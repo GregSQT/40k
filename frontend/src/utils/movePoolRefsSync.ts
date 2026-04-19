@@ -102,7 +102,8 @@ export function syncMoveDestinationPoolRefs(o: SyncMoveDestinationPoolRefsOption
     return;
   }
 
-  if (phase === "shoot" && mode === "advancePreview") {
+  /** Advance : même source ``valid_move_destinations_pool`` / ``preview_hexes`` que le move (portée M+D6×10, etc.) — ne pas exiger ``phase === "shoot"`` (replay). */
+  if (mode === "advancePreview") {
     applyFromState();
     return;
   }

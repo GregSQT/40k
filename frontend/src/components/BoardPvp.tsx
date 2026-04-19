@@ -537,6 +537,9 @@ export default function Board({
   onMeasureHexCommit,
   onMeasureJunctionCommit,
 }: BoardProps) {
+  /** Aligné sur drawBoard / ``boardHexClick`` (command & déploiement → move). */
+  const effectivePhase = phase === "command" || phase === "deployment" ? "move" : phase;
+
   React.useEffect(() => {}, []);
 
   React.useEffect(() => {}, []);
@@ -549,6 +552,9 @@ export default function Board({
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<PIXI.Application | null>(null);
+  /** Replay / Board sans API : même ref que ``moveDestPoolRef`` passée par ``useEngineAPI``. */
+  const internalMoveDestPoolRef = useRef<Set<string>>(new Set());
+  const resolvedMoveDestPoolRef = moveDestPoolRef ?? internalMoveDestPoolRef;
 
   // Persistent objective control state - survives re-renders within an episode
   const objectiveControllersRef = useRef<ObjectiveControllers>({});
@@ -1078,7 +1084,7 @@ export default function Board({
           return;
         }
       } else {
-        pool = footprintZoneRef?.current ?? moveDestPoolRef?.current;
+        pool = footprintZoneRef?.current ?? resolvedMoveDestPoolRef.current;
       }
       if (!pool || pool.size === 0) {
         zonePixels = null;
@@ -1097,7 +1103,7 @@ export default function Board({
       const pool =
         phase === "charge" && mode === "chargePreview"
           ? chargeDestPoolRef?.current
-          : moveDestPoolRef?.current;
+          : resolvedMoveDestPoolRef.current;
       if (!pool || pool.size === 0) {
         destPixels = null;
         return;
@@ -1119,8 +1125,8 @@ export default function Board({
     const onMouseMove = (ev: MouseEvent) => {
       const allowIconFollow =
         selectedUnitId !== null &&
-        (phase === "move" ||
-          (phase === "shoot" && mode === "advancePreview") ||
+        (effectivePhase === "move" ||
+          mode === "advancePreview" ||
           (phase === "charge" && mode === "chargePreview") ||
           (phase === "fight" &&
             (mode === "pileInPreview" || mode === "consolidationPreview")));
@@ -1213,7 +1219,7 @@ export default function Board({
           ? (chargeFootprintZoneRef?.current?.has(curKey) ?? false) ||
             (chargeDestPoolRef?.current?.has(curKey) ?? false)
           : (footprintZoneRef?.current?.has(curKey) ?? false) ||
-            (moveDestPoolRef?.current?.has(curKey) ?? false);
+            (resolvedMoveDestPoolRef.current?.has(curKey) ?? false);
 
       if (!inZone) {
         // Cursor outside zone: still snap to nearest center for smooth boundary sliding
@@ -1309,7 +1315,7 @@ export default function Board({
       const anchorPoolForLos =
         phase === "charge" && mode === "chargePreview"
           ? chargeDestPoolRef?.current
-          : moveDestPoolRef?.current;
+          : resolvedMoveDestPoolRef.current;
       if (!anchorPoolForLos?.has(`${iconCol},${iconRow}`)) {
         if (!destPixels) buildDestPixels();
         if (destPixels && destPixels.length > 0) {
@@ -1449,6 +1455,7 @@ export default function Board({
     boardConfig,
     gameConfig,
     phase,
+    effectivePhase,
     mode,
     selectedUnitId,
     units,
@@ -1458,6 +1465,60 @@ export default function Board({
     chargeRoll,
     setMovePreviewDistanceTooltip,
   ]);
+
+  /**
+   * Move / advance / charge / pile-in : clic gauche = valider le déplacement à l’hex de l’icône (``hoveredHexRef``).
+   * La hitArea du plateau est sous les unités (zIndex) : ``boardHexClick`` ne recevait souvent pas le clic.
+   * Capture sur le canvas avant Pixi — même code que ``boardClickHandler`` via l’événement synthétique.
+   */
+  useEffect(() => {
+    if (measureMode.kind !== "off") return;
+    if (!boardConfig) return;
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!canvas) return;
+
+    const poolHasHoveredAnchor = (key: string): boolean => {
+      if (phase === "charge" && mode === "chargePreview") {
+        return chargeDestPoolRef?.current?.has(key) ?? false;
+      }
+      return resolvedMoveDestPoolRef.current?.has(key) ?? false;
+    };
+
+    const shouldConfirmAtIcon =
+      selectedUnitId != null &&
+      ((effectivePhase === "move" && mode === "select") ||
+        mode === "advancePreview" ||
+        (phase === "charge" && mode === "chargePreview") ||
+        (phase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview")));
+
+    if (!shouldConfirmAtIcon) return;
+
+    const onPointerDownCapture = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      const h = hoveredHexRef.current;
+      if (!h) return;
+      const key = `${h.col},${h.row}`;
+      if (!poolHasHoveredAnchor(key)) return;
+
+      e.preventDefault();
+      e.stopImmediatePropagation();
+
+      window.dispatchEvent(
+        new CustomEvent("boardHexClick", {
+          detail: {
+            col: h.col,
+            row: h.row,
+            phase: effectivePhase,
+            mode,
+            selectedUnitId,
+          },
+        }),
+      );
+    };
+
+    canvas.addEventListener("pointerdown", onPointerDownCapture, true);
+    return () => canvas.removeEventListener("pointerdown", onPointerDownCapture, true);
+  }, [boardConfig, measureMode.kind, phase, effectivePhase, mode, selectedUnitId]);
 
   // Mode mesure : clic gauche = ancre ou fin de ligne (puis armed) ; clic droit = jonction — prioritaire sur les unités.
   useEffect(() => {
@@ -1681,15 +1742,15 @@ export default function Board({
     const keepMovementPickPool =
       ((enginePhaseForPools === "move" || enginePhaseForPools === "command") &&
         selectedUnitId !== null) ||
-      (phase === "shoot" && mode === "advancePreview" && selectedUnitId !== null) ||
+      (mode === "advancePreview" && selectedUnitId !== null) ||
       (phase === "shoot" && pendingMoveAfterShooting && selectedUnitId !== null) ||
       (phase === "fight" &&
         (mode === "pileInPreview" || mode === "consolidationPreview") &&
         selectedUnitId !== null);
 
     if (!keepMovementPickPool) {
-      if (moveDestPoolRef?.current && moveDestPoolRef.current.size > 0) {
-        moveDestPoolRef.current.clear();
+      if (resolvedMoveDestPoolRef.current && resolvedMoveDestPoolRef.current.size > 0) {
+        resolvedMoveDestPoolRef.current.clear();
       }
       if (footprintZoneRef?.current && footprintZoneRef.current.size > 0) {
         footprintZoneRef.current.clear();
@@ -1712,10 +1773,10 @@ export default function Board({
     // l’enfant → drawBoard lisait moveDestPoolRef vide et retombait sur les pastilles hex.
     const shouldSyncMovePoolsFromState =
       keepMovementPickPool &&
-      moveDestPoolRef?.current &&
+      resolvedMoveDestPoolRef.current &&
       (enginePhaseForPools === "move" ||
         enginePhaseForPools === "command" ||
-        (phase === "shoot" && mode === "advancePreview") ||
+        (mode === "advancePreview" && selectedUnitId !== null) ||
         (phase === "shoot" && pendingMoveAfterShooting));
     if (shouldSyncMovePoolsFromState) {
       syncMoveDestinationPoolRefs({
@@ -1723,10 +1784,34 @@ export default function Board({
         phase: enginePhaseForPools,
         mode,
         selectedUnitId,
-        moveDestPoolRef,
+        moveDestPoolRef: resolvedMoveDestPoolRef,
         footprintZoneRef,
         pendingMoveAfterShooting,
       });
+    }
+
+    if (mode === "advancePreview" && selectedUnitId !== null && resolvedMoveDestPoolRef.current.size === 0) {
+      if (typeof getAdvanceDestinations === "function") {
+        const dests = getAdvanceDestinations(selectedUnitId);
+        const s = new Set<string>();
+        for (const d of dests) {
+          s.add(`${Number(d.col)},${Number(d.row)}`);
+        }
+        if (s.size > 0) {
+          resolvedMoveDestPoolRef.current = s;
+        }
+      }
+      if (
+        resolvedMoveDestPoolRef.current.size === 0 &&
+        availableCellsOverride &&
+        availableCellsOverride.length > 0
+      ) {
+        const s = new Set<string>();
+        for (const c of availableCellsOverride) {
+          s.add(`${Number(c.col)},${Number(c.row)}`);
+        }
+        resolvedMoveDestPoolRef.current = s;
+      }
     }
 
     // Extract board configuration values - USE CONFIG VALUES
@@ -2683,8 +2768,6 @@ export default function Board({
       }
     }
 
-    // Map unsupported phases for drawBoard/UnitRenderer to closest supported behavior.
-    const effectivePhase = phase === "command" || phase === "deployment" ? "move" : phase;
     // Compute units fingerprint to determine if unit re-rendering is needed
     const unitsFingerprint = (() => {
       const parts: string[] = [];
@@ -2832,7 +2915,7 @@ export default function Board({
       (effectivePhase === "move" ||
         gsPhaseForMove === "move" ||
         gsPhaseForMove === "command" ||
-        (phase === "shoot" && mode === "advancePreview") ||
+        mode === "advancePreview" ||
         pendingMoveAfterShooting)
         ? pickMoveDestinationAnchorsFromGameState(gameState)
         : undefined;
@@ -2862,7 +2945,8 @@ export default function Board({
       mode,
       showHexCoordinates,
       objectiveControl,
-      moveDestPoolRef,
+      moveDestPoolRef: resolvedMoveDestPoolRef,
+      footprintZonePoolRef: footprintZoneRef,
       moveDestinationAnchorsFromState,
       movePreviewFootprintSpanFromState: (gameState as { move_preview_footprint_span?: number | null })
         .move_preview_footprint_span,
@@ -2912,7 +2996,7 @@ export default function Board({
         enginePhaseForPools,
         keepMovementPickPool,
         shouldSyncMovePoolsFromState,
-        moveDestPoolSize: moveDestPoolRef?.current?.size ?? 0,
+        moveDestPoolSize: resolvedMoveDestPoolRef.current?.size ?? 0,
         footprintZoneSize: footprintZoneRef?.current?.size ?? 0,
         gsValidPoolLen: Array.isArray(gs?.valid_move_destinations_pool)
           ? gs.valid_move_destinations_pool.length
@@ -3762,7 +3846,7 @@ export default function Board({
         }
 
         let lastMoveHexKey = "";
-        const poolRef = moveDestPoolRef?.current;
+        const poolRef = resolvedMoveDestPoolRef.current;
 
         dragPointerMove = (e: PointerEvent) => {
           const rect = canvas.getBoundingClientRect();

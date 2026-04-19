@@ -31,6 +31,54 @@ const RETREAT_ALERT_STORAGE_KEY = "retreatAlertEnabled";
 // Prevent duplicate AI turn calls
 let aiTurnInProgress = false;
 
+/** Clé stable pour une entrée ``action_logs`` (évite doublons 1 vs "1" sur ``unitId``). */
+function actionLogDedupeKey(e: Record<string, unknown>): string {
+  const uidRaw = e.unitId ?? e.shooterId ?? e.attackerId;
+  const uid = uidRaw === undefined || uidRaw === null ? "" : String(uidRaw);
+  const typ = typeof e.type === "string" ? e.type : "";
+  const msg = typeof e.message === "string" ? e.message : "";
+  const ph = e.phase === undefined || e.phase === null ? "" : String(e.phase);
+  return [typ, msg, String(e.turn ?? ""), uid, ph].join("\u0001");
+}
+
+/**
+ * Même réponse API : une ligne Game Log par entrée ``action_logs``.
+ * Déduplication **dans le lot** (entrées identiques côte à côte).
+ */
+function dedupeActionLogBatch<T extends Record<string, unknown>>(entries: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const e of entries) {
+    const key = actionLogDedupeKey(e);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(e);
+  }
+  return out;
+}
+
+const recentActionLogEmitAt = new Map<string, number>();
+const CROSS_ACTION_LOG_SUPPRESS_MS = 5000;
+const ACTION_LOG_EMIT_MAP_MAX = 300;
+
+/** Évite la même ligne sur **plusieurs** réponses HTTP rapprochées (move + ``advance_phase`` chaîné, etc.). */
+function shouldEmitActionLogEvent(entry: Record<string, unknown>): boolean {
+  const key = actionLogDedupeKey(entry);
+  const now = Date.now();
+  const last = recentActionLogEmitAt.get(key);
+  if (last !== undefined && now - last < CROSS_ACTION_LOG_SUPPRESS_MS) {
+    return false;
+  }
+  recentActionLogEmitAt.set(key, now);
+  if (recentActionLogEmitAt.size > ACTION_LOG_EMIT_MAP_MAX) {
+    const cutoff = now - CROSS_ACTION_LOG_SUPPRESS_MS;
+    for (const [k, t] of recentActionLogEmitAt) {
+      if (t < cutoff) recentActionLogEmitAt.delete(k);
+    }
+  }
+  return true;
+}
+
 function readRequiredBooleanSetting(key: string, defaultValue: boolean): boolean {
   const rawValue = localStorage.getItem(key);
   if (rawValue == null) {
@@ -898,7 +946,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             shootDetails?: Array<Record<string, unknown>>;
             [key: string]: unknown;
           }
-          data.action_logs.forEach((logEntry: ActionLogEntry) => {
+          const actionLogsBatch = dedupeActionLogBatch(
+            data.action_logs as ActionLogEntry[],
+          );
+          actionLogsBatch.forEach((logEntry: ActionLogEntry) => {
+            if (!shouldEmitActionLogEvent(logEntry as Record<string, unknown>)) {
+              return;
+            }
             const shootDetail = logEntry.shootDetails?.[0];
 
             window.dispatchEvent(
@@ -1324,29 +1378,27 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setMovePreview(null);
             setPendingPreviewAction(null);
             setMode("advancePreview" as GameMode);
-            // Même source que la phase move : BFS remplit valid_move_destinations_pool + move_preview_footprint_zone
+            // Même source que la phase move : BFS remplit valid_move_destinations_pool + move_preview_footprint_zone.
+            // Fallback ``result.advance_destinations`` : le moteur renvoie toujours cette liste, alors que le JSON
+            // ``game_state`` peut omettre ou vider ``valid_move_destinations_pool`` selon le chemin d’exécution —
+            // sans ce repli la couche cercle reste vide alors que le move (phase dédiée) lit bien le pool.
             const gsAdv = data.game_state;
             if (gsAdv) {
-              const pool = gsAdv.valid_move_destinations_pool as unknown;
               const poolSet = new Set<string>();
-              if (Array.isArray(pool)) {
-                for (const d of pool) {
-                  if (Array.isArray(d) && d.length === 2) {
-                    poolSet.add(`${d[0]},${d[1]}`);
-                  }
-                }
+              addHexKeysToSet(gsAdv.valid_move_destinations_pool, poolSet);
+              if (poolSet.size === 0) {
+                addHexKeysToSet(
+                  (gsAdv as { preview_hexes?: unknown }).preview_hexes,
+                  poolSet,
+                );
+              }
+              if (poolSet.size === 0) {
+                addHexKeysToSet(advanceDests, poolSet);
               }
               moveDestPoolRef.current = poolSet;
 
-              const fpZone = gsAdv.move_preview_footprint_zone as unknown;
               const fpSet = new Set<string>();
-              if (Array.isArray(fpZone)) {
-                for (const d of fpZone) {
-                  if (Array.isArray(d) && d.length === 2) {
-                    fpSet.add(`${d[0]},${d[1]}`);
-                  }
-                }
-              }
+              addHexKeysToSet(gsAdv.move_preview_footprint_zone, fpSet);
               footprintZoneRef.current = fpSet;
             }
           }
@@ -3195,7 +3247,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   }, []);
 
   const emptyCallback = useCallback(() => {}, []);
-  const getAdvanceDestinationsMemo = useCallback(() => advanceDestinations, [advanceDestinations]);
+  const getAdvanceDestinationsMemo = useCallback(
+    (_unitId: number) => advanceDestinations,
+    [advanceDestinations],
+  );
 
   // Memoize gameState to prevent re-renders when content hasn't changed
   const memoizedGameState = useMemo(() => {
@@ -3949,7 +4004,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               is_ai_action?: boolean;
               [key: string]: unknown;
             }
-            activationData.action_logs.forEach((logEntry: ActivationLogEntry) => {
+            const activationLogsBatch = dedupeActionLogBatch(
+              activationData.action_logs as ActivationLogEntry[],
+            );
+            activationLogsBatch.forEach((logEntry: ActivationLogEntry) => {
+              if (!shouldEmitActionLogEvent(logEntry as Record<string, unknown>)) {
+                return;
+              }
               window.dispatchEvent(
                 new CustomEvent("backendLogEvent", {
                   detail: {
@@ -4236,7 +4297,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   is_ai_action?: boolean;
                   [key: string]: unknown;
                 }
-                decisionData.action_logs.forEach((logEntry: DecisionLogEntry) => {
+                const decisionLogsBatch = dedupeActionLogBatch(
+                  decisionData.action_logs as DecisionLogEntry[],
+                );
+                decisionLogsBatch.forEach((logEntry: DecisionLogEntry) => {
+                  if (!shouldEmitActionLogEvent(logEntry as Record<string, unknown>)) {
+                    return;
+                  }
                   window.dispatchEvent(
                     new CustomEvent("backendLogEvent", {
                       detail: {

@@ -102,6 +102,12 @@ export interface DrawBoardOptions {
   objectiveControl?: ObjectiveControlMap;
   moveDestPoolRef?: React.RefObject<Set<string>>;
   /**
+   * ``move_preview_footprint_zone`` : chaque sous-hex couvert par la preview — union d’hex **sans lacunes**
+   * (contrairement au seul pool d’ancres). Utilisée comme masque du disque pour éviter les « plats »
+   * entre disques d’empreinte près des murs / angles concaves.
+   */
+  footprintZonePoolRef?: React.RefObject<Set<string>>;
+  /**
    * Ancres move/advance depuis game_state (repli si ``moveDestPoolRef`` vide). Le dessin des disques
    * privilégie **toujours** ``moveDestPoolRef`` quand elle est non vide — même principe que la charge.
    */
@@ -368,6 +374,8 @@ const parseColor = (colorStr: string): number => {
  */
 /** Taille max d’un côté de tuile (limite texture WebGL courante). Au-delà on découpe en plusieurs RT. */
 const FOOTPRINT_HIGHLIGHT_RT_MAX_DIM = 4096;
+/** Union d’hex pour le masque : chunk pour rester sous la limite d’indices (~65k) par `Graphics`. */
+const MOVE_ADVANCE_MASK_HEX_CHUNK = 800;
 
 function addFootprintHighlightSprite(
   app: PIXI.Application,
@@ -648,10 +656,10 @@ function addFootprintPoolSmoothOutlines(
  *   demi-empreinte`. Dérivé du BFS, donc aligné sur la portée réelle autorisée
  *   par le moteur (M×10 en phase move, M×10+D6×10 en advance, etc.) sans
  *   dupliquer les règles côté front.
- * - **Masque** = union des empreintes (un disque de rayon `footprintRadius` par
- *   cellule du pool), rendu sur une `RenderTexture` unique. Sert de masque
- *   sprite au grand disque → le cercle est net en terrain libre et tronqué
- *   franchement là où un mur / EZ / rule interdit de s'y rendre.
+ * - **Masque** : si ``move_preview_footprint_zone`` est disponible (**union d’hex
+ *   pleins** par sous-hex), on l’utilise — pas de « plats » bitangents entre
+ *   disques d’empreinte près des angles concaves. Sinon repli : union des
+ *   disques d’empreinte aux ancres (comportement historique).
  *
  * **Chemin unique, pas de fallback silencieux** : toute condition aberrante
  * (pool vide, empreinte nulle, bornes du masque non finies, RT trop grande,
@@ -661,7 +669,9 @@ function addFootprintPoolSmoothOutlines(
 function renderMoveAdvanceDestPoolCircleLayer(
   app: PIXI.Application,
   highlightContainer: PIXI.Container,
-  pool: Set<string>,
+  anchorPool: Set<string>,
+  footprintMaskHexPool: Set<string> | null,
+  gridHexRadius: number,
   footprintRadius: number,
   poolFillColor: number,
   spriteName: string,
@@ -675,14 +685,19 @@ function renderMoveAdvanceDestPoolCircleLayer(
   HEX_VERT_SPACING: number,
   MARGIN: number,
 ): void {
-  if (pool.size === 0) {
+  if (anchorPool.size === 0) {
     throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] pool vide (spriteName=${spriteName})`,
+      `[renderMoveAdvanceDestPoolCircleLayer] anchorPool vide (spriteName=${spriteName})`,
     );
   }
   if (!(footprintRadius > 0) || !Number.isFinite(footprintRadius)) {
     throw new Error(
       `[renderMoveAdvanceDestPoolCircleLayer] footprintRadius invalide (${footprintRadius}, spriteName=${spriteName})`,
+    );
+  }
+  if (!(gridHexRadius > 0) || !Number.isFinite(gridHexRadius)) {
+    throw new Error(
+      `[renderMoveAdvanceDestPoolCircleLayer] gridHexRadius invalide (${gridHexRadius}, spriteName=${spriteName})`,
     );
   }
 
@@ -706,7 +721,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
   // par murs / EZ / pathfinding, ce qui est le comportement voulu.
   const unitCube = offsetToCube(unitCol, unitRow);
   let maxCubeDist = 0;
-  for (const key of pool) {
+  for (const key of anchorPool) {
     const sep = key.indexOf(",");
     const c = Number(key.substring(0, sep));
     const r = Number(key.substring(sep + 1));
@@ -721,67 +736,150 @@ function renderMoveAdvanceDestPoolCircleLayer(
     );
   }
 
-  // Masque : union des empreintes du pool. Full alpha (couleur arbitraire, seule
-  // la forme sert) → les pixels opaques définissent la zone "atteignable".
-  const maskGfx = new PIXI.Graphics();
-  maskGfx.name = `${spriteName}-mask-gfx`;
-  const drawnCount = fillFootprintPoolCircles(
-    maskGfx,
-    pool,
-    footprintRadius,
-    0xffffff,
-    HEX_HORIZ_SPACING,
-    HEX_WIDTH,
-    HEX_HEIGHT,
-    HEX_VERT_SPACING,
-    MARGIN,
-  );
+  // Masque : préférence **union d’hex** (``move_preview_footprint_zone``) — suit les bords
+  // créneaux / murs sans segments droits parasites entre disques d’empreinte.
+  let maskBounds: PIXI.Rectangle;
+  let drawnMaskCircles: number | undefined;
+  let drawnMaskHexes: number | undefined;
 
-  const maskBounds = maskGfx.getLocalBounds();
-  if (
-    !Number.isFinite(maskBounds.width) ||
-    !Number.isFinite(maskBounds.height) ||
-    !(maskBounds.width > 0) ||
-    !(maskBounds.height > 0)
-  ) {
-    maskGfx.destroy();
-    throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] bornes du masque invalides ` +
-        `(w=${maskBounds.width}, h=${maskBounds.height}, spriteName=${spriteName}, ` +
-        `drawnCount=${drawnCount})`,
+  const rt = (() => {
+    if (footprintMaskHexPool && footprintMaskHexPool.size > 0) {
+      const keys = [...footprintMaskHexPool];
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const key of footprintMaskHexPool) {
+        const sep = key.indexOf(",");
+        const c = Number(key.substring(0, sep));
+        const r = Number(key.substring(sep + 1));
+        const hx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+        const hy =
+          r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+        for (let vi = 0; vi < 6; vi++) {
+          const ang = (vi * Math.PI) / 3;
+          const vx = hx + gridHexRadius * Math.cos(ang);
+          const vy = hy + gridHexRadius * Math.sin(ang);
+          if (vx < minX) minX = vx;
+          if (vx > maxX) maxX = vx;
+          if (vy < minY) minY = vy;
+          if (vy > maxY) maxY = vy;
+        }
+      }
+      const w = Math.ceil(maxX - minX);
+      const h = Math.ceil(maxY - minY);
+      if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+        throw new Error(
+          `[renderMoveAdvanceDestPoolCircleLayer] bornes masque hex invalides ` +
+            `(w=${w}, h=${h}, spriteName=${spriteName})`,
+        );
+      }
+      if (w > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM || h > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM) {
+        throw new Error(
+          `[renderMoveAdvanceDestPoolCircleLayer] masque hex trop grand (w=${w}, h=${h}, ` +
+            `max=${FOOTPRINT_HIGHLIGHT_RT_MAX_DIM}, spriteName=${spriteName})`,
+        );
+      }
+      maskBounds = new PIXI.Rectangle(minX, minY, w, h);
+      drawnMaskHexes = keys.length;
+
+      const texture = PIXI.RenderTexture.create({
+        width: w,
+        height: h,
+        resolution: app.renderer.resolution,
+        multisample: PIXI.MSAA_QUALITY.NONE,
+        alphaMode: PIXI.ALPHA_MODES.PMA,
+      });
+      // Même schéma que le masque « disques » : un `Graphics` décalé de `(-minX,-minY)` vers la RT.
+      // Un `Container` hors stage + `render(holder)` peut produire une RT vide (transforms).
+      for (let i = 0; i < keys.length; i += MOVE_ADVANCE_MASK_HEX_CHUNK) {
+        const chunk = keys.slice(i, i + MOVE_ADVANCE_MASK_HEX_CHUNK);
+        const g = new PIXI.Graphics();
+        g.name = `${spriteName}-mask-hex-chunk-${i}`;
+        g.beginFill(0xffffff, 1.0);
+        for (const key of chunk) {
+          const sep = key.indexOf(",");
+          const c = Number(key.substring(0, sep));
+          const r = Number(key.substring(sep + 1));
+          const hx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const hy =
+            r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+          const verts: number[] = [];
+          for (let vi = 0; vi < 6; vi++) {
+            const ang = (vi * Math.PI) / 3;
+            verts.push(hx + gridHexRadius * Math.cos(ang), hy + gridHexRadius * Math.sin(ang));
+          }
+          g.drawPolygon(verts);
+        }
+        g.endFill();
+        g.position.set(-minX, -minY);
+        app.renderer.render(g, { renderTexture: texture, clear: i === 0 });
+        g.destroy();
+      }
+      return texture;
+    }
+
+    const maskGfx = new PIXI.Graphics();
+    maskGfx.name = `${spriteName}-mask-gfx`;
+    drawnMaskCircles = fillFootprintPoolCircles(
+      maskGfx,
+      anchorPool,
+      footprintRadius,
+      0xffffff,
+      HEX_HORIZ_SPACING,
+      HEX_WIDTH,
+      HEX_HEIGHT,
+      HEX_VERT_SPACING,
+      MARGIN,
     );
-  }
 
-  // Rendu du masque sur une RenderTexture UNIQUE. Un target Pixi ne peut avoir
-  // qu'un seul `mask` : un masque multi-tuiles serait à coder nous-mêmes, et
-  // on refuse explicitement ce cas plutôt que de silencieusement dessiner une
-  // zone incomplète. Pour une preview move réelle (footprintRadius modéré,
-  // portée M×10 bornée), un tile unique est toujours largement suffisant.
+    const lb = maskGfx.getLocalBounds();
+    if (
+      !Number.isFinite(lb.width) ||
+      !Number.isFinite(lb.height) ||
+      !(lb.width > 0) ||
+      !(lb.height > 0)
+    ) {
+      maskGfx.destroy();
+      throw new Error(
+        `[renderMoveAdvanceDestPoolCircleLayer] bornes du masque disques invalides ` +
+          `(w=${lb.width}, h=${lb.height}, spriteName=${spriteName}, ` +
+          `drawnMaskCircles=${drawnMaskCircles})`,
+      );
+    }
+    maskBounds = lb;
+
+    const w = Math.ceil(maskBounds.width);
+    const h = Math.ceil(maskBounds.height);
+    if (w > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM || h > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM) {
+      maskGfx.destroy();
+      throw new Error(
+        `[renderMoveAdvanceDestPoolCircleLayer] masque trop grand pour une RT ` +
+          `unique (w=${w}, h=${h}, max=${FOOTPRINT_HIGHLIGHT_RT_MAX_DIM}, ` +
+          `spriteName=${spriteName})`,
+      );
+    }
+
+    const texture = PIXI.RenderTexture.create({
+      width: w,
+      height: h,
+      resolution: app.renderer.resolution,
+      multisample: PIXI.MSAA_QUALITY.NONE,
+      alphaMode: PIXI.ALPHA_MODES.PMA,
+    });
+    maskGfx.position.set(-maskBounds.x, -maskBounds.y);
+    app.renderer.render(maskGfx, { renderTexture: texture, clear: true });
+    maskGfx.destroy();
+    return texture;
+  })();
+
   const w = Math.ceil(maskBounds.width);
   const h = Math.ceil(maskBounds.height);
-  if (w > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM || h > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM) {
-    maskGfx.destroy();
-    throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] masque trop grand pour une RT ` +
-        `unique (w=${w}, h=${h}, max=${FOOTPRINT_HIGHLIGHT_RT_MAX_DIM}, ` +
-        `spriteName=${spriteName})`,
-    );
-  }
 
-  const rt = PIXI.RenderTexture.create({
-    width: w,
-    height: h,
-    resolution: app.renderer.resolution,
-    multisample: PIXI.MSAA_QUALITY.NONE,
-    alphaMode: PIXI.ALPHA_MODES.PMA,
-  });
-  maskGfx.position.set(-maskBounds.x, -maskBounds.y);
-  app.renderer.render(maskGfx, { renderTexture: rt, clear: true });
   const maskSprite = new PIXI.Sprite(rt);
   maskSprite.name = `${spriteName}-mask-sprite`;
   maskSprite.position.set(maskBounds.x, maskBounds.y);
   maskSprite.roundPixels = false;
-  maskGfx.destroy();
 
   // Grand disque cible. Alpha 0.28 (cohérence avec le halo de charge).
   const diskGfx = new PIXI.Graphics();
@@ -803,9 +901,12 @@ function renderMoveAdvanceDestPoolCircleLayer(
       if (window.localStorage.getItem("debugMovePool") === "1") {
         console.info("[renderMoveAdvanceDestPoolCircleLayer] rendered", {
           spriteName,
-          poolSize: pool.size,
-          drawnMaskCircles: drawnCount,
+          anchorPoolSize: anchorPool.size,
+          maskKind: drawnMaskHexes != null ? "footprint_hex_union" : "anchor_disk_union",
+          drawnMaskHexes,
+          drawnMaskCircles,
           footprintRadius,
+          gridHexRadius,
           unitCol,
           unitRow,
           unitCx,
@@ -884,6 +985,7 @@ export const drawBoard = (
       showHexCoordinates: _showHexCoordinates = false,
       objectiveControl = {},
       moveDestPoolRef,
+      footprintZonePoolRef,
       moveDestinationAnchorsFromState,
       movePreviewFootprintSpanFromState,
       pendingMoveAfterShooting = false,
@@ -927,8 +1029,8 @@ export const drawBoard = (
       objectiveHexSet.add(`${objCol},${objRow}`);
     }
 
-    const useAdvanceMovePoolLikeMove =
-      interactionPhase === "shoot" && mode === "advancePreview";
+    /** Même rendu cercle + masque BFS que le move ; ne pas dépendre de ``interactionPhase === "shoot"`` (replay / mapping phase). */
+    const useAdvanceMovePoolLikeMove = mode === "advancePreview";
     const usePostShootMovePoolLikeMove =
       interactionPhase === "shoot" && pendingMoveAfterShooting === true;
     const usePileInPoolLikeMoveHoisted =
@@ -964,6 +1066,8 @@ export const drawBoard = (
         usePostShootMovePoolLikeMove) &&
       !!movePoolForDiskDraw &&
       movePoolForDiskDraw.size > 0;
+
+    /** advancePreview sans pool : normal tant que le joueur n'a pas confirmé Advance (jet D6 + BFS) — ``allow_advance`` peut ouvrir l'UI avant toute réponse ``advance_destinations``. */
 
     const cachedStaticBoard = options?.cachedStaticBoard ?? null;
     const reuseStatic = cachedStaticBoard !== null;
@@ -1224,10 +1328,16 @@ export const drawBoard = (
             `absent alors que useMoveDestPoolCircleLayer=true (spriteName=${moveSpriteName})`,
         );
       }
+      const footprintMaskHexPool =
+        footprintZonePoolRef?.current && footprintZonePoolRef.current.size > 0
+          ? footprintZonePoolRef.current
+          : null;
       renderMoveAdvanceDestPoolCircleLayer(
         app,
         highlightContainer,
         movePoolForDiskDraw,
+        footprintMaskHexPool,
+        HEX_RADIUS,
         footprintRadius,
         poolFillColor,
         moveSpriteName,
@@ -1307,7 +1417,12 @@ export const drawBoard = (
         false,
       );
     }
-    drawGroup(advanceCells, ADVANCE_DESTINATION_HEX_FILL, 0.3, false);
+    if (
+      advanceCells.length > 0 &&
+      !(mode === "advancePreview" && useMoveDestPoolCircleLayer && movePoolForDiskDraw)
+    ) {
+      drawGroup(advanceCells, ADVANCE_DESTINATION_HEX_FILL, 0.3, false);
+    }
 
     if (
       chargeEngagementHalo &&
