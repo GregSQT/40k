@@ -891,8 +891,9 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 weapon["shot"] = 0
             
             if rng_weapons:
-                # Initialize weapon selection using weapon_availability_check to ensure valid weapon
-                # This ensures PISTOL weapons are selected when unit is adjacent to enemy
+                # Initialize weapon selection. Full weapon_availability_check is only needed when
+                # adjacent (PISTOL) or after advance (ASSAULT / combi) — otherwise O(weapons×enemies)
+                # per ally dominated SHOOT_PHASE_START reset_allies_s.
                 unit_id_str = str(unit["id"])
                 has_advanced = unit_id_str in require_key(game_state, "units_advanced")
                 is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
@@ -900,23 +901,12 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 adjacent_status = 1 if is_adjacent else 0
                 
                 weapon_rule = game_state.get("weapon_rule", 1)
-                weapon_available_pool = weapon_availability_check(
-                    game_state, unit, weapon_rule, advance_status, adjacent_status
-                )
-                usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
-                
-                if usable_weapons:
-                    # If adjacent, prioritize PISTOL weapons
-                    if is_adjacent:
-                        pistol_weapons = [w for w in usable_weapons if _weapon_has_pistol_rule(require_key(w, "weapon"))]
-                        if pistol_weapons:
-                            first_weapon = pistol_weapons[0]
-                        else:
-                            first_weapon = usable_weapons[0]
-                    else:
-                        first_weapon = usable_weapons[0]
-                    
-                    selected_idx = first_weapon["index"]
+
+                if not is_adjacent and advance_status == 0:
+                    selected_idx = next(
+                        (i for i, w in enumerate(rng_weapons) if require_key(w, "RNG") > 0),
+                        0,
+                    )
                     unit["selectedRngWeaponIndex"] = selected_idx
                     weapon = rng_weapons[selected_idx]
                     unit["SHOOT_LEFT"] = resolve_dice_value(
@@ -924,15 +914,40 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
                         "shooting_phase_start_nb",
                     )
                 else:
-                    # No usable weapons, default to first weapon (will be validated later)
-                    selected_idx = unit["selectedRngWeaponIndex"] if "selectedRngWeaponIndex" in unit else 0
-                    if selected_idx < 0 or selected_idx >= len(rng_weapons):
-                        selected_idx = 0
-                    weapon = rng_weapons[selected_idx]
-                    unit["SHOOT_LEFT"] = resolve_dice_value(
-                        require_key(weapon, "NB"),
-                        "shooting_phase_start_nb_fallback",
+                    weapon_available_pool = weapon_availability_check(
+                        game_state, unit, weapon_rule, advance_status, adjacent_status
                     )
+                    usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
+                    if usable_weapons:
+                        # If adjacent, prioritize PISTOL weapons
+                        if is_adjacent:
+                            pistol_weapons = [
+                                w for w in usable_weapons if _weapon_has_pistol_rule(require_key(w, "weapon"))
+                            ]
+                            if pistol_weapons:
+                                first_weapon = pistol_weapons[0]
+                            else:
+                                first_weapon = usable_weapons[0]
+                        else:
+                            first_weapon = usable_weapons[0]
+
+                        selected_idx = first_weapon["index"]
+                        unit["selectedRngWeaponIndex"] = selected_idx
+                        weapon = rng_weapons[selected_idx]
+                        unit["SHOOT_LEFT"] = resolve_dice_value(
+                            require_key(weapon, "NB"),
+                            "shooting_phase_start_nb",
+                        )
+                    else:
+                        # No usable weapons, default to first weapon (will be validated later)
+                        selected_idx = unit["selectedRngWeaponIndex"] if "selectedRngWeaponIndex" in unit else 0
+                        if selected_idx < 0 or selected_idx >= len(rng_weapons):
+                            selected_idx = 0
+                        weapon = rng_weapons[selected_idx]
+                        unit["SHOOT_LEFT"] = resolve_dice_value(
+                            require_key(weapon, "NB"),
+                            "shooting_phase_start_nb_fallback",
+                        )
             else:
                 unit["SHOOT_LEFT"] = 0  # Pas d'armes ranged
 
@@ -1607,29 +1622,20 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
         # If CAN_SHOOT = false -> ❌ Skip (no valid actions)
         if not can_shoot:
             return False
+        unit["_can_shoot"] = can_shoot
+        unit["_can_advance"] = can_advance
+        return True
     else:
-        # NOT adjacent to enemy
-        # CAN_ADVANCE = true -> Store unit.CAN_ADVANCE = true
+        # NOT adjacent to enemy: CAN_ADVANCE is always true → unit is always eligible for the
+        # shoot_activation_pool (can at least Advance). The old code still called
+        # weapon_availability_check then evaluated (can_shoot or can_advance) which is always
+        # true here — that duplicate O(weapons×enemies) work dominated SHOOT_PHASE_START timing.
         can_advance = True
-        # weapon_availability_check(weapon_rule, 0, 0) -> Build weapon_available_pool
-        advance_status = 0  # Not advanced yet (eligibility check)
-        adjacent_status = 0  # Not adjacent to enemy
-        weapon_available_pool = weapon_availability_check(
-            game_state, unit, weapon_rule, advance_status, adjacent_status
-        )
-        usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
-        # weapon_available_pool NOT empty? -> CAN_SHOOT = true, else false
-        can_shoot = len(usable_weapons) > 0
-        # (CAN_SHOOT OR CAN_ADVANCE)? -> YES -> Continue, NO -> ❌ Skip
-        if not (can_shoot or can_advance):
-            return False
-    
-    # Store capability flags on unit for later use in action validation
-    unit["_can_shoot"] = can_shoot
-    unit["_can_advance"] = can_advance
-    
-    # Unit is eligible if CAN_SHOOT OR CAN_ADVANCE
-    return can_shoot or can_advance
+        rng_weapons = require_key(unit, "RNG_WEAPONS")
+        has_positive_rng = any(require_key(w, "RNG") > 0 for w in rng_weapons)
+        unit["_can_advance"] = can_advance
+        unit["_can_shoot"] = has_positive_rng
+        return True
 
 
 def _friendly_engagement_blocks_ranged_shot(
