@@ -98,6 +98,22 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
     "_charge_fp_offset_pair_cache",
     # Sous-ensemble dérivé des ancres pour contour UI ; le front n’utilise pas ce champ (preview = pool + footprint_zone).
     "move_preview_border",
+    # Moteur / RL / debug — pas consommés par l’UI web (réduit serialize + jsonify sur chaque POST /action).
+    "last_compliance_data",
+    "units_cache_prev",
+    "_best_weapon_cache",
+    "_last_raw_action_int",
+    "_last_semantic_action",
+    "_last_action_debug",
+    "_choice_timing_fired_events",
+    "_deployment_random_mix_forced_steps",
+    "_wall_set_cache",
+    "_shooting_phase_initialized",
+    "_fight_consolidation_ctx",
+    "_fight_pile_in_ctx",
+    "_tutorial_force_kill_this_shot",
+    "_tutorial_force_miss_this_shot",
+    "console_logs",
 })
 
 
@@ -111,7 +127,12 @@ def _game_state_for_json(engine_instance) -> Dict[str, Any]:
     enemy_adjacent_hexes, los_cache), champs moteur inutiles au client, et
     ``move_preview_border`` (non consommé par l’UI ; la preview move repose sur
     ``valid_move_destinations_pool`` et ``move_preview_footprint_zone`` / span).
+    Si ``move_preview_footprint_mask_loops`` est présent (contours monde), supprime
+    ``move_preview_footprint_zone`` du JSON (évite des milliers de couples hex).
+    Si ``valid_move_destinations_pool`` est non vide, supprime ``preview_hexes`` (alias du même pool).
     Trims units_cache to (col, row, HP_CUR, player).
+    Exclut aussi caches internes, snapshots ``units_cache_prev``, ``last_compliance_data``,
+    ``console_logs``, etc. (voir ``_GAME_STATE_EXCLUDE_KEYS``).
     """
     gs = {
         k: v for k, v in engine_instance.game_state.items()
@@ -123,6 +144,15 @@ def _game_state_for_json(engine_instance) -> Dict[str, Any]:
             uid: {fk: entry[fk] for fk in _UNITS_CACHE_FRONTEND_KEYS if fk in entry}
             for uid, entry in raw_cache.items()
         }
+    # Preview move : boucles masque monde — si présentes, ne pas envoyer ``move_preview_footprint_zone``
+    # (milliers de couples ; même silhouette via les polygones).
+    if gs.get("move_preview_footprint_mask_loops"):
+        gs.pop("move_preview_footprint_zone", None)
+    # ``preview_hexes`` est un alias miroir de ``valid_move_destinations_pool`` côté moteur (phase move) :
+    # ne pas dupliquer des milliers de couples dans le JSON (le client lit le pool en priorité).
+    _pool = gs.get("valid_move_destinations_pool")
+    if isinstance(_pool, list) and len(_pool) > 0:
+        gs.pop("preview_hexes", None)
     return gs
 
 

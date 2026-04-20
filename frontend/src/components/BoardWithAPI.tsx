@@ -3139,7 +3139,9 @@ export const BoardWithAPI: React.FC = () => {
             chargeReferenceHex={apiProps.chargeReferenceHex ?? null}
             moveDestPoolRef={apiProps.moveDestPoolRef}
             pendingMoveAfterShooting={apiProps.pendingMoveAfterShooting ?? false}
+            activationPendingUnitId={apiProps.activationPendingUnitId ?? null}
             footprintZoneRef={apiProps.footprintZoneRef}
+            footprintMaskLoopsRef={apiProps.footprintMaskLoopsRef}
             chargeDestPoolRef={apiProps.chargeDestPoolRef}
             chargeFootprintZoneRef={apiProps.chargeFootprintZoneRef}
             onAdvance={isGameOver ? () => {} : apiProps.onAdvance}

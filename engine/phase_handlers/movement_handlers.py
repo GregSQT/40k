@@ -30,10 +30,21 @@ from .shared_utils import (
     is_footprint_placement_valid, get_engagement_zone,
 )
 from engine.hex_utils import (
+    _hex_center,
     engagement_minimum_clearance_norm,
     euclidean_edge_clearance_round_round,
     min_distance_between_sets,
 )
+from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
+from engine.perf_timing import profile_move_pool_build
+
+
+def _sync_move_preview_mask_loops(
+    game_state: Dict[str, Any], footprint_zone: Set[Tuple[int, int]]
+) -> None:
+    """Polygone(s) masque pour le client — évite d’envoyer des milliers de (col,row) en JSON."""
+    loops = compute_move_preview_mask_loops_world(footprint_zone, game_state)
+    game_state["move_preview_footprint_mask_loops"] = loops
 
 def _move_preview_footprint_span(unit: Dict[str, Any]) -> int:
     """Dimension max d’empreinte (hexes), alignée sur charge_handlers._charge_base_diameter — rayon disques UI."""
@@ -81,6 +92,9 @@ def _movement_engagement_violates(
     candidate_fp: Set[Tuple[int, int]],
     units_cache: Dict[str, Any],
     enemy_adjacent_hexes: Optional[Set[Tuple[int, int]]] = None,
+    *,
+    enemy_cache_items: Optional[List[Tuple[Any, Any]]] = None,
+    engagement_zone_ez: Optional[int] = None,
 ) -> bool:
     """True si le placement est interdit par la zone autour des ennemis.
 
@@ -91,7 +105,10 @@ def _movement_engagement_violates(
     Legacy (``engagement_zone`` ≤ 1) : toute case de l'empreinte dans
     ``enemy_adjacent_hexes`` (dilatation hex).
     """
-    ez = get_engagement_zone(game_state)
+    if engagement_zone_ez is not None:
+        ez = engagement_zone_ez
+    else:
+        ez = get_engagement_zone(game_state)
     mover_id = str(require_key(mover, "id"))
     mover_player = int(require_key(mover, "player"))
 
@@ -108,12 +125,21 @@ def _movement_engagement_violates(
     mover_shape = mover.get("BASE_SHAPE", "round")
     mover_bs = mover.get("BASE_SIZE", 1)
     mover_bs_i = mover_bs if isinstance(mover_bs, int) else 1
+    # Un seul _hex_center pour le déplaceur (identique pour chaque ennemi rond / rond).
+    mover_center_xy_rr: Optional[Tuple[float, float]] = None
+    if ez > 1 and mover_shape == "round":
+        mover_center_xy_rr = _hex_center(center_col, center_row)
 
-    for eid, cache_entry in units_cache.items():
-        if str(eid) == mover_id:
-            continue
-        if int(require_key(cache_entry, "player")) == mover_player:
-            continue
+    if enemy_cache_items is not None:
+        _enemy_iter: Any = enemy_cache_items
+    else:
+        _enemy_iter = (
+            (eid, ce)
+            for eid, ce in units_cache.items()
+            if str(eid) != mover_id and int(require_key(ce, "player")) != mover_player
+        )
+
+    for eid, cache_entry in _enemy_iter:
         enemy_fp = cache_entry.get("occupied_hexes")
         if not enemy_fp:
             ec = require_key(cache_entry, "col")
@@ -133,6 +159,7 @@ def _movement_engagement_violates(
                 e_col,
                 e_row,
                 e_bs_i,
+                mover_center_xy=mover_center_xy_rr,
             )
             if gap < req - 1e-6:
                 return True
@@ -140,26 +167,6 @@ def _movement_engagement_violates(
             if min_distance_between_sets(candidate_fp, enemy_fp, max_distance=ez) <= ez:
                 return True
     return False
-
-
-def _compute_border_cells(destinations: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
-    """
-    Return the subset of *destinations* that lie on the border of the reachable area.
-
-    A cell is a border cell when at least one of its 6 hex neighbours is NOT
-    in the destination set.  The result is suitable for lightweight rendering
-    on the frontend (typically 5-15 % of the full pool).
-    """
-    if len(destinations) <= 500:
-        return destinations
-
-    dest_set: Set[Tuple[int, int]] = set(destinations)
-    border: List[Tuple[int, int]] = []
-    for pos in destinations:
-        neighbors = get_hex_neighbors(pos[0], pos[1])
-        if any(n not in dest_set for n in neighbors):
-            border.append(pos)
-    return border
 
 
 def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any]) -> None:
@@ -186,7 +193,9 @@ def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any])
         game_state["move_preview_footprint_zone"] = set()
     if "move_preview_border" in game_state:
         game_state["move_preview_border"] = []
-    
+    if "move_preview_footprint_mask_loops" in game_state:
+        game_state["move_preview_footprint_mask_loops"] = None
+
     # Clear charge destination pools
     if "valid_charge_destinations_pool" in game_state:
         game_state["valid_charge_destinations_pool"] = []
@@ -290,6 +299,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     current_player = game_state["current_player"]
 
     units_cache = require_key(game_state, "units_cache")
+    ez_elig = get_engagement_zone(game_state)
     for unit_id, cache_entry in units_cache.items():
         # "unit.player === current_player?"
         if cache_entry["player"] != current_player:
@@ -323,7 +333,6 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         if cache_key not in game_state:
             raise KeyError(f"enemy_adjacent_hexes cache missing for player {current_player} - build_enemy_adjacent_hexes() must be called at phase start")
         enemy_adjacent_hexes = game_state[cache_key]
-        ez_elig = get_engagement_zone(game_state)
 
         has_valid_adjacent_hex = False
         if has_fly_keyword:
@@ -360,6 +369,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
                             candidate_fp,
                             units_cache,
                             enemy_adjacent_hexes,
+                            engagement_zone_ez=ez_elig,
                         )
                     ):
                         has_valid_adjacent_hex = True
@@ -385,6 +395,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
                         candidate_fp,
                         units_cache,
                         enemy_adjacent_hexes,
+                        engagement_zone_ez=ez_elig,
                     )
                 ):
                     has_valid_adjacent_hex = True
@@ -703,6 +714,7 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
         mover_bs_i = mover_bs_i if isinstance(mover_bs_i, int) else 1
         if ez_blk > 1 and mover_shape == "round":
             req_blk = engagement_minimum_clearance_norm(ez_blk)
+            _dest_mover_xy = _hex_center(dest_col_int, dest_row_int)
             for eid, cache_entry in units_cache.items():
                 if str(eid) == mover_id_str:
                     continue
@@ -715,7 +727,13 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
                 e_col = require_key(cache_entry, "col")
                 e_row = require_key(cache_entry, "row")
                 gap = euclidean_edge_clearance_round_round(
-                    dest_col_int, dest_row_int, mover_bs_i, e_col, e_row, e_bs_i
+                    dest_col_int,
+                    dest_row_int,
+                    mover_bs_i,
+                    e_col,
+                    e_row,
+                    e_bs_i,
+                    mover_center_xy=_dest_mover_xy,
                 )
                 if gap < req_blk - 1e-6:
                     blocking_eid = str(eid)
@@ -839,6 +857,7 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     return result
 
 
+@profile_move_pool_build
 def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str) -> List[Tuple[int, int]]:
     """
     Build valid movement destinations using BFS pathfinding.
@@ -848,8 +867,14 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
     Pre-computes enemy adjacent hexes and occupied positions once at BFS start for O(1) lookups.
 
-    Ground BFS may traverse hexes occupied by allies but cannot end movement overlapping any
-    model (ally or enemy). Enemy model hexes block traversal; engagement zone hexes block as before.
+    Ground (non-Fly): BFS never steps through an enemy engagement hex — those neighbors are
+    rejected before enqueue (``enemy_adjacent_hexes`` / ``_movement_engagement_violates`` on the
+    footprint). You cannot cross that band to reach hexes beyond it without Fly. Ally-occupied
+    hexes may be traversed but the footprint cannot end on any occupied hex; enemy-occupied
+    hexes block traversal.
+
+    Fly: exploration ignores walls and occupation along the path; walls, occupation and engagement
+    are enforced on the destination footprint only (see fly branch below).
     """
     from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
 
@@ -887,7 +912,17 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         game_state, current_player=current_player_int
     )
     units_cache = require_key(game_state, "units_cache")
-    
+    ez = get_engagement_zone(game_state)
+    _mover_player_int = int(require_key(unit, "player"))
+    # ez > 1 : une seule liste d’ennemis pour ``_movement_engagement_violates`` (évite O(units)×BFS).
+    _enemy_items_for_engagement_ez: Optional[List[Tuple[Any, Any]]] = None
+    if ez > 1:
+        _enemy_items_for_engagement_ez = [
+            (eid, ce)
+            for eid, ce in units_cache.items()
+            if str(eid) != unit_id_str and int(require_key(ce, "player")) != _mover_player_int
+        ]
+
     if game_state.get("debug_mode", False) and "episode_number" in game_state and "turn" in game_state:
         episode = game_state.get("episode_number", "?")
         turn = game_state.get("turn", "?")
@@ -952,7 +987,10 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     if has_fly_keyword:
         board_cols = require_key(game_state, "board_cols")
         board_rows = require_key(game_state, "board_rows")
-        fly_visited: Set[Tuple[int, int]] = {start_pos}
+        _fly_n_cells = board_cols * board_rows
+        _fly_vis = bytearray(_fly_n_cells)
+        _fly_vis[start_col + start_row * board_cols] = 1
+        fly_visited_n = 1
         fly_queue = deque([(start_pos, 0)])
         valid_destinations: List[Tuple[int, int]] = []
         fly_rejected_footprint = 0
@@ -962,7 +1000,6 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         _fly_walls = game_state.get("wall_hexes", set())
         _fly_occupied = occupied_positions
 
-        ez = get_engagement_zone(game_state)
         _fly_base_size = unit.get("BASE_SIZE", 1)
         _fly_single_hex = (ez <= 1 or _fly_base_size == 1)
 
@@ -992,12 +1029,14 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                     (fc, fr + 1), (fc - 1, fr + 1), (fc - 1, fr),
                 )
             for nb in _nbs:
-                if nb in fly_visited:
-                    continue
                 nc, nr = nb
                 if nc < 0 or nr < 0 or nc >= _fly_bcols or nr >= _fly_brows:
                     continue
-                fly_visited.add(nb)
+                _fidx = nc + nr * board_cols
+                if _fly_vis[_fidx]:
+                    continue
+                _fly_vis[_fidx] = 1
+                fly_visited_n += 1
                 fly_queue.append((nb, _nd))
                 if nb == start_pos:
                     continue
@@ -1012,6 +1051,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                         {(nc, nr)},
                         units_cache,
                         enemy_adjacent_hexes if ez <= 1 else None,
+                        enemy_cache_items=_enemy_items_for_engagement_ez,
+                        engagement_zone_ez=ez,
                     ):
                         fly_rejected_footprint += 1
                     else:
@@ -1039,6 +1080,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                         candidate_fp_nb,
                         units_cache,
                         enemy_adjacent_hexes if ez <= 1 else None,
+                        enemy_cache_items=_enemy_items_for_engagement_ez,
+                        engagement_zone_ez=ez,
                     ):
                         valid_destinations.append(nb)
                     else:
@@ -1047,8 +1090,6 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         _m_bfs_end = _perf_clock.perf_counter() if _pt else None
         game_state["valid_move_destinations_pool"] = valid_destinations
         game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
-        # Même sémantique que le BFS au sol : union d'empreintes (masque hex côté client, rendu plus doux
-        # que le fallback « disques seuls » sans cette zone).
         if _fly_single_hex:
             _fly_fp_zone: Set[Tuple[int, int]] = set(valid_destinations)
             _fly_fp_zone.add(start_pos)
@@ -1062,13 +1103,20 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             for dc, dr in _start_offs:
                 _fly_fp_zone.add((start_pos[0] + dc, start_pos[1] + dr))
         game_state["move_preview_footprint_zone"] = _fly_fp_zone
-        game_state["move_preview_border"] = _compute_border_cells(_fly_fp_zone)
+        # Non sérialisé (exclu API) ; la preview repose sur footprint_zone / mask_loops.
+        game_state["move_preview_border"] = []
+        _m_fly_before_sync = _perf_clock.perf_counter() if _pt else None
+        _sync_move_preview_mask_loops(game_state, _fly_fp_zone)
         _m_fly_done = _perf_clock.perf_counter() if _pt else None
-        if _pt and _m0 is not None and _m_prep_end is not None and _m_bfs_start is not None and _m_bfs_end is not None and _m_fly_done is not None:
+        if _pt and _m0 is not None and _m_prep_end is not None and _m_bfs_start is not None and _m_bfs_end is not None and _m_fly_before_sync is not None and _m_fly_done is not None:
+            _post_bfs = _m_fly_done - _m_bfs_end
+            _fu = _m_fly_before_sync - _m_bfs_end
+            _ml = _m_fly_done - _m_fly_before_sync
             append_perf_timing_line(
                 f"MOVE_POOL_BUILD unit={unit_id} fly=True prep_s={_m_prep_end - _m0:.6f} "
-                f"bfs_s={_m_bfs_end - _m_bfs_start:.6f} preview_border_s={_m_fly_done - _m_bfs_end:.6f} "
-                f"total_s={_m_fly_done - _m0:.6f} visited={len(fly_visited)} valid={len(valid_destinations)} "
+                f"bfs_s={_m_bfs_end - _m_bfs_start:.6f} post_bfs_s={_post_bfs:.6f} "
+                f"footprint_union_s={_fu:.6f} mask_loops_s={_ml:.6f} "
+                f"total_s={_m_fly_done - _m0:.6f} visited={fly_visited_n} valid={len(valid_destinations)} "
                 f"anchors_n={len(valid_destinations)} footprint_hex_n={len(_fly_fp_zone)} "
                 f"MOVE={move_range}"
             )
@@ -1081,7 +1129,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 game_state,
                 f"[MOVE POOL SUMMARY] E{episode} T{turn} Unit {unit_id} [FLY BFS]: "
                 f"start=({start_col},{start_row}) move_range={move_range} "
-                f"visited={len(fly_visited)} valid={len(valid_destinations)} "
+                f"visited={fly_visited_n} valid={len(valid_destinations)} "
                 f"reject_footprint={fly_rejected_footprint}",
             )
         return valid_destinations
@@ -1090,11 +1138,14 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
     wall_hexes_set = game_state.get("wall_hexes", set())
-    ez = get_engagement_zone(game_state)
     base_size = unit.get("BASE_SIZE", 1)
     is_single_hex = (ez <= 1 or base_size == 1)
 
-    visited: Dict[Tuple[int, int], int] = {start_pos: 0}
+    # Grille dense O(1) : même sémantique que ``dict`` (case visitée ou non pour ce BFS).
+    _n_cells = board_cols * board_rows
+    _vis = bytearray(_n_cells)
+    _vis[start_col + start_row * board_cols] = 1
+    visited_n = 1
     queue = deque([(start_pos, 0)])
     valid_destinations: List[Tuple[int, int]] = []
     blocked_enemy_adjacent_count = 0
@@ -1125,10 +1176,11 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                     (cc, cr + 1), (cc - 1, cr + 1), (cc - 1, cr),
                 )
             for nb in nb_list:
-                if nb in visited:
-                    continue
                 nc, nr = nb
                 if nc < 0 or nr < 0 or nc >= _bcols or nr >= _brows:
+                    continue
+                _vidx = nc + nr * board_cols
+                if _vis[_vidx]:
                     continue
                 if nb in _walls:
                     continue
@@ -1147,10 +1199,13 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                         {(nc, nr)},
                         units_cache,
                         None,
+                        enemy_cache_items=_enemy_items_for_engagement_ez,
+                        engagement_zone_ez=ez,
                     ):
                         blocked_enemy_adjacent_count += 1
                         continue
-                visited[nb] = nd
+                _vis[_vidx] = 1
+                visited_n += 1
                 queue.append((nb, nd))
                 # Traversal may pass through allied hexes; cannot end on any occupied cell.
                 if nb != start_pos and nb not in _occupied:
@@ -1164,6 +1219,16 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         _rej_bounds = 0
         _rej_walls = 0
         _rej_occupied = 0
+
+        # Union d’empreintes : même résultat qu’après coup sur ``valid_destinations``, sans repasser
+        # sur ~valid×fp ajouts (empreinte départ + une passe par destination valide).
+        footprint_zone: Set[Tuple[int, int]] = set()
+        _so_start = _off_even if (start_pos[0] & 1) == 0 else _off_odd
+        for _dc, _dr in _so_start:
+            footprint_zone.add((start_pos[0] + _dc, start_pos[1] + _dr))
+
+        # Réutilisé pour ``ez > 1`` (évite une grosse allocation par voisin).
+        _fp_work: Set[Tuple[int, int]] = set()
 
         while queue:
             (cc, cr), cd = queue.popleft()
@@ -1182,9 +1247,12 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                     (cc, cr + 1), (cc - 1, cr + 1), (cc - 1, cr),
                 )
             for nb in nb_list:
-                if nb in visited:
-                    continue
                 nc, nr = nb
+                in_b = 0 <= nc < _bcols and 0 <= nr < _brows
+                if in_b:
+                    _vidx = nc + nr * board_cols
+                    if _vis[_vidx]:
+                        continue
                 offsets = _off_even if (nc & 1) == 0 else _off_odd
                 fp_valid = True
                 _rej_reason = None
@@ -1210,56 +1278,76 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                     elif _rej_reason == "occupied":
                         _rej_occupied += 1
                     continue
-                candidate_fp_nb = {(nc + dc, nr + dr) for dc, dr in offsets}
+                # ez ≤ 1 : pas de set d’empreinte (parcours offsets ; souvent arrêt hâtif).
                 if ez <= 1:
-                    in_engagement = any((nc + dc, nr + dr) in _enemy_adj for dc, dr in offsets)
-                    if in_engagement:
+                    _eng_hit = False
+                    for dc, dr in offsets:
+                        if (nc + dc, nr + dr) in _enemy_adj:
+                            _eng_hit = True
+                            break
+                    if _eng_hit:
                         blocked_enemy_adjacent_count += 1
                         continue
-                elif _movement_engagement_violates(
-                    game_state,
-                    unit,
-                    nc,
-                    nr,
-                    candidate_fp_nb,
-                    units_cache,
-                    None,
-                ):
-                    blocked_enemy_adjacent_count += 1
-                    continue
-                visited[nb] = nd
+                else:
+                    _fp_work.clear()
+                    for dc, dr in offsets:
+                        _fp_work.add((nc + dc, nr + dr))
+                    if _movement_engagement_violates(
+                        game_state,
+                        unit,
+                        nc,
+                        nr,
+                        _fp_work,
+                        units_cache,
+                        None,
+                        enemy_cache_items=_enemy_items_for_engagement_ez,
+                        engagement_zone_ez=ez,
+                    ):
+                        blocked_enemy_adjacent_count += 1
+                        continue
+                if in_b:
+                    _vis[_vidx] = 1
+                    visited_n += 1
                 queue.append((nb, nd))
                 # Traversal may overlap allied models; destination may not overlap any model.
-                dest_on_unit = any((nc + dc, nr + dr) in _occupied for dc, dr in offsets)
+                dest_on_unit = False
+                for dc, dr in offsets:
+                    if (nc + dc, nr + dr) in _occupied:
+                        dest_on_unit = True
+                        break
                 if not dest_on_unit and nb != start_pos:
                     valid_destinations.append(nb)
+                    if ez > 1:
+                        footprint_zone.update(_fp_work)
+                    else:
+                        for dc, dr in offsets:
+                            footprint_zone.add((nc + dc, nr + dr))
 
     _m_bfs_end = _perf_clock.perf_counter() if _pt else None
     game_state["valid_move_destinations_pool"] = valid_destinations
     game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
 
     if is_single_hex:
-        footprint_zone: Set[Tuple[int, int]] = set(valid_destinations)
+        footprint_zone = set(valid_destinations)
         footprint_zone.add(start_pos)
-    else:
-        footprint_zone = set()
-        for vc, vr in valid_destinations:
-            offsets = _off_even if (vc & 1) == 0 else _off_odd
-            for dc, dr in offsets:
-                footprint_zone.add((vc + dc, vr + dr))
-        for dc, dr in (_off_even if (start_pos[0] & 1) == 0 else _off_odd):
-            footprint_zone.add((start_pos[0] + dc, start_pos[1] + dr))
+    # multi-hex : ``footprint_zone`` déjà rempli pendant la BFS (empreinte départ + destinations valides)
 
     game_state["move_preview_footprint_zone"] = footprint_zone
-    game_state["move_preview_border"] = _compute_border_cells(footprint_zone)
+    game_state["move_preview_border"] = []
+    _m_ground_before_sync = _perf_clock.perf_counter() if _pt else None
+    _sync_move_preview_mask_loops(game_state, footprint_zone)
 
     _m_ground_done = _perf_clock.perf_counter() if _pt else None
-    if _pt and _m0 is not None and _m_prep_end is not None and _m_bfs_start is not None and _m_bfs_end is not None and _m_ground_done is not None:
+    if _pt and _m0 is not None and _m_prep_end is not None and _m_bfs_start is not None and _m_bfs_end is not None and _m_ground_before_sync is not None and _m_ground_done is not None:
         _fp_n = len(_off_even) if not is_single_hex else 1
+        _post_bfs = _m_ground_done - _m_bfs_end
+        _fu = _m_ground_before_sync - _m_bfs_end
+        _ml = _m_ground_done - _m_ground_before_sync
         append_perf_timing_line(
             f"MOVE_POOL_BUILD unit={unit_id} fly=False single_hex={is_single_hex} prep_s={_m_prep_end - _m0:.6f} "
-            f"bfs_s={_m_bfs_end - _m_bfs_start:.6f} footprint_zone_border_s={_m_ground_done - _m_bfs_end:.6f} "
-            f"total_s={_m_ground_done - _m0:.6f} visited={len(visited)} valid={len(valid_destinations)} "
+            f"bfs_s={_m_bfs_end - _m_bfs_start:.6f} post_bfs_s={_post_bfs:.6f} "
+            f"footprint_union_s={_fu:.6f} mask_loops_s={_ml:.6f} "
+            f"total_s={_m_ground_done - _m0:.6f} visited={visited_n} valid={len(valid_destinations)} "
             f"anchors_n={len(valid_destinations)} footprint_hex_n={len(footprint_zone)} "
             f"MOVE={move_range} base={base_size} fp={_fp_n}"
         )
@@ -1273,7 +1361,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             game_state,
             f"[TEMPORARY LOG][MOVE POOL SUMMARY] E{episode} T{turn} Unit {unit_id}: "
             f"start=({start_col},{start_row}) move_range={move_range} "
-            f"visited={len(visited)} valid={len(valid_destinations)} "
+            f"visited={visited_n} valid={len(valid_destinations)} "
             f"blocked_enemy_adjacent={blocked_enemy_adjacent_count}",
         )
 
@@ -1428,6 +1516,7 @@ def movement_clear_preview(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["valid_move_destinations_pool"] = []
     game_state["move_preview_footprint_zone"] = set()
     game_state["move_preview_border"] = []
+    game_state["move_preview_footprint_mask_loops"] = None
     game_state["move_preview_footprint_span"] = None
     game_state["active_movement_unit"] = None
     return {

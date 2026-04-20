@@ -322,15 +322,20 @@ For each unit
 
 ### Movement Restrictions Logic
 
-**Forbidden Destinations (Cannot Move To AND through):**
-- **Occupied hexes**: Other units prevent movement
-- **Enemy adjacent hexes**: Adjacent to enemy = entering fight
-- **Wall hexes**: Terrain blocks movement
+**Ground movement (non-Fly) — pathfinding / preview:**
+- **Wall hexes**: Cannot traverse or end on them.
+- **Enemy model hexes**: Block traversal (cannot pass through).
+- **Ally-occupied hexes**: May traverse; cannot **end** movement with a model overlapping any occupied hex (ally or enemy).
+- **Enemy engagement zone**: Cannot **traverse** these hexes (not only destinations — the BFS never uses them as path steps). Units without **Fly** cannot cross that band to reach hexes behind it.
+- **Enemy adjacent / engagement checks**: Implemented via cached enemy-adjacency rings and `get_engagement_zone` (including multi-hex footprints when applicable).
+
+**Fly — pathfinding / preview:**
+- BFS exploration does not treat walls or occupation as blocking along the path; **destination** validation still applies walls, occupation, and engagement rules on the unit footprint.
 
 **Why These Restrictions:**
-- **Spatial logic**: Physical objects cannot overlap
-- **Engagement rules**: Adjacent = fight = different phase handles it
-- **Terrain realism**: Walls block movement paths
+- **Spatial logic**: Physical objects cannot overlap at the end of a move; enemies block passage.
+- **Engagement rules**: Entering or crossing the engagement band is handled by movement restrictions so the fight phase stays separate.
+- **Terrain realism**: Walls block ground paths.
 
 ### Flee Mechanics Logic
 

@@ -26,6 +26,7 @@ from engine.hex_utils import (
     engagement_minimum_clearance_norm,
     euclidean_edge_clearance_round_round,
     round_base_radius_norm,
+    _hex_center,
 )
 
 
@@ -514,6 +515,16 @@ class TestEuclideanEngagementClearance:
     def test_identical_centers_negative_clearance(self):
         g = euclidean_edge_clearance_round_round(10, 10, 3, 10, 10, 3)
         assert g < 0
+
+    def test_mover_center_cached_matches_uncached(self) -> None:
+        ca, ra = 12, 8
+        cb, rb = 20, 8
+        xy = _hex_center(ca, ra)
+        g1 = euclidean_edge_clearance_round_round(ca, ra, 3, cb, rb, 2)
+        g2 = euclidean_edge_clearance_round_round(
+            ca, ra, 3, cb, rb, 2, mover_center_xy=xy
+        )
+        assert g1 == g2
 
 
 class TestExpandWallGroupToHexList:

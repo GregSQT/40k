@@ -50,6 +50,7 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["valid_move_destinations_pool"] = []
     game_state["preview_hexes"] = []
     game_state["move_preview_footprint_zone"] = set()
+    game_state["move_preview_footprint_mask_loops"] = None
     game_state["move_preview_footprint_span"] = None
     game_state["active_movement_unit"] = None
     

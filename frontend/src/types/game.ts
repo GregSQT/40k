@@ -290,6 +290,8 @@ export interface GameState {
   preview_hexes?: Array<[number, number]>;
   move_preview_border?: Array<[number, number]>;
   move_preview_footprint_zone?: Array<[number, number]>;
+  /** Contours masque move (coord. monde) — remplace souvent ``move_preview_footprint_zone`` dans le JSON. */
+  move_preview_footprint_mask_loops?: Array<Array<[number, number]>>;
   /** Phase fight : union des hexes occupés par l'empreinte pour chaque ancre pile in valide (comme move_preview_footprint_zone). */
   fight_pile_in_footprint_zone?: Array<[number, number]>;
   /** Consolidation après attaques : union des empreintes valides (moteur). */

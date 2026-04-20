@@ -1,4 +1,5 @@
 import type { RefObject } from "react";
+import { normalizeMaskLoopsFromApi } from "./movePreviewFootprintMaskLoops";
 
 /** Remplit un Set ``col,row`` depuis les listes moteur (couples, objets ou chaînes ``"c,r"``). */
 export function addHexKeysToSet(raw: unknown, out: Set<string>): void {
@@ -24,12 +25,15 @@ export type SyncMoveDestinationPoolRefsOptions = {
     /** Alias moteur parfois présent si le pool principal est absent. */
     preview_hexes?: unknown;
     move_preview_footprint_zone?: unknown;
+    move_preview_footprint_mask_loops?: unknown;
   } | null;
   phase: string;
   mode: string;
   selectedUnitId: number | null;
   moveDestPoolRef: RefObject<Set<string>> | undefined;
   footprintZoneRef?: RefObject<Set<string>> | undefined;
+  /** Hit-test / debug quand la zone hex n’est pas dans le JSON (boucles monde). */
+  footprintMaskLoopsRef?: RefObject<number[][] | null> | undefined;
   /** Aligné sur ``pendingPreviewAction === "move_after_shooting"`` (useEngineAPI). */
   pendingMoveAfterShooting?: boolean;
 };
@@ -47,6 +51,7 @@ export function syncMoveDestinationPoolRefs(o: SyncMoveDestinationPoolRefsOption
     selectedUnitId,
     moveDestPoolRef,
     footprintZoneRef,
+    footprintMaskLoopsRef,
     pendingMoveAfterShooting,
   } = o;
 
@@ -56,6 +61,9 @@ export function syncMoveDestinationPoolRefs(o: SyncMoveDestinationPoolRefsOption
     moveDestPoolRef.current = new Set();
     if (footprintZoneRef?.current) {
       footprintZoneRef.current = new Set();
+    }
+    if (footprintMaskLoopsRef) {
+      footprintMaskLoopsRef.current = null;
     }
   };
 
@@ -76,8 +84,16 @@ export function syncMoveDestinationPoolRefs(o: SyncMoveDestinationPoolRefsOption
     const poolSet = new Set<string>();
     addHexKeysToSet(anchorSource, poolSet);
     moveDestPoolRef.current = poolSet;
+    const maskLoops = normalizeMaskLoopsFromApi(
+      (gameState as { move_preview_footprint_mask_loops?: unknown }).move_preview_footprint_mask_loops,
+    );
+    if (footprintMaskLoopsRef) {
+      footprintMaskLoopsRef.current = maskLoops;
+    }
     if (footprintZoneRef?.current) {
       if (poolSet.size === 0) {
+        footprintZoneRef.current = new Set();
+      } else if (maskLoops && maskLoops.length > 0) {
         footprintZoneRef.current = new Set();
       } else {
         const fpRaw = gameState.move_preview_footprint_zone;

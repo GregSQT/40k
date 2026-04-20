@@ -6,6 +6,7 @@ import type { GameMode, PlayerId, Unit } from "../types";
 import type { DiceValue } from "../types/game";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import { addHexKeysToSet } from "../utils/movePoolRefsSync";
+import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
 import { getPreferredRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 
 // Get max_turns from config instead of hardcoded fallback
@@ -356,6 +357,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [advanceRoll, setAdvanceRoll] = useState<number | null>(null);
   const moveDestPoolRef = useRef<Set<string>>(new Set());
   const footprintZoneRef = useRef<Set<string>>(new Set());
+  /** Boucles masque monde (API) — hit-test quand ``move_preview_footprint_zone`` est absent du JSON. */
+  const footprintMaskLoopsRef = useRef<number[][] | null>(null);
   /** Ancres charge valides + zone violette (empreintes) — même usage que moveDestPoolRef pour l’icône sous le curseur. */
   const chargeDestPoolRef = useRef<Set<string>>(new Set());
   const chargeFootprintZoneRef = useRef<Set<string>>(new Set());
@@ -448,6 +451,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   // Track last action to detect activate_unit in shoot phase
   const lastActionRef = useRef<{ action: string; phase: string; unitId?: string } | null>(null);
   const ruleChoicePreviousSelectedUnitIdRef = useRef<number | null>(null);
+  /** Bloque les doubles clics d’activation (move / tir / fight) pendant la requête API. */
+  const activationInProgressRef = useRef(false);
+  /** Unité en cours d’activation — curseur attente sur le plateau (A / perfs ressenti). */
+  const [activationPendingUnitId, setActivationPendingUnitId] = useState<number | null>(null);
 
   // Load config values
   useEffect(() => {
@@ -1397,8 +1404,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               }
               moveDestPoolRef.current = poolSet;
 
+              const loopsAdv = normalizeMaskLoopsFromApi(
+                (gsAdv as { move_preview_footprint_mask_loops?: unknown }).move_preview_footprint_mask_loops,
+              );
+              footprintMaskLoopsRef.current = loopsAdv;
               const fpSet = new Set<string>();
-              addHexKeysToSet(gsAdv.move_preview_footprint_zone, fpSet);
+              if (!loopsAdv?.length) {
+                addHexKeysToSet(gsAdv.move_preview_footprint_zone, fpSet);
+              }
               footprintZoneRef.current = fpSet;
             }
           }
@@ -1449,8 +1462,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             addHexKeysToSet(anchorSrc, poolSet);
             moveDestPoolRef.current = poolSet;
 
+            const loopsAct = normalizeMaskLoopsFromApi(
+              (data.game_state as { move_preview_footprint_mask_loops?: unknown })
+                .move_preview_footprint_mask_loops,
+            );
+            footprintMaskLoopsRef.current = loopsAct;
             const fpSet = new Set<string>();
-            addHexKeysToSet(data.game_state.move_preview_footprint_zone, fpSet);
+            if (!loopsAct?.length) {
+              addHexKeysToSet(data.game_state.move_preview_footprint_zone, fpSet);
+            }
             footprintZoneRef.current = fpSet;
           }
           // Handle charge activation response - can have blinking_units without valid_destinations yet
@@ -1713,6 +1733,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               setPileInDestinations([]);
               moveDestPoolRef.current = new Set();
               footprintZoneRef.current = new Set();
+              footprintMaskLoopsRef.current = null;
               setSelectedUnitId(null);
               setMode("select");
             }
@@ -1841,13 +1862,22 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 moveDestPoolRef.current = poolSet;
               }
             }
-            const fp = data.game_state.move_preview_footprint_zone;
-            if (Array.isArray(fp) && fp.length > 0) {
-              const fpSet = new Set<string>();
-              addHexKeysToSet(fp, fpSet);
-              if (fpSet.size > 0) {
-                footprintZoneRef.current = fpSet;
+            const loopsMv = normalizeMaskLoopsFromApi(
+              (data.game_state as { move_preview_footprint_mask_loops?: unknown })
+                .move_preview_footprint_mask_loops,
+            );
+            footprintMaskLoopsRef.current = loopsMv;
+            if (!loopsMv?.length) {
+              const fp = data.game_state.move_preview_footprint_zone;
+              if (Array.isArray(fp) && fp.length > 0) {
+                const fpSet = new Set<string>();
+                addHexKeysToSet(fp, fpSet);
+                if (fpSet.size > 0) {
+                  footprintZoneRef.current = fpSet;
+                }
               }
+            } else {
+              footprintZoneRef.current = new Set();
             }
           }
         }
@@ -2150,10 +2180,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           const shootActivationPool = gameState.shoot_activation_pool.map((id) => parseInt(id, 10));
 
           if (shootActivationPool.includes(numericUnitId)) {
-            await executeAction({
-              action: "activate_unit",
-              unitId: numericUnitId.toString(),
-            });
+            if (activationInProgressRef.current) {
+              return;
+            }
+            activationInProgressRef.current = true;
+            setSelectedUnitId(numericUnitId);
+            setActivationPendingUnitId(numericUnitId);
+            try {
+              await executeAction({
+                action: "activate_unit",
+                unitId: numericUnitId.toString(),
+              });
+            } finally {
+              activationInProgressRef.current = false;
+              setActivationPendingUnitId(null);
+            }
             return;
           } else if (gameState.active_shooting_unit) {
             // Clicking on target when unit is active
@@ -2187,10 +2228,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         const moveActivationPool = gameState.move_activation_pool.map((id) => parseInt(id, 10));
 
         if (moveActivationPool.includes(numericUnitId)) {
-          await executeAction({
-            action: "activate_unit",
-            unitId: numericUnitId.toString(),
-          });
+          if (activationInProgressRef.current) {
+            return;
+          }
+          activationInProgressRef.current = true;
+          setSelectedUnitId(numericUnitId);
+          setActivationPendingUnitId(numericUnitId);
+          try {
+            await executeAction({
+              action: "activate_unit",
+              unitId: numericUnitId.toString(),
+            });
+          } finally {
+            activationInProgressRef.current = false;
+            setActivationPendingUnitId(null);
+          }
           return;
         }
       }
@@ -2600,16 +2652,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     async (fighterId: number | string) => {
       const numericFighterId = typeof fighterId === "string" ? parseInt(fighterId, 10) : fighterId;
 
-      // Send activate_unit action to backend
-      // Backend will call _handle_fight_unit_activation which:
-      // 1. Sets ATTACK_LEFT = CC_NB
-      // 2. Builds valid_targets list (enemies adjacent within CC_RNG)
-      // 3. Returns waiting_for_player if targets exist, triggering attackPreview mode
-      // Backend will reject if unit not in current pool
-      await executeAction({
-        action: "activate_unit",
-        unitId: numericFighterId.toString(),
-      });
+      if (activationInProgressRef.current) {
+        return;
+      }
+      activationInProgressRef.current = true;
+      setSelectedUnitId(numericFighterId);
+      setActivationPendingUnitId(numericFighterId);
+      try {
+        await executeAction({
+          action: "activate_unit",
+          unitId: numericFighterId.toString(),
+        });
+      } finally {
+        activationInProgressRef.current = false;
+        setActivationPendingUnitId(null);
+      }
     },
     [executeAction]
   );
@@ -3297,6 +3354,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       preview_hexes: (gameState as { preview_hexes?: unknown }).preview_hexes,
       move_preview_border: gameState.move_preview_border,
       move_preview_footprint_zone: gameState.move_preview_footprint_zone,
+      move_preview_footprint_mask_loops: (gameState as { move_preview_footprint_mask_loops?: unknown })
+        .move_preview_footprint_mask_loops,
       fight_pile_in_footprint_zone: gameState.fight_pile_in_footprint_zone,
       fight_consolidation_footprint_zone: gameState.fight_consolidation_footprint_zone,
       active_shooting_unit: gameState.active_shooting_unit,
@@ -3375,9 +3434,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       chargeReferenceHex: null,
       moveDestPoolRef,
       footprintZoneRef,
+      footprintMaskLoopsRef,
       chargeDestPoolRef,
       chargeFootprintZoneRef,
       pendingMoveAfterShooting: false,
+      activationPendingUnitId: null,
       chargingUnitId: null,
       chargeTargetId: null,
       chargeRoll: null,
@@ -3471,9 +3532,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     chargeReferenceHex,
     moveDestPoolRef,
     footprintZoneRef,
+    footprintMaskLoopsRef,
     chargeDestPoolRef,
     chargeFootprintZoneRef,
     pendingMoveAfterShooting: pendingPreviewAction === "move_after_shooting",
+    activationPendingUnitId,
     // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Export advance state and handler
     getAdvanceDestinations: getAdvanceDestinationsMemo,
     advancingUnitId,

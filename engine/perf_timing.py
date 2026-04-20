@@ -13,6 +13,14 @@ Audit optionnel focus fire (comparaison pools) :
 Sortie : fichier append-only ``<racine_projet>/perf_timing.log`` (une ligne par segment), sauf si
 ``W40K_PERF_TIMING_LOG`` est défini (chemin absolu ou relatif du fichier à utiliser).
 
+Profilage par fonctions (cProfile), optionnel — **uniquement si** ``perf_timing`` est déjà actif :
+
+- ``W40K_PERF_PROFILE=1`` (ou ``true`` / ``yes``), ou ``game_state["perf_profile"] is True`` ;
+- sortie multi-lignes dans ``<racine_projet>/perf_timing_profile.log`` (override : ``W40K_PERF_PROFILE_LOG``) ;
+- une ligne référence ``PERF_PROFILE_DUMP`` dans ``perf_timing.log`` pointe vers ce fichier.
+
+Actuellement utilisé autour de ``movement_build_valid_destinations_pool`` (activation déplacement).
+
 **Important :** seul le processus **Python** (API Flask, bots, tests moteur) écrit ce fichier — pas le
 serveur frontend (Vite / ``npm run dev``). Si tu lances uniquement ``app``, aucun ``perf_timing.log``
 n’apparaîtra à la racine du dépôt.
@@ -49,8 +57,12 @@ Lignes typiques (référence) :
 - ``END_PHASE`` — ``services/api_server._execute_end_phase_action`` : ``activate_semantic_s`` / ``skip_semantic_s``
   (sommes des ``execute_semantic_action`` activate / skip par unité), ``advance_phase_s``, ``unit_pairs``,
   ``outcome``, ``total_s``. Découpe le coût moteur d’un ``end_phase`` HTTP (plusieurs activations + ``advance_phase``).
-- ``MOVE_POOL_BUILD`` — ``prep_s`` (caches occupation / EZ), ``bfs_s`` (exploration), pour le sol
-  multi-hex ``footprint_zone_border_s`` (union empreintes + bordure), ``total_s``, compteurs
+- ``PERF_PROFILE_DUMP`` — dump cProfile (top fonctions) : ``label``, ``unit``, ``file``, ``chars`` (voir
+  ``perf_timing_profile.log``).
+- ``MOVE_POOL_BUILD`` — ``prep_s`` (caches occupation / EZ), ``bfs_s`` (exploration seule), ``post_bfs_s``
+  (union empreintes + écriture état + masque), découpé en ``footprint_union_s`` (construction
+  ``move_preview_footprint_zone`` + clés état jusqu’au sync) et ``mask_loops_s`` (uniquement
+  ``compute_move_preview_mask_loops_world`` / ``_sync_move_preview_mask_loops``) ; ``total_s``, compteurs
   ``visited`` / ``valid``. ``anchors_n`` = taille de ``valid_move_destinations_pool`` (disques UI) ;
   ``footprint_hex_n`` = taille de ``move_preview_footprint_zone`` (union hex ; vol : ``na_fly``).
 - ``CHARGE_PHASE_START`` — ``setup_until_adj_s``, ``enemy_adjacent_hexes_s``, ``pool_build_s``, ``total_s`` (début phase charge).
@@ -67,12 +79,17 @@ Lignes typiques (référence) :
 
 from __future__ import annotations
 
+import functools
+import io
 import os
 import sys
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional, TypeVar
 
 _PERF_ENV_TRUE = frozenset({"1", "true", "yes"})
 _PERF_WRITE_ERROR_LOGGED = False
+_PERF_PROFILE_WRITE_ERROR_LOGGED = False
+
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 def perf_timing_log_file_path() -> str:
@@ -98,6 +115,38 @@ def perf_timing_enabled(game_state: Optional[Dict[str, Any]]) -> bool:
     if isinstance(raw, str) and raw.strip().lower() in _PERF_ENV_TRUE:
         return True
     if game_state is not None and game_state.get("perf_timing") is True:
+        return True
+    return False
+
+
+def perf_profile_log_file_path() -> str:
+    """
+    Fichier append pour les sorties cProfile (blocs multi-lignes).
+
+    Priorité :
+    1. ``W40K_PERF_PROFILE_LOG`` si défini (non vide) ;
+    2. sinon ``<racine_projet>/perf_timing_profile.log``.
+    """
+    override = os.environ.get("W40K_PERF_PROFILE_LOG", "").strip()
+    if override:
+        return os.path.abspath(override)
+    here = os.path.abspath(__file__)
+    engine_dir = os.path.dirname(here)
+    project_root = os.path.dirname(engine_dir)
+    return os.path.join(project_root, "perf_timing_profile.log")
+
+
+def perf_profile_enabled(game_state: Optional[Dict[str, Any]]) -> bool:
+    """
+    Profilage cProfile : uniquement lorsque ``perf_timing`` est actif, plus
+    ``W40K_PERF_PROFILE=1`` ou ``game_state['perf_profile'] is True``.
+    """
+    if not perf_timing_enabled(game_state):
+        return False
+    raw = os.environ.get("W40K_PERF_PROFILE", "")
+    if isinstance(raw, str) and raw.strip().lower() in _PERF_ENV_TRUE:
+        return True
+    if game_state is not None and game_state.get("perf_profile") is True:
         return True
     return False
 
@@ -141,3 +190,77 @@ def append_perf_timing_line(message: str) -> None:
                 f"(cwd={os.getcwd()!r}, définir W40K_PERF_TIMING_LOG si besoin)",
                 file=sys.stderr,
             )
+
+
+def append_perf_profile_block(header_line: str, body: str) -> None:
+    """
+    Écrit un bloc (en-tête + corps pstats) dans le fichier profil, append + flush.
+    """
+    global _PERF_PROFILE_WRITE_ERROR_LOGGED
+    path = perf_profile_log_file_path()
+    try:
+        with open(path, "a", encoding="utf-8", errors="replace") as f:
+            f.write(header_line.rstrip() + "\n")
+            f.write(body)
+            if not body.endswith("\n"):
+                f.write("\n")
+            f.write("=== END PERF_PROFILE ===\n")
+            f.flush()
+    except OSError as exc:
+        if not _PERF_PROFILE_WRITE_ERROR_LOGGED:
+            _PERF_PROFILE_WRITE_ERROR_LOGGED = True
+            print(
+                f"[perf_timing] impossible d'écrire le profil dans {path!r}: {exc} "
+                f"(cwd={os.getcwd()!r}, définir W40K_PERF_PROFILE_LOG si besoin)",
+                file=sys.stderr,
+            )
+
+
+def append_cprofile_dump(
+    profiler: Any,
+    label: str,
+    *,
+    unit_id: Optional[str] = None,
+    print_stats: int = 40,
+) -> None:
+    """
+    Sérialise ``pstats`` (tri cumulatif, top ``print_stats`` lignes) et journalise.
+
+    Ajoute une ligne ``PERF_PROFILE_DUMP`` dans ``perf_timing.log`` pour corrélation.
+    """
+    import pstats
+
+    stream = io.StringIO()
+    stats = pstats.Stats(profiler, stream=stream).sort_stats(pstats.SortKey.CUMULATIVE)
+    stats.print_stats(print_stats)
+    text = stream.getvalue()
+    uid = unit_id if unit_id is not None else ""
+    header = f"=== PERF_PROFILE label={label!r} unit={uid!r} ==="
+    append_perf_profile_block(header, text)
+    prof_path = perf_profile_log_file_path()
+    append_perf_timing_line(
+        f"PERF_PROFILE_DUMP label={label!r} unit={uid!r} file={prof_path!r} chars={len(text)}"
+    )
+
+
+def profile_move_pool_build(fn: F) -> F:
+    """
+    Décorateur : exécute ``movement_build_valid_destinations_pool`` sous cProfile si
+    ``perf_profile_enabled`` ; sinon coût nul (pas de profiler).
+    """
+
+    @functools.wraps(fn)
+    def wrapper(game_state: Dict[str, Any], unit_id: str) -> Any:
+        if not perf_profile_enabled(game_state):
+            return fn(game_state, unit_id)
+        import cProfile
+
+        pr = cProfile.Profile()
+        pr.enable()
+        try:
+            return fn(game_state, unit_id)
+        finally:
+            pr.disable()
+            append_cprofile_dump(pr, fn.__name__, unit_id=str(unit_id))
+
+    return wrapper  # type: ignore[return-value]

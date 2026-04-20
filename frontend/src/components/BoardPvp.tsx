@@ -48,6 +48,8 @@ import {
   type HexCoord,
 } from "../utils/hexFootprint";
 import { WeaponDropdown } from "./WeaponDropdown";
+import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
+import { pointInAnyMaskLoop } from "../utils/pointInPolygon";
 import { syncMoveDestinationPoolRefs } from "../utils/movePoolRefsSync";
 import { ensureWasmLoaded, isWasmReady, computeVisibleHexes } from "../utils/wasmLos";
 import { FEATURES } from "../constants/gameConfig";
@@ -308,8 +310,12 @@ type BoardProps = {
   chargeReferenceHex?: { col: number; row: number } | null;
   moveDestPoolRef?: React.RefObject<Set<string>>;
   footprintZoneRef?: React.RefObject<Set<string>>;
+  /** Boucles masque monde (API) — hit-test si ``footprintZoneRef`` vide. */
+  footprintMaskLoopsRef?: React.RefObject<number[][] | null>;
   /** Sélection déplacement après tir — même sync de pools que phase move (voir charge : refs avant draw). */
   pendingMoveAfterShooting?: boolean;
+  /** Requête ``activate_unit`` en cours — curseur attente sur le plateau. */
+  activationPendingUnitId?: number | null;
   /** Phase charge : ancres valides + zone violette (empreinte) pour l’icône sous le curseur. */
   chargeDestPoolRef?: React.RefObject<Set<string>>;
   chargeFootprintZoneRef?: React.RefObject<Set<string>>;
@@ -514,7 +520,9 @@ export default function Board({
   chargeReferenceHex = null,
   moveDestPoolRef,
   footprintZoneRef,
+  footprintMaskLoopsRef,
   pendingMoveAfterShooting = false,
+  activationPendingUnitId = null,
   chargeDestPoolRef,
   chargeFootprintZoneRef,
   onAdvance,
@@ -1214,11 +1222,16 @@ export default function Board({
       const rowOffset = (approxCol % 2) * HEX_HEIGHT_H / 2;
       const approxRow = Math.round((py - HEX_HEIGHT_H / 2 - MARGIN_H - rowOffset) / HEX_HEIGHT_H);
       const curKey = `${approxCol},${approxRow}`;
+      const inMaskLoops =
+        footprintMaskLoopsRef?.current && footprintMaskLoopsRef.current.length > 0
+          ? pointInAnyMaskLoop(px, py, footprintMaskLoopsRef.current)
+          : false;
       const inZone =
         phase === "charge" && mode === "chargePreview"
           ? (chargeFootprintZoneRef?.current?.has(curKey) ?? false) ||
             (chargeDestPoolRef?.current?.has(curKey) ?? false)
-          : (footprintZoneRef?.current?.has(curKey) ?? false) ||
+          : inMaskLoops ||
+            (footprintZoneRef?.current?.has(curKey) ?? false) ||
             (resolvedMoveDestPoolRef.current?.has(curKey) ?? false);
 
       if (!inZone) {
@@ -1755,6 +1768,9 @@ export default function Board({
       if (footprintZoneRef?.current && footprintZoneRef.current.size > 0) {
         footprintZoneRef.current.clear();
       }
+      if (footprintMaskLoopsRef) {
+        footprintMaskLoopsRef.current = null;
+      }
     }
 
     const keepChargePickPool =
@@ -1786,6 +1802,7 @@ export default function Board({
         selectedUnitId,
         moveDestPoolRef: resolvedMoveDestPoolRef,
         footprintZoneRef,
+        footprintMaskLoopsRef,
         pendingMoveAfterShooting,
       });
     }
@@ -2952,6 +2969,9 @@ export default function Board({
       moveDestinationAnchorsFromState,
       movePreviewFootprintSpanFromState: (gameState as { move_preview_footprint_span?: number | null })
         .move_preview_footprint_span,
+      movePreviewFootprintMaskLoops: normalizeMaskLoopsFromApi(
+        (gameState as { move_preview_footprint_mask_loops?: unknown }).move_preview_footprint_mask_loops,
+      ),
       pendingMoveAfterShooting,
       chargeDestPoolRef,
       selectedUnitBaseSize: unitForFootprintBase
@@ -4087,11 +4107,14 @@ export default function Board({
   return (
     <div>
       <div
+        aria-busy={activationPendingUnitId != null}
         style={{
           position: "relative",
           display: "inline-block",
           lineHeight: 0,
           overflow: "visible",
+          /* ``progress`` : activité en cours sans le curseur sablier système (``wait``). */
+          cursor: activationPendingUnitId != null ? "progress" : undefined,
         }}
       >
         <div

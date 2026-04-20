@@ -23,6 +23,65 @@ def test_game_state_for_json_removes_topology_arrays() -> None:
     assert state["x"] == 3
 
 
+def test_game_state_for_json_drops_footprint_zone_when_mask_loops_present() -> None:
+    engine_instance = type(
+        "E",
+        (),
+        {
+            "game_state": {
+                "phase": "move",
+                "move_preview_footprint_zone": {(1, 2), (3, 4)},
+                "move_preview_footprint_mask_loops": [[[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]],
+            },
+        },
+    )()
+    state = api_server._game_state_for_json(engine_instance)
+    assert "move_preview_footprint_zone" not in state
+    assert state["move_preview_footprint_mask_loops"] is not None
+
+
+def test_game_state_for_json_strips_internal_engine_keys() -> None:
+    engine_instance = type(
+        "E",
+        (),
+        {
+            "game_state": {
+                "phase": "move",
+                "turn": 1,
+                "units_cache_prev": {"1": {"col": 0, "row": 0}},
+                "last_compliance_data": {"x": 1},
+                "_best_weapon_cache": {"k": "v"},
+                "console_logs": ["noise"],
+            },
+        },
+    )()
+    state = api_server._game_state_for_json(engine_instance)
+    assert state["turn"] == 1
+    assert "units_cache_prev" not in state
+    assert "last_compliance_data" not in state
+    assert "_best_weapon_cache" not in state
+    assert "console_logs" not in state
+
+
+def test_game_state_for_json_drops_preview_hexes_when_move_pool_present() -> None:
+    """``preview_hexes`` est un alias du pool d’ancres — ne pas dupliquer le JSON."""
+    anchors = [[1, 2], [3, 4]]
+    engine_instance = type(
+        "E",
+        (),
+        {
+            "game_state": {
+                "phase": "move",
+                "valid_move_destinations_pool": anchors,
+                "preview_hexes": list(anchors),
+            },
+        },
+    )()
+    state = api_server._game_state_for_json(engine_instance)
+    assert state["valid_move_destinations_pool"] == anchors
+    assert "preview_hexes" not in state
+
+
 def test_game_state_for_json_excludes_move_preview_border() -> None:
     engine_instance = type(
         "E",
@@ -49,7 +108,7 @@ def test_sync_units_hp_from_cache_applies_cache_and_sets_zero_for_dead() -> None
 
 
 def test_build_and_attach_player_types_for_pve() -> None:
-    assert api_server._build_player_types(True) == {"1": "human", "2": "ai"}
+    assert api_server._build_player_types(True, "pve") == {"1": "human", "2": "ai"}
     engine_instance = type("E", (), {"game_state": {}, "current_mode_code": "pve"})()
     serializable_state = {}
     api_server._attach_player_types(serializable_state, engine_instance)

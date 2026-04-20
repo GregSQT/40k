@@ -3,6 +3,7 @@ import type React from "react";
 import * as PIXI from "pixi.js-legacy";
 import { addHexKeysToSet } from "../utils/movePoolRefsSync";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
+import { tryBuildHexUnionMaskPolygons } from "../utils/hexUnionBoundaryPolygon";
 
 interface BoardConfig {
   cols: number;
@@ -150,6 +151,11 @@ export interface DrawBoardOptions {
     rInner: number;
     rOuter: number;
   };
+  /**
+   * Contours masque move (coord. monde), envoyés par l’API — prioritaires sur
+   * ``footprintZonePoolRef`` (évite un gros JSON de milliers d’hex).
+   */
+  movePreviewFootprintMaskLoops?: number[][] | null;
 }
 
 export interface DrawBoardResult {
@@ -684,6 +690,8 @@ function renderMoveAdvanceDestPoolCircleLayer(
   HEX_HEIGHT: number,
   HEX_VERT_SPACING: number,
   MARGIN: number,
+  /** Boucles masque monde (API) — prioritaire sur ``footprintMaskHexPool``. */
+  precomputedWorldMaskLoops: number[][] | null,
 ): void {
   if (anchorPool.size === 0) {
     throw new Error(
@@ -741,31 +749,109 @@ function renderMoveAdvanceDestPoolCircleLayer(
   let maskBounds: PIXI.Rectangle;
   let drawnMaskCircles: number | undefined;
   let drawnMaskHexes: number | undefined;
+  let maskUnionKind: "server_loops" | "polygon" | "hex_chunks" | undefined;
 
   const rt = (() => {
-    if (footprintMaskHexPool && footprintMaskHexPool.size > 0) {
-      const keys = [...footprintMaskHexPool];
+    if (precomputedWorldMaskLoops && precomputedWorldMaskLoops.length > 0) {
+      maskUnionKind = "server_loops";
       let minX = Infinity;
       let minY = Infinity;
       let maxX = -Infinity;
       let maxY = -Infinity;
-      for (const key of footprintMaskHexPool) {
-        const sep = key.indexOf(",");
-        const c = Number(key.substring(0, sep));
-        const r = Number(key.substring(sep + 1));
-        const hx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const hy =
-          r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
-        for (let vi = 0; vi < 6; vi++) {
-          const ang = (vi * Math.PI) / 3;
-          const vx = hx + gridHexRadius * Math.cos(ang);
-          const vy = hy + gridHexRadius * Math.sin(ang);
+      for (const loop of precomputedWorldMaskLoops) {
+        for (let i = 0; i < loop.length; i += 2) {
+          const vx = loop[i]!;
+          const vy = loop[i + 1]!;
           if (vx < minX) minX = vx;
           if (vx > maxX) maxX = vx;
           if (vy < minY) minY = vy;
           if (vy > maxY) maxY = vy;
         }
       }
+      const w = Math.ceil(maxX - minX);
+      const h = Math.ceil(maxY - minY);
+      if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+        throw new Error(
+          `[renderMoveAdvanceDestPoolCircleLayer] bornes masque server_loops invalides ` +
+            `(w=${w}, h=${h}, spriteName=${spriteName})`,
+        );
+      }
+      if (w > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM || h > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM) {
+        throw new Error(
+          `[renderMoveAdvanceDestPoolCircleLayer] masque server_loops trop grand (w=${w}, h=${h}, ` +
+            `max=${FOOTPRINT_HIGHLIGHT_RT_MAX_DIM}, spriteName=${spriteName})`,
+        );
+      }
+      maskBounds = new PIXI.Rectangle(minX, minY, w, h);
+
+      const texture = PIXI.RenderTexture.create({
+        width: w,
+        height: h,
+        resolution: app.renderer.resolution,
+        multisample: PIXI.MSAA_QUALITY.NONE,
+        alphaMode: PIXI.ALPHA_MODES.PMA,
+      });
+      const g = new PIXI.Graphics();
+      g.name = `${spriteName}-mask-server-loops`;
+      g.beginFill(0xffffff, 1.0);
+      for (const loop of precomputedWorldMaskLoops) {
+        g.drawPolygon(loop);
+      }
+      g.endFill();
+      g.position.set(-minX, -minY);
+      app.renderer.render(g, { renderTexture: texture, clear: true });
+      g.destroy();
+      return texture;
+    }
+
+    if (footprintMaskHexPool && footprintMaskHexPool.size > 0) {
+      const keys = [...footprintMaskHexPool];
+      const layout = {
+        HEX_HORIZ_SPACING,
+        HEX_WIDTH,
+        HEX_HEIGHT,
+        HEX_VERT_SPACING,
+        MARGIN,
+        gridHexRadius,
+      };
+      const polyMask = tryBuildHexUnionMaskPolygons(footprintMaskHexPool, layout);
+
+      let minX: number;
+      let minY: number;
+      let maxX: number;
+      let maxY: number;
+
+      if (polyMask) {
+        maskUnionKind = "polygon";
+        minX = polyMask.minX;
+        minY = polyMask.minY;
+        maxX = polyMask.maxX;
+        maxY = polyMask.maxY;
+      } else {
+        maskUnionKind = "hex_chunks";
+        minX = Infinity;
+        minY = Infinity;
+        maxX = -Infinity;
+        maxY = -Infinity;
+        for (const key of footprintMaskHexPool) {
+          const sep = key.indexOf(",");
+          const c = Number(key.substring(0, sep));
+          const r = Number(key.substring(sep + 1));
+          const hx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const hy =
+            r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+          for (let vi = 0; vi < 6; vi++) {
+            const ang = (vi * Math.PI) / 3;
+            const vx = hx + gridHexRadius * Math.cos(ang);
+            const vy = hy + gridHexRadius * Math.sin(ang);
+            if (vx < minX) minX = vx;
+            if (vx > maxX) maxX = vx;
+            if (vy < minY) minY = vy;
+            if (vy > maxY) maxY = vy;
+          }
+        }
+      }
+
       const w = Math.ceil(maxX - minX);
       const h = Math.ceil(maxY - minY);
       if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
@@ -792,29 +878,42 @@ function renderMoveAdvanceDestPoolCircleLayer(
       });
       // Même schéma que le masque « disques » : un `Graphics` décalé de `(-minX,-minY)` vers la RT.
       // Un `Container` hors stage + `render(holder)` peut produire une RT vide (transforms).
-      for (let i = 0; i < keys.length; i += MOVE_ADVANCE_MASK_HEX_CHUNK) {
-        const chunk = keys.slice(i, i + MOVE_ADVANCE_MASK_HEX_CHUNK);
+      if (polyMask) {
         const g = new PIXI.Graphics();
-        g.name = `${spriteName}-mask-hex-chunk-${i}`;
+        g.name = `${spriteName}-mask-hex-union-polygon`;
         g.beginFill(0xffffff, 1.0);
-        for (const key of chunk) {
-          const sep = key.indexOf(",");
-          const c = Number(key.substring(0, sep));
-          const r = Number(key.substring(sep + 1));
-          const hx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-          const hy =
-            r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
-          const verts: number[] = [];
-          for (let vi = 0; vi < 6; vi++) {
-            const ang = (vi * Math.PI) / 3;
-            verts.push(hx + gridHexRadius * Math.cos(ang), hy + gridHexRadius * Math.sin(ang));
-          }
-          g.drawPolygon(verts);
+        for (const loop of polyMask.loops) {
+          g.drawPolygon(loop);
         }
         g.endFill();
         g.position.set(-minX, -minY);
-        app.renderer.render(g, { renderTexture: texture, clear: i === 0 });
+        app.renderer.render(g, { renderTexture: texture, clear: true });
         g.destroy();
+      } else {
+        for (let i = 0; i < keys.length; i += MOVE_ADVANCE_MASK_HEX_CHUNK) {
+          const chunk = keys.slice(i, i + MOVE_ADVANCE_MASK_HEX_CHUNK);
+          const g = new PIXI.Graphics();
+          g.name = `${spriteName}-mask-hex-chunk-${i}`;
+          g.beginFill(0xffffff, 1.0);
+          for (const key of chunk) {
+            const sep = key.indexOf(",");
+            const c = Number(key.substring(0, sep));
+            const r = Number(key.substring(sep + 1));
+            const hx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+            const hy =
+              r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+            const verts: number[] = [];
+            for (let vi = 0; vi < 6; vi++) {
+              const ang = (vi * Math.PI) / 3;
+              verts.push(hx + gridHexRadius * Math.cos(ang), hy + gridHexRadius * Math.sin(ang));
+            }
+            g.drawPolygon(verts);
+          }
+          g.endFill();
+          g.position.set(-minX, -minY);
+          app.renderer.render(g, { renderTexture: texture, clear: i === 0 });
+          g.destroy();
+        }
       }
       return texture;
     }
@@ -903,6 +1002,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
           spriteName,
           anchorPoolSize: anchorPool.size,
           maskKind: drawnMaskHexes != null ? "footprint_hex_union" : "anchor_disk_union",
+          maskUnionKind,
           drawnMaskHexes,
           drawnMaskCircles,
           footprintRadius,
@@ -998,6 +1098,7 @@ export const drawBoard = (
       losDebugVisibilityMinRatio: _losDebugVisibilityMinRatio = 0,
       chargeEngagementHalo,
       fightEngagementRing,
+      movePreviewFootprintMaskLoops = null,
     } = options || {};
 
     // Parse objective control colors - use same colors as player units
@@ -1353,6 +1454,7 @@ export const drawBoard = (
         HEX_HEIGHT,
         HEX_VERT_SPACING,
         MARGIN,
+        movePreviewFootprintMaskLoops,
       );
     } else {
       // Short-circuit uniquement si ``availableCells`` est vide côté caller : en phase déploiement

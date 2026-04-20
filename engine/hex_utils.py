@@ -958,9 +958,18 @@ def euclidean_edge_clearance_round_round(
     center_col_b: int,
     center_row_b: int,
     base_size_b: int,
+    *,
+    mover_center_xy: Optional[Tuple[float, float]] = None,
 ) -> float:
-    """Écart bord à bord entre deux socles ronds (négatif si chevauchement)."""
-    cxa, cya = _hex_center(center_col_a, center_row_a)
+    """Écart bord à bord entre deux socles ronds (négatif si chevauchement).
+
+    ``mover_center_xy`` : optionnel, centre déjà calculé pour ``(center_col_a, center_row_a)``
+    (évite des milliers de ``_hex_center`` identiques dans les boucles d’engagement).
+    """
+    if mover_center_xy is not None:
+        cxa, cya = mover_center_xy
+    else:
+        cxa, cya = _hex_center(center_col_a, center_row_a)
     cxb, cyb = _hex_center(center_col_b, center_row_b)
     d = math.hypot(cxb - cxa, cyb - cya)
     return d - round_base_radius_norm(base_size_a) - round_base_radius_norm(base_size_b)
