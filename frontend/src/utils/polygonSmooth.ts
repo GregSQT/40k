@@ -6,14 +6,19 @@
  * sur les unions d’hex (la 1ʳᵉ seule laisse encore des angles marqués).
  */
 
-/** Si le prochain sous-division dépasserait ce nombre de sommets, on s’arrête (évite explosion GPU / indices). */
-const MAX_VERTS_AFTER_ONE_CHAIKIN_STEP = 48_000;
+/** Plafond par défaut : si le prochain sous-division dépasserait ce nombre de sommets, on s’arrête. */
+export const DEFAULT_MAX_VERTS_AFTER_ONE_CHAIKIN_STEP = 48_000;
 
 /**
  * @param flat Coordonnées monde, polygone fermé (pas besoin de dupliquer le premier point en fin).
  * @param iterations Nombre de passes Chaikin (1 = léger, 2 = bien arrondi sur gros contours).
+ * @param maxVertsAfterOneChaikinStep Plafond de sommets (après une subdivision) avant d’arrêter les passes suivantes.
  */
-export function chaikinSmoothClosedPolygonFlat(flat: number[], iterations: number): number[] {
+export function chaikinSmoothClosedPolygonFlat(
+  flat: number[],
+  iterations: number,
+  maxVertsAfterOneChaikinStep: number = DEFAULT_MAX_VERTS_AFTER_ONE_CHAIKIN_STEP,
+): number[] {
   if (flat.length < 6 || iterations <= 0) {
     return flat;
   }
@@ -24,7 +29,7 @@ export function chaikinSmoothClosedPolygonFlat(flat: number[], iterations: numbe
     if (m < 3) {
       break;
     }
-    if (it > 0 && m * 2 > MAX_VERTS_AFTER_ONE_CHAIKIN_STEP) {
+    if (it > 0 && m * 2 > maxVertsAfterOneChaikinStep) {
       break;
     }
     const next: number[] = [];
@@ -72,6 +77,11 @@ export function computeBoundsFromFlatPolygonLoops(loops: number[][]): {
   return { minX, minY, maxX, maxY };
 }
 
+export type SmoothMaskLoopsForRenderOptions = {
+  /** Défaut ``DEFAULT_MAX_VERTS_AFTER_ONE_CHAIKIN_STEP`` ; augmenter pour les gros contours move/advance. */
+  maxVertsAfterOneChaikinStep?: number;
+};
+
 /**
  * Une passe Chaikin par boucle puis AABB — à utiliser pour le masque Pixi : les bornes doivent suivre
  * le contour **lissé**, sinon le rendu peut rogner les bords ; on évite aussi d’appeler Chaikin deux fois.
@@ -79,6 +89,7 @@ export function computeBoundsFromFlatPolygonLoops(loops: number[][]): {
 export function smoothMaskLoopsForRender(
   loops: number[][],
   chaikinIterations: number,
+  options?: SmoothMaskLoopsForRenderOptions,
 ): {
   smoothed: number[][];
   minX: number;
@@ -86,9 +97,10 @@ export function smoothMaskLoopsForRender(
   maxX: number;
   maxY: number;
 } {
+  const cap = options?.maxVertsAfterOneChaikinStep ?? DEFAULT_MAX_VERTS_AFTER_ONE_CHAIKIN_STEP;
   const smoothed =
     chaikinIterations > 0
-      ? loops.map((loop) => chaikinSmoothClosedPolygonFlat(loop, chaikinIterations))
+      ? loops.map((loop) => chaikinSmoothClosedPolygonFlat(loop, chaikinIterations, cap))
       : loops;
   const b = computeBoundsFromFlatPolygonLoops(smoothed);
   return { smoothed, ...b };

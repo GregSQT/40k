@@ -1,7 +1,6 @@
 // frontend/src/components/BoardDisplay.tsx
 import type React from "react";
 import * as PIXI from "pixi.js-legacy";
-import { BlurFilter } from "@pixi/filter-blur";
 import { addHexKeysToSet } from "../utils/movePoolRefsSync";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import { tryBuildHexUnionMaskPolygons } from "../utils/hexUnionBoundaryPolygon";
@@ -14,15 +13,23 @@ function asPixiUnknownArgsPointerListener(
   return fn as (...args: unknown[]) => void;
 }
 
-/** Passes Chaikin sur les masques move/advance — adoucit la géométrie (rendu uniquement). */
-const MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS = 2;
 /**
- * Flou léger sur la texture masque : le vrai « bruit » vient surtout de l’aliasage pixels (masque binaire
- * en RT), pas des angles du polygone — Chaikin seul change peu à l’écran.
+ * Passes Chaikin sur les masques move/advance (rendu uniquement).
+ * Plus de passes + plafond de sommets relevé (voir ``MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS``) =
+ * bord **plus continu**, moins « dentelé » par les micro-segments du contour hex.
  */
-const MOVE_ADVANCE_MASK_SPRITE_BLUR_STRENGTH = 2;
-/** Qualité flou masque : 1 = moins cher GPU, suffisant avec le léger strength. */
-const MOVE_ADVANCE_MASK_SPRITE_BLUR_QUALITY = 1;
+const MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS = 5;
+/** Autorise des passes Chaikin supplémentaires sur les très gros contours (défaut global 48k). */
+const MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS = 120_000;
+/**
+ * Suréchantillonnage de la RT masque : plus de pixels sur le contour = moins d’escalier, **sans** flou.
+ * (Pas de BlurFilter : contour net ; l’anti-alias vient du rendu haute résolution + Chaikin sur le poly.)
+ */
+const MOVE_MASK_RT_RESOLUTION_SCALE = 3;
+
+const moveAdvanceMaskSmoothOptions = {
+  maxVertsAfterOneChaikinStep: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
+} as const;
 
 /** Évite de re-rendre une RT masque identique (même géométrie + résolution) — ex. re-clic unité. */
 let moveAdvanceMaskServerLoopsCache: {
@@ -796,12 +803,15 @@ function renderMoveAdvanceDestPoolCircleLayer(
   let drawnMaskHexes: number | undefined;
   let maskUnionKind: "server_loops" | "polygon" | "hex_chunks" | undefined;
 
+  const maskRtResolution = app.renderer.resolution * MOVE_MASK_RT_RESOLUTION_SCALE;
+
   const rt = (() => {
     if (precomputedWorldMaskLoops && precomputedWorldMaskLoops.length > 0) {
       maskUnionKind = "server_loops";
       const prep = smoothMaskLoopsForRender(
         precomputedWorldMaskLoops,
         MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
+        moveAdvanceMaskSmoothOptions,
       );
       const { minX, minY, maxX, maxY } = prep;
       const w = Math.ceil(maxX - minX);
@@ -820,7 +830,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
       }
       maskBounds = new PIXI.Rectangle(minX, minY, w, h);
 
-      const maskCacheKey = `${spriteName}|${app.renderer.resolution}|${MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS}|${w}|${h}|${fingerprintSmoothedMaskLoops(prep.smoothed)}`;
+      const maskCacheKey = `${spriteName}|r${maskRtResolution}|${MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS}|${w}|${h}|${fingerprintSmoothedMaskLoops(prep.smoothed)}`;
       if (
         moveAdvanceMaskServerLoopsCache &&
         moveAdvanceMaskServerLoopsCache.key === maskCacheKey
@@ -832,7 +842,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
       const texture = PIXI.RenderTexture.create({
         width: w,
         height: h,
-        resolution: app.renderer.resolution,
+        resolution: maskRtResolution,
         multisample: PIXI.MSAA_QUALITY.NONE,
         alphaMode: PIXI.ALPHA_MODES.PMA,
       });
@@ -878,6 +888,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
         const hexPrep = smoothMaskLoopsForRender(
           polyMask.loops,
           MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
+          moveAdvanceMaskSmoothOptions,
         );
         hexUnionSmoothedDraw = hexPrep.smoothed;
         maskUnionKind = "polygon";
@@ -930,7 +941,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
       const texture = PIXI.RenderTexture.create({
         width: w,
         height: h,
-        resolution: app.renderer.resolution,
+        resolution: maskRtResolution,
         multisample: PIXI.MSAA_QUALITY.NONE,
         alphaMode: PIXI.ALPHA_MODES.PMA,
       });
@@ -1020,7 +1031,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
     const texture = PIXI.RenderTexture.create({
       width: w,
       height: h,
-      resolution: app.renderer.resolution,
+      resolution: maskRtResolution,
       multisample: PIXI.MSAA_QUALITY.NONE,
       alphaMode: PIXI.ALPHA_MODES.PMA,
     });
@@ -1037,14 +1048,25 @@ function renderMoveAdvanceDestPoolCircleLayer(
   maskSprite.name = `${spriteName}-mask-sprite`;
   maskSprite.position.set(maskBounds.x, maskBounds.y);
   maskSprite.roundPixels = false;
-  const maskBlur = new BlurFilter(
-    MOVE_ADVANCE_MASK_SPRITE_BLUR_STRENGTH,
-    MOVE_ADVANCE_MASK_SPRITE_BLUR_QUALITY,
-    undefined,
-    5,
-  );
-  maskBlur.repeatEdgePixels = true;
-  maskSprite.filters = [maskBlur];
+  /** Évite le voisinage « crénelé » (NEAREST) quand la RT masque est suréchantillonnée. */
+  maskSprite.texture.baseTexture.scaleMode = PIXI.SCALE_MODES.LINEAR;
+
+  if (typeof window !== "undefined") {
+    try {
+      if (window.localStorage.getItem("debugMovePreviewRender") === "1") {
+        console.info("[renderMoveAdvanceDestPoolCircleLayer] maskSmooth", {
+          chaikinIterations: MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
+          chaikinMaxVerts: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
+          maskRtResolutionScale: MOVE_MASK_RT_RESOLUTION_SCALE,
+          maskRtResolution,
+          maskUnionKind,
+          spriteName,
+        });
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   // Grand disque cible. Alpha 0.28 (cohérence avec le halo de charge).
   const diskGfx = new PIXI.Graphics();
@@ -1067,7 +1089,11 @@ function renderMoveAdvanceDestPoolCircleLayer(
         console.info("[renderMoveAdvanceDestPoolCircleLayer] rendered", {
           spriteName,
           anchorPoolSize: anchorPool.size,
-          maskKind: drawnMaskHexes != null ? "footprint_hex_union" : "anchor_disk_union",
+          /** Réel chemin masque RT : sinon le libellé « anchor_disk_union » était affiché même avec ``server_loops``. */
+          maskKind:
+            drawnMaskHexes != null
+              ? "footprint_hex_union"
+              : (maskUnionKind ?? "anchor_disk_union"),
           maskUnionKind,
           drawnMaskHexes,
           drawnMaskCircles,
