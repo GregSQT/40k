@@ -107,6 +107,44 @@ def test_game_state_for_json_drops_preview_hexes_when_move_pool_present() -> Non
     assert "preview_hexes" not in state
 
 
+def test_game_state_for_json_excludes_config_blob() -> None:
+    engine_instance = type(
+        "E",
+        (),
+        {
+            "game_state": {
+                "phase": "move",
+                "config": {"game_rules": {"max_turns": 5}, "board": {"x": 1}},
+                "turn": 1,
+            },
+        },
+    )()
+    state = api_server._game_state_for_json(engine_instance)
+    assert state["turn"] == 1
+    assert "config" not in state
+
+
+def test_game_state_for_json_excludes_weapon_damage_table_and_per_player_adjacent_caches() -> None:
+    engine_instance = type(
+        "E",
+        (),
+        {
+            "game_state": {
+                "phase": "move",
+                "weapon_damage_table": {"A": {"B": {"C": 1}}},
+                "enemy_adjacent_hexes_player_1": {(1, 2), (3, 4)},
+                "enemy_adjacent_counts_player_2": {"x": 3},
+                "turn": 1,
+            },
+        },
+    )()
+    state = api_server._game_state_for_json(engine_instance)
+    assert state["turn"] == 1
+    assert "weapon_damage_table" not in state
+    assert "enemy_adjacent_hexes_player_1" not in state
+    assert "enemy_adjacent_counts_player_2" not in state
+
+
 def test_game_state_for_json_excludes_move_preview_border() -> None:
     engine_instance = type(
         "E",

@@ -103,18 +103,128 @@ def _orjson_default(obj: Any) -> Any:
 
 def api_json_response(payload: Dict[str, Any]) -> Response:
     """Sérialise la charge en JSON. orjson en priorité ; repli ``make_json_serializable`` si type exotique dans l’état."""
+    resp, _ = api_json_response_with_size(payload)
+    return resp
+
+
+def _api_json_body_length(obj: Any) -> int:
+    """Longueur en octets du corps JSON produit par la même chaîne que :func:`api_json_response_with_size`.
+
+    Inclut le repli ``jsonify`` si orjson échoue même après ``make_json_serializable`` (cas où
+    ``_encoded_bytes_size`` renvoyait ``-1`` alors que ``payload_bytes`` était correct).
+    """
+    if _orjson is not None:
+        try:
+            body = _orjson.dumps(obj, default=_orjson_default, option=_ORJSON_OPTS)
+            return len(body)
+        except (TypeError, ValueError):
+            safe = make_json_serializable(obj)
+            try:
+                body = _orjson.dumps(safe, default=_orjson_default, option=_ORJSON_OPTS)
+                return len(body)
+            except (TypeError, ValueError):
+                resp = jsonify(safe)
+                raw = resp.get_data(as_text=False)
+                if raw:
+                    return len(raw)
+                return int(resp.calculate_content_length() or 0)
+    resp = jsonify(make_json_serializable(obj))
+    raw = resp.get_data(as_text=False)
+    if raw:
+        return len(raw)
+    return int(resp.calculate_content_length() or 0)
+
+
+def api_json_response_with_size(payload: Dict[str, Any]) -> Tuple[Response, int]:
+    """Comme :func:`api_json_response`, mais renvoie aussi la taille en octets du corps encodé.
+
+    Utilisé par les endpoints instrumentés ``perf_timing`` pour logger ``payload_bytes``
+    sans ré-encoder ni copier le buffer (diagnostic de ``response_encode_s``).
+    """
     if _orjson is not None:
         try:
             body = _orjson.dumps(payload, default=_orjson_default, option=_ORJSON_OPTS)
-            return Response(body, mimetype="application/json; charset=utf-8")
+            return Response(body, mimetype="application/json; charset=utf-8"), len(body)
         except (TypeError, ValueError):
             safe = make_json_serializable(payload)
             try:
                 body = _orjson.dumps(safe, default=_orjson_default, option=_ORJSON_OPTS)
-                return Response(body, mimetype="application/json; charset=utf-8")
+                return Response(body, mimetype="application/json; charset=utf-8"), len(body)
             except (TypeError, ValueError):
-                return jsonify(safe)
-    return jsonify(make_json_serializable(payload))
+                resp = jsonify(safe)
+                raw = resp.get_data(as_text=False)
+                n = len(raw) if raw else int(resp.calculate_content_length() or 0)
+                return resp, n
+    resp = jsonify(make_json_serializable(payload))
+    raw = resp.get_data(as_text=False)
+    n = len(raw) if raw else int(resp.calculate_content_length() or 0)
+    return resp, n
+
+
+def _payload_breakdown_enabled() -> bool:
+    """Vrai si la variable d'environnement ``W40K_PERF_PAYLOAD_BREAKDOWN`` est positionnée.
+
+    Diagnostic ponctuel : aucune activation par défaut, aucun effet si éteint.
+    """
+    raw = os.environ.get("W40K_PERF_PAYLOAD_BREAKDOWN", "")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _encoded_bytes_size(obj: Any) -> int:
+    """Taille en octets du corps JSON — même chaîne que :func:`_api_json_body_length` / la réponse HTTP.
+
+    Inclut le repli Flask ``jsonify`` lorsque orjson échoue (sinon le breakdown affichait ``-1`` alors que
+    ``payload_bytes`` était correct). Utilisé uniquement pour le diagnostic perf.
+    """
+    try:
+        return _api_json_body_length(obj)
+    except Exception:
+        return -1
+
+
+_PAYLOAD_BREAKDOWN_MIN_BYTES = 10_000
+
+
+def _log_payload_breakdown(payload: Dict[str, Any], action_name: Optional[str]) -> None:
+    """Logue une ligne ``API_PAYLOAD_BREAKDOWN`` listant les clés ≥ 10 Ko.
+
+    Activation via ``W40K_PERF_PAYLOAD_BREAKDOWN=1``. Ne modifie aucun état jeu.
+
+    Inclut ``orjson_full_payload`` et ``orjson_game_state`` (tailles alignées sur ``payload_bytes``,
+    y compris repli ``jsonify``) ; la somme ``sum_top_level_values`` reste un proxy (sous-arbres
+    partagés, etc.).
+    """
+    try:
+        from engine.perf_timing import append_perf_timing_line
+        sizes: list[tuple[str, int]] = []
+        for k, v in payload.items():
+            if k == "game_state":
+                continue  # détaillé ci-dessous
+            sizes.append((f"top.{k}", _encoded_bytes_size(v)))
+        gs = payload.get("game_state")
+        full_pl = _encoded_bytes_size(payload) if isinstance(payload, dict) else -1
+        full_gs = _encoded_bytes_size(gs) if isinstance(gs, dict) else -1
+        if isinstance(gs, dict):
+            for k, v in gs.items():
+                sizes.append((f"game_state.{k}", _encoded_bytes_size(v)))
+        sizes.sort(key=lambda kv: kv[1], reverse=True)
+        total = sum(n for _, n in sizes if n > 0)
+        n_neg = sum(1 for _, n in sizes if n < 0)
+        big = [(k, n) for k, n in sizes if n >= _PAYLOAD_BREAKDOWN_MIN_BYTES]
+        other = total - sum(n for _, n in big)
+        parts = " ".join(f"{k}={n}" for k, n in big)
+        append_perf_timing_line(
+            f"API_PAYLOAD_BREAKDOWN action={action_name!r} orjson_full_payload={full_pl} "
+            f"orjson_game_state={full_gs} sum_top_level_values={total} n_negative_sizes={n_neg} "
+            f"other_below_{_PAYLOAD_BREAKDOWN_MIN_BYTES}b={other} count_big={len(big)} count_all={len(sizes)} "
+            f"big={{{parts}}}"
+        )
+    except Exception as exc:
+        try:
+            from engine.perf_timing import append_perf_timing_line
+            append_perf_timing_line(f"API_PAYLOAD_BREAKDOWN error={type(exc).__name__}:{exc}")
+        except Exception:
+            pass
 
 
 def make_json_serializable(obj):
@@ -165,6 +275,13 @@ def make_json_serializable(obj):
 _GAME_STATE_EXCLUDE_KEYS = frozenset({
     "los_topology", "pathfinding_topology", "wall_edge_topology",
     "wall_hexes",
+    # Table statique moteur (config/weapon_damage_table.json) — le client web n’en a pas besoin ;
+    # le moteur garde ``game_state["weapon_damage_table"]`` en mémoire pour les règles.
+    "weapon_damage_table",
+    # Copie complète ``game_config.json`` + board — ~1 Mo JSON ; le client charge déjà la config via
+    # ``useGameConfig`` (``/config/game_config.json``, ``/api/config/board``). ``gameState.config`` n’est
+    # qu’un repli optionnel (ex. ``engagement_zone`` dans BoardPvp) derrière ``gameConfig``.
+    "config",
     "enemy_adjacent_hexes",
     "occupied_positions",
     "los_cache",
@@ -204,6 +321,20 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
 _UNITS_CACHE_FRONTEND_KEYS = ("col", "row", "HP_CUR", "player")
 
 
+def _exclude_game_state_key_for_api_json(key: str) -> bool:
+    """Clés dérivées / caches par joueur — volumineuses, non consommées par le client web.
+
+    Le moteur les conserve dans ``engine.game_state`` ; elles ne sont pas nécessaires au rendu
+    plateau (voir absence de références dans ``frontend/src``). Préfixes pour couvrir tout
+    ``enemy_adjacent_*_player_<id>`` (tests inclus, ex. joueur 0).
+    """
+    if key.startswith("enemy_adjacent_hexes_player_"):
+        return True
+    if key.startswith("enemy_adjacent_counts_player_"):
+        return True
+    return False
+
+
 def _game_state_for_json(engine_instance) -> Dict[str, Any]:
     """Return game_state dict with internal/heavy fields excluded.
 
@@ -216,11 +347,14 @@ def _game_state_for_json(engine_instance) -> Dict[str, Any]:
     Si ``valid_move_destinations_pool`` est non vide, supprime ``preview_hexes`` (alias du même pool).
     Trims units_cache to (col, row, HP_CUR, player).
     Exclut aussi caches internes, snapshots ``units_cache_prev``, ``last_compliance_data``,
-    ``console_logs``, etc. (voir ``_GAME_STATE_EXCLUDE_KEYS``).
+    ``console_logs``, la table statique ``weapon_damage_table`` (moteur uniquement), la config
+    complète ``config`` (déjà chargée côté client), et les caches d’adjacence par joueur
+    ``enemy_adjacent_hexes_player_*`` / ``enemy_adjacent_counts_player_*``
+    (voir ``_GAME_STATE_EXCLUDE_KEYS`` et ``_exclude_game_state_key_for_api_json``).
     """
     gs = {
         k: v for k, v in engine_instance.game_state.items()
-        if k not in _GAME_STATE_EXCLUDE_KEYS
+        if k not in _GAME_STATE_EXCLUDE_KEYS and not _exclude_game_state_key_for_api_json(k)
     }
     raw_cache = engine_instance.game_state.get("units_cache")
     if raw_cache is not None:
@@ -1719,7 +1853,7 @@ def execute_action():
         serializable_state["action_logs"] = []
 
         _j0 = time.perf_counter() if _api_perf else None
-        resp = api_json_response({
+        _response_payload = {
             "success": success,
             "result": result,
             "game_state": serializable_state,
@@ -1729,9 +1863,19 @@ def execute_action():
                 if endless_mode_active
                 else None
             ),
-            "message": "Action executed successfully" if success else "Action failed"
-        })
+            "message": "Action executed successfully" if success else "Action failed",
+        }
+        if _api_perf:
+            resp, _payload_bytes = api_json_response_with_size(_response_payload)
+        else:
+            _payload_bytes = None
+            resp = api_json_response(_response_payload)
         _j1 = time.perf_counter() if _api_perf else None
+        if _payload_breakdown_enabled():
+            _log_payload_breakdown(
+                _response_payload,
+                action.get("action") if isinstance(action, dict) else None,
+            )
         if _api_perf and _api_t0 is not None and _api_t1 is not None and _ser_t0 is not None and _ser_t1 is not None and _j0 is not None and _j1 is not None:
             from engine.perf_timing import append_perf_timing_line
 
@@ -1743,7 +1887,8 @@ def execute_action():
             append_perf_timing_line(
                 f"API_POST_ACTION episode={ep} turn={trn} phase={ph} action={act!r} "
                 f"engine_s={_api_t1 - _api_t0:.6f} serialize_game_state_s={_ser_t1 - _ser_t0:.6f} "
-                f"response_encode_s={_j1 - _j0:.6f} total_wall_s={_j1 - _api_t0:.6f}"
+                f"response_encode_s={_j1 - _j0:.6f} total_wall_s={_j1 - _api_t0:.6f} "
+                f"payload_bytes={_payload_bytes if _payload_bytes is not None else -1}"
             )
 
         return resp

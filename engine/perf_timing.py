@@ -32,7 +32,13 @@ Lignes typiques (référence) :
   ``end_phase``).
 - ``API_POST_ACTION`` — ``engine_s`` (``execute_semantic_action`` / handlers), ``serialize_game_state_s``
   (``make_json_serializable`` + sync HP + types joueurs), ``response_encode_s`` (``api_json_response`` :
-  encodage JSON du corps, typiquement ``orjson.dumps`` avec repli), ``total_wall_s`` depuis le début du traitement POST.
+  encodage JSON du corps, typiquement ``orjson.dumps`` avec repli), ``total_wall_s`` depuis le début du
+  traitement POST, et ``payload_bytes`` (taille en octets du corps JSON renvoyé au client ; ``-1`` si
+  la mesure n’est pas disponible). Ce dernier champ permet de corréler ``response_encode_s`` avec la
+  taille effective de la réponse (diagnostic payload vs. coût d’encodage).
+- ``API_PAYLOAD_BREAKDOWN`` — optionnel si ``W40K_PERF_PAYLOAD_BREAKDOWN=1`` : ``orjson_full_payload`` /
+  ``orjson_game_state`` (même encodage que le corps HTTP, pas orjson pur si repli Flask), somme des
+  tailles par clé de premier niveau, et clés ≥ 10 Ko (voir ``services.api_server._log_payload_breakdown``).
 - ``SHOOT_ACTIVATION_START`` — une activation tir (``activate_unit`` → ``shooting_unit_activation_start``) :
   ``los_cache_s`` (``build_unit_los_cache``) ;
   ``activation_prep_s`` (réinitialisations entre fin LoS et précheck ennemi : adjacence, PISTOL, reset ``shot``, etc.) ;
