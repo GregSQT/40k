@@ -22,6 +22,24 @@ def test_make_json_serializable_numpy_array_and_scalar() -> None:
     assert api_server.make_json_serializable(np.float64(3.5)) == 3.5
 
 
+def test_api_json_response_orjson_encodes_set_and_numpy_without_pre_walk() -> None:
+    if getattr(api_server, "_orjson", None) is None:
+        pytest.skip("orjson not available")
+    orjson = pytest.importorskip("orjson")
+    np = pytest.importorskip("numpy")
+    payload = {
+        "ok": True,
+        "tags": {1, 2, 3},
+        "arr": np.array([[1, 2], [3, 4]], dtype=np.int64),
+    }
+    resp = api_server.api_json_response(payload)
+    assert resp.mimetype.startswith("application/json")
+    out = orjson.loads(resp.get_data())
+    assert out["ok"] is True
+    assert set(out["tags"]) == {1, 2, 3}
+    assert out["arr"] == [[1, 2], [3, 4]]
+
+
 def test_game_state_for_json_removes_topology_arrays() -> None:
     engine_instance = type("E", (), {"game_state": {"los_topology": 1, "pathfinding_topology": 2, "x": 3}})()
     state = api_server._game_state_for_json(engine_instance)

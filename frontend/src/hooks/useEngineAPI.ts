@@ -565,11 +565,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           body: JSON.stringify(requestPayload),
         });
 
+        const data = (await response.json()) as {
+          success?: boolean;
+          error?: string;
+          game_state?: APIGameState;
+          endless_duty_state?: unknown;
+        };
         if (!response.ok) {
-          throw new Error(`Failed to start game: ${response.status}`);
+          throw new Error(
+            data.error ?? `Failed to start game: HTTP ${response.status}`,
+          );
         }
-
-        const data = await response.json();
         if (data.success) {
           const expectedPlayer2Type: "human" | "ai" =
             requestedModeCode === "pve" ||

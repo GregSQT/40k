@@ -959,10 +959,12 @@ def _build_multi_hex_vectorized(
     def _dilate_by_kernel(src: "np.ndarray", kernel: "np.ndarray") -> "np.ndarray":
         """``out[c, r] = any_{(dc, dr) ∈ kernel} src[c+dc, r+dr]``.
 
-        Utilisé pour : « ancre (c, r) est bad car une cellule de son empreinte (c+dc, r+dr)
-        appartient à l’ensemble source (obstacles, enemy_adj…) ». Préimage directe.
+        Boucle slices uniquement : ``scipy.ndimage.binary_dilation`` a provoqué des segfaults
+        sur certains environnements (extensions natives / ``origin``), donc pas de chemin SciPy ici.
         """
         out = np.zeros_like(src)
+        if kernel.size == 0:
+            return out
         for dc, dr in kernel:
             c_src_lo = max(0, int(dc))
             c_src_hi = board_cols - max(0, -int(dc))

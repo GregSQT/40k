@@ -14,7 +14,9 @@ from pathlib import Path
 import hashlib
 import secrets
 import copy
-from typing import Dict, Any, Optional, Tuple
+from datetime import date, datetime
+from typing import Any, Dict, Optional, Tuple
+from uuid import UUID
 from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 
@@ -51,15 +53,68 @@ try:
 except ImportError:
     _orjson = None
 
+_ORJSON_OPTS = 0
+if _orjson is not None:
+    _ORJSON_OPTS = getattr(_orjson, "OPT_SERIALIZE_NUMPY", 0)
+
+
+def _orjson_default(obj: Any) -> Any:
+    """Types non natifs orjson — évite le pré-parcours récursif ``make_json_serializable`` sur tout l’état."""
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, UUID):
+        return str(obj)
+    if isinstance(obj, (bytes, bytearray)):
+        return obj.decode("utf-8", errors="replace")
+    try:
+        import numpy as np
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, np.generic):
+            return obj.item()
+    except ImportError:
+        pass
+    if isinstance(obj, (set, frozenset)):
+        return list(obj)
+    try:
+        from pathlib import Path
+        if isinstance(obj, Path):
+            return str(obj)
+    except ImportError:
+        pass
+    try:
+        from collections import deque
+        if isinstance(obj, deque):
+            return list(obj)
+    except ImportError:
+        pass
+    try:
+        from engine.weapons.rules import ParsedWeaponRule
+        if isinstance(obj, ParsedWeaponRule):
+            if obj.parameter is not None:
+                return f"{obj.rule}:{obj.parameter}"
+            return obj.rule
+    except ImportError:
+        pass
+    if hasattr(obj, "__dict__") and not isinstance(obj, type):
+        return obj.__dict__
+    raise TypeError(f"Object of type {type(obj).__name__!r} is not JSON serializable")
+
 
 def api_json_response(payload: Dict[str, Any]) -> Response:
-    """Sérialise la charge en JSON. Utilise orjson si disponible (souvent plus rapide que flask.jsonify)."""
+    """Sérialise la charge en JSON. orjson en priorité ; repli ``make_json_serializable`` si type exotique dans l’état."""
     if _orjson is not None:
-        return Response(
-            _orjson.dumps(payload),
-            mimetype="application/json; charset=utf-8",
-        )
-    return jsonify(payload)
+        try:
+            body = _orjson.dumps(payload, default=_orjson_default, option=_ORJSON_OPTS)
+            return Response(body, mimetype="application/json; charset=utf-8")
+        except (TypeError, ValueError):
+            safe = make_json_serializable(payload)
+            try:
+                body = _orjson.dumps(safe, default=_orjson_default, option=_ORJSON_OPTS)
+                return Response(body, mimetype="application/json; charset=utf-8")
+            except (TypeError, ValueError):
+                return jsonify(safe)
+    return jsonify(make_json_serializable(payload))
 
 
 def make_json_serializable(obj):
@@ -1492,7 +1547,7 @@ def start_game():
             movement_handlers.movement_phase_start(gs)
 
         # Convert game state to JSON-serializable format
-        serializable_state = make_json_serializable(_game_state_for_json(engine))
+        serializable_state = _game_state_for_json(engine)
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
         _attach_player_types(serializable_state, engine)
 
@@ -1514,10 +1569,10 @@ def start_game():
         mode_label = mode_labels.get(requested_mode)
         if mode_label is None:
             raise ValueError(f"Unsupported requested_mode '{requested_mode}'")
-        return jsonify({
+        return api_json_response({
             "success": True,
             "game_state": serializable_state,
-            "message": f"Game started successfully ({mode_label} mode)"
+            "message": f"Game started successfully ({mode_label} mode)",
         })
     
     except Exception as e:
@@ -1567,7 +1622,7 @@ def execute_action():
             inter_wave_pending = bool(require_key(ed_state, "inter_wave_pending"))
             action_name = action.get("action")
             if action_name == "endless_duty_status":
-                serializable_state = make_json_serializable(_game_state_for_json(engine))
+                serializable_state = _game_state_for_json(engine)
                 _sync_units_hp_from_cache(serializable_state, engine.game_state)
                 _attach_player_types(serializable_state, engine)
                 return api_json_response(
@@ -1575,7 +1630,7 @@ def execute_action():
                         "success": True,
                         "result": {"action": "endless_duty_status"},
                         "game_state": serializable_state,
-                        "endless_duty_state": make_json_serializable(require_key(engine.game_state, "endless_duty_state")),
+                        "endless_duty_state": require_key(engine.game_state, "endless_duty_state"),
                     }
                 )
             if action_name == "endless_duty_commit":
@@ -1642,7 +1697,7 @@ def execute_action():
 
         # Convert game state to JSON-serializable format
         _ser_t0 = time.perf_counter() if _api_perf else None
-        serializable_state = make_json_serializable(_game_state_for_json(engine))
+        serializable_state = _game_state_for_json(engine)
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
         _attach_player_types(serializable_state, engine)
         _ser_t1 = time.perf_counter() if _api_perf else None
@@ -1670,7 +1725,7 @@ def execute_action():
             "game_state": serializable_state,
             "action_logs": action_logs,
             "endless_duty_state": (
-                make_json_serializable(require_key(engine.game_state, "endless_duty_state"))
+                require_key(engine.game_state, "endless_duty_state")
                 if endless_mode_active
                 else None
             ),
@@ -1688,7 +1743,7 @@ def execute_action():
             append_perf_timing_line(
                 f"API_POST_ACTION episode={ep} turn={trn} phase={ph} action={act!r} "
                 f"engine_s={_api_t1 - _api_t0:.6f} serialize_game_state_s={_ser_t1 - _ser_t0:.6f} "
-                f"jsonify_response_s={_j1 - _j0:.6f} total_wall_s={_j1 - _api_t0:.6f}"
+                f"response_encode_s={_j1 - _j0:.6f} total_wall_s={_j1 - _api_t0:.6f}"
             )
 
         return resp
@@ -2152,13 +2207,13 @@ def get_game_state():
         return jsonify({"success": False, "error": "Engine not initialized"}), 400
     
     # Convert game state to JSON-serializable format
-    serializable_state = make_json_serializable(_game_state_for_json(engine))
+    serializable_state = _game_state_for_json(engine)
     _sync_units_hp_from_cache(serializable_state, engine.game_state)
     _attach_player_types(serializable_state, engine)
     
-    return jsonify({
+    return api_json_response({
         "success": True,
-        "game_state": serializable_state
+        "game_state": serializable_state,
     })
 
 @app.route('/api/game/reset', methods=['POST'])
@@ -2171,14 +2226,14 @@ def reset_game():
     
     try:
         obs, info = engine.reset()
-        serializable_state = make_json_serializable(_game_state_for_json(engine))
+        serializable_state = _game_state_for_json(engine)
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
         _attach_player_types(serializable_state, engine)
 
-        return jsonify({
+        return api_json_response({
             "success": True,
             "game_state": serializable_state,
-            "message": "Game reset successfully"
+            "message": "Game reset successfully",
         })
     
     except Exception as e:
@@ -2399,16 +2454,16 @@ def execute_ai_turn():
         if endless_mode_active:
             ed_state = require_key(engine.game_state, "endless_duty_state")
             if bool(require_key(ed_state, "inter_wave_pending")):
-                serializable_state = make_json_serializable(_game_state_for_json(engine))
+                serializable_state = _game_state_for_json(engine)
                 _sync_units_hp_from_cache(serializable_state, engine.game_state)
                 _attach_player_types(serializable_state, engine)
-                return jsonify(
+                return api_json_response(
                     {
                         "success": True,
                         "result": {"action": "ai_turn_skipped", "reason": "inter_wave_pending"},
                         "game_state": serializable_state,
                         "action_logs": [],
-                        "endless_duty_state": make_json_serializable(ed_state),
+                        "endless_duty_state": ed_state,
                     }
                 )
 
@@ -2434,13 +2489,13 @@ def execute_ai_turn():
                 return jsonify({"success": False, "error": result}), 400
             if error_type == "not_ai_player_turn":
                 print(f"ℹ️ [API] execute_ai_turn skipped: error_type={error_type}, result={result}")
-                serializable_state = make_json_serializable(_game_state_for_json(engine))
+                serializable_state = _game_state_for_json(engine)
                 _sync_units_hp_from_cache(serializable_state, engine.game_state)
                 _attach_player_types(serializable_state, engine)
                 action_logs = serializable_state.get("action_logs", [])
                 engine.game_state["action_logs"] = []
                 serializable_state["action_logs"] = []
-                return jsonify({
+                return api_json_response({
                     "success": True,
                     "result": {
                         "action": "ai_turn_skipped",
@@ -2450,20 +2505,20 @@ def execute_ai_turn():
                     "game_state": serializable_state,
                     "action_logs": action_logs,
                     "endless_duty_state": (
-                        make_json_serializable(require_key(engine.game_state, "endless_duty_state"))
+                        require_key(engine.game_state, "endless_duty_state")
                         if endless_mode_active
                         else None
                     ),
                 })
             if error_type == "game_over":
                 print(f"ℹ️ [API] execute_ai_turn skipped: error_type={error_type}, result={result}")
-                serializable_state = make_json_serializable(_game_state_for_json(engine))
+                serializable_state = _game_state_for_json(engine)
                 _sync_units_hp_from_cache(serializable_state, engine.game_state)
                 _attach_player_types(serializable_state, engine)
                 action_logs = serializable_state.get("action_logs", [])
                 engine.game_state["action_logs"] = []
                 serializable_state["action_logs"] = []
-                return jsonify({
+                return api_json_response({
                     "success": True,
                     "result": {
                         "action": "ai_turn_skipped",
@@ -2473,7 +2528,7 @@ def execute_ai_turn():
                     "game_state": serializable_state,
                     "action_logs": action_logs,
                     "endless_duty_state": (
-                        make_json_serializable(require_key(engine.game_state, "endless_duty_state"))
+                        require_key(engine.game_state, "endless_duty_state")
                         if endless_mode_active
                         else None
                     ),
@@ -2488,7 +2543,7 @@ def execute_ai_turn():
                 result["endless_duty"] = ed_post
 
         # Convert game state to JSON-serializable format
-        serializable_state = make_json_serializable(_game_state_for_json(engine))
+        serializable_state = _game_state_for_json(engine)
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
         _attach_player_types(serializable_state, engine)
         
@@ -2499,13 +2554,13 @@ def execute_ai_turn():
         engine.game_state["action_logs"] = []
         serializable_state["action_logs"] = []
         
-        return jsonify({
+        return api_json_response({
             "success": True,
             "result": result,
             "game_state": serializable_state,
             "action_logs": action_logs,
             "endless_duty_state": (
-                make_json_serializable(require_key(engine.game_state, "endless_duty_state"))
+                require_key(engine.game_state, "endless_duty_state")
                 if endless_mode_active
                 else None
             ),

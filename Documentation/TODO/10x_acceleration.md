@@ -11,7 +11,7 @@
 |-----|------------------|-------------------------|
 | **1. Noyau hors Python** | Boucle BFS + tests d’empreinte (`movement_build_valid_destinations_pool`) | Gain **variable** : fort si toute la boucle chaude est native avec structures compactes ; modéré si le binding repasse souvent en Python. |
 | **2. Compression HTTP** | Octets sur le fil (gzip / Brotli) | Gain **fort** sur transfert réseau réel ; **faible ou nul** en localhost ; **ne réduit pas** le CPU `serialize` / `jsonify` mesuré côté serveur. |
-| **3. Réponses HTTP allégées** | `make_json_serializable` + taille du JSON | Gain **direct** sur `serialize_game_state_s` et `jsonify_response_s` si moins de données à produire ; **effort d’API** (contrat frontend). |
+| **3. Réponses HTTP allégées** | `make_json_serializable` + taille du JSON | Gain **direct** sur `serialize_game_state_s` et `response_encode_s` si moins de données à produire ; **effort d’API** (contrat frontend). |
 
 Les trois axes **ne se substituent pas** : natif = moteur ; gzip = fil ; payload = CPU sérialisation + transfert.
 

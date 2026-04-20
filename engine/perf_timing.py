@@ -31,8 +31,8 @@ Lignes typiques (référence) :
   client avant routage ; à distinguer des ``EXECUTE_SEMANTIC_TOTAL`` internes, ex. ``skip`` lors d’un
   ``end_phase``).
 - ``API_POST_ACTION`` — ``engine_s`` (``execute_semantic_action`` / handlers), ``serialize_game_state_s``
-  (``make_json_serializable`` + sync HP + types joueurs), ``jsonify_response_s`` (construction de la
-  réponse Flask + sérialisation du corps), ``total_wall_s`` depuis le début du traitement POST.
+  (``make_json_serializable`` + sync HP + types joueurs), ``response_encode_s`` (``api_json_response`` :
+  encodage JSON du corps, typiquement ``orjson.dumps`` avec repli), ``total_wall_s`` depuis le début du traitement POST.
 - ``SHOOT_ACTIVATION_START`` — une activation tir (``activate_unit`` → ``shooting_unit_activation_start``) :
   ``los_cache_s`` (``build_unit_los_cache``) ;
   ``activation_prep_s`` (réinitialisations entre fin LoS et précheck ennemi : adjacence, PISTOL, reset ``shot``, etc.) ;

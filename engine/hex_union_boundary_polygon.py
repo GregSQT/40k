@@ -107,9 +107,6 @@ def compute_move_preview_mask_loops_world(
     qfx1 = np.rint(E[:, 2] * Q) / Q
     qfy1 = np.rint(E[:, 3] * Q) / Q
 
-    # Comptage des arêtes en O(n) par dict — ``np.unique`` (tri) était plus lent que l’historique
-    # sur ~52k arêtes (régression perf observée en prod).
-    edge_count: Dict[Tuple[Vertex, Vertex], int] = {}
     pos: Dict[Vertex, Tuple[float, float]] = {}
     for i in range(n_edges):
         a0x = int(ix0[i])
@@ -122,15 +119,28 @@ def compute_move_preview_mask_loops_world(
             pos[k0] = (float(qfx0[i]), float(qfy0[i]))
         if k1 not in pos:
             pos[k1] = (float(qfx1[i]), float(qfy1[i]))
-        ek = _canonical_edge(k0, k1)
-        edge_count[ek] = edge_count.get(ek, 0) + 1
+
+    # Arêtes canoniques : comptage par ``np.unique`` (tri C) — plus rapide que dict Python sur ~52k arêtes.
+    swap = (ix0 > ix1) | ((ix0 == ix1) & (iy0 > iy1))
+    ax0 = np.where(swap, ix1, ix0)
+    ay0 = np.where(swap, iy1, iy0)
+    ax1 = np.where(swap, ix0, ix1)
+    ay1 = np.where(swap, iy0, iy1)
+    edge_dt = np.dtype(
+        [("a", np.int64), ("b", np.int64), ("c", np.int64), ("d", np.int64)]
+    )
+    rec = np.empty(n_edges, dtype=edge_dt)
+    rec["a"] = ax0
+    rec["b"] = ay0
+    rec["c"] = ax1
+    rec["d"] = ay1
+    uniq_edges, edge_counts = np.unique(rec, return_counts=True)
+    if not np.logical_or(edge_counts == 1, edge_counts == 2).all():
+        return None
 
     boundary_edges: List[Tuple[Vertex, Vertex]] = []
-    for ek, c in edge_count.items():
-        if c == 1:
-            boundary_edges.append(ek)
-        elif c != 2:
-            return None
+    for r in uniq_edges[edge_counts == 1]:
+        boundary_edges.append(((int(r["a"]), int(r["b"])), (int(r["c"]), int(r["d"]))))
 
     if not boundary_edges:
         return None

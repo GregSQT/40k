@@ -24,6 +24,32 @@ const MOVE_ADVANCE_MASK_SPRITE_BLUR_STRENGTH = 2;
 /** Qualité flou masque : 1 = moins cher GPU, suffisant avec le léger strength. */
 const MOVE_ADVANCE_MASK_SPRITE_BLUR_QUALITY = 1;
 
+/** Évite de re-rendre une RT masque identique (même géométrie + résolution) — ex. re-clic unité. */
+let moveAdvanceMaskServerLoopsCache: {
+  key: string;
+  texture: PIXI.RenderTexture;
+  maskBounds: PIXI.Rectangle;
+} | null = null;
+
+/** Empreinte des boucles **lissées** (contenu réel de la RT masque). */
+function fingerprintSmoothedMaskLoops(smoothed: number[][]): string {
+  let h = 2166136261 >>> 0;
+  for (let li = 0; li < smoothed.length; li++) {
+    const L = smoothed[li]!;
+    h = (Math.imul(h ^ L.length, 16777619) >>> 0) ^ 0;
+    const step = Math.max(2, Math.floor(L.length / 16)) * 2;
+    for (let i = 0; i < L.length; i += step) {
+      const v = L[i]!;
+      h = (Math.imul(h ^ (Number.isFinite(v) ? Math.floor(v * 1e6) : 0), 16777619) >>> 0) ^ 0;
+    }
+    if (L.length > 0) {
+      const last = L[L.length - 1]!;
+      h = (Math.imul(h ^ (Number.isFinite(last) ? Math.floor(last * 1e6) : 0), 16777619) >>> 0) ^ 0;
+    }
+  }
+  return String(h);
+}
+
 interface BoardConfig {
   cols: number;
   rows: number;
@@ -794,6 +820,15 @@ function renderMoveAdvanceDestPoolCircleLayer(
       }
       maskBounds = new PIXI.Rectangle(minX, minY, w, h);
 
+      const maskCacheKey = `${spriteName}|${app.renderer.resolution}|${MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS}|${w}|${h}|${fingerprintSmoothedMaskLoops(prep.smoothed)}`;
+      if (
+        moveAdvanceMaskServerLoopsCache &&
+        moveAdvanceMaskServerLoopsCache.key === maskCacheKey
+      ) {
+        maskBounds = moveAdvanceMaskServerLoopsCache.maskBounds;
+        return moveAdvanceMaskServerLoopsCache.texture;
+      }
+
       const texture = PIXI.RenderTexture.create({
         width: w,
         height: h,
@@ -811,6 +846,12 @@ function renderMoveAdvanceDestPoolCircleLayer(
       g.position.set(-minX, -minY);
       app.renderer.render(g, { renderTexture: texture, clear: true });
       g.destroy();
+      moveAdvanceMaskServerLoopsCache?.texture.destroy(true);
+      moveAdvanceMaskServerLoopsCache = {
+        key: maskCacheKey,
+        texture,
+        maskBounds,
+      };
       return texture;
     }
 
