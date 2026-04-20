@@ -107,6 +107,50 @@ def test_game_state_for_json_drops_preview_hexes_when_move_pool_present() -> Non
     assert "preview_hexes" not in state
 
 
+def test_game_state_for_json_omits_objectives_when_for_post_action() -> None:
+    engine_instance = type(
+        "E",
+        (),
+        {
+            "game_state": {
+                "phase": "move",
+                "objectives": [{"name": "A", "hexes": [{"col": 0, "row": 0}]}],
+                "turn": 1,
+            },
+        },
+    )()
+    full = api_server._game_state_for_json(engine_instance, for_post_action=False)
+    assert full.get("objectives") is not None
+    slim = api_server._game_state_for_json(engine_instance, for_post_action=True)
+    assert "objectives" not in slim
+
+
+def test_slim_execute_action_result_drops_duplicate_move_pool_fields() -> None:
+    r = api_server._slim_execute_action_result_for_api(
+        {
+            "unit_activated": True,
+            "unitId": "3",
+            "waiting_for_player": True,
+            "valid_destinations": [[1, 2]],
+            "preview_data": {"x": 1},
+        },
+        {"action": "activate_unit", "unitId": "3"},
+    )
+    assert "valid_destinations" not in r
+    assert "preview_data" not in r
+    assert r.get("unitId") == "3"
+    gym = api_server._slim_execute_action_result_for_api(
+        {
+            "unit_activated": True,
+            "unitId": "3",
+            "waiting_for_player": False,
+            "valid_destinations": [[1, 2]],
+        },
+        {"action": "activate_unit", "unitId": "3"},
+    )
+    assert "valid_destinations" in gym
+
+
 def test_game_state_for_json_excludes_config_blob() -> None:
     engine_instance = type(
         "E",

@@ -8,7 +8,7 @@ ZERO TOLERANCE for state storage or wrapper patterns
 """
 
 from typing import Dict, List, Tuple, Set, Optional, Any
-from collections import deque
+from collections import deque, OrderedDict
 from .generic_handlers import end_activation, _log_with_context
 from shared.data_validation import require_key
 from engine.combat_utils import (
@@ -35,16 +35,35 @@ from engine.hex_utils import (
     euclidean_edge_clearance_round_round,
     min_distance_between_sets,
 )
-from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
+from engine.hex_union_boundary_polygon import (
+    compute_move_preview_mask_loops_world,
+    _board_hex_radius_margin,
+)
 from engine.perf_timing import profile_move_pool_build
+
+# Cache LRU (footprint ∪ géométrie plateau) — même sortie que ``compute_move_preview_mask_loops_world``.
+_MASK_LOOP_CACHE_MAX = 64
+_mask_loop_cache: "OrderedDict[Tuple[frozenset, float, float], Optional[List[List[Tuple[float, float]]]]]" = OrderedDict()
 
 
 def _sync_move_preview_mask_loops(
     game_state: Dict[str, Any], footprint_zone: Set[Tuple[int, int]]
 ) -> None:
     """Polygone(s) masque pour le client — évite d’envoyer des milliers de (col,row) en JSON."""
+    hr, margin = _board_hex_radius_margin(game_state)
+    cache_key = (frozenset(footprint_zone), float(hr), float(margin))
+    if cache_key in _mask_loop_cache:
+        game_state["move_preview_footprint_mask_loops"] = _mask_loop_cache[cache_key]
+        _mask_loop_cache.move_to_end(cache_key)
+        return
+
     loops = compute_move_preview_mask_loops_world(footprint_zone, game_state)
     game_state["move_preview_footprint_mask_loops"] = loops
+
+    _mask_loop_cache[cache_key] = loops
+    _mask_loop_cache.move_to_end(cache_key)
+    while len(_mask_loop_cache) > _MASK_LOOP_CACHE_MAX:
+        _mask_loop_cache.popitem(last=False)
 
 def _move_preview_footprint_span(unit: Dict[str, Any]) -> int:
     """Dimension max d’empreinte (hexes), alignée sur charge_handlers._charge_base_diameter — rayon disques UI."""

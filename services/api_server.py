@@ -335,7 +335,11 @@ def _exclude_game_state_key_for_api_json(key: str) -> bool:
     return False
 
 
-def _game_state_for_json(engine_instance) -> Dict[str, Any]:
+def _game_state_for_json(
+    engine_instance,
+    *,
+    for_post_action: bool = False,
+) -> Dict[str, Any]:
     """Return game_state dict with internal/heavy fields excluded.
 
     Strips topology arrays, large sets (wall_hexes, occupied_positions,
@@ -351,6 +355,11 @@ def _game_state_for_json(engine_instance) -> Dict[str, Any]:
     complète ``config`` (déjà chargée côté client), et les caches d’adjacence par joueur
     ``enemy_adjacent_hexes_player_*`` / ``enemy_adjacent_counts_player_*``
     (voir ``_GAME_STATE_EXCLUDE_KEYS`` et ``_exclude_game_state_key_for_api_json``).
+
+    Si ``for_post_action`` est True (réponses ``POST /api/game/action``, ``/api/game/ai-turn``) :
+    omet ``objectives`` du JSON — le client conserve la liste issue du ``/start`` ou du premier état
+    complet (voir ``mergeGameStatePreservingOmittedObjectives`` côté React). Les objectifs de
+    scénario ne sont pas modifiés en cours de partie dans le moteur actuel.
     """
     gs = {
         k: v for k, v in engine_instance.game_state.items()
@@ -371,7 +380,28 @@ def _game_state_for_json(engine_instance) -> Dict[str, Any]:
     _pool = gs.get("valid_move_destinations_pool")
     if isinstance(_pool, list) and len(_pool) > 0:
         gs.pop("preview_hexes", None)
+    if for_post_action:
+        gs.pop("objectives", None)
     return gs
+
+
+def _slim_execute_action_result_for_api(
+    result: Any,
+    action: Optional[Dict[str, Any]],
+) -> Any:
+    """Sur ``activate_unit`` (phase move, joueur humain), retire la duplication du pool dans ``result``.
+
+    ``valid_move_destinations_pool`` / ``preview_hexes`` / masques sont déjà dans ``game_state`` ;
+    le front lit le pool depuis ``game_state`` en priorité (voir ``useEngineAPI``). On conserve
+    ``result`` inchangé pour l’entraînement (gym) où ``waiting_for_player`` est False.
+    """
+    if not isinstance(result, dict) or not isinstance(action, dict):
+        return result
+    if action.get("action") != "activate_unit":
+        return result
+    if not result.get("unit_activated") or result.get("waiting_for_player") is not True:
+        return result
+    return {k: v for k, v in result.items() if k not in {"valid_destinations", "preview_data"}}
 
 
 def _sync_units_hp_from_cache(serializable_state: Dict[str, Any], game_state: Dict[str, Any]) -> None:
@@ -1756,7 +1786,7 @@ def execute_action():
             inter_wave_pending = bool(require_key(ed_state, "inter_wave_pending"))
             action_name = action.get("action")
             if action_name == "endless_duty_status":
-                serializable_state = _game_state_for_json(engine)
+                serializable_state = _game_state_for_json(engine, for_post_action=True)
                 _sync_units_hp_from_cache(serializable_state, engine.game_state)
                 _attach_player_types(serializable_state, engine)
                 return api_json_response(
@@ -1831,7 +1861,7 @@ def execute_action():
 
         # Convert game state to JSON-serializable format
         _ser_t0 = time.perf_counter() if _api_perf else None
-        serializable_state = _game_state_for_json(engine)
+        serializable_state = _game_state_for_json(engine, for_post_action=True)
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
         _attach_player_types(serializable_state, engine)
         _ser_t1 = time.perf_counter() if _api_perf else None
@@ -1855,7 +1885,7 @@ def execute_action():
         _j0 = time.perf_counter() if _api_perf else None
         _response_payload = {
             "success": success,
-            "result": result,
+            "result": _slim_execute_action_result_for_api(result, action),
             "game_state": serializable_state,
             "action_logs": action_logs,
             "endless_duty_state": (
@@ -2599,7 +2629,7 @@ def execute_ai_turn():
         if endless_mode_active:
             ed_state = require_key(engine.game_state, "endless_duty_state")
             if bool(require_key(ed_state, "inter_wave_pending")):
-                serializable_state = _game_state_for_json(engine)
+                serializable_state = _game_state_for_json(engine, for_post_action=True)
                 _sync_units_hp_from_cache(serializable_state, engine.game_state)
                 _attach_player_types(serializable_state, engine)
                 return api_json_response(
@@ -2634,7 +2664,7 @@ def execute_ai_turn():
                 return jsonify({"success": False, "error": result}), 400
             if error_type == "not_ai_player_turn":
                 print(f"ℹ️ [API] execute_ai_turn skipped: error_type={error_type}, result={result}")
-                serializable_state = _game_state_for_json(engine)
+                serializable_state = _game_state_for_json(engine, for_post_action=True)
                 _sync_units_hp_from_cache(serializable_state, engine.game_state)
                 _attach_player_types(serializable_state, engine)
                 action_logs = serializable_state.get("action_logs", [])
@@ -2657,7 +2687,7 @@ def execute_ai_turn():
                 })
             if error_type == "game_over":
                 print(f"ℹ️ [API] execute_ai_turn skipped: error_type={error_type}, result={result}")
-                serializable_state = _game_state_for_json(engine)
+                serializable_state = _game_state_for_json(engine, for_post_action=True)
                 _sync_units_hp_from_cache(serializable_state, engine.game_state)
                 _attach_player_types(serializable_state, engine)
                 action_logs = serializable_state.get("action_logs", [])
@@ -2688,7 +2718,7 @@ def execute_ai_turn():
                 result["endless_duty"] = ed_post
 
         # Convert game state to JSON-serializable format
-        serializable_state = _game_state_for_json(engine)
+        serializable_state = _game_state_for_json(engine, for_post_action=True)
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
         _attach_player_types(serializable_state, engine)
         

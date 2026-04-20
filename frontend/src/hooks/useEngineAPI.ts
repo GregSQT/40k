@@ -245,6 +245,20 @@ export interface APIGameState {
   active_rule_choice_prompt?: RuleChoicePrompt | null;
 }
 
+/**
+ * L’API peut omettre ``objectives`` sur les réponses POST /action pour alléger le JSON.
+ * Réinjecte la liste déjà connue côté client (issue du ``/start`` ou d’un état complet).
+ */
+export function mergeGameStatePreservingOmittedObjectives(
+  prev: APIGameState | null,
+  incoming: APIGameState,
+): APIGameState {
+  if (prev !== null && prev.objectives !== undefined && incoming.objectives === undefined) {
+    return { ...incoming, objectives: prev.objectives };
+  }
+  return incoming;
+}
+
 export interface EndlessDutyState {
   enabled: boolean;
   wave_index: number;
@@ -589,7 +603,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               `Game mode mismatch: expected player 2 type '${expectedPlayer2Type}', got '${String(player2Type)}'`
             );
           }
-          setGameState(data.game_state);
+          setGameState(data.game_state ?? null);
           setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
           const startedMode =
             requestedModeCode === "pve"
@@ -653,7 +667,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
         const data = await response.json();
         if (data.success && data.game_state) {
-          setGameState(data.game_state);
+          setGameState(data.game_state ?? null);
           setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
         } else {
           throw new Error(data.error || "Failed to start game");
@@ -705,7 +719,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           `Game mode mismatch: expected player 2 type '${expectedPlayer2Type}', got '${String(player2Type)}'`
         );
       }
-      setGameState(data.game_state);
+      setGameState(data.game_state ?? null);
       setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -751,7 +765,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           `Game mode mismatch: expected player 2 type '${expectedPlayer2Type}', got '${String(player2Type)}'`
         );
       }
-      setGameState(data.game_state);
+      setGameState(data.game_state ?? null);
       setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -1019,7 +1033,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             if (data.result?.unitId) {
               setSelectedUnitId(parseInt(data.result.unitId, 10));
             }
-            setGameState(data.game_state);
+            setGameState((p) =>
+              mergeGameStatePreservingOmittedObjectives(p, data.game_state as APIGameState),
+            );
             return;
           }
           if (data.result?.action === "select_rule_choice") {
@@ -1365,7 +1381,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             };
           }
 
-          setGameState(data.game_state);
+          setGameState((p) =>
+            mergeGameStatePreservingOmittedObjectives(p, data.game_state as APIGameState),
+          );
 
           // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance activation response (jet D6 + pool sous-hex)
           const advanceDests = data.result?.advance_destinations;
@@ -2091,7 +2109,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       throw new Error(String(data.error || "Failed to fetch Endless Duty status"));
     }
     if (data.game_state) {
-      setGameState(data.game_state);
+      setGameState((p) =>
+        mergeGameStatePreservingOmittedObjectives(p, data.game_state as APIGameState),
+      );
     }
     const nextState = (data.endless_duty_state as EndlessDutyState | undefined) ?? null;
     setEndlessDutyState(nextState);
@@ -2124,7 +2144,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         throw new Error(String(data.error || "Failed to commit Endless Duty requisition"));
       }
       if (data.game_state) {
-        setGameState(data.game_state);
+        setGameState((p) =>
+          mergeGameStatePreservingOmittedObjectives(p, data.game_state as APIGameState),
+        );
       }
       setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
     },
@@ -4021,7 +4043,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 if (stateResponse.ok) {
                   const stateData = await stateResponse.json();
                   if (stateData.game_state) {
-                    setGameState(stateData.game_state);
+                    setGameState((p) =>
+                      mergeGameStatePreservingOmittedObjectives(
+                        p,
+                        stateData.game_state as APIGameState,
+                      ),
+                    );
                     setEndlessDutyState(
                       (stateData.endless_duty_state as EndlessDutyState | undefined) ?? null
                     );
@@ -4043,7 +4070,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
           if (activationData.result?.action === "ai_turn_skipped") {
             if (activationData.game_state) {
-              setGameState(activationData.game_state);
+              setGameState((p) =>
+                mergeGameStatePreservingOmittedObjectives(
+                  p,
+                  activationData.game_state as APIGameState,
+                ),
+              );
               setEndlessDutyState(
                 (activationData.endless_duty_state as EndlessDutyState | undefined) ?? null
               );
@@ -4116,7 +4148,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
           // Update game state from activation
           if (activationData.game_state) {
-            setGameState(activationData.game_state);
+            setGameState((p) =>
+              mergeGameStatePreservingOmittedObjectives(
+                p,
+                activationData.game_state as APIGameState,
+              ),
+            );
             setEndlessDutyState(
               (activationData.endless_duty_state as EndlessDutyState | undefined) ?? null
             );
@@ -4222,11 +4259,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 }
               } else {
                 // Movement phase - pick destination using fresh backend state
-                aiDecision = makeMovementDecision(
-                  activationData.result.valid_destinations,
-                  unitId,
-                  activationData.game_state
-                );
+                const moveAnchors =
+                  activationData.result.valid_destinations ??
+                  activationData.game_state?.valid_move_destinations_pool;
+                aiDecision = makeMovementDecision(moveAnchors, unitId, activationData.game_state);
               }
             } else if (
               currentPhase === "charge" &&
@@ -4404,7 +4440,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               }
 
               // Update game state from decision
-              setGameState(decisionData.game_state);
+              setGameState((p) =>
+                mergeGameStatePreservingOmittedObjectives(
+                  p,
+                  decisionData.game_state as APIGameState,
+                ),
+              );
               setEndlessDutyState(
                 (decisionData.endless_duty_state as EndlessDutyState | undefined) ?? null
               );
@@ -4462,7 +4503,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
                 if (skipResponse.ok) {
                   const skipData = await skipResponse.json();
-                  setGameState(skipData.game_state);
+                  setGameState((p) =>
+                    mergeGameStatePreservingOmittedObjectives(
+                      p,
+                      skipData.game_state as APIGameState,
+                    ),
+                  );
                   setEndlessDutyState(
                     (skipData.endless_duty_state as EndlessDutyState | undefined) ?? null
                   );
