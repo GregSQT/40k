@@ -582,6 +582,8 @@ export default function Board({
   // Hover preview: imperative PIXI layers (no React re-render)
   const hoverOverlayRef = useRef<PIXI.Graphics | null>(null);
   const hoverSpriteRef = useRef<PIXI.Container | null>(null);
+  /** Après création du sprite preview : premier ``mousemove`` fait un snap ; ensuite lerp vers l’ancre cible. */
+  const movePreviewIconLerpInitializedRef = useRef(false);
   /** Ligne départ → pointeur + libellé distance hex (preview move) */
   const movePreviewGuideLineRef = useRef<PIXI.Graphics | null>(null);
   /** Ligne mesure règle (ancre → hex sous curseur) */
@@ -1092,7 +1094,12 @@ export default function Board({
           return;
         }
       } else {
-        pool = footprintZoneRef?.current ?? resolvedMoveDestPoolRef.current;
+        // Avec ``move_preview_footprint_mask_loops`` seul, ``syncMoveDestinationPoolRefs`` vide
+        // ``footprintZoneRef`` (pas de liste hex dans le JSON) — un Set vide est truthy : ``??``
+        // ne bascule pas. Il faut alors les centres d’ancres comme « zone élargie » pour ne pas
+        // masquer l’icône dès que le curseur sort du masque (voir ``!inZone`` + ``inExpandedZone``).
+        const fp = footprintZoneRef?.current;
+        pool = fp && fp.size > 0 ? fp : resolvedMoveDestPoolRef.current;
       }
       if (!pool || pool.size === 0) {
         zonePixels = null;
@@ -1153,6 +1160,7 @@ export default function Board({
 
       // Build the icon container once per selected unit
       if (!hoverSpriteRef.current || hoverSpriteRef.current.destroyed || spriteBuiltForUnitId !== selectedUnitId) {
+        movePreviewIconLerpInitializedRef.current = false;
         if (hoverSpriteRef.current) {
           hoverSpriteRef.current.destroy({ children: true });
           hoverSpriteRef.current = null;
@@ -1245,7 +1253,25 @@ export default function Board({
         }
       }
 
-      container.position.set(best.x, best.y);
+      // Suivi souple : lerp vers l’ancre la plus proche ; snap si grand saut (changement d’ancre rapide).
+      const ICON_FOLLOW_LERP = 0.42;
+      const ICON_FOLLOW_SNAP_PX = 140;
+      const tx = best.x;
+      const ty = best.y;
+      if (!movePreviewIconLerpInitializedRef.current) {
+        container.position.set(tx, ty);
+        movePreviewIconLerpInitializedRef.current = true;
+      } else {
+        const cx = container.position.x;
+        const cy = container.position.y;
+        const dx = tx - cx;
+        const dy = ty - cy;
+        if (dx * dx + dy * dy >= ICON_FOLLOW_SNAP_PX * ICON_FOLLOW_SNAP_PX) {
+          container.position.set(tx, ty);
+        } else {
+          container.position.set(cx + dx * ICON_FOLLOW_LERP, cy + dy * ICON_FOLLOW_LERP);
+        }
+      }
       container.visible = true;
       const iconCol = best.col;
       const iconRow = best.row;
@@ -1290,8 +1316,8 @@ export default function Board({
       }
       const startX = hxX(startCol);
       const startY = hxY(startCol, startRow);
-      const previewIconX = best.x;
-      const previewIconY = best.y;
+      const previewIconX = container.position.x;
+      const previewIconY = container.position.y;
       const hexSteps = hexDistOff(startCol, startRow, iconCol, iconRow);
       const distanceDisplay = (hexSteps / HEX_STEPS_PER_INCH_DISPLAY).toFixed(1);
       const tooltipCharge =
@@ -1456,6 +1482,7 @@ export default function Board({
       setMovePreviewLosBlinkIds([]);
       setMovePreviewLosCoverById({});
       if (hoverSpriteRef.current) hoverSpriteRef.current.visible = false;
+      movePreviewIconLerpInitializedRef.current = false;
       if (movePreviewGuideLineRef.current && !movePreviewGuideLineRef.current.destroyed) {
         movePreviewGuideLineRef.current.clear();
         movePreviewGuideLineRef.current.visible = false;
