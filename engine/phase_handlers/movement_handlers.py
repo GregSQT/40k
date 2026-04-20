@@ -35,7 +35,6 @@ from engine.hex_utils import (
     min_distance_between_sets,
 )
 
-
 def _move_preview_footprint_span(unit: Dict[str, Any]) -> int:
     """Dimension max d’empreinte (hexes), alignée sur charge_handlers._charge_base_diameter — rayon disques UI."""
     bs = unit.get("BASE_SIZE", 1)
@@ -1048,8 +1047,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         _m_bfs_end = _perf_clock.perf_counter() if _pt else None
         game_state["valid_move_destinations_pool"] = valid_destinations
         game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
-        game_state["move_preview_border"] = _compute_border_cells(valid_destinations)
-        # Même sémantique que le BFS au sol : zone union d'empreintes (évite zone empreinte obsolète côté client).
+        # Même sémantique que le BFS au sol : union d'empreintes (masque hex côté client, rendu plus doux
+        # que le fallback « disques seuls » sans cette zone).
         if _fly_single_hex:
             _fly_fp_zone: Set[Tuple[int, int]] = set(valid_destinations)
             _fly_fp_zone.add(start_pos)
@@ -1063,6 +1062,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             for dc, dr in _start_offs:
                 _fly_fp_zone.add((start_pos[0] + dc, start_pos[1] + dr))
         game_state["move_preview_footprint_zone"] = _fly_fp_zone
+        game_state["move_preview_border"] = _compute_border_cells(_fly_fp_zone)
         _m_fly_done = _perf_clock.perf_counter() if _pt else None
         if _pt and _m0 is not None and _m_prep_end is not None and _m_bfs_start is not None and _m_bfs_end is not None and _m_fly_done is not None:
             append_perf_timing_line(

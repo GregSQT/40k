@@ -23,6 +23,23 @@ def test_game_state_for_json_removes_topology_arrays() -> None:
     assert state["x"] == 3
 
 
+def test_game_state_for_json_excludes_move_preview_border() -> None:
+    engine_instance = type(
+        "E",
+        (),
+        {
+            "game_state": {
+                "phase": "move",
+                "valid_move_destinations_pool": [[1, 2], [3, 4]],
+                "move_preview_border": [[1, 2]],
+            },
+        },
+    )()
+    state = api_server._game_state_for_json(engine_instance)
+    assert "move_preview_border" not in state
+    assert state["valid_move_destinations_pool"] == [[1, 2], [3, 4]]
+
+
 def test_sync_units_hp_from_cache_applies_cache_and_sets_zero_for_dead() -> None:
     serializable_state = {"units": [{"id": "1", "HP_CUR": 99}, {"id": "2", "HP_CUR": 99}]}
     game_state = {"units_cache": {"1": {"HP_CUR": 4}}}

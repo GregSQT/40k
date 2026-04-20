@@ -2160,7 +2160,10 @@ def valid_target_pool_build(
         precomputed_weapon_available_pool: si fourni (même contexte arg1–arg3), évite un second
             ``weapon_availability_check`` (ex. activation après ``shooting_unit_activation_start``).
         precomputed_enemy_precheck: même liste que ``_build_weapon_availability_enemy_precheck`` pour
-            réutiliser distance + ``friendly_blocks`` (évite BFS / boucle alliés redondants).
+            réutiliser distance + ``friendly_blocks`` + drapeaux LoS (évite BFS / boucle alliés
+            redondants pour les cibles couvertes). Les cibles avec LoS mais hors portée max du
+            précheck sont encore traitées via ``min_distance_between_sets`` borné par la portée max
+            des armes **utilisables** (cohérent avec le test de portée).
     
     Returns:
         List of enemy unit IDs that can be targeted (valid_target_pool)
@@ -2240,6 +2243,17 @@ def valid_target_pool_build(
             for r in precomputed_enemy_precheck
             if isinstance(r.get("enemy_id_str"), str)
         }
+
+    from engine.utils.weapon_helpers import get_melee_range
+    from engine.hex_utils import min_distance_between_sets
+
+    melee_range = get_melee_range(game_state)
+    max_usable_rng = 0
+    for widx in usable_weapon_indices:
+        if widx < len(rng_weapons):
+            rw = require_key(rng_weapons[widx], "RNG")
+            if rw > max_usable_rng:
+                max_usable_rng = rw
     
     # For each target_id in targets_with_los.keys():
     units_cache = require_key(game_state, "units_cache")
@@ -2305,9 +2319,6 @@ def valid_target_pool_build(
                 add_console_log(game_state, log_msg)
             continue
         
-        from engine.utils.weapon_helpers import get_melee_range
-        from engine.hex_utils import min_distance_between_sets
-        melee_range = get_melee_range(game_state)
         enemy_entry = units_cache.get(target_id_str)
         if enemy_entry is None:
             raise KeyError(f"Enemy {target_id_str} not in units_cache (dead or absent)")
@@ -2323,7 +2334,13 @@ def valid_target_pool_build(
             if not enemy_adjacent_to_shooter and bool(row_opt.get("friendly_blocks")):
                 continue
         else:
-            distance_to_enemy = min_distance_between_sets(shooter_fp, enemy_fp, max_distance=melee_range)
+            # Pas de ligne précheck (ex. cible avec LoS mais hors max RNG du précheck, ou appel sans précheck).
+            # Distance tireur/cible §3.3 : borner la recherche par la portée max des armes utilisables,
+            # pas par melee_range seul — sinon la distance renvoyée peut être tronquée et fausser le test de portée.
+            _md_cap = max_usable_rng if max_usable_rng > 0 else 0
+            distance_to_enemy = min_distance_between_sets(
+                shooter_fp, enemy_fp, max_distance=_md_cap
+            )
             enemy_adjacent_to_shooter = distance_to_enemy <= melee_range
 
         shooter_is_engaged = adjacent_status == 1

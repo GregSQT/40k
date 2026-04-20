@@ -96,6 +96,8 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
     "_cache_instance_id",
     "_charge_dest_bfs_cache",
     "_charge_fp_offset_pair_cache",
+    # Sous-ensemble dérivé des ancres pour contour UI ; le front n’utilise pas ce champ (preview = pool + footprint_zone).
+    "move_preview_border",
 })
 
 
@@ -106,10 +108,10 @@ def _game_state_for_json(engine_instance) -> Dict[str, Any]:
     """Return game_state dict with internal/heavy fields excluded.
 
     Strips topology arrays, large sets (wall_hexes, occupied_positions,
-    enemy_adjacent_hexes, los_cache), destination pools already sent via
-    move_preview_border, and other engine-internal fields the frontend
-    never reads.  Also trims units_cache to only the fields the frontend
-    consumes (col, row, HP_CUR, player), dropping occupied_hexes etc.
+    enemy_adjacent_hexes, los_cache), champs moteur inutiles au client, et
+    ``move_preview_border`` (non consommé par l’UI ; la preview move repose sur
+    ``valid_move_destinations_pool`` et ``move_preview_footprint_zone`` / span).
+    Trims units_cache to (col, row, HP_CUR, player).
     """
     gs = {
         k: v for k, v in engine_instance.game_state.items()
