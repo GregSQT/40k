@@ -892,6 +892,18 @@ def get_engagement_zone(game_state: Dict[str, Any]) -> int:
     return int(game_rules.get("engagement_zone", 1))
 
 
+def get_max_base_size_hex(game_state: Dict[str, Any]) -> int:
+    """Plafond (diamètre hex) pour borner les empreintes ennemies dans les filtres spatiaux.
+
+    Utilisé par la prune conservatrice des ennemis en déplacement (ez > 1) : au-delà de ce
+    diamètre, on tronque la contribution « rayon d'empreinte » pour rester sûr sans exploser
+    la fenêtre si des données unité sont aberrantes.
+    """
+    config = game_state.get("config") or {}
+    game_rules = config.get("game_rules") or {}
+    return int(game_rules.get("max_base_size_hex", 35))
+
+
 def build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[Tuple[int, int]]:
     """Pre-compute all hexes within engagement_zone of enemy units.
 

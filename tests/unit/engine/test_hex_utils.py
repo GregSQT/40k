@@ -27,6 +27,8 @@ from engine.hex_utils import (
     euclidean_edge_clearance_round_round,
     round_base_radius_norm,
     _hex_center,
+    precompute_footprint_offsets,
+    compute_footprint_placement_mask,
 )
 
 
@@ -525,6 +527,51 @@ class TestEuclideanEngagementClearance:
             ca, ra, 3, cb, rb, 2, mover_center_xy=xy
         )
         assert g1 == g2
+
+
+class TestComputeFootprintPlacementMask:
+    """Masque « placement invalide » (Minkowski inverse) ≡ boucle offsets brute."""
+
+    @staticmethod
+    def _brute_force_bad(bcols, brows, off_even, off_odd, obstacles):
+        bad = bytearray(bcols * brows)
+        for col in range(bcols):
+            offs = off_even if (col & 1) == 0 else off_odd
+            for row in range(brows):
+                invalid = False
+                for dc, dr in offs:
+                    fc, fr = col + dc, row + dr
+                    if fc < 0 or fr < 0 or fc >= bcols or fr >= brows:
+                        invalid = True
+                        break
+                    if (fc, fr) in obstacles:
+                        invalid = True
+                        break
+                if invalid:
+                    bad[col + row * bcols] = 1
+        return bad
+
+    def test_matches_brute_force_round_base_size_3(self):
+        bcols, brows = 20, 20
+        off_e, off_o = precompute_footprint_offsets("round", 3, 0)
+        obstacles = {(5, 5), (5, 6), (10, 2), (0, 0), (19, 19)}
+        actual = compute_footprint_placement_mask(bcols, brows, off_e, off_o, obstacles)
+        expected = self._brute_force_bad(bcols, brows, off_e, off_o, obstacles)
+        assert bytes(actual) == bytes(expected)
+
+    def test_matches_brute_force_empty_obstacles(self):
+        bcols, brows = 12, 10
+        off_e, off_o = precompute_footprint_offsets("round", 2, 0)
+        actual = compute_footprint_placement_mask(bcols, brows, off_e, off_o, set())
+        expected = self._brute_force_bad(bcols, brows, off_e, off_o, set())
+        assert bytes(actual) == bytes(expected)
+
+    def test_single_hex_no_obstacles_all_valid_in_bounds(self):
+        bcols, brows = 5, 5
+        off_e = ((0, 0),)
+        off_o = ((0, 0),)
+        mask = compute_footprint_placement_mask(bcols, brows, off_e, off_o, set())
+        assert not any(mask)
 
 
 class TestExpandWallGroupToHexList:

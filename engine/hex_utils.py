@@ -764,6 +764,71 @@ def compute_occupied_hexes(
         raise ValueError(f"Unknown base_shape: {base_shape!r} (expected 'round', 'oval', or 'square')")
 
 
+def compute_footprint_placement_mask(
+    board_cols: int,
+    board_rows: int,
+    offsets_even: Tuple[Tuple[int, int], ...],
+    offsets_odd: Tuple[Tuple[int, int], ...],
+    obstacles: Set[Tuple[int, int]],
+) -> bytearray:
+    """Masque O(1) « placement invalide » par ancre (utilisé par le BFS multi-hex).
+
+    Retourne un ``bytearray`` de taille ``board_cols * board_rows`` indexé
+    ``col + row * board_cols``. Une ancre vaut ``1`` si le socle centré dessus
+    **sort du plateau** ou **chevauche un obstacle** (``obstacles`` = union
+    murs ∪ ennemis, ou murs ∪ toutes les occupations selon le contexte d'appel).
+
+    Minkowski inverse : pour chaque cellule obstacle, on marque en ``1`` tous
+    les ancres qui la couvriraient. Complexité ``O(|obstacles| × |offsets|)``
+    + ``O(cols × rows)`` pour les bornes. Aligné sur la reconstruction décrite
+    par ``precompute_footprint_offsets``.
+    """
+    n_cells = board_cols * board_rows
+    bad = bytearray(n_cells)
+
+    min_dc_e = min((dc for dc, _ in offsets_even), default=0)
+    max_dc_e = max((dc for dc, _ in offsets_even), default=0)
+    min_dr_e = min((dr for _, dr in offsets_even), default=0)
+    max_dr_e = max((dr for _, dr in offsets_even), default=0)
+    min_dc_o = min((dc for dc, _ in offsets_odd), default=0)
+    max_dc_o = max((dc for dc, _ in offsets_odd), default=0)
+    min_dr_o = min((dr for _, dr in offsets_odd), default=0)
+    max_dr_o = max((dr for _, dr in offsets_odd), default=0)
+
+    for col in range(board_cols):
+        if (col & 1) == 0:
+            min_dc, max_dc, min_dr, max_dr = min_dc_e, max_dc_e, min_dr_e, max_dr_e
+        else:
+            min_dc, max_dc, min_dr, max_dr = min_dc_o, max_dc_o, min_dr_o, max_dr_o
+        col_oob = (col + min_dc < 0) or (col + max_dc >= board_cols)
+        if col_oob:
+            base = col
+            for row in range(board_rows):
+                bad[base + row * board_cols] = 1
+            continue
+        for row in range(board_rows):
+            if (row + min_dr < 0) or (row + max_dr >= board_rows):
+                bad[col + row * board_cols] = 1
+
+    for fc, fr in obstacles:
+        for dc, dr in offsets_even:
+            nc = fc - dc
+            if (nc & 1) != 0:
+                continue
+            nr = fr - dr
+            if 0 <= nc < board_cols and 0 <= nr < board_rows:
+                bad[nc + nr * board_cols] = 1
+        for dc, dr in offsets_odd:
+            nc = fc - dc
+            if (nc & 1) != 1:
+                continue
+            nr = fr - dr
+            if 0 <= nc < board_cols and 0 <= nr < board_rows:
+                bad[nc + nr * board_cols] = 1
+
+    return bad
+
+
 def precompute_footprint_offsets(
     base_shape: str,
     base_size: "int | list[int]",

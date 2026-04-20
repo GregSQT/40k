@@ -27,7 +27,7 @@ from .shared_utils import (
     build_occupied_positions_set,
     build_enemy_occupied_positions_set,
     compute_candidate_footprint,
-    is_footprint_placement_valid, get_engagement_zone,
+    is_footprint_placement_valid, get_engagement_zone, get_max_base_size_hex,
 )
 from engine.hex_utils import (
     _hex_center,
@@ -58,6 +58,54 @@ def _move_preview_footprint_span(unit: Dict[str, Any]) -> int:
         return max(1, int(bs))
     except (TypeError, ValueError):
         return 1
+
+
+def _hex_radius_upper_for_engagement_prune(base_span: int) -> int:
+    """Majorant (grille hex) du rayon empreinte depuis l’ancre — borne conservatrice pour la prune."""
+    s = max(1, int(base_span))
+    return max(1, (s + 1) // 2)
+
+
+def _enemy_items_within_move_engagement_horizon(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    unit_id_str: str,
+    mover_player_int: int,
+    start_col: int,
+    start_row: int,
+    move_range: int,
+    units_cache: Dict[str, Any],
+) -> List[Tuple[Any, Any]]:
+    """Ennemis susceptibles d’interagir avec un déplacement depuis ``(start_col, start_row)``.
+
+    Borne conservatrice (distance hex entre **ancres**) :
+    ``MOVE + r_m + r_e + engagement_zone + 1``, avec ``r_*`` dérivés du diamètre d’empreinte
+    (ennemi plafonné par ``max_base_size_hex``). Toute destination légale est à ≤ ``MOVE`` pas
+    de l’ancre de départ (inégalité triangulaire sur la métrique hex) ; on ajoute les rayons
+    car l’engagement teste bord à bord / cellules, pas seulement l’écart entre ancres. Le ``+1``
+    couvre l’arrondi hex ↔ espace continu (_hex_center). Exclure au-delà pourrait omettre un
+    ennemi encore pertinent → liste sur-approximée, résultat identique à un scan complet.
+    """
+    ez = get_engagement_zone(game_state)
+    max_bs = get_max_base_size_hex(game_state)
+    mover_r = _hex_radius_upper_for_engagement_prune(_move_preview_footprint_span(unit))
+    m = int(move_range)
+    horizon_without_enemy_r = m + mover_r + int(ez) + 1
+
+    out: List[Tuple[Any, Any]] = []
+    for eid, ce in units_cache.items():
+        if str(eid) == unit_id_str:
+            continue
+        if int(require_key(ce, "player")) == mover_player_int:
+            continue
+        e_col = int(require_key(ce, "col"))
+        e_row = int(require_key(ce, "row"))
+        e_span = min(_move_preview_footprint_span(ce), max_bs)
+        e_r = _hex_radius_upper_for_engagement_prune(e_span)
+        h = horizon_without_enemy_r + e_r
+        if calculate_hex_distance(start_col, start_row, e_col, e_row) <= h:
+            out.append((eid, ce))
+    return out
 
 
 def _unit_has_keyword(unit: Dict[str, Any], keyword_id: str) -> bool:
@@ -857,6 +905,281 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     return result
 
 
+def _build_multi_hex_vectorized(
+    *,
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    start_col: int,
+    start_row: int,
+    move_range: int,
+    off_even: Tuple[Tuple[int, int], ...],
+    off_odd: Tuple[Tuple[int, int], ...],
+    board_cols: int,
+    board_rows: int,
+    walls_set: Set[Tuple[int, int]],
+    enemy_occupied_set: Set[Tuple[int, int]],
+    occupied_set: Set[Tuple[int, int]],
+    enemy_adjacent_hexes: Set[Tuple[int, int]],
+    enemy_items: Optional[List[Tuple[Any, Any]]],
+    ez: int,
+) -> Tuple[List[Tuple[int, int]], Set[Tuple[int, int]], int]:
+    """BFS multi-hex vectorisé NumPy (cas ``ground``). Gère toutes les formes de socles.
+
+    Retourne ``(valid_destinations, footprint_zone, visited_count)``.
+
+    Invariants de sémantique (équivalence stricte avec le BFS Python hex orig.) :
+
+    - **Bounds + walls + enemy_occupied** : filtre de traversée. L'empreinte doit tenir dans le
+      plateau et ne chevaucher ni mur ni cellule occupée par un ennemi. Une ancre invalide ne
+      peut pas être traversée par le BFS.
+    - **Engagement zone** :
+        * ``ez <= 1`` : ``enemy_adjacent_hexes`` déjà pré-dilaté par ``build_enemy_adjacent_hexes``.
+          Une ancre viole l'engagement ssi une cellule de son empreinte est dans cet ensemble.
+        * ``ez > 1`` (Board ×10) :
+          - Paire **mover rond ↔ ennemi rond** : écart bord à bord euclidien (centres
+            ``_hex_center``) ≥ ``engagement_minimum_clearance_norm(ez)``.
+          - Sinon (mover non-rond ou ennemi non-rond) : ``min_distance_between_sets(fp_mover,
+            fp_enemy) ≤ ez`` équivalent à ancre dont l'empreinte intersecte la dilatation hex
+            de rayon ``ez`` de l'empreinte ennemie.
+    - **Destinations** : traversable ET empreinte ne chevauchant aucune cellule d'``occupied_set``.
+    - **Start** : l'ancre de départ est toujours atteinte mais exclue des destinations.
+    - **Footprint zone** : union des empreintes (empreinte de départ + empreinte de chaque
+      destination), identique à l'union calculée côté BFS Python.
+    """
+    import numpy as np
+
+    off_even_arr = np.asarray(off_even, dtype=np.int64).reshape(-1, 2)
+    off_odd_arr = np.asarray(off_odd, dtype=np.int64).reshape(-1, 2)
+
+    col_is_even = (np.arange(board_cols, dtype=np.int64) & 1) == 0
+    col_parity_mask = np.broadcast_to(
+        col_is_even[:, None], (board_cols, board_rows)
+    ).copy()
+
+    def _dilate_by_kernel(src: "np.ndarray", kernel: "np.ndarray") -> "np.ndarray":
+        """``out[c, r] = any_{(dc, dr) ∈ kernel} src[c+dc, r+dr]``.
+
+        Utilisé pour : « ancre (c, r) est bad car une cellule de son empreinte (c+dc, r+dr)
+        appartient à l’ensemble source (obstacles, enemy_adj…) ». Préimage directe.
+        """
+        out = np.zeros_like(src)
+        for dc, dr in kernel:
+            c_src_lo = max(0, int(dc))
+            c_src_hi = board_cols - max(0, -int(dc))
+            r_src_lo = max(0, int(dr))
+            r_src_hi = board_rows - max(0, -int(dr))
+            if c_src_lo >= c_src_hi or r_src_lo >= r_src_hi:
+                continue
+            c_dst_lo = c_src_lo - int(dc)
+            c_dst_hi = c_src_hi - int(dc)
+            r_dst_lo = r_src_lo - int(dr)
+            r_dst_hi = r_src_hi - int(dr)
+            out[c_dst_lo:c_dst_hi, r_dst_lo:r_dst_hi] |= src[
+                c_src_lo:c_src_hi, r_src_lo:r_src_hi
+            ]
+        return out
+
+    def _spread_by_kernel(src: "np.ndarray", kernel: "np.ndarray") -> "np.ndarray":
+        """``out[c+dc, r+dr] = any src[c, r]`` pour chaque ``(dc, dr) ∈ kernel``.
+
+        Utilisé pour : propagation BFS (src → voisin = src + offset) ou union d’empreintes
+        (ancre valide → cellules (c+dc, r+dr) de son empreinte).
+        """
+        out = np.zeros_like(src)
+        for dc, dr in kernel:
+            src_c_lo = max(0, -int(dc))
+            src_c_hi = board_cols - max(0, int(dc))
+            src_r_lo = max(0, -int(dr))
+            src_r_hi = board_rows - max(0, int(dr))
+            if src_c_lo >= src_c_hi or src_r_lo >= src_r_hi:
+                continue
+            dst_c_lo = src_c_lo + int(dc)
+            dst_c_hi = src_c_hi + int(dc)
+            dst_r_lo = src_r_lo + int(dr)
+            dst_r_hi = src_r_hi + int(dr)
+            out[dst_c_lo:dst_c_hi, dst_r_lo:dst_r_hi] |= src[
+                src_c_lo:src_c_hi, src_r_lo:src_r_hi
+            ]
+        return out
+
+    def _mask_from_cells(cells: Set[Tuple[int, int]]) -> "np.ndarray":
+        m = np.zeros((board_cols, board_rows), dtype=bool)
+        if not cells:
+            return m
+        cs = np.fromiter((c for c, _ in cells), dtype=np.int64, count=len(cells))
+        rs = np.fromiter((r for _, r in cells), dtype=np.int64, count=len(cells))
+        in_b = (cs >= 0) & (cs < board_cols) & (rs >= 0) & (rs < board_rows)
+        m[cs[in_b], rs[in_b]] = True
+        return m
+
+    obstacles_traverse = walls_set | enemy_occupied_set
+    obstacles_dest_any = walls_set | occupied_set
+    obstacles_traverse_mask = _mask_from_cells(obstacles_traverse)
+    obstacles_dest_mask = _mask_from_cells(obstacles_dest_any)
+
+    def _bounds_bad_parity(offsets_arr: "np.ndarray") -> "np.ndarray":
+        min_dc = int(offsets_arr[:, 0].min())
+        max_dc = int(offsets_arr[:, 0].max())
+        min_dr = int(offsets_arr[:, 1].min())
+        max_dr = int(offsets_arr[:, 1].max())
+        bad = np.ones((board_cols, board_rows), dtype=bool)
+        c_lo = max(0, -min_dc)
+        c_hi = min(board_cols, board_cols - max_dc)
+        r_lo = max(0, -min_dr)
+        r_hi = min(board_rows, board_rows - max_dr)
+        if c_lo < c_hi and r_lo < r_hi:
+            bad[c_lo:c_hi, r_lo:r_hi] = False
+        return bad
+
+    def _placement_bad(obstacles_mask: "np.ndarray") -> "np.ndarray":
+        hit_even = _dilate_by_kernel(obstacles_mask, off_even_arr)
+        hit_odd = _dilate_by_kernel(obstacles_mask, off_odd_arr)
+        hit = np.where(col_parity_mask, hit_even, hit_odd)
+        bounds_bad_even = _bounds_bad_parity(off_even_arr)
+        bounds_bad_odd = _bounds_bad_parity(off_odd_arr)
+        bounds_bad = np.where(col_parity_mask, bounds_bad_even, bounds_bad_odd)
+        return hit | bounds_bad
+
+    bad_traverse = _placement_bad(obstacles_traverse_mask)
+    bad_dest = _placement_bad(obstacles_dest_mask)
+
+    # Voisins hex (offset coordinates). Définis ici car utilisés à la fois par la dilatation hex
+    # de l'engagement mixte et par la propagation BFS.
+    nb_even = np.asarray(
+        [(0, -1), (1, -1), (1, 0), (0, 1), (-1, 0), (-1, -1)], dtype=np.int64
+    )
+    nb_odd = np.asarray(
+        [(0, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0)], dtype=np.int64
+    )
+
+    if ez > 1:
+        from engine.hex_utils import (
+            engagement_minimum_clearance_norm,
+            round_base_radius_norm,
+            _hex_center,
+            precompute_footprint_offsets,
+        )
+        req = engagement_minimum_clearance_norm(ez)
+        mover_shape = unit.get("BASE_SHAPE", "round")
+        mover_bs = unit.get("BASE_SIZE", 1)
+        mover_bs_i = mover_bs if isinstance(mover_bs, int) else 1
+        mover_is_round = (mover_shape == "round")
+
+        cs = np.arange(board_cols, dtype=np.float64)[:, None]
+        rs = np.arange(board_rows, dtype=np.float64)[None, :]
+        hex_width = 1.5
+        hex_height = float(np.sqrt(3.0))
+        xs = cs * hex_width + hex_width / 2.0
+        parity_shift = ((np.arange(board_cols, dtype=np.int64) & 1).astype(np.float64))[:, None]
+        ys = rs * hex_height + parity_shift * (hex_height / 2.0) + hex_height / 2.0
+
+        eng_bad = np.zeros((board_cols, board_rows), dtype=bool)
+        enemy_list = enemy_items if enemy_items is not None else []
+
+        # Partitionne les ennemis : paire round/round → formule euclidienne vectorisée ;
+        # autres → on agrège leurs empreintes dans un mask dilatable en distance hex.
+        mover_r_norm = round_base_radius_norm(mover_bs_i) if mover_is_round else 0.0
+        hex_mixed_mask = np.zeros((board_cols, board_rows), dtype=bool)
+        has_hex_mixed = False
+        for _, ce in enemy_list:
+            e_col = int(require_key(ce, "col"))
+            e_row = int(require_key(ce, "row"))
+            e_bs_raw = ce.get("BASE_SIZE", 1)
+            e_bs_i = e_bs_raw if isinstance(e_bs_raw, int) else 1
+            e_shape = ce.get("BASE_SHAPE", "round")
+            if mover_is_round and e_shape == "round":
+                e_r_norm = round_base_radius_norm(e_bs_i)
+                ex, ey = _hex_center(e_col, e_row)
+                dx = xs - float(ex)
+                dy = ys - float(ey)
+                d = np.hypot(dx, dy)
+                eng_bad |= (d - mover_r_norm - e_r_norm) < (req - 1e-6)
+            else:
+                # Dépose l'empreinte hex de l'ennemi (peu importe sa forme) dans le mask commun.
+                e_orient = int(ce.get("orientation", 0) or 0)
+                e_off_even, e_off_odd = precompute_footprint_offsets(e_shape, e_bs_i, e_orient)
+                e_off = e_off_even if (e_col & 1) == 0 else e_off_odd
+                for dc, dr in e_off:
+                    fc = e_col + int(dc)
+                    fr = e_row + int(dr)
+                    if 0 <= fc < board_cols and 0 <= fr < board_rows:
+                        hex_mixed_mask[fc, fr] = True
+                has_hex_mixed = True
+
+        if has_hex_mixed:
+            # Dilatation hex (cube-distance) de rayon ``ez`` par propagation itérative par parité.
+            # Équivalent à ``dilate_hex_set(mask, ez)`` : l'ancre viole l'engagement si une cellule
+            # de son empreinte tombe dans cette dilatation → ``min_distance_between_sets ≤ ez``.
+            dilated = hex_mixed_mask.copy()
+            for _ in range(int(ez)):
+                even_src = dilated & col_parity_mask
+                odd_src = dilated & ~col_parity_mask
+                nxt = dilated | _spread_by_kernel(even_src, nb_even) | _spread_by_kernel(
+                    odd_src, nb_odd
+                )
+                if np.array_equal(nxt, dilated):
+                    break
+                dilated = nxt
+            eng_bad_even_mix = _dilate_by_kernel(dilated, off_even_arr)
+            eng_bad_odd_mix = _dilate_by_kernel(dilated, off_odd_arr)
+            eng_bad |= np.where(col_parity_mask, eng_bad_even_mix, eng_bad_odd_mix)
+    elif ez == 1 and enemy_adjacent_hexes:
+        enemy_adj_mask = _mask_from_cells(enemy_adjacent_hexes)
+        eng_bad_even = _dilate_by_kernel(enemy_adj_mask, off_even_arr)
+        eng_bad_odd = _dilate_by_kernel(enemy_adj_mask, off_odd_arr)
+        eng_bad = np.where(col_parity_mask, eng_bad_even, eng_bad_odd)
+    else:
+        eng_bad = np.zeros((board_cols, board_rows), dtype=bool)
+
+    traverse_bad = bad_traverse | eng_bad
+
+    reach = np.zeros((board_cols, board_rows), dtype=bool)
+    reach[start_col, start_row] = True
+
+    allowed = ~traverse_bad
+    allowed[start_col, start_row] = True
+
+    for _ in range(int(move_range)):
+        even_src = reach & col_parity_mask
+        odd_src = reach & ~col_parity_mask
+        new_reach = reach.copy()
+        expanded_even = _spread_by_kernel(even_src, nb_even)
+        expanded_odd = _spread_by_kernel(odd_src, nb_odd)
+        new_reach |= expanded_even & allowed
+        new_reach |= expanded_odd & allowed
+        if np.array_equal(new_reach, reach):
+            break
+        reach = new_reach
+
+    valid_mask = reach & ~bad_dest
+    valid_mask[start_col, start_row] = False
+
+    valid_coords_cols, valid_coords_rows = np.where(valid_mask)
+    valid_destinations: List[Tuple[int, int]] = [
+        (int(c), int(r)) for c, r in zip(valid_coords_cols, valid_coords_rows)
+    ]
+
+    fpz_even_mask = valid_mask & col_parity_mask
+    fpz_odd_mask = valid_mask & ~col_parity_mask
+    footprint_zone_mask = _spread_by_kernel(fpz_even_mask, off_even_arr) | _spread_by_kernel(
+        fpz_odd_mask, off_odd_arr
+    )
+    start_offsets = off_even_arr if (start_col & 1) == 0 else off_odd_arr
+    for dc, dr in start_offsets:
+        fc = start_col + int(dc)
+        fr = start_row + int(dr)
+        if 0 <= fc < board_cols and 0 <= fr < board_rows:
+            footprint_zone_mask[fc, fr] = True
+
+    fpz_cols, fpz_rows = np.where(footprint_zone_mask)
+    footprint_zone: Set[Tuple[int, int]] = {
+        (int(c), int(r)) for c, r in zip(fpz_cols, fpz_rows)
+    }
+
+    visited_count = int(reach.sum())
+    return valid_destinations, footprint_zone, visited_count
+
+
 @profile_move_pool_build
 def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str) -> List[Tuple[int, int]]:
     """
@@ -917,11 +1240,16 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     # ez > 1 : une seule liste d’ennemis pour ``_movement_engagement_violates`` (évite O(units)×BFS).
     _enemy_items_for_engagement_ez: Optional[List[Tuple[Any, Any]]] = None
     if ez > 1:
-        _enemy_items_for_engagement_ez = [
-            (eid, ce)
-            for eid, ce in units_cache.items()
-            if str(eid) != unit_id_str and int(require_key(ce, "player")) != _mover_player_int
-        ]
+        _enemy_items_for_engagement_ez = _enemy_items_within_move_engagement_horizon(
+            game_state,
+            unit,
+            unit_id_str,
+            _mover_player_int,
+            start_col,
+            start_row,
+            int(move_range),
+            units_cache,
+        )
 
     if game_state.get("debug_mode", False) and "episode_number" in game_state and "turn" in game_state:
         episode = game_state.get("episode_number", "?")
@@ -1216,112 +1544,26 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         base_shape = unit.get("BASE_SHAPE", "round")
         orientation = unit.get("orientation", 0)
         _off_even, _off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
-        _rej_bounds = 0
-        _rej_walls = 0
-        _rej_occupied = 0
 
-        # Union d’empreintes : même résultat qu’après coup sur ``valid_destinations``, sans repasser
-        # sur ~valid×fp ajouts (empreinte départ + une passe par destination valide).
-        footprint_zone: Set[Tuple[int, int]] = set()
-        _so_start = _off_even if (start_pos[0] & 1) == 0 else _off_odd
-        for _dc, _dr in _so_start:
-            footprint_zone.add((start_pos[0] + _dc, start_pos[1] + _dr))
-
-        # Réutilisé pour ``ez > 1`` (évite une grosse allocation par voisin).
-        _fp_work: Set[Tuple[int, int]] = set()
-
-        while queue:
-            (cc, cr), cd = queue.popleft()
-            if cd >= move_range:
-                continue
-            nd = cd + 1
-            parity = cc & 1
-            if parity == 0:
-                nb_list = (
-                    (cc, cr - 1), (cc + 1, cr - 1), (cc + 1, cr),
-                    (cc, cr + 1), (cc - 1, cr), (cc - 1, cr - 1),
-                )
-            else:
-                nb_list = (
-                    (cc, cr - 1), (cc + 1, cr), (cc + 1, cr + 1),
-                    (cc, cr + 1), (cc - 1, cr + 1), (cc - 1, cr),
-                )
-            for nb in nb_list:
-                nc, nr = nb
-                in_b = 0 <= nc < _bcols and 0 <= nr < _brows
-                if in_b:
-                    _vidx = nc + nr * board_cols
-                    if _vis[_vidx]:
-                        continue
-                offsets = _off_even if (nc & 1) == 0 else _off_odd
-                fp_valid = True
-                _rej_reason = None
-                for dc, dr in offsets:
-                    fc, fr = nc + dc, nr + dr
-                    if fc < 0 or fr < 0 or fc >= _bcols or fr >= _brows:
-                        fp_valid = False
-                        _rej_reason = "bounds"
-                        break
-                    if (fc, fr) in _walls:
-                        fp_valid = False
-                        _rej_reason = "walls"
-                        break
-                    if (fc, fr) in _enemy_occ:
-                        fp_valid = False
-                        _rej_reason = "occupied"
-                        break
-                if not fp_valid:
-                    if _rej_reason == "bounds":
-                        _rej_bounds += 1
-                    elif _rej_reason == "walls":
-                        _rej_walls += 1
-                    elif _rej_reason == "occupied":
-                        _rej_occupied += 1
-                    continue
-                # ez ≤ 1 : pas de set d’empreinte (parcours offsets ; souvent arrêt hâtif).
-                if ez <= 1:
-                    _eng_hit = False
-                    for dc, dr in offsets:
-                        if (nc + dc, nr + dr) in _enemy_adj:
-                            _eng_hit = True
-                            break
-                    if _eng_hit:
-                        blocked_enemy_adjacent_count += 1
-                        continue
-                else:
-                    _fp_work.clear()
-                    for dc, dr in offsets:
-                        _fp_work.add((nc + dc, nr + dr))
-                    if _movement_engagement_violates(
-                        game_state,
-                        unit,
-                        nc,
-                        nr,
-                        _fp_work,
-                        units_cache,
-                        None,
-                        enemy_cache_items=_enemy_items_for_engagement_ez,
-                        engagement_zone_ez=ez,
-                    ):
-                        blocked_enemy_adjacent_count += 1
-                        continue
-                if in_b:
-                    _vis[_vidx] = 1
-                    visited_n += 1
-                queue.append((nb, nd))
-                # Traversal may overlap allied models; destination may not overlap any model.
-                dest_on_unit = False
-                for dc, dr in offsets:
-                    if (nc + dc, nr + dr) in _occupied:
-                        dest_on_unit = True
-                        break
-                if not dest_on_unit and nb != start_pos:
-                    valid_destinations.append(nb)
-                    if ez > 1:
-                        footprint_zone.update(_fp_work)
-                    else:
-                        for dc, dr in offsets:
-                            footprint_zone.add((nc + dc, nr + dr))
+        # Chemin unique vectorisé NumPy, sémantiquement équivalent au BFS Python hexagonal.
+        # Gère toutes les formes de socles (mover et ennemis) et toutes les valeurs de ``ez``.
+        valid_destinations, footprint_zone, visited_n = _build_multi_hex_vectorized(
+            game_state=game_state,
+            unit=unit,
+            start_col=start_col,
+            start_row=start_row,
+            move_range=move_range,
+            off_even=_off_even,
+            off_odd=_off_odd,
+            board_cols=_bcols,
+            board_rows=_brows,
+            walls_set=_walls,
+            enemy_occupied_set=_enemy_occ,
+            occupied_set=_occupied,
+            enemy_adjacent_hexes=_enemy_adj,
+            enemy_items=_enemy_items_for_engagement_ez,
+            ez=ez,
+        )
 
     _m_bfs_end = _perf_clock.perf_counter() if _pt else None
     game_state["valid_move_destinations_pool"] = valid_destinations
@@ -1330,7 +1572,6 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     if is_single_hex:
         footprint_zone = set(valid_destinations)
         footprint_zone.add(start_pos)
-    # multi-hex : ``footprint_zone`` déjà rempli pendant la BFS (empreinte départ + destinations valides)
 
     game_state["move_preview_footprint_zone"] = footprint_zone
     game_state["move_preview_border"] = []

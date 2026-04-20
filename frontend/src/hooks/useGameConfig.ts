@@ -91,6 +91,8 @@ interface GameRules {
   max_units_per_player: number;
   board_size?: [number, number];
   engagement_zone?: number;
+  /** Plafond diamètre hex (prune engagement moteur, défaut côté JSON). */
+  max_base_size_hex?: number;
   charge_max_distance?: number;
 }
 

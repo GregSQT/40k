@@ -19,7 +19,8 @@
       "swarm": 1.0,
       "troop": 1.5,
       "elite": 2.0
-    }
+    },
+    "max_base_size_hex": 35
   },
   "gameplay": {
     "phase_order": ["move", "shoot", "charge", "fight"],
