@@ -15,6 +15,13 @@ def test_make_json_serializable_handles_tuple_keys_set_and_object_dict() -> None
     assert sorted(result["value"]["a,1"]) == [1, 2]
 
 
+def test_make_json_serializable_numpy_array_and_scalar() -> None:
+    np = pytest.importorskip("numpy")
+    assert api_server.make_json_serializable(np.array([1, 2, 3])) == [1, 2, 3]
+    assert api_server.make_json_serializable(np.int64(7)) == 7
+    assert api_server.make_json_serializable(np.float64(3.5)) == 3.5
+
+
 def test_game_state_for_json_removes_topology_arrays() -> None:
     engine_instance = type("E", (), {"game_state": {"los_topology": 1, "pathfinding_topology": 2, "x": 3}})()
     state = api_server._game_state_for_json(engine_instance)

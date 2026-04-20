@@ -56,22 +56,45 @@ async function copyConfigs() {
     }
   } catch (_) {}
 
+  // Scénario par défaut : pas de ``config/scenario.json`` dans le dépôt → on synchronise depuis
+  // ``scenario_pvp.json`` (même contrat JSON) pour éviter le skip permanent au ``npm run dev``.
+  const scenarioSourcePath = (() => {
+    const canonical = join(configDir, "scenario.json");
+    if (existsSync(canonical)) {
+      return canonical;
+    }
+    const fallback = join(configDir, "scenario_pvp.json");
+    return existsSync(fallback) ? fallback : null;
+  })();
+
   // Copy each config file
   let copiedCount = 0;
   let skippedCount = 0;
 
   for (const entry of configFiles) {
-    const sourcePath = typeof entry === "string"
-      ? join(configDir, entry)
-      : entry.source === "board_config"
-        ? boardConfigSource
-        : join(configDir, entry.source);
+    const sourcePath = (() => {
+      if (typeof entry === "string") {
+        if (entry === "scenario.json") {
+          return scenarioSourcePath;
+        }
+        return join(configDir, entry);
+      }
+      if (entry.source === "board_config") {
+        return boardConfigSource;
+      }
+      return join(configDir, entry.source);
+    })();
     const targetPath = join(targetDir, typeof entry === "string" ? entry : entry.target);
 
-    if (existsSync(sourcePath)) {
+    if (sourcePath && existsSync(sourcePath)) {
       try {
         copyFileSync(sourcePath, targetPath);
-        console.log(`✅ Copied: ${typeof entry === "string" ? entry : entry.target}`);
+        const label = typeof entry === "string" ? entry : entry.target;
+        if (typeof entry === "string" && entry === "scenario.json" && scenarioSourcePath?.endsWith("scenario_pvp.json")) {
+          console.log(`✅ Copied: ${label} (from scenario_pvp.json — add config/scenario.json to override)`);
+        } else {
+          console.log(`✅ Copied: ${label}`);
+        }
         copiedCount++;
       } catch (error) {
         console.error(`❌ Failed to copy ${typeof entry === "string" ? entry : entry.target}:`, error.message);

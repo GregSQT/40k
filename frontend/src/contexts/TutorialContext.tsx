@@ -370,7 +370,14 @@ interface TutorialProviderProps {
   gameState: {
     phase?: string;
     fight_subphase?: string | null;
-    units?: Array<{ id: string | number; player: number; col?: number; row?: number }>;
+    units?: Array<{
+      id: string | number;
+      player: number;
+      col?: number;
+      row?: number;
+      /** Présent côté API quand le cache ne couvre pas l’unité (ex. désync tutoriel). */
+      HP_CUR?: number;
+    }>;
     units_cache?: Record<string, unknown>;
   } | null;
   /** options.preserveP1PositionsFrom : état de jeu courant pour garder les positions des unités P1 (ex. Intercessor après 1-25). */

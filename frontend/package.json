@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "postinstall": "node ../scripts/link-root-node-modules.mjs",
     "dev": "node ../scripts/copy-configs.js && vite",
     "copy-configs": "node ../scripts/copy-configs.js",
     "tutorial:check-sync": "node scripts/check_tutorial_md_yaml_sync.mjs",
@@ -24,6 +25,7 @@
     "test:coverage:global": "vitest run --coverage"
   },
   "dependencies": {
+    "@pixi/filter-blur": "^7.4.3",
     "js-yaml": "^4.1.0",
     "pixi.js-legacy": "^7.4.3",
     "react": "^19.1.1",
@@ -51,8 +53,22 @@
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.13",
     "typescript": "~5.8.3",
-    "typescript-eslint": "^8.39.1",
-    "vite": "^7.1.2",
+    "typescript-eslint": "^8.58.2",
+    "vite": "^7.3.2",
     "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "overrides": {
+    "test-exclude": "^8.0.0",
+    "ajv": "6.14.0",
+    "brace-expansion": "^5.0.5",
+    "flatted": "3.4.2",
+    "minimatch": "9.0.7",
+    "picomatch": "4.0.4",
+    "qs": "6.14.2",
+    "rollup": "4.60.2",
+    "tar": "7.5.11"
   }
 }

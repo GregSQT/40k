@@ -315,8 +315,8 @@ interface LegacyPvPEvent {
  */
 export function convertLegacyPvPEvent(legacyEvent: LegacyPvPEvent): BaseLogEntry {
   return {
-    type: legacyEvent.type,
-    message: legacyEvent.message,
+    type: (legacyEvent.type ?? "phase_change") as BaseLogEntry["type"],
+    message: legacyEvent.message ?? "",
     turnNumber: legacyEvent.turnNumber,
     phase: legacyEvent.phase,
     unitType: legacyEvent.unitType,

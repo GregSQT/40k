@@ -41,9 +41,7 @@ interface ReplayAction {
   // Fight action fields
   attacker_id?: number;
   attacker_pos?: { col: number; row: number };
-  hit_target?: number;
   hit_result?: string;
-  wound_target?: number;
   wound_result?: string;
   save_result?: string;
   // Weapon info
@@ -976,7 +974,8 @@ export function parse_log_file_from_text(text: string): ReplayData {
         action.wound_result = "FAIL";
       }
       if (saveMatch) {
-        action.save_result = action.damage > 0 ? "FAIL" : "SAVED";
+        const dmg = action.damage ?? 0;
+        action.save_result = dmg > 0 ? "FAIL" : "SAVED";
       }
 
       currentEpisode.actions.push(action);

@@ -1,9 +1,28 @@
 // frontend/src/components/BoardDisplay.tsx
 import type React from "react";
 import * as PIXI from "pixi.js-legacy";
+import { BlurFilter } from "@pixi/filter-blur";
 import { addHexKeysToSet } from "../utils/movePoolRefsSync";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import { tryBuildHexUnionMaskPolygons } from "../utils/hexUnionBoundaryPolygon";
+import { smoothMaskLoopsForRender } from "../utils/polygonSmooth";
+
+/** Contourne TS2345 : certaines fusions de types sur `.on` attendent `(...args: unknown[]) => void`. */
+function asPixiUnknownArgsPointerListener(
+  fn: (e: PIXI.FederatedPointerEvent) => void,
+): (...args: unknown[]) => void {
+  return fn as (...args: unknown[]) => void;
+}
+
+/** Passes Chaikin sur les masques move/advance — adoucit la géométrie (rendu uniquement). */
+const MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS = 2;
+/**
+ * Flou léger sur la texture masque : le vrai « bruit » vient surtout de l’aliasage pixels (masque binaire
+ * en RT), pas des angles du polygone — Chaikin seul change peu à l’écran.
+ */
+const MOVE_ADVANCE_MASK_SPRITE_BLUR_STRENGTH = 2;
+/** Qualité flou masque : 1 = moins cher GPU, suffisant avec le léger strength. */
+const MOVE_ADVANCE_MASK_SPRITE_BLUR_QUALITY = 1;
 
 interface BoardConfig {
   cols: number;
@@ -754,20 +773,11 @@ function renderMoveAdvanceDestPoolCircleLayer(
   const rt = (() => {
     if (precomputedWorldMaskLoops && precomputedWorldMaskLoops.length > 0) {
       maskUnionKind = "server_loops";
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-      for (const loop of precomputedWorldMaskLoops) {
-        for (let i = 0; i < loop.length; i += 2) {
-          const vx = loop[i]!;
-          const vy = loop[i + 1]!;
-          if (vx < minX) minX = vx;
-          if (vx > maxX) maxX = vx;
-          if (vy < minY) minY = vy;
-          if (vy > maxY) maxY = vy;
-        }
-      }
+      const prep = smoothMaskLoopsForRender(
+        precomputedWorldMaskLoops,
+        MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
+      );
+      const { minX, minY, maxX, maxY } = prep;
       const w = Math.ceil(maxX - minX);
       const h = Math.ceil(maxY - minY);
       if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
@@ -794,7 +804,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
       const g = new PIXI.Graphics();
       g.name = `${spriteName}-mask-server-loops`;
       g.beginFill(0xffffff, 1.0);
-      for (const loop of precomputedWorldMaskLoops) {
+      for (const loop of prep.smoothed) {
         g.drawPolygon(loop);
       }
       g.endFill();
@@ -820,13 +830,20 @@ function renderMoveAdvanceDestPoolCircleLayer(
       let minY: number;
       let maxX: number;
       let maxY: number;
+      /** Boucles prêtes pour le draw (lissées) — uniquement si ``polyMask`` présent. */
+      let hexUnionSmoothedDraw: number[][] | null = null;
 
       if (polyMask) {
+        const hexPrep = smoothMaskLoopsForRender(
+          polyMask.loops,
+          MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
+        );
+        hexUnionSmoothedDraw = hexPrep.smoothed;
         maskUnionKind = "polygon";
-        minX = polyMask.minX;
-        minY = polyMask.minY;
-        maxX = polyMask.maxX;
-        maxY = polyMask.maxY;
+        minX = hexPrep.minX;
+        minY = hexPrep.minY;
+        maxX = hexPrep.maxX;
+        maxY = hexPrep.maxY;
       } else {
         maskUnionKind = "hex_chunks";
         minX = Infinity;
@@ -878,11 +895,11 @@ function renderMoveAdvanceDestPoolCircleLayer(
       });
       // Même schéma que le masque « disques » : un `Graphics` décalé de `(-minX,-minY)` vers la RT.
       // Un `Container` hors stage + `render(holder)` peut produire une RT vide (transforms).
-      if (polyMask) {
+      if (polyMask && hexUnionSmoothedDraw) {
         const g = new PIXI.Graphics();
         g.name = `${spriteName}-mask-hex-union-polygon`;
         g.beginFill(0xffffff, 1.0);
-        for (const loop of polyMask.loops) {
+        for (const loop of hexUnionSmoothedDraw) {
           g.drawPolygon(loop);
         }
         g.endFill();
@@ -979,6 +996,14 @@ function renderMoveAdvanceDestPoolCircleLayer(
   maskSprite.name = `${spriteName}-mask-sprite`;
   maskSprite.position.set(maskBounds.x, maskBounds.y);
   maskSprite.roundPixels = false;
+  const maskBlur = new BlurFilter(
+    MOVE_ADVANCE_MASK_SPRITE_BLUR_STRENGTH,
+    MOVE_ADVANCE_MASK_SPRITE_BLUR_QUALITY,
+    undefined,
+    5,
+  );
+  maskBlur.repeatEdgePixels = true;
+  maskSprite.filters = [maskBlur];
 
   // Grand disque cible. Alpha 0.28 (cohérence avec le halo de charge).
   const diskGfx = new PIXI.Graphics();
@@ -1613,7 +1638,9 @@ export const drawBoard = (
         return { col: bestCol, row: bestRow };
       };
 
-      hitArea.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+      hitArea.on(
+        "pointerdown",
+        asPixiUnknownArgsPointerListener((e: PIXI.FederatedPointerEvent) => {
         if (e.button !== 0) return;
         const { col, row } = resolveHex(e.getLocalPosition(hitArea));
         const key = `${col},${row}`;
@@ -1672,10 +1699,13 @@ export const drawBoard = (
             })
           );
         }
-      });
+      }
+    ));
 
       let lastHoverCol = -1, lastHoverRow = -1;
-      hitArea.on("pointermove", (e: PIXI.FederatedPointerEvent) => {
+      hitArea.on(
+        "pointermove",
+        asPixiUnknownArgsPointerListener((e: PIXI.FederatedPointerEvent) => {
         const localPos = e.getLocalPosition(hitArea);
         const { col, row } = resolveHex(localPos);
         const hexChanged = col !== lastHoverCol || row !== lastHoverRow;
@@ -1688,7 +1718,8 @@ export const drawBoard = (
             detail: { col, row, pixelX: localPos.x, pixelY: localPos.y, hexChanged },
           })
         );
-      });
+      }
+    ));
 
       highlightContainer.addChild(hitArea);
     }

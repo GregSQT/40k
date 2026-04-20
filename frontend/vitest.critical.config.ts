@@ -7,7 +7,7 @@ export default defineConfig({
       "src/utils/gameHelpers.test.ts",
       "src/utils/replayParser.test.ts",
     ],
-    environment: "jsdom",
+    environment: "node",
     coverage: {
       provider: "v8",
       reporter: ["text", "text-summary"],

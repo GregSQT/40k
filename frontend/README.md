@@ -1,5 +1,11 @@
 # React + TypeScript + Vite
 
+## Prerequisites
+
+`package.json` declares **Node.js >= 20.19.0** (`engines.node`). Older runtimes may print warnings (Vite 7, jsdom, etc.) or misbehave; upgrade Node to match.
+
+After `npm install`, the `postinstall` script tries to add a symlink at the **repository root**: `node_modules` → `frontend/node_modules`. That lets TypeScript resolve imports like `pixi.js-legacy` when the IDE workspace folder is the monorepo root (not only `frontend/`). If a real `node_modules` already exists at the root, the script does nothing.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

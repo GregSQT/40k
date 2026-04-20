@@ -15,7 +15,7 @@ import hashlib
 import secrets
 import copy
 from typing import Dict, Any, Optional, Tuple
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 
 # Add parent directory (project root) to path
@@ -46,9 +46,33 @@ from services.endless_duty_runtime import (
 AUTH_DB_PATH = os.path.join(abs_parent, "config", "users.db")
 PBKDF2_ITERATIONS = 200000
 
+try:
+    import orjson as _orjson
+except ImportError:
+    _orjson = None
+
+
+def api_json_response(payload: Dict[str, Any]) -> Response:
+    """Sérialise la charge en JSON. Utilise orjson si disponible (souvent plus rapide que flask.jsonify)."""
+    if _orjson is not None:
+        return Response(
+            _orjson.dumps(payload),
+            mimetype="application/json; charset=utf-8",
+        )
+    return jsonify(payload)
+
 
 def make_json_serializable(obj):
     """Recursively convert non-JSON-serializable types to serializable ones."""
+    try:
+        import numpy as np
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, np.generic):
+            return obj.item()
+    except ImportError:
+        pass
+
     # Handle ParsedWeaponRule objects
     try:
         from engine.weapons.rules import ParsedWeaponRule
@@ -65,9 +89,14 @@ def make_json_serializable(obj):
             # Convert tuple keys to strings
             if isinstance(k, tuple):
                 k = ",".join(str(x) for x in k)
-            result[k] = make_json_serializable(v)
+            if isinstance(v, (str, int, float, bool, type(None))):
+                result[k] = v
+            else:
+                result[k] = make_json_serializable(v)
         return result
     elif isinstance(obj, (list, tuple)):
+        if not obj or all(isinstance(x, (str, int, float, bool, type(None))) for x in obj):
+            return list(obj)
         return [make_json_serializable(item) for item in obj]
     elif isinstance(obj, (set, frozenset)):
         return [make_json_serializable(item) for item in obj]
@@ -1541,7 +1570,7 @@ def execute_action():
                 serializable_state = make_json_serializable(_game_state_for_json(engine))
                 _sync_units_hp_from_cache(serializable_state, engine.game_state)
                 _attach_player_types(serializable_state, engine)
-                return jsonify(
+                return api_json_response(
                     {
                         "success": True,
                         "result": {"action": "endless_duty_status"},
@@ -1635,7 +1664,7 @@ def execute_action():
         serializable_state["action_logs"] = []
 
         _j0 = time.perf_counter() if _api_perf else None
-        resp = jsonify({
+        resp = api_json_response({
             "success": success,
             "result": result,
             "game_state": serializable_state,

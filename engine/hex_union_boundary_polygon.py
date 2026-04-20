@@ -10,21 +10,14 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+import numpy as np
+
 from shared.data_validation import require_key
 
 Q = 1e4
 
 # Sommets quantifiés en entiers (même sémantique que l’ancien _q + clés str, sans allocations str).
 Vertex = Tuple[int, int]
-
-
-def _vertex_ixy(x: float, y: float) -> Vertex:
-    return (int(round(x * Q)), int(round(y * Q)))
-
-
-def _q_float(n: float) -> float:
-    """Identique à l’historique ``round(n * Q) / Q`` pour les points de boucle."""
-    return round(n * Q) / Q
 
 
 def _canonical_edge(v0: Vertex, v1: Vertex) -> Tuple[Vertex, Vertex]:
@@ -72,27 +65,65 @@ def compute_move_preview_mask_loops_world(
     if not hex_cells:
         return None
     hex_radius, margin = _board_hex_radius_margin(game_state)
-    corner_off: List[Tuple[float, float]] = []
-    for vi in range(6):
-        ang = (vi * math.pi) / 3.0
-        corner_off.append((hex_radius * math.cos(ang), hex_radius * math.sin(ang)))
+    # Pas de tri : le multi-ensemble d’arêtes ne dépend pas de l’ordre des hex.
+    cells_list = list(hex_cells)
+    cs = np.fromiter((c for c, _ in cells_list), dtype=np.int64, count=len(cells_list))
+    rs = np.fromiter((r for _, r in cells_list), dtype=np.int64, count=len(cells_list))
+    n = int(cs.shape[0])
+    hex_width = 1.5 * hex_radius
+    hex_height = math.sqrt(3) * hex_radius
+    hx = cs.astype(np.float64) * hex_width + hex_width / 2.0 + margin
+    parity = (cs & 1).astype(np.float64)
+    hy = (
+        rs.astype(np.float64) * hex_height
+        + parity * (hex_height / 2.0)
+        + hex_height / 2.0
+        + margin
+    )
+    ang = (np.arange(6, dtype=np.float64) * math.pi) / 3.0
+    corner_x = hex_radius * np.cos(ang)
+    corner_y = hex_radius * np.sin(ang)
+    cx = hx[:, None] + corner_x[None, :]
+    cy = hy[:, None] + corner_y[None, :]
+    x0 = cx
+    y0 = cy
+    x1 = np.roll(cx, -1, axis=1)
+    y1 = np.roll(cy, -1, axis=1)
+    n_edges = n * 6
+    E = np.empty((n_edges, 4), dtype=np.float64)
+    E[:, 0] = x0.ravel()
+    E[:, 1] = y0.ravel()
+    E[:, 2] = x1.ravel()
+    E[:, 3] = y1.ravel()
 
+    # Sommets quantifiés et coordonnées affichage : tout vectorisé — la boucle Python ne fait
+    # plus d’appels ``float()`` / ``round()`` par arête (gain net sur ~52k arêtes).
+    ix0 = np.rint(E[:, 0] * Q).astype(np.int64, copy=False)
+    iy0 = np.rint(E[:, 1] * Q).astype(np.int64, copy=False)
+    ix1 = np.rint(E[:, 2] * Q).astype(np.int64, copy=False)
+    iy1 = np.rint(E[:, 3] * Q).astype(np.int64, copy=False)
+    qfx0 = np.rint(E[:, 0] * Q) / Q
+    qfy0 = np.rint(E[:, 1] * Q) / Q
+    qfx1 = np.rint(E[:, 2] * Q) / Q
+    qfy1 = np.rint(E[:, 3] * Q) / Q
+
+    # Comptage des arêtes en O(n) par dict — ``np.unique`` (tri) était plus lent que l’historique
+    # sur ~52k arêtes (régression perf observée en prod).
     edge_count: Dict[Tuple[Vertex, Vertex], int] = {}
     pos: Dict[Vertex, Tuple[float, float]] = {}
-    for c, r in hex_cells:
-        hx, hy = _hex_center_world(c, r, hex_radius, margin)
-        for i in range(6):
-            x0, y0 = hx + corner_off[i][0], hy + corner_off[i][1]
-            j = (i + 1) % 6
-            x1, y1 = hx + corner_off[j][0], hy + corner_off[j][1]
-            k0 = _vertex_ixy(x0, y0)
-            k1 = _vertex_ixy(x1, y1)
-            if k0 not in pos:
-                pos[k0] = (_q_float(x0), _q_float(y0))
-            if k1 not in pos:
-                pos[k1] = (_q_float(x1), _q_float(y1))
-            ek = _canonical_edge(k0, k1)
-            edge_count[ek] = edge_count.get(ek, 0) + 1
+    for i in range(n_edges):
+        a0x = int(ix0[i])
+        a0y = int(iy0[i])
+        a1x = int(ix1[i])
+        a1y = int(iy1[i])
+        k0 = (a0x, a0y)
+        k1 = (a1x, a1y)
+        if k0 not in pos:
+            pos[k0] = (float(qfx0[i]), float(qfy0[i]))
+        if k1 not in pos:
+            pos[k1] = (float(qfx1[i]), float(qfy1[i]))
+        ek = _canonical_edge(k0, k1)
+        edge_count[ek] = edge_count.get(ek, 0) + 1
 
     boundary_edges: List[Tuple[Vertex, Vertex]] = []
     for ek, c in edge_count.items():
