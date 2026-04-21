@@ -582,8 +582,6 @@ export default function Board({
   // Hover preview: imperative PIXI layers (no React re-render)
   const hoverOverlayRef = useRef<PIXI.Graphics | null>(null);
   const hoverSpriteRef = useRef<PIXI.Container | null>(null);
-  /** Après création du sprite preview : premier ``mousemove`` fait un snap ; ensuite lerp vers l’ancre cible. */
-  const movePreviewIconLerpInitializedRef = useRef(false);
   /** Ligne départ → pointeur + libellé distance hex (preview move) */
   const movePreviewGuideLineRef = useRef<PIXI.Graphics | null>(null);
   /** Ligne mesure règle (ancre → hex sous curseur) */
@@ -1079,6 +1077,9 @@ export default function Board({
     // Pre-parse pixel positions for fast nearest-hex lookups
     let zonePixels: { x: number; y: number }[] | null = null;
     let destPixels: { x: number; y: number; col: number; row: number }[] | null = null;
+    /** Grille spatiale : évite un scan O(n) sur ~5k ancres à chaque mousemove. */
+    let destPixelBuckets: Map<string, { x: number; y: number; col: number; row: number }[]> | null = null;
+    const DEST_BUCKET_PX = 96;
 
     const buildZonePixels = () => {
       let pool: Set<string> | undefined | null;
@@ -1119,21 +1120,92 @@ export default function Board({
         phase === "charge" && mode === "chargePreview"
           ? chargeDestPoolRef?.current
           : resolvedMoveDestPoolRef.current;
+      destPixelBuckets = null;
       if (!pool || pool.size === 0) {
         destPixels = null;
         return;
       }
       destPixels = [];
+      const buck = new Map<string, { x: number; y: number; col: number; row: number }[]>();
       for (const k of pool) {
         const sep = k.indexOf(",");
         const c = Number(k.substring(0, sep));
         const r = Number(k.substring(sep + 1));
-        destPixels.push({ x: hxX(c), y: hxY(c, r), col: c, row: r });
+        const x = hxX(c);
+        const y = hxY(c, r);
+        const dp = { x, y, col: c, row: r };
+        destPixels.push(dp);
+        const bx = Math.floor(x / DEST_BUCKET_PX);
+        const by = Math.floor(y / DEST_BUCKET_PX);
+        const bkey = `${bx},${by}`;
+        let arr = buck.get(bkey);
+        if (!arr) {
+          arr = [];
+          buck.set(bkey, arr);
+        }
+        arr.push(dp);
       }
+      destPixelBuckets = buck;
+    };
+
+    const nearestDestToPixel = (
+      px: number,
+      py: number,
+    ): { x: number; y: number; col: number; row: number } | null => {
+      if (!destPixels || destPixels.length === 0) return null;
+      if (!destPixelBuckets || destPixelBuckets.size === 0) {
+        let best = destPixels[0]!;
+        let bestD = Infinity;
+        for (let i = 0; i < destPixels.length; i++) {
+          const dp = destPixels[i]!;
+          const d = (dp.x - px) * (dp.x - px) + (dp.y - py) * (dp.y - py);
+          if (d < bestD) {
+            bestD = d;
+            best = dp;
+          }
+        }
+        return best;
+      }
+      const bx = Math.floor(px / DEST_BUCKET_PX);
+      const by = Math.floor(py / DEST_BUCKET_PX);
+      let bestD = Infinity;
+      let best: { x: number; y: number; col: number; row: number } | null = null;
+      const tryBand = (band: number) => {
+        for (let dbx = bx - band; dbx <= bx + band; dbx++) {
+          for (let dby = by - band; dby <= by + band; dby++) {
+            const list = destPixelBuckets!.get(`${dbx},${dby}`);
+            if (!list) continue;
+            for (const dp of list) {
+              const d = (dp.x - px) * (dp.x - px) + (dp.y - py) * (dp.y - py);
+              if (d < bestD) {
+                bestD = d;
+                best = dp;
+              }
+            }
+          }
+        }
+      };
+      tryBand(1);
+      if (bestD === Infinity) tryBand(4);
+      if (bestD === Infinity) tryBand(12);
+      if (bestD === Infinity) {
+        for (let i = 0; i < destPixels.length; i++) {
+          const dp = destPixels[i]!;
+          const d = (dp.x - px) * (dp.x - px) + (dp.y - py) * (dp.y - py);
+          if (d < bestD) {
+            bestD = d;
+            best = dp;
+          }
+        }
+      }
+      return best;
     };
 
     buildZonePixels();
     buildDestPixels();
+
+    /** Évite un setState React à chaque pixel de mouvement (coûteux). */
+    let lastMovePreviewTooltipKey = "";
 
     // DOM mousemove: icon follows cursor pixel-perfect (move, advance tir, charge destination)
     const canvas = canvasContainerRef.current?.querySelector("canvas");
@@ -1160,7 +1232,6 @@ export default function Board({
 
       // Build the icon container once per selected unit
       if (!hoverSpriteRef.current || hoverSpriteRef.current.destroyed || spriteBuiltForUnitId !== selectedUnitId) {
-        movePreviewIconLerpInitializedRef.current = false;
         if (hoverSpriteRef.current) {
           hoverSpriteRef.current.destroy({ children: true });
           hoverSpriteRef.current = null;
@@ -1216,14 +1287,12 @@ export default function Board({
         return;
       }
 
-      let bestIdx = 0;
-      let bestDist = Infinity;
-      for (let i = 0; i < destPixels.length; i++) {
-        const dp = destPixels[i];
-        const d = (dp.x - px) * (dp.x - px) + (dp.y - py) * (dp.y - py);
-        if (d < bestDist) { bestDist = d; bestIdx = i; }
+      const best = nearestDestToPixel(px, py);
+      if (!best) {
+        container.visible = false;
+        hideMovePreviewGuides();
+        return;
       }
-      const best = destPixels[bestIdx];
 
       // Only show the icon if cursor is reasonably close (within footprint zone or nearby)
       const approxCol = Math.round((px - HEX_WIDTH_H / 2 - MARGIN_H) / HEX_WIDTH_H);
@@ -1253,25 +1322,8 @@ export default function Board({
         }
       }
 
-      // Suivi souple : lerp vers l’ancre la plus proche ; snap si grand saut (changement d’ancre rapide).
-      const ICON_FOLLOW_LERP = 0.42;
-      const ICON_FOLLOW_SNAP_PX = 140;
-      const tx = best.x;
-      const ty = best.y;
-      if (!movePreviewIconLerpInitializedRef.current) {
-        container.position.set(tx, ty);
-        movePreviewIconLerpInitializedRef.current = true;
-      } else {
-        const cx = container.position.x;
-        const cy = container.position.y;
-        const dx = tx - cx;
-        const dy = ty - cy;
-        if (dx * dx + dy * dy >= ICON_FOLLOW_SNAP_PX * ICON_FOLLOW_SNAP_PX) {
-          container.position.set(tx, ty);
-        } else {
-          container.position.set(cx + dx * ICON_FOLLOW_LERP, cy + dy * ICON_FOLLOW_LERP);
-        }
-      }
+      // Snap direct sur l’ancre la plus proche (pas de lerp : coût perçu + inutile car positions discrètes).
+      container.position.set(best.x, best.y);
       container.visible = true;
       const iconCol = best.col;
       const iconRow = best.row;
@@ -1339,12 +1391,18 @@ export default function Board({
       guideLine.lineTo(previewIconX, previewIconY);
       guideLine.visible = true;
 
-      setMovePreviewDistanceTooltip({
-        visible: true,
-        text: tooltipCharge,
-        x: rect.left + previewIconX / scaleX,
-        y: rect.top + previewIconY / scaleY,
-      });
+      const tipX = Math.round(rect.left + previewIconX / scaleX);
+      const tipY = Math.round(rect.top + previewIconY / scaleY);
+      const tipKey = `${tooltipCharge}|${tipX}|${tipY}`;
+      if (tipKey !== lastMovePreviewTooltipKey) {
+        lastMovePreviewTooltipKey = tipKey;
+        setMovePreviewDistanceTooltip({
+          visible: true,
+          text: tooltipCharge,
+          x: tipX,
+          y: tipY,
+        });
+      }
 
       hoveredHexRef.current = { col: iconCol, row: iconRow };
 
@@ -1356,20 +1414,10 @@ export default function Board({
           ? chargeDestPoolRef?.current
           : resolvedMoveDestPoolRef.current;
       if (!anchorPoolForLos?.has(`${iconCol},${iconRow}`)) {
-        if (!destPixels) buildDestPixels();
-        if (destPixels && destPixels.length > 0) {
-          const ix = container.position.x;
-          const iy = container.position.y;
-          let bestDist = Infinity;
-          for (let i = 0; i < destPixels.length; i++) {
-            const dp = destPixels[i];
-            const d = (dp.x - ix) * (dp.x - ix) + (dp.y - iy) * (dp.y - iy);
-            if (d < bestDist) {
-              bestDist = d;
-              losCol = dp.col;
-              losRow = dp.row;
-            }
-          }
+        const nearLos = nearestDestToPixel(container.position.x, container.position.y);
+        if (nearLos) {
+          losCol = nearLos.col;
+          losRow = nearLos.row;
         }
       }
 
@@ -1482,7 +1530,6 @@ export default function Board({
       setMovePreviewLosBlinkIds([]);
       setMovePreviewLosCoverById({});
       if (hoverSpriteRef.current) hoverSpriteRef.current.visible = false;
-      movePreviewIconLerpInitializedRef.current = false;
       if (movePreviewGuideLineRef.current && !movePreviewGuideLineRef.current.destroyed) {
         movePreviewGuideLineRef.current.clear();
         movePreviewGuideLineRef.current.visible = false;
