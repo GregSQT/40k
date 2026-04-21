@@ -21,41 +21,10 @@ function asPixiUnknownArgsPointerListener(
 const MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS = 5;
 /** Autorise des passes Chaikin supplémentaires sur les très gros contours (défaut global 48k). */
 const MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS = 120_000;
-/**
- * Suréchantillonnage de la RT masque : plus de pixels sur le contour = moins d’escalier, **sans** flou.
- * (Pas de BlurFilter : contour net ; l’anti-alias vient du rendu haute résolution + Chaikin sur le poly.)
- */
-const MOVE_MASK_RT_RESOLUTION_SCALE = 3;
 
 const moveAdvanceMaskSmoothOptions = {
   maxVertsAfterOneChaikinStep: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
 } as const;
-
-/** Évite de re-rendre une RT masque identique (même géométrie + résolution) — ex. re-clic unité. */
-let moveAdvanceMaskServerLoopsCache: {
-  key: string;
-  texture: PIXI.RenderTexture;
-  maskBounds: PIXI.Rectangle;
-} | null = null;
-
-/** Empreinte des boucles **lissées** (contenu réel de la RT masque). */
-function fingerprintSmoothedMaskLoops(smoothed: number[][]): string {
-  let h = 2166136261 >>> 0;
-  for (let li = 0; li < smoothed.length; li++) {
-    const L = smoothed[li]!;
-    h = (Math.imul(h ^ L.length, 16777619) >>> 0) ^ 0;
-    const step = Math.max(2, Math.floor(L.length / 16)) * 2;
-    for (let i = 0; i < L.length; i += step) {
-      const v = L[i]!;
-      h = (Math.imul(h ^ (Number.isFinite(v) ? Math.floor(v * 1e6) : 0), 16777619) >>> 0) ^ 0;
-    }
-    if (L.length > 0) {
-      const last = L[L.length - 1]!;
-      h = (Math.imul(h ^ (Number.isFinite(last) ? Math.floor(last * 1e6) : 0), 16777619) >>> 0) ^ 0;
-    }
-  }
-  return String(h);
-}
 
 interface BoardConfig {
   cols: number;
@@ -432,8 +401,6 @@ const parseColor = (colorStr: string): number => {
  */
 /** Taille max d’un côté de tuile (limite texture WebGL courante). Au-delà on découpe en plusieurs RT. */
 const FOOTPRINT_HIGHLIGHT_RT_MAX_DIM = 4096;
-/** Union d’hex pour le masque : chunk pour rester sous la limite d’indices (~65k) par `Graphics`. */
-const MOVE_ADVANCE_MASK_HEX_CHUNK = 800;
 
 function addFootprintHighlightSprite(
   app: PIXI.Application,
@@ -725,7 +692,6 @@ function addFootprintPoolSmoothOutlines(
  * préfère un crash visible qu'un rendu "à peu près" qui masque un vrai bug.
  */
 function renderMoveAdvanceDestPoolCircleLayer(
-  app: PIXI.Application,
   highlightContainer: PIXI.Container,
   anchorPool: Set<string>,
   footprintMaskHexPool: Set<string> | null,
@@ -796,307 +762,142 @@ function renderMoveAdvanceDestPoolCircleLayer(
     );
   }
 
-  // Masque : préférence **union d’hex** (``move_preview_footprint_zone``) — suit les bords
-  // créneaux / murs sans segments droits parasites entre disques d’empreinte.
-  let maskBounds: PIXI.Rectangle;
-  let drawnMaskCircles: number | undefined;
-  let drawnMaskHexes: number | undefined;
-  let maskUnionKind: "server_loops" | "polygon" | "hex_chunks" | undefined;
+  // Rendu strict : on dessine UNIQUEMENT le polygone d'union lissé Chaikin du
+  // pool BFS. Deux sources acceptées, **aucun fallback hex-par-hex ou disques
+  // d'ancres** (trop crénelé sur WSL2 / drivers sans MSAA fill). Si aucune
+  // source n'est disponible, on lève — c'est un bug de câblage, pas un cas
+  // visuel à maquiller.
+  //
+  // Sources :
+  //  1. ``precomputedWorldMaskLoops`` : boucles calculées côté serveur via
+  //     ``compute_move_preview_mask_loops_world`` (même algo planaire que le
+  //     client, coords écran identiques).
+  //  2. ``footprintMaskHexPool`` + ``tryBuildHexUnionMaskPolygons`` : repli
+  //     client quand l'API ne fournit pas les loops (anciennes routes, replay).
+  //
+  // Rendu :
+  //  - Fill du polygone lissé (Chaikin ×``MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS``).
+  //  - **Stroke feathered intérieur** (``alignment: 1``, même couleur, trois
+  //    passes concentriques) par-dessus le fill — fournit l'AA du bord
+  //    **manuellement**, indépendamment du MSAA du driver : les pilotes qui
+  //    ignorent silencieusement ``antialias: true`` (WSL2, certains Intel)
+  //    laissaient le fill triangulé brut, d'où les escaliers visibles. Les
+  //    feathers ne débordent jamais (alignment interne) et se fondent dans le
+  //    vert transparent.
+  let maskUnionKind: "server_loops" | "polygon";
+  let smoothedLoops: number[][];
 
-  const maskRtResolution = app.renderer.resolution * MOVE_MASK_RT_RESOLUTION_SCALE;
-
-  const rt = (() => {
-    if (precomputedWorldMaskLoops && precomputedWorldMaskLoops.length > 0) {
-      maskUnionKind = "server_loops";
-      const prep = smoothMaskLoopsForRender(
-        precomputedWorldMaskLoops,
-        MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
-        moveAdvanceMaskSmoothOptions,
-      );
-      const { minX, minY, maxX, maxY } = prep;
-      const w = Math.ceil(maxX - minX);
-      const h = Math.ceil(maxY - minY);
-      if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
-        throw new Error(
-          `[renderMoveAdvanceDestPoolCircleLayer] bornes masque server_loops invalides ` +
-            `(w=${w}, h=${h}, spriteName=${spriteName})`,
-        );
-      }
-      if (w > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM || h > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM) {
-        throw new Error(
-          `[renderMoveAdvanceDestPoolCircleLayer] masque server_loops trop grand (w=${w}, h=${h}, ` +
-            `max=${FOOTPRINT_HIGHLIGHT_RT_MAX_DIM}, spriteName=${spriteName})`,
-        );
-      }
-      maskBounds = new PIXI.Rectangle(minX, minY, w, h);
-
-      const maskCacheKey = `${spriteName}|r${maskRtResolution}|${MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS}|${w}|${h}|${fingerprintSmoothedMaskLoops(prep.smoothed)}`;
-      if (
-        moveAdvanceMaskServerLoopsCache &&
-        moveAdvanceMaskServerLoopsCache.key === maskCacheKey
-      ) {
-        maskBounds = moveAdvanceMaskServerLoopsCache.maskBounds;
-        return moveAdvanceMaskServerLoopsCache.texture;
-      }
-
-      const texture = PIXI.RenderTexture.create({
-        width: w,
-        height: h,
-        resolution: maskRtResolution,
-        multisample: PIXI.MSAA_QUALITY.NONE,
-        alphaMode: PIXI.ALPHA_MODES.PMA,
-      });
-      const g = new PIXI.Graphics();
-      g.name = `${spriteName}-mask-server-loops`;
-      g.beginFill(0xffffff, 1.0);
-      for (const loop of prep.smoothed) {
-        g.drawPolygon(loop);
-      }
-      g.endFill();
-      g.position.set(-minX, -minY);
-      app.renderer.render(g, { renderTexture: texture, clear: true });
-      g.destroy();
-      moveAdvanceMaskServerLoopsCache?.texture.destroy(true);
-      moveAdvanceMaskServerLoopsCache = {
-        key: maskCacheKey,
-        texture,
-        maskBounds,
-      };
-      return texture;
-    }
-
-    if (footprintMaskHexPool && footprintMaskHexPool.size > 0) {
-      const keys = [...footprintMaskHexPool];
-      const layout = {
-        HEX_HORIZ_SPACING,
-        HEX_WIDTH,
-        HEX_HEIGHT,
-        HEX_VERT_SPACING,
-        MARGIN,
-        gridHexRadius,
-      };
-      const polyMask = tryBuildHexUnionMaskPolygons(footprintMaskHexPool, layout);
-
-      let minX: number;
-      let minY: number;
-      let maxX: number;
-      let maxY: number;
-      /** Boucles prêtes pour le draw (lissées) — uniquement si ``polyMask`` présent. */
-      let hexUnionSmoothedDraw: number[][] | null = null;
-
-      if (polyMask) {
-        const hexPrep = smoothMaskLoopsForRender(
-          polyMask.loops,
-          MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
-          moveAdvanceMaskSmoothOptions,
-        );
-        hexUnionSmoothedDraw = hexPrep.smoothed;
-        maskUnionKind = "polygon";
-        minX = hexPrep.minX;
-        minY = hexPrep.minY;
-        maxX = hexPrep.maxX;
-        maxY = hexPrep.maxY;
-      } else {
-        maskUnionKind = "hex_chunks";
-        minX = Infinity;
-        minY = Infinity;
-        maxX = -Infinity;
-        maxY = -Infinity;
-        for (const key of footprintMaskHexPool) {
-          const sep = key.indexOf(",");
-          const c = Number(key.substring(0, sep));
-          const r = Number(key.substring(sep + 1));
-          const hx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-          const hy =
-            r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
-          for (let vi = 0; vi < 6; vi++) {
-            const ang = (vi * Math.PI) / 3;
-            const vx = hx + gridHexRadius * Math.cos(ang);
-            const vy = hy + gridHexRadius * Math.sin(ang);
-            if (vx < minX) minX = vx;
-            if (vx > maxX) maxX = vx;
-            if (vy < minY) minY = vy;
-            if (vy > maxY) maxY = vy;
-          }
-        }
-      }
-
-      const w = Math.ceil(maxX - minX);
-      const h = Math.ceil(maxY - minY);
-      if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
-        throw new Error(
-          `[renderMoveAdvanceDestPoolCircleLayer] bornes masque hex invalides ` +
-            `(w=${w}, h=${h}, spriteName=${spriteName})`,
-        );
-      }
-      if (w > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM || h > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM) {
-        throw new Error(
-          `[renderMoveAdvanceDestPoolCircleLayer] masque hex trop grand (w=${w}, h=${h}, ` +
-            `max=${FOOTPRINT_HIGHLIGHT_RT_MAX_DIM}, spriteName=${spriteName})`,
-        );
-      }
-      maskBounds = new PIXI.Rectangle(minX, minY, w, h);
-      drawnMaskHexes = keys.length;
-
-      const texture = PIXI.RenderTexture.create({
-        width: w,
-        height: h,
-        resolution: maskRtResolution,
-        multisample: PIXI.MSAA_QUALITY.NONE,
-        alphaMode: PIXI.ALPHA_MODES.PMA,
-      });
-      // Même schéma que le masque « disques » : un `Graphics` décalé de `(-minX,-minY)` vers la RT.
-      // Un `Container` hors stage + `render(holder)` peut produire une RT vide (transforms).
-      if (polyMask && hexUnionSmoothedDraw) {
-        const g = new PIXI.Graphics();
-        g.name = `${spriteName}-mask-hex-union-polygon`;
-        g.beginFill(0xffffff, 1.0);
-        for (const loop of hexUnionSmoothedDraw) {
-          g.drawPolygon(loop);
-        }
-        g.endFill();
-        g.position.set(-minX, -minY);
-        app.renderer.render(g, { renderTexture: texture, clear: true });
-        g.destroy();
-      } else {
-        for (let i = 0; i < keys.length; i += MOVE_ADVANCE_MASK_HEX_CHUNK) {
-          const chunk = keys.slice(i, i + MOVE_ADVANCE_MASK_HEX_CHUNK);
-          const g = new PIXI.Graphics();
-          g.name = `${spriteName}-mask-hex-chunk-${i}`;
-          g.beginFill(0xffffff, 1.0);
-          for (const key of chunk) {
-            const sep = key.indexOf(",");
-            const c = Number(key.substring(0, sep));
-            const r = Number(key.substring(sep + 1));
-            const hx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-            const hy =
-              r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
-            const verts: number[] = [];
-            for (let vi = 0; vi < 6; vi++) {
-              const ang = (vi * Math.PI) / 3;
-              verts.push(hx + gridHexRadius * Math.cos(ang), hy + gridHexRadius * Math.sin(ang));
-            }
-            g.drawPolygon(verts);
-          }
-          g.endFill();
-          g.position.set(-minX, -minY);
-          app.renderer.render(g, { renderTexture: texture, clear: i === 0 });
-          g.destroy();
-        }
-      }
-      return texture;
-    }
-
-    const maskGfx = new PIXI.Graphics();
-    maskGfx.name = `${spriteName}-mask-gfx`;
-    drawnMaskCircles = fillFootprintPoolCircles(
-      maskGfx,
-      anchorPool,
-      footprintRadius,
-      0xffffff,
+  if (precomputedWorldMaskLoops && precomputedWorldMaskLoops.length > 0) {
+    maskUnionKind = "server_loops";
+    const prep = smoothMaskLoopsForRender(
+      precomputedWorldMaskLoops,
+      MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
+      moveAdvanceMaskSmoothOptions,
+    );
+    smoothedLoops = prep.smoothed;
+  } else if (footprintMaskHexPool && footprintMaskHexPool.size > 0) {
+    const layout = {
       HEX_HORIZ_SPACING,
       HEX_WIDTH,
       HEX_HEIGHT,
       HEX_VERT_SPACING,
       MARGIN,
+      gridHexRadius,
+    };
+    const polyMask = tryBuildHexUnionMaskPolygons(footprintMaskHexPool, layout);
+    if (!polyMask) {
+      throw new Error(
+        `[renderMoveAdvanceDestPoolCircleLayer] tryBuildHexUnionMaskPolygons a échoué ` +
+          `(spriteName=${spriteName}, footprintMaskHexPool.size=${footprintMaskHexPool.size}) — ` +
+          `pas de fallback autorisé, corriger la topologie côté moteur/polygone planaire`,
+      );
+    }
+    const hexPrep = smoothMaskLoopsForRender(
+      polyMask.loops,
+      MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
+      moveAdvanceMaskSmoothOptions,
     );
-
-    const lb = maskGfx.getLocalBounds();
-    if (
-      !Number.isFinite(lb.width) ||
-      !Number.isFinite(lb.height) ||
-      !(lb.width > 0) ||
-      !(lb.height > 0)
-    ) {
-      maskGfx.destroy();
-      throw new Error(
-        `[renderMoveAdvanceDestPoolCircleLayer] bornes du masque disques invalides ` +
-          `(w=${lb.width}, h=${lb.height}, spriteName=${spriteName}, ` +
-          `drawnMaskCircles=${drawnMaskCircles})`,
-      );
-    }
-    maskBounds = lb;
-
-    const w = Math.ceil(maskBounds.width);
-    const h = Math.ceil(maskBounds.height);
-    if (w > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM || h > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM) {
-      maskGfx.destroy();
-      throw new Error(
-        `[renderMoveAdvanceDestPoolCircleLayer] masque trop grand pour une RT ` +
-          `unique (w=${w}, h=${h}, max=${FOOTPRINT_HIGHLIGHT_RT_MAX_DIM}, ` +
-          `spriteName=${spriteName})`,
-      );
-    }
-
-    const texture = PIXI.RenderTexture.create({
-      width: w,
-      height: h,
-      resolution: maskRtResolution,
-      multisample: PIXI.MSAA_QUALITY.NONE,
-      alphaMode: PIXI.ALPHA_MODES.PMA,
-    });
-    maskGfx.position.set(-maskBounds.x, -maskBounds.y);
-    app.renderer.render(maskGfx, { renderTexture: texture, clear: true });
-    maskGfx.destroy();
-    return texture;
-  })();
-
-  const w = Math.ceil(maskBounds.width);
-  const h = Math.ceil(maskBounds.height);
-
-  const maskSprite = new PIXI.Sprite(rt);
-  maskSprite.name = `${spriteName}-mask-sprite`;
-  maskSprite.position.set(maskBounds.x, maskBounds.y);
-  maskSprite.roundPixels = false;
-  /** Évite le voisinage « crénelé » (NEAREST) quand la RT masque est suréchantillonnée. */
-  maskSprite.texture.baseTexture.scaleMode = PIXI.SCALE_MODES.LINEAR;
-
-  if (typeof window !== "undefined") {
-    try {
-      if (window.localStorage.getItem("debugMovePreviewRender") === "1") {
-        console.info("[renderMoveAdvanceDestPoolCircleLayer] maskSmooth", {
-          chaikinIterations: MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
-          chaikinMaxVerts: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
-          maskRtResolutionScale: MOVE_MASK_RT_RESOLUTION_SCALE,
-          maskRtResolution,
-          maskUnionKind,
-          spriteName,
-        });
-      }
-    } catch {
-      // ignore
-    }
+    maskUnionKind = "polygon";
+    smoothedLoops = hexPrep.smoothed;
+  } else {
+    throw new Error(
+      `[renderMoveAdvanceDestPoolCircleLayer] aucune source de polygone disponible ` +
+        `(spriteName=${spriteName}, anchorPool.size=${anchorPool.size}) — ` +
+        `precomputedWorldMaskLoops et footprintMaskHexPool tous deux absents, ` +
+        `pas de fallback hex-par-hex autorisé`,
+    );
   }
 
-  // Grand disque cible. Alpha 0.28 (cohérence avec le halo de charge).
-  const diskGfx = new PIXI.Graphics();
-  diskGfx.name = spriteName;
-  diskGfx.beginFill(poolFillColor, 1.0);
-  diskGfx.drawCircle(unitCx, unitCy, rOuter);
-  diskGfx.endFill();
-  diskGfx.alpha = 0.28;
-  diskGfx.mask = maskSprite;
+  const validLoops = smoothedLoops.filter((loop) => loop.length >= 6);
+  if (validLoops.length === 0) {
+    throw new Error(
+      `[renderMoveAdvanceDestPoolCircleLayer] polygone lissé vide ` +
+        `(spriteName=${spriteName}, maskUnionKind=${maskUnionKind}, ` +
+        `loopsCount=${smoothedLoops.length})`,
+    );
+  }
 
-  // Le masque DOIT être présent dans l'arbre d'affichage pour que Pixi calcule
-  // sa transform lors du rendu, mais il ne s'affiche pas lui-même (utilisé
-  // uniquement comme stencil/alpha). On l'ajoute dans le même container.
-  highlightContainer.addChild(maskSprite);
-  highlightContainer.addChild(diskGfx);
+  // Fill vectoriel du polygone lissé, entouré d'un **BlurFilter Pixi** faible.
+  //
+  // Pourquoi un filter plutôt qu'un stroke feathered : Pixi alloue un
+  // framebuffer dédié pour chaque filter avec une résolution explicite
+  // (``filter.resolution``). Le blur qu'il applique ne dépend donc **ni du
+  // MSAA du driver WebGL principal** (WSL2 / Intel HD ignorent silencieusement
+  // ``antialias: true``) **ni du zoom CSS** du navigateur. Un ``blur`` de 1.6
+  // pixels avec ``resolution = 2`` agit comme un FXAA natif sur le bord du
+  // polygone : les escaliers sub-pixel du bord triangulé deviennent un
+  // dégradé d'un demi-pixel, invisible à l'œil.
+  //
+  // Le fill intérieur, lui, est uniforme → le blur ne le dégrade pas (une
+  // zone constante floutée reste constante). Seul le bord bénéficie de l'AA.
+  const fillGfx = new PIXI.Graphics();
+  fillGfx.name = spriteName;
+  fillGfx.eventMode = "none";
+  fillGfx.beginFill(poolFillColor, 1.0);
+  for (const loop of validLoops) {
+    fillGfx.drawPolygon(loop);
+  }
+  fillGfx.endFill();
+  fillGfx.alpha = 0.28;
+
+  const edgeBlur = new PIXI.BlurFilter(1.6, 4);
+  edgeBlur.resolution = 2;
+  edgeBlur.autoFit = true;
+  fillGfx.filters = [edgeBlur];
+
+  const lb = fillGfx.getLocalBounds();
+  if (
+    !Number.isFinite(lb.width) ||
+    !Number.isFinite(lb.height) ||
+    !(lb.width > 0) ||
+    !(lb.height > 0)
+  ) {
+    fillGfx.destroy();
+    throw new Error(
+      `[renderMoveAdvanceDestPoolCircleLayer] bornes du fill invalides ` +
+        `(w=${lb.width}, h=${lb.height}, spriteName=${spriteName}, ` +
+        `maskUnionKind=${maskUnionKind})`,
+    );
+  }
+
+  highlightContainer.addChild(fillGfx);
 
   if (typeof window !== "undefined") {
     try {
       if (window.localStorage.getItem("debugMovePool") === "1") {
+        const rawVertCount = (precomputedWorldMaskLoops ?? []).reduce(
+          (n, l) => n + l.length / 2,
+          0,
+        );
+        const smoothedVertCount = validLoops.reduce((n, l) => n + l.length / 2, 0);
         console.info("[renderMoveAdvanceDestPoolCircleLayer] rendered", {
           spriteName,
           anchorPoolSize: anchorPool.size,
-          /** Réel chemin masque RT : sinon le libellé « anchor_disk_union » était affiché même avec ``server_loops``. */
-          maskKind:
-            drawnMaskHexes != null
-              ? "footprint_hex_union"
-              : (maskUnionKind ?? "anchor_disk_union"),
-          maskUnionKind,
-          drawnMaskHexes,
-          drawnMaskCircles,
+          maskKind: maskUnionKind,
+          loopsCount: validLoops.length,
+          rawVertCount,
+          smoothedVertCount,
+          chaikinIterations: MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
           footprintRadius,
           gridHexRadius,
           unitCol,
@@ -1105,7 +906,8 @@ function renderMoveAdvanceDestPoolCircleLayer(
           unitCy,
           maxCubeDist,
           rOuter,
-          maskSize: { w, h },
+          fillBounds: { x: lb.x, y: lb.y, w: lb.width, h: lb.height },
+          renderPipeline: "polygon_fill+blur_filter_aa",
         });
       }
     } catch {
@@ -1526,7 +1328,6 @@ export const drawBoard = (
           ? footprintZonePoolRef.current
           : null;
       renderMoveAdvanceDestPoolCircleLayer(
-        app,
         highlightContainer,
         movePoolForDiskDraw,
         footprintMaskHexPool,

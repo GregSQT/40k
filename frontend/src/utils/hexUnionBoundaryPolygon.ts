@@ -137,9 +137,57 @@ export function tryBuildHexUnionMaskPolygons(
     addAdj(kb, ka);
   }
 
+  // Tous les vertices doivent avoir un degré **pair** (Handshake lemma appliqué aux
+  // boundary edges dans un graphe planaire : chaque face ferme ses edges). Les
+  // vertices à 4 (ou 6) voisins correspondent à des **coins partagés** entre deux
+  // sous-blobs du pool qui ne se touchent que par un seul sommet — cas fréquent
+  // sur les BFS tronqués par des murs. On va disambiguïser via tri angulaire
+  // des voisins (« turn right » en coordonnées écran Y-bas = continuation du
+  // contour externe cohérent).
   for (const [, peers] of adj) {
-    if (peers.length !== 2) return null;
+    if (peers.length < 2 || peers.length % 2 !== 0) return null;
   }
+
+  /**
+   * Au vertex ``curr``, venant de ``prev``, choisit le voisin suivant cohérent
+   * avec une traversée de contour planaire (« turn right » à l'écran).
+   *
+   * - Si degré === 2 : trivial (le seul voisin ≠ prev).
+   * - Si degré > 2 : parmi les voisins ≠ prev **encore disponibles** (dirigé
+   *   ``curr→p`` non encore consommé), on prend celui qui minimise l'angle
+   *   signé ``angle(curr→p) - angle(curr→prev)`` dans [-π, π] — le plus négatif
+   *   = virage le plus à droite à l'écran.
+   */
+  const pickNextNeighbor = (
+    curr: string,
+    prev: string,
+    directedUsed: Set<string>,
+  ): string | null => {
+    const peers = adj.get(curr);
+    if (!peers || peers.length === 0) return null;
+    const [cx, cy] = pos.get(curr)!;
+    const [px, py] = pos.get(prev)!;
+    const angleIn = Math.atan2(py - cy, px - cx);
+    let best: string | null = null;
+    let bestTurn = Infinity;
+    for (const p of peers) {
+      if (directedUsed.has(`${curr}>${p}`)) continue;
+      if (p === prev && peers.length > 2) continue;
+      const [nx, ny] = pos.get(p)!;
+      const angleOut = Math.atan2(ny - cy, nx - cx);
+      let turn = angleOut - angleIn;
+      while (turn > Math.PI) turn -= 2 * Math.PI;
+      while (turn <= -Math.PI) turn += 2 * Math.PI;
+      if (turn < bestTurn) {
+        bestTurn = turn;
+        best = p;
+      }
+    }
+    if (best === null && peers.length === 2) {
+      best = peers[0] === prev ? peers[1]! : peers[0]!;
+    }
+    return best;
+  };
 
   const undirectedRemaining = new Set<string>();
   for (const [ka, kb] of boundaryEdges) {
@@ -162,10 +210,13 @@ export function tryBuildHexUnionMaskPolygons(
     let curr = kb;
     const ringKeys: string[] = [start];
 
-    const removeUndirected = (a: string, b: string) => {
+    const directedUsed = new Set<string>();
+    const consume = (a: string, b: string) => {
+      directedUsed.add(`${a}>${b}`);
+      directedUsed.add(`${b}>${a}`);
       undirectedRemaining.delete(canonicalEdgeKey(a, b));
     };
-    removeUndirected(prev, curr);
+    consume(prev, curr);
 
     let guard = 0;
     const maxGuard = boundaryEdges.length * 4 + 64;
@@ -175,15 +226,16 @@ export function tryBuildHexUnionMaskPolygons(
       if (guard > maxGuard) return null;
 
       ringKeys.push(curr);
-      const peers = adj.get(curr);
-      if (!peers || peers.length !== 2) return null;
-      const next = peers[0] === prev ? peers[1]! : peers[0]!;
-      removeUndirected(curr, next);
+      const next = pickNextNeighbor(curr, prev, directedUsed);
+      if (next === null) return null;
+      consume(curr, next);
       prev = curr;
       curr = next;
     }
 
-    if (ringKeys.length < 3) return null;
+    if (ringKeys.length < 3) {
+      continue;
+    }
 
     const flat: number[] = [];
     for (const vk of ringKeys) {
@@ -196,8 +248,6 @@ export function tryBuildHexUnionMaskPolygons(
   }
 
   if (loops.length === 0) return null;
-
-  if (undirectedRemaining.size !== 0) return null;
 
   let minX = Infinity;
   let minY = Infinity;

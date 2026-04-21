@@ -150,16 +150,51 @@ def compute_move_preview_mask_loops_world(
         adj.setdefault(va, []).append(vb)
         adj.setdefault(vb, []).append(va)
 
+    # Tous les vertex doivent avoir un degré pair (chaque face ferme ses edges).
+    # Un degré 4 correspond à deux sous-blobs qui se touchent uniquement par un
+    # sommet — cas courant sur un BFS tronqué par des murs. On disambiguïse
+    # via tri angulaire (« turn right » en coords écran Y-bas).
     for _vk, peers in adj.items():
-        if len(peers) != 2:
+        if len(peers) < 2 or len(peers) % 2 != 0:
             return None
 
-    undirected_remaining: Set[Tuple[Vertex, Vertex]] = set(boundary_edges)
+    def _pick_next_neighbor(
+        curr: Vertex,
+        prev: Vertex,
+        directed_used: Set[Tuple[Vertex, Vertex]],
+    ) -> Optional[Vertex]:
+        peers = adj.get(curr)
+        if not peers:
+            return None
+        cx, cy = pos[curr]
+        px, py = pos[prev]
+        angle_in = math.atan2(py - cy, px - cx)
+        best: Optional[Vertex] = None
+        best_turn = math.inf
+        for p in peers:
+            if (curr, p) in directed_used:
+                continue
+            if p == prev and len(peers) > 2:
+                continue
+            nx, ny = pos[p]
+            angle_out = math.atan2(ny - cy, nx - cx)
+            turn = angle_out - angle_in
+            while turn > math.pi:
+                turn -= 2 * math.pi
+            while turn <= -math.pi:
+                turn += 2 * math.pi
+            if turn < best_turn:
+                best_turn = turn
+                best = p
+        if best is None and len(peers) == 2:
+            best = peers[1] if peers[0] == prev else peers[0]
+        return best
+
+    undirected_remaining: Set[Tuple[Vertex, Vertex]] = set(
+        _canonical_edge(a, b) for a, b in boundary_edges
+    )
 
     loops: List[List[Tuple[float, float]]] = []
-
-    def _remove_undirected(a: Vertex, b: Vertex) -> None:
-        undirected_remaining.discard(_canonical_edge(a, b))
 
     while undirected_remaining:
         pick = next(iter(undirected_remaining))
@@ -172,7 +207,14 @@ def compute_move_preview_mask_loops_world(
         curr = kb
         ring_keys: List[Vertex] = [start]
 
-        _remove_undirected(prev, curr)
+        directed_used: Set[Tuple[Vertex, Vertex]] = set()
+
+        def _consume(a: Vertex, b: Vertex) -> None:
+            directed_used.add((a, b))
+            directed_used.add((b, a))
+            undirected_remaining.discard(_canonical_edge(a, b))
+
+        _consume(prev, curr)
 
         guard = 0
         max_guard = len(boundary_edges) * 4 + 64
@@ -182,15 +224,14 @@ def compute_move_preview_mask_loops_world(
             if guard > max_guard:
                 return None
             ring_keys.append(curr)
-            peers = adj.get(curr)
-            if not peers or len(peers) != 2:
+            nxt = _pick_next_neighbor(curr, prev, directed_used)
+            if nxt is None:
                 return None
-            nxt = peers[1] if peers[0] == prev else peers[0]
-            _remove_undirected(curr, nxt)
+            _consume(curr, nxt)
             prev, curr = curr, nxt
 
         if len(ring_keys) < 3:
-            return None
+            continue
 
         loop_pts: List[Tuple[float, float]] = []
         for vk in ring_keys:
@@ -199,8 +240,5 @@ def compute_move_preview_mask_loops_world(
                 return None
             loop_pts.append(p)
         loops.append(loop_pts)
-
-    if undirected_remaining:
-        return None
 
     return loops if loops else None
