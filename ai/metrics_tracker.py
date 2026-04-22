@@ -1107,9 +1107,12 @@ class W40KMetricsTracker:
           - valid_target_count: list[float]
         """
         for phase_name, metrics in phase_metrics.items():
-            kill_values = [float(v) for v in metrics.get('best_kill_probability', [])]
-            danger_values = [float(v) for v in metrics.get('danger_to_me', [])]
-            count_values = [float(v) for v in metrics.get('valid_target_count', [])]
+            _kill = metrics.get("best_kill_probability")
+            kill_values = [float(v) for v in _kill] if isinstance(_kill, list) else []
+            _danger = metrics.get("danger_to_me")
+            danger_values = [float(v) for v in _danger] if isinstance(_danger, list) else []
+            _count = metrics.get("valid_target_count")
+            count_values = [float(v) for v in _count] if isinstance(_count, list) else []
 
             if kill_values:
                 self.writer.add_scalar(

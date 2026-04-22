@@ -429,7 +429,7 @@ class GameReplayLogger:
                         "CC_RNG": unit["CC_RNG"],
                         "BASE_SHAPE": unit.get("BASE_SHAPE", "round"),
                         "BASE_SIZE": unit.get("BASE_SIZE", 1),
-                        "orientation": unit.get("orientation", 0),
+                        "orientation": int(unit["orientation"]) if "orientation" in unit else 0,
                     }
                     formatted_units.append(entry)
                 
@@ -491,7 +491,7 @@ class GameReplayLogger:
                     "CC_RNG": unit["CC_RNG"],
                     "BASE_SHAPE": unit.get("BASE_SHAPE", "round"),
                     "BASE_SIZE": unit.get("BASE_SIZE", 1),
-                    "orientation": unit.get("orientation", 0),
+                    "orientation": int(unit["orientation"]) if "orientation" in unit else 0,
                 })
         # THIRD: Try to get from controller if available
         elif hasattr(self.env, 'controller'):
@@ -522,7 +522,7 @@ class GameReplayLogger:
                         "CC_RNG": unit["CC_RNG"],
                         "BASE_SHAPE": unit.get("BASE_SHAPE", "round"),
                         "BASE_SIZE": unit.get("BASE_SIZE", 1),
-                        "orientation": unit.get("orientation", 0),
+                        "orientation": int(unit["orientation"]) if "orientation" in unit else 0,
                     })
         # THIRD: Try direct environment units
         elif hasattr(self.env, 'units') and self.env.units:

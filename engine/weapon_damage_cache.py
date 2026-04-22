@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, List
 
 from engine.combat_utils import expected_dice_value
+from shared.data_validation import require_key
 
 NestedTable = Dict[Tuple, Dict[Tuple, float]]
 BestWeaponCache = Dict[Tuple, Tuple[int, float]]
@@ -75,7 +76,7 @@ def stamp_weapon_keys(unit: Dict[str, Any]) -> None:
         int(unit.get("ARMOR_SAVE", 7)),
         int(unit.get("INVUL_SAVE", 7)),
     )
-    for weapon in unit.get("RNG_WEAPONS", []):
+    for weapon in require_key(unit, "RNG_WEAPONS"):
         weapon["_wdc_off_key"] = (
             int(weapon["ATK"]),
             int(weapon["STR"]),
@@ -83,7 +84,7 @@ def stamp_weapon_keys(unit: Dict[str, Any]) -> None:
             expected_dice_value(weapon["DMG"], "stamp_dmg"),
             int(weapon["AP"]),
         )
-    for weapon in unit.get("CC_WEAPONS", []):
+    for weapon in require_key(unit, "CC_WEAPONS"):
         weapon["_wdc_off_key"] = (
             int(weapon["ATK"]),
             int(weapon["STR"]),
@@ -124,7 +125,7 @@ def build_best_weapon_cache(
             def_key = target["_wdc_def_key"]
 
             for is_ranged_int, weapons_key in ((1, "RNG_WEAPONS"), (0, "CC_WEAPONS")):
-                weapons = attacker.get(weapons_key, [])
+                weapons = require_key(attacker, weapons_key)
                 best_idx = -1
                 best_dmg = 0.0
 

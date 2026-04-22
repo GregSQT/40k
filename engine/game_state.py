@@ -51,8 +51,11 @@ class GameStateManager:
         Returns 1 for legacy boards (1 hex = 1 inch),
         or the configured value (e.g. 10) for ×10 micro-grids.
         """
-        board = self.config.get("board", {})
-        default = board.get("default", board)
+        board = require_key(self.config, "board")
+        if "default" in board:
+            default = require_key(board, "default")
+        else:
+            default = board
         return int(default.get("inches_to_subhex", 1))
 
     def create_unit(self, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -96,6 +99,11 @@ class GameStateManager:
                 if "RNG" in w:
                     w["RNG"] = int(w["RNG"]) * scale
 
+        if "orientation" in config:
+            orientation_init = int(require_key(config, "orientation"))
+        else:
+            orientation_init = 0
+
         return {
             # Identity
             "id": config["id"],
@@ -129,6 +137,7 @@ class GameStateManager:
             "ICON_SCALE": config["ICON_SCALE"],
             "BASE_SHAPE": config.get("BASE_SHAPE", "round"),
             "BASE_SIZE": config.get("BASE_SIZE", 1),
+            "orientation": orientation_init,
             "UNIT_RULES": unit_rules,
             "UNIT_KEYWORDS": unit_keywords,
             
@@ -498,6 +507,13 @@ class GameStateManager:
                     else:
                         raise TypeError(f"Unit {unit_type}: CC_WEAPONS[{selected_cc_weapon_index}] is {type(selected_weapon).__name__}, expected dict. Value: {selected_weapon}")
                 
+                if "orientation" in unit_data:
+                    orientation_u = int(require_key(unit_data, "orientation"))
+                elif "orientation" in full_unit_data:
+                    orientation_u = int(require_key(full_unit_data, "orientation"))
+                else:
+                    orientation_u = 0
+
                 enhanced_unit = {
                     "id": str(unit_data["id"]),
                     "player": unit_player,
@@ -523,6 +539,7 @@ class GameStateManager:
                     "ICON_SCALE": full_unit_data["ICON_SCALE"],
                     "BASE_SHAPE": full_unit_data.get("BASE_SHAPE", "round"),
                     "BASE_SIZE": full_unit_data.get("BASE_SIZE", 1),
+                    "orientation": orientation_u,
                     "UNIT_RULES": copy.deepcopy(require_key(full_unit_data, "UNIT_RULES")),
                     "UNIT_KEYWORDS": copy.deepcopy(require_key(full_unit_data, "UNIT_KEYWORDS")),
                     "SHOOT_LEFT": shoot_left,
@@ -1015,7 +1032,7 @@ class GameStateManager:
                 "training_config.total_episodes and n_envs must be > 0 when roster_pool_schedule is enabled"
             )
 
-        episode_number = self.config.get("_training_episode_index", 0)
+        episode_number = require_key(self.config, "_training_episode_index")
         if not isinstance(episode_number, int) or isinstance(episode_number, bool):
             raise TypeError("config._training_episode_index must be integer when roster_pool_schedule is enabled")
         episode_number = max(0, int(episode_number))

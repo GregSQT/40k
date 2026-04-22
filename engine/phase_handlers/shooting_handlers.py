@@ -3670,13 +3670,13 @@ def _apply_move_after_shooting(
     if dest_col_int == orig_col and dest_row_int == orig_row:
         raise ValueError("move_after_shooting destination must differ from current position")
 
-    old_cache_entry = game_state.get("units_cache", {}).get(unit_id_str)
+    old_cache_entry = require_key(game_state, "units_cache").get(unit_id_str)
     old_occupied = old_cache_entry.get("occupied_hexes") if old_cache_entry else None
 
     set_unit_coordinates(unit, dest_col_int, dest_row_int)
     update_units_cache_position(game_state, unit_id_str, dest_col_int, dest_row_int)
 
-    new_cache_entry = game_state.get("units_cache", {}).get(unit_id_str)
+    new_cache_entry = require_key(game_state, "units_cache").get(unit_id_str)
     new_occupied = new_cache_entry.get("occupied_hexes") if new_cache_entry else None
 
     moved_unit_player = int(require_key(unit, "player"))
@@ -7015,13 +7015,13 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         
         # Capture old footprint before cache update (for multi-hex adjacency delta)
         adv_uid_str = str(unit["id"])
-        adv_old_entry = game_state.get("units_cache", {}).get(adv_uid_str)
+        adv_old_entry = require_key(game_state, "units_cache").get(adv_uid_str)
         adv_old_occupied = adv_old_entry.get("occupied_hexes") if adv_old_entry else None
 
         # Update units_cache after position change (advance)
         update_units_cache_position(game_state, adv_uid_str, dest_col_int, dest_row_int)
 
-        adv_new_entry = game_state.get("units_cache", {}).get(adv_uid_str)
+        adv_new_entry = require_key(game_state, "units_cache").get(adv_uid_str)
         adv_new_occupied = adv_new_entry.get("occupied_hexes") if adv_new_entry else None
 
         moved_unit_player = int(require_key(unit, "player"))

@@ -182,7 +182,7 @@ def _compute_unit_occupied_hexes(
         return {(col, row)}
     base_shape = unit.get("BASE_SHAPE", "round")
     base_size = unit.get("BASE_SIZE", 1)
-    orientation = unit.get("orientation", 0)
+    orientation = int(require_key(unit, "orientation"))
     if base_size == 1:
         return {(col, row)}
     from engine.hex_utils import compute_occupied_hexes
@@ -301,7 +301,7 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
     
     Creates game_state["units_cache"]: Dict[str, Dict] mapping unit_id (str) to
     {"col": int, "row": int, "HP_CUR": int, "player": int, "BASE_SHAPE": str,
-     "BASE_SIZE": int|list, "occupied_hexes": Set[(col,row)]}
+     "BASE_SIZE": int|list, "orientation": int, "occupied_hexes": Set[(col,row)]}
     for all units in game_state["units"].
     During gameplay, dead units are removed from cache (update_units_cache_hp calls remove_from_units_cache when HP <= 0).
     
@@ -338,6 +338,10 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
         
         base_shape = unit.get("BASE_SHAPE", "round")
         base_size = unit.get("BASE_SIZE", 1)
+        if "orientation" in unit:
+            orientation = int(require_key(unit, "orientation"))
+        else:
+            orientation = 0
         occupied = _compute_unit_occupied_hexes(col, row, unit, game_state)
         
         units_cache[unit_id] = {
@@ -347,6 +351,7 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
             "player": player,
             "BASE_SHAPE": base_shape,
             "BASE_SIZE": base_size,
+            "orientation": orientation,
             "occupied_hexes": occupied,
         }
         
@@ -425,7 +430,15 @@ def update_units_cache_unit(
     old_entry = game_state["units_cache"].get(unit_id)
     base_shape = old_entry.get("BASE_SHAPE", "round") if old_entry else "round"
     base_size = old_entry.get("BASE_SIZE", 1) if old_entry else 1
-    unit_stub = {"BASE_SHAPE": base_shape, "BASE_SIZE": base_size}
+    if old_entry and "orientation" in old_entry:
+        orient_val = int(require_key(old_entry, "orientation"))
+    else:
+        orient_val = 0
+    unit_stub = {
+        "BASE_SHAPE": base_shape,
+        "BASE_SIZE": base_size,
+        "orientation": orient_val,
+    }
     new_occupied = _compute_unit_occupied_hexes(norm_col, norm_row, unit_stub, game_state)
     
     _update_occupation_map(game_state, unit_id, old_entry, new_occupied)
@@ -437,6 +450,7 @@ def update_units_cache_unit(
         "player": player,
         "BASE_SHAPE": base_shape,
         "BASE_SIZE": base_size,
+        "orientation": orient_val,
         "occupied_hexes": new_occupied,
     }
 
@@ -633,7 +647,15 @@ def update_units_cache_position(game_state: Dict[str, Any], unit_id: str, col: i
 
     norm_col, norm_row = normalize_coordinates(col, row)
     
-    unit_stub = {"BASE_SHAPE": entry.get("BASE_SHAPE", "round"), "BASE_SIZE": entry.get("BASE_SIZE", 1)}
+    if "orientation" in entry:
+        orient_val = int(require_key(entry, "orientation"))
+    else:
+        orient_val = 0
+    unit_stub = {
+        "BASE_SHAPE": entry.get("BASE_SHAPE", "round"),
+        "BASE_SIZE": entry.get("BASE_SIZE", 1),
+        "orientation": orient_val,
+    }
     new_occupied = _compute_unit_occupied_hexes(norm_col, norm_row, unit_stub, game_state)
     _update_occupation_map(game_state, unit_id, entry, new_occupied)
     

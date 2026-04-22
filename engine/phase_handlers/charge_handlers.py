@@ -86,7 +86,7 @@ def _charge_prepare_footprint_offsets(
         from engine.hex_utils import precompute_footprint_offsets
 
         shape = unit.get("BASE_SHAPE", "round")
-        orient = unit.get("orientation", 0)
+        orient = int(require_key(unit, "orientation"))
         off_e, off_o = precompute_footprint_offsets(shape, bs, orient)
         out: FootprintOffsetPair = (off_e, off_o)
         cache[uid] = out
@@ -168,7 +168,7 @@ def _resolve_charge_dest_to_anchor(
 
 
 def _charge_base_diameter(unit: Dict[str, Any]) -> int:
-    """Diamètre de l'empreinte en hexes (fallback 1).
+    """Diamètre de l'empreinte en hexes (1 si BASE_SIZE absent ou invalide).
 
     BASE_SIZE peut être int (round/square) ou [major, minor] (oval).
     """
@@ -251,8 +251,10 @@ def _compute_charge_preview_zone(
     charger_disk = dilate_hex_set_unbounded({closest_ch}, int(charge_roll))
 
     # Bornes plateau
-    board_cols = int(game_state.get("board_cols", 0) or 0)
-    board_rows = int(game_state.get("board_rows", 0) or 0)
+    _bc = game_state.get("board_cols")
+    _br = game_state.get("board_rows")
+    board_cols = int(_bc) if isinstance(_bc, int) and not isinstance(_bc, bool) else 0
+    board_rows = int(_br) if isinstance(_br, int) and not isinstance(_br, bool) else 0
 
     zone: Set[Tuple[int, int]] = set()
     for h in target_zone & charger_disk:
@@ -1132,13 +1134,13 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
 
     # Capture old footprint before cache update (for multi-hex adjacency delta)
     chg_uid_str = str(unit["id"])
-    chg_old_entry = game_state.get("units_cache", {}).get(chg_uid_str)
+    chg_old_entry = require_key(game_state, "units_cache").get(chg_uid_str)
     chg_old_occupied = chg_old_entry.get("occupied_hexes") if chg_old_entry else None
 
     # Update units_cache after position change
     update_units_cache_position(game_state, chg_uid_str, dest_col_int, dest_row_int)
 
-    chg_new_entry = game_state.get("units_cache", {}).get(chg_uid_str)
+    chg_new_entry = require_key(game_state, "units_cache").get(chg_uid_str)
     chg_new_occupied = chg_new_entry.get("occupied_hexes") if chg_new_entry else None
 
     moved_unit_player = int(require_key(unit, "player"))

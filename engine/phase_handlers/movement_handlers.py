@@ -831,14 +831,14 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
 
     # Capture old footprint before cache update (for multi-hex adjacency delta)
     unit_id_str_cache = str(unit["id"])
-    old_cache_entry = game_state.get("units_cache", {}).get(unit_id_str_cache)
+    old_cache_entry = require_key(game_state, "units_cache").get(unit_id_str_cache)
     old_occupied = old_cache_entry.get("occupied_hexes") if old_cache_entry else None
 
     # Update units_cache after position change
     update_units_cache_position(game_state, unit_id_str_cache, dest_col_int, dest_row_int)
 
     # Retrieve new footprint from updated cache
-    new_cache_entry = game_state.get("units_cache", {}).get(unit_id_str_cache)
+    new_cache_entry = require_key(game_state, "units_cache").get(unit_id_str_cache)
     new_occupied = new_cache_entry.get("occupied_hexes") if new_cache_entry else None
 
     # Keep enemy adjacency caches synchronized incrementally with the move.
@@ -1117,7 +1117,7 @@ def _build_multi_hex_vectorized(
                 eng_bad |= (d - mover_r_norm - e_r_norm) < (req - 1e-6)
             else:
                 # Dépose l'empreinte hex de l'ennemi (peu importe sa forme) dans le mask commun.
-                e_orient = int(ce.get("orientation", 0) or 0)
+                e_orient = int(require_key(ce, "orientation"))
                 e_off_even, e_off_odd = precompute_footprint_offsets(e_shape, e_bs_i, e_orient)
                 e_off = e_off_even if (e_col & 1) == 0 else e_off_odd
                 for dc, dr in e_off:
@@ -1355,7 +1355,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         if not _fly_single_hex:
             from engine.hex_utils import precompute_footprint_offsets
             _fly_shape = unit.get("BASE_SHAPE", "round")
-            _fly_orient = unit.get("orientation", 0)
+            _fly_orient = int(require_key(unit, "orientation"))
             _fly_off_even, _fly_off_odd = precompute_footprint_offsets(
                 _fly_shape, _fly_base_size, _fly_orient
             )
@@ -1563,7 +1563,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         # Multi-hex units: pre-compute footprint offsets ONCE, then translate
         from engine.hex_utils import precompute_footprint_offsets
         base_shape = unit.get("BASE_SHAPE", "round")
-        orientation = unit.get("orientation", 0)
+        orientation = int(require_key(unit, "orientation"))
         _off_even, _off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
 
         # Chemin unique vectorisé NumPy, sémantiquement équivalent au BFS Python hexagonal.
@@ -1743,7 +1743,11 @@ def _select_strategic_destination(
         if objectives:
             objective_hexes: List[Tuple[int, int]] = []
             for obj in objectives:
-                hexes = obj.get("hexes", []) if isinstance(obj, dict) else []
+                if isinstance(obj, dict):
+                    _hx = obj.get("hexes")
+                    hexes = _hx if isinstance(_hx, list) else []
+                else:
+                    hexes = []
                 for h in hexes:
                     if isinstance(h, dict):
                         objective_hexes.append((int(h["col"]), int(h["row"])))

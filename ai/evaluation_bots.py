@@ -395,7 +395,7 @@ class ControlBot:
         self._deployment_episode_marker: Optional[Any] = None
 
     def select_action(self, valid_actions: List[int]) -> int:
-        """Fallback when game_state unavailable."""
+        """Action selection when only the valid action list is available (no game_state)."""
         if not valid_actions:
             return WAIT_ACTION
         if self.randomness > 0 and random.random() < self.randomness:
@@ -512,7 +512,8 @@ class ControlBot:
         for obj in objectives:
             if not isinstance(obj, dict):
                 continue
-            hexes = obj.get("hexes", [])
+            _hx = obj.get("hexes")
+            hexes = _hx if isinstance(_hx, list) else []
             for h in hexes:
                 if isinstance(h, dict):
                     if unit_col == int(h.get("col", -1)) and unit_row == int(h.get("row", -1)):
@@ -563,15 +564,17 @@ def _best_target_slot_by_threat(
         return None
     best_slot = 0
     best_threat = -1.0
-    units_cache = game_state.get("units_cache", {})
+    units_cache = require_key(game_state, "units_cache")
     for slot, target_id in enumerate(pool):
         tid = str(target_id)
         hp = get_hp_from_cache(tid, game_state)
         if hp is None:
             continue
-        cache_entry = units_cache.get(tid, {})
-        rng_dmg = float(cache_entry.get("RNG_DMG", 0))
-        cc_dmg = float(cache_entry.get("CC_DMG", 0))
+        cache_entry = units_cache.get(tid)
+        if cache_entry is None:
+            continue
+        rng_dmg = float(require_key(cache_entry, "RNG_DMG"))
+        cc_dmg = float(require_key(cache_entry, "CC_DMG"))
         threat = max(rng_dmg, cc_dmg)
         if threat > best_threat:
             best_threat = threat
@@ -585,7 +588,7 @@ def _shoot_focus_fire(
     game_state: Dict[str, Any],
     target_fn=_best_target_slot_by_hp,
 ) -> int:
-    """Pick the shoot action (4-8) for the best target, fallback first available."""
+    """Pick the shoot action (4-8) for the best target, else the first available shoot slot."""
     if active_unit is not None:
         slot = target_fn(active_unit, game_state)
         if slot is not None:
@@ -603,7 +606,7 @@ def _count_objectives_controlled(game_state: Dict[str, Any], player: int) -> int
     objectives = game_state.get("objectives")
     if not objectives:
         return 0
-    units_cache = game_state.get("units_cache", {})
+    units_cache = require_key(game_state, "units_cache")
     friendly_positions: set = set()
     for uid, entry in units_cache.items():
         if int(entry.get("player", -1)) == player:
@@ -611,7 +614,11 @@ def _count_objectives_controlled(game_state: Dict[str, Any], player: int) -> int
 
     controlled = 0
     for obj in objectives:
-        hexes = obj.get("hexes", []) if isinstance(obj, dict) else []
+        if isinstance(obj, dict):
+            _oh = obj.get("hexes")
+            hexes = _oh if isinstance(_oh, list) else []
+        else:
+            hexes = []
         for h in hexes:
             if isinstance(h, dict):
                 pos = (int(h["col"]), int(h["row"]))

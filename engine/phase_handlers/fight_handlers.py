@@ -600,12 +600,12 @@ def _fight_apply_pile_in_move(
     safe_print(game_state, log_message)
 
     set_unit_coordinates(unit, dest_col_i, dest_row_i)
-    old_cache = game_state.get("units_cache", {}).get(unit_id_str)
+    old_cache = require_key(game_state, "units_cache").get(unit_id_str)
     old_occupied = old_cache.get("occupied_hexes") if old_cache else None
 
     update_units_cache_position(game_state, unit_id_str, dest_col_i, dest_row_i)
 
-    new_cache = game_state.get("units_cache", {}).get(unit_id_str)
+    new_cache = require_key(game_state, "units_cache").get(unit_id_str)
     new_occupied = new_cache.get("occupied_hexes") if new_cache else None
     moved_unit_player = int(require_key(unit, "player"))
     update_enemy_adjacent_caches_after_unit_move(

@@ -101,24 +101,6 @@ function poolEdgeSig(pool: unknown): string {
   return `${pool.length}:${JSON.stringify(pool[0])}:${JSON.stringify(last)}`;
 }
 
-/** Tir / advance / survol LoS : ``localStorage.setItem('debugLos','1')`` puis F5 ; supprimer la clé pour couper. */
-function readDebugLos(): boolean {
-  try {
-    return typeof localStorage !== "undefined" && localStorage.getItem("debugLos") === "1";
-  } catch {
-    return false;
-  }
-}
-
-function logDebugLos(message: string, payload?: Record<string, unknown>): void {
-  if (!readDebugLos()) return;
-  if (payload !== undefined) {
-    console.info(`[debugLos] ${message}`, payload);
-  } else {
-    console.info(`[debugLos] ${message}`);
-  }
-}
-
 /**
  * Même liste que le sync ref / ``moveDestinationAnchorsFromState`` (valid_move_destinations_pool ou preview_hexes).
  * Si présente : le draw n’ajoute pas ``move_preview_footprint_zone`` dans ``availableCells`` (évite le double rendu « nid d’abeille »).
@@ -836,7 +818,6 @@ export default function Board({
 
   useEffect(() => {
     if (phase === "shoot" && mode === "advancePreview") return;
-    logDebugLos("shootAdvanceLosAnchor cleared (left shoot+advancePreview)", { phase, mode });
     setShootAdvanceLosAnchor(null);
   }, [phase, mode]);
 
@@ -1198,17 +1179,6 @@ export default function Board({
     };
 
     const source = resolveShootLosSource();
-    if (readDebugLos() && phase === "shoot") {
-      logDebugLos("shootPreviewWasmLos.resolve", {
-        mode,
-        selectedUnitId,
-        shootAdvanceLosAnchorKey,
-        hasSource: Boolean(source?.unit.RNG_WEAPONS?.length),
-        from: source ? { col: source.fromCol, row: source.fromRow, unitId: source.unit.id } : null,
-        enginePhase: gameState?.phase,
-        wasmReady: isWasmReady(),
-      });
-    }
     if (!source?.unit.RNG_WEAPONS?.length) return empty;
 
     const range = getMaxRangedRange(source.unit);
@@ -1288,7 +1258,7 @@ export default function Board({
         mode === "attackPreview" ||
         mode === "movePreview" ||
         mode === "advancePreview") &&
-      shootPreviewWasmLos.key !== "";
+      shootPreviewWasmLos.blinkIds.length > 0;
     const mergedIds = (() => {
       if (!mergeMoveLosHover && !mergeShootWasmLos) {
         return base;
@@ -1347,16 +1317,7 @@ export default function Board({
 
     let spriteBuiltForUnitId: number | null = null;
 
-    const hideMovePreviewGuides = (reason: string) => {
-      logDebugLos("hideMovePreviewGuides", {
-        reason,
-        phase,
-        mode,
-        effectivePhase,
-        selectedUnitId,
-        movePoolSize: resolvedMoveDestPoolRef.current?.size ?? 0,
-        hadDestPixels: destPixels !== null && destPixels.length > 0,
-      });
+    const hideMovePreviewGuides = () => {
       if (movePreviewGuideLineRef.current && !movePreviewGuideLineRef.current.destroyed) {
         movePreviewGuideLineRef.current.clear();
         movePreviewGuideLineRef.current.visible = false;
@@ -1557,20 +1518,6 @@ export default function Board({
     buildZonePixels();
     buildDestPixels();
 
-    if (readDebugLos() && (phase === "shoot" || mode === "advancePreview")) {
-      logDebugLos("mousemoveEffect: pool sync + destPixels built", {
-        phase,
-        mode,
-        effectivePhase,
-        selectedUnitId,
-        enginePhase: gameState?.phase ?? phase,
-        movePoolSize: resolvedMoveDestPoolRef.current?.size ?? 0,
-        destPixelCount: destPixels?.length ?? 0,
-        zonePixelCount: zonePixels?.length ?? 0,
-        wasmReady: isWasmReady(),
-      });
-    }
-
     /** Évite un setState React à chaque pixel de mouvement (coûteux). */
     let lastMovePreviewTooltipKey = "";
 
@@ -1641,7 +1588,7 @@ export default function Board({
       const container = hoverSpriteRef.current;
 
       if (container.destroyed) {
-        hideMovePreviewGuides("hover_sprite_destroyed");
+        hideMovePreviewGuides();
         return;
       }
 
@@ -1650,14 +1597,14 @@ export default function Board({
       if (!destPixels) buildDestPixels();
       if (!destPixels || destPixels.length === 0) {
         container.visible = false;
-        hideMovePreviewGuides("empty_move_dest_pool_after_buildDestPixels");
+        hideMovePreviewGuides();
         return;
       }
 
       const best = nearestDestToPixel(px, py);
       if (!best) {
         container.visible = false;
-        hideMovePreviewGuides("nearest_dest_to_pixel_null");
+        hideMovePreviewGuides();
         return;
       }
 
@@ -1684,7 +1631,7 @@ export default function Board({
         const inExpandedZone = zonePixels && zonePixels.length > 0;
         if (!inExpandedZone) {
           container.visible = false;
-          hideMovePreviewGuides("cursor_outside_zone_and_no_expanded_zone_pixels");
+          hideMovePreviewGuides();
           return;
         }
       }
@@ -1793,19 +1740,9 @@ export default function Board({
       losHexRef.current = { col: losCol, row: losRow };
 
       if (phase === "shoot" && mode === "advancePreview") {
-        setShootAdvanceLosAnchor((prev) => {
-          const next = prev && prev.col === losCol && prev.row === losRow ? prev : { col: losCol, row: losRow };
-          if (next !== prev && readDebugLos()) {
-            logDebugLos("shootAdvanceLosAnchor updated", {
-              col: next.col,
-              row: next.row,
-              losHexChanged,
-              iconCol,
-              iconRow,
-            });
-          }
-          return next;
-        });
+        setShootAdvanceLosAnchor((prev) =>
+          prev && prev.col === losCol && prev.row === losRow ? prev : { col: losCol, row: losRow },
+        );
       }
 
       if (
@@ -1813,15 +1750,7 @@ export default function Board({
         !(phase === "charge" && mode === "chargePreview") &&
         !(phase === "shoot" && mode === "advancePreview")
       ) {
-        if (readDebugLos() && phase === "move" && losHexChanged) {
-          logDebugLos("triggerLosForHex scheduled (move hover)", { losCol, losRow, debounceMs: 60 });
-        }
         triggerLosForHex(losCol, losRow);
-      } else if (readDebugLos() && phase === "shoot" && mode === "advancePreview" && losHexChanged) {
-        logDebugLos("triggerLosForHex skipped (shoot advance: plateau + shootPreviewWasmLos only)", {
-          losCol,
-          losRow,
-        });
       }
     };
 
@@ -1895,11 +1824,6 @@ export default function Board({
 
     if (canvas) canvas.addEventListener("mousemove", onMouseMove);
     return () => {
-      logDebugLos("mousemoveEffect cleanup (deps changed or unmount)", {
-        phase,
-        mode,
-        selectedUnitId,
-      });
       if (losDebounceTimer) clearTimeout(losDebounceTimer);
       if (canvas) canvas.removeEventListener("mousemove", onMouseMove);
       if (hoverOverlayRef.current) hoverOverlayRef.current.visible = false;
@@ -3001,22 +2925,6 @@ export default function Board({
     const shootingPreviewSource = resolveShootingPreviewSource();
     if (shootingPreviewSource) {
       appendShootingPreviewCells(shootingPreviewSource);
-    }
-    if (readDebugLos() && phase === "shoot") {
-      logDebugLos("drawBoard: shooting preview cells", {
-        mode,
-        selectedUnitId,
-        shootAdvanceLosAnchorKey,
-        hasShootingPreviewSource: shootingPreviewSource !== null,
-        from: shootingPreviewSource
-          ? { col: shootingPreviewSource.fromCol, row: shootingPreviewSource.fromRow, unitId: shootingPreviewSource.unit.id }
-          : null,
-        attackCellCount: attackCells.length,
-        coverCellCount: coverCells.length,
-        shootWasmLosKey: shootPreviewWasmLos.key,
-        wasmReady: isWasmReady(),
-        mergeShootWasmLosWouldApply: shootPreviewWasmLos.key !== "",
-      });
     }
     if (phase === "fight" && selectedUnit && mode === "attackPreview") {
       attackCells.push(...fightPreviewCells);

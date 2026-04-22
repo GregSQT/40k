@@ -25,6 +25,22 @@ from engine.combat_utils import (
 )
 from shared.data_validation import require_key
 
+
+def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: Any) -> int:
+    """Sum P1/P2 counts for a weapon-rule pair; missing bucket or keys count as 0."""
+    bucket = weapon_rule_usage.get(pair_key)
+    if not isinstance(bucket, dict):
+        return 0
+    v1 = bucket.get(1)
+    v2 = bucket.get(2)
+    total = 0
+    if isinstance(v1, int) and not isinstance(v1, bool):
+        total += v1
+    if isinstance(v2, int) and not isinstance(v2, bool):
+        total += v2
+    return total
+
+
 # Cache for LoS thresholds (loaded from game_config, same as engine)
 _los_thresholds_cache: Optional[Tuple[float, float]] = None
 _inches_to_subhex_analyzer_cache: Optional[int] = None
@@ -5984,8 +6000,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         not_used_count = sum(
             1
             for (rule_name, weapon_key) in expected_wr_keys
-            if (weapon_rule_usage.get((rule_name, weapon_key), {1: 0, 2: 0}).get(1, 0)
-                + weapon_rule_usage.get((rule_name, weapon_key), {1: 0, 2: 0}).get(2, 0)) == 0
+            if _weapon_rule_usage_pair_total(weapon_rule_usage, (rule_name, weapon_key)) == 0
         )
         log_print(
             f"Expected weapon-rule pairs: {len(expected_wr_keys):6d} | "
@@ -6331,10 +6346,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     weapon_rule_not_used_warnings = sum(
         1
         for (rule_name, weapon_key) in expected_weapon_rule_pairs
-        if (
-            weapon_rule_usage_stats.get((rule_name, weapon_key), {1: 0, 2: 0}).get(1, 0)
-            + weapon_rule_usage_stats.get((rule_name, weapon_key), {1: 0, 2: 0}).get(2, 0)
-        ) == 0
+        if _weapon_rule_usage_pair_total(weapon_rule_usage_stats, (rule_name, weapon_key)) == 0
     )
     special_rules_invalid = sum(
         1 for (rid, ut) in special_rule_usage_stats.keys()
@@ -6566,10 +6578,7 @@ if __name__ == "__main__":
         weapon_rule_not_used_warnings = sum(
             1
             for (rname, wkey) in expected_weapon_rule_pairs
-            if (
-                weapon_rule_usage.get((rname, wkey), {1: 0, 2: 0}).get(1, 0)
-                + weapon_rule_usage.get((rname, wkey), {1: 0, 2: 0}).get(2, 0)
-            ) == 0
+            if _weapon_rule_usage_pair_total(weapon_rule_usage, (rname, wkey)) == 0
         )
         weapon_rules_invalid = sum(
             1 for (rname, wkey) in weapon_rule_usage.keys()

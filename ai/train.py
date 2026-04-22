@@ -105,7 +105,7 @@ def _build_training_bots_from_config(training_config):
     
     cfg = require_key(training_config, "bot_training")
     ratios = cfg.get("ratios", {"random": 0.2, "greedy": 0.4, "defensive": 0.4})
-    randomness_cfg = cfg.get("randomness", {})
+    randomness_cfg = cfg["randomness"] if "randomness" in cfg else {}
 
     BOT_CLASSES = {
         "random": RandomBot,
@@ -861,7 +861,7 @@ def _apply_wall_ref_weighting(
 def _load_rule_checker_scenarios(project_root_path: str) -> List[str]:
     """
     Load rule-checker scenario paths from config/rule_checker/manifest.json.
-    Strict mode: no fallback if manifest/scenarios are missing.
+    Strict mode: raises if the manifest or scenario list is missing or invalid.
     """
     manifest_path = os.path.join(project_root_path, "config", "rule_checker", "manifest.json")
     if not os.path.isfile(manifest_path):
@@ -4283,7 +4283,7 @@ def main():
     parser.add_argument("--mode", type=str, default=None,
                        help="Force training device: CPU or GPU (case-insensitive). If omitted, auto-selects based on network size and GPU availability.")
     parser.add_argument("--rule-checker", action="store_true",
-                       help="Train only on scenarios from config/rule_checker/manifest.json (no fallback).")
+                       help="Train only on scenarios listed in config/rule_checker/manifest.json (no implicit scenario list).")
     parser.add_argument("--debug", action="store_true",
                        help="Enable debug console output (verbose logging)")
     parser.add_argument("--param", action="append", nargs=2, metavar=("KEY", "VALUE"),

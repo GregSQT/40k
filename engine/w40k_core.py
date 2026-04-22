@@ -326,7 +326,7 @@ class W40KEngine(gym.Env):
                 if gym_training_mode:
                     raise KeyError(
                         "Training mode requires explicit config['controlled_player']; "
-                        "fallback defaults are forbidden."
+                        "implicit defaults when the key is absent are forbidden."
                     )
                 self.config["controlled_player"] = 1  # Legacy non-training default
 
@@ -376,7 +376,7 @@ class W40KEngine(gym.Env):
         # Data files keep values in inches (GW standard); the engine works in grid steps.
         # CRITICAL: deep-copy mutable sub-dicts before scaling to avoid mutating
         # the cached config_loader objects (causes cumulative ×10 on each game restart).
-        _board_cfg = self.config.get("board", {})
+        _board_cfg = require_key(self.config, "board")
         _board_default = _board_cfg.get("default", _board_cfg)
         _scale = int(_board_default.get("inches_to_subhex", 1))
         if _scale != 1:
@@ -1337,7 +1337,9 @@ class W40KEngine(gym.Env):
             if len(valid_action_indices) == 0:
                 raise RuntimeError("deployment_random_mix enabled but no valid action available")
             action = int(random.choice(valid_action_indices))
-            forced_steps = self.game_state.get("_deployment_random_mix_forced_steps", 0)
+            if "_deployment_random_mix_forced_steps" not in self.game_state:
+                self.game_state["_deployment_random_mix_forced_steps"] = 0
+            forced_steps = self.game_state["_deployment_random_mix_forced_steps"]
             if not isinstance(forced_steps, int) or isinstance(forced_steps, bool):
                 raise TypeError(
                     "_deployment_random_mix_forced_steps must be integer "
@@ -2590,7 +2592,10 @@ class W40KEngine(gym.Env):
                         # CRITICAL: Check if there are attack results to log before phase transition.
                         # Use pre_action_phase (captured before handler execution), because current
                         # game_state phase may already have transitioned (shoot->charge / fight->command).
-                        all_attack_results = result.get("all_attack_results", [])
+                        if "all_attack_results" in result:
+                            all_attack_results = result["all_attack_results"]
+                        else:
+                            all_attack_results = []
                         if not isinstance(all_attack_results, list):
                             raise TypeError(
                                 f"result['all_attack_results'] must be a list when provided, got "

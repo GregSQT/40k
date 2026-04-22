@@ -199,7 +199,7 @@ def compute_move_preview_mask_loops_world(
     while undirected_remaining:
         pick = next(iter(undirected_remaining))
         ka, kb = pick
-        if kb not in adj.get(ka, []):
+        if kb not in require_key(adj, ka):
             return None
 
         start = ka

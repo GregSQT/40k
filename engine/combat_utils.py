@@ -350,11 +350,21 @@ def calculate_pathfinding_distance(col1: int, row1: int, col2: int, row2: int,
         wall_set = build_wall_set(game_state)
         game_state["_wall_set_cache"] = wall_set
 
-    config = game_state.get("config") or {}
-    game_rules = config.get("game_rules") or {}
-    board_cfg = config.get("board_config", {}).get("default", {})
-    pf_cfg = board_cfg.get("pathfinding", {})
-    max_open = pf_cfg.get("max_open_nodes", 2000)
+    max_open = 2000
+    config_obj = game_state.get("config")
+    if isinstance(config_obj, dict):
+        board_root = config_obj.get("board_config")
+        if isinstance(board_root, dict):
+            if "default" in board_root:
+                board_spec = board_root["default"]
+            else:
+                board_spec = board_root
+            if isinstance(board_spec, dict):
+                pf_cfg = board_spec.get("pathfinding")
+                if isinstance(pf_cfg, dict):
+                    mo = pf_cfg.get("max_open_nodes")
+                    if isinstance(mo, int) and not isinstance(mo, bool):
+                        max_open = mo
 
     result = _hex_pathfinding(
         col1, row1, col2, row2,
