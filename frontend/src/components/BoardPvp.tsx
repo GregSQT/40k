@@ -51,6 +51,10 @@ import { WeaponDropdown } from "./WeaponDropdown";
 import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
 import { pointInAnyMaskLoop } from "../utils/pointInPolygon";
 import { syncMoveDestinationPoolRefs } from "../utils/movePoolRefsSync";
+import {
+  buildShootingLosPreviewFromVisibleHexes,
+  hexDistOff,
+} from "../utils/losPreviewHelpers";
 import { ensureWasmLoaded, isWasmReady, computeVisibleHexes } from "../utils/wasmLos";
 import { FEATURES } from "../constants/gameConfig";
 import {
@@ -78,6 +82,41 @@ function resolveBaseSizeForFootprint(unit: Unit | undefined): number {
     }
   }
   return 1;
+}
+
+/** JSON stable pour l’empreinte unités (ordre des clés sinon ``unitsChanged`` boucle → gel UI). */
+function stableBoolRecordJson(m: Record<string, boolean>): string {
+  const keys = Object.keys(m).sort();
+  const sorted: Record<string, boolean> = {};
+  for (const k of keys) {
+    sorted[k] = m[k] === true;
+  }
+  return JSON.stringify(sorted);
+}
+
+/** Signature courte d’un pool (longueur + premier + dernier) pour dépendances sans ``JSON.stringify`` massif. */
+function poolEdgeSig(pool: unknown): string {
+  if (!Array.isArray(pool) || pool.length === 0) return "0";
+  const last = pool[pool.length - 1];
+  return `${pool.length}:${JSON.stringify(pool[0])}:${JSON.stringify(last)}`;
+}
+
+/** Tir / advance / survol LoS : ``localStorage.setItem('debugLos','1')`` puis F5 ; supprimer la clé pour couper. */
+function readDebugLos(): boolean {
+  try {
+    return typeof localStorage !== "undefined" && localStorage.getItem("debugLos") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function logDebugLos(message: string, payload?: Record<string, unknown>): void {
+  if (!readDebugLos()) return;
+  if (payload !== undefined) {
+    console.info(`[debugLos] ${message}`, payload);
+  } else {
+    console.info(`[debugLos] ${message}`);
+  }
 }
 
 /**
@@ -344,13 +383,6 @@ type BoardProps = {
   onMeasureJunctionCommit?: (col: number, row: number) => void;
 };
 
-/** Hex distance between two offset-coordinate positions. */
-function hexDistOff(c1: number, r1: number, c2: number, r2: number): number {
-  const x1 = c1, z1 = r1 - ((c1 - (c1 & 1)) >> 1), y1 = -x1 - z1;
-  const x2 = c2, z2 = r2 - ((c2 - (c2 & 1)) >> 1), y2 = -x2 - z2;
-  return Math.max(Math.abs(x1 - x2), Math.abs(y1 - y2), Math.abs(z1 - z2));
-}
-
 /** Échelle affichage tooltip mouvement : nombre de pas hex entre centres pour 1″ (règle plateau). */
 const HEX_STEPS_PER_INCH_DISPLAY = 10;
 /** Au-dessus de tout le reste du stage (unités 2000, drag 9000, UI / popups ~10000). */
@@ -552,8 +584,12 @@ export default function Board({
 
   React.useEffect(() => {}, []);
 
+  /** Recalcul preview tir WASM après chargement du module (``isWasmReady`` n’est pas réactif). */
+  const [wasmLosReadyVersion, setWasmLosReadyVersion] = useState(0);
   useEffect(() => {
-    ensureWasmLoaded();
+    void ensureWasmLoaded().then(() => {
+      setWasmLosReadyVersion((v) => v + 1);
+    });
   }, []);
 
   // ✅ HOOK 1: useRef - ALWAYS called first
@@ -776,6 +812,42 @@ export default function Board({
   /** Cibles ennemies en LoS depuis la destination survolée (preview move) — même barres blink que la phase tir */
   const [movePreviewLosBlinkIds, setMovePreviewLosBlinkIds] = useState<number[]>([]);
   const [movePreviewLosCoverById, setMovePreviewLosCoverById] = useState<Record<string, boolean>>({});
+
+  /**
+   * Tir + advance : seule source pour ``fromCol``/``fromRow`` (LoS plateau + WASM blink).
+   * Mis à jour uniquement depuis le même chemin souris que l’icône d’ancre ; réinitialisé hors ce mode.
+   */
+  const [shootAdvanceLosAnchor, setShootAdvanceLosAnchor] = useState<{
+    col: number;
+    row: number;
+  } | null>(null);
+
+  const shootAdvanceLosAnchorKey = useMemo(() => {
+    if (phase !== "shoot" || mode !== "advancePreview" || shootAdvanceLosAnchor === null) {
+      return "";
+    }
+    return `${shootAdvanceLosAnchor.col},${shootAdvanceLosAnchor.row}`;
+  }, [phase, mode, shootAdvanceLosAnchor]);
+
+  const movePreviewLosCoverKey = useMemo(
+    () => stableBoolRecordJson(movePreviewLosCoverById),
+    [movePreviewLosCoverById],
+  );
+
+  useEffect(() => {
+    if (phase === "shoot" && mode === "advancePreview") return;
+    logDebugLos("shootAdvanceLosAnchor cleared (left shoot+advancePreview)", { phase, mode });
+    setShootAdvanceLosAnchor(null);
+  }, [phase, mode]);
+
+  const chargePreviewOverlayKey = useMemo(
+    () => poolEdgeSig(chargePreviewOverlayHexes),
+    [chargePreviewOverlayHexes],
+  );
+
+  const chargeReferenceKey = chargeReferenceHex
+    ? `${chargeReferenceHex.col},${chargeReferenceHex.row}`
+    : "";
 
   /** Normalise la fermeture : Pixi envoie visible:false mais on garde l’état en null pour le rendu. */
   const handleUnitTooltip = useCallback((payload: HpBarHtmlTooltipPayload) => {
@@ -1011,6 +1083,197 @@ export default function Board({
     return sorted;
   }, [blinkingUnits]);
 
+  const unitsBoardLayoutKey = useMemo(
+    () =>
+      [...units]
+        .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+        .map(
+          (u) =>
+            `${String(u.id)}:${u.col}:${u.row}:${u.HP_CUR ?? ""}:rng${u.selectedRngWeaponIndex ?? 0}`,
+        )
+        .join("|"),
+    [units],
+  );
+
+  /** Évite de relancer le gros useEffect Pixi à chaque nouvelle référence ``gameState`` (perte WebGL / gel). */
+  const gameStateBoardDepsKey = useMemo(() => {
+    if (!gameState) return "";
+    const g = gameState;
+    const uc = g.units_cache;
+    const cacheSig =
+      uc && typeof uc === "object"
+        ? Object.keys(uc)
+            .sort()
+            .map((k) => {
+              const e = uc[k]!;
+              return `${k}:${e.col},${e.row}:${e.HP_CUR}`;
+            })
+            .join("|")
+        : "";
+    const parts = [
+      g.phase,
+      String(g.turn ?? g.currentTurn ?? ""),
+      String(g.episode_steps ?? ""),
+      String(g.current_player ?? ""),
+      String(g.game_over ?? ""),
+      cacheSig,
+      poolEdgeSig(g.valid_move_destinations_pool),
+      poolEdgeSig(g.preview_hexes),
+      String(g.active_shooting_unit ?? ""),
+      String(g.active_movement_unit ?? ""),
+      String(g.active_charge_unit ?? ""),
+      String(g.active_fight_unit ?? ""),
+      String(g.fight_subphase ?? g.fightSubPhase ?? ""),
+      poolEdgeSig(g.charge_activation_pool),
+      poolEdgeSig(g.shoot_activation_pool),
+      poolEdgeSig(g.move_activation_pool),
+      String(g.move_preview_footprint_span ?? ""),
+      JSON.stringify(g.move_preview_footprint_mask_loops ?? null),
+      poolEdgeSig(g.move_preview_footprint_zone),
+      poolEdgeSig(g.fight_pile_in_footprint_zone),
+      poolEdgeSig(g.fight_consolidation_footprint_zone),
+      JSON.stringify(g.unitsMoved ?? []),
+      JSON.stringify(g.unitsFled ?? []),
+      JSON.stringify(g.unitsCharged ?? []),
+      JSON.stringify(g.unitsAttacked ?? []),
+      JSON.stringify(g.unitsAdvanced ?? []),
+      JSON.stringify(g.deployment_state ?? null),
+    ];
+    return parts.join("\u001e");
+  }, [gameState]);
+
+  /**
+   * Phase tir : mêmes cibles blink / couverture que le survol move — ``buildShootingLosPreviewFromVisibleHexes``
+   * depuis la position du tireur (réelle ou movePreview / attackPreview), pas seulement ``blinking_units`` API.
+   */
+  const shootPreviewWasmLos = useMemo((): {
+    blinkIds: number[];
+    coverByUnitId: Record<string, boolean>;
+    key: string;
+  } => {
+    const empty = { blinkIds: [] as number[], coverByUnitId: {} as Record<string, boolean>, key: "" };
+    if (phase !== "shoot") return empty;
+    const enginePhase = gameState?.phase ?? phase;
+    if (enginePhase !== "shoot") return empty;
+    if (!boardConfig || !gameConfig) return empty;
+    if (!isWasmReady()) return empty;
+
+    const resolveShootLosSource = (): { unit: Unit; fromCol: number; fromRow: number } | null => {
+      if (mode === "advancePreview") {
+        if (!shootAdvanceLosAnchor) return null;
+        const sel =
+          selectedUnitId == null ? undefined : units.find((u) => String(u.id) === String(selectedUnitId));
+        if (!sel?.RNG_WEAPONS?.length) return null;
+        return {
+          unit: sel,
+          fromCol: shootAdvanceLosAnchor.col,
+          fromRow: shootAdvanceLosAnchor.row,
+        };
+      }
+      if (mode === "movePreview" && movePreview) {
+        const mpUnit = units.find((u) => u.id === movePreview.unitId);
+        if (!mpUnit) return null;
+        return { unit: mpUnit, fromCol: movePreview.destCol, fromRow: movePreview.destRow };
+      }
+      if (mode === "attackPreview" && attackPreview) {
+        const apUnit = units.find((u) => u.id === attackPreview.unitId);
+        if (!apUnit || String(apUnit.id) !== String(selectedUnitId)) return null;
+        return { unit: apUnit, fromCol: apUnit.col, fromRow: apUnit.row };
+      }
+      const sel =
+        selectedUnitId == null ? undefined : units.find((u) => String(u.id) === String(selectedUnitId));
+      if (!sel) return null;
+      const activeShoot = (gameState as { active_shooting_unit?: string | number } | null | undefined)
+        ?.active_shooting_unit;
+      const isActiveShooter =
+        activeShoot != null && String(activeShoot) === String(selectedUnitId);
+      const shootLeft = sel.SHOOT_LEFT;
+      if (
+        (shootLeft === undefined || shootLeft <= 0) &&
+        !isActiveShooter
+      ) {
+        return null;
+      }
+      return { unit: sel, fromCol: sel.col, fromRow: sel.row };
+    };
+
+    const source = resolveShootLosSource();
+    if (readDebugLos() && phase === "shoot") {
+      logDebugLos("shootPreviewWasmLos.resolve", {
+        mode,
+        selectedUnitId,
+        shootAdvanceLosAnchorKey,
+        hasSource: Boolean(source?.unit.RNG_WEAPONS?.length),
+        from: source ? { col: source.fromCol, row: source.fromRow, unitId: source.unit.id } : null,
+        enginePhase: gameState?.phase,
+        wasmReady: isWasmReady(),
+      });
+    }
+    if (!source?.unit.RNG_WEAPONS?.length) return empty;
+
+    const range = getMaxRangedRange(source.unit);
+    if (range <= 0) return empty;
+
+    const BOARD_COLS = boardConfig.cols;
+    const BOARD_ROWS = boardConfig.rows;
+    const gameRules = gameConfig.game_rules;
+    const losMin = gameRules?.los_visibility_min_ratio ?? 0;
+    const coverRatio = gameRules?.cover_ratio ?? 0;
+
+    const effectiveWallHexes: [number, number][] = wallHexesOverride
+      ? wallHexesOverride.map((h) => [h.col, h.row] as [number, number])
+      : boardConfig.wall_hexes
+        ? [...boardConfig.wall_hexes]
+        : [];
+    const wallKeySet = new Set(effectiveWallHexes.map(([c, r]) => `${c},${r}`));
+    const bottomRow = BOARD_ROWS - 1;
+    for (let col = 0; col < BOARD_COLS; col++) {
+      if (col % 2 === 1 && !wallKeySet.has(`${col},${bottomRow}`)) {
+        effectiveWallHexes.push([col, bottomRow]);
+      }
+    }
+
+    try {
+      const visibleHexes = computeVisibleHexes(
+        source.fromCol,
+        source.fromRow,
+        range,
+        BOARD_COLS,
+        BOARD_ROWS,
+        effectiveWallHexes,
+        losMin,
+        coverRatio,
+      );
+      const losPreview = buildShootingLosPreviewFromVisibleHexes(
+        visibleHexes,
+        units,
+        source.unit.player,
+        losMin,
+        coverRatio,
+      );
+      const blinkIds = losPreview.blinkIds;
+      const coverByUnitId = losPreview.coverByUnitId;
+      const key = `${shootAdvanceLosAnchorKey}|${[...blinkIds].sort((a, b) => a - b).join(",")}|${stableBoolRecordJson(coverByUnitId)}`;
+      return { blinkIds, coverByUnitId, key };
+    } catch {
+      return empty;
+    }
+  }, [
+    phase,
+    mode,
+    gameState?.phase,
+    gameState?.active_shooting_unit,
+    movePreview,
+    attackPreview,
+    selectedUnitId,
+    unitsBoardLayoutKey,
+    boardConfig,
+    gameConfig,
+    wallHexesOverride,
+    wasmLosReadyVersion,
+    shootAdvanceLosAnchorKey,
+  ]);
+
   const effectiveBlinkingUnitsWithMovePreview = useMemo(() => {
     const base = stableBlinkingUnits ?? [];
     // Survol LoS : phase move + mode "select" (curseur sur zone de move), pas seulement movePreview confirmé
@@ -1018,18 +1281,39 @@ export default function Board({
       phase === "move" &&
       (mode === "select" || mode === "movePreview") &&
       movePreviewLosBlinkIds.length > 0;
+    // Phase tir : union backend + même éligibilité WASM que la preview move (blink HP / %)
+    const mergeShootWasmLos =
+      phase === "shoot" &&
+      (mode === "select" ||
+        mode === "attackPreview" ||
+        mode === "movePreview" ||
+        mode === "advancePreview") &&
+      shootPreviewWasmLos.key !== "";
     const mergedIds = (() => {
-      if (!mergeMoveLosHover) {
+      if (!mergeMoveLosHover && !mergeShootWasmLos) {
         return base;
       }
       const merged = new Set<string>();
       for (const id of base) merged.add(String(id));
-      for (const id of movePreviewLosBlinkIds) merged.add(String(id));
+      if (mergeMoveLosHover) {
+        for (const id of movePreviewLosBlinkIds) merged.add(String(id));
+      }
+      if (mergeShootWasmLos) {
+        for (const id of shootPreviewWasmLos.blinkIds) merged.add(String(id));
+      }
       return Array.from(merged).map((s) => parseInt(s, 10));
     })();
     const uc = gameState?.units_cache as Record<string, unknown> | undefined;
     return filterBlinkIdsToLivingUnitsCache(mergedIds, uc, units);
-  }, [stableBlinkingUnits, mode, phase, movePreviewLosBlinkIds, gameState?.units_cache, units]);
+  }, [
+    stableBlinkingUnits,
+    mode,
+    phase,
+    movePreviewLosBlinkIds,
+    shootPreviewWasmLos.key,
+    gameState?.units_cache,
+    unitsBoardLayoutKey,
+  ]);
 
   // Prévisualisation LoS (move) : uniquement depuis onMouseMove = position de l’icône, pas l’hex sous le curseur
   useEffect(() => {
@@ -1063,7 +1347,16 @@ export default function Board({
 
     let spriteBuiltForUnitId: number | null = null;
 
-    const hideMovePreviewGuides = () => {
+    const hideMovePreviewGuides = (reason: string) => {
+      logDebugLos("hideMovePreviewGuides", {
+        reason,
+        phase,
+        mode,
+        effectivePhase,
+        selectedUnitId,
+        movePoolSize: resolvedMoveDestPoolRef.current?.size ?? 0,
+        hadDestPixels: destPixels !== null && destPixels.length > 0,
+      });
       if (movePreviewGuideLineRef.current && !movePreviewGuideLineRef.current.destroyed) {
         movePreviewGuideLineRef.current.clear();
         movePreviewGuideLineRef.current.visible = false;
@@ -1072,6 +1365,7 @@ export default function Board({
       setMovePreviewLosBlinkIds([]);
       setMovePreviewLosCoverById({});
       if (hoverOverlayRef.current) hoverOverlayRef.current.visible = false;
+      setShootAdvanceLosAnchor(null);
     };
 
     // Pre-parse pixel positions for fast nearest-hex lookups
@@ -1201,8 +1495,81 @@ export default function Board({
       return best;
     };
 
+    // Même ordre que l’effet drawBoard : cet effet est déclaré **avant** lui — au premier commit,
+    // ``buildDestPixels`` voyait souvent un pool encore vide puis ``hideMovePreviewGuides`` effaçait
+    // l’ancre advance tir. On synchronise la ref ici avant la première construction de ``destPixels``.
+    {
+      const enginePhaseForPoolsMs = gameState?.phase ?? phase;
+      const keepMovementPickPoolMs =
+        ((enginePhaseForPoolsMs === "move" || enginePhaseForPoolsMs === "command") &&
+          selectedUnitId !== null) ||
+        (mode === "advancePreview" && selectedUnitId !== null) ||
+        (phase === "shoot" && pendingMoveAfterShooting && selectedUnitId !== null) ||
+        (phase === "fight" &&
+          (mode === "pileInPreview" || mode === "consolidationPreview") &&
+          selectedUnitId !== null);
+
+      if (keepMovementPickPoolMs && resolvedMoveDestPoolRef.current) {
+        const shouldSyncMovePoolsFromStateMs =
+          enginePhaseForPoolsMs === "move" ||
+          enginePhaseForPoolsMs === "command" ||
+          (mode === "advancePreview" && selectedUnitId !== null) ||
+          (phase === "shoot" && pendingMoveAfterShooting);
+        if (shouldSyncMovePoolsFromStateMs) {
+          syncMoveDestinationPoolRefs({
+            gameState: gameState ?? null,
+            phase: enginePhaseForPoolsMs,
+            mode,
+            selectedUnitId,
+            moveDestPoolRef: resolvedMoveDestPoolRef,
+            footprintZoneRef,
+            footprintMaskLoopsRef,
+            pendingMoveAfterShooting,
+          });
+        }
+      }
+
+      if (mode === "advancePreview" && selectedUnitId !== null && resolvedMoveDestPoolRef.current.size === 0) {
+        if (typeof getAdvanceDestinations === "function") {
+          const dests = getAdvanceDestinations(selectedUnitId);
+          const s = new Set<string>();
+          for (const d of dests) {
+            s.add(`${Number(d.col)},${Number(d.row)}`);
+          }
+          if (s.size > 0) {
+            resolvedMoveDestPoolRef.current = s;
+          }
+        }
+        if (
+          resolvedMoveDestPoolRef.current.size === 0 &&
+          availableCellsOverride &&
+          availableCellsOverride.length > 0
+        ) {
+          const s = new Set<string>();
+          for (const c of availableCellsOverride) {
+            s.add(`${Number(c.col)},${Number(c.row)}`);
+          }
+          resolvedMoveDestPoolRef.current = s;
+        }
+      }
+    }
+
     buildZonePixels();
     buildDestPixels();
+
+    if (readDebugLos() && (phase === "shoot" || mode === "advancePreview")) {
+      logDebugLos("mousemoveEffect: pool sync + destPixels built", {
+        phase,
+        mode,
+        effectivePhase,
+        selectedUnitId,
+        enginePhase: gameState?.phase ?? phase,
+        movePoolSize: resolvedMoveDestPoolRef.current?.size ?? 0,
+        destPixelCount: destPixels?.length ?? 0,
+        zonePixelCount: zonePixels?.length ?? 0,
+        wasmReady: isWasmReady(),
+      });
+    }
 
     /** Évite un setState React à chaque pixel de mouvement (coûteux). */
     let lastMovePreviewTooltipKey = "";
@@ -1227,7 +1594,7 @@ export default function Board({
       const px = (ev.clientX - rect.left) * scaleX;
       const py = (ev.clientY - rect.top) * scaleY;
 
-      const selectedUnit = units.find((u) => u.id === selectedUnitId);
+      const selectedUnit = units.find((u) => String(u.id) === String(selectedUnitId));
       if (!selectedUnit) return;
 
       // Build the icon container once per selected unit
@@ -1274,7 +1641,7 @@ export default function Board({
       const container = hoverSpriteRef.current;
 
       if (container.destroyed) {
-        hideMovePreviewGuides();
+        hideMovePreviewGuides("hover_sprite_destroyed");
         return;
       }
 
@@ -1283,14 +1650,14 @@ export default function Board({
       if (!destPixels) buildDestPixels();
       if (!destPixels || destPixels.length === 0) {
         container.visible = false;
-        hideMovePreviewGuides();
+        hideMovePreviewGuides("empty_move_dest_pool_after_buildDestPixels");
         return;
       }
 
       const best = nearestDestToPixel(px, py);
       if (!best) {
         container.visible = false;
-        hideMovePreviewGuides();
+        hideMovePreviewGuides("nearest_dest_to_pixel_null");
         return;
       }
 
@@ -1317,7 +1684,7 @@ export default function Board({
         const inExpandedZone = zonePixels && zonePixels.length > 0;
         if (!inExpandedZone) {
           container.visible = false;
-          hideMovePreviewGuides();
+          hideMovePreviewGuides("cursor_outside_zone_and_no_expanded_zone_pixels");
           return;
         }
       }
@@ -1425,8 +1792,36 @@ export default function Board({
       const losHexChanged = !prevLos || prevLos.col !== losCol || prevLos.row !== losRow;
       losHexRef.current = { col: losCol, row: losRow };
 
-      if (losHexChanged && !(phase === "charge" && mode === "chargePreview")) {
+      if (phase === "shoot" && mode === "advancePreview") {
+        setShootAdvanceLosAnchor((prev) => {
+          const next = prev && prev.col === losCol && prev.row === losRow ? prev : { col: losCol, row: losRow };
+          if (next !== prev && readDebugLos()) {
+            logDebugLos("shootAdvanceLosAnchor updated", {
+              col: next.col,
+              row: next.row,
+              losHexChanged,
+              iconCol,
+              iconRow,
+            });
+          }
+          return next;
+        });
+      }
+
+      if (
+        losHexChanged &&
+        !(phase === "charge" && mode === "chargePreview") &&
+        !(phase === "shoot" && mode === "advancePreview")
+      ) {
+        if (readDebugLos() && phase === "move" && losHexChanged) {
+          logDebugLos("triggerLosForHex scheduled (move hover)", { losCol, losRow, debounceMs: 60 });
+        }
         triggerLosForHex(losCol, losRow);
+      } else if (readDebugLos() && phase === "shoot" && mode === "advancePreview" && losHexChanged) {
+        logDebugLos("triggerLosForHex skipped (shoot advance: plateau + shootPreviewWasmLos only)", {
+          losCol,
+          losRow,
+        });
       }
     };
 
@@ -1440,7 +1835,7 @@ export default function Board({
         const requestId = ++losRequestIdRef.current;
         const app = appRef.current;
         if (!app) return;
-        const selectedUnit = units.find((u) => u.id === selectedUnitId);
+        const selectedUnit = units.find((u) => String(u.id) === String(selectedUnitId));
         if (!selectedUnit) {
           setMovePreviewLosBlinkIds([]);
           setMovePreviewLosCoverById({});
@@ -1469,61 +1864,42 @@ export default function Board({
 
         if (losRequestIdRef.current !== requestId) return;
 
+        const losPreview = buildShootingLosPreviewFromVisibleHexes(
+          visibleHexes,
+          units,
+          selectedUnit.player,
+          losMin,
+          coverR,
+        );
+
+        if (losRequestIdRef.current !== requestId) return;
+
         overlay.clear();
         overlay.beginFill(LOS_PREVIEW_COVER_HEX, 0.3);
-        for (const hex of visibleHexes) {
-          if (hex.state === 2) {
-            overlay.drawCircle(hxX(hex.col), hxY(hex.col, hex.row), HEX_RADIUS_H);
-          }
+        for (const c of losPreview.terrainCoverCells) {
+          overlay.drawCircle(hxX(c.col), hxY(c.col, c.row), HEX_RADIUS_H);
         }
         overlay.endFill();
         overlay.beginFill(LOS_PREVIEW_CLEAR_HEX, 0.3);
-        for (const hex of visibleHexes) {
-          if (hex.state === 1) {
-            overlay.drawCircle(hxX(hex.col), hxY(hex.col, hex.row), HEX_RADIUS_H);
-          }
+        for (const c of losPreview.clearCells) {
+          overlay.drawCircle(hxX(c.col), hxY(c.col, c.row), HEX_RADIUS_H);
         }
         overlay.endFill();
         overlay.visible = true;
 
-        const losVisibleSet = new Set<string>();
-        for (const hex of visibleHexes) {
-          losVisibleSet.add(`${hex.col},${hex.row}`);
-        }
-        const selectedPlayer = selectedUnit.player;
-        const blinkIds: number[] = [];
-        const coverMap: Record<string, boolean> = {};
-
-        for (const u of units) {
-          if (u.player === selectedPlayer) continue;
-          const uBaseSize = typeof u.BASE_SIZE === "number" && u.BASE_SIZE > 1 ? u.BASE_SIZE : 0;
-          const scanR = uBaseSize > 0 ? Math.ceil(uBaseSize / 2) : 0;
-          let totalHexes = 0;
-          let visibleCount = 0;
-          for (let dc = -scanR; dc <= scanR; dc++) {
-            for (let dr = -scanR; dr <= scanR; dr++) {
-              if (hexDistOff(u.col, u.row, u.col + dc, u.row + dr) > scanR) continue;
-              totalHexes++;
-              if (losVisibleSet.has(`${u.col + dc},${u.row + dr}`)) visibleCount++;
-            }
-          }
-          const ratio = totalHexes > 0 ? visibleCount / totalHexes : 0;
-          const isVisible = ratio >= losMin;
-          if (!isVisible) continue;
-          const inCover = ratio < coverR;
-          const uid = typeof u.id === "string" ? parseInt(u.id, 10) : u.id;
-          blinkIds.push(uid);
-          coverMap[String(u.id)] = inCover;
-        }
-
         if (losRequestIdRef.current !== requestId) return;
-        setMovePreviewLosBlinkIds(blinkIds);
-        setMovePreviewLosCoverById(coverMap);
+        setMovePreviewLosBlinkIds(losPreview.blinkIds);
+        setMovePreviewLosCoverById(losPreview.coverByUnitId);
       }, LOS_DEBOUNCE_MS);
     };
 
     if (canvas) canvas.addEventListener("mousemove", onMouseMove);
     return () => {
+      logDebugLos("mousemoveEffect cleanup (deps changed or unmount)", {
+        phase,
+        mode,
+        selectedUnitId,
+      });
       if (losDebounceTimer) clearTimeout(losDebounceTimer);
       if (canvas) canvas.removeEventListener("mousemove", onMouseMove);
       if (hoverOverlayRef.current) hoverOverlayRef.current.visible = false;
@@ -1551,6 +1927,9 @@ export default function Board({
     chargeReferenceHex,
     chargeRoll,
     setMovePreviewDistanceTooltip,
+    pendingMoveAfterShooting,
+    getAdvanceDestinations,
+    availableCellsOverride,
   ]);
 
   /**
@@ -2438,8 +2817,18 @@ export default function Board({
     const shootPreviewBackendIds = backendShootableEnemyIds;
 
     const resolveShootingPreviewSource = (): { unit: Unit; fromCol: number; fromRow: number } | null => {
-      if (mode === "advancePreview") {
-        return null;
+      if (mode === "advancePreview" && phase === "shoot") {
+        if (!selectedUnit?.RNG_WEAPONS?.length) {
+          return null;
+        }
+        if (!shootAdvanceLosAnchor) {
+          return null;
+        }
+        return {
+          unit: selectedUnit,
+          fromCol: shootAdvanceLosAnchor.col,
+          fromRow: shootAdvanceLosAnchor.row,
+        };
       }
 
       if (mode === "movePreview" && movePreview) {
@@ -2466,7 +2855,15 @@ export default function Board({
         };
       }
 
-      if (phase === "shoot" && selectedUnit?.SHOOT_LEFT !== undefined && selectedUnit.SHOOT_LEFT > 0) {
+      if (phase === "shoot" && selectedUnit) {
+        const activeShoot = (gameState as { active_shooting_unit?: string | number } | null | undefined)
+          ?.active_shooting_unit;
+        const isActiveShooter =
+          activeShoot != null && String(activeShoot) === String(selectedUnitId);
+        const sl = selectedUnit.SHOOT_LEFT;
+        if ((sl === undefined || sl <= 0) && !isActiveShooter) {
+          return null;
+        }
         return {
           unit: selectedUnit,
           fromCol: selectedUnit.col,
@@ -2497,16 +2894,35 @@ export default function Board({
           effectiveWallHexes,
           losVisibilityMinRatio, coverRatio,
         );
-        const visibleHexSet = new Set<string>();
-        for (const hex of visibleHexes) {
-          const key = `${hex.col},${hex.row}`;
-          visibleHexSet.add(key);
+        // Même logique que le survol move (``triggerLosForHex``) : états terrain 1/2 depuis le WASM.
+        const losPreview = buildShootingLosPreviewFromVisibleHexes(
+          visibleHexes,
+          units,
+          source.unit.player,
+          losVisibilityMinRatio,
+          coverRatio,
+        );
+        const coverKeyDedupe = new Set<string>();
+        for (const cell of losPreview.terrainCoverCells) {
+          const key = `${cell.col},${cell.row}`;
+          coverKeyDedupe.add(key);
+          coverCells.push(cell);
+          losVisibilityRatioByHex.set(key, coverRatio * 0.99);
+        }
+        for (const cell of losPreview.clearCells) {
+          const key = `${cell.col},${cell.row}`;
           if (!attackCellSet.has(key)) {
             attackCellSet.add(key);
-            attackCells.push({ col: hex.col, row: hex.row });
+            attackCells.push(cell);
+            losVisibilityRatioByHex.set(key, 1.0);
           }
-          losVisibilityRatioByHex.set(key, 1.0);
         }
+        for (const [id, inCover] of Object.entries(losPreview.coverByUnitId)) {
+          if (inCover) {
+            coverTargets.add(id);
+          }
+        }
+        const visibleHexKeySet = losPreview.visibleHexKeySet;
         for (const enemy of units) {
           if (enemy.player === source.unit.player) continue;
           if (
@@ -2523,19 +2939,17 @@ export default function Board({
             for (let dr = -scanR; dr <= scanR; dr++) {
               if (hexDistOff(enemy.col, enemy.row, enemy.col + dc, enemy.row + dr) > scanR) continue;
               totalHexes++;
-              if (visibleHexSet.has(`${enemy.col + dc},${enemy.row + dr}`)) visCount++;
+              if (visibleHexKeySet.has(`${enemy.col + dc},${enemy.row + dr}`)) visCount++;
             }
           }
           const ratio = totalHexes > 0 ? visCount / totalHexes : 0;
           if (ratio >= losVisibilityMinRatio && ratio < coverRatio) {
-            // Source de vérité pour l’UI (bouclier / bonus save) : ratio d’empreinte, pas la présence de l’hex centre dans coverCells
-            // (l’ancre peut être hors des hex visibles alors que l’unité est partiellement visible en couvert).
-            coverTargets.add(String(enemy.id));
             for (let dc = -scanR; dc <= scanR; dc++) {
               for (let dr = -scanR; dr <= scanR; dr++) {
                 if (hexDistOff(enemy.col, enemy.row, enemy.col + dc, enemy.row + dr) > scanR) continue;
                 const ek = `${enemy.col + dc},${enemy.row + dr}`;
-                if (visibleHexSet.has(ek)) {
+                if (visibleHexKeySet.has(ek) && !coverKeyDedupe.has(ek)) {
+                  coverKeyDedupe.add(ek);
                   coverCells.push({ col: enemy.col + dc, row: enemy.row + dr });
                   losVisibilityRatioByHex.set(ek, ratio);
                 }
@@ -2587,6 +3001,22 @@ export default function Board({
     const shootingPreviewSource = resolveShootingPreviewSource();
     if (shootingPreviewSource) {
       appendShootingPreviewCells(shootingPreviewSource);
+    }
+    if (readDebugLos() && phase === "shoot") {
+      logDebugLos("drawBoard: shooting preview cells", {
+        mode,
+        selectedUnitId,
+        shootAdvanceLosAnchorKey,
+        hasShootingPreviewSource: shootingPreviewSource !== null,
+        from: shootingPreviewSource
+          ? { col: shootingPreviewSource.fromCol, row: shootingPreviewSource.fromRow, unitId: shootingPreviewSource.unit.id }
+          : null,
+        attackCellCount: attackCells.length,
+        coverCellCount: coverCells.length,
+        shootWasmLosKey: shootPreviewWasmLos.key,
+        wasmReady: isWasmReady(),
+        mergeShootWasmLosWouldApply: shootPreviewWasmLos.key !== "",
+      });
     }
     if (phase === "fight" && selectedUnit && mode === "attackPreview") {
       attackCells.push(...fightPreviewCells);
@@ -2867,7 +3297,9 @@ export default function Board({
       for (const u of units) {
         parts.push(`${u.id},${u.col},${u.row},${u.HP_CUR}`);
       }
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${movePreviewLosBlinkIds.join(",")}#${JSON.stringify(movePreviewLosCoverById)}#chov:${chargePreviewOverlayHexes.length}#cref:${chargeReferenceHex ? `${chargeReferenceHex.col},${chargeReferenceHex.row}` : ""}`;
+      const moveLosIds = [...movePreviewLosBlinkIds].sort((a, b) => a - b).join(",");
+      const backendBlink = (stableBlinkingUnits ?? []).slice().sort((a, b) => a - b).join(",");
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -3345,10 +3777,19 @@ export default function Board({
         isBlinkingActive,
         blinkVersion,
         shootingTargetInCover: coverTargets.has(String(unit.id)),
-        movePreviewShootingTargetInCoverByUnitId:
-          phase === "move" && (mode === "select" || mode === "movePreview")
-            ? movePreviewLosCoverById
-            : undefined,
+        movePreviewShootingTargetInCoverByUnitId: (() => {
+          if (phase === "move" && (mode === "select" || mode === "movePreview")) {
+            return movePreviewLosCoverById;
+          }
+          if (
+            phase === "shoot" &&
+            (mode === "select" || mode === "attackPreview" || mode === "movePreview") &&
+            Object.keys(shootPreviewWasmLos.coverByUnitId).length > 0
+          ) {
+            return shootPreviewWasmLos.coverByUnitId;
+          }
+          return undefined;
+        })(),
         // Pass shooting indicators
         shootingTargetId,
         shootingUnitId,
@@ -4020,7 +4461,6 @@ export default function Board({
     };
   }, [
     // Essential dependencies - all values used in the effect
-    units.length,
     selectedUnitId,
     ruleChoiceHighlightedUnitId,
     mode,
@@ -4042,6 +4482,8 @@ export default function Board({
     blinkingAttackerId,
     chargeRoll,
     chargeRollPopup,
+    chargePreviewOverlayKey,
+    chargeReferenceKey,
     chargeSuccess,
     chargeTargetId,
     chargingUnitId,
@@ -4051,7 +4493,7 @@ export default function Board({
     fightSubPhase,
     fightTargetId,
     fightingUnitId,
-    gameState,
+    gameStateBoardDepsKey,
     pendingMoveAfterShooting,
     getAdvanceDestinations,
     getChargeDestinations,
@@ -4076,7 +4518,7 @@ export default function Board({
     shootingTargetId,
     shootingUnitId,
     targetPreview,
-    units,
+    unitsBoardLayoutKey,
     unitsAttacked,
     unitsCharged,
     unitsFled,
@@ -4088,7 +4530,9 @@ export default function Board({
     tutorial?.currentStep?.stage,
     tutorial?.lastEnemyDeathPosition,
     movePreviewLosBlinkIds,
-    movePreviewLosCoverById,
+    movePreviewLosCoverKey,
+    shootPreviewWasmLos.key,
+    shootAdvanceLosAnchorKey,
   ]);
 
   // Handle weapon selection

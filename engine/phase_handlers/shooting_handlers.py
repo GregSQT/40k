@@ -1228,70 +1228,69 @@ def preview_shoot_valid_targets_from_position(
     """
     Return IDs of enemies targetable from a hypothetical position (read-only, no mutation).
 
-    Lightweight alternative to deepcopy: directly checks LoS and range from
-    (dest_col, dest_row) to each alive enemy, without mutating game_state.
+    Aligné sur l'activation tir : copie d'état, tireur déplacé virtuellement, ``build_unit_los_cache``
+    puis ``valid_target_pool_build`` (empreintes §3.3, PISTOL / adjacent, alliés au contact, etc.).
+
+    L'ancienne implémentation (distance centre-à-centre + ``compute_los_state`` seuls) pouvait
+    marquer des cibles « valides » alors que le pool moteur les exclut.
 
     Args:
-        advance_position: If True, only ASSAULT weapons count for range check.
+        advance_position: Si True, simule une unité après Advance (``units_advanced`` sur la copie).
     """
-    unit = _get_unit_by_id(game_state, unit_id)
+    unit_id_str = str(unit_id)
+    unit = _get_unit_by_id(game_state, unit_id_str)
     if not unit:
         return []
-    units_cache = game_state.get("units_cache")
-    if not units_cache:
+    if not game_state.get("units_cache"):
+        return []
+    if not unit.get("RNG_WEAPONS"):
         return []
 
-    from engine.utils.weapon_helpers import get_max_ranged_range
-    from engine.hex_utils import hex_distance, compute_los_state, build_wall_set
+    gs = copy.deepcopy(game_state)
+    if "weapon_rule" not in gs:
+        gs["weapon_rule"] = 1
 
-    rng_weapons = unit.get("RNG_WEAPONS", [])
-    if not rng_weapons:
+    u = _get_unit_by_id(gs, unit_id_str)
+    if not u:
         return []
+
+    u.pop("valid_target_pool", None)
+    u.pop("_pool_from_cache", None)
+    u.pop("_pool_cache_key", None)
+
+    set_unit_coordinates(u, dest_col, dest_row)
+    update_units_cache_position(gs, unit_id_str, int(u["col"]), int(u["row"]))
 
     if advance_position:
-        assault_weapons = [w for w in rng_weapons if w.get("type") == "Assault"]
-        if not assault_weapons:
-            has_shoot_after_advance = any(
-                r.get("rule") == "shoot_after_advance"
-                for r in unit.get("RULES", [])
-            )
-            if not has_shoot_after_advance:
-                return []
-            max_range = max(w.get("RNG", 0) for w in rng_weapons)
-        else:
-            max_range = max(w.get("RNG", 0) for w in assault_weapons)
-    else:
-        max_range = get_max_ranged_range(unit)
+        ua_raw = gs.get("units_advanced") or []
+        ua_list = list(ua_raw)
+        if not any(str(x) == unit_id_str for x in ua_list):
+            ua_list.append(unit_id_str)
+        gs["units_advanced"] = ua_list
 
-    if max_range <= 0:
+    if unit_id_str in require_key(gs, "units_fled") and not _unit_has_rule(u, "shoot_after_flee"):
         return []
 
-    unit_player = int(unit["player"])
-    config = game_state.get("config", {})
-    game_rules = config.get("game_rules", {})
-    los_min = float(game_rules.get("los_visibility_min_ratio", 0.5))
-    cover_ratio = float(game_rules.get("cover_ratio", 0.75))
-    wall_set = build_wall_set(game_state)
+    build_unit_los_cache(gs, unit_id_str)
 
-    valid_targets: List[str] = []
-    for target_id, target_data in units_cache.items():
-        if int(target_data.get("player", -1)) == unit_player:
-            continue
-        if not is_unit_alive(str(target_id), game_state):
-            continue
-        t_col = int(target_data["col"])
-        t_row = int(target_data["row"])
-        dist = hex_distance(dest_col, dest_row, t_col, t_row)
-        if dist > max_range or dist <= 0:
-            continue
-        _ratio, can_see, _in_cover = compute_los_state(
-            dest_col, dest_row, t_col, t_row,
-            wall_set, los_min, cover_ratio,
-        )
-        if can_see:
-            valid_targets.append(str(target_id))
+    weapon_rule = require_key(gs, "weapon_rule")
+    advance_status = (
+        1 if any(str(x) == unit_id_str for x in require_key(gs, "units_advanced")) else 0
+    )
+    if advance_status == 1:
+        adjacent_status = 0
+    else:
+        adjacent_status = 1 if _is_adjacent_to_enemy_within_cc_range(gs, u) else 0
 
-    return valid_targets
+    return valid_target_pool_build(
+        gs,
+        u,
+        weapon_rule,
+        advance_status,
+        adjacent_status,
+        precomputed_weapon_available_pool=None,
+        precomputed_enemy_precheck=None,
+    )
 
 
 def update_los_cache_after_target_death(game_state: Dict[str, Any], dead_target_id: str) -> None:

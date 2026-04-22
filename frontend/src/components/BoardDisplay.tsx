@@ -1062,7 +1062,7 @@ export const drawBoard = (
       !!movePoolForDiskDraw &&
       movePoolForDiskDraw.size > 0;
 
-    /** advancePreview sans pool : normal tant que le joueur n'a pas confirmé Advance (jet D6 + BFS) — ``allow_advance`` peut ouvrir l'UI avant toute réponse ``advance_destinations``. */
+    /** advancePreview sans pool : éviter — le pool vient de ``advance_destinations`` / ``valid_move_destinations_pool`` après ``action: "advance"``. */
 
     const cachedStaticBoard = options?.cachedStaticBoard ?? null;
     const reuseStatic = cachedStaticBoard !== null;
@@ -1363,7 +1363,8 @@ export const drawBoard = (
       drawGroup(cellsForHighlight, availableCellsDrawColor, 0.4, false, availableCellCircleR);
     }
     {
-      const useShootingPreviewPalette = phase === "shoot" || mode === "movePreview";
+      const useShootingPreviewPalette =
+        interactionPhase === "shoot" || mode === "movePreview";
       if (useShootingPreviewPalette && (attackCells.length > 0 || coverCells.length > 0)) {
         const coverKeySet = new Set(coverCells.map((c) => `${c.col},${c.row}`));
         const attackClearOnly = attackCells.filter((c) => !coverKeySet.has(`${c.col},${c.row}`));

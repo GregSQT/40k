@@ -1126,7 +1126,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
           // Backend returns allow_advance: true when active unit has no valid shooting targets.
           // Trust backend signal regardless of the initiating UI action (activate_unit or friendly_unit switch).
-          // Don't auto-trigger advance: wait for explicit player click on advance icon.
+          // Ne pas passer en ``advancePreview`` ici : le moteur n’envoie ni ``advance_destinations`` ni
+          // ``valid_move_destinations_pool`` sur ce signal (seulement après ``action: "advance"``).
+          // ``advancePreview`` sans pool → moveDestPoolSize 0, icône/LoS advance cassés, WebGL surchargé.
+          // Le joueur reste en ``select`` avec l’unité active ; l’icône Advance déclenche ``handleAdvance`` → ``advance``.
           if (
             data.game_state?.phase === "shoot" &&
             data.result?.unitId &&
@@ -1134,8 +1137,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           ) {
             const unitId = parseInt(data.result.unitId, 10);
             setSelectedUnitId(unitId);
-            setAdvancingUnitId(unitId);
-            setMode("advancePreview");
           }
 
           // Process backend cleanup signals

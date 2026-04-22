@@ -266,7 +266,9 @@ export class UnitRenderer {
         if (selectedWeaponIgnoresCover) {
           effectiveTargetInCover = false;
         } else if (
-          (this.props.mode === "movePreview" || this.props.mode === "select") &&
+          (this.props.mode === "movePreview" ||
+            this.props.mode === "select" ||
+            this.props.mode === "attackPreview") &&
           this.props.movePreviewShootingTargetInCoverByUnitId
         ) {
           const key = String(this.props.unit.id);
@@ -1270,7 +1272,9 @@ export class UnitRenderer {
         return false;
       }
       if (
-        (this.props.mode === "movePreview" || this.props.mode === "select") &&
+        (this.props.mode === "movePreview" ||
+          this.props.mode === "select" ||
+          this.props.mode === "attackPreview") &&
         this.props.movePreviewShootingTargetInCoverByUnitId
       ) {
         const key = String(this.props.unit.id);
