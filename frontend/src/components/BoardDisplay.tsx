@@ -21,6 +21,10 @@ function asPixiUnknownArgsPointerListener(
 const MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS = 5;
 /** Autorise des passes Chaikin supplémentaires sur les très gros contours (défaut global 48k). */
 const MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS = 120_000;
+/** Lissage alpha du masque (pas du disque) pour adoucir les marches d'empreinte. */
+const MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH = 1.4;
+const MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY = 3;
+const MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION = 2;
 
 const moveAdvanceMaskSmoothOptions = {
   maxVertsAfterOneChaikinStep: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
@@ -670,29 +674,115 @@ function addFootprintPoolSmoothOutlines(
   highlightContainer.addChild(gfx);
 }
 
+/** Aire signée d'un polygone fermé plat ``[x0,y0,…]`` (coords écran, y bas). */
+function signedPolygonAreaFlat(flat: number[]): number {
+  const n = flat.length / 2;
+  if (n < 3) return 0;
+  let a = 0;
+  for (let i = 0; i < n; i++) {
+    const i0 = i * 2;
+    const i1 = ((i + 1) % n) * 2;
+    a += flat[i0]! * flat[i1 + 1]! - flat[i1]! * flat[i0 + 1]!;
+  }
+  return a / 2;
+}
+
+function loopCentroidFlat(flat: number[]): [number, number] {
+  let sx = 0;
+  let sy = 0;
+  const n = flat.length / 2;
+  if (n === 0) return [0, 0];
+  for (let i = 0; i < flat.length; i += 2) {
+    sx += flat[i]!;
+    sy += flat[i + 1]!;
+  }
+  return [sx / n, sy / n];
+}
+
+/** Test point dans polygone fermé (ray casting). */
+function pointInPolygonFlat(x: number, y: number, flat: number[]): boolean {
+  let inside = false;
+  const n = flat.length / 2;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = flat[i * 2]!;
+    const yi = flat[i * 2 + 1]!;
+    const xj = flat[j * 2]!;
+    const yj = flat[j * 2 + 1]!;
+    if ((yi > y) !== (yj > y)) {
+      const xInt = ((xj - xi) * (y - yi)) / (yj - yi + 1e-12) + xi;
+      if (x < xInt) inside = !inside;
+    }
+  }
+  return inside;
+}
+
 /**
- * Zone de preview **move / advance / post-shoot** rendue comme un **cercle
- * euclidien** centré sur l'unité sélectionnée — pas comme l'union des disques
- * d'empreinte du BFS (qui donne naturellement une forme hexagonale parce que le
- * BFS s'effectue sur grille hex).
+ * Remplissage blanc opacité 1 pour masque alpha : union de composantes,
+ * trous Pixi (``beginHole``) lorsque le centroïde d'une boucle est strictement
+ * inclus dans une boucle plus grande (donut / lacune).
+ */
+function appendWhiteReachableMaskFromSmoothedLoops(
+  maskGfx: PIXI.Graphics,
+  loops: number[][],
+): void {
+  const valid = loops.filter((l) => l.length >= 6);
+  if (valid.length === 0) return;
+
+  const meta = valid.map((flat) => {
+    const [cx, cy] = loopCentroidFlat(flat);
+    return { flat, cx, cy, absA: Math.abs(signedPolygonAreaFlat(flat)) };
+  });
+
+  const used = new Set<number>();
+  while (used.size < meta.length) {
+    let bestI = -1;
+    let bestAbs = -1;
+    for (let i = 0; i < meta.length; i++) {
+      if (used.has(i)) continue;
+      if (meta[i]!.absA > bestAbs) {
+        bestAbs = meta[i]!.absA;
+        bestI = i;
+      }
+    }
+    if (bestI < 0) break;
+    const root = meta[bestI]!;
+    used.add(bestI);
+
+    maskGfx.beginFill(0xffffff, 1.0);
+    maskGfx.drawPolygon(root.flat);
+    for (let j = 0; j < meta.length; j++) {
+      if (used.has(j) || j === bestI) continue;
+      const o = meta[j]!;
+      if (pointInPolygonFlat(o.cx, o.cy, root.flat)) {
+        maskGfx.beginHole();
+        maskGfx.drawPolygon(o.flat);
+        maskGfx.endHole();
+        used.add(j);
+      }
+    }
+    maskGfx.endFill();
+  }
+}
+
+/**
+ * Preview **move / advance / post-shoot** : **disque euclidien** centré sur
+ * l'unité (``drawCircle``), rogné par le masque d'atteignabilité du BFS — même
+ * idée que le commit historique ``ba3a4b42`` (disque + ``Sprite`` masque alpha
+ * issu d'une ``RenderTexture``).
  *
- * Principe :
- * - **Rayon** = `max_euclidean_distance(unit_center → cellule du pool) +
- *   demi-empreinte`. Dérivé du BFS, donc aligné sur la portée réelle autorisée
- *   par le moteur (M×10 en phase move, M×10+D6×10 en advance, etc.) sans
- *   dupliquer les règles côté front.
- * - **Masque** : si ``move_preview_footprint_zone`` est disponible (**union d’hex
- *   pleins** par sous-hex), on l’utilise — pas de « plats » bitangents entre
- *   disques d’empreinte près des angles concaves. Sinon repli : union des
- *   disques d’empreinte aux ancres (comportement historique).
+ * Le masque est le polygone d'union des cellules atteignables (boucles API
+ * ``move_preview_footprint_mask_loops`` ou ``tryBuildHexUnionMaskPolygons``),
+ * adouci Chaikin puis rempli en blanc dans la RT. ``diskGfx.mask = maskSprite``
+ * → le bord extérieur **perçu** est l'arc du cercle ``rOuter`` (sauf là où le
+ * masque rogne : murs, EZ, pathfinding). Dessiner le polygone seul en fill
+ * donnait une enveloppe **hexagonale** — ce n'est pas le rendu voulu.
  *
- * **Chemin unique, pas de fallback silencieux** : toute condition aberrante
- * (pool vide, empreinte nulle, bornes du masque non finies, RT trop grande,
- * échec du rendu GPU…) lève une erreur explicite. C'est volontaire : on
- * préfère un crash visible qu'un rendu "à peu près" qui masque un vrai bug.
+ * **Pas de repli silencieux** : sources de masque invalides, RT trop grande,
+ * échec ``render`` → ``throw``.
  */
 function renderMoveAdvanceDestPoolCircleLayer(
   highlightContainer: PIXI.Container,
+  app: PIXI.Application,
   anchorPool: Set<string>,
   footprintMaskHexPool: Set<string> | null,
   gridHexRadius: number,
@@ -762,31 +852,11 @@ function renderMoveAdvanceDestPoolCircleLayer(
     );
   }
 
-  // Rendu strict : on dessine UNIQUEMENT le polygone d'union lissé Chaikin du
-  // pool BFS. Deux sources acceptées, **aucun fallback hex-par-hex ou disques
-  // d'ancres** (trop crénelé sur WSL2 / drivers sans MSAA fill). Si aucune
-  // source n'est disponible, on lève — c'est un bug de câblage, pas un cas
-  // visuel à maquiller.
-  //
-  // Sources :
-  //  1. ``precomputedWorldMaskLoops`` : boucles calculées côté serveur via
-  //     ``compute_move_preview_mask_loops_world`` (même algo planaire que le
-  //     client, coords écran identiques).
-  //  2. ``footprintMaskHexPool`` + ``tryBuildHexUnionMaskPolygons`` : repli
-  //     client quand l'API ne fournit pas les loops (anciennes routes, replay).
-  //
-  // Rendu :
-  //  - Fill du polygone lissé (Chaikin ×``MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS``).
-  //  - **Stroke feathered intérieur** (``alignment: 1``, même couleur, trois
-  //    passes concentriques) par-dessus le fill — fournit l'AA du bord
-  //    **manuellement**, indépendamment du MSAA du driver : les pilotes qui
-  //    ignorent silencieusement ``antialias: true`` (WSL2, certains Intel)
-  //    laissaient le fill triangulé brut, d'où les escaliers visibles. Les
-  //    feathers ne débordent jamais (alignment interne) et se fondent dans le
-  //    vert transparent.
+  // Masque visuel basé sur la vraie zone d'empreinte (pas seulement les centres).
+  // Priorité API (boucles monde), sinon reconstruction locale depuis
+  // ``footprintMaskHexPool``. Pas de fallback centre-only.
   let maskUnionKind: "server_loops" | "polygon";
   let smoothedLoops: number[][];
-
   if (precomputedWorldMaskLoops && precomputedWorldMaskLoops.length > 0) {
     maskUnionKind = "server_loops";
     const prep = smoothMaskLoopsForRender(
@@ -808,23 +878,20 @@ function renderMoveAdvanceDestPoolCircleLayer(
     if (!polyMask) {
       throw new Error(
         `[renderMoveAdvanceDestPoolCircleLayer] tryBuildHexUnionMaskPolygons a échoué ` +
-          `(spriteName=${spriteName}, footprintMaskHexPool.size=${footprintMaskHexPool.size}) — ` +
-          `pas de fallback autorisé, corriger la topologie côté moteur/polygone planaire`,
+          `(spriteName=${spriteName}, footprintMaskHexPool.size=${footprintMaskHexPool.size})`,
       );
     }
-    const hexPrep = smoothMaskLoopsForRender(
+    const prep = smoothMaskLoopsForRender(
       polyMask.loops,
       MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
       moveAdvanceMaskSmoothOptions,
     );
     maskUnionKind = "polygon";
-    smoothedLoops = hexPrep.smoothed;
+    smoothedLoops = prep.smoothed;
   } else {
     throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] aucune source de polygone disponible ` +
-        `(spriteName=${spriteName}, anchorPool.size=${anchorPool.size}) — ` +
-        `precomputedWorldMaskLoops et footprintMaskHexPool tous deux absents, ` +
-        `pas de fallback hex-par-hex autorisé`,
+      `[renderMoveAdvanceDestPoolCircleLayer] aucune source de masque empreinte disponible ` +
+        `(spriteName=${spriteName}, anchorPool.size=${anchorPool.size})`,
     );
   }
 
@@ -837,63 +904,137 @@ function renderMoveAdvanceDestPoolCircleLayer(
     );
   }
 
-  // Fill vectoriel du polygone lissé, entouré d'un **BlurFilter Pixi** faible.
-  //
-  // Pourquoi un filter plutôt qu'un stroke feathered : Pixi alloue un
-  // framebuffer dédié pour chaque filter avec une résolution explicite
-  // (``filter.resolution``). Le blur qu'il applique ne dépend donc **ni du
-  // MSAA du driver WebGL principal** (WSL2 / Intel HD ignorent silencieusement
-  // ``antialias: true``) **ni du zoom CSS** du navigateur. Un ``blur`` de 1.6
-  // pixels avec ``resolution = 2`` agit comme un FXAA natif sur le bord du
-  // polygone : les escaliers sub-pixel du bord triangulé deviennent un
-  // dégradé d'un demi-pixel, invisible à l'œil.
-  //
-  // Le fill intérieur, lui, est uniforme → le blur ne le dégrade pas (une
-  // zone constante floutée reste constante). Seul le bord bénéficie de l'AA.
-  const fillGfx = new PIXI.Graphics();
-  fillGfx.name = spriteName;
-  fillGfx.eventMode = "none";
-  fillGfx.beginFill(poolFillColor, 1.0);
-  for (const loop of validLoops) {
-    fillGfx.drawPolygon(loop);
-  }
-  fillGfx.endFill();
-  fillGfx.alpha = 0.28;
+  const maskGfx = new PIXI.Graphics();
+  maskGfx.name = `${spriteName}-mask-gfx`;
+  maskGfx.eventMode = "none";
+  appendWhiteReachableMaskFromSmoothedLoops(maskGfx, validLoops);
 
-  const edgeBlur = new PIXI.BlurFilter(1.6, 4);
-  edgeBlur.resolution = 2;
-  edgeBlur.autoFit = true;
-  fillGfx.filters = [edgeBlur];
-
-  const lb = fillGfx.getLocalBounds();
+  const maskBounds = maskGfx.getLocalBounds();
   if (
-    !Number.isFinite(lb.width) ||
-    !Number.isFinite(lb.height) ||
-    !(lb.width > 0) ||
-    !(lb.height > 0)
+    !Number.isFinite(maskBounds.width) ||
+    !Number.isFinite(maskBounds.height) ||
+    !(maskBounds.width > 0) ||
+    !(maskBounds.height > 0)
   ) {
-    fillGfx.destroy();
+    maskGfx.destroy();
     throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] bornes du fill invalides ` +
-        `(w=${lb.width}, h=${lb.height}, spriteName=${spriteName}, ` +
+      `[renderMoveAdvanceDestPoolCircleLayer] bornes du masque invalides ` +
+        `(w=${maskBounds.width}, h=${maskBounds.height}, spriteName=${spriteName}, ` +
         `maskUnionKind=${maskUnionKind})`,
     );
   }
 
-  highlightContainer.addChild(fillGfx);
+  const w = Math.ceil(maskBounds.width);
+  const h = Math.ceil(maskBounds.height);
+  if (w > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM || h > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM) {
+    maskGfx.destroy();
+    throw new Error(
+      `[renderMoveAdvanceDestPoolCircleLayer] masque trop grand pour une RT ` +
+        `unique (w=${w}, h=${h}, max=${FOOTPRINT_HIGHLIGHT_RT_MAX_DIM}, ` +
+        `spriteName=${spriteName})`,
+    );
+  }
+
+  let rt: PIXI.RenderTexture;
+  try {
+    rt = PIXI.RenderTexture.create({
+      width: w,
+      height: h,
+      resolution: app.renderer.resolution,
+      multisample: PIXI.MSAA_QUALITY.NONE,
+      alphaMode: PIXI.ALPHA_MODES.PMA,
+    });
+  } catch (e) {
+    maskGfx.destroy();
+    throw new Error(
+      `[renderMoveAdvanceDestPoolCircleLayer] création RenderTexture masque échouée ` +
+        `(spriteName=${spriteName}, w=${w}, h=${h}): ${String(e)}`,
+    );
+  }
+
+  maskGfx.position.set(-maskBounds.x, -maskBounds.y);
+  try {
+    app.renderer.render(maskGfx, { renderTexture: rt, clear: true });
+  } catch (e) {
+    maskGfx.destroy();
+    rt.destroy(true);
+    throw new Error(
+      `[renderMoveAdvanceDestPoolCircleLayer] render masque → RT échoué ` +
+        `(spriteName=${spriteName}): ${String(e)}`,
+    );
+  }
+  maskGfx.destroy();
+
+  // Lissage appliqué à l'ALPHA du masque lui-même :
+  // 1) Sprite sur la RT binaire du masque
+  // 2) BlurFilter léger rendu dans une 2e RT
+  // 3) cette RT floutée sert de mask final du disque
+  let rtSoftMask: PIXI.RenderTexture;
+  try {
+    rtSoftMask = PIXI.RenderTexture.create({
+      width: w,
+      height: h,
+      resolution: app.renderer.resolution,
+      multisample: PIXI.MSAA_QUALITY.NONE,
+      alphaMode: PIXI.ALPHA_MODES.PMA,
+    });
+  } catch (e) {
+    rt.destroy(true);
+    throw new Error(
+      `[renderMoveAdvanceDestPoolCircleLayer] création RenderTexture masque lissé échouée ` +
+        `(spriteName=${spriteName}, w=${w}, h=${h}): ${String(e)}`,
+    );
+  }
+  const maskSourceSprite = new PIXI.Sprite(rt);
+  maskSourceSprite.eventMode = "none";
+  const maskAlphaBlur = new PIXI.BlurFilter(
+    MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH,
+    MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY,
+  );
+  maskAlphaBlur.resolution = MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION;
+  maskAlphaBlur.autoFit = true;
+  maskSourceSprite.filters = [maskAlphaBlur];
+  try {
+    app.renderer.render(maskSourceSprite, { renderTexture: rtSoftMask, clear: true });
+  } catch (e) {
+    maskSourceSprite.destroy();
+    rt.destroy(true);
+    rtSoftMask.destroy(true);
+    throw new Error(
+      `[renderMoveAdvanceDestPoolCircleLayer] render masque lissé → RT échoué ` +
+        `(spriteName=${spriteName}): ${String(e)}`,
+    );
+  }
+  maskSourceSprite.destroy();
+  rt.destroy(true);
+
+  const maskSprite = new PIXI.Sprite(rtSoftMask);
+  maskSprite.name = `${spriteName}-mask-sprite`;
+  maskSprite.position.set(maskBounds.x, maskBounds.y);
+  maskSprite.roundPixels = false;
+
+  const diskGfx = new PIXI.Graphics();
+  diskGfx.name = spriteName;
+  diskGfx.eventMode = "none";
+  diskGfx.beginFill(poolFillColor, 1.0);
+  diskGfx.drawCircle(unitCx, unitCy, rOuter);
+  diskGfx.endFill();
+  diskGfx.alpha = 0.28;
+  diskGfx.mask = maskSprite;
+
+  highlightContainer.addChild(maskSprite);
+  highlightContainer.addChild(diskGfx);
 
   if (typeof window !== "undefined") {
     try {
       if (window.localStorage.getItem("debugMovePool") === "1") {
-        const rawVertCount = (precomputedWorldMaskLoops ?? []).reduce(
-          (n, l) => n + l.length / 2,
-          0,
-        );
+        const rawVertCount = (precomputedWorldMaskLoops ?? []).reduce((n, l) => n + l.length / 2, 0);
         const smoothedVertCount = validLoops.reduce((n, l) => n + l.length / 2, 0);
         console.info("[renderMoveAdvanceDestPoolCircleLayer] rendered", {
           spriteName,
           anchorPoolSize: anchorPool.size,
           maskKind: maskUnionKind,
+          footprintMaskHexPoolSize: footprintMaskHexPool?.size ?? 0,
           loopsCount: validLoops.length,
           rawVertCount,
           smoothedVertCount,
@@ -906,8 +1047,14 @@ function renderMoveAdvanceDestPoolCircleLayer(
           unitCy,
           maxCubeDist,
           rOuter,
-          fillBounds: { x: lb.x, y: lb.y, w: lb.width, h: lb.height },
-          renderPipeline: "polygon_fill+blur_filter_aa",
+          maskSize: { w, h },
+          maskBounds: { x: maskBounds.x, y: maskBounds.y, w: maskBounds.width, h: maskBounds.height },
+          maskAlphaSmoothing: {
+            blurStrength: MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH,
+            blurQuality: MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY,
+            blurResolution: MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION,
+          },
+          renderPipeline: "disk_euclidean_masked_polygon_rt+mask_alpha_blur",
         });
       }
     } catch {
@@ -1329,6 +1476,7 @@ export const drawBoard = (
           : null;
       renderMoveAdvanceDestPoolCircleLayer(
         highlightContainer,
+        app,
         movePoolForDiskDraw,
         footprintMaskHexPool,
         HEX_RADIUS,
