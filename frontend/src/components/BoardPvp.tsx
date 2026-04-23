@@ -56,10 +56,7 @@ import {
   hexDistOff,
 } from "../utils/losPreviewHelpers";
 import { ensureWasmLoaded, isWasmReady, computeVisibleHexes } from "../utils/wasmLos";
-import {
-  appendLosPreviewSmoothHexUnionFillOrThrow,
-  configureLosPreviewOverlaySoftEdges,
-} from "../utils/smoothHexLosUnionFill";
+import { mountLosPolarClippedByVisibleUnion } from "../utils/losPolarMaskedByVisibleUnion";
 import type { HexUnionMaskLayout } from "../utils/hexUnionBoundaryPolygon";
 import { FEATURES } from "../constants/gameConfig";
 import {
@@ -603,7 +600,7 @@ export default function Board({
   const unitsLayerRef = useRef<PIXI.Container | null>(null);
   const unitsFingerprintRef = useRef<string>("");
   // Hover preview: imperative PIXI layers (no React re-render)
-  const hoverOverlayRef = useRef<PIXI.Graphics | null>(null);
+  const hoverOverlayRef = useRef<PIXI.Container | null>(null);
   const hoverSpriteRef = useRef<PIXI.Container | null>(null);
   /** Ligne départ → pointeur + libellé distance hex (preview move) */
   const movePreviewGuideLineRef = useRef<PIXI.Graphics | null>(null);
@@ -1771,9 +1768,12 @@ export default function Board({
         }
 
         if (!hoverOverlayRef.current || hoverOverlayRef.current.destroyed) {
-          hoverOverlayRef.current = new PIXI.Graphics();
-          hoverOverlayRef.current.zIndex = 40;
-          app.stage.addChild(hoverOverlayRef.current);
+          const root = new PIXI.Container();
+          root.name = "los-hover-polar-masked";
+          root.eventMode = "none";
+          root.zIndex = 40;
+          app.stage.addChild(root);
+          hoverOverlayRef.current = root;
         }
         const overlay = hoverOverlayRef.current;
 
@@ -1796,7 +1796,6 @@ export default function Board({
 
         if (losRequestIdRef.current !== requestId) return;
 
-        overlay.clear();
         const losUnionLayout: HexUnionMaskLayout = {
           HEX_HORIZ_SPACING: HEX_WIDTH_H,
           HEX_WIDTH: HEX_WIDTH_H,
@@ -1805,21 +1804,18 @@ export default function Board({
           MARGIN: MARGIN_H,
           gridHexRadius: HEX_RADIUS_H,
         };
-        appendLosPreviewSmoothHexUnionFillOrThrow(
+        const allLosCells = [...losPreview.terrainCoverCells, ...losPreview.clearCells];
+        mountLosPolarClippedByVisibleUnion(
           overlay,
+          allLosCells,
           losPreview.terrainCoverCells,
-          losUnionLayout,
-          LOS_PREVIEW_COVER_HEX,
-          0.3,
-        );
-        appendLosPreviewSmoothHexUnionFillOrThrow(
-          overlay,
-          losPreview.clearCells,
           losUnionLayout,
           LOS_PREVIEW_CLEAR_HEX,
           0.3,
+          LOS_PREVIEW_COVER_HEX,
+          0.3,
+          app.renderer,
         );
-        configureLosPreviewOverlaySoftEdges(overlay, app.renderer);
         overlay.visible = true;
 
         if (losRequestIdRef.current !== requestId) return;

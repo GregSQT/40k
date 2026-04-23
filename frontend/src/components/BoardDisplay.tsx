@@ -7,10 +7,7 @@ import {
   tryBuildHexUnionMaskPolygons,
   type HexUnionMaskLayout,
 } from "../utils/hexUnionBoundaryPolygon";
-import {
-  appendLosPreviewSmoothHexUnionFillOrThrow,
-  configureLosPreviewOverlaySoftEdges,
-} from "../utils/smoothHexLosUnionFill";
+import { mountLosPolarClippedByVisibleUnion } from "../utils/losPolarMaskedByVisibleUnion";
 import { smoothMaskLoopsForRender } from "../utils/polygonSmooth";
 
 /** Contourne TS2345 : certaines fusions de types sur `.on` attendent `(...args: unknown[]) => void`. */
@@ -1531,25 +1528,22 @@ export const drawBoard = (
           MARGIN,
           gridHexRadius: HEX_RADIUS,
         };
-        const losGfx = new PIXI.Graphics();
-        losGfx.name = "los-preview-smooth-union";
-        losGfx.eventMode = "none";
-        appendLosPreviewSmoothHexUnionFillOrThrow(
-          losGfx,
+        const losRoot = new PIXI.Container();
+        losRoot.name = "los-preview-smooth-hex-union";
+        losRoot.eventMode = "none";
+        const allLosCells = [...coverCells, ...attackClearOnly];
+        mountLosPolarClippedByVisibleUnion(
+          losRoot,
+          allLosCells,
           coverCells,
-          losUnionLayout,
-          0x9ec5ff,
-          0.4,
-        );
-        appendLosPreviewSmoothHexUnionFillOrThrow(
-          losGfx,
-          attackClearOnly,
           losUnionLayout,
           0x4f8bff,
           0.4,
+          0x9ec5ff,
+          0.4,
+          app.renderer,
         );
-        configureLosPreviewOverlaySoftEdges(losGfx, app.renderer);
-        highlightContainer.addChild(losGfx);
+        highlightContainer.addChild(losRoot);
       } else {
         drawGroup(attackCells, ATTACK_COLOR, 0.4, false);
       }
