@@ -1525,6 +1525,17 @@ export const drawBoard = (
           (useMovePoolForPick && (moveAdvanceOrPileInPickPool?.has(key) ?? false)) ||
           (useChargePoolForPick && (chargeDestPoolRef?.current?.has(key) ?? false));
         if (isValid) {
+          const isHandledByBoardPvpCapture =
+            selectedUnitId !== null &&
+            ((interactionPhase === "move" && mode === "select") ||
+              mode === "advancePreview" ||
+              (interactionPhase === "charge" && mode === "chargePreview") ||
+              (interactionPhase === "fight" &&
+                (mode === "pileInPreview" || mode === "consolidationPreview")));
+          if (isHandledByBoardPvpCapture) {
+            return;
+          }
+
           let destCol = col,
             destRow = row;
           if (

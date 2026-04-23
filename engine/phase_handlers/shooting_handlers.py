@@ -1086,8 +1086,8 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
     # Get unit's player for filtering enemies
     unit_player = int(unit["player"]) if unit["player"] is not None else None
     
-    # Import has_line_of_sight_coords for performance
-    from engine.combat_utils import has_line_of_sight_coords
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    los_visibility_min_ratio = float(game_rules.get("los_visibility_min_ratio", 0.0))
     
     # Defensive: ensure los_cache exists before loop (handles edge cases)
     if "los_cache" not in unit:
@@ -1105,9 +1105,30 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
 
         target_col = target_data["col"]
         target_row = target_data["row"]
+        target_hexes: List[Tuple[int, int]] = []
+        occupied_hexes = target_data.get("occupied_hexes")
+        if isinstance(occupied_hexes, (set, list, tuple)) and len(occupied_hexes) > 0:
+            for hx in occupied_hexes:
+                if isinstance(hx, (list, tuple)) and len(hx) >= 2:
+                    hc, hr = normalize_coordinates(hx[0], hx[1])
+                    target_hexes.append((hc, hr))
+        if not target_hexes:
+            tc, tr = normalize_coordinates(target_col, target_row)
+            target_hexes = [(tc, tr)]
 
-        # PERFORMANCE: Use has_line_of_sight_coords() instead of _get_unit_by_id() + _has_line_of_sight()
-        has_los = has_line_of_sight_coords(unit_col, unit_row, target_col, target_row, game_state)
+        visible_hexes = 0
+        for tc, tr in target_hexes:
+            _, can_see_hex, _ = _get_los_visibility_state(
+                game_state,
+                int(unit_col),
+                int(unit_row),
+                int(tc),
+                int(tr),
+            )
+            if can_see_hex:
+                visible_hexes += 1
+        target_visibility_ratio = visible_hexes / len(target_hexes)
+        has_los = target_visibility_ratio >= los_visibility_min_ratio
 
         unit["los_cache"][str(target_id)] = has_los
 
@@ -1934,6 +1955,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
         adjacent_status,
         _precheck=_activation_enemy_precheck,
     )
+    usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
     if _perf_act and _t_wai0 is not None:
         _t_wai1 = time.perf_counter()
     
@@ -1983,6 +2005,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
                 "allow_advance": True,  # Signal frontend to use advancePreview mode (no shooting preview)
                 "waiting_for_player": True,
                 "action": "empty_target_advance_available",
+                "context": "empty_target_pool_advance_available",
                 "available_weapons": []  # Explicitly return empty array to prevent frontend from using stale weapons
             }
         else:
@@ -2021,7 +2044,6 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     
     # AI_TURN.md STEP 3: Pre-select first available weapon
     # If unit is adjacent to enemy, prioritize PISTOL weapons
-    usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
     if not usable_weapons:
         # No usable weapons under current rules -> treat as no valid actions
         can_advance = _can_unit_advance_in_shoot_phase(unit, game_state)
@@ -2049,6 +2071,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
                 "allow_advance": True,
                 "waiting_for_player": True,
                 "action": "empty_target_advance_available",
+                "context": "no_usable_weapon_advance_available",
                 "available_weapons": []
             }
         _success, result = _handle_shooting_end_activation(
@@ -2978,21 +3001,82 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
     #   < los_visibility_min_ratio => blocked
     #   [los_visibility_min_ratio, cover_ratio) => in cover
     #   >= cover_ratio => clear
-    visibility_ratio, can_see, in_cover = _get_los_visibility_state(
-        game_state,
-        start_col_int,
-        start_row_int,
-        end_col_int,
-        end_row_int,
+    target_hexes = _resolve_target_hexes_for_los(game_state, target, end_col_int, end_row_int)
+    target_visibility_ratio, can_see_target, in_cover_target, visible_hexes, max_visibility_ratio = (
+        _compute_target_visibility_from_hexes(
+            game_state,
+            start_col_int,
+            start_row_int,
+            target_hexes,
+        )
     )
     if debug_mode:
-        visibility_state = "BLOCKED" if not can_see else ("COVER" if in_cover else "CLEAR")
+        visibility_state = "BLOCKED" if not can_see_target else ("COVER" if in_cover_target else "CLEAR")
         add_debug_log(
             game_state,
             f"[LOS DEBUG] E{episode} T{turn} Shooter {shooter_id}({start_col},{start_row}) "
-            f"-> Target {target_id}({end_col},{end_row}): {visibility_state} ratio={visibility_ratio:.3f}"
+            f"-> Target {target_id}({end_col},{end_row}): {visibility_state} "
+            f"target_vis_ratio={target_visibility_ratio:.3f} max_hex_ratio={max_visibility_ratio:.3f} "
+            f"visible_hexes={visible_hexes}/{len(target_hexes)}"
         )
-    return can_see
+    return can_see_target
+
+
+def _resolve_target_hexes_for_los(
+    game_state: Dict[str, Any],
+    target: Dict[str, Any],
+    center_col: int,
+    center_row: int,
+) -> List[Tuple[int, int]]:
+    """Resolve target footprint hexes from units_cache, else use center hex."""
+    target_hexes: List[Tuple[int, int]] = [(center_col, center_row)]
+    if "id" not in target:
+        return target_hexes
+    units_cache = require_key(game_state, "units_cache")
+    target_entry = units_cache.get(str(require_key(target, "id")))
+    occ = target_entry.get("occupied_hexes") if isinstance(target_entry, dict) else None
+    if isinstance(occ, (set, list, tuple)) and len(occ) > 0:
+        occ_list: List[Tuple[int, int]] = []
+        for hx in occ:
+            if isinstance(hx, (list, tuple)) and len(hx) >= 2:
+                hc, hr = normalize_coordinates(hx[0], hx[1])
+                occ_list.append((hc, hr))
+        if occ_list:
+            target_hexes = occ_list
+    return target_hexes
+
+
+def _compute_target_visibility_from_hexes(
+    game_state: Dict[str, Any],
+    shooter_col: int,
+    shooter_row: int,
+    target_hexes: List[Tuple[int, int]],
+) -> Tuple[float, bool, bool, int, float]:
+    """
+    Compute target-level visibility from footprint hexes, aligned with shooting pool logic.
+    Returns: (target_visibility_ratio, can_see_target, in_cover_target, visible_hexes, max_hex_ratio)
+    """
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    los_visibility_min_ratio = float(game_rules.get("los_visibility_min_ratio", 0.0))
+    cover_ratio = float(game_rules.get("cover_ratio", 1.0))
+    visible_hexes = 0
+    max_hex_ratio = 0.0
+    for tc, tr in target_hexes:
+        visibility_ratio, can_see_hex, _ = _get_los_visibility_state(
+            game_state,
+            int(shooter_col),
+            int(shooter_row),
+            int(tc),
+            int(tr),
+        )
+        if visibility_ratio > max_hex_ratio:
+            max_hex_ratio = float(visibility_ratio)
+        if can_see_hex:
+            visible_hexes += 1
+    target_visibility_ratio = visible_hexes / len(target_hexes) if target_hexes else 0.0
+    can_see_target = visible_hexes > 0 and target_visibility_ratio >= los_visibility_min_ratio
+    in_cover_target = can_see_target and target_visibility_ratio < cover_ratio
+    return target_visibility_ratio, can_see_target, in_cover_target, visible_hexes, max_hex_ratio
 
 
 def _dump_los_contradiction_diagnostic(
@@ -4350,18 +4434,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     # PRINCIPLE: "Le Pool DOIT gérer les morts" - If unit is in pool, it's alive (no need to check)
     # CRITICAL: Normalize unit_id to string for consistent comparison with pool (which may contain int or string IDs)
     unit_id = str(unit["id"])
-    
-    # DEBUG: Log unit activation for dead unit detection
-    episode = game_state.get("episode_number", "?")
-    turn = game_state.get("turn", "?")
-    from engine.game_utils import add_debug_log
-    hp_cur = get_hp_from_cache(unit_id, game_state)  # Phase 2: from cache
-    # CRITICAL: Normalize unit_id to string for consistent comparison (pool stores strings)
     unit_id_str = str(unit_id)
-    pool_ids = [str(uid) for uid in require_key(game_state, "shoot_activation_pool")]
-    in_pool = unit_id_str in pool_ids
-    add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} execute_action: Unit {unit_id} (HP_CUR={hp_cur}, in_pool={in_pool})")
-    
+
     # Direct field access
     if "action" not in action:
         raise KeyError(f"Action missing required 'action' field: {action}")
@@ -4450,6 +4524,20 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                 f"shoot_pool_head={shoot_pool_head}, "
                 f"player_types={game_state.get('player_types')}"
             )
+
+    def _enforce_active_shooting_unit_for_waiting_targets(result_payload: Dict[str, Any]) -> None:
+        """
+        Backend contract: whenever shooting waits for a human target selection with blinking targets,
+        game_state must expose active_shooting_unit for the same unit.
+        """
+        if not result_payload.get("waiting_for_player"):
+            return
+        if result_payload.get("start_blinking") is not True:
+            return
+        blinking_units = result_payload.get("blinking_units")
+        if not isinstance(blinking_units, list) or len(blinking_units) == 0:
+            return
+        game_state["active_shooting_unit"] = unit_id
     
     # STRICT AI_TURN: shoot/advance must ALWAYS follow activation start
     # No shooting/advance allowed for a different unit while one is active
@@ -4521,6 +4609,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                 success, loop_result = execution_result
                 if success and isinstance(loop_result, dict):
                     _assert_gym_waiting_state_is_actionable(loop_result)
+                    _enforce_active_shooting_unit_for_waiting_targets(loop_result)
                 return success, loop_result
             return execution_result
         # If no success and no error handled above, return the result (may contain other errors)
@@ -4678,6 +4767,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             success, loop_result = result
             if success and isinstance(loop_result, dict):
                 _assert_gym_waiting_state_is_actionable(loop_result)
+                _enforce_active_shooting_unit_for_waiting_targets(loop_result)
             return success, loop_result
         return result
 
@@ -4731,7 +4821,6 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return success, result
     
     elif action_type == "left_click":
-        target_id = action.get("targetId")
         return shooting_click_handler(game_state, unit_id, action, config)
     
     elif action_type == "right_click":
@@ -6460,11 +6549,19 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     if not _weapon_has_ignores_cover_rule(weapon):
         attacker_col, attacker_row = require_unit_position(attacker, game_state)
         target_col, target_row = require_unit_position(target, game_state)
-        from engine.combat_utils import has_line_of_sight_coords, normalize_coordinates
-        can_see = has_line_of_sight_coords(
-            int(attacker_col), int(attacker_row),
-            int(target_col), int(target_row),
+        target_hexes = _resolve_target_hexes_for_los(
             game_state,
+            target,
+            int(target_col),
+            int(target_row),
+        )
+        target_visibility_ratio, can_see, target_in_cover, _visible_hexes, _max_hex_ratio = (
+            _compute_target_visibility_from_hexes(
+                game_state,
+                int(attacker_col),
+                int(attacker_row),
+                target_hexes,
+            )
         )
         if not can_see:
             _dump_los_contradiction_diagnostic(
@@ -6473,16 +6570,8 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             )
             raise ValueError(
                 f"Target {target_id} became not visible during save calculation "
-                f"(has_line_of_sight_coords returned False)"
+                f"(target_visibility_ratio={target_visibility_ratio:.3f})"
             )
-        # Cover check: need ratio from topology
-        visibility_ratio, _, target_in_cover = _get_los_visibility_state(
-            game_state,
-            int(attacker_col),
-            int(attacker_row),
-            int(target_col),
-            int(target_row),
-        )
         if target_in_cover:
             cover_bonus_applied = True
             cover_bonus_value = 1

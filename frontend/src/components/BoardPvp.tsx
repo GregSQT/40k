@@ -1251,25 +1251,14 @@ export default function Board({
       phase === "move" &&
       (mode === "select" || mode === "movePreview") &&
       movePreviewLosBlinkIds.length > 0;
-    // Phase tir : union backend + même éligibilité WASM que la preview move (blink HP / %)
-    const mergeShootWasmLos =
-      phase === "shoot" &&
-      (mode === "select" ||
-        mode === "attackPreview" ||
-        mode === "movePreview" ||
-        mode === "advancePreview") &&
-      shootPreviewWasmLos.blinkIds.length > 0;
     const mergedIds = (() => {
-      if (!mergeMoveLosHover && !mergeShootWasmLos) {
+      if (!mergeMoveLosHover) {
         return base;
       }
       const merged = new Set<string>();
       for (const id of base) merged.add(String(id));
       if (mergeMoveLosHover) {
         for (const id of movePreviewLosBlinkIds) merged.add(String(id));
-      }
-      if (mergeShootWasmLos) {
-        for (const id of shootPreviewWasmLos.blinkIds) merged.add(String(id));
       }
       return Array.from(merged).map((s) => parseInt(s, 10));
     })();
@@ -1280,7 +1269,6 @@ export default function Board({
     mode,
     phase,
     movePreviewLosBlinkIds,
-    shootPreviewWasmLos.key,
     gameState?.units_cache,
     unitsBoardLayoutKey,
   ]);
@@ -2810,6 +2798,49 @@ export default function Board({
       if (range <= 0) {
         return;
       }
+      const enforceBackendTargetsOnly = phase === "shoot";
+      const backendTargetSet = shootPreviewBackendIds;
+      if (enforceBackendTargetsOnly && (!backendTargetSet || backendTargetSet.size === 0)) {
+        return;
+      }
+
+      const appendBackendTargetLines = () => {
+        if (!backendTargetSet) return;
+        const enemyById = new Map<string, Unit>();
+        for (const enemy of units) {
+          if (enemy.player !== source.unit.player) {
+            enemyById.set(String(enemy.id), enemy);
+          }
+        }
+        const wallHexSet = new Set<string>(effectiveWallHexes.map((wall: number[]) => `${wall[0]},${wall[1]}`));
+        for (const enemyId of backendTargetSet) {
+          const enemy = enemyById.get(String(enemyId));
+          if (!enemy) {
+            continue;
+          }
+          if (
+            unitsCacheForShootPreview !== undefined &&
+            !Object.hasOwn(unitsCacheForShootPreview, String(enemy.id))
+          ) {
+            continue;
+          }
+          const enemyKey = `${enemy.col},${enemy.row}`;
+          if (!attackCellSet.has(enemyKey)) {
+            attackCellSet.add(enemyKey);
+            attackCells.push({ col: enemy.col, row: enemy.row });
+          }
+          const pathHexes: Position[] = getHexLine(source.fromCol, source.fromRow, enemy.col, enemy.row);
+          for (const hex of pathHexes) {
+            if (hex.col === source.fromCol && hex.row === source.fromRow) continue;
+            const hexKey = `${hex.col},${hex.row}`;
+            if (wallHexSet.has(hexKey)) continue;
+            if (!attackCellSet.has(hexKey)) {
+              attackCellSet.add(hexKey);
+              attackCells.push({ col: hex.col, row: hex.row });
+            }
+          }
+        }
+      };
 
       if (isWasmReady()) {
         const visibleHexes = computeVisibleHexes(
@@ -2826,6 +2857,17 @@ export default function Board({
           losVisibilityMinRatio,
           coverRatio,
         );
+        if (enforceBackendTargetsOnly) {
+          appendBackendTargetLines();
+          if (backendTargetSet) {
+            for (const [id, inCover] of Object.entries(losPreview.coverByUnitId)) {
+              if (inCover && backendTargetSet.has(String(id))) {
+                coverTargets.add(id);
+              }
+            }
+          }
+          return;
+        }
         const coverKeyDedupe = new Set<string>();
         for (const cell of losPreview.terrainCoverCells) {
           const key = `${cell.col},${cell.row}`;
@@ -2882,43 +2924,7 @@ export default function Board({
           }
         }
       } else {
-        const enemyById = new Map<string, Unit>();
-        for (const enemy of units) {
-          if (enemy.player !== source.unit.player) {
-            enemyById.set(String(enemy.id), enemy);
-          }
-        }
-        const wallHexSet = new Set<string>(effectiveWallHexes.map((wall: number[]) => `${wall[0]},${wall[1]}`));
-
-        if (shootPreviewBackendIds) {
-          for (const enemyId of shootPreviewBackendIds) {
-            const enemy = enemyById.get(String(enemyId));
-            if (!enemy) {
-              continue;
-            }
-            if (
-              unitsCacheForShootPreview !== undefined &&
-              !Object.hasOwn(unitsCacheForShootPreview, String(enemy.id))
-            ) {
-              continue;
-            }
-            const enemyKey = `${enemy.col},${enemy.row}`;
-            if (!attackCellSet.has(enemyKey)) {
-              attackCellSet.add(enemyKey);
-              attackCells.push({ col: enemy.col, row: enemy.row });
-            }
-            const pathHexes: Position[] = getHexLine(source.fromCol, source.fromRow, enemy.col, enemy.row);
-            for (const hex of pathHexes) {
-              if (hex.col === source.fromCol && hex.row === source.fromRow) continue;
-              const hexKey = `${hex.col},${hex.row}`;
-              if (wallHexSet.has(hexKey)) continue;
-              if (!attackCellSet.has(hexKey)) {
-                attackCellSet.add(hexKey);
-                attackCells.push({ col: hex.col, row: hex.row });
-              }
-            }
-          }
-        }
+        appendBackendTargetLines();
       }
     };
 
@@ -4038,7 +4044,8 @@ export default function Board({
           parseInt(gameState.active_shooting_unit, 10) === unitIdNum;
         const isExplicitlyActivatedInUi =
           selectedUnitId === unitIdNum &&
-          (mode === "attackPreview" ||
+          (mode === "select" ||
+            mode === "attackPreview" ||
             mode === "advancePreview" ||
             mode === "movePreview" ||
             mode === "targetPreview");
@@ -4069,7 +4076,13 @@ export default function Board({
             return !isAdjacentToEnemy;
           })();
 
-          if (canAdvance && onAdvance && !hideAdvanceIconForTutorial) {
+          const canStartAdvanceFromCurrentUiState = mode === "select";
+          if (
+            canAdvance &&
+            canStartAdvanceFromCurrentUiState &&
+            onAdvance &&
+            !hideAdvanceIconForTutorial
+          ) {
             addOverlayIcon(
               "/icons/Action_Logo/3-5 - Advance.png",
               centerX,

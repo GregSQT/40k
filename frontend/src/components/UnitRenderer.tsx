@@ -1568,6 +1568,7 @@ export class UnitRenderer {
     if (phase !== "shoot") return;
     if (unit.player !== current_player) return;
     if (canAdvance === false) return;
+    if (this.props.mode !== "select") return;
 
     // Only show icon when unit is actively activated (backend source of truth)
     const isActiveShooting =

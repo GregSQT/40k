@@ -1356,25 +1356,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
           }
 
-          // Si le moteur renvoie des cibles blink mais omet ``active_shooting_unit``, les clics ennemis
-          // ne passent jamais la branche ``handleSelectUnit`` (sinon ``left_click`` jamais envoyé).
-          if (
-            data.game_state &&
-            data.game_state.phase === "shoot" &&
-            data.result?.start_blinking === true &&
-            Array.isArray(data.result.blinking_units) &&
-            data.result.blinking_units.length > 0 &&
-            data.result.unitId != null &&
-            (data.game_state.active_shooting_unit === undefined ||
-              data.game_state.active_shooting_unit === null ||
-              String(data.game_state.active_shooting_unit).trim() === "")
-          ) {
-            data.game_state = {
-              ...data.game_state,
-              active_shooting_unit: data.result.unitId,
-            };
-          }
-
           // STEP 3: Tir uniquement — ne pas forcer attackPreview en phase charge (cibles de charge clignotantes).
           if (
             data.game_state?.phase === "shoot" &&
@@ -2270,30 +2251,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
             await executeAction(payload);
             return;
-          } else if (selectedUnitId !== null && numericUnitId !== selectedUnitId) {
-            // Repli : même logique que ``handleCancelMove`` / tir — backend parfois sans ``active_shooting_unit``
-            // alors que l’activation vient d’avoir lieu et ``selectedUnitId`` est le tireur.
-            const targetUnit = gameState.units?.find((u) => String(u.id) === String(numericUnitId));
-            const isEnemyTarget =
-              targetUnit !== undefined && targetUnit.player !== gameState.current_player;
-            if (isEnemyTarget) {
-              const clickTarget = determineClickTarget(numericUnitId, gameState);
-              const payload: Record<string, unknown> = {
-                action: "left_click",
-                unitId: String(selectedUnitId),
-                targetId: numericUnitId.toString(),
-                clickTarget,
-              };
-              const tutorialOpts = getTutorialShootOptionsRef?.current?.();
-              if (tutorialOpts?.forceKill === true) {
-                payload.tutorial_force_kill = true;
-              }
-              if (tutorialOpts?.forceMiss === true) {
-                payload.tutorial_force_miss = true;
-              }
-              await executeAction(payload);
-              return;
-            }
           }
         }
         return;
