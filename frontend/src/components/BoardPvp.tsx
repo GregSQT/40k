@@ -56,6 +56,11 @@ import {
   hexDistOff,
 } from "../utils/losPreviewHelpers";
 import { ensureWasmLoaded, isWasmReady, computeVisibleHexes } from "../utils/wasmLos";
+import {
+  appendLosPreviewSmoothHexUnionFillOrThrow,
+  configureLosPreviewOverlaySoftEdges,
+} from "../utils/smoothHexLosUnionFill";
+import type { HexUnionMaskLayout } from "../utils/hexUnionBoundaryPolygon";
 import { FEATURES } from "../constants/gameConfig";
 import {
   DAMAGE_PROBABILITY_TOOLTIP_HTML_OPACITY,
@@ -1792,16 +1797,29 @@ export default function Board({
         if (losRequestIdRef.current !== requestId) return;
 
         overlay.clear();
-        overlay.beginFill(LOS_PREVIEW_COVER_HEX, 0.3);
-        for (const c of losPreview.terrainCoverCells) {
-          overlay.drawCircle(hxX(c.col), hxY(c.col, c.row), HEX_RADIUS_H);
-        }
-        overlay.endFill();
-        overlay.beginFill(LOS_PREVIEW_CLEAR_HEX, 0.3);
-        for (const c of losPreview.clearCells) {
-          overlay.drawCircle(hxX(c.col), hxY(c.col, c.row), HEX_RADIUS_H);
-        }
-        overlay.endFill();
+        const losUnionLayout: HexUnionMaskLayout = {
+          HEX_HORIZ_SPACING: HEX_WIDTH_H,
+          HEX_WIDTH: HEX_WIDTH_H,
+          HEX_HEIGHT: HEX_HEIGHT_H,
+          HEX_VERT_SPACING: HEX_HEIGHT_H,
+          MARGIN: MARGIN_H,
+          gridHexRadius: HEX_RADIUS_H,
+        };
+        appendLosPreviewSmoothHexUnionFillOrThrow(
+          overlay,
+          losPreview.terrainCoverCells,
+          losUnionLayout,
+          LOS_PREVIEW_COVER_HEX,
+          0.3,
+        );
+        appendLosPreviewSmoothHexUnionFillOrThrow(
+          overlay,
+          losPreview.clearCells,
+          losUnionLayout,
+          LOS_PREVIEW_CLEAR_HEX,
+          0.3,
+        );
+        configureLosPreviewOverlaySoftEdges(overlay, app.renderer);
         overlay.visible = true;
 
         if (losRequestIdRef.current !== requestId) return;

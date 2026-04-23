@@ -3,7 +3,14 @@ import type React from "react";
 import * as PIXI from "pixi.js-legacy";
 import { addHexKeysToSet } from "../utils/movePoolRefsSync";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
-import { tryBuildHexUnionMaskPolygons } from "../utils/hexUnionBoundaryPolygon";
+import {
+  tryBuildHexUnionMaskPolygons,
+  type HexUnionMaskLayout,
+} from "../utils/hexUnionBoundaryPolygon";
+import {
+  appendLosPreviewSmoothHexUnionFillOrThrow,
+  configureLosPreviewOverlaySoftEdges,
+} from "../utils/smoothHexLosUnionFill";
 import { smoothMaskLoopsForRender } from "../utils/polygonSmooth";
 
 /** Contourne TS2345 : certaines fusions de types sur `.on` attendent `(...args: unknown[]) => void`. */
@@ -1516,8 +1523,33 @@ export const drawBoard = (
       if (useShootingPreviewPalette && (attackCells.length > 0 || coverCells.length > 0)) {
         const coverKeySet = new Set(coverCells.map((c) => `${c.col},${c.row}`));
         const attackClearOnly = attackCells.filter((c) => !coverKeySet.has(`${c.col},${c.row}`));
-        drawGroup(coverCells, 0x9ec5ff, 0.4, false);
-        drawGroup(attackClearOnly, 0x4f8bff, 0.4, false);
+        const losUnionLayout: HexUnionMaskLayout = {
+          HEX_HORIZ_SPACING,
+          HEX_WIDTH,
+          HEX_HEIGHT,
+          HEX_VERT_SPACING,
+          MARGIN,
+          gridHexRadius: HEX_RADIUS,
+        };
+        const losGfx = new PIXI.Graphics();
+        losGfx.name = "los-preview-smooth-union";
+        losGfx.eventMode = "none";
+        appendLosPreviewSmoothHexUnionFillOrThrow(
+          losGfx,
+          coverCells,
+          losUnionLayout,
+          0x9ec5ff,
+          0.4,
+        );
+        appendLosPreviewSmoothHexUnionFillOrThrow(
+          losGfx,
+          attackClearOnly,
+          losUnionLayout,
+          0x4f8bff,
+          0.4,
+        );
+        configureLosPreviewOverlaySoftEdges(losGfx, app.renderer);
+        highlightContainer.addChild(losGfx);
       } else {
         drawGroup(attackCells, ATTACK_COLOR, 0.4, false);
       }
