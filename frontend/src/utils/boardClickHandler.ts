@@ -1,6 +1,7 @@
 // frontend/src/utils/boardClickHandler.ts
 
 import type { UnitId } from "../types/game";
+import { logFightClick } from "./fightClickDebug";
 
 let globalClickHandler: ((e: Event) => void) | null = null;
 let globalHexClickHandler: ((e: Event) => void) | null = null;
@@ -9,6 +10,8 @@ export function setupBoardClickHandler(callbacks: {
   onSelectUnit(unitId: number | null): void;
   onSkipUnit?(unitId: UnitId): void;
   onSkipShoot?(unitId: UnitId, actionType?: "wait" | "action"): void;
+  /** Phase fight + attackPreview : clic droit (report), comme onSkipShoot pour le tir. */
+  onSkipFight?(unitId: UnitId): void;
   onStartAttackPreview(shooterId: UnitId): void;
   onShoot(shooterId: UnitId, targetId: UnitId): void;
   onCombatAttack(attackerId: UnitId, targetId: UnitId | null): void;
@@ -49,6 +52,15 @@ export function setupBoardClickHandler(callbacks: {
         clickType?: "left" | "right";
       }>
     ).detail;
+
+    if (phase === "fight") {
+      logFightClick("boardUnitClick reçu", {
+        unitId,
+        mode,
+        selectedUnitId,
+        clickType: clickType ?? "left",
+      });
+    }
 
     if (mode === "advancePreview") {
       // Sélection d’unité gérée ailleurs ; annulation advance = clic droit canvas (BoardPvp).
@@ -130,23 +142,33 @@ export function setupBoardClickHandler(callbacks: {
         callbacks.onCancelMove?.();
       }
     } else if (phase === "fight" && mode === "select") {
-      // Fight phase select mode - selecting a unit to activate
+      // Fight phase select — activation gérée dans handleSelectUnit (comme le tir)
+      logFightClick("routage: fight + select → onSelectUnit", { unitId });
       callbacks.onSelectUnit(unitId);
-      if (callbacks.onActivateFight) {
-        callbacks.onActivateFight(unitId);
+    } else if (phase === "fight" && mode === "attackPreview" && selectedUnitId != null) {
+      if (selectedUnitId === unitId) {
+        if (clickType === "right") {
+          callbacks.onSkipFight?.(unitId);
+        } else {
+          callbacks.onSelectUnit(null);
+        }
+      } else {
+        logFightClick("routage: fight + attackPreview → onSelectUnit (cible)", {
+          selectedUnitId,
+          targetId: unitId,
+        });
+        callbacks.onSelectUnit(unitId);
       }
-    } else if (
-      phase === "fight" &&
-      mode === "attackPreview" &&
-      selectedUnitId != null &&
-      selectedUnitId !== unitId
-    ) {
-      // Fight phase attack preview - clicking on enemy to attack
-      callbacks.onCombatAttack(selectedUnitId, unitId);
-    } else if (phase === "fight" && mode === "attackPreview" && selectedUnitId === unitId) {
-      // Fight phase attack preview - clicking on self (no-op or cancel)
-      callbacks.onCombatAttack(selectedUnitId, null);
+      return;
     } else {
+      if (phase === "fight") {
+        logFightClick("routage: fight → branche défaut (onSelectUnit seul)", {
+          unitId,
+          mode,
+          selectedUnitId,
+          clickType: clickType ?? "left",
+        });
+      }
       callbacks.onSelectUnit(unitId);
     }
   };

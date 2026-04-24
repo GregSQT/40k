@@ -288,6 +288,8 @@ type BoardProps = {
   onSelectUnit: (id: number | string | null) => void;
   onSkipUnit?: (unitId: number | string) => void;
   onSkipShoot?: (unitId: number | string) => void;
+  /** Phase fight + attackPreview : clic droit (``handleRightClick`` côté API). */
+  onSkipFight?: (unitId: number | string) => void;
   onStartTargetPreview?: (shooterId: number | string, targetId: number | string) => void;
   onStartMovePreview: (unitId: number | string, col: number | string, row: number | string) => void;
   onDirectMove: (unitId: number | string, col: number | string, row: number | string) => void;
@@ -530,6 +532,7 @@ export default function Board({
   onShoot,
   onDeployUnit,
   onFightAttack,
+  onSkipFight,
   onActivateFight,
   onPileInMove,
   onSkipPileIn,
@@ -655,6 +658,7 @@ export default function Board({
     onShoot: (shooterId: number, targetId: number) => void;
     onDeployUnit?: (unitId: number | string, destCol: number, destRow: number) => void;
     onFightAttack?: (attackerId: number, targetId: number | null) => void;
+    onSkipFight?: (unitId: number | string) => void;
     onActivateFight?: (fighterId: number) => void;
     onCharge?: (chargerId: number, targetId: number) => void;
     onActivateCharge?: (chargerId: number) => void;
@@ -677,6 +681,7 @@ export default function Board({
     onShoot,
     onDeployUnit,
     onFightAttack,
+    onSkipFight,
     onCharge,
     onActivateCharge,
     onChargeEnemyUnit,
@@ -702,6 +707,7 @@ export default function Board({
     onShoot,
     onDeployUnit,
     onFightAttack,
+    onSkipFight,
     onActivateFight,
     onCharge,
     onActivateCharge,
@@ -2463,6 +2469,9 @@ export default function Board({
         if (stableCallbacks.current.onSkipUnit) {
           stableCallbacks.current.onSkipUnit(unitId);
         }
+      },
+      onSkipFight: (unitId: number) => {
+        stableCallbacks.current.onSkipFight?.(unitId);
       },
       onStartAttackPreview: (shooterId: number) => {
         const unit = units.find((u) => u.id === shooterId);

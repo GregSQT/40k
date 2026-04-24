@@ -8,6 +8,16 @@ import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import { addHexKeysToSet } from "../utils/movePoolRefsSync";
 import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
 import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
+import { logFightClick } from "../utils/fightClickDebug";
+import type { ActivationPointerGameState } from "../utils/activationClickTarget";
+import {
+  buildActivationPointerPayload,
+  determineActivationClickTarget,
+  getActiveFightUnitIdString,
+  getFightActivationPoolUnitIds,
+  getFightAttackerAttackLeft,
+  isFightAttackSelectionUiOpen,
+} from "../utils/activationClickTarget";
 
 // Get max_turns from config instead of hardcoded fallback
 const getMaxTurnsFromConfig = async (): Promise<number> => {
@@ -368,6 +378,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     col: number;
     row: number;
   } | null>(null);
+  /**
+   * Snapshot synchrone du plateau pour la CC : évite les closures périmées dans
+   * ``executeAction`` (réponses async) tout en restant une seule source pour mode + attackPreview.
+   */
+  const fightTargetUiRef = useRef<{ mode: typeof mode; attackPreview: typeof attackPreview }>({
+    mode: "select",
+    attackPreview: null,
+  });
+  fightTargetUiRef.current = { mode, attackPreview };
   const [chargeDestinations, setChargeDestinations] = useState<Array<{ col: number; row: number }>>(
     []
   );
@@ -488,6 +507,26 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const ruleChoicePreviousSelectedUnitIdRef = useRef<number | null>(null);
   /** Bloque les doubles clics d’activation (move / tir / fight) pendant la requête API. */
   const activationInProgressRef = useRef(false);
+  /** Bloque les clics cible tir concurrents (double-clic spam). */
+  const shootTargetClickInProgressRef = useRef(false);
+  /**
+   * Une seule requête ``fight`` à la fois : clics rapides sur la cible envoyaient plusieurs POST
+   * en parallèle ; la N+1 peut recevoir ``no_attacks_remaining`` (ATTACK_LEFT déjà à 0) alors que
+   * l’UI n’a pas encore reçu la réponse précédente.
+   */
+  const fightRequestChainRef = useRef(Promise.resolve());
+  /** File des clics cible CC en attente (left click) pour exécution séquentielle. */
+  const queuedFightTargetClicksRef = useRef<number[]>([]);
+  /** Exécuteur de file CC actif (évite deux boucles concurrentes). */
+  const fightClickQueueProcessingRef = useRef(false);
+  /** Sérialise les interactions CC (``left_click`` / ``right_click`` / report) comme l’ancien filet ``fight``. */
+  const enqueueFightRequest = useCallback((run: () => Promise<unknown> | unknown) => {
+    const next = fightRequestChainRef.current.then(() => Promise.resolve(run()));
+    fightRequestChainRef.current = next.then(() => undefined).catch(() => undefined);
+    return next;
+  }, []);
+  /** Dernier ``gameState`` connu (pour gardes client avant envoi ``fight``). */
+  const latestGameStateRef = useRef<APIGameState | null>(null);
   /** Unité en cours d’activation — curseur attente sur le plateau (A / perfs ressenti). */
   const [activationPendingUnitId, setActivationPendingUnitId] = useState<number | null>(null);
 
@@ -945,19 +984,62 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     };
   }, [gameState, movePreview, isMovePreview]);
 
+  useEffect(() => {
+    latestGameStateRef.current = gameState;
+  }, [gameState]);
+
+  /** Quitter la prévisualisation CC (phase fight) après fin d’activation ou erreur ``no_attacks_remaining``. */
+  const clearFightAttackActivationUi = useCallback(() => {
+    queuedFightTargetClicksRef.current = [];
+    setBlinkingUnits((prev) => {
+      if (prev.blinkTimer) {
+        clearInterval(prev.blinkTimer);
+      }
+      return { unitIds: [], blinkTimer: null, attackerId: null };
+    });
+    setAttackPreview(null);
+    setPileInDestinations([]);
+    moveDestPoolRef.current = new Set();
+    footprintZoneRef.current = new Set();
+    setMode("select");
+    setSelectedUnitId(null);
+  }, []);
+
   // Execute action via API
   const executeAction = useCallback(
     async (action: Record<string, unknown>) => {
+      const isFightCombatClientTrace =
+        action.action === "fight" ||
+        (gameState?.phase === "fight" &&
+          (action.action === "left_click" || action.action === "right_click"));
+      if (isFightCombatClientTrace) {
+        logFightClick("executeAction: envoi action fight / pointeur CC", {
+          action: action.action,
+          unitId: action.unitId,
+          targetId: action.targetId,
+          phase: gameState?.phase,
+          active_fight_unit: gameState?.active_fight_unit,
+        });
+      }
       if (!gameState) {
+        if (isFightCombatClientTrace) {
+          logFightClick("executeAction: abandon (gameState null)");
+        }
         return;
       }
       if (!gameState.units_cache) {
+        if (isFightCombatClientTrace) {
+          logFightClick("executeAction: abandon (units_cache manquant)");
+        }
         setError(
           "Partie non demarree: units_cache manquant. Lance d'abord /api/game/start avec succes."
         );
         return;
       }
       if (gameState.game_over) {
+        if (isFightCombatClientTrace) {
+          logFightClick("executeAction: abandon (game_over)");
+        }
         return;
       }
 
@@ -985,6 +1067,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
 
         const data = await response.json();
+        if (isFightCombatClientTrace) {
+          const r = data.result as Record<string, unknown> | undefined;
+          logFightClick("executeAction: réponse JSON (fight)", {
+            success: data.success,
+            error: data.error,
+            phase: (data.game_state as { phase?: string } | undefined)?.phase,
+            active_fight_unit: (data.game_state as { active_fight_unit?: string | null } | undefined)
+              ?.active_fight_unit,
+            resultAction: r?.action,
+            waiting_for_player: r?.waiting_for_player,
+            attack_executed: r?.attack_executed,
+            activation_ended: r?.activation_ended,
+            resultKeys: r ? Object.keys(r) : [],
+          });
+        }
         setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
 
         // Process detailed backend action logs FIRST
@@ -1041,6 +1138,33 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
         // DEBUG: Log full response structure to understand blinking data location
 
+        if (!data.success && isFightCombatClientTrace) {
+          const r = data.result as Record<string, unknown> | undefined;
+          logFightClick("executeAction: success=false (fight), état non mis à jour par ce chemin", {
+            error: data.error,
+            resultError: r?.error,
+            result: r,
+          });
+        }
+
+        // Réponses fight en échec : appliquer quand même ``game_state`` (sinon l’UI reste en attackPreview
+        // avec ATTACK_LEFT / active_fight_unit obsolètes) et sortir du mode cible si plus d’attaques.
+        if (!data.success && isFightCombatClientTrace && data.game_state) {
+          setGameState((p) => {
+            const merged = mergeGameStatePreservingOmittedObjectives(
+              p,
+              data.game_state as APIGameState,
+            );
+            latestGameStateRef.current = merged;
+            return merged;
+          });
+          const r = data.result as Record<string, unknown> | undefined;
+          const err = r?.error;
+          if (err === "no_attacks_remaining" || err === "no_weapons_available") {
+            clearFightAttackActivationUi();
+          }
+        }
+
         if (data.success) {
           if (
             data.result?.action === "waiting_for_rule_choice" &&
@@ -1054,9 +1178,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             if (data.result?.unitId) {
               setSelectedUnitId(parseInt(data.result.unitId, 10));
             }
-            setGameState((p) =>
-              mergeGameStatePreservingOmittedObjectives(p, data.game_state as APIGameState),
-            );
+            setGameState((p) => {
+              const merged = mergeGameStatePreservingOmittedObjectives(
+                p,
+                data.game_state as APIGameState,
+              );
+              latestGameStateRef.current = merged;
+              return merged;
+            });
             return;
           }
           if (data.result?.action === "select_rule_choice") {
@@ -1411,9 +1540,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             };
           }
 
-          setGameState((p) =>
-            mergeGameStatePreservingOmittedObjectives(p, data.game_state as APIGameState),
-          );
+          setGameState((p) => {
+            const merged = mergeGameStatePreservingOmittedObjectives(
+              p,
+              data.game_state as APIGameState,
+            );
+            latestGameStateRef.current = merged;
+            return merged;
+          });
 
           // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance activation response (jet D6 + pool sous-hex)
           const advanceDests = data.result?.advance_destinations;
@@ -1793,10 +1927,36 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
           }
           // Handle fight phase multi-attack (ATTACK_LEFT > 0, waiting_for_player)
+          // ``[]`` est truthy en JS : exiger au moins une cible, sinon on retombe sur fin d'activation / filet.
+          // Si le moteur annonce ``waiting_for_player`` mais ATTACK_LEFT déjà à 0, ne pas rouvrir l’UI CC.
           else if (
-            data.game_state?.phase === "fight" &&
-            data.result?.waiting_for_player &&
-            data.result?.valid_targets
+            (() => {
+              if (data.game_state?.phase !== "fight" || !data.result?.waiting_for_player) {
+                return false;
+              }
+              if (
+                !Array.isArray(data.result.valid_targets) ||
+                data.result.valid_targets.length === 0
+              ) {
+                return false;
+              }
+              const waitUid = parseInt(
+                String(data.result.unitId ?? data.game_state.active_fight_unit ?? ""),
+                10,
+              );
+              if (!Number.isFinite(waitUid)) {
+                return false;
+              }
+              const waitAttacker = data.game_state.units?.find(
+                (u: { id: string | number; ATTACK_LEFT?: number }) =>
+                  parseInt(String(u.id), 10) === waitUid,
+              );
+              const wl = waitAttacker?.ATTACK_LEFT;
+              if (typeof wl === "number" && wl <= 0) {
+                return false;
+              }
+              return true;
+            })()
           ) {
             setPileInDestinations([]);
             if (targetPreview?.blinkTimer) {
@@ -1851,15 +2011,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           }
           // Handle fight phase completion (ATTACK_LEFT = 0, activation_ended)
           else if (data.game_state?.phase === "fight" && data.result?.activation_ended) {
-            // Clear blinking
-            if (blinkingUnits.blinkTimer) {
-              clearInterval(blinkingUnits.blinkTimer);
-            }
-            setBlinkingUnits({ unitIds: [], blinkTimer: null });
-            setAttackPreview(null);
-            setPileInDestinations([]);
-            setSelectedUnitId(null);
-            setMode("select");
+            clearFightAttackActivationUi();
           }
           // Set visual state based on shooting activation
           // AI_TURN.md COMPLIANCE: Clear stale attackPreview from previous fight phases
@@ -1876,6 +2028,34 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             // Ne pas effacer la sélection en phase charge (réponses partielles / clés manquantes).
             if (data.game_state?.phase !== "charge") {
               setSelectedUnitId(null);
+            }
+            // Fight : fin d’activation CC (active libérée ou ATTACK_LEFT à 0 dans ``game_state``), y compris si
+            // ``waiting_for_player`` est resté incohérent — éviter de rester en attackPreview.
+            const inactiveFight =
+              data.game_state?.active_fight_unit == null ||
+              data.game_state.active_fight_unit === "";
+            const filetFightUid =
+              selectedUnitId ??
+              (data.result?.unitId != null ? parseInt(String(data.result.unitId), 10) : null);
+            const filetFightUnit =
+              filetFightUid != null && data.game_state?.units
+                ? data.game_state.units.find(
+                    (u: { id: string | number; ATTACK_LEFT?: number }) =>
+                      parseInt(String(u.id), 10) === filetFightUid,
+                  )
+                : undefined;
+            const fightNoAttacksLeft =
+              typeof filetFightUnit?.ATTACK_LEFT === "number" && filetFightUnit.ATTACK_LEFT <= 0;
+            const snap = fightTargetUiRef.current;
+            const fightPreviewUiActive = isFightAttackSelectionUiOpen(snap.mode, snap.attackPreview);
+            if (
+              data.game_state?.phase === "fight" &&
+              fightPreviewUiActive &&
+              (inactiveFight || fightNoAttacksLeft) &&
+              !data.result?.waiting_for_pile_in &&
+              !data.result?.waiting_for_consolidation
+            ) {
+              clearFightAttackActivationUi();
             }
           }
 
@@ -1935,8 +2115,20 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
           }
         }
+        return data as {
+          success?: boolean;
+          error?: unknown;
+          result?: Record<string, unknown>;
+          game_state?: APIGameState;
+        };
       } catch (err) {
+        if (isFightCombatClientTrace) {
+          logFightClick("executeAction: exception réseau / parse", {
+            message: formatApiConnectionError(err),
+          });
+        }
         console.error("Action error:", err);
+        return undefined;
       }
     },
     [
@@ -1947,6 +2139,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       blinkingUnits.unitIds,
       blinkingUnits.attackerId,
       targetPreview?.blinkTimer,
+      clearFightAttackActivationUi,
     ]
   );
 
@@ -2119,39 +2312,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     });
   }, []);
 
-  // Helper function using backend state only
-  const determineClickTarget = useCallback((unitId: number, gameState: APIGameState): string => {
-    if (!gameState) return "elsewhere";
-
-    interface UnitWithId {
-      id: string | number;
-      [key: string]: unknown;
-    }
-    const unit = gameState.units.find((u: UnitWithId) => parseInt(u.id.toString(), 10) === unitId);
-    if (!unit) return "elsewhere";
-
-    const current_player = gameState.current_player;
-    const activeShooterId = gameState.active_shooting_unit
-      ? parseInt(gameState.active_shooting_unit, 10)
-      : null;
-
-    if (unit.player === current_player) {
-      if (unitId === activeShooterId) {
-        return "active_unit";
-      } else {
-        // Check if unit is in activation pool for "friendly_unit" detection
-        const shootPool = gameState.shoot_activation_pool || [];
-        const unitIdStr = unitId.toString();
-        if (shootPool.includes(unitIdStr)) {
-          return "friendly_unit";
-        }
-        return "friendly";
-      }
-    } else {
-      return "enemy";
-    }
-  }, []);
-
   const fetchEndlessDutyStatus = useCallback(async (): Promise<EndlessDutyState | null> => {
     const response = await fetch(`${API_BASE}/game/action`, {
       method: "POST",
@@ -2214,21 +2374,184 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleShootingPhaseClick = useCallback(
     async (unitId: number, clickType: "left" | "right") => {
       if (!gameState) return;
-
-      const clickTarget = determineClickTarget(unitId, gameState);
-      const activeShooterId = gameState.active_shooting_unit;
-
-      // Backend handles all context awareness
-      const action = {
-        action: clickType === "left" ? "left_click" : "right_click",
-        unitId: activeShooterId || selectedUnitId?.toString(),
-        targetId: unitId.toString(),
-        clickTarget: clickTarget,
-      };
-
-      await executeAction(action);
+      await executeAction(
+        buildActivationPointerPayload("shoot", unitId, clickType, gameState, selectedUnitId)
+      );
     },
-    [gameState, selectedUnitId, determineClickTarget, executeAction]
+    [gameState, selectedUnitId, executeAction]
+  );
+
+  const processQueuedFightTargetClicks = useCallback(async () => {
+    if (fightClickQueueProcessingRef.current) {
+      return;
+    }
+    fightClickQueueProcessingRef.current = true;
+    try {
+      while (queuedFightTargetClicksRef.current.length > 0) {
+        const gsNow = (latestGameStateRef.current ?? gameState) as ActivationPointerGameState | null;
+        if (!gsNow || gsNow.phase !== "fight") {
+          queuedFightTargetClicksRef.current = [];
+          break;
+        }
+        const activeFightStr = getActiveFightUnitIdString(
+          latestGameStateRef.current as ActivationPointerGameState | null,
+          gsNow
+        );
+        if (!activeFightStr) {
+          queuedFightTargetClicksRef.current = [];
+          clearFightAttackActivationUi();
+          break;
+        }
+        const aid = parseInt(activeFightStr, 10);
+        const al = getFightAttackerAttackLeft(gsNow, aid);
+        if (typeof al === "number" && al <= 0) {
+          queuedFightTargetClicksRef.current = [];
+          clearFightAttackActivationUi();
+          break;
+        }
+        const targetId = queuedFightTargetClicksRef.current.shift();
+        if (targetId == null) {
+          break;
+        }
+        const gsForPayload = {
+          ...gsNow,
+          active_fight_unit: activeFightStr,
+        } as ActivationPointerGameState;
+        const response = (await enqueueFightRequest(() =>
+          executeAction(
+            buildActivationPointerPayload("fight", targetId, "left", gsForPayload, selectedUnitId)
+          )
+        )) as
+          | {
+              success?: boolean;
+              result?: Record<string, unknown>;
+              game_state?: APIGameState;
+            }
+          | undefined;
+
+        const gsAfter = (response?.game_state ?? latestGameStateRef.current) as
+          | APIGameState
+          | null
+          | undefined;
+        if (!gsAfter || gsAfter.phase !== "fight" || !gsAfter.active_fight_unit) {
+          queuedFightTargetClicksRef.current = [];
+          break;
+        }
+        const result = response?.result as Record<string, unknown> | undefined;
+        if (result?.waiting_for_player !== true) {
+          queuedFightTargetClicksRef.current = [];
+          break;
+        }
+
+        const attackResult = result?.attack_result as Record<string, unknown> | undefined;
+        const targetDied =
+          (attackResult?.target_died === true || result?.target_died === true) &&
+          String(attackResult?.targetId ?? result?.targetId ?? "") === String(targetId);
+        if (targetDied) {
+          const activeAfter = parseInt(String(gsAfter.active_fight_unit), 10);
+          const alAfter = getFightAttackerAttackLeft(
+            gsAfter as unknown as ActivationPointerGameState,
+            activeAfter
+          );
+          const validTargets =
+            Array.isArray(result?.valid_targets) && result?.valid_targets.length > 0
+              ? result.valid_targets.map((x) => String(x))
+              : [];
+          const hasOtherTarget = validTargets.some((x) => x !== String(targetId));
+          if (typeof alAfter === "number" && alAfter > 0 && hasOtherTarget) {
+            // Cible morte + autres cibles possibles: rendre la main au joueur.
+            queuedFightTargetClicksRef.current = [];
+            break;
+          }
+        }
+      }
+    } finally {
+      fightClickQueueProcessingRef.current = false;
+    }
+  }, [
+    gameState,
+    selectedUnitId,
+    enqueueFightRequest,
+    executeAction,
+    clearFightAttackActivationUi,
+  ]);
+
+  /** Clics plateau en phase fight : même contrat API que le tir (``left_click`` / ``right_click``). */
+  const handleFightPhaseClick = useCallback(
+    async (unitId: number, clickType: "left" | "right") => {
+      if (!gameState || gameState.phase !== "fight") return;
+      if (clickType === "left") {
+        const gsNow = (latestGameStateRef.current ?? gameState) as ActivationPointerGameState;
+        const activeFightStr = getActiveFightUnitIdString(
+          latestGameStateRef.current as ActivationPointerGameState | null,
+          gsNow
+        );
+        if (!activeFightStr) {
+          clearFightAttackActivationUi();
+          return;
+        }
+        const aid = parseInt(activeFightStr, 10);
+        const al = getFightAttackerAttackLeft(gsNow, aid);
+        if (typeof al === "number") {
+          const inFlightEstimate = fightClickQueueProcessingRef.current ? 1 : 0;
+          const maxQueued = Math.max(0, al - inFlightEstimate);
+          if (queuedFightTargetClicksRef.current.length >= maxQueued) {
+            logFightClick("handleFightPhaseClick: left_click ignoré (file pleine vs attaques restantes)", {
+              unitId,
+              attackLeft: al,
+              queuedCount: queuedFightTargetClicksRef.current.length,
+              inFlightEstimate,
+            });
+            return;
+          }
+        }
+        queuedFightTargetClicksRef.current.push(unitId);
+        logFightClick("handleFightPhaseClick: left_click en file", {
+          unitId,
+          queuedCount: queuedFightTargetClicksRef.current.length,
+        });
+        await processQueuedFightTargetClicks();
+        return;
+      }
+      queuedFightTargetClicksRef.current = [];
+      await enqueueFightRequest(async () => {
+        const gsNow = (latestGameStateRef.current ?? gameState) as ActivationPointerGameState;
+        if (gsNow.phase !== "fight") {
+          return;
+        }
+        const activeFightStr = getActiveFightUnitIdString(
+          latestGameStateRef.current as ActivationPointerGameState | null,
+          gsNow
+        );
+        if (!activeFightStr) {
+          clearFightAttackActivationUi();
+          return;
+        }
+        if (clickType === "left") {
+          const aid = parseInt(activeFightStr, 10);
+          const al = getFightAttackerAttackLeft(gsNow, aid);
+          if (typeof al === "number" && al <= 0) {
+            clearFightAttackActivationUi();
+            return;
+          }
+        }
+        const gsForPayload = {
+          ...gsNow,
+          active_fight_unit: activeFightStr,
+        } as ActivationPointerGameState;
+        await executeAction(
+          buildActivationPointerPayload("fight", unitId, clickType, gsForPayload, selectedUnitId)
+        );
+      });
+    },
+    [
+      gameState,
+      selectedUnitId,
+      executeAction,
+      enqueueFightRequest,
+      clearFightAttackActivationUi,
+      processQueuedFightTargetClicks,
+    ]
   );
 
   // Event handlers aligned with backend
@@ -2282,8 +2605,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
             return;
           } else if (gameState.active_shooting_unit) {
+            if (shootTargetClickInProgressRef.current) {
+              return;
+            }
             // Clicking on target when unit is active
-            const clickTarget = determineClickTarget(numericUnitId, gameState);
+            const clickTarget = determineActivationClickTarget("shoot", numericUnitId, gameState);
             const payload: Record<string, unknown> = {
               action: "left_click",
               unitId: gameState.active_shooting_unit,
@@ -2297,7 +2623,90 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             if (tutorialOpts?.forceMiss === true) {
               payload.tutorial_force_miss = true;
             }
-            await executeAction(payload);
+            shootTargetClickInProgressRef.current = true;
+            try {
+              await executeAction(payload);
+            } finally {
+              shootTargetClickInProgressRef.current = false;
+            }
+            return;
+          }
+        }
+        return;
+      }
+
+      // Fight phase : aligné sur le tir (sélection pool → activate_unit ; prévisualisation → left_click)
+      if (gameState && gameState.phase === "fight") {
+        if (
+          numericUnitId === null &&
+          isFightAttackSelectionUiOpen(
+            fightTargetUiRef.current.mode,
+            fightTargetUiRef.current.attackPreview
+          ) &&
+          selectedUnitId !== null
+        ) {
+          await enqueueFightRequest(async () => {
+            const gsNow = (latestGameStateRef.current ?? gameState) as ActivationPointerGameState;
+            const activeFightId = getActiveFightUnitIdString(
+              latestGameStateRef.current as ActivationPointerGameState | null,
+              gsNow
+            );
+            if (!activeFightId) {
+              return;
+            }
+            await executeAction({
+              action: "right_click",
+              unitId: activeFightId.toString(),
+              targetId: selectedUnitId != null ? String(selectedUnitId) : activeFightId.toString(),
+              clickTarget: "active_unit",
+            });
+          });
+          setSelectedUnitId(null);
+          setMode("select");
+          return;
+        }
+        if (numericUnitId !== null) {
+          const fightPool = getFightActivationPoolUnitIds(gameState);
+          if (fightPool.includes(numericUnitId)) {
+            if (activationInProgressRef.current) {
+              return;
+            }
+            activationInProgressRef.current = true;
+            setSelectedUnitId(numericUnitId);
+            setActivationPendingUnitId(numericUnitId);
+            try {
+              await executeAction({
+                action: "activate_unit",
+                unitId: numericUnitId.toString(),
+              });
+            } finally {
+              activationInProgressRef.current = false;
+              setActivationPendingUnitId(null);
+            }
+            return;
+          }
+          const gsPtr = (latestGameStateRef.current ?? gameState) as ActivationPointerGameState;
+          const activeFightStr = getActiveFightUnitIdString(
+            latestGameStateRef.current as ActivationPointerGameState | null,
+            gameState as ActivationPointerGameState
+          );
+          if (activeFightStr) {
+            const aid = parseInt(activeFightStr, 10);
+            const al = getFightAttackerAttackLeft(gsPtr, aid);
+            if (typeof al === "number" && al <= 0) {
+              clearFightAttackActivationUi();
+              return;
+            }
+            await handleFightPhaseClick(numericUnitId, "left");
+            return;
+          }
+          if (
+            isFightAttackSelectionUiOpen(
+              fightTargetUiRef.current.mode,
+              fightTargetUiRef.current.attackPreview
+            )
+          ) {
+            clearFightAttackActivationUi();
             return;
           }
         }
@@ -2362,21 +2771,24 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       gameState,
       executeAction,
       mode,
-      determineClickTarget,
       selectedUnitId,
       getTutorialShootOptionsRef,
       clearChargePoolRefs,
+      clearFightAttackActivationUi,
+      enqueueFightRequest,
     ]
   );
 
-  // Right-click handler for shooting phase
+  // Right-click : tir ou CC (report / annulation côté moteur)
   const handleRightClick = useCallback(
     async (unitId: number) => {
       if (gameState?.phase === "shoot") {
         await handleShootingPhaseClick(unitId, "right");
+      } else if (gameState?.phase === "fight") {
+        await handleFightPhaseClick(unitId, "right");
       }
     },
-    [gameState, handleShootingPhaseClick]
+    [gameState, handleShootingPhaseClick, handleFightPhaseClick]
   );
 
   const handleSkipUnit = useCallback(
@@ -2957,25 +3369,22 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [executeAction, gameState, pendingPreviewAction]
   );
 
+  /** Compat : anciens appels ``onCombatAttack`` → même flux que le tir (``left_click`` + ``clickTarget``). */
   const handleFightAttack = useCallback(
-    async (attackerId: number | string, targetId: number | string | null) => {
-      // Fight action - send fight action to backend
+    async (_attackerId: number | string, targetId: number | string | null) => {
       if (targetId === null) {
-        console.warn("🟠 Fight attack called with null target");
+        logFightClick("handleFightAttack: ignoré (targetId null, ex. clic sur soi)", {
+          attackerId: _attackerId,
+        });
         return;
       }
-
-      const numericAttackerId =
-        typeof attackerId === "string" ? parseInt(attackerId, 10) : attackerId;
       const numericTargetId = typeof targetId === "string" ? parseInt(targetId, 10) : targetId;
-
-      await executeAction({
-        action: "fight",
-        unitId: numericAttackerId.toString(),
-        targetId: numericTargetId.toString(),
+      logFightClick("handleFightAttack → handleFightPhaseClick (left_click)", {
+        targetId: numericTargetId,
       });
+      await handleFightPhaseClick(numericTargetId, "left");
     },
-    [executeAction]
+    [handleFightPhaseClick]
   );
 
   // Handle clicking on enemy unit in chargePreview mode - triggers charge roll and destination building
@@ -3504,6 +3913,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       changeRoster: async () => {},
       onStartTargetPreview: () => {},
       onFightAttack: () => {},
+      onFightPhaseRightClick: async () => {},
       onActivateFight: () => {},
       onPileInMove: async () => {},
       onSkipPileIn: async () => {},
@@ -3601,6 +4011,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     changeRoster,
     onStartTargetPreview: handleStartTargetPreview,
     onFightAttack: handleFightAttack,
+    onFightPhaseRightClick: handleRightClick,
     onActivateFight: handleActivateFight,
     onPileInMove: handlePileInMove,
     onSkipPileIn: handleSkipPileIn,

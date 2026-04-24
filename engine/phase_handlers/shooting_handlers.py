@@ -457,7 +457,9 @@ def _build_weapon_availability_enemy_precheck(
 
     _los_map = unit.get("los_cache")
     out: List[Dict[str, Any]] = []
-    for enemy_id, cache_entry in units_cache.items():
+    # Snapshot iteration to avoid RuntimeError when rapid concurrent clicks
+    # mutate units_cache while precheck is in progress.
+    for enemy_id, cache_entry in list(units_cache.items()):
         enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
         if enemy_player != unit_player:
             enemy = get_unit_by_id(game_state, enemy_id)

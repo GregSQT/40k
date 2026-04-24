@@ -748,12 +748,33 @@ def _fight_plan_consolidation_destinations(
     has_enemy = _fight_opposing_enemies_exist(game_state, unit)
 
     if has_enemy:
+        # Consolidation: l'ancre finale doit etre strictement plus proche de l'ennemi
+        # le plus proche qu'au debut de la consolidation.
+        start_d_min, closest_ids = _fight_pile_in_closest_enemy_snapshot(game_state, unit)
+        if start_d_min <= 1:
+            # Deja au contact (distance minimale possible sans overlap) -> pas de consolidation utile.
+            return None
+
         dist_by_anchor: List[Tuple[Tuple[int, int], int]] = []
+        units_cache = require_key(game_state, "units_cache")
+        from engine.hex_utils import min_distance_between_sets
         for anchor in visited:
             ac, ar = anchor
             fp = compute_candidate_footprint(ac, ar, unit, game_state)
-            dmin = _fight_min_distance_fp_to_nearest_enemy(game_state, unit, fp)
+            # Evaluer uniquement le palier d'ennemis le plus proche au depart.
+            dmin = None
+            for enemy_id in closest_ids:
+                cache_entry = units_cache.get(str(enemy_id))
+                if not cache_entry:
+                    continue
+                enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+                d = min_distance_between_sets(fp, enemy_fp)
+                if dmin is None or d < dmin:
+                    dmin = d
             if dmin is None:
+                continue
+            if dmin >= start_d_min:
+                # Strictement plus proche requis.
                 continue
             dist_by_anchor.append((anchor, int(dmin)))
         if not dist_by_anchor:
@@ -1713,6 +1734,9 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             click_target = "elsewhere"
         else:
             click_target = action["clickTarget"]
+        # Alias front : même sémantique que le tir (``enemy``) pour une cible CC.
+        if click_target == "enemy":
+            click_target = "target"
 
         if click_target == "target" and "targetId" in action:
             return _handle_fight_attack(game_state, unit, action["targetId"], config)

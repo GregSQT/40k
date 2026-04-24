@@ -3104,6 +3104,7 @@ export const BoardWithAPI: React.FC = () => {
             onCancelMove={isGameOver ? () => {} : apiProps.onCancelMove}
             onShoot={isGameOver ? () => {} : apiProps.onShoot}
             onSkipShoot={isGameOver ? () => {} : apiProps.onSkipShoot}
+            onSkipFight={isGameOver ? () => {} : apiProps.onFightPhaseRightClick}
             onStartTargetPreview={isGameOver ? () => {} : apiProps.onStartTargetPreview}
             onCancelTargetPreview={() => {
               const targetPreview = apiProps.targetPreview as TargetPreview | null;

@@ -19,6 +19,7 @@ import {
   getSelectedMeleeWeapon,
   getSelectedRangedWeapon,
 } from "../utils/weaponHelpers";
+import { logFightClick } from "../utils/fightClickDebug";
 
 interface UnitRendererProps {
   unit: Unit;
@@ -512,7 +513,7 @@ export class UnitRenderer {
     }
 
     let unitColor = unit.color;
-    let borderColor = 0xffffff;
+    let borderColor = 0x000000;
     let borderWidth = DEFAULT_BORDER_WIDTH;
 
     // Handle selection and used unit states
@@ -684,6 +685,17 @@ export class UnitRenderer {
               e.preventDefault();
               e.stopPropagation();
 
+              if (phase === "fight") {
+                logFightClick("UnitRenderer: pointerdown sur cercle unité", {
+                  unitId: unit.id,
+                  unitPlayer: unit.player,
+                  mode,
+                  selectedUnitId,
+                  fightSubPhase: this.props.fightSubPhase,
+                  button: e.button,
+                });
+              }
+
               if (phase === "shoot" && mode === "attackPreview" && selectedUnitId === unit.id) {
                 // Handle clicks on active unit in attackPreview mode
                 if (e.button === 2) {
@@ -727,6 +739,23 @@ export class UnitRenderer {
         }
       } else {
         unitCircle.cursor = "default";
+        if (phase === "fight") {
+          logFightClick("UnitRenderer: pas de handler pointerdown (clic ignoré au niveau unité)", {
+            unitId: unit.id,
+            unitPlayer: unit.player,
+            current_player,
+            mode,
+            selectedUnitId,
+            fightSubPhase: this.props.fightSubPhase,
+            isFightPhaseActive:
+              phase === "fight" &&
+              (this.props.fightSubPhase === "charging" ||
+                this.props.fightSubPhase === "alternating_non_active" ||
+                this.props.fightSubPhase === "alternating_active" ||
+                this.props.fightSubPhase === "cleanup_non_active" ||
+                this.props.fightSubPhase === "cleanup_active"),
+          });
+        }
       }
     }
 
