@@ -7,7 +7,7 @@ import type { DiceValue } from "../types/game";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import { addHexKeysToSet } from "../utils/movePoolRefsSync";
 import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
-import { getPreferredRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
+import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 
 // Get max_turns from config instead of hardcoded fallback
 const getMaxTurnsFromConfig = async (): Promise<number> => {
@@ -823,8 +823,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             id: typeof target.id === "string" ? parseInt(target.id, 10) : target.id,
             player: target.player as PlayerId,
           };
-          const preferred = getPreferredRangedWeaponAgainstTarget(shooterUnit, targetUnit);
-          if (!preferred) {
+          const rangedEff = getSelectedRangedWeaponAgainstTarget(shooterUnit, targetUnit);
+          if (!rangedEff) {
             throw new Error(
               `No ranged weapon available for unit ${shooterUnit.id} after weapon selection`
             );
@@ -837,12 +837,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             if (!prevPreview) return null;
             return {
               ...prevPreview,
-              hitProbability: preferred.hitProbability,
-              woundProbability: preferred.woundProbability,
-              saveProbability: preferred.saveProbability,
-              overallProbability: preferred.overallProbability,
-              potentialDamage: preferred.potentialDamage,
-              expectedDamage: preferred.expectedDamage,
+              hitProbability: rangedEff.hitProbability,
+              woundProbability: rangedEff.woundProbability,
+              saveProbability: rangedEff.saveProbability,
+              overallProbability: rangedEff.overallProbability,
+              potentialDamage: rangedEff.potentialDamage,
+              expectedDamage: rangedEff.expectedDamage,
             };
           });
         }
@@ -2028,6 +2028,33 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           ? unit.DISPLAY_NAME
           : unit.unitType;
 
+      const rawUnit = unit as Record<string, unknown>;
+      const readIntField = (keys: string[]): number | undefined => {
+        for (const k of keys) {
+          const v = rawUnit[k];
+          if (v === undefined || v === null) continue;
+          if (typeof v === "number" && Number.isFinite(v)) {
+            return Math.trunc(v);
+          }
+          if (typeof v === "string" && v.trim() !== "") {
+            const n = parseInt(v, 10);
+            if (!Number.isNaN(n)) return n;
+          }
+        }
+        return undefined;
+      };
+      const manualWeaponSelected =
+        unit.manualWeaponSelected === true ||
+        rawUnit["_manual_weapon_selected"] === true ||
+        rawUnit["manual_weapon_selected"] === true;
+
+      const selectedRngWeaponIndex =
+        readIntField(["selectedRngWeaponIndex", "selected_rng_weapon_index"]) ??
+        unit.selectedRngWeaponIndex;
+      const selectedCcWeaponIndex =
+        readIntField(["selectedCcWeaponIndex", "selected_cc_weapon_index"]) ??
+        unit.selectedCcWeaponIndex;
+
       return {
         id: typeof unit.id === "number" ? unit.id : parseInt(unit.id, 10),
         name: displayName,
@@ -2049,9 +2076,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Map weapons arrays
         RNG_WEAPONS: unit.RNG_WEAPONS,
         CC_WEAPONS: unit.CC_WEAPONS,
-        selectedRngWeaponIndex: unit.selectedRngWeaponIndex,
-        selectedCcWeaponIndex: unit.selectedCcWeaponIndex,
-        manualWeaponSelected: unit.manualWeaponSelected,
+        selectedRngWeaponIndex,
+        selectedCcWeaponIndex,
+        manualWeaponSelected,
         ICON: unit.ICON,
         ICON_SCALE: unit.ICON_SCALE,
         BASE_SIZE: unit.BASE_SIZE,
@@ -3022,7 +3049,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       let potentialDamage = 0;
 
       if (shooter && target) {
-        // Get best ranged weapon for this target
+        // Arme à feu sélectionnée (alignée sur HP blink / tir effectif)
         // Convert shooter to proper Unit type (id as number, player as PlayerId)
         const shooterUnit: Unit = {
           ...shooter,
@@ -3034,15 +3061,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           id: typeof target.id === "string" ? parseInt(target.id, 10) : target.id,
           player: target.player as PlayerId,
         };
-        const preferred = getPreferredRangedWeaponAgainstTarget(shooterUnit, targetUnit);
-        if (!preferred) {
+        const rangedEff = getSelectedRangedWeaponAgainstTarget(shooterUnit, targetUnit);
+        if (!rangedEff) {
           return;
         }
 
-        hitProbability = preferred.hitProbability;
-        woundProbability = preferred.woundProbability;
-        saveProbability = preferred.saveProbability;
-        potentialDamage = preferred.potentialDamage;
+        hitProbability = rangedEff.hitProbability;
+        woundProbability = rangedEff.woundProbability;
+        saveProbability = rangedEff.saveProbability;
+        potentialDamage = rangedEff.potentialDamage;
       }
 
       const overallProbability = hitProbability * woundProbability * (1 - saveProbability);

@@ -12,7 +12,7 @@ import {
 } from "../utils/blinkingHPBar";
 import { minHexDistanceBetweenUnitFootprints } from "../utils/hexFootprint";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
-import { getPreferredRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
+import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 import {
   getDiceAverage,
   getMeleeRange,
@@ -281,13 +281,13 @@ export class UnitRenderer {
         } else {
           effectiveTargetInCover = this.props.shootingTargetInCover === true;
         }
-        const preferred = getPreferredRangedWeaponAgainstTarget(
+        const rangedEff = getSelectedRangedWeaponAgainstTarget(
           attacker,
           this.props.unit,
           effectiveTargetInCover
         );
-        if (preferred) {
-          expectedWeaponSignature = buildWeaponSignature(preferred.weapon);
+        if (rangedEff) {
+          expectedWeaponSignature = buildWeaponSignature(rangedEff.weapon);
         }
       } else if (attacker && !useRangedForBlinkSignature) {
         const weapon = getSelectedMeleeWeapon(attacker);
@@ -1314,13 +1314,13 @@ export class UnitRenderer {
               totalDamage = targetPreview.currentBlinkStep * weaponDamage;
             }
           } else {
-            const preferred = getPreferredRangedWeaponAgainstTarget(
+            const rangedEff = getSelectedRangedWeaponAgainstTarget(
               shooter,
               unit,
               getEffectiveTargetInCover(shooter)
             );
-            if (preferred) {
-              const potentialDamage = Number(preferred.potentialDamage);
+            if (rangedEff) {
+              const potentialDamage = Number(rangedEff.potentialDamage);
               if (Number.isNaN(potentialDamage)) {
                 throw new Error(`Invalid ranged potentialDamage for unit ${unit.id}`);
               }
@@ -1410,6 +1410,7 @@ export class UnitRenderer {
         getCSSColor: this.getCSSColor.bind(this),
         chargeMinRollOverlay,
         onBlinkProbHtml: this.props.onBlinkProbHtml,
+        sliceHpCur: displayHP,
       });
 
       // If targetPreview has overallProbability, update the display (pas en phase charge : affichage jet 2D6)

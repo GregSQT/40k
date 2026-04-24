@@ -172,6 +172,42 @@ export function getPreferredRangedWeaponAgainstTarget(
   return { weapon: selectedWeapon, index: selectedIndex, ...effectiveness };
 }
 
+/**
+ * Arme à feu **sélectionnée** (``selectedRngWeaponIndex`` / ``getSelectedRangedWeapon``) contre la cible.
+ * Pour le HP blink, prévisu dégâts / % : aligné sur le choix du joueur, pas sur l’arme « optimale » (best expected damage).
+ */
+export function getSelectedRangedWeaponAgainstTarget(
+  shooter: Unit,
+  target: Unit,
+  inCover: boolean = false
+): RangedWeaponEffectiveness | null {
+  if (!shooter.RNG_WEAPONS || shooter.RNG_WEAPONS.length === 0) {
+    return null;
+  }
+  const index = shooter.selectedRngWeaponIndex ?? 0;
+  if (index < 0 || index >= shooter.RNG_WEAPONS.length) {
+    throw new Error(`Invalid selectedRngWeaponIndex ${index} for unit ${shooter.id}`);
+  }
+  const aw = shooter.available_weapons;
+  let weapon: Weapon | null = null;
+  if (Array.isArray(aw)) {
+    const entry = aw.find((w) => w.index === index);
+    const canUse =
+      entry && (entry.can_use === true || entry.canUse === true);
+    if (entry?.weapon && canUse) {
+      weapon = entry.weapon;
+    }
+  }
+  if (!weapon) {
+    weapon = getSelectedRangedWeapon(shooter);
+  }
+  if (!weapon) {
+    return null;
+  }
+  const effectiveness = calculateRangedEffectiveness(weapon, index, target, inCover);
+  return { weapon, index, ...effectiveness };
+}
+
 // ✅ NEW: Combat-specific probability calculation functions
 export function calculateCombatHitProbability(attacker: Unit): number {
   // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get ATK from selected melee weapon

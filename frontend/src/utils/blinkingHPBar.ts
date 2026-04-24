@@ -2,12 +2,23 @@
 
 import * as PIXI from "pixi.js";
 import type { Unit } from "../types/game";
-import { getPreferredRangedWeaponAgainstTarget } from "./probabilityCalculator";
+import { getSelectedRangedWeaponAgainstTarget } from "./probabilityCalculator";
 import { getDiceAverage, getSelectedMeleeWeapon } from "./weaponHelpers";
 
 /** Tooltip HTML (BoardPvp) : > tout z-index connu de l’app (ex. game-log 99999) ; opacité tests. */
 export const DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX = 150_000;
 export const DAMAGE_PROBABILITY_TOOLTIP_HTML_OPACITY = 0.5;
+
+/**
+ * Z-index PIXI du conteneur `hp-blink-container` sur le stage.
+ * Au-dessus de `unitsLayer` (2000), drag (9000), `uiElementsContainer` (10000), ligne de mesure (15000),
+ * pour rester lisible comme le cadre % (HTML `DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX`, au-dessus du canvas).
+ */
+export const HP_BLINK_STAGE_Z_INDEX = 20_000;
+
+/** Ordre relatif à l’intérieur du conteneur blink (fond puis tranches). */
+const HP_BLINK_INNER_BG_Z = 350;
+const HP_BLINK_INNER_SLICES_Z = 360;
 
 /** Texte d’aide sous le cadre % (hors overlay charge jet 2D6). */
 export const DEFAULT_BLINK_PROBABILITY_HELP_TEXT = "Probabilité estimée d'infliger des degats";
@@ -125,6 +136,23 @@ export interface BlinkingHPBarConfig {
   chargeMinRollOverlay?: ChargeMinRollOverlay | null;
   /** Cadre % / bouclier en HTML (net) — obligatoire côté BoardPvp en jeu. */
   onBlinkProbHtml?: (payload: BlinkProbHtmlPayload) => void;
+  /**
+   * HP affiché dans les tranches (clignotant). Si absent, `unit.HP_CUR` (ou HP_MAX).
+   * Permet la prévisu targetPreview (currentBlinkStep) et le suivi après dégâts réels.
+   */
+  sliceHpCur?: number;
+}
+
+/** Géométrie + métadonnées pour repeindre les tranches HP sans recréer le conteneur. */
+export interface BlinkHpSliceLayout {
+  finalBarX: number;
+  finalBarY: number;
+  sliceWidth: number;
+  finalBarHeight: number;
+  slicePad: number;
+  cornerR: number;
+  hpMax: number;
+  player: Unit["player"];
 }
 
 export interface HPBlinkContainer extends PIXI.Container {
@@ -134,6 +162,10 @@ export interface HPBlinkContainer extends PIXI.Container {
   cleanupBlink?: () => void;
   blinkTicker?: () => void;
   background?: PIXI.Graphics;
+  /** Références créées dans createBlinkingHPBar — mises à jour quand HP_CUR / prévisu changent. */
+  blinkNormalSlices?: PIXI.Graphics[];
+  blinkHighlightSlices?: PIXI.Graphics[];
+  blinkSliceLayout?: BlinkHpSliceLayout;
 }
 
 export interface BlinkingHPBarResult {
@@ -149,8 +181,8 @@ export function calculateWoundProbability(
   inCover: boolean = false
 ): number {
   if (phase === "shoot") {
-    const preferred = getPreferredRangedWeaponAgainstTarget(attacker, target, inCover);
-    return preferred ? preferred.overallProbability : 0;
+    const ranged = getSelectedRangedWeaponAgainstTarget(attacker, target, inCover);
+    return ranged ? ranged.overallProbability : 0;
   }
 
   // For charge/fight, use melee weapon
@@ -185,8 +217,8 @@ export function calculateDamagePerAttack(
   inCover: boolean = false
 ): number {
   if (phase === "shoot") {
-    const preferred = getPreferredRangedWeaponAgainstTarget(attacker, target, inCover);
-    return preferred ? preferred.potentialDamage : 0;
+    const ranged = getSelectedRangedWeaponAgainstTarget(attacker, target, inCover);
+    return ranged ? ranged.potentialDamage : 0;
   }
 
   const weapon = getSelectedMeleeWeapon(attacker);
@@ -203,6 +235,73 @@ export function buildWeaponSignature(weapon: {
   NB: number | "D3" | "D6" | "2D6" | "D6+1" | "D6+2" | "D6+3";
 }): string {
   return [weapon.display_name, weapon.ATK, weapon.STR, weapon.AP, weapon.DMG, weapon.NB].join("|");
+}
+
+function paintRoundedHpSlice(
+  gfx: PIXI.Graphics,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  sliceCornerR: number,
+  fill: number
+): void {
+  gfx.clear();
+  gfx.beginFill(fill, 1);
+  gfx.drawRoundedRect(x, y, w, h, Math.max(0.5, sliceCornerR * 0.7));
+  gfx.endFill();
+}
+
+/**
+ * Met à jour les couleurs des tranches (normal + highlight) quand les PV ou l’aperçu de dégâts changent,
+ * sans recréer le conteneur (réemploi même attaquant / même arme).
+ */
+export function refreshBlinkingHpBarSlices(
+  container: HPBlinkContainer,
+  unit: Unit,
+  attacker: Unit | null,
+  phase: "shoot" | "fight" | "charge",
+  inCover: boolean,
+  getCSSColor: (cssVar: string) => number,
+  sliceHpCur?: number
+): void {
+  const layout = container.blinkSliceLayout;
+  const normalSlices = container.blinkNormalSlices;
+  const highlightSlices = container.blinkHighlightSlices;
+  if (!layout || !normalSlices || !highlightSlices) return;
+  if (normalSlices.length !== highlightSlices.length || normalSlices.length !== layout.hpMax) return;
+
+  const currentHP =
+    sliceHpCur !== undefined
+      ? Math.max(0, sliceHpCur)
+      : Math.max(0, unit.HP_CUR ?? unit.HP_MAX);
+  const shooterDamage = attacker ? calculateDamagePerAttack(attacker, unit, phase, inCover) : 0;
+
+  const lostColor = getCSSColor("--hp-bar-lost");
+  const previewColor = getCSSColor("--hp-bar-damage-preview");
+  const p1 = getCSSColor("--hp-bar-player1");
+  const p2 = getCSSColor("--hp-bar-player2");
+  const aliveColor = layout.player === 1 ? p1 : p2;
+
+  const { finalBarX, finalBarY, sliceWidth, finalBarHeight, slicePad, cornerR, hpMax } = layout;
+  const innerW = sliceWidth - slicePad * 2;
+  const innerH = finalBarHeight - slicePad * 2;
+
+  for (let i = 0; i < hpMax; i++) {
+    const sx = finalBarX + i * sliceWidth + slicePad;
+    const sy = finalBarY + slicePad;
+
+    const normalColor = i < currentHP ? aliveColor : lostColor;
+    paintRoundedHpSlice(normalSlices[i], sx, sy, innerW, innerH, cornerR, normalColor);
+
+    const wouldBeDamaged = i >= currentHP - shooterDamage && i < currentHP;
+    const highlightColor = wouldBeDamaged
+      ? previewColor
+      : i < currentHP
+        ? aliveColor
+        : lostColor;
+    paintRoundedHpSlice(highlightSlices[i], sx, sy, innerW, innerH, cornerR, highlightColor);
+  }
 }
 
 /** Aligne le texte PIXI sur `.rule-tooltip` / `App.css` (`--tooltip-font-*`). */
@@ -245,6 +344,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     getCSSColor,
     chargeMinRollOverlay,
     onBlinkProbHtml,
+    sliceHpCur: sliceHpCurFromConfig,
   } = config;
 
   // Normalize unit.id to number
@@ -259,9 +359,9 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   let weaponSignature: string | null = null;
   if (attacker) {
     if (phase === "shoot") {
-      const preferred = getPreferredRangedWeaponAgainstTarget(attacker, unit, inCover);
-      if (preferred) {
-        weaponSignature = buildWeaponSignature(preferred.weapon);
+      const ranged = getSelectedRangedWeaponAgainstTarget(attacker, unit, inCover);
+      if (ranged) {
+        weaponSignature = buildWeaponSignature(ranged.weapon);
       }
     } else {
       const weapon = getSelectedMeleeWeapon(attacker);
@@ -287,7 +387,17 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     const attackerMatches = existingContainer.attackerId === attackerIdNum;
     const weaponMatches = existingContainer.weaponSignature === weaponSignature;
     if (attackerMatches && weaponMatches) {
+      existingContainer.zIndex = HP_BLINK_STAGE_Z_INDEX;
       updateProbabilityDisplay(existingContainer, attacker, unit, phase, inCover, onBlinkProbHtml);
+      refreshBlinkingHpBarSlices(
+        existingContainer,
+        unit,
+        attacker,
+        phase,
+        inCover,
+        getCSSColor,
+        sliceHpCurFromConfig
+      );
       return {
         container: existingContainer,
         cleanup: existingContainer.cleanupBlink || (() => {}),
@@ -309,7 +419,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   // Create container
   const hpContainer = new PIXI.Container() as HPBlinkContainer;
   hpContainer.name = "hp-blink-container";
-  hpContainer.zIndex = 350;
+  hpContainer.zIndex = HP_BLINK_STAGE_Z_INDEX;
   hpContainer.sortableChildren = true;
   hpContainer.unitId = unitIdNum;
   hpContainer.attackerId = attackerIdNum;
@@ -323,15 +433,18 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   barBg.beginFill(0x222222, 1);
   barBg.drawRoundedRect(finalBarX, finalBarY, finalBarWidth, finalBarHeight, cornerR);
   barBg.endFill();
-  barBg.zIndex = 350;
+  barBg.zIndex = HP_BLINK_INNER_BG_Z;
   hpContainer.background = barBg;
   hpContainer.addChild(barBg);
 
   // Calculate damage
   const shooterDamage = attacker ? calculateDamagePerAttack(attacker, unit, phase, inCover) : 0;
 
-  // Current HP
-  const currentHP = Math.max(0, unit.HP_CUR ?? unit.HP_MAX);
+  // Current HP (état serveur ou prévisu ciblée)
+  const currentHP =
+    sliceHpCurFromConfig !== undefined
+      ? Math.max(0, sliceHpCurFromConfig)
+      : Math.max(0, unit.HP_CUR ?? unit.HP_MAX);
 
   // Create HP slices
   const normalSlices: PIXI.Graphics[] = [];
@@ -357,7 +470,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
       Math.max(0.5, cornerR * 0.7)
     );
     normalSlice.endFill();
-    normalSlice.zIndex = 360;
+    normalSlice.zIndex = HP_BLINK_INNER_SLICES_Z;
     normalSlices.push(normalSlice);
     hpContainer.addChild(normalSlice);
 
@@ -381,7 +494,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     );
     highlightSlice.endFill();
     highlightSlice.visible = false; // Start hidden
-    highlightSlice.zIndex = 360;
+    highlightSlice.zIndex = HP_BLINK_INNER_SLICES_Z;
     highlightSlices.push(highlightSlice);
     hpContainer.addChild(highlightSlice);
   }
@@ -468,6 +581,19 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   };
 
   hpContainer.cleanupBlink = cleanup;
+
+  hpContainer.blinkNormalSlices = normalSlices;
+  hpContainer.blinkHighlightSlices = highlightSlices;
+  hpContainer.blinkSliceLayout = {
+    finalBarX,
+    finalBarY,
+    sliceWidth,
+    finalBarHeight,
+    slicePad,
+    cornerR,
+    hpMax: unit.HP_MAX,
+    player: unit.player,
+  };
 
   // Add to stage
   app.stage.addChild(hpContainer);

@@ -983,6 +983,7 @@ class W40KEngine(gym.Env):
                 "activation_position",
                 "_shooting_with_pistol",
                 "_manual_weapon_selected",
+                "manualWeaponSelected",
                 "_shoot_activation_started",
                 "_pending_move_after_shooting",
                 "_move_after_shooting_destinations",

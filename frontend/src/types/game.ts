@@ -139,6 +139,14 @@ export interface Unit {
   selectedRngWeaponIndex?: number; // Index de l'arme ranged sélectionnée
   selectedCcWeaponIndex?: number; // Index de l'arme melee sélectionnée
   manualWeaponSelected?: boolean; // True when user explicitly selected a weapon
+  /** Pool moteur (tir) : profil + index ; ``weapon`` peut être la variante active (COMBI, etc.). */
+  available_weapons?: Array<{
+    index: number;
+    weapon: Weapon;
+    can_use?: boolean;
+    canUse?: boolean;
+    reason?: string;
+  }>;
 
   // Display properties
   ICON: string;

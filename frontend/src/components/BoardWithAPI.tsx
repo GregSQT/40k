@@ -3077,6 +3077,7 @@ export const BoardWithAPI: React.FC = () => {
             blinkingUnits={apiProps.blinkingUnits}
             blinkingAttackerId={apiProps.blinkingAttackerId}
             isBlinkingActive={apiProps.isBlinkingActive}
+            blinkVersion={apiProps.blinkVersion}
             onSelectUnit={
               isGameOver ||
               (isRosterSetupMode &&

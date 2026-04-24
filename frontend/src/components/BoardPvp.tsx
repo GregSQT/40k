@@ -416,6 +416,30 @@ function closestChargerHexToTargetFootprint(
  * (units + cache) pour retirer tout de suite une cible tuée même si le state React des ids
  * de blink n’a pas été resynchronisé.
  */
+/** PV pour fingerprint / layout : le moteur écrit surtout dans ``units_cache`` (tir, combat). */
+function hpCurForBoardFingerprint(unit: Unit, unitsCache: Record<string, unknown> | undefined): number | "" {
+  if (!unitsCache) return unit.HP_CUR ?? "";
+  const raw = unitsCache[String(unit.id)];
+  if (raw && typeof raw === "object" && raw !== null && "HP_CUR" in raw) {
+    const hp = (raw as { HP_CUR: unknown }).HP_CUR;
+    if (typeof hp === "number") return hp;
+  }
+  return unit.HP_CUR ?? "";
+}
+
+/** Fusionne ``HP_CUR`` depuis ``units_cache`` pour l’affichage (barres HP, blink, etc.). */
+function mergeUnitHpFromCache(unit: Unit, unitsCache: Record<string, unknown> | undefined): Unit {
+  if (!unitsCache) return unit;
+  const raw = unitsCache[String(unit.id)];
+  if (!raw || typeof raw !== "object" || raw === null || !("HP_CUR" in raw)) {
+    return unit;
+  }
+  const hp = (raw as { HP_CUR: unknown }).HP_CUR;
+  if (typeof hp !== "number") return unit;
+  if (hp === unit.HP_CUR) return unit;
+  return { ...unit, HP_CUR: hp };
+}
+
 function filterBlinkIdsToLivingUnitsCache(
   ids: number[],
   unitsCache: Record<string, unknown> | undefined,
@@ -1066,17 +1090,16 @@ export default function Board({
     return sorted;
   }, [blinkingUnits]);
 
-  const unitsBoardLayoutKey = useMemo(
-    () =>
-      [...units]
-        .sort((a, b) => String(a.id).localeCompare(String(b.id)))
-        .map(
-          (u) =>
-            `${String(u.id)}:${u.col}:${u.row}:${u.HP_CUR ?? ""}:rng${u.selectedRngWeaponIndex ?? 0}`,
-        )
-        .join("|"),
-    [units],
-  );
+  const unitsBoardLayoutKey = useMemo(() => {
+    const uc = gameState?.units_cache as Record<string, unknown> | undefined;
+    return [...units]
+      .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+      .map(
+        (u) =>
+          `${String(u.id)}:${u.col}:${u.row}:${hpCurForBoardFingerprint(u, uc)}:rng${u.selectedRngWeaponIndex ?? 0}`,
+      )
+      .join("|");
+  }, [units, gameState?.units_cache]);
 
   /** Évite de relancer le gros useEffect Pixi à chaque nouvelle référence ``gameState`` (perte WebGL / gel). */
   const gameStateBoardDepsKey = useMemo(() => {
@@ -3222,8 +3245,11 @@ export default function Board({
     // Compute units fingerprint to determine if unit re-rendering is needed
     const unitsFingerprint = (() => {
       const parts: string[] = [];
+      const ucFp = gameState?.units_cache as Record<string, unknown> | undefined;
       for (const u of units) {
-        parts.push(`${u.id},${u.col},${u.row},${u.HP_CUR}`);
+        parts.push(
+          `${u.id},${u.col},${u.row},${hpCurForBoardFingerprint(u, ucFp)},rng${u.selectedRngWeaponIndex ?? ""},cc${u.selectedCcWeaponIndex ?? ""},mw${u.manualWeaponSelected ? 1 : 0}`,
+        );
       }
       const moveLosIds = [...movePreviewLosBlinkIds].sort((a, b) => a - b).join(",");
       const backendBlink = (stableBlinkingUnits ?? []).slice().sort((a, b) => a - b).join(",");
@@ -3506,8 +3532,9 @@ export default function Board({
     // ✅ UNIFIED UNIT RENDERING USING COMPONENT — skip if fingerprint unchanged
     if (unitsChanged) {
     unitsFingerprintRef.current = unitsFingerprint;
-    for (const unit of units) {
-      const unitsCache = gameState?.units_cache;
+    for (const unitRow of units) {
+      const unitsCache = gameState?.units_cache as Record<string, unknown> | undefined;
+      const unit = mergeUnitHpFromCache(unitRow, unitsCache);
       const unitIdStr = String(unit.id);
       const isPresentInUnitsCache =
         unitsCache !== undefined ? Object.hasOwn(unitsCache, unitIdStr) : true;

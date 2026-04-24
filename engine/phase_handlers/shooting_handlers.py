@@ -902,6 +902,7 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 "activation_position",
                 "_shooting_with_pistol",
                 "_manual_weapon_selected",
+                "manualWeaponSelected",
                 "_shoot_activation_started",
                 "_current_shoot_nb",
                 "_rapid_fire_context_weapon_index",
@@ -3641,6 +3642,8 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
         del unit["_shooting_with_pistol"]
     if "_manual_weapon_selected" in unit:
         del unit["_manual_weapon_selected"]
+    if "manualWeaponSelected" in unit:
+        del unit["manualWeaponSelected"]
     if "_shoot_activation_started" in unit:
         del unit["_shoot_activation_started"]
     _clear_shoot_activation_weapon_reuse_cache(unit)
@@ -4714,6 +4717,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
 
         unit["selectedRngWeaponIndex"] = weapon_index
         unit["_manual_weapon_selected"] = True
+        # JSON / frontend (camelCase) : aligné sur useEngineAPI.convertUnits + UnitRenderer
+        unit["manualWeaponSelected"] = True
         _clear_shoot_activation_weapon_reuse_cache(unit)
 
         # CRITICAL FIX: Invalidate target pool cache after weapon change
@@ -5138,7 +5143,11 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             cfg = game_state["config"] if "config" in game_state else None
             gs = cfg["game_settings"] if cfg and "game_settings" in cfg else None
             auto_select = gs["autoSelectWeapon"] if gs and "autoSelectWeapon" in gs else True
-            if "_manual_weapon_selected" in unit and unit["_manual_weapon_selected"] is True:
+            manual_weapon_chosen = (
+                unit.get("_manual_weapon_selected") is True
+                or unit.get("manualWeaponSelected") is True
+            )
+            if manual_weapon_chosen:
                 auto_select = False
             
             # If SHOOT_LEFT > 0, weapon is already selected and has remaining shots
