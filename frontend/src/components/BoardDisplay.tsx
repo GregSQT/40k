@@ -2,7 +2,6 @@
 import type React from "react";
 import * as PIXI from "pixi.js-legacy";
 import { addHexKeysToSet } from "../utils/movePoolRefsSync";
-import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import {
   tryBuildHexUnionMaskPolygons,
   type HexUnionMaskLayout,
@@ -25,7 +24,7 @@ function asPixiUnknownArgsPointerListener(
 const MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS = 5;
 /** Autorise des passes Chaikin supplémentaires sur les très gros contours (défaut global 48k). */
 const MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS = 120_000;
-/** Lissage alpha du masque (pas du disque) pour adoucir les marches d'empreinte. */
+/** Lissage alpha du masque (même pipeline qu'avant le passage « polygone seul »). */
 const MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH = 1.4;
 const MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY = 3;
 const MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION = 2;
@@ -769,20 +768,13 @@ function appendWhiteReachableMaskFromSmoothedLoops(
 }
 
 /**
- * Preview **move / advance / post-shoot** : **disque euclidien** centré sur
- * l'unité (``drawCircle``), rogné par le masque d'atteignabilité du BFS — même
- * idée que le commit historique ``ba3a4b42`` (disque + ``Sprite`` masque alpha
- * issu d'une ``RenderTexture``).
+ * Preview **move / advance / post-shoot** : même **lissage** qu'avant (masque
+ * blanc → RT → ``BlurFilter`` sur l'alpha → ``Sprite`` masque).
+ * Le calque coloré n'est plus un **disque** euclidien mais un **rectangle** qui
+ * couvre exactement les bornes du masque : la silhouette visible suit le
+ * polygone d'union (BFS / empreinte), pas un arc de cercle sur les côtés plats.
  *
- * Le masque est le polygone d'union des cellules atteignables (boucles API
- * ``move_preview_footprint_mask_loops`` ou ``tryBuildHexUnionMaskPolygons``),
- * adouci Chaikin puis rempli en blanc dans la RT. ``diskGfx.mask = maskSprite``
- * → le bord extérieur **perçu** est l'arc du cercle ``rOuter`` (sauf là où le
- * masque rogne : murs, EZ, pathfinding). Dessiner le polygone seul en fill
- * donnait une enveloppe **hexagonale** — ce n'est pas le rendu voulu.
- *
- * **Pas de repli silencieux** : sources de masque invalides, RT trop grande,
- * échec ``render`` → ``throw``.
+ * **Pas de repli silencieux** : sources invalides, RT trop grande, échec render → ``throw``.
  */
 function renderMoveAdvanceDestPoolCircleLayer(
   highlightContainer: PIXI.Container,
@@ -793,10 +785,6 @@ function renderMoveAdvanceDestPoolCircleLayer(
   footprintRadius: number,
   poolFillColor: number,
   spriteName: string,
-  unitCol: number,
-  unitRow: number,
-  unitCx: number,
-  unitCy: number,
   HEX_HORIZ_SPACING: number,
   HEX_WIDTH: number,
   HEX_HEIGHT: number,
@@ -818,41 +806,6 @@ function renderMoveAdvanceDestPoolCircleLayer(
   if (!(gridHexRadius > 0) || !Number.isFinite(gridHexRadius)) {
     throw new Error(
       `[renderMoveAdvanceDestPoolCircleLayer] gridHexRadius invalide (${gridHexRadius}, spriteName=${spriteName})`,
-    );
-  }
-
-  // **Rayon cible** : on veut la distance qui correspond à la règle "M × 10
-  // hexes" côté moteur. Pour l'obtenir sans lire ``unit.M`` côté front on prend
-  // la **distance hex maximale** (cube distance) entre le centre de l'unité et
-  // n'importe quelle cellule du pool — c'est exactement la borne BFS du moteur
-  // (= M×10 en phase move, +D6 en advance, etc.).
-  //
-  // Pourquoi pas la distance euclidienne max ? Parce que sur grille hex, le BFS
-  // à distance N forme un hexagone : les cellules les plus lointaines en
-  // **euclidien** sont les 6 sommets du polygone (distance ≈ N × HEX_HEIGHT),
-  // PAS les bords flat (distance = N × HEX_HORIZ_SPACING). Un cercle centré sur
-  // l'unité dont le rayon est la distance vertex DÉPASSE le polygone BFS sur
-  // les bords flat → le masque rogne cette zone et le rendu final reprend
-  // exactement la forme hex — bug visuel observé en pratique.
-  //
-  // En prenant ``max_cube × HEX_HORIZ_SPACING + demi-empreinte``, le cercle est
-  // strictement **inscrit** dans le polygone BFS (sauf aux 6 coins, où il
-  // effleure) → le masque ne le rogne plus qu'aux endroits réellement bloqués
-  // par murs / EZ / pathfinding, ce qui est le comportement voulu.
-  const unitCube = offsetToCube(unitCol, unitRow);
-  let maxCubeDist = 0;
-  for (const key of anchorPool) {
-    const sep = key.indexOf(",");
-    const c = Number(key.substring(0, sep));
-    const r = Number(key.substring(sep + 1));
-    const d = cubeDistance(unitCube, offsetToCube(c, r));
-    if (d > maxCubeDist) maxCubeDist = d;
-  }
-  const rOuter = maxCubeDist * HEX_HORIZ_SPACING + footprintRadius;
-  if (!Number.isFinite(rOuter) || !(rOuter > 0)) {
-    throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] rOuter invalide (${rOuter}, ` +
-        `maxCubeDist=${maxCubeDist}, spriteName=${spriteName})`,
     );
   }
 
@@ -969,10 +922,6 @@ function renderMoveAdvanceDestPoolCircleLayer(
   }
   maskGfx.destroy();
 
-  // Lissage appliqué à l'ALPHA du masque lui-même :
-  // 1) Sprite sur la RT binaire du masque
-  // 2) BlurFilter léger rendu dans une 2e RT
-  // 3) cette RT floutée sert de mask final du disque
   let rtSoftMask: PIXI.RenderTexture;
   try {
     rtSoftMask = PIXI.RenderTexture.create({
@@ -1017,17 +966,17 @@ function renderMoveAdvanceDestPoolCircleLayer(
   maskSprite.position.set(maskBounds.x, maskBounds.y);
   maskSprite.roundPixels = false;
 
-  const diskGfx = new PIXI.Graphics();
-  diskGfx.name = spriteName;
-  diskGfx.eventMode = "none";
-  diskGfx.beginFill(poolFillColor, 1.0);
-  diskGfx.drawCircle(unitCx, unitCy, rOuter);
-  diskGfx.endFill();
-  diskGfx.alpha = 0.28;
-  diskGfx.mask = maskSprite;
+  const coverageGfx = new PIXI.Graphics();
+  coverageGfx.name = spriteName;
+  coverageGfx.eventMode = "none";
+  coverageGfx.beginFill(poolFillColor, 1.0);
+  coverageGfx.drawRect(maskBounds.x, maskBounds.y, maskBounds.width, maskBounds.height);
+  coverageGfx.endFill();
+  coverageGfx.alpha = 0.28;
+  coverageGfx.mask = maskSprite;
 
   highlightContainer.addChild(maskSprite);
-  highlightContainer.addChild(diskGfx);
+  highlightContainer.addChild(coverageGfx);
 
   if (typeof window !== "undefined") {
     try {
@@ -1045,20 +994,15 @@ function renderMoveAdvanceDestPoolCircleLayer(
           chaikinIterations: MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
           footprintRadius,
           gridHexRadius,
-          unitCol,
-          unitRow,
-          unitCx,
-          unitCy,
-          maxCubeDist,
-          rOuter,
           maskSize: { w, h },
           maskBounds: { x: maskBounds.x, y: maskBounds.y, w: maskBounds.width, h: maskBounds.height },
+          coverage: "rect_bounds_not_disk",
           maskAlphaSmoothing: {
             blurStrength: MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH,
             blurQuality: MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY,
             blurResolution: MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION,
           },
-          renderPipeline: "disk_euclidean_masked_polygon_rt+mask_alpha_blur",
+          renderPipeline: "rect_coverage_masked_polygon_rt+mask_alpha_blur",
         });
       }
     } catch {
@@ -1463,11 +1407,9 @@ export const drawBoard = (
       const moveSpriteName = useAdvanceMovePoolLikeMove
         ? "advance-dest-pool"
         : "move-dest-pool";
-      // Spec utilisateur : preview = **cercle euclidien net** centré sur l'unité,
-      // rayon = M×10 (dérivé du BFS) + demi-empreinte, tronqué par murs / EZ /
-      // pathfinding via masque BFS. Pas de fallback : si ``selectedUnitAnchor``
-      // n'est pas fourni alors qu'on entre dans le layer move, c'est un bug de
-      // câblage côté caller (BoardPvp) et on veut le voir immédiatement.
+      // Preview move/advance : masque polygone (Chaikin) + blur alpha comme avant ;
+      // calque coloré = rectangle sur les bornes du masque (plus de disque).
+      // Pas de fallback : si ``selectedUnitAnchor`` absent, bug côté caller (BoardPvp).
       if (selectedUnitAnchor == null) {
         throw new Error(
           "[drawBoard] ``selectedUnitAnchor`` requis pour rendre le layer move/advance — " +
@@ -1487,13 +1429,6 @@ export const drawBoard = (
         footprintRadius,
         poolFillColor,
         moveSpriteName,
-        selectedUnitAnchor.col,
-        selectedUnitAnchor.row,
-        selectedUnitAnchor.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN,
-        selectedUnitAnchor.row * HEX_VERT_SPACING +
-          ((selectedUnitAnchor.col % 2) * HEX_VERT_SPACING) / 2 +
-          HEX_HEIGHT / 2 +
-          MARGIN,
         HEX_HORIZ_SPACING,
         HEX_WIDTH,
         HEX_HEIGHT,
