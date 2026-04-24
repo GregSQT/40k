@@ -1129,7 +1129,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           // Ne pas passer en ``advancePreview`` ici : le moteur n’envoie ni ``advance_destinations`` ni
           // ``valid_move_destinations_pool`` sur ce signal (seulement après ``action: "advance"``).
           // ``advancePreview`` sans pool → moveDestPoolSize 0, icône/LoS advance cassés, WebGL surchargé.
-          // Le joueur reste en ``select`` avec l’unité active ; l’icône Advance déclenche ``handleAdvance`` → ``advance``.
+          // L’icône Advance (overlay) suit ``canAdvance`` + ``active_shooting_unit`` ; pas de réécriture de mode ici.
           if (
             data.game_state?.phase === "shoot" &&
             data.result?.unitId &&

@@ -4090,13 +4090,10 @@ export default function Board({
             return !isAdjacentToEnemy;
           })();
 
-          const canStartAdvanceFromCurrentUiState = mode === "select";
-          if (
-            canAdvance &&
-            canStartAdvanceFromCurrentUiState &&
-            onAdvance &&
-            !hideAdvanceIconForTutorial
-          ) {
+          // Icône « lancer l’advance » : règle locale ``canAdvance`` (pas adjacent, pas déjà avancé, etc.).
+          // Masquée seulement pendant ``advancePreview`` (choix d’hex), pour éviter un second clic ``advance``.
+          const showStartAdvanceIcon = mode !== "advancePreview";
+          if (canAdvance && showStartAdvanceIcon && onAdvance && !hideAdvanceIconForTutorial) {
             addOverlayIcon(
               "/icons/Action_Logo/3-5 - Advance.png",
               centerX,
