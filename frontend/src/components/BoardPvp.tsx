@@ -12,7 +12,6 @@ import type {
   FightSubPhase,
   GameState,
   PlayerId,
-  Position,
   PrimaryObjectiveRule,
   ShootingPhaseState,
   TargetPreview,
@@ -22,12 +21,7 @@ import type {
 } from "../types/game";
 // import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from "../utils/boardClickHandler";
-import {
-  areUnitsAdjacent,
-  cubeDistance,
-  getHexLine,
-  offsetToCube,
-} from "../utils/gameHelpers";
+import { areUnitsAdjacent, cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import { getMaxRangedRange } from "../utils/weaponHelpers";
 import { drawBoard, type DrawBoardOptions } from "./BoardDisplay";
 import { renderUnit } from "./UnitRenderer";
@@ -1693,8 +1687,6 @@ export default function Board({
           }
         }
       }
-      const startX = hxX(startCol);
-      const startY = hxY(startCol, startRow);
       const previewIconX = container.position.x;
       const previewIconY = container.position.y;
       const hexSteps = hexDistOff(startCol, startRow, iconCol, iconRow);
@@ -1704,19 +1696,10 @@ export default function Board({
           ? `${distanceDisplay}" / ${chargeRoll}"`
           : `${distanceDisplay}"`;
 
-      if (!movePreviewGuideLineRef.current || movePreviewGuideLineRef.current.destroyed) {
-        const g = new PIXI.Graphics();
-        g.zIndex = 848;
-        g.eventMode = "none";
-        app.stage.addChild(g);
-        movePreviewGuideLineRef.current = g;
+      if (movePreviewGuideLineRef.current && !movePreviewGuideLineRef.current.destroyed) {
+        movePreviewGuideLineRef.current.clear();
+        movePreviewGuideLineRef.current.visible = false;
       }
-      const guideLine = movePreviewGuideLineRef.current;
-      guideLine.clear();
-      guideLine.lineStyle(2, 0xe2e8f0, 0.9);
-      guideLine.moveTo(startX, startY);
-      guideLine.lineTo(previewIconX, previewIconY);
-      guideLine.visible = true;
 
       const tipX = Math.round(rect.left + previewIconX / scaleX);
       const tipY = Math.round(rect.top + previewIconY / scaleY);
@@ -2837,47 +2820,6 @@ export default function Board({
       }
       const enforceBackendTargetsOnly = phase === "shoot";
       const backendTargetSet = shootPreviewBackendIds;
-      if (enforceBackendTargetsOnly && (!backendTargetSet || backendTargetSet.size === 0)) {
-        return;
-      }
-
-      const appendBackendTargetLines = () => {
-        if (!backendTargetSet) return;
-        const enemyById = new Map<string, Unit>();
-        for (const enemy of units) {
-          if (enemy.player !== source.unit.player) {
-            enemyById.set(String(enemy.id), enemy);
-          }
-        }
-        const wallHexSet = new Set<string>(effectiveWallHexes.map((wall: number[]) => `${wall[0]},${wall[1]}`));
-        for (const enemyId of backendTargetSet) {
-          const enemy = enemyById.get(String(enemyId));
-          if (!enemy) {
-            continue;
-          }
-          if (
-            unitsCacheForShootPreview !== undefined &&
-            !Object.hasOwn(unitsCacheForShootPreview, String(enemy.id))
-          ) {
-            continue;
-          }
-          const enemyKey = `${enemy.col},${enemy.row}`;
-          if (!attackCellSet.has(enemyKey)) {
-            attackCellSet.add(enemyKey);
-            attackCells.push({ col: enemy.col, row: enemy.row });
-          }
-          const pathHexes: Position[] = getHexLine(source.fromCol, source.fromRow, enemy.col, enemy.row);
-          for (const hex of pathHexes) {
-            if (hex.col === source.fromCol && hex.row === source.fromRow) continue;
-            const hexKey = `${hex.col},${hex.row}`;
-            if (wallHexSet.has(hexKey)) continue;
-            if (!attackCellSet.has(hexKey)) {
-              attackCellSet.add(hexKey);
-              attackCells.push({ col: hex.col, row: hex.row });
-            }
-          }
-        }
-      };
 
       if (isWasmReady()) {
         const visibleHexes = computeVisibleHexes(
@@ -2895,11 +2837,61 @@ export default function Board({
           coverRatio,
         );
         if (enforceBackendTargetsOnly) {
-          appendBackendTargetLines();
-          if (backendTargetSet) {
+          // Même cône LoS terrain que le survol move (WASM + pastilles clair/couvert), sans corridor hex tireur→cible.
+          const coverKeyDedupe = new Set<string>();
+          for (const cell of losPreview.terrainCoverCells) {
+            const key = `${cell.col},${cell.row}`;
+            coverKeyDedupe.add(key);
+            coverCells.push(cell);
+            losVisibilityRatioByHex.set(key, coverRatio * 0.99);
+          }
+          for (const cell of losPreview.clearCells) {
+            const key = `${cell.col},${cell.row}`;
+            if (!attackCellSet.has(key)) {
+              attackCellSet.add(key);
+              attackCells.push(cell);
+              losVisibilityRatioByHex.set(key, 1.0);
+            }
+          }
+          if (backendTargetSet && backendTargetSet.size > 0) {
             for (const [id, inCover] of Object.entries(losPreview.coverByUnitId)) {
               if (inCover && backendTargetSet.has(String(id))) {
                 coverTargets.add(id);
+              }
+            }
+          }
+          const visibleHexKeySet = losPreview.visibleHexKeySet;
+          for (const enemy of units) {
+            if (enemy.player === source.unit.player) continue;
+            if (
+              unitsCacheForShootPreview !== undefined &&
+              !Object.hasOwn(unitsCacheForShootPreview, String(enemy.id))
+            ) {
+              continue;
+            }
+            const eBase = typeof enemy.BASE_SIZE === "number" && enemy.BASE_SIZE > 1 ? enemy.BASE_SIZE : 0;
+            const scanR = eBase > 0 ? Math.ceil(eBase / 2) : 0;
+            let totalHexes = 0;
+            let visCount = 0;
+            for (let dc = -scanR; dc <= scanR; dc++) {
+              for (let dr = -scanR; dr <= scanR; dr++) {
+                if (hexDistOff(enemy.col, enemy.row, enemy.col + dc, enemy.row + dr) > scanR) continue;
+                totalHexes++;
+                if (visibleHexKeySet.has(`${enemy.col + dc},${enemy.row + dr}`)) visCount++;
+              }
+            }
+            const ratio = totalHexes > 0 ? visCount / totalHexes : 0;
+            if (ratio >= losVisibilityMinRatio && ratio < coverRatio) {
+              for (let dc = -scanR; dc <= scanR; dc++) {
+                for (let dr = -scanR; dr <= scanR; dr++) {
+                  if (hexDistOff(enemy.col, enemy.row, enemy.col + dc, enemy.row + dr) > scanR) continue;
+                  const ek = `${enemy.col + dc},${enemy.row + dr}`;
+                  if (visibleHexKeySet.has(ek) && !coverKeyDedupe.has(ek)) {
+                    coverKeyDedupe.add(ek);
+                    coverCells.push({ col: enemy.col + dc, row: enemy.row + dr });
+                    losVisibilityRatioByHex.set(ek, ratio);
+                  }
+                }
               }
             }
           }
@@ -2960,8 +2952,6 @@ export default function Board({
             }
           }
         }
-      } else {
-        appendBackendTargetLines();
       }
     };
 

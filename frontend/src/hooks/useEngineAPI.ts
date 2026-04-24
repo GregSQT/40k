@@ -27,6 +27,27 @@ const getMaxTurnsFromConfig = async (): Promise<number> => {
 };
 
 const API_BASE = "/api";
+
+/** fetch échoué (API arrêtée, mauvaise origine sans proxy Vite, etc.). */
+function formatApiConnectionError(err: unknown): string {
+  const raw =
+    err instanceof Error ? err.message : typeof err === "string" ? err : String(err);
+  const isNetworkish =
+    /networkerror|failed to fetch|load failed|network request failed/i.test(raw) ||
+    (err instanceof TypeError && /fetch|network/i.test(raw));
+  if (isNetworkish) {
+    return (
+      "Impossible de joindre l'API (réseau). Démarrez le backend : `python services/api_server.py` " +
+      "(http://localhost:5001), puis le frontend avec `npm run dev` dans `frontend/` (port 5175, proxy /api). " +
+      `Détail technique : ${raw}`
+    );
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return "Unknown error";
+}
+
 const RETREAT_ALERT_STORAGE_KEY = "retreatAlertEnabled";
 
 // Prevent duplicate AI turn calls
@@ -620,7 +641,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           throw new Error(data.error || "Failed to start game");
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error");
+        setError(formatApiConnectionError(err));
         gameInitialized.current = false; // Reset on error
       } finally {
         setLoading(false);
@@ -673,7 +694,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           throw new Error(data.error || "Failed to start game");
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error");
+        setError(formatApiConnectionError(err));
       } finally {
         if (!skipLoading) {
           setLoading(false);
@@ -722,7 +743,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setGameState(data.game_state ?? null);
       setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      setError(formatApiConnectionError(err));
       throw err;
     } finally {
       setLoading(false);
@@ -768,7 +789,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setGameState(data.game_state ?? null);
       setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      setError(formatApiConnectionError(err));
       throw err;
     } finally {
       setLoading(false);
@@ -4706,7 +4727,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           await new Promise((resolve) => setTimeout(resolve, 150));
         }
       } catch (err) {
-        setError(`AI turn failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+        setError(`AI turn failed: ${formatApiConnectionError(err)}`);
       } finally {
         aiTurnInProgress = false;
       }
