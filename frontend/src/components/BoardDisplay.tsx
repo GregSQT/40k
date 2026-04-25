@@ -1142,11 +1142,25 @@ export const drawBoard = (
       return s.size > 0 ? s : null;
     })();
 
-    /** Disques d’ancre : ``moveDestPoolRef`` en priorité (comme ``chargeDestPoolRef``), puis state. */
+    /**
+     * Clic droit / désélection : ``syncMoveDestinationPoolRefs`` vide la ref tout de suite,
+     * mais ``valid_move_destinations_pool`` peut rester dans le JSON jusqu’à la réponse API.
+     * Sans ce garde-fou, ``movePoolForDiskDraw`` retombait sur le pool state → preview fantôme.
+     */
+    const allowMovePoolFallbackFromGameState =
+      selectedUnitId != null ||
+      mode === "advancePreview" ||
+      (interactionPhase === "shoot" && pendingMoveAfterShooting) ||
+      ((interactionPhase === "move" || interactionPhase === "command") &&
+        mode === "movePreview");
+
+    /** Disques d’ancre : ``moveDestPoolRef`` en priorité (comme ``chargeDestPoolRef``), puis state si autorisé. */
     const movePoolForDiskDraw: Set<string> | null =
       moveDestPoolRef?.current && moveDestPoolRef.current.size > 0
         ? moveDestPoolRef.current
-        : anchorsFromStatePool && anchorsFromStatePool.size > 0
+        : allowMovePoolFallbackFromGameState &&
+            anchorsFromStatePool &&
+            anchorsFromStatePool.size > 0
           ? anchorsFromStatePool
           : null;
 
