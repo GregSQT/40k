@@ -4588,6 +4588,19 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     # AI_SHOOT.md action routing
     if action_type == "activate_unit":
+        active_unit_id = game_state.get("active_shooting_unit")
+        if active_unit_id is not None and str(active_unit_id) != unit_id_str:
+            active_unit = _get_unit_by_id(game_state, str(active_unit_id))
+            if active_unit is None:
+                raise KeyError(f"active_shooting_unit {active_unit_id} missing from game_state['units']")
+            if _shooting_activation_has_committed_action(game_state, active_unit):
+                return _keep_committed_shooting_activation_waiting(
+                    game_state,
+                    active_unit,
+                    "cannot_activate_other_unit_after_committed_shooting_action",
+                )
+            del game_state["active_shooting_unit"]
+
         result = shooting_unit_activation_start(game_state, unit_id)
         if result.get("success"):
             # Normalize backend contract: allow_advance implies player can act (advance) now.
@@ -4942,7 +4955,7 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
 
         elif click_target == "friendly_unit" and target_id:
             _click_branch = "friendly_unit_switch"
-            # Left click on another unit in pool - switch units (only if current unit hasn't shot)
+            # Left click on another unit in pool - switch only before shot/advance.
             if "shoot_activation_pool" not in game_state:
                 raise KeyError("game_state missing required 'shoot_activation_pool' field")
             target_id_str = str(target_id)
@@ -4950,29 +4963,29 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
             if target_id_str in pool_ids:
                 current_unit = _get_unit_by_id(game_state, unit_id)
                 if current_unit:
-                    has_shot = _unit_has_shot_with_any_weapon(current_unit)
-                    if has_shot:
-                        # Unit has already shot - cannot switch (must finish shooting)
-                        return True, {
-                            "action": "no_effect",
-                            "unitId": unit_id,
-                            "error": "cannot_switch_after_shooting",
-                        }
+                    if _shooting_activation_has_committed_action(game_state, current_unit):
+                        return _keep_committed_shooting_activation_waiting(
+                            game_state,
+                            current_unit,
+                            "cannot_switch_after_committed_shooting_action",
+                        )
                 return _handle_unit_switch_with_context(game_state, unit_id, target_id_str, config)
             return False, {"error": "unit_not_in_pool", "targetId": target_id_str}
 
         elif click_target == "active_unit":
             _click_branch = "active_unit"
-            # Left click on active unit - behavior depends on whether unit has shot
+            # Left click on active unit postpones only before shot/advance.
             unit = _get_unit_by_id(game_state, unit_id)
             if not unit:
                 return False, {"error": "unit_not_found", "unitId": unit_id}
-            has_shot = _unit_has_shot_with_any_weapon(unit)
-            if has_shot:
-                # Unit has already shot - no effect (must finish shooting)
-                return True, {"action": "no_effect", "unitId": unit_id}
+            if _shooting_activation_has_committed_action(game_state, unit):
+                return _keep_committed_shooting_activation_waiting(
+                    game_state,
+                    unit,
+                    "cannot_postpone_after_committed_shooting_action",
+                )
             else:
-                # Unit has not shot yet - postpone (deselect, return to pool)
+                # Unit has not shot or advanced yet - postpone (deselect, return to pool)
                 if "active_shooting_unit" in game_state:
                     del game_state["active_shooting_unit"]
                 # Auto-select next unit only for AI-controlled player.
@@ -4992,12 +5005,11 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
         else:
             _click_branch = "elsewhere"
             # STEP 5A/5B: Postpone/Click elsewhere (Human only)
-            # Check if unit has shot with ANY weapon?
+            # Postpone only while no shot or advance has been consumed.
             unit = _get_unit_by_id(game_state, unit_id)
             if not unit:
                 return False, {"error": "unit_not_found", "unitId": unit_id}
-            has_shot = _unit_has_shot_with_any_weapon(unit)
-            if not has_shot:
+            if not _shooting_activation_has_committed_action(game_state, unit):
                 # NO -> POSTPONE_ACTIVATION() -> UNIT_ACTIVABLE_CHECK
                 # Unit is NOT removed from shoot_activation_pool (can be re-activated later)
                 # Remove weapon selection icon from UI (handled by frontend)
@@ -5019,8 +5031,11 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
                     "clear_selected_unit": True
                 }
             else:
-                # YES -> Do not end activation automatically (allow user to click active unit to confirm)
-                return True, {"action": "continue_selection", "context": "elsewhere_clicked"}
+                return _keep_committed_shooting_activation_waiting(
+                    game_state,
+                    unit,
+                    "cannot_postpone_after_committed_shooting_action",
+                )
     finally:
         if _perf_click and _t_click0 is not None:
             append_perf_timing_line(
@@ -6795,6 +6810,49 @@ def _unit_has_shot_with_any_weapon(unit: Dict[str, Any]) -> bool:
             return True
     return False
 
+
+def _shooting_activation_has_committed_action(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """
+    A shooting activation is committed after the first shot or after an advance.
+    Once committed, it cannot be postponed back into shoot_activation_pool.
+    """
+    unit_id_str = str(require_key(unit, "id"))
+    if _unit_has_shot_with_any_weapon(unit):
+        return True
+    return unit_id_str in require_key(game_state, "units_advanced")
+
+
+def _keep_committed_shooting_activation_waiting(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    error_code: str,
+) -> Tuple[bool, Dict[str, Any]]:
+    """
+    Preserve the active shooting selection after an invalid postpone/switch attempt.
+
+    This keeps the backend HP blink contract intact: if the active unit still has target
+    ids in its pool, the response includes waiting_for_player + start_blinking +
+    blinking_units for that same active unit.
+    """
+    unit_id = require_key(unit, "id")
+    game_state["active_shooting_unit"] = str(unit_id)
+    valid_targets = require_key(unit, "valid_target_pool")
+    response: Dict[str, Any] = {
+        "action": "no_effect",
+        "unitId": unit_id,
+        "error": error_code,
+        "waiting_for_player": True,
+        "phase": "shoot",
+    }
+    if valid_targets:
+        response["valid_targets"] = valid_targets
+        response["blinking_units"] = valid_targets
+        response["start_blinking"] = True
+    if "available_weapons" in unit:
+        response["available_weapons"] = unit["available_weapons"]
+    return True, response
+
+
 def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
     Check if unit is engaged (within engagement zone of any enemy).
@@ -7280,6 +7338,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 "actually_moved": actually_moved,
                 "blinking_units": valid_target_pool,
                 "start_blinking": True,
+                "waiting_for_player": True,
                 "available_weapons": available_weapons
             }
         else:
