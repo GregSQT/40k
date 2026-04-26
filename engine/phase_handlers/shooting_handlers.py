@@ -3673,6 +3673,8 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
         del unit["_rapid_fire_bonus_shot_current"]
     if "_rapid_fire_bonus_applied_by_weapon" in unit:
         del unit["_rapid_fire_bonus_applied_by_weapon"]
+    if "advance_range" in unit:
+        del unit["advance_range"]
     unit["SHOOT_LEFT"] = 0
 
 def _get_shooting_context(game_state: Dict[str, Any], unit: Dict[str, Any]) -> str:
@@ -4816,8 +4818,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             # YES -> end_activation(ACTION, 1, SHOOTING, SHOOTING, 1)
             success, result = _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
         else:
-            # Check if unit has advanced (ADVANCED_SHOOTING_ACTION_SELECTION)
-            has_advanced = unit_id_str in require_key(game_state, "units_advanced")
+            # Check if unit has advanced or is cancelling an advance selection.
+            has_advanced = _shooting_activation_has_started_or_completed_advance(game_state, unit)
             if has_advanced:
                 # NO -> Unit has not shot yet (only advanced) -> end_activation(ACTION, 1, ADVANCE, SHOOTING, 1)
                 success, result = _handle_shooting_end_activation(game_state, unit, ACTION, 1, ADVANCE, SHOOTING, 1)
@@ -4851,8 +4853,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             # YES -> end_activation(ACTION, 1, SHOOTING, SHOOTING, 1)
             success, result = _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
         else:
-            # Check if unit has advanced (ADVANCED_SHOOTING_ACTION_SELECTION)
-            has_advanced = unit_id_str in require_key(game_state, "units_advanced")
+            # Check if unit has advanced or is cancelling an advance selection.
+            has_advanced = _shooting_activation_has_started_or_completed_advance(game_state, unit)
             if has_advanced:
                 # NO -> Unit has not shot yet (only advanced) -> end_activation(ACTION, 1, ADVANCE, SHOOTING, 1)
                 success, result = _handle_shooting_end_activation(game_state, unit, ACTION, 1, ADVANCE, SHOOTING, 1)
@@ -6816,10 +6818,25 @@ def _shooting_activation_has_committed_action(game_state: Dict[str, Any], unit: 
     A shooting activation is committed after the first shot or after an advance.
     Once committed, it cannot be postponed back into shoot_activation_pool.
     """
-    unit_id_str = str(require_key(unit, "id"))
+    if _shooting_activation_has_started_or_completed_advance(game_state, unit):
+        return True
     if _unit_has_shot_with_any_weapon(unit):
         return True
-    return unit_id_str in require_key(game_state, "units_advanced")
+    return False
+
+
+def _shooting_activation_has_started_or_completed_advance(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+) -> bool:
+    """
+    True from the advance roll until the shooting activation is closed.
+    Cancelling destination selection still consumes the advance action.
+    """
+    unit_id_str = str(require_key(unit, "id"))
+    if unit_id_str in require_key(game_state, "units_advanced"):
+        return True
+    return "advance_range" in unit and unit["advance_range"] is not None
 
 
 def _keep_committed_shooting_activation_waiting(

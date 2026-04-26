@@ -2587,28 +2587,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           }
           const shootActivationPool = gameState.shoot_activation_pool.map((id) => parseInt(id, 10));
 
-          if (shootActivationPool.includes(numericUnitId)) {
-            if (activationInProgressRef.current) {
-              return;
-            }
-            activationInProgressRef.current = true;
-            setSelectedUnitId(numericUnitId);
-            setActivationPendingUnitId(numericUnitId);
-            try {
-              await executeAction({
-                action: "activate_unit",
-                unitId: numericUnitId.toString(),
-              });
-            } finally {
-              activationInProgressRef.current = false;
-              setActivationPendingUnitId(null);
-            }
-            return;
-          } else if (gameState.active_shooting_unit) {
+          if (
+            gameState.active_shooting_unit &&
+            String(gameState.active_shooting_unit) !== String(numericUnitId)
+          ) {
             if (shootTargetClickInProgressRef.current) {
               return;
             }
-            // Clicking on target when unit is active
+            // Any click while a shooting unit is active belongs to that activation.
             const clickTarget = determineActivationClickTarget("shoot", numericUnitId, gameState);
             const payload: Record<string, unknown> = {
               action: "left_click",
@@ -2628,6 +2614,25 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               await executeAction(payload);
             } finally {
               shootTargetClickInProgressRef.current = false;
+            }
+            return;
+          }
+
+          if (shootActivationPool.includes(numericUnitId)) {
+            if (activationInProgressRef.current) {
+              return;
+            }
+            activationInProgressRef.current = true;
+            setSelectedUnitId(numericUnitId);
+            setActivationPendingUnitId(numericUnitId);
+            try {
+              await executeAction({
+                action: "activate_unit",
+                unitId: numericUnitId.toString(),
+              });
+            } finally {
+              activationInProgressRef.current = false;
+              setActivationPendingUnitId(null);
             }
             return;
           }
