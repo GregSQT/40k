@@ -57,7 +57,7 @@
       "objective_zone_center_alpha": 0.45,
       "objective_texture": "/textures/wall3.webp",
       "objective_texture_alpha": 0.85,
-      "resolution": "auto",
+      "resolution": "3",
       "autoDensity": true,
       "antialias": true,
       "forceCanvas": true,
