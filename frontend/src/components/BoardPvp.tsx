@@ -872,9 +872,13 @@ export default function Board({
     if (!boardConfig || !showHexCoordinates) { setHexCoordTooltip(null); return; }
     const canvas = e.currentTarget.querySelector("canvas");
     if (!canvas) return;
+    const app = appRef.current;
+    if (!app) return;
     const rect = canvas.getBoundingClientRect();
-    const px = e.clientX - rect.left;
-    const py = e.clientY - rect.top;
+    const scaleX = (app.renderer.width / app.renderer.resolution) / rect.width;
+    const scaleY = (app.renderer.height / app.renderer.resolution) / rect.height;
+    const px = (e.clientX - rect.left) * scaleX;
+    const py = (e.clientY - rect.top) * scaleY;
     const HR = boardConfig.hex_radius;
     const M = boardConfig.margin;
     const HW = 1.5 * HR;
@@ -1389,6 +1393,7 @@ export default function Board({
     selectedUnitId,
     unitsBoardLayoutKey,
     boardConfig,
+    boardZoom,
     gameConfig,
     wallHexesOverride,
     wasmLosReadyVersion,
@@ -2516,6 +2521,22 @@ export default function Board({
       }
       return { width: canvasWidth, height: canvasHeight };
     });
+    const configuredResolution = displayConfig.resolution;
+    let baseRenderResolution: number;
+    if (configuredResolution === "auto") {
+      if (typeof window.devicePixelRatio !== "number" || !Number.isFinite(window.devicePixelRatio)) {
+        throw new Error("Missing required browser value: window.devicePixelRatio");
+      }
+      baseRenderResolution = window.devicePixelRatio;
+    } else if (typeof configuredResolution === "number") {
+      baseRenderResolution = configuredResolution;
+    } else {
+      throw new Error("Missing required configuration value: boardConfig.display.resolution");
+    }
+    if (!Number.isFinite(baseRenderResolution) || baseRenderResolution <= 0) {
+      throw new Error("Invalid configuration value: boardConfig.display.resolution");
+    }
+    const renderResolution = baseRenderResolution * boardZoom;
 
     // ✅ OPTIMIZED PIXI CONFIG - NO FALLBACKS, RAISE ERRORS IF MISSING
     const pixiConfig = {
@@ -2525,12 +2546,7 @@ export default function Board({
       backgroundAlpha: 1, // Ensure background is opaque
       antialias: displayConfig.antialias!,
       powerPreference: "high-performance" as WebGLPowerPreference,
-      resolution:
-        String(displayConfig.resolution) === "auto"
-          ? window.devicePixelRatio || 1
-          : typeof displayConfig.resolution === "number"
-            ? displayConfig.resolution
-            : 1,
+      resolution: renderResolution,
       autoDensity: displayConfig.autoDensity!,
     };
 
@@ -2546,6 +2562,7 @@ export default function Board({
       appRef.current = app;
       app.stage.sortableChildren = true;
     } else {
+      app.renderer.resolution = renderResolution;
       app.renderer.resize(canvasWidth, canvasHeight);
     }
     app.stage.position.set(canvasPaddingX, canvasPaddingTop);
@@ -2584,7 +2601,8 @@ export default function Board({
     const canvas = app.view as HTMLCanvasElement;
     canvas.style.display = "block";
     // Removed maxWidth constraint to allow full board size
-    canvas.style.height = "auto";
+    canvas.style.width = `${canvasWidth}px`;
+    canvas.style.height = `${canvasHeight}px`;
     canvas.style.border = displayConfig?.canvas_border ?? "1px solid #333";
 
     // Clear container and append canvas - EXACT BOARDREPLAY MATCH
@@ -4405,8 +4423,8 @@ export default function Board({
 
       dragPointerMove = (e: PointerEvent) => {
         const rect = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
+        const scaleX = (app.renderer.width / app.renderer.resolution) / rect.width;
+        const scaleY = (app.renderer.height / app.renderer.resolution) / rect.height;
         const px = (e.clientX - rect.left) * scaleX;
         const py = (e.clientY - rect.top) * scaleY;
         const hex = pixelToHex(px, py, HEX_RADIUS, MARGIN, BOARD_COLS, BOARD_ROWS);
@@ -4436,8 +4454,8 @@ export default function Board({
       dragPointerUp = (e: PointerEvent) => {
         if (e.button !== 0) return;
         const rect = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
+        const scaleX = (app.renderer.width / app.renderer.resolution) / rect.width;
+        const scaleY = (app.renderer.height / app.renderer.resolution) / rect.height;
         const px = (e.clientX - rect.left) * scaleX;
         const py = (e.clientY - rect.top) * scaleY;
         const hex = pixelToHex(px, py, HEX_RADIUS, MARGIN, BOARD_COLS, BOARD_ROWS);
@@ -4487,8 +4505,8 @@ export default function Board({
 
         dragPointerMove = (e: PointerEvent) => {
           const rect = canvas.getBoundingClientRect();
-          const scaleX = canvas.width / rect.width;
-          const scaleY = canvas.height / rect.height;
+          const scaleX = (app.renderer.width / app.renderer.resolution) / rect.width;
+          const scaleY = (app.renderer.height / app.renderer.resolution) / rect.height;
           const px = (e.clientX - rect.left) * scaleX;
           const py = (e.clientY - rect.top) * scaleY;
           const hex = pixelToHex(px, py, HEX_RADIUS, MARGIN, BOARD_COLS, BOARD_ROWS);
@@ -4556,6 +4574,7 @@ export default function Board({
     mode,
     phase,
     boardConfig,
+    boardZoom,
     gameConfig,
     gameConfig?.game_rules,
     loading,
