@@ -367,6 +367,16 @@ type BoardProps = {
 const HEX_STEPS_PER_INCH_DISPLAY = 10;
 /** Au-dessus de tout le reste du stage (unités 2000, drag 9000, UI / popups ~10000). */
 const MEASURE_GUIDE_LINE_Z_INDEX = 15000;
+const BOARD_ZOOM_DEFAULT = 1;
+const BOARD_ZOOM_MIN = 0.5;
+const BOARD_ZOOM_MAX = 2.5;
+const BOARD_ZOOM_SLIDER_STEP = 0.05;
+const BOARD_ZOOM_WHEEL_IN_FACTOR = 1.1;
+const BOARD_ZOOM_WHEEL_OUT_FACTOR = 1 / BOARD_ZOOM_WHEEL_IN_FACTOR;
+
+function clampBoardZoom(value: number): number {
+  return Math.min(BOARD_ZOOM_MAX, Math.max(BOARD_ZOOM_MIN, value));
+}
 
 /** Empreintes depuis ``units_cache`` (API) pour aligner l’UI sur le moteur (charge : hex le plus proche de la cible). */
 function parseOccupiedHexesFromCacheEntry(entry: unknown): Array<{ col: number; row: number }> {
@@ -599,8 +609,16 @@ export default function Board({
 
   // ✅ HOOK 1: useRef - ALWAYS called first
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const boardViewportRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<PIXI.Application | null>(null);
+  const boardPanStartRef = useRef<{
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    scrollLeft: number;
+    scrollTop: number;
+  } | null>(null);
   /** Replay / Board sans API : même ref que ``moveDestPoolRef`` passée par ``useEngineAPI``. */
   const internalMoveDestPoolRef = useRef<Set<string>>(new Set());
   const resolvedMoveDestPoolRef = moveDestPoolRef ?? internalMoveDestPoolRef;
@@ -741,6 +759,114 @@ export default function Board({
   const [hexCoordTooltip, setHexCoordTooltip] = useState<{
     visible: boolean; x: number; y: number; col: number; row: number;
   } | null>(null);
+  const [boardZoom, setBoardZoom] = useState(BOARD_ZOOM_DEFAULT);
+  const [zoomControlsOpen, setZoomControlsOpen] = useState(false);
+  const [boardViewportSize, setBoardViewportSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+  const [isBoardPanning, setIsBoardPanning] = useState(false);
+
+  const zoomPercent = Math.round(boardZoom * 100);
+  const scaledBoardWidth = boardViewportSize ? boardViewportSize.width * boardZoom : undefined;
+  const scaledBoardHeight = boardViewportSize ? boardViewportSize.height * boardZoom : undefined;
+
+  const applyBoardZoom = useCallback(
+    (
+      resolveZoom: (currentZoom: number) => number,
+      anchorClient?: { x: number; y: number }
+    ) => {
+      setBoardZoom((currentZoom) => {
+        const nextZoom = clampBoardZoom(resolveZoom(currentZoom));
+        if (nextZoom === currentZoom) return currentZoom;
+
+        const viewport = boardViewportRef.current;
+        if (viewport && anchorClient) {
+          const rect = viewport.getBoundingClientRect();
+          const anchorX = anchorClient.x - rect.left;
+          const anchorY = anchorClient.y - rect.top;
+          const contentX = (viewport.scrollLeft + anchorX) / currentZoom;
+          const contentY = (viewport.scrollTop + anchorY) / currentZoom;
+
+          requestAnimationFrame(() => {
+            viewport.scrollLeft = contentX * nextZoom - anchorX;
+            viewport.scrollTop = contentY * nextZoom - anchorY;
+          });
+        }
+
+        return nextZoom;
+      });
+    },
+    []
+  );
+
+  const handleBoardWheel = useCallback(
+    (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const zoomFactor =
+        e.deltaY < 0 ? BOARD_ZOOM_WHEEL_IN_FACTOR : BOARD_ZOOM_WHEEL_OUT_FACTOR;
+      applyBoardZoom((currentZoom) => currentZoom * zoomFactor, {
+        x: e.clientX,
+        y: e.clientY,
+      });
+    },
+    [applyBoardZoom]
+  );
+
+  useEffect(() => {
+    const viewport = boardViewportRef.current;
+    if (!viewport) return;
+
+    viewport.addEventListener("wheel", handleBoardWheel, { passive: false });
+    return () => {
+      viewport.removeEventListener("wheel", handleBoardWheel);
+    };
+  }, [handleBoardWheel]);
+
+  const handleBoardPanStart = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const viewport = boardViewportRef.current;
+      if (e.button !== 0 || !viewport || boardZoom <= BOARD_ZOOM_DEFAULT) return;
+
+      boardPanStartRef.current = {
+        pointerId: e.pointerId,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        scrollLeft: viewport.scrollLeft,
+        scrollTop: viewport.scrollTop,
+      };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setIsBoardPanning(true);
+    },
+    [boardZoom]
+  );
+
+  const handleBoardPanMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const panStart = boardPanStartRef.current;
+    const viewport = boardViewportRef.current;
+    if (!panStart || !viewport || panStart.pointerId !== e.pointerId) return;
+
+    e.preventDefault();
+    viewport.scrollLeft = panStart.scrollLeft - (e.clientX - panStart.clientX);
+    viewport.scrollTop = panStart.scrollTop - (e.clientY - panStart.clientY);
+  }, []);
+
+  const handleBoardPanEnd = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const panStart = boardPanStartRef.current;
+    if (!panStart || panStart.pointerId !== e.pointerId) return;
+
+    boardPanStartRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    setIsBoardPanning(false);
+  }, []);
+
+  const handleBoardZoomReset = useCallback(() => {
+    applyBoardZoom(() => BOARD_ZOOM_DEFAULT);
+    boardViewportRef.current?.scrollTo({ left: 0, top: 0 });
+  }, [applyBoardZoom]);
 
   const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!boardConfig || !showHexCoordinates) { setHexCoordTooltip(null); return; }
@@ -2384,6 +2510,12 @@ export default function Board({
     const canvasPaddingBottom = 0;
     const canvasWidth = gridWidth + 2 * MARGIN + 2 * canvasPaddingX;
     const canvasHeight = gridHeight + 2 * MARGIN + canvasPaddingTop + canvasPaddingBottom;
+    setBoardViewportSize((currentSize) => {
+      if (currentSize?.width === canvasWidth && currentSize.height === canvasHeight) {
+        return currentSize;
+      }
+      return { width: canvasWidth, height: canvasHeight };
+    });
 
     // ✅ OPTIMIZED PIXI CONFIG - NO FALLBACKS, RAISE ERRORS IF MISSING
     const pixiConfig = {
@@ -4583,38 +4715,173 @@ export default function Board({
   return (
     <div>
       <div
-        aria-busy={activationPendingUnitId != null}
         style={{
           position: "relative",
           display: "inline-block",
-          lineHeight: 0,
-          overflow: "visible",
-          /* ``progress`` : activité en cours sans le curseur sablier système (``wait``). */
-          cursor: activationPendingUnitId != null ? "progress" : undefined,
         }}
       >
         <div
-          ref={canvasContainerRef}
-          onMouseMove={handleCanvasMouseMove}
-          onMouseLeave={() => {
-            setHexCoordTooltip(null);
-            setUnitHoverTooltip(null);
-            setMovePreviewDistanceTooltip(null);
-            setMeasureDistanceTooltip(null);
-          }}
-        />
-        <div
-          ref={overlayRef}
           style={{
             position: "absolute",
-            left: 0,
-            top: 0,
-            width: "100%",
-            height: "100%",
-            pointerEvents: "none",
-            overflow: "visible",
+            top: 8,
+            right: 8,
+            zIndex: 1600,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: 6,
+            lineHeight: 1,
           }}
-        />
+        >
+          <button
+            type="button"
+            aria-label="Regler le zoom du plateau"
+            aria-expanded={zoomControlsOpen}
+            onClick={() => setZoomControlsOpen((open) => !open)}
+            style={{
+              border: "1px solid rgba(255,255,255,0.28)",
+              borderRadius: 6,
+              background: "rgba(17,24,39,0.88)",
+              color: "#e5e7eb",
+              cursor: "pointer",
+              fontSize: 18,
+              height: 32,
+              width: 32,
+            }}
+          >
+            🔍
+          </button>
+          {zoomControlsOpen && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 7,
+                padding: "9px 8px",
+                border: "1px solid rgba(255,255,255,0.22)",
+                borderRadius: 8,
+                background: "rgba(17,24,39,0.94)",
+                color: "#e5e7eb",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+                lineHeight: 1,
+              }}
+            >
+              <input
+                aria-label="Zoom du plateau"
+                type="range"
+                min={BOARD_ZOOM_MIN}
+                max={BOARD_ZOOM_MAX}
+                step={BOARD_ZOOM_SLIDER_STEP}
+                value={boardZoom}
+                onChange={(e) => {
+                  const nextZoom = Number(e.currentTarget.value);
+                  applyBoardZoom(() => nextZoom);
+                }}
+                style={{
+                  width: 22,
+                  height: 140,
+                  writingMode: "vertical-lr",
+                  direction: "rtl",
+                }}
+              />
+              <span style={{ minWidth: 42, fontSize: 12, textAlign: "center" }}>
+                {zoomPercent}%
+              </span>
+              <button
+                type="button"
+                onClick={handleBoardZoomReset}
+                style={{
+                  border: "1px solid rgba(255,255,255,0.24)",
+                  borderRadius: 5,
+                  background: "rgba(255,255,255,0.08)",
+                  color: "#e5e7eb",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  padding: "4px 7px",
+                }}
+              >
+                Reset
+              </button>
+            </div>
+          )}
+        </div>
+        <div
+          ref={boardViewportRef}
+          onPointerDown={handleBoardPanStart}
+          onPointerMove={handleBoardPanMove}
+          onPointerUp={handleBoardPanEnd}
+          onPointerCancel={handleBoardPanEnd}
+          style={{
+            width: boardViewportSize ? `${boardViewportSize.width}px` : undefined,
+            height: boardViewportSize ? `${boardViewportSize.height}px` : undefined,
+            maxWidth: "100%",
+            maxHeight: "calc(100vh - 40px)",
+            overflow: "auto",
+            lineHeight: 0,
+            scrollbarGutter: "stable",
+            cursor:
+              boardZoom > BOARD_ZOOM_DEFAULT
+                ? isBoardPanning
+                  ? "grabbing"
+                  : "grab"
+                : undefined,
+          }}
+        >
+          <div
+            style={{
+              position: "relative",
+              width: scaledBoardWidth ? `${scaledBoardWidth}px` : undefined,
+              height: scaledBoardHeight ? `${scaledBoardHeight}px` : undefined,
+              minWidth: boardViewportSize ? `${boardViewportSize.width}px` : undefined,
+              minHeight: boardViewportSize ? `${boardViewportSize.height}px` : undefined,
+            }}
+          >
+            <div
+              aria-busy={activationPendingUnitId != null}
+              style={{
+                position: "relative",
+                display: "inline-block",
+                lineHeight: 0,
+                overflow: "visible",
+                transform: `scale(${boardZoom})`,
+                transformOrigin: "top left",
+                /* ``progress`` : activité en cours sans le curseur sablier système (``wait``). */
+                cursor:
+                  activationPendingUnitId != null
+                    ? "progress"
+                    : isBoardPanning
+                      ? "grabbing"
+                      : boardZoom > BOARD_ZOOM_DEFAULT
+                        ? "grab"
+                        : undefined,
+              }}
+            >
+              <div
+                ref={canvasContainerRef}
+                onMouseMove={handleCanvasMouseMove}
+                onMouseLeave={() => {
+                  setHexCoordTooltip(null);
+                  setUnitHoverTooltip(null);
+                  setMovePreviewDistanceTooltip(null);
+                  setMeasureDistanceTooltip(null);
+                }}
+              />
+              <div
+                ref={overlayRef}
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: 0,
+                  width: "100%",
+                  height: "100%",
+                  pointerEvents: "none",
+                  overflow: "visible",
+                }}
+              />
+            </div>
+          </div>
+        </div>
         {unitHoverTooltip?.visible &&
           typeof document !== "undefined" &&
           createPortal(
