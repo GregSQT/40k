@@ -744,7 +744,7 @@ function BoardColumnWithTutorial({
   );
 }
 
-const GAME_LOG_LINE_HEIGHT_PX = 28;
+const GAME_LOG_LINE_HEIGHT_PX = 34;
 
 /** GameLog avec rappel du rect de la dernière ligne pour halo tutoriel 1-21 ; en 1-24 agrandit d'une ligne par tir. En 1-25 halo sur la ligne du haut (header) uniquement. */
 function GameLogWithTutorialSpotlight(
@@ -1910,9 +1910,6 @@ export const BoardWithAPI: React.FC = () => {
     }
   }, [apiProps.advanceWarningPopup]);
 
-  // Calculate available height for GameLog dynamically
-  const [logAvailableHeight, setLogAvailableHeight] = useState(220);
-
   // Track AI processing with ref to avoid re-render loops
   const isAIProcessingRef = useRef(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -2213,58 +2210,16 @@ export const BoardWithAPI: React.FC = () => {
     }
   }, [apiProps.gameState, apiProps.fightSubPhase, lastProcessedTurn]);
 
-  // Calculate available height for GameLog dynamically
-  useEffect(() => {
-    // Wait for DOM to be fully rendered before measuring
-    setTimeout(() => {
-      const turnPhaseTracker = document.querySelector(".turn-phase-tracker-right");
-      const allTables = document.querySelectorAll(".unit-status-table-container");
-      const gameLogHeader =
-        document.querySelector(".game-log__header") ||
-        document.querySelector('[class*="game-log"]');
-
-      if (!turnPhaseTracker || allTables.length < 2 || !gameLogHeader) {
-        setLogAvailableHeight(220);
-        return;
-      }
-
-      const player1Table = allTables[0];
-      const player2Table = allTables[1];
-
-      // Get actual heights from DOM measurements
-      const turnPhaseHeight = turnPhaseTracker.getBoundingClientRect().height;
-      const player1Height = player1Table.getBoundingClientRect().height;
-      const player2Height = player2Table.getBoundingClientRect().height;
-      const gameLogHeaderHeight = gameLogHeader.getBoundingClientRect().height;
-
-      // Calculate available space based purely on actual measurements
-      const viewportHeight = window.innerHeight;
-      const appContainer = document.querySelector(".app-container") || document.body;
-      const appMargins = viewportHeight - appContainer.getBoundingClientRect().height;
-      const usedSpace = turnPhaseHeight + player1Height + player2Height + gameLogHeaderHeight;
-      const availableForLogEntries = viewportHeight - usedSpace - appMargins;
-
-      const sampleLogEntry = document.querySelector(".game-log-entry");
-      if (!sampleLogEntry) {
-        setLogAvailableHeight(220);
-        return;
-      }
-      setLogAvailableHeight(availableForLogEntries);
-    }, 100); // Wait 100ms for DOM to render
-  }, []);
-
   const illustrationPreviewUnit = useMemo(() => {
-    if (illustrationPreviewUnitId === null) {
-      return null;
-    }
+    const effectiveIllustrationUnitId = illustrationPreviewUnitId ?? apiProps.selectedUnitId ?? null;
     const statusUnits = apiProps.gameState?.units;
-    if (!statusUnits) {
+    if (effectiveIllustrationUnitId === null || !statusUnits) {
       return null;
     }
     return (
-      statusUnits.find((unit) => String(unit.id) === String(illustrationPreviewUnitId)) ?? null
+      statusUnits.find((unit) => String(unit.id) === String(effectiveIllustrationUnitId)) ?? null
     );
-  }, [apiProps.gameState?.units, illustrationPreviewUnitId]);
+  }, [apiProps.gameState?.units, apiProps.selectedUnitId, illustrationPreviewUnitId]);
 
   if (apiProps.loading) {
     return (
@@ -2931,65 +2886,59 @@ export const BoardWithAPI: React.FC = () => {
         </div>
       )}
 
-      <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
-        <div className="unit-status-with-illustration">
-          {illustrationPreviewUnit?.player === 1
-            ? renderUnitIllustrationPreview(illustrationPreviewUnit)
-            : null}
-          <UnitStatusTablePlayer1WithTutorial
-            units={apiProps.gameState?.units ?? []}
-            player={1}
-            playerTypes={apiProps.gameState?.player_types}
-            selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
-            guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
-            clickedUnitId={clickedUnitId}
-            onSelectUnit={(unitId) => {
-              apiProps.onSelectUnit(unitId);
-              setClickedUnitId(null);
-            }}
-            gameMode={gameMode}
-            victoryPoints={getVictoryPointsForPlayer(1)}
-            onCollapseChange={setPlayer1Collapsed}
-            detailPreviewUnitId={
-              illustrationPreviewUnit?.player === 1 ? illustrationPreviewUnit.id : null
-            }
-          />
+      {/* Game Log Component */}
+      <ErrorBoundary fallback={<div>Failed to load game log</div>}>
+        <div className="game-log-with-illustration">
+          {illustrationPreviewUnit ? (
+            renderUnitIllustrationPreview(illustrationPreviewUnit)
+          ) : (
+            <aside className="unit-illustration-preview" aria-hidden="true" />
+          )}
+          <div className="game-log-with-illustration__log">
+            <GameLogWithTutorialSpotlight
+              events={gameLog.events}
+              currentTurn={apiProps.gameState?.currentTurn ?? 1}
+              debugMode={settings.showDebug}
+            />
+          </div>
         </div>
+      </ErrorBoundary>
+
+      <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
+        <UnitStatusTablePlayer1WithTutorial
+          units={apiProps.gameState?.units ?? []}
+          player={1}
+          playerTypes={apiProps.gameState?.player_types}
+          selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
+          guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
+          clickedUnitId={clickedUnitId}
+          onSelectUnit={(unitId) => {
+            apiProps.onSelectUnit(unitId);
+            setClickedUnitId(null);
+          }}
+          gameMode={gameMode}
+          victoryPoints={getVictoryPointsForPlayer(1)}
+          onCollapseChange={setPlayer1Collapsed}
+          detailPreviewUnitId={illustrationPreviewUnit?.player === 1 ? illustrationPreviewUnit.id : null}
+        />
       </ErrorBoundary>
 
       <ErrorBoundary fallback={<div>Failed to load player 2 status</div>}>
-        <div className="unit-status-with-illustration">
-          {illustrationPreviewUnit?.player === 2
-            ? renderUnitIllustrationPreview(illustrationPreviewUnit)
-            : null}
-          <UnitStatusTablePlayer2WithTutorial
-            units={apiProps.gameState?.units ?? []}
-            player={2}
-            playerTypes={apiProps.gameState?.player_types}
-            selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
-            guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
-            clickedUnitId={clickedUnitId}
-            onSelectUnit={(unitId) => {
-              apiProps.onSelectUnit(unitId);
-              setClickedUnitId(null);
-            }}
-            gameMode={gameMode}
-            victoryPoints={getVictoryPointsForPlayer(2)}
-            onCollapseChange={setPlayer2Collapsed}
-            detailPreviewUnitId={
-              illustrationPreviewUnit?.player === 2 ? illustrationPreviewUnit.id : null
-            }
-          />
-        </div>
-      </ErrorBoundary>
-
-      {/* Game Log Component */}
-      <ErrorBoundary fallback={<div>Failed to load game log</div>}>
-        <GameLogWithTutorialSpotlight
-          events={gameLog.events}
-          availableHeight={logAvailableHeight}
-          currentTurn={apiProps.gameState?.currentTurn ?? 1}
-          debugMode={settings.showDebug}
+        <UnitStatusTablePlayer2WithTutorial
+          units={apiProps.gameState?.units ?? []}
+          player={2}
+          playerTypes={apiProps.gameState?.player_types}
+          selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
+          guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
+          clickedUnitId={clickedUnitId}
+          onSelectUnit={(unitId) => {
+            apiProps.onSelectUnit(unitId);
+            setClickedUnitId(null);
+          }}
+          gameMode={gameMode}
+          victoryPoints={getVictoryPointsForPlayer(2)}
+          onCollapseChange={setPlayer2Collapsed}
+          detailPreviewUnitId={illustrationPreviewUnit?.player === 2 ? illustrationPreviewUnit.id : null}
         />
       </ErrorBoundary>
     </RightColumnTutorialSpotlight>

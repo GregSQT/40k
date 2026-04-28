@@ -194,7 +194,7 @@ interface GameLogProps {
 
 export const GameLog: React.FC<GameLogProps> = ({
   events,
-  availableHeight = 220,
+  availableHeight = 152,
   useStepNumbers = false,
   debugMode = false,
   onLastEntryRect,
@@ -412,7 +412,7 @@ export const GameLog: React.FC<GameLogProps> = ({
         <div className="game-log__count">{events.length} events</div>
       </div>
 
-      <div className="game-log__content">
+      <div className="game-log__content" style={{ height: `${availableHeight}px` }}>
         {displayedEvents.length === 0 ? (
           <div className="game-log__empty">No events yet. Start playing to see the action log!</div>
         ) : (
