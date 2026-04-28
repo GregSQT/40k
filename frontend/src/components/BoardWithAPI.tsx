@@ -66,6 +66,10 @@ const UNIT_ILLUSTRATION_MIN_BASE_SIZE = 10;
 const UNIT_ILLUSTRATION_MAX_BASE_SIZE = 35;
 const UNIT_ILLUSTRATION_MIN_SCALE = 0.7;
 const UNIT_ILLUSTRATION_MAX_SCALE = 1;
+const DEFAULT_UNIT_ILLUSTRATION_SRC = "/icons/Endless duty.png";
+const DEFAULT_UNIT_ILLUSTRATION_DELAY_MS = 2000;
+const DEFAULT_UNIT_ILLUSTRATION_FADE_MS = 300;
+const UNIT_ILLUSTRATION_FADE_OUT_MS = 1000;
 
 function getUnitIllustrationSrc(unit: Unit): string {
   const unitName = unit.NAME ?? unit.type;
@@ -1380,6 +1384,9 @@ export const BoardWithAPI: React.FC = () => {
   const [illustrationPreviewUnitId, setIllustrationPreviewUnitId] = useState<Unit["id"] | null>(
     null
   );
+  const [showDefaultIllustration, setShowDefaultIllustration] = useState(false);
+  const [displayedIllustrationUnit, setDisplayedIllustrationUnit] = useState<Unit | null>(null);
+  const [showDisplayedIllustrationUnit, setShowDisplayedIllustrationUnit] = useState(false);
 
   // Track UnitStatusTable collapse states
   const [, setPlayer1Collapsed] = useState(false);
@@ -2217,9 +2224,40 @@ export const BoardWithAPI: React.FC = () => {
       return null;
     }
     return (
-      statusUnits.find((unit) => String(unit.id) === String(effectiveIllustrationUnitId)) ?? null
+      statusUnits.find(
+        (unit) => String(unit.id) === String(effectiveIllustrationUnitId) && unit.HP_CUR > 0
+      ) ?? null
     );
   }, [apiProps.gameState?.units, apiProps.selectedUnitId, illustrationPreviewUnitId]);
+
+  useEffect(() => {
+    if (illustrationPreviewUnit) {
+      setDisplayedIllustrationUnit(illustrationPreviewUnit);
+      setShowDisplayedIllustrationUnit(true);
+      setShowDefaultIllustration(false);
+      return;
+    }
+    setShowDisplayedIllustrationUnit(false);
+    const timerId = window.setTimeout(() => {
+      setDisplayedIllustrationUnit(null);
+    }, UNIT_ILLUSTRATION_FADE_OUT_MS);
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [illustrationPreviewUnit]);
+
+  useEffect(() => {
+    if (illustrationPreviewUnit || displayedIllustrationUnit) {
+      setShowDefaultIllustration(false);
+      return;
+    }
+    const timerId = window.setTimeout(() => {
+      setShowDefaultIllustration(true);
+    }, DEFAULT_UNIT_ILLUSTRATION_DELAY_MS);
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [displayedIllustrationUnit, illustrationPreviewUnit]);
 
   if (apiProps.loading) {
     return (
@@ -2577,13 +2615,17 @@ export const BoardWithAPI: React.FC = () => {
     return parsed;
   })();
 
-  const renderUnitIllustrationPreview = (unit: Unit): React.ReactElement => (
+  const renderUnitIllustrationPreview = (unit: Unit, visible: boolean): React.ReactElement => (
     <aside className="unit-illustration-preview" aria-label={`Illustration unit ${unit.id}`}>
       <img
         className="unit-illustration-preview__image"
         src={getUnitIllustrationSrc(unit)}
         alt={`Unit ${unit.id} illustration`}
-        style={{ transform: `scale(${getUnitIllustrationScale(unit)})` }}
+        style={{
+          opacity: visible ? 1 : 0,
+          transform: `scale(${getUnitIllustrationScale(unit)})`,
+          transition: `opacity ${UNIT_ILLUSTRATION_FADE_OUT_MS}ms ease`,
+        }}
       />
     </aside>
   );
@@ -2889,10 +2931,20 @@ export const BoardWithAPI: React.FC = () => {
       {/* Game Log Component */}
       <ErrorBoundary fallback={<div>Failed to load game log</div>}>
         <div className="game-log-with-illustration">
-          {illustrationPreviewUnit ? (
-            renderUnitIllustrationPreview(illustrationPreviewUnit)
+          {displayedIllustrationUnit ? (
+            renderUnitIllustrationPreview(displayedIllustrationUnit, showDisplayedIllustrationUnit)
           ) : (
-            <aside className="unit-illustration-preview" aria-hidden="true" />
+            <aside className="unit-illustration-preview" aria-label="Endless Duty illustration">
+              <img
+                className="unit-illustration-preview__image"
+                src={DEFAULT_UNIT_ILLUSTRATION_SRC}
+                alt="Endless Duty illustration"
+                style={{
+                  opacity: showDefaultIllustration ? 1 : 0,
+                  transition: `opacity ${DEFAULT_UNIT_ILLUSTRATION_FADE_MS}ms ease`,
+                }}
+              />
+            </aside>
           )}
           <div className="game-log-with-illustration__log">
             <GameLogWithTutorialSpotlight
