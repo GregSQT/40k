@@ -757,7 +757,7 @@ function GameLogWithTutorialSpotlight(
     (matchesTutorialStagePattern(stage, "1-24") || matchesTutorialStagePattern(stage, "1-24-*"));
   const isStep1_25 = tutorial?.popupVisible && stage === "1-25";
   const shootEventCount = (props.events ?? []).filter((e) => e.type === "shoot").length;
-  const baseHeight = props.availableHeight ?? 220;
+  const baseHeight = (props.availableHeight ?? 220) - GAME_LOG_LINE_HEIGHT_PX;
   const availableHeight = isStep2_4
     ? baseHeight + shootEventCount * GAME_LOG_LINE_HEIGHT_PX
     : baseHeight;

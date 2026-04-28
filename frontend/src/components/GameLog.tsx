@@ -412,15 +412,20 @@ export const GameLog: React.FC<GameLogProps> = ({
         <div className="game-log__count">{events.length} events</div>
       </div>
 
-      <div className="game-log__content" style={{ height: `${availableHeight}px` }}>
+      <div
+        className="game-log__content"
+        style={{ height: `${availableHeight}px`, flex: `0 0 ${availableHeight}px` }}
+      >
         {displayedEvents.length === 0 ? (
-          <div className="game-log__empty">No events yet. Start playing to see the action log!</div>
+          <div className="game-log__empty" style={{ height: "100%" }}>
+            No events yet. Start playing to see the action log!
+          </div>
         ) : (
           <div
             ref={eventsContainerRef}
             className="game-log__events"
             style={{
-              maxHeight: `${availableHeight}px`, // Use full available height
+              height: `${availableHeight}px`,
               overflow: "auto",
             }}
           >
