@@ -4323,7 +4323,6 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         response["all_attack_results"] = list(shoot_attack_results)
         # Change action to "shoot" if attacks were executed (not just waiting)
         response["action"] = "shoot"
-        game_state["shoot_attack_results"] = []
     
     return True, response
 

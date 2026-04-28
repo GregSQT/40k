@@ -464,34 +464,10 @@ function addFootprintHighlightSprite(
       }
     }
     gfx.destroy();
-  } catch (err) {
-    // Remonte explicitement les échecs silencieux du pipeline RenderTexture
-    // (perte de contexte WebGL, dépassement du buffer d'indices, bornes Pixi
-    // aberrantes…) uniquement en mode debug — sinon aucun sprite ne sort au
-    // stage et la zone de preview disparait sans laisser de trace en console.
-    if (typeof window !== "undefined") {
-      try {
-        if (window.localStorage.getItem("debugMovePool") === "1") {
-          const lb = gfx.getLocalBounds?.();
-          console.warn(
-            "[addFootprintHighlightSprite] RenderTexture pipeline failed",
-            {
-              spriteName: displayName,
-              width: w,
-              height: h,
-              tilesW,
-              tilesH,
-              localBounds: lb
-                ? { x: lb.x, y: lb.y, width: lb.width, height: lb.height }
-                : null,
-            },
-            err,
-          );
-        }
-      } catch {
-        // ignore localStorage/console access errors (SSR, privacy mode)
-      }
-    }
+  } catch {
+    // Échec silencieux du pipeline RT (contexte WebGL perdu, buffer, etc.) :
+    // nettoyage des sprites partiels — pas de console (les erreurs « dures »
+    // passent par throw ailleurs dans le flux move preview).
     for (const s of createdSprites) {
       s.destroy({ texture: true });
     }
@@ -977,38 +953,6 @@ function renderMoveAdvanceDestPoolCircleLayer(
 
   highlightContainer.addChild(maskSprite);
   highlightContainer.addChild(coverageGfx);
-
-  if (typeof window !== "undefined") {
-    try {
-      if (window.localStorage.getItem("debugMovePool") === "1") {
-        const rawVertCount = (precomputedWorldMaskLoops ?? []).reduce((n, l) => n + l.length / 2, 0);
-        const smoothedVertCount = validLoops.reduce((n, l) => n + l.length / 2, 0);
-        console.info("[renderMoveAdvanceDestPoolCircleLayer] rendered", {
-          spriteName,
-          anchorPoolSize: anchorPool.size,
-          maskKind: maskUnionKind,
-          footprintMaskHexPoolSize: footprintMaskHexPool?.size ?? 0,
-          loopsCount: validLoops.length,
-          rawVertCount,
-          smoothedVertCount,
-          chaikinIterations: MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
-          footprintRadius,
-          gridHexRadius,
-          maskSize: { w, h },
-          maskBounds: { x: maskBounds.x, y: maskBounds.y, w: maskBounds.width, h: maskBounds.height },
-          coverage: "rect_bounds_not_disk",
-          maskAlphaSmoothing: {
-            blurStrength: MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH,
-            blurQuality: MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY,
-            blurResolution: MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION,
-          },
-          renderPipeline: "rect_coverage_masked_polygon_rt+mask_alpha_blur",
-        });
-      }
-    } catch {
-      // ignore
-    }
-  }
 }
 
 /** Remplissage objectif : texture teintée ou couleur unie (même pipeline que les murs). */
