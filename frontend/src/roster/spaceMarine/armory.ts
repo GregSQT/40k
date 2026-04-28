@@ -120,20 +120,10 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
   relic_fist_captain: {display_name: "Relic Fist", NB: 1, ATK: 2, STR: 8, AP: -2, DMG: 2, WEAPON_RULES: ["EXTRA_ATTACKS"],},
   relic_weapon_captain: {display_name: "Relic Weapon", NB: 6, ATK: 2, STR: 5, AP: -2, DMG: 2, WEAPON_RULES: [],},
   sternguard_close_combat_weapon: {display_name: "Close Combat Weapon", NB: 4, ATK: 3, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: [],},
+  teeth_and_claws: {display_name: "Teeth and Claws", NB: 3, ATK: 4, STR: 5, AP: -1, DMG: 1, WEAPON_RULES: ["EXTRA_ATTACKS"],},
   thunder_hammer_terminator: {display_name: "Thunder Hammer", NB: 3, ATK: 3, STR: 8, AP: -2, DMG: 2, WEAPON_RULES: ["DEVASTATING_WOUNDS"],},
-  // #########################################################################################
-  // #################################### Debug Weapons ######################################
-  // #########################################################################################
-  SM_RNG_killer: {
-    display_name: "SM_RNG_killer",
-    RNG: 24,
-    NB: 1,
-    ATK: 3,
-    STR: 5,
-    AP: -3,
-    DMG: 2,
-    WEAPON_RULES: [],
-  },
+  wolf_guard_weapon: {display_name: "Wolf Guard Weapon", NB: 4, ATK: 3, STR: 5, AP: -2, DMG: 2, WEAPON_RULES: [""],},
+
   Termagant_RNG_killer: {
     display_name: "Termagant_RNG_killer",
     RNG: 24,

@@ -16,7 +16,6 @@ import type {
   ShootingPhaseState,
   TargetPreview,
   Unit,
-  Weapon,
   WeaponOption,
 } from "../types/game";
 // import { SingleShotDisplay } from './SingleShotDisplay';
@@ -52,7 +51,6 @@ import {
 import { ensureWasmLoaded, isWasmReady, computeVisibleHexes } from "../utils/wasmLos";
 import { mountLosPolarClippedByVisibleUnion } from "../utils/losPolarMaskedByVisibleUnion";
 import type { HexUnionMaskLayout } from "../utils/hexUnionBoundaryPolygon";
-import { FEATURES } from "../constants/gameConfig";
 import {
   DAMAGE_PROBABILITY_TOOLTIP_HTML_OPACITY,
   DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX,
@@ -619,6 +617,7 @@ export default function Board({
     scrollLeft: number;
     scrollTop: number;
   } | null>(null);
+  const boardZoomAnchorClientRef = useRef<{ x: number; y: number } | null>(null);
   /** Replay / Board sans API : même ref que ``moveDestPoolRef`` passée par ``useEngineAPI``. */
   const internalMoveDestPoolRef = useRef<Set<string>>(new Set());
   const resolvedMoveDestPoolRef = moveDestPoolRef ?? internalMoveDestPoolRef;
@@ -655,8 +654,6 @@ export default function Board({
   const hoveredHexRef = useRef<{ col: number; row: number } | null>(null);
   const losHexRef = useRef<{ col: number; row: number } | null>(null);
   const losRequestIdRef = useRef(0);
-  /** Dédup des logs move pool : ``localStorage.setItem('debugMovePool','1')`` puis F5 — retirer la clé pour couper. */
-  const movePoolDebugLastSnapRef = useRef<string>("");
 
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
   const { boardConfig, gameConfig, loading, error } = useGameConfig();
@@ -800,6 +797,20 @@ export default function Board({
     []
   );
 
+  const resolveBoardZoomAnchorClient = useCallback((): { x: number; y: number } | undefined => {
+    const lastPointer = boardZoomAnchorClientRef.current;
+    if (lastPointer) return lastPointer;
+
+    const viewport = boardViewportRef.current;
+    if (!viewport) return undefined;
+
+    const rect = viewport.getBoundingClientRect();
+    return {
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    };
+  }, []);
+
   const handleBoardWheel = useCallback(
     (e: WheelEvent) => {
       if (!e.ctrlKey) return;
@@ -843,6 +854,7 @@ export default function Board({
   );
 
   const handleBoardPanMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    boardZoomAnchorClientRef.current = { x: e.clientX, y: e.clientY };
     const panStart = boardPanStartRef.current;
     const viewport = boardViewportRef.current;
     if (!panStart || !viewport || panStart.pointerId !== e.pointerId) return;
@@ -864,11 +876,12 @@ export default function Board({
   }, []);
 
   const handleBoardZoomReset = useCallback(() => {
-    applyBoardZoom(() => BOARD_ZOOM_DEFAULT);
+    applyBoardZoom(() => BOARD_ZOOM_DEFAULT, resolveBoardZoomAnchorClient());
     boardViewportRef.current?.scrollTo({ left: 0, top: 0 });
-  }, [applyBoardZoom]);
+  }, [applyBoardZoom, resolveBoardZoomAnchorClient]);
 
   const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    boardZoomAnchorClientRef.current = { x: e.clientX, y: e.clientY };
     if (!boardConfig || !showHexCoordinates) { setHexCoordTooltip(null); return; }
     const canvas = e.currentTarget.querySelector("canvas");
     if (!canvas) return;
@@ -3604,48 +3617,6 @@ export default function Board({
       fightEngagementRing,
     };
 
-    if (
-      FEATURES.ENABLE_DEBUG_MODE &&
-      typeof localStorage !== "undefined" &&
-      localStorage.getItem("debugMovePool") === "1"
-    ) {
-      const gs = gameState as {
-        valid_move_destinations_pool?: unknown;
-        preview_hexes?: unknown;
-        move_preview_footprint_span?: number | null;
-      } | null;
-      const pickLen = Array.isArray(moveDestinationAnchorsFromState)
-        ? moveDestinationAnchorsFromState.length
-        : null;
-      const dbg = {
-        phaseProp: phase,
-        gameStatePhase: gameState?.phase ?? null,
-        effectivePhase,
-        mode,
-        selectedUnitId,
-        pendingMoveAfterShooting,
-        enginePhaseForPools,
-        keepMovementPickPool,
-        shouldSyncMovePoolsFromState,
-        moveDestPoolSize: resolvedMoveDestPoolRef.current?.size ?? 0,
-        footprintZoneSize: footprintZoneRef?.current?.size ?? 0,
-        gsValidPoolLen: Array.isArray(gs?.valid_move_destinations_pool)
-          ? gs.valid_move_destinations_pool.length
-          : null,
-        gsPreviewHexesLen: Array.isArray(gs?.preview_hexes) ? gs.preview_hexes.length : null,
-        movePreviewFootprintSpan: gs?.move_preview_footprint_span ?? null,
-        pickMoveAnchorsLen: pickLen,
-        selectedUnitBaseSize: unitForFootprintBase
-          ? resolveBaseSizeForFootprint(unitForFootprintBase)
-          : null,
-      };
-      const snap = JSON.stringify(dbg);
-      if (snap !== movePoolDebugLastSnapRef.current) {
-        movePoolDebugLastSnapRef.current = snap;
-        console.info("[BoardPvp debugMovePool]", dbg);
-      }
-    }
-
     const drawResult = drawBoard(
       app,
       boardConfigWithOverrides as Parameters<typeof drawBoard>[1],
@@ -4280,12 +4251,8 @@ export default function Board({
             );
           }
 
-          interface UnitWithAvailableWeapons extends Unit {
-            available_weapons?: Array<{ can_use: boolean }>;
-          }
-          const unitWithWeapons = unit as UnitWithAvailableWeapons;
-          const availableWeapons = unitWithWeapons.available_weapons;
-          if (availableWeapons?.some((w) => w.can_use)) {
+          const availableWeapons = unit.available_weapons;
+          if (availableWeapons?.some((w) => (w.can_use ?? w.canUse) === true)) {
             const spacing = iconDisplaySize * 1.2;
             addOverlayIcon(
               "/icons/Action_Logo/3-1 - Gun_Choice.png",
@@ -4691,33 +4658,15 @@ export default function Board({
         const unit = units.find((u) => u.id === weaponSelectionMenu.unitId);
         if (!unit || !unit.RNG_WEAPONS) return [];
 
-        // Try to use available_weapons from unit if available
-        interface UnitWithAvailableWeapons extends Unit {
-          available_weapons?: Array<{
-            index: number;
-            weapon: Record<string, unknown>;
-            can_use: boolean;
-            reason?: string;
-          }>;
-        }
-        const unitWithWeapons = unit as UnitWithAvailableWeapons;
-        const availableWeapons = unitWithWeapons?.available_weapons;
+        const availableWeapons = unit.available_weapons;
 
-        if (availableWeapons && Array.isArray(availableWeapons)) {
-          // Use backend-filtered weapons
-          return availableWeapons.map(
-            (w: {
-              index: number;
-              weapon: Record<string, unknown>;
-              can_use: boolean;
-              reason?: string;
-            }) => ({
-              index: w.index,
-              weapon: w.weapon as unknown as Weapon,
-              canUse: w.can_use || false,
-              reason: w.reason || undefined,
-            })
-          );
+        if (availableWeapons && availableWeapons.length > 0) {
+          return availableWeapons.map((w) => ({
+            index: w.index,
+            weapon: w.weapon,
+            canUse: w.can_use ?? w.canUse ?? false,
+            reason: w.reason,
+          }));
         }
 
         // Fallback: build from unit weapons (for backward compatibility)
@@ -4752,24 +4701,51 @@ export default function Board({
             lineHeight: 1,
           }}
         >
-          <button
-            type="button"
-            aria-label="Regler le zoom du plateau"
-            aria-expanded={zoomControlsOpen}
-            onClick={() => setZoomControlsOpen((open) => !open)}
+          <div
             style={{
-              border: "1px solid rgba(255,255,255,0.28)",
-              borderRadius: 6,
-              background: "rgba(17,24,39,0.88)",
-              color: "#e5e7eb",
-              cursor: "pointer",
-              fontSize: 18,
-              height: 32,
-              width: 32,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
             }}
           >
-            🔍
-          </button>
+            {boardZoom !== BOARD_ZOOM_DEFAULT && (
+              <span
+                aria-live="polite"
+                style={{
+                  padding: "5px 7px",
+                  border: "1px solid rgba(255,255,255,0.22)",
+                  borderRadius: 6,
+                  background: "rgba(17,24,39,0.88)",
+                  color: "#e5e7eb",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  lineHeight: 1,
+                  minWidth: 42,
+                  textAlign: "center",
+                }}
+              >
+                {zoomPercent}%
+              </span>
+            )}
+            <button
+              type="button"
+              aria-label="Regler le zoom du plateau"
+              aria-expanded={zoomControlsOpen}
+              onClick={() => setZoomControlsOpen((open) => !open)}
+              style={{
+                border: "1px solid rgba(255,255,255,0.28)",
+                borderRadius: 6,
+                background: "rgba(17,24,39,0.88)",
+                color: "#e5e7eb",
+                cursor: "pointer",
+                fontSize: 18,
+                height: 32,
+                width: 32,
+              }}
+            >
+              🔍
+            </button>
+          </div>
           {zoomControlsOpen && (
             <div
               style={{
@@ -4795,7 +4771,7 @@ export default function Board({
                 value={boardZoom}
                 onChange={(e) => {
                   const nextZoom = Number(e.currentTarget.value);
-                  applyBoardZoom(() => nextZoom);
+                  applyBoardZoom(() => nextZoom, resolveBoardZoomAnchorClient());
                 }}
                 style={{
                   width: 22,

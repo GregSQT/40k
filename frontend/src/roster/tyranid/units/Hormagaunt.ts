@@ -32,7 +32,7 @@ export class Hormagaunt extends SwarmMeleeSwarm {
 
 
   // ICON
-  static ICON = "/icons/Hormagaunt2.webp"; // Path relative to public folder
+  static ICON = "/icons/Hormagaunt.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 11; // Size of the base
   static ICON_SCALE = 1.2; // Size of the icon
