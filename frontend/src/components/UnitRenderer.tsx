@@ -1,6 +1,6 @@
 // frontend/src/components/UnitRenderer.tsx
 import * as PIXI from "pixi.js-legacy";
-import type { FightSubPhase, GameState, PlayerId, TargetPreview, Unit } from "../types/game";
+import type { FightSubPhase, GameState, PlayerId, TargetPreview, Unit, UnitId } from "../types/game";
 import {
   buildChargeMinRollOverlay,
   buildWeaponSignature,
@@ -137,6 +137,7 @@ interface UnitRendererProps {
   // Debug mode
   debugMode?: boolean;
   onUnitTooltip?: (tooltip: HpBarHtmlTooltipPayload) => void;
+  onUnitIconHoverChange?: (unitId: UnitId | null) => void;
   /** Cadre % / bouclier net (HTML) au-dessus de la barre blink */
   onBlinkProbHtml?: (payload: BlinkProbHtmlPayload) => void;
   renderTarget?: PIXI.Container;
@@ -179,7 +180,7 @@ export class UnitRenderer {
   }
 
   private attachTooltipHandlers(displayObject: PIXI.DisplayObject): void {
-    if (!this.props.onUnitTooltip) {
+    if (!this.props.onUnitTooltip && !this.props.onUnitIconHoverChange) {
       return;
     }
     const tooltipText = this.getUnitTooltipText();
@@ -194,12 +195,14 @@ export class UnitRenderer {
       });
     };
     displayObject.on("pointerover", (e: PIXI.FederatedPointerEvent) => {
+      this.props.onUnitIconHoverChange?.(this.props.unit.id);
       updateTooltipPosition(e);
     });
     displayObject.on("pointermove", (e: PIXI.FederatedPointerEvent) => {
       updateTooltipPosition(e);
     });
     const hideTooltip = (): void => {
+      this.props.onUnitIconHoverChange?.(null);
       this.props.onUnitTooltip?.({
         visible: false,
         text: tooltipText,

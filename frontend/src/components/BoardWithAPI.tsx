@@ -61,6 +61,16 @@ type RuleChoicePrompt = {
   }>;
 };
 
+const UNIT_ILLUSTRATION_FILE_EXTENSION = "png";
+
+function getUnitIllustrationSrc(unit: Unit): string {
+  const unitName = unit.NAME ?? unit.type;
+  if (typeof unitName !== "string" || unitName.trim() === "") {
+    throw new Error(`Unit ${unit.id} missing NAME/type for illustration path`);
+  }
+  return `/icons/${encodeURIComponent(unitName.trim())}.${UNIT_ILLUSTRATION_FILE_EXTENSION}`;
+}
+
 type EndlessDutySlotProfiles = {
   leader: string | null;
   melee: string | null;
@@ -1346,6 +1356,9 @@ export const BoardWithAPI: React.FC = () => {
 
   // Track clicked (but not selected) units for blue highlighting
   const [clickedUnitId, setClickedUnitId] = useState<number | null>(null);
+  const [illustrationPreviewUnitId, setIllustrationPreviewUnitId] = useState<Unit["id"] | null>(
+    null
+  );
 
   // Track UnitStatusTable collapse states
   const [, setPlayer1Collapsed] = useState(false);
@@ -2219,6 +2232,19 @@ export const BoardWithAPI: React.FC = () => {
     }, 100); // Wait 100ms for DOM to render
   }, []);
 
+  const illustrationPreviewUnit = useMemo(() => {
+    if (illustrationPreviewUnitId === null) {
+      return null;
+    }
+    const statusUnits = apiProps.gameState?.units;
+    if (!statusUnits) {
+      return null;
+    }
+    return (
+      statusUnits.find((unit) => String(unit.id) === String(illustrationPreviewUnitId)) ?? null
+    );
+  }, [apiProps.gameState?.units, illustrationPreviewUnitId]);
+
   if (apiProps.loading) {
     return (
       <div
@@ -2575,6 +2601,16 @@ export const BoardWithAPI: React.FC = () => {
     return parsed;
   })();
 
+  const renderUnitIllustrationPreview = (unit: Unit): React.ReactElement => (
+    <aside className="unit-illustration-preview" aria-label={`Illustration unit ${unit.id}`}>
+      <img
+        className="unit-illustration-preview__image"
+        src={getUnitIllustrationSrc(unit)}
+        alt={`Unit ${unit.id} illustration`}
+      />
+    </aside>
+  );
+
   const rightColumnContent = (
     <RightColumnTutorialSpotlight>
       {gameConfig ? (
@@ -2874,39 +2910,55 @@ export const BoardWithAPI: React.FC = () => {
       )}
 
       <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
-        <UnitStatusTablePlayer1WithTutorial
-          units={apiProps.gameState?.units ?? []}
-          player={1}
-          playerTypes={apiProps.gameState?.player_types}
-          selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
-          guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
-          clickedUnitId={clickedUnitId}
-          onSelectUnit={(unitId) => {
-            apiProps.onSelectUnit(unitId);
-            setClickedUnitId(null);
-          }}
-          gameMode={gameMode}
-          victoryPoints={getVictoryPointsForPlayer(1)}
-          onCollapseChange={setPlayer1Collapsed}
-        />
+        <div className="unit-status-with-illustration">
+          {illustrationPreviewUnit?.player === 1
+            ? renderUnitIllustrationPreview(illustrationPreviewUnit)
+            : null}
+          <UnitStatusTablePlayer1WithTutorial
+            units={apiProps.gameState?.units ?? []}
+            player={1}
+            playerTypes={apiProps.gameState?.player_types}
+            selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
+            guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
+            clickedUnitId={clickedUnitId}
+            onSelectUnit={(unitId) => {
+              apiProps.onSelectUnit(unitId);
+              setClickedUnitId(null);
+            }}
+            gameMode={gameMode}
+            victoryPoints={getVictoryPointsForPlayer(1)}
+            onCollapseChange={setPlayer1Collapsed}
+            detailPreviewUnitId={
+              illustrationPreviewUnit?.player === 1 ? illustrationPreviewUnit.id : null
+            }
+          />
+        </div>
       </ErrorBoundary>
 
       <ErrorBoundary fallback={<div>Failed to load player 2 status</div>}>
-        <UnitStatusTablePlayer2WithTutorial
-          units={apiProps.gameState?.units ?? []}
-          player={2}
-          playerTypes={apiProps.gameState?.player_types}
-          selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
-          guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
-          clickedUnitId={clickedUnitId}
-          onSelectUnit={(unitId) => {
-            apiProps.onSelectUnit(unitId);
-            setClickedUnitId(null);
-          }}
-          gameMode={gameMode}
-          victoryPoints={getVictoryPointsForPlayer(2)}
-          onCollapseChange={setPlayer2Collapsed}
-        />
+        <div className="unit-status-with-illustration">
+          {illustrationPreviewUnit?.player === 2
+            ? renderUnitIllustrationPreview(illustrationPreviewUnit)
+            : null}
+          <UnitStatusTablePlayer2WithTutorial
+            units={apiProps.gameState?.units ?? []}
+            player={2}
+            playerTypes={apiProps.gameState?.player_types}
+            selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
+            guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
+            clickedUnitId={clickedUnitId}
+            onSelectUnit={(unitId) => {
+              apiProps.onSelectUnit(unitId);
+              setClickedUnitId(null);
+            }}
+            gameMode={gameMode}
+            victoryPoints={getVictoryPointsForPlayer(2)}
+            onCollapseChange={setPlayer2Collapsed}
+            detailPreviewUnitId={
+              illustrationPreviewUnit?.player === 2 ? illustrationPreviewUnit.id : null
+            }
+          />
+        </div>
       </ErrorBoundary>
 
       {/* Game Log Component */}
@@ -3054,6 +3106,7 @@ export const BoardWithAPI: React.FC = () => {
             ruleChoiceHighlightedUnitId={highlightedRuleChoiceUnitId}
             showHexCoordinates={settings.showDebug}
             showLosDebugOverlay={settings.showDebugLoS}
+            onUnitIllustrationPreviewChange={setIllustrationPreviewUnitId}
             eligibleUnitIds={apiProps.eligibleUnitIds}
             mode={apiProps.mode}
             movePreview={apiProps.movePreview}

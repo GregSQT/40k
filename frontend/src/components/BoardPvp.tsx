@@ -16,6 +16,7 @@ import type {
   ShootingPhaseState,
   TargetPreview,
   Unit,
+  UnitId,
   WeaponOption,
 } from "../types/game";
 // import { SingleShotDisplay } from './SingleShotDisplay';
@@ -259,6 +260,7 @@ type BoardProps = {
   eligibleUnitIds: number[];
   showHexCoordinates?: boolean;
   showLosDebugOverlay?: boolean;
+  onUnitIllustrationPreviewChange?: (unitId: UnitId | null) => void;
   shootingActivationQueue?: Unit[];
   activeShootingUnit?: Unit | null;
   shootingTargetId?: number | null; // For replay mode: shows explosion icon on target
@@ -371,6 +373,7 @@ const BOARD_ZOOM_MAX = 2.5;
 const BOARD_ZOOM_SLIDER_STEP = 0.05;
 const BOARD_ZOOM_WHEEL_IN_FACTOR = 1.1;
 const BOARD_ZOOM_WHEEL_OUT_FACTOR = 1 / BOARD_ZOOM_WHEEL_IN_FACTOR;
+const UNIT_ILLUSTRATION_HOVER_DELAY_MS = 500;
 
 function clampBoardZoom(value: number): number {
   return Math.min(BOARD_ZOOM_MAX, Math.max(BOARD_ZOOM_MIN, value));
@@ -506,6 +509,7 @@ export default function Board({
   eligibleUnitIds,
   showHexCoordinates = false,
   showLosDebugOverlay = false,
+  onUnitIllustrationPreviewChange,
   shootingActivationQueue,
   activeShootingUnit,
   shootingTargetId,
@@ -930,6 +934,39 @@ export default function Board({
   }, [boardConfig, showHexCoordinates]);
 
   const [unitHoverTooltip, setUnitHoverTooltip] = useState<HpBarHtmlTooltipPayload | null>(null);
+  const unitIllustrationHoverTimerRef = useRef<number | null>(null);
+
+  const clearUnitIllustrationHoverTimer = useCallback(() => {
+    if (unitIllustrationHoverTimerRef.current !== null) {
+      window.clearTimeout(unitIllustrationHoverTimerRef.current);
+      unitIllustrationHoverTimerRef.current = null;
+    }
+  }, []);
+
+  const handleUnitIconHoverChange = useCallback(
+    (unitId: UnitId | null) => {
+      clearUnitIllustrationHoverTimer();
+      if (!onUnitIllustrationPreviewChange) {
+        return;
+      }
+      if (unitId === null) {
+        onUnitIllustrationPreviewChange(null);
+        return;
+      }
+      unitIllustrationHoverTimerRef.current = window.setTimeout(() => {
+        onUnitIllustrationPreviewChange(unitId);
+        unitIllustrationHoverTimerRef.current = null;
+      }, UNIT_ILLUSTRATION_HOVER_DELAY_MS);
+    },
+    [clearUnitIllustrationHoverTimer, onUnitIllustrationPreviewChange]
+  );
+
+  useEffect(() => {
+    return () => {
+      clearUnitIllustrationHoverTimer();
+      onUnitIllustrationPreviewChange?.(null);
+    };
+  }, [clearUnitIllustrationHoverTimer, onUnitIllustrationPreviewChange]);
 
   /** Cadre % / bouclier COVER au-dessus de la barre PV clignotante (HTML, aligné `.rule-tooltip`). */
   const [blinkProbHtmlByUnitId, setBlinkProbHtmlByUnitId] = useState<
@@ -3846,6 +3883,7 @@ export default function Board({
         targetPreview,
         onConfirmMove,
         parseColor,
+        onUnitIconHoverChange: handleUnitIconHoverChange,
         // Pass blinking state (unified: movePreview and attackPreview use same code path)
         blinkingUnits: effectiveBlinkingUnits,
         blinkingAttackerId: effectiveBlinkingAttackerId,
@@ -4609,6 +4647,7 @@ export default function Board({
     movePreviewLosCoverKey,
     shootPreviewWasmLos.key,
     shootAdvanceLosAnchorKey,
+    handleUnitIconHoverChange,
   ]);
 
   // Handle weapon selection
@@ -4856,6 +4895,8 @@ export default function Board({
                 ref={canvasContainerRef}
                 onMouseMove={handleCanvasMouseMove}
                 onMouseLeave={() => {
+                  clearUnitIllustrationHoverTimer();
+                  onUnitIllustrationPreviewChange?.(null);
                   setHexCoordTooltip(null);
                   setUnitHoverTooltip(null);
                   setMovePreviewDistanceTooltip(null);

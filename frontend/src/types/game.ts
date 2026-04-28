@@ -113,6 +113,7 @@ export interface DeploymentState {
 
 export interface Unit {
   id: UnitId;
+  NAME?: string;
   name?: string;
   DISPLAY_NAME?: string;
   type?: string;

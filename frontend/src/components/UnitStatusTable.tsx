@@ -108,6 +108,8 @@ interface UnitStatusTableProps {
     | null;
   /** En mode tutoriel (étape 2-11/2-12) : activer le rapport des rects P2. */
   tutorialReportP2UnitRowRects?: boolean;
+  /** Preview plateau : forcer cette unité et ses armes à être visibles tant que l'illustration est affichée. */
+  detailPreviewUnitId?: UnitId | null;
 }
 
 interface UnitRowProps {
@@ -121,6 +123,7 @@ interface UnitRowProps {
   onToggleRangedExpand: (unitId: UnitId) => void;
   isMeleeExpanded: boolean;
   onToggleMeleeExpand: (unitId: UnitId) => void;
+  showUnitRules: boolean;
   /** Tutoriel : rapporter les positions viewport [colonne Name, colonne M] pour deux halos (unité ciblée, ex. Intercessor id 1). */
   reportNameMRect?:
     | ((
@@ -200,6 +203,7 @@ const UnitRow = memo<UnitRowProps>(
     onToggleRangedExpand,
     isMeleeExpanded,
     onToggleMeleeExpand,
+    showUnitRules,
     reportNameMRect,
     nameHeaderRef,
     mHeaderRef,
@@ -505,6 +509,7 @@ const UnitRow = memo<UnitRowProps>(
                   padding: "4px 8px",
                   backgroundColor: "#222",
                   fontSize: "12px",
+                  overflow: "visible",
                 }}
               >
                 <div
@@ -512,19 +517,44 @@ const UnitRow = memo<UnitRowProps>(
                     display: "inline-flex",
                     alignItems: "center",
                     gap: "6px",
-                    flexWrap: "wrap",
+                    flexWrap: "nowrap",
+                    overflow: "visible",
+                    maxWidth: "100%",
                   }}
                 >
-                  <span>{unitName}</span>
-                  {unitRules.map((rule) => {
-                    const tooltipText = getUnitRuleTooltip(rule.ruleId);
-                    return (
-                      <span key={`${unit.id}-${rule.ruleId}`} className="rule-badge-wrapper">
-                        <span className="rule-badge">{rule.displayName}</span>
-                        <span className="rule-tooltip">{tooltipText}</span>
-                      </span>
-                    );
-                  })}
+                  <span
+                    style={{
+                      display: "inline-block",
+                      maxWidth: "100%",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      verticalAlign: "middle",
+                    }}
+                  >
+                    {unitName}
+                  </span>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      flexShrink: 0,
+                      overflow: "visible",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {showUnitRules &&
+                      unitRules.map((rule) => {
+                        const tooltipText = getUnitRuleTooltip(rule.ruleId);
+                        return (
+                          <span key={`${unit.id}-${rule.ruleId}`} className="rule-badge-wrapper">
+                            <span className="rule-badge">{rule.displayName}</span>
+                            <span className="rule-tooltip">{tooltipText}</span>
+                          </span>
+                        );
+                      })}
+                  </span>
                 </div>
               </td>
 
@@ -1146,6 +1176,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     tutorialReportAttributesForUnitIds,
     onP2UnitRowRects,
     tutorialReportP2UnitRowRects = false,
+    detailPreviewUnitId = null,
   }) => {
     const nameHeaderRef = useRef<HTMLTableCellElement>(null);
     const mHeaderRef = useRef<HTMLTableCellElement>(null);
@@ -1248,7 +1279,15 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
 
     // Tutoriel : forcer table dépliée et unités ciblées dépliées (voir attributs Intercessor)
     // État dérivé : quand la prop est true, on affiche toujours la table dépliée (évite les soucis de timing)
-    const effectiveCollapsed = tutorialForceTableExpanded ? false : isCollapsed;
+    const isDetailPreviewInThisTable =
+      detailPreviewUnitId !== null &&
+      units.some(
+        (unit) =>
+          unit.player === player &&
+          String(unit.id) === String(detailPreviewUnitId)
+      );
+    const effectiveCollapsed =
+      tutorialForceTableExpanded || isDetailPreviewInThisTable ? false : isCollapsed;
 
     useEffect(() => {
       if (tutorialForceTableExpanded && isCollapsed) {
@@ -1615,51 +1654,57 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
 
           {/* Units List */}
           {!effectiveCollapsed &&
-            playerUnits.map((unit) => (
-              <UnitRow
-                key={unit.id}
-                unit={unit}
-                isSelected={selectedUnitId === unit.id}
-                isClicked={clickedUnitId === unit.id && selectedUnitId !== unit.id}
-                onSelect={onSelectUnit}
-                isUnitExpanded={expandedUnits.has(unit.id)}
-                onToggleUnitExpand={toggleUnitExpand}
-                isRangedExpanded={expandedRanged.has(unit.id)}
-                onToggleRangedExpand={toggleRangedExpand}
-                isMeleeExpanded={expandedMelee.has(unit.id)}
-                onToggleMeleeExpand={toggleMeleeExpand}
-                reportNameMRect={
-                  player === 1 && onNameMColumnsRect && (String(unit.id) === "1" || unit.id === 1)
-                    ? onNameMColumnsRect
-                    : undefined
-                }
-                nameHeaderRef={nameHeaderRef}
-                mHeaderRef={mHeaderRef}
-                reportRangedWeaponsRect={
-                  player === 1 &&
-                  onRangedWeaponsSectionRect &&
-                  tutorialForceRangedExpandedForUnitIds?.some(
-                    (id) => String(unit.id) === String(id) || unit.id === id
-                  )
-                    ? onRangedWeaponsSectionRect
-                    : undefined
-                }
-                reportUnitAttributesRect={
-                  onUnitAttributesSectionRect &&
-                  tutorialReportAttributesForUnitIds?.some(
-                    (id) => String(unit.id) === String(id) || unit.id === id
-                  )
-                    ? onUnitAttributesSectionRect
-                    : undefined
-                }
-                reportUnitRowRect={
-                  player === 2 && tutorialReportP2UnitRowRects && onP2UnitRowRects
-                    ? handleP2UnitRowRect
-                    : undefined
-                }
-                tableHeaderRowRef={tableHeaderRowRef}
-              />
-            ))}
+            playerUnits.map((unit) => {
+              const isDetailPreviewUnit =
+                detailPreviewUnitId !== null &&
+                String(unit.id) === String(detailPreviewUnitId);
+              return (
+                <UnitRow
+                  key={unit.id}
+                  unit={unit}
+                  isSelected={selectedUnitId === unit.id}
+                  isClicked={clickedUnitId === unit.id && selectedUnitId !== unit.id}
+                  onSelect={onSelectUnit}
+                  isUnitExpanded={isDetailPreviewUnit || expandedUnits.has(unit.id)}
+                  onToggleUnitExpand={toggleUnitExpand}
+                  isRangedExpanded={isDetailPreviewUnit || expandedRanged.has(unit.id)}
+                  onToggleRangedExpand={toggleRangedExpand}
+                  isMeleeExpanded={isDetailPreviewUnit || expandedMelee.has(unit.id)}
+                  onToggleMeleeExpand={toggleMeleeExpand}
+                  showUnitRules={!isDetailPreviewInThisTable || isDetailPreviewUnit}
+                  reportNameMRect={
+                    player === 1 && onNameMColumnsRect && (String(unit.id) === "1" || unit.id === 1)
+                      ? onNameMColumnsRect
+                      : undefined
+                  }
+                  nameHeaderRef={nameHeaderRef}
+                  mHeaderRef={mHeaderRef}
+                  reportRangedWeaponsRect={
+                    player === 1 &&
+                    onRangedWeaponsSectionRect &&
+                    tutorialForceRangedExpandedForUnitIds?.some(
+                      (id) => String(unit.id) === String(id) || unit.id === id
+                    )
+                      ? onRangedWeaponsSectionRect
+                      : undefined
+                  }
+                  reportUnitAttributesRect={
+                    onUnitAttributesSectionRect &&
+                    tutorialReportAttributesForUnitIds?.some(
+                      (id) => String(unit.id) === String(id) || unit.id === id
+                    )
+                      ? onUnitAttributesSectionRect
+                      : undefined
+                  }
+                  reportUnitRowRect={
+                    player === 2 && tutorialReportP2UnitRowRects && onP2UnitRowRects
+                      ? handleP2UnitRowRect
+                      : undefined
+                  }
+                  tableHeaderRowRef={tableHeaderRowRef}
+                />
+              );
+            })}
         </div>
       </div>
     );
