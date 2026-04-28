@@ -626,13 +626,16 @@ export class UnitRenderer {
         addClickHandler = false;
       }
 
-      // Block enemy and selected-unit clicks during movement phase.
-      // The selected unit must be eventMode="none" so clicks pass through
+      // Movement phase: only the selected unit must pass pointer events through
       // to the hitArea underneath (boardHexClick → onDirectMove).
-      // Other friendly units remain clickable for activation switching.
-      if (phase === "move" && (unit.player !== current_player || unit.id === selectedUnitId)) {
+      // Non-active units stay hoverable for the illustration preview.
+      if (phase === "move" && unit.id === selectedUnitId) {
         addClickHandler = false;
         unitCircle.eventMode = "none";
+        unitCircle.cursor = "default";
+      }
+      if (phase === "move" && unit.player !== current_player) {
+        addClickHandler = false;
         unitCircle.cursor = "default";
       }
       // Advance (shoot) : même principe que le move — clic gauche sur l’icône / l’hex valide
