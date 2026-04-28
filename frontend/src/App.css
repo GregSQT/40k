@@ -356,6 +356,8 @@ body {
   width: 240px;
   height: 280px;
   max-width: 240px;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
 }
 
 .unit-illustration-preview__image {
@@ -364,9 +366,7 @@ body {
   height: 100%;
   max-width: 240px;
   object-fit: contain;
-  border: 1px solid #555;
-  border-radius: var(--radius-lg);
-  background: var(--bg-secondary);
+  transform-origin: center bottom;
 }
 
 /* Replay Controls Containers */

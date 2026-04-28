@@ -62,6 +62,10 @@ type RuleChoicePrompt = {
 };
 
 const UNIT_ILLUSTRATION_FILE_EXTENSION = "png";
+const UNIT_ILLUSTRATION_MIN_BASE_SIZE = 10;
+const UNIT_ILLUSTRATION_MAX_BASE_SIZE = 35;
+const UNIT_ILLUSTRATION_MIN_SCALE = 0.7;
+const UNIT_ILLUSTRATION_MAX_SCALE = 1;
 
 function getUnitIllustrationSrc(unit: Unit): string {
   const unitName = unit.NAME ?? unit.type;
@@ -69,6 +73,23 @@ function getUnitIllustrationSrc(unit: Unit): string {
     throw new Error(`Unit ${unit.id} missing NAME/type for illustration path`);
   }
   return `/icons/${encodeURIComponent(unitName.trim())}.${UNIT_ILLUSTRATION_FILE_EXTENSION}`;
+}
+
+function getUnitIllustrationScale(unit: Unit): number {
+  if (typeof unit.BASE_SIZE !== "number") {
+    throw new Error(`Unit ${unit.id} missing numeric BASE_SIZE for illustration scale`);
+  }
+  const clampedBaseSize = Math.min(
+    UNIT_ILLUSTRATION_MAX_BASE_SIZE,
+    Math.max(UNIT_ILLUSTRATION_MIN_BASE_SIZE, unit.BASE_SIZE)
+  );
+  const normalizedBaseSize =
+    (clampedBaseSize - UNIT_ILLUSTRATION_MIN_BASE_SIZE) /
+    (UNIT_ILLUSTRATION_MAX_BASE_SIZE - UNIT_ILLUSTRATION_MIN_BASE_SIZE);
+  return (
+    UNIT_ILLUSTRATION_MIN_SCALE +
+    normalizedBaseSize * (UNIT_ILLUSTRATION_MAX_SCALE - UNIT_ILLUSTRATION_MIN_SCALE)
+  );
 }
 
 type EndlessDutySlotProfiles = {
@@ -2607,6 +2628,7 @@ export const BoardWithAPI: React.FC = () => {
         className="unit-illustration-preview__image"
         src={getUnitIllustrationSrc(unit)}
         alt={`Unit ${unit.id} illustration`}
+        style={{ transform: `scale(${getUnitIllustrationScale(unit)})` }}
       />
     </aside>
   );
