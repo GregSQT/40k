@@ -152,6 +152,7 @@ export interface Unit {
   // Display properties
   ICON: string;
   ICON_SCALE?: number;
+  ILLUSTRATION_RATIO: number;
   BASE_SIZE?: number | [number, number];
   BASE_SHAPE?: "round" | "oval" | "square";
 

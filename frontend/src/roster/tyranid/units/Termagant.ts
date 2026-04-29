@@ -36,7 +36,8 @@ export class Termagant extends SwarmRangeSwarm {
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 11; // Size of the base
   static ICON_SCALE = 1.2; // Size of the icon
-
+  static ILLUSTRATION_RATIO = 70; // Illustration size ratio in percent
+  
   constructor(name: string, startPos: [number, number]) {
     super(name, Termagant.HP_MAX, startPos);
   }

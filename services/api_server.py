@@ -2241,6 +2241,7 @@ def _build_units_from_army_config(
                     "VALUE": require_key(unit_data, "VALUE"),
                     "ICON": require_key(unit_data, "ICON"),
                     "ICON_SCALE": require_key(unit_data, "ICON_SCALE"),
+                    "ILLUSTRATION_RATIO": require_key(unit_data, "ILLUSTRATION_RATIO"),
                     "UNIT_RULES": copy.deepcopy(require_key(unit_data, "UNIT_RULES")),
                     "UNIT_KEYWORDS": copy.deepcopy(require_key(unit_data, "UNIT_KEYWORDS")),
                     "SHOOT_LEFT": shoot_left,

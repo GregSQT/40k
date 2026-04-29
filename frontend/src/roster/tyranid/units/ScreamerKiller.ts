@@ -30,7 +30,8 @@ export class ScreamerKiller extends EliteMeleeElite {
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 35; // Size of the base
   static ICON_SCALE = 2.6; // Size of the icon
-
+  static ILLUSTRATION_RATIO = 140; // Illustration size ratio in percent
+  
   constructor(name: string, startPos: [number, number]) {
     super(name, ScreamerKiller.HP_MAX, startPos);
   }

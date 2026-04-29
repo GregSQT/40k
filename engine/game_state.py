@@ -135,6 +135,7 @@ class GameStateManager:
             "VALUE": config["VALUE"],
             "ICON": config["ICON"],
             "ICON_SCALE": config["ICON_SCALE"],
+            "ILLUSTRATION_RATIO": require_key(config, "ILLUSTRATION_RATIO"),
             "BASE_SHAPE": config.get("BASE_SHAPE", "round"),
             "BASE_SIZE": config.get("BASE_SIZE", 1),
             "orientation": orientation_init,
@@ -152,7 +153,7 @@ class GameStateManager:
         required_uppercase = {
             "HP_CUR", "HP_MAX", "MOVE", "T", "ARMOR_SAVE", "INVUL_SAVE",
             "RNG_WEAPONS", "CC_WEAPONS",
-            "LD", "OC", "VALUE", "ICON", "ICON_SCALE", "UNIT_RULES", "UNIT_KEYWORDS",
+            "LD", "OC", "VALUE", "ICON", "ICON_SCALE", "ILLUSTRATION_RATIO", "UNIT_RULES", "UNIT_KEYWORDS",
             "SHOOT_LEFT", "ATTACK_LEFT"
         }
         
@@ -537,6 +538,7 @@ class GameStateManager:
                     "VALUE": full_unit_data["VALUE"],
                     "ICON": full_unit_data["ICON"],
                     "ICON_SCALE": full_unit_data["ICON_SCALE"],
+                    "ILLUSTRATION_RATIO": require_key(full_unit_data, "ILLUSTRATION_RATIO"),
                     "BASE_SHAPE": full_unit_data.get("BASE_SHAPE", "round"),
                     "BASE_SIZE": full_unit_data.get("BASE_SIZE", 1),
                     "orientation": orientation_u,

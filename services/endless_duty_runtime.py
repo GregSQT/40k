@@ -603,6 +603,13 @@ def _build_unit_from_registry(
     objective_control = _resolve_numeric_unit_field(engine_instance, unit_type, unit_data, "OC")
     value = _resolve_numeric_unit_field(engine_instance, unit_type, unit_data, "VALUE")
     icon_scale = _resolve_numeric_unit_field(engine_instance, unit_type, unit_data, "ICON_SCALE", allow_float=True)
+    illustration_ratio = _resolve_numeric_unit_field(
+        engine_instance,
+        unit_type,
+        unit_data,
+        "ILLUSTRATION_RATIO",
+        allow_float=True,
+    )
 
     return {
         "id": str(unit_id),
@@ -626,6 +633,7 @@ def _build_unit_from_registry(
         "VALUE": value,
         "ICON": require_key(unit_data, "ICON"),
         "ICON_SCALE": icon_scale,
+        "ILLUSTRATION_RATIO": illustration_ratio,
         "UNIT_RULES": copy.deepcopy(require_key(unit_data, "UNIT_RULES")),
         "UNIT_KEYWORDS": copy.deepcopy(require_key(unit_data, "UNIT_KEYWORDS")),
         "SHOOT_LEFT": shoot_left,

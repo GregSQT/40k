@@ -196,6 +196,7 @@ export interface APIGameState {
     VALUE: number;
     ICON: string;
     ICON_SCALE?: number;
+    ILLUSTRATION_RATIO: number;
     BASE_SIZE?: number | [number, number];
     BASE_SHAPE?: "round" | "oval" | "square";
     unitType: string;
@@ -2168,6 +2169,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (unit.ICON_SCALE === undefined || unit.ICON_SCALE === null) {
         throw new Error(`API ERROR: Unit ${unit.id} missing required ICON_SCALE field`);
       }
+      if (
+        typeof unit.ILLUSTRATION_RATIO !== "number" ||
+        !Number.isFinite(unit.ILLUSTRATION_RATIO) ||
+        unit.ILLUSTRATION_RATIO < 0
+      ) {
+        throw new Error(`API ERROR: Unit ${unit.id} missing non-negative ILLUSTRATION_RATIO field`);
+      }
       if (unit.SHOOT_LEFT === undefined || unit.SHOOT_LEFT === null) {
         throw new Error(`API ERROR: Unit ${unit.id} missing required SHOOT_LEFT field`);
       }
@@ -2306,6 +2314,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         manualWeaponSelected,
         ICON: unit.ICON,
         ICON_SCALE: unit.ICON_SCALE,
+        ILLUSTRATION_RATIO: unit.ILLUSTRATION_RATIO,
         BASE_SIZE: unit.BASE_SIZE,
         BASE_SHAPE: unit.BASE_SHAPE,
         SHOOT_LEFT: unit.SHOOT_LEFT,
@@ -4557,15 +4566,28 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               turn?: number;
               phase?: string;
               shooterId?: string;
+              attackerId?: string;
+              unitId?: string;
               targetId?: string;
               player?: number;
               damage?: number;
               target_died?: boolean;
               hitRoll?: number;
+              hit_roll?: number;
               woundRoll?: number;
+              wound_roll?: number;
               saveRoll?: number;
+              save_roll?: number;
               saveTarget?: number;
+              save_target?: number;
+              saveSkipped?: boolean;
+              save_skipped?: boolean;
+              saveSkipReason?: string;
+              save_skip_reason?: string;
+              devastatingWoundsApplied?: boolean;
+              devastating_wounds_applied?: boolean;
               weaponName?: string;
+              shootDetails?: Array<Record<string, unknown>>;
               action_name?: string;
               reward?: number;
               is_ai_action?: boolean;
@@ -4578,6 +4600,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               if (!shouldEmitActionLogEvent(logEntry as Record<string, unknown>)) {
                 return;
               }
+              const shootDetail = logEntry.shootDetails?.[0];
               window.dispatchEvent(
                 new CustomEvent("backendLogEvent", {
                   detail: {
@@ -4585,19 +4608,25 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                     message: logEntry.message,
                     turn: gameState?.turn || logEntry.turn, // Use live turn
                     phase: logEntry.phase,
-                    shooterId: logEntry.shooterId,
+                    shooterId: logEntry.shooterId || logEntry.attackerId || logEntry.unitId,
                     targetId: logEntry.targetId,
                     player: logEntry.player,
-                    damage: logEntry.damage,
-                    target_died: logEntry.target_died,
-                    hitRoll: logEntry.hitRoll,
-                    woundRoll: logEntry.woundRoll,
-                    saveRoll: logEntry.saveRoll,
-                    saveTarget: logEntry.saveTarget,
-                    saveSkipped: logEntry.saveSkipped || false,
-                    saveSkipReason: logEntry.saveSkipReason,
-                    devastatingWoundsApplied: logEntry.devastatingWoundsApplied || false,
+                    damage: logEntry.damage ?? shootDetail?.damageDealt,
+                    target_died: logEntry.target_died ?? shootDetail?.targetDied,
+                    hitRoll: logEntry.hitRoll || logEntry.hit_roll || shootDetail?.attackRoll,
+                    woundRoll:
+                      logEntry.woundRoll || logEntry.wound_roll || shootDetail?.strengthRoll,
+                    saveRoll: logEntry.saveRoll || logEntry.save_roll || shootDetail?.saveRoll,
+                    saveTarget:
+                      logEntry.saveTarget || logEntry.save_target || shootDetail?.saveTarget,
+                    saveSkipped: logEntry.saveSkipped || logEntry.save_skipped || false,
+                    saveSkipReason: logEntry.saveSkipReason || logEntry.save_skip_reason,
+                    devastatingWoundsApplied:
+                      logEntry.devastatingWoundsApplied ||
+                      logEntry.devastating_wounds_applied ||
+                      false,
                     weaponName: logEntry.weaponName, // MULTIPLE_WEAPONS_IMPLEMENTATION.md
+                    shootDetails: logEntry.shootDetails,
                     action_name: logEntry.action_name,
                     reward: logEntry.reward,
                     is_ai_action: logEntry.is_ai_action,
@@ -4854,15 +4883,28 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   turn?: number;
                   phase?: string;
                   shooterId?: string;
+                  attackerId?: string;
+                  unitId?: string;
                   targetId?: string;
                   player?: number;
                   damage?: number;
                   target_died?: boolean;
                   hitRoll?: number;
+                  hit_roll?: number;
                   woundRoll?: number;
+                  wound_roll?: number;
                   saveRoll?: number;
+                  save_roll?: number;
                   saveTarget?: number;
+                  save_target?: number;
+                  saveSkipped?: boolean;
+                  save_skipped?: boolean;
+                  saveSkipReason?: string;
+                  save_skip_reason?: string;
+                  devastatingWoundsApplied?: boolean;
+                  devastating_wounds_applied?: boolean;
                   weaponName?: string;
+                  shootDetails?: Array<Record<string, unknown>>;
                   action_name?: string;
                   reward?: number;
                   is_ai_action?: boolean;
@@ -4875,6 +4917,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   if (!shouldEmitActionLogEvent(logEntry as Record<string, unknown>)) {
                     return;
                   }
+                  const shootDetail = logEntry.shootDetails?.[0];
                   window.dispatchEvent(
                     new CustomEvent("backendLogEvent", {
                       detail: {
@@ -4882,19 +4925,25 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                         message: logEntry.message,
                         turn: logEntry.turn,
                         phase: logEntry.phase,
-                        shooterId: logEntry.shooterId,
+                        shooterId: logEntry.shooterId || logEntry.attackerId || logEntry.unitId,
                         targetId: logEntry.targetId,
                         player: logEntry.player,
-                        damage: logEntry.damage,
-                        target_died: logEntry.target_died,
-                        hitRoll: logEntry.hitRoll,
-                        woundRoll: logEntry.woundRoll,
-                        saveRoll: logEntry.saveRoll,
-                        saveTarget: logEntry.saveTarget,
-                        saveSkipped: logEntry.saveSkipped || false,
-                        saveSkipReason: logEntry.saveSkipReason,
-                        devastatingWoundsApplied: logEntry.devastatingWoundsApplied || false,
+                        damage: logEntry.damage ?? shootDetail?.damageDealt,
+                        target_died: logEntry.target_died ?? shootDetail?.targetDied,
+                        hitRoll: logEntry.hitRoll || logEntry.hit_roll || shootDetail?.attackRoll,
+                        woundRoll:
+                          logEntry.woundRoll || logEntry.wound_roll || shootDetail?.strengthRoll,
+                        saveRoll: logEntry.saveRoll || logEntry.save_roll || shootDetail?.saveRoll,
+                        saveTarget:
+                          logEntry.saveTarget || logEntry.save_target || shootDetail?.saveTarget,
+                        saveSkipped: logEntry.saveSkipped || logEntry.save_skipped || false,
+                        saveSkipReason: logEntry.saveSkipReason || logEntry.save_skip_reason,
+                        devastatingWoundsApplied:
+                          logEntry.devastatingWoundsApplied ||
+                          logEntry.devastating_wounds_applied ||
+                          false,
                         weaponName: logEntry.weaponName, // MULTIPLE_WEAPONS_IMPLEMENTATION.md
+                        shootDetails: logEntry.shootDetails,
                         action_name: logEntry.action_name,
                         reward: logEntry.reward,
                         is_ai_action: logEntry.is_ai_action,

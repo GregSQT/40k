@@ -9,6 +9,7 @@ interface UnitClass {
   MOVE: number;
   ICON: string;
   ICON_SCALE?: number;
+  ILLUSTRATION_RATIO: number;
   T?: number;
   ARMOR_SAVE?: number;
   INVUL_SAVE?: number;
@@ -54,7 +55,7 @@ async function initializeUnitRegistry(): Promise<void> {
 
         // Validate required UPPERCASE properties
         // MULTIPLE_WEAPONS_IMPLEMENTATION.md: At least one weapon required (RNG_WEAPONS or CC_WEAPONS)
-        const requiredProps = ["HP_MAX", "MOVE", "ICON"];
+        const requiredProps = ["HP_MAX", "MOVE", "ICON", "ILLUSTRATION_RATIO"];
         requiredProps.forEach((prop) => {
           if (UnitClass[prop] === undefined) {
             throw new Error(`Unit ${unitType} missing required UPPERCASE property: ${prop}`);
@@ -118,7 +119,7 @@ export function createUnit(params: {
 
   // Validate all UPPERCASE fields exist
   // MULTIPLE_WEAPONS_IMPLEMENTATION.md: At least one weapon required
-  const requiredFields = ["HP_MAX", "MOVE", "ICON"];
+  const requiredFields = ["HP_MAX", "MOVE", "ICON", "ILLUSTRATION_RATIO"];
   for (const field of requiredFields) {
     if (UnitClass[field] === undefined) {
       throw new Error(`Unit class ${params.type} missing required UPPERCASE field: ${field}`);
@@ -150,6 +151,7 @@ export function createUnit(params: {
     HP_MAX: UnitClass.HP_MAX,
     ICON: UnitClass.ICON,
     ICON_SCALE: UnitClass.ICON_SCALE,
+    ILLUSTRATION_RATIO: UnitClass.ILLUSTRATION_RATIO,
     BASE_SIZE: (UnitClass as Record<string, unknown>).BASE_SIZE as number | [number, number] | undefined,
     BASE_SHAPE: (UnitClass as Record<string, unknown>).BASE_SHAPE as "round" | "oval" | "square" | undefined,
     HP_CUR: UnitClass.HP_MAX, // Start at full health

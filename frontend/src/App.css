@@ -374,6 +374,7 @@ body {
   height: 100%;
   max-width: 240px;
   object-fit: contain;
+  object-position: center bottom;
   transform-origin: center bottom;
 }
 

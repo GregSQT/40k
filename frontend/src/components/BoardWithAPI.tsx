@@ -66,6 +66,7 @@ const UNIT_ILLUSTRATION_MIN_BASE_SIZE = 10;
 const UNIT_ILLUSTRATION_MAX_BASE_SIZE = 35;
 const UNIT_ILLUSTRATION_MIN_SCALE = 0.7;
 const UNIT_ILLUSTRATION_MAX_SCALE = 1;
+const UNIT_ILLUSTRATION_RATIO_PERCENT_BASE = 100;
 const DEFAULT_UNIT_ILLUSTRATION_SRC = "/icons/Endless duty.png";
 const DEFAULT_UNIT_ILLUSTRATION_DELAY_MS = 2000;
 const DEFAULT_UNIT_ILLUSTRATION_FADE_MS = 300;
@@ -84,6 +85,13 @@ function getUnitIllustrationScale(unit: Unit): number {
   if (typeof unit.BASE_SIZE !== "number") {
     throw new Error(`Unit ${unit.id} missing numeric BASE_SIZE for illustration scale`);
   }
+  if (
+    typeof unit.ILLUSTRATION_RATIO !== "number" ||
+    !Number.isFinite(unit.ILLUSTRATION_RATIO) ||
+    unit.ILLUSTRATION_RATIO < 0
+  ) {
+    throw new Error(`Unit ${unit.id} missing non-negative numeric ILLUSTRATION_RATIO`);
+  }
   const clampedBaseSize = Math.min(
     UNIT_ILLUSTRATION_MAX_BASE_SIZE,
     Math.max(UNIT_ILLUSTRATION_MIN_BASE_SIZE, unit.BASE_SIZE)
@@ -91,10 +99,10 @@ function getUnitIllustrationScale(unit: Unit): number {
   const normalizedBaseSize =
     (clampedBaseSize - UNIT_ILLUSTRATION_MIN_BASE_SIZE) /
     (UNIT_ILLUSTRATION_MAX_BASE_SIZE - UNIT_ILLUSTRATION_MIN_BASE_SIZE);
-  return (
+  const baseScale =
     UNIT_ILLUSTRATION_MIN_SCALE +
-    normalizedBaseSize * (UNIT_ILLUSTRATION_MAX_SCALE - UNIT_ILLUSTRATION_MIN_SCALE)
-  );
+    normalizedBaseSize * (UNIT_ILLUSTRATION_MAX_SCALE - UNIT_ILLUSTRATION_MIN_SCALE);
+  return baseScale * (unit.ILLUSTRATION_RATIO / UNIT_ILLUSTRATION_RATIO_PERCENT_BASE);
 }
 
 type EndlessDutySlotProfiles = {
