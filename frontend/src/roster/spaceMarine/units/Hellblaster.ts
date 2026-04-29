@@ -22,6 +22,7 @@ export class Hellblaster extends TroopRangeElite {
   static RNG_WEAPONS = getWeapons(Hellblaster.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["close_combat_weapon"];
   static CC_WEAPONS = getWeapons(Hellblaster.CC_WEAPON_CODES);
+  static ILLUSTRATION_RATIO = 95; // Illustration size ratio in percent
 
   // UNIT RULES
   static UNIT_RULES = [
