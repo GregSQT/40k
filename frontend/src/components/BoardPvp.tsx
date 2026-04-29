@@ -373,7 +373,7 @@ const BOARD_ZOOM_MAX = 2.5;
 const BOARD_ZOOM_SLIDER_STEP = 0.05;
 const BOARD_ZOOM_WHEEL_IN_FACTOR = 1.1;
 const BOARD_ZOOM_WHEEL_OUT_FACTOR = 1 / BOARD_ZOOM_WHEEL_IN_FACTOR;
-const UNIT_ILLUSTRATION_HOVER_DELAY_MS = 500;
+const UNIT_ILLUSTRATION_HOVER_DELAY_MS = 100;
 
 function clampBoardZoom(value: number): number {
   return Math.min(BOARD_ZOOM_MAX, Math.max(BOARD_ZOOM_MIN, value));

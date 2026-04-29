@@ -3681,31 +3681,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   const pileInCellsOverride = useMemo(() => {
     if (gameState?.phase === "fight" && mode === "pileInPreview") {
-      const fp = gameState.fight_pile_in_footprint_zone;
-      if (Array.isArray(fp) && fp.length > 0) {
-        return fp.map((d): { col: number; row: number } => {
-          if (Array.isArray(d) && d.length >= 2) {
-            return { col: Number(d[0]), row: Number(d[1]) };
-          }
-          const o = d as unknown as { col: number; row: number };
-          return { col: Number(o.col), row: Number(o.row) };
-        });
-      }
       if (pileInDestinations.length > 0) {
         return pileInDestinations;
       }
     }
     if (gameState?.phase === "fight" && mode === "consolidationPreview") {
-      const fp = gameState.fight_consolidation_footprint_zone;
-      if (Array.isArray(fp) && fp.length > 0) {
-        return fp.map((d): { col: number; row: number } => {
-          if (Array.isArray(d) && d.length >= 2) {
-            return { col: Number(d[0]), row: Number(d[1]) };
-          }
-          const o = d as unknown as { col: number; row: number };
-          return { col: Number(o.col), row: Number(o.row) };
-        });
-      }
       if (pileInDestinations.length > 0) {
         return pileInDestinations;
       }

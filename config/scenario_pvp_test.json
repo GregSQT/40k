@@ -14,6 +14,8 @@
     {"id": 102, "unit_type": "Termagant", "player": 2, "col": 80, "row": 90},
     {"id": 103, "unit_type": "Genestealer", "player": 2, "col": 100, "row": 80},
     {"id": 104, "unit_type": "ScreamerKiller", "player": 2, "col": 90, "row": 120},
-    {"id": 105, "unit_type": "Hormagaunt", "player": 2, "col": 220, "row": 245}
+    {"id": 105, "unit_type": "Hormagaunt", "player": 2, "col": 220, "row": 245},
+    {"id": 106, "unit_type": "TyranidWarriorMelee", "player": 2, "col": 270, "row": 110}
+
   ]
 }

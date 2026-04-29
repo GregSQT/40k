@@ -69,7 +69,8 @@ const UNIT_ILLUSTRATION_MAX_SCALE = 1;
 const DEFAULT_UNIT_ILLUSTRATION_SRC = "/icons/Endless duty.png";
 const DEFAULT_UNIT_ILLUSTRATION_DELAY_MS = 2000;
 const DEFAULT_UNIT_ILLUSTRATION_FADE_MS = 300;
-const UNIT_ILLUSTRATION_FADE_OUT_MS = 1000;
+const UNIT_ILLUSTRATION_FADE_OUT_MS = 100;
+const UNIT_ILLUSTRATION_SWAP_FADE_MS = 100;
 
 function getUnitIllustrationSrc(unit: Unit): string {
   const unitName = unit.NAME ?? unit.type;
@@ -1387,6 +1388,12 @@ export const BoardWithAPI: React.FC = () => {
   const [showDefaultIllustration, setShowDefaultIllustration] = useState(false);
   const [displayedIllustrationUnit, setDisplayedIllustrationUnit] = useState<Unit | null>(null);
   const [showDisplayedIllustrationUnit, setShowDisplayedIllustrationUnit] = useState(false);
+  const [displayedIllustrationFadeMs, setDisplayedIllustrationFadeMs] = useState(
+    UNIT_ILLUSTRATION_FADE_OUT_MS
+  );
+  const displayedIllustrationUnitRef = useRef<Unit | null>(null);
+  const pendingIllustrationUnitRef = useRef<Unit | null>(null);
+  const preloadedIllustrationSrcRef = useRef<Set<string>>(new Set());
 
   // Track UnitStatusTable collapse states
   const [, setPlayer1Collapsed] = useState(false);
@@ -2231,15 +2238,84 @@ export const BoardWithAPI: React.FC = () => {
   }, [apiProps.gameState?.units, apiProps.selectedUnitId, illustrationPreviewUnitId]);
 
   useEffect(() => {
+    if (typeof Image === "undefined") {
+      return;
+    }
+    const statusUnits = apiProps.gameState?.units ?? [];
+    const sources = new Set<string>([DEFAULT_UNIT_ILLUSTRATION_SRC]);
+    for (const unit of statusUnits) {
+      if (unit.HP_CUR > 0) {
+        sources.add(getUnitIllustrationSrc(unit));
+      }
+    }
+    for (const src of sources) {
+      if (preloadedIllustrationSrcRef.current.has(src)) {
+        continue;
+      }
+      preloadedIllustrationSrcRef.current.add(src);
+      const image = new Image();
+      image.decoding = "async";
+      image.src = src;
+      if (typeof image.decode === "function") {
+        void image.decode().catch(() => undefined);
+      }
+    }
+  }, [apiProps.gameState?.units]);
+
+  useEffect(() => {
+    const currentDisplayedUnit = displayedIllustrationUnitRef.current;
+
     if (illustrationPreviewUnit) {
-      setDisplayedIllustrationUnit(illustrationPreviewUnit);
-      setShowDisplayedIllustrationUnit(true);
       setShowDefaultIllustration(false);
+      const isReplacingDisplayedUnit =
+        currentDisplayedUnit !== null &&
+        String(currentDisplayedUnit.id) !== String(illustrationPreviewUnit.id);
+
+      if (isReplacingDisplayedUnit) {
+        pendingIllustrationUnitRef.current = illustrationPreviewUnit;
+        setDisplayedIllustrationFadeMs(UNIT_ILLUSTRATION_SWAP_FADE_MS);
+        setShowDisplayedIllustrationUnit(false);
+        return;
+      }
+
+      pendingIllustrationUnitRef.current = null;
+      setDisplayedIllustrationFadeMs(UNIT_ILLUSTRATION_SWAP_FADE_MS);
+      if (currentDisplayedUnit === null) {
+        setShowDisplayedIllustrationUnit(false);
+        setDisplayedIllustrationUnit(illustrationPreviewUnit);
+        displayedIllustrationUnitRef.current = illustrationPreviewUnit;
+        let secondAnimationFrameId: number | null = null;
+        const firstAnimationFrameId = window.requestAnimationFrame(() => {
+          secondAnimationFrameId = window.requestAnimationFrame(() => {
+            setShowDisplayedIllustrationUnit(true);
+          });
+        });
+        return () => {
+          window.cancelAnimationFrame(firstAnimationFrameId);
+          if (secondAnimationFrameId !== null) {
+            window.cancelAnimationFrame(secondAnimationFrameId);
+          }
+        };
+      }
+
+      setDisplayedIllustrationUnit(illustrationPreviewUnit);
+      displayedIllustrationUnitRef.current = illustrationPreviewUnit;
+      setShowDisplayedIllustrationUnit(true);
+      return;
+    }
+
+    pendingIllustrationUnitRef.current = null;
+    setDisplayedIllustrationFadeMs(UNIT_ILLUSTRATION_FADE_OUT_MS);
+    if (currentDisplayedUnit === null) {
       return;
     }
     setShowDisplayedIllustrationUnit(false);
     const timerId = window.setTimeout(() => {
-      setDisplayedIllustrationUnit(null);
+      if (displayedIllustrationUnitRef.current === currentDisplayedUnit) {
+        setDisplayedIllustrationUnit(null);
+        displayedIllustrationUnitRef.current = null;
+        setShowDisplayedIllustrationUnit(false);
+      }
     }, UNIT_ILLUSTRATION_FADE_OUT_MS);
     return () => {
       window.clearTimeout(timerId);
@@ -2615,16 +2691,40 @@ export const BoardWithAPI: React.FC = () => {
     return parsed;
   })();
 
-  const renderUnitIllustrationPreview = (unit: Unit, visible: boolean): React.ReactElement => (
+  const renderUnitIllustrationPreview = (
+    unit: Unit,
+    visible: boolean,
+    fadeMs: number
+  ): React.ReactElement => (
     <aside className="unit-illustration-preview" aria-label={`Illustration unit ${unit.id}`}>
       <img
         className="unit-illustration-preview__image"
         src={getUnitIllustrationSrc(unit)}
         alt={`Unit ${unit.id} illustration`}
+        onTransitionEnd={(event) => {
+          if (event.propertyName !== "opacity" || showDisplayedIllustrationUnit) {
+            return;
+          }
+          const pendingUnit = pendingIllustrationUnitRef.current;
+          if (!pendingUnit) {
+            return;
+          }
+          pendingIllustrationUnitRef.current = null;
+          setDisplayedIllustrationUnit(pendingUnit);
+          displayedIllustrationUnitRef.current = pendingUnit;
+          setDisplayedIllustrationFadeMs(UNIT_ILLUSTRATION_SWAP_FADE_MS);
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              setShowDisplayedIllustrationUnit(true);
+            });
+          });
+        }}
         style={{
           opacity: visible ? 1 : 0,
           transform: `scale(${getUnitIllustrationScale(unit)})`,
-          transition: `opacity ${UNIT_ILLUSTRATION_FADE_OUT_MS}ms ease`,
+          transition: `opacity ${fadeMs}ms ease`,
+          willChange: "opacity",
+          backfaceVisibility: "hidden",
         }}
       />
     </aside>
@@ -2934,7 +3034,11 @@ export const BoardWithAPI: React.FC = () => {
       <ErrorBoundary fallback={<div>Failed to load game log</div>}>
         <div className="game-log-with-illustration">
           {displayedIllustrationUnit ? (
-            renderUnitIllustrationPreview(displayedIllustrationUnit, showDisplayedIllustrationUnit)
+            renderUnitIllustrationPreview(
+              displayedIllustrationUnit,
+              showDisplayedIllustrationUnit,
+              displayedIllustrationFadeMs
+            )
           ) : (
             <aside className="unit-illustration-preview" aria-label="Endless Duty illustration">
               <img
