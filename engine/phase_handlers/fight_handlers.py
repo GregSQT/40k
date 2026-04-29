@@ -29,6 +29,7 @@ from engine.hex_union_boundary_polygon import (
     compute_move_preview_mask_loops_world,
     _board_hex_radius_margin,
 )
+from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH
 from .shared_utils import (
     calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge,
     ACTION, PASS, ERROR, FIGHT,
@@ -47,6 +48,7 @@ from .shared_utils import (
 
 _FIGHT_MASK_LOOP_CACHE_MAX = 64
 _fight_mask_loop_cache: "OrderedDict[Tuple[str, frozenset, float, float], Optional[List[List[Tuple[float, float]]]]]" = OrderedDict()
+_ADJACENT_EDGE_GAP_TOLERANCE_NORM = ENGAGEMENT_NORM_HEX_WIDTH
 
 
 def _fight_sync_footprint_mask_loops(
@@ -498,11 +500,10 @@ def _fight_pile_in_anchor_adjacent_to_enemy_footprint(
     """
     True si l'empreinte à cette ancre est dans la zone d'engagement d'une cible.
 
-    Pour deux socles ronds, utiliser l'écart euclidien bord-à-bord (cercle réel) ;
-    l'adjacence par cellules produit une couronne hexagonale visible dans le preview.
+    Pour deux socles ronds, "adjacent" signifie collé bord-à-bord, pas simplement
+    dans la zone d'engagement (10 sous-hexes autour de l'empreinte).
     """
     from engine.hex_utils import (
-        engagement_minimum_clearance_norm,
         euclidean_edge_clearance_round_round,
         min_distance_between_sets,
     )
@@ -514,7 +515,6 @@ def _fight_pile_in_anchor_adjacent_to_enemy_footprint(
     unit_id_str = str(unit["id"])
     target_filter = {str(t) for t in target_ids} if target_ids is not None else None
     cc_range = get_melee_range(game_state)
-    engagement_clearance = engagement_minimum_clearance_norm(cc_range)
     unit_shape = unit.get("BASE_SHAPE", "round")
     unit_base_size = unit.get("BASE_SIZE", 1)
     for enemy_id, cache_entry in units_cache.items():
@@ -541,7 +541,10 @@ def _fight_pile_in_anchor_adjacent_to_enemy_footprint(
                 int(cache_entry["row"]),
                 enemy_base_size,
             )
-            if 0 <= gap <= engagement_clearance:
+            # Le non-chevauchement est déjà garanti par is_footprint_placement_valid
+            # lors de la construction du pool. Ici "adjacent" = bord-à-bord collé,
+            # pas "dans la zone d'engagement".
+            if gap <= _ADJACENT_EDGE_GAP_TOLERANCE_NORM:
                 return True
             continue
         if min_distance_between_sets(candidate_fp, enemy_fp, max_distance=cc_range) <= cc_range:
