@@ -351,13 +351,21 @@ body {
   min-width: 0;
 }
 
+.game-log-with-illustration .game-log {
+  height: 280px;
+  margin-top: 0;
+  box-sizing: border-box;
+}
+
 .unit-illustration-preview {
   flex: 0 0 240px;
   width: 240px;
   height: 280px;
   max-width: 240px;
   overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: var(--radius-lg);
+  box-sizing: border-box;
 }
 
 .unit-illustration-preview__image {
