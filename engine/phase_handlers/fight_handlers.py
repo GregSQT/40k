@@ -10,7 +10,7 @@ CRITICAL: On ne tire PAS en phase de fight. La règle PISTOL permet de tirer en 
 de SHOOTING même si l'unité est adjacente à une unité ennemie (exception au "engaged").
 """
 
-from collections import deque
+from collections import deque, OrderedDict
 from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation
 from shared.data_validation import require_key
@@ -25,6 +25,10 @@ from engine.combat_utils import (
     set_unit_coordinates,
 )
 from engine.game_state import GameStateManager
+from engine.hex_union_boundary_polygon import (
+    compute_move_preview_mask_loops_world,
+    _board_hex_radius_margin,
+)
 from .shared_utils import (
     calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge,
     ACTION, PASS, ERROR, FIGHT,
@@ -40,6 +44,31 @@ from .shared_utils import (
     update_units_cache_position,
     update_enemy_adjacent_caches_after_unit_move,
 )
+
+_FIGHT_MASK_LOOP_CACHE_MAX = 64
+_fight_mask_loop_cache: "OrderedDict[Tuple[str, frozenset, float, float], Optional[List[List[Tuple[float, float]]]]]" = OrderedDict()
+
+
+def _fight_sync_footprint_mask_loops(
+    game_state: Dict[str, Any],
+    footprint_zone: Set[Tuple[int, int]],
+    *,
+    state_key: str,
+) -> None:
+    """Expose un contour lissé de l'empreinte fight pour le client (pile in / consolidation)."""
+    hr, margin = _board_hex_radius_margin(game_state)
+    cache_key = (state_key, frozenset(footprint_zone), float(hr), float(margin))
+    if cache_key in _fight_mask_loop_cache:
+        game_state[state_key] = _fight_mask_loop_cache[cache_key]
+        _fight_mask_loop_cache.move_to_end(cache_key)
+        return
+
+    loops = compute_move_preview_mask_loops_world(footprint_zone, game_state)
+    game_state[state_key] = loops
+    _fight_mask_loop_cache[cache_key] = loops
+    _fight_mask_loop_cache.move_to_end(cache_key)
+    while len(_fight_mask_loop_cache) > _FIGHT_MASK_LOOP_CACHE_MAX:
+        _fight_mask_loop_cache.popitem(last=False)
 
 
 def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
@@ -464,24 +493,58 @@ def _fight_pile_in_anchor_adjacent_to_enemy_footprint(
     unit: Dict[str, Any],
     anchor_col: int,
     anchor_row: int,
+    target_ids: Optional[List[str]] = None,
 ) -> bool:
     """
-    True si l'empreinte à cette ancre est « collée » à au moins un ennemi
-    (distance minimale entre empreintes == 1), comme ``_fight_unit_is_hex_adjacent_to_enemy_footprint``.
+    True si l'empreinte à cette ancre est dans la zone d'engagement d'une cible.
+
+    Pour deux socles ronds, utiliser l'écart euclidien bord-à-bord (cercle réel) ;
+    l'adjacence par cellules produit une couronne hexagonale visible dans le preview.
     """
-    from engine.hex_utils import min_distance_between_sets
+    from engine.hex_utils import (
+        engagement_minimum_clearance_norm,
+        euclidean_edge_clearance_round_round,
+        min_distance_between_sets,
+    )
+    from engine.utils.weapon_helpers import get_melee_range
 
     candidate_fp = compute_candidate_footprint(int(anchor_col), int(anchor_row), unit, game_state)
     units_cache = require_key(game_state, "units_cache")
     unit_player = int(unit["player"]) if unit["player"] is not None else None
     unit_id_str = str(unit["id"])
+    target_filter = {str(t) for t in target_ids} if target_ids is not None else None
+    cc_range = get_melee_range(game_state)
+    engagement_clearance = engagement_minimum_clearance_norm(cc_range)
+    unit_shape = unit.get("BASE_SHAPE", "round")
+    unit_base_size = unit.get("BASE_SIZE", 1)
     for enemy_id, cache_entry in units_cache.items():
         if str(enemy_id) == unit_id_str:
+            continue
+        if target_filter is not None and str(enemy_id) not in target_filter:
             continue
         if int(cache_entry["player"]) == unit_player:
             continue
         enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-        if min_distance_between_sets(candidate_fp, enemy_fp, max_distance=1) <= 1:
+        enemy_shape = cache_entry.get("BASE_SHAPE", "round")
+        enemy_base_size = cache_entry.get("BASE_SIZE", 1)
+        if (
+            unit_shape == "round"
+            and enemy_shape == "round"
+            and isinstance(unit_base_size, int)
+            and isinstance(enemy_base_size, int)
+        ):
+            gap = euclidean_edge_clearance_round_round(
+                int(anchor_col),
+                int(anchor_row),
+                unit_base_size,
+                int(cache_entry["col"]),
+                int(cache_entry["row"]),
+                enemy_base_size,
+            )
+            if 0 <= gap <= engagement_clearance:
+                return True
+            continue
+        if min_distance_between_sets(candidate_fp, enemy_fp, max_distance=cc_range) <= cc_range:
             return True
     return False
 
@@ -541,7 +604,7 @@ def _fight_build_pile_in_valid_destinations(
     contact_destinations = [
         p
         for p in valid_destinations
-        if _fight_pile_in_anchor_adjacent_to_enemy_footprint(game_state, unit, p[0], p[1])
+        if _fight_pile_in_anchor_adjacent_to_enemy_footprint(game_state, unit, p[0], p[1], closest_ids)
     ]
     if contact_destinations:
         return contact_destinations
@@ -627,6 +690,7 @@ def _fight_clear_consolidation_state(game_state: Dict[str, Any]) -> None:
     game_state.pop("fight_consolidation_pending", None)
     game_state.pop("valid_consolidation_destinations", None)
     game_state.pop("fight_consolidation_footprint_zone", None)
+    game_state.pop("fight_consolidation_footprint_mask_loops", None)
     game_state.pop("fight_consolidation_branch", None)
     game_state.pop("_fight_consolidation_ctx", None)
 
@@ -932,8 +996,12 @@ def _fight_try_begin_consolidation_after_attacks(
 
     game_state["fight_consolidation_pending"] = True
     game_state["valid_consolidation_destinations"] = list(destinations)
-    game_state["fight_consolidation_footprint_zone"] = list(
-        _fight_compute_pile_in_footprint_zone(game_state, unit, destinations)
+    consolidation_fp_zone = _fight_compute_pile_in_footprint_zone(game_state, unit, destinations)
+    game_state["fight_consolidation_footprint_zone"] = list(consolidation_fp_zone)
+    _fight_sync_footprint_mask_loops(
+        game_state,
+        consolidation_fp_zone,
+        state_key="fight_consolidation_footprint_mask_loops",
     )
     game_state["fight_consolidation_branch"] = branch
     game_state["_fight_consolidation_ctx"] = {
@@ -1083,6 +1151,7 @@ def _handle_fight_pile_in_resolution(
     game_state["_fight_pile_in_ctx"] = None
     game_state.pop("valid_pile_in_destinations", None)
     game_state.pop("fight_pile_in_footprint_zone", None)
+    game_state.pop("fight_pile_in_footprint_mask_loops", None)
 
     valid_targets = _fight_build_valid_target_pool(game_state, unit)
     if not valid_targets:
@@ -1874,6 +1943,7 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
     game_state["fight_pile_in_pending"] = False
     game_state.pop("valid_pile_in_destinations", None)
     game_state.pop("fight_pile_in_footprint_zone", None)
+    game_state.pop("fight_pile_in_footprint_mask_loops", None)
     game_state.pop("_fight_pile_in_ctx", None)
     _fight_clear_consolidation_state(game_state)
 
@@ -1901,8 +1971,12 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
                 else:
                     game_state["fight_pile_in_pending"] = True
                     game_state["valid_pile_in_destinations"] = pile_dests
-                    game_state["fight_pile_in_footprint_zone"] = list(
-                        _fight_compute_pile_in_footprint_zone(game_state, unit, pile_dests)
+                    pile_in_fp_zone = _fight_compute_pile_in_footprint_zone(game_state, unit, pile_dests)
+                    game_state["fight_pile_in_footprint_zone"] = list(pile_in_fp_zone)
+                    _fight_sync_footprint_mask_loops(
+                        game_state,
+                        pile_in_fp_zone,
+                        state_key="fight_pile_in_footprint_mask_loops",
                     )
                     game_state["_fight_pile_in_ctx"] = {
                         "d_min": d_min,

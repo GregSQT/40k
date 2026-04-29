@@ -3605,6 +3605,22 @@ export default function Board({
         : undefined;
     const unitForFootprintBase = unitForMoveFootprint ?? selectedUnit;
 
+    const activeFootprintMaskLoops =
+      effectivePhase === "fight" && mode === "pileInPreview"
+        ? normalizeMaskLoopsFromApi(
+            (gameState as { fight_pile_in_footprint_mask_loops?: unknown })
+              .fight_pile_in_footprint_mask_loops,
+          )
+        : effectivePhase === "fight" && mode === "consolidationPreview"
+          ? normalizeMaskLoopsFromApi(
+              (gameState as { fight_consolidation_footprint_mask_loops?: unknown })
+                .fight_consolidation_footprint_mask_loops,
+            )
+          : normalizeMaskLoopsFromApi(
+              (gameState as { move_preview_footprint_mask_loops?: unknown })
+                .move_preview_footprint_mask_loops,
+            );
+
     const drawBoardOptions: DrawBoardOptions = {
       availableCells: effectiveAvailableCells,
       attackCells,
@@ -3628,9 +3644,7 @@ export default function Board({
       moveDestinationAnchorsFromState,
       movePreviewFootprintSpanFromState: (gameState as { move_preview_footprint_span?: number | null })
         .move_preview_footprint_span,
-      movePreviewFootprintMaskLoops: normalizeMaskLoopsFromApi(
-        (gameState as { move_preview_footprint_mask_loops?: unknown }).move_preview_footprint_mask_loops,
-      ),
+      movePreviewFootprintMaskLoops: activeFootprintMaskLoops,
       pendingMoveAfterShooting,
       chargeDestPoolRef,
       selectedUnitBaseSize: unitForFootprintBase

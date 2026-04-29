@@ -303,8 +303,12 @@ export interface GameState {
   move_preview_footprint_mask_loops?: Array<Array<[number, number]>>;
   /** Phase fight : union des hexes occupés par l'empreinte pour chaque ancre pile in valide (comme move_preview_footprint_zone). */
   fight_pile_in_footprint_zone?: Array<[number, number]>;
+  /** Contours masque pile in (coord. monde), lissé comme move_preview_footprint_mask_loops. */
+  fight_pile_in_footprint_mask_loops?: Array<Array<[number, number]>>;
   /** Consolidation après attaques : union des empreintes valides (moteur). */
   fight_consolidation_footprint_zone?: Array<[number, number]>;
+  /** Contours masque consolidation (coord. monde), lissé comme move_preview_footprint_mask_loops. */
+  fight_consolidation_footprint_mask_loops?: Array<Array<[number, number]>>;
   active_shooting_unit?: string; // Active unit ID in shooting phase
   active_fight_unit?: string; // Active unit ID in fight phase
   active_charge_unit?: string; // Active unit ID in charge phase

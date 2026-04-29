@@ -1111,7 +1111,8 @@ export const drawBoard = (
     const useMoveDestPoolCircleLayer =
       (interactionPhase === "move" ||
         useAdvanceMovePoolLikeMove ||
-        usePostShootMovePoolLikeMove) &&
+        usePostShootMovePoolLikeMove ||
+        usePileInPoolLikeMoveHoisted) &&
       !!movePoolForDiskDraw &&
       movePoolForDiskDraw.size > 0;
 
@@ -1364,7 +1365,9 @@ export const drawBoard = (
       const poolFillColor = useAdvanceMovePoolLikeMove ? advanceZoneFillColor : HIGHLIGHT_COLOR;
       const moveSpriteName = useAdvanceMovePoolLikeMove
         ? "advance-dest-pool"
-        : "move-dest-pool";
+        : usePileInPoolLikeMoveHoisted
+          ? "fight-pile-in-dest-pool"
+          : "move-dest-pool";
       // Preview move/advance : masque polygone (Chaikin) + blur alpha comme avant ;
       // calque coloré = rectangle sur les bornes du masque (plus de disque).
       // Pas de fallback : si ``selectedUnitAnchor`` absent, bug côté caller (BoardPvp).

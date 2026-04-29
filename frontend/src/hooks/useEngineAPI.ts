@@ -250,7 +250,9 @@ export interface APIGameState {
   move_preview_border?: Array<[number, number]>;
   move_preview_footprint_zone?: Array<[number, number]>;
   fight_pile_in_footprint_zone?: Array<[number, number]>;
+  fight_pile_in_footprint_mask_loops?: Array<Array<[number, number]>>;
   fight_consolidation_footprint_zone?: Array<[number, number]>;
+  fight_consolidation_footprint_mask_loops?: Array<Array<[number, number]>>;
   active_shooting_unit?: string;
   active_fight_unit?: string;
   pve_mode?: boolean;
@@ -1001,6 +1003,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setPileInDestinations([]);
     moveDestPoolRef.current = new Set();
     footprintZoneRef.current = new Set();
+    footprintMaskLoopsRef.current = null;
     setMode("select");
     setSelectedUnitId(null);
   }, []);
@@ -1876,6 +1879,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               }
             }
             footprintZoneRef.current = fpSet;
+            footprintMaskLoopsRef.current = normalizeMaskLoopsFromApi(
+              (gsPi as { fight_pile_in_footprint_mask_loops?: unknown })
+                .fight_pile_in_footprint_mask_loops,
+            );
             const uid = parseInt(String(data.result.unitId ?? data.game_state.active_fight_unit), 10);
             setSelectedUnitId(uid);
             setMode("pileInPreview");
@@ -1909,6 +1916,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 }
               }
               footprintZoneRef.current = fpSet;
+              footprintMaskLoopsRef.current = normalizeMaskLoopsFromApi(
+                (gsC as { fight_consolidation_footprint_mask_loops?: unknown })
+                  .fight_consolidation_footprint_mask_loops,
+              );
               const uid = parseInt(String(data.result.unitId ?? data.game_state.active_fight_unit), 10);
               setSelectedUnitId(uid);
               setMode("consolidationPreview");
@@ -3836,7 +3847,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       move_preview_footprint_mask_loops: (gameState as { move_preview_footprint_mask_loops?: unknown })
         .move_preview_footprint_mask_loops,
       fight_pile_in_footprint_zone: gameState.fight_pile_in_footprint_zone,
+      fight_pile_in_footprint_mask_loops: gameState.fight_pile_in_footprint_mask_loops,
       fight_consolidation_footprint_zone: gameState.fight_consolidation_footprint_zone,
+      fight_consolidation_footprint_mask_loops: gameState.fight_consolidation_footprint_mask_loops,
       active_shooting_unit: gameState.active_shooting_unit,
       active_fight_unit: gameState.active_fight_unit,
       units_cache: gameState.units_cache,
