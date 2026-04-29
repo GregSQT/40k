@@ -407,15 +407,35 @@ export const GameLog: React.FC<GameLogProps> = ({
 
   return (
     <div className="game-log">
-      <div ref={headerRef} className="game-log__header">
-        <h3 className="game-log__title">Game Log</h3>
-        <div className="game-log__count">{events.length} events</div>
+      <div
+        ref={headerRef}
+        className="game-log__header"
+        style={{
+          backgroundColor: "#059669",
+          borderRadius: "6px",
+          padding: "4px 8px",
+          position: "relative",
+        }}
+      >
+        <h3 className="game-log__title" style={{ color: "#FFFFFF", flex: 1, textAlign: "left" }}>
+          Game Log
+        </h3>
+        <div
+          className="game-log__count"
+          style={{
+            alignItems: "center",
+            display: "inline-flex",
+            justifyContent: "center",
+            minHeight: "24px",
+            position: "absolute",
+            right: "8px",
+          }}
+        >
+          {events.length} events
+        </div>
       </div>
 
-      <div
-        className="game-log__content"
-        style={{ height: `${availableHeight}px`, flex: `0 0 ${availableHeight}px` }}
-      >
+      <div className="game-log__content" style={{ flex: "1 1 auto", minHeight: 0 }}>
         {displayedEvents.length === 0 ? (
           <div className="game-log__empty" style={{ height: "100%" }}>
             No events yet. Start playing to see the action log!
@@ -425,7 +445,7 @@ export const GameLog: React.FC<GameLogProps> = ({
             ref={eventsContainerRef}
             className="game-log__events"
             style={{
-              height: `${availableHeight}px`,
+              height: "100%",
               overflow: "auto",
             }}
           >
