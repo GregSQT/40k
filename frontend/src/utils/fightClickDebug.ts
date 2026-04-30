@@ -2,6 +2,9 @@
  * Logs de diagnostic pour les clics / attaques CC (phase fight).
  * - En build Vite dev : actif par défaut.
  * - Sinon : `localStorage.setItem("DEBUG_FIGHT_CLICK", "1")` puis recharger.
+ *
+ * Les traces **Game Log / action_logs** (`[ACTION_LOG_TRACE]` dans la console) suivent le même
+ * critère, ou forcer uniquement ces traces avec `localStorage.setItem("DEBUG_ACTION_LOG", "1")`.
  */
 export function isFightClickDebugEnabled(): boolean {
   try {

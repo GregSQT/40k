@@ -10,6 +10,8 @@ CRITICAL: On ne tire PAS en phase de fight. La règle PISTOL permet de tirer en 
 de SHOOTING même si l'unité est adjacente à une unité ennemie (exception au "engaged").
 """
 
+import os
+import sys
 from collections import deque, OrderedDict
 from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation
@@ -3208,6 +3210,18 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
         "save_ability_display_name": save_ability_display_name,
         "timestamp": "server_time"
     })
+
+    if os.environ.get("W40K_ACTION_LOG_TRACE", "").strip().lower() in ("1", "true", "yes", "on"):
+        cp = game_state.get("current_player")
+        fsub = game_state.get("fight_subphase")
+        alt = game_state.get("fight_alternating_turn")
+        sys.stderr.write(
+            "[ACTION_LOG_TRACE] fight_handlers _execute_fight_attack_sequence append combat "
+            f"attackerId={attacker_id} targetId={target_id} player={attacker.get('player')} "
+            f"current_player={cp} fight_subphase={fsub!r} fight_alternating_turn={alt!r} "
+            f"action_logs_len={len(game_state['action_logs'])}\n"
+        )
+        sys.stderr.flush()
 
     # Add separate death log event if target was killed
     if target_died:

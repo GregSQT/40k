@@ -74,18 +74,35 @@ export function determineActivationClickTarget(
     return "enemy";
   }
 
-  // fight
-  const activeFighterId = gameState.active_fight_unit
-    ? parseInt(String(gameState.active_fight_unit), 10)
-    : null;
+  // fight — ennemi / allié relatif au **combattant actif**, pas au ``current_player`` (propriétaire du tour).
+  // Sinon, en alternance (ex. P2 actif alors que ``current_player`` vaut 1), un clic sur une unité P1
+  // est classé « friendly » au lieu de « target » et le moteur ne résout pas l’attaque CC.
+  let activeFighterId: number | null = null;
+  if (gameState.active_fight_unit != null && String(gameState.active_fight_unit).trim() !== "") {
+    const parsed = parseInt(String(gameState.active_fight_unit), 10);
+    if (Number.isFinite(parsed)) {
+      activeFighterId = parsed;
+    }
+  }
+
+  const poolIds = getFightActivationPoolUnitIds(gameState);
+  if (poolIds.includes(unitId)) {
+    return "friendly_unit";
+  }
+
+  if (activeFighterId != null && unitId === activeFighterId) {
+    return "active_unit";
+  }
+
+  const attackerUnit =
+    activeFighterId != null
+      ? gameState.units.find((u) => parseInt(String(u.id), 10) === activeFighterId)
+      : undefined;
+  if (attackerUnit != null && unit.player !== attackerUnit.player) {
+    return "target";
+  }
+
   if (unit.player === currentPlayer) {
-    if (unitId === activeFighterId) {
-      return "active_unit";
-    }
-    const poolIds = getFightActivationPoolUnitIds(gameState);
-    if (poolIds.includes(unitId)) {
-      return "friendly_unit";
-    }
     return "friendly";
   }
   return "target";

@@ -9,6 +9,14 @@ import { addHexKeysToSet } from "../utils/movePoolRefsSync";
 import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
 import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 import { logFightClick } from "../utils/fightClickDebug";
+import {
+  CROSS_ACTION_LOG_SUPPRESS_MS,
+  dedupeActionLogBatch,
+  isActionLogTraceEnabled,
+  logActionLogBatchTrace,
+  logActionLogEmitTrace,
+  shouldEmitActionLogEvent,
+} from "../utils/actionLogClient";
 import type { ActivationPointerGameState } from "../utils/activationClickTarget";
 import {
   buildActivationPointerPayload,
@@ -62,54 +70,6 @@ const RETREAT_ALERT_STORAGE_KEY = "retreatAlertEnabled";
 
 // Prevent duplicate AI turn calls
 let aiTurnInProgress = false;
-
-/** Clé stable pour une entrée ``action_logs`` (évite doublons 1 vs "1" sur ``unitId``). */
-function actionLogDedupeKey(e: Record<string, unknown>): string {
-  const uidRaw = e.unitId ?? e.shooterId ?? e.attackerId;
-  const uid = uidRaw === undefined || uidRaw === null ? "" : String(uidRaw);
-  const typ = typeof e.type === "string" ? e.type : "";
-  const msg = typeof e.message === "string" ? e.message : "";
-  const ph = e.phase === undefined || e.phase === null ? "" : String(e.phase);
-  return [typ, msg, String(e.turn ?? ""), uid, ph].join("\u0001");
-}
-
-/**
- * Même réponse API : une ligne Game Log par entrée ``action_logs``.
- * Déduplication **dans le lot** (entrées identiques côte à côte).
- */
-function dedupeActionLogBatch<T extends Record<string, unknown>>(entries: T[]): T[] {
-  const seen = new Set<string>();
-  const out: T[] = [];
-  for (const e of entries) {
-    const key = actionLogDedupeKey(e);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(e);
-  }
-  return out;
-}
-
-const recentActionLogEmitAt = new Map<string, number>();
-const CROSS_ACTION_LOG_SUPPRESS_MS = 5000;
-const ACTION_LOG_EMIT_MAP_MAX = 300;
-
-/** Évite la même ligne sur **plusieurs** réponses HTTP rapprochées (move + ``advance_phase`` chaîné, etc.). */
-function shouldEmitActionLogEvent(entry: Record<string, unknown>): boolean {
-  const key = actionLogDedupeKey(entry);
-  const now = Date.now();
-  const last = recentActionLogEmitAt.get(key);
-  if (last !== undefined && now - last < CROSS_ACTION_LOG_SUPPRESS_MS) {
-    return false;
-  }
-  recentActionLogEmitAt.set(key, now);
-  if (recentActionLogEmitAt.size > ACTION_LOG_EMIT_MAP_MAX) {
-    const cutoff = now - CROSS_ACTION_LOG_SUPPRESS_MS;
-    for (const [k, t] of recentActionLogEmitAt) {
-      if (t < cutoff) recentActionLogEmitAt.delete(k);
-    }
-  }
-  return true;
-}
 
 function readRequiredBooleanSetting(key: string, defaultValue: boolean): boolean {
   const rawValue = localStorage.getItem(key);
@@ -1088,6 +1048,47 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
         setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
 
+        const responsePhaseForLog = (data.game_state as { phase?: string } | undefined)?.phase;
+        const rawActionLogs = Array.isArray(data.action_logs)
+          ? (data.action_logs as Record<string, unknown>[])
+          : [];
+        const incomingPhaseFromPayload =
+          data.game_state != null &&
+          typeof (data.game_state as { phase?: unknown }).phase === "string"
+            ? String((data.game_state as { phase: string }).phase)
+            : undefined;
+        const resultActivationEnded =
+          (data.result as { activation_ended?: boolean } | undefined)?.activation_ended === true;
+        /** Fin d’activation CC ou sortie de la phase fight : laisser le log s’afficher avant fusion UI (cf. pools vides shoot/fight + ``advance_phase``). */
+        const yieldBeforeFightCombatSuite =
+          Boolean(data.success) &&
+          gameState?.phase === "fight" &&
+          (action.action === "left_click" || action.action === "right_click") &&
+          rawActionLogs.length > 0 &&
+          rawActionLogs.some(
+            (e) =>
+              e.type === "combat" &&
+              e.phase === "fight" &&
+              typeof e.message === "string" &&
+              e.message.trim().length > 0
+          ) &&
+          (resultActivationEnded ||
+            (incomingPhaseFromPayload !== undefined && incomingPhaseFromPayload !== "fight"));
+        if (rawActionLogs.length > 0) {
+          logActionLogBatchTrace("executeAction /game/action", rawActionLogs, {
+            requestAction: action.action,
+            success: data.success,
+            responsePhase: responsePhaseForLog,
+          });
+        } else if (isActionLogTraceEnabled() && responsePhaseForLog === "fight") {
+          logActionLogBatchTrace("executeAction /game/action", [], {
+            requestAction: action.action,
+            success: data.success,
+            responsePhase: responsePhaseForLog,
+            note: "aucune entrée action_logs (phase fight)",
+          });
+        }
+
         // Process detailed backend action logs FIRST
         if (data.action_logs && data.action_logs.length > 0) {
           interface ActionLogEntry {
@@ -1100,8 +1101,19 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           );
           actionLogsBatch.forEach((logEntry: ActionLogEntry) => {
             if (!shouldEmitActionLogEvent(logEntry as Record<string, unknown>)) {
+              logActionLogEmitTrace(
+                "executeAction /game/action",
+                logEntry as Record<string, unknown>,
+                false,
+                `cross_request_dedupe_<${CROSS_ACTION_LOG_SUPPRESS_MS}ms`,
+              );
               return;
             }
+            logActionLogEmitTrace(
+              "executeAction /game/action",
+              logEntry as Record<string, unknown>,
+              true,
+            );
             const shootDetail = logEntry.shootDetails?.[0];
 
             window.dispatchEvent(
@@ -1137,6 +1149,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 },
               })
             );
+          });
+        }
+
+        if (yieldBeforeFightCombatSuite) {
+          await new Promise<void>((resolve) => {
+            window.requestAnimationFrame(() => {
+              window.requestAnimationFrame(() => {
+                resolve();
+              });
+            });
           });
         }
 
@@ -2691,7 +2713,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           return;
         }
         if (numericUnitId !== null) {
-          const fightPool = getFightActivationPoolUnitIds(gameState);
+          const gsFight = (latestGameStateRef.current ?? gameState) as ActivationPointerGameState;
+          const fightPool = getFightActivationPoolUnitIds(gsFight);
           if (fightPool.includes(numericUnitId)) {
             if (activationInProgressRef.current) {
               return;
@@ -4559,6 +4582,23 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           }
 
           // Process AI activation logs immediately
+          const activationGsPhase = (activationData.game_state as { phase?: string } | undefined)
+            ?.phase;
+          const rawActivationLogs = Array.isArray(activationData.action_logs)
+            ? (activationData.action_logs as Record<string, unknown>[])
+            : [];
+          if (rawActivationLogs.length > 0) {
+            logActionLogBatchTrace("ai-turn /game/ai-turn", rawActivationLogs, {
+              responsePhase: activationGsPhase,
+              success: activationData.success,
+            });
+          } else if (isActionLogTraceEnabled() && activationGsPhase === "fight") {
+            logActionLogBatchTrace("ai-turn /game/ai-turn", [], {
+              responsePhase: activationGsPhase,
+              success: activationData.success,
+              note: "aucune entrée action_logs (phase fight)",
+            });
+          }
           if (activationData.action_logs && activationData.action_logs.length > 0) {
             interface ActivationLogEntry {
               message?: string;
@@ -4598,8 +4638,19 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             );
             activationLogsBatch.forEach((logEntry: ActivationLogEntry) => {
               if (!shouldEmitActionLogEvent(logEntry as Record<string, unknown>)) {
+                logActionLogEmitTrace(
+                  "ai-turn /game/ai-turn",
+                  logEntry as Record<string, unknown>,
+                  false,
+                  `cross_request_dedupe_<${CROSS_ACTION_LOG_SUPPRESS_MS}ms`,
+                );
                 return;
               }
+              logActionLogEmitTrace(
+                "ai-turn /game/ai-turn",
+                logEntry as Record<string, unknown>,
+                true,
+              );
               const shootDetail = logEntry.shootDetails?.[0];
               window.dispatchEvent(
                 new CustomEvent("backendLogEvent", {
@@ -4875,6 +4926,25 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             const decisionData = await decisionResponse.json();
 
             if (decisionData.success) {
+              const decisionGsPhase = (decisionData.game_state as { phase?: string } | undefined)
+                ?.phase;
+              const rawDecisionLogs = Array.isArray(decisionData.action_logs)
+                ? (decisionData.action_logs as Record<string, unknown>[])
+                : [];
+              if (rawDecisionLogs.length > 0) {
+                logActionLogBatchTrace("ai-decision /game/action", rawDecisionLogs, {
+                  responsePhase: decisionGsPhase,
+                  success: decisionData.success,
+                  afterAiTurn: true,
+                });
+              } else if (isActionLogTraceEnabled() && decisionGsPhase === "fight") {
+                logActionLogBatchTrace("ai-decision /game/action", [], {
+                  responsePhase: decisionGsPhase,
+                  success: decisionData.success,
+                  afterAiTurn: true,
+                  note: "aucune entrée action_logs (phase fight)",
+                });
+              }
               // Process action logs
               if (decisionData.action_logs && decisionData.action_logs.length > 0) {
                 interface DecisionLogEntry {
@@ -4915,8 +4985,19 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 );
                 decisionLogsBatch.forEach((logEntry: DecisionLogEntry) => {
                   if (!shouldEmitActionLogEvent(logEntry as Record<string, unknown>)) {
+                    logActionLogEmitTrace(
+                      "ai-decision /game/action",
+                      logEntry as Record<string, unknown>,
+                      false,
+                      `cross_request_dedupe_<${CROSS_ACTION_LOG_SUPPRESS_MS}ms`,
+                    );
                     return;
                   }
+                  logActionLogEmitTrace(
+                    "ai-decision /game/action",
+                    logEntry as Record<string, unknown>,
+                    true,
+                  );
                   const shootDetail = logEntry.shootDetails?.[0];
                   window.dispatchEvent(
                     new CustomEvent("backendLogEvent", {
