@@ -6,6 +6,7 @@ def test_end_activation_wait_adds_wait_log_with_position() -> None:
     game_state = {
         "turn": 3,
         "phase": "MOVEMENT",
+        "action_log_seq": 0,
         "units_cache": {
             "u1": {"col": 7, "row": 9, "HP_CUR": 5, "player": 1},
         },
@@ -22,6 +23,7 @@ def test_end_activation_wait_adds_wait_log_with_position() -> None:
     assert wait_log["col"] == 7
     assert wait_log["row"] == 9
     assert "(7, 9) WAIT" in wait_log["message"]
+    assert wait_log["logSeq"] == 1
 
 
 def test_end_activation_arg2_increments_episode_steps() -> None:

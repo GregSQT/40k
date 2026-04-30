@@ -8,6 +8,7 @@ from typing import Dict, List, Tuple, Set, Optional, Any, Union
 import inspect
 
 from shared.data_validation import require_key
+from engine.action_log_utils import append_action_log
 from engine.combat_utils import (
     get_unit_coordinates,
     normalize_coordinates,
@@ -1844,7 +1845,8 @@ def maybe_resolve_reactive_move(
                 declined_count += 1
                 if "action_logs" not in game_state:
                     game_state["action_logs"] = []
-                game_state["action_logs"].append(
+                append_action_log(
+                    game_state,
                     {
                         "type": "reactive_move_declined",
                         "unitId": reactive_unit_id,
@@ -1856,7 +1858,7 @@ def maybe_resolve_reactive_move(
                         "event_fromRow": from_row_int,
                         "event_toCol": to_col_int,
                         "event_toRow": to_row_int,
-                    }
+                    },
                 )
                 continue
 
@@ -1893,7 +1895,8 @@ def maybe_resolve_reactive_move(
             # Keep action logs explicit for post-mortem analysis.
             if "action_logs" not in game_state:
                 game_state["action_logs"] = []
-            game_state["action_logs"].append(
+            append_action_log(
+                game_state,
                 {
                     "type": "reactive_move",
                     "message": (
@@ -1916,7 +1919,7 @@ def maybe_resolve_reactive_move(
                     "event_fromRow": from_row_int,
                     "event_toCol": to_col_int,
                     "event_toRow": to_row_int,
-                }
+                },
             )
 
             refresh_all_positional_caches_after_reactive_move(

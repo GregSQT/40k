@@ -11,6 +11,7 @@ from typing import Dict, List, Tuple, Set, Optional, Any
 from collections import deque, OrderedDict
 from .generic_handlers import end_activation, _log_with_context
 from shared.data_validation import require_key
+from engine.action_log_utils import append_action_log
 from engine.combat_utils import (
     calculate_hex_distance,
     normalize_coordinates,
@@ -1936,7 +1937,9 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
             else f"Unit {unit['id']} MOVED from ({orig_col},{orig_row}) to ({dest_col},{dest_row})"
         )
 
-    game_state["action_logs"].append({
+    append_action_log(
+        game_state,
+        {
         "type": "move",
         "message": movement_message,
         "turn": game_state["current_turn"] if "current_turn" in game_state else 1,
@@ -1953,8 +1956,9 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         "reward": round(action_reward, 2),  # NEW: Calculated reward
         "is_ai_action": unit["player"] == 2,  # FIXED: PvE AI is player 2 (was P0/P1, now P1/P2)
         "is_fly_move": is_fly_move,
-    })
-    
+        },
+    )
+
     # Clear preview
     movement_clear_preview(game_state)
 

@@ -18,6 +18,7 @@ from engine.combat_utils import (
     calculate_hex_distance as _calculate_hex_distance,
 )
 from shared.data_validation import require_key
+from engine.action_log_utils import append_action_log
 from .shared_utils import (
     calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge,
     ACTION, WAIT, PASS, SHOOTING, ADVANCE, NOT_REMOVED,
@@ -234,8 +235,10 @@ def _append_shoot_nb_roll_info_log(
     unit_col, unit_row = require_unit_position(unit, game_state)
     weapon_name = str(require_key(weapon, "display_name"))
 
-    action_logs = game_state.setdefault("action_logs", [])
-    action_logs.append(
+    if "action_logs" not in game_state:
+        game_state["action_logs"] = []
+    append_action_log(
+        game_state,
         {
             "type": "roll_info",
             "phase": "SHOOT",
@@ -245,7 +248,7 @@ def _append_shoot_nb_roll_info_log(
                 f"Unit {unit_id}({unit_col},{unit_row}) SHOOT with [{weapon_name}]. "
                 f"Number of shoots ({nb_value}): {nb_roll}"
             ),
-        }
+        },
     )
 
 
@@ -3796,7 +3799,6 @@ def _apply_move_after_shooting(
     )
     require_key(game_state, "units_cannot_charge").add(unit_id_str)
 
-    action_logs = require_key(game_state, "action_logs")
     source_rule_display_name = _get_source_unit_rule_display_name_for_effect(
         unit, "move_after_shooting"
     )
@@ -3809,21 +3811,24 @@ def _apply_move_after_shooting(
         raise ValueError(
             f"move_after_shooting source rule id is required for unit {unit_id_str}"
         )
-    action_logs.append({
-        "type": "move_after_shooting",
-        "turn": game_state.get("turn", 1),
-        "phase": "shoot",
-        "unitId": unit_id_str,
-        "player": require_key(unit, "player"),
-        "fromCol": orig_col,
-        "fromRow": orig_row,
-        "toCol": dest_col_int,
-        "toRow": dest_row_int,
-        "move_distance": move_distance,
-        "ability_display_name": source_rule_display_name.strip(),
-        "source_rule_id": source_rule_id.strip(),
-        "timestamp": "server_time",
-    })
+    append_action_log(
+        game_state,
+        {
+            "type": "move_after_shooting",
+            "turn": game_state.get("turn", 1),
+            "phase": "shoot",
+            "unitId": unit_id_str,
+            "player": require_key(unit, "player"),
+            "fromCol": orig_col,
+            "fromRow": orig_row,
+            "toCol": dest_col_int,
+            "toRow": dest_row_int,
+            "move_distance": move_distance,
+            "ability_display_name": source_rule_display_name.strip(),
+            "source_rule_id": source_rule_id.strip(),
+            "timestamp": "server_time",
+        },
+    )
     return {
         "fromCol": orig_col,
         "fromRow": orig_row,
@@ -6073,35 +6078,41 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         "is_ai_action": shooter["player"] == 1
     }
     
-    # Append the shoot log entry immediately
-    game_state["action_logs"].append(shoot_log_entry)
+    # Append the shoot log entry immediately (same dict updated later with reward/action_name)
+    append_action_log(game_state, shoot_log_entry)
     if hazardous_triggered:
         if hazardous_self_died:
             hazardous_message = f"Unit {unit_id}({shooter_col},{shooter_row}) was DESTROYED [HAZARDOUS]"
-            game_state["action_logs"].append({
-                "type": "death",
-                "message": hazardous_message,
-                "turn": game_state["turn"],
-                "phase": "shoot",
-                "targetId": unit_id,
-                "unitId": unit_id,
-                "player": shooter["player"],
-                "timestamp": "server_time",
-            })
+            append_action_log(
+                game_state,
+                {
+                    "type": "death",
+                    "message": hazardous_message,
+                    "turn": game_state["turn"],
+                    "phase": "shoot",
+                    "targetId": unit_id,
+                    "unitId": unit_id,
+                    "player": shooter["player"],
+                    "timestamp": "server_time",
+                },
+            )
         else:
             hazardous_message = (
                 f"Unit {unit_id}({shooter_col},{shooter_row}) SUFFERS "
                 f"{hazardous_mortal_wounds} Mortal Wounds [HAZARDOUS]"
             )
-            game_state["action_logs"].append({
-                "type": "reactive_move",
-                "message": hazardous_message,
-                "turn": game_state["turn"],
-                "phase": "shoot",
-                "unitId": unit_id,
-                "player": shooter["player"],
-                "timestamp": "server_time",
-            })
+            append_action_log(
+                game_state,
+                {
+                    "type": "reactive_move",
+                    "message": hazardous_message,
+                    "turn": game_state["turn"],
+                    "phase": "shoot",
+                    "unitId": unit_id,
+                    "player": shooter["player"],
+                    "timestamp": "server_time",
+                },
+            )
     add_console_log(game_state, enhanced_message)
     
     # DEBUG: Log shooting attack execution
@@ -6282,16 +6293,19 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     
     # Add separate death log event if target was killed (AFTER shoot log)
     if attack_result.get("target_died", False):
-        game_state["action_logs"].append({
-            "type": "death",
-            "message": f"Unit {target_id} was DESTROYED",
-            "turn": game_state["turn"],
-            "phase": "shoot",
-            "targetId": target_id,
-            "unitId": target_id,
-            "player": target["player"],
-            "timestamp": "server_time"
-        })
+        append_action_log(
+            game_state,
+            {
+                "type": "death",
+                "message": f"Unit {target_id} was DESTROYED",
+                "turn": game_state["turn"],
+                "phase": "shoot",
+                "targetId": target_id,
+                "unitId": target_id,
+                "player": target["player"],
+                "timestamp": "server_time",
+            },
+        )
     
     # Store attack result for engine access
     game_state["last_attack_result"] = attack_result
@@ -7255,23 +7269,26 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         # Log the advance action
         if "action_logs" not in game_state:
             game_state["action_logs"] = []
-                    
-        game_state["action_logs"].append({
-            "type": "advance",
-            "message": f"Unit {unit_id} ({orig_col}, {orig_row}) ADVANCED to ({dest_col}, {dest_row}) (Roll: {advance_roll})",
-            "turn": game_state.get("turn", 1),
-            "phase": "shoot",
-            "unitId": unit_id,
-            "player": unit["player"],
-            "fromCol": orig_col,
-            "fromRow": orig_row,
-            "toCol": dest_col,
-            "toRow": dest_row,
-            "advance_range": advance_roll,
-            "advance_max_subhex": advance_move_budget,
-            "actually_moved": actually_moved,
-            "timestamp": "server_time"
-        })
+
+        append_action_log(
+            game_state,
+            {
+                "type": "advance",
+                "message": f"Unit {unit_id} ({orig_col}, {orig_row}) ADVANCED to ({dest_col}, {dest_row}) (Roll: {advance_roll})",
+                "turn": game_state.get("turn", 1),
+                "phase": "shoot",
+                "unitId": unit_id,
+                "player": unit["player"],
+                "fromCol": orig_col,
+                "fromRow": orig_row,
+                "toCol": dest_col,
+                "toRow": dest_row,
+                "advance_range": advance_roll,
+                "advance_max_subhex": advance_move_budget,
+                "actually_moved": actually_moved,
+                "timestamp": "server_time",
+            },
+        )
         
         # Clean up advance state AFTER logging
         if "advance_range" in unit:

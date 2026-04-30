@@ -9,6 +9,7 @@ ZERO TOLERANCE for deviations from specification
 
 from typing import Dict, List, Tuple, Set, Optional, Any
 from shared.data_validation import require_key
+from engine.action_log_utils import append_action_log
 from engine.combat_utils import get_unit_by_id
 from .shared_utils import (
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
@@ -81,16 +82,19 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             raise KeyError("game_state missing required 'turn' field for wait action logging")
 
         unit_col, unit_row = require_unit_position(unit, game_state)
-        game_state["action_logs"].append({
-            "type": "wait",
-            "message": f"Unit {unit_id} ({unit_col}, {unit_row}) WAIT",
-            "turn": game_state["turn"],
-            "phase": game_state["phase"],
-            "unitId": unit_id,
-            "col": unit_col,
-            "row": unit_row,
-            "timestamp": "server_time"
-        })
+        append_action_log(
+            game_state,
+            {
+                "type": "wait",
+                "message": f"Unit {unit_id} ({unit_col}, {unit_row}) WAIT",
+                "turn": game_state["turn"],
+                "phase": game_state["phase"],
+                "unitId": unit_id,
+                "col": unit_col,
+                "row": unit_row,
+                "timestamp": "server_time",
+            },
+        )
         response["wait_logged"] = True
     elif arg1 == "NO":
         # Do not log the action

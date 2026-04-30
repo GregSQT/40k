@@ -510,6 +510,7 @@ class W40KEngine(gym.Env):
             
             # Metrics tracking
             "action_logs": [],  # CRITICAL: For metrics collection - tracks all actions per episode
+            "action_log_seq": 0,  # Monotonic stamp per append_action_log (not cleared with action_logs flush)
 
             # PERFORMANCE: Hex-coordinate LoS cache (walls static within episode)
             "hex_los_cache": {},
@@ -947,6 +948,7 @@ class W40KEngine(gym.Env):
             "fight_subphase": None,
             "charge_range_rolls": {},
             "action_logs": [],  # CRITICAL: Reset action logs for new episode metrics
+            "action_log_seq": 0,
             "gym_training_mode": self.gym_training_mode,  # ADDED: For handler access
             "debug_mode": self.debug_mode,  # ADDED: For handler access
             "console_logs": [],  # CRITICAL: Initialize console_logs for debug logging across all episodes
@@ -2227,7 +2229,10 @@ class W40KEngine(gym.Env):
             raise TypeError(
                 f"game_state['action_logs'] must be a list before rule choice logging, got {type(action_logs).__name__}"
             )
-        action_logs.append(
+        from engine.action_log_utils import append_action_log
+
+        append_action_log(
+            self.game_state,
             {
                 "type": "rule_choice",
                 "message": message,
@@ -2240,7 +2245,7 @@ class W40KEngine(gym.Env):
                 "ruleId": require_key(prompt, "rule_id"),
                 "trigger": require_key(prompt, "trigger"),
                 "phase": prompt.get("phase"),
-            }
+            },
         )
 
         # write to step.log immediately because select_rule_choice bypasses normal step logger flow

@@ -16,6 +16,7 @@ from collections import deque, OrderedDict
 from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation
 from shared.data_validation import require_key
+from engine.action_log_utils import append_action_log
 from engine.game_utils import add_console_log, safe_print
 from engine.combat_utils import (
     normalize_coordinates,
@@ -168,8 +169,10 @@ def _append_fight_nb_roll_info_log(
     unit_col, unit_row = require_unit_position(unit, game_state)
     weapon_name = str(require_key(weapon, "display_name"))
 
-    action_logs = game_state.setdefault("action_logs", [])
-    action_logs.append(
+    if "action_logs" not in game_state:
+        game_state["action_logs"] = []
+    append_action_log(
+        game_state,
         {
             "type": "roll_info",
             "phase": "FIGHT",
@@ -179,7 +182,7 @@ def _append_fight_nb_roll_info_log(
                 f"Unit {unit_id}({unit_col},{unit_row}) FIGHTS with [{weapon_name}]. "
                 f"Number of attacks ({nb_value}): {nb_roll}"
             ),
-        }
+        },
     )
 
 def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -3172,9 +3175,6 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
                     )
 
     # AI_TURN.md COMPLIANCE: Log ALL attacks to action_logs (not just damage)
-    if "action_logs" not in game_state:
-        game_state["action_logs"] = []
-
     # AI_TURN.md COMPLIANCE: Direct field access for required 'turn' field
     if "turn" not in game_state:
         raise KeyError("game_state missing required 'turn' field")
@@ -3182,34 +3182,37 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
     # AI_TURN.md COMPLIANCE: shootDetails array matches frontend gameLogStructure.ts ShootDetail interface
     # Fields: targetDied, damageDealt, saveSuccess (camelCase to match frontend)
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon_name in action_logs
-    game_state["action_logs"].append({
-        "type": "combat",  # Must match frontend gameLogStructure.ts type
-        "weaponName": weapon_name if weapon_name else None,
-        "message": attack_log,
-        "turn": game_state["turn"],
-        "phase": "fight",
-        "attackerId": attacker_id,
-        "targetId": target_id,
-        "player": attacker["player"],
-        "shootDetails": [{
-            "shotNumber": 1,
-            "attackRoll": hit_roll,
-            "hitTarget": hit_target,
-            "hitResult": "HIT" if hit_success else "MISS",
-            "strengthRoll": wound_roll,
-            "woundTarget": wound_target,
-            "strengthResult": "SUCCESS" if wound_success else "FAILED",
-            "saveRoll": save_roll,
-            "saveTarget": save_target,
-            "saveSuccess": save_success,
-            "damageDealt": damage_dealt,
-            "targetDied": target_died
-        }],
-        "wound_ability_display_name": wound_ability_display_name,
-        "hit_ability_display_name": hit_ability_display_name,
-        "save_ability_display_name": save_ability_display_name,
-        "timestamp": "server_time"
-    })
+    append_action_log(
+        game_state,
+        {
+            "type": "combat",  # Must match frontend gameLogStructure.ts type
+            "weaponName": weapon_name if weapon_name else None,
+            "message": attack_log,
+            "turn": game_state["turn"],
+            "phase": "fight",
+            "attackerId": attacker_id,
+            "targetId": target_id,
+            "player": attacker["player"],
+            "shootDetails": [{
+                "shotNumber": 1,
+                "attackRoll": hit_roll,
+                "hitTarget": hit_target,
+                "hitResult": "HIT" if hit_success else "MISS",
+                "strengthRoll": wound_roll,
+                "woundTarget": wound_target,
+                "strengthResult": "SUCCESS" if wound_success else "FAILED",
+                "saveRoll": save_roll,
+                "saveTarget": save_target,
+                "saveSuccess": save_success,
+                "damageDealt": damage_dealt,
+                "targetDied": target_died
+            }],
+            "wound_ability_display_name": wound_ability_display_name,
+            "hit_ability_display_name": hit_ability_display_name,
+            "save_ability_display_name": save_ability_display_name,
+            "timestamp": "server_time",
+        },
+    )
 
     if os.environ.get("W40K_ACTION_LOG_TRACE", "").strip().lower() in ("1", "true", "yes", "on"):
         cp = game_state.get("current_player")
@@ -3225,16 +3228,19 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
 
     # Add separate death log event if target was killed
     if target_died:
-        game_state["action_logs"].append({
-            "type": "death",
-            "message": f"Unit {target_id} was DESTROYED",
-            "turn": game_state["turn"],
-            "phase": "fight",
-            "targetId": target_id,
-            "unitId": target_id,
-            "player": target["player"],
-            "timestamp": "server_time"
-        })
+        append_action_log(
+            game_state,
+            {
+                "type": "death",
+                "message": f"Unit {target_id} was DESTROYED",
+                "turn": game_state["turn"],
+                "phase": "fight",
+                "targetId": target_id,
+                "unitId": target_id,
+                "player": target["player"],
+                "timestamp": "server_time",
+            },
+        )
 
     return {
         "hit_roll": hit_roll,

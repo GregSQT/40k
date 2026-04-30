@@ -1285,8 +1285,7 @@ def _fallback_spawn_from_objective(gs: Dict[str, Any]) -> Tuple[int, int]:
 
 
 def _append_ed_log(gs: Dict[str, Any], payload: Dict[str, Any]) -> None:
-    action_logs = require_key(gs, "action_logs")
-    if not isinstance(action_logs, list):
-        raise TypeError("game_state.action_logs must be a list")
-    action_logs.append(payload)
+    from engine.action_log_utils import append_action_log
+
+    append_action_log(gs, payload)
 

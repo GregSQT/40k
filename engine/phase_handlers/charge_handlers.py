@@ -13,6 +13,7 @@ from collections import deque
 from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation
 from shared.data_validation import require_key
+from engine.action_log_utils import append_action_log
 from engine.game_utils import add_console_log, safe_print, add_debug_file_log
 from engine.combat_utils import (
     normalize_coordinates,
@@ -1862,19 +1863,22 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         else:
             current_turn = game_state["current_turn"]
         
-        game_state["action_logs"].append({
-            "type": "charge_fail",
-            "message": f"Unit {unit['id']} ({unit['col']}, {unit['row']}) FAILED charge to target {target_id} (Roll: {charge_roll} too low)",
-            "turn": current_turn,
-            "phase": "charge",
-            "unitId": unit["id"],
-            "player": unit["player"],
-            "targetId": target_id,
-            "charge_roll": charge_roll,
-            "charge_failed": True,
-            "timestamp": "server_time"
-        })
-        
+        append_action_log(
+            game_state,
+            {
+                "type": "charge_fail",
+                "message": f"Unit {unit['id']} ({unit['col']}, {unit['row']}) FAILED charge to target {target_id} (Roll: {charge_roll} too low)",
+                "turn": current_turn,
+                "phase": "charge",
+                "unitId": unit["id"],
+                "player": unit["player"],
+                "targetId": target_id,
+                "charge_roll": charge_roll,
+                "charge_failed": True,
+                "timestamp": "server_time",
+            },
+        )
+
         # Clear charge roll after use
         if unit_id in game_state["charge_roll_values"]:
             del game_state["charge_roll_values"][unit_id]
@@ -2038,26 +2042,29 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         else:
             current_turn = game_state["current_turn"]
         
-        game_state["action_logs"].append({
-            "type": "charge_fail",
-            "message": f"Unit {unit['id']} ({unit['col']}, {unit['row']}) FAILED charge to target {target_id} (Roll: {charge_roll}, needed: {distance_to_dest}+)",
-            "turn": current_turn,
-            "phase": "charge",
-            "unitId": unit["id"],
-            "player": unit["player"],
-            "targetId": target_id,
-            "charge_roll": charge_roll,
-            "charge_failed": True,
-            "timestamp": "server_time"
-        })
-        
+        append_action_log(
+            game_state,
+            {
+                "type": "charge_fail",
+                "message": f"Unit {unit['id']} ({unit['col']}, {unit['row']}) FAILED charge to target {target_id} (Roll: {charge_roll}, needed: {distance_to_dest}+)",
+                "turn": current_turn,
+                "phase": "charge",
+                "unitId": unit["id"],
+                "player": unit["player"],
+                "targetId": target_id,
+                "charge_roll": charge_roll,
+                "charge_failed": True,
+                "timestamp": "server_time",
+            },
+        )
+
         # Clear charge roll after use
         if unit_id in game_state["charge_roll_values"]:
             del game_state["charge_roll_values"][unit_id]
-        
+
         # Clear preview
         charge_clear_preview(game_state)
-        
+
         # End activation with failure
         result = end_activation(
             game_state, unit,
@@ -2067,7 +2074,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             CHARGE,        # Arg4: Remove from charge_activation_pool
             0              # Arg5: No error logging
         )
-        
+
         action_logs_val = game_state["action_logs"] if "action_logs" in game_state else []
         result.update({
             "action": "charge_fail",
@@ -2181,25 +2188,28 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         f"to ({dest_col}, {dest_row}) [Roll:{charge_roll}]"
     )
 
-    game_state["action_logs"].append({
-        "type": "charge",
-        "message": charge_message,
-        "turn": current_turn,
-        "phase": "charge",
-        "unitId": unit["id"],
-        "player": unit["player"],
-        "fromCol": orig_col,
-        "fromRow": orig_row,
-        "toCol": dest_col,
-        "toRow": dest_row,
-        "targetId": target_id,
-        "charge_roll": charge_roll,
-        "ability_display_name": charge_ability_display_name,
-        "timestamp": "server_time",
-        "action_name": action_name,
-        "reward": round(action_reward, 2),
-        "is_ai_action": unit["player"] == 1
-    })
+    append_action_log(
+        game_state,
+        {
+            "type": "charge",
+            "message": charge_message,
+            "turn": current_turn,
+            "phase": "charge",
+            "unitId": unit["id"],
+            "player": unit["player"],
+            "fromCol": orig_col,
+            "fromRow": orig_row,
+            "toCol": dest_col,
+            "toRow": dest_row,
+            "targetId": target_id,
+            "charge_roll": charge_roll,
+            "ability_display_name": charge_ability_display_name,
+            "timestamp": "server_time",
+            "action_name": action_name,
+            "reward": round(action_reward, 2),
+            "is_ai_action": unit["player"] == 1,
+        },
+    )
     add_console_log(game_state, charge_message)
 
     if _unit_has_rule(unit, "charge_impact"):
@@ -2226,7 +2236,9 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         )
         if impact_hit_result == "HIT":
             impact_message += f" Wound:AUTO Save:NONE[MW] Dmg:{mortal_wounds}HP"
-        game_state["action_logs"].append({
+        append_action_log(
+            game_state,
+            {
             "type": "charge_impact",
             "message": impact_message,
             "turn": current_turn,
@@ -2246,7 +2258,8 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             "reward": 0.0,
             "timestamp": "server_time",
             "is_ai_action": unit["player"] == 1,
-        })
+            },
+        )
         add_console_log(game_state, impact_message)
 
     # Clear preview

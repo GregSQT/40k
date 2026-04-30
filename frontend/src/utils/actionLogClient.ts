@@ -24,7 +24,8 @@ export function actionLogDedupeKey(e: Record<string, unknown>): string {
   const typ = typeof e.type === "string" ? e.type : "";
   const msg = typeof e.message === "string" ? e.message : "";
   const ph = e.phase === undefined || e.phase === null ? "" : String(e.phase);
-  return [typ, msg, String(e.turn ?? ""), uid, ph].join("\u0001");
+  const seq = e.logSeq === undefined || e.logSeq === null ? "" : String(e.logSeq);
+  return [typ, msg, String(e.turn ?? ""), uid, ph, seq].join("\u0001");
 }
 
 /**
