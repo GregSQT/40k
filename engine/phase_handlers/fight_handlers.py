@@ -813,7 +813,6 @@ def _fight_plan_consolidation_destinations(
     Priorité 2 (sans ennemis sur le plateau) : objectif — finir avec empreinte ∩ empreinte objectif ; mouvement le plus court possible.
     Retourne None si aucune consolidation n'est possible / utile.
     """
-    visited = _fight_bfs_reachable_anchors_consolidation(game_state, unit)
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
 
@@ -826,6 +825,8 @@ def _fight_plan_consolidation_destinations(
         if start_d_min <= 1:
             # Deja au contact (distance minimale possible sans overlap) -> pas de consolidation utile.
             return None
+
+        visited = _fight_bfs_reachable_anchors_consolidation(game_state, unit)
 
         dist_by_anchor: List[Tuple[Tuple[int, int], int]] = []
         units_cache = require_key(game_state, "units_cache")
@@ -867,6 +868,7 @@ def _fight_plan_consolidation_destinations(
     obj_hexes = _fight_all_objective_hexes_union(game_state)
     if not obj_hexes:
         return None
+    visited = _fight_bfs_reachable_anchors_consolidation(game_state, unit)
     overlap_cands: List[Tuple[Tuple[int, int], int]] = []
     for anchor in visited:
         ac, ar = anchor
