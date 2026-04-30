@@ -365,6 +365,14 @@ def _rebuild_alternating_pools_for_fight(game_state: Dict[str, Any]) -> None:
     or became eligible after other units died or changed status.
 
     This must be called BEFORE checking if the phase is complete.
+
+    PERF: One pass over ``units_cache`` × inner scan over all enemies in
+    ``_is_adjacent_to_enemy_for_fight`` (footprint distance). Cost grows roughly
+    with ``n_units²`` and with larger ``occupied_hexes`` (ex. résolution ×10).
+    It runs notably when the **charging** pool vient de se vider (passage charge
+    → alternance) : la dernière attaque du chargeur déclenche ce rebuild en plus
+    de ``end_activation`` — d’où un pic de latence **sans** logique CC supplémentaire
+    sur le dernier jet par rapport aux attaques précédentes.
     """
     current_player = game_state["current_player"]
 

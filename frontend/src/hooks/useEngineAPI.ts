@@ -1052,28 +1052,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         const rawActionLogs = Array.isArray(data.action_logs)
           ? (data.action_logs as Record<string, unknown>[])
           : [];
-        const incomingPhaseFromPayload =
-          data.game_state != null &&
-          typeof (data.game_state as { phase?: unknown }).phase === "string"
-            ? String((data.game_state as { phase: string }).phase)
-            : undefined;
-        const resultActivationEnded =
-          (data.result as { activation_ended?: boolean } | undefined)?.activation_ended === true;
-        /** Fin d’activation CC ou sortie de la phase fight : laisser le log s’afficher avant fusion UI (cf. pools vides shoot/fight + ``advance_phase``). */
-        const yieldBeforeFightCombatSuite =
-          Boolean(data.success) &&
-          gameState?.phase === "fight" &&
-          (action.action === "left_click" || action.action === "right_click") &&
-          rawActionLogs.length > 0 &&
-          rawActionLogs.some(
-            (e) =>
-              e.type === "combat" &&
-              e.phase === "fight" &&
-              typeof e.message === "string" &&
-              e.message.trim().length > 0
-          ) &&
-          (resultActivationEnded ||
-            (incomingPhaseFromPayload !== undefined && incomingPhaseFromPayload !== "fight"));
         if (rawActionLogs.length > 0) {
           logActionLogBatchTrace("executeAction /game/action", rawActionLogs, {
             requestAction: action.action,
@@ -1149,16 +1127,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 },
               })
             );
-          });
-        }
-
-        if (yieldBeforeFightCombatSuite) {
-          await new Promise<void>((resolve) => {
-            window.requestAnimationFrame(() => {
-              window.requestAnimationFrame(() => {
-                resolve();
-              });
-            });
           });
         }
 
