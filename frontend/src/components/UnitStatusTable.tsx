@@ -178,6 +178,10 @@ interface UnitRowProps {
     | null;
   /** Ref de la ligne d'en-tête du tableau (pour union avec la ligne unité). */
   tableHeaderRowRef?: RefObject<HTMLTableRowElement | null>;
+  /** Preview plateau : encadrer la ligne principale + sections armes lorsque l’illustration détail est affichée. */
+  isDetailPreviewHighlight?: boolean;
+  /** Joueur de ce tableau (couleur de l’encadrement preview = bandeau titre). */
+  tablePlayer: 1 | 2;
 }
 
 function unionRect(
@@ -211,6 +215,8 @@ const UnitRow = memo<UnitRowProps>(
     reportUnitRowRect,
     reportUnitAttributesRect,
     tableHeaderRowRef,
+    isDetailPreviewHighlight = false,
+    tablePlayer,
   }) => {
     const tutorial = useTutorial();
     const spotlightLayoutTick = tutorial?.spotlightLayoutTick ?? 0;
@@ -414,8 +420,17 @@ const UnitRow = memo<UnitRowProps>(
     const unitName = unit.DISPLAY_NAME || unit.name || unit.type || `Unit ${unit.id}`;
     const unitRules = unit.UNIT_RULES || [];
 
+    const detailPreviewWrapClass = isDetailPreviewHighlight
+      ? `unit-status-detail-preview-wrap${
+          tablePlayer === 2 ? " unit-status-detail-preview-wrap--player2" : ""
+        }`
+      : undefined;
+
     return (
-      <div style={{ marginBottom: "2px" }}>
+      <div
+        className={detailPreviewWrapClass}
+        style={{ marginBottom: isDetailPreviewHighlight ? undefined : "2px" }}
+      >
         {/* Unit Attributes Table */}
         <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
           <colgroup>
@@ -1702,6 +1717,8 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                       : undefined
                   }
                   tableHeaderRowRef={tableHeaderRowRef}
+                  isDetailPreviewHighlight={isDetailPreviewUnit}
+                  tablePlayer={player}
                 />
               );
             })}

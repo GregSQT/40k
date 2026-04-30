@@ -1364,6 +1364,21 @@ body {
   border-right: 2px solid var(--color-accent);
 }
 
+/* Encadrement unité en preview (hover icône plateau + illustration) — couleurs = bandeaux Player 1 / 2 */
+.unit-status-detail-preview-wrap {
+  margin-bottom: 2px;
+  padding: 4px;
+  border-width: 4px;
+  border-style: solid;
+  border-radius: 6px;
+  box-sizing: border-box;
+  border-color: var(--hp-bar-player1);
+}
+
+.unit-status-detail-preview-wrap--player2 {
+  border-color: var(--hp-bar-player2);
+}
+
 /* Cell styles */
 .unit-status-cell {
   padding: 0 1px;
