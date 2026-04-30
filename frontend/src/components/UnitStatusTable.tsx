@@ -1351,10 +1351,24 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
       }
     }, [tutorialForceRangedExpandedForUnitIds, player]);
 
-    // Filter units for this player and exclude dead units
+    // Filter units for this player and exclude dead units ; preview plateau : unité ciblée en tête de liste
     const playerUnits = useMemo(() => {
-      return units.filter((unit) => unit.player === player && (unit.HP_CUR ?? unit.HP_MAX) > 0);
-    }, [units, player]);
+      const filtered = units.filter(
+        (unit) => unit.player === player && (unit.HP_CUR ?? unit.HP_MAX) > 0
+      );
+      if (detailPreviewUnitId === null) {
+        return filtered;
+      }
+      const previewIndex = filtered.findIndex(
+        (u) => String(u.id) === String(detailPreviewUnitId)
+      );
+      if (previewIndex <= 0) {
+        return filtered;
+      }
+      const previewUnit = filtered[previewIndex];
+      const rest = filtered.filter((_, i) => i !== previewIndex);
+      return [previewUnit, ...rest];
+    }, [units, player, detailPreviewUnitId]);
 
     useEffect(() => {
       const targetUnitInThisTable =
