@@ -1044,6 +1044,7 @@ export class UnitRenderer {
       ELIGIBLE_OUTLINE_ALPHA,
       phase,
       fightSubPhase,
+      displayOrientationStep,
     } = this.props;
 
     const nrEl = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
@@ -1051,6 +1052,14 @@ export class UnitRenderer {
     eligibleOutline.lineStyle(ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA);
     const outlinePad = 1.045;
     if (nrEl) {
+      if (
+        displayOrientationStep !== undefined &&
+        (!Number.isInteger(displayOrientationStep) || displayOrientationStep < 0 || displayOrientationStep > 5)
+      ) {
+        throw new Error(
+          `displayOrientationStep must be an integer in 0..5, got ${String(displayOrientationStep)}`
+        );
+      }
       if (nrEl.kind === "oval") {
         eligibleOutline.drawEllipse(
           centerX,
@@ -1068,6 +1077,11 @@ export class UnitRenderer {
           ss,
           getSquareCornerRadiusPx() + 2,
         );
+      }
+      if (displayOrientationStep !== undefined) {
+        eligibleOutline.pivot.set(centerX, centerY);
+        eligibleOutline.position.set(centerX, centerY);
+        eligibleOutline.rotation = displayOrientationStep * Math.PI / 3;
       }
     } else {
       const circleRadius = ((HEX_RADIUS * unitIconScale) / 2) * 1.1;
@@ -1115,6 +1129,11 @@ export class UnitRenderer {
             ss,
             getSquareCornerRadiusPx() + 3,
           );
+        }
+        if (displayOrientationStep !== undefined) {
+          chargedOutline.pivot.set(centerX, centerY);
+          chargedOutline.position.set(centerX, centerY);
+          chargedOutline.rotation = displayOrientationStep * Math.PI / 3;
         }
       } else {
         const circleRadius = ((HEX_RADIUS * unitIconScale) / 2) * 1.1;
