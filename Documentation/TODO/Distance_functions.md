@@ -1,6 +1,6 @@
 # Distance / engagement / clearance — contrat spatial final
 
-**Chemin :** `Documentation/TODO/Distance_functions_final.md`  
+**Chemin :** `Documentation/TODO/Distance_functions.md`  
 **Statut :** référence **TODO unique** pour cartographier le moteur, limiter les régressions et piloter le refactor distance / engagement / clearance.
 
 **Document vivant :** **revue du tableau maître (§4)** à chaque PR qui modifie un symbole listé (mise à jour de la ligne dans le même merge, ou référence explicite vers un test de non-régression qui verrouille le comportement).
@@ -9,9 +9,9 @@
 
 Ce document **ne remplace pas** `Documentation/AI_TURN.md` ni `Documentation/AI_IMPLEMENTATION.md`. Toute règle joueur visible, ou tout changement d’architecture canonique, doit être porté dans ces documents **après** décision explicite.
 
-**Remplace pour le quotidien :** `Distance_functions11.md` à `Distance_functions33.md`, ainsi que les variantes intermédiaires (`…13.md`, `…23.md`, etc.) — les conserver en archive avec une ligne « **voir `Distance_functions_final.md`** » pour éviter la maintenance parallèle.
+**Remplace pour le quotidien :** `Distance_functions11.md` à `Distance_functions33.md`, ainsi que les variantes intermédiaires (`…13.md`, `…23.md`, etc.) — les conserver en archive avec une ligne « **voir `Distance_functions.md`** » pour éviter la maintenance parallèle.
 
-**Note dépôt :** certains brouillons pointaient vers `Documentation/TODO/Distance_functions.md` ; ce fichier **sans suffixe n’existe pas** dans le dépôt (glob `Distance_functions*.md`). Toute spec longue utile au refactor est **ici**.
+**Note dépôt :** `Documentation/TODO/Distance_functions.md` est désormais la référence de production. Toute spec longue utile au refactor est **ici**.
 
 **Module cible à trancher :** nouveau `engine/spatial_relations.py`, ou extension contrôlée de `engine/hex_utils.py` / `engine/combat_utils.py`, selon les cycles d’imports.
 
@@ -40,7 +40,7 @@ Ce document **ne remplace pas** `Documentation/AI_TURN.md` ni `Documentation/AI_
 | ID | Nom contractuel | Question métier | Primitive dominante |
 |----|-----------------|-----------------|---------------------|
 | **A** | **Contact empreinte** | Les empreintes sont-elles au contact utile : voisinage **hex strict** entre cellules, ou bord-à-bord rond↔rond avec tolérance de discrétisation ? | Hex : `min_distance_between_sets(..., max_distance=1) <= 1`. Rond↔rond : `euclidean_edge_clearance_round_round(...)` + `gap <= _ADJACENT_EDGE_GAP_TOLERANCE_NORM`. |
-| **B** | **Engagement empreintes** | La distance **hex minimale entre empreintes** est-elle `<= engagement_zone` ? | `min_distance_between_sets(unit_fp, enemy_fp [, max_distance=ez]) <= ez`, avec `ez` via `get_melee_range` / `get_engagement_zone`. |
+| **B** | **Engagement empreintes** | La distance **hex minimale entre empreintes** est-elle `<= engagement_zone` ? | `min_distance_between_sets(unit_fp, enemy_fp [, max_distance=ez]) <= ez`, avec `ez` via `get_engagement_zone`. |
 | **C** | **Clearance destination (move)** | L’ancre de placement est-elle trop proche d’un ennemi pour finir / traverser selon les règles move ? | `ez <= 1` : membership dans `enemy_adjacent_hexes`. `ez > 1` : rond↔rond `gap < engagement_minimum_clearance_norm(ez) - ε` (ε = typ. `1e-6` dans `movement_handlers`) ; sinon repli hex `min_distance_between_sets(...) <= ez`. |
 
 **Lecture rapide :** **A** = collé ; **B** = dans la bulle d’engagement entre empreintes ; **C** = interdiction de destination / traversée. **B** et **C** ne sont pas interchangeables.
@@ -57,7 +57,7 @@ Ce document **ne remplace pas** `Documentation/AI_TURN.md` ni `Documentation/AI_
 
 **B — Engagement empreintes**
 
-- `cc_range` / `ez` = typiquement `get_melee_range(game_state)` ou `get_engagement_zone(game_state)` — **même** config `engagement_zone` ; cible refactor : **un seul lecteur** dans le module spatial.
+- `cc_range` / `ez` = `get_engagement_zone(game_state)` — lecteur canonique de la config `engagement_zone`.
 - Test courant : `min_distance_between_sets(unit_fp, enemy_fp) <= cc_range`.
 - **Si `max_distance` en boucle :** arrêt anticipé → la valeur retournée peut être **`max_distance + 1`** au-delà du seuil : **≠ distance exacte** pour logging ou règles fines ; le booléen « ≤ ez » reste correct si l’implémentation respecte le contrat. **Fight** vs **tir / charge** : voir **§5**.
 - **Caches move :** dilatation hex (`build_enemy_adjacent_hexes`, …) — représentation **grille** liée à **ez**, pas la géométrie euclidienne **C** pour rond↔rond quand `ez > 1`.
@@ -91,20 +91,21 @@ Symboles : **●** = rôle principal ; **◐** = branche / mixte ; **—** = non
 
 | Zone | Fichier — symbole | A | B | C | Notes anti-régression |
 |------|-------------------|---|---|---|------------------------|
-| Fight — skip pile-in « déjà collé » | `fight_handlers.py` — `_fight_unit_is_hex_adjacent_to_enemy_footprint` | ● | | | `<= 1` hex strict ; pas `ENGAGEMENT_NORM_HEX_WIDTH`. |
-| Fight — consolidation contact | `fight_handlers.py` — `_fight_fp_has_adjacent_enemy_footprint` | ● | | | Même sémantique **A**. |
+| Fight — skip pile-in « déjà collé » | `fight_handlers.py` — `_fight_unit_is_hex_adjacent_to_enemy_footprint` → `_fight_footprint_has_enemy_hex_contact` | ● | | | `<= 1` hex strict ; pas `ENGAGEMENT_NORM_HEX_WIDTH`. Test : `tests/unit/engine/test_fight_spatial_contract.py`. |
+| Fight — consolidation contact | `fight_handlers.py` — `_fight_fp_has_adjacent_enemy_footprint` → `_fight_footprint_has_enemy_hex_contact` | ● | | | Même sémantique **A**. Test : `tests/unit/engine/test_fight_spatial_contract.py`. |
 | Fight — pile-in ancre « contact » | `fight_handlers.py` — `_fight_pile_in_anchor_adjacent_to_enemy_footprint` | ●¹ | ●² | | ¹ **Rond↔rond :** `euclidean_edge_clearance_round_round` puis `gap ≤` tolérance (= `ENGAGEMENT_NORM_HEX_WIDTH` / `_ADJACENT_EDGE_GAP_TOLERANCE_NORM`). ² **Non-rond :** `min_distance_between_sets ≤ cc_range` (**B-like** si `ez > 1`). Décision **§10** avant unification. |
-| Fight — éligibilité | `fight_handlers.py` — `_is_adjacent_to_enemy_within_cc_range` | | ● | | Nom trompeur : **B**, pas contact **A**. Souvent sans `max_distance` dans la boucle ; voir **§5**. |
-| Fight — cibles CC | `fight_handlers.py` — `_fight_build_valid_target_pool` | | ● | | Exclusion si `distance > cc_range`. |
-| Fight — pools alternance | `generic_handlers.py` — `_is_adjacent_to_enemy_for_fight` | | ● | | Même **B** ; risque de divergence avec fight / tir. |
-| Tir / advance | `shooting_handlers.py` — `_is_adjacent_to_enemy_within_cc_range` | | ● | | Copie locale **B**, pas import fight ; utilise typiquement `max_distance=cc_range`; voir **§5**. |
+| Fight — éligibilité | `fight_handlers.py` — `_is_adjacent_to_enemy_within_cc_range` → `engine.spatial_relations.enemy_footprint_distances` | | ● | | Nom trompeur : **B**, pas contact **A**. Fight passe `max_distance=None` pour distance complète ; voir **§5**. Test : `tests/unit/engine/test_fight_spatial_contract.py`. |
+| Fight — cibles CC | `fight_handlers.py` — `_fight_build_valid_target_pool` → `engine.spatial_relations.enemy_footprint_distances` | | ● | | Exclusion si `distance > cc_range`. Test : `tests/unit/engine/test_fight_spatial_contract.py`. |
+| Fight — pools alternance | `generic_handlers.py` — `_is_adjacent_to_enemy_for_fight` → `engine.spatial_relations.unit_within_engagement_zone_footprints` | | ● | | Même **B** que fight, via primitive partagée. |
+| Tir / advance | `shooting_handlers.py` — `_is_adjacent_to_enemy_within_cc_range` → `engine.spatial_relations.unit_within_engagement_zone_footprints` | | ● | | Copie locale conservée comme wrapper ; utilise `max_distance=cc_range`; voir **§5**. |
 | Tir — portée arme | `shooting_handlers.py` — `_has_los_to_enemies_within_range` | — | — | | **\*** Distance de portée arme (`get_max_ranged_range`), pas `engagement_zone` ; **hors** A/B/C — ne pas fusionner avec **B**. |
-| Charge — déjà engagé | `charge_handlers.py` — `_is_adjacent_to_enemy`, `_is_adjacent_to_enemy_simple` | | ● | | **B** ; `max_distance=cc_range` comme le tir si version actuelle. |
+| Charge — déjà engagé | `charge_handlers.py` — `_is_adjacent_to_enemy`, `_is_adjacent_to_enemy_simple` → `engine.spatial_relations.unit_within_engagement_zone_footprints` | | ● | | **B** ; `max_distance=cc_range` comme le tir. |
 | Charge — hex voisin ennemi | `charge_handlers.py` — `_is_hex_adjacent_to_enemy` | ● | | | **A** grille / cache `enemy_adjacent_hexes` ; distinct de `_is_adjacent_to_enemy` **B**. |
-| Move — flee / pools | `movement_handlers.py` — `_is_adjacent_to_enemy` → `_movement_engagement_violates` | | ◐ | ● | ³ **C** dominant (flee, pools) ; branche non-rond `ez > 1` **B-like** hex ; `ez <= 1` via cache dilaté. Docstring historique trompeuse. |
-| Move — BFS vectorisé | `movement_handlers.py` — `_build_multi_hex_vectorized` | | | ● | Invariants commentés : doivent rester alignés avec `_movement_engagement_violates`. |
+| Move — flee / pools | `movement_handlers.py` — `_is_adjacent_to_enemy` → `_movement_engagement_violates` → `engine.spatial_relations.move_anchor_violates_engagement_clearance` | | ◐ | ● | ³ **C** dominant (flee, pools) ; branche non-rond `ez > 1` **B-like** hex ; `ez <= 1` via cache dilaté. Test : `tests/unit/engine/test_spatial_relations.py`. |
+| Move — BFS vectorisé | `movement_handlers.py` — `_build_multi_hex_vectorized` | | | ● | Invariants commentés : doivent rester alignés avec `_movement_engagement_violates` / `move_anchor_violates_engagement_clearance`. |
 | Caches move | `shared_utils.py` — `build_enemy_adjacent_hexes`, `enemy_adjacent_hexes_player_*` | | ◐ | ● | ⁴ Dilatation hex rayon **ez** (perf) ; `ez <= 1` → sert **C** directement ; `ez > 1` rond↔rond → le moteur affine en euclidien — **ne pas confondre** cache et vérité cercles. |
-| IA | `ai/analyzer.py` — `is_adjacent_to_enemy` | ● | | | ⁵ **Ancre 1 hex** + voisinage grille — pas empreinte multi-hex ni **B** moteur / clearance Board ×10 ; risque **moteur ↔ RL** si assimilé à **B**. |
+| IA | `ai/analyzer.py` — `is_hex_anchor_adjacent_to_enemy` / `is_adjacent_to_enemy` (alias legacy) | ● | | | ⁵ **Ancre 1 hex** + voisinage grille — pas empreinte multi-hex ni **B** moteur / clearance Board ×10. |
+| IA — engagement moteur | `ai/analyzer.py` — `is_within_engine_engagement_zone` → `engine.spatial_relations.unit_within_engagement_zone_footprints` | | ● | | Fonction séparée pour comparer/aligner les analyses avec la sémantique moteur **B** sans casser l’adjacence legacy. |
 
 **Légende exposants (§4) :** **¹** contact pile-in rond↔rond (gap + tolérance norme). **²** pile-in non-rond, critère **B-like** (`≤ cc_range`). **³** move : **C** dominant + branche hex **B-like** si `ez > 1` + cache si `ez <= 1`. **⁴** dilatation cache : perf grille **ez** ; ne **remplace pas** l’euclidien rond↔rond pour **C** quand `ez > 1`. **⁵** IA : ancre seule, pas empreinte moteur.
 
@@ -143,7 +144,7 @@ Le booléen attendu est identique si le contrat de `max_distance` est respecté 
 | Symbole | Rôle | Fichier |
 |---------|------|---------|
 | `_ADJACENT_EDGE_GAP_TOLERANCE_NORM` | Alias de `ENGAGEMENT_NORM_HEX_WIDTH` pour contact pile-in rond↔rond | `fight_handlers.py` |
-| `get_melee_range` / `get_engagement_zone` | Même règle config `engagement_zone`; cible : un lecteur unique dans le module spatial | `weapon_helpers.py` / `shared_utils.py` |
+| `get_engagement_zone` | Lecteur canonique de la règle config `engagement_zone`; `get_melee_range` supprimé car le nom historique confondait mêlée et engagement | `engine/spatial_relations.py` |
 | ε (clearance) | typ. `1e-6` dans `gap < req - ε` ; à centraliser avec **C** | `movement_handlers.py` |
 
 ---
@@ -153,8 +154,8 @@ Le booléen attendu est identique si le contrat de `max_distance` est respecté 
 | Famille | Exemples actuels | Livrable indicatif |
 |---------|------------------|--------------------|
 | **A — Contact** | `_fight_unit_is_hex_adjacent_to_enemy_footprint`, `_fight_fp_has_adjacent_enemy_footprint`, branche contact pile-in, `_is_hex_adjacent_to_enemy` | `footprint_hex_contact(...)` + `footprint_round_edge_contact(...)` si le split reste nécessaire. |
-| **B — Engagement** | `_is_adjacent_to_enemy_within_cc_range` (fight + tir), `_is_adjacent_to_enemy_for_fight`, `_fight_build_valid_target_pool`, charge `_is_adjacent_to_enemy*` | `within_engagement_zone_footprints(...)` ou `unit_footprint_engaged_with_enemy(...)`, unique, testé sur fight / tir / charge. |
-| **C — Clearance** | `_movement_engagement_violates`, `destination_adjacent_to_enemy`, `_build_multi_hex_vectorized` | `move_anchor_violates_engagement_clearance(...)`, avec **ε** centralisé et équivalence BFS conservée. |
+| **B — Engagement** | `_is_adjacent_to_enemy_within_cc_range` (fight + tir), `_is_adjacent_to_enemy_for_fight`, `_fight_build_valid_target_pool`, charge `_is_adjacent_to_enemy*` | `engine.spatial_relations.unit_within_engagement_zone_footprints(...)` + `enemy_footprint_distances(...)`, testé sur fight / tir / charge. |
+| **C — Clearance** | `_movement_engagement_violates`, `destination_adjacent_to_enemy`, `_build_multi_hex_vectorized` | `engine.spatial_relations.move_anchor_violates_engagement_clearance(...)`, avec **ε** centralisé et équivalence BFS conservée. |
 
 **Hors scope immédiat :** réécrire toute la dilatation des caches.  
 **Dans le scope :** conserver l’équivalence BFS / prédicat **C**, sauf décision documentée.
@@ -181,9 +182,9 @@ Le booléen attendu est identique si le contrat de `max_distance` est respecté 
 | Sujet | Options | Risque si non tranché |
 |-------|---------|------------------------|
 | Pile-in non-rond | Garder `<= cc_range` (**B-like**) vs `<= 1` hex (**A** strict) | Priorité ancres contact vs portée pile-in. |
-| Lecteurs config | Un wrapper unique `engagement_zone(game_state)` | Divergence `get_melee_range` / `get_engagement_zone`. |
-| Fight éligible vs PISTOL « engaged » | Une primitive **B** ou règles distinctes documentées | Double maintenance / incohérence. |
-| `ai.analyzer.is_adjacent_to_enemy` | Renommer + doc « ancre hex » ou aligner sur **B** + tests | Décalage moteur ↔ RL persistant. |
+| Lecteurs config | Décision appliquée : `get_engagement_zone(game_state)` est le lecteur canonique, `get_melee_range` est supprimé | Divergence terminologique supprimée. |
+| Fight éligible vs PISTOL « engaged » | Décision appliquée : même primitive **B/engagement** partagée ; wrappers métier locaux conservés | Double maintenance / incohérence supprimée côté moteur. |
+| `ai.analyzer.is_adjacent_to_enemy` | Décision appliquée : conserver l’alias legacy ancre hex, ajouter `is_hex_anchor_adjacent_to_enemy` et `is_within_engine_engagement_zone` | Décalage rendu explicite sans casser les analyses existantes. |
 
 **Format attendu :** une phrase de décision dans la PR ou un ADR court, plus un test qui verrouille le choix. Si impact joueur visible : mise à jour `AI_TURN.md`. Sinon : mention « refactor nominal uniquement ».  
 Si un symbole du **§4** change de sémantique : mettre à jour la ligne du tableau **dans le même merge** (ou lien vers test de non-régression).
@@ -212,7 +213,7 @@ Si un symbole du **§4** change de sémantique : mettre à jour la ligne du tabl
 - [ ] Doublons **B** : fusion ou tests booléens documentés, incluant le cas **§5** (early exit `max_distance + 1` vs distance complète).
 - [ ] Chaque ligne du **§10** est tranchée par écrit et verrouillée par test.
 - [ ] Tests minimum : rond↔rond ×10, legacy `ez = 1`, au moins un non-rond si applicable, clearance dans `tests/unit/engine/test_hex_utils.py`.
-- [ ] Décision analyzer (**§10**) appliquée.
+- [x] Décision analyzer (**§10**) appliquée : legacy ancre hex explicite + fonction **B** moteur séparée.
 - [ ] `AI_TURN.md` mis à jour si règle joueur visible change ; sinon mention « refactor nominal uniquement ».
 
 ---
@@ -222,6 +223,10 @@ Si un symbole du **§4** change de sémantique : mettre à jour la ligne du tabl
 - `Documentation/AI_TURN.md` — canon gameplay
 - `Documentation/AI_IMPLEMENTATION.md` — architecture
 - `Documentation/TODO/Boardx10-final.md` — grille Board ×10
+- `engine/spatial_relations.py` — primitives partagées **B** / distances empreintes
+- `tests/unit/engine/test_fight_spatial_contract.py` — garde-fous A/B fight
+- `tests/unit/engine/test_spatial_relations.py` — garde-fous primitives partagées B/C
+- `tests/unit/ai/test_analyzer_utils.py` — garde-fous analyzer legacy A + engagement moteur B
 - `tests/unit/engine/test_hex_utils.py` — garde-fous clearance
 - `generic_handlers.py` — commentaires PERF autour de `_rebuild_alternating_pools_for_fight`
 

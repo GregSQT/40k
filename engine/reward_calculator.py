@@ -1042,9 +1042,10 @@ class RewardCalculator:
         )
         
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max range from weapons
-        from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
+        from engine.utils.weapon_helpers import get_max_ranged_range
+        from engine.spatial_relations import get_engagement_zone
         max_ranged_range = get_max_ranged_range(attacker)
-        melee_range = get_melee_range(game_state)
+        melee_range = get_engagement_zone(game_state)
         
         can_use_ranged = max_ranged_range > 0 and distance <= max_ranged_range
         can_use_melee = distance <= melee_range
@@ -1277,10 +1278,11 @@ class RewardCalculator:
         enriched["unitType"] = agent_key
         
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
-        from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
+        from engine.utils.weapon_helpers import get_max_ranged_range
+        from engine.spatial_relations import get_engagement_zone_from_config
         
         max_rng_range = get_max_ranged_range(unit)
-        melee_range = get_melee_range()  # Always 1
+        melee_range = get_engagement_zone_from_config(self.config)
         
         # Add required tactical flags based on unit stats
         enriched["is_ranged"] = max_rng_range > melee_range

@@ -177,64 +177,19 @@ def _movement_engagement_violates(
         ez = engagement_zone_ez
     else:
         ez = get_engagement_zone(game_state)
-    mover_id = str(require_key(mover, "id"))
-    mover_player = int(require_key(mover, "player"))
+    from engine.spatial_relations import move_anchor_violates_engagement_clearance
 
-    if ez <= 1:
-        if enemy_adjacent_hexes is None:
-            ck = f"enemy_adjacent_hexes_player_{mover_player}"
-            enemy_adjacent_hexes = require_key(game_state, ck)
-        for c, r in candidate_fp:
-            if (c, r) in enemy_adjacent_hexes:
-                return True
-        return False
-
-    req = engagement_minimum_clearance_norm(ez)
-    mover_shape = mover.get("BASE_SHAPE", "round")
-    mover_bs = mover.get("BASE_SIZE", 1)
-    mover_bs_i = mover_bs if isinstance(mover_bs, int) else 1
-    # Un seul _hex_center pour le déplaceur (identique pour chaque ennemi rond / rond).
-    mover_center_xy_rr: Optional[Tuple[float, float]] = None
-    if ez > 1 and mover_shape == "round":
-        mover_center_xy_rr = _hex_center(center_col, center_row)
-
-    if enemy_cache_items is not None:
-        _enemy_iter: Any = enemy_cache_items
-    else:
-        _enemy_iter = (
-            (eid, ce)
-            for eid, ce in units_cache.items()
-            if str(eid) != mover_id and int(require_key(ce, "player")) != mover_player
-        )
-
-    for eid, cache_entry in _enemy_iter:
-        enemy_fp = cache_entry.get("occupied_hexes")
-        if not enemy_fp:
-            ec = require_key(cache_entry, "col")
-            er = require_key(cache_entry, "row")
-            enemy_fp = {(ec, er)}
-        e_shape = cache_entry.get("BASE_SHAPE", "round")
-        e_bs_raw = cache_entry.get("BASE_SIZE", 1)
-        e_bs_i = e_bs_raw if isinstance(e_bs_raw, int) else 1
-        e_col = require_key(cache_entry, "col")
-        e_row = require_key(cache_entry, "row")
-
-        if mover_shape == "round" and e_shape == "round":
-            gap = euclidean_edge_clearance_round_round(
-                center_col,
-                center_row,
-                mover_bs_i,
-                e_col,
-                e_row,
-                e_bs_i,
-                mover_center_xy=mover_center_xy_rr,
-            )
-            if gap < req - 1e-6:
-                return True
-        else:
-            if min_distance_between_sets(candidate_fp, enemy_fp, max_distance=ez) <= ez:
-                return True
-    return False
+    return move_anchor_violates_engagement_clearance(
+        game_state,
+        mover,
+        center_col,
+        center_row,
+        candidate_fp,
+        units_cache,
+        enemy_adjacent_hexes,
+        enemy_cache_items=enemy_cache_items,
+        engagement_zone_ez=ez,
+    )
 
 
 def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any]) -> None:

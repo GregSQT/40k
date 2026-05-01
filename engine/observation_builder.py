@@ -892,9 +892,10 @@ class ObservationBuilder:
         )
 
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max range from weapons
-        from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
+        from engine.utils.weapon_helpers import get_max_ranged_range
+        from engine.spatial_relations import get_engagement_zone
         max_ranged_range = get_max_ranged_range(attacker)
-        melee_range = get_melee_range(game_state)
+        melee_range = get_engagement_zone(game_state)
 
         can_use_ranged = max_ranged_range > 0 and distance <= max_ranged_range
         can_use_melee = distance <= melee_range
@@ -1877,7 +1878,8 @@ class ObservationBuilder:
                 d = calculate_hex_distance(active_col, active_row, other_col, other_row)
                 if d <= perception_radius:
                     enemies.append((d, other_unit))
-            from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
+            from engine.utils.weapon_helpers import get_max_ranged_range
+            from engine.spatial_relations import get_engagement_zone
 
             def _enemy_priority(item):
                 distance, unit = item
@@ -1887,7 +1889,7 @@ class ObservationBuilder:
                 max_range = get_max_ranged_range(unit)
                 if max_range > 0 and distance <= max_range:
                     can_attack = 1.0
-                elif distance <= get_melee_range(game_state):
+                elif distance <= get_engagement_zone(game_state):
                     can_attack = 1.0
                 return (
                     1000,
@@ -1946,12 +1948,13 @@ class ObservationBuilder:
                 current_phase = game_state["phase"]
                 is_valid = 0.0
                 # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max range from weapons
-                from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
+                from engine.utils.weapon_helpers import get_max_ranged_range
+                from engine.spatial_relations import get_engagement_zone
                 if current_phase == "shoot":
                     max_range = get_max_ranged_range(active_unit)
                     is_valid = 1.0 if distance <= max_range else 0.0
                 elif current_phase == "fight":
-                    melee_range = get_melee_range(game_state)
+                    melee_range = get_engagement_zone(game_state)
                     is_valid = 1.0 if distance <= melee_range else 0.0
                 obs[feature_base + 10] = is_valid
                 
@@ -2122,9 +2125,10 @@ class ObservationBuilder:
                 
                 # Offensive type encoding (Melee=0.0, Ranged=1.0)
                 # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
-                from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
+                from engine.utils.weapon_helpers import get_max_ranged_range
+                from engine.spatial_relations import get_engagement_zone
                 max_rng_range = get_max_ranged_range(unit)
-                melee_range = get_melee_range(game_state)
+                melee_range = get_engagement_zone(game_state)
                 
                 offensive_type = 1.0 if max_rng_range > melee_range else 0.0
                 
@@ -2202,8 +2206,8 @@ class ObservationBuilder:
                 if distance <= active_unit["MOVE"] + _charge_max_d:
                     valid_targets.append(enemy)
         elif current_phase == "fight":
-            from engine.utils.weapon_helpers import get_melee_range
-            melee_range = get_melee_range(game_state)
+            from engine.spatial_relations import get_engagement_zone
+            melee_range = get_engagement_zone(game_state)
             units_cache = require_key(game_state, "units_cache")
             active_entry = require_key(units_cache, str(active_unit["id"]))
             active_player = require_key(active_entry, "player")

@@ -1,4 +1,4 @@
-// frontend/src/roster/spaceMarine/units/Aggressor.ts
+// frontend/src/roster/spaceMarine/units/AggressorBoltStorm.ts
 
 import { getWeapons } from "../armory";
 import { EliteRangeSwarm } from "../classes/EliteRangeSwarm";
@@ -36,7 +36,7 @@ export class AggressorBoltStorm extends EliteRangeSwarm {
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 16; // Size of the base
   static ICON_SCALE = 2.0; // Size of the icon
-  static ILLUSTRATION_RATIO = 100; // Illustration size ratio in percent
+  static ILLUSTRATION_RATIO = 115; // Illustration size ratio in percent
 
 
   constructor(name: string, startPos: [number, number]) {

@@ -435,7 +435,7 @@ def _build_weapon_availability_enemy_precheck(
     weapon_availability_check : évite de répéter min_distance / boucle alliés pour chaque arme.
     """
     from engine.hex_utils import min_distance_between_sets as _mds_wpn
-    from engine.utils.weapon_helpers import get_melee_range
+    from engine.spatial_relations import get_engagement_zone
 
     max_rng = 0
     for w in rng_weapons:
@@ -456,7 +456,7 @@ def _build_weapon_availability_enemy_precheck(
     _u_fp = _ue.get("occupied_hexes", {(unit_col, unit_row)}) if _ue else {(unit_col, unit_row)}
     shooter_id_str = _uid_str
     shooter_player_int = int(unit["player"]) if unit["player"] is not None else None
-    melee_range = get_melee_range(game_state)
+    melee_range = get_engagement_zone(game_state)
 
     _los_map = unit.get("los_cache")
     out: List[Dict[str, Any]] = []
@@ -630,9 +630,9 @@ def weapon_availability_check(
                     )
                     if _perf_wa and _tpb is not None:
                         _precheck_build_s += time.perf_counter() - _tpb
-                from engine.utils.weapon_helpers import get_melee_range
+                from engine.spatial_relations import get_engagement_zone
 
-                melee_range = get_melee_range(game_state)
+                melee_range = get_engagement_zone(game_state)
                 weapon_is_pistol = _weapon_has_pistol_rule(weapon)
                 shooter_engaged = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
 
@@ -1727,9 +1727,9 @@ def _friendly_engagement_blocks_ranged_shot(
     if enemy_adjacent_to_shooter:
         return False
     from engine.hex_utils import min_distance_between_sets
-    from engine.utils.weapon_helpers import get_melee_range
+    from engine.spatial_relations import get_engagement_zone
 
-    melee_range = get_melee_range(game_state)
+    melee_range = get_engagement_zone(game_state)
     for friendly_id, cache_entry in units_cache.items():
         friendly_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
         if friendly_player == shooter_player_int and friendly_id != shooter_id_str:
@@ -1758,7 +1758,8 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     """
     # Range check using min footprint distance (§3.3)
     from engine.hex_utils import min_distance_between_sets
-    from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range, get_selected_ranged_weapon
+    from engine.utils.weapon_helpers import get_max_ranged_range, get_selected_ranged_weapon
+    from engine.spatial_relations import get_engagement_zone
 
     shooter_col, shooter_row = require_unit_position(shooter, game_state)
     target_col, target_row = require_unit_position(target, game_state)
@@ -1783,7 +1784,7 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     if target_player == shooter_player:
         return False
 
-    melee_range = get_melee_range(game_state)
+    melee_range = get_engagement_zone(game_state)
     enemy_adjacent_to_shooter = (distance <= melee_range)
     selected_weapon = get_selected_ranged_weapon(shooter)
     weapon_is_pistol = bool(selected_weapon and _weapon_has_pistol_rule(selected_weapon))
@@ -2272,10 +2273,10 @@ def valid_target_pool_build(
             if isinstance(r.get("enemy_id_str"), str)
         }
 
-    from engine.utils.weapon_helpers import get_melee_range
+    from engine.spatial_relations import get_engagement_zone
     from engine.hex_utils import min_distance_between_sets
 
-    melee_range = get_melee_range(game_state)
+    melee_range = get_engagement_zone(game_state)
     max_usable_rng = 0
     for widx in usable_weapon_indices:
         if widx < len(rng_weapons):
@@ -6890,26 +6891,13 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
     Uses min distance between footprints (§3.3, §9.8) for multi-hex units.
     Always uses fresh positions from units_cache.
     """
-    from engine.utils.weapon_helpers import get_melee_range
-    from engine.hex_utils import min_distance_between_sets
-    cc_range = get_melee_range(game_state)
+    from engine.spatial_relations import get_engagement_zone
+    from engine.spatial_relations import unit_within_engagement_zone_footprints
 
-    unit_col, unit_row = require_unit_position(unit, game_state)
-    unit_player = int(unit["player"]) if unit["player"] is not None else None
-
-    units_cache = require_key(game_state, "units_cache")
-    unit_id_str = str(unit["id"])
-    unit_entry = units_cache.get(unit_id_str)
-    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
-
-    for enemy_id, cache_entry in units_cache.items():
-        enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
-        if enemy_player != unit_player:
-            enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-            distance = min_distance_between_sets(unit_fp, enemy_fp, max_distance=cc_range)
-            if distance <= cc_range:
-                return True
-    return False
+    cc_range = get_engagement_zone(game_state)
+    return unit_within_engagement_zone_footprints(
+        game_state, unit, engagement_zone=cc_range, max_distance=cc_range
+    )
 
 
 def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:

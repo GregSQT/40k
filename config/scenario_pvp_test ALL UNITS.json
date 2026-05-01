@@ -1,0 +1,26 @@
+{
+  "primary_objectives": ["objectives_control"],
+  "wall_ref": "walls-11.json",
+  "objectives_ref": "objectives-51.json",
+  "units": [
+    {"id": 1, "unit_type": "CaptainTerminatorRelicFistBolter", "player": 1, "col": 20, "row": 10},
+    {"id": 2, "unit_type": "Terminator", "player": 1, "col": 40, "row": 10},
+    {"id": 3, "unit_type": "TerminatorAssaultCannon", "player": 1, "col": 60, "row": 10},
+    {"id": 4, "unit_type": "AssaultTerminator", "player": 1, "col":80, "row": 10},
+    {"id": 5, "unit_type": "Intercessor", "player": 1, "col": 20, "row": 30},
+    {"id": 6, "unit_type": "Hellblaster", "player": 1, "col": 40, "row": 30},
+    {"id": 7, "unit_type": "AssaultIntercessor", "player": 1, "col": 60, "row": 30},
+    {"id": 8, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 80, "row": 30},
+    {"id": 9, "unit_type": "AggressorBoltStorm", "player": 1, "col": 20, "row": 50},
+    {"id": 10, "unit_type": "AggressorFlamestorm", "player": 1, "col": 40, "row": 50},
+    {"id": 11, "unit_type": "HeavyIntercessor", "player": 1, "col": 60, "row": 50},
+    {"id": 12, "unit_type": "DreadnoughtBallistus", "player": 1, "col": 20, "row": 80},
+    {"id": 101, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 200, "row": 200},
+    {"id": 102, "unit_type": "Termagant", "player": 2, "col": 80, "row": 90},
+    {"id": 103, "unit_type": "Genestealer", "player": 2, "col": 100, "row": 80},
+    {"id": 104, "unit_type": "ScreamerKiller", "player": 2, "col": 90, "row": 120},
+    {"id": 105, "unit_type": "Hormagaunt", "player": 2, "col": 220, "row": 245},
+    {"id": 106, "unit_type": "TyranidWarriorMelee", "player": 2, "col": 270, "row": 110}
+
+  ]
+}

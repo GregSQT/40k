@@ -381,6 +381,16 @@ def _remove_dead_unit_from_fight_pools(game_state: Dict[str, Any], unit_id: str)
     from .shooting_handlers import _remove_dead_unit_from_pools
     _remove_dead_unit_from_pools(game_state, unit_id)
 
+def _fight_enemy_footprint_distances(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+) -> List[Tuple[Any, int]]:
+    """Return fight footprint distances to enemy units using the B/engagement metric."""
+    from engine.spatial_relations import enemy_footprint_distances
+
+    return enemy_footprint_distances(game_state, unit, max_distance=None)
+
+
 def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
     Check if unit is adjacent to at least one enemy within engagement zone.
@@ -388,30 +398,41 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
     Uses min distance between footprints (§3.3, §9.8) for multi-hex units.
     For legacy boards (engagement_zone=1, single-hex), equivalent to hex distance <= 1.
     """
-    from engine.utils.weapon_helpers import get_melee_range
-    from engine.hex_utils import min_distance_between_sets
-    cc_range = get_melee_range(game_state)
-    unit_col, unit_row = require_unit_position(unit, game_state)
+    from engine.spatial_relations import get_engagement_zone
+    cc_range = get_engagement_zone(game_state)
 
     if "console_logs" not in game_state:
         game_state["console_logs"] = []
 
-    units_cache = require_key(game_state, "units_cache")
-    unit_id_str = str(unit["id"])
-    unit_entry = units_cache.get(unit_id_str)
-    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
-
-    unit_player = int(unit["player"]) if unit["player"] is not None else None
-    for enemy_id, cache_entry in units_cache.items():
-        if int(cache_entry["player"]) != unit_player:
-            enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-            distance = min_distance_between_sets(unit_fp, enemy_fp)
-            add_console_log(game_state, f"FIGHT CHECK: Unit {unit['id']} engagement_zone={cc_range} | Enemy {enemy_id} footprint_dist={distance}")
-            if distance <= cc_range:
-                add_console_log(game_state, f"FIGHT ELIGIBLE: Unit {unit['id']} can fight enemy {enemy_id} (dist {distance} <= engagement_zone {cc_range})")
-                return True
+    for enemy_id, distance in _fight_enemy_footprint_distances(game_state, unit):
+        add_console_log(game_state, f"FIGHT CHECK: Unit {unit['id']} engagement_zone={cc_range} | Enemy {enemy_id} footprint_dist={distance}")
+        if distance <= cc_range:
+            add_console_log(game_state, f"FIGHT ELIGIBLE: Unit {unit['id']} can fight enemy {enemy_id} (dist {distance} <= engagement_zone {cc_range})")
+            return True
 
     add_console_log(game_state, f"FIGHT NOT ELIGIBLE: Unit {unit['id']} has no enemies within engagement_zone {cc_range}")
+    return False
+
+
+def _fight_footprint_has_enemy_hex_contact(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    fp: Set[Tuple[int, int]],
+) -> bool:
+    """Return True when a footprint has A/contact hex adjacency with any enemy footprint."""
+    from engine.hex_utils import min_distance_between_sets
+
+    units_cache = require_key(game_state, "units_cache")
+    unit_player = int(unit["player"]) if unit["player"] is not None else None
+    unit_id_str = str(unit["id"])
+    for enemy_id, cache_entry in units_cache.items():
+        if str(enemy_id) == unit_id_str:
+            continue
+        if int(cache_entry["player"]) == unit_player:
+            continue
+        enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+        if min_distance_between_sets(fp, enemy_fp, max_distance=1) <= 1:
+            return True
     return False
 
 
@@ -420,22 +441,13 @@ def _fight_unit_is_hex_adjacent_to_enemy_footprint(game_state: Dict[str, Any], u
     « Collé » : au moins un hex de l'empreinte partage un bord avec un hex d'empreinte ennemie
     (distance minimale entre empreintes == 1).
     """
-    from engine.hex_utils import min_distance_between_sets
-
     unit_col, unit_row = require_unit_position(unit, game_state)
     units_cache = require_key(game_state, "units_cache")
     unit_id_str = str(unit["id"])
     unit_entry = units_cache.get(unit_id_str)
     unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
-    unit_player = int(unit["player"]) if unit["player"] is not None else None
 
-    for enemy_id, cache_entry in units_cache.items():
-        if int(cache_entry["player"]) == unit_player:
-            continue
-        enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-        if min_distance_between_sets(unit_fp, enemy_fp, max_distance=1) <= 1:
-            return True
-    return False
+    return _fight_footprint_has_enemy_hex_contact(game_state, unit, unit_fp)
 
 
 def _fight_pile_in_closest_enemy_snapshot(
@@ -512,14 +524,14 @@ def _fight_pile_in_anchor_adjacent_to_enemy_footprint(
         euclidean_edge_clearance_round_round,
         min_distance_between_sets,
     )
-    from engine.utils.weapon_helpers import get_melee_range
+    from engine.spatial_relations import get_engagement_zone
 
     candidate_fp = compute_candidate_footprint(int(anchor_col), int(anchor_row), unit, game_state)
     units_cache = require_key(game_state, "units_cache")
     unit_player = int(unit["player"]) if unit["player"] is not None else None
     unit_id_str = str(unit["id"])
     target_filter = {str(t) for t in target_ids} if target_ids is not None else None
-    cc_range = get_melee_range(game_state)
+    cc_range = get_engagement_zone(game_state)
     unit_shape = unit.get("BASE_SHAPE", "round")
     unit_base_size = unit.get("BASE_SIZE", 1)
     for enemy_id, cache_entry in units_cache.items():
@@ -788,20 +800,7 @@ def _fight_fp_has_adjacent_enemy_footprint(
     unit: Dict[str, Any],
     fp: Set[Tuple[int, int]],
 ) -> bool:
-    from engine.hex_utils import min_distance_between_sets
-
-    units_cache = require_key(game_state, "units_cache")
-    unit_player = int(unit["player"]) if unit["player"] is not None else None
-    unit_id_str = str(unit["id"])
-    for enemy_id, cache_entry in units_cache.items():
-        if str(enemy_id) == unit_id_str:
-            continue
-        if int(cache_entry["player"]) == unit_player:
-            continue
-        enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-        if min_distance_between_sets(fp, enemy_fp, max_distance=1) <= 1:
-            return True
-    return False
+    return _fight_footprint_has_enemy_hex_contact(game_state, unit, fp)
 
 
 def _fight_plan_consolidation_destinations(
@@ -2201,25 +2200,12 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
 
     NO LINE OF SIGHT CHECK (fight doesn't need LoS)
     """
-    from engine.utils.weapon_helpers import get_melee_range
-    from engine.hex_utils import min_distance_between_sets
-    cc_range = get_melee_range(game_state)
-    unit_col, unit_row = require_unit_position(unit, game_state)
-    unit_player = int(unit["player"]) if unit["player"] is not None else None
-
-    units_cache = require_key(game_state, "units_cache")
-    unit_id_str = str(unit["id"])
-    unit_entry = units_cache.get(unit_id_str)
-    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+    from engine.spatial_relations import get_engagement_zone
+    cc_range = get_engagement_zone(game_state)
 
     valid_targets = []
 
-    for target_id, cache_entry in units_cache.items():
-        if int(cache_entry["player"]) == unit_player:
-            continue
-
-        enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-        distance = min_distance_between_sets(unit_fp, enemy_fp)
+    for target_id, distance in _fight_enemy_footprint_distances(game_state, unit):
         if distance > cc_range:
             continue
 

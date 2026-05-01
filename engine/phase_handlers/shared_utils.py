@@ -910,9 +910,9 @@ def get_engagement_zone(game_state: Dict[str, Any]) -> int:
 
     Returns 1 for legacy boards (adjacency), 10 for Board ×10 (§9.0).
     """
-    config = game_state.get("config") or {}
-    game_rules = config.get("game_rules") or {}
-    return int(game_rules.get("engagement_zone", 1))
+    from engine.spatial_relations import get_engagement_zone as _get_engagement_zone
+
+    return _get_engagement_zone(game_state)
 
 
 def get_max_base_size_hex(game_state: Dict[str, Any]) -> int:

@@ -44,6 +44,7 @@ def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: A
 # Cache for LoS thresholds (loaded from game_config, same as engine)
 _los_thresholds_cache: Optional[Tuple[float, float]] = None
 _inches_to_subhex_analyzer_cache: Optional[int] = None
+_engagement_zone_analyzer_cache: Optional[int] = None
 
 
 def _get_inches_to_subhex_for_analyzer() -> int:
@@ -59,6 +60,18 @@ def _get_inches_to_subhex_for_analyzer() -> int:
     default = require_key(board_cfg, "default")
     _inches_to_subhex_analyzer_cache = int(default.get("inches_to_subhex", 1))
     return _inches_to_subhex_analyzer_cache
+
+
+def _get_engagement_zone_for_analyzer() -> int:
+    """Load canonical engagement_zone from game_config (same as engine)."""
+    global _engagement_zone_analyzer_cache
+    if _engagement_zone_analyzer_cache is not None:
+        return _engagement_zone_analyzer_cache
+    from config_loader import get_config_loader
+    game_config = get_config_loader().get_game_config()
+    game_rules = require_key(game_config, "game_rules")
+    _engagement_zone_analyzer_cache = int(require_key(game_rules, "engagement_zone"))
+    return _engagement_zone_analyzer_cache
 
 MAX_D3 = 3
 MAX_D6 = 6
@@ -607,9 +620,15 @@ def parse_timestamp_to_seconds(line: str) -> Optional[int]:
     return None
 
 
-def is_adjacent_to_enemy(col: int, row: int, unit_player: Dict[str, int], unit_positions: Dict[str, Tuple[int, int]], 
-                         unit_hp: Dict[str, int], player: int) -> bool:
-    """Check if a hex is adjacent to any enemy unit."""
+def is_hex_anchor_adjacent_to_enemy(
+    col: int,
+    row: int,
+    unit_player: Dict[str, int],
+    unit_positions: Dict[str, Tuple[int, int]],
+    unit_hp: Dict[str, int],
+    player: int,
+) -> bool:
+    """Check legacy analyzer A/anchor hex adjacency against any enemy unit."""
     enemy_player = 3 - player
     # CRITICAL: Normalize player values to int for consistent comparison (handles int/string mismatches)
     enemy_player_int = int(enemy_player) if enemy_player is not None else None
@@ -630,6 +649,63 @@ def is_adjacent_to_enemy(col: int, row: int, unit_player: Dict[str, int], unit_p
             if is_adjacent(col, row, enemy_pos[0], enemy_pos[1]):
                 return True
     return False
+
+
+def is_adjacent_to_enemy(col: int, row: int, unit_player: Dict[str, int], unit_positions: Dict[str, Tuple[int, int]], 
+                         unit_hp: Dict[str, int], player: int) -> bool:
+    """Backward-compatible analyzer alias for legacy A/anchor hex adjacency."""
+    return is_hex_anchor_adjacent_to_enemy(col, row, unit_player, unit_positions, unit_hp, player)
+
+
+def is_within_engine_engagement_zone(
+    unit_id: str,
+    unit_player: Dict[str, int],
+    unit_positions: Dict[str, Tuple[int, int]],
+    unit_hp: Dict[str, int],
+    engagement_zone: int,
+    position_override: Optional[Tuple[int, int]] = None,
+) -> bool:
+    """Check B/engine engagement using the shared footprint engagement primitive."""
+    from engine.spatial_relations import unit_within_engagement_zone_footprints
+
+    if unit_id not in unit_positions and position_override is None:
+        return False
+    player = require_key(unit_player, unit_id)
+    units_cache: Dict[str, Dict[str, Any]] = {}
+    for uid, pos in unit_positions.items():
+        if uid not in unit_player:
+            continue
+        hp_value = _get_unit_hp_value(unit_hp, uid)
+        if hp_value is None or hp_value <= 0:
+            continue
+        units_cache[uid] = {
+            "col": pos[0],
+            "row": pos[1],
+            "player": require_key(unit_player, uid),
+            "occupied_hexes": {pos},
+        }
+    if position_override is not None:
+        hp_value = _get_unit_hp_value(unit_hp, unit_id)
+        if hp_value is None or hp_value <= 0:
+            return False
+        units_cache[unit_id] = {
+            "col": position_override[0],
+            "row": position_override[1],
+            "player": player,
+            "occupied_hexes": {position_override},
+        }
+    if unit_id not in units_cache:
+        return False
+    game_state = {
+        "config": {"game_rules": {"engagement_zone": engagement_zone}},
+        "units_cache": units_cache,
+    }
+    return unit_within_engagement_zone_footprints(
+        game_state,
+        {"id": unit_id, "player": player},
+        engagement_zone=engagement_zone,
+        max_distance=engagement_zone,
+    )
 
 
 def _build_enemy_adjacent_hexes(
@@ -779,14 +855,16 @@ def get_adjacent_enemies(col: int, row: int, unit_player: Dict[str, int], unit_p
 
 def is_engaged(unit_id: str, unit_player: Dict[str, int], unit_positions: Dict[str, Tuple[int, int]], 
                unit_hp: Dict[str, int]) -> bool:
-    """Check if a unit is engaged (adjacent to an enemy)."""
+    """Check if a unit is engaged using engine B/engagement semantics."""
     if unit_id not in unit_positions:
         return False
-    
-    player = require_key(unit_player, unit_id)
-    
-    unit_pos = unit_positions[unit_id]
-    return is_adjacent_to_enemy(unit_pos[0], unit_pos[1], unit_player, unit_positions, unit_hp, player)
+    return is_within_engine_engagement_zone(
+        unit_id,
+        unit_player,
+        unit_positions,
+        unit_hp,
+        engagement_zone=_get_engagement_zone_for_analyzer(),
+    )
 
 
 def _position_cache_set(
@@ -2156,13 +2234,13 @@ def parse_step_log(filepath: str) -> Dict:
                                     continue
                                 positions_for_adjacency_check_filtered[uid] = pos
 
-                            reactive_dest_adjacent = is_adjacent_to_enemy(
-                                to_col,
-                                to_row,
+                            reactive_dest_adjacent = is_within_engine_engagement_zone(
+                                reactive_unit_id,
                                 unit_player,
                                 positions_for_adjacency_check_filtered,
                                 unit_hp_at_reactive,
-                                reactive_player
+                                engagement_zone=_get_engagement_zone_for_analyzer(),
+                                position_override=(to_col, to_row),
                             )
                             if reactive_dest_adjacent:
                                 reactive_checks['to_adjacent_enemy'][reactive_player] += 1
@@ -2551,13 +2629,13 @@ def parse_step_log(filepath: str) -> Dict:
                                         uid: pos for uid, pos in unit_positions.items()
                                         if uid in unit_hp and uid in unit_player
                                     }
-                                    target_engaged = is_adjacent_to_enemy(
-                                        target_pos[0],
-                                        target_pos[1],
+                                    target_engaged = is_within_engine_engagement_zone(
+                                        target_id,
                                         unit_player,
                                         positions_for_engagement,
                                         unit_hp,
-                                        require_key(unit_player, target_id)
+                                        engagement_zone=_get_engagement_zone_for_analyzer(),
+                                        position_override=target_pos,
                                     )
                             elif target_id in unit_positions:
                                 stats['parse_errors'].append({
@@ -2593,13 +2671,13 @@ def parse_step_log(filepath: str) -> Dict:
                                     }
                                     target_pos_from_cache = positions_for_engagement.get(target_id)
                                     if target_pos_from_cache:
-                                        target_engaged = is_adjacent_to_enemy(
-                                            target_pos_from_cache[0],
-                                            target_pos_from_cache[1],
+                                        target_engaged = is_within_engine_engagement_zone(
+                                            target_id,
                                             unit_player,
                                             positions_for_engagement,
                                             unit_hp,
-                                            require_key(unit_player, target_id)
+                                            engagement_zone=_get_engagement_zone_for_analyzer(),
+                                            position_override=target_pos_from_cache,
                                         )
                                     else:
                                         target_engaged = False
@@ -2616,13 +2694,13 @@ def parse_step_log(filepath: str) -> Dict:
                             heavy_applied_in_log = re.search(r'(?:\[\s*HEAVY\s*\]|\sHEAVY\s)', action_desc, re.IGNORECASE) is not None
                             if weapon_match and target_pos and weapon_found:
                                 distance = calculate_hex_distance(shooter_col, shooter_row, target_pos[0], target_pos[1])
-                                shooter_engaged = is_adjacent_to_enemy(
-                                    shooter_col,
-                                    shooter_row,
+                                shooter_engaged = is_within_engine_engagement_zone(
+                                    shooter_id,
                                     unit_player,
                                     unit_positions,
                                     unit_hp,
-                                    player
+                                    engagement_zone=_get_engagement_zone_for_analyzer(),
+                                    position_override=(shooter_col, shooter_row),
                                 )
                                 
                                 if is_pistol:
@@ -3026,7 +3104,14 @@ def parse_step_log(filepath: str) -> Dict:
                             positions_at_advance_reconciled = dict(positions_at_advance)
                             
                             # RULE: Advance from adjacent
-                            if is_adjacent_to_enemy(start_col, start_row, unit_player, positions_at_advance_reconciled, unit_hp_at_advance, player):
+                            if is_within_engine_engagement_zone(
+                                advance_unit_id,
+                                unit_player,
+                                positions_at_advance_reconciled,
+                                unit_hp_at_advance,
+                                engagement_zone=_get_engagement_zone_for_analyzer(),
+                                position_override=(start_col, start_row),
+                            ):
                                 adjacent_enemies = get_adjacent_enemies(
                                     start_col, start_row, unit_player, positions_at_advance_reconciled, unit_hp_at_advance, unit_types, player
                                 )
@@ -3279,7 +3364,14 @@ def parse_step_log(filepath: str) -> Dict:
                             # However, if unit did charge after advancing, we still check adjacency at charge position for completeness.
                             if charge_unit_id not in units_advanced:
                                 # Only check adjacency if unit did NOT advance (normal case)
-                                if is_adjacent_to_enemy(start_col, start_row, unit_player, unit_positions, unit_hp, player):
+                                if is_within_engine_engagement_zone(
+                                    charge_unit_id,
+                                    unit_player,
+                                    unit_positions,
+                                    unit_hp,
+                                    engagement_zone=_get_engagement_zone_for_analyzer(),
+                                    position_override=(start_col, start_row),
+                                ):
                                     # DEBUG: Log which enemy is adjacent for debugging
                                     adjacent_enemies = get_adjacent_enemies(start_col, start_row, unit_player, unit_positions, unit_hp, unit_types, player)
                                     if adjacent_enemies:
@@ -3816,10 +3908,22 @@ def parse_step_log(filepath: str) -> Dict:
                                     if (int(require_key(unit_player, uid)) if require_key(unit_player, uid) is not None else None) == enemy_player_int and hp_value > 0:
                                         enemy_positions_current[uid] = pos
                                 # CRITICAL FIX: Use filtered enemy positions for both checks
-                                was_adjacent_in_snapshot = is_adjacent_to_enemy(start_pos[0], start_pos[1], unit_player, 
-                                                                               enemy_positions_in_snapshot, unit_hp, player)
-                                was_adjacent_in_current = is_adjacent_to_enemy(start_pos[0], start_pos[1], unit_player, 
-                                                                              enemy_positions_current, unit_hp, player)
+                                was_adjacent_in_snapshot = is_within_engine_engagement_zone(
+                                    move_unit_id,
+                                    unit_player,
+                                    enemy_positions_in_snapshot,
+                                    unit_hp,
+                                    engagement_zone=_get_engagement_zone_for_analyzer(),
+                                    position_override=start_pos,
+                                )
+                                was_adjacent_in_current = is_within_engine_engagement_zone(
+                                    move_unit_id,
+                                    unit_player,
+                                    enemy_positions_current,
+                                    unit_hp,
+                                    engagement_zone=_get_engagement_zone_for_analyzer(),
+                                    position_override=start_pos,
+                                )
                                 # CRITICAL FIX (Episodes 32, 112, 85): Require BOTH checks to agree (reduces false positives)
                                 # AND require that we have at least 2 units in snapshot (this unit + at least one other)
                                 # AND require that enemy_positions_current has at least one enemy (ensures unit_positions is up-to-date)
@@ -4122,7 +4226,14 @@ def parse_step_log(filepath: str) -> Dict:
                                 enemy_player_int = int(enemy_player) if enemy_player is not None else None
                                 enemy_positions_str = ', '.join([f"Unit {uid} at {pos} (HP={require_key(unit_hp_at_movement, uid)})" for uid, pos in positions_for_adjacency_check_filtered.items() if (int(require_key(unit_player, uid)) if require_key(unit_player, uid) is not None else None) == enemy_player_int])
                                 _debug_log(f"[ANALYZER DEBUG] E{current_episode_num} T{turn} MOVE: Unit {move_unit_id} checking adjacency at ({dest_col},{dest_row}) against {len(positions_for_adjacency_check_filtered)} enemy positions: {enemy_positions_str}")
-                                dest_adjacent = is_adjacent_to_enemy(dest_col, dest_row, unit_player, positions_for_adjacency_check_filtered, unit_hp_at_movement, player)
+                                dest_adjacent = is_within_engine_engagement_zone(
+                                    move_unit_id,
+                                    unit_player,
+                                    positions_for_adjacency_check_filtered,
+                                    unit_hp_at_movement,
+                                    engagement_zone=_get_engagement_zone_for_analyzer(),
+                                    position_override=(dest_col, dest_row),
+                                )
                                 
                                 # Only report violation if unit was NOT adjacent before move (flee is allowed)
                                 # If unit was already adjacent, moving to another adjacent hex is a flee (not a violation)
@@ -4201,9 +4312,13 @@ def parse_step_log(filepath: str) -> Dict:
                                         continue
                                     if charged_id not in unit_hp or require_key(unit_hp, charged_id) <= 0:
                                         continue
-                                    charged_pos = unit_positions[charged_id]
-                                    charged_player = require_key(unit_player, charged_id)
-                                    if is_adjacent_to_enemy(charged_pos[0], charged_pos[1], unit_player, unit_positions, unit_hp, charged_player):
+                                    if is_within_engine_engagement_zone(
+                                        charged_id,
+                                        unit_player,
+                                        unit_positions,
+                                        unit_hp,
+                                        engagement_zone=_get_engagement_zone_for_analyzer(),
+                                    ):
                                         eligible_charged_units.append(charged_id)
                                 if eligible_charged_units:
                                     stats['fight_alternation_violations'][attacker_player] += 1

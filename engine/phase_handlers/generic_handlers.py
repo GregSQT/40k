@@ -427,23 +427,11 @@ def _is_adjacent_to_enemy_for_fight(game_state: Dict[str, Any], unit: Dict[str, 
 
     Uses min distance between footprints (§3.3, §9.8) for multi-hex units.
     """
-    from engine.utils.weapon_helpers import get_melee_range
-    from engine.hex_utils import min_distance_between_sets
-    cc_range = get_melee_range(game_state)
-    unit_col, unit_row = require_unit_position(unit, game_state)
+    from engine.spatial_relations import get_engagement_zone
+    from engine.spatial_relations import unit_within_engagement_zone_footprints
 
-    units_cache = require_key(game_state, "units_cache")
-    unit_id_str = str(unit["id"])
-    unit_entry = units_cache.get(unit_id_str)
-    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
-
-    unit_player = int(unit["player"]) if unit["player"] is not None else None
-    for enemy_id, cache_entry in units_cache.items():
-        if int(cache_entry["player"]) != unit_player:
-            enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-            distance = min_distance_between_sets(unit_fp, enemy_fp)
-            if distance <= cc_range:
-                return True
-
-    return False
+    cc_range = get_engagement_zone(game_state)
+    return unit_within_engagement_zone_footprints(
+        game_state, unit, engagement_zone=cc_range, max_distance=None
+    )
 

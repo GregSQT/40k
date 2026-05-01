@@ -1310,23 +1310,13 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
 
     Used for charge eligibility — unit must NOT be already engaged.
     """
-    from engine.utils.weapon_helpers import get_melee_range
-    from engine.hex_utils import min_distance_between_sets
-    cc_range = get_melee_range(game_state)
-    unit_col, unit_row = require_unit_position(unit, game_state)
+    from engine.spatial_relations import get_engagement_zone
+    from engine.spatial_relations import unit_within_engagement_zone_footprints
 
-    units_cache = require_key(game_state, "units_cache")
-    unit_id_str = str(unit["id"])
-    unit_entry = units_cache.get(unit_id_str)
-    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
-
-    unit_player = int(unit["player"]) if unit["player"] is not None else None
-    for enemy_id, enemy_entry in units_cache.items():
-        if int(enemy_entry["player"]) != unit_player:
-            enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
-            if min_distance_between_sets(unit_fp, enemy_fp, max_distance=cc_range) <= cc_range:
-                return True
-    return False
+    cc_range = get_engagement_zone(game_state)
+    return unit_within_engagement_zone_footprints(
+        game_state, unit, engagement_zone=cc_range, max_distance=cc_range
+    )
 
 
 def _is_hex_adjacent_to_enemy(game_state: Dict[str, Any], col: int, row: int, player: int,
@@ -2304,22 +2294,13 @@ def _is_adjacent_to_enemy_simple(game_state: Dict[str, Any], unit: Dict[str, Any
     """
     Flee detection: unit within engagement zone of any enemy (footprint distance).
     """
-    from engine.utils.weapon_helpers import get_melee_range
-    from engine.hex_utils import min_distance_between_sets
-    cc_range = get_melee_range(game_state)
-    units_cache = require_key(game_state, "units_cache")
-    unit_player = int(unit["player"]) if unit["player"] is not None else None
-    unit_col, unit_row = require_unit_position(unit, game_state)
-    unit_id_str = str(unit["id"])
-    unit_entry = units_cache.get(unit_id_str)
-    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+    from engine.spatial_relations import get_engagement_zone
+    from engine.spatial_relations import unit_within_engagement_zone_footprints
 
-    for enemy_id, enemy_entry in units_cache.items():
-        if int(enemy_entry["player"]) != unit_player:
-            enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
-            if min_distance_between_sets(unit_fp, enemy_fp, max_distance=cc_range) <= cc_range:
-                return True
-    return False
+    cc_range = get_engagement_zone(game_state)
+    return unit_within_engagement_zone_footprints(
+        game_state, unit, engagement_zone=cc_range, max_distance=cc_range
+    )
 
 
 def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_valid_destinations: bool = True) -> Tuple[bool, Dict[str, Any]]:
