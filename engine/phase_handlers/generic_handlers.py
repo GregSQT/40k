@@ -362,11 +362,11 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
 
 def _rebuild_alternating_pools_for_fight(game_state: Dict[str, Any]) -> None:
     """
-    Rebuild alternating activation pools after each activation in fight phase.
+    Rebuild alternating activation pools when fight pool membership may have changed.
 
-    CRITICAL: This function is called after EVERY activation in the fight phase.
-    This ensures all eligible units are captured, even if they weren't in the initial pools
-    or became eligible after other units died or changed status.
+    CRITICAL: Invoked from ``end_activation`` (``arg4 == FIGHT``) only when the charging
+    pool is empty and a unit was removed from charging or an alternating pool, so that
+    adjacency-based eligibility stays consistent (not on every fight ``end_activation``).
 
     This must be called BEFORE checking if the phase is complete.
 

@@ -123,6 +123,23 @@ def _is_fight_auto_execution_allowed(game_state: Dict[str, Any]) -> bool:
     raise ValueError(f"Unsupported current_mode_code for fight auto execution: {mode_code}")
 
 
+def _fight_verbose_debug_enabled() -> bool:
+    """Actif si ``W40K_FIGHT_DEBUG`` vaut 1/true/yes/on (trace fight détaillée)."""
+    v = os.environ.get("W40K_FIGHT_DEBUG", "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _fight_verbose_trace(message: str) -> None:
+    """
+    Trace fight détaillée : **stderr uniquement**, indépendant de ``game_state['debug_mode']``
+    et de ``console_logs`` (piste A : ne pas mélanger avec le debug training).
+    """
+    if not _fight_verbose_debug_enabled():
+        return
+    sys.stderr.write(message + "\n")
+    sys.stderr.flush()
+
+
 def _is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
     """Return True if unit coordinates are inside any objective hex."""
     unit_col, unit_row = require_unit_position(unit, game_state)
@@ -307,17 +324,14 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
     add_console_log(game_state, f"CHARGING POOL SIZE: {len(charging_activation_pool)}")
     
     # DEBUG: Log all units in charging pool
-    if "episode_number" in game_state and "turn" in game_state:
+    if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
         episode = game_state["episode_number"]
         turn = game_state["turn"]
-        if "console_logs" not in game_state:
-            game_state["console_logs"] = []
         for unit_id in charging_activation_pool:
             unit = get_unit_by_id(game_state, unit_id)
             if unit:
                 log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight build_pools: Unit {unit_id} (player {unit['player']}) ADDED to charging_pool"
-                add_console_log(game_state, log_msg)
-                safe_print(game_state, log_msg)
+                _fight_verbose_trace(log_msg)
 
     # Sub-Phase 2: Alternating activation (units NOT in units_charged, adjacent to enemies)
     active_alternating = []
@@ -812,6 +826,10 @@ def _fight_plan_consolidation_destinations(
     Priorité 1 : ennemis — minimiser la distance à l'empreinte ennemie la plus proche ; si possible, contact (distance 1).
     Priorité 2 (sans ennemis sur le plateau) : objectif — finir avec empreinte ∩ empreinte objectif ; mouvement le plus court possible.
     Retourne None si aucune consolidation n'est possible / utile.
+
+    PERF (branche ennemis) : BFS seulement si ``start_d_min > 1`` ; empreintes des ancres
+    ``compute_candidate_footprint`` mémorisées ; empreintes du palier d'ennemis les plus proches
+    pré-calculées une fois par plan.
     """
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
@@ -831,16 +849,24 @@ def _fight_plan_consolidation_destinations(
         dist_by_anchor: List[Tuple[Tuple[int, int], int]] = []
         units_cache = require_key(game_state, "units_cache")
         from engine.hex_utils import min_distance_between_sets
+
+        closest_enemy_fps: List[Set[Tuple[int, int]]] = []
+        for enemy_id in closest_ids:
+            cache_entry = units_cache.get(str(enemy_id))
+            if not cache_entry:
+                continue
+            closest_enemy_fps.append(
+                cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+            )
+
+        fp_by_anchor: Dict[Tuple[int, int], Set[Tuple[int, int]]] = {}
         for anchor in visited:
             ac, ar = anchor
             fp = compute_candidate_footprint(ac, ar, unit, game_state)
+            fp_by_anchor[anchor] = fp
             # Evaluer uniquement le palier d'ennemis le plus proche au depart.
             dmin = None
-            for enemy_id in closest_ids:
-                cache_entry = units_cache.get(str(enemy_id))
-                if not cache_entry:
-                    continue
-                enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+            for enemy_fp in closest_enemy_fps:
                 d = min_distance_between_sets(fp, enemy_fp)
                 if dmin is None or d < dmin:
                     dmin = d
@@ -856,8 +882,7 @@ def _fight_plan_consolidation_destinations(
         tier = [a for a, d in dist_by_anchor if d == best_score]
         contact_tier = []
         for anchor in tier:
-            ac, ar = anchor
-            fp = compute_candidate_footprint(ac, ar, unit, game_state)
+            fp = fp_by_anchor[anchor]
             if _fight_fp_has_adjacent_enemy_footprint(game_state, unit, fp):
                 contact_tier.append(anchor)
         final_cands = contact_tier if contact_tier else tier
@@ -1728,16 +1753,13 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                 else:
                     # DEBUG: Check if unit is adjacent to enemy but not attacking
                     is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
-                    if "episode_number" in game_state and "turn" in game_state:
+                    if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
                         episode = game_state["episode_number"]
                         turn = game_state["turn"]
-                        if "console_logs" not in game_state:
-                            game_state["console_logs"] = []
                         if is_adjacent:
                             attack_left = require_key(unit, "ATTACK_LEFT")
                             log_msg = f"[FIGHT DEBUG] ⚠️ E{episode} T{turn} fight execute_action: Unit {unit_id} ADJACENT to enemy but NO TARGETS (ATTACK_LEFT={attack_left}) - skipping without attack"
-                            add_console_log(game_state, log_msg)
-                            safe_print(game_state, log_msg)
+                            _fight_verbose_trace(log_msg)
                     
                     # No targets - skip this unit (e.g. target died before activation)
                     result = end_activation(
@@ -1877,14 +1899,11 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             _update_fight_subphase(game_state)
 
         # DEBUG: Log final result before return (ATTACK_LEFT > 0 case)
-        if "episode_number" in game_state and "turn" in game_state:
+        if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
             episode = game_state["episode_number"]
             turn = game_state["turn"]
-            if "console_logs" not in game_state:
-                game_state["console_logs"] = []
             log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: RETURNING (ATTACK_LEFT>0) - result['action']={result.get('action')} result['unitId']={result.get('unitId')} result_keys={list(result.keys())}"
-            add_console_log(game_state, log_msg)
-            safe_print(game_state, log_msg)
+            _fight_verbose_trace(log_msg)
 
         return True, result
 
@@ -1927,27 +1946,21 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
         unit["_fight_attacks_executed"] = 0
 
     # DEBUG: Log unit activation
-    if "episode_number" in game_state and "turn" in game_state:
+    if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
         episode = game_state["episode_number"]
         turn = game_state["turn"]
-        if "console_logs" not in game_state:
-            game_state["console_logs"] = []
         log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight unit_activation: Unit {unit_id} ACTIVATED with ATTACK_LEFT={unit['ATTACK_LEFT']}"
-        add_console_log(game_state, log_msg)
-        safe_print(game_state, log_msg)
+        _fight_verbose_trace(log_msg)
 
     # Build valid target pool (enemies adjacent within CC_RNG)
     valid_targets = _fight_build_valid_target_pool(game_state, unit)
     
     # DEBUG: Log valid targets
-    if "episode_number" in game_state and "turn" in game_state:
+    if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
         episode = game_state["episode_number"]
         turn = game_state["turn"]
-        if "console_logs" not in game_state:
-            game_state["console_logs"] = []
         log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight unit_activation: Unit {unit_id} valid_targets={valid_targets} count={len(valid_targets)}"
-        add_console_log(game_state, log_msg)
-        safe_print(game_state, log_msg)
+        _fight_verbose_trace(log_msg)
 
     # Pile in (optionnel) : pas « collé », mais cibles CC valides — jusqu'à 3\", fin plus proche du palier ennemi le plus proche
     game_state["fight_pile_in_pending"] = False
@@ -2007,15 +2020,12 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
     if not valid_targets:
         # DEBUG: Check if unit is adjacent to enemy but not attacking
         is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
-        if "episode_number" in game_state and "turn" in game_state:
+        if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
             episode = game_state["episode_number"]
             turn = game_state["turn"]
-            if "console_logs" not in game_state:
-                game_state["console_logs"] = []
             if is_adjacent and unit["ATTACK_LEFT"] > 0:
                 log_msg = f"[FIGHT DEBUG] ⚠️ E{episode} T{turn} fight unit_activation: Unit {unit_id} ADJACENT to enemy but NO VALID TARGETS (ATTACK_LEFT={unit['ATTACK_LEFT']}) - ending without attack"
-                add_console_log(game_state, log_msg)
-                safe_print(game_state, log_msg)
+                _fight_verbose_trace(log_msg)
         
         # No targets - end activation with PASS
         # ATTACK_LEFT = CC_NB? YES -> no attack -> end_activation (PASS, 1, PASS, FIGHT)
@@ -2067,14 +2077,11 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
             _update_fight_subphase(game_state)
 
         # DEBUG: Log final result before return (ATTACK_LEFT = 0 case)
-        if "episode_number" in game_state and "turn" in game_state:
+        if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
             episode = game_state["episode_number"]
             turn = game_state["turn"]
-            if "console_logs" not in game_state:
-                game_state["console_logs"] = []
             log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: RETURNING (ATTACK_LEFT=0) - result['action']={result.get('action')} result['unitId']={result.get('unitId')} result_keys={list(result.keys())}"
-            add_console_log(game_state, log_msg)
-            safe_print(game_state, log_msg)
+            _fight_verbose_trace(log_msg)
 
         return True, result
 
@@ -2399,29 +2406,24 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
     # Execute attack sequence using selected weapon
     attack_result = _execute_fight_attack_sequence(game_state, unit, target_id)
 
-    # DEBUG: Log attack execution
-    if "episode_number" in game_state and "turn" in game_state:
-        episode = game_state["episode_number"]
-        turn = game_state["turn"]
-        if "console_logs" not in game_state:
-            game_state["console_logs"] = []
-        damage = attack_result["damage"] if "damage" in attack_result else 0
-        target_died = attack_result["target_died"] if "target_died" in attack_result else False
-        log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight attack_executed: Unit {unit_id} -> Unit {target_id} damage={damage} target_died={target_died}"
-        add_console_log(game_state, log_msg)
-        safe_print(game_state, log_msg)
-        # DEBUG: Verify log was added
-        from engine.game_utils import conditional_debug_print
-        conditional_debug_print(game_state, f"[DEBUG] Added attack_executed log to console_logs (count={len(game_state['console_logs'])})")
-    else:
-        # DEBUG: Log why condition failed
-        missing_keys = []
-        if "episode_number" not in game_state:
-            missing_keys.append("episode_number")
-        if "turn" not in game_state:
-            missing_keys.append("turn")
-        from engine.game_utils import conditional_debug_print
-        conditional_debug_print(game_state, f"[DEBUG] attack_executed log NOT added - missing keys: {missing_keys}")
+    # DEBUG: trace attack execution (stderr only ; ``W40K_FIGHT_DEBUG``)
+    if _fight_verbose_debug_enabled():
+        if "episode_number" in game_state and "turn" in game_state:
+            episode = game_state["episode_number"]
+            turn = game_state["turn"]
+            damage = attack_result["damage"] if "damage" in attack_result else 0
+            target_died = attack_result["target_died"] if "target_died" in attack_result else False
+            log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight attack_executed: Unit {unit_id} -> Unit {target_id} damage={damage} target_died={target_died}"
+            _fight_verbose_trace(log_msg)
+        else:
+            missing_keys = []
+            if "episode_number" not in game_state:
+                missing_keys.append("episode_number")
+            if "turn" not in game_state:
+                missing_keys.append("turn")
+            _fight_verbose_trace(
+                f"[FIGHT DEBUG] attack_executed trace: missing game_state keys {missing_keys}"
+            )
 
     # Store this attack result with metadata for step logging
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon NB
@@ -2441,16 +2443,13 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
     unit["_fight_attacks_executed"] = attacks_executed + 1
     
     # DEBUG: Log accumulation in fight_attack_results
-    if "episode_number" in game_state and "turn" in game_state:
+    if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
         episode = game_state["episode_number"]
         turn = game_state["turn"]
-        if "console_logs" not in game_state:
-            game_state["console_logs"] = []
         far_list = game_state["fight_attack_results"] if "fight_attack_results" in game_state else []
         total_results = len(far_list)
         log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight attack_executed: Unit {unit_id} fight_attack_results count={total_results}"
-        add_console_log(game_state, log_msg)
-        safe_print(game_state, log_msg)
+        _fight_verbose_trace(log_msg)
 
     # Decrement ATTACK_LEFT
     unit["ATTACK_LEFT"] -= 1
@@ -2517,29 +2516,12 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                                 if "unitId" not in rec_result:
                                     rec_result["unitId"] = unit_id
                             
-                            # DEBUG: Log the merge
-                            if "episode_number" in game_state and "turn" in game_state:
+                            # DEBUG: Log the merge (stderr only ; ``W40K_FIGHT_DEBUG``)
+                            if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
                                 episode = game_state["episode_number"]
                                 turn = game_state["turn"]
-                                if "console_logs" not in game_state:
-                                    game_state["console_logs"] = []
                                 log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: MERGED recursive results - before={len(attacks_before_recursive)} recursive={len(recursive_attack_results)} combined={len(combined_results)}"
-                                add_console_log(game_state, log_msg)
-                                safe_print(game_state, log_msg)
-                            else:
-                                # CRITICAL: If recursive call failed, preserve attacks_before_recursive
-                                # Restore fight_attack_results from attacks_before_recursive to ensure they're not lost
-                                if attacks_before_recursive:
-                                    game_state["fight_attack_results"] = list(attacks_before_recursive)
-                                    # Ensure result includes all_attack_results even if recursive call failed
-                                    if isinstance(rec_result, dict):
-                                        rec_result["all_attack_results"] = list(attacks_before_recursive)
-                                        # CRITICAL: Ensure action is set to "combat" when there are attack results
-                                        if attacks_before_recursive:
-                                            rec_result["action"] = "combat"
-                                            rec_result["phase"] = "fight"
-                                            if "unitId" not in rec_result:
-                                                rec_result["unitId"] = unit_id
+                                _fight_verbose_trace(log_msg)
                     else:
                         # CRITICAL: If recursive_result is invalid, preserve attacks_before_recursive
                         # Restore fight_attack_results to ensure they're not lost
@@ -2584,26 +2566,24 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                     raise ValueError(
                         f"attack_result missing from all_attack_results for unit {unit_id}"
                     )
+                for i, ar in enumerate(all_attack_results):
+                    tid_wp = ar.get("targetId")
+                    if tid_wp is None:
+                        raise ValueError(f"attack_result[{i}] missing 'targetId' field: {ar}")
+                    dmg_wp = ar.get("damage")
+                    if dmg_wp is None:
+                        raise ValueError(f"attack_result[{i}] missing 'damage' field: {ar}")
                 # DEBUG: Log all_attack_results being returned with waiting_for_player
-                if "episode_number" in game_state and "turn" in game_state:
+                if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
                     episode = game_state["episode_number"]
                     turn = game_state["turn"]
-                    if "console_logs" not in game_state:
-                        game_state["console_logs"] = []
                     log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: RETURNING waiting_for_player=True with all_attack_results count={len(all_attack_results)} for Unit {unit_id}"
-                    add_console_log(game_state, log_msg)
-                    safe_print(game_state, log_msg)
+                    _fight_verbose_trace(log_msg)
                     for i, ar in enumerate(all_attack_results):
-                        # CRITICAL: No default values - require explicit targetId and damage
-                        target_id = ar.get("targetId")
-                        if target_id is None:
-                            raise ValueError(f"attack_result[{i}] missing 'targetId' field: {ar}")
-                        damage = ar.get("damage")
-                        if damage is None:
-                            raise ValueError(f"attack_result[{i}] missing 'damage' field: {ar}")
-                        log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: waiting_for_player attack[{i}] -> Unit {target_id} damage={damage}"
-                        add_console_log(game_state, log_msg)
-                        safe_print(game_state, log_msg)
+                        tid_wp = ar.get("targetId")
+                        dmg_wp = ar.get("damage")
+                        log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: waiting_for_player attack[{i}] -> Unit {tid_wp} damage={dmg_wp}"
+                        _fight_verbose_trace(log_msg)
                 if all_attack_results:
                     game_state["fight_attack_results"] = []
                 return True, {
@@ -2621,15 +2601,12 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
 
         # DEBUG: Check if unit is adjacent to enemy but has no more targets
         is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
-        if "episode_number" in game_state and "turn" in game_state:
+        if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
             episode = game_state["episode_number"]
             turn = game_state["turn"]
-            if "console_logs" not in game_state:
-                game_state["console_logs"] = []
             if is_adjacent and unit["ATTACK_LEFT"] > 0:
                 log_msg = f"[FIGHT DEBUG] ⚠️ E{episode} T{turn} fight attack: Unit {unit_id} ADJACENT to enemy but NO MORE TARGETS (ATTACK_LEFT={unit['ATTACK_LEFT']}) - ending without completing all attacks"
-                add_console_log(game_state, log_msg)
-                safe_print(game_state, log_msg)
+                _fight_verbose_trace(log_msg)
         
         # No more targets - end activation
         # ATTACK_LEFT > 0 but no targets -> end_activation (ACTION, 1, FIGHT, FIGHT)
@@ -2681,26 +2658,24 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                 f"fight_attack_results is empty despite attack_result for unit {unit_id}"
             )
         result["all_attack_results"] = list(fight_attack_results)  # Copie explicite pour sécurité
+        for i, ar in enumerate(result["all_attack_results"]):
+            tid_nt = ar.get("targetId")
+            if tid_nt is None:
+                raise ValueError(f"attack_result[{i}] missing 'targetId' field: {ar}")
+            dmg_nt = ar.get("damage")
+            if dmg_nt is None:
+                raise ValueError(f"attack_result[{i}] missing 'damage' field: {ar}")
         # DEBUG: Log all_attack_results being set in result (no_more_targets path)
-        if "episode_number" in game_state and "turn" in game_state:
+        if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
             episode = game_state["episode_number"]
             turn = game_state["turn"]
-            if "console_logs" not in game_state:
-                game_state["console_logs"] = []
             log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: SETTING all_attack_results count={len(result['all_attack_results'])} for Unit {unit_id} (no_more_targets)"
-            add_console_log(game_state, log_msg)
-            safe_print(game_state, log_msg)
+            _fight_verbose_trace(log_msg)
             for i, ar in enumerate(result["all_attack_results"]):
-                # CRITICAL: No default values - require explicit targetId and damage
-                target_id = ar.get("targetId")
-                if target_id is None:
-                    raise ValueError(f"attack_result[{i}] missing 'targetId' field: {ar}")
-                damage = ar.get("damage")
-                if damage is None:
-                    raise ValueError(f"attack_result[{i}] missing 'damage' field: {ar}")
-                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: no_more_targets attack[{i}] -> Unit {target_id} damage={damage}"
-                add_console_log(game_state, log_msg)
-                safe_print(game_state, log_msg)
+                tid_nt = ar.get("targetId")
+                dmg_nt = ar.get("damage")
+                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: no_more_targets attack[{i}] -> Unit {tid_nt} damage={dmg_nt}"
+                _fight_verbose_trace(log_msg)
         # Clear accumulated results for next unit
         game_state["fight_attack_results"] = []
 
@@ -2714,14 +2689,11 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
             preserved_unit_id = result.get("unitId")
             
             # DEBUG: Log preservation before phase transition
-            if "episode_number" in game_state and "turn" in game_state:
+            if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
                 episode = game_state["episode_number"]
                 turn = game_state["turn"]
-                if "console_logs" not in game_state:
-                    game_state["console_logs"] = []
                 log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: BEFORE phase_complete - preserved_action={preserved_action} preserved_unit_id={preserved_unit_id} result_keys={list(result.keys())}"
-                add_console_log(game_state, log_msg)
-                safe_print(game_state, log_msg)
+                _fight_verbose_trace(log_msg)
             
             phase_result = _fight_phase_complete(game_state)
             # Merge phase transition info into result
@@ -2736,14 +2708,11 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                 result["unitId"] = preserved_unit_id
             
             # DEBUG: Log restoration after phase transition
-            if "episode_number" in game_state and "turn" in game_state:
+            if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
                 episode = game_state["episode_number"]
                 turn = game_state["turn"]
-                if "console_logs" not in game_state:
-                    game_state["console_logs"] = []
                 log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: AFTER phase_complete - result['action']={result.get('action')} result_keys={list(result.keys())}"
-                add_console_log(game_state, log_msg)
-                safe_print(game_state, log_msg)
+                _fight_verbose_trace(log_msg)
         else:
             # More units to activate - toggle alternation and update subphase
             # AI_TURN.md Lines 762-764, 844-846: Toggle alternation after activation completes
@@ -2804,26 +2773,24 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
             if attack_result:
                 fight_attack_results = [attack_result]
         result["all_attack_results"] = list(fight_attack_results)  # Copie explicite pour sécurité
+        for i, ar in enumerate(result["all_attack_results"]):
+            tid_ac = ar.get("targetId")
+            if tid_ac is None:
+                raise ValueError(f"attack_result[{i}] missing 'targetId' field: {ar}")
+            dmg_ac = ar.get("damage")
+            if dmg_ac is None:
+                raise ValueError(f"attack_result[{i}] missing 'damage' field: {ar}")
         # DEBUG: Log all_attack_results being set in result (attacks_complete path)
-        if "episode_number" in game_state and "turn" in game_state:
+        if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
             episode = game_state["episode_number"]
             turn = game_state["turn"]
-            if "console_logs" not in game_state:
-                game_state["console_logs"] = []
             log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: SETTING all_attack_results count={len(result['all_attack_results'])} for Unit {unit_id} (attacks_complete)"
-            add_console_log(game_state, log_msg)
-            safe_print(game_state, log_msg)
+            _fight_verbose_trace(log_msg)
             for i, ar in enumerate(result["all_attack_results"]):
-                # CRITICAL: No default values - require explicit targetId and damage
-                target_id = ar.get("targetId")
-                if target_id is None:
-                    raise ValueError(f"attack_result[{i}] missing 'targetId' field: {ar}")
-                damage = ar.get("damage")
-                if damage is None:
-                    raise ValueError(f"attack_result[{i}] missing 'damage' field: {ar}")
-                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: attacks_complete attack[{i}] -> Unit {target_id} damage={damage}"
-                add_console_log(game_state, log_msg)
-                safe_print(game_state, log_msg)
+                tid_ac = ar.get("targetId")
+                dmg_ac = ar.get("damage")
+                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: attacks_complete attack[{i}] -> Unit {tid_ac} damage={dmg_ac}"
+                _fight_verbose_trace(log_msg)
         # Clear accumulated results for next unit
         game_state["fight_attack_results"] = []
 
@@ -2836,14 +2803,11 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
             preserved_unit_id = result.get("unitId")
             
             # DEBUG: Log preservation before phase transition
-            if "episode_number" in game_state and "turn" in game_state:
+            if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
                 episode = game_state["episode_number"]
                 turn = game_state["turn"]
-                if "console_logs" not in game_state:
-                    game_state["console_logs"] = []
                 log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: BEFORE phase_complete (ATTACK_LEFT=0) - preserved_action={preserved_action} preserved_unit_id={preserved_unit_id} result_keys={list(result.keys())}"
-                add_console_log(game_state, log_msg)
-                safe_print(game_state, log_msg)
+                _fight_verbose_trace(log_msg)
             
             phase_result = _fight_phase_complete(game_state)
             # Merge phase transition info into result
@@ -2858,14 +2822,11 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                 result["unitId"] = preserved_unit_id
             
             # DEBUG: Log restoration after phase transition
-            if "episode_number" in game_state and "turn" in game_state:
+            if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
                 episode = game_state["episode_number"]
                 turn = game_state["turn"]
-                if "console_logs" not in game_state:
-                    game_state["console_logs"] = []
                 log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: AFTER phase_complete (ATTACK_LEFT=0) - result['action']={result.get('action')} result_keys={list(result.keys())}"
-                add_console_log(game_state, log_msg)
-                safe_print(game_state, log_msg)
+                _fight_verbose_trace(log_msg)
         else:
             # More units to activate - toggle alternation and update subphase
             # AI_TURN.md Lines 762-764, 844-846: Toggle alternation after activation completes
