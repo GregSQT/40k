@@ -25,7 +25,7 @@ export function setupBoardClickHandler(callbacks: {
   onMoveCharger?(chargerId: UnitId, destCol: number, destRow: number): void;
   onChargeEnemyUnit?(chargerId: UnitId, enemyUnitId: UnitId): void;
   onStartMovePreview?(unitId: UnitId, col: number, row: number): void;
-  onDirectMove?(unitId: UnitId, col: number, row: number): void;
+  onDirectMove?(unitId: UnitId, col: number, row: number, orientation?: number): void;
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action callbacks
   onAdvanceMove?(unitId: UnitId, destCol: number, destRow: number): void;
   onDeployUnit?(unitId: UnitId, destCol: number, destRow: number): void;
@@ -214,13 +214,14 @@ export function setupBoardClickHandler(callbacks: {
   window.addEventListener("boardSkipShoot", skipShootHandler);
 
   globalHexClickHandler = (e: Event) => {
-    const { col, row, phase, mode, selectedUnitId } = (
+    const { col, row, phase, mode, selectedUnitId, orientation } = (
       e as CustomEvent<{
         col: number;
         row: number;
         phase: string;
         mode: string;
         selectedUnitId: number | null;
+        orientation?: number;
       }>
     ).detail;
     if (mode === "chargePreview" && selectedUnitId !== null) {
@@ -235,7 +236,7 @@ export function setupBoardClickHandler(callbacks: {
       if (!callbacks.onDirectMove) {
         throw new Error("onDirectMove callback is required during move phase");
       }
-      callbacks.onDirectMove(selectedUnitId, col, row);
+      callbacks.onDirectMove(selectedUnitId, col, row, orientation);
     } else if (mode === "select" && selectedUnitId !== null && phase === "shoot") {
       if (!callbacks.onStartMovePreview) {
         throw new Error("onStartMovePreview callback is required during shoot phase move preview");

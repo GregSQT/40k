@@ -155,6 +155,7 @@ export interface Unit {
   ILLUSTRATION_RATIO: number;
   BASE_SIZE?: number | [number, number];
   BASE_SHAPE?: "round" | "oval" | "square";
+  orientation?: number;
 
   // Game state tracking
   SHOOT_LEFT?: number;
@@ -278,7 +279,7 @@ export interface GameState {
   charging_activation_pool?: string[];
   active_alternating_activation_pool?: string[];
   non_active_alternating_activation_pool?: string[];
-  units_cache?: Record<string, { col: number; row: number; HP_CUR: number; player: number }>;
+  units_cache?: Record<string, { col: number; row: number; HP_CUR: number; player: number; orientation?: number }>;
 
   // Frontend specific
   mode?: GameMode;
@@ -322,6 +323,7 @@ export interface SemanticAction {
   unitId: string;
   destCol?: number;
   destRow?: number;
+  orientation?: number;
   targetId?: string;
 }
 
@@ -337,6 +339,7 @@ export interface MovePreview {
   unitId: UnitId;
   destCol: number;
   destRow: number;
+  orientation?: number;
 }
 
 export interface AttackPreview {

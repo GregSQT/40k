@@ -117,6 +117,32 @@ function pickMoveDestinationAnchorsFromGameState(
   return undefined;
 }
 
+function validateBoardOrientationStep(rawOrientation: unknown, context: string): number {
+  if (
+    typeof rawOrientation !== "number" ||
+    !Number.isInteger(rawOrientation) ||
+    rawOrientation < 0 ||
+    rawOrientation > 5
+  ) {
+    throw new Error(`${context}: orientation must be an integer in 0..5, got ${String(rawOrientation)}`);
+  }
+  return rawOrientation;
+}
+
+function orientationStepForBoard(
+  unit: Unit,
+  unitsCache: GameState["units_cache"] | undefined,
+): number | undefined {
+  const cacheOrientation = unitsCache?.[String(unit.id)]?.orientation;
+  if (cacheOrientation !== undefined) {
+    return validateBoardOrientationStep(cacheOrientation, `Unit ${unit.id} units_cache`);
+  }
+  if (unit.orientation !== undefined) {
+    return validateBoardOrientationStep(unit.orientation, `Unit ${unit.id}`);
+  }
+  return undefined;
+}
+
 // Objective control map type - tracks which player controls each objective
 type ObjectiveControllers = { [objectiveName: string]: number | null };
 
@@ -273,7 +299,7 @@ type BoardProps = {
   advanceRoll?: number | null;
   advancingUnitId?: number | null;
   mode: Mode;
-  movePreview: { unitId: number; destCol: number; destRow: number } | null;
+  movePreview: { unitId: number; destCol: number; destRow: number; orientation?: number } | null;
   attackPreview: { unitId: number; col: number; row: number } | null;
   // Blinking state for multi-unit HP bars
   blinkingUnits?: number[];
@@ -288,7 +314,13 @@ type BoardProps = {
   onSkipFight?: (unitId: number | string) => void;
   onStartTargetPreview?: (shooterId: number | string, targetId: number | string) => void;
   onStartMovePreview: (unitId: number | string, col: number | string, row: number | string) => void;
-  onDirectMove: (unitId: number | string, col: number | string, row: number | string) => void;
+  onDirectMove: (
+    unitId: number | string,
+    col: number | string,
+    row: number | string,
+    orientation?: number,
+  ) => void;
+  onBumpMovePreviewOrientation?: (delta: number) => void;
   onStartAttackPreview: (unitId: number, col: number, row: number) => void;
   onConfirmMove: () => void;
   onCancelMove: () => void;
@@ -531,6 +563,7 @@ export default function Board({
   onSkipUnit,
   onStartMovePreview,
   onDirectMove,
+  onBumpMovePreviewOrientation,
   onStartAttackPreview,
   onConfirmMove,
   onCancelMove,
@@ -646,6 +679,7 @@ export default function Board({
   const hoverSpriteRef = useRef<PIXI.Container | null>(null);
   /** Ligne départ → pointeur + libellé distance hex (preview move) */
   const movePreviewGuideLineRef = useRef<PIXI.Graphics | null>(null);
+  const hoverMoveOrientationStepRef = useRef<number | null>(null);
   /** Ligne mesure règle (ancre → hex sous curseur) */
   const measureGuideLineRef = useRef<PIXI.Graphics | null>(null);
   /** Dernier clientX/clientY pendant la mesure — pour redessiner après un setState (ex. jonction) sans attendre mousemove. */
@@ -670,7 +704,13 @@ export default function Board({
       col: number | string,
       row: number | string
     ) => void;
-    onDirectMove: (unitId: number | string, col: number | string, row: number | string) => void;
+    onDirectMove: (
+      unitId: number | string,
+      col: number | string,
+      row: number | string,
+      orientation?: number,
+    ) => void;
+    onBumpMovePreviewOrientation?: (delta: number) => void;
     onStartAttackPreview: (unitId: number, col: number, row: number) => void;
     onConfirmMove: () => void;
     onCancelMove: () => void;
@@ -694,6 +734,7 @@ export default function Board({
     onSelectUnit,
     onStartMovePreview,
     onDirectMove,
+    onBumpMovePreviewOrientation,
     onStartAttackPreview,
     onConfirmMove,
     onCancelMove,
@@ -720,6 +761,7 @@ export default function Board({
     onSkipUnit,
     onStartMovePreview,
     onDirectMove,
+    onBumpMovePreviewOrientation,
     onStartAttackPreview,
     onConfirmMove,
     onCancelMove,
@@ -817,16 +859,54 @@ export default function Board({
 
   const handleBoardWheel = useCallback(
     (e: WheelEvent) => {
-      if (!e.ctrlKey) return;
-      e.preventDefault();
-      const zoomFactor =
-        e.deltaY < 0 ? BOARD_ZOOM_WHEEL_IN_FACTOR : BOARD_ZOOM_WHEEL_OUT_FACTOR;
-      applyBoardZoom((currentZoom) => currentZoom * zoomFactor, {
-        x: e.clientX,
-        y: e.clientY,
-      });
+      if (e.ctrlKey) {
+        e.preventDefault();
+        const zoomFactor =
+          e.deltaY < 0 ? BOARD_ZOOM_WHEEL_IN_FACTOR : BOARD_ZOOM_WHEEL_OUT_FACTOR;
+        applyBoardZoom((currentZoom) => currentZoom * zoomFactor, {
+          x: e.clientX,
+          y: e.clientY,
+        });
+        return;
+      }
+      const delta = e.deltaY < 0 ? 1 : -1;
+      if (mode === "movePreview") {
+        if (!onBumpMovePreviewOrientation) return;
+        e.preventDefault();
+        onBumpMovePreviewOrientation(delta);
+        return;
+      }
+      if (
+        effectivePhase === "move" &&
+        mode === "select" &&
+        selectedUnitId !== null &&
+        hoveredHexRef.current
+      ) {
+        const selectedUnit = units.find((u) => String(u.id) === String(selectedUnitId));
+        if (!selectedUnit || selectedUnit.BASE_SHAPE === "round") return;
+        e.preventDefault();
+        const current =
+          hoverMoveOrientationStepRef.current ??
+          orientationStepForBoard(selectedUnit, gameState?.units_cache);
+        if (current === undefined) {
+          throw new Error(`Unit ${selectedUnit.id} is missing orientation`);
+        }
+        hoverMoveOrientationStepRef.current = (current + delta + 6) % 6;
+        const baseShape = hoverSpriteRef.current?.getChildByName("hover-base-shape");
+        if (baseShape) {
+          baseShape.rotation = hoverMoveOrientationStepRef.current * Math.PI / 3;
+        }
+      }
     },
-    [applyBoardZoom]
+    [
+      applyBoardZoom,
+      effectivePhase,
+      gameState?.units_cache,
+      mode,
+      onBumpMovePreviewOrientation,
+      selectedUnitId,
+      units,
+    ]
   );
 
   useEffect(() => {
@@ -1744,6 +1824,7 @@ export default function Board({
           hoverSpriteRef.current.destroy({ children: true });
           hoverSpriteRef.current = null;
         }
+        hoverMoveOrientationStepRef.current = null;
         const container = new PIXI.Container();
         container.zIndex = 900;
         container.eventMode = "none";
@@ -1760,6 +1841,7 @@ export default function Board({
 
         const baseColor = selectedUnit.player === 1 ? 0x1d4ed8 : 0x882222;
         const baseCircle = new PIXI.Graphics();
+        baseCircle.name = "hover-base-shape";
         baseCircle.beginFill(baseColor, 0.7);
         if (nrHover) {
           if (nrHover.kind === "oval") {
@@ -1773,6 +1855,13 @@ export default function Board({
           baseCircle.drawCircle(0, 0, defaultIconDiam / 2);
         }
         baseCircle.endFill();
+        const hoverOrientation =
+          hoverMoveOrientationStepRef.current ??
+          orientationStepForBoard(selectedUnit, gameState?.units_cache);
+        if (nrHover && hoverOrientation !== undefined) {
+          baseCircle.rotation = hoverOrientation * Math.PI / 3;
+          hoverMoveOrientationStepRef.current = hoverOrientation;
+        }
         container.addChild(baseCircle);
 
         if (selectedUnit.ICON) {
@@ -1856,6 +1945,10 @@ export default function Board({
       // Snap direct sur l’ancre la plus proche (pas de lerp : coût perçu + inutile car positions discrètes).
       container.position.set(best.x, best.y);
       container.visible = true;
+      const hoverBaseShape = container.getChildByName("hover-base-shape");
+      if (hoverBaseShape && hoverMoveOrientationStepRef.current !== null) {
+        hoverBaseShape.rotation = hoverMoveOrientationStepRef.current * Math.PI / 3;
+      }
       const iconCol = best.col;
       const iconRow = best.row;
 
@@ -2054,6 +2147,7 @@ export default function Board({
       }
       setMovePreviewDistanceTooltip(null);
       hoveredHexRef.current = null;
+      hoverMoveOrientationStepRef.current = null;
       losHexRef.current = null;
     };
   }, [
@@ -2119,6 +2213,7 @@ export default function Board({
             phase: effectivePhase,
             mode,
             selectedUnitId,
+            orientation: hoverMoveOrientationStepRef.current ?? undefined,
           },
         }),
       );
@@ -2718,8 +2813,13 @@ export default function Board({
         stableCallbacks.current.onPileInMove?.(uid, dc, dr);
       },
       onStartMovePreview: onStartMovePreview,
-      onDirectMove: (unitId: number | string, col: number | string, row: number | string) => {
-        onDirectMove(unitId, col, row);
+      onDirectMove: (
+        unitId: number | string,
+        col: number | string,
+        row: number | string,
+        orientation?: number,
+      ) => {
+        onDirectMove(unitId, col, row, orientation);
       },
     });
 
@@ -3471,13 +3571,14 @@ export default function Board({
       const parts: string[] = [];
       const ucFp = gameState?.units_cache as Record<string, unknown> | undefined;
       for (const u of units) {
+        const orientation = orientationStepForBoard(u, gameState?.units_cache);
         parts.push(
-          `${u.id},${u.col},${u.row},${hpCurForBoardFingerprint(u, ucFp)},rng${u.selectedRngWeaponIndex ?? ""},cc${u.selectedCcWeaponIndex ?? ""},mw${u.manualWeaponSelected ? 1 : 0}`,
+          `${u.id},${u.col},${u.row},o${orientation ?? ""},${hpCurForBoardFingerprint(u, ucFp)},rng${u.selectedRngWeaponIndex ?? ""},cc${u.selectedCcWeaponIndex ?? ""},mw${u.manualWeaponSelected ? 1 : 0}`,
         );
       }
       const moveLosIds = [...movePreviewLosBlinkIds].sort((a, b) => a - b).join(",");
       const backendBlink = (stableBlinkingUnits ?? []).slice().sort((a, b) => a - b).join(",");
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -3933,6 +4034,7 @@ export default function Board({
         isPreview: false,
         isEligible: isMoveOriginGhost ? false : (isEligibleForRendering || false),
         isShootable,
+        displayOrientationStep: orientationStepForBoard(unit, gameState?.units_cache),
         boardConfig: boardConfigForRender,
         HEX_RADIUS,
         HEX_HORIZ_SPACING,
@@ -4062,6 +4164,7 @@ export default function Board({
           isPreview: true,
           previewType: "move",
           isEligible: false,
+          displayOrientationStep: movePreview.orientation,
           boardConfig: boardConfigForRender,
           HEX_RADIUS,
           HEX_HORIZ_SPACING,

@@ -318,7 +318,7 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
 })
 
 
-_UNITS_CACHE_FRONTEND_KEYS = ("col", "row", "HP_CUR", "player")
+_UNITS_CACHE_FRONTEND_KEYS = ("col", "row", "HP_CUR", "player", "orientation")
 
 
 def _exclude_game_state_key_for_api_json(key: str) -> bool:
@@ -349,7 +349,7 @@ def _game_state_for_json(
     Si ``move_preview_footprint_mask_loops`` est présent (contours monde), supprime
     ``move_preview_footprint_zone`` du JSON (évite des milliers de couples hex).
     Si ``valid_move_destinations_pool`` est non vide, supprime ``preview_hexes`` (alias du même pool).
-    Trims units_cache to (col, row, HP_CUR, player).
+    Trims units_cache to (col, row, HP_CUR, player, orientation).
     Exclut aussi caches internes, snapshots ``units_cache_prev``, ``last_compliance_data``,
     ``console_logs``, la table statique ``weapon_damage_table`` (moteur uniquement), la config
     complète ``config`` (déjà chargée côté client), et les caches d’adjacence par joueur

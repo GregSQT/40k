@@ -995,11 +995,11 @@ function BoardPvpWithTutorialAdvance(
   );
 
   const wrappedOnDirectMove = useCallback(
-    async (unitId: number | string, col: number | string, row: number | string) => {
+    async (unitId: number | string, col: number | string, row: number | string, orientation?: number) => {
       if (tutorial?.currentStep?.advanceOnMoveClick && tutorial?.prepareSkipNextPhaseTrigger) {
         tutorial.prepareSkipNextPhaseTrigger();
       }
-      await props.onDirectMove?.(unitId, col, row);
+      await props.onDirectMove?.(unitId, col, row, orientation);
       if (tutorial?.currentStep?.advanceOnMoveClick && tutorial?.onClosePopup) {
         tutorial.onClosePopup();
       }
@@ -1063,8 +1063,8 @@ function BoardPvpWithTutorialAdvance(
       }
       onDirectMove={
         props.onDirectMove != null
-          ? (unitId: string | number, col: string | number, row: string | number) => {
-              void wrappedOnDirectMove(unitId, col, row);
+          ? (unitId: string | number, col: string | number, row: string | number, orientation?: number) => {
+              void wrappedOnDirectMove(unitId, col, row, orientation);
             }
           : (_unitId: string | number, _col: string | number, _row: string | number) => {}
       }
@@ -3279,6 +3279,9 @@ export const BoardWithAPI: React.FC = () => {
             onSkipUnit={isGameOver ? () => {} : apiProps.onSkipUnit}
             onStartMovePreview={isGameOver ? () => {} : apiProps.onStartMovePreview}
             onDirectMove={isGameOver ? () => {} : apiProps.onDirectMove}
+            onBumpMovePreviewOrientation={
+              isGameOver ? () => {} : apiProps.onBumpMovePreviewOrientation
+            }
             onStartAttackPreview={isGameOver ? () => {} : apiProps.onStartAttackPreview}
             onDeployUnit={
               isGameOver ||

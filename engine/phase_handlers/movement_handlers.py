@@ -47,6 +47,28 @@ _MASK_LOOP_CACHE_MAX = 64
 _mask_loop_cache: "OrderedDict[Tuple[frozenset, float, float], Optional[List[List[Tuple[float, float]]]]]" = OrderedDict()
 
 
+def _validate_move_orientation(raw_orientation: Any) -> int:
+    """Validate a move orientation step from semantic action payload."""
+    if isinstance(raw_orientation, bool) or not isinstance(raw_orientation, int):
+        raise ValueError(f"Move orientation must be an integer in 0..5, got {raw_orientation!r}")
+    if raw_orientation < 0 or raw_orientation > 5:
+        raise ValueError(f"Move orientation must be in 0..5, got {raw_orientation!r}")
+    return raw_orientation
+
+
+def _require_footprint_base_size(base_shape: str, base_size: Any, context: str) -> Any:
+    """Validate BASE_SIZE against BASE_SHAPE before footprint computation."""
+    if base_shape == "round" or base_shape == "square":
+        if isinstance(base_size, bool) or not isinstance(base_size, int):
+            raise ValueError(f"{context}: {base_shape} BASE_SIZE must be int, got {base_size!r}")
+        return base_size
+    if base_shape == "oval":
+        if not isinstance(base_size, (list, tuple)) or len(base_size) != 2:
+            raise ValueError(f"{context}: oval BASE_SIZE must be [major, minor], got {base_size!r}")
+        return base_size
+    raise ValueError(f"{context}: unsupported BASE_SHAPE {base_shape!r}")
+
+
 def _sync_move_preview_mask_loops(
     game_state: Dict[str, Any], footprint_zone: Set[Tuple[int, int]]
 ) -> None:
@@ -677,7 +699,14 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
         }
 
 
-def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str, Any], dest_col: int, dest_row: int, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+def _attempt_movement_to_destination(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    dest_col: int,
+    dest_row: int,
+    config: Dict[str, Any],
+    orientation: Optional[int] = None,
+) -> Tuple[bool, Dict[str, Any]]:
     """
     AI_TURN.md movement execution with destination validation.
 
@@ -703,8 +732,15 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     phase = game_state.get("phase", "move")
 
     unit_id_str = str(unit["id"])
+    footprint_unit = unit
+    if orientation is not None:
+        footprint_unit = {
+            "BASE_SHAPE": unit.get("BASE_SHAPE", "round"),
+            "BASE_SIZE": unit.get("BASE_SIZE", 1),
+            "orientation": orientation,
+        }
     occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
-    candidate_fp = compute_candidate_footprint(dest_col_int, dest_row_int, unit, game_state)
+    candidate_fp = compute_candidate_footprint(dest_col_int, dest_row_int, footprint_unit, game_state)
     if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
         if "console_logs" not in game_state:
             game_state["console_logs"] = []
@@ -789,6 +825,13 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     unit_id_str_cache = str(unit["id"])
     old_cache_entry = require_key(game_state, "units_cache").get(unit_id_str_cache)
     old_occupied = old_cache_entry.get("occupied_hexes") if old_cache_entry else None
+
+    if orientation is not None:
+        unit["orientation"] = orientation
+        cache_entry = require_key(game_state, "units_cache").get(unit_id_str_cache)
+        if cache_entry is None:
+            raise KeyError(f"units_cache missing moved unit {unit_id_str_cache}")
+        cache_entry["orientation"] = orientation
 
     # Update units_cache after position change
     update_units_cache_position(game_state, unit_id_str_cache, dest_col_int, dest_row_int)
@@ -1061,11 +1104,14 @@ def _build_multi_hex_vectorized(
         for _, ce in enemy_list:
             e_col = int(require_key(ce, "col"))
             e_row = int(require_key(ce, "row"))
-            e_bs_raw = ce.get("BASE_SIZE", 1)
-            e_bs_i = e_bs_raw if isinstance(e_bs_raw, int) else 1
-            e_shape = ce.get("BASE_SHAPE", "round")
+            e_shape = require_key(ce, "BASE_SHAPE")
+            e_bs = _require_footprint_base_size(
+                e_shape,
+                require_key(ce, "BASE_SIZE"),
+                f"units_cache enemy at ({e_col},{e_row})",
+            )
             if mover_is_round and e_shape == "round":
-                e_r_norm = round_base_radius_norm(e_bs_i)
+                e_r_norm = round_base_radius_norm(e_bs)
                 ex, ey = _hex_center(e_col, e_row)
                 dx = xs - float(ex)
                 dy = ys - float(ey)
@@ -1074,7 +1120,7 @@ def _build_multi_hex_vectorized(
             else:
                 # Dépose l'empreinte hex de l'ennemi (peu importe sa forme) dans le mask commun.
                 e_orient = int(require_key(ce, "orientation"))
-                e_off_even, e_off_odd = precompute_footprint_offsets(e_shape, e_bs_i, e_orient)
+                e_off_even, e_off_odd = precompute_footprint_offsets(e_shape, e_bs, e_orient)
                 e_off = e_off_even if (e_col & 1) == 0 else e_off_odd
                 for dc, dr in e_off:
                     fc = e_col + int(dc)
@@ -1778,6 +1824,9 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
 
     # Normalize coordinates to int - raises error if invalid
     dest_col, dest_row = normalize_coordinates(dest_col, dest_row)
+    orientation = None
+    if "orientation" in action:
+        orientation = _validate_move_orientation(action["orientation"])
 
     # Pool is already built during activation - no need to rebuild here
     # System is sequential, so pool is still valid
@@ -1802,7 +1851,14 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     # Use _attempt_movement_to_destination() to validate occupation
     # This function checks if destination is occupied, validates enemy adjacency, etc.
     config = {}  # Empty config for now
-    move_success, move_result = _attempt_movement_to_destination(game_state, unit, dest_col, dest_row, config)
+    move_success, move_result = _attempt_movement_to_destination(
+        game_state,
+        unit,
+        dest_col,
+        dest_row,
+        config,
+        orientation=orientation,
+    )
 
     if not move_success:
         # Move was blocked (occupied hex, adjacent to enemy, etc.)

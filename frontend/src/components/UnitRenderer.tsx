@@ -42,6 +42,7 @@ interface UnitRendererProps {
   previewType?: "move" | "attack";
   isEligible?: boolean; // Add eligibility as a prop instead of calculating it
   isShootable?: boolean; // Add shootability based on LoS validation
+  displayOrientationStep?: number;
 
   // Blinking state for multi-unit HP bars
   blinkingUnits?: number[];
@@ -596,6 +597,15 @@ export class UnitRenderer {
     const displayCircle = resolveBaseSizeForUnitDisplay(unit);
     const baseSizeVal = displayCircle > 1 ? displayCircle : undefined;
     const nrBase = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
+    const displayOrientationStep = this.props.displayOrientationStep;
+    if (
+      displayOrientationStep !== undefined &&
+      (!Number.isInteger(displayOrientationStep) || displayOrientationStep < 0 || displayOrientationStep > 5)
+    ) {
+      throw new Error(
+        `displayOrientationStep must be an integer in 0..5, got ${String(displayOrientationStep)}`
+      );
+    }
     const circleRadius = baseSizeVal
       ? (baseSizeVal / 2) * 1.5 * HEX_RADIUS
       : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
@@ -616,6 +626,11 @@ export class UnitRenderer {
     unitCircle.endFill();
     unitCircle.alpha = circleAlpha;
     unitCircle.zIndex = iconZIndex;
+    if (nrBase && displayOrientationStep !== undefined) {
+      unitCircle.pivot.set(centerX, centerY);
+      unitCircle.position.set(centerX, centerY);
+      unitCircle.rotation = displayOrientationStep * Math.PI / 3;
+    }
 
     if (isPreview) {
       unitCircle.eventMode = "none";

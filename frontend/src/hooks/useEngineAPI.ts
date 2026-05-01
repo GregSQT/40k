@@ -46,6 +46,18 @@ const getMaxTurnsFromConfig = async (): Promise<number> => {
 
 const API_BASE = "/api";
 
+function validateOrientationStepValue(rawOrientation: unknown, context: string): number {
+  if (
+    typeof rawOrientation !== "number" ||
+    !Number.isInteger(rawOrientation) ||
+    rawOrientation < 0 ||
+    rawOrientation > 5
+  ) {
+    throw new Error(`${context}: orientation must be an integer in 0..5, got ${String(rawOrientation)}`);
+  }
+  return rawOrientation;
+}
+
 /** fetch échoué (API arrêtée, mauvaise origine sans proxy Vite, etc.). */
 function formatApiConnectionError(err: unknown): string {
   const raw =
@@ -159,6 +171,7 @@ export interface APIGameState {
     ILLUSTRATION_RATIO: number;
     BASE_SIZE?: number | [number, number];
     BASE_SHAPE?: "round" | "oval" | "square";
+    orientation?: number;
     unitType: string;
     SHOOT_LEFT?: number;
     ATTACK_LEFT?: number;
@@ -204,7 +217,7 @@ export interface APIGameState {
   active_alternating_activation_pool: string[];
   non_active_alternating_activation_pool: string[];
   fight_subphase: string | null;
-  units_cache?: Record<string, { col: number; row: number; HP_CUR: number; player: number }>;
+  units_cache?: Record<string, { col: number; row: number; HP_CUR: number; player: number; orientation?: number }>;
   active_movement_unit?: string;
   valid_move_destinations_pool?: Array<[number, number]>;
   move_preview_footprint_span?: number | null;
@@ -332,6 +345,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     unitId: number;
     destCol: number;
     destRow: number;
+    orientation?: number;
   } | null>(null);
   const [pendingPreviewAction, setPendingPreviewAction] = useState<
     "move" | "move_after_shooting" | null
@@ -2304,6 +2318,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const selectedCcWeaponIndex =
         readIntField(["selectedCcWeaponIndex", "selected_cc_weapon_index"]) ??
         unit.selectedCcWeaponIndex;
+      const orientation =
+        unit.orientation === undefined
+          ? undefined
+          : validateOrientationStepValue(unit.orientation, `API unit ${unit.id}`);
 
       return {
         id: typeof unit.id === "number" ? unit.id : parseInt(unit.id, 10),
@@ -2334,6 +2352,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         ILLUSTRATION_RATIO: unit.ILLUSTRATION_RATIO,
         BASE_SIZE: unit.BASE_SIZE,
         BASE_SHAPE: unit.BASE_SHAPE,
+        orientation,
         SHOOT_LEFT: unit.SHOOT_LEFT,
         ATTACK_LEFT: unit.ATTACK_LEFT,
         valid_target_pool: unit.valid_target_pool,
@@ -2874,39 +2893,72 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [executeAction, gameState]
   );
 
+  const validateOrientationStep = useCallback((rawOrientation: unknown, context: string): number => {
+    return validateOrientationStepValue(rawOrientation, context);
+  }, []);
+
+  const readEngineOrientationStepFromGameState = useCallback(
+    (unitId: number | string): number | undefined => {
+      const unitKey = String(unitId);
+      const cacheOrientation = gameState?.units_cache?.[unitKey]?.orientation;
+      if (cacheOrientation !== undefined) {
+        return validateOrientationStep(cacheOrientation, `Unit ${unitKey} units_cache`);
+      }
+      const unitOrientation = gameState?.units.find((unit) => String(unit.id) === unitKey)?.orientation;
+      if (unitOrientation !== undefined) {
+        return validateOrientationStep(unitOrientation, `Unit ${unitKey}`);
+      }
+      return undefined;
+    },
+    [gameState?.units, gameState?.units_cache, validateOrientationStep]
+  );
+
   const handleStartMovePreview = useCallback(
     (unitId: number | string, col: number | string, row: number | string) => {
+      const parsedUnitId = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      const orientation = readEngineOrientationStepFromGameState(unitId);
       if (gameState?.phase === "shoot") {
         if (pendingPreviewAction !== "move_after_shooting") {
           return;
         }
         setMovePreview({
-          unitId: typeof unitId === "string" ? parseInt(unitId, 10) : unitId,
+          unitId: parsedUnitId,
           destCol: typeof col === "string" ? parseInt(col, 10) : col,
           destRow: typeof row === "string" ? parseInt(row, 10) : row,
+          orientation,
         });
         setMode("movePreview");
         return;
       }
       setMovePreview({
-        unitId: typeof unitId === "string" ? parseInt(unitId, 10) : unitId,
+        unitId: parsedUnitId,
         destCol: typeof col === "string" ? parseInt(col, 10) : col,
         destRow: typeof row === "string" ? parseInt(row, 10) : row,
+        orientation,
       });
       setPendingPreviewAction("move");
       setMode("movePreview");
     },
-    [gameState?.phase, pendingPreviewAction]
+    [gameState?.phase, pendingPreviewAction, readEngineOrientationStepFromGameState]
   );
 
   const handleDirectMove = useCallback(
-    async (unitId: number | string, col: number | string, row: number | string) => {
-      const action = {
+    async (unitId: number | string, col: number | string, row: number | string, orientation?: number) => {
+      const action: {
+        action: "move";
+        unitId: string;
+        destCol: number;
+        destRow: number;
+        orientation?: number;
+      } = {
         action: "move",
         unitId: typeof unitId === "string" ? unitId : unitId.toString(),
         destCol: typeof col === "string" ? parseInt(col, 10) : col,
         destRow: typeof row === "string" ? parseInt(row, 10) : row,
       };
+      if (orientation !== undefined) {
+        action.orientation = validateOrientationStep(orientation, `Move action unit ${action.unitId}`);
+      }
 
       try {
         await executeAction(action);
@@ -2918,7 +2970,32 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         console.error("Move failed:", error);
       }
     },
-    [executeAction]
+    [executeAction, validateOrientationStep]
+  );
+
+  const handleBumpMovePreviewOrientation = useCallback(
+    (delta: number) => {
+      if (!Number.isInteger(delta)) {
+        throw new Error(`Move preview orientation delta must be an integer, got ${String(delta)}`);
+      }
+      setMovePreview((current) => {
+        if (!current) {
+          return current;
+        }
+        if (current.orientation === undefined) {
+          throw new Error(`Move preview for unit ${current.unitId} is missing orientation`);
+        }
+        const currentOrientation = validateOrientationStep(
+          current.orientation,
+          `Move preview unit ${current.unitId}`,
+        );
+        return {
+          ...current,
+          orientation: (currentOrientation + delta + 6) % 6,
+        };
+      });
+    },
+    [validateOrientationStep]
   );
 
   const shouldShowRetreatAlert = useCallback((): boolean => {
@@ -3054,7 +3131,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
     }
 
-    await handleDirectMove(movePreview.unitId, movePreview.destCol, movePreview.destRow);
+    await handleDirectMove(
+      movePreview.unitId,
+      movePreview.destCol,
+      movePreview.destRow,
+      movePreview.orientation,
+    );
     setPendingPreviewAction(null);
   }, [
     movePreview,
@@ -3391,6 +3473,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           unitId: numericUnitId,
           destCol,
           destRow,
+          orientation: readEngineOrientationStepFromGameState(numericUnitId),
         });
         setSelectedUnitId(numericUnitId);
         setMode("movePreview");
@@ -3409,7 +3492,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         throw error;
       }
     },
-    [executeAction, gameState, pendingPreviewAction]
+    [executeAction, gameState, pendingPreviewAction, readEngineOrientationStepFromGameState]
   );
 
   /** Compat : anciens appels ``onCombatAttack`` → même flux que le tir (``left_click`` + ``clickTarget``). */
@@ -3926,6 +4009,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onEndPhase: async () => {},
       onStartMovePreview: () => {},
       onDirectMove: () => {},
+      onBumpMovePreviewOrientation: () => {},
       onStartAttackPreview: () => {},
       onConfirmMove: () => {},
       onCancelMove: () => {},
@@ -4026,6 +4110,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onEndPhase: handleEndPhase,
     onStartMovePreview: handleStartMovePreview,
     onDirectMove: handleDirectMove,
+    onBumpMovePreviewOrientation: handleBumpMovePreviewOrientation,
     onStartAttackPreview: onStartAttackPreviewMemo,
     onConfirmMove: handleConfirmMove,
     onCancelMove: handleCancelMove,
