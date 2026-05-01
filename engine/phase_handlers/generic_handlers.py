@@ -329,15 +329,21 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         else:
             charging_empty = len(game_state["charging_activation_pool"]) == 0
 
-        # Reconstruire les pools d'alternance dès que la sous-phase charge est terminée et qu'une
-        # unité vient d'être retirée d'un pool fight (charge ou alternance). Avant, seul
-        # removed_from_charging_pool déclenchait un rebuild : après la dernière activation en
-        # alternating_active, l'adversaire pouvait disparaître des pools / fight_subphase devenait
-        # incohérent et phase_complete se déclenchait à tort.
-        if charging_empty and (
-            response.get("removed_from_charging_pool")
-            or response.get("removed_from_active_alternating_pool")
-            or response.get("removed_from_non_active_alternating_pool")
+        # Rebuild paresseux : passage charge → alternance (``removed_from_charging_pool``) ;
+        # morts / consolidation (déplacement) via ``_fight_maybe_lazy_rebuild_alternating_pools``.
+        # Si retrait d'un pool alternating sans marquer ``units_fought`` (``arg3 != "FIGHT"`` :
+        # PASS, etc.), rebuild pour réaligner l'éligibilité (évite pools tronqués vs ancien
+        # ``removed_from_active|non_active``). Pas de rebuild quand ``arg3 == "FIGHT"`` : la
+        # liste a déjà été filtrée et ``units_fought`` exclut l'unité du rescan.
+        if charging_empty and response.get("removed_from_charging_pool"):
+            _rebuild_alternating_pools_for_fight(game_state)
+        elif (
+            charging_empty
+            and arg3 != "FIGHT"
+            and (
+                response.get("removed_from_active_alternating_pool")
+                or response.get("removed_from_non_active_alternating_pool")
+            )
         ):
             _rebuild_alternating_pools_for_fight(game_state)
 
@@ -364,9 +370,10 @@ def _rebuild_alternating_pools_for_fight(game_state: Dict[str, Any]) -> None:
     """
     Rebuild alternating activation pools when fight pool membership may have changed.
 
-    CRITICAL: Invoked from ``end_activation`` (``arg4 == FIGHT``) only when the charging
-    pool is empty and a unit was removed from charging or an alternating pool, so that
-    adjacency-based eligibility stays consistent (not on every fight ``end_activation``).
+    CRITICAL: Appelé (1) depuis ``end_activation`` (``arg4 == FIGHT``) : pool charge vide
+    et dernier chargeur retiré, **ou** pool charge vide + retrait alternating avec
+    ``arg3 != FIGHT`` (ex. PASS) ; (2) depuis ``fight_handlers._fight_maybe_lazy_rebuild_alternating_pools``
+    sur mort (alternance) ou consolidation avec déplacement.
 
     This must be called BEFORE checking if the phase is complete.
 

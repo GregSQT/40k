@@ -341,6 +341,23 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
     )
 
 
+def _fight_maybe_lazy_rebuild_alternating_pools(game_state: Dict[str, Any]) -> None:
+    """
+    Reconstruit ``active_alternating_activation_pool`` / ``non_active_alternating_activation_pool``
+    via ``_rebuild_alternating_pools_for_fight`` uniquement lorsque la sous-phase **charge**
+    est terminée (pool charge vide). À utiliser après une mort en fight ou un déplacement
+    de consolidation ; le passage charge → alternance est déclenché depuis ``end_activation``.
+    """
+    if game_state.get("phase") != "fight":
+        return
+    charging = game_state.get("charging_activation_pool")
+    if charging is not None and len(charging) > 0:
+        return
+    from .generic_handlers import _rebuild_alternating_pools_for_fight
+
+    _rebuild_alternating_pools_for_fight(game_state)
+
+
 def _remove_dead_unit_from_fight_pools(game_state: Dict[str, Any], unit_id: str) -> None:
     """
     CRITICAL: Immediately remove a dead unit from all fight activation pools.
@@ -366,6 +383,9 @@ def _remove_dead_unit_from_fight_pools(game_state: Dict[str, Any], unit_id: str)
     # Import from shooting_handlers to reuse the function
     from .shooting_handlers import _remove_dead_unit_from_pools
     _remove_dead_unit_from_pools(game_state, unit_id)
+
+    _fight_maybe_lazy_rebuild_alternating_pools(game_state)
+
 
 def _fight_enemy_footprint_distances(
     game_state: Dict[str, Any],
@@ -571,10 +591,10 @@ def _fight_build_pile_in_valid_destinations(
     BFS jusqu'à 3\" (× inches_to_subhex) : mêmes contraintes de placement que charge
     (empreinte légale, pas chevauchement), avec fin strictement plus proche d'une cible du palier d'activation.
 
-    Si au moins une ancre valide permet de finir au contact d'**au moins une cible CC éligible**
-    (``contact_target_ids``, même logique que ``_fight_build_valid_target_pool``), seules ces ancres
-    sont proposées (preview + validation). Ne pas se limiter au palier ``closest_ids`` : un ennemi
-    plus proche n'est pas forcément une cible CC à laquelle on peut engager le combat.
+    Si au moins une ancre valide permet de finir au **même contact bord-à-bord / empreinte**
+    que ``_fight_pile_in_anchor_adjacent_to_enemy_footprint`` vs une cible CC éligible **ou**
+    une unité du palier ``closest_ids`` (même sémantique que la consolidation « contact »), seules
+    ces ancres sont proposées. Sinon repli sur toutes les ancres strictement plus proches.
 
     PERF : si ``d_min <= 1``, aucune ancre ne peut être strictement plus proche sans overlap ;
     retour immédiat sans BFS. Empreintes des destinations valides réutilisées pour le filtre contact.
@@ -622,7 +642,11 @@ def _fight_build_pile_in_valid_destinations(
 
     if not contact_target_ids:
         return valid_destinations
-    contact_filter = [str(x) for x in contact_target_ids]
+    # Cibles pour le test « contact » : CC éligibles + palier distance minimale (pile-in GW :
+    # se rapprocher du plus proche ; évite un repli non-collé alors qu'un contact avec ce palier existe).
+    contact_filter = sorted(
+        {str(x) for x in contact_target_ids} | {str(x) for x in closest_ids}
+    )
     contact_destinations = [
         p
         for p in valid_destinations
@@ -825,6 +849,12 @@ def _fight_fp_has_adjacent_enemy_footprint(
     unit: Dict[str, Any],
     fp: Set[Tuple[int, int]],
 ) -> bool:
+    """
+    Contact **A** strict (empreintes : ``min_distance_between_sets`` ≤ 1).
+
+    Pour le palier « contact » **consolidation** / cohérence pile-in (rond↔rond bord-à-bord),
+    utiliser ``_fight_pile_in_anchor_adjacent_to_enemy_footprint`` avec l'ancre et l'empreinte.
+    """
     return _fight_footprint_has_enemy_hex_contact(game_state, unit, fp)
 
 
@@ -833,7 +863,8 @@ def _fight_plan_consolidation_destinations(
     unit: Dict[str, Any],
 ) -> Optional[Tuple[str, List[Tuple[int, int]], Dict[Tuple[int, int], int]]]:
     """
-    Priorité 1 : ennemis — minimiser la distance à l'empreinte ennemie la plus proche ; si possible, contact (distance 1).
+    Priorité 1 : ennemis — minimiser la distance à l'empreinte ennemie la plus proche ; si possible,
+    fin « contact » (même test que pile-in : ``_fight_pile_in_anchor_adjacent_to_enemy_footprint``).
     Priorité 2 (sans ennemis sur le plateau) : objectif — finir avec empreinte ∩ empreinte objectif ; mouvement le plus court possible.
     Retourne None si aucune consolidation n'est possible / utile.
 
@@ -895,8 +926,16 @@ def _fight_plan_consolidation_destinations(
         tier = [a for a, d in dist_by_anchor if d == best_score]
         contact_tier = []
         for anchor in tier:
+            ac, ar = anchor
             fp = fp_by_anchor[anchor]
-            if _fight_fp_has_adjacent_enemy_footprint(game_state, unit, fp):
+            if _fight_pile_in_anchor_adjacent_to_enemy_footprint(
+                game_state,
+                unit,
+                int(ac),
+                int(ar),
+                None,
+                candidate_footprint=fp,
+            ):
                 contact_tier.append(anchor)
         final_cands = contact_tier if contact_tier else tier
         if len(final_cands) == 1 and final_cands[0] == start_pos:
@@ -1049,6 +1088,7 @@ def _fight_try_begin_consolidation_after_attacks(
         result["all_attack_results"] = list(all_attack_results_snapshot)
         if last_target_id is not None:
             result["targetId"] = last_target_id
+        _fight_maybe_lazy_rebuild_alternating_pools(game_state)
         _fight_post_process_fight_activation_result(game_state, unit, result)
         return True, result
 
@@ -1098,6 +1138,7 @@ def _handle_fight_consolidation_resolution(
         raise TypeError("game_state['_fight_consolidation_ctx'] must be a dict when fight_consolidation_pending")
 
     skip = action.get("skip") is True
+    moved_consolidation = False
     if not skip:
         if "destCol" not in action or "destRow" not in action:
             return False, {"error": "consolidation_requires_dest_or_skip", "unitId": unit_id}
@@ -1112,6 +1153,7 @@ def _handle_fight_consolidation_resolution(
                 "destination": (dest_col, dest_row),
             }
         _fight_apply_pile_in_move(game_state, unit, dest_col, dest_row, log_label="CONSOLIDATION")
+        moved_consolidation = True
 
     snap_attacks = ctx.get("all_attack_results") or []
 
@@ -1135,6 +1177,8 @@ def _handle_fight_consolidation_resolution(
     result["consolidation_completed"] = True
     result["fight_subphase"] = require_key(game_state, "fight_subphase")
     result["all_attack_results"] = list(snap_attacks)
+    if moved_consolidation:
+        _fight_maybe_lazy_rebuild_alternating_pools(game_state)
     _fight_post_process_fight_activation_result(game_state, unit, result)
     return True, result
 
@@ -1880,8 +1924,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
 
     elif action_type == "invalid":
         # AI_TURN.md line 667: INVALID ACTION ERROR -> end_activation (ERROR, 0, PASS, FIGHT)
-        # We follow AI_TURN.md strictly. The _rebuild_alternating_pools_for_fight call in end_activation
-        # is skipped for this case to prevent the unit from being re-added to the pool.
+        # ``end_activation`` : rebuild alternating si ``arg3 != FIGHT`` et retrait d'un pool alternating.
         result = end_activation(
             game_state, unit,
             ERROR,         # Arg1: ERROR logging (per AI_TURN.md line 667)
