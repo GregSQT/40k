@@ -435,7 +435,7 @@ def _build_weapon_availability_enemy_precheck(
     weapon_availability_check : évite de répéter min_distance / boucle alliés pour chaque arme.
     """
     from engine.hex_utils import min_distance_between_sets as _mds_wpn
-    from engine.spatial_relations import get_engagement_zone
+    from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
 
     max_rng = 0
     for w in rng_weapons:
@@ -453,7 +453,9 @@ def _build_weapon_availability_enemy_precheck(
     unit_col, unit_row = require_unit_position(unit, game_state)
     _uid_str = str(unit["id"])
     _ue = units_cache.get(_uid_str)
-    _u_fp = _ue.get("occupied_hexes", {(unit_col, unit_row)}) if _ue else {(unit_col, unit_row)}
+    if _ue is None:
+        raise KeyError(f"Unit {_uid_str} not in units_cache (dead or absent)")
+    _u_fp = _ue.get("occupied_hexes", {(unit_col, unit_row)})
     shooter_id_str = _uid_str
     shooter_player_int = int(unit["player"]) if unit["player"] is not None else None
     melee_range = get_engagement_zone(game_state)
@@ -480,12 +482,14 @@ def _build_weapon_availability_enemy_precheck(
             if d > max_rng:
                 continue
 
-            enemy_adjacent_to_shooter = d <= melee_range
+            enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(
+                _ue, cache_entry, melee_range
+            )
             friendly_blocks = _friendly_engagement_blocks_ranged_shot(
                 game_state,
                 shooter_id_str,
                 shooter_player_int,
-                _e_fp,
+                cache_entry,
                 _enemy_id_str,
                 enemy_adjacent_to_shooter,
                 units_cache,
@@ -498,6 +502,7 @@ def _build_weapon_availability_enemy_precheck(
                 "enemy": enemy,
                 "enemy_id_str": _enemy_id_str,
                 "distance": d,
+                "enemy_engaged_with_shooter": enemy_adjacent_to_shooter,
                 "friendly_blocks": friendly_blocks,
                 "los_cache_has_key": los_cache_has_key,
                 "los_cache_true": los_cache_true,
@@ -648,9 +653,9 @@ def weapon_availability_check(
                             if shooter_engaged:
                                 if not weapon_is_pistol:
                                     continue
-                                if row["distance"] > melee_range:
+                                if not row["enemy_engaged_with_shooter"]:
                                     continue
-                            elif row["distance"] <= melee_range and not weapon_is_pistol:
+                            elif row["enemy_engaged_with_shooter"] and not weapon_is_pistol:
                                 continue
                             if row["friendly_blocks"]:
                                 continue
@@ -1714,7 +1719,7 @@ def _friendly_engagement_blocks_ranged_shot(
     game_state: Dict[str, Any],
     shooter_id_str: str,
     shooter_player_int: int,
-    target_fp: Set[Tuple[int, int]],
+    target_entry: Dict[str, Any],
     target_id_str: str,
     enemy_adjacent_to_shooter: bool,
     units_cache: Dict[str, Any],
@@ -1726,17 +1731,13 @@ def _friendly_engagement_blocks_ranged_shot(
     """
     if enemy_adjacent_to_shooter:
         return False
-    from engine.hex_utils import min_distance_between_sets
-    from engine.spatial_relations import get_engagement_zone
+    from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
 
     melee_range = get_engagement_zone(game_state)
     for friendly_id, cache_entry in units_cache.items():
         friendly_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
         if friendly_player == shooter_player_int and friendly_id != shooter_id_str:
-            friendly_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-            friendly_distance = min_distance_between_sets(target_fp, friendly_fp, max_distance=melee_range)
-
-            if friendly_distance <= melee_range:
+            if unit_entries_within_engagement_zone(target_entry, cache_entry, melee_range):
                 if game_state.get("debug_mode", False):
                     from engine.game_utils import add_debug_file_log
                     episode = game_state.get("episode_number", "?")
@@ -1745,7 +1746,7 @@ def _friendly_engagement_blocks_ranged_shot(
                         game_state,
                         f"[SHOOT DEBUG] E{episode} T{turn} _is_valid_shooting_target: "
                         f"Shooter {shooter_id_str} blocked - target {target_id_str} engaged with "
-                        f"friendly {friendly_id} (dist={friendly_distance})"
+                        f"friendly {friendly_id}"
                     )
                 return True
     return False
@@ -1759,7 +1760,7 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     # Range check using min footprint distance (§3.3)
     from engine.hex_utils import min_distance_between_sets
     from engine.utils.weapon_helpers import get_max_ranged_range, get_selected_ranged_weapon
-    from engine.spatial_relations import get_engagement_zone
+    from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
 
     shooter_col, shooter_row = require_unit_position(shooter, game_state)
     target_col, target_row = require_unit_position(target, game_state)
@@ -1785,7 +1786,9 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
         return False
 
     melee_range = get_engagement_zone(game_state)
-    enemy_adjacent_to_shooter = (distance <= melee_range)
+    enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(
+        shooter_entry, target_entry, melee_range
+    )
     selected_weapon = get_selected_ranged_weapon(shooter)
     weapon_is_pistol = bool(selected_weapon and _weapon_has_pistol_rule(selected_weapon))
     shooter_is_engaged = _is_adjacent_to_enemy_within_cc_range(game_state, shooter)
@@ -1803,7 +1806,7 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
         game_state,
         shooter_id_str,
         shooter_player_int,
-        target_fp,
+        target_entry,
         str(target["id"]),
         enemy_adjacent_to_shooter,
         units_cache,
@@ -2273,7 +2276,7 @@ def valid_target_pool_build(
             if isinstance(r.get("enemy_id_str"), str)
         }
 
-    from engine.spatial_relations import get_engagement_zone
+    from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
     from engine.hex_utils import min_distance_between_sets
 
     melee_range = get_engagement_zone(game_state)
@@ -2359,7 +2362,7 @@ def valid_target_pool_build(
         row_opt = precheck_by_id.get(target_id_str) if precheck_by_id else None
         if row_opt is not None:
             distance_to_enemy = int(row_opt["distance"])
-            enemy_adjacent_to_shooter = distance_to_enemy <= melee_range
+            enemy_adjacent_to_shooter = bool(row_opt["enemy_engaged_with_shooter"])
             if not enemy_adjacent_to_shooter and bool(row_opt.get("friendly_blocks")):
                 continue
         else:
@@ -2370,7 +2373,9 @@ def valid_target_pool_build(
             distance_to_enemy = min_distance_between_sets(
                 shooter_fp, enemy_fp, max_distance=_md_cap
             )
-            enemy_adjacent_to_shooter = distance_to_enemy <= melee_range
+            enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(
+                unit_entry, enemy_entry, melee_range
+            )
 
         shooter_is_engaged = adjacent_status == 1
         has_pistol_weapon = False
@@ -2417,17 +2422,13 @@ def valid_target_pool_build(
         if not enemy_adjacent_to_shooter and row_opt is None:
             enemy_adjacent_to_friendly = False
             engaged_friendly_id = None
-            engaged_friendly_distance = None
             for friendly_id, cache_entry in units_cache.items():
                 friendly_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
                 if (friendly_player == current_player_int and 
                     friendly_id != unit_id_normalized):
-                    friendly_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-                    friendly_distance = min_distance_between_sets(enemy_fp, friendly_fp, max_distance=melee_range)
-                    if friendly_distance <= melee_range:
+                    if unit_entries_within_engagement_zone(enemy_entry, cache_entry, melee_range):
                         enemy_adjacent_to_friendly = True
                         engaged_friendly_id = friendly_id
-                        engaged_friendly_distance = friendly_distance
                         break
             
             if enemy_adjacent_to_friendly:
@@ -2439,7 +2440,7 @@ def valid_target_pool_build(
                         game_state,
                         f"[SHOOT DEBUG] E{episode} T{turn} valid_target_pool_build: "
                         f"Enemy {enemy_id_normalized}({_ep},{_er}) engaged with friendly "
-                        f"{engaged_friendly_id} (dist={engaged_friendly_distance})"
+                        f"{engaged_friendly_id}"
                     )
                 if game_state.get("debug_mode", False):
                     from engine.game_utils import add_debug_file_log

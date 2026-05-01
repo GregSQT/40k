@@ -1,6 +1,9 @@
 """Tests for shared spatial relation primitives."""
 
-from engine.spatial_relations import move_anchor_violates_engagement_clearance
+from engine.spatial_relations import (
+    move_anchor_violates_engagement_clearance,
+    unit_entries_within_engagement_zone,
+)
 
 
 def test_move_clearance_legacy_uses_enemy_adjacent_hexes_membership() -> None:
@@ -56,6 +59,63 @@ def test_move_clearance_round_round_uses_euclidean_gap() -> None:
         enemy_cache_items=[("enemy", enemy_entry)],
         engagement_zone_ez=10,
     ) is True
+
+
+def test_move_clearance_round_round_rejects_exact_engagement_boundary(monkeypatch) -> None:
+    mover = {"id": "u1", "player": 1, "BASE_SHAPE": "round", "BASE_SIZE": 2}
+    enemy_entry = {
+        "col": 10,
+        "row": 10,
+        "player": 2,
+        "BASE_SHAPE": "round",
+        "BASE_SIZE": 2,
+        "occupied_hexes": {(10, 10)},
+    }
+
+    monkeypatch.setattr(
+        "engine.spatial_relations.euclidean_edge_clearance_round_round",
+        lambda *args, **kwargs: 15.0,
+    )
+
+    assert move_anchor_violates_engagement_clearance(
+        {},
+        mover,
+        20,
+        10,
+        {(20, 10)},
+        units_cache={"enemy": enemy_entry},
+        enemy_adjacent_hexes=None,
+        enemy_cache_items=[("enemy", enemy_entry)],
+        engagement_zone_ez=10,
+    ) is True
+
+
+def test_round_round_engagement_uses_euclidean_clearance_not_hex_footprints(monkeypatch) -> None:
+    first_entry = {
+        "col": 20,
+        "row": 10,
+        "player": 1,
+        "BASE_SHAPE": "round",
+        "BASE_SIZE": 2,
+        "occupied_hexes": {(20, 10)},
+    }
+    second_entry = {
+        "col": 10,
+        "row": 10,
+        "player": 2,
+        "BASE_SHAPE": "round",
+        "BASE_SIZE": 2,
+        "occupied_hexes": {(10, 10)},
+    }
+
+    monkeypatch.setattr(
+        "engine.spatial_relations.euclidean_edge_clearance_round_round",
+        lambda *args, **kwargs: 15.000002,
+    )
+
+    assert unit_entries_within_engagement_zone(
+        first_entry, second_entry, engagement_zone=10
+    ) is False
 
 
 def test_move_clearance_non_round_uses_hex_footprint_distance() -> None:

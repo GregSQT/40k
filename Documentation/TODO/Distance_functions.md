@@ -40,8 +40,8 @@ Ce document **ne remplace pas** `Documentation/AI_TURN.md` ni `Documentation/AI_
 | ID | Nom contractuel | Question métier | Primitive dominante |
 |----|-----------------|-----------------|---------------------|
 | **A** | **Contact empreinte** | Les empreintes sont-elles au contact utile : voisinage **hex strict** entre cellules, ou bord-à-bord rond↔rond avec tolérance de discrétisation ? | Hex : `min_distance_between_sets(..., max_distance=1) <= 1`. Rond↔rond : `euclidean_edge_clearance_round_round(...)` + `gap <= _ADJACENT_EDGE_GAP_TOLERANCE_NORM`. |
-| **B** | **Engagement empreintes** | La distance **hex minimale entre empreintes** est-elle `<= engagement_zone` ? | `min_distance_between_sets(unit_fp, enemy_fp [, max_distance=ez]) <= ez`, avec `ez` via `get_engagement_zone`. |
-| **C** | **Clearance destination (move)** | L’ancre de placement est-elle trop proche d’un ennemi pour finir / traverser selon les règles move ? | `ez <= 1` : membership dans `enemy_adjacent_hexes`. `ez > 1` : rond↔rond `gap < engagement_minimum_clearance_norm(ez) - ε` (ε = typ. `1e-6` dans `movement_handlers`) ; sinon repli hex `min_distance_between_sets(...) <= ez`. |
+| **B** | **Engagement empreintes** | Les unités sont-elles dans la zone d’engagement réelle ? | Rond↔rond Board ×10 : `gap <= engagement_minimum_clearance_norm(ez) + ε`. Sinon : `min_distance_between_sets(unit_fp, enemy_fp [, max_distance=ez]) <= ez`, avec `ez` via `get_engagement_zone`. |
+| **C** | **Clearance destination (move)** | L’ancre de placement est-elle trop proche d’un ennemi pour finir / traverser selon les règles move ? | `ez <= 1` : membership dans `enemy_adjacent_hexes`. `ez > 1` : rond↔rond `gap <= engagement_minimum_clearance_norm(ez) + ε` (ε = typ. `1e-6`) ; sinon repli hex `min_distance_between_sets(...) <= ez`. |
 
 **Lecture rapide :** **A** = collé ; **B** = dans la bulle d’engagement entre empreintes ; **C** = interdiction de destination / traversée. **B** et **C** ne sont pas interchangeables.
 
@@ -58,16 +58,17 @@ Ce document **ne remplace pas** `Documentation/AI_TURN.md` ni `Documentation/AI_
 **B — Engagement empreintes**
 
 - `cc_range` / `ez` = `get_engagement_zone(game_state)` — lecteur canonique de la config `engagement_zone`.
-- Test courant : `min_distance_between_sets(unit_fp, enemy_fp) <= cc_range`.
+- Rond↔rond Board ×10 : même vérité bord-à-bord que le move, `gap <= engagement_minimum_clearance_norm(ez) + ε`.
+- Autres formes : `min_distance_between_sets(unit_fp, enemy_fp) <= cc_range`.
 - **Si `max_distance` en boucle :** arrêt anticipé → la valeur retournée peut être **`max_distance + 1`** au-delà du seuil : **≠ distance exacte** pour logging ou règles fines ; le booléen « ≤ ez » reste correct si l’implémentation respecte le contrat. **Fight** vs **tir / charge** : voir **§5**.
-- **Caches move :** dilatation hex (`build_enemy_adjacent_hexes`, …) — représentation **grille** liée à **ez**, pas la géométrie euclidienne **C** pour rond↔rond quand `ez > 1`.
+- **Caches move :** dilatation hex (`build_enemy_adjacent_hexes`, …) — représentation **grille** liée à **ez**, pas la géométrie euclidienne rond↔rond quand `ez > 1`.
 
 **C — Clearance destination**
 
-- **Rond↔rond (Board ×10) :** `gap = euclidean_edge_clearance_round_round(...)` ; `req = engagement_minimum_clearance_norm(ez)` ; violation si `gap < req - ε` avec **ε** typiquement `1e-6` dans `movement_handlers`.
+- **Rond↔rond (Board ×10) :** `gap = euclidean_edge_clearance_round_round(...)` ; `req = engagement_minimum_clearance_norm(ez)` ; violation si `gap <= req + ε` avec **ε** typiquement `1e-6`.
 - **Autres formes :** repli `min_distance_between_sets(candidate_fp, enemy_fp, max_distance=ez) <= ez` (aligné `_movement_engagement_violates` / BFS).
 
-**Rappel B vs C :** **B** = distance **hex** entre polyhex, **`<= ez`** ; **C** = en rond↔rond, **gap** en norme continue, **`gap < req - ε`**. Permuter ou « harmoniser » naïvement = bugs discrets en **Board ×10**.
+**Rappel B vs C :** **B** et **C** partagent la vérité rond↔rond bord-à-bord (**`gap <= req + ε`**) ; les formes non-rondes restent sur la vérité hex **`<= ez`**. Permuter les chemins sans respecter cette séparation = bugs discrets en **Board ×10**.
 
 ---
 
@@ -75,11 +76,11 @@ Ce document **ne remplace pas** `Documentation/AI_TURN.md` ni `Documentation/AI_
 
 | | **B — Engagement** | **C — Clearance move** |
 |--|--------------------|-------------------------|
-| Espace | Distance **hex** entre ensembles d’hex occupés. | Norme continue bord-à-bord pour rond↔rond en `_hex_center`, repli hex sinon. |
-| Test typique | `distance <= ez`. | `gap < req - ε`, avec `req = engagement_minimum_clearance_norm(ez)`. |
+| Espace | Norme continue bord-à-bord pour rond↔rond en `_hex_center`, repli hex sinon. | Norme continue bord-à-bord pour rond↔rond en `_hex_center`, repli hex sinon. |
+| Test typique | Rond↔rond : `gap <= req + ε`; sinon `distance <= ez`. | `gap <= req + ε`, avec `req = engagement_minimum_clearance_norm(ez)`. |
 | Cache | Les caches dilatés sont une représentation grille liée à `ez`. | Pour rond↔rond `ez > 1`, le cache ne remplace pas le recalcul euclidien. |
 
-Inverser `<= ez` et `gap < req - ε`, ou croire qu’un cache dilaté suffit pour la vérité rond↔rond, produit des bugs discrets en Board ×10.
+Croire qu’un cache dilaté ou une distance hex suffit pour la vérité rond↔rond produit des bugs discrets en Board ×10.
 
 ---
 
@@ -135,7 +136,7 @@ Le booléen attendu est identique si le contrat de `max_distance` est respecté 
 | `dilate_hex_set` / BFS | `hex_utils.py`, handlers | Caches, pile-in, consolidation. |
 | `compute_candidate_footprint`, `is_footprint_placement_valid` | `shared_utils.py` | Ancre → empreinte ; légalité plateau. |
 
-**Piège structurel :** en rond↔rond Board ×10, **`engagement_minimum_clearance_norm`** et la comparaison **`gap < req - ε`** pour **C** ne sont **pas** interchangeables avec seul **`min_distance_between_sets <= ez`** (qui sert surtout à **B** / repli hex). Décider **C** sans recalculer `gap` quand les deux modèles coexistent = erreur.
+**Piège structurel :** en rond↔rond Board ×10, **`engagement_minimum_clearance_norm`** et la comparaison **`gap <= req + ε`** pour **B/C** ne sont **pas** interchangeables avec seul **`min_distance_between_sets <= ez`** (qui sert au repli hex). Décider l’engagement sans recalculer `gap` quand les deux modèles coexistent = erreur.
 
 ---
 
@@ -145,7 +146,7 @@ Le booléen attendu est identique si le contrat de `max_distance` est respecté 
 |---------|------|---------|
 | `_ADJACENT_EDGE_GAP_TOLERANCE_NORM` | Alias de `ENGAGEMENT_NORM_HEX_WIDTH` pour contact pile-in rond↔rond | `fight_handlers.py` |
 | `get_engagement_zone` | Lecteur canonique de la règle config `engagement_zone`; `get_melee_range` supprimé car le nom historique confondait mêlée et engagement | `engine/spatial_relations.py` |
-| ε (clearance) | typ. `1e-6` dans `gap < req - ε` ; à centraliser avec **C** | `movement_handlers.py` |
+| ε (clearance) | typ. `1e-6` dans `gap <= req + ε` ; à centraliser avec **C** | `engine/spatial_relations.py` |
 
 ---
 
@@ -154,7 +155,7 @@ Le booléen attendu est identique si le contrat de `max_distance` est respecté 
 | Famille | Exemples actuels | Livrable indicatif |
 |---------|------------------|--------------------|
 | **A — Contact** | `_fight_unit_is_hex_adjacent_to_enemy_footprint`, `_fight_fp_has_adjacent_enemy_footprint`, branche contact pile-in, `_is_hex_adjacent_to_enemy` | `footprint_hex_contact(...)` + `footprint_round_edge_contact(...)` si le split reste nécessaire. |
-| **B — Engagement** | `_is_adjacent_to_enemy_within_cc_range` (fight + tir), `_is_adjacent_to_enemy_for_fight`, `_fight_build_valid_target_pool`, charge `_is_adjacent_to_enemy*` | `engine.spatial_relations.unit_within_engagement_zone_footprints(...)` + `enemy_footprint_distances(...)`, testé sur fight / tir / charge. |
+| **B — Engagement** | `_is_adjacent_to_enemy_within_cc_range` (fight + tir), `_is_adjacent_to_enemy_for_fight`, `_fight_build_valid_target_pool`, charge `_is_adjacent_to_enemy*`, blocage de cible shoot engagée avec un allié | `engine.spatial_relations.unit_within_engagement_zone_footprints(...)` + `unit_entries_within_engagement_zone(...)`, testé sur fight / tir / charge. |
 | **C — Clearance** | `_movement_engagement_violates`, `destination_adjacent_to_enemy`, `_build_multi_hex_vectorized` | `engine.spatial_relations.move_anchor_violates_engagement_clearance(...)`, avec **ε** centralisé et équivalence BFS conservée. |
 
 **Hors scope immédiat :** réécrire toute la dilatation des caches.  
@@ -170,7 +171,7 @@ Le booléen attendu est identique si le contrat de `max_distance` est respecté 
 2. **Homonymes** : `_is_adjacent_to_enemy` dans `movement_handlers` ≠ `charge_handlers` ≠ `ai/analyzer.py`.
 3. **Pile-in** : deux branches (rond↔rond vs non-rond) ; pas d’unification sans décision **§10**.
 4. **Doublons B** : fight / generic / tir / charge ; fusion ou tests « mêmes entrées → même booléen » (inclure le cas **§5**).
-5. **B vs C** : `<= ez` hex vs `gap < req - ε` ; caches dilatés ≠ vérité cercles en Board ×10.
+5. **B/C rond↔rond** : `gap <= req + ε` ; caches dilatés et `<= ez` hex ≠ vérité cercles en Board ×10.
 6. **Pools** : pas de re-vérification redondante (règle projet) ; noms de pools alignés sur **C** / dilatation réelle, pas « adjacent » vague.
 7. **Analyzer** : ne pas assimiler à **B** moteur sans décision **§10** et tests.
 8. **`max_distance` dans `min_distance_between_sets`** : avec arrêt anticipé, la valeur au-delà du seuil peut être **`max_distance + 1`** — ne pas l’utiliser comme distance exacte (logs, règles fines) ; pour l’API **B** unifiée, figer le choix perf vs distance complète et couvrir fight / tir / charge (voir **§5**).

@@ -758,7 +758,7 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
                     e_bs_i,
                     mover_center_xy=_dest_mover_xy,
                 )
-                if gap < req_blk - 1e-6:
+                if gap <= req_blk + 1e-6:
                     blocking_eid = str(eid)
                     break
         return False, {
@@ -1070,7 +1070,7 @@ def _build_multi_hex_vectorized(
                 dx = xs - float(ex)
                 dy = ys - float(ey)
                 d = np.hypot(dx, dy)
-                eng_bad |= (d - mover_r_norm - e_r_norm) < (req - 1e-6)
+                eng_bad |= (d - mover_r_norm - e_r_norm) <= (req + 1e-6)
             else:
                 # Dépose l'empreinte hex de l'ennemi (peu importe sa forme) dans le mask commun.
                 e_orient = int(require_key(ce, "orientation"))

@@ -399,16 +399,17 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
     For legacy boards (engagement_zone=1, single-hex), equivalent to hex distance <= 1.
     """
     from engine.spatial_relations import get_engagement_zone
+    from engine.spatial_relations import unit_within_engagement_zone_footprints
     cc_range = get_engagement_zone(game_state)
 
     if "console_logs" not in game_state:
         game_state["console_logs"] = []
 
-    for enemy_id, distance in _fight_enemy_footprint_distances(game_state, unit):
-        add_console_log(game_state, f"FIGHT CHECK: Unit {unit['id']} engagement_zone={cc_range} | Enemy {enemy_id} footprint_dist={distance}")
-        if distance <= cc_range:
-            add_console_log(game_state, f"FIGHT ELIGIBLE: Unit {unit['id']} can fight enemy {enemy_id} (dist {distance} <= engagement_zone {cc_range})")
-            return True
+    if unit_within_engagement_zone_footprints(
+        game_state, unit, engagement_zone=cc_range, max_distance=cc_range
+    ):
+        add_console_log(game_state, f"FIGHT ELIGIBLE: Unit {unit['id']} within engagement_zone {cc_range}")
+        return True
 
     add_console_log(game_state, f"FIGHT NOT ELIGIBLE: Unit {unit['id']} has no enemies within engagement_zone {cc_range}")
     return False
@@ -2200,16 +2201,26 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
 
     NO LINE OF SIGHT CHECK (fight doesn't need LoS)
     """
-    from engine.spatial_relations import get_engagement_zone
+    from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
     cc_range = get_engagement_zone(game_state)
+    units_cache = require_key(game_state, "units_cache")
+    unit_id_str = str(require_key(unit, "id"))
+    unit_entry = units_cache.get(unit_id_str)
+    if unit_entry is None:
+        raise ValueError(f"Unit {unit_id_str} not in units_cache (dead or absent); cannot build fight target pool")
+    unit_player = int(require_key(unit_entry, "player"))
 
     valid_targets = []
 
-    for target_id, distance in _fight_enemy_footprint_distances(game_state, unit):
-        if distance > cc_range:
+    for target_id, target_entry in units_cache.items():
+        target_id_str = str(target_id)
+        if target_id_str == unit_id_str:
             continue
-
-        # Valid target
+        target_player = int(require_key(target_entry, "player"))
+        if target_player == unit_player:
+            continue
+        if not unit_entries_within_engagement_zone(unit_entry, target_entry, cc_range):
+            continue
         valid_targets.append(target_id)
 
     return valid_targets

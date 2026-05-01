@@ -63,6 +63,49 @@ def enemy_footprint_distances(
     return distances
 
 
+def _cache_entry_footprint(cache_entry: Dict[str, Any]) -> Set[Tuple[int, int]]:
+    """Return a unit cache entry footprint, using its anchor only when no footprint is stored."""
+    footprint = cache_entry.get("occupied_hexes")
+    if footprint:
+        return footprint
+    return {(require_key(cache_entry, "col"), require_key(cache_entry, "row"))}
+
+
+def _cache_entry_round_base_size(cache_entry: Dict[str, Any]) -> int:
+    """Return a round base size from a cache entry, raising when the stored value is invalid."""
+    base_size = require_key(cache_entry, "BASE_SIZE")
+    if not isinstance(base_size, int):
+        raise TypeError(f"round BASE_SIZE must be int, got {type(base_size).__name__}")
+    return base_size
+
+
+def unit_entries_within_engagement_zone(
+    first_entry: Dict[str, Any],
+    second_entry: Dict[str, Any],
+    engagement_zone: int,
+) -> bool:
+    """Return True when two unit cache entries are within the shared engagement contract."""
+    first_shape = first_entry.get("BASE_SHAPE")
+    second_shape = second_entry.get("BASE_SHAPE")
+    if first_shape == "round" and second_shape == "round":
+        req = engagement_minimum_clearance_norm(engagement_zone)
+        gap = euclidean_edge_clearance_round_round(
+            require_key(first_entry, "col"),
+            require_key(first_entry, "row"),
+            _cache_entry_round_base_size(first_entry),
+            require_key(second_entry, "col"),
+            require_key(second_entry, "row"),
+            _cache_entry_round_base_size(second_entry),
+        )
+        return gap <= req + 1e-6
+
+    first_fp = _cache_entry_footprint(first_entry)
+    second_fp = _cache_entry_footprint(second_entry)
+    return min_distance_between_sets(
+        first_fp, second_fp, max_distance=engagement_zone
+    ) <= engagement_zone
+
+
 def unit_within_engagement_zone_footprints(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -70,8 +113,20 @@ def unit_within_engagement_zone_footprints(
     max_distance: Optional[int],
 ) -> bool:
     """Return True when unit is within B/engagement range of at least one enemy footprint."""
-    for _, distance in enemy_footprint_distances(game_state, unit, max_distance):
-        if distance <= engagement_zone:
+    units_cache = require_key(game_state, "units_cache")
+    unit_id_str = str(require_key(unit, "id"))
+    unit_entry = units_cache.get(unit_id_str)
+    if unit_entry is None:
+        raise ValueError(f"Unit {unit_id_str} not in units_cache (dead or absent); cannot read engagement")
+
+    unit_player = int(require_key(unit, "player"))
+    for enemy_id, cache_entry in units_cache.items():
+        if str(enemy_id) == unit_id_str:
+            continue
+        enemy_player = int(require_key(cache_entry, "player"))
+        if enemy_player == unit_player:
+            continue
+        if unit_entries_within_engagement_zone(unit_entry, cache_entry, engagement_zone):
             return True
     return False
 
@@ -140,7 +195,7 @@ def move_anchor_violates_engagement_clearance(
                 e_bs_i,
                 mover_center_xy=mover_center_xy_rr,
             )
-            if gap < req - 1e-6:
+            if gap <= req + 1e-6:
                 return True
         else:
             if (
