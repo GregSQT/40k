@@ -1903,10 +1903,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               }
             }
             footprintZoneRef.current = fpSet;
-            footprintMaskLoopsRef.current = normalizeMaskLoopsFromApi(
-              (gsPi as { fight_pile_in_footprint_mask_loops?: unknown })
-                .fight_pile_in_footprint_mask_loops,
-            );
+            footprintMaskLoopsRef.current = null;
             const uid = parseInt(String(data.result.unitId ?? data.game_state.active_fight_unit), 10);
             setSelectedUnitId(uid);
             setMode("pileInPreview");
@@ -1940,10 +1937,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 }
               }
               footprintZoneRef.current = fpSet;
-              footprintMaskLoopsRef.current = normalizeMaskLoopsFromApi(
-                (gsC as { fight_consolidation_footprint_mask_loops?: unknown })
-                  .fight_consolidation_footprint_mask_loops,
-              );
+              footprintMaskLoopsRef.current = null;
               const uid = parseInt(String(data.result.unitId ?? data.game_state.active_fight_unit), 10);
               setSelectedUnitId(uid);
               setMode("consolidationPreview");
