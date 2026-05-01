@@ -2325,6 +2325,140 @@ def _fight_ensure_current_fight_nb(unit: Dict[str, Any], unit_id: Any) -> None:
     unit["_current_fight_nb"] = total
 
 
+def _fight_finish_no_more_targets_after_attack(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    config: Dict[str, Any],
+    attack_result: Dict[str, Any],
+    last_target_id: Any,
+    unit_id: Any,
+) -> Tuple[bool, Dict[str, Any]]:
+    """
+    Fin d'activation fight : plus de cibles valides alors qu'il reste des attaques (ATTACK_LEFT > 0).
+
+    Extrait de ``_handle_fight_attack`` pour éviter la duplication entre les chemins
+    « pool vide » et « IA sans cible suivante ».
+    """
+    # DEBUG: Check if unit is adjacent to enemy but has no more targets
+    is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+    if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
+        episode = game_state["episode_number"]
+        turn = game_state["turn"]
+        if is_adjacent and unit["ATTACK_LEFT"] > 0:
+            log_msg = (
+                f"[FIGHT DEBUG] ⚠️ E{episode} T{turn} fight attack: Unit {unit_id} ADJACENT to enemy "
+                f"but NO MORE TARGETS (ATTACK_LEFT={unit['ATTACK_LEFT']}) - ending without completing all attacks"
+            )
+            _fight_verbose_trace(log_msg)
+
+    snap_nt = list(game_state.get("fight_attack_results") or [])
+    cons_nt = _fight_try_begin_consolidation_after_attacks(
+        game_state,
+        unit,
+        config,
+        all_attack_results_snapshot=snap_nt,
+        result_reason="no_more_targets",
+        last_target_id=last_target_id,
+    )
+    if cons_nt is not None:
+        if isinstance(cons_nt[1], dict):
+            cons_nt[1]["attack_result"] = attack_result
+            cons_nt[1]["target_died"] = (
+                attack_result["target_died"] if "target_died" in attack_result else False
+            )
+        return cons_nt
+
+    result = end_activation(
+        game_state, unit,
+        ACTION,        # Arg1: Log action
+        1,             # Arg2: +1 step
+        FIGHT,         # Arg3: FIGHT tracking
+        FIGHT,         # Arg4: Remove from fight pool
+        0              # Arg5: No error logging
+    )
+    game_state["active_fight_unit"] = None
+    game_state["valid_fight_targets"] = []
+
+    result["action"] = "combat"
+    result["phase"] = "fight"
+    result["unitId"] = unit_id
+    result["waiting_for_player"] = False
+    result["targetId"] = last_target_id
+    result["attack_result"] = attack_result
+    result["target_died"] = attack_result["target_died"] if "target_died" in attack_result else False
+    result["reason"] = "no_more_targets"
+    result["fight_subphase"] = require_key(game_state, "fight_subphase")
+
+    fight_attack_results = game_state["fight_attack_results"] if "fight_attack_results" in game_state else []
+    if not fight_attack_results and attack_result:
+        raise ValueError(
+            f"fight_attack_results is empty despite attack_result for unit {unit_id}"
+        )
+    result["all_attack_results"] = list(fight_attack_results)
+    for i, ar in enumerate(result["all_attack_results"]):
+        tid_nt = ar.get("targetId")
+        if tid_nt is None:
+            raise ValueError(f"attack_result[{i}] missing 'targetId' field: {ar}")
+        dmg_nt = ar.get("damage")
+        if dmg_nt is None:
+            raise ValueError(f"attack_result[{i}] missing 'damage' field: {ar}")
+    if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
+        episode = game_state["episode_number"]
+        turn = game_state["turn"]
+        log_msg = (
+            f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: SETTING all_attack_results "
+            f"count={len(result['all_attack_results'])} for Unit {unit_id} (no_more_targets)"
+        )
+        _fight_verbose_trace(log_msg)
+        for i, ar in enumerate(result["all_attack_results"]):
+            tid_nt = ar.get("targetId")
+            dmg_nt = ar.get("damage")
+            log_msg = (
+                f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: no_more_targets "
+                f"attack[{i}] -> Unit {tid_nt} damage={dmg_nt}"
+            )
+            _fight_verbose_trace(log_msg)
+    game_state["fight_attack_results"] = []
+
+    if result.get("phase_complete"):
+        preserved_action = result.get("action")
+        preserved_attack_results = result.get("all_attack_results")
+        preserved_unit_id = result.get("unitId")
+
+        if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
+            episode = game_state["episode_number"]
+            turn = game_state["turn"]
+            log_msg = (
+                f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: BEFORE phase_complete - "
+                f"preserved_action={preserved_action} preserved_unit_id={preserved_unit_id} "
+                f"result_keys={list(result.keys())}"
+            )
+            _fight_verbose_trace(log_msg)
+
+        phase_result = _fight_phase_complete(game_state)
+        result.update(phase_result)
+
+        result["action"] = preserved_action if preserved_action else "combat"
+        if preserved_attack_results:
+            result["all_attack_results"] = preserved_attack_results
+        if preserved_unit_id:
+            result["unitId"] = preserved_unit_id
+
+        if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
+            episode = game_state["episode_number"]
+            turn = game_state["turn"]
+            log_msg = (
+                f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: AFTER phase_complete - "
+                f"result['action']={result.get('action')} result_keys={list(result.keys())}"
+            )
+            _fight_verbose_trace(log_msg)
+    else:
+        _toggle_fight_alternation(game_state)
+        _update_fight_subphase(game_state)
+
+    return True, result
+
+
 def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], target_id: str, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     Handle fight attack execution.
@@ -2346,273 +2480,191 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
     if unit["ATTACK_LEFT"] <= 0:
         return False, {"error": "no_attacks_remaining", "unitId": unit_id, "action": "combat"}
 
-    # Validate target is valid
-    valid_targets = _fight_build_valid_target_pool(game_state, unit)
-    if target_id not in valid_targets:
-        return False, {"error": "invalid_target", "targetId": target_id, "valid_targets": valid_targets, "action": "combat"}
-    
-    # === MULTIPLE_WEAPONS_IMPLEMENTATION.md: Sélection d'arme pour cette cible ===
-    target = get_unit_by_id(game_state, target_id)
-    if not target:
-        return False, {"error": "target_not_found", "targetId": target_id, "action": "combat"}
-    
-    from engine.ai.weapon_selector import select_best_melee_weapon
-    best_weapon_idx = select_best_melee_weapon(unit, target, game_state)
-    
-    if best_weapon_idx >= 0:
-        unit["selectedCcWeaponIndex"] = best_weapon_idx
-        # CRITICAL: Only initialize ATTACK_LEFT if it's 0 AND we're at the start of activation
-        # Don't reset ATTACK_LEFT during attack execution (it should already be set)
-        weapon = unit["CC_WEAPONS"][best_weapon_idx]
-        current_attack_left = require_key(unit, "ATTACK_LEFT")
-        # Only reset if ATTACK_LEFT is 0 and we haven't started attacking yet
-        # This prevents infinite loops where ATTACK_LEFT is reset after being decremented
-        far = game_state["fight_attack_results"] if "fight_attack_results" in game_state else []
-        if current_attack_left == 0 and not far:
-            nb_roll = resolve_dice_value(require_key(weapon, "NB"), "fight_nb_auto_select")
-            unit["ATTACK_LEFT"] = nb_roll
-            unit["_current_fight_nb"] = nb_roll
-            _append_fight_nb_roll_info_log(game_state, unit, weapon, nb_roll)
-    else:
-        # Pas d'armes disponibles
-        unit["ATTACK_LEFT"] = 0
-        return False, {"error": "no_weapons_available", "unitId": unit["id"], "action": "combat"}
-    # === FIN NOUVEAU ===
+    # Première cible : même validation qu'avant (avant toute mutation d'arme sur une cible invalide)
+    valid_targets_initial = _fight_build_valid_target_pool(game_state, unit)
+    if target_id not in valid_targets_initial:
+        return False, {
+            "error": "invalid_target",
+            "targetId": target_id,
+            "valid_targets": valid_targets_initial,
+            "action": "combat",
+        }
 
-    # Initialize accumulated attack results list for this unit's activation
-    # This stores ALL attacks made during the weapon NB attack loop
-    # CRITICAL: Only initialize if not already exists (don't clear on recursive calls)
-    # fight_attack_results is cleared at the start of unit activation in _handle_fight_unit_activation
     if "fight_attack_results" not in game_state:
         game_state["fight_attack_results"] = []
 
-    _fight_ensure_current_fight_nb(unit, unit_id)
+    from engine.ai.weapon_selector import select_best_melee_weapon
+    from engine.utils.weapon_helpers import get_selected_melee_weapon
 
-    total_attacks_allowed = require_key(unit, "_current_fight_nb")
-    if not isinstance(total_attacks_allowed, int):
-        raise TypeError(
-            f"unit['_current_fight_nb'] must be int, got {type(total_attacks_allowed).__name__}"
-        )
-    if total_attacks_allowed <= 0:
-        raise ValueError(
-            f"unit['_current_fight_nb'] must be > 0, got {total_attacks_allowed} (unit_id={unit_id})"
-        )
-    if "_fight_attacks_executed" not in unit:
-        unit["_fight_attacks_executed"] = 0
-    attacks_executed = require_key(unit, "_fight_attacks_executed")
-    if not isinstance(attacks_executed, int):
-        raise TypeError(
-            f"unit['_fight_attacks_executed'] must be int, got {type(attacks_executed).__name__}"
-        )
-    if attacks_executed < 0:
-        raise ValueError(
-            f"unit['_fight_attacks_executed'] cannot be negative: {attacks_executed} (unit_id={unit_id})"
-        )
-    if attacks_executed >= total_attacks_allowed:
-        snap_cap = list(game_state.get("fight_attack_results") or [])
-        cons_cap = _fight_try_begin_consolidation_after_attacks(
-            game_state,
-            unit,
-            config,
-            all_attack_results_snapshot=snap_cap,
-            result_reason="attack_cap_reached",
-            last_target_id=target_id,
-        )
-        if cons_cap is not None:
-            cons_cap[1]["attack_cap_reached"] = True
-            cons_cap[1]["attack_cap_total"] = total_attacks_allowed
-            cons_cap[1]["attack_cap_executed"] = attacks_executed
-            return cons_cap
-        result = end_activation(
-            game_state, unit,
-            ACTION,        # Arg1: Log action
-            1,             # Arg2: +1 step
-            FIGHT,         # Arg3: FIGHT tracking
-            FIGHT,         # Arg4: Remove from fight pool
-            0              # Arg5: No error logging
-        )
-        game_state["active_fight_unit"] = None
-        game_state["valid_fight_targets"] = []
-        result["action"] = "combat"
-        result["phase"] = "fight"
-        result["unitId"] = unit_id
-        result["waiting_for_player"] = False
-        result["targetId"] = target_id
-        result["reason"] = "attack_cap_reached"
-        result["fight_subphase"] = require_key(game_state, "fight_subphase")
-        fight_attack_results = game_state["fight_attack_results"] if "fight_attack_results" in game_state else []
-        result["all_attack_results"] = list(fight_attack_results)
-        game_state["fight_attack_results"] = []
-        if result.get("phase_complete"):
-            phase_result = _fight_phase_complete(game_state)
-            result.update(phase_result)
+    current_target_id: Any = target_id
+    attack_result: Dict[str, Any]
+
+    while True:
+        _fight_ensure_current_fight_nb(unit, unit_id)
+
+        total_attacks_allowed = require_key(unit, "_current_fight_nb")
+        if not isinstance(total_attacks_allowed, int):
+            raise TypeError(
+                f"unit['_current_fight_nb'] must be int, got {type(total_attacks_allowed).__name__}"
+            )
+        if total_attacks_allowed <= 0:
+            raise ValueError(
+                f"unit['_current_fight_nb'] must be > 0, got {total_attacks_allowed} (unit_id={unit_id})"
+            )
+        if "_fight_attacks_executed" not in unit:
+            unit["_fight_attacks_executed"] = 0
+        attacks_executed = require_key(unit, "_fight_attacks_executed")
+        if not isinstance(attacks_executed, int):
+            raise TypeError(
+                f"unit['_fight_attacks_executed'] must be int, got {type(attacks_executed).__name__}"
+            )
+        if attacks_executed < 0:
+            raise ValueError(
+                f"unit['_fight_attacks_executed'] cannot be negative: {attacks_executed} (unit_id={unit_id})"
+            )
+        if attacks_executed >= total_attacks_allowed:
+            snap_cap = list(game_state.get("fight_attack_results") or [])
+            cons_cap = _fight_try_begin_consolidation_after_attacks(
+                game_state,
+                unit,
+                config,
+                all_attack_results_snapshot=snap_cap,
+                result_reason="attack_cap_reached",
+                last_target_id=current_target_id,
+            )
+            if cons_cap is not None:
+                cons_cap[1]["attack_cap_reached"] = True
+                cons_cap[1]["attack_cap_total"] = total_attacks_allowed
+                cons_cap[1]["attack_cap_executed"] = attacks_executed
+                return cons_cap
+            result = end_activation(
+                game_state, unit,
+                ACTION,
+                1,
+                FIGHT,
+                FIGHT,
+                0,
+            )
+            game_state["active_fight_unit"] = None
+            game_state["valid_fight_targets"] = []
+            result["action"] = "combat"
+            result["phase"] = "fight"
+            result["unitId"] = unit_id
+            result["waiting_for_player"] = False
+            result["targetId"] = current_target_id
+            result["reason"] = "attack_cap_reached"
+            result["fight_subphase"] = require_key(game_state, "fight_subphase")
+            fight_attack_results = game_state["fight_attack_results"] if "fight_attack_results" in game_state else []
+            result["all_attack_results"] = list(fight_attack_results)
+            game_state["fight_attack_results"] = []
+            if result.get("phase_complete"):
+                phase_result = _fight_phase_complete(game_state)
+                result.update(phase_result)
+            else:
+                _toggle_fight_alternation(game_state)
+                _update_fight_subphase(game_state)
+            result["attack_cap_reached"] = True
+            result["attack_cap_total"] = total_attacks_allowed
+            result["attack_cap_executed"] = attacks_executed
+            return True, result
+
+        valid_targets_now = _fight_build_valid_target_pool(game_state, unit)
+        if current_target_id not in valid_targets_now:
+            return False, {
+                "error": "invalid_target",
+                "targetId": current_target_id,
+                "valid_targets": valid_targets_now,
+                "action": "combat",
+            }
+
+        tgt = get_unit_by_id(game_state, current_target_id)
+        if not tgt:
+            return False, {"error": "target_not_found", "targetId": current_target_id, "action": "combat"}
+
+        best_weapon_idx = select_best_melee_weapon(unit, tgt, game_state)
+        if best_weapon_idx >= 0:
+            unit["selectedCcWeaponIndex"] = best_weapon_idx
+            weapon = unit["CC_WEAPONS"][best_weapon_idx]
+            current_attack_left = require_key(unit, "ATTACK_LEFT")
+            far = game_state["fight_attack_results"] if "fight_attack_results" in game_state else []
+            if current_attack_left == 0 and not far:
+                nb_roll = resolve_dice_value(require_key(weapon, "NB"), "fight_nb_auto_select")
+                unit["ATTACK_LEFT"] = nb_roll
+                unit["_current_fight_nb"] = nb_roll
+                _append_fight_nb_roll_info_log(game_state, unit, weapon, nb_roll)
         else:
-            _toggle_fight_alternation(game_state)
-            _update_fight_subphase(game_state)
-        result["attack_cap_reached"] = True
-        result["attack_cap_total"] = total_attacks_allowed
-        result["attack_cap_executed"] = attacks_executed
-        return True, result
+            unit["ATTACK_LEFT"] = 0
+            return False, {"error": "no_weapons_available", "unitId": unit["id"], "action": "combat"}
 
-    # Execute attack sequence using selected weapon
-    attack_result = _execute_fight_attack_sequence(game_state, unit, target_id)
+        attack_result = _execute_fight_attack_sequence(game_state, unit, current_target_id)
 
-    # DEBUG: trace attack execution (stderr only ; ``W40K_FIGHT_DEBUG``)
-    if _fight_verbose_debug_enabled():
-        if "episode_number" in game_state and "turn" in game_state:
+        if _fight_verbose_debug_enabled():
+            if "episode_number" in game_state and "turn" in game_state:
+                episode = game_state["episode_number"]
+                turn = game_state["turn"]
+                damage = attack_result["damage"] if "damage" in attack_result else 0
+                target_died = attack_result["target_died"] if "target_died" in attack_result else False
+                log_msg = (
+                    f"[FIGHT DEBUG] E{episode} T{turn} fight attack_executed: Unit {unit_id} -> "
+                    f"Unit {current_target_id} damage={damage} target_died={target_died}"
+                )
+                _fight_verbose_trace(log_msg)
+            else:
+                missing_keys = []
+                if "episode_number" not in game_state:
+                    missing_keys.append("episode_number")
+                if "turn" not in game_state:
+                    missing_keys.append("turn")
+                _fight_verbose_trace(
+                    f"[FIGHT DEBUG] attack_executed trace: missing game_state keys {missing_keys}"
+                )
+
+        selected_weapon = get_selected_melee_weapon(unit)
+        if selected_weapon:
+            _fight_ensure_current_fight_nb(unit, unit_id)
+            total_attacks = require_key(unit, "_current_fight_nb")
+        else:
+            total_attacks = 0
+
+        attack_result["attackerId"] = unit_id
+        attack_result["targetId"] = current_target_id
+        attack_result["attack_number"] = total_attacks - unit["ATTACK_LEFT"]
+        attack_result["total_attacks"] = total_attacks
+        game_state["fight_attack_results"].append(attack_result)
+        unit["_fight_attacks_executed"] = attacks_executed + 1
+
+        if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
             episode = game_state["episode_number"]
             turn = game_state["turn"]
-            damage = attack_result["damage"] if "damage" in attack_result else 0
-            target_died = attack_result["target_died"] if "target_died" in attack_result else False
-            log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight attack_executed: Unit {unit_id} -> Unit {target_id} damage={damage} target_died={target_died}"
-            _fight_verbose_trace(log_msg)
-        else:
-            missing_keys = []
-            if "episode_number" not in game_state:
-                missing_keys.append("episode_number")
-            if "turn" not in game_state:
-                missing_keys.append("turn")
-            _fight_verbose_trace(
-                f"[FIGHT DEBUG] attack_executed trace: missing game_state keys {missing_keys}"
+            far_list = game_state["fight_attack_results"] if "fight_attack_results" in game_state else []
+            total_results = len(far_list)
+            log_msg = (
+                f"[FIGHT DEBUG] E{episode} T{turn} fight attack_executed: Unit {unit_id} "
+                f"fight_attack_results count={total_results}"
             )
+            _fight_verbose_trace(log_msg)
 
-    # Store this attack result with metadata for step logging
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon NB
-    from engine.utils.weapon_helpers import get_selected_melee_weapon
-    selected_weapon = get_selected_melee_weapon(unit)
-    if selected_weapon:
-        _fight_ensure_current_fight_nb(unit, unit_id)
-        total_attacks = require_key(unit, "_current_fight_nb")
-    else:
-        total_attacks = 0
-    
-    attack_result["attackerId"] = unit_id
-    attack_result["targetId"] = target_id
-    attack_result["attack_number"] = total_attacks - unit["ATTACK_LEFT"]  # 1-indexed (before decrement)
-    attack_result["total_attacks"] = total_attacks
-    game_state["fight_attack_results"].append(attack_result)
-    unit["_fight_attacks_executed"] = attacks_executed + 1
-    
-    # DEBUG: Log accumulation in fight_attack_results
-    if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
-        episode = game_state["episode_number"]
-        turn = game_state["turn"]
-        far_list = game_state["fight_attack_results"] if "fight_attack_results" in game_state else []
-        total_results = len(far_list)
-        log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight attack_executed: Unit {unit_id} fight_attack_results count={total_results}"
-        _fight_verbose_trace(log_msg)
+        unit["ATTACK_LEFT"] -= 1
 
-    # Decrement ATTACK_LEFT
-    unit["ATTACK_LEFT"] -= 1
+        if unit["ATTACK_LEFT"] <= 0:
+            break
 
-    # Check if more attacks remain
-    if unit["ATTACK_LEFT"] > 0:
-        # Rebuild target pool (target may have died)
         valid_targets_after = _fight_build_valid_target_pool(game_state, unit)
-
         if valid_targets_after:
-            # More attacks and targets available
-            # Auto-continue only for AI-controlled players.
             is_ai_controlled = _is_ai_controlled_fight_unit(game_state, unit)
-
             auto_execution_allowed = _is_fight_auto_execution_allowed(game_state)
             if is_ai_controlled and auto_execution_allowed:
-                # AI path: auto-continue attack loop until ATTACK_LEFT = 0 or no targets.
-                # Select next target (use AI selection logic)
                 next_target_id = _ai_select_fight_target(game_state, unit["id"], valid_targets_after)
                 if next_target_id:
-                    # CRITICAL: Capture fight_attack_results BEFORE recursive call
-                    # The recursive call may clear fight_attack_results, so we need to preserve
-                    # the attacks accumulated so far in this activation
-                    far_snap = game_state["fight_attack_results"] if "fight_attack_results" in game_state else []
-                    attacks_before_recursive = list(far_snap)
-                    
-                    # Recursively call to continue the attack loop
-                    recursive_result = _handle_fight_attack(game_state, unit, next_target_id, config)
-                    if isinstance(recursive_result, tuple) and len(recursive_result) == 2:
-                        rec_success, rec_result = recursive_result
-                        if rec_success and isinstance(rec_result, dict):
-                            # CRITICAL: Ensure all_attack_results includes ALL accumulated attacks
-                            # Merge attacks from before recursive call with recursive results
-                            recursive_attack_results = rec_result["all_attack_results"] if "all_attack_results" in rec_result else []
-                            
-                            # Combine: attacks before recursive + recursive results
-                            # Remove duplicates by checking targetId and attack_number
-                            seen_attacks = {(ar.get("targetId"), ar.get("attack_number")) for ar in attacks_before_recursive}
-                            combined_results = list(attacks_before_recursive)
-                            for ar in recursive_attack_results:
-                                # CRITICAL: Validate ar has all required fields before adding
-                                required_fields = ["hit_roll", "wound_roll", "save_roll", "damage", "hit_success", "wound_success", "save_success", "hit_target", "wound_target", "save_target", "target_died", "weapon_name"]
-                                missing_fields = [field for field in required_fields if field not in ar]
-                                if missing_fields:
-                                    raise KeyError(
-                                        f"recursive_attack_results contains incomplete attack_result: missing {missing_fields}. "
-                                        f"attack_result keys: {list(ar.keys())}. "
-                                        f"unit_id={unit_id}, target_id={ar.get('targetId', 'unknown')}"
-                                    )
-                                
-                                key = (ar.get("targetId"), ar.get("attack_number"))
-                                if key not in seen_attacks:
-                                    combined_results.append(ar)
-                                    seen_attacks.add(key)
-                            
-                            # Update result with combined attack results
-                            rec_result["all_attack_results"] = combined_results
-                            
-                            # CRITICAL: Ensure action is set to "combat" when there are attack results
-                            # This ensures attacks are logged even if recursive result had different action
-                            if combined_results:
-                                rec_result["action"] = "combat"
-                                rec_result["phase"] = "fight"
-                                if "unitId" not in rec_result:
-                                    rec_result["unitId"] = unit_id
-                            
-                            # DEBUG: Log the merge (stderr only ; ``W40K_FIGHT_DEBUG``)
-                            if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
-                                episode = game_state["episode_number"]
-                                turn = game_state["turn"]
-                                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: MERGED recursive results - before={len(attacks_before_recursive)} recursive={len(recursive_attack_results)} combined={len(combined_results)}"
-                                _fight_verbose_trace(log_msg)
-                    else:
-                        # CRITICAL: If recursive_result is invalid, preserve attacks_before_recursive
-                        # Restore fight_attack_results to ensure they're not lost
-                        if attacks_before_recursive:
-                            game_state["fight_attack_results"] = list(attacks_before_recursive)
-                            # CRITICAL: If recursive_result is not a valid tuple, create a valid result with all_attack_results
-                            if not isinstance(recursive_result, tuple) or len(recursive_result) != 2:
-                                # Create a valid result structure with preserved attacks
-                                recursive_result = (True, {
-                                    "action": "combat",
-                                    "unitId": unit_id,
-                                    "all_attack_results": list(attacks_before_recursive),
-                                    "error": "recursive_call_failed"
-                                })
-                            else:
-                                # recursive_result is a tuple but rec_result might not have all_attack_results
-                                rec_success, rec_result = recursive_result
-                                if isinstance(rec_result, dict) and "all_attack_results" not in rec_result:
-                                    rec_result["all_attack_results"] = list(attacks_before_recursive)
-                                    recursive_result = (rec_success, rec_result)
-                    
-                    if isinstance(recursive_result, tuple) and len(recursive_result) == 2:
-                        _, rec_result = recursive_result
-                        if isinstance(rec_result, dict) and rec_result.get("all_attack_results"):
-                            game_state["fight_attack_results"] = []
-                    return recursive_result
-                # No valid target selected - fall through to end activation
-
+                    current_target_id = next_target_id
+                    continue
             else:
-                # HUMAN PLAYER: Return waiting_for_player for manual target selection
-                # CRITICAL: Include all_attack_results even when waiting_for_player
-                # This ensures attacks already executed are logged to step.log
-                # CRITICAL: Always get ALL attacks from fight_attack_results
                 fight_attack_results = game_state["fight_attack_results"] if "fight_attack_results" in game_state else []
                 if not fight_attack_results and attack_result:
                     raise ValueError(
                         f"fight_attack_results is empty despite attack_result for unit {unit_id}"
                     )
                 all_attack_results = fight_attack_results
-                # CRITICAL ASSERTION: If we have attack_result, it MUST be in all_attack_results
                 if attack_result and attack_result not in all_attack_results:
                     raise ValueError(
                         f"attack_result missing from all_attack_results for unit {unit_id}"
@@ -2624,16 +2676,22 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                     dmg_wp = ar.get("damage")
                     if dmg_wp is None:
                         raise ValueError(f"attack_result[{i}] missing 'damage' field: {ar}")
-                # DEBUG: Log all_attack_results being returned with waiting_for_player
                 if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
                     episode = game_state["episode_number"]
                     turn = game_state["turn"]
-                    log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: RETURNING waiting_for_player=True with all_attack_results count={len(all_attack_results)} for Unit {unit_id}"
+                    log_msg = (
+                        f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: RETURNING "
+                        f"waiting_for_player=True with all_attack_results count={len(all_attack_results)} "
+                        f"for Unit {unit_id}"
+                    )
                     _fight_verbose_trace(log_msg)
                     for i, ar in enumerate(all_attack_results):
                         tid_wp = ar.get("targetId")
                         dmg_wp = ar.get("damage")
-                        log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: waiting_for_player attack[{i}] -> Unit {tid_wp} damage={dmg_wp}"
+                        log_msg = (
+                            f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: "
+                            f"waiting_for_player attack[{i}] -> Unit {tid_wp} damage={dmg_wp}"
+                        )
                         _fight_verbose_trace(log_msg)
                 if all_attack_results:
                     game_state["fight_attack_results"] = []
@@ -2644,248 +2702,120 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                     "ATTACK_LEFT": unit["ATTACK_LEFT"],
                     "valid_targets": valid_targets_after,
                     "waiting_for_player": True,
-                    "action": "combat",  # CRITICAL: Must be "combat" for step_logger
+                    "action": "combat",
                     "fight_subphase": require_key(game_state, "fight_subphase"),
-                    "all_attack_results": list(all_attack_results) if all_attack_results else []  # Copie explicite pour sécurité
+                    "all_attack_results": list(all_attack_results) if all_attack_results else [],
                 }
-        # No more targets or no valid target selected - fall through to end activation
 
-        # DEBUG: Check if unit is adjacent to enemy but has no more targets
-        is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
-        if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
-            episode = game_state["episode_number"]
-            turn = game_state["turn"]
-            if is_adjacent and unit["ATTACK_LEFT"] > 0:
-                log_msg = f"[FIGHT DEBUG] ⚠️ E{episode} T{turn} fight attack: Unit {unit_id} ADJACENT to enemy but NO MORE TARGETS (ATTACK_LEFT={unit['ATTACK_LEFT']}) - ending without completing all attacks"
-                _fight_verbose_trace(log_msg)
-        
-        # No more targets - end activation
-        # ATTACK_LEFT > 0 but no targets -> end_activation (ACTION, 1, FIGHT, FIGHT)
-        snap_nt = list(game_state.get("fight_attack_results") or [])
-        cons_nt = _fight_try_begin_consolidation_after_attacks(
-            game_state,
-            unit,
-            config,
-            all_attack_results_snapshot=snap_nt,
-            result_reason="no_more_targets",
-            last_target_id=target_id,
+        return _fight_finish_no_more_targets_after_attack(
+            game_state, unit, config, attack_result, current_target_id, unit_id
         )
-        if cons_nt is not None:
-            if isinstance(cons_nt[1], dict):
-                cons_nt[1]["attack_result"] = attack_result
-                cons_nt[1]["target_died"] = (
-                    attack_result["target_died"] if "target_died" in attack_result else False
-                )
-            return cons_nt
 
-        result = end_activation(
-            game_state, unit,
-            ACTION,        # Arg1: Log action
-            1,             # Arg2: +1 step
-            FIGHT,         # Arg3: FIGHT tracking
-            FIGHT,         # Arg4: Remove from fight pool
-            0              # Arg5: No error logging
+    snap_ac = list(game_state.get("fight_attack_results") or [])
+    if not snap_ac and attack_result:
+        snap_ac = [attack_result]
+    cons_ac = _fight_try_begin_consolidation_after_attacks(
+        game_state,
+        unit,
+        config,
+        all_attack_results_snapshot=snap_ac,
+        result_reason="attacks_complete",
+        last_target_id=current_target_id,
+    )
+    if cons_ac is not None:
+        if isinstance(cons_ac[1], dict):
+            cons_ac[1]["attack_result"] = attack_result
+            cons_ac[1]["target_died"] = attack_result.get("target_died", False)
+        return cons_ac
+
+    result = end_activation(
+        game_state, unit,
+        ACTION,
+        1,
+        FIGHT,
+        FIGHT,
+        0,
+    )
+    game_state["active_fight_unit"] = None
+    game_state["valid_fight_targets"] = []
+
+    result["action"] = "combat"
+    result["phase"] = "fight"
+    result["unitId"] = unit_id
+    result["waiting_for_player"] = False
+    result["targetId"] = current_target_id
+    result["attack_result"] = attack_result
+    result["target_died"] = attack_result.get("target_died", False)
+    result["reason"] = "attacks_complete"
+    result["fight_subphase"] = require_key(game_state, "fight_subphase")
+
+    fight_attack_results = game_state["fight_attack_results"] if "fight_attack_results" in game_state else []
+    if not fight_attack_results:
+        if attack_result:
+            fight_attack_results = [attack_result]
+    result["all_attack_results"] = list(fight_attack_results)
+    for i, ar in enumerate(result["all_attack_results"]):
+        tid_ac = ar.get("targetId")
+        if tid_ac is None:
+            raise ValueError(f"attack_result[{i}] missing 'targetId' field: {ar}")
+        dmg_ac = ar.get("damage")
+        if dmg_ac is None:
+            raise ValueError(f"attack_result[{i}] missing 'damage' field: {ar}")
+    if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
+        episode = game_state["episode_number"]
+        turn = game_state["turn"]
+        log_msg = (
+            f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: SETTING all_attack_results "
+            f"count={len(result['all_attack_results'])} for Unit {unit_id} (attacks_complete)"
         )
-        # CRITICAL: Clear active_fight_unit so next unit can be activated
-        game_state["active_fight_unit"] = None
-        game_state["valid_fight_targets"] = []
-
-        # CRITICAL: Set action BEFORE checking phase_complete to ensure it's preserved
-        result["action"] = "combat"  # Must be "combat" for step_logger (not "fight")
-        result["phase"] = "fight"  # For metrics tracking
-        result["unitId"] = unit_id  # For step_logger
-        result["waiting_for_player"] = False  # Combat resolved, no further input
-        result["targetId"] = target_id  # For reward calculator
-        result["attack_result"] = attack_result
-        result["target_died"] = attack_result["target_died"] if "target_died" in attack_result else False  # For metrics tracking
-        result["reason"] = "no_more_targets"
-        result["fight_subphase"] = require_key(game_state, "fight_subphase")
-
-        # Include ALL attack results from this activation for step logging
-        # CRITICAL: Always use fight_attack_results - it should contain ALL attacks from this activation
-        fight_attack_results = game_state["fight_attack_results"] if "fight_attack_results" in game_state else []
-        if not fight_attack_results and attack_result:
-            raise ValueError(
-                f"fight_attack_results is empty despite attack_result for unit {unit_id}"
-            )
-        result["all_attack_results"] = list(fight_attack_results)  # Copie explicite pour sécurité
-        for i, ar in enumerate(result["all_attack_results"]):
-            tid_nt = ar.get("targetId")
-            if tid_nt is None:
-                raise ValueError(f"attack_result[{i}] missing 'targetId' field: {ar}")
-            dmg_nt = ar.get("damage")
-            if dmg_nt is None:
-                raise ValueError(f"attack_result[{i}] missing 'damage' field: {ar}")
-        # DEBUG: Log all_attack_results being set in result (no_more_targets path)
-        if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
-            episode = game_state["episode_number"]
-            turn = game_state["turn"]
-            log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: SETTING all_attack_results count={len(result['all_attack_results'])} for Unit {unit_id} (no_more_targets)"
-            _fight_verbose_trace(log_msg)
-            for i, ar in enumerate(result["all_attack_results"]):
-                tid_nt = ar.get("targetId")
-                dmg_nt = ar.get("damage")
-                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: no_more_targets attack[{i}] -> Unit {tid_nt} damage={dmg_nt}"
-                _fight_verbose_trace(log_msg)
-        # Clear accumulated results for next unit
-        game_state["fight_attack_results"] = []
-
-        # Check if ALL pools are empty -> phase complete
-        if result.get("phase_complete"):
-            # All fight pools empty - transition to next phase
-            # CRITICAL: Preserve action and all_attack_results before merging phase transition
-            # action is already set above, so preserved_action will be "combat"
-            preserved_action = result.get("action")
-            preserved_attack_results = result.get("all_attack_results")
-            preserved_unit_id = result.get("unitId")
-            
-            # DEBUG: Log preservation before phase transition
-            if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
-                episode = game_state["episode_number"]
-                turn = game_state["turn"]
-                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: BEFORE phase_complete - preserved_action={preserved_action} preserved_unit_id={preserved_unit_id} result_keys={list(result.keys())}"
-                _fight_verbose_trace(log_msg)
-            
-            phase_result = _fight_phase_complete(game_state)
-            # Merge phase transition info into result
-            result.update(phase_result)
-            
-            # CRITICAL: Restore preserved combat data for logging
-            # ALWAYS restore action, even if preserved_action is None (defensive)
-            result["action"] = preserved_action if preserved_action else "combat"
-            if preserved_attack_results:
-                result["all_attack_results"] = preserved_attack_results
-            if preserved_unit_id:
-                result["unitId"] = preserved_unit_id
-            
-            # DEBUG: Log restoration after phase transition
-            if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
-                episode = game_state["episode_number"]
-                turn = game_state["turn"]
-                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: AFTER phase_complete - result['action']={result.get('action')} result_keys={list(result.keys())}"
-                _fight_verbose_trace(log_msg)
-        else:
-            # More units to activate - toggle alternation and update subphase
-            # AI_TURN.md Lines 762-764, 844-846: Toggle alternation after activation completes
-            _toggle_fight_alternation(game_state)
-            # CRITICAL: Recalculate fight_subphase after pool changes
-            _update_fight_subphase(game_state)
-
-        return True, result
-    else:
-        # ATTACK_LEFT = 0 - end activation
-        # end_activation (ACTION, 1, FIGHT, FIGHT)
-        snap_ac = list(game_state.get("fight_attack_results") or [])
-        if not snap_ac and attack_result:
-            snap_ac = [attack_result]
-        cons_ac = _fight_try_begin_consolidation_after_attacks(
-            game_state,
-            unit,
-            config,
-            all_attack_results_snapshot=snap_ac,
-            result_reason="attacks_complete",
-            last_target_id=target_id,
-        )
-        if cons_ac is not None:
-            if isinstance(cons_ac[1], dict):
-                cons_ac[1]["attack_result"] = attack_result
-                cons_ac[1]["target_died"] = attack_result.get("target_died", False)
-            return cons_ac
-
-        result = end_activation(
-            game_state, unit,
-            ACTION,        # Arg1: Log action
-            1,             # Arg2: +1 step
-            FIGHT,         # Arg3: FIGHT tracking
-            FIGHT,         # Arg4: Remove from fight pool
-            0              # Arg5: No error logging
-        )
-        # CRITICAL: Clear active_fight_unit so next unit can be activated
-        game_state["active_fight_unit"] = None
-        game_state["valid_fight_targets"] = []
-
-        result["action"] = "combat"  # Must be "combat" for step_logger (not "fight")
-        result["phase"] = "fight"  # For metrics tracking
-        result["unitId"] = unit_id  # For step_logger
-        result["waiting_for_player"] = False  # Combat resolved, no further input
-        result["targetId"] = target_id  # For reward calculator
-        result["attack_result"] = attack_result
-        result["target_died"] = attack_result.get("target_died", False)  # For metrics tracking
-        result["reason"] = "attacks_complete"
-        result["fight_subphase"] = require_key(game_state, "fight_subphase")
-
-        # Include ALL attack results from this activation for step logging
-        # CRITICAL: fight_attack_results MUST contain all attacks from this activation
-        # If it's empty, something is wrong - but we still need to return attack_result
-        fight_attack_results = game_state["fight_attack_results"] if "fight_attack_results" in game_state else []
-        if not fight_attack_results:
-            # This should never happen - all attacks should be in fight_attack_results
-            # But if it does, at least return the current attack_result
-            if attack_result:
-                fight_attack_results = [attack_result]
-        result["all_attack_results"] = list(fight_attack_results)  # Copie explicite pour sécurité
+        _fight_verbose_trace(log_msg)
         for i, ar in enumerate(result["all_attack_results"]):
             tid_ac = ar.get("targetId")
-            if tid_ac is None:
-                raise ValueError(f"attack_result[{i}] missing 'targetId' field: {ar}")
             dmg_ac = ar.get("damage")
-            if dmg_ac is None:
-                raise ValueError(f"attack_result[{i}] missing 'damage' field: {ar}")
-        # DEBUG: Log all_attack_results being set in result (attacks_complete path)
+            log_msg = (
+                f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: attacks_complete "
+                f"attack[{i}] -> Unit {tid_ac} damage={dmg_ac}"
+            )
+            _fight_verbose_trace(log_msg)
+    game_state["fight_attack_results"] = []
+
+    if result.get("phase_complete"):
+        preserved_action = result.get("action")
+        preserved_attack_results = result.get("all_attack_results")
+        preserved_unit_id = result.get("unitId")
+
         if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
             episode = game_state["episode_number"]
             turn = game_state["turn"]
-            log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: SETTING all_attack_results count={len(result['all_attack_results'])} for Unit {unit_id} (attacks_complete)"
+            log_msg = (
+                f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: BEFORE phase_complete "
+                f"(ATTACK_LEFT=0) - preserved_action={preserved_action} preserved_unit_id={preserved_unit_id} "
+                f"result_keys={list(result.keys())}"
+            )
             _fight_verbose_trace(log_msg)
-            for i, ar in enumerate(result["all_attack_results"]):
-                tid_ac = ar.get("targetId")
-                dmg_ac = ar.get("damage")
-                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: attacks_complete attack[{i}] -> Unit {tid_ac} damage={dmg_ac}"
-                _fight_verbose_trace(log_msg)
-        # Clear accumulated results for next unit
-        game_state["fight_attack_results"] = []
 
-        # Check if ALL pools are empty -> phase complete
-        if result.get("phase_complete"):
-            # All fight pools empty - transition to next phase
-            # CRITICAL: Preserve action and all_attack_results before merging phase transition
-            preserved_action = result.get("action")
-            preserved_attack_results = result.get("all_attack_results")
-            preserved_unit_id = result.get("unitId")
-            
-            # DEBUG: Log preservation before phase transition
-            if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
-                episode = game_state["episode_number"]
-                turn = game_state["turn"]
-                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: BEFORE phase_complete (ATTACK_LEFT=0) - preserved_action={preserved_action} preserved_unit_id={preserved_unit_id} result_keys={list(result.keys())}"
-                _fight_verbose_trace(log_msg)
-            
-            phase_result = _fight_phase_complete(game_state)
-            # Merge phase transition info into result
-            result.update(phase_result)
-            
-            # CRITICAL: Restore preserved combat data for logging
-            # ALWAYS restore action, even if preserved_action is None (defensive)
-            result["action"] = preserved_action if preserved_action else "combat"
-            if preserved_attack_results:
-                result["all_attack_results"] = preserved_attack_results
-            if preserved_unit_id:
-                result["unitId"] = preserved_unit_id
-            
-            # DEBUG: Log restoration after phase transition
-            if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
-                episode = game_state["episode_number"]
-                turn = game_state["turn"]
-                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: AFTER phase_complete (ATTACK_LEFT=0) - result['action']={result.get('action')} result_keys={list(result.keys())}"
-                _fight_verbose_trace(log_msg)
-        else:
-            # More units to activate - toggle alternation and update subphase
-            # AI_TURN.md Lines 762-764, 844-846: Toggle alternation after activation completes
-            _toggle_fight_alternation(game_state)
-            # CRITICAL: Recalculate fight_subphase after pool changes
-            _update_fight_subphase(game_state)
+        phase_result = _fight_phase_complete(game_state)
+        result.update(phase_result)
 
-        return True, result
+        result["action"] = preserved_action if preserved_action else "combat"
+        if preserved_attack_results:
+            result["all_attack_results"] = preserved_attack_results
+        if preserved_unit_id:
+            result["unitId"] = preserved_unit_id
+
+        if _fight_verbose_debug_enabled() and "episode_number" in game_state and "turn" in game_state:
+            episode = game_state["episode_number"]
+            turn = game_state["turn"]
+            log_msg = (
+                f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: AFTER phase_complete "
+                f"(ATTACK_LEFT=0) - result['action']={result.get('action')} result_keys={list(result.keys())}"
+            )
+            _fight_verbose_trace(log_msg)
+    else:
+        _toggle_fight_alternation(game_state)
+        _update_fight_subphase(game_state)
+
+    return True, result
 
 
 def _handle_fight_postpone(game_state: Dict[str, Any], unit: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
