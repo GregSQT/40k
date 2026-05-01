@@ -23,7 +23,11 @@ import type {
 import { setupBoardClickHandler } from "../utils/boardClickHandler";
 import { areUnitsAdjacent, cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import { getMaxRangedRange } from "../utils/weaponHelpers";
-import { drawBoard, type DrawBoardOptions } from "./BoardDisplay";
+import {
+  drawBoard,
+  detachMovePreviewLayerCacheFromStage,
+  type DrawBoardOptions,
+} from "./BoardDisplay";
 import { renderUnit } from "./UnitRenderer";
 import {
   computeOccupiedHexes,
@@ -3479,6 +3483,7 @@ export default function Board({
       if (savedHoverSprite?.parent) app.stage.removeChild(savedHoverSprite);
       if (savedMovePreviewGuideLine?.parent) app.stage.removeChild(savedMovePreviewGuideLine);
       if (savedMeasureGuideLine?.parent) app.stage.removeChild(savedMeasureGuideLine);
+      detachMovePreviewLayerCacheFromStage();
       for (const child of [...app.stage.children]) {
         if (child.name === "hp-blink-container") {
           app.stage.removeChild(child);

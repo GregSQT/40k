@@ -33,6 +33,70 @@ const moveAdvanceMaskSmoothOptions = {
   maxVertsAfterOneChaikinStep: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
 } as const;
 
+/** Incrémenter si le pipeline masque / RT / blur / couleur du layer move preview change. */
+const MOVE_PREVIEW_LAYER_RENDER_CACHE_VERSION = 1;
+
+interface MovePreviewLayerRenderCacheEntry {
+  key: string;
+  root: PIXI.Container;
+}
+
+let movePreviewLayerRenderCache: MovePreviewLayerRenderCacheEntry | null = null;
+
+function disposeMovePreviewRenderCache(): void {
+  if (!movePreviewLayerRenderCache) return;
+  const { root } = movePreviewLayerRenderCache;
+  movePreviewLayerRenderCache = null;
+  if (!root.destroyed) {
+    root.destroy({ children: true, texture: true, baseTexture: true });
+  }
+}
+
+/**
+ * Retire le cache du layer move preview de son parent pour qu'il ne soit pas
+ * détruit avec l'ancien ``highlightContainer`` lors du ``removeChildren`` du stage.
+ * Même principe que les conteneurs persistants détachés dans BoardPvp avant destroy.
+ */
+export function detachMovePreviewLayerCacheFromStage(): void {
+  const root = movePreviewLayerRenderCache?.root;
+  if (root && root.parent) {
+    root.parent.removeChild(root);
+  }
+}
+
+function hashStringSetStable(pool: Set<string>): number {
+  const keys = [...pool].sort();
+  let h = 5381 >>> 0;
+  for (const k of keys) {
+    for (let i = 0; i < k.length; i++) {
+      h = Math.imul(33, h) ^ k.charCodeAt(i)!;
+    }
+    h = Math.imul(33, h) ^ 58;
+  }
+  return h | 0;
+}
+
+/** Empreinte légère des boucles monde (évite un stringify complet des milliers de nombres). */
+function fingerprintPrecomputedMaskLoops(loops: number[][] | null): string {
+  if (loops == null || loops.length === 0) return "∅";
+  let h = 5381 >>> 0;
+  let totalVerts = 0;
+  for (let li = 0; li < loops.length; li++) {
+    const flat = loops[li]!;
+    const n = flat.length;
+    totalVerts += n;
+    h = Math.imul(33, h) ^ n;
+    const stride = Math.max(1, Math.floor(n / 400));
+    for (let i = 0; i < n; i += stride) {
+      const v = flat[i]!;
+      const bits =
+        typeof v === "number" && Number.isFinite(v) ? (v * 131071) | 0 : (0x7bad0000 ^ li) ^ i;
+      h = Math.imul(33, h) ^ bits;
+    }
+  }
+  return `L${loops.length}|V${totalVerts}|${h >>> 0}`;
+}
+
 interface BoardConfig {
   cols: number;
   rows: number;
@@ -753,7 +817,7 @@ function appendWhiteReachableMaskFromSmoothedLoops(
  * **Pas de repli silencieux** : sources invalides, RT trop grande, échec render → ``throw``.
  */
 function renderMoveAdvanceDestPoolCircleLayer(
-  highlightContainer: PIXI.Container,
+  parentContainer: PIXI.Container,
   app: PIXI.Application,
   anchorPool: Set<string>,
   footprintMaskHexPool: Set<string> | null,
@@ -951,8 +1015,8 @@ function renderMoveAdvanceDestPoolCircleLayer(
   coverageGfx.alpha = 0.28;
   coverageGfx.mask = maskSprite;
 
-  highlightContainer.addChild(maskSprite);
-  highlightContainer.addChild(coverageGfx);
+  parentContainer.addChild(maskSprite);
+  parentContainer.addChild(coverageGfx);
 }
 
 /** Remplissage objectif : texture teintée ou couleur unie (même pipeline que les murs). */
@@ -985,6 +1049,8 @@ export const drawBoard = (
   if (!boardConfig || !app.stage) return;
 
   try {
+    detachMovePreviewLayerCacheFromStage();
+
     // Extract board configuration values - USE CONFIG VALUES
     const BOARD_COLS = boardConfig.cols;
     const BOARD_ROWS = boardConfig.rows;
@@ -1115,6 +1181,10 @@ export const drawBoard = (
         usePileInPoolLikeMoveHoisted) &&
       !!movePoolForDiskDraw &&
       movePoolForDiskDraw.size > 0;
+
+    if (!useMoveDestPoolCircleLayer) {
+      disposeMovePreviewRenderCache();
+    }
 
     /** advancePreview sans pool : éviter — le pool vient de ``advance_destinations`` / ``valid_move_destinations_pool`` après ``action: "advance"``. */
 
@@ -1381,22 +1451,78 @@ export const drawBoard = (
         footprintZonePoolRef?.current && footprintZonePoolRef.current.size > 0
           ? footprintZonePoolRef.current
           : null;
-      renderMoveAdvanceDestPoolCircleLayer(
-        highlightContainer,
-        app,
-        movePoolForDiskDraw,
-        footprintMaskHexPool,
-        HEX_RADIUS,
-        footprintRadius,
-        poolFillColor,
-        moveSpriteName,
-        HEX_HORIZ_SPACING,
-        HEX_WIDTH,
-        HEX_HEIGHT,
-        HEX_VERT_SPACING,
-        MARGIN,
-        movePreviewFootprintMaskLoops,
-      );
+
+      const poolHash = hashStringSetStable(movePoolForDiskDraw);
+      const footprintPoolHash =
+        footprintMaskHexPool && footprintMaskHexPool.size > 0
+          ? hashStringSetStable(footprintMaskHexPool)
+          : null;
+      const loopsFp = fingerprintPrecomputedMaskLoops(movePreviewFootprintMaskLoops);
+
+      const movePreviewCacheKey = JSON.stringify({
+        v: MOVE_PREVIEW_LAYER_RENDER_CACHE_VERSION,
+        res: app.renderer.resolution,
+        ip: interactionPhase,
+        mo: mode,
+        pms: pendingMoveAfterShooting,
+        sn: moveSpriteName,
+        ph: poolHash,
+        psz: movePoolForDiskDraw.size,
+        fph: footprintPoolHash,
+        fpsz: footprintMaskHexPool?.size ?? 0,
+        lf: loopsFp,
+        ghr: HEX_RADIUS,
+        fr: footprintRadius,
+        pfc: poolFillColor,
+        ac: selectedUnitAnchor.col,
+        ar: selectedUnitAnchor.row,
+        fsp: footprintSpanForPool,
+        sp: {
+          hhs: HEX_HORIZ_SPACING,
+          hw: HEX_WIDTH,
+          hh: HEX_HEIGHT,
+          hvs: HEX_VERT_SPACING,
+          mg: MARGIN,
+        },
+        chai: MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
+        bq: MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY,
+        bs: MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH,
+        br: MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION,
+        mvmax: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
+      });
+
+      const cachedEntry = movePreviewLayerRenderCache;
+      const canReuse =
+        cachedEntry != null &&
+        !cachedEntry.root.destroyed &&
+        cachedEntry.key === movePreviewCacheKey;
+
+      if (canReuse) {
+        highlightContainer.addChild(cachedEntry.root);
+      } else {
+        disposeMovePreviewRenderCache();
+        const cacheRoot = new PIXI.Container();
+        cacheRoot.name = "move-preview-layer-cache-root";
+        cacheRoot.eventMode = "none";
+        renderMoveAdvanceDestPoolCircleLayer(
+          cacheRoot,
+          app,
+          movePoolForDiskDraw,
+          footprintMaskHexPool,
+          HEX_RADIUS,
+          footprintRadius,
+          poolFillColor,
+          moveSpriteName,
+          HEX_HORIZ_SPACING,
+          HEX_WIDTH,
+          HEX_HEIGHT,
+          HEX_VERT_SPACING,
+          MARGIN,
+          movePreviewFootprintMaskLoops,
+        );
+        movePreviewLayerRenderCache = { key: movePreviewCacheKey, root: cacheRoot };
+        highlightContainer.addChild(cacheRoot);
+      }
     } else {
       // Short-circuit uniquement si ``availableCells`` est vide côté caller : en phase déploiement
       // (mappée ``interactionPhase === "move"``), le pool de déploiement est légitimement poussé
