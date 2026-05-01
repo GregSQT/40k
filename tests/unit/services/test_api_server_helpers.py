@@ -63,6 +63,50 @@ def test_game_state_for_json_drops_footprint_zone_when_mask_loops_present() -> N
     state = api_server._game_state_for_json(engine_instance)
     assert "move_preview_footprint_zone" not in state
     assert state["move_preview_footprint_mask_loops"] is not None
+    assert isinstance(state["move_preview_footprint_mask_loops_hash"], str)
+    assert len(state["move_preview_footprint_mask_loops_hash"]) == 64
+    assert state["move_preview_footprint_mask_loops"][0][0] == 0.0
+
+
+def test_game_state_for_json_omits_large_mask_loops_when_client_hash_matches() -> None:
+    loop = [[float(i), 0.0] for i in range(70)]
+    loops = [loop]
+    engine_instance = type(
+        "E",
+        (),
+        {
+            "game_state": {
+                "phase": "move",
+                "move_preview_footprint_zone": {(0, 0)},
+                "move_preview_footprint_mask_loops": loops,
+            },
+        },
+    )()
+    state1 = api_server._game_state_for_json(engine_instance, mask_loops_client_hash=None)
+    h = state1["move_preview_footprint_mask_loops_hash"]
+    assert isinstance(h, str)
+    state2 = api_server._game_state_for_json(engine_instance, mask_loops_client_hash=h)
+    assert state2.get("move_preview_footprint_mask_loops_unchanged") is True
+    assert state2.get("move_preview_footprint_mask_loops") is None
+
+
+def test_game_state_for_json_does_not_omit_small_mask_loops_even_if_hash_matches() -> None:
+    loops = [[[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]]
+    engine_instance = type(
+        "E",
+        (),
+        {
+            "game_state": {
+                "phase": "move",
+                "move_preview_footprint_mask_loops": loops,
+            },
+        },
+    )()
+    state1 = api_server._game_state_for_json(engine_instance)
+    h = state1["move_preview_footprint_mask_loops_hash"]
+    state2 = api_server._game_state_for_json(engine_instance, mask_loops_client_hash=h)
+    assert state2.get("move_preview_footprint_mask_loops_unchanged") is not True
+    assert state2.get("move_preview_footprint_mask_loops") is not None
 
 
 def test_game_state_for_json_strips_internal_engine_keys() -> None:

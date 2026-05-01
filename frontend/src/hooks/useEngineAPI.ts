@@ -223,6 +223,10 @@ export interface APIGameState {
   move_preview_footprint_span?: number | null;
   move_preview_border?: Array<[number, number]>;
   move_preview_footprint_zone?: Array<[number, number]>;
+  /** Boucles masque (format compact ``[x,y,...]`` ou legacy ``[[x,y],...]``) + métadonnées API. */
+  move_preview_footprint_mask_loops?: unknown;
+  move_preview_footprint_mask_loops_hash?: string;
+  move_preview_footprint_mask_loops_unchanged?: boolean;
   fight_pile_in_footprint_zone?: Array<[number, number]>;
   fight_pile_in_footprint_mask_loops?: Array<Array<[number, number]>>;
   fight_consolidation_footprint_zone?: Array<[number, number]>;
@@ -252,6 +256,55 @@ export interface APIGameState {
   active_rule_choice_prompt?: RuleChoicePrompt | null;
 }
 
+/** Cache dernier payload ``move_preview_footprint_mask_loops`` + hash pour omission JSON (POST /action). */
+const _movePreviewMaskLoopsTransport = {
+  lastPayload: undefined as unknown,
+  clientHash: "",
+};
+
+function restoreMovePreviewMaskLoopsIfUnchanged(inc: Record<string, unknown>): void {
+  if (inc.move_preview_footprint_mask_loops_unchanged !== true) return;
+  const h = inc.move_preview_footprint_mask_loops_hash;
+  const snap = _movePreviewMaskLoopsTransport.lastPayload;
+  const ok =
+    typeof h === "string" &&
+    h.length > 0 &&
+    h === _movePreviewMaskLoopsTransport.clientHash &&
+    snap !== undefined;
+  if (ok) {
+    inc.move_preview_footprint_mask_loops = snap;
+    delete inc.move_preview_footprint_mask_loops_unchanged;
+  } else {
+    delete inc.move_preview_footprint_mask_loops_unchanged;
+    _movePreviewMaskLoopsTransport.lastPayload = undefined;
+    _movePreviewMaskLoopsTransport.clientHash = "";
+  }
+}
+
+function recordMovePreviewMaskLoopsTransportFromIncoming(inc: Record<string, unknown>): void {
+  if (!("move_preview_footprint_mask_loops" in inc)) return;
+  const loops = inc.move_preview_footprint_mask_loops;
+  const h = inc.move_preview_footprint_mask_loops_hash;
+  if (loops === null) {
+    _movePreviewMaskLoopsTransport.lastPayload = undefined;
+    _movePreviewMaskLoopsTransport.clientHash = "";
+    return;
+  }
+  if (loops === undefined) return;
+  _movePreviewMaskLoopsTransport.lastPayload = loops;
+  if (typeof h === "string" && h.length > 0) {
+    _movePreviewMaskLoopsTransport.clientHash = h;
+  }
+}
+
+function hydrateApiGameStateMovePreviewTransport(gs: APIGameState | null): APIGameState | null {
+  if (gs == null) return null;
+  const inc = gs as unknown as Record<string, unknown>;
+  restoreMovePreviewMaskLoopsIfUnchanged(inc);
+  recordMovePreviewMaskLoopsTransportFromIncoming(inc);
+  return gs;
+}
+
 /**
  * L’API peut omettre ``objectives`` sur les réponses POST /action pour alléger le JSON.
  * Réinjecte la liste déjà connue côté client (issue du ``/start`` ou d’un état complet).
@@ -260,9 +313,14 @@ export function mergeGameStatePreservingOmittedObjectives(
   prev: APIGameState | null,
   incoming: APIGameState,
 ): APIGameState {
+  const inc = incoming as unknown as Record<string, unknown>;
+  restoreMovePreviewMaskLoopsIfUnchanged(inc);
   if (prev !== null && prev.objectives !== undefined && incoming.objectives === undefined) {
-    return { ...incoming, objectives: prev.objectives };
+    const out = { ...incoming, objectives: prev.objectives };
+    recordMovePreviewMaskLoopsTransportFromIncoming(out as unknown as Record<string, unknown>);
+    return out;
   }
+  recordMovePreviewMaskLoopsTransportFromIncoming(inc);
   return incoming;
 }
 
@@ -640,7 +698,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               `Game mode mismatch: expected player 2 type '${expectedPlayer2Type}', got '${String(player2Type)}'`
             );
           }
-          setGameState(data.game_state ?? null);
+          setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
           setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
           const startedMode =
             requestedModeCode === "pve"
@@ -704,7 +762,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
         const data = await response.json();
         if (data.success && data.game_state) {
-          setGameState(data.game_state ?? null);
+          setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
           setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
         } else {
           throw new Error(data.error || "Failed to start game");
@@ -756,7 +814,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           `Game mode mismatch: expected player 2 type '${expectedPlayer2Type}', got '${String(player2Type)}'`
         );
       }
-      setGameState(data.game_state ?? null);
+      setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
       setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
     } catch (err) {
       setError(formatApiConnectionError(err));
@@ -802,7 +860,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           `Game mode mismatch: expected player 2 type '${expectedPlayer2Type}', got '${String(player2Type)}'`
         );
       }
-      setGameState(data.game_state ?? null);
+      setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
       setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
     } catch (err) {
       setError(formatApiConnectionError(err));
@@ -834,7 +892,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             newGameState.units = updatedUnits;
           }
         }
-        setGameState(newGameState);
+        setGameState(hydrateApiGameStateMovePreviewTransport(newGameState));
         setBlinkVersion((prev) => prev + 1);
         if (newGameState.phase === "shoot" && targetPreview) {
           const shooter = newGameState.units.find((u) => {
@@ -1033,7 +1091,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
       try {
         const requestId = Date.now();
-        const requestBody = JSON.stringify({ ...action, requestId });
+        const body: Record<string, unknown> = { ...action, requestId };
+        if (_movePreviewMaskLoopsTransport.clientHash.length > 0) {
+          body.move_preview_mask_loops_client_hash = _movePreviewMaskLoopsTransport.clientHash;
+        }
+        const requestBody = JSON.stringify(body);
         const response = await fetch(`${API_BASE}/game/action`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },

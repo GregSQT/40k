@@ -8,9 +8,17 @@ export function normalizeMaskLoopsFromApi(raw: unknown): number[][] | null {
   for (const loop of raw) {
     if (!Array.isArray(loop)) continue;
     const flat: number[] = [];
-    for (const pt of loop) {
-      if (Array.isArray(pt) && pt.length >= 2) {
-        flat.push(Number(pt[0]), Number(pt[1]));
+    if (loop.length > 0 && typeof loop[0] === "number") {
+      for (const v of loop) {
+        if (typeof v === "number" && Number.isFinite(v)) {
+          flat.push(v);
+        }
+      }
+    } else {
+      for (const pt of loop) {
+        if (Array.isArray(pt) && pt.length >= 2) {
+          flat.push(Number(pt[0]), Number(pt[1]));
+        }
       }
     }
     if (flat.length >= 6) out.push(flat);

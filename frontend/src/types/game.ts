@@ -301,8 +301,11 @@ export interface GameState {
   preview_hexes?: Array<[number, number]>;
   move_preview_border?: Array<[number, number]>;
   move_preview_footprint_zone?: Array<[number, number]>;
-  /** Contours masque move (coord. monde) — remplace souvent ``move_preview_footprint_zone`` dans le JSON. */
-  move_preview_footprint_mask_loops?: Array<Array<[number, number]>>;
+  /** Contours masque move (coord. monde) — JSON compact ``[x,y,...]`` par boucle ou legacy ``[[x,y],…]``. */
+  move_preview_footprint_mask_loops?: unknown;
+  /** Empreinte serveur ; le client la renvoie en ``move_preview_mask_loops_client_hash`` pour omettre les boucles si inchangé. */
+  move_preview_footprint_mask_loops_hash?: string;
+  move_preview_footprint_mask_loops_unchanged?: boolean;
   /** Phase fight : union des hexes occupés par l'empreinte pour chaque ancre pile in valide (comme move_preview_footprint_zone). */
   fight_pile_in_footprint_zone?: Array<[number, number]>;
   /** Obsolète : le moteur n’envoie plus les boucles ; l’UI dérive le masque depuis ``fight_pile_in_footprint_zone``. */

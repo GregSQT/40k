@@ -320,6 +320,119 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
 
 _UNITS_CACHE_FRONTEND_KEYS = ("col", "row", "HP_CUR", "player", "orientation")
 
+# Ne pas omettre les boucles masque sur la base du seul hash client si le contour est petit
+# (évite un aller-retour inutile et reste tolérant aux clients sans cache).
+_MASK_LOOPS_OMIT_MIN_TOTAL_COORDS = 128
+
+
+def _extract_mask_loops_client_hash_from_request_data(data: Any) -> Optional[str]:
+    """Hash renvoyé par le dernier JSON ``move_preview_footprint_mask_loops_hash`` (réponse API)."""
+    if not isinstance(data, dict):
+        return None
+    h = data.get("move_preview_mask_loops_client_hash")
+    if isinstance(h, str) and len(h) > 0:
+        return h
+    return None
+
+
+def _count_mask_loop_coord_values(loops: Any) -> int:
+    """Nombre total de coordonnées scalaires (x et y) dans toutes les boucles."""
+    if not isinstance(loops, list):
+        return 0
+    n = 0
+    for loop in loops:
+        if not isinstance(loop, list) or len(loop) == 0:
+            continue
+        if isinstance(loop[0], (int, float)):
+            n += len(loop)
+        else:
+            for pt in loop:
+                if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                    n += 2
+    return n
+
+
+def _mask_loops_stable_hash(loops: Any) -> Optional[str]:
+    """Empreinte stable du contour (même géométrie → même digest) pour cache client / omission JSON."""
+    if not isinstance(loops, list) or len(loops) == 0:
+        return None
+    parts: list[bytes] = []
+    for loop in loops:
+        if not isinstance(loop, list):
+            continue
+        flat: list[float] = []
+        if len(loop) > 0 and isinstance(loop[0], (int, float)):
+            for v in loop:
+                if isinstance(v, (int, float)):
+                    flat.append(float(v))
+        else:
+            for pt in loop:
+                if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                    flat.append(float(pt[0]))
+                    flat.append(float(pt[1]))
+        if len(flat) < 6:
+            continue
+        s = ",".join(f"{x:.6f}" for x in flat)
+        parts.append(s.encode("utf-8"))
+    if not parts:
+        return None
+    digest = hashlib.sha256()
+    for b in parts:
+        digest.update(b)
+        digest.update(b"|")
+    return digest.hexdigest()
+
+
+def _compact_mask_loops_for_api_json(loops: Any) -> list[list[float]]:
+    """Format compact : une boucle = ``[x0,y0,x1,y1,...]`` (moins de crochets que ``[[[x,y],...]]``)."""
+    out: list[list[float]] = []
+    if not isinstance(loops, list):
+        return out
+    for loop in loops:
+        if not isinstance(loop, list):
+            continue
+        flat: list[float] = []
+        if len(loop) > 0 and isinstance(loop[0], (int, float)):
+            for v in loop:
+                if isinstance(v, (int, float)):
+                    flat.append(float(v))
+        else:
+            for pt in loop:
+                if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                    flat.append(float(pt[0]))
+                    flat.append(float(pt[1]))
+        if len(flat) >= 6:
+            out.append(flat)
+    return out
+
+
+def _apply_move_preview_mask_loops_transport_to_gs(
+    gs: Dict[str, Any],
+    *,
+    mask_loops_client_hash: Optional[str],
+) -> None:
+    """Remplace les boucles par un format compact ; peut omettre le tableau si le client renvoie le même hash."""
+    raw = gs.get("move_preview_footprint_mask_loops")
+    if raw in (None, [], ()):
+        gs.pop("move_preview_footprint_mask_loops_hash", None)
+        gs.pop("move_preview_footprint_mask_loops_unchanged", None)
+        return
+    h = _mask_loops_stable_hash(raw)
+    if h is None:
+        return
+    gs["move_preview_footprint_mask_loops_hash"] = h
+    coord_n = _count_mask_loop_coord_values(raw)
+    if (
+        mask_loops_client_hash is not None
+        and mask_loops_client_hash == h
+        and coord_n >= _MASK_LOOPS_OMIT_MIN_TOTAL_COORDS
+    ):
+        gs.pop("move_preview_footprint_mask_loops", None)
+        gs["move_preview_footprint_mask_loops_unchanged"] = True
+    else:
+        gs["move_preview_footprint_mask_loops"] = _compact_mask_loops_for_api_json(raw)
+        gs.pop("move_preview_footprint_mask_loops_unchanged", None)
+
 
 def _exclude_game_state_key_for_api_json(key: str) -> bool:
     """Clés dérivées / caches par joueur — volumineuses, non consommées par le client web.
@@ -339,6 +452,7 @@ def _game_state_for_json(
     engine_instance,
     *,
     for_post_action: bool = False,
+    mask_loops_client_hash: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Return game_state dict with internal/heavy fields excluded.
 
@@ -360,7 +474,12 @@ def _game_state_for_json(
     omet ``objectives`` du JSON — le client conserve la liste issue du ``/start`` ou du premier état
     complet (voir ``mergeGameStatePreservingOmittedObjectives`` côté React). Les objectifs de
     scénario ne sont pas modifiés en cours de partie dans le moteur actuel.
+
+    ``mask_loops_client_hash`` : hash renvoyé par le client (dernier ``move_preview_footprint_mask_loops_hash``).
+    Si identique au contour courant et contour volumineux, les boucles sont omises du JSON et
+    ``move_preview_footprint_mask_loops_unchanged`` vaut True (le client réutilise son cache).
     """
+    had_engine_mask_loops = bool(engine_instance.game_state.get("move_preview_footprint_mask_loops"))
     gs = {
         k: v for k, v in engine_instance.game_state.items()
         if k not in _GAME_STATE_EXCLUDE_KEYS and not _exclude_game_state_key_for_api_json(k)
@@ -371,9 +490,10 @@ def _game_state_for_json(
             uid: {fk: entry[fk] for fk in _UNITS_CACHE_FRONTEND_KEYS if fk in entry}
             for uid, entry in raw_cache.items()
         }
-    # Preview move : boucles masque monde — si présentes, ne pas envoyer ``move_preview_footprint_zone``
+    _apply_move_preview_mask_loops_transport_to_gs(gs, mask_loops_client_hash=mask_loops_client_hash)
+    # Preview move : boucles masque monde — si présentes côté moteur, ne pas envoyer ``move_preview_footprint_zone``
     # (milliers de couples ; même silhouette via les polygones).
-    if gs.get("move_preview_footprint_mask_loops"):
+    if had_engine_mask_loops:
         gs.pop("move_preview_footprint_zone", None)
     # ``preview_hexes`` est un alias miroir de ``valid_move_destinations_pool`` côté moteur (phase move) :
     # ne pas dupliquer des milliers de couples dans le JSON (le client lit le pool en priorité).
@@ -1763,7 +1883,8 @@ def execute_action():
         data = request.json
         if not data:
             return jsonify({"success": False, "error": "No JSON data provided"}), 400
-        
+        mask_loops_client_hash = _extract_mask_loops_client_hash_from_request_data(data)
+
         # Convert frontend hex click to engine semantic action format
         if "col" in data and "row" in data and "selectedUnitId" in data:
             action = {
@@ -1786,7 +1907,11 @@ def execute_action():
             inter_wave_pending = bool(require_key(ed_state, "inter_wave_pending"))
             action_name = action.get("action")
             if action_name == "endless_duty_status":
-                serializable_state = _game_state_for_json(engine, for_post_action=True)
+                serializable_state = _game_state_for_json(
+                    engine,
+                    for_post_action=True,
+                    mask_loops_client_hash=mask_loops_client_hash,
+                )
                 _sync_units_hp_from_cache(serializable_state, engine.game_state)
                 _attach_player_types(serializable_state, engine)
                 return api_json_response(
@@ -1861,7 +1986,11 @@ def execute_action():
 
         # Convert game state to JSON-serializable format
         _ser_t0 = time.perf_counter() if _api_perf else None
-        serializable_state = _game_state_for_json(engine, for_post_action=True)
+        serializable_state = _game_state_for_json(
+            engine,
+            for_post_action=True,
+            mask_loops_client_hash=mask_loops_client_hash,
+        )
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
         _attach_player_types(serializable_state, engine)
         _ser_t1 = time.perf_counter() if _api_perf else None
