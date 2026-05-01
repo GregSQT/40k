@@ -52,9 +52,9 @@ const moveAdvanceMaskSmoothOptions = {
 } as const;
 
 /** Incrémenter si le pipeline d’assemblage layer (clé « full ») change. */
-const MOVE_PREVIEW_LAYER_RENDER_CACHE_VERSION = 4;
-/** Incrémenter si Chaikin / blur / format RT masque doux change. */
-const MOVE_PREVIEW_SOFT_MASK_CACHE_VERSION = 3;
+const MOVE_PREVIEW_LAYER_RENDER_CACHE_VERSION = 5;
+/** Incrémenter si Chaikin / blur / format RT masque doux / tuilage change. */
+const MOVE_PREVIEW_SOFT_MASK_CACHE_VERSION = 4;
 
 /** Alpha du rectangle de couverture (identique au rendu historique). */
 const MOVE_PREVIEW_COVERAGE_FILL_ALPHA = 0.28;
@@ -73,8 +73,11 @@ interface MovePreviewSoftMaskBounds {
 
 interface MovePreviewSoftMaskCacheEntry {
   key: string;
-  rtSoftMask: PIXI.RenderTexture;
+  /** Une ou plusieurs RT (tuiles ≤ ``FOOTPRINT_HIGHLIGHT_RT_MAX_DIM``), ordre row-major ``ti`` puis ``tj``. */
+  softTileRts: PIXI.RenderTexture[];
   maskBounds: MovePreviewSoftMaskBounds;
+  tilesW: number;
+  tilesH: number;
 }
 
 let movePreviewLayerRenderCache: MovePreviewLayerRenderCacheEntry | null = null;
@@ -82,10 +85,12 @@ let movePreviewSoftMaskCache: MovePreviewSoftMaskCacheEntry | null = null;
 
 function disposeMovePreviewSoftMaskCache(): void {
   if (!movePreviewSoftMaskCache) return;
-  const { rtSoftMask } = movePreviewSoftMaskCache;
+  const { softTileRts } = movePreviewSoftMaskCache;
   movePreviewSoftMaskCache = null;
-  if (!rtSoftMask.destroyed) {
-    rtSoftMask.destroy(true);
+  for (const rt of softTileRts) {
+    if (!rt.destroyed) {
+      rt.destroy(true);
+    }
   }
 }
 
@@ -99,6 +104,17 @@ function disposeMovePreviewLayerRootCache(): void {
   for (const c of kids) {
     root.removeChild(c);
     if (c instanceof PIXI.Sprite) {
+      c.destroy({ children: false, texture: false, baseTexture: false });
+    } else if (c instanceof PIXI.Container) {
+      const inner = [...c.children];
+      for (const cc of inner) {
+        c.removeChild(cc);
+        if (cc instanceof PIXI.Sprite) {
+          cc.destroy({ children: false, texture: false, baseTexture: false });
+        } else {
+          cc.destroy();
+        }
+      }
       c.destroy({ children: false, texture: false, baseTexture: false });
     } else {
       c.destroy();
@@ -172,6 +188,63 @@ function buildMovePreviewSoftMaskCacheKey(params: {
   mvmax: number;
 }): string {
   return JSON.stringify(params);
+}
+
+/**
+ * Une tuile = masque ``Sprite`` (alpha soft) + ``Graphics`` même rectangle monde avec ``.mask`` sur le sprite.
+ * Pixi n’applique pas un masque alpha fiable via ``Graphics.mask = Container`` multi-sprites — d’où le rectangle plein (forme « carrée ») si on regroupait les tuiles dans un seul conteneur masque.
+ */
+function appendMovePreviewMaskTilesAndCoverageToParent(
+  parentContainer: PIXI.Container,
+  spriteName: string,
+  smc: MovePreviewSoftMaskCacheEntry,
+  tileMaxDim: number,
+  poolFillColor: number,
+): void {
+  const mb = smc.maskBounds;
+  const wTot = Math.ceil(mb.width);
+  const hTot = Math.ceil(mb.height);
+  const expected = smc.tilesW * smc.tilesH;
+  if (smc.softTileRts.length !== expected) {
+    throw new Error(
+      `[appendMovePreviewMaskTilesAndCoverageToParent] nombre de RT (${smc.softTileRts.length}) ≠ tuiles ` +
+        `(${smc.tilesW}×${smc.tilesH}=${expected}, spriteName=${spriteName})`,
+    );
+  }
+  let idx = 0;
+  for (let tj = 0; tj < smc.tilesH; tj++) {
+    for (let ti = 0; ti < smc.tilesW; ti++) {
+      const tileLeft = ti * tileMaxDim;
+      const tileTop = tj * tileMaxDim;
+      const tw = Math.min(tileMaxDim, wTot - tileLeft);
+      const th = Math.min(tileMaxDim, hTot - tileTop);
+      const sx = mb.x + tileLeft;
+      const sy = mb.y + tileTop;
+
+      const maskSprite = new PIXI.Sprite(smc.softTileRts[idx]!);
+      maskSprite.name =
+        smc.tilesW === 1 && smc.tilesH === 1
+          ? `${spriteName}-mask-sprite`
+          : `${spriteName}-mask-tile-${ti}-${tj}`;
+      maskSprite.eventMode = "none";
+      maskSprite.position.set(sx, sy);
+      maskSprite.roundPixels = false;
+
+      const tileCoverage = new PIXI.Graphics();
+      tileCoverage.name =
+        smc.tilesW === 1 && smc.tilesH === 1 ? spriteName : `${spriteName}-coverage-tile-${ti}-${tj}`;
+      tileCoverage.eventMode = "none";
+      tileCoverage.beginFill(poolFillColor, 1.0);
+      tileCoverage.drawRect(sx, sy, tw, th);
+      tileCoverage.endFill();
+      tileCoverage.alpha = MOVE_PREVIEW_COVERAGE_FILL_ALPHA;
+      tileCoverage.mask = maskSprite;
+
+      parentContainer.addChild(maskSprite);
+      parentContainer.addChild(tileCoverage);
+      idx++;
+    }
+  }
 }
 
 interface BoardConfig {
@@ -1011,7 +1084,11 @@ function resolveMovePreviewMaskLoopsBeforeSmooth(
  * couvre exactement les bornes du masque : la silhouette visible suit le
  * polygone d'union (BFS / empreinte), pas un arc de cercle sur les côtés plats.
  *
- * **Pas de repli silencieux** : sources invalides, RT trop grande, échec render → ``throw``.
+ * **Pas de repli silencieux** : sources invalides, échec render → ``throw``.
+ * Au-delà de ``FOOTPRINT_HIGHLIGHT_RT_MAX_DIM`` sur un côté : tuiles (même principe que
+ * ``addFootprintHighlightSprite``) : plusieurs RT ≤ 4096 + ``BlurFilter`` par tuile.
+ * Couverture : une paire ``Sprite`` masque + ``Graphics`` par tuile (masque alpha fiable Pixi).
+ * Jointures : léger risque de couture d’alpha aux bords de tuile (blur sans recouvrement).
  */
 function renderMoveAdvanceDestPoolCircleLayer(
   parentContainer: PIXI.Container,
@@ -1040,6 +1117,8 @@ function renderMoveAdvanceDestPoolCircleLayer(
   const alphaBlurProfile = resolveMoveAdvanceMaskAlphaBlurProfileForTier(smoothingTier);
 
   const loopsFpPreSmooth = fingerprintPrecomputedMaskLoops(loopsBeforeSmooth);
+  const TILE_DIM = FOOTPRINT_HIGHLIGHT_RT_MAX_DIM;
+
   const softMaskKey = buildMovePreviewSoftMaskCacheKey({
     v: MOVE_PREVIEW_SOFT_MASK_CACHE_VERSION,
     res: app.renderer.resolution,
@@ -1054,18 +1133,32 @@ function renderMoveAdvanceDestPoolCircleLayer(
     mvmax: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
   });
 
-  let rtSoftMask: PIXI.RenderTexture;
-  let maskBoundsPlain: MovePreviewSoftMaskBounds;
-
-  const softHit =
+  const softHitBase =
     movePreviewSoftMaskCache != null &&
     movePreviewSoftMaskCache.key === softMaskKey &&
-    !movePreviewSoftMaskCache.rtSoftMask.destroyed;
+    movePreviewSoftMaskCache.softTileRts.length > 0 &&
+    !movePreviewSoftMaskCache.softTileRts.some((r) => r.destroyed);
 
-  if (softHit) {
-    rtSoftMask = movePreviewSoftMaskCache.rtSoftMask;
-    maskBoundsPlain = movePreviewSoftMaskCache.maskBounds;
-  } else {
+  const softHitGridOk =
+    softHitBase &&
+    movePreviewSoftMaskCache != null &&
+    (() => {
+      const c = movePreviewSoftMaskCache;
+      const mb = c.maskBounds;
+      const iw = Math.ceil(mb.width);
+      const ih = Math.ceil(mb.height);
+      const needW = Math.max(1, Math.ceil(iw / TILE_DIM));
+      const needH = Math.max(1, Math.ceil(ih / TILE_DIM));
+      return (
+        needW === c.tilesW &&
+        needH === c.tilesH &&
+        c.softTileRts.length === c.tilesW * c.tilesH
+      );
+    })();
+
+  const softHit = Boolean(softHitBase && softHitGridOk);
+
+  if (!softHit || !movePreviewSoftMaskCache) {
     disposeMovePreviewSoftMaskCache();
 
     const prep = smoothMaskLoopsForRender(
@@ -1105,117 +1198,130 @@ function renderMoveAdvanceDestPoolCircleLayer(
 
     const w = Math.ceil(maskBounds.width);
     const h = Math.ceil(maskBounds.height);
-    if (w > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM || h > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM) {
-      maskGfx.destroy();
-      throw new Error(
-        `[renderMoveAdvanceDestPoolCircleLayer] masque trop grand pour une RT ` +
-          `unique (w=${w}, h=${h}, max=${FOOTPRINT_HIGHLIGHT_RT_MAX_DIM}, ` +
-          `spriteName=${spriteName})`,
-      );
-    }
+    const tilesW = Math.max(1, Math.ceil(w / TILE_DIM));
+    const tilesH = Math.max(1, Math.ceil(h / TILE_DIM));
+    const resolution = app.renderer.resolution;
 
-    let rt: PIXI.RenderTexture;
+    const softTileRts: PIXI.RenderTexture[] = [];
     try {
-      rt = PIXI.RenderTexture.create({
-        width: w,
-        height: h,
-        resolution: app.renderer.resolution,
-        multisample: PIXI.MSAA_QUALITY.NONE,
-        alphaMode: PIXI.ALPHA_MODES.PMA,
-      });
-    } catch (e) {
-      maskGfx.destroy();
-      throw new Error(
-        `[renderMoveAdvanceDestPoolCircleLayer] création RenderTexture masque échouée ` +
-          `(spriteName=${spriteName}, w=${w}, h=${h}): ${String(e)}`,
-      );
-    }
+      for (let tj = 0; tj < tilesH; tj++) {
+        for (let ti = 0; ti < tilesW; ti++) {
+          const tileLeft = ti * TILE_DIM;
+          const tileTop = tj * TILE_DIM;
+          const tw = Math.min(TILE_DIM, w - tileLeft);
+          const th = Math.min(TILE_DIM, h - tileTop);
 
-    maskGfx.position.set(-maskBounds.x, -maskBounds.y);
-    try {
-      app.renderer.render(maskGfx, { renderTexture: rt, clear: true });
+          let rt: PIXI.RenderTexture;
+          try {
+            rt = PIXI.RenderTexture.create({
+              width: tw,
+              height: th,
+              resolution,
+              multisample: PIXI.MSAA_QUALITY.NONE,
+              alphaMode: PIXI.ALPHA_MODES.PMA,
+            });
+          } catch (e) {
+            throw new Error(
+              `[renderMoveAdvanceDestPoolCircleLayer] création RenderTexture masque tuile échouée ` +
+                `(spriteName=${spriteName}, tw=${tw}, th=${th}): ${String(e)}`,
+            );
+          }
+
+          maskGfx.position.set(-maskBounds.x - tileLeft, -maskBounds.y - tileTop);
+          try {
+            app.renderer.render(maskGfx, { renderTexture: rt, clear: true });
+          } catch (e) {
+            rt.destroy(true);
+            throw new Error(
+              `[renderMoveAdvanceDestPoolCircleLayer] render masque tuile → RT échoué ` +
+                `(spriteName=${spriteName}, ti=${ti}, tj=${tj}): ${String(e)}`,
+            );
+          }
+
+          let rtSoft: PIXI.RenderTexture;
+          try {
+            rtSoft = PIXI.RenderTexture.create({
+              width: tw,
+              height: th,
+              resolution,
+              multisample: PIXI.MSAA_QUALITY.NONE,
+              alphaMode: PIXI.ALPHA_MODES.PMA,
+            });
+          } catch (e) {
+            rt.destroy(true);
+            throw new Error(
+              `[renderMoveAdvanceDestPoolCircleLayer] création RenderTexture masque lissé tuile échouée ` +
+                `(spriteName=${spriteName}, tw=${tw}, th=${th}): ${String(e)}`,
+            );
+          }
+
+          const maskSourceSprite = new PIXI.Sprite(rt);
+          maskSourceSprite.eventMode = "none";
+          const maskAlphaBlur = new PIXI.BlurFilter(
+            alphaBlurProfile.strength,
+            alphaBlurProfile.quality,
+          );
+          maskAlphaBlur.resolution = alphaBlurProfile.resolution;
+          maskAlphaBlur.autoFit = true;
+          maskSourceSprite.filters = [maskAlphaBlur];
+          try {
+            app.renderer.render(maskSourceSprite, { renderTexture: rtSoft, clear: true });
+          } catch (e) {
+            maskSourceSprite.destroy();
+            rt.destroy(true);
+            rtSoft.destroy(true);
+            throw new Error(
+              `[renderMoveAdvanceDestPoolCircleLayer] render masque lissé tuile → RT échoué ` +
+                `(spriteName=${spriteName}, ti=${ti}, tj=${tj}): ${String(e)}`,
+            );
+          }
+          maskSourceSprite.destroy();
+          rt.destroy(true);
+          softTileRts.push(rtSoft);
+        }
+      }
     } catch (e) {
-      maskGfx.destroy();
-      rt.destroy(true);
-      throw new Error(
-        `[renderMoveAdvanceDestPoolCircleLayer] render masque → RT échoué ` +
-          `(spriteName=${spriteName}): ${String(e)}`,
-      );
+      for (const r of softTileRts) {
+        if (!r.destroyed) {
+          r.destroy(true);
+        }
+      }
+      if (!maskGfx.destroyed) {
+        maskGfx.destroy();
+      }
+      throw e instanceof Error ? e : new Error(String(e));
     }
     maskGfx.destroy();
 
-    try {
-      rtSoftMask = PIXI.RenderTexture.create({
-        width: w,
-        height: h,
-        resolution: app.renderer.resolution,
-        multisample: PIXI.MSAA_QUALITY.NONE,
-        alphaMode: PIXI.ALPHA_MODES.PMA,
-      });
-    } catch (e) {
-      rt.destroy(true);
-      throw new Error(
-        `[renderMoveAdvanceDestPoolCircleLayer] création RenderTexture masque lissé échouée ` +
-          `(spriteName=${spriteName}, w=${w}, h=${h}): ${String(e)}`,
-      );
-    }
-    const maskSourceSprite = new PIXI.Sprite(rt);
-    maskSourceSprite.eventMode = "none";
-    const maskAlphaBlur = new PIXI.BlurFilter(
-      alphaBlurProfile.strength,
-      alphaBlurProfile.quality,
-    );
-    maskAlphaBlur.resolution = alphaBlurProfile.resolution;
-    maskAlphaBlur.autoFit = true;
-    maskSourceSprite.filters = [maskAlphaBlur];
-    try {
-      app.renderer.render(maskSourceSprite, { renderTexture: rtSoftMask, clear: true });
-    } catch (e) {
-      maskSourceSprite.destroy();
-      rt.destroy(true);
-      rtSoftMask.destroy(true);
-      throw new Error(
-        `[renderMoveAdvanceDestPoolCircleLayer] render masque lissé → RT échoué ` +
-          `(spriteName=${spriteName}): ${String(e)}`,
-      );
-    }
-    maskSourceSprite.destroy();
-    rt.destroy(true);
-
-    maskBoundsPlain = {
-      x: maskBounds.x,
-      y: maskBounds.y,
-      width: maskBounds.width,
-      height: maskBounds.height,
-    };
     movePreviewSoftMaskCache = {
       key: softMaskKey,
-      rtSoftMask,
-      maskBounds: maskBoundsPlain,
+      softTileRts,
+      maskBounds: {
+        x: maskBounds.x,
+        y: maskBounds.y,
+        width: maskBounds.width,
+        height: maskBounds.height,
+      },
+      tilesW,
+      tilesH,
     };
   }
 
-  const maskSprite = new PIXI.Sprite(rtSoftMask);
-  maskSprite.name = `${spriteName}-mask-sprite`;
-  maskSprite.position.set(maskBoundsPlain.x, maskBoundsPlain.y);
-  maskSprite.roundPixels = false;
+  const smc = movePreviewSoftMaskCache;
+  if (!smc) {
+    throw new Error(
+      `[renderMoveAdvanceDestPoolCircleLayer] cache soft masque absent après pipeline ` +
+        `(spriteName=${spriteName})`,
+    );
+  }
 
-  const coverageGfx = new PIXI.Graphics();
-  coverageGfx.name = spriteName;
-  coverageGfx.eventMode = "none";
-  coverageGfx.beginFill(poolFillColor, 1.0);
-  coverageGfx.drawRect(
-    maskBoundsPlain.x,
-    maskBoundsPlain.y,
-    maskBoundsPlain.width,
-    maskBoundsPlain.height,
+  appendMovePreviewMaskTilesAndCoverageToParent(
+    parentContainer,
+    spriteName,
+    smc,
+    TILE_DIM,
+    poolFillColor,
   );
-  coverageGfx.endFill();
-  coverageGfx.alpha = MOVE_PREVIEW_COVERAGE_FILL_ALPHA;
-  coverageGfx.mask = maskSprite;
-
-  parentContainer.addChild(maskSprite);
-  parentContainer.addChild(coverageGfx);
 }
 
 /** Remplissage objectif : texture teintée ou couleur unie (même pipeline que les murs). */
