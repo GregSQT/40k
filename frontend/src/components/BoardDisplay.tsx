@@ -18,25 +18,43 @@ function asPixiUnknownArgsPointerListener(
 
 /**
  * Passes Chaikin sur les masques move/advance (rendu uniquement).
- * Plus de passes + plafond de sommets relevé (voir ``MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS``) =
- * bord **plus continu**, moins « dentelé » par les micro-segments du contour hex.
+ * Plafond de sommets : ``MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS`` — bord plus continu sur petites zones.
+ * Sur gros contours, le nombre de passes est réduit (voir ``resolveMoveAdvanceMaskChaikinIterations``).
  */
-const MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS = 5;
+const MOVE_ADVANCE_MASK_CHAIKIN_ITERS_SMALL_ZONE = 5;
+const MOVE_ADVANCE_MASK_CHAIKIN_ITERS_MEDIUM_ZONE = 4;
+const MOVE_ADVANCE_MASK_CHAIKIN_ITERS_ENORMOUS_ZONE = 3;
+/**
+ * Somme des sommets (points) de toutes les boucles **avant** Chaikin ; seuils inclus côté « petit » / « moyen ».
+ */
+const MOVE_ADVANCE_MASK_CHAIKIN_VERTS_SMALL_MAX = 400;
+const MOVE_ADVANCE_MASK_CHAIKIN_VERTS_MEDIUM_MAX = 3000;
 /** Autorise des passes Chaikin supplémentaires sur les très gros contours (défaut global 48k). */
 const MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS = 120_000;
-/** Lissage alpha du masque (même pipeline qu'avant le passage « polygone seul »). */
-const MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH = 1.4;
-const MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY = 3;
-const MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION = 2;
+/**
+ * Blur alpha du masque : fort sur petites zones (historique), plus léger sur moyennes / énormes
+ * (``BlurFilter`` sur une grande RT est coûteux).
+ */
+const MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH_SMALL_ZONE = 1.4;
+const MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY_SMALL_ZONE = 3;
+const MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION_SMALL_ZONE = 2;
+
+const MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH_MEDIUM_ZONE = 1.25;
+const MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY_MEDIUM_ZONE = 2;
+const MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION_MEDIUM_ZONE = 1;
+
+const MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH_ENORMOUS_ZONE = 1.0;
+const MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY_ENORMOUS_ZONE = 1;
+const MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION_ENORMOUS_ZONE = 1;
 
 const moveAdvanceMaskSmoothOptions = {
   maxVertsAfterOneChaikinStep: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
 } as const;
 
 /** Incrémenter si le pipeline d’assemblage layer (clé « full ») change. */
-const MOVE_PREVIEW_LAYER_RENDER_CACHE_VERSION = 2;
+const MOVE_PREVIEW_LAYER_RENDER_CACHE_VERSION = 4;
 /** Incrémenter si Chaikin / blur / format RT masque doux change. */
-const MOVE_PREVIEW_SOFT_MASK_CACHE_VERSION = 1;
+const MOVE_PREVIEW_SOFT_MASK_CACHE_VERSION = 3;
 
 /** Alpha du rectangle de couverture (identique au rendu historique). */
 const MOVE_PREVIEW_COVERAGE_FILL_ALPHA = 0.28;
@@ -866,6 +884,126 @@ function appendWhiteReachableMaskFromSmoothedLoops(
   }
 }
 
+/** Boucles masque monde ou union hex — résolues une fois (drawBoard + rendu) pour éviter un double ``tryBuild``. */
+interface MovePreviewMaskGeometryResolved {
+  kind: "server_loops" | "polygon";
+  loopsBeforeSmooth: number[][];
+}
+
+function countMoveAdvanceMaskPreSmoothVertices(loopsBeforeSmooth: number[][]): number {
+  let n = 0;
+  for (const flat of loopsBeforeSmooth) {
+    n += flat.length >> 1;
+  }
+  return n;
+}
+
+type MoveAdvanceMaskSmoothingTier = "small" | "medium" | "enormous";
+
+/**
+ * Même découpe que Chaikin / blur : somme des sommets avant Chaikin
+ * (``MOVE_ADVANCE_MASK_CHAIKIN_VERTS_SMALL_MAX`` / ``MEDIUM_MAX``).
+ */
+function resolveMoveAdvanceMaskSmoothingTier(loopsBeforeSmooth: number[][]): MoveAdvanceMaskSmoothingTier {
+  const v = countMoveAdvanceMaskPreSmoothVertices(loopsBeforeSmooth);
+  if (v <= MOVE_ADVANCE_MASK_CHAIKIN_VERTS_SMALL_MAX) {
+    return "small";
+  }
+  if (v <= MOVE_ADVANCE_MASK_CHAIKIN_VERTS_MEDIUM_MAX) {
+    return "medium";
+  }
+  return "enormous";
+}
+
+interface MoveAdvanceMaskAlphaBlurProfile {
+  strength: number;
+  quality: number;
+  resolution: number;
+}
+
+function resolveMoveAdvanceMaskAlphaBlurProfileForTier(
+  tier: MoveAdvanceMaskSmoothingTier,
+): MoveAdvanceMaskAlphaBlurProfile {
+  switch (tier) {
+    case "small":
+      return {
+        strength: MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH_SMALL_ZONE,
+        quality: MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY_SMALL_ZONE,
+        resolution: MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION_SMALL_ZONE,
+      };
+    case "medium":
+      return {
+        strength: MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH_MEDIUM_ZONE,
+        quality: MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY_MEDIUM_ZONE,
+        resolution: MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION_MEDIUM_ZONE,
+      };
+    default:
+      return {
+        strength: MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH_ENORMOUS_ZONE,
+        quality: MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY_ENORMOUS_ZONE,
+        resolution: MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION_ENORMOUS_ZONE,
+      };
+  }
+}
+
+/**
+ * Petites zones → 5 passes (historique), moyennes → 4, énormes → 3 (moins de sommets, bord encore lisse).
+ * Basé sur la somme des sommets des boucles **avant** Chaikin (seuils nommés ``MOVE_ADVANCE_MASK_CHAIKIN_VERTS_*``).
+ */
+function resolveMoveAdvanceMaskChaikinIterations(loopsBeforeSmooth: number[][]): number {
+  const tier = resolveMoveAdvanceMaskSmoothingTier(loopsBeforeSmooth);
+  if (tier === "small") {
+    return MOVE_ADVANCE_MASK_CHAIKIN_ITERS_SMALL_ZONE;
+  }
+  if (tier === "medium") {
+    return MOVE_ADVANCE_MASK_CHAIKIN_ITERS_MEDIUM_ZONE;
+  }
+  return MOVE_ADVANCE_MASK_CHAIKIN_ITERS_ENORMOUS_ZONE;
+}
+
+/**
+ * Priorité API (boucles monde), sinon ``tryBuildHexUnionMaskPolygons`` depuis le pool d’hex empreinte.
+ * Mêmes erreurs explicites que l’ancien chemin dans ``renderMoveAdvanceDestPoolCircleLayer``.
+ */
+function resolveMovePreviewMaskLoopsBeforeSmooth(
+  precomputedWorldMaskLoops: number[][] | null,
+  footprintMaskHexPool: Set<string> | null,
+  gridHexRadius: number,
+  HEX_HORIZ_SPACING: number,
+  HEX_WIDTH: number,
+  HEX_HEIGHT: number,
+  HEX_VERT_SPACING: number,
+  MARGIN: number,
+  spriteName: string,
+  anchorPoolSize: number,
+): MovePreviewMaskGeometryResolved {
+  if (precomputedWorldMaskLoops && precomputedWorldMaskLoops.length > 0) {
+    return { kind: "server_loops", loopsBeforeSmooth: precomputedWorldMaskLoops };
+  }
+  if (footprintMaskHexPool && footprintMaskHexPool.size > 0) {
+    const layout = {
+      HEX_HORIZ_SPACING,
+      HEX_WIDTH,
+      HEX_HEIGHT,
+      HEX_VERT_SPACING,
+      MARGIN,
+      gridHexRadius,
+    };
+    const polyMask = tryBuildHexUnionMaskPolygons(footprintMaskHexPool, layout);
+    if (!polyMask) {
+      throw new Error(
+        `[resolveMovePreviewMaskLoopsBeforeSmooth] tryBuildHexUnionMaskPolygons a échoué ` +
+          `(spriteName=${spriteName}, footprintMaskHexPool.size=${footprintMaskHexPool.size})`,
+      );
+    }
+    return { kind: "polygon", loopsBeforeSmooth: polyMask.loops };
+  }
+  throw new Error(
+    `[resolveMovePreviewMaskLoopsBeforeSmooth] aucune source de masque empreinte disponible ` +
+      `(spriteName=${spriteName}, anchorPool.size=${anchorPoolSize})`,
+  );
+}
+
 /**
  * Preview **move / advance / post-shoot** : même **lissage** qu'avant (masque
  * blanc → RT → ``BlurFilter`` sur l'alpha → ``Sprite`` masque).
@@ -879,18 +1017,10 @@ function renderMoveAdvanceDestPoolCircleLayer(
   parentContainer: PIXI.Container,
   app: PIXI.Application,
   anchorPool: Set<string>,
-  footprintMaskHexPool: Set<string> | null,
-  gridHexRadius: number,
   footprintRadius: number,
   poolFillColor: number,
   spriteName: string,
-  HEX_HORIZ_SPACING: number,
-  HEX_WIDTH: number,
-  HEX_HEIGHT: number,
-  HEX_VERT_SPACING: number,
-  MARGIN: number,
-  /** Boucles masque monde (API) — prioritaire sur ``footprintMaskHexPool``. */
-  precomputedWorldMaskLoops: number[][] | null,
+  maskGeometry: MovePreviewMaskGeometryResolved,
 ): void {
   if (anchorPool.size === 0) {
     throw new Error(
@@ -902,44 +1032,12 @@ function renderMoveAdvanceDestPoolCircleLayer(
       `[renderMoveAdvanceDestPoolCircleLayer] footprintRadius invalide (${footprintRadius}, spriteName=${spriteName})`,
     );
   }
-  if (!(gridHexRadius > 0) || !Number.isFinite(gridHexRadius)) {
-    throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] gridHexRadius invalide (${gridHexRadius}, spriteName=${spriteName})`,
-    );
-  }
 
-  // Masque visuel basé sur la vraie zone d'empreinte (pas seulement les centres).
-  // Priorité API (boucles monde), sinon reconstruction locale depuis
-  // ``footprintMaskHexPool``. Pas de fallback centre-only.
-  let maskUnionKind: "server_loops" | "polygon";
-  let loopsBeforeSmooth: number[][];
-  if (precomputedWorldMaskLoops && precomputedWorldMaskLoops.length > 0) {
-    maskUnionKind = "server_loops";
-    loopsBeforeSmooth = precomputedWorldMaskLoops;
-  } else if (footprintMaskHexPool && footprintMaskHexPool.size > 0) {
-    maskUnionKind = "polygon";
-    const layout = {
-      HEX_HORIZ_SPACING,
-      HEX_WIDTH,
-      HEX_HEIGHT,
-      HEX_VERT_SPACING,
-      MARGIN,
-      gridHexRadius,
-    };
-    const polyMask = tryBuildHexUnionMaskPolygons(footprintMaskHexPool, layout);
-    if (!polyMask) {
-      throw new Error(
-        `[renderMoveAdvanceDestPoolCircleLayer] tryBuildHexUnionMaskPolygons a échoué ` +
-          `(spriteName=${spriteName}, footprintMaskHexPool.size=${footprintMaskHexPool.size})`,
-      );
-    }
-    loopsBeforeSmooth = polyMask.loops;
-  } else {
-    throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] aucune source de masque empreinte disponible ` +
-        `(spriteName=${spriteName}, anchorPool.size=${anchorPool.size})`,
-    );
-  }
+  const maskUnionKind = maskGeometry.kind;
+  const loopsBeforeSmooth = maskGeometry.loopsBeforeSmooth;
+  const smoothingTier = resolveMoveAdvanceMaskSmoothingTier(loopsBeforeSmooth);
+  const chaikinIterations = resolveMoveAdvanceMaskChaikinIterations(loopsBeforeSmooth);
+  const alphaBlurProfile = resolveMoveAdvanceMaskAlphaBlurProfileForTier(smoothingTier);
 
   const loopsFpPreSmooth = fingerprintPrecomputedMaskLoops(loopsBeforeSmooth);
   const softMaskKey = buildMovePreviewSoftMaskCacheKey({
@@ -949,10 +1047,10 @@ function renderMoveAdvanceDestPoolCircleLayer(
     rh: app.renderer.height,
     kind: maskUnionKind,
     loopsFp: loopsFpPreSmooth,
-    bs: MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH,
-    bq: MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY,
-    br: MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION,
-    chai: MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
+    bs: alphaBlurProfile.strength,
+    bq: alphaBlurProfile.quality,
+    br: alphaBlurProfile.resolution,
+    chai: chaikinIterations,
     mvmax: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
   });
 
@@ -972,7 +1070,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
 
     const prep = smoothMaskLoopsForRender(
       loopsBeforeSmooth,
-      MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
+      chaikinIterations,
       moveAdvanceMaskSmoothOptions,
     );
     const smoothedLoops = prep.smoothed;
@@ -1064,10 +1162,10 @@ function renderMoveAdvanceDestPoolCircleLayer(
     const maskSourceSprite = new PIXI.Sprite(rt);
     maskSourceSprite.eventMode = "none";
     const maskAlphaBlur = new PIXI.BlurFilter(
-      MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH,
-      MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY,
+      alphaBlurProfile.strength,
+      alphaBlurProfile.quality,
     );
-    maskAlphaBlur.resolution = MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION;
+    maskAlphaBlur.resolution = alphaBlurProfile.resolution;
     maskAlphaBlur.autoFit = true;
     maskSourceSprite.filters = [maskAlphaBlur];
     try {
@@ -1558,7 +1656,7 @@ export const drawBoard = (
         footprintMaskHexPool && footprintMaskHexPool.size > 0
           ? hashStringSetStable(footprintMaskHexPool)
           : null;
-      const loopsFp = fingerprintPrecomputedMaskLoops(movePreviewFootprintMaskLoops);
+      const loopsFp = fingerprintPrecomputedMaskLoops(movePreviewFootprintMaskLoops ?? null);
 
       const movePreviewCacheKey = JSON.stringify({
         v: MOVE_PREVIEW_LAYER_RENDER_CACHE_VERSION,
@@ -1585,10 +1683,6 @@ export const drawBoard = (
           hvs: HEX_VERT_SPACING,
           mg: MARGIN,
         },
-        chai: MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
-        bq: MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY,
-        bs: MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH,
-        br: MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION,
         mvmax: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
         covA: MOVE_PREVIEW_COVERAGE_FILL_ALPHA,
       });
@@ -1603,6 +1697,22 @@ export const drawBoard = (
         highlightContainer.addChild(cachedEntry.root);
       } else {
         disposeMovePreviewLayerRootCache();
+        const preNorm =
+          movePreviewFootprintMaskLoops != null && movePreviewFootprintMaskLoops.length > 0
+            ? movePreviewFootprintMaskLoops
+            : null;
+        const maskGeom = resolveMovePreviewMaskLoopsBeforeSmooth(
+          preNorm,
+          footprintMaskHexPool,
+          HEX_RADIUS,
+          HEX_HORIZ_SPACING,
+          HEX_WIDTH,
+          HEX_HEIGHT,
+          HEX_VERT_SPACING,
+          MARGIN,
+          moveSpriteName,
+          movePoolForDiskDraw.size,
+        );
         const cacheRoot = new PIXI.Container();
         cacheRoot.name = "move-preview-layer-cache-root";
         cacheRoot.eventMode = "none";
@@ -1610,17 +1720,10 @@ export const drawBoard = (
           cacheRoot,
           app,
           movePoolForDiskDraw,
-          footprintMaskHexPool,
-          HEX_RADIUS,
           footprintRadius,
           poolFillColor,
           moveSpriteName,
-          HEX_HORIZ_SPACING,
-          HEX_WIDTH,
-          HEX_HEIGHT,
-          HEX_VERT_SPACING,
-          MARGIN,
-          movePreviewFootprintMaskLoops,
+          maskGeom,
         );
         movePreviewLayerRenderCache = { key: movePreviewCacheKey, root: cacheRoot };
         highlightContainer.addChild(cacheRoot);
