@@ -1,6 +1,6 @@
 {
   "primary_objectives": ["objectives_control"],
-  "wall_ref": "walls-11.json",
+  "wall_ref": "walls-none.json",
   "objectives_ref": "objectives-51.json",
   "units": [
     {"id": 1, "unit_type": "CaptainTerminatorRelicFistBolter", "player": 1, "col": 20, "row": 10},
@@ -15,12 +15,12 @@
     {"id": 10, "unit_type": "AggressorFlamestorm", "player": 1, "col": 40, "row": 50},
     {"id": 11, "unit_type": "HeavyIntercessor", "player": 1, "col": 60, "row": 50},
     {"id": 12, "unit_type": "DreadnoughtBallistus", "player": 1, "col": 20, "row": 80},
-    {"id": 101, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 200, "row": 200},
-    {"id": 102, "unit_type": "Termagant", "player": 2, "col": 80, "row": 90},
-    {"id": 103, "unit_type": "Genestealer", "player": 2, "col": 100, "row": 80},
-    {"id": 104, "unit_type": "ScreamerKiller", "player": 2, "col": 90, "row": 120},
-    {"id": 105, "unit_type": "Hormagaunt", "player": 2, "col": 220, "row": 245},
-    {"id": 106, "unit_type": "TyranidWarriorMelee", "player": 2, "col": 270, "row": 110}
+    {"id": 101, "unit_type": "Termagant", "player": 2, "col": 10, "row": 300},
+    {"id": 102, "unit_type": "Hormagaunt", "player": 2, "col": 25, "row": 300},
+    {"id": 103, "unit_type": "Genestealer", "player": 2, "col": 10, "row": 285},
+    {"id": 104, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 10, "row": 265},
+    {"id": 105, "unit_type": "TyranidWarriorMelee", "player": 2, "col": 35, "row": 265},
+    {"id": 106, "unit_type": "ScreamerKiller", "player": 2, "col": 20, "row": 230}
 
   ]
 }

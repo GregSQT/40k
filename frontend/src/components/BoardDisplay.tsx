@@ -33,23 +33,66 @@ const moveAdvanceMaskSmoothOptions = {
   maxVertsAfterOneChaikinStep: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
 } as const;
 
-/** Incrémenter si le pipeline masque / RT / blur / couleur du layer move preview change. */
-const MOVE_PREVIEW_LAYER_RENDER_CACHE_VERSION = 1;
+/** Incrémenter si le pipeline d’assemblage layer (clé « full ») change. */
+const MOVE_PREVIEW_LAYER_RENDER_CACHE_VERSION = 2;
+/** Incrémenter si Chaikin / blur / format RT masque doux change. */
+const MOVE_PREVIEW_SOFT_MASK_CACHE_VERSION = 1;
+
+/** Alpha du rectangle de couverture (identique au rendu historique). */
+const MOVE_PREVIEW_COVERAGE_FILL_ALPHA = 0.28;
 
 interface MovePreviewLayerRenderCacheEntry {
   key: string;
   root: PIXI.Container;
 }
 
-let movePreviewLayerRenderCache: MovePreviewLayerRenderCacheEntry | null = null;
+interface MovePreviewSoftMaskBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
-function disposeMovePreviewRenderCache(): void {
+interface MovePreviewSoftMaskCacheEntry {
+  key: string;
+  rtSoftMask: PIXI.RenderTexture;
+  maskBounds: MovePreviewSoftMaskBounds;
+}
+
+let movePreviewLayerRenderCache: MovePreviewLayerRenderCacheEntry | null = null;
+let movePreviewSoftMaskCache: MovePreviewSoftMaskCacheEntry | null = null;
+
+function disposeMovePreviewSoftMaskCache(): void {
+  if (!movePreviewSoftMaskCache) return;
+  const { rtSoftMask } = movePreviewSoftMaskCache;
+  movePreviewSoftMaskCache = null;
+  if (!rtSoftMask.destroyed) {
+    rtSoftMask.destroy(true);
+  }
+}
+
+/** Détruit le root du layer sans détruire la RT masque doux (référence partagée). */
+function disposeMovePreviewLayerRootCache(): void {
   if (!movePreviewLayerRenderCache) return;
   const { root } = movePreviewLayerRenderCache;
   movePreviewLayerRenderCache = null;
-  if (!root.destroyed) {
-    root.destroy({ children: true, texture: true, baseTexture: true });
+  if (root.destroyed) return;
+  const kids = [...root.children];
+  for (const c of kids) {
+    root.removeChild(c);
+    if (c instanceof PIXI.Sprite) {
+      c.destroy({ children: false, texture: false, baseTexture: false });
+    } else {
+      c.destroy();
+    }
   }
+  root.destroy({ children: false, texture: false, baseTexture: false });
+}
+
+/** Layer + RT masque doux (hors preview move ou reset complet). */
+function disposeMovePreviewRenderCachesFull(): void {
+  disposeMovePreviewLayerRootCache();
+  disposeMovePreviewSoftMaskCache();
 }
 
 /**
@@ -95,6 +138,22 @@ function fingerprintPrecomputedMaskLoops(loops: number[][] | null): string {
     }
   }
   return `L${loops.length}|V${totalVerts}|${h >>> 0}`;
+}
+
+function buildMovePreviewSoftMaskCacheKey(params: {
+  v: number;
+  res: number;
+  rw: number;
+  rh: number;
+  kind: "server_loops" | "polygon";
+  loopsFp: string;
+  bs: number;
+  bq: number;
+  br: number;
+  chai: number;
+  mvmax: number;
+}): string {
+  return JSON.stringify(params);
 }
 
 interface BoardConfig {
@@ -853,16 +912,12 @@ function renderMoveAdvanceDestPoolCircleLayer(
   // Priorité API (boucles monde), sinon reconstruction locale depuis
   // ``footprintMaskHexPool``. Pas de fallback centre-only.
   let maskUnionKind: "server_loops" | "polygon";
-  let smoothedLoops: number[][];
+  let loopsBeforeSmooth: number[][];
   if (precomputedWorldMaskLoops && precomputedWorldMaskLoops.length > 0) {
     maskUnionKind = "server_loops";
-    const prep = smoothMaskLoopsForRender(
-      precomputedWorldMaskLoops,
-      MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
-      moveAdvanceMaskSmoothOptions,
-    );
-    smoothedLoops = prep.smoothed;
+    loopsBeforeSmooth = precomputedWorldMaskLoops;
   } else if (footprintMaskHexPool && footprintMaskHexPool.size > 0) {
+    maskUnionKind = "polygon";
     const layout = {
       HEX_HORIZ_SPACING,
       HEX_WIDTH,
@@ -878,13 +933,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
           `(spriteName=${spriteName}, footprintMaskHexPool.size=${footprintMaskHexPool.size})`,
       );
     }
-    const prep = smoothMaskLoopsForRender(
-      polyMask.loops,
-      MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
-      moveAdvanceMaskSmoothOptions,
-    );
-    maskUnionKind = "polygon";
-    smoothedLoops = prep.smoothed;
+    loopsBeforeSmooth = polyMask.loops;
   } else {
     throw new Error(
       `[renderMoveAdvanceDestPoolCircleLayer] aucune source de masque empreinte disponible ` +
@@ -892,127 +941,179 @@ function renderMoveAdvanceDestPoolCircleLayer(
     );
   }
 
-  const validLoops = smoothedLoops.filter((loop) => loop.length >= 6);
-  if (validLoops.length === 0) {
-    throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] polygone lissé vide ` +
-        `(spriteName=${spriteName}, maskUnionKind=${maskUnionKind}, ` +
-        `loopsCount=${smoothedLoops.length})`,
-    );
-  }
-
-  const maskGfx = new PIXI.Graphics();
-  maskGfx.name = `${spriteName}-mask-gfx`;
-  maskGfx.eventMode = "none";
-  appendWhiteReachableMaskFromSmoothedLoops(maskGfx, validLoops);
-
-  const maskBounds = maskGfx.getLocalBounds();
-  if (
-    !Number.isFinite(maskBounds.width) ||
-    !Number.isFinite(maskBounds.height) ||
-    !(maskBounds.width > 0) ||
-    !(maskBounds.height > 0)
-  ) {
-    maskGfx.destroy();
-    throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] bornes du masque invalides ` +
-        `(w=${maskBounds.width}, h=${maskBounds.height}, spriteName=${spriteName}, ` +
-        `maskUnionKind=${maskUnionKind})`,
-    );
-  }
-
-  const w = Math.ceil(maskBounds.width);
-  const h = Math.ceil(maskBounds.height);
-  if (w > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM || h > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM) {
-    maskGfx.destroy();
-    throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] masque trop grand pour une RT ` +
-        `unique (w=${w}, h=${h}, max=${FOOTPRINT_HIGHLIGHT_RT_MAX_DIM}, ` +
-        `spriteName=${spriteName})`,
-    );
-  }
-
-  let rt: PIXI.RenderTexture;
-  try {
-    rt = PIXI.RenderTexture.create({
-      width: w,
-      height: h,
-      resolution: app.renderer.resolution,
-      multisample: PIXI.MSAA_QUALITY.NONE,
-      alphaMode: PIXI.ALPHA_MODES.PMA,
-    });
-  } catch (e) {
-    maskGfx.destroy();
-    throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] création RenderTexture masque échouée ` +
-        `(spriteName=${spriteName}, w=${w}, h=${h}): ${String(e)}`,
-    );
-  }
-
-  maskGfx.position.set(-maskBounds.x, -maskBounds.y);
-  try {
-    app.renderer.render(maskGfx, { renderTexture: rt, clear: true });
-  } catch (e) {
-    maskGfx.destroy();
-    rt.destroy(true);
-    throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] render masque → RT échoué ` +
-        `(spriteName=${spriteName}): ${String(e)}`,
-    );
-  }
-  maskGfx.destroy();
+  const loopsFpPreSmooth = fingerprintPrecomputedMaskLoops(loopsBeforeSmooth);
+  const softMaskKey = buildMovePreviewSoftMaskCacheKey({
+    v: MOVE_PREVIEW_SOFT_MASK_CACHE_VERSION,
+    res: app.renderer.resolution,
+    rw: app.renderer.width,
+    rh: app.renderer.height,
+    kind: maskUnionKind,
+    loopsFp: loopsFpPreSmooth,
+    bs: MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH,
+    bq: MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY,
+    br: MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION,
+    chai: MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
+    mvmax: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
+  });
 
   let rtSoftMask: PIXI.RenderTexture;
-  try {
-    rtSoftMask = PIXI.RenderTexture.create({
-      width: w,
-      height: h,
-      resolution: app.renderer.resolution,
-      multisample: PIXI.MSAA_QUALITY.NONE,
-      alphaMode: PIXI.ALPHA_MODES.PMA,
-    });
-  } catch (e) {
-    rt.destroy(true);
-    throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] création RenderTexture masque lissé échouée ` +
-        `(spriteName=${spriteName}, w=${w}, h=${h}): ${String(e)}`,
+  let maskBoundsPlain: MovePreviewSoftMaskBounds;
+
+  const softHit =
+    movePreviewSoftMaskCache != null &&
+    movePreviewSoftMaskCache.key === softMaskKey &&
+    !movePreviewSoftMaskCache.rtSoftMask.destroyed;
+
+  if (softHit) {
+    rtSoftMask = movePreviewSoftMaskCache.rtSoftMask;
+    maskBoundsPlain = movePreviewSoftMaskCache.maskBounds;
+  } else {
+    disposeMovePreviewSoftMaskCache();
+
+    const prep = smoothMaskLoopsForRender(
+      loopsBeforeSmooth,
+      MOVE_ADVANCE_MASK_POLYGON_CHAIKIN_ITERATIONS,
+      moveAdvanceMaskSmoothOptions,
     );
-  }
-  const maskSourceSprite = new PIXI.Sprite(rt);
-  maskSourceSprite.eventMode = "none";
-  const maskAlphaBlur = new PIXI.BlurFilter(
-    MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH,
-    MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY,
-  );
-  maskAlphaBlur.resolution = MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION;
-  maskAlphaBlur.autoFit = true;
-  maskSourceSprite.filters = [maskAlphaBlur];
-  try {
-    app.renderer.render(maskSourceSprite, { renderTexture: rtSoftMask, clear: true });
-  } catch (e) {
+    const smoothedLoops = prep.smoothed;
+    const validLoops = smoothedLoops.filter((loop) => loop.length >= 6);
+    if (validLoops.length === 0) {
+      throw new Error(
+        `[renderMoveAdvanceDestPoolCircleLayer] polygone lissé vide ` +
+          `(spriteName=${spriteName}, maskUnionKind=${maskUnionKind}, ` +
+          `loopsCount=${smoothedLoops.length})`,
+      );
+    }
+
+    const maskGfx = new PIXI.Graphics();
+    maskGfx.name = `${spriteName}-mask-gfx`;
+    maskGfx.eventMode = "none";
+    appendWhiteReachableMaskFromSmoothedLoops(maskGfx, validLoops);
+
+    const maskBounds = maskGfx.getLocalBounds();
+    if (
+      !Number.isFinite(maskBounds.width) ||
+      !Number.isFinite(maskBounds.height) ||
+      !(maskBounds.width > 0) ||
+      !(maskBounds.height > 0)
+    ) {
+      maskGfx.destroy();
+      throw new Error(
+        `[renderMoveAdvanceDestPoolCircleLayer] bornes du masque invalides ` +
+          `(w=${maskBounds.width}, h=${maskBounds.height}, spriteName=${spriteName}, ` +
+          `maskUnionKind=${maskUnionKind})`,
+      );
+    }
+
+    const w = Math.ceil(maskBounds.width);
+    const h = Math.ceil(maskBounds.height);
+    if (w > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM || h > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM) {
+      maskGfx.destroy();
+      throw new Error(
+        `[renderMoveAdvanceDestPoolCircleLayer] masque trop grand pour une RT ` +
+          `unique (w=${w}, h=${h}, max=${FOOTPRINT_HIGHLIGHT_RT_MAX_DIM}, ` +
+          `spriteName=${spriteName})`,
+      );
+    }
+
+    let rt: PIXI.RenderTexture;
+    try {
+      rt = PIXI.RenderTexture.create({
+        width: w,
+        height: h,
+        resolution: app.renderer.resolution,
+        multisample: PIXI.MSAA_QUALITY.NONE,
+        alphaMode: PIXI.ALPHA_MODES.PMA,
+      });
+    } catch (e) {
+      maskGfx.destroy();
+      throw new Error(
+        `[renderMoveAdvanceDestPoolCircleLayer] création RenderTexture masque échouée ` +
+          `(spriteName=${spriteName}, w=${w}, h=${h}): ${String(e)}`,
+      );
+    }
+
+    maskGfx.position.set(-maskBounds.x, -maskBounds.y);
+    try {
+      app.renderer.render(maskGfx, { renderTexture: rt, clear: true });
+    } catch (e) {
+      maskGfx.destroy();
+      rt.destroy(true);
+      throw new Error(
+        `[renderMoveAdvanceDestPoolCircleLayer] render masque → RT échoué ` +
+          `(spriteName=${spriteName}): ${String(e)}`,
+      );
+    }
+    maskGfx.destroy();
+
+    try {
+      rtSoftMask = PIXI.RenderTexture.create({
+        width: w,
+        height: h,
+        resolution: app.renderer.resolution,
+        multisample: PIXI.MSAA_QUALITY.NONE,
+        alphaMode: PIXI.ALPHA_MODES.PMA,
+      });
+    } catch (e) {
+      rt.destroy(true);
+      throw new Error(
+        `[renderMoveAdvanceDestPoolCircleLayer] création RenderTexture masque lissé échouée ` +
+          `(spriteName=${spriteName}, w=${w}, h=${h}): ${String(e)}`,
+      );
+    }
+    const maskSourceSprite = new PIXI.Sprite(rt);
+    maskSourceSprite.eventMode = "none";
+    const maskAlphaBlur = new PIXI.BlurFilter(
+      MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH,
+      MOVE_ADVANCE_MASK_ALPHA_BLUR_QUALITY,
+    );
+    maskAlphaBlur.resolution = MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION;
+    maskAlphaBlur.autoFit = true;
+    maskSourceSprite.filters = [maskAlphaBlur];
+    try {
+      app.renderer.render(maskSourceSprite, { renderTexture: rtSoftMask, clear: true });
+    } catch (e) {
+      maskSourceSprite.destroy();
+      rt.destroy(true);
+      rtSoftMask.destroy(true);
+      throw new Error(
+        `[renderMoveAdvanceDestPoolCircleLayer] render masque lissé → RT échoué ` +
+          `(spriteName=${spriteName}): ${String(e)}`,
+      );
+    }
     maskSourceSprite.destroy();
     rt.destroy(true);
-    rtSoftMask.destroy(true);
-    throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] render masque lissé → RT échoué ` +
-        `(spriteName=${spriteName}): ${String(e)}`,
-    );
+
+    maskBoundsPlain = {
+      x: maskBounds.x,
+      y: maskBounds.y,
+      width: maskBounds.width,
+      height: maskBounds.height,
+    };
+    movePreviewSoftMaskCache = {
+      key: softMaskKey,
+      rtSoftMask,
+      maskBounds: maskBoundsPlain,
+    };
   }
-  maskSourceSprite.destroy();
-  rt.destroy(true);
 
   const maskSprite = new PIXI.Sprite(rtSoftMask);
   maskSprite.name = `${spriteName}-mask-sprite`;
-  maskSprite.position.set(maskBounds.x, maskBounds.y);
+  maskSprite.position.set(maskBoundsPlain.x, maskBoundsPlain.y);
   maskSprite.roundPixels = false;
 
   const coverageGfx = new PIXI.Graphics();
   coverageGfx.name = spriteName;
   coverageGfx.eventMode = "none";
   coverageGfx.beginFill(poolFillColor, 1.0);
-  coverageGfx.drawRect(maskBounds.x, maskBounds.y, maskBounds.width, maskBounds.height);
+  coverageGfx.drawRect(
+    maskBoundsPlain.x,
+    maskBoundsPlain.y,
+    maskBoundsPlain.width,
+    maskBoundsPlain.height,
+  );
   coverageGfx.endFill();
-  coverageGfx.alpha = 0.28;
+  coverageGfx.alpha = MOVE_PREVIEW_COVERAGE_FILL_ALPHA;
   coverageGfx.mask = maskSprite;
 
   parentContainer.addChild(maskSprite);
@@ -1183,7 +1284,7 @@ export const drawBoard = (
       movePoolForDiskDraw.size > 0;
 
     if (!useMoveDestPoolCircleLayer) {
-      disposeMovePreviewRenderCache();
+      disposeMovePreviewRenderCachesFull();
     }
 
     /** advancePreview sans pool : éviter — le pool vient de ``advance_destinations`` / ``valid_move_destinations_pool`` après ``action: "advance"``. */
@@ -1489,6 +1590,7 @@ export const drawBoard = (
         bs: MOVE_ADVANCE_MASK_ALPHA_BLUR_STRENGTH,
         br: MOVE_ADVANCE_MASK_ALPHA_BLUR_RESOLUTION,
         mvmax: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
+        covA: MOVE_PREVIEW_COVERAGE_FILL_ALPHA,
       });
 
       const cachedEntry = movePreviewLayerRenderCache;
@@ -1500,7 +1602,7 @@ export const drawBoard = (
       if (canReuse) {
         highlightContainer.addChild(cachedEntry.root);
       } else {
-        disposeMovePreviewRenderCache();
+        disposeMovePreviewLayerRootCache();
         const cacheRoot = new PIXI.Container();
         cacheRoot.name = "move-preview-layer-cache-root";
         cacheRoot.eventMode = "none";

@@ -342,6 +342,51 @@ def _build_charge_anchors_in_zone(
     return anchors
 
 
+def _charge_anchor_is_socle_a_socle_with_target(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    target: Dict[str, Any],
+    anchor_col: int,
+    anchor_row: int,
+) -> bool:
+    """
+    True si, à cette ancre, l'empreinte du chargeur touche celle de la cible (cases distinctes,
+    au moins une paire de cases 1-voisines), sans chevauchement.
+
+    Utilisé pour la règle produit : lorsqu'au moins une telle ancre est dans le pool déjà filtré
+    (zone × BFS × autres contraintes), le pool est réduit à ces ancres uniquement.
+    """
+    from engine.hex_utils import min_distance_between_sets
+
+    units_cache = require_key(game_state, "units_cache")
+    te = units_cache.get(str(require_key(target, "id")))
+    if not te:
+        return False
+    target_fp = set(te.get("occupied_hexes") or {(int(te["col"]), int(te["row"]))})
+    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
+    candidate_fp = _candidate_footprint_charge(int(anchor_col), int(anchor_row), unit, game_state, fp_pair)
+    if candidate_fp & target_fp:
+        return False
+    try:
+        return min_distance_between_sets(candidate_fp, target_fp, max_distance=1) == 1
+    except ValueError:
+        return False
+
+
+def _charge_pool_must_socle_a_socle_if_possible(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    target: Dict[str, Any],
+    valid_pool: List[Tuple[int, int]],
+) -> List[Tuple[int, int]]:
+    """Si au moins une ancre « socle à socle » avec la cible est possible, ne retourne que celles-ci."""
+    touching: List[Tuple[int, int]] = []
+    for ac, ar in valid_pool:
+        if _charge_anchor_is_socle_a_socle_with_target(game_state, unit, target, int(ac), int(ar)):
+            touching.append((int(ac), int(ar)))
+    return touching if touching else list(valid_pool)
+
+
 def _charge_bfs_max_distance(
     game_state: Dict[str, Any],
     unit_id: str,
@@ -1849,6 +1894,9 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         )
         bfs_set = set(bfs_reachable)
         valid_pool = [p for p in zone_anchors if p in bfs_set]
+        valid_pool = _charge_pool_must_socle_a_socle_if_possible(
+            game_state, unit, target_unit_entry, valid_pool
+        )
     game_state["valid_charge_destinations_pool"] = valid_pool
     if "debug_mode" in game_state and game_state["debug_mode"]:
         episode = game_state.get("episode_number", "?")
