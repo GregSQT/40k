@@ -12,7 +12,6 @@ export async function ensureWasmLoaded(): Promise<void> {
     initPromise = init()
       .then(() => {
         wasmReady = true;
-        console.log("[WASM-LOS] Module loaded successfully");
       })
       .catch((err) => {
         console.error("[WASM-LOS] Failed to load WASM module:", err);

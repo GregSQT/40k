@@ -13,6 +13,13 @@ Audit optionnel focus fire (comparaison pools) :
 Sortie : fichier append-only ``<racine_projet>/perf_timing.log`` (une ligne par segment), sauf si
 ``W40K_PERF_TIMING_LOG`` est défini (chemin absolu ou relatif du fichier à utiliser).
 
+Réponse HTTP (même activation ``W40K_PERF_TIMING`` ou ``game_state["perf_timing"]``) :
+  - en-tête ``Server-Timing`` sur ``POST /api/game/action`` : ``engine``, ``serialize``, ``json_encode``,
+    ``post_action_wall`` (durées en **millisecondes**) ;
+  - en-tête ``X-W40k-Payload-Bytes`` : taille du corps JSON renvoyé.
+  Le front peut les afficher en console si les traces client sont activées (``DEBUG_FIGHT_CLICK`` /
+  ``DEBUG_ACTION_LOG``) ; l’onglet Network du navigateur les montre toujours pour cette requête.
+
 Profilage par fonctions (cProfile), optionnel — **uniquement si** ``perf_timing`` est déjà actif :
 
 - ``W40K_PERF_PROFILE=1`` (ou ``true`` / ``yes``), ou ``game_state["perf_profile"] is True`` ;

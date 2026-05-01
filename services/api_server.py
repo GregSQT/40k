@@ -966,7 +966,10 @@ def initialize_auth_db() -> None:
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app)  # Enable CORS for frontend requests
+CORS(
+    app,
+    expose_headers=["Server-Timing", "X-W40k-Payload-Bytes"],
+)  # Server-Timing + taille payload (perf) lisibles en JS si W40K_PERF_TIMING=1
 
 # Minimal Flask logging for debugging when needed
 flask_request_logs = []
@@ -2049,6 +2052,19 @@ def execute_action():
                 f"response_encode_s={_j1 - _j0:.6f} total_wall_s={_j1 - _api_t0:.6f} "
                 f"payload_bytes={_payload_bytes if _payload_bytes is not None else -1}"
             )
+            # Découpe visible dans l’onglet Network (Timing) et lisible en JS si CORS expose_headers.
+            engine_ms = (_api_t1 - _api_t0) * 1000.0
+            ser_ms = (_ser_t1 - _ser_t0) * 1000.0
+            enc_ms = (_j1 - _j0) * 1000.0
+            total_ms = (_j1 - _api_t0) * 1000.0
+            pb = _payload_bytes if _payload_bytes is not None else -1
+            resp.headers["Server-Timing"] = (
+                f"engine;dur={engine_ms:.3f}, "
+                f"serialize;dur={ser_ms:.3f}, "
+                f"json_encode;dur={enc_ms:.3f}, "
+                f"post_action_wall;dur={total_ms:.3f}"
+            )
+            resp.headers["X-W40k-Payload-Bytes"] = str(int(pb))
 
         return resp
     

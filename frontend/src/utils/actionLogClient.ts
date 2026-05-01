@@ -1,7 +1,7 @@
 /**
  * Client : déduplication des entrées ``action_logs`` avant dispatch ``backendLogEvent``.
- * Traces : même activation que ``fightClickDebug`` (dev Vite ou ``DEBUG_FIGHT_CLICK``)
- * ou forcer avec ``localStorage.setItem("DEBUG_ACTION_LOG", "1")``.
+ * Traces : ``DEBUG_ACTION_LOG`` seul, ou même critère que ``fightClickDebug``
+ * (``localStorage.setItem("DEBUG_FIGHT_CLICK", "1")``) — tout est opt-in.
  */
 
 import { isFightClickDebugEnabled } from "./fightClickDebug";
@@ -15,6 +15,25 @@ export function isActionLogTraceEnabled(): boolean {
     /* ignore */
   }
   return isFightClickDebugEnabled();
+}
+
+let _clientDebugConsoleNotifyDone = false;
+
+/**
+ * Affiche une fois dans la console comment fonctionnent les flags debug (tant que les traces sont actives).
+ * À appeler au boot et/ou avant traitement d’une action : ainsi un `localStorage.setItem` **après** chargement
+ * est pris en compte dès la prochaine action, sans rechargement obligatoire.
+ */
+export function logClientDebugConsoleNotifyIfEnabled(): void {
+  if (_clientDebugConsoleNotifyDone || !isActionLogTraceEnabled()) {
+    return;
+  }
+  _clientDebugConsoleNotifyDone = true;
+  console.info(
+    "[40k debug] Traces activées (localStorage DEBUG_FIGHT_CLICK et/ou DEBUG_ACTION_LOG). " +
+      "Chaque réponse /game/action affiche [ACTION_LOG_TRACE] (avec ou sans entrées action_logs). " +
+      "Les lignes [FIGHT_CLICK] n’apparaissent qu’en phase fight (clics CC) ou pour l’action « fight »."
+  );
 }
 
 /** Clé stable pour une entrée ``action_logs`` (évite doublons 1 vs "1" sur ``unitId``). */

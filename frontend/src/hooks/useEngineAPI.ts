@@ -13,6 +13,7 @@ import {
   CROSS_ACTION_LOG_SUPPRESS_MS,
   dedupeActionLogBatch,
   isActionLogTraceEnabled,
+  logClientDebugConsoleNotifyIfEnabled,
   logActionLogBatchTrace,
   logActionLogEmitTrace,
   shouldEmitActionLogEvent,
@@ -628,22 +629,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 ? "pvp_test"
                 : "pvp";
 
-        console.log(
-          `Starting game in ${
-            isTutorialMode
-              ? "Tutorial"
-              : isPvPTestMode
-                ? "PvP Test"
-                : isPvETestMode
-                  ? "PvE Test"
-                : isEndlessDutyMode
-                  ? "Endless Duty"
-                  : isPvEMode
-                    ? "PvE"
-                    : "PvP"
-          } mode`
-        );
-
         const requestPayload: Record<string, unknown> = {
           pve_mode: isPvEMode || isPvETestMode || isTutorialMode || isEndlessDutyMode,
           mode_code: requestedModeCode,
@@ -700,17 +685,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           }
           setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
           setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
-          const startedMode =
-            requestedModeCode === "pve"
-              ? "PvE"
-              : requestedModeCode === "endless_duty"
-                ? "Endless Duty"
-              : requestedModeCode === "pve_test"
-                  ? "PvE Test"
-                : requestedModeCode === "pvp_test"
-                  ? "PvP Test"
-                : "PvP";
-          console.log(`Game started successfully in ${startedMode} mode`);
         } else {
           throw new Error(data.error || "Failed to start game");
         }
@@ -1044,6 +1018,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   // Execute action via API
   const executeAction = useCallback(
     async (action: Record<string, unknown>) => {
+      logClientDebugConsoleNotifyIfEnabled();
       const isFightCombatClientTrace =
         action.action === "fight" ||
         (gameState?.phase === "fight" &&
@@ -1106,6 +1081,22 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           throw new Error(`Action failed: ${response.status}`);
         }
 
+        const serverTimingHeader = response.headers.get("Server-Timing");
+        const payloadBytesHeader = response.headers.get("X-W40k-Payload-Bytes");
+        if (
+          isActionLogTraceEnabled() &&
+          (serverTimingHeader !== null || payloadBytesHeader !== null)
+        ) {
+          console.info("[SERVER_PERF] /game/action (serveur ; Network → en-têtes / Timing)", {
+            "Server-Timing": serverTimingHeader,
+            "X-W40k-Payload-Bytes": payloadBytesHeader,
+            hint:
+              "dur en ms : engine = moteur (handlers, end_phase, …), serialize = préparation état, " +
+              "json_encode = sérialisation du corps. Sous-découpe moteur (END_PHASE, CHARGE_*, …) : " +
+              "variable W40K_PERF_TIMING=1 sur le process Python + fichier perf_timing.log à la racine du dépôt.",
+          });
+        }
+
         const data = await response.json();
         if (isFightCombatClientTrace) {
           const r = data.result as Record<string, unknown> | undefined;
@@ -1161,12 +1152,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             success: data.success,
             responsePhase: responsePhaseForLog,
           });
-        } else if (isActionLogTraceEnabled() && responsePhaseForLog === "fight") {
+        } else if (isActionLogTraceEnabled()) {
           logActionLogBatchTrace("executeAction /game/action", [], {
             requestAction: action.action,
             success: data.success,
             responsePhase: responsePhaseForLog,
-            note: "aucune entrée action_logs (phase fight)",
+            note:
+              responsePhaseForLog === "fight"
+                ? "aucune entrée action_logs (phase fight)"
+                : `aucune entrée action_logs (phase ${responsePhaseForLog ?? "?"})`,
           });
         }
 
@@ -1322,7 +1316,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             Array.isArray(data.game_state.shoot_activation_pool) &&
             data.game_state.shoot_activation_pool.length === 0
           ) {
-            console.log("🔥 EMPTY SHOOTING POOL DETECTED - Auto-advancing phase");
             setTimeout(async () => {
               await executeAction({ action: "advance_phase", from: "shoot" });
             }, 100);
@@ -1346,7 +1339,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               chargingPool.length === 0 && activePool.length === 0 && nonActivePool.length === 0;
 
             if (allPoolsEmpty) {
-              console.log("🔥 EMPTY FIGHT POOLS DETECTED - Auto-advancing phase");
               setTimeout(async () => {
                 await executeAction({ action: "advance_phase", from: "fight" });
               }, 100);
