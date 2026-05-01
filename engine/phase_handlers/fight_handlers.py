@@ -528,6 +528,8 @@ def _fight_pile_in_anchor_adjacent_to_enemy_footprint(
     anchor_col: int,
     anchor_row: int,
     target_ids: Optional[List[str]] = None,
+    *,
+    candidate_footprint: Optional[Set[Tuple[int, int]]] = None,
 ) -> bool:
     """
     True si l'empreinte à cette ancre est dans la zone d'engagement d'une cible.
@@ -541,7 +543,9 @@ def _fight_pile_in_anchor_adjacent_to_enemy_footprint(
     )
     from engine.spatial_relations import get_engagement_zone
 
-    candidate_fp = compute_candidate_footprint(int(anchor_col), int(anchor_row), unit, game_state)
+    candidate_fp = candidate_footprint
+    if candidate_fp is None:
+        candidate_fp = compute_candidate_footprint(int(anchor_col), int(anchor_row), unit, game_state)
     units_cache = require_key(game_state, "units_cache")
     unit_player = int(unit["player"]) if unit["player"] is not None else None
     unit_id_str = str(unit["id"])
@@ -596,8 +600,11 @@ def _fight_build_pile_in_valid_destinations(
 
     Si au moins une ancre valide permet de finir au contact ennemi (empreintes adjacentes),
     seules ces ancres sont proposées (preview + validation).
+
+    PERF : si ``d_min <= 1``, aucune ancre ne peut être strictement plus proche sans overlap ;
+    retour immédiat sans BFS. Empreintes des destinations valides réutilisées pour le filtre contact.
     """
-    if d_min <= 0:
+    if d_min <= 1:
         return []
 
     scale = max(1, int(game_state.get("inches_to_subhex", 1) or 1))
@@ -612,6 +619,7 @@ def _fight_build_pile_in_valid_destinations(
     visited: Dict[Tuple[int, int], int] = {start_pos: 0}
     queue = deque([(start_pos, 0)])
     valid_destinations: List[Tuple[int, int]] = []
+    pile_in_fp_by_anchor: Dict[Tuple[int, int], Set[Tuple[int, int]]] = {}
 
     while queue:
         current_pos, current_dist = queue.popleft()
@@ -635,11 +643,19 @@ def _fight_build_pile_in_valid_destinations(
             ):
                 continue
             valid_destinations.append(neighbor_pos)
+            pile_in_fp_by_anchor[neighbor_pos] = candidate_fp
 
     contact_destinations = [
         p
         for p in valid_destinations
-        if _fight_pile_in_anchor_adjacent_to_enemy_footprint(game_state, unit, p[0], p[1], closest_ids)
+        if _fight_pile_in_anchor_adjacent_to_enemy_footprint(
+            game_state,
+            unit,
+            p[0],
+            p[1],
+            closest_ids,
+            candidate_footprint=pile_in_fp_by_anchor[p],
+        )
     ]
     if contact_destinations:
         return contact_destinations
@@ -759,15 +775,30 @@ def _fight_all_objective_hexes_union(game_state: Dict[str, Any]) -> Set[Tuple[in
 def _fight_bfs_reachable_anchors_consolidation(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
-) -> Dict[Tuple[int, int], int]:
-    """BFS jusqu'à 3\" (sous-hex) : ancres avec placement d'empreinte valide (sans filtre pile in)."""
+    *,
+    start_footprint: Optional[Set[Tuple[int, int]]] = None,
+) -> Tuple[Dict[Tuple[int, int], int], Dict[Tuple[int, int], Set[Tuple[int, int]]]]:
+    """
+    BFS jusqu'à 3\" (sous-hex) : ancres avec placement d'empreinte valide (sans filtre pile in).
+
+    Retourne ``(visited, fp_by_anchor)`` : empreinte candidate déjà calculée à l'entrée dans
+    ``visited`` (évite un second ``compute_candidate_footprint`` par ancre en consolidation).
+
+    ``start_footprint`` : si fourni, réutilise l'empreinte de l'ancre de départ (ex. déjà
+    calculée pour un early-exit objectif) au lieu d'un second appel identique.
+    """
     scale = max(1, int(game_state.get("inches_to_subhex", 1) or 1))
     bfs_max = 3 * scale
     unit_id_str = str(unit["id"])
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
     occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
+    if start_footprint is not None:
+        start_fp = start_footprint
+    else:
+        start_fp = compute_candidate_footprint(start_col, start_row, unit, game_state)
     visited: Dict[Tuple[int, int], int] = {start_pos: 0}
+    fp_by_anchor: Dict[Tuple[int, int], Set[Tuple[int, int]]] = {start_pos: start_fp}
     queue = deque([(start_pos, 0)])
     while queue:
         current_pos, current_dist = queue.popleft()
@@ -783,8 +814,9 @@ def _fight_bfs_reachable_anchors_consolidation(
             if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
                 continue
             visited[neighbor_pos] = neighbor_dist
+            fp_by_anchor[neighbor_pos] = candidate_fp
             queue.append((neighbor_pos, neighbor_dist))
-    return visited
+    return visited, fp_by_anchor
 
 
 def _fight_min_distance_fp_to_nearest_enemy(
@@ -827,9 +859,10 @@ def _fight_plan_consolidation_destinations(
     Priorité 2 (sans ennemis sur le plateau) : objectif — finir avec empreinte ∩ empreinte objectif ; mouvement le plus court possible.
     Retourne None si aucune consolidation n'est possible / utile.
 
-    PERF (branche ennemis) : BFS seulement si ``start_d_min > 1`` ; empreintes des ancres
-    ``compute_candidate_footprint`` mémorisées ; empreintes du palier d'ennemis les plus proches
-    pré-calculées une fois par plan.
+    PERF : BFS consolidation seulement si utile — ennemis : ``start_d_min > 1`` ; objectifs :
+    pas si l'empreinte de départ intersecte déjà les hexes objectif (seul walk 0 possible).
+    Empreintes par ancre : réutilisées depuis le BFS (pas de second ``compute_candidate_footprint``).
+    Palier d'ennemis les plus proches : empreintes pré-calculées une fois par plan.
     """
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
@@ -844,7 +877,7 @@ def _fight_plan_consolidation_destinations(
             # Deja au contact (distance minimale possible sans overlap) -> pas de consolidation utile.
             return None
 
-        visited = _fight_bfs_reachable_anchors_consolidation(game_state, unit)
+        visited, fp_by_anchor = _fight_bfs_reachable_anchors_consolidation(game_state, unit)
 
         dist_by_anchor: List[Tuple[Tuple[int, int], int]] = []
         units_cache = require_key(game_state, "units_cache")
@@ -859,11 +892,13 @@ def _fight_plan_consolidation_destinations(
                 cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
             )
 
-        fp_by_anchor: Dict[Tuple[int, int], Set[Tuple[int, int]]] = {}
         for anchor in visited:
-            ac, ar = anchor
-            fp = compute_candidate_footprint(ac, ar, unit, game_state)
-            fp_by_anchor[anchor] = fp
+            if anchor not in fp_by_anchor:
+                raise KeyError(
+                    "_fight_plan_consolidation_destinations: missing candidate footprint for anchor "
+                    f"{anchor!r} (BFS fp_by_anchor inconsistency)"
+                )
+            fp = fp_by_anchor[anchor]
             # Evaluer uniquement le palier d'ennemis le plus proche au depart.
             dmin = None
             for enemy_fp in closest_enemy_fps:
@@ -893,11 +928,21 @@ def _fight_plan_consolidation_destinations(
     obj_hexes = _fight_all_objective_hexes_union(game_state)
     if not obj_hexes:
         return None
-    visited = _fight_bfs_reachable_anchors_consolidation(game_state, unit)
+    start_fp_obj = compute_candidate_footprint(start_col, start_row, unit, game_state)
+    if start_fp_obj & obj_hexes:
+        # Déjà sur l'objectif avec walk 0 ; aucune autre ancre n'a un walk strictement plus court.
+        return None
+    visited, fp_by_anchor = _fight_bfs_reachable_anchors_consolidation(
+        game_state, unit, start_footprint=start_fp_obj
+    )
     overlap_cands: List[Tuple[Tuple[int, int], int]] = []
     for anchor in visited:
-        ac, ar = anchor
-        fp = compute_candidate_footprint(ac, ar, unit, game_state)
+        if anchor not in fp_by_anchor:
+            raise KeyError(
+                "_fight_plan_consolidation_destinations: missing candidate footprint for anchor "
+                f"{anchor!r} (BFS fp_by_anchor inconsistency)"
+            )
+        fp = fp_by_anchor[anchor]
         if fp & obj_hexes:
             overlap_cands.append((anchor, visited[anchor]))
     if not overlap_cands:
@@ -1127,22 +1172,28 @@ def _ai_select_pile_in_destination(
     d_min: int,
     closest_ids: List[str],
 ) -> Tuple[int, int]:
-    """Choisit la destination qui minimise la distance au palier d'ennemis les plus proches."""
+    """
+    Choisit la destination qui minimise la distance au palier d'ennemis les plus proches.
+
+    PERF : empreintes ennemies du palier pré-calculées une fois (pas une lecture cache par destination).
+    """
     from engine.hex_utils import min_distance_between_sets
 
     if not pile_dests:
         raise ValueError("_ai_select_pile_in_destination: empty pile_dests")
     units_cache = require_key(game_state, "units_cache")
+    tier_efps: List[Set[Tuple[int, int]]] = []
+    for eid in closest_ids:
+        ce = units_cache.get(str(eid))
+        if not ce:
+            continue
+        tier_efps.append(ce.get("occupied_hexes", {(ce["col"], ce["row"])}))
     best: Optional[Tuple[int, int]] = None
     best_score: Optional[int] = None
     for ac, ar in pile_dests:
         fp = compute_candidate_footprint(ac, ar, unit, game_state)
         tier_scores: List[int] = []
-        for eid in closest_ids:
-            ce = units_cache.get(str(eid))
-            if not ce:
-                continue
-            efp = ce.get("occupied_hexes", {(ce["col"], ce["row"])})
+        for efp in tier_efps:
             tier_scores.append(min_distance_between_sets(fp, efp))
         if not tier_scores:
             continue

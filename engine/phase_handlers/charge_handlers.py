@@ -37,6 +37,9 @@ from .shared_utils import (
 CHARGE_IMPACT_TRIGGER_THRESHOLD = 4
 CHARGE_IMPACT_MORTAL_WOUNDS = 1
 
+# Incrémenter si la sémantique du BFS de fin de charge change (invalidation cache ``_charge_dest_bfs_cache``).
+_CHARGE_DEST_BFS_CACHE_SCHEMA = 2
+
 
 def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
     """Check if unit has a specific direct or granted rule effect by ruleId."""
@@ -109,6 +112,25 @@ def _candidate_footprint_charge(
         offs = off_e if (center_col & 1) == 0 else off_o
         return {(center_col + dc, center_row + dr) for dc, dr in offs}
     return compute_candidate_footprint(center_col, center_row, unit, game_state)
+
+
+def _charge_synthetic_charger_cache_entry(
+    unit: Dict[str, Any],
+    anchor_col: int,
+    anchor_row: int,
+    candidate_fp: Set[Tuple[int, int]],
+) -> Dict[str, Any]:
+    """
+    Entrée au format ``units_cache`` pour tester l'engagement en fin de charge,
+    alignée sur ``_fight_build_valid_target_pool`` (``unit_entries_within_engagement_zone``).
+    """
+    return {
+        "col": int(anchor_col),
+        "row": int(anchor_row),
+        "BASE_SHAPE": require_key(unit, "BASE_SHAPE"),
+        "BASE_SIZE": require_key(unit, "BASE_SIZE"),
+        "occupied_hexes": set(candidate_fp),
+    }
 
 
 def _charge_footprint_union_for_anchors(
@@ -282,10 +304,11 @@ def _build_charge_anchors_in_zone(
     Ancres de placement valides dont :
     - le centre est dans la ``zone`` cible-centrée ;
     - l'empreinte ne chevauche pas la cible (``occupied_hexes``) ;
-    - l'empreinte touche la zone d'engagement de la cible ;
+    - fin en zone d'engagement réelle vs la cible (``unit_entries_within_engagement_zone``, comme le BFS charge) ;
     - le placement est légal (``is_footprint_placement_valid``).
     """
-    from engine.hex_utils import dilate_hex_set_unbounded, hex_distance
+    from engine.hex_utils import hex_distance
+    from engine.spatial_relations import unit_entries_within_engagement_zone
     from .shared_utils import get_engagement_zone
 
     units_cache = require_key(game_state, "units_cache")
@@ -293,8 +316,7 @@ def _build_charge_anchors_in_zone(
     if not te:
         return []
     target_fp = set(te.get("occupied_hexes") or {(int(te["col"]), int(te["row"]))})
-    engagement_zone = get_engagement_zone(game_state)
-    enemy_shell = dilate_hex_set_unbounded(target_fp, engagement_zone)
+    engagement_zone = int(get_engagement_zone(game_state))
 
     unit_id_str = str(unit["id"])
     occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
@@ -311,7 +333,8 @@ def _build_charge_anchors_in_zone(
         candidate_fp = _candidate_footprint_charge(int(ac), int(ar), unit, game_state, fp_pair)
         if candidate_fp & target_fp:
             continue
-        if not (candidate_fp & enemy_shell):
+        synth = _charge_synthetic_charger_cache_entry(unit, int(ac), int(ar), candidate_fp)
+        if not unit_entries_within_engagement_zone(synth, te, engagement_zone):
             continue
         if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
             continue
@@ -475,7 +498,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     - Alive (in units_cache)
     - player === current_player
     - NOT in units_charged
-    - NOT adjacent to enemy (distance > melee_range to all enemies)
+    - NOT within engagement zone of any enemy (``_charge_unit_within_engagement_zone`` = contrat move)
     - NOT in units_fled
     - Has valid charge target (enemy within charge range via pathfinding)
 
@@ -486,15 +509,6 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     current_player = game_state["current_player"]
 
     units_cache = require_key(game_state, "units_cache")
-    from engine.hex_utils import dilate_hex_set_unbounded
-    from .shared_utils import get_engagement_zone
-
-    engagement_zone = get_engagement_zone(game_state)
-    enemy_engagement_shells_by_id: Dict[str, Set[Tuple[int, int]]] = {}
-    for eid, entry in units_cache.items():
-        ec, er = int(entry["col"]), int(entry["row"])
-        efp = entry.get("occupied_hexes", {(ec, er)})
-        enemy_engagement_shells_by_id[str(eid)] = dilate_hex_set_unbounded(efp, engagement_zone)
 
     full_occupied_positions = build_occupied_positions_set(game_state)
 
@@ -508,18 +522,10 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         if cache_entry["player"] != current_player:
             continue  # Wrong player
 
-        # "NOT adjacent to enemy?" — footprint distance <= engagement_zone
-        unit_col_int, unit_row_int = require_unit_position(unit_id, game_state)
-        unit_fp = cache_entry.get("occupied_hexes", {(unit_col_int, unit_row_int)})
-        adjacent_found = False
-        for enemy_id, enemy_entry in units_cache.items():
-            if enemy_entry["player"] != cache_entry["player"]:
-                if unit_fp & enemy_engagement_shells_by_id[str(enemy_id)]:
-                    adjacent_found = True
-                    break
-
-        if adjacent_found:
-            continue  # Already in melee, cannot charge
+        # Engagement : aligné mouvement / preview charge (pas intersection empreinte × dilatation hex seule,
+        # qui peut exclure à tort une unité posée au clearance légal bord-à-bord).
+        if _charge_unit_within_engagement_zone(game_state, unit):
+            continue  # Déjà en zone d'engagement, ne peut pas déclarer de charge
 
         # "NOT in units_fled?" unless the unit has a rule effect allowing charge after fleeing
         # CRITICAL: Normalize unit ID to string for consistent comparison (units_fled stores strings)
@@ -914,8 +920,10 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
     
     Valid target criteria:
     - Enemy unit
-    - within charge_max_distance hexes (via BFS pathfinding)
-    - having non occupied adjacent hex(es) at 12 hexes or less from the active unit
+    - Not already in **engagement** with the charger vs **that** target only
+      (``unit_entries_within_engagement_zone`` — same contract as move / ``_charge_unit_within_engagement_zone`` ;
+      not ``unit_fp & dilate_hex`` which wrongly dropped a legally close target).
+    - At least one legal charge end anchor vs that target from BFS-reachable hexes within ``charge_max_distance``.
     
     Returns list of target dicts with unit info.
     """
@@ -943,45 +951,44 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
     enemies = [enemy_id for enemy_id, cache_entry in units_cache.items()
                if int(cache_entry["player"]) != unit_player]
     
-    from engine.hex_utils import dilate_hex_set_unbounded
+    from engine.spatial_relations import unit_entries_within_engagement_zone
     from .shared_utils import get_engagement_zone, build_occupied_positions_set
-    engagement_zone = get_engagement_zone(game_state)
+
+    engagement_zone = int(get_engagement_zone(game_state))
 
     fp_offset_pair = _charge_prepare_footprint_offsets(unit, game_state)
 
-    unit_col_int, unit_row_int = require_unit_position(unit, game_state)
     unit_id_str = str(unit["id"])
-    unit_entry = units_cache.get(unit_id_str)
-    unit_fp = unit_entry.get("occupied_hexes", {(unit_col_int, unit_row_int)}) if unit_entry else {(unit_col_int, unit_row_int)}
+    unit_entry = require_key(units_cache, unit_id_str)
     occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
 
-    enemy_index: List[Tuple[Any, Dict[str, Any], Set[Tuple[int, int]], Set[Tuple[int, int]]]] = []
+    enemy_index: List[Tuple[Any, Dict[str, Any], Set[Tuple[int, int]]]] = []
     for enemy_id in enemies:
         enemy_entry = units_cache.get(str(enemy_id))
         if enemy_entry is None:
             raise KeyError(f"Enemy {enemy_id} not in units_cache (dead or absent)")
+        if unit_entries_within_engagement_zone(unit_entry, enemy_entry, engagement_zone):
+            continue
         ec, er = int(enemy_entry["col"]), int(enemy_entry["row"])
         enemy_fp = enemy_entry.get("occupied_hexes", {(ec, er)})
-        shell = dilate_hex_set_unbounded(enemy_fp, engagement_zone)
-        if unit_fp & shell:
-            continue
-        enemy_index.append((enemy_id, enemy_entry, enemy_fp, shell))
+        enemy_index.append((enemy_id, enemy_entry, enemy_fp))
 
-    per_enemy_has_geom: Dict[Any, bool] = {eid: False for eid, _, _, _ in enemy_index}
-    per_enemy_non_occ: Dict[Any, bool] = {eid: False for eid, _, _, _ in enemy_index}
+    per_enemy_has_geom: Dict[Any, bool] = {eid: False for eid, _, _ in enemy_index}
+    per_enemy_non_occ: Dict[Any, bool] = {eid: False for eid, _, _ in enemy_index}
 
     for dest_col, dest_row in reachable_hexes:
         candidate_fp = _candidate_footprint_charge(dest_col, dest_row, unit, game_state, fp_offset_pair)
         blocked_by_occupation = bool(candidate_fp & occupied_positions)
-        for enemy_id, _enemy_entry, enemy_fp, shell in enemy_index:
+        synth = _charge_synthetic_charger_cache_entry(unit, dest_col, dest_row, candidate_fp)
+        for enemy_id, enemy_entry, enemy_fp in enemy_index:
             if candidate_fp & enemy_fp:
                 continue
-            if candidate_fp & shell:
+            if unit_entries_within_engagement_zone(synth, enemy_entry, engagement_zone):
                 per_enemy_has_geom[enemy_id] = True
                 if not blocked_by_occupation:
                     per_enemy_non_occ[enemy_id] = True
 
-    for enemy_id, enemy_entry, _enemy_fp, _shell in enemy_index:
+    for enemy_id, enemy_entry, _enemy_fp in enemy_index:
         if per_enemy_has_geom.get(enemy_id) and per_enemy_non_occ.get(enemy_id):
             ec, er = int(enemy_entry["col"]), int(enemy_entry["row"])
             valid_targets.append({
@@ -1304,11 +1311,14 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
     return bool(valid_any)
 
 
-def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+def _charge_unit_within_engagement_zone(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
-    Check if unit is within engagement zone of any enemy (footprint distance).
+    True si l'unité est dans la **zone d'engagement** (≥1 ennemi), au sens ``spatial_relations`` :
+    ``unit_within_engagement_zone_footprints`` — **pas** l'adjacence hex discrète (voir
+    ``_is_hex_adjacent_to_enemy`` pour le voisinage à 6 côtés).
 
-    Used for charge eligibility — unit must NOT be already engaged.
+    Aligné sur la phase move (bord à bord / empreintes). Utilisé pour l'éligibilité charge
+    et la revalidation au choix de cible.
     """
     from engine.spatial_relations import get_engagement_zone
     from engine.spatial_relations import unit_within_engagement_zone_footprints
@@ -1394,13 +1404,11 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     CRITICAL: Charge destinations must:
     - Be reachable within charge_roll distance (2d6) via BFS
     - Use a **legal footprint** at the end hex (``is_footprint_placement_valid``).
-    - End in **engagement** vs the declared target (if ``target_id``) or vs **some** enemy :
-      no overlap with enemy ``occupied_hexes``, and the footprint must intersect the
-      **dilated** enemy footprint ``dilate_hex_set_unbounded(enemy_fp, engagement_zone)`` without
-      overlapping the enemy core. For disjoint footprints this is **equivalent** to
-      ``1 <= min_distance_between_sets <= engagement_zone`` (see ``hex_utils.dilate_hex_set_unbounded``).
-      **Do not** call ``min_distance_between_sets`` inside this BFS — it would nest BFS per neighbor
-      and destroy performance on large boards.
+    - Finir en **zone d'engagement** vs la cible déclarée (si ``target_id``) ou vs **un** ennemi :
+      pas de chevauchement d'empreinte ennemie, et ``unit_entries_within_engagement_zone``
+      (même contrat que la phase fight / move pour rond↔rond et empreintes) doit être vrai
+      avec au moins un ennemi indexé — **pas** seulement ``empreinte ∩ dilate(hex)``, qui pouvait
+      accepter une fin de charge sans engagement réel au sens ``spatial_relations``.
 
     Unlike movement, charges CAN move through hexes adjacent to enemies.
 
@@ -1449,7 +1457,12 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     tid_arg: Optional[str] = str(target_id) if target_id is not None else None
     bfs_max_distance = _charge_bfs_max_distance(game_state, unit_id_str, int(charge_range), tid_arg)
     cache = game_state.setdefault("_charge_dest_bfs_cache", {})
-    cache_key = (unit_id_str, int(charge_range), target_id if target_id else None)
+    cache_key = (
+        unit_id_str,
+        int(charge_range),
+        target_id if target_id else None,
+        _CHARGE_DEST_BFS_CACHE_SCHEMA,
+    )
     if (
         not early_exit_if_valid
         and charge_range == CHARGE_MAX_DISTANCE
@@ -1500,21 +1513,18 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     fp_offset_pair = _charge_prepare_footprint_offsets(unit, game_state)
     _fp_tag = "offset" if fp_offset_pair is not None else "legacy"
 
-    from engine.hex_utils import dilate_hex_set_unbounded
+    from engine.spatial_relations import unit_entries_within_engagement_zone
     from .shared_utils import get_engagement_zone
 
-    engagement_zone = get_engagement_zone(game_state)
+    engagement_zone = int(get_engagement_zone(game_state))
 
-    indexed_enemy_engagement: List[Tuple[Any, Set[Tuple[int, int]], Set[Tuple[int, int]]]] = []
+    indexed_enemy_engagement: List[Tuple[Any, Dict[str, Any]]] = []
     for enemy_ref in enemies:
         eid = enemy_ref["id"] if isinstance(enemy_ref, dict) else enemy_ref
         enemy_entry = units_cache.get(str(eid))
         if enemy_entry is None:
             raise KeyError(f"Enemy {eid} not in units_cache (dead or absent)")
-        ec, er = int(enemy_entry["col"]), int(enemy_entry["row"])
-        enemy_fp = enemy_entry.get("occupied_hexes", {(ec, er)})
-        shell = dilate_hex_set_unbounded(enemy_fp, engagement_zone)
-        indexed_enemy_engagement.append((eid, enemy_fp, shell))
+        indexed_enemy_engagement.append((eid, enemy_entry))
 
     _t_bfs0 = time.perf_counter() if _perf else None
     bfs_short_circuit = False
@@ -1546,11 +1556,18 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
             is_adjacent_to_enemy = False
             hex_overlaps_enemy = False
-            for _eid, enemy_fp, shell in indexed_enemy_engagement:
+            synth = _charge_synthetic_charger_cache_entry(
+                unit, neighbor_col_int, neighbor_row_int, candidate_fp
+            )
+            for _eid, enemy_entry in indexed_enemy_engagement:
+                ec, er = int(enemy_entry["col"]), int(enemy_entry["row"])
+                enemy_fp = enemy_entry.get("occupied_hexes", {(ec, er)})
                 if candidate_fp & enemy_fp:
                     hex_overlaps_enemy = True
                     break
-                if candidate_fp & shell:
+                if unit_entries_within_engagement_zone(
+                    synth, enemy_entry, engagement_zone
+                ):
                     is_adjacent_to_enemy = True
                     if tid_arg:
                         break
@@ -1776,7 +1793,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
 
     # Re-evaluate adjacency at execution time.
     # Charge pool is built earlier and board state may change before target selection.
-    if _is_adjacent_to_enemy(game_state, unit):
+    if _charge_unit_within_engagement_zone(game_state, unit):
         return _handle_skip_action(game_state, unit, had_valid_destinations=False)
 
     # Roll 2d6 AFTER target selection — résultat en POUCES (règles GW).
@@ -2288,19 +2305,6 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         result.update(phase_end_result)
 
     return True, result
-
-
-def _is_adjacent_to_enemy_simple(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
-    """
-    Flee detection: unit within engagement zone of any enemy (footprint distance).
-    """
-    from engine.spatial_relations import get_engagement_zone
-    from engine.spatial_relations import unit_within_engagement_zone_footprints
-
-    cc_range = get_engagement_zone(game_state)
-    return unit_within_engagement_zone_footprints(
-        game_state, unit, engagement_zone=cc_range, max_distance=cc_range
-    )
 
 
 def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_valid_destinations: bool = True) -> Tuple[bool, Dict[str, Any]]:
