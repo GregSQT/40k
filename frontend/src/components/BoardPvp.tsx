@@ -48,6 +48,12 @@ import {
   resolveBaseSizeForUnitDisplay,
   type HexCoord,
 } from "../utils/hexFootprint";
+import {
+  getNonRoundBasePixelLayout,
+  getNonRoundIconRadius,
+  getSquareCornerRadiusPx,
+  getUnitTokenTopExtentY,
+} from "../utils/unitBaseDisplay";
 import { WeaponDropdown } from "./WeaponDropdown";
 import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
 import { pointInAnyMaskLoop } from "../utils/pointInPolygon";
@@ -1744,17 +1750,28 @@ export default function Board({
         container.interactiveChildren = false;
         app.stage.addChild(container);
 
+        const HEX_R = HEX_RADIUS_H;
+        const nrHover = getNonRoundBasePixelLayout(selectedUnit, HEX_R);
         const bdSel = resolveBaseSizeForUnitDisplay(selectedUnit);
         const baseSizeVal = bdSel > 1 ? bdSel : undefined;
-        const iconDiam = baseSizeVal
+        const defaultIconDiam = baseSizeVal
           ? baseSizeVal * 1.5 * HEX_RADIUS_H
           : HEX_RADIUS_H * (selectedUnit.ICON_SCALE ?? 1.0);
-        const circleRadius = iconDiam / 2;
 
-        const baseCircle = new PIXI.Graphics();
         const baseColor = selectedUnit.player === 1 ? 0x1d4ed8 : 0x882222;
+        const baseCircle = new PIXI.Graphics();
         baseCircle.beginFill(baseColor, 0.7);
-        baseCircle.drawCircle(0, 0, circleRadius);
+        if (nrHover) {
+          if (nrHover.kind === "oval") {
+            baseCircle.drawEllipse(0, 0, nrHover.outerRx, nrHover.outerRy);
+          } else {
+            const h = nrHover.squareHalf;
+            const s = nrHover.squareSide;
+            baseCircle.drawRoundedRect(-h, -h, s, s, getSquareCornerRadiusPx());
+          }
+        } else {
+          baseCircle.drawCircle(0, 0, defaultIconDiam / 2);
+        }
         baseCircle.endFill();
         container.addChild(baseCircle);
 
@@ -1765,8 +1782,19 @@ export default function Board({
           const texture = PIXI.Texture.from(iconPath);
           const iconSprite = new PIXI.Sprite(texture);
           iconSprite.anchor.set(0.5);
+          const nonRoundIconR = getNonRoundIconRadius(selectedUnit, HEX_R);
+          const iconDiam =
+            nonRoundIconR != null ? nonRoundIconR * 2 : defaultIconDiam;
           iconSprite.width = iconDiam;
           iconSprite.height = iconDiam;
+          if (nonRoundIconR != null) {
+            const maskG = new PIXI.Graphics();
+            maskG.beginFill(0xffffff);
+            maskG.drawCircle(0, 0, nonRoundIconR);
+            maskG.endFill();
+            iconSprite.mask = maskG;
+            container.addChild(maskG);
+          }
           container.addChild(iconSprite);
         }
         container.alpha = 0.65;
@@ -4286,11 +4314,13 @@ export default function Board({
           ((overlayCol % 2) * HEX_VERT_SPACING) / 2 +
           HEX_HEIGHT / 2 +
           MARGIN;
-        const unitIconScale = unit.ICON_SCALE || ICON_SCALE;
-        const baseSizeOvlRaw = resolveBaseSizeForUnitDisplay(unit);
-        const baseSizeOvl = baseSizeOvlRaw > 1 ? baseSizeOvlRaw : 0;
-        const iconRadiusOvl = baseSizeOvl > 0 ? (baseSizeOvl / 2) * HEX_HORIZ_SPACING : (HEX_RADIUS * unitIconScale) / 2;
-        const barY = centerY - iconRadiusOvl - HP_BAR_HEIGHT - 1;
+        const tokenTopOvl = getUnitTokenTopExtentY(
+          unit,
+          HEX_RADIUS,
+          HEX_HORIZ_SPACING,
+          UNIT_CIRCLE_RADIUS_RATIO,
+        );
+        const barY = centerY - tokenTopOvl - HP_BAR_HEIGHT - 1;
 
         // Icons: advance + weapon selection
         const isActiveShootingFromState =

@@ -14,6 +14,13 @@ import {
   minHexDistanceBetweenUnitFootprints,
   resolveBaseSizeForUnitDisplay,
 } from "../utils/hexFootprint";
+import {
+  getHpBarWidthBase,
+  getNonRoundBasePixelLayout,
+  getNonRoundIconRadius,
+  getSquareCornerRadiusPx,
+  getUnitTokenTopExtentY,
+} from "../utils/unitBaseDisplay";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 import {
@@ -472,8 +479,6 @@ export class UnitRenderer {
       parseColor,
     } = this.props;
 
-    if (isPreview) return;
-
     // Grey-out enemies that are NOT valid shooting targets during shooting phase
     // ONLY apply when we have actual blinking data (prevents grey flash during loading)
     // - Replay mode: blinkingUnits is undefined -> skip greying
@@ -489,6 +494,7 @@ export class UnitRenderer {
     const hasShootingPreviewContext =
       (phase === "shoot" && selectedUnitId !== null) || this.props.mode === "movePreview";
     if (
+      !isPreview &&
       hasShootingPreviewContext &&
       unit.player !== current_player &&
       this.props.blinkingUnits &&
@@ -501,15 +507,26 @@ export class UnitRenderer {
 
       if (!isShootable && !unitWithFlags.isGhost) {
         const grey = 0x888888;
-        const displayGrey = resolveBaseSizeForUnitDisplay(unit);
-        const baseSizeGrey = displayGrey > 1 ? displayGrey : undefined;
-        const greyRadius = baseSizeGrey
-          ? (baseSizeGrey / 2) * 1.5 * HEX_RADIUS
-          : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
+        const nrGrey = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
         const g = new PIXI.Graphics();
         g.beginFill(grey);
         g.lineStyle(DEFAULT_BORDER_WIDTH, grey);
-        g.drawCircle(centerX, centerY, greyRadius);
+        if (nrGrey) {
+          if (nrGrey.kind === "oval") {
+            g.drawEllipse(centerX, centerY, nrGrey.outerRx, nrGrey.outerRy);
+          } else {
+            const h = nrGrey.squareHalf;
+            const s = nrGrey.squareSide;
+            g.drawRoundedRect(centerX - h, centerY - h, s, s, getSquareCornerRadiusPx());
+          }
+        } else {
+          const displayGrey = resolveBaseSizeForUnitDisplay(unit);
+          const baseSizeGrey = displayGrey > 1 ? displayGrey : undefined;
+          const greyRadius = baseSizeGrey
+            ? (baseSizeGrey / 2) * 1.5 * HEX_RADIUS
+            : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
+          g.drawCircle(centerX, centerY, greyRadius);
+        }
         g.endFill();
         g.zIndex = iconZIndex;
         g.eventMode = "static";
@@ -520,9 +537,15 @@ export class UnitRenderer {
       }
     }
 
-    let unitColor = unit.color;
+    /** Remplissage socle : toujours couleur joueur (sauf ghost / just-killed) — l’état « déjà activé » ne grise plus le socle. */
+    let socleFill = unit.color;
     let borderColor = 0x000000;
     let borderWidth = DEFAULT_BORDER_WIDTH;
+
+    const hasUsedState =
+      unitsMoved.includes(unit.id) ||
+      Boolean(unitsCharged?.includes(unit.id)) ||
+      Boolean(unitsAttacked?.includes(unit.id));
 
     // Handle selection and used unit states
     if (selectedUnitId === unit.id) {
@@ -537,12 +560,9 @@ export class UnitRenderer {
           : undefined;
       borderColor = parseColor(currentUnitColor || "#ffffff");
       borderWidth = SELECTED_BORDER_WIDTH;
-    } else if (
-      unitsMoved.includes(unit.id) ||
-      unitsCharged?.includes(unit.id) ||
-      unitsAttacked?.includes(unit.id)
-    ) {
-      unitColor = 0x666666;
+    } else if (hasUsedState) {
+      borderColor = 0x777777;
+      borderWidth = DEFAULT_BORDER_WIDTH;
     }
 
     // Handle red outline for targets
@@ -556,43 +576,63 @@ export class UnitRenderer {
 
     const unitCircle = new PIXI.Graphics();
 
-    let finalUnitColor = unitColor;
+    let finalSocleFill = socleFill;
     let finalBorderColor = borderColor;
     let circleAlpha = 1.0;
     if (unitWithFlags.isGhost) {
       // Ghost uses move-preview icon palette, but darker.
-      finalUnitColor = this.getCSSColor("--icon-move-bg-color");
+      finalSocleFill = this.getCSSColor("--icon-move-bg-color");
       finalBorderColor = this.getCSSColor("--icon-move-color");
       circleAlpha = 0.45;
     }
 
     // Just-killed unit styling (show as grey ghost before removal)
     if (unitWithFlags.isJustKilled) {
-      finalUnitColor = 0x444444; // Dark grey fill
+      finalSocleFill = 0x444444; // Dark grey fill
       finalBorderColor = 0x666666; // Medium grey border
       circleAlpha = 0.5;
     }
 
     const displayCircle = resolveBaseSizeForUnitDisplay(unit);
     const baseSizeVal = displayCircle > 1 ? displayCircle : undefined;
+    const nrBase = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
     const circleRadius = baseSizeVal
       ? (baseSizeVal / 2) * 1.5 * HEX_RADIUS
       : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
 
-    unitCircle.beginFill(finalUnitColor);
+    unitCircle.beginFill(finalSocleFill);
     unitCircle.lineStyle(borderWidth, finalBorderColor);
-    unitCircle.drawCircle(centerX, centerY, circleRadius);
+    if (nrBase) {
+      if (nrBase.kind === "oval") {
+        unitCircle.drawEllipse(centerX, centerY, nrBase.outerRx, nrBase.outerRy);
+      } else {
+        const h = nrBase.squareHalf;
+        const s = nrBase.squareSide;
+        unitCircle.drawRoundedRect(centerX - h, centerY - h, s, s, getSquareCornerRadiusPx());
+      }
+    } else {
+      unitCircle.drawCircle(centerX, centerY, circleRadius);
+    }
     unitCircle.endFill();
     unitCircle.alpha = circleAlpha;
     unitCircle.zIndex = iconZIndex;
 
-    // Add click handlers for normal units (with charge-cancel on re-click)
-    unitCircle.eventMode = "static";
-    unitCircle.cursor = "pointer";
-    this.attachTooltipHandlers(unitCircle);
-    // Always add click handlers so we can detect clicks on all units
+    if (isPreview) {
+      unitCircle.eventMode = "none";
+      unitCircle.cursor = "default";
+    } else {
+      // Add click handlers for normal units (with charge-cancel on re-click)
+      unitCircle.eventMode = "static";
+      unitCircle.cursor = "pointer";
+      this.attachTooltipHandlers(unitCircle);
+    }
 
-    if (phase === "charge" && selectedUnitId === unit.id && this.props.mode === "chargePreview") {
+    if (
+      !isPreview &&
+      phase === "charge" &&
+      selectedUnitId === unit.id &&
+      this.props.mode === "chargePreview"
+    ) {
       // Handle clicks on active unit in chargePreview mode (left = deselect, right = skip)
       unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
         if (e.button === 0 || e.button === 2) {
@@ -612,7 +652,7 @@ export class UnitRenderer {
           );
         }
       });
-    } else {
+    } else if (!isPreview) {
       // Block enemy unit clicks when no friendly unit is selected
       let addClickHandler = true;
 
@@ -775,6 +815,7 @@ export class UnitRenderer {
 
     const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
     const isRuleChoiceHighlighted =
+      !isPreview &&
       ruleChoiceHighlightedUnitId !== null &&
       Number.isFinite(unitIdNum) &&
       Number.isFinite(ruleChoiceHighlightedUnitId) &&
@@ -782,7 +823,22 @@ export class UnitRenderer {
     if (isRuleChoiceHighlighted) {
       const markerCircle = new PIXI.Graphics();
       markerCircle.lineStyle(borderWidth + 2, 0xffd700, 0.95);
-      markerCircle.drawCircle(centerX, centerY, circleRadius + 5);
+      if (nrBase) {
+        if (nrBase.kind === "oval") {
+          markerCircle.drawEllipse(centerX, centerY, nrBase.outerRx + 5, nrBase.outerRy + 5);
+        } else {
+          const pad = 5;
+          markerCircle.drawRoundedRect(
+            centerX - nrBase.squareHalf - pad,
+            centerY - nrBase.squareHalf - pad,
+            nrBase.squareSide + pad * 2,
+            nrBase.squareSide + pad * 2,
+            getSquareCornerRadiusPx() + 2,
+          );
+        }
+      } else {
+        markerCircle.drawCircle(centerX, centerY, circleRadius + 5);
+      }
       markerCircle.zIndex = iconZIndex + 1;
       markerCircle.eventMode = "none";
       this.target.addChild(markerCircle);
@@ -802,6 +858,9 @@ export class UnitRenderer {
       current_player,
       onConfirmMove,
       selectedUnitId,
+      unitsMoved,
+      unitsCharged,
+      unitsAttacked,
     } = this.props;
 
     const unitIconScale = unit.ICON_SCALE || ICON_SCALE;
@@ -820,9 +879,13 @@ export class UnitRenderer {
 
         const displayIcon = resolveBaseSizeForUnitDisplay(unit);
         const baseSizeIcon = displayIcon > 1 ? displayIcon : undefined;
-        const iconDiameter = baseSizeIcon
-          ? baseSizeIcon * 1.5 * HEX_RADIUS
-          : HEX_RADIUS * unitIconScale;
+        const nonRoundIconR = getNonRoundIconRadius(unit, HEX_RADIUS);
+        const iconDiameter =
+          nonRoundIconR != null
+            ? nonRoundIconR * 2
+            : baseSizeIcon
+              ? baseSizeIcon * 1.5 * HEX_RADIUS
+              : HEX_RADIUS * unitIconScale;
 
         const sprite = new PIXI.Sprite(texture);
         sprite.anchor.set(0.5);
@@ -831,6 +894,15 @@ export class UnitRenderer {
         sprite.height = iconDiameter;
         sprite.zIndex = iconZIndex;
         sprite.alpha = 1.0; // Always fully opaque
+
+        let iconMask: PIXI.Graphics | null = null;
+        if (nonRoundIconR != null) {
+          iconMask = new PIXI.Graphics();
+          iconMask.beginFill(0xffffff);
+          iconMask.drawCircle(centerX, centerY, nonRoundIconR);
+          iconMask.endFill();
+          sprite.mask = iconMask;
+        }
 
         interface UnitWithFlags extends Unit {
           isJustKilled?: boolean;
@@ -863,6 +935,18 @@ export class UnitRenderer {
             sprite.alpha = 0.8;
           }
         }
+
+        const iconUsedState =
+          !isPreview &&
+          !unitWithFlags.isGhost &&
+          !unitWithFlags.isJustKilled &&
+          (unitsMoved.includes(unit.id) ||
+            Boolean(unitsCharged?.includes(unit.id)) ||
+            Boolean(unitsAttacked?.includes(unit.id)));
+        if (iconUsedState) {
+          sprite.alpha *= 0.88;
+        }
+
         // Unified: movePreview and shoot phase use same greying logic
         const hasShootingPreviewContextSprite =
           (phase === "shoot" && selectedUnitId !== null) || this.props.mode === "movePreview";
@@ -884,6 +968,9 @@ export class UnitRenderer {
           }
         }
 
+        if (iconMask) {
+          this.target.addChild(iconMask);
+        }
         this.target.addChild(sprite);
       } catch {
         this.renderTextFallback(iconZIndex);
@@ -935,16 +1022,42 @@ export class UnitRenderer {
     const {
       centerX,
       centerY,
+      unit,
       HEX_RADIUS,
       ELIGIBLE_OUTLINE_WIDTH,
       ELIGIBLE_COLOR,
       ELIGIBLE_OUTLINE_ALPHA,
+      phase,
+      fightSubPhase,
     } = this.props;
 
+    const nrEl = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
     const eligibleOutline = new PIXI.Graphics();
-    const circleRadius = ((HEX_RADIUS * unitIconScale) / 2) * 1.1;
     eligibleOutline.lineStyle(ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA);
-    eligibleOutline.drawCircle(centerX, centerY, circleRadius);
+    const outlinePad = 1.045;
+    if (nrEl) {
+      if (nrEl.kind === "oval") {
+        eligibleOutline.drawEllipse(
+          centerX,
+          centerY,
+          nrEl.outerRx * outlinePad,
+          nrEl.outerRy * outlinePad,
+        );
+      } else {
+        const sh = nrEl.squareHalf * outlinePad;
+        const ss = nrEl.squareSide * outlinePad;
+        eligibleOutline.drawRoundedRect(
+          centerX - sh,
+          centerY - sh,
+          ss,
+          ss,
+          getSquareCornerRadiusPx() + 2,
+        );
+      }
+    } else {
+      const circleRadius = ((HEX_RADIUS * unitIconScale) / 2) * 1.1;
+      eligibleOutline.drawCircle(centerX, centerY, circleRadius);
+    }
 
     // Use same z-index calculation as icons to ensure proper layering
     const unitZIndexRange = 149;
@@ -960,7 +1073,6 @@ export class UnitRenderer {
     this.target.addChild(eligibleOutline);
 
     // NEW: Add red circle around green circle for charged units in fight phase
-    const { unit, phase, fightSubPhase } = this.props;
     if (
       phase === "fight" &&
       fightSubPhase === "charging" &&
@@ -968,9 +1080,32 @@ export class UnitRenderer {
       isEligible
     ) {
       const chargedOutline = new PIXI.Graphics();
-      const outerCircleRadius = circleRadius + ELIGIBLE_OUTLINE_WIDTH + 2; // Slightly larger than green circle
-      chargedOutline.lineStyle(ELIGIBLE_OUTLINE_WIDTH, 0xff0000, ELIGIBLE_OUTLINE_ALPHA); // Red color
-      chargedOutline.drawCircle(centerX, centerY, outerCircleRadius);
+      chargedOutline.lineStyle(ELIGIBLE_OUTLINE_WIDTH, 0xff0000, ELIGIBLE_OUTLINE_ALPHA);
+      const redPad = 1.07;
+      if (nrEl) {
+        if (nrEl.kind === "oval") {
+          chargedOutline.drawEllipse(
+            centerX,
+            centerY,
+            nrEl.outerRx * redPad,
+            nrEl.outerRy * redPad,
+          );
+        } else {
+          const sh = nrEl.squareHalf * redPad;
+          const ss = nrEl.squareSide * redPad;
+          chargedOutline.drawRoundedRect(
+            centerX - sh,
+            centerY - sh,
+            ss,
+            ss,
+            getSquareCornerRadiusPx() + 3,
+          );
+        }
+      } else {
+        const circleRadius = ((HEX_RADIUS * unitIconScale) / 2) * 1.1;
+        const outerCircleRadius = circleRadius + ELIGIBLE_OUTLINE_WIDTH + 2;
+        chargedOutline.drawCircle(centerX, centerY, outerCircleRadius);
+      }
       chargedOutline.zIndex = 251; // Above green circle
       this.target.addChild(chargedOutline);
     }
@@ -1270,20 +1405,25 @@ export class UnitRenderer {
       HEX_HORIZ_SPACING,
       HP_BAR_WIDTH_RATIO,
       HP_BAR_HEIGHT,
+      UNIT_CIRCLE_RADIUS_RATIO,
     } = this.props;
 
     if (!unit.HP_MAX) return; // Only skip if no HP_MAX, not if isPreview
 
-    // Icon visual radius: matches the circle drawn in render()
+    const nrHp = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
     const hpDisplayBase = resolveBaseSizeForUnitDisplay(unit);
     const baseSizeVal = hpDisplayBase > 1 ? hpDisplayBase : 0;
-    const iconRadius = baseSizeVal > 0
-      ? (baseSizeVal / 2) * HEX_HORIZ_SPACING
-      : (HEX_RADIUS * unitIconScale) / 2;
-
-    const HP_BAR_WIDTH = (baseSizeVal > 0 ? iconRadius : HEX_RADIUS * unitIconScale) * HP_BAR_WIDTH_RATIO;
+    const tokenTop = getUnitTokenTopExtentY(
+      unit,
+      HEX_RADIUS,
+      HEX_HORIZ_SPACING,
+      UNIT_CIRCLE_RADIUS_RATIO,
+    );
+    const hpWidthBase = getHpBarWidthBase(unit, HEX_RADIUS, HEX_HORIZ_SPACING, unitIconScale);
+    const HP_BAR_WIDTH =
+      (baseSizeVal > 0 || nrHp ? hpWidthBase : HEX_RADIUS * unitIconScale) * HP_BAR_WIDTH_RATIO;
     const barX = centerX - HP_BAR_WIDTH / 2;
-    const barY = centerY - iconRadius - HP_BAR_HEIGHT - 1;
+    const barY = centerY - tokenTop - HP_BAR_HEIGHT - 1;
 
     // Check if this unit is being previewed for shooting
     const isTargetPreviewed =
@@ -1591,7 +1731,7 @@ export class UnitRenderer {
     this.target.addChild(shootText);
   }
 
-  private renderAdvanceButton(unitIconScale: number, iconZIndex: number): void {
+  private renderAdvanceButton(_unitIconScale: number, iconZIndex: number): void {
     const {
       unit,
       phase,
@@ -1620,11 +1760,14 @@ export class UnitRenderer {
     if (!isActiveShooting) return;
 
     // Position: above HP bar (same calculation as renderHPBar)
-    const { HEX_HORIZ_SPACING } = this.props;
-    const advDisplayBase = resolveBaseSizeForUnitDisplay(unit);
-    const baseSizeAdv = advDisplayBase > 1 ? advDisplayBase : 0;
-    const iconRadiusAdv = baseSizeAdv > 0 ? (baseSizeAdv / 2) * HEX_HORIZ_SPACING : (HEX_RADIUS * unitIconScale) / 2;
-    const barY = centerY - iconRadiusAdv - this.props.HP_BAR_HEIGHT - 1;
+    const { HEX_HORIZ_SPACING, UNIT_CIRCLE_RADIUS_RATIO } = this.props;
+    const tokenTopAdv = getUnitTokenTopExtentY(
+      unit,
+      HEX_RADIUS,
+      HEX_HORIZ_SPACING,
+      UNIT_CIRCLE_RADIUS_RATIO,
+    );
+    const barY = centerY - tokenTopAdv - this.props.HP_BAR_HEIGHT - 1;
     const squareSizeRatio = this.getCSSNumber("--icon-square-standard-size", 0.5);
     const squareSize = HEX_RADIUS * squareSizeRatio;
     const positionX = centerX;
@@ -1658,9 +1801,18 @@ export class UnitRenderer {
     this.target.addChild(iconSprite);
   }
 
-  private renderWeaponSelectionIcon(unitIconScale: number, iconZIndex: number): void {
-    const { unit, phase, current_player, centerX, centerY, HEX_RADIUS, gameState } =
-      this.props;
+  private renderWeaponSelectionIcon(_unitIconScale: number, iconZIndex: number): void {
+    const {
+      unit,
+      phase,
+      current_player,
+      centerX,
+      centerY,
+      HEX_RADIUS,
+      HEX_HORIZ_SPACING,
+      UNIT_CIRCLE_RADIUS_RATIO,
+      gameState,
+    } = this.props;
 
     if (this.props.useOverlayIcons) {
       return;
@@ -1705,11 +1857,13 @@ export class UnitRenderer {
     // Note: The icon allows manual weapon selection even if auto-selection is enabled
 
     // Position: to the right of Advance icon (same Y position as Advance)
-    const { HEX_HORIZ_SPACING: hexHS } = this.props;
-    const wpnDisplayBase = resolveBaseSizeForUnitDisplay(unit);
-    const baseSizeWpn = wpnDisplayBase > 1 ? wpnDisplayBase : 0;
-    const iconRadiusWpn = baseSizeWpn > 0 ? (baseSizeWpn / 2) * hexHS : (HEX_RADIUS * unitIconScale) / 2;
-    const barY = centerY - iconRadiusWpn - this.props.HP_BAR_HEIGHT - 1;
+    const tokenTopWpn = getUnitTokenTopExtentY(
+      unit,
+      HEX_RADIUS,
+      HEX_HORIZ_SPACING,
+      UNIT_CIRCLE_RADIUS_RATIO,
+    );
+    const barY = centerY - tokenTopWpn - this.props.HP_BAR_HEIGHT - 1;
     const squareSizeRatio = this.getCSSNumber("--icon-square-standard-size", 0.5);
     const squareSize = HEX_RADIUS * squareSizeRatio;
     const positionY = barY - squareSize / 2 - Math.max(2, this.props.HP_BAR_HEIGHT * 0.7);
