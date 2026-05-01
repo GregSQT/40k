@@ -1070,34 +1070,32 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
     if not unit:
         return
 
-    # Initialize cache
-    unit["los_cache"] = {}
-    
     # Get unit position from cache (single source of truth)
     unit_pos = get_unit_position(unit, game_state)
     if unit_pos is None:
+        unit["los_cache"] = {}
         return
     unit_col, unit_row = unit_pos
-    
+
     # Get units_cache (must exist, built at reset)
     if "units_cache" not in game_state:
         raise KeyError("units_cache must exist (built at reset)")
-    
+
     units_cache = game_state["units_cache"]
-    
+
     # If units_cache is empty, los_cache remains empty (no units)
     if not units_cache:
+        unit["los_cache"] = {}
         return
-    
+
     # Get unit's player for filtering enemies
     unit_player = int(unit["player"]) if unit["player"] is not None else None
-    
+
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
     los_visibility_min_ratio = float(game_rules.get("los_visibility_min_ratio", 0.0))
-    
-    # Defensive: ensure los_cache exists before loop (handles edge cases)
-    if "los_cache" not in unit:
-        unit["los_cache"] = {}
+
+    # Build in a local dict then assign once (avoids KeyError if unit["los_cache"] is cleared mid-build).
+    los_map: Dict[str, bool] = {}
 
     # Calculate LoS for each enemy in units_cache (only alive enemies — dead must not appear in pool)
     for target_id, target_data in units_cache.items():
@@ -1136,7 +1134,7 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
         target_visibility_ratio = visible_hexes / len(target_hexes)
         has_los = target_visibility_ratio >= los_visibility_min_ratio
 
-        unit["los_cache"][str(target_id)] = has_los
+        los_map[str(target_id)] = has_los
 
         if os.environ.get("LOS_DEBUG") == "1":
             import sys
@@ -1152,6 +1150,8 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
             msg = f"[LOS_DEBUG] build_unit_los_cache unit={unit_id} target={target_id} ({unit_col},{unit_row})->({target_col},{target_row}) has_los={has_los} {topo_str} ep={ep} turn={turn}\n"
             sys.stderr.write(msg)
             sys.stderr.flush()
+
+    unit["los_cache"] = los_map
 
 
 def _emit_shoot_activation_perf(
