@@ -45,6 +45,7 @@ import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import TutorialOverlay from "./TutorialOverlay";
 import { UnitStatusTable } from "./UnitStatusTable";
+import { resolveBaseSizeForUnitDisplay } from "../utils/hexFootprint";
 
 type RuleChoicePrompt = {
   trigger: "on_deploy" | "turn_start" | "player_turn_start" | "phase_start" | "activation_start";
@@ -82,9 +83,7 @@ function getUnitIllustrationSrc(unit: Unit): string {
 }
 
 function getUnitIllustrationScale(unit: Unit): number {
-  if (typeof unit.BASE_SIZE !== "number") {
-    throw new Error(`Unit ${unit.id} missing numeric BASE_SIZE for illustration scale`);
-  }
+  const effectiveBaseSize = resolveBaseSizeForUnitDisplay(unit);
   if (
     typeof unit.ILLUSTRATION_RATIO !== "number" ||
     !Number.isFinite(unit.ILLUSTRATION_RATIO) ||
@@ -94,7 +93,7 @@ function getUnitIllustrationScale(unit: Unit): number {
   }
   const clampedBaseSize = Math.min(
     UNIT_ILLUSTRATION_MAX_BASE_SIZE,
-    Math.max(UNIT_ILLUSTRATION_MIN_BASE_SIZE, unit.BASE_SIZE)
+    Math.max(UNIT_ILLUSTRATION_MIN_BASE_SIZE, effectiveBaseSize)
   );
   const normalizedBaseSize =
     (clampedBaseSize - UNIT_ILLUSTRATION_MIN_BASE_SIZE) /
@@ -2802,8 +2801,8 @@ export const BoardWithAPI: React.FC = () => {
       {false && (
         <div className="scoring-panel">
           {(() => {
-            const p1Score = victoryPoints ? (victoryPoints[1] ?? victoryPoints["1"] ?? 0) : 0;
-            const p2Score = victoryPoints ? (victoryPoints[2] ?? victoryPoints["2"] ?? 0) : 0;
+            const p1Score = victoryPoints?.[1] ?? victoryPoints?.["1"] ?? 0;
+            const p2Score = victoryPoints?.[2] ?? victoryPoints?.["2"] ?? 0;
             const total = p1Score + p2Score;
             const p1Percent = total > 0 ? (p1Score / total) * 100 : 50;
             const p2Percent = 100 - p1Percent;
@@ -2851,8 +2850,8 @@ export const BoardWithAPI: React.FC = () => {
             <div className="deployment-panel__picker-content" style={{ display: "block" }}>
               <div className="deployment-panel__picker-tooltip">
                 {(() => {
-                  const p1 = victoryPoints ? (victoryPoints[1] ?? victoryPoints["1"] ?? 0) : 0;
-                  const p2 = victoryPoints ? (victoryPoints[2] ?? victoryPoints["2"] ?? 0) : 0;
+                  const p1 = victoryPoints?.[1] ?? victoryPoints?.["1"] ?? 0;
+                  const p2 = victoryPoints?.[2] ?? victoryPoints?.["2"] ?? 0;
                   const winner = apiProps.gameState?.winner;
                   const winnerText =
                     winner === 1 ? "Winner: Player 1" : winner === 2 ? "Winner: Player 2" : "Draw";
@@ -3294,7 +3293,14 @@ export const BoardWithAPI: React.FC = () => {
             onCancelMove={isGameOver ? () => {} : apiProps.onCancelMove}
             onShoot={isGameOver ? () => {} : apiProps.onShoot}
             onSkipShoot={isGameOver ? () => {} : apiProps.onSkipShoot}
-            onSkipFight={isGameOver ? () => {} : apiProps.onFightPhaseRightClick}
+            onSkipFight={
+              isGameOver
+                ? () => {}
+                : (unitId: string | number) => {
+                    const id = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+                    void apiProps.onFightPhaseRightClick?.(id);
+                  }
+            }
             onStartTargetPreview={isGameOver ? () => {} : apiProps.onStartTargetPreview}
             onCancelTargetPreview={() => {
               const targetPreview = apiProps.targetPreview as TargetPreview | null;

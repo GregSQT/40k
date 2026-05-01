@@ -141,6 +141,442 @@ export function detachMovePreviewLayerCacheFromStage(): void {
   }
 }
 
+/** Bump when la définition de l’empreinte « structure highlights » change (hors clé polygone move). */
+const BOARD_DISPLAY_HIGHLIGHT_STRUCTURAL_FP_V = 1;
+
+function digestHighlightCellList(cells: Array<{ col: number; row: number }> | undefined): number {
+  const s = new Set<string>();
+  for (const c of cells ?? []) {
+    s.add(`${c.col},${c.row}`);
+  }
+  return hashStringSetStable(s);
+}
+
+function digestChargeCellList(
+  cells: Array<HighlightCell | [number, number] | { col: number; row: number }> | undefined,
+): number {
+  const s = new Set<string>();
+  for (const c of cells ?? []) {
+    const cc = Array.isArray(c) ? c[0] : c.col;
+    const cr = Array.isArray(c) ? c[1] : c.row;
+    s.add(`${cc},${cr}`);
+  }
+  return hashStringSetStable(s);
+}
+
+export interface DrawBoardPartialRedrawFingerprint {
+  structuralKey: string;
+  /** Même sémantique que ``movePreviewCacheKey`` dans ``drawBoard`` ; ``null`` si pas de calque polygone move. */
+  movePolygonCacheKey: string | null;
+}
+
+/**
+ * Empreintes pour éviter un ``drawBoard`` complet quand seuls les highlights move-polygone changent
+ * (ou quand rien ne change — réutilisation du conteneur ``highlights`` à travers le destroy stage BoardPvp).
+ */
+export function computeDrawBoardPartialRedrawFingerprint(
+  app: PIXI.Application,
+  boardConfig: BoardConfig,
+  options?: DrawBoardOptions,
+): DrawBoardPartialRedrawFingerprint {
+  const {
+    availableCells = [],
+    attackCells = [],
+    coverCells = [],
+    chargeCells = [],
+    advanceCells = [],
+    phase = "move",
+    interactionPhase = phase,
+    selectedUnitId = null,
+    mode = "select",
+    moveDestPoolRef,
+    footprintZonePoolRef,
+    moveDestinationAnchorsFromState,
+    movePreviewFootprintSpanFromState,
+    pendingMoveAfterShooting = false,
+    chargeDestPoolRef,
+    selectedUnitBaseSize,
+    selectedUnitAnchor,
+    movePreviewFootprintMaskLoops = null,
+    chargeEngagementHalo,
+    fightEngagementRing,
+  } = options || {};
+
+  const useAdvanceMovePoolLikeMove = mode === "advancePreview";
+  const usePostShootMovePoolLikeMove =
+    interactionPhase === "shoot" && pendingMoveAfterShooting === true;
+  const usePileInPoolLikeMoveHoisted =
+    interactionPhase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview");
+  const useConsolidationPreview =
+    interactionPhase === "fight" && mode === "consolidationPreview";
+
+  const spanFromEngine =
+    typeof movePreviewFootprintSpanFromState === "number" &&
+    Number.isFinite(movePreviewFootprintSpanFromState) &&
+    movePreviewFootprintSpanFromState >= 1
+      ? Math.floor(movePreviewFootprintSpanFromState)
+      : null;
+  const footprintSpanForPool = Math.max(1, spanFromEngine ?? selectedUnitBaseSize ?? 1);
+
+  const anchorsFromStatePool: Set<string> | null = (() => {
+    if (moveDestinationAnchorsFromState == null) return null;
+    const s = new Set<string>();
+    addHexKeysToSet(moveDestinationAnchorsFromState, s);
+    return s.size > 0 ? s : null;
+  })();
+
+  const allowMovePoolFallbackFromGameState =
+    selectedUnitId != null ||
+    mode === "advancePreview" ||
+    (interactionPhase === "shoot" && pendingMoveAfterShooting) ||
+    ((interactionPhase === "move" || interactionPhase === "command") && mode === "movePreview");
+
+  const movePoolForDiskDraw: Set<string> | null =
+    moveDestPoolRef?.current && moveDestPoolRef.current.size > 0
+      ? moveDestPoolRef.current
+      : allowMovePoolFallbackFromGameState && anchorsFromStatePool && anchorsFromStatePool.size > 0
+        ? anchorsFromStatePool
+        : null;
+
+  const useMoveDestPoolCircleLayer =
+    (interactionPhase === "move" ||
+      useAdvanceMovePoolLikeMove ||
+      usePostShootMovePoolLikeMove ||
+      usePileInPoolLikeMoveHoisted) &&
+    !!movePoolForDiskDraw &&
+    movePoolForDiskDraw.size > 0;
+
+  const useChargeDestPoolDiskDraw =
+    interactionPhase === "charge" &&
+    (mode === "select" || mode === "chargePreview") &&
+    !!chargeDestPoolRef?.current &&
+    chargeDestPoolRef.current.size > 0;
+
+  const moveAdvanceOrPileInPickPool: Set<string> | null = (() => {
+    if (
+      interactionPhase === "move" ||
+      useAdvanceMovePoolLikeMove ||
+      usePostShootMovePoolLikeMove
+    ) {
+      return movePoolForDiskDraw && movePoolForDiskDraw.size > 0 ? movePoolForDiskDraw : null;
+    }
+    if (usePileInPoolLikeMoveHoisted) {
+      if (moveDestPoolRef?.current && moveDestPoolRef.current.size > 0) {
+        return moveDestPoolRef.current;
+      }
+      return null;
+    }
+    return null;
+  })();
+
+  const clickableBranchExcluded =
+    interactionPhase === "charge" && mode === "select" ? 1 : 0;
+  const clickableAvailDigest =
+    interactionPhase === "charge" && mode === "select" ? 0 : digestHighlightCellList(availableCells);
+
+  const structuralPayload = {
+    v: BOARD_DISPLAY_HIGHLIGHT_STRUCTURAL_FP_V,
+    cols: boardConfig.cols,
+    rows: boardConfig.rows,
+    hex_radius: boardConfig.hex_radius,
+    margin: boardConfig.margin,
+    res: app.renderer.resolution,
+    phase,
+    interactionPhase,
+    mode,
+    selectedUnitId,
+    pendingMoveAfterShooting,
+    footprintSpanForPool,
+    selectedUnitBaseSize: selectedUnitBaseSize ?? null,
+    spanFromEngine,
+    useMoveDestPoolCircleLayer,
+    useConsolidationPreview,
+    useChargeDestPoolDiskDraw,
+    chargeDestPoolHash:
+      useChargeDestPoolDiskDraw && chargeDestPoolRef?.current
+        ? hashStringSetStable(chargeDestPoolRef.current)
+        : null,
+    digestAvail: clickableAvailDigest,
+    digestAtk: digestHighlightCellList(attackCells),
+    digestCov: digestHighlightCellList(coverCells),
+    digestChg: digestChargeCellList(chargeCells),
+    digestAdv: digestHighlightCellList(advanceCells),
+    clickableBranchExcluded,
+    movePickPoolHash:
+      moveAdvanceOrPileInPickPool != null && moveAdvanceOrPileInPickPool.size > 0
+        ? hashStringSetStable(moveAdvanceOrPileInPickPool)
+        : null,
+    moveRefPoolHash:
+      moveDestPoolRef?.current && moveDestPoolRef.current.size > 0
+        ? hashStringSetStable(moveDestPoolRef.current)
+        : null,
+    anchorsDigest:
+      anchorsFromStatePool != null && anchorsFromStatePool.size > 0
+        ? hashStringSetStable(anchorsFromStatePool)
+        : null,
+    chargeEngagementHalo: chargeEngagementHalo ?? null,
+    fightEngagementRing: fightEngagementRing ?? null,
+  };
+
+  const structuralKey = JSON.stringify(structuralPayload);
+
+  let movePolygonCacheKey: string | null = null;
+  if (useMoveDestPoolCircleLayer && movePoolForDiskDraw) {
+    if (selectedUnitAnchor == null) {
+      movePolygonCacheKey = null;
+    } else {
+      const HEX_RADIUS = boardConfig.hex_radius;
+      const MARGIN = boardConfig.margin;
+      const HEX_WIDTH = 1.5 * HEX_RADIUS;
+      const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+      const HEX_HORIZ_SPACING = HEX_WIDTH;
+      const HEX_VERT_SPACING = HEX_HEIGHT;
+      const footprintRadius = (footprintSpanForPool / 2) * HEX_HORIZ_SPACING;
+      const ADVANCE_DESTINATION_HEX_FILL = 0xff8c00;
+      const HIGHLIGHT_COLOR = parseColor(boardConfig.colors.highlight!);
+      const advanceZoneFillColor = ADVANCE_DESTINATION_HEX_FILL;
+      const poolFillColor = useAdvanceMovePoolLikeMove ? advanceZoneFillColor : HIGHLIGHT_COLOR;
+      const moveSpriteName = useAdvanceMovePoolLikeMove
+        ? "advance-dest-pool"
+        : usePileInPoolLikeMoveHoisted
+          ? "fight-pile-in-dest-pool"
+          : "move-dest-pool";
+      const footprintMaskHexPool =
+        footprintZonePoolRef?.current && footprintZonePoolRef.current.size > 0
+          ? footprintZonePoolRef.current
+          : null;
+      const poolHash = hashStringSetStable(movePoolForDiskDraw);
+      const footprintPoolHash =
+        footprintMaskHexPool && footprintMaskHexPool.size > 0
+          ? hashStringSetStable(footprintMaskHexPool)
+          : null;
+      const loopsFp = fingerprintPrecomputedMaskLoops(movePreviewFootprintMaskLoops ?? null);
+      movePolygonCacheKey = JSON.stringify({
+        v: MOVE_PREVIEW_LAYER_RENDER_CACHE_VERSION,
+        res: app.renderer.resolution,
+        ip: interactionPhase,
+        mo: mode,
+        pms: pendingMoveAfterShooting,
+        sn: moveSpriteName,
+        ph: poolHash,
+        psz: movePoolForDiskDraw.size,
+        fph: footprintPoolHash,
+        fpsz: footprintMaskHexPool?.size ?? 0,
+        lf: loopsFp,
+        ghr: HEX_RADIUS,
+        fr: footprintRadius,
+        pfc: poolFillColor,
+        ac: selectedUnitAnchor.col,
+        ar: selectedUnitAnchor.row,
+        fsp: footprintSpanForPool,
+        sp: {
+          hhs: HEX_HORIZ_SPACING,
+          hw: HEX_WIDTH,
+          hh: HEX_HEIGHT,
+          hvs: HEX_VERT_SPACING,
+          mg: MARGIN,
+        },
+        mvmax: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
+        covA: MOVE_PREVIEW_COVERAGE_FILL_ALPHA,
+      });
+    }
+  }
+
+  return { structuralKey, movePolygonCacheKey };
+}
+
+/**
+ * Met à jour uniquement le sous-arbre ``move-preview-layer-cache-root`` dans un conteneur
+ * ``highlights`` existant (même logique que le bloc correspondant dans ``drawBoard``).
+ */
+export function updateMovePreviewPolygonLayerInHighlightContainer(
+  app: PIXI.Application,
+  boardConfig: BoardConfig,
+  highlightContainer: PIXI.Container,
+  options?: DrawBoardOptions,
+): void {
+  if (!boardConfig || !app.stage) {
+    throw new Error(
+      "[updateMovePreviewPolygonLayerInHighlightContainer] boardConfig et app.stage sont requis",
+    );
+  }
+
+  detachMovePreviewLayerCacheFromStage();
+
+  const orphan = highlightContainer.children.find((c) => c.name === "move-preview-layer-cache-root");
+  if (orphan) {
+    highlightContainer.removeChild(orphan);
+    orphan.destroy({ children: true, texture: false, baseTexture: false });
+  }
+  disposeMovePreviewLayerRootCache();
+
+  const {
+    interactionPhase = "move",
+    mode = "select",
+    pendingMoveAfterShooting = false,
+    moveDestPoolRef,
+    footprintZonePoolRef,
+    moveDestinationAnchorsFromState,
+    movePreviewFootprintSpanFromState,
+    selectedUnitId = null,
+    selectedUnitBaseSize,
+    selectedUnitAnchor,
+    movePreviewFootprintMaskLoops = null,
+  } = options || {};
+
+  const useAdvanceMovePoolLikeMove = mode === "advancePreview";
+  const usePostShootMovePoolLikeMove =
+    interactionPhase === "shoot" && pendingMoveAfterShooting === true;
+  const usePileInPoolLikeMoveHoisted =
+    interactionPhase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview");
+
+  const spanFromEngine =
+    typeof movePreviewFootprintSpanFromState === "number" &&
+    Number.isFinite(movePreviewFootprintSpanFromState) &&
+    movePreviewFootprintSpanFromState >= 1
+      ? Math.floor(movePreviewFootprintSpanFromState)
+      : null;
+  const footprintSpanForPool = Math.max(1, spanFromEngine ?? selectedUnitBaseSize ?? 1);
+
+  const anchorsFromStatePool: Set<string> | null = (() => {
+    if (moveDestinationAnchorsFromState == null) return null;
+    const s = new Set<string>();
+    addHexKeysToSet(moveDestinationAnchorsFromState, s);
+    return s.size > 0 ? s : null;
+  })();
+
+  const allowMovePoolFallbackFromGameState =
+    selectedUnitId != null ||
+    mode === "advancePreview" ||
+    (interactionPhase === "shoot" && pendingMoveAfterShooting) ||
+    ((interactionPhase === "move" || interactionPhase === "command") && mode === "movePreview");
+
+  const movePoolForDiskDraw: Set<string> | null =
+    moveDestPoolRef?.current && moveDestPoolRef.current.size > 0
+      ? moveDestPoolRef.current
+      : allowMovePoolFallbackFromGameState && anchorsFromStatePool && anchorsFromStatePool.size > 0
+        ? anchorsFromStatePool
+        : null;
+
+  const useMoveDestPoolCircleLayer =
+    (interactionPhase === "move" ||
+      useAdvanceMovePoolLikeMove ||
+      usePostShootMovePoolLikeMove ||
+      usePileInPoolLikeMoveHoisted) &&
+    !!movePoolForDiskDraw &&
+    movePoolForDiskDraw.size > 0;
+
+  if (!useMoveDestPoolCircleLayer) {
+    disposeMovePreviewRenderCachesFull();
+    return;
+  }
+
+  const HEX_RADIUS = boardConfig.hex_radius;
+  const MARGIN = boardConfig.margin;
+  const HEX_WIDTH = 1.5 * HEX_RADIUS;
+  const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+  const HEX_HORIZ_SPACING = HEX_WIDTH;
+  const HEX_VERT_SPACING = HEX_HEIGHT;
+  const ADVANCE_DESTINATION_HEX_FILL = 0xff8c00;
+  const HIGHLIGHT_COLOR = parseColor(boardConfig.colors.highlight!);
+  const advanceZoneFillColor = ADVANCE_DESTINATION_HEX_FILL;
+  const poolFillColor = useAdvanceMovePoolLikeMove ? advanceZoneFillColor : HIGHLIGHT_COLOR;
+  const moveSpriteName = useAdvanceMovePoolLikeMove
+    ? "advance-dest-pool"
+    : usePileInPoolLikeMoveHoisted
+      ? "fight-pile-in-dest-pool"
+      : "move-dest-pool";
+
+  if (selectedUnitAnchor == null) {
+    throw new Error(
+      "[updateMovePreviewPolygonLayerInHighlightContainer] ``selectedUnitAnchor`` requis — " +
+        `spriteName=${moveSpriteName}`,
+    );
+  }
+
+  const footprintRadius = (footprintSpanForPool / 2) * HEX_HORIZ_SPACING;
+  const footprintMaskHexPool =
+    footprintZonePoolRef?.current && footprintZonePoolRef.current.size > 0
+      ? footprintZonePoolRef.current
+      : null;
+  const poolHash = hashStringSetStable(movePoolForDiskDraw);
+  const footprintPoolHash =
+    footprintMaskHexPool && footprintMaskHexPool.size > 0
+      ? hashStringSetStable(footprintMaskHexPool)
+      : null;
+  const loopsFp = fingerprintPrecomputedMaskLoops(movePreviewFootprintMaskLoops ?? null);
+
+  const movePreviewCacheKey = JSON.stringify({
+    v: MOVE_PREVIEW_LAYER_RENDER_CACHE_VERSION,
+    res: app.renderer.resolution,
+    ip: interactionPhase,
+    mo: mode,
+    pms: pendingMoveAfterShooting,
+    sn: moveSpriteName,
+    ph: poolHash,
+    psz: movePoolForDiskDraw.size,
+    fph: footprintPoolHash,
+    fpsz: footprintMaskHexPool?.size ?? 0,
+    lf: loopsFp,
+    ghr: HEX_RADIUS,
+    fr: footprintRadius,
+    pfc: poolFillColor,
+    ac: selectedUnitAnchor.col,
+    ar: selectedUnitAnchor.row,
+    fsp: footprintSpanForPool,
+    sp: {
+      hhs: HEX_HORIZ_SPACING,
+      hw: HEX_WIDTH,
+      hh: HEX_HEIGHT,
+      hvs: HEX_VERT_SPACING,
+      mg: MARGIN,
+    },
+    mvmax: MOVE_ADVANCE_MASK_CHAIKIN_MAX_VERTS,
+    covA: MOVE_PREVIEW_COVERAGE_FILL_ALPHA,
+  });
+
+  const cachedEntry = movePreviewLayerRenderCache;
+  const canReuse =
+    cachedEntry != null && !cachedEntry.root.destroyed && cachedEntry.key === movePreviewCacheKey;
+
+  if (canReuse) {
+    highlightContainer.addChild(cachedEntry.root);
+    return;
+  }
+
+  disposeMovePreviewLayerRootCache();
+  const preNorm =
+    movePreviewFootprintMaskLoops != null && movePreviewFootprintMaskLoops.length > 0
+      ? movePreviewFootprintMaskLoops
+      : null;
+  const maskGeom = resolveMovePreviewMaskLoopsBeforeSmooth(
+    preNorm,
+    footprintMaskHexPool,
+    HEX_RADIUS,
+    HEX_HORIZ_SPACING,
+    HEX_WIDTH,
+    HEX_HEIGHT,
+    HEX_VERT_SPACING,
+    MARGIN,
+    moveSpriteName,
+    movePoolForDiskDraw.size,
+  );
+  const cacheRoot = new PIXI.Container();
+  cacheRoot.name = "move-preview-layer-cache-root";
+  cacheRoot.eventMode = "none";
+  renderMoveAdvanceDestPoolCircleLayer(
+    cacheRoot,
+    app,
+    movePoolForDiskDraw,
+    footprintRadius,
+    poolFillColor,
+    moveSpriteName,
+    maskGeom,
+  );
+  movePreviewLayerRenderCache = { key: movePreviewCacheKey, root: cacheRoot };
+  highlightContainer.addChild(cacheRoot);
+}
+
 function hashStringSetStable(pool: Set<string>): number {
   const keys = [...pool].sort();
   let h = 5381 >>> 0;
@@ -403,6 +839,8 @@ export interface DrawBoardOptions {
 export interface DrawBoardResult {
   baseHexContainer: PIXI.Container;
   wallsContainer: PIXI.Container | null;
+  /** Conteneur ``name === "highlights"`` (hitArea, surbrillances, move preview, etc.). */
+  highlightContainer: PIXI.Container;
 }
 
 type PixelPt = [number, number];
@@ -2186,7 +2624,7 @@ export const drawBoard = (
       wallsResult = wallsContainer;
     }
 
-    return { baseHexContainer, wallsContainer: wallsResult };
+    return { baseHexContainer, wallsContainer: wallsResult, highlightContainer };
   } catch (error) {
     console.error("❌ Error drawing board:", error);
     throw error;

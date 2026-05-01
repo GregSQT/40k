@@ -90,15 +90,36 @@ export function computeOccupiedHexes(
   });
 }
 
-function resolveBaseSizeForFootprint(unit: { BASE_SIZE?: number | [number, number] }): number {
-  const b = unit.BASE_SIZE;
-  if (typeof b === "number" && Number.isFinite(b)) {
-    return b;
+/**
+ * Diamètre hex effectif pour le rendu et les approximations front :
+ * nombre ``BASE_SIZE``, ou ``max(major, minor)`` pour une base ovale (aligné moteur).
+ */
+export function resolveBaseSizeForUnitDisplay(unit: {
+  BASE_SIZE?: number | [number, number];
+}): number {
+  if (!unit?.BASE_SIZE) return 1;
+  const bs = unit.BASE_SIZE;
+  if (typeof bs === "number" && Number.isFinite(bs)) {
+    return Math.max(1, bs);
   }
-  if (Array.isArray(b) && b.length > 0 && typeof b[0] === "number") {
-    return b[0];
+  if (Array.isArray(bs) && bs.length >= 2) {
+    const a = Number(bs[0]);
+    const b = Number(bs[1]);
+    if (Number.isFinite(a) && Number.isFinite(b)) {
+      return Math.max(1, Math.max(a, b));
+    }
+  }
+  if (Array.isArray(bs) && bs.length === 1) {
+    const a = Number(bs[0]);
+    if (Number.isFinite(a)) {
+      return Math.max(1, a);
+    }
   }
   return 1;
+}
+
+function resolveBaseSizeForFootprint(unit: { BASE_SIZE?: number | [number, number] }): number {
+  return resolveBaseSizeForUnitDisplay(unit);
 }
 
 /**
@@ -487,7 +508,7 @@ export function buildOccupiedSet(
     col: number;
     row: number;
     BASE_SHAPE?: string;
-    BASE_SIZE?: number;
+    BASE_SIZE?: number | [number, number];
     alive?: boolean;
   }>,
   excludeId?: number,
@@ -496,9 +517,8 @@ export function buildOccupiedSet(
   for (const u of units) {
     if (u.id === excludeId) continue;
     if (u.alive === false) continue;
-    const shape = u.BASE_SHAPE ?? "round";
-    const size = u.BASE_SIZE ?? 1;
-    const hexes = computeOccupiedHexes(u.col, u.row, shape, size);
+    const size = resolveBaseSizeForUnitDisplay({ BASE_SIZE: u.BASE_SIZE });
+    const hexes = computeOccupiedHexes(u.col, u.row, "round", size);
     for (const [c, r] of hexes) {
       set.add(`${c},${r}`);
     }

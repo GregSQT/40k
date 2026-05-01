@@ -82,17 +82,10 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
       setGameState((prev) => ({
         ...prev,
         units: initialUnits.map((unit) => {
-          // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate weapons arrays
           if (!unit.RNG_WEAPONS || unit.RNG_WEAPONS.length === 0) {
-            // Unit must have at least one weapon type (ranged or melee)
-            if (!unit.CC_WEAPONS || unit.CC_WEAPONS.length === 0) {
-              throw new Error(
-                `Unit ${unit.id} missing required weapons (must have RNG_WEAPONS or CC_WEAPONS)`
-              );
-            }
             return {
               ...unit,
-              SHOOT_LEFT: 0, // No ranged weapons
+              SHOOT_LEFT: 0,
               HP_CUR: unit.HP_CUR ?? unit.HP_MAX,
             };
           }
@@ -152,10 +145,6 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
       units: prev.units.map((unit) => {
         // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate weapons arrays
         if (!unit.RNG_WEAPONS || unit.RNG_WEAPONS.length === 0) {
-          // Unit must have at least one weapon type (ranged or melee)
-          if (!unit.CC_WEAPONS || unit.CC_WEAPONS.length === 0) {
-            throw new Error("unit must have RNG_WEAPONS or CC_WEAPONS");
-          }
           return { ...unit, SHOOT_LEFT: 0 };
         }
         // Get NB from selected or first weapon

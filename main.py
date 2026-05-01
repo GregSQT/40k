@@ -192,10 +192,6 @@ def load_unit_definitions_from_ts(unit_registry):
                 
                 unit_stats["CC_WEAPONS"] = get_weapons(faction, codes)
             
-            # Validation: Au moins une arme requise
-            if not unit_stats.get("RNG_WEAPONS") and not unit_stats.get("CC_WEAPONS"):
-                raise ValueError(f"Unit {unit_name} must have at least RNG_WEAPONS or CC_WEAPONS")
-            
             # Initialiser selectedWeaponIndex
             if unit_stats.get("RNG_WEAPONS"):
                 unit_stats["selectedRngWeaponIndex"] = 0

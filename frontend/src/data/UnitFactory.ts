@@ -54,21 +54,12 @@ async function initializeUnitRegistry(): Promise<void> {
         }
 
         // Validate required UPPERCASE properties
-        // MULTIPLE_WEAPONS_IMPLEMENTATION.md: At least one weapon required (RNG_WEAPONS or CC_WEAPONS)
         const requiredProps = ["HP_MAX", "MOVE", "ICON", "ILLUSTRATION_RATIO"];
         requiredProps.forEach((prop) => {
           if (UnitClass[prop] === undefined) {
             throw new Error(`Unit ${unitType} missing required UPPERCASE property: ${prop}`);
           }
         });
-
-        // Validate at least one weapon type exists
-        if (
-          (!UnitClass.RNG_WEAPONS || UnitClass.RNG_WEAPONS.length === 0) &&
-          (!UnitClass.CC_WEAPONS || UnitClass.CC_WEAPONS.length === 0)
-        ) {
-          throw new Error(`Unit ${unitType} must have at least RNG_WEAPONS or CC_WEAPONS`);
-        }
 
         unitClassMap[unitType] = UnitClass;
         availableUnitTypes.push(unitType);
@@ -117,8 +108,6 @@ export function createUnit(params: {
 
   const UnitClass = getUnitClass(params.type);
 
-  // Validate all UPPERCASE fields exist
-  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: At least one weapon required
   const requiredFields = ["HP_MAX", "MOVE", "ICON", "ILLUSTRATION_RATIO"];
   for (const field of requiredFields) {
     if (UnitClass[field] === undefined) {
@@ -126,13 +115,8 @@ export function createUnit(params: {
     }
   }
 
-  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate at least one weapon type exists
   const rngWeapons = UnitClass.RNG_WEAPONS || [];
   const ccWeapons = UnitClass.CC_WEAPONS || [];
-
-  if (rngWeapons.length === 0 && ccWeapons.length === 0) {
-    throw new Error(`Unit class ${params.type} must have at least RNG_WEAPONS or CC_WEAPONS`);
-  }
 
   // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Initialize selected weapon indices
   const selectedRngWeaponIndex = rngWeapons.length > 0 ? 0 : undefined;

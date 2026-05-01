@@ -60,13 +60,9 @@ class GameStateManager:
 
     def create_unit(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Create unit with AI_TURN.md compliant fields."""
-        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate at least one weapon type exists
         rng_weapons = copy.deepcopy(require_key(config, "RNG_WEAPONS"))
         cc_weapons = copy.deepcopy(require_key(config, "CC_WEAPONS"))
-        
-        if not rng_weapons and not cc_weapons:
-            raise ValueError(f"Unit {config.get('id', 'unknown')} must have at least RNG_WEAPONS or CC_WEAPONS")
-        
+
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Initialize selected weapon indices
         selected_rng_weapon_index = 0 if rng_weapons else None
         selected_cc_weapon_index = 0 if cc_weapons else None
@@ -160,13 +156,7 @@ class GameStateManager:
         for field in required_uppercase:
             if field not in unit:
                 raise ValueError(f"Unit {unit['id']} missing required UPPERCASE field: {field}")
-        
-        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate at least one weapon type exists
-        rng_weapons = require_key(unit, "RNG_WEAPONS")
-        cc_weapons = require_key(unit, "CC_WEAPONS")
-        if not rng_weapons and not cc_weapons:
-            raise ValueError(f"Unit {unit['id']} must have at least RNG_WEAPONS or CC_WEAPONS")
-    
+
     def load_units_from_scenario(self, scenario_file, unit_registry):
             """Load units from scenario file - NO FALLBACKS ALLOWED."""
             if not scenario_file:
@@ -476,10 +466,6 @@ class GameStateManager:
                 # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract RNG_WEAPONS and CC_WEAPONS
                 rng_weapons = copy.deepcopy(require_key(full_unit_data, "RNG_WEAPONS"))
                 cc_weapons = copy.deepcopy(require_key(full_unit_data, "CC_WEAPONS"))
-                
-                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate at least one weapon type exists
-                if not rng_weapons and not cc_weapons:
-                    raise ValueError(f"Unit {unit_type} must have at least RNG_WEAPONS or CC_WEAPONS")
                 
                 # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Initialize selected weapon indices
                 selected_rng_weapon_index = 0 if rng_weapons else None

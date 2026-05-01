@@ -129,13 +129,9 @@ class UnitRegistry:
                     print(f"    ⚠️ Missing {prop} for {unit_type}")
                     return None
             
-            # Validate at least one weapon type exists
-            rng_weapons = require_key(unit_data, "RNG_WEAPONS")
-            cc_weapons = require_key(unit_data, "CC_WEAPONS")
-            if (not rng_weapons or len(rng_weapons) == 0) and (not cc_weapons or len(cc_weapons) == 0):
-                print(f"    ⚠️ Unit {unit_type} must have at least RNG_WEAPONS or CC_WEAPONS")
-                return None
-            
+            require_key(unit_data, "RNG_WEAPONS")
+            require_key(unit_data, "CC_WEAPONS")
+
             return unit_data
             
         except Exception as e:

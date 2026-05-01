@@ -10,7 +10,10 @@ import {
   type HpBarHtmlTooltipPayload,
   type HPBlinkContainer,
 } from "../utils/blinkingHPBar";
-import { minHexDistanceBetweenUnitFootprints } from "../utils/hexFootprint";
+import {
+  minHexDistanceBetweenUnitFootprints,
+  resolveBaseSizeForUnitDisplay,
+} from "../utils/hexFootprint";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 import {
@@ -356,7 +359,8 @@ export class UnitRenderer {
     }
 
     const HEX_HORIZ_SPACING = 1.5 * this.props.HEX_RADIUS;
-    const baseSize = typeof unit.BASE_SIZE === "number" ? unit.BASE_SIZE : undefined;
+    const displayBase = resolveBaseSizeForUnitDisplay(unit);
+    const baseSize = displayBase > 1 ? displayBase : undefined;
     const unitIconScale = baseSize
       ? (baseSize * HEX_HORIZ_SPACING) / this.props.HEX_RADIUS
       : (unit.ICON_SCALE || this.props.ICON_SCALE);
@@ -497,7 +501,8 @@ export class UnitRenderer {
 
       if (!isShootable && !unitWithFlags.isGhost) {
         const grey = 0x888888;
-        const baseSizeGrey = typeof unit.BASE_SIZE === "number" ? unit.BASE_SIZE : undefined;
+        const displayGrey = resolveBaseSizeForUnitDisplay(unit);
+        const baseSizeGrey = displayGrey > 1 ? displayGrey : undefined;
         const greyRadius = baseSizeGrey
           ? (baseSizeGrey / 2) * 1.5 * HEX_RADIUS
           : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
@@ -568,7 +573,8 @@ export class UnitRenderer {
       circleAlpha = 0.5;
     }
 
-    const baseSizeVal = typeof unit.BASE_SIZE === "number" ? unit.BASE_SIZE : undefined;
+    const displayCircle = resolveBaseSizeForUnitDisplay(unit);
+    const baseSizeVal = displayCircle > 1 ? displayCircle : undefined;
     const circleRadius = baseSizeVal
       ? (baseSizeVal / 2) * 1.5 * HEX_RADIUS
       : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
@@ -812,7 +818,8 @@ export class UnitRenderer {
           isPreview ? { resourceOptions: { crossorigin: "anonymous" } } : undefined
         );
 
-        const baseSizeIcon = typeof unit.BASE_SIZE === "number" ? unit.BASE_SIZE : undefined;
+        const displayIcon = resolveBaseSizeForUnitDisplay(unit);
+        const baseSizeIcon = displayIcon > 1 ? displayIcon : undefined;
         const iconDiameter = baseSizeIcon
           ? baseSizeIcon * 1.5 * HEX_RADIUS
           : HEX_RADIUS * unitIconScale;
@@ -1268,7 +1275,8 @@ export class UnitRenderer {
     if (!unit.HP_MAX) return; // Only skip if no HP_MAX, not if isPreview
 
     // Icon visual radius: matches the circle drawn in render()
-    const baseSizeVal = typeof unit.BASE_SIZE === "number" && unit.BASE_SIZE > 1 ? unit.BASE_SIZE : 0;
+    const hpDisplayBase = resolveBaseSizeForUnitDisplay(unit);
+    const baseSizeVal = hpDisplayBase > 1 ? hpDisplayBase : 0;
     const iconRadius = baseSizeVal > 0
       ? (baseSizeVal / 2) * HEX_HORIZ_SPACING
       : (HEX_RADIUS * unitIconScale) / 2;
@@ -1613,7 +1621,8 @@ export class UnitRenderer {
 
     // Position: above HP bar (same calculation as renderHPBar)
     const { HEX_HORIZ_SPACING } = this.props;
-    const baseSizeAdv = typeof unit.BASE_SIZE === "number" && unit.BASE_SIZE > 1 ? unit.BASE_SIZE : 0;
+    const advDisplayBase = resolveBaseSizeForUnitDisplay(unit);
+    const baseSizeAdv = advDisplayBase > 1 ? advDisplayBase : 0;
     const iconRadiusAdv = baseSizeAdv > 0 ? (baseSizeAdv / 2) * HEX_HORIZ_SPACING : (HEX_RADIUS * unitIconScale) / 2;
     const barY = centerY - iconRadiusAdv - this.props.HP_BAR_HEIGHT - 1;
     const squareSizeRatio = this.getCSSNumber("--icon-square-standard-size", 0.5);
@@ -1676,11 +1685,7 @@ export class UnitRenderer {
 
     // AI_TURN.md: Check if unit can actually shoot (CAN_SHOOT = true)
     // If empty_target_pool is true, CAN_SHOOT = false, so don't show weapon icon
-    interface UnitWithAvailableWeapons extends Unit {
-      available_weapons?: Array<{ can_use: boolean }>;
-    }
-    const unitWithWeapons = unit as UnitWithAvailableWeapons;
-    const availableWeapons = unitWithWeapons.available_weapons;
+    const availableWeapons = unit.available_weapons;
 
     // CRITICAL: Only show icon if unit has usable weapons (CAN_SHOOT = true)
     // If available_weapons is undefined or empty, unit cannot shoot
@@ -1701,7 +1706,8 @@ export class UnitRenderer {
 
     // Position: to the right of Advance icon (same Y position as Advance)
     const { HEX_HORIZ_SPACING: hexHS } = this.props;
-    const baseSizeWpn = typeof unit.BASE_SIZE === "number" && unit.BASE_SIZE > 1 ? unit.BASE_SIZE : 0;
+    const wpnDisplayBase = resolveBaseSizeForUnitDisplay(unit);
+    const baseSizeWpn = wpnDisplayBase > 1 ? wpnDisplayBase : 0;
     const iconRadiusWpn = baseSizeWpn > 0 ? (baseSizeWpn / 2) * hexHS : (HEX_RADIUS * unitIconScale) / 2;
     const barY = centerY - iconRadiusWpn - this.props.HP_BAR_HEIGHT - 1;
     const squareSizeRatio = this.getCSSNumber("--icon-square-standard-size", 0.5);

@@ -24,8 +24,10 @@ import { setupBoardClickHandler } from "../utils/boardClickHandler";
 import { areUnitsAdjacent, cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import { getMaxRangedRange } from "../utils/weaponHelpers";
 import {
+  computeDrawBoardPartialRedrawFingerprint,
   drawBoard,
   detachMovePreviewLayerCacheFromStage,
+  updateMovePreviewPolygonLayerInHighlightContainer,
   type DrawBoardOptions,
 } from "./BoardDisplay";
 import { renderUnit } from "./UnitRenderer";
@@ -43,6 +45,7 @@ import {
   isFootprintInDeployPool,
   getContestedObjectives,
   buildOccupiedSet,
+  resolveBaseSizeForUnitDisplay,
   type HexCoord,
 } from "../utils/hexFootprint";
 import { WeaponDropdown } from "./WeaponDropdown";
@@ -65,23 +68,6 @@ import {
 } from "../utils/blinkingHPBar";
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
-
-/** Taille d'empreinte pour le rendu move/charge (round = entier ; oval = max des côtés — aligné usage moteur). */
-function resolveBaseSizeForFootprint(unit: Unit | undefined): number {
-  if (!unit?.BASE_SIZE) return 1;
-  const bs = unit.BASE_SIZE;
-  if (typeof bs === "number" && Number.isFinite(bs)) {
-    return Math.max(1, bs);
-  }
-  if (Array.isArray(bs) && bs.length >= 2) {
-    const a = Number(bs[0]);
-    const b = Number(bs[1]);
-    if (Number.isFinite(a) && Number.isFinite(b)) {
-      return Math.max(1, Math.max(a, b));
-    }
-  }
-  return 1;
-}
 
 /** JSON stable pour l’empreinte unités (ordre des clés sinon ``unitsChanged`` boucle → gel UI). */
 function stableBoolRecordJson(m: Record<string, boolean>): string {
@@ -643,6 +629,10 @@ export default function Board({
   const staticBoardRef = useRef<PIXI.Container | null>(null);
   const staticWallsRef = useRef<PIXI.Container | null>(null);
   const staticBoardConfigKeyRef = useRef<string>("");
+  /** Dernier conteneur ``highlights`` — réutilisé si l’empreinte structure est inchangée (patch move preview ou skip drawBoard). */
+  const highlightsLayerRef = useRef<PIXI.Container | null>(null);
+  const lastHighlightsStructuralKeyRef = useRef<string>("");
+  const lastMovePolygonCacheKeyRef = useRef<string>("");
   const unitsLayerRef = useRef<PIXI.Container | null>(null);
   const unitsFingerprintRef = useRef<string>("");
   // Hover preview: imperative PIXI layers (no React re-render)
@@ -1754,7 +1744,8 @@ export default function Board({
         container.interactiveChildren = false;
         app.stage.addChild(container);
 
-        const baseSizeVal = typeof selectedUnit.BASE_SIZE === "number" ? selectedUnit.BASE_SIZE : undefined;
+        const bdSel = resolveBaseSizeForUnitDisplay(selectedUnit);
+        const baseSizeVal = bdSel > 1 ? bdSel : undefined;
         const iconDiam = baseSizeVal
           ? baseSizeVal * 1.5 * HEX_RADIUS_H
           : HEX_RADIUS_H * (selectedUnit.ICON_SCALE ?? 1.0);
@@ -3082,7 +3073,8 @@ export default function Board({
             ) {
               continue;
             }
-            const eBase = typeof enemy.BASE_SIZE === "number" && enemy.BASE_SIZE > 1 ? enemy.BASE_SIZE : 0;
+            const eBaseRaw = resolveBaseSizeForUnitDisplay(enemy);
+            const eBase = eBaseRaw > 1 ? eBaseRaw : 0;
             const scanR = eBase > 0 ? Math.ceil(eBase / 2) : 0;
             let totalHexes = 0;
             let visCount = 0;
@@ -3139,7 +3131,8 @@ export default function Board({
           ) {
             continue;
           }
-          const eBase = typeof enemy.BASE_SIZE === "number" && enemy.BASE_SIZE > 1 ? enemy.BASE_SIZE : 0;
+          const eBaseRawB = resolveBaseSizeForUnitDisplay(enemy);
+          const eBase = eBaseRawB > 1 ? eBaseRawB : 0;
           const scanR = eBase > 0 ? Math.ceil(eBase / 2) : 0;
           let totalHexes = 0;
           let visCount = 0;
@@ -3460,92 +3453,6 @@ export default function Board({
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
-    if (app.stage) {
-      // Detach persistent containers before removeChildren so they survive.
-      const savedStatic = staticBoardRef.current;
-      const savedWalls = staticWallsRef.current;
-      const savedUi = uiElementsContainerRef.current;
-      const savedDragOverlay = dragOverlayRef.current;
-      const savedUnitsLayer = unitsLayerRef.current;
-      const savedBlinks: PIXI.DisplayObject[] = [];
-      // Move-preview LoS / icône / ligne / règle : même principe que hp-blink — sinon chaque re-run du
-      // useEffect détruit le stage et la preview (ou la ligne mesure) disparaît + les refs sont perdues.
-      const savedHoverOverlay = hoverOverlayRef.current;
-      const savedHoverSprite = hoverSpriteRef.current;
-      const savedMovePreviewGuideLine = movePreviewGuideLineRef.current;
-      const savedMeasureGuideLine = measureGuideLineRef.current;
-      if (savedStatic?.parent) app.stage.removeChild(savedStatic);
-      if (savedWalls?.parent) app.stage.removeChild(savedWalls);
-      if (savedUi?.parent) app.stage.removeChild(savedUi);
-      if (savedDragOverlay?.parent) app.stage.removeChild(savedDragOverlay);
-      if (savedUnitsLayer?.parent) app.stage.removeChild(savedUnitsLayer);
-      if (savedHoverOverlay?.parent) app.stage.removeChild(savedHoverOverlay);
-      if (savedHoverSprite?.parent) app.stage.removeChild(savedHoverSprite);
-      if (savedMovePreviewGuideLine?.parent) app.stage.removeChild(savedMovePreviewGuideLine);
-      if (savedMeasureGuideLine?.parent) app.stage.removeChild(savedMeasureGuideLine);
-      detachMovePreviewLayerCacheFromStage();
-      for (const child of [...app.stage.children]) {
-        if (child.name === "hp-blink-container") {
-          app.stage.removeChild(child);
-          savedBlinks.push(child);
-        }
-      }
-
-      // Destroy all remaining children (old highlights, old units, etc.)
-      const toDestroy = [...app.stage.children];
-      app.stage.removeChildren();
-      for (const child of toDestroy) {
-        if (child.destroy) {
-          child.destroy({ children: true, texture: false, baseTexture: false });
-        }
-      }
-
-      // If units changed, clear the units layer so it gets rebuilt
-      if (unitsChanged && savedUnitsLayer) {
-        const unitChildren = [...savedUnitsLayer.children];
-        savedUnitsLayer.removeChildren();
-        for (const child of unitChildren) {
-          if (child.destroy) {
-            child.destroy({ children: true, texture: false, baseTexture: false });
-          }
-        }
-      }
-
-      // Re-attach persistent containers in correct z-order
-      if (savedStatic) app.stage.addChild(savedStatic);
-      if (savedWalls) app.stage.addChild(savedWalls);
-      if (savedUi) app.stage.addChild(savedUi);
-      const unitsCacheForBlinkSweep = gameState?.units_cache as Record<string, unknown> | undefined;
-      const blinksToReattach = destroyAndFilterOrphanHpBlinkContainers(savedBlinks, unitsCacheForBlinkSweep);
-      for (const blink of blinksToReattach) app.stage.addChild(blink);
-      if (savedUnitsLayer) app.stage.addChild(savedUnitsLayer);
-      if (savedDragOverlay) app.stage.addChild(savedDragOverlay);
-      if (savedHoverOverlay && !savedHoverOverlay.destroyed) app.stage.addChild(savedHoverOverlay);
-      if (savedHoverSprite && !savedHoverSprite.destroyed) app.stage.addChild(savedHoverSprite);
-      if (savedMovePreviewGuideLine && !savedMovePreviewGuideLine.destroyed) {
-        app.stage.addChild(savedMovePreviewGuideLine);
-      }
-      if (savedMeasureGuideLine && !savedMeasureGuideLine.destroyed) {
-        savedMeasureGuideLine.zIndex = MEASURE_GUIDE_LINE_Z_INDEX;
-        app.stage.addChild(savedMeasureGuideLine);
-      }
-
-      // Nettoyer pastilles cible / jet de charge seulement quand on reconstruit les unités.
-      // Sinon le badge 2D6 est supprimé ici puis jamais redessiné (unitsChanged false).
-      if (savedUi && unitsChanged) {
-        const staleTargetMarkers = savedUi.children.filter(
-          (child: PIXI.DisplayObject) =>
-            typeof child.name === "string" &&
-            (child.name.startsWith("target-indicator-") || child.name.startsWith("charge-badge-"))
-        );
-        staleTargetMarkers.forEach((child: PIXI.DisplayObject) => {
-          savedUi.removeChild(child);
-          if ("destroy" in child && typeof child.destroy === "function") {
-            child.destroy();
-          }
-        });
-      }
-    }
     // Reuse cached static board layers when the board config hasn't changed.
     const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}`;
     const canReuseStatic = staticBoardConfigKeyRef.current === bcKey && staticBoardRef.current !== null;
@@ -3646,7 +3553,7 @@ export default function Board({
       pendingMoveAfterShooting,
       chargeDestPoolRef,
       selectedUnitBaseSize: unitForFootprintBase
-        ? resolveBaseSizeForFootprint(unitForFootprintBase)
+        ? resolveBaseSizeForUnitDisplay(unitForFootprintBase)
         : undefined,
       // Ancre de l'unité sélectionnée (col, row) — utilisée par drawBoard pour
       // centrer la preview move / advance / post-shoot en **cercle euclidien**
@@ -3666,11 +3573,146 @@ export default function Board({
       fightEngagementRing,
     };
 
-    const drawResult = drawBoard(
+    const partialFp = computeDrawBoardPartialRedrawFingerprint(
       app,
       boardConfigWithOverrides as Parameters<typeof drawBoard>[1],
       drawBoardOptions,
     );
+    const fingerprintMatchStructural =
+      partialFp.structuralKey === lastHighlightsStructuralKeyRef.current;
+    const fingerprintMatchMove =
+      (partialFp.movePolygonCacheKey ?? "") === (lastMovePolygonCacheKeyRef.current ?? "");
+
+    const canReuseExistingHighlightsThroughDestroy =
+      highlightsLayerRef.current != null &&
+      !highlightsLayerRef.current.destroyed &&
+      highlightsLayerRef.current.parent === app.stage &&
+      fingerprintMatchStructural &&
+      (fingerprintMatchMove || partialFp.movePolygonCacheKey !== null);
+
+    let savedHighlightsThroughDestroy: PIXI.Container | null = null;
+
+    if (app.stage) {
+      // Detach persistent containers before removeChildren so they survive.
+      const savedStatic = staticBoardRef.current;
+      const savedWalls = staticWallsRef.current;
+      const savedUi = uiElementsContainerRef.current;
+      const savedDragOverlay = dragOverlayRef.current;
+      const savedUnitsLayer = unitsLayerRef.current;
+      const savedBlinks: PIXI.DisplayObject[] = [];
+      // Move-preview LoS / icône / ligne / règle : même principe que hp-blink — sinon chaque re-run du
+      // useEffect détruit le stage et la preview (ou la ligne mesure) disparaît + les refs sont perdues.
+      const savedHoverOverlay = hoverOverlayRef.current;
+      const savedHoverSprite = hoverSpriteRef.current;
+      const savedMovePreviewGuideLine = movePreviewGuideLineRef.current;
+      const savedMeasureGuideLine = measureGuideLineRef.current;
+      if (savedStatic?.parent) app.stage.removeChild(savedStatic);
+      if (savedWalls?.parent) app.stage.removeChild(savedWalls);
+      if (savedUi?.parent) app.stage.removeChild(savedUi);
+      if (savedDragOverlay?.parent) app.stage.removeChild(savedDragOverlay);
+      if (savedUnitsLayer?.parent) app.stage.removeChild(savedUnitsLayer);
+      if (savedHoverOverlay?.parent) app.stage.removeChild(savedHoverOverlay);
+      if (savedHoverSprite?.parent) app.stage.removeChild(savedHoverSprite);
+      if (savedMovePreviewGuideLine?.parent) app.stage.removeChild(savedMovePreviewGuideLine);
+      if (savedMeasureGuideLine?.parent) app.stage.removeChild(savedMeasureGuideLine);
+      if (canReuseExistingHighlightsThroughDestroy && highlightsLayerRef.current?.parent === app.stage) {
+        savedHighlightsThroughDestroy = highlightsLayerRef.current;
+        app.stage.removeChild(savedHighlightsThroughDestroy);
+      } else {
+        detachMovePreviewLayerCacheFromStage();
+      }
+      for (const child of [...app.stage.children]) {
+        if (child.name === "hp-blink-container") {
+          app.stage.removeChild(child);
+          savedBlinks.push(child);
+        }
+      }
+
+      // Destroy all remaining children (old highlights, old units, etc.)
+      const toDestroy = [...app.stage.children];
+      app.stage.removeChildren();
+      for (const child of toDestroy) {
+        if (child === savedHighlightsThroughDestroy) continue;
+        if (child.destroy) {
+          child.destroy({ children: true, texture: false, baseTexture: false });
+        }
+      }
+
+      // If units changed, clear the units layer so it gets rebuilt
+      if (unitsChanged && savedUnitsLayer) {
+        const unitChildren = [...savedUnitsLayer.children];
+        savedUnitsLayer.removeChildren();
+        for (const child of unitChildren) {
+          if (child.destroy) {
+            child.destroy({ children: true, texture: false, baseTexture: false });
+          }
+        }
+      }
+
+      // Re-attach persistent containers in correct z-order
+      if (savedStatic) app.stage.addChild(savedStatic);
+      if (savedWalls) app.stage.addChild(savedWalls);
+      if (savedHighlightsThroughDestroy) app.stage.addChild(savedHighlightsThroughDestroy);
+      if (savedUi) app.stage.addChild(savedUi);
+      const unitsCacheForBlinkSweep = gameState?.units_cache as Record<string, unknown> | undefined;
+      const blinksToReattach = destroyAndFilterOrphanHpBlinkContainers(savedBlinks, unitsCacheForBlinkSweep);
+      for (const blink of blinksToReattach) app.stage.addChild(blink);
+      if (savedUnitsLayer) app.stage.addChild(savedUnitsLayer);
+      if (savedDragOverlay) app.stage.addChild(savedDragOverlay);
+      if (savedHoverOverlay && !savedHoverOverlay.destroyed) app.stage.addChild(savedHoverOverlay);
+      if (savedHoverSprite && !savedHoverSprite.destroyed) app.stage.addChild(savedHoverSprite);
+      if (savedMovePreviewGuideLine && !savedMovePreviewGuideLine.destroyed) {
+        app.stage.addChild(savedMovePreviewGuideLine);
+      }
+      if (savedMeasureGuideLine && !savedMeasureGuideLine.destroyed) {
+        savedMeasureGuideLine.zIndex = MEASURE_GUIDE_LINE_Z_INDEX;
+        app.stage.addChild(savedMeasureGuideLine);
+      }
+
+      // Nettoyer pastilles cible / jet de charge seulement quand on reconstruit les unités.
+      // Sinon le badge 2D6 est supprimé ici puis jamais redessiné (unitsChanged false).
+      if (savedUi && unitsChanged) {
+        const staleTargetMarkers = savedUi.children.filter(
+          (child: PIXI.DisplayObject) =>
+            typeof child.name === "string" &&
+            (child.name.startsWith("target-indicator-") || child.name.startsWith("charge-badge-"))
+        );
+        staleTargetMarkers.forEach((child: PIXI.DisplayObject) => {
+          savedUi.removeChild(child);
+          if ("destroy" in child && typeof child.destroy === "function") {
+            child.destroy();
+          }
+        });
+      }
+    }
+
+    let drawResult: ReturnType<typeof drawBoard> = undefined;
+    if (canReuseExistingHighlightsThroughDestroy && savedHighlightsThroughDestroy) {
+      const onlyPatchMovePolygon =
+        partialFp.movePolygonCacheKey !== null &&
+        (partialFp.movePolygonCacheKey ?? "") !== (lastMovePolygonCacheKeyRef.current ?? "");
+      if (onlyPatchMovePolygon) {
+        updateMovePreviewPolygonLayerInHighlightContainer(
+          app,
+          boardConfigWithOverrides as Parameters<typeof drawBoard>[1],
+          savedHighlightsThroughDestroy,
+          drawBoardOptions,
+        );
+        lastMovePolygonCacheKeyRef.current = partialFp.movePolygonCacheKey ?? "";
+      }
+      highlightsLayerRef.current = savedHighlightsThroughDestroy;
+    } else {
+      drawResult = drawBoard(
+        app,
+        boardConfigWithOverrides as Parameters<typeof drawBoard>[1],
+        drawBoardOptions,
+      );
+      if (drawResult) {
+        lastHighlightsStructuralKeyRef.current = partialFp.structuralKey;
+        lastMovePolygonCacheKeyRef.current = partialFp.movePolygonCacheKey ?? "";
+        highlightsLayerRef.current = drawResult.highlightContainer;
+      }
+    }
 
     if (!canReuseStatic && drawResult) {
       staticBoardRef.current = drawResult.baseHexContainer;
@@ -4245,7 +4287,8 @@ export default function Board({
           HEX_HEIGHT / 2 +
           MARGIN;
         const unitIconScale = unit.ICON_SCALE || ICON_SCALE;
-        const baseSizeOvl = typeof unit.BASE_SIZE === "number" && unit.BASE_SIZE > 1 ? unit.BASE_SIZE : 0;
+        const baseSizeOvlRaw = resolveBaseSizeForUnitDisplay(unit);
+        const baseSizeOvl = baseSizeOvlRaw > 1 ? baseSizeOvlRaw : 0;
         const iconRadiusOvl = baseSizeOvl > 0 ? (baseSizeOvl / 2) * HEX_HORIZ_SPACING : (HEX_RADIUS * unitIconScale) / 2;
         const barY = centerY - iconRadiusOvl - HP_BAR_HEIGHT - 1;
 
@@ -4350,8 +4393,7 @@ export default function Board({
           id: u.id,
           col: u.col,
           row: u.row,
-          BASE_SHAPE: u.BASE_SHAPE,
-          BASE_SIZE: typeof u.BASE_SIZE === "number" ? u.BASE_SIZE : 1,
+          BASE_SIZE: resolveBaseSizeForUnitDisplay(u),
           alive: u.HP_CUR > 0,
         })),
         selectedUnitId ?? undefined,
@@ -4456,9 +4498,8 @@ export default function Board({
         lastHexKey = key;
 
         if (!selectedUnit) return;
-        const shape = selectedUnit.BASE_SHAPE ?? "round";
-        const size = typeof selectedUnit.BASE_SIZE === "number" ? selectedUnit.BASE_SIZE : 1;
-        const fp = computeOccupiedHexes(hex.col, hex.row, shape, size);
+        const sizeDrag = resolveBaseSizeForUnitDisplay(selectedUnit);
+        const fp = computeOccupiedHexes(hex.col, hex.row, "round", sizeDrag);
         const inBounds = isFootprintInBounds(fp, BOARD_COLS, BOARD_ROWS);
         const onWall = isFootprintOnWall(fp, wallSet);
         const overlapping = isFootprintOverlapping(fp, occupiedSet);
@@ -4479,9 +4520,8 @@ export default function Board({
 
         if (hex.col < 0 || hex.col >= BOARD_COLS || hex.row < 0 || hex.row >= BOARD_ROWS) return;
         if (!selectedUnit) return;
-        const shape = selectedUnit.BASE_SHAPE ?? "round";
-        const size = typeof selectedUnit.BASE_SIZE === "number" ? selectedUnit.BASE_SIZE : 1;
-        const fp = computeOccupiedHexes(hex.col, hex.row, shape, size);
+        const sizeUp = resolveBaseSizeForUnitDisplay(selectedUnit);
+        const fp = computeOccupiedHexes(hex.col, hex.row, "round", sizeUp);
         const inBounds = isFootprintInBounds(fp, BOARD_COLS, BOARD_ROWS);
         const onWall = isFootprintOnWall(fp, wallSet);
         const overlapping = isFootprintOverlapping(fp, occupiedSet);

@@ -1,4 +1,5 @@
 import type { VisibleHex } from "./wasmLos";
+import { resolveBaseSizeForUnitDisplay } from "./hexFootprint";
 
 /** Même cube-odd-r que ``BoardPvp.hexDistOff`` (empreinte / scan). */
 export function hexDistOff(c1: number, r1: number, c2: number, r2: number): number {
@@ -53,7 +54,8 @@ export function buildShootingLosPreviewFromVisibleHexes(
 
   for (const u of units) {
     if (u.player === shooterPlayer) continue;
-    const uBaseSize = typeof u.BASE_SIZE === "number" && u.BASE_SIZE > 1 ? u.BASE_SIZE : 0;
+    const uBaseResolved = resolveBaseSizeForUnitDisplay(u);
+    const uBaseSize = uBaseResolved > 1 ? uBaseResolved : 0;
     const scanR = uBaseSize > 0 ? Math.ceil(uBaseSize / 2) : 0;
     let totalHexes = 0;
     let visibleCount = 0;
