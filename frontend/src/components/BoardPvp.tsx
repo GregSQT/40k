@@ -2115,7 +2115,8 @@ export default function Board({
       row: number;
       selectedUnit: Unit | undefined;
     } | null = null;
-    const LOS_MOUSEMOVE_DEBOUNCE_MS = 75;
+    let losBackendRequestInFlight = false;
+    const LOS_MOUSEMOVE_DEBOUNCE_MS = 25;
     const LOS_INITIAL_PREVIEW_DEBOUNCE_MS = 0;
 
     const scheduleVisualLosForHex = (col: number, row: number, selectedUnit: Unit, range: number) => {
@@ -2181,35 +2182,20 @@ export default function Board({
       });
     };
 
-    const triggerLosForHex = (col: number, row: number, delayMs: number) => {
-      if (phase === "move" && gameState?.active_movement_unit == null) {
-        setMovePreviewLosBlinkIds([]);
-        setMovePreviewLosCoverById({});
-        return;
-      }
-      const sourceUnitId =
-        phase === "move"
-          ? parseRequiredUnitId(gameState?.active_movement_unit, "gameState.active_movement_unit")
-          : mode === "movePreview" && movePreview
-            ? movePreview.unitId
-            : selectedUnitId;
-      const selectedUnit = units.find((u) => String(u.id) === String(sourceUnitId));
-      if (selectedUnit) {
-        const range = getMaxRangedRange(selectedUnit);
-        if (range > 0 && selectedUnit.RNG_WEAPONS?.length) {
-          scheduleVisualLosForHex(col, row, selectedUnit, range);
-        }
-      }
-      pendingLosRequest = {
-        col,
-        row,
-        selectedUnit,
-      };
-      if (losDebounceTimer) return;
-      losDebounceTimer = setTimeout(async () => {
+    const scheduleBackendLosRequest = (delayMs: number) => {
+      if (losDebounceTimer || losBackendRequestInFlight) return;
+      losDebounceTimer = setTimeout(() => {
+        losDebounceTimer = null;
+        void processBackendLosRequest();
+      }, delayMs);
+    };
+
+    async function processBackendLosRequest(): Promise<void> {
+      if (losBackendRequestInFlight) return;
+      losBackendRequestInFlight = true;
+      try {
         const pending = pendingLosRequest;
         pendingLosRequest = null;
-        losDebounceTimer = null;
         if (!pending) return;
         const { col, row, selectedUnit } = pending;
         const app = appRef.current;
@@ -2238,7 +2224,6 @@ export default function Board({
           String(gameState?.episode_steps ?? ""),
         ].join("|");
 
-        try {
           let losPreview = movePreviewBackendLosCacheRef.current.get(cacheKey);
           if (!losPreview) {
             const response = await fetch("/api/game/action", {
@@ -2298,6 +2283,8 @@ export default function Board({
           }
 
           if (!losEffectActive) return;
+          const currentLosHex = losHexRef.current;
+          if (!currentLosHex || currentLosHex.col !== col || currentLosHex.row !== row) return;
           setMovePreviewLosBlinkIds(losPreview.blinkIds);
           setMovePreviewLosCoverById(losPreview.coverByUnitId);
         } catch (error) {
@@ -2305,8 +2292,39 @@ export default function Board({
           setMovePreviewLosBlinkIds([]);
           setMovePreviewLosCoverById({});
           console.error("Move preview backend LoS failed:", error);
+        } finally {
+          losBackendRequestInFlight = false;
+          if (losEffectActive && pendingLosRequest) {
+            scheduleBackendLosRequest(LOS_INITIAL_PREVIEW_DEBOUNCE_MS);
+          }
         }
-      }, delayMs);
+    }
+
+    const triggerLosForHex = (col: number, row: number, delayMs: number) => {
+      if (phase === "move" && gameState?.active_movement_unit == null) {
+        setMovePreviewLosBlinkIds([]);
+        setMovePreviewLosCoverById({});
+        return;
+      }
+      const sourceUnitId =
+        phase === "move"
+          ? parseRequiredUnitId(gameState?.active_movement_unit, "gameState.active_movement_unit")
+          : mode === "movePreview" && movePreview
+            ? movePreview.unitId
+            : selectedUnitId;
+      const selectedUnit = units.find((u) => String(u.id) === String(sourceUnitId));
+      if (selectedUnit) {
+        const range = getMaxRangedRange(selectedUnit);
+        if (range > 0 && selectedUnit.RNG_WEAPONS?.length) {
+          scheduleVisualLosForHex(col, row, selectedUnit, range);
+        }
+      }
+      pendingLosRequest = {
+        col,
+        row,
+        selectedUnit,
+      };
+      scheduleBackendLosRequest(delayMs);
     };
 
     if (phase === "move" && mode === "movePreview" && movePreview) {
