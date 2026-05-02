@@ -39,6 +39,7 @@ from .shared_utils import (
 # Cache valid target pools to avoid repeated distance/LoS calculations
 # Cache key: (pid, id(game_state), episode_num, turn, unit_id, col, row, advance_status, adjacent_status, player)
 _target_pool_cache = {}  # per-process, per-env, per-episode; invalidates when unit/weapon changes
+_move_los_preview_cache = {}
 _cache_size_limit = 100  # Prevent memory leak in long episodes
 _MOVE_AFTER_SHOOTING_DISTANCE_ARG = "distance"
 
@@ -46,12 +47,107 @@ _MOVE_AFTER_SHOOTING_DISTANCE_ARG = "distance"
 def clear_target_pool_cache() -> None:
     """Clear _target_pool_cache. Call on scenario rotation to avoid stale pool from different topology."""
     global _target_pool_cache
+    global _move_los_preview_cache
     n = len(_target_pool_cache)
+    preview_n = len(_move_los_preview_cache)
     _target_pool_cache.clear()
-    if os.environ.get("LOS_DEBUG") == "1" and n > 0:
+    _move_los_preview_cache.clear()
+    if os.environ.get("LOS_DEBUG") == "1" and (n > 0 or preview_n > 0):
         import sys
-        sys.stderr.write(f"[LOS_DEBUG] clear_target_pool_cache cleared {n} entries\n")
+        sys.stderr.write(
+            f"[LOS_DEBUG] clear_target_pool_cache cleared target_pool={n} "
+            f"move_los_preview={preview_n} entries\n"
+        )
         sys.stderr.flush()
+
+
+def _tracking_collection_fingerprint(collection: Any) -> Tuple[str, ...]:
+    """Return normalized tracking collection fingerprint for cache keys."""
+    return tuple(sorted(str(item) for item in collection))
+
+
+def _occupied_hexes_fingerprint(raw_hexes: Any) -> Tuple[Tuple[int, int], ...]:
+    """Return normalized occupied hexes fingerprint for units_cache entries."""
+    if raw_hexes is None:
+        return ()
+    if not isinstance(raw_hexes, (set, list, tuple)):
+        raise TypeError(f"occupied_hexes must be a set/list/tuple when present, got {type(raw_hexes).__name__}")
+    normalized_hexes: List[Tuple[int, int]] = []
+    for raw_hex in raw_hexes:
+        if not isinstance(raw_hex, (list, tuple)) or len(raw_hex) < 2:
+            raise ValueError(f"occupied_hexes entry must contain col,row, got {raw_hex!r}")
+        hex_col, hex_row = normalize_coordinates(raw_hex[0], raw_hex[1])
+        normalized_hexes.append((hex_col, hex_row))
+    return tuple(sorted(normalized_hexes))
+
+
+def _units_cache_fingerprint(units_cache: Dict[str, Any]) -> Tuple[Tuple[Any, ...], ...]:
+    """Return units_cache fingerprint for exact move LoS preview memoization."""
+    rows: List[Tuple[Any, ...]] = []
+    for unit_id, entry in sorted(units_cache.items(), key=lambda item: str(item[0])):
+        if not isinstance(entry, dict):
+            raise TypeError(f"units_cache[{unit_id}] must be a dict, got {type(entry).__name__}")
+        rows.append((
+            str(unit_id),
+            int(require_key(entry, "col")),
+            int(require_key(entry, "row")),
+            int(require_key(entry, "player")),
+            int(require_key(entry, "HP_CUR")),
+            _occupied_hexes_fingerprint(entry.get("occupied_hexes")),
+        ))
+    return tuple(rows)
+
+
+def _weapon_rules_fingerprint(raw_rules: Any) -> Tuple[str, ...]:
+    """Return normalized weapon rules fingerprint for cache keys."""
+    if raw_rules is None:
+        return ()
+    if not isinstance(raw_rules, (list, tuple)):
+        raise TypeError(f"WEAPON_RULES must be a list/tuple when present, got {type(raw_rules).__name__}")
+    rules: List[str] = []
+    for rule in raw_rules:
+        if hasattr(rule, "rule"):
+            rules.append(str(rule.rule))
+        else:
+            rules.append(str(rule))
+    return tuple(sorted(rules))
+
+
+def _rng_weapons_fingerprint(unit: Dict[str, Any]) -> Tuple[Tuple[Any, ...], ...]:
+    """Return ranged weapon targetability fingerprint for move LoS preview cache."""
+    rows: List[Tuple[Any, ...]] = []
+    for weapon in require_key(unit, "RNG_WEAPONS"):
+        rows.append((
+            int(require_key(weapon, "RNG")),
+            _weapon_rules_fingerprint(weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else None),
+        ))
+    return tuple(rows)
+
+
+def _move_los_preview_cache_key(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    unit_id_str: str,
+    dest_col: int,
+    dest_row: int,
+    advance_position: bool,
+) -> Tuple[Any, ...]:
+    """Build strict backend cache key for move LoS target preview."""
+    return (
+        os.getpid(),
+        require_key(game_state, "episode_number"),
+        require_key(game_state, "turn"),
+        require_key(game_state, "episode_steps"),
+        str(require_key(game_state, "current_player")),
+        unit_id_str,
+        int(dest_col),
+        int(dest_row),
+        bool(advance_position),
+        _units_cache_fingerprint(require_key(game_state, "units_cache")),
+        _tracking_collection_fingerprint(require_key(game_state, "units_advanced")),
+        _tracking_collection_fingerprint(require_key(game_state, "units_fled")),
+        _rng_weapons_fingerprint(unit),
+    )
 
 
 # LOS debugging env vars (stderr, no debug.log):
@@ -1098,9 +1194,11 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
 
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
     los_visibility_min_ratio = float(game_rules.get("los_visibility_min_ratio", 0.0))
+    cover_ratio = float(require_key(game_rules, "cover_ratio"))
 
     # Build in a local dict then assign once (avoids KeyError if unit["los_cache"] is cleared mid-build).
     los_map: Dict[str, bool] = {}
+    cover_map: Dict[str, bool] = {}
 
     # Calculate LoS for each enemy in units_cache (only alive enemies — dead must not appear in pool)
     for target_id, target_data in units_cache.items():
@@ -1140,6 +1238,7 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
         has_los = target_visibility_ratio >= los_visibility_min_ratio
 
         los_map[str(target_id)] = has_los
+        cover_map[str(target_id)] = has_los and target_visibility_ratio < cover_ratio
 
         if os.environ.get("LOS_DEBUG") == "1":
             import sys
@@ -1157,6 +1256,7 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
             sys.stderr.flush()
 
     unit["los_cache"] = los_map
+    unit["los_cover_cache"] = cover_map
 
 
 def _emit_shoot_activation_perf(
@@ -1289,7 +1389,35 @@ def preview_shoot_valid_targets_from_position(
     if not unit.get("RNG_WEAPONS"):
         return empty_preview
 
+    _preview_perf_t0 = time.perf_counter()
+    preview_cache_key: Optional[Tuple[Any, ...]] = None
+    if not include_los_cells:
+        _preview_perf_cache_t0 = time.perf_counter()
+        preview_cache_key = _move_los_preview_cache_key(
+            game_state,
+            unit,
+            unit_id_str,
+            dest_col,
+            dest_row,
+            advance_position,
+        )
+        cached_preview = _move_los_preview_cache.get(preview_cache_key)
+        if cached_preview is not None:
+            _preview_perf_after_cache = time.perf_counter()
+            print(
+                "[MOVE_LOS_PREVIEW_PERF] "
+                f"unit={unit_id_str} dest=({dest_col},{dest_row}) "
+                f"total_ms={(_preview_perf_after_cache - _preview_perf_t0) * 1000:.1f} "
+                f"cache_hit=1 "
+                f"cache_lookup_ms={(_preview_perf_after_cache - _preview_perf_cache_t0) * 1000:.1f} "
+                f"valid_targets={cached_preview['valid_targets']}",
+                flush=True,
+            )
+            return copy.deepcopy(cached_preview)
+
+    _preview_perf_deepcopy_t0 = time.perf_counter()
     gs = copy.deepcopy(game_state)
+    _preview_perf_after_deepcopy = time.perf_counter()
     if "weapon_rule" not in gs:
         gs["weapon_rule"] = 1
 
@@ -1319,8 +1447,6 @@ def preview_shoot_valid_targets_from_position(
     if unit_id_str in require_key(gs, "units_fled") and not _unit_has_rule(u, "shoot_after_flee"):
         return empty_preview
 
-    build_unit_los_cache(gs, unit_id_str)
-
     weapon_rule = require_key(gs, "weapon_rule")
     advance_status = (
         1 if any(str(x) == unit_id_str for x in require_key(gs, "units_advanced")) else 0
@@ -1330,31 +1456,77 @@ def preview_shoot_valid_targets_from_position(
     else:
         adjacent_status = 1 if _is_adjacent_to_enemy_within_cc_range(gs, u) else 0
 
+    _preview_perf_los_t0 = time.perf_counter()
+    build_unit_los_cache(gs, unit_id_str)
+    _preview_perf_after_los = time.perf_counter()
+    _preview_perf_enemy_precheck_t0 = time.perf_counter()
+    preview_enemy_precheck = _build_weapon_availability_enemy_precheck(
+        gs, u, require_key(u, "RNG_WEAPONS")
+    )
+    _preview_perf_after_enemy_precheck = time.perf_counter()
+    _preview_perf_weapon_availability_t0 = time.perf_counter()
+    preview_weapon_available_pool = weapon_availability_check(
+        gs,
+        u,
+        weapon_rule,
+        advance_status,
+        adjacent_status,
+        _precheck=preview_enemy_precheck,
+    )
+    _preview_perf_after_weapon_availability = time.perf_counter()
+
+    _preview_perf_pool_t0 = time.perf_counter()
     valid_targets = valid_target_pool_build(
         gs,
         u,
         weapon_rule,
         advance_status,
         adjacent_status,
-        precomputed_weapon_available_pool=None,
-        precomputed_enemy_precheck=None,
+        precomputed_weapon_available_pool=preview_weapon_available_pool,
+        precomputed_enemy_precheck=preview_enemy_precheck,
     )
+    _preview_perf_after_pool = time.perf_counter()
     if include_los_cells:
+        _preview_perf_cells_t0 = time.perf_counter()
         _update_unit_los_preview_data(gs, u, weapon_rule, advance_status, adjacent_status)
+        _preview_perf_after_cells = time.perf_counter()
     else:
+        _preview_perf_cells_t0 = time.perf_counter()
         u["los_preview_attack_cells"] = []
         u["los_preview_cover_cells"] = []
         u["los_preview_ratio_by_hex"] = {}
+        _preview_perf_after_cells = time.perf_counter()
 
+    _preview_perf_cover_t0 = time.perf_counter()
     cover_by_unit_id = build_cover_by_unit_id_for_valid_targets(gs, u, valid_targets)
+    _preview_perf_after_cover = time.perf_counter()
+    print(
+        "[MOVE_LOS_PREVIEW_PERF] "
+        f"unit={unit_id_str} dest=({dest_col},{dest_row}) "
+        f"total_ms={(_preview_perf_after_cover - _preview_perf_t0) * 1000:.1f} "
+        f"deepcopy_ms={(_preview_perf_after_deepcopy - _preview_perf_deepcopy_t0) * 1000:.1f} "
+        f"los_cache_ms={(_preview_perf_after_los - _preview_perf_los_t0) * 1000:.1f} "
+        f"enemy_precheck_ms={(_preview_perf_after_enemy_precheck - _preview_perf_enemy_precheck_t0) * 1000:.1f} "
+        f"weapon_availability_ms={(_preview_perf_after_weapon_availability - _preview_perf_weapon_availability_t0) * 1000:.1f} "
+        f"valid_pool_ms={(_preview_perf_after_pool - _preview_perf_pool_t0) * 1000:.1f} "
+        f"cells_ms={(_preview_perf_after_cells - _preview_perf_cells_t0) * 1000:.1f} "
+        f"cover_ms={(_preview_perf_after_cover - _preview_perf_cover_t0) * 1000:.1f} "
+        f"valid_targets={valid_targets}",
+        flush=True,
+    )
 
-    return {
+    result_payload = {
         "valid_targets": valid_targets,
         "los_preview_attack_cells": require_key(u, "los_preview_attack_cells"),
         "los_preview_cover_cells": require_key(u, "los_preview_cover_cells"),
         "los_preview_ratio_by_hex": require_key(u, "los_preview_ratio_by_hex"),
         "cover_by_unit_id": cover_by_unit_id,
     }
+    if preview_cache_key is not None:
+        if len(_move_los_preview_cache) >= _cache_size_limit:
+            _move_los_preview_cache.clear()
+        _move_los_preview_cache[preview_cache_key] = copy.deepcopy(result_payload)
+    return result_payload
 
 
 def build_cover_by_unit_id_for_valid_targets(
@@ -1364,30 +1536,12 @@ def build_cover_by_unit_id_for_valid_targets(
 ) -> Dict[str, bool]:
     """Return backend cover status for each valid shooting target."""
     cover_by_unit_id: Dict[str, bool] = {}
-    units_cache = require_key(game_state, "units_cache")
-    shooter_col, shooter_row = require_unit_position(shooter, game_state)
+    los_cover_cache = require_key(shooter, "los_cover_cache")
     for target_id in valid_targets:
         target_id_str = str(target_id)
-        enemy = _get_unit_by_id(game_state, target_id_str)
-        if enemy is None:
-            raise KeyError(f"Target {target_id_str} is in valid_target_pool but missing from game_state['units']")
-        target_entry = units_cache.get(target_id_str)
-        if target_entry is None:
-            raise KeyError(f"Target {target_id_str} is in valid_target_pool but missing from units_cache")
-        target_col = int(require_key(target_entry, "col"))
-        target_row = int(require_key(target_entry, "row"))
-        target_hexes = _resolve_target_hexes_for_los(game_state, enemy, target_col, target_row)
-        _, can_see_target, in_cover_target, _, _ = _compute_target_visibility_from_hexes(
-            game_state,
-            int(shooter_col),
-            int(shooter_row),
-            target_hexes,
-        )
-        if not can_see_target:
-            raise RuntimeError(
-                f"Target {target_id_str} is in valid_target_pool but backend LoS cannot see it"
-            )
-        cover_by_unit_id[target_id_str] = bool(in_cover_target)
+        if target_id_str not in los_cover_cache:
+            raise KeyError(f"Target {target_id_str} is in valid_target_pool but missing from los_cover_cache")
+        cover_by_unit_id[target_id_str] = bool(los_cover_cache[target_id_str])
     return cover_by_unit_id
 
 
