@@ -9,15 +9,15 @@ import {
 } from "./hexUnionBoundaryPolygon";
 import { smoothMaskLoopsForRender } from "./polygonSmooth";
 
-/** Aligné sur le masque move (5) + une passe pour lisser les longs segments de bord LoS. */
-export const LOS_PREVIEW_SMOOTH_HEX_UNION_CHAIKIN_ITERATIONS = 6;
+/** Preview LoS interactive : limiter le lissage pour ne pas bloquer le déplacement du ghost. */
+export const LOS_PREVIEW_SMOOTH_HEX_UNION_CHAIKIN_ITERATIONS = 2;
 
 const LOS_PREVIEW_CHAIKIN_MAX_VERTS = 180_000;
 
-/** Flou très léger sur tout l’overlay LoS : adoucit le crénelage raster (bords alpha), un peu comme le blur du masque move. */
-const LOS_PREVIEW_OVERLAY_BLUR_STRENGTH = 1.55;
-const LOS_PREVIEW_OVERLAY_BLUR_QUALITY = 3;
-const LOS_PREVIEW_OVERLAY_BLUR_RESOLUTION = 2;
+/** Flou réduit : le contenu LoS change souvent pendant le survol move. */
+const LOS_PREVIEW_OVERLAY_BLUR_STRENGTH = 0.75;
+const LOS_PREVIEW_OVERLAY_BLUR_QUALITY = 1;
+const LOS_PREVIEW_OVERLAY_BLUR_RESOLUTION = 1;
 
 const losPreviewSmoothOpts = {
   maxVertsAfterOneChaikinStep: LOS_PREVIEW_CHAIKIN_MAX_VERTS,

@@ -2100,9 +2100,16 @@ export default function Board({
       }
     };
 
-    // Throttled LoS computation : backend = vérité pour cellules + cibles tirables en move preview.
+    // LoS move preview : visuel WASM coalescé par frame, backend throttlé pour blinks/couvert.
     let losDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     let losEffectActive = true;
+    let visualLosFrame: number | null = null;
+    let pendingVisualLosRequest: {
+      col: number;
+      row: number;
+      selectedUnit: Unit;
+      range: number;
+    } | null = null;
     let pendingLosRequest: {
       col: number;
       row: number;
@@ -2110,6 +2117,69 @@ export default function Board({
     } | null = null;
     const LOS_MOUSEMOVE_DEBOUNCE_MS = 75;
     const LOS_INITIAL_PREVIEW_DEBOUNCE_MS = 0;
+
+    const scheduleVisualLosForHex = (col: number, row: number, selectedUnit: Unit, range: number) => {
+      pendingVisualLosRequest = { col, row, selectedUnit, range };
+      if (visualLosFrame !== null) return;
+      visualLosFrame = window.requestAnimationFrame(() => {
+        visualLosFrame = null;
+        const pending = pendingVisualLosRequest;
+        pendingVisualLosRequest = null;
+        if (!pending || !losEffectActive || !isWasmReady()) return;
+
+        const app = appRef.current;
+        if (!app) return;
+
+        if (!hoverOverlayRef.current || hoverOverlayRef.current.destroyed) {
+          const root = new PIXI.Container();
+          root.name = "los-hover-polar-masked";
+          root.eventMode = "none";
+          root.zIndex = 40;
+          app.stage.addChild(root);
+          hoverOverlayRef.current = root;
+        }
+        const overlay = hoverOverlayRef.current;
+        const visualPreview = buildLosPreviewFromSource({
+          source: {
+            unit: pending.selectedUnit,
+            fromCol: pending.col,
+            fromRow: pending.row,
+          },
+          units,
+          boardCols: BOARD_COLS_H,
+          boardRows: BOARD_ROWS_H,
+          wallHexes: boardConfig.wall_hexes,
+          wallHexesOverride,
+          maxRange: pending.range,
+          losVisibilityMinRatio: gameConfig.game_rules?.los_visibility_min_ratio ?? 0,
+          coverRatio: gameConfig.game_rules?.cover_ratio ?? 0,
+        });
+        const losUnionLayout: HexUnionMaskLayout = {
+          HEX_HORIZ_SPACING: HEX_WIDTH_H,
+          HEX_WIDTH: HEX_WIDTH_H,
+          HEX_HEIGHT: HEX_HEIGHT_H,
+          HEX_VERT_SPACING: HEX_HEIGHT_H,
+          MARGIN: MARGIN_H,
+          gridHexRadius: HEX_RADIUS_H,
+        };
+        const allVisualLosCells = [
+          ...visualPreview.terrainCoverCells,
+          ...visualPreview.clearCells,
+        ];
+        mountLosPolarClippedByVisibleUnion(
+          overlay,
+          allVisualLosCells,
+          visualPreview.terrainCoverCells,
+          losUnionLayout,
+          LOS_PREVIEW_CLEAR_HEX,
+          0.4,
+          LOS_PREVIEW_COVER_HEX,
+          0.4,
+          app.renderer,
+        );
+        overlay.visible = true;
+      });
+    };
 
     const triggerLosForHex = (col: number, row: number, delayMs: number) => {
       if (phase === "move" && gameState?.active_movement_unit == null) {
@@ -2124,6 +2194,12 @@ export default function Board({
             ? movePreview.unitId
             : selectedUnitId;
       const selectedUnit = units.find((u) => String(u.id) === String(sourceUnitId));
+      if (selectedUnit) {
+        const range = getMaxRangedRange(selectedUnit);
+        if (range > 0 && selectedUnit.RNG_WEAPONS?.length) {
+          scheduleVisualLosForHex(col, row, selectedUnit, range);
+        }
+      }
       pendingLosRequest = {
         col,
         row,
@@ -2152,57 +2228,7 @@ export default function Board({
           return;
         }
 
-        if (!hoverOverlayRef.current || hoverOverlayRef.current.destroyed) {
-          const root = new PIXI.Container();
-          root.name = "los-hover-polar-masked";
-          root.eventMode = "none";
-          root.zIndex = 40;
-          app.stage.addChild(root);
-          hoverOverlayRef.current = root;
-        }
         const overlay = hoverOverlayRef.current;
-
-        if (isWasmReady()) {
-          const visualPreview = buildLosPreviewFromSource({
-            source: {
-              unit: selectedUnit,
-              fromCol: col,
-              fromRow: row,
-            },
-            units,
-            boardCols: BOARD_COLS_H,
-            boardRows: BOARD_ROWS_H,
-            wallHexes: boardConfig.wall_hexes,
-            wallHexesOverride,
-            maxRange: range,
-            losVisibilityMinRatio: gameConfig.game_rules?.los_visibility_min_ratio ?? 0,
-            coverRatio: gameConfig.game_rules?.cover_ratio ?? 0,
-          });
-          const losUnionLayout: HexUnionMaskLayout = {
-            HEX_HORIZ_SPACING: HEX_WIDTH_H,
-            HEX_WIDTH: HEX_WIDTH_H,
-            HEX_HEIGHT: HEX_HEIGHT_H,
-            HEX_VERT_SPACING: HEX_HEIGHT_H,
-            MARGIN: MARGIN_H,
-            gridHexRadius: HEX_RADIUS_H,
-          };
-          const allVisualLosCells = [
-            ...visualPreview.terrainCoverCells,
-            ...visualPreview.clearCells,
-          ];
-          mountLosPolarClippedByVisibleUnion(
-            overlay,
-            allVisualLosCells,
-            visualPreview.terrainCoverCells,
-            losUnionLayout,
-            LOS_PREVIEW_CLEAR_HEX,
-            0.4,
-            LOS_PREVIEW_COVER_HEX,
-            0.4,
-            app.renderer,
-          );
-          overlay.visible = true;
-        }
 
         const cacheKey = [
           String(selectedUnit.id),
@@ -2301,6 +2327,7 @@ export default function Board({
     return () => {
       losEffectActive = false;
       if (losDebounceTimer) clearTimeout(losDebounceTimer);
+      if (visualLosFrame !== null) window.cancelAnimationFrame(visualLosFrame);
       if (canvas) canvas.removeEventListener("mousemove", onMouseMove);
       if (hoverOverlayRef.current) hoverOverlayRef.current.visible = false;
       if (hoverSpriteRef.current) hoverSpriteRef.current.visible = false;
