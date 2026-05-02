@@ -437,6 +437,337 @@ def _charge_bfs_max_distance(
     return rid + extra
 
 
+def _charge_skip_hex_lb_prune_round_round_engagement(
+    unit: Dict[str, Any],
+    indexed_enemy_engagement: List[Tuple[Any, Dict[str, Any]]],
+) -> bool:
+    """
+    La prune hexagonale ci-dessous suppose une borne via ``hex_distance`` jusqu'aux cases
+    d'empreinte. Les paires socle rond ↔ socle rond utilisent ``euclidean_edge_clearance``
+    dans ``unit_entries_within_engagement_zone`` : ne pas prune dans ce cas (éviter faux négatif).
+    """
+    if unit.get("BASE_SHAPE") != "round":
+        return False
+    return any(
+        ee.get("BASE_SHAPE") == "round"
+        for _, ee in indexed_enemy_engagement
+    )
+
+
+def _charge_impossible_by_primary_to_enemy_hex_lower_bound(
+    game_state: Dict[str, Any],
+    *,
+    unit_id_str: str,
+    start_col: int,
+    start_row: int,
+    indexed_enemy_engagement: List[Tuple[Any, Dict[str, Any]]],
+    bfs_max_distance: int,
+) -> bool:
+    """
+    Retourne True si aucune fin de charge valide n'existe avec au plus ``bfs_max_distance``
+    pas BFS depuis le primaire (borne géométrique sur grille hex, indépendante des obstacles).
+
+    Idée : soit ``m`` la distance hex minimale du primaire à une case d'empreinte ennemie.
+    Pour tout ancre ``h`` avec ``hex_distance(start, h) ≤ D``, par inégalité triangulaire
+    ``hex_distance(h, e) ≥ hex_distance(start, e) − D`` pour toute case ennemie ``e``, donc
+    ``min_e hex_distance(h, e) ≥ m − D``.
+
+    Pour l'engagement on a ``min_{f∈F(h), e∈E} d(f,e) ≥ min_e d(h,e) − S_c`` avec ``S_c`` le
+    rayon d'empreinte du chargeur depuis le primaire (max ``hex_distance(primaire, case)``).
+
+    Si ``m − D > ez + S_c`` (strict), alors ``min_distance(F,E) > ez`` pour tout ``h`` dans la
+    boule hex : impossible d'engager. Les obstacles ne peuvent qu'allonger les chemins, pas rapprocher.
+
+    Cas round↔round : engagement euclidien — la prune est désactivée par l'appelant.
+    """
+    from engine.hex_utils import hex_distance
+
+    from .shared_utils import get_engagement_zone
+
+    if not indexed_enemy_engagement:
+        return False
+
+    ez = int(get_engagement_zone(game_state))
+    units_cache = require_key(game_state, "units_cache")
+    own = units_cache.get(unit_id_str)
+    if not own:
+        return False
+    own_hexes_raw = own.get("occupied_hexes")
+    if not own_hexes_raw:
+        own_hexes_raw = {(int(own["col"]), int(own["row"]))}
+    s_charger = 0
+    for oc, orow in own_hexes_raw:
+        dhc = hex_distance(int(start_col), int(start_row), int(oc), int(orow))
+        if dhc > s_charger:
+            s_charger = dhc
+
+    m: Optional[int] = None
+    for _, enemy_entry in indexed_enemy_engagement:
+        ec = int(enemy_entry["col"])
+        er = int(enemy_entry["row"])
+        efp_raw = enemy_entry.get("occupied_hexes")
+        if not efp_raw:
+            efp_raw = {(ec, er)}
+        for exc, exr in efp_raw:
+            dse = hex_distance(int(start_col), int(start_row), int(exc), int(exr))
+            if m is None or dse < m:
+                m = dse
+
+    if m is None:
+        return False
+
+    d_limit = int(bfs_max_distance)
+    return m > d_limit + s_charger + ez
+
+
+def _charge_primary_footprint_radius(
+    game_state: Dict[str, Any],
+    unit_id_str: str,
+    start_col: int,
+    start_row: int,
+) -> int:
+    """Distance hex maximale entre le primaire courant et une case de l'empreinte du chargeur."""
+    from engine.hex_utils import hex_distance
+
+    units_cache = require_key(game_state, "units_cache")
+    own = units_cache.get(unit_id_str)
+    if not own:
+        raise KeyError(f"Unit {unit_id_str} missing from units_cache")
+    own_hexes = own.get("occupied_hexes")
+    if not own_hexes:
+        own_hexes = {(int(own["col"]), int(own["row"]))}
+
+    radius = 0
+    for oc, orow in own_hexes:
+        distance = hex_distance(int(start_col), int(start_row), int(oc), int(orow))
+        if distance > radius:
+            radius = distance
+    return radius
+
+
+def _charge_reverse_goal_bfs_for_eligibility(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    *,
+    unit_id_str: str,
+    start_pos: Tuple[int, int],
+    indexed_enemy_engagement: List[Tuple[Any, Dict[str, Any]]],
+    occupied_positions: Set[Tuple[int, int]],
+    bfs_max_distance: int,
+    fp_offset_pair: FootprintOffsetPair,
+) -> Optional[List[Tuple[int, int]]]:
+    """
+    Recherche d'éligibilité charge par BFS inversé, strictement réservée au cas
+    ``early_exit_if_valid=True`` sans cible déclarée.
+
+    Le BFS historique part du chargeur et teste chaque ancre atteignable jusqu'à rencontrer une
+    ancre qui engage un ennemi. Ici on génère d'abord les ancres de fin qui satisfont déjà les
+    contraintes de fin de charge (placement légal + engagement réel), puis on cherche si le primaire
+    courant est atteignable depuis l'une d'elles dans le même graphe de placements légaux.
+
+    Retourne :
+    - ``None`` si le chemin optimisé n'est pas applicable ;
+    - ``[]`` si aucune destination n'est atteignable ;
+    - ``[goal]`` dès qu'une destination valide est prouvée atteignable.
+    """
+    from engine.hex_utils import dilate_hex_set, hex_distance
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+
+    from .shared_utils import get_engagement_zone
+
+    if _charge_skip_hex_lb_prune_round_round_engagement(unit, indexed_enemy_engagement):
+        return None
+
+    _perf = perf_timing_enabled(game_state)
+    _t0 = time.perf_counter() if _perf else None
+    start_col, start_row = int(start_pos[0]), int(start_pos[1])
+    board_cols = int(require_key(game_state, "board_cols"))
+    board_rows = int(require_key(game_state, "board_rows"))
+    engagement_zone = int(get_engagement_zone(game_state))
+    charger_radius = _charge_primary_footprint_radius(
+        game_state, unit_id_str, start_col, start_row
+    )
+
+    enemy_occupied: Set[Tuple[int, int]] = set()
+    for _, enemy_entry in indexed_enemy_engagement:
+        ec = int(enemy_entry["col"])
+        er = int(enemy_entry["row"])
+        enemy_fp = enemy_entry.get("occupied_hexes")
+        if not enemy_fp:
+            enemy_fp = {(ec, er)}
+        for fc, fr in enemy_fp:
+            enemy_occupied.add((int(fc), int(fr)))
+
+    if not enemy_occupied:
+        return []
+
+    goal_search_radius = engagement_zone + charger_radius
+    enemy_goal_zone = dilate_hex_set(enemy_occupied, goal_search_radius, board_cols, board_rows)
+    start_reach_disk = dilate_hex_set({start_pos}, int(bfs_max_distance), board_cols, board_rows)
+    if start_pos not in start_reach_disk:
+        start_reach_disk.add(start_pos)
+    goal_zone = enemy_goal_zone & start_reach_disk
+    goal_candidates_n = len(goal_zone)
+    skipped_goal_start_lb_n = len(enemy_goal_zone) - goal_candidates_n
+    enemy_engagement_zones: Dict[Any, Set[Tuple[int, int]]] = {}
+    for eid, enemy_entry in indexed_enemy_engagement:
+        ec = int(enemy_entry["col"])
+        er = int(enemy_entry["row"])
+        enemy_fp = enemy_entry.get("occupied_hexes")
+        if not enemy_fp:
+            enemy_fp = {(ec, er)}
+        enemy_engagement_zones[eid] = dilate_hex_set(
+            {(int(fc), int(fr)) for fc, fr in enemy_fp},
+            engagement_zone,
+            board_cols,
+            board_rows,
+        )
+    goals: List[Tuple[int, int]] = []
+    seen_goals: Set[Tuple[int, int]] = set()
+    goal_candidate_fp_s = 0.0
+    goal_placement_s = 0.0
+    goal_engagement_s = 0.0
+    rejected_placement_n = 0
+    rejected_overlap_n = 0
+    rejected_engagement_prefilter_n = 0
+    rejected_no_engagement_n = 0
+
+    for anchor_col, anchor_row in goal_zone:
+        anchor = (int(anchor_col), int(anchor_row))
+        if anchor == start_pos:
+            continue
+        _t_candidate_fp0 = time.perf_counter() if _perf else None
+        candidate_fp = _candidate_footprint_charge(
+            anchor[0], anchor[1], unit, game_state, fp_offset_pair
+        )
+        if _perf and _t_candidate_fp0 is not None:
+            goal_candidate_fp_s += time.perf_counter() - _t_candidate_fp0
+        _t_placement0 = time.perf_counter() if _perf else None
+        if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+            if _perf and _t_placement0 is not None:
+                goal_placement_s += time.perf_counter() - _t_placement0
+            rejected_placement_n += 1
+            continue
+        if _perf and _t_placement0 is not None:
+            goal_placement_s += time.perf_counter() - _t_placement0
+
+        _t_engagement0 = time.perf_counter() if _perf else None
+        synth = _charge_synthetic_charger_cache_entry(unit, anchor[0], anchor[1], candidate_fp)
+        hex_overlaps_enemy = False
+        engages_enemy = False
+        for eid, enemy_entry in indexed_enemy_engagement:
+            ec = int(enemy_entry["col"])
+            er = int(enemy_entry["row"])
+            enemy_fp = enemy_entry.get("occupied_hexes", {(ec, er)})
+            if candidate_fp & enemy_fp:
+                hex_overlaps_enemy = True
+                break
+            is_round_round_engagement = (
+                unit.get("BASE_SHAPE") == "round"
+                and enemy_entry.get("BASE_SHAPE") == "round"
+            )
+            if not is_round_round_engagement:
+                enemy_engagement_zone = enemy_engagement_zones[eid]
+                if not (candidate_fp & enemy_engagement_zone):
+                    rejected_engagement_prefilter_n += 1
+                    continue
+            if unit_entries_within_engagement_zone(synth, enemy_entry, engagement_zone):
+                engages_enemy = True
+        if _perf and _t_engagement0 is not None:
+            goal_engagement_s += time.perf_counter() - _t_engagement0
+        if hex_overlaps_enemy:
+            rejected_overlap_n += 1
+        elif not engages_enemy:
+            rejected_no_engagement_n += 1
+        if engages_enemy and not hex_overlaps_enemy and anchor not in seen_goals:
+            goals.append(anchor)
+            seen_goals.add(anchor)
+
+    _t_goals_done = time.perf_counter() if _perf else None
+    if not goals:
+        if _perf and _t0 is not None:
+            append_perf_timing_line(
+                f"CHARGE_REVERSE_GOAL_BFS episode={game_state.get('episode_number', '?')} "
+                f"turn={game_state.get('turn', '?')} unit_id={unit_id_str} "
+                f"goal_candidates_n={goal_candidates_n} goals_n=0 "
+                f"skipped_goal_start_lb_n={skipped_goal_start_lb_n} "
+                f"goal_build_s={(_t_goals_done - _t0) if _t_goals_done is not None else 0.0:.6f} "
+                f"goal_candidate_fp_s={goal_candidate_fp_s:.6f} goal_placement_s={goal_placement_s:.6f} "
+                f"goal_engagement_s={goal_engagement_s:.6f} "
+                f"rejected_placement_n={rejected_placement_n} rejected_overlap_n={rejected_overlap_n} "
+                f"rejected_engagement_prefilter_n={rejected_engagement_prefilter_n} "
+                f"rejected_no_engagement_n={rejected_no_engagement_n} "
+                f"reverse_bfs_s=0.000000 visited_n=0 outcome=no_goals "
+                f"total_s={time.perf_counter() - _t0:.6f}"
+            )
+        return []
+
+    visited: Set[Tuple[int, int]] = set(goals)
+    queue = deque((goal, 0, goal) for goal in goals)
+    pruned_by_start_lb = 0
+    _t_reverse_bfs0 = time.perf_counter() if _perf else None
+
+    while queue:
+        current_pos, current_dist, origin_goal = queue.popleft()
+        if current_dist >= int(bfs_max_distance):
+            continue
+        remaining_distance = int(bfs_max_distance) - int(current_dist)
+        if hex_distance(current_pos[0], current_pos[1], start_col, start_row) > remaining_distance:
+            pruned_by_start_lb += 1
+            continue
+
+        for neighbor_col, neighbor_row in get_hex_neighbors(current_pos[0], current_pos[1]):
+            neighbor = (int(neighbor_col), int(neighbor_row))
+            next_dist = current_dist + 1
+            if neighbor == start_pos:
+                if _perf and _t0 is not None:
+                    append_perf_timing_line(
+                        f"CHARGE_REVERSE_GOAL_BFS episode={game_state.get('episode_number', '?')} "
+                        f"turn={game_state.get('turn', '?')} unit_id={unit_id_str} "
+                        f"goal_candidates_n={goal_candidates_n} goals_n={len(goals)} "
+                        f"skipped_goal_start_lb_n={skipped_goal_start_lb_n} "
+                        f"visited_n={len(visited)} outcome=hit distance={next_dist} "
+                        f"pruned_start_lb_n={pruned_by_start_lb} "
+                        f"goal_build_s={(_t_goals_done - _t0) if _t_goals_done is not None else 0.0:.6f} "
+                        f"goal_candidate_fp_s={goal_candidate_fp_s:.6f} goal_placement_s={goal_placement_s:.6f} "
+                        f"goal_engagement_s={goal_engagement_s:.6f} "
+                        f"rejected_placement_n={rejected_placement_n} rejected_overlap_n={rejected_overlap_n} "
+                        f"rejected_engagement_prefilter_n={rejected_engagement_prefilter_n} "
+                        f"rejected_no_engagement_n={rejected_no_engagement_n} "
+                        f"reverse_bfs_s={(time.perf_counter() - _t_reverse_bfs0) if _t_reverse_bfs0 is not None else 0.0:.6f} "
+                        f"total_s={time.perf_counter() - _t0:.6f}"
+                    )
+                return [origin_goal]
+            if neighbor in visited:
+                continue
+            candidate_fp = _candidate_footprint_charge(
+                neighbor[0], neighbor[1], unit, game_state, fp_offset_pair
+            )
+            if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+                continue
+            visited.add(neighbor)
+            queue.append((neighbor, next_dist, origin_goal))
+
+    if _perf and _t0 is not None:
+        append_perf_timing_line(
+            f"CHARGE_REVERSE_GOAL_BFS episode={game_state.get('episode_number', '?')} "
+            f"turn={game_state.get('turn', '?')} unit_id={unit_id_str} "
+            f"goal_candidates_n={goal_candidates_n} goals_n={len(goals)} "
+            f"skipped_goal_start_lb_n={skipped_goal_start_lb_n} "
+            f"visited_n={len(visited)} outcome=miss pruned_start_lb_n={pruned_by_start_lb} "
+            f"goal_build_s={(_t_goals_done - _t0) if _t_goals_done is not None else 0.0:.6f} "
+            f"goal_candidate_fp_s={goal_candidate_fp_s:.6f} goal_placement_s={goal_placement_s:.6f} "
+            f"goal_engagement_s={goal_engagement_s:.6f} "
+            f"rejected_placement_n={rejected_placement_n} rejected_overlap_n={rejected_overlap_n} "
+            f"rejected_engagement_prefilter_n={rejected_engagement_prefilter_n} "
+            f"rejected_no_engagement_n={rejected_no_engagement_n} "
+            f"reverse_bfs_s={(time.perf_counter() - _t_reverse_bfs0) if _t_reverse_bfs0 is not None else 0.0:.6f} "
+            f"total_s={time.perf_counter() - _t0:.6f}"
+        )
+    return []
+
+
 def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Initialize charge phase and build activation pool
@@ -1550,11 +1881,6 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         add_console_log(game_state, log_message)
         safe_print(game_state, log_message)
 
-    # BFS pathfinding to find all reachable anchor positions within bfs_max_distance (jet + offset ×10)
-    visited = {start_pos: 0}
-    queue = deque([(start_pos, 0)])
-    valid_destinations = []
-
     fp_offset_pair = _charge_prepare_footprint_offsets(unit, game_state)
     _fp_tag = "offset" if fp_offset_pair is not None else "legacy"
 
@@ -1570,6 +1896,55 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         if enemy_entry is None:
             raise KeyError(f"Enemy {eid} not in units_cache (dead or absent)")
         indexed_enemy_engagement.append((eid, enemy_entry))
+
+    if (
+        not _charge_skip_hex_lb_prune_round_round_engagement(unit, indexed_enemy_engagement)
+        and _charge_impossible_by_primary_to_enemy_hex_lower_bound(
+            game_state,
+            unit_id_str=unit_id_str,
+            start_col=start_col,
+            start_row=start_row,
+            indexed_enemy_engagement=indexed_enemy_engagement,
+            bfs_max_distance=bfs_max_distance,
+        )
+    ):
+        game_state["valid_charge_destinations_pool"] = []
+        if charge_range == CHARGE_MAX_DISTANCE and not early_exit_if_valid and tid_arg is None:
+            cache[cache_key] = []
+        if _perf and _t_func0 is not None:
+            _t_done_lb = time.perf_counter()
+            append_perf_timing_line(
+                f"CHARGE_HEX_LB_PRUNE episode={_ep} turn={_turn} unit_id={unit_id} "
+                f"bfs_max={bfs_max_distance} charge_roll={charge_range}"
+            )
+            append_perf_timing_line(
+                f"CHARGE_DEST_BFS episode={_ep} turn={_turn} unit_id={unit_id} charge_roll={charge_range} "
+                f"bfs_max={bfs_max_distance} "
+                f"bfs_loop_s=0.000000 total_s={_t_done_lb - _t_func0:.6f} "
+                f"visited_n=0 valid_dest_n=0 cache_hit=0 "
+                f"early_exit={1 if early_exit_if_valid else 0} short_circuit=0 fp={_fp_tag}"
+            )
+        return []
+
+    if early_exit_if_valid and tid_arg is None:
+        reverse_result = _charge_reverse_goal_bfs_for_eligibility(
+            game_state,
+            unit,
+            unit_id_str=unit_id_str,
+            start_pos=start_pos,
+            indexed_enemy_engagement=indexed_enemy_engagement,
+            occupied_positions=occupied_positions,
+            bfs_max_distance=bfs_max_distance,
+            fp_offset_pair=fp_offset_pair,
+        )
+        if reverse_result is not None:
+            game_state["valid_charge_destinations_pool"] = reverse_result
+            return reverse_result
+
+    # BFS pathfinding to find all reachable anchor positions within bfs_max_distance (jet + offset ×10)
+    visited = {start_pos: 0}
+    queue = deque([(start_pos, 0)])
+    valid_destinations = []
 
     _t_bfs0 = time.perf_counter() if _perf else None
     bfs_short_circuit = False

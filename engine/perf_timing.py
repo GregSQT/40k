@@ -80,6 +80,22 @@ Lignes typiques (référence) :
   ``footprint_hex_n`` = taille de ``move_preview_footprint_zone`` (union hex ; vol : ``na_fly``).
 - ``CHARGE_PHASE_START`` — ``setup_until_adj_s``, ``enemy_adjacent_hexes_s``, ``pool_build_s``, ``total_s`` (début phase charge).
 - ``CHARGE_BUILD_POOL`` — ``get_eligible_s``, ``eligible_count`` (construction du pool d’activation).
+- ``CHARGE_HEX_LB_PRUNE`` — pré-filtre géométrique : pas de BFS si le primaire est trop loin de toute
+  empreinte ennemie pour pouvoir engager en au plus ``bfs_max`` pas (grille hex ; désactivé pour
+  engagement socle rond ↔ rond, métrique euclidienne).
+- ``CHARGE_REVERSE_GOAL_BFS`` — chemin optimisé de l’éligibilité charge (``early_exit_if_valid``) :
+  génère les ancres finales légales qui engagent un ennemi, puis cherche le primaire depuis ces buts
+  dans le même graphe de placements légaux. ``outcome=hit|miss|no_goals``.
+  ``pruned_start_lb_n`` = branches coupées car la distance hex restante vers le primaire dépasse déjà
+  le budget BFS restant.
+  ``goal_candidates_n`` = intersection entre zone ennemie et disque géométriquement atteignable depuis
+  le primaire ; ``skipped_goal_start_lb_n`` = ancres de la zone ennemie écartées avant empreinte/placement
+  car hors portée géométrique du primaire ; ``goal_build_s`` et ``reverse_bfs_s`` découpent le coût.
+  ``goal_candidate_fp_s`` / ``goal_placement_s`` / ``goal_engagement_s`` détaillent la génération des
+  buts, avec compteurs ``rejected_placement_n``, ``rejected_overlap_n``,
+  ``rejected_engagement_prefilter_n``, ``rejected_no_engagement_n``. Ce chemin optimisé est désactivé
+  si une paire round↔round est en jeu : le BFS historique reste plus rentable et conserve la métrique
+  euclidienne exacte.
 - ``CHARGE_DEST_BFS`` — ``bfs_loop_s``, ``total_s``, ``visited_n``, ``valid_dest_n``, ``cache_hit``,
   ``early_exit`` (1 = éligibilité uniquement, arrêt au premier hex valide), ``short_circuit`` (1 si arrêt anticipé).
   ``charge_roll`` est en **pas de grille** (sous-hex) : sur plateau Boardx10, ``game_rules.charge_max_distance``
