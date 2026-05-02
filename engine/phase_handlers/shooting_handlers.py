@@ -1256,9 +1256,10 @@ def preview_shoot_valid_targets_from_position(
     dest_row: int,
     *,
     advance_position: bool = False,
-) -> List[str]:
+    include_los_cells: bool = True,
+) -> Dict[str, Any]:
     """
-    Return IDs of enemies targetable from a hypothetical position (read-only, no mutation).
+    Return shooting preview data from a hypothetical position (read-only, no mutation).
 
     Aligné sur l'activation tir : copie d'état, tireur déplacé virtuellement, ``build_unit_los_cache``
     puis ``valid_target_pool_build`` (empreintes §3.3, PISTOL / adjacent, alliés au contact, etc.).
@@ -1268,15 +1269,25 @@ def preview_shoot_valid_targets_from_position(
 
     Args:
         advance_position: Si True, simule une unité après Advance (``units_advanced`` sur la copie).
+        include_los_cells: Si False, ne calcule pas la grille complète LoS (coûteuse) et renvoie
+            seulement les cibles tirables backend + couvert par cible.
     """
+    empty_preview: Dict[str, Any] = {
+        "valid_targets": [],
+        "los_preview_attack_cells": [],
+        "los_preview_cover_cells": [],
+        "los_preview_ratio_by_hex": {},
+        "cover_by_unit_id": {},
+    }
+
     unit_id_str = str(unit_id)
     unit = _get_unit_by_id(game_state, unit_id_str)
     if not unit:
-        return []
+        return empty_preview
     if not game_state.get("units_cache"):
-        return []
+        return empty_preview
     if not unit.get("RNG_WEAPONS"):
-        return []
+        return empty_preview
 
     gs = copy.deepcopy(game_state)
     if "weapon_rule" not in gs:
@@ -1284,11 +1295,16 @@ def preview_shoot_valid_targets_from_position(
 
     u = _get_unit_by_id(gs, unit_id_str)
     if not u:
-        return []
+        return empty_preview
 
     u.pop("valid_target_pool", None)
     u.pop("_pool_from_cache", None)
     u.pop("_pool_cache_key", None)
+
+    # Move-phase preview simulates a fresh future shooting activation; weapon["shot"]
+    # is normally initialized at shooting_phase_start, which has not run yet.
+    for weapon in require_key(u, "RNG_WEAPONS"):
+        weapon["shot"] = 0
 
     set_unit_coordinates(u, dest_col, dest_row)
     update_units_cache_position(gs, unit_id_str, int(u["col"]), int(u["row"]))
@@ -1301,7 +1317,7 @@ def preview_shoot_valid_targets_from_position(
         gs["units_advanced"] = ua_list
 
     if unit_id_str in require_key(gs, "units_fled") and not _unit_has_rule(u, "shoot_after_flee"):
-        return []
+        return empty_preview
 
     build_unit_los_cache(gs, unit_id_str)
 
@@ -1314,7 +1330,7 @@ def preview_shoot_valid_targets_from_position(
     else:
         adjacent_status = 1 if _is_adjacent_to_enemy_within_cc_range(gs, u) else 0
 
-    return valid_target_pool_build(
+    valid_targets = valid_target_pool_build(
         gs,
         u,
         weapon_rule,
@@ -1323,6 +1339,56 @@ def preview_shoot_valid_targets_from_position(
         precomputed_weapon_available_pool=None,
         precomputed_enemy_precheck=None,
     )
+    if include_los_cells:
+        _update_unit_los_preview_data(gs, u, weapon_rule, advance_status, adjacent_status)
+    else:
+        u["los_preview_attack_cells"] = []
+        u["los_preview_cover_cells"] = []
+        u["los_preview_ratio_by_hex"] = {}
+
+    cover_by_unit_id = build_cover_by_unit_id_for_valid_targets(gs, u, valid_targets)
+
+    return {
+        "valid_targets": valid_targets,
+        "los_preview_attack_cells": require_key(u, "los_preview_attack_cells"),
+        "los_preview_cover_cells": require_key(u, "los_preview_cover_cells"),
+        "los_preview_ratio_by_hex": require_key(u, "los_preview_ratio_by_hex"),
+        "cover_by_unit_id": cover_by_unit_id,
+    }
+
+
+def build_cover_by_unit_id_for_valid_targets(
+    game_state: Dict[str, Any],
+    shooter: Dict[str, Any],
+    valid_targets: List[str],
+) -> Dict[str, bool]:
+    """Return backend cover status for each valid shooting target."""
+    cover_by_unit_id: Dict[str, bool] = {}
+    units_cache = require_key(game_state, "units_cache")
+    shooter_col, shooter_row = require_unit_position(shooter, game_state)
+    for target_id in valid_targets:
+        target_id_str = str(target_id)
+        enemy = _get_unit_by_id(game_state, target_id_str)
+        if enemy is None:
+            raise KeyError(f"Target {target_id_str} is in valid_target_pool but missing from game_state['units']")
+        target_entry = units_cache.get(target_id_str)
+        if target_entry is None:
+            raise KeyError(f"Target {target_id_str} is in valid_target_pool but missing from units_cache")
+        target_col = int(require_key(target_entry, "col"))
+        target_row = int(require_key(target_entry, "row"))
+        target_hexes = _resolve_target_hexes_for_los(game_state, enemy, target_col, target_row)
+        _, can_see_target, in_cover_target, _, _ = _compute_target_visibility_from_hexes(
+            game_state,
+            int(shooter_col),
+            int(shooter_row),
+            target_hexes,
+        )
+        if not can_see_target:
+            raise RuntimeError(
+                f"Target {target_id_str} is in valid_target_pool but backend LoS cannot see it"
+            )
+        cover_by_unit_id[target_id_str] = bool(in_cover_target)
+    return cover_by_unit_id
 
 
 def update_los_cache_after_target_death(game_state: Dict[str, Any], dead_target_id: str) -> None:
@@ -4142,6 +4208,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
                     "weapon_selection_required": True,
                     "context": "weapon_selection_after_shots_exhausted",
                     "blinking_units": valid_targets,
+                    "cover_by_unit_id": build_cover_by_unit_id_for_valid_targets(game_state, unit, valid_targets),
                     "start_blinking": True,
                     "waiting_for_player": True,
                     "available_weapons": available_weapons
@@ -4316,6 +4383,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         "shootLeft": unit["SHOOT_LEFT"],
         "context": "player_action_selection",
         "blinking_units": valid_targets,
+        "cover_by_unit_id": build_cover_by_unit_id_for_valid_targets(game_state, unit, valid_targets),
         "start_blinking": True,
         "waiting_for_player": True,
         "available_weapons": available_weapons,

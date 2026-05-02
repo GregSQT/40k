@@ -512,11 +512,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     unitIds: number[];
     blinkTimer: number | null;
     attackerId?: number | null;
+    coverByUnitId?: Record<string, boolean>;
   }>({ unitIds: [], blinkTimer: null, attackerId: null });
   const [blinkVersion, setBlinkVersion] = useState(0);
-
-  // Move phase preview: backend source of truth (same logic as shoot phase)
-  const [movePreviewBlinkingUnits, setMovePreviewBlinkingUnits] = useState<number[]>([]);
 
   // State for failed charge roll display
   const [failedChargeRoll, setFailedChargeRoll] = useState<{
@@ -953,45 +951,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setAdvanceRoll(null);
     }
   }, [gameState?.phase]);
-
-  // Move phase movePreview: fetch valid shoot targets from hypothetical position (same as backend)
-  const isMovePreview = gameState?.phase === "move" && movePreview;
-  useEffect(() => {
-    if (!gameState || !movePreview || !gameState.units_cache || !isMovePreview) {
-      setMovePreviewBlinkingUnits([]);
-      return;
-    }
-    let cancelled = false;
-    const fetchPreview = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/game/action`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "preview_shoot_from_position",
-            unitId: String(movePreview.unitId),
-            destCol: movePreview.destCol,
-            destRow: movePreview.destRow,
-            advancePosition: false,
-          }),
-        });
-        if (!response.ok || cancelled) return;
-        const data = await response.json();
-        if (!data.success || !data.result?.blinking_units || cancelled) {
-          setMovePreviewBlinkingUnits([]);
-          return;
-        }
-        const ids = data.result.blinking_units.map((id: string) => parseInt(id, 10));
-        setMovePreviewBlinkingUnits(ids);
-      } catch {
-        if (!cancelled) setMovePreviewBlinkingUnits([]);
-      }
-    };
-    fetchPreview();
-    return () => {
-      cancelled = true;
-    };
-  }, [gameState, movePreview, isMovePreview]);
 
   useEffect(() => {
     latestGameStateRef.current = gameState;
@@ -1497,13 +1456,32 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                       : null,
                 "active attacker unit id"
               );
+            let coverByUnitId: Record<string, boolean> | undefined;
+            if (phase === "shoot") {
+              const rawCoverByUnitId = data.result.cover_by_unit_id;
+              if (!rawCoverByUnitId || typeof rawCoverByUnitId !== "object" || Array.isArray(rawCoverByUnitId)) {
+                throw new Error("shoot blinking response missing required cover_by_unit_id");
+              }
+              coverByUnitId = {};
+              for (const [unitId, inCover] of Object.entries(rawCoverByUnitId as Record<string, unknown>)) {
+                if (typeof inCover !== "boolean") {
+                  throw new Error(`shoot blinking response cover_by_unit_id.${unitId} must be boolean`);
+                }
+                coverByUnitId[unitId] = inCover;
+              }
+            }
+            const coverKey = JSON.stringify(Object.entries(coverByUnitId ?? {}).sort(([a], [b]) => a.localeCompare(b)));
+            const previousCoverKey = JSON.stringify(
+              Object.entries(blinkingUnits.coverByUnitId ?? {}).sort(([a], [b]) => a.localeCompare(b))
+            );
 
             // Check if we need to update: different unitIds, different attackerId, or no timer
             const unitIdsChanged =
               newUnitIds.length !== blinkingUnits.unitIds.length ||
               !newUnitIds.every((id: number) => blinkingUnits.unitIds.includes(id));
             const attackerIdChanged = newAttackerId !== blinkingUnits.attackerId;
-            const needsUpdate = !blinkingUnits.blinkTimer || unitIdsChanged || attackerIdChanged;
+            const coverByUnitIdChanged = coverKey !== previousCoverKey;
+            const needsUpdate = !blinkingUnits.blinkTimer || unitIdsChanged || attackerIdChanged || coverByUnitIdChanged;
 
             if (needsUpdate) {
               // Clear any existing blinking timer
@@ -1532,7 +1510,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 unitIds: newUnitIds,
                 blinkTimer: timer,
                 attackerId: newAttackerId,
+                coverByUnitId,
               });
+              setBlinkVersion((prev) => prev + 1);
             }
           } else if (data.result?.blinking_units && !data.result?.start_blinking) {
             console.warn("💫 WARNING: blinking_units present but start_blinking is false");
@@ -3832,15 +3812,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     throw new Error(`API ERROR: ${error}`);
   }
 
-  // Memoize blinkingUnits: move phase movePreview uses backend preview; shoot uses blinking_units
+  // Memoize blinkingUnits from activation responses; move hover LoS is owned by BoardPvp.
   const blinkingUnitsIds = useMemo(() => {
-    const usePreviewBlinking =
-      gameState?.phase === "move" && movePreview && movePreviewBlinkingUnits.length > 0;
-    if (usePreviewBlinking) {
-      return [...movePreviewBlinkingUnits].sort((a, b) => a - b);
-    }
     return [...blinkingUnits.unitIds].sort((a, b) => a - b);
-  }, [gameState?.phase, movePreview, movePreviewBlinkingUnits, blinkingUnits.unitIds]);
+  }, [blinkingUnits.unitIds]);
 
   const moveSelectionCellsOverride = useMemo(() => {
     if (
@@ -4214,11 +4189,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     availableCellsOverride: combinedAvailableCellsOverride,
     // Export blinking state for HP bar components
     blinkingUnits: blinkingUnitsIds,
-    blinkingAttackerId: (() => {
-      const usePreviewAttacker =
-        gameState?.phase === "move" && movePreview && movePreviewBlinkingUnits.length > 0;
-      return usePreviewAttacker ? movePreview!.unitId : (blinkingUnits.attackerId ?? null);
-    })(),
+    blinkingAttackerId: blinkingUnits.attackerId ?? null,
+    blinkingCoverByUnitId: blinkingUnits.coverByUnitId,
     isBlinkingActive: isBlinkingActiveMemo,
     blinkVersion,
     ruleChoicePrompt,

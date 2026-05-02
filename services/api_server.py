@@ -1946,21 +1946,28 @@ def execute_action():
             dest_col = action.get("destCol")
             dest_row = action.get("destRow")
             advance_position = action.get("advancePosition") is True
+            include_los_cells = action.get("includeLosCells") is not False
             if unit_id is None or dest_col is None or dest_row is None:
                 return jsonify({
                     "success": False,
                     "error": "preview_shoot_from_position requires unitId, destCol, destRow",
                 }), 400
             from engine.phase_handlers.shooting_handlers import preview_shoot_valid_targets_from_position
-            valid_targets = preview_shoot_valid_targets_from_position(
+            preview_payload = preview_shoot_valid_targets_from_position(
                 engine.game_state, str(unit_id), int(dest_col), int(dest_row),
                 advance_position=advance_position,
+                include_los_cells=include_los_cells,
             )
+            valid_targets = preview_payload["valid_targets"]
             return jsonify({
                 "success": True,
                 "result": {
                     "blinking_units": valid_targets,
                     "start_blinking": len(valid_targets) > 0,
+                    "los_preview_attack_cells": preview_payload["los_preview_attack_cells"],
+                    "los_preview_cover_cells": preview_payload["los_preview_cover_cells"],
+                    "los_preview_ratio_by_hex": preview_payload["los_preview_ratio_by_hex"],
+                    "cover_by_unit_id": preview_payload["cover_by_unit_id"],
                 },
             })
 

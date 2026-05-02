@@ -1,4 +1,4 @@
-import type { VisibleHex } from "./wasmLos";
+import { computeVisibleHexes, type VisibleHex } from "./wasmLos";
 import { resolveBaseSizeForUnitDisplay } from "./hexFootprint";
 
 /** Même cube-odd-r que ``BoardPvp.hexDistOff`` (empreinte / scan). */
@@ -19,6 +19,72 @@ export interface MinimalUnitForLos {
   row: number;
   /** Aligné sur ``Unit.BASE_SIZE`` (nombre ou tuple rare). */
   BASE_SIZE?: number | [number, number];
+}
+
+export interface WallHexOverrideForLos {
+  col: number;
+  row: number;
+}
+
+export interface BuildLosPreviewFromSourceParams {
+  source: {
+    unit: MinimalUnitForLos;
+    fromCol: number;
+    fromRow: number;
+  };
+  units: MinimalUnitForLos[];
+  boardCols: number;
+  boardRows: number;
+  wallHexes: Array<[number, number]> | undefined;
+  wallHexesOverride?: WallHexOverrideForLos[];
+  maxRange: number;
+  losVisibilityMinRatio: number;
+  coverRatio: number;
+}
+
+export interface LosPreviewFromSource {
+  visibleHexes: VisibleHex[];
+  clearCells: Array<{ col: number; row: number }>;
+  terrainCoverCells: Array<{ col: number; row: number }>;
+  visibleHexKeySet: Set<string>;
+  blinkIds: number[];
+  coverByUnitId: Record<string, boolean>;
+  effectiveWallHexes: Array<[number, number]>;
+  key: string;
+}
+
+function stableBoolRecordJson(m: Record<string, boolean>): string {
+  const keys = Object.keys(m).sort();
+  const sorted: Record<string, boolean> = {};
+  for (const k of keys) {
+    sorted[k] = m[k] === true;
+  }
+  return JSON.stringify(sorted);
+}
+
+function stableWallHexKey(wallHexes: Array<[number, number]>): string {
+  return wallHexes.map(([c, r]) => `${c},${r}`).sort().join(";");
+}
+
+export function buildEffectiveLosWallHexes(
+  boardCols: number,
+  boardRows: number,
+  wallHexes: Array<[number, number]> | undefined,
+  wallHexesOverride?: WallHexOverrideForLos[],
+): Array<[number, number]> {
+  const effectiveWallHexes: Array<[number, number]> = wallHexesOverride
+    ? wallHexesOverride.map((h) => [h.col, h.row] as [number, number])
+    : wallHexes
+      ? [...wallHexes]
+      : [];
+  const wallKeySet = new Set(effectiveWallHexes.map(([c, r]) => `${c},${r}`));
+  const bottomRow = boardRows - 1;
+  for (let col = 0; col < boardCols; col++) {
+    if (col % 2 === 1 && !wallKeySet.has(`${col},${bottomRow}`)) {
+      effectiveWallHexes.push([col, bottomRow]);
+    }
+  }
+  return effectiveWallHexes;
 }
 
 /** Même logique que le survol move (``triggerLosForHex``) : terrain 1/2 + cibles / couverture par empreinte. */
@@ -81,5 +147,53 @@ export function buildShootingLosPreviewFromVisibleHexes(
     visibleHexKeySet,
     blinkIds,
     coverByUnitId,
+  };
+}
+
+export function buildLosPreviewFromSource(
+  params: BuildLosPreviewFromSourceParams,
+): LosPreviewFromSource {
+  const effectiveWallHexes = buildEffectiveLosWallHexes(
+    params.boardCols,
+    params.boardRows,
+    params.wallHexes,
+    params.wallHexesOverride,
+  );
+  const visibleHexes = computeVisibleHexes(
+    params.source.fromCol,
+    params.source.fromRow,
+    params.maxRange,
+    params.boardCols,
+    params.boardRows,
+    effectiveWallHexes,
+    params.losVisibilityMinRatio,
+    params.coverRatio,
+  );
+  const losPreview = buildShootingLosPreviewFromVisibleHexes(
+    visibleHexes,
+    params.units,
+    params.source.unit.player,
+    params.losVisibilityMinRatio,
+    params.coverRatio,
+  );
+  const key = [
+    params.source.fromCol,
+    params.source.fromRow,
+    params.maxRange,
+    params.boardCols,
+    params.boardRows,
+    stableWallHexKey(effectiveWallHexes),
+    [...losPreview.blinkIds].sort((a, b) => a - b).join(","),
+    stableBoolRecordJson(losPreview.coverByUnitId),
+  ].join("|");
+  return {
+    visibleHexes,
+    clearCells: losPreview.clearCells,
+    terrainCoverCells: losPreview.terrainCoverCells,
+    visibleHexKeySet: losPreview.visibleHexKeySet,
+    blinkIds: losPreview.blinkIds,
+    coverByUnitId: losPreview.coverByUnitId,
+    effectiveWallHexes,
+    key,
   };
 }

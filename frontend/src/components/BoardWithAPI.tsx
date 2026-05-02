@@ -3265,6 +3265,7 @@ export const BoardWithAPI: React.FC = () => {
             }
             blinkingUnits={apiProps.blinkingUnits}
             blinkingAttackerId={apiProps.blinkingAttackerId}
+            blinkingCoverByUnitId={apiProps.blinkingCoverByUnitId}
             isBlinkingActive={apiProps.isBlinkingActive}
             blinkVersion={apiProps.blinkVersion}
             onSelectUnit={
