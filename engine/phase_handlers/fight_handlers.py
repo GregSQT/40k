@@ -748,30 +748,192 @@ def _fight_clear_consolidation_state(game_state: Dict[str, Any]) -> None:
     game_state.pop("_fight_consolidation_ctx", None)
 
 
-def _fight_all_objective_hexes_union(game_state: Dict[str, Any]) -> Set[Tuple[int, int]]:
-    """Union des hexes de tous les objectifs (empreinte objectif)."""
-    objectives = game_state.get("objectives")
-    if not isinstance(objectives, list) or not objectives:
-        return set()
-    out: Set[Tuple[int, int]] = set()
-    for objective in objectives:
-        if not isinstance(objective, dict):
-            continue
-        objective_hexes = objective.get("hexes")
-        if not isinstance(objective_hexes, list):
-            continue
-        for objective_hex in objective_hexes:
-            if isinstance(objective_hex, dict):
-                oc, orow = normalize_coordinates(
-                    require_key(objective_hex, "col"),
-                    require_key(objective_hex, "row"),
-                )
-            elif isinstance(objective_hex, (list, tuple)) and len(objective_hex) == 2:
-                oc, orow = normalize_coordinates(objective_hex[0], objective_hex[1])
-            else:
-                continue
-            out.add((int(oc), int(orow)))
+def _fight_synth_cache_entry_at_footprint(
+    unit: Dict[str, Any],
+    game_state: Dict[str, Any],
+    anchor_col: int,
+    anchor_row: int,
+    candidate_fp: Set[Tuple[int, int]],
+) -> Dict[str, Any]:
+    """Construit une entrée ``units_cache``-compatible pour un test d'engagement à l'ancre donnée."""
+    uid = str(require_key(unit, "id"))
+    units_cache = require_key(game_state, "units_cache")
+    src = units_cache.get(uid)
+    if src is None:
+        raise ValueError(f"_fight_synth_cache_entry_at_footprint: unit {uid} missing from units_cache")
+    out = dict(src)
+    out["col"] = int(anchor_col)
+    out["row"] = int(anchor_row)
+    out["occupied_hexes"] = set(candidate_fp)
     return out
+
+
+def _fight_footprint_in_engagement_with_any_enemy(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    anchor_col: int,
+    anchor_row: int,
+    candidate_fp: Set[Tuple[int, int]],
+) -> bool:
+    """True si l'empreinte candidate est en zone d'engagement (contrat ``spatial_relations``) avec ≥1 ennemi."""
+    from engine.spatial_relations import unit_entries_within_engagement_zone, get_engagement_zone
+
+    ez = get_engagement_zone(game_state)
+    synth = _fight_synth_cache_entry_at_footprint(unit, game_state, anchor_col, anchor_row, candidate_fp)
+    mover_id = str(require_key(unit, "id"))
+    mover_player = int(require_key(unit, "player"))
+    units_cache = require_key(game_state, "units_cache")
+    for eid, ce in units_cache.items():
+        if str(eid) == mover_id:
+            continue
+        if int(require_key(ce, "player")) == mover_player:
+            continue
+        if unit_entries_within_engagement_zone(synth, ce, ez):
+            return True
+    return False
+
+
+def _fight_consolidation_unit_engaged_with_any_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """True si l'unité est en zone d'engagement (contrat B) d'au moins un ennemi — pas de consolidation objectif."""
+    from engine.spatial_relations import get_engagement_zone, unit_within_engagement_zone_footprints
+
+    cc_range = get_engagement_zone(game_state)
+    return unit_within_engagement_zone_footprints(
+        game_state, unit, engagement_zone=cc_range, max_distance=cc_range
+    )
+
+
+def _fight_collect_consolidation_orbit_anchors(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    start_pos: Tuple[int, int],
+    closest_ids: List[str],
+    visited: Dict[Tuple[int, int], int],
+    fp_by_anchor: Dict[Tuple[int, int], Set[Tuple[int, int]]],
+) -> List[Tuple[int, int]]:
+    """
+    Consolidation « orbite » : au contact hex minimal (``start_d_min`` ≤ 1) avec engagement,
+    déplacements ≤ 3\" qui **restent** en contact bord-à-bord / empreinte avec au moins une unité
+    du palier ``closest_ids`` (pas de rapprochement strict possible).
+    """
+    contact_filter = sorted({str(x) for x in closest_ids})
+    if not contact_filter:
+        return []
+    out: List[Tuple[int, int]] = []
+    for anchor in visited:
+        if anchor == start_pos:
+            continue
+        if anchor not in fp_by_anchor:
+            raise KeyError(
+                "_fight_collect_consolidation_orbit_anchors: missing candidate footprint for anchor "
+                f"{anchor!r}"
+            )
+        fp = fp_by_anchor[anchor]
+        ac, ar = anchor
+        if _fight_pile_in_anchor_adjacent_to_enemy_footprint(
+            game_state,
+            unit,
+            int(ac),
+            int(ar),
+            contact_filter,
+            candidate_footprint=fp,
+        ):
+            out.append(anchor)
+    return out
+
+
+def _fight_unit_positions_for_observation_builder(game_state: Dict[str, Any]) -> Dict[str, Tuple[int, int]]:
+    """Positions ancre pour ``ObservationBuilder._target_priority_score`` (unités vivantes uniquement)."""
+    positions: Dict[str, Tuple[int, int]] = {}
+    for u in require_key(game_state, "units"):
+        uid = str(require_key(u, "id"))
+        if not is_unit_alive(uid, game_state):
+            continue
+        positions[uid] = require_unit_position(u, game_state)
+    return positions
+
+
+def _fight_resolve_objective_marker_center_hex(objective: Dict[str, Any]) -> Optional[Tuple[int, int]]:
+    """
+    Hex « marqueur » d'un objectif : centre déclaré (disque / config) ou médiode des ``hexes``
+    (liste explicite sans ``center``). Les autres hexes de ``hexes`` sont la zone de contrôle ;
+    la consolidation objectif se mesure vers ce marqueur, pas vers toute la zone.
+    """
+    center_raw = objective.get("center")
+    if center_raw is not None:
+        if isinstance(center_raw, (list, tuple)) and len(center_raw) >= 2:
+            c, r = normalize_coordinates(center_raw[0], center_raw[1])
+            return (int(c), int(r))
+        if isinstance(center_raw, dict):
+            c = require_key(center_raw, "col")
+            r = require_key(center_raw, "row")
+            nc, nr = normalize_coordinates(c, r)
+            return (int(nc), int(nr))
+    hexes = objective.get("hexes")
+    if not isinstance(hexes, (list, tuple)) or not hexes:
+        return None
+    coords: List[Tuple[int, int]] = []
+    for h in hexes:
+        if isinstance(h, (list, tuple)) and len(h) >= 2:
+            c, r = normalize_coordinates(h[0], h[1])
+            coords.append((int(c), int(r)))
+        elif isinstance(h, dict):
+            c = require_key(h, "col")
+            r = require_key(h, "row")
+            nc, nr = normalize_coordinates(c, r)
+            coords.append((int(nc), int(nr)))
+    if not coords:
+        return None
+    best: Optional[Tuple[int, int]] = None
+    best_sum: Optional[int] = None
+    for cand in coords:
+        s = 0
+        for o in coords:
+            s += calculate_hex_distance(cand[0], cand[1], o[0], o[1])
+        if best_sum is None or s < best_sum:
+            best_sum = s
+            best = cand
+    return best
+
+
+def _fight_closest_objective_marker_snapshot(
+    start_fp: Set[Tuple[int, int]],
+    marker_points: List[Tuple[int, int]],
+) -> Tuple[int, List[Tuple[int, int]]]:
+    """Distance minimale empreinte → hex marqueur, et liste des marqueurs à cette distance."""
+    from engine.hex_utils import min_distance_between_sets
+
+    if not marker_points:
+        raise ValueError("_fight_closest_objective_marker_snapshot: marker_points must be non-empty")
+    d_min: Optional[int] = None
+    closest: List[Tuple[int, int]] = []
+    for mc, mr in marker_points:
+        d = min_distance_between_sets(start_fp, {(mc, mr)})
+        if d_min is None or d < d_min:
+            d_min = d
+            closest = [(mc, mr)]
+        elif d == d_min and (mc, mr) not in closest:
+            closest.append((mc, mr))
+    assert d_min is not None
+    return int(d_min), closest
+
+
+def _fight_new_fp_strictly_closer_to_objective_marker_tier(
+    new_fp: Set[Tuple[int, int]],
+    d_min: int,
+    closest_markers: List[Tuple[int, int]],
+) -> bool:
+    """Même idée que ``_fight_pile_in_new_fp_strictly_closer_to_closest_tier`` : empreinte plus proche du marqueur."""
+    if d_min <= 0:
+        return False
+    from engine.hex_utils import dilate_hex_set_unbounded
+
+    radius = d_min - 1
+    for mc, mr in closest_markers:
+        shell = dilate_hex_set_unbounded({(mc, mr)}, radius)
+        if new_fp & shell:
+            return True
+    return False
 
 
 def _fight_bfs_reachable_anchors_consolidation(
@@ -821,29 +983,6 @@ def _fight_bfs_reachable_anchors_consolidation(
     return visited, fp_by_anchor
 
 
-def _fight_min_distance_fp_to_nearest_enemy(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    fp: Set[Tuple[int, int]],
-) -> Optional[int]:
-    from engine.hex_utils import min_distance_between_sets
-
-    units_cache = require_key(game_state, "units_cache")
-    unit_player = int(unit["player"]) if unit["player"] is not None else None
-    unit_id_str = str(unit["id"])
-    best: Optional[int] = None
-    for enemy_id, cache_entry in units_cache.items():
-        if str(enemy_id) == unit_id_str:
-            continue
-        if int(cache_entry["player"]) == unit_player:
-            continue
-        enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-        d = min_distance_between_sets(fp, enemy_fp)
-        if best is None or d < best:
-            best = d
-    return best
-
-
 def _fight_fp_has_adjacent_enemy_footprint(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -861,114 +1000,171 @@ def _fight_fp_has_adjacent_enemy_footprint(
 def _fight_plan_consolidation_destinations(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
-) -> Optional[Tuple[str, List[Tuple[int, int]], Dict[Tuple[int, int], int]]]:
+) -> Optional[Tuple[str, List[Tuple[int, int]], Dict[Tuple[int, int], int], Optional[List[str]]]]:
     """
-    Priorité 1 : ennemis — minimiser la distance à l'empreinte ennemie la plus proche ; si possible,
-    fin « contact » (même test que pile-in : ``_fight_pile_in_anchor_adjacent_to_enemy_footprint``).
-    Priorité 2 (sans ennemis sur le plateau) : objectif — finir avec empreinte ∩ empreinte objectif ; mouvement le plus court possible.
-    Retourne None si aucune consolidation n'est possible / utile.
+    Consolidation après attaques (alignée pile-in + engagement ``spatial_relations``) :
 
-    PERF : BFS consolidation seulement si utile — ennemis : ``start_d_min > 1`` ; objectifs :
-    pas si l'empreinte de départ intersecte déjà les hexes objectif (seul walk 0 possible).
-    Empreintes par ancre : réutilisées depuis le BFS (pas de second ``compute_candidate_footprint``).
-    Palier d'ennemis les plus proches : empreintes pré-calculées une fois par plan.
+    - **Ennemis** : BFS 3\", placement valide. Si distance au palier > 1 : rapprochement strict +
+      engagement + préférence contact (pile-in). Si distance ≤ 1 **et** l'unité est **engagée**
+      (zone d'engagement B) : ancres ≤ 3\" qui **restent** en contact bord-à-bord / empreinte avec
+      une unité du palier le plus proche (orbite autour du socle). **Pas** de consolidation objectif
+      tant que l'unité est engagée.
+    - **Objectif** : uniquement si **non engagée** ; si consolidation vers une figurine ennemie
+      impossible (ou pas d'ennemi opposant),
+      rapprochement du **hex marqueur** (centre déclaré ``center`` / médiode des ``hexes`` si pas de
+      centre). Les autres hexes de la zone sont la **zone de contrôle** ; la consolidation vise à
+      diminuer la distance empreinte → marqueur (comme le pile-in vers un palier), pas seulement à
+      entrer dans la zone. Préférence si ex aequo : empreinte recouvrant le hex marqueur.
+    - **Aucune** consolidation si aucune branche ne fournit d'ancre utile (hors position de départ seule).
     """
+    from engine.hex_utils import min_distance_between_sets
+
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
-
     has_enemy = _fight_opposing_enemies_exist(game_state, unit)
 
+    visited: Optional[Dict[Tuple[int, int], int]] = None
+    fp_by_anchor: Optional[Dict[Tuple[int, int], Set[Tuple[int, int]]]] = None
+
+    def _ensure_consolidation_bfs(start_footprint: Optional[Set[Tuple[int, int]]] = None) -> None:
+        nonlocal visited, fp_by_anchor
+        if visited is not None and fp_by_anchor is not None:
+            return
+        visited_out, fp_out = _fight_bfs_reachable_anchors_consolidation(
+            game_state, unit, start_footprint=start_footprint
+        )
+        visited = visited_out
+        fp_by_anchor = fp_out
+
     if has_enemy:
-        # Consolidation: l'ancre finale doit etre strictement plus proche de l'ennemi
-        # le plus proche qu'au debut de la consolidation.
         start_d_min, closest_ids = _fight_pile_in_closest_enemy_snapshot(game_state, unit)
-        if start_d_min <= 1:
-            # Deja au contact (distance minimale possible sans overlap) -> pas de consolidation utile.
-            return None
+        _ensure_consolidation_bfs()
+        assert visited is not None and fp_by_anchor is not None
 
-        visited, fp_by_anchor = _fight_bfs_reachable_anchors_consolidation(game_state, unit)
-
-        dist_by_anchor: List[Tuple[Tuple[int, int], int]] = []
-        units_cache = require_key(game_state, "units_cache")
-        from engine.hex_utils import min_distance_between_sets
-
-        closest_enemy_fps: List[Set[Tuple[int, int]]] = []
-        for enemy_id in closest_ids:
-            cache_entry = units_cache.get(str(enemy_id))
-            if not cache_entry:
-                continue
-            closest_enemy_fps.append(
-                cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-            )
-
-        for anchor in visited:
-            if anchor not in fp_by_anchor:
-                raise KeyError(
-                    "_fight_plan_consolidation_destinations: missing candidate footprint for anchor "
-                    f"{anchor!r} (BFS fp_by_anchor inconsistency)"
+        if start_d_min > 1:
+            units_cache = require_key(game_state, "units_cache")
+            closest_enemy_fps: List[Set[Tuple[int, int]]] = []
+            for enemy_id in closest_ids:
+                cache_entry = units_cache.get(str(enemy_id))
+                if not cache_entry:
+                    continue
+                closest_enemy_fps.append(
+                    cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
                 )
-            fp = fp_by_anchor[anchor]
-            # Evaluer uniquement le palier d'ennemis le plus proche au depart.
-            dmin = None
-            for enemy_fp in closest_enemy_fps:
-                d = min_distance_between_sets(fp, enemy_fp)
-                if dmin is None or d < dmin:
-                    dmin = d
-            if dmin is None:
-                continue
-            if dmin >= start_d_min:
-                # Strictement plus proche requis.
-                continue
-            dist_by_anchor.append((anchor, int(dmin)))
-        if not dist_by_anchor:
-            return None
-        best_score = min(d for _, d in dist_by_anchor)
-        tier = [a for a, d in dist_by_anchor if d == best_score]
-        contact_tier = []
-        for anchor in tier:
-            ac, ar = anchor
-            fp = fp_by_anchor[anchor]
-            if _fight_pile_in_anchor_adjacent_to_enemy_footprint(
-                game_state,
-                unit,
-                int(ac),
-                int(ar),
-                None,
-                candidate_footprint=fp,
-            ):
-                contact_tier.append(anchor)
-        final_cands = contact_tier if contact_tier else tier
-        if len(final_cands) == 1 and final_cands[0] == start_pos:
-            return None
-        return ("enemy", final_cands, visited)
+            dist_by_anchor: List[Tuple[Tuple[int, int], int]] = []
+            for anchor in visited:
+                if anchor == start_pos:
+                    continue
+                if anchor not in fp_by_anchor:
+                    raise KeyError(
+                        "_fight_plan_consolidation_destinations: missing candidate footprint for anchor "
+                        f"{anchor!r} (BFS fp_by_anchor inconsistency)"
+                    )
+                fp = fp_by_anchor[anchor]
+                if not _fight_pile_in_new_fp_strictly_closer_to_closest_tier(
+                    game_state, fp, start_d_min, closest_ids
+                ):
+                    continue
+                ac, ar = anchor
+                if not _fight_footprint_in_engagement_with_any_enemy(
+                    game_state, unit, int(ac), int(ar), fp
+                ):
+                    continue
+                dmin: Optional[int] = None
+                for enemy_fp in closest_enemy_fps:
+                    d = min_distance_between_sets(fp, enemy_fp)
+                    if dmin is None or d < dmin:
+                        dmin = d
+                if dmin is None or dmin >= start_d_min:
+                    continue
+                dist_by_anchor.append((anchor, int(dmin)))
+            if dist_by_anchor:
+                best_score = min(d for _, d in dist_by_anchor)
+                tier = [a for a, d in dist_by_anchor if d == best_score]
+                contact_tier: List[Tuple[int, int]] = []
+                for anchor in tier:
+                    ac, ar = anchor
+                    fp = fp_by_anchor[anchor]
+                    if _fight_pile_in_anchor_adjacent_to_enemy_footprint(
+                        game_state,
+                        unit,
+                        int(ac),
+                        int(ar),
+                        None,
+                        candidate_footprint=fp,
+                    ):
+                        contact_tier.append(anchor)
+                final_cands = contact_tier if contact_tier else tier
+                if not (len(final_cands) == 1 and final_cands[0] == start_pos):
+                    return ("enemy", final_cands, visited, list(closest_ids))
 
-    obj_hexes = _fight_all_objective_hexes_union(game_state)
-    if not obj_hexes:
+        if start_d_min <= 1 and _fight_consolidation_unit_engaged_with_any_enemy(game_state, unit):
+            orbit_anchors = _fight_collect_consolidation_orbit_anchors(
+                game_state, unit, start_pos, closest_ids, visited, fp_by_anchor
+            )
+            if orbit_anchors:
+                return ("enemy", orbit_anchors, visited, list(closest_ids))
+
+    if _fight_consolidation_unit_engaged_with_any_enemy(game_state, unit):
         return None
+
+    objectives = game_state.get("objectives")
+    if not isinstance(objectives, (list, tuple)) or not objectives:
+        return None
+    marker_points: List[Tuple[int, int]] = []
+    seen_markers: Set[Tuple[int, int]] = set()
+    for obj in objectives:
+        if not isinstance(obj, dict):
+            continue
+        pt = _fight_resolve_objective_marker_center_hex(obj)
+        if pt is not None and pt not in seen_markers:
+            seen_markers.add(pt)
+            marker_points.append(pt)
+    if not marker_points:
+        return None
+
     start_fp_obj = compute_candidate_footprint(start_col, start_row, unit, game_state)
-    if start_fp_obj & obj_hexes:
-        # Déjà sur l'objectif avec walk 0 ; aucune autre ancre n'a un walk strictement plus court.
+    start_d_obj, closest_markers = _fight_closest_objective_marker_snapshot(start_fp_obj, marker_points)
+    if start_d_obj == 0:
         return None
-    visited, fp_by_anchor = _fight_bfs_reachable_anchors_consolidation(
-        game_state, unit, start_footprint=start_fp_obj
-    )
-    overlap_cands: List[Tuple[Tuple[int, int], int]] = []
+
+    _ensure_consolidation_bfs(start_fp_obj)
+    assert visited is not None and fp_by_anchor is not None
+    dist_by_anchor_obj: List[Tuple[Tuple[int, int], int]] = []
     for anchor in visited:
+        if anchor == start_pos:
+            continue
         if anchor not in fp_by_anchor:
             raise KeyError(
                 "_fight_plan_consolidation_destinations: missing candidate footprint for anchor "
                 f"{anchor!r} (BFS fp_by_anchor inconsistency)"
             )
         fp = fp_by_anchor[anchor]
-        if fp & obj_hexes:
-            overlap_cands.append((anchor, visited[anchor]))
-    if not overlap_cands:
+        if not _fight_new_fp_strictly_closer_to_objective_marker_tier(fp, start_d_obj, closest_markers):
+            continue
+        d_tier: Optional[int] = None
+        for mc, mr in closest_markers:
+            d = min_distance_between_sets(fp, {(mc, mr)})
+            if d_tier is None or d < d_tier:
+                d_tier = d
+        if d_tier is None or d_tier >= start_d_obj:
+            continue
+        dist_by_anchor_obj.append((anchor, int(d_tier)))
+    if not dist_by_anchor_obj:
         return None
-    min_walk = min(w for _, w in overlap_cands)
-    final_cands = [a for a, w in overlap_cands if w == min_walk]
-    if len(final_cands) == 1 and final_cands[0] == start_pos:
+    best_o = min(d for _, d in dist_by_anchor_obj)
+    tier_o = [a for a, d in dist_by_anchor_obj if d == best_o]
+    on_marker: List[Tuple[int, int]] = []
+    for anchor in tier_o:
+        fp = fp_by_anchor[anchor]
+        for mc, mr in closest_markers:
+            if (mc, mr) in fp:
+                on_marker.append(anchor)
+                break
+    final_cands_obj = on_marker if on_marker else tier_o
+    if len(final_cands_obj) == 1 and final_cands_obj[0] == start_pos:
         return None
-    return ("objective", final_cands, visited)
+    return ("objective", final_cands_obj, visited, None)
 
 
 def _fight_opposing_enemies_exist(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
@@ -984,20 +1180,45 @@ def _fight_opposing_enemies_exist(game_state: Dict[str, Any], unit: Dict[str, An
 
 
 def _ai_select_consolidation_destination(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    branch: str,
     destinations: List[Tuple[int, int]],
     visited: Dict[Tuple[int, int], int],
+    closest_enemy_ids: Optional[List[str]],
 ) -> Tuple[int, int]:
-    """Minimise la distance de marche BFS parmi les ancres optimales."""
+    """
+    Choisit l'ancre de consolidation : d'abord marche BFS minimale, puis en branche ennemie
+    tie-break via ``ObservationBuilder._target_priority_score`` (même contrat que l'observation).
+    """
     if not destinations:
         raise ValueError("_ai_select_consolidation_destination: empty destinations")
-    best: Optional[Tuple[int, int]] = None
-    best_w: Optional[int] = None
-    for a in destinations:
-        w = visited.get(a, 10**9)
-        if best_w is None or w < best_w:
-            best_w = w
-            best = a
-    return best if best is not None else destinations[0]
+    best_w = min(visited.get(a, 10**9) for a in destinations)
+    tier_walk = [a for a in destinations if visited.get(a, 10**9) == best_w]
+    if branch != "enemy" or not closest_enemy_ids:
+        return tier_walk[0]
+    from engine.observation_builder import ObservationBuilder
+
+    obs_builder = ObservationBuilder(require_key(game_state, "config"))
+    positions = _fight_unit_positions_for_observation_builder(game_state)
+    best_anchor = tier_walk[0]
+    best_score = float("-inf")
+    for anchor in tier_walk:
+        local_best = float("-inf")
+        for eid in closest_enemy_ids:
+            enemy_u = get_unit_by_id(game_state, str(eid))
+            if enemy_u is None or not is_unit_alive(str(eid), game_state):
+                continue
+            prio_tup = obs_builder._target_priority_score(enemy_u, unit, game_state, positions)
+            eff = -float(prio_tup[0])
+            if eff > local_best:
+                local_best = eff
+        if local_best > best_score or (
+            local_best == best_score and (anchor[0], anchor[1]) < (best_anchor[0], best_anchor[1])
+        ):
+            best_score = local_best
+            best_anchor = anchor
+    return best_anchor
 
 
 def _fight_post_process_fight_activation_result(
@@ -1040,7 +1261,7 @@ def _fight_try_begin_consolidation_after_attacks(
     plan = _fight_plan_consolidation_destinations(game_state, unit)
     if plan is None:
         return None
-    branch, destinations, visited = plan
+    branch, destinations, visited, closest_ids = plan
     if not destinations:
         return None
     # Dédupliquer ; si la seule option utile est « rester », pas de consolidation UI.
@@ -1062,7 +1283,9 @@ def _fight_try_begin_consolidation_after_attacks(
     auto_execution_allowed = _is_fight_auto_execution_allowed(game_state)
 
     if (is_ai_controlled or is_gym_training) and auto_execution_allowed:
-        pc, pr = _ai_select_consolidation_destination(destinations, visited)
+        pc, pr = _ai_select_consolidation_destination(
+            game_state, unit, branch, destinations, visited, closest_ids
+        )
         _fight_apply_pile_in_move(game_state, unit, pc, pr, log_label="CONSOLIDATION")
         _fight_clear_consolidation_state(game_state)
         game_state["fight_attack_results"] = []

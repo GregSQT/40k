@@ -14,7 +14,9 @@
     {"id": 104, "unit_type": "ScreamerKiller", "player": 2, "col": 90, "row": 120},
     {"id": 105, "unit_type": "Hormagaunt", "player": 2, "col": 220, "row": 245},
     {"id": 106, "unit_type": "TyranidWarriorMelee", "player": 2, "col": 270, "row": 110},
-    {"id": 107, "unit_type": "Carnifex", "player": 1, "col": 50, "row": 30}
+    {"id": 107, "unit_type": "Carnifex", "player": 1, "col": 50, "row": 30},
+    {"id": 108, "unit_type": "Hormagaunt", "player": 2, "col": 205, "row": 225}
+
 
   ]
 }
