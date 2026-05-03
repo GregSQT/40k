@@ -496,21 +496,27 @@ def _fight_pile_in_new_fp_strictly_closer_to_closest_tier(
     new_fp: Set[Tuple[int, int]],
     d_min: int,
     closest_ids: List[str],
+    *,
+    closest_enemy_fps: Optional[List[Set[Tuple[int, int]]]] = None,
 ) -> bool:
     """True si la nouvelle empreinte est strictement plus proche d'au moins une unité du palier le plus proche."""
     if d_min <= 0:
         return False
-    from engine.hex_utils import dilate_hex_set_unbounded
+    from engine.hex_utils import min_distance_between_sets
 
-    units_cache = require_key(game_state, "units_cache")
+    enemy_fps = closest_enemy_fps
+    if enemy_fps is None:
+        units_cache = require_key(game_state, "units_cache")
+        enemy_fps = []
+        for eid in closest_ids:
+            ce = units_cache.get(str(eid))
+            if not ce:
+                continue
+            enemy_fps.append(ce.get("occupied_hexes", {(ce["col"], ce["row"])}))
     radius = d_min - 1
-    for eid in closest_ids:
-        ce = units_cache.get(str(eid))
-        if not ce:
-            continue
-        efp = ce.get("occupied_hexes", {(ce["col"], ce["row"])})
-        shell = dilate_hex_set_unbounded(efp, radius)
-        if new_fp & shell:
+    for efp in enemy_fps:
+        d = min_distance_between_sets(new_fp, efp, max_distance=radius)
+        if d <= radius:
             return True
     return False
 
@@ -885,27 +891,28 @@ def _fight_new_fp_strictly_closer_to_objective_marker_tier(
     d_min: int,
     closest_markers: List[Tuple[int, int]],
     *,
-    _perf_dilate_acc: Optional[List[float]] = None,
+    _perf_strict_eval_acc: Optional[List[float]] = None,
 ) -> bool:
     """Même idée que ``_fight_pile_in_new_fp_strictly_closer_to_closest_tier`` : empreinte plus proche du marqueur.
 
-    _perf_dilate_acc : si une liste d'un flottant est fournie (perf consolidation), y ajoute le temps
-    passé dans ``dilate_hex_set_unbounded`` (diagnostic uniquement).
+    Optimisation équivalente au test par dilatation : ``new_fp`` est strictement plus proche d'un marqueur
+    du palier ssi sa distance minimale au palier est <= ``d_min - 1``.
     """
     if d_min <= 0:
         return False
-    from engine.hex_utils import dilate_hex_set_unbounded
+    from engine.hex_utils import min_distance_between_sets
 
-    radius = d_min - 1
-    for mc, mr in closest_markers:
-        if _perf_dilate_acc is not None:
-            _td0 = time.perf_counter()
-        shell = dilate_hex_set_unbounded({(mc, mr)}, radius)
-        if _perf_dilate_acc is not None:
-            _perf_dilate_acc[0] += time.perf_counter() - _td0
-        if new_fp & shell:
-            return True
-    return False
+    marker_set = set(closest_markers)
+    if not marker_set:
+        raise ValueError(
+            "_fight_new_fp_strictly_closer_to_objective_marker_tier: closest_markers must be non-empty"
+        )
+    if _perf_strict_eval_acc is not None:
+        _td0 = time.perf_counter()
+    d = min_distance_between_sets(new_fp, marker_set, max_distance=d_min - 1)
+    if _perf_strict_eval_acc is not None:
+        _perf_strict_eval_acc[0] += time.perf_counter() - _td0
+    return d <= (d_min - 1)
 
 
 def _fight_bfs_reachable_anchors_consolidation(
@@ -1013,9 +1020,12 @@ def _fight_plan_consolidation_destinations(
     - **Aucune** consolidation si aucune branche ne fournit d'ancre utile (hors position de départ seule).
     """
     from engine.hex_utils import min_distance_between_sets
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
 
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
+    unit_id_str = str(require_key(unit, "id"))
+    _cons_pf = perf_timing_enabled(game_state)
     has_enemy = _fight_opposing_enemies_exist(game_state, unit)
 
     visited: Optional[Dict[Tuple[int, int], int]] = None
@@ -1036,6 +1046,13 @@ def _fight_plan_consolidation_destinations(
         if start_d_min > 1:
             _ensure_consolidation_bfs()
             assert visited is not None and fp_by_anchor is not None
+            _t_enemy_filt0 = time.perf_counter() if _cons_pf else None
+            strict_enemy_calls_n = 0
+            engagement_calls_n = 0
+            distance_pair_eval_n = 0
+            strict_eval_s = 0.0
+            engagement_eval_s = 0.0
+            distance_eval_s = 0.0
             units_cache = require_key(game_state, "units_cache")
             closest_enemy_fps: List[Set[Tuple[int, int]]] = []
             for enemy_id in closest_ids:
@@ -1055,23 +1072,58 @@ def _fight_plan_consolidation_destinations(
                         f"{anchor!r} (BFS fp_by_anchor inconsistency)"
                     )
                 fp = fp_by_anchor[anchor]
+                strict_enemy_calls_n += 1
+                if _cons_pf:
+                    _ts0 = time.perf_counter()
                 if not _fight_pile_in_new_fp_strictly_closer_to_closest_tier(
-                    game_state, fp, start_d_min, closest_ids
+                    game_state,
+                    fp,
+                    start_d_min,
+                    closest_ids,
+                    closest_enemy_fps=closest_enemy_fps,
                 ):
+                    if _cons_pf:
+                        strict_eval_s += time.perf_counter() - _ts0
                     continue
+                if _cons_pf:
+                    strict_eval_s += time.perf_counter() - _ts0
                 ac, ar = anchor
+                engagement_calls_n += 1
+                if _cons_pf:
+                    _te0 = time.perf_counter()
                 if not _fight_footprint_in_engagement_with_any_enemy(
                     game_state, unit, int(ac), int(ar), fp
                 ):
+                    if _cons_pf:
+                        engagement_eval_s += time.perf_counter() - _te0
                     continue
+                if _cons_pf:
+                    engagement_eval_s += time.perf_counter() - _te0
                 dmin: Optional[int] = None
                 for enemy_fp in closest_enemy_fps:
+                    if _cons_pf:
+                        _td0 = time.perf_counter()
                     d = min_distance_between_sets(fp, enemy_fp)
+                    if _cons_pf:
+                        distance_eval_s += time.perf_counter() - _td0
+                    distance_pair_eval_n += 1
                     if dmin is None or d < dmin:
                         dmin = d
                 if dmin is None or dmin >= start_d_min:
                     continue
                 dist_by_anchor.append((anchor, int(dmin)))
+            if _cons_pf and _t_enemy_filt0 is not None:
+                filter_s = time.perf_counter() - _t_enemy_filt0
+                tracked_s = strict_eval_s + engagement_eval_s + distance_eval_s
+                other_s = max(0.0, filter_s - tracked_s)
+                append_perf_timing_line(
+                    f"FIGHT_CONSOLIDATION_ENEMY_ANCHOR_FILTER unitId={unit_id_str!r} start_d_min={start_d_min} "
+                    f"visited_n={len(visited)} strict_closer_calls_n={strict_enemy_calls_n} "
+                    f"engagement_calls_n={engagement_calls_n} distance_pair_eval_n={distance_pair_eval_n} "
+                    f"strict_eval_s={strict_eval_s:.6f} engagement_eval_s={engagement_eval_s:.6f} "
+                    f"distance_eval_s={distance_eval_s:.6f} other_filter_s={other_s:.6f} "
+                    f"filter_s={filter_s:.6f} candidates_n={len(dist_by_anchor)}"
+                )
             if dist_by_anchor:
                 best_score = min(d for _, d in dist_by_anchor)
                 tier = [a for a, d in dist_by_anchor if d == best_score]
@@ -1117,13 +1169,16 @@ def _fight_plan_consolidation_destinations(
 
     _ensure_consolidation_bfs(start_fp_obj)
     assert visited is not None and fp_by_anchor is not None
-    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
-
-    _obj_pf = perf_timing_enabled(game_state)
-    _obj_uid = str(require_key(unit, "id"))
-    _dilate_acc: Optional[List[float]] = [0.0] if _obj_pf else None
+    _obj_pf = _cons_pf
+    _obj_uid = unit_id_str
+    _strict_eval_acc: Optional[List[float]] = [0.0] if _obj_pf else None
     _t_obj_filt0 = time.perf_counter() if _obj_pf else None
     strict_closer_calls_n = 0
+    marker_set_obj = set(closest_markers)
+    if not marker_set_obj:
+        raise ValueError(
+            "_fight_plan_consolidation_destinations: closest_markers must be non-empty"
+        )
     dist_by_anchor_obj: List[Tuple[Tuple[int, int], int]] = []
     for anchor in visited:
         if anchor == start_pos:
@@ -1139,25 +1194,21 @@ def _fight_plan_consolidation_destinations(
             fp,
             start_d_obj,
             closest_markers,
-            _perf_dilate_acc=_dilate_acc,
+            _perf_strict_eval_acc=_strict_eval_acc,
         ):
             continue
-        d_tier: Optional[int] = None
-        for mc, mr in closest_markers:
-            d = min_distance_between_sets(fp, {(mc, mr)})
-            if d_tier is None or d < d_tier:
-                d_tier = d
-        if d_tier is None or d_tier >= start_d_obj:
+        d_tier = min_distance_between_sets(fp, marker_set_obj, max_distance=start_d_obj - 1)
+        if d_tier >= start_d_obj:
             continue
         dist_by_anchor_obj.append((anchor, int(d_tier)))
-    if _obj_pf and _t_obj_filt0 is not None and _dilate_acc is not None:
-        dilate_s = float(_dilate_acc[0])
+    if _obj_pf and _t_obj_filt0 is not None and _strict_eval_acc is not None:
+        strict_eval_s = float(_strict_eval_acc[0])
         filter_s = time.perf_counter() - _t_obj_filt0
-        other_s = max(0.0, filter_s - dilate_s)
+        other_s = max(0.0, filter_s - strict_eval_s)
         append_perf_timing_line(
             f"FIGHT_CONSOLIDATION_OBJ_ANCHOR_FILTER unitId={_obj_uid!r} start_d_obj={start_d_obj} "
             f"visited_n={len(visited)} strict_closer_calls_n={strict_closer_calls_n} "
-            f"dilate_s={dilate_s:.6f} other_filter_s={other_s:.6f} filter_s={filter_s:.6f}"
+            f"strict_eval_s={strict_eval_s:.6f} other_filter_s={other_s:.6f} filter_s={filter_s:.6f}"
         )
     if not dist_by_anchor_obj:
         return None

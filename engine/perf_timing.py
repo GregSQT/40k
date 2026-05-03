@@ -120,10 +120,14 @@ Lignes typiques (référence) :
   ``fp_zone_s``, ``dest_n``, ``trigger``.
 - ``FIGHT_CONSOLIDATION_BFS`` — ``_fight_bfs_reachable_anchors_consolidation`` : ``visited_n``,
   ``neighbor_eval_n``, ``compute_fp_s``, ``placement_valid_s``, ``total_s`` (isoler BFS vs filtre).
+- ``FIGHT_CONSOLIDATION_ENEMY_ANCHOR_FILTER`` — boucle ``for anchor in visited`` branche ennemie :
+  ``visited_n``, ``strict_closer_calls_n``, ``engagement_calls_n``, ``distance_pair_eval_n``,
+  ``strict_eval_s``, ``engagement_eval_s``, ``distance_eval_s``, ``other_filter_s``,
+  ``filter_s``, ``candidates_n``.
 - ``FIGHT_CONSOLIDATION_OBJ_ANCHOR_FILTER`` — boucle ``for anchor in visited`` branche objectif :
-  ``visited_n``, ``strict_closer_calls_n``, ``dilate_s``, ``other_filter_s``, ``filter_s``,
-  ``start_d_obj`` (distance départ → marqueur). Si ``dilate_s`` domine : coût des
-  ``dilate_hex_set_unbounded`` dans ``_fight_new_fp_strictly_closer_to_objective_marker_tier``.
+  ``visited_n``, ``strict_closer_calls_n``, ``strict_eval_s``, ``other_filter_s``, ``filter_s``,
+  ``start_d_obj`` (distance départ → marqueur). ``strict_eval_s`` mesure le coût du test
+  « strictement plus proche » sur toutes les ancres (distance empreinte → palier marqueur).
 """
 
 from __future__ import annotations

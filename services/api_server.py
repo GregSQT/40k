@@ -14,6 +14,8 @@ from pathlib import Path
 import hashlib
 import secrets
 import copy
+from functools import wraps
+from threading import RLock
 from datetime import date, datetime
 from typing import Any, Dict, Optional, Tuple
 from uuid import UUID
@@ -978,6 +980,17 @@ initialize_auth_db()
 
 # Global engine instance
 engine: Optional[W40KEngine] = None
+_ENGINE_STATE_LOCK = RLock()
+
+
+def with_engine_state_lock(fn):
+    """Serialize engine/game_state access across concurrent HTTP requests."""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        with _ENGINE_STATE_LOCK:
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 
 def _perf_timing_boot_if_enabled() -> None:
@@ -1611,6 +1624,7 @@ def test_engine():
         }), 500
 
 @app.route('/api/game/start', methods=['POST'])
+@with_engine_state_lock
 def start_game():
     """Start a new game session with optional PvE mode."""
     global engine
@@ -1869,6 +1883,7 @@ def start_game():
         }), 500
 
 @app.route('/api/game/action', methods=['POST'])
+@with_engine_state_lock
 def execute_action():
     """Execute a semantic action in the game."""
     global engine
@@ -2527,6 +2542,7 @@ def list_armies():
         return jsonify({"success": False, "error": f"Failed to list armies: {str(e)}"}), 500
 
 @app.route('/api/game/state', methods=['GET'])
+@with_engine_state_lock
 def get_game_state():
     """Get current game state."""
     global engine
@@ -2545,6 +2561,7 @@ def get_game_state():
     })
 
 @app.route('/api/game/reset', methods=['POST'])
+@with_engine_state_lock
 def reset_game():
     """Reset the current game."""
     global engine
