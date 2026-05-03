@@ -178,12 +178,18 @@ def _compute_unit_occupied_hexes(
     Multi-hex footprints are only computed on Board ×10 (engagement_zone > 1).
     On legacy boards (engagement_zone=1), all units occupy a single cell.
     """
-    ez = get_engagement_zone(game_state) if game_state is not None else 1
+    if game_state is None or "config" not in game_state:
+        ez = 1
+    else:
+        ez = get_engagement_zone(game_state)
     if ez <= 1:
         return {(col, row)}
     base_shape = unit.get("BASE_SHAPE", "round")
     base_size = unit.get("BASE_SIZE", 1)
-    orientation = int(require_key(unit, "orientation"))
+    if "orientation" in unit:
+        orientation = int(require_key(unit, "orientation"))
+    else:
+        orientation = 0
     if base_size == 1:
         return {(col, row)}
     from engine.hex_utils import compute_occupied_hexes

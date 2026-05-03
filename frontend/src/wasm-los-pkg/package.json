@@ -1,0 +1,15 @@
+{
+  "name": "wasm-los",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "wasm_los_bg.wasm",
+    "wasm_los.js",
+    "wasm_los.d.ts"
+  ],
+  "main": "wasm_los.js",
+  "types": "wasm_los.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

@@ -1357,7 +1357,10 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         if not _fly_single_hex:
             from engine.hex_utils import precompute_footprint_offsets
             _fly_shape = unit.get("BASE_SHAPE", "round")
-            _fly_orient = int(require_key(unit, "orientation"))
+            if "orientation" in unit:
+                _fly_orient = int(require_key(unit, "orientation"))
+            else:
+                _fly_orient = 0
             _fly_off_even, _fly_off_odd = precompute_footprint_offsets(
                 _fly_shape, _fly_base_size, _fly_orient
             )
@@ -1565,7 +1568,10 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         # Multi-hex units: pre-compute footprint offsets ONCE, then translate
         from engine.hex_utils import precompute_footprint_offsets
         base_shape = unit.get("BASE_SHAPE", "round")
-        orientation = int(require_key(unit, "orientation"))
+        if "orientation" in unit:
+            orientation = int(require_key(unit, "orientation"))
+        else:
+            orientation = 0
         _off_even, _off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
 
         # Chemin unique vectorisé NumPy, sémantiquement équivalent au BFS Python hexagonal.

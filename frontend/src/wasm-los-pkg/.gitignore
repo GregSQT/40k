@@ -1,0 +1,7 @@
+*
+!.gitignore
+!package.json
+!wasm_los.js
+!wasm_los.d.ts
+!wasm_los_bg.wasm
+!wasm_los_bg.wasm.d.ts
