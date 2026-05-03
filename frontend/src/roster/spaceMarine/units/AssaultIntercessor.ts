@@ -19,7 +19,7 @@ export class AssaultIntercessor extends TroopMeleeSwarm {
   // WEAPONS
   static RNG_WEAPON_CODES = ["bolt_pistol"];
   static RNG_WEAPONS = getWeapons(AssaultIntercessor.RNG_WEAPON_CODES);
-  static CC_WEAPON_CODES = ["assault_intercessor_chainsword_test"];
+  static CC_WEAPON_CODES = ["assault_intercessor_chainsword"];
   static CC_WEAPONS = getWeapons(AssaultIntercessor.CC_WEAPON_CODES);
 
   // UNIT RULES

@@ -36,6 +36,7 @@ L'autonomie est secondaire.
 6. SORTIE MINIMALE
 - Ne renvoyer QUE des diffs.
 - Ne jamais répéter le code inchangé.
+- Réponse courte, sans explications inutiles.
 
 === WORKFLOW OBLIGATOIRE ===
 

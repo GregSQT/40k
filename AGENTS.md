@@ -1,0 +1,188 @@
+=== CONTEXTE PROJET ===
+
+PROJET : Warhammer 40K Game Engine avec IA (Reinforcement Learning)
+- Backend Python : Flask API (services/api_server.py)
+- Frontend : React + TypeScript + Vite
+- IA : Stable-Baselines3 (PPO) avec MaskablePPO
+- Structure : engine/ (moteur de jeu), ai/ (entraînement), config/ (configurations)
+
+CONVENTIONS IMPORTANTES :
+- Les modèles IA sont dans ai/models/<agent_key>/model_<agent_key>.zip
+- Les configs d'agents sont dans config/agents/<agent_name>/
+- Format de code : Python type hints, docstrings, respect AI_TURN.md
+- Ne jamais utiliser de fallbacks ou de workaround ou de valeur par défaut pour masquer des erreurs
+
+# SYSTEM OVERRIDE - HIGHEST PRIORITY
+
+=== MODE PAR DÉFAUT : ASK ===
+Par défaut, suivre les règles "MODE ASK" (validation stricte).
+Si un prompt explicite active "MODE AUTO" ou "MODE AGENT", suivre les règles correspondantes.
+
+=== MODE ASK (PAR DÉFAUT) ===
+
+MODE ÉCONOME STRICT — PRIORITÉ ABSOLUE AU QUOTA
+
+OBJECTIF PRINCIPAL :
+Minimiser la consommation de tokens.
+L'autonomie est secondaire.
+
+=== RÈGLES FONDAMENTALES MODE ASK (NON NÉGOCIABLES) ===
+
+1. AUCUNE ACTION SANS VALIDATION
+- Ne jamais lancer de tests, scripts ou commandes sans autorisation explicite.
+- Ne jamais modifier du code sans validation préalable.
+
+2. ANALYSE AVANT ACTION
+- Toujours expliquer l'hypothèse et le plan AVANT toute modification.
+- Une seule hypothèse à la fois.
+- Attendre confirmation avant de continuer.
+
+3. SCOPE DE MODIFICATION PAR ITÉRATION
+- Par défaut : Une réponse = une modification ciblée.
+  - Si cette modification échoue, STOP et demander instruction.
+- Si l'utilisateur le demande, on peut procéder à la modification d'un fichier complet par itération
+
+4. PÉRIMÈTRE STRICT DES FICHIERS
+- Ne lire ou modifier QUE les fichiers explicitement autorisés.
+- Si un autre fichier semble nécessaire :
+  → lister le fichier
+  → expliquer pourquoi
+  → attendre validation
+
+5. AUCUNE EXPLORATION IMPLICITE
+- Ne pas explorer le code par curiosité.
+- Ne pas rechercher de patterns similaires ailleurs.
+- Ne pas refactorer hors demande explicite.
+
+6. SORTIE MINIMALE
+- Utiliser le format de mise à jour strict défini ci-dessous (CODE ACTUEL + CODE MIS À JOUR).
+- Ne jamais répéter le code inchangé en dehors du contexte nécessaire (3 lignes avant/après).
+- Pour les modifications très simples (typos, renommages), le format peut être simplifié avec validation préalable.
+
+7. AUCUN FALLBACK/WORKAROUND/VALEUR PAR DÉFAUT ANTI-ERREUR
+- NE JAMAIS utiliser de fallback sauf si c'est pertinent fonctionnellement (pas pour éviter une erreur).
+- Toujours préférer un message d'erreur explicite plutôt qu'un fallback pour masquer un problème.
+- NE JAMAIS utiliser de workaround. Toujours corriger la root cause.
+- NE JAMAIS utiliser de valeur par défaut pour éviter une erreur. Préférer l'erreur explicite si la valeur n'est pas fournie.
+- Les fallbacks sont autorisés uniquement dans les cas où c'est un comportement métier valide (ex: stratégie de repli planifiée), jamais pour contourner un bug ou une erreur.
+
+8. INVESTIGATION AUTONOME (EXCEPTION CRITIQUE)
+- Si l'utilisateur demande explicitement d'investiguer un problème, d'analyser une erreur, ou de trouver la root cause :
+  → INVESTIGUER IMMÉDIATEMENT ET AUTONOMEMENT sans redemander la permission
+  → Lire tous les fichiers nécessaires pour comprendre le problème
+  → Utiliser codebase_search, grep, read_file pour explorer le code
+  → Suivre les traces d'erreur, analyser les logs, examiner le flux d'exécution
+  → Ne s'arrêter QUE si :
+    * La root cause est identifiée avec certitude (présenter alors la solution)
+    * Des logs/exécutions sont nécessaires pour continuer (demander alors les logs)
+    * Après investigation approfondie, aucune root cause claire n'est trouvée (reconnaître honnêtement l'échec et proposer des pistes alternatives)
+- NE JAMAIS demander "voulez-vous que j'investigue ?" si l'utilisateur a déjà demandé l'investigation
+- NE JAMAIS s'arrêter à mi-chemin pour demander la permission de continuer l'investigation
+- L'investigation est une ACTION DE LECTURE/ANALYSE, pas une modification → autonomie totale autorisée
+
+=== WORKFLOW OBLIGATOIRE MODE ASK ===
+
+Étape 1 : Expliquer brièvement l'hypothèse et le plan.
+Étape 2 : Attendre ma validation.
+Étape 3 : Appliquer les modifications convenues.
+Étape 4 : STOP et attendre instruction.
+
+Toute violation de ces règles est une erreur.
+
+=== FORMAT DE MISE À JOUR OBLIGATOIRE ===
+
+TEMPLATE STRICT pour TOUTE modification de code :
+
+**Fichier :** `<chemin_complet>` 
+[Lien clickable](file://<chemin_absolu_complet>)
+- Le lien doit utiliser le format `file://` pour être cliquable dans l'éditeur
+- Exemple : `[helper.ts](file:///home/greg/40k/src/utils/helper.ts)`
+
+**CODE ACTUEL**
+```langage
+<3 lignes contexte AVANT>
+<code à modifier>
+<3 lignes contexte APRÈS>
+```
+
+**CODE MIS À JOUR**
+```langage
+<MÊMES 3 lignes contexte AVANT>
+<code modifié>
+<MÊMES 3 lignes contexte APRÈS>
+```
+
+EXEMPLE :
+
+**Fichier :** `src/utils/helper.ts`
+[helper.ts](src/utils/helper.ts)
+
+**CODE ACTUEL**
+```typescript
+export const processData = (data: any) => {
+  const result = data.map(x => x * 2);
+  return result;
+};
+```
+
+**CODE MIS À JOUR**
+```typescript
+export const processData = (data: number[]) => {
+  const result = data.map(x => x * 2);
+  return result;
+};
+```
+
+RÈGLES NON NÉGOCIABLES :
+
+✓ Chemin complet + lien clickable OBLIGATOIRE en début
+✓ DEUX blocs obligatoires : CODE ACTUEL + CODE MIS À JOUR
+✓ Contexte (3 lignes avant/après) STRICTEMENT identique dans les deux blocs
+✓ CODE ACTUEL = copie exacte du fichier (caractère par caractère, avec indentation)
+✓ Format diff (+/-) INTERDIT
+
+Si le format ne peut pas être respecté → STOP et demander instruction.
+
+Si plusieurs fichiers → STOP, lister, expliquer, attendre validation.
+
+=== MODE AGENT/AUTO (ACTIVÉ PAR PROMPT EXPLICITE) ===
+
+OBJECTIF :
+Workflow automatique itératif avec validation à des checkpoints stratégiques.
+Optimisation tokens toujours prioritaire, mais autonomie accrue pour les workflows définis.
+
+RÈGLES FONDAMENTALES MODE AGENT/AUTO :
+
+1. WORKFLOW ITÉRATIF AUTORISÉ
+- Peut exécuter des commandes définies dans le prompt (ex: scripts de test/analyse)
+- Peut relancer automatiquement un workflow après un fix
+- DOIT respecter les checkpoints de validation définis dans le prompt
+
+2. ANALYSE AVANT ACTION (RELÂCHÉE)
+- Expliquer l'hypothèse et le plan AVANT toute modification
+- Peut proposer plusieurs hypothèses si le prompt le permet
+- Peut continuer automatiquement si le prompt définit un workflow clair
+
+3. MODIFICATIONS MULTIPLES AUTORISÉES
+- Peut faire plusieurs modifications dans la même itération si le prompt le permet
+- DOIT suivre l'ordre défini dans le prompt
+- DOIT vérifier après chaque modification que tout fonctionne
+
+4. PÉRIMÈTRE DES FICHIERS (RELÂCHÉ)
+- Peut lire les fichiers nécessaires pour l'investigation
+- DOIT lister les fichiers si le prompt l'exige
+- Ne pas explorer au-delà de ce qui est nécessaire au workflow
+
+5. EXPLORATION CIBLÉE AUTORISÉE
+- Peut rechercher des patterns similaires si pertinent pour le workflow
+- Peut refactorer si le prompt l'exige explicitement
+- Toujours ciblé sur l'objectif du workflow
+
+6. SORTIE OPTIMISÉE
+- Format de mise à jour strict OBLIGATOIRE (CODE ACTUEL + CODE MIS À JOUR)
+- Peut inclure des rapports itératifs si le prompt le demande
+- Minimiser la répétition de code inchangé
+
+=== FORMAT DE MISE À JOUR OBLIGATOIRE (TOUS MODES) ===
+
+Le format strict défini ci-dessus s'applique à TOUS les modes (ASK et AGENT/AUTO).
