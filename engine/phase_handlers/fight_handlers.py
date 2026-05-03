@@ -12,6 +12,7 @@ de SHOOTING même si l'unité est adjacente à une unité ennemie (exception au 
 
 import os
 import sys
+import time
 from collections import deque
 from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation
@@ -803,45 +804,6 @@ def _fight_consolidation_unit_engaged_with_any_enemy(game_state: Dict[str, Any],
     )
 
 
-def _fight_collect_consolidation_orbit_anchors(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    start_pos: Tuple[int, int],
-    closest_ids: List[str],
-    visited: Dict[Tuple[int, int], int],
-    fp_by_anchor: Dict[Tuple[int, int], Set[Tuple[int, int]]],
-) -> List[Tuple[int, int]]:
-    """
-    Consolidation « orbite » : au contact hex minimal (``start_d_min`` ≤ 1) avec engagement,
-    déplacements ≤ 3\" qui **restent** en contact bord-à-bord / empreinte avec au moins une unité
-    du palier ``closest_ids`` (pas de rapprochement strict possible).
-    """
-    contact_filter = sorted({str(x) for x in closest_ids})
-    if not contact_filter:
-        return []
-    out: List[Tuple[int, int]] = []
-    for anchor in visited:
-        if anchor == start_pos:
-            continue
-        if anchor not in fp_by_anchor:
-            raise KeyError(
-                "_fight_collect_consolidation_orbit_anchors: missing candidate footprint for anchor "
-                f"{anchor!r}"
-            )
-        fp = fp_by_anchor[anchor]
-        ac, ar = anchor
-        if _fight_pile_in_anchor_adjacent_to_enemy_footprint(
-            game_state,
-            unit,
-            int(ac),
-            int(ar),
-            contact_filter,
-            candidate_footprint=fp,
-        ):
-            out.append(anchor)
-    return out
-
-
 def _fight_unit_positions_for_observation_builder(game_state: Dict[str, Any]) -> Dict[str, Tuple[int, int]]:
     """Positions ancre pour ``ObservationBuilder._target_priority_score`` (unités vivantes uniquement)."""
     positions: Dict[str, Tuple[int, int]] = {}
@@ -1004,11 +966,11 @@ def _fight_plan_consolidation_destinations(
     """
     Consolidation après attaques (alignée pile-in + engagement ``spatial_relations``) :
 
-    - **Ennemis** : BFS 3\", placement valide. Si distance au palier > 1 : rapprochement strict +
-      engagement + préférence contact (pile-in). Si distance ≤ 1 **et** l'unité est **engagée**
-      (zone d'engagement B) : ancres ≤ 3\" qui **restent** en contact bord-à-bord / empreinte avec
-      une unité du palier le plus proche (orbite autour du socle). **Pas** de consolidation objectif
-      tant que l'unité est engagée.
+    - **Ennemis** : uniquement si la distance minimale empreinte → palier d'ennemis les plus proches
+      est **> 1** : BFS 3\", placement valide, rapprochement **strict** + engagement + préférence contact
+      (pile-in). Si la distance est déjà minimale (≤ 1, ex. adjacent au palier) : **aucune**
+      consolidation vers l'ennemi (impossible de se rapprocher davantage). **Pas** de consolidation
+      objectif tant que l'unité est **engagée** (zone d'engagement B).
     - **Objectif** : uniquement si **non engagée** ; si consolidation vers une figurine ennemie
       impossible (ou pas d'ennemi opposant),
       rapprochement du **hex marqueur** (centre déclaré ``center`` / médiode des ``hexes`` si pas de
@@ -1038,10 +1000,9 @@ def _fight_plan_consolidation_destinations(
 
     if has_enemy:
         start_d_min, closest_ids = _fight_pile_in_closest_enemy_snapshot(game_state, unit)
-        _ensure_consolidation_bfs()
-        assert visited is not None and fp_by_anchor is not None
-
         if start_d_min > 1:
+            _ensure_consolidation_bfs()
+            assert visited is not None and fp_by_anchor is not None
             units_cache = require_key(game_state, "units_cache")
             closest_enemy_fps: List[Set[Tuple[int, int]]] = []
             for enemy_id in closest_ids:
@@ -1097,13 +1058,6 @@ def _fight_plan_consolidation_destinations(
                 final_cands = contact_tier if contact_tier else tier
                 if not (len(final_cands) == 1 and final_cands[0] == start_pos):
                     return ("enemy", final_cands, visited, list(closest_ids))
-
-        if start_d_min <= 1 and _fight_consolidation_unit_engaged_with_any_enemy(game_state, unit):
-            orbit_anchors = _fight_collect_consolidation_orbit_anchors(
-                game_state, unit, start_pos, closest_ids, visited, fp_by_anchor
-            )
-            if orbit_anchors:
-                return ("enemy", orbit_anchors, visited, list(closest_ids))
 
     if _fight_consolidation_unit_engaged_with_any_enemy(game_state, unit):
         return None
@@ -1252,13 +1206,26 @@ def _fight_try_begin_consolidation_after_attacks(
     all_attack_results_snapshot: List[Any],
     result_reason: str,
     last_target_id: Optional[str] = None,
+    perf_trigger: Optional[str] = None,
 ) -> Optional[Tuple[bool, Dict[str, Any]]]:
     """
     Après la dernière attaque : propose consolidation (humain) ou l'exécute (IA / gym).
     Retourne None si pas de consolidation ; sinon (True, résultat API).
+
+    perf_trigger : libellé optionnel pour ``perf_timing`` (sinon ``result_reason``).
     """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+    _perf = perf_timing_enabled(game_state)
+    _tr = perf_trigger if perf_trigger is not None else result_reason
     _fight_clear_consolidation_state(game_state)
+    _t_plan0 = time.perf_counter() if _perf else None
     plan = _fight_plan_consolidation_destinations(game_state, unit)
+    if _perf and _t_plan0 is not None:
+        append_perf_timing_line(
+            f"FIGHT_CONSOLIDATION_PLAN trigger={_tr!r} unitId={unit['id']!r} "
+            f"plan_s={time.perf_counter() - _t_plan0:.6f} has_plan={1 if plan is not None else 0}"
+        )
     if plan is None:
         return None
     branch, destinations, visited, closest_ids = plan
@@ -1317,7 +1284,13 @@ def _fight_try_begin_consolidation_after_attacks(
 
     game_state["fight_consolidation_pending"] = True
     game_state["valid_consolidation_destinations"] = list(destinations)
+    _t_fp0 = time.perf_counter() if _perf else None
     consolidation_fp_zone = _fight_compute_pile_in_footprint_zone(game_state, unit, destinations)
+    if _perf and _t_fp0 is not None:
+        append_perf_timing_line(
+            f"FIGHT_CONSOLIDATION_FP_ZONE trigger={_tr!r} unitId={unit['id']!r} "
+            f"fp_zone_s={time.perf_counter() - _t_fp0:.6f} dest_n={len(destinations)}"
+        )
     game_state["fight_consolidation_footprint_zone"] = list(consolidation_fp_zone)
     game_state.pop("fight_consolidation_footprint_mask_loops", None)
     game_state["fight_consolidation_branch"] = branch
@@ -2599,6 +2572,9 @@ def _fight_finish_no_more_targets_after_attack(
         all_attack_results_snapshot=snap_nt,
         result_reason="no_more_targets",
         last_target_id=last_target_id,
+        perf_trigger=(
+            "no_more_targets_after_kill" if attack_result.get("target_died") else None
+        ),
     )
     if cons_nt is not None:
         if isinstance(cons_nt[1], dict):
@@ -2734,6 +2710,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         game_state["fight_attack_results"] = []
 
     from engine.ai.weapon_selector import select_best_melee_weapon
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
     from engine.utils.weapon_helpers import get_selected_melee_weapon
 
     current_target_id: Any = target_id
@@ -2837,6 +2814,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
             return False, {"error": "no_weapons_available", "unitId": unit["id"], "action": "combat"}
 
         attack_result = _execute_fight_attack_sequence(game_state, unit, current_target_id)
+        _perf_after_kill = perf_timing_enabled(game_state) and bool(attack_result.get("target_died"))
 
         if _fight_verbose_debug_enabled():
             if "episode_number" in game_state and "turn" in game_state:
@@ -2889,7 +2867,13 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         if unit["ATTACK_LEFT"] <= 0:
             break
 
+        _t_pool_after_kill = time.perf_counter() if _perf_after_kill else None
         valid_targets_after = _fight_build_valid_target_pool(game_state, unit)
+        if _perf_after_kill and _t_pool_after_kill is not None:
+            append_perf_timing_line(
+                f"FIGHT_KILL_VALID_TARGET_POOL attackerId={unit_id!r} last_targetId={current_target_id!r} "
+                f"pool_s={time.perf_counter() - _t_pool_after_kill:.6f} valid_targets_n={len(valid_targets_after)}"
+            )
         if valid_targets_after:
             is_ai_controlled = _is_ai_controlled_fight_unit(game_state, unit)
             auto_execution_allowed = _is_fight_auto_execution_allowed(game_state)
@@ -2961,6 +2945,9 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         all_attack_results_snapshot=snap_ac,
         result_reason="attacks_complete",
         last_target_id=current_target_id,
+        perf_trigger=(
+            "attacks_complete_after_kill" if attack_result.get("target_died") else None
+        ),
     )
     if cons_ac is not None:
         if isinstance(cons_ac[1], dict):
@@ -3156,6 +3143,7 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
     save_success = False
     damage_dealt = 0
     target_died = False
+    _fight_kill_attack_perf: Optional[Dict[str, float]] = None
     hit_ability_display_name = None
     wound_ability_display_name = None
     save_ability_display_name = None
@@ -3314,23 +3302,58 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
                         "fight damage pending missing when save failed (internal bug)"
                     )
                 damage_dealt = damage_dealt_pending
+                from engine.perf_timing import perf_timing_enabled
+
+                _perf_kill_track = perf_timing_enabled(game_state)
+                if _perf_kill_track:
+                    _fight_kill_attack_perf = {"_kill_wall_t0": time.perf_counter()}
+                _tk = (
+                    _fight_kill_attack_perf["_kill_wall_t0"]
+                    if _fight_kill_attack_perf is not None
+                    else None
+                )
                 target_hp = require_hp_from_cache(str(target["id"]), game_state)
                 new_hp = max(0, target_hp - damage_dealt)
                 update_units_cache_hp(game_state, str(target["id"]), new_hp)
-                
+                if _fight_kill_attack_perf is not None and _tk is not None:
+                    _fight_kill_attack_perf["update_hp_s"] = time.perf_counter() - _tk
+                    _tk = time.perf_counter()
+
                 # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Invalidate kill probability cache for target
                 from engine.ai.weapon_selector import invalidate_cache_for_target
                 cache = game_state["kill_probability_cache"] if "kill_probability_cache" in game_state else {}
                 invalidate_cache_for_target(cache, str(target["id"]))
-                
+                if _fight_kill_attack_perf is not None and _tk is not None:
+                    _fight_kill_attack_perf["invalidate_target_cache_s"] = time.perf_counter() - _tk
+                    _tk = time.perf_counter()
+
                 target_died = not is_unit_alive(str(target["id"]), game_state)
 
                 if target_died:
                     # CRITICAL: Immediately remove dead unit from fight activation pools
                     _remove_dead_unit_from_fight_pools(game_state, target_id)
+                    if _fight_kill_attack_perf is not None and _tk is not None:
+                        _fight_kill_attack_perf["remove_pools_and_rebuild_s"] = time.perf_counter() - _tk
+                        _tk = time.perf_counter()
                     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Invalidate cache for dead unit
                     from engine.ai.weapon_selector import invalidate_cache_for_unit
                     invalidate_cache_for_unit(cache, str(target["id"]))
+                    if _fight_kill_attack_perf is not None and _tk is not None:
+                        _fight_kill_attack_perf["invalidate_dead_unit_cache_s"] = time.perf_counter() - _tk
+                    if can_reroll_hit_ones:
+                        hit_log_value = f"{initial_hit_roll}->{hit_roll}"
+                    else:
+                        hit_log_value = str(hit_roll)
+                    attack_log = (
+                        f"{attacker_label} FOUGHT {target_label}{weapon_prefix} - "
+                        f"Hit {hit_log_value}({hit_target}+){hit_log_suffix} - "
+                        f"Wound {wound_log_value}({wound_target}+){wound_log_suffix} - "
+                        f"Save {save_log_value}({save_target}+){save_log_suffix} - "
+                        f"Dmg:{damage_dealt}HP"
+                    )
+                elif _fight_kill_attack_perf is not None:
+                    _fight_kill_attack_perf["remove_pools_and_rebuild_s"] = 0.0
+                    _fight_kill_attack_perf["invalidate_dead_unit_cache_s"] = 0.0
                     if can_reroll_hit_ones:
                         hit_log_value = f"{initial_hit_roll}->{hit_roll}"
                     else:
@@ -3363,6 +3386,7 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
     # AI_TURN.md COMPLIANCE: shootDetails array matches frontend gameLogStructure.ts ShootDetail interface
     # Fields: targetDied, damageDealt, saveSuccess (camelCase to match frontend)
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon_name in action_logs
+    _t_combat_log0 = time.perf_counter() if _fight_kill_attack_perf is not None and target_died else None
     append_action_log(
         game_state,
         {
@@ -3394,6 +3418,8 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
             "timestamp": "server_time",
         },
     )
+    if _fight_kill_attack_perf is not None and target_died and _t_combat_log0 is not None:
+        _fight_kill_attack_perf["append_combat_log_s"] = time.perf_counter() - _t_combat_log0
 
     if os.environ.get("W40K_ACTION_LOG_TRACE", "").strip().lower() in ("1", "true", "yes", "on"):
         cp = game_state.get("current_player")
@@ -3408,6 +3434,7 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
         sys.stderr.flush()
 
     # Add separate death log event if target was killed
+    _t_death_log0 = time.perf_counter() if _fight_kill_attack_perf is not None and target_died else None
     if target_died:
         append_action_log(
             game_state,
@@ -3421,6 +3448,33 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
                 "player": target["player"],
                 "timestamp": "server_time",
             },
+        )
+    if _fight_kill_attack_perf is not None and target_died:
+        from engine.perf_timing import append_perf_timing_line
+
+        if _t_death_log0 is None:
+            raise RuntimeError(
+                "fight kill perf: _t_death_log0 missing despite target_died (internal bug)"
+            )
+        _fight_kill_attack_perf["append_death_log_s"] = time.perf_counter() - _t_death_log0
+        sd = _fight_kill_attack_perf
+        wall0 = float(sd.pop("_kill_wall_t0"))
+        eng = (
+            float(sd["update_hp_s"])
+            + float(sd["invalidate_target_cache_s"])
+            + float(sd["remove_pools_and_rebuild_s"])
+            + float(sd["invalidate_dead_unit_cache_s"])
+        )
+        total_to_logs = time.perf_counter() - wall0
+        append_perf_timing_line(
+            f"FIGHT_KILL_ATTACK_SEQUENCE attackerId={attacker_id!r} targetId={target_id!r} "
+            f"update_hp_s={sd['update_hp_s']:.6f} "
+            f"invalidate_target_cache_s={sd['invalidate_target_cache_s']:.6f} "
+            f"remove_pools_and_rebuild_s={sd['remove_pools_and_rebuild_s']:.6f} "
+            f"invalidate_dead_unit_cache_s={sd['invalidate_dead_unit_cache_s']:.6f} "
+            f"append_combat_log_s={sd['append_combat_log_s']:.6f} "
+            f"append_death_log_s={sd['append_death_log_s']:.6f} "
+            f"engine_kill_path_s={eng:.6f} total_to_logs_s={total_to_logs:.6f}"
         )
 
     return {

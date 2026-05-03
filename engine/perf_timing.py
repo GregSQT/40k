@@ -107,6 +107,17 @@ Lignes typiques (référence) :
 - Logs verbeux ``[CHARGE DEBUG]`` (positions / occupation) : ``W40K_CHARGE_DEBUG=1`` ou
   ``game_state["charge_debug_positions"]``.
 - ``CHARGE_HAS_VALID_TARGET`` — ``bfs_pool_s``, ``nested_loop_s``, ``reachable_n``, ``enemy_n`` (éligibilité).
+- ``FIGHT_KILL_ATTACK_SEQUENCE`` — coup fatal (sauvegarde ratée → HP 0) : ``update_hp_s``,
+  ``invalidate_target_cache_s``, ``remove_pools_and_rebuild_s``, ``invalidate_dead_unit_cache_s``,
+  ``append_combat_log_s``, ``append_death_log_s``, ``engine_kill_path_s`` (somme moteur avant les
+  deux append), ``total_to_logs_s`` (jusqu’après l’entrée ``death`` dans ``action_logs``). Permet de
+  distinguer coût pools / caches IA vs écriture des logs.
+- ``FIGHT_KILL_VALID_TARGET_POOL`` — après une mort, si ``ATTACK_LEFT`` > 0 : durée de
+  ``_fight_build_valid_target_pool`` pour l’attaquant (``pool_s``, ``valid_targets_n``).
+- ``FIGHT_CONSOLIDATION_PLAN`` — ``_fight_plan_consolidation_destinations`` (BFS / géométrie) :
+  ``plan_s``, ``has_plan``, ``trigger`` (raison ou libellé explicite).
+- ``FIGHT_CONSOLIDATION_FP_ZONE`` — ``_fight_compute_pile_in_footprint_zone`` (chemin UI humain) :
+  ``fp_zone_s``, ``dest_n``, ``trigger``.
 """
 
 from __future__ import annotations
