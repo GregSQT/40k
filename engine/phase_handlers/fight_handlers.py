@@ -884,15 +884,25 @@ def _fight_new_fp_strictly_closer_to_objective_marker_tier(
     new_fp: Set[Tuple[int, int]],
     d_min: int,
     closest_markers: List[Tuple[int, int]],
+    *,
+    _perf_dilate_acc: Optional[List[float]] = None,
 ) -> bool:
-    """Même idée que ``_fight_pile_in_new_fp_strictly_closer_to_closest_tier`` : empreinte plus proche du marqueur."""
+    """Même idée que ``_fight_pile_in_new_fp_strictly_closer_to_closest_tier`` : empreinte plus proche du marqueur.
+
+    _perf_dilate_acc : si une liste d'un flottant est fournie (perf consolidation), y ajoute le temps
+    passé dans ``dilate_hex_set_unbounded`` (diagnostic uniquement).
+    """
     if d_min <= 0:
         return False
     from engine.hex_utils import dilate_hex_set_unbounded
 
     radius = d_min - 1
     for mc, mr in closest_markers:
+        if _perf_dilate_acc is not None:
+            _td0 = time.perf_counter()
         shell = dilate_hex_set_unbounded({(mc, mr)}, radius)
+        if _perf_dilate_acc is not None:
+            _perf_dilate_acc[0] += time.perf_counter() - _td0
         if new_fp & shell:
             return True
     return False
@@ -913,6 +923,13 @@ def _fight_bfs_reachable_anchors_consolidation(
     ``start_footprint`` : si fourni, réutilise l'empreinte de l'ancre de départ (ex. déjà
     calculée pour un early-exit objectif) au lieu d'un second appel identique.
     """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+    _perf = perf_timing_enabled(game_state)
+    _t_bfs0 = time.perf_counter() if _perf else None
+    s_compute_fp = 0.0
+    s_placement_valid = 0.0
+    neighbor_eval_n = 0
     scale = max(1, int(game_state.get("inches_to_subhex", 1) or 1))
     bfs_max = 3 * scale
     unit_id_str = str(unit["id"])
@@ -936,12 +953,28 @@ def _fight_bfs_reachable_anchors_consolidation(
             neighbor_pos = (neighbor_col, neighbor_row)
             if neighbor_pos in visited:
                 continue
+            neighbor_eval_n += 1
+            if _perf:
+                _t1 = time.perf_counter()
             candidate_fp = compute_candidate_footprint(neighbor_col, neighbor_row, unit, game_state)
+            if _perf:
+                s_compute_fp += time.perf_counter() - _t1
+                _t2 = time.perf_counter()
             if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+                if _perf:
+                    s_placement_valid += time.perf_counter() - _t2
                 continue
+            if _perf:
+                s_placement_valid += time.perf_counter() - _t2
             visited[neighbor_pos] = neighbor_dist
             fp_by_anchor[neighbor_pos] = candidate_fp
             queue.append((neighbor_pos, neighbor_dist))
+    if _perf and _t_bfs0 is not None:
+        append_perf_timing_line(
+            f"FIGHT_CONSOLIDATION_BFS unitId={unit_id_str!r} bfs_max={bfs_max} visited_n={len(visited)} "
+            f"neighbor_eval_n={neighbor_eval_n} compute_fp_s={s_compute_fp:.6f} "
+            f"placement_valid_s={s_placement_valid:.6f} total_s={time.perf_counter() - _t_bfs0:.6f}"
+        )
     return visited, fp_by_anchor
 
 
@@ -1084,6 +1117,13 @@ def _fight_plan_consolidation_destinations(
 
     _ensure_consolidation_bfs(start_fp_obj)
     assert visited is not None and fp_by_anchor is not None
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+    _obj_pf = perf_timing_enabled(game_state)
+    _obj_uid = str(require_key(unit, "id"))
+    _dilate_acc: Optional[List[float]] = [0.0] if _obj_pf else None
+    _t_obj_filt0 = time.perf_counter() if _obj_pf else None
+    strict_closer_calls_n = 0
     dist_by_anchor_obj: List[Tuple[Tuple[int, int], int]] = []
     for anchor in visited:
         if anchor == start_pos:
@@ -1094,7 +1134,13 @@ def _fight_plan_consolidation_destinations(
                 f"{anchor!r} (BFS fp_by_anchor inconsistency)"
             )
         fp = fp_by_anchor[anchor]
-        if not _fight_new_fp_strictly_closer_to_objective_marker_tier(fp, start_d_obj, closest_markers):
+        strict_closer_calls_n += 1
+        if not _fight_new_fp_strictly_closer_to_objective_marker_tier(
+            fp,
+            start_d_obj,
+            closest_markers,
+            _perf_dilate_acc=_dilate_acc,
+        ):
             continue
         d_tier: Optional[int] = None
         for mc, mr in closest_markers:
@@ -1104,6 +1150,15 @@ def _fight_plan_consolidation_destinations(
         if d_tier is None or d_tier >= start_d_obj:
             continue
         dist_by_anchor_obj.append((anchor, int(d_tier)))
+    if _obj_pf and _t_obj_filt0 is not None and _dilate_acc is not None:
+        dilate_s = float(_dilate_acc[0])
+        filter_s = time.perf_counter() - _t_obj_filt0
+        other_s = max(0.0, filter_s - dilate_s)
+        append_perf_timing_line(
+            f"FIGHT_CONSOLIDATION_OBJ_ANCHOR_FILTER unitId={_obj_uid!r} start_d_obj={start_d_obj} "
+            f"visited_n={len(visited)} strict_closer_calls_n={strict_closer_calls_n} "
+            f"dilate_s={dilate_s:.6f} other_filter_s={other_s:.6f} filter_s={filter_s:.6f}"
+        )
     if not dist_by_anchor_obj:
         return None
     best_o = min(d for _, d in dist_by_anchor_obj)

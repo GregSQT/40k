@@ -118,6 +118,12 @@ Lignes typiques (référence) :
   ``plan_s``, ``has_plan``, ``trigger`` (raison ou libellé explicite).
 - ``FIGHT_CONSOLIDATION_FP_ZONE`` — ``_fight_compute_pile_in_footprint_zone`` (chemin UI humain) :
   ``fp_zone_s``, ``dest_n``, ``trigger``.
+- ``FIGHT_CONSOLIDATION_BFS`` — ``_fight_bfs_reachable_anchors_consolidation`` : ``visited_n``,
+  ``neighbor_eval_n``, ``compute_fp_s``, ``placement_valid_s``, ``total_s`` (isoler BFS vs filtre).
+- ``FIGHT_CONSOLIDATION_OBJ_ANCHOR_FILTER`` — boucle ``for anchor in visited`` branche objectif :
+  ``visited_n``, ``strict_closer_calls_n``, ``dilate_s``, ``other_filter_s``, ``filter_s``,
+  ``start_d_obj`` (distance départ → marqueur). Si ``dilate_s`` domine : coût des
+  ``dilate_hex_set_unbounded`` dans ``_fight_new_fp_strictly_closer_to_objective_marker_tier``.
 """
 
 from __future__ import annotations

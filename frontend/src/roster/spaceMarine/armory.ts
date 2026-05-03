@@ -92,6 +92,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
   // #################################### Melee Weapons ######################################
   // #########################################################################################
   armoured_feet: {display_name: "Armoured Feet", NB: 5, ATK: 3, STR: 7, AP: 0, DMG: 1, WEAPON_RULES: [],},
+  assault_intercessor_chainsword_test: {display_name: "Astartes Chainsword", NB: 20, ATK: 2, STR: 8, AP: -5, DMG: 3, WEAPON_RULES: [],},
   assault_intercessor_chainsword: {display_name: "Astartes Chainsword", NB: 4, ATK: 3, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: [],},
   astartes_chainsword: {display_name: "Astartes Chainsword", NB: 3, ATK: 3, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: [],},
   close_combat_weapon_captain: {display_name: "Close Combat Weapon", NB: 6, ATK: 2, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: [],},
