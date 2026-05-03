@@ -47,6 +47,7 @@ from .shared_utils import (
 )
 
 _ADJACENT_EDGE_GAP_TOLERANCE_NORM = ENGAGEMENT_NORM_HEX_WIDTH
+FightFootprintOffsetPair = Optional[Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]]
 
 
 def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
@@ -498,10 +499,13 @@ def _fight_pile_in_new_fp_strictly_closer_to_closest_tier(
     closest_ids: List[str],
     *,
     closest_enemy_fps: Optional[List[Set[Tuple[int, int]]]] = None,
+    closer_shell_union: Optional[Set[Tuple[int, int]]] = None,
 ) -> bool:
     """True si la nouvelle empreinte est strictement plus proche d'au moins une unité du palier le plus proche."""
     if d_min <= 0:
         return False
+    if closer_shell_union is not None:
+        return bool(new_fp & closer_shell_union)
     from engine.hex_utils import min_distance_between_sets
 
     enemy_fps = closest_enemy_fps
@@ -810,6 +814,54 @@ def _fight_consolidation_unit_engaged_with_any_enemy(game_state: Dict[str, Any],
     )
 
 
+def _fight_prepare_footprint_offsets(
+    unit: Dict[str, Any], game_state: Dict[str, Any]
+) -> FightFootprintOffsetPair:
+    """
+    Pré-calcule les offsets d'empreinte pair/impair pour accélérer le BFS de consolidation.
+
+    Retourne ``None`` pour fallback sur ``compute_candidate_footprint`` (plateau legacy / 1-hex / erreur).
+    """
+    cache: Dict[str, FightFootprintOffsetPair] = game_state.setdefault("_fight_fp_offset_pair_cache", {})
+    uid = str(unit["id"])
+    if uid in cache:
+        return cache[uid]
+
+    from .shared_utils import get_engagement_zone
+
+    ez = get_engagement_zone(game_state)
+    bs = unit.get("BASE_SIZE", 1)
+    if ez <= 1 or bs == 1:
+        cache[uid] = None
+        return None
+    try:
+        from engine.hex_utils import precompute_footprint_offsets
+
+        shape = unit.get("BASE_SHAPE", "round")
+        orient = int(require_key(unit, "orientation"))
+        off_e, off_o = precompute_footprint_offsets(shape, bs, orient)
+        out: FightFootprintOffsetPair = (off_e, off_o)
+        cache[uid] = out
+        return out
+    except Exception:
+        cache[uid] = None
+        return None
+
+
+def _candidate_footprint_fight(
+    center_col: int,
+    center_row: int,
+    unit: Dict[str, Any],
+    game_state: Dict[str, Any],
+    offset_pair: FightFootprintOffsetPair,
+) -> Set[Tuple[int, int]]:
+    if offset_pair is not None:
+        off_e, off_o = offset_pair
+        offs = off_e if (center_col & 1) == 0 else off_o
+        return {(center_col + dc, center_row + dr) for dc, dr in offs}
+    return compute_candidate_footprint(center_col, center_row, unit, game_state)
+
+
 def _fight_unit_positions_for_observation_builder(game_state: Dict[str, Any]) -> Dict[str, Tuple[int, int]]:
     """Positions ancre pour ``ObservationBuilder._target_priority_score`` (unités vivantes uniquement)."""
     positions: Dict[str, Tuple[int, int]] = {}
@@ -942,11 +994,12 @@ def _fight_bfs_reachable_anchors_consolidation(
     unit_id_str = str(unit["id"])
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
+    fp_pair = _fight_prepare_footprint_offsets(unit, game_state)
     occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
     if start_footprint is not None:
         start_fp = start_footprint
     else:
-        start_fp = compute_candidate_footprint(start_col, start_row, unit, game_state)
+        start_fp = _candidate_footprint_fight(start_col, start_row, unit, game_state, fp_pair)
     visited: Dict[Tuple[int, int], int] = {start_pos: 0}
     fp_by_anchor: Dict[Tuple[int, int], Set[Tuple[int, int]]] = {start_pos: start_fp}
     queue = deque([(start_pos, 0)])
@@ -963,7 +1016,9 @@ def _fight_bfs_reachable_anchors_consolidation(
             neighbor_eval_n += 1
             if _perf:
                 _t1 = time.perf_counter()
-            candidate_fp = compute_candidate_footprint(neighbor_col, neighbor_row, unit, game_state)
+            candidate_fp = _candidate_footprint_fight(
+                neighbor_col, neighbor_row, unit, game_state, fp_pair
+            )
             if _perf:
                 s_compute_fp += time.perf_counter() - _t1
                 _t2 = time.perf_counter()
@@ -1053,6 +1108,7 @@ def _fight_plan_consolidation_destinations(
             strict_eval_s = 0.0
             engagement_eval_s = 0.0
             distance_eval_s = 0.0
+            shell_build_s = 0.0
             units_cache = require_key(game_state, "units_cache")
             closest_enemy_fps: List[Set[Tuple[int, int]]] = []
             for enemy_id in closest_ids:
@@ -1062,6 +1118,17 @@ def _fight_plan_consolidation_destinations(
                 closest_enemy_fps.append(
                     cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
                 )
+            closer_shell_union: Set[Tuple[int, int]] = set()
+            if _cons_pf:
+                _tb0 = time.perf_counter()
+            if closest_enemy_fps:
+                from engine.hex_utils import dilate_hex_set_unbounded
+
+                radius = start_d_min - 1
+                for efp in closest_enemy_fps:
+                    closer_shell_union.update(dilate_hex_set_unbounded(efp, radius))
+            if _cons_pf:
+                shell_build_s = time.perf_counter() - _tb0
             dist_by_anchor: List[Tuple[Tuple[int, int], int]] = []
             for anchor in visited:
                 if anchor == start_pos:
@@ -1081,6 +1148,7 @@ def _fight_plan_consolidation_destinations(
                     start_d_min,
                     closest_ids,
                     closest_enemy_fps=closest_enemy_fps,
+                    closer_shell_union=closer_shell_union,
                 ):
                     if _cons_pf:
                         strict_eval_s += time.perf_counter() - _ts0
@@ -1120,7 +1188,8 @@ def _fight_plan_consolidation_destinations(
                     f"FIGHT_CONSOLIDATION_ENEMY_ANCHOR_FILTER unitId={unit_id_str!r} start_d_min={start_d_min} "
                     f"visited_n={len(visited)} strict_closer_calls_n={strict_enemy_calls_n} "
                     f"engagement_calls_n={engagement_calls_n} distance_pair_eval_n={distance_pair_eval_n} "
-                    f"strict_eval_s={strict_eval_s:.6f} engagement_eval_s={engagement_eval_s:.6f} "
+                    f"shell_build_s={shell_build_s:.6f} strict_eval_s={strict_eval_s:.6f} "
+                    f"engagement_eval_s={engagement_eval_s:.6f} "
                     f"distance_eval_s={distance_eval_s:.6f} other_filter_s={other_s:.6f} "
                     f"filter_s={filter_s:.6f} candidates_n={len(dist_by_anchor)}"
                 )

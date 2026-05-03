@@ -122,7 +122,7 @@ Lignes typiques (référence) :
   ``neighbor_eval_n``, ``compute_fp_s``, ``placement_valid_s``, ``total_s`` (isoler BFS vs filtre).
 - ``FIGHT_CONSOLIDATION_ENEMY_ANCHOR_FILTER`` — boucle ``for anchor in visited`` branche ennemie :
   ``visited_n``, ``strict_closer_calls_n``, ``engagement_calls_n``, ``distance_pair_eval_n``,
-  ``strict_eval_s``, ``engagement_eval_s``, ``distance_eval_s``, ``other_filter_s``,
+  ``shell_build_s``, ``strict_eval_s``, ``engagement_eval_s``, ``distance_eval_s``, ``other_filter_s``,
   ``filter_s``, ``candidates_n``.
 - ``FIGHT_CONSOLIDATION_OBJ_ANCHOR_FILTER`` — boucle ``for anchor in visited`` branche objectif :
   ``visited_n``, ``strict_closer_calls_n``, ``strict_eval_s``, ``other_filter_s``, ``filter_s``,
