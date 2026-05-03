@@ -380,6 +380,15 @@ export interface UseEngineAPIOptions {
   onStopAfterPhaseChange?: () => void;
 }
 
+/** Props blink passées au plateau : même forme en chargement et en jeu pour stabiliser l’inférence d’union (BoardWithAPI). */
+export type UseEngineAPIBlinkBoardProps = {
+  blinkingUnits: number[];
+  blinkingAttackerId: number | null;
+  blinkingCoverByUnitId: Record<string, boolean> | undefined;
+  isBlinkingActive: boolean;
+  blinkVersion: number;
+};
+
 export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const getTutorialShootOptionsRef = options?.getTutorialShootOptionsRef;
   const stopAiAfterPhaseChangeRef = options?.stopAiAfterPhaseChangeRef;
@@ -4015,6 +4024,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   ]);
 
   if (loading || !gameState) {
+    const blinkBoardPropsIdle: UseEngineAPIBlinkBoardProps = {
+      blinkingUnits: [],
+      blinkingAttackerId: null,
+      blinkingCoverByUnitId: undefined,
+      isBlinkingActive: false,
+      blinkVersion: 0,
+    };
     return {
       loading: true,
       error: null,
@@ -4089,10 +4105,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onCancelFleeWarning: async () => {},
       onToggleFleeWarningDontRemind: () => {},
       availableCellsOverride: undefined,
-      blinkingUnits: [],
-      blinkingAttackerId: null,
-      isBlinkingActive: false,
-      blinkVersion: 0,
+      ...blinkBoardPropsIdle,
       ruleChoicePrompt: null,
       onSelectRuleChoice: async (_prompt: RuleChoicePrompt, _selectedDisplayRuleId: string) => {},
       // blinkState removed - blinking is handled locally in UnitRenderer
@@ -4108,6 +4121,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   }
 
   // Normal case
+  const blinkBoardPropsReady: UseEngineAPIBlinkBoardProps = {
+    blinkingUnits: blinkingUnitsIds,
+    blinkingAttackerId: blinkingUnits.attackerId ?? null,
+    blinkingCoverByUnitId: blinkingUnits.coverByUnitId,
+    isBlinkingActive: isBlinkingActiveMemo,
+    blinkVersion,
+  };
   const returnObject = {
     loading: false,
     error: null,
@@ -4188,11 +4208,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onToggleFleeWarningDontRemind: handleToggleFleeWarningDontRemind,
     availableCellsOverride: combinedAvailableCellsOverride,
     // Export blinking state for HP bar components
-    blinkingUnits: blinkingUnitsIds,
-    blinkingAttackerId: blinkingUnits.attackerId ?? null,
-    blinkingCoverByUnitId: blinkingUnits.coverByUnitId,
-    isBlinkingActive: isBlinkingActiveMemo,
-    blinkVersion,
+    ...blinkBoardPropsReady,
     ruleChoicePrompt,
     onSelectRuleChoice: handleSelectRuleChoice,
     // blinkState removed - blinking is handled locally in UnitRenderer

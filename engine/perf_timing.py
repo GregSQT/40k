@@ -98,6 +98,9 @@ Lignes typiques (référence) :
   euclidienne exacte.
 - ``CHARGE_DEST_BFS`` — ``bfs_loop_s``, ``total_s``, ``visited_n``, ``valid_dest_n``, ``cache_hit``,
   ``early_exit`` (1 = éligibilité uniquement, arrêt au premier hex valide), ``short_circuit`` (1 si arrêt anticipé).
+  ``bfs_candidate_fp_s`` / ``bfs_placement_s`` / ``bfs_engagement_s`` détaillent le BFS historique,
+  avec compteurs ``bfs_rejected_placement_n``, ``bfs_overlap_n``, ``bfs_no_engagement_n``,
+  ``bfs_engagement_checks_n``.
   ``charge_roll`` est en **pas de grille** (sous-hex) : sur plateau Boardx10, ``game_rules.charge_max_distance``
   est déjà multiplié par ``inches_to_subhex`` (ex. 12\" → 120).
   ``fp=offset`` : empreinte par offsets pré-calculés (multi-hex ×10) ; ``fp=legacy`` : ``compute_candidate_footprint``.

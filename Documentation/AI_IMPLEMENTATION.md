@@ -70,6 +70,8 @@ Rules:
   - [Phase Transitions](#phase-transition-flow)
   - [Integration Points](#integration-points)
 - [Performance Optimizations](#performance-optimizations)
+  - [Move preview masque monde & payload API](#move-preview-masque-monde--payload-api)
+  - [Rendu plateau Pixi (highlights / redraw partiel)](#rendu-plateau-pixi-highlights--redraw-partiel)
 - [Success Metrics](#success-metrics)
 - [Related Documentation](#related-documentation)
 - [Summary](#summary)
@@ -466,6 +468,7 @@ Each handler module implements complete phase logic:
 - Valid destination calculation
 - Movement execution
 - Flee detection
+- **Preview move — masque monde** : `_sync_move_preview_mask_loops(game_state, footprint_zone)` remplit `game_state["move_preview_footprint_mask_loops"]` via `engine.hex_union_boundary_polygon.compute_move_preview_mask_loops_world`, avec cache LRU module `_mask_loop_cache` (clé `(frozenset(footprint_zone), hex_radius, margin)`). Évite d’exposer `move_preview_footprint_zone` en JSON quand les boucles sont présentes (voir `_game_state_for_json` dans `services/api_server.py`).
 
 **shooting_handlers.py:**
 - Shooting eligibility
@@ -1219,30 +1222,33 @@ Training Script:
       └─ If done: obs, info = env.reset()
 ```
 
-**HTTP API (Frontend):**
+**HTTP API (Frontend — `services/api_server.py`):**
 ```
-API Server:
+API Server (Flask):
 │
-├─ engine = W40KEngine(config, ...)
+├─ engine = W40KEngine(...) — état canonique : engine.game_state
 │
-├─ POST /api/action:
-│  │
-│  ├─ Receive: {"type": "move", "unitId": "u1", "to": {"col": 5, "row": 3}}
-│  │
-│  ├─ Call: engine.execute_semantic_action(action)
-│  │
-│  ├─ Transform result to frontend format:
-│  │  └─ UPPERCASE → lowercase field names
-│  │
-│  └─ Return: JSON response
+├─ POST /api/game/start — initialise la partie ; réponse inclut game_state sérialisé
 │
-└─ GET /api/state:
-   │
-   ├─ Read: engine.game_state
-   │
-   ├─ Transform to frontend format
-   │
-   └─ Return: current game state
+├─ POST /api/game/action — actions sémantiques (move, skip, shoot, charge, fight, advance, …)
+│  │
+│  ├─ Corps JSON : action OU { col, row, selectedUnitId } (clic plateau → move)
+│  │
+│  ├─ Optionnel : move_preview_mask_loops_client_hash (dernier hash reçu,
+│  │   voir section « Move preview masque monde & payload API »)
+│  │
+│  ├─ engine.execute_semantic_action(...) ou handlers dédiés (preview_shoot_from_position, …)
+│  │
+│  └─ Réponse : game_state via _game_state_for_json(..., for_post_action=True,
+│      mask_loops_client_hash=...) — vue allégée (pas une copie brute du moteur)
+│
+├─ GET /api/game/state — état courant (_game_state_for_json sans hash client)
+│
+├─ Sérialisation JSON : orjson en priorité ; types non natifs via default handler ;
+│   repli make_json_serializable / jsonify si nécessaire
+│
+└─ Gym / pas HTTP : le code moteur utilise game_state complet ; les exclusions JSON
+   ne s’appliquent qu’aux réponses HTTP documentées ci-dessus
 ```
 
 ---
@@ -1251,11 +1257,87 @@ API Server:
 
 ### LoS Cache (5x Shooting Speedup)
 
-Line-of-sight calculations cached in `game_state["los_cache"]`. Cache built at shooting phase start, invalidated on movement. Reduces shooting phase from 40% to 8% of episode time.
+Line-of-sight calculations are cached on the active shooter (`unit["los_cache"]`) when a unit is activated for shooting. `shooting_phase_start()` no longer builds a global LoS cache for all units; it clears stale global cache data and lets `shooting_unit_activation_start()` call `build_unit_los_cache(game_state, unit_id)` for the active unit only. This avoids phase-start LoS spikes while preserving backend targetability as the source of truth.
+
+`build_unit_los_cache()` also writes `unit["los_cover_cache"]`. Cover status for valid shooting targets is read from this cache by `build_cover_by_unit_id_for_valid_targets()` instead of recomputing target visibility after `valid_target_pool_build()`.
+
+### Move Preview LoS / HP Blink Contract
+
+Move-phase LoS preview has two separate responsibilities:
+
+- **Visual blue/orange LoS overlay**: rendered immediately on the frontend from WASM (`buildLosPreviewFromSource`) for responsiveness. This visual overlay is not authoritative for targetability.
+- **HP blinks and cover/probability indicators**: always come from the backend. The frontend calls `preview_shoot_from_position` and uses the returned `blinking_units` and `cover_by_unit_id`.
+
+For move preview calls, the frontend sends `includeLosCells: false`. The backend then skips full-board LoS cell generation and returns only backend-valid targets plus per-target cover. This keeps targetability authoritative without forcing the backend to stream the full blue overlay on every hover.
+
+The shoot phase uses the same backend cover source for HP blink probabilities: shooting responses that start blinking include `cover_by_unit_id`, and the frontend must use that map instead of WASM-derived cover for shoot HP blink labels.
+
+Frontend request policy for move preview:
+- Blue LoS overlay is scheduled through `requestAnimationFrame`.
+- Backend target preview is throttled and serialized: only one `preview_shoot_from_position` request may be in flight.
+- If the cursor moves while a request is in flight, only the latest pending destination is kept.
+- Stale backend responses are ignored if they no longer match the current LoS destination.
+
+Backend optimizations retained:
+- `preview_shoot_valid_targets_from_position()` still uses `copy.deepcopy(game_state)` for safety. Do not mutate the live `game_state` for preview unless a strict restoration strategy has been proven safe.
+- `valid_target_pool_build()` receives precomputed `weapon_available_pool` and enemy precheck data during preview, avoiding the former duplicate pool work (`valid_pool_ms` should remain near zero in profiling).
+- `_move_los_preview_cache` memoizes exact backend preview results for `includeLosCells=False` using a strict key: process id, episode, turn, step, current player, unit id, destination, `units_cache` fingerprint, `units_advanced`, `units_fled`, and ranged weapon targetability fingerprint.
+
+Rejected / non-retained experiments:
+- Temporarily mutating the live `game_state` instead of `deepcopy` reduced snapshot cost but was rejected because hidden side effects could not be ruled out.
+- A combined preview pass replacing `build_unit_los_cache()` plus `_build_weapon_availability_enemy_precheck()` was rejected because profiling showed no improvement and sometimes worse first-pass latency.
+
+### Move preview masque monde & payload API
+
+**Moteur (`game_state`)**  
+- Champ : `move_preview_footprint_mask_loops` — listes de contours en coordonnées monde (structure interne tuples/listes selon le calcul).  
+- Production : `movement_handlers._sync_move_preview_mask_loops` + `compute_move_preview_mask_loops_world` (`engine/hex_union_boundary_polygon.py`).  
+- Quand ce champ est renseigné côté moteur, la vue HTTP **ne duplique pas** la zone hex `move_preview_footprint_zone` dans le JSON (économie massive sur les listes de couples).
+
+**Vue HTTP (`_game_state_for_json` dans `services/api_server.py`)**  
+- Toujours ajouter **`move_preview_footprint_mask_loops_hash`** (SHA-256 hex sur géométrie canonique) lorsque des boucles existent.  
+- Remplacer les boucles par un **format compact JSON** : une boucle = `[x0,y0,x1,y1,...]` (pas `[[[x,y],…]]`).  
+- **Omission du tableau** si la requête `POST /api/game/action` inclut **`move_preview_mask_loops_client_hash`** égal au hash courant **et** le contour est « volumineux » (seuil `_MASK_LOOPS_OMIT_MIN_TOTAL_COORDS`, actuellement 128 coordonnées scalaires au total). Réponse alors : pas de clé `move_preview_footprint_mask_loops`, **`move_preview_footprint_mask_loops_unchanged: true`**, hash inchangé.  
+- Les autres routes (`/game/start`, `/game/state`, `/game/ai-turn`, …) ne passent pas ce hash : les boucles compactes sont renvoyées normalement si présentes.
+
+**Frontend (`frontend/src/hooks/useEngineAPI.ts`)**  
+- Cache module : dernier payload boucles + dernier hash ; envoi du hash sur les corps `executeAction`.  
+- **`mergeGameStatePreservingOmittedObjectives`** et **`hydrateApiGameStateMovePreviewTransport`** réinjectent les boucles depuis le cache si `unchanged` + hash cohérent ; en cas d’incohérence, invalidation du cache (pas de repli silencieux qui laisserait la preview sans données).  
+- Normalisation : **`normalizeMaskLoopsFromApi`** (`frontend/src/utils/movePreviewFootprintMaskLoops.ts`) accepte format compact **et** legacy paires `[x,y]`.
+
+**Rendu Pixi (`frontend/src/components/BoardDisplay.tsx`)**  
+- **`resolveMovePreviewMaskLoopsBeforeSmooth`** : priorité aux boucles API (**`server_loops`**).  
+- Si absentes : reconstruction locale **`tryBuildHexUnionMaskPolygons`** depuis `footprintZonePoolRef` (**`polygon`**). Les phases où le moteur n’envoie pas encore les boucles (ex. certains chemins fight pile-in) peuvent donc rester plus coûteuses côté navigateur — alignement futur possible en étendant l’envoi serveur de boucles.
+
+### Rendu plateau Pixi (highlights / redraw partiel)
+
+**Objectif** : éviter un `drawBoard` complet quand seule la géométrie du **calque polygone move preview** change (ou lorsque rien ne change dans les highlights).
+
+**Implémentation (`BoardPvp.tsx` + `BoardDisplay.tsx`)**  
+- **`computeDrawBoardPartialRedrawFingerprint`** : deux empreintes — structure des highlights (phases, cellules, pools pour hit-test, halos, etc.) vs clé dédiée au polygone move (`movePolygonCacheKey`, alignée sur le cache rendu Pixi).  
+- Si la structure est identique à la frame précédente et le conteneur **`highlights`** (`name === "highlights"`) survit au cycle destroy/recollage du stage : détachement avant `removeChildren`, réattachement après les couches persistantes ; **`detachMovePreviewLayerCacheFromStage`** n’est **pas** appelé dans ce cas (sinon le sous-arbre preview serait retiré du conteneur sauvé).  
+- Si seule la clé polygone diffère : **`updateMovePreviewPolygonLayerInHighlightContainer`** met à jour uniquement le sous-arbre `move-preview-layer-cache-root`.  
+- Sinon : **`drawBoard`** complet ; résultat expose **`highlightContainer`** pour tenir à jour les refs.  
+- Le moteur / la sérialisation API ne sont pas modifiés par ce mécanisme (pure couche présentation).
 
 ### Kill Probability Cache (Lazy)
 
 `game_state["kill_probability_cache"]` is filled on first use in `engine/ai/weapon_selector.py` (e.g. when `select_best_ranged_weapon()` or `select_best_melee_weapon()` is called). It is no longer precomputed at shooting_phase_start() or fight_phase_start(), avoiding a costly O(units×weapons×enemies) block at phase transition.
+
+### Charge Phase Start Profiling
+
+The `shoot` -> `charge` transition is dominated by charge activation pool construction, not by the phase switch itself. Keep `W40K_PERF_TIMING=1` instrumentation around `CHARGE_PHASE_START`, `CHARGE_BUILD_POOL`, `CHARGE_DEST_BFS`, and `CHARGE_REVERSE_GOAL_BFS` when changing charge eligibility.
+
+Current effective optimizations:
+- Cheap hex lower-bound pruning avoids full BFS when a unit is geometrically too far to engage. This pruning is disabled for round-vs-round engagement pairs because those use exact Euclidean edge clearance in `unit_entries_within_engagement_zone`.
+- Reverse goal BFS is used only for `early_exit_if_valid=True` without a declared target, and only when the round-vs-round guard allows it. It builds legal final charge goals, then searches back to the charger primary anchor through the same placement graph.
+- Fine-grained `CHARGE_DEST_BFS` timings are intentionally kept: `bfs_candidate_fp_s`, `bfs_placement_s`, `bfs_engagement_s`, `bfs_rejected_placement_n`, `bfs_overlap_n`, `bfs_no_engagement_n`, and `bfs_engagement_checks_n`.
+
+Rejected charge experiments:
+- Sorting historical BFS neighbors toward the nearest enemy added measurable overhead and did not reduce `visited_n` on the PvP test scenario.
+- Precomputing reverse-BFS anchors from enemy engagement zones increased `goal_build_s` and total charge initialization time on the large-base `unit_id=107` case.
+
+Do not reintroduce these rejected optimizations without a charge non-regression test that compares reachable eligibility and end destinations for large round, oval, and square bases.
 
 ### Egocentric Observation (150 Floats)
 

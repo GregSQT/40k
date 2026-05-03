@@ -1948,6 +1948,13 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
     _t_bfs0 = time.perf_counter() if _perf else None
     bfs_short_circuit = False
+    bfs_candidate_fp_s = 0.0
+    bfs_placement_s = 0.0
+    bfs_engagement_s = 0.0
+    bfs_rejected_placement_n = 0
+    bfs_overlap_n = 0
+    bfs_no_engagement_n = 0
+    bfs_engagement_checks_n = 0
     while queue and not bfs_short_circuit:
         current_pos, current_dist = queue.popleft()
         current_col, current_row = current_pos
@@ -1965,17 +1972,27 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             if neighbor_pos in visited:
                 continue
 
+            _t_candidate_fp0 = time.perf_counter() if _perf else None
             candidate_fp = _candidate_footprint_charge(
                 neighbor_col_int, neighbor_row_int, unit, game_state, fp_offset_pair
             )
+            if _perf and _t_candidate_fp0 is not None:
+                bfs_candidate_fp_s += time.perf_counter() - _t_candidate_fp0
 
+            _t_placement0 = time.perf_counter() if _perf else None
             if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+                if _perf and _t_placement0 is not None:
+                    bfs_placement_s += time.perf_counter() - _t_placement0
+                bfs_rejected_placement_n += 1
                 continue
+            if _perf and _t_placement0 is not None:
+                bfs_placement_s += time.perf_counter() - _t_placement0
 
             visited[neighbor_pos] = neighbor_dist
 
             is_adjacent_to_enemy = False
             hex_overlaps_enemy = False
+            _t_engagement0 = time.perf_counter() if _perf else None
             synth = _charge_synthetic_charger_cache_entry(
                 unit, neighbor_col_int, neighbor_row_int, candidate_fp
             )
@@ -1985,12 +2002,19 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                 if candidate_fp & enemy_fp:
                     hex_overlaps_enemy = True
                     break
+                bfs_engagement_checks_n += 1
                 if unit_entries_within_engagement_zone(
                     synth, enemy_entry, engagement_zone
                 ):
                     is_adjacent_to_enemy = True
                     if tid_arg:
                         break
+            if _perf and _t_engagement0 is not None:
+                bfs_engagement_s += time.perf_counter() - _t_engagement0
+            if hex_overlaps_enemy:
+                bfs_overlap_n += 1
+            elif not is_adjacent_to_enemy:
+                bfs_no_engagement_n += 1
 
             if is_adjacent_to_enemy and not hex_overlaps_enemy and neighbor_pos != start_pos:
                 valid_destinations.append(neighbor_pos)
@@ -2014,6 +2038,10 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             f"CHARGE_DEST_BFS episode={_ep} turn={_turn} unit_id={unit_id} charge_roll={charge_range} "
             f"bfs_max={bfs_max_distance} "
             f"bfs_loop_s={_t_bfs1 - _t_bfs0:.6f} total_s={_t_done - _t_func0:.6f} "
+            f"bfs_candidate_fp_s={bfs_candidate_fp_s:.6f} bfs_placement_s={bfs_placement_s:.6f} "
+            f"bfs_engagement_s={bfs_engagement_s:.6f} bfs_rejected_placement_n={bfs_rejected_placement_n} "
+            f"bfs_overlap_n={bfs_overlap_n} bfs_no_engagement_n={bfs_no_engagement_n} "
+            f"bfs_engagement_checks_n={bfs_engagement_checks_n} "
             f"visited_n={len(visited)} valid_dest_n={len(valid_destinations)} cache_hit=0 "
             f"early_exit={_ee} short_circuit={_sc} fp={_fp_tag}"
         )

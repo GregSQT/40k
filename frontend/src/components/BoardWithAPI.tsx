@@ -31,7 +31,7 @@ import {
   type TutorialSpotlightRect,
   useTutorial,
 } from "../contexts/TutorialContext";
-import { useEngineAPI } from "../hooks/useEngineAPI";
+import { useEngineAPI, type UseEngineAPIBlinkBoardProps } from "../hooks/useEngineAPI";
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
 import type { GamePhase, GameState, PlayerId, TargetPreview, Unit } from "../types";
@@ -2397,6 +2397,9 @@ export const BoardWithAPI: React.FC = () => {
     );
   }
 
+  /** Alignement explicite avec le hook : l’union inférée peut omettre des clés côté serveur TS du workspace. */
+  const engineApiBlink = apiProps as UseEngineAPIBlinkBoardProps;
+
   const deploymentPanel = (() => {
     if (!apiProps.gameState) {
       return null;
@@ -3263,11 +3266,11 @@ export const BoardWithAPI: React.FC = () => {
                   }
                 : null
             }
-            blinkingUnits={apiProps.blinkingUnits}
-            blinkingAttackerId={apiProps.blinkingAttackerId}
-            blinkingCoverByUnitId={apiProps.blinkingCoverByUnitId}
-            isBlinkingActive={apiProps.isBlinkingActive}
-            blinkVersion={apiProps.blinkVersion}
+            blinkingUnits={engineApiBlink.blinkingUnits}
+            blinkingAttackerId={engineApiBlink.blinkingAttackerId}
+            blinkingCoverByUnitId={engineApiBlink.blinkingCoverByUnitId}
+            isBlinkingActive={engineApiBlink.isBlinkingActive}
+            blinkVersion={engineApiBlink.blinkVersion}
             onSelectUnit={
               isGameOver ||
               (isRosterSetupMode &&
