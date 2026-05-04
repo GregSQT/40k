@@ -3048,8 +3048,26 @@ export default function Board({
     const contextMenuHandler = (e: Event) => {
       e.preventDefault();
 
-      if (phase === "move" && mode === "select" && selectedUnitId !== null) {
-        onSelectUnit(null);
+      const isMoveUiPhase = phase === "move" || phase === "command";
+      if (isMoveUiPhase && mode === "select") {
+        const activeMu = gameState?.active_movement_unit;
+        if (activeMu != null && activeMu !== "") {
+          if (!onSkipUnit) {
+            throw new Error(
+              "BoardPvp: onSkipUnit is required when cancelling move-in-progress (active_movement_unit set)",
+            );
+          }
+          const activeId = parseRequiredUnitId(
+            activeMu,
+            "contextmenu postpone movement active_movement_unit",
+          );
+          void onSkipUnit(activeId);
+          return;
+        }
+        if (selectedUnitId !== null) {
+          onSelectUnit(null);
+        }
+        return;
       } else if (phase === "shoot" && mode === "advancePreview" && selectedUnitId !== null) {
         onCancelAdvance?.();
       } else if (phase === "shoot" && mode === "movePreview") {
@@ -5022,6 +5040,8 @@ export default function Board({
     onConfirmAdvanceWarning,
     onConfirmMove,
     onDirectMove,
+    onSelectUnit,
+    onSkipUnit,
     onSkipAdvanceWarning,
     onStartMovePreview,
     shootingActivationQueue,

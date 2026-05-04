@@ -1993,6 +1993,7 @@ export const BoardReplay: React.FC = () => {
         }
         attackPreview={null}
         onSelectUnit={() => {}}
+        onSkipUnit={() => {}}
         onStartMovePreview={() => {}}
         onDirectMove={() => {}}
         onStartAttackPreview={() => {}}

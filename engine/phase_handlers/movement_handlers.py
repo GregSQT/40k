@@ -560,6 +560,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return movement_click_handler(game_state, unit_id, action)
     
     elif action_type == "right_click":
+        if game_state.get("active_movement_unit") is not None:
+            return _handle_movement_postpone(game_state, active_unit)
         return _handle_skip_action(game_state, active_unit)
     
     elif action_type == "invalid":
@@ -1799,6 +1801,32 @@ def movement_clear_preview(game_state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _handle_movement_postpone(
+    game_state: Dict[str, Any], unit: Dict[str, Any]
+) -> Tuple[bool, Dict[str, Any]]:
+    """
+    Quitter la sélection de destination (preview + active_movement_unit) sans retirer l'unité du
+    ``move_activation_pool`` — aligné sur le report tir (``postpone`` / ``activation_ended: false``).
+    """
+    am = game_state.get("active_movement_unit")
+    if am is None or am == "":
+        return True, {"action": "no_effect", "activation_ended": False}
+    if str(unit["id"]) != str(am):
+        return False, {
+            "error": "postpone_movement_wrong_unit",
+            "expected_active_movement_unit": am,
+            "unitId": unit["id"],
+        }
+    movement_clear_preview(game_state)
+    return True, {
+        "action": "postpone",
+        "unitId": unit["id"],
+        "activation_ended": False,
+        "reset_mode": "select",
+        "clear_selected_unit": True,
+    }
+
+
 def movement_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """AI_MOVE.md: Route click actions"""
     if "clickTarget" not in action:
@@ -1811,9 +1839,18 @@ def movement_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
     elif click_target == "friendly_unit":
         return False, {"error": "unit_switch_not_implemented"}
     elif click_target == "active_unit":
-        return True, {"action": "no_effect"}
+        unit_click = get_unit_by_id(game_state, unit_id)
+        if not unit_click:
+            return False, {"error": "unit_not_found", "unitId": unit_id}
+        return _handle_movement_postpone(game_state, unit_click)
     else:
-        return True, {"action": "continue_selection"}
+        # Clic ailleurs : report uniquement si une activation move attend une destination
+        if game_state.get("active_movement_unit") is None:
+            return True, {"action": "continue_selection"}
+        unit_click = get_unit_by_id(game_state, unit_id)
+        if not unit_click:
+            return False, {"error": "unit_not_found", "unitId": unit_id}
+        return _handle_movement_postpone(game_state, unit_click)
 
 def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """AI_MOVE.md: Handle destination selection and execute movement"""

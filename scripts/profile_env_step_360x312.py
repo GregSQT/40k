@@ -2,17 +2,25 @@
 """
 Profile env.step latency on the 360x312 scenario map.
 
-Usage:
+Usage (from repo root):
   ./.venv/bin/python scripts/profile_env_step_360x312.py
-  ./.venv/bin/python scripts/profile_env_step_360x312.py --measured-steps 1500 --warmup-steps 100
+  ./.venv/bin/python scripts/profile_env_step_360x312.py --measured-steps 500 --warmup-steps 100
+
+Project root is prepended to sys.path so imports resolve without PYTHONPATH.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 import time
 from typing import Any, Dict
+
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 
 import numpy as np
 
@@ -86,12 +94,12 @@ def main() -> None:
 
     arr = np.array(step_durations_ms, dtype=np.float64)
     game_state = require_key(env.__dict__, "game_state")
-    cols = require_key(game_state, "cols")
-    rows = require_key(game_state, "rows")
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
 
     result: Dict[str, Any] = {
         "scenario_file": args.scenario_file,
-        "board_dims": [int(cols), int(rows)],
+        "board_dims": [int(board_cols), int(board_rows)],
         "inches_to_subhex": game_state.get("inches_to_subhex"),
         "seed": args.seed,
         "warmup_steps": args.warmup_steps,

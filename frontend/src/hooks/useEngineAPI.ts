@@ -2898,9 +2898,36 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   const handleSkipUnit = useCallback(
     async (unitId: number | string) => {
+      const uid = typeof unitId === "string" ? unitId : unitId.toString();
+      const gsPhase = gameState?.phase;
+      const isMoveLikePhase = gsPhase === "move" || gsPhase === "command";
+      const activeMu = gameState?.active_movement_unit;
+      if (isMoveLikePhase && activeMu != null && activeMu !== "") {
+        if (String(activeMu) !== String(uid)) {
+          console.error(
+            "handleSkipUnit: refuse skip — une autre unité a le mouvement en cours",
+            { active_movement_unit: activeMu, requestedUnitId: uid },
+          );
+          return;
+        }
+        try {
+          await executeAction({
+            action: "right_click",
+            unitId: uid,
+          });
+          setSelectedUnitId(null);
+          setMode("select");
+          setMovePreview(null);
+          setPendingPreviewAction(null);
+        } catch (error) {
+          console.error("Postpone movement (right_click) failed:", error);
+        }
+        return;
+      }
+
       const action = {
         action: "skip",
-        unitId: typeof unitId === "string" ? unitId : unitId.toString(),
+        unitId: uid,
       };
 
       try {
@@ -2911,7 +2938,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         console.error("Skip unit failed:", error);
       }
     },
-    [executeAction]
+    [executeAction, gameState?.phase, gameState?.active_movement_unit]
   );
 
   const handleEndPhase = useCallback(
