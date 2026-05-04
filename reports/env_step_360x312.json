@@ -1,0 +1,671 @@
+{
+  "scenario_file": "config/scenario_pvp_test.json",
+  "board_dims": [
+    360,
+    312
+  ],
+  "inches_to_subhex": 10,
+  "seed": 42,
+  "warmup_steps": 100,
+  "measured_steps": 400,
+  "episode_resets": 4,
+  "step_ms": {
+    "mean": 2658.8914645675077,
+    "p50": 200.83066999995935,
+    "p95": 14993.3918968499,
+    "p99": 35787.20915782044,
+    "max": 136004.690236,
+    "min": 5.21271399975376,
+    "stdev": 11240.260325762647
+  },
+  "sps_step_only": 0.37609658510926053,
+  "by_phase_action": [
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "count": 23,
+      "mean_ms": 34219.173736304416,
+      "p50_ms": 29312.85001300057,
+      "p95_ms": 117347.30819319974,
+      "p99_ms": 133343.52228567997,
+      "max_ms": 136004.690236,
+      "min_ms": 116.27179500010243,
+      "stdev_ms": 32979.06679766006,
+      "cv": 0.9637598806972747
+    },
+    {
+      "phase": "fight",
+      "action": 10,
+      "label": "fight",
+      "count": 119,
+      "mean_ms": 1154.6386189243667,
+      "p50_ms": 14.843008999378071,
+      "p95_ms": 7811.656198999284,
+      "p99_ms": 15887.851899279587,
+      "max_ms": 33839.56364000005,
+      "min_ms": 9.259497000130068,
+      "stdev_ms": 4124.148091102985,
+      "cv": 3.5718085498863195
+    },
+    {
+      "phase": "charge",
+      "action": 9,
+      "label": "charge_activate",
+      "count": 23,
+      "mean_ms": 1785.7040545217703,
+      "p50_ms": 1456.0176539998793,
+      "p95_ms": 3757.081530400227,
+      "p99_ms": 4160.819478640152,
+      "max_ms": 4253.160395000123,
+      "min_ms": 323.2709470003101,
+      "stdev_ms": 990.5069326614573,
+      "cv": 0.5546870603520723
+    },
+    {
+      "phase": "move",
+      "action": 0,
+      "label": "move_aggressive",
+      "count": 19,
+      "mean_ms": 607.6280153156882,
+      "p50_ms": 232.31098999985988,
+      "p95_ms": 3362.2426863996225,
+      "p99_ms": 3372.1678964795865,
+      "max_ms": 3374.6491989995775,
+      "min_ms": 142.7790540001297,
+      "stdev_ms": 983.7008110934327,
+      "cv": 1.6189194479164344
+    },
+    {
+      "phase": "shoot",
+      "action": 11,
+      "label": "shoot_wait",
+      "count": 54,
+      "mean_ms": 639.1996800000722,
+      "p50_ms": 266.59800250035914,
+      "p95_ms": 2370.9333980002157,
+      "p99_ms": 3396.641359490213,
+      "max_ms": 3543.0849000003946,
+      "min_ms": 7.993504999831202,
+      "stdev_ms": 809.792369760516,
+      "cv": 1.26688481721459
+    },
+    {
+      "phase": "shoot",
+      "action": 7,
+      "label": "shoot_target_slot_3",
+      "count": 3,
+      "mean_ms": 934.1943516668229,
+      "p50_ms": 1043.8697139998112,
+      "p95_ms": 1535.698936600511,
+      "p99_ms": 1579.4170897205731,
+      "max_ms": 1590.3466280005887,
+      "min_ms": 168.36671300006856,
+      "stdev_ms": 717.306234110213,
+      "cv": 0.7678340516942429
+    },
+    {
+      "phase": "shoot",
+      "action": 12,
+      "label": "shoot_advance",
+      "count": 45,
+      "mean_ms": 444.53710262223467,
+      "p50_ms": 261.8588599998475,
+      "p95_ms": 1078.8755849996958,
+      "p99_ms": 1958.2979895998171,
+      "max_ms": 2528.0418719994486,
+      "min_ms": 19.798067000010633,
+      "stdev_ms": 446.263064187207,
+      "cv": 1.0038826040723963
+    },
+    {
+      "phase": "shoot",
+      "action": 4,
+      "label": "shoot_target_slot_0",
+      "count": 30,
+      "mean_ms": 373.8003775332497,
+      "p50_ms": 274.39791500000865,
+      "p95_ms": 746.5928283993431,
+      "p99_ms": 1716.6035920000115,
+      "max_ms": 2089.255912000226,
+      "min_ms": 11.452734999693348,
+      "stdev_ms": 381.1757724579475,
+      "cv": 1.019730838618647
+    },
+    {
+      "phase": "shoot",
+      "action": 5,
+      "label": "shoot_target_slot_1",
+      "count": 7,
+      "mean_ms": 292.7881428573268,
+      "p50_ms": 254.2500720001044,
+      "p95_ms": 650.5375828003705,
+      "p99_ms": 745.0597453604676,
+      "max_ms": 768.690286000492,
+      "min_ms": 63.343915000587,
+      "stdev_ms": 233.79996332012885,
+      "cv": 0.7985294795016942
+    },
+    {
+      "phase": "move",
+      "action": 2,
+      "label": "move_defensive",
+      "count": 17,
+      "mean_ms": 356.25030305886065,
+      "p50_ms": 384.20993799991265,
+      "p95_ms": 647.1540107999315,
+      "p99_ms": 880.9482853605732,
+      "max_ms": 939.3968540007336,
+      "min_ms": 100.45203400022729,
+      "stdev_ms": 223.1203205824707,
+      "cv": 0.626302121476669
+    },
+    {
+      "phase": "move",
+      "action": 11,
+      "label": "move_wait",
+      "count": 14,
+      "mean_ms": 163.85376578572115,
+      "p50_ms": 36.134702999788715,
+      "p95_ms": 634.7465054505847,
+      "p99_ms": 687.8521018903665,
+      "max_ms": 701.1285010003121,
+      "min_ms": 12.176535999969929,
+      "stdev_ms": 227.94198338098136,
+      "cv": 1.3911305748021148
+    },
+    {
+      "phase": "move",
+      "action": 1,
+      "label": "move_tactical",
+      "count": 18,
+      "mean_ms": 303.19803677765674,
+      "p50_ms": 263.41254799990566,
+      "p95_ms": 592.8092037500844,
+      "p99_ms": 696.9575447495752,
+      "max_ms": 722.9946299994481,
+      "min_ms": 77.88459699986561,
+      "stdev_ms": 178.22428646738248,
+      "cv": 0.587814777303717
+    },
+    {
+      "phase": "shoot",
+      "action": 6,
+      "label": "shoot_target_slot_2",
+      "count": 4,
+      "mean_ms": 413.0440607500532,
+      "p50_ms": 360.0343020002583,
+      "p95_ms": 556.7310754498066,
+      "p99_ms": 583.3180326898037,
+      "max_ms": 589.9647719998029,
+      "min_ms": 342.14286699989316,
+      "stdev_ms": 118.44574519978002,
+      "cv": 0.28676297871150247
+    },
+    {
+      "phase": "charge",
+      "action": 11,
+      "label": "charge_wait",
+      "count": 24,
+      "mean_ms": 18.769008250008785,
+      "p50_ms": 15.96617650011467,
+      "p95_ms": 37.99490920014248,
+      "p99_ms": 41.67456987993319,
+      "max_ms": 42.38640699986718,
+      "min_ms": 5.21271399975376,
+      "stdev_ms": 8.784093874191813,
+      "cv": 0.46801055000802727
+    }
+  ],
+  "goulot_detail": [
+    {
+      "id": "move:3",
+      "expected_label": "move_objective",
+      "samples": 23,
+      "label_mismatch_count": 0,
+      "share_of_measured_wall_time": 0.740008577280364,
+      "histogram_ms": {
+        "0-50": 0,
+        "50-200": 1,
+        "200-500": 1,
+        "500-1k": 0,
+        "1k-5k": 0,
+        "5k-20k": 4,
+        "20k+": 17
+      },
+      "wall_ms": {
+        "mean_ms": 34219.173736304416,
+        "p50_ms": 29312.85001300057,
+        "p95_ms": 117347.30819319974,
+        "p99_ms": 133343.52228567997,
+        "max_ms": 136004.690236,
+        "min_ms": 116.27179500010243,
+        "stdev_ms": 32979.06679766006,
+        "cv": 0.9637598806972747
+      },
+      "slowest_in_bucket": [
+        {
+          "phase": "move",
+          "action": 3,
+          "label": "move_objective",
+          "ms": 136004.690236
+        },
+        {
+          "phase": "move",
+          "action": 3,
+          "label": "move_objective",
+          "ms": 123908.47227999984
+        },
+        {
+          "phase": "move",
+          "action": 3,
+          "label": "move_objective",
+          "ms": 58296.83141199985
+        },
+        {
+          "phase": "move",
+          "action": 3,
+          "label": "move_objective",
+          "ms": 43730.701641999985
+        },
+        {
+          "phase": "move",
+          "action": 3,
+          "label": "move_objective",
+          "ms": 35706.97186000052
+        },
+        {
+          "phase": "move",
+          "action": 3,
+          "label": "move_objective",
+          "ms": 35340.75505400051
+        },
+        {
+          "phase": "move",
+          "action": 3,
+          "label": "move_objective",
+          "ms": 34480.89956900003
+        },
+        {
+          "phase": "move",
+          "action": 3,
+          "label": "move_objective",
+          "ms": 33818.05166199956
+        }
+      ]
+    },
+    {
+      "id": "fight:10",
+      "expected_label": "fight",
+      "samples": 119,
+      "label_mismatch_count": 0,
+      "share_of_measured_wall_time": 0.1291910533797863,
+      "histogram_ms": {
+        "0-50": 88,
+        "50-200": 4,
+        "200-500": 7,
+        "500-1k": 6,
+        "1k-5k": 6,
+        "5k-20k": 7,
+        "20k+": 1
+      },
+      "wall_ms": {
+        "mean_ms": 1154.6386189243667,
+        "p50_ms": 14.843008999378071,
+        "p95_ms": 7811.656198999284,
+        "p99_ms": 15887.851899279587,
+        "max_ms": 33839.56364000005,
+        "min_ms": 9.259497000130068,
+        "stdev_ms": 4124.148091102985,
+        "cv": 3.5718085498863195
+      },
+      "slowest_in_bucket": [
+        {
+          "phase": "fight",
+          "action": 10,
+          "label": "fight",
+          "ms": 33839.56364000005
+        },
+        {
+          "phase": "fight",
+          "action": 10,
+          "label": "fight",
+          "ms": 16090.412820999518
+        },
+        {
+          "phase": "fight",
+          "action": 10,
+          "label": "fight",
+          "ms": 14965.074366999943
+        },
+        {
+          "phase": "fight",
+          "action": 10,
+          "label": "fight",
+          "ms": 13431.120383999769
+        },
+        {
+          "phase": "fight",
+          "action": 10,
+          "label": "fight",
+          "ms": 10419.671419999759
+        },
+        {
+          "phase": "fight",
+          "action": 10,
+          "label": "fight",
+          "ms": 10166.3371249997
+        },
+        {
+          "phase": "fight",
+          "action": 10,
+          "label": "fight",
+          "ms": 7550.024984999254
+        },
+        {
+          "phase": "fight",
+          "action": 10,
+          "label": "fight",
+          "ms": 5506.737310999597
+        }
+      ]
+    },
+    {
+      "id": "charge:9",
+      "expected_label": "charge_activate",
+      "samples": 23,
+      "label_mismatch_count": 0,
+      "share_of_measured_wall_time": 0.03861683882298042,
+      "histogram_ms": {
+        "0-50": 0,
+        "50-200": 0,
+        "200-500": 1,
+        "500-1k": 2,
+        "1k-5k": 20,
+        "5k-20k": 0,
+        "20k+": 0
+      },
+      "wall_ms": {
+        "mean_ms": 1785.7040545217703,
+        "p50_ms": 1456.0176539998793,
+        "p95_ms": 3757.081530400227,
+        "p99_ms": 4160.819478640152,
+        "max_ms": 4253.160395000123,
+        "min_ms": 323.2709470003101,
+        "stdev_ms": 990.5069326614573,
+        "cv": 0.5546870603520723
+      },
+      "slowest_in_bucket": [
+        {
+          "phase": "charge",
+          "action": 9,
+          "label": "charge_activate",
+          "ms": 4253.160395000123
+        },
+        {
+          "phase": "charge",
+          "action": 9,
+          "label": "charge_activate",
+          "ms": 3833.428957000251
+        },
+        {
+          "phase": "charge",
+          "action": 9,
+          "label": "charge_activate",
+          "ms": 3069.954691000021
+        },
+        {
+          "phase": "charge",
+          "action": 9,
+          "label": "charge_activate",
+          "ms": 2742.3974159992213
+        },
+        {
+          "phase": "charge",
+          "action": 9,
+          "label": "charge_activate",
+          "ms": 2700.459753999894
+        },
+        {
+          "phase": "charge",
+          "action": 9,
+          "label": "charge_activate",
+          "ms": 2486.634953000248
+        },
+        {
+          "phase": "charge",
+          "action": 9,
+          "label": "charge_activate",
+          "ms": 2195.3060739997454
+        },
+        {
+          "phase": "charge",
+          "action": 9,
+          "label": "charge_activate",
+          "ms": 1899.685858000339
+        }
+      ]
+    },
+    {
+      "id": "move:0",
+      "expected_label": "move_aggressive",
+      "samples": 19,
+      "label_mismatch_count": 0,
+      "share_of_measured_wall_time": 0.01085502402490502,
+      "histogram_ms": {
+        "0-50": 0,
+        "50-200": 6,
+        "200-500": 9,
+        "500-1k": 2,
+        "1k-5k": 2,
+        "5k-20k": 0,
+        "20k+": 0
+      },
+      "wall_ms": {
+        "mean_ms": 607.6280153156882,
+        "p50_ms": 232.31098999985988,
+        "p95_ms": 3362.2426863996225,
+        "p99_ms": 3372.1678964795865,
+        "max_ms": 3374.6491989995775,
+        "min_ms": 142.7790540001297,
+        "stdev_ms": 983.7008110934327,
+        "cv": 1.6189194479164344
+      },
+      "slowest_in_bucket": [
+        {
+          "phase": "move",
+          "action": 0,
+          "label": "move_aggressive",
+          "ms": 3374.6491989995775
+        },
+        {
+          "phase": "move",
+          "action": 0,
+          "label": "move_aggressive",
+          "ms": 3360.8641849996275
+        },
+        {
+          "phase": "move",
+          "action": 0,
+          "label": "move_aggressive",
+          "ms": 596.229126000253
+        },
+        {
+          "phase": "move",
+          "action": 0,
+          "label": "move_aggressive",
+          "ms": 572.8134860000864
+        },
+        {
+          "phase": "move",
+          "action": 0,
+          "label": "move_aggressive",
+          "ms": 489.5304430001488
+        },
+        {
+          "phase": "move",
+          "action": 0,
+          "label": "move_aggressive",
+          "ms": 482.9984059997514
+        },
+        {
+          "phase": "move",
+          "action": 0,
+          "label": "move_aggressive",
+          "ms": 364.988854999865
+        },
+        {
+          "phase": "move",
+          "action": 0,
+          "label": "move_aggressive",
+          "ms": 264.14823599952797
+        }
+      ]
+    }
+  ],
+  "goulot_specs": [
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective"
+    },
+    {
+      "phase": "fight",
+      "action": 10,
+      "label": "fight"
+    },
+    {
+      "phase": "charge",
+      "action": 9,
+      "label": "charge_activate"
+    },
+    {
+      "phase": "move",
+      "action": 0,
+      "label": "move_aggressive"
+    }
+  ],
+  "goulot_metrics_note": "wall_ms / histogram / share / slowest_in_bucket = uniquement les steps de la phase measured. cprofile_replay (--profile-goulots) rejoue warmup+measured : des entr\u00e9es cprofile peuvent exister m\u00eame si samples==0 pour une combinaison goulot (ex. action surtout au warmup).",
+  "slowest_steps": [
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 136004.690236
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 123908.47227999984
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 58296.83141199985
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 43730.701641999985
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 35706.97186000052
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 35340.75505400051
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 34480.89956900003
+    },
+    {
+      "phase": "fight",
+      "action": 10,
+      "label": "fight",
+      "ms": 33839.56364000005
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 33818.05166199956
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 30510.392842999863
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 30475.439087000268
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 30270.835322000494
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 29312.85001300057
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 24299.108782000076
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 24063.471637000475
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 21574.411564
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 20666.618354000093
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 20124.31033899975
+    },
+    {
+      "phase": "fight",
+      "action": 10,
+      "label": "fight",
+      "ms": 16090.412820999518
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 15531.424963999598
+    }
+  ]
+}

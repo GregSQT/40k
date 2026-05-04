@@ -47,7 +47,7 @@ from .shared_utils import (
 )
 
 _ADJACENT_EDGE_GAP_TOLERANCE_NORM = ENGAGEMENT_NORM_HEX_WIDTH
-FightFootprintOffsetPair = Optional[Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]]
+FightFootprintFastOffsets = Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]
 
 
 def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
@@ -814,38 +814,52 @@ def _fight_consolidation_unit_engaged_with_any_enemy(game_state: Dict[str, Any],
     )
 
 
+def _fight_precomputed_footprint_offsets_eligible(
+    unit: Dict[str, Any], game_state: Dict[str, Any]
+) -> bool:
+    """
+    True si le BFS consolidation peut utiliser des offsets pré-calculés (plateau ×10, empreinte multi-hex).
+
+    Sinon l'empreinte se résout via ``compute_candidate_footprint`` (empreinte ancrée seule ou plateau legacy).
+    """
+    from .shared_utils import get_engagement_zone
+
+    ez = int(get_engagement_zone(game_state))
+    bs = unit.get("BASE_SIZE", 1)
+    return ez > 1 and bs != 1
+
+
 def _fight_prepare_footprint_offsets(
     unit: Dict[str, Any], game_state: Dict[str, Any]
-) -> FightFootprintOffsetPair:
+) -> FightFootprintFastOffsets:
     """
     Pré-calcule les offsets d'empreinte pair/impair pour accélérer le BFS de consolidation.
 
-    Retourne ``None`` pour fallback sur ``compute_candidate_footprint`` (plateau legacy / 1-hex / erreur).
+    À n'appeler que si ``_fight_precomputed_footprint_offsets_eligible`` est vrai ; sinon ``ValueError``.
+    Toute erreur de ``precompute_footprint_offsets`` est propagée (pas d'absorption).
     """
-    cache: Dict[str, FightFootprintOffsetPair] = game_state.setdefault("_fight_fp_offset_pair_cache", {})
-    uid = str(unit["id"])
+    if not _fight_precomputed_footprint_offsets_eligible(unit, game_state):
+        raise ValueError(
+            "_fight_prepare_footprint_offsets: ineligible (engagement_zone<=1 or BASE_SIZE==1); "
+            "use compute_candidate_footprint path instead"
+        )
+    cache: Dict[str, FightFootprintFastOffsets] = game_state.setdefault("_fight_fp_offset_pair_cache", {})
+    uid = str(require_key(unit, "id"))
     if uid in cache:
-        return cache[uid]
+        cached = cache[uid]
+        if isinstance(cached, tuple) and len(cached) == 2:
+            return cached
+        del cache[uid]
 
-    from .shared_utils import get_engagement_zone
+    from engine.hex_utils import precompute_footprint_offsets
 
-    ez = get_engagement_zone(game_state)
+    shape = unit.get("BASE_SHAPE", "round")
+    orient = int(require_key(unit, "orientation"))
     bs = unit.get("BASE_SIZE", 1)
-    if ez <= 1 or bs == 1:
-        cache[uid] = None
-        return None
-    try:
-        from engine.hex_utils import precompute_footprint_offsets
-
-        shape = unit.get("BASE_SHAPE", "round")
-        orient = int(require_key(unit, "orientation"))
-        off_e, off_o = precompute_footprint_offsets(shape, bs, orient)
-        out: FightFootprintOffsetPair = (off_e, off_o)
-        cache[uid] = out
-        return out
-    except Exception:
-        cache[uid] = None
-        return None
+    off_e, off_o = precompute_footprint_offsets(shape, bs, orient)
+    out: FightFootprintFastOffsets = (off_e, off_o)
+    cache[uid] = out
+    return out
 
 
 def _candidate_footprint_fight(
@@ -853,10 +867,11 @@ def _candidate_footprint_fight(
     center_row: int,
     unit: Dict[str, Any],
     game_state: Dict[str, Any],
-    offset_pair: FightFootprintOffsetPair,
+    fast_offsets: Optional[FightFootprintFastOffsets],
 ) -> Set[Tuple[int, int]]:
-    if offset_pair is not None:
-        off_e, off_o = offset_pair
+    """Empreinte candidate : offsets pré-calculés si fournis, sinon ``compute_candidate_footprint``."""
+    if fast_offsets is not None:
+        off_e, off_o = fast_offsets
         offs = off_e if (center_col & 1) == 0 else off_o
         return {(center_col + dc, center_row + dr) for dc, dr in offs}
     return compute_candidate_footprint(center_col, center_row, unit, game_state)
@@ -994,12 +1009,14 @@ def _fight_bfs_reachable_anchors_consolidation(
     unit_id_str = str(unit["id"])
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
-    fp_pair = _fight_prepare_footprint_offsets(unit, game_state)
+    fp_fast: Optional[FightFootprintFastOffsets] = None
+    if _fight_precomputed_footprint_offsets_eligible(unit, game_state):
+        fp_fast = _fight_prepare_footprint_offsets(unit, game_state)
     occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
     if start_footprint is not None:
         start_fp = start_footprint
     else:
-        start_fp = _candidate_footprint_fight(start_col, start_row, unit, game_state, fp_pair)
+        start_fp = _candidate_footprint_fight(start_col, start_row, unit, game_state, fp_fast)
     visited: Dict[Tuple[int, int], int] = {start_pos: 0}
     fp_by_anchor: Dict[Tuple[int, int], Set[Tuple[int, int]]] = {start_pos: start_fp}
     queue = deque([(start_pos, 0)])
@@ -1017,7 +1034,7 @@ def _fight_bfs_reachable_anchors_consolidation(
             if _perf:
                 _t1 = time.perf_counter()
             candidate_fp = _candidate_footprint_fight(
-                neighbor_col, neighbor_row, unit, game_state, fp_pair
+                neighbor_col, neighbor_row, unit, game_state, fp_fast
             )
             if _perf:
                 s_compute_fp += time.perf_counter() - _t1
