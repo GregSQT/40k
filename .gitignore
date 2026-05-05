@@ -218,3 +218,4 @@ frontend/src/roster/pdf/
 # FIN du .gitignore - Dernière mise à jour: Juin 2025
 # ═══════════════════════════════════════════════════════════════════════════════
 .aider*
+.claude/settings.local.json

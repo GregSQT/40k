@@ -2787,8 +2787,13 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                     os.rmdir(tmp_dir)
         model.set_env(env)
     
+    def _debug_train_marker(message: str) -> None:
+        if debug_mode:
+            print(f"[TRAIN DEBUG] {message}", flush=True)
+
     # Create callbacks for training
     scenario_display = f"Random from {len(scenario_list)} scenarios"
+    _debug_train_marker("before setup_callbacks()")
     training_callbacks = setup_callbacks(
         config=config,
         model_path=model_path,
@@ -2809,11 +2814,16 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         phase_label=phase_label,
         silent_logs=silent_chunk
     )
+    callback_names = [callback.__class__.__name__ for callback in training_callbacks]
+    _debug_train_marker(
+        f"after setup_callbacks(): count={len(training_callbacks)} callbacks={callback_names}"
+    )
     
     # Link metrics_tracker to bot evaluation callback
     for callback in training_callbacks:
         if hasattr(callback, '__class__') and callback.__class__.__name__ == 'BotEvaluationCallback':
             callback.metrics_tracker = metrics_tracker
+    _debug_train_marker("after bot-eval callback metrics_tracker wiring")
     
     # Combine all callbacks with strict ordering:
     # 1) Metrics first (episode_count must be up to date)
@@ -2830,6 +2840,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
     ordered_training_callbacks = non_terminal_callbacks + terminal_callbacks
     enhanced_callbacks = CallbackList([metrics_callback] + ordered_training_callbacks)
+    _debug_train_marker(
+        "after CallbackList assembly: "
+        f"ordered_callbacks={[callback.__class__.__name__ for callback in ordered_training_callbacks]}"
+    )
     
     # Train directly to total_episodes using an EPISODE-BUDGETED wrapper around SB3.learn().
     #
@@ -2868,10 +2882,26 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     target_episode_count = callback_global_episode_offset + total_episodes
     last_snapshot_episode_count = metrics_tracker.episode_count
     if self_play_snapshot_enabled:
+        _debug_train_marker("before initial self-play snapshot publish")
         _publish_self_play_snapshot()
+        _debug_train_marker("after initial self-play snapshot publish")
+    _debug_train_marker(
+        "before learn loop: "
+        f"episode_count={metrics_tracker.episode_count} "
+        f"target_episode_count={target_episode_count} "
+        f"chunk_timesteps={chunk_timesteps} "
+        f"model_num_timesteps={model.num_timesteps}"
+    )
     while metrics_tracker.episode_count < target_episode_count:
         # As a safety guard, we still use the same chunk_timesteps. 
         # EpisodeTerminationCallback is responsible for stopping promptly when the episode budget is reached.
+        _debug_train_marker(
+            "before model.learn(): "
+            f"episode_count={metrics_tracker.episode_count} "
+            f"target_episode_count={target_episode_count} "
+            f"chunk_timesteps={chunk_timesteps} "
+            f"model_num_timesteps={model.num_timesteps}"
+        )
         model.learn(
             total_timesteps=chunk_timesteps,
             reset_num_timesteps=(not append_training and model.num_timesteps == 0),
@@ -2879,6 +2909,13 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             callback=enhanced_callbacks,
             log_interval=1,  # Every iteration so MetricsCollectionCallback captures PPO metrics
             progress_bar=False  # Disabled - using episode-based progress
+        )
+        _debug_train_marker(
+            "after model.learn(): "
+            f"episode_count={metrics_tracker.episode_count} "
+            f"target_episode_count={target_episode_count} "
+            f"chunk_timesteps={chunk_timesteps} "
+            f"model_num_timesteps={model.num_timesteps}"
         )
         if self_play_snapshot_enabled:
             if self_play_snapshot_update_freq is None:
@@ -2898,6 +2935,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
     # Final save unless robust mode owns canonical output.
     if not save_best_robust:
+        _debug_train_marker("before final model.save()")
         model.save(model_path)
         if save_vec_normalize(model.get_env(), model_path):
             if not silent_chunk:
@@ -2930,6 +2968,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
     # Run final comprehensive bot evaluation
     if EVALUATION_BOTS_AVAILABLE:
+        _debug_train_marker("before final comprehensive bot evaluation")
         n_final = require_key(training_config, "_bot_eval_final")
         if not isinstance(n_final, int) or isinstance(n_final, bool) or n_final < 0:
             raise ValueError(

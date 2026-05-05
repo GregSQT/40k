@@ -2106,7 +2106,21 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     bfs_overlap_n = 0
     bfs_no_engagement_n = 0
     bfs_engagement_checks_n = 0
+    _charge_max_open_nodes = 10000
+    _config_obj = game_state.get("config")
+    if isinstance(_config_obj, dict):
+        _br = _config_obj.get("board_config")
+        if isinstance(_br, dict):
+            _bs = _br.get("default", _br)
+            if isinstance(_bs, dict):
+                _pf = _bs.get("pathfinding")
+                if isinstance(_pf, dict):
+                    _mc = _pf.get("max_open_nodes_charge")
+                    if isinstance(_mc, int) and not isinstance(_mc, bool) and _mc > 0:
+                        _charge_max_open_nodes = _mc
     while queue and not bfs_short_circuit:
+        if len(visited) > _charge_max_open_nodes:
+            break
         current_pos, current_dist = queue.popleft()
         current_col, current_row = current_pos
 
@@ -2444,28 +2458,41 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         display_zone_set: Set[Tuple[int, int]] = set()
         valid_pool: List[Tuple[int, int]] = []
     else:
-        display_zone_set, closest_ch = _compute_charge_preview_zone(
-            game_state, unit, target_unit_entry, int(charge_roll_subhex)
-        )
-        charge_reference_hex = (int(closest_ch[0]), int(closest_ch[1]))
-        # Ancres géométriques (anneau cible + portée depuis l’hex allié le plus proche).
-        zone_anchors = _build_charge_anchors_in_zone(
-            game_state, unit, target_unit_entry, display_zone_set, int(charge_roll_subhex)
-        )
-        # BFS : chaque pas vérifie murs + empreintes (autres unités) — impossible de « traverser »
-        # un mur ou un socle (allié ou ennemi) comme si c’était du vide. On garde l’intersection
-        # avec la zone cible-centrée pour respecter la spec d’affichage autour de la cible.
-        bfs_reachable = charge_build_valid_destinations_pool(
-            game_state,
-            str(unit_id),
-            int(charge_roll_subhex),
-            target_id=str(target_id),
-        )
-        bfs_set = set(bfs_reachable)
-        valid_pool = [p for p in zone_anchors if p in bfs_set]
-        valid_pool = _charge_pool_must_socle_a_socle_if_possible(
-            game_state, unit, target_unit_entry, valid_pool
-        )
+        is_gym = game_state.get("gym_training_mode", False)
+        if is_gym:
+            # Skip visual preview zone — BFS with target_id already returns only valid engagement hexes
+            bfs_reachable = charge_build_valid_destinations_pool(
+                game_state,
+                str(unit_id),
+                int(charge_roll_subhex),
+                target_id=str(target_id),
+            )
+            valid_pool = _charge_pool_must_socle_a_socle_if_possible(
+                game_state, unit, target_unit_entry, bfs_reachable
+            )
+        else:
+            display_zone_set, closest_ch = _compute_charge_preview_zone(
+                game_state, unit, target_unit_entry, int(charge_roll_subhex)
+            )
+            charge_reference_hex = (int(closest_ch[0]), int(closest_ch[1]))
+            # Ancres géométriques (anneau cible + portée depuis l’hex allié le plus proche).
+            zone_anchors = _build_charge_anchors_in_zone(
+                game_state, unit, target_unit_entry, display_zone_set, int(charge_roll_subhex)
+            )
+            # BFS : chaque pas vérifie murs + empreintes (autres unités) — impossible de « traverser »
+            # un mur ou un socle (allié ou ennemi) comme si c’était du vide. On garde l’intersection
+            # avec la zone cible-centrée pour respecter la spec d’affichage autour de la cible.
+            bfs_reachable = charge_build_valid_destinations_pool(
+                game_state,
+                str(unit_id),
+                int(charge_roll_subhex),
+                target_id=str(target_id),
+            )
+            bfs_set = set(bfs_reachable)
+            valid_pool = [p for p in zone_anchors if p in bfs_set]
+            valid_pool = _charge_pool_must_socle_a_socle_if_possible(
+                game_state, unit, target_unit_entry, valid_pool
+            )
     game_state["valid_charge_destinations_pool"] = valid_pool
     if "debug_mode" in game_state and game_state["debug_mode"]:
         episode = game_state.get("episode_number", "?")

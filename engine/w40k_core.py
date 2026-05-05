@@ -1238,6 +1238,17 @@ class W40KEngine(gym.Env):
         """
         Execute gym action with built-in step counting - gym.Env interface.
         """
+        if self.game_state.get("debug_mode", False):
+            episode = self.game_state.get("episode_number", "?")
+            turn = self.game_state.get("turn", "?")
+            phase = self.game_state.get("phase", "?")
+            current_player = self.game_state.get("current_player", "?")
+            print(
+                "[TRAIN DEBUG] W40KEngine.step enter "
+                f"episode={episode} turn={turn} phase={phase} "
+                f"current_player={current_player} action={action}",
+                flush=True,
+            )
         # Safety: count step() calls per episode to truncate runaways (e.g. stuck in eval)
         self._episode_step_calls = getattr(self, '_episode_step_calls', 0) + 1
 
@@ -1352,18 +1363,42 @@ class W40KEngine(gym.Env):
         
         # Normalize raw action once and keep it in game_state for deterministic
         # policy-driven rule-choice resolution in gym training mode.
+        if self.game_state.get("debug_mode", False):
+            print(
+                "[TRAIN DEBUG] W40KEngine.step before normalize_action_input "
+                f"phase={self.game_state.get('phase', '?')} action={action}",
+                flush=True,
+            )
         action_int = self.action_decoder.normalize_action_input(
             raw_action=action,
             phase=require_key(self.game_state, "phase"),
             source="w40k_core.step",
             action_space_size=len(action_mask),
         )
+        if self.game_state.get("debug_mode", False):
+            print(
+                "[TRAIN DEBUG] W40KEngine.step after normalize_action_input "
+                f"phase={self.game_state.get('phase', '?')} action_int={action_int}",
+                flush=True,
+            )
         self.game_state["_last_raw_action_int"] = action_int
 
         # Convert gym integer action to semantic action (reuse precomputed mask+eligible_units)
+        if self.game_state.get("debug_mode", False):
+            print(
+                "[TRAIN DEBUG] W40KEngine.step before convert_gym_action "
+                f"phase={self.game_state.get('phase', '?')} action_int={action_int}",
+                flush=True,
+            )
         semantic_action = self.action_decoder.convert_gym_action(
             action_int, self.game_state, action_mask=action_mask, eligible_units=eligible_units
         )
+        if self.game_state.get("debug_mode", False):
+            print(
+                "[TRAIN DEBUG] W40KEngine.step after convert_gym_action "
+                f"phase={self.game_state.get('phase', '?')} semantic_action={semantic_action}",
+                flush=True,
+            )
         self.game_state["_last_semantic_action"] = copy.deepcopy(semantic_action)
         if self.game_state.get("debug_mode", False):
             from engine.game_utils import add_debug_file_log
@@ -1390,7 +1425,19 @@ class W40KEngine(gym.Env):
                     pre_action_positions[str(unit_id)] = require_unit_position(pre_unit, self.game_state)
         
         # Process semantic action with AI_TURN.md compliance
+        if self.game_state.get("debug_mode", False):
+            print(
+                "[TRAIN DEBUG] W40KEngine.step before _process_semantic_action "
+                f"phase={self.game_state.get('phase', '?')} semantic_action={semantic_action}",
+                flush=True,
+            )
         action_result = self._process_semantic_action(semantic_action)
+        if self.game_state.get("debug_mode", False):
+            print(
+                "[TRAIN DEBUG] W40KEngine.step after _process_semantic_action "
+                f"phase={self.game_state.get('phase', '?')} action_result={action_result}",
+                flush=True,
+            )
         _step_t3 = time.perf_counter() if _step_t0 is not None else None
         if isinstance(action_result, tuple) and len(action_result) == 2:
             success, result = action_result

@@ -1,0 +1,18 @@
+{
+  "model": "claude-sonnet-4-6",
+  "permissions": {
+    "allow": [
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(find * -name *)",
+      "Bash(find * -type *)",
+      "Bash(wc *)",
+      "Bash(stat *)",
+      "Bash(source /home/greg/40k/.venv/bin/activate*)",
+      "Bash(python3 ai/*)",
+      "Bash(python3 scripts/*)",
+      "Bash(python3 engine/*)",
+      "Bash(python3 services/*)"
+    ]
+  }
+}

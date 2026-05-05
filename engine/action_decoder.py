@@ -4,11 +4,19 @@ action_decoder.py - Decodes actions and computes masks
 """
 
 import numpy as np
+import hashlib
+import os
+import pickle
+import time
 from typing import Dict, List, Any, Optional
 from shared.data_validation import require_key
 from engine.game_utils import get_unit_by_id
 from engine.combat_utils import calculate_hex_distance, get_unit_coordinates, has_line_of_sight
-from engine.phase_handlers.shared_utils import is_unit_alive
+from engine.phase_handlers.shared_utils import (
+    is_unit_alive,
+    compute_candidate_footprint,
+    build_occupied_positions_set,
+)
 
 # Game phases - single source of truth for phase count
 GAME_PHASES = ["deployment", "command", "move", "shoot", "charge", "fight"]
@@ -27,6 +35,60 @@ class ActionDecoder:
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
+        self._deployment_potential_los_cache: Dict[
+            tuple[int, tuple[tuple[int, int], ...], tuple[tuple[int, int], ...]],
+            Dict[tuple[int, int], int],
+        ] = {}
+
+    def _get_deployment_potential_los_cache_file_path(
+        self,
+        current_deployer: int,
+        enemy_los_reference_hexes: List[tuple[int, int]],
+        wall_signature: List[tuple[int, int]],
+    ) -> str:
+        """Return deterministic shared cache file path for deployment potential LoS."""
+        cache_payload = (
+            int(current_deployer),
+            tuple(enemy_los_reference_hexes),
+            tuple(sorted(wall_signature)),
+        )
+        cache_digest = hashlib.sha256(repr(cache_payload).encode("utf-8")).hexdigest()
+        project_root = os.path.dirname(os.path.dirname(__file__))
+        cache_dir = os.path.join(project_root, ".cache", "deployment_potential_los")
+        os.makedirs(cache_dir, exist_ok=True)
+        return os.path.join(cache_dir, f"{cache_digest}.pkl")
+
+    def _load_deployment_potential_los_disk_cache(
+        self, cache_path: str
+    ) -> Dict[tuple[int, int], int]:
+        """Load exact deployment potential LoS cache from shared disk cache."""
+        with open(cache_path, "rb") as f:
+            loaded = pickle.load(f)
+        if not isinstance(loaded, dict):
+            raise TypeError(
+                f"Deployment potential LoS disk cache must be dict, got {type(loaded).__name__}"
+            )
+        normalized: Dict[tuple[int, int], int] = {}
+        for raw_key, raw_value in loaded.items():
+            if not isinstance(raw_key, tuple) or len(raw_key) != 2:
+                raise TypeError(f"Invalid deployment potential LoS cache key: {raw_key!r}")
+            if not isinstance(raw_value, int) or isinstance(raw_value, bool):
+                raise TypeError(
+                    f"Invalid deployment potential LoS cache value type: {type(raw_value).__name__}"
+                )
+            normalized[(int(raw_key[0]), int(raw_key[1]))] = int(raw_value)
+        return normalized
+
+    def _save_deployment_potential_los_disk_cache(
+        self,
+        cache_path: str,
+        potential_los_cache_for_topology: Dict[tuple[int, int], int],
+    ) -> None:
+        """Atomically persist exact deployment potential LoS cache for shared reuse."""
+        tmp_path = f"{cache_path}.tmp.{os.getpid()}"
+        with open(tmp_path, "wb") as f:
+            pickle.dump(potential_los_cache_for_topology, f, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp_path, cache_path)
     
     # ============================================================================
     # ACTION MASKING
@@ -74,7 +136,11 @@ class ActionDecoder:
             active_unit = eligible_units[0] if eligible_units else None
             if active_unit:
                 current_deployer = self._get_current_deployer(game_state)
-                valid_hexes = self._get_valid_deployment_hexes(game_state, current_deployer)
+                valid_hexes = self._get_valid_deployment_hexes(
+                    game_state,
+                    current_deployer,
+                    str(require_key(active_unit, "id")),
+                )
                 num_hexes = len(valid_hexes)
                 if num_hexes == 0:
                     raise ValueError(
@@ -452,7 +518,23 @@ class ActionDecoder:
         if current_phase == "deployment":
             if action_int in [4, 5, 6, 7, 8]:
                 current_deployer = self._get_current_deployer(game_state)
-                valid_hexes = self._get_valid_deployment_hexes(game_state, current_deployer)
+                if game_state.get("debug_mode", False):
+                    print(
+                        "[TRAIN DEBUG] ActionDecoder.convert_gym_action before _get_valid_deployment_hexes "
+                        f"action_int={action_int} current_deployer={current_deployer}",
+                        flush=True,
+                    )
+                valid_hexes = self._get_valid_deployment_hexes(
+                    game_state,
+                    current_deployer,
+                    str(selected_unit_id),
+                )
+                if game_state.get("debug_mode", False):
+                    print(
+                        "[TRAIN DEBUG] ActionDecoder.convert_gym_action after _get_valid_deployment_hexes "
+                        f"action_int={action_int} valid_hexes_n={len(valid_hexes)}",
+                        flush=True,
+                    )
                 if not valid_hexes:
                     return {
                         "action": "invalid",
@@ -461,6 +543,12 @@ class ActionDecoder:
                         "attempted_action": action_int,
                         "end_activation_required": False,
                     }
+                if game_state.get("debug_mode", False):
+                    print(
+                        "[TRAIN DEBUG] ActionDecoder.convert_gym_action before _select_deployment_hex_for_action "
+                        f"action_int={action_int} unit_id={selected_unit_id}",
+                        flush=True,
+                    )
                 dest_col, dest_row = self._select_deployment_hex_for_action(
                     action_int=action_int,
                     unit_id=selected_unit_id,
@@ -468,6 +556,12 @@ class ActionDecoder:
                     current_deployer=current_deployer,
                     valid_hexes=valid_hexes,
                 )
+                if game_state.get("debug_mode", False):
+                    print(
+                        "[TRAIN DEBUG] ActionDecoder.convert_gym_action after _select_deployment_hex_for_action "
+                        f"action_int={action_int} dest=({dest_col},{dest_row})",
+                        flush=True,
+                    )
                 return {
                     "action": "deploy_unit",
                     "unitId": selected_unit_id,
@@ -486,7 +580,8 @@ class ActionDecoder:
                 from engine.phase_handlers import movement_handlers
                 unit = get_unit_by_id(selected_unit_id, game_state)
 
-                # Build valid destinations using BFS
+                # Activate unit first so execute_action skips the redundant BFS rebuild
+                movement_handlers.movement_unit_activation_start(game_state, selected_unit_id)
                 movement_handlers.movement_build_valid_destinations_pool(game_state, selected_unit_id)
                 valid_destinations = require_key(game_state, "valid_move_destinations_pool")
 
@@ -626,31 +721,69 @@ class ActionDecoder:
         except (TypeError, ValueError) as exc:
             raise ValueError(f"Invalid deployment current_deployer: {current_deployer}") from exc
 
-    def _get_valid_deployment_hexes(self, game_state: Dict[str, Any], current_deployer: int) -> List[tuple]:
+    def _get_valid_deployment_hexes(
+        self,
+        game_state: Dict[str, Any],
+        current_deployer: int,
+        unit_id: str,
+    ) -> List[tuple]:
         """Build sorted list of currently valid deployment hexes for player."""
         deployment_state = require_key(game_state, "deployment_state")
         deployment_pools = require_key(deployment_state, "deployment_pools")
         pool = deployment_pools.get(current_deployer, deployment_pools.get(str(current_deployer)))
         if pool is None:
             raise KeyError(f"deployment_pools missing player {current_deployer}")
+        unit = get_unit_by_id(str(unit_id), game_state)
+        if unit is None:
+            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
 
-        occupied = set()
-        for unit in require_key(game_state, "units"):
-            unit_col = int(require_key(unit, "col"))
-            unit_row = int(require_key(unit, "row"))
-            if unit_col >= 0 and unit_row >= 0:
-                occupied.add((unit_col, unit_row))
-
-        valid_hexes = []
+        occupied = build_occupied_positions_set(game_state, exclude_unit_id=str(unit_id))
+        raw_wall_hexes = require_key(game_state, "wall_hexes")
+        wall_hexes = set()
+        for raw_hex in raw_wall_hexes:
+            if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
+                wall_hexes.add((int(raw_hex[0]), int(raw_hex[1])))
+            elif isinstance(raw_hex, dict):
+                wall_hexes.add(
+                    (int(require_key(raw_hex, "col")), int(require_key(raw_hex, "row")))
+                )
+            else:
+                raise TypeError(f"Invalid wall hex format: {raw_hex}")
+        board_cols = int(require_key(game_state, "board_cols"))
+        board_rows = int(require_key(game_state, "board_rows"))
+        pool_set = set()
+        normalized_pool: List[tuple[int, int]] = []
         for raw_hex in pool:
             if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
-                col, row = int(raw_hex[0]), int(raw_hex[1])
+                normalized = (int(raw_hex[0]), int(raw_hex[1]))
             elif isinstance(raw_hex, dict):
-                col = int(require_key(raw_hex, "col"))
-                row = int(require_key(raw_hex, "row"))
+                normalized = (
+                    int(require_key(raw_hex, "col")),
+                    int(require_key(raw_hex, "row")),
+                )
             else:
                 raise TypeError(f"Invalid deployment hex format: {raw_hex}")
-            if (col, row) not in occupied:
+            normalized_pool.append(normalized)
+            pool_set.add(normalized)
+
+        valid_hexes = []
+        for col, row in normalized_pool:
+            candidate_fp = compute_candidate_footprint(int(col), int(row), unit, game_state)
+            candidate_is_valid = True
+            for fp_col, fp_row in candidate_fp:
+                if fp_col < 0 or fp_col >= board_cols or fp_row < 0 or fp_row >= board_rows:
+                    candidate_is_valid = False
+                    break
+                if (fp_col, fp_row) not in pool_set:
+                    candidate_is_valid = False
+                    break
+                if (fp_col, fp_row) in wall_hexes:
+                    candidate_is_valid = False
+                    break
+                if (fp_col, fp_row) in occupied:
+                    candidate_is_valid = False
+                    break
+            if candidate_is_valid:
                 valid_hexes.append((col, row))
 
         return sorted(valid_hexes)
@@ -881,6 +1014,14 @@ class ActionDecoder:
         valid_hexes: List[tuple[int, int]],
     ) -> Dict[str, Any]:
         """Build full deployment scoring cache for current state."""
+        _debug_mode = bool(game_state.get("debug_mode", False))
+        _t_cache0 = time.perf_counter() if _debug_mode else None
+        if _debug_mode:
+            print(
+                "[TRAIN DEBUG] ActionDecoder._build_deployment_scoring_cache enter "
+                f"current_deployer={current_deployer} valid_hexes_n={len(valid_hexes)}",
+                flush=True,
+            )
         deployed_snapshot = self._build_deployed_snapshot(game_state)
         snapshot_version = self._build_deployed_snapshot_version(deployed_snapshot)
         enemy_player = 2 if int(current_deployer) == 1 else 1
@@ -897,14 +1038,67 @@ class ActionDecoder:
                     ally_col_counts[col] = 1
             elif player == enemy_player:
                 enemy_deployed_units.append({"col": col, "row": row})
+        if _debug_mode:
+            print(
+                "[TRAIN DEBUG] ActionDecoder._build_deployment_scoring_cache after deployed snapshot split "
+                f"ally_deployed_hexes_n={len(ally_deployed_hexes)} "
+                f"enemy_deployed_units_n={len(enemy_deployed_units)}",
+                flush=True,
+            )
 
         enemy_pool_hexes = self._get_enemy_deployment_pool_hexes(game_state, current_deployer)
         enemy_los_reference_hexes = self._build_enemy_los_reference_hexes(enemy_pool_hexes)
+        if _debug_mode:
+            print(
+                "[TRAIN DEBUG] ActionDecoder._build_deployment_scoring_cache after enemy refs "
+                f"enemy_pool_hexes_n={len(enemy_pool_hexes)} "
+                f"enemy_los_reference_hexes_n={len(enemy_los_reference_hexes)}",
+                flush=True,
+            )
+        raw_wall_hexes = require_key(game_state, "wall_hexes")
+        wall_signature: List[tuple[int, int]] = []
+        for raw_hex in raw_wall_hexes:
+            if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
+                wall_signature.append((int(raw_hex[0]), int(raw_hex[1])))
+            elif isinstance(raw_hex, dict):
+                wall_signature.append(
+                    (int(require_key(raw_hex, "col")), int(require_key(raw_hex, "row")))
+                )
+            else:
+                raise TypeError(f"Invalid wall hex format: {raw_hex}")
+        topology_key = (
+            int(current_deployer),
+            tuple(enemy_los_reference_hexes),
+            tuple(sorted(wall_signature)),
+        )
+        potential_los_cache_file_path = self._get_deployment_potential_los_cache_file_path(
+            current_deployer=current_deployer,
+            enemy_los_reference_hexes=enemy_los_reference_hexes,
+            wall_signature=wall_signature,
+        )
+        if topology_key not in self._deployment_potential_los_cache:
+            if os.path.exists(potential_los_cache_file_path):
+                if _debug_mode:
+                    print(
+                        "[TRAIN DEBUG] ActionDecoder._build_deployment_scoring_cache "
+                        f"loading shared potential_los cache path={potential_los_cache_file_path}",
+                        flush=True,
+                    )
+                self._deployment_potential_los_cache[topology_key] = (
+                    self._load_deployment_potential_los_disk_cache(potential_los_cache_file_path)
+                )
+            else:
+                self._deployment_potential_los_cache[topology_key] = {}
+        potential_los_cache_for_topology = self._deployment_potential_los_cache[topology_key]
 
         los_exposure_by_hex: Dict[tuple[int, int], int] = {}
         potential_los_exposure_by_hex: Dict[tuple[int, int], int] = {}
         los_pair_cache: Dict[tuple[int, int, int, int, tuple[tuple[str, int, int, int], ...]], bool] = {}
-        for col, row in valid_hexes:
+        los_exposure_total_s = 0.0
+        potential_los_total_s = 0.0
+        progress_interval = max(1, len(valid_hexes) // 4) if _debug_mode else 0
+        for idx, (col, row) in enumerate(valid_hexes, start=1):
+            _t_los0 = time.perf_counter() if _debug_mode else None
             los_exposure_by_hex[(col, row)] = self._count_los_exposure(
                 col,
                 row,
@@ -913,14 +1107,58 @@ class ActionDecoder:
                 los_pair_cache,
                 snapshot_version,
             )
-            potential_los_exposure_by_hex[(col, row)] = self._count_potential_los_from_reference_hexes(
-                col,
-                row,
-                enemy_los_reference_hexes,
-                game_state,
-                los_pair_cache,
-                snapshot_version,
+            if _debug_mode and _t_los0 is not None:
+                los_exposure_total_s += time.perf_counter() - _t_los0
+            candidate_key = (int(col), int(row))
+            if candidate_key in potential_los_cache_for_topology:
+                potential_los_exposure_by_hex[(col, row)] = potential_los_cache_for_topology[candidate_key]
+            else:
+                _t_potential0 = time.perf_counter() if _debug_mode else None
+                potential_los_value = self._count_potential_los_from_reference_hexes(
+                    col,
+                    row,
+                    enemy_los_reference_hexes,
+                    game_state,
+                    los_pair_cache,
+                    snapshot_version,
+                )
+                potential_los_cache_for_topology[candidate_key] = potential_los_value
+                potential_los_exposure_by_hex[(col, row)] = potential_los_value
+                if _debug_mode and _t_potential0 is not None:
+                    potential_los_total_s += time.perf_counter() - _t_potential0
+            if _debug_mode and progress_interval > 0 and (idx == 1 or idx % progress_interval == 0 or idx == len(valid_hexes)):
+                elapsed_s = time.perf_counter() - _t_cache0 if _t_cache0 is not None else 0.0
+                print(
+                    "[TRAIN DEBUG] ActionDecoder._build_deployment_scoring_cache progress "
+                    f"processed={idx}/{len(valid_hexes)} "
+                    f"los_exposure_total_s={los_exposure_total_s:.6f} "
+                    f"potential_los_total_s={potential_los_total_s:.6f} "
+                    f"los_pair_cache_n={len(los_pair_cache)} "
+                    f"elapsed_s={elapsed_s:.6f}",
+                    flush=True,
+                )
+        if _debug_mode and _t_cache0 is not None:
+            print(
+                "[TRAIN DEBUG] ActionDecoder._build_deployment_scoring_cache after los maps "
+                f"los_exposure_by_hex_n={len(los_exposure_by_hex)} "
+                f"potential_los_exposure_by_hex_n={len(potential_los_exposure_by_hex)} "
+                f"los_pair_cache_n={len(los_pair_cache)} "
+                f"los_exposure_total_s={los_exposure_total_s:.6f} "
+                f"potential_los_total_s={potential_los_total_s:.6f} "
+                f"duration_s={time.perf_counter() - _t_cache0:.6f}",
+                flush=True,
             )
+        if not os.path.exists(potential_los_cache_file_path):
+            self._save_deployment_potential_los_disk_cache(
+                potential_los_cache_file_path,
+                potential_los_cache_for_topology,
+            )
+            if _debug_mode:
+                print(
+                    "[TRAIN DEBUG] ActionDecoder._build_deployment_scoring_cache "
+                    f"saved shared potential_los cache path={potential_los_cache_file_path}",
+                    flush=True,
+                )
 
         return {
             "current_deployer": int(current_deployer),
@@ -1026,14 +1264,56 @@ class ActionDecoder:
 
         Full rebuild is used only when state drift is not a single deployment delta.
         """
+        _debug_mode = bool(game_state.get("debug_mode", False))
+        _t_cache0 = time.perf_counter() if _debug_mode else None
+        if _debug_mode:
+            print(
+                "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache enter "
+                f"current_deployer={current_deployer} valid_hexes_n={len(valid_hexes)}",
+                flush=True,
+            )
         current_snapshot = self._build_deployed_snapshot(game_state)
         cache_key = "_deployment_scoring_cache"
         if cache_key not in game_state:
+            if _debug_mode:
+                print(
+                    "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache cache_miss_full_build",
+                    flush=True,
+                )
             new_cache = self._build_deployment_scoring_cache(game_state, current_deployer, valid_hexes)
             game_state[cache_key] = new_cache
+            if _debug_mode and _t_cache0 is not None:
+                print(
+                    "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache exit "
+                    f"path=cache_miss_full_build duration_s={time.perf_counter() - _t_cache0:.6f}",
+                    flush=True,
+                )
             return new_cache
 
         cache = require_key(game_state, cache_key)
+        current_valid_hex_set = set(valid_hexes)
+        cached_valid_hex_set = require_key(cache, "valid_hex_set")
+        if cached_valid_hex_set != current_valid_hex_set:
+            if _debug_mode:
+                print(
+                    "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache "
+                    "valid_hex_set_mismatch_full_build",
+                    flush=True,
+                )
+            new_cache = self._build_deployment_scoring_cache(game_state, current_deployer, valid_hexes)
+            game_state[cache_key] = new_cache
+            if _debug_mode and _t_cache0 is not None:
+                print(
+                    "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache exit "
+                    f"path=valid_hex_set_mismatch_full_build duration_s={time.perf_counter() - _t_cache0:.6f}",
+                    flush=True,
+                )
+            return new_cache
+        if _debug_mode:
+            print(
+                "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache before incremental_update",
+                flush=True,
+            )
         updated = self._update_deployment_scoring_cache_incremental(
             cache=cache,
             game_state=game_state,
@@ -1041,10 +1321,27 @@ class ActionDecoder:
             current_snapshot=current_snapshot,
         )
         if updated:
+            if _debug_mode and _t_cache0 is not None:
+                print(
+                    "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache exit "
+                    f"path=incremental_update duration_s={time.perf_counter() - _t_cache0:.6f}",
+                    flush=True,
+                )
             return cache
 
+        if _debug_mode:
+            print(
+                "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache incremental_failed_full_build",
+                flush=True,
+            )
         new_cache = self._build_deployment_scoring_cache(game_state, current_deployer, valid_hexes)
         game_state[cache_key] = new_cache
+        if _debug_mode and _t_cache0 is not None:
+            print(
+                "[TRAIN DEBUG] ActionDecoder._get_or_build_deployment_scoring_cache exit "
+                f"path=incremental_failed_full_build duration_s={time.perf_counter() - _t_cache0:.6f}",
+                flush=True,
+            )
         return new_cache
 
     def _select_deployment_hex_for_action(
@@ -1072,7 +1369,20 @@ class ActionDecoder:
         if unit is None:
             raise KeyError(f"Unit {unit_id} missing from game_state['units']")
 
+        if game_state.get("debug_mode", False):
+            print(
+                "[TRAIN DEBUG] ActionDecoder._select_deployment_hex_for_action "
+                f"before _get_or_build_deployment_scoring_cache action_int={action_int} "
+                f"unit_id={unit_id} valid_hexes_n={len(valid_hexes)}",
+                flush=True,
+            )
         cache = self._get_or_build_deployment_scoring_cache(game_state, current_deployer, valid_hexes)
+        if game_state.get("debug_mode", False):
+            print(
+                "[TRAIN DEBUG] ActionDecoder._select_deployment_hex_for_action "
+                f"after _get_or_build_deployment_scoring_cache action_int={action_int}",
+                flush=True,
+            )
         ally_col_counts = require_key(cache, "ally_col_counts")
         ally_deployed_hexes = require_key(cache, "ally_deployed_hexes")
         los_exposure_by_hex = require_key(cache, "los_exposure_by_hex")

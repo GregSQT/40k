@@ -9,6 +9,7 @@
     "hex_orientations": 6,
     "pathfinding": {
       "max_open_nodes": 2000,
+      "max_open_nodes_charge": 10000,
       "time_budget_us": 5000
     },
     "wall_ref": "walls-11.json",

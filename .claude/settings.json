@@ -1,0 +1,13 @@
+{
+  "model": "claude-sonnet-4-6",
+  "permissions": {
+    "allow": [
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(find * -name *)",
+      "Bash(find * -type *)",
+      "Bash(wc *)",
+      "Bash(stat *)"
+    ]
+  }
+}

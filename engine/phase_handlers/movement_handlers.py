@@ -1515,7 +1515,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         # Non sérialisé (exclu API) ; la preview repose sur footprint_zone / mask_loops.
         game_state["move_preview_border"] = []
         _m_fly_before_sync = _perf_clock.perf_counter() if _pt else None
-        _sync_move_preview_mask_loops(game_state, _fly_fp_zone)
+        if not game_state.get("gym_training_mode"):
+            _sync_move_preview_mask_loops(game_state, _fly_fp_zone)
         _m_fly_done = _perf_clock.perf_counter() if _pt else None
         if _pt and _m0 is not None and _m_prep_end is not None and _m_bfs_start is not None and _m_bfs_end is not None and _m_fly_before_sync is not None and _m_fly_done is not None:
             _post_bfs = _m_fly_done - _m_bfs_end
@@ -1595,24 +1596,9 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                     continue
                 if nb in _enemy_occ:
                     continue
-                if ez <= 1:
-                    if nb in _enemy_adj:
-                        blocked_enemy_adjacent_count += 1
-                        continue
-                else:
-                    if _movement_engagement_violates(
-                        game_state,
-                        unit,
-                        nc,
-                        nr,
-                        {(nc, nr)},
-                        units_cache,
-                        None,
-                        enemy_cache_items=_enemy_items_for_engagement_ez,
-                        engagement_zone_ez=ez,
-                    ):
-                        blocked_enemy_adjacent_count += 1
-                        continue
+                if nb in _enemy_adj:
+                    blocked_enemy_adjacent_count += 1
+                    continue
                 _vis[_vidx] = 1
                 visited_n += 1
                 queue.append((nb, nd))
@@ -1660,8 +1646,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     game_state["move_preview_footprint_zone"] = footprint_zone
     game_state["move_preview_border"] = []
     _m_ground_before_sync = _perf_clock.perf_counter() if _pt else None
-    _sync_move_preview_mask_loops(game_state, footprint_zone)
-
+    if not game_state.get("gym_training_mode"):
+        _sync_move_preview_mask_loops(game_state, footprint_zone)
     _m_ground_done = _perf_clock.perf_counter() if _pt else None
     if _pt and _m0 is not None and _m_prep_end is not None and _m_bfs_start is not None and _m_bfs_end is not None and _m_ground_before_sync is not None and _m_ground_done is not None:
         _fp_n = len(_off_even) if not is_single_hex else 1
@@ -1804,18 +1790,20 @@ def _select_strategic_destination(
     else:
         objective_hex_sets, boundary_hexes = _build_objective_distance_cache(game_state)
         if objective_hex_sets and boundary_hexes:
+            # Pre-compute centroid of boundary hexes once — O(N_boundary) instead of O(N_dest × N_boundary)
+            n_bh = len(boundary_hexes)
+            centroid_c = sum(bc for bc, br in boundary_hexes) / n_bh
+            centroid_r = sum(br for bc, br in boundary_hexes) / n_bh
             best_dest = valid_destinations[0]
             min_dist = float('inf')
             for dest in valid_destinations:
                 if any(dest in objective_hex_set for objective_hex_set in objective_hex_sets):
                     return dest
-
                 dest_col, dest_row = dest
-                for obj_col, obj_row in boundary_hexes:
-                    dist = calculate_hex_distance(dest_col, dest_row, obj_col, obj_row)
-                    if dist < min_dist:
-                        min_dist = dist
-                        best_dest = dest
+                dist = (dest_col - centroid_c) ** 2 + (dest_row - centroid_r) ** 2
+                if dist < min_dist:
+                    min_dist = dist
+                    best_dest = dest
             return best_dest
 
         return valid_destinations[0]

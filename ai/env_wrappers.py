@@ -211,8 +211,23 @@ class BotControlledEnv(gym.Wrapper):
         """Execute consecutive bot turns until control leaves bot player or episode ends."""
         bot_loop_count = 0
         max_bot_iterations = 1000
+        if debug_mode:
+            print(
+                f"[TRAIN DEBUG] BotControlledEnv._run_bot_until_not_bot_turn enter env_rank={self._env_rank}",
+                flush=True,
+            )
         while not (terminated or truncated):
             decision_owner, has_valid_actions, _eligible_count = self._get_decision_owner_from_mask()
+            if debug_mode and (bot_loop_count < 5 or bot_loop_count % 25 == 0):
+                current_phase = str(require_key(self.engine.game_state, "phase"))
+                current_player = int(require_key(self.engine.game_state, "current_player"))
+                print(
+                    "[TRAIN DEBUG] BotControlledEnv._run_bot_until_not_bot_turn "
+                    f"env_rank={self._env_rank} loop={bot_loop_count} "
+                    f"decision_owner={decision_owner} has_valid_actions={has_valid_actions} "
+                    f"phase={current_phase} current_player={current_player} bot_player={self.bot_player}",
+                    flush=True,
+                )
             if decision_owner != self.bot_player:
                 break
             if not has_valid_actions:
@@ -233,8 +248,31 @@ class BotControlledEnv(gym.Wrapper):
                 )
             debug_bot = self.episode_length < 10
             bot_action = self._get_opponent_action(debug=debug_bot)
+            if debug_mode and (bot_loop_count <= 5 or bot_loop_count % 25 == 0):
+                current_phase = str(require_key(self.engine.game_state, "phase"))
+                print(
+                    "[TRAIN DEBUG] BotControlledEnv._run_bot_until_not_bot_turn "
+                    f"env_rank={self._env_rank} loop={bot_loop_count} "
+                    f"bot_action={bot_action} phase={current_phase}",
+                    flush=True,
+                )
             t0_bot = time.perf_counter() if debug_mode else None
+            if debug_mode and (bot_loop_count <= 5 or bot_loop_count % 25 == 0):
+                print(
+                    "[TRAIN DEBUG] BotControlledEnv._run_bot_until_not_bot_turn "
+                    f"env_rank={self._env_rank} loop={bot_loop_count} "
+                    f"before self.env.step(bot_action={bot_action})",
+                    flush=True,
+                )
             obs, reward, terminated, truncated, info = self.env.step(bot_action)
+            if debug_mode and (bot_loop_count <= 5 or bot_loop_count % 25 == 0):
+                print(
+                    "[TRAIN DEBUG] BotControlledEnv._run_bot_until_not_bot_turn "
+                    f"env_rank={self._env_rank} loop={bot_loop_count} "
+                    f"after self.env.step(bot_action={bot_action}) "
+                    f"terminated={terminated} truncated={truncated}",
+                    flush=True,
+                )
             if accumulate_reward:
                 cumulative_reward += float(reward)
                 self.episode_reward += float(reward)
@@ -249,6 +287,16 @@ class BotControlledEnv(gym.Wrapper):
                 except (OSError, IOError):
                     pass
             self.episode_length += 1
+        if debug_mode:
+            current_phase = str(require_key(self.engine.game_state, "phase"))
+            current_player = int(require_key(self.engine.game_state, "current_player"))
+            print(
+                "[TRAIN DEBUG] BotControlledEnv._run_bot_until_not_bot_turn exit "
+                f"env_rank={self._env_rank} loops={bot_loop_count} "
+                f"terminated={terminated} truncated={truncated} "
+                f"phase={current_phase} current_player={current_player}",
+                flush=True,
+            )
         return obs, terminated, truncated, info, cumulative_reward
 
     def _get_decision_owner_from_mask(self) -> tuple[Optional[int], bool, int]:
@@ -287,8 +335,22 @@ class BotControlledEnv(gym.Wrapper):
         """
         Advance deterministic no-choice states so controlled player always gets a non-empty mask.
         """
+        iteration_count = 0
         while not (terminated or truncated):
+            iteration_count += 1
             decision_owner, has_valid_actions, eligible_count = self._get_decision_owner_from_mask()
+            if debug_mode and (iteration_count <= 5 or iteration_count % 25 == 0):
+                current_phase = str(require_key(self.engine.game_state, "phase"))
+                current_player = int(require_key(self.engine.game_state, "current_player"))
+                print(
+                    "[TRAIN DEBUG] BotControlledEnv._ensure_actionable_controlled_turn "
+                    f"env_rank={self._env_rank} iteration={iteration_count} "
+                    f"decision_owner={decision_owner} has_valid_actions={has_valid_actions} "
+                    f"eligible_count={eligible_count} phase={current_phase} "
+                    f"current_player={current_player} controlled_player={self.controlled_player} "
+                    f"bot_player={self.bot_player}",
+                    flush=True,
+                )
 
             if decision_owner == self.bot_player:
                 obs, terminated, truncated, info, cumulative_reward = self._run_bot_until_not_bot_turn(
@@ -300,10 +362,23 @@ class BotControlledEnv(gym.Wrapper):
                     accumulate_reward=accumulate_reward,
                     cumulative_reward=cumulative_reward,
                 )
+                if debug_mode and (iteration_count <= 5 or iteration_count % 25 == 0):
+                    print(
+                        "[TRAIN DEBUG] BotControlledEnv._ensure_actionable_controlled_turn "
+                        f"env_rank={self._env_rank} iteration={iteration_count} branch=bot-run "
+                        f"terminated={terminated} truncated={truncated}",
+                        flush=True,
+                    )
                 continue
 
             if decision_owner == self.controlled_player:
                 if has_valid_actions:
+                    if debug_mode:
+                        print(
+                            "[TRAIN DEBUG] BotControlledEnv._ensure_actionable_controlled_turn "
+                            f"env_rank={self._env_rank} iteration={iteration_count} branch=controlled-ready",
+                            flush=True,
+                        )
                     break
                 # Controlled owner selected but no valid action: try explicit WAIT to advance.
             elif decision_owner is None:
@@ -333,6 +408,12 @@ class BotControlledEnv(gym.Wrapper):
 
             # No actionable decision for controlled player: force WAIT to advance phase/turn.
             t0_wait = time.perf_counter() if debug_mode else None
+            if debug_mode and (iteration_count <= 5 or iteration_count % 25 == 0):
+                print(
+                    "[TRAIN DEBUG] BotControlledEnv._ensure_actionable_controlled_turn "
+                    f"env_rank={self._env_rank} iteration={iteration_count} branch=forced-wait",
+                    flush=True,
+                )
             try:
                 obs, reward, terminated, truncated, info = self.env.step(11)
             except RuntimeError as e:
@@ -490,6 +571,11 @@ class BotControlledEnv(gym.Wrapper):
         Returns:
             obs, cumulative_reward, terminated, truncated, info
         """
+        if debug_mode:
+            print(
+                f"[TRAIN DEBUG] BotControlledEnv._play_bot_until_control_returns enter env_rank={self._env_rank}",
+                flush=True,
+            )
         obs = None
         info = {}
         obs, terminated, truncated, info, cumulative_reward = self._ensure_actionable_controlled_turn(
@@ -504,6 +590,16 @@ class BotControlledEnv(gym.Wrapper):
         if obs is None:
             # Keep vectorized env stacking stable: always return a real observation.
             obs = self.engine._build_observation()
+        if debug_mode:
+            current_phase = str(require_key(self.engine.game_state, "phase"))
+            current_player = int(require_key(self.engine.game_state, "current_player"))
+            print(
+                "[TRAIN DEBUG] BotControlledEnv._play_bot_until_control_returns exit "
+                f"env_rank={self._env_rank} terminated={terminated} truncated={truncated} "
+                f"phase={current_phase} current_player={current_player} "
+                f"controlled_player={self.controlled_player}",
+                flush=True,
+            )
         return obs, float(cumulative_reward), terminated, truncated, info
 
     def reset(self, seed=None, options=None):
@@ -514,6 +610,22 @@ class BotControlledEnv(gym.Wrapper):
         for attempt_idx in range(max_reset_attempts):
             self._apply_episode_seat()
             t0 = time.perf_counter() if debug_mode else None
+            if debug_mode:
+                try:
+                    debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                    with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                        f.write(
+                            f"RESET_START env_rank={self._env_rank} attempt={attempt_idx} "
+                            f"episode_index={self._episode_index} seed={seed if attempt_idx == 0 else None!r} "
+                            f"options_present={options is not None}\n"
+                        )
+                    print(
+                        f"[TRAIN DEBUG] BotControlledEnv.reset start "
+                        f"env_rank={self._env_rank} attempt={attempt_idx}",
+                        flush=True,
+                    )
+                except (OSError, IOError):
+                    pass
             obs, info = self.env.reset(
                 seed=seed if attempt_idx == 0 else None,
                 options=options,
@@ -535,7 +647,16 @@ class BotControlledEnv(gym.Wrapper):
                 try:
                     debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
                     with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                        f.write(
+                            f"RESET_END env_rank={self._env_rank} attempt={attempt_idx} "
+                            f"episode={ep} duration_s={reset_s:.6f}\n"
+                        )
                         f.write(f"RESET_TIMING episode={ep} duration_s={reset_s:.6f}\n")
+                    print(
+                        f"[TRAIN DEBUG] BotControlledEnv.reset end "
+                        f"env_rank={self._env_rank} attempt={attempt_idx} duration_s={reset_s:.6f}",
+                        flush=True,
+                    )
                 except (OSError, IOError):
                     pass
             self.episode_reward = 0.0
@@ -842,6 +963,16 @@ class SelfPlayWrapper(gym.Wrapper):
         # LOG TEMPORAIRE: time reset() when --debug (to explain slow step index 0)
         debug_mode = require_key(self.engine.game_state, "debug_mode")
         t0 = time.perf_counter() if debug_mode else None
+        if debug_mode:
+            try:
+                debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                    f.write(
+                        f"RESET_START episode={int(require_key(self.engine.game_state, 'episode_number'))} "
+                        f"seed={seed!r} options_present={options is not None}\n"
+                    )
+            except (OSError, IOError):
+                pass
         obs, info = self.env.reset(seed=seed, options=options)
         if debug_mode and t0 is not None:
             reset_s = time.perf_counter() - t0
@@ -849,6 +980,7 @@ class SelfPlayWrapper(gym.Wrapper):
             try:
                 debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
                 with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                    f.write(f"RESET_END episode={ep} duration_s={reset_s:.6f}\n")
                     f.write(f"RESET_TIMING episode={ep} duration_s={reset_s:.6f}\n")
             except (OSError, IOError):
                 pass

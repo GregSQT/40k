@@ -7,1136 +7,506 @@
   "inches_to_subhex": 10,
   "seed": 42,
   "warmup_steps": 50,
-  "measured_steps": 200,
+  "measured_steps": 300,
   "episode_resets": 2,
   "step_ms": {
-    "mean": 551.1688524250258,
-    "p50": 231.57758099932835,
-    "p95": 2594.7296650494536,
-    "p99": 3268.5348913192847,
-    "max": 4854.7875250005745,
-    "min": 9.510875001069508,
-    "stdev": 821.2429865985891
+    "mean": 230.602627440018,
+    "p50": 64.1533520001758,
+    "p95": 1070.4511752495366,
+    "p99": 2090.39983615984,
+    "max": 2386.0443269995812,
+    "min": 8.237912999902619,
+    "stdev": 398.5654100198072
   },
-  "sps_step_only": 1.814326037475109,
+  "sps_step_only": 4.336464033828538,
   "by_phase_action": [
-    {
-      "phase": "move",
-      "action": 3,
-      "label": "move_objective",
-      "count": 12,
-      "mean_ms": 1299.5256941662774,
-      "p50_ms": 1052.4495389990989,
-      "p95_ms": 3218.483863699657,
-      "p99_ms": 3417.8150775397085,
-      "max_ms": 3467.6478809997207,
-      "min_ms": 160.27360699990822,
-      "stdev_ms": 1149.08641599184,
-      "cv": 0.8842352414809674
-    },
     {
       "phase": "charge",
       "action": 9,
       "label": "charge_activate",
-      "count": 11,
-      "mean_ms": 1825.9200914546288,
-      "p50_ms": 1631.0299830001895,
-      "p95_ms": 3149.5344834993375,
-      "p99_ms": 3154.410223898776,
-      "max_ms": 3155.629158998636,
-      "min_ms": 541.1818840002525,
-      "stdev_ms": 906.5237530601598,
-      "cv": 0.4964750414340273
+      "count": 13,
+      "mean_ms": 882.3314882308225,
+      "p50_ms": 603.1413670007169,
+      "p95_ms": 2164.8056730000458,
+      "p99_ms": 2288.990063400524,
+      "max_ms": 2320.036161000644,
+      "min_ms": 416.56673699981184,
+      "stdev_ms": 633.8883019114593,
+      "cv": 0.7184242094572406
     },
     {
       "phase": "shoot",
       "action": 11,
       "label": "shoot_wait",
-      "count": 32,
-      "mean_ms": 951.5800855935481,
-      "p50_ms": 299.47374899984425,
-      "p95_ms": 2786.316664300011,
-      "p99_ms": 4281.756547870448,
-      "max_ms": 4854.7875250005745,
-      "min_ms": 46.80993999863858,
-      "stdev_ms": 1135.1483546315424,
-      "cv": 1.1929089015387428
-    },
-    {
-      "phase": "move",
-      "action": 0,
-      "label": "move_aggressive",
-      "count": 9,
-      "mean_ms": 587.7999697774309,
-      "p50_ms": 204.26380999924731,
-      "p95_ms": 2151.4128257993425,
-      "p99_ms": 3043.5014843592944,
-      "max_ms": 3266.523648999282,
-      "min_ms": 144.2755269999907,
-      "stdev_ms": 1012.9245334890243,
-      "cv": 1.7232469982476621
-    },
-    {
-      "phase": "fight",
-      "action": 10,
-      "label": "fight",
-      "count": 48,
-      "mean_ms": 310.7892880833181,
-      "p50_ms": 13.275243499265343,
-      "p95_ms": 1227.0436682999389,
-      "p99_ms": 2155.4816651990595,
-      "max_ms": 2537.2629189987492,
-      "min_ms": 9.510875001069508,
-      "stdev_ms": 531.5204946685978,
-      "cv": 1.7102278458390912
+      "count": 38,
+      "mean_ms": 484.41349823691013,
+      "p50_ms": 230.64542400015853,
+      "p95_ms": 2097.863952399939,
+      "p99_ms": 2296.1851923799354,
+      "max_ms": 2386.0443269995812,
+      "min_ms": 44.536651999806054,
+      "stdev_ms": 622.3500211864,
+      "cv": 1.2847495444522683
     },
     {
       "phase": "shoot",
-      "action": 12,
-      "label": "shoot_advance",
-      "count": 26,
-      "mean_ms": 384.9812645003112,
-      "p50_ms": 236.46795200056658,
-      "p95_ms": 836.995138000475,
-      "p99_ms": 2245.299880750281,
-      "max_ms": 2701.1272580002696,
-      "min_ms": 46.950211999501335,
-      "stdev_ms": 518.8591974780685,
-      "cv": 1.347751813718844
+      "action": 4,
+      "label": "shoot_target_slot_0",
+      "count": 12,
+      "mean_ms": 387.3737198331734,
+      "p50_ms": 191.3456980000774,
+      "p95_ms": 1425.0819420498372,
+      "p99_ms": 1526.0245020103687,
+      "max_ms": 1551.2601420005012,
+      "min_ms": 18.120022999937646,
+      "stdev_ms": 508.0624978990749,
+      "cv": 1.3115564424914457
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "count": 15,
+      "mean_ms": 306.9977844666937,
+      "p50_ms": 111.75944800015714,
+      "p95_ms": 1192.7186204005918,
+      "p99_ms": 1358.8901520807483,
+      "max_ms": 1400.4330350007876,
+      "min_ms": 38.51282899995567,
+      "stdev_ms": 430.4455804267789,
+      "cv": 1.4021129864977189
     },
     {
       "phase": "move",
       "action": 2,
       "label": "move_defensive",
       "count": 12,
-      "mean_ms": 369.94879058359703,
-      "p50_ms": 322.8205900004468,
-      "p95_ms": 789.3015790004024,
-      "p99_ms": 1054.2959262000118,
-      "max_ms": 1120.5445129999134,
-      "min_ms": 112.7391300015006,
-      "stdev_ms": 265.3983867104398,
-      "cv": 0.7173922268857045
-    },
-    {
-      "phase": "shoot",
-      "action": 4,
-      "label": "shoot_target_slot_0",
-      "count": 15,
-      "mean_ms": 332.4887296000573,
-      "p50_ms": 317.88496199988003,
-      "p95_ms": 744.564189199627,
-      "p99_ms": 996.0619442387904,
-      "max_ms": 1058.9363829985814,
-      "min_ms": 11.637563999101985,
-      "stdev_ms": 260.8168140096891,
-      "cv": 0.7844380599709933
-    },
-    {
-      "phase": "shoot",
-      "action": 5,
-      "label": "shoot_target_slot_1",
-      "count": 2,
-      "mean_ms": 387.7205490007327,
-      "p50_ms": 387.7205490007327,
-      "p95_ms": 690.7617810013107,
-      "p99_ms": 717.6987794013621,
-      "max_ms": 724.433029001375,
-      "min_ms": 51.00806900009047,
-      "stdev_ms": 476.1833558371878,
-      "cv": 1.228161254451045
+      "mean_ms": 251.84368574999402,
+      "p50_ms": 58.34983749991807,
+      "p95_ms": 1160.8041708499966,
+      "p99_ms": 1289.259096569813,
+      "max_ms": 1321.3728279997667,
+      "min_ms": 42.451534000065294,
+      "stdev_ms": 436.69097234573724,
+      "cv": 1.7339762600966762
     },
     {
       "phase": "move",
       "action": 1,
       "label": "move_tactical",
-      "count": 8,
-      "mean_ms": 268.94273100037935,
-      "p50_ms": 263.1000999999742,
-      "p95_ms": 452.9757519499981,
-      "p99_ms": 464.7901511899545,
-      "max_ms": 467.7437509999436,
-      "min_ms": 82.78763000089384,
-      "stdev_ms": 155.1258390104651,
-      "cv": 0.5767987795522397
+      "count": 7,
+      "mean_ms": 356.3436137144111,
+      "p50_ms": 240.1253309999447,
+      "p95_ms": 995.2190137001701,
+      "p99_ms": 1226.394036340043,
+      "max_ms": 1284.1877920000115,
+      "min_ms": 52.33905600016442,
+      "stdev_ms": 420.71170294542844,
+      "cv": 1.1806348893419616
+    },
+    {
+      "phase": "move",
+      "action": 11,
+      "label": "move_wait",
+      "count": 10,
+      "mean_ms": 237.36496510000507,
+      "p50_ms": 136.28249349994803,
+      "p95_ms": 799.0928501498267,
+      "p99_ms": 1015.5349564295467,
+      "max_ms": 1069.6454829994764,
+      "min_ms": 10.38034399971366,
+      "stdev_ms": 327.9817655170418,
+      "cv": 1.3817614801698248
+    },
+    {
+      "phase": "shoot",
+      "action": 12,
+      "label": "shoot_advance",
+      "count": 26,
+      "mean_ms": 267.69852469222036,
+      "p50_ms": 206.48785899993527,
+      "p95_ms": 729.9947844999224,
+      "p99_ms": 783.293217249593,
+      "max_ms": 800.8356089994777,
+      "min_ms": 37.73426099996868,
+      "stdev_ms": 227.49040678826816,
+      "cv": 0.849800748994861
+    },
+    {
+      "phase": "shoot",
+      "action": 5,
+      "label": "shoot_target_slot_1",
+      "count": 9,
+      "mean_ms": 268.2670123334295,
+      "p50_ms": 222.1720160005134,
+      "p95_ms": 621.9027575998551,
+      "p99_ms": 737.0718203199431,
+      "max_ms": 765.864085999965,
+      "min_ms": 74.18190299995331,
+      "stdev_ms": 215.6625054270042,
+      "cv": 0.8039098939192604
+    },
+    {
+      "phase": "fight",
+      "action": 10,
+      "label": "fight",
+      "count": 137,
+      "mean_ms": 87.63584406572916,
+      "p50_ms": 11.808620999545383,
+      "p95_ms": 537.9009113999923,
+      "p99_ms": 757.5977285199402,
+      "max_ms": 1197.9793339996831,
+      "min_ms": 8.237912999902619,
+      "stdev_ms": 191.8185482029781,
+      "cv": 2.1888138380810163
+    },
+    {
+      "phase": "move",
+      "action": 0,
+      "label": "move_aggressive",
+      "count": 9,
+      "mean_ms": 59.1843974443691,
+      "p50_ms": 56.5219199997955,
+      "p95_ms": 68.03574839996145,
+      "p99_ms": 68.66207928000222,
+      "max_ms": 68.81866200001241,
+      "min_ms": 51.906800999859115,
+      "stdev_ms": 6.817520082656523,
+      "cv": 0.11519117161013107
     },
     {
       "phase": "shoot",
       "action": 6,
       "label": "shoot_target_slot_2",
       "count": 1,
-      "mean_ms": 310.8304079996742,
-      "p50_ms": 310.8304079996742,
-      "p95_ms": 310.8304079996742,
-      "p99_ms": 310.8304079996742,
-      "max_ms": 310.8304079996742,
-      "min_ms": 310.8304079996742,
+      "mean_ms": 46.78632899958757,
+      "p50_ms": 46.78632899958757,
+      "p95_ms": 46.78632899958757,
+      "p99_ms": 46.78632899958757,
+      "max_ms": 46.78632899958757,
+      "min_ms": 46.78632899958757,
       "stdev_ms": 0.0,
       "cv": 0.0
-    },
-    {
-      "phase": "move",
-      "action": 11,
-      "label": "move_wait",
-      "count": 8,
-      "mean_ms": 82.18355899998642,
-      "p50_ms": 34.733417500319774,
-      "p95_ms": 201.80595675010406,
-      "p99_ms": 216.7546625498653,
-      "max_ms": 220.49183899980562,
-      "min_ms": 11.258043999987422,
-      "stdev_ms": 85.10315190722257,
-      "cv": 1.0355252673741793
-    },
-    {
-      "phase": "shoot",
-      "action": 7,
-      "label": "shoot_target_slot_3",
-      "count": 2,
-      "mean_ms": 145.52065449970542,
-      "p50_ms": 145.52065449970542,
-      "p95_ms": 152.4800030494589,
-      "p99_ms": 153.098611809437,
-      "max_ms": 153.2532639994315,
-      "min_ms": 137.78804499997932,
-      "stdev_ms": 10.935561227047677,
-      "cv": 0.07514782877141206
     },
     {
       "phase": "charge",
       "action": 11,
       "label": "charge_wait",
-      "count": 14,
-      "mean_ms": 19.510029357401695,
-      "p50_ms": 17.776112999854377,
-      "p95_ms": 33.90916590133202,
-      "p99_ms": 35.48373318129961,
-      "max_ms": 35.87737500129151,
-      "min_ms": 12.066679000781733,
-      "stdev_ms": 7.5360221886480465,
-      "cv": 0.3862640107093964
+      "count": 11,
+      "mean_ms": 18.092188636397953,
+      "p50_ms": 15.208449000056135,
+      "p95_ms": 34.07861400000911,
+      "p99_ms": 40.065049200256915,
+      "max_ms": 41.56165800031886,
+      "min_ms": 9.863688000223192,
+      "stdev_ms": 9.386346974139144,
+      "cv": 0.5188066055897541
     }
   ],
   "goulot_detail": [
     {
       "id": "move:3",
       "expected_label": "move_objective",
-      "samples": 12,
+      "samples": 15,
       "label_mismatch_count": 0,
-      "share_of_measured_wall_time": 0.14146579819762753,
+      "share_of_measured_wall_time": 0.06656424254024312,
       "histogram_ms": {
-        "0-50": 0,
-        "50-200": 1,
-        "200-500": 3,
+        "0-50": 4,
+        "50-200": 6,
+        "200-500": 2,
         "500-1k": 1,
-        "1k-5k": 7,
+        "1k-5k": 2,
         "5k-20k": 0,
         "20k+": 0
       },
       "wall_ms": {
-        "mean_ms": 1299.5256941662774,
-        "p50_ms": 1052.4495389990989,
-        "p95_ms": 3218.483863699657,
-        "p99_ms": 3417.8150775397085,
-        "max_ms": 3467.6478809997207,
-        "min_ms": 160.27360699990822,
-        "stdev_ms": 1149.08641599184,
-        "cv": 0.8842352414809674
+        "mean_ms": 306.9977844666937,
+        "p50_ms": 111.75944800015714,
+        "p95_ms": 1192.7186204005918,
+        "p99_ms": 1358.8901520807483,
+        "max_ms": 1400.4330350007876,
+        "min_ms": 38.51282899995567,
+        "stdev_ms": 430.4455804267789,
+        "cv": 1.4021129864977189
       },
       "slowest_in_bucket": [
         {
           "phase": "move",
           "action": 3,
           "label": "move_objective",
-          "ms": 3467.6478809997207
+          "ms": 1400.4330350007876
         },
         {
           "phase": "move",
           "action": 3,
           "label": "move_objective",
-          "ms": 3014.6223949996056
+          "ms": 1103.6981570005082
         },
         {
           "phase": "move",
           "action": 3,
           "label": "move_objective",
-          "ms": 2722.1180710002955
+          "ms": 789.9113429994031
         },
         {
           "phase": "move",
           "action": 3,
           "label": "move_objective",
-          "ms": 1474.0029829990817
+          "ms": 270.51209499950346
         },
         {
           "phase": "move",
           "action": 3,
           "label": "move_objective",
-          "ms": 1108.8851219992648
+          "ms": 213.1431080006223
         },
         {
           "phase": "move",
           "action": 3,
           "label": "move_objective",
-          "ms": 1104.6902689995477
+          "ms": 160.61347300001216
         },
         {
           "phase": "move",
           "action": 3,
           "label": "move_objective",
-          "ms": 1000.20880899865
+          "ms": 126.89135199980228
         },
         {
           "phase": "move",
           "action": 3,
           "label": "move_objective",
-          "ms": 500.8824479991745
+          "ms": 111.75944800015714
         }
-      ],
-      "cprofile_replay": {
-        "cprofile_top_cumtime": [
-          {
-            "cumtime_s": 28.803671386,
-            "ncalls": 16,
-            "where": "action_decoder.py:408:convert_gym_action"
-          },
-          {
-            "cumtime_s": 22.076665062,
-            "ncalls": 16,
-            "where": "movement_handlers.py:1696:_select_strategic_destination"
-          },
-          {
-            "cumtime_s": 18.151327496,
-            "ncalls": 26837198,
-            "where": "combat_utils.py:275:calculate_hex_distance"
-          },
-          {
-            "cumtime_s": 11.529003841000002,
-            "ncalls": 32,
-            "where": "perf_timing.py:305:wrapper"
-          },
-          {
-            "cumtime_s": 11.526004226000001,
-            "ncalls": 32,
-            "where": "movement_handlers.py:1261:movement_build_valid_destinations_pool"
-          },
-          {
-            "cumtime_s": 5.542870644000001,
-            "ncalls": 16,
-            "where": "w40k_core.py:2445:_process_semantic_action"
-          },
-          {
-            "cumtime_s": 5.542200684,
-            "ncalls": 16,
-            "where": "w40k_core.py:3976:_process_movement_phase"
-          },
-          {
-            "cumtime_s": 4.969808554,
-            "ncalls": 18,
-            "where": "w40k_core.py:1237:step"
-          },
-          {
-            "cumtime_s": 4.871676625,
-            "ncalls": 16,
-            "where": "movement_handlers.py:514:execute_action"
-          },
-          {
-            "cumtime_s": 4.4703982170000005,
-            "ncalls": 48,
-            "where": "action_decoder.py:35:get_action_mask_and_eligible_units"
-          },
-          {
-            "cumtime_s": 4.18551388,
-            "ncalls": 9,
-            "where": "shooting_handlers.py:2727:shooting_build_valid_target_pool"
-          },
-          {
-            "cumtime_s": 4.181114622,
-            "ncalls": 48,
-            "where": "action_decoder.py:55:_build_mask_for_units"
-          },
-          {
-            "cumtime_s": 4.0989437,
-            "ncalls": 8386,
-            "where": "hex_utils.py:498:compute_los_visibility"
-          },
-          {
-            "cumtime_s": 4.043287162,
-            "ncalls": 8095,
-            "where": "shooting_handlers.py:3422:_get_los_visibility_state"
-          },
-          {
-            "cumtime_s": 4.027923575,
-            "ncalls": 8386,
-            "where": "hex_utils.py:243:hex_line"
-          },
-          {
-            "cumtime_s": 3.9969403380000004,
-            "ncalls": 8095,
-            "where": "hex_utils.py:525:compute_los_state"
-          },
-          {
-            "cumtime_s": 3.9176810530000004,
-            "ncalls": 85145227,
-            "where": "~:0:<built-in method builtins.abs>"
-          },
-          {
-            "cumtime_s": 3.776098145,
-            "ncalls": 7,
-            "where": "shooting_handlers.py:1163:build_unit_los_cache"
-          },
-          {
-            "cumtime_s": 3.58497351,
-            "ncalls": 27058829,
-            "where": "~:0:<built-in method builtins.max>"
-          },
-          {
-            "cumtime_s": 2.2084614950000003,
-            "ncalls": 32,
-            "where": "movement_handlers.py:72:_sync_move_preview_mask_loops"
-          },
-          {
-            "cumtime_s": 2.135310724,
-            "ncalls": 15,
-            "where": "hex_union_boundary_polygon.py:57:compute_move_preview_mask_loops_world"
-          },
-          {
-            "cumtime_s": 1.8360827240000002,
-            "ncalls": 18208202,
-            "where": "~:0:<method 'add' of 'set' objects>"
-          },
-          {
-            "cumtime_s": 1.614376237,
-            "ncalls": 134660,
-            "where": "movement_handlers.py:228:_movement_engagement_violates"
-          },
-          {
-            "cumtime_s": 1.521409588,
-            "ncalls": 134660,
-            "where": "spatial_relations.py:134:move_anchor_violates_engagement_clearance"
-          },
-          {
-            "cumtime_s": 1.101227723,
-            "ncalls": 16,
-            "where": "w40k_core.py:4331:_build_observation"
-          },
-          {
-            "cumtime_s": 1.0947411,
-            "ncalls": 16,
-            "where": "observation_builder.py:1079:build_observation"
-          },
-          {
-            "cumtime_s": 1.054892587,
-            "ncalls": 26,
-            "where": "movement_handlers.py:981:_build_multi_hex_vectorized"
-          },
-          {
-            "cumtime_s": 0.88529365,
-            "ncalls": 26,
-            "where": "hex_utils.py:98:min_distance_between_sets"
-          },
-          {
-            "cumtime_s": 0.7874479090000001,
-            "ncalls": 14,
-            "where": "shooting_handlers.py:609:weapon_availability_check"
-          },
-          {
-            "cumtime_s": 0.775886674,
-            "ncalls": 15,
-            "where": "_arraysetops_impl.py:145:unique"
-          }
-        ]
-      }
+      ]
     },
     {
       "id": "fight:10",
       "expected_label": "fight",
-      "samples": 48,
+      "samples": 137,
       "label_mismatch_count": 0,
-      "share_of_measured_wall_time": 0.1353295434091,
+      "share_of_measured_wall_time": 0.17354688987845987,
       "histogram_ms": {
-        "0-50": 30,
-        "50-200": 2,
-        "200-500": 5,
-        "500-1k": 6,
-        "1k-5k": 5,
+        "0-50": 105,
+        "50-200": 17,
+        "200-500": 6,
+        "500-1k": 8,
+        "1k-5k": 1,
         "5k-20k": 0,
         "20k+": 0
       },
       "wall_ms": {
-        "mean_ms": 310.7892880833181,
-        "p50_ms": 13.275243499265343,
-        "p95_ms": 1227.0436682999389,
-        "p99_ms": 2155.4816651990595,
-        "max_ms": 2537.2629189987492,
-        "min_ms": 9.510875001069508,
-        "stdev_ms": 531.5204946685978,
-        "cv": 1.7102278458390912
+        "mean_ms": 87.63584406572916,
+        "p50_ms": 11.808620999545383,
+        "p95_ms": 537.9009113999923,
+        "p99_ms": 757.5977285199402,
+        "max_ms": 1197.9793339996831,
+        "min_ms": 8.237912999902619,
+        "stdev_ms": 191.8185482029781,
+        "cv": 2.1888138380810163
       },
       "slowest_in_bucket": [
         {
           "phase": "fight",
           "action": 10,
           "label": "fight",
-          "ms": 2537.2629189987492
+          "ms": 1197.9793339996831
         },
         {
           "phase": "fight",
           "action": 10,
           "label": "fight",
-          "ms": 1724.9623789994075
+          "ms": 768.0513519999295
         },
         {
           "phase": "fight",
           "action": 10,
           "label": "fight",
-          "ms": 1243.3592130000761
+          "ms": 739.0135089999603
         },
         {
           "phase": "fight",
           "action": 10,
           "label": "fight",
-          "ms": 1196.743370999684
+          "ms": 673.5007540000879
         },
         {
           "phase": "fight",
           "action": 10,
           "label": "fight",
-          "ms": 1013.5898709995672
+          "ms": 661.4545029997316
         },
         {
           "phase": "fight",
           "action": 10,
           "label": "fight",
-          "ms": 934.9575209998875
+          "ms": 592.3576369996226
         },
         {
           "phase": "fight",
           "action": 10,
           "label": "fight",
-          "ms": 804.1041330016014
+          "ms": 567.5564009998197
         },
         {
           "phase": "fight",
           "action": 10,
           "label": "fight",
-          "ms": 789.714766000543
+          "ms": 530.487039000036
         }
-      ],
-      "cprofile_replay": {
-        "cprofile_top_cumtime": [
-          {
-            "cumtime_s": 26.126233429000003,
-            "ncalls": 60,
-            "where": "w40k_core.py:2445:_process_semantic_action"
-          },
-          {
-            "cumtime_s": 25.879827332,
-            "ncalls": 60,
-            "where": "w40k_core.py:4134:_process_fight_phase"
-          },
-          {
-            "cumtime_s": 25.879448401,
-            "ncalls": 60,
-            "where": "fight_handlers.py:1915:execute_action"
-          },
-          {
-            "cumtime_s": 25.876795462,
-            "ncalls": 61,
-            "where": "w40k_core.py:1237:step"
-          },
-          {
-            "cumtime_s": 14.528882992000002,
-            "ncalls": 60,
-            "where": "fight_handlers.py:2913:_handle_fight_attack"
-          },
-          {
-            "cumtime_s": 14.446483461000001,
-            "ncalls": 20,
-            "where": "fight_handlers.py:1436:_fight_try_begin_consolidation_after_attacks"
-          },
-          {
-            "cumtime_s": 13.429717028,
-            "ncalls": 20,
-            "where": "fight_handlers.py:1109:_fight_plan_consolidation_destinations"
-          },
-          {
-            "cumtime_s": 12.258317471000002,
-            "ncalls": 10,
-            "where": "fight_handlers.py:2776:_fight_finish_no_more_targets_after_attack"
-          },
-          {
-            "cumtime_s": 11.246267843,
-            "ncalls": 20,
-            "where": "fight_handlers.py:2414:_handle_fight_unit_activation"
-          },
-          {
-            "cumtime_s": 10.839839986000001,
-            "ncalls": 7554,
-            "where": "hex_utils.py:98:min_distance_between_sets"
-          },
-          {
-            "cumtime_s": 5.723795408,
-            "ncalls": 8125,
-            "where": "shared_utils.py:172:_compute_unit_occupied_hexes"
-          },
-          {
-            "cumtime_s": 5.714866161000001,
-            "ncalls": 8109,
-            "where": "shared_utils.py:249:compute_candidate_footprint"
-          },
-          {
-            "cumtime_s": 5.681869002,
-            "ncalls": 8135,
-            "where": "hex_utils.py:729:compute_occupied_hexes"
-          },
-          {
-            "cumtime_s": 5.6740161790000005,
-            "ncalls": 8135,
-            "where": "hex_utils.py:865:_footprint_round"
-          },
-          {
-            "cumtime_s": 5.439294631,
-            "ncalls": 25,
-            "where": "fight_handlers.py:462:_fight_pile_in_closest_enemy_snapshot"
-          },
-          {
-            "cumtime_s": 4.242676978,
-            "ncalls": 7794,
-            "where": "fight_handlers.py:991:_fight_min_distance_from_fp_to_marker_points"
-          },
-          {
-            "cumtime_s": 4.090874037,
-            "ncalls": 23661,
-            "where": "fight_handlers.py:495:_fight_pile_in_new_fp_strictly_closer_to_closest_tier"
-          },
-          {
-            "cumtime_s": 3.6717282590000004,
-            "ncalls": 5485390,
-            "where": "combat_utils.py:275:calculate_hex_distance"
-          },
-          {
-            "cumtime_s": 3.523892982,
-            "ncalls": 5,
-            "where": "fight_handlers.py:594:_fight_build_pile_in_valid_destinations"
-          },
-          {
-            "cumtime_s": 3.0931623320000003,
-            "ncalls": 60,
-            "where": "w40k_core.py:4331:_build_observation"
-          },
-          {
-            "cumtime_s": 3.092488416,
-            "ncalls": 60,
-            "where": "observation_builder.py:1079:build_observation"
-          },
-          {
-            "cumtime_s": 2.4336615260000003,
-            "ncalls": 9129077,
-            "where": "hex_utils.py:715:_hex_center"
-          },
-          {
-            "cumtime_s": 2.288097564,
-            "ncalls": 20,
-            "where": "fight_handlers.py:1141:_ensure_consolidation_bfs"
-          },
-          {
-            "cumtime_s": 2.287526832,
-            "ncalls": 11,
-            "where": "fight_handlers.py:1020:_fight_bfs_reachable_anchors_consolidation"
-          },
-          {
-            "cumtime_s": 1.978999133,
-            "ncalls": 9,
-            "where": "fight_handlers.py:934:_fight_closest_objective_marker_snapshot"
-          },
-          {
-            "cumtime_s": 1.592779713,
-            "ncalls": 16053374,
-            "where": "~:0:<method 'add' of 'set' objects>"
-          },
-          {
-            "cumtime_s": 1.470982542,
-            "ncalls": 27321,
-            "where": "shared_utils.py:270:is_footprint_placement_valid"
-          },
-          {
-            "cumtime_s": 1.124370738,
-            "ncalls": 19391,
-            "where": "fight_handlers.py:865:_candidate_footprint_fight"
-          },
-          {
-            "cumtime_s": 1.042982085,
-            "ncalls": 60,
-            "where": "observation_builder.py:1466:_encode_macro_intent_context"
-          },
-          {
-            "cumtime_s": 1.0363827730000001,
-            "ncalls": 60,
-            "where": "observation_builder.py:300:_build_macro_objective_entries"
-          }
-        ]
-      }
+      ]
     },
     {
       "id": "charge:9",
       "expected_label": "charge_activate",
-      "samples": 11,
+      "samples": 13,
       "label_mismatch_count": 0,
-      "share_of_measured_wall_time": 0.18220479003512857,
+      "share_of_measured_wall_time": 0.16580194646718602,
       "histogram_ms": {
         "0-50": 0,
         "50-200": 0,
-        "200-500": 0,
-        "500-1k": 3,
-        "1k-5k": 8,
+        "200-500": 4,
+        "500-1k": 6,
+        "1k-5k": 3,
         "5k-20k": 0,
         "20k+": 0
       },
       "wall_ms": {
-        "mean_ms": 1825.9200914546288,
-        "p50_ms": 1631.0299830001895,
-        "p95_ms": 3149.5344834993375,
-        "p99_ms": 3154.410223898776,
-        "max_ms": 3155.629158998636,
-        "min_ms": 541.1818840002525,
-        "stdev_ms": 906.5237530601598,
-        "cv": 0.4964750414340273
+        "mean_ms": 882.3314882308225,
+        "p50_ms": 603.1413670007169,
+        "p95_ms": 2164.8056730000458,
+        "p99_ms": 2288.990063400524,
+        "max_ms": 2320.036161000644,
+        "min_ms": 416.56673699981184,
+        "stdev_ms": 633.8883019114593,
+        "cv": 0.7184242094572406
       },
       "slowest_in_bucket": [
         {
           "phase": "charge",
           "action": 9,
           "label": "charge_activate",
-          "ms": 3155.629158998636
+          "ms": 2320.036161000644
         },
         {
           "phase": "charge",
           "action": 9,
           "label": "charge_activate",
-          "ms": 3143.439808000039
+          "ms": 2061.3186809996478
         },
         {
           "phase": "charge",
           "action": 9,
           "label": "charge_activate",
-          "ms": 2395.1401630001783
+          "ms": 1396.4568760002294
         },
         {
           "phase": "charge",
           "action": 9,
           "label": "charge_activate",
-          "ms": 2376.8525089999457
+          "ms": 776.5537510003924
         },
         {
           "phase": "charge",
           "action": 9,
           "label": "charge_activate",
-          "ms": 2260.286017000908
+          "ms": 683.301308999944
         },
         {
           "phase": "charge",
           "action": 9,
           "label": "charge_activate",
-          "ms": 1631.0299830001895
+          "ms": 676.875260000088
         },
         {
           "phase": "charge",
           "action": 9,
           "label": "charge_activate",
-          "ms": 1449.0353020009934
+          "ms": 603.1413670007169
         },
         {
           "phase": "charge",
           "action": 9,
           "label": "charge_activate",
-          "ms": 1423.9436149982794
+          "ms": 561.5200789998198
         }
-      ],
-      "cprofile_replay": {
-        "cprofile_top_cumtime": [
-          {
-            "cumtime_s": 28.617867639000004,
-            "ncalls": 11,
-            "where": "w40k_core.py:2445:_process_semantic_action"
-          },
-          {
-            "cumtime_s": 28.582761985,
-            "ncalls": 11,
-            "where": "w40k_core.py:4108:_process_charge_phase"
-          },
-          {
-            "cumtime_s": 28.582642657,
-            "ncalls": 11,
-            "where": "charge_handlers.py:1051:execute_action"
-          },
-          {
-            "cumtime_s": 26.779435949000003,
-            "ncalls": 11,
-            "where": "charge_handlers.py:1257:_handle_unit_activation"
-          },
-          {
-            "cumtime_s": 21.328568948,
-            "ncalls": 22,
-            "where": "charge_handlers.py:1905:charge_build_valid_destinations_pool"
-          },
-          {
-            "cumtime_s": 19.133895346000003,
-            "ncalls": 11,
-            "where": "charge_handlers.py:1498:charge_unit_execution_loop"
-          },
-          {
-            "cumtime_s": 19.133820911,
-            "ncalls": 11,
-            "where": "charge_handlers.py:1410:charge_build_valid_targets"
-          },
-          {
-            "cumtime_s": 13.422832816000001,
-            "ncalls": 337107,
-            "where": "charge_handlers.py:118:_charge_cached_candidate_fp_and_placement_validity"
-          },
-          {
-            "cumtime_s": 9.447060198,
-            "ncalls": 11,
-            "where": "charge_handlers.py:2386:charge_target_selection_handler"
-          },
-          {
-            "cumtime_s": 8.296072384,
-            "ncalls": 161179,
-            "where": "charge_handlers.py:104:_candidate_footprint_charge"
-          },
-          {
-            "cumtime_s": 6.379894416,
-            "ncalls": 12,
-            "where": "w40k_core.py:1237:step"
-          },
-          {
-            "cumtime_s": 4.5118889200000005,
-            "ncalls": 157489,
-            "where": "shared_utils.py:270:is_footprint_placement_valid"
-          },
-          {
-            "cumtime_s": 3.713837342,
-            "ncalls": 721475,
-            "where": "spatial_relations.py:82:unit_entries_within_engagement_zone"
-          },
-          {
-            "cumtime_s": 2.301933982,
-            "ncalls": 11,
-            "where": "charge_handlers.py:296:_compute_charge_preview_zone"
-          },
-          {
-            "cumtime_s": 2.23505476,
-            "ncalls": 11,
-            "where": "charge_handlers.py:363:_build_charge_anchors_in_zone"
-          },
-          {
-            "cumtime_s": 2.15400326,
-            "ncalls": 8,
-            "where": "charge_handlers.py:2605:charge_destination_selection_handler"
-          },
-          {
-            "cumtime_s": 1.951617622,
-            "ncalls": 8,
-            "where": "charge_handlers.py:1549:_attempt_charge_to_destination"
-          },
-          {
-            "cumtime_s": 1.895187339,
-            "ncalls": 33,
-            "where": "charge_handlers.py:257:_charge_cached_closest_charger_hex_to_target"
-          },
-          {
-            "cumtime_s": 1.894676156,
-            "ncalls": 11,
-            "where": "charge_handlers.py:236:_charge_closest_charger_hex_to_target"
-          },
-          {
-            "cumtime_s": 1.5413142480000002,
-            "ncalls": 1451782,
-            "where": "hex_utils.py:88:hex_distance"
-          },
-          {
-            "cumtime_s": 1.504742021,
-            "ncalls": 721487,
-            "where": "hex_utils.py:1019:euclidean_edge_clearance_round_round"
-          },
-          {
-            "cumtime_s": 1.092378569,
-            "ncalls": 301437,
-            "where": "charge_handlers.py:143:_charge_synthetic_charger_cache_entry"
-          },
-          {
-            "cumtime_s": 0.675588881,
-            "ncalls": 11,
-            "where": "w40k_core.py:4331:_build_observation"
-          },
-          {
-            "cumtime_s": 0.675404875,
-            "ncalls": 11,
-            "where": "observation_builder.py:1079:build_observation"
-          },
-          {
-            "cumtime_s": 0.6602287480000001,
-            "ncalls": 273783,
-            "where": "combat_utils.py:142:get_hex_neighbors"
-          },
-          {
-            "cumtime_s": 0.618080482,
-            "ncalls": 1454723,
-            "where": "hex_utils.py:715:_hex_center"
-          },
-          {
-            "cumtime_s": 0.603266312,
-            "ncalls": 1442950,
-            "where": "spatial_relations.py:74:_cache_entry_round_base_size"
-          },
-          {
-            "cumtime_s": 0.519435161,
-            "ncalls": 11,
-            "where": "charge_handlers.py:452:_charge_pool_must_socle_a_socle_if_possible"
-          },
-          {
-            "cumtime_s": 0.48519624800000005,
-            "ncalls": 3693,
-            "where": "charge_handlers.py:421:_charge_anchor_is_socle_a_socle_with_target"
-          },
-          {
-            "cumtime_s": 0.46663510500000005,
-            "ncalls": 3361204,
-            "where": "~:0:<method 'get' of 'dict' objects>"
-          }
-        ]
-      }
+      ]
     },
     {
       "id": "move:0",
       "expected_label": "move_aggressive",
       "samples": 9,
       "label_mismatch_count": 0,
-      "share_of_measured_wall_time": 0.04799073554974237,
+      "share_of_measured_wall_time": 0.007699530326439607,
       "histogram_ms": {
         "0-50": 0,
-        "50-200": 4,
-        "200-500": 4,
+        "50-200": 9,
+        "200-500": 0,
         "500-1k": 0,
-        "1k-5k": 1,
+        "1k-5k": 0,
         "5k-20k": 0,
         "20k+": 0
       },
       "wall_ms": {
-        "mean_ms": 587.7999697774309,
-        "p50_ms": 204.26380999924731,
-        "p95_ms": 2151.4128257993425,
-        "p99_ms": 3043.5014843592944,
-        "max_ms": 3266.523648999282,
-        "min_ms": 144.2755269999907,
-        "stdev_ms": 1012.9245334890243,
-        "cv": 1.7232469982476621
+        "mean_ms": 59.1843974443691,
+        "p50_ms": 56.5219199997955,
+        "p95_ms": 68.03574839996145,
+        "p99_ms": 68.66207928000222,
+        "max_ms": 68.81866200001241,
+        "min_ms": 51.906800999859115,
+        "stdev_ms": 6.817520082656523,
+        "cv": 0.11519117161013107
       },
       "slowest_in_bucket": [
         {
           "phase": "move",
           "action": 0,
           "label": "move_aggressive",
-          "ms": 3266.523648999282
+          "ms": 68.81866200001241
         },
         {
           "phase": "move",
           "action": 0,
           "label": "move_aggressive",
-          "ms": 478.7465909994353
+          "ms": 66.86137799988501
         },
         {
           "phase": "move",
           "action": 0,
           "label": "move_aggressive",
-          "ms": 469.3657110001368
+          "ms": 64.1838209994603
         },
         {
           "phase": "move",
           "action": 0,
           "label": "move_aggressive",
-          "ms": 229.5500099990022
+          "ms": 64.1228830008913
         },
         {
           "phase": "move",
           "action": 0,
           "label": "move_aggressive",
-          "ms": 204.26380999924731
+          "ms": 56.5219199997955
         },
         {
           "phase": "move",
           "action": 0,
           "label": "move_aggressive",
-          "ms": 174.3233170000167
+          "ms": 56.092476999765495
         },
         {
           "phase": "move",
           "action": 0,
           "label": "move_aggressive",
-          "ms": 171.44032800024434
+          "ms": 52.16153600031248
         },
         {
           "phase": "move",
           "action": 0,
           "label": "move_aggressive",
-          "ms": 151.71078499952273
+          "ms": 51.99009899934026
         }
-      ],
-      "cprofile_replay": {
-        "cprofile_top_cumtime": [
-          {
-            "cumtime_s": 11.190590503000001,
-            "ncalls": 11,
-            "where": "w40k_core.py:1237:step"
-          },
-          {
-            "cumtime_s": 6.517482303,
-            "ncalls": 22,
-            "where": "perf_timing.py:305:wrapper"
-          },
-          {
-            "cumtime_s": 4.358701920000001,
-            "ncalls": 22,
-            "where": "movement_handlers.py:1261:movement_build_valid_destinations_pool"
-          },
-          {
-            "cumtime_s": 4.212598013,
-            "ncalls": 11,
-            "where": "action_decoder.py:408:convert_gym_action"
-          },
-          {
-            "cumtime_s": 3.415797968,
-            "ncalls": 11,
-            "where": "w40k_core.py:2445:_process_semantic_action"
-          },
-          {
-            "cumtime_s": 3.4152752950000003,
-            "ncalls": 11,
-            "where": "w40k_core.py:3976:_process_movement_phase"
-          },
-          {
-            "cumtime_s": 2.8206615580000003,
-            "ncalls": 6,
-            "where": "shooting_handlers.py:2727:shooting_build_valid_target_pool"
-          },
-          {
-            "cumtime_s": 2.8162946210000004,
-            "ncalls": 33,
-            "where": "action_decoder.py:35:get_action_mask_and_eligible_units"
-          },
-          {
-            "cumtime_s": 2.8158411070000002,
-            "ncalls": 33,
-            "where": "action_decoder.py:55:_build_mask_for_units"
-          },
-          {
-            "cumtime_s": 2.725647663,
-            "ncalls": 11,
-            "where": "movement_handlers.py:514:execute_action"
-          },
-          {
-            "cumtime_s": 2.5094208040000003,
-            "ncalls": 5409,
-            "where": "hex_utils.py:498:compute_los_visibility"
-          },
-          {
-            "cumtime_s": 2.4614076970000003,
-            "ncalls": 4,
-            "where": "shooting_handlers.py:1163:build_unit_los_cache"
-          },
-          {
-            "cumtime_s": 2.457622175,
-            "ncalls": 5409,
-            "where": "hex_utils.py:243:hex_line"
-          },
-          {
-            "cumtime_s": 2.4571306130000004,
-            "ncalls": 5171,
-            "where": "shooting_handlers.py:3422:_get_los_visibility_state"
-          },
-          {
-            "cumtime_s": 2.429026732,
-            "ncalls": 5171,
-            "where": "hex_utils.py:525:compute_los_state"
-          },
-          {
-            "cumtime_s": 1.172512994,
-            "ncalls": 22,
-            "where": "movement_handlers.py:72:_sync_move_preview_mask_loops"
-          },
-          {
-            "cumtime_s": 1.1366428530000001,
-            "ncalls": 59534,
-            "where": "movement_handlers.py:228:_movement_engagement_violates"
-          },
-          {
-            "cumtime_s": 1.124776338,
-            "ncalls": 20,
-            "where": "movement_handlers.py:981:_build_multi_hex_vectorized"
-          },
-          {
-            "cumtime_s": 1.114204551,
-            "ncalls": 9,
-            "where": "hex_union_boundary_polygon.py:57:compute_move_preview_mask_loops_world"
-          },
-          {
-            "cumtime_s": 1.094654234,
-            "ncalls": 59534,
-            "where": "spatial_relations.py:134:move_anchor_violates_engagement_clearance"
-          },
-          {
-            "cumtime_s": 0.886346933,
-            "ncalls": 28,
-            "where": "hex_utils.py:98:min_distance_between_sets"
-          },
-          {
-            "cumtime_s": 0.854105199,
-            "ncalls": 8496774,
-            "where": "~:0:<method 'add' of 'set' objects>"
-          },
-          {
-            "cumtime_s": 0.8092512150000001,
-            "ncalls": 10,
-            "where": "shooting_handlers.py:609:weapon_availability_check"
-          },
-          {
-            "cumtime_s": 0.7836750840000001,
-            "ncalls": 5,
-            "where": "shooting_handlers.py:524:_build_weapon_availability_enemy_precheck"
-          },
-          {
-            "cumtime_s": 0.7485868800000001,
-            "ncalls": 11,
-            "where": "w40k_core.py:4331:_build_observation"
-          },
-          {
-            "cumtime_s": 0.743434514,
-            "ncalls": 11,
-            "where": "observation_builder.py:1079:build_observation"
-          },
-          {
-            "cumtime_s": 0.689296804,
-            "ncalls": 4,
-            "where": "w40k_core.py:4159:_shooting_phase_init"
-          },
-          {
-            "cumtime_s": 0.6892635330000001,
-            "ncalls": 4,
-            "where": "shooting_handlers.py:949:shooting_phase_start"
-          },
-          {
-            "cumtime_s": 0.44739874300000004,
-            "ncalls": 9,
-            "where": "_arraysetops_impl.py:145:unique"
-          },
-          {
-            "cumtime_s": 0.44730854900000006,
-            "ncalls": 9,
-            "where": "_arraysetops_impl.py:350:_unique1d"
-          }
-        ]
-      }
+      ]
     }
   ],
   "goulot_specs": [
@@ -1167,121 +537,121 @@
       "phase": "shoot",
       "action": 11,
       "label": "shoot_wait",
-      "ms": 4854.7875250005745
-    },
-    {
-      "phase": "move",
-      "action": 3,
-      "label": "move_objective",
-      "ms": 3467.6478809997207
-    },
-    {
-      "phase": "move",
-      "action": 0,
-      "label": "move_aggressive",
-      "ms": 3266.523648999282
+      "ms": 2386.0443269995812
     },
     {
       "phase": "charge",
       "action": 9,
       "label": "charge_activate",
-      "ms": 3155.629158998636
-    },
-    {
-      "phase": "charge",
-      "action": 9,
-      "label": "charge_activate",
-      "ms": 3143.439808000039
-    },
-    {
-      "phase": "move",
-      "action": 3,
-      "label": "move_objective",
-      "ms": 3014.6223949996056
+      "ms": 2320.036161000644
     },
     {
       "phase": "shoot",
       "action": 11,
       "label": "shoot_wait",
-      "ms": 3006.3005020001583
+      "ms": 2143.1818010005372
+    },
+    {
+      "phase": "shoot",
+      "action": 11,
+      "label": "shoot_wait",
+      "ms": 2089.8666849998335
+    },
+    {
+      "phase": "charge",
+      "action": 9,
+      "label": "charge_activate",
+      "ms": 2061.3186809996478
+    },
+    {
+      "phase": "shoot",
+      "action": 11,
+      "label": "shoot_wait",
+      "ms": 2040.8434890005083
+    },
+    {
+      "phase": "shoot",
+      "action": 4,
+      "label": "shoot_target_slot_0",
+      "ms": 1551.2601420005012
     },
     {
       "phase": "move",
       "action": 3,
       "label": "move_objective",
-      "ms": 2722.1180710002955
+      "ms": 1400.4330350007876
+    },
+    {
+      "phase": "charge",
+      "action": 9,
+      "label": "charge_activate",
+      "ms": 1396.4568760002294
+    },
+    {
+      "phase": "shoot",
+      "action": 4,
+      "label": "shoot_target_slot_0",
+      "ms": 1321.8452329992942
+    },
+    {
+      "phase": "move",
+      "action": 2,
+      "label": "move_defensive",
+      "ms": 1321.3728279997667
+    },
+    {
+      "phase": "move",
+      "action": 1,
+      "label": "move_tactical",
+      "ms": 1284.1877920000115
+    },
+    {
+      "phase": "fight",
+      "action": 10,
+      "label": "fight",
+      "ms": 1197.9793339996831
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 1103.6981570005082
+    },
+    {
+      "phase": "shoot",
+      "action": 11,
+      "label": "shoot_wait",
+      "ms": 1085.7593280006768
+    },
+    {
+      "phase": "move",
+      "action": 11,
+      "label": "move_wait",
+      "ms": 1069.6454829994764
+    },
+    {
+      "phase": "move",
+      "action": 2,
+      "label": "move_defensive",
+      "ms": 1029.429815000185
     },
     {
       "phase": "shoot",
       "action": 12,
       "label": "shoot_advance",
-      "ms": 2701.1272580002696
+      "ms": 800.8356089994777
     },
     {
-      "phase": "shoot",
-      "action": 11,
-      "label": "shoot_wait",
-      "ms": 2606.329887999891
-    },
-    {
-      "phase": "shoot",
-      "action": 11,
-      "label": "shoot_wait",
-      "ms": 2594.1191269994306
-    },
-    {
-      "phase": "fight",
-      "action": 10,
-      "label": "fight",
-      "ms": 2537.2629189987492
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 789.9113429994031
     },
     {
       "phase": "charge",
       "action": 9,
       "label": "charge_activate",
-      "ms": 2395.1401630001783
-    },
-    {
-      "phase": "charge",
-      "action": 9,
-      "label": "charge_activate",
-      "ms": 2376.8525089999457
-    },
-    {
-      "phase": "charge",
-      "action": 9,
-      "label": "charge_activate",
-      "ms": 2260.286017000908
-    },
-    {
-      "phase": "shoot",
-      "action": 11,
-      "label": "shoot_wait",
-      "ms": 2061.916917000417
-    },
-    {
-      "phase": "shoot",
-      "action": 11,
-      "label": "shoot_wait",
-      "ms": 2024.135113999364
-    },
-    {
-      "phase": "shoot",
-      "action": 11,
-      "label": "shoot_wait",
-      "ms": 1955.3570949992718
-    },
-    {
-      "phase": "shoot",
-      "action": 11,
-      "label": "shoot_wait",
-      "ms": 1927.843028001007
-    },
-    {
-      "phase": "fight",
-      "action": 10,
-      "label": "fight",
-      "ms": 1724.9623789994075
+      "ms": 776.5537510003924
     }
   ]
 }

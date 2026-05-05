@@ -168,6 +168,13 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
     def _init():
         # Import environment (inside function to avoid import issues)
         from engine.w40k_core import W40KEngine
+        if debug_mode:
+            try:
+                debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                    f.write(f"WORKER_INIT_START env_rank={int(rank)} scenario_file={scenario_file}\n")
+            except (OSError, IOError):
+                pass
 
         # Create base environment with scenario_files for random selection
         base_env = W40KEngine(
@@ -238,7 +245,15 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
             wrapped_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
 
         # Wrap with Monitor for episode statistics
-        return Monitor(wrapped_env)
+        monitored_env = Monitor(wrapped_env)
+        if debug_mode:
+            try:
+                debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                    f.write(f"WORKER_INIT_END env_rank={int(rank)}\n")
+            except (OSError, IOError):
+                pass
+        return monitored_env
     
     return _init
 
