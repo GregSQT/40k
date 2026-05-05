@@ -958,6 +958,7 @@ def _fight_new_fp_strictly_closer_to_objective_marker_tier(
     d_min: int,
     closest_markers: List[Tuple[int, int]],
     *,
+    closer_shell_union: Optional[Set[Tuple[int, int]]] = None,
     _perf_strict_eval_acc: Optional[List[float]] = None,
 ) -> bool:
     """Même idée que ``_fight_pile_in_new_fp_strictly_closer_to_closest_tier`` : empreinte plus proche du marqueur.
@@ -976,10 +977,44 @@ def _fight_new_fp_strictly_closer_to_objective_marker_tier(
         )
     if _perf_strict_eval_acc is not None:
         _td0 = time.perf_counter()
+    if closer_shell_union is not None:
+        is_strictly_closer = bool(new_fp & closer_shell_union)
+        if _perf_strict_eval_acc is not None:
+            _perf_strict_eval_acc[0] += time.perf_counter() - _td0
+        return is_strictly_closer
     d = min_distance_between_sets(new_fp, marker_set, max_distance=d_min - 1)
     if _perf_strict_eval_acc is not None:
         _perf_strict_eval_acc[0] += time.perf_counter() - _td0
     return d <= (d_min - 1)
+
+
+def _fight_min_distance_from_fp_to_marker_points(
+    fp: Set[Tuple[int, int]],
+    marker_points: List[Tuple[int, int]],
+    *,
+    max_distance: Optional[int] = None,
+) -> int:
+    """Exact min hex distance between a footprint and a small set of objective marker points."""
+    if not fp:
+        raise ValueError("_fight_min_distance_from_fp_to_marker_points: fp must be non-empty")
+    if not marker_points:
+        raise ValueError(
+            "_fight_min_distance_from_fp_to_marker_points: marker_points must be non-empty"
+        )
+
+    best: Optional[int] = None
+    for fc, fr in fp:
+        for mc, mr in marker_points:
+            d = calculate_hex_distance(fc, fr, mc, mr)
+            if best is None or d < best:
+                best = d
+                if best == 0:
+                    return 0
+    if best is None:
+        raise ValueError("_fight_min_distance_from_fp_to_marker_points: failed to compute distance")
+    if max_distance is not None and best > max_distance:
+        return max_distance + 1
+    return best
 
 
 def _fight_bfs_reachable_anchors_consolidation(
@@ -1265,6 +1300,11 @@ def _fight_plan_consolidation_destinations(
         raise ValueError(
             "_fight_plan_consolidation_destinations: closest_markers must be non-empty"
         )
+    closer_shell_union_obj: Set[Tuple[int, int]] = set()
+    if start_d_obj > 0:
+        from engine.hex_utils import dilate_hex_set_unbounded
+
+        closer_shell_union_obj = dilate_hex_set_unbounded(marker_set_obj, start_d_obj - 1)
     dist_by_anchor_obj: List[Tuple[Tuple[int, int], int]] = []
     for anchor in visited:
         if anchor == start_pos:
@@ -1280,10 +1320,13 @@ def _fight_plan_consolidation_destinations(
             fp,
             start_d_obj,
             closest_markers,
+            closer_shell_union=closer_shell_union_obj,
             _perf_strict_eval_acc=_strict_eval_acc,
         ):
             continue
-        d_tier = min_distance_between_sets(fp, marker_set_obj, max_distance=start_d_obj - 1)
+        d_tier = _fight_min_distance_from_fp_to_marker_points(
+            fp, closest_markers, max_distance=start_d_obj - 1
+        )
         if d_tier >= start_d_obj:
             continue
         dist_by_anchor_obj.append((anchor, int(d_tier)))

@@ -108,6 +108,57 @@ def _hex_radius_upper_for_engagement_prune(base_span: int) -> int:
     return max(1, (s + 1) // 2)
 
 
+def _build_objective_distance_cache(
+    game_state: Dict[str, Any],
+) -> Tuple[List[Set[Tuple[int, int]]], List[Tuple[int, int]]]:
+    """Build exact objective distance refs with boundary reduction for move strategy 3."""
+    cached = game_state.get("_objective_distance_cache")
+    objectives = game_state.get("objectives")
+    if (
+        isinstance(cached, dict)
+        and cached.get("objectives_ref") is objectives
+        and isinstance(cached.get("objective_hex_sets"), list)
+        and isinstance(cached.get("boundary_hexes"), list)
+    ):
+        return cached["objective_hex_sets"], cached["boundary_hexes"]
+
+    objective_hex_sets: List[Set[Tuple[int, int]]] = []
+    boundary_union: Set[Tuple[int, int]] = set()
+
+    if isinstance(objectives, list):
+        for obj in objectives:
+            if not isinstance(obj, dict):
+                continue
+            raw_hexes = obj.get("hexes")
+            if not isinstance(raw_hexes, list):
+                continue
+
+            objective_hex_set: Set[Tuple[int, int]] = set()
+            for raw_hex in raw_hexes:
+                if isinstance(raw_hex, dict):
+                    objective_hex_set.add((int(raw_hex["col"]), int(raw_hex["row"])))
+                elif isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
+                    objective_hex_set.add((int(raw_hex[0]), int(raw_hex[1])))
+
+            if not objective_hex_set:
+                continue
+
+            objective_hex_sets.append(objective_hex_set)
+            for hex_pos in objective_hex_set:
+                for neighbor in get_hex_neighbors(hex_pos[0], hex_pos[1]):
+                    if neighbor not in objective_hex_set:
+                        boundary_union.add(hex_pos)
+                        break
+
+    boundary_hexes = list(boundary_union)
+    game_state["_objective_distance_cache"] = {
+        "objectives_ref": objectives,
+        "objective_hex_sets": objective_hex_sets,
+        "boundary_hexes": boundary_hexes,
+    }
+    return objective_hex_sets, boundary_hexes
+
+
 def _enemy_items_within_move_engagement_horizon(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -246,6 +297,8 @@ def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any])
         game_state["valid_charge_destinations_pool"] = []
     if "_charge_dest_bfs_cache" in game_state:
         game_state["_charge_dest_bfs_cache"] = {}
+    if "_charge_closest_hex_cache" in game_state:
+        game_state["_charge_closest_hex_cache"] = {}
 
     # Clear target pools for all units (shoot phase)
     for unit in require_key(game_state, "units"):
@@ -1749,31 +1802,21 @@ def _select_strategic_destination(
 
     # STRATEGY 3: OBJECTIVE - Move closest to nearest objective hex
     else:
-        objectives = game_state.get("objectives")
-        if objectives:
-            objective_hexes: List[Tuple[int, int]] = []
-            for obj in objectives:
-                if isinstance(obj, dict):
-                    _hx = obj.get("hexes")
-                    hexes = _hx if isinstance(_hx, list) else []
-                else:
-                    hexes = []
-                for h in hexes:
-                    if isinstance(h, dict):
-                        objective_hexes.append((int(h["col"]), int(h["row"])))
-                    elif isinstance(h, (list, tuple)) and len(h) == 2:
-                        objective_hexes.append((int(h[0]), int(h[1])))
+        objective_hex_sets, boundary_hexes = _build_objective_distance_cache(game_state)
+        if objective_hex_sets and boundary_hexes:
+            best_dest = valid_destinations[0]
+            min_dist = float('inf')
+            for dest in valid_destinations:
+                if any(dest in objective_hex_set for objective_hex_set in objective_hex_sets):
+                    return dest
 
-            if objective_hexes:
-                best_dest = valid_destinations[0]
-                min_dist = float('inf')
-                for dest in valid_destinations:
-                    for obj_col, obj_row in objective_hexes:
-                        dist = calculate_hex_distance(dest[0], dest[1], obj_col, obj_row)
-                        if dist < min_dist:
-                            min_dist = dist
-                            best_dest = dest
-                return best_dest
+                dest_col, dest_row = dest
+                for obj_col, obj_row in boundary_hexes:
+                    dist = calculate_hex_distance(dest_col, dest_row, obj_col, obj_row)
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_dest = dest
+            return best_dest
 
         return valid_destinations[0]
 
@@ -2145,5 +2188,3 @@ def movement_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
         "next_phase": "shoot",
         "units_processed": len([uid for uid in require_key(game_state, "units_cache").keys() if uid in game_state["units_moved"]])
     }
-
-
