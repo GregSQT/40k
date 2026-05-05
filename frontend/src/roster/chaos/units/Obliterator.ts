@@ -30,6 +30,7 @@ export class Obliterator extends EliteRangeElite {
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 20; // Size of the base
   static ICON_SCALE = 2.2; // Size of the icon
+  static ILLUSTRATION_RATIO = 100; // Illustration size ratio in percent
 
   constructor(name: string, startPos: [number, number]) {
     super(name, Obliterator.HP_MAX, startPos);

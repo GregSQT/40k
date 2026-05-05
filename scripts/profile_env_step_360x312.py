@@ -7,7 +7,11 @@ Usage (from repo root):
   ./.venv/bin/python scripts/profile_env_step_360x312.py --measured-steps 500 --warmup-steps 100
   ./.venv/bin/python scripts/profile_env_step_360x312.py --per-step --top-slow 0
   ./.venv/bin/python scripts/profile_env_step_360x312.py --no-progress   # JSON only (no bar on stderr)
-  ./.venv/bin/python scripts/profile_env_step_360x312.py --profile-goulots  # + cProfile replay (2e passe, sans toucher au moteur)
+  ./.venv/bin/python scripts/profile_env_step_360x312.py --profile-goulots  # + cProfile replay (2e passe, barre tqdm "cprofile-replay")
+
+  # JSON dans un fichier tout en gardant les barres tqdm dans le terminal (bash) :
+  #   ./.venv/bin/python scripts/profile_env_step_360x312.py ... > profile_result.json 2> >(tee profile_stderr.txt >&2)
+  # Sans tee : rediriger 2> fichier envoie tqdm dans le fichier seulement (tail -f profile_stderr.txt dans un autre terminal).
 
 Progress bar (tqdm) goes to stderr; JSON result stays on stdout for piping.
 
@@ -94,7 +98,8 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "After the timed run, replay the same action sequence once and accumulate cProfile "
-            "per goulot (move:3, fight:10, charge:9, move:0). Does not change the engine; doubles work."
+            "per goulot (move:3, fight:10, charge:9, move:0). Does not change the engine; doubles work. "
+            "Shows a second tqdm bar on stderr (desc=cprofile-replay) unless --no-progress."
         ),
     )
     parser.add_argument(
@@ -291,20 +296,30 @@ def _replay_and_profile_goulots(
     env = _make_env(args, W40KEngine)
     env.reset(seed=args.seed)
 
-    for action in action_trail:
-        gs = require_key(env.__dict__, "game_state")
-        phase = require_key(gs, "phase")
-        pair = (str(phase), int(action))
-        prof = profiles.get(pair)
-        if prof is not None:
-            prof.enable()
-        try:
-            _obs, _r, terminated, truncated, _i = env.step(action)
-        finally:
+    progress_disable = bool(args.no_progress)
+    with tqdm(
+        total=len(action_trail),
+        desc="cprofile-replay",
+        unit="step",
+        file=sys.stderr,
+        disable=progress_disable,
+        mininterval=0.5,
+    ) as pbar:
+        for action in action_trail:
+            gs = require_key(env.__dict__, "game_state")
+            phase = require_key(gs, "phase")
+            pair = (str(phase), int(action))
+            prof = profiles.get(pair)
             if prof is not None:
-                prof.disable()
-        if terminated or truncated:
-            env.reset()
+                prof.enable()
+            try:
+                _obs, _r, terminated, truncated, _i = env.step(action)
+            finally:
+                if prof is not None:
+                    prof.disable()
+            if terminated or truncated:
+                env.reset()
+            pbar.update(1)
 
     report: Dict[str, Any] = {}
     for phase, action, _label in GOULOT_SPECS:

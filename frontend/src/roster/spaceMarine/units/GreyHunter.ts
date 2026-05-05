@@ -50,6 +50,7 @@ export class GreyHunter extends TroopRangeSwarm {
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 13; // Size of the base
   static ICON_SCALE = 1.7; // Size of the icon
+  static ILLUSTRATION_RATIO = 100; // Illustration size ratio in percent
 
   constructor(name: string, startPos: [number, number]) {
     super(name, GreyHunter.HP_MAX, startPos);

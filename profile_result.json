@@ -1,0 +1,1287 @@
+{
+  "scenario_file": "config/scenario_pvp_test.json",
+  "board_dims": [
+    360,
+    312
+  ],
+  "inches_to_subhex": 10,
+  "seed": 42,
+  "warmup_steps": 50,
+  "measured_steps": 200,
+  "episode_resets": 2,
+  "step_ms": {
+    "mean": 2946.5078150550107,
+    "p50": 183.05753899949195,
+    "p95": 16646.28436785001,
+    "p99": 45467.171259069524,
+    "max": 113962.86980600053,
+    "min": 8.35565500165103,
+    "stdev": 12130.929304939968
+  },
+  "sps_step_only": 0.3393848117050829,
+  "by_phase_action": [
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "count": 12,
+      "mean_ms": 39603.11302774972,
+      "p50_ms": 25869.4265715003,
+      "p95_ms": 105781.71963595049,
+      "p99_ms": 112326.63977199054,
+      "max_ms": 113962.86980600053,
+      "min_ms": 12431.174858000304,
+      "stdev_ms": 32684.69224001756,
+      "cv": 0.8253061373512619
+    },
+    {
+      "phase": "fight",
+      "action": 10,
+      "label": "fight",
+      "count": 48,
+      "mean_ms": 1106.5942995418634,
+      "p50_ms": 10.634412501531187,
+      "p95_ms": 7386.0004855025145,
+      "p99_ms": 10488.490345259019,
+      "max_ms": 12337.15588799896,
+      "min_ms": 8.35565500165103,
+      "stdev_ms": 2554.1988334206367,
+      "cv": 2.308161929334075
+    },
+    {
+      "phase": "charge",
+      "action": 9,
+      "label": "charge_activate",
+      "count": 11,
+      "mean_ms": 1683.5008925458665,
+      "p50_ms": 1504.679865000071,
+      "p95_ms": 3309.8281219990895,
+      "p99_ms": 3403.860831597922,
+      "max_ms": 3427.36900899763,
+      "min_ms": 636.9919600001595,
+      "stdev_ms": 955.7941175312002,
+      "cv": 0.5677419725544695
+    },
+    {
+      "phase": "shoot",
+      "action": 11,
+      "label": "shoot_wait",
+      "count": 32,
+      "mean_ms": 585.4741128437126,
+      "p50_ms": 227.06292600014422,
+      "p95_ms": 1850.0404041016736,
+      "p99_ms": 2419.3917933589555,
+      "max_ms": 2655.7986439984234,
+      "min_ms": 26.95763800147688,
+      "stdev_ms": 665.9814455146598,
+      "cv": 1.1375079288816274
+    },
+    {
+      "phase": "move",
+      "action": 0,
+      "label": "move_aggressive",
+      "count": 9,
+      "mean_ms": 487.8373879991058,
+      "p50_ms": 146.11410399811575,
+      "p95_ms": 1814.6882593980981,
+      "p99_ms": 2570.8041278785095,
+      "max_ms": 2759.833094998612,
+      "min_ms": 111.62805999992997,
+      "stdev_ms": 858.9938936470874,
+      "cv": 1.7608201314177705
+    },
+    {
+      "phase": "shoot",
+      "action": 12,
+      "label": "shoot_advance",
+      "count": 26,
+      "mean_ms": 302.85532615394357,
+      "p50_ms": 181.78213949977362,
+      "p95_ms": 712.0514805001221,
+      "p99_ms": 1679.7756557507455,
+      "max_ms": 1992.3983410008077,
+      "min_ms": 13.36378300038632,
+      "stdev_ms": 392.19273167977406,
+      "cv": 1.2949837688521273
+    },
+    {
+      "phase": "move",
+      "action": 2,
+      "label": "move_defensive",
+      "count": 12,
+      "mean_ms": 324.3395309164043,
+      "p50_ms": 275.95826250035316,
+      "p95_ms": 699.1277810988319,
+      "p99_ms": 935.1014082195255,
+      "max_ms": 994.0948149996984,
+      "min_ms": 100.00623799714958,
+      "stdev_ms": 240.55602900641162,
+      "cv": 0.7416796476418807
+    },
+    {
+      "phase": "shoot",
+      "action": 5,
+      "label": "shoot_target_slot_1",
+      "count": 2,
+      "mean_ms": 327.59085050020076,
+      "p50_ms": 327.59085050020076,
+      "p95_ms": 582.901112151194,
+      "p99_ms": 605.5953576312822,
+      "max_ms": 611.2689190013043,
+      "min_ms": 43.912781999097206,
+      "stdev_ms": 401.18137182206453,
+      "cv": 1.224641564956707
+    },
+    {
+      "phase": "shoot",
+      "action": 4,
+      "label": "shoot_target_slot_0",
+      "count": 15,
+      "mean_ms": 255.41630333318608,
+      "p50_ms": 269.72035899962066,
+      "p95_ms": 516.5255099003842,
+      "p99_ms": 590.2337419804825,
+      "max_ms": 608.6608000005072,
+      "min_ms": 9.886494997772388,
+      "stdev_ms": 163.26567561643645,
+      "cv": 0.6392139949009412
+    },
+    {
+      "phase": "move",
+      "action": 1,
+      "label": "move_tactical",
+      "count": 8,
+      "mean_ms": 224.8781552498258,
+      "p50_ms": 201.99530950048938,
+      "p95_ms": 397.5464244986142,
+      "p99_ms": 410.2884208981777,
+      "max_ms": 413.4739199980686,
+      "min_ms": 63.69805400026962,
+      "stdev_ms": 138.01162384401772,
+      "cv": 0.6137173425791194
+    },
+    {
+      "phase": "shoot",
+      "action": 6,
+      "label": "shoot_target_slot_2",
+      "count": 1,
+      "mean_ms": 271.75946200077306,
+      "p50_ms": 271.75946200077306,
+      "p95_ms": 271.75946200077306,
+      "p99_ms": 271.75946200077306,
+      "max_ms": 271.75946200077306,
+      "min_ms": 271.75946200077306,
+      "stdev_ms": 0.0,
+      "cv": 0.0
+    },
+    {
+      "phase": "move",
+      "action": 11,
+      "label": "move_wait",
+      "count": 8,
+      "mean_ms": 66.85360475057678,
+      "p50_ms": 25.446162500884384,
+      "p95_ms": 168.37524305083204,
+      "p99_ms": 182.7094334112189,
+      "max_ms": 186.29298100131564,
+      "min_ms": 8.925670001190156,
+      "stdev_ms": 72.58167863179457,
+      "cv": 1.0856808530009503
+    },
+    {
+      "phase": "shoot",
+      "action": 7,
+      "label": "shoot_target_slot_3",
+      "count": 2,
+      "mean_ms": 123.76597999900696,
+      "p50_ms": 123.76597999900696,
+      "p95_ms": 128.94687859989062,
+      "p99_ms": 129.40740291996917,
+      "max_ms": 129.5225339999888,
+      "min_ms": 118.00942599802511,
+      "stdev_ms": 8.140996740721636,
+      "cv": 0.06577733833471004
+    },
+    {
+      "phase": "charge",
+      "action": 11,
+      "label": "charge_wait",
+      "count": 14,
+      "mean_ms": 14.112698214375996,
+      "p50_ms": 12.046729498251807,
+      "p95_ms": 25.268904201038822,
+      "p99_ms": 27.226814439600272,
+      "max_ms": 27.71629199924064,
+      "min_ms": 9.441088001040043,
+      "stdev_ms": 5.565076600279073,
+      "cv": 0.39433115593800266
+    }
+  ],
+  "goulot_detail": [
+    {
+      "id": "move:3",
+      "expected_label": "move_objective",
+      "samples": 12,
+      "label_mismatch_count": 0,
+      "share_of_measured_wall_time": 0.8064417034714771,
+      "histogram_ms": {
+        "0-50": 0,
+        "50-200": 0,
+        "200-500": 0,
+        "500-1k": 0,
+        "1k-5k": 0,
+        "5k-20k": 3,
+        "20k+": 9
+      },
+      "wall_ms": {
+        "mean_ms": 39603.11302774972,
+        "p50_ms": 25869.4265715003,
+        "p95_ms": 105781.71963595049,
+        "p99_ms": 112326.63977199054,
+        "max_ms": 113962.86980600053,
+        "min_ms": 12431.174858000304,
+        "stdev_ms": 32684.69224001756,
+        "cv": 0.8253061373512619
+      },
+      "slowest_in_bucket": [
+        {
+          "phase": "move",
+          "action": 3,
+          "label": "move_objective",
+          "ms": 113962.86980600053
+        },
+        {
+          "phase": "move",
+          "action": 3,
+          "label": "move_objective",
+          "ms": 99088.05131500048
+        },
+        {
+          "phase": "move",
+          "action": 3,
+          "label": "move_objective",
+          "ms": 44925.546208000014
+        },
+        {
+          "phase": "move",
+          "action": 3,
+          "label": "move_objective",
+          "ms": 37269.798377998086
+        },
+        {
+          "phase": "move",
+          "action": 3,
+          "label": "move_objective",
+          "ms": 33911.47175500009
+        },
+        {
+          "phase": "move",
+          "action": 3,
+          "label": "move_objective",
+          "ms": 27815.46448500012
+        },
+        {
+          "phase": "move",
+          "action": 3,
+          "label": "move_objective",
+          "ms": 23923.388658000476
+        },
+        {
+          "phase": "move",
+          "action": 3,
+          "label": "move_objective",
+          "ms": 23297.04024199964
+        }
+      ],
+      "cprofile_replay": {
+        "cprofile_top_cumtime": [
+          {
+            "cumtime_s": 2301.316530518,
+            "ncalls": 170,
+            "where": "threading.py:637:wait"
+          },
+          {
+            "cumtime_s": 1604.9873473680002,
+            "ncalls": 170,
+            "where": "threading.py:323:wait"
+          },
+          {
+            "cumtime_s": 1338.839631471,
+            "ncalls": 2326878493,
+            "where": "combat_utils.py:275:calculate_hex_distance"
+          },
+          {
+            "cumtime_s": 277.00471750400004,
+            "ncalls": 6985269119,
+            "where": "~:0:<built-in method builtins.abs>"
+          },
+          {
+            "cumtime_s": 257.651974414,
+            "ncalls": 2327100131,
+            "where": "~:0:<built-in method builtins.max>"
+          },
+          {
+            "cumtime_s": 84.30148476800001,
+            "ncalls": 16,
+            "where": "action_decoder.py:408:convert_gym_action"
+          },
+          {
+            "cumtime_s": 84.29762272,
+            "ncalls": 16,
+            "where": "movement_handlers.py:1643:_select_strategic_destination"
+          },
+          {
+            "cumtime_s": 13.698551892000001,
+            "ncalls": 18,
+            "where": "w40k_core.py:1237:step"
+          },
+          {
+            "cumtime_s": 10.394958224,
+            "ncalls": 32,
+            "where": "perf_timing.py:305:wrapper"
+          },
+          {
+            "cumtime_s": 10.392093217000001,
+            "ncalls": 32,
+            "where": "movement_handlers.py:1208:movement_build_valid_destinations_pool"
+          },
+          {
+            "cumtime_s": 5.363026982,
+            "ncalls": 16,
+            "where": "w40k_core.py:2445:_process_semantic_action"
+          },
+          {
+            "cumtime_s": 5.362261614,
+            "ncalls": 16,
+            "where": "w40k_core.py:3976:_process_movement_phase"
+          },
+          {
+            "cumtime_s": 4.5000095810000005,
+            "ncalls": 16,
+            "where": "movement_handlers.py:461:execute_action"
+          },
+          {
+            "cumtime_s": 4.002064016,
+            "ncalls": 9,
+            "where": "shooting_handlers.py:2727:shooting_build_valid_target_pool"
+          },
+          {
+            "cumtime_s": 3.998897581,
+            "ncalls": 48,
+            "where": "action_decoder.py:35:get_action_mask_and_eligible_units"
+          },
+          {
+            "cumtime_s": 3.998352649,
+            "ncalls": 48,
+            "where": "action_decoder.py:55:_build_mask_for_units"
+          },
+          {
+            "cumtime_s": 3.6583434570000004,
+            "ncalls": 8386,
+            "where": "hex_utils.py:498:compute_los_visibility"
+          },
+          {
+            "cumtime_s": 3.618326696,
+            "ncalls": 7,
+            "where": "shooting_handlers.py:1163:build_unit_los_cache"
+          },
+          {
+            "cumtime_s": 3.609635212,
+            "ncalls": 8095,
+            "where": "shooting_handlers.py:3422:_get_los_visibility_state"
+          },
+          {
+            "cumtime_s": 3.5968469420000004,
+            "ncalls": 8386,
+            "where": "hex_utils.py:243:hex_line"
+          },
+          {
+            "cumtime_s": 3.5685735100000002,
+            "ncalls": 8095,
+            "where": "hex_utils.py:525:compute_los_state"
+          },
+          {
+            "cumtime_s": 2.1025667770000003,
+            "ncalls": 32,
+            "where": "movement_handlers.py:72:_sync_move_preview_mask_loops"
+          },
+          {
+            "cumtime_s": 2.014918464,
+            "ncalls": 15,
+            "where": "hex_union_boundary_polygon.py:57:compute_move_preview_mask_loops_world"
+          },
+          {
+            "cumtime_s": 1.646379905,
+            "ncalls": 18191595,
+            "where": "~:0:<method 'add' of 'set' objects>"
+          },
+          {
+            "cumtime_s": 1.4037647080000002,
+            "ncalls": 134660,
+            "where": "movement_handlers.py:177:_movement_engagement_violates"
+          },
+          {
+            "cumtime_s": 1.328062333,
+            "ncalls": 134660,
+            "where": "spatial_relations.py:134:move_anchor_violates_engagement_clearance"
+          },
+          {
+            "cumtime_s": 1.030768667,
+            "ncalls": 26,
+            "where": "hex_utils.py:98:min_distance_between_sets"
+          },
+          {
+            "cumtime_s": 0.9927670040000001,
+            "ncalls": 16,
+            "where": "w40k_core.py:4331:_build_observation"
+          },
+          {
+            "cumtime_s": 0.9869632850000001,
+            "ncalls": 16,
+            "where": "observation_builder.py:1079:build_observation"
+          },
+          {
+            "cumtime_s": 0.9624909260000001,
+            "ncalls": 14,
+            "where": "shooting_handlers.py:609:weapon_availability_check"
+          }
+        ]
+      }
+    },
+    {
+      "id": "fight:10",
+      "expected_label": "fight",
+      "samples": 48,
+      "label_mismatch_count": 0,
+      "share_of_measured_wall_time": 0.09013471151614401,
+      "histogram_ms": {
+        "0-50": 30,
+        "50-200": 2,
+        "200-500": 4,
+        "500-1k": 1,
+        "1k-5k": 7,
+        "5k-20k": 4,
+        "20k+": 0
+      },
+      "wall_ms": {
+        "mean_ms": 1106.5942995418634,
+        "p50_ms": 10.634412501531187,
+        "p95_ms": 7386.0004855025145,
+        "p99_ms": 10488.490345259019,
+        "max_ms": 12337.15588799896,
+        "min_ms": 8.35565500165103,
+        "stdev_ms": 2554.1988334206367,
+        "cv": 2.308161929334075
+      },
+      "slowest_in_bucket": [
+        {
+          "phase": "fight",
+          "action": 10,
+          "label": "fight",
+          "ms": 12337.15588799896
+        },
+        {
+          "phase": "fight",
+          "action": 10,
+          "label": "fight",
+          "ms": 8403.824945999077
+        },
+        {
+          "phase": "fight",
+          "action": 10,
+          "label": "fight",
+          "ms": 8259.02686700283
+        },
+        {
+          "phase": "fight",
+          "action": 10,
+          "label": "fight",
+          "ms": 5764.665777001937
+        },
+        {
+          "phase": "fight",
+          "action": 10,
+          "label": "fight",
+          "ms": 3305.668157998298
+        },
+        {
+          "phase": "fight",
+          "action": 10,
+          "label": "fight",
+          "ms": 3202.816435998102
+        },
+        {
+          "phase": "fight",
+          "action": 10,
+          "label": "fight",
+          "ms": 2837.940150002396
+        },
+        {
+          "phase": "fight",
+          "action": 10,
+          "label": "fight",
+          "ms": 2193.047796998144
+        }
+      ],
+      "cprofile_replay": {
+        "cprofile_top_cumtime": [
+          {
+            "cumtime_s": 100.385198751,
+            "ncalls": 60,
+            "where": "w40k_core.py:2445:_process_semantic_action"
+          },
+          {
+            "cumtime_s": 100.16406739600001,
+            "ncalls": 60,
+            "where": "w40k_core.py:4134:_process_fight_phase"
+          },
+          {
+            "cumtime_s": 100.163538965,
+            "ncalls": 60,
+            "where": "fight_handlers.py:1872:execute_action"
+          },
+          {
+            "cumtime_s": 90.04566021500001,
+            "ncalls": 60,
+            "where": "fight_handlers.py:2870:_handle_fight_attack"
+          },
+          {
+            "cumtime_s": 87.807564119,
+            "ncalls": 29530,
+            "where": "hex_utils.py:98:min_distance_between_sets"
+          },
+          {
+            "cumtime_s": 70.39828591,
+            "ncalls": 10,
+            "where": "fight_handlers.py:2733:_fight_finish_no_more_targets_after_attack"
+          },
+          {
+            "cumtime_s": 62.17775274900001,
+            "ncalls": 20,
+            "where": "fight_handlers.py:1393:_fight_try_begin_consolidation_after_attacks"
+          },
+          {
+            "cumtime_s": 57.048876279000005,
+            "ncalls": 14182,
+            "where": "fight_handlers.py:956:_fight_new_fp_strictly_closer_to_objective_marker_tier"
+          },
+          {
+            "cumtime_s": 49.691763685000005,
+            "ncalls": 9,
+            "where": "threading.py:637:wait"
+          },
+          {
+            "cumtime_s": 35.470281625000005,
+            "ncalls": 20,
+            "where": "fight_handlers.py:1074:_fight_plan_consolidation_destinations"
+          },
+          {
+            "cumtime_s": 23.013007147,
+            "ncalls": 9,
+            "where": "threading.py:323:wait"
+          },
+          {
+            "cumtime_s": 10.099737224,
+            "ncalls": 20,
+            "where": "fight_handlers.py:2371:_handle_fight_unit_activation"
+          },
+          {
+            "cumtime_s": 9.222824765,
+            "ncalls": 100075702,
+            "where": "~:0:<method 'add' of 'set' objects>"
+          },
+          {
+            "cumtime_s": 9.066734937000001,
+            "ncalls": 63,
+            "where": "w40k_core.py:1237:step"
+          },
+          {
+            "cumtime_s": 8.916284733000001,
+            "ncalls": 5,
+            "where": "fight_handlers.py:594:_fight_build_pile_in_valid_destinations"
+          },
+          {
+            "cumtime_s": 7.256876281,
+            "ncalls": 94851445,
+            "where": "~:0:<method 'append' of 'list' objects>"
+          },
+          {
+            "cumtime_s": 5.15470147,
+            "ncalls": 25,
+            "where": "fight_handlers.py:462:_fight_pile_in_closest_enemy_snapshot"
+          },
+          {
+            "cumtime_s": 5.108200058,
+            "ncalls": 8125,
+            "where": "shared_utils.py:172:_compute_unit_occupied_hexes"
+          },
+          {
+            "cumtime_s": 5.099414615000001,
+            "ncalls": 8109,
+            "where": "shared_utils.py:249:compute_candidate_footprint"
+          },
+          {
+            "cumtime_s": 5.074876694,
+            "ncalls": 8135,
+            "where": "hex_utils.py:729:compute_occupied_hexes"
+          },
+          {
+            "cumtime_s": 5.068409043,
+            "ncalls": 8135,
+            "where": "hex_utils.py:865:_footprint_round"
+          },
+          {
+            "cumtime_s": 3.6267696120000004,
+            "ncalls": 23661,
+            "where": "fight_handlers.py:495:_fight_pile_in_new_fp_strictly_closer_to_closest_tier"
+          },
+          {
+            "cumtime_s": 2.7994193980000004,
+            "ncalls": 60,
+            "where": "w40k_core.py:4331:_build_observation"
+          },
+          {
+            "cumtime_s": 2.798766401,
+            "ncalls": 60,
+            "where": "observation_builder.py:1079:build_observation"
+          },
+          {
+            "cumtime_s": 2.461431889,
+            "ncalls": 20,
+            "where": "fight_handlers.py:1106:_ensure_consolidation_bfs"
+          },
+          {
+            "cumtime_s": 2.460949348,
+            "ncalls": 11,
+            "where": "fight_handlers.py:985:_fight_bfs_reachable_anchors_consolidation"
+          },
+          {
+            "cumtime_s": 2.167182936,
+            "ncalls": 9129077,
+            "where": "hex_utils.py:715:_hex_center"
+          },
+          {
+            "cumtime_s": 1.9864985940000002,
+            "ncalls": 9,
+            "where": "fight_handlers.py:934:_fight_closest_objective_marker_snapshot"
+          },
+          {
+            "cumtime_s": 1.382751022,
+            "ncalls": 27321,
+            "where": "shared_utils.py:270:is_footprint_placement_valid"
+          },
+          {
+            "cumtime_s": 1.339632986,
+            "ncalls": 19391,
+            "where": "fight_handlers.py:865:_candidate_footprint_fight"
+          }
+        ]
+      }
+    },
+    {
+      "id": "charge:9",
+      "expected_label": "charge_activate",
+      "samples": 11,
+      "label_mismatch_count": 0,
+      "share_of_measured_wall_time": 0.031424504838210986,
+      "histogram_ms": {
+        "0-50": 0,
+        "50-200": 0,
+        "200-500": 0,
+        "500-1k": 4,
+        "1k-5k": 7,
+        "5k-20k": 0,
+        "20k+": 0
+      },
+      "wall_ms": {
+        "mean_ms": 1683.5008925458665,
+        "p50_ms": 1504.679865000071,
+        "p95_ms": 3309.8281219990895,
+        "p99_ms": 3403.860831597922,
+        "max_ms": 3427.36900899763,
+        "min_ms": 636.9919600001595,
+        "stdev_ms": 955.7941175312002,
+        "cv": 0.5677419725544695
+      },
+      "slowest_in_bucket": [
+        {
+          "phase": "charge",
+          "action": 9,
+          "label": "charge_activate",
+          "ms": 3427.36900899763
+        },
+        {
+          "phase": "charge",
+          "action": 9,
+          "label": "charge_activate",
+          "ms": 3192.287235000549
+        },
+        {
+          "phase": "charge",
+          "action": 9,
+          "label": "charge_activate",
+          "ms": 2145.4263300001912
+        },
+        {
+          "phase": "charge",
+          "action": 9,
+          "label": "charge_activate",
+          "ms": 2043.1285310005478
+        },
+        {
+          "phase": "charge",
+          "action": 9,
+          "label": "charge_activate",
+          "ms": 1806.4056809998874
+        },
+        {
+          "phase": "charge",
+          "action": 9,
+          "label": "charge_activate",
+          "ms": 1504.679865000071
+        },
+        {
+          "phase": "charge",
+          "action": 9,
+          "label": "charge_activate",
+          "ms": 1243.4566949996224
+        },
+        {
+          "phase": "charge",
+          "action": 9,
+          "label": "charge_activate",
+          "ms": 869.3718630020157
+        }
+      ],
+      "cprofile_replay": {
+        "cprofile_top_cumtime": [
+          {
+            "cumtime_s": 30.599465832000003,
+            "ncalls": 11,
+            "where": "w40k_core.py:2445:_process_semantic_action"
+          },
+          {
+            "cumtime_s": 30.57314028,
+            "ncalls": 11,
+            "where": "w40k_core.py:4108:_process_charge_phase"
+          },
+          {
+            "cumtime_s": 30.573024908,
+            "ncalls": 11,
+            "where": "charge_handlers.py:934:execute_action"
+          },
+          {
+            "cumtime_s": 28.894918008,
+            "ncalls": 11,
+            "where": "charge_handlers.py:1140:_handle_unit_activation"
+          },
+          {
+            "cumtime_s": 22.8638264,
+            "ncalls": 22,
+            "where": "charge_handlers.py:1773:charge_build_valid_destinations_pool"
+          },
+          {
+            "cumtime_s": 15.04626773,
+            "ncalls": 11,
+            "where": "charge_handlers.py:1381:charge_unit_execution_loop"
+          },
+          {
+            "cumtime_s": 15.045821342000002,
+            "ncalls": 11,
+            "where": "charge_handlers.py:1293:charge_build_valid_targets"
+          },
+          {
+            "cumtime_s": 14.974085227000002,
+            "ncalls": 11,
+            "where": "charge_handlers.py:2220:charge_target_selection_handler"
+          },
+          {
+            "cumtime_s": 11.33334793,
+            "ncalls": 12,
+            "where": "w40k_core.py:1237:step"
+          },
+          {
+            "cumtime_s": 8.003331653,
+            "ncalls": 317004,
+            "where": "shared_utils.py:270:is_footprint_placement_valid"
+          },
+          {
+            "cumtime_s": 5.415161366,
+            "ncalls": 350005,
+            "where": "charge_handlers.py:103:_candidate_footprint_charge"
+          },
+          {
+            "cumtime_s": 4.020519039,
+            "ncalls": 4246156,
+            "where": "hex_utils.py:88:hex_distance"
+          },
+          {
+            "cumtime_s": 3.6422387260000004,
+            "ncalls": 752848,
+            "where": "spatial_relations.py:82:unit_entries_within_engagement_zone"
+          },
+          {
+            "cumtime_s": 3.6135385710000003,
+            "ncalls": 11,
+            "where": "charge_handlers.py:296:_build_charge_anchors_in_zone"
+          },
+          {
+            "cumtime_s": 3.2689015890000004,
+            "ncalls": 22,
+            "where": "charge_handlers.py:210:_charge_closest_charger_hex_to_target"
+          },
+          {
+            "cumtime_s": 1.837172451,
+            "ncalls": 22,
+            "where": "charge_handlers.py:390:_charge_bfs_max_distance"
+          },
+          {
+            "cumtime_s": 1.7887529640000002,
+            "ncalls": 11,
+            "where": "charge_handlers.py:231:_compute_charge_preview_zone"
+          },
+          {
+            "cumtime_s": 1.469172206,
+            "ncalls": 752860,
+            "where": "hex_utils.py:1019:euclidean_edge_clearance_round_round"
+          },
+          {
+            "cumtime_s": 0.9612556440000001,
+            "ncalls": 310642,
+            "where": "charge_handlers.py:117:_charge_synthetic_charger_cache_entry"
+          },
+          {
+            "cumtime_s": 0.859179236,
+            "ncalls": 2,
+            "where": "threading.py:637:wait"
+          },
+          {
+            "cumtime_s": 0.803201598,
+            "ncalls": 8492662,
+            "where": "hex_utils.py:64:offset_to_cube"
+          },
+          {
+            "cumtime_s": 0.6421944340000001,
+            "ncalls": 11,
+            "where": "w40k_core.py:4331:_build_observation"
+          },
+          {
+            "cumtime_s": 0.642019411,
+            "ncalls": 11,
+            "where": "observation_builder.py:1079:build_observation"
+          },
+          {
+            "cumtime_s": 0.60468961,
+            "ncalls": 1505696,
+            "where": "spatial_relations.py:74:_cache_entry_round_base_size"
+          },
+          {
+            "cumtime_s": 0.597418703,
+            "ncalls": 1517469,
+            "where": "hex_utils.py:715:_hex_center"
+          },
+          {
+            "cumtime_s": 0.583096598,
+            "ncalls": 273783,
+            "where": "combat_utils.py:142:get_hex_neighbors"
+          },
+          {
+            "cumtime_s": 0.5608651060000001,
+            "ncalls": 13337481,
+            "where": "~:0:<built-in method builtins.abs>"
+          },
+          {
+            "cumtime_s": 0.5510647240000001,
+            "ncalls": 2,
+            "where": "threading.py:323:wait"
+          },
+          {
+            "cumtime_s": 0.551035402,
+            "ncalls": 11,
+            "where": "~:0:<method 'acquire' of '_thread.lock' objects>"
+          },
+          {
+            "cumtime_s": 0.51710864,
+            "ncalls": 4323871,
+            "where": "~:0:<built-in method builtins.max>"
+          }
+        ]
+      }
+    },
+    {
+      "id": "move:0",
+      "expected_label": "move_aggressive",
+      "samples": 9,
+      "label_mismatch_count": 0,
+      "share_of_measured_wall_time": 0.007450407003094919,
+      "histogram_ms": {
+        "0-50": 0,
+        "50-200": 6,
+        "200-500": 2,
+        "500-1k": 0,
+        "1k-5k": 1,
+        "5k-20k": 0,
+        "20k+": 0
+      },
+      "wall_ms": {
+        "mean_ms": 487.8373879991058,
+        "p50_ms": 146.11410399811575,
+        "p95_ms": 1814.6882593980981,
+        "p99_ms": 2570.8041278785095,
+        "max_ms": 2759.833094998612,
+        "min_ms": 111.62805999992997,
+        "stdev_ms": 858.9938936470874,
+        "cv": 1.7608201314177705
+      },
+      "slowest_in_bucket": [
+        {
+          "phase": "move",
+          "action": 0,
+          "label": "move_aggressive",
+          "ms": 2759.833094998612
+        },
+        {
+          "phase": "move",
+          "action": 0,
+          "label": "move_aggressive",
+          "ms": 396.9710059973295
+        },
+        {
+          "phase": "move",
+          "action": 0,
+          "label": "move_aggressive",
+          "ms": 384.25520099917776
+        },
+        {
+          "phase": "move",
+          "action": 0,
+          "label": "move_aggressive",
+          "ms": 179.82209699766827
+        },
+        {
+          "phase": "move",
+          "action": 0,
+          "label": "move_aggressive",
+          "ms": 146.11410399811575
+        },
+        {
+          "phase": "move",
+          "action": 0,
+          "label": "move_aggressive",
+          "ms": 144.8278179996123
+        },
+        {
+          "phase": "move",
+          "action": 0,
+          "label": "move_aggressive",
+          "ms": 141.50215799963917
+        },
+        {
+          "phase": "move",
+          "action": 0,
+          "label": "move_aggressive",
+          "ms": 125.58295300186728
+        }
+      ],
+      "cprofile_replay": {
+        "cprofile_top_cumtime": [
+          {
+            "cumtime_s": 11.520851389,
+            "ncalls": 11,
+            "where": "w40k_core.py:1237:step"
+          },
+          {
+            "cumtime_s": 6.862386702,
+            "ncalls": 22,
+            "where": "perf_timing.py:305:wrapper"
+          },
+          {
+            "cumtime_s": 6.859784681000001,
+            "ncalls": 22,
+            "where": "movement_handlers.py:1208:movement_build_valid_destinations_pool"
+          },
+          {
+            "cumtime_s": 4.159081632,
+            "ncalls": 11,
+            "where": "action_decoder.py:408:convert_gym_action"
+          },
+          {
+            "cumtime_s": 3.4559061420000003,
+            "ncalls": 11,
+            "where": "w40k_core.py:2445:_process_semantic_action"
+          },
+          {
+            "cumtime_s": 3.455347009,
+            "ncalls": 11,
+            "where": "w40k_core.py:3976:_process_movement_phase"
+          },
+          {
+            "cumtime_s": 2.8340066800000003,
+            "ncalls": 6,
+            "where": "shooting_handlers.py:2727:shooting_build_valid_target_pool"
+          },
+          {
+            "cumtime_s": 2.829387184,
+            "ncalls": 33,
+            "where": "action_decoder.py:35:get_action_mask_and_eligible_units"
+          },
+          {
+            "cumtime_s": 2.8289708630000003,
+            "ncalls": 33,
+            "where": "action_decoder.py:55:_build_mask_for_units"
+          },
+          {
+            "cumtime_s": 2.7669894210000003,
+            "ncalls": 11,
+            "where": "movement_handlers.py:461:execute_action"
+          },
+          {
+            "cumtime_s": 2.501337344,
+            "ncalls": 5409,
+            "where": "hex_utils.py:498:compute_los_visibility"
+          },
+          {
+            "cumtime_s": 2.4548242410000003,
+            "ncalls": 4,
+            "where": "shooting_handlers.py:1163:build_unit_los_cache"
+          },
+          {
+            "cumtime_s": 2.451211657,
+            "ncalls": 5171,
+            "where": "shooting_handlers.py:3422:_get_los_visibility_state"
+          },
+          {
+            "cumtime_s": 2.447942026,
+            "ncalls": 5409,
+            "where": "hex_utils.py:243:hex_line"
+          },
+          {
+            "cumtime_s": 2.4232371660000003,
+            "ncalls": 5171,
+            "where": "hex_utils.py:525:compute_los_state"
+          },
+          {
+            "cumtime_s": 1.522990576,
+            "ncalls": 22,
+            "where": "movement_handlers.py:72:_sync_move_preview_mask_loops"
+          },
+          {
+            "cumtime_s": 1.4563328560000002,
+            "ncalls": 9,
+            "where": "hex_union_boundary_polygon.py:57:compute_move_preview_mask_loops_world"
+          },
+          {
+            "cumtime_s": 1.186158081,
+            "ncalls": 59534,
+            "where": "movement_handlers.py:177:_movement_engagement_violates"
+          },
+          {
+            "cumtime_s": 1.142161515,
+            "ncalls": 59534,
+            "where": "spatial_relations.py:134:move_anchor_violates_engagement_clearance"
+          },
+          {
+            "cumtime_s": 1.10016197,
+            "ncalls": 20,
+            "where": "movement_handlers.py:928:_build_multi_hex_vectorized"
+          },
+          {
+            "cumtime_s": 0.9051736730000001,
+            "ncalls": 28,
+            "where": "hex_utils.py:98:min_distance_between_sets"
+          },
+          {
+            "cumtime_s": 0.898093439,
+            "ncalls": 8496774,
+            "where": "~:0:<method 'add' of 'set' objects>"
+          },
+          {
+            "cumtime_s": 0.8096812480000001,
+            "ncalls": 10,
+            "where": "shooting_handlers.py:609:weapon_availability_check"
+          },
+          {
+            "cumtime_s": 0.784924892,
+            "ncalls": 5,
+            "where": "shooting_handlers.py:524:_build_weapon_availability_enemy_precheck"
+          },
+          {
+            "cumtime_s": 0.732451309,
+            "ncalls": 11,
+            "where": "w40k_core.py:4331:_build_observation"
+          },
+          {
+            "cumtime_s": 0.725555081,
+            "ncalls": 11,
+            "where": "observation_builder.py:1079:build_observation"
+          },
+          {
+            "cumtime_s": 0.687954888,
+            "ncalls": 4,
+            "where": "w40k_core.py:4159:_shooting_phase_init"
+          },
+          {
+            "cumtime_s": 0.6879249190000001,
+            "ncalls": 4,
+            "where": "shooting_handlers.py:949:shooting_phase_start"
+          },
+          {
+            "cumtime_s": 0.45370961400000004,
+            "ncalls": 9,
+            "where": "_arraysetops_impl.py:145:unique"
+          },
+          {
+            "cumtime_s": 0.453617918,
+            "ncalls": 9,
+            "where": "_arraysetops_impl.py:350:_unique1d"
+          }
+        ]
+      }
+    }
+  ],
+  "goulot_specs": [
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective"
+    },
+    {
+      "phase": "fight",
+      "action": 10,
+      "label": "fight"
+    },
+    {
+      "phase": "charge",
+      "action": 9,
+      "label": "charge_activate"
+    },
+    {
+      "phase": "move",
+      "action": 0,
+      "label": "move_aggressive"
+    }
+  ],
+  "goulot_metrics_note": "wall_ms / histogram / share / slowest_in_bucket = uniquement les steps de la phase measured. cprofile_replay (--profile-goulots) rejoue warmup+measured : des entr\u00e9es cprofile peuvent exister m\u00eame si samples==0 pour une combinaison goulot (ex. action surtout au warmup).",
+  "slowest_steps": [
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 113962.86980600053
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 99088.05131500048
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 44925.546208000014
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 37269.798377998086
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 33911.47175500009
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 27815.46448500012
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 23923.388658000476
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 23297.04024199964
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 22859.782790997997
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 19243.1611969987
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 16509.60664000013
+    },
+    {
+      "phase": "move",
+      "action": 3,
+      "label": "move_objective",
+      "ms": 12431.174858000304
+    },
+    {
+      "phase": "fight",
+      "action": 10,
+      "label": "fight",
+      "ms": 12337.15588799896
+    },
+    {
+      "phase": "fight",
+      "action": 10,
+      "label": "fight",
+      "ms": 8403.824945999077
+    },
+    {
+      "phase": "fight",
+      "action": 10,
+      "label": "fight",
+      "ms": 8259.02686700283
+    },
+    {
+      "phase": "fight",
+      "action": 10,
+      "label": "fight",
+      "ms": 5764.665777001937
+    },
+    {
+      "phase": "charge",
+      "action": 9,
+      "label": "charge_activate",
+      "ms": 3427.36900899763
+    },
+    {
+      "phase": "fight",
+      "action": 10,
+      "label": "fight",
+      "ms": 3305.668157998298
+    },
+    {
+      "phase": "fight",
+      "action": 10,
+      "label": "fight",
+      "ms": 3202.816435998102
+    },
+    {
+      "phase": "charge",
+      "action": 9,
+      "label": "charge_activate",
+      "ms": 3192.287235000549
+    }
+  ]
+}

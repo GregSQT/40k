@@ -31,6 +31,7 @@ export class StrikingScorpion extends SwarmMeleeTroop {
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 11; // Size of the base
   static ICON_SCALE = 1.6; // Size of the icon
+  static ILLUSTRATION_RATIO = 100; // Illustration size ratio in percent
 
   constructor(name: string, startPos: [number, number]) {
     super(name, StrikingScorpion.HP_MAX, startPos);
