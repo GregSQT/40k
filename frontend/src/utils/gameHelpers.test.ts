@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Unit, UnitId } from "../types/game";
 import {
   applyDamage,
   findUnitById,
@@ -28,7 +29,7 @@ const makeUnit = (id: number, player: number, col: number, row: number, move = 2
     HP_CUR: 5,
     RNG_WEAPONS: [],
     CC_WEAPONS: [],
-  }) as any;
+  }) as unknown as Unit;
 
 describe("gameHelpers", () => {
   it("calcule des distances coherentes sur grille hex", () => {
@@ -50,11 +51,11 @@ describe("gameHelpers", () => {
 
   it("filtre et localise les unites", () => {
     const units = [makeUnit(1, 1, 0, 0), makeUnit(2, 2, 1, 0), makeUnit(3, 1, 1, 0)];
-    expect(findUnitById(units, 2 as any)?.player).toBe(2);
+    expect(findUnitById(units, 2 as UnitId)?.player).toBe(2);
     expect(getUnitsAtPosition(units, { col: 1, row: 0 })).toHaveLength(2);
     expect(getPlayerUnits(units, 1)).toHaveLength(2);
     expect(isPositionOccupied(units, { col: 1, row: 0 })).toBe(true);
-    expect(isPositionOccupied(units, { col: 1, row: 0 }, 2 as any)).toBe(true);
+    expect(isPositionOccupied(units, { col: 1, row: 0 }, 2 as UnitId)).toBe(true);
   });
 
   it("calcule les portees et mouvements valides", () => {

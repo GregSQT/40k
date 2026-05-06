@@ -22,7 +22,9 @@
       "Bash(echo \"PID profiler: $!\")",
       "Bash(echo \"Exit: $?\")",
       "Skill(update-config)",
-      "Skill(update-config:*)"
+      "Skill(update-config:*)",
+      "Bash(sed -n '830,860p' /home/greg/40k/frontend/src/components/UnitStatusTable.tsx)",
+      "Bash(sed -n '1074,1104p' /home/greg/40k/frontend/src/components/UnitStatusTable.tsx)"
     ]
   }
 }

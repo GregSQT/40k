@@ -57,11 +57,11 @@ export function syncMoveDestinationPoolRefs(o: SyncMoveDestinationPoolRefsOption
 
   if (!moveDestPoolRef?.current) return;
 
+  // Mutation en place : préserve l’identité objet du Set pour éviter les re-runs parasites du
+  // useEffect mousemove (dep array inclut resolvedMoveDestPoolRef.current et footprintZoneRef.current).
   const clearBoth = (): void => {
-    moveDestPoolRef.current = new Set();
-    if (footprintZoneRef?.current) {
-      footprintZoneRef.current = new Set();
-    }
+    moveDestPoolRef.current.clear();
+    footprintZoneRef?.current?.clear();
     if (footprintMaskLoopsRef) {
       footprintMaskLoopsRef.current = null;
     }
@@ -71,18 +71,17 @@ export function syncMoveDestinationPoolRefs(o: SyncMoveDestinationPoolRefsOption
     if (!gameState) return;
     const anchorSource =
       gameState.valid_move_destinations_pool ?? (gameState.preview_hexes as unknown);
-    // Ne pas remplacer la ref par un Set vide si le state n’a pas encore les clés (course avec
-    // executeAction qui remplit la ref avant le prochain game_state complet) — sinon on efface
-    // des milliers d’ancres et le plateau retombe sur les pastilles hex.
+    // Ne pas vider la ref si le state n’a pas encore les clés (course avec executeAction qui remplit
+    // la ref avant le prochain game_state complet) — sinon on efface des milliers d’ancres.
     if (anchorSource === undefined || anchorSource === null) {
       return;
     }
     if (!Array.isArray(anchorSource)) {
       return;
     }
-    const poolSet = new Set<string>();
-    addHexKeysToSet(anchorSource, poolSet);
-    moveDestPoolRef.current = poolSet;
+    moveDestPoolRef.current.clear();
+    addHexKeysToSet(anchorSource, moveDestPoolRef.current);
+    const poolSize = moveDestPoolRef.current.size;
     const maskLoops = normalizeMaskLoopsFromApi(
       (gameState as { move_preview_footprint_mask_loops?: unknown })
         .move_preview_footprint_mask_loops
@@ -91,18 +90,11 @@ export function syncMoveDestinationPoolRefs(o: SyncMoveDestinationPoolRefsOption
       footprintMaskLoopsRef.current = maskLoops;
     }
     if (footprintZoneRef?.current) {
-      if (poolSet.size === 0) {
-        footprintZoneRef.current = new Set();
-      } else if (maskLoops && maskLoops.length > 0) {
-        footprintZoneRef.current = new Set();
-      } else {
+      footprintZoneRef.current.clear();
+      if (poolSize > 0 && !(maskLoops && maskLoops.length > 0)) {
         const fpRaw = gameState.move_preview_footprint_zone;
         if (Array.isArray(fpRaw) && fpRaw.length > 0) {
-          const fpSet = new Set<string>();
-          addHexKeysToSet(fpRaw, fpSet);
-          footprintZoneRef.current = fpSet;
-        } else {
-          footprintZoneRef.current = new Set();
+          addHexKeysToSet(fpRaw, footprintZoneRef.current);
         }
       }
     }

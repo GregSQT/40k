@@ -683,11 +683,11 @@ export default function Board({
   onAdvanceMove,
   onCancelAdvance,
   getAdvanceDestinations,
-  advanceWarningPopup,
-  onConfirmAdvanceWarning,
-  onCancelAdvanceWarning,
-  onSkipAdvanceWarning,
-  showAdvanceWarningPopup = false,
+  advanceWarningPopup: _advanceWarningPopup,
+  onConfirmAdvanceWarning: _onConfirmAdvanceWarning,
+  onCancelAdvanceWarning: _onCancelAdvanceWarning,
+  onSkipAdvanceWarning: _onSkipAdvanceWarning,
+  showAdvanceWarningPopup: _showAdvanceWarningPopup = false,
   hideAdvanceIconForTutorial = false,
   wallHexesOverride,
   availableCellsOverride,
@@ -2374,7 +2374,6 @@ export default function Board({
         movePreviewGuideLineRef.current.visible = false;
       }
       setMovePreviewDistanceTooltip(null);
-      hoveredHexRef.current = null;
       hoverMoveOrientationStepRef.current = null;
       losHexRef.current = null;
     };
@@ -2396,7 +2395,7 @@ export default function Board({
     getAdvanceDestinations,
     availableCellsOverride,
     wallHexesOverride,
-    footprintZoneRef?.current?.has,
+    footprintZoneRef?.current,
     resolvedMoveDestPoolRef.current?.has,
     footprintMaskLoopsRef.current,
     footprintZoneRef,
@@ -5403,7 +5402,9 @@ export default function Board({
                         : undefined,
               }}
             >
+              {/* biome-ignore lint/a11y/noStaticElementInteractions: canvas de jeu — mouse tracking uniquement, pas d'interaction utilisateur */}
               <div
+                role="presentation"
                 ref={canvasContainerRef}
                 onMouseMove={handleCanvasMouseMove}
                 onMouseLeave={() => {
@@ -5507,7 +5508,7 @@ export default function Board({
                     style={{ display: "inline-flex", alignItems: "center" }}
                     aria-hidden
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" style={{ display: "block" }}>
+                    <svg aria-hidden={true} width="14" height="14" viewBox="0 0 24 24" style={{ display: "block" }}>
                       <path
                         fill="currentColor"
                         d="M12 2L4 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-8-3z"

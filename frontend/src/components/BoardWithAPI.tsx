@@ -3428,7 +3428,9 @@ export const BoardWithAPI: React.FC = () => {
       </SharedLayout>
       <TutorialOverlayGate />
       {isEndlessDutyInterWave && isEndlessDutyModalOpen && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — stopPropagation intentionnel
         <div
+          role="presentation"
           style={{
             position: "fixed",
             inset: 0,
@@ -3439,6 +3441,7 @@ export const BoardWithAPI: React.FC = () => {
             zIndex: 12000,
           }}
           onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
         >
           <div
             role="dialog"
@@ -3454,6 +3457,7 @@ export const BoardWithAPI: React.FC = () => {
               color: "#dbeafe",
             }}
             onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
           >
             <h2
               id="endless-duty-title"
@@ -4173,7 +4177,9 @@ export const BoardWithAPI: React.FC = () => {
         </div>
       )}
       {apiProps.advanceWarningPopup && settings.showAdvanceWarning && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — stopPropagation intentionnel
         <div
+          role="presentation"
           style={{
             position: "fixed",
             inset: 0,
@@ -4184,6 +4190,12 @@ export const BoardWithAPI: React.FC = () => {
             zIndex: 12000,
           }}
           onClick={() => {
+            if (advanceWarningDontRemind) {
+              handleToggleAdvanceWarning(false);
+            }
+            void apiProps.onCancelAdvanceWarning();
+          }}
+          onKeyDown={() => {
             if (advanceWarningDontRemind) {
               handleToggleAdvanceWarning(false);
             }
@@ -4204,6 +4216,7 @@ export const BoardWithAPI: React.FC = () => {
               color: "#e5fbe9",
             }}
             onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
           >
             <h2
               id="advance-warning-title"
@@ -4282,7 +4295,9 @@ export const BoardWithAPI: React.FC = () => {
         </div>
       )}
       {apiProps.fleeWarningPopup && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — stopPropagation intentionnel
         <div
+          role="presentation"
           style={{
             position: "fixed",
             inset: 0,
@@ -4293,6 +4308,12 @@ export const BoardWithAPI: React.FC = () => {
             zIndex: 12000,
           }}
           onClick={() => {
+            if (apiProps.fleeWarningPopup?.dontRemind) {
+              updateRetreatAlertSetting(false);
+            }
+            void apiProps.onCancelFleeWarning();
+          }}
+          onKeyDown={() => {
             if (apiProps.fleeWarningPopup?.dontRemind) {
               updateRetreatAlertSetting(false);
             }
@@ -4313,6 +4334,7 @@ export const BoardWithAPI: React.FC = () => {
               color: "#e5fbe9",
             }}
             onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
           >
             <h2
               id="retreat-warning-title"

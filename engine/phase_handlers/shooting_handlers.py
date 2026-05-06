@@ -7592,6 +7592,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 for w in weapon_available_pool
             ]
             # Return advance action so it gets logged as its own step
+            cover_by_unit_id = build_cover_by_unit_id_for_valid_targets(game_state, unit, valid_target_pool)
             return True, {
                 "action": "advance",
                 "unitId": unit_id,
@@ -7605,7 +7606,8 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 "blinking_units": valid_target_pool,
                 "start_blinking": True,
                 "waiting_for_player": True,
-                "available_weapons": available_weapons
+                "available_weapons": available_weapons,
+                "cover_by_unit_id": cover_by_unit_id,
             }
         else:
             # NO -> Unit advanced but no valid targets -> end_activation(ACTION, 1, ADVANCE, SHOOTING, 1)

@@ -343,8 +343,8 @@ function renderBodyWithClickIcon(
               </>
             )}
             {hasPlaceholder
-              ? parts.map((part, j) => (
-                  <span key={`part-${i}-${part.slice(0, 20)}-${j}`}>
+              ? parts.map((part) => (
+                  <span key={`part-${part.slice(0, 20)}`}>
                     {replaceCursorInText(part)}
                     {j < parts.length - 1 && (
                       <>
@@ -501,13 +501,13 @@ function highlightBoltRifleInSegment(seg: string): React.ReactNode {
   const parts = seg.split(/(Bolt Rifle)/g);
   return (
     <>
-      {parts.map((p, i) =>
+      {parts.map((p) =>
         p === "Bolt Rifle" ? (
-          <strong key={`bolt-rifle-${i}-${p}`} className="tutorial-overlay-dialog__bolt-rifle">
+          <strong key={`bolt-rifle-${p}`} className="tutorial-overlay-dialog__bolt-rifle">
             Bolt Rifle
           </strong>
         ) : (
-          <Fragment key={`seg-${i}-${String(p).slice(0, 8)}`}>{p}</Fragment>
+          <Fragment key={`seg-${String(p).slice(0, 8)}`}>{p}</Fragment>
         )
       )}
     </>
@@ -519,16 +519,16 @@ function highlightBoundingLeapInSegment(seg: string): React.ReactNode {
   const parts = seg.split(/(Bounding Leap)/g);
   return (
     <>
-      {parts.map((p, i) =>
+      {parts.map((p) =>
         p === "Bounding Leap" ? (
           <span
-            key={`bounding-leap-${i}-${p}`}
+            key={`bounding-leap-${p}`}
             className="rule-tooltip tutorial-overlay-dialog__inline-rule-tooltip"
           >
             Bounding Leap
           </span>
         ) : (
-          <Fragment key={`bound-seg-${i}-${String(p).slice(0, 8)}`}>{p}</Fragment>
+          <Fragment key={`bound-seg-${String(p).slice(0, 8)}`}>{p}</Fragment>
         )
       )}
     </>
@@ -819,13 +819,13 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
           <mask id={MASK_ID}>
             <rect x="0" y="0" width={overlayRect.width} height={overlayRect.height} fill="white" />
             <g filter={`url(#${BLUR_FILTER_ID})`}>
-              {spotlights.map((s, idx) => {
+              {spotlights.map((s) => {
                 if (s.shape === "circle") {
                   const c = s as TutorialSpotlightCircle;
                   const r = c.radius + 20;
                   return (
                     <circle
-                      key={`circle-${c.x}-${c.y}-${idx}`}
+                      key={`circle-${c.x}-${c.y}`}
                       cx={c.x}
                       cy={c.y}
                       r={r}
@@ -837,7 +837,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
                 const pad = 4;
                 return (
                   <rect
-                    key={`rect-${r.left}-${r.top}-${idx}`}
+                    key={`rect-${r.left}-${r.top}`}
                     x={r.left - pad}
                     y={r.top - pad}
                     width={r.width + pad * 2}
@@ -1234,7 +1234,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
         ? (fogLeftPanelRects as TutorialSpotlightRect[]).map((rect, i) =>
             rect.shape === "rect" ? (
               <svg
-                key={`fog-left-${rect.left}-${rect.top}-${i}`}
+                key={`fog-left-${rect.left}-${rect.top}`}
                 aria-hidden
                 role="img"
                 style={{
@@ -1275,10 +1275,10 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
           )
         : null}
       {Array.isArray(fogRightPanelRects) && fogRightPanelRects.length > 0
-        ? (fogRightPanelRects as TutorialSpotlightRect[]).map((rect, i) =>
+        ? (fogRightPanelRects as TutorialSpotlightRect[]).map((rect) =>
             rect.shape === "rect" ? (
               <div
-                key={`fog-right-${rect.left}-${rect.top}-${i}`}
+                key={`fog-right-${rect.left}-${rect.top}`}
                 aria-hidden
                 style={{
                   position: "fixed",

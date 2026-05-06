@@ -12,7 +12,8 @@
       "Bash(python3 scripts/*)",
       "Bash(python3 engine/*)",
       "Bash(python3 services/*)",
-      "Bash(/home/greg/40k/.venv/bin/python3 scripts/profile_env_step_360x312.py --warmup-steps 50 --measured-steps 300)"
+      "Bash(/home/greg/40k/.venv/bin/python3 scripts/profile_env_step_360x312.py --warmup-steps 50 --measured-steps 300)",
+      "Bash(awk 'NR>=1627{print NR\": \"$0}' /home/greg/40k/frontend/src/components/BoardPvp.tsx)"
     ]
   },
   "model": "claude-sonnet-4-6"

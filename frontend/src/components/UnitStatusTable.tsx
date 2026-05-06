@@ -832,7 +832,7 @@ const UnitRow = memo<UnitRowProps>(
                   <tbody>
                     {rngWeapons.map((weapon, idx) => (
                       <tr
-                        key={`rng-${unit.id}-${weapon.display_name}-${idx}`}
+                        key={`rng-${unit.id}-${weapon.display_name}`}
                         className="unit-status-row unit-status-row--weapon"
                         style={{
                           backgroundColor: idx === 0 ? "#222" : "#2a2a2a",
@@ -853,7 +853,7 @@ const UnitRow = memo<UnitRowProps>(
                             const { displayName, tooltipText } = getWeaponRuleDisplay(ruleId);
                             return (
                               <span
-                                key={`${unit.id}-rng-${idx}-${ruleId}`}
+                                key={`${unit.id}-rng-${ruleId}`}
                                 className="rule-badge-wrapper"
                               >
                                 <span className="rule-badge">{displayName}</span>
@@ -1075,7 +1075,7 @@ const UnitRow = memo<UnitRowProps>(
                   <tbody>
                     {ccWeapons.map((weapon, idx) => (
                       <tr
-                        key={`cc-${unit.id}-${weapon.display_name}-${idx}`}
+                        key={`cc-${unit.id}-${weapon.display_name}`}
                         className="unit-status-row unit-status-row--weapon"
                         style={{
                           backgroundColor: idx === 0 ? "#222" : "#2a2a2a",
@@ -1096,7 +1096,7 @@ const UnitRow = memo<UnitRowProps>(
                             const { displayName, tooltipText } = getWeaponRuleDisplay(ruleId);
                             return (
                               <span
-                                key={`${unit.id}-cc-${idx}-${ruleId}`}
+                                key={`${unit.id}-cc-${ruleId}`}
                                 className="rule-badge-wrapper"
                               >
                                 <span className="rule-badge">{displayName}</span>

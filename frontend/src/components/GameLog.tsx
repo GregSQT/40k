@@ -201,7 +201,7 @@ interface GameLogProps {
 
 export const GameLog: React.FC<GameLogProps> = ({
   events,
-  availableHeight = 152,
+  availableHeight: _availableHeight = 152,
   useStepNumbers = false,
   debugMode = false,
   onLastEntryRect,

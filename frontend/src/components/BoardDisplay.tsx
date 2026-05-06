@@ -2347,7 +2347,7 @@ export const drawBoard = (
       );
     } else {
       drawGroup(
-        chargeCells.map((c: any) => ({
+        chargeCells.map((c: HighlightCell | [number, number]) => ({
           col: Array.isArray(c) ? c[0] : c.col,
           row: Array.isArray(c) ? c[1] : c.row,
         })),
