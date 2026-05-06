@@ -1178,6 +1178,15 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
         return
     unit_col, unit_row = unit_pos
 
+    # Version check: skip full rebuild if no unit has moved since last build
+    current_version = game_state.get("_unit_move_version", 0)
+    if unit.get("_los_cache_version") == current_version and "los_cache" in unit:
+        dead_keys = [tid for tid in unit["los_cache"] if not is_unit_alive(tid, game_state)]
+        for tid in dead_keys:
+            unit["los_cache"].pop(tid, None)
+            unit.get("los_cover_cache", {}).pop(tid, None)
+        return
+
     # Get units_cache (must exist, built at reset)
     if "units_cache" not in game_state:
         raise KeyError("units_cache must exist (built at reset)")
@@ -1257,6 +1266,7 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
 
     unit["los_cache"] = los_map
     unit["los_cover_cache"] = cover_map
+    unit["_los_cache_version"] = game_state.get("_unit_move_version", 0)
 
 
 def _emit_shoot_activation_perf(
@@ -2796,27 +2806,37 @@ def shooting_build_valid_target_pool(
     unit["player"] = unit_player_int
     episode_num = require_key(game_state, "episode_number")
     turn_num = require_key(game_state, "turn")
-    # Hash enemy positions so cache invalidates when any target moves
-    units_cache = require_key(game_state, "units_cache")
-    enemy_pos_hash = tuple(
-        sorted(
-            (tid, int(e["col"]), int(e["row"]))
-            for tid, e in units_cache.items()
-            if int(e.get("player", -1)) != unit_player_int and is_unit_alive(tid, game_state)
+    # wall_hexes_tuple: walls never change — compute once per game_state instance
+    if "_wall_hexes_tuple_cache" not in game_state:
+        _raw_walls = require_key(game_state, "wall_hexes")
+        if not isinstance(_raw_walls, (list, set, tuple)):
+            raise TypeError(f"wall_hexes must be list/set/tuple (got {type(_raw_walls).__name__})")
+        _norm: List[Tuple[int, int]] = []
+        for _raw_wall in _raw_walls:
+            if not isinstance(_raw_wall, (list, tuple)) or len(_raw_wall) != 2:
+                raise ValueError(f"Invalid wall hex format in game_state.wall_hexes: {_raw_wall!r}")
+            _wc, _wr = normalize_coordinates(_raw_wall[0], _raw_wall[1])
+            _norm.append((_wc, _wr))
+        game_state["_wall_hexes_tuple_cache"] = tuple(sorted(_norm))
+    wall_hexes_tuple = game_state["_wall_hexes_tuple_cache"]
+    # enemy_pos_hash: cache per player, invalidate when any unit moves (_unit_move_version)
+    # Safe on unit death: cache-hit path re-filters with is_unit_alive()
+    _move_ver = game_state.get("_unit_move_version", 0)
+    _eph_store = game_state.setdefault("_enemy_pos_hash_v", {})
+    _eph_entry = _eph_store.get(unit_player_int)
+    if _eph_entry is None or _eph_entry[0] != _move_ver:
+        units_cache = require_key(game_state, "units_cache")
+        _eph = tuple(
+            sorted(
+                (tid, int(e["col"]), int(e["row"]))
+                for tid, e in units_cache.items()
+                if int(e.get("player", -1)) != unit_player_int and is_unit_alive(tid, game_state)
+            )
         )
-    )
-    wall_hexes = require_key(game_state, "wall_hexes")
-    if not isinstance(wall_hexes, (list, set, tuple)):
-        raise TypeError(
-            f"wall_hexes must be list/set/tuple (got {type(wall_hexes).__name__})"
-        )
-    normalized_wall_hexes: List[Tuple[int, int]] = []
-    for raw_wall in wall_hexes:
-        if not isinstance(raw_wall, (list, tuple)) or len(raw_wall) != 2:
-            raise ValueError(f"Invalid wall hex format in game_state.wall_hexes: {raw_wall!r}")
-        wall_col, wall_row = normalize_coordinates(raw_wall[0], raw_wall[1])
-        normalized_wall_hexes.append((wall_col, wall_row))
-    wall_hexes_tuple = tuple(sorted(normalized_wall_hexes))
+        _eph_store[unit_player_int] = (_move_ver, _eph)
+        enemy_pos_hash = _eph
+    else:
+        enemy_pos_hash = _eph_entry[1]
     precheck_cache_tag = 1 if precomputed_enemy_precheck is not None else 0
     cache_key = (
         os.getpid(),
@@ -4007,6 +4027,7 @@ def _apply_move_after_shooting(
         new_occupied=new_occupied,
     )
     _invalidate_los_cache_for_moved_unit(game_state, unit_id_str, old_col=orig_col, old_row=orig_row)
+    game_state["_unit_move_version"] = game_state.get("_unit_move_version", 0) + 1
     build_unit_los_cache(game_state, unit_id_str)
     _invalidate_all_destination_pools_after_movement(game_state)
     maybe_resolve_reactive_move(
@@ -7443,7 +7464,8 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         if actually_moved:
             # CRITICAL: Invalidate LoS cache when unit advances (moves)
             _invalidate_los_cache_for_moved_unit(game_state, unit["id"], old_col=orig_col, old_row=orig_row)
-            
+            game_state["_unit_move_version"] = game_state.get("_unit_move_version", 0) + 1
+
             # AI_TURN.md STEP 4: Rebuild unit's los_cache with new position after advance
             # CRITICAL: Rebuild unit-local cache (not global cache) with new position
             build_unit_los_cache(game_state, unit["id"])

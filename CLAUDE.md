@@ -72,6 +72,11 @@ STYLE DE RÉPONSE (NON NÉGOCIABLE) :
 - Si la réponse tient en 3 phrases, ne fais pas 3 paragraphes
 - Si je dis "oui" ou "ok", ne développe pas
 - Explique ce qui a été fait de façon simple et précise
+- ÉTAT DU CODE : ne jamais supposer. Toujours lire/vérifier avant d'affirmer.
+  → Si incertain sur ce que fait le code : lire le fichier, puis répondre.
+  → Ne jamais répondre avec "devrait", "probablement", "je pense que" sur le code.
+  → Une réponse incertaine sur le code = réponse invalide.
+- Hors code (estimations, architecture, opinions) : l'incertitude est explicite et acceptable.
 
 RECOMMANDATION MODÈLE/EFFORT (critères stricts) :
 Ne recommander que si un critère est explicitement rempli.

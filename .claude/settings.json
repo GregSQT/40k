@@ -1,5 +1,4 @@
 {
-  "model": "claude-sonnet-4-6",
   "permissions": {
     "allow": [
       "Bash(grep *)",
@@ -7,7 +6,23 @@
       "Bash(find * -name *)",
       "Bash(find * -type *)",
       "Bash(wc *)",
-      "Bash(stat *)"
+      "Bash(stat *)",
+      "Bash(ls *)",
+      "Bash(source .venv/bin/activate*)",
+      "Bash(source /home/greg/40k/.venv/bin/activate)",
+      "Bash(.venv/bin/python3 scripts/*)",
+      "Bash(.venv/bin/python3 ai/*)",
+      "Bash(.venv/bin/python3 engine/*)",
+      "Bash(.venv/bin/python3 services/*)",
+      "Bash(python3 scripts/*)",
+      "Bash(python3 -c *)",
+      "Bash(python3 ai/*)",
+      "Bash(python3 engine/*)",
+      "Bash(python3 services/*)",
+      "Bash(echo \"PID profiler: $!\")",
+      "Bash(echo \"Exit: $?\")",
+      "Skill(update-config)",
+      "Skill(update-config:*)"
     ]
   }
 }

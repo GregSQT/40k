@@ -47,7 +47,7 @@ from .shared_utils import (
 )
 
 _ADJACENT_EDGE_GAP_TOLERANCE_NORM = ENGAGEMENT_NORM_HEX_WIDTH
-FightFootprintOffsetPair = Optional[Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]]
+FightFootprintFastOffsets = Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]
 
 
 def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
@@ -814,38 +814,52 @@ def _fight_consolidation_unit_engaged_with_any_enemy(game_state: Dict[str, Any],
     )
 
 
+def _fight_precomputed_footprint_offsets_eligible(
+    unit: Dict[str, Any], game_state: Dict[str, Any]
+) -> bool:
+    """
+    True si le BFS consolidation peut utiliser des offsets pré-calculés (plateau ×10, empreinte multi-hex).
+
+    Sinon l'empreinte se résout via ``compute_candidate_footprint`` (empreinte ancrée seule ou plateau legacy).
+    """
+    from .shared_utils import get_engagement_zone
+
+    ez = int(get_engagement_zone(game_state))
+    bs = unit.get("BASE_SIZE", 1)
+    return ez > 1 and bs != 1
+
+
 def _fight_prepare_footprint_offsets(
     unit: Dict[str, Any], game_state: Dict[str, Any]
-) -> FightFootprintOffsetPair:
+) -> FightFootprintFastOffsets:
     """
     Pré-calcule les offsets d'empreinte pair/impair pour accélérer le BFS de consolidation.
 
-    Retourne ``None`` pour fallback sur ``compute_candidate_footprint`` (plateau legacy / 1-hex / erreur).
+    À n'appeler que si ``_fight_precomputed_footprint_offsets_eligible`` est vrai ; sinon ``ValueError``.
+    Toute erreur de ``precompute_footprint_offsets`` est propagée (pas d'absorption).
     """
-    cache: Dict[str, FightFootprintOffsetPair] = game_state.setdefault("_fight_fp_offset_pair_cache", {})
-    uid = str(unit["id"])
+    if not _fight_precomputed_footprint_offsets_eligible(unit, game_state):
+        raise ValueError(
+            "_fight_prepare_footprint_offsets: ineligible (engagement_zone<=1 or BASE_SIZE==1); "
+            "use compute_candidate_footprint path instead"
+        )
+    cache: Dict[str, FightFootprintFastOffsets] = game_state.setdefault("_fight_fp_offset_pair_cache", {})
+    uid = str(require_key(unit, "id"))
     if uid in cache:
-        return cache[uid]
+        cached = cache[uid]
+        if isinstance(cached, tuple) and len(cached) == 2:
+            return cached
+        del cache[uid]
 
-    from .shared_utils import get_engagement_zone
+    from engine.hex_utils import precompute_footprint_offsets
 
-    ez = get_engagement_zone(game_state)
+    shape = unit.get("BASE_SHAPE", "round")
+    orient = int(require_key(unit, "orientation"))
     bs = unit.get("BASE_SIZE", 1)
-    if ez <= 1 or bs == 1:
-        cache[uid] = None
-        return None
-    try:
-        from engine.hex_utils import precompute_footprint_offsets
-
-        shape = unit.get("BASE_SHAPE", "round")
-        orient = int(require_key(unit, "orientation"))
-        off_e, off_o = precompute_footprint_offsets(shape, bs, orient)
-        out: FightFootprintOffsetPair = (off_e, off_o)
-        cache[uid] = out
-        return out
-    except Exception:
-        cache[uid] = None
-        return None
+    off_e, off_o = precompute_footprint_offsets(shape, bs, orient)
+    out: FightFootprintFastOffsets = (off_e, off_o)
+    cache[uid] = out
+    return out
 
 
 def _candidate_footprint_fight(
@@ -853,10 +867,11 @@ def _candidate_footprint_fight(
     center_row: int,
     unit: Dict[str, Any],
     game_state: Dict[str, Any],
-    offset_pair: FightFootprintOffsetPair,
+    fast_offsets: Optional[FightFootprintFastOffsets],
 ) -> Set[Tuple[int, int]]:
-    if offset_pair is not None:
-        off_e, off_o = offset_pair
+    """Empreinte candidate : offsets pré-calculés si fournis, sinon ``compute_candidate_footprint``."""
+    if fast_offsets is not None:
+        off_e, off_o = fast_offsets
         offs = off_e if (center_col & 1) == 0 else off_o
         return {(center_col + dc, center_row + dr) for dc, dr in offs}
     return compute_candidate_footprint(center_col, center_row, unit, game_state)
@@ -943,6 +958,7 @@ def _fight_new_fp_strictly_closer_to_objective_marker_tier(
     d_min: int,
     closest_markers: List[Tuple[int, int]],
     *,
+    closer_shell_union: Optional[Set[Tuple[int, int]]] = None,
     _perf_strict_eval_acc: Optional[List[float]] = None,
 ) -> bool:
     """Même idée que ``_fight_pile_in_new_fp_strictly_closer_to_closest_tier`` : empreinte plus proche du marqueur.
@@ -959,13 +975,46 @@ def _fight_new_fp_strictly_closer_to_objective_marker_tier(
         raise ValueError(
             "_fight_new_fp_strictly_closer_to_objective_marker_tier: closest_markers must be non-empty"
         )
-    _td0 = 0.0
     if _perf_strict_eval_acc is not None:
         _td0 = time.perf_counter()
+    if closer_shell_union is not None:
+        is_strictly_closer = bool(new_fp & closer_shell_union)
+        if _perf_strict_eval_acc is not None:
+            _perf_strict_eval_acc[0] += time.perf_counter() - _td0
+        return is_strictly_closer
     d = min_distance_between_sets(new_fp, marker_set, max_distance=d_min - 1)
     if _perf_strict_eval_acc is not None:
         _perf_strict_eval_acc[0] += time.perf_counter() - _td0
     return d <= (d_min - 1)
+
+
+def _fight_min_distance_from_fp_to_marker_points(
+    fp: Set[Tuple[int, int]],
+    marker_points: List[Tuple[int, int]],
+    *,
+    max_distance: Optional[int] = None,
+) -> int:
+    """Exact min hex distance between a footprint and a small set of objective marker points."""
+    if not fp:
+        raise ValueError("_fight_min_distance_from_fp_to_marker_points: fp must be non-empty")
+    if not marker_points:
+        raise ValueError(
+            "_fight_min_distance_from_fp_to_marker_points: marker_points must be non-empty"
+        )
+
+    best: Optional[int] = None
+    for fc, fr in fp:
+        for mc, mr in marker_points:
+            d = calculate_hex_distance(fc, fr, mc, mr)
+            if best is None or d < best:
+                best = d
+                if best == 0:
+                    return 0
+    if best is None:
+        raise ValueError("_fight_min_distance_from_fp_to_marker_points: failed to compute distance")
+    if max_distance is not None and best > max_distance:
+        return max_distance + 1
+    return best
 
 
 def _fight_bfs_reachable_anchors_consolidation(
@@ -995,12 +1044,14 @@ def _fight_bfs_reachable_anchors_consolidation(
     unit_id_str = str(unit["id"])
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
-    fp_pair = _fight_prepare_footprint_offsets(unit, game_state)
+    fp_fast: Optional[FightFootprintFastOffsets] = None
+    if _fight_precomputed_footprint_offsets_eligible(unit, game_state):
+        fp_fast = _fight_prepare_footprint_offsets(unit, game_state)
     occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
     if start_footprint is not None:
         start_fp = start_footprint
     else:
-        start_fp = _candidate_footprint_fight(start_col, start_row, unit, game_state, fp_pair)
+        start_fp = _candidate_footprint_fight(start_col, start_row, unit, game_state, fp_fast)
     visited: Dict[Tuple[int, int], int] = {start_pos: 0}
     fp_by_anchor: Dict[Tuple[int, int], Set[Tuple[int, int]]] = {start_pos: start_fp}
     queue = deque([(start_pos, 0)])
@@ -1015,13 +1066,11 @@ def _fight_bfs_reachable_anchors_consolidation(
             if neighbor_pos in visited:
                 continue
             neighbor_eval_n += 1
-            _t1 = 0.0
             if _perf:
                 _t1 = time.perf_counter()
             candidate_fp = _candidate_footprint_fight(
-                neighbor_col, neighbor_row, unit, game_state, fp_pair
+                neighbor_col, neighbor_row, unit, game_state, fp_fast
             )
-            _t2 = 0.0
             if _perf:
                 s_compute_fp += time.perf_counter() - _t1
                 _t2 = time.perf_counter()
@@ -1251,6 +1300,11 @@ def _fight_plan_consolidation_destinations(
         raise ValueError(
             "_fight_plan_consolidation_destinations: closest_markers must be non-empty"
         )
+    closer_shell_union_obj: Set[Tuple[int, int]] = set()
+    if start_d_obj > 0:
+        from engine.hex_utils import dilate_hex_set_unbounded
+
+        closer_shell_union_obj = dilate_hex_set_unbounded(marker_set_obj, start_d_obj - 1)
     dist_by_anchor_obj: List[Tuple[Tuple[int, int], int]] = []
     for anchor in visited:
         if anchor == start_pos:
@@ -1266,10 +1320,13 @@ def _fight_plan_consolidation_destinations(
             fp,
             start_d_obj,
             closest_markers,
+            closer_shell_union=closer_shell_union_obj,
             _perf_strict_eval_acc=_strict_eval_acc,
         ):
             continue
-        d_tier = min_distance_between_sets(fp, marker_set_obj, max_distance=start_d_obj - 1)
+        d_tier = _fight_min_distance_from_fp_to_marker_points(
+            fp, closest_markers, max_distance=start_d_obj - 1
+        )
         if d_tier >= start_d_obj:
             continue
         dist_by_anchor_obj.append((anchor, int(d_tier)))
@@ -1850,8 +1907,6 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 "clear_selected_unit": True,
                 "clear_attack_preview": True
             }
-    else:
-        raise ValueError(f"Unreachable: current_player={game_state['current_player']}")
 
 def fight_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """Fight phase end - redirects to complete function"""
@@ -2145,10 +2200,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                         raise ValueError(f"AI target selection failed for unit {unit_id}")
                 elif is_gym_training and auto_execution_allowed:
                     first_target = valid_targets[0]
-                    if isinstance(first_target, dict):
-                        action["targetId"] = first_target["id"]
-                    else:
-                        action["targetId"] = first_target
+                    action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
                 else:
                     return False, {
                         "error": "target_id_required",

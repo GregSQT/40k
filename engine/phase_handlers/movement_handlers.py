@@ -921,6 +921,7 @@ def _attempt_movement_to_destination(
     # This prevents "shoot through wall" bugs caused by stale cache
     from .shooting_handlers import _invalidate_los_cache_for_moved_unit
     _invalidate_los_cache_for_moved_unit(game_state, unit["id"], old_col=orig_col, old_row=orig_row)
+    game_state["_unit_move_version"] = game_state.get("_unit_move_version", 0) + 1
 
     # Pools are invalidated at the START of the phase, not after each movement
     # This prevents invalidating the "moved" tracking of units that just moved
