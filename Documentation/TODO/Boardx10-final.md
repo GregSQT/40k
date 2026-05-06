@@ -707,4 +707,76 @@ Rendu PIXI.js (canvas WebGL). **Mode clic + preview** (select unit → hover hex
 
 ---
 
+## 20. Audit hypothèses "1 hex = 1 unité" — code RL/training (2026-05-06)
+
+### 20.1 Contexte
+
+Après la migration Board×10 (socles multi-cellules, `occupied_hexes`), un audit a été conduit sur les fichiers IA/training pour identifier les endroits qui calculent encore les distances **centre-à-centre** au lieu d'utiliser `min_distance_between_sets(fp_A, fp_B)` entre empreintes.
+
+**Note :** les numéros de ligne ci-dessous sont **indicatifs** (audit par extraits). Vérifier dans le fichier réel avant correction.
+
+---
+
+### 20.2 Problèmes identifiés
+
+#### Tier 1 — Critiques (impact direct sur signal d'entraînement)
+
+| Fichier | Ligne approx. | Fonction | Problème |
+|---------|--------------|----------|---------|
+| `engine/observation_builder.py` | ~2038 | `_encode_six_enemies` | Feature `is_adjacent` : `distance <= 1` centre-centre |
+| `engine/observation_builder.py` | ~901 | `_calculate_danger_probability` | `can_use_melee = distance <= melee_range` centre-centre |
+| `engine/observation_builder.py` | ~1958 | encode phase FIGHT | `is_valid = distance <= melee_range` centre-centre |
+| `engine/observation_builder.py` | ~1055 | `_can_melee_units_charge_target` | pathfinding centre→centre pour éligibilité charge |
+| `engine/action_decoder.py` | ~1511 | `can_melee_units_charge_target` | `distance <= max_charge_range` centre-centre |
+| `engine/reward_calculator.py` | ~1051 | `_calculate_expected_damage` | `can_use_melee = distance <= melee_range` centre-centre |
+
+#### Tier 2 — Importants (impact sur comportement bot adversaire)
+
+| Fichier | Lignes approx. | Problème |
+|---------|---------------|---------|
+| `engine/evaluation_bots.py` | ~365, 1192, 1214, 1234, 1243 | Sélection cible/destination par distance centre-centre |
+| `engine/phase_handlers/movement_handlers.py` | ~199, 1741, 1759, 1780 | `select_best_movement_destination` et pruning ennemis centre-centre |
+
+#### À vérifier (peut être correct selon contexte)
+
+- `engine/observation_builder.py:~526` — `_min_distance_to_objective` : hexes objectifs sont des cellules individuelles, pas des empreintes d'unités → probablement **correct**
+- `engine/phase_handlers/action_decoder.py:~1397` — deployment scoring sur hexes individuels → probablement **correct**
+- `ai/macro_training_env.py:~565` — centroïde objectif : approximation acceptable
+
+---
+
+### 20.3 Protocole de correction
+
+**Règle générale :** remplacer `calculate_hex_distance(a.col, a.row, b.col, b.row)` par `min_distance_between_sets(fp_a, fp_b)` partout où la distance sert à une décision de règle (portée, engagement, fight). Conserver la distance centre-centre uniquement pour les heuristiques pures sans impact gameplay (tri approx., budget BFS).
+
+**Pattern de correction :**
+```python
+# Avant (legacy 1 hex)
+distance = calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])
+if distance <= engagement_zone:
+    ...
+
+# Après (multi-hex)
+unit_fp = build_occupied_positions_set(unit)   # ou units_cache[uid]["occupied_hexes"]
+target_fp = build_occupied_positions_set(target)
+if min_distance_between_sets(unit_fp, target_fp) <= engagement_zone:
+    ...
+```
+
+**Ordre de correction (priorité décroissante) :**
+
+- [ ] **1. `reward_calculator.py`** — `_calculate_expected_damage` : signal de reward directement faussé
+- [ ] **2. `action_decoder.py`** — `can_melee_units_charge_target` : masques d'actions faussés
+- [ ] **3. `observation_builder.py`** — 4 endroits : features `is_adjacent`, `is_valid` fight, danger probability, charge éligibilité alliés
+- [ ] **4. `movement_handlers.py`** — `select_best_movement_destination` et `_get_nearby_enemy_cache_entries`
+- [ ] **5. `evaluation_bots.py`** — distances pour stratégie AGGRESSIVE et sélection de cible bot
+
+**Validation après chaque correction :**
+```bash
+python3 ai/train.py --agent CoreAgent --scenario bot --step
+```
+Vérifier que le comportement ne régresse pas sur les métriques de base.
+
+---
+
 *Micro-grille **B** odd-q, **plat à plat = 0,1″**, `COLS × ROWS` configurables. Socles multi-cellules avec rotation (§2.5). Zone d'engagement **10** sous-hex (§9.0). **Une seule** spec ×10 : **ce fichier**.*
