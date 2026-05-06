@@ -1508,13 +1508,21 @@ class ActionDecoder:
                     any(require_key(w, "DMG") > 0 for w in unit["CC_WEAPONS"])):  # Has melee capability
                     
                     # Simple charge range check (2d6 movement + unit MOVE)
-                    distance = calculate_hex_distance(*get_unit_coordinates(unit), *get_unit_coordinates(target))
                     if "MOVE" not in unit:
                         raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
                     from shared.data_validation import require_key as _rk
+                    from engine.hex_utils import min_distance_between_sets as _mds
                     _gr = _rk(_rk(game_state, "config"), "game_rules")
                     max_charge_range = unit["MOVE"] + _rk(_gr, "charge_max_distance")
-                    
+                    _cache = _rk(game_state, "units_cache")
+                    _ue = _cache.get(str(unit["id"]))
+                    _te = _cache.get(str(target["id"]))
+                    _uc = get_unit_coordinates(unit)
+                    _tc = get_unit_coordinates(target)
+                    unit_fp = _ue.get("occupied_hexes", {_uc}) if _ue else {_uc}
+                    target_fp = _te.get("occupied_hexes", {_tc}) if _te else {_tc}
+                    distance = _mds(unit_fp, target_fp, max_distance=max_charge_range)
+
                     if distance <= max_charge_range:
                         return True
         

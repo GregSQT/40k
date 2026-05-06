@@ -25,9 +25,11 @@ import random
 from typing import Dict, List, Tuple, Any, Optional
 from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
+from engine.hex_utils import min_distance_between_sets
 from engine.phase_handlers.shared_utils import (
     is_unit_alive, get_hp_from_cache,
     get_unit_position, require_unit_position,
+    compute_candidate_footprint,
 )
 
 DEPLOYMENT_ACTIONS = [4, 5, 6, 7, 8]
@@ -359,10 +361,15 @@ class DefensiveBot:
         """Count enemy units within threatening range."""
         threat_count = 0
         threat_range = 12
+        units_cache = game_state.get("units_cache", {})
+        unit_entry = units_cache.get(str(unit["id"]))
+        unit_fp = unit_entry.get("occupied_hexes", {(unit["col"], unit["row"])}) if unit_entry else {(unit["col"], unit["row"])}
 
         for enemy in require_key(game_state, 'units'):
             if enemy['player'] != unit['player'] and is_unit_alive(str(enemy["id"]), game_state):
-                distance = calculate_hex_distance(unit['col'], unit['row'], enemy['col'], enemy['row'])
+                enemy_entry = units_cache.get(str(enemy["id"]))
+                enemy_fp = enemy_entry.get("occupied_hexes", {(enemy["col"], enemy["row"])}) if enemy_entry else {(enemy["col"], enemy["row"])}
+                distance = min_distance_between_sets(unit_fp, enemy_fp, max_distance=threat_range)
                 if distance <= threat_range:
                     threat_count += 1
 
@@ -1186,13 +1193,15 @@ class TacticalBot:
         """Find nearest enemy unit."""
         nearest = None
         min_dist = float('inf')
+        units_cache = game_state.get("units_cache", {})
+        unit_entry = units_cache.get(str(unit.get("id", "")))
+        unit_fp = unit_entry.get("occupied_hexes", {(unit["col"], unit["row"])}) if unit_entry else {(unit["col"], unit["row"])}
 
         for enemy in require_key(game_state, 'units'):
             if enemy.get('player') != unit.get('player') and is_unit_alive(str(enemy.get("id")), game_state):
-                dist = calculate_hex_distance(
-                    unit['col'], unit['row'],
-                    enemy['col'], enemy['row']
-                )
+                enemy_entry = units_cache.get(str(enemy.get("id", "")))
+                enemy_fp = enemy_entry.get("occupied_hexes", {(enemy["col"], enemy["row"])}) if enemy_entry else {(enemy["col"], enemy["row"])}
+                dist = min_distance_between_sets(unit_fp, enemy_fp)
                 if dist < min_dist:
                     min_dist = dist
                     nearest = enemy
@@ -1204,14 +1213,18 @@ class TacticalBot:
         """Find position furthest from melee threats."""
         best_pos = destinations[0]
         max_min_dist = -1
+        units_cache = game_state.get("units_cache", {})
 
         for col, row in destinations:
+            unit_fp = compute_candidate_footprint(col, row, unit, game_state)
             min_enemy_dist = float('inf')
             for enemy in require_key(game_state, 'units'):
                 if enemy.get('player') != unit.get('player') and is_unit_alive(str(enemy.get("id")), game_state):
                     # Only consider melee threats
                     if require_key(enemy, 'CC_DMG') > require_key(enemy, 'RNG_DMG'):
-                        dist = calculate_hex_distance(col, row, enemy['col'], enemy['row'])
+                        enemy_entry = units_cache.get(str(enemy.get("id", "")))
+                        enemy_fp = enemy_entry.get("occupied_hexes", {(enemy["col"], enemy["row"])}) if enemy_entry else {(enemy["col"], enemy["row"])}
+                        dist = min_distance_between_sets(unit_fp, enemy_fp)
                         min_enemy_dist = min(min_enemy_dist, dist)
 
             if min_enemy_dist > max_min_dist:
@@ -1227,11 +1240,15 @@ class TacticalBot:
         from engine.utils.weapon_helpers import get_max_ranged_range
         rng_weapons = require_key(unit, 'RNG_WEAPONS')
         rng_rng = get_max_ranged_range(unit) if rng_weapons else 0
+        units_cache = game_state.get("units_cache", {})
+        target_entry = units_cache.get(str(target.get("id", "")))
+        target_fp = target_entry.get("occupied_hexes", {(target["col"], target["row"])}) if target_entry else {(target["col"], target["row"])}
         best_pos = destinations[0]
         best_dist = float('inf')
 
         for col, row in destinations:
-            dist = calculate_hex_distance(col, row, target['col'], target['row'])
+            unit_fp = compute_candidate_footprint(col, row, unit, game_state)
+            dist = min_distance_between_sets(unit_fp, target_fp, max_distance=rng_rng)
             # Prefer positions within shooting range
             if dist <= rng_rng and dist < best_dist:
                 best_dist = dist
@@ -1240,7 +1257,8 @@ class TacticalBot:
         # If no position in range, get closest
         if best_dist == float('inf'):
             for col, row in destinations:
-                dist = calculate_hex_distance(col, row, target['col'], target['row'])
+                unit_fp = compute_candidate_footprint(col, row, unit, game_state)
+                dist = min_distance_between_sets(unit_fp, target_fp)
                 if dist < best_dist:
                     best_dist = dist
                     best_pos = (col, row)

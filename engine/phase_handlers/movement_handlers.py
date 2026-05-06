@@ -1726,8 +1726,13 @@ def _select_strategic_destination(
     if not enemy_units:
         return valid_destinations[0]
 
-    # Pre-build enemy positions from cache (avoids repeated require_unit_position calls)
-    enemy_positions = {eid: (units_cache[str(eid)]["col"], units_cache[str(eid)]["row"]) for eid in enemy_units}
+    # Pre-build enemy footprints from cache (footprint-based distance for all strategies)
+    from engine.hex_utils import min_distance_between_sets as _mds_sd
+    enemy_footprints = {
+        eid: (units_cache[str(eid)].get("occupied_hexes") or
+              {(units_cache[str(eid)]["col"], units_cache[str(eid)]["row"])})
+        for eid in enemy_units
+    }
 
     # STRATEGY 0: AGGRESSIVE - Move closest to nearest enemy
     if strategy_id == 0:
@@ -1735,10 +1740,9 @@ def _select_strategic_destination(
         min_dist_to_enemy = float('inf')
 
         for dest in valid_destinations:
-            # Find distance to nearest enemy from this destination
+            unit_fp = compute_candidate_footprint(dest[0], dest[1], unit, game_state)
             for enemy_id in enemy_units:
-                enemy_col, enemy_row = enemy_positions[enemy_id]
-                dist = calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
+                dist = _mds_sd(unit_fp, enemy_footprints[enemy_id])
                 if dist < min_dist_to_enemy:
                     min_dist_to_enemy = dist
                     best_dest = dest
@@ -1747,18 +1751,16 @@ def _select_strategic_destination(
 
     # STRATEGY 1: TACTICAL - Move to position with most enemies in shooting range
     elif strategy_id == 1:
-        # Use max ranged range from weapons
         weapon_range = get_max_ranged_range(unit)
         best_dest = valid_destinations[0]
         max_targets = 0
 
         for dest in valid_destinations:
+            unit_fp = compute_candidate_footprint(dest[0], dest[1], unit, game_state)
             targets_in_range = 0
             for enemy_id in enemy_units:
-                enemy_col, enemy_row = enemy_positions[enemy_id]
-                dist = calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
+                dist = _mds_sd(unit_fp, enemy_footprints[enemy_id], max_distance=weapon_range)
                 if dist <= weapon_range:
-                    # Check LoS (simplified - assumes LoS if in range for now)
                     targets_in_range += 1
 
             if targets_in_range > max_targets:
@@ -1773,11 +1775,10 @@ def _select_strategic_destination(
         max_min_dist = 0
 
         for dest in valid_destinations:
-            # Find distance to nearest enemy (we want to maximize this)
+            unit_fp = compute_candidate_footprint(dest[0], dest[1], unit, game_state)
             min_dist_to_any_enemy = float('inf')
             for enemy_id in enemy_units:
-                enemy_col, enemy_row = enemy_positions[enemy_id]
-                dist = calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
+                dist = _mds_sd(unit_fp, enemy_footprints[enemy_id])
                 if dist < min_dist_to_any_enemy:
                     min_dist_to_any_enemy = dist
 

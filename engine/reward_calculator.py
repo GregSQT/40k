@@ -16,6 +16,7 @@ from engine.phase_handlers.shared_utils import (
     get_unit_position, require_unit_position,
 )
 from engine.game_utils import get_unit_by_id
+from engine.hex_utils import min_distance_between_sets
 from shared.data_validation import require_key
 
 class RewardCalculator:
@@ -1048,7 +1049,12 @@ class RewardCalculator:
         melee_range = get_engagement_zone(game_state)
         
         can_use_ranged = max_ranged_range > 0 and distance <= max_ranged_range
-        can_use_melee = distance <= melee_range
+        units_cache = require_key(game_state, "units_cache")
+        defender_entry = units_cache.get(str(defender["id"]))
+        attacker_entry = units_cache.get(str(attacker["id"]))
+        defender_fp = defender_entry.get("occupied_hexes", {(defender_col, defender_row)}) if defender_entry else {(defender_col, defender_row)}
+        attacker_fp = attacker_entry.get("occupied_hexes", {(attacker_col, attacker_row)}) if attacker_entry else {(attacker_col, attacker_row)}
+        can_use_melee = min_distance_between_sets(defender_fp, attacker_fp, max_distance=melee_range) <= melee_range
 
         if not can_use_ranged and not can_use_melee:
             return 0.0

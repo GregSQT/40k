@@ -766,6 +766,8 @@ export default function Board({
   /** Redessin ligne mesure — défini tant que l’effet « mesure » est monté (pas de cleanup quand seules les jonctions changent). */
   const measureLineRedrawRef = useRef<((clientX: number, clientY: number) => void) | null>(null);
   const hoveredHexRef = useRef<{ col: number; row: number } | null>(null);
+  /** Contexte actif quand hoveredHexRef a été mis à jour — pour invalider la restauration si le contexte change. */
+  const hoveredHexContextRef = useRef<{ mode: string; unitId: number | null } | null>(null);
   const losHexRef = useRef<{ col: number; row: number } | null>(null);
   const movePreviewBackendLosCacheRef = useRef<Map<string, BackendMoveLosPreviewPayload>>(
     new Map()
@@ -2087,6 +2089,7 @@ export default function Board({
       }
 
       hoveredHexRef.current = { col: iconCol, row: iconRow };
+      hoveredHexContextRef.current = { mode, unitId: movementPreviewUnitId };
 
       // Find nearest valid center for LoS (icon may be on a footprint extension hex)
       let losCol = iconCol;
@@ -2362,6 +2365,41 @@ export default function Board({
     }
 
     if (canvas) canvas.addEventListener("mousemove", onMouseMove);
+    // Restaure la visibilité du ghost si on était déjà en hover (la cleanup l'a caché sans le déplacer)
+    {
+      const activeMovIdRestore =
+        phase === "move" && gameState?.active_movement_unit != null
+          ? parseRequiredUnitId(gameState.active_movement_unit, "gameState.active_movement_unit")
+          : null;
+      const previewUnitIdRestore = phase === "move" ? activeMovIdRestore : selectedUnitId;
+      const allowRestore =
+        previewUnitIdRestore !== null &&
+        ((effectivePhase === "move" && activeMovIdRestore !== null) ||
+          mode === "advancePreview" ||
+          (phase === "charge" && mode === "chargePreview") ||
+          (phase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview")));
+      const sameContext =
+        hoveredHexContextRef.current?.mode === mode &&
+        hoveredHexContextRef.current?.unitId === previewUnitIdRestore;
+      if (!sameContext) {
+        hoveredHexRef.current = null;
+        hoveredHexContextRef.current = null;
+      }
+      if (
+        allowRestore &&
+        sameContext &&
+        hoveredHexRef.current &&
+        hoverSpriteRef.current &&
+        !hoverSpriteRef.current.destroyed
+      ) {
+        hoverSpriteRef.current.visible = true;
+        // hoverOverlayRef n'est pas rempli en advancePreview (triggerLosForHex y est skippé) :
+        // le ghost LoS vient de appendShootingPreviewCells. Restaurer ici afficherait du contenu périmé.
+        if (mode !== "advancePreview" && hoverOverlayRef.current && !hoverOverlayRef.current.destroyed) {
+          hoverOverlayRef.current.visible = true;
+        }
+      }
+    }
     return () => {
       losEffectActive = false;
       if (losDebounceTimer) clearTimeout(losDebounceTimer);
@@ -3056,6 +3094,13 @@ export default function Board({
       canvasContainerRef.current.appendChild(canvas);
     }
 
+    const clearMovePreviewLos = () => {
+      hoveredHexRef.current = null;
+      if (hoverOverlayRef.current && !hoverOverlayRef.current.destroyed) {
+        hoverOverlayRef.current.visible = false;
+      }
+    };
+
     // Set up board click handler IMMEDIATELY after canvas creation
     setupBoardClickHandler({
       onSelectUnit: stableCallbacks.current.onSelectUnit,
@@ -3076,17 +3121,27 @@ export default function Board({
       },
       onShoot: stableCallbacks.current.onShoot,
       onCombatAttack: stableCallbacks.current.onFightAttack || (() => {}),
-      onConfirmMove: stableCallbacks.current.onConfirmMove,
+      onConfirmMove: () => {
+        clearMovePreviewLos();
+        stableCallbacks.current.onConfirmMove();
+      },
       onCancelMove: stableCallbacks.current.onCancelMove,
       onCancelCharge: stableCallbacks.current.onCancelCharge,
       onCancelAdvance: stableCallbacks.current.onCancelAdvance,
       onDeployUnit: stableCallbacks.current.onDeployUnit,
       onActivateCharge: stableCallbacks.current.onActivateCharge,
       onActivateFight: stableCallbacks.current.onActivateFight,
-      onMoveCharger: stableCallbacks.current.onMoveCharger,
+      onMoveCharger: (chargerId: number, dc: number, dr: number) => {
+        clearMovePreviewLos();
+        stableCallbacks.current.onMoveCharger?.(chargerId, dc, dr);
+      },
       onChargeEnemyUnit: stableCallbacks.current.onChargeEnemyUnit || (() => {}),
-      onAdvanceMove: stableCallbacks.current.onAdvanceMove,
+      onAdvanceMove: (uid: number | string, dc: number, dr: number) => {
+        clearMovePreviewLos();
+        stableCallbacks.current.onAdvanceMove?.(uid, dc, dr);
+      },
       onPileInMove: (uid: number, dc: number, dr: number) => {
+        clearMovePreviewLos();
         stableCallbacks.current.onPileInMove?.(uid, dc, dr);
       },
       onStartMovePreview: onStartMovePreview,
@@ -3096,6 +3151,7 @@ export default function Board({
         row: number | string,
         orientation?: number
       ) => {
+        clearMovePreviewLos();
         onDirectMove(unitId, col, row, orientation);
       },
     });

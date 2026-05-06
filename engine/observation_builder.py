@@ -898,7 +898,13 @@ class ObservationBuilder:
         melee_range = get_engagement_zone(game_state)
 
         can_use_ranged = max_ranged_range > 0 and distance <= max_ranged_range
-        can_use_melee = distance <= melee_range
+        from engine.hex_utils import min_distance_between_sets as _mds_dp
+        _cache_dp = require_key(game_state, "units_cache")
+        _de = _cache_dp.get(str(defender["id"]))
+        _ae = _cache_dp.get(str(attacker["id"]))
+        _dfp = _de.get("occupied_hexes", {(defender_col, defender_row)}) if _de else {(defender_col, defender_row)}
+        _afp = _ae.get("occupied_hexes", {(attacker_col, attacker_row)}) if _ae else {(attacker_col, attacker_row)}
+        can_use_melee = _mds_dp(_dfp, _afp, max_distance=melee_range) <= melee_range
 
         if not can_use_ranged and not can_use_melee:
             self._danger_probability_cache[cache_key] = 0.0
@@ -1049,18 +1055,20 @@ class ObservationBuilder:
                 is_unit_alive(str(unit["id"]), game_state) and
                 has_melee):  # Has melee capability
 
-                # Charge range check using BFS pathfinding to respect walls
-                unit_col, unit_row = positions[str(unit["id"])]
-                target_col, target_row = positions[str(target["id"])]
-                distance = calculate_pathfinding_distance(
-                    unit_col, unit_row,
-                    target_col, target_row,
-                    game_state
-                )
+                # Charge range check — footprint-based distance
                 if "MOVE" not in unit:
                     raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
                 _gr = require_key(require_key(game_state, "config"), "game_rules")
                 max_charge_range = unit["MOVE"] + require_key(_gr, "charge_max_distance")
+                from engine.hex_utils import min_distance_between_sets as _mds_cmct
+                _cmct_cache = require_key(game_state, "units_cache")
+                _ue_cmct = _cmct_cache.get(str(unit["id"]))
+                _te_cmct = _cmct_cache.get(str(target["id"]))
+                unit_col, unit_row = positions[str(unit["id"])]
+                target_col, target_row = positions[str(target["id"])]
+                _ufp = _ue_cmct.get("occupied_hexes", {(unit_col, unit_row)}) if _ue_cmct else {(unit_col, unit_row)}
+                _tfp = _te_cmct.get("occupied_hexes", {(target_col, target_row)}) if _te_cmct else {(target_col, target_row)}
+                distance = _mds_cmct(_ufp, _tfp, max_distance=max_charge_range)
 
                 if distance <= max_charge_range:
                     return True
@@ -1919,7 +1927,20 @@ class ObservationBuilder:
             feature_base = base_idx + i * 22
             if i < len(enemies):
                 distance, enemy = enemies[i]
-                
+
+                # Footprint-based distance for melee/engagement features
+                from engine.hex_utils import min_distance_between_sets as _mds_enc
+                from engine.spatial_relations import get_engagement_zone as _gez_enc
+                _enc_cache = require_key(game_state, "units_cache")
+                _enc_ae = _enc_cache.get(str(active_unit["id"]))
+                _enc_ee = _enc_cache.get(str(enemy["id"]))
+                _enc_acol, _enc_arow = positions[str(active_unit["id"])]
+                _enc_ecol, _enc_erow = positions[str(enemy["id"])]
+                _enc_afp = _enc_ae.get("occupied_hexes", {(_enc_acol, _enc_arow)}) if _enc_ae else {(_enc_acol, _enc_arow)}
+                _enc_efp = _enc_ee.get("occupied_hexes", {(_enc_ecol, _enc_erow)}) if _enc_ee else {(_enc_ecol, _enc_erow)}
+                _enc_ez = _gez_enc(game_state)
+                _enc_fp_dist = _mds_enc(_enc_afp, _enc_efp, max_distance=_enc_ez)
+
                 # Feature 0-2: Position and distance
                 enemy_col, enemy_row = positions[str(enemy["id"])]
                 active_col, active_row = positions[str(active_unit["id"])]
@@ -1954,8 +1975,7 @@ class ObservationBuilder:
                     max_range = get_max_ranged_range(active_unit)
                     is_valid = 1.0 if distance <= max_range else 0.0
                 elif current_phase == "fight":
-                    melee_range = get_engagement_zone(game_state)
-                    is_valid = 1.0 if distance <= melee_range else 0.0
+                    is_valid = 1.0 if _enc_fp_dist <= _enc_ez else 0.0
                 obs[feature_base + 10] = is_valid
                 
                 # Feature 11-12: best_weapon_index + best_kill_probability (phase-aware)
@@ -2034,8 +2054,8 @@ class ObservationBuilder:
                 else:
                     obs[feature_base + 17] = 0.0
                 
-                # Feature 18: is_adjacent (était feature 18 originale) - INCHANGÉ
-                obs[feature_base + 18] = 1.0 if distance <= 1 else 0.0
+                # Feature 18: is_adjacent (within engagement zone — footprint-based)
+                obs[feature_base + 18] = 1.0 if _enc_fp_dist <= _enc_ez else 0.0
                 
                 # Features 19-20: Enemy capabilities (2 floats, était 20-22) - DÉCALÉ
                 obs[feature_base + 19] = self._calculate_combat_mix_score(enemy)
