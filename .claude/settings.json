@@ -1,4 +1,21 @@
 {
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FILE=$(jq -r '.tool_input.file_path // empty' 2>/dev/null); if echo \"$FILE\" | grep -qE '\\.py$'; then cd /home/greg/40k && .venv/bin/python3 -m pytest tests/ -x -q 2>&1 | tail -30; R=${PIPESTATUS[0]}; [ $R -ne 0 ] && exit 2; elif echo \"$FILE\" | grep -qE '\\.(ts|tsx)$'; then cd /home/greg/40k/frontend && npx vitest run 2>&1 | tail -30; R=${PIPESTATUS[0]}; [ $R -ne 0 ] && exit 2; fi",
+            "asyncRewake": true,
+            "timeout": 120,
+            "statusMessage": "Tests de non-régression...",
+            "rewakeMessage": "Tests échoués après modification :"
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "allow": [
       "Bash(grep *)",
@@ -24,7 +41,8 @@
       "Skill(update-config)",
       "Skill(update-config:*)",
       "Bash(sed -n '830,860p' /home/greg/40k/frontend/src/components/UnitStatusTable.tsx)",
-      "Bash(sed -n '1074,1104p' /home/greg/40k/frontend/src/components/UnitStatusTable.tsx)"
+      "Bash(sed -n '1074,1104p' /home/greg/40k/frontend/src/components/UnitStatusTable.tsx)",
+      "Bash(npx vitest *)"
     ]
   }
 }

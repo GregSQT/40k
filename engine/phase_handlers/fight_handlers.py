@@ -260,8 +260,9 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
     if current_player_int not in (1, 2):
         raise ValueError(f"Invalid current_player value: {current_player_int}")
     game_state["current_player"] = current_player_int
+    current_player = current_player_int
 
-    non_active_player = 3 - game_state["current_player"]
+    non_active_player = 3 - current_player
 
     # AI_TURN.md COMPLIANCE: Ensure units_fought exists before any checks
     if "units_fought" not in game_state:
