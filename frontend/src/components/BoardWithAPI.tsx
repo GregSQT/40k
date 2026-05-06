@@ -31,11 +31,12 @@ import {
   type TutorialSpotlightRect,
   useTutorial,
 } from "../contexts/TutorialContext";
-import { useEngineAPI, type UseEngineAPIBlinkBoardProps } from "../hooks/useEngineAPI";
+import { type UseEngineAPIBlinkBoardProps, useEngineAPI } from "../hooks/useEngineAPI";
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
 import type { GamePhase, GameState, PlayerId, TargetPreview, Unit } from "../types";
 import type { DeploymentState } from "../types/game";
+import { resolveBaseSizeForUnitDisplay } from "../utils/hexFootprint";
 import BoardPvp, { type MeasureModeState } from "./BoardPvp";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
@@ -45,7 +46,6 @@ import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import TutorialOverlay from "./TutorialOverlay";
 import { UnitStatusTable } from "./UnitStatusTable";
-import { resolveBaseSizeForUnitDisplay } from "../utils/hexFootprint";
 
 type RuleChoicePrompt = {
   trigger: "on_deploy" | "turn_start" | "player_turn_start" | "phase_start" | "activation_start";
@@ -222,7 +222,9 @@ function buildPickMenusByProfile(config: EvolutionCatalogConfig): Map<string, Pr
   return result;
 }
 
-function buildDefaultPicksByProfile(config: EvolutionCatalogConfig): Map<string, EndlessDutyPickState> {
+function buildDefaultPicksByProfile(
+  config: EvolutionCatalogConfig
+): Map<string, EndlessDutyPickState> {
   const defaults = new Map<string, EndlessDutyPickState>();
   const loadouts = config.loadouts ?? [];
   for (const loadout of loadouts) {
@@ -238,11 +240,11 @@ function buildDefaultPicksByProfile(config: EvolutionCatalogConfig): Map<string,
       secondary:
         typeof picks.secondary === "string" && picks.secondary !== "none" ? picks.secondary : null,
       special:
-        (typeof picks.special === "string" && picks.special !== "none"
+        typeof picks.special === "string" && picks.special !== "none"
           ? picks.special
           : typeof picks.equipment === "string" && picks.equipment !== "none"
             ? picks.equipment
-            : null),
+            : null,
     });
   }
   return defaults;
@@ -285,7 +287,10 @@ function TutorialOverlayGate(): React.ReactNode {
     (TUTORIAL_STEP_TITLES_HALO_LEFT.includes(
       title as (typeof TUTORIAL_STEP_TITLES_HALO_LEFT)[number]
     ) ||
-      stage === "1-15" || stage === "1-16" || stage === "1-23" || isStage124Family ||
+      stage === "1-15" ||
+      stage === "1-16" ||
+      stage === "1-23" ||
+      isStage124Family ||
       (isFrom2_1Onwards && !isStage2_11Or12)) &&
     stage !== "1-14";
   const isStep2_1 = stage === "1-21";
@@ -428,7 +433,12 @@ function TutorialOverlayGate(): React.ReactNode {
   const toSpotlightRect = (element: Element | null): TutorialSpotlightRect[] => {
     if (!(element instanceof HTMLElement)) return [];
     const rect = element.getBoundingClientRect();
-    if (!Number.isFinite(rect.width) || !Number.isFinite(rect.height) || rect.width <= 0 || rect.height <= 0) {
+    if (
+      !Number.isFinite(rect.width) ||
+      !Number.isFinite(rect.height) ||
+      rect.width <= 0 ||
+      rect.height <= 0
+    ) {
       return [];
     }
     return [
@@ -447,8 +457,12 @@ function TutorialOverlayGate(): React.ReactNode {
   const guideP2ChangeRosterSpotlight = toSpotlightRect(
     document.querySelector(".deployment-panel__change-roster--player2")
   );
-  const guideStartDeploymentSpotlight = toSpotlightRect(document.querySelector(".test-start-bar__button"));
-  const guideP1RosterSpotlight = toSpotlightRect(document.querySelector(".deployment-panel__roster--player1"));
+  const guideStartDeploymentSpotlight = toSpotlightRect(
+    document.querySelector(".test-start-bar__button")
+  );
+  const guideP1RosterSpotlight = toSpotlightRect(
+    document.querySelector(".deployment-panel__roster--player1")
+  );
   const guideP1DeploymentZoneSpotlight =
     leftPanelSpotlight != null
       ? [leftPanelSpotlight]
@@ -563,7 +577,9 @@ function TutorialOverlayGate(): React.ReactNode {
       }
       tableNameMSpotlightRectsForLayout={
         stage === "1-15" && Array.isArray(tutorial.spotlightTablePositions)
-          ? tutorial.spotlightTablePositions.filter((s): s is TutorialSpotlightRect => s.shape === "rect")
+          ? tutorial.spotlightTablePositions.filter(
+              (s): s is TutorialSpotlightRect => s.shape === "rect"
+            )
           : null
       }
     />
@@ -608,7 +624,11 @@ function TurnPhaseTrackerWithTutorial(
     if (!showTurnPhaseRects && tutorial?.setSpotlightTutorialPopupAnchor) {
       tutorial.setSpotlightTutorialPopupAnchor(null);
     }
-  }, [showTurnPhaseRects, tutorial?.setSpotlightTurnPhasePositions, tutorial?.setSpotlightTutorialPopupAnchor]);
+  }, [
+    showTurnPhaseRects,
+    tutorial?.setSpotlightTurnPhasePositions,
+    tutorial?.setSpotlightTutorialPopupAnchor,
+  ]);
   return (
     <TurnPhaseTracker
       {...props}
@@ -747,7 +767,6 @@ function BoardColumnWithTutorial({
     boardRows,
     tutorial?.setSpotlightLeftPanel,
     tutorial?.setLeftPanelFogRects,
-    tutorial?.spotlightLayoutTick,
   ]);
   return (
     <div ref={ref} className="board-column-overlay-anchor">
@@ -914,7 +933,6 @@ function RightColumnTutorialSpotlight({
     shouldShowRightFog,
     tutorial?.setSpotlightRightPanel,
     tutorial?.setRightPanelFogRects,
-    tutorial?.spotlightLayoutTick,
   ]);
   return (
     <div ref={ref} style={{ display: "contents" }}>
@@ -995,7 +1013,12 @@ function BoardPvpWithTutorialAdvance(
   );
 
   const wrappedOnDirectMove = useCallback(
-    async (unitId: number | string, col: number | string, row: number | string, orientation?: number) => {
+    async (
+      unitId: number | string,
+      col: number | string,
+      row: number | string,
+      orientation?: number
+    ) => {
       if (tutorial?.currentStep?.advanceOnMoveClick && tutorial?.prepareSkipNextPhaseTrigger) {
         tutorial.prepareSkipNextPhaseTrigger();
       }
@@ -1063,7 +1086,12 @@ function BoardPvpWithTutorialAdvance(
       }
       onDirectMove={
         props.onDirectMove != null
-          ? (unitId: string | number, col: string | number, row: string | number, orientation?: number) => {
+          ? (
+              unitId: string | number,
+              col: string | number,
+              row: string | number,
+              orientation?: number
+            ) => {
               void wrappedOnDirectMove(unitId, col, row, orientation);
             }
           : (_unitId: string | number, _col: string | number, _row: string | number) => {}
@@ -1321,13 +1349,13 @@ export const BoardWithAPI: React.FC = () => {
       ? "tutorial"
       : location.pathname === "/game" && location.search.includes("mode=endless_duty")
         ? "endless_duty"
-      : location.pathname === "/game" && location.search.includes("mode=pvp_test")
-        ? "pvp_test"
-        : location.pathname === "/game" && location.search.includes("mode=pve_test")
-          ? "pve"
-          : location.pathname === "/game" && location.search.includes("mode=pve")
+        : location.pathname === "/game" && location.search.includes("mode=pvp_test")
+          ? "pvp_test"
+          : location.pathname === "/game" && location.search.includes("mode=pve_test")
             ? "pve"
-            : "pvp";
+            : location.pathname === "/game" && location.search.includes("mode=pve")
+              ? "pve"
+              : "pvp";
   const modeGuideMode: "pve" | "pvp" | null =
     !isTutorialMode && gameMode === "pve"
       ? "pve"
@@ -1355,7 +1383,7 @@ export const BoardWithAPI: React.FC = () => {
       return undefined;
     }
     return objectives.map((objective) => {
-      if (!objective || !objective.name) {
+      if (!objective?.name) {
         throw new Error("Objective missing required name field");
       }
       if (!objective.hexes) {
@@ -1464,8 +1492,9 @@ export const BoardWithAPI: React.FC = () => {
   );
 
   const endlessDutyUnlockRules = useMemo(() => {
-    const endlessCfg = (endlessDutyScenarioConfig as { endless_duty?: { wave_unlock_rules?: Record<string, number> } })
-      .endless_duty;
+    const endlessCfg = (
+      endlessDutyScenarioConfig as { endless_duty?: { wave_unlock_rules?: Record<string, number> } }
+    ).endless_duty;
     const waveUnlockRules = endlessCfg?.wave_unlock_rules ?? {};
     return {
       leader: Number(waveUnlockRules.leader ?? 1),
@@ -1566,7 +1595,11 @@ export const BoardWithAPI: React.FC = () => {
     [getDefaultPicksForProfile]
   );
   const handleEndlessDutyPickChange = useCallback(
-    (slot: keyof EndlessDutySlotProfiles, pickKey: keyof EndlessDutyPickState, pickValue: string | null) => {
+    (
+      slot: keyof EndlessDutySlotProfiles,
+      pickKey: keyof EndlessDutyPickState,
+      pickValue: string | null
+    ) => {
       setEndlessDutyDraftPicks((prev) => {
         const current = prev[slot];
         if (!current) {
@@ -1592,7 +1625,9 @@ export const BoardWithAPI: React.FC = () => {
       await apiProps.commitEndlessDuty(endlessDutyDraft, endlessDutyDraftPicks);
       setIsEndlessDutyModalOpen(false);
     } catch (error) {
-      setEndlessDutyFormError(error instanceof Error ? error.message : "Commit requisition impossible");
+      setEndlessDutyFormError(
+        error instanceof Error ? error.message : "Commit requisition impossible"
+      );
     } finally {
       setIsSubmittingEndlessDuty(false);
     }
@@ -1843,7 +1878,9 @@ export const BoardWithAPI: React.FC = () => {
         canUseAutoWeaponSelection && (autoSelectWeaponStr ? JSON.parse(autoSelectWeaponStr) : true),
       retreatAlertEnabled: retreatAlertEnabledStr ? JSON.parse(retreatAlertEnabledStr) : true,
       modeGuidesActivated:
-        modeGuidesActivatedStr != null ? JSON.parse(modeGuidesActivatedStr) : !guidesSeenAtLeastOnce,
+        modeGuidesActivatedStr != null
+          ? JSON.parse(modeGuidesActivatedStr)
+          : !guidesSeenAtLeastOnce,
     };
   });
 
@@ -1911,7 +1948,9 @@ export const BoardWithAPI: React.FC = () => {
   }, [modeGuideMode, settings.modeGuidesActivated]);
 
   const activeTutorialMode = isTutorialMode || isModeGuideActive;
-  const tutorialScenarioType: "tutorial" | "mode_guide" = isTutorialMode ? "tutorial" : "mode_guide";
+  const tutorialScenarioType: "tutorial" | "mode_guide" = isTutorialMode
+    ? "tutorial"
+    : "mode_guide";
   const handleModeGuideComplete = useCallback(() => {
     if (modeGuideMode == null) {
       setIsModeGuideActive(false);
@@ -2077,8 +2116,7 @@ export const BoardWithAPI: React.FC = () => {
     // Don't use lastProcessedTurn to block - rely on isAIProcessingRef and hasEligibleAIUnits
     // lastProcessedTurn is only used to detect turn/phase changes for reset
     // Tutoriel 2-11/2-12/2-13 : pause IA tant que le popup est visible (Hormagaunts immobiles jusqu'au clic Suivant)
-    const tutorialPauseFromSync =
-      isTutorialMode && tutorialPauseAiSyncRef.current;
+    const tutorialPauseFromSync = isTutorialMode && tutorialPauseAiSyncRef.current;
     const shouldTriggerAI =
       isAiEnabled &&
       isAITurn &&
@@ -2201,15 +2239,7 @@ export const BoardWithAPI: React.FC = () => {
       //   turnKeyMatches: lastProcessedTurn === turnKey
       // });
     }
-  }, [
-    isAiMode,
-    apiProps,
-    gameMode,
-    lastProcessedTurn,
-    pauseAIForTutorial,
-    isTutorialMode,
-    tutorialPauseAiSyncRef,
-  ]);
+  }, [isAiMode, apiProps, gameMode, lastProcessedTurn, pauseAIForTutorial, isTutorialMode]);
 
   // Update lastProcessedTurn when phase/turn changes (to track phase transitions)
   useEffect(() => {
@@ -2232,7 +2262,8 @@ export const BoardWithAPI: React.FC = () => {
   }, [apiProps.gameState, apiProps.fightSubPhase, lastProcessedTurn]);
 
   const illustrationPreviewUnit = useMemo(() => {
-    const effectiveIllustrationUnitId = illustrationPreviewUnitId ?? apiProps.selectedUnitId ?? null;
+    const effectiveIllustrationUnitId =
+      illustrationPreviewUnitId ?? apiProps.selectedUnitId ?? null;
     const statusUnits = apiProps.gameState?.units;
     if (effectiveIllustrationUnitId === null || !statusUnits) {
       return null;
@@ -3087,7 +3118,9 @@ export const BoardWithAPI: React.FC = () => {
           gameMode={gameMode}
           victoryPoints={getVictoryPointsForPlayer(1)}
           onCollapseChange={setPlayer1Collapsed}
-          detailPreviewUnitId={illustrationPreviewUnit?.player === 1 ? illustrationPreviewUnit.id : null}
+          detailPreviewUnitId={
+            illustrationPreviewUnit?.player === 1 ? illustrationPreviewUnit.id : null
+          }
         />
       </ErrorBoundary>
 
@@ -3106,7 +3139,9 @@ export const BoardWithAPI: React.FC = () => {
           gameMode={gameMode}
           victoryPoints={getVictoryPointsForPlayer(2)}
           onCollapseChange={setPlayer2Collapsed}
-          detailPreviewUnitId={illustrationPreviewUnit?.player === 2 ? illustrationPreviewUnit.id : null}
+          detailPreviewUnitId={
+            illustrationPreviewUnit?.player === 2 ? illustrationPreviewUnit.id : null
+          }
         />
       </ErrorBoundary>
     </RightColumnTutorialSpotlight>
@@ -3196,7 +3231,8 @@ export const BoardWithAPI: React.FC = () => {
       [slot]: picks,
     };
     const candidateInvested = resolveDraftInvestedTotal(candidateProfiles, candidatePicks);
-    const candidateAvailable = candidateInvested == null ? null : requisitionCapitalTotal - candidateInvested;
+    const candidateAvailable =
+      candidateInvested == null ? null : requisitionCapitalTotal - candidateInvested;
     return candidateAvailable != null && candidateAvailable >= 0;
   };
   const getProfileLabel = (slot: keyof EndlessDutySlotProfiles, profile: string): string => {
@@ -3419,36 +3455,100 @@ export const BoardWithAPI: React.FC = () => {
             }}
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 id="endless-duty-title" style={{ margin: "0 0 8px 0", color: "#bfdbfe", fontSize: "28px" }}>
+            <h2
+              id="endless-duty-title"
+              style={{ margin: "0 0 8px 0", color: "#bfdbfe", fontSize: "28px" }}
+            >
               Endless Duty - Requisition
             </h2>
             <p style={{ margin: "0 0 12px 0", lineHeight: 1.5, fontSize: "16px" }}>
               Wave {currentWave} cleared. Configurez votre escouade avant la prochaine vague.
             </p>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginBottom: "14px" }}>
-              <div style={{ background: "rgba(15, 23, 42, 0.8)", border: "1px solid #334155", borderRadius: "6px", padding: "8px 10px" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr 1fr",
+                gap: "10px",
+                marginBottom: "14px",
+              }}
+            >
+              <div
+                style={{
+                  background: "rgba(15, 23, 42, 0.8)",
+                  border: "1px solid #334155",
+                  borderRadius: "6px",
+                  padding: "8px 10px",
+                }}
+              >
                 <div style={{ fontSize: "12px", color: "#94a3b8" }}>Capital total</div>
-                <div style={{ fontSize: "18px", fontWeight: 700 }}>{endlessDutyState?.requisition_capital_total ?? 0}</div>
+                <div style={{ fontSize: "18px", fontWeight: 700 }}>
+                  {endlessDutyState?.requisition_capital_total ?? 0}
+                </div>
               </div>
-              <div style={{ background: "rgba(15, 23, 42, 0.8)", border: "1px solid #334155", borderRadius: "6px", padding: "8px 10px" }}>
+              <div
+                style={{
+                  background: "rgba(15, 23, 42, 0.8)",
+                  border: "1px solid #334155",
+                  borderRadius: "6px",
+                  padding: "8px 10px",
+                }}
+              >
                 <div style={{ fontSize: "12px", color: "#94a3b8" }}>Investi</div>
-                <div style={{ fontSize: "18px", fontWeight: 700 }}>{endlessDutyState?.requisition_invested_total ?? 0}</div>
+                <div style={{ fontSize: "18px", fontWeight: 700 }}>
+                  {endlessDutyState?.requisition_invested_total ?? 0}
+                </div>
               </div>
-              <div style={{ background: "rgba(15, 23, 42, 0.8)", border: "1px solid #334155", borderRadius: "6px", padding: "8px 10px" }}>
+              <div
+                style={{
+                  background: "rgba(15, 23, 42, 0.8)",
+                  border: "1px solid #334155",
+                  borderRadius: "6px",
+                  padding: "8px 10px",
+                }}
+              >
                 <div style={{ fontSize: "12px", color: "#94a3b8" }}>Disponible</div>
-                <div style={{ fontSize: "18px", fontWeight: 700 }}>{endlessDutyState?.requisition_available ?? 0}</div>
+                <div style={{ fontSize: "18px", fontWeight: 700 }}>
+                  {endlessDutyState?.requisition_available ?? 0}
+                </div>
               </div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "14px" }}>
-              <div style={{ background: "rgba(15, 23, 42, 0.8)", border: "1px solid #334155", borderRadius: "6px", padding: "8px 10px" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "10px",
+                marginBottom: "14px",
+              }}
+            >
+              <div
+                style={{
+                  background: "rgba(15, 23, 42, 0.8)",
+                  border: "1px solid #334155",
+                  borderRadius: "6px",
+                  padding: "8px 10px",
+                }}
+              >
                 <div style={{ fontSize: "12px", color: "#94a3b8" }}>Investi projete</div>
                 <div style={{ fontSize: "18px", fontWeight: 700 }}>
                   {projectedInvestedTotal == null ? "-" : projectedInvestedTotal}
                 </div>
               </div>
-              <div style={{ background: "rgba(15, 23, 42, 0.8)", border: "1px solid #334155", borderRadius: "6px", padding: "8px 10px" }}>
+              <div
+                style={{
+                  background: "rgba(15, 23, 42, 0.8)",
+                  border: "1px solid #334155",
+                  borderRadius: "6px",
+                  padding: "8px 10px",
+                }}
+              >
                 <div style={{ fontSize: "12px", color: "#94a3b8" }}>Disponible projete</div>
-                <div style={{ fontSize: "18px", fontWeight: 700, color: isProjectedDraftAffordable ? "#86efac" : "#fca5a5" }}>
+                <div
+                  style={{
+                    fontSize: "18px",
+                    fontWeight: 700,
+                    color: isProjectedDraftAffordable ? "#86efac" : "#fca5a5",
+                  }}
+                >
                   {projectedAvailable == null ? "-" : projectedAvailable}
                 </div>
               </div>
@@ -3462,9 +3562,18 @@ export const BoardWithAPI: React.FC = () => {
                   value={endlessDutyDraft.leader ?? ""}
                   disabled={!slotUnlockStatus.leader || isSubmittingEndlessDuty}
                   onChange={(event) =>
-                    handleEndlessDutyDraftChange("leader", event.target.value === "" ? null : event.target.value)
+                    handleEndlessDutyDraftChange(
+                      "leader",
+                      event.target.value === "" ? null : event.target.value
+                    )
                   }
-                  style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid #475569",
+                    background: "#0f172a",
+                    color: "#e2e8f0",
+                  }}
                 >
                   <option value="" disabled>
                     Choisir un leader (obligatoire)
@@ -3496,7 +3605,11 @@ export const BoardWithAPI: React.FC = () => {
                     <>
                       <select
                         value={picks.package ?? picks.melee ?? ""}
-                        disabled={!slotUnlockStatus.leader || isSubmittingEndlessDuty || !endlessDutyDraft.leader}
+                        disabled={
+                          !slotUnlockStatus.leader ||
+                          isSubmittingEndlessDuty ||
+                          !endlessDutyDraft.leader
+                        }
                         onChange={(event) => {
                           const value = event.target.value === "" ? null : event.target.value;
                           if (value && menu.primaryPackages.some((opt) => opt.id === value)) {
@@ -3507,7 +3620,13 @@ export const BoardWithAPI: React.FC = () => {
                             handleEndlessDutyPickChange("leader", "melee", value);
                           }
                         }}
-                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: "6px",
+                          border: "1px solid #475569",
+                          background: "#0f172a",
+                          color: "#e2e8f0",
+                        }}
                       >
                         <option value="">Arme principale (melee ou pack)</option>
                         {menu.primaryPackages.map((option) => (
@@ -3536,7 +3655,13 @@ export const BoardWithAPI: React.FC = () => {
                             event.target.value === "" ? null : event.target.value
                           )
                         }
-                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: "6px",
+                          border: "1px solid #475569",
+                          background: "#0f172a",
+                          color: "#e2e8f0",
+                        }}
                       >
                         <option value="">Arme a distance</option>
                         {menu.ranged.map((option) => (
@@ -3560,7 +3685,13 @@ export const BoardWithAPI: React.FC = () => {
                             event.target.value === "" ? null : event.target.value
                           )
                         }
-                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: "6px",
+                          border: "1px solid #475569",
+                          background: "#0f172a",
+                          color: "#e2e8f0",
+                        }}
                       >
                         <option value="">Secondaire</option>
                         {menu.secondary.map((option) => (
@@ -3584,7 +3715,13 @@ export const BoardWithAPI: React.FC = () => {
                             event.target.value === "" ? null : event.target.value
                           )
                         }
-                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: "6px",
+                          border: "1px solid #475569",
+                          background: "#0f172a",
+                          color: "#e2e8f0",
+                        }}
                       >
                         <option value="">Special (equipement/special)</option>
                         {menu.special.map((option) => (
@@ -3605,9 +3742,18 @@ export const BoardWithAPI: React.FC = () => {
                   value={endlessDutyDraft.melee ?? ""}
                   disabled={!slotUnlockStatus.melee || isSubmittingEndlessDuty}
                   onChange={(event) =>
-                    handleEndlessDutyDraftChange("melee", event.target.value === "" ? null : event.target.value)
+                    handleEndlessDutyDraftChange(
+                      "melee",
+                      event.target.value === "" ? null : event.target.value
+                    )
                   }
-                  style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid #475569",
+                    background: "#0f172a",
+                    color: "#e2e8f0",
+                  }}
                 >
                   <option value="">Aucun</option>
                   {endlessDutyProfileOptions.melee.map((profile) => (
@@ -3637,7 +3783,11 @@ export const BoardWithAPI: React.FC = () => {
                     <>
                       <select
                         value={picks.package ?? picks.melee ?? ""}
-                        disabled={!slotUnlockStatus.melee || isSubmittingEndlessDuty || !endlessDutyDraft.melee}
+                        disabled={
+                          !slotUnlockStatus.melee ||
+                          isSubmittingEndlessDuty ||
+                          !endlessDutyDraft.melee
+                        }
                         onChange={(event) => {
                           const value = event.target.value === "" ? null : event.target.value;
                           if (value && menu.primaryPackages.some((opt) => opt.id === value)) {
@@ -3648,7 +3798,13 @@ export const BoardWithAPI: React.FC = () => {
                             handleEndlessDutyPickChange("melee", "melee", value);
                           }
                         }}
-                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: "6px",
+                          border: "1px solid #475569",
+                          background: "#0f172a",
+                          color: "#e2e8f0",
+                        }}
                       >
                         <option value="">Arme principale (melee ou pack)</option>
                         {menu.primaryPackages.map((option) => (
@@ -3677,7 +3833,13 @@ export const BoardWithAPI: React.FC = () => {
                             event.target.value === "" ? null : event.target.value
                           )
                         }
-                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: "6px",
+                          border: "1px solid #475569",
+                          background: "#0f172a",
+                          color: "#e2e8f0",
+                        }}
                       >
                         <option value="">Arme a distance</option>
                         {menu.ranged.map((option) => (
@@ -3701,7 +3863,13 @@ export const BoardWithAPI: React.FC = () => {
                             event.target.value === "" ? null : event.target.value
                           )
                         }
-                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: "6px",
+                          border: "1px solid #475569",
+                          background: "#0f172a",
+                          color: "#e2e8f0",
+                        }}
                       >
                         <option value="">Secondaire</option>
                         {menu.secondary.map((option) => (
@@ -3725,7 +3893,13 @@ export const BoardWithAPI: React.FC = () => {
                             event.target.value === "" ? null : event.target.value
                           )
                         }
-                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: "6px",
+                          border: "1px solid #475569",
+                          background: "#0f172a",
+                          color: "#e2e8f0",
+                        }}
                       >
                         <option value="">Special (equipement/special)</option>
                         {menu.special.map((option) => (
@@ -3746,9 +3920,18 @@ export const BoardWithAPI: React.FC = () => {
                   value={endlessDutyDraft.range ?? ""}
                   disabled={!slotUnlockStatus.range || isSubmittingEndlessDuty}
                   onChange={(event) =>
-                    handleEndlessDutyDraftChange("range", event.target.value === "" ? null : event.target.value)
+                    handleEndlessDutyDraftChange(
+                      "range",
+                      event.target.value === "" ? null : event.target.value
+                    )
                   }
-                  style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid #475569",
+                    background: "#0f172a",
+                    color: "#e2e8f0",
+                  }}
                 >
                   <option value="">Aucun</option>
                   {endlessDutyProfileOptions.range.map((profile) => (
@@ -3778,7 +3961,11 @@ export const BoardWithAPI: React.FC = () => {
                     <>
                       <select
                         value={picks.package ?? picks.melee ?? ""}
-                        disabled={!slotUnlockStatus.range || isSubmittingEndlessDuty || !endlessDutyDraft.range}
+                        disabled={
+                          !slotUnlockStatus.range ||
+                          isSubmittingEndlessDuty ||
+                          !endlessDutyDraft.range
+                        }
                         onChange={(event) => {
                           const value = event.target.value === "" ? null : event.target.value;
                           if (value && menu.primaryPackages.some((opt) => opt.id === value)) {
@@ -3789,7 +3976,13 @@ export const BoardWithAPI: React.FC = () => {
                             handleEndlessDutyPickChange("range", "melee", value);
                           }
                         }}
-                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: "6px",
+                          border: "1px solid #475569",
+                          background: "#0f172a",
+                          color: "#e2e8f0",
+                        }}
                       >
                         <option value="">Arme principale (melee ou pack)</option>
                         {menu.primaryPackages.map((option) => (
@@ -3818,7 +4011,13 @@ export const BoardWithAPI: React.FC = () => {
                             event.target.value === "" ? null : event.target.value
                           )
                         }
-                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: "6px",
+                          border: "1px solid #475569",
+                          background: "#0f172a",
+                          color: "#e2e8f0",
+                        }}
                       >
                         <option value="">Arme a distance</option>
                         {menu.ranged.map((option) => (
@@ -3842,7 +4041,13 @@ export const BoardWithAPI: React.FC = () => {
                             event.target.value === "" ? null : event.target.value
                           )
                         }
-                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: "6px",
+                          border: "1px solid #475569",
+                          background: "#0f172a",
+                          color: "#e2e8f0",
+                        }}
                       >
                         <option value="">Secondaire</option>
                         {menu.secondary.map((option) => (
@@ -3866,7 +4071,13 @@ export const BoardWithAPI: React.FC = () => {
                             event.target.value === "" ? null : event.target.value
                           )
                         }
-                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: "6px",
+                          border: "1px solid #475569",
+                          background: "#0f172a",
+                          color: "#e2e8f0",
+                        }}
                       >
                         <option value="">Special (equipement/special)</option>
                         {menu.special.map((option) => (
@@ -3910,7 +4121,14 @@ export const BoardWithAPI: React.FC = () => {
                 {endlessDutyFormError}
               </div>
             )}
-            <div style={{ marginTop: "16px", display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+            <div
+              style={{
+                marginTop: "16px",
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "10px",
+              }}
+            >
               <button
                 type="button"
                 onClick={() => {
@@ -3938,9 +4156,13 @@ export const BoardWithAPI: React.FC = () => {
                   padding: "10px 14px",
                   border: "1px solid #60a5fa",
                   borderRadius: "6px",
-                  background: isSubmittingEndlessDuty || !isProjectedDraftAffordable ? "#334155" : "#1d4ed8",
+                  background:
+                    isSubmittingEndlessDuty || !isProjectedDraftAffordable ? "#334155" : "#1d4ed8",
                   color: "#eff6ff",
-                  cursor: isSubmittingEndlessDuty || !isProjectedDraftAffordable ? "not-allowed" : "pointer",
+                  cursor:
+                    isSubmittingEndlessDuty || !isProjectedDraftAffordable
+                      ? "not-allowed"
+                      : "pointer",
                   fontWeight: 600,
                 }}
               >
@@ -3983,15 +4205,27 @@ export const BoardWithAPI: React.FC = () => {
             }}
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 id="advance-warning-title" style={{ margin: "0 0 12px 0", color: "#86efac", fontSize: "30px" }}>
+            <h2
+              id="advance-warning-title"
+              style={{ margin: "0 0 12px 0", color: "#86efac", fontSize: "30px" }}
+            >
               Advance !
             </h2>
             <p style={{ margin: 0, lineHeight: 1.5, fontSize: "19px" }}>
-              Vous êtes sur le point d&apos;effectuer une action Advance. Si vous la validez, cette unité ne pourra
-              ni tirer ni charger jusqu&apos;à la fin de ce tour.
+              Vous êtes sur le point d&apos;effectuer une action Advance. Si vous la validez, cette
+              unité ne pourra ni tirer ni charger jusqu&apos;à la fin de ce tour.
             </p>
-            <div style={{ marginTop: "20px", display: "flex", justifyContent: "space-between", alignItems: "end" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer" }}>
+            <div
+              style={{
+                marginTop: "20px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "end",
+              }}
+            >
+              <label
+                style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer" }}
+              >
                 <input
                   type="checkbox"
                   checked={advanceWarningDontRemind}
@@ -4080,15 +4314,27 @@ export const BoardWithAPI: React.FC = () => {
             }}
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 id="retreat-warning-title" style={{ margin: "0 0 12px 0", color: "#86efac", fontSize: "30px" }}>
+            <h2
+              id="retreat-warning-title"
+              style={{ margin: "0 0 12px 0", color: "#86efac", fontSize: "30px" }}
+            >
               Retraite !
             </h2>
             <p style={{ margin: 0, lineHeight: 1.5, fontSize: "19px" }}>
-              Vous êtes sur le point d'effectuer un mouvement de Retraite. Si vous le validez, cette unité ne
-              pourra ni tirer ni charger jusqu&apos; à la fin de ce tour.
+              Vous êtes sur le point d'effectuer un mouvement de Retraite. Si vous le validez, cette
+              unité ne pourra ni tirer ni charger jusqu&apos; à la fin de ce tour.
             </p>
-            <div style={{ marginTop: "20px", display: "flex", justifyContent: "space-between", alignItems: "end" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer" }}>
+            <div
+              style={{
+                marginTop: "20px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "end",
+              }}
+            >
+              <label
+                style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer" }}
+              >
                 <input
                   type="checkbox"
                   checked={apiProps.fleeWarningPopup.dontRemind}

@@ -24,8 +24,11 @@ export class TyrantGuardScytingTalon extends EliteMeleeTroop {
   static CC_WEAPONS = getWeapons(TyrantGuardScytingTalon.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "tyrant guard"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "great devourer" },
+    { keywordId: "tyrant guard" },
+  ];
 
   static ICON = "/icons/TyrantGuardScytingTalon.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

@@ -27,9 +27,15 @@ export class IntercessorGrenadeLauncher extends TroopRangeSwarm {
   static CC_WEAPON_CODES = ["close_combat_weapon"];
   static CC_WEAPONS = getWeapons(IntercessorGrenadeLauncher.CC_WEAPON_CODES);
 
-    // UNIT KEYWORDS
-    static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "intercessor squad"}];
-
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "grenades" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "intercessor squad" },
+  ];
 
   static ICON = "/icons/IntercessorGrenadeLauncher.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

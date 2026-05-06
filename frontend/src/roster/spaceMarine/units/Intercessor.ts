@@ -24,8 +24,14 @@ export class Intercessor extends TroopRangeSwarm {
   static CC_WEAPONS = getWeapons(Intercessor.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "intercessor squad"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "grenades" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "intercessor squad" },
+  ];
 
   static ICON = "/icons/Intercessor.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

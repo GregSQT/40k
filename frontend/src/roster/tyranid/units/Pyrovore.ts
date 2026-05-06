@@ -24,8 +24,12 @@ export class Pyrovore extends EliteRangeTroop {
   static CC_WEAPONS = getWeapons(Pyrovore.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "harvester"}, { keywordId: "pyrovore"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "great devourer" },
+    { keywordId: "harvester" },
+    { keywordId: "pyrovore" },
+  ];
 
   static ICON = "/icons/Pyrovore.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

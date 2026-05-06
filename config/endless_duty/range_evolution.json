@@ -114,9 +114,19 @@
       "rows": [
         { "slot": "melee", "pick": "close_combat_weapon", "cost": 0 },
         { "slot": "ranged", "pick": "sternguard_bolt_rifle", "cost": 0 },
-        { "slot": "ranged", "pick": "planned_sternguard_combi_weapon", "cost": 1, "implemented": false },
+        {
+          "slot": "ranged",
+          "pick": "planned_sternguard_combi_weapon",
+          "cost": 1,
+          "implemented": false
+        },
         { "slot": "ranged", "pick": "planned_pyrecannon", "cost": 2, "implemented": false },
-        { "slot": "ranged", "pick": "planned_sternguard_heavy_bolter", "cost": 3, "implemented": false },
+        {
+          "slot": "ranged",
+          "pick": "planned_sternguard_heavy_bolter",
+          "cost": 3,
+          "implemented": false
+        },
         { "slot": "secondary", "pick": "sternguard_bolt_pistol", "cost": 0 }
       ],
       "packages": []

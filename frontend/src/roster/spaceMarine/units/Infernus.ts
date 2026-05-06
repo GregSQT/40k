@@ -24,8 +24,13 @@ export class Infernus extends TroopRangeSwarm {
   static CC_WEAPONS = getWeapons(Infernus.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "infernus squad"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "grenades" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "infernus squad" },
+  ];
 
   static ICON = "/icons/Infernus.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

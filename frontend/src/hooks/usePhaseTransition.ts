@@ -31,14 +31,11 @@ export const usePhaseTransition = ({
 }: UsePhaseTransitionParams) => {
   void _boardConfig;
   // Phase completion by eligibility (NOT step counts)
-  const shouldTransitionPhase = useCallback(
-    (): boolean => {
-      const playerUnits = gameState.units.filter((u) => u.player === gameState.current_player);
-      const eligibleUnits = playerUnits.filter((unit) => isUnitEligible(unit));
-      return eligibleUnits.length === 0;
-    },
-    [gameState.units, gameState.current_player, isUnitEligible]
-  );
+  const shouldTransitionPhase = useCallback((): boolean => {
+    const playerUnits = gameState.units.filter((u) => u.player === gameState.current_player);
+    const eligibleUnits = playerUnits.filter((unit) => isUnitEligible(unit));
+    return eligibleUnits.length === 0;
+  }, [gameState.units, gameState.current_player, isUnitEligible]);
 
   // Eligibility-based phase transitions (core principle)
   useEffect(() => {

@@ -24,8 +24,11 @@ export class HiveGuardImpalerCannon extends TroopRangeElite {
   static CC_WEAPONS = getWeapons(HiveGuardImpalerCannon.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "hiveguard"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "great devourer" },
+    { keywordId: "hiveguard" },
+  ];
 
   static ICON = "/icons/HiveGuardImpalerCannon.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

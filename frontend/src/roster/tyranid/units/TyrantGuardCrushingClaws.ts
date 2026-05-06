@@ -24,8 +24,11 @@ export class TyrantGuardCrushingClaws extends EliteMeleeElite {
   static CC_WEAPONS = getWeapons(TyrantGuardCrushingClaws.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "tyrant guard"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "great devourer" },
+    { keywordId: "tyrant guard" },
+  ];
 
   static ICON = "/icons/TyrantGuardCrushingClaws.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

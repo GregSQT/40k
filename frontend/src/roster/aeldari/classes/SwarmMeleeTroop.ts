@@ -4,7 +4,6 @@ export class SwarmMeleeTroop {
   static FACTION = "Aeldari";
   static TEAM_COLOR = 0x0078ff; // Example: blue
 
-
   name: string;
   hp: number;
   pos: [number, number];

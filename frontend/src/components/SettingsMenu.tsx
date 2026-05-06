@@ -151,17 +151,34 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
             {canToggleAdvanceWarning && (
               <div style={{ marginBottom: "12px" }}>
                 <label
-                  style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    cursor: "pointer",
+                    color: "#e5e7eb",
+                  }}
                 >
                   <input
                     type="checkbox"
                     checked={showAdvanceWarning}
                     onChange={(e) => onToggleAdvanceWarning(e.target.checked)}
-                    style={{ marginRight: "12px", width: "18px", height: "18px", cursor: "pointer" }}
+                    style={{
+                      marginRight: "12px",
+                      width: "18px",
+                      height: "18px",
+                      cursor: "pointer",
+                    }}
                   />
                   <span>Alerte d'advance</span>
                 </label>
-                <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
+                <p
+                  style={{
+                    color: "#9ca3af",
+                    fontSize: "14px",
+                    marginLeft: "30px",
+                    marginTop: "4px",
+                  }}
+                >
                   Affiche une confirmation avant de valider une action Advance.
                 </p>
               </div>
@@ -169,17 +186,34 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
             {onToggleRetreatAlert && (
               <div>
                 <label
-                  style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    cursor: "pointer",
+                    color: "#e5e7eb",
+                  }}
                 >
                   <input
                     type="checkbox"
                     checked={retreatAlertEnabled}
                     onChange={(e) => onToggleRetreatAlert(e.target.checked)}
-                    style={{ marginRight: "12px", width: "18px", height: "18px", cursor: "pointer" }}
+                    style={{
+                      marginRight: "12px",
+                      width: "18px",
+                      height: "18px",
+                      cursor: "pointer",
+                    }}
                   />
                   <span>Alerte de retraite</span>
                 </label>
-                <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
+                <p
+                  style={{
+                    color: "#9ca3af",
+                    fontSize: "14px",
+                    marginLeft: "30px",
+                    marginTop: "4px",
+                  }}
+                >
                   Affiche une confirmation avant de valider un mouvement de Retraite.
                 </p>
               </div>
@@ -190,7 +224,9 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
         {onToggleModeGuidesActivated && (
           <div style={{ marginTop: "8px", marginBottom: "16px" }}>
             <h3 style={{ color: "#e5e7eb", margin: "0 0 10px 0", fontSize: "18px" }}>Guides</h3>
-            <label style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}>
+            <label
+              style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}
+            >
               <input
                 type="checkbox"
                 checked={modeGuidesActivated}
@@ -200,8 +236,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
               <span>Modes guides activated</span>
             </label>
             <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
-              Active les guides d&apos;introduction PvE/PvP. Désactivé automatiquement après
-              avoir vu un guide.
+              Active les guides d&apos;introduction PvE/PvP. Désactivé automatiquement après avoir
+              vu un guide.
             </p>
           </div>
         )}

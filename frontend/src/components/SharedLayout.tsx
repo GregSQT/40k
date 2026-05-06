@@ -61,12 +61,15 @@ const Navigation: React.FC<NavigationProps> = ({
   const tutorialCompleted = authSession?.tutorial_completed ?? true;
 
   const getButtonClass = (path: string) => {
-    const isPvPTestMode = location.pathname === "/game" && location.search.includes("mode=pvp_test");
+    const isPvPTestMode =
+      location.pathname === "/game" && location.search.includes("mode=pvp_test");
     const isPvEMode = location.pathname === "/game" && location.search.includes("mode=pve");
     const isEndlessDutyMode =
       location.pathname === "/game" && location.search.includes("mode=endless_duty");
-    const isPvETestMode = location.pathname === "/game" && location.search.includes("mode=pve_test");
-    const isTutorialMode = location.pathname === "/game" && location.search.includes("mode=tutorial");
+    const isPvETestMode =
+      location.pathname === "/game" && location.search.includes("mode=pve_test");
+    const isTutorialMode =
+      location.pathname === "/game" && location.search.includes("mode=tutorial");
 
     // Handle Tutorial mode
     if (path === "/game?mode=tutorial") {

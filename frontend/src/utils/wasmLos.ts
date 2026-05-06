@@ -1,7 +1,4 @@
-import init, {
-  compute_visible_hexes,
-  compute_los_single,
-} from "../wasm-los-pkg/wasm_los.js";
+import init, { compute_los_single, compute_visible_hexes } from "../wasm-los-pkg/wasm_los.js";
 
 let wasmReady = false;
 let initPromise: Promise<void> | null = null;
@@ -57,16 +54,21 @@ export function computeVisibleHexes(
   boardRows: number,
   wallHexes: Array<[number, number]> | number[][],
   losVisibilityMinRatio: number,
-  coverRatio: number,
+  coverRatio: number
 ): VisibleHex[] {
   if (!wasmReady) {
     throw new Error("WASM not initialized — call ensureWasmLoaded() first");
   }
   const wallData = getWallData(wallHexes);
   const raw = compute_visible_hexes(
-    shooterCol, shooterRow, maxRange,
-    boardCols, boardRows,
-    wallData, losVisibilityMinRatio, coverRatio,
+    shooterCol,
+    shooterRow,
+    maxRange,
+    boardCols,
+    boardRows,
+    wallData,
+    losVisibilityMinRatio,
+    coverRatio
   );
   const results: VisibleHex[] = [];
   for (let i = 0; i < raw.length; i += 3) {
@@ -80,18 +82,25 @@ export function computeVisibleHexes(
 }
 
 export function computeLosSingle(
-  fromCol: number, fromRow: number,
-  toCol: number, toRow: number,
+  fromCol: number,
+  fromRow: number,
+  toCol: number,
+  toRow: number,
   wallHexes: Array<[number, number]> | number[][],
   losVisibilityMinRatio: number,
-  coverRatio: number,
+  coverRatio: number
 ): 0 | 1 | 2 {
   if (!wasmReady) {
     throw new Error("WASM not initialized — call ensureWasmLoaded() first");
   }
   const wallData = getWallData(wallHexes);
   return compute_los_single(
-    fromCol, fromRow, toCol, toRow,
-    wallData, losVisibilityMinRatio, coverRatio,
+    fromCol,
+    fromRow,
+    toCol,
+    toRow,
+    wallData,
+    losVisibilityMinRatio,
+    coverRatio
   ) as 0 | 1 | 2;
 }

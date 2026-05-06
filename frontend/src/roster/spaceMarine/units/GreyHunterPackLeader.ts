@@ -28,10 +28,7 @@ export class GreyHunterPackLeader extends TroopMeleeElite {
     {
       ruleId: "cunning_hunters",
       displayName: "Cunning Hunters",
-      grants_rule_ids: [
-        "cunning_hunters_shoot_after_advance",
-        "cunning_hunters_shoot_after_flee",
-      ],
+      grants_rule_ids: ["cunning_hunters_shoot_after_advance", "cunning_hunters_shoot_after_flee"],
       usage: "and",
     },
   ];
@@ -43,8 +40,13 @@ export class GreyHunterPackLeader extends TroopMeleeElite {
   };
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "grey hunters"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "grenades" },
+    { keywordId: "imperium" },
+    { keywordId: "grey hunters" },
+  ];
 
   static ICON = "/icons/GreyHunterPackLeader.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

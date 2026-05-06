@@ -1,17 +1,18 @@
 // frontend/src/components/BoardDisplay.tsx
-import type React from "react";
+
 import * as PIXI from "pixi.js-legacy";
-import { addHexKeysToSet } from "../utils/movePoolRefsSync";
+import type React from "react";
 import {
-  tryBuildHexUnionMaskPolygons,
   type HexUnionMaskLayout,
+  tryBuildHexUnionMaskPolygons,
 } from "../utils/hexUnionBoundaryPolygon";
 import { mountLosPolarClippedByVisibleUnion } from "../utils/losPolarMaskedByVisibleUnion";
+import { addHexKeysToSet } from "../utils/movePoolRefsSync";
 import { smoothMaskLoopsForRender } from "../utils/polygonSmooth";
 
 /** Contourne TS2345 : certaines fusions de types sur `.on` attendent `(...args: unknown[]) => void`. */
 function asPixiUnknownArgsPointerListener(
-  fn: (e: PIXI.FederatedPointerEvent) => void,
+  fn: (e: PIXI.FederatedPointerEvent) => void
 ): (...args: unknown[]) => void {
   return fn as (...args: unknown[]) => void;
 }
@@ -136,7 +137,7 @@ function disposeMovePreviewRenderCachesFull(): void {
  */
 export function detachMovePreviewLayerCacheFromStage(): void {
   const root = movePreviewLayerRenderCache?.root;
-  if (root && root.parent) {
+  if (root?.parent) {
     root.parent.removeChild(root);
   }
 }
@@ -153,7 +154,7 @@ function digestHighlightCellList(cells: Array<{ col: number; row: number }> | un
 }
 
 function digestChargeCellList(
-  cells: Array<HighlightCell | [number, number] | { col: number; row: number }> | undefined,
+  cells: Array<HighlightCell | [number, number] | { col: number; row: number }> | undefined
 ): number {
   const s = new Set<string>();
   for (const c of cells ?? []) {
@@ -177,7 +178,7 @@ export interface DrawBoardPartialRedrawFingerprint {
 export function computeDrawBoardPartialRedrawFingerprint(
   app: PIXI.Application,
   boardConfig: BoardConfig,
-  options?: DrawBoardOptions,
+  options?: DrawBoardOptions
 ): DrawBoardPartialRedrawFingerprint {
   const {
     availableCells = [],
@@ -207,8 +208,7 @@ export function computeDrawBoardPartialRedrawFingerprint(
     interactionPhase === "shoot" && pendingMoveAfterShooting === true;
   const usePileInPoolLikeMoveHoisted =
     interactionPhase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview");
-  const useConsolidationPreview =
-    interactionPhase === "fight" && mode === "consolidationPreview";
+  const useConsolidationPreview = interactionPhase === "fight" && mode === "consolidationPreview";
 
   const spanFromEngine =
     typeof movePreviewFootprintSpanFromState === "number" &&
@@ -253,11 +253,7 @@ export function computeDrawBoardPartialRedrawFingerprint(
     chargeDestPoolRef.current.size > 0;
 
   const moveAdvanceOrPileInPickPool: Set<string> | null = (() => {
-    if (
-      interactionPhase === "move" ||
-      useAdvanceMovePoolLikeMove ||
-      usePostShootMovePoolLikeMove
-    ) {
+    if (interactionPhase === "move" || useAdvanceMovePoolLikeMove || usePostShootMovePoolLikeMove) {
       return movePoolForDiskDraw && movePoolForDiskDraw.size > 0 ? movePoolForDiskDraw : null;
     }
     if (usePileInPoolLikeMoveHoisted) {
@@ -269,10 +265,11 @@ export function computeDrawBoardPartialRedrawFingerprint(
     return null;
   })();
 
-  const clickableBranchExcluded =
-    interactionPhase === "charge" && mode === "select" ? 1 : 0;
+  const clickableBranchExcluded = interactionPhase === "charge" && mode === "select" ? 1 : 0;
   const clickableAvailDigest =
-    interactionPhase === "charge" && mode === "select" ? 0 : digestHighlightCellList(availableCells);
+    interactionPhase === "charge" && mode === "select"
+      ? 0
+      : digestHighlightCellList(availableCells);
 
   const structuralPayload = {
     v: BOARD_DISPLAY_HIGHLIGHT_STRUCTURAL_FP_V,
@@ -393,17 +390,19 @@ export function updateMovePreviewPolygonLayerInHighlightContainer(
   app: PIXI.Application,
   boardConfig: BoardConfig,
   highlightContainer: PIXI.Container,
-  options?: DrawBoardOptions,
+  options?: DrawBoardOptions
 ): void {
   if (!boardConfig || !app.stage) {
     throw new Error(
-      "[updateMovePreviewPolygonLayerInHighlightContainer] boardConfig et app.stage sont requis",
+      "[updateMovePreviewPolygonLayerInHighlightContainer] boardConfig et app.stage sont requis"
     );
   }
 
   detachMovePreviewLayerCacheFromStage();
 
-  const orphan = highlightContainer.children.find((c) => c.name === "move-preview-layer-cache-root");
+  const orphan = highlightContainer.children.find(
+    (c) => c.name === "move-preview-layer-cache-root"
+  );
   if (orphan) {
     highlightContainer.removeChild(orphan);
     orphan.destroy({ children: true, texture: false, baseTexture: false });
@@ -490,7 +489,7 @@ export function updateMovePreviewPolygonLayerInHighlightContainer(
   if (selectedUnitAnchor == null) {
     throw new Error(
       "[updateMovePreviewPolygonLayerInHighlightContainer] ``selectedUnitAnchor`` requis — " +
-        `spriteName=${moveSpriteName}`,
+        `spriteName=${moveSpriteName}`
     );
   }
 
@@ -559,7 +558,7 @@ export function updateMovePreviewPolygonLayerInHighlightContainer(
     HEX_VERT_SPACING,
     MARGIN,
     moveSpriteName,
-    movePoolForDiskDraw.size,
+    movePoolForDiskDraw.size
   );
   const cacheRoot = new PIXI.Container();
   cacheRoot.name = "move-preview-layer-cache-root";
@@ -571,7 +570,7 @@ export function updateMovePreviewPolygonLayerInHighlightContainer(
     footprintRadius,
     poolFillColor,
     moveSpriteName,
-    maskGeom,
+    maskGeom
   );
   movePreviewLayerRenderCache = { key: movePreviewCacheKey, root: cacheRoot };
   highlightContainer.addChild(cacheRoot);
@@ -603,7 +602,7 @@ function fingerprintPrecomputedMaskLoops(loops: number[][] | null): string {
     for (let i = 0; i < n; i += stride) {
       const v = flat[i]!;
       const bits =
-        typeof v === "number" && Number.isFinite(v) ? (v * 131071) | 0 : (0x7bad0000 ^ li) ^ i;
+        typeof v === "number" && Number.isFinite(v) ? (v * 131071) | 0 : 0x7bad0000 ^ li ^ i;
       h = Math.imul(33, h) ^ bits;
     }
   }
@@ -635,7 +634,7 @@ function appendMovePreviewMaskTilesAndCoverageToParent(
   spriteName: string,
   smc: MovePreviewSoftMaskCacheEntry,
   tileMaxDim: number,
-  poolFillColor: number,
+  poolFillColor: number
 ): void {
   const mb = smc.maskBounds;
   const wTot = Math.ceil(mb.width);
@@ -644,7 +643,7 @@ function appendMovePreviewMaskTilesAndCoverageToParent(
   if (smc.softTileRts.length !== expected) {
     throw new Error(
       `[appendMovePreviewMaskTilesAndCoverageToParent] nombre de RT (${smc.softTileRts.length}) ≠ tuiles ` +
-        `(${smc.tilesW}×${smc.tilesH}=${expected}, spriteName=${spriteName})`,
+        `(${smc.tilesW}×${smc.tilesH}=${expected}, spriteName=${spriteName})`
     );
   }
   let idx = 0;
@@ -668,7 +667,9 @@ function appendMovePreviewMaskTilesAndCoverageToParent(
 
       const tileCoverage = new PIXI.Graphics();
       tileCoverage.name =
-        smc.tilesW === 1 && smc.tilesH === 1 ? spriteName : `${spriteName}-coverage-tile-${ti}-${tj}`;
+        smc.tilesW === 1 && smc.tilesH === 1
+          ? spriteName
+          : `${spriteName}-coverage-tile-${ti}-${tj}`;
       tileCoverage.eventMode = "none";
       tileCoverage.beginFill(poolFillColor, 1.0);
       tileCoverage.drawRect(sx, sy, tw, th);
@@ -908,9 +909,11 @@ function convexHull2D(points: PixelPt[]): PixelPt[] {
 /**
  * Plus petit cercle contenant des points, par énumération paires/triples — sans récursion.
  */
-function bruteForceSmallestEnclosingCirclePoints(
-  points: PixelPt[]
-): { cx: number; cy: number; r: number } {
+function bruteForceSmallestEnclosingCirclePoints(points: PixelPt[]): {
+  cx: number;
+  cy: number;
+  r: number;
+} {
   const n = points.length;
   const EPS = 1e-6;
   if (n === 0) {
@@ -1106,8 +1109,7 @@ function addFootprintHighlightSprite(
         gfx.position.set(-bounds.x - tileLeft, -bounds.y - tileTop);
         app.renderer.render(gfx, { renderTexture: rt, clear: true });
         const sprite = new PIXI.Sprite(rt);
-        sprite.name =
-          tilesW === 1 && tilesH === 1 ? displayName : `${displayName}-t${i}-${j}`;
+        sprite.name = tilesW === 1 && tilesH === 1 ? displayName : `${displayName}-t${i}-${j}`;
         sprite.position.set(bounds.x + tileLeft, bounds.y + tileTop);
         sprite.alpha = alpha;
         sprite.roundPixels = false;
@@ -1132,7 +1134,7 @@ function createFightEngagementRingSmoothOutline(
   cx: number,
   cy: number,
   rOuter: number,
-  color: number,
+  color: number
 ): PIXI.Graphics {
   const gfx = new PIXI.Graphics();
   gfx.name = "fight-engagement-ring-smooth";
@@ -1152,16 +1154,14 @@ function appendFeatheredCircleOutlineStrokes(
   cy: number,
   r: number,
   color: number,
-  layers?: FeatherLayer[],
+  layers?: FeatherLayer[]
 ): void {
   const hi = Math.min(0xffffff, ((color & 0xfefefe) >> 1) + 0x282828);
-  const defaultLayers: FeatherLayer[] =
-    layers ??
-    [
-      { width: Math.max(5, Math.min(14, r * 0.018)), alpha: 0.1 },
-      { width: 2.6, alpha: 0.34 },
-      { width: 1.05, alpha: 0.8, useHighlightStroke: true },
-    ];
+  const defaultLayers: FeatherLayer[] = layers ?? [
+    { width: Math.max(5, Math.min(14, r * 0.018)), alpha: 0.1 },
+    { width: 2.6, alpha: 0.34 },
+    { width: 1.05, alpha: 0.8, useHighlightStroke: true },
+  ];
   for (const layer of defaultLayers) {
     const strokeColor = layer.useHighlightStroke ? hi : color;
     gfx.lineStyle(layer.width, strokeColor, layer.alpha);
@@ -1242,7 +1242,7 @@ function fillFootprintPoolCircles(
   HEX_WIDTH: number,
   HEX_HEIGHT: number,
   HEX_VERT_SPACING: number,
-  MARGIN: number,
+  MARGIN: number
 ): number {
   const stride =
     pool.size > FOOTPRINT_POOL_MAX_CIRCLES
@@ -1254,12 +1254,11 @@ function fillFootprintPoolCircles(
     const sep = key.indexOf(",");
     const c = Number(key.substring(0, sep));
     const r = Number(key.substring(sep + 1));
-    if (stride > 1 && ((c + r) % stride) !== 0 && !isPoolBoundaryCell(c, r, pool)) {
+    if (stride > 1 && (c + r) % stride !== 0 && !isPoolBoundaryCell(c, r, pool)) {
       continue;
     }
     const hx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-    const hy =
-      r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+    const hy = r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
     gfx.drawCircle(hx, hy, footprintRadius);
     drawn++;
   }
@@ -1280,7 +1279,7 @@ function addFootprintPoolSmoothOutlines(
   HEX_HEIGHT: number,
   HEX_VERT_SPACING: number,
   MARGIN: number,
-  color: number,
+  color: number
 ): void {
   if (pool.size === 0 || footprintRadius <= 0) return;
   if (pool.size > FOOTPRINT_POOL_OUTLINE_MAX_CENTERS) {
@@ -1298,8 +1297,7 @@ function addFootprintPoolSmoothOutlines(
     const c = Number(key.substring(0, sep));
     const r = Number(key.substring(sep + 1));
     const hx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-    const hy =
-      r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+    const hy = r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
     gfx.drawCircle(hx, hy, footprintRadius);
   }
   highlightContainer.addChild(gfx);
@@ -1339,7 +1337,7 @@ function pointInPolygonFlat(x: number, y: number, flat: number[]): boolean {
     const yi = flat[i * 2 + 1]!;
     const xj = flat[j * 2]!;
     const yj = flat[j * 2 + 1]!;
-    if ((yi > y) !== (yj > y)) {
+    if (yi > y !== yj > y) {
       const xInt = ((xj - xi) * (y - yi)) / (yj - yi + 1e-12) + xi;
       if (x < xInt) inside = !inside;
     }
@@ -1354,7 +1352,7 @@ function pointInPolygonFlat(x: number, y: number, flat: number[]): boolean {
  */
 function appendWhiteReachableMaskFromSmoothedLoops(
   maskGfx: PIXI.Graphics,
-  loops: number[][],
+  loops: number[][]
 ): void {
   const valid = loops.filter((l) => l.length >= 6);
   if (valid.length === 0) return;
@@ -1415,7 +1413,9 @@ type MoveAdvanceMaskSmoothingTier = "small" | "medium" | "enormous";
  * Même découpe que Chaikin / blur : somme des sommets avant Chaikin
  * (``MOVE_ADVANCE_MASK_CHAIKIN_VERTS_SMALL_MAX`` / ``MEDIUM_MAX``).
  */
-function resolveMoveAdvanceMaskSmoothingTier(loopsBeforeSmooth: number[][]): MoveAdvanceMaskSmoothingTier {
+function resolveMoveAdvanceMaskSmoothingTier(
+  loopsBeforeSmooth: number[][]
+): MoveAdvanceMaskSmoothingTier {
   const v = countMoveAdvanceMaskPreSmoothVertices(loopsBeforeSmooth);
   if (v <= MOVE_ADVANCE_MASK_CHAIKIN_VERTS_SMALL_MAX) {
     return "small";
@@ -1433,7 +1433,7 @@ interface MoveAdvanceMaskAlphaBlurProfile {
 }
 
 function resolveMoveAdvanceMaskAlphaBlurProfileForTier(
-  tier: MoveAdvanceMaskSmoothingTier,
+  tier: MoveAdvanceMaskSmoothingTier
 ): MoveAdvanceMaskAlphaBlurProfile {
   switch (tier) {
     case "small":
@@ -1486,7 +1486,7 @@ function resolveMovePreviewMaskLoopsBeforeSmooth(
   HEX_VERT_SPACING: number,
   MARGIN: number,
   spriteName: string,
-  anchorPoolSize: number,
+  anchorPoolSize: number
 ): MovePreviewMaskGeometryResolved {
   if (precomputedWorldMaskLoops && precomputedWorldMaskLoops.length > 0) {
     return { kind: "server_loops", loopsBeforeSmooth: precomputedWorldMaskLoops };
@@ -1504,14 +1504,14 @@ function resolveMovePreviewMaskLoopsBeforeSmooth(
     if (!polyMask) {
       throw new Error(
         `[resolveMovePreviewMaskLoopsBeforeSmooth] tryBuildHexUnionMaskPolygons a échoué ` +
-          `(spriteName=${spriteName}, footprintMaskHexPool.size=${footprintMaskHexPool.size})`,
+          `(spriteName=${spriteName}, footprintMaskHexPool.size=${footprintMaskHexPool.size})`
       );
     }
     return { kind: "polygon", loopsBeforeSmooth: polyMask.loops };
   }
   throw new Error(
     `[resolveMovePreviewMaskLoopsBeforeSmooth] aucune source de masque empreinte disponible ` +
-      `(spriteName=${spriteName}, anchorPool.size=${anchorPoolSize})`,
+      `(spriteName=${spriteName}, anchorPool.size=${anchorPoolSize})`
   );
 }
 
@@ -1535,16 +1535,16 @@ function renderMoveAdvanceDestPoolCircleLayer(
   footprintRadius: number,
   poolFillColor: number,
   spriteName: string,
-  maskGeometry: MovePreviewMaskGeometryResolved,
+  maskGeometry: MovePreviewMaskGeometryResolved
 ): void {
   if (anchorPool.size === 0) {
     throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] anchorPool vide (spriteName=${spriteName})`,
+      `[renderMoveAdvanceDestPoolCircleLayer] anchorPool vide (spriteName=${spriteName})`
     );
   }
   if (!(footprintRadius > 0) || !Number.isFinite(footprintRadius)) {
     throw new Error(
-      `[renderMoveAdvanceDestPoolCircleLayer] footprintRadius invalide (${footprintRadius}, spriteName=${spriteName})`,
+      `[renderMoveAdvanceDestPoolCircleLayer] footprintRadius invalide (${footprintRadius}, spriteName=${spriteName})`
     );
   }
 
@@ -1588,9 +1588,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
       const needW = Math.max(1, Math.ceil(iw / TILE_DIM));
       const needH = Math.max(1, Math.ceil(ih / TILE_DIM));
       return (
-        needW === c.tilesW &&
-        needH === c.tilesH &&
-        c.softTileRts.length === c.tilesW * c.tilesH
+        needW === c.tilesW && needH === c.tilesH && c.softTileRts.length === c.tilesW * c.tilesH
       );
     })();
 
@@ -1602,7 +1600,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
     const prep = smoothMaskLoopsForRender(
       loopsBeforeSmooth,
       chaikinIterations,
-      moveAdvanceMaskSmoothOptions,
+      moveAdvanceMaskSmoothOptions
     );
     const smoothedLoops = prep.smoothed;
     const validLoops = smoothedLoops.filter((loop) => loop.length >= 6);
@@ -1610,7 +1608,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
       throw new Error(
         `[renderMoveAdvanceDestPoolCircleLayer] polygone lissé vide ` +
           `(spriteName=${spriteName}, maskUnionKind=${maskUnionKind}, ` +
-          `loopsCount=${smoothedLoops.length})`,
+          `loopsCount=${smoothedLoops.length})`
       );
     }
 
@@ -1630,7 +1628,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
       throw new Error(
         `[renderMoveAdvanceDestPoolCircleLayer] bornes du masque invalides ` +
           `(w=${maskBounds.width}, h=${maskBounds.height}, spriteName=${spriteName}, ` +
-          `maskUnionKind=${maskUnionKind})`,
+          `maskUnionKind=${maskUnionKind})`
       );
     }
 
@@ -1661,7 +1659,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
           } catch (e) {
             throw new Error(
               `[renderMoveAdvanceDestPoolCircleLayer] création RenderTexture masque tuile échouée ` +
-                `(spriteName=${spriteName}, tw=${tw}, th=${th}): ${String(e)}`,
+                `(spriteName=${spriteName}, tw=${tw}, th=${th}): ${String(e)}`
             );
           }
 
@@ -1672,7 +1670,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
             rt.destroy(true);
             throw new Error(
               `[renderMoveAdvanceDestPoolCircleLayer] render masque tuile → RT échoué ` +
-                `(spriteName=${spriteName}, ti=${ti}, tj=${tj}): ${String(e)}`,
+                `(spriteName=${spriteName}, ti=${ti}, tj=${tj}): ${String(e)}`
             );
           }
 
@@ -1689,7 +1687,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
             rt.destroy(true);
             throw new Error(
               `[renderMoveAdvanceDestPoolCircleLayer] création RenderTexture masque lissé tuile échouée ` +
-                `(spriteName=${spriteName}, tw=${tw}, th=${th}): ${String(e)}`,
+                `(spriteName=${spriteName}, tw=${tw}, th=${th}): ${String(e)}`
             );
           }
 
@@ -1697,7 +1695,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
           maskSourceSprite.eventMode = "none";
           const maskAlphaBlur = new PIXI.BlurFilter(
             alphaBlurProfile.strength,
-            alphaBlurProfile.quality,
+            alphaBlurProfile.quality
           );
           maskAlphaBlur.resolution = alphaBlurProfile.resolution;
           maskAlphaBlur.autoFit = true;
@@ -1710,7 +1708,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
             rtSoft.destroy(true);
             throw new Error(
               `[renderMoveAdvanceDestPoolCircleLayer] render masque lissé tuile → RT échoué ` +
-                `(spriteName=${spriteName}, ti=${ti}, tj=${tj}): ${String(e)}`,
+                `(spriteName=${spriteName}, ti=${ti}, tj=${tj}): ${String(e)}`
             );
           }
           maskSourceSprite.destroy();
@@ -1749,7 +1747,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
   if (!smc) {
     throw new Error(
       `[renderMoveAdvanceDestPoolCircleLayer] cache soft masque absent après pipeline ` +
-        `(spriteName=${spriteName})`,
+        `(spriteName=${spriteName})`
     );
   }
 
@@ -1758,7 +1756,7 @@ function renderMoveAdvanceDestPoolCircleLayer(
     spriteName,
     smc,
     TILE_DIM,
-    poolFillColor,
+    poolFillColor
   );
 }
 
@@ -1788,7 +1786,7 @@ export const drawBoard = (
   app: PIXI.Application,
   boardConfig: BoardConfig,
   options?: DrawBoardOptions
-): DrawBoardResult | void => {
+): DrawBoardResult | undefined => {
   if (!boardConfig || !app.stage) return;
 
   try {
@@ -1861,9 +1859,9 @@ export const drawBoard = (
     const objectiveHexSet = new Set<string>();
     let baseObjectives: Array<[number, number]> = boardConfig.objective_hexes || [];
     if (baseObjectives.length === 0 && Array.isArray(boardConfig.objective_zones)) {
-      baseObjectives = boardConfig.objective_zones.flatMap(z =>
-        (z.hexes || []).map(h =>
-          Array.isArray(h) ? h as [number, number] : [h.col, h.row] as [number, number]
+      baseObjectives = boardConfig.objective_zones.flatMap((z) =>
+        (z.hexes || []).map((h) =>
+          Array.isArray(h) ? (h as [number, number]) : ([h.col, h.row] as [number, number])
         )
       );
     }
@@ -1877,8 +1875,7 @@ export const drawBoard = (
     const usePostShootMovePoolLikeMove =
       interactionPhase === "shoot" && pendingMoveAfterShooting === true;
     const usePileInPoolLikeMoveHoisted =
-      interactionPhase === "fight" &&
-      (mode === "pileInPreview" || mode === "consolidationPreview");
+      interactionPhase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview");
     const advanceZoneFillColor = ADVANCE_DESTINATION_HEX_FILL;
     const spanFromEngine =
       typeof movePreviewFootprintSpanFromState === "number" &&
@@ -1904,8 +1901,7 @@ export const drawBoard = (
       selectedUnitId != null ||
       mode === "advancePreview" ||
       (interactionPhase === "shoot" && pendingMoveAfterShooting) ||
-      ((interactionPhase === "move" || interactionPhase === "command") &&
-        mode === "movePreview");
+      ((interactionPhase === "move" || interactionPhase === "command") && mode === "movePreview");
 
     /** Disques d’ancre : ``moveDestPoolRef`` en priorité (comme ``chargeDestPoolRef``), puis state si autorisé. */
     const movePoolForDiskDraw: Set<string> | null =
@@ -2002,7 +1998,8 @@ export const drawBoard = (
       const wallAltColor = (WALL_COLOR & 0xfefefe) + 0x101010;
       for (const [wc, wr] of boardConfig.wall_hexes || []) {
         const wx = wc * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const wy = wr * HEX_VERT_SPACING + ((wc % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+        const wy =
+          wr * HEX_VERT_SPACING + ((wc % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
         const wallDot = new PIXI.Graphics();
         const fill = wc % 2 === 0 ? WALL_COLOR : wallAltColor;
         wallDot.beginFill(fill, 1.0);
@@ -2089,7 +2086,8 @@ export const drawBoard = (
 
       for (const [oc, or_] of baseObjectives) {
         const ox = oc * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const oy = or_ * HEX_VERT_SPACING + ((oc % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+        const oy =
+          or_ * HEX_VERT_SPACING + ((oc % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
         const hexKey = `${oc},${or_}`;
         const controller = objectiveControl[hexKey];
         let objColor = OBJECTIVE_NEUTRAL_COLOR;
@@ -2156,7 +2154,7 @@ export const drawBoard = (
       color: number,
       alpha: number,
       skipThreshold = true,
-      circleRadius: number = HEX_RADIUS,
+      circleRadius: number = HEX_RADIUS
     ) => {
       if (cells.length === 0) return;
       if (skipThreshold && cells.length > LARGE_POOL_THRESHOLD) return;
@@ -2165,7 +2163,8 @@ export const drawBoard = (
       // rempli (« hex géant » / blob au lieu de pastilles distinctes).
       for (const c of cells) {
         const hx = c.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const hy = c.row * HEX_VERT_SPACING + ((c.col % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+        const hy =
+          c.row * HEX_VERT_SPACING + ((c.col % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
         batch.beginFill(color, alpha);
         batch.drawCircle(hx, hy, circleRadius);
         batch.endFill();
@@ -2187,7 +2186,7 @@ export const drawBoard = (
       if (selectedUnitAnchor == null) {
         throw new Error(
           "[drawBoard] ``selectedUnitAnchor`` requis pour rendre le layer move/advance — " +
-            `absent alors que useMoveDestPoolCircleLayer=true (spriteName=${moveSpriteName})`,
+            `absent alors que useMoveDestPoolCircleLayer=true (spriteName=${moveSpriteName})`
         );
       }
       const footprintMaskHexPool =
@@ -2255,7 +2254,7 @@ export const drawBoard = (
           HEX_VERT_SPACING,
           MARGIN,
           moveSpriteName,
-          movePoolForDiskDraw.size,
+          movePoolForDiskDraw.size
         );
         const cacheRoot = new PIXI.Container();
         cacheRoot.name = "move-preview-layer-cache-root";
@@ -2267,7 +2266,7 @@ export const drawBoard = (
           footprintRadius,
           poolFillColor,
           moveSpriteName,
-          maskGeom,
+          maskGeom
         );
         movePreviewLayerRenderCache = { key: movePreviewCacheKey, root: cacheRoot };
         highlightContainer.addChild(cacheRoot);
@@ -2286,8 +2285,7 @@ export const drawBoard = (
       drawGroup(cellsForHighlight, availableCellsDrawColor, 0.4, false, availableCellCircleR);
     }
     {
-      const useShootingPreviewPalette =
-        interactionPhase === "shoot" || mode === "movePreview";
+      const useShootingPreviewPalette = interactionPhase === "shoot" || mode === "movePreview";
       if (useShootingPreviewPalette && (attackCells.length > 0 || coverCells.length > 0)) {
         const coverKeySet = new Set(coverCells.map((c) => `${c.col},${c.row}`));
         const attackClearOnly = attackCells.filter((c) => !coverKeySet.has(`${c.col},${c.row}`));
@@ -2312,7 +2310,7 @@ export const drawBoard = (
           0.4,
           0x9ec5ff,
           0.4,
-          app.renderer,
+          app.renderer
         );
         highlightContainer.addChild(losRoot);
       } else {
@@ -2333,7 +2331,7 @@ export const drawBoard = (
         HEX_WIDTH,
         HEX_HEIGHT,
         HEX_VERT_SPACING,
-        MARGIN,
+        MARGIN
       );
       addFootprintHighlightSprite(app, highlightContainer, chargeGfx, 0.28, "charge-dest-pool");
       addFootprintPoolSmoothOutlines(
@@ -2345,7 +2343,7 @@ export const drawBoard = (
         HEX_HEIGHT,
         HEX_VERT_SPACING,
         MARGIN,
-        CHARGE_DESTINATION_HEX_FILL,
+        CHARGE_DESTINATION_HEX_FILL
       );
     } else {
       drawGroup(
@@ -2355,7 +2353,7 @@ export const drawBoard = (
         })),
         CHARGE_DESTINATION_HEX_FILL,
         0.4,
-        false,
+        false
       );
     }
     if (
@@ -2372,8 +2370,7 @@ export const drawBoard = (
       Number.isFinite(chargeEngagementHalo.centerCol) &&
       Number.isFinite(chargeEngagementHalo.centerRow)
     ) {
-      const hcx =
-        chargeEngagementHalo.centerCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+      const hcx = chargeEngagementHalo.centerCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
       const hcy =
         chargeEngagementHalo.centerRow * HEX_VERT_SPACING +
         ((chargeEngagementHalo.centerCol % 2) * HEX_VERT_SPACING) / 2 +
@@ -2436,7 +2433,9 @@ export const drawBoard = (
         const colApprox = (ux - HEX_WIDTH / 2) / HEX_HORIZ_SPACING;
         const c0 = Math.max(0, Math.floor(colApprox) - 2);
         const c1 = Math.min(BOARD_COLS - 1, Math.ceil(colApprox) + 2);
-        let bestCol = 0, bestRow = 0, bestD = Infinity;
+        let bestCol = 0,
+          bestRow = 0,
+          bestD = Infinity;
         for (let c = c0; c <= c1; c++) {
           const stagger = ((c % 2) * HEX_VERT_SPACING) / 2;
           const rowApprox = (uy - HEX_HEIGHT / 2 - stagger) / HEX_VERT_SPACING;
@@ -2446,7 +2445,11 @@ export const drawBoard = (
             const cx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2;
             const cy = r * HEX_VERT_SPACING + stagger + HEX_HEIGHT / 2;
             const d = (ux - cx) ** 2 + (uy - cy) ** 2;
-            if (d < bestD) { bestD = d; bestCol = c; bestRow = r; }
+            if (d < bestD) {
+              bestD = d;
+              bestCol = c;
+              bestRow = r;
+            }
           }
         }
         return { col: bestCol, row: bestRow };
@@ -2455,96 +2458,103 @@ export const drawBoard = (
       hitArea.on(
         "pointerdown",
         asPixiUnknownArgsPointerListener((e: PIXI.FederatedPointerEvent) => {
-        if (e.button !== 0) return;
-        const { col, row } = resolveHex(e.getLocalPosition(hitArea));
-        const key = `${col},${row}`;
-        const useMovePoolForPick =
-          moveAdvanceOrPileInPickPool != null && moveAdvanceOrPileInPickPool.size > 0;
-        const useChargePoolForPick =
-          interactionPhase === "charge" &&
-          mode === "chargePreview" &&
-          chargeDestPoolRef?.current &&
-          chargeDestPoolRef.current.size > 0;
-        const isValid =
-          clickableSet.has(key) ||
-          (useMovePoolForPick && (moveAdvanceOrPileInPickPool?.has(key) ?? false)) ||
-          (useChargePoolForPick && (chargeDestPoolRef?.current?.has(key) ?? false));
-        if (isValid) {
-          const isHandledByBoardPvpCapture =
-            selectedUnitId !== null &&
-            ((interactionPhase === "move" && mode === "select") ||
-              mode === "advancePreview" ||
-              (interactionPhase === "charge" && mode === "chargePreview") ||
-              (interactionPhase === "fight" &&
-                (mode === "pileInPreview" || mode === "consolidationPreview")));
-          if (isHandledByBoardPvpCapture) {
-            return;
-          }
-
-          let destCol = col,
-            destRow = row;
-          if (
-            useMovePoolForPick &&
-            moveAdvanceOrPileInPickPool &&
-            !moveAdvanceOrPileInPickPool.has(key)
-          ) {
-            let bestDist = Infinity;
-            for (const k of moveAdvanceOrPileInPickPool) {
-              const sep = k.indexOf(",");
-              const cc = Number(k.substring(0, sep));
-              const cr = Number(k.substring(sep + 1));
-              const d = (cc - col) * (cc - col) + (cr - row) * (cr - row);
-              if (d < bestDist) {
-                bestDist = d;
-                destCol = cc;
-                destRow = cr;
-              }
-            }
-          } else if (
-            useChargePoolForPick &&
+          if (e.button !== 0) return;
+          const { col, row } = resolveHex(e.getLocalPosition(hitArea));
+          const key = `${col},${row}`;
+          const useMovePoolForPick =
+            moveAdvanceOrPileInPickPool != null && moveAdvanceOrPileInPickPool.size > 0;
+          const useChargePoolForPick =
+            interactionPhase === "charge" &&
+            mode === "chargePreview" &&
             chargeDestPoolRef?.current &&
-            !chargeDestPoolRef.current.has(key)
-          ) {
-            let bestDist = Infinity;
-            for (const k of chargeDestPoolRef.current) {
-              const sep = k.indexOf(",");
-              const cc = Number(k.substring(0, sep));
-              const cr = Number(k.substring(sep + 1));
-              const d = (cc - col) * (cc - col) + (cr - row) * (cr - row);
-              if (d < bestDist) {
-                bestDist = d;
-                destCol = cc;
-                destRow = cr;
+            chargeDestPoolRef.current.size > 0;
+          const isValid =
+            clickableSet.has(key) ||
+            (useMovePoolForPick && (moveAdvanceOrPileInPickPool?.has(key) ?? false)) ||
+            (useChargePoolForPick && (chargeDestPoolRef?.current?.has(key) ?? false));
+          if (isValid) {
+            const isHandledByBoardPvpCapture =
+              selectedUnitId !== null &&
+              ((interactionPhase === "move" && mode === "select") ||
+                mode === "advancePreview" ||
+                (interactionPhase === "charge" && mode === "chargePreview") ||
+                (interactionPhase === "fight" &&
+                  (mode === "pileInPreview" || mode === "consolidationPreview")));
+            if (isHandledByBoardPvpCapture) {
+              return;
+            }
+
+            let destCol = col,
+              destRow = row;
+            if (
+              useMovePoolForPick &&
+              moveAdvanceOrPileInPickPool &&
+              !moveAdvanceOrPileInPickPool.has(key)
+            ) {
+              let bestDist = Infinity;
+              for (const k of moveAdvanceOrPileInPickPool) {
+                const sep = k.indexOf(",");
+                const cc = Number(k.substring(0, sep));
+                const cr = Number(k.substring(sep + 1));
+                const d = (cc - col) * (cc - col) + (cr - row) * (cr - row);
+                if (d < bestDist) {
+                  bestDist = d;
+                  destCol = cc;
+                  destRow = cr;
+                }
+              }
+            } else if (
+              useChargePoolForPick &&
+              chargeDestPoolRef?.current &&
+              !chargeDestPoolRef.current.has(key)
+            ) {
+              let bestDist = Infinity;
+              for (const k of chargeDestPoolRef.current) {
+                const sep = k.indexOf(",");
+                const cc = Number(k.substring(0, sep));
+                const cr = Number(k.substring(sep + 1));
+                const d = (cc - col) * (cc - col) + (cr - row) * (cr - row);
+                if (d < bestDist) {
+                  bestDist = d;
+                  destCol = cc;
+                  destRow = cr;
+                }
               }
             }
+            window.dispatchEvent(
+              new CustomEvent("boardHexClick", {
+                detail: {
+                  col: destCol,
+                  row: destRow,
+                  phase: interactionPhase,
+                  mode,
+                  selectedUnitId,
+                },
+              })
+            );
           }
-          window.dispatchEvent(
-            new CustomEvent("boardHexClick", {
-              detail: { col: destCol, row: destRow, phase: interactionPhase, mode, selectedUnitId },
-            })
-          );
-        }
-      }
-    ));
+        })
+      );
 
-      let lastHoverCol = -1, lastHoverRow = -1;
+      let lastHoverCol = -1,
+        lastHoverRow = -1;
       hitArea.on(
         "pointermove",
         asPixiUnknownArgsPointerListener((e: PIXI.FederatedPointerEvent) => {
-        const localPos = e.getLocalPosition(hitArea);
-        const { col, row } = resolveHex(localPos);
-        const hexChanged = col !== lastHoverCol || row !== lastHoverRow;
-        if (hexChanged) {
-          lastHoverCol = col;
-          lastHoverRow = row;
-        }
-        window.dispatchEvent(
-          new CustomEvent("boardHexHover", {
-            detail: { col, row, pixelX: localPos.x, pixelY: localPos.y, hexChanged },
-          })
-        );
-      }
-    ));
+          const localPos = e.getLocalPosition(hitArea);
+          const { col, row } = resolveHex(localPos);
+          const hexChanged = col !== lastHoverCol || row !== lastHoverRow;
+          if (hexChanged) {
+            lastHoverCol = col;
+            lastHoverRow = row;
+          }
+          window.dispatchEvent(
+            new CustomEvent("boardHexHover", {
+              detail: { col, row, pixelX: localPos.x, pixelY: localPos.y, hexChanged },
+            })
+          );
+        })
+      );
 
       highlightContainer.addChild(hitArea);
     }
@@ -2561,8 +2571,8 @@ export const drawBoard = (
           fightEngagementRing.cx,
           fightEngagementRing.cy,
           fightEngagementRing.rOuter,
-          ATTACK_COLOR,
-        ),
+          ATTACK_COLOR
+        )
       );
     }
 
@@ -2597,7 +2607,8 @@ export const drawBoard = (
         const [sx, sy] = toPixel(wall.start.col, wall.start.row);
         const [ex, ey] = toPixel(wall.end.col, wall.end.row);
 
-        const dx = ex - sx, dy = ey - sy;
+        const dx = ex - sx,
+          dy = ey - sy;
         const len = Math.sqrt(dx * dx + dy * dy);
         if (len < 0.01) return;
         const nx = (-dy / len) * halfW;
@@ -2610,12 +2621,7 @@ export const drawBoard = (
         });
         g.drawCircle(sx, sy, halfW);
         g.drawCircle(ex, ey, halfW);
-        g.drawPolygon([
-          sx + nx, sy + ny,
-          ex + nx, ey + ny,
-          ex - nx, ey - ny,
-          sx - nx, sy - ny,
-        ]);
+        g.drawPolygon([sx + nx, sy + ny, ex + nx, ey + ny, ex - nx, ey - ny, sx - nx, sy - ny]);
         g.endFill();
         wallsContainer.addChild(g);
       });

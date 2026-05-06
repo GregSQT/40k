@@ -24,8 +24,12 @@ export class DarkReaperExarch extends SwarmRangeTroop {
   static CC_WEAPONS = getWeapons(DarkReaperExarch.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "aeldari"}, { keywordId: "aspect warrior"}, { keywordId: "Dark Reaper"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "aeldari" },
+    { keywordId: "aspect warrior" },
+    { keywordId: "Dark Reaper" },
+  ];
 
   static ICON = "/icons/DarkReaperExarch.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

@@ -139,7 +139,11 @@ function parseTutorialUiRuntimeConfig(raw: unknown): TutorialUiRuntimeConfig {
   if (typeof cfg.fogBackdropOpacity !== "number") {
     throw new Error("tutorialUiRules: runtime_config.fogBackdropOpacity must be number");
   }
-  if (!Number.isFinite(cfg.fogBackdropOpacity) || cfg.fogBackdropOpacity < 0 || cfg.fogBackdropOpacity > 1) {
+  if (
+    !Number.isFinite(cfg.fogBackdropOpacity) ||
+    cfg.fogBackdropOpacity < 0 ||
+    cfg.fogBackdropOpacity > 1
+  ) {
     throw new Error("tutorialUiRules: runtime_config.fogBackdropOpacity must be in [0,1]");
   }
   return {
@@ -220,4 +224,3 @@ export function getTutorialUiBehavior(stage: string): TutorialUiBehavior {
 export function isTutorialUiDebugModeEnabled(): boolean {
   return TUTORIAL_UI_RUNTIME_CONFIG.debugMode;
 }
-

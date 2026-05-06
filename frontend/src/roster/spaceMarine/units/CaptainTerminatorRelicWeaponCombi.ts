@@ -30,8 +30,13 @@ export class CaptainTerminatorRelicWeaponCombi extends LeaderEliteMeleeElite {
   static RULES_STATUS = { reroll_charge: 2 };
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "character"}, { keywordId: "imperium"}, { keywordId: "terminator"}, { keywordId: "captain terminator"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "character" },
+    { keywordId: "imperium" },
+    { keywordId: "terminator" },
+    { keywordId: "captain terminator" },
+  ];
 
   static ICON = "/icons/CaptainTerminatorRelicWeaponCombi.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

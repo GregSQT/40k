@@ -24,8 +24,15 @@ export class Suppressor extends EliteRangeTroop {
   static CC_WEAPONS = getWeapons(Suppressor.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "smoke"}, { keywordId: "jump pack"}, { keywordId: "fly"}, { keywordId: "imperium"}, { keywordId: "suppressor squad"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "grenades" },
+    { keywordId: "smoke" },
+    { keywordId: "jump pack" },
+    { keywordId: "fly" },
+    { keywordId: "imperium" },
+    { keywordId: "suppressor squad" },
+  ];
 
   static ICON = "/icons/Suppressor.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

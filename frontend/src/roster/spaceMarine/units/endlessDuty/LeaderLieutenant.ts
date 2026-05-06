@@ -37,7 +37,10 @@ export class LeaderLieutenant extends LeaderEliteMeleeElite {
     shoot_after_flee: 2,
     charge_after_flee: 2,
   };
-  static UNIT_KEYWORDS = [...LieutenantPowerFistPlasmaPistol.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
+  static UNIT_KEYWORDS = [
+    ...LieutenantPowerFistPlasmaPistol.UNIT_KEYWORDS,
+    { keywordId: "endless_duty" },
+  ];
 
   static ICON = "/icons/LieutenantPowerFistPlasmaPistol.webp";
   static BASE_SHAPE = "round"; // Shape of the base

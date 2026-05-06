@@ -24,8 +24,13 @@ export class EradicatorMultiMelta extends EliteRangeTroop {
   static CC_WEAPONS = getWeapons(EradicatorMultiMelta.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenade"}, { keywordId: "imperium"}, { keywordId: "gravis"}, { keywordId: "eradicator squad"}];
- 
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "grenade" },
+    { keywordId: "imperium" },
+    { keywordId: "gravis" },
+    { keywordId: "eradicator squad" },
+  ];
 
   static ICON = "/icons/EradicatorMultiMelta.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

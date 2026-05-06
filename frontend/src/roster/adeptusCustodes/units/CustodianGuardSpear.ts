@@ -21,10 +21,14 @@ export class CustodianGuardSpear extends EliteMeleeTroop {
   static RNG_WEAPONS = getWeapons(CustodianGuardSpear.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["guardian_spear_melee"];
   static CC_WEAPONS = getWeapons(CustodianGuardSpear.CC_WEAPON_CODES);
-    
+
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "imperium"}, { keywordId: "custodian guard"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "imperium" },
+    { keywordId: "custodian guard" },
+  ];
 
   static ICON = "/icons/CustodianGuardSpear.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

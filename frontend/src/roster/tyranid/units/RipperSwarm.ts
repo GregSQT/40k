@@ -22,9 +22,13 @@ export class RipperSwarm extends SwarmMeleeSwarm {
   static CC_WEAPON_CODES = ["chitinous_claws_and_teeth_ripper_swarm"];
   static CC_WEAPONS = getWeapons(RipperSwarm.CC_WEAPON_CODES);
 
-   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "swarm"}, { keywordId: "great devourer"}, { keywordId: "harverster"}, { keywordId: "ripper swarm"}];
-
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [
+    { keywordId: "swarm" },
+    { keywordId: "great devourer" },
+    { keywordId: "harverster" },
+    { keywordId: "ripper swarm" },
+  ];
 
   // ICON
   static ICON = "/icons/RipperSwarm.webp"; // Path relative to public folder

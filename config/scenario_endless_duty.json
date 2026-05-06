@@ -4,11 +4,13 @@
   "deployment_type": "active",
   "wall_ref": "walls-11.json",
   "primary_objectives": ["objectives_control"],
-  "units": [
-    {"id": 1, "unit_type": "Intercessor", "player": 1, "col": 12, "row": 10}
-  ],
+  "units": [{ "id": 1, "unit_type": "Intercessor", "player": 1, "col": 12, "row": 10 }],
   "objectives": [
-    {"id": 5, "name": "Center", "hexes": [[12, 10], [11, 9], [12, 9], [13, 9], [13, 10], [12, 11], [11, 10]]}
+    {
+      "id": 5,
+      "name": "Center",
+      "hexes": [[12, 10], [11, 9], [12, 9], [13, 9], [13, 10], [12, 11], [11, 10]]
+    }
   ],
   "endless_duty": {
     "budget_mode": "soft_cap",
@@ -60,11 +62,31 @@
       "seeded": true
     },
     "objective_pool": [
-      {"id": 1, "name": "West", "hexes": [[2, 10], [1, 9], [2, 9], [3, 9], [3, 10], [2, 11], [1, 10]]},
-      {"id": 2, "name": "North", "hexes": [[12, 1], [12, 2], [11, 1], [11, 0], [12, 0], [13, 0], [13, 1]]},
-      {"id": 3, "name": "East", "hexes": [[22, 10], [21, 9], [22, 9], [23, 9], [23, 10], [22, 11], [21, 10]]},
-      {"id": 4, "name": "South", "hexes": [[12, 19], [11, 18], [12, 18], [13, 18], [13, 19], [12, 20], [11, 19]]},
-      {"id": 5, "name": "Center", "hexes": [[12, 10], [11, 9], [12, 9], [13, 9], [13, 10], [12, 11], [11, 10]]}
+      {
+        "id": 1,
+        "name": "West",
+        "hexes": [[2, 10], [1, 9], [2, 9], [3, 9], [3, 10], [2, 11], [1, 10]]
+      },
+      {
+        "id": 2,
+        "name": "North",
+        "hexes": [[12, 1], [12, 2], [11, 1], [11, 0], [12, 0], [13, 0], [13, 1]]
+      },
+      {
+        "id": 3,
+        "name": "East",
+        "hexes": [[22, 10], [21, 9], [22, 9], [23, 9], [23, 10], [22, 11], [21, 10]]
+      },
+      {
+        "id": 4,
+        "name": "South",
+        "hexes": [[12, 19], [11, 18], [12, 18], [13, 18], [13, 19], [12, 20], [11, 19]]
+      },
+      {
+        "id": 5,
+        "name": "Center",
+        "hexes": [[12, 10], [11, 9], [12, 9], [13, 9], [13, 10], [12, 11], [11, 10]]
+      }
     ],
     "enemy_spawn_rules": {
       "mode": "random_board_edge_hexes",
@@ -114,22 +136,35 @@
         {
           "id": "med_stim",
           "base_cost": 5,
-          "effect": {"type": "instant_heal", "hp_delta": 1}
+          "effect": { "type": "instant_heal", "hp_delta": 1 }
         },
         {
           "id": "adrenal_stim",
           "base_cost": 4,
-          "effect": {"type": "temp_move_bonus", "move_delta": 2, "duration": "end_of_current_turn"}
+          "effect": {
+            "type": "temp_move_bonus",
+            "move_delta": 2,
+            "duration": "end_of_current_turn"
+          }
         },
         {
           "id": "targeter_stim",
           "base_cost": 4,
-          "effect": {"type": "next_shooting_hit_bonus", "to_hit_delta": 1, "duration": "next_shooting_activation"}
+          "effect": {
+            "type": "next_shooting_hit_bonus",
+            "to_hit_delta": 1,
+            "duration": "next_shooting_activation"
+          }
         },
         {
           "id": "armor_stim",
           "base_cost": 5,
-          "effect": {"type": "temp_armor_save_bonus", "armor_save_delta": 1, "armor_save_min": 2, "duration": "end_of_next_enemy_shooting_phase"}
+          "effect": {
+            "type": "temp_armor_save_bonus",
+            "armor_save_delta": 1,
+            "armor_save_min": 2,
+            "duration": "end_of_next_enemy_shooting_phase"
+          }
         }
       ]
     },

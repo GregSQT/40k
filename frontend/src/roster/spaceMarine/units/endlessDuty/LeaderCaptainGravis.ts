@@ -24,7 +24,10 @@ export class LeaderCaptainGravis extends LeaderEliteMeleeElite {
   static RNG_WEAPON_CODES = ["master_crafted_heavy_bolt_rifle_captain"];
   static RNG_WEAPONS = getWeapons(LeaderCaptainGravis.RNG_WEAPON_CODES);
 
-  static UNIT_KEYWORDS = [...CaptainGravisPowerWeaponBoltRifle.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
+  static UNIT_KEYWORDS = [
+    ...CaptainGravisPowerWeaponBoltRifle.UNIT_KEYWORDS,
+    { keywordId: "endless_duty" },
+  ];
 
   static ICON = "/icons/CaptainGravisPowerWeaponBoltRifle.webp";
   static BASE_SHAPE = "round"; // Shape of the base

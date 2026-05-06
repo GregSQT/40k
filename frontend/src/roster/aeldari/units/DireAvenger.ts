@@ -24,8 +24,12 @@ export class DireAvenger extends SwarmRangeSwarm {
   static CC_WEAPONS = getWeapons(DireAvenger.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "aeldari"}, { keywordId: "aspect warrior"}, { keywordId: "dire avenger"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "aeldari" },
+    { keywordId: "aspect warrior" },
+    { keywordId: "dire avenger" },
+  ];
 
   static ICON = "/icons/DireAvenger.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

@@ -70,8 +70,7 @@ export function syncMoveDestinationPoolRefs(o: SyncMoveDestinationPoolRefsOption
   const applyFromState = (): void => {
     if (!gameState) return;
     const anchorSource =
-      gameState.valid_move_destinations_pool ??
-      (gameState.preview_hexes as unknown);
+      gameState.valid_move_destinations_pool ?? (gameState.preview_hexes as unknown);
     // Ne pas remplacer la ref par un Set vide si le state n’a pas encore les clés (course avec
     // executeAction qui remplit la ref avant le prochain game_state complet) — sinon on efface
     // des milliers d’ancres et le plateau retombe sur les pastilles hex.
@@ -85,7 +84,8 @@ export function syncMoveDestinationPoolRefs(o: SyncMoveDestinationPoolRefsOption
     addHexKeysToSet(anchorSource, poolSet);
     moveDestPoolRef.current = poolSet;
     const maskLoops = normalizeMaskLoopsFromApi(
-      (gameState as { move_preview_footprint_mask_loops?: unknown }).move_preview_footprint_mask_loops,
+      (gameState as { move_preview_footprint_mask_loops?: unknown })
+        .move_preview_footprint_mask_loops
     );
     if (footprintMaskLoopsRef) {
       footprintMaskLoopsRef.current = maskLoops;

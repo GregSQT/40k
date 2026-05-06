@@ -192,8 +192,7 @@ export function getSelectedRangedWeaponAgainstTarget(
   let weapon: Weapon | null = null;
   if (Array.isArray(aw)) {
     const entry = aw.find((w) => w.index === index);
-    const canUse =
-      entry && (entry.can_use === true || entry.canUse === true);
+    const canUse = entry && (entry.can_use === true || entry.canUse === true);
     if (entry?.weapon && canUse) {
       weapon = entry.weapon;
     }

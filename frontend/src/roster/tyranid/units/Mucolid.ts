@@ -21,17 +21,21 @@ export class Mucolid extends EliteMeleeElite {
   static RNG_WEAPONS = getWeapons(Mucolid.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES: string[] = [];
   static CC_WEAPONS = getWeapons(Mucolid.CC_WEAPON_CODES);
-    
+
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "beast"}, { keywordId: "fly"}, { keywordId: "great devourer"}, { keywordId: "mucolid"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "beast" },
+    { keywordId: "fly" },
+    { keywordId: "great devourer" },
+    { keywordId: "mucolid" },
+  ];
 
   static ICON = "/icons/Mucolid.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 16; // Size of the base
   static ICON_SCALE = 2.6; // Size of the icon
   static ILLUSTRATION_RATIO = 100; // Illustration size ratio in percent
-  
+
   constructor(name: string, startPos: [number, number]) {
     super(name, Mucolid.HP_MAX, startPos);
   }

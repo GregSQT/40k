@@ -21,10 +21,14 @@ export class CustodianAllarusAxe extends EliteMeleeElite {
   static RNG_WEAPONS = getWeapons(CustodianAllarusAxe.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["castellan_axe_melee"];
   static CC_WEAPONS = getWeapons(CustodianAllarusAxe.CC_WEAPON_CODES);
-    
+
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "imperium"}, { keywordId: "custodian allarus"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "imperium" },
+    { keywordId: "custodian allarus" },
+  ];
 
   static ICON = "/icons/CustodianAllarusAxe.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

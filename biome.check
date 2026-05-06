@@ -1,0 +1,9 @@
+
+> wh40k-tactics@0.1.0 format:check
+> biome format .
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 720.
+Checked 837 files in 176ms. No fixes applied.
+Found 739 errors.
+Found 1 warning.

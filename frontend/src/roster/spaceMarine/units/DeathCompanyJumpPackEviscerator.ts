@@ -23,8 +23,17 @@ export class DeathCompanyJumpPackEviscerator extends TroopMeleeTroop {
   static CC_WEAPONS = getWeapons(DeathCompanyJumpPackEviscerator.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "jump_pack"}, { keywordId: "fly"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "death company"}, { keywordId: "death company marine"}, { keywordId: "death company with jump packs"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "grenades" },
+    { keywordId: "jump_pack" },
+    { keywordId: "fly" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "death company" },
+    { keywordId: "death company marine" },
+    { keywordId: "death company with jump packs" },
+  ];
 
   static ICON = "/icons/DeathCompanyJumpPackEviscerator.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

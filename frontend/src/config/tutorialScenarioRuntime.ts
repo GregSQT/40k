@@ -1,6 +1,6 @@
 import { load } from "js-yaml";
-import tutorialScenarioYamlRaw from "../../../config/tutorial/tutorial_scenario.yaml?raw";
 import modeGuideYamlRaw from "../../../config/tutorial/mode_guide.yaml?raw";
+import tutorialScenarioYamlRaw from "../../../config/tutorial/tutorial_scenario.yaml?raw";
 
 /**
  * Référence au YAML brut pour le HMR Vite : quand le fichier change, les modules qui en dépendent
@@ -31,7 +31,11 @@ function parseAssets(raw: unknown): Record<string, string> {
   return parsed;
 }
 
-function resolveAssetRef(value: unknown, assets: Record<string, string>, fieldPath: string): unknown {
+function resolveAssetRef(
+  value: unknown,
+  assets: Record<string, string>,
+  fieldPath: string
+): unknown {
   if (typeof value !== "string") return value;
   const trimmed = value.trim();
   if (!trimmed.startsWith("@")) return value;
@@ -46,7 +50,11 @@ function resolveAssetRef(value: unknown, assets: Record<string, string>, fieldPa
   return resolved;
 }
 
-function resolveInlineIconRefs(value: unknown, assets: Record<string, string>, fieldPath: string): unknown {
+function resolveInlineIconRefs(
+  value: unknown,
+  assets: Record<string, string>,
+  fieldPath: string
+): unknown {
   if (typeof value !== "string") return value;
   return value.replace(/<icon:\s*@([A-Za-z0-9._-]+)\s*>/g, (_match, key: string) => {
     const resolved = assets[key];
@@ -133,4 +141,3 @@ function buildModeGuideRuntimeData(): TutorialScenarioRuntimeData {
 export function getModeGuideRuntimeData(): TutorialScenarioRuntimeData {
   return buildModeGuideRuntimeData();
 }
-

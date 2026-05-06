@@ -79,7 +79,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
   const movePhaseButtonRef = useRef<HTMLButtonElement | null>(null);
   const shootPhaseButtonRef = useRef<HTMLButtonElement | null>(null);
   const tutorial = useTutorial();
-  const spotlightLayoutTick = tutorial?.spotlightLayoutTick ?? 0;
+  const _spotlightLayoutTick = tutorial?.spotlightLayoutTick ?? 0;
 
   useLayoutEffect(() => {
     if (!onTutorialRects || !tutorialStepTitle) {
@@ -174,7 +174,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
       onTutorialRects?.(null);
       onTutorialPopupAnchor?.(null);
     };
-  }, [tutorialStepTitle, onTutorialRects, onTutorialPopupAnchor, spotlightLayoutTick]);
+  }, [tutorialStepTitle, onTutorialRects, onTutorialPopupAnchor]);
 
   // Validate required props (raise errors for missing data)
   if (!phases || phases.length === 0) {
@@ -429,7 +429,12 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
         >
           <div
             ref={roundsContentRef}
-            style={{ display: "inline-flex", gap: "2px", alignItems: "center", width: "fit-content" }}
+            style={{
+              display: "inline-flex",
+              gap: "2px",
+              alignItems: "center",
+              width: "fit-content",
+            }}
           >
             <span
               style={{
@@ -518,7 +523,12 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
         >
           <div
             ref={phasesContentRef}
-            style={{ display: "inline-flex", gap: "2px", alignItems: "center", width: "fit-content" }}
+            style={{
+              display: "inline-flex",
+              gap: "2px",
+              alignItems: "center",
+              width: "fit-content",
+            }}
           >
             {phases
               .filter((phase) => !(phase === "deployment" && currentPhase !== "deployment"))
@@ -530,7 +540,13 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
 
                 return (
                   <button
-                    ref={isMovePhase ? movePhaseButtonRef : isShootPhase ? shootPhaseButtonRef : undefined}
+                    ref={
+                      isMovePhase
+                        ? movePhaseButtonRef
+                        : isShootPhase
+                          ? shootPhaseButtonRef
+                          : undefined
+                    }
                     type="button"
                     key={phase}
                     style={style}

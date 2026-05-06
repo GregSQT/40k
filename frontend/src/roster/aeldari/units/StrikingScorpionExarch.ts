@@ -24,8 +24,12 @@ export class StrikingScorpionExarch extends SwarmMeleeTroop {
   static CC_WEAPONS = getWeapons(StrikingScorpionExarch.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "aeldari"}, { keywordId: "aspect warrior"}, { keywordId: "Striking Scorpion"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "aeldari" },
+    { keywordId: "aspect warrior" },
+    { keywordId: "Striking Scorpion" },
+  ];
 
   static ICON = "/icons/StrikingScorpion.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

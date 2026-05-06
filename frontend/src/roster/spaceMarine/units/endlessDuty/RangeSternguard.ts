@@ -23,7 +23,10 @@ export class RangeSternguard extends TroopRangeSwarm {
   static CC_WEAPON_CODES = ["close_combat_weapon"];
   static CC_WEAPONS = getWeapons(RangeSternguard.CC_WEAPON_CODES);
 
-  static UNIT_KEYWORDS = [...SternguardVeteranBoltRifle.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
+  static UNIT_KEYWORDS = [
+    ...SternguardVeteranBoltRifle.UNIT_KEYWORDS,
+    { keywordId: "endless_duty" },
+  ];
   static ICON = SternguardVeteranBoltRifle.ICON;
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = SternguardVeteranBoltRifle.BASE_SIZE; // Size of the base

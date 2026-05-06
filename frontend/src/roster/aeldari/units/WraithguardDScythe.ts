@@ -24,8 +24,12 @@ export class WraithguardDScythe extends SwarmRangeTroop {
   static CC_WEAPONS = getWeapons(WraithguardDScythe.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "aeldari"}, { keywordId: "wraith construct"}, { keywordId: "wraithguard"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "aeldari" },
+    { keywordId: "wraith construct" },
+    { keywordId: "wraithguard" },
+  ];
 
   static ICON = "/icons/WraithguardDScythe.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

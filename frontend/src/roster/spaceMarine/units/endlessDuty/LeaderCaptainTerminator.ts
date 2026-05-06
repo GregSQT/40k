@@ -26,7 +26,10 @@ export class LeaderCaptainTerminator extends LeaderEliteMeleeElite {
 
   static UNIT_RULES = [{ ruleId: "reroll_charge", displayName: "Unstoppable Valour" }];
   static RULES_STATUS = { reroll_charge: 2 };
-  static UNIT_KEYWORDS = [...CaptainTerminatorRelicFistCombi.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
+  static UNIT_KEYWORDS = [
+    ...CaptainTerminatorRelicFistCombi.UNIT_KEYWORDS,
+    { keywordId: "endless_duty" },
+  ];
 
   static ICON = "/icons/CaptainTerminatorRelicFistCombi.webp";
   static BASE_SHAPE = "round"; // Shape of the base

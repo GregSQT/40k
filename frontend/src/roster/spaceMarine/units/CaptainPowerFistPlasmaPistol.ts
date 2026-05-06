@@ -18,14 +18,20 @@ export class CaptainPowerFistPlasmaPistol extends LeaderEliteMeleeElite {
   static VALUE = 70; // Unit value (W40K points cost)
 
   // WEAPONS
-  static RNG_WEAPON_CODES = ["plasma_pistol_supercharge_captain","plasma_pistol_standard_captain"];
+  static RNG_WEAPON_CODES = ["plasma_pistol_supercharge_captain", "plasma_pistol_standard_captain"];
   static RNG_WEAPONS = getWeapons(CaptainPowerFistPlasmaPistol.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["power_fist_captain"];
   static CC_WEAPONS = getWeapons(CaptainPowerFistPlasmaPistol.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "character"}, { keywordId: "grenade"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "captain"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "character" },
+    { keywordId: "grenade" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "captain" },
+  ];
 
   static ICON = "/icons/CaptainPowerFistPlasmaPistol.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

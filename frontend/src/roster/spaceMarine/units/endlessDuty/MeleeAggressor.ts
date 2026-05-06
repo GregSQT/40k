@@ -23,7 +23,9 @@ export class MeleeAggressor extends EliteMeleeElite {
   static CC_WEAPON_CODES = ["power_fist"];
   static CC_WEAPONS = getWeapons(MeleeAggressor.CC_WEAPON_CODES);
 
-  static UNIT_RULES = [{ ruleId: "closest_target_penetration", displayName: "Close-quarter firepower" }];
+  static UNIT_RULES = [
+    { ruleId: "closest_target_penetration", displayName: "Close-quarter firepower" },
+  ];
   static RULES_STATUS = { closest_target_penetration: 2 };
   static UNIT_KEYWORDS = [...AggressorFlamestorm.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
   static ICON = AggressorFlamestorm.ICON;

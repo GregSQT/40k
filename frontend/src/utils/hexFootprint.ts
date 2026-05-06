@@ -34,8 +34,7 @@ function hexCenter(col: number, row: number): [number, number] {
   const hexWidth = 1.5 * hexRadius;
   const hexHeight = Math.sqrt(3) * hexRadius;
   const x = col * hexWidth + hexWidth / 2;
-  const y =
-    row * hexHeight + ((col % 2) * hexHeight) / 2 + hexHeight / 2;
+  const y = row * hexHeight + ((col % 2) * hexHeight) / 2 + hexHeight / 2;
   return [x, y];
 }
 
@@ -44,11 +43,7 @@ const FOOTPRINT_SIZE_SCALE = 1.5;
 
 // --- Footprint computation ---
 
-function footprintRound(
-  centerCol: number,
-  centerRow: number,
-  diameter: number,
-): Set<string> {
+function footprintRound(centerCol: number, centerRow: number, diameter: number): Set<string> {
   const radius = (diameter / 2.0) * FOOTPRINT_SIZE_SCALE;
   const radiusSq = radius ** 2;
   const [cx, cy] = hexCenter(centerCol, centerRow);
@@ -78,7 +73,7 @@ export function computeOccupiedHexes(
   centerCol: number,
   centerRow: number,
   baseShape: string,
-  baseSize: number,
+  baseSize: number
 ): HexCoord[] {
   if (baseShape !== "round") {
     throw new Error(`Unsupported base_shape: ${baseShape} (only 'round' for now)`);
@@ -149,7 +144,7 @@ export function dilateFootprintHexKeysOnBoard(
   fpKeys: Set<string>,
   radius: number,
   cols: number,
-  rows: number,
+  rows: number
 ): Set<string> {
   if (radius < 0) {
     throw new Error("dilateFootprintHexKeysOnBoard: radius must be non-negative");
@@ -168,7 +163,7 @@ export function dilateFootprintHexKeysOnBoard(
   for (let layer = 0; layer < radius; layer++) {
     const next: Array<[number, number]> = [];
     for (const [c, r] of frontier) {
-      const offsets = (c & 1) ? NEIGHBORS_ODD_COL : NEIGHBORS_EVEN_COL;
+      const offsets = c & 1 ? NEIGHBORS_ODD_COL : NEIGHBORS_EVEN_COL;
       for (const [dc, dr] of offsets) {
         const nc = c + dc;
         const nr = r + dr;
@@ -210,7 +205,7 @@ export function getFightEngagementRingBoardPixels(
   },
   engagementSteps: number,
   boardHexRadius: number,
-  margin: number,
+  margin: number
 ): { cx: number; cy: number; rInner: number; rOuter: number } {
   const [cxN, cyN] = hexCenter(unit.col, unit.row);
   const shape = unit.BASE_SHAPE ?? "round";
@@ -236,7 +231,7 @@ export function engagementRoundRingPreviewHexesOnBoard(
   },
   engagementSteps: number,
   cols: number,
-  rows: number,
+  rows: number
 ): Array<{ col: number; row: number }> {
   const fpKeys = unitFootprintHexKeys(unit);
   const [cx, cy] = hexCenter(unit.col, unit.row);
@@ -277,7 +272,7 @@ export function engagementRoundRingPreviewHexesOnBoard(
 export function minHexDistanceBetweenFootprintKeySets(
   setA: Set<string>,
   setB: Set<string>,
-  maxDistance: number,
+  maxDistance: number
 ): number {
   if (setA.size === 0 || setB.size === 0) {
     throw new Error("minHexDistanceBetweenFootprintKeySets: empty footprint set");
@@ -327,7 +322,7 @@ export function minHexDistanceBetweenFootprintKeySets(
     }
     const next: Array<[number, number]> = [];
     for (const [c, r] of frontier) {
-      const offsets = (c & 1) ? NEIGHBORS_ODD_COL : NEIGHBORS_EVEN_COL;
+      const offsets = c & 1 ? NEIGHBORS_ODD_COL : NEIGHBORS_EVEN_COL;
       for (const [dc, dr] of offsets) {
         const nc = c + dc;
         const nr = r + dr;
@@ -362,7 +357,7 @@ export type UnitFootprintInput = {
 export function minHexDistanceBetweenUnitFootprints(
   charger: UnitFootprintInput,
   target: UnitFootprintInput,
-  maxDistance: number,
+  maxDistance: number
 ): number {
   const setA = unitFootprintHexKeys(charger);
   const setB = unitFootprintHexKeys(target);
@@ -379,13 +374,12 @@ export function hexToPixel(
   col: number,
   row: number,
   hexRadius: number,
-  margin: number,
+  margin: number
 ): { x: number; y: number } {
   const hexWidth = 1.5 * hexRadius;
   const hexHeight = Math.sqrt(3) * hexRadius;
   const x = col * hexWidth + hexWidth / 2 + margin;
-  const y =
-    row * hexHeight + ((col % 2) * hexHeight) / 2 + hexHeight / 2 + margin;
+  const y = row * hexHeight + ((col % 2) * hexHeight) / 2 + hexHeight / 2 + margin;
   return { x, y };
 }
 
@@ -399,7 +393,7 @@ export function pixelToHex(
   hexRadius: number,
   margin: number,
   boardCols?: number,
-  boardRows?: number,
+  boardRows?: number
 ): { col: number; row: number } {
   const hexWidth = 1.5 * hexRadius;
   const hexHeight = Math.sqrt(3) * hexRadius;
@@ -408,9 +402,10 @@ export function pixelToHex(
 
   const colApprox = (ux - hexWidth / 2) / hexWidth;
   const c0 = Math.max(0, Math.floor(colApprox) - 2);
-  const c1 = boardCols != null
-    ? Math.min(boardCols - 1, Math.ceil(colApprox) + 2)
-    : Math.ceil(colApprox) + 2;
+  const c1 =
+    boardCols != null
+      ? Math.min(boardCols - 1, Math.ceil(colApprox) + 2)
+      : Math.ceil(colApprox) + 2;
 
   let bestCol = 0;
   let bestRow = 0;
@@ -420,9 +415,10 @@ export function pixelToHex(
     const stagger = ((c % 2) * hexHeight) / 2;
     const rowApprox = (uy - hexHeight / 2 - stagger) / hexHeight;
     const r0 = Math.max(0, Math.floor(rowApprox) - 2);
-    const r1 = boardRows != null
-      ? Math.min(boardRows - 1, Math.ceil(rowApprox) + 2)
-      : Math.ceil(rowApprox) + 2;
+    const r1 =
+      boardRows != null
+        ? Math.min(boardRows - 1, Math.ceil(rowApprox) + 2)
+        : Math.ceil(rowApprox) + 2;
     for (let r = r0; r <= r1; r++) {
       const cx = c * hexWidth + hexWidth / 2;
       const cy = r * hexHeight + stagger + hexHeight / 2;
@@ -445,30 +441,22 @@ export function pixelToHex(
 export function isFootprintInBounds(
   hexes: HexCoord[],
   boardCols: number,
-  boardRows: number,
+  boardRows: number
 ): boolean {
-  return hexes.every(
-    ([c, r]) => c >= 0 && c < boardCols && r >= 0 && r < boardRows,
-  );
+  return hexes.every(([c, r]) => c >= 0 && c < boardCols && r >= 0 && r < boardRows);
 }
 
 /**
  * Check if any hex in a footprint overlaps a wall.
  */
-export function isFootprintOnWall(
-  hexes: HexCoord[],
-  wallSet: Set<string>,
-): boolean {
+export function isFootprintOnWall(hexes: HexCoord[], wallSet: Set<string>): boolean {
   return hexes.some(([c, r]) => wallSet.has(`${c},${r}`));
 }
 
 /**
  * Check if any hex in a footprint overlaps with occupied positions (other units).
  */
-export function isFootprintOverlapping(
-  hexes: HexCoord[],
-  occupiedSet: Set<string>,
-): boolean {
+export function isFootprintOverlapping(hexes: HexCoord[], occupiedSet: Set<string>): boolean {
   return hexes.some(([c, r]) => occupiedSet.has(`${c},${r}`));
 }
 
@@ -476,10 +464,7 @@ export function isFootprintOverlapping(
  * Check if any hex in a footprint intersects a deployment pool.
  * Returns true if ALL hexes are in the pool (valid for deployment).
  */
-export function isFootprintInDeployPool(
-  hexes: HexCoord[],
-  deployPool: Set<string>,
-): boolean {
+export function isFootprintInDeployPool(hexes: HexCoord[], deployPool: Set<string>): boolean {
   return hexes.every(([c, r]) => deployPool.has(`${c},${r}`));
 }
 
@@ -489,13 +474,11 @@ export function isFootprintInDeployPool(
  */
 export function getContestedObjectives(
   hexes: HexCoord[],
-  objectives: Array<{ id: number; hexes: HexCoord[] }>,
+  objectives: Array<{ id: number; hexes: HexCoord[] }>
 ): number[] {
   const fpSet = new Set(hexes.map(([c, r]) => `${c},${r}`));
   return objectives
-    .filter((obj) =>
-      obj.hexes.some(([c, r]) => fpSet.has(`${c},${r}`)),
-    )
+    .filter((obj) => obj.hexes.some(([c, r]) => fpSet.has(`${c},${r}`)))
     .map((obj) => obj.id);
 }
 
@@ -511,7 +494,7 @@ export function buildOccupiedSet(
     BASE_SIZE?: number | [number, number];
     alive?: boolean;
   }>,
-  excludeId?: number,
+  excludeId?: number
 ): Set<string> {
   const set = new Set<string>();
   for (const u of units) {

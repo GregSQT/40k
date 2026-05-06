@@ -33,8 +33,14 @@ export class BloodClaw extends TroopMeleeTroop {
   static RULES_STATUS = { charge_after_advance: 2 };
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "bloodclaws"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "grenades" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "bloodclaws" },
+  ];
 
   static ICON = "/icons/BloodClaw.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

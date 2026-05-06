@@ -24,8 +24,12 @@ export class TerminatorHeavyFlamer extends EliteRangeTroop {
   static CC_WEAPONS = getWeapons(TerminatorHeavyFlamer.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "terminator"}, { keywordId: "terminator squad"}];
- 
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "imperium" },
+    { keywordId: "terminator" },
+    { keywordId: "terminator squad" },
+  ];
 
   static ICON = "/icons/TerminatorHeavyFlamer.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

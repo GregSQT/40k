@@ -103,7 +103,7 @@ const validateReplayRules = (rules: ReplayRules, episodeNumber: number): void =>
     throw new Error(`Replay rules primary_objective is missing (episode ${episodeNumber})`);
   }
 
-  if (!primaryObjectiveConfig.control || !primaryObjectiveConfig.control.control_method) {
+  if (!primaryObjectiveConfig.control?.control_method) {
     throw new Error(
       `Replay rules primary_objective.control.control_method is missing (episode ${episodeNumber}). ` +
         `Regenerate step.log after updating primary objective config.`
@@ -801,7 +801,10 @@ export function parse_log_file_from_text(text: string): ReplayData {
         );
         if (newFormatMatch) {
           targetId = parseInt(newFormatMatch[1], 10);
-          targetPos = { col: parseInt(newFormatMatch[2], 10), row: parseInt(newFormatMatch[3], 10) };
+          targetPos = {
+            col: parseInt(newFormatMatch[2], 10),
+            row: parseInt(newFormatMatch[3], 10),
+          };
           chargeRoll = parseInt(newFormatMatch[4], 10);
         } else {
           // Legacy format: "FAILED charge to unit X [Roll:Y] [FAILED: reason]"
@@ -909,7 +912,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       };
 
       const fightSubphaseMatch = trimmed.match(/\[FIGHT_SUBPHASE:([^\]]+)\]/);
-      if (!fightSubphaseMatch || !fightSubphaseMatch[1]?.trim()) {
+      if (!fightSubphaseMatch?.[1]?.trim()) {
         throw new Error(`Fight replay line missing FIGHT_SUBPHASE metadata: ${trimmed}`);
       }
       action.fight_subphase = fightSubphaseMatch[1].trim();

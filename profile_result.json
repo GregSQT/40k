@@ -1,9 +1,6 @@
 {
   "scenario_file": "config/scenario_pvp_test.json",
-  "board_dims": [
-    360,
-    312
-  ],
+  "board_dims": [360, 312],
   "inches_to_subhex": 10,
   "seed": 42,
   "warmup_steps": 50,

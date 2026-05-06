@@ -21,10 +21,16 @@ export class CultistMob extends SwarmRangeSwarm {
   static RNG_WEAPONS = getWeapons(CultistMob.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["brutal_assault_weapon"];
   static CC_WEAPONS = getWeapons(CultistMob.CC_WEAPON_CODES);
-    
+
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "chaos"}, { keywordId: "damned"}, { keywordId: "cultist mob"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "grenades" },
+    { keywordId: "chaos" },
+    { keywordId: "damned" },
+    { keywordId: "cultist mob" },
+  ];
 
   static ICON = "/icons/CultistMob.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

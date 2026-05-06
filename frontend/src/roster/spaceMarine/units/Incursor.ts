@@ -23,9 +23,15 @@ export class Incursor extends TroopRangeSwarm {
   static CC_WEAPON_CODES = ["close_combat_weapon"];
   static CC_WEAPONS = getWeapons(Incursor.CC_WEAPON_CODES);
 
-    // UNIT KEYWORDS
-    static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "smoke"}, { keywordId: "imperium"}, { keywordId: "phobos"}, { keywordId: "incursor squad"}];
-
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "grenades" },
+    { keywordId: "smoke" },
+    { keywordId: "imperium" },
+    { keywordId: "phobos" },
+    { keywordId: "incursor squad" },
+  ];
 
   static ICON = "/icons/Incursor.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

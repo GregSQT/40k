@@ -4,18 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAuthSession } from "../auth/authStorage";
 import type { GameMode, PlayerId, Unit } from "../types";
 import type { DiceValue } from "../types/game";
-import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
-import { addHexKeysToSet } from "../utils/movePoolRefsSync";
-import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
-import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
-import { logFightClick } from "../utils/fightClickDebug";
 import {
   CROSS_ACTION_LOG_SUPPRESS_MS,
   dedupeActionLogBatch,
   isActionLogTraceEnabled,
-  logClientDebugConsoleNotifyIfEnabled,
   logActionLogBatchTrace,
   logActionLogEmitTrace,
+  logClientDebugConsoleNotifyIfEnabled,
   shouldEmitActionLogEvent,
 } from "../utils/actionLogClient";
 import type { ActivationPointerGameState } from "../utils/activationClickTarget";
@@ -27,6 +22,11 @@ import {
   getFightAttackerAttackLeft,
   isFightAttackSelectionUiOpen,
 } from "../utils/activationClickTarget";
+import { logFightClick } from "../utils/fightClickDebug";
+import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
+import { addHexKeysToSet } from "../utils/movePoolRefsSync";
+import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
+import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 
 // Get max_turns from config instead of hardcoded fallback
 const getMaxTurnsFromConfig = async (): Promise<number> => {
@@ -54,15 +54,16 @@ function validateOrientationStepValue(rawOrientation: unknown, context: string):
     rawOrientation < 0 ||
     rawOrientation > 5
   ) {
-    throw new Error(`${context}: orientation must be an integer in 0..5, got ${String(rawOrientation)}`);
+    throw new Error(
+      `${context}: orientation must be an integer in 0..5, got ${String(rawOrientation)}`
+    );
   }
   return rawOrientation;
 }
 
 /** fetch échoué (API arrêtée, mauvaise origine sans proxy Vite, etc.). */
 function formatApiConnectionError(err: unknown): string {
-  const raw =
-    err instanceof Error ? err.message : typeof err === "string" ? err : String(err);
+  const raw = err instanceof Error ? err.message : typeof err === "string" ? err : String(err);
   const isNetworkish =
     /networkerror|failed to fetch|load failed|network request failed/i.test(raw) ||
     (err instanceof TypeError && /fetch|network/i.test(raw));
@@ -102,9 +103,7 @@ function readRequiredBooleanSetting(key: string, defaultValue: boolean): boolean
 }
 
 /** Backend renvoie souvent des couples [col, row] ; le state React attend { col, row }. */
-function normalizeChargeDestinationsFromApi(
-  raw: unknown
-): Array<{ col: number; row: number }> {
+function normalizeChargeDestinationsFromApi(raw: unknown): Array<{ col: number; row: number }> {
   if (!Array.isArray(raw)) {
     return [];
   }
@@ -191,7 +190,12 @@ export interface APIGameState {
       grants_rule_ids?: string[];
       usage?: "and" | "or" | "unique" | "always";
       choice_timing?: {
-        trigger: "on_deploy" | "turn_start" | "player_turn_start" | "phase_start" | "activation_start";
+        trigger:
+          | "on_deploy"
+          | "turn_start"
+          | "player_turn_start"
+          | "phase_start"
+          | "activation_start";
         phase?: "command" | "move" | "shoot" | "charge" | "fight";
         active_player_scope?: "owner" | "opponent" | "both";
       };
@@ -218,7 +222,10 @@ export interface APIGameState {
   active_alternating_activation_pool: string[];
   non_active_alternating_activation_pool: string[];
   fight_subphase: string | null;
-  units_cache?: Record<string, { col: number; row: number; HP_CUR: number; player: number; orientation?: number }>;
+  units_cache?: Record<
+    string,
+    { col: number; row: number; HP_CUR: number; player: number; orientation?: number }
+  >;
   active_movement_unit?: string;
   valid_move_destinations_pool?: Array<[number, number]>;
   move_preview_footprint_span?: number | null;
@@ -312,7 +319,7 @@ function hydrateApiGameStateMovePreviewTransport(gs: APIGameState | null): APIGa
  */
 export function mergeGameStatePreservingOmittedObjectives(
   prev: APIGameState | null,
-  incoming: APIGameState,
+  incoming: APIGameState
 ): APIGameState {
   const inc = incoming as unknown as Record<string, unknown>;
   restoreMovePreviewMaskLoopsIfUnchanged(inc);
@@ -628,13 +635,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           ? "pve"
           : isEndlessDutyMode
             ? "endless_duty"
-          : isPvETestMode
-            ? "pve_test"
-            : isPvEMode
-              ? "pve"
-              : isPvPTestMode
-                ? "pvp_test"
-                : "pvp";
+            : isPvETestMode
+              ? "pve_test"
+              : isPvEMode
+                ? "pve"
+                : isPvPTestMode
+                  ? "pvp_test"
+                  : "pvp";
 
         const requestPayload: Record<string, unknown> = {
           pve_mode: isPvEMode || isPvETestMode || isTutorialMode || isEndlessDutyMode,
@@ -673,9 +680,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           endless_duty_state?: unknown;
         };
         if (!response.ok) {
-          throw new Error(
-            data.error ?? `Failed to start game: HTTP ${response.status}`,
-          );
+          throw new Error(data.error ?? `Failed to start game: HTTP ${response.status}`);
         }
         if (data.success) {
           const expectedPlayer2Type: "human" | "ai" =
@@ -717,7 +722,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setError("Session utilisateur manquante. Merci de vous reconnecter.");
         return;
       }
-      const skipLoading = options?.skipLoading ?? (options?.preserveP1PositionsFrom != null);
+      const skipLoading = options?.skipLoading ?? options?.preserveP1PositionsFrom != null;
       if (!skipLoading) {
         setLoading(true);
       }
@@ -959,7 +964,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setAdvancingUnitId(null);
       setAdvanceRoll(null);
     }
-  }, [gameState?.phase]);
+  }, [gameState?.phase, targetPreview.blinkTimer, clearChargePoolRefs]);
 
   useEffect(() => {
     latestGameStateRef.current = gameState;
@@ -1072,8 +1077,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             success: data.success,
             error: data.error,
             phase: (data.game_state as { phase?: string } | undefined)?.phase,
-            active_fight_unit: (data.game_state as { active_fight_unit?: string | null } | undefined)
-              ?.active_fight_unit,
+            active_fight_unit: (
+              data.game_state as { active_fight_unit?: string | null } | undefined
+            )?.active_fight_unit,
             resultAction: r?.action,
             waiting_for_player: r?.waiting_for_player,
             attack_executed: r?.attack_executed,
@@ -1139,23 +1145,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             shootDetails?: Array<Record<string, unknown>>;
             [key: string]: unknown;
           }
-          const actionLogsBatch = dedupeActionLogBatch(
-            data.action_logs as ActionLogEntry[],
-          );
+          const actionLogsBatch = dedupeActionLogBatch(data.action_logs as ActionLogEntry[]);
           actionLogsBatch.forEach((logEntry: ActionLogEntry) => {
             if (!shouldEmitActionLogEvent(logEntry as Record<string, unknown>)) {
               logActionLogEmitTrace(
                 "executeAction /game/action",
                 logEntry as Record<string, unknown>,
                 false,
-                `cross_request_dedupe_<${CROSS_ACTION_LOG_SUPPRESS_MS}ms`,
+                `cross_request_dedupe_<${CROSS_ACTION_LOG_SUPPRESS_MS}ms`
               );
               return;
             }
             logActionLogEmitTrace(
               "executeAction /game/action",
               logEntry as Record<string, unknown>,
-              true,
+              true
             );
             const shootDetail = logEntry.shootDetails?.[0];
 
@@ -1218,7 +1222,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           setGameState((p) => {
             const merged = mergeGameStatePreservingOmittedObjectives(
               p,
-              data.game_state as APIGameState,
+              data.game_state as APIGameState
             );
             latestGameStateRef.current = merged;
             return merged;
@@ -1246,7 +1250,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setGameState((p) => {
               const merged = mergeGameStatePreservingOmittedObjectives(
                 p,
-                data.game_state as APIGameState,
+                data.game_state as APIGameState
               );
               latestGameStateRef.current = merged;
               return merged;
@@ -1320,7 +1324,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             typeof data.result.toCol === "number" &&
             typeof data.result.toRow === "number";
           if (advanceMoveCommitted) {
-            const unitId = parseInt(String(data.result.unitId ?? lastActionRef.current?.unitId), 10);
+            const unitId = parseInt(
+              String(data.result.unitId ?? lastActionRef.current?.unitId),
+              10
+            );
             const advanceRollValue = data.result.advance_range ?? data.result.advance_roll;
             if (advanceRollValue !== undefined && advanceRollValue !== null) {
               setAdvanceRoll(advanceRollValue);
@@ -1442,7 +1449,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           // STEP 1: Start blinking if blinking_units is present (regardless of empty_target_pool)
           if (data.result?.blinking_units && data.result?.start_blinking) {
             const newUnitIds = data.result.blinking_units.map((id: string) => parseInt(id, 10));
-            const parseOptionalId = (rawId: string | number | null | undefined, label: string): number | null => {
+            const parseOptionalId = (
+              rawId: string | number | null | undefined,
+              label: string
+            ): number | null => {
               if (rawId === null || rawId === undefined) {
                 return null;
               }
@@ -1468,20 +1478,32 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             let coverByUnitId: Record<string, boolean> | undefined;
             if (phase === "shoot") {
               const rawCoverByUnitId = data.result.cover_by_unit_id;
-              if (!rawCoverByUnitId || typeof rawCoverByUnitId !== "object" || Array.isArray(rawCoverByUnitId)) {
+              if (
+                !rawCoverByUnitId ||
+                typeof rawCoverByUnitId !== "object" ||
+                Array.isArray(rawCoverByUnitId)
+              ) {
                 throw new Error("shoot blinking response missing required cover_by_unit_id");
               }
               coverByUnitId = {};
-              for (const [unitId, inCover] of Object.entries(rawCoverByUnitId as Record<string, unknown>)) {
+              for (const [unitId, inCover] of Object.entries(
+                rawCoverByUnitId as Record<string, unknown>
+              )) {
                 if (typeof inCover !== "boolean") {
-                  throw new Error(`shoot blinking response cover_by_unit_id.${unitId} must be boolean`);
+                  throw new Error(
+                    `shoot blinking response cover_by_unit_id.${unitId} must be boolean`
+                  );
                 }
                 coverByUnitId[unitId] = inCover;
               }
             }
-            const coverKey = JSON.stringify(Object.entries(coverByUnitId ?? {}).sort(([a], [b]) => a.localeCompare(b)));
+            const coverKey = JSON.stringify(
+              Object.entries(coverByUnitId ?? {}).sort(([a], [b]) => a.localeCompare(b))
+            );
             const previousCoverKey = JSON.stringify(
-              Object.entries(blinkingUnits.coverByUnitId ?? {}).sort(([a], [b]) => a.localeCompare(b))
+              Object.entries(blinkingUnits.coverByUnitId ?? {}).sort(([a], [b]) =>
+                a.localeCompare(b)
+              )
             );
 
             // Check if we need to update: different unitIds, different attackerId, or no timer
@@ -1490,7 +1512,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               !newUnitIds.every((id: number) => blinkingUnits.unitIds.includes(id));
             const attackerIdChanged = newAttackerId !== blinkingUnits.attackerId;
             const coverByUnitIdChanged = coverKey !== previousCoverKey;
-            const needsUpdate = !blinkingUnits.blinkTimer || unitIdsChanged || attackerIdChanged || coverByUnitIdChanged;
+            const needsUpdate =
+              !blinkingUnits.blinkTimer ||
+              unitIdsChanged ||
+              attackerIdChanged ||
+              coverByUnitIdChanged;
 
             if (needsUpdate) {
               // Clear any existing blinking timer
@@ -1627,7 +1653,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           setGameState((p) => {
             const merged = mergeGameStatePreservingOmittedObjectives(
               p,
-              data.game_state as APIGameState,
+              data.game_state as APIGameState
             );
             latestGameStateRef.current = merged;
             return merged;
@@ -1637,7 +1663,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           const advanceDests = data.result?.advance_destinations;
           const advanceRollOrRange =
             data.result?.advance_roll ?? (data.result as { advance_range?: number })?.advance_range;
-          if (Array.isArray(advanceDests) && advanceRollOrRange !== undefined && advanceRollOrRange !== null) {
+          if (
+            Array.isArray(advanceDests) &&
+            advanceRollOrRange !== undefined &&
+            advanceRollOrRange !== null
+          ) {
             // Clear shooting preview when entering advancePreview mode (from either advance button click or unit activation)
             if (targetPreview?.blinkTimer) {
               clearInterval(targetPreview.blinkTimer);
@@ -1666,10 +1696,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               const poolSet = new Set<string>();
               addHexKeysToSet(gsAdv.valid_move_destinations_pool, poolSet);
               if (poolSet.size === 0) {
-                addHexKeysToSet(
-                  (gsAdv as { preview_hexes?: unknown }).preview_hexes,
-                  poolSet,
-                );
+                addHexKeysToSet((gsAdv as { preview_hexes?: unknown }).preview_hexes, poolSet);
               }
               if (poolSet.size === 0) {
                 addHexKeysToSet(advanceDests, poolSet);
@@ -1677,7 +1704,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               moveDestPoolRef.current = poolSet;
 
               const loopsAdv = normalizeMaskLoopsFromApi(
-                (gsAdv as { move_preview_footprint_mask_loops?: unknown }).move_preview_footprint_mask_loops,
+                (gsAdv as { move_preview_footprint_mask_loops?: unknown })
+                  .move_preview_footprint_mask_loops
               );
               footprintMaskLoopsRef.current = loopsAdv;
               const fpSet = new Set<string>();
@@ -1736,7 +1764,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
             const loopsAct = normalizeMaskLoopsFromApi(
               (data.game_state as { move_preview_footprint_mask_loops?: unknown })
-                .move_preview_footprint_mask_loops,
+                .move_preview_footprint_mask_loops
             );
             footprintMaskLoopsRef.current = loopsAct;
             const fpSet = new Set<string>();
@@ -1795,10 +1823,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             data.result?.action === "charge_target_selected"
           ) {
             const pd = data.result.preview_data as { violet_hexes?: unknown } | undefined;
-            const raw =
-              data.result.valid_destinations ??
-              pd?.violet_hexes ??
-              [];
+            const raw = data.result.valid_destinations ?? pd?.violet_hexes ?? [];
             const anchorsNorm = normalizeChargeDestinationsFromApi(raw);
             const displayRaw = (data.result as { charge_preview_display_hexes?: unknown })
               .charge_preview_display_hexes;
@@ -1834,7 +1859,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             data.result?.valid_destinations &&
             data.result?.waiting_for_player === true
           ) {
-            const anchorsNormFb = normalizeChargeDestinationsFromApi(data.result.valid_destinations);
+            const anchorsNormFb = normalizeChargeDestinationsFromApi(
+              data.result.valid_destinations
+            );
             const displayRawFb = (data.result as { charge_preview_display_hexes?: unknown })
               .charge_preview_display_hexes;
             const overlayNormFb = normalizeChargeDestinationsFromApi(displayRawFb ?? []);
@@ -1961,7 +1988,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
             footprintZoneRef.current = fpSet;
             footprintMaskLoopsRef.current = null;
-            const uid = parseInt(String(data.result.unitId ?? data.game_state.active_fight_unit), 10);
+            const uid = parseInt(
+              String(data.result.unitId ?? data.game_state.active_fight_unit),
+              10
+            );
             setSelectedUnitId(uid);
             setMode("pileInPreview");
           }
@@ -1995,7 +2025,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               }
               footprintZoneRef.current = fpSet;
               footprintMaskLoopsRef.current = null;
-              const uid = parseInt(String(data.result.unitId ?? data.game_state.active_fight_unit), 10);
+              const uid = parseInt(
+                String(data.result.unitId ?? data.game_state.active_fight_unit),
+                10
+              );
               setSelectedUnitId(uid);
               setMode("consolidationPreview");
             } else {
@@ -2028,14 +2061,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               }
               const waitUid = parseInt(
                 String(data.result.unitId ?? data.game_state.active_fight_unit ?? ""),
-                10,
+                10
               );
               if (!Number.isFinite(waitUid)) {
                 return false;
               }
               const waitAttacker = data.game_state.units?.find(
                 (u: { id: string | number; ATTACK_LEFT?: number }) =>
-                  parseInt(String(u.id), 10) === waitUid,
+                  parseInt(String(u.id), 10) === waitUid
               );
               const wl = waitAttacker?.ATTACK_LEFT;
               if (typeof wl === "number" && wl <= 0) {
@@ -2127,13 +2160,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               filetFightUid != null && data.game_state?.units
                 ? data.game_state.units.find(
                     (u: { id: string | number; ATTACK_LEFT?: number }) =>
-                      parseInt(String(u.id), 10) === filetFightUid,
+                      parseInt(String(u.id), 10) === filetFightUid
                   )
                 : undefined;
             const fightNoAttacksLeft =
               typeof filetFightUnit?.ATTACK_LEFT === "number" && filetFightUnit.ATTACK_LEFT <= 0;
             const snap = fightTargetUiRef.current;
-            const fightPreviewUiActive = isFightAttackSelectionUiOpen(snap.mode, snap.attackPreview);
+            const fightPreviewUiActive = isFightAttackSelectionUiOpen(
+              snap.mode,
+              snap.attackPreview
+            );
             if (
               data.game_state?.phase === "fight" &&
               fightPreviewUiActive &&
@@ -2184,7 +2220,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
             const loopsMv = normalizeMaskLoopsFromApi(
               (data.game_state as { move_preview_footprint_mask_loops?: unknown })
-                .move_preview_footprint_mask_loops,
+                .move_preview_footprint_mask_loops
             );
             footprintMaskLoopsRef.current = loopsMv;
             if (!loopsMv?.length) {
@@ -2226,6 +2262,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       blinkingUnits.attackerId,
       targetPreview?.blinkTimer,
       clearFightAttackActivationUi,
+      clearChargePoolRefs,
+      syncChargePoolRefs,
+      blinkingUnits.coverByUnitId,
     ]
   );
 
@@ -2267,7 +2306,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           throw new Error(`API ERROR: Unit ${unit.id} has invalid UNIT_RULES entry`);
         }
         if (!("ruleId" in rule) || !("displayName" in rule)) {
-          throw new Error(`API ERROR: Unit ${unit.id} has UNIT_RULES entry missing ruleId/displayName`);
+          throw new Error(
+            `API ERROR: Unit ${unit.id} has UNIT_RULES entry missing ruleId/displayName`
+          );
         }
         if (
           "grants_rule_ids" in rule &&
@@ -2289,20 +2330,30 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           const trigger = (timing as { trigger?: unknown }).trigger;
           if (
             typeof trigger !== "string" ||
-            !["on_deploy", "turn_start", "player_turn_start", "phase_start", "activation_start"].includes(
-              trigger
-            )
+            ![
+              "on_deploy",
+              "turn_start",
+              "player_turn_start",
+              "phase_start",
+              "activation_start",
+            ].includes(trigger)
           ) {
-            throw new Error(`API ERROR: Unit ${unit.id} has invalid choice_timing.trigger in UNIT_RULES`);
+            throw new Error(
+              `API ERROR: Unit ${unit.id} has invalid choice_timing.trigger in UNIT_RULES`
+            );
           }
           const phase = (timing as { phase?: unknown }).phase;
           if (
             phase !== undefined &&
-            (typeof phase !== "string" || !["command", "move", "shoot", "charge", "fight"].includes(phase))
+            (typeof phase !== "string" ||
+              !["command", "move", "shoot", "charge", "fight"].includes(phase))
           ) {
-            throw new Error(`API ERROR: Unit ${unit.id} has invalid choice_timing.phase in UNIT_RULES`);
+            throw new Error(
+              `API ERROR: Unit ${unit.id} has invalid choice_timing.phase in UNIT_RULES`
+            );
           }
-          const activePlayerScope = (timing as { active_player_scope?: unknown }).active_player_scope;
+          const activePlayerScope = (timing as { active_player_scope?: unknown })
+            .active_player_scope;
           if (
             activePlayerScope !== undefined &&
             (typeof activePlayerScope !== "string" ||
@@ -2352,8 +2403,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       };
       const manualWeaponSelected =
         unit.manualWeaponSelected === true ||
-        rawUnit["_manual_weapon_selected"] === true ||
-        rawUnit["manual_weapon_selected"] === true;
+        rawUnit._manual_weapon_selected === true ||
+        rawUnit.manual_weapon_selected === true;
 
       const selectedRngWeaponIndex =
         readIntField(["selectedRngWeaponIndex", "selected_rng_weapon_index"]) ??
@@ -2426,7 +2477,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     }
     if (data.game_state) {
       setGameState((p) =>
-        mergeGameStatePreservingOmittedObjectives(p, data.game_state as APIGameState),
+        mergeGameStatePreservingOmittedObjectives(p, data.game_state as APIGameState)
       );
     }
     const nextState = (data.endless_duty_state as EndlessDutyState | undefined) ?? null;
@@ -2461,7 +2512,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
       if (data.game_state) {
         setGameState((p) =>
-          mergeGameStatePreservingOmittedObjectives(p, data.game_state as APIGameState),
+          mergeGameStatePreservingOmittedObjectives(p, data.game_state as APIGameState)
         );
       }
       setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
@@ -2487,7 +2538,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     fightClickQueueProcessingRef.current = true;
     try {
       while (queuedFightTargetClicksRef.current.length > 0) {
-        const gsNow = (latestGameStateRef.current ?? gameState) as ActivationPointerGameState | null;
+        const gsNow = (latestGameStateRef.current ??
+          gameState) as ActivationPointerGameState | null;
         if (!gsNow || gsNow.phase !== "fight") {
           queuedFightTargetClicksRef.current = [];
           break;
@@ -2567,13 +2619,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     } finally {
       fightClickQueueProcessingRef.current = false;
     }
-  }, [
-    gameState,
-    selectedUnitId,
-    enqueueFightRequest,
-    executeAction,
-    clearFightAttackActivationUi,
-  ]);
+  }, [gameState, selectedUnitId, enqueueFightRequest, executeAction, clearFightAttackActivationUi]);
 
   /** Clics plateau en phase fight : même contrat API que le tir (``left_click`` / ``right_click``). */
   const handleFightPhaseClick = useCallback(
@@ -2595,12 +2641,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           const inFlightEstimate = fightClickQueueProcessingRef.current ? 1 : 0;
           const maxQueued = Math.max(0, al - inFlightEstimate);
           if (queuedFightTargetClicksRef.current.length >= maxQueued) {
-            logFightClick("handleFightPhaseClick: left_click ignoré (file pleine vs attaques restantes)", {
-              unitId,
-              attackLeft: al,
-              queuedCount: queuedFightTargetClicksRef.current.length,
-              inFlightEstimate,
-            });
+            logFightClick(
+              "handleFightPhaseClick: left_click ignoré (file pleine vs attaques restantes)",
+              {
+                unitId,
+                attackLeft: al,
+                queuedCount: queuedFightTargetClicksRef.current.length,
+                inFlightEstimate,
+              }
+            );
             return;
           }
         }
@@ -2881,6 +2930,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       clearChargePoolRefs,
       clearFightAttackActivationUi,
       enqueueFightRequest,
+      handleFightPhaseClick,
     ]
   );
 
@@ -2904,10 +2954,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const activeMu = gameState?.active_movement_unit;
       if (isMoveLikePhase && activeMu != null && activeMu !== "") {
         if (String(activeMu) !== String(uid)) {
-          console.error(
-            "handleSkipUnit: refuse skip — une autre unité a le mouvement en cours",
-            { active_movement_unit: activeMu, requestedUnitId: uid },
-          );
+          console.error("handleSkipUnit: refuse skip — une autre unité a le mouvement en cours", {
+            active_movement_unit: activeMu,
+            requestedUnitId: uid,
+          });
           return;
         }
         try {
@@ -2951,8 +3001,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           `Cannot end phase for player ${player}: current player is ${gameState.current_player}`
         );
       }
-      if (gameState.phase !== "move" && gameState.phase !== "shoot" && gameState.phase !== "charge") {
-        throw new Error(`end_phase is only supported in move/shoot/charge phases, got '${gameState.phase}'`);
+      if (
+        gameState.phase !== "move" &&
+        gameState.phase !== "shoot" &&
+        gameState.phase !== "charge"
+      ) {
+        throw new Error(
+          `end_phase is only supported in move/shoot/charge phases, got '${gameState.phase}'`
+        );
       }
 
       await executeAction({
@@ -2963,9 +3019,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [executeAction, gameState]
   );
 
-  const validateOrientationStep = useCallback((rawOrientation: unknown, context: string): number => {
-    return validateOrientationStepValue(rawOrientation, context);
-  }, []);
+  const validateOrientationStep = useCallback(
+    (rawOrientation: unknown, context: string): number => {
+      return validateOrientationStepValue(rawOrientation, context);
+    },
+    []
+  );
 
   const readEngineOrientationStepFromGameState = useCallback(
     (unitId: number | string): number | undefined => {
@@ -2974,7 +3033,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (cacheOrientation !== undefined) {
         return validateOrientationStep(cacheOrientation, `Unit ${unitKey} units_cache`);
       }
-      const unitOrientation = gameState?.units.find((unit) => String(unit.id) === unitKey)?.orientation;
+      const unitOrientation = gameState?.units.find(
+        (unit) => String(unit.id) === unitKey
+      )?.orientation;
       if (unitOrientation !== undefined) {
         return validateOrientationStep(unitOrientation, `Unit ${unitKey}`);
       }
@@ -3013,7 +3074,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   );
 
   const handleDirectMove = useCallback(
-    async (unitId: number | string, col: number | string, row: number | string, orientation?: number) => {
+    async (
+      unitId: number | string,
+      col: number | string,
+      row: number | string,
+      orientation?: number
+    ) => {
       const action: {
         action: "move";
         unitId: string;
@@ -3027,7 +3093,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         destRow: typeof row === "string" ? parseInt(row, 10) : row,
       };
       if (orientation !== undefined) {
-        action.orientation = validateOrientationStep(orientation, `Move action unit ${action.unitId}`);
+        action.orientation = validateOrientationStep(
+          orientation,
+          `Move action unit ${action.unitId}`
+        );
       }
 
       try {
@@ -3057,7 +3126,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
         const currentOrientation = validateOrientationStep(
           current.orientation,
-          `Move preview unit ${current.unitId}`,
+          `Move preview unit ${current.unitId}`
         );
         return {
           ...current,
@@ -3086,7 +3155,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       );
       const wasAdjacentToEnemy = enemyUnits.some(
         (enemy) =>
-          cubeDistance(offsetToCube(movingUnit.col, movingUnit.row), offsetToCube(enemy.col, enemy.row)) === 1
+          cubeDistance(
+            offsetToCube(movingUnit.col, movingUnit.row),
+            offsetToCube(enemy.col, enemy.row)
+          ) === 1
       );
       if (!wasAdjacentToEnemy) {
         return false;
@@ -3188,7 +3260,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     }
 
     if (pendingPreviewAction === "move" || pendingPreviewAction == null) {
-      const willFlee = isFleeMovePreview(movePreview.unitId, movePreview.destCol, movePreview.destRow);
+      const willFlee = isFleeMovePreview(
+        movePreview.unitId,
+        movePreview.destCol,
+        movePreview.destRow
+      );
       if (willFlee && shouldShowRetreatAlert()) {
         setFleeWarningPopup({
           unitId: movePreview.unitId,
@@ -3205,7 +3281,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       movePreview.unitId,
       movePreview.destCol,
       movePreview.destRow,
-      movePreview.orientation,
+      movePreview.orientation
     );
     setPendingPreviewAction(null);
   }, [
@@ -3625,12 +3701,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (targetIdStr == null) {
         const sel = (gameState as { charge_target_selections?: Record<string, string> })
           .charge_target_selections;
-        if (sel && sel[String(numericChargerId)]) {
+        if (sel?.[String(numericChargerId)]) {
           targetIdStr = String(sel[String(numericChargerId)]);
         }
       }
       if (!targetIdStr) {
-        console.error("🟠 handleMoveCharger: no charge target (chargePreviewTargetId / game_state)");
+        console.error(
+          "🟠 handleMoveCharger: no charge target (chargePreviewTargetId / game_state)"
+        );
         return;
       }
 
@@ -3877,13 +3955,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
     }
     return undefined;
-  }, [
-    gameState?.phase,
-    gameState?.fight_pile_in_footprint_zone,
-    gameState?.fight_consolidation_footprint_zone,
-    mode,
-    pileInDestinations,
-  ]);
+  }, [gameState?.phase, mode, pileInDestinations]);
 
   const combinedAvailableCellsOverride = useMemo(() => {
     return pileInCellsOverride ?? moveSelectionCellsOverride;
@@ -3927,7 +3999,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
     const rawDeployer = Number(gameState.deployment_state.current_deployer);
     if (rawDeployer !== 1 && rawDeployer !== 2) {
-      throw new Error(`Invalid deployment current_deployer: ${gameState.deployment_state.current_deployer}`);
+      throw new Error(
+        `Invalid deployment current_deployer: ${gameState.deployment_state.current_deployer}`
+      );
     }
     const currentDeployer = rawDeployer as PlayerId;
 
@@ -3971,7 +4045,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const emptyCallback = useCallback(() => {}, []);
   const getAdvanceDestinationsMemo = useCallback(
     (_unitId: number) => advanceDestinations,
-    [advanceDestinations],
+    [advanceDestinations]
   );
 
   // Memoize gameState to prevent re-renders when content hasn't changed
@@ -4019,8 +4093,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       preview_hexes: (gameState as { preview_hexes?: unknown }).preview_hexes,
       move_preview_border: gameState.move_preview_border,
       move_preview_footprint_zone: gameState.move_preview_footprint_zone,
-      move_preview_footprint_mask_loops: (gameState as { move_preview_footprint_mask_loops?: unknown })
-        .move_preview_footprint_mask_loops,
+      move_preview_footprint_mask_loops: (
+        gameState as { move_preview_footprint_mask_loops?: unknown }
+      ).move_preview_footprint_mask_loops,
       fight_pile_in_footprint_zone: gameState.fight_pile_in_footprint_zone,
       fight_pile_in_footprint_mask_loops: gameState.fight_pile_in_footprint_mask_loops,
       fight_consolidation_footprint_zone: gameState.fight_consolidation_footprint_zone,
@@ -4328,9 +4403,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         const shootPool = gameState.shoot_activation_pool || [];
         eligibleAICount = shootPool.filter((unitId) => isAiUnitId(unitId)).length;
       } else if (phaseCheck === "move" && gameState.move_activation_pool) {
-        eligibleAICount = gameState.move_activation_pool.filter((unitId) => isAiUnitId(unitId)).length;
+        eligibleAICount = gameState.move_activation_pool.filter((unitId) =>
+          isAiUnitId(unitId)
+        ).length;
       } else if (phaseCheck === "charge" && gameState.charge_activation_pool) {
-        eligibleAICount = gameState.charge_activation_pool.filter((unitId) => isAiUnitId(unitId)).length;
+        eligibleAICount = gameState.charge_activation_pool.filter((unitId) =>
+          isAiUnitId(unitId)
+        ).length;
       } else if (phaseCheck === "fight") {
         // Fight phase has 3 sub-phases with different pools
         const fightSubphase = gameState.fight_subphase;
@@ -4382,12 +4461,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           aiEligibleUnits = getPlayerType(deployer) === "ai" ? pool.length : 0;
         }
       } else if (currentPhase === "move" && gameState.move_activation_pool) {
-        aiEligibleUnits = gameState.move_activation_pool.filter((unitId) => isAiUnitId(unitId)).length;
+        aiEligibleUnits = gameState.move_activation_pool.filter((unitId) =>
+          isAiUnitId(unitId)
+        ).length;
       } else if (currentPhase === "shoot" && gameState.shoot_activation_pool) {
         const shootPool = gameState.shoot_activation_pool || [];
         aiEligibleUnits = shootPool.filter((unitId) => isAiUnitId(unitId)).length;
       } else if (currentPhase === "charge" && gameState.charge_activation_pool) {
-        aiEligibleUnits = gameState.charge_activation_pool.filter((unitId) => isAiUnitId(unitId)).length;
+        aiEligibleUnits = gameState.charge_activation_pool.filter((unitId) =>
+          isAiUnitId(unitId)
+        ).length;
       } else if (currentPhase === "fight") {
         // Same fight pool logic as above
         const fightSubphase = gameState.fight_subphase;
@@ -4618,7 +4701,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           if (initialPhase === "fight" && gs.phase === "fight") {
             const ns = gs.fight_subphase;
             if (ns == null || ns === "") {
-              throw new Error("Missing fight_subphase in fight phase during AI turn (tutorial boundary)");
+              throw new Error(
+                "Missing fight_subphase in fight phase during AI turn (tutorial boundary)"
+              );
             }
             if (initialFightSubphase == null || initialFightSubphase === "") {
               throw new Error("Missing initial fight_subphase for tutorial boundary");
@@ -4693,8 +4778,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                     setGameState((p) =>
                       mergeGameStatePreservingOmittedObjectives(
                         p,
-                        stateData.game_state as APIGameState,
-                      ),
+                        stateData.game_state as APIGameState
+                      )
                     );
                     setEndlessDutyState(
                       (stateData.endless_duty_state as EndlessDutyState | undefined) ?? null
@@ -4720,8 +4805,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               setGameState((p) =>
                 mergeGameStatePreservingOmittedObjectives(
                   p,
-                  activationData.game_state as APIGameState,
-                ),
+                  activationData.game_state as APIGameState
+                )
               );
               setEndlessDutyState(
                 (activationData.endless_duty_state as EndlessDutyState | undefined) ?? null
@@ -4783,7 +4868,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               [key: string]: unknown;
             }
             const activationLogsBatch = dedupeActionLogBatch(
-              activationData.action_logs as ActivationLogEntry[],
+              activationData.action_logs as ActivationLogEntry[]
             );
             activationLogsBatch.forEach((logEntry: ActivationLogEntry) => {
               if (!shouldEmitActionLogEvent(logEntry as Record<string, unknown>)) {
@@ -4791,14 +4876,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   "ai-turn /game/ai-turn",
                   logEntry as Record<string, unknown>,
                   false,
-                  `cross_request_dedupe_<${CROSS_ACTION_LOG_SUPPRESS_MS}ms`,
+                  `cross_request_dedupe_<${CROSS_ACTION_LOG_SUPPRESS_MS}ms`
                 );
                 return;
               }
               logActionLogEmitTrace(
                 "ai-turn /game/ai-turn",
                 logEntry as Record<string, unknown>,
-                true,
+                true
               );
               const shootDetail = logEntry.shootDetails?.[0];
               window.dispatchEvent(
@@ -4846,8 +4931,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setGameState((p) =>
               mergeGameStatePreservingOmittedObjectives(
                 p,
-                activationData.game_state as APIGameState,
-              ),
+                activationData.game_state as APIGameState
+              )
             );
             setEndlessDutyState(
               (activationData.endless_duty_state as EndlessDutyState | undefined) ?? null
@@ -4962,15 +5047,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             } else if (
               currentPhase === "charge" &&
               (activationData.result.blinking_units || activationData.result.valid_targets) &&
-              (activationData.result.start_blinking !== false || activationData.result.valid_targets)
+              (activationData.result.start_blinking !== false ||
+                activationData.result.valid_targets)
             ) {
               // Charge phase - we have blinking_units or valid_targets (potential targets) but no destinations yet
               // Step 1: Select target (this will trigger roll and build destinations)
               const blinkingUnits = activationData.result.blinking_units as string[] | undefined;
-              const validTargets = activationData.result.valid_targets as Array<{ id: string | number }> | undefined;
+              const validTargets = activationData.result.valid_targets as
+                | Array<{ id: string | number }>
+                | undefined;
               const targetIds = blinkingUnits?.length
                 ? blinkingUnits
-                : validTargets?.map((t) => String(t.id)) ?? [];
+                : (validTargets?.map((t) => String(t.id)) ?? []);
 
               if (!targetIds.length) {
                 aiDecision = { action: "skip", unitId };
@@ -5039,10 +5127,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 action: "advance",
                 unitId: advanceUnitId,
               };
-            } else if (
-              activationData.result.valid_targets &&
-              currentPhase !== "charge"
-            ) {
+            } else if (activationData.result.valid_targets && currentPhase !== "charge") {
               // Handle valid targets (uniformized to snake_case in backend)
               // Charge phase is handled above via blinking_units/valid_targets block
               const targets = activationData.result.valid_targets;
@@ -5130,7 +5215,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   [key: string]: unknown;
                 }
                 const decisionLogsBatch = dedupeActionLogBatch(
-                  decisionData.action_logs as DecisionLogEntry[],
+                  decisionData.action_logs as DecisionLogEntry[]
                 );
                 decisionLogsBatch.forEach((logEntry: DecisionLogEntry) => {
                   if (!shouldEmitActionLogEvent(logEntry as Record<string, unknown>)) {
@@ -5138,14 +5223,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                       "ai-decision /game/action",
                       logEntry as Record<string, unknown>,
                       false,
-                      `cross_request_dedupe_<${CROSS_ACTION_LOG_SUPPRESS_MS}ms`,
+                      `cross_request_dedupe_<${CROSS_ACTION_LOG_SUPPRESS_MS}ms`
                     );
                     return;
                   }
                   logActionLogEmitTrace(
                     "ai-decision /game/action",
                     logEntry as Record<string, unknown>,
-                    true,
+                    true
                   );
                   const shootDetail = logEntry.shootDetails?.[0];
                   window.dispatchEvent(
@@ -5188,8 +5273,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               setGameState((p) =>
                 mergeGameStatePreservingOmittedObjectives(
                   p,
-                  decisionData.game_state as APIGameState,
-                ),
+                  decisionData.game_state as APIGameState
+                )
               );
               setEndlessDutyState(
                 (decisionData.endless_duty_state as EndlessDutyState | undefined) ?? null
@@ -5251,8 +5336,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   setGameState((p) =>
                     mergeGameStatePreservingOmittedObjectives(
                       p,
-                      skipData.game_state as APIGameState,
-                    ),
+                      skipData.game_state as APIGameState
+                    )
                   );
                   setEndlessDutyState(
                     (skipData.endless_duty_state as EndlessDutyState | undefined) ?? null

@@ -2,7 +2,6 @@
 // frontend/src/components/GameLog.tsx
 import React from "react";
 import { createPortal } from "react-dom";
-import { useTutorial } from "../contexts/TutorialContext";
 import unitRulesConfig from "../../../config/unit_rules.json";
 import weaponRulesConfig from "../../../config/weapon_rules.json";
 import {
@@ -10,6 +9,7 @@ import {
   getEventIcon,
   getEventTypeClass,
 } from "../../../shared/gameLogStructure.ts";
+import { useTutorial } from "../contexts/TutorialContext";
 
 const RULE_TOKEN_REGEX = /\[([^\]]+)\]/g;
 
@@ -73,11 +73,18 @@ const resolveRuleDescription = (
   return undefined;
 };
 
-const RuleReferenceTag: React.FC<{ label: string; description: string }> = ({ label, description }) => {
+const RuleReferenceTag: React.FC<{ label: string; description: string }> = ({
+  label,
+  description,
+}) => {
   const [isTooltipPinned, setIsTooltipPinned] = React.useState(false);
   const [isTooltipHovered, setIsTooltipHovered] = React.useState(false);
   const buttonRef = React.useRef<HTMLButtonElement | null>(null);
-  const [tooltipCoords, setTooltipCoords] = React.useState<{ left: number; top: number; placeAbove: boolean }>({
+  const [tooltipCoords, setTooltipCoords] = React.useState<{
+    left: number;
+    top: number;
+    placeAbove: boolean;
+  }>({
     left: 0,
     top: 0,
     placeAbove: false,
@@ -206,8 +213,8 @@ export const GameLog: React.FC<GameLogProps> = ({
   const headerRef = React.useRef<HTMLDivElement>(null);
   const topEntryRefs = React.useRef<Array<HTMLDivElement | null>>([]);
   const tutorial = useTutorial();
-  const spotlightLayoutTick = tutorial?.spotlightLayoutTick ?? 0;
-  const [gameLogScrollTick, setGameLogScrollTick] = React.useState(0);
+  const _spotlightLayoutTick = tutorial?.spotlightLayoutTick ?? 0;
+  const [_gameLogScrollTick, setGameLogScrollTick] = React.useState(0);
 
   React.useLayoutEffect(() => {
     const el = eventsContainerRef.current;
@@ -315,7 +322,11 @@ export const GameLog: React.FC<GameLogProps> = ({
         if (match.index > lastIndex) {
           nodes.push(safeMessage.slice(lastIndex, match.index));
         }
-        const description = resolveRuleDescription(tokenLabel, ruleDescriptionByLookup, ruleHintByLabel);
+        const description = resolveRuleDescription(
+          tokenLabel,
+          ruleDescriptionByLookup,
+          ruleHintByLabel
+        );
         if (description) {
           nodes.push(
             <RuleReferenceTag
@@ -366,7 +377,7 @@ export const GameLog: React.FC<GameLogProps> = ({
       height: rect.height,
     });
     return () => onLastEntryRect(null);
-  }, [onLastEntryRect, spotlightLayoutTick, gameLogScrollTick]);
+  }, [onLastEntryRect]);
 
   React.useLayoutEffect(() => {
     if (!onHeaderRect) return;
@@ -383,7 +394,7 @@ export const GameLog: React.FC<GameLogProps> = ({
       height: rect.height,
     });
     return () => onHeaderRect(null);
-  }, [onHeaderRect, displayedEvents.length, spotlightLayoutTick, gameLogScrollTick]);
+  }, [onHeaderRect, displayedEvents.length]);
 
   React.useLayoutEffect(() => {
     if (!onTopTwoEntriesRects) return;
@@ -403,7 +414,7 @@ export const GameLog: React.FC<GameLogProps> = ({
       });
     onTopTwoEntriesRects(topTwo);
     return () => onTopTwoEntriesRects([]);
-  }, [onTopTwoEntriesRects, displayedEvents.length, spotlightLayoutTick, gameLogScrollTick]);
+  }, [onTopTwoEntriesRects, displayedEvents.length]);
 
   return (
     <div className="game-log">
@@ -498,8 +509,7 @@ export const GameLog: React.FC<GameLogProps> = ({
                     </span>
                     {useStepNumbers && (
                       <span className="game-log-entry__turn">
-                        #
-                        {events.length - displayedEvents.findIndex((e) => e.id === event.id)}
+                        #{events.length - displayedEvents.findIndex((e) => e.id === event.id)}
                       </span>
                     )}
                     {event.turnNumber && (

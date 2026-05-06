@@ -23,16 +23,20 @@ export class Terminator extends EliteMeleeElite {
   static CC_WEAPON_CODES = ["power_fist"];
   static CC_WEAPONS = getWeapons(Terminator.CC_WEAPON_CODES);
 
-  
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "terminator"}, { keywordId: "terminator squad"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "imperium" },
+    { keywordId: "terminator" },
+    { keywordId: "terminator squad" },
+  ];
+
   static ICON = "/icons/TerminatorPowerFist.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 16; // Size of the base
   static ICON_SCALE = 2.0; // Size of the icon
   static ILLUSTRATION_RATIO = 99; // Illustration size ratio in percent
-  
+
   constructor(name: string, startPos: [number, number]) {
     super(name, Terminator.HP_MAX, startPos);
   }

@@ -23,8 +23,14 @@ export class SanguinaryGuardInferno extends TroopMeleeTroop {
   static CC_WEAPONS = getWeapons(SanguinaryGuardInferno.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "jump_pack"}, { keywordId: "fly"}, { keywordId: "imperium"}, { keywordId: "sanguinary guard"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "grenades" },
+    { keywordId: "jump_pack" },
+    { keywordId: "fly" },
+    { keywordId: "imperium" },
+    { keywordId: "sanguinary guard" },
+  ];
 
   static ICON = "/icons/SanguinaryGuardInferno.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

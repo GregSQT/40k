@@ -9,13 +9,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteMeleeElite",
       "value": 70,
-      "melee_weapons": [
-        "castellan_axe_melee"
-      ],
-      "ranged_weapons": [
-        "castellan_axe_ranged",
-        "balistus_grenade_launcher"
-      ],
+      "melee_weapons": ["castellan_axe_melee"],
+      "ranged_weapons": ["castellan_axe_ranged", "balistus_grenade_launcher"],
       "special_rules": []
     },
     {
@@ -24,13 +19,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteMeleeTroop",
       "value": 70,
-      "melee_weapons": [
-        "guardian_spear_melee"
-      ],
-      "ranged_weapons": [
-        "guardian_spear_ranged",
-        "balistus_grenade_launcher"
-      ],
+      "melee_weapons": ["guardian_spear_melee"],
+      "ranged_weapons": ["guardian_spear_ranged", "balistus_grenade_launcher"],
       "special_rules": []
     },
     {
@@ -39,12 +29,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteMeleeTroop",
       "value": 56,
-      "melee_weapons": [
-        "sentinel_blade_melee"
-      ],
-      "ranged_weapons": [
-        "sentinel_blade_ranged"
-      ],
+      "melee_weapons": ["sentinel_blade_melee"],
+      "ranged_weapons": ["sentinel_blade_ranged"],
       "special_rules": []
     },
     {
@@ -53,12 +39,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteMeleeTroop",
       "value": 56,
-      "melee_weapons": [
-        "guardian_spear_melee"
-      ],
-      "ranged_weapons": [
-        "guardian_spear_ranged"
-      ],
+      "melee_weapons": ["guardian_spear_melee"],
+      "ranged_weapons": ["guardian_spear_ranged"],
       "special_rules": []
     },
     {
@@ -67,12 +49,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteMeleeElite",
       "value": 65,
-      "melee_weapons": [
-        "castellan_axe_melee"
-      ],
-      "ranged_weapons": [
-        "castellan_axe_ranged"
-      ],
+      "melee_weapons": ["castellan_axe_melee"],
+      "ranged_weapons": ["castellan_axe_ranged"],
       "special_rules": []
     },
     {
@@ -81,12 +59,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteMeleeTroop",
       "value": 65,
-      "melee_weapons": [
-        "guardian_spear_melee"
-      ],
-      "ranged_weapons": [
-        "guardian_spear_ranged"
-      ],
+      "melee_weapons": ["guardian_spear_melee"],
+      "ranged_weapons": ["guardian_spear_ranged"],
       "special_rules": []
     },
     {
@@ -95,12 +69,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeSwarm",
       "value": 11,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "bolter"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["bolter"],
       "special_rules": []
     },
     {
@@ -109,12 +79,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeSwarm",
       "value": 13,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "whitchseeker_flamer"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["whitchseeker_flamer"],
       "special_rules": []
     },
     {
@@ -123,13 +89,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeTroop",
       "value": 16,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "reaper_launcher_starshot",
-        "reaper_launcher_starswarm"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["reaper_launcher_starshot", "reaper_launcher_starswarm"],
       "special_rules": []
     },
     {
@@ -138,13 +99,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeTroop",
       "value": 21,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "missile_launcher_starshot",
-        "missile_launcher_starswarm"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["missile_launcher_starshot", "missile_launcher_starswarm"],
       "special_rules": []
     },
     {
@@ -153,12 +109,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeSwarm",
       "value": 14,
-      "melee_weapons": [
-        "close_combat_weapon_aspect_warrior"
-      ],
-      "ranged_weapons": [
-        "shuriken_catapult_avenger"
-      ],
+      "melee_weapons": ["close_combat_weapon_aspect_warrior"],
+      "ranged_weapons": ["shuriken_catapult_avenger"],
       "special_rules": []
     },
     {
@@ -167,12 +119,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmMeleeTroop",
       "value": 19,
-      "melee_weapons": [
-        "power_glaive"
-      ],
-      "ranged_weapons": [
-        "shuriken_pistol"
-      ],
+      "melee_weapons": ["power_glaive"],
+      "ranged_weapons": ["shuriken_pistol"],
       "special_rules": []
     },
     {
@@ -181,12 +129,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeElite",
       "value": 19,
-      "melee_weapons": [
-        "close_combat_weapon_aspect_warrior"
-      ],
-      "ranged_weapons": [
-        "dragon_fusion_gun"
-      ],
+      "melee_weapons": ["close_combat_weapon_aspect_warrior"],
+      "ranged_weapons": ["dragon_fusion_gun"],
       "special_rules": []
     },
     {
@@ -195,12 +139,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeElite",
       "value": 24,
-      "melee_weapons": [
-        "close_combat_weapon_aspect_warrior"
-      ],
-      "ranged_weapons": [
-        "firepike"
-      ],
+      "melee_weapons": ["close_combat_weapon_aspect_warrior"],
+      "ranged_weapons": ["firepike"],
       "special_rules": []
     },
     {
@@ -209,12 +149,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeTroop",
       "value": 10,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "shuriken_catapult"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["shuriken_catapult"],
       "special_rules": []
     },
     {
@@ -223,12 +159,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeTroop",
       "value": 20,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "shuriken_cannon"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["shuriken_cannon"],
       "special_rules": []
     },
     {
@@ -237,12 +169,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmMeleeTroop",
       "value": 16,
-      "melee_weapons": [
-        "banshees_blade"
-      ],
-      "ranged_weapons": [
-        "shuriken_pistol"
-      ],
+      "melee_weapons": ["banshees_blade"],
+      "ranged_weapons": ["shuriken_pistol"],
       "special_rules": []
     },
     {
@@ -251,12 +179,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmMeleeTroop",
       "value": 21,
-      "melee_weapons": [
-        "mirror_swords"
-      ],
-      "ranged_weapons": [
-        "shuriken_pistol"
-      ],
+      "melee_weapons": ["mirror_swords"],
+      "ranged_weapons": ["shuriken_pistol"],
       "special_rules": []
     },
     {
@@ -265,9 +189,7 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeTroop",
       "value": 20,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
       "ranged_weapons": [],
       "special_rules": []
     },
@@ -277,12 +199,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmMeleeSwarm",
       "value": 10,
-      "melee_weapons": [
-        "close_combat_weapon_aspect_warrior"
-      ],
-      "ranged_weapons": [
-        "shuriken_pistol"
-      ],
+      "melee_weapons": ["close_combat_weapon_aspect_warrior"],
+      "ranged_weapons": ["shuriken_pistol"],
       "special_rules": []
     },
     {
@@ -291,12 +209,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmMeleeTroop",
       "value": 14,
-      "melee_weapons": [
-        "scorpion_chainsword"
-      ],
-      "ranged_weapons": [
-        "shuriken_pistol"
-      ],
+      "melee_weapons": ["scorpion_chainsword"],
+      "ranged_weapons": ["shuriken_pistol"],
       "special_rules": []
     },
     {
@@ -305,12 +219,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmMeleeTroop",
       "value": 19,
-      "melee_weapons": [
-        "scorpion_claws"
-      ],
-      "ranged_weapons": [
-        "shuriken_pistol"
-      ],
+      "melee_weapons": ["scorpion_claws"],
+      "ranged_weapons": ["shuriken_pistol"],
       "special_rules": []
     },
     {
@@ -319,12 +229,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeSwarm",
       "value": 14,
-      "melee_weapons": [
-        "close_combat_weapon_aspect_warrior"
-      ],
-      "ranged_weapons": [
-        "lasblaster"
-      ],
+      "melee_weapons": ["close_combat_weapon_aspect_warrior"],
+      "ranged_weapons": ["lasblaster"],
       "special_rules": []
     },
     {
@@ -333,12 +239,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeSwarm",
       "value": 19,
-      "melee_weapons": [
-        "close_combat_weapon_aspect_warrior"
-      ],
-      "ranged_weapons": [
-        "hawk_talons"
-      ],
+      "melee_weapons": ["close_combat_weapon_aspect_warrior"],
+      "ranged_weapons": ["hawk_talons"],
       "special_rules": []
     },
     {
@@ -347,12 +249,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeTroop",
       "value": 16,
-      "melee_weapons": [
-        "close_combat_weapon_aspect_warrior"
-      ],
-      "ranged_weapons": [
-        "death_spinner"
-      ],
+      "melee_weapons": ["close_combat_weapon_aspect_warrior"],
+      "ranged_weapons": ["death_spinner"],
       "special_rules": []
     },
     {
@@ -361,9 +259,7 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmMeleeTroop",
       "value": 21,
-      "melee_weapons": [
-        "powerblades_array"
-      ],
+      "melee_weapons": ["powerblades_array"],
       "ranged_weapons": [],
       "special_rules": []
     },
@@ -373,12 +269,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeTroop",
       "value": 21,
-      "melee_weapons": [
-        "close_combat_weapon_aspect_warrior"
-      ],
-      "ranged_weapons": [
-        "death_spinner_exarch"
-      ],
+      "melee_weapons": ["close_combat_weapon_aspect_warrior"],
+      "ranged_weapons": ["death_spinner_exarch"],
       "special_rules": []
     },
     {
@@ -387,12 +279,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeTroop",
       "value": 34,
-      "melee_weapons": [
-        "close_combat_weapon_wraithguard"
-      ],
-      "ranged_weapons": [
-        "d_scythe"
-      ],
+      "melee_weapons": ["close_combat_weapon_wraithguard"],
+      "ranged_weapons": ["d_scythe"],
       "special_rules": []
     },
     {
@@ -401,12 +289,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeTroop",
       "value": 34,
-      "melee_weapons": [
-        "close_combat_weapon_wraithguard"
-      ],
-      "ranged_weapons": [
-        "wraithcannon"
-      ],
+      "melee_weapons": ["close_combat_weapon_wraithguard"],
+      "ranged_weapons": ["wraithcannon"],
       "special_rules": []
     },
     {
@@ -415,13 +299,8 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopRangeTroop",
       "value": 5,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "plasma_pistol_standard",
-        "plasma_pistol_supercharge"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["plasma_pistol_standard", "plasma_pistol_supercharge"],
       "special_rules": []
     },
     {
@@ -430,12 +309,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeSwarm",
       "value": 60,
-      "melee_weapons": [
-        "close_combat_weapon_firebrand"
-      ],
-      "ranged_weapons": [
-        "balefire_pike"
-      ],
+      "melee_weapons": ["close_combat_weapon_firebrand"],
+      "ranged_weapons": ["balefire_pike"],
       "special_rules": []
     },
     {
@@ -444,12 +319,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeSwarm",
       "value": 5,
-      "melee_weapons": [
-        "brutal_assault_weapon"
-      ],
-      "ranged_weapons": [
-        "autopistol"
-      ],
+      "melee_weapons": ["brutal_assault_weapon"],
+      "ranged_weapons": ["autopistol"],
       "special_rules": []
     },
     {
@@ -458,9 +329,7 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteRangeElite",
       "value": 90,
-      "melee_weapons": [
-        "crushing_fists"
-      ],
+      "melee_weapons": ["crushing_fists"],
       "ranged_weapons": [
         "fleshmetal_guns_focused_malice",
         "fleshmetal_guns_ruinous_salvo",
@@ -474,12 +343,8 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopRangeElite",
       "value": 24,
-      "melee_weapons": [
-        "close_combat_weapon_a3"
-      ],
-      "ranged_weapons": [
-        "meltagun"
-      ],
+      "melee_weapons": ["close_combat_weapon_a3"],
+      "ranged_weapons": ["meltagun"],
       "special_rules": []
     },
     {
@@ -488,13 +353,8 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopRangeTroop",
       "value": 24,
-      "melee_weapons": [
-        "close_combat_weapon_a3"
-      ],
-      "ranged_weapons": [
-        "plasma_gun_standard",
-        "plasma_gun_supercharge"
-      ],
+      "melee_weapons": ["close_combat_weapon_a3"],
+      "ranged_weapons": ["plasma_gun_standard", "plasma_gun_supercharge"],
       "special_rules": []
     },
     {
@@ -503,12 +363,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeSwarm",
       "value": 5,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "autopistol"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["autopistol"],
       "special_rules": []
     },
     {
@@ -517,15 +373,9 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteRangeSwarm",
       "value": 33,
-      "melee_weapons": [
-        "power_fist"
-      ],
-      "ranged_weapons": [
-        "auto_boltstorm_gauntlets"
-      ],
-      "special_rules": [
-        "Close-quarter firepower"
-      ]
+      "melee_weapons": ["power_fist"],
+      "ranged_weapons": ["auto_boltstorm_gauntlets"],
+      "special_rules": ["Close-quarter firepower"]
     },
     {
       "army": "SpaceMarine",
@@ -533,15 +383,9 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteRangeSwarm",
       "value": 33,
-      "melee_weapons": [
-        "power_fist"
-      ],
-      "ranged_weapons": [
-        "auto_boltstorm_gauntlets"
-      ],
-      "special_rules": [
-        "Close-quarter firepower"
-      ]
+      "melee_weapons": ["power_fist"],
+      "ranged_weapons": ["auto_boltstorm_gauntlets"],
+      "special_rules": ["Close-quarter firepower"]
     },
     {
       "army": "SpaceMarine",
@@ -549,15 +393,9 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeSwarm",
       "value": 17,
-      "melee_weapons": [
-        "assault_intercessor_chainsword"
-      ],
-      "ranged_weapons": [
-        "bolt_pistol"
-      ],
-      "special_rules": [
-        "Targeted Intercession"
-      ]
+      "melee_weapons": ["assault_intercessor_chainsword"],
+      "ranged_weapons": ["bolt_pistol"],
+      "special_rules": ["Targeted Intercession"]
     },
     {
       "army": "SpaceMarine",
@@ -565,15 +403,9 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeTroop",
       "value": 17,
-      "melee_weapons": [
-        "assault_intercessor_chainsword"
-      ],
-      "ranged_weapons": [
-        "heavy_bolt_pistol"
-      ],
-      "special_rules": [
-        "Hammer of wrath"
-      ]
+      "melee_weapons": ["assault_intercessor_chainsword"],
+      "ranged_weapons": ["heavy_bolt_pistol"],
+      "special_rules": ["Hammer of wrath"]
     },
     {
       "army": "SpaceMarine",
@@ -581,16 +413,9 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeTroop",
       "value": 19,
-      "melee_weapons": [
-        "assault_intercessor_chainsword"
-      ],
-      "ranged_weapons": [
-        "plasma_pistol_standard",
-        "plasma_pistol_supercharge"
-      ],
-      "special_rules": [
-        "Hammer of wrath"
-      ]
+      "melee_weapons": ["assault_intercessor_chainsword"],
+      "ranged_weapons": ["plasma_pistol_standard", "plasma_pistol_supercharge"],
+      "special_rules": ["Hammer of wrath"]
     },
     {
       "army": "SpaceMarine",
@@ -598,15 +423,9 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeTroop",
       "value": 20,
-      "melee_weapons": [
-        "power_fist"
-      ],
-      "ranged_weapons": [
-        "hand_flamer"
-      ],
-      "special_rules": [
-        "Hammer of wrath"
-      ]
+      "melee_weapons": ["power_fist"],
+      "ranged_weapons": ["hand_flamer"],
+      "special_rules": ["Hammer of wrath"]
     },
     {
       "army": "SpaceMarine",
@@ -614,16 +433,9 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeElite",
       "value": 22,
-      "melee_weapons": [
-        "power_fist"
-      ],
-      "ranged_weapons": [
-        "plasma_pistol_standard",
-        "plasma_pistol_supercharge"
-      ],
-      "special_rules": [
-        "Targeted Intercession"
-      ]
+      "melee_weapons": ["power_fist"],
+      "ranged_weapons": ["plasma_pistol_standard", "plasma_pistol_supercharge"],
+      "special_rules": ["Targeted Intercession"]
     },
     {
       "army": "SpaceMarine",
@@ -631,9 +443,7 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteMeleeElite",
       "value": 36,
-      "melee_weapons": [
-        "thunder_hammer_terminator"
-      ],
+      "melee_weapons": ["thunder_hammer_terminator"],
       "ranged_weapons": [],
       "special_rules": []
     },
@@ -643,12 +453,8 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeTroop",
       "value": 15,
-      "melee_weapons": [
-        "master_crafted_power_weapon"
-      ],
-      "ranged_weapons": [
-        "heavy_bolt_pistol"
-      ],
+      "melee_weapons": ["master_crafted_power_weapon"],
+      "ranged_weapons": ["heavy_bolt_pistol"],
       "special_rules": []
     },
     {
@@ -657,13 +463,8 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeTroop",
       "value": 18,
-      "melee_weapons": [
-        "master_crafted_power_weapon"
-      ],
-      "ranged_weapons": [
-        "plasma_pistol_standard",
-        "plasma_pistol_supercharge"
-      ],
+      "melee_weapons": ["master_crafted_power_weapon"],
+      "ranged_weapons": ["plasma_pistol_standard", "plasma_pistol_supercharge"],
       "special_rules": []
     },
     {
@@ -672,15 +473,9 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeTroop",
       "value": 13,
-      "melee_weapons": [
-        "assault_intercessor_chainsword"
-      ],
-      "ranged_weapons": [
-        "bolt_pistol"
-      ],
-      "special_rules": [
-        "Berserk Charge"
-      ]
+      "melee_weapons": ["assault_intercessor_chainsword"],
+      "ranged_weapons": ["bolt_pistol"],
+      "special_rules": ["Berserk Charge"]
     },
     {
       "army": "SpaceMarine",
@@ -688,16 +483,9 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeTroop",
       "value": 18,
-      "melee_weapons": [
-        "power_weapon_pack_leader"
-      ],
-      "ranged_weapons": [
-        "plasma_pistol_standard",
-        "plasma_pistol_supercharge"
-      ],
-      "special_rules": [
-        "Berserk Charge"
-      ]
+      "melee_weapons": ["power_weapon_pack_leader"],
+      "ranged_weapons": ["plasma_pistol_standard", "plasma_pistol_supercharge"],
+      "special_rules": ["Berserk Charge"]
     },
     {
       "army": "SpaceMarine",
@@ -705,12 +493,8 @@
       "agent_key": "CoreAgent",
       "base_class": "LeaderEliteMeleeElite",
       "value": 80,
-      "melee_weapons": [
-        "power_fist"
-      ],
-      "ranged_weapons": [
-        "master_crafted_boltgun"
-      ],
+      "melee_weapons": ["power_fist"],
+      "ranged_weapons": ["master_crafted_boltgun"],
       "special_rules": []
     },
     {
@@ -719,15 +503,9 @@
       "agent_key": "CoreAgent",
       "base_class": "LeaderEliteMeleeElite",
       "value": 95,
-      "melee_weapons": [
-        "relic_fist"
-      ],
-      "ranged_weapons": [
-        "storm_bolter_wolf_guard"
-      ],
-      "special_rules": [
-        "Unstoppable Valour"
-      ]
+      "melee_weapons": ["relic_fist"],
+      "ranged_weapons": ["storm_bolter_wolf_guard"],
+      "special_rules": ["Unstoppable Valour"]
     },
     {
       "army": "SpaceMarine",
@@ -735,9 +513,7 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeTroop",
       "value": 17,
-      "melee_weapons": [
-        "eviscerator"
-      ],
+      "melee_weapons": ["eviscerator"],
       "ranged_weapons": [],
       "special_rules": []
     },
@@ -747,9 +523,7 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeSwarm",
       "value": 17,
-      "melee_weapons": [
-        "eviscerator"
-      ],
+      "melee_weapons": ["eviscerator"],
       "ranged_weapons": [],
       "special_rules": []
     },
@@ -759,9 +533,7 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeSwarm",
       "value": 17,
-      "melee_weapons": [
-        "eviscerator"
-      ],
+      "melee_weapons": ["eviscerator"],
       "ranged_weapons": [],
       "special_rules": []
     },
@@ -771,13 +543,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteRangeElite",
       "value": 38,
-      "melee_weapons": [
-        "power_fist"
-      ],
-      "ranged_weapons": [
-        "plasma_cannon_standard",
-        "plasma_cannon_supercharge"
-      ],
+      "melee_weapons": ["power_fist"],
+      "ranged_weapons": ["plasma_cannon_standard", "plasma_cannon_supercharge"],
       "special_rules": []
     },
     {
@@ -786,12 +553,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteRangeTroop",
       "value": 28,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "melta_rifle"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["melta_rifle"],
       "special_rules": []
     },
     {
@@ -800,12 +563,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteRangeTroop",
       "value": 34,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "melta_rifle"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["melta_rifle"],
       "special_rules": []
     },
     {
@@ -814,13 +573,9 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmMeleeSwarm",
       "value": 8,
-      "melee_weapons": [
-        "fenrisian_wolf_teeth_and_claws"
-      ],
+      "melee_weapons": ["fenrisian_wolf_teeth_and_claws"],
       "ranged_weapons": [],
-      "special_rules": [
-        "Predator Instinct"
-      ]
+      "special_rules": ["Predator Instinct"]
     },
     {
       "army": "SpaceMarine",
@@ -828,16 +583,9 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopRangeSwarm",
       "value": 16,
-      "melee_weapons": [
-        "astartes_chainsword"
-      ],
-      "ranged_weapons": [
-        "boltgun",
-        "bolt_pistol"
-      ],
-      "special_rules": [
-        "Cunning Hunters"
-      ]
+      "melee_weapons": ["astartes_chainsword"],
+      "ranged_weapons": ["boltgun", "bolt_pistol"],
+      "special_rules": ["Cunning Hunters"]
     },
     {
       "army": "SpaceMarine",
@@ -845,16 +593,9 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeElite",
       "value": 17,
-      "melee_weapons": [
-        "power_fist_pack_leader"
-      ],
-      "ranged_weapons": [
-        "boltgun",
-        "bolt_pistol"
-      ],
-      "special_rules": [
-        "Cunning Hunters"
-      ]
+      "melee_weapons": ["power_fist_pack_leader"],
+      "ranged_weapons": ["boltgun", "bolt_pistol"],
+      "special_rules": ["Cunning Hunters"]
     },
     {
       "army": "SpaceMarine",
@@ -862,17 +603,9 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopRangeElite",
       "value": 18,
-      "melee_weapons": [
-        "astartes_chainsword"
-      ],
-      "ranged_weapons": [
-        "plasma_gun_standard",
-        "plasma_gun_supercharge",
-        "bolt_pistol"
-      ],
-      "special_rules": [
-        "Cunning Hunters"
-      ]
+      "melee_weapons": ["astartes_chainsword"],
+      "ranged_weapons": ["plasma_gun_standard", "plasma_gun_supercharge", "bolt_pistol"],
+      "special_rules": ["Cunning Hunters"]
     },
     {
       "army": "SpaceMarine",
@@ -880,13 +613,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteRangeTroop",
       "value": 19,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "heavy_bolt_rifle",
-        "bolt_pistol"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["heavy_bolt_rifle", "bolt_pistol"],
       "special_rules": []
     },
     {
@@ -895,13 +623,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteRangeTroop",
       "value": 24,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "heavy_bolter",
-        "bolt_pistol"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["heavy_bolter", "bolt_pistol"],
       "special_rules": []
     },
     {
@@ -910,9 +633,7 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopRangeElite",
       "value": 21,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
       "ranged_weapons": [
         "plasma_incinerator_standard",
         "plasma_incineratorl_supercharge",
@@ -926,9 +647,7 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopRangeElite",
       "value": 26,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
       "ranged_weapons": [
         "plasma_incinerator_standard",
         "plasma_incineratorl_supercharge",
@@ -943,12 +662,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteRangeTroop",
       "value": 24,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "assault_bolters"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["assault_bolters"],
       "special_rules": []
     },
     {
@@ -957,13 +672,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteRangeTroop",
       "value": 24,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "plasma_exterminator_standard",
-        "plasma_exterminator_supercharge"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["plasma_exterminator_standard", "plasma_exterminator_supercharge"],
       "special_rules": []
     },
     {
@@ -972,13 +682,8 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopRangeSwarm",
       "value": 16,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "occulus_bolt_carabine",
-        "bolt_pistol"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["occulus_bolt_carabine", "bolt_pistol"],
       "special_rules": []
     },
     {
@@ -987,13 +692,8 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopRangeSwarm",
       "value": 19,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "bolt_rifle",
-        "bolt_pistol"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["bolt_rifle", "bolt_pistol"],
       "special_rules": []
     },
     {
@@ -1002,13 +702,8 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopRangeSwarm",
       "value": 18,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "bolt_rifle",
-        "bolt_pistol"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["bolt_rifle", "bolt_pistol"],
       "special_rules": []
     },
     {
@@ -1017,9 +712,7 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopRangeSwarm",
       "value": 20,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
       "ranged_weapons": [
         "astartes_grenade_launcher_frag",
         "astartes_grenade_launcher_krak",
@@ -1033,13 +726,8 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeElite",
       "value": 21,
-      "melee_weapons": [
-        "intercessor_sergeant_power_fist"
-      ],
-      "ranged_weapons": [
-        "plasma_pistol_standard",
-        "plasma_pistol_supercharge"
-      ],
+      "melee_weapons": ["intercessor_sergeant_power_fist"],
+      "ranged_weapons": ["plasma_pistol_standard", "plasma_pistol_supercharge"],
       "special_rules": []
     },
     {
@@ -1048,12 +736,8 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeTroop",
       "value": 50,
-      "melee_weapons": [
-        "encarmine_blade"
-      ],
-      "ranged_weapons": [
-        "angelus_boltgun"
-      ],
+      "melee_weapons": ["encarmine_blade"],
+      "ranged_weapons": ["angelus_boltgun"],
       "special_rules": []
     },
     {
@@ -1062,12 +746,8 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeTroop",
       "value": 50,
-      "melee_weapons": [
-        "encarmine_blade"
-      ],
-      "ranged_weapons": [
-        "inferno_pistol"
-      ],
+      "melee_weapons": ["encarmine_blade"],
+      "ranged_weapons": ["inferno_pistol"],
       "special_rules": []
     },
     {
@@ -1076,13 +756,8 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopRangeSwarm",
       "value": 14,
-      "melee_weapons": [
-        "close_combat_weapon_scout"
-      ],
-      "ranged_weapons": [
-        "boltgun",
-        "bolt_pistol"
-      ],
+      "melee_weapons": ["close_combat_weapon_scout"],
+      "ranged_weapons": ["boltgun", "bolt_pistol"],
       "special_rules": []
     },
     {
@@ -1091,13 +766,8 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopRangeSwarm",
       "value": 31,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "sternguard_bolt_rifle",
-        "sternguard_bolt_pistol"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["sternguard_bolt_rifle", "sternguard_bolt_pistol"],
       "special_rules": []
     },
     {
@@ -1106,13 +776,8 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeElite",
       "value": 38,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "sternguard_bolt_rifle",
-        "sternguard_bolt_pistol"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["sternguard_bolt_rifle", "sternguard_bolt_pistol"],
       "special_rules": []
     },
     {
@@ -1121,13 +786,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteRangeTroop",
       "value": 15,
-      "melee_weapons": [
-        "close_combat_weapon"
-      ],
-      "ranged_weapons": [
-        "accelerator_autocannon",
-        "bolt_pistol"
-      ],
+      "melee_weapons": ["close_combat_weapon"],
+      "ranged_weapons": ["accelerator_autocannon", "bolt_pistol"],
       "special_rules": []
     },
     {
@@ -1136,12 +796,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteMeleeElite",
       "value": 33,
-      "melee_weapons": [
-        "power_fist"
-      ],
-      "ranged_weapons": [
-        "storm_bolter"
-      ],
+      "melee_weapons": ["power_fist"],
+      "ranged_weapons": ["storm_bolter"],
       "special_rules": []
     },
     {
@@ -1150,12 +806,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteRangeTroop",
       "value": 38,
-      "melee_weapons": [
-        "power_fist"
-      ],
-      "ranged_weapons": [
-        "assault_cannon"
-      ],
+      "melee_weapons": ["power_fist"],
+      "ranged_weapons": ["assault_cannon"],
       "special_rules": []
     },
     {
@@ -1164,13 +816,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteRangeTroop",
       "value": 38,
-      "melee_weapons": [
-        "power_fist"
-      ],
-      "ranged_weapons": [
-        "cyclone_missile_launcher_frag",
-        "cyclone_missile_launcher_krak"
-      ],
+      "melee_weapons": ["power_fist"],
+      "ranged_weapons": ["cyclone_missile_launcher_frag", "cyclone_missile_launcher_krak"],
       "special_rules": []
     },
     {
@@ -1179,12 +826,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteRangeTroop",
       "value": 38,
-      "melee_weapons": [
-        "power_fist"
-      ],
-      "ranged_weapons": [
-        "heavy_flamer"
-      ],
+      "melee_weapons": ["power_fist"],
+      "ranged_weapons": ["heavy_flamer"],
       "special_rules": []
     },
     {
@@ -1193,12 +836,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteMeleeElite",
       "value": 33,
-      "melee_weapons": [
-        "master_crafted_power_weapon"
-      ],
-      "ranged_weapons": [
-        "storm_bolter_wolf_guard"
-      ],
+      "melee_weapons": ["master_crafted_power_weapon"],
+      "ranged_weapons": ["storm_bolter_wolf_guard"],
       "special_rules": []
     },
     {
@@ -1207,12 +846,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteRangeTroop",
       "value": 45,
-      "melee_weapons": [
-        "chitin_barbed_limb"
-      ],
-      "ranged_weapons": [
-        "spore_mine_launcher"
-      ],
+      "melee_weapons": ["chitin_barbed_limb"],
+      "ranged_weapons": ["spore_mine_launcher"],
       "special_rules": []
     },
     {
@@ -1221,12 +856,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteMeleeElite",
       "value": 125,
-      "melee_weapons": [
-        "monstrous_scything_talons"
-      ],
-      "ranged_weapons": [
-        "heavy_venom_cannon"
-      ],
+      "melee_weapons": ["monstrous_scything_talons"],
+      "ranged_weapons": ["heavy_venom_cannon"],
       "special_rules": []
     },
     {
@@ -1235,15 +866,9 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmMeleeSwarm",
       "value": 7,
-      "melee_weapons": [
-        "blinding_venom"
-      ],
-      "ranged_weapons": [
-        "fleshborer"
-      ],
-      "special_rules": [
-        "Winged Swarm"
-      ]
+      "melee_weapons": ["blinding_venom"],
+      "ranged_weapons": ["fleshborer"],
+      "special_rules": ["Winged Swarm"]
     },
     {
       "army": "Tyranid",
@@ -1251,9 +876,7 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeTroop",
       "value": 19,
-      "melee_weapons": [
-        "rending_claws"
-      ],
+      "melee_weapons": ["rending_claws"],
       "ranged_weapons": [],
       "special_rules": []
     },
@@ -1263,9 +886,7 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteMeleeElite",
       "value": 90,
-      "melee_weapons": [
-        "rending_claws_prime"
-      ],
+      "melee_weapons": ["rending_claws_prime"],
       "ranged_weapons": [],
       "special_rules": []
     },
@@ -1275,12 +896,8 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopRangeElite",
       "value": 32,
-      "melee_weapons": [
-        "chitinous_claws_and_teeth_hive_guard"
-      ],
-      "ranged_weapons": [
-        "impaler_cannon"
-      ],
+      "melee_weapons": ["chitinous_claws_and_teeth_hive_guard"],
+      "ranged_weapons": ["impaler_cannon"],
       "special_rules": []
     },
     {
@@ -1289,12 +906,8 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopRangeElite",
       "value": 32,
-      "melee_weapons": [
-        "chitinous_claws_and_teeth_hive_guard"
-      ],
-      "ranged_weapons": [
-        "shockcannon"
-      ],
+      "melee_weapons": ["chitinous_claws_and_teeth_hive_guard"],
+      "ranged_weapons": ["shockcannon"],
       "special_rules": []
     },
     {
@@ -1303,13 +916,9 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmMeleeSwarm",
       "value": 7,
-      "melee_weapons": [
-        "scything_talons"
-      ],
+      "melee_weapons": ["scything_talons"],
       "ranged_weapons": [],
-      "special_rules": [
-        "Bounding Leap"
-      ]
+      "special_rules": ["Bounding Leap"]
     },
     {
       "army": "Tyranid",
@@ -1317,12 +926,8 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteRangeTroop",
       "value": 30,
-      "melee_weapons": [
-        "chitin_barbed_limb"
-      ],
-      "ranged_weapons": [
-        "flamespurt"
-      ],
+      "melee_weapons": ["chitin_barbed_limb"],
+      "ranged_weapons": ["flamespurt"],
       "special_rules": []
     },
     {
@@ -1331,12 +936,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmMeleeSwarm",
       "value": 15,
-      "melee_weapons": [
-        "chitinous_claws_and_teeth_ripper_swarm"
-      ],
-      "ranged_weapons": [
-        "spinemaws"
-      ],
+      "melee_weapons": ["chitinous_claws_and_teeth_ripper_swarm"],
+      "ranged_weapons": ["spinemaws"],
       "special_rules": []
     },
     {
@@ -1345,15 +946,9 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeSwarm",
       "value": 6,
-      "melee_weapons": [
-        "flesh_hooks"
-      ],
-      "ranged_weapons": [
-        "fleshborer"
-      ],
-      "special_rules": [
-        "Skulking Horrors"
-      ]
+      "melee_weapons": ["flesh_hooks"],
+      "ranged_weapons": ["fleshborer"],
+      "special_rules": ["Skulking Horrors"]
     },
     {
       "army": "Tyranid",
@@ -1361,12 +956,8 @@
       "agent_key": "CoreAgent",
       "base_class": "SwarmRangeSwarm",
       "value": 6,
-      "melee_weapons": [
-        "flesh_hooks"
-      ],
-      "ranged_weapons": [
-        "fleshborer"
-      ],
+      "melee_weapons": ["flesh_hooks"],
+      "ranged_weapons": ["fleshborer"],
       "special_rules": []
     },
     {
@@ -1375,13 +966,9 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeTroop",
       "value": 32,
-      "melee_weapons": [
-        "bio_weapon_warrior"
-      ],
+      "melee_weapons": ["bio_weapon_warrior"],
       "ranged_weapons": [],
-      "special_rules": [
-        "Adrenalised Onslaught"
-      ]
+      "special_rules": ["Adrenalised Onslaught"]
     },
     {
       "army": "Tyranid",
@@ -1389,15 +976,9 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopRangeTroop",
       "value": 24,
-      "melee_weapons": [
-        "rending_claws"
-      ],
-      "ranged_weapons": [
-        "deathspitter"
-      ],
-      "special_rules": [
-        "Adaptable Predators"
-      ]
+      "melee_weapons": ["rending_claws"],
+      "ranged_weapons": ["deathspitter"],
+      "special_rules": ["Adaptable Predators"]
     },
     {
       "army": "Tyranid",
@@ -1405,9 +986,7 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteMeleeTroop",
       "value": 32,
-      "melee_weapons": [
-        "bone_cleaver"
-      ],
+      "melee_weapons": ["bone_cleaver"],
       "ranged_weapons": [],
       "special_rules": []
     },
@@ -1417,9 +996,7 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteMeleeElite",
       "value": 32,
-      "melee_weapons": [
-        "crushing_claws"
-      ],
+      "melee_weapons": ["crushing_claws"],
       "ranged_weapons": [],
       "special_rules": []
     },
@@ -1429,9 +1006,7 @@
       "agent_key": "CoreAgent",
       "base_class": "EliteMeleeTroop",
       "value": 32,
-      "melee_weapons": [
-        "scything_talons_tyrant_guard"
-      ],
+      "melee_weapons": ["scything_talons_tyrant_guard"],
       "ranged_weapons": [],
       "special_rules": []
     },
@@ -1441,13 +1016,8 @@
       "agent_key": "CoreAgent",
       "base_class": "TroopRangeElite",
       "value": 30,
-      "melee_weapons": [
-        "chitinous_claws_and_teeth_zoanthrope"
-      ],
-      "ranged_weapons": [
-        "warp_blast_witchfire",
-        "warp_blast_focused_bolt"
-      ],
+      "melee_weapons": ["chitinous_claws_and_teeth_zoanthrope"],
+      "ranged_weapons": ["warp_blast_witchfire", "warp_blast_focused_bolt"],
       "special_rules": []
     }
   ]

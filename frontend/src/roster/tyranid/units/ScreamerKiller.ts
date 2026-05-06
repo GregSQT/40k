@@ -21,17 +21,21 @@ export class ScreamerKiller extends EliteMeleeElite {
   static RNG_WEAPONS = getWeapons(ScreamerKiller.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["screamer_killer_talons"];
   static CC_WEAPONS = getWeapons(ScreamerKiller.CC_WEAPON_CODES);
-    
+
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "monster"}, { keywordId: "great devourer"}, { keywordId: "tyranids"}, { keywordId: "carnifex"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "monster" },
+    { keywordId: "great devourer" },
+    { keywordId: "tyranids" },
+    { keywordId: "carnifex" },
+  ];
 
   static ICON = "/icons/ScreamerKiller.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 35; // Size of the base
   static ICON_SCALE = 2.6; // Size of the icon
   static ILLUSTRATION_RATIO = 130; // Illustration size ratio in percent
-  
+
   constructor(name: string, startPos: [number, number]) {
     super(name, ScreamerKiller.HP_MAX, startPos);
   }

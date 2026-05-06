@@ -21,10 +21,14 @@ export class Witchseeker extends SwarmRangeSwarm {
   static RNG_WEAPONS = getWeapons(Witchseeker.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["close_combat_weapon"];
   static CC_WEAPONS = getWeapons(Witchseeker.CC_WEAPON_CODES);
-    
+
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "anathema psykana"}, { keywordId: "witchseeker"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "imperium" },
+    { keywordId: "anathema psykana" },
+    { keywordId: "witchseeker" },
+  ];
 
   static ICON = "/icons/Witchseeker.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

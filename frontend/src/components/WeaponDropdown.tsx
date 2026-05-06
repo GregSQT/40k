@@ -70,24 +70,22 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
               >
                 <td>
                   <TooltipWrapper text={disabledReason}>
-                    <>
-                      {weapon.COMBI_WEAPON && (
-                        <TooltipWrapper text="Combi weapon">
-                          <span className="combi-badge">C</span>
-                        </TooltipWrapper>
-                      )}
-                      {weapon.display_name}
-                      {weapon.WEAPON_RULES?.map((rule) => (
-                        <span key={rule} className="rule-badge-wrapper">
-                          <span className="rule-badge">
-                            [{weaponRules[rule as keyof typeof weaponRules]?.name || rule}]
-                          </span>
-                          <span className="rule-tooltip">
-                            {weaponRules[rule as keyof typeof weaponRules]?.description || rule}
-                          </span>
+                    {weapon.COMBI_WEAPON && (
+                      <TooltipWrapper text="Combi weapon">
+                        <span className="combi-badge">C</span>
+                      </TooltipWrapper>
+                    )}
+                    {weapon.display_name}
+                    {weapon.WEAPON_RULES?.map((rule) => (
+                      <span key={rule} className="rule-badge-wrapper">
+                        <span className="rule-badge">
+                          [{weaponRules[rule as keyof typeof weaponRules]?.name || rule}]
                         </span>
-                      ))}
-                    </>
+                        <span className="rule-tooltip">
+                          {weaponRules[rule as keyof typeof weaponRules]?.description || rule}
+                        </span>
+                      </span>
+                    ))}
                   </TooltipWrapper>
                 </td>
                 <td>{weapon.RNG ? `${weapon.RNG}"` : "-"}</td>

@@ -21,10 +21,16 @@ export class CultistFirebrand extends SwarmRangeSwarm {
   static RNG_WEAPONS = getWeapons(CultistFirebrand.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["close_combat_weapon_firebrand"];
   static CC_WEAPONS = getWeapons(CultistFirebrand.CC_WEAPON_CODES);
-    
+
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "character"}, { keywordId: "grenades"}, { keywordId: "chaos"}, { keywordId: "damned"}, { keywordId: "cultist firebrand"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "character" },
+    { keywordId: "grenades" },
+    { keywordId: "chaos" },
+    { keywordId: "damned" },
+    { keywordId: "cultist firebrand" },
+  ];
 
   static ICON = "/icons/CultistFirebrand.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

@@ -2,8 +2,8 @@
 
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { getAuthSession } from "./auth/authStorage";
-import { BoardWithAPI } from "./components/BoardWithAPI";
 import { BoardReplay } from "./components/BoardReplay";
+import { BoardWithAPI } from "./components/BoardWithAPI";
 import AuthPage from "./pages/AuthPage";
 
 const RootRedirect = () => {
@@ -37,7 +37,9 @@ const ProtectedGameRoute = () => {
   const isRequestedModeAllowed =
     allowedModes.includes(requestedMode) ||
     (requestedMode === "endless_duty" && allowedModes.includes("pve")) ||
-    ((requestedMode === "pvp_test" || requestedMode === "pve_test" || requestedMode === "tutorial") &&
+    ((requestedMode === "pvp_test" ||
+      requestedMode === "pve_test" ||
+      requestedMode === "tutorial") &&
       allowedModes.includes("test"));
   if (!isRequestedModeAllowed) {
     const fallbackMode = allowedModes.includes("pve")

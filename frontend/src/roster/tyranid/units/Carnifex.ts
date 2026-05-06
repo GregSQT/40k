@@ -21,10 +21,14 @@ export class Carnifex extends EliteMeleeElite {
   static RNG_WEAPONS = getWeapons(Carnifex.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["monstrous_scything_talons"];
   static CC_WEAPONS = getWeapons(Carnifex.CC_WEAPON_CODES);
-    
+
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "monster"}, { keywordId: "great devourer"}, { keywordId: "tyranids"}, { keywordId: "carnifex"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "monster" },
+    { keywordId: "great devourer" },
+    { keywordId: "tyranids" },
+    { keywordId: "carnifex" },
+  ];
 
   static ICON = "/icons/Carnifex.webp"; // Path relative to public folder
   static BASE_SHAPE = "oval"; // Shape of the base

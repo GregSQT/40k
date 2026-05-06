@@ -42,7 +42,9 @@ export default function AuthPage() {
     const text = await loginResponse.text();
     let loginPayload: LoginResponse & { error?: string };
     try {
-      loginPayload = text ? (JSON.parse(text) as LoginResponse & { error?: string }) : ({} as LoginResponse);
+      loginPayload = text
+        ? (JSON.parse(text) as LoginResponse & { error?: string })
+        : ({} as LoginResponse);
     } catch {
       console.error("Login response (non-JSON):", text.slice(0, 200));
       throw new Error(
@@ -135,7 +137,9 @@ export default function AuthPage() {
           padding: "24px",
         }}
       >
-        <h1 style={{ marginTop: 0, marginBottom: "16px", fontSize: "24px" }}>Connexion utilisateur</h1>
+        <h1 style={{ marginTop: 0, marginBottom: "16px", fontSize: "24px" }}>
+          Connexion utilisateur
+        </h1>
 
         <div style={{ display: "flex", gap: "10px", marginBottom: "16px" }}>
           <button
@@ -170,7 +174,10 @@ export default function AuthPage() {
           </button>
         </div>
 
-        <label htmlFor="auth-login" style={{ display: "block", marginBottom: "8px", color: "#d1d5db" }}>
+        <label
+          htmlFor="auth-login"
+          style={{ display: "block", marginBottom: "8px", color: "#d1d5db" }}
+        >
           Login
         </label>
         <input
@@ -190,7 +197,10 @@ export default function AuthPage() {
           }}
         />
 
-        <label htmlFor="auth-password" style={{ display: "block", marginBottom: "8px", color: "#d1d5db" }}>
+        <label
+          htmlFor="auth-password"
+          style={{ display: "block", marginBottom: "8px", color: "#d1d5db" }}
+        >
           Mot de passe
         </label>
         <input

@@ -23,15 +23,19 @@ export class Genestealer extends TroopMeleeTroop {
   static CC_WEAPONS = getWeapons(Genestealer.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "tyranids"}, { keywordId: "genestealer"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "great devourer" },
+    { keywordId: "tyranids" },
+    { keywordId: "genestealer" },
+  ];
 
   static ICON = "/icons/Genestealer.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 13; // Size of the base
   static ICON_SCALE = 1.6; // Size of the icon
   static ILLUSTRATION_RATIO = 110; // Illustration size ratio in percent
-  
+
   constructor(name: string, startPos: [number, number]) {
     super(name, Genestealer.HP_MAX, startPos);
   }

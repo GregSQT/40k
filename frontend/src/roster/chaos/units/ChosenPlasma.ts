@@ -21,10 +21,14 @@ export class ChosenPlasma extends TroopRangeTroop {
   static RNG_WEAPONS = getWeapons(ChosenPlasma.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["close_combat_weapon"];
   static CC_WEAPONS = getWeapons(ChosenPlasma.CC_WEAPON_CODES);
-    
+
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "chaos"}, { keywordId: "chosen"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "grenades" },
+    { keywordId: "chaos" },
+    { keywordId: "chosen" },
+  ];
 
   static ICON = "/icons/ChosenPlasma.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

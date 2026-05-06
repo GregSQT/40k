@@ -24,8 +24,12 @@ export class Biovore extends EliteRangeTroop {
   static CC_WEAPONS = getWeapons(Biovore.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "harvester"}, { keywordId: "biovore"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "great devourer" },
+    { keywordId: "harvester" },
+    { keywordId: "biovore" },
+  ];
 
   static ICON = "/icons/Biovore.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

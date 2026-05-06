@@ -23,16 +23,12 @@ export class TyranidWarriorMelee extends TroopMeleeTroop {
   static CC_WEAPON_CODES = ["bio_weapon_warrior"];
   static CC_WEAPONS = getWeapons(TyranidWarriorMelee.CC_WEAPON_CODES);
 
-
   // UNIT RULES
   static UNIT_RULES = [
     {
       ruleId: "adrenalised_onslaught",
       displayName: "Adrenalised Onslaught",
-      grants_rule_ids: [
-        "aggression_imperative",
-        "preservation_imperative",
-      ],
+      grants_rule_ids: ["aggression_imperative", "preservation_imperative"],
       usage: "or",
       choice_timing: {
         trigger: "phase_start",
@@ -49,7 +45,13 @@ export class TyranidWarriorMelee extends TroopMeleeTroop {
   };
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "synapse"}, { keywordId: "tyranids"}, { keywordId: "tyranid warrior with melee bio-weapon"}];
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "great devourer" },
+    { keywordId: "synapse" },
+    { keywordId: "tyranids" },
+    { keywordId: "tyranid warrior with melee bio-weapon" },
+  ];
 
   // ICON
   static ICON = "/icons/TyranidWarriorMelee.webp"; // Path relative to public folder

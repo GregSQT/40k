@@ -24,8 +24,13 @@ export class StormGuardian extends SwarmMeleeSwarm {
   static CC_WEAPONS = getWeapons(StormGuardian.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "guardians"}, { keywordId: "guardian defenders"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "grenades" },
+    { keywordId: "guardians" },
+    { keywordId: "guardian defenders" },
+  ];
 
   static ICON = "/icons/StormGuardian.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

@@ -42,8 +42,14 @@ export class AssaultIntercessor extends TroopMeleeSwarm {
   };
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "assault intercessor squad"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "grenades" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "assault intercessor squad" },
+  ];
 
   static ICON = "/icons/AssaultIntercessor.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

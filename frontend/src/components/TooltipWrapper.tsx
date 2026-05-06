@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 interface TooltipWrapperProps {
@@ -89,7 +89,7 @@ export default function TooltipWrapper({
       return;
     }
     recalcFloatingPosition();
-  }, [isHovered, tooltipAnchor, text, recalcFloatingPosition]);
+  }, [isHovered, tooltipAnchor, recalcFloatingPosition]);
 
   useEffect(() => {
     if (!isHovered) {

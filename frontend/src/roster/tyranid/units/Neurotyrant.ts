@@ -21,17 +21,25 @@ export class Neurotyrant extends EliteMeleeElite {
   static RNG_WEAPONS = getWeapons(Neurotyrant.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["neurotyrant_claws_and_lashers"];
   static CC_WEAPONS = getWeapons(Neurotyrant.CC_WEAPON_CODES);
-    
+
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "monster"}, { keywordId: "character"}, { keywordId: "fly"}, { keywordId: "psyker"}, { keywordId: "great devourer"}, { keywordId: "synapse"}, { keywordId: "tyranids"}, { keywordId: "neurotyrant"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "monster" },
+    { keywordId: "character" },
+    { keywordId: "fly" },
+    { keywordId: "psyker" },
+    { keywordId: "great devourer" },
+    { keywordId: "synapse" },
+    { keywordId: "tyranids" },
+    { keywordId: "neurotyrant" },
+  ];
 
   static ICON = "/icons/Neurotyrant.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 20; // Size of the base
   static ICON_SCALE = 2.6; // Size of the icon
   static ILLUSTRATION_RATIO = 130; // Illustration size ratio in percent
-  
+
   constructor(name: string, startPos: [number, number]) {
     super(name, Neurotyrant.HP_MAX, startPos);
   }

@@ -24,8 +24,12 @@ export class AssaultTerminator extends EliteMeleeElite {
   static CC_WEAPONS = getWeapons(AssaultTerminator.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "terminator"}, { keywordId: "terminator assault squad"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "imperium" },
+    { keywordId: "terminator" },
+    { keywordId: "terminator assault squad" },
+  ];
 
   static ICON = "/icons/AssaultTerminator.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

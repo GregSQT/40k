@@ -24,8 +24,12 @@ export class WarpSpider extends SwarmRangeTroop {
   static CC_WEAPONS = getWeapons(WarpSpider.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "aeldari"}, { keywordId: "aspect warrior"}, { keywordId: "Warp Spider"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "aeldari" },
+    { keywordId: "aspect warrior" },
+    { keywordId: "Warp Spider" },
+  ];
 
   static ICON = "/icons/WarpSpider.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

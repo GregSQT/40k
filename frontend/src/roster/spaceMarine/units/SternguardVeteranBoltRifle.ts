@@ -23,9 +23,14 @@ export class SternguardVeteranBoltRifle extends TroopRangeSwarm {
   static CC_WEAPON_CODES = ["close_combat_weapon"];
   static CC_WEAPONS = getWeapons(SternguardVeteranBoltRifle.CC_WEAPON_CODES);
 
-    // UNIT KEYWORDS
-    static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "sternguard veteran squad"}];
-
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "grenades" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "sternguard veteran squad" },
+  ];
 
   static ICON = "/icons/SternguardVeteranBoltRifle.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

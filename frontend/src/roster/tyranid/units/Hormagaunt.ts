@@ -28,8 +28,14 @@ export class Hormagaunt extends SwarmMeleeSwarm {
   static RULES_STATUS = { charge_after_advance: 2 };
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "tyranids"}, { keywordId: "hormagaunt"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "great devourer" },
+    { keywordId: "endless multitude" },
+    { keywordId: "tyranids" },
+    { keywordId: "hormagaunt" },
+  ];
 
   // ICON
   static ICON = "/icons/Hormagaunt.webp"; // Path relative to public folder
@@ -37,7 +43,7 @@ export class Hormagaunt extends SwarmMeleeSwarm {
   static BASE_SIZE = 11; // Size of the base
   static ICON_SCALE = 1.2; // Size of the icon
   static ILLUSTRATION_RATIO = 100; // Illustration size ratio in percent
-  
+
   constructor(name: string, startPos: [number, number]) {
     super(name, Hormagaunt.HP_MAX, startPos);
   }

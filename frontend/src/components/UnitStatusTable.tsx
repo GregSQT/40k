@@ -11,9 +11,9 @@ import {
 } from "react";
 import unitRules from "../../../config/unit_rules.json";
 import weaponRules from "../../../config/weapon_rules.json";
+import { useTutorial } from "../contexts/TutorialContext";
 import type { Unit, UnitId } from "../types/game";
 import TooltipWrapper from "./TooltipWrapper";
-import { useTutorial } from "../contexts/TutorialContext";
 
 const UNIT_RULE_DESCRIPTIONS: Record<string, string> = {
   charge_after_advance: "Allows a unit to charge in the same turn it advanced.",
@@ -219,7 +219,7 @@ const UnitRow = memo<UnitRowProps>(
     tablePlayer,
   }) => {
     const tutorial = useTutorial();
-    const spotlightLayoutTick = tutorial?.spotlightLayoutTick ?? 0;
+    const _spotlightLayoutTick = tutorial?.spotlightLayoutTick ?? 0;
     const nameCellRef = useRef<HTMLTableCellElement>(null);
     const mCellRef = useRef<HTMLTableCellElement>(null);
     const unitRowRef = useRef<HTMLTableRowElement>(null);
@@ -293,7 +293,7 @@ const UnitRow = memo<UnitRowProps>(
         clearTimeout(t);
         reportNameMRect(null);
       };
-    }, [reportNameMRect, reportRect, spotlightLayoutTick]);
+    }, [reportNameMRect, reportRect]);
 
     const rangedTableRef = useRef<HTMLTableElement>(null);
     useLayoutEffect(() => {
@@ -334,7 +334,7 @@ const UnitRow = memo<UnitRowProps>(
         clearTimeout(t);
         reportRangedWeaponsRect(null);
       };
-    }, [reportRangedWeaponsRect, isUnitExpanded, isRangedExpanded, spotlightLayoutTick]);
+    }, [reportRangedWeaponsRect, isUnitExpanded, isRangedExpanded]);
 
     // Tutoriel 2-2 : rapporter union (ligne titre + ligne attributs) pour halo
     const reportAttributesRect = useCallback(() => {
@@ -374,7 +374,7 @@ const UnitRow = memo<UnitRowProps>(
         clearTimeout(t);
         reportUnitAttributesRect(null);
       };
-    }, [reportUnitAttributesRect, reportAttributesRect, spotlightLayoutTick]);
+    }, [reportUnitAttributesRect, reportAttributesRect]);
 
     // Tutoriel 2-11/2-12 : rapporter le rect de la ligne unité pour halo P2
     const reportRowRect = useCallback(() => {
@@ -407,7 +407,7 @@ const UnitRow = memo<UnitRowProps>(
         clearTimeout(t);
         reportUnitRowRect(unit.id, null);
       };
-    }, [reportUnitRowRect, reportRowRect, unit.id, spotlightLayoutTick]);
+    }, [reportUnitRowRect, reportRowRect, unit.id]);
 
     if (!unit.HP_MAX) {
       throw new Error(`Unit ${unit.id} missing required HP_MAX field`);
@@ -1196,10 +1196,15 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     const nameHeaderRef = useRef<HTMLTableCellElement>(null);
     const mHeaderRef = useRef<HTMLTableCellElement>(null);
     const tableHeaderRowRef = useRef<HTMLTableRowElement>(null);
-    const p2UnitRectsRef = useRef<Map<UnitId, { shape: "rect"; left: number; top: number; width: number; height: number }>>(new Map());
+    const p2UnitRectsRef = useRef<
+      Map<UnitId, { shape: "rect"; left: number; top: number; width: number; height: number }>
+    >(new Map());
 
     const handleP2UnitRowRect = useCallback(
-      (unitId: UnitId, rect: { shape: "rect"; left: number; top: number; width: number; height: number } | null) => {
+      (
+        unitId: UnitId,
+        rect: { shape: "rect"; left: number; top: number; width: number; height: number } | null
+      ) => {
         if (!onP2UnitRowRects) return;
         if (rect) {
           p2UnitRectsRef.current.set(unitId, rect);
@@ -1297,9 +1302,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     const isDetailPreviewInThisTable =
       detailPreviewUnitId !== null &&
       units.some(
-        (unit) =>
-          unit.player === player &&
-          String(unit.id) === String(detailPreviewUnitId)
+        (unit) => unit.player === player && String(unit.id) === String(detailPreviewUnitId)
       );
     const effectiveCollapsed =
       tutorialForceTableExpanded || isDetailPreviewInThisTable ? false : isCollapsed;
@@ -1359,9 +1362,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
       if (detailPreviewUnitId === null) {
         return filtered;
       }
-      const previewIndex = filtered.findIndex(
-        (u) => String(u.id) === String(detailPreviewUnitId)
-      );
+      const previewIndex = filtered.findIndex((u) => String(u.id) === String(detailPreviewUnitId));
       if (previewIndex <= 0) {
         return filtered;
       }
@@ -1440,7 +1441,9 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
 
     const getPlayerTypeLabel = (playerNumber: 1 | 2): string => {
       if (!playerTypes) {
-        throw new Error("UnitStatusTable requires game_state.player_types for player header labels");
+        throw new Error(
+          "UnitStatusTable requires game_state.player_types for player header labels"
+        );
       }
       const runtimePlayerType = playerTypes[String(playerNumber)];
       if (runtimePlayerType === "human") {
@@ -1685,8 +1688,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
           {!effectiveCollapsed &&
             playerUnits.map((unit) => {
               const isDetailPreviewUnit =
-                detailPreviewUnitId !== null &&
-                String(unit.id) === String(detailPreviewUnitId);
+                detailPreviewUnitId !== null && String(unit.id) === String(detailPreviewUnitId);
               return (
                 <UnitRow
                   key={unit.id}

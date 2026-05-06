@@ -36,20 +36,10 @@ describe("getActiveFightUnitIdString", () => {
     expect(getActiveFightUnitIdString(null, { ...base, active_fight_unit: "" })).toBe(null);
   });
   it("ignore preferred vide et retombe sur base", () => {
-    expect(
-      getActiveFightUnitIdString(
-        { ...base, active_fight_unit: "" },
-        base
-      )
-    ).toBe("7");
+    expect(getActiveFightUnitIdString({ ...base, active_fight_unit: "" }, base)).toBe("7");
   });
   it("ignore preferred chaîne blanche", () => {
-    expect(
-      getActiveFightUnitIdString(
-        { ...base, active_fight_unit: "  " },
-        base
-      )
-    ).toBe("7");
+    expect(getActiveFightUnitIdString({ ...base, active_fight_unit: "  " }, base)).toBe("7");
   });
 });
 

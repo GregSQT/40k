@@ -23,16 +23,22 @@ export class Barbgaunt extends SwarmRangeSwarm {
   static CC_WEAPON_CODES = ["flesh_hooks"];
   static CC_WEAPONS = getWeapons(Barbgaunt.CC_WEAPON_CODES);
 
-   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "tyranids"}, { keywordId: "termagant"}];
-
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "great devourer" },
+    { keywordId: "endless multitude" },
+    { keywordId: "tyranids" },
+    { keywordId: "termagant" },
+  ];
 
   static ICON = "/icons/Barbgaunt.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 11; // Size of the base
   static ICON_SCALE = 1.2; // Size of the icon
   static ILLUSTRATION_RATIO = 100; // Illustration size ratio in percent
-  
+
   constructor(name: string, startPos: [number, number]) {
     super(name, Barbgaunt.HP_MAX, startPos);
   }

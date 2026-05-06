@@ -3,10 +3,7 @@
  * **Aucun repli** : si la topologie n’est pas convertible en polygone, on lève une erreur.
  */
 import * as PIXI from "pixi.js-legacy";
-import {
-  tryBuildHexUnionMaskPolygons,
-  type HexUnionMaskLayout,
-} from "./hexUnionBoundaryPolygon";
+import { type HexUnionMaskLayout, tryBuildHexUnionMaskPolygons } from "./hexUnionBoundaryPolygon";
 import { smoothMaskLoopsForRender } from "./polygonSmooth";
 
 /** Preview LoS interactive : limiter le lissage pour ne pas bloquer le déplacement du ghost. */
@@ -55,7 +52,7 @@ function pointInPolygonFlat(x: number, y: number, flat: number[]): boolean {
     const yi = flat[i * 2 + 1]!;
     const xj = flat[j * 2]!;
     const yj = flat[j * 2 + 1]!;
-    if ((yi > y) !== (yj > y)) {
+    if (yi > y !== yj > y) {
       const xInt = ((xj - xi) * (y - yi)) / (yj - yi + 1e-12) + xi;
       if (x < xInt) inside = !inside;
     }
@@ -67,7 +64,7 @@ function appendUnionFillFromSmoothedLoops(
   gfx: PIXI.Graphics,
   loops: number[][],
   fillColor: number,
-  fillAlpha: number,
+  fillAlpha: number
 ): void {
   const valid = loops.filter((l) => l.length >= 6);
   if (valid.length === 0) return;
@@ -118,7 +115,7 @@ export function appendLosPreviewSmoothHexUnionFillOrThrow(
   layout: HexUnionMaskLayout,
   fillColor: number,
   fillAlpha: number,
-  chaikinIterations: number = LOS_PREVIEW_SMOOTH_HEX_UNION_CHAIKIN_ITERATIONS,
+  chaikinIterations: number = LOS_PREVIEW_SMOOTH_HEX_UNION_CHAIKIN_ITERATIONS
 ): void {
   if (cells.length === 0) return;
   const pool = new Set<string>();
@@ -127,19 +124,15 @@ export function appendLosPreviewSmoothHexUnionFillOrThrow(
   if (!poly) {
     throw new Error(
       "[appendLosPreviewSmoothHexUnionFillOrThrow] tryBuildHexUnionMaskPolygons a retourné null " +
-        `(cellules=${cells.length}). Pas de repli : corriger la topologie ou le layout.`,
+        `(cellules=${cells.length}). Pas de repli : corriger la topologie ou le layout.`
     );
   }
-  const prep = smoothMaskLoopsForRender(
-    poly.loops,
-    chaikinIterations,
-    losPreviewSmoothOpts,
-  );
+  const prep = smoothMaskLoopsForRender(poly.loops, chaikinIterations, losPreviewSmoothOpts);
   const validLoops = prep.smoothed.filter((l) => l.length >= 6);
   if (validLoops.length === 0) {
     throw new Error(
       "[appendLosPreviewSmoothHexUnionFillOrThrow] aucune boucle valide après Chaikin " +
-        `(boucles brutes=${poly.loops.length}). Pas de repli.`,
+        `(boucles brutes=${poly.loops.length}). Pas de repli.`
     );
   }
   appendUnionFillFromSmoothedLoops(gfx, validLoops, fillColor, fillAlpha);
@@ -151,17 +144,19 @@ export function appendLosPreviewSmoothHexUnionFillOrThrow(
  */
 export function configureLosPreviewOverlaySoftEdges(
   obj: PIXI.DisplayObject,
-  renderer: PIXI.IRenderer | PIXI.Renderer | null,
+  renderer: PIXI.IRenderer | PIXI.Renderer | null
 ): void {
   obj.roundPixels = false;
   const blur = new PIXI.BlurFilter(
     LOS_PREVIEW_OVERLAY_BLUR_STRENGTH,
-    LOS_PREVIEW_OVERLAY_BLUR_QUALITY,
+    LOS_PREVIEW_OVERLAY_BLUR_QUALITY
   );
   blur.resolution = LOS_PREVIEW_OVERLAY_BLUR_RESOLUTION;
   blur.autoFit = true;
   obj.filters = [blur];
-  const w = renderer && "width" in renderer && Number.isFinite(renderer.width) ? renderer.width : 4096;
-  const h = renderer && "height" in renderer && Number.isFinite(renderer.height) ? renderer.height : 4096;
+  const w =
+    renderer && "width" in renderer && Number.isFinite(renderer.width) ? renderer.width : 4096;
+  const h =
+    renderer && "height" in renderer && Number.isFinite(renderer.height) ? renderer.height : 4096;
   obj.filterArea = new PIXI.Rectangle(0, 0, w, h);
 }

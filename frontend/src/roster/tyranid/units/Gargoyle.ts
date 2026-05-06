@@ -34,8 +34,15 @@ export class Gargoyle extends SwarmMeleeSwarm {
   static RULES_STATUS = { move_after_shooting: 2 };
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "fly"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "tyranids"}, { keywordId: "gargoyle"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "fly" },
+    { keywordId: "great devourer" },
+    { keywordId: "endless multitude" },
+    { keywordId: "tyranids" },
+    { keywordId: "gargoyle" },
+  ];
 
   // ICON
   static ICON = "/icons/Gargoyle.webp"; // Path relative to public folder

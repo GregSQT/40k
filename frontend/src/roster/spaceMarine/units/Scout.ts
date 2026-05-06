@@ -23,9 +23,14 @@ export class Scout extends TroopRangeSwarm {
   static CC_WEAPON_CODES = ["close_combat_weapon_scout"];
   static CC_WEAPONS = getWeapons(Scout.CC_WEAPON_CODES);
 
-    // UNIT KEYWORDS
-    static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "smoke"}, { keywordId: "imperium"}, { keywordId: "Scout squad"}];
-
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "grenades" },
+    { keywordId: "smoke" },
+    { keywordId: "imperium" },
+    { keywordId: "Scout squad" },
+  ];
 
   static ICON = "/icons/Scout.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

@@ -23,7 +23,6 @@ export class TyranidWarriorRanged extends TroopRangeTroop {
   static CC_WEAPON_CODES = ["rending_claws"];
   static CC_WEAPONS = getWeapons(TyranidWarriorRanged.CC_WEAPON_CODES);
 
-
   // UNIT RULES
   static UNIT_RULES = [
     {
@@ -44,7 +43,13 @@ export class TyranidWarriorRanged extends TroopRangeTroop {
   };
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "synapse"}, { keywordId: "tyranids"}, { keywordId: "tyranid warrior with ranged bio-weapon"}];
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "great devourer" },
+    { keywordId: "synapse" },
+    { keywordId: "tyranids" },
+    { keywordId: "tyranid warrior with ranged bio-weapon" },
+  ];
 
   // ICON
   static ICON = "/icons/TyranidWarriorRanged.webp"; // Path relative to public folder
@@ -52,7 +57,7 @@ export class TyranidWarriorRanged extends TroopRangeTroop {
   static BASE_SIZE = 20; // Size of the base
   static ICON_SCALE = 2.2; // Size of the icon
   static ILLUSTRATION_RATIO = 150; // Illustration size ratio in percent
-  
+
   constructor(name: string, startPos: [number, number]) {
     super(name, TyranidWarriorRanged.HP_MAX, startPos);
   }

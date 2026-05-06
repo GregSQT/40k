@@ -23,10 +23,14 @@ export class WolfGuardTerminator extends EliteMeleeElite {
   static CC_WEAPON_CODES = ["master_crafted_power_weapon"];
   static CC_WEAPONS = getWeapons(WolfGuardTerminator.CC_WEAPON_CODES);
 
-  
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "terminator"}, { keywordId: "wolf guard terminator squad"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "imperium" },
+    { keywordId: "terminator" },
+    { keywordId: "wolf guard terminator squad" },
+  ];
+
   static ICON = "/icons/WolfGuardTerminator.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 16; // Size of the base

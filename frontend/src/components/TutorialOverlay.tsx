@@ -176,9 +176,7 @@ const TUTORIAL_POPUP_2_BOARD_ANCHOR_BY_STAGE: Record<
   "2-15": { offsetTopPx: 12, centerXShiftPx: 0 },
 };
 
-function isTutorialStage2BoardAnchored(
-  stage: string
-): stage is "2-13" | "2-14" | "2-15" {
+function isTutorialStage2BoardAnchored(stage: string): stage is "2-13" | "2-14" | "2-15" {
   return stage === "2-13" || stage === "2-14" || stage === "2-15";
 }
 
@@ -211,14 +209,7 @@ const WEAPON_MENU_ICON_PATH = "/icons/weapon_menu_icon.png";
 /** Mini icônes entre le curseur et le texte (étapes 1-14, 1-15, 1-16, 1-21, 1-22, 1-24). */
 const MINI_ICON_CLASS = "tutorial-overlay-dialog__mini-icon";
 function MiniIntercessorIcon(): React.ReactElement {
-  return (
-    <img
-      src={INTERCESSOR_ICON_PATH}
-      alt=""
-      className={MINI_ICON_CLASS}
-      aria-hidden
-    />
-  );
+  return <img src={INTERCESSOR_ICON_PATH} alt="" className={MINI_ICON_CLASS} aria-hidden />;
 }
 /** Mini Intercessor avec cercle vert (étape 1-21). */
 function MiniIntercessorIconWithGreenCircle(): React.ReactElement {
@@ -240,12 +231,7 @@ function MiniIntercessorIconWithGreenCircle(): React.ReactElement {
           strokeOpacity="0.8"
         />
       </svg>
-      <img
-        src={INTERCESSOR_ICON_PATH}
-        alt=""
-        className={MINI_ICON_CLASS}
-        aria-hidden
-      />
+      <img src={INTERCESSOR_ICON_PATH} alt="" className={MINI_ICON_CLASS} aria-hidden />
     </span>
   );
 }
@@ -274,24 +260,10 @@ function MiniHexIcon(): React.ReactElement {
   );
 }
 function MiniWeaponMenuIcon(): React.ReactElement {
-  return (
-    <img
-      src={WEAPON_MENU_ICON_PATH}
-      alt=""
-      className={MINI_ICON_CLASS}
-      aria-hidden
-    />
-  );
+  return <img src={WEAPON_MENU_ICON_PATH} alt="" className={MINI_ICON_CLASS} aria-hidden />;
 }
 function MiniTermagantIcon(): React.ReactElement {
-  return (
-    <img
-      src={TERMAGANT_ICON_PATH}
-      alt=""
-      className={MINI_ICON_CLASS}
-      aria-hidden
-    />
-  );
+  return <img src={TERMAGANT_ICON_PATH} alt="" className={MINI_ICON_CLASS} aria-hidden />;
 }
 
 function resolveDefaultAfterCursorIcon(stepStage: string): TutorialAfterCursorIconKey | null {
@@ -367,8 +339,7 @@ function renderBodyWithClickIcon(
             {showIconAtStart && (
               <>
                 <CursorIcon />
-                {afterCursor}
-                {" "}
+                {afterCursor}{" "}
               </>
             )}
             {hasPlaceholder
@@ -378,8 +349,7 @@ function renderBodyWithClickIcon(
                     {j < parts.length - 1 && (
                       <>
                         <CursorIcon />
-                        {afterCursor}
-                        {" "}
+                        {afterCursor}{" "}
                       </>
                     )}
                   </span>
@@ -609,7 +579,9 @@ function replaceCursorInText(
               />
             );
           }
-          return <Fragment key={nextKey(`inline-text-${part}`)}>{renderTextDecorators(part)}</Fragment>;
+          return (
+            <Fragment key={nextKey(`inline-text-${part}`)}>{renderTextDecorators(part)}</Fragment>
+          );
         })}
       </>
     );
@@ -626,8 +598,7 @@ function replaceCursorInText(
           {k < segments.length - 1 && (
             <>
               <CursorIcon />
-              {afterCursor ?? null}
-              {" "}
+              {afterCursor ?? null}{" "}
             </>
           )}
         </span>
@@ -659,12 +630,7 @@ function renderBodyWithLosPlaceholders(
     if (tag.includes("termagant") || tag.includes("Termagant icon")) {
       parts.push(
         <span key={`termagant-${m.index}`} aria-hidden>
-          <img
-            src={TERMAGANT_ICON_PATH}
-            alt=""
-            className={MINI_ICON_CLASS}
-            aria-hidden
-          />
+          <img src={TERMAGANT_ICON_PATH} alt="" className={MINI_ICON_CLASS} aria-hidden />
         </span>
       );
     } else if (tag.includes("foncé") || tag.includes("Dark blue")) {
@@ -755,7 +721,8 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   const defaultAfterCursorIcon = resolveDefaultAfterCursorIcon(step.stage);
   const effectiveAfterCursorIcon =
     uiBehavior.afterCursorIcon === undefined ? defaultAfterCursorIcon : uiBehavior.afterCursorIcon;
-  const popupImageGhostClass = uiBehavior.popupImageGhost === true ? " tutorial-overlay-dialog__popup-image--ghost" : "";
+  const popupImageGhostClass =
+    uiBehavior.popupImageGhost === true ? " tutorial-overlay-dialog__popup-image--ghost" : "";
   const backdropOpacity =
     step.fog.global === true
       ? (uiBehavior.overlayBackdropOpacity ?? TUTORIAL_UI_RUNTIME_CONFIG.fogBackdropOpacity)
@@ -783,17 +750,15 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   const isStepIconAndFirstLine = step.popupFirstLineWithIcon === true;
   const bodyFirstLineIcon = isStepIconAndFirstLine ? (body.split("\n")[0] ?? "") : "";
   const bodyRestIcon = isStepIconAndFirstLine ? body.split("\n").slice(1).join("\n") : "";
-  const bodyContentRestIcon =
-    isStepIconAndFirstLine
-      ? renderBodyWithClickIcon(bodyRestIcon, { afterCursor: afterCursorIcon })
-      : null;
+  const bodyContentRestIcon = isStepIconAndFirstLine
+    ? renderBodyWithClickIcon(bodyRestIcon, { afterCursor: afterCursorIcon })
+    : null;
   const isStep1_5 = step.stage === "1-15";
   const bodyFirstLine1_5 = isStep1_5 ? (body.split("\n")[0] ?? "") : "";
   const bodyRest1_5 = isStep1_5 ? body.split("\n").slice(1).join("\n") : "";
-  const bodyContentRest1_5 =
-    isStep1_5
-      ? renderBodyWithClickIcon(bodyRest1_5, { afterCursor: afterCursorIcon })
-      : null;
+  const bodyContentRest1_5 = isStep1_5
+    ? renderBodyWithClickIcon(bodyRest1_5, { afterCursor: afterCursorIcon })
+    : null;
   const showIllustrationBlock =
     uiBehavior.hidePopupIllustrationBlock === true
       ? false
@@ -893,16 +858,16 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
 
   useEffect(() => {
     setDialogPosition(null);
-  }, [step.stage]);
+  }, []);
 
   useEffect(() => {
     // Si la position YAML change (HMR), on annule un éventuel drag persistant
     // pour que les nouveaux réglages left/top reprennent immédiatement la main.
     setDialogPosition(null);
     setViewportInsetNudge({ x: 0, y: 0 });
-  }, [step.popupPosition]);
+  }, []);
 
-  const tutorialLayoutDepsKey = useMemo(() => {
+  const _tutorialLayoutDepsKey = useMemo(() => {
     const spotlightSig = spotlights
       .map((s) => {
         if (s.shape === "circle") {
@@ -930,7 +895,9 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
         ? `${tutorialPopupAnchor.centerX},${tutorialPopupAnchor.bottomY}`
         : "";
     const popupPosSig =
-      step.popupPosition && step.popupPosition !== "center" && typeof step.popupPosition === "object"
+      step.popupPosition &&
+      step.popupPosition !== "center" &&
+      typeof step.popupPosition === "object"
         ? JSON.stringify(step.popupPosition)
         : String(step.popupPosition ?? "");
     return [
@@ -974,9 +941,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
       if (rect.top < margin) dy = margin - rect.top;
       else if (rect.bottom > vh - margin) dy = vh - margin - rect.bottom;
     }
-    setViewportInsetNudge((prev) =>
-      prev.x === dx && prev.y === dy ? prev : { x: dx, y: dy }
-    );
+    setViewportInsetNudge((prev) => (prev.x === dx && prev.y === dy ? prev : { x: dx, y: dy }));
   }, [step.popupPosition]);
 
   useLayoutEffect(() => {
@@ -995,7 +960,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
       ro.disconnect();
       window.removeEventListener("resize", clampDialogToViewport);
     };
-  }, [tutorialLayoutDepsKey, clampDialogToViewport]);
+  }, [clampDialogToViewport]);
 
   const dialogStyle = ((): React.CSSProperties => {
     const base: React.CSSProperties = {
@@ -1022,8 +987,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
     }
     if (hasExplicitPopupPosition) {
       const popupPos = step.popupPosition as { left: string | number; top: string | number };
-      const stageSpecificTransform =
-        step.stage === "1-16" ? "translateY(-50%)" : "none";
+      const stageSpecificTransform = step.stage === "1-16" ? "translateY(-50%)" : "none";
       return {
         ...base,
         position: "fixed",
@@ -1078,8 +1042,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
           Number.isFinite(union.top)
         ) {
           const leftAnchor = union.left - TUTORIAL_POPUP_1_15_GAP_LEFT_OF_NAME_M_ROW_PX;
-          const topCenter =
-            union.top + union.height / 2 + TUTORIAL_POPUP_1_15_SHIFT_DOWN_PX;
+          const topCenter = union.top + union.height / 2 + TUTORIAL_POPUP_1_15_SHIFT_DOWN_PX;
           return {
             ...base,
             position: "fixed",
@@ -1092,17 +1055,13 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
       if (panelLeftSpotlightForLayout != null) {
         const r = panelLeftSpotlightForLayout;
         if (r.width >= 2 && r.height >= 2) {
-          let fullBoardTop =
-            step.fog.leftPanel === true ? r.top - r.height : r.top;
+          let fullBoardTop = step.fog.leftPanel === true ? r.top - r.height : r.top;
           if (!Number.isFinite(fullBoardTop) || fullBoardTop < 0) {
             fullBoardTop = r.top;
           }
           const boardCenterX = r.left + r.width / 2;
           const desiredBottom = fullBoardTop - TUTORIAL_POPUP_1_15_GAP_ABOVE_BOARD_TOP_PX;
-          const topPx = Math.max(
-            12,
-            desiredBottom - TUTORIAL_POPUP_1_15_MAX_HEIGHT_ESTIMATE_PX
-          );
+          const topPx = Math.max(12, desiredBottom - TUTORIAL_POPUP_1_15_MAX_HEIGHT_ESTIMATE_PX);
           if (Number.isFinite(boardCenterX) && Number.isFinite(topPx)) {
             return {
               ...base,
@@ -1115,18 +1074,12 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
         }
       }
     }
-    if (
-      isTutorialStage2BoardAnchored(step.stage) &&
-      panelLeftSpotlightForLayout != null
-    ) {
+    if (isTutorialStage2BoardAnchored(step.stage) && panelLeftSpotlightForLayout != null) {
       const anchor = TUTORIAL_POPUP_2_BOARD_ANCHOR_BY_STAGE[step.stage];
       const r = panelLeftSpotlightForLayout;
       if (r.width >= 2 && r.height >= 2) {
         const boardCenterX = r.left + r.width / 2 + anchor.centerXShiftPx;
-        const topPx = Math.max(
-          TUTORIAL_DIALOG_VIEWPORT_MARGIN_PX,
-          r.top + anchor.offsetTopPx
-        );
+        const topPx = Math.max(TUTORIAL_DIALOG_VIEWPORT_MARGIN_PX, r.top + anchor.offsetTopPx);
         return {
           ...base,
           position: "fixed",
@@ -1680,11 +1633,13 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
               </>
             ) : (
               <>
-                {!step.advanceOnUnitClick && !step.advanceOnMoveClick && !step.advanceOnWeaponClick && (
-                  <button type="button" onClick={onClose} className="tutorial-btn-primary">
-                    Suivant
-                  </button>
-                )}
+                {!step.advanceOnUnitClick &&
+                  !step.advanceOnMoveClick &&
+                  !step.advanceOnWeaponClick && (
+                    <button type="button" onClick={onClose} className="tutorial-btn-primary">
+                      Suivant
+                    </button>
+                  )}
                 {onSkipTutorial && (
                   <button type="button" onClick={onSkipTutorial} className="tutorial-btn-secondary">
                     Passer le tutoriel

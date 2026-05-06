@@ -17,14 +17,22 @@ export class Obliterator extends EliteRangeElite {
   static VALUE = 90; // Unit value (W40K points cost)
 
   // WEAPONS
-  static RNG_WEAPON_CODES = ["fleshmetal_guns_focused_malice", "fleshmetal_guns_ruinous_salvo", "fleshmetal_guns_warp_hail"];
+  static RNG_WEAPON_CODES = [
+    "fleshmetal_guns_focused_malice",
+    "fleshmetal_guns_ruinous_salvo",
+    "fleshmetal_guns_warp_hail",
+  ];
   static RNG_WEAPONS = getWeapons(Obliterator.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["crushing_fists"];
   static CC_WEAPONS = getWeapons(Obliterator.CC_WEAPON_CODES);
-    
+
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "chaos"}, { keywordId: "daemon"}, { keywordId: "obliterator"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "chaos" },
+    { keywordId: "daemon" },
+    { keywordId: "obliterator" },
+  ];
 
   static ICON = "/icons/Obliterator.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

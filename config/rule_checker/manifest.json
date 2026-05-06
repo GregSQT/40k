@@ -31,16 +31,12 @@
     {
       "unit_type": "AggressorBoltStorm",
       "file": "frontend/src/roster/spaceMarine/units/AggressorBoltStorm.ts",
-      "implemented_rules": [
-        "closest_target_penetration"
-      ]
+      "implemented_rules": ["closest_target_penetration"]
     },
     {
       "unit_type": "AggressorFlamestorm",
       "file": "frontend/src/roster/spaceMarine/units/AggressorFlamestorm.ts",
-      "implemented_rules": [
-        "closest_target_penetration"
-      ]
+      "implemented_rules": ["closest_target_penetration"]
     },
     {
       "unit_type": "AssaultIntercessor",
@@ -54,23 +50,17 @@
     {
       "unit_type": "AssaultIntercessorJumpPack",
       "file": "frontend/src/roster/spaceMarine/units/AssaultIntercessorJumpPack.ts",
-      "implemented_rules": [
-        "charge_impact"
-      ]
+      "implemented_rules": ["charge_impact"]
     },
     {
       "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
       "file": "frontend/src/roster/spaceMarine/units/AssaultIntercessorJumpPackPlasmaPistol.ts",
-      "implemented_rules": [
-        "charge_impact"
-      ]
+      "implemented_rules": ["charge_impact"]
     },
     {
       "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
       "file": "frontend/src/roster/spaceMarine/units/AssaultIntercessorJumpPackSergeantPowerFistHandFlamer.ts",
-      "implemented_rules": [
-        "charge_impact"
-      ]
+      "implemented_rules": ["charge_impact"]
     },
     {
       "unit_type": "AssaultIntercessorSergeant",
@@ -84,23 +74,17 @@
     {
       "unit_type": "BloodClaw",
       "file": "frontend/src/roster/spaceMarine/units/BloodClaw.ts",
-      "implemented_rules": [
-        "charge_after_advance"
-      ]
+      "implemented_rules": ["charge_after_advance"]
     },
     {
       "unit_type": "BloodClawPackLeader",
       "file": "frontend/src/roster/spaceMarine/units/BloodClawPackLeader.ts",
-      "implemented_rules": [
-        "charge_after_advance"
-      ]
+      "implemented_rules": ["charge_after_advance"]
     },
     {
       "unit_type": "FenrisianWolf",
       "file": "frontend/src/roster/spaceMarine/units/FenrisianWolf.ts",
-      "implemented_rules": [
-        "reactive_move"
-      ]
+      "implemented_rules": ["reactive_move"]
     },
     {
       "unit_type": "GreyHunter",
@@ -132,23 +116,17 @@
     {
       "unit_type": "Gargoyle",
       "file": "frontend/src/roster/tyranid/units/Gargoyle.ts",
-      "implemented_rules": [
-        "move_after_shooting"
-      ]
+      "implemented_rules": ["move_after_shooting"]
     },
     {
       "unit_type": "Hormagaunt",
       "file": "frontend/src/roster/tyranid/units/Hormagaunt.ts",
-      "implemented_rules": [
-        "charge_after_advance"
-      ]
+      "implemented_rules": ["charge_after_advance"]
     },
     {
       "unit_type": "Termagant",
       "file": "frontend/src/roster/tyranid/units/Termagant.ts",
-      "implemented_rules": [
-        "reactive_move"
-      ]
+      "implemented_rules": ["reactive_move"]
     },
     {
       "unit_type": "TyranidWarriorMelee",

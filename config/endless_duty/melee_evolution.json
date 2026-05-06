@@ -78,7 +78,12 @@
         { "slot": "melee", "pick": "power_fist", "cost": 0 },
         { "slot": "ranged", "pick": "flamestorm_gauntlets", "cost": 0 },
         { "slot": "ranged", "pick": "auto_boltstorm_gauntlets", "cost": 0 },
-        { "slot": "secondary", "pick": "planned_fragstorm_grenade_launcher", "cost": 2, "implemented": false }
+        {
+          "slot": "secondary",
+          "pick": "planned_fragstorm_grenade_launcher",
+          "cost": 2,
+          "implemented": false
+        }
       ],
       "packages": []
     },

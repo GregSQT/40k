@@ -24,8 +24,12 @@ export class CaptainGravisPowerWeaponBoltRifle extends LeaderEliteMeleeElite {
   static CC_WEAPONS = getWeapons(CaptainGravisPowerWeaponBoltRifle.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "gravis"}, { keywordId: "captain"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "imperium" },
+    { keywordId: "gravis" },
+    { keywordId: "captain" },
+  ];
 
   static ICON = "/icons/CaptainGravisPowerWeaponBoltRifle.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

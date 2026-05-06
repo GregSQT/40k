@@ -30,7 +30,7 @@ export function mountLosPolarClippedByVisibleUnion(
   coverColor: number,
   coverAlpha: number,
   /** Pour ``filterArea`` + flou léger sur les bords alpha (même principe que le masque move). */
-  renderer?: PIXI.IRenderer | PIXI.Renderer | null,
+  renderer?: PIXI.IRenderer | PIXI.Renderer | null
 ): void {
   destroyAllChildren(root);
 

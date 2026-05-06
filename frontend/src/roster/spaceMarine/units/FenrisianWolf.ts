@@ -34,8 +34,11 @@ export class FenrisianWolf extends SwarmMeleeSwarm {
   static RULES_STATUS = { reactive_move: 2 };
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "beasts"}, { keywordId: "imperium"}, { keywordId: "fenrisian wolves"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "beasts" },
+    { keywordId: "imperium" },
+    { keywordId: "fenrisian wolves" },
+  ];
 
   static ICON = "/icons/FenrisianWolf.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

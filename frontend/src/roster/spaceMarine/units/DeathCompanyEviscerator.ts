@@ -23,8 +23,15 @@ export class DeathCompanyMarineEviscerator extends TroopMeleeSwarm {
   static CC_WEAPONS = getWeapons(DeathCompanyMarineEviscerator.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "death company"}, { keywordId: "death company marine"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "grenades" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "death company" },
+    { keywordId: "death company marine" },
+  ];
 
   static ICON = "/icons/DeathCompanyMarineEviscerator.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

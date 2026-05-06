@@ -13,7 +13,11 @@ import type {
   Unit,
   UnitId,
 } from "../types/game";
-import { getDiceAverage, getSelectedMeleeWeapon, getSelectedRangedWeapon } from "../utils/weaponHelpers";
+import {
+  getDiceAverage,
+  getSelectedMeleeWeapon,
+  getSelectedRangedWeapon,
+} from "../utils/weaponHelpers";
 
 interface ChargeRollPopup {
   unitId: UnitId;

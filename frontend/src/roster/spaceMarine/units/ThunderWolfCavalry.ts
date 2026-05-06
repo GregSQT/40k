@@ -23,10 +23,14 @@ export class ThunderWolfCavalry extends EliteMeleeElite {
   static CC_WEAPON_CODES = ["wolf_guard_weapon", "teeth_and_claws"];
   static CC_WEAPONS = getWeapons(ThunderWolfCavalry.CC_WEAPON_CODES);
 
-  
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "mounted"}, { keywordId: "grenade"}, { keywordId: "imperium"}, { keywordId: "thunderwolf cavalry"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "mounted" },
+    { keywordId: "grenade" },
+    { keywordId: "imperium" },
+    { keywordId: "thunderwolf cavalry" },
+  ];
+
   static ICON = "/icons/ThunderWolfCavalry.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 16; // Size of the base

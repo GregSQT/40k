@@ -24,20 +24,25 @@ export class AggressorBoltStorm extends EliteRangeSwarm {
   static CC_WEAPONS = getWeapons(AggressorBoltStorm.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "closest_target_penetration", displayName: "Close-quarter firepower" }];
+  static UNIT_RULES = [
+    { ruleId: "closest_target_penetration", displayName: "Close-quarter firepower" },
+  ];
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
   static RULES_STATUS = { closest_target_penetration: 2 };
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "gravis"}, { keywordId: "aggressor squad"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "imperium" },
+    { keywordId: "gravis" },
+    { keywordId: "aggressor squad" },
+  ];
 
   static ICON = "/icons/AggressorBoltstormGauntletFragstormGrenadeLauncher.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 16; // Size of the base
   static ICON_SCALE = 2.0; // Size of the icon
   static ILLUSTRATION_RATIO = 115; // Illustration size ratio in percent
-
 
   constructor(name: string, startPos: [number, number]) {
     super(name, AggressorBoltStorm.HP_MAX, startPos);

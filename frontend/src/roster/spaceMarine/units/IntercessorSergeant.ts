@@ -23,9 +23,15 @@ export class IntercessorSergeant extends TroopMeleeElite {
   static CC_WEAPON_CODES = ["intercessor_sergeant_power_fist"];
   static CC_WEAPONS = getWeapons(IntercessorSergeant.CC_WEAPON_CODES);
 
-    // UNIT KEYWORDS
-    static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "intercessor squad"}];
-
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "grenades" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "intercessor squad" },
+  ];
 
   static ICON = "/icons/IntercessorSergeant.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

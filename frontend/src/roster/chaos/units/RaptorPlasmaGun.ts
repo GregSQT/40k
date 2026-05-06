@@ -21,10 +21,15 @@ export class RaptorPlasmaGun extends TroopRangeTroop {
   static RNG_WEAPONS = getWeapons(RaptorPlasmaGun.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["close_combat_weapon_a3"];
   static CC_WEAPONS = getWeapons(RaptorPlasmaGun.CC_WEAPON_CODES);
-    
+
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "fly"}, { keywordId: "jump_pack"}, { keywordId: "chaos"}, { keywordId: "raptor"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "fly" },
+    { keywordId: "jump_pack" },
+    { keywordId: "chaos" },
+    { keywordId: "raptor" },
+  ];
 
   static ICON = "/icons/RaptorPlasmaGun.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

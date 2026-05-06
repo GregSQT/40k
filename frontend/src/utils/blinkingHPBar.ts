@@ -90,7 +90,7 @@ export type ChargeMinRollOverlay = {
 export function buildChargeMinRollOverlay(
   distanceSubhexRaw: number,
   chargeMaxInches: number,
-  inchesToSubhex: number,
+  inchesToSubhex: number
 ): ChargeMinRollOverlay {
   const scale = Math.max(1, Math.floor(inchesToSubhex));
   const maxSubhex = chargeMaxInches * scale;
@@ -99,8 +99,7 @@ export function buildChargeMinRollOverlay(
   if (dSub <= 0) {
     return {
       primaryText: "—",
-      tooltipText:
-        "Empreintes adjacentes ou superposées : charge impossible vers cette cible.",
+      tooltipText: "Empreintes adjacentes ou superposées : charge impossible vers cette cible.",
     };
   }
   if (distanceSubhexRaw > maxSubhex) {
@@ -269,12 +268,11 @@ export function refreshBlinkingHpBarSlices(
   const normalSlices = container.blinkNormalSlices;
   const highlightSlices = container.blinkHighlightSlices;
   if (!layout || !normalSlices || !highlightSlices) return;
-  if (normalSlices.length !== highlightSlices.length || normalSlices.length !== layout.hpMax) return;
+  if (normalSlices.length !== highlightSlices.length || normalSlices.length !== layout.hpMax)
+    return;
 
   const currentHP =
-    sliceHpCur !== undefined
-      ? Math.max(0, sliceHpCur)
-      : Math.max(0, unit.HP_CUR ?? unit.HP_MAX);
+    sliceHpCur !== undefined ? Math.max(0, sliceHpCur) : Math.max(0, unit.HP_CUR ?? unit.HP_MAX);
   const shooterDamage = attacker ? calculateDamagePerAttack(attacker, unit, phase, inCover) : 0;
 
   const lostColor = getCSSColor("--hp-bar-lost");
@@ -295,18 +293,16 @@ export function refreshBlinkingHpBarSlices(
     paintRoundedHpSlice(normalSlices[i], sx, sy, innerW, innerH, cornerR, normalColor);
 
     const wouldBeDamaged = i >= currentHP - shooterDamage && i < currentHP;
-    const highlightColor = wouldBeDamaged
-      ? previewColor
-      : i < currentHP
-        ? aliveColor
-        : lostColor;
+    const highlightColor = wouldBeDamaged ? previewColor : i < currentHP ? aliveColor : lostColor;
     paintRoundedHpSlice(highlightSlices[i], sx, sy, innerW, innerH, cornerR, highlightColor);
   }
 }
 
 /** Aligne le texte PIXI sur `.rule-tooltip` / `App.css` (`--tooltip-font-*`). */
 function readCssTooltipFontSizePx(): number {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue("--tooltip-font-size").trim();
+  const raw = getComputedStyle(document.documentElement)
+    .getPropertyValue("--tooltip-font-size")
+    .trim();
   const m = raw.match(/^([\d.]+)px$/i);
   if (!m) {
     throw new Error(`CSS --tooltip-font-size must be a px length, got ${JSON.stringify(raw)}`);
@@ -315,8 +311,12 @@ function readCssTooltipFontSizePx(): number {
 }
 
 function readCssTooltipPaddingPx(): { padX: number; padY: number } {
-  const xRaw = getComputedStyle(document.documentElement).getPropertyValue("--tooltip-padding-x").trim();
-  const yRaw = getComputedStyle(document.documentElement).getPropertyValue("--tooltip-padding-y").trim();
+  const xRaw = getComputedStyle(document.documentElement)
+    .getPropertyValue("--tooltip-padding-x")
+    .trim();
+  const yRaw = getComputedStyle(document.documentElement)
+    .getPropertyValue("--tooltip-padding-y")
+    .trim();
   const parsePx = (v: string, name: string): number => {
     const m = v.match(/^([\d.]+)px$/i);
     if (!m) {
@@ -541,8 +541,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     displayProbability = calculateWoundProbability(attacker, unit, phase, inCover);
   }
 
-  const probLabel =
-    chargeMinRollOverlay?.primaryText ?? `${Math.round(displayProbability * 100)}%`;
+  const probLabel = chargeMinRollOverlay?.primaryText ?? `${Math.round(displayProbability * 100)}%`;
 
   const scale = Math.max(1, finalBarHeight / 7);
   const hasCoverIcon = phase === "shoot" && inCover;
@@ -613,7 +612,9 @@ export function updateProbabilityDisplay(
   inCover: boolean = false,
   onBlinkProbHtml?: (payload: BlinkProbHtmlPayload) => void
 ): void {
-  const displayProbability = attacker ? calculateWoundProbability(attacker, target, phase, inCover) : 0;
+  const displayProbability = attacker
+    ? calculateWoundProbability(attacker, target, phase, inCover)
+    : 0;
   const unitIdNum = typeof target.id === "string" ? parseInt(target.id, 10) : target.id;
   const showCoverShield = phase === "shoot" && inCover;
   onBlinkProbHtml?.({

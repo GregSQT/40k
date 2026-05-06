@@ -90,17 +90,28 @@ async function copyConfigs() {
       try {
         copyFileSync(sourcePath, targetPath);
         const label = typeof entry === "string" ? entry : entry.target;
-        if (typeof entry === "string" && entry === "scenario.json" && scenarioSourcePath?.endsWith("scenario_pvp.json")) {
-          console.log(`✅ Copied: ${label} (from scenario_pvp.json — add config/scenario.json to override)`);
+        if (
+          typeof entry === "string" &&
+          entry === "scenario.json" &&
+          scenarioSourcePath?.endsWith("scenario_pvp.json")
+        ) {
+          console.log(
+            `✅ Copied: ${label} (from scenario_pvp.json — add config/scenario.json to override)`
+          );
         } else {
           console.log(`✅ Copied: ${label}`);
         }
         copiedCount++;
       } catch (error) {
-        console.error(`❌ Failed to copy ${typeof entry === "string" ? entry : entry.target}:`, error.message);
+        console.error(
+          `❌ Failed to copy ${typeof entry === "string" ? entry : entry.target}:`,
+          error.message
+        );
       }
     } else {
-      console.log(`⚠️  Skipped: ${typeof entry === "string" ? entry : entry.target} (source not found)`);
+      console.log(
+        `⚠️  Skipped: ${typeof entry === "string" ? entry : entry.target} (source not found)`
+      );
       skippedCount++;
     }
   }

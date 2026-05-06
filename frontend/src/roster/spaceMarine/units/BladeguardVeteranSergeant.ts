@@ -23,8 +23,13 @@ export class BladeguardVeteranSergeant extends TroopMeleeTroop {
   static CC_WEAPONS = getWeapons(BladeguardVeteranSergeant.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "bladeguard veteran squad"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "grenades" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "bladeguard veteran squad" },
+  ];
 
   static ICON = "/icons/BladeguardVeteranSergeant.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

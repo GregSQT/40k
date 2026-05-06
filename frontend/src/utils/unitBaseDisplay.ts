@@ -42,7 +42,10 @@ function isLargeSquareUnit(unit: Unit): boolean {
 /**
  * Socle ovale ou carré multi-hex : métriques pixel. Sinon ``null`` (rendu rond classique).
  */
-export function getNonRoundBasePixelLayout(unit: Unit, HEX_RADIUS: number): NonRoundBasePixelLayout | null {
+export function getNonRoundBasePixelLayout(
+  unit: Unit,
+  HEX_RADIUS: number
+): NonRoundBasePixelLayout | null {
   if (isOvalUnit(unit)) {
     const bs = unit.BASE_SIZE as [number, number];
     const M = Number(bs[0]);
@@ -94,7 +97,7 @@ export function getUnitTokenTopExtentY(
   unit: Unit,
   HEX_RADIUS: number,
   HEX_HORIZ_SPACING: number,
-  UNIT_CIRCLE_RADIUS_RATIO: number,
+  UNIT_CIRCLE_RADIUS_RATIO: number
 ): number {
   const nr = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
   if (nr) {
@@ -114,7 +117,7 @@ export function getHpBarWidthBase(
   unit: Unit,
   HEX_RADIUS: number,
   HEX_HORIZ_SPACING: number,
-  unitIconScale: number,
+  unitIconScale: number
 ): number {
   const nr = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
   if (nr) {

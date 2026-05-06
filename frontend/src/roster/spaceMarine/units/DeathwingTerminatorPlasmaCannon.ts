@@ -24,8 +24,13 @@ export class DeathwingTerminatorPlasmaCannon extends EliteRangeElite {
   static CC_WEAPONS = getWeapons(DeathwingTerminatorPlasmaCannon.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "terminator"}, { keywordId: "deathwing"}, { keywordId: "deathwing terminator squad"}];
- 
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "imperium" },
+    { keywordId: "terminator" },
+    { keywordId: "deathwing" },
+    { keywordId: "deathwing terminator squad" },
+  ];
 
   static ICON = "/icons/DeathwingTerminatorPlasmaCannon.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

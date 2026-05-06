@@ -24,8 +24,14 @@ export class CaptainStormShield extends LeaderEliteMeleeElite {
   static CC_WEAPONS = getWeapons(CaptainStormShield.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "character"}, { keywordId: "grenade"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "captain"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "character" },
+    { keywordId: "grenade" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "captain" },
+  ];
 
   static ICON = "/icons/CaptainStormShield.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

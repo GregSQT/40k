@@ -1,5 +1,5 @@
-import { computeVisibleHexes, type VisibleHex } from "./wasmLos";
 import { resolveBaseSizeForUnitDisplay } from "./hexFootprint";
+import { computeVisibleHexes, type VisibleHex } from "./wasmLos";
 
 /** Même cube-odd-r que ``BoardPvp.hexDistOff`` (empreinte / scan). */
 export function hexDistOff(c1: number, r1: number, c2: number, r2: number): number {
@@ -63,14 +63,17 @@ function stableBoolRecordJson(m: Record<string, boolean>): string {
 }
 
 function stableWallHexKey(wallHexes: Array<[number, number]>): string {
-  return wallHexes.map(([c, r]) => `${c},${r}`).sort().join(";");
+  return wallHexes
+    .map(([c, r]) => `${c},${r}`)
+    .sort()
+    .join(";");
 }
 
 export function buildEffectiveLosWallHexes(
   boardCols: number,
   boardRows: number,
   wallHexes: Array<[number, number]> | undefined,
-  wallHexesOverride?: WallHexOverrideForLos[],
+  wallHexesOverride?: WallHexOverrideForLos[]
 ): Array<[number, number]> {
   const effectiveWallHexes: Array<[number, number]> = wallHexesOverride
     ? wallHexesOverride.map((h) => [h.col, h.row] as [number, number])
@@ -93,7 +96,7 @@ export function buildShootingLosPreviewFromVisibleHexes(
   units: MinimalUnitForLos[],
   shooterPlayer: number,
   losVisibilityMinRatio: number,
-  coverRatio: number,
+  coverRatio: number
 ): {
   clearCells: Array<{ col: number; row: number }>;
   terrainCoverCells: Array<{ col: number; row: number }>;
@@ -151,13 +154,13 @@ export function buildShootingLosPreviewFromVisibleHexes(
 }
 
 export function buildLosPreviewFromSource(
-  params: BuildLosPreviewFromSourceParams,
+  params: BuildLosPreviewFromSourceParams
 ): LosPreviewFromSource {
   const effectiveWallHexes = buildEffectiveLosWallHexes(
     params.boardCols,
     params.boardRows,
     params.wallHexes,
-    params.wallHexesOverride,
+    params.wallHexesOverride
   );
   const visibleHexes = computeVisibleHexes(
     params.source.fromCol,
@@ -167,14 +170,14 @@ export function buildLosPreviewFromSource(
     params.boardRows,
     effectiveWallHexes,
     params.losVisibilityMinRatio,
-    params.coverRatio,
+    params.coverRatio
   );
   const losPreview = buildShootingLosPreviewFromVisibleHexes(
     visibleHexes,
     params.units,
     params.source.unit.player,
     params.losVisibilityMinRatio,
-    params.coverRatio,
+    params.coverRatio
   );
   const key = [
     params.source.fromCol,

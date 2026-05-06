@@ -24,13 +24,19 @@ export class AggressorFlamestorm extends EliteRangeSwarm {
   static CC_WEAPONS = getWeapons(AggressorFlamestorm.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "closest_target_penetration", displayName: "Close-quarter firepower" }];
+  static UNIT_RULES = [
+    { ruleId: "closest_target_penetration", displayName: "Close-quarter firepower" },
+  ];
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
   static RULES_STATUS = { closest_target_penetration: 2 };
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "gravis"}, { keywordId: "aggressor squad"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "imperium" },
+    { keywordId: "gravis" },
+    { keywordId: "aggressor squad" },
+  ];
 
   static ICON = "/icons/AggressorFlamestormGauntletFragstormGrenadeLauncher.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

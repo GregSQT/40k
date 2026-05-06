@@ -1,13 +1,7 @@
 {
   "config": {
     "runs_root": "/home/greg/40k/tensorboard",
-    "seeds": [
-      "12345",
-      "22345",
-      "32345",
-      "42345",
-      "52345"
-    ],
+    "seeds": ["12345", "22345", "32345", "42345", "52345"],
     "run_pattern": "{seed}",
     "last_run_only": true,
     "tag_robust": "0_critical/n_robust_current_score",
@@ -15,10 +9,7 @@
     "tag_worst_bot": "0_critical/b_worst_bot_score",
     "tag_holdout_hard": "0_critical/c_holdout_hard_mean",
     "enable_schedule_diagnostics": true,
-    "decaying_tags": [
-      "training_diagnostic/learning_rate",
-      "training_diagnostic/entropy_coef"
-    ],
+    "decaying_tags": ["training_diagnostic/learning_rate", "training_diagnostic/entropy_coef"],
     "diag_fast_consumption_at_40": 0.65,
     "diag_slow_consumption_at_80": 0.7,
     "min_evals": 5,
@@ -78,16 +69,16 @@
       "schedule_diagnostics": {
         "training_diagnostic/learning_rate": {
           "status": "OK",
-          "start_value": 9.999999747378752e-05,
-          "end_value": 3.0002800485817716e-05,
+          "start_value": 9.999999747378752e-5,
+          "end_value": 3.0002800485817716e-5,
           "consumed_decay_fraction_at_40": 0.4072362711864231,
           "consumed_decay_fraction_at_80": 0.8003720034262817,
           "checkpoints": {
-            "p20": 8.537559915566817e-05,
-            "p40": 7.149459997890517e-05,
-            "p60": 5.771020005340688e-05,
-            "p80": 4.3976200686302036e-05,
-            "p100": 3.0002800485817716e-05
+            "p20": 8.537559915566817e-5,
+            "p40": 7.149459997890517e-5,
+            "p60": 5.771020005340688e-5,
+            "p80": 4.3976200686302036e-5,
+            "p100": 3.0002800485817716e-5
           },
           "points": 71299
         },
@@ -123,16 +114,16 @@
       "schedule_diagnostics": {
         "training_diagnostic/learning_rate": {
           "status": "OK",
-          "start_value": 9.999999747378752e-05,
-          "end_value": 3.0001399863976985e-05,
+          "start_value": 9.999999747378752e-5,
+          "end_value": 3.0001399863976985e-5,
           "consumed_decay_fraction_at_40": 0.40522812974830713,
           "consumed_decay_fraction_at_80": 0.8008360034900349,
           "checkpoints": {
-            "p20": 8.551000064471737e-05,
-            "p40": 7.163459667935967e-05,
-            "p60": 5.779420098406263e-05,
-            "p80": 4.394260031403974e-05,
-            "p100": 3.0001399863976985e-05
+            "p20": 8.551000064471737e-5,
+            "p40": 7.163459667935967e-5,
+            "p60": 5.779420098406263e-5,
+            "p80": 4.394260031403974e-5,
+            "p100": 3.0001399863976985e-5
           },
           "points": 70915
         },
@@ -168,16 +159,16 @@
       "schedule_diagnostics": {
         "training_diagnostic/learning_rate": {
           "status": "OK",
-          "start_value": 9.999999747378752e-05,
-          "end_value": 3.0001399863976985e-05,
+          "start_value": 9.999999747378752e-5,
+          "end_value": 3.0001399863976985e-5,
           "consumed_decay_fraction_at_40": 0.4052881056290638,
           "consumed_decay_fraction_at_80": 0.7996160088410893,
           "checkpoints": {
-            "p20": 8.551419887226075e-05,
-            "p40": 7.163039845181629e-05,
-            "p60": 5.7820798247121274e-05,
-            "p80": 4.402799822855741e-05,
-            "p100": 3.0001399863976985e-05
+            "p20": 8.551419887226075e-5,
+            "p40": 7.163039845181629e-5,
+            "p60": 5.7820798247121274e-5,
+            "p80": 4.402799822855741e-5,
+            "p100": 3.0001399863976985e-5
           },
           "points": 71067
         },
@@ -213,16 +204,16 @@
       "schedule_diagnostics": {
         "training_diagnostic/learning_rate": {
           "status": "OK",
-          "start_value": 9.999999747378752e-05,
-          "end_value": 3.0001399863976985e-05,
+          "start_value": 9.999999747378752e-5,
+          "end_value": 3.0001399863976985e-5,
           "consumed_decay_fraction_at_40": 0.40446808877760837,
           "consumed_decay_fraction_at_80": 0.8006759811877386,
           "checkpoints": {
-            "p20": 8.541339775547385e-05,
-            "p40": 7.168779848143458e-05,
-            "p60": 5.789920032839291e-05,
-            "p80": 4.395380165078677e-05,
-            "p100": 3.0001399863976985e-05
+            "p20": 8.541339775547385e-5,
+            "p40": 7.168779848143458e-5,
+            "p60": 5.789920032839291e-5,
+            "p80": 4.395380165078677e-5,
+            "p100": 3.0001399863976985e-5
           },
           "points": 70598
         },
@@ -258,16 +249,16 @@
       "schedule_diagnostics": {
         "training_diagnostic/learning_rate": {
           "status": "OK",
-          "start_value": 9.999999747378752e-05,
-          "end_value": 3.0001399863976985e-05,
+          "start_value": 9.999999747378752e-5,
+          "end_value": 3.0001399863976985e-5,
           "consumed_decay_fraction_at_40": 0.40488802388723955,
           "consumed_decay_fraction_at_80": 0.80013599037226,
           "checkpoints": {
-            "p20": 8.538820111425593e-05,
-            "p40": 7.165840361267328e-05,
-            "p60": 5.791040166513994e-05,
-            "p80": 4.3991600250592455e-05,
-            "p100": 3.0001399863976985e-05
+            "p20": 8.538820111425593e-5,
+            "p40": 7.165840361267328e-5,
+            "p60": 5.791040166513994e-5,
+            "p80": 4.3991600250592455e-5,
+            "p100": 3.0001399863976985e-5
           },
           "points": 70825
         },

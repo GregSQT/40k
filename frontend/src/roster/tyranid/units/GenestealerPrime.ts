@@ -23,8 +23,12 @@ export class GenestealerPrime extends EliteMeleeElite {
   static CC_WEAPONS = getWeapons(GenestealerPrime.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "tyranids"}, { keywordId: "genestealer"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "great devourer" },
+    { keywordId: "tyranids" },
+    { keywordId: "genestealer" },
+  ];
 
   static ICON = "/icons/GenestealerPrime.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

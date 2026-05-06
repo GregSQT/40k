@@ -18,9 +18,13 @@ export class AssaultIntercessorJumpPackSergeantPowerFistHandFlamer extends Troop
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["hand_flamer"];
-  static RNG_WEAPONS = getWeapons(AssaultIntercessorJumpPackSergeantPowerFistHandFlamer.RNG_WEAPON_CODES);
+  static RNG_WEAPONS = getWeapons(
+    AssaultIntercessorJumpPackSergeantPowerFistHandFlamer.RNG_WEAPON_CODES
+  );
   static CC_WEAPON_CODES = ["power_fist"];
-  static CC_WEAPONS = getWeapons(AssaultIntercessorJumpPackSergeantPowerFistHandFlamer.CC_WEAPON_CODES);
+  static CC_WEAPONS = getWeapons(
+    AssaultIntercessorJumpPackSergeantPowerFistHandFlamer.CC_WEAPON_CODES
+  );
 
   // UNIT RULES
   static UNIT_RULES = [{ ruleId: "charge_impact", displayName: "Hammer of wrath" }];
@@ -28,8 +32,15 @@ export class AssaultIntercessorJumpPackSergeantPowerFistHandFlamer extends Troop
   static RULES_STATUS = { charge_impact: 2 };
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "jump_pack"}, { keywordId: "fly"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "assault intercessors with jump packs"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "grenades" },
+    { keywordId: "jump_pack" },
+    { keywordId: "fly" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "assault intercessors with jump packs" },
+  ];
 
   static ICON = "/icons/AssaultIntercessorJumpPackSergeantPowerFistHandFlamer.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

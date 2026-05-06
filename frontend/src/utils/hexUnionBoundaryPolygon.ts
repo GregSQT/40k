@@ -28,15 +28,10 @@ function canonicalEdgeKey(a: string, b: string): string {
 }
 
 /** Centre hex identique à BoardDisplay / fillFootprintPoolCircles. */
-function hexCenterWorld(
-  col: number,
-  row: number,
-  layout: HexUnionMaskLayout,
-): [number, number] {
+function hexCenterWorld(col: number, row: number, layout: HexUnionMaskLayout): [number, number] {
   const { HEX_HORIZ_SPACING, HEX_WIDTH, HEX_HEIGHT, HEX_VERT_SPACING, MARGIN } = layout;
   const hx = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-  const hy =
-    row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+  const hy = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
   return [hx, hy];
 }
 
@@ -44,7 +39,7 @@ function hexCenterWorld(
 function hexCornerWorld(
   col: number,
   row: number,
-  layout: HexUnionMaskLayout,
+  layout: HexUnionMaskLayout
 ): Array<[number, number]> {
   const [hx, hy] = hexCenterWorld(col, row, layout);
   const R = layout.gridHexRadius;
@@ -80,7 +75,7 @@ export type HexUnionMaskPolygonResult = {
  */
 export function tryBuildHexUnionMaskPolygons(
   hexKeys: Set<string>,
-  layout: HexUnionMaskLayout,
+  layout: HexUnionMaskLayout
 ): HexUnionMaskPolygonResult | null {
   if (hexKeys.size === 0) return null;
 
@@ -161,7 +156,7 @@ export function tryBuildHexUnionMaskPolygons(
   const pickNextNeighbor = (
     curr: string,
     prev: string,
-    directedUsed: Set<string>,
+    directedUsed: Set<string>
   ): string | null => {
     const peers = adj.get(curr);
     if (!peers || peers.length === 0) return null;

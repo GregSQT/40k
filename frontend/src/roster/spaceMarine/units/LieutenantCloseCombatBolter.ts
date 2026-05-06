@@ -40,8 +40,14 @@ export class LieutenantCloseCombatBolter extends LeaderEliteMeleeElite {
   };
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "character"}, { keywordId: "grenade"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "lieutenant"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "character" },
+    { keywordId: "grenade" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "lieutenant" },
+  ];
 
   static ICON = "/icons/LieutenantCloseCombatBolter.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

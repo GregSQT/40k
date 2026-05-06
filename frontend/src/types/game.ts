@@ -279,7 +279,10 @@ export interface GameState {
   charging_activation_pool?: string[];
   active_alternating_activation_pool?: string[];
   non_active_alternating_activation_pool?: string[];
-  units_cache?: Record<string, { col: number; row: number; HP_CUR: number; player: number; orientation?: number }>;
+  units_cache?: Record<
+    string,
+    { col: number; row: number; HP_CUR: number; player: number; orientation?: number }
+  >;
 
   // Frontend specific
   mode?: GameMode;

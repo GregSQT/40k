@@ -13,7 +13,7 @@ describe("buildShootingLosPreviewFromVisibleHexes", () => {
       [{ id: 1, player: 0, col: 5, row: 5 }],
       0,
       0,
-      0.5,
+      0.5
     );
     expect(out.clearCells).toEqual([{ col: 0, row: 0 }]);
     expect(out.terrainCoverCells).toEqual([{ col: 1, row: 0 }]);

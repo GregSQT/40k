@@ -24,8 +24,14 @@ export class HeavyIntercessorHeavyBolter extends EliteRangeTroop {
   static CC_WEAPONS = getWeapons(HeavyIntercessorHeavyBolter.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "gravis"}, { keywordId: "heavy intercessor squad"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "grenades" },
+    { keywordId: "imperium" },
+    { keywordId: "gravis" },
+    { keywordId: "heavy intercessor squad" },
+  ];
 
   static ICON = "/icons/HeavyIntercessor.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

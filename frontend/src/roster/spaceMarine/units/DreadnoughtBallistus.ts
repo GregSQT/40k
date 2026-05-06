@@ -18,14 +18,24 @@ export class DreadnoughtBallistus extends EliteRangeElite {
   static VALUE = 160; // Unit value (W40K points cost)
 
   // WEAPONS
-  static RNG_WEAPON_CODES = ["ballistus_missile_launcher_frag", "ballistus_missile_launcher_krak", "ballistus_lascannon", "twin_storm_bolter"];
+  static RNG_WEAPON_CODES = [
+    "ballistus_missile_launcher_frag",
+    "ballistus_missile_launcher_krak",
+    "ballistus_lascannon",
+    "twin_storm_bolter",
+  ];
   static RNG_WEAPONS = getWeapons(DreadnoughtBallistus.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["redemptor_fist"];
   static CC_WEAPONS = getWeapons(DreadnoughtBallistus.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "vehicle"}, { keywordId: "walker"}, { keywordId: "imperium"}, { keywordId: "dreadnought"}, { keywordId: "ballistus dreadnought"}];
- 
+  static UNIT_KEYWORDS = [
+    { keywordId: "vehicle" },
+    { keywordId: "walker" },
+    { keywordId: "imperium" },
+    { keywordId: "dreadnought" },
+    { keywordId: "ballistus dreadnought" },
+  ];
 
   static ICON = "/icons/DreadnoughtBallistus.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

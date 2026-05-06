@@ -124,9 +124,14 @@ export function logActionLogEmitTrace(
   reason?: string
 ): void {
   if (!isActionLogTraceEnabled()) return;
-  console.info("[ACTION_LOG_TRACE]", source, emitted ? "→ dispatch backendLogEvent" : "→ SUPPRIMÉ", {
-    ...summarizeActionLogEntry(entry),
-    dedupeKey: actionLogDedupeKey(entry),
-    reason,
-  });
+  console.info(
+    "[ACTION_LOG_TRACE]",
+    source,
+    emitted ? "→ dispatch backendLogEvent" : "→ SUPPRIMÉ",
+    {
+      ...summarizeActionLogEntry(entry),
+      dedupeKey: actionLogDedupeKey(entry),
+      reason,
+    }
+  );
 }

@@ -5,7 +5,8 @@ import { LeaderEliteMeleeElite } from "../classes/LeaderEliteMeleeElite";
 
 export class LieutenantStormShield extends LeaderEliteMeleeElite {
   static NAME = "LieutenantStormShield";
-  static DISPLAY_NAME = "Lieutenant (Master-crafted Power Weapon, Neo-Volkite Pistol, Storm Shield)";
+  static DISPLAY_NAME =
+    "Lieutenant (Master-crafted Power Weapon, Neo-Volkite Pistol, Storm Shield)";
 
   // BASE
   static MOVE = 6; // Move distance
@@ -40,8 +41,14 @@ export class LieutenantStormShield extends LeaderEliteMeleeElite {
   };
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "character"}, { keywordId: "grenade"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "lieutenant"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "character" },
+    { keywordId: "grenade" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "lieutenant" },
+  ];
 
   static ICON = "/icons/LieutenantStormShield.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

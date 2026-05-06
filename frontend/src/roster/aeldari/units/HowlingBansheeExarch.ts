@@ -24,8 +24,12 @@ export class HowlingBansheeExarch extends SwarmMeleeTroop {
   static CC_WEAPONS = getWeapons(HowlingBansheeExarch.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "aeldari"}, { keywordId: "aspect warrior"}, { keywordId: "howling banshee"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "aeldari" },
+    { keywordId: "aspect warrior" },
+    { keywordId: "howling banshee" },
+  ];
 
   static ICON = "/icons/HowlingBansheeExarch.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

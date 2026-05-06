@@ -28,15 +28,22 @@ export class AssaultIntercessorJumpPack extends TroopMeleeTroop {
   static RULES_STATUS = { charge_impact: 2 };
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "jump_pack"}, { keywordId: "fly"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "assault intercessors with jump packs"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "grenades" },
+    { keywordId: "jump_pack" },
+    { keywordId: "fly" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "assault intercessors with jump packs" },
+  ];
 
   static ICON = "/icons/AssaultIntercessorJumpPack.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 13; // Size of the base
   static ICON_SCALE = 1.7; // Size of the icon
   static ILLUSTRATION_RATIO = 125; // Illustration size ratio in percent
-  
+
   constructor(name: string, startPos: [number, number]) {
     super(name, AssaultIntercessorJumpPack.HP_MAX, startPos);
   }

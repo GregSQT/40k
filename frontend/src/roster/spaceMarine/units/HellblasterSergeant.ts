@@ -18,18 +18,28 @@ export class HellblasterSergeant extends TroopRangeElite {
   static VALUE = 26; // Unit value (W40K points cost)
 
   // WEAPONS
-  static RNG_WEAPON_CODES = ["plasma_incinerator_standard", "plasma_incineratorl_supercharge", "plasma_pistol_standard", "plasma_pistol_supercharge"];
+  static RNG_WEAPON_CODES = [
+    "plasma_incinerator_standard",
+    "plasma_incineratorl_supercharge",
+    "plasma_pistol_standard",
+    "plasma_pistol_supercharge",
+  ];
   static RNG_WEAPONS = getWeapons(HellblasterSergeant.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["close_combat_weapon"];
   static CC_WEAPONS = getWeapons(HellblasterSergeant.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [
-  ];
+  static UNIT_RULES = [];
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "hellblaster squad"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "grenades" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "hellblaster squad" },
+  ];
 
   static ICON = "/icons/HellblasterSergeant.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

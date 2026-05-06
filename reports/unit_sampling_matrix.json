@@ -104,9 +104,7 @@
       "count": 1,
       "mobility_bucket": "Mid",
       "tanking": "Elite",
-      "units": [
-        "spaceMarine::CaptainCloseCombatBolter"
-      ],
+      "units": ["spaceMarine::CaptainCloseCombatBolter"],
       "weapon_profile": "Volume"
     },
     {
@@ -114,9 +112,7 @@
       "count": 1,
       "mobility_bucket": "High",
       "tanking": "Elite",
-      "units": [
-        "tyranid::Carnifex"
-      ],
+      "units": ["tyranid::Carnifex"],
       "weapon_profile": "AntiElite"
     },
     {
@@ -157,10 +153,7 @@
       "count": 2,
       "mobility_bucket": "Low",
       "tanking": "Elite",
-      "units": [
-        "adeptusCustodes::CustodianGuardBlade",
-        "tyranid::TyrantGuardScytingTalon"
-      ],
+      "units": ["adeptusCustodes::CustodianGuardBlade", "tyranid::TyrantGuardScytingTalon"],
       "weapon_profile": "Volume"
     },
     {
@@ -183,10 +176,7 @@
       "count": 2,
       "mobility_bucket": "Mid",
       "tanking": "Elite",
-      "units": [
-        "adeptusCustodes::CustodianAllarusAxe",
-        "adeptusCustodes::CustodianAllarusSpear"
-      ],
+      "units": ["adeptusCustodes::CustodianAllarusAxe", "adeptusCustodes::CustodianAllarusSpear"],
       "weapon_profile": "Burst"
     },
     {
@@ -212,9 +202,7 @@
       "count": 1,
       "mobility_bucket": "High",
       "tanking": "Elite",
-      "units": [
-        "tyranid::Biovore"
-      ],
+      "units": ["tyranid::Biovore"],
       "weapon_profile": "Burst"
     },
     {
@@ -222,10 +210,7 @@
       "count": 2,
       "mobility_bucket": "Low",
       "tanking": "Elite",
-      "units": [
-        "spaceMarine::EradicatorMeltaRifle",
-        "spaceMarine::EradicatorMultiMelta"
-      ],
+      "units": ["spaceMarine::EradicatorMeltaRifle", "spaceMarine::EradicatorMultiMelta"],
       "weapon_profile": "AntiElite"
     },
     {
@@ -233,9 +218,7 @@
       "count": 1,
       "mobility_bucket": "Low",
       "tanking": "Elite",
-      "units": [
-        "aeldari::WraithguardDScythe"
-      ],
+      "units": ["aeldari::WraithguardDScythe"],
       "weapon_profile": "Burst"
     },
     {
@@ -243,9 +226,7 @@
       "count": 1,
       "mobility_bucket": "Low",
       "tanking": "Elite",
-      "units": [
-        "tyranid::Pyrovore"
-      ],
+      "units": ["tyranid::Pyrovore"],
       "weapon_profile": "Volume"
     },
     {
@@ -253,10 +234,7 @@
       "count": 2,
       "mobility_bucket": "Mid",
       "tanking": "Elite",
-      "units": [
-        "aeldari::WraithguardWraithcannon",
-        "spaceMarine::InceptorPlasma"
-      ],
+      "units": ["aeldari::WraithguardWraithcannon", "spaceMarine::InceptorPlasma"],
       "weapon_profile": "AntiElite"
     },
     {
@@ -277,9 +255,7 @@
       "count": 1,
       "mobility_bucket": "Mid",
       "tanking": "Elite",
-      "units": [
-        "tyranid::HiveGuardImpalerCannon"
-      ],
+      "units": ["tyranid::HiveGuardImpalerCannon"],
       "weapon_profile": "Volume"
     },
     {
@@ -287,9 +263,7 @@
       "count": 1,
       "mobility_bucket": "High",
       "tanking": "Swarm",
-      "units": [
-        "tyranid::Gargoyle"
-      ],
+      "units": ["tyranid::Gargoyle"],
       "weapon_profile": "Generalist"
     },
     {
@@ -297,10 +271,7 @@
       "count": 2,
       "mobility_bucket": "Low",
       "tanking": "Swarm",
-      "units": [
-        "chaos::CultistMob",
-        "chaos::RenegadeGuard"
-      ],
+      "units": ["chaos::CultistMob", "chaos::RenegadeGuard"],
       "weapon_profile": "Generalist"
     },
     {
@@ -308,9 +279,7 @@
       "count": 1,
       "mobility_bucket": "Low",
       "tanking": "Swarm",
-      "units": [
-        "tyranid::RipperSwarm"
-      ],
+      "units": ["tyranid::RipperSwarm"],
       "weapon_profile": "Volume"
     },
     {
@@ -331,9 +300,7 @@
       "count": 1,
       "mobility_bucket": "Low",
       "tanking": "Swarm",
-      "units": [
-        "aeldari::SerpentScalePlatform"
-      ],
+      "units": ["aeldari::SerpentScalePlatform"],
       "weapon_profile": "Generalist"
     },
     {
@@ -341,9 +308,7 @@
       "count": 1,
       "mobility_bucket": "Low",
       "tanking": "Swarm",
-      "units": [
-        "tyranid::Genestealer"
-      ],
+      "units": ["tyranid::Genestealer"],
       "weapon_profile": "Volume"
     },
     {
@@ -365,9 +330,7 @@
       "count": 1,
       "mobility_bucket": "Mid",
       "tanking": "Swarm",
-      "units": [
-        "aeldari::StrikingScorpion"
-      ],
+      "units": ["aeldari::StrikingScorpion"],
       "weapon_profile": "Volume"
     },
     {
@@ -375,9 +338,7 @@
       "count": 1,
       "mobility_bucket": "High",
       "tanking": "Swarm",
-      "units": [
-        "aeldari::DarkReaper"
-      ],
+      "units": ["aeldari::DarkReaper"],
       "weapon_profile": "AntiElite"
     },
     {
@@ -385,9 +346,7 @@
       "count": 1,
       "mobility_bucket": "High",
       "tanking": "Swarm",
-      "units": [
-        "aeldari::SwoopingHawkExarch"
-      ],
+      "units": ["aeldari::SwoopingHawkExarch"],
       "weapon_profile": "Generalist"
     },
     {
@@ -395,9 +354,7 @@
       "count": 1,
       "mobility_bucket": "High",
       "tanking": "Swarm",
-      "units": [
-        "aeldari::SwoopingHawk"
-      ],
+      "units": ["aeldari::SwoopingHawk"],
       "weapon_profile": "Volume"
     },
     {
@@ -405,9 +362,7 @@
       "count": 1,
       "mobility_bucket": "Low",
       "tanking": "Swarm",
-      "units": [
-        "chaos::ChosenPlasma"
-      ],
+      "units": ["chaos::ChosenPlasma"],
       "weapon_profile": "AntiElite"
     },
     {
@@ -415,9 +370,7 @@
       "count": 1,
       "mobility_bucket": "Low",
       "tanking": "Swarm",
-      "units": [
-        "adeptusCustodes::Witchseeker"
-      ],
+      "units": ["adeptusCustodes::Witchseeker"],
       "weapon_profile": "Burst"
     },
     {
@@ -425,9 +378,7 @@
       "count": 1,
       "mobility_bucket": "Low",
       "tanking": "Swarm",
-      "units": [
-        "chaos::CultistFirebrand"
-      ],
+      "units": ["chaos::CultistFirebrand"],
       "weapon_profile": "Volume"
     },
     {
@@ -435,9 +386,7 @@
       "count": 1,
       "mobility_bucket": "Mid",
       "tanking": "Swarm",
-      "units": [
-        "aeldari::FireDragon"
-      ],
+      "units": ["aeldari::FireDragon"],
       "weapon_profile": "AntiElite"
     },
     {
@@ -445,9 +394,7 @@
       "count": 1,
       "mobility_bucket": "Mid",
       "tanking": "Swarm",
-      "units": [
-        "aeldari::WarpSpider"
-      ],
+      "units": ["aeldari::WarpSpider"],
       "weapon_profile": "Burst"
     },
     {
@@ -455,10 +402,7 @@
       "count": 2,
       "mobility_bucket": "Mid",
       "tanking": "Swarm",
-      "units": [
-        "aeldari::GuardianDefender",
-        "aeldari::HeavyWeaponPlatform"
-      ],
+      "units": ["aeldari::GuardianDefender", "aeldari::HeavyWeaponPlatform"],
       "weapon_profile": "Generalist"
     },
     {
@@ -466,9 +410,7 @@
       "count": 1,
       "mobility_bucket": "Mid",
       "tanking": "Swarm",
-      "units": [
-        "aeldari::DireAvenger"
-      ],
+      "units": ["aeldari::DireAvenger"],
       "weapon_profile": "Volume"
     },
     {
@@ -476,9 +418,7 @@
       "count": 1,
       "mobility_bucket": "Low",
       "tanking": "Troop",
-      "units": [
-        "spaceMarine::BladeguardVeteranSergeant"
-      ],
+      "units": ["spaceMarine::BladeguardVeteranSergeant"],
       "weapon_profile": "AntiElite"
     },
     {
@@ -511,9 +451,7 @@
       "count": 1,
       "mobility_bucket": "Mid",
       "tanking": "Troop",
-      "units": [
-        "spaceMarine::LieutenantCloseCombatBolter"
-      ],
+      "units": ["spaceMarine::LieutenantCloseCombatBolter"],
       "weapon_profile": "Volume"
     },
     {
@@ -521,9 +459,7 @@
       "count": 1,
       "mobility_bucket": "High",
       "tanking": "Troop",
-      "units": [
-        "spaceMarine::AssaultIntercessorJumpPack"
-      ],
+      "units": ["spaceMarine::AssaultIntercessorJumpPack"],
       "weapon_profile": "Volume"
     },
     {
@@ -531,10 +467,7 @@
       "count": 2,
       "mobility_bucket": "Low",
       "tanking": "Troop",
-      "units": [
-        "spaceMarine::AssaultIntercessorSergeant",
-        "spaceMarine::IntercessorSergeant"
-      ],
+      "units": ["spaceMarine::AssaultIntercessorSergeant", "spaceMarine::IntercessorSergeant"],
       "weapon_profile": "AntiElite"
     },
     {
@@ -554,10 +487,7 @@
       "count": 2,
       "mobility_bucket": "Low",
       "tanking": "Troop",
-      "units": [
-        "spaceMarine::AssaultIntercessor",
-        "tyranid::TyranidWarriorMelee"
-      ],
+      "units": ["spaceMarine::AssaultIntercessor", "tyranid::TyranidWarriorMelee"],
       "weapon_profile": "Volume"
     },
     {
@@ -606,10 +536,7 @@
       "count": 2,
       "mobility_bucket": "High",
       "tanking": "Troop",
-      "units": [
-        "aeldari::DarkReaperExarch",
-        "chaos::RaptorPlasmaGun"
-      ],
+      "units": ["aeldari::DarkReaperExarch", "chaos::RaptorPlasmaGun"],
       "weapon_profile": "AntiElite"
     },
     {
@@ -617,9 +544,7 @@
       "count": 1,
       "mobility_bucket": "High",
       "tanking": "Troop",
-      "units": [
-        "spaceMarine::Suppressor"
-      ],
+      "units": ["spaceMarine::Suppressor"],
       "weapon_profile": "Generalist"
     },
     {
@@ -644,9 +569,7 @@
       "count": 1,
       "mobility_bucket": "Mid",
       "tanking": "Troop",
-      "units": [
-        "aeldari::WarpSpiderExarchSpinner"
-      ],
+      "units": ["aeldari::WarpSpiderExarchSpinner"],
       "weapon_profile": "Burst"
     },
     {

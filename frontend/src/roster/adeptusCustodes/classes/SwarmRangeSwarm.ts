@@ -4,7 +4,6 @@ export class SwarmRangeSwarm {
   static FACTION = "Adeptus Custodes";
   static TEAM_COLOR = 0x0078ff; // Example: blue
 
-
   name: string;
   hp: number;
   pos: [number, number];

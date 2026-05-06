@@ -10,8 +10,7 @@ export function pointInPolygon(px: number, py: number, flat: number[]): boolean 
     const yj = flat[j * 2 + 1]!;
     const dy = yj - yi;
     if (dy === 0) continue;
-    const intersect =
-      yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / dy + xi;
+    const intersect = yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / dy + xi;
     if (intersect) inside = !inside;
   }
   return inside;

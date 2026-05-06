@@ -21,10 +21,15 @@ export class RenegadeGuard extends SwarmRangeSwarm {
   static RNG_WEAPONS = getWeapons(RenegadeGuard.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["close_combat_weapon"];
   static CC_WEAPONS = getWeapons(RenegadeGuard.CC_WEAPON_CODES);
-    
+
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "chaos"}, { keywordId: "damned"}, { keywordId: "renegarde guard"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "grenades" },
+    { keywordId: "chaos" },
+    { keywordId: "damned" },
+    { keywordId: "renegarde guard" },
+  ];
 
   static ICON = "/icons/RenegadeGuard.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

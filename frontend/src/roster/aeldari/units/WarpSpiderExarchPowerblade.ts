@@ -24,8 +24,12 @@ export class WarpSpiderExarchPowerblade extends SwarmMeleeTroop {
   static CC_WEAPONS = getWeapons(WarpSpiderExarchPowerblade.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "aeldari"}, { keywordId: "aspect warrior"}, { keywordId: "Warp Spider"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "aeldari" },
+    { keywordId: "aspect warrior" },
+    { keywordId: "Warp Spider" },
+  ];
 
   static ICON = "/icons/WarpSpiderExarchSpinner.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

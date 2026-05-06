@@ -24,8 +24,13 @@ export class GuardianDefender extends SwarmRangeTroop {
   static CC_WEAPONS = getWeapons(GuardianDefender.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "guardians"}, { keywordId: "guardian defenders"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "grenades" },
+    { keywordId: "guardians" },
+    { keywordId: "guardian defenders" },
+  ];
 
   static ICON = "/icons/GuardianDefender.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

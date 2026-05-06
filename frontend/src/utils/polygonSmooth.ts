@@ -17,7 +17,7 @@ export const DEFAULT_MAX_VERTS_AFTER_ONE_CHAIKIN_STEP = 48_000;
 export function chaikinSmoothClosedPolygonFlat(
   flat: number[],
   iterations: number,
-  maxVertsAfterOneChaikinStep: number = DEFAULT_MAX_VERTS_AFTER_ONE_CHAIKIN_STEP,
+  maxVertsAfterOneChaikinStep: number = DEFAULT_MAX_VERTS_AFTER_ONE_CHAIKIN_STEP
 ): number[] {
   if (flat.length < 6 || iterations <= 0) {
     return flat;
@@ -89,7 +89,7 @@ export type SmoothMaskLoopsForRenderOptions = {
 export function smoothMaskLoopsForRender(
   loops: number[][],
   chaikinIterations: number,
-  options?: SmoothMaskLoopsForRenderOptions,
+  options?: SmoothMaskLoopsForRenderOptions
 ): {
   smoothed: number[][];
   minX: number;

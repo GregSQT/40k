@@ -24,8 +24,13 @@ export class EradicatorMeltaRifle extends EliteRangeTroop {
   static CC_WEAPONS = getWeapons(EradicatorMeltaRifle.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenade"}, { keywordId: "imperium"}, { keywordId: "gravis"}, { keywordId: "eradicator squad"}];
- 
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "grenade" },
+    { keywordId: "imperium" },
+    { keywordId: "gravis" },
+    { keywordId: "eradicator squad" },
+  ];
 
   static ICON = "/icons/EradicatorMeltaRifle.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

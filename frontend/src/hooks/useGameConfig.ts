@@ -196,7 +196,8 @@ export const useGameConfig = (_boardConfigName: string = "default"): ExtendedGam
         const boardUrl =
           "/api/config/board?scenario_file=" +
           encodeURIComponent(scenarioFile) +
-          "&_t=" + Date.now();
+          "&_t=" +
+          Date.now();
         const [boardResponse, gameResponse] = await Promise.all([
           fetch(boardUrl),
           fetch("/config/game_config.json"),
@@ -209,9 +210,7 @@ export const useGameConfig = (_boardConfigName: string = "default"): ExtendedGam
         }
 
         if (!boardResponse.ok) {
-          throw new Error(
-            `Board config missing: /api/config/board (HTTP ${boardResponse.status})`
-          );
+          throw new Error(`Board config missing: /api/config/board (HTTP ${boardResponse.status})`);
         }
 
         const boardJson = await boardResponse.json();

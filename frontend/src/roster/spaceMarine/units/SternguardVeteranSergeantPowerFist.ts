@@ -24,8 +24,13 @@ export class SternguardVeteranSergeantPowerFist extends TroopMeleeElite {
   static CC_WEAPONS = getWeapons(SternguardVeteranSergeantPowerFist.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "sternguard veteran squad"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "grenades" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "sternguard veteran squad" },
+  ];
 
   static ICON = "/icons/SternguardVeteranSergeantPowerFist.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

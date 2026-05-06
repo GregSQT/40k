@@ -12,8 +12,6 @@ import {
 import {
   getModeGuideRuntimeData,
   getTutorialScenarioRuntimeData,
-  modeGuideYamlRevision,
-  tutorialScenarioYamlRevision,
 } from "../config/tutorialScenarioRuntime";
 import { getTutorialUiBehavior } from "../config/tutorialUiRules";
 import type { APIGameState } from "../hooks/useEngineAPI";
@@ -137,7 +135,12 @@ function normalizeStep(raw: Record<string, unknown>): TutorialStepDef {
     throw new Error(`Step "${stageId ?? `${etape}-${order}`}" must define fog object`);
   }
   const fogRecord = raw.fog as Record<string, unknown>;
-  const fogKeys: Array<keyof TutorialFogConfig> = ["global", "leftPanel", "rightPanel", "boardTopBand"];
+  const fogKeys: Array<keyof TutorialFogConfig> = [
+    "global",
+    "leftPanel",
+    "rightPanel",
+    "boardTopBand",
+  ];
   for (const key of fogKeys) {
     if (typeof fogRecord[key] !== "boolean") {
       throw new Error(`Step "${stageId ?? `${etape}-${order}`}" fog.${key} must be boolean`);
@@ -158,8 +161,13 @@ function normalizeStep(raw: Record<string, unknown>): TutorialStepDef {
       );
     }
   }
-  if (raw.title_icon != null && (typeof raw.title_icon !== "string" || raw.title_icon.trim() === "")) {
-    throw new Error(`Step "${stageId ?? `${etape}-${order}`}" title_icon must be a non-empty string`);
+  if (
+    raw.title_icon != null &&
+    (typeof raw.title_icon !== "string" || raw.title_icon.trim() === "")
+  ) {
+    throw new Error(
+      `Step "${stageId ?? `${etape}-${order}`}" title_icon must be a non-empty string`
+    );
   }
   if (typeof raw.trigger === "object" && raw.trigger != null) {
     const t = raw.trigger as Record<string, unknown>;
@@ -420,15 +428,25 @@ export function TutorialProvider({
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [popupVisible, setPopupVisible] = useState(false);
   const [skipped, setSkipped] = useState(false);
-  const [spotlightPosition, setSpotlightPosition] = useState<TutorialSpotlightPosition | null>(null);
-  const [spotlightTablePositions, setSpotlightTablePositions] = useState<TutorialSpotlightPosition[] | null>(null);
-  const [spotlightTurnPhasePositions, setSpotlightTurnPhasePositions] = useState<TutorialSpotlightPosition[] | null>(null);
+  const [spotlightPosition, setSpotlightPosition] = useState<TutorialSpotlightPosition | null>(
+    null
+  );
+  const [spotlightTablePositions, setSpotlightTablePositions] = useState<
+    TutorialSpotlightPosition[] | null
+  >(null);
+  const [spotlightTurnPhasePositions, setSpotlightTurnPhasePositions] = useState<
+    TutorialSpotlightPosition[] | null
+  >(null);
   const [spotlightTutorialPopupAnchor, setSpotlightTutorialPopupAnchor] = useState<{
     centerX: number;
     bottomY: number;
   } | null>(null);
-  const [spotlightLeftPanel, setSpotlightLeftPanel] = useState<TutorialSpotlightPosition | null>(null);
-  const [spotlightRightPanel, setSpotlightRightPanel] = useState<TutorialSpotlightPosition | null>(null);
+  const [spotlightLeftPanel, setSpotlightLeftPanel] = useState<TutorialSpotlightPosition | null>(
+    null
+  );
+  const [spotlightRightPanel, setSpotlightRightPanel] = useState<TutorialSpotlightPosition | null>(
+    null
+  );
   const [leftPanelFogRects, setLeftPanelFogRectsState] = useState<TutorialSpotlightRect[]>([]);
   const setLeftPanelFogRects = useCallback((r: TutorialSpotlightRect[] | null) => {
     setLeftPanelFogRectsState(r ?? []);
@@ -437,17 +455,26 @@ export function TutorialProvider({
   const setRightPanelFogRects = useCallback((r: TutorialSpotlightRect[] | null) => {
     setRightPanelFogRectsState(r ?? []);
   }, []);
-  const [spotlightRangedWeaponsPositions, setSpotlightRangedWeaponsPositions] = useState<TutorialSpotlightPosition[] | null>(null);
-  const [spotlightGameLogLastEntry, setSpotlightGameLogLastEntry] = useState<TutorialSpotlightPosition | null>(null);
-  const [spotlightGameLogHeader, setSpotlightGameLogHeader] = useState<TutorialSpotlightPosition | null>(null);
-  const [spotlightGameLogTopEntriesPositions, setSpotlightGameLogTopEntriesPositionsState] = useState<
+  const [spotlightRangedWeaponsPositions, setSpotlightRangedWeaponsPositions] = useState<
+    TutorialSpotlightPosition[] | null
+  >(null);
+  const [spotlightGameLogLastEntry, setSpotlightGameLogLastEntry] =
+    useState<TutorialSpotlightPosition | null>(null);
+  const [spotlightGameLogHeader, setSpotlightGameLogHeader] =
+    useState<TutorialSpotlightPosition | null>(null);
+  const [spotlightGameLogTopEntriesPositions, setSpotlightGameLogTopEntriesPositionsState] =
+    useState<TutorialSpotlightPosition[]>([]);
+  const setSpotlightGameLogTopEntriesPositions = useCallback(
+    (pos: TutorialSpotlightPosition[] | null) => {
+      setSpotlightGameLogTopEntriesPositionsState(pos ?? []);
+    },
+    []
+  );
+  const [spotlightEnemyUnitAttributes, setSpotlightEnemyUnitAttributes] =
+    useState<TutorialSpotlightPosition | null>(null);
+  const [spotlightP2UnitRowPositions, setSpotlightP2UnitRowPositionsState] = useState<
     TutorialSpotlightPosition[]
   >([]);
-  const setSpotlightGameLogTopEntriesPositions = useCallback((pos: TutorialSpotlightPosition[] | null) => {
-    setSpotlightGameLogTopEntriesPositionsState(pos ?? []);
-  }, []);
-  const [spotlightEnemyUnitAttributes, setSpotlightEnemyUnitAttributes] = useState<TutorialSpotlightPosition | null>(null);
-  const [spotlightP2UnitRowPositions, setSpotlightP2UnitRowPositionsState] = useState<TutorialSpotlightPosition[]>([]);
   const setSpotlightP2UnitRowPositions = useCallback((pos: TutorialSpotlightPosition[] | null) => {
     setSpotlightP2UnitRowPositionsState((prev) => {
       const next = pos ?? [];
@@ -455,17 +482,14 @@ export function TutorialProvider({
       const areEqual = next.every((n, i) => {
         const p = prev[i];
         if (!p || p.shape !== "rect" || n.shape !== "rect") return false;
-        return (
-          p.left === n.left &&
-          p.top === n.top &&
-          p.width === n.width &&
-          p.height === n.height
-        );
+        return p.left === n.left && p.top === n.top && p.width === n.width && p.height === n.height;
       });
       return areEqual ? prev : next;
     });
   }, []);
-  const [spotlightBoardUnitPositions, setSpotlightBoardUnitPositionsState] = useState<TutorialSpotlightPosition[]>([]);
+  const [spotlightBoardUnitPositions, setSpotlightBoardUnitPositionsState] = useState<
+    TutorialSpotlightPosition[]
+  >([]);
   const setSpotlightBoardUnitPositions = useCallback((pos: TutorialSpotlightPosition[] | null) => {
     setSpotlightBoardUnitPositionsState(pos ?? []);
   }, []);
@@ -478,7 +502,10 @@ export function TutorialProvider({
       setSpotlightLayoutTick((n) => n + 1);
     });
   }, []);
-  const [lastEnemyDeathPosition, setLastEnemyDeathPosition] = useState<{ col: number; row: number } | null>(null);
+  const [lastEnemyDeathPosition, setLastEnemyDeathPosition] = useState<{
+    col: number;
+    row: number;
+  } | null>(null);
   const lastKnownEnemyPositionRef = useRef<{ col: number; row: number } | null>(null);
   const [tutorialLang, setTutorialLang] = useState<TutorialLang>("fr");
   const lastPhaseRef = useRef<string | null>(null);
@@ -500,11 +527,11 @@ export function TutorialProvider({
     setSkipped(false);
     setPopupVisible(false);
     setCurrentStepIndex(0);
-      if (scenarioType === "mode_guide") {
-        setCurrentEtape(1);
-      } else {
-        setCurrentEtape(1);
-      }
+    if (scenarioType === "mode_guide") {
+      setCurrentEtape(1);
+    } else {
+      setCurrentEtape(1);
+    }
     setReleasedSteps(new Set());
     onDeployShownForEtapeRef.current.clear();
     skipNextPhaseTriggerRef.current = false;
@@ -512,7 +539,7 @@ export function TutorialProvider({
     modeGuideInitialPopupShownRef.current = false;
     lastPhaseRef.current = null;
     lastFightSubphaseRef.current = null;
-  }, [isTutorialMode, scenarioType, guideMode]);
+  }, [isTutorialMode, scenarioType]);
 
   /** Remesure des halos (coords viewport) au scroll / resize pendant que le tutoriel est ouvert. */
   useEffect(() => {
@@ -543,10 +570,7 @@ export function TutorialProvider({
   }, [isTutorialMode, popupVisible, skipped, scheduleSpotlightLayoutTickBump]);
 
   const stepsForEtape = useMemo(
-    () =>
-      steps
-        .filter((s) => s.etape === currentEtape)
-        .sort((a, b) => a.order - b.order),
+    () => steps.filter((s) => s.etape === currentEtape).sort((a, b) => a.order - b.order),
     [steps, currentEtape]
   );
 
@@ -590,7 +614,9 @@ export function TutorialProvider({
     const stage = getStageId(s);
     const uiBehavior = getTutorialUiBehavior(stage);
     let phase =
-      s.trigger?.type === "phase_enter" && typeof s.trigger.phase === "string" && s.trigger.phase.trim() !== ""
+      s.trigger?.type === "phase_enter" &&
+      typeof s.trigger.phase === "string" &&
+      s.trigger.phase.trim() !== ""
         ? s.trigger.phase
         : s.trigger?.type === "fight_subphase_enter"
           ? "fight"
@@ -617,15 +643,20 @@ export function TutorialProvider({
         typeof s.advance_on_weapon_name === "string" && s.advance_on_weapon_name.trim() !== ""
           ? s.advance_on_weapon_name.trim()
           : undefined,
-      popupImage: typeof s.popup_image === "string" && s.popup_image.trim() !== "" ? s.popup_image : undefined,
-      titleIcon: typeof s.title_icon === "string" && s.title_icon.trim() !== "" ? s.title_icon : undefined,
+      popupImage:
+        typeof s.popup_image === "string" && s.popup_image.trim() !== ""
+          ? s.popup_image
+          : undefined,
+      titleIcon:
+        typeof s.title_icon === "string" && s.title_icon.trim() !== "" ? s.title_icon : undefined,
       popupShowMoveHex: s.popup_show_move_hex === true,
       popupShowGreenCircle: s.popup_show_green_circle === true,
       popupFirstLineWithIcon: s.popup_first_line_with_icon === true,
       popupPosition:
         s.popup_position === "center" || s.popup_position == null
           ? undefined
-          : typeof s.popup_position === "object" && (s.popup_position.left != null || s.popup_position.top != null)
+          : typeof s.popup_position === "object" &&
+              (s.popup_position.left != null || s.popup_position.top != null)
             ? {
                 left: s.popup_position.left ?? "50%",
                 top: s.popup_position.top ?? "50%",
@@ -651,29 +682,26 @@ export function TutorialProvider({
    * Basé sur la phase du jeu, pas sur popupVisible (évite que l'IA enchaîne avant affichage du popup). */
   const phase = gameState?.phase ?? null;
   const fightSubphase = gameState?.fight_subphase ?? null;
-  const shouldPauseAI =
-    isModeGuideScenario
-      ? false
-      :
-    transitioningToEtape2Ref.current ||
-    (currentEtape === 2 &&
-      phase != null &&
-      ((phase === "move" && !releasedSteps.has("2-11")) ||
-        (phase === "shoot" && !releasedSteps.has("2-12")) ||
-        (phase === "charge" && !releasedSteps.has("2-13")) ||
-        (phase === "fight" &&
-          fightSubphase === "charging" &&
-          !releasedSteps.has("2-14"))));
+  const shouldPauseAI = isModeGuideScenario
+    ? false
+    : transitioningToEtape2Ref.current ||
+      (currentEtape === 2 &&
+        phase != null &&
+        ((phase === "move" && !releasedSteps.has("2-11")) ||
+          (phase === "shoot" && !releasedSteps.has("2-12")) ||
+          (phase === "charge" && !releasedSteps.has("2-13")) ||
+          (phase === "fight" && fightSubphase === "charging" && !releasedSteps.has("2-14"))));
   if (tutorialPauseAiSyncRef) {
     tutorialPauseAiSyncRef.current = shouldPauseAI;
   }
   useLayoutEffect(() => {
     onPauseAIChange?.(shouldPauseAI);
-  }, [shouldPauseAI, onPauseAIChange, phase, fightSubphase]);
+  }, [shouldPauseAI, onPauseAIChange]);
 
   useLayoutEffect(() => {
     if (stopAiAfterPhaseChangeRef) {
-      stopAiAfterPhaseChangeRef.current = isTutorialMode && !isModeGuideScenario && currentEtape === 2;
+      stopAiAfterPhaseChangeRef.current =
+        isTutorialMode && !isModeGuideScenario && currentEtape === 2;
     }
   }, [isTutorialMode, isModeGuideScenario, currentEtape, stopAiAfterPhaseChangeRef]);
 
@@ -710,11 +738,15 @@ export function TutorialProvider({
     if (!isTutorialMode) return;
     try {
       const runtimeData =
-        scenarioType === "mode_guide" ? getModeGuideRuntimeData() : getTutorialScenarioRuntimeData();
+        scenarioType === "mode_guide"
+          ? getModeGuideRuntimeData()
+          : getTutorialScenarioRuntimeData();
       if (!Array.isArray(runtimeData.steps)) {
         throw new Error("Tutorial runtime data does not contain a valid steps[]");
       }
-      const normalizedSteps = runtimeData.steps.map((s: Record<string, unknown>) => normalizeStep(s));
+      const normalizedSteps = runtimeData.steps.map((s: Record<string, unknown>) =>
+        normalizeStep(s)
+      );
       const filteredSteps =
         scenarioType === "mode_guide" && guideMode != null
           ? normalizedSteps.filter((step) => step.guide_mode === guideMode)
@@ -723,13 +755,7 @@ export function TutorialProvider({
     } catch (err) {
       console.error("Tutorial steps load failed from tutorial_scenario.md:", err);
     }
-  }, [
-    isTutorialMode,
-    scenarioType,
-    guideMode,
-    tutorialScenarioYamlRevision,
-    modeGuideYamlRevision,
-  ]);
+  }, [isTutorialMode, scenarioType, guideMode]);
 
   const showStepForTrigger = useCallback(
     (triggerType: string, phaseOrSubphase?: string) => {
@@ -766,7 +792,15 @@ export function TutorialProvider({
         setPopupVisible(true);
       }
     }
-  }, [isTutorialMode, isModeGuideScenario, skipped, currentEtape, currentStepIndex, gameState?.phase, steps]);
+  }, [
+    isTutorialMode,
+    isModeGuideScenario,
+    skipped,
+    currentEtape,
+    currentStepIndex,
+    gameState?.phase,
+    steps,
+  ]);
 
   useEffect(() => {
     if (!isTutorialMode || skipped || !gameState || steps.length === 0) return;
@@ -868,7 +902,6 @@ export function TutorialProvider({
     gameState?.phase,
     gameState?.fight_subphase,
     steps.length,
-    currentStepIndex,
     showStepForTrigger,
     currentEtape,
   ]);
@@ -912,9 +945,13 @@ export function TutorialProvider({
       // Option configurable: jouer les sous-étapes intermédiaires avant 1-25 même si la cible est déjà morte.
       const currentOrder = stepsForEtape[currentStepIndex]?.order;
       const currentStageId =
-        stepsForEtape[currentStepIndex] != null ? getStageId(stepsForEtape[currentStepIndex]) : null;
+        stepsForEtape[currentStepIndex] != null
+          ? getStageId(stepsForEtape[currentStepIndex])
+          : null;
       const sequentialSubstepsUntilOrder =
-        currentStageId != null ? getTutorialUiBehavior(currentStageId).sequentialSubstepsUntilOrder : undefined;
+        currentStageId != null
+          ? getTutorialUiBehavior(currentStageId).sequentialSubstepsUntilOrder
+          : undefined;
       if (typeof currentOrder === "number" && Number.isFinite(currentOrder)) {
         const next124SubstepIdx = stepsForEtape.findIndex(
           (s, idx) =>
@@ -989,7 +1026,9 @@ export function TutorialProvider({
   }, []);
 
   const onClosePopup = useCallback(() => {
-    const stage = stepsForEtape[currentStepIndex] ? getStageId(stepsForEtape[currentStepIndex]) : "";
+    const stage = stepsForEtape[currentStepIndex]
+      ? getStageId(stepsForEtape[currentStepIndex])
+      : "";
     const currentStepDef = stepsForEtape[currentStepIndex] ?? null;
     if (STAGES_AI_PAUSED.includes(stage as (typeof STAGES_AI_PAUSED)[number])) {
       setReleasedSteps((prev) => new Set(prev).add(stage));
@@ -1200,9 +1239,5 @@ export function TutorialProvider({
     ]
   );
 
-  return (
-    <TutorialContext.Provider value={value}>
-      {children}
-    </TutorialContext.Provider>
-  );
+  return <TutorialContext.Provider value={value}>{children}</TutorialContext.Provider>;
 }

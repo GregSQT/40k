@@ -1,19 +1,29 @@
 // frontend/src/components/UnitRenderer.tsx
 import * as PIXI from "pixi.js-legacy";
-import type { FightSubPhase, GameState, PlayerId, TargetPreview, Unit, UnitId } from "../types/game";
+import type {
+  FightSubPhase,
+  GameState,
+  PlayerId,
+  TargetPreview,
+  Unit,
+  UnitId,
+} from "../types/game";
 import {
+  type BlinkProbHtmlPayload,
   buildChargeMinRollOverlay,
   buildWeaponSignature,
   createBlinkingHPBar,
   DEFAULT_BLINK_PROBABILITY_HELP_TEXT,
-  type BlinkProbHtmlPayload,
-  type HpBarHtmlTooltipPayload,
   type HPBlinkContainer,
+  type HpBarHtmlTooltipPayload,
 } from "../utils/blinkingHPBar";
+import { logFightClick } from "../utils/fightClickDebug";
+import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import {
   minHexDistanceBetweenUnitFootprints,
   resolveBaseSizeForUnitDisplay,
 } from "../utils/hexFootprint";
+import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 import {
   getHpBarWidthBase,
   getNonRoundBasePixelLayout,
@@ -21,15 +31,12 @@ import {
   getSquareCornerRadiusPx,
   getUnitTokenTopExtentY,
 } from "../utils/unitBaseDisplay";
-import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
-import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 import {
   getDiceAverage,
   getMeleeRange,
   getSelectedMeleeWeapon,
   getSelectedRangedWeapon,
 } from "../utils/weaponHelpers";
-import { logFightClick } from "../utils/fightClickDebug";
 
 interface UnitRendererProps {
   unit: Unit;
@@ -185,8 +192,7 @@ export class UnitRenderer {
 
   private getUnitTooltipText(): string {
     const { unit } = this.props;
-    const displayName =
-      unit.DISPLAY_NAME || unit.name || unit.type || unit.unitType || "Unknown";
+    const displayName = unit.DISPLAY_NAME || unit.name || unit.type || unit.unitType || "Unknown";
     return `${displayName} - ID ${unit.id}`;
   }
 
@@ -288,7 +294,7 @@ export class UnitRenderer {
         ) {
           const key = String(this.props.unit.id);
           const map = this.props.movePreviewShootingTargetInCoverByUnitId;
-          if (Object.prototype.hasOwnProperty.call(map, key)) {
+          if (Object.hasOwn(map, key)) {
             effectiveTargetInCover = map[key] === true;
           } else {
             effectiveTargetInCover = this.props.shootingTargetInCover === true;
@@ -371,7 +377,7 @@ export class UnitRenderer {
     const baseSize = displayBase > 1 ? displayBase : undefined;
     const unitIconScale = baseSize
       ? (baseSize * HEX_HORIZ_SPACING) / this.props.HEX_RADIUS
-      : (unit.ICON_SCALE || this.props.ICON_SCALE);
+      : unit.ICON_SCALE || this.props.ICON_SCALE;
 
     // ===== Z-INDEX CALCULATIONS =====
     const unitZIndexRange = 149;
@@ -539,7 +545,7 @@ export class UnitRenderer {
     }
 
     /** Remplissage socle : toujours couleur joueur (sauf ghost / just-killed) — l’état « déjà activé » ne grise plus le socle. */
-    let socleFill = unit.color;
+    const socleFill = unit.color;
     let borderColor = 0x000000;
     let borderWidth = DEFAULT_BORDER_WIDTH;
 
@@ -600,7 +606,9 @@ export class UnitRenderer {
     const displayOrientationStep = this.props.displayOrientationStep;
     if (
       displayOrientationStep !== undefined &&
-      (!Number.isInteger(displayOrientationStep) || displayOrientationStep < 0 || displayOrientationStep > 5)
+      (!Number.isInteger(displayOrientationStep) ||
+        displayOrientationStep < 0 ||
+        displayOrientationStep > 5)
     ) {
       throw new Error(
         `displayOrientationStep must be an integer in 0..5, got ${String(displayOrientationStep)}`
@@ -629,7 +637,7 @@ export class UnitRenderer {
     if (nrBase && displayOrientationStep !== undefined) {
       unitCircle.pivot.set(centerX, centerY);
       unitCircle.position.set(centerX, centerY);
-      unitCircle.rotation = displayOrientationStep * Math.PI / 3;
+      unitCircle.rotation = (displayOrientationStep * Math.PI) / 3;
     }
 
     if (isPreview) {
@@ -701,11 +709,7 @@ export class UnitRenderer {
       }
       // Advance (shoot) : même principe que le move — clic gauche sur l’icône / l’hex valide
       // via capture canvas (boardHexClick → onAdvanceMove), pas d’annulation sur l’unité.
-      if (
-        phase === "shoot" &&
-        this.props.mode === "advancePreview" &&
-        unit.id === selectedUnitId
-      ) {
+      if (phase === "shoot" && this.props.mode === "advancePreview" && unit.id === selectedUnitId) {
         addClickHandler = false;
         unitCircle.eventMode = "none";
         unitCircle.cursor = "default";
@@ -848,7 +852,7 @@ export class UnitRenderer {
             centerY - nrBase.squareHalf - pad,
             nrBase.squareSide + pad * 2,
             nrBase.squareSide + pad * 2,
-            getSquareCornerRadiusPx() + 2,
+            getSquareCornerRadiusPx() + 2
           );
         }
       } else {
@@ -1054,7 +1058,9 @@ export class UnitRenderer {
     if (nrEl) {
       if (
         displayOrientationStep !== undefined &&
-        (!Number.isInteger(displayOrientationStep) || displayOrientationStep < 0 || displayOrientationStep > 5)
+        (!Number.isInteger(displayOrientationStep) ||
+          displayOrientationStep < 0 ||
+          displayOrientationStep > 5)
       ) {
         throw new Error(
           `displayOrientationStep must be an integer in 0..5, got ${String(displayOrientationStep)}`
@@ -1065,7 +1071,7 @@ export class UnitRenderer {
           centerX,
           centerY,
           nrEl.outerRx * outlinePad,
-          nrEl.outerRy * outlinePad,
+          nrEl.outerRy * outlinePad
         );
       } else {
         const sh = nrEl.squareHalf * outlinePad;
@@ -1075,13 +1081,13 @@ export class UnitRenderer {
           centerY - sh,
           ss,
           ss,
-          getSquareCornerRadiusPx() + 2,
+          getSquareCornerRadiusPx() + 2
         );
       }
       if (displayOrientationStep !== undefined) {
         eligibleOutline.pivot.set(centerX, centerY);
         eligibleOutline.position.set(centerX, centerY);
-        eligibleOutline.rotation = displayOrientationStep * Math.PI / 3;
+        eligibleOutline.rotation = (displayOrientationStep * Math.PI) / 3;
       }
     } else {
       const circleRadius = ((HEX_RADIUS * unitIconScale) / 2) * 1.1;
@@ -1117,7 +1123,7 @@ export class UnitRenderer {
             centerX,
             centerY,
             nrEl.outerRx * redPad,
-            nrEl.outerRy * redPad,
+            nrEl.outerRy * redPad
           );
         } else {
           const sh = nrEl.squareHalf * redPad;
@@ -1127,13 +1133,13 @@ export class UnitRenderer {
             centerY - sh,
             ss,
             ss,
-            getSquareCornerRadiusPx() + 3,
+            getSquareCornerRadiusPx() + 3
           );
         }
         if (displayOrientationStep !== undefined) {
           chargedOutline.pivot.set(centerX, centerY);
           chargedOutline.position.set(centerX, centerY);
-          chargedOutline.rotation = displayOrientationStep * Math.PI / 3;
+          chargedOutline.rotation = (displayOrientationStep * Math.PI) / 3;
         }
       } else {
         const circleRadius = ((HEX_RADIUS * unitIconScale) / 2) * 1.1;
@@ -1451,7 +1457,7 @@ export class UnitRenderer {
       unit,
       HEX_RADIUS,
       HEX_HORIZ_SPACING,
-      UNIT_CIRCLE_RADIUS_RATIO,
+      UNIT_CIRCLE_RADIUS_RATIO
     );
     const hpWidthBase = getHpBarWidthBase(unit, HEX_RADIUS, HEX_HORIZ_SPACING, unitIconScale);
     const HP_BAR_WIDTH =
@@ -1496,7 +1502,7 @@ export class UnitRenderer {
       ) {
         const key = String(this.props.unit.id);
         const map = this.props.movePreviewShootingTargetInCoverByUnitId;
-        if (Object.prototype.hasOwnProperty.call(map, key)) {
+        if (Object.hasOwn(map, key)) {
           return map[key] === true;
         }
       }
@@ -1607,7 +1613,7 @@ export class UnitRenderer {
           ? buildChargeMinRollOverlay(
               minHexDistanceBetweenUnitFootprints(attacker, unit, chargeMaxSubhex),
               chargeMaxInches,
-              inchesToSubhex,
+              inchesToSubhex
             )
           : null;
 
@@ -1638,8 +1644,7 @@ export class UnitRenderer {
         targetPreview.overallProbability !== undefined
       ) {
         const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
-        const showCoverShield =
-          blinkPhase === "shoot" && getEffectiveTargetInCover(attacker);
+        const showCoverShield = blinkPhase === "shoot" && getEffectiveTargetInCover(attacker);
         this.props.onBlinkProbHtml?.({
           action: "updateLabel",
           unitId: unitIdNum,
@@ -1697,16 +1702,8 @@ export class UnitRenderer {
   }
 
   private renderShootingCounter(unitIconScale: number): void {
-    const {
-      unit,
-      centerX,
-      centerY,
-      phase,
-      current_player,
-      HEX_RADIUS,
-      unitsFled,
-      isEligible,
-    } = this.props;
+    const { unit, centerX, centerY, phase, current_player, HEX_RADIUS, unitsFled, isEligible } =
+      this.props;
 
     if (phase !== "shoot" || unit.player !== current_player) return;
 
@@ -1799,7 +1796,7 @@ export class UnitRenderer {
       unit,
       HEX_RADIUS,
       HEX_HORIZ_SPACING,
-      UNIT_CIRCLE_RADIUS_RATIO,
+      UNIT_CIRCLE_RADIUS_RATIO
     );
     const barY = centerY - tokenTopAdv - this.props.HP_BAR_HEIGHT - 1;
     const squareSizeRatio = this.getCSSNumber("--icon-square-standard-size", 0.5);
@@ -1895,7 +1892,7 @@ export class UnitRenderer {
       unit,
       HEX_RADIUS,
       HEX_HORIZ_SPACING,
-      UNIT_CIRCLE_RADIUS_RATIO,
+      UNIT_CIRCLE_RADIUS_RATIO
     );
     const barY = centerY - tokenTopWpn - this.props.HP_BAR_HEIGHT - 1;
     const squareSizeRatio = this.getCSSNumber("--icon-square-standard-size", 0.5);

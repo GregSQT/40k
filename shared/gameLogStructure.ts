@@ -402,18 +402,17 @@ export function getEventTypeClass(event: BaseLogEntry | TrainingLogEntry): strin
       return "game-log-entry--shoot-failed"; // Light blue - failed during hit or wound rolls
     case "charge":
       return "game-log-entry--charge";
-    case "charge_impact":
-      {
-        const message = event.message || "";
-        const damageMatch = message.match(/Dmg:(\d+)HP/i);
-        if (damageMatch) {
-          const damage = parseInt(damageMatch[1], 10);
-          if (damage > 0) {
-            return "game-log-entry--charge-impact-damage";
-          }
+    case "charge_impact": {
+      const message = event.message || "";
+      const damageMatch = message.match(/Dmg:(\d+)HP/i);
+      if (damageMatch) {
+        const damage = parseInt(damageMatch[1], 10);
+        if (damage > 0) {
+          return "game-log-entry--charge-impact-damage";
         }
-        return "game-log-entry--charge-impact-failed";
       }
+      return "game-log-entry--charge-impact-failed";
+    }
     case "charge_fail":
       return "game-log-entry--charge-fail";
     case "combat":

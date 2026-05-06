@@ -24,8 +24,14 @@ export class TermagantTuto extends SwarmRangeSwarm {
   static CC_WEAPONS = getWeapons(TermagantTuto.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "tyranids"}, { keywordId: "termagant"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "great devourer" },
+    { keywordId: "endless multitude" },
+    { keywordId: "tyranids" },
+    { keywordId: "termagant" },
+  ];
 
   static ICON = "/icons/Termagant.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

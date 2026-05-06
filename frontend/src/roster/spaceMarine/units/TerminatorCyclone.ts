@@ -24,8 +24,12 @@ export class TerminatorCyclone extends EliteRangeTroop {
   static CC_WEAPONS = getWeapons(TerminatorCyclone.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "terminator"}, { keywordId: "terminator squad"}];
- 
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "imperium" },
+    { keywordId: "terminator" },
+    { keywordId: "terminator squad" },
+  ];
 
   static ICON = "/icons/TerminatorCyclone.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

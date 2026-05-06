@@ -28,8 +28,15 @@ export class AssaultIntercessorJumpPackPlasmaPistol extends TroopMeleeTroop {
   static RULES_STATUS = { charge_impact: 2 };
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "jump_pack"}, { keywordId: "fly"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "assault intercessors with jump packs"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "grenades" },
+    { keywordId: "jump_pack" },
+    { keywordId: "fly" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "assault intercessors with jump packs" },
+  ];
 
   static ICON = "/icons/AssaultIntercessorJumpPackPlasmaPistol.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

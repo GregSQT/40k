@@ -24,7 +24,10 @@ export class LeaderCaptain extends LeaderEliteMeleeElite {
   static RNG_WEAPON_CODES = ["master_crafted_bolter_captain", "bolt_pistol_captain"];
   static RNG_WEAPONS = getWeapons(LeaderCaptain.RNG_WEAPON_CODES);
 
-  static UNIT_KEYWORDS = [...CaptainPowerFistPlasmaPistol.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
+  static UNIT_KEYWORDS = [
+    ...CaptainPowerFistPlasmaPistol.UNIT_KEYWORDS,
+    { keywordId: "endless_duty" },
+  ];
 
   static ICON = "/icons/CaptainPowerFistPlasmaPistol.webp";
   static BASE_SHAPE = "round"; // Shape of the base

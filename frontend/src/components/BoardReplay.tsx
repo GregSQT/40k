@@ -9,7 +9,11 @@ import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
 import type { GameState, Unit, Weapon } from "../types/game";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
-import { getDiceAverage, getSelectedMeleeWeapon, getSelectedRangedWeapon } from "../utils/weaponHelpers";
+import {
+  getDiceAverage,
+  getSelectedMeleeWeapon,
+  getSelectedRangedWeapon,
+} from "../utils/weaponHelpers";
 import BoardPvp, { type MeasureModeState } from "./BoardPvp";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
@@ -348,9 +352,7 @@ export const BoardReplay: React.FC = () => {
 
     try {
       // Load file content from server
-      const response = await fetch(
-        `/api/replay/file/${encodeURIComponent(filename)}`
-      );
+      const response = await fetch(`/api/replay/file/${encodeURIComponent(filename)}`);
       if (!response.ok) {
         throw new Error(`Failed to load file: ${response.statusText}`);
       }
@@ -1023,19 +1025,14 @@ export const BoardReplay: React.FC = () => {
       ) {
         throw new Error("Replay rules primary_objective.scoring.start_turn is missing");
       }
-      if (
-        !primaryObjectiveConfig.control ||
-        !primaryObjectiveConfig.control.method ||
-        !primaryObjectiveConfig.control.tie_behavior
-      ) {
+      if (!primaryObjectiveConfig.control?.method || !primaryObjectiveConfig.control.tie_behavior) {
         throw new Error("Replay rules primary_objective.control is missing required fields");
       }
       if (!primaryObjectiveConfig.control.control_method) {
         throw new Error("Replay rules primary_objective.control.control_method is missing");
       }
       if (
-        !primaryObjectiveConfig.timing ||
-        !primaryObjectiveConfig.timing.default_phase ||
+        !primaryObjectiveConfig.timing?.default_phase ||
         !primaryObjectiveConfig.timing.round5_second_player_phase
       ) {
         throw new Error("Replay rules primary_objective.timing is missing required fields");
@@ -2334,9 +2331,7 @@ export const BoardReplay: React.FC = () => {
                 return [];
               }
 
-              const advancingUnit = unitsWithGhost.find(
-                (u) => u.id === currentAction.unit_id
-              );
+              const advancingUnit = unitsWithGhost.find((u) => u.id === currentAction.unit_id);
               if (!advancingUnit) {
                 return [];
               }

@@ -24,8 +24,14 @@ export class Zoanthrope extends TroopRangeElite {
   static CC_WEAPONS = getWeapons(Zoanthrope.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "psyker"}, { keywordId: "fly"}, { keywordId: "great devourer"}, { keywordId: "synapse"}, { keywordId: "zoanthrope"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "psyker" },
+    { keywordId: "fly" },
+    { keywordId: "great devourer" },
+    { keywordId: "synapse" },
+    { keywordId: "zoanthrope" },
+  ];
 
   static ICON = "/icons/Zoanthrope.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

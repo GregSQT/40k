@@ -24,8 +24,14 @@ export class InceptorPlasma extends EliteRangeTroop {
   static CC_WEAPONS = getWeapons(InceptorPlasma.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "jump pack"}, { keywordId: "fly"}, { keywordId: "imperium"}, { keywordId: "gravis"}, { keywordId: "inceptor squad"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "jump pack" },
+    { keywordId: "fly" },
+    { keywordId: "imperium" },
+    { keywordId: "gravis" },
+    { keywordId: "inceptor squad" },
+  ];
 
   static ICON = "/icons/InceptorPlasma.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

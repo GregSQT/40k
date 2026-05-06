@@ -4,7 +4,6 @@ export class EliteMeleeElite {
   static FACTION = "Chaos";
   static TEAM_COLOR = 0x0078ff; // Example: blue
 
-
   name: string;
   hp: number;
   pos: [number, number];

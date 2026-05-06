@@ -18,7 +18,11 @@ export class LieutenantPowerFistPlasmaPistol extends LeaderEliteMeleeElite {
   static VALUE = 65; // Unit value (W40K points cost)
 
   // WEAPONS
-  static RNG_WEAPON_CODES = ["plasma_pistol_standard_lieutenant", "plasma_pistol_supercharge_lieutenant", "heavy_bolt_pistol_lieutenant"];
+  static RNG_WEAPON_CODES = [
+    "plasma_pistol_standard_lieutenant",
+    "plasma_pistol_supercharge_lieutenant",
+    "heavy_bolt_pistol_lieutenant",
+  ];
   static RNG_WEAPONS = getWeapons(LieutenantPowerFistPlasmaPistol.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["power_fist_lieutenant"];
   static CC_WEAPONS = getWeapons(LieutenantPowerFistPlasmaPistol.CC_WEAPON_CODES);
@@ -40,8 +44,14 @@ export class LieutenantPowerFistPlasmaPistol extends LeaderEliteMeleeElite {
   };
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "character"}, { keywordId: "grenade"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "lieutenant"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "character" },
+    { keywordId: "grenade" },
+    { keywordId: "imperium" },
+    { keywordId: "tacticus" },
+    { keywordId: "lieutenant" },
+  ];
 
   static ICON = "/icons/LieutenantPowerFistPlasmaPistol.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

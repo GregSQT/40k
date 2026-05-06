@@ -24,8 +24,13 @@ export class HeavyWeaponPlatform extends SwarmRangeTroop {
   static CC_WEAPONS = getWeapons(HeavyWeaponPlatform.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "guardians"}, { keywordId: "guardian defenders"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "grenades" },
+    { keywordId: "guardians" },
+    { keywordId: "guardian defenders" },
+  ];
 
   static ICON = "/icons/HeavyWeaponPlatform.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

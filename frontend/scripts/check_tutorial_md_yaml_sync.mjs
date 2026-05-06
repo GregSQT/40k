@@ -55,11 +55,15 @@ function main() {
     console.error("tutorial md/yaml sync mismatch detected.");
     if (missingInYaml.length > 0) {
       // eslint-disable-next-line no-console
-      console.error(`Stages in MD but missing in YAML (${missingInYaml.length}): ${missingInYaml.join(", ")}`);
+      console.error(
+        `Stages in MD but missing in YAML (${missingInYaml.length}): ${missingInYaml.join(", ")}`
+      );
     }
     if (extraInYaml.length > 0) {
       // eslint-disable-next-line no-console
-      console.error(`Stages in YAML but missing in MD (${extraInYaml.length}): ${extraInYaml.join(", ")}`);
+      console.error(
+        `Stages in YAML but missing in MD (${extraInYaml.length}): ${extraInYaml.join(", ")}`
+      );
     }
     process.exit(1);
   }

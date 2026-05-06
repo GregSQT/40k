@@ -1,9 +1,7 @@
 {
   "config": {
     "runs_root": "/home/greg/40k/tensorboard_b001",
-    "seeds": [
-      "12345"
-    ],
+    "seeds": ["12345"],
     "run_pattern": "{seed}",
     "last_run_only": true,
     "tag_robust": "0_critical/n_robust_current_score",
@@ -11,10 +9,7 @@
     "tag_worst_bot": "0_critical/b_worst_bot_score",
     "tag_holdout_hard": "0_critical/c_holdout_hard_mean",
     "enable_schedule_diagnostics": true,
-    "decaying_tags": [
-      "training_diagnostic/learning_rate",
-      "training_diagnostic/entropy_coef"
-    ],
+    "decaying_tags": ["training_diagnostic/learning_rate", "training_diagnostic/entropy_coef"],
     "diag_fast_consumption_at_40": 0.65,
     "diag_slow_consumption_at_80": 0.7,
     "min_evals": 5,
@@ -67,16 +62,16 @@
       "schedule_diagnostics": {
         "training_diagnostic/learning_rate": {
           "status": "OK",
-          "start_value": 9.999999747378752e-05,
-          "end_value": 3.0001399863976985e-05,
+          "start_value": 9.999999747378752e-5,
+          "end_value": 3.0001399863976985e-5,
           "consumed_decay_fraction_at_40": 0.40642806314077784,
           "consumed_decay_fraction_at_80": 0.8007959849214191,
           "checkpoints": {
-            "p20": 8.536999666830525e-05,
-            "p40": 7.155060302466154e-05,
-            "p60": 5.7808199926512316e-05,
-            "p80": 4.39454015577212e-05,
-            "p100": 3.0001399863976985e-05
+            "p20": 8.536999666830525e-5,
+            "p40": 7.155060302466154e-5,
+            "p60": 5.7808199926512316e-5,
+            "p80": 4.39454015577212e-5,
+            "p100": 3.0001399863976985e-5
           },
           "points": 70903
         },

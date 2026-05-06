@@ -24,15 +24,21 @@ export class HeavyIntercessor extends EliteRangeTroop {
   static CC_WEAPONS = getWeapons(HeavyIntercessor.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "gravis"}, { keywordId: "heavy intercessor squad"}];
-
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "grenades" },
+    { keywordId: "imperium" },
+    { keywordId: "gravis" },
+    { keywordId: "heavy intercessor squad" },
+  ];
 
   static ICON = "/icons/HeavyIntercessor.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 16; // Size of the base
   static ICON_SCALE = 1.8; // Size of the icon
   static ILLUSTRATION_RATIO = 102; // Illustration size ratio in percent
-  
+
   constructor(name: string, startPos: [number, number]) {
     super(name, HeavyIntercessor.HP_MAX, startPos);
   }

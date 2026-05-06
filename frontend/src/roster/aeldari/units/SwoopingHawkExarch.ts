@@ -24,8 +24,12 @@ export class SwoopingHawkExarch extends SwarmRangeSwarm {
   static CC_WEAPONS = getWeapons(SwoopingHawkExarch.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "aeldari"}, { keywordId: "aspect warrior"}, { keywordId: "swooping hawk"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "aeldari" },
+    { keywordId: "aspect warrior" },
+    { keywordId: "swooping hawk" },
+  ];
 
   static ICON = "/icons/SwoopingHawkExarch.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

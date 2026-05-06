@@ -185,7 +185,12 @@ export function hasLineOfSight(
     }
   }
 
-  if (typeof coverRatio !== "number" || Number.isNaN(coverRatio) || coverRatio <= 0 || coverRatio > 1) {
+  if (
+    typeof coverRatio !== "number" ||
+    Number.isNaN(coverRatio) ||
+    coverRatio <= 0 ||
+    coverRatio > 1
+  ) {
     throw new Error(`Invalid coverRatio: ${coverRatio}`);
   }
   if (

@@ -21,10 +21,14 @@ export class CustodianGuardBlade extends EliteMeleeTroop {
   static RNG_WEAPONS = getWeapons(CustodianGuardBlade.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["sentinel_blade_melee"];
   static CC_WEAPONS = getWeapons(CustodianGuardBlade.CC_WEAPON_CODES);
-    
+
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "imperium"}, { keywordId: "custodian guard"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "battleline" },
+    { keywordId: "imperium" },
+    { keywordId: "custodian guard" },
+  ];
 
   static ICON = "/icons/CustodianGuardBlade.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

@@ -1,6 +1,4 @@
 {
   "wall_id": "walls-none",
-  "walls": [
-    {"name": "Ext-SE-Straight", "segments": [[[321,251],[320,251]]]}
-  ]
+  "walls": [{ "name": "Ext-SE-Straight", "segments": [[[321, 251], [320, 251]]] }]
 }

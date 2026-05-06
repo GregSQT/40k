@@ -24,8 +24,12 @@ export class FireDragonExarch extends SwarmRangeElite {
   static CC_WEAPONS = getWeapons(FireDragonExarch.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "aeldari"}, { keywordId: "aspect warrior"}, { keywordId: "Fire Dragon"}];
-  
+  static UNIT_KEYWORDS = [
+    { keywordId: "infantry" },
+    { keywordId: "aeldari" },
+    { keywordId: "aspect warrior" },
+    { keywordId: "Fire Dragon" },
+  ];
 
   static ICON = "/icons/FireDragonExarch.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

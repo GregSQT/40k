@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tryBuildHexUnionMaskPolygons, type HexUnionMaskLayout } from "./hexUnionBoundaryPolygon";
+import { type HexUnionMaskLayout, tryBuildHexUnionMaskPolygons } from "./hexUnionBoundaryPolygon";
 
 /** Même contraintes que BoardDisplay (drawBoard) : espacement = 1.5R, hauteur = √3 R. */
 const HEX_RADIUS = 10;

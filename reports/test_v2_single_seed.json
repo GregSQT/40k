@@ -1,9 +1,7 @@
 {
   "config": {
     "runs_root": "/home/greg/40k/tensorboard_b001",
-    "seeds": [
-      "12345"
-    ],
+    "seeds": ["12345"],
     "run_pattern": "{seed}",
     "last_run_only": true,
     "tag_robust": "0_critical/n_robust_current_score",
