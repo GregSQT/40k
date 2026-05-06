@@ -964,7 +964,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setAdvancingUnitId(null);
       setAdvanceRoll(null);
     }
-  }, [gameState?.phase, targetPreview.blinkTimer, clearChargePoolRefs]);
+  }, [gameState?.phase, targetPreview?.blinkTimer, clearChargePoolRefs]);
 
   useEffect(() => {
     latestGameStateRef.current = gameState;

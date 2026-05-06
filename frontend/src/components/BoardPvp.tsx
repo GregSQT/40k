@@ -1600,8 +1600,8 @@ export default function Board({
     wallHexesOverride,
     shootAdvanceLosAnchorKey,
     units,
-    shootAdvanceLosAnchor.col,
-    shootAdvanceLosAnchor.row,
+    shootAdvanceLosAnchor?.col,
+    shootAdvanceLosAnchor?.row,
     shootAdvanceLosAnchor,
   ]);
 
