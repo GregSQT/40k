@@ -15,7 +15,7 @@ from engine.phase_handlers.shared_utils import build_units_cache
 
 def _board_config() -> Dict[str, Any]:
     return {
-        "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+        "game_rules": {"engagement_zone": 10, "max_base_size_hex": 35},
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
     }
 
@@ -27,7 +27,7 @@ def _unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
         "col": col,
         "row": row,
         "HP_CUR": 2,
-        "BASE_SIZE": 1,
+        "BASE_SIZE": 3,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
@@ -237,3 +237,68 @@ class TestFightBuildValidTargetPool:
         del gs["units_cache"]["2"]
         targets = _fight_build_valid_target_pool(gs, units[0])
         assert "2" not in targets
+
+    def test_two_enemies_only_one_in_ez(self):
+        """fight_two_enemies_one_ez : deux ennemis — seul celui en EZ est dans le pool.
+
+        enemy2 en (6,10) → adjacent, en EZ → inclus.
+        enemy3 en (35,10) → loin, hors EZ (edge gap > engagement_zone=10) → exclu.
+        """
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10), _unit(3, 2, 35, 10)]
+        gs = _make_game_state(units, current_player=1)
+        targets = _fight_build_valid_target_pool(gs, units[0])
+        assert "2" in targets, "adjacent enemy must be in pool"
+        assert "3" not in targets, "far enemy must not be in pool"
+        assert len(targets) == 1
+
+
+# ---------------------------------------------------------------------------
+# Multi-hex footprint geometry invariants — fight
+# ---------------------------------------------------------------------------
+
+
+class TestMultiHexFightInvariants:
+    def test_large_round_base_distant_centers_in_ez(self):
+        """footprint_adjacency_ez : grands socles ronds (BASE_SIZE=25) avec centres éloignés → en EZ.
+
+        euclidean_edge_clearance(5,10, 35,10, r=18.75, r=18.75) = 45 - 37.5 = 7.5 ≤ req(15.0).
+        _fight_build_valid_target_pool doit inclure l'ennemi.
+        """
+        unit_a = {**_unit(1, 1, 5, 10), "BASE_SIZE": 25}
+        unit_b = {**_unit(2, 2, 35, 10), "BASE_SIZE": 25}
+        gs = _make_game_state([unit_a, unit_b], current_player=1)
+        targets = _fight_build_valid_target_pool(gs, unit_a)
+        assert "2" in targets, "large-base enemy must be in fight target pool when edge-to-edge gap ≤ req"
+
+    def test_small_round_base_distant_centers_not_in_ez(self):
+        """fight_target_pool_footprint : petits socles ronds (BASE_SIZE=3) aux mêmes positions → hors EZ.
+
+        euclidean_edge_clearance(5,10, 35,10, r=2.25, r=2.25) = 45 - 4.5 = 40.5 > req(15.0).
+        _fight_build_valid_target_pool ne doit PAS inclure l'ennemi.
+        """
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 35, 10)]
+        gs = _make_game_state(units, current_player=1)
+        targets = _fight_build_valid_target_pool(gs, units[0])
+        assert "2" not in targets, "small-base enemy far away must not be in fight target pool"
+
+    def test_large_square_base_footprint_ez_via_min_distance(self):
+        """footprint_adjacency_ez_square : socles carrés (BASE_SIZE=5) — chemin min_distance_between_sets.
+
+        min_distance(fp(5,10), fp(16,10)) = 7 ≤ engagement_zone(10) → en EZ.
+        """
+        unit_a = {**_unit(1, 1, 5, 10), "BASE_SIZE": 5, "BASE_SHAPE": "square"}
+        unit_b = {**_unit(2, 2, 16, 10), "BASE_SIZE": 5, "BASE_SHAPE": "square"}
+        gs = _make_game_state([unit_a, unit_b], current_player=1)
+        targets = _fight_build_valid_target_pool(gs, unit_a)
+        assert "2" in targets, "large square-base enemy must be in fight target pool via footprint distance"
+
+    def test_small_square_base_not_in_ez(self):
+        """fight_target_pool_footprint_square : petits socles carrés (BASE_SIZE=1) aux mêmes positions → hors EZ.
+
+        min_distance(fp(5,10), fp(16,10)) = 11 > engagement_zone(10) → hors EZ.
+        """
+        unit_a = {**_unit(1, 1, 5, 10), "BASE_SIZE": 1, "BASE_SHAPE": "square"}
+        unit_b = {**_unit(2, 2, 16, 10), "BASE_SIZE": 1, "BASE_SHAPE": "square"}
+        gs = _make_game_state([unit_a, unit_b], current_player=1)
+        targets = _fight_build_valid_target_pool(gs, unit_a)
+        assert "2" not in targets, "small square-base enemy at distance 11 must not be in fight target pool"

@@ -13,13 +13,18 @@ from engine.phase_handlers.movement_handlers import (
     movement_preview,
     movement_clear_preview,
 )
-from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache
+from engine.phase_handlers.shared_utils import (
+    build_enemy_adjacent_hexes,
+    build_units_cache,
+    compute_candidate_footprint,
+    is_footprint_placement_valid,
+)
 
 
 def _board_config() -> Dict[str, Any]:
     return {
         "game_rules": {
-            "engagement_zone": 1,
+            "engagement_zone": 10,
             "max_base_size_hex": 35,
         },
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
@@ -35,7 +40,7 @@ def _unit(uid: int, player: int, col: int, row: int, move: int = 6, fly: bool = 
         "row": row,
         "MOVE": move,
         "HP_CUR": 2,
-        "BASE_SIZE": 1,
+        "BASE_SIZE": 3,
         "BASE_SHAPE": "round",
         "UNIT_KEYWORDS": keywords,
     }
@@ -133,10 +138,10 @@ class TestGetEligibleUnits:
             get_eligible_units(gs)
 
     def test_unit_adjacent_to_enemy_still_eligible(self):
-        """move_to_adjacent_enemy : une unité adjacente à un ennemi peut fuir → toujours éligible."""
-        # Unit 1 at (5,10) adjacent to enemy at (6,10).
-        # Some neighbors of (5,10) are not neighbors of (6,10) → valid flee destinations exist.
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]
+        """move_to_adjacent_enemy : unité dans la zone d'engagement d'un ennemi peut fuir → éligible."""
+        # Unit 1 at (5,10), enemy at (17,10) — hex-dist 12, Euclidean edge gap ~13.5 ≤ req(15.0) → in EZ.
+        # Neighbors (4,10) and (4,11) have gap ~15.02 > 15.0 → outside EZ → valid flee destinations.
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 17, 10)]
         gs = _make_game_state(units, current_player=1)
         result = get_eligible_units(gs)
         assert "1" in result
@@ -155,10 +160,11 @@ class TestGetEligibleUnits:
         """FLY keyword : l'unité FLY peut survoler les hexes bloqués pour atteindre une destination valide."""
         # All 6 immediate neighbors of (5,10) are walls.
         # Non-FLY unit → not eligible (no valid adjacent hex at depth 1).
-        # FLY unit (MOVE=2) → BFS explores depth 2 through walls → valid hex found → eligible.
+        # FLY unit (MOVE=3) → BFS explores depth 3 through walls; with BASE_SIZE=3 the footprint at
+        # depth-2 positions still overlaps the wall ring, but depth-3 positions (e.g. (5,7)) are clear.
         neighbors = {(5, 9), (6, 10), (6, 11), (5, 11), (4, 11), (4, 10)}
         units_non_fly = [_unit(1, 1, 5, 10, move=6, fly=False)]
-        units_fly = [_unit(2, 1, 5, 10, move=2, fly=True)]
+        units_fly = [_unit(2, 1, 5, 10, move=3, fly=True)]
 
         gs_non_fly = _make_game_state(units_non_fly, current_player=1, wall_hexes=neighbors)
         gs_fly = _make_game_state(units_fly, current_player=1, wall_hexes=neighbors)
@@ -231,3 +237,45 @@ class TestMovementPreview:
         assert gs["move_preview_border"] == []
         assert gs["move_preview_footprint_mask_loops"] is None
         assert gs["move_preview_footprint_span"] is None
+
+
+# ---------------------------------------------------------------------------
+# Multi-hex footprint geometry invariants
+# ---------------------------------------------------------------------------
+
+
+class TestMultiHexFootprintInvariants:
+    def _board_gs(self) -> Dict[str, Any]:
+        return {
+            "config": _board_config(),
+            "board_cols": 25,
+            "board_rows": 21,
+            "wall_hexes": set(),
+        }
+
+    def test_footprint_overlap_invalid_placement(self):
+        """footprint_overlap : placement invalide si l'empreinte candidate chevauche l'empreinte occupée."""
+        gs = self._board_gs()
+        stub = {"BASE_SIZE": 3, "BASE_SHAPE": "round"}
+        # Footprints at (5,10) and (6,10) share 4 hexes: (5,9),(5,10),(6,10),(6,11)
+        occupied = compute_candidate_footprint(5, 10, stub, gs)
+        candidate_near = compute_candidate_footprint(6, 10, stub, gs)
+        assert not is_footprint_placement_valid(candidate_near, gs, occupied)
+
+    def test_footprint_no_overlap_valid_placement(self):
+        """footprint_no_overlap : placement valide si l'empreinte candidate ne chevauche aucune cellule occupée."""
+        gs = self._board_gs()
+        stub = {"BASE_SIZE": 3, "BASE_SHAPE": "round"}
+        occupied = compute_candidate_footprint(5, 10, stub, gs)
+        candidate_far = compute_candidate_footprint(20, 10, stub, gs)
+        assert is_footprint_placement_valid(candidate_far, gs, occupied)
+
+    def test_footprint_clearance_off_board_invalid(self):
+        """footprint_clearance : empreinte multi-hex sortant du bord du plateau → placement invalide."""
+        gs = self._board_gs()
+        stub = {"BASE_SIZE": 3, "BASE_SHAPE": "round"}
+        # Footprint at (0,0) includes hexes at negative coordinates
+        fp_corner = compute_candidate_footprint(0, 0, stub, gs)
+        neg_hexes = {(c, r) for c, r in fp_corner if c < 0 or r < 0}
+        assert neg_hexes, "footprint at (0,0) must extend off-board with BASE_SIZE=3"
+        assert not is_footprint_placement_valid(fp_corner, gs, set())

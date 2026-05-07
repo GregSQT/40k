@@ -1892,8 +1892,8 @@ def maybe_resolve_reactive_move(
                 sets_by_player=reactive_adjacent_sets_by_player,
                 players_present=players_present,
                 moved_unit_player=reactive_player_int,
-                old_pos=(orig_col, orig_row),
-                new_pos=(dest_col, dest_row),
+                old_occupied={(orig_col, orig_row)},
+                new_occupied={(dest_col, dest_row)},
                 board_cols=board_cols,
                 board_rows=board_rows,
             )

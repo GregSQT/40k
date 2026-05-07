@@ -1,5 +1,4 @@
 {
-  "model": "claude-sonnet-4-6",
   "permissions": {
     "allow": [
       "Bash(grep *)",
@@ -12,7 +11,13 @@
       "Bash(python3 ai/*)",
       "Bash(python3 scripts/*)",
       "Bash(python3 engine/*)",
-      "Bash(python3 services/*)"
+      "Bash(python3 services/*)",
+      "Bash(awk -F: 'NR>1{print prev_line, \"→ lines\", prev_num, \"to\", $2-1, \"\\(\", $2-1-prev_num, \"lines\\)\"} {prev_line=$0; prev_num=$2} END{print prev_line, \"→ line\", prev_num, \"to EOF\"}')",
+      "Bash(awk 'NR>=50 && NR<=200')",
+      "Bash(awk '$1+0 >= 1454 && $1+0 <= 4545')",
+      "Bash(awk '$1+0 >= 1454 && $1+0 <= 1700')",
+      "Bash(awk '$1+0 >= 1738 && $1+0 <= 4545')"
     ]
-  }
+  },
+  "model": "claude-sonnet-4-6"
 }

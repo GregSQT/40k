@@ -12,7 +12,7 @@ from engine.phase_handlers.shared_utils import build_units_cache
 
 def _board_config() -> Dict[str, Any]:
     return {
-        "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+        "game_rules": {"engagement_zone": 10, "max_base_size_hex": 35},
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
     }
 
@@ -24,7 +24,7 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 2) -> Dict[str, A
         "col": col,
         "row": row,
         "HP_CUR": hp,
-        "BASE_SIZE": 1,
+        "BASE_SIZE": 3,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
@@ -167,3 +167,39 @@ class TestShootingActivationPool:
         shooting_build_activation_pool(gs)
         assert "1" not in gs["shoot_activation_pool"]
         assert "2" in gs["shoot_activation_pool"]
+
+
+# ---------------------------------------------------------------------------
+# Multi-hex footprint geometry invariants — shooting
+# ---------------------------------------------------------------------------
+
+
+class TestMultiHexShootingInvariants:
+    def test_large_base_adjacent_via_footprint_excluded_without_pistol(self):
+        """footprint_adjacency_shooting : grand socle (BASE_SIZE=25) en EZ via empreinte → adjacent
+        → arme sans règle PISTOL non utilisable → unité absente du pool de tir.
+
+        euclidean_edge_clearance(5,10, 30,10, r=18.75, r=18.75) = 45 - 37.5 = 7.5 ≤ req(15.0).
+        """
+        units = [
+            {**_unit(1, 1, 5, 10), "BASE_SIZE": 25},
+            {**_unit(2, 2, 30, 10), "BASE_SIZE": 25},
+        ]
+        gs = _make_game_state(units, current_player=1)
+        shooting_build_activation_pool(gs)
+        assert "1" not in gs["shoot_activation_pool"], (
+            "large-base shooter in EZ via footprint must be excluded (no PISTOL weapon)"
+        )
+
+    def test_small_base_not_adjacent_in_shoot_pool(self):
+        """footprint_adjacency_shooting_small : petit socle (BASE_SIZE=3) aux mêmes positions → hors EZ
+        → non adjacent → unité présente dans le pool de tir.
+
+        euclidean_edge_clearance(5,10, 30,10, r=2.25, r=2.25) = 45 - 4.5 = 40.5 > req(15.0).
+        """
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 30, 10)]
+        gs = _make_game_state(units, current_player=1)
+        shooting_build_activation_pool(gs)
+        assert "1" in gs["shoot_activation_pool"], (
+            "small-base shooter not in EZ must be in shoot pool"
+        )
