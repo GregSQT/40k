@@ -154,6 +154,23 @@ describe("calculateWoundProbability", () => {
     const invulTarget = { ...target, T: 5, ARMOR_SAVE: 3, INVUL_SAVE: 5 } as unknown as Unit;
     expect(calculateWoundProbability(attacker, invulTarget, "fight")).toBeCloseTo(16 / 216, 5);
   });
+
+  it("shoot with inCover reduces wound probability (cover improves armor save)", () => {
+    // ATK=4 → hit=3/6 | STR=4=T=4 → wound=3/6
+    // Without cover: ARMOR=3 AP=0 → save=3+ → fail=2/6 → prob=9/216=1/24≈0.0417
+    // With cover: ARMOR=3-1=2 → save=2+ → fail=1/6 → prob=9/216/2=1/48≈0.0208
+    const attacker = {
+      id: 1, player: 1,
+      RNG_WEAPONS: [{ id: "r1", display_name: "Bolter", ATK: 4, STR: 4, AP: 0, DMG: 1, NB: 1, RNG: 24, SHOTS: 1, WEAPON_RULES: [] }],
+      CC_WEAPONS: [],
+      MEL_WEAPONS: [],
+    } as unknown as Unit;
+    const probNoCover = calculateWoundProbability(attacker, target, "shoot", false);
+    const probCover = calculateWoundProbability(attacker, target, "shoot", true);
+    expect(probCover).toBeLessThan(probNoCover);
+    expect(probNoCover).toBeCloseTo(3 / 36, 5); // (3/6)*(3/6)*(2/6)=18/216=1/12 — wait: overallProbability = hit*wound*saveFail
+    expect(probCover).toBeCloseTo(1 / 24, 5);
+  });
 });
 
 // ─── calculateDamagePerAttack ─────────────────────────────────────────────────
@@ -173,6 +190,21 @@ describe("calculateDamagePerAttack", () => {
       CC_WEAPONS: [{ id: "m1", display_name: "Sword", ATK: 4, STR: 4, AP: 0, DMG: 2, NB: 1 }],
     } as unknown as Unit;
     expect(calculateDamagePerAttack(attacker, target, "fight")).toBe(2);
+  });
+
+  it.each([
+    ["D3", 2],
+    ["2D6", 7],
+    ["D6+1", 4.5],
+    ["D6+2", 5.5],
+    ["D6+3", 6.5],
+  ] as const)("dice DMG=%s → average %f", (dmg, expected) => {
+    const attacker = {
+      id: 1,
+      player: 1,
+      CC_WEAPONS: [{ id: "m1", display_name: "X", ATK: 4, STR: 4, AP: 0, DMG: dmg, NB: 1 }],
+    } as unknown as Unit;
+    expect(calculateDamagePerAttack(attacker, target, "fight")).toBe(expected);
   });
 });
 

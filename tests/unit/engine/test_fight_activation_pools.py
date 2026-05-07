@@ -6,7 +6,10 @@ from typing import Any, Dict, List
 
 import pytest
 
-from engine.phase_handlers.fight_handlers import fight_build_activation_pools
+from engine.phase_handlers.fight_handlers import (
+    fight_build_activation_pools,
+    _fight_build_valid_target_pool,
+)
 from engine.phase_handlers.shared_utils import build_units_cache
 
 
@@ -183,3 +186,54 @@ class TestFightActivationPools:
         fight_build_activation_pools(gs)
         assert "1" not in gs["active_alternating_activation_pool"]
         assert "2" not in gs["non_active_alternating_activation_pool"]
+
+    def test_dead_unit_removed_from_cache_not_in_pools(self, monkeypatch):
+        """fight_dead_unit_attacker : unité retirée du cache absente de tous les pools."""
+        _patch_target_pool(monkeypatch)
+        units = [_unit(1, 1, 5, 10), _unit(2, 1, 7, 10)]
+        gs = _make_game_state(units, current_player=1)
+        del gs["units_cache"]["1"]
+        fight_build_activation_pools(gs)
+        assert "1" not in gs["charging_activation_pool"]
+        assert "1" not in gs["active_alternating_activation_pool"]
+        assert "1" not in gs["non_active_alternating_activation_pool"]
+        assert "2" in gs["active_alternating_activation_pool"]
+
+    def test_no_unit_in_multiple_pools(self, monkeypatch):
+        """double_activation : une unité n'apparaît que dans un seul pool à la fois."""
+        _patch_target_pool(monkeypatch)
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10), _unit(3, 1, 7, 10)]
+        gs = _make_game_state(units, current_player=1, units_charged={"1"})
+        fight_build_activation_pools(gs)
+        all_pools = (
+            gs["charging_activation_pool"]
+            + gs["active_alternating_activation_pool"]
+            + gs["non_active_alternating_activation_pool"]
+        )
+        assert len(all_pools) == len(set(all_pools))
+
+
+class TestFightBuildValidTargetPool:
+    def test_friendly_unit_excluded_from_target_pool(self):
+        """fight_friendly : _fight_build_valid_target_pool n'inclut pas les alliés."""
+        units = [_unit(1, 1, 5, 10), _unit(2, 1, 6, 10), _unit(3, 2, 6, 10)]
+        gs = _make_game_state(units, current_player=1)
+        targets = _fight_build_valid_target_pool(gs, units[0])
+        assert "2" not in targets
+        assert "1" not in targets
+
+    def test_dead_attacker_raises(self):
+        """fight_dead_unit_attacker : ValueError si l'attaquant n'est plus dans units_cache."""
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]
+        gs = _make_game_state(units, current_player=1)
+        del gs["units_cache"]["1"]
+        with pytest.raises(ValueError, match="not in units_cache"):
+            _fight_build_valid_target_pool(gs, units[0])
+
+    def test_dead_target_excluded_from_pool(self):
+        """fight_dead_unit_target : cible retirée du cache absente du pool de cibles."""
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10), _unit(3, 2, 7, 10)]
+        gs = _make_game_state(units, current_player=1)
+        del gs["units_cache"]["2"]
+        targets = _fight_build_valid_target_pool(gs, units[0])
+        assert "2" not in targets

@@ -26,7 +26,8 @@ def _board_config() -> Dict[str, Any]:
     }
 
 
-def _unit(uid: int, player: int, col: int, row: int, move: int = 6) -> Dict[str, Any]:
+def _unit(uid: int, player: int, col: int, row: int, move: int = 6, fly: bool = False) -> Dict[str, Any]:
+    keywords = [{"keywordId": "fly"}] if fly else []
     return {
         "id": uid,
         "player": player,
@@ -36,6 +37,7 @@ def _unit(uid: int, player: int, col: int, row: int, move: int = 6) -> Dict[str,
         "HP_CUR": 2,
         "BASE_SIZE": 1,
         "BASE_SHAPE": "round",
+        "UNIT_KEYWORDS": keywords,
     }
 
 
@@ -129,6 +131,40 @@ class TestGetEligibleUnits:
         gs = _make_game_state(units, current_player=1)
         with pytest.raises(ValueError, match="Invalid MOVE value"):
             get_eligible_units(gs)
+
+    def test_unit_adjacent_to_enemy_still_eligible(self):
+        """move_to_adjacent_enemy : une unité adjacente à un ennemi peut fuir → toujours éligible."""
+        # Unit 1 at (5,10) adjacent to enemy at (6,10).
+        # Some neighbors of (5,10) are not neighbors of (6,10) → valid flee destinations exist.
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]
+        gs = _make_game_state(units, current_player=1)
+        result = get_eligible_units(gs)
+        assert "1" in result
+
+    def test_unit_removed_from_cache_not_in_move_pool(self):
+        """dead_unit_moving : unité retirée du cache (morte) absente du pool de mouvement."""
+        units = [_unit(1, 1, 5, 10), _unit(2, 1, 7, 10)]
+        gs = _make_game_state(units, current_player=1)
+        # Simulate unit death: remove from units_cache (update_units_cache_hp does this)
+        del gs["units_cache"]["1"]
+        result = get_eligible_units(gs)
+        assert "1" not in result
+        assert "2" in result
+
+    def test_fly_unit_eligible_over_blocked_neighbors(self):
+        """FLY keyword : l'unité FLY peut survoler les hexes bloqués pour atteindre une destination valide."""
+        # All 6 immediate neighbors of (5,10) are walls.
+        # Non-FLY unit → not eligible (no valid adjacent hex at depth 1).
+        # FLY unit (MOVE=2) → BFS explores depth 2 through walls → valid hex found → eligible.
+        neighbors = {(5, 9), (6, 10), (6, 11), (5, 11), (4, 11), (4, 10)}
+        units_non_fly = [_unit(1, 1, 5, 10, move=6, fly=False)]
+        units_fly = [_unit(2, 1, 5, 10, move=2, fly=True)]
+
+        gs_non_fly = _make_game_state(units_non_fly, current_player=1, wall_hexes=neighbors)
+        gs_fly = _make_game_state(units_fly, current_player=1, wall_hexes=neighbors)
+
+        assert "1" not in get_eligible_units(gs_non_fly)
+        assert "2" in get_eligible_units(gs_fly)
 
 
 # ---------------------------------------------------------------------------

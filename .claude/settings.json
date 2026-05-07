@@ -42,7 +42,16 @@
       "Skill(update-config:*)",
       "Bash(sed -n '830,860p' /home/greg/40k/frontend/src/components/UnitStatusTable.tsx)",
       "Bash(sed -n '1074,1104p' /home/greg/40k/frontend/src/components/UnitStatusTable.tsx)",
-      "Bash(npx vitest *)"
+      "Bash(npx vitest *)",
+      "Bash(source .venv/bin/activate && pytest tests/unit/*)",
+      "Bash(cd /home/greg/40k && source .venv/bin/activate && pytest tests/unit/*)",
+      "Bash(source .venv/bin/activate && pytest tests/unit/engine/test_move_eligibility.py*)",
+      "Bash(source .venv/bin/activate && pytest tests/unit/engine/test_shooting_activation_pool.py*)",
+      "Bash(source .venv/bin/activate && pytest tests/unit/engine/test_charge_eligibility.py*)",
+      "Bash(source .venv/bin/activate && pytest tests/unit/engine/test_fight_activation_pools.py*)",
+      "Bash(source .venv/bin/activate && pytest tests/unit/engine/test_los_cache_invalidation.py*)",
+      "Bash(source .venv/bin/activate && pytest tests/unit/engine/ -q*)",
+      "Bash(cd /home/greg/40k/frontend && npx vitest run *)"
     ]
   }
 }

@@ -138,3 +138,32 @@ class TestShootingActivationPool:
         gs["units_cache"]["1"]["HP_CUR"] = 0
         shooting_build_activation_pool(gs)
         assert "1" in gs["shoot_activation_pool"]
+
+    def test_fled_unit_excluded_no_mock(self):
+        """shoot_after_flee : unité en fuite exclue du pool — vérifié sans mock sur _has_valid_shooting_targets."""
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
+        gs = _make_game_state(units, current_player=1)
+        gs["units_fled"] = {"1"}
+        # Pas de mock : _has_valid_shooting_targets vérifie units_fled avant l'adjacence
+        shooting_build_activation_pool(gs)
+        assert "1" not in gs["shoot_activation_pool"]
+
+    def test_fled_unit_with_shoot_after_flee_rule_eligible_no_mock(self):
+        """shoot_after_flee avec règle override : l'unité reste éligible au tir."""
+        unit = _unit(1, 1, 5, 10)
+        unit["UNIT_RULES"] = [{"ruleId": "shoot_after_flee"}]
+        units = [unit, _unit(2, 2, 20, 10)]
+        gs = _make_game_state(units, current_player=1)
+        gs["units_fled"] = {"1"}
+        shooting_build_activation_pool(gs)
+        assert "1" in gs["shoot_activation_pool"]
+
+    def test_unit_removed_from_cache_not_in_pool(self, monkeypatch):
+        """dead_unit : unité retirée du cache (morte) absente du pool de tir."""
+        _patch_targets(monkeypatch)
+        units = [_unit(1, 1, 5, 10), _unit(2, 1, 7, 10)]
+        gs = _make_game_state(units, current_player=1)
+        del gs["units_cache"]["1"]
+        shooting_build_activation_pool(gs)
+        assert "1" not in gs["shoot_activation_pool"]
+        assert "2" in gs["shoot_activation_pool"]

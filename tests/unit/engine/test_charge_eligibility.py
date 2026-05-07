@@ -172,3 +172,33 @@ class TestChargeEligibleUnits:
         gs["units_fled"] = {"1"}
         result = get_eligible_units(gs)
         assert "1" not in result
+
+    def test_dead_unit_removed_from_cache_not_charging(self, monkeypatch):
+        """dead_unit_charging : unité retirée du cache (morte) absente du pool de charge."""
+        _patch_ez_and_target(monkeypatch)
+        units = [_unit(1, 1, 5, 10), _unit(2, 1, 7, 10)]
+        gs = _make_game_state(units, current_player=1)
+        # Simuler la mort : retrait du cache (ce que fait update_units_cache_hp à HP=0)
+        del gs["units_cache"]["1"]
+        result = get_eligible_units(gs)
+        assert "1" not in result
+        assert "2" in result
+
+    def test_charge_from_adjacent_real_state_excluded(self):
+        """charge_from_adjacent : unité déjà en zone d'engagement exclue — sans mock, état réel."""
+        # Units 1 et 2 sont adjacents (hexes contigus) → unit 1 est en EZ → non éligible
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]
+        gs = _make_game_state(units, current_player=1)
+        result = get_eligible_units(gs)
+        # Unit 1 est adjacent à l'ennemi 2 → _charge_unit_within_engagement_zone retourne True → exclue
+        assert "1" not in result
+
+    def test_unit_not_adjacent_real_state_eligible_if_target_reachable(self):
+        """Sans mock : unité loin d'un ennemi atteignable → éligible si BFS trouve destination."""
+        # Units loin l'une de l'autre (5,10 et 6,10 sont adjacents, trop proche pour ce test)
+        # On utilise 5,10 et 20,10 — charge_max_distance=12, trop loin → non éligible
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
+        gs = _make_game_state(units, current_player=1)
+        result = get_eligible_units(gs)
+        # Distance trop grande pour une charge → non éligible
+        assert "1" not in result

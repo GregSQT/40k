@@ -177,4 +177,24 @@ describe("syncMoveDestinationPoolRefs", () => {
       })
     ).not.toThrow();
   });
+
+  it("successive calls replace content, not merge (second call clears first then refills)", () => {
+    const moveRef = makeRef(new Set<string>());
+    const args = {
+      gameState: { valid_move_destinations_pool: [[5, 10], [6, 10]] },
+      phase: "move" as const,
+      mode: "default" as const,
+      selectedUnitId: 1,
+      moveDestPoolRef: moveRef,
+    };
+    syncMoveDestinationPoolRefs(args);
+    expect(moveRef.current.size).toBe(2);
+
+    // Second call with different pool — must not accumulate, must replace
+    args.gameState = { valid_move_destinations_pool: [[20, 5]] };
+    syncMoveDestinationPoolRefs(args);
+    expect(moveRef.current.size).toBe(1);
+    expect(moveRef.current.has("20,5")).toBe(true);
+    expect(moveRef.current.has("5,10")).toBe(false);
+  });
 });
