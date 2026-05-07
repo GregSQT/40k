@@ -18,6 +18,7 @@
   },
   "permissions": {
     "allow": [
+      "Bash(*)",
       "Bash(grep *)",
       "Bash(rg *)",
       "Bash(find * -name *)",
@@ -40,8 +41,6 @@
       "Bash(echo \"Exit: $?\")",
       "Skill(update-config)",
       "Skill(update-config:*)",
-      "Bash(sed -n '830,860p' /home/greg/40k/frontend/src/components/UnitStatusTable.tsx)",
-      "Bash(sed -n '1074,1104p' /home/greg/40k/frontend/src/components/UnitStatusTable.tsx)",
       "Bash(npx vitest *)",
       "Bash(source .venv/bin/activate && pytest tests/*)",
       "Bash(source .venv/bin/activate && python3 -m pytest tests/*)",
@@ -77,7 +76,6 @@
       "Bash(source /home/greg/40k/.venv/bin/activate && python -m pytest tests/unit/ -q --tb=short 2>&1 | tail*",
       "Bash(source /home/greg/40k/.venv/bin/activate && python -m pytest tests/unit/ --collect-only 2>&1 | tail*",
       "Bash(source /home/greg/40k/.venv/bin/activate && python -m pytest tests/unit/ --tb=no -q --co -q 2>&1 | tail*",
-      "Bash(source .venv/bin/activate && python -m pytest tests/unit/engine/test_fight_special_rules.py -v --tb=short 2>&1 | tail*",
       "Bash(source .venv/bin/activate && python -m pytest tests/unit/engine/test_move_execution.py -v --tb=short 2>&1 | tail*",
       "Bash(source .venv/bin/activate && python -m pytest tests/unit/services/test_api_endpoints.py -v --tb=short 2>&1 | tail*",
       "Bash(source .venv/bin/activate && python -m pytest tests/unit/engine/test_reactive_move.py -v --tb=short 2>&1 | tail*",
@@ -88,7 +86,14 @@
       "Bash(source .venv/bin/activate && pytest tests/unit/engine/test_engine_init.py -q 2>&1 | tail*",
       "Bash(source .venv/bin/activate && pytest tests/unit/services/test_api_integration.py -q 2>&1 | tail*",
       "Bash(source .venv/bin/activate && python -m pytest tests/unit/engine/test_engine_turn_loop.py tests/unit/services/test_api_endpoints.py tests/unit/engine/test_fight_special_rules.py -v --tb=short 2>&1 | tail*",
-      "Bash(source .venv/bin/activate && python -m pytest tests/unit/engine/test_action_decoder.py::TestConvertGymActionFightAlternating -v --tb=short 2>&1 | tail*"
+      "Bash(source .venv/bin/activate && python -m pytest tests/unit/engine/test_action_decoder.py::TestConvertGymActionFightAlternating -v --tb=short 2>&1 | tail*",
+      "Bash(npx biome *)",
+      "Bash(source .venv/bin/activate && python3 -m pytest *)",
+      "Bash(source .venv/bin/activate && python3 scripts/*)",
+      "Bash(source /home/greg/40k/.venv/bin/activate && python -m pytest *)",
+      "Bash(source /home/greg/40k/.venv/bin/activate && pytest *)",
+      "Bash(source .venv/bin/activate && python3 -c *)",
+      "Bash(source /home/greg/40k/.venv/bin/activate && python3 -c *)"
     ]
   }
 }

@@ -1260,6 +1260,7 @@ class W40KEngine(gym.Env):
             if max_turns and self.game_state["turn"] > max_turns:
                 # Turn limit exceeded - return terminated episode immediately
                 # CRITICAL: Set turn_limit_reached flag in game_state for winner determination
+                self.game_state["game_over"] = True
                 self.game_state["turn_limit_reached"] = True
                 observation = self._build_observation()
                 winner, win_method = self._determine_winner_with_method()

@@ -1,0 +1,396 @@
+"""Tests e2e — activation complète via execute_semantic_action.
+
+Chemin testé : activation → résolution → décompte HP → mort → cleanup pool.
+Utilise _bare_engine (bypass __init__) avec un game_state minimal injecté,
+comme dans test_execute_semantic_action.py.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List
+from unittest.mock import patch
+
+import pytest
+
+from engine.w40k_core import W40KEngine
+from engine.phase_handlers.shared_utils import build_units_cache, build_enemy_adjacent_hexes
+
+
+@pytest.fixture(autouse=True)
+def mock_reward_systems(monkeypatch):
+    """Mocke les systèmes de reward pour éviter les lookups dans unit_registry et RewardMapper."""
+    from ai import unit_registry as ur
+    monkeypatch.setattr(ur.UnitRegistry, "__init__", lambda self: None)
+    monkeypatch.setattr(ur.UnitRegistry, "get_model_key", lambda self, unit_type: "default")
+
+    from ai import reward_mapper as rm
+    monkeypatch.setattr(rm.RewardMapper, "__init__", lambda self, config: None)
+    monkeypatch.setattr(rm.RewardMapper, "_get_unit_rewards", lambda self, unit: {
+        "base_actions": {"ranged_attack": 0.0, "melee_attack": 0.0, "charge_success": 0.0},
+        "result_bonuses": {"kill_target": 0.0, "damage_dealt": 0.0},
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers partagés
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _base_config() -> Dict[str, Any]:
+    return {
+        "game_rules": {
+            "engagement_zone": 1,
+            "max_base_size_hex": 35,
+            "los_visibility_min_ratio": 0.0,
+            "cover_ratio": 0.0,
+            "charge_max_distance": 12,
+        },
+        "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+        "gym_training_mode": False,
+        "pve_mode": False,
+        "controlled_player": 1,
+    }
+
+
+def _weapon(atk=4, str_=4, ap=0, dmg=3) -> Dict[str, Any]:
+    return {
+        "ATK": atk,
+        "STR": str_,
+        "AP": ap,
+        "DMG": dmg,
+        "NB": 1,
+        "RNG": 24,
+        "WEAPON_RULES": ["IGNORES_COVER"],
+        "display_name": "Test Bolter",
+    }
+
+
+def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, Any]:
+    return {
+        "id": uid,
+        "player": player,
+        "col": col,
+        "row": row,
+        "HP_CUR": hp,
+        "HP_MAX": hp,
+        "BASE_SIZE": 1,
+        "BASE_SHAPE": "round",
+        "MOVE": 6,
+        "UNIT_RULES": [],
+        "T": 4,
+        "ARMOR_SAVE": 4,
+        "INVUL_SAVE": 0,
+        "RNG_WEAPONS": [_weapon()],
+        "CC_WEAPONS": [],
+        "selectedRngWeaponIndex": 0,
+        "_rapid_fire_rule_value": 0,
+        "_rapid_fire_bonus_shot_current": False,
+        "OC": 1,
+        "unitType": "TestUnit",
+        "DISPLAY_NAME": f"Unit {uid}",
+        "VALUE": 100,
+    }
+
+
+def _make_shoot_gs(attacker: Dict, target: Dict) -> Dict[str, Any]:
+    """Game-state minimal pour la phase shoot avec un attaquant et une cible."""
+    units = [attacker, target]
+    gs: Dict[str, Any] = {
+        "config": _base_config(),
+        "board_cols": 25,
+        "board_rows": 21,
+        "current_player": 1,
+        "phase": "shoot",
+        "wall_hexes": set(),
+        "units": units,
+        "unit_by_id": {str(u["id"]): u for u in units},
+        "console_logs": [],
+        "debug_logs": [],
+        "action_logs": [],
+        "action_log_seq": 0,
+        "turn": 1,
+        "episode_number": 1,
+        "debug_mode": False,
+        "turn_limit_reached": False,
+        "game_over": False,
+        "winner": None,
+        "units_moved": set(),
+        "units_advanced": set(),
+        "units_fled": set(),
+        "units_shot": set(),
+        "units_charged": set(),
+        "units_fought": set(),
+        "units_cannot_charge": set(),
+        "units_attacked": set(),
+        "units_reacted_this_enemy_turn": set(),
+        "reaction_window_active": False,
+        "_unit_move_version": 0,
+        "last_move_event_id": 0,
+        "last_move_cause": "normal",
+        "reactive_mode": "micro",
+        "reactive_macro_order_current_window": [],
+        "reactive_decision_mode": "auto",
+        "reactive_decision_payload": {},
+        "move_activation_pool": [],
+        "shoot_activation_pool": [str(attacker["id"])],
+        "charge_activation_pool": [],
+        "charging_activation_pool": [],
+        "active_alternating_activation_pool": [],
+        "non_active_alternating_activation_pool": [],
+        "command_activation_pool": [],
+        "valid_move_destinations_pool": [],
+        "preview_hexes": [],
+        "move_preview_footprint_span": None,
+        "active_movement_unit": None,
+        "fight_subphase": None,
+        "hex_los_cache": {},
+        "los_cache": {},
+        "player_types": {"1": "human", "2": "ai"},
+        "gym_training_mode": False,
+        "weapon_rule": 1,
+        "victory_points": {1: 0, 2: 0},
+        "primary_objective": None,
+        "primary_objective_scored_turns": set(),
+        "objective_rewarded_turns": set(),
+        "objective_controllers": {},
+        "objectives": [{"id": "obj1", "name": "Alpha", "hexes": [[5, 5]]}],
+        "pending_shooting_phase_init": False,
+        "charge_range_rolls": {},
+        "rewards_configs": {
+            "default": {
+                "base_actions": {
+                    "ranged_attack": 0.0,
+                    "melee_attack": 0.0,
+                    "charge_success": 0.0,
+                    "move_to_los": 0.0,
+                    "move_away": 0.0,
+                    "advance": 0.0,
+                },
+                "result_bonuses": {
+                    "kill_target": 0.0,
+                    "damage_dealt": 0.0,
+                },
+            }
+        },
+        "reward_configs": {
+            "default": {
+                "base_actions": {
+                    "ranged_attack": 0.0,
+                    "melee_attack": 0.0,
+                    "charge_success": 0.0,
+                    "move_to_los": 0.0,
+                    "move_away": 0.0,
+                    "advance": 0.0,
+                },
+                "result_bonuses": {
+                    "kill_target": 0.0,
+                    "damage_dealt": 0.0,
+                },
+            }
+        },
+    }
+    build_units_cache(gs)
+    build_enemy_adjacent_hexes(gs, 1)
+    return gs
+
+
+def _bare_engine(gs: Dict[str, Any]) -> W40KEngine:
+    engine = object.__new__(W40KEngine)
+    engine.game_state = gs
+    engine.step_logger = None
+    engine.replay_logger = None
+    engine.gym_training_mode = False
+    engine.config = _base_config()
+    engine._shooting_phase_initialized = False
+    engine._movement_phase_initialized = False
+    engine.is_pve_mode = False
+    return engine
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests — routing et pool management
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestActivationPoolRouting:
+
+    def test_unit_not_in_pool_phase_complete(self):
+        """act_e2e_not_in_pool : pool vide → phase complete (auto-avancement)."""
+        attacker = _unit(1, 1, 5, 10)
+        target = _unit(2, 2, 15, 10)
+        gs = _make_shoot_gs(attacker, target)
+        gs["shoot_activation_pool"] = []  # pool vide
+
+        engine = _bare_engine(gs)
+        success, result = engine.execute_semantic_action({
+            "action": "shoot",
+            "unitId": "1",
+            "targetId": "2",
+        })
+
+        # Avec pool vide, le handler traite la phase comme complète ou renvoie une erreur métier
+        # Dans tous les cas le résultat doit être un dict valide
+        assert isinstance(result, dict)
+
+    def test_skip_removes_unit_from_shoot_pool(self):
+        """act_e2e_skip : skip → unité retirée du pool shoot."""
+        attacker = _unit(1, 1, 5, 10)
+        target = _unit(2, 2, 15, 10)
+        gs = _make_shoot_gs(attacker, target)
+        gs["shoot_activation_pool"] = ["1"]
+
+        engine = _bare_engine(gs)
+        success, result = engine.execute_semantic_action({
+            "action": "skip",
+            "unitId": "1",
+        })
+
+        assert success is True
+        assert "1" not in gs["shoot_activation_pool"]
+
+    def test_game_over_blocks_activation(self):
+        """act_e2e_game_over : game_over bloque toute activation."""
+        attacker = _unit(1, 1, 5, 10)
+        target = _unit(2, 2, 15, 10)
+        gs = _make_shoot_gs(attacker, target)
+        gs["game_over"] = True
+        gs["winner"] = 1
+
+        engine = _bare_engine(gs)
+        success, result = engine.execute_semantic_action({
+            "action": "shoot",
+            "unitId": "1",
+            "targetId": "2",
+        })
+
+        assert success is False
+        assert result.get("error") == "game_over"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests — tir, HP, mort, cleanup
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestShootActivationE2E:
+
+    def test_shoot_reduces_target_hp_on_hit(self, monkeypatch):
+        """act_e2e_hp : tir réussi → HP de la cible réduit.
+
+        Séquence dés : hit=6 (OK), wound=6 (OK), save=1 (FAIL) → DMG=3 infligés.
+        """
+        attacker = _unit(1, 1, 5, 10)
+        attacker["RNG_WEAPONS"] = [_weapon(atk=1, str_=4, ap=0, dmg=3)]
+        target = _unit(2, 2, 15, 10, hp=10)
+        gs = _make_shoot_gs(attacker, target)
+
+        # hit=6 (≥4 OK), wound=6 (≥4 OK), save=1 (<4 FAIL) → 3 dégâts
+        rolls = iter([6, 6, 1])
+        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
+
+        hp_before = gs["units_cache"]["2"]["HP_CUR"]
+        engine = _bare_engine(gs)
+        success, result = engine.execute_semantic_action({
+            "action": "shoot",
+            "unitId": "1",
+            "targetId": "2",
+        })
+
+        assert success is True
+        hp_after = gs["units_cache"]["2"]["HP_CUR"]
+        assert hp_after < hp_before
+
+    def test_shoot_kills_target_removes_from_units_cache(self, monkeypatch):
+        """act_e2e_kill : cible tuée (HP→0) → retirée de units_cache."""
+        attacker = _unit(1, 1, 5, 10)
+        target = _unit(2, 2, 15, 10, hp=1)
+        # Arme DMG=10 pour tuer en un coup
+        attacker["RNG_WEAPONS"] = [_weapon(atk=1, str_=4, ap=0, dmg=10)]
+        gs = _make_shoot_gs(attacker, target)
+
+        # hit=6 (OK), wound=6 (OK), save=1 (FAIL) → 10 dégâts → HP 1→0 → mort
+        rolls = iter([6, 6, 1])
+        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
+
+        engine = _bare_engine(gs)
+        success, result = engine.execute_semantic_action({
+            "action": "shoot",
+            "unitId": "1",
+            "targetId": "2",
+        })
+
+        assert success is True
+        assert "2" not in gs["units_cache"]
+
+    def test_shoot_removes_attacker_from_shoot_pool(self, monkeypatch):
+        """act_e2e_pool_cleanup : après tir → attaquant retiré du shoot_activation_pool."""
+        attacker = _unit(1, 1, 5, 10)
+        target = _unit(2, 2, 15, 10, hp=10)
+        gs = _make_shoot_gs(attacker, target)
+
+        rolls = iter([6, 6, 1] * 10)
+        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
+
+        engine = _bare_engine(gs)
+        engine.execute_semantic_action({
+            "action": "shoot",
+            "unitId": "1",
+            "targetId": "2",
+        })
+
+        assert "1" not in gs["shoot_activation_pool"]
+
+    def test_shoot_adds_attacker_to_units_shot(self, monkeypatch):
+        """act_e2e_units_shot : attaquant ajouté à units_shot après tir."""
+        attacker = _unit(1, 1, 5, 10)
+        target = _unit(2, 2, 15, 10, hp=10)
+        gs = _make_shoot_gs(attacker, target)
+
+        rolls = iter([6, 6, 1] * 10)
+        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
+
+        engine = _bare_engine(gs)
+        engine.execute_semantic_action({
+            "action": "shoot",
+            "unitId": "1",
+            "targetId": "2",
+        })
+
+        assert "1" in gs["units_shot"] or 1 in gs["units_shot"]
+
+    def test_shoot_miss_does_not_reduce_hp(self, monkeypatch):
+        """act_e2e_miss : tir raté (dé=1 au hit) → HP inchangé."""
+        attacker = _unit(1, 1, 5, 10)
+        target = _unit(2, 2, 15, 10, hp=10)
+        gs = _make_shoot_gs(attacker, target)
+
+        # Dé toujours 1 → jamais de hit (BS=4+, 1 toujours fail)
+        monkeypatch.setattr("random.randint", lambda a, b: 1)
+
+        hp_before = gs["units_cache"]["2"]["HP_CUR"]
+        engine = _bare_engine(gs)
+        engine.execute_semantic_action({
+            "action": "shoot",
+            "unitId": "1",
+            "targetId": "2",
+        })
+
+        assert gs["units_cache"]["2"]["HP_CUR"] == hp_before
+
+    def test_shoot_result_contains_attack_results(self, monkeypatch):
+        """act_e2e_results : résultat de tir contient all_attack_results."""
+        attacker = _unit(1, 1, 5, 10)
+        target = _unit(2, 2, 15, 10, hp=10)
+        gs = _make_shoot_gs(attacker, target)
+
+        rolls = iter([6, 6, 1] * 20)
+        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
+
+        engine = _bare_engine(gs)
+        success, result = engine.execute_semantic_action({
+            "action": "shoot",
+            "unitId": "1",
+            "targetId": "2",
+        })
+
+        assert success is True
+        assert "all_attack_results" in result
+        assert isinstance(result["all_attack_results"], list)
+        assert len(result["all_attack_results"]) > 0

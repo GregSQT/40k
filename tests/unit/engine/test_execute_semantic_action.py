@@ -27,6 +27,7 @@ def _base_config() -> Dict[str, Any]:
             "max_base_size_hex": 35,
             "los_visibility_min_ratio": 0.0,
             "cover_ratio": 0.0,
+            "charge_max_distance": 12,
         },
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         "gym_training_mode": False,
@@ -296,6 +297,139 @@ class TestExecuteSemanticActionAdvancePhase:
 
         assert success is True
         assert result.get("phase_complete") is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers supplémentaires — phases shoot et fight
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _make_shoot_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Game-state minimal pour la phase shoot (pool pre-rempli, pas de rebuild)."""
+    gs = _make_move_gs(units, phase="shoot")
+    gs["weapon_rule"] = 1
+    gs["active_shooting_unit"] = None
+    gs["shoot_attack_results"] = []
+    return gs
+
+
+def _bare_shoot_engine(gs: Dict[str, Any]) -> W40KEngine:
+    """Engine shoot avec _shooting_phase_initialized=True (évite le rebuild du pool)."""
+    engine = _bare_engine(gs)
+    engine._shooting_phase_initialized = True
+    return engine
+
+
+def _make_fight_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Game-state minimal pour la phase fight."""
+    gs = _make_move_gs(units, phase="fight")
+    gs["fight_subphase"] = None
+    gs["fight_alternating_turn"] = "active"
+    gs["charging_activation_pool"] = []
+    gs["active_alternating_activation_pool"] = []
+    gs["non_active_alternating_activation_pool"] = []
+    gs["units_fought"] = set()
+    gs["units_charged"] = set()
+    gs["fight_attack_results"] = []
+    gs["episode_steps"] = 0
+    return gs
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests — routing phase shoot
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestExecuteSemanticActionShoot:
+    """Routing execute_semantic_action → _process_shooting_phase."""
+
+    def test_shoot_unit_not_in_pool_returns_unit_not_eligible(self):
+        """esa_shoot_not_in_pool : unitId absent du shoot_activation_pool → error 'unit_not_eligible'."""
+        units = [_unit(1, 1, 5, 10), _unit(2, 1, 8, 10)]
+        gs = _make_shoot_gs(units)
+        gs["shoot_activation_pool"] = ["2"]  # Unit 1 absent du pool
+        engine = _bare_shoot_engine(gs)
+
+        success, result = engine.execute_semantic_action({"action": "shoot", "unitId": "1"})
+
+        assert success is False
+        assert result.get("error") == "unit_not_eligible"
+
+    def test_shoot_routes_to_handler_not_invalid_phase(self):
+        """esa_shoot_routing : phase='shoot' → pas d'erreur 'invalid_phase' (routing correct)."""
+        units = [_unit(1, 1, 5, 10), _unit(2, 1, 8, 10)]
+        gs = _make_shoot_gs(units)
+        gs["shoot_activation_pool"] = ["2"]  # Pool non vide, unit 1 absent
+        engine = _bare_shoot_engine(gs)
+
+        _, result = engine.execute_semantic_action({"action": "shoot", "unitId": "1"})
+
+        # Le routing a atteint le shooting handler, pas un 'invalid_phase'
+        assert result.get("error") != "invalid_phase"
+
+    def test_shoot_pool_empty_returns_success_with_phase_complete(self):
+        """esa_shoot_empty_pool : shoot_activation_pool vide → success=True, phase transition."""
+        units = [_unit(1, 1, 5, 10)]
+        gs = _make_shoot_gs(units)
+        gs["shoot_activation_pool"] = []  # Pool vide
+        engine = _bare_shoot_engine(gs)
+
+        success, result = engine.execute_semantic_action({"action": "advance_phase", "from": "shoot"})
+
+        assert success is True
+        # Phase a bien transitionné (pas d'erreur)
+        assert result.get("error") is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests — routing phase fight
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestExecuteSemanticActionFight:
+    """Routing execute_semantic_action → _process_fight_phase."""
+
+    def test_fight_unit_not_in_alternating_active_pool_returns_error(self):
+        """esa_fight_not_in_pool : unit absente du pool alternating_active → 'unit_not_in_current_pool'."""
+        # Unit 1 (P1) essaie de combattre mais seule unit 1 est dans le pool,
+        # on demande unit 2 qui est absente du pool.
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
+        gs = _make_fight_gs(units)
+        gs["fight_subphase"] = "alternating_active"
+        gs["fight_alternating_turn"] = "active"
+        gs["active_alternating_activation_pool"] = ["1"]  # Unit 2 ABSENTE
+        engine = _bare_engine(gs)
+
+        success, result = engine.execute_semantic_action({"action": "fight", "unitId": "2"})
+
+        assert success is False
+        assert result.get("error") == "unit_not_in_current_pool"
+
+    def test_fight_charging_subphase_unit_not_in_pool_returns_error(self):
+        """esa_fight_charging : sous-phase charging, unit absente du charging_pool → error."""
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
+        gs = _make_fight_gs(units)
+        gs["fight_subphase"] = "charging"
+        gs["fight_alternating_turn"] = None
+        gs["charging_activation_pool"] = ["1"]  # Seule unit 1 dans le pool charging
+        gs["units_charged"] = {"1"}
+        engine = _bare_engine(gs)
+
+        success, result = engine.execute_semantic_action({"action": "fight", "unitId": "2"})
+
+        assert success is False
+        assert result.get("error") == "unit_not_in_current_pool"
+
+    def test_fight_routing_not_invalid_phase(self):
+        """esa_fight_routing : phase='fight' → routing correct vers fight handler (pas 'invalid_phase')."""
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
+        gs = _make_fight_gs(units)
+        gs["fight_subphase"] = "alternating_active"
+        gs["fight_alternating_turn"] = "active"
+        gs["active_alternating_activation_pool"] = ["1"]
+        engine = _bare_engine(gs)
+
+        _, result = engine.execute_semantic_action({"action": "fight", "unitId": "2"})
+
+        # Routing correct : pas d'erreur 'invalid_phase'
+        assert result.get("error") != "invalid_phase"
 
 
 class TestExecuteSemanticActionInvalidPhase:

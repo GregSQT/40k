@@ -673,7 +673,7 @@ Liste **indicative** de fichiers impactés.
 - [x] `engine/game_state.py` — `create_unit` : `MOVE *= scale`, `weapon.RNG *= scale` via `_get_inches_to_subhex()`.
 - [x] `engine/phase_handlers/charge_handlers.py` — remplacé hardcoded `12`/`13` par `charge_max_distance` + `melee_range` depuis config.
 - [x] `engine/action_decoder.py` — remplacé hardcoded `+12` par `charge_max_distance` config.
-- [ ] `engine/utils/weapon_helpers.py`
+- [x] `engine/utils/weapon_helpers.py` — **faux positif** : pas de valeurs hardcodées, opère sur des champs déjà convertis en sub-hex
 
 ### Logs et replays
 - [ ] `ai/step_logger.py`
@@ -765,11 +765,11 @@ if min_distance_between_sets(unit_fp, target_fp) <= engagement_zone:
 
 **Ordre de correction (priorité décroissante) :**
 
-- [ ] **1. `reward_calculator.py`** — `_calculate_expected_damage` : signal de reward directement faussé
-- [ ] **2. `action_decoder.py`** — `can_melee_units_charge_target` : masques d'actions faussés
-- [ ] **3. `observation_builder.py`** — 4 endroits : features `is_adjacent`, `is_valid` fight, danger probability, charge éligibilité alliés
-- [ ] **4. `movement_handlers.py`** — `select_best_movement_destination` et `_get_nearby_enemy_cache_entries`
-- [ ] **5. `evaluation_bots.py`** — distances pour stratégie AGGRESSIVE et sélection de cible bot
+- [x] **1. `reward_calculator.py`** — `_calculate_expected_damage` : signal de reward directement faussé
+- [x] **2. `action_decoder.py`** — `can_melee_units_charge_target` : masques d'actions faussés
+- [x] **3. `observation_builder.py`** — 4 endroits : features `is_adjacent`, `is_valid` fight, danger probability, charge éligibilité alliés
+- [x] **4. `movement_handlers.py`** — `select_best_movement_destination` et `_get_nearby_enemy_cache_entries` (ligne 199 : heuristique pruning conservatrice — légitime)
+- [x] **5. `evaluation_bots.py`** — distances pour stratégie AGGRESSIVE et sélection de cible bot
 
 **Validation après chaque correction :**
 ```bash

@@ -1895,9 +1895,20 @@ class ObservationBuilder:
                 hp_ratio = (hp_cur if hp_cur is not None else 0) / max(1, unit["HP_MAX"])
                 can_attack = 0.0
                 max_range = get_max_ranged_range(unit)
-                if max_range > 0 and distance <= max_range:
+                _ez_ep = get_engagement_zone(game_state)
+                _uc_ep = require_key(game_state, "units_cache")
+                _ae_ep = _uc_ep.get(str(active_unit["id"]))
+                _ue_ep = _uc_ep.get(str(unit["id"]))
+                _ac_ep, _ar_ep = positions[str(active_unit["id"])]
+                _ec_ep, _er_ep = positions[str(unit["id"])]
+                _afp_ep = _ae_ep.get("occupied_hexes", {(_ac_ep, _ar_ep)}) if _ae_ep else {(_ac_ep, _ar_ep)}
+                _efp_ep = _ue_ep.get("occupied_hexes", {(_ec_ep, _er_ep)}) if _ue_ep else {(_ec_ep, _er_ep)}
+                from engine.hex_utils import min_distance_between_sets as _mds_ep
+                _cap = max(max_range, _ez_ep) if max_range > 0 else _ez_ep
+                _fp_dist = _mds_ep(_afp_ep, _efp_ep, max_distance=_cap)
+                if max_range > 0 and _fp_dist <= max_range:
                     can_attack = 1.0
-                elif distance <= get_engagement_zone(game_state):
+                elif _fp_dist <= _ez_ep:
                     can_attack = 1.0
                 return (
                     1000,
@@ -2019,11 +2030,16 @@ class ObservationBuilder:
                         continue
 
                     ally_col, ally_row = positions[ally_id]
-                    ally_distance = calculate_hex_distance(ally_col, ally_row, enemy_col, enemy_row)
                     if "MOVE" not in ally:
                         raise KeyError(f"Unit missing required 'MOVE' field: {ally}")
                     _charge_max = require_key(require_key(require_key(game_state, "config"), "game_rules"), "charge_max_distance")
-                    if ally_distance > ally["MOVE"] + _charge_max:
+                    _uc_al = require_key(game_state, "units_cache")
+                    _al_e = _uc_al.get(ally_id)
+                    _en_e = _uc_al.get(enemy_id_str)
+                    ally_fp = _al_e.get("occupied_hexes", {(ally_col, ally_row)}) if _al_e else {(ally_col, ally_row)}
+                    enemy_fp_al = _en_e.get("occupied_hexes", {(enemy_col, enemy_row)}) if _en_e else {(enemy_col, enemy_row)}
+                    from engine.hex_utils import min_distance_between_sets as _mds_al
+                    if _mds_al(ally_fp, enemy_fp_al, max_distance=ally["MOVE"] + _charge_max) > ally["MOVE"] + _charge_max:
                         continue
 
                     if bwc is not None:
@@ -2242,9 +2258,10 @@ class ObservationBuilder:
                     raise KeyError(f"Enemy unit missing required position fields: {enemy}")
                 active_col, active_row = positions[str(active_unit["id"])]
                 enemy_col, enemy_row = positions[str(enemy["id"])]
-                if calculate_hex_distance(
-                    active_col, active_row, enemy_col, enemy_row
-                ) <= melee_range:
+                active_fp = active_entry.get("occupied_hexes", {(active_col, active_row)}) or {(active_col, active_row)}
+                enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_col, enemy_row)}) or {(enemy_col, enemy_row)}
+                from engine.hex_utils import min_distance_between_sets as _mds_gvt
+                if _mds_gvt(active_fp, enemy_fp, max_distance=melee_range) <= melee_range:
                     valid_targets.append(enemy)
         return valid_targets
     

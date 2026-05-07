@@ -20,7 +20,7 @@ npx vitest run
 
 ### Python — `tests/unit/engine/` + `tests/unit/services/`
 
-**853 tests, ~1.8s** (2 skipped)
+**990 tests, ~2.2s** (2 skipped)
 
 | Fichier | Tests | Ce qui est couvert |
 |---|---|---|
@@ -55,10 +55,18 @@ npx vitest run
 | `test_spatial_relations.py` | 5 | Relations spatiales entre empreintes |
 | Autres | ~28 | Armes, polygones, replay, hex union |
 | `tests/unit/services/test_api_endpoints.py` | 22 | Flask endpoints : `/api/game/state`, `/api/game/action`, `/api/health`, `/api/game/reset`, racine |
-| `tests/unit/engine/test_execute_semantic_action.py` | 13 | Flux e2e `execute_semantic_action` : skip, move valide/invalide, advance_phase (cascade), phase inconnue, game_over, action inconnue |
+| `tests/unit/engine/test_execute_semantic_action.py` | 19 | Flux e2e `execute_semantic_action` : skip, move valide/invalide, advance_phase (cascade), phase inconnue, game_over, action inconnue + routing shoot/fight |
 | `tests/unit/engine/test_cross_phase_cascade.py` | 15 | Cascade inter-phases : mort en fight/shoot retire des pools croisés, units_fled/advanced exclus de charge et tir |
+| `tests/unit/engine/test_cascade_fight_subphases.py` | 9 | Cascade charge→fight : fight vide, unités adjacentes, sous-phases charging/alternating, player switch, pools nettoyés |
 | `tests/unit/engine/test_engine_init.py` | 9 | `W40KEngine.__init__` : échecs sans controlled_agent / rewards_config / board / objectives ; succès config minimale |
+| `tests/unit/engine/test_engine_reset.py` | 18 | `W40KEngine.reset()` : turn=1, game_over=False, tracking sets vidés, HP/positions restaurés, units_cache reconstruit, episode_number incrémenté |
+| `tests/unit/engine/test_special_rules_e2e.py` | 31 | Règles spéciales tir : DEVASTATING_WOUNDS (crit wound skip save), HAZARDOUS (roll=1 déclenché), HEAVY (stationnaire +1), combinaisons et structure résultat |
 | `tests/unit/services/test_api_integration.py` | 14 | API Flask flux réel (engine semi-réel, sans mock execute_semantic_action ni _game_state_for_json) : sérialisation JSON, champs requis, no set leak |
+| `tests/unit/engine/test_engine_step.py` | 13 | `W40KEngine.step()` : signature tuple×5, types obs/reward/terminated/truncated/info, turn_limit→terminated, pool vide→phase auto-advance |
+| `tests/unit/engine/test_game_state_contract.py` | 28 | Contrat game_state produit par `__init__` réel : clés scalaires, tracking sets, pools, structures complexes (units_cache après reset) |
+| `tests/unit/engine/test_objective_scoring.py` | 11 | `apply_primary_objective_scoring` : guard clauses, VP par condition (control_at_least_one/two, control_more_than_opponent), cap max_points, round5 phase spéciale, liste multi-objectifs |
+| `tests/unit/engine/test_unit_rules_shoot.py` | 8 | UNIT_RULES dynamiques : `reroll_1_towound`, `reroll_towound_target_on_objective`, `closest_target_penetration` |
+| `tests/unit/engine/test_activation_e2e.py` | 9 | Activation e2e via `execute_semantic_action` : routing pool, skip, game_over, tir→HP réduit, mort→units_cache cleanup, pool cleanup, units_shot, all_attack_results |
 
 #### Couverture par couche
 
@@ -79,10 +87,18 @@ npx vitest run
 | 11 — Boucle tour / fin de partie | `_check_game_over`, `_advance_to_next_player`, `determine_winner` | ✅ OK |
 | 12 — Mouvement réactif | `maybe_resolve_reactive_move` | ✅ OK |
 | 13 — API Flask | endpoints REST `/api/game/*` | ✅ OK |
-| 14 — Flux e2e `execute_semantic_action` | skip, move, advance_phase, phase inconnue, game_over | ✅ OK |
+| 14 — Flux e2e `execute_semantic_action` | skip, move, advance_phase, routing shoot/fight, game_over | ✅ OK |
 | 15 — Cascade inter-phases | mort→pools, fled/advanced exclusions | ✅ OK |
+| 15b — Cascade charge→fight | sous-phases charging/alternating, player switch, fight vide | ✅ OK |
 | 16 — Init W40KEngine réel | échecs config, succès config minimale | ✅ OK |
+| 16b — Reset W40KEngine | turn/game_over/pools/HP/positions restaurés entre épisodes | ✅ OK |
 | 17 — API intégration (flux réel) | sérialisation JSON sans set leak, champs requis | ✅ OK |
+| 18 — Règles spéciales tir | DEVASTATING_WOUNDS, HAZARDOUS, HEAVY — résultats et flags | ✅ OK |
+| 19 — step() gym interface | reset→step×N→game_over, turn_limit, phase auto-advance, tuple×5 | ✅ OK |
+| 20 — Contrat game_state | clés critiques produites par `__init__` réel, types vérifiés | ✅ OK |
+| 21 — Scoring objectifs primaires | VP par condition, cap, round5, déduplication, liste multi-obj | ✅ OK |
+| 22 — UNIT_RULES dynamiques (tir) | reroll_1_towound, reroll_towound_on_obj, closest_target_penetration | ✅ OK |
+| 23 — Activation e2e complète | tir→HP→mort→cleanup pool via execute_semantic_action | ✅ OK |
 
 ### Frontend — `frontend/src/utils/`
 
@@ -231,4 +247,7 @@ Checklist :
 | Ghost / LoS preview (UnitRenderer.tsx) | Composant PIXI — test E2E Playwright |
 | Tests UI de bout en bout | Playwright sur les parcours critiques |
 | Init W40KEngine avec config réelle complète | Trop coûteux en fichiers ; mocké partiellement dans test_engine_init.py (limite documentée) |
-| Action `shoot` e2e via execute_semantic_action | Exercé indirectement via attack_sequence ; flux complet API non exercé |
+| Déploiement phase (`deployment_handlers`) | Trop couplé au scénario complet — exclure du périmètre unitaire |
+| PvEController / chemin IA (modèle chargé) | Hors périmètre tests unitaires |
+| `_reload_scenario` / `_configure_deployment_random_mix_for_episode` | Dépendances fichier lourd — exclure du périmètre unitaire |
+| Rewards multi-agents (RewardMapper, phase suffixes) | Couvert partiellement via reward_calculator ; flux multi-agents non exercé |
