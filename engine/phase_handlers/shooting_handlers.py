@@ -1222,12 +1222,17 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
         target_col = target_data["col"]
         target_row = target_data["row"]
         target_hexes: List[Tuple[int, int]] = []
-        occupied_hexes = target_data.get("occupied_hexes")
-        if isinstance(occupied_hexes, (set, list, tuple)) and len(occupied_hexes) > 0:
-            for hx in occupied_hexes:
-                if isinstance(hx, (list, tuple)) and len(hx) >= 2:
-                    hc, hr = normalize_coordinates(hx[0], hx[1])
-                    target_hexes.append((hc, hr))
+        gym_training = bool(
+            game_state.get("gym_training_mode", False)
+            or require_key(game_state, "config").get("gym_training_mode", False)
+        )
+        if not gym_training:
+            occupied_hexes = target_data.get("occupied_hexes")
+            if isinstance(occupied_hexes, (set, list, tuple)) and len(occupied_hexes) > 0:
+                for hx in occupied_hexes:
+                    if isinstance(hx, (list, tuple)) and len(hx) >= 2:
+                        hc, hr = normalize_coordinates(hx[0], hx[1])
+                        target_hexes.append((hc, hr))
         if not target_hexes:
             tc, tr = normalize_coordinates(target_col, target_row)
             target_hexes = [(tc, tr)]

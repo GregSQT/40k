@@ -513,7 +513,9 @@ def _eval_worker_task(
         np.random.seed(ep_seed)
         obs, info = env.reset(seed=ep_seed)
         done = False
-        while not done:
+        step_count = 0
+        max_steps_per_episode = int(require_key(task, "max_steps_per_episode"))
+        while not done and step_count < max_steps_per_episode:
             model_obs = _worker_obs_normalizer(obs) if _worker_obs_normalizer else obs
             model_obs_arr = np.asarray(model_obs, dtype=np.float32)
             if model_obs_arr.ndim == 1:
@@ -529,6 +531,7 @@ def _eval_worker_task(
             action_scalar = int(np.asarray(action).flat[0])
             obs, reward, terminated, truncated, info = env.step(action_scalar)
             done = bool(terminated or truncated)
+            step_count += 1
         winner = info.get("winner")
         controlled_player = require_key(info, "controlled_player")
         if winner == controlled_player:
@@ -994,6 +997,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 "scenario_index": scenario_index,
                 "deterministic": deterministic,
                 "config_params": config_params,
+                "max_steps_per_episode": int(require_key(training_cfg, "max_turns_per_episode")) * 400,
             })
 
     initargs = (

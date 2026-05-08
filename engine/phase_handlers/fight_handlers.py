@@ -592,6 +592,118 @@ def _fight_pile_in_anchor_adjacent_to_enemy_footprint(
     return False
 
 
+def _fight_pile_in_bfs_numpy(
+    board_cols: int,
+    board_rows: int,
+    start_col: int,
+    start_row: int,
+    bfs_max: int,
+    off_even_arr: "Any",
+    off_odd_arr: "Any",
+    obstacles: Set[Tuple[int, int]],
+    closer_shell_union: Set[Tuple[int, int]],
+) -> List[Tuple[int, int]]:
+    """Numpy-vectorised BFS for fight pile-in (multi-hex units on ×10 boards).
+
+    Operates on a subgrid [c0..c1] × [r0..r1] centered on start to minimise
+    array size and speed up dilation/spread operations.
+    """
+    import numpy as np
+
+    # Subgrid: BFS radius + footprint radius (max footprint offset + 1)
+    fp_radius = max(
+        int(np.abs(off_even_arr).max()),
+        int(np.abs(off_odd_arr).max()),
+    ) + 1
+    margin = bfs_max + fp_radius + 1
+    c0 = max(0, start_col - margin); c1 = min(board_cols, start_col + margin + 1)
+    r0 = max(0, start_row - margin); r1 = min(board_rows, start_row + margin + 1)
+    W = c1 - c0; H = r1 - r0
+
+    # Local coordinates
+    sc = start_col - c0; sr = start_row - r0
+
+    # Local parity depends on absolute column index
+    col_is_even = ((np.arange(c0, c1, dtype=np.int64)) & 1) == 0
+    col_parity_mask = np.broadcast_to(col_is_even[:, None], (W, H)).copy()
+
+    def _spread(src: "np.ndarray", kernel: "np.ndarray") -> "np.ndarray":
+        out = np.zeros_like(src)
+        for dc, dr in kernel:
+            sl = max(0, -int(dc)); sh = W - max(0, int(dc))
+            rl = max(0, -int(dr)); rh = H - max(0, int(dr))
+            if sl >= sh or rl >= rh:
+                continue
+            out[sl + int(dc):sh + int(dc), rl + int(dr):rh + int(dr)] |= src[sl:sh, rl:rh]
+        return out
+
+    def _dilate(src: "np.ndarray", kernel: "np.ndarray") -> "np.ndarray":
+        out = np.zeros_like(src)
+        for dc, dr in kernel:
+            sl = max(0, int(dc)); sh = W - max(0, -int(dc))
+            rl = max(0, int(dr)); rh = H - max(0, -int(dr))
+            if sl >= sh or rl >= rh:
+                continue
+            out[sl - int(dc):sh - int(dc), rl - int(dr):rh - int(dr)] |= src[sl:sh, rl:rh]
+        return out
+
+    def _mask_from(cells: Set[Tuple[int, int]]) -> "np.ndarray":
+        m = np.zeros((W, H), dtype=bool)
+        if not cells:
+            return m
+        cs = np.fromiter((c - c0 for c, _ in cells), dtype=np.int64, count=len(cells))
+        rs = np.fromiter((r - r0 for _, r in cells), dtype=np.int64, count=len(cells))
+        valid = (cs >= 0) & (cs < W) & (rs >= 0) & (rs < H)
+        m[cs[valid], rs[valid]] = True
+        return m
+
+    nb_even = np.array([(0,-1),(1,-1),(1,0),(0,1),(-1,0),(-1,-1)], dtype=np.int64)
+    nb_odd  = np.array([(0,-1),(1,0),(1,1),(0,1),(-1,1),(-1,0)],   dtype=np.int64)
+
+    # bad_placement[lc, lr] = footprint at absolute (lc+c0, lr+r0) overlaps obstacles or OOB
+    obs_mask = _mask_from(obstacles)
+    bad_e = _dilate(obs_mask, off_even_arr)
+    bad_o = _dilate(obs_mask, off_odd_arr)
+    bad_placement = np.where(col_parity_mask, bad_e, bad_o)
+    # OOB: anchor (c, r) is OOB if any footprint cell falls outside the full board
+    min_dc_e = int(off_even_arr[:, 0].min()); max_dc_e = int(off_even_arr[:, 0].max())
+    min_dr_e = int(off_even_arr[:, 1].min()); max_dr_e = int(off_even_arr[:, 1].max())
+    min_dc_o = int(off_odd_arr[:, 0].min());  max_dc_o = int(off_odd_arr[:, 0].max())
+    min_dr_o = int(off_odd_arr[:, 1].min());  max_dr_o = int(off_odd_arr[:, 1].max())
+    abs_cols = np.arange(c0, c1, dtype=np.int64)[:, None]
+    abs_rows = np.arange(r0, r1, dtype=np.int64)[None, :]
+    oob_e = ((abs_cols + min_dc_e < 0) | (abs_cols + max_dc_e >= board_cols) |
+             (abs_rows + min_dr_e < 0) | (abs_rows + max_dr_e >= board_rows))
+    oob_o = ((abs_cols + min_dc_o < 0) | (abs_cols + max_dc_o >= board_cols) |
+             (abs_rows + min_dr_o < 0) | (abs_rows + max_dr_o >= board_rows))
+    bad_placement |= np.where(col_parity_mask, oob_e, oob_o)
+    allowed = ~bad_placement
+    allowed[sc, sr] = True
+
+    # in_shell[lc, lr] = footprint at that anchor overlaps closer_shell_union
+    shell_mask = _mask_from(closer_shell_union)
+    in_shell_e = _dilate(shell_mask, off_even_arr)
+    in_shell_o = _dilate(shell_mask, off_odd_arr)
+    in_shell = np.where(col_parity_mask, in_shell_e, in_shell_o)
+
+    # BFS spread within the subgrid
+    reach = np.zeros((W, H), dtype=bool)
+    reach[sc, sr] = True
+    for _ in range(bfs_max):
+        even_src = reach & col_parity_mask
+        odd_src  = reach & ~col_parity_mask
+        new_reach = reach | (_spread(even_src, nb_even) & allowed) | (_spread(odd_src, nb_odd) & allowed)
+        if np.array_equal(new_reach, reach):
+            break
+        reach = new_reach
+
+    valid_mask = reach & allowed & in_shell
+    valid_mask[sc, sr] = False
+
+    lc, lr = np.where(valid_mask)
+    return [(int(c + c0), int(r + r0)) for c, r in zip(lc, lr)]
+
+
 def _fight_build_pile_in_valid_destinations(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -623,34 +735,132 @@ def _fight_build_pile_in_valid_destinations(
 
     occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
 
-    visited: Dict[Tuple[int, int], int] = {start_pos: 0}
-    queue = deque([(start_pos, 0)])
-    valid_destinations: List[Tuple[int, int]] = []
-    pile_in_fp_by_anchor: Dict[Tuple[int, int], Set[Tuple[int, int]]] = {}
+    _bfs_board_cols = int(require_key(game_state, "board_cols"))
+    _bfs_board_rows = int(require_key(game_state, "board_rows"))
+    _bfs_wall_hexes: Set[Tuple[int, int]] = game_state.get("wall_hexes", set())
 
-    while queue:
-        current_pos, current_dist = queue.popleft()
-        current_col, current_row = current_pos
-        if current_dist >= bfs_max:
-            continue
-        neighbor_dist = current_dist + 1
-        for neighbor_col, neighbor_row in get_hex_neighbors(current_col, current_row):
-            neighbor_pos = (neighbor_col, neighbor_row)
-            if neighbor_pos in visited:
+    from engine.hex_utils import precompute_footprint_offsets
+    from engine.phase_handlers.shared_utils import get_engagement_zone as _get_ez
+    _bfs_ez = _get_ez(game_state) if "config" in game_state else 1
+    _bfs_base_size = unit.get("BASE_SIZE", 1)
+    _bfs_single_hex = (_bfs_ez <= 1 or _bfs_base_size == 1)
+    _bfs_off_e: Tuple[Tuple[int, int], ...] = ()
+    _bfs_off_o: Tuple[Tuple[int, int], ...] = ()
+
+    if not _bfs_single_hex:
+        _bfs_shape = unit.get("BASE_SHAPE", "round")
+        _bfs_orient = int(unit.get("orientation", 0))
+        _bfs_off_e, _bfs_off_o = precompute_footprint_offsets(_bfs_shape, _bfs_base_size, _bfs_orient)
+
+    # Precompute closer_shell_union: union of all hexes within (d_min-1) hex steps
+    # from any closest enemy footprint.
+    units_cache_pre = require_key(game_state, "units_cache")
+    closest_enemy_fps_pre: List[Set[Tuple[int, int]]] = []
+    for eid in closest_ids:
+        ce = units_cache_pre.get(str(eid))
+        if ce:
+            closest_enemy_fps_pre.append(ce.get("occupied_hexes", {(ce["col"], ce["row"])}))
+    closer_shell_union: Set[Tuple[int, int]] = set()
+    if closest_enemy_fps_pre and d_min > 1:
+        seed: Set[Tuple[int, int]] = set()
+        for efp in closest_enemy_fps_pre:
+            seed.update(efp)
+        shell_visited = set(seed)
+        frontier = list(seed)
+        for _ in range(d_min - 1):
+            next_frontier: List[Tuple[int, int]] = []
+            for c, r in frontier:
+                for nc, nr in get_hex_neighbors(c, r):
+                    if (nc, nr) not in shell_visited:
+                        shell_visited.add((nc, nr))
+                        next_frontier.append((nc, nr))
+            frontier = next_frontier
+        closer_shell_union = shell_visited
+
+    # For multi-hex units on large boards, use numpy-vectorised BFS (avoids per-position set construction)
+    import numpy as np
+    _use_numpy = (not _bfs_single_hex and _bfs_off_e and _bfs_off_o and
+                  _bfs_board_cols * _bfs_board_rows >= 10000)
+    if _use_numpy:
+        import numpy as np
+        _off_e_arr = np.asarray(_bfs_off_e, dtype=np.int64).reshape(-1, 2)
+        _off_o_arr = np.asarray(_bfs_off_o, dtype=np.int64).reshape(-1, 2)
+        obstacles = _bfs_wall_hexes | occupied_positions
+        valid_destinations = _fight_pile_in_bfs_numpy(
+            _bfs_board_cols, _bfs_board_rows,
+            start_col, start_row, bfs_max,
+            _off_e_arr, _off_o_arr,
+            obstacles, closer_shell_union,
+        )
+        pile_in_fp_by_anchor: Dict[Tuple[int, int], Set[Tuple[int, int]]] = {}
+        for vc, vr in valid_destinations:
+            _offs = _bfs_off_e if (vc & 1) == 0 else _bfs_off_o
+            pile_in_fp_by_anchor[(vc, vr)] = {(vc + dc, vr + dr) for dc, dr in _offs}
+    else:
+        _closer_shell: Optional[Set[Tuple[int, int]]] = closer_shell_union if closer_shell_union else None
+        _bfs_bbox_e: Optional[Tuple[int, int, int, int]] = None
+        _bfs_bbox_o: Optional[Tuple[int, int, int, int]] = None
+        if not _bfs_single_hex and _bfs_off_e:
+            _bfs_bbox_e = (min(dc for dc, dr in _bfs_off_e), max(dc for dc, dr in _bfs_off_e),
+                           min(dr for dc, dr in _bfs_off_e), max(dr for dc, dr in _bfs_off_e))
+        if not _bfs_single_hex and _bfs_off_o:
+            _bfs_bbox_o = (min(dc for dc, dr in _bfs_off_o), max(dc for dc, dr in _bfs_off_o),
+                           min(dr for dc, dr in _bfs_off_o), max(dr for dc, dr in _bfs_off_o))
+        visited: Dict[Tuple[int, int], int] = {start_pos: 0}
+        queue = deque([(start_pos, 0)])
+        valid_destinations = []
+        pile_in_fp_by_anchor = {}
+
+        while queue:
+            current_pos, current_dist = queue.popleft()
+            current_col, current_row = current_pos
+            if current_dist >= bfs_max:
                 continue
-            candidate_fp = compute_candidate_footprint(neighbor_col, neighbor_row, unit, game_state)
-            if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
-                continue
-            visited[neighbor_pos] = neighbor_dist
-            queue.append((neighbor_pos, neighbor_dist))
-            if neighbor_pos == start_pos:
-                continue
-            if not _fight_pile_in_new_fp_strictly_closer_to_closest_tier(
-                game_state, candidate_fp, d_min, closest_ids
-            ):
-                continue
-            valid_destinations.append(neighbor_pos)
-            pile_in_fp_by_anchor[neighbor_pos] = candidate_fp
+            neighbor_dist = current_dist + 1
+            for neighbor_col, neighbor_row in get_hex_neighbors(current_col, current_row):
+                neighbor_pos = (neighbor_col, neighbor_row)
+                if neighbor_pos in visited:
+                    continue
+                if _bfs_single_hex:
+                    if (neighbor_col < 0 or neighbor_row < 0 or
+                            neighbor_col >= _bfs_board_cols or neighbor_row >= _bfs_board_rows):
+                        continue
+                    if neighbor_pos in _bfs_wall_hexes or neighbor_pos in occupied_positions:
+                        continue
+                    visited[neighbor_pos] = neighbor_dist
+                    queue.append((neighbor_pos, neighbor_dist))
+                    if neighbor_pos == start_pos:
+                        continue
+                    if _closer_shell is not None and neighbor_pos not in _closer_shell:
+                        continue
+                    valid_destinations.append(neighbor_pos)
+                    pile_in_fp_by_anchor[neighbor_pos] = {neighbor_pos}
+                else:
+                    _bbox = _bfs_bbox_e if (neighbor_col & 1) == 0 else _bfs_bbox_o
+                    if _bbox is not None:
+                        _min_dc, _max_dc, _min_dr, _max_dr = _bbox
+                        if (neighbor_col + _min_dc < 0 or
+                                neighbor_col + _max_dc >= _bfs_board_cols or
+                                neighbor_row + _min_dr < 0 or
+                                neighbor_row + _max_dr >= _bfs_board_rows):
+                            visited[neighbor_pos] = neighbor_dist
+                            continue
+                    _offs = _bfs_off_e if (neighbor_col & 1) == 0 else _bfs_off_o
+                    candidate_fp: Set[Tuple[int, int]] = {(neighbor_col + dc, neighbor_row + dr) for dc, dr in _offs}
+                    if _bfs_wall_hexes and (candidate_fp & _bfs_wall_hexes):
+                        visited[neighbor_pos] = neighbor_dist
+                        continue
+                    if occupied_positions and (candidate_fp & occupied_positions):
+                        visited[neighbor_pos] = neighbor_dist
+                        continue
+                    visited[neighbor_pos] = neighbor_dist
+                    queue.append((neighbor_pos, neighbor_dist))
+                    if neighbor_pos == start_pos:
+                        continue
+                    if _closer_shell is not None and not (candidate_fp & _closer_shell):
+                        continue
+                    valid_destinations.append(neighbor_pos)
+                    pile_in_fp_by_anchor[neighbor_pos] = candidate_fp
 
     if not contact_target_ids:
         return valid_destinations

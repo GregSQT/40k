@@ -96,6 +96,8 @@ def _move_preview_footprint_span(unit: Dict[str, Any]) -> int:
             return max(int(v) for v in bs)
         except (TypeError, ValueError):
             return 1
+    if isinstance(bs, (list, tuple)):
+        return 1
     try:
         return max(1, int(bs))
     except (TypeError, ValueError):
@@ -299,6 +301,8 @@ def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any])
         game_state["_charge_dest_bfs_cache"] = {}
     if "_charge_closest_hex_cache" in game_state:
         game_state["_charge_closest_hex_cache"] = {}
+    if "_has_valid_charge_cache" in game_state:
+        game_state["_has_valid_charge_cache"] = {}
 
     # Clear target pools for all units (shoot phase)
     for unit in require_key(game_state, "units"):
@@ -1410,6 +1414,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         _fly_base_size = unit.get("BASE_SIZE", 1)
         _fly_single_hex = (ez <= 1 or _fly_base_size == 1)
 
+        _fly_off_even: Tuple[Tuple[int, int], ...] = ()
+        _fly_off_odd: Tuple[Tuple[int, int], ...] = ()
         if not _fly_single_hex:
             from engine.hex_utils import precompute_footprint_offsets
             _fly_shape = unit.get("BASE_SHAPE", "round")
@@ -1420,6 +1426,19 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             _fly_off_even, _fly_off_odd = precompute_footprint_offsets(
                 _fly_shape, _fly_base_size, _fly_orient
             )
+
+        # Precompute per-enemy proximity thresholds to skip engagement check for distant hexes.
+        _fly_enemy_proximity_filter: Optional[List[Tuple[int, int, int]]] = None
+        if ez > 1 and _enemy_items_for_engagement_ez is not None:
+            _fly_mover_r = _hex_radius_upper_for_engagement_prune(_move_preview_footprint_span(unit))
+            _fly_ez_i = int(ez)
+            _fly_prox_list: List[Tuple[int, int, int]] = []
+            for _, _fce in _enemy_items_for_engagement_ez:
+                _fec = int(require_key(_fce, "col"))
+                _fer = int(require_key(_fce, "row"))
+                _fe_r = _hex_radius_upper_for_engagement_prune(_move_preview_footprint_span(_fce))
+                _fly_prox_list.append((_fec, _fer, _fly_ez_i + _fly_mover_r + _fe_r + 1))
+            _fly_enemy_proximity_filter = _fly_prox_list
 
         _m_bfs_start = _perf_clock.perf_counter() if _pt else None
         while fly_queue:
@@ -1453,20 +1472,28 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 if _fly_single_hex:
                     if nb in _fly_walls or nb in _fly_occupied:
                         fly_rejected_footprint += 1
-                    elif _movement_engagement_violates(
-                        game_state,
-                        unit,
-                        nc,
-                        nr,
-                        {(nc, nr)},
-                        units_cache,
-                        enemy_adjacent_hexes if ez <= 1 else None,
-                        enemy_cache_items=_enemy_items_for_engagement_ez,
-                        engagement_zone_ez=ez,
-                    ):
-                        fly_rejected_footprint += 1
                     else:
-                        valid_destinations.append(nb)
+                        _fly_skip_ez = False
+                        if _fly_enemy_proximity_filter is not None:
+                            _fly_skip_ez = True
+                            for _fec, _fer, _feth in _fly_enemy_proximity_filter:
+                                if calculate_hex_distance(nc, nr, _fec, _fer) <= _feth:
+                                    _fly_skip_ez = False
+                                    break
+                        if _fly_skip_ez or not _movement_engagement_violates(
+                            game_state,
+                            unit,
+                            nc,
+                            nr,
+                            {(nc, nr)},
+                            units_cache,
+                            enemy_adjacent_hexes if ez <= 1 else None,
+                            enemy_cache_items=_enemy_items_for_engagement_ez,
+                            engagement_zone_ez=ez,
+                        ):
+                            valid_destinations.append(nb)
+                        else:
+                            fly_rejected_footprint += 1
                 else:
                     offsets = _fly_off_even if (nc & 1) == 0 else _fly_off_odd
                     dest_ok = True
@@ -1481,21 +1508,31 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                         if (_fc, _fr) in _fly_occupied:
                             dest_ok = False
                             break
-                    candidate_fp_nb = {(nc + dc, nr + dr) for dc, dr in offsets}
-                    if dest_ok and not _movement_engagement_violates(
-                        game_state,
-                        unit,
-                        nc,
-                        nr,
-                        candidate_fp_nb,
-                        units_cache,
-                        enemy_adjacent_hexes if ez <= 1 else None,
-                        enemy_cache_items=_enemy_items_for_engagement_ez,
-                        engagement_zone_ez=ez,
-                    ):
-                        valid_destinations.append(nb)
-                    else:
+                    if not dest_ok:
                         fly_rejected_footprint += 1
+                    else:
+                        _fly_skip_ez = False
+                        if _fly_enemy_proximity_filter is not None:
+                            _fly_skip_ez = True
+                            for _fec, _fer, _feth in _fly_enemy_proximity_filter:
+                                if calculate_hex_distance(nc, nr, _fec, _fer) <= _feth:
+                                    _fly_skip_ez = False
+                                    break
+                        candidate_fp_nb = {(nc + dc, nr + dr) for dc, dr in offsets}
+                        if _fly_skip_ez or not _movement_engagement_violates(
+                            game_state,
+                            unit,
+                            nc,
+                            nr,
+                            candidate_fp_nb,
+                            units_cache,
+                            enemy_adjacent_hexes if ez <= 1 else None,
+                            enemy_cache_items=_enemy_items_for_engagement_ez,
+                            engagement_zone_ez=ez,
+                        ):
+                            valid_destinations.append(nb)
+                        else:
+                            fly_rejected_footprint += 1
 
         _m_bfs_end = _perf_clock.perf_counter() if _pt else None
         game_state["valid_move_destinations_pool"] = valid_destinations
@@ -1560,6 +1597,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     queue = deque([(start_pos, 0)])
     valid_destinations: List[Tuple[int, int]] = []
     blocked_enemy_adjacent_count = 0
+    footprint_zone: Set[Tuple[int, int]] = set()
+    _off_even: Tuple[Tuple[int, int], ...] = ()
 
     _occupied = occupied_positions
     _enemy_occ = enemy_occupied
@@ -1726,13 +1765,15 @@ def _select_strategic_destination(
     if not enemy_units:
         return valid_destinations[0]
 
-    # Pre-build enemy footprints from cache (footprint-based distance for all strategies)
-    from engine.hex_utils import min_distance_between_sets as _mds_sd
-    enemy_footprints = {
-        eid: (units_cache[str(eid)].get("occupied_hexes") or
-              {(units_cache[str(eid)]["col"], units_cache[str(eid)]["row"])})
+    # Pre-extract enemy anchor positions once — O(1) per enemy, O(1) distance checks below.
+    # Using anchor-to-anchor distance (centre hex) instead of footprint-to-footprint BFS:
+    # for round units, footprint distance = centre_distance - r_mover - r_enemy, so the
+    # constant offset doesn't change which destination ranks best. Valid for RL heuristics.
+    from engine.combat_utils import calculate_hex_distance as _chd
+    enemy_anchors = [
+        (int(units_cache[str(eid)]["col"]), int(units_cache[str(eid)]["row"]))
         for eid in enemy_units
-    }
+    ]
 
     # STRATEGY 0: AGGRESSIVE - Move closest to nearest enemy
     if strategy_id == 0:
@@ -1740,12 +1781,13 @@ def _select_strategic_destination(
         min_dist_to_enemy = float('inf')
 
         for dest in valid_destinations:
-            unit_fp = compute_candidate_footprint(dest[0], dest[1], unit, game_state)
-            for enemy_id in enemy_units:
-                dist = _mds_sd(unit_fp, enemy_footprints[enemy_id])
+            for ec, er in enemy_anchors:
+                dist = _chd(dest[0], dest[1], ec, er)
                 if dist < min_dist_to_enemy:
                     min_dist_to_enemy = dist
                     best_dest = dest
+                    if min_dist_to_enemy == 0:
+                        return best_dest
 
         return best_dest
 
@@ -1756,13 +1798,10 @@ def _select_strategic_destination(
         max_targets = 0
 
         for dest in valid_destinations:
-            unit_fp = compute_candidate_footprint(dest[0], dest[1], unit, game_state)
-            targets_in_range = 0
-            for enemy_id in enemy_units:
-                dist = _mds_sd(unit_fp, enemy_footprints[enemy_id], max_distance=weapon_range)
-                if dist <= weapon_range:
-                    targets_in_range += 1
-
+            targets_in_range = sum(
+                1 for ec, er in enemy_anchors
+                if _chd(dest[0], dest[1], ec, er) <= weapon_range
+            )
             if targets_in_range > max_targets:
                 max_targets = targets_in_range
                 best_dest = dest
@@ -1772,16 +1811,12 @@ def _select_strategic_destination(
     # STRATEGY 2: DEFENSIVE - Move farthest from all enemies
     elif strategy_id == 2:
         best_dest = valid_destinations[0]
-        max_min_dist = 0
+        max_min_dist = -1
 
         for dest in valid_destinations:
-            unit_fp = compute_candidate_footprint(dest[0], dest[1], unit, game_state)
-            min_dist_to_any_enemy = float('inf')
-            for enemy_id in enemy_units:
-                dist = _mds_sd(unit_fp, enemy_footprints[enemy_id])
-                if dist < min_dist_to_any_enemy:
-                    min_dist_to_any_enemy = dist
-
+            min_dist_to_any_enemy = min(
+                _chd(dest[0], dest[1], ec, er) for ec, er in enemy_anchors
+            )
             if min_dist_to_any_enemy > max_min_dist:
                 max_min_dist = min_dist_to_any_enemy
                 best_dest = dest

@@ -290,15 +290,17 @@ def is_footprint_placement_valid(
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
     wall_hexes = game_state.get("wall_hexes", set())
+    # Bounds check (must iterate — no way to vectorize without numpy)
     for c, r in candidate_hexes:
         if c < 0 or r < 0 or c >= board_cols or r >= board_rows:
             return False
-        if (c, r) in wall_hexes:
-            return False
-        if (c, r) in occupied_positions:
-            return False
-        if enemy_adjacent_hexes is not None and (c, r) in enemy_adjacent_hexes:
-            return False
+    # Set-intersection checks are implemented in C and much faster than Python loops
+    if wall_hexes and (candidate_hexes & wall_hexes):
+        return False
+    if occupied_positions and (candidate_hexes & occupied_positions):
+        return False
+    if enemy_adjacent_hexes is not None and (candidate_hexes & enemy_adjacent_hexes):
+        return False
     return True
 
 

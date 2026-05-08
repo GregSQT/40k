@@ -898,13 +898,7 @@ class ObservationBuilder:
         melee_range = get_engagement_zone(game_state)
 
         can_use_ranged = max_ranged_range > 0 and distance <= max_ranged_range
-        from engine.hex_utils import min_distance_between_sets as _mds_dp
-        _cache_dp = require_key(game_state, "units_cache")
-        _de = _cache_dp.get(str(defender["id"]))
-        _ae = _cache_dp.get(str(attacker["id"]))
-        _dfp = _de.get("occupied_hexes", {(defender_col, defender_row)}) if _de else {(defender_col, defender_row)}
-        _afp = _ae.get("occupied_hexes", {(attacker_col, attacker_row)}) if _ae else {(attacker_col, attacker_row)}
-        can_use_melee = _mds_dp(_dfp, _afp, max_distance=melee_range) <= melee_range
+        can_use_melee = calculate_hex_distance(attacker_col, attacker_row, defender_col, defender_row) <= melee_range
 
         if not can_use_ranged and not can_use_melee:
             self._danger_probability_cache[cache_key] = 0.0
@@ -1055,20 +1049,14 @@ class ObservationBuilder:
                 is_unit_alive(str(unit["id"]), game_state) and
                 has_melee):  # Has melee capability
 
-                # Charge range check — footprint-based distance
+                # Charge range check — anchor-based distance (approx, sufficient for RL obs)
                 if "MOVE" not in unit:
                     raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
                 _gr = require_key(require_key(game_state, "config"), "game_rules")
                 max_charge_range = unit["MOVE"] + require_key(_gr, "charge_max_distance")
-                from engine.hex_utils import min_distance_between_sets as _mds_cmct
-                _cmct_cache = require_key(game_state, "units_cache")
-                _ue_cmct = _cmct_cache.get(str(unit["id"]))
-                _te_cmct = _cmct_cache.get(str(target["id"]))
                 unit_col, unit_row = positions[str(unit["id"])]
                 target_col, target_row = positions[str(target["id"])]
-                _ufp = _ue_cmct.get("occupied_hexes", {(unit_col, unit_row)}) if _ue_cmct else {(unit_col, unit_row)}
-                _tfp = _te_cmct.get("occupied_hexes", {(target_col, target_row)}) if _te_cmct else {(target_col, target_row)}
-                distance = _mds_cmct(_ufp, _tfp, max_distance=max_charge_range)
+                distance = calculate_hex_distance(unit_col, unit_row, target_col, target_row)
 
                 if distance <= max_charge_range:
                     return True
@@ -1901,11 +1889,7 @@ class ObservationBuilder:
                 _ue_ep = _uc_ep.get(str(unit["id"]))
                 _ac_ep, _ar_ep = positions[str(active_unit["id"])]
                 _ec_ep, _er_ep = positions[str(unit["id"])]
-                _afp_ep = _ae_ep.get("occupied_hexes", {(_ac_ep, _ar_ep)}) if _ae_ep else {(_ac_ep, _ar_ep)}
-                _efp_ep = _ue_ep.get("occupied_hexes", {(_ec_ep, _er_ep)}) if _ue_ep else {(_ec_ep, _er_ep)}
-                from engine.hex_utils import min_distance_between_sets as _mds_ep
-                _cap = max(max_range, _ez_ep) if max_range > 0 else _ez_ep
-                _fp_dist = _mds_ep(_afp_ep, _efp_ep, max_distance=_cap)
+                _fp_dist = calculate_hex_distance(_ac_ep, _ar_ep, _ec_ep, _er_ep)
                 if max_range > 0 and _fp_dist <= max_range:
                     can_attack = 1.0
                 elif _fp_dist <= _ez_ep:
@@ -1939,18 +1923,12 @@ class ObservationBuilder:
             if i < len(enemies):
                 distance, enemy = enemies[i]
 
-                # Footprint-based distance for melee/engagement features
-                from engine.hex_utils import min_distance_between_sets as _mds_enc
+                # Anchor-based distance for engagement features (approx, sufficient for RL obs)
                 from engine.spatial_relations import get_engagement_zone as _gez_enc
-                _enc_cache = require_key(game_state, "units_cache")
-                _enc_ae = _enc_cache.get(str(active_unit["id"]))
-                _enc_ee = _enc_cache.get(str(enemy["id"]))
                 _enc_acol, _enc_arow = positions[str(active_unit["id"])]
                 _enc_ecol, _enc_erow = positions[str(enemy["id"])]
-                _enc_afp = _enc_ae.get("occupied_hexes", {(_enc_acol, _enc_arow)}) if _enc_ae else {(_enc_acol, _enc_arow)}
-                _enc_efp = _enc_ee.get("occupied_hexes", {(_enc_ecol, _enc_erow)}) if _enc_ee else {(_enc_ecol, _enc_erow)}
                 _enc_ez = _gez_enc(game_state)
-                _enc_fp_dist = _mds_enc(_enc_afp, _enc_efp, max_distance=_enc_ez)
+                _enc_fp_dist = calculate_hex_distance(_enc_acol, _enc_arow, _enc_ecol, _enc_erow)
 
                 # Feature 0-2: Position and distance
                 enemy_col, enemy_row = positions[str(enemy["id"])]
@@ -2033,13 +2011,7 @@ class ObservationBuilder:
                     if "MOVE" not in ally:
                         raise KeyError(f"Unit missing required 'MOVE' field: {ally}")
                     _charge_max = require_key(require_key(require_key(game_state, "config"), "game_rules"), "charge_max_distance")
-                    _uc_al = require_key(game_state, "units_cache")
-                    _al_e = _uc_al.get(ally_id)
-                    _en_e = _uc_al.get(enemy_id_str)
-                    ally_fp = _al_e.get("occupied_hexes", {(ally_col, ally_row)}) if _al_e else {(ally_col, ally_row)}
-                    enemy_fp_al = _en_e.get("occupied_hexes", {(enemy_col, enemy_row)}) if _en_e else {(enemy_col, enemy_row)}
-                    from engine.hex_utils import min_distance_between_sets as _mds_al
-                    if _mds_al(ally_fp, enemy_fp_al, max_distance=ally["MOVE"] + _charge_max) > ally["MOVE"] + _charge_max:
+                    if calculate_hex_distance(ally_col, ally_row, enemy_col, enemy_row) > ally["MOVE"] + _charge_max:
                         continue
 
                     if bwc is not None:
@@ -2258,10 +2230,7 @@ class ObservationBuilder:
                     raise KeyError(f"Enemy unit missing required position fields: {enemy}")
                 active_col, active_row = positions[str(active_unit["id"])]
                 enemy_col, enemy_row = positions[str(enemy["id"])]
-                active_fp = active_entry.get("occupied_hexes", {(active_col, active_row)}) or {(active_col, active_row)}
-                enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_col, enemy_row)}) or {(enemy_col, enemy_row)}
-                from engine.hex_utils import min_distance_between_sets as _mds_gvt
-                if _mds_gvt(active_fp, enemy_fp, max_distance=melee_range) <= melee_range:
+                if calculate_hex_distance(active_col, active_row, enemy_col, enemy_row) <= melee_range:
                     valid_targets.append(enemy)
         return valid_targets
     

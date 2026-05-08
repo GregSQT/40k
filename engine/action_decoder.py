@@ -39,6 +39,13 @@ class ActionDecoder:
             tuple[int, tuple[tuple[int, int], ...], tuple[tuple[int, int], ...]],
             Dict[tuple[int, int], int],
         ] = {}
+        self._wall_hexes_cache: tuple[frozenset, int] | None = None
+        self._deployment_pool_cache: Dict[int, tuple[set, List[tuple[int, int]]]] = {}
+
+    def reset_episode_caches(self) -> None:
+        """Invalidate per-episode caches. Call on every env.reset()."""
+        self._deployment_pool_cache = {}
+        self._wall_hexes_cache = None
 
     def _get_deployment_potential_los_cache_file_path(
         self,
@@ -739,54 +746,91 @@ class ActionDecoder:
 
         occupied = build_occupied_positions_set(game_state, exclude_unit_id=str(unit_id))
         raw_wall_hexes = require_key(game_state, "wall_hexes")
-        wall_hexes = set()
-        for raw_hex in raw_wall_hexes:
-            if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
-                wall_hexes.add((int(raw_hex[0]), int(raw_hex[1])))
-            elif isinstance(raw_hex, dict):
-                wall_hexes.add(
-                    (int(require_key(raw_hex, "col")), int(require_key(raw_hex, "row")))
-                )
-            else:
-                raise TypeError(f"Invalid wall hex format: {raw_hex}")
+        n_walls = len(raw_wall_hexes)
+        if self._wall_hexes_cache is not None and self._wall_hexes_cache[1] == n_walls:
+            wall_hexes = self._wall_hexes_cache[0]
+        else:
+            wall_hexes_mut = set()
+            for raw_hex in raw_wall_hexes:
+                if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
+                    wall_hexes_mut.add((int(raw_hex[0]), int(raw_hex[1])))
+                elif isinstance(raw_hex, dict):
+                    wall_hexes_mut.add(
+                        (int(require_key(raw_hex, "col")), int(require_key(raw_hex, "row")))
+                    )
+                else:
+                    raise TypeError(f"Invalid wall hex format: {raw_hex}")
+            wall_hexes = frozenset(wall_hexes_mut)
+            self._wall_hexes_cache = (wall_hexes, n_walls)
         board_cols = int(require_key(game_state, "board_cols"))
         board_rows = int(require_key(game_state, "board_rows"))
-        pool_set = set()
-        normalized_pool: List[tuple[int, int]] = []
-        for raw_hex in pool:
-            if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
-                normalized = (int(raw_hex[0]), int(raw_hex[1]))
-            elif isinstance(raw_hex, dict):
-                normalized = (
-                    int(require_key(raw_hex, "col")),
-                    int(require_key(raw_hex, "row")),
-                )
-            else:
-                raise TypeError(f"Invalid deployment hex format: {raw_hex}")
-            normalized_pool.append(normalized)
-            pool_set.add(normalized)
+        if current_deployer not in self._deployment_pool_cache:
+            pool_set = set()
+            normalized_pool_list: List[tuple[int, int]] = []
+            for raw_hex in pool:
+                if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
+                    normalized = (int(raw_hex[0]), int(raw_hex[1]))
+                elif isinstance(raw_hex, dict):
+                    normalized = (
+                        int(require_key(raw_hex, "col")),
+                        int(require_key(raw_hex, "row")),
+                    )
+                else:
+                    raise TypeError(f"Invalid deployment hex format: {raw_hex}")
+                normalized_pool_list.append(normalized)
+                pool_set.add(normalized)
+            pool_np = np.array(normalized_pool_list, dtype=np.int32)
+            pool_grid = np.zeros((board_cols + 10, board_rows + 10), dtype=bool)
+            pool_grid[pool_np[:, 0], pool_np[:, 1]] = True
+            even_mask_np = pool_np[:, 0] % 2 == 0
+            self._deployment_pool_cache[current_deployer] = (
+                pool_set, normalized_pool_list, pool_np, pool_grid, even_mask_np
+            )
+        pool_set, normalized_pool, pool_np, pool_grid, even_mask_np = self._deployment_pool_cache[current_deployer]
 
-        valid_hexes = []
-        for col, row in normalized_pool:
-            candidate_fp = compute_candidate_footprint(int(col), int(row), unit, game_state)
-            candidate_is_valid = True
-            for fp_col, fp_row in candidate_fp:
-                if fp_col < 0 or fp_col >= board_cols or fp_row < 0 or fp_row >= board_rows:
-                    candidate_is_valid = False
-                    break
-                if (fp_col, fp_row) not in pool_set:
-                    candidate_is_valid = False
-                    break
-                if (fp_col, fp_row) in wall_hexes:
-                    candidate_is_valid = False
-                    break
-                if (fp_col, fp_row) in occupied:
-                    candidate_is_valid = False
-                    break
-            if candidate_is_valid:
-                valid_hexes.append((col, row))
+        base_size = unit.get("BASE_SIZE", 1)
+        from engine.phase_handlers.shared_utils import get_engagement_zone as _get_ez
+        ez = _get_ez(game_state) if "config" in game_state else 1
 
-        return sorted(valid_hexes)
+        obstacles = wall_hexes | occupied
+
+        if ez <= 1 or base_size == 1:
+            # Single-hex footprint: check pool + obstacles only
+            valid_hexes = [
+                (col, row) for col, row in normalized_pool
+                if (col, row) not in wall_hexes and (col, row) not in occupied
+            ]
+            return valid_hexes
+
+        # Multi-hex units: vectorized numpy footprint check
+        from engine.hex_utils import precompute_footprint_offsets
+        base_shape = unit.get("BASE_SHAPE", "round")
+        orientation = int(unit.get("orientation", 0))
+        off_e, off_o = precompute_footprint_offsets(base_shape, base_size, orientation)
+        off_e_np = np.array(off_e, dtype=np.int32)
+        off_o_np = np.array(off_o, dtype=np.int32)
+
+        obstacle_grid = np.zeros((board_cols + 10, board_rows + 10), dtype=bool)
+        if obstacles:
+            obs_arr = np.array(list(obstacles), dtype=np.int32)
+            obstacle_grid[obs_arr[:, 0], obs_arr[:, 1]] = True
+
+        valid_mask = np.zeros(len(pool_np), dtype=bool)
+        for mask, off_arr in ((even_mask_np, off_e_np), (~even_mask_np, off_o_np)):
+            if not np.any(mask):
+                continue
+            anchors = pool_np[mask]  # (Nk, 2)
+            fp = anchors[:, None, :] + off_arr[None, :, :]  # (Nk, M, 2)
+            fp_c = fp[:, :, 0]
+            fp_r = fp[:, :, 1]
+            in_bounds = (fp_c >= 0) & (fp_c < board_cols) & (fp_r >= 0) & (fp_r < board_rows)
+            fc_s = np.where(in_bounds, fp_c, 0)
+            fr_s = np.where(in_bounds, fp_r, 0)
+            in_pool = in_bounds & pool_grid[fc_s, fr_s]
+            no_obstacle = in_bounds & ~obstacle_grid[fc_s, fr_s]
+            valid_mask[mask] = np.all(in_pool & no_obstacle, axis=1)
+
+        return [(int(c), int(r)) for c, r in pool_np[valid_mask]]
 
     def _get_enemy_reference_hexes(self, game_state: Dict[str, Any], current_deployer: int) -> List[tuple[int, int]]:
         """
@@ -864,6 +908,25 @@ class ActionDecoder:
         if not objective_hexes:
             raise ValueError("objectives are required for deployment scoring")
         return objective_hexes
+
+    def _get_objective_centers(self, game_state: Dict[str, Any]) -> List[tuple[int, int]]:
+        """Extract objective center hex (or centroid) from each objective — O(N_objectives)."""
+        objectives = require_key(game_state, "objectives")
+        centers: List[tuple[int, int]] = []
+        for objective in objectives:
+            if "center" in objective:
+                c = objective["center"]
+                centers.append((int(c[0]), int(c[1])))
+            else:
+                hexes = objective.get("hexes", [])
+                if not hexes:
+                    raise ValueError(f"Objective {objective.get('id')} has no center and no hexes")
+                avg_c = sum(int(h[0]) if isinstance(h, (list, tuple)) else int(h["col"]) for h in hexes) // len(hexes)
+                avg_r = sum(int(h[1]) if isinstance(h, (list, tuple)) else int(h["row"]) for h in hexes) // len(hexes)
+                centers.append((avg_c, avg_r))
+        if not centers:
+            raise ValueError("objectives are required for deployment scoring")
+        return centers
 
     def _build_deployed_snapshot_version(
         self, deployed_snapshot: Dict[str, tuple[int, int, int]]
@@ -1387,8 +1450,9 @@ class ActionDecoder:
         ally_deployed_hexes = require_key(cache, "ally_deployed_hexes")
         los_exposure_by_hex = require_key(cache, "los_exposure_by_hex")
         potential_los_exposure_by_hex = require_key(cache, "potential_los_exposure_by_hex")
-        enemy_reference_hexes = self._get_enemy_reference_hexes(game_state, current_deployer)
-        objective_hexes = self._get_objective_hexes(game_state)
+        raw_enemy_refs = self._get_enemy_reference_hexes(game_state, current_deployer)
+        enemy_reference_hexes = self._build_enemy_los_reference_hexes(raw_enemy_refs) if len(raw_enemy_refs) > 10 else raw_enemy_refs
+        objective_centers = self._get_objective_centers(game_state)
         candidate_cols = [col for col, _ in valid_hexes]
         candidate_rows = [row for _, row in valid_hexes]
         center_col = (min(candidate_cols) + max(candidate_cols)) // 2
@@ -1401,7 +1465,7 @@ class ActionDecoder:
 
         def score_for_hex(col: int, row: int) -> tuple:
             nearest_enemy_distance = nearest_distance(col, row, enemy_reference_hexes)
-            nearest_objective_distance = nearest_distance(col, row, objective_hexes)
+            nearest_objective_distance = nearest_distance(col, row, objective_centers)
             if ally_deployed_hexes:
                 nearest_ally_distance = nearest_distance(col, row, ally_deployed_hexes)
             else:

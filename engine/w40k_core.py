@@ -896,6 +896,7 @@ class W40KEngine(gym.Env):
         # Reset episode-level metric accumulators
         self.episode_reward_accumulator = 0.0
         self.episode_length_accumulator = 0
+        self.action_decoder.reset_episode_caches()
         
         # Increment episode number (original logic - works fine for everything except debug.log)
         self.episode_number += 1
