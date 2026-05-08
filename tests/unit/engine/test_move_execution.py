@@ -45,6 +45,7 @@ def _make_game_state(
         "console_logs": [],
         "hex_los_cache": {},
         "gym_training_mode": True,
+        "_unit_move_version": 0,
     }
     build_units_cache(gs)
     build_enemy_adjacent_hexes(gs, current_player)

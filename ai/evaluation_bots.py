@@ -362,7 +362,7 @@ class DefensiveBot:
         threat_count = 0
         _scale = game_state.get("inches_to_subhex", 1)
         threat_range = 12 * _scale
-        units_cache = game_state.get("units_cache", {})
+        units_cache = game_state["units_cache"]
         unit_entry = units_cache.get(str(unit["id"]))
         unit_fp = unit_entry.get("occupied_hexes", {(unit["col"], unit["row"])}) if unit_entry else {(unit["col"], unit["row"])}
 
@@ -1194,7 +1194,7 @@ class TacticalBot:
         """Find nearest enemy unit."""
         nearest = None
         min_dist = float('inf')
-        units_cache = game_state.get("units_cache", {})
+        units_cache = game_state["units_cache"]
         unit_entry = units_cache.get(str(unit.get("id", "")))
         unit_fp = unit_entry.get("occupied_hexes", {(unit["col"], unit["row"])}) if unit_entry else {(unit["col"], unit["row"])}
 
@@ -1214,7 +1214,7 @@ class TacticalBot:
         """Find position furthest from melee threats."""
         best_pos = destinations[0]
         max_min_dist = -1
-        units_cache = game_state.get("units_cache", {})
+        units_cache = game_state["units_cache"]
 
         for col, row in destinations:
             unit_fp = compute_candidate_footprint(col, row, unit, game_state)
@@ -1241,7 +1241,7 @@ class TacticalBot:
         from engine.utils.weapon_helpers import get_max_ranged_range
         rng_weapons = require_key(unit, 'RNG_WEAPONS')
         rng_rng = get_max_ranged_range(unit) if rng_weapons else 0
-        units_cache = game_state.get("units_cache", {})
+        units_cache = game_state["units_cache"]
         target_entry = units_cache.get(str(target.get("id", "")))
         target_fp = target_entry.get("occupied_hexes", {(target["col"], target["row"])}) if target_entry else {(target["col"], target["row"])}
         best_pos = destinations[0]

@@ -104,6 +104,7 @@ def test_defensive_bot_action_and_threat_count(monkeypatch: pytest.MonkeyPatch) 
             {"id": "2", "player": 1, "col": 2, "row": 1},
             {"id": "3", "player": 1, "col": 20, "row": 20},
         ],
+        "units_cache": {},
     }
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: uid in {"1", "2", "3"})
     monkeypatch.setattr(eb, "calculate_hex_distance", lambda c1, r1, c2, r2: 3 if c2 == 2 else 30)
@@ -151,6 +152,7 @@ def test_tactical_bot_find_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
             {"id": "e1", "player": 1, "col": 4, "row": 1, "CC_DMG": 3, "RNG_DMG": 1},
             {"id": "e2", "player": 1, "col": 9, "row": 1, "CC_DMG": 1, "RNG_DMG": 3},
         ],
+        "units_cache": {},
     }
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: uid in {"u0", "e1", "e2"})
     monkeypatch.setattr(eb, "calculate_hex_distance", lambda c1, r1, c2, r2: abs(c1 - c2) + abs(r1 - r2))
@@ -167,7 +169,8 @@ def test_tactical_bot_movement_position_helpers(monkeypatch: pytest.MonkeyPatch)
             {"id": "u0", "player": 0},
             {"id": "e1", "player": 1, "col": 5, "row": 5, "CC_DMG": 3, "RNG_DMG": 1},
             {"id": "e2", "player": 1, "col": 10, "row": 10, "CC_DMG": 1, "RNG_DMG": 3},
-        ]
+        ],
+        "units_cache": {},
     }
     unit = {"id": "u0", "player": 0, "RNG_WEAPONS": [{"RNG": 6}]}
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: uid in {"e1", "e2"})

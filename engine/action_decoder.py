@@ -41,11 +41,13 @@ class ActionDecoder:
         ] = {}
         self._wall_hexes_cache: tuple[frozenset, int] | None = None
         self._deployment_pool_cache: Dict[int, tuple[set, List[tuple[int, int]]]] = {}
+        self._wall_grid_cache: Optional[np.ndarray] = None
 
     def reset_episode_caches(self) -> None:
         """Invalidate per-episode caches. Call on every env.reset()."""
         self._deployment_pool_cache = {}
         self._wall_hexes_cache = None
+        self._wall_grid_cache = None
 
     def _get_deployment_potential_los_cache_file_path(
         self,
@@ -805,7 +807,7 @@ class ActionDecoder:
         # Multi-hex units: vectorized numpy footprint check
         from engine.hex_utils import precompute_footprint_offsets
         base_shape = unit.get("BASE_SHAPE", "round")
-        orientation = int(unit.get("orientation", 0))
+        orientation = int(unit["orientation"])
         off_e, off_o = precompute_footprint_offsets(base_shape, base_size, orientation)
         off_e_np = np.array(off_e, dtype=np.int32)
         off_o_np = np.array(off_o, dtype=np.int32)
@@ -918,7 +920,7 @@ class ActionDecoder:
                 c = objective["center"]
                 centers.append((int(c[0]), int(c[1])))
             else:
-                hexes = objective.get("hexes", [])
+                hexes = objective["hexes"]
                 if not hexes:
                     raise ValueError(f"Objective {objective.get('id')} has no center and no hexes")
                 avg_c = sum(int(h[0]) if isinstance(h, (list, tuple)) else int(h["col"]) for h in hexes) // len(hexes)
@@ -938,6 +940,31 @@ class ActionDecoder:
             version_items.append((str(unit_id), int(player), int(col), int(row)))
         version_items.sort(key=lambda item: item[0])
         return tuple(version_items)
+
+    def _build_wall_grid(self, game_state: Dict[str, Any]) -> np.ndarray:
+        """Build a (board_cols × board_rows) bool grid from game_state wall_hexes.
+
+        wall_grid[col, row] is True when that hex is a wall.
+        Result is cached in self._wall_grid_cache (reset each episode).
+        """
+        if self._wall_grid_cache is not None:
+            return self._wall_grid_cache
+        board_cols = int(require_key(game_state, "board_cols"))
+        board_rows = int(require_key(game_state, "board_rows"))
+        wall_grid = np.zeros((board_cols, board_rows), dtype=bool)
+        raw_wall_hexes = require_key(game_state, "wall_hexes")
+        for raw_hex in raw_wall_hexes:
+            if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
+                c, r = int(raw_hex[0]), int(raw_hex[1])
+            elif isinstance(raw_hex, dict):
+                c = int(require_key(raw_hex, "col"))
+                r = int(require_key(raw_hex, "row"))
+            else:
+                raise TypeError(f"Invalid wall hex format: {raw_hex!r}")
+            if 0 <= c < board_cols and 0 <= r < board_rows:
+                wall_grid[c, r] = True
+        self._wall_grid_cache = wall_grid
+        return wall_grid
 
     def _has_line_of_sight_cached(
         self,
@@ -1154,52 +1181,61 @@ class ActionDecoder:
                 self._deployment_potential_los_cache[topology_key] = {}
         potential_los_cache_for_topology = self._deployment_potential_los_cache[topology_key]
 
+        from engine.hex_utils import batch_has_los_from_source as _batch_los
         los_exposure_by_hex: Dict[tuple[int, int], int] = {}
         potential_los_exposure_by_hex: Dict[tuple[int, int], int] = {}
+        # Kept empty — incremental updates still use _has_line_of_sight_cached
         los_pair_cache: Dict[tuple[int, int, int, int, tuple[tuple[str, int, int, int], ...]], bool] = {}
         los_exposure_total_s = 0.0
         potential_los_total_s = 0.0
-        progress_interval = max(1, len(valid_hexes) // 4) if _debug_mode else 0
-        for idx, (col, row) in enumerate(valid_hexes, start=1):
-            _t_los0 = time.perf_counter() if _debug_mode else None
-            los_exposure_by_hex[(col, row)] = self._count_los_exposure(
-                col,
-                row,
-                enemy_deployed_units,
-                game_state,
-                los_pair_cache,
-                snapshot_version,
+
+        for h in valid_hexes:
+            los_exposure_by_hex[h] = 0
+
+        if valid_hexes:
+            wall_grid = self._build_wall_grid(game_state)
+            valid_arr = np.array(valid_hexes, dtype=np.int32)
+            hex_los_cache: Dict[tuple[tuple[int, int], tuple[int, int]], bool] = (
+                game_state.setdefault("hex_los_cache", {})
             )
-            if _debug_mode and _t_los0 is not None:
-                los_exposure_total_s += time.perf_counter() - _t_los0
-            candidate_key = (int(col), int(row))
-            if candidate_key in potential_los_cache_for_topology:
-                potential_los_exposure_by_hex[(col, row)] = potential_los_cache_for_topology[candidate_key]
-            else:
-                _t_potential0 = time.perf_counter() if _debug_mode else None
-                potential_los_value = self._count_potential_los_from_reference_hexes(
-                    col,
-                    row,
-                    enemy_los_reference_hexes,
-                    game_state,
-                    los_pair_cache,
-                    snapshot_version,
-                )
-                potential_los_cache_for_topology[candidate_key] = potential_los_value
-                potential_los_exposure_by_hex[(col, row)] = potential_los_value
-                if _debug_mode and _t_potential0 is not None:
-                    potential_los_total_s += time.perf_counter() - _t_potential0
-            if _debug_mode and progress_interval > 0 and (idx == 1 or idx % progress_interval == 0 or idx == len(valid_hexes)):
-                elapsed_s = time.perf_counter() - _t_cache0 if _t_cache0 is not None else 0.0
-                print(
-                    "[TRAIN DEBUG] ActionDecoder._build_deployment_scoring_cache progress "
-                    f"processed={idx}/{len(valid_hexes)} "
-                    f"los_exposure_total_s={los_exposure_total_s:.6f} "
-                    f"potential_los_total_s={potential_los_total_s:.6f} "
-                    f"los_pair_cache_n={len(los_pair_cache)} "
-                    f"elapsed_s={elapsed_s:.6f}",
-                    flush=True,
-                )
+
+            # --- Batch LoS from each deployed enemy to all valid hexes ---
+            _t_los0 = time.perf_counter() if _debug_mode else None
+            for enemy in enemy_deployed_units:
+                enemy_col = int(require_key(enemy, "col"))
+                enemy_row = int(require_key(enemy, "row"))
+                if enemy_col < 0 or enemy_row < 0:
+                    continue
+                los_results = _batch_los(enemy_col, enemy_row, valid_arr, wall_grid)
+                for i, (vc, vr) in enumerate(valid_hexes):
+                    r = bool(los_results[i])
+                    hex_los_cache[((enemy_col, enemy_row), (vc, vr))] = r
+                    if r:
+                        los_exposure_by_hex[(vc, vr)] += 1
+            if _debug_mode:
+                los_exposure_total_s = time.perf_counter() - _t_los0  # type: ignore[operator]
+
+            # --- Batch potential LoS from reference hexes ---
+            _t_potential0 = time.perf_counter() if _debug_mode else None
+            uncached_valid = [
+                (int(c), int(r)) for c, r in valid_hexes
+                if (int(c), int(r)) not in potential_los_cache_for_topology
+            ]
+            if uncached_valid:
+                uncached_arr = np.array(uncached_valid, dtype=np.int32)
+                potential_counts = np.zeros(len(uncached_valid), dtype=np.int32)
+                for ref_col, ref_row in enemy_los_reference_hexes:
+                    ref_los = _batch_los(int(ref_col), int(ref_row), uncached_arr, wall_grid)
+                    for i, (vc, vr) in enumerate(uncached_valid):
+                        r = bool(ref_los[i])
+                        hex_los_cache[((int(ref_col), int(ref_row)), (vc, vr))] = r
+                    potential_counts += ref_los.astype(np.int32)
+                for i, (vc, vr) in enumerate(uncached_valid):
+                    potential_los_cache_for_topology[(vc, vr)] = int(potential_counts[i])
+            for col, row in valid_hexes:
+                potential_los_exposure_by_hex[(col, row)] = potential_los_cache_for_topology[(int(col), int(row))]
+            if _debug_mode:
+                potential_los_total_s = time.perf_counter() - _t_potential0  # type: ignore[operator]
         if _debug_mode and _t_cache0 is not None:
             print(
                 "[TRAIN DEBUG] ActionDecoder._build_deployment_scoring_cache after los maps "

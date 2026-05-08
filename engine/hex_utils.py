@@ -11,6 +11,8 @@ All functions are O(1) per call unless documented otherwise.
 import math
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+import numpy as np
+
 
 # ---------------------------------------------------------------------------
 # Neighbor offsets — offset odd-q (§2.2 P2)
@@ -284,6 +286,111 @@ def hex_line(
             results.append((c, r))
 
     return results
+
+
+def batch_has_los_from_source(
+    from_col: int,
+    from_row: int,
+    to_arr: np.ndarray,
+    wall_grid: np.ndarray,
+) -> np.ndarray:
+    """Vectorized LoS from one source to N targets using the hex-line algorithm.
+
+    Traces intermediate hexes (excluding endpoints) for each ray and checks
+    them against ``wall_grid``. Equivalent to calling :func:`hex_line` + wall
+    check on each target, but vectorized via numpy.
+
+    Args:
+        from_col, from_row: Source hex in offset odd-q.
+        to_arr: int array shape (N, 2) — columns [col, row] of targets.
+        wall_grid: bool array shape (board_cols, board_rows), True = wall.
+
+    Returns:
+        bool array shape (N,) — True = has LoS, False = blocked.
+    """
+    n_targets = len(to_arr)
+    if n_targets == 0:
+        return np.empty(0, dtype=bool)
+
+    to_cols = to_arr[:, 0].astype(np.int64)
+    to_rows = to_arr[:, 1].astype(np.int64)
+
+    # offset_to_cube for source
+    x1 = np.int64(from_col)
+    z1 = np.int64(from_row) - np.int64((from_col - (from_col & 1)) >> 1)
+    y1 = -x1 - z1
+
+    # offset_to_cube vectorized for all targets
+    x2 = to_cols
+    z2 = to_rows - ((to_cols - (to_cols & 1)) >> 1)
+    y2 = -x2 - z2
+
+    n_arr = np.maximum(np.maximum(np.abs(x2 - x1), np.abs(y2 - y1)), np.abs(z2 - z1))
+
+    result = np.ones(n_targets, dtype=bool)
+    max_n = int(n_arr.max())
+    if max_n <= 1:
+        return result  # 0 or 1 steps: no intermediate hexes possible
+
+    # Nudged float source coords (same tiebreak nudge as hex_line)
+    fx1 = float(from_col) + 1e-6
+    fy1 = float(y1) + 1e-6
+    fz1 = float(z1) - 2e-6
+
+    fx2 = x2.astype(np.float64) + 1e-6
+    fy2 = y2.astype(np.float64) + 1e-6
+    fz2 = z2.astype(np.float64) - 2e-6
+
+    board_cols, board_rows = wall_grid.shape
+
+    for i in range(1, max_n):
+        # Active rays: not yet blocked and step i is intermediate (i < n_j)
+        active = result & (n_arr > i)
+        if not active.any():
+            break
+
+        idx_active = np.where(active)[0]
+        n_active = n_arr[idx_active].astype(np.float64)
+        t = float(i) / n_active
+
+        fx = fx1 + (fx2[idx_active] - fx1) * t
+        fy = fy1 + (fy2[idx_active] - fy1) * t
+        fz = fz1 + (fz2[idx_active] - fz1) * t
+
+        rx = np.round(fx).astype(np.int64)
+        ry = np.round(fy).astype(np.int64)
+        rz = np.round(fz).astype(np.int64)
+
+        dx = np.abs(rx.astype(np.float64) - fx)
+        dy = np.abs(ry.astype(np.float64) - fy)
+        dz = np.abs(rz.astype(np.float64) - fz)
+
+        # Tiebreak: recompute the coordinate with the largest rounding error
+        mask_x = (dx > dy) & (dx > dz)
+        mask_y = (~mask_x) & (dy > dz)
+        mask_z = (~mask_x) & (~mask_y)
+
+        # Masks are mutually exclusive — use original rx/ry/rz in each formula
+        rx_f = np.where(mask_x, -ry - rz, rx)
+        ry_f = np.where(mask_y, -rx - rz, ry)
+        rz_f = np.where(mask_z, -rx - ry, rz)
+
+        # cube_to_offset: col = x, row = z + ((x - (x & 1)) >> 1)
+        c_off = rx_f
+        r_off = rz_f + ((rx_f - (rx_f & 1)) >> 1)
+
+        in_bounds = (
+            (c_off >= 0) & (c_off < board_cols) & (r_off >= 0) & (r_off < board_rows)
+        )
+        is_wall = np.zeros(len(idx_active), dtype=bool)
+        if in_bounds.any():
+            c_v = c_off[in_bounds]
+            r_v = r_off[in_bounds]
+            is_wall[in_bounds] = wall_grid[c_v, r_v]
+
+        result[idx_active[is_wall]] = False
+
+    return result
 
 
 def expand_wall_group_to_hex_list(

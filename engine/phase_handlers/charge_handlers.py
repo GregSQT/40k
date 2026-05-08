@@ -578,9 +578,6 @@ def _charge_reverse_goal_bfs_for_eligibility(
 
     from .shared_utils import get_engagement_zone
 
-    if _charge_skip_hex_lb_prune_round_round_engagement(unit, indexed_enemy_engagement):
-        return None
-
     _perf = perf_timing_enabled(game_state)
     _t0 = time.perf_counter() if _perf else None
     start_col, start_row = int(start_pos[0]), int(start_pos[1])
@@ -625,6 +622,19 @@ def _charge_reverse_goal_bfs_for_eligibility(
             board_cols,
             board_rows,
         )
+    # Pre-filtre hex-distance pour round-vs-round : évite d'appeler unit_entries_within_engagement_zone
+    # sur des candidates clairement hors portée euclidienne. Seuil conservatif par ennemi.
+    _mover_bs = max(1, unit.get("BASE_SIZE", 1) if isinstance(unit.get("BASE_SIZE", 1), int) else 1)
+    _mover_r = max(1, (_mover_bs + 1) // 2)
+    _rr_proximity: Dict[Any, int] = {}
+    if unit.get("BASE_SHAPE") == "round":
+        for _eid, _ee in indexed_enemy_engagement:
+            if _ee.get("BASE_SHAPE") == "round":
+                _e_bs = _ee.get("BASE_SIZE", 1)
+                _e_bs_i = max(1, _e_bs if isinstance(_e_bs, int) else 1)
+                _e_r = max(1, (_e_bs_i + 1) // 2)
+                _rr_proximity[_eid] = engagement_zone + _mover_r + _e_r + 1
+
     goals: List[Tuple[int, int]] = []
     seen_goals: Set[Tuple[int, int]] = set()
     goal_candidate_fp_s = 0.0
@@ -669,6 +679,10 @@ def _charge_reverse_goal_bfs_for_eligibility(
                 unit.get("BASE_SHAPE") == "round"
                 and enemy_entry.get("BASE_SHAPE") == "round"
             )
+            if is_round_round_engagement and eid in _rr_proximity:
+                if hex_distance(anchor[0], anchor[1], ec, er) > _rr_proximity[eid]:
+                    rejected_engagement_prefilter_n += 1
+                    continue
             if not is_round_round_engagement:
                 enemy_engagement_zone = enemy_engagement_zones[eid]
                 if not (candidate_fp & enemy_engagement_zone):
@@ -1554,7 +1568,7 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     # Positions have changed, so all pools (move, charge, shoot) are now stale
     from .movement_handlers import _invalidate_all_destination_pools_after_movement
     _invalidate_all_destination_pools_after_movement(game_state)
-    game_state["_unit_move_version"] = game_state.get("_unit_move_version", 0) + 1
+    game_state["_unit_move_version"] += 1
 
     # Clear charge roll, target selection, and pending targets after use
     if "charge_roll_values" in game_state and unit_id in game_state["charge_roll_values"]:
@@ -1651,7 +1665,7 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
 
     # Cache: skip BFS if positions haven't changed since last call
     _hvt_cache = game_state.setdefault("_has_valid_charge_cache", {})
-    _move_version = game_state.get("_unit_move_version", 0)
+    _move_version = game_state["_unit_move_version"]
     _hvt_key = (_uid, _move_version)
     if _hvt_key in _hvt_cache:
         return _hvt_cache[_hvt_key]
@@ -1923,6 +1937,28 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         _e_r = max(1, (_e_bs_i + 1) // 2)
         _charge_enemy_prox.append((_ec, _er, engagement_zone + _mover_r + _e_r + 1))
 
+    if _charge_enemy_prox and all(
+        _calculate_hex_distance(start_col, start_row, pec, per) > bfs_max_distance + peth
+        for pec, per, peth in _charge_enemy_prox
+    ):
+        game_state["valid_charge_destinations_pool"] = []
+        if charge_range == CHARGE_MAX_DISTANCE and not early_exit_if_valid and tid_arg is None:
+            cache[cache_key] = []
+        if _perf and _t_func0 is not None:
+            _t_done_lb = time.perf_counter()
+            append_perf_timing_line(
+                f"CHARGE_PROX_LB_PRUNE episode={_ep} turn={_turn} unit_id={unit_id} "
+                f"bfs_max={bfs_max_distance} charge_roll={charge_range}"
+            )
+            append_perf_timing_line(
+                f"CHARGE_DEST_BFS episode={_ep} turn={_turn} unit_id={unit_id} charge_roll={charge_range} "
+                f"bfs_max={bfs_max_distance} "
+                f"bfs_loop_s=0.000000 total_s={_t_done_lb - _t_func0:.6f} "
+                f"visited_n=0 valid_dest_n=0 cache_hit=0 "
+                f"early_exit={1 if early_exit_if_valid else 0} short_circuit=0 fp={_fp_tag}"
+            )
+        return []
+
     if (
         not _charge_skip_hex_lb_prune_round_round_engagement(unit, indexed_enemy_engagement)
         and _charge_impossible_by_primary_to_enemy_hex_lower_bound(
@@ -1963,9 +1999,8 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             bfs_max_distance=bfs_max_distance,
             fp_offset_pair=fp_offset_pair,
         )
-        if reverse_result is not None:
-            game_state["valid_charge_destinations_pool"] = reverse_result
-            return reverse_result
+        game_state["valid_charge_destinations_pool"] = reverse_result
+        return reverse_result
 
     # BFS pathfinding to find all reachable anchor positions within bfs_max_distance (jet + offset ×10)
     visited = {start_pos: 0}
@@ -1991,6 +2026,12 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                 min(dc for dc, dr in off_o), max(dc for dc, dr in off_o),
                 min(dr for dc, dr in off_o), max(dr for dc, dr in off_o),
             )
+
+    # Precompute set of all hexes within proximity threshold of any enemy → O(1) lookup in BFS loop.
+    from engine.hex_utils import dilate_hex_set_unbounded as _dilate_unbounded
+    _near_enemy_set: Set[Tuple[int, int]] = set()
+    for _pec, _per, _peth in _charge_enemy_prox:
+        _near_enemy_set.update(_dilate_unbounded({(_pec, _per)}, _peth))
 
     _t_bfs0 = time.perf_counter() if _perf else None
     bfs_short_circuit = False
@@ -2018,6 +2059,24 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             if neighbor_pos in visited:
                 continue
 
+            # Proximity pre-filter first (O(1) set lookup): determines whether full footprint check is needed.
+            _near_enemy = neighbor_pos in _near_enemy_set
+
+            if not _near_enemy:
+                # Traversal only: single-hex bounds+wall+occupied check, no footprint computation.
+                if (neighbor_col_int < 0 or neighbor_col_int >= _bfs_board_cols or
+                        neighbor_row_int < 0 or neighbor_row_int >= _bfs_board_rows or
+                        (_bfs_wall_hexes and neighbor_pos in _bfs_wall_hexes) or
+                        (occupied_positions and neighbor_pos in occupied_positions)):
+                    visited[neighbor_pos] = neighbor_dist
+                    bfs_rejected_placement_n += 1
+                    continue
+                visited[neighbor_pos] = neighbor_dist
+                bfs_no_engagement_n += 1
+                queue.append((neighbor_pos, neighbor_dist))
+                continue
+
+            # Near enemy: full footprint + placement + engagement check.
             # O(1) bounding-box check: skip footprint computation when anchor makes OOB certain
             _bbox = _fp_bbox_e if (neighbor_col_int & 1) == 0 else _fp_bbox_o
             if _bbox is not None:
@@ -2057,35 +2116,28 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
             visited[neighbor_pos] = neighbor_dist
 
-            # Proximity pre-filter: skip engagement checks when no enemy is within reach.
-            _near_enemy = False
-            for _pec, _per, _peth in _charge_enemy_prox:
-                if _calculate_hex_distance(neighbor_col_int, neighbor_row_int, _pec, _per) <= _peth:
-                    _near_enemy = True
-                    break
-
             is_adjacent_to_enemy = False
             hex_overlaps_enemy = False
-            if _near_enemy:
-                _t_engagement0 = time.perf_counter() if _perf else None
-                synth = _charge_synthetic_charger_cache_entry(
-                    unit, neighbor_col_int, neighbor_row_int, candidate_fp
-                )
-                for _eid, enemy_entry in indexed_enemy_engagement:
-                    ec, er = int(enemy_entry["col"]), int(enemy_entry["row"])
-                    enemy_fp = enemy_entry.get("occupied_hexes", {(ec, er)})
-                    if candidate_fp & enemy_fp:
-                        hex_overlaps_enemy = True
+            _t_engagement0 = time.perf_counter() if _perf else None
+            synth = _charge_synthetic_charger_cache_entry(
+                unit, neighbor_col_int, neighbor_row_int, candidate_fp
+            )
+            for _eid, enemy_entry in indexed_enemy_engagement:
+                ec, er = int(enemy_entry["col"]), int(enemy_entry["row"])
+                enemy_fp = enemy_entry.get("occupied_hexes", {(ec, er)})
+                if candidate_fp & enemy_fp:
+                    hex_overlaps_enemy = True
+                    break
+                bfs_engagement_checks_n += 1
+                if unit_entries_within_engagement_zone(
+                    synth, enemy_entry, engagement_zone
+                ):
+                    is_adjacent_to_enemy = True
+                    if tid_arg:
                         break
-                    bfs_engagement_checks_n += 1
-                    if unit_entries_within_engagement_zone(
-                        synth, enemy_entry, engagement_zone
-                    ):
-                        is_adjacent_to_enemy = True
-                        if tid_arg:
-                            break
-                if _perf and _t_engagement0 is not None:
-                    bfs_engagement_s += time.perf_counter() - _t_engagement0
+            if _perf and _t_engagement0 is not None:
+                bfs_engagement_s += time.perf_counter() - _t_engagement0
+
             if hex_overlaps_enemy:
                 bfs_overlap_n += 1
             elif not is_adjacent_to_enemy:

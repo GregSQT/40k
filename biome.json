@@ -19,6 +19,7 @@
       "!**/tensorboard",
       "!**/config/agents",
       "!**/config/weapon_damage_table.json",
+      "!**/profile_result.json",
       "!**/Documentation",
       "!**/*.css",
       "!**/index.html",

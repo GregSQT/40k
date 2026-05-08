@@ -749,7 +749,7 @@ def _fight_build_pile_in_valid_destinations(
 
     if not _bfs_single_hex:
         _bfs_shape = unit.get("BASE_SHAPE", "round")
-        _bfs_orient = int(unit.get("orientation", 0))
+        _bfs_orient = int(unit["orientation"])
         _bfs_off_e, _bfs_off_o = precompute_footprint_offsets(_bfs_shape, _bfs_base_size, _bfs_orient)
 
     # Precompute closer_shell_union: union of all hexes within (d_min-1) hex steps
@@ -1031,7 +1031,7 @@ def _fight_prepare_footprint_offsets(
     """
     Pré-calcule les offsets d'empreinte pair/impair pour accélérer le BFS de consolidation.
 
-    Retourne ``None`` pour fallback sur ``compute_candidate_footprint`` (plateau legacy / 1-hex / erreur).
+    Retourne ``None`` si le plateau est legacy / 1-hex / en erreur ; l'appelant doit alors utiliser ``compute_candidate_footprint``.
     """
     cache: Dict[str, FightFootprintOffsetPair] = game_state.setdefault("_fight_fp_offset_pair_cache", {})
     uid = str(unit["id"])
@@ -1332,17 +1332,24 @@ def _fight_plan_consolidation_destinations(
                 closest_enemy_fps.append(
                     cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
                 )
+            _t_shell0 = time.perf_counter() if _cons_pf else None
             closer_shell_union: Set[Tuple[int, int]] = set()
-            if _cons_pf:
-                _tb0 = time.perf_counter()
             if closest_enemy_fps:
-                from engine.hex_utils import dilate_hex_set_unbounded
-
-                radius = start_d_min - 1
-                for efp in closest_enemy_fps:
-                    closer_shell_union.update(dilate_hex_set_unbounded(efp, radius))
-            if _cons_pf:
-                shell_build_s = time.perf_counter() - _tb0
+                _seed: Set[Tuple[int, int]] = set()
+                for _efp in closest_enemy_fps:
+                    _seed.update(_efp)
+                _shell_visited = set(_seed)
+                _shell_frontier = list(_seed)
+                for _ in range(start_d_min - 1):
+                    _next: List[Tuple[int, int]] = []
+                    for _c, _r in _shell_frontier:
+                        for _nc, _nr in get_hex_neighbors(_c, _r):
+                            if (_nc, _nr) not in _shell_visited:
+                                _shell_visited.add((_nc, _nr))
+                                _next.append((_nc, _nr))
+                    _shell_frontier = _next
+                closer_shell_union = _shell_visited
+            shell_build_s = (time.perf_counter() - _t_shell0) if _t_shell0 is not None else 0.0
             dist_by_anchor: List[Tuple[Tuple[int, int], int]] = []
             for anchor in visited:
                 if anchor == start_pos:

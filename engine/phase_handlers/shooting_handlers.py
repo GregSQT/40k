@@ -530,8 +530,11 @@ def _build_weapon_availability_enemy_precheck(
     Une passe par ennemi (distance max RNG, blocage allié/mêlée, clé los_cache) pour
     weapon_availability_check : évite de répéter min_distance / boucle alliés pour chaque arme.
     """
-    from engine.hex_utils import min_distance_between_sets as _mds_wpn
+    from engine.hex_utils import min_distance_between_sets as _mds_wpn, hex_distance as _hex_dist
     from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
+
+    _cfg = require_key(game_state, "config")
+    _gym = bool(game_state.get("gym_training_mode") or _cfg.get("gym_training_mode"))
 
     max_rng = 0
     for w in rng_weapons:
@@ -573,8 +576,11 @@ def _build_weapon_availability_enemy_precheck(
                 if not _los_map[_enemy_id_str]:
                     continue
 
-            _e_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-            d = _mds_wpn(_u_fp, _e_fp, max_distance=max_rng)
+            if _gym:
+                d = _hex_dist(unit_col, unit_row, cache_entry["col"], cache_entry["row"])
+            else:
+                _e_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+                d = _mds_wpn(_u_fp, _e_fp, max_distance=max_rng)
             if d > max_rng:
                 continue
 
@@ -725,12 +731,18 @@ def weapon_availability_check(
                 weapon_has_valid_target = False
 
                 if _enemy_precheck_for_availability is None:
-                    _tpb = time.perf_counter() if _perf_wa else None
-                    _enemy_precheck_for_availability = _build_weapon_availability_enemy_precheck(
-                        game_state, unit, rng_weapons
-                    )
-                    if _perf_wa and _tpb is not None:
-                        _precheck_build_s += time.perf_counter() - _tpb
+                    _mv = game_state.get("_unit_move_version")
+                    _pc = unit.get("_precheck_cache")
+                    if _pc is not None and _pc.get("version") == _mv:
+                        _enemy_precheck_for_availability = _pc["data"]
+                    else:
+                        _tpb = time.perf_counter() if _perf_wa else None
+                        _enemy_precheck_for_availability = _build_weapon_availability_enemy_precheck(
+                            game_state, unit, rng_weapons
+                        )
+                        if _perf_wa and _tpb is not None:
+                            _precheck_build_s += time.perf_counter() - _tpb
+                        unit["_precheck_cache"] = {"version": _mv, "data": _enemy_precheck_for_availability}
                 from engine.spatial_relations import get_engagement_zone
 
                 melee_range = get_engagement_zone(game_state)
@@ -1179,12 +1191,13 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
     unit_col, unit_row = unit_pos
 
     # Version check: skip full rebuild if no unit has moved since last build
-    current_version = game_state.get("_unit_move_version", 0)
+    current_version = game_state["_unit_move_version"]
     if unit.get("_los_cache_version") == current_version and "los_cache" in unit:
         dead_keys = [tid for tid in unit["los_cache"] if not is_unit_alive(tid, game_state)]
         for tid in dead_keys:
             unit["los_cache"].pop(tid, None)
-            unit.get("los_cover_cache", {}).pop(tid, None)
+            if "los_cover_cache" in unit:
+                unit["los_cover_cache"].pop(tid, None)
         return
 
     # Get units_cache (must exist, built at reset)
@@ -1271,7 +1284,7 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
 
     unit["los_cache"] = los_map
     unit["los_cover_cache"] = cover_map
-    unit["_los_cache_version"] = game_state.get("_unit_move_version", 0)
+    unit["_los_cache_version"] = game_state["_unit_move_version"]
 
 
 def _emit_shoot_activation_perf(
@@ -2826,7 +2839,7 @@ def shooting_build_valid_target_pool(
     wall_hexes_tuple = game_state["_wall_hexes_tuple_cache"]
     # enemy_pos_hash: cache per player, invalidate when any unit moves (_unit_move_version)
     # Safe on unit death: cache-hit path re-filters with is_unit_alive()
-    _move_ver = game_state.get("_unit_move_version", 0)
+    _move_ver = game_state["_unit_move_version"]
     _eph_store = game_state.setdefault("_enemy_pos_hash_v", {})
     _eph_entry = _eph_store.get(unit_player_int)
     if _eph_entry is None or _eph_entry[0] != _move_ver:
@@ -4032,7 +4045,7 @@ def _apply_move_after_shooting(
         new_occupied=new_occupied,
     )
     _invalidate_los_cache_for_moved_unit(game_state, unit_id_str, old_col=orig_col, old_row=orig_row)
-    game_state["_unit_move_version"] = game_state.get("_unit_move_version", 0) + 1
+    game_state["_unit_move_version"] += 1
     build_unit_los_cache(game_state, unit_id_str)
     _invalidate_all_destination_pools_after_movement(game_state)
     maybe_resolve_reactive_move(
@@ -7469,7 +7482,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         if actually_moved:
             # CRITICAL: Invalidate LoS cache when unit advances (moves)
             _invalidate_los_cache_for_moved_unit(game_state, unit["id"], old_col=orig_col, old_row=orig_row)
-            game_state["_unit_move_version"] = game_state.get("_unit_move_version", 0) + 1
+            game_state["_unit_move_version"] += 1
 
             # AI_TURN.md STEP 4: Rebuild unit's los_cache with new position after advance
             # CRITICAL: Rebuild unit-local cache (not global cache) with new position
@@ -7632,7 +7645,24 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         # No destination - return valid destinations for player/AI to choose
         # For AI, auto-select best destination
         movable_destinations = [d for d in valid_destinations if int(d[0]) != int(orig_col) or int(d[1]) != int(orig_row)]
-        
+
+        # AI_TURN.md §STEP4: valid_advance_destinations must exclude enemy-adjacent hexes
+        # Filter BEFORE auto-select to prevent advance_destination_adjacent_to_enemy loop
+        from .shared_utils import compute_candidate_footprint, get_engagement_zone
+        from engine.hex_utils import dilate_hex_set_unbounded
+        _ez = get_engagement_zone(game_state)
+        _units_cache = require_key(game_state, "units_cache")
+        _unit_player = int(unit["player"]) if unit["player"] is not None else None
+        _forbidden_zone: set = set()
+        for _ce in _units_cache.values():
+            if int(_ce.get("player", _unit_player)) != _unit_player:
+                _enemy_fp = _ce.get("occupied_hexes", {(_ce["col"], _ce["row"])})
+                _forbidden_zone.update(dilate_hex_set_unbounded(_enemy_fp, _ez))
+        movable_destinations = [
+            d for d in movable_destinations
+            if not (compute_candidate_footprint(d[0], d[1], unit, game_state) & _forbidden_zone)
+        ]
+
         if (is_gym_training or is_pve_ai) and movable_destinations:
             # Auto-select: move toward nearest enemy (aggressive strategy)
             units_cache = require_key(game_state, "units_cache")

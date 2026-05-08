@@ -57,6 +57,7 @@ def _make_gs(units: List[Dict[str, Any]], current_player: int = 1) -> Dict[str, 
         "units_fled": set(),
         "units_cannot_charge": set(),
         "units_advanced": set(),
+        "_unit_move_version": 0,
     }
     build_units_cache(gs)
     return gs

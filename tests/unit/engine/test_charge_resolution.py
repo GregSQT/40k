@@ -53,6 +53,7 @@ def _make_game_state(
         "units_cannot_charge": set(),
         "units_advanced": set(),
         "console_logs": [],
+        "_unit_move_version": 0,
     }
     build_units_cache(gs)
     return gs

@@ -279,7 +279,7 @@ export const BoardReplay: React.FC = () => {
         const typedData = data as unknown as ReplayData;
         setReplayData(typedData);
         setSelectedFileName("step.log");
-        setSelectedEpisode(1);
+        setSelectedEpisode(typedData.total_episodes > 0 ? 1 : null);
         setCurrentActionIndex(0);
         setIsPlaying(false);
         setLoadError(null);

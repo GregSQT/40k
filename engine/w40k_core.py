@@ -1960,6 +1960,7 @@ class W40KEngine(gym.Env):
             truncated = True
             info["truncation_reason"] = "episode_steps_limit"
             info["winner"] = -1  # draw so eval does not skew win rate
+            info["win_method"] = "step_limit"
             
         return observation, reward, terminated, truncated, info
     

@@ -92,6 +92,7 @@ def _make_move_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
         "move_activation_pool": [],
         "shoot_activation_pool": [],
         "charge_activation_pool": [],
+        "_unit_move_version": 0,
     }
     build_units_cache(gs)
     return gs
