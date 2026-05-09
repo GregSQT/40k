@@ -363,10 +363,12 @@ class StepLogger:
                 start_col, start_row = details["start_pos"]
                 end_col, end_row = details["end_pos"]
                 advance_range = details.get("advance_range")
+                _strategy_labels = {0: "aggressive", 1: "tactical", 2: "defensive", 3: "objective"}
+                strategy_label = _strategy_labels.get(details.get("advance_strategy", 0), "aggressive")
                 if advance_range is not None and advance_range > 0:
-                    base_msg = f"{unit_label} ADVANCED from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {advance_range}]"
+                    base_msg = f"{unit_label} ADVANCED from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {advance_range}] [Strategy: {strategy_label}]"
                 else:
-                    base_msg = f"{unit_label} ADVANCED from ({start_col},{start_row}) to ({end_col},{end_row})"
+                    base_msg = f"{unit_label} ADVANCED from ({start_col},{start_row}) to ({end_col},{end_row}) [Strategy: {strategy_label}]"
             else:
                 raise KeyError("Advance action missing required position data")
 

@@ -578,8 +578,8 @@ class W40KEngine(gym.Env):
 
         # CRITICAL: Initialize Gym spaces BEFORE any other operations
         # Gym interface properties - dynamic action space based on phase
-        self.action_space = gym.spaces.Discrete(13)  # Expanded: 4 move + 5 shoot + charge + fight + wait + advance
-        self._current_valid_actions = list(range(13))  # Will be masked dynamically
+        self.action_space = gym.spaces.Discrete(16)  # 4 move + 5 shoot + charge + fight + wait + 4 advance strategies
+        self._current_valid_actions = list(range(16))  # Will be masked dynamically
         
         # Observation space: Asymmetric egocentric perception with R=25 radius
         # Size is now configurable via training_config.json observation_params.obs_size

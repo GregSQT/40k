@@ -727,6 +727,12 @@ def handle_advance(
     start_row = int(advance_match.group(5))
     dest_col = int(advance_match.group(6))
     dest_row = int(advance_match.group(7))
+
+    strategy_match = re.search(r'\[Strategy: (\w+)\]', action_desc)
+    advance_strategy_label = strategy_match.group(1) if strategy_match else "aggressive"
+    if advance_strategy_label in stats['advance_by_strategy'][player]:
+        stats['advance_by_strategy'][player][advance_strategy_label] += 1
+
     _track_action_phase_accuracy(stats, "advance", phase, state.current_episode_num, line)
 
     stats['position_log_mismatch']['advance']['total'] += 1

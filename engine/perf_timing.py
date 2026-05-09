@@ -166,10 +166,16 @@ def perf_timing_enabled(game_state: Optional[Dict[str, Any]]) -> bool:
     """Retourne True si les logs de performance sont activés."""
     raw = os.environ.get("W40K_PERF_TIMING", "")
     if isinstance(raw, str) and raw.strip().lower() in _PERF_ENV_TRUE:
-        return True
-    if game_state is not None and game_state.get("perf_timing") is True:
-        return True
-    return False
+        pass
+    elif game_state is not None and game_state.get("perf_timing") is True:
+        pass
+    else:
+        return False
+    min_ep_raw = os.environ.get("W40K_PERF_TIMING_MIN_EPISODE", "1").strip()
+    min_ep = int(min_ep_raw) if min_ep_raw.isdigit() else 1
+    if game_state is not None and game_state.get("episode_number", 1) < min_ep:
+        return False
+    return True
 
 
 def perf_profile_log_file_path() -> str:

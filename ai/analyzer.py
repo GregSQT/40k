@@ -995,6 +995,10 @@ def parse_step_log(filepath: str) -> Dict:
             1: {'shoot': 0, 'wait': 0, 'wait_with_targets': 0, 'wait_no_targets': 0, 'skip': 0, 'advance': 0},
             2: {'shoot': 0, 'wait': 0, 'wait_with_targets': 0, 'wait_no_targets': 0, 'skip': 0, 'advance': 0}
         },
+        'advance_by_strategy': {
+            1: {'aggressive': 0, 'tactical': 0, 'defensive': 0, 'objective': 0},
+            2: {'aggressive': 0, 'tactical': 0, 'defensive': 0, 'objective': 0},
+        },
         'shots_after_advance': {1: 0, 2: 0},
         'pistol_shots': {
             1: {'adjacent': 0, 'not_adjacent': 0},
@@ -2040,6 +2044,19 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             f"{agent_count:6d} ({agent_pct:5.1f}%)",
             f"{bot_count:6d} ({bot_pct:5.1f}%)",
         )
+        if action == 'advance':
+            agent_adv_total = stats['shoot_vs_wait_by_player'][1]['advance']
+            bot_adv_total = stats['shoot_vs_wait_by_player'][2]['advance']
+            for strat in ['aggressive', 'tactical', 'defensive', 'objective']:
+                agent_s = stats['advance_by_strategy'][1][strat]
+                bot_s = stats['advance_by_strategy'][2][strat]
+                agent_s_pct = (agent_s / agent_adv_total * 100) if agent_adv_total > 0 else 0
+                bot_s_pct = (bot_s / bot_adv_total * 100) if bot_adv_total > 0 else 0
+                _table_row(
+                    f"  ↳ {strat.capitalize()}",
+                    f"{agent_s:6d} ({agent_s_pct:5.1f}%)",
+                    f"{bot_s:6d} ({bot_s_pct:5.1f}%)",
+                )
     
     agent_wait_with = stats['shoot_vs_wait_by_player'][1]['wait_with_targets']
     bot_wait_with = stats['shoot_vs_wait_by_player'][2]['wait_with_targets']

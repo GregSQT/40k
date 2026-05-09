@@ -272,6 +272,90 @@ class TestConvertGymActionShoot:
         result = d.convert_gym_action(10, self._make_gs())
         assert result["action"] == "invalid"
 
+    def _make_gs_can_advance(self) -> Dict[str, Any]:
+        """Game state with _can_advance=True for unit 1."""
+        gs = self._make_gs()
+        gs["units"][0]["_can_advance"] = True
+        return gs
+
+    def _make_advance_mask(self) -> np.ndarray:
+        """Mask with advance slots 12-15 enabled (bypass real mask computation)."""
+        mask = np.zeros(16, dtype=bool)
+        mask[11] = True  # wait
+        mask[12] = mask[13] = mask[14] = mask[15] = True
+        return mask
+
+    def test_advance_slot_12_returns_aggressive(self):
+        """conv_shoot_adv12 : slot 12 → advance avec strategy 0 (aggressive)."""
+        d = _make_decoder()
+        gs = self._make_gs_can_advance()
+        mask = self._make_advance_mask()
+        eligible = [gs["units"][0]]
+        result = d.convert_gym_action(12, gs, action_mask=mask, eligible_units=eligible)
+        assert result["action"] == "advance"
+        assert result["advance_strategy"] == 0
+
+    def test_advance_slot_13_returns_objective(self):
+        """conv_shoot_adv13 : slot 13 → advance avec strategy 3 (objective)."""
+        d = _make_decoder()
+        gs = self._make_gs_can_advance()
+        mask = self._make_advance_mask()
+        eligible = [gs["units"][0]]
+        result = d.convert_gym_action(13, gs, action_mask=mask, eligible_units=eligible)
+        assert result["action"] == "advance"
+        assert result["advance_strategy"] == 3
+
+    def test_advance_slot_14_returns_defensive(self):
+        """conv_shoot_adv14 : slot 14 → advance avec strategy 2 (defensive)."""
+        d = _make_decoder()
+        gs = self._make_gs_can_advance()
+        mask = self._make_advance_mask()
+        eligible = [gs["units"][0]]
+        result = d.convert_gym_action(14, gs, action_mask=mask, eligible_units=eligible)
+        assert result["action"] == "advance"
+        assert result["advance_strategy"] == 2
+
+    def test_advance_slot_15_returns_tactical(self):
+        """conv_shoot_adv15 : slot 15 → advance avec strategy 1 (tactical)."""
+        d = _make_decoder()
+        gs = self._make_gs_can_advance()
+        mask = self._make_advance_mask()
+        eligible = [gs["units"][0]]
+        result = d.convert_gym_action(15, gs, action_mask=mask, eligible_units=eligible)
+        assert result["action"] == "advance"
+        assert result["advance_strategy"] == 1
+
+    def test_advance_slots_all_masked_when_cannot_advance(self):
+        """mask_shoot_no_adv : _can_advance=False → mask[12..15]=False."""
+        d = _make_decoder()
+        gs = self._make_gs()  # _can_advance=False
+        mask = d.get_action_mask(gs)
+        assert len(mask) == 16
+        for slot in [12, 13, 14, 15]:
+            assert bool(mask[slot]) is False, f"mask[{slot}] should be False when cannot advance"
+
+    def test_advance_slots_all_masked_when_can_advance(self):
+        """mask_shoot_adv : _can_advance=True + not advanced → mask[12..15]=True."""
+        d = _make_decoder()
+        gs = self._make_gs_can_advance()
+        gs["shoot_activation_pool"] = ["1"]
+        gs["active_shooting_unit"] = "1"
+        mask = d.get_action_mask(gs)
+        assert len(mask) == 16
+        for slot in [12, 13, 14, 15]:
+            assert bool(mask[slot]) is True, f"mask[{slot}] should be True when can advance"
+
+    def test_advance_slots_masked_when_already_advanced(self):
+        """mask_shoot_adv_done : unité déjà avancée → mask[12..15]=False."""
+        d = _make_decoder()
+        gs = self._make_gs_can_advance()
+        gs["units_advanced"] = {"1"}
+        gs["shoot_activation_pool"] = ["1"]
+        gs["active_shooting_unit"] = "1"
+        mask = d.get_action_mask(gs)
+        for slot in [12, 13, 14, 15]:
+            assert bool(mask[slot]) is False, f"mask[{slot}] should be False when already advanced"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # convert_gym_action — fight phase
@@ -358,11 +442,12 @@ class TestConvertGymActionEdgeCases:
         # Pas d'unités éligibles en command → advance_phase
         assert result["action"] in ("advance_phase", "skip")
 
-    def test_action_space_size_is_13(self):
-        """conv_space_13 : l'espace d'action est de 13 (0-12)."""
+    def test_action_space_size_is_16(self):
+        """conv_space_16 : l'espace d'action est de 16 (0-15)."""
         d = _make_decoder()
+        assert d.normalize_action_input(15, "shoot", "gym", 16) == 15
         with pytest.raises(ActionValidationError, match="out_of_range"):
-            d.normalize_action_input(13, "move", "gym", 13)
+            d.normalize_action_input(16, "shoot", "gym", 16)
 
     def test_action_minus_one_raises(self):
         """conv_neg_action : action=-1 → out_of_range."""

@@ -7214,6 +7214,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
     from engine.combat_utils import get_hex_neighbors, is_hex_adjacent_to_enemy
     from engine.phase_handlers.movement_handlers import (
         movement_build_valid_destinations_pool,
+        _select_strategic_destination,
     )
     from .shared_utils import build_enemy_adjacent_hexes
     
@@ -7551,6 +7552,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 "toRow": dest_row,
                 "advance_range": advance_roll,
                 "advance_max_subhex": advance_move_budget,
+                "advance_strategy": action.get("advance_strategy", 0),
                 "actually_moved": actually_moved,
                 "timestamp": "server_time",
             },
@@ -7635,6 +7637,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 "toRow": dest_row,
                 "advance_range": advance_roll,
                 "advance_max_subhex": advance_move_budget,
+                "advance_strategy": action.get("advance_strategy", 0),
                 "actually_moved": actually_moved,
                 "blinking_units": valid_target_pool,
                 "start_blinking": True,
@@ -7653,6 +7656,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 "toRow": dest_row,
                 "advance_range": advance_roll,
                 "advance_max_subhex": advance_move_budget,
+                "advance_strategy": action.get("advance_strategy", 0),
                 "actually_moved": actually_moved
             })
             return success, result
@@ -7693,20 +7697,10 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 ]
 
         if (is_gym_training or is_pve_ai) and movable_destinations:
-            # Auto-select: move toward nearest enemy (aggressive strategy)
-            units_cache = require_key(game_state, "units_cache")
-            unit_player = int(unit["player"]) if unit["player"] is not None else None
-            enemies = [enemy_id for enemy_id, cache_entry in units_cache.items()
-                       if int(cache_entry["player"]) != unit_player]
-            
-            if enemies:
-                unit_col, unit_row = require_unit_position(unit, game_state)
-                nearest_enemy_id = min(enemies, key=lambda e: _calculate_hex_distance(unit_col, unit_row, *require_unit_position(e, game_state)))
-                nearest_enemy_col, nearest_enemy_row = require_unit_position(nearest_enemy_id, game_state)
-                best_dest = min(movable_destinations, key=lambda d: _calculate_hex_distance(d[0], d[1], nearest_enemy_col, nearest_enemy_row))
-            else:
-                best_dest = movable_destinations[0]
-            
+            # Auto-select destination using the strategy carried by the action dict (default: aggressive)
+            strategy_id = action.get("advance_strategy", 0)
+            best_dest = _select_strategic_destination(strategy_id, movable_destinations, unit, game_state)
+
             # Recursively call with destination — pass pool to skip second BFS
             action["_valid_destinations"] = valid_destinations
             action["destCol"] = best_dest[0]
