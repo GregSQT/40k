@@ -4467,7 +4467,7 @@ def main():
 
                 training_config = config.load_agent_training_config(args.agent, args.training_config)
                 macro_player = require_key(training_config, "macro_player")
-                episodes_per_bot = args.test_episodes if args.test_episodes else 50
+                episodes_per_bot = args.test_episodes if args.test_episodes else require_key(training_config, "eval_episodes")
 
                 if args.macro_eval_mode == "bot":
                     from ai.evaluation_bots import RandomBot, GreedyBot, DefensiveBot
@@ -4639,8 +4639,8 @@ def main():
                     raise
             
             # Run bot evaluation ONLY
-            # Use test_episodes if provided, otherwise default to 50 per bot
-            episodes_per_bot = args.test_episodes if args.test_episodes else 50
+            training_config = cfg.load_agent_training_config(args.agent, args.training_config)
+            episodes_per_bot = args.test_episodes if args.test_episodes else require_key(training_config, "eval_episodes")
             
             print("\n" + "="*80)
             print("🎯 RUNNING BOT EVALUATION")

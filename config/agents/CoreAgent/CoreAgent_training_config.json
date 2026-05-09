@@ -5,6 +5,7 @@
   "total_episodes": 10,
   "total_episodes_normal": "20000 -violet 1000 ep / minute -> 12k ep / hour -> 100k ep / 5h30. NB avant x10 refactor : -----------50000",
   "agent_seat_mode": "random",
+  "eval_episodes": 10,
   "bot_eval_scenario_pool": "holdout",
   "bot_eval_show_progress": true,
   "bot_eval_use_subprocess": true,

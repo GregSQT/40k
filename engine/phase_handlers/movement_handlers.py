@@ -1776,28 +1776,24 @@ def _select_strategic_destination(
     ]
 
     # STRATEGY 0: AGGRESSIVE - Move closest to nearest enemy
+    # O(m + n): find nearest enemy to current position, then pick destination closest to it.
     if strategy_id == 0:
-        best_dest = valid_destinations[0]
-        min_dist_to_enemy = float('inf')
-
-        for dest in valid_destinations:
-            for ec, er in enemy_anchors:
-                dist = _chd(dest[0], dest[1], ec, er)
-                if dist < min_dist_to_enemy:
-                    min_dist_to_enemy = dist
-                    best_dest = dest
-                    if min_dist_to_enemy == 0:
-                        return best_dest
-
-        return best_dest
+        unit_col, unit_row = int(unit["col"]), int(unit["row"])
+        nearest_ec, nearest_er = min(enemy_anchors, key=lambda e: _chd(unit_col, unit_row, e[0], e[1]))
+        return min(valid_destinations, key=lambda d: _chd(d[0], d[1], nearest_ec, nearest_er))
 
     # STRATEGY 1: TACTICAL - Move to position with most enemies in shooting range
+    # O(k × m) with k ≤ _MAX_TACTICAL_POOL to cap cost on large destination sets.
     elif strategy_id == 1:
+        _MAX_TACTICAL_POOL = 400
+        candidates = valid_destinations
+        if len(candidates) > _MAX_TACTICAL_POOL:
+            step = len(candidates) // _MAX_TACTICAL_POOL
+            candidates = candidates[::step]
         weapon_range = get_max_ranged_range(unit)
-        best_dest = valid_destinations[0]
+        best_dest = candidates[0]
         max_targets = 0
-
-        for dest in valid_destinations:
+        for dest in candidates:
             targets_in_range = sum(
                 1 for ec, er in enemy_anchors
                 if _chd(dest[0], dest[1], ec, er) <= weapon_range
@@ -1805,23 +1801,15 @@ def _select_strategic_destination(
             if targets_in_range > max_targets:
                 max_targets = targets_in_range
                 best_dest = dest
-
         return best_dest
 
     # STRATEGY 2: DEFENSIVE - Move farthest from all enemies
+    # O(m + n): approximate with enemy centroid — maximise distance from centroid.
     elif strategy_id == 2:
-        best_dest = valid_destinations[0]
-        max_min_dist = -1
-
-        for dest in valid_destinations:
-            min_dist_to_any_enemy = min(
-                _chd(dest[0], dest[1], ec, er) for ec, er in enemy_anchors
-            )
-            if min_dist_to_any_enemy > max_min_dist:
-                max_min_dist = min_dist_to_any_enemy
-                best_dest = dest
-
-        return best_dest
+        n_e = len(enemy_anchors)
+        cent_c = sum(e[0] for e in enemy_anchors) / n_e
+        cent_r = sum(e[1] for e in enemy_anchors) / n_e
+        return max(valid_destinations, key=lambda d: (d[0] - cent_c) ** 2 + (d[1] - cent_r) ** 2)
 
     # STRATEGY 3: OBJECTIVE - Move closest to nearest objective hex
     else:
