@@ -32,6 +32,7 @@ class AnalyzerConfig:
     rule_to_units: Dict[str, Set[str]]
     weapon_rule_to_weapons: Dict[str, Set[str]]
     resolve_rule_id: Callable  # closure over all_unit_rules_config
+    inches_to_subhex: int
 
 
 def load_analyzer_config() -> AnalyzerConfig:
@@ -43,6 +44,7 @@ def load_analyzer_config() -> AnalyzerConfig:
     unit_registry = UnitRegistry()
     config_loader = get_config_loader()
     all_unit_rules_config = config_loader.load_unit_rules_config()
+    inches_to_subhex: int = int(config_loader.get_board_config()["default"]["inches_to_subhex"])
 
     def resolve_effect_rule_id_to_technical(
         rule_id: str, visited: Optional[Set[str]] = None
@@ -162,7 +164,7 @@ def load_analyzer_config() -> AnalyzerConfig:
                 weapons_info.append(
                     {
                         "name": require_key(weapon, "display_name"),
-                        "range": require_key(weapon, "RNG"),
+                        "range": require_key(weapon, "RNG") * inches_to_subhex,
                         "rules": weapon_rules,
                         "is_pistol": "PISTOL" in weapon_rules,
                     }
@@ -229,7 +231,7 @@ def load_analyzer_config() -> AnalyzerConfig:
                         f"Unit '{unit_type}' has conflicting move_after_shooting distances: "
                         f"{existing_distance} vs {move_after_shooting_distance}"
                     )
-                unit_move_after_shooting_distance_by_type[unit_type] = move_after_shooting_distance
+                unit_move_after_shooting_distance_by_type[unit_type] = move_after_shooting_distance * inches_to_subhex
         unit_rules_by_type[unit_type] = expanded_rule_ids
         unit_choice_effect_to_source_rules[unit_type] = choice_effect_to_source_rules_for_unit
 
@@ -262,4 +264,5 @@ def load_analyzer_config() -> AnalyzerConfig:
         rule_to_units=rule_to_units,
         weapon_rule_to_weapons=weapon_rule_to_weapons,
         resolve_rule_id=resolve_effect_rule_id_to_technical,
+        inches_to_subhex=inches_to_subhex,
     )

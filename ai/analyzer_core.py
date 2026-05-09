@@ -173,7 +173,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 state.unit_types[unit_id] = unit_type
                 stats['unit_types'][unit_id] = unit_type
                 require_key(stats, 'unit_types_seen').add(unit_type)
-                state.unit_move[unit_id] = unit_move_value
+                state.unit_move[unit_id] = unit_move_value * config.inches_to_subhex
                 state.positions_at_turn_start[unit_id] = (col, row)
                 state.unit_movement_history[unit_id] = [{"position": (col, row)}]
                 continue

@@ -2435,7 +2435,7 @@ export default function Board({
     wallHexesOverride,
     footprintZoneRef?.current,
     resolvedMoveDestPoolRef.current?.has,
-    footprintMaskLoopsRef.current,
+    footprintMaskLoopsRef?.current,
     footprintZoneRef,
     chargeFootprintZoneRef?.current?.has,
     chargeFootprintZoneRef?.current,
@@ -3741,6 +3741,11 @@ export default function Board({
         thickness?: number;
       }>;
     }
+    const effectiveObjectiveZones =
+      objectivesOverride && objectivesOverride.length > 0
+        ? objectivesOverride.map((obj) => ({ id: obj.name, hexes: obj.hexes }))
+        : boardConfig.objective_zones;
+
     const boardConfigWithOverrides: BoardConfigForDrawBoard = {
       ...boardConfig,
       colors: {
@@ -3749,6 +3754,7 @@ export default function Board({
       },
       wall_hexes: wallHexesOverride ? effectiveWallHexes : boardConfig.wall_hexes || [],
       objective_hexes: effectiveObjectiveHexes,
+      objective_zones: effectiveObjectiveZones,
     } as BoardConfigForDrawBoard;
     // Override availableCells if availableCellsOverride is provided (for replay mode)
     const effectiveAvailableCells = availableCellsOverride || availableCells;

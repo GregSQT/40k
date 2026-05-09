@@ -334,6 +334,16 @@ export const BoardReplay: React.FC = () => {
             UNIT_KEYWORDS: UnitClass.UNIT_KEYWORDS as Unit["UNIT_KEYWORDS"],
             ICON: UnitClass.ICON || "",
             ICON_SCALE: UnitClass.ICON_SCALE || 1,
+            ILLUSTRATION_RATIO: UnitClass.ILLUSTRATION_RATIO,
+            BASE_SIZE: (UnitClass as Record<string, unknown>).BASE_SIZE as
+              | number
+              | [number, number]
+              | undefined,
+            BASE_SHAPE: (UnitClass as Record<string, unknown>).BASE_SHAPE as
+              | "round"
+              | "oval"
+              | "square"
+              | undefined,
           };
         } catch (error) {
           console.error(`❌ Failed to enrich unit ${unit.id} (${unit.type}):`, error);

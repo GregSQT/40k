@@ -1053,6 +1053,9 @@ export function parse_log_file_from_text(text: string): ReplayData {
       });
     }
 
+    const p2Type = /bot/i.test(episode.bot_name) ? "bot" : "ai";
+    const episodePlayerTypes: Record<string, "human" | "ai" | "bot"> = { "1": "ai", "2": p2Type };
+
     const initialState = {
       units: initialUnits,
       walls: episode.walls || [],
@@ -1061,6 +1064,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       currentTurn: 1,
       current_player: 1,
       phase: "move",
+      player_types: episodePlayerTypes,
     };
 
     // Build states
@@ -1239,6 +1243,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
         current_player: action.player,
         phase,
         action,
+        player_types: episodePlayerTypes,
         ...fightStateFields,
       });
     }
