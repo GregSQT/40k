@@ -3275,10 +3275,10 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         if (
             not isinstance(bot_n_episodes_intermediate, int)
             or isinstance(bot_n_episodes_intermediate, bool)
-            or bot_n_episodes_intermediate <= 0
+            or bot_n_episodes_intermediate < 0
         ):
             raise ValueError(
-                f"callback_params.bot_eval_intermediate must be a positive integer "
+                f"callback_params.bot_eval_intermediate must be an integer >= 0 "
                 f"(got {bot_n_episodes_intermediate!r})"
             )
         if not isinstance(bot_eval_use_episodes, bool):
@@ -3381,36 +3381,40 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         
         if not rewards_config_name:
             raise KeyError("setup_callbacks requires rewards_config_name for BotEvaluationCallback")
-        bot_eval_callback = BotEvaluationCallback(
-            eval_freq=bot_eval_freq,
-            n_eval_episodes=bot_n_episodes_intermediate,
-            best_model_save_path=os.path.dirname(model_path),
-            metrics_tracker=metrics_tracker,
-            use_episode_freq=bot_eval_use_episodes,
-            verbose=1,
-            training_config_name=training_config_name,
-            rewards_config_name=rewards_config_name,
-            scenario_pool=bot_eval_scenario_pool,
-            save_best_robust=save_best_robust,
-            save_best_robust_seed=save_best_robust_seed,
-            robust_seed_value=robust_seed_value,
-            robust_window=robust_window,
-            robust_drawdown_penalty=robust_drawdown_penalty,
-            robust_penalty_bot=robust_penalty_bot,
-            robust_penalty_hard=robust_penalty_hard,
-            model_gating_enabled=model_gating_enabled,
-            model_gating_min_combined=model_gating_min_combined,
-            model_gating_min_worst_bot=model_gating_min_worst_bot,
-            model_gating_min_worst_scenario_combined=model_gating_min_worst_scenario_combined,
-            gate_display_state=training_config.get("_gate_display_state"),
-            eval_deterministic=eval_deterministic,
-            final_summary_target_episodes=total_eps,
-            initial_episode_marker=max(0, int(global_episode_offset)),
-            show_eval_progress=bot_eval_show_progress,
-            phase_progress_total_episodes=(int(total_eps) if phase_label else None),
-            phase_progress_episode_offset=(int(phase_episode_offset) if phase_label else 0),
-        )
-        callbacks.append(bot_eval_callback)
+        if bot_n_episodes_intermediate <= 0:
+            if not silent_logs:
+                print("ℹ️  Intermediate bot evaluation skipped (bot_eval_intermediate=0)")
+        else:
+            bot_eval_callback = BotEvaluationCallback(
+                eval_freq=bot_eval_freq,
+                n_eval_episodes=bot_n_episodes_intermediate,
+                best_model_save_path=os.path.dirname(model_path),
+                metrics_tracker=metrics_tracker,
+                use_episode_freq=bot_eval_use_episodes,
+                verbose=1,
+                training_config_name=training_config_name,
+                rewards_config_name=rewards_config_name,
+                scenario_pool=bot_eval_scenario_pool,
+                save_best_robust=save_best_robust,
+                save_best_robust_seed=save_best_robust_seed,
+                robust_seed_value=robust_seed_value,
+                robust_window=robust_window,
+                robust_drawdown_penalty=robust_drawdown_penalty,
+                robust_penalty_bot=robust_penalty_bot,
+                robust_penalty_hard=robust_penalty_hard,
+                model_gating_enabled=model_gating_enabled,
+                model_gating_min_combined=model_gating_min_combined,
+                model_gating_min_worst_bot=model_gating_min_worst_bot,
+                model_gating_min_worst_scenario_combined=model_gating_min_worst_scenario_combined,
+                gate_display_state=training_config.get("_gate_display_state"),
+                eval_deterministic=eval_deterministic,
+                final_summary_target_episodes=total_eps,
+                initial_episode_marker=max(0, int(global_episode_offset)),
+                show_eval_progress=bot_eval_show_progress,
+                phase_progress_total_episodes=(int(total_eps) if phase_label else None),
+                phase_progress_episode_offset=(int(phase_episode_offset) if phase_label else 0),
+            )
+            callbacks.append(bot_eval_callback)
         
         freq_unit = "episodes" if bot_eval_use_episodes else "timesteps"
     else:

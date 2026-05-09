@@ -1,0 +1,13 @@
+{
+  "deployment_zone": "hammer",
+  "deployment_type": "active",
+  "scale": "150pts",
+  "agent_roster_seed": null,
+  "agent_roster_ref": "training/agent_training_roster_benchmark.json",
+  "opponent_roster_ref": "training/opponent_training_roster_benchmark.json",
+  "wall_ref": "random",
+  "primary_objectives": [
+    "objectives_control"
+  ],
+  "objectives_ref": "random"
+}

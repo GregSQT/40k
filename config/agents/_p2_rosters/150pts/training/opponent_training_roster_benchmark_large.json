@@ -1,0 +1,8 @@
+{
+  "roster_id": "opponent_training_roster_benchmark_large",
+  "composition": [
+    { "unit_type": "ScreamerKiller", "count": 1 },
+    { "unit_type": "Carnifex", "count": 1 },
+    { "unit_type": "Pyrovore", "count": 1 }
+  ]
+}

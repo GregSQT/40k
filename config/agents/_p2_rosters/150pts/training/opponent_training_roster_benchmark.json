@@ -1,0 +1,17 @@
+{
+  "roster_id": "opponent_training_roster_benchmark",
+  "composition": [
+    {
+      "unit_type": "ScreamerKiller",
+      "count": 1
+    },
+    {
+      "unit_type": "Gargoyle",
+      "count": 1
+    },
+    {
+      "unit_type": "Genestealer",
+      "count": 1
+    }
+  ]
+}

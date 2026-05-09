@@ -1,0 +1,8 @@
+{
+  "roster_id": "opponent_training_roster_benchmark_fly",
+  "composition": [
+    { "unit_type": "Gargoyle", "count": 1 },
+    { "unit_type": "Zoanthrope", "count": 1 },
+    { "unit_type": "RaptorMeltaGun", "count": 1 }
+  ]
+}

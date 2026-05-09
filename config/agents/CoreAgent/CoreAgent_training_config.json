@@ -2,7 +2,7 @@
   "default": {
   "type": "################################################### Default ###################################################",
   "seed": 12345,
-  "total_episodes": 96,
+  "total_episodes": 48,
   "total_episodes_normal": "20000 -violet 1000 ep / minute -> 12k ep / hour -> 100k ep / 5h30. NB avant x10 refactor : -----------50000",
   "agent_seat_mode": "random",
   "eval_episodes": 1,

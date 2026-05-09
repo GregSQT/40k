@@ -215,6 +215,7 @@ class EpisodeTerminationCallback(BaseCallback):
         self.max_episode_duration_seconds = 0.0
         self.total_episode_duration_seconds = 0.0
         self.episode_duration_stats_count = 0
+        self._first_episode_done = False
         self.episode_duration_window_size = 200
         self.recent_episode_durations_seconds: deque[float] = deque(
             maxlen=self.episode_duration_window_size
@@ -385,6 +386,9 @@ class EpisodeTerminationCallback(BaseCallback):
         episode_ended = episodes_finished > 0
         if episode_ended:
             self.episode_count += episodes_finished
+            if not self._first_episode_done and self.total_episode_duration_seconds > 0:
+                self.start_time = time.time() - self.total_episode_duration_seconds
+                self._first_episode_done = True
 
         # Update progress display on episode end
         if episode_ended:

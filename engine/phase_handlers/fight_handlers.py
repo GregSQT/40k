@@ -1047,27 +1047,28 @@ def _fight_prepare_footprint_offsets(
     """
     cache: Dict[str, FightFootprintOffsetPair] = game_state.setdefault("_fight_fp_offset_pair_cache", {})
     uid = str(unit["id"])
-    if uid in cache:
-        return cache[uid]
+    orient = int(unit.get("orientation", 0))
+    cache_key = (uid, orient)
+    if cache_key in cache:
+        return cache[cache_key]
 
     from .shared_utils import get_engagement_zone
 
     ez = get_engagement_zone(game_state)
     bs = unit.get("BASE_SIZE", 1)
     if ez <= 1 or bs == 1:
-        cache[uid] = None
+        cache[cache_key] = None
         return None
     try:
         from engine.hex_utils import precompute_footprint_offsets
 
         shape = unit.get("BASE_SHAPE", "round")
-        orient = int(require_key(unit, "orientation"))
         off_e, off_o = precompute_footprint_offsets(shape, bs, orient)
         out: FightFootprintOffsetPair = (off_e, off_o)
-        cache[uid] = out
+        cache[cache_key] = out
         return out
     except Exception:
-        cache[uid] = None
+        cache[cache_key] = None
         return None
 
 
