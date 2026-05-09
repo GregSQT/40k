@@ -7338,20 +7338,29 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
 
     advance_move_budget = advance_roll * scale
 
+    from engine.perf_timing import perf_timing_enabled, append_perf_timing_line
+    _adv_pt = perf_timing_enabled(game_state)
+    _t_adv0 = time.perf_counter() if _adv_pt else None
+
     # Build valid destinations using BFS (same as movement phase)
     original_move = unit["MOVE"]
     unit["MOVE"] = advance_move_budget
 
     # Use movement pathfinding to get valid destinations
-    valid_destinations = movement_build_valid_destinations_pool(game_state, unit_id)
+    # "_valid_destinations" is injected by the first (no-dest) call to avoid a second BFS
+    if "_valid_destinations" in action:
+        valid_destinations = action["_valid_destinations"]
+    else:
+        valid_destinations = movement_build_valid_destinations_pool(game_state, unit_id)
 
     # Restore original MOVE
     unit["MOVE"] = original_move
-    
+    _t_adv_pool = time.perf_counter() if _adv_pt else None
+
     # Check if destination provided in action
     dest_col = action.get("destCol")
     dest_row = action.get("destRow")
-    
+
     if dest_col is not None and dest_row is not None:
         # CRITICAL: Convert coordinates to int for consistent tuple comparison
         dest_col, dest_row = int(dest_col), int(dest_row)
@@ -7378,7 +7387,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         # Destination provided - validate and execute
         if (dest_col, dest_row) not in valid_destinations:
             return False, {"error": "invalid_advance_destination", "destination": (dest_col, dest_row)}
-        
+
         from engine.hex_utils import min_distance_between_sets
         from .shared_utils import get_engagement_zone, compute_candidate_footprint
         engagement_zone = get_engagement_zone(game_state)
@@ -7396,19 +7405,17 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                     "enemy_id": enemy_id,
                     "destination": (dest_col, dest_row),
                 }
+        _t_adv_dest_check = time.perf_counter() if _adv_pt else None
 
         # CRITICAL: Final occupation check IMMEDIATELY before position assignment
-        # This prevents race conditions where multiple units select the same destination
-        # before any of them have moved. Must check JUST before assignment, not earlier.
         dest_col_int, dest_row_int = int(dest_col), int(dest_row)
-        
-        # DEBUG: Log occupation check for debugging collisions
+
         episode = game_state.get("episode_number", "?")
         turn = game_state.get("turn", "?")
         phase = game_state.get("phase", "shoot")
         from engine.game_utils import conditional_debug_print
         conditional_debug_print(game_state, f"[OCCUPATION CHECK] E{episode} T{turn} {phase}: Unit {unit['id']} checking advance destination ({dest_col_int},{dest_row_int})")
-        
+
         unit_id_str = str(unit["id"])
         occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
         candidate_fp = compute_candidate_footprint(dest_col_int, dest_row_int, unit, game_state)
@@ -7426,14 +7433,9 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             }
         
         conditional_debug_print(game_state, f"[OCCUPATION CHECK] E{episode} T{turn} {phase}: Unit {unit['id']} advance destination ({dest_col_int},{dest_row_int}) is FREE - proceeding with advance")
-        
+        _t_adv_occ_check = time.perf_counter() if _adv_pt else None
+
         # Execute advance movement
-        # CRITICAL: Log ALL position changes to detect unauthorized modifications
-        # CRITICAL: Log ALL position changes to detect unauthorized modifications
-        # ALWAYS log, even if episode_number/turn/phase are missing (for debugging)
-        episode = game_state.get("episode_number", "?")
-        turn = game_state.get("turn", "?")
-        phase = game_state.get("phase", "shoot")
         if "console_logs" not in game_state:
             game_state["console_logs"] = []
         log_message = f"[POSITION CHANGE] E{episode} T{turn} {phase} Unit {unit['id']}: ({orig_col},{orig_row})→({dest_col},{dest_row}) via ADVANCE"
@@ -7441,8 +7443,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         from engine.game_utils import safe_print
         add_console_log(game_state, log_message)
         safe_print(game_state, log_message)
-        
-        # CRITICAL: Log BEFORE each assignment to catch any modification
+
         from engine.game_utils import conditional_debug_print
         dest_col_int, dest_row_int = normalize_coordinates(dest_col, dest_row)
         conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: Setting col={dest_col_int} row={dest_row_int}")
@@ -7450,17 +7451,17 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         set_unit_coordinates(unit, dest_col_int, dest_row_int)
         conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: col set to {unit['col']}")
         conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
-        
+
         # Capture old footprint before cache update (for multi-hex adjacency delta)
         adv_uid_str = str(unit["id"])
         adv_old_entry = require_key(game_state, "units_cache").get(adv_uid_str)
         adv_old_occupied = adv_old_entry.get("occupied_hexes") if adv_old_entry else None
 
-        # Update units_cache after position change (advance)
         update_units_cache_position(game_state, adv_uid_str, dest_col_int, dest_row_int)
 
         adv_new_entry = require_key(game_state, "units_cache").get(adv_uid_str)
         adv_new_occupied = adv_new_entry.get("occupied_hexes") if adv_new_entry else None
+        _t_adv_pos_update = time.perf_counter() if _adv_pt else None
 
         moved_unit_player = int(require_key(unit, "player"))
         update_enemy_adjacent_caches_after_unit_move(
@@ -7473,23 +7474,17 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             old_occupied=adv_old_occupied,
             new_occupied=adv_new_occupied,
         )
-        
+        _t_adv_adj_cache = time.perf_counter() if _adv_pt else None
+
         # Check if unit actually moved (for cache invalidation and logging)
         actually_moved = (orig_col != dest_col) or (orig_row != dest_row)
-        
-        # CRITICAL: Invalidate LoS cache ONLY if unit actually moved
-        # The unit's position changed, so LoS cache entries are now stale
+
         if actually_moved:
-            # CRITICAL: Invalidate LoS cache when unit advances (moves)
             _invalidate_los_cache_for_moved_unit(game_state, unit["id"], old_col=orig_col, old_row=orig_row)
             game_state["_unit_move_version"] += 1
-
-            # AI_TURN.md STEP 4: Rebuild unit's los_cache with new position after advance
-            # CRITICAL: Rebuild unit-local cache (not global cache) with new position
             build_unit_los_cache(game_state, unit["id"])
-            
-            # CRITICAL: Invalidate all destination pools after advance movement
-            # Positions have changed, so all pools (move, charge, shoot) are now stale
+            _t_adv_los = time.perf_counter() if _adv_pt else None
+
             from .movement_handlers import _invalidate_all_destination_pools_after_movement
             _invalidate_all_destination_pools_after_movement(game_state)
 
@@ -7503,6 +7498,26 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 move_kind="advance",
                 move_cause="normal",
             )
+            _t_adv_reactive = time.perf_counter() if _adv_pt else None
+
+            if _adv_pt and _t_adv0 is not None:
+                _ep = game_state.get("episode_number", "?")
+                _tu = game_state.get("turn", "?")
+                _uid = str(unit["id"])
+                _pool_s  = (_t_adv_pool        - _t_adv0)           if _t_adv_pool        else 0.0
+                _dchk_s  = (_t_adv_dest_check  - _t_adv_pool)       if _t_adv_dest_check  else 0.0
+                _ochk_s  = (_t_adv_occ_check   - _t_adv_dest_check) if _t_adv_occ_check   else 0.0
+                _pos_s   = (_t_adv_pos_update  - _t_adv_occ_check)  if _t_adv_pos_update  else 0.0
+                _adj_s   = (_t_adv_adj_cache   - _t_adv_pos_update) if _t_adv_adj_cache   else 0.0
+                _los_s   = (_t_adv_los         - _t_adv_adj_cache)  if _t_adv_los         else 0.0
+                _react_s = (_t_adv_reactive    - _t_adv_los)        if _t_adv_reactive     else 0.0
+                _total_s = _t_adv_reactive - _t_adv0
+                append_perf_timing_line(
+                    f"ADVANCE_TIMING episode={_ep} turn={_tu} unitId={_uid!r} "
+                    f"pool_s={_pool_s:.6f} dest_check_s={_dchk_s:.6f} occ_check_s={_ochk_s:.6f} "
+                    f"pos_update_s={_pos_s:.6f} adj_cache_s={_adj_s:.6f} "
+                    f"los_cache_s={_los_s:.6f} reactive_s={_react_s:.6f} total_s={_total_s:.6f}"
+                )
         
         # CRITICAL FIX: Mark unit as advanced REGARDLESS of whether it moved
         # Units must be marked as advanced even if they stay in place (for ASSAULT weapon rule)
@@ -7648,8 +7663,8 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
 
         # AI_TURN.md §STEP4: valid_advance_destinations must exclude enemy-adjacent hexes
         # Filter BEFORE auto-select to prevent advance_destination_adjacent_to_enemy loop
-        from .shared_utils import compute_candidate_footprint, get_engagement_zone
-        from engine.hex_utils import dilate_hex_set_unbounded
+        from .shared_utils import get_engagement_zone
+        from engine.hex_utils import dilate_hex_set_unbounded, precompute_footprint_offsets
         _ez = get_engagement_zone(game_state)
         _units_cache = require_key(game_state, "units_cache")
         _unit_player = int(unit["player"]) if unit["player"] is not None else None
@@ -7658,10 +7673,24 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             if int(_ce.get("player", _unit_player)) != _unit_player:
                 _enemy_fp = _ce.get("occupied_hexes", {(_ce["col"], _ce["row"])})
                 _forbidden_zone.update(dilate_hex_set_unbounded(_enemy_fp, _ez))
-        movable_destinations = [
-            d for d in movable_destinations
-            if not (compute_candidate_footprint(d[0], d[1], unit, game_state) & _forbidden_zone)
-        ]
+        if _forbidden_zone:
+            _base_shape = unit.get("BASE_SHAPE", "round")
+            _base_size = unit.get("BASE_SIZE", 1)
+            _orientation = int(require_key(unit, "orientation")) if "orientation" in unit else 0
+            if _ez <= 1 or _base_size == 1:
+                movable_destinations = [
+                    d for d in movable_destinations
+                    if (d[0], d[1]) not in _forbidden_zone
+                ]
+            else:
+                _off_even, _off_odd = precompute_footprint_offsets(_base_shape, _base_size, _orientation)
+                movable_destinations = [
+                    d for d in movable_destinations
+                    if not any(
+                        (d[0] + dc, d[1] + dr) in _forbidden_zone
+                        for dc, dr in (_off_even if d[0] % 2 == 0 else _off_odd)
+                    )
+                ]
 
         if (is_gym_training or is_pve_ai) and movable_destinations:
             # Auto-select: move toward nearest enemy (aggressive strategy)
@@ -7678,10 +7707,13 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             else:
                 best_dest = movable_destinations[0]
             
-            # Recursively call with destination
+            # Recursively call with destination — pass pool to skip second BFS
+            action["_valid_destinations"] = valid_destinations
             action["destCol"] = best_dest[0]
             action["destRow"] = best_dest[1]
-            return _handle_advance_action(game_state, unit, action, config)
+            result = _handle_advance_action(game_state, unit, action, config)
+            action.pop("_valid_destinations", None)
+            return result
         
         # CRITICAL FIX: If no valid destinations in gym training, end activation to prevent infinite loop
         if (is_gym_training or is_pve_ai) and not movable_destinations:

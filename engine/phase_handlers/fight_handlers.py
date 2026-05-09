@@ -1154,6 +1154,7 @@ def _fight_new_fp_strictly_closer_to_objective_marker_tier(
     d_min: int,
     closest_markers: List[Tuple[int, int]],
     *,
+    closer_shell_union: Optional[Set[Tuple[int, int]]] = None,
     _perf_strict_eval_acc: Optional[List[float]] = None,
 ) -> bool:
     """Même idée que ``_fight_pile_in_new_fp_strictly_closer_to_closest_tier`` : empreinte plus proche du marqueur.
@@ -1163,6 +1164,8 @@ def _fight_new_fp_strictly_closer_to_objective_marker_tier(
     """
     if d_min <= 0:
         return False
+    if closer_shell_union is not None:
+        return bool(new_fp & closer_shell_union)
     from engine.hex_utils import min_distance_between_sets
 
     marker_set = set(closest_markers)
@@ -1339,12 +1342,19 @@ def _fight_plan_consolidation_destinations(
                 for _efp in closest_enemy_fps:
                     _seed.update(_efp)
                 _shell_visited = set(_seed)
-                _shell_frontier = list(_seed)
+                _board_cols = game_state.get("board_cols", 9999)
+                _board_rows = game_state.get("board_rows", 9999)
+                _shell_frontier = [
+                    h for h in _seed
+                    if 0 <= h[0] < _board_cols and 0 <= h[1] < _board_rows
+                ]
                 for _ in range(start_d_min - 1):
+                    if not _shell_frontier:
+                        break
                     _next: List[Tuple[int, int]] = []
                     for _c, _r in _shell_frontier:
                         for _nc, _nr in get_hex_neighbors(_c, _r):
-                            if (_nc, _nr) not in _shell_visited:
+                            if (_nc, _nr) not in _shell_visited and 0 <= _nc < _board_cols and 0 <= _nr < _board_rows:
                                 _shell_visited.add((_nc, _nr))
                                 _next.append((_nc, _nr))
                     _shell_frontier = _next
@@ -1461,7 +1471,6 @@ def _fight_plan_consolidation_destinations(
     assert visited is not None and fp_by_anchor is not None
     _obj_pf = _cons_pf
     _obj_uid = unit_id_str
-    _strict_eval_acc: Optional[List[float]] = [0.0] if _obj_pf else None
     _t_obj_filt0 = time.perf_counter() if _obj_pf else None
     strict_closer_calls_n = 0
     marker_set_obj = set(closest_markers)
@@ -1469,6 +1478,23 @@ def _fight_plan_consolidation_destinations(
         raise ValueError(
             "_fight_plan_consolidation_destinations: closest_markers must be non-empty"
         )
+    # Pre-compute distance map from markers (single BFS, bounded at start_d_obj-1 steps).
+    # This replaces both the shell check and the per-anchor min_distance_between_sets call.
+    _OBJ_INF = 10 ** 9
+    _obj_dist_map: Dict[Tuple[int, int], int] = {h: 0 for h in marker_set_obj}
+    _t_distmap0 = time.perf_counter() if _obj_pf else None
+    _obj_frontier: List[Tuple[int, int]] = list(marker_set_obj)
+    for _mdist in range(1, start_d_obj):
+        _obj_next: List[Tuple[int, int]] = []
+        for _c, _r in _obj_frontier:
+            for _nc, _nr in get_hex_neighbors(_c, _r):
+                if (_nc, _nr) not in _obj_dist_map:
+                    _obj_dist_map[(_nc, _nr)] = _mdist
+                    _obj_next.append((_nc, _nr))
+        _obj_frontier = _obj_next
+        if not _obj_frontier:
+            break
+    dist_map_build_s = (time.perf_counter() - _t_distmap0) if _t_distmap0 is not None else 0.0
     dist_by_anchor_obj: List[Tuple[Tuple[int, int], int]] = []
     for anchor in visited:
         if anchor == start_pos:
@@ -1480,25 +1506,17 @@ def _fight_plan_consolidation_destinations(
             )
         fp = fp_by_anchor[anchor]
         strict_closer_calls_n += 1
-        if not _fight_new_fp_strictly_closer_to_objective_marker_tier(
-            fp,
-            start_d_obj,
-            closest_markers,
-            _perf_strict_eval_acc=_strict_eval_acc,
-        ):
-            continue
-        d_tier = min_distance_between_sets(fp, marker_set_obj, max_distance=start_d_obj - 1)
+        d_tier = min((_obj_dist_map.get(h, _OBJ_INF) for h in fp), default=_OBJ_INF)
         if d_tier >= start_d_obj:
             continue
         dist_by_anchor_obj.append((anchor, int(d_tier)))
-    if _obj_pf and _t_obj_filt0 is not None and _strict_eval_acc is not None:
-        strict_eval_s = float(_strict_eval_acc[0])
+    if _obj_pf and _t_obj_filt0 is not None:
         filter_s = time.perf_counter() - _t_obj_filt0
-        other_s = max(0.0, filter_s - strict_eval_s)
+        loop_s = max(0.0, filter_s - dist_map_build_s)
         append_perf_timing_line(
             f"FIGHT_CONSOLIDATION_OBJ_ANCHOR_FILTER unitId={_obj_uid!r} start_d_obj={start_d_obj} "
             f"visited_n={len(visited)} strict_closer_calls_n={strict_closer_calls_n} "
-            f"strict_eval_s={strict_eval_s:.6f} other_filter_s={other_s:.6f} filter_s={filter_s:.6f}"
+            f"dist_map_build_s={dist_map_build_s:.6f} loop_s={loop_s:.6f} filter_s={filter_s:.6f}"
         )
     if not dist_by_anchor_obj:
         return None

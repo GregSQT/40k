@@ -104,11 +104,9 @@ class LearningRateScheduleCallback(BaseCallback):
                 param_group["lr"] = lr_value
 
     def _on_training_start(self) -> None:
-        print("[TRAIN DEBUG] LearningRateScheduleCallback._on_training_start enter", flush=True)
         progress = min(1.0, self.episode_count / self.total_episodes)
         initial_lr = self.start_lr + (self.end_lr - self.start_lr) * progress
         self._set_model_learning_rate(self.model, initial_lr)
-        print("[TRAIN DEBUG] LearningRateScheduleCallback._on_training_start exit", flush=True)
 
     def _on_step(self) -> bool:
         # Detect episode end using dones array (more reliable than info dict)
@@ -150,11 +148,9 @@ class EntropyScheduleCallback(BaseCallback):
         self.last_update_step = 0
 
     def _on_training_start(self) -> None:
-        print("[TRAIN DEBUG] EntropyScheduleCallback._on_training_start enter", flush=True)
         progress = min(1.0, self.episode_count / self.total_episodes)
         initial_ent = self.start_ent + (self.end_ent - self.start_ent) * progress
         self.model.ent_coef = initial_ent
-        print("[TRAIN DEBUG] EntropyScheduleCallback._on_training_start exit", flush=True)
 
     def _on_step(self) -> bool:
         # Detect episode end using dones array (more reliable than info dict)
@@ -233,12 +229,10 @@ class EpisodeTerminationCallback(BaseCallback):
 
     def _on_training_start(self) -> None:
         """Initialize timing on training start."""
-        print("[TRAIN DEBUG] EpisodeTerminationCallback._on_training_start enter", flush=True)
         import time
         # Only set start_time if not already set (preserves global start time in rotation mode)
         if self.start_time is None:
             self.start_time = time.time()
-        print("[TRAIN DEBUG] EpisodeTerminationCallback._on_training_start exit", flush=True)
 
     def _compute_training_roster_count(self, display_episode_count: int) -> Optional[int]:
         """Compute active training roster count (per side) for progress display."""
@@ -836,7 +830,6 @@ class MetricsCollectionCallback(BaseCallback):
         CRITICAL: Wrap logger.dump to capture PPO metrics BEFORE SB3 clears name_to_value.
         Also force log_interval=1 so dump_logs() runs every iteration (default ~1025 skips most).
         """
-        print("[TRAIN DEBUG] MetricsCollectionCallback._on_training_start enter", flush=True)
         if hasattr(self.model, 'logger') and self.model.logger and hasattr(self, 'metrics_tracker') and self.metrics_tracker:
             _original_dump = self.model.logger.dump
             _tracker = self.metrics_tracker
@@ -869,7 +862,6 @@ class MetricsCollectionCallback(BaseCallback):
                 return _original_dump(step)
 
             self.model.logger.dump = _dump_with_capture
-        print("[TRAIN DEBUG] MetricsCollectionCallback._on_training_start exit", flush=True)
 
     def _on_rollout_start(self) -> None:
         """Called at start of rollout. PPO metrics captured via logger.dump wrapper."""
