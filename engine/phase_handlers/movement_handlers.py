@@ -1000,8 +1000,9 @@ def _build_multi_hex_vectorized(
     enemy_adjacent_hexes: Set[Tuple[int, int]],
     enemy_items: Optional[List[Tuple[Any, Any]]],
     ez: int,
+    fly: bool = False,
 ) -> Tuple[List[Tuple[int, int]], Set[Tuple[int, int]], int]:
-    """BFS multi-hex vectorisé NumPy (cas ``ground``). Gère toutes les formes de socles.
+    """BFS/disk multi-hex vectorisé NumPy (``ground`` et ``fly``). Gère toutes les formes de socles.
 
     Retourne ``(valid_destinations, footprint_zone, visited_count)``.
 
@@ -1092,10 +1093,11 @@ def _build_multi_hex_vectorized(
         m[cs[in_b], rs[in_b]] = True
         return m
 
-    obstacles_traverse = walls_set | enemy_occupied_set
     obstacles_dest_any = walls_set | occupied_set
-    obstacles_traverse_mask = _mask_from_cells(obstacles_traverse)
     obstacles_dest_mask = _mask_from_cells(obstacles_dest_any)
+    if not fly:
+        obstacles_traverse = walls_set | enemy_occupied_set
+        obstacles_traverse_mask = _mask_from_cells(obstacles_traverse)
 
     def _bounds_bad_parity(offsets_arr: "np.ndarray") -> "np.ndarray":
         min_dc = int(offsets_arr[:, 0].min())
@@ -1120,7 +1122,8 @@ def _build_multi_hex_vectorized(
         bounds_bad = np.where(col_parity_mask, bounds_bad_even, bounds_bad_odd)
         return hit | bounds_bad
 
-    bad_traverse = _placement_bad(obstacles_traverse_mask)
+    if not fly:
+        bad_traverse = _placement_bad(obstacles_traverse_mask)
     bad_dest = _placement_bad(obstacles_dest_mask)
 
     # Voisins hex (offset coordinates). Définis ici car utilisés à la fois par la dilatation hex
@@ -1214,27 +1217,41 @@ def _build_multi_hex_vectorized(
     else:
         eng_bad = np.zeros((board_cols, board_rows), dtype=bool)
 
-    traverse_bad = bad_traverse | eng_bad
+    if fly:
+        # FLY: reachable = hex disk (no traversal obstacles). Direct cube-distance computation.
+        cols_arr = np.arange(board_cols, dtype=np.int64)[:, None]
+        rows_arr = np.arange(board_rows, dtype=np.int64)[None, :]
+        x_c = cols_arr
+        z_c = rows_arr - (cols_arr - (cols_arr & 1)) // 2
+        y_c = -x_c - z_c
+        sx_c = np.int64(start_col)
+        sz_c = np.int64(start_row) - (np.int64(start_col) - (np.int64(start_col) & 1)) // 2
+        sy_c = -sx_c - sz_c
+        cube_d = np.maximum(np.abs(x_c - sx_c), np.maximum(np.abs(y_c - sy_c), np.abs(z_c - sz_c)))
+        reach = cube_d <= np.int64(move_range)
+        valid_mask = reach & ~bad_dest & ~eng_bad
+    else:
+        traverse_bad = bad_traverse | eng_bad
 
-    reach = np.zeros((board_cols, board_rows), dtype=bool)
-    reach[start_col, start_row] = True
+        reach = np.zeros((board_cols, board_rows), dtype=bool)
+        reach[start_col, start_row] = True
 
-    allowed = ~traverse_bad
-    allowed[start_col, start_row] = True
+        allowed = ~traverse_bad
+        allowed[start_col, start_row] = True
 
-    for _ in range(int(move_range)):
-        even_src = reach & col_parity_mask
-        odd_src = reach & ~col_parity_mask
-        new_reach = reach.copy()
-        expanded_even = _spread_by_kernel(even_src, nb_even)
-        expanded_odd = _spread_by_kernel(odd_src, nb_odd)
-        new_reach |= expanded_even & allowed
-        new_reach |= expanded_odd & allowed
-        if np.array_equal(new_reach, reach):
-            break
-        reach = new_reach
+        for _ in range(int(move_range)):
+            even_src = reach & col_parity_mask
+            odd_src = reach & ~col_parity_mask
+            new_reach = reach.copy()
+            expanded_even = _spread_by_kernel(even_src, nb_even)
+            expanded_odd = _spread_by_kernel(odd_src, nb_odd)
+            new_reach |= expanded_even & allowed
+            new_reach |= expanded_odd & allowed
+            if np.array_equal(new_reach, reach):
+                break
+            reach = new_reach
 
-    valid_mask = reach & ~bad_dest
+        valid_mask = reach & ~bad_dest
     valid_mask[start_col, start_row] = False
 
     valid_coords_cols, valid_coords_rows = np.where(valid_mask)
@@ -1426,6 +1443,66 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             _fly_off_even, _fly_off_odd = precompute_footprint_offsets(
                 _fly_shape, _fly_base_size, _fly_orient
             )
+
+        # Multi-hex FLY: vectorized NumPy path (cube-distance disk + destination filter).
+        if not _fly_single_hex:
+            _m_bfs_start = _perf_clock.perf_counter() if _pt else None
+            valid_destinations, _fly_fp_zone_vec, fly_visited_n = _build_multi_hex_vectorized(
+                fly=True,
+                game_state=game_state,
+                unit=unit,
+                start_col=start_col,
+                start_row=start_row,
+                move_range=move_range,
+                off_even=_fly_off_even,
+                off_odd=_fly_off_odd,
+                board_cols=board_cols,
+                board_rows=board_rows,
+                walls_set=_fly_walls,
+                enemy_occupied_set=set(),
+                occupied_set=occupied_positions,
+                enemy_adjacent_hexes=enemy_adjacent_hexes,
+                enemy_items=_enemy_items_for_engagement_ez,
+                ez=ez,
+            )
+            _m_bfs_end = _perf_clock.perf_counter() if _pt else None
+            game_state["valid_move_destinations_pool"] = valid_destinations
+            game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
+            if game_state.get("gym_training_mode"):
+                _fly_fp_zone: Set[Tuple[int, int]] = set()
+            else:
+                _fly_fp_zone = _fly_fp_zone_vec
+            game_state["move_preview_footprint_zone"] = _fly_fp_zone
+            game_state["move_preview_border"] = []
+            _m_fly_before_sync = _perf_clock.perf_counter() if _pt else None
+            if not game_state.get("gym_training_mode"):
+                _sync_move_preview_mask_loops(game_state, _fly_fp_zone)
+            _m_fly_done = _perf_clock.perf_counter() if _pt else None
+            if _pt and _m0 is not None and _m_prep_end is not None and _m_bfs_start is not None and _m_bfs_end is not None and _m_fly_before_sync is not None and _m_fly_done is not None:
+                _post_bfs = _m_fly_done - _m_bfs_end
+                _fu = _m_fly_before_sync - _m_bfs_end
+                _ml = _m_fly_done - _m_fly_before_sync
+                append_perf_timing_line(
+                    f"MOVE_POOL_BUILD unit={unit_id} fly=True prep_s={_m_prep_end - _m0:.6f} "
+                    f"bfs_s={_m_bfs_end - _m_bfs_start:.6f} post_bfs_s={_post_bfs:.6f} "
+                    f"footprint_union_s={_fu:.6f} mask_loops_s={_ml:.6f} "
+                    f"total_s={_m_fly_done - _m0:.6f} visited={fly_visited_n} valid={len(valid_destinations)} "
+                    f"anchors_n={len(valid_destinations)} footprint_hex_n={len(_fly_fp_zone)} "
+                    f"MOVE={move_range}"
+                )
+            _log_movement_debug(game_state, "build_valid_destinations", str(unit_id), f"valid_destinations count={len(valid_destinations)} [FLY vectorized]")
+            if game_state.get("debug_mode", False):
+                from engine.game_utils import add_debug_file_log
+                episode = game_state.get("episode_number", "?")
+                turn = game_state.get("turn", "?")
+                add_debug_file_log(
+                    game_state,
+                    f"[MOVE POOL SUMMARY] E{episode} T{turn} Unit {unit_id} [FLY vectorized]: "
+                    f"start=({start_col},{start_row}) move_range={move_range} "
+                    f"visited={fly_visited_n} valid={len(valid_destinations)} "
+                    f"reject_footprint=0",
+                )
+            return valid_destinations
 
         # Precompute per-enemy proximity thresholds to skip engagement check for distant hexes.
         _fly_enemy_proximity_filter: Optional[List[Tuple[int, int, int]]] = None

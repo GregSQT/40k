@@ -609,6 +609,12 @@ def _charge_reverse_goal_bfs_for_eligibility(
     goal_zone = enemy_goal_zone & start_reach_disk
     goal_candidates_n = len(goal_zone)
     skipped_goal_start_lb_n = len(enemy_goal_zone) - goal_candidates_n
+    _TRAINING_GOAL_CAP = 300
+    if game_state.get("gym_training_mode") and goal_candidates_n > _TRAINING_GOAL_CAP:
+        _ec_c = int(sum(c for c, _ in enemy_occupied) / len(enemy_occupied))
+        _er_c = int(sum(r for _, r in enemy_occupied) / len(enemy_occupied))
+        goal_zone = sorted(goal_zone, key=lambda h: hex_distance(h[0], h[1], _ec_c, _er_c))[:_TRAINING_GOAL_CAP]
+        goal_candidates_n = _TRAINING_GOAL_CAP
     enemy_engagement_zones: Dict[Any, Set[Tuple[int, int]]] = {}
     for eid, enemy_entry in indexed_enemy_engagement:
         ec = int(enemy_entry["col"])
