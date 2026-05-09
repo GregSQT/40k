@@ -1233,23 +1233,42 @@ def _build_multi_hex_vectorized(
     else:
         traverse_bad = bad_traverse | eng_bad
 
+        # Deque BFS : visite uniquement les ancres accessibles — O(reachable) au lieu de
+        # O(move_range × board_cols × board_rows) pour le wavefront NumPy.
+        # Sémantique identique : même ensemble d'ancres atteignables en ≤ move_range pas.
+        # traverse_bad (précomputé par _placement_bad) converti en bytearray F-order pour
+        # lookup O(1) cohérent avec l'index nc + nr * board_cols du BFS single-hex.
+        _tb_flat = bytearray(traverse_bad.ravel(order='F').astype(np.uint8))
+
         reach = np.zeros((board_cols, board_rows), dtype=bool)
         reach[start_col, start_row] = True
 
-        allowed = ~traverse_bad
-        allowed[start_col, start_row] = True
+        _vis_bfs = bytearray(board_cols * board_rows)
+        _vis_bfs[start_col + start_row * board_cols] = 1
 
-        for _ in range(int(move_range)):
-            even_src = reach & col_parity_mask
-            odd_src = reach & ~col_parity_mask
-            new_reach = reach.copy()
-            expanded_even = _spread_by_kernel(even_src, nb_even)
-            expanded_odd = _spread_by_kernel(odd_src, nb_odd)
-            new_reach |= expanded_even & allowed
-            new_reach |= expanded_odd & allowed
-            if np.array_equal(new_reach, reach):
-                break
-            reach = new_reach
+        _nb_even_t = ((0, -1), (1, -1), (1, 0), (0, 1), (-1, 0), (-1, -1))
+        _nb_odd_t  = ((0, -1), (1, 0),  (1, 1), (0, 1), (-1, 1), (-1, 0))
+
+        _bfs_queue = deque([(start_col, start_row, 0)])
+        while _bfs_queue:
+            cc, cr, cd = _bfs_queue.popleft()
+            if cd >= move_range:
+                continue
+            nd = cd + 1
+            nb_t = _nb_even_t if (cc & 1) == 0 else _nb_odd_t
+            for dc, dr in nb_t:
+                nc = cc + dc
+                nr = cr + dr
+                if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                    continue
+                _vidx = nc + nr * board_cols
+                if _vis_bfs[_vidx]:
+                    continue
+                if _tb_flat[_vidx]:
+                    continue
+                _vis_bfs[_vidx] = 1
+                reach[nc, nr] = True
+                _bfs_queue.append((nc, nr, nd))
 
         valid_mask = reach & ~bad_dest
     valid_mask[start_col, start_row] = False

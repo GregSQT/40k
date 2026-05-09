@@ -37,6 +37,7 @@ def _gs_single_hex(
         "row": unit_row,
         "BASE_SIZE": 1,
         "BASE_SHAPE": "round",
+        "orientation": 0,
     }
     units_cache: Dict[str, Any] = {
         "u1": {"col": unit_col, "row": unit_row, "player": 1},

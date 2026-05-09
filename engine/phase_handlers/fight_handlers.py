@@ -1047,7 +1047,7 @@ def _fight_prepare_footprint_offsets(
     """
     cache: Dict[str, FightFootprintOffsetPair] = game_state.setdefault("_fight_fp_offset_pair_cache", {})
     uid = str(unit["id"])
-    orient = int(unit.get("orientation", 0))
+    orient = int(unit["orientation"])
     cache_key = (uid, orient)
     if cache_key in cache:
         return cache[cache_key]

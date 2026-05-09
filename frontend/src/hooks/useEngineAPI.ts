@@ -1674,11 +1674,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
             setTargetPreview(null);
             setAttackPreview(null);
-            // Clear HP bar blinking
-            if (blinkingUnits.blinkTimer) {
-              clearInterval(blinkingUnits.blinkTimer);
-            }
-            setBlinkingUnits({ unitIds: [], blinkTimer: null, attackerId: null });
+
             setAdvanceDestinations(advanceDests);
             setPostShootMoveDestinations([]);
             setAdvanceRoll(advanceRollOrRange);
@@ -3476,11 +3472,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setTargetPreview(null);
       // Also clear attackPreview if it exists
       setAttackPreview(null);
-      // Clear HP bar blinking (blinkingUnits)
-      if (blinkingUnits.blinkTimer) {
-        clearInterval(blinkingUnits.blinkTimer);
-      }
-      setBlinkingUnits({ unitIds: [], blinkTimer: null });
       // Change mode immediately to prevent shooting preview from showing
       setMode("select");
 
@@ -3505,7 +3496,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // Backend will return valid_destinations and advance_roll
       // State will be updated in executeAction response handler (will set mode to advancePreview)
     },
-    [executeAction, targetPreview, blinkingUnits]
+    [executeAction, targetPreview]
   );
 
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Cancel advance action
@@ -3550,11 +3541,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     }
     setTargetPreview(null);
     setAttackPreview(null);
-    // Clear HP bar blinking
-    if (blinkingUnits.blinkTimer) {
-      clearInterval(blinkingUnits.blinkTimer);
-    }
-    setBlinkingUnits({ unitIds: [], blinkTimer: null });
     setMode("select");
 
     // Send advance action to backend to trigger 1D6 roll and get destinations
@@ -3562,7 +3548,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       action: "advance",
       unitId: unitId.toString(),
     });
-  }, [advanceWarningPopup, executeAction, targetPreview, blinkingUnits]);
+  }, [advanceWarningPopup, executeAction, targetPreview]);
 
   // Handle advance warning popup cancellation
   const handleCancelAdvanceWarning = useCallback(() => {

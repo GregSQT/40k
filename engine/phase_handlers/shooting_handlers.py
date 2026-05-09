@@ -4413,10 +4413,12 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
             # No weapon selected, end activation
             return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
     
-    # Build valid_target_pool only if missing (pool is source of truth during activation)
-    # shooting_build_valid_target_pool() now correctly determines context
-    # including arg2=1, arg3=0 if unit has advanced
-    if "valid_target_pool" in unit:
+    # Build valid_target_pool only if missing (pool is source of truth during activation).
+    # Exception : si la figurine a avancé depuis la construction du pool (advance_status 0→1),
+    # le pool doit être reconstruit — shooting_build_valid_target_pool lit units_advanced
+    # et filtre les armes selon advance_status=1 (ASSAULT uniquement).
+    _has_advanced = str(unit_id) in require_key(game_state, "units_advanced")
+    if "valid_target_pool" in unit and not _has_advanced:
         valid_targets = unit["valid_target_pool"]
     else:
         valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
@@ -7552,7 +7554,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 "toRow": dest_row,
                 "advance_range": advance_roll,
                 "advance_max_subhex": advance_move_budget,
-                "advance_strategy": require_key(action, "advance_strategy"),
+                "advance_strategy": action.get("advance_strategy"),
                 "actually_moved": actually_moved,
                 "timestamp": "server_time",
             },
@@ -7637,7 +7639,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 "toRow": dest_row,
                 "advance_range": advance_roll,
                 "advance_max_subhex": advance_move_budget,
-                "advance_strategy": require_key(action, "advance_strategy"),
+                "advance_strategy": action.get("advance_strategy"),
                 "actually_moved": actually_moved,
                 "blinking_units": valid_target_pool,
                 "start_blinking": True,
@@ -7656,7 +7658,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 "toRow": dest_row,
                 "advance_range": advance_roll,
                 "advance_max_subhex": advance_move_budget,
-                "advance_strategy": require_key(action, "advance_strategy"),
+                "advance_strategy": action.get("advance_strategy"),
                 "actually_moved": actually_moved
             })
             return success, result
