@@ -1537,8 +1537,10 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         _m_bfs_end = _perf_clock.perf_counter() if _pt else None
         game_state["valid_move_destinations_pool"] = valid_destinations
         game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
-        if _fly_single_hex:
-            _fly_fp_zone: Set[Tuple[int, int]] = set(valid_destinations)
+        if game_state.get("gym_training_mode"):
+            _fly_fp_zone: Set[Tuple[int, int]] = set()
+        elif _fly_single_hex:
+            _fly_fp_zone = set(valid_destinations)
             _fly_fp_zone.add(start_pos)
         else:
             _fly_fp_zone = set()

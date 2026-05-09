@@ -11,7 +11,7 @@
   "bot_eval_use_subprocess": true,
   "bot_eval_n_workers": 6,
   "max_turns_per_episode": 5,
-  "n_envs": 4,
+  "n_envs": 5,
   "n_envs_normal_value": "-----------------------48",
   "callback_params": {
     "checkpoint_save_freq": 10000,

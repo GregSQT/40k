@@ -7552,7 +7552,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 "toRow": dest_row,
                 "advance_range": advance_roll,
                 "advance_max_subhex": advance_move_budget,
-                "advance_strategy": action.get("advance_strategy", 0),
+                "advance_strategy": require_key(action, "advance_strategy"),
                 "actually_moved": actually_moved,
                 "timestamp": "server_time",
             },
@@ -7637,7 +7637,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 "toRow": dest_row,
                 "advance_range": advance_roll,
                 "advance_max_subhex": advance_move_budget,
-                "advance_strategy": action.get("advance_strategy", 0),
+                "advance_strategy": require_key(action, "advance_strategy"),
                 "actually_moved": actually_moved,
                 "blinking_units": valid_target_pool,
                 "start_blinking": True,
@@ -7656,7 +7656,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 "toRow": dest_row,
                 "advance_range": advance_roll,
                 "advance_max_subhex": advance_move_budget,
-                "advance_strategy": action.get("advance_strategy", 0),
+                "advance_strategy": require_key(action, "advance_strategy"),
                 "actually_moved": actually_moved
             })
             return success, result
@@ -7698,7 +7698,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
 
         if (is_gym_training or is_pve_ai) and movable_destinations:
             # Auto-select destination using the strategy carried by the action dict (default: aggressive)
-            strategy_id = action.get("advance_strategy", 0)
+            strategy_id = require_key(action, "advance_strategy")
             best_dest = _select_strategic_destination(strategy_id, movable_destinations, unit, game_state)
 
             # Recursively call with destination — pass pool to skip second BFS
