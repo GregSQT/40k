@@ -123,9 +123,11 @@ def _resolve_scenario_path(scenario_name: str) -> str:
     """Resolve scenario path from scenario name (no fallbacks)."""
     if not scenario_name or scenario_name == "Unknown":
         raise ValueError("Scenario name is missing or unknown; cannot resolve objectives mapping")
-    candidate_names = [scenario_name]
-    if not scenario_name.endswith(".json"):
-        candidate_names.append(f"{scenario_name}.json")
+    # Temporary ref-mixed scenarios have suffix "__<hash>" — strip it to find the base file.
+    base_name = scenario_name.split("__", 1)[0] if "__" in scenario_name else scenario_name
+    candidate_names = [base_name]
+    if not base_name.endswith(".json"):
+        candidate_names.append(f"{base_name}.json")
     candidate_paths = []
     for name in candidate_names:
         candidate_paths.append(os.path.join(project_root, name))

@@ -4,6 +4,7 @@ Utilise AnalyzerState (state) et AnalyzerConfig (config) pour tout état mutable
 """
 
 import re
+from typing import Dict
 
 from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance
@@ -92,6 +93,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         f"Objectives line missing payload in episode {state.current_episode_num}: {line.strip()[:200]}"
                     )
                 state.objective_hexes = {}
+                # For temp scenarios (name contains __<hash>), the objectives file is gone;
+                # build name→id from position so we can still parse the log.
+                _inline_name_to_id: Dict[str, int] = {}
+                _inline_next_id: int = 1
                 for entry in objectives_payload.split('|'):
                     entry = entry.strip()
                     if not entry:
@@ -109,12 +114,14 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         obj_id = int(obj_id_match.group(1))
                     else:
                         objective_name_map = _get_objective_name_to_id_map(state.current_scenario)
-                        if name_part not in objective_name_map:
-                            raise ValueError(
-                                f"Invalid objective name '{name_part}' in episode {state.current_episode_num} "
-                                f"(no mapping found in scenario '{state.current_scenario}')"
-                            )
-                        obj_id = objective_name_map[name_part]
+                        if name_part in objective_name_map:
+                            obj_id = objective_name_map[name_part]
+                        else:
+                            # Temp scenario: assign sequential id from position in this line.
+                            if name_part not in _inline_name_to_id:
+                                _inline_name_to_id[name_part] = _inline_next_id
+                                _inline_next_id += 1
+                            obj_id = _inline_name_to_id[name_part]
                     if obj_id in state.objective_hexes:
                         raise ValueError(
                             f"Duplicate objective id {obj_id} in episode {state.current_episode_num}"

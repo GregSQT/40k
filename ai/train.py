@@ -4666,11 +4666,8 @@ def main():
             if not isinstance(scenario_scores, dict) or not scenario_scores:
                 raise ValueError("eval-only requires non-empty scenario_scores in evaluation results")
 
-            bot_scores = {
-                "random": float(require_key(results, "random")),
-                "greedy": float(require_key(results, "greedy")),
-                "defensive": float(require_key(results, "defensive")),
-            }
+            bot_eval_weights = require_key(require_key(training_config, "callback_params"), "bot_eval_weights")
+            bot_scores = {bn: float(require_key(results, bn)) for bn in bot_eval_weights}
             worst_bot_name, worst_bot_score = min(bot_scores.items(), key=lambda item: item[1])
 
             worst_scenario_name = None
