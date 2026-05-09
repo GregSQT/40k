@@ -475,13 +475,24 @@ def _fight_pile_in_closest_enemy_snapshot(
     unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
     unit_player = int(unit["player"]) if unit["player"] is not None else None
 
+    d_cap: Optional[int] = None
+    for ce in units_cache.values():
+        if int(ce["player"]) == unit_player:
+            continue
+        approx = abs(unit_col - int(ce["col"])) + abs(unit_row - int(ce["row"]))
+        if d_cap is None or approx < d_cap:
+            d_cap = approx
+
     d_min: Optional[int] = None
     closest_ids: List[str] = []
     for enemy_id, cache_entry in units_cache.items():
         if int(cache_entry["player"]) == unit_player:
             continue
         enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-        d = min_distance_between_sets(unit_fp, enemy_fp)
+        cap = min(d_cap, d_min) if d_min is not None else d_cap
+        d = min_distance_between_sets(unit_fp, enemy_fp, max_distance=cap if cap is not None else 0)
+        if d_min is not None and d > d_min:
+            continue
         if d_min is None or d < d_min:
             d_min = d
             closest_ids = [str(enemy_id)]
@@ -921,7 +932,8 @@ def _fight_apply_pile_in_move(
     orig_col, orig_row = require_unit_position(unit, game_state)
     unit_id_str = str(unit["id"])
     occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
-    candidate_fp = compute_candidate_footprint(dest_col_i, dest_row_i, unit, game_state)
+    fp_pair = _fight_prepare_footprint_offsets(unit, game_state)
+    candidate_fp = _candidate_footprint_fight(dest_col_i, dest_row_i, unit, game_state, fp_pair)
     if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
         raise ValueError(
             f"Pile in illegal placement unit={unit_id_str} dest=({dest_col_i},{dest_row_i})"
@@ -1314,7 +1326,14 @@ def _fight_plan_consolidation_destinations(
         fp_by_anchor = fp_out
 
     if has_enemy:
+        _t_snapshot0 = time.perf_counter() if _cons_pf else None
         start_d_min, closest_ids = _fight_pile_in_closest_enemy_snapshot(game_state, unit)
+        if _cons_pf and _t_snapshot0 is not None:
+            append_perf_timing_line(
+                f"FIGHT_CONSOLIDATION_SNAPSHOT unitId={unit_id_str!r} "
+                f"enemy_n={len(closest_ids)} d_min={start_d_min} "
+                f"snapshot_s={time.perf_counter() - _t_snapshot0:.6f}"
+            )
         if start_d_min > 1:
             _ensure_consolidation_bfs()
             assert visited is not None and fp_by_anchor is not None
