@@ -124,7 +124,7 @@ interface ReplayEpisode {
   scenario: string;
   bot_name: string;
   win_method?: string | null;
-  board: { cols: number; rows: number; inches_to_subhex: number };
+  board: { cols: number; rows: number; inches_to_subhex: number; hex_radius: number; margin: number };
   initial_state: ReplayGameState;
   actions: ReplayAction[];
   states: ReplayGameState[];
@@ -225,6 +225,7 @@ export const BoardReplay: React.FC = () => {
   const showHexCoordinates = settings.showDebug;
 
   const playbackInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const replayFootprintZoneRef = useRef<Set<string>>(new Set());
 
   // Initialize UnitFactory registry on mount
   useEffect(() => {
@@ -295,8 +296,23 @@ export const BoardReplay: React.FC = () => {
 
   // Enrich units with stats from UnitFactory
   const enrichUnitsWithStats = useCallback(
-    (units: Unit[]): Unit[] => {
+    (units: Unit[], inchesToSubhex: number): Unit[] => {
       if (!unitRegistryReady) return units;
+
+      const scaleBaseSize = (
+        raw: number | [number, number] | undefined
+      ): number | [number, number] | undefined => {
+        if (typeof raw === "number") {
+          return Math.max(1, Math.round((raw * inchesToSubhex) / 10));
+        }
+        if (Array.isArray(raw) && raw.length >= 2) {
+          return [
+            Math.max(1, Math.round((raw[0] * inchesToSubhex) / 10)),
+            Math.max(1, Math.round((raw[1] * inchesToSubhex) / 10)),
+          ] as [number, number];
+        }
+        return raw;
+      };
 
       return units.map((unit) => {
         try {
@@ -311,6 +327,11 @@ export const BoardReplay: React.FC = () => {
             // This is the hardcoded placeholder value, reset to correct HP_MAX
             currentHp = correctHpMax;
           }
+
+          const rawBaseSize = (UnitClass as Record<string, unknown>).BASE_SIZE as
+            | number
+            | [number, number]
+            | undefined;
 
           return {
             ...unit,
@@ -334,10 +355,7 @@ export const BoardReplay: React.FC = () => {
             ICON: UnitClass.ICON || "",
             ICON_SCALE: UnitClass.ICON_SCALE || 1,
             ILLUSTRATION_RATIO: UnitClass.ILLUSTRATION_RATIO,
-            BASE_SIZE: (UnitClass as Record<string, unknown>).BASE_SIZE as
-              | number
-              | [number, number]
-              | undefined,
+            BASE_SIZE: scaleBaseSize(rawBaseSize),
             BASE_SHAPE: (UnitClass as Record<string, unknown>).BASE_SHAPE as
               | "round"
               | "oval"
@@ -451,7 +469,7 @@ export const BoardReplay: React.FC = () => {
     // Action index N = state after Nth action (states[N-1])
     if (clampedActionIndex === 0) {
       // Enrich initial state units with stats
-      const enrichedUnits = enrichUnitsWithStats(episode.initial_state.units || []);
+      const enrichedUnits = enrichUnitsWithStats(episode.initial_state.units || [], episode.board.inches_to_subhex);
       return {
         ...episode.initial_state,
         units: enrichedUnits,
@@ -467,7 +485,7 @@ export const BoardReplay: React.FC = () => {
       }
 
       // Enrich state units with stats
-      const enrichedUnits = enrichUnitsWithStats(state?.units || []);
+      const enrichedUnits = enrichUnitsWithStats(state?.units || [], episode.board.inches_to_subhex);
 
       return {
         ...state,
@@ -606,7 +624,7 @@ export const BoardReplay: React.FC = () => {
       }
 
       const ocByPosition: Record<string, { p1: number; p2: number }> = {};
-      const enrichedUnits = enrichUnitsWithStats(state.units || []);
+      const enrichedUnits = enrichUnitsWithStats(state.units || [], currentEpisode.board.inches_to_subhex);
       for (const unit of enrichedUnits) {
         if ((unit.HP_CUR ?? 0) <= 0) {
           continue;
@@ -1482,7 +1500,7 @@ export const BoardReplay: React.FC = () => {
         stateAfterAction?.units &&
         isObjectiveScoringWindow(action, i, turnNumber)
       ) {
-        const enrichedObjectiveUnits = enrichUnitsWithStats(stateAfterAction.units as Unit[]);
+        const enrichedObjectiveUnits = enrichUnitsWithStats(stateAfterAction.units as Unit[], currentEpisode.board.inches_to_subhex);
         logObjectiveControlChanges(
           enrichedObjectiveUnits,
           objectives,
@@ -2170,6 +2188,7 @@ export const BoardReplay: React.FC = () => {
           }
           return [];
         }}
+        footprintZoneRef={replayFootprintZoneRef}
         chargePreviewOverlayHexes={[]}
         chargeReferenceHex={null}
         getAdvanceDestinations={(unitId: number) => {
@@ -2310,6 +2329,7 @@ export const BoardReplay: React.FC = () => {
         fightTargetId={fightTargetId}
         chargeRoll={chargeRoll}
         chargeSuccess={chargeSuccess}
+        boardConfigOverride={currentEpisode!.board}
         wallHexesOverride={currentState.walls}
         objectivesOverride={currentState.objectives}
         availableCellsOverride={(() => {

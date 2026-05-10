@@ -147,7 +147,7 @@ interface ReplayEpisodeDuringParsing {
   walls: Array<{ col: number; row: number }>;
   objectives: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>;
   rules?: ReplayRules;
-  board: { cols: number; rows: number; inches_to_subhex: number } | null;
+  board: { cols: number; rows: number; inches_to_subhex: number; hex_radius: number; margin: number } | null;
   final_result: string | null;
 }
 
@@ -157,7 +157,7 @@ interface ReplayEpisode {
   scenario: string;
   bot_name: string;
   win_method?: string | null;
-  board: { cols: number; rows: number; inches_to_subhex: number };
+  board: { cols: number; rows: number; inches_to_subhex: number; hex_radius: number; margin: number };
   initial_state: ReplayGameState;
   actions: ReplayAction[];
   states: ReplayGameState[];
@@ -280,12 +280,14 @@ export function parse_log_file_from_text(text: string): ReplayData {
     }
 
     // Board config
-    const boardMatch = trimmed.match(/Board: cols=(\d+) rows=(\d+) inches_to_subhex=(\d+)/);
+    const boardMatch = trimmed.match(/Board: cols=(\d+) rows=(\d+) inches_to_subhex=(\d+) hex_radius=([\d.]+) margin=([\d.]+)/);
     if (boardMatch) {
       currentEpisode.board = {
         cols: parseInt(boardMatch[1], 10),
         rows: parseInt(boardMatch[2], 10),
         inches_to_subhex: parseInt(boardMatch[3], 10),
+        hex_radius: parseFloat(boardMatch[4]),
+        margin: parseFloat(boardMatch[5]),
       };
       continue;
     }
@@ -320,7 +322,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
     // Unit starting positions
     const unitStart = trimmed.match(
-      /Unit (\d+) \((.+?)\)(?: \[[^\]]+\])? P(\d+): Starting position \((-?\d+),\s*(-?\d+)\),\s*HP_MAX=(\d+)/
+      /Unit (\d+) \((.+?)\)(?: \[[^\]]+\])? P(\d+): Starting position \((-?\d+),\s*(-?\d+)\),\s*HP_MAX=(\d+)(?: base=(\w+)\/(\d+))?/
     );
     if (unitStart) {
       const unitId = parseInt(unitStart[1], 10);
@@ -332,6 +334,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       if (Number.isNaN(unitHP) || unitHP <= 0) {
         throw new Error(`Invalid HP_MAX in step.log unit start line: ${trimmed}`);
       }
+      const parsedBaseSize = unitStart[8] !== undefined ? parseInt(unitStart[8], 10) : undefined;
 
       currentEpisode.units[unitId] = {
         id: unitId,
@@ -348,6 +351,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
         ARMOR_SAVE: 0,
         RNG_WEAPONS: [],
         CC_WEAPONS: [],
+        ...(parsedBaseSize !== undefined ? { BASE_SIZE: parsedBaseSize } : {}),
       };
       currentEpisode.initial_positions[unitId] = { col, row };
       continue;

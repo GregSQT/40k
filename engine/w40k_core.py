@@ -1211,10 +1211,16 @@ class W40KEngine(gym.Env):
                     "player": entry["player"],
                     "unitType": unit_type,
                     "HP_MAX": hp_max,
+                    "BASE_SIZE": require_key(unit, "BASE_SIZE"),
+                    "BASE_SHAPE": require_key(unit, "BASE_SHAPE"),
                 })
             board_cols = self.game_state["board_cols"]
             board_rows = self.game_state["board_rows"]
             inches_to_subhex = self.game_state["inches_to_subhex"]
+            _board_default = require_key(self.config, "board")
+            _board_default = _board_default.get("default", _board_default)
+            hex_radius = require_key(_board_default, "hex_radius")
+            margin = require_key(_board_default, "margin")
             self.step_logger.log_episode_start(
                 episode_units,
                 scenario_name,
@@ -1223,7 +1229,13 @@ class W40KEngine(gym.Env):
                 objectives=objectives,
                 primary_objective_config=self._scenario_primary_objective,
                 roster_info=getattr(self, "_scenario_roster_info", None),
-                board_config={"cols": board_cols, "rows": board_rows, "inches_to_subhex": inches_to_subhex},
+                board_config={
+                    "cols": board_cols,
+                    "rows": board_rows,
+                    "inches_to_subhex": inches_to_subhex,
+                    "hex_radius": hex_radius,
+                    "margin": margin,
+                },
             )
             
             # CRITICAL: Synchronize game_state["episode_number"] with step_logger.episode_number

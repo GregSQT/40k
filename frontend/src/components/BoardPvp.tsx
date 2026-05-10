@@ -455,6 +455,7 @@ type BoardProps = {
   showAdvanceWarningPopup?: boolean; // If false, skip advance warning popup
   /** Tutoriel : masquer l’icône Advance au-dessus des unités pendant certains steps. */
   hideAdvanceIconForTutorial?: boolean;
+  boardConfigOverride?: { cols: number; rows: number; hex_radius: number; margin: number; inches_to_subhex: number };
   wallHexesOverride?: Array<{ col: number; row: number }>; // For replay mode: override walls from log
   availableCellsOverride?: Array<{ col: number; row: number }>; // Replay / pile in : surbrillance des hexes disponibles
   deploymentState?: GameState["deployment_state"];
@@ -689,6 +690,7 @@ export default function Board({
   onSkipAdvanceWarning: _onSkipAdvanceWarning,
   showAdvanceWarningPopup: _showAdvanceWarningPopup = false,
   hideAdvanceIconForTutorial = false,
+  boardConfigOverride,
   wallHexesOverride,
   availableCellsOverride,
   deploymentState,
@@ -774,7 +776,10 @@ export default function Board({
   );
 
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
-  const { boardConfig, gameConfig, loading, error } = useGameConfig();
+  const { boardConfig: _boardConfigFromHook, gameConfig, loading, error } = useGameConfig();
+  const boardConfig = boardConfigOverride && _boardConfigFromHook
+    ? { ..._boardConfigFromHook, ...boardConfigOverride }
+    : _boardConfigFromHook;
   // ✅ STABLE CALLBACK REFS - Don't change on every render
   const stableCallbacks = useRef<{
     onSelectUnit: (id: number | string | null) => void;
@@ -2827,6 +2832,38 @@ export default function Board({
           s.add(`${Number(c.col)},${Number(c.row)}`);
         }
         resolvedMoveDestPoolRef.current = s;
+      }
+    }
+
+    // Replay mode : footprintZoneRef jamais peuplé par l'API → calculer client-side
+    // depuis les anchors (resolvedMoveDestPoolRef) + position courante, en expandant
+    // chaque anchor via computeOccupiedHexes (identique à movement_handlers.py côté moteur).
+    if (
+      footprintZoneRef?.current &&
+      footprintZoneRef.current.size === 0 &&
+      resolvedMoveDestPoolRef.current.size > 0 &&
+      selectedUnitId !== null
+    ) {
+      const selUnit = units.find((u) => String(u.id) === String(selectedUnitId));
+      if (selUnit) {
+        const baseSize = typeof selUnit.BASE_SIZE === "number" ? selUnit.BASE_SIZE : 1;
+        const baseShape = typeof selUnit.BASE_SHAPE === "string" ? selUnit.BASE_SHAPE : "round";
+        const fpZone = new Set<string>();
+        const anchors = [...resolvedMoveDestPoolRef.current, `${Number(selUnit.col)},${Number(selUnit.row)}`];
+        for (const key of anchors) {
+          const parts = key.split(",");
+          const ac = Number(parts[0]);
+          const ar = Number(parts[1]);
+          if (baseShape === "round" && baseSize > 1) {
+            const occupied = computeOccupiedHexes(ac, ar, baseShape, baseSize);
+            for (const hex of occupied) {
+              fpZone.add(`${hex[0]},${hex[1]}`);
+            }
+          } else {
+            fpZone.add(key);
+          }
+        }
+        footprintZoneRef.current = fpZone;
       }
     }
 
