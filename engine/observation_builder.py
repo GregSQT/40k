@@ -82,8 +82,9 @@ class ObservationBuilder:
         "SUSTAINED_HITS",
     })
     _WEAPON_RULE_OBS_ALIAS = {
-        # Keep observation size/model compatibility: ANTI_INFANTRY shares the ANTI_VEHICLE channel.
+        # Keep observation size/model compatibility: ANTI_X rules share the ANTI_VEHICLE channel.
         "ANTI_INFANTRY": "ANTI_VEHICLE",
+        "ANTI_FLY": "ANTI_VEHICLE",
     }
     _WEAPON_RULE_PARAMETER_NORMALIZATION = 6.0
     

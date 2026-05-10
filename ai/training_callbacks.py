@@ -1307,6 +1307,7 @@ class MetricsCollectionCallback(BaseCallback):
                         'objectives': 0,
                         'value_tiebreaker': 0,
                         'draw': 0,
+                        'step_limit': 0,
                     }
                 if win_method not in self.win_method_counts:
                     raise ValueError(f"Unexpected win_method '{win_method}'")
@@ -1323,6 +1324,10 @@ class MetricsCollectionCallback(BaseCallback):
                 self.model.logger.record(
                     'game_critical/win_method_draw_rate',
                     float(self.win_method_counts['draw']) / win_method_total
+                )
+                self.model.logger.record(
+                    'game_critical/win_method_step_limit_rate',
+                    float(self.win_method_counts['step_limit']) / win_method_total
                 )
 
                 if len(self.win_rate_window) >= 10:

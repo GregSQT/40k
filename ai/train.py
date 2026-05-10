@@ -3303,14 +3303,19 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         model_gating_min_combined = None
         model_gating_min_worst_bot = None
         model_gating_min_worst_scenario_combined = None
-        if model_gating_enabled:
-            model_gating_min_combined = float(_resolve_callback_value("model_gating_min_combined"))
+        if model_gating_enabled or save_best_robust:
+            if model_gating_enabled:
+                model_gating_min_combined = float(_resolve_callback_value("model_gating_min_combined"))
             model_gating_min_worst_bot = float(_resolve_callback_value("model_gating_min_worst_bot"))
             model_gating_min_worst_scenario_combined = float(
                 _resolve_callback_value("model_gating_min_worst_scenario_combined")
             )
             for key, value in (
-                ("model_gating_min_combined", model_gating_min_combined),
+                *(
+                    [("model_gating_min_combined", model_gating_min_combined)]
+                    if model_gating_enabled
+                    else []
+                ),
                 ("model_gating_min_worst_bot", model_gating_min_worst_bot),
                 ("model_gating_min_worst_scenario_combined", model_gating_min_worst_scenario_combined),
             ):
@@ -4331,8 +4336,14 @@ def main():
                        help="Enable debug console output (verbose logging)")
     parser.add_argument("--param", action="append", nargs=2, metavar=("KEY", "VALUE"),
                        help="Override config parameter (e.g. n_steps 10240 or model_params.batch_size 2048). Can be repeated.")
-    
+    parser.add_argument("--resolution", type=int, choices=[1, 10], default=None,
+                       help="Board resolution: 1 (25x21, fast) or 10 (360x312, full). Overrides W40K_BOARD_PATH env var.")
+
     args = parser.parse_args()
+
+    _RESOLUTION_TO_BOARD = {1: "board/25x21", 10: "board/360x312"}
+    if args.resolution is not None:
+        os.environ["W40K_BOARD_PATH"] = _RESOLUTION_TO_BOARD[args.resolution]
     args.test_only = args.test_only or args.eval
 
     # Default rewards-config to agent when agent is set (simplifies: --agent X implies rewards X)
@@ -4369,6 +4380,8 @@ def main():
     print(f"Step logging: {args.step}")
     print(f"Rule-checker mode: {args.rule_checker}")
     print(f"Debug mode: {args.debug}")
+    if args.resolution is not None:
+        print(f"Resolution: x{args.resolution} ({_RESOLUTION_TO_BOARD[args.resolution]})")
     if args.mode:
         print(f"Device mode: {args.mode}")
     if getattr(args, "param", None):

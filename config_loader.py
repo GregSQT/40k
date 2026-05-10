@@ -191,16 +191,24 @@ class ConfigLoader:
         )
     
     def get_board_config(self) -> Dict[str, Any]:
-        """Get board configuration from config/board/{paths.board}/board_config.json."""
-        config = self.load_config("config", force_reload=False)
-        board_subdir = config.get("paths", {}).get("board")
-        if board_subdir:
-            board_path = self.config_dir / board_subdir / "board_config.json"
+        """Get board configuration from config/board/{paths.board}/board_config.json.
+
+        W40K_BOARD_PATH env var overrides config.json paths.board (training use only).
+        Example: W40K_BOARD_PATH=board/25x21 python3 ai/train.py ...
+        """
+        board_override = os.environ.get("W40K_BOARD_PATH", "").strip()
+        if board_override:
+            board_path = self.config_dir / board_override / "board_config.json"
         else:
-            board_path = self.config_dir / "board_config.json"
+            config = self.load_config("config", force_reload=False)
+            board_subdir = config.get("paths", {}).get("board")
+            if board_subdir:
+                board_path = self.config_dir / board_subdir / "board_config.json"
+            else:
+                board_path = self.config_dir / "board_config.json"
         if not board_path.exists():
             raise FileNotFoundError(f"Board config not found: {board_path}")
-        cache_key = "board_config"
+        cache_key = f"board_config__{board_override}"
         if cache_key in self._cache:
             return self._cache[cache_key]
         try:

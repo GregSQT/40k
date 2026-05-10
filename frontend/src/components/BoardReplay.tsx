@@ -114,8 +114,6 @@ interface ReplayRules {
 // Extended GameState for replay mode (with additional properties from parser)
 interface ReplayGameState extends Omit<GameState, "episode_steps"> {
   episode_steps?: number; // Optional in replay mode
-  board_cols?: number;
-  board_rows?: number;
   walls?: Array<{ col: number; row: number }>;
   objectives?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>;
   rules?: ReplayRules;
@@ -126,6 +124,7 @@ interface ReplayEpisode {
   scenario: string;
   bot_name: string;
   win_method?: string | null;
+  board: { cols: number; rows: number; inches_to_subhex: number };
   initial_state: ReplayGameState;
   actions: ReplayAction[];
   states: ReplayGameState[];
@@ -157,7 +156,7 @@ const requireReplayLogMessage = (action: ReplayAction, actionType: string): stri
 };
 
 export const BoardReplay: React.FC = () => {
-  const { gameConfig, boardConfig } = useGameConfig();
+  const { gameConfig } = useGameConfig();
   const gameLog = useGameLog();
 
   // Replay data
@@ -1930,12 +1929,6 @@ export const BoardReplay: React.FC = () => {
       ? currentAction.unit_id // Use real unit ID so icon shows on preview at destination, not on ghost
       : null;
 
-  const inchesToSubhexForReplay =
-    boardConfig !== null &&
-    typeof (boardConfig as unknown as Record<string, unknown>).inches_to_subhex === "number"
-      ? (boardConfig as unknown as { inches_to_subhex: number }).inches_to_subhex
-      : 1;
-
   const resolveAdvanceMoveBudget = (action: ReplayAction | null | undefined): number => {
     if (!action || action.type !== "advance") return 0;
     if (typeof action.advance_max_subhex === "number" && action.advance_max_subhex > 0) {
@@ -1943,7 +1936,10 @@ export const BoardReplay: React.FC = () => {
     }
     const roll = action.advance_roll;
     if (roll === undefined || roll <= 0) return 0;
-    return roll * inchesToSubhexForReplay;
+    if (!currentEpisode) {
+      throw new Error("resolveAdvanceMoveBudget: currentEpisode is null");
+    }
+    return roll * currentEpisode.board.inches_to_subhex;
   };
 
   // For move actions, select the ghost unit to show movement range
@@ -2072,8 +2068,8 @@ export const BoardReplay: React.FC = () => {
 
             // Helper function to check if hex is traversable
             const isTraversable = (col: number, row: number): boolean => {
-              const boardCols = currentState?.board_cols || 25;
-              const boardRows = currentState?.board_rows || 21;
+              const boardCols = currentEpisode!.board.cols;
+              const boardRows = currentEpisode!.board.rows;
 
               // Check bounds
               if (col < 0 || row < 0 || col >= boardCols || row >= boardRows) {
@@ -2227,8 +2223,8 @@ export const BoardReplay: React.FC = () => {
 
             // Helper function to check if hex is traversable (advance cannot end adjacent to enemies)
             const isTraversable = (col: number, row: number): boolean => {
-              const boardCols = currentState?.board_cols || 25;
-              const boardRows = currentState?.board_rows || 21;
+              const boardCols = currentEpisode!.board.cols;
+              const boardRows = currentEpisode!.board.rows;
 
               // Check bounds
               if (col < 0 || row < 0 || col >= boardCols || row >= boardRows) {
@@ -2373,8 +2369,8 @@ export const BoardReplay: React.FC = () => {
               };
 
               const isTraversable = (col: number, row: number): boolean => {
-                const boardCols = currentState?.board_cols || 25;
-                const boardRows = currentState?.board_rows || 21;
+                const boardCols = currentEpisode!.board.cols;
+                const boardRows = currentEpisode!.board.rows;
 
                 if (col < 0 || row < 0 || col >= boardCols || row >= boardRows) {
                   return false;

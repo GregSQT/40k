@@ -1310,7 +1310,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             const allPoolsEmpty =
               chargingPool.length === 0 && activePool.length === 0 && nonActivePool.length === 0;
 
-            if (allPoolsEmpty) {
+            const fightActivePending =
+              (data.game_state as { fight_consolidation_pending?: boolean }).fight_consolidation_pending === true ||
+              Boolean((data.game_state as { fight_pile_in_pending?: boolean }).fight_pile_in_pending);
+
+            if (allPoolsEmpty && !fightActivePending) {
               setTimeout(async () => {
                 await executeAction({ action: "advance_phase", from: "fight" });
               }, 100);

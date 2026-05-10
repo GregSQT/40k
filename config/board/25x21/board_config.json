@@ -2,6 +2,13 @@
   "default": {
     "cols": 25,
     "rows": 21,
+    "inches_to_subhex": 1,
+    "chunk_size": 8,
+    "hex_orientations": 6,
+    "pathfinding": {
+      "max_open_nodes": 200,
+      "time_budget_us": 500
+    },
     "hex_radius": 25,
     "margin": 4,
     "colors": {

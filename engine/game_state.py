@@ -133,7 +133,7 @@ class GameStateManager:
             "ICON_SCALE": config["ICON_SCALE"],
             "ILLUSTRATION_RATIO": require_key(config, "ILLUSTRATION_RATIO"),
             "BASE_SHAPE": config.get("BASE_SHAPE", "round"),
-            "BASE_SIZE": config.get("BASE_SIZE", 1),
+            "BASE_SIZE": max(1, round(config.get("BASE_SIZE", 1) * scale / 10)),
             "orientation": orientation_init,
             "UNIT_RULES": unit_rules,
             "UNIT_KEYWORDS": unit_keywords,

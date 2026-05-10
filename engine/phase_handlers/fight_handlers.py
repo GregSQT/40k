@@ -2526,6 +2526,22 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                     _update_fight_subphase(game_state)
                 return True, result
         
+        if require_key(unit, "ATTACK_LEFT") <= 0:
+            result = end_activation(game_state, unit, PASS, 1, PASS, FIGHT, 0)
+            game_state["active_fight_unit"] = None
+            game_state["valid_fight_targets"] = []
+            result["action"] = "skip"
+            result["skip_reason"] = "no_attacks_remaining"
+            result["phase"] = "fight"
+            result["unitId"] = unit_id
+            if result.get("phase_complete"):
+                phase_result = _fight_phase_complete(game_state)
+                result.update(phase_result)
+            else:
+                _toggle_fight_alternation(game_state)
+                _update_fight_subphase(game_state)
+            return True, result
+
         target_id = action["targetId"]
         return _handle_fight_attack(game_state, unit, target_id, config)
 

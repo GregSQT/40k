@@ -134,7 +134,7 @@ class StepLogger:
         except Exception as e:
             print(f"⚠️ Step logging flush error: {e}")
     
-    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None, primary_objective_config=None, roster_info=None):
+    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None, primary_objective_config=None, roster_info=None, board_config=None):
         """Log episode start with all unit starting positions, walls, and objectives"""
         if not self.enabled:
             return
@@ -221,6 +221,13 @@ class StepLogger:
                     "primary_objective": primary_objective_config
                 }
                 f.write(f"[{timestamp}] Rules: {json.dumps(rules_payload, separators=(',', ':'))}\n")
+
+                if board_config is None:
+                    raise ValueError("board_config is required for episode start logging")
+                cols = require_key(board_config, "cols")
+                rows = require_key(board_config, "rows")
+                inches_to_subhex = require_key(board_config, "inches_to_subhex")
+                f.write(f"[{timestamp}] Board: cols={cols} rows={rows} inches_to_subhex={inches_to_subhex}\n")
 
                 # Log all unit starting positions (already validated above)
                 for unit in units_list:
@@ -364,7 +371,7 @@ class StepLogger:
                 end_col, end_row = details["end_pos"]
                 advance_range = details.get("advance_range")
                 _strategy_labels = {0: "aggressive", 1: "tactical", 2: "defensive", 3: "objective"}
-                strategy_label = _strategy_labels.get(require_key(details, "advance_strategy"), "aggressive")
+                strategy_label = _strategy_labels.get(details.get("advance_strategy"), "aggressive")
                 if advance_range is not None and advance_range > 0:
                     base_msg = f"{unit_label} ADVANCED from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {advance_range}] [Strategy: {strategy_label}]"
                 else:

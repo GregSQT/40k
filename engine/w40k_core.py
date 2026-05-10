@@ -1212,6 +1212,9 @@ class W40KEngine(gym.Env):
                     "unitType": unit_type,
                     "HP_MAX": hp_max,
                 })
+            board_cols = self.game_state["board_cols"]
+            board_rows = self.game_state["board_rows"]
+            inches_to_subhex = self.game_state["inches_to_subhex"]
             self.step_logger.log_episode_start(
                 episode_units,
                 scenario_name,
@@ -1219,7 +1222,8 @@ class W40KEngine(gym.Env):
                 walls=walls,
                 objectives=objectives,
                 primary_objective_config=self._scenario_primary_objective,
-                roster_info=getattr(self, "_scenario_roster_info", None)
+                roster_info=getattr(self, "_scenario_roster_info", None),
+                board_config={"cols": board_cols, "rows": board_rows, "inches_to_subhex": inches_to_subhex},
             )
             
             # CRITICAL: Synchronize game_state["episode_number"] with step_logger.episode_number
@@ -4485,10 +4489,13 @@ class W40KEngine(gym.Env):
         bootstrap_config = {"board": {}, "controlled_player": bootstrap_controlled_player}
         if hasattr(self, "training_config") and isinstance(self.training_config, dict):
             bootstrap_config["training_config"] = self.training_config
+        episode_number = None
         if hasattr(self, "game_state") and isinstance(self.game_state, dict):
             episode_number = self.game_state.get("episode_number")
-            if isinstance(episode_number, int) and not isinstance(episode_number, bool):
-                bootstrap_config["_training_episode_index"] = max(0, int(episode_number) - 1)
+        if isinstance(episode_number, int) and not isinstance(episode_number, bool):
+            bootstrap_config["_training_episode_index"] = max(0, int(episode_number) - 1)
+        else:
+            bootstrap_config["_training_episode_index"] = 0
         temp_manager = GameStateManager(
             bootstrap_config,
             unit_registry

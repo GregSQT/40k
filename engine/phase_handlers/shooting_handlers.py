@@ -2010,12 +2010,16 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     from engine.utils.weapon_helpers import get_max_ranged_range, get_selected_ranged_weapon
     from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
 
-    shooter_col, shooter_row = require_unit_position(shooter, game_state)
-    target_col, target_row = require_unit_position(target, game_state)
-
     units_cache = require_key(game_state, "units_cache")
     shooter_id_str = str(shooter["id"])
     target_id_str = str(target["id"])
+
+    if not is_unit_alive(target_id_str, game_state):
+        return False
+
+    shooter_col, shooter_row = require_unit_position(shooter, game_state)
+    target_col, target_row = require_unit_position(target, game_state)
+
     shooter_entry = units_cache.get(shooter_id_str)
     target_entry = units_cache.get(target_id_str)
     shooter_fp = shooter_entry.get("occupied_hexes", {(shooter_col, shooter_row)}) if shooter_entry else {(shooter_col, shooter_row)}
@@ -2023,9 +2027,6 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     max_range = get_max_ranged_range(shooter)
     distance = min_distance_between_sets(shooter_fp, target_fp, max_distance=max_range)
     if distance > max_range:
-        return False
-
-    if not is_unit_alive(target_id_str, game_state):
         return False
 
     target_player = int(target["player"]) if target["player"] is not None else None

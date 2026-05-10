@@ -147,6 +147,7 @@ interface ReplayEpisodeDuringParsing {
   walls: Array<{ col: number; row: number }>;
   objectives: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>;
   rules?: ReplayRules;
+  board: { cols: number; rows: number; inches_to_subhex: number } | null;
   final_result: string | null;
 }
 
@@ -156,6 +157,7 @@ interface ReplayEpisode {
   scenario: string;
   bot_name: string;
   win_method?: string | null;
+  board: { cols: number; rows: number; inches_to_subhex: number };
   initial_state: ReplayGameState;
   actions: ReplayAction[];
   states: ReplayGameState[];
@@ -220,6 +222,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
         bot_name: "Unknown",
         walls: [],
         objectives: [],
+        board: null,
       };
       continue;
     }
@@ -273,6 +276,17 @@ export function parse_log_file_from_text(text: string): ReplayData {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`Invalid Rules JSON in step.log: ${message}`);
       }
+      continue;
+    }
+
+    // Board config
+    const boardMatch = trimmed.match(/Board: cols=(\d+) rows=(\d+) inches_to_subhex=(\d+)/);
+    if (boardMatch) {
+      currentEpisode.board = {
+        cols: parseInt(boardMatch[1], 10),
+        rows: parseInt(boardMatch[2], 10),
+        inches_to_subhex: parseInt(boardMatch[3], 10),
+      };
       continue;
     }
 
@@ -1024,6 +1038,9 @@ export function parse_log_file_from_text(text: string): ReplayData {
     if (!episode.rules) {
       throw new Error(`Missing Rules block for episode ${episode.episode_num}`);
     }
+    if (!episode.board) {
+      throw new Error(`Missing Board block for episode ${episode.episode_num}`);
+    }
     // Build initial units with starting positions (episode.units has been mutated by move parsing)
     const initialUnits = [];
     for (const uid in episode.units) {
@@ -1253,6 +1270,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       scenario: episode.scenario,
       bot_name: episode.bot_name || "Unknown",
       win_method: episode.win_method,
+      board: episode.board,
       initial_state: initialState,
       actions: episode.actions,
       states: states,

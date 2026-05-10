@@ -372,9 +372,9 @@ class ActionDecoder:
             subphase = game_state.get("fight_subphase")
             if subphase == "charging":
                 pool_unit_ids = require_key(game_state, "charging_activation_pool")
-            elif subphase == "alternating_active":
+            elif subphase in ("alternating_active", "cleanup_active"):
                 pool_unit_ids = require_key(game_state, "active_alternating_activation_pool")
-            elif subphase in ("alternating_non_active", "alternating"):
+            elif subphase in ("alternating_non_active", "alternating", "cleanup_non_active"):
                 pool_unit_ids = require_key(game_state, "non_active_alternating_activation_pool")
             else:
                 # Check all pools (all keys required)
