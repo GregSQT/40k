@@ -93,19 +93,19 @@ Le namespace **`0_critical/`** regroupe les 10 métriques essentielles pour le t
 
 ### 3. Tableau des métriques (détail)
 
-| Métrique | Ce que cela mesure | À vérifier | Paramètres à modifier |
-|----------|---------------------|------------|------------------------|
-| **episode_reward_smooth** | Récompense moyenne par épisode (lissée) | Augmentation progressive | Voir Problèmes courants |
-| **win_rate_100ep** | Taux de victoire sur 100 épisodes | Augmentation progressive | ent_coef, récompenses |
-| **bot_eval_combined** | Win rate pondéré vs Random + Greedy + Defensive | >0.55 (Phase 2), >0.70 (Phase 3) | ent_coef, target_kl, net_arch |
-| **loss_mean** | Erreur moyenne (policy + value) | Diminution progressive, pas d’oscillations | learning_rate ↓, vf_coef ↓, n_steps ↓ |
-| **explained_variance** | Variance des returns expliquée par le value model | Cible 0.3–0.5 | n_steps ↑, learning_rate ↓, net_arch ↑ |
-| **clip_fraction** | Proportion des gradients clippés | 0.10–0.30 | learning_rate ↓ si >0.25 ; clip_range ↑ si <0.1 |
-| **approx_kl** | Divergence ancienne/nouvelle politique | ~0.01 | learning_rate ↓ si >0.02 ; target_kl |
-| **entropy_loss** | Diversité des actions | Diminution progressive mais pas trop vite | **ent_coef ↑** si plateau |
-| **gradient_norm** | Norme des gradients | Pas de pics | learning_rate ↓, n_steps ↓ |
-| **immediate_reward_ratio** | Récompenses immédiates / total | Cible 0.5–0.7 | gamma ↓ si >0.9 ; win/lose ↑ |
-| **reward_victory_gap** | Écart mean_reward(gagné) − mean_reward(perdu) | 20–90 bon ; <10 problème | win/lose ↑ ou ↓ |
+| Métrique | Ce que cela mesure | Cible | Paramètres à modifier |
+|----------|---------------------|-------|------------------------|
+| **episode_reward_smooth** | Récompense moyenne par épisode (lissée) | Augmentation progressive | Si stagne → ent_coef ↑, récompenses intermédiaires ↑ ; si chute → learning_rate ↓ |
+| **win_rate_100ep** | Taux de victoire sur 100 épisodes | Augmentation progressive | Si stagne → ent_coef ↑, récompenses win/lose ↑ ; si chute → learning_rate ↓ |
+| **bot_eval_combined** | Win rate pondéré vs Random + Greedy + Defensive | >0.55 (Phase 2), >0.70 (Phase 3) | Si sous la cible → ent_coef ↑, target_kl ↓ ; si chute → learning_rate ↓, net_arch ↑ |
+| **loss_mean** | Erreur moyenne (policy + value) | Diminution progressive, sans oscillations | Si oscille → learning_rate ↓, n_steps ↓ ; si stagne → vf_coef ↓ |
+| **explained_variance** | Variance des returns expliquée par le value model | 0.3 < idéal < 0.7 | Si <0.3 → net_arch ↑, n_steps ↑ ; si stagne sous 0.5 → learning_rate ↓ |
+| **clip_fraction** | Proportion des gradients clippés | 0.10–0.30 | Si >0.30 → learning_rate ↓ ; si <0.10 → clip_range ↑ |
+| **approx_kl** | Divergence ancienne/nouvelle politique | <0.02 (idéal ~0.01) | Si >0.02 → learning_rate ↓, target_kl ↓ ; si <0.005 → learning_rate ↑ |
+| **entropy_loss** | Diversité des actions | Diminution progressive, pas trop rapide | Si chute trop vite → ent_coef ↑ ; si stagne trop haut → ent_coef ↓ |
+| **gradient_norm** | Norme des gradients | <10, sans pics | Si >10 → learning_rate ↓, max_grad_norm ↓ ; si pics → n_steps ↓ |
+| **immediate_reward_ratio** | Récompenses immédiates / total | 0.5–0.7 | Si >0.9 → gamma ↑, win/lose ↑ ; si <0.5 → récompenses intermédiaires ↓ |
+| **reward_victory_gap** | Écart mean_reward(gagné) − mean_reward(perdu) | 20–90 | Si <10 → win/lose ↑ ; si >90 → win/lose ↓, récompenses intermédiaires ↑ |
 
 ### 4. Problèmes courants et actions
 

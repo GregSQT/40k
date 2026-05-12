@@ -1470,7 +1470,9 @@ class BotEvaluationCallback(BaseCallback):
                  phase_progress_total_episodes: Optional[int] = None,
                  phase_progress_episode_offset: int = 0,
                  scenario_pool: str = "training",
-                 async_eval_enabled: bool = True):
+                 async_eval_enabled: bool = True,
+                 early_stopping_patience: int = 0,
+                 save_best_min_episodes: int = 0):
         super().__init__(verbose)
         if not training_config_name or not rewards_config_name:
             raise ValueError("BotEvaluationCallback requires training_config_name and rewards_config_name")
@@ -1536,6 +1538,11 @@ class BotEvaluationCallback(BaseCallback):
         self.phase_progress_total_episodes = phase_progress_total_episodes
         self.phase_progress_episode_offset = int(phase_progress_episode_offset)
         self.scenario_pool = scenario_pool
+        self.early_stopping_patience = int(early_stopping_patience)
+        self.save_best_min_episodes = int(save_best_min_episodes)
+        self.best_tier2_combined = -float('inf')
+        self.evals_without_tier2_improvement = 0
+        self.should_stop_early = False
         self.eval_count = int(initial_episode_marker // eval_freq) if use_episode_freq and eval_freq > 0 else 0
         self.best_combined_win_rate = 0.0
         self.save_best_robust = save_best_robust
@@ -2061,11 +2068,29 @@ class BotEvaluationCallback(BaseCallback):
             self.model.logger.record('eval_bots/combined_win_rate', combined_win_rate)
         self._log_scenario_scores(results)
 
-        if gate_pass and combined_win_rate > self.best_combined_win_rate:
+        if gate_pass and combined_win_rate > self.best_combined_win_rate and eval_marker >= self.save_best_min_episodes:
             self.best_combined_win_rate = combined_win_rate
             if self.best_model_save_path:
                 save_path = f"{self.best_model_save_path}/best_model"
                 self._save_model_with_vecnormalize(save_path)
+
+        if self.early_stopping_patience > 0:
+            _TIER2_KEYS = ('aggressive_smart', 'defensive_smart', 'adaptive')
+            tier2_scores = [float(results[k]) for k in _TIER2_KEYS if k in results]
+            if tier2_scores:
+                tier2_now = sum(tier2_scores) / len(tier2_scores)
+                if tier2_now > self.best_tier2_combined:
+                    self.best_tier2_combined = tier2_now
+                    self.evals_without_tier2_improvement = 0
+                else:
+                    self.evals_without_tier2_improvement += 1
+                    if self.evals_without_tier2_improvement >= self.early_stopping_patience:
+                        print(
+                            f"\n🛑 Early stopping: a2_tier2_combined n'a pas progressé depuis "
+                            f"{self.evals_without_tier2_improvement} évaluations "
+                            f"(best={self.best_tier2_combined:.4f}, current={tier2_now:.4f})"
+                        )
+                        self.should_stop_early = True
 
         self.combined_history.append(combined_win_rate)
         if self.save_best_robust and len(self.combined_history) >= self.robust_window:
@@ -2109,7 +2134,7 @@ class BotEvaluationCallback(BaseCallback):
                     "0_critical/n3_robust_penalty_hard", penalty_hard, step,
                 )
 
-            if gate_pass and robust_score > self.best_robust_score:
+            if gate_pass and robust_score > self.best_robust_score and eval_marker >= self.save_best_min_episodes:
                 previous_robust_model_path = self.best_robust_model_path
                 self.best_robust_score = robust_score
                 self.best_robust_combined = combined_win_rate
@@ -2221,9 +2246,16 @@ class BotEvaluationCallback(BaseCallback):
                 self.last_eval_episode = int(self.metrics_tracker.episode_count)
             if self.async_eval_enabled:
                 self._submit_async_eval(eval_marker)
+                # When early stopping is active, wait for this eval immediately
+                # so the stopping decision is made before continuing training.
+                if self.early_stopping_patience > 0:
+                    self._consume_async_eval_if_ready(force_wait=True)
             else:
                 results = self._evaluate_against_bots(eval_marker)
                 self._apply_eval_results(results, eval_marker)
+
+        if self.should_stop_early:
+            return False
         return True
 
     def _on_training_end(self) -> None:

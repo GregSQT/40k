@@ -3418,6 +3418,8 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                 show_eval_progress=bot_eval_show_progress,
                 phase_progress_total_episodes=(int(total_eps) if phase_label else None),
                 phase_progress_episode_offset=(int(phase_episode_offset) if phase_label else 0),
+                early_stopping_patience=int(callback_params.get("early_stopping_patience", 0)),
+                save_best_min_episodes=int(callback_params.get("save_best_min_episodes", 0)),
             )
             callbacks.append(bot_eval_callback)
         
