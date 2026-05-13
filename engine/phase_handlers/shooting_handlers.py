@@ -4220,7 +4220,8 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
     result.update({
         "action": action_type,
         "unitId": unit["id"],
-        "activation_complete": True
+        "activation_complete": True,
+        "phase": "shoot",
     })
     # Backend is source of truth: when activation really ends and no next unit is auto-activated,
     # explicitly instruct frontend to return to neutral select state.

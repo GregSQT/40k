@@ -1844,6 +1844,8 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['victory_points_diff_controlled_minus_opponent'] = (
                 controlled_vp - opponent_vp
             )
+            samples = self.game_state.get("controlled_objective_samples_turn2_to_5")
+            self.episode_tactical_data['controlled_objective_samples'] = list(samples) if isinstance(samples, list) else []
 
             # Add tactical data to info
             info["tactical_data"] = self.episode_tactical_data.copy()

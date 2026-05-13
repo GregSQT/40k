@@ -15,6 +15,12 @@
     { "id": 10, "unit_type": "AggressorFlamestorm", "player": 1, "col": 40, "row": 50 },
     { "id": 11, "unit_type": "HeavyIntercessor", "player": 1, "col": 60, "row": 50 },
     { "id": 12, "unit_type": "DreadnoughtBallistus", "player": 1, "col": 20, "row": 80 },
+    
+
+
+    { "id": 12, "unit_type": "ApothecaryBiologis", "player": 1, "col": 20, "row": 80 },
+
+    
     { "id": 101, "unit_type": "Termagant", "player": 2, "col": 10, "row": 300 },
     { "id": 102, "unit_type": "Hormagaunt", "player": 2, "col": 25, "row": 300 },
     { "id": 103, "unit_type": "Genestealer", "player": 2, "col": 10, "row": 285 },

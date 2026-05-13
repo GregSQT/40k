@@ -2712,7 +2712,10 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
                     pc, pr = _ai_select_pile_in_destination(
                         game_state, unit, pile_dests, d_min, closest_ids
                     )
-                    _fight_apply_pile_in_move(game_state, unit, pc, pr)
+                    try:
+                        _fight_apply_pile_in_move(game_state, unit, pc, pr)
+                    except ValueError:
+                        pass  # destination became invalid between BFS and application — skip pile-in
                     valid_targets = _fight_build_valid_target_pool(game_state, unit)
                 else:
                     game_state["fight_pile_in_pending"] = True

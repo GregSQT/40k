@@ -1065,15 +1065,25 @@ class MetricsCollectionCallback(BaseCallback):
                         self.episode_tactical_data['damage_dealt'] += damage_dealt
 
                     # COMBAT KILL TRACKING: Log kills to metrics tracker (optional per step)
-                    if is_controlled_action and info.get('target_died', False):  # get allowed
+                    if is_controlled_action:
                         phase = info.get('phase', 'unknown')  # get allowed
-                        if phase == 'shoot':
-                            self.metrics_tracker.log_combat_kill('shoot')
-                        elif phase == 'fight':
-                            self.metrics_tracker.log_combat_kill('melee')
-                        elif phase == 'charge':
-                            # Charge phase kills (rare but possible)
-                            self.metrics_tracker.log_combat_kill('melee')
+                        all_attack_results = info.get('all_attack_results')
+                        if isinstance(all_attack_results, list) and all_attack_results:
+                            # Iterate over individual attack results to count each kill
+                            for attack_result in all_attack_results:
+                                if attack_result.get('target_died', False):
+                                    if phase == 'shoot':
+                                        self.metrics_tracker.log_combat_kill('shoot')
+                                    elif phase in ('fight', 'charge'):
+                                        self.metrics_tracker.log_combat_kill('melee')
+                        elif info.get('target_died', False):  # get allowed
+                            # Fallback for actions without all_attack_results
+                            if phase == 'shoot':
+                                self.metrics_tracker.log_combat_kill('shoot')
+                            elif phase == 'fight':
+                                self.metrics_tracker.log_combat_kill('melee')
+                            elif phase == 'charge':
+                                self.metrics_tracker.log_combat_kill('melee')
 
                     # CHARGE SUCCESS TRACKING: Log successful charges (optional per step)
                     if is_controlled_action and info.get('charge_succeeded', False):  # get allowed
@@ -1347,10 +1357,6 @@ class MetricsCollectionCallback(BaseCallback):
                 invalid_rate = self.episode_tactical_data['invalid_actions'] / total_actions
                 self.model.logger.record('game_critical/invalid_action_rate', invalid_rate)
 
-            if 'victory_points_diff_controlled_minus_opponent' in self.episode_tactical_data:
-                vp_diff = float(self.episode_tactical_data['victory_points_diff_controlled_minus_opponent'])
-                self.model.logger.record('game_critical/victory_points_diff', vp_diff)
-            
             # Dump metrics to TensorBoard
             self.model.logger.dump(step=self.model.num_timesteps)
         
@@ -2126,12 +2132,6 @@ class BotEvaluationCallback(BaseCallback):
                 step = int(eval_marker)
                 self.metrics_tracker.writer.add_scalar(
                     "0_critical/n_robust_current_score", robust_score, step,
-                )
-                self.metrics_tracker.writer.add_scalar(
-                    "0_critical/n2_robust_penalty_bot", penalty_bot, step,
-                )
-                self.metrics_tracker.writer.add_scalar(
-                    "0_critical/n3_robust_penalty_hard", penalty_hard, step,
                 )
 
             if gate_pass and robust_score > self.best_robust_score and eval_marker >= self.save_best_min_episodes:

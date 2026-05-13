@@ -57,30 +57,31 @@
 
 ### 1. Métriques 0_critical (TensorBoard)
 
-Le namespace **`0_critical/`** regroupe les 10 métriques essentielles pour le tuning PPO. Le préfixe `0_` les fait apparaître en premier dans TensorBoard.
+Le namespace **`0_critical/`** regroupe les 11 métriques essentielles pour le tuning PPO. Le préfixe `0_` les fait apparaître en premier dans TensorBoard.
 
 **Organisation** :
-- **a–c** : Performance de jeu (bot_eval, win_rate, episode_reward)
-- **d–h** : Santé PPO (loss, explained_variance, clip_fraction, approx_kl, entropy)
-- **i–j** : Santé technique (gradient_norm, immediate_reward_ratio)
+- **a–c** : Évaluation bot (combined, worst_bot, holdout_hard)
+- **d–e** : Performance training (win_rate, episode_reward)
+- **g–j** : Santé PPO (explained_variance, clip_fraction, approx_kl, entropy)
+- **l–m** : Efficacité tactique (value_trade_ratio, value_loss)
 
-| Métrique | Cible | Contrôle principal | Si mauvais |
-|----------|--------|---------------------|------------|
-| **a_bot_eval_combined** | >0.70 | Récompenses | Ajuster les autres métriques d’abord |
-| **b_win_rate_100ep** | >0.50 | Apprentissage | Vérifier entropy, clip_fraction |
-| **c_episode_reward_smooth** | Tendance croissante | Signal de récompense | Vérifier immediate_reward_ratio |
-| **d_loss_mean** | Tendance décroissante | Stabilité | Réduire learning_rate |
-| **e_explained_variance** | >0.30 | gamma, gae_lambda | Monter à 0.98 |
-| **f_clip_fraction** | 0.1–0.3 | **learning_rate** | Ajuster learning_rate |
-| **g_approx_kl** | <0.02 | learning_rate | Réduire lr, fixer target_kl |
-| **h_entropy_loss** | 0.5–2.0 | **ent_coef** | Augmenter ent_coef (ex. 0.3) |
-| **i_gradient_norm** | <10 | max_grad_norm | Réduire max_grad_norm, learning_rate |
-| **j_immediate_reward_ratio** | <0.90 | **gamma** | Augmenter gamma, revoir récompenses |
+| Métrique | Cible | Contrôle principal | Si trop bas | Si trop haut |
+|----------|--------|---------------------|-------------|--------------|
+| **a_bot_eval_combined** | >0.49 (BEST actuel) | Récompenses + PPO | Ajuster les autres métriques d’abord | — |
+| **b_worst_bot_score** | >0.35 | Diversité d’entraînement | Augmenter diversité des bots dans bot_training.ratios | — |
+| **c_holdout_hard_mean** | >0.10 | Matchup défavorable | Score ≈0 normal (structurel, pas un bug) | — |
+| **d_win_rate_100ep** | >0.50 | Apprentissage général | Vérifier entropy (trop basse) et clip_fraction | — |
+| **e_episode_reward_smooth** | Tendance croissante | Signal de récompense | Vérifier reward config — récompenses intermédiaires trop faibles | Possible reward hacking — vérifier les récompenses exploitées |
+| **g_explained_variance** | >0.30 | gamma, gae_lambda, net_arch | <0.30 : gamma ↑ (→0.98), net_arch ↑, n_steps ↑ | >0.95 : value network saturé — aucune action requise |
+| **h_clip_fraction** | 0.10–0.30 | **learning_rate**, clip_range | <0.05 : politique figée → clip_range ↑ (→0.25) ou ent_coef ↑ | >0.40 : LR trop élevé → learning_rate ↓ (÷2), clip_range ↓ (→0.15) |
+| **i_approx_kl** | 0.01–0.02 | learning_rate, target_kl | <0.005 : apprentissage trop lent → LR ↑ (×1.5) | >0.02 : mise à jour trop agressive → LR ↓ (÷2), fixer target_kl à 0.01–0.015 |
+| **j_entropy_loss** | -2.0 à -0.5 | **ent_coef** | >-0.5 (proche de 0) : politique déterministe → ent_coef ↑ ; si <20ep : restart obligatoire | <-2.0 après 200ep : trop d’exploration → ent_coef ↓ (÷2) |
+| **l_value_trade_ratio** | >1.0 | Récompenses combat | <1.0 : agent perd plus qu’il ne détruit → revoir récompenses kill/combat | — |
+| **m_value_loss_smooth** | Tendance décroissante | learning_rate, vf_coef | Basse et stable : convergence saine — rien à faire | Croissante : LR ↓ (÷2) ; Stagne haute : vf_coef ↑ ou net_arch ↑ |
 
-**Interprétation rapide** :
-- **explained_variance < 0** : value function cassée, corriger en priorité (gamma, récompenses).
-- **immediate_reward_ratio > 0.9** : l’agent n’apprend que le court terme, augmenter gamma et poids win/lose.
-- **entropy_loss trop bas** : politique trop déterministe, augmenter ent_coef.
+**Notes** :
+- **c_holdout_hard_mean ≈ 0** : structurel, pas un bug — holdout hard teste des matchups défavorables par construction.
+- **j_entropy_loss** : valeur TensorBoard toujours négative (`entropy_loss = -entropy`). "Trop haut" = proche de 0 = politique déterministe. "Trop bas" = très négatif (ex. -2.5) = trop d'exploration.
 
 ### 2. Patterns de diagnostic (symptômes → cause)
 
@@ -421,27 +422,28 @@ These are the most important metrics to watch in TensorBoard.
 
 ### **⭐ START HERE: `0_critical/` Dashboard**
 
-The `0_critical/` namespace contains **THE 10 ESSENTIAL METRICS** for hyperparameter tuning. All metrics are smoothed (20-episode rolling average) for clear trends.
+The `0_critical/` namespace contains **THE 11 ESSENTIAL METRICS** for hyperparameter tuning. All metrics are smoothed for clear trends.
 
 **TIP:** Open TensorBoard and navigate to the `0_critical/` namespace first - it contains everything you need for tuning.
 
 | Metric | What It Measures | Target Value | Critical For |
 |--------|------------------|--------------|--------------|
-| **0_critical/a_bot_eval_combined** | Weighted win rate vs all bots | 0.55+ (Phase 2)<br>0.70+ (Phase 3) | **PRIMARY GOAL** - Overall competence |
-| **0_critical/b_win_rate_100ep** | Rolling 100-episode win rate | Phase 1: 60%+<br>Phase 2: 70%+<br>Phase 3: 75%+ | Self-play performance |
-| **0_critical/c_episode_reward_smooth** | Smoothed episode reward | Increasing trend | Learning progress signal |
-| **0_critical/d_loss_mean** | Combined policy + value loss | Decreasing then stable | Training convergence |
-| **0_critical/e_explained_variance** | Value function quality (R²) | >0.70 (Phase 1)<br>>0.85 (Phase 2+) | Value network capacity |
-| **0_critical/f_clip_fraction** | % of clipped policy updates | 0.10-0.30 | Tune `learning_rate` |
-| **0_critical/g_approx_kl** | Policy change magnitude | <0.02 (ideally 0.01-0.015) | Policy stability |
-| **0_critical/h_entropy_loss** | Exploration level | -2.0 to -0.5 (decreasing) | Tune `ent_coef` |
-| **0_critical/i_gradient_norm** | Gradient magnitude | <10 | No gradient explosion |
-| **0_critical/j_immediate_reward_ratio** | Immediate vs total reward | <0.9 | Reward balance check |
+| **0_critical/a_bot_eval_combined** | Weighted win rate vs all holdout bots | >0.49 (BEST actuel: 0.4857) | **PRIMARY GOAL** — sélection du modèle |
+| **0_critical/b_worst_bot_score** | Score vs le bot le plus difficile | >0.35 | Robustesse — pas de point faible structurel |
+| **0_critical/c_holdout_hard_mean** | Score moyen holdout hard (matchup défavorable) | >0.10 (structurellement faible) | Résilience aux matchups difficiles |
+| **0_critical/d_win_rate_100ep** | Rolling 100-episode win rate | >0.50 | Self-play performance |
+| **0_critical/e_episode_reward_smooth** | Smoothed episode reward | Increasing trend | Learning progress signal |
+| **0_critical/g_explained_variance** | Value function quality (R²) | >0.30 | Value network capacity |
+| **0_critical/h_clip_fraction** | % of clipped policy updates | 0.10–0.30 | Tune `learning_rate` — <0.05 = politique trop déterministe |
+| **0_critical/i_approx_kl** | Policy change magnitude | <0.02 (ideally 0.01–0.015) | Policy stability |
+| **0_critical/j_entropy_loss** | Exploration level | -2.0 to -0.5 (decreasing) | Tune `ent_coef` |
+| **0_critical/l_value_trade_ratio** | Valeur détruite / valeur perdue (200ep) | >1.0 | Efficacité tactique — l'agent doit détruire plus qu'il ne perd |
+| **0_critical/m_value_loss_smooth** | Value function loss lissée | Décroissante puis stable | Convergence du value network |
 
 **How to use this dashboard:**
 1. Open TensorBoard: `tensorboard --logdir=./tensorboard/`
 2. Navigate to Scalars → `0_critical/`
-3. Check all 10 metrics are trending correctly
+3. Check all 11 metrics are trending correctly
 4. Use table above to diagnose issues
 
 ---
@@ -598,104 +600,45 @@ These metrics compare agent performance against scripted opponents.
 
 ---
 
-### Combat Effectiveness Metrics
+### `0_game/` Dashboard — Métriques de jeu
 
-These metrics measure the agent's tactical combat performance across different phases of gameplay. They use alphabetical prefixes (a-e) to control TensorBoard sort order and are smoothed using rolling averages.
+Le namespace **`0_game/`** est le second dashboard à consulter après `0_critical/`. Il regroupe les 11 métriques décrivant le comportement tactique de l'agent dans la partie. Tous les metrics sont lissés sur **200 épisodes** (rolling window).
 
-#### `combat/b_shoot_kills`
-**What it is:** Number of enemy units killed by ranged attacks per episode (smoothed over 20 episodes)
+| Métrique | Ce qu'elle mesure | Signal attendu |
+|----------|-------------------|----------------|
+| **0_game/a_vp_diff** | VP agent − VP bot (différentiel) | Croissant → agent gagne le jeu de points |
+| **0_game/b_vp_agent** | VP cumulés de l'agent sur l'épisode | Croissant |
+| **0_game/c_vp_bot** | VP cumulés du bot sur l'épisode | Décroissant (ou agent > bot) |
+| **0_game/d_objectives_held** | Moyenne d'objectifs contrôlés (turns 2–5) | Croissant — agent se positionne stratégiquement |
+| **0_game/e_kill_efficiency** | kills / total_enemies | Croissant |
+| **0_game/f_units_killed** | Unités ennemies éliminées par épisode | Croissant |
+| **0_game/g_units_lost** | Unités alliées perdues par épisode | Décroissant ou stable |
+| **0_game/h_shoot_kills** | Kills en phase de tir | Croissant — ranged = source principale de dégâts |
+| **0_game/i_melee_kills** | Kills en phase de combat (fight) | Croissant |
+| **0_game/j_kill_prob** | Probabilité de kill au combat (fight phase) | Indicateur de ciblage — doit rester >0 |
+| **0_game/k_wait_freq** | Fréquence d'actions "wait" / total actions | Décroissant — agent doit agir, pas attendre |
+| **0_game/ca_kill_rewards** | Récompense kill_target cumulée par épisode (ranged + mêlée) | Croissant — reflète l'activité de kill réelle |
+| **0_game/cb_obj_rewards** | Récompense objectifs per-turn cumulée par épisode (tactical_bonuses) | Croissant — agent tient des objectifs actifs |
 
-**Why it matters:** Measures ranged combat effectiveness - primary damage dealing method.
+#### Lecture combinée
 
-**Interpretation:**
-- **Should increase over time** as agent learns target selection
-- **High values:** Agent effectively using ranged weapons
-- **Low or decreasing:** Agent not prioritizing ranged combat or poor target selection
+**Problème : agent focus kills mais perd les objectifs**
+- `f_units_killed` élevé, `a_vp_diff` négatif, `d_objectives_held` faible
+- → Augmenter `reward_per_objective` et `reward_for_objective_lead` dans rewards_config.json
 
-**Phase targets:**
-- Phase 1: 0.5+ kills per episode (learning basics)
-- Phase 2: 1.0+ kills per episode (competent)
-- Phase 3: 1.5+ kills per episode (expert)
+**Problème : agent passif**
+- `k_wait_freq` élevé, `h_shoot_kills` + `i_melee_kills` faibles
+- → Vérifier `ent_coef` (trop bas = politique déterministe passive)
 
-**Action triggers:**
-- Not increasing → Increase shoot/kill rewards
-- Decreasing → Check if agent is avoiding combat
+**Problème : agent tire mais ne tue pas**
+- `h_shoot_kills` ≈ 0 mais `f_units_killed` > 0 (kills en mêlée seulement)
+- Vérifier la structure `all_attack_results` — cf. `_handle_shooting_end_activation`
 
----
+#### Notes techniques
 
-#### `combat/c_charge_successes`
-**What it is:** Number of successful charge attempts per episode (smoothed over 20 episodes)
-
-**Why it matters:** Measures charge phase effectiveness - agent's ability to close distance and engage in melee.
-
-**Interpretation:**
-- **Should increase over time** as agent learns charge mechanics
-- **High values:** Agent effectively using charges to engage
-- **Low or zero:** Agent not attempting charges or failing charge rolls
-
-**Phase targets:**
-- Phase 1: 0.0-0.2 charges per episode (learning)
-- Phase 2: 0.3-0.5 charges per episode (competent)
-- Phase 3: 0.5+ charges per episode (expert)
-
-**Action triggers:**
-- Consistently zero → Increase charge rewards or check charge mechanics
-- Not increasing → Agent may be too passive or charge distance too restrictive
-
----
-
-#### `combat/d_melee_kills`
-**What it is:** Number of enemy units killed in fight phase per episode (smoothed over 20 episodes)
-
-**Why it matters:** Measures melee combat effectiveness - agent's ability to finish fights.
-
-**Interpretation:**
-- **Should increase over time** as agent learns melee tactics
-- **High values:** Agent effectively using melee combat
-- **Low or zero:** Agent not engaging in melee or losing melee fights
-
-**Phase targets:**
-- Phase 1: 0.0-0.3 kills per episode (learning)
-- Phase 2: 0.3-0.7 kills per episode (competent)
-- Phase 3: 0.7+ kills per episode (expert)
-
-**Action triggers:**
-- Consistently zero → Increase melee/combat rewards
-- Not increasing → Agent may be avoiding melee or losing fights
-
----
-
-#### `combat/e_controlled_objectives`
-**What it is:** Mean number of objectives controlled by Player 0 (learning agent) between turns 2 and 5 included, then smoothed over 20 episodes.
-
-**Why it matters:** Measures strategic objective control - agent's ability to position units to control victory points.
-
-**Important:** This metric is **only logged when the game reaches turn 5 or the configured turn limit**. Episodes ending early by elimination do not contribute.
-
-**Interpretation:**
-- **Higher values:** Agent controlling more objectives (better strategic positioning)
-- **Increasing trend:** Agent learning objective control
-- **Stable high:** Good objective control habits established
-- **Low or decreasing:** Agent not prioritizing objectives
-
-**Phase targets:**
-- Phase 1: 0.0-1.0 objectives (learning basics)
-- Phase 2: 1.0-2.0 objectives (competent)
-- Phase 3: 2.0+ objectives (expert, controlling majority)
-
-**Special considerations:**
-- **Only appears in TensorBoard for episodes that reached turn 5+**
-- **Missing data points are normal** - indicates early eliminations
-- **Less noisy than end-of-episode snapshot** - captures sustained control over turns 2..5
-- **Compare with win rate** - high objective control should correlate with wins
-
-**Action triggers:**
-- Consistently low → Increase objective control rewards
-- Not increasing → Agent may be prioritizing combat over objectives
-- High but losing → Check if agent is controlling wrong objectives or losing units
-
-**Relationship to other metrics:**
-- May trade off with `b_shoot_kills` and `d_melee_kills` (aggressive play vs. defensive positioning)
+- `d_objectives_held` : calculé à partir des échantillons turns 2–5 uniquement (épisodes complets). Normal si absent sur épisodes courts.
+- `j_kill_prob` : issue de la phase fight uniquement. Non loggué si aucun combat en mêlée dans l'épisode.
+- `h_shoot_kills` / `i_melee_kills` : comptage par kill individuel (itération sur `all_attack_results`), pas par activation.
 
 ---
 

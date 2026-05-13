@@ -365,6 +365,18 @@ class RewardCalculator:
             reward_breakdown['base_actions'] = fight_reward
             reward_breakdown['total'] = fight_reward
 
+            # Metric: track kill_target bonus in result_bonuses when a melee kill happens
+            # (breakdown only — does not change the actual step_reward returned to the agent)
+            fight_attack_results = result.get("all_attack_results", [])
+            fight_killed = (
+                any(ar.get("target_died") for ar in fight_attack_results)
+                or bool(result.get("target_died", False))
+            )
+            if fight_killed:
+                unit_rewards = reward_mapper._get_unit_rewards(enriched_unit)
+                result_bonuses_cfg = unit_rewards.get("result_bonuses", {})
+                reward_breakdown['result_bonuses'] = result_bonuses_cfg.get("kill_target", 0.0)
+
             # CRITICAL FIX: Add situational reward if game ended
             if game_state.get("game_over", False):
                 situational_reward = self._get_situational_reward(game_state)

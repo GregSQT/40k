@@ -468,6 +468,81 @@ def _apply_training_hard_weights(
     return weighted_scenario_list
 
 
+def _count_units_from_roster_scenario(scenario_data: Dict[str, Any], scenario_file: str) -> int:
+    """Count units for roster-based scenarios without triggering deployment (avoids O(board_size) cost)."""
+    import glob as _glob
+    scale_name = str(require_key(scenario_data, "scale")).strip()
+    scenario_path_obj = Path(os.path.abspath(scenario_file))
+    parts = scenario_path_obj.parts
+    try:
+        agents_idx = parts.index("agents")
+        scenario_agent_key = parts[agents_idx + 1]
+    except (ValueError, IndexError):
+        raise ValueError(f"Cannot resolve agent key from scenario path: {scenario_file}")
+
+    def _split_from_path(path_str: str) -> str:
+        if "/scenarios/training/" in path_str:
+            return "training"
+        if "/scenarios/holdout_regular/" in path_str:
+            return "holdout_regular"
+        if "/scenarios/holdout_hard/" in path_str:
+            return "holdout_hard"
+        raise ValueError(f"Cannot resolve split from scenario path: {path_str}")
+
+    split = _split_from_path(scenario_file)
+    holdout_split = "holdout" if split != "training" else "training"
+    project_root = Path(os.path.abspath(__file__)).parent.parent
+
+    def _max_count_for_ref(ref_value: str, roster_kind: str) -> int:
+        """Return max unit count across all matching roster files for a given ref."""
+        if isinstance(ref_value, str):
+            ref_stripped = ref_value.strip().replace("\\", "/")
+        else:
+            return 0
+        random_token = f"{holdout_split}_random" if split != "training" else "training_random"
+        if ref_stripped == random_token or ref_stripped.endswith("_random"):
+            actual_split = holdout_split if split != "training" else "training"
+            if roster_kind == "agent":
+                base_dir = project_root / "config" / "agents" / scenario_agent_key / "rosters" / scale_name / actual_split
+                pattern = f"agent_{actual_split}_roster*.json"
+            else:
+                base_dir = project_root / "config" / "agents" / "_p2_rosters" / scale_name / actual_split
+                pattern = f"opponent_{actual_split}_roster*.json"
+            if not base_dir.exists():
+                return 0
+            roster_files = sorted(base_dir.glob(pattern))
+            roster_files = [p for p in roster_files if "_kpis" not in p.name and "_matchups" not in p.name]
+            if not roster_files:
+                return 0
+            max_count = 0
+            for rf in roster_files:
+                try:
+                    rd = json.load(open(rf))
+                    count = sum(int(e["count"]) for e in rd.get("composition", []) if isinstance(e, dict))
+                    max_count = max(max_count, count)
+                except Exception:
+                    pass
+            return max_count
+        else:
+            parts_ref = ref_stripped.split("/")
+            ref_filename = parts_ref[-1] if parts_ref else ref_stripped
+            if roster_kind == "agent":
+                roster_path = project_root / "config" / "agents" / scenario_agent_key / "rosters" / scale_name / ref_stripped
+            else:
+                roster_path = project_root / "config" / "agents" / "_p2_rosters" / scale_name / ref_stripped
+            if not roster_path.exists():
+                return 0
+            try:
+                rd = json.load(open(roster_path))
+                return sum(int(e["count"]) for e in rd.get("composition", []) if isinstance(e, dict))
+            except Exception:
+                return 0
+
+    agent_ref = require_key(scenario_data, "agent_roster_ref")
+    opponent_ref = require_key(scenario_data, "opponent_roster_ref")
+    return _max_count_for_ref(str(agent_ref), "agent") + _max_count_for_ref(str(opponent_ref), "opponent")
+
+
 def _load_scenario_wall_ref(scenario_path: str) -> str:
     """Load required wall_ref from scenario JSON."""
     if not isinstance(scenario_path, str) or not scenario_path.strip():
@@ -2280,6 +2355,12 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             scenario_data = json.load(f)
         if isinstance(scenario_data, dict) and "units" in scenario_data:
             scenario_unit_count = len(require_key(scenario_data, "units"))
+        elif (
+            isinstance(scenario_data, dict)
+            and "agent_roster_ref" in scenario_data
+            and "opponent_roster_ref" in scenario_data
+        ):
+            scenario_unit_count = _count_units_from_roster_scenario(scenario_data, scenario_file)
         else:
             scenario_unit_count_candidates: List[int] = []
             for probe_player in scenario_probe_players:

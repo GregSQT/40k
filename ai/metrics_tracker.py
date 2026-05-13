@@ -157,6 +157,14 @@ class W40KMetricsTracker:
         # NEW: Latest VALUE trade ratio for 0_critical/ dashboard
         self.latest_value_trade_ratio = None
         self.value_trade_ratio_history: List[float] = []
+
+        # Rolling histories for 0_game/ smoothing (window=100)
+        self._game_history: Dict[str, List[float]] = {
+            'vp_diff': [], 'vp_bot': [], 'objectives_held': [],
+            'units_killed': [], 'units_lost': [],
+            'kill_efficiency': [], 'kill_prob': [],
+            'kill_rewards': [], 'obj_rewards': [],
+        }
         
         # NEW: Episode tactical data for invalid_action_rate tracking
         self.episode_tactical_data = {
@@ -273,6 +281,14 @@ class W40KMetricsTracker:
         # Flush metrics to disk
         self.writer.flush()
     
+    def _game_smooth(self, key: str, value: float, window: int = 200) -> float:
+        """Append value to rolling history and return smoothed mean."""
+        h = self._game_history[key]
+        h.append(value)
+        if len(h) > window:
+            h.pop(0)
+        return float(np.mean(h))
+
     def log_tactical_metrics(self, tactical_data: Dict[str, Any]):
         """Log tactical performance metrics - combat effectiveness and decision quality"""
         
@@ -286,7 +302,7 @@ class W40KMetricsTracker:
         if 'total_enemies' in tactical_data and tactical_data['total_enemies'] > 0:
             killed_enemies = require_key(tactical_data, 'units_killed')  # FIXED: use units_killed from engine
             slaughter_efficiency = killed_enemies / tactical_data['total_enemies']
-            self.writer.add_scalar('game_tactical/kill_efficiency', slaughter_efficiency, self.episode_count)
+            self.writer.add_scalar('0_game/e_kill_efficiency', self._game_smooth('kill_efficiency', slaughter_efficiency), self.episode_count)
         
         # GAME DETAILED: Damage dealt - Offensive power
         damage_dealt = require_key(tactical_data, 'damage_dealt')
@@ -306,12 +322,12 @@ class W40KMetricsTracker:
         # GAME DETAILED: Units lost - Unit preservation
         units_lost = require_key(tactical_data, 'units_lost')
         if units_lost >= 0:
-            self.writer.add_scalar('game_detailed/units_lost', units_lost, self.episode_count)
+            self.writer.add_scalar('0_game/g_units_lost', self._game_smooth('units_lost', units_lost), self.episode_count)
         
         # GAME DETAILED: Units killed - Lethality
         units_killed = require_key(tactical_data, 'units_killed')
         if units_killed >= 0:
-            self.writer.add_scalar('game_detailed/units_killed', units_killed, self.episode_count)
+            self.writer.add_scalar('0_game/f_units_killed', self._game_smooth('units_killed', units_killed), self.episode_count)
 
         # COMBAT VALUE METRICS: Episode-level attrition in VALUE points.
         enemy_value_destroyed = float(require_key(tactical_data, 'enemy_value_destroyed'))
@@ -357,16 +373,17 @@ class W40KMetricsTracker:
             action_efficiency = valid_actions / total_actions
             self.writer.add_scalar('game_tactical/action_efficiency', action_efficiency, self.episode_count)
         
-        # GAME TACTICAL: Wait frequency - Decision confidence
-        wait_actions = require_key(tactical_data, 'wait_actions')
-        if total_actions > 0:
-            wait_frequency = wait_actions / total_actions
-            self.writer.add_scalar('game_tactical/wait_frequency', wait_frequency, self.episode_count)
-
-        # GAME CRITICAL: VP differential from controlled perspective (seat-aware).
+        # 0_GAME: VP differential and objective samples
         if 'victory_points_diff_controlled_minus_opponent' in tactical_data:
             vp_diff = float(require_key(tactical_data, 'victory_points_diff_controlled_minus_opponent'))
-            self.writer.add_scalar('game_critical/victory_points_diff', vp_diff, self.episode_count)
+            self.writer.add_scalar('0_game/a_vp_diff', self._game_smooth('vp_diff', vp_diff), self.episode_count)
+
+        samples = tactical_data.get('controlled_objective_samples')
+        if isinstance(samples, list) and samples:
+            self.writer.add_scalar('0_game/d_objectives_held', self._game_smooth('objectives_held', float(np.mean(samples))), self.episode_count)
+
+        if 'victory_points_opponent_episode' in tactical_data:
+            self.writer.add_scalar('0_game/c_vp_bot', self._game_smooth('vp_bot', float(tactical_data['victory_points_opponent_episode'])), self.episode_count)
 
         # FORCING METRICS: Exposure of units with configured UNIT_RULES.
         has_forcing_fields = 'forced_unit_episode_has_controlled' in tactical_data
@@ -501,6 +518,10 @@ class W40KMetricsTracker:
         for key in self.reward_components:
             if len(self.reward_components[key]) > 100:
                 self.reward_components[key].pop(0)
+
+        # 0_game: obj_rewards (tactical_bonuses = objective per-turn rewards)
+        # ca_kill_rewards is computed in log_episode_end from combat_effectiveness (reliable source)
+        self.writer.add_scalar('0_game/cb_obj_rewards', self._game_smooth('obj_rewards', tactical_bonuses), self.episode_count)
 
     def log_position_score(self, position_score: float):
         """Log raw position_score from movement rewards (Phase 2+ positioning metric).
@@ -723,27 +744,32 @@ class W40KMetricsTracker:
         # Log smoothed combat metrics (20-episode rolling average)
         # Prefixes control TensorBoard sort order:
         # a_position_score, b_shoot_kills, c_charge_successes, d_melee_kills, e_victory_points_cumulative_mean
-        window_size = 20
-
         # a) Position score (movement quality)
         if len(self.position_scores) >= 1:
-            position_score_smooth = self._calculate_smoothed_metric(self.position_scores, window_size=100)
+            position_score_smooth = self._calculate_smoothed_metric(self.position_scores, window_size=200)
             self.writer.add_scalar('combat/a_position_score', position_score_smooth, self.episode_count)
 
         # b) Shoot kills
         if len(self.combat_history['shoot_kills']) >= 1:
-            smoothed_value = self._calculate_smoothed_metric(self.combat_history['shoot_kills'], window_size=window_size)
-            self.writer.add_scalar('combat/b_shoot_kills', smoothed_value, self.episode_count)
+            smoothed_value = self._calculate_smoothed_metric(self.combat_history['shoot_kills'], window_size=200)
+            self.writer.add_scalar('0_game/h_shoot_kills', smoothed_value, self.episode_count)
+
+        # ca_kill_rewards: total kill rewards per episode (shoot + melee kills × kill_target=2.0)
+        # Computed here from reliable combat_effectiveness data, NOT via reward_breakdown chain
+        kill_rewards_ep = (
+            self.combat_effectiveness['shoot_kills'] + self.combat_effectiveness['melee_kills']
+        ) * 2.0
+        self.writer.add_scalar('0_game/ca_kill_rewards', self._game_smooth('kill_rewards', kill_rewards_ep), self.episode_count)
 
         # c) Charge successes
         if len(self.combat_history['charge_successes']) >= 1:
-            smoothed_value = self._calculate_smoothed_metric(self.combat_history['charge_successes'], window_size=window_size)
+            smoothed_value = self._calculate_smoothed_metric(self.combat_history['charge_successes'], window_size=200)
             self.writer.add_scalar('combat/c_charge_successes', smoothed_value, self.episode_count)
 
         # d) Melee kills
         if len(self.combat_history['melee_kills']) >= 1:
-            smoothed_value = self._calculate_smoothed_metric(self.combat_history['melee_kills'], window_size=window_size)
-            self.writer.add_scalar('combat/d_melee_kills', smoothed_value, self.episode_count)
+            smoothed_value = self._calculate_smoothed_metric(self.combat_history['melee_kills'], window_size=200)
+            self.writer.add_scalar('0_game/i_melee_kills', smoothed_value, self.episode_count)
 
         # e) Mean cumulative victory points per episode (smoothed over 200 episodes)
         if len(self.combat_history['victory_points_cumulative']) >= 1:
@@ -751,7 +777,7 @@ class W40KMetricsTracker:
                 self.combat_history['victory_points_cumulative'],
                 window_size=200
             )
-            self.writer.add_scalar('combat/e_victory_points_cumulative_mean', smoothed_value, self.episode_count)
+            self.writer.add_scalar('0_game/b_vp_agent', smoothed_value, self.episode_count)
 
         # Reset combat effectiveness and flags for next episode
         self.combat_effectiveness = {
@@ -949,7 +975,6 @@ class W40KMetricsTracker:
             recent_value = self.hyperparameter_tracking['value_losses'][-20:]
             combined_losses = [abs(p) + abs(v) for p, v in zip(recent_policy, recent_value)]
             loss_mean = np.mean(combined_losses)
-            self.writer.add_scalar('0_critical/f_loss_mean', loss_mean, self.episode_count)
             value_loss_smooth = float(np.mean(recent_value))
             self.writer.add_scalar('0_critical/m_value_loss_smooth', value_loss_smooth, self.episode_count)
         
@@ -958,13 +983,7 @@ class W40KMetricsTracker:
         # ==========================================
         
         # 8. Gradient Norm (direct value from latest training step) - Technical health
-        if hasattr(self, 'latest_gradient_norm') and self.latest_gradient_norm is not None:
-            self.writer.add_scalar('0_critical/k_gradient_norm', self.latest_gradient_norm, self.episode_count)
-        else:
-            # Log placeholder if gradient_norm not available from stable-baselines3
-            # This keeps the metric visible in TensorBoard even if SB3 doesn't log it
-            if self.episode_count <= 1:
-                self.writer.add_scalar('0_critical/k_gradient_norm', 0.0, self.episode_count)
+        pass  # gradient_norm removed from 0_critical (redundant with clip_fraction + approx_kl)
         
         # 10. Reward-Victory Gap (reward alignment: mean reward when won vs lost)
         # Gap > 20-30 = good alignment; Gap < 10 = reward may not correlate with victory
@@ -1029,7 +1048,6 @@ class W40KMetricsTracker:
         if tier2_scores:
             tier2_combined = sum(tier2_scores) / len(tier2_scores)
             self.writer.add_scalar('bot_eval/tier2_combined', tier2_combined, x)
-            self.writer.add_scalar('0_critical/a2_tier2_combined', tier2_combined, x)
 
         bot_score_keys = [k for k in ALL_BOT_KEYS if k in bot_results]
         if len(bot_score_keys) >= 3:
@@ -1120,6 +1138,8 @@ class W40KMetricsTracker:
                     float(np.mean(kill_values)),
                     self.episode_count
                 )
+                if phase_name == 'fight':
+                    self.writer.add_scalar('0_game/j_kill_prob', self._game_smooth('kill_prob', float(np.mean(kill_values))), self.episode_count)
                 self.writer.add_scalar(
                     f'obs/{phase_name}_best_kill_probability_p50',
                     float(np.percentile(kill_values, 50)),
