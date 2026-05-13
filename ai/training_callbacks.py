@@ -1064,27 +1064,6 @@ class MetricsCollectionCallback(BaseCallback):
                         damage_dealt = info['totalDamage']
                         self.episode_tactical_data['damage_dealt'] += damage_dealt
 
-                    # COMBAT KILL TRACKING: Log kills to metrics tracker (optional per step)
-                    if is_controlled_action:
-                        phase = info.get('phase', 'unknown')  # get allowed
-                        all_attack_results = info.get('all_attack_results')
-                        if isinstance(all_attack_results, list) and all_attack_results:
-                            # Iterate over individual attack results to count each kill
-                            for attack_result in all_attack_results:
-                                if attack_result.get('target_died', False):
-                                    if phase == 'shoot':
-                                        self.metrics_tracker.log_combat_kill('shoot')
-                                    elif phase in ('fight', 'charge'):
-                                        self.metrics_tracker.log_combat_kill('melee')
-                        elif info.get('target_died', False):  # get allowed
-                            # Fallback for actions without all_attack_results
-                            if phase == 'shoot':
-                                self.metrics_tracker.log_combat_kill('shoot')
-                            elif phase == 'fight':
-                                self.metrics_tracker.log_combat_kill('melee')
-                            elif phase == 'charge':
-                                self.metrics_tracker.log_combat_kill('melee')
-
                     # CHARGE SUCCESS TRACKING: Log successful charges (optional per step)
                     if is_controlled_action and info.get('charge_succeeded', False):  # get allowed
                         self.metrics_tracker.log_combat_kill('charge')
@@ -2131,7 +2110,7 @@ class BotEvaluationCallback(BaseCallback):
             if self.metrics_tracker is not None:
                 step = int(eval_marker)
                 self.metrics_tracker.writer.add_scalar(
-                    "0_critical/n_robust_current_score", robust_score, step,
+                    "0_critical/0_robust_current_score", robust_score, step,
                 )
 
             if gate_pass and robust_score > self.best_robust_score and eval_marker >= self.save_best_min_episodes:

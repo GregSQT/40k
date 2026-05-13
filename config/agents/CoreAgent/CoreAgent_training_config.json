@@ -66,7 +66,7 @@
   "step_log_buffer_size": 200,
   "model_params": {
     "policy": "MlpPolicy",
-    "learning_rate": {"initial": 0.002, "final": 0.001},
+    "learning_rate": {"initial": 0.002, "final": 0.0015},
     "n_steps": 16384,
     "batch_size": 1024,
     "n_epochs": 3,
@@ -75,7 +75,7 @@
     "clip_range": 0.2,
     "clip_range_vf": null,
     "normalize_advantage": true,
-    "ent_coef": 0.11,
+    "ent_coef": 0.15,
     "vf_coef": 1.0,
     "max_grad_norm": 0.5,
     "target_kl": 0.02,

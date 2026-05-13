@@ -609,36 +609,35 @@ Le namespace **`0_game/`** est le second dashboard à consulter après `0_critic
 | **0_game/a_vp_diff** | VP agent − VP bot (différentiel) | Croissant → agent gagne le jeu de points |
 | **0_game/b_vp_agent** | VP cumulés de l'agent sur l'épisode | Croissant |
 | **0_game/c_vp_bot** | VP cumulés du bot sur l'épisode | Décroissant (ou agent > bot) |
-| **0_game/d_objectives_held** | Moyenne d'objectifs contrôlés (turns 2–5) | Croissant — agent se positionne stratégiquement |
-| **0_game/e_kill_efficiency** | kills / total_enemies | Croissant |
-| **0_game/f_units_killed** | Unités ennemies éliminées par épisode | Croissant |
-| **0_game/g_units_lost** | Unités alliées perdues par épisode | Décroissant ou stable |
-| **0_game/h_shoot_kills** | Kills en phase de tir | Croissant — ranged = source principale de dégâts |
-| **0_game/i_melee_kills** | Kills en phase de combat (fight) | Croissant |
-| **0_game/j_kill_prob** | Probabilité de kill au combat (fight phase) | Indicateur de ciblage — doit rester >0 |
-| **0_game/k_wait_freq** | Fréquence d'actions "wait" / total actions | Décroissant — agent doit agir, pas attendre |
-| **0_game/ca_kill_rewards** | Récompense kill_target cumulée par épisode (ranged + mêlée) | Croissant — reflète l'activité de kill réelle |
-| **0_game/cb_obj_rewards** | Récompense objectifs per-turn cumulée par épisode (tactical_bonuses) | Croissant — agent tient des objectifs actifs |
+| **0_game/d_obj_rewards** | Récompense objectifs per-turn cumulée par épisode (tactical_bonuses) | Croissant — agent tient des objectifs actifs |
+| **0_game/e_objectives_held** | Moyenne d'objectifs contrôlés par l'agent (turns 2–5) | Croissant — agent se positionne stratégiquement |
+| **0_game/f_objectives_held_diff** | Objectifs agent − objectifs bot (turns 2–5) | Positif et croissant — agent domine le contrôle |
+| **0_game/g_kill_rewards** | Récompense kill_target cumulée par épisode (ranged + mêlée) | Croissant — reflète l'activité de kill réelle |
+| **0_game/h_kill_efficiency** | kills / total_enemies | Croissant |
+| **0_game/i_units_killed** | Unités ennemies éliminées par épisode | Croissant |
+| **0_game/j_units_lost** | Unités alliées perdues par épisode | Décroissant ou stable |
+| **0_game/k_shoot_kills** | Kills en phase de tir | Croissant — ranged = source principale de dégâts |
+| **0_game/l_melee_kills** | Kills en phase de combat (fight) | Croissant |
 
 #### Lecture combinée
 
 **Problème : agent focus kills mais perd les objectifs**
-- `f_units_killed` élevé, `a_vp_diff` négatif, `d_objectives_held` faible
+- `i_units_killed` élevé, `a_vp_diff` négatif, `e_objectives_held` faible
 - → Augmenter `reward_per_objective` et `reward_for_objective_lead` dans rewards_config.json
 
 **Problème : agent passif**
-- `k_wait_freq` élevé, `h_shoot_kills` + `i_melee_kills` faibles
+- `k_shoot_kills` + `l_melee_kills` faibles, `g_kill_rewards` ≈ 0
 - → Vérifier `ent_coef` (trop bas = politique déterministe passive)
 
 **Problème : agent tire mais ne tue pas**
-- `h_shoot_kills` ≈ 0 mais `f_units_killed` > 0 (kills en mêlée seulement)
+- `k_shoot_kills` ≈ 0 mais `i_units_killed` > 0 (kills en mêlée seulement)
 - Vérifier la structure `all_attack_results` — cf. `_handle_shooting_end_activation`
 
 #### Notes techniques
 
-- `d_objectives_held` : calculé à partir des échantillons turns 2–5 uniquement (épisodes complets). Normal si absent sur épisodes courts.
-- `j_kill_prob` : issue de la phase fight uniquement. Non loggué si aucun combat en mêlée dans l'épisode.
-- `h_shoot_kills` / `i_melee_kills` : comptage par kill individuel (itération sur `all_attack_results`), pas par activation.
+- `e_objectives_held` / `f_objectives_held_diff` : calculés à partir des échantillons turns 2–5 uniquement (épisodes complets). Normal si absent sur épisodes courts.
+- `k_shoot_kills` / `l_melee_kills` : comptage par kill individuel (itération sur `all_attack_results`), pas par activation.
+- `g_kill_rewards` : calculé en fin d'épisode depuis `combat_effectiveness` (shoot_kills + melee_kills) × 2.0, source fiable indépendante du système reward_breakdown.
 
 ---
 

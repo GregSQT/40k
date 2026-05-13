@@ -270,8 +270,8 @@ class RewardCalculator:
                 return 0.0
             
             # Calculate total reward
-            calculated_reward = base_action_reward + result_bonus_reward
-            
+            calculated_reward = base_action_reward + result_bonus_reward + objective_turn_reward
+
             # Properly populate reward_breakdown
             reward_breakdown['base_actions'] = base_action_reward
             reward_breakdown['result_bonuses'] = result_bonus_reward
@@ -288,8 +288,8 @@ class RewardCalculator:
             return calculated_reward
             
         elif action_type == "deploy_unit":
-            deploy_reward = 0.0
-            reward_breakdown['base_actions'] = deploy_reward
+            deploy_reward = 0.0 + objective_turn_reward
+            reward_breakdown['base_actions'] = 0.0
             reward_breakdown['total'] = deploy_reward
 
             if game_state.get("game_over", False):
@@ -303,8 +303,8 @@ class RewardCalculator:
 
         elif action_type == "move" or action_type == "flee":
             # Movement rewards removed (unused) - keep behavior deterministic
-            movement_reward = 0.0
-            reward_breakdown['base_actions'] = movement_reward
+            movement_reward = 0.0 + objective_turn_reward
+            reward_breakdown['base_actions'] = 0.0
             reward_breakdown['total'] = movement_reward
 
             if game_state.get("game_over", False):
@@ -318,8 +318,8 @@ class RewardCalculator:
 
         elif action_type == "skip":
             # FIXED: Skip means no targets available - no penalty
-            skip_reward = 0.0
-            reward_breakdown['base_actions'] = skip_reward
+            skip_reward = 0.0 + objective_turn_reward
+            reward_breakdown['base_actions'] = 0.0
             reward_breakdown['total'] = skip_reward
             
             # Add situational reward if game ended
@@ -339,8 +339,8 @@ class RewardCalculator:
             # No target can die in charge phase
             enriched_target = self._enrich_unit_for_reward_mapper(target)
             all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit, game_state)]
-            charge_reward = reward_mapper.get_charge_priority_reward(enriched_unit, enriched_target, all_targets, game_state)
-            reward_breakdown['base_actions'] = charge_reward
+            charge_reward = reward_mapper.get_charge_priority_reward(enriched_unit, enriched_target, all_targets, game_state) + objective_turn_reward
+            reward_breakdown['base_actions'] = charge_reward - objective_turn_reward
             reward_breakdown['total'] = charge_reward
             
             # CRITICAL FIX: Add situational reward if game ended
@@ -361,12 +361,10 @@ class RewardCalculator:
             # units_cache = living only; target may be dead (removed). Reward_mapper uses get_hp_from_cache → 0 if not in cache.
             enriched_target = self._enrich_unit_for_reward_mapper(target) if is_unit_alive(str(target["id"]), game_state) else target
             all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit, game_state)]
-            fight_reward = reward_mapper.get_combat_priority_reward(enriched_unit, enriched_target, all_targets, game_state)
-            reward_breakdown['base_actions'] = fight_reward
+            fight_reward = reward_mapper.get_combat_priority_reward(enriched_unit, enriched_target, all_targets, game_state) + objective_turn_reward
+            reward_breakdown['base_actions'] = fight_reward - objective_turn_reward
             reward_breakdown['total'] = fight_reward
 
-            # Metric: track kill_target bonus in result_bonuses when a melee kill happens
-            # (breakdown only — does not change the actual step_reward returned to the agent)
             fight_attack_results = result.get("all_attack_results", [])
             fight_killed = (
                 any(ar.get("target_died") for ar in fight_attack_results)
@@ -374,8 +372,11 @@ class RewardCalculator:
             )
             if fight_killed:
                 unit_rewards = reward_mapper._get_unit_rewards(enriched_unit)
-                result_bonuses_cfg = unit_rewards.get("result_bonuses", {})
-                reward_breakdown['result_bonuses'] = result_bonuses_cfg.get("kill_target", 0.0)
+                result_bonuses_cfg = require_key(unit_rewards, "result_bonuses")
+                kill_bonus = result_bonuses_cfg.get("kill_target", 0.0)
+                fight_reward += kill_bonus
+                reward_breakdown['result_bonuses'] = kill_bonus
+                reward_breakdown['total'] = fight_reward
 
             # CRITICAL FIX: Add situational reward if game ended
             if game_state.get("game_over", False):
@@ -396,6 +397,7 @@ class RewardCalculator:
                 wait_reward = self.calculate_reward_from_config(acting_unit, {"type": "wait"}, success, game_state)
             reward_breakdown['base_actions'] = wait_reward
             reward_breakdown['penalties'] = wait_reward
+            wait_reward += objective_turn_reward
             reward_breakdown['total'] = wait_reward
 
             # CRITICAL FIX: Add situational reward if game ended
@@ -411,8 +413,8 @@ class RewardCalculator:
         elif action_type == "pass":
             # Pass action in fight phase - unit had no valid targets to attack
             # Treat same as wait (no reward, no penalty)
-            pass_reward = 0.0
-            reward_breakdown['base_actions'] = pass_reward
+            pass_reward = 0.0 + objective_turn_reward
+            reward_breakdown['base_actions'] = 0.0
             reward_breakdown['total'] = pass_reward
 
             # CRITICAL FIX: Add situational reward if game ended
@@ -427,12 +429,11 @@ class RewardCalculator:
 
         elif action_type == "charge_fail":
             # Charge failed because roll was too low
-            # Give a small penalty (less than wait, since agent at least tried)
-            # Use system penalty for failed actions
-            system_penalties = self._get_system_penalties()
-            charge_fail_reward = system_penalties.get('failed_action', -0.1)  # Small penalty for failed charge
+            unit_rewards = self._get_unit_reward_config(acting_unit)
+            charge_fail_reward = require_key(require_key(unit_rewards, "base_actions"), "charge_fail")
             reward_breakdown['base_actions'] = charge_fail_reward
             reward_breakdown['penalties'] = charge_fail_reward
+            charge_fail_reward += objective_turn_reward
             reward_breakdown['total'] = charge_fail_reward
 
             # CRITICAL FIX: Add situational reward if game ended
@@ -447,8 +448,8 @@ class RewardCalculator:
 
         elif action_type == "advance":
             # Advance movement rewards removed (unused) - keep behavior deterministic
-            advance_reward = 0.0
-            reward_breakdown['base_actions'] = advance_reward
+            advance_reward = 0.0 + objective_turn_reward
+            reward_breakdown['base_actions'] = 0.0
             reward_breakdown['total'] = advance_reward
 
             if game_state.get("game_over", False):
@@ -463,8 +464,8 @@ class RewardCalculator:
         elif action_type == "no_effect":
             # No-effect action (e.g., skip attempted on non-active unit in charge phase)
             # Treat same as pass - no reward, no penalty
-            no_effect_reward = 0.0
-            reward_breakdown['base_actions'] = no_effect_reward
+            no_effect_reward = 0.0 + objective_turn_reward
+            reward_breakdown['base_actions'] = 0.0
             reward_breakdown['total'] = no_effect_reward
 
             # CRITICAL FIX: Add situational reward if game ended
@@ -682,8 +683,12 @@ class RewardCalculator:
             raise TypeError(
                 "game_state['controlled_objective_samples_turn2_to_5'] must be a list"
             )
+        opponent_player = 2 if int(controlled_player) == 1 else 1
+        opponent_objectives = require_key(obj_counts, opponent_player)
+        opponent_objective_samples_turn2_to_5 = game_state.setdefault("opponent_objective_samples_turn2_to_5", [])
         if 2 <= current_turn <= 5:
             controlled_objective_samples_turn2_to_5.append(float(controlled_objectives))
+            opponent_objective_samples_turn2_to_5.append(float(opponent_objectives))
         reward_per_objective = objective_rewards["reward_per_objective"]
         total_reward = reward_per_objective * controlled_objectives
 

@@ -7,6 +7,7 @@
       "ranged_attack": 0.3,
       "melee_attack": 0.3,
       "charge_success": 0.05,
+      "charge_fail": -0.01,
       "wait": -0.1
     },
     "shoot_priority_1": 0.0,
@@ -24,14 +25,14 @@
     },
     "target_type_bonuses": {},
     "situational_modifiers": {
-      "win": 20,
-      "lose": -20,
+      "win": 40,
+      "lose": -40,
       "draw": 0.0
     },
     "objective_rewards": {
-      "reward_per_objective": 10.0,
-      "reward_for_objective_lead": 0.0,
-      "use_objective_lead": false,
+      "reward_per_objective": 20.0,
+      "reward_for_objective_lead": 20.0,
+      "use_objective_lead": true,
       "reward_per_objective_turn5": 0.0
     },
     "system_penalties": {

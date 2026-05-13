@@ -468,6 +468,7 @@ class W40KEngine(gym.Env):
             "primary_objective_scored_turns": set(),
             "objective_rewarded_turns": set(),
             "controlled_objective_samples_turn2_to_5": [],
+            "opponent_objective_samples_turn2_to_5": [],
             "macro_intent_id": INTENT_TAKE_OBJECTIVE,
             "macro_detail_type": DETAIL_OBJECTIVE,
             "macro_detail_id": 0,
@@ -926,6 +927,7 @@ class W40KEngine(gym.Env):
             "primary_objective_scored_turns": set(),
             "objective_rewarded_turns": set(),
             "controlled_objective_samples_turn2_to_5": [],
+            "opponent_objective_samples_turn2_to_5": [],
             "macro_intent_id": INTENT_TAKE_OBJECTIVE,
             "macro_detail_type": DETAIL_OBJECTIVE,
             "macro_detail_id": 0,
@@ -1762,6 +1764,26 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['units_killed'] = total_enemy_units - surviving_enemy_units
             self.episode_tactical_data['total_enemies'] = total_enemy_units
 
+            # Count kills by phase from action_logs (reliable source: same as reward_calculator)
+            action_logs = self.game_state.get("action_logs", [])
+            shoot_kills = sum(
+                1 for log in action_logs
+                if log.get("type") == "shoot"
+                and log.get("action_name") == "kill_target"
+                and int(log.get("player", 0)) == controlled_player
+            )
+            melee_kills = sum(
+                1 for log in action_logs
+                if log.get("type") == "combat"
+                and log.get("phase") == "fight"
+                and int(log.get("player", 0)) == controlled_player
+                and isinstance(log.get("shootDetails"), list)
+                and log["shootDetails"]
+                and log["shootDetails"][0].get("targetDied", False)
+            )
+            self.episode_tactical_data['shoot_kills'] = shoot_kills
+            self.episode_tactical_data['melee_kills'] = melee_kills
+
             # VALUE attrition metrics (episode-level): destroyed enemy value and lost ally value.
             units = require_key(self.game_state, "units")
             total_ally_value = 0.0
@@ -1846,6 +1868,8 @@ class W40KEngine(gym.Env):
             )
             samples = self.game_state.get("controlled_objective_samples_turn2_to_5")
             self.episode_tactical_data['controlled_objective_samples'] = list(samples) if isinstance(samples, list) else []
+            opp_samples = self.game_state.get("opponent_objective_samples_turn2_to_5")
+            self.episode_tactical_data['opponent_objective_samples'] = list(opp_samples) if isinstance(opp_samples, list) else []
 
             # Add tactical data to info
             info["tactical_data"] = self.episode_tactical_data.copy()
