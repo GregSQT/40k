@@ -105,6 +105,7 @@ def _make_move_gs(units: List[Dict[str, Any]], phase: str = "move") -> Dict[str,
         "los_cache": {},
         "player_types": {"1": "human", "2": "ai"},
         "gym_training_mode": False,
+        "objectives": [{"id": "obj1", "hexes": [[5, 5]]}],
     }
     build_units_cache(gs)
     build_enemy_adjacent_hexes(gs, gs["current_player"])

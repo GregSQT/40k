@@ -20,7 +20,7 @@ def _make_builder() -> ObservationBuilder:
             "perception_radius": 25,
             "max_nearby_units": 6,
             "max_valid_targets": 5,
-            "obs_size": 323,
+            "obs_size": 357,
         }
     }
     return ObservationBuilder(config)
@@ -196,6 +196,6 @@ class TestObsBuilderInit:
     def test_valid_config_initializes(self):
         """obs_init_ok : config minimale valide → instance créée."""
         b = _make_builder()
-        assert b.obs_size == 323
+        assert b.obs_size == 357
         assert b.perception_radius == 25
         assert b.max_nearby_units == 6

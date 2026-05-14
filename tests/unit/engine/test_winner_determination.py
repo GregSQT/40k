@@ -133,7 +133,7 @@ def _unit_cfg(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
 
 def _minimal_config() -> Dict[str, Any]:
     obs = {"perception_radius": 25, "max_nearby_units": 10,
-           "max_valid_targets": 5, "obs_size": 50}
+           "max_valid_targets": 5, "obs_size": 50, "action_space_size": 31}
     return {
         "board": {"default": {"cols": 15, "rows": 13, "hex_radius": 1.0,
                                "margin": 0.0, "wall_hexes": [],

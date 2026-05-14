@@ -780,3 +780,31 @@ print('✅ v2.4 implementation verified!')
 **Document Status:** ✅ CANONICAL REFERENCE v2.5
 **Implementation Status:** ✅ VERIFIED AND DEPLOYED (CoreAgent rule-aware + weapon damage cache)
 **Training Status:** ⏳ READY FOR FULL TRAINING RUN
+---
+
+## §9 — Zone Intent Context (Phase 2) — obs[346:357]
+
+**obs_size = 357** (Phase 2, remplace 355)
+
+11 floats encodant le contexte zone intent pour l'unité active.
+
+| Index | Feature | Description |
+|-------|---------|-------------|
+| obs[346] | c1_col_norm | col / (board_cols-1) — cible principale (candidat 1) |
+| obs[347] | c1_row_norm | row / (board_rows-1) |
+| obs[348] | c1_signal | -1/0/1 (contrôle obj) ou damage_ratio (ATTACK) ou 0.0 (DEFEND) |
+| obs[349] | c1_dist | distance hex / max_range |
+| obs[350] | c2_col_norm | col / (board_cols-1) — objectif de la zone (candidat 2) |
+| obs[351] | c2_row_norm | row / (board_rows-1) |
+| obs[352] | c2_signal | get_objective_control(zone_idx) : -1/0/1 |
+| obs[353] | c2_dist | distance hex / max_range |
+| obs[354] | intent_INVADE | 1.0 si intent == INVADE, sinon 0.0 |
+| obs[355] | intent_DEFEND | 1.0 si intent == DEFEND, sinon 0.0 |
+| obs[356] | intent_ATTACK | 1.0 si intent == ATTACK, sinon 0.0 |
+
+**Source de vérité :** `zone_idx = game_state["unit_zone_assignments"][str(unit_id)]`  
+Peuplé une fois en début de command phase via `get_nearest_objective_zone()`.
+
+**Action space :** BASE_ZONE_INTENT=16, TOTAL_ACTION_SIZE=31 (16 + 5×3)  
+Zone intent actions : action_id = 16 + zone_idx × 3 + intent_value  
+Disponibles uniquement en command phase si `zone_intent_free_steps_remaining > 0`.

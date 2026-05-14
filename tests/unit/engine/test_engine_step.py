@@ -67,6 +67,7 @@ def _minimal_config() -> Dict[str, Any]:
         "max_nearby_units": 10,
         "max_valid_targets": 5,
         "obs_size": 50,
+        "action_space_size": 31,
     }
     return {
         "board": {
@@ -248,20 +249,21 @@ class TestStepGameOver:
         assert engine.game_state.get("turn_limit_reached", False) is False or terminated is True
 
     def test_step_pool_empty_triggers_phase_advance(self):
-        """step_pool_empty : si pool vide, step() avance la phase automatiquement."""
+        """step_pool_empty : fight phase avec pools vides → masque tout-False → auto-advance."""
         engine = _make_engine()
         engine.reset()
         engine.game_state["turn"] = 1
-        # Vider tous les pools d'activation pour forcer le phase auto-advance
+        # Fight phase : seule phase où pools vides donnent un masque tout-False
+        engine.game_state["phase"] = "fight"
+        engine.game_state["fight_subphase"] = None
         for pool_key in (
-            "move_activation_pool", "shoot_activation_pool",
-            "charge_activation_pool", "charging_activation_pool",
-            "active_alternating_activation_pool", "non_active_alternating_activation_pool",
-            "command_activation_pool",
+            "charging_activation_pool",
+            "active_alternating_activation_pool",
+            "non_active_alternating_activation_pool",
         ):
             engine.game_state[pool_key] = []
 
         _, _, _, _, info = engine.step(0)
 
         # Phase advance automatique doit avoir eu lieu
-        assert info.get("phase_auto_advanced") is True or engine.game_state["phase"] != "command"
+        assert info.get("phase_auto_advanced") is True or engine.game_state["phase"] != "fight"

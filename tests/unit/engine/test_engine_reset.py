@@ -70,6 +70,7 @@ def _minimal_config_with_units() -> Dict[str, Any]:
         "max_nearby_units": 10,
         "max_valid_targets": 5,
         "obs_size": 50,
+        "action_space_size": 31,
     }
     return {
         "board": {

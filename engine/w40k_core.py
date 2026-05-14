@@ -39,7 +39,7 @@ from engine.observation_builder import ObservationBuilder
 from engine.action_decoder import ActionDecoder
 from engine.reward_calculator import RewardCalculator
 from engine.game_state import GameStateManager
-from engine.macro_intents import INTENT_TAKE_OBJECTIVE, DETAIL_OBJECTIVE
+from engine.macro_intents import INTENT_INVADE, MAX_OBJECTIVES, is_zone_intent_action, decode_zone_intent_action, get_nearest_objective_zone
 from engine.pve_controller import PvEController
 
 # Global flag to ensure debug.log is cleared only once per training session
@@ -469,11 +469,10 @@ class W40KEngine(gym.Env):
             "objective_rewarded_turns": set(),
             "controlled_objective_samples_turn2_to_5": [],
             "opponent_objective_samples_turn2_to_5": [],
-            "macro_intent_id": INTENT_TAKE_OBJECTIVE,
-            "macro_detail_type": DETAIL_OBJECTIVE,
-            "macro_detail_id": 0,
-            "macro_target_unit_id": None,
-            
+            "zone_intents": [INTENT_INVADE] * MAX_OBJECTIVES,
+            "zone_intent_free_steps_remaining": 0,
+            "unit_zone_assignments": {},
+
             # AI_TURN.md required tracking sets
             "units_moved": set(),
             "units_fled": set(),
@@ -553,6 +552,10 @@ class W40KEngine(gym.Env):
         objectives = require_key(self.game_state, "objectives")
         if not objectives:
             raise ValueError("objectives are required for macro target initialization")
+        assert len(objectives) <= MAX_OBJECTIVES, (
+            f"Scenario has {len(objectives)} objectives but MAX_OBJECTIVES={MAX_OBJECTIVES}. "
+            "Increase MAX_OBJECTIVES in macro_intents.py or reduce scenario objectives."
+        )
         self.game_state["macro_target_objective_index"] = 0
         self.game_state["macro_target_objective_id"] = str(require_key(objectives[0], "id"))
 
@@ -579,8 +582,9 @@ class W40KEngine(gym.Env):
 
         # CRITICAL: Initialize Gym spaces BEFORE any other operations
         # Gym interface properties - dynamic action space based on phase
-        self.action_space = gym.spaces.Discrete(16)  # 4 move + 5 shoot + charge + fight + wait + 4 advance strategies
-        self._current_valid_actions = list(range(16))  # Will be masked dynamically
+        _total_action_size = self.action_decoder.total_action_size
+        self.action_space = gym.spaces.Discrete(_total_action_size)
+        self._current_valid_actions = list(range(_total_action_size))  # Will be masked dynamically
         
         # Observation space: Asymmetric egocentric perception with R=25 radius
         # Size is now configurable via training_config.json observation_params.obs_size
@@ -928,10 +932,9 @@ class W40KEngine(gym.Env):
             "objective_rewarded_turns": set(),
             "controlled_objective_samples_turn2_to_5": [],
             "opponent_objective_samples_turn2_to_5": [],
-            "macro_intent_id": INTENT_TAKE_OBJECTIVE,
-            "macro_detail_type": DETAIL_OBJECTIVE,
-            "macro_detail_id": 0,
-            "macro_target_unit_id": None,
+            "zone_intents": [INTENT_INVADE] * MAX_OBJECTIVES,
+            "zone_intent_free_steps_remaining": 0,
+            "unit_zone_assignments": {},
             "units_moved": set(),
             "units_fled": set(),
             "units_cannot_charge": set(),
@@ -967,9 +970,10 @@ class W40KEngine(gym.Env):
         self.game_state["deployment_zone"] = self.config.get("deployment_zone")
         objectives = require_key(self.game_state, "objectives")
         if not objectives:
-            raise ValueError("objectives are required for macro target reset")
-        self.game_state["macro_target_objective_index"] = 0
-        self.game_state["macro_target_objective_id"] = str(require_key(objectives[0], "id"))
+            raise ValueError("objectives are required for episode reset")
+        assert len(objectives) <= MAX_OBJECTIVES, (
+            f"Scenario has {len(objectives)} objectives but MAX_OBJECTIVES={MAX_OBJECTIVES}."
+        )
         self._episode_step_calls = 0  # Safety: reset for runaway truncation check in step()
         self._step_calls_since_increment = 0
 
@@ -1137,16 +1141,18 @@ class W40KEngine(gym.Env):
                 self.game_state["deployment_state"]["current_deployer"] = 2
             if not deployable_units[1] and not deployable_units[2]:
                 self.game_state["deployment_state"]["deployment_complete"] = True
-                command_handlers.command_phase_start(self.game_state)
-                movement_handlers.movement_phase_start(self.game_state)
+                cmd_result = command_handlers.command_phase_start(self.game_state)
+                if not (cmd_result and cmd_result.get("phase_complete") is False):
+                    movement_handlers.movement_phase_start(self.game_state)
             else:
                 deployment_handlers.deployment_phase_start(self.game_state)
         else:
             # Initialize command phase for game start using handler delegation
-            # CRITICAL: reset() is not in the cascade loop, so we need to handle initialization differently
-            # Call command_phase_start() to do the resets, then call movement_phase_start() directly
-            command_handlers.command_phase_start(self.game_state)  # Does the resets
-            movement_handlers.movement_phase_start(self.game_state)  # Initializes the move phase
+            # Phase 2: if command_phase_start returns phase_complete=False (free steps active),
+            # stay in command phase — agent will issue zone intent actions first.
+            cmd_result = command_handlers.command_phase_start(self.game_state)
+            if not (cmd_result and cmd_result.get("phase_complete") is False):
+                movement_handlers.movement_phase_start(self.game_state)
         self.episode_tactical_data = {
             'shots_fired': 0,
             'hits': 0,
@@ -1250,6 +1256,16 @@ class W40KEngine(gym.Env):
             deployment_state = self.game_state.get("deployment_state")
             if deployment_state is not None:
                 self.game_state["current_player"] = int(require_key(deployment_state, "current_deployer"))
+        # Initialise unit_zone_assignments avant le premier obs build (command phase pas encore atteinte).
+        # Couvre le cas déploiement (command_phase_start pas encore appelé) et le tour bot en reset.
+        if not self.game_state.get("unit_zone_assignments"):
+            assignments = {}
+            for unit in self.game_state["units"]:
+                if unit.get("col", -1) >= 0 and unit.get("row", -1) >= 0:
+                    assignments[str(unit["id"])] = get_nearest_objective_zone(unit, self.game_state)
+                else:
+                    assignments[str(unit["id"])] = 0  # Unité non déployée : zone 0 par défaut
+            self.game_state["unit_zone_assignments"] = assignments
         observation = self._build_observation()
         info = {"phase": self.game_state["phase"]}
         
@@ -1329,8 +1345,8 @@ class W40KEngine(gym.Env):
                 f"eligible_units={[u.get('id') for u in eligible_units]}"
             )
         _step_t1 = time.perf_counter() if _step_t0 is not None else None
-        if not eligible_units:
-            # No eligible units - trigger phase transition
+        if not eligible_units and not action_mask.any():
+            # No eligible units and no valid actions - trigger phase transition
             current_phase = self.game_state["phase"]
             advance_action = {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
             advance_success, result = self._process_semantic_action(advance_action)
@@ -1635,7 +1651,7 @@ class W40KEngine(gym.Env):
 
         # Convert to gym format
         action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
-        if not eligible_units:
+        if not eligible_units and not action_mask.any():
             if self.game_state.get("game_over", False):
                 observation = self._build_observation()
             else:
@@ -1690,7 +1706,15 @@ class W40KEngine(gym.Env):
             observation = self._build_observation()
         _step_t4 = time.perf_counter() if _step_t0 is not None else None
         # Calculate reward (independent of step_logger)
-        reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
+        # Zone intent free step: reward is always 0.0 (agent learns via deferred rewards)
+        if isinstance(result, dict) and result.get("action") == "zone_intent":
+            reward = 0.0
+        else:
+            reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
+            # Add zone intent shaping accumulated from this turn's free steps
+            # Two paths: cap épuisé (stored during zone_intent action) or sortie volontaire (stored at first non-zone-intent)
+            shaping = self.game_state.pop("_pending_zone_shaping", 0.0)
+            reward += shaping
         _step_t5 = time.perf_counter() if _step_t0 is not None else None
         terminated = self.game_state["game_over"]
         truncated = False
@@ -1765,18 +1789,18 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['total_enemies'] = total_enemy_units
 
             # Count kills by phase from action_logs (reliable source: same as reward_calculator)
-            action_logs = self.game_state.get("action_logs", [])
+            action_logs = self.game_state["action_logs"]
             shoot_kills = sum(
                 1 for log in action_logs
                 if log.get("type") == "shoot"
                 and log.get("action_name") == "kill_target"
-                and int(log.get("player", 0)) == controlled_player
+                and int(log["player"]) == controlled_player
             )
             melee_kills = sum(
                 1 for log in action_logs
                 if log.get("type") == "combat"
                 and log.get("phase") == "fight"
-                and int(log.get("player", 0)) == controlled_player
+                and int(log["player"]) == controlled_player
                 and isinstance(log.get("shootDetails"), list)
                 and log["shootDetails"]
                 and log["shootDetails"][0].get("targetDied", False)
@@ -4217,11 +4241,68 @@ class W40KEngine(gym.Env):
 
     def _process_command_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """Process command phase actions."""
+        # Phase 2: handle zone intent free step actions
+        if action.get("action") == "zone_intent":
+            zone_idx = action["zone_idx"]
+            intent_value = action["intent_value"]
+
+            free_steps = self.game_state["zone_intent_free_steps_remaining"]
+            if free_steps <= 0:
+                # Guard: mask should have prevented this, but be explicit
+                return False, {
+                    "action": "invalid",
+                    "error": "zone_intent_action_but_no_free_steps_remaining",
+                    "zone_idx": zone_idx,
+                    "intent_value": intent_value,
+                }
+
+            zone_intents = self.game_state["zone_intents"]
+            if zone_idx >= len(zone_intents):
+                return False, {
+                    "action": "invalid",
+                    "error": f"zone_idx {zone_idx} out of range (len={len(zone_intents)})",
+                }
+
+            zone_intents[zone_idx] = intent_value
+            self.game_state["zone_intent_free_steps_remaining"] = free_steps - 1
+
+            # Log zone intent step for metrics
+            metrics_tracker = getattr(self, "_metrics_tracker", None)
+            if metrics_tracker is not None and hasattr(metrics_tracker, "log_zone_intent_step"):
+                metrics_tracker.log_zone_intent_step(intent_value)
+
+            if self.game_state["zone_intent_free_steps_remaining"] == 0:
+                # Cap épuisé: déclencher le shaping maintenant.
+                # La prochaine action sera non-zone-intent (zone intents masqués).
+                # _pending_zone_shaping sera ajouté au reward de la première action tactique.
+                self.game_state["_pending_zone_shaping"] = self.reward_calculator.compute_zone_intent_shaping(
+                    self.game_state
+                )
+
+            # Return without phase_complete — env re-demande une action (free step)
+            return True, {
+                "action": "zone_intent",
+                "zone_idx": zone_idx,
+                "intent_value": intent_value,
+                "zone_intent_free_steps_remaining": self.game_state["zone_intent_free_steps_remaining"],
+            }
+
+        # Non-zone-intent action in command phase: exit free steps
+        free_steps = self.game_state["zone_intent_free_steps_remaining"]
+        if free_steps > 0:
+            # Sortie volontaire: shaper uniquement si au moins un intent a été joué
+            intents_played = MAX_OBJECTIVES - free_steps
+            if intents_played > 0:
+                self.game_state["_pending_zone_shaping"] = self.reward_calculator.compute_zone_intent_shaping(
+                    self.game_state
+                )
+            self.game_state["zone_intent_free_steps_remaining"] = 0
+
         unit_id = action.get("unitId")
         current_unit = None
         if unit_id:
             current_unit = self._get_unit_by_id(unit_id)
-        
+
         success, result = command_handlers.execute_action(self.game_state, current_unit, action, self.config)
         return success, result
     
@@ -4427,7 +4508,7 @@ class W40KEngine(gym.Env):
         if self.game_state.get("phase") == "deployment":
             return self.obs_builder.build_observation(self.game_state)
         action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
-        if not eligible_units:
+        if not eligible_units and not action_mask.any():
             if self.game_state.get("game_over", False):
                 if not hasattr(self.obs_builder, "obs_size"):
                     raise KeyError("obs_builder missing required 'obs_size' field")

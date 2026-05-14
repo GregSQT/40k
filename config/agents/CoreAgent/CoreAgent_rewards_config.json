@@ -25,13 +25,13 @@
     },
     "target_type_bonuses": {},
     "situational_modifiers": {
-      "win": 40,
-      "lose": -40,
+      "win": 20,
+      "lose": -20,
       "draw": 0.0
     },
     "objective_rewards": {
-      "reward_per_objective": 20.0,
-      "reward_for_objective_lead": 20.0,
+      "reward_per_objective": 5.0,
+      "reward_for_objective_lead": 5.0,
       "use_objective_lead": true,
       "reward_per_objective_turn5": 0.0
     },
@@ -40,6 +40,11 @@
       "invalid_action": -0.5,
       "system_response": 0.0,
       "generic_error": -0.1
+    },
+    "zone_intent_shaping": {
+      "defend_held_bonus": 0.2,
+      "invade_success_bonus": 0.3,
+      "invade_lost_penalty": 0.2
     }
   }
 }

@@ -4,7 +4,8 @@ command_handlers.py - Command Phase Implementation
 Pure stateless functions implementing command phase specification
 
 The command phase handles all administrative tasks (reset marks, clear caches, etc.)
-before the movement phase. It auto-advances to the movement phase.
+before the movement phase. In Phase 2, the agent may take zone intent free steps
+(up to MAX_OBJECTIVES) before transitioning to move.
 """
 
 from typing import Dict, List, Tuple, Set, Optional, Any
@@ -14,16 +15,17 @@ from engine.game_state import GameStateManager
 
 def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Initialize command phase - do all maintenance/resets, then transition to move.
-    
-    This function:
-    - Sets phase to "command"
-    - Resets all tracking sets (units_moved, units_fled, etc.)
-    - Clears all preview pools (valid_move_destinations_pool, preview_hexes, etc.)
-    - Clears enemy_reachable_cache
-    - Builds activation pool (empty for now, structure ready for future)
-    - Auto-advances to move phase
+    Initialize command phase - do all maintenance/resets, then either:
+    - Stay in command if zone intent free steps are available (Phase 2), or
+    - Auto-advance to move (no free steps or bot player).
+
+    Phase 2 changes:
+    - Initializes zone_intent_free_steps_remaining = MAX_OBJECTIVES
+    - Populates unit_zone_assignments (one per alive friendly unit)
+    - Returns without phase_complete if free steps > 0 (agent will issue zone intent actions)
     """
+    from engine.macro_intents import INTENT_INVADE, MAX_OBJECTIVES, get_nearest_objective_zone
+
     # Set phase
     game_state["phase"] = "command"
 
@@ -32,7 +34,7 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     turn = game_state.get("turn", "?")
     units_cache = require_key(game_state, "units_cache")
     add_debug_file_log(game_state, f"[PHASE START] E{episode} T{turn} command units_cache={units_cache}")
-    
+
     # Reset ALL tracking sets (moved from movement_phase_start)
     game_state["units_moved"] = set()
     game_state["units_fled"] = set()
@@ -45,7 +47,7 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["reactive_macro_order_current_window"] = []
     game_state["reaction_window_active"] = False
     game_state["reactive_decision_payload"] = {}
-    
+
     # Clear movement preview state
     game_state["valid_move_destinations_pool"] = []
     game_state["preview_hexes"] = []
@@ -53,17 +55,17 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["move_preview_footprint_mask_loops"] = None
     game_state["move_preview_footprint_span"] = None
     game_state["active_movement_unit"] = None
-    
+
     # Clear enemy reachable positions cache (enemy positions may have changed)
     # Used by RewardCalculator._get_enemy_reachable_positions for defensive threat calculation
     game_state["enemy_reachable_cache"] = {}
-    
+
     # Build activation pool (empty for now, structure ready for future)
     command_build_activation_pool(game_state)
 
     command_pool = require_key(game_state, "command_activation_pool")
     add_debug_file_log(game_state, f"[POOL BUILD] E{episode} T{turn} command command_activation_pool={command_pool}")
-    
+
     # Console log
     from engine.game_utils import add_console_log
     add_console_log(game_state, "COMMAND PHASE START")
@@ -71,8 +73,42 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Primary objective scoring (command phase)
     state_manager = GameStateManager(require_key(game_state, "config"))
     state_manager.apply_primary_objective_scoring(game_state, "command")
-    
-    # Auto-advance: transition directly to move (pool is empty)
+
+    # Phase 2: Initialize zone intent free steps
+    # Only for the controlled agent player during gym training
+    gym_training_mode = game_state.get("gym_training_mode", False)
+    current_player = game_state.get("current_player")
+    config = game_state["config"]
+    controlled_player = config.get("controlled_player")
+
+    is_agent_turn = (
+        gym_training_mode
+        and controlled_player is not None
+        and current_player == controlled_player
+    )
+
+    # Populate unit_zone_assignments for ALL alive units (both players)
+    from engine.phase_handlers.shared_utils import is_unit_alive
+    assignments = {}
+    for unit in game_state["units"]:
+        if not is_unit_alive(str(unit["id"]), game_state):
+            continue
+        if unit.get("col", -1) >= 0 and unit.get("row", -1) >= 0:
+            zone_idx = get_nearest_objective_zone(unit, game_state)
+        else:
+            zone_idx = 0
+        assignments[str(unit["id"])] = zone_idx
+    game_state["unit_zone_assignments"] = assignments
+
+    if is_agent_turn:
+        # Reset zone_intent_free_steps_remaining to MAX_OBJECTIVES
+        game_state["zone_intent_free_steps_remaining"] = MAX_OBJECTIVES
+
+        # Stay in command phase — agent will issue zone intent actions
+        return {"phase_complete": False, "phase": "command"}
+
+    # Bot player or non-training: skip free steps, auto-advance to move
+    game_state["zone_intent_free_steps_remaining"] = 0
     return command_phase_end(game_state)
 
 

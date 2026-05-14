@@ -12,11 +12,6 @@ if "ai.multi_agent_trainer" not in sys.modules:
     _stub.MultiAgentTrainer = object
     sys.modules["ai.multi_agent_trainer"] = _stub
 
-if "ai.macro_training_env" not in sys.modules:
-    _stub_macro = types.ModuleType("ai.macro_training_env")
-    _stub_macro.MacroTrainingWrapper = object
-    _stub_macro.MacroVsBotWrapper = object
-    sys.modules["ai.macro_training_env"] = _stub_macro
 
 import ai.train as train
 

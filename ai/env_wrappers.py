@@ -210,7 +210,7 @@ class BotControlledEnv(gym.Wrapper):
     ) -> tuple[Any, bool, bool, dict, float]:
         """Execute consecutive bot turns until control leaves bot player or episode ends."""
         bot_loop_count = 0
-        max_bot_iterations = 1000
+        max_bot_iterations = require_key(require_key(self.engine.game_state["config"], "game_rules"), "max_steps_per_turn")
         if debug_mode:
             print(
                 f"[TRAIN DEBUG] BotControlledEnv._run_bot_until_not_bot_turn enter env_rank={self._env_rank}",
@@ -312,6 +312,11 @@ class BotControlledEnv(gym.Wrapper):
         )
         has_valid_actions = bool(np.any(np.asarray(action_mask, dtype=bool)))
         if not eligible_units:
+            if has_valid_actions and self.engine.game_state.get("phase") == "command":
+                # Command phase: no eligible units but zone intent actions are valid.
+                # Current player owns the decision.
+                current_player = int(require_key(self.engine.game_state, "current_player"))
+                return current_player, has_valid_actions, 0
             return None, has_valid_actions, 0
 
         owners = {int(require_key(unit, "player")) for unit in eligible_units}
@@ -335,9 +340,21 @@ class BotControlledEnv(gym.Wrapper):
         """
         Advance deterministic no-choice states so controlled player always gets a non-empty mask.
         """
+        MAX_ENSURE_ITERATIONS = 2000
         iteration_count = 0
         while not (terminated or truncated):
             iteration_count += 1
+            if iteration_count > MAX_ENSURE_ITERATIONS:
+                phase = self.engine.game_state.get("phase", "?")
+                cp = self.engine.game_state.get("current_player", "?")
+                free = self.engine.game_state.get("zone_intent_free_steps_remaining", "?")
+                raise RuntimeError(
+                    f"_ensure_actionable_controlled_turn infinite loop detected: "
+                    f"env_rank={self._env_rank} iterations={iteration_count} "
+                    f"phase={phase} current_player={cp} decision_owner={decision_owner} "
+                    f"has_valid_actions={has_valid_actions} eligible_count={eligible_count} "
+                    f"free_steps={free}"
+                )
             decision_owner, has_valid_actions, eligible_count = self._get_decision_owner_from_mask()
             if debug_mode and (iteration_count <= 5 or iteration_count % 25 == 0):
                 current_phase = str(require_key(self.engine.game_state, "phase"))
@@ -744,6 +761,9 @@ class BotControlledEnv(gym.Wrapper):
         reward = 0.0
         cumulative_reward = 0.0
         info = {}
+        agent_action_info = None
+        agent_intent_value = None
+        agent_is_controlled_action = None
         obs, bot_reward_before, terminated, truncated, info = self._play_bot_until_control_returns(
             debug_mode=debug_mode
         )
@@ -779,6 +799,9 @@ class BotControlledEnv(gym.Wrapper):
             # LOG TEMPORAIRE: time full env.step() call (--debug) to compare with STEP_TIMING
             t0_agent = time.perf_counter() if debug_mode else None
             obs, reward, terminated, truncated, info = self.env.step(agent_action)
+            agent_action_info = info.get("action")
+            agent_intent_value = info.get("intent_value")
+            agent_is_controlled_action = info.get("is_controlled_action")
             cumulative_reward += float(reward)
             self.episode_reward += float(reward)
             if debug_mode and t0_agent is not None:
@@ -807,6 +830,12 @@ class BotControlledEnv(gym.Wrapper):
                 self.timesteps_agent_p1 += self.episode_length
             else:
                 self.timesteps_agent_p2 += self.episode_length
+        if agent_action_info is not None:
+            info["action"] = agent_action_info
+        if agent_intent_value is not None:
+            info["intent_value"] = agent_intent_value
+        if agent_is_controlled_action is not None:
+            info["is_controlled_action"] = agent_is_controlled_action
         info["controlled_player"] = self.controlled_player
         info["opponent_player"] = self.bot_player
         info["agent_seat_mode"] = self.agent_seat_mode

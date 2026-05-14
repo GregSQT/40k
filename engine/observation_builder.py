@@ -23,22 +23,23 @@ from engine.phase_handlers.shared_utils import (
     unit_has_rule_effect,
 )
 from engine.macro_intents import (
-    INTENT_COUNT,
-    DETAIL_OBJECTIVE,
-    DETAIL_ENEMY,
-    DETAIL_ALLY,
-    DETAIL_NONE,
+    INTENT_INVADE,
+    INTENT_DEFEND,
+    INTENT_ATTACK,
+    get_best_enemy_global,
+    get_best_enemy_score,
+    get_objective_control,
+    get_objective_center,
 )
 from engine.weapon_damage_cache import lookup_best_weapon
 
 class ObservationBuilder:
     """Builds observations for the agent."""
 
-    LEGACY_OBS_SIZE = 323
-    RULE_AWARE_OBS_SIZE = 355
+    PHASE2_OBS_SIZE = 357
     RULE_FEATURE_BASE_IDX = 314
     RULE_FEATURE_COUNT = 32
-    RULE_AWARE_MACRO_BASE_IDX = 346
+    RULE_AWARE_MACRO_BASE_IDX = 346  # kept for reference: base of macro intent context (obs[346:357])
 
     _UNIT_RULE_FEATURE_IDS = (
         "charge_after_advance",
@@ -1210,39 +1211,25 @@ class ObservationBuilder:
         # base_idx = 16 + 22 = 38
         self._encode_directional_terrain(obs, active_unit, game_state, base_idx=38, positions=positions)
         # === SECTION 4: Allied Units (72 floats) ===
-        # Directional Terrain: [38:70] = 32 floats
-        # base_idx = 38 + 32 = 70
         self._encode_allied_units(obs, active_unit, game_state, base_idx=70, positions=positions)
-        # === SECTION 5: Enemy Units (132 floats) ===
-        # Allied Units: [70:142] = 72 floats
-        # base_idx = 70 + 72 = 142
-        # === SECTION 6: Valid Targets (40 floats) ===
-        # Shared 6 reference enemies so every valid target has enemy_index; avoid "Required key 'X' missing".
-        # Sort before building 6 so encoded targets (first 5) are always in the 6.
+        # === SECTION 5+6: Enemy Units + Valid Targets ===
         valid_targets = self._get_valid_targets(active_unit, game_state, positions=positions)
         self._sort_valid_targets(valid_targets, active_unit, game_state, positions=positions)
         six_enemies = self._get_six_reference_enemies(active_unit, game_state, valid_targets, positions=positions)
         self._encode_enemy_units(obs, active_unit, game_state, base_idx=142, six_enemies=six_enemies, positions=positions)
-        # Enemy Units: [142:274] = 132 floats (6 × 22 features)
-        # base_idx = 142 + 132 = 274
         self._encode_valid_targets(
             obs, active_unit, game_state, base_idx=274,
             valid_targets=valid_targets, six_enemies=six_enemies, positions=positions
         )
-        # === SECTION 7: Rule-aware extension + Macro target + intent ===
-        if self.obs_size == self.LEGACY_OBS_SIZE:
-            self._encode_macro_intent_context(obs, active_unit, game_state, base_idx=314, positions=positions)
-        elif self.obs_size == self.RULE_AWARE_OBS_SIZE:
-            self._encode_rule_features(obs, active_unit, game_state, base_idx=self.RULE_FEATURE_BASE_IDX)
-            self._encode_macro_intent_context(
-                obs, active_unit, game_state, base_idx=self.RULE_AWARE_MACRO_BASE_IDX, positions=positions
-            )
-        else:
+        # === SECTION 7: Phase 2 — Rule features + Zone intent context (obs[314:357]) ===
+        if self.obs_size != self.PHASE2_OBS_SIZE:
             raise ValueError(
-                "Unsupported observation size. "
-                f"Expected {self.LEGACY_OBS_SIZE} (legacy) or {self.RULE_AWARE_OBS_SIZE} (rule-aware), "
-                f"got {self.obs_size}"
+                f"Unsupported observation size: {self.obs_size}. "
+                f"Expected {self.PHASE2_OBS_SIZE} (Phase 2). "
+                "Checkpoints trained with earlier obs_size are incompatible — use --new."
             )
+        self._encode_rule_features(obs, active_unit, game_state, base_idx=self.RULE_FEATURE_BASE_IDX)
+        self._encode_macro_intent_context(obs, active_unit, game_state, base_idx=self.RULE_AWARE_MACRO_BASE_IDX, positions=positions)
         return obs
 
     def build_observation_for_unit(self, game_state: Dict[str, Any], unit_id: str) -> np.ndarray:
@@ -1469,111 +1456,77 @@ class ObservationBuilder:
         positions: Dict[str, Tuple[int, int]],
     ) -> None:
         """
-        Encode macro intent context for the active unit.
+        Phase 2 zone intent context encoding — obs[346:357], 11 floats.
 
-        Detail features (4 floats):
-        - target_col_norm
-        - target_row_norm
-        - target_signal (objective: control_state, unit: hp_ratio, none: 0.0)
-        - target_distance_norm (distance / max_range)
+        Source de vérité pour zone_idx : unit_zone_assignments (peuplé en début de command phase).
+        Si la clé est absente → KeyError explicite.
+
+        Layout:
+          obs[346:350] = c1_col_norm, c1_row_norm, c1_signal, c1_dist  (candidat 1 : navigation)
+          obs[350:354] = c2_col_norm, c2_row_norm, c2_signal, c2_dist  (candidat 2 : objectif zone)
+          obs[354:357] = intent_onehot [INVADE, DEFEND, ATTACK]
         """
-        macro_intent_id = require_key(game_state, "macro_intent_id")
-        if macro_intent_id is None:
-            raise ValueError("macro_intent_id is required for macro intent encoding")
-        try:
-            macro_intent_id_int = int(macro_intent_id)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"Invalid macro_intent_id: {macro_intent_id}") from exc
-        if macro_intent_id_int < 0 or macro_intent_id_int >= INTENT_COUNT:
-            raise ValueError(f"macro_intent_id out of range: {macro_intent_id_int}")
+        unit_zone_assignments = game_state["unit_zone_assignments"]
+        unit_id_str = str(active_unit["id"])
+        if unit_id_str not in unit_zone_assignments:
+            raise KeyError(
+                f"unit_zone_assignments missing unit_id={unit_id_str}. "
+                "This key must be populated at the start of command phase. "
+                "Possible cause: command phase was skipped or unit_zone_assignments was not reset."
+            )
+        zone_idx = unit_zone_assignments[unit_id_str]
 
-        detail_type = require_key(game_state, "macro_detail_type")
-        if detail_type is None:
-            raise ValueError("macro_detail_type is required for macro intent encoding")
-        try:
-            detail_type_int = int(detail_type)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"Invalid macro_detail_type: {detail_type}") from exc
-
-        detail_id = require_key(game_state, "macro_detail_id")
-        if detail_id is None:
-            raise ValueError("macro_detail_id is required for macro intent encoding")
-        try:
-            detail_id_int = int(detail_id)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"Invalid macro_detail_id: {detail_id}") from exc
-
+        zone_intents = game_state["zone_intents"]
+        intent = zone_intents[zone_idx]
+        objectives = game_state["objectives"]
         board_cols = require_key(game_state, "board_cols")
         board_rows = require_key(game_state, "board_rows")
-        if board_cols <= 0 or board_rows <= 0:
-            raise ValueError(f"Invalid board size for macro intent encoding: cols={board_cols}, rows={board_rows}")
-
-        unit_col, unit_row = positions[str(active_unit["id"])]
         max_range = require_key(game_state, "max_range")
 
-        target_col_norm = 0.0
-        target_row_norm = 0.0
-        target_signal = 0.0
-        distance_norm = 0.0
+        if board_cols <= 1 or board_rows <= 1:
+            raise ValueError(f"Invalid board size for zone intent encoding: cols={board_cols}, rows={board_rows}")
+        if max_range <= 0:
+            raise ValueError(f"Invalid max_range for zone intent encoding: {max_range}")
 
-        if detail_type_int == DETAIL_OBJECTIVE:
-            if "macro_objectives" not in game_state:
-                objectives = require_key(game_state, "objectives")
-                macro_objectives = self._build_macro_objective_entries(
-                    objectives, game_state, board_cols, board_rows
-                )
-                game_state["macro_objectives"] = macro_objectives
-                game_state["macro_attrition_objective_index"] = len(macro_objectives) - 1
-            macro_objectives = require_key(game_state, "macro_objectives")
-            if not macro_objectives:
-                raise ValueError("macro_objectives is required for macro intent encoding")
-            if detail_id_int < 0 or detail_id_int >= len(macro_objectives):
-                raise ValueError(
-                    f"macro_detail_id out of range for objectives: {detail_id_int} "
-                    f"(objectives={len(macro_objectives)})"
-                )
-            objective = macro_objectives[detail_id_int]
-            centroid_col = require_key(objective, "col")
-            centroid_row = require_key(objective, "row")
-            target_col_norm = require_key(objective, "col_norm")
-            target_row_norm = require_key(objective, "row_norm")
-            target_signal = require_key(objective, "control_state")
-            distance = calculate_hex_distance(
-                unit_col,
-                unit_row,
-                int(round(centroid_col)),
-                int(round(centroid_row))
-            )
-            distance_norm = distance / float(max_range) if max_range > 0 else 0.0
-        elif detail_type_int in (DETAIL_ENEMY, DETAIL_ALLY):
-            unit_by_id = require_key(game_state, "unit_by_id")
-            target_unit = unit_by_id.get(str(detail_id_int))
-            if target_unit is None:
-                raise KeyError(f"macro_detail_id unit missing from game_state: {detail_id_int}")
-            target_col, target_row = positions[str(target_unit["id"])]
-            target_col_norm = target_col / float(board_cols - 1)
-            target_row_norm = target_row / float(board_rows - 1)
-            hp_cur = require_hp_from_cache(str(detail_id_int), game_state)
-            hp_max = require_key(target_unit, "HP_MAX")
-            target_signal = (hp_cur / hp_max) if hp_max > 0 else 0.0
-            distance = calculate_hex_distance(unit_col, unit_row, target_col, target_row)
-            distance_norm = distance / float(max_range) if max_range > 0 else 0.0
-        elif detail_type_int == DETAIL_NONE:
-            target_col_norm = 0.0
-            target_row_norm = 0.0
-            target_signal = 0.0
-            distance_norm = 0.0
+        unit_col, unit_row = positions[unit_id_str]
+
+        # Candidat 1: navigation principale selon intent
+        if intent == INTENT_INVADE:
+            c1_col, c1_row = get_objective_center(objectives[zone_idx])
+            c1_signal = get_objective_control(zone_idx, game_state)
+        elif intent == INTENT_DEFEND:
+            c1_col, c1_row = get_objective_center(objectives[zone_idx])
+            c1_signal = get_objective_control(zone_idx, game_state)
+        elif intent == INTENT_ATTACK:
+            c1_col, c1_row = get_best_enemy_global(game_state, zone_idx)
+            c1_signal = get_best_enemy_score(game_state)
         else:
-            raise ValueError(f"Unsupported macro_detail_type: {detail_type_int}")
+            raise ValueError(f"Unsupported zone intent value: {intent}")
 
-        obs[base_idx + 0] = target_col_norm
-        obs[base_idx + 1] = target_row_norm
-        obs[base_idx + 2] = target_signal
-        obs[base_idx + 3] = distance_norm
+        c1_dist = calculate_hex_distance(unit_col, unit_row, c1_col, c1_row) / float(max_range)
 
-        intent_base = base_idx + 4
-        for idx in range(INTENT_COUNT):
-            obs[intent_base + idx] = 1.0 if idx == macro_intent_id_int else 0.0
+        # Candidat 2: objectif de la zone (toujours disponible)
+        c2_col, c2_row = get_objective_center(objectives[zone_idx])
+        c2_signal = get_objective_control(zone_idx, game_state)
+        c2_dist = calculate_hex_distance(unit_col, unit_row, c2_col, c2_row) / float(max_range)
+
+        intent_onehot = [
+            1.0 if intent == INTENT_INVADE else 0.0,
+            1.0 if intent == INTENT_DEFEND else 0.0,
+            1.0 if intent == INTENT_ATTACK else 0.0,
+        ]
+
+        obs[base_idx + 0] = c1_col / float(board_cols - 1)
+        obs[base_idx + 1] = c1_row / float(board_rows - 1)
+        obs[base_idx + 2] = c1_signal
+        obs[base_idx + 3] = c1_dist
+        obs[base_idx + 4] = c2_col / float(board_cols - 1)
+        obs[base_idx + 5] = c2_row / float(board_rows - 1)
+        obs[base_idx + 6] = c2_signal
+        obs[base_idx + 7] = c2_dist
+        obs[base_idx + 8] = intent_onehot[0]
+        obs[base_idx + 9] = intent_onehot[1]
+        obs[base_idx + 10] = intent_onehot[2]
 
     def _get_active_unit_for_observation(self, game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -1606,7 +1559,12 @@ class ObservationBuilder:
             else:
                 raise KeyError(f"Unknown fight_subphase: {fight_subphase}")
         elif current_phase == "command":
-            # Command phase has no "active unit" for observation; return None so build_observation returns zeros
+            # Return first alive unit of current player as reference for zone intent observation.
+            # Zone intents are global (not per-unit), but the obs builder needs a unit to encode
+            # obs[346:357] (c1/c2 candidates, intent one-hot). Any alive friendly unit works.
+            for unit in game_state["units"]:
+                if unit.get("player") == current_player and is_unit_alive(str(unit["id"]), game_state):
+                    return unit
             return None
         elif current_phase == "deployment":
             deployment_state = require_key(game_state, "deployment_state")

@@ -70,6 +70,8 @@ def test_log_episode_start_writes_units_and_metadata(tmp_path: Path) -> None:
             "HP_MAX": 2,
             "unitType": "Intercessor",
             "DISPLAY_NAME": "Alpha",
+            "BASE_SHAPE": "round",
+            "BASE_SIZE": 1,
         }
     ]
     logger.log_episode_start(
@@ -85,6 +87,10 @@ def test_log_episode_start_writes_units_and_metadata(tmp_path: Path) -> None:
             "agent_roster_ref": "space_marines",
             "opponent_roster_ref": "tyranids",
             "scale": 2000,
+        },
+        board_config={
+            "cols": 15, "rows": 13, "hex_radius": 1.0,
+            "margin": 0.0, "inches_to_subhex": 2.0,
         },
     )
     content = _read_text(output_file)

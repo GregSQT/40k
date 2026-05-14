@@ -1,0 +1,81 @@
+........................................................................ [  6%]
+..................................................................F..... [ 13%]
+........................................................................ [ 19%]
+........................................................................ [ 26%]
+........................................................................ [ 33%]
+........................................................................ [ 39%]
+........................................................................ [ 46%]
+........................................................................ [ 53%]
+.........................F.............................................. [ 59%]
+........................................................................ [ 66%]
+........................................................................ [ 72%]
+........................................................................ [ 79%]
+........................................................................ [ 86%]
+........................................................................ [ 92%]
+........................................................................ [ 99%]
+.....                                                                    [100%]
+=================================== FAILURES ===================================
+_______________ test_log_episode_start_writes_units_and_metadata _______________
+
+tmp_path = PosixPath('/tmp/pytest-of-greg/pytest-8/test_log_episode_start_writes_0')
+
+    def test_log_episode_start_writes_units_and_metadata(tmp_path: Path) -> None:
+        output_file = tmp_path / "step.log"
+        logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=10)
+        units = [
+            {
+                "id": 1,
+                "col": 2,
+                "row": 3,
+                "player": 1,
+                "HP_MAX": 2,
+                "unitType": "Intercessor",
+                "DISPLAY_NAME": "Alpha",
+                "BASE_SHAPE": "round",
+                "BASE_SIZE": 1,
+            }
+        ]
+        logger.log_episode_start(
+            units_data=units,
+            scenario_info="demo-scenario",
+            bot_name="random",
+            walls=[{"col": 7, "row": 8}],
+            objectives=[{"id": 1, "hexes": [(4, 4)]}],
+            primary_objective_config={"mode": "control"},
+            roster_info={
+                "agent_roster_id": "A1",
+                "opponent_roster_id": "B2",
+                "agent_roster_ref": "space_marines",
+                "opponent_roster_ref": "tyranids",
+                "scale": 2000,
+            },
+        )
+        content = _read_text(output_file)
+        assert "=== EPISODE 1 START ===" in content
+        assert "Scenario: demo-scenario" in content
+        assert "Opponent: RandomBot" in content
+        assert "Walls: (7,8)" in content
+        assert "Objectives: Obj1:(4,4)" in content
+        assert 'Rules: {"primary_objective":{"mode":"control"}}' in content
+>       assert "Unit 1 (Intercessor) [Alpha] P1: Starting position (2,3), HP_MAX=2" in content
+E       assert 'Unit 1 (Intercessor) [Alpha] P1: Starting position (2,3), HP_MAX=2' in '=== STEP-BY-STEP ACTION LOG ===\nAI_TURN.md COMPLIANCE: Actions that increment episode_steps are logged\nINCREMENTED ...0:55:45] Walls: (7,8)\n[10:55:45] Objectives: Obj1:(4,4)\n[10:55:45] Rules: {"primary_objective":{"mode":"control"}}\n'
+
+tests/unit/ai/test_step_logger.py:99: AssertionError
+----------------------------- Captured stdout call -----------------------------
+📝 Step logging enabled: /tmp/pytest-of-greg/pytest-8/test_log_episode_start_writes_0/step.log
+⚠️ Episode start logging error: board_config is required for episode start logging
+_______ TestGameStateComplexKeys.test_macro_target_objective_id_present ________
+
+self = <test_game_state_contract.TestGameStateComplexKeys object at 0x764e955dfa10>
+engine = <engine.w40k_core.W40KEngine object at 0x764e94b76c00>
+
+    def test_macro_target_objective_id_present(self, engine):
+        """gs_macro_target : macro_target_objective_id initialisé depuis objectives[0]."""
+>       assert "macro_target_objective_id" in engine.game_state
+E       AssertionError: assert 'macro_target_objective_id' in {'_best_weapon_cache': {('1', 0, '2'): (-1, 0.0), ('1', 1, '2'): (-1, 0.0), ('2', 0, '1'): (-1, 0.0), ('2', 1, '1'): (-1, 0.0)}, '_cache_instance_id': 55, '_deployment_random_mix_forced_steps': 0, '_unit_move_version': 0, ...}
+E        +  where {'_best_weapon_cache': {('1', 0, '2'): (-1, 0.0), ('1', 1, '2'): (-1, 0.0), ('2', 0, '1'): (-1, 0.0), ('2', 1, '1'): (-1, 0.0)}, '_cache_instance_id': 55, '_deployment_random_mix_forced_steps': 0, '_unit_move_version': 0, ...} = <engine.w40k_core.W40KEngine object at 0x764e94b76c00>.game_state
+
+tests/unit/engine/test_game_state_contract.py:241: AssertionError
+=========================== short test summary info ============================
+FAILED tests/unit/ai/test_step_logger.py::test_log_episode_start_writes_units_and_metadata
+FAILED tests/unit/engine/test_game_state_contract.py::TestGameStateComplexKeys::test_macro_target_objective_id_present

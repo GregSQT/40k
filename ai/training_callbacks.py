@@ -1059,6 +1059,12 @@ class MetricsCollectionCallback(BaseCallback):
                     if is_controlled_action and (info.get('action') == 'wait' or info.get('action') == 'skip'):  # get allowed
                         self.episode_tactical_data['wait_actions'] += 1
 
+                    # Track zone intent steps (SubprocVecEnv-safe: read from info dict)
+                    if is_controlled_action and info.get('action') == 'zone_intent' and self.metrics_tracker is not None:
+                        intent_value = info.get('intent_value')
+                        if intent_value is not None:
+                            self.metrics_tracker.log_zone_intent_step(int(intent_value))
+
                     # Track damage from combat results
                     if is_controlled_action and 'totalDamage' in info:
                         damage_dealt = info['totalDamage']

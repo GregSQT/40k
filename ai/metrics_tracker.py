@@ -162,6 +162,13 @@ class W40KMetricsTracker:
         # NEW: Bot evaluation combined score for 0_critical/ dashboard
         self.bot_eval_combined = None
 
+        # Phase 2: Zone intent metrics (sliding window, reset after each log interval)
+        self._intent_invade_count = 0
+        self._intent_defend_count = 0
+        self._intent_attack_count = 0
+        self._intent_zone_steps_total = 0
+        self._episodes_in_window = 0
+
         # Unit-rule forcing instrumentation (episode exposure + bot-eval impact)
         self.forcing_tracking = {
             'episodes_total': 0,
@@ -250,6 +257,7 @@ class W40KMetricsTracker:
     def log_episode_end(self, episode_data: Dict[str, Any]):
         """Log core episode metrics - reward, win rate, and episode length"""
         self.episode_count += 1
+        self._episodes_in_window += 1
 
         # Extract data
         total_reward = require_key(episode_data, 'total_reward')
@@ -1091,7 +1099,59 @@ class W40KMetricsTracker:
                 self.writer.add_scalar('game_critical/invalid_action_rate', 0.0, self.episode_count)
 
         self._log_thresholds(self.episode_count)
-    
+
+        # Phase 2: zone intent metrics (sliding window)
+        self._log_zone_intent_metrics(self.episode_count)
+
+    def log_zone_intent_step(self, intent_value: int) -> None:
+        """
+        Log a single zone intent free step. Called from w40k_core.step() when is_zone_intent_action(action).
+
+        Args:
+            intent_value: 0=INVADE, 1=DEFEND, 2=ATTACK
+        """
+        self._intent_zone_steps_total += 1
+        if intent_value == 0:
+            self._intent_invade_count += 1
+        elif intent_value == 1:
+            self._intent_defend_count += 1
+        elif intent_value == 2:
+            self._intent_attack_count += 1
+        else:
+            raise ValueError(f"Invalid intent_value for zone intent step: {intent_value}")
+
+    def _log_zone_intent_metrics(self, step: int) -> None:
+        """
+        Log zone intent metrics to 0_critical/ namespace and reset window counters.
+        Called from log_critical_dashboard() at each log interval.
+        """
+        episodes = max(1, self._episodes_in_window)
+        n_steps_per_ep = self._intent_zone_steps_total / episodes
+        self.writer.add_scalar("0_critical/n_intent_zone_steps", n_steps_per_ep, step)
+
+        total_intents = self._intent_invade_count + self._intent_defend_count + self._intent_attack_count
+        if total_intents > 0:
+            self.writer.add_scalar(
+                "0_critical/intent_invade_ratio", self._intent_invade_count / total_intents, step
+            )
+            self.writer.add_scalar(
+                "0_critical/intent_defend_ratio", self._intent_defend_count / total_intents, step
+            )
+            self.writer.add_scalar(
+                "0_critical/intent_attack_ratio", self._intent_attack_count / total_intents, step
+            )
+        else:
+            self.writer.add_scalar("0_critical/intent_invade_ratio", 0.0, step)
+            self.writer.add_scalar("0_critical/intent_defend_ratio", 0.0, step)
+            self.writer.add_scalar("0_critical/intent_attack_ratio", 0.0, step)
+
+        # Reset sliding window counters
+        self._intent_invade_count = 0
+        self._intent_defend_count = 0
+        self._intent_attack_count = 0
+        self._intent_zone_steps_total = 0
+        self._episodes_in_window = 0
+
     def log_bot_evaluations(self, bot_results: Dict[str, float], step: Optional[int] = None):
         """
         Log bot evaluation results to both 0_critical/ and bot_eval/ namespaces.

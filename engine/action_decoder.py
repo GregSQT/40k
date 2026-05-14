@@ -17,6 +17,7 @@ from engine.phase_handlers.shared_utils import (
     compute_candidate_footprint,
     build_occupied_positions_set,
 )
+from engine.macro_intents import BASE_ZONE_INTENT, TOTAL_ACTION_SIZE, MAX_OBJECTIVES, is_zone_intent_action, decode_zone_intent_action
 
 # Game phases - single source of truth for phase count
 GAME_PHASES = ["deployment", "command", "move", "shoot", "charge", "fight"]
@@ -35,6 +36,13 @@ class ActionDecoder:
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
+        obs_params = config["observation_params"]
+        if "action_space_size" not in obs_params:
+            raise KeyError(
+                "Config missing required 'action_space_size' in observation_params. "
+                "Must be defined in training_config.json."
+            )
+        self.total_action_size = obs_params["action_space_size"]
         self._deployment_potential_los_cache: Dict[
             tuple[int, tuple[tuple[int, int], ...], tuple[tuple[int, int], ...]],
             Dict[tuple[int, int], int],
@@ -130,16 +138,17 @@ class ActionDecoder:
         game_state: Dict[str, Any],
     ) -> np.ndarray:
         """Build action mask for provided eligible_units list."""
-        mask = np.zeros(16, dtype=bool)  # 16 actions (0-15): 4 move + 5 shoot + charge + fight + wait + 4 advance strategies
+        mask = np.zeros(self.total_action_size, dtype=bool)
         if not eligible_units:
             # No units can act - phase should auto-advance
             # CRITICAL: Fight phase has no wait action - return all False mask
             # to trigger auto-advance in w40k_core.step()
             if current_phase == "fight":
                 return mask
-            # For other phases, enable WAIT action to allow phase processing
-            mask[11] = True
-            return mask
+            # Command phase: fall through to its handler (zone intents require eligible_units=[])
+            if current_phase != "command":
+                mask[11] = True
+                return mask
 
         if current_phase == "deployment":
             active_unit = eligible_units[0] if eligible_units else None
@@ -161,6 +170,16 @@ class ActionDecoder:
             return mask
         if current_phase == "command":
             mask[11] = True
+            # Activate zone intent actions if free steps remain
+            free_steps = game_state["zone_intent_free_steps_remaining"]
+            if free_steps > 0:
+                objectives = game_state["objectives"]
+                num_zones = min(len(objectives), MAX_OBJECTIVES)
+                for zone_idx in range(num_zones):
+                    for intent_val in range(3):
+                        action_idx = BASE_ZONE_INTENT + zone_idx * 3 + intent_val
+                        if action_idx < TOTAL_ACTION_SIZE:
+                            mask[action_idx] = True
             return mask
         elif current_phase == "move":
             mask[[0, 1, 2, 3]] = True
@@ -494,8 +513,22 @@ class ActionDecoder:
             raw_action=action,
             phase=current_phase,
             source="gym",
-            action_space_size=16,
+            action_space_size=self.total_action_size,
         )
+
+        # Zone intent actions (16-30): only valid in command phase
+        if is_zone_intent_action(action_int):
+            if current_phase != "command":
+                return {
+                    "action": "invalid",
+                    "error": f"zone_intent_action_{action_int}_forbidden_in_{current_phase}_phase",
+                }
+            zone_idx, intent_value = decode_zone_intent_action(action_int)
+            return {
+                "action": "zone_intent",
+                "zone_idx": zone_idx,
+                "intent_value": intent_value,
+            }
 
         # Use provided mask/units or compute (e.g. PvE, other callers)
         if action_mask is None or eligible_units is None:

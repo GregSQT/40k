@@ -4,6 +4,7 @@ reward_calculator.py - Reward calculation system
 """
 
 from typing import Dict, List, Any, Tuple, Optional
+from engine.macro_intents import INTENT_DEFEND, INTENT_INVADE, get_objective_control
 from engine.combat_utils import (
     calculate_wound_target,
     calculate_hex_distance,
@@ -365,7 +366,7 @@ class RewardCalculator:
             reward_breakdown['base_actions'] = fight_reward - objective_turn_reward
             reward_breakdown['total'] = fight_reward
 
-            fight_attack_results = result.get("all_attack_results", [])
+            fight_attack_results = result["all_attack_results"]
             fight_killed = (
                 any(ar.get("target_died") for ar in fight_attack_results)
                 or bool(result.get("target_died", False))
@@ -1441,6 +1442,35 @@ class RewardCalculator:
 
         expected_damage = num_attacks * p_hit * p_wound * p_fail_save * damage
         return expected_damage
+
+    def compute_zone_intent_shaping(self, game_state: Dict[str, Any]) -> float:
+        """
+        Compute zone intent shaping reward based on current zone intents and objective control.
+
+        Called once per command phase, stored in _pending_zone_shaping, added to the first
+        non-zone-intent action reward of the turn.
+
+        Returns:
+          +0.05 per DEFEND zone where the objective is currently held (controlled by current_player)
+          -0.05 per INVADE zone where the objective is lost (controlled by opponent)
+        """
+        agent_key = require_key(self.config, "controlled_agent")
+        zone_intent_cfg = self.rewards_config[agent_key]["zone_intent_shaping"]
+        defend_bonus = zone_intent_cfg["defend_held_bonus"]
+        invade_success_bonus = zone_intent_cfg["invade_success_bonus"]
+        invade_penalty = zone_intent_cfg["invade_lost_penalty"]
+
+        zone_intents = game_state["zone_intents"]
+        shaping = 0.0
+        for zone_idx, intent in enumerate(zone_intents):
+            control = get_objective_control(zone_idx, game_state)
+            if intent == INTENT_DEFEND and control == 1.0:
+                shaping += defend_bonus
+            elif intent == INTENT_INVADE and control == 1.0:
+                shaping += invade_success_bonus
+            elif intent == INTENT_INVADE and control == -1.0:
+                shaping += invade_penalty
+        return shaping
 
     def _calculate_wound_target(self, strength: int, toughness: int) -> int:
         """W40K wound chart."""

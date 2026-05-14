@@ -93,6 +93,14 @@ def _tracker_stub() -> W40KMetricsTracker:
     t.latest_value_trade_ratio = None
     t.value_trade_ratio_history = []
     t.episode_tactical_data = {"total_actions": 0, "invalid_actions": 0, "valid_actions": 0}
+    t._episodes_in_window = 0
+    t._game_history = {
+        'vp_diff': [], 'vp_bot': [], 'objectives_held': [],
+        'units_killed': [], 'units_lost': [],
+        'objectives_held_diff': [],
+        'kill_efficiency': [],
+        'kill_rewards': [], 'obj_rewards': [],
+    }
     t.seat_aware = {
         "episodes_agent_p1": 0,
         "episodes_agent_p2": 0,

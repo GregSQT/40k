@@ -5,7 +5,7 @@
   "total_episodes": 30000,
   "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
   "agent_seat_mode": "random",
-  "eval_episodes": 100,
+  "eval_episodes": 10,
   "bot_eval_scenario_pool": "holdout",
   "bot_eval_show_progress": true,
   "bot_eval_use_subprocess": true,
@@ -13,6 +13,7 @@
   "max_turns_per_episode": 5,
   "n_envs": 48,
   "callback_params": {
+    "early_stopping_patience": 0,
     "save_best_min_episodes": 10000,
     "checkpoint_save_freq": 10000,
     "max_checkpoints": 3,
@@ -57,11 +58,12 @@
     "apply_to": "agent_only"
   },
   "observation_params": {
-    "obs_size": 355,
+    "obs_size": 357,
+    "action_space_size": 31,
     "perception_radius": 25,
     "max_nearby_units": 12,
     "max_valid_targets": 5,
-    "justification": "Identique au profil default — scale ×1, perception_radius en inches, converti en 25 sub-hex au chargement."
+    "justification": "Phase 2 — obs_size 355→357 (+2 floats zone intent), action_space_size 16+5×3=31."
   },
   "step_log_buffer_size": 200,
   "model_params": {
@@ -75,7 +77,7 @@
     "clip_range": 0.2,
     "clip_range_vf": null,
     "normalize_advantage": true,
-    "ent_coef": 0.15,
+    "ent_coef": 0.10,
     "vf_coef": 1.0,
     "max_grad_norm": 0.5,
     "target_kl": 0.02,

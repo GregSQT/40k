@@ -518,7 +518,7 @@ def _count_units_from_roster_scenario(scenario_data: Dict[str, Any], scenario_fi
             for rf in roster_files:
                 try:
                     rd = json.load(open(rf))
-                    count = sum(int(e["count"]) for e in rd.get("composition", []) if isinstance(e, dict))
+                    count = sum(int(e["count"]) for e in rd["composition"] if isinstance(e, dict))
                     max_count = max(max_count, count)
                 except Exception:
                     pass
@@ -534,7 +534,7 @@ def _count_units_from_roster_scenario(scenario_data: Dict[str, Any], scenario_fi
                 return 0
             try:
                 rd = json.load(open(roster_path))
-                return sum(int(e["count"]) for e in rd.get("composition", []) if isinstance(e, dict))
+                return sum(int(e["count"]) for e in rd["composition"] if isinstance(e, dict))
             except Exception:
                 return 0
 
@@ -1010,7 +1010,6 @@ import gymnasium as gym  # For SelfPlayWrapper to inherit from gym.Wrapper
 
 # Environment wrappers (extracted to ai/env_wrappers.py)
 from ai.env_wrappers import BotControlledEnv, SelfPlayWrapper
-from ai.macro_training_env import MacroTrainingWrapper, MacroVsBotWrapper
 
 
 # Step logger (extracted to ai/step_logger.py)
@@ -1035,7 +1034,7 @@ from ai.training_utils import (
     benchmark_device_speed,
     setup_imports,
     make_training_env,
-    make_macro_training_env,
+
     get_agent_scenario_file,
     get_scenario_list_for_phase,
     describe_expected_bot_self_scenario_files,
@@ -1947,204 +1946,19 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
 def create_macro_controller_model(config, training_config_name, rewards_config_name,
                                   agent_key, new_model=False, append_training=False,
                                   scenario_override=None, debug_mode=False, device_mode: Optional[str] = None):
-    """Create or load PPO model for MacroController with macro training wrapper."""
-    gpu_available = check_gpu_availability()
-
-    training_config = config.load_agent_training_config(agent_key, training_config_name)
-    print(
-        f"✅ Loaded agent-specific training config: "
-        f"config/agents/{agent_key}/{agent_key}_training_config.json [{training_config_name}]"
+    """Phase 1 macro controller — removed in Phase 2. Use create_model() instead."""
+    raise NotImplementedError(
+        "create_macro_controller_model is a Phase 1 artifact and has been removed. "
+        "Phase 2 uses the unified micro agent (create_model) with zone intent actions."
     )
-
-    model_params = training_config["model_params"]
-
-    # Handle entropy coefficient scheduling if configured
-    if "ent_coef" in model_params and isinstance(model_params["ent_coef"], dict):
-        ent_config = model_params["ent_coef"]
-        start_val = float(ent_config["start"])
-        end_val = float(ent_config["end"])
-        model_params["ent_coef"] = start_val
-        print(f"✅ Entropy coefficient schedule: {start_val} -> {end_val} (will be applied via callback)")
-
-    W40KEngine, register_environment = setup_imports()
-    register_environment()
-
-    cfg = get_config_loader()
-
-    scenario_file = None
-    scenario_files = None
-    if scenario_override == "all":
-        scenario_files = get_scenario_list_for_phase(cfg, agent_key, training_config_name)
-        if len(scenario_files) == 0:
-            raise FileNotFoundError(
-                f"No scenarios found for MacroController with training_config='{training_config_name}'. "
-                f"Expected files matching: {agent_key}_scenario_{training_config_name}*.json"
-            )
-        scenario_file = scenario_files[0]
-        print(f"✅ Using scenario rotation (MacroController): {len(scenario_files)} scenarios")
-        for s in scenario_files:
-            print(f"   - {os.path.basename(s)}")
-    else:
-        if scenario_override:
-            if os.path.isfile(scenario_override):
-                scenario_file = scenario_override
-            else:
-                scenario_file = get_agent_scenario_file(cfg, agent_key, training_config_name, scenario_override)
-        else:
-            scenario_file = get_agent_scenario_file(cfg, agent_key, training_config_name, scenario_override)
-        scenario_files = [scenario_file]
-        print(f"✅ Using scenario: {scenario_file}")
-
-    effective_agent_key = rewards_config_name if rewards_config_name else agent_key
-
-    n_envs = require_key(training_config, "n_envs")
-    macro_player = require_key(training_config, "macro_player")
-    macro_max_units = require_key(training_config, "macro_max_units")
-
-    models_root = config.get_models_root()
-    model_path_template = os.path.join(models_root, "{model_key}", "model_{model_key}.zip")
-    if n_envs > 1:
-        print(f"🚀 Creating {n_envs} parallel macro environments for accelerated training...")
-        env = SubprocVecEnv([
-            make_macro_training_env(
-                rank=i,
-                scenario_file=scenario_file,
-                rewards_config_name=rewards_config_name,
-                training_config_name=training_config_name,
-                controlled_agent_key=effective_agent_key,
-                model_path_template=model_path_template,
-                macro_player=macro_player,
-                macro_max_units=macro_max_units,
-                scenario_files=scenario_files,
-                debug_mode=debug_mode
-            )
-            for i in range(n_envs)
-        ])
-        print(f"✅ Vectorized macro training environment created with {n_envs} parallel processes")
-    else:
-        from ai.unit_registry import UnitRegistry
-        unit_registry = UnitRegistry()
-        base_env = W40KEngine(
-            rewards_config=rewards_config_name,
-            training_config_name=training_config_name,
-            controlled_agent=effective_agent_key,
-            active_agents=None,
-            scenario_file=scenario_file,
-            scenario_files=scenario_files,
-            unit_registry=unit_registry,
-            quiet=True,
-            gym_training_mode=True,
-            debug_mode=debug_mode
-        )
-        if step_logger:
-            base_env.step_logger = step_logger
-            print("✅ StepLogger connected to compliant W40KEngine")
-        macro_env = MacroTrainingWrapper(
-            base_env=base_env,
-            unit_registry=unit_registry,
-            scenario_files=scenario_files,
-            model_path_template=model_path_template,
-            macro_player=macro_player,
-            macro_max_units=macro_max_units,
-            debug_mode=debug_mode
-        )
-        def mask_fn(env):
-            return env.get_action_mask()
-        masked_env = ActionMasker(macro_env, mask_fn)
-        env = Monitor(masked_env)
-
-    model_path = build_agent_model_path(models_root, agent_key)
-
-    policy_kwargs = require_key(model_params, "policy_kwargs")
-    net_arch = require_key(policy_kwargs, "net_arch")
-    total_params = sum(net_arch) if isinstance(net_arch, list) else 512
-    obs_size = env.observation_space.shape[0]
-    cache_key = (agent_key, training_config_name, rewards_config_name)
-    device, use_gpu = resolve_device_mode(
-        device_mode, gpu_available, total_params,
-        obs_size=obs_size, net_arch=net_arch, cache_key=cache_key
-    )
-    model_params["device"] = device
-
-    if use_gpu:
-        print(f"🖥️  Using GPU for {agent_key} PPO")
-    elif gpu_available:
-        print(f"ℹ️  Using CPU for {agent_key} PPO (10% faster than GPU for MlpPolicy)")
-
-    if new_model or not os.path.exists(model_path):
-        print(f"🆕 Creating new model for {agent_key} on {device.upper()}...")
-        tb_log_name = f"{training_config_name}_{agent_key}"
-        specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
-        os.makedirs(specific_log_dir, exist_ok=True)
-        model_params_copy = model_params.copy()
-        model_params_copy["tensorboard_log"] = specific_log_dir
-        model = MaskablePPO(env=env, **model_params_copy)
-    else:
-        print(f"📁 Loading existing model: {model_path}")
-        try:
-            model = MaskablePPO.load(model_path, env=env, device=device)
-        except Exception as e:
-            print(f"⚠️ Failed to load model: {e}")
-            print("🆕 Creating new model instead...")
-            tb_log_name = f"{training_config_name}_{agent_key}"
-            specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
-            os.makedirs(specific_log_dir, exist_ok=True)
-            model_params_copy = model_params.copy()
-            model_params_copy["tensorboard_log"] = specific_log_dir
-            if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
-                model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
-            model = MaskablePPO(env=env, **model_params_copy)
-
-    _apply_torch_compile(model)
-    return model, env, training_config, model_path
 
 
 def _build_macro_eval_env(config, training_config_name, rewards_config_name, agent_key,
                           scenario_override, debug_mode, bot=None):
-    W40KEngine, register_environment = setup_imports()
-    register_environment()
-    cfg = get_config_loader()
-    scenario_file = get_agent_scenario_file(cfg, agent_key, training_config_name, scenario_override)
-    from ai.unit_registry import UnitRegistry
-    unit_registry = UnitRegistry()
-    effective_agent_key = rewards_config_name if rewards_config_name else agent_key
-    base_env = W40KEngine(
-        rewards_config=rewards_config_name,
-        training_config_name=training_config_name,
-        controlled_agent=effective_agent_key,
-        active_agents=None,
-        scenario_file=scenario_file,
-        unit_registry=unit_registry,
-        quiet=True,
-        gym_training_mode=True,
-        debug_mode=debug_mode
-    )
-    if step_logger and step_logger.enabled:
-        base_env.step_logger = step_logger
-    training_config = config.load_agent_training_config(agent_key, training_config_name)
-    macro_player = require_key(training_config, "macro_player")
-    macro_max_units = require_key(training_config, "macro_max_units")
-    models_root = config.get_models_root()
-    model_path_template = os.path.join(models_root, "{model_key}", "model_{model_key}.zip")
-    if bot is None:
-        return MacroTrainingWrapper(
-            base_env=base_env,
-            unit_registry=unit_registry,
-            scenario_files=[scenario_file],
-            model_path_template=model_path_template,
-            macro_player=macro_player,
-            macro_max_units=macro_max_units,
-            debug_mode=debug_mode
-        )
-    return MacroVsBotWrapper(
-        base_env=base_env,
-        unit_registry=unit_registry,
-        scenario_files=[scenario_file],
-        model_path_template=model_path_template,
-        macro_player=macro_player,
-        macro_max_units=macro_max_units,
-        bot=bot,
-        debug_mode=debug_mode
+    """Phase 1 macro eval env — removed in Phase 2."""
+    raise NotImplementedError(
+        "_build_macro_eval_env is a Phase 1 artifact and has been removed. "
+        "Phase 2 uses the unified micro agent with zone intent actions."
     )
 
 
@@ -2829,6 +2643,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             gym_training_mode=True,
             debug_mode=debug_mode
         )
+        base_env._metrics_tracker = metrics_tracker
         masked_env = ActionMasker(base_env, mask_fn)
         if use_bots:
             bot_env = BotControlledEnv(
@@ -3499,8 +3314,8 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                 show_eval_progress=bot_eval_show_progress,
                 phase_progress_total_episodes=(int(total_eps) if phase_label else None),
                 phase_progress_episode_offset=(int(phase_episode_offset) if phase_label else 0),
-                early_stopping_patience=int(callback_params.get("early_stopping_patience", 0)),
-                save_best_min_episodes=int(callback_params.get("save_best_min_episodes", 0)),
+                early_stopping_patience=int(callback_params["early_stopping_patience"]),
+                save_best_min_episodes=int(callback_params["save_best_min_episodes"]),
             )
             callbacks.append(bot_eval_callback)
         

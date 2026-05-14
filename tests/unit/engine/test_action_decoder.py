@@ -16,7 +16,7 @@ from engine.phase_handlers.shared_utils import build_units_cache
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _make_decoder() -> ActionDecoder:
-    return ActionDecoder(config={})
+    return ActionDecoder(config={"observation_params": {"action_space_size": 31}})
 
 
 def _unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
@@ -50,6 +50,8 @@ def _build_gs(units: List[Dict[str, Any]], phase: str, current_player: int = 1) 
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
         "config": _base_config(),
+        "zone_intent_free_steps_remaining": 0,
+        "objectives": [],
     }
     build_units_cache(gs)
     return gs
@@ -280,7 +282,7 @@ class TestConvertGymActionShoot:
 
     def _make_advance_mask(self) -> np.ndarray:
         """Mask with advance slots 12-15 enabled (bypass real mask computation)."""
-        mask = np.zeros(16, dtype=bool)
+        mask = np.zeros(31, dtype=bool)
         mask[11] = True  # wait
         mask[12] = mask[13] = mask[14] = mask[15] = True
         return mask
@@ -330,7 +332,7 @@ class TestConvertGymActionShoot:
         d = _make_decoder()
         gs = self._make_gs()  # _can_advance=False
         mask = d.get_action_mask(gs)
-        assert len(mask) == 16
+        assert len(mask) == 31
         for slot in [12, 13, 14, 15]:
             assert bool(mask[slot]) is False, f"mask[{slot}] should be False when cannot advance"
 
@@ -341,7 +343,7 @@ class TestConvertGymActionShoot:
         gs["shoot_activation_pool"] = ["1"]
         gs["active_shooting_unit"] = "1"
         mask = d.get_action_mask(gs)
-        assert len(mask) == 16
+        assert len(mask) == 31
         for slot in [12, 13, 14, 15]:
             assert bool(mask[slot]) is True, f"mask[{slot}] should be True when can advance"
 
@@ -442,12 +444,13 @@ class TestConvertGymActionEdgeCases:
         # Pas d'unités éligibles en command → advance_phase
         assert result["action"] in ("advance_phase", "skip")
 
-    def test_action_space_size_is_16(self):
-        """conv_space_16 : l'espace d'action est de 16 (0-15)."""
+    def test_action_space_size_is_31(self):
+        """conv_space_31 : l'espace d'action est de 31 (0-30) en Phase 2."""
         d = _make_decoder()
-        assert d.normalize_action_input(15, "shoot", "gym", 16) == 15
+        assert d.total_action_size == 31
+        assert d.normalize_action_input(30, "shoot", "gym", 31) == 30
         with pytest.raises(ActionValidationError, match="out_of_range"):
-            d.normalize_action_input(16, "shoot", "gym", 16)
+            d.normalize_action_input(31, "shoot", "gym", 31)
 
     def test_action_minus_one_raises(self):
         """conv_neg_action : action=-1 → out_of_range."""

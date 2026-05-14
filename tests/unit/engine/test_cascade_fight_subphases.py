@@ -121,6 +121,7 @@ def _make_gs(units: List[Dict[str, Any]], phase: str = "charge") -> Dict[str, An
         "charge_target_selections": {},
         "pending_charge_targets": [],
         "pending_charge_unit_id": None,
+        "objectives": [{"id": "obj1", "hexes": [[5, 5]]}],
     }
     build_units_cache(gs)
     build_enemy_adjacent_hexes(gs, gs["current_player"])

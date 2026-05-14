@@ -1,40 +1,135 @@
 #!/usr/bin/env python3
-"""
-engine/macro_intents.py - Shared macro intent definitions for macro/micro coordination.
-"""
+"""engine/macro_intents.py - Zone intent system Phase 2."""
 
-from typing import Dict
+INTENT_INVADE = 0
+INTENT_DEFEND = 1
+INTENT_ATTACK = 2
 
-INTENT_TAKE_OBJECTIVE = 0
-INTENT_HOLD_OBJECTIVE = 1
-INTENT_FOCUS_KILL = 2
-INTENT_SCREEN = 3
-INTENT_ATTRITION = 4
-INTENT_COUNT = 5
+MAX_OBJECTIVES = 5
+BASE_ZONE_INTENT = 16
+TOTAL_ACTION_SIZE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3  # 31
 
-DETAIL_OBJECTIVE = 0
-DETAIL_ENEMY = 1
-DETAIL_ALLY = 2
-DETAIL_NONE = 3
 
-INTENT_NAMES: Dict[int, str] = {
-    INTENT_TAKE_OBJECTIVE: "take_objective",
-    INTENT_HOLD_OBJECTIVE: "hold_objective",
-    INTENT_FOCUS_KILL: "focus_kill",
-    INTENT_SCREEN: "screen",
-    INTENT_ATTRITION: "attrition",
-}
+def get_objective_center(obj: dict) -> tuple:
+    """Return (col, row) center of an objective. Uses 'center' key if present, else centroid of 'hexes'."""
+    if "center" in obj:
+        c = obj["center"]
+        return int(c[0]), int(c[1])
+    hexes = obj["hexes"]
+    if not hexes:
+        raise ValueError(f"Objective {obj.get('id')} has no center and no hexes")
+    def _hex_col(h):
+        return int(h[0]) if isinstance(h, (list, tuple)) else int(h["col"])
+    def _hex_row(h):
+        return int(h[1]) if isinstance(h, (list, tuple)) else int(h["row"])
+    return sum(_hex_col(h) for h in hexes) // len(hexes), sum(_hex_row(h) for h in hexes) // len(hexes)
 
-INTENT_DETAIL_TYPE: Dict[int, int] = {
-    INTENT_TAKE_OBJECTIVE: DETAIL_OBJECTIVE,
-    INTENT_HOLD_OBJECTIVE: DETAIL_OBJECTIVE,
-    INTENT_FOCUS_KILL: DETAIL_ENEMY,
-    INTENT_SCREEN: DETAIL_ALLY,
-    INTENT_ATTRITION: DETAIL_OBJECTIVE,
-}
 
-def get_intent_detail_type(intent_id: int) -> int:
-    """Return detail type for intent."""
-    if intent_id not in INTENT_DETAIL_TYPE:
-        raise KeyError(f"Unknown intent id: {intent_id}")
-    return INTENT_DETAIL_TYPE[intent_id]
+def is_zone_intent_action(action: int) -> bool:
+    return BASE_ZONE_INTENT <= action < TOTAL_ACTION_SIZE
+
+
+def decode_zone_intent_action(action: int):
+    offset = action - BASE_ZONE_INTENT
+    zone_idx = offset // 3
+    intent_value = offset % 3
+    return zone_idx, intent_value
+
+
+def get_nearest_objective_zone(active_unit: dict, game_state: dict) -> int:
+    """Return index of the closest objective to active_unit. Called once per command phase."""
+    from engine.combat_utils import calculate_hex_distance
+    objectives = game_state["objectives"]
+    if not objectives:
+        return 0
+    unit_col, unit_row = active_unit["col"], active_unit["row"]
+    best_idx, best_dist = 0, float("inf")
+    for i, obj in enumerate(objectives):
+        obj_col, obj_row = get_objective_center(obj)
+        d = calculate_hex_distance(unit_col, unit_row, obj_col, obj_row)
+        if d < best_dist:
+            best_dist = d
+            best_idx = i
+    return best_idx
+
+
+def get_best_enemy_global(game_state: dict, zone_idx: int):
+    """Return (col, row) of best enemy (highest damage_ratio). Falls back to zone objective if no enemy alive."""
+    from engine.phase_handlers.shared_utils import is_unit_alive
+    current_player = game_state["current_player"]
+    fallback_col, fallback_row = get_objective_center(game_state["objectives"][zone_idx])
+
+    best_unit = None
+    best_score = -1.0
+    for unit in game_state["units"]:
+        if unit.get("player") == current_player:
+            continue
+        if not is_unit_alive(str(unit["id"]), game_state):
+            continue
+        score = get_best_enemy_score_for_unit(unit, game_state)
+        if score > best_score:
+            best_score = score
+            best_unit = unit
+
+    if best_unit is None:
+        # No enemy alive: navigate to zone objective, game may continue to turn 5
+        return fallback_col, fallback_row
+    return best_unit["col"], best_unit["row"]
+
+
+def get_best_enemy_score(game_state: dict) -> float:
+    """Return damage_ratio of best enemy. Returns 0.0 if no enemy alive."""
+    from engine.phase_handlers.shared_utils import is_unit_alive
+    current_player = game_state["current_player"]
+    best_score = 0.0
+    for unit in game_state["units"]:
+        if unit.get("player") == current_player:
+            continue
+        if not is_unit_alive(str(unit["id"]), game_state):
+            continue
+        score = get_best_enemy_score_for_unit(unit, game_state)
+        if score > best_score:
+            best_score = score
+    return best_score
+
+
+def get_best_enemy_score_for_unit(unit: dict, game_state: dict) -> float:
+    """Compute damage_ratio = expected_damage / hp_remaining for a unit."""
+    from engine.weapon_damage_cache import lookup_best_weapon
+    from engine.phase_handlers.shared_utils import get_hp_from_cache, is_unit_alive
+    hp = get_hp_from_cache(str(unit["id"]), game_state)
+    if not hp or hp <= 0:
+        return 0.0
+    cache = game_state.get("_best_weapon_cache")
+    if not cache:
+        return 0.0
+    unit_id = str(unit["id"])
+    current_player = game_state.get("current_player")
+    max_dmg = 0.0
+    for target in game_state["units"]:
+        if target.get("player") != current_player:
+            continue
+        if not is_unit_alive(str(target["id"]), game_state):
+            continue
+        target_id = str(target["id"])
+        _, ranged_dmg = lookup_best_weapon(cache, unit_id, target_id, True)
+        _, melee_dmg = lookup_best_weapon(cache, unit_id, target_id, False)
+        max_dmg = max(max_dmg, ranged_dmg, melee_dmg)
+    return max_dmg / hp
+
+
+def get_objective_control(zone_idx: int, game_state: dict) -> float:
+    """Return 1.0 if objective controlled by current_player, -1.0 if by opponent, 0.0 if neutral/contested."""
+    objectives = game_state["objectives"]
+    if zone_idx >= len(objectives):
+        return 0.0
+    obj = objectives[zone_idx]
+    obj_id = str(obj["id"])
+    controllers = game_state["objective_controllers"]
+    controller = controllers.get(obj_id)
+    current_player = game_state.get("current_player")
+    if controller is None:
+        return 0.0
+    if controller == current_player:
+        return 1.0
+    return -1.0
