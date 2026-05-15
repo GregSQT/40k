@@ -39,7 +39,7 @@ CHARGE_IMPACT_TRIGGER_THRESHOLD = 4
 CHARGE_IMPACT_MORTAL_WOUNDS = 1
 
 # Incrémenter si la sémantique du BFS de fin de charge change (invalidation cache ``_charge_dest_bfs_cache``).
-_CHARGE_DEST_BFS_CACHE_SCHEMA = 2
+_CHARGE_DEST_BFS_CACHE_SCHEMA = 3
 _unit_registry_singleton = None  # UnitRegistry reads static files — safe to share across all episodes
 
 
@@ -1967,7 +1967,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         and tid_arg is None
         and cache_key in cache
     ):
-        cached_list = cache[cache_key]
+        cached_list, _ = cache[cache_key]
         game_state["valid_charge_destinations_pool"] = cached_list
         if _perf and _t_func0 is not None:
             _t_done = time.perf_counter()
@@ -2038,7 +2038,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     ):
         game_state["valid_charge_destinations_pool"] = []
         if charge_range == CHARGE_MAX_DISTANCE and not early_exit_if_valid and tid_arg is None:
-            cache[cache_key] = []
+            cache[cache_key] = ([], {})
         if _perf and _t_func0 is not None:
             _t_done_lb = time.perf_counter()
             append_perf_timing_line(
@@ -2067,7 +2067,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     ):
         game_state["valid_charge_destinations_pool"] = []
         if charge_range == CHARGE_MAX_DISTANCE and not early_exit_if_valid and tid_arg is None:
-            cache[cache_key] = []
+            cache[cache_key] = ([], {})
         if _perf and _t_func0 is not None:
             _t_done_lb = time.perf_counter()
             append_perf_timing_line(
@@ -2101,6 +2101,10 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     visited = {start_pos: 0}
     queue = deque([(start_pos, 0)])
     valid_destinations = []
+    # Track (distance, engaging_enemy_ids) per valid destination for target-selection fast path.
+    # Only built when the result will be stored in cache (activation BFS, no specific target).
+    _track_engages = (tid_arg is None and charge_range == CHARGE_MAX_DISTANCE and not early_exit_if_valid)
+    pos_dist_engage: Dict[Tuple[int, int], Tuple[int, FrozenSet[str]]] = {} if _track_engages else {}
 
     # Precompute for O(1) bounds check before footprint computation
     _bfs_board_cols = int(require_key(game_state, "board_cols"))
@@ -2213,6 +2217,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
             is_adjacent_to_enemy = False
             hex_overlaps_enemy = False
+            _cur_engaging: Set[str] = set() if _track_engages else set()
             _t_engagement0 = time.perf_counter() if _perf else None
             synth = _charge_synthetic_charger_cache_entry(
                 unit, neighbor_col_int, neighbor_row_int, candidate_fp
@@ -2228,6 +2233,8 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                     synth, enemy_entry, engagement_zone
                 ):
                     is_adjacent_to_enemy = True
+                    if _track_engages:
+                        _cur_engaging.add(str(_eid))
                     if tid_arg:
                         break
             if _perf and _t_engagement0 is not None:
@@ -2240,6 +2247,8 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
             if is_adjacent_to_enemy and not hex_overlaps_enemy and neighbor_pos != start_pos:
                 valid_destinations.append(neighbor_pos)
+                if _track_engages:
+                    pos_dist_engage[neighbor_pos] = (neighbor_dist, frozenset(_cur_engaging))
                 if early_exit_if_valid:
                     bfs_short_circuit = True
                     break
@@ -2250,7 +2259,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
     game_state["valid_charge_destinations_pool"] = valid_destinations
     if charge_range == CHARGE_MAX_DISTANCE and not early_exit_if_valid and tid_arg is None:
-        cache[cache_key] = list(valid_destinations)
+        cache[cache_key] = (list(valid_destinations), pos_dist_engage)
 
     if _perf and _t_func0 is not None and _t_bfs0 is not None and _t_bfs1 is not None:
         _t_done = time.perf_counter()
@@ -2522,12 +2531,32 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         # un mur ou un socle (allié ou ennemi) comme si c’était du vide. On garde l’intersection
         # avec la zone cible-centrée pour respecter la spec d’affichage autour de la cible.
         _t_bfs0 = time.perf_counter() if _perf else None
-        bfs_reachable = charge_build_valid_destinations_pool(
-            game_state,
-            str(unit_id),
-            int(charge_roll_subhex),
-            target_id=str(target_id),
-        )
+        _game_rules_tsel = require_key(require_key(game_state, "config"), "game_rules")
+        _CHARGE_MAX_DIST_TSEL = require_key(_game_rules_tsel, "charge_max_distance")
+        _activation_key_tsel = (str(unit_id), _CHARGE_MAX_DIST_TSEL, None, _CHARGE_DEST_BFS_CACHE_SCHEMA)
+        _activation_entry_tsel = game_state["_charge_dest_bfs_cache"].get(_activation_key_tsel)
+        _bfs_fast_path = False
+        if _activation_entry_tsel is not None and isinstance(_activation_entry_tsel, tuple):
+            _extra_tsel = (
+                _charge_bfs_max_distance(game_state, str(unit_id), int(charge_roll_subhex), str(target_id))
+                - int(charge_roll_subhex)
+            )
+            _effective_max_tsel = int(charge_roll_subhex) + _extra_tsel
+            if _effective_max_tsel <= _CHARGE_MAX_DIST_TSEL:
+                _, _pos_dist_engage_tsel = _activation_entry_tsel
+                _str_tid_tsel = str(target_id)
+                bfs_reachable = [
+                    pos for pos, (d, eng) in _pos_dist_engage_tsel.items()
+                    if d <= _effective_max_tsel and _str_tid_tsel in eng
+                ]
+                _bfs_fast_path = True
+        if not _bfs_fast_path:
+            bfs_reachable = charge_build_valid_destinations_pool(
+                game_state,
+                str(unit_id),
+                int(charge_roll_subhex),
+                target_id=str(target_id),
+            )
         _t_bfs1 = time.perf_counter() if _perf else None
         bfs_set = set(bfs_reachable)
         _t_socle0 = time.perf_counter() if _perf else None
