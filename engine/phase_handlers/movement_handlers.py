@@ -1909,25 +1909,35 @@ def _select_strategic_destination(
         cent_r = sum(e[1] for e in enemy_anchors) / n_e
         return max(valid_destinations, key=lambda d: (d[0] - cent_c) ** 2 + (d[1] - cent_r) ** 2)
 
-    # STRATEGY 3: OBJECTIVE - Move closest to nearest objective hex
+    # STRATEGY 3: OBJECTIVE - Move toward nearest uncontrolled objective (prefer capture over hold)
     else:
-        objective_hex_sets, boundary_hexes = _build_objective_distance_cache(game_state)
-        if objective_hex_sets and boundary_hexes:
-            # Pre-compute centroid of boundary hexes once — O(N_boundary) instead of O(N_dest × N_boundary)
-            n_bh = len(boundary_hexes)
-            centroid_c = sum(bc for bc, br in boundary_hexes) / n_bh
-            centroid_r = sum(br for bc, br in boundary_hexes) / n_bh
-            best_dest = valid_destinations[0]
-            min_dist = float('inf')
+        objective_hex_sets, _ = _build_objective_distance_cache(game_state)
+        if objective_hex_sets:
+            unit_col, unit_row = int(unit["col"]), int(unit["row"])
+            unit_player = int(unit["player"])
+            objective_controllers = require_key(game_state, "objective_controllers")
+            objectives = require_key(game_state, "objectives")
+
+            # Prefer objectives not already controlled by this player
+            uncontrolled_sets = [
+                hs for i, hs in enumerate(objective_hex_sets)
+                if i < len(objectives) and objective_controllers.get(str(objectives[i]["id"])) != unit_player
+            ]
+            candidate_sets = uncontrolled_sets if uncontrolled_sets else objective_hex_sets
+
+            best_obj_set = min(
+                candidate_sets,
+                key=lambda hs: min(_chd(unit_col, unit_row, hc, hr) for hc, hr in hs)
+            )
+            # If any destination is on that objective, take it immediately
             for dest in valid_destinations:
-                if any(dest in objective_hex_set for objective_hex_set in objective_hex_sets):
+                if dest in best_obj_set:
                     return dest
-                dest_col, dest_row = dest
-                dist = (dest_col - centroid_c) ** 2 + (dest_row - centroid_r) ** 2
-                if dist < min_dist:
-                    min_dist = dist
-                    best_dest = dest
-            return best_dest
+            # Otherwise move toward the centroid of that objective's hexes
+            n = len(best_obj_set)
+            centroid_c = sum(hc for hc, hr in best_obj_set) / n
+            centroid_r = sum(hr for hc, hr in best_obj_set) / n
+            return min(valid_destinations, key=lambda d: (d[0] - centroid_c) ** 2 + (d[1] - centroid_r) ** 2)
 
         return valid_destinations[0]
 

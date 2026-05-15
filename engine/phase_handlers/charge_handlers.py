@@ -14,6 +14,7 @@ from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation
 from shared.data_validation import require_key
 from engine.action_log_utils import append_action_log
+from engine.hex_utils import hex_distance as _hex_distance
 from engine.game_utils import add_console_log, safe_print, add_debug_file_log
 from engine.combat_utils import (
     normalize_coordinates,
@@ -39,6 +40,7 @@ CHARGE_IMPACT_MORTAL_WOUNDS = 1
 
 # Incrémenter si la sémantique du BFS de fin de charge change (invalidation cache ``_charge_dest_bfs_cache``).
 _CHARGE_DEST_BFS_CACHE_SCHEMA = 2
+_unit_registry_singleton = None  # UnitRegistry reads static files — safe to share across all episodes
 
 
 def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
@@ -1104,8 +1106,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             # CRITICAL: In gym training mode, skip must NOT trigger activation or movement.
             # Determine had_valid_destinations without executing charge logic.
             if is_gym_training:
-                valid_targets = charge_build_valid_targets(game_state, unit_id)
-                had_valid_destinations = len(valid_targets) > 0
+                had_valid_destinations = _has_valid_charge_target(game_state, active_unit, None)
                 return _handle_skip_action(game_state, active_unit, had_valid_destinations=had_valid_destinations)
             # PvE AI: treat skip as explicit wait to avoid infinite loop on non-active unit
             if "pve_mode" not in config:
@@ -1117,8 +1118,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             current_player = require_key(game_state, "current_player")
             is_pve_ai = config_pve_mode and current_player == 2
             if is_pve_ai:
-                valid_targets = charge_build_valid_targets(game_state, unit_id)
-                had_valid_destinations = len(valid_targets) > 0
+                had_valid_destinations = _has_valid_charge_target(game_state, active_unit, None)
                 return _handle_skip_action(game_state, active_unit, had_valid_destinations=had_valid_destinations)
             # Unit not in charge pool and not active — ignore (e.g. stale action)
             return True, {"action": "no_effect", "unitId": unit_id, "reason": "unit_not_active_in_charge_phase"}
@@ -1316,40 +1316,61 @@ def charge_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> No
 def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List[Dict[str, Any]]:
     """
     Build list of valid charge targets for unit activation.
-    
+
     Valid target criteria:
     - Enemy unit
     - Not already in **engagement** with the charger vs **that** target only
       (``unit_entries_within_engagement_zone`` — same contract as move / ``_charge_unit_within_engagement_zone`` ;
       not ``unit_fp & dilate_hex`` which wrongly dropped a legally close target).
     - At least one legal charge end anchor vs that target from BFS-reachable hexes within ``charge_max_distance``.
-    
+
     Returns list of target dicts with unit info.
     """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+    _perf = perf_timing_enabled(game_state)
+    _ep = game_state.get("episode_number", "?")
+    _turn = game_state.get("turn", "?")
+    _t_bvt0 = time.perf_counter() if _perf else None
+
     unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return []
-    
+
+    _bvt_cache = game_state.setdefault("_charge_build_valid_targets_cache", {})
+    _move_version = game_state["_unit_move_version"]
+    _bvt_key = (str(unit_id), _move_version)
+    if _bvt_key in _bvt_cache:
+        if _perf and _t_bvt0 is not None:
+            append_perf_timing_line(
+                f"CHARGE_BUILD_VALID_TARGETS episode={_ep} turn={_turn} unit_id={unit_id} "
+                f"bfs_s=0.000000 geom_loop_s=0.000000 total_s={time.perf_counter() - _t_bvt0:.6f} "
+                f"n_reachable=0 n_enemies=0 n_valid={len(_bvt_cache[_bvt_key])} cache_hit=1"
+            )
+        return _bvt_cache[_bvt_key]
+
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
     CHARGE_MAX_DISTANCE = require_key(game_rules, "charge_max_distance")
     valid_targets = []
-    
+
     # Build all hexes reachable via BFS within max charge distance
     try:
         reachable_hexes = charge_build_valid_destinations_pool(game_state, unit_id, CHARGE_MAX_DISTANCE)
     except Exception as e:
         add_console_log(game_state, f"ERROR: BFS failed for unit {unit_id}: {str(e)}")
         return []
-    
+
     if not reachable_hexes:
+        _bvt_cache[_bvt_key] = []
         return []  # No reachable hexes
-    
+
+    _t_after_bfs = time.perf_counter() if _perf else None
+
     # Get all enemies - CRITICAL: is_unit_alive so dead units never enter pool
     units_cache = require_key(game_state, "units_cache")
     unit_player = int(unit["player"]) if unit["player"] is not None else None
     enemies = [enemy_id for enemy_id, cache_entry in units_cache.items()
                if int(cache_entry["player"]) != unit_player]
-    
+
     from engine.spatial_relations import unit_entries_within_engagement_zone
     from .shared_utils import get_engagement_zone, build_occupied_positions_set
 
@@ -1375,6 +1396,7 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
     per_enemy_has_geom: Dict[Any, bool] = {eid: False for eid, _, _ in enemy_index}
     per_enemy_non_occ: Dict[Any, bool] = {eid: False for eid, _, _ in enemy_index}
 
+    _t_geom0 = time.perf_counter() if _perf else None
     for dest_col, dest_row in reachable_hexes:
         candidate_fp = _candidate_footprint_charge(dest_col, dest_row, unit, game_state, fp_offset_pair)
         blocked_by_occupation = bool(candidate_fp & occupied_positions)
@@ -1386,6 +1408,7 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
                 per_enemy_has_geom[enemy_id] = True
                 if not blocked_by_occupation:
                     per_enemy_non_occ[enemy_id] = True
+    _t_geom1 = time.perf_counter() if _perf else None
 
     for enemy_id, enemy_entry, _enemy_fp in enemy_index:
         if per_enemy_has_geom.get(enemy_id) and per_enemy_non_occ.get(enemy_id):
@@ -1398,6 +1421,16 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
                 "player": enemy_entry["player"],
             })
 
+    _bvt_cache[_bvt_key] = valid_targets
+
+    if _perf and _t_bvt0 is not None and _t_after_bfs is not None and _t_geom0 is not None and _t_geom1 is not None:
+        append_perf_timing_line(
+            f"CHARGE_BUILD_VALID_TARGETS episode={_ep} turn={_turn} unit_id={unit_id} "
+            f"bfs_s={_t_after_bfs - _t_bvt0:.6f} geom_loop_s={_t_geom1 - _t_geom0:.6f} "
+            f"total_s={_t_geom1 - _t_bvt0:.6f} "
+            f"n_reachable={len(reachable_hexes)} n_enemies={len(enemy_index)} n_valid={len(valid_targets)} cache_hit=0"
+        )
+
     return valid_targets
 
 
@@ -1408,12 +1441,25 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
     NEW RULE: At activation, show all possible charge targets without rolling.
     The roll happens AFTER target selection.
     """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+    _perf = perf_timing_enabled(game_state)
+    _ep = game_state.get("episode_number", "?")
+    _turn = game_state.get("turn", "?")
+    _t_el0 = time.perf_counter() if _perf else None
+
     unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id, "action": "charge"}
 
     # Build valid targets (enemies with non-occupied adjacent hexes reachable within 12 hexes)
+    _t_bvt0 = time.perf_counter() if _perf else None
     valid_targets = charge_build_valid_targets(game_state, unit_id)
+    _t_bvt1 = time.perf_counter() if _perf else None
+    if _perf and _t_el0 is not None and _t_bvt0 is not None and _t_bvt1 is not None:
+        append_perf_timing_line(
+            f"CHARGE_EXEC_LOOP episode={_ep} turn={_turn} unit_id={unit_id} "
+            f"build_targets_s={_t_bvt1 - _t_bvt0:.6f} n_targets={len(valid_targets)}"
+        )
 
     # Check if valid targets exist
     if not valid_targets:
@@ -1461,6 +1507,12 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     - Within charge_range (2d6 roll result)
     - Path must be reachable via BFS pathfinding
     """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+    _perf = perf_timing_enabled(game_state)
+    _ep = game_state.get("episode_number", "?")
+    _turn = game_state.get("turn", "?")
+    _t_atd0 = time.perf_counter() if _perf else None
+
     # CRITICAL: Check units_fled just before execution (may have changed during phase)
     # CRITICAL: Normalize unit ID to string for consistent comparison (units_fled stores strings)
     unit_id_str = str(unit["id"])
@@ -1479,23 +1531,25 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
             "unitId": unit["id"],
             "action": "charge",
         }
-    
+
     # NOTE: Pool is already built in charge_destination_selection_handler() after roll.
     # Since system is sequential, no need to rebuild here. Only verify destination is in pool.
     unit_id = unit["id"]
     if unit_id not in game_state["charge_roll_values"]:
         raise KeyError(f"Unit {unit_id} missing charge_roll_values")
     charge_roll = game_state["charge_roll_values"][unit_id]
-    
+
     # Check if destination is in the pool (built after roll in charge_destination_selection_handler)
     dest_tuple = (int(dest_col), int(dest_row))
     pool = require_key(game_state, "valid_charge_destinations_pool")
     if dest_tuple not in pool:
         return False, {"error": "destination_not_in_pool", "target": (dest_col, dest_row), "action": "charge"}
-    
+
     # Validate destination per AI_TURN.md charge rules
+    _t_valid0 = time.perf_counter() if _perf else None
     if not _is_valid_charge_destination(game_state, dest_col, dest_row, unit, target_id, charge_roll, config):
         return False, {"error": "invalid_charge_destination", "target": (dest_col, dest_row), "action": "charge"}
+    _t_valid1 = time.perf_counter() if _perf else None
 
     # Store original position
     orig_col, orig_row = require_unit_position(unit, game_state)
@@ -1508,9 +1562,11 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     phase = game_state.get("phase", "charge")
     # CRITICAL: Normalize destination coordinates to int for consistent comparison
     dest_col_int, dest_row_int = normalize_coordinates(dest_col, dest_row)
-    
+
     unit_id_str = str(unit["id"])
+    _t_occ0 = time.perf_counter() if _perf else None
     occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
+    _t_occ1 = time.perf_counter() if _perf else None
     _fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
     candidate_fp = _candidate_footprint_charge(dest_col_int, dest_row_int, unit, game_state, _fp_pair)
     if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
@@ -1530,7 +1586,7 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     log_message = f"[POSITION CHANGE] E{episode} T{turn} {phase} Unit {unit['id']}: ({orig_col},{orig_row})→({dest_col_int},{dest_row_int}) via CHARGE"
     add_console_log(game_state, log_message)
     safe_print(game_state, log_message)
-    
+
     # CRITICAL: Normalize coordinates before assignment
     from engine.combat_utils import set_unit_coordinates
     set_unit_coordinates(unit, dest_col_int, dest_row_int)
@@ -1545,12 +1601,15 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     chg_old_occupied = chg_old_entry.get("occupied_hexes") if chg_old_entry else None
 
     # Update units_cache after position change
+    _t_upd0 = time.perf_counter() if _perf else None
     update_units_cache_position(game_state, chg_uid_str, dest_col_int, dest_row_int)
+    _t_upd1 = time.perf_counter() if _perf else None
 
     chg_new_entry = require_key(game_state, "units_cache").get(chg_uid_str)
     chg_new_occupied = chg_new_entry.get("occupied_hexes") if chg_new_entry else None
 
     moved_unit_player = int(require_key(unit, "player"))
+    _t_adj0 = time.perf_counter() if _perf else None
     update_enemy_adjacent_caches_after_unit_move(
         game_state,
         moved_unit_player=moved_unit_player,
@@ -1561,6 +1620,7 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
         old_occupied=chg_old_occupied,
         new_occupied=chg_new_occupied,
     )
+    _t_adj1 = time.perf_counter() if _perf else None
 
     # AI_TURN_SHOOTING_UPDATE.md: No need to invalidate los_cache here
     # The new architecture uses unit["los_cache"] which is built at unit activation in shooting phase
@@ -1573,8 +1633,21 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     # CRITICAL: Invalidate all destination pools after charge movement
     # Positions have changed, so all pools (move, charge, shoot) are now stale
     from .movement_handlers import _invalidate_all_destination_pools_after_movement
+    _t_inv0 = time.perf_counter() if _perf else None
     _invalidate_all_destination_pools_after_movement(game_state)
+    _t_inv1 = time.perf_counter() if _perf else None
     game_state["_unit_move_version"] += 1
+
+    if _perf and _t_atd0 is not None and _t_valid0 is not None and _t_valid1 is not None and _t_occ0 is not None and _t_occ1 is not None and _t_upd0 is not None and _t_upd1 is not None and _t_adj0 is not None and _t_adj1 is not None and _t_inv0 is not None and _t_inv1 is not None:
+        append_perf_timing_line(
+            f"CHARGE_ATTEMPT_DEST episode={_ep} turn={_turn} unit_id={unit_id} "
+            f"valid_dest_s={_t_valid1 - _t_valid0:.6f} "
+            f"build_occ_s={_t_occ1 - _t_occ0:.6f} "
+            f"update_cache_pos_s={_t_upd1 - _t_upd0:.6f} "
+            f"update_adj_cache_s={_t_adj1 - _t_adj0:.6f} "
+            f"invalidate_pools_s={_t_inv1 - _t_inv0:.6f} "
+            f"total_s={_t_inv1 - _t_atd0:.6f}"
+        )
 
     # Clear charge roll, target selection, and pending targets after use
     if "charge_roll_values" in game_state and unit_id in game_state["charge_roll_values"]:
@@ -1678,6 +1751,22 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
 
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
     CHARGE_MAX_DISTANCE = require_key(game_rules, "charge_max_distance")
+
+    # Fast precheck: skip BFS if all enemies are beyond max reachable distance.
+    # A charge of CHARGE_MAX_DISTANCE can land adjacent to a target at CHARGE_MAX_DISTANCE+1.
+    # hex_distance is straight-line (no walls) — conservative lower bound, never a false negative.
+    units_cache = require_key(game_state, "units_cache")
+    unit_col, unit_row = int(require_key(units_cache[str(unit["id"])], "col")), int(require_key(units_cache[str(unit["id"])], "row"))
+    unit_player = int(unit["player"])
+    _precheck_threshold = CHARGE_MAX_DISTANCE + 1
+    _any_enemy_in_range = any(
+        _hex_distance(unit_col, unit_row, int(e["col"]), int(e["row"])) <= _precheck_threshold
+        for e in units_cache.values()
+        if int(e["player"]) != unit_player
+    )
+    if not _any_enemy_in_range:
+        _hvt_cache[_hvt_key] = False
+        return False
 
     try:
         # BFS with early exit: any hex in charge_build_valid_destinations_pool already satisfies
@@ -2361,9 +2450,15 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
     4. Display preview (violet hexes) for PvP/PvE modes
     5. Return waiting_for_player for destination selection
     """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+    _perf = perf_timing_enabled(game_state)
+    _ep = game_state.get("episode_number", "?")
+    _turn = game_state.get("turn", "?")
+    _t_tsel0 = time.perf_counter() if _perf else None
+
     if "targetId" not in action:
         raise KeyError(f"Action missing required 'targetId' field: {action}")
-    
+
     target_id = action["targetId"]
     if target_id is None:
         return False, {"error": "missing_target", "action": "charge"}
@@ -2411,28 +2506,46 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         display_zone_set: Set[Tuple[int, int]] = set()
         valid_pool: List[Tuple[int, int]] = []
     else:
+        _t_zone0 = time.perf_counter() if _perf else None
         display_zone_set, closest_ch = _compute_charge_preview_zone(
             game_state, unit, target_unit_entry, int(charge_roll_subhex)
         )
+        _t_zone1 = time.perf_counter() if _perf else None
         charge_reference_hex = (int(closest_ch[0]), int(closest_ch[1]))
         # Ancres géométriques (anneau cible + portée depuis l’hex allié le plus proche).
+        _t_anch0 = time.perf_counter() if _perf else None
         zone_anchors = _build_charge_anchors_in_zone(
             game_state, unit, target_unit_entry, display_zone_set, int(charge_roll_subhex)
         )
+        _t_anch1 = time.perf_counter() if _perf else None
         # BFS : chaque pas vérifie murs + empreintes (autres unités) — impossible de « traverser »
         # un mur ou un socle (allié ou ennemi) comme si c’était du vide. On garde l’intersection
         # avec la zone cible-centrée pour respecter la spec d’affichage autour de la cible.
+        _t_bfs0 = time.perf_counter() if _perf else None
         bfs_reachable = charge_build_valid_destinations_pool(
             game_state,
             str(unit_id),
             int(charge_roll_subhex),
             target_id=str(target_id),
         )
+        _t_bfs1 = time.perf_counter() if _perf else None
         bfs_set = set(bfs_reachable)
+        _t_socle0 = time.perf_counter() if _perf else None
         valid_pool = [p for p in zone_anchors if p in bfs_set]
         valid_pool = _charge_pool_must_socle_a_socle_if_possible(
             game_state, unit, target_unit_entry, valid_pool
         )
+        _t_socle1 = time.perf_counter() if _perf else None
+        if _perf and _t_tsel0 is not None:
+            append_perf_timing_line(
+                f"CHARGE_TARGET_SEL episode={_ep} turn={_turn} unit_id={unit_id} "
+                f"preview_zone_s={_t_zone1 - _t_zone0:.6f} "
+                f"anchors_s={_t_anch1 - _t_anch0:.6f} "
+                f"bfs_s={_t_bfs1 - _t_bfs0:.6f} "
+                f"pool_filter_s={_t_socle1 - _t_socle0:.6f} "
+                f"total_s={_t_socle1 - _t_tsel0:.6f} "
+                f"pool_size={len(valid_pool)}"
+            )
     game_state["valid_charge_destinations_pool"] = valid_pool
     if "debug_mode" in game_state and game_state["debug_mode"]:
         episode = game_state.get("episode_number", "?")
@@ -2690,6 +2803,11 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
 
     # Charge roll is sufficient - execute charge
     # Execute charge using _attempt_charge_to_destination
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+    _perf = perf_timing_enabled(game_state)
+    _ep = game_state.get("episode_number", "?")
+    _turn = game_state.get("turn", "?")
+    _t_dsel0 = time.perf_counter() if _perf else None
     config = {}
     charge_success, charge_result = _attempt_charge_to_destination(game_state, unit, dest_col, dest_row, target_id, config)
 
@@ -2736,17 +2854,21 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     action_name = "CHARGE"
 
     # AI_TURN.md COMPLIANCE: Direct field access with validation
+    _t_rew0 = time.perf_counter() if _perf else None
     reward_configs = require_key(game_state, "reward_configs")
-    from ai.unit_registry import UnitRegistry
-    unit_registry = UnitRegistry()
+    global _unit_registry_singleton
+    if _unit_registry_singleton is None:
+        from ai.unit_registry import UnitRegistry
+        _unit_registry_singleton = UnitRegistry()
     scenario_unit_type = require_key(unit, "unitType")
-    reward_config_key = unit_registry.get_model_key(scenario_unit_type)
+    reward_config_key = _unit_registry_singleton.get_model_key(scenario_unit_type)
 
     unit_reward_config = require_key(reward_configs, reward_config_key)
 
     # Base charge reward is required in rewards config
     base_actions = require_key(unit_reward_config, "base_actions")
     action_reward = require_key(base_actions, "charge_success")
+    _t_rew1 = time.perf_counter() if _perf else None
 
     # AI_TURN.md COMPLIANCE: Direct field access for current_turn
     if "current_turn" not in game_state:
@@ -2857,6 +2979,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     charge_clear_preview(game_state)
 
     # AI_TURN.md EXACT: end_activation(Arg1, Arg2, Arg3, Arg4, Arg5)
+    _t_ea0 = time.perf_counter() if _perf else None
     result = end_activation(
         game_state, unit,
         ACTION,        # Arg1: Log action
@@ -2865,7 +2988,8 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         CHARGE,        # Arg4: Remove from charge_activation_pool
         0              # Arg5: No error logging
     )
-    
+    _t_ea1 = time.perf_counter() if _perf else None
+
     # Update result with charge details
     result.update({
         "action": "charge",
@@ -2883,10 +3007,21 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     })
 
     # Check if pool is now empty after removing this unit
+    _t_pe0 = time.perf_counter() if _perf else None
     if not game_state["charge_activation_pool"]:
         # Pool empty - phase complete
         phase_end_result = charge_phase_end(game_state)
         result.update(phase_end_result)
+    _t_pe1 = time.perf_counter() if _perf else None
+
+    if _perf and _t_dsel0 is not None and _t_rew0 is not None and _t_rew1 is not None and _t_ea0 is not None and _t_ea1 is not None and _t_pe0 is not None and _t_pe1 is not None:
+        append_perf_timing_line(
+            f"CHARGE_DEST_SEL episode={_ep} turn={_turn} unit_id={unit['id']} "
+            f"reward_calc_s={_t_rew1 - _t_rew0:.6f} "
+            f"end_activation_s={_t_ea1 - _t_ea0:.6f} "
+            f"phase_end_s={_t_pe1 - _t_pe0:.6f} "
+            f"total_s={_t_pe1 - _t_dsel0:.6f}"
+        )
 
     return True, result
 

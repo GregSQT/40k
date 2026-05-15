@@ -142,7 +142,43 @@ _PERF_ENV_TRUE = frozenset({"1", "true", "yes"})
 _PERF_WRITE_ERROR_LOGGED = False
 _PERF_PROFILE_WRITE_ERROR_LOGGED = False
 
+# Handle de fichier perf ouvert en continu pour éviter open/flush/close à chaque ligne.
+_PERF_FILE_HANDLE: Optional[Any] = None
+_PERF_FILE_PATH: Optional[str] = None
+_PERF_WRITE_COUNT: int = 0
+_PERF_FLUSH_INTERVAL: int = 500
+
 F = TypeVar("F", bound=Callable[..., Any])
+
+
+def _get_perf_file_handle() -> Optional[Any]:
+    """Retourne le handle ouvert vers le fichier perf, en l'ouvrant si nécessaire."""
+    global _PERF_FILE_HANDLE, _PERF_FILE_PATH
+    import atexit
+    path = perf_timing_log_file_path()
+    if _PERF_FILE_HANDLE is None or _PERF_FILE_PATH != path:
+        if _PERF_FILE_HANDLE is not None:
+            try:
+                _PERF_FILE_HANDLE.flush()
+                _PERF_FILE_HANDLE.close()
+            except OSError:
+                pass
+        _PERF_FILE_HANDLE = open(path, "a", encoding="utf-8", errors="replace", buffering=8192)
+        _PERF_FILE_PATH = path
+        atexit.register(_flush_perf_file)
+    return _PERF_FILE_HANDLE
+
+
+def _flush_perf_file() -> None:
+    """Flush + fermeture du handle perf à l'exit du processus."""
+    global _PERF_FILE_HANDLE
+    if _PERF_FILE_HANDLE is not None:
+        try:
+            _PERF_FILE_HANDLE.flush()
+            _PERF_FILE_HANDLE.close()
+        except OSError:
+            pass
+        _PERF_FILE_HANDLE = None
 
 
 def perf_timing_log_file_path() -> str:
@@ -230,20 +266,24 @@ def focus_fire_pool_audit_enabled(game_state: Optional[Dict[str, Any]]) -> bool:
 
 def append_perf_timing_line(message: str) -> None:
     """
-    Écrit une ligne dans le fichier perf (voir ``perf_timing_log_file_path``), append + flush.
+    Écrit une ligne dans le fichier perf (voir ``perf_timing_log_file_path``), via handle bufferisé.
 
     En cas d'échec d'écriture, un message est envoyé une fois sur stderr (pour ne pas masquer
     un mauvais cwd, permissions, ou moteur chargé depuis un autre répertoire).
     """
-    global _PERF_WRITE_ERROR_LOGGED
-    path = perf_timing_log_file_path()
+    global _PERF_WRITE_ERROR_LOGGED, _PERF_WRITE_COUNT
     try:
-        with open(path, "a", encoding="utf-8", errors="replace") as f:
-            f.write(message + "\n")
-            f.flush()
+        fh = _get_perf_file_handle()
+        if fh is None:
+            return
+        fh.write(message + "\n")
+        _PERF_WRITE_COUNT += 1
+        if _PERF_WRITE_COUNT % _PERF_FLUSH_INTERVAL == 0:
+            fh.flush()
     except OSError as exc:
         if not _PERF_WRITE_ERROR_LOGGED:
             _PERF_WRITE_ERROR_LOGGED = True
+            path = perf_timing_log_file_path()
             print(
                 f"[perf_timing] impossible d'écrire dans {path!r}: {exc} "
                 f"(cwd={os.getcwd()!r}, définir W40K_PERF_TIMING_LOG si besoin)",

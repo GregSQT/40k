@@ -737,6 +737,8 @@ def update_units_cache_hp(game_state: Dict[str, Any], unit_id: str, new_hp_cur: 
     entry = game_state["units_cache"].get(unit_id_str)
     if entry is None:
         return
+    game_state.pop("_cached_best_enemy_score", None)
+    game_state.pop("_cached_best_enemy_global", None)
     if effective_hp <= 0:
         from engine.game_utils import add_debug_file_log
         episode = game_state.get("episode_number", "?")

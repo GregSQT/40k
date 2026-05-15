@@ -42,6 +42,7 @@ _target_pool_cache = {}  # per-process, per-env, per-episode; invalidates when u
 _move_los_preview_cache = {}
 _cache_size_limit = 100  # Prevent memory leak in long episodes
 _MOVE_AFTER_SHOOTING_DISTANCE_ARG = "distance"
+_unit_registry_singleton = None  # UnitRegistry reads static files — safe to share across all episodes
 
 
 def clear_target_pool_cache() -> None:
@@ -1825,10 +1826,12 @@ def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_t
     reward_configs = require_key(game_state, "reward_configs")
     
     # Get unit type for config lookup
-    from ai.unit_registry import UnitRegistry
-    unit_registry = UnitRegistry()
+    global _unit_registry_singleton
+    if _unit_registry_singleton is None:
+        from ai.unit_registry import UnitRegistry
+        _unit_registry_singleton = UnitRegistry()
     shooter_unit_type = require_key(unit, "unitType")
-    shooter_agent_key = unit_registry.get_model_key(shooter_unit_type)
+    shooter_agent_key = _unit_registry_singleton.get_model_key(shooter_unit_type)
     
     # Get unit-specific config
     unit_reward_config = require_key(reward_configs, shooter_agent_key)
@@ -2162,7 +2165,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     # Recompute advance capability at activation time from current board state.
     # Do not rely on stale value set at phase-start pool build.
     unit["_can_advance"] = not unit_is_adjacent
-    
+
     # PISTOL rule: Reset _shooting_with_pistol for this activation (no category restriction yet)
     # This must be done BEFORE weapon_availability_check to avoid incorrect filtering
     unit["_shooting_with_pistol"] = None
@@ -2193,6 +2196,31 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
             f"[SHOT RESET] E{episode} T{turn} Unit {unit_id_str} weapon_shot_flags={shot_flags}"
         )
     
+    # Short-circuit: aucun ennemi avec LOS → target pool sera vide, skip weapon_avail + pool build
+    if not any(unit["los_cache"].values()):
+        unit["valid_target_pool"] = []
+        game_state["active_shooting_unit"] = unit_id
+        can_advance = _can_unit_advance_in_shoot_phase(unit, game_state)
+        if can_advance:
+            unit["_current_shoot_nb"] = require_key(unit, "SHOOT_LEFT")
+            _emit_shoot_activation_perf(game_state, str(unit_id), _t_act0, _t_after_los, None, None, None, None, None, "empty_pool_advance", 0)
+            return {
+                "success": True,
+                "unitId": unit_id,
+                "empty_target_pool": True,
+                "can_advance": True,
+                "allow_advance": True,
+                "waiting_for_player": True,
+                "action": "empty_target_advance_available",
+                "context": "empty_target_pool_advance_available",
+                "available_weapons": [],
+            }
+        else:
+            _success, result = _handle_shooting_end_activation(game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip")
+            result["skip_reason"] = "no_valid_actions"
+            _emit_shoot_activation_perf(game_state, str(unit_id), _t_act0, _t_after_los, None, None, None, None, None, "empty_pool_skip", 0)
+            return result
+
     # weapon_availability_check(weapon_rule, 0, unit_is_adjacent ? 1 : 0) -> Build weapon_available_pool
     if "weapon_rule" not in game_state:
         raise KeyError("game_state missing required 'weapon_rule' field")
@@ -5467,9 +5495,16 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                     adjacent_status = 1 if is_adjacent else 0
 
                     try:
-                        weapon_available_pool = weapon_availability_check(
-                            game_state, unit, weapon_rule, advance_status, adjacent_status
-                        )
+                        # Reuse activation WAC result: no weapon/adjacency/advance state has changed
+                        # since activation when shots_fired==0 and SHOOT_LEFT==_current_shoot_nb.
+                        _reuse_pool = unit.get("_shoot_activation_reuse_weapon_pool")
+                        _reuse_ctx = unit.get("_shoot_activation_reuse_ctx")
+                        if _reuse_pool is not None and _reuse_ctx == (advance_status, adjacent_status):
+                            weapon_available_pool = _reuse_pool
+                        else:
+                            weapon_available_pool = weapon_availability_check(
+                                game_state, unit, weapon_rule, advance_status, adjacent_status
+                            )
                         usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
                         available_weapons = [{"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")} for w in usable_weapons]
                     except Exception as e:
@@ -6419,24 +6454,30 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
    
         try:
             from ai.reward_mapper import RewardMapper
-            rewards_configs = require_key(game_state, "rewards_configs")
             from ai.unit_registry import UnitRegistry
-            unit_registry = UnitRegistry()
-            scenario_unit_type = require_key(shooter, "unitType")
-            reward_config_key = unit_registry.get_model_key(scenario_unit_type)
-            unit_reward_config = require_key(rewards_configs, reward_config_key)
+            global _unit_registry_singleton
+            if _unit_registry_singleton is None:
+                _unit_registry_singleton = UnitRegistry()
 
-            reward_mapper = RewardMapper(unit_reward_config)
-            enriched_shooter = shooter.copy()
-            enriched_shooter["unitType"] = reward_config_key
-       
-        # Get unit rewards config
-            unit_rewards = reward_mapper._get_unit_rewards(enriched_shooter)
-            base_actions = require_key(unit_rewards, "base_actions")
-            result_bonuses = require_key(unit_rewards, "result_bonuses")
+            rewards_configs = require_key(game_state, "rewards_configs")
+            scenario_unit_type = require_key(shooter, "unitType")
+            reward_config_key = _unit_registry_singleton.get_model_key(scenario_unit_type)
+
+            # Cache RewardMapper + unit_rewards per game_state (stable for the episode lifetime)
+            _shoot_reward_cache = game_state.setdefault("_shoot_reward_cache", {})
+            if reward_config_key not in _shoot_reward_cache:
+                unit_reward_config = require_key(rewards_configs, reward_config_key)
+                _rm = RewardMapper(unit_reward_config)
+                enriched = {"unitType": reward_config_key}
+                _shoot_reward_cache[reward_config_key] = {
+                    "base_actions": require_key(_rm._get_unit_rewards(enriched), "base_actions"),
+                    "result_bonuses": require_key(_rm._get_unit_rewards(enriched), "result_bonuses"),
+                }
+            base_actions = _shoot_reward_cache[reward_config_key]["base_actions"]
+            result_bonuses = _shoot_reward_cache[reward_config_key]["result_bonuses"]
        
             if "ranged_attack" not in base_actions:
-                raise KeyError(f"Missing 'ranged_attack' in base_actions for unit {shooter['id']} (enriched_unitType={enriched_shooter.get('unitType')}): base_actions={base_actions}")
+                raise KeyError(f"Missing 'ranged_attack' in base_actions for unit {shooter['id']} (reward_config_key={reward_config_key}): base_actions={base_actions}")
         
             base_ranged_reward = base_actions["ranged_attack"]
         

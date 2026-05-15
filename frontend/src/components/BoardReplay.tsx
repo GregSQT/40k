@@ -302,6 +302,7 @@ export const BoardReplay: React.FC = () => {
       const scaleBaseSize = (
         raw: number | [number, number] | undefined
       ): number | [number, number] | undefined => {
+        if (inchesToSubhex <= 1) return 1;
         if (typeof raw === "number") {
           return Math.max(1, Math.round((raw * inchesToSubhex) / 10));
         }
@@ -776,6 +777,96 @@ export const BoardReplay: React.FC = () => {
 
     return victoryPoints;
   }, [currentEpisode, currentActionIndex, enrichUnitsWithStats, unitRegistryReady]);
+
+  // Pre-compute objective control state at currentActionIndex (hexKey → player | null).
+  // Required for accurate backward navigation in sticky mode: the ref-based heuristic in
+  // BoardPvp resets on rollback and loses historical control, so we provide a ground-truth
+  // snapshot derived from replaying all actions up to the current index.
+  const replayObjectiveControlMap = useMemo((): Record<string, number | null> => {
+    if (!currentEpisode || !unitRegistryReady) return {};
+    const rules = currentEpisode.initial_state.rules;
+    if (!rules?.primary_objective) return {};
+    const primaryObjective = rules.primary_objective;
+    const cfg = Array.isArray(primaryObjective) ? primaryObjective[0] : primaryObjective;
+    if (!cfg) return {};
+    const startTurn = cfg.scoring?.start_turn;
+    const controlMethod = cfg.control?.control_method;
+    const tieBehavior = cfg.control?.tie_behavior;
+    const round5Phase = cfg.timing?.round5_second_player_phase;
+    if (startTurn == null || !controlMethod || !tieBehavior || !round5Phase) return {};
+
+    const controllers: Record<string, number | null> = {};
+
+    for (let i = 0; i < currentActionIndex; i++) {
+      const action = currentEpisode.actions[i];
+      if (!action) break;
+      const turn = parseInt(action.turn.replace("T", ""), 10);
+      if (Number.isNaN(turn) || turn < startTurn) continue;
+      // Skip T5 P2 actions that are not the first fight (same logic as isObjectiveScoringWindow)
+      if (turn === 5 && action.player === 2 && round5Phase === "fight") {
+        if (action.type !== "fight") continue;
+        let alreadyFought = false;
+        for (let j = 0; j < i; j++) {
+          const prev = currentEpisode.actions[j];
+          if (parseInt(prev.turn.replace("T", ""), 10) === 5 && prev.player === 2 && prev.type === "fight") {
+            alreadyFought = true;
+            break;
+          }
+        }
+        if (alreadyFought) continue;
+      } else {
+        // Only process at the first action of each (player, turn) pair
+        if (i > 0) {
+          const prev = currentEpisode.actions[i - 1];
+          const prevTurn = parseInt(prev.turn.replace("T", ""), 10);
+          if (prevTurn === turn && prev.player === action.player) continue;
+        }
+      }
+
+      const stateAfterAction = currentEpisode.states[i];
+      if (!stateAfterAction?.units) continue;
+      const objectives = stateAfterAction.objectives || currentEpisode.initial_state.objectives || [];
+      if (objectives.length === 0) continue;
+
+      const enrichedUnits = enrichUnitsWithStats(
+        stateAfterAction.units as Unit[],
+        currentEpisode.board.inches_to_subhex
+      );
+      for (const obj of objectives) {
+        if (!obj.name) continue;
+        const hexSet = new Set(obj.hexes.map((h) => `${h.col},${h.row}`));
+        let p1_oc = 0;
+        let p2_oc = 0;
+        for (const unit of enrichedUnits) {
+          if (unit.id < 0 || (unit.HP_CUR ?? unit.HP_MAX) <= 0) continue;
+          if (hexSet.has(`${unit.col},${unit.row}`)) {
+            const oc = unit.OC ?? 0;
+            if (unit.player === 1) p1_oc += oc;
+            else p2_oc += oc;
+          }
+        }
+        const prev = controllers[obj.name] ?? null;
+        let newController = controlMethod === "sticky" ? prev : null;
+        if (p1_oc > p2_oc) newController = 1;
+        else if (p2_oc > p1_oc) newController = 2;
+        else if (controlMethod === "sticky" && prev === null && tieBehavior === "no_control") newController = null;
+        controllers[obj.name] = newController;
+      }
+    }
+
+    // Convert zone-name → player to hexKey → player
+    const objectives =
+      (currentActionIndex > 0 ? currentEpisode.states[currentActionIndex - 1]?.objectives : null) ||
+      currentEpisode.initial_state.objectives || [];
+    const map: Record<string, number | null> = {};
+    for (const obj of objectives) {
+      const c = controllers[obj.name] ?? null;
+      for (const h of obj.hexes) {
+        map[`${h.col},${h.row}`] = c;
+      }
+    }
+    return map;
+  }, [currentEpisode, currentActionIndex, unitRegistryReady, enrichUnitsWithStats]);
 
   // Get current action for move preview
   const currentActionIndexClamped =
@@ -2026,6 +2117,7 @@ export const BoardReplay: React.FC = () => {
         onShoot={() => {}}
         gameState={currentState as GameState}
         replayActionIndex={currentActionIndex}
+        objectiveControlOverride={replayObjectiveControlMap}
         getChargeDestinations={(unitId: number) => {
           // Calculate ALL valid charge destinations for replay mode using BFS
           if (

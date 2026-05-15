@@ -526,7 +526,7 @@ class GameStateManager:
                     "ICON_SCALE": full_unit_data["ICON_SCALE"],
                     "ILLUSTRATION_RATIO": require_key(full_unit_data, "ILLUSTRATION_RATIO"),
                     "BASE_SHAPE": full_unit_data.get("BASE_SHAPE", "round"),
-                    "BASE_SIZE": full_unit_data.get("BASE_SIZE", 1),
+                    "BASE_SIZE": full_unit_data.get("BASE_SIZE", 1) if self._get_inches_to_subhex() > 1 else 1,
                     "orientation": orientation_u,
                     "UNIT_RULES": copy.deepcopy(require_key(full_unit_data, "UNIT_RULES")),
                     "UNIT_KEYWORDS": copy.deepcopy(require_key(full_unit_data, "UNIT_KEYWORDS")),

@@ -2072,11 +2072,23 @@ export const drawBoard = (
             const outerR = Math.max(0, mec.r * smoothRadiusRatio);
             const innerR = Math.max(0.5, outerR * centerRadiusRatio);
 
+            // Determine zone controller from objectiveControl (any zone hex works — all share the same controller)
+            const sampleHexKey = zoneCells.length > 0 ? `${zoneCells[0]![0]},${zoneCells[0]![1]}` : null;
+            const zoneController = sampleHexKey != null ? (objectiveControl[sampleHexKey] ?? null) : null;
+            const zoneRingColor =
+              zoneController === 1 ? OBJECTIVE_P0_COLOR
+              : zoneController === 2 ? OBJECTIVE_P1_COLOR
+              : ringColorParsed;
+            const zoneCenterColor =
+              zoneController === 1 ? OBJECTIVE_P0_COLOR
+              : zoneController === 2 ? OBJECTIVE_P1_COLOR
+              : centerColorParsed;
+
             const smoothZone = new PIXI.Graphics();
-            smoothZone.lineStyle(ringWidth, ringColorParsed, ringAlpha);
+            smoothZone.lineStyle(ringWidth, zoneRingColor, ringAlpha);
             smoothZone.drawCircle(mec.cx, mec.cy, outerR);
             smoothZone.lineStyle(0);
-            smoothZone.beginFill(centerColorParsed, centerAlpha);
+            smoothZone.beginFill(zoneCenterColor, centerAlpha);
             smoothZone.drawCircle(mec.cx, mec.cy, innerR);
             smoothZone.endFill();
             baseHexContainer.addChild(smoothZone);

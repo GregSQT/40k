@@ -48,6 +48,7 @@ from .shared_utils import (
 
 _ADJACENT_EDGE_GAP_TOLERANCE_NORM = ENGAGEMENT_NORM_HEX_WIDTH
 FightFootprintOffsetPair = Optional[Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]]
+_unit_registry_singleton = None  # UnitRegistry reads static files — safe to share across all episodes
 
 
 def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
@@ -1808,6 +1809,8 @@ def _handle_fight_consolidation_resolution(
     result["fight_subphase"] = require_key(game_state, "fight_subphase")
     result["all_attack_results"] = list(snap_attacks)
     if moved_consolidation:
+        result["toCol"] = dest_col
+        result["toRow"] = dest_row
         _fight_maybe_lazy_rebuild_alternating_pools(game_state)
     _fight_post_process_fight_activation_result(game_state, unit, result)
     return True, result
@@ -1880,6 +1883,8 @@ def _handle_fight_pile_in_resolution(
                 "destination": (dest_col, dest_row),
             }
         _fight_apply_pile_in_move(game_state, unit, dest_col, dest_row)
+        game_state["_pile_in_toCol"] = dest_col
+        game_state["_pile_in_toRow"] = dest_row
 
     game_state["fight_pile_in_pending"] = False
     game_state["_fight_pile_in_ctx"] = None
@@ -1953,10 +1958,12 @@ def _ai_select_fight_target(game_state: Dict[str, Any], unit_id: str, valid_targ
         reward_configs = require_key(game_state, "reward_configs")
 
         # Get unit type for config lookup
-        from ai.unit_registry import UnitRegistry
-        unit_registry = UnitRegistry()
+        global _unit_registry_singleton
+        if _unit_registry_singleton is None:
+            from ai.unit_registry import UnitRegistry
+            _unit_registry_singleton = UnitRegistry()
         fighter_unit_type = unit["unitType"]
-        fighter_agent_key = unit_registry.get_model_key(fighter_unit_type)
+        fighter_agent_key = _unit_registry_singleton.get_model_key(fighter_unit_type)
 
         # Get unit-specific config (required)
         unit_reward_config = require_key(reward_configs, fighter_agent_key)

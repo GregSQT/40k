@@ -1493,7 +1493,7 @@ class ObservationBuilder:
         # Candidat 1: navigation principale selon intent
         if intent == INTENT_INVADE:
             c1_col, c1_row = get_objective_center(objectives[zone_idx])
-            c1_signal = get_objective_control(zone_idx, game_state)
+            c1_signal = -get_objective_control(zone_idx, game_state)  # inversé : zone ennemie → +1.0 (priorité invasion)
         elif intent == INTENT_DEFEND:
             c1_col, c1_row = get_objective_center(objectives[zone_idx])
             c1_signal = get_objective_control(zone_idx, game_state)

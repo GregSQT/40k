@@ -963,6 +963,8 @@ class W40KEngine(gym.Env):
             "hex_los_cache": {},  # PERFORMANCE: Clear hex-coordinate LoS cache for new episode
             "objective_controllers": {},  # RESET: Clear objective control for new episode
             "pending_shooting_phase_init": False,
+            "_pile_in_toCol": None,
+            "_pile_in_toRow": None,
         })
         self._configure_deployment_random_mix_for_episode()
         self.game_state["deployment_type"] = self.config.get("deployment_type")

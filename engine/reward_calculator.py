@@ -303,8 +303,8 @@ class RewardCalculator:
             return deploy_reward
 
         elif action_type == "move" or action_type == "flee":
-            # Movement rewards removed (unused) - keep behavior deterministic
-            movement_reward = 0.0 + objective_turn_reward
+            on_obj_reward = self._calculate_on_objective_reward(game_state, result)
+            movement_reward = on_obj_reward + objective_turn_reward
             reward_breakdown['base_actions'] = 0.0
             reward_breakdown['total'] = movement_reward
 
@@ -362,7 +362,15 @@ class RewardCalculator:
             # units_cache = living only; target may be dead (removed). Reward_mapper uses get_hp_from_cache → 0 if not in cache.
             enriched_target = self._enrich_unit_for_reward_mapper(target) if is_unit_alive(str(target["id"]), game_state) else target
             all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit, game_state)]
-            fight_reward = reward_mapper.get_combat_priority_reward(enriched_unit, enriched_target, all_targets, game_state) + objective_turn_reward
+            # on_objective_bonus for consolidation (toCol/toRow in result) and pile-in (_pile_in_toCol/Row in game_state)
+            pile_in_col = game_state.pop("_pile_in_toCol", None)
+            pile_in_row = game_state.pop("_pile_in_toRow", None)
+            on_obj_reward = 0.0
+            if result.get("toCol") is not None:
+                on_obj_reward = self._calculate_on_objective_reward(game_state, result)
+            elif pile_in_col is not None:
+                on_obj_reward = self._calculate_on_objective_reward(game_state, {"unitId": result.get("unitId"), "toCol": pile_in_col, "toRow": pile_in_row})
+            fight_reward = reward_mapper.get_combat_priority_reward(enriched_unit, enriched_target, all_targets, game_state) + objective_turn_reward + on_obj_reward
             reward_breakdown['base_actions'] = fight_reward - objective_turn_reward
             reward_breakdown['total'] = fight_reward
 
@@ -398,7 +406,13 @@ class RewardCalculator:
                 wait_reward = self.calculate_reward_from_config(acting_unit, {"type": "wait"}, success, game_state)
             reward_breakdown['base_actions'] = wait_reward
             reward_breakdown['penalties'] = wait_reward
-            wait_reward += objective_turn_reward
+            # on_objective_bonus for pile-in without targets (_pile_in_toCol/Row set in game_state)
+            pile_in_col = game_state.pop("_pile_in_toCol", None)
+            pile_in_row = game_state.pop("_pile_in_toRow", None)
+            on_obj_reward = 0.0
+            if pile_in_col is not None:
+                on_obj_reward = self._calculate_on_objective_reward(game_state, {"unitId": result.get("unitId"), "toCol": pile_in_col, "toRow": pile_in_row})
+            wait_reward += objective_turn_reward + on_obj_reward
             reward_breakdown['total'] = wait_reward
 
             # CRITICAL FIX: Add situational reward if game ended
@@ -448,8 +462,8 @@ class RewardCalculator:
             return charge_fail_reward
 
         elif action_type == "advance":
-            # Advance movement rewards removed (unused) - keep behavior deterministic
-            advance_reward = 0.0 + objective_turn_reward
+            on_obj_reward = self._calculate_on_objective_reward(game_state, result)
+            advance_reward = on_obj_reward + objective_turn_reward
             reward_breakdown['base_actions'] = 0.0
             reward_breakdown['total'] = advance_reward
 
@@ -1443,6 +1457,30 @@ class RewardCalculator:
         expected_damage = num_attacks * p_hit * p_wound * p_fail_save * damage
         return expected_damage
 
+    def _calculate_on_objective_reward(self, game_state: Dict[str, Any], result: Dict[str, Any]) -> float:
+        """Reward fired when a controlled-player unit lands on an uncontrolled objective hex during move."""
+        controlled_player = int(require_key(self.config, "controlled_player"))
+        unit = get_unit_by_id(str(result.get("unitId", "")), game_state)
+        if not unit or int(require_key(unit, "player")) != controlled_player:
+            return 0.0
+        to_col = result.get("toCol")
+        to_row = result.get("toRow")
+        if to_col is None or to_row is None:
+            return 0.0
+        unit_rewards = self._get_unit_reward_config(unit)
+        if "objective_rewards" not in unit_rewards or "on_objective_bonus" not in unit_rewards["objective_rewards"]:
+            raise KeyError("Unit rewards missing required 'on_objective_bonus' in 'objective_rewards'")
+        on_objective_bonus = float(unit_rewards["objective_rewards"]["on_objective_bonus"])
+        objectives = require_key(game_state, "objectives")
+        for zone_idx, obj in enumerate(objectives):
+            for h in obj["hexes"]:
+                h_col = int(h["col"]) if isinstance(h, dict) else int(h[0])
+                h_row = int(h["row"]) if isinstance(h, dict) else int(h[1])
+                if h_col == int(to_col) and h_row == int(to_row):
+                    if get_objective_control(zone_idx, game_state) < 1.0:
+                        return on_objective_bonus
+        return 0.0
+
     def compute_zone_intent_shaping(self, game_state: Dict[str, Any]) -> float:
         """
         Compute zone intent shaping reward based on current zone intents and objective control.
@@ -1458,7 +1496,8 @@ class RewardCalculator:
         zone_intent_cfg = self.rewards_config[agent_key]["zone_intent_shaping"]
         defend_bonus = zone_intent_cfg["defend_held_bonus"]
         invade_success_bonus = zone_intent_cfg["invade_success_bonus"]
-        invade_penalty = zone_intent_cfg["invade_lost_penalty"]
+        invade_neutral_bonus = zone_intent_cfg["invade_neutral_bonus"]
+        invade_own_penalty = zone_intent_cfg["invade_lost_penalty"]
 
         zone_intents = game_state["zone_intents"]
         shaping = 0.0
@@ -1466,10 +1505,12 @@ class RewardCalculator:
             control = get_objective_control(zone_idx, game_state)
             if intent == INTENT_DEFEND and control == 1.0:
                 shaping += defend_bonus
-            elif intent == INTENT_INVADE and control == 1.0:
-                shaping += invade_success_bonus
             elif intent == INTENT_INVADE and control == -1.0:
-                shaping += invade_penalty
+                shaping += invade_success_bonus   # cible une zone ennemie : correct
+            elif intent == INTENT_INVADE and control == 0.0:
+                shaping += invade_neutral_bonus   # cible une zone neutre : acceptable
+            elif intent == INTENT_INVADE and control == 1.0:
+                shaping += invade_own_penalty     # déclare invasion sur sa propre zone : incorrect
         return shaping
 
     def _calculate_wound_target(self, strength: int, toughness: int) -> int:

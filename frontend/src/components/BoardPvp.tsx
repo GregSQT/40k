@@ -460,6 +460,7 @@ type BoardProps = {
   availableCellsOverride?: Array<{ col: number; row: number }>; // Replay / pile in : surbrillance des hexes disponibles
   deploymentState?: GameState["deployment_state"];
   objectivesOverride?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>; // For replay mode: override objectives from log
+  objectiveControlOverride?: Record<string, number | null>; // For replay mode: pre-computed objective control (bypasses sticky-ref heuristic)
   replayActionIndex?: number; // For replay mode: detect rollback and reset objective control
   autoSelectWeapon?: boolean;
   /** Mode mesure (règle) : armed → 1er clic pose l’ancre ; clic droit = jonction ; 2e clic termine la ligne → armed. Sortie : bouton règle uniquement. */
@@ -695,6 +696,7 @@ export default function Board({
   availableCellsOverride,
   deploymentState,
   objectivesOverride,
+  objectiveControlOverride,
   replayActionIndex,
   autoSelectWeapon,
   measureMode = { kind: "off" },
@@ -3958,6 +3960,11 @@ export default function Board({
       }
     }
 
+    // Replay mode: override with pre-computed snapshot (correct sticky state at exact action index)
+    if (objectiveControlOverride !== undefined) {
+      objectiveControl = objectiveControlOverride;
+    }
+
     // Compute units fingerprint to determine if unit re-rendering is needed
     const unitsFingerprint = (() => {
       const parts: string[] = [];
@@ -3977,8 +3984,12 @@ export default function Board({
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
-    // Reuse cached static board layers when the board config hasn't changed.
-    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}`;
+    // Reuse cached static board layers when the board config and objective control haven't changed.
+    const objControlKey = Object.entries(objectiveControl)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${k}:${v ?? "n"}`)
+      .join("|");
+    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}|oc:${objControlKey}`;
     const canReuseStatic =
       staticBoardConfigKeyRef.current === bcKey && staticBoardRef.current !== null;
 
@@ -5262,6 +5273,7 @@ export default function Board({
     chargePreviewOverlayHexes,
     footprintZoneRef,
     blinkingCoverByUnitId,
+    objectiveControlOverride,
   ]);
 
   // Handle weapon selection

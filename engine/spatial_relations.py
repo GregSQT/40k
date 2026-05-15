@@ -87,7 +87,9 @@ def unit_entries_within_engagement_zone(
     """Return True when two unit cache entries are within the shared engagement contract."""
     first_shape = first_entry.get("BASE_SHAPE")
     second_shape = second_entry.get("BASE_SHAPE")
-    if first_shape == "round" and second_shape == "round":
+    # Euclidean round-base check is only meaningful on micro-grid boards (engagement_zone > 1).
+    # On legacy boards (engagement_zone == 1, 1 hex = 1 inch), hex footprint adjacency is used.
+    if engagement_zone > 1 and first_shape == "round" and second_shape == "round":
         req = engagement_minimum_clearance_norm(engagement_zone)
         gap = euclidean_edge_clearance_round_round(
             require_key(first_entry, "col"),

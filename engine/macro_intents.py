@@ -55,6 +55,10 @@ def get_nearest_objective_zone(active_unit: dict, game_state: dict) -> int:
 
 def get_best_enemy_global(game_state: dict, zone_idx: int):
     """Return (col, row) of best enemy (highest damage_ratio). Falls back to zone objective if no enemy alive."""
+    cache = game_state.get("_cached_best_enemy_global")
+    if cache is not None and zone_idx in cache:
+        return cache[zone_idx]
+
     from engine.phase_handlers.shared_utils import is_unit_alive
     current_player = game_state["current_player"]
     fallback_col, fallback_row = get_objective_center(game_state["objectives"][zone_idx])
@@ -71,14 +75,19 @@ def get_best_enemy_global(game_state: dict, zone_idx: int):
             best_score = score
             best_unit = unit
 
-    if best_unit is None:
-        # No enemy alive: navigate to zone objective, game may continue to turn 5
-        return fallback_col, fallback_row
-    return best_unit["col"], best_unit["row"]
+    result = (best_unit["col"], best_unit["row"]) if best_unit is not None else (fallback_col, fallback_row)
+    if "_cached_best_enemy_global" not in game_state:
+        game_state["_cached_best_enemy_global"] = {}
+    game_state["_cached_best_enemy_global"][zone_idx] = result
+    return result
 
 
 def get_best_enemy_score(game_state: dict) -> float:
     """Return damage_ratio of best enemy. Returns 0.0 if no enemy alive."""
+    cached = game_state.get("_cached_best_enemy_score")
+    if cached is not None:
+        return cached
+
     from engine.phase_handlers.shared_utils import is_unit_alive
     current_player = game_state["current_player"]
     best_score = 0.0
@@ -90,6 +99,7 @@ def get_best_enemy_score(game_state: dict) -> float:
         score = get_best_enemy_score_for_unit(unit, game_state)
         if score > best_score:
             best_score = score
+    game_state["_cached_best_enemy_score"] = best_score
     return best_score
 
 

@@ -26,8 +26,408 @@
     "bot_eval_final": 100,
     "bot_eval_worker_device": "cpu",
     "bot_eval_task_timeout_seconds": 600,
+    "save_best_robust": false,
+    "save_best_robust_seed": true,
+    "robust_window": 5,
+    "robust_drawdown_penalty": 0.5,
+    "robust_penalty_bot": 0.12,
+    "robust_penalty_hard": 0.20,
+    "model_gating_enabled": false,
+    "model_gating_min_worst_bot": 0.25,
+    "model_gating_min_worst_scenario_combined": 0.35,
+    "holdout_regular_scenarios": ["holdout_regular_bot-01", "holdout_regular_bot-02", "holdout_regular_bot-03", "holdout_regular_bot-04", "holdout_regular_bot-05"],
+    "holdout_hard_scenarios": ["holdout_hard_bot-01", "holdout_hard_bot-02", "holdout_hard_bot-03", "holdout_hard_bot-04", "holdout_hard_bot-05"],
+    "holdout_hard_opponent_budget_modifier": 1.10,
+    "bot_eval_weights": {"greedy": 0.23, "defensive": 0.23, "control": 0.23, "aggressive_smart": 0.15, "adaptive": 0.16},
+    "bot_eval_randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.05, "adaptive": 0.05}
+  },
+  "roster_pool_schedule": {
+    "enabled": true,
+    "training": {
+      "start_counts": { "swarm": 16, "troop": 10, "elite": 6 },
+      "end_counts":   { "swarm": 16, "troop": 10, "elite": 6 }
+    }
+  },
+  "deployment_random_mix": {
+    "enabled": false,
+    "training_only": true,
+    "force_random_ratio_start": 0.10,
+    "force_random_ratio_end": 0.20,
+    "schedule": "linear",
+    "freeze_after_progress": 0.80,
+    "apply_to": "agent_only"
+  },
+  "observation_params": {
+    "obs_size": 357,
+    "action_space_size": 31,
+    "perception_radius": 25,
+    "max_nearby_units": 12,
+    "max_valid_targets": 5,
+    "justification": "Phase 2 — obs_size 355→357 (+2 floats zone intent), action_space_size 16+5×3=31."
+  },
+  "step_log_buffer_size": 200,
+  "model_params": {
+    "policy": "MlpPolicy",
+    "learning_rate": {"initial": 0.002, "final": 0.0015},
+    "n_steps": 16384,
+    "batch_size": 1024,
+    "n_epochs": 3,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "clip_range": 0.2,
+    "clip_range_vf": null,
+    "normalize_advantage": true,
+    "ent_coef": 0.10,
+    "vf_coef": 1.0,
+    "max_grad_norm": 0.5,
+    "target_kl": 0.02,
+    "tensorboard_log": "./tensorboard/",
+    "policy_kwargs": {
+      "net_arch": [320, 320]
+    },
+    "verbose": 0
+  },
+  "vec_normalize": {
+    "enabled": true,
+    "norm_obs": true,
+    "norm_reward": true,
+    "clip_obs": 10.0,
+    "clip_reward": 10.0,
+    "gamma": 0.99
+  },
+  "vec_normalize_eval": {
+    "enabled": true,
+    "training": false,
+    "norm_reward": false
+  },
+  "bot_training": {
+    "ratios": {"random": 0.10, "greedy": 0.20, "defensive": 0.20, "control": 0.20, "aggressive_smart": 0.15, "adaptive": 0.15},
+    "randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.05, "adaptive": 0.05}
+  },
+  "scenario_sampling": {
+    "eval_ref_strict": true,
+    "train_objective_count_weights": {"1": 0.025, "2": 0.025, "3": 0.025, "4": 0.025, "5": 0.90},
+    "train_objectives_ref_weights": {"default": 1.0},
+    "eval_objectives_refs": ["objectives-51.json"],
+    "eval_objective_count_weights": {"5": 1.0},
+    "train_wall_ref_weights": {"walls-11.json": 0.3, "walls-21.json": 0.3, "walls-31.json": 0.3, "default": 0.1},
+    "eval_wall_refs": ["walls-11.json", "walls-21.json", "walls-31.json"],
+    "train_selection_mode": "uniform_within_count",
+    "eval_selection_mode": "uniform_within_count"
+  },
+  "training_hard": {
+    "enabled": false,
+    "target_episode_ratio": 0.3,
+    "max_scenario_weight": 4,
+    "scenario_names": []
+  },
+  "unit_rule_forcing": {
+    "enabled": false,
+    "target_controlled_episode_ratio": 0.20,
+    "max_scenario_weight": 6
+  }
+  },
+  "default": {
+  "type": "################################################### Default ###################################################",
+  "seed": 12345,
+  "total_episodes": 48,
+  "total_episodes_normal": "30000 : 8s/ep -> 450 ep/hour -> 30k ep/60h",
+  "agent_seat_mode": "random",
+  "eval_episodes": 100,
+  "bot_eval_scenario_pool": "holdout",
+  "bot_eval_show_progress": true,
+  "bot_eval_use_subprocess": true,
+  "bot_eval_n_workers": 6,
+  "max_turns_per_episode": 5,
+  "n_envs": 48,
+  "n_envs_normal_value": "-----------------------48",
+  "callback_params": {
+    "checkpoint_save_freq": 10000,
+    "max_checkpoints": 5,
+    "checkpoint_name_prefix": "ppo_checkpoint",
+    "eval_deterministic": true,
+    "eval_render": false,
+    "bot_eval_freq": 48,
+    "bot_eval_freq_normal_value": "--------------2500",
+    "bot_eval_use_episodes": true,
+    "bot_eval_intermediate": 0,
+    "bot_eval_intermediate_normal_value": "------150",
+    "bot_eval_final": 0,
+    "bot_eval_final_normal_value": "-------------300",
+    "bot_eval_worker_device": "cpu",
+    "bot_eval_task_timeout_seconds": 600,
+    "save_best_robust": false,
+    "save_best_robust_normal_value": "----------true",
+    "save_best_robust_seed": false,
+    "save_best_robust_seed_normal_value": "-----true",
+    "robust_window": 1,
+    "robust_window_normal_value": "--------------5",
+    "robust_drawdown_penalty": 0.5,
+    "robust_penalty_bot": 0.12,
+    "robust_penalty_hard": 0.20,
+    "model_gating_enabled": true,
+    "model_gating_min_combined": 0.45,
+    "model_gating_min_worst_bot": 0.25,
+    "model_gating_min_worst_scenario_combined": 0.35,
+    "holdout_regular_scenarios": ["holdout_regular_bot-01", "holdout_regular_bot-02", "holdout_regular_bot-03", "holdout_regular_bot-04", "holdout_regular_bot-05", "holdout_regular_bot-06", "holdout_regular_bot-07", "holdout_regular_bot-08", "holdout_regular_bot-09", "holdout_regular_bot-10"],
+    "holdout_hard_scenarios": ["holdout_hard_bot-01", "holdout_hard_bot-02", "holdout_hard_bot-03", "holdout_hard_bot-04", "holdout_hard_bot-05", "holdout_hard_bot-06", "holdout_hard_bot-07", "holdout_hard_bot-08", "holdout_hard_bot-09", "holdout_hard_bot-10"],
+    "holdout_hard_opponent_budget_modifier": 1.10,
+    "bot_eval_weights": {"greedy": 0.23, "defensive": 0.23, "control": 0.23, "aggressive_smart": 0.15, "adaptive": 0.16},
+    "bot_eval_randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.05, "adaptive": 0.05}
+  },
+  "roster_pool_schedule": {
+    "enabled": true,
+    "training": {
+      "start_counts": { "swarm": 10, "troop": 6, "elite": 4 },
+      "end_counts":   { "swarm": 48, "troop": 32, "elite": 20 }
+    }
+  },
+  "deployment_random_mix": {
+    "enabled": false,
+    "training_only": true,
+    "force_random_ratio_start": 0.10,
+    "force_random_ratio_end": 0.20,
+    "schedule": "linear",
+    "freeze_after_progress": 0.80,
+    "apply_to": "agent_only"
+  },
+    "observation_params": {
+      "obs_size": 357,
+      "action_space_size": 31,
+    "perception_radius": 25,
+    "max_nearby_units": 12,
+    "max_valid_targets": 5,
+    "justification": "Phase 2 — obs_size 355→357 (+2 floats zone intent). R=25 inches covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). Converted to sub-hex at load via inches_to_subhex."
+  },
+  "step_log_buffer_size": 200,
+  "model_params": {
+    "policy": "MlpPolicy",
+    "learning_rate": {"initial": 0.0001, "final": 0.00003},
+    "n_steps": 16384,
+    "batch_size": 4096,
+    "n_epochs": 3,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "clip_range": 0.12,
+    "clip_range_vf": null,
+    "normalize_advantage": true,
+    "ent_coef": { "start": 0.02, "end": 0.01 },
+    "vf_coef": 1.0,
+    "max_grad_norm": 0.3,
+    "target_kl": 0.008,
+    "tensorboard_log": "./tensorboard/",
+    "policy_kwargs": {
+      "net_arch": [320, 320]
+    },
+    "verbose": 0
+  },
+  "vec_normalize": {
+    "enabled": true,
+    "norm_obs": true,
+    "norm_reward": true,
+    "clip_obs": 10.0,
+    "clip_reward": 10.0,
+    "gamma": 0.99
+  },
+  "vec_normalize_eval": {
+    "enabled": true,
+    "training": false,
+    "norm_reward": false
+  },
+  "bot_training": {
+    "ratios": {"random": 0.10, "greedy": 0.20, "defensive": 0.20, "control": 0.20, "aggressive_smart": 0.15, "adaptive": 0.15},
+    "randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.05, "adaptive": 0.05}
+  },
+  "opponent_mix": {
+    "enabled": false,
+    "self_play_ratio_start": 0.01,
+    "self_play_ratio_end": 0.50,
+    "warmup_episodes": 2000,
+    "snapshot_model_path": "ai/models/CoreAgent/model_CoreAgent_selfplay_snapshot.zip",
+    "snapshot_update_freq_episodes": 1000,
+    "self_play_snapshot_device": "cpu",
+    "self_play_deterministic": false
+  },
+  "scenario_sampling": {
+    "eval_ref_strict": true,
+    "train_objective_count_weights": {"1": 0.025, "2": 0.025, "3": 0.025, "4": 0.025, "5": 0.90},
+    "train_objectives_ref_weights": {"default": 1.0},
+    "eval_objectives_refs": ["objectives-51.json", "objectives-151.json"],
+    "eval_objective_count_weights": {"5": 1.0},
+    "train_wall_ref_weights": {"walls-11.json": 0.3, "walls-21.json": 0.3, "walls-31.json": 0.3, "default": 0.1},
+    "eval_wall_refs": ["walls-11.json", "walls-21.json", "walls-31.json"],
+    "train_selection_mode": "uniform_within_count",
+    "eval_selection_mode": "uniform_within_count"
+  },
+  "training_hard": {
+    "enabled": false,
+    "target_episode_ratio": 0.3,
+    "max_scenario_weight": 4,
+    "scenario_names": []
+  },
+  "unit_rule_forcing": {
+    "enabled": false,
+    "target_controlled_episode_ratio": 0.20,
+    "max_scenario_weight": 6
+  }
+},
+  "suite": {
+  "type": "################################################### Suite ###################################################",
+  "seed": 12345,
+  "total_episodes": 50000,
+  "total_episodes_normal": "50000 -violet 1000 ep / minute -> 12k ep / hour -> 100k ep / 5h30",
+  "agent_seat_mode": "random",
+  "bot_eval_scenario_pool": "holdout",
+  "bot_eval_show_progress": true,
+  "bot_eval_use_subprocess": true,
+  "bot_eval_n_workers": 6,
+  "max_turns_per_episode": 5,
+  "n_envs": 48,
+  "callback_params": {
+    "checkpoint_save_freq": 10000,
+    "max_checkpoints": 5,
+    "checkpoint_name_prefix": "ppo_checkpoint",
+    "eval_deterministic": true,
+    "eval_render": false,
+    "bot_eval_freq": 1000,
+    "bot_eval_use_episodes": true,
+    "bot_eval_intermediate": 150,
+    "bot_eval_final": 300,
+    "bot_eval_worker_device": "cpu",
     "save_best_robust": true,
     "save_best_robust_seed": true,
+    "robust_window": 5,
+    "robust_drawdown_penalty": 0.5,
+    "robust_penalty_bot": 0.12,
+    "robust_penalty_hard": 0.20,
+    "model_gating_enabled": true,
+    "model_gating_min_combined": 0.45,
+    "model_gating_min_worst_bot": 0.25,
+    "model_gating_min_worst_scenario_combined": 0.35,
+    "holdout_regular_scenarios": ["holdout_regular_bot-01", "holdout_regular_bot-02", "holdout_regular_bot-03", "holdout_regular_bot-04", "holdout_regular_bot-05", "holdout_regular_bot-06", "holdout_regular_bot-07", "holdout_regular_bot-08", "holdout_regular_bot-09", "holdout_regular_bot-10"],
+    "holdout_hard_scenarios": ["holdout_hard_bot-01", "holdout_hard_bot-02", "holdout_hard_bot-03", "holdout_hard_bot-04", "holdout_hard_bot-05", "holdout_hard_bot-06", "holdout_hard_bot-07", "holdout_hard_bot-08", "holdout_hard_bot-09", "holdout_hard_bot-10"],
+    "holdout_hard_opponent_budget_modifier": 1.10,
+    "bot_eval_weights": {"greedy": 0.23, "defensive": 0.23, "control": 0.23, "aggressive_smart": 0.15, "adaptive": 0.16},
+    "bot_eval_randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.05, "adaptive": 0.05}
+  },
+  "deployment_random_mix": {
+    "enabled": false,
+    "training_only": true,
+    "force_random_ratio_start": 0.10,
+    "force_random_ratio_end": 0.20,
+    "schedule": "linear",
+    "freeze_after_progress": 0.80,
+    "apply_to": "agent_only"
+  },
+    "observation_params": {
+      "obs_size": 357,
+      "action_space_size": 31,
+    "perception_radius": 25,
+    "max_nearby_units": 12,
+    "max_valid_targets": 5,
+    "justification": "Phase 2 — obs_size 355→357 (+2 floats zone intent). R=25 inches covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). Converted to sub-hex at load via inches_to_subhex."
+  },
+  "step_log_buffer_size": 200,
+  "model_params": {
+    "policy": "MlpPolicy",
+    "learning_rate": {"initial": 0.0001, "final": 0.00003},
+    "n_steps": 16384,
+    "batch_size": 4096,
+    "n_epochs": 3,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "clip_range": 0.12,
+    "clip_range_vf": null,
+    "normalize_advantage": true,
+    "ent_coef": { "start": 0.02, "end": 0.01 },
+    "vf_coef": 1.0,
+    "max_grad_norm": 0.3,
+    "target_kl": 0.008,
+    "tensorboard_log": "./tensorboard/",
+    "policy_kwargs": {
+      "net_arch": [320, 320]
+    },
+    "verbose": 0
+  },
+  "vec_normalize": {
+    "enabled": true,
+    "norm_obs": true,
+    "norm_reward": true,
+    "clip_obs": 10.0,
+    "clip_reward": 10.0,
+    "gamma": 0.99
+  },
+  "vec_normalize_eval": {
+    "enabled": true,
+    "training": false,
+    "norm_reward": false
+  },
+  "bot_training": {
+    "ratios": {"random": 0.10, "greedy": 0.20, "defensive": 0.20, "control": 0.20, "aggressive_smart": 0.15, "adaptive": 0.15},
+    "randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.05, "adaptive": 0.05}
+  },
+  "opponent_mix": {
+    "enabled": true,
+    "self_play_ratio_start": 0.00,
+    "self_play_ratio_end": 0.30,
+    "warmup_episodes": 1000,
+    "snapshot_model_path": "ai/models/CoreAgent/model_CoreAgent_selfplay_snapshot.zip",
+    "snapshot_update_freq_episodes": 1000,
+    "self_play_snapshot_device": "cpu",
+    "self_play_deterministic": false
+  },
+  "scenario_sampling": {
+    "train_objective_count_weights": {"1": 0.025, "2": 0.025, "3": 0.025, "4": 0.025, "5": 0.90},
+    "train_wall_ref_weights": {"walls-11.json": 0.3, "walls-21.json": 0.3, "walls-31.json": 0.3, "default": 0.1},
+    "train_objectives_ref_weights": {"default": 1.0},
+    "eval_wall_refs": ["walls-11.json", "walls-21.json", "walls-31.json"],
+    "eval_objectives_refs": ["objectives-51.json", "objectives-151.json"],
+    "eval_ref_strict": true,
+    "train_selection_mode": "uniform_within_count",
+    "eval_objective_count_weights": {"5": 1.0},
+    "eval_selection_mode": "uniform_within_count"
+  },
+  "training_hard": {
+    "enabled": false,
+    "target_episode_ratio": 0.20,
+    "max_scenario_weight": 4,
+    "scenario_names": []
+  },
+  "unit_rule_forcing": {
+    "enabled": true,
+    "target_controlled_episode_ratio": 0.20,
+    "max_scenario_weight": 6
+  }
+},
+  "debug": {
+    "type": "################################################### debug ###################################################",
+    "seed": 12345,
+  "total_episodes": 500,
+  "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
+  "agent_seat_mode": "random",
+  "eval_episodes": 10,
+  "bot_eval_scenario_pool": "holdout",
+  "bot_eval_show_progress": true,
+  "bot_eval_use_subprocess": true,
+  "bot_eval_n_workers": 6,
+  "max_turns_per_episode": 5,
+  "n_envs": 48,
+  "callback_params": {
+    "early_stopping_patience": 0,
+    "save_best_min_episodes": 10000,
+    "checkpoint_save_freq": 10000,
+    "max_checkpoints": 3,
+    "checkpoint_name_prefix": "ppo_checkpoint",
+    "eval_deterministic": true,
+    "eval_render": false,
+    "bot_eval_freq": 2000,
+    "bot_eval_use_episodes": true,
+    "bot_eval_intermediate": 5,
+    "bot_eval_final": 5,
+    "bot_eval_worker_device": "cpu",
+    "bot_eval_task_timeout_seconds": 600,
+    "save_best_robust": false,
+    "save_best_robust_seed": false,
     "robust_window": 5,
     "robust_drawdown_penalty": 0.5,
     "robust_penalty_bot": 0.12,
