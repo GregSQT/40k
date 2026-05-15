@@ -605,9 +605,15 @@ def _charge_reverse_goal_bfs_for_eligibility(
 
     goal_search_radius = engagement_zone + charger_radius
     enemy_goal_zone = dilate_hex_set(enemy_occupied, goal_search_radius, board_cols, board_rows)
-    start_reach_disk = dilate_hex_set({start_pos}, int(bfs_max_distance), board_cols, board_rows)
-    if start_pos not in start_reach_disk:
-        start_reach_disk.add(start_pos)
+    _reach_disk_cache = game_state.setdefault("_charge_reach_disk_cache", {})
+    _reach_disk_key = (start_pos, int(bfs_max_distance))
+    if _reach_disk_key in _reach_disk_cache:
+        start_reach_disk = _reach_disk_cache[_reach_disk_key]
+    else:
+        start_reach_disk = dilate_hex_set({start_pos}, int(bfs_max_distance), board_cols, board_rows)
+        if start_pos not in start_reach_disk:
+            start_reach_disk.add(start_pos)
+        _reach_disk_cache[_reach_disk_key] = start_reach_disk
     goal_zone = enemy_goal_zone & start_reach_disk
     goal_candidates_n = len(goal_zone)
     skipped_goal_start_lb_n = len(enemy_goal_zone) - goal_candidates_n
@@ -741,8 +747,10 @@ def _charge_reverse_goal_bfs_for_eligibility(
             pruned_by_start_lb += 1
             continue
 
-        for neighbor_col, neighbor_row in get_hex_neighbors(current_pos[0], current_pos[1]):
-            neighbor = (int(neighbor_col), int(neighbor_row))
+        _rev_c, _rev_r = current_pos[0], current_pos[1]
+        _rev_offsets = ((0, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0)) if (_rev_c & 1) else ((0, -1), (1, -1), (1, 0), (0, 1), (-1, 0), (-1, -1))
+        for _dc, _dr in _rev_offsets:
+            neighbor = (_rev_c + _dc, _rev_r + _dr)
             next_dist = current_dist + 1
             if neighbor == start_pos:
                 if _perf and _t0 is not None:
@@ -820,6 +828,7 @@ def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["_charge_dest_bfs_cache"] = {}
     game_state["_charge_fp_offset_pair_cache"] = {}
     game_state["_has_valid_charge_cache"] = {}
+    game_state["_charge_reach_disk_cache"] = {}
     game_state["preview_hexes"] = []
     game_state["active_charge_unit"] = None
     game_state["charge_roll_values"] = {}  # Store 2d6 rolls per unit
@@ -2132,6 +2141,24 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     for _pec, _per, _peth in _charge_enemy_prox:
         _near_enemy_set.update(_dilate_unbounded({(_pec, _per)}, _peth))
 
+    # Opt 3 — neighbor offsets inlinés : évite get_hex_neighbors (normalize_coordinates + int() redondants).
+    _BFS_OFF_EVEN = ((0, -1), (1, -1), (1, 0), (0, 1), (-1, 0), (-1, -1))
+    _BFS_OFF_ODD  = ((0, -1), (1, 0),  (1, 1), (0, 1), (-1, 1), (-1, 0))
+
+    # Opt 1 — prefiltre per-enemy : évite unit_entries_within_engagement_zone sur les hexes
+    # clairement hors portée d'un ennemi spécifique (miroir de _charge_reverse_goal_bfs_for_eligibility).
+    _bfs_is_mover_round = (unit.get("BASE_SHAPE") == "round")
+    _bfs_enemy_eng_zones: Dict[Any, Set[Tuple[int, int]]] = {}
+    _bfs_rr_prox: Dict[Any, int] = {}
+    for (_bfs_eid, _bfs_ee), (_bfs_pec, _bfs_per, _bfs_peth) in zip(indexed_enemy_engagement, _charge_enemy_prox):
+        if _bfs_is_mover_round and _bfs_ee.get("BASE_SHAPE") == "round":
+            _bfs_rr_prox[_bfs_eid] = _bfs_peth
+        else:
+            _bfs_ee_fp = _bfs_ee.get("occupied_hexes") or {(int(_bfs_pec), int(_bfs_per))}
+            _bfs_enemy_eng_zones[_bfs_eid] = _dilate_unbounded(
+                {(int(fc), int(fr)) for fc, fr in _bfs_ee_fp}, engagement_zone
+            )
+
     _t_bfs0 = time.perf_counter() if _perf else None
     bfs_short_circuit = False
     bfs_candidate_fp_s = 0.0
@@ -2148,10 +2175,9 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         if current_dist >= bfs_max_distance:
             continue
 
-        neighbors = get_hex_neighbors(current_col, current_row)
-
-        for neighbor_col, neighbor_row in neighbors:
-            neighbor_col_int, neighbor_row_int = int(neighbor_col), int(neighbor_row)
+        for _dc, _dr in (_BFS_OFF_ODD if (current_col & 1) else _BFS_OFF_EVEN):
+            neighbor_col_int = current_col + _dc
+            neighbor_row_int = current_row + _dr
             neighbor_pos = (neighbor_col_int, neighbor_row_int)
             neighbor_dist = current_dist + 1
 
@@ -2217,7 +2243,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
             is_adjacent_to_enemy = False
             hex_overlaps_enemy = False
-            _cur_engaging: Set[str] = set() if _track_engages else set()
+            _cur_engaging: Set[str] = set() if _track_engages else None
             _t_engagement0 = time.perf_counter() if _perf else None
             synth = _charge_synthetic_charger_cache_entry(
                 unit, neighbor_col_int, neighbor_row_int, candidate_fp
@@ -2228,6 +2254,14 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                 if candidate_fp & enemy_fp:
                     hex_overlaps_enemy = True
                     break
+                # Opt 1 — prefiltre per-enemy avant l'appel coûteux unit_entries_within_engagement_zone.
+                _bfs_ee_is_rr = (_bfs_is_mover_round and enemy_entry.get("BASE_SHAPE") == "round")
+                if _bfs_ee_is_rr:
+                    if _eid in _bfs_rr_prox and _calculate_hex_distance(neighbor_col_int, neighbor_row_int, ec, er) > _bfs_rr_prox[_eid]:
+                        continue
+                elif _eid in _bfs_enemy_eng_zones:
+                    if not (candidate_fp & _bfs_enemy_eng_zones[_eid]):
+                        continue
                 bfs_engagement_checks_n += 1
                 if unit_entries_within_engagement_zone(
                     synth, enemy_entry, engagement_zone
