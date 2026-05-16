@@ -1,0 +1,5 @@
+[wsl2]
+memory=48GB       # Max RAM WSL peut utiliser
+processors=8      # Ajuste selon ton CPU
+swap=8GB          # Swap pour prévenir OOM
+localhostForwarding=true

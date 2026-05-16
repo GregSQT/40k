@@ -1,0 +1,10 @@
+# Custom aliases
+alias lt='ls -ltra'
+alias p='python3'
+alias api='cd /home/greg/40k && python3 services/api_server.py'
+alias app='cd /home/greg/40k/frontend && npm run dev'
+alias tens='cd /home/greg/40k && tensorboard --logdir=./tensorboard/'
+alias check='python3 /home/greg/40k/scripts/check_ai_rules.py'
+alias biome='cd /home/greg/40k ; npm run check'
+alias nuit_on='cp /home/greg/40k/.claude/settings.nuit.json /home/greg/40k/.claude/settings.local.json && echo "MODE NUIT activé"'
+alias nuit_off='rm -f /home/greg/40k/.claude/settings.local.json && echo "MODE NUIT désactivé"'
