@@ -877,23 +877,10 @@ def charge_build_activation_pool(game_state: Dict[str, Any]) -> None:
     """
     Build charge activation pool with eligibility checks
     """
-    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
-
-    _perf = perf_timing_enabled(game_state)
-    _ep = game_state.get("episode_number", "?")
-    _turn = game_state.get("turn", "?")
-    _t0 = time.perf_counter() if _perf else None
-
     # CRITICAL: Clear pool before rebuilding (defense in depth)
     game_state["charge_activation_pool"] = []
     eligible_units = get_eligible_units(game_state)
     game_state["charge_activation_pool"] = list(eligible_units)  # Ensure it's a new list, not a reference
-
-    if _perf and _t0 is not None:
-        append_perf_timing_line(
-            f"CHARGE_BUILD_POOL episode={_ep} turn={_turn} "
-            f"get_eligible_s={time.perf_counter() - _t0:.6f} eligible_count={len(eligible_units)}"
-        )
 
     from engine.game_utils import add_debug_file_log
     episode = game_state.get("episode_number", "?")
@@ -915,12 +902,30 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     Returns list of unit IDs eligible for charge activation.
     Pure function - no internal state storage.
     """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+    _perf = perf_timing_enabled(game_state)
+    _ep = game_state.get("episode_number", "?")
+    _turn = game_state.get("turn", "?")
+    _t_total0 = time.perf_counter() if _perf else None
+
     eligible_units = []
     current_player = game_state["current_player"]
-
     units_cache = require_key(game_state, "units_cache")
+    units_total_n = len(units_cache)
 
+    _t_occ0 = time.perf_counter() if _perf else None
     full_occupied_positions = build_occupied_positions_set(game_state)
+    _occupied_pos_s = (time.perf_counter() - _t_occ0) if (_perf and _t_occ0 is not None) else 0.0
+
+    units_own_n = 0
+    bfs_calls_n = 0
+    bfs_cache_hits_n = 0
+    _bfs_total_s = 0.0
+
+    _t_loop0 = time.perf_counter() if _perf else None
+
+    units_cannot_charge = require_key(game_state, "units_cannot_charge")
+    units_advanced = require_key(game_state, "units_advanced")
 
     for unit_id, cache_entry in units_cache.items():
         unit = get_unit_by_id(game_state, unit_id)
@@ -931,6 +936,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         # "unit.player === current_player?"
         if cache_entry["player"] != current_player:
             continue  # Wrong player
+        units_own_n += 1
 
         # Engagement : aligné mouvement / preview charge (pas intersection empreinte × dilatation hex seule,
         # qui peut exclure à tort une unité posée au clearance légal bord-à-bord).
@@ -944,23 +950,47 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
                 continue  # Fled units cannot charge without explicit rule effect
 
         # Post-shoot movement restriction: cannot charge until end of turn.
-        units_cannot_charge = require_key(game_state, "units_cannot_charge")
         if unit_id_str in units_cannot_charge:
             continue
 
         # ADVANCE_IMPLEMENTATION: Units that advanced cannot charge
-        units_advanced = require_key(game_state, "units_advanced")
         if unit_id_str in units_advanced:
             if not _unit_has_rule(unit, "charge_after_advance"):
                 continue  # Advanced units cannot charge without rule
 
         # "Has valid charge target?"
         # Must have at least one enemy within charge range (via BFS pathfinding)
-        if not _has_valid_charge_target(game_state, unit, full_occupied_positions):
+        bfs_calls_n += 1
+        _hvt_cache = game_state.get("_has_valid_charge_cache", {})
+        _hvt_key = (unit_id_str, game_state["_unit_move_version"])
+        if _hvt_key in _hvt_cache:
+            bfs_cache_hits_n += 1
+        _t_bfs0 = time.perf_counter() if _perf else None
+        has_target = _has_valid_charge_target(game_state, unit, full_occupied_positions)
+        if _perf and _t_bfs0 is not None:
+            _bfs_total_s += time.perf_counter() - _t_bfs0
+        if not has_target:
             continue  # No valid charge targets
 
         # Unit passes all conditions - add to pool
         eligible_units.append(unit_id_str)
+
+    if _perf and _t_loop0 is not None and _t_total0 is not None:
+        _loop_total_s = time.perf_counter() - _t_loop0
+        _filter_only_s = _loop_total_s - _bfs_total_s
+        _total_s = time.perf_counter() - _t_total0
+        append_perf_timing_line(
+            f"CHARGE_BUILD_POOL episode={_ep} turn={_turn} "
+            f"occupied_pos_s={_occupied_pos_s:.6f} "
+            f"filter_only_s={_filter_only_s:.6f} "
+            f"bfs_total_s={_bfs_total_s:.6f} "
+            f"total_s={_total_s:.6f} "
+            f"units_total_n={units_total_n} "
+            f"units_own_n={units_own_n} "
+            f"bfs_calls_n={bfs_calls_n} "
+            f"bfs_cache_hits_n={bfs_cache_hits_n} "
+            f"eligible_count={len(eligible_units)}"
+        )
 
     return eligible_units
 

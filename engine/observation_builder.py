@@ -1732,9 +1732,8 @@ class ObservationBuilder:
                 # Feature 0-1: Relative position (egocentric)
                 ally_col, ally_row = positions[str(ally["id"])]
                 active_col, active_row = positions[str(active_unit["id"])]
-                _pos_norm = 24.0 * game_state.get("inches_to_subhex", 1)
-                rel_col = (ally_col - active_col) / _pos_norm
-                rel_row = (ally_row - active_row) / _pos_norm
+                rel_col = (ally_col - active_col) / perception_radius
+                rel_row = (ally_row - active_row) / perception_radius
                 obs[feature_base + 0] = np.clip(rel_col, -1.0, 1.0)
                 obs[feature_base + 1] = np.clip(rel_row, -1.0, 1.0)
                 
@@ -1892,9 +1891,8 @@ class ObservationBuilder:
                 # Feature 0-2: Position and distance
                 enemy_col, enemy_row = positions[str(enemy["id"])]
                 active_col, active_row = positions[str(active_unit["id"])]
-                _epos_norm = 24.0 * game_state.get("inches_to_subhex", 1)
-                rel_col = (enemy_col - active_col) / _epos_norm
-                rel_row = (enemy_row - active_row) / _epos_norm
+                rel_col = (enemy_col - active_col) / perception_radius
+                rel_row = (enemy_row - active_row) / perception_radius
                 obs[feature_base + 0] = np.clip(rel_col, -1.0, 1.0)
                 obs[feature_base + 1] = np.clip(rel_row, -1.0, 1.0)
                 obs[feature_base + 2] = distance / perception_radius
@@ -2061,9 +2059,8 @@ class ObservationBuilder:
                 # Relative position (egocentric)
                 unit_col, unit_row = positions[str(unit["id"])]
                 active_col, active_row = positions[str(active_unit["id"])]
-                _upos_norm = 24.0 * game_state.get("inches_to_subhex", 1)
-                rel_col = (unit_col - active_col) / _upos_norm
-                rel_row = (unit_row - active_row) / _upos_norm
+                rel_col = (unit_col - active_col) / perception_radius
+                rel_row = (unit_row - active_row) / perception_radius
                 dist_norm = distance / perception_radius
                 hp_ratio = require_hp_from_cache(str(unit["id"]), game_state) / max(1, unit["HP_MAX"])
                 is_enemy = 1.0 if unit["player"] != active_unit["player"] else 0.0

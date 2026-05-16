@@ -213,6 +213,7 @@ class EpisodeTerminationCallback(BaseCallback):
         self.total_episode_actions = 0
         self.episode_stats_count = 0
         self.max_episode_duration_seconds = 0.0
+        self.last_episode_duration_seconds = 0.0
         self.total_episode_duration_seconds = 0.0
         self.episode_duration_stats_count = 0
         self._first_episode_done = False
@@ -221,6 +222,7 @@ class EpisodeTerminationCallback(BaseCallback):
             maxlen=self.episode_duration_window_size
         )
         self._episode_action_counts_by_env = None
+        self._episode_wall_time_by_env: Optional[List[float]] = None
         self._last_step_perf_time: Optional[float] = None
         self._ema_env_actions_per_second: Optional[float] = None
         self.gate_display_state = gate_display_state
@@ -346,6 +348,7 @@ class EpisodeTerminationCallback(BaseCallback):
         self._last_step_perf_time = now_perf
         if self._episode_action_counts_by_env is None:
             self._episode_action_counts_by_env = [0] * n_envs
+            self._episode_wall_time_by_env = [now_perf] * n_envs
         elif len(self._episode_action_counts_by_env) != n_envs:
             raise ValueError(
                 "Environment count changed during training; cannot maintain per-env episode timing/action tracking"
@@ -364,24 +367,19 @@ class EpisodeTerminationCallback(BaseCallback):
                 raise ValueError(
                     f"Non-positive episode action count for env {env_index}: {episode_actions}"
                 )
-            episode_duration_seconds = None
-            if self._ema_env_actions_per_second is not None:
-                if self._ema_env_actions_per_second <= 0:
-                    raise ValueError(
-                        f"Invalid env throughput EMA: {self._ema_env_actions_per_second}"
-                    )
-                episode_duration_seconds = episode_actions / self._ema_env_actions_per_second
+            wall_duration = now_perf - self._episode_wall_time_by_env[env_index]
+            self._episode_wall_time_by_env[env_index] = now_perf
             self._episode_action_counts_by_env[env_index] = 0
             self.total_episode_actions += episode_actions
             self.episode_stats_count += 1
-            if episode_duration_seconds is not None:
-                self.total_episode_duration_seconds += episode_duration_seconds
-                self.episode_duration_stats_count += 1
-                self.max_episode_duration_seconds = max(
-                    self.max_episode_duration_seconds,
-                    episode_duration_seconds
-                )
-                self.recent_episode_durations_seconds.append(float(episode_duration_seconds))
+            self.total_episode_duration_seconds += wall_duration
+            self.episode_duration_stats_count += 1
+            self.max_episode_duration_seconds = max(
+                self.max_episode_duration_seconds,
+                wall_duration
+            )
+            self.recent_episode_durations_seconds.append(wall_duration)
+            self.last_episode_duration_seconds = wall_duration
 
         episode_ended = episodes_finished > 0
         if episode_ended:
@@ -472,14 +470,13 @@ class EpisodeTerminationCallback(BaseCallback):
                     eta_str = format_time(eta)
                     time_info = f"{elapsed_str}<{eta_str}"
 
-                if self.recent_episode_durations_seconds:
-                    recent_durations = np.array(self.recent_episode_durations_seconds, dtype=np.float64)
-                    recent_avg_duration = float(np.mean(recent_durations))
-                else:
-                    recent_avg_duration = 0.0
+                moy_duration = (
+                    self.total_episode_duration_seconds / self.episode_duration_stats_count
+                    if self.episode_duration_stats_count > 0 else 0.0
+                )
                 duration_display = (
-                    f"s/ep: cur {recent_avg_duration:.2f}, "
-                    f"moy {global_avg_time_per_episode:.2f}, "
+                    f"s/ep: cur {self.last_episode_duration_seconds:.2f}, "
+                    f"moy {moy_duration:.2f}, "
                     f"max: {self.max_episode_duration_seconds:.2f}"
                 )
                 gate_label = "Gate 🧱"
