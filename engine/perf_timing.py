@@ -457,20 +457,23 @@ if __name__ == "__main__":
 
     def _print_diff(before: Dict[str, Any], after: Dict[str, Any], lbl_b: str, lbl_a: str) -> None:
         print(f"\n{'=' * 72}")
-        print(f"DIFF  avant={lbl_b}  après={lbl_a}")
+        print(f"DIFF avg/call  avant={lbl_b}  après={lbl_a}")
         print(f"{'=' * 72}\n")
-        print(f"{'':28} {'avant':>10}  {'après':>10}  {'delta':>10}  {'%':>7}")
+        print(f"{'':28} {'avant/call':>10}  {'après/call':>10}  {'delta':>10}  {'%':>7}")
         print(f"{'─' * 72}")
         for event, _, _ in ROWS:
-            b = before.get(event, {}).get("sum_s")
-            a = after.get(event, {}).get("sum_s")
+            b = before.get(event, {}).get("avg_s")
+            a = after.get(event, {}).get("avg_s")
             if b is None and a is None:
                 continue
-            b = b or 0.0
-            a = a or 0.0
+            if b is None or a is None:
+                tag = "(absent avant)" if b is None else "(absent après)"
+                val = _fmt(a or b or 0.0)
+                print(f"{event:<28} {tag:>23}  {val:>10}")
+                continue
             delta = a - b
             pct = (delta / b * 100) if b else 0.0
-            arrow = "✅" if delta < -0.5 else ("❌" if delta > 0.5 else "  ")
+            arrow = "✅" if pct < -5 else ("❌" if pct > 5 else "  ")
             print(f"{event:<28} {_fmt(b):>10}  {_fmt(a):>10}  {_fmt(abs(delta)):>10}{'↓' if delta < 0 else '↑'}  {pct:>+6.1f}%  {arrow}")
         print(f"{'─' * 72}")
         tb = before.get("__total_s", 0.0)
