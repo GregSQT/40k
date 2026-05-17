@@ -363,3 +363,137 @@ def profile_move_pool_build(fn: F) -> F:
             append_cprofile_dump(pr, fn.__name__, unit_id=str(unit_id))
 
     return wrapper  # type: ignore[return-value]
+
+
+if __name__ == "__main__":
+    import json
+    import sys
+    from collections import defaultdict
+
+    if len(sys.argv) < 2:
+        print("Usage: python3 engine/perf_timing.py <log> [log_after]")
+        sys.exit(1)
+
+    ROWS = [
+        ("ADVANCE_TIMING",          "total_s",    [("los_cache_s", "los"), ("adj_cache_s", "adj")]),
+        ("SHOOT_ACTIVATION_START",  "total_s",    [("los_cache_s", "los")]),
+        ("CHARGE_REVERSE_GOAL_BFS", "total_s",    [("goal_build_s", "goal"), ("reverse_bfs_s", "bfs")]),
+        ("CHARGE_DEST_BFS",         "total_s",    [("bfs_loop_s", "bfs"), ("bfs_engagement_s", "eng")]),
+        ("MOVE_POOL_BUILD",         "total_s",    [("bfs_s", "bfs")]),
+        ("CASCADE_LOOP_TOTAL",      "duration_s", []),
+        ("CHARGE_PHASE_START",      "total_s",    [("pool_build_s", "pool")]),
+    ]
+
+    def _parse_log(path: str) -> Dict[str, list]:
+        ev: Dict[str, list] = defaultdict(list)
+        with open(path) as fh:
+            for line in fh:
+                parts = line.strip().split()
+                if not parts:
+                    continue
+                fields: Dict[str, Any] = {}
+                for part in parts[1:]:
+                    if "=" in part:
+                        k, v = part.split("=", 1)
+                        try:
+                            fields[k] = float(v)
+                        except ValueError:
+                            fields[k] = v.strip("'\"")
+                ev[parts[0]].append(fields)
+        return ev
+
+    def _stats(records: list, field: str):
+        vals = [r[field] for r in records if field in r and isinstance(r[field], float)]
+        if not vals:
+            return 0, 0.0, 0.0
+        return len(vals), sum(vals) / len(vals), sum(vals)
+
+    def _fmt(s: float) -> str:
+        if s >= 1.0:
+            return f"{s:.1f}s"
+        if s >= 0.001:
+            return f"{s * 1000:.2f}ms"
+        return f"{s * 1_000_000:.1f}µs"
+
+    def _build_scores(events: Dict[str, list]) -> Dict[str, Any]:
+        scores: Dict[str, Any] = {}
+        total = 0.0
+        for event, total_field, sub_fields in ROWS:
+            recs = events.get(event, [])
+            n, avg, s = _stats(recs, total_field)
+            if n == 0:
+                continue
+            total += s
+            entry: Dict[str, Any] = {"calls": n, "avg_s": round(avg, 6), "sum_s": round(s, 2)}
+            for f, lbl in sub_fields:
+                _, sub_avg, _ = _stats(recs, f)
+                if sub_avg > 0:
+                    entry[f"avg_{lbl}_s"] = round(sub_avg, 6)
+            scores[event] = entry
+        scores["__total_s"] = round(total, 2)
+        eps = sorted({int(r["episode"]) for recs in events.values() for r in recs
+                      if "episode" in r and isinstance(r.get("episode"), float)})
+        scores["__episodes"] = eps
+        return scores
+
+    def _print_scores(scores: Dict[str, Any], label: str) -> None:
+        eps = scores.get("__episodes", [])
+        print(f"\n{'=' * 72}")
+        print(f"PERF TIMING — {label}   (épisodes: {eps if eps else '?'})")
+        print(f"{'=' * 72}\n")
+        for event, _, sub_fields in ROWS:
+            if event not in scores:
+                continue
+            e = scores[event]
+            subs = "  ".join(
+                f"{lbl}={_fmt(e[f'avg_{lbl}_s'])}/call"
+                for _, lbl in sub_fields
+                if f"avg_{lbl}_s" in e
+            )
+            print(f"{event:<28} calls={e['calls']:<6} avg={_fmt(e['avg_s']):<10} sum={_fmt(e['sum_s']):<10}  {subs}")
+        print(f"\n{'─' * 72}")
+        print(f"SCORE (total accounté) : {_fmt(scores['__total_s'])}")
+        print(f"{'=' * 72}\n")
+
+    def _print_diff(before: Dict[str, Any], after: Dict[str, Any], lbl_b: str, lbl_a: str) -> None:
+        print(f"\n{'=' * 72}")
+        print(f"DIFF  avant={lbl_b}  après={lbl_a}")
+        print(f"{'=' * 72}\n")
+        print(f"{'':28} {'avant':>10}  {'après':>10}  {'delta':>10}  {'%':>7}")
+        print(f"{'─' * 72}")
+        for event, _, _ in ROWS:
+            b = before.get(event, {}).get("sum_s")
+            a = after.get(event, {}).get("sum_s")
+            if b is None and a is None:
+                continue
+            b = b or 0.0
+            a = a or 0.0
+            delta = a - b
+            pct = (delta / b * 100) if b else 0.0
+            arrow = "✅" if delta < -0.5 else ("❌" if delta > 0.5 else "  ")
+            print(f"{event:<28} {_fmt(b):>10}  {_fmt(a):>10}  {_fmt(abs(delta)):>10}{'↓' if delta < 0 else '↑'}  {pct:>+6.1f}%  {arrow}")
+        print(f"{'─' * 72}")
+        tb = before.get("__total_s", 0.0)
+        ta = after.get("__total_s", 0.0)
+        td = ta - tb
+        tp = (td / tb * 100) if tb else 0.0
+        print(f"{'SCORE TOTAL':<28} {_fmt(tb):>10}  {_fmt(ta):>10}  {_fmt(abs(td)):>10}{'↓' if td < 0 else '↑'}  {tp:>+6.1f}%")
+        print(f"{'=' * 72}\n")
+
+    if len(sys.argv) == 2:
+        logfile = sys.argv[1]
+        ev = _parse_log(logfile)
+        sc = _build_scores(ev)
+        _print_scores(sc, logfile)
+        score_path = logfile + ".score.json"
+        with open(score_path, "w") as jf:
+            json.dump(sc, jf, indent=2)
+        print(f"Score sauvegardé → {score_path}\n")
+    else:
+        ev_b = _parse_log(sys.argv[1])
+        ev_a = _parse_log(sys.argv[2])
+        sc_b = _build_scores(ev_b)
+        sc_a = _build_scores(ev_a)
+        _print_scores(sc_b, sys.argv[1])
+        _print_scores(sc_a, sys.argv[2])
+        _print_diff(sc_b, sc_a, sys.argv[1], sys.argv[2])

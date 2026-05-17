@@ -1738,20 +1738,29 @@ def _invalidate_los_cache_for_moved_unit(
     
     # hex_los_cache: selective invalidation when old position known (PERF: preserves
     # LoS between other hex pairs; full clear caused training ~0.2 ep/min)
-    if "hex_los_cache" not in game_state:
+    if "hex_los_cache" not in game_state and "_hex_los_state_cache" not in game_state:
         return
     if old_col is not None and old_row is not None:
         old_col_int, old_row_int = normalize_coordinates(old_col, old_row)
         old_pos = (old_col_int, old_row_int)
-        keys_to_remove = [
-            k for k in game_state["hex_los_cache"].keys()
-            if (k[0] == old_pos or k[1] == old_pos)
-        ]
-        for k in keys_to_remove:
-            del game_state["hex_los_cache"][k]
+        if "hex_los_cache" in game_state:
+            keys_to_remove = [
+                k for k in game_state["hex_los_cache"].keys()
+                if (k[0] == old_pos or k[1] == old_pos)
+            ]
+            for k in keys_to_remove:
+                del game_state["hex_los_cache"][k]
+        if "_hex_los_state_cache" in game_state:
+            keys_to_remove = [
+                k for k in game_state["_hex_los_state_cache"].keys()
+                if (k[0] == old_pos or k[1] == old_pos)
+            ]
+            for k in keys_to_remove:
+                del game_state["_hex_los_state_cache"][k]
     else:
         # Full clear when old position not provided (callers without coords use this path)
         game_state["hex_los_cache"] = {}
+        game_state["_hex_los_state_cache"] = {}
 
 
 def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:
@@ -3521,12 +3530,23 @@ def _get_los_visibility_state(
         to_idx = end_row * board_cols + end_col
         visibility_ratio = float(los_topology[from_idx, to_idx])
     else:
+        _state_cache = game_state.get("_hex_los_state_cache")
+        if _state_cache is not None:
+            _ck = ((start_col, start_row), (end_col, end_row))
+            _cached = _state_cache.get(_ck)
+            if _cached is not None:
+                return _cached
         from engine.hex_utils import compute_los_state, build_wall_set
         wall_set = _get_wall_set(game_state)
-        return compute_los_state(
+        _result = compute_los_state(
             start_col, start_row, end_col, end_row,
             wall_set, los_visibility_min_ratio, cover_ratio,
         )
+        if _state_cache is None:
+            _state_cache = {}
+            game_state["_hex_los_state_cache"] = _state_cache
+        _state_cache[((start_col, start_row), (end_col, end_row))] = _result
+        return _result
 
     can_see = visibility_ratio >= los_visibility_min_ratio
     in_cover = can_see and visibility_ratio < cover_ratio

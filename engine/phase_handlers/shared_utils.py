@@ -1605,22 +1605,22 @@ def refresh_all_positional_caches_after_reactive_move(
     """
     # Invalidate global LoS caches.
     game_state["los_cache"] = {}
-    # hex_los_cache: selective invalidation when reactive move positions known (PERF)
-    if "hex_los_cache" in game_state:
+    # hex_los_cache + _hex_los_state_cache: selective invalidation when reactive move positions known (PERF)
+    _los_caches_to_purge = [c for c in ("hex_los_cache", "_hex_los_state_cache") if c in game_state]
+    if _los_caches_to_purge:
         positions_to_invalidate: List[Tuple[int, int]] = []
         if reactive_move_old_col is not None and reactive_move_old_row is not None:
             positions_to_invalidate.append(normalize_coordinates(reactive_move_old_col, reactive_move_old_row))
         if reactive_move_new_col is not None and reactive_move_new_row is not None:
             positions_to_invalidate.append(normalize_coordinates(reactive_move_new_col, reactive_move_new_row))
-        if positions_to_invalidate:
-            keys_to_remove = [
-                k for k in game_state["hex_los_cache"].keys()
-                if k[0] in positions_to_invalidate or k[1] in positions_to_invalidate
-            ]
-            for k in keys_to_remove:
-                del game_state["hex_los_cache"][k]
-        else:
-            game_state["hex_los_cache"] = {}
+        for _cache_name in _los_caches_to_purge:
+            _cache = game_state[_cache_name]
+            if positions_to_invalidate:
+                keys_to_remove = [k for k in _cache.keys() if k[0] in positions_to_invalidate or k[1] in positions_to_invalidate]
+                for k in keys_to_remove:
+                    del _cache[k]
+            else:
+                game_state[_cache_name] = {}
 
     # Invalidate all destination/target pools via movement helper.
     from .movement_handlers import _invalidate_all_destination_pools_after_movement

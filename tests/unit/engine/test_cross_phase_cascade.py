@@ -92,6 +92,7 @@ def _make_gs(units: List[Dict[str, Any]], phase: str = "fight") -> Dict[str, Any
         "non_active_alternating_activation_pool": [],
         "hex_los_cache": {},
         "los_cache": {},
+        "_unit_move_version": 0,
         "player_types": {"1": "human", "2": "ai"},
     }
     build_units_cache(gs)
