@@ -419,7 +419,9 @@ if __name__ == "__main__":
         scores: Dict[str, Any] = {}
         total = 0.0
         for event, total_field, sub_fields in ROWS:
-            recs = events.get(event, [])
+            if event not in events:
+                continue
+            recs = events[event]
             n, avg, s = _stats(recs, total_field)
             if n == 0:
                 continue
@@ -437,7 +439,7 @@ if __name__ == "__main__":
         return scores
 
     def _print_scores(scores: Dict[str, Any], label: str) -> None:
-        eps = scores.get("__episodes", [])
+        eps = scores["__episodes"]
         print(f"\n{'=' * 72}")
         print(f"PERF TIMING — {label}   (épisodes: {eps if eps else '?'})")
         print(f"{'=' * 72}\n")
@@ -462,8 +464,8 @@ if __name__ == "__main__":
         print(f"{'':28} {'avant/call':>10}  {'après/call':>10}  {'delta':>10}  {'%':>7}")
         print(f"{'─' * 72}")
         for event, _, _ in ROWS:
-            b = before.get(event, {}).get("avg_s")
-            a = after.get(event, {}).get("avg_s")
+            b = before[event]["avg_s"] if event in before else None
+            a = after[event]["avg_s"] if event in after else None
             if b is None and a is None:
                 continue
             if b is None or a is None:
