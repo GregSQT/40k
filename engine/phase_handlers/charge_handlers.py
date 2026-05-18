@@ -961,6 +961,8 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         # "Has valid charge target?"
         # Must have at least one enemy within charge range (via BFS pathfinding)
         bfs_calls_n += 1
+        if "_has_valid_charge_cache" not in game_state:
+            game_state["_has_valid_charge_cache"] = {}
         _hvt_cache = game_state["_has_valid_charge_cache"]
         _hvt_key = (unit_id_str, game_state["_unit_move_version"])
         if _hvt_key in _hvt_cache:
