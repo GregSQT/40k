@@ -790,6 +790,11 @@ def _attempt_movement_to_destination(
     turn = game_state.get("turn", "?")
     phase = game_state.get("phase", "move")
 
+    import time as _mct
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+    _mct_pt = perf_timing_enabled(game_state)
+    _mct0 = _mct.perf_counter() if _mct_pt else None
+
     unit_id_str = str(unit["id"])
     footprint_unit = unit
     if orientation is not None:
@@ -800,6 +805,7 @@ def _attempt_movement_to_destination(
         }
     occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
     candidate_fp = compute_candidate_footprint(dest_col_int, dest_row_int, footprint_unit, game_state)
+    _mct1 = _mct.perf_counter() if _mct_pt else None
     if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
         if "console_logs" not in game_state:
             game_state["console_logs"] = []
@@ -814,6 +820,7 @@ def _attempt_movement_to_destination(
 
     # Re-validate against enemy engagement zone at commit time (euclidien bord à bord ×10).
     units_cache = require_key(game_state, "units_cache")
+    _mct2_pre = _mct.perf_counter() if _mct_pt else None
     if _movement_engagement_violates(
         game_state,
         unit,
@@ -862,6 +869,8 @@ def _attempt_movement_to_destination(
             "destination": (dest_col_int, dest_row_int),
         }
 
+    _mct2 = _mct.perf_counter() if _mct_pt else None
+
     # Execute movement - position assignment
     # Log ALL position changes to detect unauthorized modifications
     # ALWAYS log, even if episode_number/turn/phase are missing (for debugging)
@@ -899,6 +908,8 @@ def _attempt_movement_to_destination(
     new_cache_entry = require_key(game_state, "units_cache").get(unit_id_str_cache)
     new_occupied = new_cache_entry.get("occupied_hexes") if new_cache_entry else None
 
+    _mct3 = _mct.perf_counter() if _mct_pt else None
+
     # Keep enemy adjacency caches synchronized incrementally with the move.
     moved_unit_player = int(require_key(unit, "player"))
     update_enemy_adjacent_caches_after_unit_move(
@@ -911,6 +922,8 @@ def _attempt_movement_to_destination(
         old_occupied=old_occupied,
         new_occupied=new_occupied,
     )
+
+    _mct4 = _mct.perf_counter() if _mct_pt else None
 
     # Apply AI_TURN.md tracking
     # Normalize unit ID to string for consistent storage (units_fled stores strings)
@@ -926,6 +939,15 @@ def _attempt_movement_to_destination(
     from .shooting_handlers import _invalidate_los_cache_for_moved_unit
     _invalidate_los_cache_for_moved_unit(game_state, unit["id"], old_col=orig_col, old_row=orig_row)
     game_state["_unit_move_version"] += 1
+
+    _mct5 = _mct.perf_counter() if _mct_pt else None
+    if _mct_pt and _mct0 is not None and _mct1 is not None and _mct2_pre is not None and _mct2 is not None and _mct3 is not None and _mct4 is not None and _mct5 is not None:
+        append_perf_timing_line(
+            f"MOVE_COMMIT_TIMING episode={episode} turn={turn} unitId={unit_id_str!r} phase={phase} "
+            f"occ_build_s={_mct1 - _mct0:.6f} eng_check_s={_mct2 - _mct2_pre:.6f} "
+            f"pos_update_s={_mct3 - _mct2:.6f} adj_cache_s={_mct4 - _mct3:.6f} "
+            f"los_cache_s={_mct5 - _mct4:.6f} total_s={_mct5 - _mct0:.6f}"
+        )
 
     # Pools are invalidated at the START of the phase, not after each movement
     # This prevents invalidating the "moved" tracking of units that just moved
@@ -2058,6 +2080,10 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     # Use _attempt_movement_to_destination() to validate occupation
     # This function checks if destination is occupied, validates enemy adjacency, etc.
     config = {}  # Empty config for now
+    import time as _mds_t
+    from engine.perf_timing import append_perf_timing_line as _mds_log, perf_timing_enabled as _mds_pte
+    _mds_pt = _mds_pte(game_state)
+    _mds_t0 = _mds_t.perf_counter() if _mds_pt else None
     move_success, move_result = _attempt_movement_to_destination(
         game_state,
         unit,
@@ -2066,6 +2092,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         config,
         orientation=orientation,
     )
+    _mds_t1 = _mds_t.perf_counter() if _mds_pt else None
 
     if not move_success:
         # Move was blocked (occupied hex, adjacent to enemy, etc.)
@@ -2117,6 +2144,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     # Invalidate all destination pools after movement
     # Positions have changed, so all pools (move, charge, shoot) are now stale
     _invalidate_all_destination_pools_after_movement(game_state)
+    _mds_t2 = _mds_t.perf_counter() if _mds_pt else None
 
     move_kind = "flee" if was_adjacent else "move"
     reactive_result = maybe_resolve_reactive_move(
@@ -2129,6 +2157,13 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         move_kind=move_kind,
         move_cause="normal",
     )
+    _mds_t3 = _mds_t.perf_counter() if _mds_pt else None
+    if _mds_pt and _mds_t0 is not None and _mds_t1 is not None and _mds_t2 is not None and _mds_t3 is not None:
+        _mds_log(
+            f"MOVE_DEST_TIMING episode={episode} turn={turn} unitId={unit_id!r} "
+            f"attempt_s={_mds_t1 - _mds_t0:.6f} pool_invalidate_s={_mds_t2 - _mds_t1:.6f} "
+            f"reactive_s={_mds_t3 - _mds_t2:.6f} total_s={_mds_t3 - _mds_t0:.6f}"
+        )
 
     # Generate movement log per requested format
     if "action_logs" not in game_state:

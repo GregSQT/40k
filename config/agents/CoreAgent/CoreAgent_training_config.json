@@ -2,7 +2,7 @@
   "x1": {
   "type": "################################################### x1 — curriculum phase 1 (board 25x21, scale ×1) ###################################################",
   "seed": 12345,
-  "total_episodes": 30000,
+  "total_episodes": 150000,
   "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
   "agent_seat_mode": "random",
   "eval_episodes": 10,
@@ -386,7 +386,7 @@
   "x10_debug": {
     "type": "################################################### X1 debug ###################################################",
     "seed": 12345,
-  "total_episodes": 3,
+  "total_episodes": 48,
   "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
   "agent_seat_mode": "random",
   "eval_episodes": 0,
@@ -395,7 +395,7 @@
   "bot_eval_use_subprocess": true,
   "bot_eval_n_workers": 6,
   "max_turns_per_episode": 5,
-  "n_envs": 3,
+  "n_envs": 48,
   "callback_params": {
     "early_stopping_patience": 0,
     "save_best_min_episodes": 10000,
