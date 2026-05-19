@@ -386,7 +386,7 @@
   "x10_debug": {
     "type": "################################################### X1 debug ###################################################",
     "seed": 12345,
-  "total_episodes": 192,
+  "total_episodes": 600,
   "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
   "agent_seat_mode": "random",
   "eval_episodes": 0,

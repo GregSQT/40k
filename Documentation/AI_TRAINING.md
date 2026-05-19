@@ -1497,13 +1497,63 @@ Supprimé : `bytearray(112K)`, `deque`, `fly_queue`, marquage visited, propagati
 
 SCORE stabilisé ~12.80 ms/call → **-2.7% net**, bien au-delà du bruit ±0.16%. Wall-clock : 4:58 → ~4:30.
 
-**Pourquoi ça a marché**
+**Analyse post-mesure (données log seconde moitié, post-fix)**
 
-Le BFS maintenait une deque (~43K pops + ~258K appends) et initialisait un bytearray 112K à chaque appel. L'énumération géométrique évite toute structure de données : double boucle Python pure sur ~43K itérations avec arithmétique entière uniquement. Pas d'allocation, pas de lookups indirect.
+La moyenne per-call fly=True MOVE=120 est passée de **~35ms (BFS) à ~81ms (géométrique)**. La double boucle Python génère ~43K itérations avec overhead loop Python (~1.9μs/iter), contre un BFS dont les ops critiques (deque, bytearray) étaient en C (~0.85μs/iter).
+
+Le SCORE global s'améliore quand même de **-2.7%** car le BFS générait des pics à **0.4–0.5s** sur certains appels (variabilité positionnelle). Avec SubprocVecEnv 48 envs, chaque pic bloque tous les envs. L'énumération géométrique est **uniforme** (~81ms partout) → moins de stalls de synchronisation → meilleur débit global malgré la moyenne plus élevée.
+
+**Ce qui resterait à explorer**
+
+Vectoriser l'énumération du disque avec NumPy (générer tous les (dx,dy) valides en array, calculer (nc,nr) vectoriellement, filtrer bounds en array) pour ramener la moyenne ≤35ms. Le filtre walls/occupied/EZ reste Python mais ne s'applique qu'aux destinations valides (minorité). Gain potentiel : récupérer les ~300-400s supplémentaires sur 7800 appels.
 
 **Compatibilité métier**
 
 100% identique : même ensemble de destinations (disque cube = disque BFS pour fly), même filtrage walls/occupied/EZ, même `_fly_enemy_proximity_filter`. Les fly units passaient déjà à travers les murs en BFS (propagation non bloquée), l'énumération géométrique est strictement équivalente.
+
+---
+
+#### [2026-05] CHARGE_REVERSE_GOAL_BFS — Suppression `dilate_hex_set({start_pos}, 120)` ✅ Appliqué
+
+**Contexte**
+
+Analyse post-fix fly : `CHARGE_HAS_VALID_TARGET` / `CHARGE_REVERSE_GOAL_BFS` coûtaient 100ms/call avec seulement 18ms de BFS réel. Les 82ms restants étaient dans le setup pré-BFS non timé. Breakdown par soustraction des sous-timers : `goal_candidate_fp_s + goal_placement_s + goal_engagement_s = 3ms` → **79ms non timés**.
+
+Root cause : `_charge_reverse_goal_bfs_for_eligibility` calculait `dilate_hex_set({start_pos}, 120, 360, 312)` à chaque appel pour construire le `start_reach_disk`. Radius 120 = CHARGE_MAX_DISTANCE (12 pouces × 10) → disque de ~43K hexes, même problème que fly=True MOVE=120. Le cache `_charge_reach_disk_cache` ne servait à rien : chaque chargeur a une position différente → 100% de cache misses.
+
+**Ce qui a été fait**
+
+Remplacement de `dilate_hex_set({start_pos}, bfs_max_distance)` + intersection set par un filtre géométrique direct dans `engine/phase_handlers/charge_handlers.py` (lignes 608-617) :
+
+```python
+# Avant — O(43K BFS) + O(n) intersection
+start_reach_disk = dilate_hex_set({start_pos}, 120, ...)  # ~60ms
+goal_zone = enemy_goal_zone & start_reach_disk             # ~380 hexes dans enemy_goal_zone
+
+# Après — O(|enemy_goal_zone|) checks de distance
+goal_zone = {h for h in enemy_goal_zone if hex_distance(h[0], h[1], start_col, start_row) <= _bfs_max}
+```
+
+`enemy_goal_zone` ≈ 786 hexes → 786 appels O(1) à `hex_distance` au lieu de 43K BFS. Suppression du cache `_charge_reach_disk_cache` (devenu inutile). Sémantique identique : `dilate_hex_set({start_pos}, r)` retourne exactement les hexes à distance cube ≤ r du point de départ.
+
+**Résultat**
+
+| Mesure | SCORE | Delta vs baseline fly-fix (12.80) |
+|--------|-------|-----------------------------------|
+| Baseline fly-fix | 12.80 ms/call | — |
+| Après charge fix (run 1, 192 ep) | 12.5802 ms/call | -1.72% |
+| Après charge fix (run 2, 192 ep) | 12.4334 ms/call | -2.86% |
+| Après charge fix (600 ep) | **12.0060 ms/call** | **-6.2%** |
+
+**Cumulé depuis le baseline original (13.1587) : -8.8%.**
+
+**Pourquoi ça a marché**
+
+La matérialisation du disque entier (~43K hexes) n'était jamais nécessaire : seul le sous-ensemble `enemy_goal_zone ∩ disk(start_pos, r)` était utilisé, et `enemy_goal_zone` ne contient que ~786 hexes. Le filtre O(|enemy_goal_zone|) est O(1000) fois moins cher que le BFS O(43K).
+
+**Ce qui reste**
+
+`enemy_engagement_zones` (loop ligne 621-638) : N × `dilate_hex_set(enemy_fp, ez=10)` ≈ N×2ms. Non timé séparément, estimé à ~15ms sur les 82ms restants post-fix. Optimisable séparément (même approche : filtre distance au lieu de matérialisation).
 
 ---
 

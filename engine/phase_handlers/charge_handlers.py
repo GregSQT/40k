@@ -605,16 +605,11 @@ def _charge_reverse_goal_bfs_for_eligibility(
 
     goal_search_radius = engagement_zone + charger_radius
     enemy_goal_zone = dilate_hex_set(enemy_occupied, goal_search_radius, board_cols, board_rows)
-    _reach_disk_cache = game_state.setdefault("_charge_reach_disk_cache", {})
-    _reach_disk_key = (start_pos, int(bfs_max_distance))
-    if _reach_disk_key in _reach_disk_cache:
-        start_reach_disk = _reach_disk_cache[_reach_disk_key]
-    else:
-        start_reach_disk = dilate_hex_set({start_pos}, int(bfs_max_distance), board_cols, board_rows)
-        if start_pos not in start_reach_disk:
-            start_reach_disk.add(start_pos)
-        _reach_disk_cache[_reach_disk_key] = start_reach_disk
-    goal_zone = enemy_goal_zone & start_reach_disk
+    _bfs_max = int(bfs_max_distance)
+    goal_zone = {
+        h for h in enemy_goal_zone
+        if hex_distance(h[0], h[1], start_col, start_row) <= _bfs_max
+    }
     goal_candidates_n = len(goal_zone)
     skipped_goal_start_lb_n = len(enemy_goal_zone) - goal_candidates_n
     _TRAINING_GOAL_CAP = 300
