@@ -400,8 +400,8 @@ class EpisodeTerminationCallback(BaseCallback):
                 display_episode_count = self.global_episode_offset + self.episode_count
                 display_total_episodes = self.total_episodes
 
-            # Update progress every 10 episodes.
-            if display_episode_count % 10 == 0 or display_episode_count == 1:
+            # Update progress every 10 episodes, or on final episode of this callback.
+            if display_episode_count % 10 == 0 or display_episode_count == 1 or self.episode_count >= self.max_episodes:
                 global_progress_pct = (display_episode_count / display_total_episodes) * 100
 
                 # Global progress bar (full width)
@@ -530,6 +530,7 @@ class EpisodeTerminationCallback(BaseCallback):
                 return True
             else:
                 # Normal mode: Stop when episode count reached (silent for rotation training)
+                print()
                 return False
 
         return True
