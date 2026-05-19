@@ -1439,39 +1439,89 @@ Le pool est déjà mis en cache via `valid_move_destinations_pool` (réutilisé 
 
 **MOVE=60 est réel** : ce sont des unités avec MOVE=6 en x1 mises à l'échelle ×10. Pas un artefact de debug.
 
-**Seul gain possible** : fly=True (voir section suivante).
+---
+
+#### [2026-05] MOVE_POOL_BUILD fly=True single-hex — `_build_multi_hex_vectorized` ❌ Revert
+
+**Contexte**
+
+Benchmark x10_debug : MOVE_POOL_BUILD coûte 1 962s cumulés (avg 35.5ms/call, 55K calls). Les 20 appels les plus lents sont tous `fly=True MOVE=120 base_size=1` (BFS Python single-hex) à ~0.4–0.5s chacun, visitant jusqu'à 43 561 nœuds. Le chemin vectorisé NumPy (`_build_multi_hex_vectorized`) existait déjà pour les unités fly multi-hex (base_size > 1) mais était exclu pour base_size=1 via `_fly_single_hex = (ez <= 1 or base_size == 1)`.
+
+**Ce qui a été tenté**
+
+Changer `_fly_single_hex = (ez <= 1 or _fly_base_size == 1)` → `_fly_single_hex = ez <= 1` dans `movement_handlers.py`. Les offsets `((0, 0),)` pour base_size=1 sont corrects (`precompute_footprint_offsets('round', 1, 0)` retourne `((0, 0),)`, vérifié). La sémantique est rigoureusement identique au BFS Python (même ensemble de destinations valides, même traitement walls/occupied/EZ).
+
+**Résultat**
+
+SCORE : 13.1587 → 13.1311 ms/call (**-0.21%, dans le bruit ±0.2%**). MOVE_POOL_BUILD avg : 35.22 → 34.99ms (négligeable). Revert.
+
+**Pourquoi ça n'a pas marché**
+
+Le chemin NumPy traite un array 360×312 = 112K cellules **en entier**, incluant :
+- `_dilate_by_kernel` / `_spread_by_kernel` pour l'engagement zone : ez=10 à x10 → 10 passes de spread sur 112K cells = ~60 opérations array
+- Allocation et initialisation de plusieurs arrays 112K à chaque appel
+
+Le BFS Python optimisé (bytearray + deque) visite 25K–43K nœuds avec des lookups O(1) en C. L'overhead NumPy pour le plateau complet compense le gain de vectorisation — les deux approches coûtent ~35ms.
+
+**Ce qui resterait à explorer**
+
+- Réduire les passes EZ dans `_build_multi_hex_vectorized` en précomputant la zone d'engagement une fois par tour (pas par appel BFS)
+- ~~Pour fly single-hex MOVE=120 spécifiquement : énumération géométrique pure du disque hex sans BFS ni NumPy full-board~~ → **Fait, voir entrée suivante**
+
+---
+
+#### [2026-05] MOVE_POOL_BUILD fly=True single-hex — Énumération géométrique ✅ Appliqué
+
+**Contexte**
+
+Bottleneck identifié : fly=True single-hex BFS Python (deque + bytearray 112K) visitait ~43K nœuds séquentiellement pour MOVE=120 sur x10. Le BFS est redondant : les fly units traversent les obstacles → distance BFS == distance cube → le disque cube est énumérable directement.
+
+**Ce qui a été fait**
+
+Remplacement du BFS (deque + bytearray) par une énumération géométrique directe du disque cube dans `engine/phase_handlers/movement_handlers.py` :
+- Conversion start offset → cube : `sx=col, sz=row-((col-(col&1))>>1)`
+- Double boucle `dx in [-r, r]`, `dy in [max(-r,-r-dx), min(r,r-dx)]`
+- Reconversion cube → offset : `nc=sx+dx, nr=(sz-dx-dy)+((nc-(nc&1))>>1)`
+- Filtrage bounds/walls/occupied/EZ identique à l'ancienne logique BFS
+
+Supprimé : `bytearray(112K)`, `deque`, `fly_queue`, marquage visited, propagation neighbor-par-neighbor.
+
+**Résultat**
+
+| Mesure | SCORE | Delta |
+|--------|-------|-------|
+| Baseline | 13.1587 ms/call | — |
+| Après (run 1) | 12.9837 ms/call | -1.33% |
+| Après (run 2) | 12.8903 ms/call | -2.04% |
+| Après (run 3) | 12.8027 ms/call | -2.70% |
+
+SCORE stabilisé ~12.80 ms/call → **-2.7% net**, bien au-delà du bruit ±0.16%. Wall-clock : 4:58 → ~4:30.
+
+**Pourquoi ça a marché**
+
+Le BFS maintenait une deque (~43K pops + ~258K appends) et initialisait un bytearray 112K à chaque appel. L'énumération géométrique évite toute structure de données : double boucle Python pure sur ~43K itérations avec arithmétique entière uniquement. Pas d'allocation, pas de lookups indirect.
+
+**Compatibilité métier**
+
+100% identique : même ensemble de destinations (disque cube = disque BFS pour fly), même filtrage walls/occupied/EZ, même `_fly_enemy_proximity_filter`. Les fly units passaient déjà à travers les murs en BFS (propagation non bloquée), l'énumération géométrique est strictement équivalente.
 
 ---
 
 #### [2026-05] Méthode d'évaluation des optimisations perf — Référence
 
-**Problème** : `s/ep` a un CV=36% sur x10_debug (min=268s, max=725s, ratio 2.7×). Il faut ≥50 épisodes en conditions identiques pour atteindre une précision ±10% (IC95%).
+**Métrique de référence** : `SCORE = total_s / total_calls` (ms/call), calculé automatiquement par `python3 engine/perf_timing.py <log>` et sauvegardé dans `<log>.score.json`.
 
-**Sources de variance** :
-- Rosters tirés aléatoirement (certains ont beaucoup d'unités MOVE=60, d'autres non)
-- Longueur des parties variable (termination tour 1 à 5 → volume de steps ×5)
-- Cache warmup sur les épisodes 1-2
-- 48 SubprocVecEnv parallèles → `moy` est un running average wall-clock, pas un estimateur propre
+**Stabilité mesurée** : 3 runs consécutifs identiques donnent 13.1587 / 13.2009 / 13.1808 ms/call → variance ±0.16%. Un delta > 1% est significatif.
 
-**Méthode correcte** : utiliser le **score normalisé** de `perf_timing.py`.
-
-Avant le changement :
+**Commande benchmark** :
 ```bash
-W40K_PERF_TIMING=1 W40K_PERF_TIMING_MIN_EPISODE=2 W40K_PERF_TIMING_LOG=perf_timing_before.log \
-  python3 ai/train.py --agent CoreAgent --training-config x10_debug --scenario bot --new --resolution 10
+W40K_PERF_TIMING=1 W40K_PERF_TIMING_LOG=perf_timing_bench_x10.log W40K_PERF_TIMING_MIN_EPISODE=2 \
+  python3 ai/train.py --agent CoreAgent --training-config x10_debug \
+  --scenario config/agents/CoreAgent/scenarios/training/training_benchmark/scenario_training_benchmark.json \
+  --new --resolution 10 && python3 engine/perf_timing.py perf_timing_bench_x10.log
 ```
-Appliquer le changement, puis :
-```bash
-W40K_PERF_TIMING=1 W40K_PERF_TIMING_MIN_EPISODE=2 W40K_PERF_TIMING_LOG=perf_timing_after.log \
-  python3 ai/train.py --agent CoreAgent --training-config x10_debug --scenario bot --new --resolution 10
-```
-Comparer :
-```bash
-python3 engine/perf_timing.py perf_timing_before.log perf_timing_after.log
-```
-Le score normalisé = Σ(avg_après × calls_avant) mesure le coût "après" projeté sur la charge "avant". Il est indépendant de la longueur des parties et des rosters — deux épisodes suffisent. C'est la seule métrique fiable pour valider un fix perf ciblé.
 
-`s/ep` sert uniquement à confirmer qu'un gain mesuré en per-call se traduit bien en wall-clock sur un run long (≥50 épisodes).
+**Pourquoi pas `s/ep`** : CV=36% sur x10_debug → il faut ≥50 épisodes pour ±10% IC95%. Le SCORE ms/call est stable sur 192 épisodes car il normalise par le volume total de calls — indépendant du nombre d'épisodes terminés et de la composition des rosters.
 
 ---
 

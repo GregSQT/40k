@@ -1456,11 +1456,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     if has_fly_keyword:
         board_cols = require_key(game_state, "board_cols")
         board_rows = require_key(game_state, "board_rows")
-        _fly_n_cells = board_cols * board_rows
-        _fly_vis = bytearray(_fly_n_cells)
-        _fly_vis[start_col + start_row * board_cols] = 1
-        fly_visited_n = 1
-        fly_queue = deque([(start_pos, 0)])
+        fly_visited_n = 0
         valid_destinations: List[Tuple[int, int]] = []
         fly_rejected_footprint = 0
 
@@ -1559,99 +1555,44 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             _fly_enemy_proximity_filter = _fly_prox_list
 
         _m_bfs_start = _perf_clock.perf_counter() if _pt else None
-        while fly_queue:
-            (fc, fr), fly_dist = fly_queue.popleft()
-            if fly_dist >= move_range:
-                continue
-            _nd = fly_dist + 1
-            _p = fc & 1
-            if _p == 0:
-                _nbs = (
-                    (fc, fr - 1), (fc + 1, fr - 1), (fc + 1, fr),
-                    (fc, fr + 1), (fc - 1, fr), (fc - 1, fr - 1),
-                )
-            else:
-                _nbs = (
-                    (fc, fr - 1), (fc + 1, fr), (fc + 1, fr + 1),
-                    (fc, fr + 1), (fc - 1, fr + 1), (fc - 1, fr),
-                )
-            for nb in _nbs:
-                nc, nr = nb
+        _sx = start_col
+        _sz = start_row - ((start_col - (start_col & 1)) >> 1)
+        for _dx in range(-move_range, move_range + 1):
+            _dy_lo = max(-move_range, -move_range - _dx)
+            _dy_hi = min(move_range, move_range - _dx) + 1
+            for _dy in range(_dy_lo, _dy_hi):
+                nc = _sx + _dx
+                nr = (_sz - _dx - _dy) + ((nc - (nc & 1)) >> 1)
                 if nc < 0 or nr < 0 or nc >= _fly_bcols or nr >= _fly_brows:
                     continue
-                _fidx = nc + nr * board_cols
-                if _fly_vis[_fidx]:
-                    continue
-                _fly_vis[_fidx] = 1
-                fly_visited_n += 1
-                fly_queue.append((nb, _nd))
+                nb = (nc, nr)
                 if nb == start_pos:
                     continue
-                if _fly_single_hex:
-                    if nb in _fly_walls or nb in _fly_occupied:
-                        fly_rejected_footprint += 1
-                    else:
-                        _fly_skip_ez = False
-                        if _fly_enemy_proximity_filter is not None:
-                            _fly_skip_ez = True
-                            for _fec, _fer, _feth in _fly_enemy_proximity_filter:
-                                if calculate_hex_distance(nc, nr, _fec, _fer) <= _feth:
-                                    _fly_skip_ez = False
-                                    break
-                        if _fly_skip_ez or not _movement_engagement_violates(
-                            game_state,
-                            unit,
-                            nc,
-                            nr,
-                            {(nc, nr)},
-                            units_cache,
-                            enemy_adjacent_hexes if ez <= 1 else None,
-                            enemy_cache_items=_enemy_items_for_engagement_ez,
-                            engagement_zone_ez=ez,
-                        ):
-                            valid_destinations.append(nb)
-                        else:
-                            fly_rejected_footprint += 1
+                fly_visited_n += 1
+                if nb in _fly_walls or nb in _fly_occupied:
+                    fly_rejected_footprint += 1
                 else:
-                    offsets = _fly_off_even if (nc & 1) == 0 else _fly_off_odd
-                    dest_ok = True
-                    for dc, dr in offsets:
-                        _fc, _fr = nc + dc, nr + dr
-                        if _fc < 0 or _fr < 0 or _fc >= _fly_bcols or _fr >= _fly_brows:
-                            dest_ok = False
-                            break
-                        if (_fc, _fr) in _fly_walls:
-                            dest_ok = False
-                            break
-                        if (_fc, _fr) in _fly_occupied:
-                            dest_ok = False
-                            break
-                    if not dest_ok:
-                        fly_rejected_footprint += 1
+                    _fly_skip_ez = False
+                    if _fly_enemy_proximity_filter is not None:
+                        _fly_skip_ez = True
+                        for _fec, _fer, _feth in _fly_enemy_proximity_filter:
+                            if calculate_hex_distance(nc, nr, _fec, _fer) <= _feth:
+                                _fly_skip_ez = False
+                                break
+                    if _fly_skip_ez or not _movement_engagement_violates(
+                        game_state,
+                        unit,
+                        nc,
+                        nr,
+                        {(nc, nr)},
+                        units_cache,
+                        enemy_adjacent_hexes if ez <= 1 else None,
+                        enemy_cache_items=_enemy_items_for_engagement_ez,
+                        engagement_zone_ez=ez,
+                    ):
+                        valid_destinations.append(nb)
                     else:
-                        _fly_skip_ez = False
-                        if _fly_enemy_proximity_filter is not None:
-                            _fly_skip_ez = True
-                            for _fec, _fer, _feth in _fly_enemy_proximity_filter:
-                                if calculate_hex_distance(nc, nr, _fec, _fer) <= _feth:
-                                    _fly_skip_ez = False
-                                    break
-                        candidate_fp_nb = {(nc + dc, nr + dr) for dc, dr in offsets}
-                        if _fly_skip_ez or not _movement_engagement_violates(
-                            game_state,
-                            unit,
-                            nc,
-                            nr,
-                            candidate_fp_nb,
-                            units_cache,
-                            enemy_adjacent_hexes if ez <= 1 else None,
-                            enemy_cache_items=_enemy_items_for_engagement_ez,
-                            engagement_zone_ez=ez,
-                        ):
-                            valid_destinations.append(nb)
-                        else:
-                            fly_rejected_footprint += 1
-
+                        fly_rejected_footprint += 1
         _m_bfs_end = _perf_clock.perf_counter() if _pt else None
         game_state["valid_move_destinations_pool"] = valid_destinations
         game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
