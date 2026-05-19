@@ -418,7 +418,8 @@ if __name__ == "__main__":
 
     def _build_scores(events: Dict[str, list]) -> Dict[str, Any]:
         scores: Dict[str, Any] = {}
-        total = 0.0
+        total_s = 0.0
+        total_calls = 0
         eps = sorted({int(r["episode"]) for recs in events.values() for r in recs
                       if "episode" in r and isinstance(r.get("episode"), float)})
         n_episodes = max(len(eps), 1)
@@ -429,16 +430,17 @@ if __name__ == "__main__":
             n, avg, s = _stats(recs, total_field)
             if n == 0:
                 continue
-            total += s
-            entry: Dict[str, Any] = {"calls": n, "avg_s": round(avg, 6), "sum_s": round(s, 2),
-                                      "avg_per_ep_s": round(s / n_episodes, 4)}
+            total_s += s
+            total_calls += n
+            entry: Dict[str, Any] = {"calls": n, "avg_s": round(avg, 6), "sum_s": round(s, 2)}
             for f, lbl in sub_fields:
                 _, sub_avg, _ = _stats(recs, f)
                 if sub_avg > 0:
                     entry[f"avg_{lbl}_s"] = round(sub_avg, 6)
             scores[event] = entry
-        scores["__total_s"] = round(total, 2)
-        scores["__total_per_ep_s"] = round(total / n_episodes, 2)
+        scores["__total_s"] = round(total_s, 2)
+        scores["__total_calls"] = total_calls
+        scores["__score_ms"] = round(total_s / total_calls * 1000, 4) if total_calls else 0.0
         scores["__n_episodes"] = n_episodes
         scores["__episodes"] = eps
         return scores
@@ -460,7 +462,7 @@ if __name__ == "__main__":
             )
             print(f"{event:<28} calls={e['calls']:<6} avg={_fmt(e['avg_s']):<10} sum={_fmt(e['sum_s']):<10}  {subs}")
         print(f"\n{'─' * 72}")
-        print(f"SCORE brut : {_fmt(scores['__total_s'])}   SCORE/épisode : {_fmt(scores['__total_per_ep_s'])}")
+        print(f"SCORE : {scores['__score_ms']:.4f} ms/call  (total={_fmt(scores['__total_s'])}, calls={scores['__total_calls']})")
         print(f"{'=' * 72}\n")
 
     def _print_diff(before: Dict[str, Any], after: Dict[str, Any], lbl_b: str, lbl_a: str) -> None:
@@ -485,7 +487,7 @@ if __name__ == "__main__":
                 val = _fmt(a or b or 0.0)
                 print(f"{event:<28} {tag:>23}  {val:>10}")
                 continue
-            calls_b = b_entry["calls"]
+            calls_b = b_entry["calls"] if b_entry else 0
             norm_before += b * calls_b
             norm_after  += a * calls_b
             delta = a - b
@@ -493,15 +495,6 @@ if __name__ == "__main__":
             arrow = "✅" if pct < -5 else ("❌" if pct > 5 else "  ")
             print(f"{event:<28} {_fmt(b):>10}  {_fmt(a):>10}  {_fmt(abs(delta)):>10}{'↓' if delta < 0 else '↑'}  {pct:>+6.1f}%  {arrow}")
         print(f"{'─' * 72}")
-        # Score/épisode (normalise par nombre d'épisodes distincts)
-        n_ep_b = max(before.get("__n_episodes", 1), 1)
-        n_ep_a = max(after.get("__n_episodes", 1), 1)
-        ep_b = before.get("__total_per_ep_s", 0.0)
-        ep_a = after.get("__total_per_ep_s", 0.0)
-        ep_d = ep_a - ep_b
-        ep_p = (ep_d / ep_b * 100) if ep_b else 0.0
-        arrow_ep = "✅" if ep_p < -5 else ("❌" if ep_p > 5 else "  ")
-        print(f"{'SCORE/épisode':<28} {_fmt(ep_b):>10}  {_fmt(ep_a):>10}  {_fmt(abs(ep_d)):>10}{'↓' if ep_d < 0 else '↑'}  {ep_p:>+6.1f}%  {arrow_ep}  (n_ep: {n_ep_b} → {n_ep_a})")
         # Score normalisé (charge avant × avg après — seule comparaison valide si call counts diffèrent)
         if norm_before > 0:
             nd = norm_after - norm_before

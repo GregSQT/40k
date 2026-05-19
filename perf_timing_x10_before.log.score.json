@@ -1,0 +1,73 @@
+{
+  "ADVANCE_TIMING": {
+    "calls": 1677,
+    "avg_s": 0.023808,
+    "sum_s": 39.93,
+    "avg_per_ep_s": 19.9632,
+    "avg_los_s": 0.018314,
+    "avg_adj_s": 0.00492
+  },
+  "MOVE_COMMIT_TIMING": {
+    "calls": 1054,
+    "avg_s": 0.023925,
+    "sum_s": 25.22,
+    "avg_per_ep_s": 12.6084,
+    "avg_los_s": 0.019034,
+    "avg_adj_s": 0.004729
+  },
+  "SHOOT_ACTIVATION_START": {
+    "calls": 1966,
+    "avg_s": 0.000626,
+    "sum_s": 1.23,
+    "avg_per_ep_s": 0.6151,
+    "avg_los_s": 1.3e-05
+  },
+  "CHARGE_REVERSE_GOAL_BFS": {
+    "calls": 49,
+    "avg_s": 0.11017,
+    "sum_s": 5.4,
+    "avg_per_ep_s": 2.6992,
+    "avg_goal_s": 0.084905,
+    "avg_bfs_s": 0.025234
+  },
+  "CHARGE_DEST_BFS": {
+    "calls": 30,
+    "avg_s": 0.105928,
+    "sum_s": 3.18,
+    "avg_per_ep_s": 1.5889,
+    "avg_bfs_s": 0.098606,
+    "avg_eng_s": 0.013568
+  },
+  "MOVE_POOL_BUILD": {
+    "calls": 4449,
+    "avg_s": 0.005947,
+    "sum_s": 26.46,
+    "avg_per_ep_s": 13.2295,
+    "avg_bfs_s": 0.005607
+  },
+  "CASCADE_LOOP_TOTAL": {
+    "calls": 12061,
+    "avg_s": 0.001855,
+    "sum_s": 22.37,
+    "avg_per_ep_s": 11.1853
+  },
+  "CHARGE_PHASE_START": {
+    "calls": 470,
+    "avg_s": 0.01756,
+    "sum_s": 8.25,
+    "avg_per_ep_s": 4.1266,
+    "avg_pool_s": 0.012302
+  },
+  "__total_s": 132.03,
+  "__total_per_ep_s": 66.02,
+  "__n_episodes": 2,
+  "__episodes": [
+    2,
+    3
+  ],
+  "__ep_min_s": 105.57,
+  "__ep_max_s": 105.57,
+  "__ep_avg_s": 105.57,
+  "__ep_std_s": 0.0,
+  "__ep_count": 1
+}
