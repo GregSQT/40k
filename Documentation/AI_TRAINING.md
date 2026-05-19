@@ -1343,6 +1343,77 @@ This forces continuous adaptation and prevents exploitation strategies.
 
 ## ⚡ PERFORMANCE OPTIMIZATION
 
+### 📓 Journal de tuning performance
+
+> Ce journal trace les tentatives d'optimisation avec leur résultat réel. But : ne pas répéter les mêmes erreurs, comprendre pourquoi ça a marché ou non.
+
+---
+
+#### [2026-05] Accélération entraînement x10 — BFS pathfinding
+
+**Contexte**
+
+L'entraînement x10 (`--training-config x10 --resolution 10`, 48 SubprocVecEnv, n_steps=16384) tournait à ~230 s/ep (vs ~5.7 s/ep en x1). Un profiling via `W40K_PERF_TIMING_MIN_EPISODE=2` sur 48 épisodes a révélé :
+
+- **94% du temps handler** est dans le BFS pathfinding (559s / 594s)
+- Move BFS : 102s (~17% du total)
+- Charge BFS : 237s (~40% du total)
+
+Particularités x10 : board 360×312 = 112 320 hexes, empreintes de 433 hexes (base 25mm), move_range=60 hexes, pas de topologie .npz → tout le pathfinding est on-demand.
+
+---
+
+**Tentative 1 — numba JIT sur le move BFS** ❌ Revert
+
+- **Cible** : `engine/phase_handlers/movement_handlers.py` — boucle deque Python remplacée par `@numba.njit(cache=True)` avec queue numpy préallouée (`engine/fast_bfs.py`)
+- **Résultat x1** : 5.69 → 5.98 s/ep (légèrement plus lent, pas de gain)
+- **Raisons de l'échec** :
+  1. Sur x1 (25×21), le BFS visite ~37 nœuds → Python est quasi-instantané, l'overhead numba domine
+  2. L'allocation de 3 tableaux `int32[112K]` à l'intérieur de la fonction JIT (1.3 MB) génère une pression mémoire par appel
+  3. Move BFS = seulement 17% du temps total sur x10 → gain maximal théorique ~15%, insuffisant même parfait
+- **Leçon** : numba est efficace quand la boucle est longue et les données déjà numpy. Ici, la fonction était appelée trop souvent avec une queue trop grande et trop peu de nœuds visités sur x1.
+
+---
+
+**Tentative 2 — numpy board arrays sur le charge BFS** ❌ Revert
+
+- **Cible** : `engine/phase_handlers/charge_handlers.py` — `charge_build_valid_destinations_pool` et `_charge_reverse_goal_bfs_for_eligibility`
+- **Idée** : remplacer les sets Python (433 tuples par empreinte) par des tableaux numpy 2D précomputés :
+  - `_candidate_footprint_charge()` + set comprehension → `fp_c = nc + offs_dc` (1 op numpy)
+  - Intersections de sets → `arr[fp_c, fp_r].any()` (fancy indexing numpy)
+  - `unit_entries_within_engagement_zone` (non-round-round) → éliminé, remplacé par check numpy (équivalence prouvée : `dilate(fp, r) ∩ charger_fp ≠ ∅ ↔ min_distance ≤ r`)
+  - `visited` dict → `_vis_arr` numpy board uint8
+- **Résultat x10** : 233.83 → 287.59 s/ep (**+23%, plus lent**)
+- **Raisons de l'échec** :
+  1. Sur x10 (360×312 = 112K cellules), chaque appel à `charge_build_valid_destinations_pool` initialise 5-6 tableaux `np.zeros((360, 312))` + itère en Python sur ~13K hexes occupés + ~17K hexes de `near_enemy_set` pour remplir les arrays. Coût estimé : 3-5ms par appel, payé en Python avant le BFS
+  2. Ce coût d'initialisation n'est pas amorti : le BFS peut être pruné tôt (early_exit, lower bounds) et ne visiter que quelques dizaines de nœuds near-enemy
+  3. L'original utilisait déjà des sets Python (lookups O(1) implémentés en C) qui sont très rapides pour des ensembles de taille modérée
+
+- **Erreur de diagnostic** : le `perf_timing_x10.log` mesurait le temps CPU total sur 48 épisodes, pas le coût par appel BFS individuel. Sans mesure du coût moyen par appel vs. nombre de nœuds near-enemy visités, il était impossible de prédire si l'amortisation serait suffisante.
+
+---
+
+**Leçons générales**
+
+| Leçon | Détail |
+|-------|--------|
+| Tester sur la board cible | x1 n'est pas représentatif de x10. Les deux boards ont des profils de coût radicalement différents. |
+| Mesurer le coût d'init vs. gain per-nœud | Un tableau `np.zeros(112K)` coûte plusieurs ms en Python. Profitable seulement si des milliers de nœuds bénéficient de l'array. |
+| Le profiling agrégé ne suffit pas | "BFS = 237s sur 48 épisodes" ne dit pas si c'est 1 appel lent ou 10 000 appels courts. |
+| Sets Python C sont déjà optimisés | `x in set` est O(1) en C, souvent plus rapide que numpy fancy indexing sur des petits ensembles. |
+| Le gain max borné | Si une pièce = 17% du total, même la rendre instantanée ne donne que 17% d'amélioration globale. |
+
+---
+
+**Pistes non explorées**
+
+- **Caching des board arrays entre appels** : construire `occ_arr`, `enemy_eng_arr` une fois par tour (pas par appel BFS) pour amortir le coût d'initialisation
+- **Réduction algorithmique du nombre d'appels** : caching plus agressif des destinations de charge (actuellement invalidé trop souvent)
+- **Numba sur la boucle BFS entière** : possible si tous les inputs sont numériques, mais nécessite de précomputer les board arrays au niveau épisode (pas appel)
+- **Parallélisation intra-step** : les 48 envs SubprocVecEnv sont déjà parallèles, mais le charge BFS par env est séquentiel — threading intra-env non trivial avec le GIL
+
+---
+
 ### CPU vs GPU
 
 **Current Benchmark**: Training runs **10% faster on CPU** than GPU
