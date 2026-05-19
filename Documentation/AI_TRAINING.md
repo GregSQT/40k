@@ -1408,9 +1408,134 @@ Particularités x10 : board 360×312 = 112 320 hexes, empreintes de 433 hexes (b
 **Pistes non explorées**
 
 - **Caching des board arrays entre appels** : construire `occ_arr`, `enemy_eng_arr` une fois par tour (pas par appel BFS) pour amortir le coût d'initialisation
-- **Réduction algorithmique du nombre d'appels** : caching plus agressif des destinations de charge (actuellement invalidé trop souvent)
 - **Numba sur la boucle BFS entière** : possible si tous les inputs sont numériques, mais nécessite de précomputer les board arrays au niveau épisode (pas appel)
 - **Parallélisation intra-step** : les 48 envs SubprocVecEnv sont déjà parallèles, mais le charge BFS par env est séquentiel — threading intra-env non trivial avec le GIL
+
+---
+
+#### [2026-05] Charge BFS — `bfs_cache_hits_n=0` ❌ Non optimisable
+
+**Constat** : `CHARGE_BUILD_POOL` log `bfs_cache_hits_n=0` sur 473 calls (5.5s total). Le cache `_has_valid_charge_cache` est implémenté avec la clé `(unit_id, _unit_move_version)` mais ne produit aucun hit.
+
+**Pourquoi** : le cache est invalidé à chaque incrément de `_unit_move_version`. Or `_unit_move_version` s'incrémente après chaque charge (l'unité se déplace physiquement). Donc quand `build_charge_eligible_units_pool` est rappelé pour l'activation suivante, toutes les clés ont une version périmée.
+
+**Pourquoi l'invalidation est correcte** (deux raisons métier) :
+1. Une unité peut mourir pendant une charge en cours (combat réactif) → les cibles valides changent
+2. Une charge peut bloquer le chemin BFS vers une cible qui était atteignable avant → le résultat BFS change
+
+On ne peut pas clef par hash des positions ennemies seules car le chemin dépend aussi des alliés (positions bloquantes). Utiliser `_unit_move_version` est la seule clé correcte.
+
+**Conclusion** : pas d'optimisation possible sans changer la sémantique du jeu. Le coût de 5.5s est incompressible tant que les règles 40K permettent mort-en-charge et blocage de chemin.
+
+---
+
+#### [2026-05] MOVE_POOL_BUILD BFS fly=False MOVE=60 — Non optimisable
+
+**Constat** : 236 calls MOVE=60 fly=False, bfs_s moyen 27ms, max 146ms, total 6.4s. Visited ~10 600 hexes par call.
+
+**Pourquoi ce n'est pas optimisable** : sur Board ×10 (360×312), une unité MOVE=60 placée en position centrale peut géométriquement atteindre π×60² ≈ 11 300 hexes. Le BFS en visite ~10 600 — c'est le coût exact du calcul correct. Il n'existe pas d'algorithme sub-linéaire pour calculer l'ensemble des hexes atteignables avec obstacles (murs + occupation).
+
+Le pool est déjà mis en cache via `valid_move_destinations_pool` (réutilisé si non-vide, invalidé après chaque mouvement). Les 4449 calls sont des rebuilds légitimes : un par activation d'unité en phase mouvement.
+
+**MOVE=60 est réel** : ce sont des unités avec MOVE=6 en x1 mises à l'échelle ×10. Pas un artefact de debug.
+
+**Seul gain possible** : fly=True (voir section suivante).
+
+---
+
+#### [2026-05] Méthode d'évaluation des optimisations perf — Référence
+
+**Problème** : `s/ep` a un CV=36% sur x10_debug (min=268s, max=725s, ratio 2.7×). Il faut ≥50 épisodes en conditions identiques pour atteindre une précision ±10% (IC95%).
+
+**Sources de variance** :
+- Rosters tirés aléatoirement (certains ont beaucoup d'unités MOVE=60, d'autres non)
+- Longueur des parties variable (termination tour 1 à 5 → volume de steps ×5)
+- Cache warmup sur les épisodes 1-2
+- 48 SubprocVecEnv parallèles → `moy` est un running average wall-clock, pas un estimateur propre
+
+**Méthode correcte** : utiliser le **score normalisé** de `perf_timing.py`.
+
+Avant le changement :
+```bash
+W40K_PERF_TIMING=1 W40K_PERF_TIMING_MIN_EPISODE=2 W40K_PERF_TIMING_LOG=perf_timing_before.log \
+  python3 ai/train.py --agent CoreAgent --training-config x10_debug --scenario bot --new --resolution 10
+```
+Appliquer le changement, puis :
+```bash
+W40K_PERF_TIMING=1 W40K_PERF_TIMING_MIN_EPISODE=2 W40K_PERF_TIMING_LOG=perf_timing_after.log \
+  python3 ai/train.py --agent CoreAgent --training-config x10_debug --scenario bot --new --resolution 10
+```
+Comparer :
+```bash
+python3 engine/perf_timing.py perf_timing_before.log perf_timing_after.log
+```
+Le score normalisé = Σ(avg_après × calls_avant) mesure le coût "après" projeté sur la charge "avant". Il est indépendant de la longueur des parties et des rosters — deux épisodes suffisent. C'est la seule métrique fiable pour valider un fix perf ciblé.
+
+`s/ep` sert uniquement à confirmer qu'un gain mesuré en per-call se traduit bien en wall-clock sur un run long (≥50 épisodes).
+
+---
+
+#### [2026-05] Suppression invalidation hex_los_cache / _hex_los_state_cache ✅ Appliqué
+
+**Contexte**
+
+Profiling via `W40K_PERF_TIMING=1 W40K_PERF_TIMING_MIN_EPISODE=2` sur scénario `x10_debug` (Board ×10, 2 épisodes, `perf_timing_x10.log`). Budget des hotspots sur ~98.7s mesurées :
+
+| Hotspot | Temps | % |
+|---|---|---|
+| ADVANCE `los_cache_s` | 30.7s | 31% |
+| MOVE_COMMIT `los_cache_s` | 20.1s | 20% |
+| MOVE_POOL_BUILD BFS | 24.9s | 25% |
+| ADVANCE `adj_cache_s` + MOVE_COMMIT `adj_cache_s` | 13.2s | 13% |
+| CHARGE_BUILD_POOL BFS | 5.5s | 6% |
+| SHOOT enemy_adj_hex | 4.2s | 4% |
+
+Les 50.8s de `los_cache_s` (advance + move_commit) représentaient le premier hotspot.
+
+**Diagnostic**
+
+`MOVE_COMMIT los_cache_s` = uniquement `_invalidate_los_cache_for_moved_unit` (pas de rebuild dans movement_handlers). La fonction itérait en O(N) sur TOUT `_hex_los_state_cache` à chaque mouvement pour supprimer les entrées liées à l'ancien hex :
+
+```python
+keys_to_remove = [k for k in game_state["_hex_los_state_cache"].keys()
+                  if (k[0] == old_pos or k[1] == old_pos)]
+```
+
+Avec un cache qui grossit jusqu'à ~27 000 entrées, ce scan Python coûtait ~19ms/call × 1054 moves = 20s.
+
+**Pourquoi l'invalidation était incorrecte**
+
+`_hex_los_state_cache` et `hex_los_cache` stockent des résultats géométriques `((sc,sr),(ec,er)) → (visibility_ratio, can_see, in_cover)`, calculés par `compute_los_state()` (hex_utils.py) qui dépend **uniquement de `wall_set` (terrain statique)**. En 40K, les unités ne bloquent pas le LOS — seuls les murs comptent. Le résultat LOS entre deux hexes est donc une constante de la map, valide pour toute la durée de la partie, indépendamment des positions d'unités.
+
+**Correction**
+
+Deux caches hex distincts, traitement différencié :
+
+| Cache | Dépend de | Traitement |
+|---|---|---|
+| `_hex_los_state_cache` | `wall_set` uniquement (terrain statique) | **Jamais invalidé** |
+| `hex_los_cache` | `occupied_hexes` via `_has_line_of_sight` (dépend de l'empreinte du target) | Invalidation sélective maintenue |
+
+- `_invalidate_los_cache_for_moved_unit` (`shooting_handlers.py`) : suppression du bloc d'invalidation de `_hex_los_state_cache` uniquement ; `hex_los_cache` conserve son invalidation sélective (O(N) scan mais sur un cache plus petit)
+- `refresh_all_positional_caches_after_reactive_move` (`shared_utils.py`) : idem
+
+`unit["los_cache"]` et `game_state["los_cache"]` (basés sur unit IDs) continuent d'être invalidés normalement.
+
+Le choix de conserver l'invalidation de `hex_los_cache` : son résultat dépend de `occupied_hexes` (footprint multi-hex), qui varie selon l'unité. Si une unité A quitte un hex et une unité B avec une empreinte différente arrive au même hex, un cache stale donnerait un résultat incorrect. `_hex_los_state_cache` n'a pas ce problème car il est purement géométrique (hex-pair → terrain).
+
+**Tests mis à jour**
+
+`tests/unit/engine/test_los_cache_invalidation.py` — 2 tests obsolètes remplacés :
+- `test_clears_hex_los_cache_fully_when_no_old_position` → `test_hex_los_cache_preserved_when_no_old_position`
+- `test_selective_hex_cache_invalidation_with_old_position` → `test_hex_los_cache_preserved_with_old_position`
+
+Les nouveaux tests vérifient que `hex_los_cache` est **intact** après un mouvement d'unité. Suite complète : 8/8 ✅
+
+**Gain estimé**
+
+- MOVE_COMMIT `los_cache_s` : 20s → ~0 (plus de scan O(N))
+- ADVANCE `los_cache_s` : 30.7s → seulement `build_unit_los_cache` avec `_get_los_visibility_state` quasi-gratuit (dict lookup au lieu de `compute_los_state`)
+- **Total estimé : ~40-45s récupérés sur 50.8s**
 
 ---
 

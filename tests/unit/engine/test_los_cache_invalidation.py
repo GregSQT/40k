@@ -37,14 +37,15 @@ class TestInvalidateLosCacheForMovedUnit:
         assert ("2", "3") in remaining
 
     def test_clears_hex_los_cache_fully_when_no_old_position(self):
+        # hex_los_cache is footprint-dependent: full clear when old position unknown.
         gs = _make_game_state_with_caches()
         _invalidate_los_cache_for_moved_unit(gs, "1")
         assert gs["hex_los_cache"] == {}
 
     def test_selective_hex_cache_invalidation_with_old_position(self):
+        # hex_los_cache: only entries involving old position are removed.
         gs = _make_game_state_with_caches()
         _invalidate_los_cache_for_moved_unit(gs, "1", old_col=5, old_row=10)
-        # Entries involving old position (5,10) must be removed
         assert ((5, 10), (20, 10)) not in gs["hex_los_cache"]
         assert ((5, 10), (15, 5)) not in gs["hex_los_cache"]
         # Entry not involving (5,10) preserved

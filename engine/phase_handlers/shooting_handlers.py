@@ -1736,31 +1736,25 @@ def _invalidate_los_cache_for_moved_unit(
         for key in keys_to_remove:
             del game_state["los_cache"][key]
     
-    # hex_los_cache: selective invalidation when old position known (PERF: preserves
-    # LoS between other hex pairs; full clear caused training ~0.2 ep/min)
-    if "hex_los_cache" not in game_state and "_hex_los_state_cache" not in game_state:
-        return
-    if old_col is not None and old_row is not None:
-        old_col_int, old_row_int = normalize_coordinates(old_col, old_row)
-        old_pos = (old_col_int, old_row_int)
-        if "hex_los_cache" in game_state:
+    # _hex_los_state_cache: NOT invalidated on unit movement.
+    # Stores compute_los_state() results keyed by ((sc,sr),(ec,er)) — depends only on
+    # wall_set (static terrain). Permanent for the duration of a game.
+    # Invalidating here caused O(cache_size) scans on every move (~50s/episode on x10 boards).
+    #
+    # hex_los_cache: selective invalidation maintained (calls _has_line_of_sight which reads
+    # occupied_hexes from units_cache — result is footprint-dependent, not purely geometric).
+    if "hex_los_cache" in game_state:
+        if old_col is not None and old_row is not None:
+            old_col_int, old_row_int = normalize_coordinates(old_col, old_row)
+            old_pos = (old_col_int, old_row_int)
             keys_to_remove = [
                 k for k in game_state["hex_los_cache"].keys()
                 if (k[0] == old_pos or k[1] == old_pos)
             ]
             for k in keys_to_remove:
                 del game_state["hex_los_cache"][k]
-        if "_hex_los_state_cache" in game_state:
-            keys_to_remove = [
-                k for k in game_state["_hex_los_state_cache"].keys()
-                if (k[0] == old_pos or k[1] == old_pos)
-            ]
-            for k in keys_to_remove:
-                del game_state["_hex_los_state_cache"][k]
-    else:
-        # Full clear when old position not provided (callers without coords use this path)
-        game_state["hex_los_cache"] = {}
-        game_state["_hex_los_state_cache"] = {}
+        else:
+            game_state["hex_los_cache"] = {}
 
 
 def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:

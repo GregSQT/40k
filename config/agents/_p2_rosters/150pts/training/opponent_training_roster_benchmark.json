@@ -12,6 +12,10 @@
     {
       "unit_type": "Genestealer",
       "count": 1
+    },
+    {
+      "unit_type": "Intercessor",
+      "count": 1
     }
   ]
 }

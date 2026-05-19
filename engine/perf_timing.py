@@ -376,6 +376,7 @@ if __name__ == "__main__":
 
     ROWS = [
         ("ADVANCE_TIMING",          "total_s",    [("los_cache_s", "los"), ("adj_cache_s", "adj")]),
+        ("MOVE_COMMIT_TIMING",      "total_s",    [("los_cache_s", "los"), ("adj_cache_s", "adj")]),
         ("SHOOT_ACTIVATION_START",  "total_s",    [("los_cache_s", "los")]),
         ("CHARGE_REVERSE_GOAL_BFS", "total_s",    [("goal_build_s", "goal"), ("reverse_bfs_s", "bfs")]),
         ("CHARGE_DEST_BFS",         "total_s",    [("bfs_loop_s", "bfs"), ("bfs_engagement_s", "eng")]),
@@ -418,6 +419,9 @@ if __name__ == "__main__":
     def _build_scores(events: Dict[str, list]) -> Dict[str, Any]:
         scores: Dict[str, Any] = {}
         total = 0.0
+        eps = sorted({int(r["episode"]) for recs in events.values() for r in recs
+                      if "episode" in r and isinstance(r.get("episode"), float)})
+        n_episodes = max(len(eps), 1)
         for event, total_field, sub_fields in ROWS:
             if event not in events:
                 continue
@@ -426,22 +430,24 @@ if __name__ == "__main__":
             if n == 0:
                 continue
             total += s
-            entry: Dict[str, Any] = {"calls": n, "avg_s": round(avg, 6), "sum_s": round(s, 2)}
+            entry: Dict[str, Any] = {"calls": n, "avg_s": round(avg, 6), "sum_s": round(s, 2),
+                                      "avg_per_ep_s": round(s / n_episodes, 4)}
             for f, lbl in sub_fields:
                 _, sub_avg, _ = _stats(recs, f)
                 if sub_avg > 0:
                     entry[f"avg_{lbl}_s"] = round(sub_avg, 6)
             scores[event] = entry
         scores["__total_s"] = round(total, 2)
-        eps = sorted({int(r["episode"]) for recs in events.values() for r in recs
-                      if "episode" in r and isinstance(r.get("episode"), float)})
+        scores["__total_per_ep_s"] = round(total / n_episodes, 2)
+        scores["__n_episodes"] = n_episodes
         scores["__episodes"] = eps
         return scores
 
     def _print_scores(scores: Dict[str, Any], label: str) -> None:
         eps = scores["__episodes"]
+        n_ep = scores["__n_episodes"]
         print(f"\n{'=' * 72}")
-        print(f"PERF TIMING — {label}   (épisodes: {eps if eps else '?'})")
+        print(f"PERF TIMING — {label}   (épisodes: {eps if eps else '?'}, n={n_ep})")
         print(f"{'=' * 72}\n")
         for event, _, sub_fields in ROWS:
             if event not in scores:
@@ -454,18 +460,24 @@ if __name__ == "__main__":
             )
             print(f"{event:<28} calls={e['calls']:<6} avg={_fmt(e['avg_s']):<10} sum={_fmt(e['sum_s']):<10}  {subs}")
         print(f"\n{'─' * 72}")
-        print(f"SCORE (total accounté) : {_fmt(scores['__total_s'])}")
+        print(f"SCORE brut : {_fmt(scores['__total_s'])}   SCORE/épisode : {_fmt(scores['__total_per_ep_s'])}")
         print(f"{'=' * 72}\n")
 
     def _print_diff(before: Dict[str, Any], after: Dict[str, Any], lbl_b: str, lbl_a: str) -> None:
         print(f"\n{'=' * 72}")
         print(f"DIFF avg/call  avant={lbl_b}  après={lbl_a}")
         print(f"{'=' * 72}\n")
+        # Score normalisé : projette le coût "après" sur la charge "avant" (calls_before × avg_after)
+        # → compare le coût d'un épisode identique, indépendamment du volume capturé.
+        norm_before = 0.0
+        norm_after = 0.0
         print(f"{'':28} {'avant/call':>10}  {'après/call':>10}  {'delta':>10}  {'%':>7}")
         print(f"{'─' * 72}")
         for event, _, _ in ROWS:
-            b = before[event]["avg_s"] if event in before else None
-            a = after[event]["avg_s"] if event in after else None
+            b_entry = before.get(event)
+            a_entry = after.get(event)
+            b = b_entry["avg_s"] if b_entry else None
+            a = a_entry["avg_s"] if a_entry else None
             if b is None and a is None:
                 continue
             if b is None or a is None:
@@ -473,17 +485,32 @@ if __name__ == "__main__":
                 val = _fmt(a or b or 0.0)
                 print(f"{event:<28} {tag:>23}  {val:>10}")
                 continue
+            calls_b = b_entry["calls"]
+            norm_before += b * calls_b
+            norm_after  += a * calls_b
             delta = a - b
             pct = (delta / b * 100) if b else 0.0
             arrow = "✅" if pct < -5 else ("❌" if pct > 5 else "  ")
             print(f"{event:<28} {_fmt(b):>10}  {_fmt(a):>10}  {_fmt(abs(delta)):>10}{'↓' if delta < 0 else '↑'}  {pct:>+6.1f}%  {arrow}")
         print(f"{'─' * 72}")
-        tb = before.get("__total_s", 0.0)
-        ta = after.get("__total_s", 0.0)
-        td = ta - tb
-        tp = (td / tb * 100) if tb else 0.0
-        print(f"{'SCORE TOTAL':<28} {_fmt(tb):>10}  {_fmt(ta):>10}  {_fmt(abs(td)):>10}{'↓' if td < 0 else '↑'}  {tp:>+6.1f}%")
-        print(f"{'=' * 72}\n")
+        # Score/épisode (normalise par nombre d'épisodes distincts)
+        n_ep_b = max(before.get("__n_episodes", 1), 1)
+        n_ep_a = max(after.get("__n_episodes", 1), 1)
+        ep_b = before.get("__total_per_ep_s", 0.0)
+        ep_a = after.get("__total_per_ep_s", 0.0)
+        ep_d = ep_a - ep_b
+        ep_p = (ep_d / ep_b * 100) if ep_b else 0.0
+        arrow_ep = "✅" if ep_p < -5 else ("❌" if ep_p > 5 else "  ")
+        print(f"{'SCORE/épisode':<28} {_fmt(ep_b):>10}  {_fmt(ep_a):>10}  {_fmt(abs(ep_d)):>10}{'↓' if ep_d < 0 else '↑'}  {ep_p:>+6.1f}%  {arrow_ep}  (n_ep: {n_ep_b} → {n_ep_a})")
+        # Score normalisé (charge avant × avg après — seule comparaison valide si call counts diffèrent)
+        if norm_before > 0:
+            nd = norm_after - norm_before
+            np_ = (nd / norm_before * 100) if norm_before else 0.0
+            arrow_n = "✅" if np_ < -5 else ("❌" if np_ > 5 else "  ")
+            print(f"{'SCORE normalisé (*)':<28} {_fmt(norm_before):>10}  {_fmt(norm_after):>10}  {_fmt(abs(nd)):>10}{'↓' if nd < 0 else '↑'}  {np_:>+6.1f}%  {arrow_n}  (calls_avant × avg_après)")
+        print(f"{'=' * 72}")
+        print(f"  (*) Score normalisé = Σ(avg_après × calls_avant) : projette le coût 'après' sur la")
+        print(f"      charge de travail 'avant'. Valide même si les logs capturent des volumes différents.\n")
 
     if len(sys.argv) == 2:
         logfile = sys.argv[1]
