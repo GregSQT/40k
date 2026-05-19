@@ -1543,7 +1543,9 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
         # Precompute per-enemy proximity thresholds to skip engagement check for distant hexes.
         _fly_enemy_proximity_filter: Optional[List[Tuple[int, int, int]]] = None
+        _fly_ez_prox_set: Optional[Set[Tuple[int, int]]] = None
         if ez > 1 and _enemy_items_for_engagement_ez is not None:
+            from engine.hex_utils import dilate_hex_set as _dilate_hex_set
             _fly_mover_r = _hex_radius_upper_for_engagement_prune(_move_preview_footprint_span(unit))
             _fly_ez_i = int(ez)
             _fly_prox_list: List[Tuple[int, int, int]] = []
@@ -1553,6 +1555,10 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 _fe_r = _hex_radius_upper_for_engagement_prune(_move_preview_footprint_span(_fce))
                 _fly_prox_list.append((_fec, _fer, _fly_ez_i + _fly_mover_r + _fe_r + 1))
             _fly_enemy_proximity_filter = _fly_prox_list
+            _fly_ez_prox_set = set()
+            for _fec, _fer, _feth in _fly_prox_list:
+                _fly_ez_prox_set |= _dilate_hex_set({(_fec, _fer)}, _feth, _fly_bcols, _fly_brows)
+                _fly_ez_prox_set.add((_fec, _fer))
 
         _m_bfs_start = _perf_clock.perf_counter() if _pt else None
         _sx = start_col
@@ -1572,14 +1578,9 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 if nb in _fly_walls or nb in _fly_occupied:
                     fly_rejected_footprint += 1
                 else:
-                    _fly_skip_ez = False
-                    if _fly_enemy_proximity_filter is not None:
-                        _fly_skip_ez = True
-                        for _fec, _fer, _feth in _fly_enemy_proximity_filter:
-                            if calculate_hex_distance(nc, nr, _fec, _fer) <= _feth:
-                                _fly_skip_ez = False
-                                break
-                    if _fly_skip_ez or not _movement_engagement_violates(
+                    if _fly_ez_prox_set is not None and nb not in _fly_ez_prox_set:
+                        valid_destinations.append(nb)
+                    elif not _movement_engagement_violates(
                         game_state,
                         unit,
                         nc,

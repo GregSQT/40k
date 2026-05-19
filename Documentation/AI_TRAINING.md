@@ -1513,6 +1513,58 @@ Vectoriser l'énumération du disque avec NumPy (générer tous les (dx,dy) vali
 
 ---
 
+#### [2026-05] MOVE_POOL_BUILD fly=True — Précomputation `_fly_ez_prox_set` ✅ Appliqué
+
+**Contexte**
+
+Analyse fine du breakdown de `bfs_s=66ms` sur fly=True MOVE=120 (via instrumentation `perf_counter()` dans la boucle) :
+- Géométrie + bounds + tuple creation : 27ms (37%)
+- Walls/occupied lookup : 11ms (15%)
+- EZ checks (`_movement_engagement_violates`) : **35ms (47%)** ← bottleneck
+
+Les 35ms EZ se décomposaient en :
+- ~21ms : proximity filter — boucle Python N ennemis × `calculate_hex_distance` pour chacun des ~43K hexes du disque
+- ~11ms : appels réels à `_movement_engagement_violates` (~2260 hexes proches d'un ennemi)
+
+Le proximity filter servait à décider "ce hex est-il proche d'au moins un ennemi ?" pour 43K hexes × N ennemis = 215K calculs de distance Python par appel.
+
+**Ce qui a été fait**
+
+Remplacement du proximity filter per-hex par une **précomputation unique** avant la boucle dans `engine/phase_handlers/movement_handlers.py` :
+
+```python
+# Une seule fois avant la boucle
+_fly_ez_prox_set = set()
+for _fec, _fer, _feth in _fly_prox_list:
+    _fly_ez_prox_set |= dilate_hex_set({(_fec, _fer)}, _feth, board_cols, board_rows)
+    _fly_ez_prox_set.add((_fec, _fer))
+
+# Dans la boucle : O(1) set lookup au lieu de N × distance_calc
+if _fly_ez_prox_set is not None and nb not in _fly_ez_prox_set:
+    valid_destinations.append(nb)   # loin de tous les ennemis → pas de violation EZ possible
+elif not _movement_engagement_violates(...):
+    valid_destinations.append(nb)
+```
+
+N appels à `dilate_hex_set(radius≈13)` ≈ N × 1ms (une fois) → remplace 43K × N distance calcs Python. Sémantique identique : le set contient exactement les hexes à distance ≤ threshold de chaque ennemi.
+
+**Résultat**
+
+| Mesure | SCORE | Delta |
+|--------|-------|-------|
+| Baseline (post charge-fix) | 12.0060 ms/call | — |
+| Après fix (incrémental 9.41ms/call) | **11.5560 ms/call** | **-3.75%** |
+
+Gain supérieur à l'estimation (-1.2%) : le set lookup O(1) est aussi plus rapide que la boucle proximity filter elle-même.
+
+**Cumulé depuis le baseline original (13.1587) : -12.2%.**
+
+**Compatibilité métier**
+
+100% identique : `dilate_hex_set({enemy_pos}, threshold)` produit exactement les hexes à distance ≤ threshold, ce que vérifiait `calculate_hex_distance(...) <= threshold`. Logique de validation EZ inchangée pour les hexes proches.
+
+---
+
 #### [2026-05] CHARGE_REVERSE_GOAL_BFS — Suppression `dilate_hex_set({start_pos}, 120)` ✅ Appliqué
 
 **Contexte**
