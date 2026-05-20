@@ -4234,12 +4234,12 @@ def main():
                        help="Enable debug console output (verbose logging)")
     parser.add_argument("--param", action="append", nargs=2, metavar=("KEY", "VALUE"),
                        help="Override config parameter (e.g. n_steps 10240 or model_params.batch_size 2048). Can be repeated.")
-    parser.add_argument("--resolution", type=int, choices=[1, 10], default=None,
-                       help="Board resolution: 1 (25x21, fast) or 10 (360x312, full). Overrides W40K_BOARD_PATH env var.")
+    parser.add_argument("--resolution", type=int, choices=[1, 5, 10], default=None,
+                       help="Board resolution: 1 (25x21, fast), 5 (180x156, mid) or 10 (360x312, full). Overrides W40K_BOARD_PATH env var.")
 
     args = parser.parse_args()
 
-    _RESOLUTION_TO_BOARD = {1: "board/25x21", 10: "board/360x312"}
+    _RESOLUTION_TO_BOARD = {1: "board/25x21", 5: "board/180x156", 10: "board/360x312"}
     if args.resolution is not None:
         os.environ["W40K_BOARD_PATH"] = _RESOLUTION_TO_BOARD[args.resolution]
     args.test_only = args.test_only or args.eval

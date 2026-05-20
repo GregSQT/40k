@@ -1,0 +1,15 @@
+{
+  "name": "hammer_tutorial",
+  "p1": {
+    "col_min": 0,
+    "col_max": 179,
+    "row_min": 104,
+    "row_max": 155
+  },
+  "p2": {
+    "col_min": 0,
+    "col_max": 179,
+    "row_min": 0,
+    "row_max": 103
+  }
+}

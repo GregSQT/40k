@@ -1,0 +1,20 @@
+{
+  "wall_id": "walls-none",
+  "walls": [
+    {
+      "name": "Ext-SE-Straight",
+      "segments": [
+        [
+          [
+            160,
+            126
+          ],
+          [
+            160,
+            126
+          ]
+        ]
+      ]
+    }
+  ]
+}

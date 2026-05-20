@@ -1,0 +1,55 @@
+{
+  "objectives_id": "objectives-51",
+  "objectives": [
+    {
+      "id": 1,
+      "name": "West",
+      "shape": "disc",
+      "center": [
+        30,
+        78
+      ],
+      "diameter": 35
+    },
+    {
+      "id": 2,
+      "name": "North",
+      "shape": "disc",
+      "center": [
+        90,
+        26
+      ],
+      "diameter": 35
+    },
+    {
+      "id": 3,
+      "name": "East",
+      "shape": "disc",
+      "center": [
+        150,
+        78
+      ],
+      "diameter": 35
+    },
+    {
+      "id": 4,
+      "name": "South",
+      "shape": "disc",
+      "center": [
+        90,
+        130
+      ],
+      "diameter": 35
+    },
+    {
+      "id": 5,
+      "name": "Center",
+      "shape": "disc",
+      "center": [
+        90,
+        78
+      ],
+      "diameter": 35
+    }
+  ]
+}
