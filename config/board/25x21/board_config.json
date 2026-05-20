@@ -48,7 +48,12 @@
       "charge_target_border_width": 3,
       "default_border_width": 2,
       "canvas_border": "1px solid #333",
-      "right_column_bottom_offset": 650
+      "right_column_bottom_offset": 650,
+      "background_image": "/backgrounds/Fallout.webp",
+      "background_image_alpha": 0.85,
+      "background_overlay_alpha": 0.18,
+      "wall_texture": "/textures/Fallout.webp",
+      "wall_texture_alpha": 1.0
     }
   }
 }

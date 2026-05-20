@@ -50,6 +50,12 @@ from services.endless_duty_runtime import (
 AUTH_DB_PATH = os.path.join(abs_parent, "config", "users.db")
 PBKDF2_ITERATIONS = 200000
 
+BOARD_PATH_MAP = {
+    "x1": "board/25x21",
+    "x5": "board/180x156",
+    "x10": "board/360x312",
+}
+
 try:
     import orjson as _orjson
 except ImportError:
@@ -1057,9 +1063,10 @@ def get_agents_from_scenario(scenario_file: str, unit_registry) -> set:
     
     return agent_keys
 
-def initialize_engine(scenario_file: str = None):
+def initialize_engine(scenario_file: Optional[str] = None):
     """Initialize the W40K engine for PvP mode with configurable scenario."""
     global engine
+    original_cwd: Optional[str] = None
     try:
         # Change to project root directory for config loading
         original_cwd = os.getcwd()
@@ -1091,7 +1098,7 @@ def initialize_engine(scenario_file: str = None):
         game_config = config_loader.get_game_config()
         
         from engine.game_state import GameStateManager
-        scenario_manager = GameStateManager({"board": {}}, unit_registry)
+        scenario_manager = GameStateManager({"board": board_config}, unit_registry)
         scenario_result = scenario_manager.load_units_from_scenario(scenario_file, unit_registry)
         scenario_units = require_key(scenario_result, "units")
         scenario_primary_objective_ids = scenario_result.get("primary_objectives")
@@ -1154,9 +1161,7 @@ def initialize_engine(scenario_file: str = None):
                 agent_rewards = config_loader.load_agent_rewards_config(agent_key)
                 # Load entire config file (contains "default" and "debug" phases)
                 agent_training_full = config_loader.load_agent_training_config(agent_key)
-                # Load "default" phase for observation params
-                agent_training_default = config_loader.load_agent_training_config(agent_key, "default")
-                
+
                 # Store agent-specific configs
                 all_rewards_configs[agent_key] = agent_rewards
                 all_training_configs[agent_key] = agent_training_full  # Store full config for engine
@@ -1172,7 +1177,7 @@ def initialize_engine(scenario_file: str = None):
         
         # Use first agent's training config for observation params (all agents should match)
         first_agent = list(agent_keys)[0]
-        training_config_default = config_loader.load_agent_training_config(first_agent, "default")
+        training_config_default = config_loader.load_agent_training_config(first_agent, "x10")
         
         # Add configs to main config
         config["rewards_configs"] = all_rewards_configs  # Multi-agent support
@@ -1198,7 +1203,7 @@ def initialize_engine(scenario_file: str = None):
         engine = W40KEngine(
             config=config,
             rewards_config="default",
-            training_config_name="default",
+            training_config_name="x10",
             controlled_agent=first_agent,
             active_agents=None,
             scenario_file=scenario_file,
@@ -1217,7 +1222,7 @@ def initialize_engine(scenario_file: str = None):
         return True
     except Exception as e:
         # Restore original working directory on error
-        if 'original_cwd' in locals():
+        if original_cwd is not None:
             os.chdir(original_cwd)
         print(f"❌ Failed to initialize engine: {e}")
         print(f"❌ Exception type: {type(e).__name__}")
@@ -1225,16 +1230,17 @@ def initialize_engine(scenario_file: str = None):
         print(f"❌ Full traceback: {traceback.format_exc()}")
         return False
 
-def initialize_pve_engine(scenario_file: str = None):
+def initialize_pve_engine(scenario_file: Optional[str] = None):
     """
     Backward-compatible wrapper kept for callers that still import this symbol.
     PvE initialization is handled by initialize_test_engine.
     """
     return initialize_test_engine(scenario_file=scenario_file)
 
-def initialize_test_engine(scenario_file: str = None, forced_agent_key: str = None):
+def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key: Optional[str] = None):
     """Initialize the W40K engine for PvE mode with configurable scenario."""
     global engine
+    original_cwd: Optional[str] = None
     try:
         # Change to project root directory for config loading
         original_cwd = os.getcwd()
@@ -1265,7 +1271,7 @@ def initialize_test_engine(scenario_file: str = None, forced_agent_key: str = No
         game_config = config_loader.get_game_config()
         
         from engine.game_state import GameStateManager
-        scenario_manager = GameStateManager({"board": {}}, unit_registry)
+        scenario_manager = GameStateManager({"board": board_config}, unit_registry)
         scenario_result = scenario_manager.load_units_from_scenario(scenario_file, unit_registry)
         scenario_units = require_key(scenario_result, "units")
         scenario_primary_objective_ids = scenario_result.get("primary_objectives")
@@ -1338,7 +1344,7 @@ def initialize_test_engine(scenario_file: str = None, forced_agent_key: str = No
                 shared_rewards = config_loader.load_agent_rewards_config(resolved_forced_agent_key)
                 shared_training_full = config_loader.load_agent_training_config(resolved_forced_agent_key)
                 training_config_default = config_loader.load_agent_training_config(
-                    resolved_forced_agent_key, "default"
+                    resolved_forced_agent_key, "x10"
                 )
             except FileNotFoundError as e:
                 raise FileNotFoundError(
@@ -1375,7 +1381,7 @@ def initialize_test_engine(scenario_file: str = None, forced_agent_key: str = No
 
             # Use first agent's training config for observation params
             first_agent = list(agent_keys)[0]
-            training_config_default = config_loader.load_agent_training_config(first_agent, "default")
+            training_config_default = config_loader.load_agent_training_config(first_agent, "x10")
         
         # PvE mode configuration
         config["pve_mode"] = True
@@ -1400,7 +1406,7 @@ def initialize_test_engine(scenario_file: str = None, forced_agent_key: str = No
         engine = W40KEngine(
             config=config,
             rewards_config="default",
-            training_config_name="default",
+            training_config_name="x10",
             controlled_agent=first_agent,
             active_agents=None,
             scenario_file=scenario_file,
@@ -1418,7 +1424,7 @@ def initialize_test_engine(scenario_file: str = None, forced_agent_key: str = No
         return True
     except Exception as e:
         # Restore original working directory on error
-        if 'original_cwd' in locals():
+        if original_cwd is not None:
             os.chdir(original_cwd)
         print(f"❌ Failed to initialize PvE engine: {e}")
         print(f"❌ Exception type: {type(e).__name__}")
@@ -1644,9 +1650,12 @@ def start_game():
             raise ValueError(f"mode_code must be string or null (got {type(data['mode_code']).__name__})")
         if "scenario_file" in data and data["scenario_file"] is not None and not isinstance(data["scenario_file"], str):
             raise ValueError(f"scenario_file must be string or null (got {type(data['scenario_file']).__name__})")
+        if "board_path" in data and data["board_path"] is not None and data["board_path"] not in BOARD_PATH_MAP:
+            raise ValueError(f"board_path must be one of {sorted(BOARD_PATH_MAP)} (got {data['board_path']!r})")
         pve_mode = data.get('pve_mode', False)
         mode_code = data.get('mode_code', None)
         scenario_file = data.get('scenario_file', None)
+        board_path = data.get('board_path', None)
 
         requested_mode = "pvp"
         if mode_code is not None:
@@ -1677,9 +1686,21 @@ def start_game():
         # CRITICAL: Always reinitialize engine based on requested mode to prevent mode contamination
         if requested_mode == "pvp_test":
             print("DEBUG: Initializing engine for PvP Test mode")
-            if scenario_file is None:
-                scenario_file = os.path.join("config", "scenario_pvp_test.json")
-            if not initialize_engine(scenario_file=scenario_file):
+            if board_path is None:
+                from config_loader import get_config_loader as _gcl
+                _cfg = _gcl().load_config("config", force_reload=False)
+                board_path = _cfg.get("defaults", {}).get("test_board", "x5")
+            scenario_file = os.path.join("config", BOARD_PATH_MAP[board_path], "scenario", "scenario_pvp_test.json")
+            _prev_board = os.environ.get("W40K_BOARD_PATH")
+            os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
+            try:
+                ok = initialize_engine(scenario_file=scenario_file)
+            finally:
+                if _prev_board is not None:
+                    os.environ["W40K_BOARD_PATH"] = _prev_board
+                elif "W40K_BOARD_PATH" in os.environ:
+                    del os.environ["W40K_BOARD_PATH"]
+            if not ok:
                 return jsonify({"success": False, "error": "PvP Test engine initialization failed"}), 500
         elif requested_mode == "pvp":
             print("DEBUG: Initializing engine for PvP mode")
@@ -1694,12 +1715,24 @@ def start_game():
                 return jsonify({"success": False, "error": "PvE engine initialization failed"}), 500
         elif requested_mode == "pve_test":
             print("DEBUG: Initializing engine for PvE Test mode")
-            if scenario_file is None:
-                scenario_file = os.path.join("config", "scenario_pve_test.json")
-            if not initialize_test_engine(
-                scenario_file=scenario_file,
-                forced_agent_key="CoreAgent",
-            ):
+            if board_path is None:
+                from config_loader import get_config_loader as _gcl
+                _cfg = _gcl().load_config("config", force_reload=False)
+                board_path = _cfg.get("defaults", {}).get("test_board", "x5")
+            scenario_file = os.path.join("config", BOARD_PATH_MAP[board_path], "scenario", "scenario_pve_test.json")
+            _prev_board = os.environ.get("W40K_BOARD_PATH")
+            os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
+            try:
+                ok = initialize_test_engine(
+                    scenario_file=scenario_file,
+                    forced_agent_key="CoreAgent",
+                )
+            finally:
+                if _prev_board is not None:
+                    os.environ["W40K_BOARD_PATH"] = _prev_board
+                elif "W40K_BOARD_PATH" in os.environ:
+                    del os.environ["W40K_BOARD_PATH"]
+            if not ok:
                 return jsonify({"success": False, "error": "PvE Test engine initialization failed"}), 500
         elif requested_mode == ED_MODE_CODE:
             print("DEBUG: Initializing engine for Endless Duty mode")
@@ -1715,6 +1748,8 @@ def start_game():
             if not initialize_engine(scenario_file=scenario_file):
                 return jsonify({"success": False, "error": "PvP engine initialization failed"}), 500
 
+        assert engine is not None
+
         # HTTP session: requested_mode is the source of truth for PvE vs PvP (aligns engine with client).
         if requested_mode in ("pve", "pve_test", ED_MODE_CODE):
             engine.is_pve_mode = True
@@ -1726,6 +1761,7 @@ def start_game():
             raise ValueError(f"Unhandled requested_mode: {requested_mode!r}")
 
         engine.current_mode_code = requested_mode
+        engine.game_state["current_mode_code"] = requested_mode
         
         print("DEBUG: About to call engine.reset()")
         # Reset the engine for new game
@@ -1741,6 +1777,7 @@ def start_game():
 
         if requested_mode == ED_MODE_CODE:
             project_root = Path(abs_parent)
+            assert scenario_file is not None
             initialize_endless_duty_state(
                 engine_instance=engine,
                 project_root=project_root,
@@ -2609,19 +2646,46 @@ def get_tutorial_steps():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/config/defaults', methods=['GET'])
+def get_config_defaults():
+    """Expose config.json defaults section to the frontend."""
+    try:
+        from config_loader import get_config_loader
+        config_loader = get_config_loader()
+        config = config_loader.load_config("config", force_reload=False)
+        return jsonify({"success": True, "defaults": config.get("defaults", {})})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/config/board', methods=['GET'])
 def get_board_config():
     """Get board configuration for frontend.
     Loads board_config.json from config/board/{paths.board}/, then walls and objectives
     from the same directory (walls/walls-XX.json, objectives/objectives-XX.json).
+    Accepts optional query param board_path (x1|x5|x10) to override the default board.
     """
     try:
         from config_loader import get_config_loader
         config_loader = get_config_loader()
-        board_data = config_loader.get_board_config()
+        board_path_param = request.args.get("board_path")
+        if board_path_param is not None and board_path_param not in BOARD_PATH_MAP:
+            raise ValueError(f"board_path must be one of {sorted(BOARD_PATH_MAP)} (got {board_path_param!r})")
+        if board_path_param is not None:
+            prev = os.environ.get("W40K_BOARD_PATH")
+            os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path_param]
+            try:
+                board_data = config_loader.get_board_config()
+            finally:
+                if prev is not None:
+                    os.environ["W40K_BOARD_PATH"] = prev
+                elif "W40K_BOARD_PATH" in os.environ:
+                    del os.environ["W40K_BOARD_PATH"]
+        else:
+            board_data = config_loader.get_board_config()
         board_spec = board_data["default"]
         config_json = config_loader.load_config("config", force_reload=False)
-        board_subdir = config_json.get("paths", {}).get("board")
+        board_subdir = BOARD_PATH_MAP[board_path_param] if board_path_param else config_json.get("paths", {}).get("board")
         if not board_subdir:
             return jsonify({"success": True, "config": board_spec})
 

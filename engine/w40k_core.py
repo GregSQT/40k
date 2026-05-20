@@ -154,6 +154,7 @@ class W40KEngine(gym.Env):
         # Store gym training mode for handler access
         self.gym_training_mode = gym_training_mode
         self.debug_mode = debug_mode
+        self.current_mode_code: Optional[str] = None
 
         # Store scenario files list for random selection during reset
         # If scenario_files provided, use it; otherwise create single-item list from scenario_file

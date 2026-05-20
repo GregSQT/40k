@@ -658,6 +658,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         } else if (isPvEMode) {
           requestPayload.scenario_file = "config/scenario_pve.json";
         }
+        if (isPvPTestMode || isPvETestMode) {
+          const boardParam = new URLSearchParams(window.location.search).get("board") ?? "x5";
+          requestPayload.board_path = boardParam;
+        }
 
         const authSession = getAuthSession();
         if (!authSession?.token) {

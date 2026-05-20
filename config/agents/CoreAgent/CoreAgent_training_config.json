@@ -26,7 +26,7 @@
     "bot_eval_final": 100,
     "bot_eval_worker_device": "cpu",
     "bot_eval_task_timeout_seconds": 600,
-    "save_best_robust": false,
+    "save_best_robust": true,
     "save_best_robust_seed": true,
     "robust_window": 5,
     "robust_drawdown_penalty": 0.5,

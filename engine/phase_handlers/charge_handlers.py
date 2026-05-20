@@ -590,28 +590,38 @@ def _charge_reverse_goal_bfs_for_eligibility(
         game_state, unit_id_str, start_col, start_row
     )
 
-    enemy_occupied: Set[Tuple[int, int]] = set()
+    enemy_occupied: Set[Tuple[int, int]] = set()  # enemy centers (for sort center computation)
     for _, enemy_entry in indexed_enemy_engagement:
         ec = int(enemy_entry["col"])
         er = int(enemy_entry["row"])
-        enemy_fp = enemy_entry.get("occupied_hexes")
-        if not enemy_fp:
-            enemy_fp = {(ec, er)}
-        for fc, fr in enemy_fp:
-            enemy_occupied.add((int(fc), int(fr)))
+        enemy_occupied.add((ec, er))
 
     if not enemy_occupied:
         return []
 
     goal_search_radius = engagement_zone + charger_radius
-    enemy_goal_zone = dilate_hex_set(enemy_occupied, goal_search_radius, board_cols, board_rows)
     _bfs_max = int(bfs_max_distance)
+    # Build enemy_goal_zone per-enemy from center + effective radius instead of dilating all
+    # footprint hexes together. Dilating full footprints at x5 scale (140 spread hexes, radius 8)
+    # covers the entire 28K-hex board via BFS; per-center enumeration is O(N × π×eff_r²).
+    enemy_goal_zone: Set[Tuple[int, int]] = set()
+    for _, _gz_enemy in indexed_enemy_engagement:
+        _gz_ec = int(require_key(_gz_enemy, "col"))
+        _gz_er = int(require_key(_gz_enemy, "row"))
+        _gz_fp = _gz_enemy.get("occupied_hexes")
+        _gz_fp_r = (
+            max(hex_distance(_gz_ec, _gz_er, int(_fc), int(_fr)) for _fc, _fr in _gz_fp)
+            if _gz_fp else 0
+        )
+        _gz_eff_r = goal_search_radius + _gz_fp_r
+        enemy_goal_zone |= dilate_hex_set({(_gz_ec, _gz_er)}, _gz_eff_r, board_cols, board_rows)
+        enemy_goal_zone.add((_gz_ec, _gz_er))
     goal_zone = {
         h for h in enemy_goal_zone
         if hex_distance(h[0], h[1], start_col, start_row) <= _bfs_max
     }
     goal_candidates_n = len(goal_zone)
-    skipped_goal_start_lb_n = len(enemy_goal_zone) - goal_candidates_n
+    skipped_goal_start_lb_n = 0
     _TRAINING_GOAL_CAP = 300
     if game_state.get("gym_training_mode") and goal_candidates_n > _TRAINING_GOAL_CAP:
         _ec_c = int(sum(c for c, _ in enemy_occupied) / len(enemy_occupied))

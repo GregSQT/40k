@@ -5,7 +5,7 @@
     "description": "Warhammer 40k tactical game with AI opponents"
   },
   "paths": {
-    "board": "board/360x312",
+    "board": "board/180x156",
     "ai_models": "ai/",
     "models_root": "ai/models",
     "model_file": "ai/models/{agent_key}/model_{agent_key}.zip",
@@ -21,7 +21,8 @@
     "scenario": "default",
     "training_config": "default",
     "rewards_config": "default",
-    "game_config": "default"
+    "game_config": "default",
+    "test_board": "x5"
   },
   "training_env": {
     "OMP_NUM_THREADS": 1,

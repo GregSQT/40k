@@ -1,8 +1,8 @@
 {
   "default": {
-    "cols": 360,
-    "rows": 312,
-    "inches_to_subhex": 10,
+    "cols": 180,
+    "rows": 156,
+    "inches_to_subhex": 5,
     "hex_radius": 1.7,
     "margin": 1,
     "chunk_size": 64,
@@ -58,6 +58,7 @@
       "objective_texture": "/textures/wall3.webp",
       "objective_texture_alpha": 0.85,
       "resolution": 3,
+      "display_scale": 2.0,
       "autoDensity": true,
       "antialias": true,
       "forceCanvas": true,

@@ -1,58 +1,58 @@
 {
   "ADVANCE_TIMING": {
-    "calls": 18931,
-    "avg_s": 0.000899,
-    "sum_s": 17.02,
-    "avg_los_s": 0.000658,
-    "avg_adj_s": 0.000136
+    "calls": 28069,
+    "avg_s": 0.000631,
+    "sum_s": 17.72,
+    "avg_los_s": 0.000451,
+    "avg_adj_s": 9.6e-05
   },
   "MOVE_COMMIT_TIMING": {
-    "calls": 24230,
-    "avg_s": 0.000845,
-    "sum_s": 20.47,
-    "avg_los_s": 0.00057,
-    "avg_adj_s": 0.000232
+    "calls": 36048,
+    "avg_s": 0.000582,
+    "sum_s": 20.96,
+    "avg_los_s": 0.000387,
+    "avg_adj_s": 0.000161
   },
   "SHOOT_ACTIVATION_START": {
-    "calls": 24273,
-    "avg_s": 0.00012,
-    "sum_s": 2.9,
+    "calls": 36123,
+    "avg_s": 0.00011,
+    "sum_s": 3.97,
     "avg_los_s": 4e-06
   },
   "CHARGE_REVERSE_GOAL_BFS": {
-    "calls": 5215,
-    "avg_s": 0.00377,
-    "sum_s": 19.66,
-    "avg_goal_s": 0.000783,
-    "avg_bfs_s": 0.002977
+    "calls": 8548,
+    "avg_s": 0.002379,
+    "sum_s": 20.34,
+    "avg_goal_s": 0.000507,
+    "avg_bfs_s": 0.001866
   },
   "CHARGE_DEST_BFS": {
-    "calls": 2347,
-    "avg_s": 0.006261,
-    "sum_s": 14.7,
-    "avg_bfs_s": 0.006082,
-    "avg_eng_s": 0.000996
+    "calls": 3870,
+    "avg_s": 0.003977,
+    "sum_s": 15.39,
+    "avg_bfs_s": 0.003825,
+    "avg_eng_s": 0.000661
   },
   "MOVE_POOL_BUILD": {
-    "calls": 44162,
-    "avg_s": 0.001147,
-    "sum_s": 50.66,
-    "avg_bfs_s": 0.001082
+    "calls": 65630,
+    "avg_s": 0.000799,
+    "sum_s": 52.45,
+    "avg_bfs_s": 0.00075
   },
   "CASCADE_LOOP_TOTAL": {
-    "calls": 129641,
-    "avg_s": 0.000269,
-    "sum_s": 34.92
+    "calls": 195081,
+    "avg_s": 0.000196,
+    "sum_s": 38.24
   },
   "CHARGE_PHASE_START": {
-    "calls": 9368,
-    "avg_s": 0.002425,
-    "sum_s": 22.72,
-    "avg_pool_s": 0.002259
+    "calls": 14083,
+    "avg_s": 0.001697,
+    "sum_s": 23.89,
+    "avg_pool_s": 0.001575
   },
-  "__total_s": 183.04,
-  "__total_calls": 258167,
-  "__score_ms": 0.709,
+  "__total_s": 192.97,
+  "__total_calls": 387452,
+  "__score_ms": 0.498,
   "__n_episodes": 11,
   "__episodes": [
     2,

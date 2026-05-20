@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 interface DisplayConfig {
   resolution?: "auto" | number;
+  display_scale?: number;
   autoDensity?: boolean;
   antialias?: boolean;
   forceCanvas?: boolean;
@@ -185,19 +186,32 @@ export const useGameConfig = (_boardConfigName: string = "default"): ExtendedGam
 
         const urlParams = new URLSearchParams(window.location.search);
         const mode = urlParams.get("mode");
+        const isTestMode = mode === "pvp_test" || mode === "pve_test";
+        const DEFAULT_TEST_BOARD = "x5";
+        const boardParam = isTestMode ? (urlParams.get("board") ?? DEFAULT_TEST_BOARD) : null;
+        const scenarioName = mode === "pve_test" ? "scenario_pve_test.json" : "scenario_pvp_test.json";
+        const boardDirMap: Record<string, string> = {
+          x1: "board/25x21",
+          x5: "board/180x156",
+          x10: "board/360x312",
+        };
         const scenarioMap: Record<string, string> = {
           tutorial: "config/tutorial/scenario_etape1.json",
           endless_duty: "config/scenario_endless_duty.json",
-          pvp_test: "config/scenario_pvp_test.json",
-          pve_test: "config/scenario_pve_test.json",
           pve: "config/scenario_pve.json",
         };
-        const scenarioFile = (mode && scenarioMap[mode]) || "config/scenario_pvp.json";
-        const boardUrl =
+        let scenarioFile = (mode && scenarioMap[mode]) || "config/scenario_pvp.json";
+        if (isTestMode && boardParam && boardDirMap[boardParam]) {
+          scenarioFile = `config/${boardDirMap[boardParam]}/scenario/${scenarioName}`;
+        }
+        let boardUrl =
           "/api/config/board?scenario_file=" +
           encodeURIComponent(scenarioFile) +
           "&_t=" +
           Date.now();
+        if (isTestMode && boardParam) {
+          boardUrl += `&board_path=${encodeURIComponent(boardParam)}`;
+        }
         const [boardResponse, gameResponse] = await Promise.all([
           fetch(boardUrl),
           fetch("/config/game_config.json"),

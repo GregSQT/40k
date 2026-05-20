@@ -779,9 +779,15 @@ export default function Board({
 
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
   const { boardConfig: _boardConfigFromHook, gameConfig, loading, error } = useGameConfig();
-  const boardConfig = boardConfigOverride && _boardConfigFromHook
+  const _rawBoardConfig = boardConfigOverride && _boardConfigFromHook
     ? { ..._boardConfigFromHook, ...boardConfigOverride }
     : _boardConfigFromHook;
+  const boardConfig = (() => {
+    if (!_rawBoardConfig) return _rawBoardConfig;
+    const ds = (_rawBoardConfig.display as { display_scale?: number } | undefined)?.display_scale;
+    if (!ds || ds === 1) return _rawBoardConfig;
+    return { ..._rawBoardConfig, hex_radius: _rawBoardConfig.hex_radius * ds };
+  })();
   // ✅ STABLE CALLBACK REFS - Don't change on every render
   const stableCallbacks = useRef<{
     onSelectUnit: (id: number | string | null) => void;

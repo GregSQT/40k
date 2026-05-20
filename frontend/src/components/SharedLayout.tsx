@@ -1,6 +1,6 @@
 // frontend/src/components/SharedLayout.tsx
 import type React from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { getAuthSession } from "../auth/authStorage";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -39,6 +39,141 @@ function RulerMenuIcon({ active }: { active: boolean }) {
         objectFit: "contain",
       }}
     />
+  );
+}
+
+const BOARD_OPTIONS = [
+  { key: "x1", label: "25×21" },
+  { key: "x5", label: "180×156" },
+  { key: "x10", label: "360×312" },
+] as const;
+
+type BoardKey = (typeof BOARD_OPTIONS)[number]["key"];
+
+function MapIcon() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden
+    >
+      <title>Map</title>
+      <polygon
+        points="1,3 7,1 13,3 19,1 19,17 13,19 7,17 1,19"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <line x1="7" y1="1" x2="7" y2="17" stroke="currentColor" strokeWidth="1.5" />
+      <line x1="13" y1="3" x2="13" y2="19" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+function BoardResolutionPicker() {
+  const [open, setOpen] = useState(false);
+  const [defaultBoard, setDefaultBoard] = useState<BoardKey>("x5");
+  const ref = useRef<HTMLDivElement>(null);
+
+  const params = new URLSearchParams(window.location.search);
+  const current = (params.get("board") as BoardKey | null) ?? defaultBoard;
+
+  useEffect(() => {
+    fetch("/api/config/defaults")
+      .then((r) => r.json())
+      .then((data: { success?: boolean; defaults?: { test_board?: string } }) => {
+        if (data.success && data.defaults?.test_board) {
+          setDefaultBoard(data.defaults.test_board as BoardKey);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const select = (key: BoardKey) => {
+    setOpen(false);
+    const p = new URLSearchParams(window.location.search);
+    p.set("board", key);
+    window.location.href = `${window.location.pathname}?${p.toString()}`;
+  };
+
+  const currentLabel = BOARD_OPTIONS.find((o) => o.key === current)?.label ?? current;
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <TooltipWrapper text="Résolution du plateau">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="settings-button"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "5px",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            color: open ? "#93c5fd" : "#9ca3af",
+            padding: "4px",
+          }}
+        >
+          <span style={{ fontSize: "11px", fontWeight: 500, letterSpacing: "0.02em" }}>
+            {currentLabel}
+          </span>
+          <MapIcon />
+        </button>
+      </TooltipWrapper>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            right: 0,
+            background: "#1f2937",
+            border: "1px solid #374151",
+            borderRadius: "6px",
+            padding: "4px 0",
+            minWidth: "120px",
+            zIndex: 100,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
+          }}
+        >
+          {BOARD_OPTIONS.map((opt) => (
+            <button
+              key={opt.key}
+              type="button"
+              onClick={() => select(opt.key)}
+              style={{
+                display: "block",
+                width: "100%",
+                textAlign: "left",
+                padding: "6px 14px",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                color: current === opt.key ? "#93c5fd" : "#d1d5db",
+                fontSize: "13px",
+                fontWeight: current === opt.key ? 600 : 400,
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -194,6 +329,10 @@ const Navigation: React.FC<NavigationProps> = ({
             gap: "6px",
           }}
         >
+          {(location.search.includes("mode=pvp_test") ||
+            location.search.includes("mode=pve_test")) && (
+            <BoardResolutionPicker />
+          )}
           {onToggleMeasureMode && (
             <TooltipWrapper
               text={
