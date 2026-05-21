@@ -144,7 +144,7 @@ def command_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     Execute action for command phase (structure ready for future).
     

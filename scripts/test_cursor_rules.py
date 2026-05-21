@@ -10,7 +10,7 @@ prompts de test à utiliser manuellement.
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 # Couleurs pour l'affichage
 GREEN = "\033[92m"
@@ -19,7 +19,7 @@ YELLOW = "\033[93m"
 BLUE = "\033[94m"
 RESET = "\033[0m"
 
-def check_rule_file(rule_path: Path) -> Tuple[bool, Dict[str, any]]:
+def check_rule_file(rule_path: Path) -> Tuple[bool, Dict[str, Any]]:
     """Vérifie qu'un fichier de règle est valide."""
     if not rule_path.exists():
         return False, {"error": "File does not exist"}

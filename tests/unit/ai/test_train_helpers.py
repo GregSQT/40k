@@ -9,7 +9,7 @@ import pytest
 # Some legacy imports in ai.train may be absent in current single-agent architecture.
 if "ai.multi_agent_trainer" not in sys.modules:
     _stub = types.ModuleType("ai.multi_agent_trainer")
-    _stub.MultiAgentTrainer = object
+    setattr(_stub, "MultiAgentTrainer", object)
     sys.modules["ai.multi_agent_trainer"] = _stub
 
 
@@ -181,7 +181,7 @@ def test_apply_torch_compile_and_param_overrides(monkeypatch: pytest.MonkeyPatch
     assert train._parse_param_value("abc") == "abc"
 
     cfg = {}
-    train._apply_param_overrides(cfg, [("n_steps", "64"), ("model_params.gamma", "0.95")], log_overrides=False)
+    train._apply_param_overrides(cfg, [["n_steps", "64"], ["model_params.gamma", "0.95"]], log_overrides=False)
     assert cfg["model_params"]["n_steps"] == 64
     assert cfg["model_params"]["gamma"] == pytest.approx(0.95)
 

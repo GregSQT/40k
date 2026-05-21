@@ -10,7 +10,7 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 """
 
 import gymnasium as gym
-from typing import Optional, Any
+from typing import Optional, Any, TYPE_CHECKING, cast
 import random
 import os
 import time
@@ -18,6 +18,9 @@ import hashlib
 import numpy as np
 from shared.data_validation import require_key, require_present
 from engine.action_decoder import ActionValidationError
+
+if TYPE_CHECKING:
+    from engine.w40k_core import W40KEngine
 
 __all__ = ['BotControlledEnv', 'SelfPlayWrapper']
 PLAYER_ONE_ID = 1
@@ -181,10 +184,7 @@ class BotControlledEnv(gym.Wrapper):
 
         # Unwrap ActionMasker to get actual engine
         # self.env is set by gym.Wrapper.__init__ to base_env
-        self.engine = self.env
-        if hasattr(self.env, 'env'):
-            # ActionMasker wraps the actual engine in .env attribute
-            self.engine = self.env.env
+        self.engine: "W40KEngine" = cast("W40KEngine", getattr(self.env, 'env', self.env))
 
         # DIAGNOSTIC: Track shoot phase decisions FOR BOT
         self.shoot_opportunities = 0  # Times shoot was available
@@ -342,6 +342,7 @@ class BotControlledEnv(gym.Wrapper):
         """
         MAX_ENSURE_ITERATIONS = 2000
         iteration_count = 0
+        decision_owner = has_valid_actions = eligible_count = None
         while not (terminated or truncated):
             iteration_count += 1
             if iteration_count > MAX_ENSURE_ITERATIONS:
@@ -619,7 +620,7 @@ class BotControlledEnv(gym.Wrapper):
             )
         return obs, float(cumulative_reward), terminated, truncated, info
 
-    def reset(self, seed=None, options=None):
+    def reset(self, *, seed=None, options=None):
         debug_mode = require_key(self.engine.game_state, "debug_mode")
         max_reset_attempts = 64
         last_failure: Optional[str] = None
@@ -681,7 +682,7 @@ class BotControlledEnv(gym.Wrapper):
 
             # Random bot selection: pick a new opponent for this episode
             if self._use_random_bots:
-                self.bot = random.choice(self._bots)
+                self.bot = random.choice(require_present(self._bots, "_bots"))
             if self._self_play_opponent_enabled:
                 self._episodes_since_snapshot_refresh += 1
             self._select_opponent_mode_for_episode()
@@ -741,7 +742,7 @@ class BotControlledEnv(gym.Wrapper):
             f"Last failure: {last_failure}"
         )
 
-    def step(self, agent_action):
+    def step(self, action):
         # LOG TEMPORAIRE: time between previous step() return and this step() call (SB3 loop = predict + overhead, --debug)
         debug_mode = require_key(self.engine.game_state, "debug_mode")
         if debug_mode and self._last_step_return_time is not None:
@@ -789,16 +790,16 @@ class BotControlledEnv(gym.Wrapper):
             if current_phase == "shoot":
                 # Infer shoot opportunity from action type (action 4-8 are shoot actions)
                 # This avoids expensive get_action_mask() call
-                if agent_action in [4, 5, 6, 7, 8]:  # Shoot actions (target slots 0-4)
+                if action in [4, 5, 6, 7, 8]:  # Shoot actions (target slots 0-4)
                     self.ai_shoot_opportunities += 1  # If agent shot, opportunity existed
                     self.ai_shoot_actions += 1
-                elif agent_action == 11:  # Wait action
+                elif action == 11:  # Wait action
                     self.ai_wait_actions += 1
 
             # Execute agent action
             # LOG TEMPORAIRE: time full env.step() call (--debug) to compare with STEP_TIMING
             t0_agent = time.perf_counter() if debug_mode else None
-            obs, reward, terminated, truncated, info = self.env.step(agent_action)
+            obs, reward, terminated, truncated, info = self.env.step(action)
             agent_action_info = info.get("action")
             agent_intent_value = info.get("intent_value")
             agent_is_controlled_action = info.get("is_controlled_action")
@@ -972,9 +973,9 @@ class SelfPlayWrapper(gym.Wrapper):
         # Unwrap to get actual W40KEngine
         # Wrapping order: SelfPlayWrapper(ActionMasker(W40KEngine))
         # self.env is set by gym.Wrapper.__init__ to base_env (ActionMasker)
-        self.engine = self.env
+        self.engine: "W40KEngine" = cast("W40KEngine", self.env)
         while hasattr(self.engine, 'env'):
-            self.engine = self.engine.env
+            self.engine = cast("W40KEngine", getattr(self.engine, 'env'))
 
         # Episode tracking
         self.episode_reward = 0.0
@@ -987,7 +988,7 @@ class SelfPlayWrapper(gym.Wrapper):
         # LOG TEMPORAIRE: time between step() return and next step() call (--debug)
         self._last_step_return_time = None
 
-    def reset(self, seed=None, options=None):
+    def reset(self, *, seed=None, options=None):
         """Reset environment for new episode."""
         # LOG TEMPORAIRE: time reset() when --debug (to explain slow step index 0)
         debug_mode = require_key(self.engine.game_state, "debug_mode")
@@ -1018,7 +1019,7 @@ class SelfPlayWrapper(gym.Wrapper):
         self._last_step_return_time = None
         return obs, info
 
-    def step(self, agent_action):
+    def step(self, action):
         """
         Execute one step in the environment.
 
@@ -1080,7 +1081,7 @@ class SelfPlayWrapper(gym.Wrapper):
         if not (terminated or truncated):
             # LOG TEMPORAIRE: time full env.step() (--debug)
             t0_p0 = time.perf_counter() if debug_mode else None
-            obs, reward, terminated, truncated, info = self.env.step(agent_action)
+            obs, reward, terminated, truncated, info = self.env.step(action)
             if debug_mode and t0_p0 is not None:
                 ep = int(require_key(self.engine.game_state, "episode_number"))
                 step_idx = int(require_key(self.engine.game_state, "episode_steps"))
@@ -1091,8 +1092,8 @@ class SelfPlayWrapper(gym.Wrapper):
                         f.write(f"WRAPPER_STEP_TIMING episode={ep} step_index={step_idx} duration_s={duration_s:.6f}\n")
                 except (OSError, IOError):
                     pass
-            p0_reward = reward  # CRITICAL: Save P0's reward before P1 overwrites it
-            self.episode_reward += reward
+            p0_reward = float(reward)  # CRITICAL: Save P0's reward before P1 overwrites it
+            self.episode_reward += float(reward)
             self.episode_length += 1
 
             # DIAGNOSTIC: Log P0's reward for debugging (disabled for cleaner output)
@@ -1130,7 +1131,7 @@ class SelfPlayWrapper(gym.Wrapper):
                 # If P1's action ended the game, P0 needs the situational reward (win/lose)
                 # The engine returns P0's perspective reward even for P1's actions
                 if terminated or truncated:
-                    p0_reward += p1_step_reward  # Add win/lose bonus to P0's total
+                    p0_reward += float(p1_step_reward)  # Add win/lose bonus to P0's total
 
             # DIAGNOSTIC: Log if P1 took actions (disabled for cleaner output)
             # if (p1_actions_before + p1_actions_after) > 0 and self.total_episodes < 3:

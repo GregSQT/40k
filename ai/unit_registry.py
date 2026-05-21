@@ -10,7 +10,7 @@ import os
 import re
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import sys
 from shared.data_validation import require_key, require_present
 
@@ -18,7 +18,7 @@ class UnitRegistry:
     """Dynamic unit discovery and faction-role management system."""
     CORE_AGENT_KEY = "CoreAgent"
     
-    def __init__(self, project_root: str = None):
+    def __init__(self, project_root: Optional[str] = None):
         if project_root is None:
             # Auto-detect project root from current file location
             self.project_root = Path(__file__).parent.parent
@@ -87,7 +87,7 @@ class UnitRegistry:
         if verbose:
             print(f"🎯 Faction-Role combinations: {sorted(self.faction_role_combinations)}")
     
-    def _parse_unit_file(self, ts_file: Path, faction_name: str) -> Dict:
+    def _parse_unit_file(self, ts_file: Path, faction_name: str) -> Optional[Dict]:
         """Parse a TypeScript unit file and extract all unit data."""
         try:
             with open(ts_file, 'r', encoding='utf-8') as f:
@@ -217,6 +217,7 @@ class UnitRegistry:
             return object_bodies
         
         # Try to import get_weapons, but continue if it fails (standalone mode)
+        get_weapons = None
         try:
             from engine.weapons import get_weapons
             weapons_available = True
@@ -424,9 +425,9 @@ class UnitRegistry:
         
         # Pattern 3: RNG_WEAPON_CODES = ["code1", "code2"] ou [] (robuste)
         # Only process weapons if import succeeded
-        if not weapons_available:
+        if not weapons_available or get_weapons is None:
             raise ImportError("engine.weapons.get_weapons is required to load RNG_WEAPONS/CC_WEAPONS")
-        
+
         rng_codes_match = re.search(
             r'static\s+RNG_WEAPON_CODES(?:\s*:\s*[^=]+)?\s*=\s*\[([^\]]*)\];',
             content,
@@ -797,11 +798,14 @@ class UnitRegistry:
         return [unit_type for unit_type, data in self.units.items() 
                 if data['role'] == role]
     
-    def save_registry_cache(self, cache_file: str = None):
+    def save_registry_cache(self, cache_file: Optional[str] = None):
         """Save discovered units to cache file for faster loading."""
+        cache_path: Union[str, Path]
         if cache_file is None:
-            cache_file = self.project_root / "config" / "unit_registry_cache.json"
-        
+            cache_path = self.project_root / "config" / "unit_registry_cache.json"
+        else:
+            cache_path = cache_file
+
         cache_data = {
             "units": self.units,
             "factions": list(self.factions),
@@ -810,11 +814,11 @@ class UnitRegistry:
             "faction_role_matrix": self.faction_role_matrix
         }
         
-        os.makedirs(os.path.dirname(cache_file), exist_ok=True)
-        with open(cache_file, 'w') as f:
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        with open(cache_path, 'w') as f:
             json.dump(cache_data, f, indent=2, default=str)
-        
-        print(f"💾 Unit registry cached to: {cache_file}")
+
+        print(f"💾 Unit registry cached to: {cache_path}")
     
     def print_summary(self):
         """Print a summary of discovered units and required models."""

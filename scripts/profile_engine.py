@@ -5,7 +5,9 @@ import pstats
 import io
 import sys
 import os
+from typing import cast
 import numpy as np
+from gymnasium.spaces import Discrete
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -44,7 +46,7 @@ def main():
     profiler = cProfile.Profile()
     profiler.enable()
     for _ in range(N_STEPS):
-        action = int(rng.integers(env.action_space.n))
+        action = int(rng.integers(cast(Discrete, env.action_space).n))
         obs, reward, term, trunc, info = env.step(action)
         if term or trunc:
             obs, _ = env.reset()

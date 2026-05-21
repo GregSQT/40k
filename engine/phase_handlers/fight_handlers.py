@@ -490,7 +490,12 @@ def _fight_pile_in_closest_enemy_snapshot(
         if int(cache_entry["player"]) == unit_player:
             continue
         enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-        cap = min(d_cap, d_min) if d_min is not None else d_cap
+        if d_min is not None and d_cap is not None:
+            cap = min(d_cap, d_min)
+        elif d_min is not None:
+            cap = d_min
+        else:
+            cap = d_cap
         d = min_distance_between_sets(unit_fp, enemy_fp, max_distance=cap if cap is not None else 0)
         if d_min is not None and d > d_min:
             continue
@@ -1046,7 +1051,7 @@ def _fight_prepare_footprint_offsets(
 
     Retourne ``None`` si le plateau est legacy / 1-hex / en erreur ; l'appelant doit alors utiliser ``compute_candidate_footprint``.
     """
-    cache: Dict[str, FightFootprintOffsetPair] = game_state.setdefault("_fight_fp_offset_pair_cache", {})
+    cache: Dict[Tuple[str, int], FightFootprintOffsetPair] = game_state.setdefault("_fight_fp_offset_pair_cache", {})
     uid = str(unit["id"])
     orient = int(unit["orientation"])
     cache_key = (uid, orient)
@@ -1770,6 +1775,8 @@ def _handle_fight_consolidation_resolution(
 
     skip = action.get("skip") is True
     moved_consolidation = False
+    dest_col: int = 0
+    dest_row: int = 0
     if not skip:
         if "destCol" not in action or "destRow" not in action:
             return False, {"error": "consolidation_requires_dest_or_skip", "unitId": unit_id}
@@ -2120,7 +2127,7 @@ def fight_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """Fight phase end - redirects to complete function"""
     return _fight_phase_complete(game_state)
 
-def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     Fight phase handler action routing with 3 sub-phases.
 
@@ -2407,7 +2414,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                     else:
                         raise ValueError(f"AI target selection failed for unit {unit_id}")
                 elif is_gym_training and auto_execution_allowed:
-                    first_target = valid_targets[0]
+                    first_target: Any = valid_targets[0]
                     if isinstance(first_target, dict):
                         action["targetId"] = first_target["id"]
                     else:
@@ -2451,8 +2458,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                         else:
                             raise ValueError(f"AI target selection failed for unit {unit_id}")
                     elif is_gym_training and auto_execution_allowed:
-                        first_target = valid_targets[0]
-                        action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
+                        first_target_g: Any = valid_targets[0]
+                        action["targetId"] = first_target_g["id"] if isinstance(first_target_g, dict) else first_target_g
                     else:
                         return False, {
                             "error": "target_id_required",

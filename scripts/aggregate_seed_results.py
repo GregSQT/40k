@@ -26,6 +26,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+
+from shared.data_validation import require_present
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
 
@@ -345,8 +347,8 @@ def compute_schedule_diagnostic(
             "checkpoints": checkpoints,
         }
 
-    p40 = float(checkpoints["p40"])
-    p80 = float(checkpoints["p80"])
+    p40 = float(require_present(checkpoints["p40"], "checkpoints.p40"))
+    p80 = float(require_present(checkpoints["p80"], "checkpoints.p80"))
     consumed_40 = (start_value - p40) / total_drop
     consumed_80 = (start_value - p80) / total_drop
 
@@ -369,7 +371,7 @@ def compute_schedule_diagnostic(
 
 def compute_aggregate(seed_rows: List[SeedSummary]) -> Dict[str, object]:
     valid_rows = [row for row in seed_rows if row.valid and row.robust_best is not None]
-    robust_values = [float(row.robust_best) for row in valid_rows]
+    robust_values = [float(require_present(row.robust_best, "row.robust_best")) for row in valid_rows]
 
     aggregate: Dict[str, object] = {
         "seeds_total": len(seed_rows),

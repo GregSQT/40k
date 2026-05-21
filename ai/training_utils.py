@@ -53,7 +53,7 @@ def check_gpu_availability():
         print(f"📊 GPU Devices: {device_count}")
         print(f"🎯 Current Device: {current_device} ({device_name})")
         print(f"💾 GPU Memory: {memory_gb:.1f} GB")
-        print(f"🚀 PyTorch CUDA Version: {torch.version.cuda}")
+        print(f"🚀 PyTorch CUDA Version: {getattr(torch, 'version').cuda}")
 
         # Force PyTorch to use GPU for Stable-Baselines3
         torch.cuda.set_device(current_device)
@@ -217,28 +217,28 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
                 env_rank=rank,
                 self_play_opponent_enabled=mix_enabled,
                 self_play_ratio_start=(
-                    float(opponent_mix_config["self_play_ratio_start"]) if mix_enabled else None
+                    float(opponent_mix_config["self_play_ratio_start"]) if mix_enabled and opponent_mix_config is not None else None
                 ),
                 self_play_ratio_end=(
-                    float(opponent_mix_config["self_play_ratio_end"]) if mix_enabled else None
+                    float(opponent_mix_config["self_play_ratio_end"]) if mix_enabled and opponent_mix_config is not None else None
                 ),
                 self_play_total_episodes=(
-                    int(opponent_mix_config["total_episodes"]) if mix_enabled else None
+                    int(opponent_mix_config["total_episodes"]) if mix_enabled and opponent_mix_config is not None else None
                 ),
                 self_play_warmup_episodes=(
-                    int(opponent_mix_config["warmup_episodes"]) if mix_enabled else None
+                    int(opponent_mix_config["warmup_episodes"]) if mix_enabled and opponent_mix_config is not None else None
                 ),
                 self_play_snapshot_path=(
-                    str(opponent_mix_config["snapshot_model_path"]) if mix_enabled else None
+                    str(opponent_mix_config["snapshot_model_path"]) if mix_enabled and opponent_mix_config is not None else None
                 ),
                 self_play_snapshot_refresh_episodes=(
-                    int(opponent_mix_config["snapshot_refresh_episodes"]) if mix_enabled else None
+                    int(opponent_mix_config["snapshot_refresh_episodes"]) if mix_enabled and opponent_mix_config is not None else None
                 ),
                 self_play_snapshot_device=(
-                    str(opponent_mix_config["snapshot_device"]) if mix_enabled else None
+                    str(opponent_mix_config["snapshot_device"]) if mix_enabled and opponent_mix_config is not None else None
                 ),
                 self_play_deterministic=(
-                    bool(opponent_mix_config["deterministic"]) if mix_enabled else False
+                    bool(opponent_mix_config["deterministic"]) if mix_enabled and opponent_mix_config is not None else False
                 ),
             )
         else:

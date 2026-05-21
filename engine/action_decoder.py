@@ -8,7 +8,8 @@ import hashlib
 import os
 import pickle
 import time
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
+from shared.data_validation import require_present
 from shared.data_validation import require_key
 from engine.game_utils import get_unit_by_id
 from engine.combat_utils import calculate_hex_distance, get_unit_coordinates, has_line_of_sight
@@ -48,7 +49,7 @@ class ActionDecoder:
             Dict[tuple[int, int], int],
         ] = {}
         self._wall_hexes_cache: tuple[frozenset, int] | None = None
-        self._deployment_pool_cache: Dict[int, tuple[set, List[tuple[int, int]]]] = {}
+        self._deployment_pool_cache: Dict[int, Tuple[set, List[Tuple[int, int]], np.ndarray, np.ndarray, np.ndarray]] = {}
         self._wall_grid_cache: Optional[np.ndarray] = None
 
     def reset_episode_caches(self) -> None:
@@ -111,7 +112,7 @@ class ActionDecoder:
     # ACTION MASKING
     # ============================================================================
     
-    def get_action_mask_and_eligible_units(self, game_state: Dict[str, Any]) -> tuple:
+    def get_action_mask_and_eligible_units(self, game_state: Dict[str, Any]) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
         """Return (mask, eligible_units). PERF: avoids recomputing eligible_units when both are needed."""
         eligible_units = self._get_eligible_units_for_current_phase(game_state)
         mask = self._build_mask_for_units(game_state["phase"], eligible_units, game_state)
@@ -424,7 +425,7 @@ class ActionDecoder:
         action_space_size: int,
     ) -> int:
         """Normalize action to int with strict type and range checks."""
-        context = {
+        context: Dict[str, Any] = {
             "phase": phase,
             "source": source,
             "raw_action_repr": repr(raw_action),
@@ -620,7 +621,7 @@ class ActionDecoder:
 
                 # Get unit to activate and build destinations
                 from engine.phase_handlers import movement_handlers
-                unit = get_unit_by_id(selected_unit_id, game_state)
+                unit = require_present(get_unit_by_id(selected_unit_id, game_state), f"unit {selected_unit_id}")
 
                 # Activate unit first so execute_action skips the redundant BFS rebuild
                 movement_handlers.movement_unit_activation_start(game_state, selected_unit_id)

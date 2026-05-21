@@ -16,7 +16,7 @@ import numpy as np
 from typing import Dict, List, Tuple, Set, Optional, Any
 
 # Import shared utilities
-from shared.data_validation import require_key
+from shared.data_validation import require_key, require_present
 from engine.combat_utils import calculate_hex_distance, normalize_coordinates, resolve_dice_value, set_unit_coordinates
 from engine.weapon_damage_cache import load_weapon_damage_table, stamp_weapon_keys, build_best_weapon_cache
 
@@ -41,6 +41,12 @@ from engine.reward_calculator import RewardCalculator
 from engine.game_state import GameStateManager
 from engine.macro_intents import INTENT_INVADE, MAX_OBJECTIVES, is_zone_intent_action, decode_zone_intent_action, get_nearest_objective_zone
 from engine.pve_controller import PvEController
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ai.step_logger import StepLogger
+    from ai.game_replay_logger import GameReplayLogger
+    from ai.metrics_tracker import W40KMetricsTracker
 
 # Global flag to ensure debug.log is cleared only once per training session
 _debug_log_cleared = False
@@ -406,8 +412,11 @@ class W40KEngine(gym.Env):
         # Store training system compatibility parameters
         self.quiet = quiet
         self.unit_registry = unit_registry
-        self.step_logger = None  # Will be set by training system if enabled
-        self.replay_logger = None  # Will be set by training system for replay capture
+        self.step_logger: Optional["StepLogger"] = None  # Will be set by training system if enabled
+        self.replay_logger: Optional["GameReplayLogger"] = None  # Will be set by training system for replay capture
+        self.is_evaluation_mode: bool = False  # Set by training system during evaluation
+        self._force_evaluation_mode: bool = False  # Set by training system during evaluation
+        self._metrics_tracker: Optional["W40KMetricsTracker"] = None  # Set by training system
         
         # Detect training context to suppress debug logs
         self.is_training = training_config_name in ["debug", "default", "conservative", "aggressive"]
@@ -696,9 +705,10 @@ class W40KEngine(gym.Env):
         self._deployment_random_mix_ratio = 0.0
         self._deployment_random_mix_apply_to = "agent_only"
 
-        if not isinstance(getattr(self, "training_config", None), dict):
+        if not isinstance(self.training_config, dict):
             return
-        mix_cfg = self.training_config.get("deployment_random_mix")
+        training_config: Dict[str, Any] = self.training_config
+        mix_cfg = training_config.get("deployment_random_mix")
         if mix_cfg is None:
             return
         if not isinstance(mix_cfg, dict):
@@ -783,7 +793,7 @@ class W40KEngine(gym.Env):
                 f"(got {apply_to!r})"
             )
 
-        total_episodes = require_key(self.training_config, "total_episodes")
+        total_episodes = require_key(training_config, "total_episodes")
         if not isinstance(total_episodes, int) or isinstance(total_episodes, bool):
             raise TypeError(
                 "training_config.total_episodes must be integer "
@@ -850,7 +860,7 @@ class W40KEngine(gym.Env):
             mapped_model_keys: Set[str] = set()
             for unit in units:
                 unit_type = require_key(unit, "unitType")
-                model_key = self.unit_registry.get_model_key(unit_type)
+                model_key = require_present(self.unit_registry, "unit_registry").get_model_key(unit_type)
                 if model_key in mapped_model_keys:
                     continue
                 reward_configs[model_key] = controlled_rewards
@@ -860,7 +870,7 @@ class W40KEngine(gym.Env):
         # Legacy mode: no controlled agent; load rewards per model key.
         for unit in units:
             unit_type = require_key(unit, "unitType")
-            model_key = self.unit_registry.get_model_key(unit_type)
+            model_key = require_present(self.unit_registry, "unit_registry").get_model_key(unit_type)
             if model_key in reward_configs:
                 continue
             agent_rewards = config_loader.load_agent_rewards_config(model_key)
@@ -872,7 +882,7 @@ class W40KEngine(gym.Env):
     # GYM INTERFACE - KEEP THESE CORE METHODS
     # ============================================================================
     
-    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[np.ndarray, Dict]:
+    def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Reset game state for new episode - gym.Env interface."""
 
         # Call parent reset for gym compliance
@@ -893,7 +903,7 @@ class W40KEngine(gym.Env):
 
         # RANDOM SCENARIO SELECTION: Pick a random scenario for this episode
         if should_reload_scenario:
-            self._reload_scenario(self._current_scenario_file)
+            self._reload_scenario(require_present(self._current_scenario_file, "_current_scenario_file"))
             # Rebuild reward configs for units in the new scenario.
             reward_configs = self._build_reward_configs_for_current_units()
             self.game_state["reward_configs"] = reward_configs
@@ -1293,8 +1303,9 @@ class W40KEngine(gym.Env):
         self._episode_step_calls = getattr(self, '_episode_step_calls', 0) + 1
 
         # CRITICAL: Check turn limit BEFORE processing any action
-        if hasattr(self, 'training_config'):
-            max_turns = self.training_config.get("max_turns_per_episode")
+        _tc = getattr(self, "training_config", None)
+        if _tc is not None:
+            max_turns = _tc.get("max_turns_per_episode")
             if max_turns and self.game_state["turn"] > max_turns:
                 # Turn limit exceeded - return terminated episode immediately
                 # CRITICAL: Set turn_limit_reached flag in game_state for winner determination
@@ -1556,8 +1567,8 @@ class W40KEngine(gym.Env):
                         start_pos = pre_action_positions[str(unit_id)]
                         # Use result destination
                         if isinstance(result, dict) and result.get("toCol") is not None and result.get("toRow") is not None:
-                            dest_col = result.get("toCol")
-                            dest_row = result.get("toRow")
+                            dest_col = int(result["toCol"])
+                            dest_row = int(result["toRow"])
                         else:
                             raise ValueError(
                                 f"Replay logger {action_type} missing destination in result: unit_id={unit_id}, result keys={list(result.keys())}"
@@ -1611,11 +1622,11 @@ class W40KEngine(gym.Env):
                             start_pos = pre_action_positions[str(unit_id)]
                         # Use result destination; do not use updated_unit
                             if isinstance(result, dict) and result.get("toCol") is not None and result.get("toRow") is not None:
-                                dest_col = result.get("toCol")
-                                dest_row = result.get("toRow")
+                                dest_col = int(result["toCol"])
+                                dest_row = int(result["toRow"])
                             elif isinstance(semantic_action, dict) and semantic_action.get("destCol") is not None and semantic_action.get("destRow") is not None:
-                                dest_col = semantic_action.get("destCol")
-                                dest_row = semantic_action.get("destRow")
+                                dest_col = int(semantic_action["destCol"])
+                                dest_row = int(semantic_action["destRow"])
                             else:
                                 raise ValueError(f"Replay logger charge missing destination: result.toCol={result.get('toCol') if isinstance(result, dict) else None}, result.toRow={result.get('toRow') if isinstance(result, dict) else None}, action.destCol={semantic_action.get('destCol') if isinstance(semantic_action, dict) else None}, action.destRow={semantic_action.get('destRow') if isinstance(semantic_action, dict) else None}")
                             self.replay_logger.log_charge(
@@ -4102,7 +4113,7 @@ class W40KEngine(gym.Env):
         current_unit = None
         if unit_id:
             current_unit = self._get_unit_by_id(unit_id)
-        
+
         # **FULL DELEGATION**: movement_handlers.execute_action(game_state, unit, action, config)
         success, result = movement_handlers.execute_action(self.game_state, current_unit, action, self.config)
         
@@ -4184,7 +4195,7 @@ class W40KEngine(gym.Env):
         else:
             # Handler returned non-tuple or wrong tuple length
             success = True
-            result = handler_response if isinstance(handler_response, dict) else {"error": "invalid_handler_response"}
+            result: Dict[str, Any] = handler_response if isinstance(handler_response, dict) else {"error": "invalid_handler_response"}
         
         _t_pe0: Optional[float] = None
         _t_pe1: Optional[float] = None
@@ -4367,8 +4378,9 @@ class W40KEngine(gym.Env):
             self.game_state["turn"] += 1
             
             # Check turn limit immediately after P1 completes turn
-            if hasattr(self, 'training_config'):
-                max_turns = self.training_config.get("max_turns_per_episode")
+            _tc = getattr(self, "training_config", None)
+            if _tc is not None:
+                max_turns = _tc.get("max_turns_per_episode")
                 if max_turns and self.game_state["turn"] > max_turns:
                     # Turn limit reached - mark game over and stop phase progression
                     self.game_state["game_over"] = True
@@ -4431,8 +4443,9 @@ class W40KEngine(gym.Env):
     def _check_game_over(self) -> bool:
         """Check if game is over - turn limit reached."""
         # Check turn limit first
-        if hasattr(self, 'training_config'):
-            max_turns = self.training_config.get("max_turns_per_episode")
+        training_config = getattr(self, "training_config", None)
+        if training_config is not None:
+            max_turns = training_config.get("max_turns_per_episode")
             if max_turns and self.game_state["turn"] > max_turns:
                 # CRITICAL: Flag turn limit reached for winner determination
                 self.game_state["turn_limit_reached"] = True

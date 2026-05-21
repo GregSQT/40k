@@ -9,7 +9,7 @@ All functions are O(1) per call unless documented otherwise.
 """
 
 import math
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -1043,7 +1043,7 @@ def _footprint_square(
 
 def build_occupation_map(
     units_cache: Dict[str, Any],
-    get_footprint: "callable",
+    get_footprint: Callable[..., Set[Tuple[int, int]]],
 ) -> Dict[Tuple[int, int], str]:
     """Build sparse cell→unit_id map from all alive units.
 

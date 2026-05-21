@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, cast
 
 import pytest
 
@@ -196,7 +196,7 @@ class TestResolveDiceValue:
     def test_invalid_float_raises_type_error(self):
         """dice_float : type float → TypeError."""
         with pytest.raises(TypeError):
-            resolve_dice_value(3.5, "fight_test")
+            resolve_dice_value(cast(int, 3.5), "fight_test")
 
     def test_invalid_string_raises_value_error(self):
         """dice_invalid_str : expression non supportée → ValueError."""

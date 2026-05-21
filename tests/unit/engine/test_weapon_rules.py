@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -79,7 +80,7 @@ def test_validate_weapon_rules_field_enforces_array_and_required_key(tmp_path: P
 
 def test_weapon_rules_applier_passes_through_context() -> None:
     registry = type("R", (), {})()
-    applier = rules.WeaponRulesApplier(registry)
+    applier = rules.WeaponRulesApplier(cast(rules.WeaponRulesRegistry, registry))
     dummy_rule = rules.ParsedWeaponRule("ASSAULT", None, {"name": "Assault", "description": "", "has_parameter": False})
     context = {"shots": 2}
     result = applier.apply_rules({"_parsed_rules": [dummy_rule]}, context)

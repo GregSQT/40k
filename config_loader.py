@@ -120,7 +120,7 @@ class ConfigLoader:
 
     def get_reward_value(self, unit_type: str, action: str) -> float:
         """Get specific reward value - raises error if missing."""
-        rewards_config = self.load_rewards_config()
+        rewards_config = self.load_rewards_config(unit_type)
         
         if unit_type not in rewards_config:
             available_types = list(rewards_config.keys())
@@ -224,7 +224,7 @@ class ConfigLoader:
         return self.load_config("unit_definitions", force_reload=False)
     
     # ─── Agent-specific config loading ──────────────────────────────────
-    def load_agent_training_config(self, agent_key: str, phase: str = None) -> Dict[str, Any]:
+    def load_agent_training_config(self, agent_key: str, phase: Optional[str] = None) -> Dict[str, Any]:
         """Load agent-specific training configuration.
         
         Args:

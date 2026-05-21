@@ -23,7 +23,7 @@ All bots implement all 4 phases: MOVE, SHOOT, CHARGE, FIGHT
 
 import random
 from typing import Dict, List, Tuple, Any, Optional
-from shared.data_validation import require_key
+from shared.data_validation import require_key, require_present
 from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
 from engine.hex_utils import min_distance_between_sets
 from engine.phase_handlers.shared_utils import (
@@ -958,7 +958,7 @@ class TacticalBot:
         """
         self.randomness = max(0.0, min(1.0, randomness))
 
-    def select_action(self, valid_actions: List[int], game_state: Dict = None, phase: str = None) -> int:
+    def select_action(self, valid_actions: List[int], game_state: Optional[Dict] = None, phase: Optional[str] = None) -> int:
         """
         Select action based on current phase and game state.
 
@@ -980,7 +980,7 @@ class TacticalBot:
         elif phase == 'shoot':
             return self._select_shoot_action(valid_actions, game_state)
         elif phase == 'charge':
-            return self._select_charge_action(valid_actions, game_state)
+            return self._select_charge_action(valid_actions, require_present(game_state, "game_state"))
         elif phase == 'fight':
             return self._select_fight_action(valid_actions, game_state)
         else:
@@ -995,7 +995,7 @@ class TacticalBot:
                 return 0
             return valid_actions[0]
 
-    def _select_move_action(self, valid_actions: List[int], game_state: Dict) -> int:
+    def _select_move_action(self, valid_actions: List[int], game_state: Optional[Dict]) -> int:
         """Movement phase: advance if out of range, reposition for LoS."""
         # Always prefer moving if we can improve position
         if 0 in valid_actions:
@@ -1004,7 +1004,7 @@ class TacticalBot:
             return 7
         return valid_actions[0] if valid_actions else 7
 
-    def _select_shoot_action(self, valid_actions: List[int], game_state: Dict) -> int:
+    def _select_shoot_action(self, valid_actions: List[int], game_state: Optional[Dict]) -> int:
         """Shooting phase: always shoot if targets available."""
         if 4 in valid_actions:  # Shoot
             return 4
@@ -1028,7 +1028,7 @@ class TacticalBot:
             return 7
         return valid_actions[0] if valid_actions else 7
 
-    def _select_fight_action(self, valid_actions: List[int], game_state: Dict) -> int:
+    def _select_fight_action(self, valid_actions: List[int], game_state: Optional[Dict]) -> int:
         """Fight phase: always fight when in melee."""
         if 6 in valid_actions:  # Fight
             return 6
@@ -1037,7 +1037,7 @@ class TacticalBot:
         return valid_actions[0] if valid_actions else 7
 
     def select_movement_destination(self, unit: Dict, valid_destinations: List[Tuple[int, int]],
-                                     game_state: Dict = None) -> Tuple[int, int]:
+                                     game_state: Optional[Dict] = None) -> Tuple[int, int]:
         """
         Select best movement destination.
 
@@ -1073,7 +1073,7 @@ class TacticalBot:
         # Otherwise, move toward optimal shooting range
         return self._find_best_offensive_position(unit, valid_destinations, nearest_enemy, game_state)
 
-    def select_shooting_target(self, valid_targets: List[str], game_state: Dict = None) -> str:
+    def select_shooting_target(self, valid_targets: List[str], game_state: Optional[Dict] = None) -> str:
         """
         Select best shooting target.
 
@@ -1122,7 +1122,7 @@ class TacticalBot:
 
         return best_target
 
-    def select_charge_target(self, valid_targets: List[str], game_state: Dict = None) -> str:
+    def select_charge_target(self, valid_targets: List[str], game_state: Optional[Dict] = None) -> str:
         """
         Select best charge target.
 
@@ -1169,7 +1169,7 @@ class TacticalBot:
 
         return best_target
 
-    def select_fight_target(self, valid_targets: List[str], game_state: Dict = None) -> str:
+    def select_fight_target(self, valid_targets: List[str], game_state: Optional[Dict] = None) -> str:
         """Select best melee target - same logic as shooting but for melee."""
         return self.select_shooting_target(valid_targets, game_state)
 

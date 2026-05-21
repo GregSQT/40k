@@ -1,10 +1,13 @@
+from concurrent.futures import ProcessPoolExecutor
 from itertools import chain, repeat
 from types import SimpleNamespace
+from typing import cast
 
 import numpy as np
 import pytest
 
 import ai.bot_evaluation as be
+from shared.data_validation import require_present
 
 
 class _DummyCfgLoader:
@@ -152,7 +155,7 @@ def test_build_eval_obs_normalizer_uses_saved_stats(monkeypatch: pytest.MonkeyPa
         vec_normalize_enabled=True,
         vec_model_path="/tmp/vec.pkl",
     )
-    out = normalizer(np.array([1.0, 2.0], dtype=np.float32))
+    out = require_present(normalizer, "normalizer")(np.array([1.0, 2.0], dtype=np.float32))
     assert np.allclose(out, np.array([11.0, 12.0], dtype=np.float32))
 
 
@@ -169,7 +172,7 @@ def test_build_eval_obs_normalizer_for_worker_normalizes_and_squeezes(
         vec_normalize_enabled=True,
         vec_eval_enabled=True,
     )
-    out = normalizer(np.array([3.0, 4.0], dtype=np.float32))
+    out = require_present(normalizer, "normalizer")(np.array([3.0, 4.0], dtype=np.float32))
     assert np.allclose(out, np.array([6.0, 8.0], dtype=np.float32))
 
 
@@ -439,7 +442,7 @@ def test_collect_parallel_results_with_timeouts_aborts_pool_on_hung_task(
     }
 
     out = be._collect_parallel_results_with_timeouts(
-        pool=object(),
+        pool=cast(ProcessPoolExecutor, object()),
         future_to_task=task_map,
         task_timeout_seconds=1,
     )
@@ -454,7 +457,7 @@ def test_collect_parallel_results_with_timeouts_aborts_pool_on_hung_task(
 def test_collect_parallel_results_with_timeouts_rejects_non_positive_timeout() -> None:
     with pytest.raises(ValueError, match=r"must be > 0"):
         be._collect_parallel_results_with_timeouts(
-            pool=object(),
+            pool=cast(ProcessPoolExecutor, object()),
             future_to_task={},
             task_timeout_seconds=0,
         )

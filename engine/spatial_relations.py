@@ -152,9 +152,11 @@ def move_anchor_violates_engagement_clearance(
     if engagement_zone_ez <= 1:
         if enemy_adjacent_hexes is None:
             ck = f"enemy_adjacent_hexes_player_{mover_player}"
-            enemy_adjacent_hexes = require_key(game_state, ck)
+            adjacent_hexes: Set[Tuple[int, int]] = require_key(game_state, ck)
+        else:
+            adjacent_hexes = enemy_adjacent_hexes
         for c, r in candidate_fp:
-            if (c, r) in enemy_adjacent_hexes:
+            if (c, r) in adjacent_hexes:
                 return True
         return False
 

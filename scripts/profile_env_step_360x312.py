@@ -29,7 +29,7 @@ import pstats
 import sys
 import time
 from collections import defaultdict
-from typing import Any, DefaultDict, Dict, List, Sequence, Tuple
+from typing import Any, DefaultDict, Dict, List, Sequence, Tuple, cast
 
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _project_root not in sys.path:
@@ -218,11 +218,12 @@ def _top_cum_functions(profile: cProfile.Profile, limit: int) -> List[Dict[str, 
     finally:
         if os.path.isfile(prof_path):
             os.remove(prof_path)
-    if not stats.stats:
+    stats_data = cast(Dict[Any, Any], getattr(stats, "stats"))
+    if not stats_data:
         return []
     stats.strip_dirs()
     rows: List[Tuple[float, int, str]] = []
-    for (fname, line, func), (_cc, nc, _tt, ct, _callers) in stats.stats.items():
+    for (fname, line, func), (_cc, nc, _tt, ct, _callers) in stats_data.items():
         rows.append((float(ct), int(nc), f"{fname}:{line}:{func}"))
     rows.sort(key=lambda x: x[0], reverse=True)
     return [{"cumtime_s": r[0], "ncalls": r[1], "where": r[2]} for r in rows[:limit]]

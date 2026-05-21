@@ -52,6 +52,8 @@ def _import_roster_aggregate() -> Any:
 
     path = PROJECT_ROOT / "scripts" / "roster_aggregate_rankings.py"
     spec = importlib.util.spec_from_file_location("roster_aggregate_rankings", path)
+    if spec is None:
+        raise RuntimeError("importlib spec is None")
     mod = importlib.util.module_from_spec(spec)
     loader = spec.loader
     if loader is None:

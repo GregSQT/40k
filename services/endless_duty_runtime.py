@@ -15,7 +15,7 @@ import copy
 import json
 import random
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance, resolve_dice_value
@@ -831,7 +831,7 @@ def _map_old_units_by_slot(target_profiles: Dict[str, Any], old_alive_units: Lis
 
 def _extract_slot_unit_ids(units: List[Dict[str, Any]]) -> Dict[str, Any]:
     sorted_units = sorted(units, key=lambda u: int(require_key(u, "id")))
-    slot_ids = {"leader": None, "melee": None, "range": None}
+    slot_ids: Dict[str, Optional[str]] = {"leader": None, "melee": None, "range": None}
     if sorted_units:
         slot_ids["leader"] = str(require_key(sorted_units[0], "id"))
     if len(sorted_units) > 1:

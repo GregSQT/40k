@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 from engine.phase_handlers.shooting_handlers import _invalidate_los_cache_for_moved_unit
 
@@ -65,7 +65,7 @@ class TestInvalidateLosCacheForMovedUnit:
             "los_cache": {("1", "2"): 1.0, (1, 2): 0.5},
             "hex_los_cache": {},
         }
-        _invalidate_los_cache_for_moved_unit(gs, 1)
+        _invalidate_los_cache_for_moved_unit(gs, cast(str, 1))
         # Both string "1" and int 1 keys involving unit 1 removed
         assert ("1", "2") not in gs["los_cache"]
         assert (1, 2) not in gs["los_cache"]

@@ -24,10 +24,10 @@ from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 import numpy as np
 import torch
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any, List, cast
 from stable_baselines3.common.callbacks import BaseCallback
 
-from shared.data_validation import require_key
+from shared.data_validation import require_key, require_present
 from ai.vec_normalize_utils import get_vec_normalize_path
 from config_loader import get_config_loader
 
@@ -40,6 +40,8 @@ try:
     EVALUATION_BOTS_AVAILABLE = True
 except ImportError:
     EVALUATION_BOTS_AVAILABLE = False
+    RandomBot = GreedyBot = DefensiveBot = ControlBot = None
+    AggressiveSmartBot = DefensiveSmartBot = AdaptiveBot = None
 
 ALL_BOT_NAMES = frozenset([
     "random", "greedy", "defensive", "control",
@@ -150,7 +152,7 @@ class EntropyScheduleCallback(BaseCallback):
     def _on_training_start(self) -> None:
         progress = min(1.0, self.episode_count / self.total_episodes)
         initial_ent = self.start_ent + (self.end_ent - self.start_ent) * progress
-        self.model.ent_coef = initial_ent
+        cast(Any, self.model).ent_coef = initial_ent
 
     def _on_step(self) -> bool:
         # Detect episode end using dones array (more reliable than info dict)
@@ -164,7 +166,7 @@ class EntropyScheduleCallback(BaseCallback):
                 # Linear interpolation: ent = start + (end - start) * progress
                 progress = min(1.0, self.episode_count / self.total_episodes)
                 new_ent = self.start_ent + (self.end_ent - self.start_ent) * progress
-                self.model.ent_coef = new_ent
+                cast(Any, self.model).ent_coef = new_ent
 
                 if self.verbose > 0 and self.num_timesteps - self.last_update_step >= 1000:
                     # Keep internal throttling state in sync without printing a separate line.
@@ -176,8 +178,8 @@ class EpisodeTerminationCallback(BaseCallback):
     """Callback to terminate training after exact episode count."""
 
     def __init__(self, max_episodes: int, expected_timesteps: int, verbose: int = 0,
-                 total_episodes: int = None, scenario_info: str = None,
-                 disable_early_stopping: bool = False, global_start_time: float = None,
+                 total_episodes: Optional[int] = None, scenario_info: Optional[str] = None,
+                 disable_early_stopping: bool = False, global_start_time: Optional[float] = None,
                  phase_label: Optional[str] = None,
                  phase_episode_offset: int = 0,
                  gate_display_state: Optional[Dict[str, Any]] = None,
@@ -221,7 +223,7 @@ class EpisodeTerminationCallback(BaseCallback):
         self.recent_episode_durations_seconds: deque[float] = deque(
             maxlen=self.episode_duration_window_size
         )
-        self._episode_action_counts_by_env = None
+        self._episode_action_counts_by_env: Optional[List[int]] = None
         self._episode_wall_time_by_env: Optional[List[float]] = None
         self._last_step_perf_time: Optional[float] = None
         self._ema_env_actions_per_second: Optional[float] = None
@@ -353,6 +355,8 @@ class EpisodeTerminationCallback(BaseCallback):
             raise ValueError(
                 "Environment count changed during training; cannot maintain per-env episode timing/action tracking"
             )
+        if self._episode_wall_time_by_env is None:
+            raise RuntimeError("Per-env wall time tracking not initialized")
 
         for env_index in range(n_envs):
             self._episode_action_counts_by_env[env_index] += 1
@@ -581,7 +585,7 @@ class EpisodeBasedEvalCallback(BaseCallback):
                     import torch
                     obs_tensor = torch.FloatTensor(self.locals['obs']).to(self.model.device)
                     with torch.no_grad():
-                        q_values = self.model.q_net(obs_tensor)
+                        q_values = cast(Any, self.model).q_net(obs_tensor)
                         mean_q_value = q_values.mean().item()
                         self.q_value_history.append(mean_q_value)
                         if len(self.q_value_history) > self.max_loss_history:
@@ -718,9 +722,9 @@ class EpisodeBasedEvalCallback(BaseCallback):
 class MetricsCollectionCallback(BaseCallback):
     """Callback to collect training metrics and send to W40KMetricsTracker."""
     
-    def __init__(self, metrics_tracker, model, controlled_agent=None, verbose: int = 0):
+    def __init__(self, metrics_tracker: Any, model: Any, controlled_agent: Any = None, verbose: int = 0):
         super().__init__(verbose)
-        self.metrics_tracker = metrics_tracker
+        self.metrics_tracker: Any = metrics_tracker
         self.model = model
         self.controlled_agent = controlled_agent  # CRITICAL FIX: Store controlled_agent for bot evaluation
         self.episode_count = 0
@@ -853,7 +857,7 @@ class MetricsCollectionCallback(BaseCallback):
                     # Explicitly expose current entropy coefficient in captured stats.
                     # This guarantees TensorBoard logging even when SB3 logger keys vary.
                     if hasattr(_model, "ent_coef"):
-                        ent_coef_value = _model.ent_coef
+                        ent_coef_value = cast(Any, _model).ent_coef
                         if isinstance(ent_coef_value, torch.Tensor):
                             ent_coef_value = float(ent_coef_value.detach().item())
                         else:
@@ -1070,7 +1074,7 @@ class MetricsCollectionCallback(BaseCallback):
 
                     # CHARGE SUCCESS TRACKING: Log successful charges (optional per step)
                     if is_controlled_action and info.get('charge_succeeded', False):  # get allowed
-                        self.metrics_tracker.log_combat_kill('charge')
+                        cast(Any, self.metrics_tracker).log_combat_kill('charge')
 
                     # Handle episode end - check for 'episode' key (Monitor wrapper adds this)
                     if 'episode' in info:
@@ -1106,11 +1110,11 @@ class MetricsCollectionCallback(BaseCallback):
                     obs_tensor = torch.FloatTensor(self.locals['obs']).to(self.model.device)
                 else:
                     # Create dummy observation matching env observation space
-                    dummy_obs = torch.zeros((1, self.model.observation_space.shape[0])).to(self.model.device)
+                    dummy_obs = torch.zeros((1, require_present(self.model.observation_space.shape, "observation_space.shape")[0])).to(self.model.device)
                     obs_tensor = dummy_obs
                 
                 with torch.no_grad():
-                    q_values = self.model.q_net(obs_tensor)
+                    q_values = cast(Any, self.model).q_net(obs_tensor)
                     mean_q_value = q_values.mean().item()
                     
                     # Track history
@@ -1142,10 +1146,10 @@ class MetricsCollectionCallback(BaseCallback):
             if 'train/loss' in self.model.logger.name_to_value:
                 step_data['loss'] = self.model.logger.name_to_value['train/loss']
         if hasattr(self.model, 'exploration_rate'):
-            step_data['exploration_rate'] = self.model.exploration_rate
+            step_data['exploration_rate'] = cast(Any, self.model).exploration_rate
         
         if step_data:
-            self.metrics_tracker.log_training_step(step_data)
+            cast(Any, self.metrics_tracker).log_training_step(step_data)
         
         # NOTE: PPO training metrics are captured in _on_rollout_start()
         # SB3 only populates model.logger.name_to_value during train() which happens BETWEEN rollouts
@@ -1176,7 +1180,7 @@ class MetricsCollectionCallback(BaseCallback):
 
         # GAMMA MONITORING: Track discount factor effects
         if hasattr(self.model, 'gamma'):
-            gamma = self.model.gamma
+            gamma = cast(Any, self.model).gamma
            
             # Calculate temporal metrics
             immediate_reward_ratio = self._calculate_immediate_vs_future_ratio(info)
@@ -1409,8 +1413,8 @@ class MetricsCollectionCallback(BaseCallback):
         immediate_actions = 0  # Shooting, direct attacks
         future_actions = 0     # Movement, positioning
         
-        if hasattr(self.training_env, 'envs') and len(self.training_env.envs) > 0:
-            env = self.training_env.envs[0]
+        if hasattr(self.training_env, 'envs') and len(cast(Any, self.training_env).envs) > 0:
+            env = cast(Any, self.training_env).envs[0]
             if hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'game_state'):
                 gs = env.unwrapped.game_state
                 action_logs = gs['action_logs']  # engine always sets it
@@ -1438,9 +1442,9 @@ class BotEvaluationCallback(BaseCallback):
     """Callback to test agent against evaluation bots with best model saving"""
 
     def __init__(self, eval_freq: int = 5000, n_eval_episodes: int = 20,
-                 best_model_save_path: str = None, metrics_tracker=None,
+                 best_model_save_path: Optional[str] = None, metrics_tracker: Any = None,
                  use_episode_freq: bool = False, verbose: int = 1,
-                 training_config_name: str = None, rewards_config_name: str = None,
+                 training_config_name: Optional[str] = None, rewards_config_name: Optional[str] = None,
                  save_best_robust: bool = False, robust_window: int = 3,
                  save_best_robust_seed: bool = False,
                  robust_seed_value: Optional[int] = None,
@@ -1632,9 +1636,9 @@ class BotEvaluationCallback(BaseCallback):
         if EVALUATION_BOTS_AVAILABLE:
             # Initialize bots with stochasticity to prevent overfitting (15% random actions)
             self.bots = {
-                'random': RandomBot(),
-                'greedy': GreedyBot(randomness=0.15),
-                'defensive': DefensiveBot(randomness=0.15)
+                'random': cast(Any, RandomBot)(),
+                'greedy': cast(Any, GreedyBot)(randomness=0.15),
+                'defensive': cast(Any, DefensiveBot)(randomness=0.15)
             }
         else:
             self.bots = {}
@@ -1703,17 +1707,17 @@ class BotEvaluationCallback(BaseCallback):
             (
                 "combined",
                 combined_score,
-                float(self.model_gating_min_combined),
+                float(require_present(self.model_gating_min_combined, "model_gating_min_combined")),
             ),
             (
                 "worst_bot",
                 worst_bot_score,
-                float(self.model_gating_min_worst_bot),
+                float(require_present(self.model_gating_min_worst_bot, "model_gating_min_worst_bot")),
             ),
             (
                 "worst_scenario_combined",
                 worst_scenario_combined,
-                float(self.model_gating_min_worst_scenario_combined),
+                float(require_present(self.model_gating_min_worst_scenario_combined, "model_gating_min_worst_scenario_combined")),
             ),
         ]
         gate_pass = all(actual >= threshold for _, actual, threshold in checks)
@@ -1845,7 +1849,7 @@ class BotEvaluationCallback(BaseCallback):
         else:
             filename = f"{agent_key}_robust_{robust_score_str}"
         model_base_path = os.path.join(
-            self.best_model_save_path,
+            require_present(self.best_model_save_path, "best_model_save_path"),
             filename
         )
         return self._ensure_zip_path(model_base_path)
@@ -1853,12 +1857,12 @@ class BotEvaluationCallback(BaseCallback):
     def _build_canonical_model_path(self) -> str:
         """Build canonical model path model_<agent>.zip."""
         agent_key = self._infer_agent_key()
-        return os.path.join(self.best_model_save_path, f"model_{agent_key}.zip")
+        return os.path.join(require_present(self.best_model_save_path, "best_model_save_path"), f"model_{agent_key}.zip")
 
     def _get_canonical_robust_meta_path(self) -> str:
         """Path to sidecar file storing robust score of canonical model."""
         agent_key = self._infer_agent_key()
-        return os.path.join(self.best_model_save_path, f"model_{agent_key}_robust_meta.json")
+        return os.path.join(require_present(self.best_model_save_path, "best_model_save_path"), f"model_{agent_key}_robust_meta.json")
 
     def _read_canonical_robust_score(self) -> Optional[float]:
         """Return robust score of current canonical model, or None if unknown."""

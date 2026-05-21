@@ -25,7 +25,7 @@ class WeaponRulesRegistry:
     Single source of truth for weapon rule definitions.
     """
     
-    def __init__(self, rules_file_path: str = None):
+    def __init__(self, rules_file_path: Optional[str] = None):
         """
         Initialize weapon rules registry.
         
@@ -34,9 +34,11 @@ class WeaponRulesRegistry:
         """
         if rules_file_path is None:
             project_root = Path(__file__).parent.parent.parent
-            rules_file_path = project_root / "config" / "weapon_rules.json"
-        
-        self._rules_file_path = Path(rules_file_path)
+            resolved_path: Path = project_root / "config" / "weapon_rules.json"
+        else:
+            resolved_path = Path(rules_file_path)
+
+        self._rules_file_path = resolved_path
         self._rules: Dict[str, Dict[str, Any]] = {}
         self._load_rules()
     

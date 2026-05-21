@@ -4,9 +4,9 @@ Utilise AnalyzerState (state) et AnalyzerConfig (config) pour tout état mutable
 """
 
 import re
-from typing import Dict
+from typing import Dict, List, Tuple, Optional
 
-from shared.data_validation import require_key
+from shared.data_validation import require_key, require_present
 from engine.combat_utils import calculate_hex_distance
 
 from ai.analyzer_state import AnalyzerState
@@ -48,7 +48,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
     )
 
     stats = state.stats
-    unit_id: str = None  # may be set from unit_start or deploy lines
+    unit_id: Optional[str] = None  # may be set from unit_start or deploy lines
 
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
@@ -153,7 +153,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             # Parse unit starting positions
             unit_start_match = re.match(r'.*Unit (\d+) \((\w+)\) P(\d+): Starting position \((-?\d+),\s*(-?\d+)\)', line)
             if unit_start_match:
-                unit_id = unit_start_match.group(1)
+                unit_id = str(unit_start_match.group(1))
                 unit_type = unit_start_match.group(2)
                 player = int(unit_start_match.group(3))
                 col = int(unit_start_match.group(4))
@@ -185,7 +185,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             )
             if deploy_match:
                 player = int(deploy_match.group(1))
-                unit_id = deploy_match.group(2)
+                unit_id = str(deploy_match.group(2))
                 unit_type = state.unit_types.get(unit_id)
                 if unit_type is None:
                     raise KeyError(f"Unit {unit_id} missing unit type before deployment parse")
@@ -288,6 +288,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 player = int(match.group(2))
                 phase = match.group(3)
                 action_desc = match.group(4)
+                is_reactive_move = False
                 success = match.group(5) == 'SUCCESS'
                 step_marker_present = match.group(6) is not None
                 step_inc = match.group(6) == 'YES' if step_marker_present else True
@@ -806,6 +807,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 _position_cache_set(state.unit_positions, reactive_unit_id, to_col, to_row)
 
                 # Determine action type and validate rules
+                action_unit_id = require_present(unit_id, "unit_id")
                 is_shoot_action = re.search(
                     r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
                     r'(?:\s+\[RAPID(?: |_)?FIRE:(\d+)\])?\s+(?:at\s+)?Unit\s+\d+',
@@ -823,21 +825,21 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     re.IGNORECASE
                 ):
                         action_type = 'shoot'
-                        handle_shoot(state, config, line, action_desc, unit_id, player, turn, phase, step_marker_present, step_inc)
+                        handle_shoot(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)
                 elif " WAIT" in action_desc:
                         action_type = 'wait'
-                        if handle_wait(state, config, line, action_desc, unit_id, player, turn, phase):
+                        if handle_wait(state, config, line, action_desc, action_unit_id, player, turn, phase):
                             continue
                 elif " SKIP" in action_desc:
                         action_type = 'skip'
                         handle_skip(state, line, action_desc, player, turn, phase)
                 elif "ADVANCED from" in action_desc:
                         action_type = 'advance'
-                        if handle_advance(state, config, line, action_desc, unit_id, player, turn, phase):
+                        if handle_advance(state, config, line, action_desc, action_unit_id, player, turn, phase):
                             continue
                 elif re.search(r"CHARGED(?:\s+(?:\([A-Za-z0-9_ ]+\)|\[[A-Za-z0-9_ ]+\]))?\s+Unit", action_desc):
                         action_type = 'charge'
-                        handle_charge(state, config, line, action_desc, unit_id, player, turn, phase)
+                        handle_charge(state, config, line, action_desc, action_unit_id, player, turn, phase)
                 elif (
                     "MOVED from" in action_desc
                     or "MOVED AFTER SHOOTING" in action_desc
@@ -848,11 +850,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         fled_match_check = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\) FLED from', action_desc)
                         if fled_match_check:
                             action_type = 'fled'
-                        if handle_move_or_fled(state, config, line, action_desc, unit_id, player, turn, phase):
+                        if handle_move_or_fled(state, config, line, action_desc, action_unit_id, player, turn, phase):
                             continue
                 elif "FOUGHT Unit" in action_desc:
                         action_type = 'fight'
-                        handle_fight(state, config, line, action_desc, unit_id, player, turn, phase, step_marker_present, step_inc)
+                        handle_fight(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)
                 else:
                     action_type = 'other'
 

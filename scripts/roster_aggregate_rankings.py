@@ -49,12 +49,12 @@ BOT_FILES_P1EXCLUDE: Tuple[str, ...] = (
     "holdout_hard_matchups_aggressive_smart_p1exclude.json",
     "holdout_hard_matchups_defensive_p1exclude.json",
 )
-BOT_LABELS: Tuple[str, ...] = (
+BOT_LABELS: Tuple[str, str, str] = (
     "mean_greedy",
     "mean_defensive_smart",
     "mean_adaptive",
 )
-BOT_LABELS_P1EXCLUDE: Tuple[str, ...] = (
+BOT_LABELS_P1EXCLUDE: Tuple[str, str, str] = (
     "mean_adaptive",
     "mean_aggressive_smart",
     "mean_defensive",

@@ -11,7 +11,7 @@ unités portant les bonnes UNIT_RULES.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pytest
 
@@ -44,7 +44,7 @@ def _unit_rule(rule_id: str, display_name: str = "Test Rule") -> Dict[str, Any]:
     }
 
 
-def _attacker(uid: int, col: int, row: int, rules: List[Dict] = None, ap: int = 0) -> Dict[str, Any]:
+def _attacker(uid: int, col: int, row: int, rules: Optional[List[Dict]] = None, ap: int = 0) -> Dict[str, Any]:
     return {
         "id": uid,
         "player": 1,

@@ -282,6 +282,8 @@ class ScenarioManager:
         if num_agents < 2:
             raise ValueError(f"Need at least 2 agents for training rotation, got {num_agents}")
 
+        return matchups
+
     def get_phase_based_training_rotation(self, total_episodes: int, phase: str) -> List[TrainingMatchup]:
         """
         Generate phase-specific training rotation for 3-phase training plan.
@@ -558,7 +560,7 @@ class ScenarioManager:
         
         return balance_analysis
 
-    def save_scenario_to_file(self, scenario: Dict[str, Any], filepath: str = None) -> str:
+    def save_scenario_to_file(self, scenario: Dict[str, Any], filepath: Optional[str] = None) -> str:
         """Save generated scenario to file."""
         if filepath is None:
             timestamp = self._get_timestamp()

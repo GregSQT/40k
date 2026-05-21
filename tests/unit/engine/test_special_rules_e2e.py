@@ -10,7 +10,7 @@ Couvre via _attack_sequence_rng avec dés fixés par monkeypatch :
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pytest
 
@@ -22,7 +22,7 @@ from engine.phase_handlers.shared_utils import build_units_cache
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _weapon(rules: list = None, atk: int = 4, str_: int = 4, ap: int = 0, dmg: int = 2) -> Dict[str, Any]:
+def _weapon(rules: Optional[list] = None, atk: int = 4, str_: int = 4, ap: int = 0, dmg: int = 2) -> Dict[str, Any]:
     return {
         "ATK": atk,
         "STR": str_,

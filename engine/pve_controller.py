@@ -5,7 +5,7 @@ pve_controller.py - PvE mode AI opponent
 
 import numpy as np
 import os
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List, cast
 from engine.combat_utils import calculate_hex_distance, calculate_pathfinding_distance, normalize_coordinates, get_unit_coordinates
 from engine.phase_handlers.shared_utils import is_unit_alive
 from shared.data_validation import require_key
@@ -25,6 +25,12 @@ class PvEController:
         self.macro_model_key = None
         self.unit_registry = unit_registry
         self.quiet = config.get("quiet", True)
+        # Members used by model-driven selection paths, populated at runtime by the
+        # owning engine/training harness when PvE runs against a trained model.
+        self._ai_model: Any = None
+        self._build_observation: Any = None
+        self._convert_gym_action: Any = None
+        self._get_unit_by_id: Any = None
     
     # ============================================================================
     # MODEL LOADING
@@ -152,7 +158,7 @@ class PvEController:
         if isinstance(micro_prediction, tuple) and len(micro_prediction) >= 1:
             predicted_action = micro_prediction[0]
         elif hasattr(micro_prediction, 'item'):
-            predicted_action = micro_prediction.item()
+            predicted_action = cast(Any, micro_prediction).item()
         else:
             predicted_action = micro_prediction
 

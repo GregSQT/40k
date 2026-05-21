@@ -217,6 +217,8 @@ def create_log_entry(
         )
     elif entry_type == "death" and (target_unit or acting_unit):
         unit = target_unit or acting_unit
+        if unit is None:
+            raise KeyError("death entry missing both target_unit and acting_unit")
         if "id" not in unit:
             raise KeyError("unit missing required 'id' field")
         
@@ -346,8 +348,12 @@ def get_event_icon(event_type: str) -> str:
 
 def get_event_type_class(event: Union[BaseLogEntry, Dict]) -> str:
     """Get CSS class for event type (for display purposes)"""
-    event_type = event.type if hasattr(event, 'type') else event.get('type', '')
-    message = event.message if hasattr(event, 'message') else event.get('message', '')
+    if isinstance(event, BaseLogEntry):
+        event_type = event.type
+        message = event.message
+    else:
+        event_type = event.get('type', '')
+        message = event.get('message', '')
     
     if event_type == 'turn_change':
         return 'game-log-entry--turn'

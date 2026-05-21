@@ -28,6 +28,7 @@ class GameStateManager:
     def __init__(self, config: Dict[str, Any], unit_registry=None):
         self.config = config
         self.unit_registry = unit_registry
+        self.training_config: Optional[Dict[str, Any]] = None
     
     # ============================================================================
     # UNIT MANAGEMENT
@@ -1055,6 +1056,15 @@ class GameStateManager:
 
     def _load_shared_walls_from_ref(self, wall_ref: Any, scenario_file: str) -> List[List[int]]:
         """Load shared wall_hexes file referenced by scenario wall_ref."""
+        if isinstance(wall_ref, str) and wall_ref.strip() == "random":
+            from config_loader import get_config_loader
+            cols, rows = get_config_loader().get_board_size()
+            walls_dir = Path(__file__).resolve().parent.parent / "config" / "board" / f"{cols}x{rows}" / "walls"
+            candidates = sorted(p for p in walls_dir.glob("walls-*.json") if p.stem != "walls-none")
+            if not candidates:
+                raise FileNotFoundError(f"No walls-*.json files found in {walls_dir} for random wall_ref in scenario {scenario_file}")
+            import random as _random
+            wall_ref = _random.choice(candidates).stem
         wall_path = self._resolve_shared_config_path("_walls", wall_ref, scenario_file, "wall_ref")
         cache_key = str(wall_path)
         if cache_key in _walls_json_cache and cache_key in _walls_json_mtime_ns:
@@ -1097,6 +1107,15 @@ class GameStateManager:
 
     def _load_shared_objectives_from_ref(self, objectives_ref: Any, scenario_file: str) -> List[Dict[str, Any]]:
         """Load shared objectives file referenced by scenario objectives_ref."""
+        if isinstance(objectives_ref, str) and objectives_ref.strip() == "random":
+            from config_loader import get_config_loader
+            cols, rows = get_config_loader().get_board_size()
+            objectives_dir = Path(__file__).resolve().parent.parent / "config" / "board" / f"{cols}x{rows}" / "objectives"
+            candidates = sorted(objectives_dir.glob("objectives-*.json"))
+            if not candidates:
+                raise FileNotFoundError(f"No objectives-*.json files found in {objectives_dir} for random objectives_ref in scenario {scenario_file}")
+            import random as _random
+            objectives_ref = _random.choice(candidates).stem
         objectives_path = self._resolve_shared_config_path(
             "_objectives",
             objectives_ref,
@@ -1561,7 +1580,7 @@ class GameStateManager:
         1. Turn limit reached (training config override)
         """
         # Check training turn limit (for RL training - may differ from standard 5 turns)
-        if hasattr(self, 'training_config'):
+        if self.training_config is not None:
             max_turns = self.training_config.get("max_turns_per_episode")
             if max_turns and game_state["turn"] > max_turns:
                 return True

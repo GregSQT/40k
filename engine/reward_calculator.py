@@ -18,7 +18,7 @@ from engine.phase_handlers.shared_utils import (
 )
 from engine.game_utils import get_unit_by_id
 from engine.hex_utils import min_distance_between_sets
-from shared.data_validation import require_key
+from shared.data_validation import require_key, require_present
 
 class RewardCalculator:
     """Calculates rewards for actions."""
@@ -1040,7 +1040,7 @@ class RewardCalculator:
         p_wound = max(0.0, min(1.0, (7 - wound_target) / 6.0))
         
         # Save failure probability (uses imported function from shooting_handlers)
-        save_target = self._calculate_save_target(target, ap)
+        save_target = _calculate_save_target(target, ap)
         p_fail_save = max(0.0, min(1.0, (save_target - 1) / 6.0))
         
         p_damage_per_attack = p_hit * p_wound * p_fail_save
@@ -1359,7 +1359,7 @@ class RewardCalculator:
 
         # Use unit registry to get agent key (matches rewards config)
         try:
-            agent_key = self.unit_registry.get_model_key(unit_type)
+            agent_key = require_present(self.unit_registry, "unit_registry").get_model_key(unit_type)
             return agent_key
         except ValueError as e:
             # AI_TURN.md COMPLIANCE: NO FALLBACKS - propagate the error

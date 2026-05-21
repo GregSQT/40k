@@ -1,3 +1,5 @@
+from typing import Any, Dict, cast
+
 import pytest
 
 from engine.phase_handlers.shared_utils import (
@@ -10,7 +12,7 @@ from engine.phase_handlers.shared_utils import (
 
 
 def test_build_units_cache_normalizes_coordinates_hp_and_player() -> None:
-    game_state = {
+    game_state: Dict[str, Any] = {
         "units": [
             {
                 "id": 1,
@@ -80,7 +82,7 @@ def test_update_units_cache_position_updates_existing_entry_with_normalization()
         }
     }
 
-    update_units_cache_position(game_state, "u1", "6.0", 8.0)
+    update_units_cache_position(game_state, "u1", cast(int, "6.0"), cast(int, 8.0))
 
     assert game_state["units_cache"]["u1"]["col"] == 6
     assert game_state["units_cache"]["u1"]["row"] == 8
@@ -99,7 +101,7 @@ def test_update_units_cache_position_is_noop_when_unit_absent() -> None:
 def test_update_units_cache_unit_inserts_entry_when_hp_positive() -> None:
     game_state = {"units_cache": {}}
 
-    update_units_cache_unit(game_state, "u9", "2", "3.0", 4, 2)
+    update_units_cache_unit(game_state, "u9", cast(int, "2"), cast(int, "3.0"), 4, 2)
 
     entry = game_state["units_cache"]["u9"]
     assert entry["col"] == 2

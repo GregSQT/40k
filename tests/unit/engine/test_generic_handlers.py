@@ -1,3 +1,5 @@
+from typing import Any, Dict
+
 from engine.phase_handlers.generic_handlers import end_activation
 
 
@@ -62,7 +64,7 @@ def test_end_activation_removes_unit_from_move_pool_and_marks_phase_complete() -
 
 def test_end_activation_arg5_logs_error_entry() -> None:
     unit = {"id": "u4"}
-    game_state = {"phase": "SHOOTING"}
+    game_state: Dict[str, Any] = {"phase": "SHOOTING"}
 
     response = end_activation(game_state, unit, "NO", 0, "SHOOTING", "NOT_REMOVED", 1)
 

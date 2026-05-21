@@ -33,7 +33,7 @@ DUAL TIER SYSTEM (41 Total Metrics):
 
 import numpy as np
 from collections import deque
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard.writer import SummaryWriter
 import os
 from typing import Dict, Any, List, Optional
 from shared.data_validation import require_key
@@ -1348,11 +1348,11 @@ class W40KMetricsTracker:
         
         if len(values) < window_size:
             # Not enough data - return simple mean
-            return np.mean(values)
+            return float(np.mean(values))
         
         # Use last N values for rolling mean
         recent_values = values[-window_size:]
-        return np.mean(recent_values)
+        return float(np.mean(recent_values))
 
     @staticmethod
     def _metric_slug(name: str) -> str:

@@ -51,7 +51,9 @@ def run_ocr(
     total_pages = len(document)
 
     with output_txt.open("w", encoding="utf-8") as output_file:
-        for page_index, page in enumerate(document, start=1):
+        for page_zero_index in range(total_pages):
+            page_index = page_zero_index + 1
+            page = document[page_zero_index]
             pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
             page_image_bytes = pixmap.tobytes("png")
             lines = reader.readtext(page_image_bytes, detail=0, paragraph=paragraph)

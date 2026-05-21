@@ -36,7 +36,7 @@ def test_check_gpu_availability_returns_true_when_cuda_available(
     monkeypatch.setattr(training_utils.torch.cuda, "get_device_name", lambda idx: "DummyGPU")
     monkeypatch.setattr(training_utils.torch.cuda, "get_device_properties", lambda idx: _Props())
     monkeypatch.setattr(training_utils.torch.cuda, "set_device", lambda idx: None)
-    monkeypatch.setattr(training_utils.torch.version, "cuda", "12.1")
+    monkeypatch.setattr("torch.version.cuda", "12.1")
     assert training_utils.check_gpu_availability() is True
 
 

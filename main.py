@@ -326,7 +326,7 @@ def test_basic_functionality():
             if active_unit:
                 action = {"action": "move", "unitId": active_unit["id"], "destCol": active_unit["col"] + 1, "destRow": active_unit["row"]}
                 print(f"   Activating {active_unit['id']} at ({active_unit['col']}, {active_unit['row']})")
-                success, result = engine.step(action)
+                success, result = engine.execute_semantic_action(action)
                 print(f"   Result: {result}")
             else:
                 engine.game_state["move_activation_pool"].pop(0)
@@ -348,7 +348,7 @@ def test_basic_functionality():
             action = {"action": "skip", "unitId": 0}
             action_name = "Skip"
         
-        success, result = engine.step(action)
+        success, result = engine.execute_semantic_action(action)
         print(f"   Action: {action_name} -> Success: {success}, New Phase: {engine.game_state['phase']}")
         print(f"   Result: {result}")
         

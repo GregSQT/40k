@@ -6,7 +6,7 @@ Separates target selection (forward decision) from reward calculation (backward 
 Used by PvE AI to select targets using tactical heuristics, not rewards.
 """
 
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from engine.combat_utils import calculate_hex_distance, expected_dice_value
 from engine.phase_handlers.shared_utils import (
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
@@ -206,7 +206,7 @@ class TargetSelector:
         return min(1.0, total_threat / 100.0)  # Normalize to 0-1
     
     @staticmethod
-    def _get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Dict[str, Any]:
+    def _get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[str, Any]]:
         """Helper to get unit by ID."""
         for unit in game_state["units"]:
             if unit["id"] == unit_id:

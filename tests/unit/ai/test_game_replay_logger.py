@@ -1,10 +1,12 @@
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 import json
 
 import ai.game_replay_logger as grl
 from ai.game_replay_logger import GameReplayIntegration, GameReplayLogger
+from shared.data_validation import require_present
 
 
 def _env_stub() -> SimpleNamespace:
@@ -91,8 +93,8 @@ def test_add_entry_appends_with_incremental_id(monkeypatch: pytest.MonkeyPatch) 
 
     out1 = logger.add_entry("move", acting_unit={"id": 1})
     out2 = logger.add_entry("wait", acting_unit={"id": 1})
-    assert out1["id"] == 1
-    assert out2["id"] == 2
+    assert require_present(out1, "out1")["id"] == 1
+    assert require_present(out2, "out2")["id"] == 2
     assert len(logger.combat_log_entries) == 2
     assert len(logger.game_states) == 2
 
@@ -102,7 +104,7 @@ def test_game_replay_integration_save_episode_replay(monkeypatch: pytest.MonkeyP
         replay_logger=SimpleNamespace(save_replay=lambda filename, reward: filename)
     )
     out = GameReplayIntegration.save_episode_replay(env, 1.23, output_dir="/tmp", is_best=True)
-    assert out.endswith("train_best_game_replay.json")
+    assert require_present(out, "out").endswith("train_best_game_replay.json")
 
     env2 = SimpleNamespace()
     assert GameReplayIntegration.save_episode_replay(env2, 1.0) is None
@@ -146,7 +148,7 @@ def test_log_action_routes_and_unknown_action_raises(monkeypatch: pytest.MonkeyP
 
     with pytest.raises(ValueError, match=r"Unknown action type"):
         logger.log_action(
-            action="unknown_action",
+            action=cast(int, "unknown_action"),
             reward=0.0,
             pre_action_units=pre,
             post_action_units=post,
@@ -182,6 +184,7 @@ def test_convert_shoot_details_happy_path_and_validation(monkeypatch: pytest.Mon
         shooter=shooter,
         target=target,
     )
+    details = require_present(details, "details")
     assert details[0]["shotNumber"] == 1
     assert details[0]["hitResult"] == "HIT"
 

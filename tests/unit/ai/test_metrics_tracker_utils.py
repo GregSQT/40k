@@ -1,6 +1,8 @@
 from collections import deque
+from typing import cast
 
 import pytest
+from torch.utils.tensorboard.writer import SummaryWriter
 
 import ai.metrics_tracker as mt
 from ai.metrics_tracker import TrainingMonitor, W40KMetricsTracker, create_metrics_tracker
@@ -22,9 +24,13 @@ class _DummyWriter:
         self.closed += 1
 
 
+def _dw(t: W40KMetricsTracker) -> _DummyWriter:
+    return cast(_DummyWriter, t.writer)
+
+
 def _tracker_stub() -> W40KMetricsTracker:
     t = W40KMetricsTracker.__new__(W40KMetricsTracker)
-    t.writer = _DummyWriter()
+    t.writer = cast(SummaryWriter, _DummyWriter())
     t.episode_count = 12
     t.step_count = 0
     t.win_rate_window = deque([1.0] * 12, maxlen=100)
@@ -149,13 +155,13 @@ def test_log_holdout_and_scenario_split_scores() -> None:
     t.log_holdout_split_metrics(
         {"holdout_regular_mean": 0.5, "holdout_hard_mean": 0.4, "holdout_overall_mean": 0.45}
     )
-    keys = [k for k, _, _ in t.writer.scalars]
+    keys = [k for k, _, _ in _dw(t).scalars]
     assert "bot_eval/holdout_regular_mean" in keys
     assert "bot_eval/holdout_hard_mean" in keys
     assert "bot_eval/holdout_overall_mean" in keys
 
     t.log_scenario_split_scores({"training_bot_1": 0.9, "hard_bot_1": 0.2})
-    keys2 = [k for k, _, _ in t.writer.scalars]
+    keys2 = [k for k, _, _ in _dw(t).scalars]
     assert "bot_split/training_bot_1" in keys2
     assert "bot_split/hard_bot_1" in keys2
 
@@ -191,14 +197,14 @@ def test_log_reward_decomposition_validation_and_trimming() -> None:
 
 def test_log_position_score_and_close() -> None:
     t = _tracker_stub()
-    t.log_position_score(None)
+    t.log_position_score(cast(float, None))
     assert t.position_scores == []
     for i in range(10):
         t.log_position_score(float(i))
     assert len(t.position_scores) == 10
-    assert any(k == "game_tactical/avg_position_score" for k, _, _ in t.writer.scalars)
+    assert any(k == "game_tactical/avg_position_score" for k, _, _ in _dw(t).scalars)
     t.close()
-    assert t.writer.closed == 1
+    assert _dw(t).closed == 1
 
 
 def test_create_metrics_tracker_factory(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -229,7 +235,7 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
         }
     )
     assert t.episode_count == 13
-    assert t.writer.flushed == 1
+    assert _dw(t).flushed == 1
     assert t.seat_aware["episodes_agent_p1"] == 1
 
     t.log_tactical_metrics(
@@ -252,7 +258,7 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
             "victory_points_diff_controlled_minus_opponent": 1.0,
         }
     )
-    keys = [k for k, _, _ in t.writer.scalars]
+    keys = [k for k, _, _ in _dw(t).scalars]
     assert "game_tactical/shooting_accuracy" in keys
     assert "combat/h_value_trade_ratio" in keys
     assert "forcing/episodes_with_forced_unit_ratio" in keys
@@ -307,7 +313,7 @@ def test_compliance_mapper_phase_and_training_metrics_paths() -> None:
         {"random": 0.5, "greedy": 0.6, "defensive": 0.4, "combined": 0.5, "holdout_hard_mean": 0.3},
         step=99,
     )
-    keys = [k for k, _, _ in t.writer.scalars]
+    keys = [k for k, _, _ in _dw(t).scalars]
     assert "0_critical/b_worst_bot_score" in keys
     assert "0_critical/a_bot_eval_combined" in keys
 
@@ -377,7 +383,7 @@ def test_log_tactical_metrics_forcing_validation_errors() -> None:
 def test_log_training_step_records_optional_fields() -> None:
     t = _tracker_stub()
     t.log_training_step({"exploration_rate": 0.2, "loss": 1.3, "learning_rate": 3e-4})
-    keys = [k for k, _, _ in t.writer.scalars]
+    keys = [k for k, _, _ in _dw(t).scalars]
     assert "training_diagnostic/exploration_rate" in keys
     assert "training_detailed/loss" in keys
     assert "training_diagnostic/learning_rate" in keys

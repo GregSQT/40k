@@ -21,9 +21,12 @@ import atexit
 import numpy as np
 import re
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
-from typing import Callable, Optional, Dict, List, Any, Tuple
+from typing import Callable, Optional, Dict, List, Any, Tuple, TYPE_CHECKING
 
-from shared.data_validation import require_key
+if TYPE_CHECKING:
+    from ai.env_wrappers import BotControlledEnv
+
+from shared.data_validation import require_key, require_present
 
 __all__ = ['evaluate_against_bots']
 
@@ -755,12 +758,12 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
     # CRITICAL FIX: Strip phase suffix from controlled_agent for file path lookup
     # controlled_agent may be "Agent_phase1", but files are at "config/agents/Agent/..."
-    base_agent_key = controlled_agent
-    if controlled_agent:
-        for phase_suffix in ['_phase1', '_phase2', '_phase3', '_phase4']:
-            if controlled_agent.endswith(phase_suffix):
-                base_agent_key = controlled_agent[:-len(phase_suffix)]
-                break
+    controlled_agent = require_present(controlled_agent, "controlled_agent")
+    base_agent_key: str = controlled_agent
+    for phase_suffix in ['_phase1', '_phase2', '_phase3', '_phase4']:
+        if controlled_agent.endswith(phase_suffix):
+            base_agent_key = controlled_agent[:-len(phase_suffix)]
+            break
 
     training_cfg = config.load_agent_training_config(base_agent_key, training_config_name)
     agent_seat_mode = require_key(training_cfg, "agent_seat_mode")
@@ -1154,7 +1157,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         progress_pct = 100.0
         bar_length = bot_eval_bar_length
         bar = '█' * bar_length
-        elapsed = time.time() - start_time
+        elapsed = time.time() - require_present(start_time, "start_time")
         _mins = int(elapsed // 60)
         _secs = int(elapsed % 60)
         elapsed_str = f"{_mins:02d}:{_secs:02d}" if _mins < 3600 else f"{int(elapsed//3600)}:{_mins%60:02d}:{_secs:02d}"

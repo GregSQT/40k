@@ -1,6 +1,7 @@
 import pytest
 
 import ai.evaluation_bots as eb
+from shared.data_validation import require_present
 from ai.evaluation_bots import (
     DEPLOYMENT_ACTIONS,
     WAIT_ACTION,
@@ -156,10 +157,10 @@ def test_tactical_bot_find_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     }
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: uid in {"u0", "e1", "e2"})
     monkeypatch.setattr(eb, "calculate_hex_distance", lambda c1, r1, c2, r2: abs(c1 - c2) + abs(r1 - r2))
-    active = bot._get_active_unit(game_state)
+    active = require_present(bot._get_active_unit(game_state), "active_unit")
     assert active["id"] == "u0"
-    assert bot._get_unit_by_id(game_state, "e2")["id"] == "e2"
-    assert bot._find_nearest_enemy(active, game_state)["id"] == "e1"
+    assert require_present(bot._get_unit_by_id(game_state, "e2"), "unit_e2")["id"] == "e2"
+    assert require_present(bot._find_nearest_enemy(active, game_state), "nearest_enemy")["id"] == "e1"
 
 
 def test_tactical_bot_movement_position_helpers(monkeypatch: pytest.MonkeyPatch) -> None:

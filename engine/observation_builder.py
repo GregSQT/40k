@@ -91,6 +91,7 @@ class ObservationBuilder:
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
+        self.unit_registry: Optional[Any] = None
         
         # NOTE: last_unit_positions removed - now using game_state["units_cache_prev"] for movement_direction
         
@@ -992,7 +993,7 @@ class ObservationBuilder:
         Example: RangedSwarm unit gets 1.0 against Swarm targets, 0.3 against others
         """
         try:
-            if not hasattr(self, 'unit_registry') or not self.unit_registry:
+            if not self.unit_registry:
                 return 0.5
 
             if "unitType" not in active_unit:

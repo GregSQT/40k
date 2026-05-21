@@ -18,7 +18,7 @@ import os
 import re
 import json
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, cast
 
 from shared.data_validation import require_key
 
@@ -41,12 +41,12 @@ __all__ = [
 def extract_scenario_name_for_replay():
     """Extract scenario name for replay filename from scenario template name."""
     # Check if generate_steplog_and_replay stored template name
-    if hasattr(extract_scenario_name_for_replay, '_current_template_name') and extract_scenario_name_for_replay._current_template_name:
-        return extract_scenario_name_for_replay._current_template_name
-    
+    if hasattr(extract_scenario_name_for_replay, '_current_template_name') and cast(Any, extract_scenario_name_for_replay)._current_template_name:
+        return cast(Any, extract_scenario_name_for_replay)._current_template_name
+
     # Check if convert_to_replay_format detected template name
-    if hasattr(convert_to_replay_format, '_detected_template_name') and convert_to_replay_format._detected_template_name:
-        return convert_to_replay_format._detected_template_name
+    if hasattr(convert_to_replay_format, '_detected_template_name') and cast(Any, convert_to_replay_format)._detected_template_name:
+        return cast(Any, convert_to_replay_format)._detected_template_name
     
     # Use scenario name from filename if template not available
     return "scenario"   
@@ -148,7 +148,7 @@ def generate_steplog_and_replay(config, args):
         print(f"Using bot scenario: {os.path.basename(temp_scenario_file)}")
 
         # Store scenario file path for replay converter
-        convert_to_replay_format._scenario_file = temp_scenario_file
+        cast(Any, convert_to_replay_format)._scenario_file = temp_scenario_file
         
         # Load training config to override max_turns for this environment
         # Test-only mode requires agent parameter
@@ -197,7 +197,7 @@ def generate_steplog_and_replay(config, args):
             
             while not done and step_count < 1000:
                 action, _ = model.predict(obs, deterministic=True)
-                obs, reward, terminated, truncated, info = env.step(action)
+                obs, reward, terminated, truncated, info = env.step(int(action))
                 done = terminated or truncated
                 step_count += 1
         
@@ -449,7 +449,7 @@ def convert_to_replay_format(steplog_data):
     print(f"🔄 Converting to replay format...")
     
     # Store agent info for filename generation
-    convert_to_replay_format._detected_agents = None
+    cast(Any, convert_to_replay_format)._detected_agents = None
     
     actions = steplog_data['actions']
     max_turn = steplog_data['max_turn']
@@ -465,8 +465,8 @@ def convert_to_replay_format(steplog_data):
     board_size = [board_cols, board_rows]
     
     # Load scenario for units data - use stored path from generate_steplog_and_replay
-    if hasattr(convert_to_replay_format, '_scenario_file') and convert_to_replay_format._scenario_file:
-        scenario_file = convert_to_replay_format._scenario_file
+    if hasattr(convert_to_replay_format, '_scenario_file') and cast(Any, convert_to_replay_format)._scenario_file:
+        scenario_file = cast(Any, convert_to_replay_format)._scenario_file
     else:
         scenario_file = os.path.join(config.config_dir, "scenario.json")
     if not os.path.exists(scenario_file):

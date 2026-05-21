@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from ai import replay_converter
+from shared.data_validation import require_present
 
 
 def test_extract_scenario_name_for_replay_prioritizes_stored_template_name(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -24,24 +25,24 @@ def test_extract_scenario_name_for_replay_falls_back_to_detected_and_default(mon
 def test_parse_action_message_handles_move_shoot_combat_charge_wait() -> None:
     ctx = {"turn": 1, "phase": "move", "player": 1, "timestamp": "t"}
 
-    move = replay_converter.parse_action_message(
+    move = require_present(replay_converter.parse_action_message(
         "Unit 1(1, 1) MOVED from (1, 1) to (2, 1)", ctx
-    )
+    ), "move")
     assert move["type"] == "move"
     assert move["startHex"] == "(1, 1)"
     assert move["endHex"] == "(2, 1)"
 
-    shoot = replay_converter.parse_action_message("Unit 1(1, 1) SHOT Unit 2", ctx)
+    shoot = require_present(replay_converter.parse_action_message("Unit 1(1, 1) SHOT Unit 2", ctx), "shoot")
     assert shoot["type"] == "shoot"
     assert shoot["targetUnitId"] == 2
 
-    combat = replay_converter.parse_action_message("Unit 3(3, 3) FOUGHT Unit 4", ctx)
+    combat = require_present(replay_converter.parse_action_message("Unit 3(3, 3) FOUGHT Unit 4", ctx), "combat")
     assert combat["type"] == "combat"
 
-    charge = replay_converter.parse_action_message("Unit 5(4, 4) CHARGED Unit 6", ctx)
+    charge = require_present(replay_converter.parse_action_message("Unit 5(4, 4) CHARGED Unit 6", ctx), "charge")
     assert charge["type"] == "charge"
 
-    wait = replay_converter.parse_action_message("Unit 7(6, 6) WAIT", ctx)
+    wait = require_present(replay_converter.parse_action_message("Unit 7(6, 6) WAIT", ctx), "wait")
     assert wait["type"] == "wait"
 
     assert replay_converter.parse_action_message("unknown message", ctx) is None

@@ -55,10 +55,10 @@ class GameReplayLogger:
             6: "wait", 7: "attack_adjacent"
         }
     
-    def add_entry(self, entry_type: str, acting_unit: Dict = None, target_unit: Dict = None,
-                  reward: float = 0.0, action_name: str = "", turn_number: int = None,
-                  phase: str = None, start_hex: str = None, end_hex: str = None, 
-                  shoot_details: List = None):
+    def add_entry(self, entry_type: str, acting_unit: Optional[Dict] = None, target_unit: Optional[Dict] = None,
+                  reward: float = 0.0, action_name: str = "", turn_number: Optional[int] = None,
+                  phase: Optional[str] = None, start_hex: Optional[str] = None, end_hex: Optional[str] = None,
+                  shoot_details: Optional[List] = None):
         """Add entry to combat log using shared structure."""
         # Enhanced evaluation mode detection
         env_eval = getattr(self.env, 'is_evaluation_mode', False)
@@ -159,8 +159,8 @@ class GameReplayLogger:
     
     def log_charge(self, charger: Dict, target: Dict, start_col: int, start_row: int,
                    end_col: int, end_row: int, turn_number: int, 
-                   reward: float, action_int: int, charge_roll: int = None, 
-                   die1: int = None, die2: int = None, charge_succeeded: bool = None):
+                   reward: float, action_int: int, charge_roll: Optional[int] = None,
+                   die1: Optional[int] = None, die2: Optional[int] = None, charge_succeeded: Optional[bool] = None):
         """Log charge action with dice roll details."""
         # Create charge details with dice information
         charge_details = []
@@ -223,7 +223,7 @@ class GameReplayLogger:
                    turn_number: int, reward: float, action_int: int):
         """Log combat action with complete dice roll details."""
         converted_details = self._convert_combat_details(combat_details, attacker, target)
-        
+
         self.add_entry(
             entry_type="combat",
             acting_unit=attacker,
@@ -234,6 +234,14 @@ class GameReplayLogger:
             shoot_details=converted_details
         )
     
+    def _convert_combat_details(self, combat_result, attacker=None, target=None):
+        """Convert gym combat result to detailed dice roll format.
+
+        Not implemented: melee combat detail conversion has no defined dice-roll
+        format yet. Raises NotImplementedError to surface missing implementation explicitly.
+        """
+        raise NotImplementedError("_convert_combat_details is not implemented for melee combat logging")
+
     def _convert_shoot_details(self, shoot_result, shooter=None, target=None):
         """Convert gym shooting result to detailed dice roll format - preserved from game_replay_logger.py"""
         if not shoot_result:
@@ -738,7 +746,7 @@ class GameReplayLogger:
         )
     
     def log_action(self, action: int, reward: float, pre_action_units: list, post_action_units: list,
-                   acting_unit_id: int, target_unit_id: int = None, description: str = ""):
+                   acting_unit_id: int, target_unit_id: Optional[int] = None, description: str = ""):
         """Generic action logger that routes to specific log methods based on action type."""        
         # Find acting unit and target unit from the unit lists
         acting_unit = None

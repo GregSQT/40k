@@ -536,6 +536,7 @@ def calculate_wound_target(strength: int, toughness: int) -> int:
 def has_valid_shooting_targets(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
         """Check if unit has valid shooting targets per AI_TURN.md restrictions."""
         from engine.phase_handlers import shooting_handlers
+        from shared.data_validation import require_key  # Lazy: avoid circular import
         units_cache = require_key(game_state, "units_cache")
         for unit_id, entry in units_cache.items():
             if entry["player"] != unit["player"]:

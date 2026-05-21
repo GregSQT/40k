@@ -1,8 +1,11 @@
 import sqlite3
+from typing import Any, Dict, cast
 
 import pytest
 
 from services import api_server
+from engine.w40k_core import W40KEngine
+from shared.data_validation import require_present
 
 
 def test_make_json_serializable_handles_tuple_keys_set_and_object_dict() -> None:
@@ -10,7 +13,7 @@ def test_make_json_serializable_handles_tuple_keys_set_and_object_dict() -> None
         def __init__(self) -> None:
             self.value = {("a", 1): {1, 2}}
 
-    result = api_server.make_json_serializable(Dummy())
+    result = cast(Dict[str, Any], api_server.make_json_serializable(Dummy()))
     assert "a,1" in result["value"]
     assert sorted(result["value"]["a,1"]) == [1, 2]
 
@@ -33,7 +36,7 @@ def test_api_json_response_orjson_encodes_set_and_numpy_without_pre_walk() -> No
         "arr": np.array([[1, 2], [3, 4]], dtype=np.int64),
     }
     resp = api_server.api_json_response(payload)
-    assert resp.mimetype.startswith("application/json")
+    assert require_present(resp.mimetype, "mimetype").startswith("application/json")
     out = orjson.loads(resp.get_data())
     assert out["ok"] is True
     assert set(out["tags"]) == {1, 2, 3}
@@ -261,16 +264,16 @@ def test_sync_units_hp_from_cache_applies_cache_and_sets_zero_for_dead() -> None
 def test_build_and_attach_player_types_for_pve() -> None:
     assert api_server._build_player_types(True, "pve") == {"1": "human", "2": "ai"}
     engine_instance = type("E", (), {"game_state": {}, "current_mode_code": "pve"})()
-    serializable_state = {}
-    api_server._attach_player_types(serializable_state, engine_instance)
+    serializable_state: Dict[str, Any] = {}
+    api_server._attach_player_types(serializable_state, cast(W40KEngine, engine_instance))
     assert serializable_state["player_types"]["2"] == "ai"
-    assert engine_instance.game_state["current_mode_code"] == "pve"
+    assert cast(Dict[str, Any], getattr(engine_instance, "game_state"))["current_mode_code"] == "pve"
 
 
 def test_attach_player_types_rejects_invalid_mode() -> None:
     engine_instance = type("E", (), {"game_state": {}, "current_mode_code": "invalid"})()
     with pytest.raises(ValueError, match=r"Unsupported current_mode_code"):
-        api_server._attach_player_types({}, engine_instance)
+        api_server._attach_player_types({}, cast(W40KEngine, engine_instance))
 
 
 def test_hash_and_verify_password_roundtrip_and_failures() -> None:
@@ -335,7 +338,7 @@ def test_execute_end_phase_action_returns_wrong_player_error() -> None:
             self.game_state = {"phase": "move", "current_player": 1}
 
     engine_instance = DummyEngine()
-    success, result = api_server._execute_end_phase_action(engine_instance, {"player": 2})
+    success, result = api_server._execute_end_phase_action(cast(W40KEngine, engine_instance), {"player": 2})
     assert success is False
     assert result["error"] == "wrong_player_end_phase"
 
@@ -358,7 +361,7 @@ def test_execute_end_phase_action_processes_pool_and_advances_phase() -> None:
                 return True, {"phase": "shoot"}
             raise AssertionError("Unexpected action")
 
-    success, result = api_server._execute_end_phase_action(DummyEngine(), {"player": 1})
+    success, result = api_server._execute_end_phase_action(cast(W40KEngine, DummyEngine()), {"player": 1})
     assert success is True
     assert result["action"] == "end_phase"
 

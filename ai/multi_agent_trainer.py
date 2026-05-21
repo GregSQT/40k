@@ -15,7 +15,7 @@ import random
 import glob
 from tqdm import tqdm
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Any, Callable
+from typing import Dict, List, Tuple, Optional, Any, Callable, cast
 from dataclasses import dataclass, asdict
 from concurrent.futures import ThreadPoolExecutor, Future
 from collections import defaultdict
@@ -282,7 +282,7 @@ class MultiAgentTrainer:
             )
 
     def start_balanced_training(self, total_episodes: int, training_config_name: str = "default",
-                               rewards_config_name: str = "default", training_phase: str = None) -> Dict[str, Any]:
+                               rewards_config_name: str = "default", training_phase: Optional[str] = None) -> Dict[str, Any]:
         """
         Start balanced multi-agent training following scenario manager rotation.
         Supports 3-phase training plan: solo -> cross_faction -> full_composition
@@ -464,6 +464,8 @@ class MultiAgentTrainer:
     def _execute_training_session(self, session: TrainingSession, training_config_name: str,
                                  rewards_config_name: str) -> Dict[str, Any]:
         """Execute individual training session for specific agent matchup."""
+        session_start_time: Optional[float] = None
+        env: Optional[Any] = None
         try:
             # Load training configuration at start of method
             training_config = self.config.load_training_config(training_config_name)
@@ -471,10 +473,9 @@ class MultiAgentTrainer:
             
             # Generate scenario for this matchup (Windows-compatible timeout)
             import threading
-            import time
-            
-            scenario_result = [None]
-            scenario_error = [None]
+
+            scenario_result: List[Optional[Any]] = [None]
+            scenario_error: List[Optional[BaseException]] = [None]
             
             def generate_with_timeout():
                 try:
@@ -625,7 +626,7 @@ class MultiAgentTrainer:
             self._update_agent_state(session, training_duration, test_results)
             
             # Cleanup
-            env.close()
+            require_present(env, "env").close()
             if os.path.exists(scenario_path):  # Check before removing
                 os.remove(scenario_path)  # Clean up temporary scenario file
             
@@ -656,12 +657,12 @@ class MultiAgentTrainer:
             session.status = 'failed'
             
             # Calculate duration for failed session
-            session_duration = time.time() - session_start_time if 'session_start_time' in locals() else 0.0
+            session_duration = time.time() - session_start_time if session_start_time is not None else 0.0
             
             # Try to save replay even on failure using GameReplayLogger
             replay_file_saved = None
             try:
-                if 'env' in locals() and env:
+                if env is not None:
                     timestamp = time.strftime("%Y%m%d_%H%M%S")
                     failed_replay_filename = f"ai/event_log/failed_training_{session.agent_key}_vs_{session.opponent_agent}.json"
                     
@@ -743,7 +744,7 @@ class MultiAgentTrainer:
                         from shared.data_validation import require_key
                         step_log_buffer_size = require_key(training_config, "step_log_buffer_size")
                         agent_step_logger = StepLogger(agent_log_file, enabled=True, buffer_size=step_log_buffer_size)
-                        base_env.controller.connect_step_logger(agent_step_logger)
+                        cast(Any, base_env).controller.connect_step_logger(agent_step_logger)
                         print(f"✅ StepLogger connected for agent {agent_key}: {agent_log_file}")
                 except Exception as log_error:
                     print(f"⚠️ Failed to connect step logger for {agent_key}: {log_error}")
@@ -827,7 +828,7 @@ class MultiAgentTrainer:
     def _create_eval_env_for_session(self, session: TrainingSession):
         """Create evaluation environment for session callbacks."""
         # Import environment - AI_TURN.md compliant
-        from engine.w40k_engine_old import W40KEngine
+        from engine import W40KEngine
         
         # Create evaluation environment identical to training environment
         scenario = self.scenario_manager.generate_training_scenario(
@@ -859,7 +860,7 @@ class MultiAgentTrainer:
         
         return eval_env
 
-    def _test_trained_model(self, model, env, num_episodes: int, episode_tracker: SelectiveEpisodeTracker = None) -> Dict[str, float]:
+    def _test_trained_model(self, model, env, num_episodes: int, episode_tracker: Optional[SelectiveEpisodeTracker] = None) -> Dict[str, float]:
         """Test trained model with optimized single progress bar"""
         # AI_TURN.md COMPLIANCE: No default values - validate input
         if num_episodes <= 0:
@@ -924,6 +925,8 @@ class MultiAgentTrainer:
            
             # Add step counter to prevent infinite loops
             step_count = 0
+            reward: float = 0.0
+            current_turn: Optional[int] = None
             debug_config = self.config.load_training_config("debug")
             max_steps = debug_config["max_turns_per_episode"] * debug_config["max_steps_per_turn"]
             while not done and step_count < max_steps:
@@ -1048,7 +1051,7 @@ class MultiAgentTrainer:
                             "initial_state": initial_state.copy() if initial_state else {},
                             "game_info": {
                                 "scenario": "evaluation_episode", 
-                                "total_turns": max(1, current_turn),
+                                "total_turns": max(1, current_turn) if current_turn is not None else 1,
                                 "winner": require_present(require_key(info, "winner"), "winner")
                             }
                         }

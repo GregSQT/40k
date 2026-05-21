@@ -1,3 +1,5 @@
+from typing import cast
+
 import pytest
 
 from engine.combat_utils import (
@@ -41,14 +43,14 @@ def test_expected_dice_value_known_mappings_and_invalid() -> None:
 
 def test_get_unit_by_id_requires_index_and_handles_string_lookup() -> None:
     game_state = {"unit_by_id": {"12": {"id": 12}}}
-    assert get_unit_by_id(game_state, 12) == {"id": 12}
+    assert get_unit_by_id(game_state, cast(str, 12)) == {"id": 12}
     with pytest.raises(Exception):
         get_unit_by_id({}, "12")
 
 
 def test_is_hex_adjacent_to_enemy_normalizes_and_checks_membership() -> None:
     enemy_adjacent_hexes = {(3, 4)}
-    assert is_hex_adjacent_to_enemy("3.0", 4.0, 1, enemy_adjacent_hexes) is True
+    assert is_hex_adjacent_to_enemy(cast(int, "3.0"), cast(int, 4.0), 1, enemy_adjacent_hexes) is True
     assert is_hex_adjacent_to_enemy(1, 1, 1, enemy_adjacent_hexes) is False
 
 

@@ -29,7 +29,7 @@ def process_icon(unit_name):
     rgb = ImageEnhance.Color(rgb).enhance(1.12)
 
     # 4. Nettoyage alpha
-    alpha = alpha.point(lambda a: 0 if a < 35 else 255 if a > 220 else a)
+    alpha = alpha.point(lambda a: 0 if int(a) < 35 else 255 if int(a) > 220 else int(a))
 
     # 5. Recomposition RGBA
     out = Image.merge("RGBA", (*rgb.split(), alpha))

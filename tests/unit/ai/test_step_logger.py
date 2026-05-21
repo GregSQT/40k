@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -12,7 +13,7 @@ def _read_text(path: Path) -> str:
 def test_init_requires_buffer_size_when_enabled(tmp_path: Path) -> None:
     output_file = tmp_path / "step.log"
     with pytest.raises(ValueError, match=r"buffer_size is required"):
-        StepLogger(output_file=str(output_file), enabled=True, buffer_size=None)
+        StepLogger(output_file=str(output_file), enabled=True, buffer_size=cast(int, None))
 
 
 def test_init_writes_header_when_enabled(tmp_path: Path) -> None:

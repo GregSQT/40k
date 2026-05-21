@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, cast
 
 import pytest
 
@@ -236,21 +236,21 @@ class TestChargeBuildValidDestinationsPool:
         """charge_pool_no_unit : unité inconnue → pool vide."""
         units = [_unit(1, 1, 5, 10)]
         gs = self._make_pool_gs(units)
-        result = charge_build_valid_destinations_pool(gs, 99, 12)
+        result = charge_build_valid_destinations_pool(gs, cast(str, 99), 12)
         assert result == []
 
     def test_no_enemies_returns_empty(self):
         """charge_pool_no_enemies : aucun ennemi → pool vide."""
         units = [_unit(1, 1, 5, 10), _unit(2, 1, 8, 10)]  # both player 1
         gs = self._make_pool_gs(units)
-        result = charge_build_valid_destinations_pool(gs, 1, 12)
+        result = charge_build_valid_destinations_pool(gs, cast(str, 1), 12)
         assert result == []
 
     def test_enemy_far_beyond_roll_returns_empty(self):
         """charge_pool_oob : ennemi très loin + roll=2 → pool vide."""
         units = [_unit(1, 1, 5, 10), _unit(2, 2, 24, 10)]  # far right of 25-col board
         gs = self._make_pool_gs(units)
-        result = charge_build_valid_destinations_pool(gs, 1, 2)
+        result = charge_build_valid_destinations_pool(gs, cast(str, 1), 2)
         assert result == []
 
     def test_close_enemy_large_roll_nonempty_pool(self):
@@ -258,13 +258,13 @@ class TestChargeBuildValidDestinationsPool:
         # Charger at (5,10), enemy at (9,10) — distance ~4 hexes, roll=12 ample
         units = [_unit(1, 1, 5, 10), _unit(2, 2, 9, 10)]
         gs = self._make_pool_gs(units)
-        result = charge_build_valid_destinations_pool(gs, 1, 12)
+        result = charge_build_valid_destinations_pool(gs, cast(str, 1), 12)
         assert len(result) > 0
 
     def test_result_is_list_of_tuples(self):
         """charge_pool_type : résultat est une liste de tuples (col, row)."""
         units = [_unit(1, 1, 5, 10), _unit(2, 2, 9, 10)]
         gs = self._make_pool_gs(units)
-        result = charge_build_valid_destinations_pool(gs, 1, 12)
+        result = charge_build_valid_destinations_pool(gs, cast(str, 1), 12)
         if result:
             assert all(isinstance(d, tuple) and len(d) == 2 for d in result)

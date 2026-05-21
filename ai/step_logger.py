@@ -11,6 +11,7 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 import time
 import builtins
 import json
+from typing import Optional
 
 from shared.data_validation import require_key
 
@@ -22,7 +23,7 @@ class StepLogger:
     Captures ALL actions that generate step increments per AI_TURN.md.
     """
     
-    def __init__(self, output_file: str = "step.log", enabled: bool = False, buffer_size: int = None, debug_mode: bool = False):
+    def __init__(self, output_file: str = "step.log", enabled: bool = False, buffer_size: Optional[int] = None, debug_mode: bool = False):
         self.output_file = output_file
         self.enabled = enabled
         self.debug_mode = debug_mode  # LOG TEMPORAIRE: timings/logs to debug.log only when --debug
@@ -32,6 +33,7 @@ class StepLogger:
         self.episode_step_count = 0
         self.episode_action_count = 0
         self.episode_number = 0  # Track episode number for logging
+        self.current_bot_name: Optional[str] = None  # Set externally for bot-evaluation logging
         self._last_step_wall = None  # Wall-clock of last step end (for STEP_TIMING → analyzer "Step Durations")
         # PERFORMANCE: Buffer logs to reduce I/O (buffer_size from training_config step_log_buffer_size)
         # Obligatoire si enabled ; si disabled, buffer_size peut être None (non utilisé).
@@ -373,7 +375,8 @@ class StepLogger:
                 end_col, end_row = details["end_pos"]
                 advance_range = details.get("advance_range")
                 _strategy_labels = {0: "aggressive", 1: "tactical", 2: "defensive", 3: "objective"}
-                strategy_label = _strategy_labels.get(details.get("advance_strategy"), "aggressive")
+                _advance_strategy = details.get("advance_strategy")
+                strategy_label = _strategy_labels.get(_advance_strategy, "aggressive") if _advance_strategy is not None else "aggressive"
                 if advance_range is not None and advance_range > 0:
                     base_msg = f"{unit_label} ADVANCED from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {advance_range}] [Strategy: {strategy_label}]"
                 else:

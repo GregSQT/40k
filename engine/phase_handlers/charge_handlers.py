@@ -10,9 +10,9 @@ ZERO TOLERANCE for state storage or wrapper patterns
 import os
 import time
 from collections import deque
-from typing import Dict, List, Tuple, Set, Optional, Any
+from typing import Dict, List, Tuple, Set, Optional, Any, FrozenSet
 from .generic_handlers import end_activation
-from shared.data_validation import require_key
+from shared.data_validation import require_key, require_present
 from engine.action_log_utils import append_action_log
 from engine.hex_utils import hex_distance as _hex_distance
 from engine.game_utils import add_console_log, safe_print, add_debug_file_log
@@ -559,7 +559,7 @@ def _charge_reverse_goal_bfs_for_eligibility(
     occupied_positions: Set[Tuple[int, int]],
     bfs_max_distance: int,
     fp_offset_pair: FootprintOffsetPair,
-) -> Optional[List[Tuple[int, int]]]:
+) -> List[Tuple[int, int]]:
     """
     Recherche d'éligibilité charge par BFS inversé, strictement réservée au cas
     ``early_exit_if_valid=True`` sans cible déclarée.
@@ -1002,7 +1002,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     return eligible_units
 
 
-def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     Charge phase handler action routing with complete autonomy
     """
@@ -2280,7 +2280,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
             is_adjacent_to_enemy = False
             hex_overlaps_enemy = False
-            _cur_engaging: Set[str] = set() if _track_engages else None
+            _cur_engaging: Optional[Set[str]] = set() if _track_engages else None
             _t_engagement0 = time.perf_counter() if _perf else None
             synth = _charge_synthetic_charger_cache_entry(
                 unit, neighbor_col_int, neighbor_row_int, candidate_fp
@@ -2304,7 +2304,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                     synth, enemy_entry, engagement_zone
                 ):
                     is_adjacent_to_enemy = True
-                    if _track_engages:
+                    if _cur_engaging is not None:
                         _cur_engaging.add(str(_eid))
                     if tid_arg:
                         break
@@ -2318,7 +2318,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
             if is_adjacent_to_enemy and not hex_overlaps_enemy and neighbor_pos != start_pos:
                 valid_destinations.append(neighbor_pos)
-                if _track_engages:
+                if _track_engages and _cur_engaging is not None:
                     pos_dist_engage[neighbor_pos] = (neighbor_dist, frozenset(_cur_engaging))
                 if early_exit_if_valid:
                     bfs_short_circuit = True
@@ -2607,6 +2607,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         _activation_key_tsel = (str(unit_id), _CHARGE_MAX_DIST_TSEL, None, _CHARGE_DEST_BFS_CACHE_SCHEMA)
         _activation_entry_tsel = game_state["_charge_dest_bfs_cache"].get(_activation_key_tsel)
         _bfs_fast_path = False
+        bfs_reachable: List[Tuple[int, int]] = []
         if _activation_entry_tsel is not None and isinstance(_activation_entry_tsel, tuple):
             _extra_tsel = (
                 _charge_bfs_max_distance(game_state, str(unit_id), int(charge_roll_subhex), str(target_id))
@@ -2637,13 +2638,21 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         )
         _t_socle1 = time.perf_counter() if _perf else None
         if _perf and _t_tsel0 is not None:
+            _z0 = require_present(_t_zone0, "_t_zone0")
+            _z1 = require_present(_t_zone1, "_t_zone1")
+            _a0 = require_present(_t_anch0, "_t_anch0")
+            _a1 = require_present(_t_anch1, "_t_anch1")
+            _b0 = require_present(_t_bfs0, "_t_bfs0")
+            _b1 = require_present(_t_bfs1, "_t_bfs1")
+            _s0 = require_present(_t_socle0, "_t_socle0")
+            _s1 = require_present(_t_socle1, "_t_socle1")
             append_perf_timing_line(
                 f"CHARGE_TARGET_SEL episode={_ep} turn={_turn} unit_id={unit_id} "
-                f"preview_zone_s={_t_zone1 - _t_zone0:.6f} "
-                f"anchors_s={_t_anch1 - _t_anch0:.6f} "
-                f"bfs_s={_t_bfs1 - _t_bfs0:.6f} "
-                f"pool_filter_s={_t_socle1 - _t_socle0:.6f} "
-                f"total_s={_t_socle1 - _t_tsel0:.6f} "
+                f"preview_zone_s={_z1 - _z0:.6f} "
+                f"anchors_s={_a1 - _a0:.6f} "
+                f"bfs_s={_b1 - _b0:.6f} "
+                f"pool_filter_s={_s1 - _s0:.6f} "
+                f"total_s={_s1 - _t_tsel0:.6f} "
                 f"pool_size={len(valid_pool)}"
             )
     game_state["valid_charge_destinations_pool"] = valid_pool

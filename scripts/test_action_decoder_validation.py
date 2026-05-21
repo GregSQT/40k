@@ -67,7 +67,7 @@ class TestDeploymentScoring(unittest.TestCase):
         }
 
     def test_left_and_right_flank_actions_diverge(self) -> None:
-        valid_hexes = self.decoder._get_valid_deployment_hexes(self.game_state, 1)
+        valid_hexes = self.decoder._get_valid_deployment_hexes(self.game_state, 1, "1")
         left_hex = self.decoder._select_deployment_hex_for_action(7, "1", self.game_state, 1, valid_hexes)
         right_hex = self.decoder._select_deployment_hex_for_action(8, "1", self.game_state, 1, valid_hexes)
         self.assertLess(left_hex[0], right_hex[0])

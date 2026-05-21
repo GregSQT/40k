@@ -11,6 +11,7 @@ from typing import Any, Mapping, TypeVar
 
 
 T = TypeVar("T")
+_KT = TypeVar("_KT")
 
 
 class ConfigurationError(RuntimeError):
@@ -29,7 +30,7 @@ def require_present(value: T | None, name: str) -> T:
     return value
 
 
-def require_key(mapping: Mapping[str, Any], key: str) -> Any:
+def require_key(mapping: Mapping[_KT, Any], key: _KT) -> Any:
     """
     Ensure that a key exists in a mapping (typically configuration dictionaries).
 

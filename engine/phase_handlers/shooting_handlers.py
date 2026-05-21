@@ -17,7 +17,7 @@ from engine.combat_utils import (
     set_unit_coordinates,
     calculate_hex_distance as _calculate_hex_distance,
 )
-from shared.data_validation import require_key
+from shared.data_validation import require_key, require_present
 from engine.action_log_utils import append_action_log
 from .shared_utils import (
     calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge,
@@ -557,7 +557,7 @@ def _build_weapon_availability_enemy_precheck(
         raise KeyError(f"Unit {_uid_str} not in units_cache (dead or absent)")
     _u_fp = _ue.get("occupied_hexes", {(unit_col, unit_row)})
     shooter_id_str = _uid_str
-    shooter_player_int = int(unit["player"]) if unit["player"] is not None else None
+    shooter_player_int = require_present(int(unit["player"]) if unit["player"] is not None else None, "unit['player']")
     melee_range = get_engagement_zone(game_state)
 
     _los_map = unit.get("los_cache")
@@ -599,7 +599,7 @@ def _build_weapon_availability_enemy_precheck(
             )
 
             los_cache_has_key = isinstance(_los_map, dict) and _enemy_id_str in _los_map
-            los_cache_true = bool(_los_map[_enemy_id_str]) if los_cache_has_key else False
+            los_cache_true = bool(_los_map[_enemy_id_str]) if (isinstance(_los_map, dict) and _enemy_id_str in _los_map) else False
 
             out.append({
                 "enemy": enemy,
@@ -751,7 +751,7 @@ def weapon_availability_check(
                 shooter_engaged = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
 
                 _trs = time.perf_counter() if _perf_wa else None
-                for row in _enemy_precheck_for_availability:
+                for row in require_present(_enemy_precheck_for_availability, "_enemy_precheck_for_availability"):
                     if row["distance"] > weapon_range:
                         continue
                     temp_unit = dict(unit)
@@ -2056,7 +2056,7 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     elif enemy_adjacent_to_shooter and not weapon_is_pistol:
         return False
 
-    shooter_player_int = int(shooter["player"]) if shooter["player"] is not None else None
+    shooter_player_int = require_present(int(shooter["player"]) if shooter["player"] is not None else None, "shooter['player']")
     if _friendly_engagement_blocks_ranged_shot(
         game_state,
         shooter_id_str,
@@ -2712,10 +2712,10 @@ def valid_target_pool_build(
                         break
             
             if enemy_adjacent_to_friendly:
+                _ep = enemy.get("col", "?")
+                _er = enemy.get("row", "?")
                 if game_state.get("debug_mode", False):
                     from engine.game_utils import add_debug_file_log
-                    _ep = enemy.get("col", "?")
-                    _er = enemy.get("row", "?")
                     add_debug_file_log(
                         game_state,
                         f"[SHOOT DEBUG] E{episode} T{turn} valid_target_pool_build: "
@@ -3270,6 +3270,10 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
     """
     debug_mode = game_state.get("debug_mode", False)
     from engine.game_utils import add_debug_log
+    episode: Any = "?"
+    turn: Any = "?"
+    shooter_id: Any = "?"
+    target_id: Any = "?"
     if debug_mode:
         episode = game_state.get("episode_number", "?")
         turn = game_state.get("turn", "?")
@@ -3904,6 +3908,7 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             "clear_selected_unit": True,
             "clear_attack_preview": True
         }
+    raise ValueError(f"Invalid current_player: {game_state['current_player']!r}")
 
 def shooting_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """Legacy function - redirects to new complete function"""
@@ -4145,7 +4150,7 @@ def _apply_move_after_shooting(
 
 def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
                                      arg1: str, arg2: int, arg3: str, arg4: str, arg5: int = 1,
-                                     action_type: str = None, include_attack_results: bool = True) -> Tuple[bool, Dict[str, Any]]:
+                                     action_type: Optional[str] = None, include_attack_results: bool = True) -> Tuple[bool, Dict[str, Any]]:
     """Handle shooting activation end using end_activation (aligned with MOVE phase).
     
     This function:
@@ -4544,7 +4549,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
             # Shot last target available
             return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
     
-    unit = _get_unit_by_id(game_state, unit_id)
+    unit = require_present(_get_unit_by_id(game_state, unit_id), f"unit {unit_id}")
     # Gym/PvE AI can auto-continue attacks; humans must explicitly choose targets.
     if unit and _is_ai_controlled_shooting_unit(game_state, unit, config) and valid_targets:
         # Pool is source of truth - do not rebuild here (AI_TURN.md: no redundant checks)
@@ -4706,7 +4711,7 @@ def _handle_move_after_shooting_action(
     return success, result
 
 
-def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     AI_SHOOT.md EXACT: Complete action routing with full phase lifecycle management
     """
@@ -5714,10 +5719,9 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         
         target = _get_unit_by_id(game_state, selected_target_id)
         if not target:
-            if _perf_ts:
-                _t_pool0 = time.perf_counter()
+            _t_pool0 = time.perf_counter() if _perf_ts else None
             updated_pool = shooting_build_valid_target_pool(game_state, unit_id)
-            if _perf_ts:
+            if _perf_ts and _t_pool0 is not None:
                 append_perf_timing_line(
                     f"SHOOT_BUILD_VALID_TARGET_POOL episode={_ep_ts} turn={_turn_ts} unit_id={unit_id} "
                     f"duration_s={time.perf_counter() - _t_pool0:.6f}"
@@ -5933,10 +5937,9 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 
                 # CRITICAL: Rebuild target pool using shooting_build_valid_target_pool for consistency
                 # This wrapper automatically determines context (advance_status, adjacent_status)
-                if _perf_ts:
-                    _t_vtp0 = time.perf_counter()
+                _t_vtp0 = time.perf_counter() if _perf_ts else None
                 valid_target_pool = shooting_build_valid_target_pool(game_state, unit_id)
-                if _perf_ts:
+                if _perf_ts and _t_vtp0 is not None:
                     append_perf_timing_line(
                         f"SHOOT_BUILD_VALID_TARGET_POOL episode={_ep_ts} turn={_turn_ts} unit_id={unit_id} "
                         f"context=after_weapon_switch duration_s={time.perf_counter() - _t_vtp0:.6f}"
@@ -5945,10 +5948,9 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 
                 # Continue to shooting action selection step (ADVANCED if arg2=1, else normal)
                 # This is handled by _shooting_unit_execution_loop
-                if _perf_ts:
-                    _t_ex0 = time.perf_counter()
+                _t_ex0 = time.perf_counter() if _perf_ts else None
                 success, loop_result = _shooting_unit_execution_loop(game_state, unit_id, config)
-                if _perf_ts:
+                if _perf_ts and _t_ex0 is not None:
                     append_perf_timing_line(
                         f"SHOOT_EXEC_LOOP episode={_ep_ts} turn={_turn_ts} unit_id={unit_id} "
                         f"context=after_shoot_left_zero_weapon_switch duration_s={time.perf_counter() - _t_ex0:.6f}"
@@ -6002,10 +6004,9 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             # NO -> Continue to shooting action selection step
             
             # Continue to shooting action selection step
-            if _perf_ts:
-                _t_ex1 = time.perf_counter()
+            _t_ex1 = time.perf_counter() if _perf_ts else None
             success, loop_result = _shooting_unit_execution_loop(game_state, unit_id, config)
-            if _perf_ts:
+            if _perf_ts and _t_ex1 is not None:
                 append_perf_timing_line(
                     f"SHOOT_EXEC_LOOP episode={_ep_ts} turn={_turn_ts} unit_id={unit_id} "
                     f"context=continue_after_shot duration_s={time.perf_counter() - _t_ex1:.6f}"
@@ -7564,14 +7565,21 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 _ep = game_state.get("episode_number", "?")
                 _tu = game_state.get("turn", "?")
                 _uid = str(unit["id"])
-                _pool_s  = (_t_adv_pool        - _t_adv0)           if _t_adv_pool        else 0.0
-                _dchk_s  = (_t_adv_dest_check  - _t_adv_pool)       if _t_adv_dest_check  else 0.0
-                _ochk_s  = (_t_adv_occ_check   - _t_adv_dest_check) if _t_adv_occ_check   else 0.0
-                _pos_s   = (_t_adv_pos_update  - _t_adv_occ_check)  if _t_adv_pos_update  else 0.0
-                _adj_s   = (_t_adv_adj_cache   - _t_adv_pos_update) if _t_adv_adj_cache   else 0.0
-                _los_s   = (_t_adv_los         - _t_adv_adj_cache)  if _t_adv_los         else 0.0
-                _react_s = (_t_adv_reactive    - _t_adv_los)        if _t_adv_reactive     else 0.0
-                _total_s = _t_adv_reactive - _t_adv0
+                _t_adv_pool_v        = require_present(_t_adv_pool, "_t_adv_pool")
+                _t_adv_dest_check_v  = require_present(_t_adv_dest_check, "_t_adv_dest_check")
+                _t_adv_occ_check_v   = require_present(_t_adv_occ_check, "_t_adv_occ_check")
+                _t_adv_pos_update_v  = require_present(_t_adv_pos_update, "_t_adv_pos_update")
+                _t_adv_adj_cache_v   = require_present(_t_adv_adj_cache, "_t_adv_adj_cache")
+                _t_adv_los_v         = require_present(_t_adv_los, "_t_adv_los")
+                _t_adv_reactive_v    = require_present(_t_adv_reactive, "_t_adv_reactive")
+                _pool_s  = (_t_adv_pool_v        - _t_adv0)              if _t_adv_pool_v        else 0.0
+                _dchk_s  = (_t_adv_dest_check_v  - _t_adv_pool_v)        if _t_adv_dest_check_v  else 0.0
+                _ochk_s  = (_t_adv_occ_check_v   - _t_adv_dest_check_v)  if _t_adv_occ_check_v   else 0.0
+                _pos_s   = (_t_adv_pos_update_v  - _t_adv_occ_check_v)   if _t_adv_pos_update_v  else 0.0
+                _adj_s   = (_t_adv_adj_cache_v   - _t_adv_pos_update_v)  if _t_adv_adj_cache_v   else 0.0
+                _los_s   = (_t_adv_los_v         - _t_adv_adj_cache_v)   if _t_adv_los_v         else 0.0
+                _react_s = (_t_adv_reactive_v    - _t_adv_los_v)         if _t_adv_reactive_v    else 0.0
+                _total_s = _t_adv_reactive_v - _t_adv0
                 append_perf_timing_line(
                     f"ADVANCE_TIMING episode={_ep} turn={_tu} unitId={_uid!r} "
                     f"pool_s={_pool_s:.6f} dest_check_s={_dchk_s:.6f} occ_check_s={_ochk_s:.6f} "

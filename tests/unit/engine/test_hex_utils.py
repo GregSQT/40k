@@ -2,6 +2,7 @@
 
 import math
 import pytest
+from shared.data_validation import require_present
 from engine.hex_utils import (
     get_neighbors,
     get_neighbors_bounded,
@@ -423,17 +424,17 @@ class TestValidatePlacement:
     def test_out_of_bounds(self):
         candidate = {(-1, 5)}
         result = validate_placement(candidate, "u1", {}, set(), 100, 100)
-        assert "out of bounds" in result
+        assert "out of bounds" in require_present(result, "result")
 
     def test_wall_collision(self):
         candidate = {(5, 5)}
         result = validate_placement(candidate, "u1", {}, {(5, 5)}, 100, 100)
-        assert "wall" in result
+        assert "wall" in require_present(result, "result")
 
     def test_unit_collision(self):
         omap = {(5, 5): "u_other"}
         result = validate_placement({(5, 5)}, "u1", omap, set(), 100, 100)
-        assert "occupied" in result
+        assert "occupied" in require_present(result, "result")
 
     def test_same_unit_ok(self):
         omap = {(5, 5): "u1"}

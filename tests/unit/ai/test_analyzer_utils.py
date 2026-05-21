@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Dict, Optional
 
 import pytest
 
@@ -227,7 +228,7 @@ def test_adjacency_and_position_cache_helpers() -> None:
 
 def test_objective_control_snapshot() -> None:
     objective_hexes = {1: {(1, 1)}}
-    objective_controllers = {1: None}
+    objective_controllers: Dict[int, Optional[int]] = {1: None}
     unit_positions = {"u1": (1, 1), "u2": (2, 2)}
     unit_player = {"u1": 1, "u2": 2}
     unit_types = {"u1": "A", "u2": "B"}

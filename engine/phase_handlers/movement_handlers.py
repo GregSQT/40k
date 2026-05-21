@@ -10,7 +10,7 @@ ZERO TOLERANCE for state storage or wrapper patterns
 from typing import Dict, List, Tuple, Set, Optional, Any
 from collections import deque, OrderedDict
 from .generic_handlers import end_activation, _log_with_context
-from shared.data_validation import require_key
+from shared.data_validation import require_key, require_present
 from engine.action_log_utils import append_action_log
 from engine.combat_utils import (
     calculate_hex_distance,
@@ -515,7 +515,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     return eligible_units
 
 
-def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     AI_MOVE.md: Handler action routing with complete autonomy
     """
@@ -1117,6 +1117,7 @@ def _build_multi_hex_vectorized(
 
     obstacles_dest_any = walls_set | occupied_set
     obstacles_dest_mask = _mask_from_cells(obstacles_dest_any)
+    obstacles_traverse_mask: np.ndarray = obstacles_dest_mask
     if not fly:
         obstacles_traverse = walls_set | enemy_occupied_set
         obstacles_traverse_mask = _mask_from_cells(obstacles_traverse)
@@ -1144,9 +1145,10 @@ def _build_multi_hex_vectorized(
         bounds_bad = np.where(col_parity_mask, bounds_bad_even, bounds_bad_odd)
         return hit | bounds_bad
 
+    bad_dest = _placement_bad(obstacles_dest_mask)
+    bad_traverse: np.ndarray = bad_dest
     if not fly:
         bad_traverse = _placement_bad(obstacles_traverse_mask)
-    bad_dest = _placement_bad(obstacles_dest_mask)
 
     # Voisins hex (offset coordinates). Définis ici car utilisés à la fois par la dilatation hex
     # de l'engagement mixte et par la propagation BFS.
@@ -1877,8 +1879,8 @@ def _select_strategic_destination(
     else:
         objective_hex_sets, _ = _build_objective_distance_cache(game_state)
         if objective_hex_sets:
-            unit_col, unit_row = int(unit["col"]), int(unit["row"])
-            unit_player = int(unit["player"])
+            unit_col, unit_row = int(require_present(unit["col"], "unit.col")), int(require_present(unit["row"], "unit.row"))
+            unit_player = int(require_present(unit["player"], "unit.player"))
             objective_controllers = require_key(game_state, "objective_controllers")
             objectives = require_key(game_state, "objectives")
 
