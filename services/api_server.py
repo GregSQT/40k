@@ -235,8 +235,15 @@ def _log_payload_breakdown(payload: Dict[str, Any], action_name: Optional[str]) 
             pass
 
 
-def make_json_serializable(obj):
-    """Recursively convert non-JSON-serializable types to serializable ones."""
+def make_json_serializable(obj, _ancestors: Optional[frozenset] = None, _path: str = "root"):
+    """Recursively convert non-JSON-serializable types to serializable ones.
+
+    _ancestors / _path: diagnostic cycle detection — raises ValueError with the path
+    when a circular reference is found (never silently hides it).
+    """
+    if _ancestors is None:
+        _ancestors = frozenset()
+
     try:
         import numpy as np
         if isinstance(obj, np.ndarray):
@@ -255,27 +262,38 @@ def make_json_serializable(obj):
             return obj.rule
     except ImportError:
         pass
-    
+
+    if isinstance(obj, (dict, list, set, frozenset)):
+        oid = id(obj)
+        if oid in _ancestors:
+            raise ValueError(
+                f"Circular reference detected at path '{_path}': "
+                f"{type(obj).__name__} id={oid} already in ancestor chain"
+            )
+        _ancestors = _ancestors | {oid}
+
     if isinstance(obj, dict):
         result = {}
         for k, v in obj.items():
-            # Convert tuple keys to strings
+            # Convert non-string keys to strings (JSON only supports string keys)
             if isinstance(k, tuple):
                 k = ",".join(str(x) for x in k)
+            elif not isinstance(k, str):
+                k = str(k)
             if isinstance(v, (str, int, float, bool, type(None))):
                 result[k] = v
             else:
-                result[k] = make_json_serializable(v)
+                result[k] = make_json_serializable(v, _ancestors, f"{_path}.{k}")
         return result
     elif isinstance(obj, (list, tuple)):
         if not obj or all(isinstance(x, (str, int, float, bool, type(None))) for x in obj):
             return list(obj)
-        return [make_json_serializable(item) for item in obj]
+        return [make_json_serializable(item, _ancestors, f"{_path}[{i}]") for i, item in enumerate(obj)]
     elif isinstance(obj, (set, frozenset)):
-        return [make_json_serializable(item) for item in obj]
+        return [make_json_serializable(item, _ancestors, f"{_path}{{}}") for item in obj]
     elif hasattr(obj, '__dict__'):
         # Handle objects with __dict__ (convert to dict)
-        return make_json_serializable(obj.__dict__)
+        return make_json_serializable(obj.__dict__, _ancestors, f"{_path}.__dict__")
     else:
         return obj
 

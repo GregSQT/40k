@@ -17,7 +17,7 @@ from engine.phase_handlers.shared_utils import build_units_cache
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-_MINIMAL_CONFIG = {"board": {"default": {}}}
+_MINIMAL_CONFIG = {"board": {"default": {"inches_to_subhex": 1}}}
 
 _FULL_UNIT_CFG: Dict[str, Any] = {
     "id": 1, "player": 1, "col": 3, "row": 3,
@@ -28,6 +28,7 @@ _FULL_UNIT_CFG: Dict[str, Any] = {
     "UNIT_RULES": [], "UNIT_KEYWORDS": [],
     "LD": 7, "OC": 1, "VALUE": 100, "ICON": "t",
     "ICON_SCALE": 1.0, "ILLUSTRATION_RATIO": 1.0,
+    "BASE_SHAPE": "round", "BASE_SIZE": 1,
 }
 
 

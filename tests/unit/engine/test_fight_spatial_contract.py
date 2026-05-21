@@ -50,10 +50,10 @@ def test_fight_b_engagement_pool_uses_full_footprint_distance() -> None:
     game_state = {
         "config": {"game_rules": {"engagement_zone": 2}},
         "units_cache": {
-            "u1": {"col": 0, "row": 0, "player": 1, "occupied_hexes": {(0, 0)}},
-            "enemy_in_engagement": {"col": 0, "row": 2, "player": 2, "occupied_hexes": {(0, 2)}},
-            "enemy_out_of_engagement": {"col": 0, "row": 3, "player": 2, "occupied_hexes": {(0, 3)}},
-            "ally": {"col": 0, "row": 1, "player": 1, "occupied_hexes": {(0, 1)}},
+            "u1": {"col": 0, "row": 0, "player": 1, "occupied_hexes": {(0, 0)}, "BASE_SHAPE": "round", "BASE_SIZE": 1},
+            "enemy_in_engagement": {"col": 0, "row": 2, "player": 2, "occupied_hexes": {(0, 2)}, "BASE_SHAPE": "round", "BASE_SIZE": 1},
+            "enemy_out_of_engagement": {"col": 0, "row": 3, "player": 2, "occupied_hexes": {(0, 3)}, "BASE_SHAPE": "round", "BASE_SIZE": 1},
+            "ally": {"col": 0, "row": 1, "player": 1, "occupied_hexes": {(0, 1)}, "BASE_SHAPE": "round", "BASE_SIZE": 1},
         },
     }
 
@@ -69,9 +69,9 @@ def test_shared_b_engagement_helper_supports_full_and_bounded_distance() -> None
     game_state = {
         "config": {"game_rules": {"engagement_zone": 2}},
         "units_cache": {
-            "u1": {"col": 0, "row": 0, "player": 1, "occupied_hexes": {(0, 0)}},
-            "enemy_in_engagement": {"col": 0, "row": 2, "player": 2, "occupied_hexes": {(0, 2)}},
-            "enemy_out_of_engagement": {"col": 0, "row": 3, "player": 2, "occupied_hexes": {(0, 3)}},
+            "u1": {"col": 0, "row": 0, "player": 1, "occupied_hexes": {(0, 0)}, "BASE_SHAPE": "round", "BASE_SIZE": 1},
+            "enemy_in_engagement": {"col": 0, "row": 2, "player": 2, "occupied_hexes": {(0, 2)}, "BASE_SHAPE": "round", "BASE_SIZE": 1},
+            "enemy_out_of_engagement": {"col": 0, "row": 3, "player": 2, "occupied_hexes": {(0, 3)}, "BASE_SHAPE": "round", "BASE_SIZE": 1},
         },
     }
 

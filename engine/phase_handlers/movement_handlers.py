@@ -90,7 +90,7 @@ def _sync_move_preview_mask_loops(
 
 def _move_preview_footprint_span(unit: Dict[str, Any]) -> int:
     """Dimension max d’empreinte (hexes), alignée sur charge_handlers._charge_base_diameter — rayon disques UI."""
-    bs = unit.get("BASE_SIZE", 1)
+    bs = unit["BASE_SIZE"]
     if isinstance(bs, (list, tuple)) and len(bs) >= 1:
         try:
             return max(int(v) for v in bs)
@@ -799,8 +799,8 @@ def _attempt_movement_to_destination(
     footprint_unit = unit
     if orientation is not None:
         footprint_unit = {
-            "BASE_SHAPE": unit.get("BASE_SHAPE", "round"),
-            "BASE_SIZE": unit.get("BASE_SIZE", 1),
+            "BASE_SHAPE": unit["BASE_SHAPE"],
+            "BASE_SIZE": unit["BASE_SIZE"],
             "orientation": orientation,
         }
     occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
@@ -834,9 +834,8 @@ def _attempt_movement_to_destination(
         ez_blk = get_engagement_zone(game_state)
         mover_player_int = int(require_key(unit, "player"))
         mover_id_str = str(require_key(unit, "id"))
-        mover_shape = unit.get("BASE_SHAPE", "round")
-        mover_bs_i = unit.get("BASE_SIZE", 1)
-        mover_bs_i = mover_bs_i if isinstance(mover_bs_i, int) else 1
+        mover_shape = unit["BASE_SHAPE"]
+        mover_bs_i = unit["BASE_SIZE"]
         if ez_blk > 1 and mover_shape == "round":
             req_blk = engagement_minimum_clearance_norm(ez_blk)
             _dest_mover_xy = _hex_center(dest_col_int, dest_row_int)
@@ -845,10 +844,9 @@ def _attempt_movement_to_destination(
                     continue
                 if int(require_key(cache_entry, "player")) == mover_player_int:
                     continue
-                if cache_entry.get("BASE_SHAPE", "round") != "round":
+                if cache_entry["BASE_SHAPE"] != "round":
                     continue
-                e_bs = cache_entry.get("BASE_SIZE", 1)
-                e_bs_i = e_bs if isinstance(e_bs, int) else 1
+                e_bs_i = cache_entry["BASE_SIZE"]
                 e_col = require_key(cache_entry, "col")
                 e_row = require_key(cache_entry, "row")
                 gap = euclidean_edge_clearance_round_round(
@@ -1167,9 +1165,8 @@ def _build_multi_hex_vectorized(
             precompute_footprint_offsets,
         )
         req = engagement_minimum_clearance_norm(ez)
-        mover_shape = unit.get("BASE_SHAPE", "round")
-        mover_bs = unit.get("BASE_SIZE", 1)
-        mover_bs_i = mover_bs if isinstance(mover_bs, int) else 1
+        mover_shape = unit["BASE_SHAPE"]
+        mover_bs_i = unit["BASE_SIZE"]
         mover_is_round = (mover_shape == "round")
 
         cs = np.arange(board_cols, dtype=np.float64)[:, None]
@@ -1467,14 +1464,14 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         _fly_walls = game_state.get("wall_hexes", set())
         _fly_occupied = occupied_positions
 
-        _fly_base_size = unit.get("BASE_SIZE", 1)
+        _fly_base_size = unit["BASE_SIZE"]
         _fly_single_hex = (ez <= 1 or _fly_base_size == 1)
 
         _fly_off_even: Tuple[Tuple[int, int], ...] = ()
         _fly_off_odd: Tuple[Tuple[int, int], ...] = ()
         if not _fly_single_hex:
             from engine.hex_utils import precompute_footprint_offsets
-            _fly_shape = unit.get("BASE_SHAPE", "round")
+            _fly_shape = unit["BASE_SHAPE"]
             if "orientation" in unit:
                 _fly_orient = int(require_key(unit, "orientation"))
             else:
@@ -1650,7 +1647,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
     wall_hexes_set = game_state.get("wall_hexes", set())
-    base_size = unit.get("BASE_SIZE", 1)
+    base_size = unit["BASE_SIZE"]
     is_single_hex = (ez <= 1 or base_size == 1)
 
     # Grille dense O(1) : même sémantique que ``dict`` (case visitée ou non pour ce BFS).
@@ -1712,7 +1709,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     else:
         # Multi-hex units: pre-compute footprint offsets ONCE, then translate
         from engine.hex_utils import precompute_footprint_offsets
-        base_shape = unit.get("BASE_SHAPE", "round")
+        base_shape = unit["BASE_SHAPE"]
         if "orientation" in unit:
             orientation = int(require_key(unit, "orientation"))
         else:

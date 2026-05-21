@@ -20,6 +20,8 @@ def test_build_units_cache_normalizes_coordinates_hp_and_player() -> None:
                 "row": 4.0,
                 "HP_CUR": "2",
                 "player": "1",
+                "BASE_SHAPE": "round",
+                "BASE_SIZE": 1,
             }
         ]
     }
@@ -78,7 +80,7 @@ def test_require_unit_position_raises_when_unit_absent_from_cache() -> None:
 def test_update_units_cache_position_updates_existing_entry_with_normalization() -> None:
     game_state = {
         "units_cache": {
-            "u1": {"col": 1, "row": 2, "HP_CUR": 3, "player": 1},
+            "u1": {"col": 1, "row": 2, "HP_CUR": 3, "player": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1},
         }
     }
 
@@ -98,8 +100,10 @@ def test_update_units_cache_position_is_noop_when_unit_absent() -> None:
     assert game_state["units_cache"] == {}
 
 
-def test_update_units_cache_unit_inserts_entry_when_hp_positive() -> None:
-    game_state = {"units_cache": {}}
+def test_update_units_cache_unit_updates_existing_entry() -> None:
+    game_state = {"units_cache": {
+        "u9": {"col": 1, "row": 1, "HP_CUR": 10, "player": 2, "BASE_SHAPE": "round", "BASE_SIZE": 1},
+    }}
 
     update_units_cache_unit(game_state, "u9", cast(int, "2"), cast(int, "3.0"), 4, 2)
 

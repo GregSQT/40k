@@ -84,14 +84,14 @@ def _charge_prepare_footprint_offsets(
     from .shared_utils import get_engagement_zone
 
     ez = get_engagement_zone(game_state)
-    bs = unit.get("BASE_SIZE", 1)
+    bs = unit["BASE_SIZE"]
     if ez <= 1 or bs == 1:
         cache[uid] = None
         return None
     try:
         from engine.hex_utils import precompute_footprint_offsets
 
-        shape = unit.get("BASE_SHAPE", "round")
+        shape = unit["BASE_SHAPE"]
         orient = int(require_key(unit, "orientation"))
         off_e, off_o = precompute_footprint_offsets(shape, bs, orient)
         out: FootprintOffsetPair = (off_e, off_o)
@@ -197,7 +197,7 @@ def _charge_base_diameter(unit: Dict[str, Any]) -> int:
 
     BASE_SIZE peut être int (round/square) ou [major, minor] (oval).
     """
-    bs = unit.get("BASE_SIZE", 1)
+    bs = unit["BASE_SIZE"]
     if isinstance(bs, (list, tuple)) and len(bs) >= 1:
         try:
             return max(int(v) for v in bs)
@@ -450,10 +450,10 @@ def _charge_skip_hex_lb_prune_round_round_engagement(
     d'empreinte. Les paires socle rond ↔ socle rond utilisent ``euclidean_edge_clearance``
     dans ``unit_entries_within_engagement_zone`` : ne pas prune dans ce cas (éviter faux négatif).
     """
-    if unit.get("BASE_SHAPE") != "round":
+    if unit["BASE_SHAPE"] != "round":
         return False
     return any(
-        ee.get("BASE_SHAPE") == "round"
+        ee["BASE_SHAPE"] == "round"
         for _, ee in indexed_enemy_engagement
     )
 
@@ -643,15 +643,14 @@ def _charge_reverse_goal_bfs_for_eligibility(
         )
     # Pre-filtre hex-distance pour round-vs-round : évite d'appeler unit_entries_within_engagement_zone
     # sur des candidates clairement hors portée euclidienne. Seuil conservatif par ennemi.
-    _mover_bs = max(1, unit.get("BASE_SIZE", 1) if isinstance(unit.get("BASE_SIZE", 1), int) else 1)
+    _mover_bs = unit["BASE_SIZE"]
     _mover_r = max(1, (_mover_bs + 1) // 2)
     _rr_proximity: Dict[Any, int] = {}
-    if unit.get("BASE_SHAPE") == "round":
+    if unit["BASE_SHAPE"] == "round":
         for _eid, _ee in indexed_enemy_engagement:
-            if _ee.get("BASE_SHAPE") == "round":
-                _e_bs = _ee.get("BASE_SIZE", 1)
-                _e_bs_i = max(1, _e_bs if isinstance(_e_bs, int) else 1)
-                _e_r = max(1, (_e_bs_i + 1) // 2)
+            if _ee["BASE_SHAPE"] == "round":
+                _e_bs = _ee["BASE_SIZE"]
+                _e_r = max(1, (_e_bs + 1) // 2)
                 _rr_proximity[_eid] = engagement_zone + _mover_r + _e_r + 1
 
     goals: List[Tuple[int, int]] = []
@@ -695,8 +694,8 @@ def _charge_reverse_goal_bfs_for_eligibility(
                 hex_overlaps_enemy = True
                 break
             is_round_round_engagement = (
-                unit.get("BASE_SHAPE") == "round"
-                and enemy_entry.get("BASE_SHAPE") == "round"
+                unit["BASE_SHAPE"] == "round"
+                and enemy_entry["BASE_SHAPE"] == "round"
             )
             if is_round_round_engagement and eid in _rr_proximity:
                 if hex_distance(anchor[0], anchor[1], ec, er) > _rr_proximity[eid]:
@@ -2067,15 +2066,14 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
     # Precompute per-enemy proximity thresholds: if the BFS anchor is beyond this distance
     # from all enemies, neither overlap nor engagement is possible — skip the expensive checks.
-    _mover_bs = max(1, unit.get("BASE_SIZE", 1) if isinstance(unit.get("BASE_SIZE", 1), int) else 1)
+    _mover_bs = unit["BASE_SIZE"]
     _mover_r = max(1, (_mover_bs + 1) // 2)
     _charge_enemy_prox: List[Tuple[int, int, int]] = []
     for _, _ce in indexed_enemy_engagement:
         _ec = int(require_key(_ce, "col"))
         _er = int(require_key(_ce, "row"))
-        _e_bs = _ce.get("BASE_SIZE", 1)
-        _e_bs_i = max(1, _e_bs if isinstance(_e_bs, int) else 1)
-        _e_r = max(1, (_e_bs_i + 1) // 2)
+        _e_bs = _ce["BASE_SIZE"]
+        _e_r = max(1, (_e_bs + 1) // 2)
         _charge_enemy_prox.append((_ec, _er, engagement_zone + _mover_r + _e_r + 1))
 
     if _charge_enemy_prox and all(
@@ -2184,7 +2182,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
     # Opt 1 — prefiltre per-enemy : évite unit_entries_within_engagement_zone sur les hexes
     # clairement hors portée d'un ennemi spécifique (miroir de _charge_reverse_goal_bfs_for_eligibility).
-    _bfs_is_mover_round = (unit.get("BASE_SHAPE") == "round")
+    _bfs_is_mover_round = (unit["BASE_SHAPE"] == "round")
     _bfs_enemy_eng_zones: Dict[Any, Set[Tuple[int, int]]] = {}
     _bfs_rr_prox: Dict[Any, int] = {}
     for (_bfs_eid, _bfs_ee), (_bfs_pec, _bfs_per, _bfs_peth) in zip(indexed_enemy_engagement, _charge_enemy_prox):
@@ -2292,7 +2290,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                     hex_overlaps_enemy = True
                     break
                 # Opt 1 — prefiltre per-enemy avant l'appel coûteux unit_entries_within_engagement_zone.
-                _bfs_ee_is_rr = (_bfs_is_mover_round and enemy_entry.get("BASE_SHAPE") == "round")
+                _bfs_ee_is_rr = (_bfs_is_mover_round and enemy_entry["BASE_SHAPE"] == "round")
                 if _bfs_ee_is_rr:
                     if _eid in _bfs_rr_prox and _calculate_hex_distance(neighbor_col_int, neighbor_row_int, ec, er) > _bfs_rr_prox[_eid]:
                         continue
@@ -2559,7 +2557,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
     import random
     charge_roll = random.randint(1, 6) + random.randint(1, 6)
     game_state["charge_roll_values"][unit_id] = charge_roll
-    _charge_scale = max(1, int(game_state.get("inches_to_subhex", 1) or 1))
+    _charge_scale = game_state["inches_to_subhex"]
     charge_roll_subhex = charge_roll * _charge_scale
     # Store target_id for destination selection
     if "charge_target_selections" not in game_state:

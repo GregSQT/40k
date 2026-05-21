@@ -51,7 +51,7 @@ class TestMoraleNotImplemented:
     def test_ld_field_exists_on_units_as_stat_only(self) -> None:
         """morale_ld_stat : LD est bien un champ de stat sans logique de résolution."""
         from engine.game_state import GameStateManager
-        config = {"board": {"default": {}}}
+        config = {"board": {"default": {"inches_to_subhex": 1}}}
         sm = GameStateManager(config)
         unit_cfg = {
             "id": 99, "player": 1, "col": 0, "row": 0,
@@ -62,6 +62,7 @@ class TestMoraleNotImplemented:
             "UNIT_RULES": [], "UNIT_KEYWORDS": [],
             "LD": 7, "OC": 1, "VALUE": 100, "ICON": "t",
             "ICON_SCALE": 1.0, "ILLUSTRATION_RATIO": 1.0,
+            "BASE_SHAPE": "round", "BASE_SIZE": 1,
         }
         unit = sm.create_unit(unit_cfg)
         # LD est bien stocké comme valeur entière, pas consommé par une logique

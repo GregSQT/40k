@@ -554,8 +554,8 @@ def _fight_pile_in_anchor_adjacent_to_enemy_footprint(
     unit_id_str = str(unit["id"])
     target_filter = {str(t) for t in target_ids} if target_ids is not None else None
     cc_range = get_engagement_zone(game_state)
-    unit_shape = unit.get("BASE_SHAPE", "round")
-    unit_base_size = unit.get("BASE_SIZE", 1)
+    unit_shape = unit["BASE_SHAPE"]
+    unit_base_size = unit["BASE_SIZE"]
     for enemy_id, cache_entry in units_cache.items():
         if str(enemy_id) == unit_id_str:
             continue
@@ -564,8 +564,8 @@ def _fight_pile_in_anchor_adjacent_to_enemy_footprint(
         if int(cache_entry["player"]) == unit_player:
             continue
         enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-        enemy_shape = cache_entry.get("BASE_SHAPE", "round")
-        enemy_base_size = cache_entry.get("BASE_SIZE", 1)
+        enemy_shape = cache_entry["BASE_SHAPE"]
+        enemy_base_size = cache_entry["BASE_SIZE"]
         if (
             unit_shape == "round"
             and enemy_shape == "round"
@@ -613,7 +613,7 @@ def _fight_build_pile_in_valid_destinations(
     if d_min <= 1:
         return []
 
-    scale = max(1, int(game_state.get("inches_to_subhex", 1) or 1))
+    scale = game_state["inches_to_subhex"]
     bfs_max = 3 * scale
 
     unit_id_str = str(unit["id"])
@@ -825,7 +825,7 @@ def _fight_precomputed_footprint_offsets_eligible(
     from .shared_utils import get_engagement_zone
 
     ez = int(get_engagement_zone(game_state))
-    bs = unit.get("BASE_SIZE", 1)
+    bs = unit["BASE_SIZE"]
     return ez > 1 and bs != 1
 
 
@@ -853,9 +853,9 @@ def _fight_prepare_footprint_offsets(
 
     from engine.hex_utils import precompute_footprint_offsets
 
-    shape = unit.get("BASE_SHAPE", "round")
+    shape = unit["BASE_SHAPE"]
     orient = int(require_key(unit, "orientation"))
-    bs = unit.get("BASE_SIZE", 1)
+    bs = unit["BASE_SIZE"]
     off_e, off_o = precompute_footprint_offsets(shape, bs, orient)
     out: FightFootprintFastOffsets = (off_e, off_o)
     cache[uid] = out
@@ -1039,7 +1039,7 @@ def _fight_bfs_reachable_anchors_consolidation(
     s_compute_fp = 0.0
     s_placement_valid = 0.0
     neighbor_eval_n = 0
-    scale = max(1, int(game_state.get("inches_to_subhex", 1) or 1))
+    scale = game_state["inches_to_subhex"]
     bfs_max = 3 * scale
     unit_id_str = str(unit["id"])
     start_col, start_row = require_unit_position(unit, game_state)

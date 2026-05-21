@@ -1,58 +1,58 @@
 {
   "ADVANCE_TIMING": {
-    "calls": 114450,
-    "avg_s": 0.007272,
-    "sum_s": 832.32,
-    "avg_los_s": 0.004965,
-    "avg_adj_s": 0.001972
+    "calls": 133744,
+    "avg_s": 0.007053,
+    "sum_s": 943.3,
+    "avg_los_s": 0.004566,
+    "avg_adj_s": 0.001861
   },
   "MOVE_COMMIT_TIMING": {
-    "calls": 144877,
-    "avg_s": 0.005257,
-    "sum_s": 761.64,
-    "avg_los_s": 0.003294,
-    "avg_adj_s": 0.001872
+    "calls": 169210,
+    "avg_s": 0.004946,
+    "sum_s": 836.98,
+    "avg_los_s": 0.003024,
+    "avg_adj_s": 0.001778
   },
   "SHOOT_ACTIVATION_START": {
-    "calls": 145647,
-    "avg_s": 0.000309,
-    "sum_s": 45.0,
-    "avg_los_s": 5e-06
+    "calls": 170251,
+    "avg_s": 0.000297,
+    "sum_s": 50.65,
+    "avg_los_s": 6e-06
   },
   "CHARGE_REVERSE_GOAL_BFS": {
-    "calls": 20358,
-    "avg_s": 0.061769,
-    "sum_s": 1257.5,
-    "avg_goal_s": 0.038192,
-    "avg_bfs_s": 0.023501
+    "calls": 24202,
+    "avg_s": 0.056408,
+    "sum_s": 1365.19,
+    "avg_goal_s": 0.033903,
+    "avg_bfs_s": 0.022426
   },
   "CHARGE_DEST_BFS": {
-    "calls": 9366,
-    "avg_s": 0.071296,
-    "sum_s": 667.75,
-    "avg_bfs_s": 0.070427,
-    "avg_eng_s": 0.007319
+    "calls": 11183,
+    "avg_s": 0.065045,
+    "sum_s": 727.39,
+    "avg_bfs_s": 0.064137,
+    "avg_eng_s": 0.007257
   },
   "MOVE_POOL_BUILD": {
-    "calls": 263982,
-    "avg_s": 0.021827,
-    "sum_s": 5761.82,
-    "avg_bfs_s": 0.021406
+    "calls": 308380,
+    "avg_s": 0.020541,
+    "sum_s": 6334.47,
+    "avg_bfs_s": 0.020165
   },
   "CASCADE_LOOP_TOTAL": {
-    "calls": 753234,
-    "avg_s": 0.002598,
-    "sum_s": 1957.12
+    "calls": 883629,
+    "avg_s": 0.002414,
+    "sum_s": 2133.13
   },
   "CHARGE_PHASE_START": {
-    "calls": 54550,
-    "avg_s": 0.025802,
-    "sum_s": 1407.47,
-    "avg_pool_s": 0.023472
+    "calls": 63911,
+    "avg_s": 0.023915,
+    "sum_s": 1528.41,
+    "avg_pool_s": 0.021803
   },
-  "__total_s": 12690.63,
-  "__total_calls": 1506464,
-  "__score_ms": 8.4241,
+  "__total_s": 13919.52,
+  "__total_calls": 1764510,
+  "__score_ms": 7.8886,
   "__n_episodes": 13,
   "__episodes": [
     2,

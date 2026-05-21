@@ -7745,8 +7745,8 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 _enemy_fp = _ce.get("occupied_hexes", {(_ce["col"], _ce["row"])})
                 _forbidden_zone.update(dilate_hex_set_unbounded(_enemy_fp, _ez))
         if _forbidden_zone:
-            _base_shape = unit.get("BASE_SHAPE", "round")
-            _base_size = unit.get("BASE_SIZE", 1)
+            _base_shape = unit["BASE_SHAPE"]
+            _base_size = unit["BASE_SIZE"]
             _orientation = int(require_key(unit, "orientation")) if "orientation" in unit else 0
             if _ez <= 1 or _base_size == 1:
                 movable_destinations = [

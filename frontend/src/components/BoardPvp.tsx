@@ -4059,13 +4059,20 @@ export default function Board({
     const unitForFootprintBase = unitForMoveFootprint ?? selectedUnit;
 
     /** Pile-in / consolidation : masque uniquement depuis ``footprintZonePoolRef`` (union hex → polygone lissé côté client, comme move sans ``move_preview_footprint_mask_loops``). */
-    const activeFootprintMaskLoops =
-      effectivePhase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview")
-        ? null
-        : normalizeMaskLoopsFromApi(
-            (gameState as { move_preview_footprint_mask_loops?: unknown })
-              .move_preview_footprint_mask_loops
-          );
+    const activeFootprintMaskLoops = (() => {
+      const raw =
+        effectivePhase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview")
+          ? null
+          : normalizeMaskLoopsFromApi(
+              (gameState as { move_preview_footprint_mask_loops?: unknown })
+                .move_preview_footprint_mask_loops
+            );
+      if (!raw) return raw;
+      const ds =
+        (boardConfig?.display as { display_scale?: number } | undefined)?.display_scale ?? 1;
+      if (ds === 1) return raw;
+      return raw.map((loop) => loop.map((v) => v * ds));
+    })();
 
     const drawBoardOptions: DrawBoardOptions = {
       availableCells: effectiveAvailableCells,

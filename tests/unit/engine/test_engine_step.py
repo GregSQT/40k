@@ -78,6 +78,7 @@ def _minimal_config() -> Dict[str, Any]:
                 "margin": 0.0,
                 "wall_hexes": [],
                 "objectives": [{"id": "obj1", "name": "Alpha", "hexes": [[5, 5]]}],
+                "inches_to_subhex": 1,
             }
         },
         "game_rules": {

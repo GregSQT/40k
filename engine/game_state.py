@@ -57,7 +57,7 @@ class GameStateManager:
             default = require_key(board, "default")
         else:
             default = board
-        return int(default.get("inches_to_subhex", 1))
+        return int(require_key(default, "inches_to_subhex"))
 
     def create_unit(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Create unit with AI_TURN.md compliant fields."""
@@ -133,8 +133,8 @@ class GameStateManager:
             "ICON": config["ICON"],
             "ICON_SCALE": config["ICON_SCALE"],
             "ILLUSTRATION_RATIO": require_key(config, "ILLUSTRATION_RATIO"),
-            "BASE_SHAPE": config.get("BASE_SHAPE", "round"),
-            "BASE_SIZE": max(1, round(config.get("BASE_SIZE", 1) * scale / 10)),
+            "BASE_SHAPE": require_key(config, "BASE_SHAPE"),
+            "BASE_SIZE": max(1, round(require_key(config, "BASE_SIZE") * scale / 10)),
             "orientation": orientation_init,
             "UNIT_RULES": unit_rules,
             "UNIT_KEYWORDS": unit_keywords,
@@ -364,7 +364,8 @@ class GameStateManager:
                         2: deploy_pools[2] - wall_hex_set,
                     }
             used_hexes = set()
-            is_micro_board = int(board_spec.get("inches_to_subhex", 1)) > 1
+            _ish = int(require_key(board_spec, "inches_to_subhex"))
+            is_micro_board = _ish > 1
 
             def _compute_deploy_footprint(
                 col: int, row: int, base_shape: str, base_size, orientation: int = 0
@@ -403,8 +404,10 @@ class GameStateManager:
                 except Exception as e:
                     raise ValueError(f"Failed to get unit data for '{unit_type}': {e}")
 
-                base_shape = full_unit_data.get("BASE_SHAPE", "round")
-                base_size = full_unit_data.get("BASE_SIZE", 1)
+                base_shape = require_key(full_unit_data, "BASE_SHAPE")
+                base_size = require_key(full_unit_data, "BASE_SIZE")
+                if is_micro_board:
+                    base_size = max(1, round(base_size * _ish / 10))
                 player_deployment_type = deployment_type_by_player[int(unit_player)]
                 pool_set = set()
                 if deployment_zone and int(unit_player) in deploy_pools:
@@ -526,8 +529,8 @@ class GameStateManager:
                     "ICON": full_unit_data["ICON"],
                     "ICON_SCALE": full_unit_data["ICON_SCALE"],
                     "ILLUSTRATION_RATIO": require_key(full_unit_data, "ILLUSTRATION_RATIO"),
-                    "BASE_SHAPE": full_unit_data.get("BASE_SHAPE", "round"),
-                    "BASE_SIZE": max(1, round(full_unit_data.get("BASE_SIZE", 1) * self._get_inches_to_subhex() / 10)) if self._get_inches_to_subhex() > 1 else 1,
+                    "BASE_SHAPE": require_key(full_unit_data, "BASE_SHAPE"),
+                    "BASE_SIZE": max(1, round(require_key(full_unit_data, "BASE_SIZE") * self._get_inches_to_subhex() / 10)) if self._get_inches_to_subhex() > 1 else 1,
                     "orientation": orientation_u,
                     "UNIT_RULES": copy.deepcopy(require_key(full_unit_data, "UNIT_RULES")),
                     "UNIT_KEYWORDS": copy.deepcopy(require_key(full_unit_data, "UNIT_KEYWORDS")),

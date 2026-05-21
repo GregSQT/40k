@@ -319,8 +319,8 @@ def calculate_pathfinding_distance(col1: int, row1: int, col2: int, row2: int,
 
     # Precomputed topology lookup (O(1) — legacy boards with .npz)
     pathfinding_topology = game_state.get("pathfinding_topology")
-    board_cols = game_state.get("board_cols")
-    board_rows = game_state.get("board_rows")
+    board_cols = game_state["board_cols"]
+    board_rows = game_state["board_rows"]
     if (
         pathfinding_topology is not None
         and isinstance(board_cols, int)

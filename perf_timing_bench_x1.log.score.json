@@ -1,59 +1,59 @@
 {
   "ADVANCE_TIMING": {
-    "calls": 64287,
-    "avg_s": 0.000319,
-    "sum_s": 20.53,
-    "avg_los_s": 0.000209,
-    "avg_adj_s": 5e-05
+    "calls": 73433,
+    "avg_s": 0.000296,
+    "sum_s": 21.71,
+    "avg_los_s": 0.000188,
+    "avg_adj_s": 4.7e-05
   },
   "MOVE_COMMIT_TIMING": {
-    "calls": 82982,
-    "avg_s": 0.000277,
-    "sum_s": 23.0,
-    "avg_los_s": 0.000175,
-    "avg_adj_s": 7.8e-05
+    "calls": 94770,
+    "avg_s": 0.000254,
+    "sum_s": 24.04,
+    "avg_los_s": 0.000157,
+    "avg_adj_s": 7.2e-05
   },
   "SHOOT_ACTIVATION_START": {
-    "calls": 83105,
-    "avg_s": 0.0001,
-    "sum_s": 8.3,
+    "calls": 95001,
+    "avg_s": 0.000106,
+    "sum_s": 10.1,
     "avg_los_s": 4e-06
   },
   "CHARGE_REVERSE_GOAL_BFS": {
-    "calls": 21675,
-    "avg_s": 0.001063,
-    "sum_s": 23.03,
-    "avg_goal_s": 0.000247,
-    "avg_bfs_s": 0.000811
+    "calls": 24913,
+    "avg_s": 0.000967,
+    "sum_s": 24.09,
+    "avg_goal_s": 0.000231,
+    "avg_bfs_s": 0.000732
   },
   "CHARGE_DEST_BFS": {
-    "calls": 9987,
-    "avg_s": 0.001824,
-    "sum_s": 18.21,
-    "avg_bfs_s": 0.001705,
-    "avg_eng_s": 0.000348
+    "calls": 11477,
+    "avg_s": 0.00168,
+    "sum_s": 19.28,
+    "avg_bfs_s": 0.001557,
+    "avg_eng_s": 0.000333
   },
   "MOVE_POOL_BUILD": {
-    "calls": 150972,
-    "avg_s": 0.000396,
-    "sum_s": 59.81,
-    "avg_bfs_s": 0.000365
+    "calls": 172435,
+    "avg_s": 0.000366,
+    "sum_s": 63.11,
+    "avg_bfs_s": 0.000334
   },
   "CASCADE_LOOP_TOTAL": {
-    "calls": 455216,
-    "avg_s": 0.000114,
-    "sum_s": 51.83
+    "calls": 520507,
+    "avg_s": 0.000111,
+    "sum_s": 57.66
   },
   "CHARGE_PHASE_START": {
-    "calls": 32830,
-    "avg_s": 0.000873,
-    "sum_s": 28.65,
-    "avg_pool_s": 0.000803
+    "calls": 37497,
+    "avg_s": 0.000816,
+    "sum_s": 30.58,
+    "avg_pool_s": 0.000748
   },
-  "__total_s": 233.37,
-  "__total_calls": 901054,
-  "__score_ms": 0.259,
-  "__n_episodes": 11,
+  "__total_s": 250.57,
+  "__total_calls": 1030033,
+  "__score_ms": 0.2433,
+  "__n_episodes": 12,
   "__episodes": [
     2,
     3,
@@ -65,6 +65,7 @@
     9,
     10,
     11,
-    12
+    12,
+    13
   ]
 }

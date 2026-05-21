@@ -435,8 +435,8 @@ class GameReplayLogger:
                         "RNG_DMG": unit["RNG_DMG"],
                         "CC_DMG": unit["CC_DMG"],
                         "CC_RNG": unit["CC_RNG"],
-                        "BASE_SHAPE": unit.get("BASE_SHAPE", "round"),
-                        "BASE_SIZE": unit.get("BASE_SIZE", 1),
+                        "BASE_SHAPE": unit["BASE_SHAPE"],
+                        "BASE_SIZE": unit["BASE_SIZE"],
                         "orientation": int(unit["orientation"]) if "orientation" in unit else 0,
                     }
                     formatted_units.append(entry)
@@ -497,8 +497,8 @@ class GameReplayLogger:
                     "RNG_DMG": unit["RNG_DMG"],
                     "CC_DMG": unit["CC_DMG"],
                     "CC_RNG": unit["CC_RNG"],
-                    "BASE_SHAPE": unit.get("BASE_SHAPE", "round"),
-                    "BASE_SIZE": unit.get("BASE_SIZE", 1),
+                    "BASE_SHAPE": unit["BASE_SHAPE"],
+                    "BASE_SIZE": unit["BASE_SIZE"],
                     "orientation": int(unit["orientation"]) if "orientation" in unit else 0,
                 })
         # THIRD: Try to get from controller if available
@@ -528,8 +528,8 @@ class GameReplayLogger:
                         "RNG_DMG": unit["RNG_DMG"],
                         "CC_DMG": unit["CC_DMG"],
                         "CC_RNG": unit["CC_RNG"],
-                        "BASE_SHAPE": unit.get("BASE_SHAPE", "round"),
-                        "BASE_SIZE": unit.get("BASE_SIZE", 1),
+                        "BASE_SHAPE": unit["BASE_SHAPE"],
+                        "BASE_SIZE": unit["BASE_SIZE"],
                         "orientation": int(unit["orientation"]) if "orientation" in unit else 0,
                     })
         # THIRD: Try direct environment units

@@ -360,7 +360,7 @@ class DefensiveBot:
     def _count_nearby_threats(self, unit, game_state) -> int:
         """Count enemy units within threatening range."""
         threat_count = 0
-        _scale = game_state.get("inches_to_subhex", 1)
+        _scale = game_state["inches_to_subhex"]
         threat_range = 12 * _scale
         units_cache = game_state["units_cache"]
         unit_entry = units_cache.get(str(unit["id"]))

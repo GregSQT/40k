@@ -106,6 +106,7 @@ def test_defensive_bot_action_and_threat_count(monkeypatch: pytest.MonkeyPatch) 
             {"id": "3", "player": 1, "col": 20, "row": 20},
         ],
         "units_cache": {},
+        "inches_to_subhex": 1,
     }
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: uid in {"1", "2", "3"})
     monkeypatch.setattr(eb, "calculate_hex_distance", lambda c1, r1, c2, r2: 3 if c2 == 2 else 30)

@@ -184,8 +184,8 @@ def _compute_unit_occupied_hexes(
         ez = get_engagement_zone(game_state)
     if ez <= 1:
         return {(col, row)}
-    base_shape = unit.get("BASE_SHAPE", "round")
-    base_size = unit.get("BASE_SIZE", 1)
+    base_shape = unit["BASE_SHAPE"]
+    base_size = unit["BASE_SIZE"]
     if "orientation" in unit:
         orientation = int(require_key(unit, "orientation"))
     else:
@@ -345,8 +345,8 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
         except (ValueError, TypeError):
             raise ValueError(f"Unit {unit_id} has invalid player: {player_raw!r}") from None
         
-        base_shape = unit.get("BASE_SHAPE", "round")
-        base_size = unit.get("BASE_SIZE", 1)
+        base_shape = unit["BASE_SHAPE"]
+        base_size = unit["BASE_SIZE"]
         if "orientation" in unit:
             orientation = int(require_key(unit, "orientation"))
         else:
@@ -437,8 +437,10 @@ def update_units_cache_unit(
         return
     
     old_entry = game_state["units_cache"].get(unit_id)
-    base_shape = old_entry.get("BASE_SHAPE", "round") if old_entry else "round"
-    base_size = old_entry.get("BASE_SIZE", 1) if old_entry else 1
+    if old_entry is None:
+        raise KeyError(f"Unit {unit_id} not found in units_cache — cannot update HP for unknown unit")
+    base_shape = old_entry["BASE_SHAPE"]
+    base_size = old_entry["BASE_SIZE"]
     if old_entry and "orientation" in old_entry:
         orient_val = int(require_key(old_entry, "orientation"))
     else:
@@ -661,8 +663,8 @@ def update_units_cache_position(game_state: Dict[str, Any], unit_id: str, col: i
     else:
         orient_val = 0
     unit_stub = {
-        "BASE_SHAPE": entry.get("BASE_SHAPE", "round"),
-        "BASE_SIZE": entry.get("BASE_SIZE", 1),
+        "BASE_SHAPE": entry["BASE_SHAPE"],
+        "BASE_SIZE": entry["BASE_SIZE"],
         "orientation": orient_val,
     }
     new_occupied = _compute_unit_occupied_hexes(norm_col, norm_row, unit_stub, game_state)

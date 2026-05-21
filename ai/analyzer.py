@@ -58,7 +58,7 @@ def _get_inches_to_subhex_for_analyzer() -> int:
     from config_loader import get_config_loader
     board_cfg = get_config_loader().get_board_config()
     default = require_key(board_cfg, "default")
-    _inches_to_subhex_analyzer_cache = int(default.get("inches_to_subhex", 1))
+    _inches_to_subhex_analyzer_cache = int(require_key(default, "inches_to_subhex"))
     return _inches_to_subhex_analyzer_cache
 
 
@@ -685,6 +685,8 @@ def is_within_engine_engagement_zone(
             "row": pos[1],
             "player": require_key(unit_player, uid),
             "occupied_hexes": {pos},
+            "BASE_SHAPE": "round",
+            "BASE_SIZE": 1,
         }
     if position_override is not None:
         hp_value = _get_unit_hp_value(unit_hp, unit_id)
@@ -695,6 +697,8 @@ def is_within_engine_engagement_zone(
             "row": position_override[1],
             "player": player,
             "occupied_hexes": {position_override},
+            "BASE_SHAPE": "round",
+            "BASE_SIZE": 1,
         }
     if unit_id not in units_cache:
         return False

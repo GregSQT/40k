@@ -751,8 +751,8 @@ class ObservationBuilder:
         Falls back to on-demand hex line trace (Board ×10) via hex_utils.
         Returns False for out-of-bounds coordinates.
         """
-        board_cols = game_state.get("board_cols")
-        board_rows = game_state.get("board_rows")
+        board_cols = game_state["board_cols"]
+        board_rows = game_state["board_rows"]
         if not (
             isinstance(board_cols, int)
             and isinstance(board_rows, int)
@@ -1153,7 +1153,7 @@ class ObservationBuilder:
         # -1.0 = enemy controls, 0.0 = contested/empty, 1.0 = we control
         self._encode_objective_control(obs, active_unit, game_state, base_idx=11, positions=positions)
         # === SECTION 2: Active Unit Capabilities (22 floats) - MULTIPLE_WEAPONS_IMPLEMENTATION.md ===
-        _scale = game_state.get("inches_to_subhex", 1)
+        _scale = game_state["inches_to_subhex"]
         _move_norm = 12.0 * _scale
         _rng_norm = 24.0 * _scale
         obs[16] = require_key(active_unit, "MOVE") / _move_norm
@@ -1627,8 +1627,8 @@ class ObservationBuilder:
         ]
 
         active_col, active_row = positions[str(active_unit["id"])]
-        board_cols = game_state.get("board_cols")
-        board_rows = game_state.get("board_rows")
+        board_cols = game_state["board_cols"]
+        board_rows = game_state["board_rows"]
         wall_edge_topology = game_state.get("wall_edge_topology")
 
         for dir_idx, (dx, dy) in enumerate(directions):

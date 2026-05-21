@@ -385,7 +385,7 @@ class W40KEngine(gym.Env):
         # the cached config_loader objects (causes cumulative ×10 on each game restart).
         _board_cfg = require_key(self.config, "board")
         _board_default = _board_cfg.get("default", _board_cfg)
-        _scale = int(_board_default.get("inches_to_subhex", 1))
+        _scale = int(require_key(_board_default, "inches_to_subhex"))
         if _scale != 1:
             gr = self.config.get("game_rules")
             if gr:
@@ -537,7 +537,7 @@ class W40KEngine(gym.Env):
             # Board state - handle both config formats
             "board_cols": board_cols,
             "board_rows": board_rows,
-            "inches_to_subhex": self.config.get("inches_to_subhex", 1),
+            "inches_to_subhex": require_key(_board.get("default", _board), "inches_to_subhex"),
             "max_range": max_range,
             # Use scenario terrain if loaded, otherwise use board config
             "wall_hexes": base_wall_hexes,
@@ -4621,7 +4621,8 @@ class W40KEngine(gym.Env):
         bootstrap_controlled_player = 1
         if hasattr(self, "config") and isinstance(self.config, dict) and "controlled_player" in self.config:
             bootstrap_controlled_player = int(require_key(self.config, "controlled_player"))
-        bootstrap_config = {"board": {}, "controlled_player": bootstrap_controlled_player}
+        from config_loader import get_config_loader
+        bootstrap_config = {"board": get_config_loader().get_board_config(), "controlled_player": bootstrap_controlled_player}
         if hasattr(self, "training_config") and isinstance(self.training_config, dict):
             bootstrap_config["training_config"] = self.training_config
         episode_number = None

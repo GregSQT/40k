@@ -825,7 +825,7 @@ class ActionDecoder:
             )
         pool_set, normalized_pool, pool_np, pool_grid, even_mask_np = self._deployment_pool_cache[current_deployer]
 
-        base_size = unit.get("BASE_SIZE", 1)
+        base_size = unit["BASE_SIZE"]
         from engine.phase_handlers.shared_utils import get_engagement_zone as _get_ez
         ez = _get_ez(game_state) if "config" in game_state else 1
 
@@ -841,7 +841,7 @@ class ActionDecoder:
 
         # Multi-hex units: vectorized numpy footprint check
         from engine.hex_utils import precompute_footprint_offsets
-        base_shape = unit.get("BASE_SHAPE", "round")
+        base_shape = unit["BASE_SHAPE"]
         orientation = int(unit["orientation"])
         off_e, off_o = precompute_footprint_offsets(base_shape, base_size, orientation)
         off_e_np = np.array(off_e, dtype=np.int32)
