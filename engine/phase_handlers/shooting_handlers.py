@@ -6913,12 +6913,19 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     if not _weapon_has_ignores_cover_rule(weapon):
         attacker_col, attacker_row = require_unit_position(attacker, game_state)
         target_col, target_row = require_unit_position(target, game_state)
-        target_hexes = _resolve_target_hexes_for_los(
-            game_state,
-            target,
-            int(target_col),
-            int(target_row),
+        _gym_training = bool(
+            game_state.get("gym_training_mode", False)
+            or game_state.get("config", {}).get("gym_training_mode", False)
         )
+        if _gym_training:
+            target_hexes = [(int(target_col), int(target_row))]
+        else:
+            target_hexes = _resolve_target_hexes_for_los(
+                game_state,
+                target,
+                int(target_col),
+                int(target_row),
+            )
         target_visibility_ratio, can_see, target_in_cover, _visible_hexes, _max_hex_ratio = (
             _compute_target_visibility_from_hexes(
                 game_state,
@@ -7766,15 +7773,18 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         if (is_gym_training or is_pve_ai) and movable_destinations:
             # Auto-select destination using the strategy carried by the action dict (default: aggressive)
             strategy_id = require_key(action, "advance_strategy")
-            best_dest = _select_strategic_destination(strategy_id, movable_destinations, unit, game_state)
-
-            # Recursively call with destination — pass pool to skip second BFS
             action["_valid_destinations"] = valid_destinations
-            action["destCol"] = best_dest[0]
-            action["destRow"] = best_dest[1]
-            result = _handle_advance_action(game_state, unit, action, config)
+            remaining = list(movable_destinations)
+            while remaining:
+                best_dest = _select_strategic_destination(strategy_id, remaining, unit, game_state)
+                action["destCol"] = best_dest[0]
+                action["destRow"] = best_dest[1]
+                result = _handle_advance_action(game_state, unit, action, config)
+                if result[0] or result[1].get("error") not in ("advance_destination_adjacent_to_enemy", "advance_destination_occupied"):
+                    action.pop("_valid_destinations", None)
+                    return result
+                remaining.remove(best_dest)
             action.pop("_valid_destinations", None)
-            return result
         
         # CRITICAL FIX: If no valid destinations in gym training, end activation to prevent infinite loop
         if (is_gym_training or is_pve_ai) and not movable_destinations:

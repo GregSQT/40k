@@ -2879,6 +2879,7 @@ export default function Board({
     const BOARD_COLS = boardConfig.cols;
     const BOARD_ROWS = boardConfig.rows;
     const HEX_RADIUS = boardConfig.hex_radius;
+    console.log('[DBG] hex_radius raw:', _rawBoardConfig?.hex_radius, '| boardConfig:', boardConfig?.hex_radius, '| display_scale:', (_rawBoardConfig?.display as {display_scale?:number}|undefined)?.display_scale);
     const MARGIN = boardConfig.margin;
     const HEX_WIDTH = 1.5 * HEX_RADIUS;
     const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
@@ -4872,7 +4873,7 @@ export default function Board({
           const iconSize = getRequiredCssNumber("--icon-advance-size");
           const iconScale = getRequiredCssNumber("--icon-square-icon-scale");
           const iconBoost = getRequiredCssNumber("--shooting-overlay-action-icon-boost");
-          const iconDisplaySize = HEX_RADIUS * iconSize * iconScale * iconBoost;
+          const iconDisplaySize = HEX_RADIUS * (inchesToSubhex / 10) * iconSize * iconScale * iconBoost;
           const squareSizeRatio = getRequiredCssNumber("--icon-square-standard-size");
           const squareSize = HEX_RADIUS * squareSizeRatio;
           const positionY = barY - squareSize / 2 - Math.max(2, HP_BAR_HEIGHT * 0.7);

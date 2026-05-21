@@ -1135,6 +1135,7 @@ def _apply_enemy_adjacent_delta_for_moved_unit(
     board_cols: int,
     board_rows: int,
     engagement_zone: int = 1,
+    game_state: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Apply incremental enemy-adjacent cache update after one unit position change.
@@ -1154,6 +1155,25 @@ def _apply_enemy_adjacent_delta_for_moved_unit(
 
         for h in old_zone:
             if h not in player_counters:
+                if game_state is not None and game_state.get("debug_mode", False):
+                    from engine.game_utils import add_debug_file_log
+                    units_cache = game_state.get("units_cache", {})
+                    unit_positions = {
+                        uid: (e.get("col"), e.get("row"), e.get("player"), e.get("occupied_hexes"))
+                        for uid, e in units_cache.items()
+                    }
+                    counter_snapshot = {
+                        str(k): v for k, v in player_counters.items() if k in old_zone
+                    }
+                    add_debug_file_log(game_state, (
+                        f"[DELTA_MISSING_HEX] missing={h} perspective_player={perspective_player} "
+                        f"moved_unit_player={moved_unit_player} ez={engagement_zone} "
+                        f"old_occupied={sorted(old_occupied)} new_occupied={sorted(new_occupied)} "
+                        f"old_zone={sorted(old_zone)} "
+                        f"counter_for_old_zone={counter_snapshot} "
+                        f"counter_total_keys={len(player_counters)} "
+                        f"unit_positions={unit_positions}"
+                    ))
                 raise KeyError(
                     f"Delta update missing old zone hex {h} for player {perspective_player}"
                 )
@@ -1902,6 +1922,7 @@ def maybe_resolve_reactive_move(
                 new_occupied={(dest_col, dest_row)},
                 board_cols=board_cols,
                 board_rows=board_rows,
+                game_state=game_state,
             )
 
             # Keep action logs explicit for post-mortem analysis.

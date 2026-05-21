@@ -831,11 +831,7 @@ class MetricsCollectionCallback(BaseCallback):
         }
     
     def _on_training_start(self) -> None:
-        """Called when training starts.
-
-        CRITICAL: Wrap logger.dump to capture PPO metrics BEFORE SB3 clears name_to_value.
-        Also force log_interval=1 so dump_logs() runs every iteration (default ~1025 skips most).
-        """
+        """Called when training starts. Wrap logger.dump to track step_count and entropy_coef."""
         if hasattr(self.model, 'logger') and self.model.logger and hasattr(self, 'metrics_tracker') and self.metrics_tracker:
             _original_dump = self.model.logger.dump
             _tracker = self.metrics_tracker
@@ -844,18 +840,6 @@ class MetricsCollectionCallback(BaseCallback):
             def _dump_with_capture(step=0):
                 if hasattr(_model.logger, 'name_to_value') and len(_model.logger.name_to_value) > 0:
                     model_stats = dict(_model.logger.name_to_value)
-                    if hasattr(_model, 'policy') and hasattr(_model.policy, 'parameters'):
-                        total_norm = 0.0
-                        param_count = 0
-                        for p in _model.policy.parameters():
-                            if p.grad is not None:
-                                param_norm = p.grad.data.norm(2)
-                                total_norm += param_norm.item() ** 2
-                                param_count += 1
-                        if param_count > 0:
-                            model_stats['train/gradient_norm'] = total_norm ** 0.5
-                    # Explicitly expose current entropy coefficient in captured stats.
-                    # This guarantees TensorBoard logging even when SB3 logger keys vary.
                     if hasattr(_model, "ent_coef"):
                         ent_coef_value = cast(Any, _model).ent_coef
                         if isinstance(ent_coef_value, torch.Tensor):
@@ -863,15 +847,29 @@ class MetricsCollectionCallback(BaseCallback):
                         else:
                             ent_coef_value = float(ent_coef_value)
                         model_stats['train/ent_coef'] = ent_coef_value
-                    _tracker.log_training_metrics(model_stats)
+                        _tracker.log_training_metrics({"train/ent_coef": model_stats['train/ent_coef']})
                     _tracker.step_count = _model.num_timesteps
                 return _original_dump(step)
 
             self.model.logger.dump = _dump_with_capture
 
     def _on_rollout_start(self) -> None:
-        """Called at start of rollout. PPO metrics captured via logger.dump wrapper."""
-        pass
+        """Capture PPO training metrics from train() that just completed."""
+        if not (hasattr(self.model, 'logger') and self.model.logger and self.metrics_tracker):
+            return
+        name_to_value = self.model.logger.name_to_value
+        if not name_to_value:
+            return
+        ppo_keys = {
+            'train/policy_gradient_loss', 'train/value_loss', 'train/entropy_loss',
+            'train/clip_fraction', 'train/approx_kl', 'train/explained_variance',
+            'train/learning_rate',
+        }
+        if not any(k in name_to_value for k in ppo_keys):
+            return
+        model_stats = {k: v for k, v in name_to_value.items() if k in ppo_keys}
+        self.metrics_tracker.step_count = self.model.num_timesteps
+        self.metrics_tracker.log_training_metrics(model_stats)
     
     def print_final_training_summary(self, model=None, training_config=None, training_config_name=None, rewards_config_name=None):
         """Print comprehensive training summary with final bot evaluation"""

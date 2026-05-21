@@ -71,11 +71,11 @@ def _cache_entry_footprint(cache_entry: Dict[str, Any]) -> Set[Tuple[int, int]]:
     return {(require_key(cache_entry, "col"), require_key(cache_entry, "row"))}
 
 
-def _cache_entry_round_base_size(cache_entry: Dict[str, Any]) -> int:
+def _cache_entry_round_base_size(cache_entry: Dict[str, Any]) -> float:
     """Return a round base size from a cache entry, raising when the stored value is invalid."""
     base_size = require_key(cache_entry, "BASE_SIZE")
-    if not isinstance(base_size, int):
-        raise TypeError(f"round BASE_SIZE must be int, got {type(base_size).__name__}")
+    if not isinstance(base_size, (int, float)):
+        raise TypeError(f"round BASE_SIZE must be numeric, got {type(base_size).__name__}")
     return base_size
 
 

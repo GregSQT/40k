@@ -1815,7 +1815,11 @@ export class UnitRenderer {
     const iconSprite = new PIXI.Sprite(texture);
     iconSprite.anchor.set(0.5);
     iconSprite.position.set(positionX, positionY);
-    const iconDisplaySize = HEX_RADIUS * iconSize * iconScale * iconBoost;
+    const bc = this.props.boardConfig;
+    const itsRawAdv = bc && typeof bc === "object" && "inches_to_subhex" in bc && typeof (bc as { inches_to_subhex?: unknown }).inches_to_subhex === "number"
+      ? (bc as { inches_to_subhex: number }).inches_to_subhex : 10;
+    const iconScaleRatioAdv = itsRawAdv / 10;
+    const iconDisplaySize = HEX_RADIUS * iconScaleRatioAdv * iconSize * iconScale * iconBoost;
     iconSprite.width = iconDisplaySize;
     iconSprite.height = iconDisplaySize;
     iconSprite.zIndex = iconZIndex + 1001;
@@ -1904,7 +1908,11 @@ export class UnitRenderer {
     const iconScale = this.getCSSNumber("--icon-square-icon-scale", 0.7);
     /* Si la variable existe sur :root (App.css), la valeur CSS prime — le 2e argument n'est pas utilisé. */
     const iconBoost = this.getCSSNumber("--shooting-overlay-action-icon-boost", 1.45);
-    const iconDisplaySize = HEX_RADIUS * iconSize * iconScale * iconBoost;
+    const bc = this.props.boardConfig;
+    const itsRawWpn = bc && typeof bc === "object" && "inches_to_subhex" in bc && typeof (bc as { inches_to_subhex?: unknown }).inches_to_subhex === "number"
+      ? (bc as { inches_to_subhex: number }).inches_to_subhex : 10;
+    const iconScaleRatioWpn = itsRawWpn / 10;
+    const iconDisplaySize = HEX_RADIUS * iconScaleRatioWpn * iconSize * iconScale * iconBoost;
     const spacing = iconDisplaySize * 1.2; // Spacing between icons
     const positionX = centerX + spacing; // To the right of Advance icon
 

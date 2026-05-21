@@ -134,7 +134,7 @@ class GameStateManager:
             "ICON_SCALE": config["ICON_SCALE"],
             "ILLUSTRATION_RATIO": require_key(config, "ILLUSTRATION_RATIO"),
             "BASE_SHAPE": require_key(config, "BASE_SHAPE"),
-            "BASE_SIZE": max(1, round(require_key(config, "BASE_SIZE") * scale / 10)),
+            "BASE_SIZE": require_key(config, "BASE_SIZE"),
             "orientation": orientation_init,
             "UNIT_RULES": unit_rules,
             "UNIT_KEYWORDS": unit_keywords,

@@ -856,16 +856,16 @@ def compute_occupied_hexes(
         ValueError: On unknown base_shape or invalid base_size.
     """
     if base_shape == "round":
-        if not isinstance(base_size, int):
-            raise ValueError(f"round base_size must be int, got {type(base_size).__name__}")
+        if not isinstance(base_size, (int, float)):
+            raise ValueError(f"round base_size must be numeric, got {type(base_size).__name__}")
         return _footprint_round(center_col, center_row, base_size)
     elif base_shape == "oval":
         if not isinstance(base_size, (list, tuple)) or len(base_size) != 2:
             raise ValueError(f"oval base_size must be [major, minor], got {base_size}")
         return _footprint_oval(center_col, center_row, base_size[0], base_size[1], orientation)
     elif base_shape == "square":
-        if not isinstance(base_size, int):
-            raise ValueError(f"square base_size must be int, got {type(base_size).__name__}")
+        if not isinstance(base_size, (int, float)):
+            raise ValueError(f"square base_size must be numeric, got {type(base_size).__name__}")
         return _footprint_square(center_col, center_row, base_size, orientation)
     else:
         raise ValueError(f"Unknown base_shape: {base_shape!r} (expected 'round', 'oval', or 'square')")

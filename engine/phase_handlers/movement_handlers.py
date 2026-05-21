@@ -2040,16 +2040,16 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         error_type = move_result.get('error', 'unknown')
         _log_movement_debug(game_state, "destination_selection", str(unit_id), f"destination ({dest_col},{dest_row}) BLOCKED error={error_type}")
         
-        # If destination is invalid (adjacent to enemy), remove it from pool
+        # If destination is invalid (adjacent to enemy or occupied), remove it from pool
         # to prevent infinite loops where agent keeps trying invalid destinations
-        if error_type == "destination_adjacent_to_enemy" and "valid_move_destinations_pool" in game_state:
+        if error_type in ("destination_adjacent_to_enemy", "destination_occupied") and "valid_move_destinations_pool" in game_state:
             invalid_dest = (dest_col, dest_row)
             if invalid_dest in game_state["valid_move_destinations_pool"]:
                 game_state["valid_move_destinations_pool"].remove(invalid_dest)
                 # Also update pending_movement_destinations if it exists
                 if "pending_movement_destinations" in game_state and invalid_dest in game_state["pending_movement_destinations"]:
                     game_state["pending_movement_destinations"].remove(invalid_dest)
-                
+
                 # If pool is now empty, force skip this unit to prevent infinite loop
                 if not game_state["valid_move_destinations_pool"]:
                     _log_movement_debug(game_state, "destination_selection", str(unit_id), "ALL destinations invalid - forcing skip to prevent infinite loop")

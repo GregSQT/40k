@@ -847,10 +847,18 @@ class ActionDecoder:
         off_e_np = np.array(off_e, dtype=np.int32)
         off_o_np = np.array(off_o, dtype=np.int32)
 
-        obstacle_grid = np.zeros((board_cols + 10, board_rows + 10), dtype=bool)
+        grid_cols = board_cols + 10
+        grid_rows = board_rows + 10
+        obstacle_grid = np.zeros((grid_cols, grid_rows), dtype=bool)
         if obstacles:
             obs_arr = np.array(list(obstacles), dtype=np.int32)
-            obstacle_grid[obs_arr[:, 0], obs_arr[:, 1]] = True
+            in_grid = (
+                (obs_arr[:, 0] >= 0) & (obs_arr[:, 0] < grid_cols) &
+                (obs_arr[:, 1] >= 0) & (obs_arr[:, 1] < grid_rows)
+            )
+            obs_arr = obs_arr[in_grid]
+            if len(obs_arr) > 0:
+                obstacle_grid[obs_arr[:, 0], obs_arr[:, 1]] = True
 
         valid_mask = np.zeros(len(pool_np), dtype=bool)
         for mask, off_arr in ((even_mask_np, off_e_np), (~even_mask_np, off_o_np)):

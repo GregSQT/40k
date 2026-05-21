@@ -6,7 +6,7 @@
     { "id": 3, "unit_type": "DreadnoughtBallistus", "player": 1, "col": 130, "row": 100 },
     { "id": 5, "unit_type": "Intercessor", "player": 1, "col": 105, "row": 105 },
     { "id": 6, "unit_type": "Hellblaster", "player": 1, "col": 122, "row": 122 },
-    { "id": 7, "unit_type": "AssaultIntercessor", "player": 1, "col": 130, "row": 110 },
+    { "id": 7, "unit_type": "AssaultIntercessor", "player": 1, "col": 130, "row": 120 },
     { "id": 8, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 90, "row": 70 },
     { "id": 101, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 100, "row": 90 },
     { "id": 102, "unit_type": "Termagant", "player": 2, "col": 40, "row": 45 },
