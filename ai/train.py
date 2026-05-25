@@ -1138,16 +1138,10 @@ def _resolve_tensorboard_run_dir(
     os.makedirs(experiment_dir, exist_ok=True)
 
     if append_training:
-        metadata = _read_tensorboard_run_meta(model_path)
-        run_dir = require_key(metadata, "run_dir")
-        if not isinstance(run_dir, str) or not run_dir.strip():
-            raise ValueError(
-                f"Invalid run_dir in TensorBoard metadata for model {model_path}: {run_dir!r}"
-            )
-        if not os.path.exists(run_dir):
-            raise FileNotFoundError(
-                f"TensorBoard run directory from metadata does not exist: {run_dir}"
-            )
+        run_id = time.strftime("%Y%m%d-%H%M%S")
+        run_dir = os.path.join(experiment_dir, f"run_{run_id}")
+        os.makedirs(run_dir, exist_ok=True)
+        _write_tensorboard_run_meta(model_path, run_dir)
         return experiment_dir, run_dir
 
     # --new (or implicit non-append training) creates an isolated run directory.
@@ -1467,13 +1461,16 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
         model_path_for_vn = build_agent_model_path(
             config.get_models_root(), require_present(controlled_agent_key, "controlled_agent_key")
         )
+        reset_vec_normalize = vec_norm_cfg.get("reset_on_curriculum", False)
         vec_norm_loaded = load_vec_normalize(env, model_path_for_vn)
-        if vec_norm_loaded is not None and not new_model:
+        if vec_norm_loaded is not None and not new_model and not reset_vec_normalize:
             env = vec_norm_loaded
             env.training = True
             env.norm_reward = vec_norm_cfg.get("norm_reward", True)
             print("✅ VecNormalize: loaded stats from checkpoint")
         else:
+            if reset_vec_normalize and vec_norm_loaded is not None:
+                print("🔄 VecNormalize: reset requested — discarding x1 stats, starting fresh for new curriculum phase")
             env = VecNormalize(
                 cast(Any, env),
                 norm_obs=vec_norm_cfg.get("norm_obs", True),
@@ -1801,8 +1798,9 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         model_path_for_vn = build_agent_model_path(
             config.get_models_root(), require_present(agent_key, "agent_key")
         )
+        reset_vec_normalize = vec_norm_cfg.get("reset_on_curriculum", False)
         vec_norm_loaded = load_vec_normalize(env, model_path_for_vn)
-        if vec_norm_loaded is not None and not new_model:
+        if vec_norm_loaded is not None and not new_model and not reset_vec_normalize:
             env = vec_norm_loaded
             env.training = True
             env.norm_reward = vec_norm_cfg.get("norm_reward", True)
@@ -2471,8 +2469,9 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     if vec_normalize_enabled:
         if n_envs == 1:
             env = DummyVecEnv([cast(Any, lambda: env)])
+        reset_vec_normalize = vec_norm_cfg.get("reset_on_curriculum", False)
         vec_norm_loaded = load_vec_normalize(env, model_path)
-        if vec_norm_loaded is not None and not new_model:
+        if vec_norm_loaded is not None and not new_model and not reset_vec_normalize:
             env = vec_norm_loaded
             env.training = True
             env.norm_reward = vec_norm_cfg.get("norm_reward", True)
@@ -2574,6 +2573,18 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 model.gae_lambda = model_params["gae_lambda"]
             if "n_steps" in model_params:
                 model.n_steps = model_params["n_steps"]
+                # Rollout buffer buffer_size was set from the checkpoint's n_steps;
+                # recreate it so it matches the (possibly adjusted) n_steps.
+                from sb3_contrib.common.maskable.buffers import MaskableRolloutBuffer
+                model.rollout_buffer = MaskableRolloutBuffer(
+                    model.n_steps,
+                    model.observation_space,
+                    model.action_space,
+                    device=model.device,
+                    gae_lambda=model.gae_lambda,
+                    gamma=model.gamma,
+                    n_envs=model.n_envs,
+                )
             if "batch_size" in model_params:
                 model.batch_size = model_params["batch_size"]
             if "n_epochs" in model_params:

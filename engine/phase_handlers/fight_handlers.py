@@ -2300,7 +2300,7 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
             if not unit:
                 return False, {"error": "unit_not_found", "unitId": unit_id, "action": action_type}
     else:
-        unit_id = unit["id"]
+        unit_id = str(unit["id"])
 
     # Validate unit is in current pool
     if unit_id not in current_pool:

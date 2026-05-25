@@ -830,46 +830,49 @@ class MetricsCollectionCallback(BaseCallback):
             'valid_target_count': [float(valid_count)],
         }
     
+    _PPO_KEYS = frozenset({
+        'train/policy_gradient_loss', 'train/value_loss', 'train/entropy_loss',
+        'train/clip_fraction', 'train/approx_kl', 'train/explained_variance',
+        'train/learning_rate',
+    })
+
     def _on_training_start(self) -> None:
-        """Called when training starts. Wrap logger.dump to track step_count and entropy_coef."""
-        if hasattr(self.model, 'logger') and self.model.logger and hasattr(self, 'metrics_tracker') and self.metrics_tracker:
-            _original_dump = self.model.logger.dump
-            _tracker = self.metrics_tracker
-            _model = self.model
+        """Wrap logger.dump to capture PPO metrics BEFORE SB3 clears name_to_value."""
+        if not (hasattr(self.model, 'logger') and self.model.logger and hasattr(self, 'metrics_tracker') and self.metrics_tracker):
+            return
+        _original_dump = self.model.logger.dump
+        _tracker = self.metrics_tracker
+        _model = self.model
 
-            def _dump_with_capture(step=0):
-                if hasattr(_model.logger, 'name_to_value') and len(_model.logger.name_to_value) > 0:
-                    model_stats = dict(_model.logger.name_to_value)
-                    if hasattr(_model, "ent_coef"):
-                        ent_coef_value = cast(Any, _model).ent_coef
-                        if isinstance(ent_coef_value, torch.Tensor):
-                            ent_coef_value = float(ent_coef_value.detach().item())
-                        else:
-                            ent_coef_value = float(ent_coef_value)
-                        model_stats['train/ent_coef'] = ent_coef_value
-                        _tracker.log_training_metrics({"train/ent_coef": model_stats['train/ent_coef']})
-                    _tracker.step_count = _model.num_timesteps
-                return _original_dump(step)
+        def _dump_with_capture(step: int = 0) -> None:
+            ntv = getattr(_model.logger, 'name_to_value', {})
+            if ntv:
+                model_stats: Dict[str, Any] = dict(ntv)
+                if hasattr(_model, 'policy') and hasattr(_model.policy, 'parameters'):
+                    total_norm = 0.0
+                    param_count = 0
+                    for p in cast(Any, _model.policy).parameters():
+                        if p.grad is not None:
+                            param_norm = p.grad.data.norm(2)
+                            total_norm += param_norm.item() ** 2
+                            param_count += 1
+                    if param_count > 0:
+                        model_stats['train/gradient_norm'] = total_norm ** 0.5
+                if hasattr(_model, "ent_coef"):
+                    ent_coef_value: Any = cast(Any, _model).ent_coef
+                    if isinstance(ent_coef_value, torch.Tensor):
+                        ent_coef_value = float(ent_coef_value.detach().item())
+                    else:
+                        ent_coef_value = float(ent_coef_value)
+                    model_stats['train/ent_coef'] = ent_coef_value
+                _tracker.log_training_metrics(model_stats)
+                _tracker.step_count = cast(Any, _model).num_timesteps
+            _original_dump(step)
 
-            self.model.logger.dump = _dump_with_capture
+        self.model.logger.dump = _dump_with_capture
 
     def _on_rollout_start(self) -> None:
-        """Capture PPO training metrics from train() that just completed."""
-        if not (hasattr(self.model, 'logger') and self.model.logger and self.metrics_tracker):
-            return
-        name_to_value = self.model.logger.name_to_value
-        if not name_to_value:
-            return
-        ppo_keys = {
-            'train/policy_gradient_loss', 'train/value_loss', 'train/entropy_loss',
-            'train/clip_fraction', 'train/approx_kl', 'train/explained_variance',
-            'train/learning_rate',
-        }
-        if not any(k in name_to_value for k in ppo_keys):
-            return
-        model_stats = {k: v for k, v in name_to_value.items() if k in ppo_keys}
-        self.metrics_tracker.step_count = self.model.num_timesteps
-        self.metrics_tracker.log_training_metrics(model_stats)
+        pass
     
     def print_final_training_summary(self, model=None, training_config=None, training_config_name=None, rewards_config_name=None):
         """Print comprehensive training summary with final bot evaluation"""
@@ -1200,7 +1203,7 @@ class MetricsCollectionCallback(BaseCallback):
                 self.model.logger.record('config/planning_horizon', planning_horizon)
                 # Force tensorboard dump to ensure gamma metrics are written
                 self.model.logger.dump(step=self.model.num_timesteps)
-       
+
         # CRITICAL: Use tactical_data from engine (populated during episode)
         if 'tactical_data' in info:
             # Engine provides complete tactical data - use it directly
@@ -1813,7 +1816,16 @@ class BotEvaluationCallback(BaseCallback):
             Absolute/relative path to the saved model zip.
         """
         model_zip_path = self._ensure_zip_path(save_path)
-        self.model.save(model_zip_path)
+        policy = self.model.policy
+        patched_forward = policy.__dict__.pop("forward", None)
+        patched_train = self.model.__dict__.pop("train", None)
+        try:
+            self.model.save(model_zip_path)
+        finally:
+            if patched_forward is not None:
+                policy.forward = patched_forward
+            if patched_train is not None:
+                self.model.train = patched_train
         if not os.path.exists(model_zip_path):
             raise FileNotFoundError(
                 f"Model save did not produce expected .zip artifact: {model_zip_path}"

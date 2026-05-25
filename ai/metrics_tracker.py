@@ -973,7 +973,7 @@ class W40KMetricsTracker:
 
         GAME PERFORMANCE (6 metrics):
         - 0_critical/a_bot_eval_combined    - Primary goal [0-1] (sorts first)
-        - 0_critical/a2_tier2_combined      - Avg(aggressive_smart, defensive_smart, adaptive)
+
         - 0_critical/b_worst_bot_score      - Min across all 7 bots
         - 0_critical/c_holdout_hard_mean    - Hard holdout aggregate robustness
         - 0_critical/d_win_rate_100ep       - Training opponent performance
@@ -1054,8 +1054,9 @@ class W40KMetricsTracker:
             recent_policy = self.hyperparameter_tracking['policy_losses'][-20:]
             recent_value = self.hyperparameter_tracking['value_losses'][-20:]
             combined_losses = [abs(p) + abs(v) for p, v in zip(recent_policy, recent_value)]
-            loss_mean = np.mean(combined_losses)
+            loss_mean = float(np.mean(combined_losses))
             value_loss_smooth = float(np.mean(recent_value))
+            self.writer.add_scalar('0_critical/f_loss_mean', loss_mean, self.episode_count)
             self.writer.add_scalar('0_critical/m_value_loss_smooth', value_loss_smooth, self.episode_count)
         
         # ==========================================
@@ -1132,18 +1133,18 @@ class W40KMetricsTracker:
         total_intents = self._intent_invade_count + self._intent_defend_count + self._intent_attack_count
         if total_intents > 0:
             self.writer.add_scalar(
-                "0_critical/intent_invade_ratio", self._intent_invade_count / total_intents, step
+                "combat/intent_invade_ratio", self._intent_invade_count / total_intents, step
             )
             self.writer.add_scalar(
-                "0_critical/intent_defend_ratio", self._intent_defend_count / total_intents, step
+                "combat/intent_defend_ratio", self._intent_defend_count / total_intents, step
             )
             self.writer.add_scalar(
-                "0_critical/intent_attack_ratio", self._intent_attack_count / total_intents, step
+                "combat/intent_attack_ratio", self._intent_attack_count / total_intents, step
             )
         else:
-            self.writer.add_scalar("0_critical/intent_invade_ratio", 0.0, step)
-            self.writer.add_scalar("0_critical/intent_defend_ratio", 0.0, step)
-            self.writer.add_scalar("0_critical/intent_attack_ratio", 0.0, step)
+            self.writer.add_scalar("combat/intent_invade_ratio", 0.0, step)
+            self.writer.add_scalar("combat/intent_defend_ratio", 0.0, step)
+            self.writer.add_scalar("combat/intent_attack_ratio", 0.0, step)
 
         # Reset sliding window counters
         self._intent_invade_count = 0

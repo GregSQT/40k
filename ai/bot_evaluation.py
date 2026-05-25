@@ -568,6 +568,9 @@ def _get_result_with_timeout(
     try:
         return future.result(timeout=timeout_seconds)
     except TimeoutError:
+        import sys as _sys
+        _sys.stderr.write(f"BOT_EVAL_TIMEOUT bot={bot_name} scenario={scenario_name} n_episodes={task.get('n_episodes')} timeout={timeout_seconds}s\n")
+        _sys.stderr.flush()
         logging.warning(f"Eval task timeout: bot={bot_name} scenario={scenario_name}")
         return {
             "wins": 0, "losses": 0, "draws": 0,
