@@ -120,12 +120,12 @@
       "apply_to": "agent_only"
     },
     "observation_params": {
-      "obs_size": 357,
-      "action_space_size": 31,
+      "obs_size": 108,
+      "action_space_size": 41,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "Phase 2 — obs_size 355→357 (+2 floats zone intent), action_space_size 16+5×3=31."
+      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=31 (16 micro + 15 macro)."
     },
     "step_log_buffer_size": 200,
     "vec_normalize": {
@@ -323,12 +323,12 @@
       "apply_to": "agent_only"
     },
     "observation_params": {
-      "obs_size": 357,
-      "action_space_size": 31,
+      "obs_size": 108,
+      "action_space_size": 41,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "Phase 2 — obs_size 355→357 (+2 floats zone intent), action_space_size 16+5×3=31."
+      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=31 (16 micro + 15 macro)."
     },
     "step_log_buffer_size": 200,
     "vec_normalize": {
@@ -527,12 +527,12 @@
       "apply_to": "agent_only"
     },
     "observation_params": {
-      "obs_size": 357,
-      "action_space_size": 31,
+      "obs_size": 108,
+      "action_space_size": 41,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "Phase 2 — obs_size 355→357 (+2 floats zone intent), action_space_size 16+5×3=31."
+      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=31 (16 micro + 15 macro)."
     },
     "step_log_buffer_size": 200,
     "vec_normalize": {
@@ -700,12 +700,12 @@
       "apply_to": "agent_only"
     },
     "observation_params": {
-      "obs_size": 357,
-      "action_space_size": 31,
+      "obs_size": 108,
+      "action_space_size": 41,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "Phase 2 — obs_size 355→357 (+2 floats zone intent), action_space_size 16+5×3=31."
+      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=31 (16 micro + 15 macro)."
     },
     "step_log_buffer_size": 200,
     "model_params": {
@@ -905,12 +905,12 @@
       "apply_to": "agent_only"
     },
     "observation_params": {
-      "obs_size": 357,
-      "action_space_size": 31,
+      "obs_size": 108,
+      "action_space_size": 41,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "Phase 2 — obs_size 355→357 (+2 floats zone intent), action_space_size 16+5×3=31."
+      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=31 (16 micro + 15 macro)."
     },
     "step_log_buffer_size": 200,
     "model_params": {

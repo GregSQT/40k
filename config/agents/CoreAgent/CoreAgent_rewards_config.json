@@ -3,6 +3,14 @@
   "CoreAgent": {
     "Unit": "######################### CoreAgent ######################################################",
     "Info": "######################### MINIMAL CONFIG - Only 5 reward signals per RL_TRAINING_ROADMAP.md ##############################",
+    "squad_shaping": {
+      "_comment": "PR4 squad pipeline reward shaping (squad.md §Reward function). Calibrate after first runs.",
+      "hp_damage_weight": 0.7,
+      "model_kill_bonus_factor": 0.2,
+      "squad_kill_bonus_factor": 0.3,
+      "oc_weight": 0.5,
+      "incoherent_weight": 0.2
+    },
     "base_actions": {
       "ranged_attack": 0.3,
       "melee_attack": 0.3,

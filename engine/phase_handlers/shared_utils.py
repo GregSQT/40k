@@ -4231,16 +4231,19 @@ def squad_consolidate_plan(
 # Returns np-compatible list[int] de longueur 16, valeurs ∈ {0, 1}.
 
 
-SQUAD_ACTION_SIZE = 16
+SQUAD_ACTION_SIZE = 26
 SQUAD_ACTION_MOVE_DIR_BASE = 0
 SQUAD_ACTION_MOVE_DIR_COUNT = 6
-SQUAD_ACTION_ADVANCE = 6
-SQUAD_ACTION_FALL_BACK = 7
-SQUAD_ACTION_WAIT = 8
-SQUAD_ACTION_SHOOT_SLOT_BASE = 9
+# PR4 4e-v_a : Advance et Fall Back ont chacun 6 directions (agent decide, zero fallback)
+SQUAD_ACTION_ADVANCE_DIR_BASE = 6
+SQUAD_ACTION_ADVANCE_DIR_COUNT = 6
+SQUAD_ACTION_FALL_BACK_DIR_BASE = 12
+SQUAD_ACTION_FALL_BACK_DIR_COUNT = 6
+SQUAD_ACTION_WAIT = 18
+SQUAD_ACTION_SHOOT_SLOT_BASE = 19
 SQUAD_ACTION_SHOOT_SLOT_COUNT = 5
-SQUAD_ACTION_CHARGE = 14
-SQUAD_ACTION_FIGHT = 15
+SQUAD_ACTION_CHARGE = 24
+SQUAD_ACTION_FIGHT = 25
 
 
 def _squad_is_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:
@@ -4262,19 +4265,62 @@ def _squad_is_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:
     return False
 
 
+def _squad_direction_move_legal(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    direction_idx: int,
+    move_type: str,
+    advance_roll: Optional[int] = None,
+) -> bool:
+    """Dry-run : verifie qu un mouvement de l ancre dans la direction `direction_idx`
+    produit un plan rigide valide.
+
+    direction_idx : 0..5, index dans get_hex_neighbors (parity-aware).
+    move_type : "normal" / "advance" / "fall_back".
+    advance_roll : pour move_type="advance", D6 roll partage (caller doit fournir).
+
+    Aucune ecriture cache. Returns True si le plan rigide est valide
+    (bounds + walls + collisions + ER ennemi + budget + coherency).
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive_mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]
+    if not alive_mids:
+        return False
+    anchor = models_cache[alive_mids[0]]
+    anchor_col, anchor_row = int(anchor["col"]), int(anchor["row"])
+    neighbors = get_hex_neighbors(anchor_col, anchor_row)
+    if not (0 <= direction_idx < len(neighbors)):
+        return False
+    dest_col, dest_row = neighbors[direction_idx]
+    plan = build_rigid_plan(dest_col, dest_row, squad_id, game_state)
+    if plan is None:
+        return False
+    budget = get_squad_move_budget(squad_id, game_state, move_type, advance_roll=advance_roll)
+    constraints = {"budget_per_model": budget}
+    return validate_move_plan(plan, game_state, constraints)
+
+
 def build_squad_action_mask(
     game_state: Dict[str, Any],
     squad_id: str,
     enemy_slot_ids: Optional[List[Optional[str]]] = None,
+    advance_roll: Optional[int] = None,
 ) -> List[int]:
-    """Construit le masque 16 actions pour une escouade active (PR4 4b).
+    """Construit le masque 26 actions pour une escouade active (PR4 4e-v_a).
 
-    Phase courante lue depuis game_state['phase']. Si squad n existe pas ou est mort,
-    retourne masque all-zero (rien n est legal).
+    Decision utilisateur : agent decide direction Advance/Fall Back. Per-direction
+    dry-run validation : chaque direction est mask=1 SEULEMENT si le plan rigide
+    correspondant est valide (zero fallback).
 
-    enemy_slot_ids : mapping slot 0..4 → squad_id ennemi (ou None pour slot vide).
-    Si None, derivee depuis enemy_squads sortes par id (cohérent avec PR4 4a obs).
-    Stable slot mapping HP*OC = PR4 4d.
+    Phase courante lue depuis game_state['phase']. Si squad absent/mort, mask all-zero.
+
+    enemy_slot_ids : mapping slot 0..4 → squad_id ennemi (ou None). Defaut : 1ers 5
+    enemy squads tries par str(sid) (PR4 4a coherence ; PR4 4d stable mapping disponible
+    via get_enemy_slot_mapping).
+
+    advance_roll : pour le mask des actions Advance (6-11), caller doit fournir le
+    roll D6 partage. Si None, mask Advance fully a 0 (impossible de savoir le budget).
     """
     mask = [0] * SQUAD_ACTION_SIZE
     units_cache = game_state.get("units_cache", {})
@@ -4289,9 +4335,7 @@ def build_squad_action_mask(
     has_moved = squad_id in game_state.get("units_moved", set())
     has_shot = squad_id in game_state.get("units_shot", set())
     has_fought = squad_id in game_state.get("units_fought", set())
-    has_charged = squad_id in game_state.get("units_charged", set())
 
-    # Default enemy_slot_ids = first 5 enemy squads sorted by id (PR4 4a coherence).
     if enemy_slot_ids is None:
         enemy_sorted = sorted(
             (sid for sid, e in units_cache.items() if int(e["player"]) != our_player),
@@ -4301,34 +4345,36 @@ def build_squad_action_mask(
             0, SQUAD_ACTION_SHOOT_SLOT_COUNT - len(enemy_sorted)
         )
 
-    # --- Move phase actions: 0-5 (directions), 6 (Advance), 7 (Fall Back) ---
+    # --- Move phase: directions Normal (0-5), Advance (6-11), Fall Back (12-17) ---
     if phase == "move":
         if not has_moved:
-            # Directions 0-5 : Normal move. Mask=1 si pas en ER ennemi (locked).
+            # Normal move : interdit si in ER (locked). Per-direction dry-run.
             if not in_er:
                 for d in range(SQUAD_ACTION_MOVE_DIR_COUNT):
-                    mask[SQUAD_ACTION_MOVE_DIR_BASE + d] = 1
-                mask[SQUAD_ACTION_ADVANCE] = 1
-            # Fall Back : uniquement si in ER ennemi
-            if in_er:
-                mask[SQUAD_ACTION_FALL_BACK] = 1
-        # Wait toujours possible en move phase
+                    if _squad_direction_move_legal(game_state, squad_id, d, "normal"):
+                        mask[SQUAD_ACTION_MOVE_DIR_BASE + d] = 1
+                # Advance : per-direction validation avec roll partage.
+                # Si advance_roll=None : impossible d evaluer le budget, mask 0.
+                if advance_roll is not None and not has_advanced and not has_fled:
+                    for d in range(SQUAD_ACTION_ADVANCE_DIR_COUNT):
+                        if _squad_direction_move_legal(
+                            game_state, squad_id, d, "advance", advance_roll=advance_roll
+                        ):
+                            mask[SQUAD_ACTION_ADVANCE_DIR_BASE + d] = 1
+            # Fall Back : uniquement si in ER ennemi. Per-direction dry-run.
+            if in_er and not has_advanced and not has_fled:
+                for d in range(SQUAD_ACTION_FALL_BACK_DIR_COUNT):
+                    if _squad_direction_move_legal(game_state, squad_id, d, "fall_back"):
+                        mask[SQUAD_ACTION_FALL_BACK_DIR_BASE + d] = 1
         mask[SQUAD_ACTION_WAIT] = 1
 
-    # --- Shoot phase actions: 9-13 (5 slots) ---
+    # --- Shoot phase: shoot slots 19-23 ---
     elif phase == "shoot":
-        # Shooting interdit si fled/advanced/has_shot OU si in ER ennemi (locked, sauf
-        # Pistol qu on ignore en PR4 4b — TODO PR5).
         can_shoot = not has_fled and not has_advanced and not has_shot and not in_er
         if can_shoot:
             for slot_i, esid in enumerate(enemy_slot_ids):
-                if esid is None:
+                if esid is None or esid not in units_cache:
                     continue
-                # Cible eligible si elle existe vivante ET pas locked by ally ER
-                # (PR4 4b : check locked by friendly ER, cf. spec).
-                if esid not in units_cache:
-                    continue
-                # Locked-by-ally check (PR4 4b minimal)
                 er = get_engagement_range_subhex(game_state)
                 e_pos = _squad_model_positions(game_state, esid)
                 ally_pos: List[Tuple[int, int]] = []
@@ -4343,8 +4389,7 @@ def build_squad_action_mask(
                     for ec, er_ in e_pos
                 )
                 if locked_by_ally:
-                    continue  # interdit (regle officielle, sauf Monster/Vehicle non gere en PR4 4b)
-                # At least 1 fig peut tirer ? (range check)
+                    continue
                 models_cache = game_state.get("models_cache", {})
                 can_any_hit = False
                 for mid in game_state.get("squad_models", {}).get(squad_id, []):
@@ -4358,11 +4403,8 @@ def build_squad_action_mask(
                     mask[SQUAD_ACTION_SHOOT_SLOT_BASE + slot_i] = 1
         mask[SQUAD_ACTION_WAIT] = 1
 
-    # --- Charge phase action: 14 ---
+    # --- Charge phase: action 24 ---
     elif phase == "charge":
-        # Eligibilite charge : utiliser n importe quelle escouade ennemie comme cible
-        # candidate, le caller (decoder) precise la cible via macro_intent.
-        # PR4 4b : on autorise l action si AU MOINS UN slot ennemi declanche eligibilite.
         any_charge_possible = False
         for esid in enemy_slot_ids:
             if esid is None:
@@ -4374,13 +4416,11 @@ def build_squad_action_mask(
             mask[SQUAD_ACTION_CHARGE] = 1
         mask[SQUAD_ACTION_WAIT] = 1
 
-    # --- Fight phase action: 15 ---
+    # --- Fight phase: action 25 ---
     elif phase == "fight":
-        # Eligible = fig en ER ennemi OR has_charged ce tour
         eligible = _squad_is_in_fight(game_state, squad_id)
         if eligible and not has_fought:
             mask[SQUAD_ACTION_FIGHT] = 1
-        # Wait masque si eligible (regle officielle : ne peut pas passer si peut combattre)
         if not eligible:
             mask[SQUAD_ACTION_WAIT] = 1
 

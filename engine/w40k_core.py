@@ -4525,33 +4525,58 @@ class W40KEngine(gym.Env):
     
     
     def _build_observation(self) -> np.ndarray:
-        """Build observation - delegates to observation_builder."""
-        if self.game_state.get("phase") == "deployment":
+        """Build observation — route selon obs_size :
+           - 357 : pipeline mono-fig legacy (build_observation)
+           - 108 : pipeline squad PR4 (build_squad_observation)
+        """
+        obs_size = self.obs_builder.obs_size
+        is_squad_pipeline = obs_size == self.obs_builder.SQUAD_OBS_SIZE_TARGET
+
+        def _zero_obs() -> np.ndarray:
+            return np.zeros(obs_size, dtype=np.float32)
+
+        def _build_for_squad(squad_id: str) -> np.ndarray:
+            if is_squad_pipeline:
+                return self.obs_builder.build_squad_observation(self.game_state, squad_id)
             return self.obs_builder.build_observation(self.game_state)
+
+        if self.game_state.get("phase") == "deployment":
+            # En deployment, l agent voit ses unites pas encore deployees. Selectionne
+            # la 1ere vivante. Si aucune (cas degenere), zero obs.
+            uc = self.game_state.get("units_cache", {})
+            if uc:
+                return _build_for_squad(next(iter(uc.keys())))
+            return _zero_obs()
+
         action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
         if not eligible_units and not action_mask.any():
             if self.game_state.get("game_over", False):
-                if not hasattr(self.obs_builder, "obs_size"):
-                    raise KeyError("obs_builder missing required 'obs_size' field")
-                return np.zeros(self.obs_builder.obs_size, dtype=np.float32)
+                return _zero_obs()
             current_phase = self.game_state.get("phase", "unknown")
             advance_action = {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
             advance_success, advance_result = self._process_semantic_action(advance_action)
             if not advance_success:
-                if (
-                    isinstance(advance_result, dict)
-                    and advance_result.get("error") == "game_over"
-                ):
-                    if not hasattr(self.obs_builder, "obs_size"):
-                        raise KeyError("obs_builder missing required 'obs_size' field")
-                    return np.zeros(self.obs_builder.obs_size, dtype=np.float32)
+                if isinstance(advance_result, dict) and advance_result.get("error") == "game_over":
+                    return _zero_obs()
                 raise RuntimeError(f"advance_phase failed: {advance_result}")
             _action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
             if not eligible_units:
-                if not hasattr(self.obs_builder, "obs_size"):
-                    raise KeyError("obs_builder missing required 'obs_size' field")
-                return np.zeros(self.obs_builder.obs_size, dtype=np.float32)
-        return self.obs_builder.build_observation(self.game_state)
+                return _zero_obs()
+        # Active squad = 1er eligible (convention 1 unit = 1 squad).
+        # Fallback : si eligible_units vide mais mask any (cas degenere),
+        # prendre 1ere unite vivante du player courant.
+        if eligible_units:
+            active_squad_id = str(eligible_units[0])
+        else:
+            uc = self.game_state.get("units_cache", {})
+            current_player = int(self.game_state.get("current_player", 1))
+            active_squad_id = next(
+                (str(sid) for sid, e in uc.items() if int(e.get("player", -1)) == current_player),
+                None,
+            )
+            if active_squad_id is None:
+                return _zero_obs()
+        return _build_for_squad(active_squad_id)
 
     def build_macro_observation(self) -> Dict[str, Any]:
         """Build macro observation - delegates to observation_builder."""

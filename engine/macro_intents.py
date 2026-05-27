@@ -6,8 +6,18 @@ INTENT_DEFEND = 1
 INTENT_ATTACK = 2
 
 MAX_OBJECTIVES = 5
-BASE_ZONE_INTENT = 16
-TOTAL_ACTION_SIZE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3  # 31
+# PR4 4e-v_a : squad pipeline action space (cf. squad.md §"Action space (micro)").
+# Decision utilisateur : agent decide direction Advance/Fall Back (zero fallback).
+# 26 micro actions:
+#   0-5   : Normal move direction D (6)
+#   6-11  : Advance direction D (6)        [PR4: extension agent-decided]
+#   12-17 : Fall Back direction D (6)      [PR4: extension agent-decided]
+#   18    : wait / end activation
+#   19-23 : shoot slot 0-4 (5)
+#   24    : charge
+#   25    : fight
+BASE_ZONE_INTENT = 26
+TOTAL_ACTION_SIZE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3  # 41
 
 
 def get_objective_center(obj: dict) -> tuple:
