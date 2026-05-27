@@ -235,7 +235,7 @@
       },
       "vf_coef": 1.0,
       "max_grad_norm": 0.5,
-      "target_kl": 0.02,
+      "target_kl": 0.018,
       "tensorboard_log": "./tensorboard/",
       "policy_kwargs": {
         "net_arch": [
@@ -462,7 +462,7 @@
       "bot_eval_intermediate": 100,
       "bot_eval_final": 100,
       "bot_eval_worker_device": "cpu",
-      "bot_eval_task_timeout_seconds": 600,
+      "bot_eval_task_timeout_seconds": 3600,
       "save_best_robust": true,
       "save_best_robust_seed": true,
       "robust_window": 5,
