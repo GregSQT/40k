@@ -1,5 +1,39 @@
 # Squad - spec implementation finale (v3.7)
 
+---
+
+## STATUT IMPLEMENTATION (mise a jour 2026-05-27)
+
+**PR1 — DONE.** Cf. [squad_audit.md §PR1](squad_audit.md) pour le detail des tranches 1a-1d et des validations passees.
+**PR2 — DONE (moteur uniquement, pas branche au decoder).** Cf. [squad_audit.md §PR2](squad_audit.md). Helpers ajoutes dans shared_utils.py : pipeline mutualise rigid_plan/validate/snap/commit, advance roll D6, charge multi-fig avec eligibilite 12" + B2B + ER finale. Aucun hook dans le pipeline RL existant — invocable uniquement par tests directs ou par PR4 quand le decoder sera migre.
+**PR3 — DONE (pipeline parallele).** Cf. [squad_audit.md §PR3](squad_audit.md). ~700 lignes ajoutees dans shared_utils.py : pending intents lifecycle, squad_shooting (start/declare/lock/resolve), squad_fight (start/order alternance non-active first/declare/pile_in/buddy non-transitive/resolve/consolidate), end_of_turn_coherency_removal deterministe. Validation : table wound W40K 10e + save threshold testees, 50-run stats coherent, integration end-to-end (move→charge→fight→consolidate→coherency) OK. Pipeline existant mono-fig **intact** — soak 3 episodes sans regression. Aucun hook RL — branchement = PR4.
+**PR4 4a-4d — DONE (pipeline parallele).** Cf. [squad_audit.md §PR4](squad_audit.md). Helpers ajoutes : `build_squad_observation` (108-dim) dans observation_builder.py, `build_squad_action_mask` (16-dim) + `init_enemy_slot_mapping` + `get_enemy_slot_mapping` dans shared_utils.py. Scenario [scenario_pvp_squad5.json](../../config/scenario_pvp_squad5.json) avec 5+3 figs validé. game_state.py adapte pour pass-through unit["models"] + HP_CUR multi-fig.
+**PR4 4e-i + 4e-ii — DONE.** occupied_hexes_by_model dict en parallele (per-fig source de verite, set legacy conserve pour ~30 readers existants, zero breakage). Assert obs_size adapte : 357 (legacy) OU 108 (squad) via SUPPORTED_OBS_SIZES. build_observation early check + RuntimeError clair si 108. **PR4 4e-iii a 4e-viii (configs + wiring + retrain) en pause — supervision utilisateur requise.**
+
+**Decisions architecturales prises en cours d implementation (a respecter pour PR2+) :**
+
+1. **`occupied_hexes` reste un `Set[Tuple[int,int]]`** en PR1. Migration set → dict deferee a PR2 (1er scenario multi-figurines). Raison : ~30 readers dans engine/ (fight_handlers, shooting_handlers, spatial_relations, movement_handlers, action_decoder, reward_calculator) iterent occupied_hexes comme iterable de (col,row). Le changement de type doit etre coordonne avec la migration de tous les readers, sinon casse silencieuse (un dict itere ses keys). Le set actuel reste correct tant que les scenarios sont mono-fig.
+
+2. **Pipeline gameplay non migre vers `update_model_hp` / `update_model_position` en PR1.** Les structures parallels (`models_cache`, `squad_models`, `squad_cache`) sont construites au reset et **deviennent stale en cours de partie** car les phases existantes ecrivent directement dans `units_cache` via `update_units_cache_hp`. Migration des call sites = PR2 (mouvement) + PR3 (tir/fight). Aucun reader ne lit `models_cache` en PR1, donc l ecart est inerte.
+
+3. **`obs_size = 108` (cible)** — calcule en PR1 (`N_global=16 + 5 squad_agg + 6*7 top-k + 5*9 enemy slots = 108`) mais **NON ecrit dans `config/agents/*_training_config.json`**. Ecrire 108 maintenant casserait le modele PPO existant entraine avec 357. Figer dans les configs juste avant le retrain PR4. La cible 108 est le contrat pour PR4.
+
+4. **Backward compat mono-fig dans `_build_models_for_unit`** : si une unite n a pas de cle `unit["models"]`, le moteur cree automatiquement un modele unique `<unit_id>#0` derive des champs de l unite. Les scenarios existants (4× mono-fig dans scenario_pvp.json) continuent de fonctionner sans modification.
+
+5. **`fight_handler_new_bugged.py` supprime** (3 820 lignes, zero reference). Entree pyrightconfig.json correspondante retiree.
+
+6. **Format roster multi-fig (option B)** : 1 ligne par figurine declaree dans `unit["models"]` avec `col`, `row`, optionnellement `unit_type` pour profils mixtes. Cf. [squad_audit.md §8](squad_audit.md). Pas encore utilise par un scenario en PR1 — premier usage en PR2 (tests multi-fig).
+
+**Sections de la spec partiellement obsoletes a la lumiere de l implementation :**
+
+- §"Contrat `occupied_hexes`" : la migration dict n est pas faite en PR1 — voir decision 1.
+- §"Cascade de mise a jour" de `destroy_model` : la cascade existe et fonctionne, mais n est pas declenchee par le pipeline gameplay actuel (decision 2).
+- §"Criteres d acceptance PR1 explicite : N_global compte, valeur totale obs_size inscrite dans la spec ET dans le config" : N_global=16 et obs_size=108 sont dans la spec/audit, mais PAS dans le config (decision 3).
+
+**Le reste de la spec est encore valide pour PR2-4.**
+
+---
+
 > v3.7 : corrections post-audit (round 6).
 > Corrections : INVUL_SAVE convention 0->7 (aligne sentinel observation_builder:1332),
 > calculate_hex_distance documente en subhexes (B2B==1, ER<=inches_to_subhex),

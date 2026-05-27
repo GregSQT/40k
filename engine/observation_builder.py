@@ -21,6 +21,10 @@ from engine.phase_handlers.shared_utils import (
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position,
     unit_has_rule_effect,
+    # PR4 4a: nouveau pipeline d observation squad
+    get_engagement_range_subhex, get_fighting_models,
+    wound_threshold, save_threshold,
+    BASE_TO_BASE_SUBHEX,
 )
 from engine.macro_intents import (
     INTENT_INVADE,
@@ -37,6 +41,8 @@ class ObservationBuilder:
     """Builds observations for the agent."""
 
     PHASE2_OBS_SIZE = 357
+    SQUAD_OBS_SIZE_TARGET = 108  # PR4 cible — voir build_squad_observation
+    SUPPORTED_OBS_SIZES = (357, 108)  # PR4 4e-ii : 2 pipelines cohabitent transitoire
     RULE_FEATURE_BASE_IDX = 314
     RULE_FEATURE_COUNT = 32
     RULE_AWARE_MACRO_BASE_IDX = 346  # kept for reference: base of macro intent context (obs[346:357])
@@ -1100,6 +1106,16 @@ class ObservationBuilder:
         Asymmetric design: More complete information about enemies than allies.
         Agent discovers optimal tactical combinations through training.
         """
+        # PR4 4e-ii : pipeline mono-fig (357-d) uniquement. Si obs_size == 108
+        # (squad pipeline), le caller doit appeler build_squad_observation. Cette
+        # fonction n est PAS retro-compatible avec 108-d.
+        if self.obs_size != self.PHASE2_OBS_SIZE:
+            raise RuntimeError(
+                f"build_observation requires obs_size={self.PHASE2_OBS_SIZE} (mono-fig pipeline). "
+                f"Got obs_size={self.obs_size}. For squad pipeline (108-d), call "
+                "build_squad_observation(game_state, active_squad_id) instead."
+            )
+
         # PERFORMANCE: Clear per-observation cache (same pairs recalculated multiple times)
         self._danger_probability_cache = {}
         game_state.pop("macro_objectives", None)
@@ -1223,14 +1239,325 @@ class ObservationBuilder:
             valid_targets=valid_targets, six_enemies=six_enemies, positions=positions
         )
         # === SECTION 7: Phase 2 — Rule features + Zone intent context (obs[314:357]) ===
-        if self.obs_size != self.PHASE2_OBS_SIZE:
-            raise ValueError(
-                f"Unsupported observation size: {self.obs_size}. "
-                f"Expected {self.PHASE2_OBS_SIZE} (Phase 2). "
-                "Checkpoints trained with earlier obs_size are incompatible — use --new."
-            )
+        # obs_size deja valide en tete (PR4 4e-ii early check) : on est en 357-d.
         self._encode_rule_features(obs, active_unit, game_state, base_idx=self.RULE_FEATURE_BASE_IDX)
         self._encode_macro_intent_context(obs, active_unit, game_state, base_idx=self.RULE_AWARE_MACRO_BASE_IDX, positions=positions)
+        return obs
+
+    # ========================================================================
+    # PR4 4a — NEW SQUAD OBSERVATION (parallel to build_observation)
+    # ========================================================================
+    # Structure 108-dim per squad.md PR4 :
+    #   [0:16]    Global context (16 floats, identique a build_observation[0:16])
+    #   [16:21]   Squad aggregates (5 floats: nb_alive_norm, is_coherent, OC_total,
+    #             HP_pct, firepower_estimate)
+    #   [21:63]   Top-k=6 fig features (7 features × 6 figs, zero-padded if <6 alive)
+    #             col_rel/perception_radius, row_rel/perception_radius, HP%,
+    #             weapon_idx_norm, is_fighting_eligible, is_b2b_enemy, is_b2b_ally_in_b2b
+    #   [63:108]  5 enemy slots × 9 features
+    #             squad_size, HP_total, anchor_col_rel, anchor_row_rel, OC_total,
+    #             slot_mask, is_locked_by_friendly_er, value_over_ttk, threat_level
+    # PR4 4a : slot mapping = premiers 5 squad_ids ennemis tries par index creation.
+    # Slot mapping stable (par HP*OC) defere a PR4 4d.
+
+    SQUAD_OBS_SIZE = 108
+    SQUAD_N_GLOBAL = 16
+    SQUAD_N_AGG = 5
+    SQUAD_TOP_K = 6
+    SQUAD_PER_MODEL = 7
+    SQUAD_N_ENEMY_SLOTS = 5
+    SQUAD_PER_ENEMY_SLOT = 9
+
+    def build_squad_observation(
+        self, game_state: Dict[str, Any], active_squad_id: str
+    ) -> np.ndarray:
+        """Construit l observation 108-dim pour une escouade active (PR4 4a).
+
+        Parallel implementation: ne modifie pas build_observation. La selection
+        active_squad vs active_unit est de la responsabilite du caller (decoder PR4).
+
+        Spec : Documentation/TODO/squad.md §"Observation (micro)" et formule
+        obs_size = N_global + 92.
+        """
+        obs = np.zeros(self.SQUAD_OBS_SIZE, dtype=np.float32)
+        # C2 cleanup (audit) : message d erreur explicite si l ordre d init est cassé.
+        # squad_cache, models_cache, squad_models sont construits par build_units_cache.
+        # Si absents, appelez build_units_cache(game_state) avant build_squad_observation.
+        if not all(k in game_state for k in ("units_cache", "models_cache", "squad_models", "squad_cache")):
+            missing = [k for k in ("units_cache", "models_cache", "squad_models", "squad_cache") if k not in game_state]
+            raise RuntimeError(
+                f"build_squad_observation requires fully initialized caches. "
+                f"Missing: {missing}. Call build_units_cache(game_state) first."
+            )
+        units_cache = game_state["units_cache"]
+        models_cache = game_state["models_cache"]
+        squad_models = game_state["squad_models"]
+        squad_cache = game_state["squad_cache"]
+
+        if active_squad_id not in units_cache or active_squad_id not in squad_cache:
+            return obs  # squad dead/absent -> zero observation
+        active_entry = units_cache[active_squad_id]
+        active_sq = squad_cache[active_squad_id]
+        active_player = int(active_entry["player"])
+
+        # === SECTION 1: Global context (16 floats) — meme structure que build_observation ===
+        current_player = int(require_key(game_state, "current_player"))
+        obs[0] = 1.0 if current_player == active_player else 0.0
+        phase_encoding = {"deployment": 0.0, "command": 0.0, "move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}
+        obs[1] = phase_encoding.get(game_state.get("phase", "command"), 0.0)
+        obs[2] = min(1.0, int(game_state.get("turn", 0)) / 5.0)
+        obs[3] = min(1.0, int(game_state.get("episode_steps", 0)) / 100.0)
+        # HP pct du squad actif
+        model_count_at_start = max(1, int(active_sq.get("model_count_at_start", 1)))
+        # HP_MAX par modele (mono-fig: HP_MAX direct; multi-fig: somme via models_cache)
+        total_hp_pool = 0
+        for mid in squad_models.get(active_squad_id, []):
+            m = models_cache.get(mid)
+            if m is not None:
+                total_hp_pool += int(m["HP_MAX"])
+        if total_hp_pool == 0:
+            total_hp_pool = model_count_at_start
+        obs[4] = min(1.0, int(active_entry["HP_CUR"]) / float(total_hp_pool)) if total_hp_pool > 0 else 0.0
+        obs[5] = 1.0 if active_squad_id in game_state.get("units_moved", set()) else 0.0
+        obs[6] = 1.0 if active_squad_id in game_state.get("units_shot", set()) else 0.0
+        obs[7] = 1.0 if active_squad_id in game_state.get("units_attacked", set()) else 0.0
+        obs[8] = 1.0 if active_squad_id in game_state.get("units_advanced", set()) else 0.0
+        # alive friendlies/enemies normalises
+        max_nearby = self.max_nearby_units
+        alive_friendlies = sum(
+            1 for sid, e in units_cache.items() if int(e["player"]) == active_player
+        )
+        alive_enemies = sum(
+            1 for sid, e in units_cache.items() if int(e["player"]) != active_player
+        )
+        obs[9] = alive_friendlies / max(1, max_nearby)
+        obs[10] = alive_enemies / max(1, max_nearby)
+        # Objective control (5 floats) — reuse existing encoder mais avec active_unit synthetique
+        synthetic_active = {
+            "id": active_squad_id,
+            "player": active_player,
+            "col": int(active_entry["col"]),
+            "row": int(active_entry["row"]),
+        }
+        positions = {uid: (int(e["col"]), int(e["row"])) for uid, e in units_cache.items()}
+        try:
+            self._encode_objective_control(obs, synthetic_active, game_state, base_idx=11, positions=positions)
+        except Exception:
+            pass  # objectifs absents → zero (PR4 acceptable, sera plus strict en PR5)
+
+        # === SECTION 2: Squad aggregates (5 floats) [16:21] ===
+        nb_alive = int(active_sq["model_count"])
+        obs[16] = min(1.0, nb_alive / float(model_count_at_start))
+        obs[17] = 1.0 if active_sq.get("is_coherent", False) else 0.0
+        obs[18] = min(1.0, int(active_sq.get("oc_total", 0)) / 10.0)
+        obs[19] = min(1.0, int(active_entry["HP_CUR"]) / float(total_hp_pool)) if total_hp_pool > 0 else 0.0
+        # Firepower estimate : sum(P(hit)*P(wound)*D) sur les armes RNG selectionnees,
+        # vs cible generique T=4, Sv=4 (normalisation /10)
+        firepower = 0.0
+        for mid in squad_models.get(active_squad_id, []):
+            m = models_cache.get(mid)
+            if m is None:
+                continue
+            weapons = m.get("RNG_WEAPONS", [])
+            sel = m.get("selectedRngWeaponIndex")
+            if not weapons or sel is None or not (0 <= int(sel) < len(weapons)):
+                continue
+            w = weapons[int(sel)]
+            if not isinstance(w, dict):
+                continue
+            bs = int(w.get("ATK", w.get("BS", 4)))
+            s = int(w.get("STR", w.get("S", 4)))
+            ap = int(w.get("AP", 0))
+            dmg_raw = w.get("DMG", 1)
+            try:
+                d = float(expected_dice_value(dmg_raw, "obs_firepower"))
+            except Exception:
+                d = float(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1.0
+            try:
+                nb_raw = w.get("NB", 1)
+                n = float(expected_dice_value(nb_raw, "obs_firepower_nb"))
+            except Exception:
+                n = float(nb_raw) if isinstance(nb_raw, (int, float)) else 1.0
+            p_hit = max(0.0, (7 - bs) / 6.0) if bs <= 6 else 0.0
+            wth = wound_threshold(s, 4)
+            p_wound = max(0.0, (7 - wth) / 6.0)
+            sv = save_threshold(4, 7, ap)
+            p_fail = max(0.0, (sv - 1) / 6.0) if sv < 7 else 1.0
+            firepower += n * p_hit * p_wound * p_fail * d
+        obs[20] = min(1.0, firepower / 10.0)
+
+        # === SECTION 3: Top-k=6 fig features (7 × 6 = 42 floats) [21:63] ===
+        cx = float(active_sq.get("centroid_col", active_entry["col"]))
+        cy = float(active_sq.get("centroid_row", active_entry["row"]))
+        pr = float(max(1, self.perception_radius))
+        # Calcule once : fighting_models + B2B with enemies
+        fighting_set: set = set()
+        try:
+            fighting_set = set(get_fighting_models(game_state, active_squad_id))
+        except Exception:
+            fighting_set = set()
+        # Enemy positions pour B2B
+        enemy_positions: List[Tuple[int, int]] = []
+        for sid, e in units_cache.items():
+            if int(e["player"]) == active_player:
+                continue
+            for mid in squad_models.get(sid, []):
+                m = models_cache.get(mid)
+                if m is not None:
+                    enemy_positions.append((int(m["col"]), int(m["row"])))
+        alive_mids = [m for m in squad_models.get(active_squad_id, []) if m in models_cache]
+        for k_idx in range(self.SQUAD_TOP_K):
+            base = 21 + k_idx * self.SQUAD_PER_MODEL
+            if k_idx >= len(alive_mids):
+                continue  # zero-padded
+            mid = alive_mids[k_idx]
+            m = models_cache[mid]
+            col_rel = (int(m["col"]) - cx) / pr
+            row_rel = (int(m["row"]) - cy) / pr
+            obs[base + 0] = max(-1.0, min(1.0, col_rel))
+            obs[base + 1] = max(-1.0, min(1.0, row_rel))
+            obs[base + 2] = int(m["HP_CUR"]) / max(1, int(m["HP_MAX"]))
+            sel_idx = m.get("selectedCcWeaponIndex")
+            obs[base + 3] = (int(sel_idx) if sel_idx is not None else 0) / 5.0
+            obs[base + 4] = 1.0 if mid in fighting_set else 0.0
+            # B2B with enemy (condition 1 simplified : distance == 1)
+            mc = int(m["col"]); mr = int(m["row"])
+            is_b2b_enemy = any(
+                calculate_hex_distance(mc, mr, ec, er) == BASE_TO_BASE_SUBHEX
+                for ec, er in enemy_positions
+            )
+            obs[base + 5] = 1.0 if is_b2b_enemy else 0.0
+            # B2B with ally that is B2B with enemy (buddy rule features)
+            is_b2b_ally_in_b2b = False
+            if not is_b2b_enemy:
+                for other_mid in alive_mids:
+                    if other_mid == mid:
+                        continue
+                    om = models_cache[other_mid]
+                    oc, or_ = int(om["col"]), int(om["row"])
+                    if calculate_hex_distance(mc, mr, oc, or_) != BASE_TO_BASE_SUBHEX:
+                        continue
+                    if any(
+                        calculate_hex_distance(oc, or_, ec, er) == BASE_TO_BASE_SUBHEX
+                        for ec, er in enemy_positions
+                    ):
+                        is_b2b_ally_in_b2b = True
+                        break
+            obs[base + 6] = 1.0 if is_b2b_ally_in_b2b else 0.0
+
+        # === SECTION 4: 5 enemy slots × 9 features = 45 floats [63:108] ===
+        # PR4 4a : slot mapping naif (ordre de creation). Stable mapping HP*OC = PR4 4d.
+        enemy_squads = sorted(
+            (sid for sid, e in units_cache.items() if int(e["player"]) != active_player),
+            key=lambda s: str(s)
+        )
+        er_threshold = get_engagement_range_subhex(game_state)
+        # ER zone des alliés (pour is_locked_by_friendly_er)
+        ally_positions: List[Tuple[int, int]] = []
+        for sid, e in units_cache.items():
+            if int(e["player"]) != active_player:
+                continue
+            for mid in squad_models.get(sid, []):
+                m = models_cache.get(mid)
+                if m is not None:
+                    ally_positions.append((int(m["col"]), int(m["row"])))
+        # Pour value_over_ttk et threat_level : utiliser arme RNG[0] de l active squad
+        active_sample_weapon: Optional[Dict[str, Any]] = None
+        if alive_mids:
+            a_sample = models_cache[alive_mids[0]]
+            a_weapons = a_sample.get("RNG_WEAPONS", [])
+            a_sel = a_sample.get("selectedRngWeaponIndex")
+            if a_weapons and a_sel is not None and 0 <= int(a_sel) < len(a_weapons):
+                active_sample_weapon = a_weapons[int(a_sel)]
+        for slot_i in range(self.SQUAD_N_ENEMY_SLOTS):
+            base = 63 + slot_i * self.SQUAD_PER_ENEMY_SLOT
+            if slot_i >= len(enemy_squads):
+                continue  # slot vide (mask=0)
+            esid = enemy_squads[slot_i]
+            e_entry = units_cache[esid]
+            e_sq = squad_cache.get(esid, {})
+            e_mids = [m for m in squad_models.get(esid, []) if m in models_cache]
+            e_size = len(e_mids)
+            e_hp_total = int(e_entry.get("HP_CUR", 0))
+            obs[base + 0] = min(1.0, e_size / 10.0)
+            obs[base + 1] = min(1.0, e_hp_total / 30.0)
+            obs[base + 2] = max(-1.0, min(1.0, (int(e_entry["col"]) - cx) / pr))
+            obs[base + 3] = max(-1.0, min(1.0, (int(e_entry["row"]) - cy) / pr))
+            obs[base + 4] = min(1.0, int(e_sq.get("oc_total", 0)) / 10.0)
+            obs[base + 5] = 1.0  # slot_mask (alive)
+            # is_locked_by_friendly_er : au moins une fig de e en ER d un allié
+            is_locked = False
+            for em in e_mids:
+                mm = models_cache[em]
+                ec_, er_ = int(mm["col"]), int(mm["row"])
+                if any(calculate_hex_distance(ec_, er_, ac, ar) <= er_threshold for ac, ar in ally_positions):
+                    is_locked = True
+                    break
+            obs[base + 6] = 1.0 if is_locked else 0.0
+            # value_over_ttk = VALUE_cible / TTK, normalise (cap a 1.0)
+            value_over_ttk = 0.0
+            threat_level = 0.0
+            if active_sample_weapon is not None and isinstance(active_sample_weapon, dict) and e_mids:
+                t_target = int(models_cache[e_mids[0]].get("T", 4))
+                sv_target = int(models_cache[e_mids[0]].get("ARMOR_SAVE", 7))
+                invul_target = int(models_cache[e_mids[0]].get("INVUL_SAVE", 7))
+                bs = int(active_sample_weapon.get("ATK", active_sample_weapon.get("BS", 4)))
+                s = int(active_sample_weapon.get("STR", active_sample_weapon.get("S", 4)))
+                ap = int(active_sample_weapon.get("AP", 0))
+                dmg_raw = active_sample_weapon.get("DMG", 1)
+                try:
+                    d_mean = float(expected_dice_value(dmg_raw, "obs_ttk_dmg"))
+                except Exception:
+                    d_mean = float(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1.0
+                p_hit = max(0.0, (7 - bs) / 6.0) if bs <= 6 else 0.0
+                wth = wound_threshold(s, t_target)
+                p_wound = max(0.0, (7 - wth) / 6.0)
+                sv_th = save_threshold(sv_target, invul_target, ap)
+                p_fail = max(0.0, (sv_th - 1) / 6.0) if sv_th < 7 else 1.0
+                expected_dmg_per_attack = p_hit * p_wound * p_fail * d_mean
+                if expected_dmg_per_attack > 0:
+                    # Approx VALUE de la cible : somme points_per_hp * HP_total
+                    try:
+                        ppl = float(models_cache[e_mids[0]].get("points_per_hp", 0.0))
+                    except Exception:
+                        ppl = 0.0
+                    e_value = ppl * e_hp_total
+                    # TTK = HP_total / expected_dmg_per_attack (en nb attaques moyennes)
+                    ttk = max(1.0, e_hp_total / expected_dmg_per_attack)
+                    value_over_ttk = min(1.0, e_value / (ttk * 50.0))  # /50 normalisation
+            # threat_level = expected damage des armes ennemies sur notre escouade
+            if e_mids:
+                e_sample = models_cache[e_mids[0]]
+                e_weapons = e_sample.get("RNG_WEAPONS", [])
+                e_sel = e_sample.get("selectedRngWeaponIndex")
+                if e_weapons and e_sel is not None and 0 <= int(e_sel) < len(e_weapons):
+                    ew = e_weapons[int(e_sel)]
+                    if isinstance(ew, dict) and alive_mids:
+                        # vs notre T/Sv (premier modele actif)
+                        our_t = int(models_cache[alive_mids[0]].get("T", 4))
+                        our_sv = int(models_cache[alive_mids[0]].get("ARMOR_SAVE", 7))
+                        our_inv = int(models_cache[alive_mids[0]].get("INVUL_SAVE", 7))
+                        e_bs = int(ew.get("ATK", ew.get("BS", 4)))
+                        e_s = int(ew.get("STR", ew.get("S", 4)))
+                        e_ap = int(ew.get("AP", 0))
+                        e_dmg_raw = ew.get("DMG", 1)
+                        try:
+                            e_d = float(expected_dice_value(e_dmg_raw, "obs_threat_dmg"))
+                        except Exception:
+                            e_d = float(e_dmg_raw) if isinstance(e_dmg_raw, (int, float)) else 1.0
+                        try:
+                            e_nb = float(expected_dice_value(ew.get("NB", 1), "obs_threat_nb"))
+                        except Exception:
+                            e_nb = float(ew.get("NB", 1)) if isinstance(ew.get("NB", 1), (int, float)) else 1.0
+                        e_phit = max(0.0, (7 - e_bs) / 6.0) if e_bs <= 6 else 0.0
+                        e_wth = wound_threshold(e_s, our_t)
+                        e_pw = max(0.0, (7 - e_wth) / 6.0)
+                        e_svth = save_threshold(our_sv, our_inv, e_ap)
+                        e_pf = max(0.0, (e_svth - 1) / 6.0) if e_svth < 7 else 1.0
+                        threat_level = min(1.0, e_size * e_nb * e_phit * e_pw * e_pf * e_d / 20.0)
+            obs[base + 7] = value_over_ttk
+            obs[base + 8] = threat_level
+
         return obs
 
     def build_observation_for_unit(self, game_state: Dict[str, Any], unit_id: str) -> np.ndarray:

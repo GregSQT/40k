@@ -101,7 +101,11 @@ class GameStateManager:
         else:
             orientation_init = 0
 
-        return {
+        # PR4 4c: pass-through "models" field (multi-fig squad declaration).
+        # Already validated/normalized upstream by load_units_from_scenario.
+        models_passthrough = config.get("models")
+
+        result = {
             # Identity
             "id": config["id"],
             "player": config["player"],
@@ -143,7 +147,10 @@ class GameStateManager:
             "SHOOT_LEFT": shoot_left,
             "ATTACK_LEFT": attack_left
         }
-    
+        if models_passthrough is not None:
+            result["models"] = copy.deepcopy(models_passthrough)
+        return result
+
     def validate_uppercase_fields(self, unit: Dict[str, Any]):
         """Validate unit uses UPPERCASE field naming convention."""
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate weapons instead of individual weapon fields
@@ -537,7 +544,33 @@ class GameStateManager:
                     "SHOOT_LEFT": shoot_left,
                     "ATTACK_LEFT": attack_left
                 }
-                
+
+                # PR4 4c : pass-through champ optionnel "models" (multi-fig squad)
+                # Format option B (cf. squad_audit.md §8) : liste de {col, row}
+                # Si absent → backward compat (auto-build 1 fig in _build_models_for_unit)
+                if "models" in unit_data:
+                    raw_models = unit_data["models"]
+                    if not isinstance(raw_models, list) or not raw_models:
+                        raise ValueError(
+                            f"Unit {unit_data.get('id')}: 'models' must be a non-empty list"
+                        )
+                    normalized_models: List[Dict[str, Any]] = []
+                    for idx, spec in enumerate(raw_models):
+                        if not isinstance(spec, dict):
+                            raise TypeError(
+                                f"Unit {unit_data.get('id')}: models[{idx}] must be dict, got {type(spec).__name__}"
+                            )
+                        m_col = int(require_key(spec, "col"))
+                        m_row = int(require_key(spec, "row"))
+                        m_norm_col, m_norm_row = normalize_coordinates(m_col, m_row)
+                        normalized_models.append({
+                            "col": m_norm_col,
+                            "row": m_norm_row,
+                        })
+                    enhanced_unit["models"] = normalized_models
+                    # Multi-fig : HP_CUR au niveau unit = somme HP_MAX par fig (= sum agrege)
+                    enhanced_unit["HP_CUR"] = int(full_unit_data["HP_MAX"]) * len(normalized_models)
+
                 enhanced_units.append(enhanced_unit)
 
             # Extract optional terrain data from scenario

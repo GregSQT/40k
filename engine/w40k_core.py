@@ -1026,7 +1026,12 @@ class W40KEngine(gym.Env):
                 if field_name in unit:
                     del unit[field_name]
 
-            unit["HP_CUR"] = unit["HP_MAX"]
+            # PR4 4c : pour un squad multi-fig, HP_CUR au niveau unit = somme HP_MAX
+            # par fig (= HP_MAX * model_count). Sinon HP_CUR == HP_MAX (mono-fig).
+            if isinstance(unit.get("models"), list) and unit["models"]:
+                unit["HP_CUR"] = int(unit["HP_MAX"]) * len(unit["models"])
+            else:
+                unit["HP_CUR"] = unit["HP_MAX"]
 
             # CRITICAL: Reset shooting state per episode
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon or first weapon

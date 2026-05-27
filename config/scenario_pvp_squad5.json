@@ -1,0 +1,34 @@
+{
+  "primary_objectives": ["objectives_control"],
+  "units": [
+    {
+      "id": 1,
+      "unit_type": "Intercessor",
+      "player": 1,
+      "col": 30,
+      "row": 30,
+      "models": [
+        { "col": 30, "row": 30 },
+        { "col": 32, "row": 30 },
+        { "col": 28, "row": 30 },
+        { "col": 30, "row": 32 },
+        { "col": 32, "row": 32 }
+      ]
+    },
+    {
+      "id": 2,
+      "unit_type": "Intercessor",
+      "player": 2,
+      "col": 60,
+      "row": 30,
+      "models": [
+        { "col": 60, "row": 30 },
+        { "col": 62, "row": 30 },
+        { "col": 58, "row": 30 }
+      ]
+    }
+  ],
+  "objectives": [
+    {"id": 1, "name": "Center", "hexes": [[45, 30]]}
+  ]
+}

@@ -5,6 +5,7 @@ Functions used across multiple phase handlers to avoid duplication.
 """
 
 from typing import Dict, List, Tuple, Set, Optional, Any, Union
+import copy
 import inspect
 
 from shared.data_validation import require_key
@@ -304,10 +305,105 @@ def is_footprint_placement_valid(
     return True
 
 
+def _build_models_for_unit(
+    unit: Dict[str, Any],
+    unit_id: str,
+    unit_col: int,
+    unit_row: int,
+    unit_hp_cur: int,
+    unit_player: int,
+    models_cache: Dict[str, Dict[str, Any]],
+    squad_models: Dict[str, List[str]],
+) -> None:
+    """Build per-model entries for one squad (squad.md PR1 1b).
+
+    For mono-figurine units (no explicit unit["models"] list), create exactly
+    one model entry derived from the unit's own fields. For multi-figurine
+    squads (unit["models"] declared), iterate and build one entry per fig.
+
+    Maintains parallel structures models_cache (model_id -> dict) and
+    squad_models (squad_id -> [model_id,...]) without touching units_cache.
+
+    points_per_hp formula (homogeneous):
+        VALUE / (model_count_at_start * HP_MAX)
+    Mixed profiles (per spec, when models[] declares heterogeneous HP_MAX):
+        VALUE / total_hp_pool, total_hp_pool = sum(HP_MAX_i for i in models)
+    """
+    hp_max = int(require_key(unit, "HP_MAX"))
+    if hp_max <= 0:
+        raise ValueError(f"Unit {unit_id} has invalid HP_MAX: {hp_max}")
+    value = int(require_key(unit, "VALUE"))
+    oc = int(require_key(unit, "OC"))
+    t_stat = int(require_key(unit, "T"))
+    armor_save = int(require_key(unit, "ARMOR_SAVE"))
+    invul_save_raw = require_key(unit, "INVUL_SAVE")
+    # Sentinel convention: INVUL_SAVE = 7 means "no invul save" (aligned with
+    # observation_builder.py:1332 has_invul = invul_save < 7). Accept 0 in
+    # legacy data and convert to 7.
+    invul_save = int(invul_save_raw) if int(invul_save_raw) > 0 else 7
+    shoot_left = int(require_key(unit, "SHOOT_LEFT"))
+    attack_left = int(require_key(unit, "ATTACK_LEFT"))
+    rng_weapons = require_key(unit, "RNG_WEAPONS")
+    cc_weapons = require_key(unit, "CC_WEAPONS")
+    selected_rng = unit.get("selectedRngWeaponIndex")
+    selected_cc = unit.get("selectedCcWeaponIndex")
+
+    explicit_models = unit.get("models")
+    if isinstance(explicit_models, list) and len(explicit_models) > 0:
+        # Multi-figurine squad with explicit positions.
+        model_specs = explicit_models
+    else:
+        # Backward compat: single-figurine squad derived from unit fields.
+        model_specs = [{"col": unit_col, "row": unit_row, "HP_CUR": unit_hp_cur}]
+
+    model_count_at_start = len(model_specs)
+    # points_per_hp — homogeneous case (all models share unit HP_MAX). For
+    # mixed profiles (future), each spec carries its own HP_MAX and the formula
+    # becomes VALUE / sum(HP_MAX_i).
+    total_hp_pool = 0
+    for spec in model_specs:
+        spec_hp_max = int(spec.get("HP_MAX", hp_max))
+        if spec_hp_max <= 0:
+            raise ValueError(f"Squad {unit_id}: model spec has invalid HP_MAX={spec_hp_max}")
+        total_hp_pool += spec_hp_max
+    points_per_hp = float(value) / float(total_hp_pool) if total_hp_pool > 0 else 0.0
+
+    model_ids: List[str] = []
+    for idx, spec in enumerate(model_specs):
+        model_id = f"{unit_id}#{idx}"
+        model_ids.append(model_id)
+        spec_col, spec_row = normalize_coordinates(
+            int(require_key(spec, "col")), int(require_key(spec, "row"))
+        )
+        spec_hp_max = int(spec.get("HP_MAX", hp_max))
+        spec_hp_cur = int(spec.get("HP_CUR", spec_hp_max))
+        models_cache[model_id] = {
+            "squad_id": unit_id,
+            "col": spec_col,
+            "row": spec_row,
+            "HP_CUR": spec_hp_cur,
+            "HP_MAX": spec_hp_max,
+            "player": unit_player,
+            "wounds_allocated_this_activation": 0,
+            "SHOOT_LEFT": shoot_left,
+            "ATTACK_LEFT": attack_left,
+            "OC": int(spec.get("OC", oc)),
+            "points_per_hp": points_per_hp,
+            "ARMOR_SAVE": int(spec.get("ARMOR_SAVE", armor_save)),
+            "INVUL_SAVE": int(spec.get("INVUL_SAVE", invul_save)),
+            "T": int(spec.get("T", t_stat)),
+            "RNG_WEAPONS": copy.deepcopy(spec.get("RNG_WEAPONS", rng_weapons)),
+            "CC_WEAPONS": copy.deepcopy(spec.get("CC_WEAPONS", cc_weapons)),
+            "selectedRngWeaponIndex": spec.get("selectedRngWeaponIndex", selected_rng),
+            "selectedCcWeaponIndex": spec.get("selectedCcWeaponIndex", selected_cc),
+        }
+    squad_models[unit_id] = model_ids
+
+
 def build_units_cache(game_state: Dict[str, Any]) -> None:
     """
     Build units_cache from game_state["units"].
-    
+
     Creates game_state["units_cache"]: Dict[str, Dict] mapping unit_id (str) to
     {"col": int, "row": int, "HP_CUR": int, "player": int, "BASE_SHAPE": str,
      "BASE_SIZE": int|list, "orientation": int, "occupied_hexes": Set[(col,row)]}
@@ -326,17 +422,19 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
     """
     if "units" not in game_state:
         raise KeyError("game_state must have 'units' field to build units_cache")
-    
+
     units_cache: Dict[str, Dict[str, Any]] = {}
     occupation_map: Dict[Tuple[int, int], str] = {}
-    
+    models_cache: Dict[str, Dict[str, Any]] = {}
+    squad_models: Dict[str, List[str]] = {}
+
     for unit in game_state["units"]:
         hp_cur_raw = require_key(unit, "HP_CUR")
         try:
             hp_cur = max(0, int(float(hp_cur_raw)))
         except (ValueError, TypeError):
             raise ValueError(f"Unit {unit.get('id')} has invalid HP_CUR: {hp_cur_raw!r}") from None
-        
+
         unit_id = str(require_key(unit, "id"))
         col, row = get_unit_coordinates(unit)  # Already normalizes
         player_raw = require_key(unit, "player")
@@ -344,7 +442,7 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
             player = int(player_raw)
         except (ValueError, TypeError):
             raise ValueError(f"Unit {unit_id} has invalid player: {player_raw!r}") from None
-        
+
         base_shape = unit["BASE_SHAPE"]
         base_size = unit["BASE_SIZE"]
         if "orientation" in unit:
@@ -352,7 +450,7 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
         else:
             orientation = 0
         occupied = _compute_unit_occupied_hexes(col, row, unit, game_state)
-        
+
         units_cache[unit_id] = {
             "col": col,
             "row": row,
@@ -362,13 +460,68 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
             "BASE_SIZE": base_size,
             "orientation": orientation,
             "occupied_hexes": occupied,
+            # PR4 4e-i : ajout dict parallele {model_id: (col, row)}.
+            # Source de verite per-figurine pour le pipeline squad. Construit dans
+            # la passe model_cache ci-dessous (apres _build_models_for_unit).
+            # Initialise vide ici, rempli juste apres.
+            "occupied_hexes_by_model": {},
         }
-        
+
         for cell in occupied:
             occupation_map[cell] = unit_id
-    
+
+        # ====================================================================
+        # MODEL-LEVEL CACHE (squad.md PR1 1b)
+        # ====================================================================
+        # Build models_cache + squad_models in parallel to units_cache.
+        # Backward compat: if unit has no explicit "models" list, treat it as
+        # a single-figurine squad (1 unit = 1 model).
+        # Multi-figurine squads (future) declare unit["models"] = [{col,row,...},...].
+        _build_models_for_unit(
+            unit=unit,
+            unit_id=unit_id,
+            unit_col=col,
+            unit_row=row,
+            unit_hp_cur=hp_cur,
+            unit_player=player,
+            models_cache=models_cache,
+            squad_models=squad_models,
+        )
+        # Fill occupied_hexes_by_model from models_cache (PR4 4e-i)
+        units_cache[unit_id]["occupied_hexes_by_model"] = {
+            mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"]))
+            for mid in squad_models.get(unit_id, [])
+            if mid in models_cache
+        }
+        # F2 fix (audit) : pour multi-fig, recompute occupied_hexes = union des
+        # footprints de toutes les figs. Pour mono-fig (1 fig au anchor),
+        # occupied_hexes deja correct depuis _compute_unit_occupied_hexes(col,row,...).
+        if len(squad_models.get(unit_id, [])) > 1:
+            # game_state["units_cache"] pas encore set globalement, on patch via la variable locale
+            game_state_view = dict(game_state)
+            game_state_view["units_cache"] = units_cache
+            game_state_view["models_cache"] = models_cache
+            game_state_view["squad_models"] = squad_models
+            game_state_view["occupation_map"] = occupation_map
+            _recompute_squad_occupied_hexes(game_state_view, unit_id)
+
     game_state["units_cache"] = units_cache
     game_state["occupation_map"] = occupation_map
+    game_state["models_cache"] = models_cache
+    game_state["squad_models"] = squad_models
+
+    # squad_cache: built APRES models_cache + squad_models (depend des deux).
+    # model_count_at_start est capture maintenant et ne changera plus.
+    squad_cache: Dict[str, Dict[str, Any]] = {}
+    for squad_id in squad_models:
+        entry = _compute_squad_cache_entry(game_state, squad_id)
+        entry["model_count_at_start"] = entry["model_count"]
+        squad_cache[squad_id] = entry
+        # Mirror OC_TOTAL into units_cache (squad.md PR1 1d): observation_builder
+        # et logique d'objectifs lisent l'OC agrege depuis units_cache.
+        if squad_id in units_cache:
+            units_cache[squad_id]["OC_TOTAL"] = entry["oc_total"]
+    game_state["squad_cache"] = squad_cache
 
     from engine.game_utils import add_debug_file_log
     episode = game_state.get("episode_number", "?")
@@ -1973,3 +2126,2377 @@ def maybe_resolve_reactive_move(
         "reactive_moves_declined": declined_count,
         "triggered": applied_count > 0 or declined_count > 0,
     }
+
+
+# ============================================================================
+# DISTANCE PRIMITIVES — Engagement Range, Base-to-Base, Coherency
+# ============================================================================
+# Reference: Documentation/TODO/squad.md §"Definition des distances en hex-grid"
+# Toutes les distances sont en subhexes. `inches_to_subhex` est l echelle du
+# scenario (x5: 5 subhexes par pouce, x10: 10 subhexes par pouce).
+
+BASE_TO_BASE_SUBHEX = 1
+
+
+def get_engagement_range_subhex(game_state: Dict[str, Any]) -> int:
+    """Engagement Range = 1" horizontal (regle officielle).
+    Retourne le seuil ER en subhexes pour l echelle du scenario."""
+    return int(require_key(game_state, "inches_to_subhex"))
+
+
+def get_coherency_subhex(game_state: Dict[str, Any]) -> int:
+    """Unit Coherency = 2" horizontal (regle officielle).
+    Retourne le seuil coherency en subhexes pour l echelle du scenario."""
+    return 2 * int(require_key(game_state, "inches_to_subhex"))
+
+
+def is_base_to_base(col_a: int, row_a: int, col_b: int, row_b: int) -> bool:
+    """B2B: hexes directement adjacents (distance hex == 1).
+    Strictement plus contraignant que l Engagement Range."""
+    return calculate_hex_distance(col_a, row_a, col_b, row_b) == BASE_TO_BASE_SUBHEX
+
+
+def is_in_engagement_range(
+    col_a: int, row_a: int, col_b: int, row_b: int, game_state: Dict[str, Any]
+) -> bool:
+    """ER: distance <= 1" horizontal."""
+    return calculate_hex_distance(col_a, row_a, col_b, row_b) <= get_engagement_range_subhex(game_state)
+
+
+# ============================================================================
+# MODEL-LEVEL HELPERS (squad.md PR1 1b)
+# ============================================================================
+# Source de verite par-figurine = models_cache[model_id]. Source de verite
+# agregee par-escouade = units_cache[squad_id]. Toute mutation par-figurine
+# DOIT passer par ces helpers pour garder les deux caches synchronises.
+
+
+def is_model_alive(model_id: str, game_state: Dict[str, Any]) -> bool:
+    """True si la figurine est presente dans models_cache."""
+    require_key(game_state, "models_cache")
+    return model_id in game_state["models_cache"]
+
+
+# ----------------------------------------------------------------------------
+# squad_cache: agregats par escouade (PR1 1c)
+# ----------------------------------------------------------------------------
+
+
+def _compute_squad_cache_entry(
+    game_state: Dict[str, Any], squad_id: str
+) -> Dict[str, Any]:
+    """Recompute complet d'une entree squad_cache depuis models_cache.
+
+    Centroide = moyenne des positions des figurines vivantes.
+    is_coherent = booleen recompute via validate_squad_coherency.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    model_ids = squad_models.get(squad_id, [])
+    alive = [models_cache[m] for m in model_ids if m in models_cache]
+    n = len(alive)
+    if n == 0:
+        return {
+            "is_coherent": True,  # escouade morte: pas de violation
+            "model_count": 0,
+            "model_count_at_start": 0,
+            "oc_total": 0,
+            "centroid_col": 0.0,
+            "centroid_row": 0.0,
+        }
+    centroid_col = sum(int(m["col"]) for m in alive) / float(n)
+    centroid_row = sum(int(m["row"]) for m in alive) / float(n)
+    oc_total = sum(int(m["OC"]) for m in alive)
+    is_coherent = validate_squad_coherency(game_state, squad_id)
+    return {
+        "is_coherent": is_coherent,
+        "model_count": n,
+        "model_count_at_start": 0,  # remplace par caller a l'init; preserve sinon
+        "oc_total": oc_total,
+        "centroid_col": centroid_col,
+        "centroid_row": centroid_row,
+    }
+
+
+def _recompute_squad_cache(game_state: Dict[str, Any], squad_id: str) -> None:
+    """Recalcule squad_cache[squad_id] tout en preservant model_count_at_start.
+
+    A appeler depuis destroy_model et update_model_position (les deux seuls
+    points d'ecriture de presence/position).
+    Mirror OC_TOTAL vers units_cache si l escouade est vivante.
+    """
+    squad_cache = game_state.get("squad_cache")
+    if squad_cache is None:
+        return  # pas encore initialise (ex: avant build_units_cache)
+    new_entry = _compute_squad_cache_entry(game_state, squad_id)
+    old_entry = squad_cache.get(squad_id)
+    if old_entry is not None and "model_count_at_start" in old_entry:
+        new_entry["model_count_at_start"] = old_entry["model_count_at_start"]
+    squad_cache[squad_id] = new_entry
+    # Mirror OC_TOTAL → units_cache (cf. spec §"Contrat units_cache").
+    units_entry = game_state.get("units_cache", {}).get(squad_id)
+    if units_entry is not None:
+        units_entry["OC_TOTAL"] = new_entry["oc_total"]
+
+
+def validate_squad_coherency(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """Recalcul independant de la coherency d'une escouade.
+
+    Ne lit PAS squad_cache["is_coherent"] — recompute depuis models_cache.
+
+    Regles officielles (Core Concepts) :
+      - squad_size == 1 : vacuously True (cas degenere).
+      - 2 <= squad_size <= 6 : chaque figurine a >= 1 voisin a <= 2".
+      - squad_size >= 7 : chaque figurine a >= 2 voisins a <= 2".
+    Distance horizontale uniquement (moteur 2D, pas de verticale).
+    Propriete locale (1 ou 2 voisins directs), pas de connectivite transitive.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    model_ids = squad_models.get(squad_id, [])
+    alive = [models_cache[m] for m in model_ids if m in models_cache]
+    n = len(alive)
+    if n <= 1:
+        return True
+    coherency_dist = get_coherency_subhex(game_state)
+    min_neighbors = 2 if n >= 7 else 1
+    positions = [(int(m["col"]), int(m["row"])) for m in alive]
+    for i, (ci, ri) in enumerate(positions):
+        neighbors = 0
+        for j, (cj, rj) in enumerate(positions):
+            if i == j:
+                continue
+            if calculate_hex_distance(ci, ri, cj, rj) <= coherency_dist:
+                neighbors += 1
+                if neighbors >= min_neighbors:
+                    break
+        if neighbors < min_neighbors:
+            return False
+    return True
+
+
+def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -> None:
+    """Recalcule occupied_hexes (union des footprints de toutes les figs vivantes).
+
+    Fix F2 (audit) : occupied_hexes doit couvrir TOUTES les figs du squad, pas
+    seulement le footprint de l'ancre. Sinon collisions inter-squads ignorent
+    les figs non-ancres.
+
+    Egalement met a jour occupation_map (reverse lookup cell -> unit_id).
+    Idempotent. Pas d'effet si squad_id absent du units_cache.
+    """
+    units_cache = game_state.get("units_cache", {})
+    entry = units_cache.get(squad_id)
+    if entry is None:
+        return
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    base_shape = entry["BASE_SHAPE"]
+    base_size = entry["BASE_SIZE"]
+    orientation = int(entry.get("orientation", 0))
+    unit_stub = {
+        "BASE_SHAPE": base_shape,
+        "BASE_SIZE": base_size,
+        "orientation": orientation,
+    }
+    old_occupied = entry.get("occupied_hexes", set())
+    new_occupied: Set[Tuple[int, int]] = set()
+    for mid in squad_models.get(squad_id, []):
+        m = models_cache.get(mid)
+        if m is None:
+            continue
+        fp = _compute_unit_occupied_hexes(
+            int(m["col"]), int(m["row"]), unit_stub, game_state
+        )
+        new_occupied.update(fp)
+    entry["occupied_hexes"] = new_occupied
+    # Sync occupation_map (retire cellules disparues, ajoute nouvelles)
+    occ_map = game_state.get("occupation_map")
+    if occ_map is not None:
+        for cell in old_occupied:
+            if cell not in new_occupied and occ_map.get(cell) == squad_id:
+                del occ_map[cell]
+        for cell in new_occupied:
+            occ_map[cell] = squad_id
+
+
+def _recompute_squad_hp_total(game_state: Dict[str, Any], squad_id: str) -> int:
+    """Somme des HP_CUR des figurines vivantes d'une escouade.
+
+    Lit models_cache via squad_models pour eviter O(N_total) scan.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    model_ids = squad_models.get(squad_id, [])
+    total = 0
+    for mid in model_ids:
+        m = models_cache.get(mid)
+        if m is not None:
+            total += int(m["HP_CUR"])
+    return total
+
+
+def _recompute_squad_anchor(game_state: Dict[str, Any], squad_id: str) -> Optional[Tuple[int, int]]:
+    """Position de l ancre = figurine vivante de plus petit index.
+
+    Retourne (col, row) ou None si toutes les figurines sont mortes.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    for mid in squad_models.get(squad_id, []):
+        m = models_cache.get(mid)
+        if m is not None:
+            return (int(m["col"]), int(m["row"]))
+    return None
+
+
+def update_model_position(
+    game_state: Dict[str, Any], model_id: str, col: int, row: int
+) -> None:
+    """Met a jour la position d une figurine et propage a units_cache si ancre.
+
+    Pour les escouades mono-figurine, met aussi a jour units_cache directement.
+    Pour les multi-figurines (futures tranches), n update units_cache que si la
+    figurine est l ancre courante (index minimum vivant).
+    """
+    require_key(game_state, "models_cache")
+    model = game_state["models_cache"].get(model_id)
+    if model is None:
+        raise KeyError(f"update_model_position: model {model_id} not in models_cache (dead/absent)")
+    norm_col, norm_row = normalize_coordinates(int(col), int(row))
+    model["col"] = norm_col
+    model["row"] = norm_row
+
+    squad_id = str(model["squad_id"])
+    # PR4 4e-i : sync occupied_hexes_by_model
+    units_entry_oh = game_state.get("units_cache", {}).get(squad_id)
+    if units_entry_oh is not None:
+        oh_by_model = units_entry_oh.setdefault("occupied_hexes_by_model", {})
+        oh_by_model[model_id] = (norm_col, norm_row)
+    # F2 fix (audit) : recalcule occupied_hexes pour refleter TOUTES les figs
+    _recompute_squad_occupied_hexes(game_state, squad_id)
+    anchor = _recompute_squad_anchor(game_state, squad_id)
+    if anchor is not None:
+        anchor_col, anchor_row = anchor
+        # Propage uniquement si l ancre a vraiment bouge — evite recompute
+        # inutile pour les figurines non-ancres.
+        units_entry = game_state.get("units_cache", {}).get(squad_id)
+        if units_entry is not None and (
+            int(units_entry.get("col", -1)) != anchor_col
+            or int(units_entry.get("row", -1)) != anchor_row
+        ):
+            update_units_cache_position(game_state, squad_id, anchor_col, anchor_row)
+    _recompute_squad_cache(game_state, squad_id)
+
+
+def update_model_hp(game_state: Dict[str, Any], model_id: str, new_hp_cur: int) -> None:
+    """Update HP d une figurine et propage le total a units_cache.
+
+    Si HP <= 0 : appelle destroy_model (reason='combat').
+    Sinon : met a jour models_cache + units_cache HP_CUR (somme du squad).
+    """
+    require_key(game_state, "models_cache")
+    model = game_state["models_cache"].get(model_id)
+    if model is None:
+        raise KeyError(f"update_model_hp: model {model_id} not in models_cache (dead/absent)")
+    effective_hp = max(0, int(new_hp_cur))
+    if effective_hp <= 0:
+        destroy_model(game_state, model_id, reason="combat")
+        return
+    model["HP_CUR"] = effective_hp
+    squad_id = str(model["squad_id"])
+    squad_total = _recompute_squad_hp_total(game_state, squad_id)
+    units_entry = game_state.get("units_cache", {}).get(squad_id)
+    if units_entry is not None:
+        units_entry["HP_CUR"] = squad_total
+
+
+def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> None:
+    """Retire une figurine du jeu et cascade les mises a jour.
+
+    reason ∈ {"combat", "coherency_removal", "deployment_no_space"}
+
+    Etapes (ordre critique) :
+      1. Retire l entree de models_cache.
+      2. Retire model_id de squad_models[squad_id].
+      3. Recalcule l ancre de l escouade si la figurine detruite etait l ancre,
+         et propage la nouvelle position a units_cache.
+      4. Met a jour units_cache["HP_CUR"] = somme des HP des figurines vivantes.
+      5. Si derniere figurine du squad : appelle remove_from_units_cache.
+
+    Le scoring/reward (reason=="combat") et le retrait reglementaire
+    (reason=="coherency_removal") sont distingues pour PR3+ — pour PR1 1b on
+    enregistre simplement reason dans le debug log.
+    """
+    require_key(game_state, "models_cache")
+    require_key(game_state, "squad_models")
+    valid_reasons = ("combat", "coherency_removal", "deployment_no_space")
+    if reason not in valid_reasons:
+        raise ValueError(f"destroy_model: invalid reason {reason!r}, expected one of {valid_reasons}")
+
+    model = game_state["models_cache"].get(model_id)
+    if model is None:
+        raise KeyError(f"destroy_model: model {model_id} not in models_cache (already dead?)")
+
+    squad_id = str(model["squad_id"])
+    old_col = int(model["col"])
+    old_row = int(model["row"])
+
+    # 1. Retire du models_cache.
+    del game_state["models_cache"][model_id]
+    # 2. Retire de squad_models (preserve l ordre des autres figurines).
+    squad_list = game_state["squad_models"].get(squad_id)
+    if squad_list is not None and model_id in squad_list:
+        squad_list.remove(model_id)
+    # PR4 4e-i : sync occupied_hexes_by_model (retire entree fig morte)
+    units_entry_oh = game_state.get("units_cache", {}).get(squad_id)
+    if units_entry_oh is not None:
+        oh_by_model = units_entry_oh.get("occupied_hexes_by_model")
+        if oh_by_model is not None:
+            oh_by_model.pop(model_id, None)
+    # F2 fix (audit) : recalcule occupied_hexes apres retrait de la fig
+    _recompute_squad_occupied_hexes(game_state, squad_id)
+
+    from engine.game_utils import add_debug_file_log
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    phase = game_state.get("phase", "?")
+    add_debug_file_log(
+        game_state,
+        f"[MODEL DESTROY] E{episode} T{turn} {phase} model_id={model_id} squad={squad_id} "
+        f"pos=({old_col},{old_row}) reason={reason}"
+    )
+
+    # 3/4/5. Cascade vers units_cache.
+    units_entry = game_state.get("units_cache", {}).get(squad_id)
+    if units_entry is None:
+        return  # squad deja absent du units_cache (cas degenere)
+
+    squad_total = _recompute_squad_hp_total(game_state, squad_id)
+    if squad_total <= 0 or not game_state["squad_models"].get(squad_id):
+        # Derniere figurine : retirer l escouade du units_cache + squad_cache.
+        remove_from_units_cache(game_state, squad_id)
+        squad_cache_local = game_state.get("squad_cache")
+        if squad_cache_local is not None:
+            squad_cache_local.pop(squad_id, None)
+        return
+
+    # Recalcule ancre si necessaire.
+    anchor = _recompute_squad_anchor(game_state, squad_id)
+    if anchor is not None:
+        anchor_col, anchor_row = anchor
+        if int(units_entry.get("col", -1)) != anchor_col or int(units_entry.get("row", -1)) != anchor_row:
+            update_units_cache_position(game_state, squad_id, anchor_col, anchor_row)
+
+    units_entry["HP_CUR"] = squad_total
+    _recompute_squad_cache(game_state, squad_id)
+
+
+# ============================================================================
+# MULTI-MODEL MOVEMENT PLAN (squad.md PR2 2a)
+# ============================================================================
+# Pipeline mutualise pour Normal/Advance/Fall Back (et plus tard Charge/Pile In/
+# Consolidation). Transaction atomique : dry-run complet → validation → commit
+# en une passe. Aucune ecriture cache avant validation.
+
+
+DEFAULT_MOVE_CONSTRAINTS: Dict[str, Any] = {
+    "budget_per_model": None,    # None = pas de check budget
+    "forbid_enemy_er": True,
+    "require_coherency": True,
+    "allow_walls": False,
+    "allow_collisions": False,
+}
+
+
+def build_rigid_plan(
+    anchor_dest_col: int,
+    anchor_dest_row: int,
+    squad_id: str,
+    game_state: Dict[str, Any],
+) -> Optional[List[Tuple[str, int, int]]]:
+    """Translation rigide depuis l'ancre — Normal/Advance/Fall Back.
+
+    L ancre = figurine vivante de plus petit index (cf. _recompute_squad_anchor).
+    Toutes les figurines suivent le meme vecteur (dx, dy) = anchor_dest - anchor_origin.
+
+    Returns list[(model_id, new_col, new_row)] ou None si squad sans figurine vivante.
+    AUCUNE validation ici — voir validate_move_plan.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    mids = squad_models.get(squad_id, [])
+    alive_mids = [m for m in mids if m in models_cache]
+    if not alive_mids:
+        return None
+    anchor_id = alive_mids[0]
+    anchor_origin_col = int(models_cache[anchor_id]["col"])
+    anchor_origin_row = int(models_cache[anchor_id]["row"])
+    dest_col, dest_row = normalize_coordinates(int(anchor_dest_col), int(anchor_dest_row))
+    dx = dest_col - anchor_origin_col
+    dy = dest_row - anchor_origin_row
+    plan: List[Tuple[str, int, int]] = []
+    for mid in alive_mids:
+        m = models_cache[mid]
+        new_col, new_row = normalize_coordinates(int(m["col"]) + dx, int(m["row"]) + dy)
+        plan.append((mid, new_col, new_row))
+    return plan
+
+
+def _validate_plan_coherency(
+    plan_positions: Dict[str, Tuple[int, int]], game_state: Dict[str, Any]
+) -> bool:
+    """Verifie la coherency d un plan (positions hypothetiques, sans toucher caches).
+
+    Meme regles que validate_squad_coherency : <=6 modeles → 1 voisin, >=7 → 2.
+    """
+    n = len(plan_positions)
+    if n <= 1:
+        return True
+    coherency_dist = get_coherency_subhex(game_state)
+    min_neighbors = 2 if n >= 7 else 1
+    positions = list(plan_positions.values())
+    for i, (ci, ri) in enumerate(positions):
+        neighbors = 0
+        for j, (cj, rj) in enumerate(positions):
+            if i == j:
+                continue
+            if calculate_hex_distance(ci, ri, cj, rj) <= coherency_dist:
+                neighbors += 1
+                if neighbors >= min_neighbors:
+                    break
+        if neighbors < min_neighbors:
+            return False
+    return True
+
+
+def validate_move_plan(
+    plan: List[Tuple[str, int, int]],
+    game_state: Dict[str, Any],
+    constraints: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Verifie un plan multi-figurines en dry-run (aucune ecriture cache).
+
+    Constraints (dict, defaut DEFAULT_MOVE_CONSTRAINTS) :
+      - budget_per_model: int|None — distance hex max depuis position d origine
+      - forbid_enemy_er: bool — interdit cellule dans ER d un ennemi
+      - require_coherency: bool — coherency sur le plan final
+      - allow_walls: bool — autorise traverser/finir sur un mur
+      - allow_collisions: bool — autorise overlap avec autres escouades
+
+    Validation atomique : un seul echec → False. Aucune ecriture.
+    """
+    c = dict(DEFAULT_MOVE_CONSTRAINTS)
+    if constraints:
+        c.update(constraints)
+    if not plan:
+        return False
+
+    models_cache = require_key(game_state, "models_cache")
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    wall_hexes = game_state.get("wall_hexes", set())
+
+    first_model = models_cache.get(plan[0][0])
+    if first_model is None:
+        return False
+    squad_id = str(first_model["squad_id"])
+    player = int(first_model["player"])
+
+    enemy_er_zone: Optional[Set[Tuple[int, int]]] = None
+    if c["forbid_enemy_er"]:
+        cache_key = f"enemy_adjacent_hexes_player_{player}"
+        enemy_er_zone = game_state.get(cache_key)
+        if enemy_er_zone is None:
+            enemy_er_zone = build_enemy_adjacent_hexes(game_state, player)
+
+    # Cellules occupees par les AUTRES escouades (collisions interdites).
+    other_occupied: Set[Tuple[int, int]] = set()
+    if not c["allow_collisions"]:
+        units_cache = game_state.get("units_cache", {})
+        for sid, entry in units_cache.items():
+            if str(sid) == squad_id:
+                continue
+            occ = entry.get("occupied_hexes")
+            if occ:
+                for cell in occ:
+                    other_occupied.add((int(cell[0]), int(cell[1])))
+
+    # Budget per-model depuis position d origine actuelle.
+    origin_positions: Dict[str, Tuple[int, int]] = {}
+    if c["budget_per_model"] is not None:
+        for mid, _, _ in plan:
+            m = models_cache.get(mid)
+            if m is None:
+                return False
+            origin_positions[mid] = (int(m["col"]), int(m["row"]))
+
+    new_cells: Set[Tuple[int, int]] = set()
+    for mid, nc, nr in plan:
+        if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+            return False
+        cell = (nc, nr)
+        if not c["allow_walls"] and wall_hexes and cell in wall_hexes:
+            return False
+        if not c["allow_collisions"] and cell in other_occupied:
+            return False
+        if c["forbid_enemy_er"] and enemy_er_zone and cell in enemy_er_zone:
+            return False
+        if cell in new_cells:
+            return False  # collision intra-plan (deux figs sur meme hex)
+        new_cells.add(cell)
+        if c["budget_per_model"] is not None:
+            o_col, o_row = origin_positions[mid]
+            if calculate_hex_distance(o_col, o_row, nc, nr) > int(c["budget_per_model"]):
+                return False
+
+    if c["require_coherency"]:
+        plan_positions = {mid: (nc, nr) for mid, nc, nr in plan}
+        if not _validate_plan_coherency(plan_positions, game_state):
+            return False
+
+    return True
+
+
+def apply_snap_corrections(
+    plan: List[Tuple[str, int, int]],
+    game_state: Dict[str, Any],
+    radius: int = 2,
+    constraints: Optional[Dict[str, Any]] = None,
+) -> List[Tuple[str, int, int]]:
+    """Pour chaque figurine invalide individuellement, cherche un hex valide proche.
+
+    Snap par-figurine sur contraintes locales (bounds, walls, collisions, enemy_er) —
+    pas de garantie de coherency globale (responsabilite UX pour ajustement manuel).
+    Ordre : par index de figurine dans le plan (deterministe).
+
+    Recherche : anneaux concentriques de distance hex 1..radius autour de la destination
+    invalide. Premier hex valide retenu (ordre balayage col puis row).
+
+    Si aucun hex valide trouve dans le rayon, la figurine garde sa destination originale
+    (l UX affichera le voile rouge).
+    """
+    c = dict(DEFAULT_MOVE_CONSTRAINTS)
+    if constraints:
+        c.update(constraints)
+    c_individual = dict(c)
+    c_individual["require_coherency"] = False
+
+    corrected: List[Tuple[str, int, int]] = []
+    for mid, nc, nr in plan:
+        if validate_move_plan([(mid, nc, nr)], game_state, c_individual):
+            corrected.append((mid, nc, nr))
+            continue
+        found_cell: Optional[Tuple[int, int]] = None
+        for r in range(1, int(radius) + 1):
+            for d_col in range(-r, r + 1):
+                for d_row in range(-r, r + 1):
+                    if max(abs(d_col), abs(d_row)) != r:
+                        continue
+                    cand_col, cand_row = nc + d_col, nr + d_row
+                    if validate_move_plan([(mid, cand_col, cand_row)], game_state, c_individual):
+                        found_cell = (cand_col, cand_row)
+                        break
+                if found_cell is not None:
+                    break
+            if found_cell is not None:
+                break
+        if found_cell is not None:
+            corrected.append((mid, found_cell[0], found_cell[1]))
+        else:
+            corrected.append((mid, nc, nr))
+    return corrected
+
+
+def roll_advance_for_squad(squad_id: str, game_state: Dict[str, Any]) -> int:
+    """Roll 1D6 partage par l escouade pour un Advance move.
+
+    Stocke le resultat dans game_state["current_advance_roll"] pour les logs/replay,
+    sera efface apres commit_move (responsabilite du caller).
+    """
+    import random
+    roll = random.randint(1, 6)
+    game_state["current_advance_roll"] = int(roll)
+    return int(roll)
+
+
+def get_squad_move_budget(
+    squad_id: str,
+    game_state: Dict[str, Any],
+    move_type: str,
+    advance_roll: Optional[int] = None,
+) -> int:
+    """Budget de deplacement par figurine (en subhexes) pour une escouade.
+
+    - "normal" / "fall_back" → MOVE
+    - "advance" → MOVE + advance_roll (caller doit fournir advance_roll)
+    - "charge" / "pile_in" / "consolidation" → contraintes specifiques (PR2 2c / PR3)
+      Pour pile_in/consolidation: 3 inches en subhexes.
+      Pour charge: la valeur est charge_roll 2D6, caller la fournit via advance_roll
+      (le parametre est polysemique : budget D6 partage par l escouade).
+
+    MOVE est deja en subhexes dans le moteur (cf. game_state.py:118
+    `"MOVE": config["MOVE"] * scale`).
+    """
+    valid_types = ("normal", "advance", "fall_back", "charge", "pile_in", "consolidation")
+    if move_type not in valid_types:
+        raise ValueError(f"get_squad_move_budget: invalid move_type {move_type!r}")
+    if move_type in ("pile_in", "consolidation"):
+        ish = int(require_key(game_state, "inches_to_subhex"))
+        return 3 * ish
+    units = game_state.get("units", [])
+    unit = next((u for u in units if str(u.get("id")) == str(squad_id)), None)
+    if unit is None:
+        raise KeyError(f"get_squad_move_budget: squad {squad_id} not in game_state['units']")
+    move_stat = int(require_key(unit, "MOVE"))
+    if move_type == "advance":
+        if advance_roll is None:
+            raise ValueError("get_squad_move_budget: advance_roll required for move_type='advance'")
+        return move_stat + int(advance_roll)
+    if move_type == "charge":
+        if advance_roll is None:
+            raise ValueError("get_squad_move_budget: charge_roll (passed via advance_roll) required for move_type='charge'")
+        # F5 fix (audit) : charge_roll est en POUCES (2D6), convertir en subhexes
+        # pour rester coherent avec les autres move_types qui retournent subhexes.
+        ish = int(require_key(game_state, "inches_to_subhex"))
+        return int(advance_roll) * ish
+    return move_stat  # normal, fall_back
+
+
+def execute_squad_move(
+    squad_id: str,
+    anchor_dest_col: int,
+    anchor_dest_row: int,
+    move_type: str,
+    game_state: Dict[str, Any],
+    advance_roll: Optional[int] = None,
+    extra_constraints: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Pipeline complet pour Normal/Advance/Fall Back: roll → plan → validate → commit.
+
+    Pour move_type="advance" : si advance_roll est None, le helper roll lui-meme.
+    Pour fall_back : aucun roll. Pour normal : aucun roll.
+
+    Retourne True si le move a ete commit, False si la validation a echoue
+    (aucune ecriture dans ce cas — transaction atomique).
+    """
+    if move_type == "advance" and advance_roll is None:
+        advance_roll = roll_advance_for_squad(squad_id, game_state)
+    plan = build_rigid_plan(anchor_dest_col, anchor_dest_row, squad_id, game_state)
+    if plan is None:
+        return False
+    budget = get_squad_move_budget(squad_id, game_state, move_type, advance_roll=advance_roll)
+    constraints: Dict[str, Any] = {"budget_per_model": budget}
+    if extra_constraints:
+        constraints.update(extra_constraints)
+    if not validate_move_plan(plan, game_state, constraints):
+        return False
+    commit_move(plan, game_state, move_type)
+    # Nettoyage du roll partage apres commit reussi (cf. spec).
+    if move_type == "advance":
+        game_state.pop("current_advance_roll", None)
+    return True
+
+
+# ============================================================================
+# CHARGE PLAN (squad.md PR2 2c)
+# ============================================================================
+
+
+def _enemy_squad_ids(game_state: Dict[str, Any], player: int) -> List[str]:
+    """Liste des squad_id ennemis vivants (player != donne)."""
+    out: List[str] = []
+    for sid, entry in game_state.get("units_cache", {}).items():
+        try:
+            if int(entry.get("player", -1)) != int(player):
+                out.append(str(sid))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _squad_model_positions(game_state: Dict[str, Any], squad_id: str) -> List[Tuple[int, int]]:
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    out: List[Tuple[int, int]] = []
+    for mid in squad_models.get(squad_id, []):
+        m = models_cache.get(mid)
+        if m is not None:
+            out.append((int(m["col"]), int(m["row"])))
+    return out
+
+
+CHARGE_THRESHOLD_INCHES = 12
+
+
+def charge_check_eligibility(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    target_squad_ids: List[str],
+) -> bool:
+    """Verifie l eligibilite a charger (Regles officielles Charge Phase).
+
+    - Au moins une figurine vivante du squad est a <= 12" d au moins une figurine
+      ennemie (mesure figurine la plus proche, pas ancre).
+    - Interdit si le squad est dans `units_advanced` ou `units_fled` ce tour.
+    - Interdit si une figurine du squad est deja dans l ER d un ennemi (locked).
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    if not target_squad_ids:
+        return False
+    if str(squad_id) in game_state.get("units_advanced", set()):
+        return False
+    if str(squad_id) in game_state.get("units_fled", set()):
+        return False
+    our_positions = _squad_model_positions(game_state, squad_id)
+    if not our_positions:
+        return False
+    ish = int(require_key(game_state, "inches_to_subhex"))
+    er_dist = get_engagement_range_subhex(game_state)
+    threshold_12 = CHARGE_THRESHOLD_INCHES * ish
+
+    # Position ennemies (tous)
+    units_cache = game_state.get("units_cache", {})
+    our_player = int(units_cache.get(str(squad_id), {}).get("player", -1))
+    enemy_positions: List[Tuple[int, int]] = []
+    for tsid in target_squad_ids:
+        enemy_positions.extend(_squad_model_positions(game_state, str(tsid)))
+    if not enemy_positions:
+        return False
+    # 12" check
+    in_range = False
+    for oc, orow in our_positions:
+        for ec, er in enemy_positions:
+            if calculate_hex_distance(oc, orow, ec, er) <= threshold_12:
+                in_range = True
+                break
+        if in_range:
+            break
+    if not in_range:
+        return False
+    # Locked check (au moins une fig dans l ER d un ennemi quelconque)
+    all_enemy_positions: List[Tuple[int, int]] = []
+    for esid in _enemy_squad_ids(game_state, our_player):
+        all_enemy_positions.extend(_squad_model_positions(game_state, esid))
+    for oc, orow in our_positions:
+        for ec, er in all_enemy_positions:
+            if calculate_hex_distance(oc, orow, ec, er) <= er_dist:
+                return False
+    return True
+
+
+def _hex_legal_for_charge(
+    col: int,
+    row: int,
+    game_state: Dict[str, Any],
+    squad_id: str,
+    target_squad_ids: List[str],
+) -> bool:
+    """Cellule valide pour le placement d une figurine en cours de charge :
+       - dans le plateau
+       - pas un mur
+       - pas occupee par une autre escouade (cible OU non) — collision physique
+       - pas dans l ER d une escouade ennemie NON-cible (regle officielle)
+    """
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    wall_hexes = game_state.get("wall_hexes", set())
+    if col < 0 or row < 0 or col >= board_cols or row >= board_rows:
+        return False
+    cell = (col, row)
+    if wall_hexes and cell in wall_hexes:
+        return False
+    # Collision : autres escouades (sauf nous-meme)
+    units_cache = game_state.get("units_cache", {})
+    for sid, entry in units_cache.items():
+        if str(sid) == str(squad_id):
+            continue
+        occ = entry.get("occupied_hexes")
+        if occ and cell in occ:
+            return False
+    # ER des escouades non-cibles
+    our_player = int(units_cache.get(str(squad_id), {}).get("player", -1))
+    er_dist = get_engagement_range_subhex(game_state)
+    for esid in _enemy_squad_ids(game_state, our_player):
+        if esid in [str(t) for t in target_squad_ids]:
+            continue
+        for ec, er in _squad_model_positions(game_state, esid):
+            if calculate_hex_distance(col, row, ec, er) <= er_dist:
+                return False
+    return True
+
+
+def charge_build_valid_plan(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    target_squad_ids: List[str],
+    charge_roll: int,
+) -> Optional[List[Tuple[str, int, int]]]:
+    """Plan de charge multi-figurines (transaction atomique, aucune ecriture cache).
+
+    Ordre de traitement : par index de figurine croissant.
+    Pour chaque fig :
+      (a) priorite : B2B avec un modele ennemi cible (hex hexagonalement adjacent)
+      (b) sinon : se rapproche du cible le plus proche, hors ER des non-cibles
+    Validation finale : TOUTES les figs finissent dans l ER d au moins un modele cible
+    (regle officielle : charge legale exige ER apres deplacement). Coherency verifiee
+    sur le plan final.
+
+    Retourne le plan ou None si invalide (atomic : aucune fig deplacee).
+    Le caller appelle commit_move(plan, gs, 'charge') sur succes.
+    """
+    if charge_roll <= 0:
+        return None
+    if not charge_check_eligibility(game_state, squad_id, target_squad_ids):
+        return None
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]
+    if not mids:
+        return None
+
+    ish = int(require_key(game_state, "inches_to_subhex"))
+    budget = int(charge_roll) * ish
+    er_threshold = get_engagement_range_subhex(game_state)
+
+    # Toutes les positions de figurines cibles
+    target_positions: List[Tuple[int, int]] = []
+    for tsid in target_squad_ids:
+        target_positions.extend(_squad_model_positions(game_state, str(tsid)))
+    if not target_positions:
+        return None
+
+    plan: List[Tuple[str, int, int]] = []
+    occupied_after: Set[Tuple[int, int]] = set()  # cellules deja reservees par ce plan
+
+    for mid in mids:
+        m = models_cache[mid]
+        orig_col, orig_row = int(m["col"]), int(m["row"])
+
+        # (a) Tentative B2B : voisins immediats de chaque modele cible
+        b2b_candidates: List[Tuple[int, int, int]] = []  # (dist_from_orig, col, row)
+        for tc, tr in target_positions:
+            for nc, nr in get_hex_neighbors(tc, tr):
+                if (nc, nr) in occupied_after:
+                    continue
+                d_orig = calculate_hex_distance(orig_col, orig_row, nc, nr)
+                if d_orig > budget:
+                    continue
+                if not _hex_legal_for_charge(nc, nr, game_state, squad_id, target_squad_ids):
+                    continue
+                b2b_candidates.append((d_orig, nc, nr))
+        picked: Optional[Tuple[int, int]] = None
+        if b2b_candidates:
+            b2b_candidates.sort()  # plus proche d origine d abord
+            _, pc, pr = b2b_candidates[0]
+            picked = (pc, pr)
+        else:
+            # (b) Pas de B2B atteignable : avancer vers la cible la plus proche
+            nearest_target = min(
+                target_positions,
+                key=lambda tp: calculate_hex_distance(orig_col, orig_row, tp[0], tp[1]),
+            )
+            tc, tr = nearest_target
+            orig_dist_to_tgt = calculate_hex_distance(orig_col, orig_row, tc, tr)
+            best_cand: Optional[Tuple[int, int, int]] = None  # (dist_to_target, col, row)
+            for d in range(1, budget + 1):
+                for d_col in range(-d, d + 1):
+                    for d_row in range(-d, d + 1):
+                        if max(abs(d_col), abs(d_row)) != d:
+                            continue
+                        nc = orig_col + d_col
+                        nr = orig_row + d_row
+                        if (nc, nr) in occupied_after:
+                            continue
+                        if not _hex_legal_for_charge(nc, nr, game_state, squad_id, target_squad_ids):
+                            continue
+                        cand_d = calculate_hex_distance(nc, nr, tc, tr)
+                        if cand_d >= orig_dist_to_tgt:
+                            continue  # doit etre strictement plus proche
+                        if best_cand is None or cand_d < best_cand[0]:
+                            best_cand = (cand_d, nc, nr)
+                if best_cand is not None:
+                    break  # premier anneau utile retenu
+            if best_cand is not None:
+                _, pc, pr = best_cand
+                picked = (pc, pr)
+        if picked is None:
+            return None  # cette fig ne peut bouger legalement → charge echouee
+        plan.append((mid, picked[0], picked[1]))
+        occupied_after.add(picked)
+
+    # Validation finale : ER pour chaque fig
+    for mid, nc, nr in plan:
+        in_er = any(
+            calculate_hex_distance(nc, nr, tc, tr) <= er_threshold
+            for tc, tr in target_positions
+        )
+        if not in_er:
+            return None
+
+    # Coherency finale
+    plan_positions = {mid: (nc, nr) for mid, nc, nr in plan}
+    if not _validate_plan_coherency(plan_positions, game_state):
+        return None
+
+    return plan
+
+
+def commit_move(
+    plan: List[Tuple[str, int, int]],
+    game_state: Dict[str, Any],
+    move_type: str,
+) -> None:
+    """Applique le plan complet en une passe et positionne les flags post-move.
+
+    Pre-condition: plan validé via validate_move_plan (ce helper ne re-valide pas).
+    Flags:
+        "advance"   → units_advanced.add(squad_id)
+        "fall_back" → units_fled.add(squad_id)
+        "normal"/"charge"/"pile_in"/"consolidation" → aucun flag
+    """
+    valid_types = ("normal", "advance", "fall_back", "charge", "pile_in", "consolidation")
+    if move_type not in valid_types:
+        raise ValueError(
+            f"commit_move: invalid move_type {move_type!r}, expected one of {valid_types}"
+        )
+    if not plan:
+        return
+    models_cache = require_key(game_state, "models_cache")
+    first = models_cache.get(plan[0][0])
+    if first is None:
+        raise KeyError(f"commit_move: anchor model {plan[0][0]} not in models_cache")
+    squad_id = str(first["squad_id"])
+    for mid, nc, nr in plan:
+        update_model_position(game_state, mid, nc, nr)
+    if move_type == "advance":
+        game_state.setdefault("units_advanced", set()).add(squad_id)
+    elif move_type == "fall_back":
+        game_state.setdefault("units_fled", set()).add(squad_id)
+    elif move_type == "charge":
+        game_state.setdefault("units_charged", set()).add(squad_id)
+
+
+# ============================================================================
+# PENDING INTENTS — SHOOT / FIGHT (squad.md PR3 3a)
+# ============================================================================
+# Structures de declaration-puis-resolution pour le tir et la melee multi-figs.
+# Lifecycle :
+#   - Cree lors de l activation de tir/fight (squad_shooting_unit_activation_start /
+#     squad_fight_unit_activation_start).
+#   - Nettoye par end_activation (responsabilite du caller) — assertion en debug
+#     si pending existe deja au debut d une nouvelle activation.
+#   - Jamais persiste entre deux activations.
+
+
+def init_pending_intents(game_state: Dict[str, Any]) -> None:
+    """Initialise les dicts pending si absents. Idempotent (safe re-call)."""
+    game_state.setdefault("pending_squad_shoot_intents", {})
+    game_state.setdefault("pending_squad_fight_intents", {})
+
+
+def assert_no_pending_shoot_intent(game_state: Dict[str, Any], squad_id: str) -> None:
+    """Leve si pending_squad_shoot_intents[squad_id] existe deja.
+
+    A appeler au debut de squad_shooting_unit_activation_start : un pending
+    persistant signale un bug (activation precedente non nettoyee).
+    """
+    init_pending_intents(game_state)
+    if squad_id in game_state["pending_squad_shoot_intents"]:
+        raise RuntimeError(
+            f"pending_squad_shoot_intents[{squad_id!r}] already exists at activation start — "
+            f"previous activation was not cleaned by end_activation"
+        )
+
+
+def assert_no_pending_fight_intent(game_state: Dict[str, Any], squad_id: str) -> None:
+    """Leve si pending_squad_fight_intents[squad_id] existe deja."""
+    init_pending_intents(game_state)
+    if squad_id in game_state["pending_squad_fight_intents"]:
+        raise RuntimeError(
+            f"pending_squad_fight_intents[{squad_id!r}] already exists at activation start"
+        )
+
+
+def clear_pending_shoot_intent(game_state: Dict[str, Any], squad_id: str) -> None:
+    """Supprime le pending d une escouade (succes OU annulation d activation)."""
+    init_pending_intents(game_state)
+    game_state["pending_squad_shoot_intents"].pop(squad_id, None)
+
+
+def clear_pending_fight_intent(game_state: Dict[str, Any], squad_id: str) -> None:
+    """Supprime le pending d une escouade (succes OU annulation d activation)."""
+    init_pending_intents(game_state)
+    game_state["pending_squad_fight_intents"].pop(squad_id, None)
+
+
+def reset_wounds_allocated_for_squad(game_state: Dict[str, Any], squad_id: str) -> None:
+    """Reset wounds_allocated_this_activation sur toutes les figs vivantes d une escouade.
+
+    Appele au moment de la declaration de cible (par activation attaquante)
+    sur l ESCOUADE CIBLE. NE PAS reset sur toutes les escouades du jeu —
+    scope per-activation par-cible (cf. spec §"Allocation prioritaire").
+    """
+    models_cache = require_key(game_state, "models_cache")
+    for mid in game_state.get("squad_models", {}).get(squad_id, []):
+        m = models_cache.get(mid)
+        if m is not None:
+            m["wounds_allocated_this_activation"] = 0
+
+
+# ============================================================================
+# SQUAD SHOOTING — declaration / lock (squad.md PR3 3b)
+# ============================================================================
+# Pipeline parallele: ces fonctions s invoquent independamment du shoot flow
+# existant. Le decoder mono-fig est preserve. Branchement RL en PR4.
+
+
+def squad_shooting_unit_activation_start(
+    game_state: Dict[str, Any], squad_id: str
+) -> None:
+    """Initialise l activation tir d une escouade.
+
+    - Verifie pas de pending leftover (bug detection).
+    - Initialise pending_squad_shoot_intents[squad_id] = [].
+    - Reset SHOOT_LEFT par fig selon l arme RNG selectionnee (NB).
+
+    Reset de wounds_allocated_this_activation : NON ici — fait au moment de la
+    declaration de cible (squad_declare_shoot), scope par-cible.
+    """
+    assert_no_pending_shoot_intent(game_state, squad_id)
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    for mid in squad_models.get(squad_id, []):
+        m = models_cache.get(mid)
+        if m is None:
+            continue
+        weapons = m.get("RNG_WEAPONS", [])
+        sel = m.get("selectedRngWeaponIndex")
+        if weapons and sel is not None and 0 <= int(sel) < len(weapons):
+            w = weapons[int(sel)]
+            if isinstance(w, dict) and "NB" in w:
+                m["SHOOT_LEFT"] = resolve_dice_value(w["NB"], f"squad_shoot_init_{mid}")
+            else:
+                m["SHOOT_LEFT"] = 0
+        else:
+            m["SHOOT_LEFT"] = 0
+    game_state["pending_squad_shoot_intents"][squad_id] = []
+
+
+def _model_can_shoot_target(
+    game_state: Dict[str, Any], attacker_model: Dict[str, Any], target_squad_id: str
+) -> bool:
+    """Eligibilite d une figurine attaquante a tirer sur une escouade cible.
+
+    PR3 3b MVP : check distance + portee. LoS via murs **non verifiee** (deferree —
+    a integrer avec build_unit_los_cache en PR3 3c+). La cible est eligible si
+    AU MOINS UNE figurine cible est a portee de l arme selectionnee.
+
+    Conditions :
+      - attaquant a SHOOT_LEFT > 0
+      - arme RNG selectionnee existe avec RNG > 0
+      - au moins un modele cible dans le rayon RNG (en subhexes)
+    """
+    if int(attacker_model.get("SHOOT_LEFT", 0)) <= 0:
+        return False
+    weapons = attacker_model.get("RNG_WEAPONS", [])
+    sel = attacker_model.get("selectedRngWeaponIndex")
+    if not weapons or sel is None or not (0 <= int(sel) < len(weapons)):
+        return False
+    weapon = weapons[int(sel)]
+    if not isinstance(weapon, dict) or "RNG" not in weapon:
+        return False
+    # weapon["RNG"] est DEJA en subhexes (conv. existant code, cf. shooting_handlers.py:726)
+    range_subhex = int(weapon["RNG"])
+    if range_subhex <= 0:
+        return False
+    ac = int(attacker_model["col"])
+    ar = int(attacker_model["row"])
+    for tc, tr in _squad_model_positions(game_state, target_squad_id):
+        if calculate_hex_distance(ac, ar, tc, tr) <= range_subhex:
+            return True
+    return False
+
+
+def squad_declare_shoot(
+    game_state: Dict[str, Any],
+    attacker_squad_id: str,
+    priority_target_squad_id: str,
+    eligible_target_slots: List[str],
+) -> List[Dict[str, Any]]:
+    """Construit les declarations de tir pour une escouade (per-fig).
+
+    Logique de selection par fig (par index croissant) :
+      1. Si la fig peut tirer sur la cible prioritaire → declare sur la cible prioritaire.
+      2. Sinon, prend le premier slot (par ordre `eligible_target_slots`) ou la fig
+         peut tirer.
+      3. Sinon, fig ne tire pas (pas d entree dans intents).
+
+    Au premier tir declare sur une cible donnee : `reset_wounds_allocated_for_squad`
+    sur cette cible (scope per-cible par-activation).
+
+    Capture `target_squad_size_at_declaration` (taille de l escouade cible au
+    moment de la declaration) — utilise pour BLAST bonus en resolution.
+
+    Returns la liste des intents (aussi stockee dans pending_squad_shoot_intents).
+
+    PR3 3b : pas de TTK residual (defere a PR3 3c ou PR4 — sans TTK, plusieurs
+    figs peuvent overkill une meme cible). Spec : overkill = signal implicite
+    (attaques perdues), pas de penalite explicite.
+    """
+    init_pending_intents(game_state)
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    if attacker_squad_id not in game_state["pending_squad_shoot_intents"]:
+        raise RuntimeError(
+            f"squad_declare_shoot called before squad_shooting_unit_activation_start "
+            f"for squad {attacker_squad_id!r}"
+        )
+
+    intents: List[Dict[str, Any]] = game_state["pending_squad_shoot_intents"][attacker_squad_id]
+    reset_targets: Set[str] = set()
+
+    def _maybe_reset_target_wounds(target_sid: str) -> None:
+        if target_sid not in reset_targets:
+            reset_wounds_allocated_for_squad(game_state, target_sid)
+            reset_targets.add(target_sid)
+
+    def _target_size(target_sid: str) -> int:
+        return sum(
+            1 for mid in squad_models.get(target_sid, []) if mid in models_cache
+        )
+
+    for mid in squad_models.get(attacker_squad_id, []):
+        m = models_cache.get(mid)
+        if m is None:
+            continue
+        chosen_target: Optional[str] = None
+        if _model_can_shoot_target(game_state, m, priority_target_squad_id):
+            chosen_target = priority_target_squad_id
+        else:
+            for slot_sid in eligible_target_slots:
+                if slot_sid == priority_target_squad_id:
+                    continue
+                if _model_can_shoot_target(game_state, m, slot_sid):
+                    chosen_target = slot_sid
+                    break
+        if chosen_target is None:
+            continue  # fig bloquee, ne tire pas
+        _maybe_reset_target_wounds(chosen_target)
+        sel = m.get("selectedRngWeaponIndex")
+        weapon_idx = int(sel) if sel is not None else 0
+        # F3 fix (audit) : resoudre NB UNE SEULE FOIS a la declaration, stocker
+        # dans l intent. Sinon le double-roll de_resolve_squad_shoot decouple le
+        # nombre d attaques effectif de SHOOT_LEFT pour les armes a NB variable (D3/D6).
+        weapons = m.get("RNG_WEAPONS", [])
+        n_attacks_resolved = 0
+        if 0 <= weapon_idx < len(weapons):
+            w = weapons[weapon_idx]
+            if isinstance(w, dict) and "NB" in w:
+                try:
+                    n_attacks_resolved = int(resolve_dice_value(w["NB"], f"squad_declare_shoot_NB_{mid}"))
+                except Exception:
+                    n_attacks_resolved = int(w["NB"]) if isinstance(w["NB"], (int, float)) else 1
+        intents.append({
+            "model_id": mid,
+            "weapon_index": weapon_idx,
+            "target_unit_id": chosen_target,
+            "target_squad_size_at_declaration": _target_size(chosen_target),
+            "n_attacks_resolved": n_attacks_resolved,
+        })
+    return intents
+
+
+def squad_lock_shoot(game_state: Dict[str, Any], squad_id: str) -> List[Dict[str, Any]]:
+    """Verrouille les declarations (lecture seule jusqu a resolution).
+
+    PR3 3b : pas de flag explicite — la convention est que toute modification de
+    pending_squad_shoot_intents[squad_id] apres ce call est un bug. La resolution
+    (PR3 3c) lit ce dict et le nettoie via clear_pending_shoot_intent en fin.
+    Retourne la liste verrouillee pour usage immediat par la resolution.
+    """
+    init_pending_intents(game_state)
+    return list(game_state["pending_squad_shoot_intents"].get(squad_id, []))
+
+
+# ============================================================================
+# SQUAD SHOOTING — resolution (squad.md PR3 3c)
+# ============================================================================
+# Hit → Wound → Save → Damage. Allocation prioritaire. Damage excess perdu.
+# BLAST bonus selon taille cible a la declaration. Fig morte mid-resolution
+# (attaquante : ses attaques restantes annulees ; cible : voir allocation).
+
+
+def wound_threshold(strength: int, toughness: int) -> int:
+    """Seuil 1D6 pour blesser selon table W40K 10e :
+       S >= 2T : 2+
+       S > T (et pas >= 2T) : 3+
+       S == T : 4+
+       S < T (et pas <= T/2) : 5+
+       S <= T/2 : 6+
+    """
+    s = int(strength); t = int(toughness)
+    if s >= 2 * t:
+        return 2
+    if 2 * s <= t:
+        return 6
+    if s > t:
+        return 3
+    if s == t:
+        return 4
+    return 5
+
+
+def save_threshold(armor_save: int, invul_save: int, ap: int) -> int:
+    """Meilleur des deux sauvegardes (Sv degrade par AP vs Invul ignore AP).
+
+    Convention W40K (alignee shooting_handlers.py:6873) : AP est NEGATIF (ex: -1, -2).
+    AP -1 sur Sv 3+ → effective = 3 - (-1) = 4 (save degradee a 4+).
+    invul_save == 7 = pas d invul (sentinel).
+    """
+    effective_armor = int(armor_save) - int(ap)
+    inv = int(invul_save)
+    if inv < 7 and inv < effective_armor:
+        return inv
+    return effective_armor
+
+
+def _has_blast_keyword(weapon: Dict[str, Any]) -> bool:
+    kws = weapon.get("KEYWORDS") or weapon.get("keywords") or []
+    if isinstance(kws, list):
+        return any(str(k).upper() == "BLAST" for k in kws)
+    if isinstance(kws, str):
+        return "BLAST" in kws.upper()
+    return False
+
+
+def _allocate_damage_to_squad(
+    game_state: Dict[str, Any], target_squad_id: str, damage: int
+) -> Optional[Dict[str, Any]]:
+    """Applique `damage` HP a une figurine vivante du squad selon allocation prioritaire.
+
+    Priorite (regle officielle simplifiee per-activation) :
+      1. Premier modele vivant avec wounds_allocated_this_activation > 0.
+      2. Sinon : premier modele vivant par ordre d index.
+    Damage excess (> HP_CUR du modele) perdu — pas de carry-over.
+    Si le modele est tue → destroy_model(reason='combat').
+    Sinon → update_model_hp + increment wounds_allocated_this_activation.
+
+    Returns {model_id, damage_dealt, destroyed} ou None si pas de cible vivante.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive = [m for m in squad_models.get(target_squad_id, []) if m in models_cache]
+    if not alive:
+        return None
+    target_mid: Optional[str] = None
+    for mid in alive:
+        if int(models_cache[mid].get("wounds_allocated_this_activation", 0)) > 0:
+            target_mid = mid
+            break
+    if target_mid is None:
+        target_mid = alive[0]
+    m = models_cache[target_mid]
+    hp_before = int(m["HP_CUR"])
+    damage_dealt = min(int(damage), hp_before)
+    new_hp = hp_before - damage_dealt
+    destroyed = False
+    if new_hp <= 0:
+        # F4 cleanup (audit) : pas d incrementation wounds_allocated_this_activation
+        # avant destroy — la fig est immediatement detachee du cache, l ecriture
+        # serait un no-op silencieux.
+        destroy_model(game_state, target_mid, reason="combat")
+        destroyed = True
+    else:
+        m["wounds_allocated_this_activation"] = int(m.get("wounds_allocated_this_activation", 0)) + damage_dealt
+        update_model_hp(game_state, target_mid, new_hp)
+    return {"model_id": target_mid, "damage_dealt": damage_dealt, "destroyed": destroyed}
+
+
+def resolve_squad_shoot(
+    game_state: Dict[str, Any], attacker_squad_id: str
+) -> Dict[str, Any]:
+    """Resout toutes les declarations de pending_squad_shoot_intents[attacker_squad_id].
+
+    Sequence par attaque :
+      1. Hit roll (1D6 vs BS de l attaquant)
+      2. Wound roll (table S vs T)
+      3. Save roll (best of Sv+AP vs Invul)
+      4. Damage : allocation prioritaire, excess perdu
+
+    BLAST bonus : si l arme a keyword BLAST, +1 attaque par tranche de 5 figs
+    dans la taille cible AU MOMENT DE LA DECLARATION (capture dans l intent).
+
+    Fig attaquante morte mid-resolution : ses attaques restantes (et celles
+    declarees mais non encore resolues) sont annulees — l intent est skip si
+    le modele attaquant n existe plus dans models_cache.
+    Fig cible morte mid-resolution : pas de carry-over, allocation_prioritaire
+    sur prochaine vivante de la cible.
+
+    Nettoie pending_squad_shoot_intents[attacker_squad_id] en fin (succes OU echec).
+
+    Returns un summary dict pour log/debug.
+    """
+    init_pending_intents(game_state)
+    models_cache = require_key(game_state, "models_cache")
+    intents = list(game_state["pending_squad_shoot_intents"].get(attacker_squad_id, []))
+    summary: Dict[str, Any] = {
+        "attacks_made": 0,
+        "hits": 0,
+        "wounds": 0,
+        "failed_saves": 0,
+        "damage_total": 0,
+        "models_killed": 0,
+        "events": [],
+    }
+    import random
+    for intent in intents:
+        attacker_mid = intent["model_id"]
+        attacker = models_cache.get(attacker_mid)
+        if attacker is None:
+            continue  # fig morte mid-resolution
+        target_sid = str(intent["target_unit_id"])
+        if target_sid not in game_state.get("squad_models", {}):
+            continue  # cible deja wipe
+        weapon_index = int(intent.get("weapon_index", 0))
+        weapons = attacker.get("RNG_WEAPONS", [])
+        if not (0 <= weapon_index < len(weapons)):
+            continue
+        weapon = weapons[weapon_index]
+        if not isinstance(weapon, dict):
+            continue
+        # F3 fix (audit) : lire n_attacks_resolved depuis l intent (resolu a la
+        # declaration). Fallback sur re-roll de NB si absent (compat legacy intents).
+        if "n_attacks_resolved" in intent:
+            n_attacks = int(intent["n_attacks_resolved"])
+        else:
+            nb_raw = weapon.get("NB", 1)
+            try:
+                n_attacks = resolve_dice_value(nb_raw, f"squad_shoot_attacks_{attacker_mid}")
+            except Exception:
+                n_attacks = int(nb_raw) if isinstance(nb_raw, (int, float)) else 1
+        if _has_blast_keyword(weapon):
+            tgt_size = int(intent.get("target_squad_size_at_declaration", 0))
+            n_attacks += tgt_size // 5
+        if n_attacks <= 0:
+            continue
+        # Convention moteur (cf. shooting_handlers.py:3010-3011, 6683, 6748) :
+        # weapon["ATK"] = seuil hit (BS/WS), weapon["STR"] = force, weapon["AP"] = AP modifier
+        bs = int(weapon.get("ATK", weapon.get("BS", 4)))
+        strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))
+        ap = int(weapon.get("AP", 0))
+        dmg_raw = weapon.get("DMG", 1)
+        wound_th_lookup: Dict[int, int] = {}  # cache wound threshold by T
+
+        for _ in range(int(n_attacks)):
+            # Recheck cible alive et attaquant alive avant chaque attaque
+            if attacker_mid not in models_cache:
+                break
+            target_alive = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]
+            if not target_alive:
+                break
+            summary["attacks_made"] += 1
+            # 1. Hit roll
+            hit_roll = random.randint(1, 6)
+            if hit_roll == 1:  # 1 always miss (regle 10e)
+                continue
+            if hit_roll < bs:
+                continue
+            summary["hits"] += 1
+            # 2. Wound roll — utilise T de la fig "allocation prioritaire" (proxy : 1ere vivante)
+            first_alive = models_cache[target_alive[0]]
+            t_target = int(first_alive["T"])
+            wth = wound_th_lookup.get(t_target)
+            if wth is None:
+                wth = wound_threshold(strength, t_target)
+                wound_th_lookup[t_target] = wth
+            wound_roll = random.randint(1, 6)
+            if wound_roll == 1:  # 1 always fail
+                continue
+            if wound_roll < wth:
+                continue
+            summary["wounds"] += 1
+            # 3. Save roll — meme cible (allocation prioritaire dans _allocate_damage_to_squad)
+            sv = int(first_alive["ARMOR_SAVE"])
+            invul = int(first_alive.get("INVUL_SAVE", 7))
+            save_th = save_threshold(sv, invul, ap)
+            save_roll = random.randint(1, 6)
+            if save_roll != 1 and save_roll >= save_th:
+                continue  # save reussi
+            summary["failed_saves"] += 1
+            # 4. Damage
+            try:
+                dmg = resolve_dice_value(dmg_raw, f"squad_shoot_dmg_{attacker_mid}")
+            except Exception:
+                dmg = int(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1
+            if dmg <= 0:
+                continue
+            res = _allocate_damage_to_squad(game_state, target_sid, dmg)
+            if res is None:
+                break  # cible wipe
+            summary["damage_total"] += int(res["damage_dealt"])
+            if res["destroyed"]:
+                summary["models_killed"] += 1
+            summary["events"].append({
+                "attacker": attacker_mid, "target": res["model_id"],
+                "damage": int(res["damage_dealt"]), "destroyed": bool(res["destroyed"]),
+            })
+        # Apres toutes les attaques de cet intent, decrement SHOOT_LEFT du modele attaquant
+        if attacker_mid in models_cache:
+            sl = int(models_cache[attacker_mid].get("SHOOT_LEFT", 0))
+            models_cache[attacker_mid]["SHOOT_LEFT"] = max(0, sl - 1)
+
+    # Nettoyage atomique
+    clear_pending_shoot_intent(game_state, attacker_squad_id)
+    return summary
+
+
+# ============================================================================
+# SQUAD FIGHT — activation start + ordering (squad.md PR3 3d)
+# ============================================================================
+
+
+def squad_fight_unit_activation_start(
+    game_state: Dict[str, Any], squad_id: str
+) -> None:
+    """Initialise l activation fight d une escouade.
+
+    - Verifie pas de pending leftover (bug detection).
+    - Initialise pending_squad_fight_intents[squad_id] = [].
+    - Reset ATTACK_LEFT par fig selon l arme CC actuellement selectionnee (NB).
+
+    Auto-selection d arme : NON ici — reportee au moment de la declaration de
+    cible (la formule expected damage P(hit)*P(wound)*P(failed_save)*D requiert
+    de connaitre T et Sv de la cible, cf. spec §"Auto-selection de l arme").
+    Si la fig change d arme en declaration, ATTACK_LEFT sera recalcule a ce
+    moment-la (responsabilite du caller de declaration).
+
+    Reset de wounds_allocated sur la cible : NON ici — fait apres Pile In au
+    moment de la declaration (scope per-cible).
+    """
+    assert_no_pending_fight_intent(game_state, squad_id)
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    for mid in squad_models.get(squad_id, []):
+        m = models_cache.get(mid)
+        if m is None:
+            continue
+        weapons = m.get("CC_WEAPONS", [])
+        sel = m.get("selectedCcWeaponIndex")
+        if weapons and sel is not None and 0 <= int(sel) < len(weapons):
+            w = weapons[int(sel)]
+            if isinstance(w, dict) and "NB" in w:
+                m["ATTACK_LEFT"] = resolve_dice_value(w["NB"], f"squad_fight_init_{mid}")
+            else:
+                m["ATTACK_LEFT"] = 0
+        else:
+            m["ATTACK_LEFT"] = 0
+    game_state["pending_squad_fight_intents"][squad_id] = []
+
+
+def _squad_is_in_fight(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """Une escouade est eligible au combat si :
+       - elle a charge ce tour (squad_id dans units_charged), OU
+       - au moins une figurine est dans l ER d une unite ennemie.
+    """
+    if squad_id in game_state.get("units_charged", set()):
+        return True
+    units_cache = game_state.get("units_cache", {})
+    our_entry = units_cache.get(squad_id)
+    if our_entry is None:
+        return False
+    our_player = int(our_entry.get("player", -1))
+    er = get_engagement_range_subhex(game_state)
+    our_positions = _squad_model_positions(game_state, squad_id)
+    if not our_positions:
+        return False
+    for esid in _enemy_squad_ids(game_state, our_player):
+        for tc, tr in _squad_model_positions(game_state, esid):
+            for oc, orow in our_positions:
+                if calculate_hex_distance(oc, orow, tc, tr) <= er:
+                    return True
+    return False
+
+
+def squad_fight_activation_order(
+    game_state: Dict[str, Any], active_player: int
+) -> List[Tuple[str, str]]:
+    """Construit l ordre d activation des escouades en Fight phase.
+
+    Regle officielle (cf. spec §"Ordre d activation") :
+      - Step 1 (Fights First) : escouades dans `units_charged` ou avec ability
+        Fights First. Alternance : non-active player d abord, puis active.
+      - Step 2 (Remaining Combats) : autres escouades eligibles. Meme alternance.
+      - Chaque escouade s active une seule fois par phase.
+
+    Returns liste ordonnee de tuples (squad_id, step) ou step ∈ {"fights_first", "remaining"}.
+
+    PR3 3d : ne lit que les structures squad-level (units_charged, units_cache).
+    Pour Fights First ability (regles speciales), `units_cache[sid].get("fights_first")`
+    bool optionnel — defaut False.
+    """
+    units_charged = game_state.get("units_charged", set())
+    units_cache = game_state.get("units_cache", {})
+    eligible: Dict[str, str] = {}
+    for sid, entry in units_cache.items():
+        if not _squad_is_in_fight(game_state, str(sid)):
+            continue
+        ff = bool(entry.get("fights_first", False))
+        if str(sid) in units_charged or ff:
+            eligible[str(sid)] = "fights_first"
+        else:
+            eligible[str(sid)] = "remaining"
+
+    def _player_of(sid: str) -> int:
+        return int(units_cache.get(sid, {}).get("player", -1))
+
+    def _alternate(squads_in_step: List[str], step_name: str) -> List[Tuple[str, str]]:
+        # Tri non-active d abord, puis active. A egalite : ordre d'id (deterministe).
+        non_active = sorted(s for s in squads_in_step if _player_of(s) != int(active_player))
+        active = sorted(s for s in squads_in_step if _player_of(s) == int(active_player))
+        out: List[Tuple[str, str]] = []
+        # Alternance stricte non-active → active → non-active...
+        i_na, i_ac = 0, 0
+        turn_non_active = True
+        while i_na < len(non_active) or i_ac < len(active):
+            if turn_non_active and i_na < len(non_active):
+                out.append((non_active[i_na], step_name)); i_na += 1
+            elif not turn_non_active and i_ac < len(active):
+                out.append((active[i_ac], step_name)); i_ac += 1
+            elif i_na < len(non_active):
+                out.append((non_active[i_na], step_name)); i_na += 1
+            elif i_ac < len(active):
+                out.append((active[i_ac], step_name)); i_ac += 1
+            turn_non_active = not turn_non_active
+        return out
+
+    ff_squads = [s for s, st in eligible.items() if st == "fights_first"]
+    rem_squads = [s for s, st in eligible.items() if st == "remaining"]
+    return _alternate(ff_squads, "fights_first") + _alternate(rem_squads, "remaining")
+
+
+# ============================================================================
+# SQUAD FIGHT — Pile In + buddy rule (squad.md PR3 3e)
+# ============================================================================
+
+
+def fight_pile_in_plan(
+    game_state: Dict[str, Any], squad_id: str
+) -> Optional[List[Tuple[str, int, int]]]:
+    """Plan Pile In multi-figurines (transaction atomique, aucune ecriture cache).
+
+    Regle officielle (spec §"Pile In") :
+    Chaque figurine non-B2B avec un ennemi peut se deplacer jusqu a 3" pour
+    (a) finir B2B avec un ennemi si possible (OBLIGATOIRE si conditions remplies),
+    (b) sinon minimiser la distance au plus proche ennemi.
+    Apres placement, l escouade doit etre en coherency ET au moins une figurine
+    doit etre dans l ER d une unite ennemie.
+
+    Algorithme :
+      - Ordre par index figurine.
+      - Chaque fig deja en B2B (regle officielle) reste sur place.
+      - Sinon : cherche dans le disque de rayon 3" l hex (i) B2B avec ennemi
+        (priorite) ou (ii) plus proche d un ennemi qu avant.
+      - A egalite : hex de plus petit index dans get_hex_neighbors.
+      - Validation finale : coherency + ER.
+      - Si validation echoue : retourne None (transaction atomique).
+
+    Returns liste de (model_id, col, row) ou None.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]
+    if not mids:
+        return None
+
+    units_cache = game_state.get("units_cache", {})
+    our_entry = units_cache.get(squad_id)
+    if our_entry is None:
+        return None
+    our_player = int(our_entry.get("player", -1))
+
+    # Positions ennemies (tous les modeles)
+    enemy_positions: List[Tuple[int, int]] = []
+    for esid in _enemy_squad_ids(game_state, our_player):
+        enemy_positions.extend(_squad_model_positions(game_state, esid))
+    if not enemy_positions:
+        return None
+
+    ish = int(require_key(game_state, "inches_to_subhex"))
+    pile_in_budget = 3 * ish  # 3" en subhexes
+    er_threshold = get_engagement_range_subhex(game_state)
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    wall_hexes = game_state.get("wall_hexes", set())
+
+    occupied_after: Set[Tuple[int, int]] = set()
+    plan: List[Tuple[str, int, int]] = []
+
+    def _is_b2b_with_enemy(col: int, row: int) -> bool:
+        for ec, er in enemy_positions:
+            if calculate_hex_distance(col, row, ec, er) == BASE_TO_BASE_SUBHEX:
+                return True
+        return False
+
+    def _cell_legal(col: int, row: int) -> bool:
+        # B3 cleanup (audit) : parametre exclude supprime (jamais utilise)
+        if col < 0 or row < 0 or col >= board_cols or row >= board_rows:
+            return False
+        cell = (col, row)
+        if wall_hexes and cell in wall_hexes:
+            return False
+        if cell in occupied_after:
+            return False
+        # Pas de collision avec autres escouades (sauf notre cellule d origine).
+        for sid, entry in units_cache.items():
+            if str(sid) == squad_id:
+                continue
+            occ = entry.get("occupied_hexes")
+            if occ and cell in occ:
+                return False
+        return True
+
+    for mid in mids:
+        m = models_cache[mid]
+        orig_col, orig_row = int(m["col"]), int(m["row"])
+        # Deja B2B : reste sur place
+        if _is_b2b_with_enemy(orig_col, orig_row):
+            plan.append((mid, orig_col, orig_row))
+            occupied_after.add((orig_col, orig_row))
+            continue
+        # Cherche (a) B2B candidate
+        b2b_cands: List[Tuple[int, int, int]] = []  # (dist_from_orig, col, row)
+        for ec, er in enemy_positions:
+            for nc, nr in get_hex_neighbors(ec, er):
+                if not _cell_legal(nc, nr):
+                    continue
+                d = calculate_hex_distance(orig_col, orig_row, nc, nr)
+                if d > pile_in_budget:
+                    continue
+                b2b_cands.append((d, nc, nr))
+        picked: Optional[Tuple[int, int]] = None
+        if b2b_cands:
+            b2b_cands.sort()  # plus proche d origine d abord
+            _, pc, pr = b2b_cands[0]
+            picked = (pc, pr)
+        else:
+            # (b) Plus proche d un ennemi
+            nearest = min(
+                enemy_positions,
+                key=lambda ep: calculate_hex_distance(orig_col, orig_row, ep[0], ep[1]),
+            )
+            tc, tr = nearest
+            orig_dist = calculate_hex_distance(orig_col, orig_row, tc, tr)
+            best: Optional[Tuple[int, int, int]] = None  # (dist_to_target, col, row)
+            for d in range(1, pile_in_budget + 1):
+                for d_col in range(-d, d + 1):
+                    for d_row in range(-d, d + 1):
+                        if max(abs(d_col), abs(d_row)) != d:
+                            continue
+                        nc, nr = orig_col + d_col, orig_row + d_row
+                        if not _cell_legal(nc, nr):
+                            continue
+                        cand_d = calculate_hex_distance(nc, nr, tc, tr)
+                        if cand_d >= orig_dist:
+                            continue
+                        if best is None or cand_d < best[0]:
+                            best = (cand_d, nc, nr)
+                if best is not None:
+                    break
+            if best is not None:
+                _, pc, pr = best
+                picked = (pc, pr)
+        # Si pas de move utile : reste sur place (regle officielle : Pile In optionnel
+        # par-figurine ; seule l obligation B2B contraint).
+        if picked is None:
+            picked = (orig_col, orig_row)
+        plan.append((mid, picked[0], picked[1]))
+        occupied_after.add(picked)
+
+    # Validation finale
+    plan_positions = {mid: (c, r) for mid, c, r in plan}
+    if not _validate_plan_coherency(plan_positions, game_state):
+        return None
+    in_er_count = 0
+    for mid, c, r in plan:
+        for ec, er in enemy_positions:
+            if calculate_hex_distance(c, r, ec, er) <= er_threshold:
+                in_er_count += 1
+                break
+    if in_er_count == 0:
+        return None
+    return plan
+
+
+def get_fighting_models(game_state: Dict[str, Any], squad_id: str) -> List[str]:
+    """Retourne les model_ids d une escouade autorises a frapper en melee.
+
+    Regle officielle (spec §"Quelles figurines peuvent frapper — buddy rule") :
+      Une fig peut attaquer si :
+        (1) elle est dans l ER d une unite ennemie, OU
+        (2) elle est en B2B avec une figurine ALLIEE de SON propre squad qui est
+            elle-meme en B2B avec un modele ennemi.
+      La condition (2) n est PAS transitive (1 niveau de buddy max).
+
+    Ordre de retour : par index figurine (deterministe).
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]
+    if not mids:
+        return []
+    units_cache = game_state.get("units_cache", {})
+    our_player = int(units_cache.get(squad_id, {}).get("player", -1))
+    er_threshold = get_engagement_range_subhex(game_state)
+    enemy_positions: List[Tuple[int, int]] = []
+    for esid in _enemy_squad_ids(game_state, our_player):
+        enemy_positions.extend(_squad_model_positions(game_state, esid))
+    if not enemy_positions:
+        return []
+
+    # Pre-calcule : pour chaque fig, est-elle en ER d un ennemi ? + position
+    positions: Dict[str, Tuple[int, int]] = {}
+    in_er: Dict[str, bool] = {}
+    b2b_enemy: Dict[str, bool] = {}
+    for mid in mids:
+        m = models_cache[mid]
+        pos = (int(m["col"]), int(m["row"]))
+        positions[mid] = pos
+        in_er[mid] = any(
+            calculate_hex_distance(pos[0], pos[1], ec, er) <= er_threshold
+            for ec, er in enemy_positions
+        )
+        b2b_enemy[mid] = any(
+            calculate_hex_distance(pos[0], pos[1], ec, er) == BASE_TO_BASE_SUBHEX
+            for ec, er in enemy_positions
+        )
+
+    # Condition (1) : in ER.
+    # Condition (2) : B2B avec un allie du meme squad qui est B2B avec un ennemi.
+    out: List[str] = []
+    for mid in mids:
+        if in_er[mid]:
+            out.append(mid)
+            continue
+        my_pos = positions[mid]
+        relayed = False
+        for other_mid in mids:
+            if other_mid == mid:
+                continue
+            if not b2b_enemy.get(other_mid, False):
+                continue
+            other_pos = positions[other_mid]
+            if calculate_hex_distance(my_pos[0], my_pos[1], other_pos[0], other_pos[1]) == BASE_TO_BASE_SUBHEX:
+                relayed = True
+                break
+        if relayed:
+            out.append(mid)
+    return out
+
+
+# ============================================================================
+# SQUAD FIGHT — declaration + resolution + consolidation (squad.md PR3 3f)
+# ============================================================================
+
+
+def _auto_select_cc_weapon_for_fig(
+    attacker: Dict[str, Any], target_t: int, target_sv: int, target_invul: int
+) -> int:
+    """Choisit l index de l arme CC maximisant l expected damage P(hit)*P(wound)*P(failed_save)*D.
+
+    Tie-break : index d arme le plus bas. Si pas d arme : retourne 0 (no-op).
+    """
+    weapons = attacker.get("CC_WEAPONS", [])
+    if not weapons:
+        return 0
+    best_idx = 0
+    best_score = -1.0
+    for idx, w in enumerate(weapons):
+        if not isinstance(w, dict):
+            continue
+        ws = int(w.get("ATK", w.get("WS", 4)))  # WS via ATK convention
+        s = int(w.get("STR", w.get("S", 4)))
+        ap = int(w.get("AP", 0))
+        dmg_raw = w.get("DMG", 1)
+        try:
+            dmg = float(expected_dice_value(dmg_raw, f"auto_select_cc_dmg"))
+        except Exception:
+            dmg = float(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1.0
+        # P(hit) : roll >= ws, et 1 always fail
+        p_hit = max(0.0, (7 - ws) / 6.0) if ws <= 6 else 0.0
+        wth = wound_threshold(s, target_t)
+        p_wound = max(0.0, (7 - wth) / 6.0)
+        save_th = save_threshold(target_sv, target_invul, ap)
+        if save_th >= 7:
+            p_failed_save = 1.0
+        else:
+            p_failed_save = max(0.0, (save_th - 1) / 6.0)
+        score = p_hit * p_wound * p_failed_save * dmg
+        if score > best_score:
+            best_score = score
+            best_idx = idx
+    return best_idx
+
+
+def squad_declare_fight(
+    game_state: Dict[str, Any],
+    attacker_squad_id: str,
+    target_squad_id: str,
+) -> List[Dict[str, Any]]:
+    """Construit les declarations de combat pour une escouade (per-fig).
+
+    PR3 3f MVP : auto-cible = target_squad_id passe par le caller (l agent a deja
+    choisi). Auto-selection d arme CC par fig selon expected damage vs T/Sv cible.
+    Reset wounds_allocated_this_activation sur la cible (per-cible per-activation).
+
+    Eligibilite per fig = `get_fighting_models` (in ER OR buddy rule).
+
+    Returns la liste d intents (aussi stockee dans pending_squad_fight_intents).
+    """
+    init_pending_intents(game_state)
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    if attacker_squad_id not in game_state["pending_squad_fight_intents"]:
+        raise RuntimeError(
+            f"squad_declare_fight called before squad_fight_unit_activation_start "
+            f"for squad {attacker_squad_id!r}"
+        )
+    # Target info pour auto-select
+    target_alive = [
+        m for m in squad_models.get(target_squad_id, []) if m in models_cache
+    ]
+    if not target_alive:
+        return []  # cible deja wipe
+    t_sample = models_cache[target_alive[0]]
+    target_t = int(t_sample.get("T", 4))
+    target_sv = int(t_sample.get("ARMOR_SAVE", 7))
+    target_invul = int(t_sample.get("INVUL_SAVE", 7))
+
+    # Reset wounds_allocated sur la cible (per-cible per-activation).
+    reset_wounds_allocated_for_squad(game_state, target_squad_id)
+
+    fighting = get_fighting_models(game_state, attacker_squad_id)
+    intents: List[Dict[str, Any]] = game_state["pending_squad_fight_intents"][attacker_squad_id]
+    for mid in fighting:
+        m = models_cache.get(mid)
+        if m is None:
+            continue
+        chosen_idx = _auto_select_cc_weapon_for_fig(m, target_t, target_sv, target_invul)
+        m["selectedCcWeaponIndex"] = chosen_idx
+        # F3 fix (audit) : resoudre NB UNE SEULE FOIS, stocker dans intent.
+        weapons = m.get("CC_WEAPONS", [])
+        n_attacks_resolved = 0
+        if 0 <= chosen_idx < len(weapons):
+            w = weapons[chosen_idx]
+            if isinstance(w, dict) and "NB" in w:
+                try:
+                    n_attacks_resolved = int(resolve_dice_value(w["NB"], f"squad_declare_fight_NB_{mid}"))
+                except Exception:
+                    n_attacks_resolved = int(w["NB"]) if isinstance(w["NB"], (int, float)) else 1
+                m["ATTACK_LEFT"] = n_attacks_resolved
+        intents.append({
+            "model_id": mid,
+            "weapon_index": chosen_idx,
+            "target_unit_id": target_squad_id,
+            "n_attacks_resolved": n_attacks_resolved,
+        })
+    return intents
+
+
+def resolve_squad_fight(
+    game_state: Dict[str, Any], attacker_squad_id: str
+) -> Dict[str, Any]:
+    """Resolution melee (Hit→Wound→Save→Damage). Meme structure que resolve_squad_shoot.
+
+    Differences :
+      - Lit CC_WEAPONS au lieu de RNG_WEAPONS.
+      - Pas de BLAST en melee.
+      - Decremente ATTACK_LEFT au lieu de SHOOT_LEFT.
+    """
+    init_pending_intents(game_state)
+    models_cache = require_key(game_state, "models_cache")
+    intents = list(game_state["pending_squad_fight_intents"].get(attacker_squad_id, []))
+    summary: Dict[str, Any] = {
+        "attacks_made": 0, "hits": 0, "wounds": 0,
+        "failed_saves": 0, "damage_total": 0, "models_killed": 0, "events": [],
+    }
+    import random
+    for intent in intents:
+        attacker_mid = intent["model_id"]
+        attacker = models_cache.get(attacker_mid)
+        if attacker is None:
+            continue
+        target_sid = str(intent["target_unit_id"])
+        if target_sid not in game_state.get("squad_models", {}):
+            continue
+        weapon_index = int(intent.get("weapon_index", 0))
+        weapons = attacker.get("CC_WEAPONS", [])
+        if not (0 <= weapon_index < len(weapons)):
+            continue
+        weapon = weapons[weapon_index]
+        if not isinstance(weapon, dict):
+            continue
+        # F3 fix (audit) : lire n_attacks_resolved depuis l intent.
+        if "n_attacks_resolved" in intent:
+            n_attacks = int(intent["n_attacks_resolved"])
+        else:
+            nb_raw = weapon.get("NB", 1)
+            try:
+                n_attacks = resolve_dice_value(nb_raw, f"squad_fight_attacks_{attacker_mid}")
+            except Exception:
+                n_attacks = int(nb_raw) if isinstance(nb_raw, (int, float)) else 1
+        if n_attacks <= 0:
+            continue
+        ws = int(weapon.get("ATK", weapon.get("WS", 4)))
+        strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))
+        ap = int(weapon.get("AP", 0))
+        dmg_raw = weapon.get("DMG", 1)
+        wound_th_lookup: Dict[int, int] = {}
+        for _ in range(int(n_attacks)):
+            if attacker_mid not in models_cache:
+                break
+            target_alive = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]
+            if not target_alive:
+                break
+            summary["attacks_made"] += 1
+            hit_roll = random.randint(1, 6)
+            if hit_roll == 1 or hit_roll < ws:
+                continue
+            summary["hits"] += 1
+            first_alive = models_cache[target_alive[0]]
+            t_target = int(first_alive["T"])
+            wth = wound_th_lookup.get(t_target)
+            if wth is None:
+                wth = wound_threshold(strength, t_target); wound_th_lookup[t_target] = wth
+            wound_roll = random.randint(1, 6)
+            if wound_roll == 1 or wound_roll < wth:
+                continue
+            summary["wounds"] += 1
+            sv = int(first_alive["ARMOR_SAVE"])
+            invul = int(first_alive.get("INVUL_SAVE", 7))
+            save_th = save_threshold(sv, invul, ap)
+            save_roll = random.randint(1, 6)
+            if save_roll != 1 and save_roll >= save_th:
+                continue
+            summary["failed_saves"] += 1
+            try:
+                dmg = resolve_dice_value(dmg_raw, f"squad_fight_dmg_{attacker_mid}")
+            except Exception:
+                dmg = int(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1
+            if dmg <= 0:
+                continue
+            res = _allocate_damage_to_squad(game_state, target_sid, dmg)
+            if res is None:
+                break
+            summary["damage_total"] += int(res["damage_dealt"])
+            if res["destroyed"]:
+                summary["models_killed"] += 1
+            summary["events"].append({
+                "attacker": attacker_mid, "target": res["model_id"],
+                "damage": int(res["damage_dealt"]), "destroyed": bool(res["destroyed"]),
+            })
+        if attacker_mid in models_cache:
+            al = int(models_cache[attacker_mid].get("ATTACK_LEFT", 0))
+            models_cache[attacker_mid]["ATTACK_LEFT"] = max(0, al - int(n_attacks))
+    clear_pending_fight_intent(game_state, attacker_squad_id)
+    return summary
+
+
+def squad_consolidate_plan(
+    game_state: Dict[str, Any], squad_id: str
+) -> Optional[List[Tuple[str, int, int]]]:
+    """Plan Consolidation (apres melee, 3" max par fig).
+
+    Regle officielle (spec §"Consolidation") — OR condition :
+      (1) Si possible : finir dans l ER d une unite ennemie ET en coherency.
+          Chaque fig doit finir plus proche de l ennemi le plus proche, B2B si possible.
+      (2) Sinon : chaque fig peut se deplacer vers l objectif le plus proche, a
+          condition que le deplacement mette l escouade a portee de cet objectif
+          ET en coherency.
+      (3) Sinon : pas de Consolidation.
+
+    PR3 3f MVP : implementation de (1) uniquement (mouvement vers ennemi le plus proche).
+    Option (2) "vers objectif" defere a PR3+ (necessite acces aux objectifs en
+    game_state + concept "a portee d objectif").
+
+    Retourne plan ou None si impossible. Atomic.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]
+    if not mids:
+        return None
+    units_cache = game_state.get("units_cache", {})
+    our_entry = units_cache.get(squad_id)
+    if our_entry is None:
+        return None
+    our_player = int(our_entry.get("player", -1))
+    enemy_positions: List[Tuple[int, int]] = []
+    for esid in _enemy_squad_ids(game_state, our_player):
+        enemy_positions.extend(_squad_model_positions(game_state, esid))
+    if not enemy_positions:
+        return None  # plus d ennemi → consolidation (2) seulement, deferree
+
+    ish = int(require_key(game_state, "inches_to_subhex"))
+    budget = 3 * ish
+    er_threshold = get_engagement_range_subhex(game_state)
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    wall_hexes = game_state.get("wall_hexes", set())
+
+    occupied_after: Set[Tuple[int, int]] = set()
+    plan: List[Tuple[str, int, int]] = []
+
+    def _cell_legal(c, r):
+        if c < 0 or r < 0 or c >= board_cols or r >= board_rows: return False
+        if wall_hexes and (c, r) in wall_hexes: return False
+        if (c, r) in occupied_after: return False
+        for sid, entry in units_cache.items():
+            if str(sid) == squad_id: continue
+            occ = entry.get("occupied_hexes")
+            if occ and (c, r) in occ: return False
+        return True
+
+    for mid in mids:
+        m = models_cache[mid]
+        oc, orow = int(m["col"]), int(m["row"])
+        nearest = min(enemy_positions, key=lambda ep: calculate_hex_distance(oc, orow, ep[0], ep[1]))
+        tc, tr = nearest
+        orig_dist = calculate_hex_distance(oc, orow, tc, tr)
+        # B2B preference
+        b2b_cands: List[Tuple[int, int, int]] = []
+        for ec, er in enemy_positions:
+            for nc, nr in get_hex_neighbors(ec, er):
+                if not _cell_legal(nc, nr): continue
+                d = calculate_hex_distance(oc, orow, nc, nr)
+                if d > budget: continue
+                b2b_cands.append((d, nc, nr))
+        picked: Optional[Tuple[int, int]] = None
+        if b2b_cands:
+            b2b_cands.sort()
+            _, pc, pr = b2b_cands[0]
+            picked = (pc, pr)
+        else:
+            best: Optional[Tuple[int, int, int]] = None
+            for d in range(1, budget + 1):
+                for d_col in range(-d, d + 1):
+                    for d_row in range(-d, d + 1):
+                        if max(abs(d_col), abs(d_row)) != d: continue
+                        nc, nr = oc + d_col, orow + d_row
+                        if not _cell_legal(nc, nr): continue
+                        cd = calculate_hex_distance(nc, nr, tc, tr)
+                        if cd >= orig_dist: continue
+                        if best is None or cd < best[0]:
+                            best = (cd, nc, nr)
+                if best is not None: break
+            if best is not None:
+                _, pc, pr = best
+                picked = (pc, pr)
+        if picked is None:
+            picked = (oc, orow)
+        plan.append((mid, picked[0], picked[1]))
+        occupied_after.add(picked)
+
+    # Validation finale : coherency + ER (au moins 1 fig)
+    plan_positions = {mid: (c, r) for mid, c, r in plan}
+    if not _validate_plan_coherency(plan_positions, game_state):
+        return None
+    in_er = any(
+        any(calculate_hex_distance(c, r, ec, er) <= er_threshold for ec, er in enemy_positions)
+        for _, c, r in plan
+    )
+    if not in_er:
+        return None
+    return plan
+
+
+# ============================================================================
+# END-OF-TURN COHERENCY REMOVAL (squad.md PR3 3g)
+# ============================================================================
+
+
+# ============================================================================
+# SQUAD ACTION MASK (squad.md PR4 4b — pipeline parallele decoder)
+# ============================================================================
+# 16 micro-actions :
+#   0-5  : Normal move direction D (cf. get_hex_neighbors, parity-aware)
+#   6    : Advance (direction depuis macro_intent)
+#   7    : Fall Back (direction auto)
+#   8    : wait / end activation
+#   9-13 : shoot slots 0-4
+#   14   : charge (vers cible macro_intent)
+#   15   : fight (Pile In + declare + resolve + Consolidation)
+#
+# Returns np-compatible list[int] de longueur 16, valeurs ∈ {0, 1}.
+
+
+SQUAD_ACTION_SIZE = 16
+SQUAD_ACTION_MOVE_DIR_BASE = 0
+SQUAD_ACTION_MOVE_DIR_COUNT = 6
+SQUAD_ACTION_ADVANCE = 6
+SQUAD_ACTION_FALL_BACK = 7
+SQUAD_ACTION_WAIT = 8
+SQUAD_ACTION_SHOOT_SLOT_BASE = 9
+SQUAD_ACTION_SHOOT_SLOT_COUNT = 5
+SQUAD_ACTION_CHARGE = 14
+SQUAD_ACTION_FIGHT = 15
+
+
+def _squad_is_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """True si AU MOINS UNE figurine du squad est dans l ER d une fig ennemie."""
+    units_cache = game_state.get("units_cache", {})
+    entry = units_cache.get(squad_id)
+    if entry is None:
+        return False
+    our_player = int(entry.get("player", -1))
+    er = get_engagement_range_subhex(game_state)
+    our_pos = _squad_model_positions(game_state, squad_id)
+    if not our_pos:
+        return False
+    for esid in _enemy_squad_ids(game_state, our_player):
+        for ec, er_pos in _squad_model_positions(game_state, esid):
+            for oc, orow in our_pos:
+                if calculate_hex_distance(oc, orow, ec, er_pos) <= er:
+                    return True
+    return False
+
+
+def build_squad_action_mask(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    enemy_slot_ids: Optional[List[Optional[str]]] = None,
+) -> List[int]:
+    """Construit le masque 16 actions pour une escouade active (PR4 4b).
+
+    Phase courante lue depuis game_state['phase']. Si squad n existe pas ou est mort,
+    retourne masque all-zero (rien n est legal).
+
+    enemy_slot_ids : mapping slot 0..4 → squad_id ennemi (ou None pour slot vide).
+    Si None, derivee depuis enemy_squads sortes par id (cohérent avec PR4 4a obs).
+    Stable slot mapping HP*OC = PR4 4d.
+    """
+    mask = [0] * SQUAD_ACTION_SIZE
+    units_cache = game_state.get("units_cache", {})
+    if squad_id not in units_cache:
+        return mask
+    entry = units_cache[squad_id]
+    our_player = int(entry.get("player", -1))
+    phase = str(game_state.get("phase", "")).lower()
+    in_er = _squad_is_in_enemy_er(game_state, squad_id)
+    has_advanced = squad_id in game_state.get("units_advanced", set())
+    has_fled = squad_id in game_state.get("units_fled", set())
+    has_moved = squad_id in game_state.get("units_moved", set())
+    has_shot = squad_id in game_state.get("units_shot", set())
+    has_fought = squad_id in game_state.get("units_fought", set())
+    has_charged = squad_id in game_state.get("units_charged", set())
+
+    # Default enemy_slot_ids = first 5 enemy squads sorted by id (PR4 4a coherence).
+    if enemy_slot_ids is None:
+        enemy_sorted = sorted(
+            (sid for sid, e in units_cache.items() if int(e["player"]) != our_player),
+            key=lambda s: str(s),
+        )
+        enemy_slot_ids = list(enemy_sorted[:SQUAD_ACTION_SHOOT_SLOT_COUNT]) + [None] * max(
+            0, SQUAD_ACTION_SHOOT_SLOT_COUNT - len(enemy_sorted)
+        )
+
+    # --- Move phase actions: 0-5 (directions), 6 (Advance), 7 (Fall Back) ---
+    if phase == "move":
+        if not has_moved:
+            # Directions 0-5 : Normal move. Mask=1 si pas en ER ennemi (locked).
+            if not in_er:
+                for d in range(SQUAD_ACTION_MOVE_DIR_COUNT):
+                    mask[SQUAD_ACTION_MOVE_DIR_BASE + d] = 1
+                mask[SQUAD_ACTION_ADVANCE] = 1
+            # Fall Back : uniquement si in ER ennemi
+            if in_er:
+                mask[SQUAD_ACTION_FALL_BACK] = 1
+        # Wait toujours possible en move phase
+        mask[SQUAD_ACTION_WAIT] = 1
+
+    # --- Shoot phase actions: 9-13 (5 slots) ---
+    elif phase == "shoot":
+        # Shooting interdit si fled/advanced/has_shot OU si in ER ennemi (locked, sauf
+        # Pistol qu on ignore en PR4 4b — TODO PR5).
+        can_shoot = not has_fled and not has_advanced and not has_shot and not in_er
+        if can_shoot:
+            for slot_i, esid in enumerate(enemy_slot_ids):
+                if esid is None:
+                    continue
+                # Cible eligible si elle existe vivante ET pas locked by ally ER
+                # (PR4 4b : check locked by friendly ER, cf. spec).
+                if esid not in units_cache:
+                    continue
+                # Locked-by-ally check (PR4 4b minimal)
+                er = get_engagement_range_subhex(game_state)
+                e_pos = _squad_model_positions(game_state, esid)
+                ally_pos: List[Tuple[int, int]] = []
+                for sid, e in units_cache.items():
+                    if int(e["player"]) != our_player:
+                        continue
+                    if str(sid) == squad_id:
+                        continue
+                    ally_pos.extend(_squad_model_positions(game_state, str(sid)))
+                locked_by_ally = any(
+                    any(calculate_hex_distance(ec, er_, ac, ar) <= er for ac, ar in ally_pos)
+                    for ec, er_ in e_pos
+                )
+                if locked_by_ally:
+                    continue  # interdit (regle officielle, sauf Monster/Vehicle non gere en PR4 4b)
+                # At least 1 fig peut tirer ? (range check)
+                models_cache = game_state.get("models_cache", {})
+                can_any_hit = False
+                for mid in game_state.get("squad_models", {}).get(squad_id, []):
+                    m = models_cache.get(mid)
+                    if m is None:
+                        continue
+                    if _model_can_shoot_target(game_state, m, esid):
+                        can_any_hit = True
+                        break
+                if can_any_hit:
+                    mask[SQUAD_ACTION_SHOOT_SLOT_BASE + slot_i] = 1
+        mask[SQUAD_ACTION_WAIT] = 1
+
+    # --- Charge phase action: 14 ---
+    elif phase == "charge":
+        # Eligibilite charge : utiliser n importe quelle escouade ennemie comme cible
+        # candidate, le caller (decoder) precise la cible via macro_intent.
+        # PR4 4b : on autorise l action si AU MOINS UN slot ennemi declanche eligibilite.
+        any_charge_possible = False
+        for esid in enemy_slot_ids:
+            if esid is None:
+                continue
+            if charge_check_eligibility(game_state, squad_id, [esid]):
+                any_charge_possible = True
+                break
+        if any_charge_possible:
+            mask[SQUAD_ACTION_CHARGE] = 1
+        mask[SQUAD_ACTION_WAIT] = 1
+
+    # --- Fight phase action: 15 ---
+    elif phase == "fight":
+        # Eligible = fig en ER ennemi OR has_charged ce tour
+        eligible = _squad_is_in_fight(game_state, squad_id)
+        if eligible and not has_fought:
+            mask[SQUAD_ACTION_FIGHT] = 1
+        # Wait masque si eligible (regle officielle : ne peut pas passer si peut combattre)
+        if not eligible:
+            mask[SQUAD_ACTION_WAIT] = 1
+
+    # --- Other phases (command/deployment) ---
+    else:
+        mask[SQUAD_ACTION_WAIT] = 1
+
+    return mask
+
+
+# ============================================================================
+# STABLE ENEMY SLOT MAPPING (squad.md PR4 4d)
+# ============================================================================
+# Mapping fixe a l init de partie : top-5 escouades ennemies par menace
+# (HP_total * OC_total). Tie-break = ordre d index (deterministe).
+# Apres init, le mapping NE CHANGE JAMAIS. Si une escouade slot meurt, son
+# slot reste vide (masque=0). La 6eme escouade n est PAS promue.
+
+
+def init_enemy_slot_mapping(game_state: Dict[str, Any], our_player: int) -> None:
+    """Construit le mapping stable a l init de partie. Idempotent.
+
+    Cle stockee : game_state[f"enemy_slot_mapping_p{our_player}"] = [sid_or_None, ...]
+    Liste de 5 entrees, chaque slot = squad_id ennemi ou None si moins de 5 ennemis.
+
+    A appeler UNE SEULE FOIS au debut de partie. Si la cle existe deja → no-op
+    (preserve mapping initial même si squad meurt).
+    """
+    cache_key = f"enemy_slot_mapping_p{int(our_player)}"
+    if cache_key in game_state:
+        return
+    units_cache = game_state.get("units_cache", {})
+    squad_models = game_state.get("squad_models", {})
+    models_cache = game_state.get("models_cache", {})
+    # Calcule (squad_id, threat) pour chaque ennemi vivant a l init
+    candidates: List[Tuple[str, float, int]] = []  # (sid, threat, idx)
+    enemy_sorted = sorted(
+        (sid for sid, e in units_cache.items() if int(e["player"]) != int(our_player)),
+        key=lambda s: str(s),
+    )
+    for idx, sid in enumerate(enemy_sorted):
+        entry = units_cache[sid]
+        hp_total = int(entry.get("HP_CUR", 0))
+        # OC_total : prefer cache value, fallback sum
+        oc_total = int(entry.get("OC_TOTAL", 0))
+        if oc_total == 0:
+            for mid in squad_models.get(sid, []):
+                m = models_cache.get(mid)
+                if m is not None:
+                    oc_total += int(m.get("OC", 0))
+        threat = float(hp_total) * float(oc_total)
+        candidates.append((str(sid), threat, idx))
+    # Tri : menace decroissante, tie-break index croissant (ordre creation)
+    candidates.sort(key=lambda t: (-t[1], t[2]))
+    slot_count = SQUAD_ACTION_SHOOT_SLOT_COUNT
+    mapping: List[Optional[str]] = [None] * slot_count
+    for slot_i in range(min(slot_count, len(candidates))):
+        mapping[slot_i] = candidates[slot_i][0]
+    game_state[cache_key] = mapping
+
+
+def get_enemy_slot_mapping(
+    game_state: Dict[str, Any], our_player: int
+) -> List[Optional[str]]:
+    """Retourne le mapping fige. Si squad d un slot est mort, retourne None pour ce slot.
+
+    Si le mapping n a jamais ete initialise, le construit (init lazy).
+    """
+    cache_key = f"enemy_slot_mapping_p{int(our_player)}"
+    if cache_key not in game_state:
+        init_enemy_slot_mapping(game_state, our_player)
+    raw = game_state.get(cache_key, [None] * SQUAD_ACTION_SHOOT_SLOT_COUNT)
+    units_cache = game_state.get("units_cache", {})
+    return [sid if (sid is not None and sid in units_cache) else None for sid in raw]
+
+
+def end_of_turn_coherency_removal(
+    game_state: Dict[str, Any], squad_id: str
+) -> List[str]:
+    """Retrait deterministe des figurines hors coherency (MVP PR3).
+
+    Boucle :
+      - Si squad coherent OU model_count <= 1 → stop.
+      - Sinon : retire la figurine la plus eloignee du centroide geometrique.
+        Tie-break : index croissant. Utilise destroy_model(reason='coherency_removal').
+      - Recalcule coherency apres chaque retrait.
+
+    Returns liste des model_ids retires (ordre de retrait).
+
+    Note : la fig retiree par 'coherency_removal' ne genere ni reward kill ni perte
+    d OC pour le combat (cf. spec §"Cascade de mise a jour" — reason discrimine).
+    """
+    removed: List[str] = []
+    while True:
+        models_cache = game_state.get("models_cache", {})
+        squad_models = game_state.get("squad_models", {}).get(squad_id, [])
+        alive = [m for m in squad_models if m in models_cache]
+        if len(alive) <= 1:
+            break
+        if validate_squad_coherency(game_state, squad_id):
+            break
+        # Calcule centroide
+        positions = [(int(models_cache[m]["col"]), int(models_cache[m]["row"])) for m in alive]
+        cx = sum(p[0] for p in positions) / float(len(positions))
+        cy = sum(p[1] for p in positions) / float(len(positions))
+        # B1 cleanup (audit) : pre-calcule l index pour O(1) lookup vs alive.index O(n)
+        index_of = {mid: i for i, mid in enumerate(alive)}
+        # Fig la plus eloignee (distance euclidienne carree, evite sqrt)
+        def _sq_dist(mid: str) -> float:
+            m = models_cache[mid]
+            dx = int(m["col"]) - cx
+            dy = int(m["row"]) - cy
+            return dx * dx + dy * dy
+        # Sort by (-dist, index) — distance max d abord, puis index croissant pour tie-break
+        sorted_alive = sorted(alive, key=lambda mid: (-_sq_dist(mid), index_of[mid]))
+        target_mid = sorted_alive[0]
+        destroy_model(game_state, target_mid, reason="coherency_removal")
+        removed.append(target_mid)
+    return removed

@@ -13,8 +13,7 @@
     "**/node_modules",
     "**/__pycache__",
     "frontend/src/roster/_HOW_TO_ADD_UNIT.py",
-    "ai/analyzer_avant_refactor.py",
-    "engine/phase_handlers/fight_handler_new_bugged.py"
+    "ai/analyzer_avant_refactor.py"
   ],
   "reportPrivateImportUsage": "none"
 }
