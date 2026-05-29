@@ -1846,7 +1846,20 @@ def movement_build_model_destinations_pool(
             for cell in occ:
                 other_occupied.add((int(cell[0]), int(cell[1])))
 
+    # Cellules occupees par les AUTRES figs du meme squad (collision intra-squad interdite).
+    same_squad_occupied: Set[Tuple[int, int]] = set()
+    _models_cache = require_key(game_state, "models_cache")
+    _squad_models = game_state.get("squad_models", {})
+    for mid in _squad_models.get(squad_id, []):
+        if str(mid) == str(model_id):
+            continue
+        sibling = _models_cache.get(str(mid))
+        if sibling is not None:
+            same_squad_occupied.add((int(sibling["col"]), int(sibling["row"])))
+
     has_fly = _unit_has_keyword(unit, "fly")
+
+    dest_blocked = wall_hexes | other_occupied | same_squad_occupied | enemy_adjacent_hexes
 
     visited: Set[Tuple[int, int]] = {start_pos}
     reachable: List[Tuple[int, int]] = []
@@ -1867,8 +1880,8 @@ def movement_build_model_destinations_pool(
                 continue
             visited.add(cell)
             queue.append((nc, nr, d + 1))
-            # Validite destination (regles validate_move_plan, 1 fig, sans coherency).
-            if cell in wall_hexes or cell in other_occupied or cell in enemy_adjacent_hexes:
+            # Validite destination : murs + toutes figs occupant la cellule + engagement ennemi.
+            if cell in dest_blocked:
                 continue
             reachable.append(cell)
 
@@ -1884,11 +1897,12 @@ def movement_build_model_destinations_pool(
         orientation = unit.get("orientation", 0)
         off_even, off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
         # Fix fonctionnel : exclure les destinations dont l'empreinte complète
-        # chevauche wall_hexes (le BFS ne vérifie que le hex central).
+        # chevauche dest_blocked (murs, figs alliées, figs ennemies, engagement).
+        # Le BFS ne vérifie que le hex central ; ici on vérifie chaque cellule de l'empreinte.
         valid_reachable: List[Tuple[int, int]] = []
         for ac, ar in reachable:
             offs = off_even if (ac & 1) == 0 else off_odd
-            if not any((ac + dc, ar + dr) in wall_hexes for dc, dr in offs):
+            if not any((ac + dc, ar + dr) in dest_blocked for dc, dr in offs):
                 valid_reachable.append((ac, ar))
         reachable = valid_reachable
         # Footprint zone depuis les destinations valides uniquement.
