@@ -5436,10 +5436,14 @@ export default function Board({
         // squad.md brique 3 : voile rouge sur les figs invalides (hex interdit OU hors cohesion).
         if (isSquadGhost && modelValidFlags.some((ok) => !ok)) {
           const veil = new PIXI.Graphics();
+          const veilDisplayBase = resolveBaseSizeForUnitDisplay(unit);
+          const veilRadius = veilDisplayBase > 1
+            ? (veilDisplayBase * 1.5 * HEX_RADIUS) / 2
+            : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
           modelCenters.forEach(([cx, cy], i) => {
             if (!modelValidFlags[i]) {
               veil.beginFill(0xff0000, 0.45);
-              veil.drawCircle(cx, cy, HEX_RADIUS * 1.2);
+              veil.drawCircle(cx, cy, veilRadius);
               veil.endFill();
             }
           });

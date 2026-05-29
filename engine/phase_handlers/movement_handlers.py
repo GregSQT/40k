@@ -1957,16 +1957,36 @@ def movement_preview_move_plan(
     # coherency_dist (2"), puis on cherche les groupes connectes. Le groupe STRICTEMENT
     # majoritaire (taille*2 > effectif total) reste vert ; tout groupe minoritaire ou a
     # egalite (taille*2 <= total) passe en rouge → 2 moities egales = tout le squad rouge.
+    #
+    # La distance utilisée est l'empreinte-à-empreinte (pas centre-à-centre) pour les
+    # unités avec une grande base : deux figs dont les empreintes se touchent à ≤2" sont
+    # en cohésion même si leurs centres sont à >2".
     positions: List[Tuple[int, int]] = [(int(nc), int(nr)) for _, nc, nr in plan]
     n = len(positions)
     coherency_dist = get_coherency_subhex(game_state)
 
+    # Calcul des empreintes par fig
+    from engine.hex_utils import precompute_footprint_offsets as _pfo
+    units_cache = game_state.get("units_cache", {})
+    unit_entry = units_cache.get(str(squad_id), {})
+    base_shape = unit_entry.get("BASE_SHAPE", "round")
+    base_size = unit_entry.get("BASE_SIZE", 1)
+    orientation = int(unit_entry.get("orientation", 0))
+    is_single_hex = not isinstance(base_size, int) or base_size <= 1
+    if is_single_hex:
+        footprints: List[Set[Tuple[int, int]]] = [{pos} for pos in positions]
+    else:
+        _off_even, _off_odd = _pfo(base_shape, base_size, orientation)
+        footprints = []
+        for col, row in positions:
+            offs = _off_even if (col & 1) == 0 else _off_odd
+            footprints.append({(col + dc, row + dr) for dc, dr in offs})
+
     adjacency: List[List[int]] = [[] for _ in range(n)]
     for i in range(n):
-        ci, ri = positions[i]
         for j in range(i + 1, n):
-            cj, rj = positions[j]
-            if calculate_hex_distance(ci, ri, cj, rj) <= coherency_dist:
+            d = min_distance_between_sets(footprints[i], footprints[j], max_distance=coherency_dist)
+            if d <= coherency_dist:
                 adjacency[i].append(j)
                 adjacency[j].append(i)
 
