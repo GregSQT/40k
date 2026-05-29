@@ -445,6 +445,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   } | null>(null);
   /** Pool BFS (hexes atteignables) de la figurine en cours de repositionnement. */
   const squadMoveModelPoolRef = useRef<Set<string>>(new Set());
+  /** Mask loops per-fig (polygone lissé) reçus de move_model_destinations. */
+  const squadMoveModelMaskLoopsRef = useRef<number[][] | null>(null);
   const [attackPreview, setAttackPreview] = useState<{
     unitId: number;
     col: number;
@@ -3323,6 +3325,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         set.add(`${c},${r}`);
       }
       squadMoveModelPoolRef.current = set;
+      const rawLoops = result?.footprint_mask_loops;
+      squadMoveModelMaskLoopsRef.current = Array.isArray(rawLoops) ? (rawLoops as number[][]) : null;
       console.log(`[SQUAD-MOVE] selectModel active=${modelId} poolSize=${set.size}`);
       setSquadMovePlan((prev) => (prev ? { ...prev, activeModelId: modelId } : prev));
     },
@@ -3333,8 +3337,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleMoveModelInPlan = useCallback(
     (modelId: string, col: number, row: number) => {
       console.log(`[SQUAD-MOVE] moveModelInPlan model=${modelId} → (${col},${row}) [pose + deselect]`);
-      // Fig posee → on la deselectionne (vide le pool, sort du preview de cette fig).
+      // Fig posee → on la deselectionne (vide le pool + loops, sort du preview de cette fig).
       squadMoveModelPoolRef.current = new Set();
+      squadMoveModelMaskLoopsRef.current = null;
       setSquadMovePlan((prev) => {
         if (!prev) return prev;
         const models = { ...prev.models, [modelId]: { col, row } };
@@ -4429,6 +4434,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onBumpMovePreviewOrientation: () => {},
       squadMovePlan: null,
       squadMoveModelPoolRef,
+      squadMoveModelMaskLoopsRef,
       onStartSquadModelMove: async () => {},
       onSelectModelForMove: async () => {},
       onMoveModelInPlan: () => {},
@@ -4543,6 +4549,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     // Move par-figurine (squad.md brique 3)
     squadMovePlan,
     squadMoveModelPoolRef,
+    squadMoveModelMaskLoopsRef,
     onStartSquadModelMove: handleStartSquadModelMove,
     onSelectModelForMove: handleSelectModelForMove,
     onMoveModelInPlan: handleMoveModelInPlan,

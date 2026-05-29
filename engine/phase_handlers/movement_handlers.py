@@ -1791,7 +1791,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
 def movement_build_model_destinations_pool(
     game_state: Dict[str, Any], model_id: str
-) -> List[Tuple[int, int]]:
+) -> Dict[str, Any]:
     """BFS des hexes atteignables pour UNE figurine (move par-figurine, squad.md).
 
     Move normal : budget = MOVE de l'escouade (subhexes). Origine = position
@@ -1807,7 +1807,7 @@ def movement_build_model_destinations_pool(
     escouade, hors zone d'engagement ennemie. Les overlaps avec une coequipiere
     sont geres par preview_move_plan sur le plan complet. Lecture pure.
 
-    Retourne la liste des (col, row) atteignables, origine exclue.
+    Retourne {"destinations": [...], "footprint_mask_loops": [...]}.
     """
     models_cache = require_key(game_state, "models_cache")
     model = models_cache.get(str(model_id))
@@ -1818,7 +1818,7 @@ def movement_build_model_destinations_pool(
     squad_id = str(model["squad_id"])
     unit = get_unit_by_id(game_state, squad_id)
     if not unit:
-        return []
+        return {"destinations": [], "footprint_mask_loops": []}
 
     budget = get_squad_move_budget(squad_id, game_state, "normal")
     start_col = int(model["col"])
@@ -1871,7 +1871,34 @@ def movement_build_model_destinations_pool(
             if cell in wall_hexes or cell in other_occupied or cell in enemy_adjacent_hexes:
                 continue
             reachable.append(cell)
-    return reachable
+
+    # Footprint zone per-fig : destinations ∪ start, expandées selon BASE_SIZE.
+    base_size = unit.get("BASE_SIZE", 1)
+    is_single_hex = (base_size == 1 or not isinstance(base_size, int) or base_size <= 1)
+    if is_single_hex:
+        footprint_zone: Set[Tuple[int, int]] = set(reachable)
+        footprint_zone.add(start_pos)
+    else:
+        from engine.hex_utils import precompute_footprint_offsets
+        base_shape = unit.get("BASE_SHAPE", "round")
+        orientation = unit.get("orientation", 0)
+        off_even, off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
+        footprint_zone = set()
+        for ac, ar in reachable:
+            offs = off_even if (ac & 1) == 0 else off_odd
+            for dc, dr in offs:
+                footprint_zone.add((ac + dc, ar + dr))
+        s_offs = off_even if (start_col & 1) == 0 else off_odd
+        for dc, dr in s_offs:
+            footprint_zone.add((start_col + dc, start_row + dr))
+
+    # Calcul mask loops sans ecriture permanente dans game_state.
+    _prev_loops = game_state.get("move_preview_footprint_mask_loops")
+    _sync_move_preview_mask_loops(game_state, footprint_zone)
+    mask_loops = game_state.get("move_preview_footprint_mask_loops", [])
+    game_state["move_preview_footprint_mask_loops"] = _prev_loops
+
+    return {"destinations": reachable, "footprint_mask_loops": mask_loops}
 
 
 def movement_preview_move_plan(

@@ -2010,7 +2010,7 @@ def execute_action():
                 "error": "move_model_destinations requires model_id",
             }), 400
         from engine.phase_handlers import movement_handlers as _mh_model
-        pool = _mh_model.movement_build_model_destinations_pool(
+        _model_pool = _mh_model.movement_build_model_destinations_pool(
             engine.game_state, str(model_id)
         )
         return api_json_response({
@@ -2018,7 +2018,10 @@ def execute_action():
             "result": {
                 "action": "move_model_destinations",
                 "model_id": str(model_id),
-                "destinations": [[int(c), int(r)] for c, r in pool],
+                "destinations": [[int(c), int(r)] for c, r in _model_pool["destinations"]],
+                "footprint_mask_loops": _compact_mask_loops_for_api_json(
+                    _model_pool["footprint_mask_loops"]
+                ),
             },
         })
 

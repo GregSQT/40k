@@ -3291,6 +3291,7 @@ export const BoardWithAPI: React.FC = () => {
             }
             squadMovePlan={apiProps.squadMovePlan}
             squadMoveModelPoolRef={apiProps.squadMoveModelPoolRef}
+            squadMoveModelMaskLoopsRef={apiProps.squadMoveModelMaskLoopsRef}
             onStartSquadModelMove={isGameOver ? async () => {} : apiProps.onStartSquadModelMove}
             onSelectModelForMove={isGameOver ? async () => {} : apiProps.onSelectModelForMove}
             onMoveModelInPlan={isGameOver ? () => {} : apiProps.onMoveModelInPlan}

@@ -410,6 +410,8 @@ type BoardProps = {
   } | null;
   /** Pool BFS (hexes atteignables) de la figurine en cours de repositionnement. */
   squadMoveModelPoolRef?: React.RefObject<Set<string>>;
+  /** Mask loops per-fig (polygone lissé) reçus de move_model_destinations. */
+  squadMoveModelMaskLoopsRef?: React.RefObject<number[][] | null>;
   onStartSquadModelMove?: (unitId: number | string) => void | Promise<void>;
   onSelectModelForMove?: (modelId: string) => void | Promise<void>;
   onMoveModelInPlan?: (modelId: string, col: number, row: number) => void;
@@ -662,6 +664,7 @@ export default function Board({
   onBumpMovePreviewOrientation,
   squadMovePlan = null,
   squadMoveModelPoolRef,
+  squadMoveModelMaskLoopsRef,
   onStartSquadModelMove,
   onSelectModelForMove,
   onMoveModelInPlan,
@@ -3553,24 +3556,32 @@ export default function Board({
     // Comme la charge (syncChargePoolRefs synchrone dans le handler API) : remplir les refs
     // **dans cet effet**, avant drawBoard. Un useEffect parent sur gameState s’exécute après
     // l’enfant → drawBoard lisait moveDestPoolRef vide et retombait sur les pastilles hex.
-    const shouldSyncMovePoolsFromState =
-      keepMovementPickPool &&
-      resolvedMoveDestPoolRef.current &&
-      (enginePhaseForPools === "move" ||
-        enginePhaseForPools === "command" ||
-        (mode === "advancePreview" && selectedUnitId !== null) ||
-        (phase === "shoot" && pendingMoveAfterShooting));
-    if (shouldSyncMovePoolsFromState) {
-      syncMoveDestinationPoolRefs({
-        gameState: gameState ?? null,
-        phase: enginePhaseForPools,
-        mode,
-        selectedUnitId,
-        moveDestPoolRef: resolvedMoveDestPoolRef,
-        footprintZoneRef,
-        footprintMaskLoopsRef,
-        pendingMoveAfterShooting,
-      });
+    // En squadModelMove : resolvedMoveDestPoolRef est vidé pour ne pas parasite le rendu ;
+    // drawBoardOptions utilise squadMoveModelPoolRef directement (pool per-fig toujours frais).
+    if (mode === "squadModelMove") {
+      if (resolvedMoveDestPoolRef.current.size > 0) {
+        resolvedMoveDestPoolRef.current.clear();
+      }
+    } else {
+      const shouldSyncMovePoolsFromState =
+        keepMovementPickPool &&
+        resolvedMoveDestPoolRef.current &&
+        (enginePhaseForPools === "move" ||
+          enginePhaseForPools === "command" ||
+          (mode === "advancePreview" && selectedUnitId !== null) ||
+          (phase === "shoot" && pendingMoveAfterShooting));
+      if (shouldSyncMovePoolsFromState) {
+        syncMoveDestinationPoolRefs({
+          gameState: gameState ?? null,
+          phase: enginePhaseForPools,
+          mode,
+          selectedUnitId,
+          moveDestPoolRef: resolvedMoveDestPoolRef,
+          footprintZoneRef,
+          footprintMaskLoopsRef,
+          pendingMoveAfterShooting,
+        });
+      }
     }
 
     if (
@@ -4847,6 +4858,7 @@ export default function Board({
      */
     const gsPhaseForMove = gameState?.phase;
     const moveDestinationAnchorsFromState =
+      mode !== "squadModelMove" &&
       phase !== "deployment" &&
       (effectivePhase === "move" ||
         gsPhaseForMove === "move" ||
@@ -4865,13 +4877,20 @@ export default function Board({
 
     /** Pile-in / consolidation : masque uniquement depuis ``footprintZonePoolRef`` (union hex → polygone lissé côté client, comme move sans ``move_preview_footprint_mask_loops``). */
     const activeFootprintMaskLoops = (() => {
-      const raw =
-        effectivePhase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview")
-          ? null
-          : normalizeMaskLoopsFromApi(
-              (gameState as { move_preview_footprint_mask_loops?: unknown })
-                .move_preview_footprint_mask_loops
-            );
+      let raw: number[][] | null;
+      if (mode === "squadModelMove") {
+        raw = squadMovePlan?.activeModelId
+          ? (squadMoveModelMaskLoopsRef?.current ?? null)
+          : null;
+      } else {
+        raw =
+          effectivePhase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview")
+            ? null
+            : normalizeMaskLoopsFromApi(
+                (gameState as { move_preview_footprint_mask_loops?: unknown })
+                  .move_preview_footprint_mask_loops
+              );
+      }
       if (!raw) return raw;
       const ds =
         (boardConfig?.display as { display_scale?: number } | undefined)?.display_scale ?? 1;
@@ -4897,7 +4916,10 @@ export default function Board({
       mode,
       showHexCoordinates,
       objectiveControl,
-      moveDestPoolRef: resolvedMoveDestPoolRef,
+      moveDestPoolRef:
+        mode === "squadModelMove" && squadMovePlan?.activeModelId && squadMoveModelPoolRef
+          ? squadMoveModelPoolRef
+          : resolvedMoveDestPoolRef,
       footprintZonePoolRef: footprintZoneRef,
       moveDestinationAnchorsFromState,
       movePreviewFootprintSpanFromState: (
@@ -6176,6 +6198,8 @@ export default function Board({
     blinkingCoverByUnitId,
     objectiveControlOverride,
     squadMovePlan,
+    squadMoveModelPoolRef,
+    squadMoveModelMaskLoopsRef?.current,
   ]);
 
   // Handle weapon selection
