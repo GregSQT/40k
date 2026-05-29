@@ -2602,7 +2602,7 @@ export const drawBoard = (
       const wallsContainer = new PIXI.Container();
       wallsContainer.name = "walls";
 
-      const halfW = HEX_HEIGHT * 0.8;
+      const halfW = HEX_HEIGHT * 1.0;
       const wallTexturePath = boardConfig.display?.wall_texture?.trim() || "/textures/wall1.webp";
       const wallTextureAlpha =
         typeof boardConfig.display?.wall_texture_alpha === "number"

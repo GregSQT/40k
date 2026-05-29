@@ -237,6 +237,7 @@ export class UnitRenderer {
     };
     displayObject.on("pointerout", hideTooltip);
     displayObject.on("pointerleave", hideTooltip);
+    displayObject.on("pointerdown", hideTooltip);
   }
 
   private cleanupExistingBlinkIntervals(): void {
