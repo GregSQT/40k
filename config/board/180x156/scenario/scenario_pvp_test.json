@@ -1,6 +1,6 @@
 {
   "primary_objectives": ["objectives_control"],
-  "wall_ref": "walls-none.json",
+  "wall_ref": "walls-33.json",
   "objectives_ref": "objectives-51.json",
   "units": [
     { "id": 1, "unit_type": "CaptainTerminatorRelicWeaponBolter", "player": 1, "col": 168, "row": 72  },

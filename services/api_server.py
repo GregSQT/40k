@@ -1660,278 +1660,274 @@ def start_game():
     """Start a new game session with optional PvE mode."""
     global engine
     
+    auth_user, auth_error = _get_authenticated_user_or_response()
+    if auth_error is not None:
+        return auth_error
+    if auth_user is None:
+        return jsonify({"success": False, "error": "authentication failed"}), 401
+
+    # Check for PvE mode in request
+    data = request.get_json() or {}
+    if "pve_mode" in data and not isinstance(data["pve_mode"], bool):
+        raise ValueError(f"pve_mode must be boolean (got {type(data['pve_mode']).__name__})")
+    if "mode_code" in data and data["mode_code"] is not None and not isinstance(data["mode_code"], str):
+        raise ValueError(f"mode_code must be string or null (got {type(data['mode_code']).__name__})")
+    if "scenario_file" in data and data["scenario_file"] is not None and not isinstance(data["scenario_file"], str):
+        raise ValueError(f"scenario_file must be string or null (got {type(data['scenario_file']).__name__})")
+    if "board_path" in data and data["board_path"] is not None and data["board_path"] not in BOARD_PATH_MAP:
+        raise ValueError(f"board_path must be one of {sorted(BOARD_PATH_MAP)} (got {data['board_path']!r})")
+    pve_mode = data.get('pve_mode', False)
+    mode_code = data.get('mode_code', None)
+    scenario_file = data.get('scenario_file', None)
+    board_path = data.get('board_path', None)
+
+    requested_mode = "pvp"
+    if mode_code is not None:
+        allowed_mode_codes = {"pvp", "pve", "pvp_test", "pve_test", ED_MODE_CODE}
+        if mode_code not in allowed_mode_codes:
+            raise ValueError(f"Unsupported mode_code '{mode_code}'. Allowed values: {sorted(allowed_mode_codes)}")
+        requested_mode = mode_code
+    elif pve_mode:
+        requested_mode = "pve"
+
+    connection = _get_auth_db_connection()
     try:
-        auth_user, auth_error = _get_authenticated_user_or_response()
-        if auth_error is not None:
-            return auth_error
-        if auth_user is None:
-            return jsonify({"success": False, "error": "authentication failed"}), 401
+        permissions = _resolve_permissions_for_profile(connection, auth_user["profile_id"])
+    finally:
+        connection.close()
 
-        # Check for PvE mode in request
-        data = request.get_json() or {}
-        if "pve_mode" in data and not isinstance(data["pve_mode"], bool):
-            raise ValueError(f"pve_mode must be boolean (got {type(data['pve_mode']).__name__})")
-        if "mode_code" in data and data["mode_code"] is not None and not isinstance(data["mode_code"], str):
-            raise ValueError(f"mode_code must be string or null (got {type(data['mode_code']).__name__})")
-        if "scenario_file" in data and data["scenario_file"] is not None and not isinstance(data["scenario_file"], str):
-            raise ValueError(f"scenario_file must be string or null (got {type(data['scenario_file']).__name__})")
-        if "board_path" in data and data["board_path"] is not None and data["board_path"] not in BOARD_PATH_MAP:
-            raise ValueError(f"board_path must be one of {sorted(BOARD_PATH_MAP)} (got {data['board_path']!r})")
-        pve_mode = data.get('pve_mode', False)
-        mode_code = data.get('mode_code', None)
-        scenario_file = data.get('scenario_file', None)
-        board_path = data.get('board_path', None)
-
-        requested_mode = "pvp"
-        if mode_code is not None:
-            allowed_mode_codes = {"pvp", "pve", "pvp_test", "pve_test", ED_MODE_CODE}
-            if mode_code not in allowed_mode_codes:
-                raise ValueError(f"Unsupported mode_code '{mode_code}'. Allowed values: {sorted(allowed_mode_codes)}")
-            requested_mode = mode_code
-        elif pve_mode:
-            requested_mode = "pve"
-
-        connection = _get_auth_db_connection()
+    if not _is_mode_allowed(requested_mode, permissions):
+        return jsonify(
+            {
+                "success": False,
+                "error": (
+                    f"Mode '{requested_mode}' is not allowed for profile "
+                    f"'{auth_user['profile_code']}'"
+                ),
+            }
+        ), 403
+        
+    # CRITICAL: Always reinitialize engine based on requested mode to prevent mode contamination
+    if requested_mode == "pvp_test":
+        print("DEBUG: Initializing engine for PvP Test mode")
+        if board_path is None:
+            from config_loader import get_config_loader as _gcl
+            _cfg = _gcl().load_config("config", force_reload=False)
+            board_path = _cfg.get("defaults", {}).get("test_board", "x5")
+        scenario_file = os.path.join("config", BOARD_PATH_MAP[board_path], "scenario", "scenario_pvp_test.json")
+        _prev_board = os.environ.get("W40K_BOARD_PATH")
+        os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
         try:
-            permissions = _resolve_permissions_for_profile(connection, auth_user["profile_id"])
+            initialize_engine(scenario_file=scenario_file)
         finally:
-            connection.close()
-
-        if not _is_mode_allowed(requested_mode, permissions):
-            return jsonify(
-                {
-                    "success": False,
-                    "error": (
-                        f"Mode '{requested_mode}' is not allowed for profile "
-                        f"'{auth_user['profile_code']}'"
-                    ),
-                }
-            ), 403
-        
-        # CRITICAL: Always reinitialize engine based on requested mode to prevent mode contamination
-        if requested_mode == "pvp_test":
-            print("DEBUG: Initializing engine for PvP Test mode")
-            if board_path is None:
-                from config_loader import get_config_loader as _gcl
-                _cfg = _gcl().load_config("config", force_reload=False)
-                board_path = _cfg.get("defaults", {}).get("test_board", "x5")
-            scenario_file = os.path.join("config", BOARD_PATH_MAP[board_path], "scenario", "scenario_pvp_test.json")
-            _prev_board = os.environ.get("W40K_BOARD_PATH")
-            os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
-            try:
-                initialize_engine(scenario_file=scenario_file)
-            finally:
-                if _prev_board is not None:
-                    os.environ["W40K_BOARD_PATH"] = _prev_board
-                elif "W40K_BOARD_PATH" in os.environ:
-                    del os.environ["W40K_BOARD_PATH"]
-        elif requested_mode == "pvp":
-            print("DEBUG: Initializing engine for PvP mode")
-            initialize_engine(scenario_file=scenario_file)
-        elif requested_mode == "pve":
-            print("DEBUG: Initializing engine for PvE mode (copied from Test mode)")
-            initialize_test_engine(
-                scenario_file=scenario_file,
-                forced_agent_key="CoreAgent",
-            )
-        elif requested_mode == "pve_test":
-            print("DEBUG: Initializing engine for PvE Test mode")
-            if board_path is None:
-                from config_loader import get_config_loader as _gcl
-                _cfg = _gcl().load_config("config", force_reload=False)
-                board_path = _cfg.get("defaults", {}).get("test_board", "x5")
-            scenario_file = os.path.join("config", BOARD_PATH_MAP[board_path], "scenario", "scenario_pve_test.json")
-            _prev_board = os.environ.get("W40K_BOARD_PATH")
-            os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
-            try:
-                initialize_test_engine(
-                    scenario_file=scenario_file,
-                    forced_agent_key="CoreAgent",
-                )
-            finally:
-                if _prev_board is not None:
-                    os.environ["W40K_BOARD_PATH"] = _prev_board
-                elif "W40K_BOARD_PATH" in os.environ:
-                    del os.environ["W40K_BOARD_PATH"]
-        elif requested_mode == ED_MODE_CODE:
-            print("DEBUG: Initializing engine for Endless Duty mode")
-            if scenario_file is None:
-                scenario_file = ED_SCENARIO_DEFAULT
-            initialize_test_engine(
-                scenario_file=scenario_file,
-                forced_agent_key="CoreAgent",
-            )
-        else:
-            print("DEBUG: Initializing engine for PvP mode")
-            initialize_engine(scenario_file=scenario_file)
-
-        assert engine is not None
-
-        # HTTP session: requested_mode is the source of truth for PvE vs PvP (aligns engine with client).
-        if requested_mode in ("pve", "pve_test", ED_MODE_CODE):
-            engine.is_pve_mode = True
-            engine.config["pve_mode"] = True
-        elif requested_mode in ("pvp", "pvp_test"):
-            engine.is_pve_mode = False
-            engine.config["pve_mode"] = False
-        else:
-            raise ValueError(f"Unhandled requested_mode: {requested_mode!r}")
-
-        engine.current_mode_code = requested_mode
-        engine.game_state["current_mode_code"] = requested_mode
-        
-        print("DEBUG: About to call engine.reset()")
-        # Reset the engine for new game
+            if _prev_board is not None:
+                os.environ["W40K_BOARD_PATH"] = _prev_board
+            elif "W40K_BOARD_PATH" in os.environ:
+                del os.environ["W40K_BOARD_PATH"]
+    elif requested_mode == "pvp":
+        print("DEBUG: Initializing engine for PvP mode")
+        initialize_engine(scenario_file=scenario_file)
+    elif requested_mode == "pve":
+        print("DEBUG: Initializing engine for PvE mode (copied from Test mode)")
+        initialize_test_engine(
+            scenario_file=scenario_file,
+            forced_agent_key="CoreAgent",
+        )
+    elif requested_mode == "pve_test":
+        print("DEBUG: Initializing engine for PvE Test mode")
+        if board_path is None:
+            from config_loader import get_config_loader as _gcl
+            _cfg = _gcl().load_config("config", force_reload=False)
+            board_path = _cfg.get("defaults", {}).get("test_board", "x5")
+        scenario_file = os.path.join("config", BOARD_PATH_MAP[board_path], "scenario", "scenario_pve_test.json")
+        _prev_board = os.environ.get("W40K_BOARD_PATH")
+        os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
         try:
-            obs, info = engine.reset()
-        except Exception as reset_error:
-            print(f"CRITICAL ERROR in engine.reset(): {reset_error}")
-            print(f"ERROR TYPE: {type(reset_error).__name__}")
-            import traceback
-            print(f"FULL TRACEBACK:\n{traceback.format_exc()}")
-            raise
-        print("DEBUG: engine.reset() completed successfully")
-
-        if requested_mode == ED_MODE_CODE:
-            project_root = Path(abs_parent)
-            assert scenario_file is not None
-            initialize_endless_duty_state(
-                engine_instance=engine,
-                project_root=project_root,
+            initialize_test_engine(
                 scenario_file=scenario_file,
+                forced_agent_key="CoreAgent",
             )
-            # Endless Duty spawns tyranids after reset; reload micro models now that player-2 units exist.
-            if bool(getattr(engine, "is_pve_mode", False)):
-                engine.pve_controller.load_ai_model_for_pve(engine.game_state, engine)
+        finally:
+            if _prev_board is not None:
+                os.environ["W40K_BOARD_PATH"] = _prev_board
+            elif "W40K_BOARD_PATH" in os.environ:
+                del os.environ["W40K_BOARD_PATH"]
+    elif requested_mode == ED_MODE_CODE:
+        print("DEBUG: Initializing engine for Endless Duty mode")
+        if scenario_file is None:
+            scenario_file = ED_SCENARIO_DEFAULT
+        initialize_test_engine(
+            scenario_file=scenario_file,
+            forced_agent_key="CoreAgent",
+        )
+    else:
+        print("DEBUG: Initializing engine for PvP mode")
+        initialize_engine(scenario_file=scenario_file)
 
-        # Tutoriel : conserver les positions des unités P1 depuis l’état précédent (ex. Intercessor après 1-25)
-        preserve_p1 = data.get("preserve_p1_positions_from")
-        if isinstance(preserve_p1, dict) and preserve_p1.get("units"):
-            prev_units = preserve_p1["units"]
-            p1_positions = {}
-            for u in prev_units:
-                if int(u.get("player", 0)) != 1:
-                    continue
-                uid = u.get("id")
-                if uid is None:
-                    continue
-                col, row = u.get("col"), u.get("row")
-                if col is not None and row is not None:
-                    p1_positions[str(uid)] = (col, row)
-            if p1_positions:
-                for unit in engine.game_state["units"]:
-                    if int(unit.get("player", 0)) != 1:
-                        continue
-                    uid_str = str(unit["id"])
-                    if uid_str in p1_positions:
-                        set_unit_coordinates(unit, p1_positions[uid_str][0], p1_positions[uid_str][1])
-                build_units_cache(engine.game_state)
-                rebuild_choice_timing_index(engine.game_state)
-                uc = engine.game_state["units_cache"]
-                engine.game_state["units_cache_prev"] = {
-                    uid: {"col": d["col"], "row": d["row"], "HP_CUR": d["HP_CUR"], "player": d["player"]}
-                    for uid, d in uc.items()
-                }
+    assert engine is not None
 
-            # Tutoriel 1-25→2 : avancer au début du T1 de P2 (fin du T1 de P1 simulée)
-            # Les Hormagaunts bougeront pendant la phase move du T1 de P2
-            # Déploiement selon les positions du scenario (ex. scenario_etape2.json)
-            gs = engine.game_state
-            scenario_file = data.get("scenario_file")
-            p2_positions_from_scenario = {}
-            if isinstance(scenario_file, str) and scenario_file.strip():
-                scenario_path = os.path.join(abs_parent, scenario_file.strip())
-                if os.path.exists(scenario_path):
-                    try:
-                        with open(scenario_path, "r", encoding="utf-8") as f:
-                            scenario_data = json.load(f)
-                        for u in scenario_data.get("units", []):
-                            if int(u.get("player", 0)) != 2:
-                                continue
-                            uid = u.get("id")
-                            if uid is None:
-                                continue
-                            col, row = u.get("col"), u.get("row")
-                            if col is not None and row is not None:
-                                p2_positions_from_scenario[str(uid)] = (int(col), int(row))
-                    except (json.JSONDecodeError, OSError):
-                        pass
-            while gs.get("phase") == "deployment":
-                dep_state = gs.get("deployment_state")
-                if not dep_state:
-                    break
-                deployer = int(dep_state.get("current_deployer", 2))
-                deployable = dep_state.get("deployable_units", {})
-                pool_ids = deployable.get(deployer, deployable.get(str(deployer), []))
-                if not pool_ids:
-                    break
-                unit_id = str(pool_ids[0])
-                dest = None
-                if unit_id in p2_positions_from_scenario:
-                    dest = p2_positions_from_scenario[unit_id]
-                if dest is None:
-                    pools = dep_state.get("deployment_pools", {})
-                    hex_pool = pools.get(deployer, pools.get(str(deployer), []))
-                    if not hex_pool:
-                        break
-                    occupied = {(int(u.get("col", -2)), int(u.get("row", -2))) for u in gs.get("units", [])
-                                if u.get("col") is not None and u.get("row") is not None}
-                    for h in hex_pool:
-                        if isinstance(h, (list, tuple)) and len(h) >= 2:
-                            c, r = int(h[0]), int(h[1])
-                        elif isinstance(h, dict) and "col" in h and "row" in h:
-                            c, r = int(h["col"]), int(h["row"])
-                        else:
-                            continue
-                        if (c, r) not in occupied:
-                            dest = (c, r)
-                            break
-                if dest is None:
-                    break
-                action = {"action": "deploy_unit", "unitId": unit_id, "destCol": dest[0], "destRow": dest[1]}
-                ok, res = deployment_handlers.execute_deployment_action(gs, action)
-                if not ok:
-                    break
-                if res.get("phase_complete"):
-                    command_handlers.command_phase_start(gs)
-                    movement_handlers.movement_phase_start(gs)
-                    break
-            gs["current_player"] = 2
-            gs["turn"] = 1
-            command_handlers.command_phase_start(gs)
-            movement_handlers.movement_phase_start(gs)
+    # HTTP session: requested_mode is the source of truth for PvE vs PvP (aligns engine with client).
+    if requested_mode in ("pve", "pve_test", ED_MODE_CODE):
+        engine.is_pve_mode = True
+        engine.config["pve_mode"] = True
+    elif requested_mode in ("pvp", "pvp_test"):
+        engine.is_pve_mode = False
+        engine.config["pve_mode"] = False
+    else:
+        raise ValueError(f"Unhandled requested_mode: {requested_mode!r}")
 
-        # Convert game state to JSON-serializable format
-        serializable_state = _game_state_for_json(engine)
-        _sync_units_hp_from_cache(serializable_state, engine.game_state)
-        _attach_player_types(serializable_state, engine)
-
-        # Add max_turns from game config
-        from config_loader import get_config_loader
-        config = get_config_loader()
-        serializable_state["max_turns"] = config.get_max_turns()
-
-        # Add mode flags to response
-        serializable_state["pve_mode"] = getattr(engine, 'is_pve_mode', False)
-
-        mode_labels = {
-            "pvp": "PvP",
-            "pvp_test": "PvP Test",
-            "pve_test": "PvE Test",
-            "pve": "PvE",
-            ED_MODE_CODE: "Endless Duty",
-        }
-        mode_label = mode_labels.get(requested_mode)
-        if mode_label is None:
-            raise ValueError(f"Unsupported requested_mode '{requested_mode}'")
-        return api_json_response({
-            "success": True,
-            "game_state": serializable_state,
-            "message": f"Game started successfully ({mode_label} mode)",
-        })
-    
-    except Exception:
+    engine.current_mode_code = requested_mode
+    engine.game_state["current_mode_code"] = requested_mode
+        
+    print("DEBUG: About to call engine.reset()")
+    # Reset the engine for new game
+    try:
+        obs, info = engine.reset()
+    except Exception as reset_error:
+        print(f"CRITICAL ERROR in engine.reset(): {reset_error}")
+        print(f"ERROR TYPE: {type(reset_error).__name__}")
+        import traceback
+        print(f"FULL TRACEBACK:\n{traceback.format_exc()}")
         raise
+    print("DEBUG: engine.reset() completed successfully")
+
+    if requested_mode == ED_MODE_CODE:
+        project_root = Path(abs_parent)
+        assert scenario_file is not None
+        initialize_endless_duty_state(
+            engine_instance=engine,
+            project_root=project_root,
+            scenario_file=scenario_file,
+        )
+        # Endless Duty spawns tyranids after reset; reload micro models now that player-2 units exist.
+        if bool(getattr(engine, "is_pve_mode", False)):
+            engine.pve_controller.load_ai_model_for_pve(engine.game_state, engine)
+
+    # Tutoriel : conserver les positions des unités P1 depuis l’état précédent (ex. Intercessor après 1-25)
+    preserve_p1 = data.get("preserve_p1_positions_from")
+    if isinstance(preserve_p1, dict) and preserve_p1.get("units"):
+        prev_units = preserve_p1["units"]
+        p1_positions = {}
+        for u in prev_units:
+            if int(u.get("player", 0)) != 1:
+                continue
+            uid = u.get("id")
+            if uid is None:
+                continue
+            col, row = u.get("col"), u.get("row")
+            if col is not None and row is not None:
+                p1_positions[str(uid)] = (col, row)
+        if p1_positions:
+            for unit in engine.game_state["units"]:
+                if int(unit.get("player", 0)) != 1:
+                    continue
+                uid_str = str(unit["id"])
+                if uid_str in p1_positions:
+                    set_unit_coordinates(unit, p1_positions[uid_str][0], p1_positions[uid_str][1])
+            build_units_cache(engine.game_state)
+            rebuild_choice_timing_index(engine.game_state)
+            uc = engine.game_state["units_cache"]
+            engine.game_state["units_cache_prev"] = {
+                uid: {"col": d["col"], "row": d["row"], "HP_CUR": d["HP_CUR"], "player": d["player"]}
+                for uid, d in uc.items()
+            }
+
+        # Tutoriel 1-25→2 : avancer au début du T1 de P2 (fin du T1 de P1 simulée)
+        # Les Hormagaunts bougeront pendant la phase move du T1 de P2
+        # Déploiement selon les positions du scenario (ex. scenario_etape2.json)
+        gs = engine.game_state
+        scenario_file = data.get("scenario_file")
+        p2_positions_from_scenario = {}
+        if isinstance(scenario_file, str) and scenario_file.strip():
+            scenario_path = os.path.join(abs_parent, scenario_file.strip())
+            if os.path.exists(scenario_path):
+                try:
+                    with open(scenario_path, "r", encoding="utf-8") as f:
+                        scenario_data = json.load(f)
+                    for u in scenario_data.get("units", []):
+                        if int(u.get("player", 0)) != 2:
+                            continue
+                        uid = u.get("id")
+                        if uid is None:
+                            continue
+                        col, row = u.get("col"), u.get("row")
+                        if col is not None and row is not None:
+                            p2_positions_from_scenario[str(uid)] = (int(col), int(row))
+                except (json.JSONDecodeError, OSError):
+                    pass
+        while gs.get("phase") == "deployment":
+            dep_state = gs.get("deployment_state")
+            if not dep_state:
+                break
+            deployer = int(dep_state.get("current_deployer", 2))
+            deployable = dep_state.get("deployable_units", {})
+            pool_ids = deployable.get(deployer, deployable.get(str(deployer), []))
+            if not pool_ids:
+                break
+            unit_id = str(pool_ids[0])
+            dest = None
+            if unit_id in p2_positions_from_scenario:
+                dest = p2_positions_from_scenario[unit_id]
+            if dest is None:
+                pools = dep_state.get("deployment_pools", {})
+                hex_pool = pools.get(deployer, pools.get(str(deployer), []))
+                if not hex_pool:
+                    break
+                occupied = {(int(u.get("col", -2)), int(u.get("row", -2))) for u in gs.get("units", [])
+                            if u.get("col") is not None and u.get("row") is not None}
+                for h in hex_pool:
+                    if isinstance(h, (list, tuple)) and len(h) >= 2:
+                        c, r = int(h[0]), int(h[1])
+                    elif isinstance(h, dict) and "col" in h and "row" in h:
+                        c, r = int(h["col"]), int(h["row"])
+                    else:
+                        continue
+                    if (c, r) not in occupied:
+                        dest = (c, r)
+                        break
+            if dest is None:
+                break
+            action = {"action": "deploy_unit", "unitId": unit_id, "destCol": dest[0], "destRow": dest[1]}
+            ok, res = deployment_handlers.execute_deployment_action(gs, action)
+            if not ok:
+                break
+            if res.get("phase_complete"):
+                command_handlers.command_phase_start(gs)
+                movement_handlers.movement_phase_start(gs)
+                break
+        gs["current_player"] = 2
+        gs["turn"] = 1
+        command_handlers.command_phase_start(gs)
+        movement_handlers.movement_phase_start(gs)
+
+    # Convert game state to JSON-serializable format
+    serializable_state = _game_state_for_json(engine)
+    _sync_units_hp_from_cache(serializable_state, engine.game_state)
+    _attach_player_types(serializable_state, engine)
+
+    # Add max_turns from game config
+    from config_loader import get_config_loader
+    config = get_config_loader()
+    serializable_state["max_turns"] = config.get_max_turns()
+
+    # Add mode flags to response
+    serializable_state["pve_mode"] = getattr(engine, 'is_pve_mode', False)
+
+    mode_labels = {
+        "pvp": "PvP",
+        "pvp_test": "PvP Test",
+        "pve_test": "PvE Test",
+        "pve": "PvE",
+        ED_MODE_CODE: "Endless Duty",
+    }
+    mode_label = mode_labels.get(requested_mode)
+    if mode_label is None:
+        raise ValueError(f"Unsupported requested_mode '{requested_mode}'")
+    return api_json_response({
+        "success": True,
+        "game_state": serializable_state,
+        "message": f"Game started successfully ({mode_label} mode)",
+    })
 
 @app.route('/api/game/action', methods=['POST'])
 @with_engine_state_lock
@@ -1948,245 +1944,241 @@ def execute_action():
             "error_code": "game_not_started_call_start_first",
         }), 400
     
-    try:
-        data = request.json
-        if not data:
-            return jsonify({"success": False, "error": "No JSON data provided"}), 400
-        mask_loops_client_hash = _extract_mask_loops_client_hash_from_request_data(data)
+    data = request.json
+    if not data:
+        return jsonify({"success": False, "error": "No JSON data provided"}), 400
+    mask_loops_client_hash = _extract_mask_loops_client_hash_from_request_data(data)
 
-        # Convert frontend hex click to engine semantic action format
-        if "col" in data and "row" in data and "selectedUnitId" in data:
-            action = {
-                "action": "move",
-                "unitId": str(data["selectedUnitId"]),
-                "destCol": data["col"],
-                "destRow": data["row"]
-            }
-        else:
-            action = data  # Pass through already formatted actions
-        
-        if not action:
-            return jsonify({"success": False, "error": "No action provided"}), 400
-
-        success = None
-        result = None
-        endless_mode_active = is_endless_duty_mode(engine)
-        if endless_mode_active:
-            ed_state = require_key(engine.game_state, "endless_duty_state")
-            inter_wave_pending = bool(require_key(ed_state, "inter_wave_pending"))
-            action_name = action.get("action")
-            if action_name == "endless_duty_status":
-                serializable_state = _game_state_for_json(
-                    engine,
-                    for_post_action=True,
-                    mask_loops_client_hash=mask_loops_client_hash,
-                )
-                _sync_units_hp_from_cache(serializable_state, engine.game_state)
-                _attach_player_types(serializable_state, engine)
-                return api_json_response(
-                    {
-                        "success": True,
-                        "result": {"action": "endless_duty_status"},
-                        "game_state": serializable_state,
-                        "endless_duty_state": require_key(engine.game_state, "endless_duty_state"),
-                    }
-                )
-            if action_name == "endless_duty_commit":
-                success, result = commit_inter_wave_requisition(engine, action)
-            else:
-                if inter_wave_pending:
-                    return jsonify(
-                        {
-                            "success": False,
-                            "error": "inter_wave_pending_commit_required",
-                            "hint": "Use action=endless_duty_commit before continuing combat",
-                        }
-                    ), 400
-                # Read-only preview remains allowed during combat phase.
-                success = None
-                result = None
-
-        # Read-only: BFS des hexes atteignables pour UNE figurine (move par-figurine).
-        if action.get("action") == "move_model_destinations":
-            model_id = action.get("model_id")
-            if model_id is None:
-                return jsonify({
-                    "success": False,
-                    "error": "move_model_destinations requires model_id",
-                }), 400
-            from engine.phase_handlers import movement_handlers as _mh_model
-            pool = _mh_model.movement_build_model_destinations_pool(
-                engine.game_state, str(model_id)
-            )
-            return api_json_response({
-                "success": True,
-                "result": {
-                    "action": "move_model_destinations",
-                    "model_id": str(model_id),
-                    "destinations": [[int(c), int(r)] for c, r in pool],
-                },
-            })
-
-        # Read-only: dry-run d'un plan provisoire par-figurine (rouge/vert + cohesion + can_validate).
-        if action.get("action") == "preview_move_plan":
-            squad_id = action.get("unitId")
-            plan = action.get("plan")
-            if squad_id is None or not isinstance(plan, list):
-                return jsonify({
-                    "success": False,
-                    "error": "preview_move_plan requires unitId and plan (list of [model_id, col, row])",
-                }), 400
-            parsed_plan = [(str(e[0]), int(e[1]), int(e[2])) for e in plan]
-            from engine.phase_handlers import movement_handlers as _mh_plan
-            preview = _mh_plan.movement_preview_move_plan(
-                engine.game_state, str(squad_id), parsed_plan
-            )
-            return api_json_response({
-                "success": True,
-                "result": {
-                    "action": "preview_move_plan",
-                    "unitId": str(squad_id),
-                    **preview,
-                },
-            })
-
-        # Read-only preview: valid shoot targets from hypothetical position (move/advance phase preview)
-        if action.get("action") == "preview_shoot_from_position":
-            unit_id = action.get("unitId")
-            dest_col = action.get("destCol")
-            dest_row = action.get("destRow")
-            advance_position = action.get("advancePosition") is True
-            include_los_cells = action.get("includeLosCells") is not False
-            if unit_id is None or dest_col is None or dest_row is None:
-                return jsonify({
-                    "success": False,
-                    "error": "preview_shoot_from_position requires unitId, destCol, destRow",
-                }), 400
-            from engine.phase_handlers.shooting_handlers import preview_shoot_valid_targets_from_position
-            preview_payload = preview_shoot_valid_targets_from_position(
-                engine.game_state, str(unit_id), int(dest_col), int(dest_row),
-                advance_position=advance_position,
-                include_los_cells=include_los_cells,
-            )
-            valid_targets = preview_payload["valid_targets"]
-            return jsonify({
-                "success": True,
-                "result": {
-                    "blinking_units": valid_targets,
-                    "start_blinking": len(valid_targets) > 0,
-                    "los_preview_attack_cells": preview_payload["los_preview_attack_cells"],
-                    "los_preview_cover_cells": preview_payload["los_preview_cover_cells"],
-                    "los_preview_ratio_by_hex": preview_payload["los_preview_ratio_by_hex"],
-                    "cover_by_unit_id": preview_payload["cover_by_unit_id"],
-                },
-            })
-
-        # Route ALL actions through engine consistently
-        if success is None:
-            from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
-
-            _api_perf = perf_timing_enabled(engine.game_state)
-            _api_t0 = time.perf_counter() if _api_perf else None
-            if action.get("action") == "end_phase":
-                success, result = _execute_end_phase_action(engine, action)
-            elif action.get("action") == "change_roster":
-                success, result = _execute_change_roster_action(engine, action)
-            else:
-                success, result = engine.execute_semantic_action(action)
-            _api_t1 = time.perf_counter() if _api_perf else None
-        else:
-            _api_perf = False
-            _api_t0 = None
-            _api_t1 = None
-
-        if success and endless_mode_active and action.get("action") != "endless_duty_status":
-            ed_post = handle_endless_duty_post_action(engine)
-            if isinstance(result, dict):
-                result["endless_duty"] = ed_post
-
-        # Convert game state to JSON-serializable format
-        _ser_t0 = time.perf_counter() if _api_perf else None
-        serializable_state = _game_state_for_json(
-            engine,
-            for_post_action=True,
-            mask_loops_client_hash=mask_loops_client_hash,
-        )
-        _sync_units_hp_from_cache(serializable_state, engine.game_state)
-        _attach_player_types(serializable_state, engine)
-        _ser_t1 = time.perf_counter() if _api_perf else None
-
-        # WEAPON_SELECTION: Copy available_weapons from result to active unit in game_state
-        # AI_TURN.md: After advance, _shooting_unit_execution_loop returns available_weapons
-        # Use active_shooting_unit from game_state (not shooterId from result which doesn't exist)
-        if result and isinstance(result, dict) and "available_weapons" in result:
-            active_unit_id = engine.game_state.get("active_shooting_unit")
-            if active_unit_id and "units" in serializable_state:
-                for unit in serializable_state["units"]:
-                    if str(unit.get("id")) == str(active_unit_id):
-                        unit["available_weapons"] = result["available_weapons"]
-                        break
-        # Extract and send detailed action logs to frontend
-        action_logs = serializable_state.get("action_logs", [])
-        # CRITICAL: Always clear logs after each AI turn to prevent accumulation
-        engine.game_state["action_logs"] = []
-        serializable_state["action_logs"] = []
-
-        _j0 = time.perf_counter() if _api_perf else None
-        _response_payload = {
-            "success": success,
-            "result": _slim_execute_action_result_for_api(result, action),
-            "game_state": serializable_state,
-            "action_logs": action_logs,
-            "endless_duty_state": (
-                require_key(engine.game_state, "endless_duty_state")
-                if endless_mode_active
-                else None
-            ),
-            "message": "Action executed successfully" if success else "Action failed",
+    # Convert frontend hex click to engine semantic action format
+    if "col" in data and "row" in data and "selectedUnitId" in data:
+        action = {
+            "action": "move",
+            "unitId": str(data["selectedUnitId"]),
+            "destCol": data["col"],
+            "destRow": data["row"]
         }
-        if _api_perf:
-            resp, _payload_bytes = api_json_response_with_size(_response_payload)
+    else:
+        action = data  # Pass through already formatted actions
+        
+    if not action:
+        return jsonify({"success": False, "error": "No action provided"}), 400
+
+    success = None
+    result = None
+    endless_mode_active = is_endless_duty_mode(engine)
+    if endless_mode_active:
+        ed_state = require_key(engine.game_state, "endless_duty_state")
+        inter_wave_pending = bool(require_key(ed_state, "inter_wave_pending"))
+        action_name = action.get("action")
+        if action_name == "endless_duty_status":
+            serializable_state = _game_state_for_json(
+                engine,
+                for_post_action=True,
+                mask_loops_client_hash=mask_loops_client_hash,
+            )
+            _sync_units_hp_from_cache(serializable_state, engine.game_state)
+            _attach_player_types(serializable_state, engine)
+            return api_json_response(
+                {
+                    "success": True,
+                    "result": {"action": "endless_duty_status"},
+                    "game_state": serializable_state,
+                    "endless_duty_state": require_key(engine.game_state, "endless_duty_state"),
+                }
+            )
+        if action_name == "endless_duty_commit":
+            success, result = commit_inter_wave_requisition(engine, action)
         else:
-            _payload_bytes = None
-            resp = api_json_response(_response_payload)
-        _j1 = time.perf_counter() if _api_perf else None
-        if _payload_breakdown_enabled():
-            _log_payload_breakdown(
-                _response_payload,
-                action.get("action") if isinstance(action, dict) else None,
-            )
-        if _api_perf and _api_t0 is not None and _api_t1 is not None and _ser_t0 is not None and _ser_t1 is not None and _j0 is not None and _j1 is not None:
-            from engine.perf_timing import append_perf_timing_line
+            if inter_wave_pending:
+                return jsonify(
+                    {
+                        "success": False,
+                        "error": "inter_wave_pending_commit_required",
+                        "hint": "Use action=endless_duty_commit before continuing combat",
+                    }
+                ), 400
+            # Read-only preview remains allowed during combat phase.
+            success = None
+            result = None
 
-            gs = engine.game_state
-            ep = gs.get("episode_number", "?")
-            trn = gs.get("turn", "?")
-            ph = gs.get("phase", "?")
-            act = action.get("action") if isinstance(action, dict) else None
-            append_perf_timing_line(
-                f"API_POST_ACTION episode={ep} turn={trn} phase={ph} action={act!r} "
-                f"engine_s={_api_t1 - _api_t0:.6f} serialize_game_state_s={_ser_t1 - _ser_t0:.6f} "
-                f"response_encode_s={_j1 - _j0:.6f} total_wall_s={_j1 - _api_t0:.6f} "
-                f"payload_bytes={_payload_bytes if _payload_bytes is not None else -1}"
-            )
-            # Découpe visible dans l’onglet Network (Timing) et lisible en JS si CORS expose_headers.
-            engine_ms = (_api_t1 - _api_t0) * 1000.0
-            ser_ms = (_ser_t1 - _ser_t0) * 1000.0
-            enc_ms = (_j1 - _j0) * 1000.0
-            total_ms = (_j1 - _api_t0) * 1000.0
-            pb = _payload_bytes if _payload_bytes is not None else -1
-            resp.headers["Server-Timing"] = (
-                f"engine;dur={engine_ms:.3f}, "
-                f"serialize;dur={ser_ms:.3f}, "
-                f"json_encode;dur={enc_ms:.3f}, "
-                f"post_action_wall;dur={total_ms:.3f}"
-            )
-            resp.headers["X-W40k-Payload-Bytes"] = str(int(pb))
+    # Read-only: BFS des hexes atteignables pour UNE figurine (move par-figurine).
+    if action.get("action") == "move_model_destinations":
+        model_id = action.get("model_id")
+        if model_id is None:
+            return jsonify({
+                "success": False,
+                "error": "move_model_destinations requires model_id",
+            }), 400
+        from engine.phase_handlers import movement_handlers as _mh_model
+        pool = _mh_model.movement_build_model_destinations_pool(
+            engine.game_state, str(model_id)
+        )
+        return api_json_response({
+            "success": True,
+            "result": {
+                "action": "move_model_destinations",
+                "model_id": str(model_id),
+                "destinations": [[int(c), int(r)] for c, r in pool],
+            },
+        })
 
-        return resp
-    
-    except Exception:
-        raise
+    # Read-only: dry-run d'un plan provisoire par-figurine (rouge/vert + cohesion + can_validate).
+    if action.get("action") == "preview_move_plan":
+        squad_id = action.get("unitId")
+        plan = action.get("plan")
+        if squad_id is None or not isinstance(plan, list):
+            return jsonify({
+                "success": False,
+                "error": "preview_move_plan requires unitId and plan (list of [model_id, col, row])",
+            }), 400
+        parsed_plan = [(str(e[0]), int(e[1]), int(e[2])) for e in plan]
+        from engine.phase_handlers import movement_handlers as _mh_plan
+        preview = _mh_plan.movement_preview_move_plan(
+            engine.game_state, str(squad_id), parsed_plan
+        )
+        return api_json_response({
+            "success": True,
+            "result": {
+                "action": "preview_move_plan",
+                "unitId": str(squad_id),
+                **preview,
+            },
+        })
+
+    # Read-only preview: valid shoot targets from hypothetical position (move/advance phase preview)
+    if action.get("action") == "preview_shoot_from_position":
+        unit_id = action.get("unitId")
+        dest_col = action.get("destCol")
+        dest_row = action.get("destRow")
+        advance_position = action.get("advancePosition") is True
+        include_los_cells = action.get("includeLosCells") is not False
+        if unit_id is None or dest_col is None or dest_row is None:
+            return jsonify({
+                "success": False,
+                "error": "preview_shoot_from_position requires unitId, destCol, destRow",
+            }), 400
+        from engine.phase_handlers.shooting_handlers import preview_shoot_valid_targets_from_position
+        preview_payload = preview_shoot_valid_targets_from_position(
+            engine.game_state, str(unit_id), int(dest_col), int(dest_row),
+            advance_position=advance_position,
+            include_los_cells=include_los_cells,
+        )
+        valid_targets = preview_payload["valid_targets"]
+        return jsonify({
+            "success": True,
+            "result": {
+                "blinking_units": valid_targets,
+                "start_blinking": len(valid_targets) > 0,
+                "los_preview_attack_cells": preview_payload["los_preview_attack_cells"],
+                "los_preview_cover_cells": preview_payload["los_preview_cover_cells"],
+                "los_preview_ratio_by_hex": preview_payload["los_preview_ratio_by_hex"],
+                "cover_by_unit_id": preview_payload["cover_by_unit_id"],
+            },
+        })
+
+    # Route ALL actions through engine consistently
+    if success is None:
+        from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+        _api_perf = perf_timing_enabled(engine.game_state)
+        _api_t0 = time.perf_counter() if _api_perf else None
+        if action.get("action") == "end_phase":
+            success, result = _execute_end_phase_action(engine, action)
+        elif action.get("action") == "change_roster":
+            success, result = _execute_change_roster_action(engine, action)
+        else:
+            success, result = engine.execute_semantic_action(action)
+        _api_t1 = time.perf_counter() if _api_perf else None
+    else:
+        _api_perf = False
+        _api_t0 = None
+        _api_t1 = None
+
+    if success and endless_mode_active and action.get("action") != "endless_duty_status":
+        ed_post = handle_endless_duty_post_action(engine)
+        if isinstance(result, dict):
+            result["endless_duty"] = ed_post
+
+    # Convert game state to JSON-serializable format
+    _ser_t0 = time.perf_counter() if _api_perf else None
+    serializable_state = _game_state_for_json(
+        engine,
+        for_post_action=True,
+        mask_loops_client_hash=mask_loops_client_hash,
+    )
+    _sync_units_hp_from_cache(serializable_state, engine.game_state)
+    _attach_player_types(serializable_state, engine)
+    _ser_t1 = time.perf_counter() if _api_perf else None
+
+    # WEAPON_SELECTION: Copy available_weapons from result to active unit in game_state
+    # AI_TURN.md: After advance, _shooting_unit_execution_loop returns available_weapons
+    # Use active_shooting_unit from game_state (not shooterId from result which doesn't exist)
+    if result and isinstance(result, dict) and "available_weapons" in result:
+        active_unit_id = engine.game_state.get("active_shooting_unit")
+        if active_unit_id and "units" in serializable_state:
+            for unit in serializable_state["units"]:
+                if str(unit.get("id")) == str(active_unit_id):
+                    unit["available_weapons"] = result["available_weapons"]
+                    break
+    # Extract and send detailed action logs to frontend
+    action_logs = serializable_state.get("action_logs", [])
+    # CRITICAL: Always clear logs after each AI turn to prevent accumulation
+    engine.game_state["action_logs"] = []
+    serializable_state["action_logs"] = []
+
+    _j0 = time.perf_counter() if _api_perf else None
+    _response_payload = {
+        "success": success,
+        "result": _slim_execute_action_result_for_api(result, action),
+        "game_state": serializable_state,
+        "action_logs": action_logs,
+        "endless_duty_state": (
+            require_key(engine.game_state, "endless_duty_state")
+            if endless_mode_active
+            else None
+        ),
+        "message": "Action executed successfully" if success else "Action failed",
+    }
+    if _api_perf:
+        resp, _payload_bytes = api_json_response_with_size(_response_payload)
+    else:
+        _payload_bytes = None
+        resp = api_json_response(_response_payload)
+    _j1 = time.perf_counter() if _api_perf else None
+    if _payload_breakdown_enabled():
+        _log_payload_breakdown(
+            _response_payload,
+            action.get("action") if isinstance(action, dict) else None,
+        )
+    if _api_perf and _api_t0 is not None and _api_t1 is not None and _ser_t0 is not None and _ser_t1 is not None and _j0 is not None and _j1 is not None:
+        from engine.perf_timing import append_perf_timing_line
+
+        gs = engine.game_state
+        ep = gs.get("episode_number", "?")
+        trn = gs.get("turn", "?")
+        ph = gs.get("phase", "?")
+        act = action.get("action") if isinstance(action, dict) else None
+        append_perf_timing_line(
+            f"API_POST_ACTION episode={ep} turn={trn} phase={ph} action={act!r} "
+            f"engine_s={_api_t1 - _api_t0:.6f} serialize_game_state_s={_ser_t1 - _ser_t0:.6f} "
+            f"response_encode_s={_j1 - _j0:.6f} total_wall_s={_j1 - _api_t0:.6f} "
+            f"payload_bytes={_payload_bytes if _payload_bytes is not None else -1}"
+        )
+        # Découpe visible dans l’onglet Network (Timing) et lisible en JS si CORS expose_headers.
+        engine_ms = (_api_t1 - _api_t0) * 1000.0
+        ser_ms = (_ser_t1 - _ser_t0) * 1000.0
+        enc_ms = (_j1 - _j0) * 1000.0
+        total_ms = (_j1 - _api_t0) * 1000.0
+        pb = _payload_bytes if _payload_bytes is not None else -1
+        resp.headers["Server-Timing"] = (
+            f"engine;dur={engine_ms:.3f}, "
+            f"serialize;dur={ser_ms:.3f}, "
+            f"json_encode;dur={enc_ms:.3f}, "
+            f"post_action_wall;dur={total_ms:.3f}"
+        )
+        resp.headers["X-W40k-Payload-Bytes"] = str(int(pb))
+
+    return resp
 
 
 def _get_activation_pool_key_for_phase(phase: str) -> str:
@@ -2896,125 +2888,121 @@ def execute_ai_turn():
     if not engine:
         return jsonify({"success": False, "error": "Engine not initialized"}), 400
     
-    try:
-        endless_mode_active = is_endless_duty_mode(engine)
-        if endless_mode_active:
-            ed_state = require_key(engine.game_state, "endless_duty_state")
-            if bool(require_key(ed_state, "inter_wave_pending")):
-                serializable_state = _game_state_for_json(engine, for_post_action=True)
-                _sync_units_hp_from_cache(serializable_state, engine.game_state)
-                _attach_player_types(serializable_state, engine)
-                return api_json_response(
-                    {
-                        "success": True,
-                        "result": {"action": "ai_turn_skipped", "reason": "inter_wave_pending"},
-                        "game_state": serializable_state,
-                        "action_logs": [],
-                        "endless_duty_state": ed_state,
-                    }
-                )
+    endless_mode_active = is_endless_duty_mode(engine)
+    if endless_mode_active:
+        ed_state = require_key(engine.game_state, "endless_duty_state")
+        if bool(require_key(ed_state, "inter_wave_pending")):
+            serializable_state = _game_state_for_json(engine, for_post_action=True)
+            _sync_units_hp_from_cache(serializable_state, engine.game_state)
+            _attach_player_types(serializable_state, engine)
+            return api_json_response(
+                {
+                    "success": True,
+                    "result": {"action": "ai_turn_skipped", "reason": "inter_wave_pending"},
+                    "game_state": serializable_state,
+                    "action_logs": [],
+                    "endless_duty_state": ed_state,
+                }
+            )
 
-        # Debug: Check engine state before AI turn (conditional on debug mode)
-        debug_mode = os.environ.get('W40K_DEBUG', 'false').lower() == 'true'
+    # Debug: Check engine state before AI turn (conditional on debug mode)
+    debug_mode = os.environ.get('W40K_DEBUG', 'false').lower() == 'true'
         
-        if debug_mode:
-            print(f"DEBUG AI_TURN: AI model loaded = {hasattr(engine.pve_controller, 'ai_model') and engine.pve_controller.ai_model is not None}")
+    if debug_mode:
+        print(f"DEBUG AI_TURN: AI model loaded = {hasattr(engine.pve_controller, 'ai_model') and engine.pve_controller.ai_model is not None}")
         
-        success, result = engine.execute_ai_turn()
+    success, result = engine.execute_ai_turn()
         
-        if debug_mode:
-            print(f"DEBUG AI_TURN: execute_ai_turn returned success={success}, result={result}")
-            print(f"DEBUG AI_TURN: current_phase={engine.game_state.get('phase')}, current_player={engine.game_state.get('current_player')}")
-            if engine.game_state.get('phase') == 'shoot':
-                print(f"DEBUG AI_TURN: shoot_activation_pool={engine.game_state.get('shoot_activation_pool', [])}")
+    if debug_mode:
+        print(f"DEBUG AI_TURN: execute_ai_turn returned success={success}, result={result}")
+        print(f"DEBUG AI_TURN: current_phase={engine.game_state.get('phase')}, current_player={engine.game_state.get('current_player')}")
+        if engine.game_state.get('phase') == 'shoot':
             print(f"DEBUG AI_TURN: shoot_activation_pool={engine.game_state.get('shoot_activation_pool', [])}")
+        print(f"DEBUG AI_TURN: shoot_activation_pool={engine.game_state.get('shoot_activation_pool', [])}")
         
-        if not success:
-            error_type = result.get("error", "unknown_error")
-            if error_type == "not_pve_mode":
-                print(f"❌ [API] execute_ai_turn failed: error_type={error_type}, result={result}")
-                return jsonify({"success": False, "error": result}), 400
-            if error_type == "not_ai_player_turn":
-                print(f"ℹ️ [API] execute_ai_turn skipped: error_type={error_type}, result={result}")
-                serializable_state = _game_state_for_json(engine, for_post_action=True)
-                _sync_units_hp_from_cache(serializable_state, engine.game_state)
-                _attach_player_types(serializable_state, engine)
-                action_logs = serializable_state.get("action_logs", [])
-                engine.game_state["action_logs"] = []
-                serializable_state["action_logs"] = []
-                return api_json_response({
-                    "success": True,
-                    "result": {
-                        "action": "ai_turn_skipped",
-                        "reason": "not_ai_player_turn",
-                        "details": result,
-                    },
-                    "game_state": serializable_state,
-                    "action_logs": action_logs,
-                    "endless_duty_state": (
-                        require_key(engine.game_state, "endless_duty_state")
-                        if endless_mode_active
-                        else None
-                    ),
-                })
-            if error_type == "game_over":
-                print(f"ℹ️ [API] execute_ai_turn skipped: error_type={error_type}, result={result}")
-                serializable_state = _game_state_for_json(engine, for_post_action=True)
-                _sync_units_hp_from_cache(serializable_state, engine.game_state)
-                _attach_player_types(serializable_state, engine)
-                action_logs = serializable_state.get("action_logs", [])
-                engine.game_state["action_logs"] = []
-                serializable_state["action_logs"] = []
-                return api_json_response({
-                    "success": True,
-                    "result": {
-                        "action": "ai_turn_skipped",
-                        "reason": "game_over",
-                        "details": result,
-                    },
-                    "game_state": serializable_state,
-                    "action_logs": action_logs,
-                    "endless_duty_state": (
-                        require_key(engine.game_state, "endless_duty_state")
-                        if endless_mode_active
-                        else None
-                    ),
-                })
-            else:
-                print(f"❌ [API] execute_ai_turn failed: error_type={error_type}, result={result}")
-                return jsonify({"success": False, "error": result}), 500
+    if not success:
+        error_type = result.get("error", "unknown_error")
+        if error_type == "not_pve_mode":
+            print(f"❌ [API] execute_ai_turn failed: error_type={error_type}, result={result}")
+            return jsonify({"success": False, "error": result}), 400
+        if error_type == "not_ai_player_turn":
+            print(f"ℹ️ [API] execute_ai_turn skipped: error_type={error_type}, result={result}")
+            serializable_state = _game_state_for_json(engine, for_post_action=True)
+            _sync_units_hp_from_cache(serializable_state, engine.game_state)
+            _attach_player_types(serializable_state, engine)
+            action_logs = serializable_state.get("action_logs", [])
+            engine.game_state["action_logs"] = []
+            serializable_state["action_logs"] = []
+            return api_json_response({
+                "success": True,
+                "result": {
+                    "action": "ai_turn_skipped",
+                    "reason": "not_ai_player_turn",
+                    "details": result,
+                },
+                "game_state": serializable_state,
+                "action_logs": action_logs,
+                "endless_duty_state": (
+                    require_key(engine.game_state, "endless_duty_state")
+                    if endless_mode_active
+                    else None
+                ),
+            })
+        if error_type == "game_over":
+            print(f"ℹ️ [API] execute_ai_turn skipped: error_type={error_type}, result={result}")
+            serializable_state = _game_state_for_json(engine, for_post_action=True)
+            _sync_units_hp_from_cache(serializable_state, engine.game_state)
+            _attach_player_types(serializable_state, engine)
+            action_logs = serializable_state.get("action_logs", [])
+            engine.game_state["action_logs"] = []
+            serializable_state["action_logs"] = []
+            return api_json_response({
+                "success": True,
+                "result": {
+                    "action": "ai_turn_skipped",
+                    "reason": "game_over",
+                    "details": result,
+                },
+                "game_state": serializable_state,
+                "action_logs": action_logs,
+                "endless_duty_state": (
+                    require_key(engine.game_state, "endless_duty_state")
+                    if endless_mode_active
+                    else None
+                ),
+            })
+        else:
+            print(f"❌ [API] execute_ai_turn failed: error_type={error_type}, result={result}")
+            return jsonify({"success": False, "error": result}), 500
 
-        if endless_mode_active:
-            ed_post = handle_endless_duty_post_action(engine)
-            if isinstance(result, dict):
-                result["endless_duty"] = ed_post
+    if endless_mode_active:
+        ed_post = handle_endless_duty_post_action(engine)
+        if isinstance(result, dict):
+            result["endless_duty"] = ed_post
 
-        # Convert game state to JSON-serializable format
-        serializable_state = _game_state_for_json(engine, for_post_action=True)
-        _sync_units_hp_from_cache(serializable_state, engine.game_state)
-        _attach_player_types(serializable_state, engine)
+    # Convert game state to JSON-serializable format
+    serializable_state = _game_state_for_json(engine, for_post_action=True)
+    _sync_units_hp_from_cache(serializable_state, engine.game_state)
+    _attach_player_types(serializable_state, engine)
         
-        # Extract action logs for this specific AI action
-        action_logs = serializable_state.get("action_logs", [])
+    # Extract action logs for this specific AI action
+    action_logs = serializable_state.get("action_logs", [])
         
-        # CRITICAL: Always clear logs after extracting to prevent accumulation
-        engine.game_state["action_logs"] = []
-        serializable_state["action_logs"] = []
+    # CRITICAL: Always clear logs after extracting to prevent accumulation
+    engine.game_state["action_logs"] = []
+    serializable_state["action_logs"] = []
         
-        return api_json_response({
-            "success": True,
-            "result": result,
-            "game_state": serializable_state,
-            "action_logs": action_logs,
-            "endless_duty_state": (
-                require_key(engine.game_state, "endless_duty_state")
-                if endless_mode_active
-                else None
-            ),
-        })
-
-    except Exception:
-        raise
+    return api_json_response({
+        "success": True,
+        "result": result,
+        "game_state": serializable_state,
+        "action_logs": action_logs,
+        "endless_duty_state": (
+            require_key(engine.game_state, "endless_duty_state")
+            if endless_mode_active
+            else None
+        ),
+    })
 
 @app.route('/api/replay/parse', methods=['POST'])
 def parse_replay_log():

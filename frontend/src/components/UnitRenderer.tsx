@@ -409,11 +409,6 @@ export class UnitRenderer {
     const originalCenterX = this.props.centerX;
     const originalCenterY = this.props.centerY;
 
-    if (unit.id === 8 || this.props.isPreview) {
-      console.log(
-        `[DEBUG UnitRenderer.render] u${unit.id} preview=${this.props.isPreview} unit.col,row=(${unit.col},${unit.row}) passedCenter=(${originalCenterX.toFixed(1)},${originalCenterY.toFixed(1)}) modelCenters=${JSON.stringify(modelCenters.map(([x, y]) => [Math.round(x), Math.round(y)]))}`
-      );
-    }
 
     for (const [mx, my] of modelCenters) {
       this.props.centerX = mx;

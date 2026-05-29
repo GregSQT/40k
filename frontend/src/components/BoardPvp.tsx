@@ -1675,11 +1675,22 @@ export default function Board({
     // LoS preview during squad movePreview is disabled per user requirement:
     // "preview LoS QUE quand UNE figurine est selectionnée" — re-introduce in
     // the per-fig flow only, not during squad-level hover/preview.
-    const useMoveLosPreview = phase === "move" && mode === "select";
+    const useMoveLosPreview =
+      phase === "move" &&
+      (mode === "select" ||
+        (mode === "squadModelMove" && squadMovePlan?.activeModelId != null));
     const mergedIds = useMoveLosPreview ? movePreviewLosBlinkIds : (stableBlinkingUnits ?? []);
     const uc = gameState?.units_cache as Record<string, unknown> | undefined;
     return filterBlinkIdsToLivingUnitsCache(mergedIds, uc, units);
-  }, [stableBlinkingUnits, mode, phase, movePreviewLosBlinkIds, gameState?.units_cache, units]);
+  }, [
+    stableBlinkingUnits,
+    mode,
+    phase,
+    movePreviewLosBlinkIds,
+    squadMovePlan?.activeModelId,
+    gameState?.units_cache,
+    units,
+  ]);
 
   useEffect(() => {
     const isMoveLosPreviewContext =
@@ -3047,6 +3058,165 @@ export default function Board({
 
     buildSprite();
 
+    // --- Preview de tir per-fig : suit le ghost (même machinerie que le survol move normal) ---
+    // Cône bleu/couvert via WASM (instantané) + clignotement ennemis via backend
+    // `preview_shoot_from_position`. Tout est gated mode squadModelMove ; ne touche pas le gros effet.
+    const LOS_PREVIEW_CLEAR_HEX = 0x4f8bff;
+    const LOS_PREVIEW_COVER_HEX = 0x9ec5ff;
+    const losUnionLayout: HexUnionMaskLayout = {
+      HEX_HORIZ_SPACING: HEX_WIDTH_H,
+      HEX_WIDTH: HEX_WIDTH_H,
+      HEX_HEIGHT: HEX_HEIGHT_H,
+      HEX_VERT_SPACING: HEX_HEIGHT_H,
+      MARGIN: MARGIN_H,
+      gridHexRadius: HEX_RADIUS_H,
+    };
+    const shootRange =
+      squadUnit.RNG_WEAPONS && squadUnit.RNG_WEAPONS.length > 0 ? getMaxRangedRange(squadUnit) : 0;
+    const hasRangedPreview = shootRange > 0;
+
+    let shootPreviewActive = true;
+    let visualLosFrame: number | null = null;
+    let pendingVisualLos: { col: number; row: number } | null = null;
+    let shootBackendTimer: ReturnType<typeof setTimeout> | null = null;
+    let shootBackendInFlight = false;
+    let pendingShootBackend: { col: number; row: number } | null = null;
+    let lastShootPreviewHexKey: string | null = null;
+
+    const ensureLosOverlay = (): PIXI.Container => {
+      if (!hoverOverlayRef.current || hoverOverlayRef.current.destroyed) {
+        const root = new PIXI.Container();
+        root.name = "los-hover-polar-masked";
+        root.eventMode = "none";
+        root.zIndex = 40;
+        app.stage.addChild(root);
+        hoverOverlayRef.current = root;
+      }
+      return hoverOverlayRef.current;
+    };
+
+    const drawVisualCone = (col: number, row: number) => {
+      pendingVisualLos = { col, row };
+      if (visualLosFrame !== null) return;
+      visualLosFrame = window.requestAnimationFrame(() => {
+        visualLosFrame = null;
+        const pending = pendingVisualLos;
+        pendingVisualLos = null;
+        if (!pending || !shootPreviewActive || !isWasmReady()) return;
+        if (!boardConfig || !gameConfig) return;
+        const overlay = ensureLosOverlay();
+        const visualPreview = buildLosPreviewFromSource({
+          source: { unit: squadUnit, fromCol: pending.col, fromRow: pending.row },
+          units,
+          boardCols: boardConfig.cols,
+          boardRows: boardConfig.rows,
+          wallHexes: boardConfig.wall_hexes,
+          wallHexesOverride,
+          maxRange: shootRange,
+          losVisibilityMinRatio: gameConfig.game_rules?.los_visibility_min_ratio ?? 0,
+          coverRatio: gameConfig.game_rules?.cover_ratio ?? 0,
+        });
+        const allVisualLosCells = [...visualPreview.terrainCoverCells, ...visualPreview.clearCells];
+        mountLosPolarClippedByVisibleUnion(
+          overlay,
+          allVisualLosCells,
+          visualPreview.terrainCoverCells,
+          losUnionLayout,
+          LOS_PREVIEW_CLEAR_HEX,
+          0.4,
+          LOS_PREVIEW_COVER_HEX,
+          0.4,
+          app.renderer
+        );
+        overlay.visible = true;
+      });
+    };
+
+    async function runShootBackend(): Promise<void> {
+      if (shootBackendInFlight) return;
+      shootBackendInFlight = true;
+      try {
+        const pending = pendingShootBackend;
+        pendingShootBackend = null;
+        if (!pending) return;
+        const cacheKey = [
+          String(squadUnit.id),
+          `${pending.col},${pending.row}`,
+          unitsBoardLayoutKey,
+          String(gameState?.turn ?? ""),
+          String(gameState?.episode_steps ?? ""),
+        ].join("|");
+        let losPreview = movePreviewBackendLosCacheRef.current.get(cacheKey);
+        if (!losPreview) {
+          const response = await fetch("/api/game/action", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "preview_shoot_from_position",
+              unitId: String(squadUnit.id),
+              destCol: pending.col,
+              destRow: pending.row,
+              advancePosition: false,
+              includeLosCells: false,
+            }),
+          });
+          if (!response.ok) {
+            throw new Error(`preview_shoot_from_position failed with HTTP ${response.status}`);
+          }
+          const data = await response.json();
+          if (data?.success !== true) {
+            throw new Error("preview_shoot_from_position returned success=false");
+          }
+          losPreview = parseBackendMoveLosPreviewPayload(data.result, cacheKey);
+          if (movePreviewBackendLosCacheRef.current.size >= MOVE_PREVIEW_LOS_CACHE_MAX_ENTRIES) {
+            const oldestKey = movePreviewBackendLosCacheRef.current.keys().next().value;
+            if (typeof oldestKey !== "string") {
+              throw new Error("Move preview LoS cache oldest key is invalid");
+            }
+            movePreviewBackendLosCacheRef.current.delete(oldestKey);
+          }
+          movePreviewBackendLosCacheRef.current.set(cacheKey, losPreview);
+        }
+        if (!shootPreviewActive) return;
+        setMovePreviewLosBlinkIds(losPreview.blinkIds);
+        setMovePreviewLosCoverById(losPreview.coverByUnitId);
+      } catch (error) {
+        if (!shootPreviewActive) return;
+        setMovePreviewLosBlinkIds([]);
+        setMovePreviewLosCoverById({});
+        console.error("Squad per-fig shoot preview backend LoS failed:", error);
+      } finally {
+        shootBackendInFlight = false;
+        if (shootPreviewActive && pendingShootBackend) {
+          scheduleShootBackend(pendingShootBackend.col, pendingShootBackend.row);
+        }
+      }
+    }
+
+    const scheduleShootBackend = (col: number, row: number) => {
+      pendingShootBackend = { col, row };
+      if (shootBackendTimer || shootBackendInFlight) return;
+      shootBackendTimer = setTimeout(() => {
+        shootBackendTimer = null;
+        void runShootBackend();
+      }, 25);
+    };
+
+    const triggerShootPreview = (col: number, row: number) => {
+      if (!hasRangedPreview) return;
+      const key = `${col},${row}`;
+      if (key === lastShootPreviewHexKey) return;
+      lastShootPreviewHexKey = key;
+      drawVisualCone(col, row);
+      scheduleShootBackend(col, row);
+    };
+
+    // Apparition immédiate à la sélection : preview depuis la position courante de la fig active.
+    const activeModelPos = squadMovePlan?.models?.[String(activeModelId)];
+    if (hasRangedPreview && activeModelPos) {
+      triggerShootPreview(activeModelPos.col, activeModelPos.row);
+    }
+
     const onMouseMove = (ev: MouseEvent) => {
       // Guard sur activeModelId (state) ET sur la taille du pool (ref synchrone).
       // handleMoveModelInPlan vide le pool AVANT setSquadMovePlan → la race condition
@@ -3072,7 +3242,8 @@ export default function Board({
         sprite.visible = true;
       }
       hoveredHexRef.current = { col: best.col, row: best.row };
-      console.log(`[SQUAD-MOVE] per-fig ghost move model=${squadMovePlanRef.current?.activeModelId} → hex(${best.col},${best.row})`);
+      // Le preview de tir suit le ghost : recalcul depuis l'hex destination survolé.
+      triggerShootPreview(best.col, best.row);
     };
 
     canvas.addEventListener("mousemove", onMouseMove);
@@ -3084,14 +3255,29 @@ export default function Board({
         hoverSpriteRef.current.visible = false;
       }
       hoveredHexRef.current = null;
+      // Coupe le preview de tir per-fig : stoppe les callbacks en vol, cache le cône, vide le blink.
+      shootPreviewActive = false;
+      if (visualLosFrame !== null) window.cancelAnimationFrame(visualLosFrame);
+      if (shootBackendTimer) clearTimeout(shootBackendTimer);
+      if (hoverOverlayRef.current && !hoverOverlayRef.current.destroyed) {
+        hoverOverlayRef.current.visible = false;
+      }
+      setMovePreviewLosBlinkIds([]);
+      setMovePreviewLosCoverById({});
       console.log(`[SQUAD-MOVE] per-fig effect CLEANUP model=${activeModelId}`);
     };
   }, [
     mode,
     squadMovePlan?.activeModelId,
     squadMovePlan?.unitId,
+    squadMovePlan?.models,
     boardConfig,
+    gameConfig,
     units,
+    wallHexesOverride,
+    unitsBoardLayoutKey,
+    gameState?.turn,
+    gameState?.episode_steps,
     squadMoveModelPoolRef.current,
   ]);
 
@@ -3451,7 +3637,6 @@ export default function Board({
     const BOARD_COLS = boardConfig.cols;
     const BOARD_ROWS = boardConfig.rows;
     const HEX_RADIUS = boardConfig.hex_radius;
-    console.log('[DBG] hex_radius raw:', _rawBoardConfig?.hex_radius, '| boardConfig:', boardConfig?.hex_radius, '| display_scale:', (_rawBoardConfig?.display as {display_scale?:number}|undefined)?.display_scale);
     const MARGIN = boardConfig.margin;
     const HEX_WIDTH = 1.5 * HEX_RADIUS;
     const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
