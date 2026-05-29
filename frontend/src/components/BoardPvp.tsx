@@ -786,6 +786,7 @@ export default function Board({
   // Hover preview: imperative PIXI layers (no React re-render)
   const hoverOverlayRef = useRef<PIXI.Container | null>(null);
   const hoverSpriteRef = useRef<PIXI.Container | null>(null);
+  const squadMoveVeilOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Ligne départ → pointeur + libellé distance hex (preview move) */
   const movePreviewGuideLineRef = useRef<PIXI.Graphics | null>(null);
   const hoverMoveOrientationStepRef = useRef<number | null>(null);
@@ -3086,6 +3087,97 @@ export default function Board({
     let shootBackendInFlight = false;
     let pendingShootBackend: { col: number; row: number } | null = null;
     let lastShootPreviewHexKey: string | null = null;
+    let lastValidityHexKey: string | null = null;
+
+    // Overlay PIXI dédié au voile rouge hover — mis à jour directement, pas via React state.
+    const veilOverlay = new PIXI.Graphics();
+    veilOverlay.zIndex = 950; // au-dessus du ghost sprite (900), sous unitsLayer (2000)
+    app.stage.addChild(veilOverlay);
+    squadMoveVeilOverlayRef.current = veilOverlay;
+
+    const inchesToSubhex = (boardConfig as unknown as { inches_to_subhex?: number }).inches_to_subhex ?? 10;
+    const coherencyDist = 2 * inchesToSubhex;
+    const baseSize = resolveBaseSizeForUnitDisplay(squadUnit);
+    const baseShape = typeof squadUnit.BASE_SHAPE === "string" ? squadUnit.BASE_SHAPE : "round";
+    const veilRadius = baseSize > 1 ? (baseSize * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
+
+    function hexDist(c1: number, r1: number, c2: number, r2: number): number {
+      const z1 = r1 - Math.floor(c1 / 2), y1 = -c1 - z1;
+      const z2 = r2 - Math.floor(c2 / 2), y2 = -c2 - z2;
+      return Math.max(Math.abs(c1 - c2), Math.abs(y1 - y2), Math.abs(z1 - z2));
+    }
+
+    function minFootprintDist(fpA: Array<[number,number]>, fpB: Array<[number,number]>): number {
+      let best = Infinity;
+      for (const [ac, ar] of fpA) {
+        for (const [bc, br] of fpB) {
+          const d = hexDist(ac, ar, bc, br);
+          if (d < best) best = d;
+          if (best === 0) return 0;
+        }
+      }
+      return best;
+    }
+
+    function drawHoverVeil(hoverCol: number, hoverRow: number): void {
+      veilOverlay.clear();
+      const plan = squadMovePlanRef.current;
+      if (!plan) return;
+      const mids = Object.keys(plan.models);
+      const n = mids.length;
+      if (n < 2) return;
+
+      // Positions avec fig active à la position hover
+      const positions = mids.map((mid) =>
+        mid === plan.activeModelId
+          ? [hoverCol, hoverRow] as [number, number]
+          : [plan.models[mid].col, plan.models[mid].row] as [number, number]
+      );
+
+      // Footprints
+      const footprints = positions.map(([c, r]) => {
+        const fp = computeOccupiedHexes(c, r, baseShape, baseSize);
+        return [...fp] as Array<[number, number]>;
+      });
+
+      // Graphe d'adjacence (cohésion empreinte-à-empreinte)
+      const adj: boolean[][] = Array.from({ length: n }, () => new Array(n).fill(false));
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          if (minFootprintDist(footprints[i], footprints[j]) <= coherencyDist) {
+            adj[i][j] = adj[j][i] = true;
+          }
+        }
+      }
+
+      // Composantes connexes
+      const comp = new Array(n).fill(-1);
+      let numComp = 0;
+      for (let s = 0; s < n; s++) {
+        if (comp[s] !== -1) continue;
+        const stack = [s];
+        comp[s] = numComp;
+        while (stack.length) {
+          const k = stack.pop()!;
+          for (let nb = 0; nb < n; nb++) {
+            if (adj[k][nb] && comp[nb] === -1) { comp[nb] = numComp; stack.push(nb); }
+          }
+        }
+        numComp++;
+      }
+      const compSize: Record<number, number> = {};
+      for (const c of comp) compSize[c] = (compSize[c] ?? 0) + 1;
+
+      for (let i = 0; i < n; i++) {
+        if (compSize[comp[i]] * 2 > n) continue; // majorité → valide
+        const [col, row] = positions[i]; // positions[i] est déjà hoverCol/hoverRow pour la fig active
+        const cx = col * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H;
+        const cy = row * HEX_HEIGHT_H + ((col % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H;
+        veilOverlay.beginFill(0xff0000, 0.45);
+        veilOverlay.drawCircle(cx, cy, veilRadius);
+        veilOverlay.endFill();
+      }
+    }
 
     const ensureLosOverlay = (): PIXI.Container => {
       if (!hoverOverlayRef.current || hoverOverlayRef.current.destroyed) {
@@ -3248,6 +3340,12 @@ export default function Board({
       hoveredHexRef.current = { col: best.col, row: best.row };
       // Le preview de tir suit le ghost : recalcul depuis l'hex destination survolé.
       triggerShootPreview(best.col, best.row);
+      // Voile rouge hover : recalcul côté client à chaque changement d'hex (pas de backend).
+      const vKey = `${best.col},${best.row}`;
+      if (vKey !== lastValidityHexKey) {
+        lastValidityHexKey = vKey;
+        drawHoverVeil(best.col, best.row);
+      }
     };
 
     canvas.addEventListener("mousemove", onMouseMove);
@@ -3263,6 +3361,8 @@ export default function Board({
       shootPreviewActive = false;
       if (visualLosFrame !== null) window.cancelAnimationFrame(visualLosFrame);
       if (shootBackendTimer) clearTimeout(shootBackendTimer);
+      if (!veilOverlay.destroyed) veilOverlay.destroy();
+      squadMoveVeilOverlayRef.current = null;
       if (hoverOverlayRef.current && !hoverOverlayRef.current.destroyed) {
         hoverOverlayRef.current.visible = false;
       }
@@ -4981,6 +5081,7 @@ export default function Board({
       // useEffect détruit le stage et la preview (ou la ligne mesure) disparaît + les refs sont perdues.
       const savedHoverOverlay = hoverOverlayRef.current;
       const savedHoverSprite = hoverSpriteRef.current;
+      const savedVeilOverlay = squadMoveVeilOverlayRef.current;
       const savedMovePreviewGuideLine = movePreviewGuideLineRef.current;
       const savedMeasureGuideLine = measureGuideLineRef.current;
       if (savedStatic?.parent) app.stage.removeChild(savedStatic);
@@ -4990,6 +5091,7 @@ export default function Board({
       if (savedUnitsLayer?.parent) app.stage.removeChild(savedUnitsLayer);
       if (savedHoverOverlay?.parent) app.stage.removeChild(savedHoverOverlay);
       if (savedHoverSprite?.parent) app.stage.removeChild(savedHoverSprite);
+      if (savedVeilOverlay?.parent) app.stage.removeChild(savedVeilOverlay);
       if (savedMovePreviewGuideLine?.parent) app.stage.removeChild(savedMovePreviewGuideLine);
       if (savedMeasureGuideLine?.parent) app.stage.removeChild(savedMeasureGuideLine);
       if (
@@ -5044,6 +5146,7 @@ export default function Board({
       if (savedDragOverlay) app.stage.addChild(savedDragOverlay);
       if (savedHoverOverlay && !savedHoverOverlay.destroyed) app.stage.addChild(savedHoverOverlay);
       if (savedHoverSprite && !savedHoverSprite.destroyed) app.stage.addChild(savedHoverSprite);
+      if (savedVeilOverlay && !savedVeilOverlay.destroyed) app.stage.addChild(savedVeilOverlay);
       if (savedMovePreviewGuideLine && !savedMovePreviewGuideLine.destroyed) {
         app.stage.addChild(savedMovePreviewGuideLine);
       }
