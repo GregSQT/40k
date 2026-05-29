@@ -6,12 +6,17 @@
   },
   "ANTI_INFANTRY": {
     "name": "Anti-Infantry",
-    "description": "An unmodified Wound roll of X+ against Infantry scores a Critical Wound.",
+    "description": "An unmodified Wound roll of X+ against a target with the infantry keyword scores a Critical Wound.",
     "has_parameter": true
   },
   "ANTI_VEHICLE": {
     "name": "Anti-Vehicle",
     "description": "An unmodified Wound roll of X+ against a target with the vehicle keyword scores a Critical Wound.",
+    "has_parameter": true
+  },
+  "ANTI_PSYKER": {
+    "name": "Anti-Psyker",
+    "description": "An unmodified Wound roll of X+ against a target with the psyker keyword scores a Critical Wound.",
     "has_parameter": true
   },
   "ASSAULT": {

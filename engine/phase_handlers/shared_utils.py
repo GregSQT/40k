@@ -2276,11 +2276,17 @@ def validate_squad_coherency(game_state: Dict[str, Any], squad_id: str) -> bool:
 
 
 def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -> None:
-    """Recalcule occupied_hexes (union des footprints de toutes les figs vivantes).
+    """Recalcule occupied_hexes (union des footprints de toutes les figs vivantes)
+    ET occupied_hexes_by_model (map model_id -> position courante de la figurine),
+    depuis models_cache.
 
     Fix F2 (audit) : occupied_hexes doit couvrir TOUTES les figs du squad, pas
     seulement le footprint de l'ancre. Sinon collisions inter-squads ignorent
     les figs non-ancres.
+
+    occupied_hexes_by_model est la source de vérité par-modèle consommée par le
+    frontend. Doit rester synchronisée avec models_cache à chaque mutation de
+    position (move, charge, advance, pile-in).
 
     Egalement met a jour occupation_map (reverse lookup cell -> unit_id).
     Idempotent. Pas d'effet si squad_id absent du units_cache.
@@ -2301,15 +2307,18 @@ def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -
     }
     old_occupied = entry.get("occupied_hexes", set())
     new_occupied: Set[Tuple[int, int]] = set()
+    new_by_model: Dict[str, Tuple[int, int]] = {}
     for mid in squad_models.get(squad_id, []):
         m = models_cache.get(mid)
         if m is None:
             continue
-        fp = _compute_unit_occupied_hexes(
-            int(m["col"]), int(m["row"]), unit_stub, game_state
-        )
+        m_col = int(m["col"])
+        m_row = int(m["row"])
+        new_by_model[mid] = (m_col, m_row)
+        fp = _compute_unit_occupied_hexes(m_col, m_row, unit_stub, game_state)
         new_occupied.update(fp)
     entry["occupied_hexes"] = new_occupied
+    entry["occupied_hexes_by_model"] = new_by_model
     # Sync occupation_map (retire cellules disparues, ajoute nouvelles)
     occ_map = game_state.get("occupation_map")
     if occ_map is not None:
@@ -2318,6 +2327,47 @@ def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -
                 del occ_map[cell]
         for cell in new_occupied:
             occ_map[cell] = squad_id
+
+
+def translate_squad_to_destination(
+    game_state: Dict[str, Any], squad_id: str, dest_col: int, dest_row: int
+) -> None:
+    """Déplacement rigide d'une escouade : translate toutes les figurines vivantes
+    par le delta (dest - ancien_ancre), puis resync caches.
+
+    Sémantique : "l'escouade entière bouge vers (dest_col, dest_row)". Préserve
+    la formation relative entre figurines. À utiliser pour les actions de
+    mouvement (move standard, charge, advance, pile-in, move_after_shooting).
+
+    À NE PAS confondre avec update_units_cache_position seul, qui ne met à jour
+    que l'ancre — utilisé après une mort de figurine pour resync l'ancre sans
+    toucher aux figs survivantes.
+    """
+    units_cache = game_state.get("units_cache", {})
+    entry = units_cache.get(squad_id)
+    if entry is None:
+        return
+    norm_dest_col, norm_dest_row = normalize_coordinates(int(dest_col), int(dest_row))
+    old_col = int(entry.get("col", norm_dest_col))
+    old_row = int(entry.get("row", norm_dest_row))
+    delta_col = norm_dest_col - old_col
+    delta_row = norm_dest_row - old_row
+    if delta_col != 0 or delta_row != 0:
+        models_cache = require_key(game_state, "models_cache")
+        squad_models = require_key(game_state, "squad_models")
+        for mid in squad_models.get(squad_id, []):
+            m = models_cache.get(mid)
+            if m is None:
+                continue
+            if int(m.get("HP_CUR", 0)) <= 0:
+                continue
+            m["col"] = int(m["col"]) + delta_col
+            m["row"] = int(m["row"]) + delta_row
+    # Update anchor first (sets entry.col/row, entry.occupied_hexes = anchor footprint).
+    update_units_cache_position(game_state, squad_id, norm_dest_col, norm_dest_row)
+    # Then override occupied_hexes (union de toutes les figs) + occupied_hexes_by_model
+    # depuis models_cache déplacés. Ordre important : ce 2e appel écrase ce qui doit l'être.
+    _recompute_squad_occupied_hexes(game_state, squad_id)
 
 
 def _recompute_squad_hp_total(game_state: Dict[str, Any], squad_id: str) -> int:
@@ -3399,6 +3449,8 @@ def _allocate_damage_to_squad(
         target_mid = alive[0]
     m = models_cache[target_mid]
     hp_before = int(m["HP_CUR"])
+    target_points_per_hp = float(require_key(m, "points_per_hp"))
+    target_player = int(require_key(m, "player"))
     damage_dealt = min(int(damage), hp_before)
     new_hp = hp_before - damage_dealt
     destroyed = False
@@ -3411,7 +3463,10 @@ def _allocate_damage_to_squad(
     else:
         m["wounds_allocated_this_activation"] = int(m.get("wounds_allocated_this_activation", 0)) + damage_dealt
         update_model_hp(game_state, target_mid, new_hp)
-    return {"model_id": target_mid, "damage_dealt": damage_dealt, "destroyed": destroyed}
+    return {
+        "model_id": target_mid, "damage_dealt": damage_dealt, "destroyed": destroyed,
+        "points_per_hp": target_points_per_hp, "target_player": target_player,
+    }
 
 
 def resolve_squad_shoot(
@@ -3450,6 +3505,7 @@ def resolve_squad_shoot(
         "models_killed": 0,
         "events": [],
     }
+    targets_meta: Dict[str, Dict[str, Any]] = {}
     import random
     for intent in intents:
         attacker_mid = intent["model_id"]
@@ -3459,6 +3515,14 @@ def resolve_squad_shoot(
         target_sid = str(intent["target_unit_id"])
         if target_sid not in game_state.get("squad_models", {}):
             continue  # cible deja wipe
+        if target_sid not in targets_meta:
+            _tgt_uc = require_key(game_state, "units_cache")[target_sid]
+            _tgt_sc = require_key(game_state, "squad_cache")[target_sid]
+            targets_meta[target_sid] = {
+                "value": float(require_key(_tgt_uc, "VALUE")),
+                "model_count_at_start": int(require_key(_tgt_sc, "model_count_at_start")),
+                "player": int(require_key(_tgt_uc, "player")),
+            }
         weapon_index = int(intent.get("weapon_index", 0))
         weapons = attacker.get("RNG_WEAPONS", [])
         if not (0 <= weapon_index < len(weapons)):
@@ -3540,6 +3604,9 @@ def resolve_squad_shoot(
                 summary["models_killed"] += 1
             summary["events"].append({
                 "attacker": attacker_mid, "target": res["model_id"],
+                "target_squad_id": target_sid,
+                "target_player": int(res["target_player"]),
+                "points_per_hp": float(res["points_per_hp"]),
                 "damage": int(res["damage_dealt"]), "destroyed": bool(res["destroyed"]),
             })
         # Apres toutes les attaques de cet intent, decrement SHOOT_LEFT du modele attaquant
@@ -3547,6 +3614,12 @@ def resolve_squad_shoot(
             sl = int(models_cache[attacker_mid].get("SHOOT_LEFT", 0))
             models_cache[attacker_mid]["SHOOT_LEFT"] = max(0, sl - 1)
 
+    # Meta cibles + escouades wipe (pour reward shaping proportionnel)
+    summary["targets_meta"] = targets_meta
+    summary["squads_wiped"] = [
+        sid for sid in targets_meta
+        if not [m for m in game_state["squad_models"].get(sid, []) if m in models_cache]
+    ]
     # Nettoyage atomique
     clear_pending_shoot_intent(game_state, attacker_squad_id)
     return summary
@@ -4021,6 +4094,7 @@ def resolve_squad_fight(
         "attacks_made": 0, "hits": 0, "wounds": 0,
         "failed_saves": 0, "damage_total": 0, "models_killed": 0, "events": [],
     }
+    targets_meta: Dict[str, Dict[str, Any]] = {}
     import random
     for intent in intents:
         attacker_mid = intent["model_id"]
@@ -4030,6 +4104,14 @@ def resolve_squad_fight(
         target_sid = str(intent["target_unit_id"])
         if target_sid not in game_state.get("squad_models", {}):
             continue
+        if target_sid not in targets_meta:
+            _tgt_uc = require_key(game_state, "units_cache")[target_sid]
+            _tgt_sc = require_key(game_state, "squad_cache")[target_sid]
+            targets_meta[target_sid] = {
+                "value": float(require_key(_tgt_uc, "VALUE")),
+                "model_count_at_start": int(require_key(_tgt_sc, "model_count_at_start")),
+                "player": int(require_key(_tgt_uc, "player")),
+            }
         weapon_index = int(intent.get("weapon_index", 0))
         weapons = attacker.get("CC_WEAPONS", [])
         if not (0 <= weapon_index < len(weapons)):
@@ -4094,11 +4176,19 @@ def resolve_squad_fight(
                 summary["models_killed"] += 1
             summary["events"].append({
                 "attacker": attacker_mid, "target": res["model_id"],
+                "target_squad_id": target_sid,
+                "target_player": int(res["target_player"]),
+                "points_per_hp": float(res["points_per_hp"]),
                 "damage": int(res["damage_dealt"]), "destroyed": bool(res["destroyed"]),
             })
         if attacker_mid in models_cache:
             al = int(models_cache[attacker_mid].get("ATTACK_LEFT", 0))
             models_cache[attacker_mid]["ATTACK_LEFT"] = max(0, al - int(n_attacks))
+    summary["targets_meta"] = targets_meta
+    summary["squads_wiped"] = [
+        sid for sid in targets_meta
+        if not [m for m in game_state["squad_models"].get(sid, []) if m in models_cache]
+    ]
     clear_pending_fight_intent(game_state, attacker_squad_id)
     return summary
 

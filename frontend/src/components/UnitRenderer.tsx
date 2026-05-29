@@ -42,6 +42,14 @@ interface UnitRendererProps {
   unit: Unit;
   centerX: number;
   centerY: number;
+  /**
+   * Pixel centers for each model (figure) of a multi-model squad.
+   * When provided, per-figure components (circle/icon/eligibility/debug-id) are rendered
+   * once per entry, and squad-level components (HP bar, counters, badges, indicators) are
+   * rendered once at modelCenters[0]. When omitted, the unit is treated as a single figure
+   * located at (centerX, centerY) — legacy behaviour.
+   */
+  modelCenters?: Array<[number, number]>;
   app: PIXI.Application;
   uiElementsContainer?: PIXI.Container; // Persistent container for UI elements (target logos, badges) that should never be cleaned up
   useOverlayIcons?: boolean; // Render advance/weapon icons in DOM overlay
@@ -391,10 +399,34 @@ export class UnitRenderer {
     // ===== AI_TURN.md COMPLIANT ELIGIBILITY =====
     const isEligible = this.calculateEligibilityCompliant();
 
-    // ===== RENDER COMPONENTS =====
-    this.renderUnitCircle(iconZIndex);
-    this.renderUnitIcon(iconZIndex);
-    this.renderGreenActivationCircle(isEligible, unitIconScale);
+    // ===== MULTI-FIGURE LOOP =====
+    // Per-figure components are rendered once per model position; squad-level components
+    // are rendered once at the anchor (first model center).
+    const modelCenters: Array<[number, number]> =
+      this.props.modelCenters && this.props.modelCenters.length > 0
+        ? this.props.modelCenters
+        : [[this.props.centerX, this.props.centerY]];
+    const originalCenterX = this.props.centerX;
+    const originalCenterY = this.props.centerY;
+
+    if (unit.id === 8 || this.props.isPreview) {
+      console.log(
+        `[DEBUG UnitRenderer.render] u${unit.id} preview=${this.props.isPreview} unit.col,row=(${unit.col},${unit.row}) passedCenter=(${originalCenterX.toFixed(1)},${originalCenterY.toFixed(1)}) modelCenters=${JSON.stringify(modelCenters.map(([x, y]) => [Math.round(x), Math.round(y)]))}`
+      );
+    }
+
+    for (const [mx, my] of modelCenters) {
+      this.props.centerX = mx;
+      this.props.centerY = my;
+      this.renderUnitCircle(iconZIndex);
+      this.renderUnitIcon(iconZIndex);
+      this.renderGreenActivationCircle(isEligible, unitIconScale);
+      this.renderUnitIdDebug(iconZIndex);
+    }
+
+    // Squad-level UI anchored at first model center
+    this.props.centerX = modelCenters[0][0];
+    this.props.centerY = modelCenters[0][1];
     this.renderHPBar(unitIconScale);
     this.renderShootingCounter(unitIconScale);
     this.renderAdvanceButton(unitIconScale, iconZIndex);
@@ -407,7 +439,9 @@ export class UnitRenderer {
     this.renderAttackCounter(unitIconScale);
     this.renderChargeRollBadge(unitIconScale);
     this.renderAdvanceRollBadge(unitIconScale);
-    this.renderUnitIdDebug(iconZIndex);
+
+    this.props.centerX = originalCenterX;
+    this.props.centerY = originalCenterY;
   }
 
   private calculateEligibilityCompliant(): boolean {
@@ -750,6 +784,13 @@ export class UnitRenderer {
           unitCircle.cursor = "default";
         } else {
           unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+            console.log("[DEBUG UnitRenderer pointerdown]", {
+              unitId: unit.id,
+              button: e.button,
+              phase,
+              mode,
+              selectedUnitId,
+            });
             if (e.button === 0 || e.button === 2) {
               // Left or right click
               // Prevent context menu and event bubbling
@@ -947,6 +988,11 @@ export class UnitRenderer {
             sprite.eventMode = "static";
             sprite.cursor = "pointer";
             sprite.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+              console.log("[DEBUG ghost sprite pointerdown]", {
+                unitId: unit.id,
+                button: e.button,
+                ts: performance.now(),
+              });
               if (e.button === 0) onConfirmMove?.();
             });
           }

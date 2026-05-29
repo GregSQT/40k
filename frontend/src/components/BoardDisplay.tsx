@@ -2297,7 +2297,7 @@ export const drawBoard = (
       drawGroup(cellsForHighlight, availableCellsDrawColor, 0.4, false, availableCellCircleR);
     }
     {
-      const useShootingPreviewPalette = interactionPhase === "shoot" || mode === "movePreview";
+      const useShootingPreviewPalette = interactionPhase === "shoot";
       if (useShootingPreviewPalette && (attackCells.length > 0 || coverCells.length > 0)) {
         const coverKeySet = new Set(coverCells.map((c) => `${c.col},${c.row}`));
         const attackClearOnly = attackCells.filter((c) => !coverKeySet.has(`${c.col},${c.row}`));

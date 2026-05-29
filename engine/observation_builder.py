@@ -42,7 +42,6 @@ class ObservationBuilder:
 
     PHASE2_OBS_SIZE = 357
     SQUAD_OBS_SIZE_TARGET = 108  # PR4 cible — voir build_squad_observation
-    SUPPORTED_OBS_SIZES = (357, 108)  # PR4 4e-ii : 2 pipelines cohabitent transitoire
     RULE_FEATURE_BASE_IDX = 314
     RULE_FEATURE_COUNT = 32
     RULE_AWARE_MACRO_BASE_IDX = 346  # kept for reference: base of macro intent context (obs[346:357])

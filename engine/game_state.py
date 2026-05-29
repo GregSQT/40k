@@ -414,7 +414,10 @@ class GameStateManager:
                 base_shape = require_key(full_unit_data, "BASE_SHAPE")
                 base_size = require_key(full_unit_data, "BASE_SIZE")
                 if is_micro_board:
-                    base_size = max(1, round(base_size * _ish / 10))
+                    if isinstance(base_size, list):
+                        base_size = [max(1, round(s * _ish / 10)) for s in base_size]
+                    else:
+                        base_size = max(1, round(base_size * _ish / 10))
                 player_deployment_type = deployment_type_by_player[int(unit_player)]
                 pool_set = set()
                 if deployment_zone and int(unit_player) in deploy_pools:
@@ -537,7 +540,12 @@ class GameStateManager:
                     "ICON_SCALE": full_unit_data["ICON_SCALE"],
                     "ILLUSTRATION_RATIO": require_key(full_unit_data, "ILLUSTRATION_RATIO"),
                     "BASE_SHAPE": require_key(full_unit_data, "BASE_SHAPE"),
-                    "BASE_SIZE": max(1, round(require_key(full_unit_data, "BASE_SIZE") * self._get_inches_to_subhex() / 10)) if self._get_inches_to_subhex() > 1 else 1,
+                    "BASE_SIZE": (
+                        ([max(1, round(s * self._get_inches_to_subhex() / 10)) for s in require_key(full_unit_data, "BASE_SIZE")]
+                         if isinstance(require_key(full_unit_data, "BASE_SIZE"), list)
+                         else max(1, round(require_key(full_unit_data, "BASE_SIZE") * self._get_inches_to_subhex() / 10)))
+                        if self._get_inches_to_subhex() > 1 else 1
+                    ),
                     "orientation": orientation_u,
                     "UNIT_RULES": copy.deepcopy(require_key(full_unit_data, "UNIT_RULES")),
                     "UNIT_KEYWORDS": copy.deepcopy(require_key(full_unit_data, "UNIT_KEYWORDS")),
@@ -546,8 +554,9 @@ class GameStateManager:
                 }
 
                 # PR4 4c : pass-through champ optionnel "models" (multi-fig squad)
-                # Format option B (cf. squad_audit.md §8) : liste de {col, row}
+                # Format option B (cf. squad_audit.md §8) : liste de {col, row[, unit_type]}
                 # Si absent → backward compat (auto-build 1 fig in _build_models_for_unit)
+                # Si unit_type présent dans un spec → stats overrides pour ce modèle spécifique
                 if "models" in unit_data:
                     raw_models = unit_data["models"]
                     if not isinstance(raw_models, list) or not raw_models:
@@ -555,6 +564,8 @@ class GameStateManager:
                             f"Unit {unit_data.get('id')}: 'models' must be a non-empty list"
                         )
                     normalized_models: List[Dict[str, Any]] = []
+                    total_hp_cur = 0
+                    total_value = 0
                     for idx, spec in enumerate(raw_models):
                         if not isinstance(spec, dict):
                             raise TypeError(
@@ -563,13 +574,52 @@ class GameStateManager:
                         m_col = int(require_key(spec, "col"))
                         m_row = int(require_key(spec, "row"))
                         m_norm_col, m_norm_row = normalize_coordinates(m_col, m_row)
-                        normalized_models.append({
-                            "col": m_norm_col,
-                            "row": m_norm_row,
-                        })
+                        m_spec: Dict[str, Any] = {"col": m_norm_col, "row": m_norm_row}
+                        model_unit_type = spec.get("unit_type")
+                        if model_unit_type is not None:
+                            # Load stats for this specific model's unit_type
+                            try:
+                                m_data = unit_registry.get_unit_data(model_unit_type)
+                            except Exception as e:
+                                raise ValueError(
+                                    f"Unit {unit_data.get('id')} models[{idx}]: "
+                                    f"unknown unit_type '{model_unit_type}': {e}"
+                                )
+                            m_rng = copy.deepcopy(require_key(m_data, "RNG_WEAPONS"))
+                            m_cc = copy.deepcopy(require_key(m_data, "CC_WEAPONS"))
+                            _ish_local = self._get_inches_to_subhex()
+                            _scale_local = _ish_local / 5
+                            if _scale_local != 1.0:
+                                for w in m_rng:
+                                    if "RNG" in w:
+                                        w["RNG"] = int(w["RNG"]) * _scale_local
+                                for w in m_cc:
+                                    if "RNG" in w:
+                                        w["RNG"] = int(w["RNG"]) * _scale_local
+                            m_spec.update({
+                                "unit_type": model_unit_type,
+                                "HP_MAX": int(require_key(m_data, "HP_MAX")),
+                                "T": int(require_key(m_data, "T")),
+                                "ARMOR_SAVE": int(require_key(m_data, "ARMOR_SAVE")),
+                                "INVUL_SAVE": int(require_key(m_data, "INVUL_SAVE")),
+                                "OC": int(require_key(m_data, "OC")),
+                                "VALUE": int(require_key(m_data, "VALUE")),
+                                "RNG_WEAPONS": m_rng,
+                                "CC_WEAPONS": m_cc,
+                                "selectedRngWeaponIndex": 0 if m_rng else None,
+                                "selectedCcWeaponIndex": 0 if m_cc else None,
+                            })
+                            total_hp_cur += int(require_key(m_data, "HP_MAX"))
+                            total_value += int(require_key(m_data, "VALUE"))
+                        else:
+                            total_hp_cur += int(full_unit_data["HP_MAX"])
+                            total_value += int(full_unit_data["VALUE"])
+                        normalized_models.append(m_spec)
                     enhanced_unit["models"] = normalized_models
-                    # Multi-fig : HP_CUR au niveau unit = somme HP_MAX par fig (= sum agrege)
-                    enhanced_unit["HP_CUR"] = int(full_unit_data["HP_MAX"]) * len(normalized_models)
+                    enhanced_unit["HP_CUR"] = total_hp_cur
+                    if total_value != int(full_unit_data["VALUE"]) * len(normalized_models):
+                        # Mixed squad: override VALUE with sum of per-model values
+                        enhanced_unit["VALUE"] = total_value
 
                 enhanced_units.append(enhanced_unit)
 

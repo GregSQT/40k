@@ -477,6 +477,7 @@ class W40KEngine(gym.Env):
             "primary_objective": self._scenario_primary_objective,
             "primary_objective_scored_turns": set(),
             "objective_rewarded_turns": set(),
+            "coherency_penalized_turns": set(),
             "controlled_objective_samples_turn2_to_5": [],
             "opponent_objective_samples_turn2_to_5": [],
             "zone_intents": [INTENT_INVADE] * MAX_OBJECTIVES,
@@ -941,6 +942,7 @@ class W40KEngine(gym.Env):
             "primary_objective": self._scenario_primary_objective,
             "primary_objective_scored_turns": set(),
             "objective_rewarded_turns": set(),
+            "coherency_penalized_turns": set(),
             "controlled_objective_samples_turn2_to_5": [],
             "opponent_objective_samples_turn2_to_5": [],
             "zone_intents": [INTENT_INVADE] * MAX_OBJECTIVES,
@@ -1349,7 +1351,7 @@ class W40KEngine(gym.Env):
         # CRITICAL FIX: Auto-advance phase when no valid actions exist
         # This handles the case where fight phase pools are empty
         # PERF: compute mask+eligible_units once, reuse for convert_gym_action
-        action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
+        action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
         if self.game_state.get("debug_mode", False):
             from engine.game_utils import add_debug_file_log
             episode = self.game_state.get("episode_number", "?")
@@ -1368,7 +1370,7 @@ class W40KEngine(gym.Env):
             # No eligible units and no valid actions - trigger phase transition
             current_phase = self.game_state["phase"]
             advance_action = {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
-            advance_success, result = self._process_semantic_action(advance_action)
+            advance_success, result = self._process_squad_action(advance_action)
             if not advance_success:
                 raise RuntimeError(f"advance_phase failed: {result}")
             _step_t2_early = time.perf_counter() if _step_t0 is not None else None
@@ -1447,8 +1449,8 @@ class W40KEngine(gym.Env):
                 f"phase={self.game_state.get('phase', '?')} action_int={action_int}",
                 flush=True,
             )
-        semantic_action = self.action_decoder.convert_gym_action(
-            action_int, self.game_state, action_mask=action_mask, eligible_units=eligible_units
+        semantic_action = self.action_decoder.convert_squad_action(
+            action_int, self.game_state, eligible_units=eligible_units
         )
         if self.game_state.get("debug_mode", False):
             print(
@@ -1488,7 +1490,7 @@ class W40KEngine(gym.Env):
                 f"phase={self.game_state.get('phase', '?')} semantic_action={semantic_action}",
                 flush=True,
             )
-        action_result = self._process_semantic_action(semantic_action)
+        action_result = self._process_squad_action(semantic_action)
         if self.game_state.get("debug_mode", False):
             print(
                 "[TRAIN DEBUG] W40KEngine.step after _process_semantic_action "
@@ -1669,7 +1671,7 @@ class W40KEngine(gym.Env):
                         )
 
         # Convert to gym format
-        action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
+        action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
         if not eligible_units and not action_mask.any():
             if self.game_state.get("game_over", False):
                 observation = self._build_observation()
@@ -1677,7 +1679,7 @@ class W40KEngine(gym.Env):
             # Pool empty -> advance phase before building observation (no recursion)
                 current_phase = self.game_state.get("phase", "unknown")
                 advance_action = {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
-                advance_success, advance_result = self._process_semantic_action(advance_action)
+                advance_success, advance_result = self._process_squad_action(advance_action)
                 if not advance_success:
                     if (
                         isinstance(advance_result, dict)
@@ -4107,9 +4109,376 @@ class W40KEngine(gym.Env):
     
     
     # ============================================================================
+    # SQUAD PIPELINE DISPATCH
+    # ============================================================================
+
+    def _process_squad_action(self, semantic: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """Dispatch sémantique squad vers helpers squad. Remplace _process_semantic_action."""
+        from engine.combat_utils import get_hex_neighbors
+        from engine.phase_handlers.generic_handlers import end_activation
+        from engine.phase_handlers.shared_utils import (
+            execute_squad_move,
+            squad_shooting_unit_activation_start,
+            squad_declare_shoot,
+            squad_lock_shoot,
+            resolve_squad_shoot,
+            squad_fight_unit_activation_start,
+            fight_pile_in_plan,
+            squad_declare_fight,
+            resolve_squad_fight,
+            squad_consolidate_plan,
+            commit_move,
+            charge_build_valid_plan,
+            get_enemy_slot_mapping,
+        )
+        from engine.macro_intents import get_best_enemy_score_for_unit
+        from engine.game_utils import add_console_log
+
+        if self.game_state.get("game_over", False):
+            return False, {"error": "game_over", "winner": self.game_state.get("winner")}
+
+        self._initialize_rule_choice_runtime_state()
+
+        if semantic.get("action") == "select_rule_choice":
+            return self._handle_select_rule_choice_action(semantic)
+
+        active_prompt = self.game_state.get("active_rule_choice_prompt")
+        if active_prompt is not None:
+            return True, {
+                "action": "waiting_for_rule_choice",
+                "waiting_for_player": True,
+                "rule_choice_prompt": active_prompt,
+                "unitId": require_key(active_prompt, "unit_id"),
+                "player": int(require_key(self.game_state, "current_player")),
+            }
+
+        current_phase = self.game_state["phase"]
+        success = True
+        result: Dict[str, Any] = {}
+        action_name = semantic.get("action")
+
+        # ── advance_phase : transition pool vide ──────────────────────────────
+        if action_name == "advance_phase":
+            from_phase = semantic.get("from", current_phase)
+            if from_phase == "shoot":
+                result = shooting_handlers.shooting_phase_end(self.game_state)
+                self._shooting_phase_initialized = False
+                result.setdefault("phase_complete", True)
+                result.setdefault("reason", "pool_empty")
+            elif from_phase == "fight":
+                result = fight_handlers.fight_phase_end(self.game_state)
+                result.setdefault("phase_complete", True)
+                result.setdefault("reason", "pool_empty")
+            elif from_phase == "deployment":
+                result = {"phase_complete": True, "next_phase": "command", "reason": "pool_empty"}
+            else:
+                next_phase_map = {"move": "shoot", "charge": "fight", "command": "move"}
+                result = {
+                    "phase_complete": True,
+                    "next_phase": next_phase_map.get(from_phase, "move"),
+                    "reason": "pool_empty",
+                }
+
+        # ── deployment : logique existante inchangée ──────────────────────────
+        elif action_name == "deploy_unit":
+            success, result = deployment_handlers.execute_deployment_action(self.game_state, semantic)
+
+        # ── zone_intent : command phase ───────────────────────────────────────
+        elif action_name == "zone_intent":
+            success, result = self._process_command_phase(semantic)
+
+        # ── command_wait : passer la phase command sans action ────────────────
+        elif action_name == "command_wait":
+            success, result = self._process_command_phase({"action": "skip"})
+
+        # ── squad_wait : fin d'activation sans action ─────────────────────────
+        elif action_name == "squad_wait":
+            squad_id = semantic["squad_id"]
+            phase_tracking = {
+                "move": ("MOVE", "MOVE"),
+                "shoot": ("SHOOTING", "SHOOTING"),
+                "charge": ("CHARGE", "CHARGE"),
+                "fight": ("FIGHT", "FIGHT"),
+            }
+            tracking, pool = phase_tracking.get(current_phase, ("MOVE", "MOVE"))
+            unit = get_unit_by_id(squad_id, self.game_state)
+            if unit is None:
+                raise KeyError(f"Squad {squad_id} introuvable pour squad_wait")
+            if current_phase == "move":
+                self.game_state.get("_squad_advance_rolls", {}).pop(squad_id, None)
+            end_result = end_activation(self.game_state, unit, "WAIT", 1, tracking, pool, 0)
+            result = {**end_result, "action": "squad_wait", "squad_id": squad_id}
+
+        # ── mouvement : normal / advance / fall_back ──────────────────────────
+        elif action_name in ("squad_normal_move", "squad_advance", "squad_fall_back"):
+            squad_id = semantic["squad_id"]
+            direction = int(semantic["direction"])
+            move_type_map = {
+                "squad_normal_move": "normal",
+                "squad_advance": "advance",
+                "squad_fall_back": "fall_back",
+            }
+            move_type = move_type_map[action_name]
+            advance_roll = semantic.get("advance_roll") if move_type == "advance" else None
+
+            models_cache = require_key(self.game_state, "models_cache")
+            squad_models_list = self.game_state.get("squad_models", {}).get(squad_id, [])
+            anchor_col: Optional[int] = None
+            anchor_row: Optional[int] = None
+            for mid in squad_models_list:
+                m = models_cache.get(mid)
+                if m is not None:
+                    anchor_col = int(m["col"])
+                    anchor_row = int(m["row"])
+                    break
+            if anchor_col is None:
+                raise ValueError(f"Squad {squad_id} n'a aucun modèle vivant pour l'ancre de déplacement")
+
+            neighbors = get_hex_neighbors(anchor_col, anchor_row)
+            if direction >= len(neighbors):
+                raise ValueError(
+                    f"direction {direction} hors limites pour get_hex_neighbors (len={len(neighbors)})"
+                )
+            dest_col, dest_row = neighbors[direction]
+
+            ok = execute_squad_move(squad_id, dest_col, dest_row, move_type, self.game_state, advance_roll)
+            if not ok:
+                raise ValueError(
+                    f"execute_squad_move a échoué : squad={squad_id} dir={direction} "
+                    f"type={move_type} dest=({dest_col},{dest_row}) — incohérence mask/exécution"
+                )
+            self.game_state.get("_squad_advance_rolls", {}).pop(squad_id, None)
+            unit = get_unit_by_id(squad_id, self.game_state)
+            if unit is None:
+                raise KeyError(f"Squad {squad_id} introuvable après déplacement")
+            tracking = "FLED" if move_type == "fall_back" else "MOVE"
+            end_result = end_activation(self.game_state, unit, "ACTION", 1, tracking, "MOVE", 0)
+            result = {
+                **end_result,
+                "action": action_name,
+                "squad_id": squad_id,
+                "direction": direction,
+                "move_type": move_type,
+                "toCol": dest_col,
+                "toRow": dest_row,
+            }
+
+        # ── tir ───────────────────────────────────────────────────────────────
+        elif action_name == "squad_shoot":
+            squad_id = semantic["squad_id"]
+            target_slot = int(semantic["target_slot"])
+            units_cache = require_key(self.game_state, "units_cache")
+            cache_entry = units_cache.get(squad_id)
+            if cache_entry is None:
+                raise KeyError(f"Squad {squad_id} absent de units_cache pour squad_shoot")
+            our_player = int(require_key(cache_entry, "player"))
+            enemy_slots = get_enemy_slot_mapping(self.game_state, our_player)
+            if target_slot >= len(enemy_slots):
+                raise ValueError(
+                    f"squad_shoot: target_slot {target_slot} hors limite (len={len(enemy_slots)})"
+                )
+            target_squad_id = enemy_slots[target_slot]
+            if target_squad_id is None:
+                raise ValueError(
+                    f"squad_shoot: target_slot {target_slot} est None — mask aurait dû l'empêcher"
+                )
+            eligible_slots = [sid for sid in enemy_slots if sid is not None]
+
+            squad_shooting_unit_activation_start(self.game_state, squad_id)
+            squad_declare_shoot(self.game_state, squad_id, target_squad_id, eligible_slots)
+            squad_lock_shoot(self.game_state, squad_id)
+            shoot_result = resolve_squad_shoot(self.game_state, squad_id)
+
+            unit = get_unit_by_id(squad_id, self.game_state)
+            if unit is None:
+                raise KeyError(f"Squad {squad_id} introuvable pour end_activation après tir")
+            end_result = end_activation(self.game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 0)
+            result = {
+                **end_result,
+                "action": "squad_shoot",
+                "squad_id": squad_id,
+                "target_squad_id": target_squad_id,
+                "shoot_result": shoot_result,
+            }
+
+        # ── charge ────────────────────────────────────────────────────────────
+        elif action_name == "squad_charge":
+            squad_id = semantic["squad_id"]
+            target_squad_id = semantic["target_squad_id"]
+            charge_roll = random.randint(1, 6) + random.randint(1, 6)
+            plan = charge_build_valid_plan(self.game_state, squad_id, [target_squad_id], charge_roll)
+            unit = get_unit_by_id(squad_id, self.game_state)
+            if unit is None:
+                raise KeyError(f"Squad {squad_id} introuvable pour squad_charge")
+            if plan is None:
+                end_result = end_activation(self.game_state, unit, "NO", 1, "CHARGE", "CHARGE", 0)
+                result = {
+                    **end_result,
+                    "action": "squad_charge",
+                    "squad_id": squad_id,
+                    "target_squad_id": target_squad_id,
+                    "charge_roll": charge_roll,
+                    "charge_succeeded": False,
+                }
+            else:
+                commit_move(plan, self.game_state, "charge")
+                end_result = end_activation(self.game_state, unit, "ACTION", 1, "CHARGE", "CHARGE", 0)
+                result = {
+                    **end_result,
+                    "action": "squad_charge",
+                    "squad_id": squad_id,
+                    "target_squad_id": target_squad_id,
+                    "charge_roll": charge_roll,
+                    "charge_succeeded": True,
+                }
+
+        # ── combat ────────────────────────────────────────────────────────────
+        elif action_name == "squad_fight":
+            squad_id = semantic["squad_id"]
+            units_cache = require_key(self.game_state, "units_cache")
+            cache_entry = units_cache.get(squad_id)
+            if cache_entry is None:
+                raise KeyError(f"Squad {squad_id} absent de units_cache pour squad_fight")
+            our_player = int(require_key(cache_entry, "player"))
+            enemy_slots = get_enemy_slot_mapping(self.game_state, our_player)
+
+            best_target_id: Optional[str] = None
+            best_score = -1.0
+            for esid in enemy_slots:
+                if esid is None or esid not in units_cache:
+                    continue
+                enemy_unit = get_unit_by_id(esid, self.game_state)
+                if enemy_unit is None:
+                    continue
+                score = get_best_enemy_score_for_unit(enemy_unit, self.game_state)
+                if score > best_score:
+                    best_score = score
+                    best_target_id = esid
+            if best_target_id is None:
+                raise ValueError(
+                    f"squad_fight: aucune cible pour squad {squad_id} — mask aurait dû l'empêcher"
+                )
+
+            pile_in = fight_pile_in_plan(self.game_state, squad_id)
+            if pile_in is not None:
+                commit_move(pile_in, self.game_state, "pile_in")
+
+            squad_fight_unit_activation_start(self.game_state, squad_id)
+            squad_declare_fight(self.game_state, squad_id, best_target_id)
+            fight_result = resolve_squad_fight(self.game_state, squad_id)
+
+            consolidation = squad_consolidate_plan(self.game_state, squad_id)
+            if consolidation is not None:
+                commit_move(consolidation, self.game_state, "consolidation")
+
+            unit = get_unit_by_id(squad_id, self.game_state)
+            if unit is None:
+                raise KeyError(f"Squad {squad_id} introuvable après combat")
+            end_result = end_activation(self.game_state, unit, "ACTION", 1, "FIGHT", "FIGHT", 0)
+            result = {
+                **end_result,
+                "action": "squad_fight",
+                "squad_id": squad_id,
+                "target_squad_id": best_target_id,
+                "fight_result": fight_result,
+            }
+
+        else:
+            return False, {"error": "unknown_squad_action", "action": action_name}
+
+        # ── cascade : auto-avance les phases vides ────────────────────────────
+        max_cascade = 10
+        cascade_count = 0
+        started_phases: List[str] = []
+        while (
+            success
+            and result.get("phase_complete")
+            and result.get("next_phase")
+            and cascade_count < max_cascade
+        ):
+            next_phase = result["next_phase"]
+            current_phase = self.game_state.get("phase", "unknown")
+            cascade_count += 1
+            if next_phase == current_phase:
+                break
+            add_console_log(
+                self.game_state,
+                f"🔄 PHASE TRANSITION: {current_phase} -> {next_phase} (cascade #{cascade_count})",
+            )
+            phase_init_result = None
+            if next_phase == "deployment":
+                phase_init_result = deployment_handlers.deployment_phase_start(self.game_state)
+            elif next_phase == "command":
+                phase_init_result = command_handlers.command_phase_start(self.game_state)
+                self._clear_turn_scoped_rule_choices()
+            elif next_phase == "shoot":
+                phase_init_result = shooting_handlers.shooting_phase_start(self.game_state)
+                self._shooting_phase_initialized = True
+            elif next_phase == "charge":
+                phase_init_result = charge_handlers.charge_phase_start(self.game_state)
+            elif next_phase == "fight":
+                phase_init_result = fight_handlers.fight_phase_start(self.game_state)
+            elif next_phase == "move":
+                phase_init_result = movement_handlers.movement_phase_start(self.game_state)
+            started_phases.append(next_phase)
+            if phase_init_result and phase_init_result.get("phase_complete") and phase_init_result.get("next_phase"):
+                result = phase_init_result
+            else:
+                break
+
+        # ── game_over / winner ────────────────────────────────────────────────
+        self.game_state["game_over"] = self._check_game_over()
+        if self.game_state["game_over"]:
+            winner, win_method = self._determine_winner_with_method()
+            self.game_state["winner"] = winner
+            result["game_over"] = True
+            result["winner"] = winner
+            if win_method is not None:
+                result["win_method"] = win_method
+
+        # ── rule choices post-transition ──────────────────────────────────────
+        if success:
+            current_player_for_event = int(require_key(self.game_state, "current_player"))
+            if result.get("action") == "deploy_unit" and result.get("unitId") is not None:
+                deployed_unit_id = str(result["unitId"])
+                deployed_unit = self._get_unit_by_id(deployed_unit_id)
+                deployed_player = (
+                    int(require_key(deployed_unit, "player"))
+                    if deployed_unit is not None
+                    else current_player_for_event
+                )
+                self._enqueue_rule_choice_candidates(
+                    trigger="on_deploy",
+                    activation_unit_id=deployed_unit_id,
+                    event_player=deployed_player,
+                )
+            for started_phase in started_phases:
+                if started_phase == "command":
+                    self._enqueue_rule_choice_candidates(
+                        trigger="turn_start",
+                        event_phase=started_phase,
+                        event_player=current_player_for_event,
+                    )
+                    self._enqueue_rule_choice_candidates(
+                        trigger="player_turn_start",
+                        event_phase=started_phase,
+                        event_player=current_player_for_event,
+                    )
+                self._enqueue_rule_choice_candidates(
+                    trigger="phase_start",
+                    event_phase=started_phase,
+                    event_player=current_player_for_event,
+                )
+            choice_prompt_result = self._emit_next_rule_choice_prompt_if_needed()
+            if choice_prompt_result is not None:
+                return True, choice_prompt_result
+
+        return success, result
+
+    # ============================================================================
     # PHASE PROCESSING - KEEP THESE (They delegate to phase_handlers)
     # ============================================================================
-    
+
     def _process_movement_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """AI_MOVE.md EXACT: Pure engine orchestration - handler manages everything"""
         
@@ -4511,7 +4880,7 @@ class W40KEngine(gym.Env):
     
     def get_action_mask(self) -> np.ndarray:
         """Get valid action mask. Auto-advances phase when mask is empty (e.g. fight with empty pools)."""
-        action_mask, _ = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
+        action_mask, _ = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
         while not np.any(action_mask) and not self.game_state.get("game_over", False):
             current_phase = self.game_state.get("phase")
             if current_phase == "fight":
@@ -4520,7 +4889,7 @@ class W40KEngine(gym.Env):
             else:
                 break
             self.game_state["game_over"] = self._check_game_over()
-            action_mask, _ = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
+            action_mask, _ = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
         return action_mask
     
     
@@ -4548,25 +4917,25 @@ class W40KEngine(gym.Env):
                 return _build_for_squad(next(iter(uc.keys())))
             return _zero_obs()
 
-        action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
+        action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
         if not eligible_units and not action_mask.any():
             if self.game_state.get("game_over", False):
                 return _zero_obs()
             current_phase = self.game_state.get("phase", "unknown")
             advance_action = {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
-            advance_success, advance_result = self._process_semantic_action(advance_action)
+            advance_success, advance_result = self._process_squad_action(advance_action)
             if not advance_success:
                 if isinstance(advance_result, dict) and advance_result.get("error") == "game_over":
                     return _zero_obs()
                 raise RuntimeError(f"advance_phase failed: {advance_result}")
-            _action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
+            _action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
             if not eligible_units:
                 return _zero_obs()
         # Active squad = 1er eligible (convention 1 unit = 1 squad).
         # Fallback : si eligible_units vide mais mask any (cas degenere),
         # prendre 1ere unite vivante du player courant.
         if eligible_units:
-            active_squad_id = str(eligible_units[0])
+            active_squad_id = str(eligible_units[0]["id"])
         else:
             uc = self.game_state.get("units_cache", {})
             current_player = int(self.game_state.get("current_player", 1))
@@ -4612,11 +4981,6 @@ class W40KEngine(gym.Env):
     def _calculate_reward(self, success: bool, result: Dict[str, Any]) -> float:
         """Calculate reward - delegates to reward_calculator."""
         return self.reward_calculator.calculate_reward(success, result, self.game_state)
-    
-    
-    def _convert_gym_action(self, action: int) -> Dict[str, Any]:
-        """Convert gym action - delegates to action_decoder."""
-        return self.action_decoder.convert_gym_action(action, self.game_state)
     
     
     def _initialize_units(self):

@@ -21,7 +21,7 @@ from engine.combat_utils import (
 )
 from .shared_utils import (
     ACTION, WAIT, NO, PASS, ERROR, MOVE, FLED,
-    build_enemy_adjacent_hexes, update_units_cache_position, is_unit_alive,
+    build_enemy_adjacent_hexes, update_units_cache_position, translate_squad_to_destination, is_unit_alive,
     get_unit_position, require_unit_position,
     update_enemy_adjacent_caches_after_unit_move,
     maybe_resolve_reactive_move,
@@ -29,6 +29,8 @@ from .shared_utils import (
     build_enemy_occupied_positions_set,
     compute_candidate_footprint,
     is_footprint_placement_valid, get_engagement_zone, get_max_base_size_hex,
+    get_squad_move_budget, validate_move_plan, _validate_plan_coherency, commit_move,
+    get_coherency_subhex,
 )
 from engine.hex_utils import (
     _hex_center,
@@ -348,7 +350,7 @@ def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
         players_present.add(player_int)
     for player_int in players_present:
         build_enemy_adjacent_hexes(game_state, player_int)
-    
+
     # Invalidate all destination pools at the START of the phase
     # This ensures pools are clean and don't contain stale data from previous phases
     _invalidate_all_destination_pools_after_movement(game_state)
@@ -608,7 +610,11 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
     elif action_type == "move":
         # Execute movement directly (destination already in action for gym training)
         return movement_destination_selection_handler(game_state, unit_id, action)
-    
+
+    elif action_type == "commit_move_plan":
+        # Validate (= bouton Validate) + commit d'un plan provisoire par-figurine.
+        return movement_commit_move_plan_handler(game_state, unit_id, action)
+
     elif action_type == "skip":
         # Engine determined unit has no valid actions (e.g. no valid destinations)
         return _handle_skip_action(game_state, active_unit, had_valid_destinations=False)
@@ -899,8 +905,11 @@ def _attempt_movement_to_destination(
             raise KeyError(f"units_cache missing moved unit {unit_id_str_cache}")
         cache_entry["orientation"] = orientation
 
-    # Update units_cache after position change
-    update_units_cache_position(game_state, unit_id_str_cache, dest_col_int, dest_row_int)
+    # Update units_cache after position change.
+    # Use translate_squad_to_destination for rigid squad movement: anchor + all
+    # surviving models translate by the same delta, occupied_hexes_by_model is
+    # resync'd from updated models_cache. This is the move-action semantic.
+    translate_squad_to_destination(game_state, unit_id_str_cache, dest_col_int, dest_row_int)
 
     # Retrieve new footprint from updated cache
     new_cache_entry = require_key(game_state, "units_cache").get(unit_id_str_cache)
@@ -1778,6 +1787,250 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         )
 
     return valid_destinations
+
+
+def movement_build_model_destinations_pool(
+    game_state: Dict[str, Any], model_id: str
+) -> List[Tuple[int, int]]:
+    """BFS des hexes atteignables pour UNE figurine (move par-figurine, squad.md).
+
+    Move normal : budget = MOVE de l'escouade (subhexes). Origine = position
+    courante de la figurine dans models_cache (= position de debut de phase, car
+    les moves par-figurine ne sont pas committes avant Validate).
+
+    Sol (non-Fly) : ne traverse jamais mur / hex occupe par un ennemi / bande
+    d'engagement ennemie (enemy_adjacent_hexes). Les hexes allies sont
+    traversables. Fly : traversal libre, seule la destination est validee.
+
+    Destination retenue selon les memes regles que validate_move_plan (1 fig,
+    sans coherency) : dans le plateau, hors mur, hors collision avec une AUTRE
+    escouade, hors zone d'engagement ennemie. Les overlaps avec une coequipiere
+    sont geres par preview_move_plan sur le plan complet. Lecture pure.
+
+    Retourne la liste des (col, row) atteignables, origine exclue.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    model = models_cache.get(str(model_id))
+    if model is None:
+        raise KeyError(
+            f"movement_build_model_destinations_pool: model {model_id} not in models_cache"
+        )
+    squad_id = str(model["squad_id"])
+    unit = get_unit_by_id(game_state, squad_id)
+    if not unit:
+        return []
+
+    budget = get_squad_move_budget(squad_id, game_state, "normal")
+    start_col = int(model["col"])
+    start_row = int(model["row"])
+    start_pos = (start_col, start_row)
+
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    wall_hexes = game_state.get("wall_hexes", set())
+
+    player = int(model["player"])
+    cache_key = f"enemy_adjacent_hexes_player_{player}"
+    enemy_adjacent_hexes = game_state.get(cache_key)
+    if enemy_adjacent_hexes is None:
+        enemy_adjacent_hexes = build_enemy_adjacent_hexes(game_state, player)
+    enemy_occupied = build_enemy_occupied_positions_set(game_state, current_player=player)
+
+    # Cellules occupees par les AUTRES escouades (collision destination interdite).
+    other_occupied: Set[Tuple[int, int]] = set()
+    for sid, entry in game_state.get("units_cache", {}).items():
+        if str(sid) == squad_id:
+            continue
+        occ = entry.get("occupied_hexes")
+        if occ:
+            for cell in occ:
+                other_occupied.add((int(cell[0]), int(cell[1])))
+
+    has_fly = _unit_has_keyword(unit, "fly")
+
+    visited: Set[Tuple[int, int]] = {start_pos}
+    reachable: List[Tuple[int, int]] = []
+    queue: deque = deque([(start_col, start_row, 0)])
+    while queue:
+        c, r, d = queue.popleft()
+        if d >= budget:
+            continue
+        for nc, nr in get_hex_neighbors(c, r):
+            if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                continue
+            cell = (nc, nr)
+            if cell in visited:
+                continue
+            if not has_fly and (
+                cell in wall_hexes or cell in enemy_occupied or cell in enemy_adjacent_hexes
+            ):
+                continue
+            visited.add(cell)
+            queue.append((nc, nr, d + 1))
+            # Validite destination (regles validate_move_plan, 1 fig, sans coherency).
+            if cell in wall_hexes or cell in other_occupied or cell in enemy_adjacent_hexes:
+                continue
+            reachable.append(cell)
+    return reachable
+
+
+def movement_preview_move_plan(
+    game_state: Dict[str, Any], squad_id: str, plan: List[Tuple[str, int, int]]
+) -> Dict[str, Any]:
+    """Dry-run d'un plan provisoire par-figurine (move normal). Aucune ecriture.
+
+    ``plan`` doit contenir TOUTES les figurines vivantes de l'escouade (sinon le
+    test de cohesion est fausse).
+
+    Voile rouge d'une fig = elle est sur un hex INTERDIT (mur, EZ ennemie, overlap
+    avec une autre escouade ou une coequipiere, hors budget) OU hors COHESION 2"
+    (moins du nb requis de voisins dans la distance de cohesion). En single-fig move
+    le pool empeche deja les hex interdits → seul le cas cohesion survient ; en drop
+    d'escouade rigide une fig peut tomber sur un hex interdit → voile rouge.
+
+    Retourne :
+      - per_model: {model_id: bool} — True = fig valide (placement legal ET cohesion).
+        False => voile rouge cote UI.
+      - coherency_ok: bool — cohesion respectee sur l'ensemble du plan.
+      - can_validate: bool — toutes les figs valides (placement + cohesion).
+    """
+    budget = get_squad_move_budget(str(squad_id), game_state, "normal")
+    c_individual = {"budget_per_model": budget, "require_coherency": False}
+    cell_count: Dict[Tuple[int, int], int] = {}
+    for _, nc, nr in plan:
+        key = (int(nc), int(nr))
+        cell_count[key] = cell_count.get(key, 0) + 1
+
+    # Cohesion par COMPOSANTES CONNEXES (squad.md) : on relie les figs distantes de <=
+    # coherency_dist (2"), puis on cherche les groupes connectes. Le groupe STRICTEMENT
+    # majoritaire (taille*2 > effectif total) reste vert ; tout groupe minoritaire ou a
+    # egalite (taille*2 <= total) passe en rouge → 2 moities egales = tout le squad rouge.
+    positions: List[Tuple[int, int]] = [(int(nc), int(nr)) for _, nc, nr in plan]
+    n = len(positions)
+    coherency_dist = get_coherency_subhex(game_state)
+
+    adjacency: List[List[int]] = [[] for _ in range(n)]
+    for i in range(n):
+        ci, ri = positions[i]
+        for j in range(i + 1, n):
+            cj, rj = positions[j]
+            if calculate_hex_distance(ci, ri, cj, rj) <= coherency_dist:
+                adjacency[i].append(j)
+                adjacency[j].append(i)
+
+    comp_id = [-1] * n
+    comp_count = 0
+    for start in range(n):
+        if comp_id[start] != -1:
+            continue
+        stack = [start]
+        comp_id[start] = comp_count
+        while stack:
+            k = stack.pop()
+            for nb in adjacency[k]:
+                if comp_id[nb] == -1:
+                    comp_id[nb] = comp_count
+                    stack.append(nb)
+        comp_count += 1
+
+    comp_size: Dict[int, int] = {}
+    for c in comp_id:
+        comp_size[c] = comp_size.get(c, 0) + 1
+
+    # cohesion_red[i] = la composante de la fig i n'est PAS strictement majoritaire.
+    cohesion_red = [comp_size[comp_id[i]] * 2 <= n for i in range(n)] if n > 1 else [False] * n
+
+    per_model: Dict[str, bool] = {}
+    for idx, (mid, nc, nr) in enumerate(plan):
+        base_valid = validate_move_plan(
+            [(str(mid), int(nc), int(nr))], game_state, c_individual
+        )
+        no_overlap = cell_count[(int(nc), int(nr))] == 1
+        per_model[str(mid)] = bool(base_valid and no_overlap and not cohesion_red[idx])
+
+    coherency_ok = not any(cohesion_red)
+    all_valid = len(per_model) > 0 and all(per_model.values())
+    return {
+        "per_model": per_model,
+        "coherency_ok": coherency_ok,
+        "can_validate": bool(all_valid),
+    }
+
+
+def movement_commit_move_plan_handler(
+    game_state: Dict[str, Any], squad_id: str, action: Dict[str, Any]
+) -> Tuple[bool, Dict[str, Any]]:
+    """Valide (= bouton Validate) puis commit un plan provisoire par-figurine.
+
+    ``action["plan"]`` : liste de ``[model_id, col, row]``, DOIT couvrir toutes
+    les figurines vivantes de l'escouade (sinon la cohesion est fausse). Move
+    normal uniquement.
+
+    Note brique 1 : aucun reactive move n'est declenche ici (move par-figurine) —
+    a ajouter dans une tranche ulterieure si necessaire.
+    """
+    if "plan" not in action:
+        raise KeyError(f"commit_move_plan action missing required 'plan' field: {action}")
+    raw_plan = action["plan"]
+    if not isinstance(raw_plan, list) or not raw_plan:
+        return False, {"error": "empty_move_plan", "unitId": squad_id}
+    plan: List[Tuple[str, int, int]] = []
+    for entry in raw_plan:
+        if not (isinstance(entry, (list, tuple)) and len(entry) == 3):
+            raise ValueError(
+                f"commit_move_plan: plan entry must be [model_id, col, row], got {entry!r}"
+            )
+        plan.append((str(entry[0]), int(entry[1]), int(entry[2])))
+
+    squad_models = require_key(game_state, "squad_models")
+    models_cache = require_key(game_state, "models_cache")
+    alive = {m for m in squad_models.get(str(squad_id), []) if m in models_cache}
+    plan_ids = {mid for mid, _, _ in plan}
+    if plan_ids != alive:
+        return False, {
+            "error": "plan_models_mismatch",
+            "unitId": squad_id,
+            "expected": sorted(alive),
+            "got": sorted(plan_ids),
+        }
+
+    # Validation = MEME regle que le voile rouge du preview (placement par-fig +
+    # cohesion par composantes connexes). Coherent avec ce que l'UI affiche.
+    preview = movement_preview_move_plan(game_state, str(squad_id), plan)
+    if not preview["can_validate"]:
+        return False, {
+            "error": "invalid_move_plan",
+            "unitId": squad_id,
+            "per_model": preview["per_model"],
+            "coherency_ok": preview["coherency_ok"],
+        }
+
+    commit_move(plan, game_state, "normal")
+
+    unit = get_unit_by_id(game_state, squad_id)
+    if not unit:
+        return False, {"error": "unit_not_found", "unitId": squad_id}
+    # Sync ancre de la liste units sur l'ancre recalculee dans units_cache
+    # (commit_move ne touche que models_cache/units_cache).
+    entry = game_state.get("units_cache", {}).get(str(squad_id))
+    if entry is not None:
+        set_unit_coordinates(unit, int(entry["col"]), int(entry["row"]))
+
+    _invalidate_all_destination_pools_after_movement(game_state)
+    movement_clear_preview(game_state)
+
+    result = end_activation(game_state, unit, ACTION, 1, MOVE, MOVE, 1)
+    result.update(
+        {
+            "action": "move",
+            "unitId": unit["id"],
+            "activation_complete": True,
+            "waiting_for_player": False,
+            "reset_mode": "select",
+            "clear_selected_unit": True,
+        }
+    )
+    return True, result
 
 
 def _select_strategic_destination(

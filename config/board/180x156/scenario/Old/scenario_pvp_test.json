@@ -1,0 +1,18 @@
+{
+  "primary_objectives": ["objectives_control"],
+  "wall_ref": "walls-11.json",
+  "objectives_ref": "objectives-51.json",
+  "units": [
+    { "id": 3, "unit_type": "DreadnoughtBallistus", "player": 1, "col": 130, "row": 100 },
+    { "id": 5, "unit_type": "Intercessor", "player": 1, "col": 105, "row": 105 },
+    { "id": 6, "unit_type": "Hellblaster", "player": 1, "col": 122, "row": 122 },
+    { "id": 7, "unit_type": "AssaultIntercessor", "player": 1, "col": 130, "row": 120 },
+    { "id": 8, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 90, "row": 70 },
+    { "id": 101, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 100, "row": 90 },
+    { "id": 102, "unit_type": "Termagant", "player": 2, "col": 40, "row": 45 },
+    { "id": 103, "unit_type": "Genestealer", "player": 2, "col": 50, "row": 40 },
+    { "id": 104, "unit_type": "ScreamerKiller", "player": 2, "col": 45, "row": 60 },
+    { "id": 105, "unit_type": "Hormagaunt", "player": 2, "col": 110, "row": 122 },
+    { "id": 108, "unit_type": "Hormagaunt", "player": 2, "col": 102, "row": 112 }
+  ]
+}

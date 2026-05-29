@@ -3322,6 +3322,16 @@ export const BoardWithAPI: React.FC = () => {
             onBumpMovePreviewOrientation={
               isGameOver ? () => {} : apiProps.onBumpMovePreviewOrientation
             }
+            squadMovePlan={apiProps.squadMovePlan}
+            squadMoveModelPoolRef={apiProps.squadMoveModelPoolRef}
+            onStartSquadModelMove={isGameOver ? async () => {} : apiProps.onStartSquadModelMove}
+            onSelectModelForMove={isGameOver ? async () => {} : apiProps.onSelectModelForMove}
+            onMoveModelInPlan={isGameOver ? () => {} : apiProps.onMoveModelInPlan}
+            onResetModelInPlan={isGameOver ? () => {} : apiProps.onResetModelInPlan}
+            onCommitSquadMovePlan={
+              isGameOver ? async () => {} : apiProps.onCommitSquadMovePlan
+            }
+            onCancelSquadMove={isGameOver ? () => {} : apiProps.onCancelSquadMove}
             onStartAttackPreview={isGameOver ? () => {} : apiProps.onStartAttackPreview}
             onDeployUnit={
               isGameOver ||

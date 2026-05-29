@@ -344,7 +344,7 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
 })
 
 
-_UNITS_CACHE_FRONTEND_KEYS = ("col", "row", "HP_CUR", "player", "orientation")
+_UNITS_CACHE_FRONTEND_KEYS = ("col", "row", "HP_CUR", "player", "orientation", "occupied_hexes_by_model")
 
 # Ne pas omettre les boucles masque sur la base du seul hash client si le contour est petit
 # (évite un aller-retour inutile et reste tolérant aux clients sans cache).
@@ -1195,7 +1195,7 @@ def initialize_engine(scenario_file: Optional[str] = None):
         
         # Use first agent's training config for observation params (all agents should match)
         first_agent = list(agent_keys)[0]
-        training_config_default = config_loader.load_agent_training_config(first_agent, "x10")
+        training_config_default = config_loader.load_agent_training_config(first_agent, "x5_new")
         
         # Add configs to main config
         config["rewards_configs"] = all_rewards_configs  # Multi-agent support
@@ -1221,7 +1221,7 @@ def initialize_engine(scenario_file: Optional[str] = None):
         engine = W40KEngine(
             config=config,
             rewards_config="default",
-            training_config_name="x10",
+            training_config_name="x5_new",
             controlled_agent=first_agent,
             active_agents=None,
             scenario_file=scenario_file,
@@ -1362,7 +1362,7 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
                 shared_rewards = config_loader.load_agent_rewards_config(resolved_forced_agent_key)
                 shared_training_full = config_loader.load_agent_training_config(resolved_forced_agent_key)
                 training_config_default = config_loader.load_agent_training_config(
-                    resolved_forced_agent_key, "x10"
+                    resolved_forced_agent_key, "x5_new"
                 )
             except FileNotFoundError as e:
                 raise FileNotFoundError(
@@ -1399,7 +1399,7 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
 
             # Use first agent's training config for observation params
             first_agent = list(agent_keys)[0]
-            training_config_default = config_loader.load_agent_training_config(first_agent, "x10")
+            training_config_default = config_loader.load_agent_training_config(first_agent, "x5_new")
         
         # PvE mode configuration
         config["pve_mode"] = True
@@ -1424,7 +1424,7 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
         engine = W40KEngine(
             config=config,
             rewards_config="default",
-            training_config_name="x10",
+            training_config_name="x5_new",
             controlled_agent=first_agent,
             active_agents=None,
             scenario_file=scenario_file,
@@ -2009,6 +2009,50 @@ def execute_action():
                 # Read-only preview remains allowed during combat phase.
                 success = None
                 result = None
+
+        # Read-only: BFS des hexes atteignables pour UNE figurine (move par-figurine).
+        if action.get("action") == "move_model_destinations":
+            model_id = action.get("model_id")
+            if model_id is None:
+                return jsonify({
+                    "success": False,
+                    "error": "move_model_destinations requires model_id",
+                }), 400
+            from engine.phase_handlers import movement_handlers as _mh_model
+            pool = _mh_model.movement_build_model_destinations_pool(
+                engine.game_state, str(model_id)
+            )
+            return api_json_response({
+                "success": True,
+                "result": {
+                    "action": "move_model_destinations",
+                    "model_id": str(model_id),
+                    "destinations": [[int(c), int(r)] for c, r in pool],
+                },
+            })
+
+        # Read-only: dry-run d'un plan provisoire par-figurine (rouge/vert + cohesion + can_validate).
+        if action.get("action") == "preview_move_plan":
+            squad_id = action.get("unitId")
+            plan = action.get("plan")
+            if squad_id is None or not isinstance(plan, list):
+                return jsonify({
+                    "success": False,
+                    "error": "preview_move_plan requires unitId and plan (list of [model_id, col, row])",
+                }), 400
+            parsed_plan = [(str(e[0]), int(e[1]), int(e[2])) for e in plan]
+            from engine.phase_handlers import movement_handlers as _mh_plan
+            preview = _mh_plan.movement_preview_move_plan(
+                engine.game_state, str(squad_id), parsed_plan
+            )
+            return api_json_response({
+                "success": True,
+                "result": {
+                    "action": "preview_move_plan",
+                    "unitId": str(squad_id),
+                    **preview,
+                },
+            })
 
         # Read-only preview: valid shoot targets from hypothetical position (move/advance phase preview)
         if action.get("action") == "preview_shoot_from_position":

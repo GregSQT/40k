@@ -307,7 +307,7 @@ class BotControlledEnv(gym.Wrapper):
             (decision_owner, has_valid_actions, eligible_count)
             - decision_owner: 1|2 when eligible units exist, None when no eligible unit
         """
-        action_mask, eligible_units = self.engine.action_decoder.get_action_mask_and_eligible_units(
+        action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(
             self.engine.game_state
         )
         has_valid_actions = bool(np.any(np.asarray(action_mask, dtype=bool)))
@@ -549,11 +549,11 @@ class BotControlledEnv(gym.Wrapper):
 
     def _get_self_play_opponent_action(self) -> int:
         """Get action from frozen self-play opponent model."""
-        action_mask, eligible_units = self.engine.action_decoder.get_action_mask_and_eligible_units(
+        action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(
             self.engine.game_state
         )
         if not eligible_units:
-            return 11
+            return 18
         valid_actions = [i for i in range(len(action_mask)) if action_mask[i]]
         if not valid_actions:
             raise RuntimeError(
@@ -848,10 +848,10 @@ class BotControlledEnv(gym.Wrapper):
 
     def _get_bot_action(self, debug=False) -> int:
         game_state = self.engine.game_state
-        action_mask, eligible_units = self.engine.action_decoder.get_action_mask_and_eligible_units(game_state)
+        action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(game_state)
         if not eligible_units:
             # Pool empty -> advance phase via WAIT/invalid action handling
-            return 11
+            return 18
         valid_actions = [i for i in range(len(action_mask)) if action_mask[i]]
 
         if not valid_actions:
@@ -1166,10 +1166,10 @@ class SelfPlayWrapper(gym.Wrapper):
         """
         if self.frozen_model is None:
             # No frozen model yet - use random valid action
-            action_mask, eligible_units = self.engine.action_decoder.get_action_mask_and_eligible_units(self.engine.game_state)
+            action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(self.engine.game_state)
             if not eligible_units:
                 # Pool empty -> advance phase via WAIT/invalid action handling
-                return 11
+                return 18
             valid_actions = [i for i in range(len(action_mask)) if action_mask[i]]
             if not valid_actions:
                 # AI_IMPLEMENTATION.md: Empty masks indicate a flow/phase bug;
@@ -1182,10 +1182,10 @@ class SelfPlayWrapper(gym.Wrapper):
 
         # Use frozen model to predict action WITH action masking
         # CRITICAL: MaskablePPO requires action_masks parameter for proper masked inference
-        action_mask, eligible_units = self.engine.action_decoder.get_action_mask_and_eligible_units(self.engine.game_state)
+        action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(self.engine.game_state)
         if not eligible_units:
             # Pool empty -> advance phase via WAIT/invalid action handling
-            return 11
+            return 18
         obs = self.engine._build_observation()
 
         # MaskablePPO.predict() expects action_masks as keyword argument

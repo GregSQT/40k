@@ -94,7 +94,11 @@ class RewardCalculator:
         # CRITICAL FIX: Check if this is actually an action result with phase transition attached
         # If result has 'action' field with move/shoot/etc, it's an action - NOT a system response
         # Position data (fromCol/toCol) confirms it's a completed action, not just a prompt
-        is_action_result = result.get("action") in ["move", "shoot", "wait", "flee", "charge", "charge_fail", "fight"]
+        is_action_result = result.get("action") in [
+            "move", "shoot", "wait", "flee", "charge", "charge_fail", "fight",
+            "squad_normal_move", "squad_advance", "squad_fall_back", "squad_wait",
+            "squad_shoot", "squad_charge", "squad_fight",
+        ]
         has_position_data = any(ind in result for ind in ["fromCol", "toCol", "fromRow", "toRow"])
 
         matching_indicators = [ind for ind in system_response_indicators if ind in result]
@@ -134,23 +138,43 @@ class RewardCalculator:
         objective_turn_reward = self._calculate_objective_reward_per_turn(game_state, result)
         if objective_turn_reward:
             reward_breakdown['tactical_bonuses'] += objective_turn_reward
+        # Penalite coherency fin de tour (squad_shaping). Fusionnee dans
+        # objective_turn_reward pour etre propagee par tous les chemins de retour.
+        coherency_penalty = self._calculate_coherency_penalty_per_turn(game_state, result)
+        if coherency_penalty:
+            reward_breakdown['penalties'] += coherency_penalty
+            objective_turn_reward += coherency_penalty
 
         # CRITICAL: Only give rewards to the controlled player.
         # The opponent's actions are part of the environment, not the learning agent.
         controlled_player = require_key(self.config, "controlled_player")
         if require_key(acting_unit, "player") != controlled_player:
-            # No action rewards for opponent, BUT check if game ended.
+            # Symetrie alliee : un tir/combat adverse qui detruit nos figurines
+            # genere un signal negatif dense (proportionnel aux points). Le wrapper
+            # BotControlledEnv accumule ce reward dans le step de l agent (credit
+            # assignment correct). Miroir exact du path offensif squad.
+            defensive_penalty = 0.0
+            opp_action = result.get("action")
+            if opp_action in ("squad_shoot", "squad_fight"):
+                res_key = "shoot_result" if opp_action == "squad_shoot" else "fight_result"
+                combat = require_key(result, res_key)
+                shaping = require_key(self._get_unit_reward_config(acting_unit), "squad_shaping")
+                defensive_penalty = -self._squad_combat_shaping(
+                    combat, lambda p: p == controlled_player, shaping
+                )
+            reward_breakdown['penalties'] += defensive_penalty
+
             # If the opponent ends the game, the controlled player still needs
             # the terminal win/lose/draw situational reward.
             if game_state.get("game_over", False):
                 situational_reward = self._get_situational_reward(game_state)
                 reward_breakdown['situational'] = situational_reward
-                reward_breakdown['total'] = situational_reward
+                reward_breakdown['total'] = situational_reward + defensive_penalty
                 game_state['last_reward_breakdown'] = reward_breakdown
-                return situational_reward
+                return reward_breakdown['total']
 
-            # Game not over - no reward for opponent's actions
-            reward_breakdown['total'] = objective_turn_reward
+            # Game not over : seul le signal defensif (+ objectif) revient a l agent.
+            reward_breakdown['total'] = objective_turn_reward + defensive_penalty
             game_state['last_reward_breakdown'] = reward_breakdown
             return reward_breakdown['total']
 
@@ -396,7 +420,34 @@ class RewardCalculator:
 
             game_state['last_reward_breakdown'] = reward_breakdown
             return fight_reward
-            
+
+        elif action_type in ("squad_shoot", "squad_fight"):
+            # Reward shaping proportionnel aux points (spec squad.md).
+            # Cote offensif uniquement : les events ciblent toujours des ennemis.
+            # La symetrie alliee (pertes propres) ne passe pas par ce path car les
+            # actions adverses ne generent pas de reward (cf. early-return ligne ~144).
+            shaping = require_key(self._get_unit_reward_config(acting_unit), "squad_shaping")
+            res_key = "shoot_result" if action_type == "squad_shoot" else "fight_result"
+            combat = require_key(result, res_key)
+            acting_player = require_key(acting_unit, "player")
+            # Cote offensif : degats infliges aux ennemis (tout joueur != acting).
+            squad_reward = self._squad_combat_shaping(
+                combat, lambda p: p != acting_player, shaping
+            )
+
+            squad_total = squad_reward + objective_turn_reward
+            reward_breakdown['result_bonuses'] = squad_reward
+            reward_breakdown['total'] = squad_total
+
+            if game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward(game_state)
+                reward_breakdown['situational'] = situational_reward
+                squad_total += situational_reward
+                reward_breakdown['total'] = squad_total
+
+            game_state['last_reward_breakdown'] = reward_breakdown
+            return squad_total
+
         elif action_type == "wait":
             # FIXED: Wait means agent chose not to act when action was available
             current_phase = require_key(game_state, "phase")
@@ -492,6 +543,140 @@ class RewardCalculator:
 
             game_state['last_reward_breakdown'] = reward_breakdown
             return no_effect_reward
+
+        # ── Actions squad pipeline ────────────────────────────────────────────
+
+        elif action_type in ("squad_normal_move", "squad_fall_back"):
+            on_obj_reward = self._calculate_on_objective_reward(game_state, result)
+            movement_reward = on_obj_reward + objective_turn_reward
+            reward_breakdown['base_actions'] = 0.0
+            reward_breakdown['total'] = movement_reward
+            if game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward(game_state)
+                reward_breakdown['situational'] = situational_reward
+                movement_reward += situational_reward
+                reward_breakdown['total'] = movement_reward
+            game_state['last_reward_breakdown'] = reward_breakdown
+            return movement_reward
+
+        elif action_type == "squad_advance":
+            on_obj_reward = self._calculate_on_objective_reward(game_state, result)
+            advance_reward = on_obj_reward + objective_turn_reward
+            reward_breakdown['base_actions'] = 0.0
+            reward_breakdown['total'] = advance_reward
+            if game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward(game_state)
+                reward_breakdown['situational'] = situational_reward
+                advance_reward += situational_reward
+                reward_breakdown['total'] = advance_reward
+            game_state['last_reward_breakdown'] = reward_breakdown
+            return advance_reward
+
+        elif action_type == "squad_wait":
+            current_phase = require_key(game_state, "phase")
+            if current_phase == "move":
+                wait_reward = self.calculate_reward_from_config(acting_unit, {"type": "move_wait"}, success, game_state)
+            else:
+                wait_reward = self.calculate_reward_from_config(acting_unit, {"type": "wait"}, success, game_state)
+            reward_breakdown['base_actions'] = wait_reward
+            reward_breakdown['penalties'] = wait_reward
+            wait_reward += objective_turn_reward
+            reward_breakdown['total'] = wait_reward
+            if game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward(game_state)
+                reward_breakdown['situational'] = situational_reward
+                wait_reward += situational_reward
+                reward_breakdown['total'] = wait_reward
+            game_state['last_reward_breakdown'] = reward_breakdown
+            return wait_reward
+
+        elif action_type == "squad_shoot":
+            shoot_result = result.get("shoot_result", {})
+            attacks_made = shoot_result.get("attacks_made", 0)
+            if attacks_made == 0:
+                reward_breakdown['total'] = objective_turn_reward
+                game_state['last_reward_breakdown'] = reward_breakdown
+                return objective_turn_reward
+            unit_rewards = self._get_unit_reward_config(acting_unit)
+            base_actions = require_key(unit_rewards, "base_actions")
+            result_bonuses = unit_rewards.get("result_bonuses", {})
+            base = float(base_actions.get("ranged_attack", 0.0))
+            kill_bonus = float(result_bonuses.get("kill_target", 0.0)) * shoot_result.get("models_killed", 0)
+            calculated = base + kill_bonus + objective_turn_reward
+            reward_breakdown['base_actions'] = base
+            reward_breakdown['result_bonuses'] = kill_bonus
+            reward_breakdown['total'] = calculated
+            if game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward(game_state)
+                reward_breakdown['situational'] = situational_reward
+                calculated += situational_reward
+                reward_breakdown['total'] = calculated
+            game_state['last_reward_breakdown'] = reward_breakdown
+            return calculated
+
+        elif action_type == "squad_charge":
+            charge_succeeded = result.get("charge_succeeded", False)
+            if not charge_succeeded:
+                unit_rewards = self._get_unit_reward_config(acting_unit)
+                charge_fail_val = float(require_key(require_key(unit_rewards, "base_actions"), "charge_fail"))
+                charge_fail_val += objective_turn_reward
+                reward_breakdown['base_actions'] = charge_fail_val - objective_turn_reward
+                reward_breakdown['penalties'] = charge_fail_val - objective_turn_reward
+                reward_breakdown['total'] = charge_fail_val
+                if game_state.get("game_over", False):
+                    situational_reward = self._get_situational_reward(game_state)
+                    reward_breakdown['situational'] = situational_reward
+                    charge_fail_val += situational_reward
+                    reward_breakdown['total'] = charge_fail_val
+                game_state['last_reward_breakdown'] = reward_breakdown
+                return charge_fail_val
+            target_squad_id = result.get("target_squad_id")
+            if target_squad_id is None:
+                raise ValueError(f"squad_charge succeeded but missing target_squad_id: {result}")
+            target = get_unit_by_id(str(target_squad_id), game_state)
+            if not target:
+                raise ValueError(f"Charge target not found: {target_squad_id}")
+            enriched_target = self._enrich_unit_for_reward_mapper(target)
+            all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit, game_state)]
+            charge_reward = reward_mapper.get_charge_priority_reward(enriched_unit, enriched_target, all_targets, game_state) + objective_turn_reward
+            reward_breakdown['base_actions'] = charge_reward - objective_turn_reward
+            reward_breakdown['total'] = charge_reward
+            if game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward(game_state)
+                reward_breakdown['situational'] = situational_reward
+                charge_reward += situational_reward
+                reward_breakdown['total'] = charge_reward
+            game_state['last_reward_breakdown'] = reward_breakdown
+            return charge_reward
+
+        elif action_type == "squad_fight":
+            target_squad_id = result.get("target_squad_id")
+            if target_squad_id is None:
+                raise ValueError(f"squad_fight missing target_squad_id: {result}")
+            target = get_unit_by_id(str(target_squad_id), game_state)
+            if not target:
+                raise ValueError(f"Fight target not found: {target_squad_id}")
+            enriched_target = self._enrich_unit_for_reward_mapper(target) if is_unit_alive(str(target["id"]), game_state) else target
+            all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit, game_state)]
+            fight_result = result.get("fight_result", {})
+            fight_reward = reward_mapper.get_combat_priority_reward(enriched_unit, enriched_target, all_targets, game_state) + objective_turn_reward
+            reward_breakdown['base_actions'] = fight_reward - objective_turn_reward
+            reward_breakdown['total'] = fight_reward
+            models_killed = fight_result.get("models_killed", 0)
+            if models_killed > 0:
+                unit_rewards = self._get_unit_reward_config(acting_unit)
+                result_bonuses_cfg = require_key(unit_rewards, "result_bonuses")
+                kill_bonus = float(result_bonuses_cfg.get("kill_target", 0.0))
+                fight_reward += kill_bonus
+                reward_breakdown['result_bonuses'] = kill_bonus
+                reward_breakdown['total'] = fight_reward
+            if game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward(game_state)
+                reward_breakdown['situational'] = situational_reward
+                fight_reward += situational_reward
+                reward_breakdown['total'] = fight_reward
+            game_state['last_reward_breakdown'] = reward_breakdown
+            return fight_reward
 
         # NO FALLBACK - Raise error to identify missing action types
         raise ValueError(f"Unhandled action type '{action_type}' in _calculate_reward. Result: {result}")
@@ -650,6 +835,37 @@ class RewardCalculator:
                 return unit
         return None
 
+    def _calculate_coherency_penalty_per_turn(self, game_state: Dict[str, Any], result: Dict[str, Any]) -> float:
+        """Penalite -incoherent_weight par escouade du joueur controle hors coherency.
+        Appliquee une fois par tour, au meme hook que l OC (entree en phase move).
+        `is_coherent` est maintenu en temps reel dans squad_cache par destroy_model
+        et update_model_position. Retourne <= 0.
+        """
+        if not result.get("phase_transition") or result.get("next_phase") != "move":
+            return 0.0
+        controlled_player = int(require_key(self.config, "controlled_player"))
+        current_turn = require_key(game_state, "turn")
+        penalized = require_key(game_state, "coherency_penalized_turns")
+        key = (current_turn, controlled_player)
+        if key in penalized:
+            return 0.0
+        acting_unit = self._get_controlled_player_unit(game_state)
+        if not acting_unit:
+            return 0.0
+        shaping = require_key(self._get_unit_reward_config(acting_unit), "squad_shaping")
+        incoherent_w = float(require_key(shaping, "incoherent_weight"))
+        units_cache = require_key(game_state, "units_cache")
+        squad_cache = require_key(game_state, "squad_cache")
+        incoherent_count = 0
+        for sid, entry in units_cache.items():
+            if int(entry["player"]) != controlled_player:
+                continue
+            sc = require_key(squad_cache, str(sid))
+            if not bool(require_key(sc, "is_coherent")):
+                incoherent_count += 1
+        penalized.add(key)
+        return -incoherent_w * incoherent_count
+
     def _calculate_objective_reward_per_turn(self, game_state: Dict[str, Any], result: Dict[str, Any]) -> float:
         """
         Reward controlled player based on objectives controlled at turn start.
@@ -780,6 +996,36 @@ class RewardCalculator:
         
         return total_reward
     
+    def _squad_combat_shaping(self, combat: Dict[str, Any], is_victim, shaping: Dict[str, Any]) -> float:
+        """Valeur proportionnelle-points des degats subis par les figurines dont
+        `is_victim(target_player)` est vrai, dans un summary de resolve_squad_*.
+        Toujours positif — l appelant applique le signe (offensif +, defensif -).
+
+        Composantes (spec squad.md) :
+          - points_per_hp * hp_damage_weight * damage  (par HP retire)
+          - (value / model_count_at_start) * model_kill_bonus_factor  (par fig tuee)
+          - value * squad_kill_bonus_factor  (par escouade wipe)
+        """
+        hp_w = float(require_key(shaping, "hp_damage_weight"))
+        kill_f = float(require_key(shaping, "model_kill_bonus_factor"))
+        wipe_f = float(require_key(shaping, "squad_kill_bonus_factor"))
+        targets_meta = require_key(combat, "targets_meta")
+        total = 0.0
+        for ev in require_key(combat, "events"):
+            if not is_victim(int(ev["target_player"])):
+                continue
+            total += float(ev["points_per_hp"]) * hp_w * int(ev["damage"])
+            if ev["destroyed"]:
+                meta = require_key(targets_meta, ev["target_squad_id"])
+                mcs = int(require_key(meta, "model_count_at_start"))
+                if mcs > 0:
+                    total += (float(require_key(meta, "value")) / mcs) * kill_f
+        for sid in require_key(combat, "squads_wiped"):
+            meta = require_key(targets_meta, sid)
+            if is_victim(int(require_key(meta, "player"))):
+                total += float(require_key(meta, "value")) * wipe_f
+        return total
+
     def _get_system_penalties(self):
         """Get system penalty values from rewards config."""
         # Import here to avoid circular dependency

@@ -26,6 +26,9 @@ export function setupBoardClickHandler(callbacks: {
   onChargeEnemyUnit?(chargerId: UnitId, enemyUnitId: UnitId): void;
   onStartMovePreview?(unitId: UnitId, col: number, row: number): void;
   onDirectMove?(unitId: UnitId, col: number, row: number, orientation?: number): void;
+  // Move par-figurine (squad.md brique 3)
+  onStartSquadModelMove?(unitId: UnitId): void;
+  onMoveModelInPlan?(modelId: string, col: number, row: number): void;
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action callbacks
   onAdvanceMove?(unitId: UnitId, destCol: number, destRow: number): void;
   onDeployUnit?(unitId: UnitId, destCol: number, destRow: number): void;
@@ -176,6 +179,35 @@ export function setupBoardClickHandler(callbacks: {
   globalClickHandler = unitClickHandler;
   window.addEventListener("boardUnitClick", globalClickHandler);
 
+  // Double-click on a unit (left button, e.detail===2) → enter movePreview at unit origin.
+  // Move phase only; other phases ignore the event for now.
+  const existingDoubleClickHandler = (window as unknown as Record<string, unknown>)
+    .boardUnitDoubleClickHandler as ((e: Event) => void) | undefined;
+  if (existingDoubleClickHandler) {
+    window.removeEventListener("boardUnitDoubleClick", existingDoubleClickHandler);
+  }
+  const unitDoubleClickHandler = (e: Event) => {
+    const { unitId, unitCol, unitRow, phase } = (
+      e as CustomEvent<{
+        unitId: number;
+        unitCol: number;
+        unitRow: number;
+        phase: string;
+        mode: string;
+        selectedUnitId: number | null;
+      }>
+    ).detail;
+    console.log("[DEBUG boardUnitDoubleClick]", { unitId, unitCol, unitRow, phase });
+    if (phase !== "move") return;
+    if (!callbacks.onStartMovePreview) {
+      throw new Error("onStartMovePreview callback is required to enter movePreview on double-click");
+    }
+    callbacks.onStartMovePreview(unitId, unitCol, unitRow);
+  };
+  (window as unknown as Record<string, unknown>).boardUnitDoubleClickHandler =
+    unitDoubleClickHandler;
+  window.addEventListener("boardUnitDoubleClick", unitDoubleClickHandler);
+
   // Remove existing charge cancel handler before adding new one
   const existingCancelHandler = (window as unknown as Record<string, unknown>)
     .cancelChargeHandler as (() => void) | undefined;
@@ -214,7 +246,7 @@ export function setupBoardClickHandler(callbacks: {
   window.addEventListener("boardSkipShoot", skipShootHandler);
 
   globalHexClickHandler = (e: Event) => {
-    const { col, row, phase, mode, selectedUnitId, orientation } = (
+    const { col, row, phase, mode, selectedUnitId, orientation, activeModelId } = (
       e as CustomEvent<{
         col: number;
         row: number;
@@ -222,8 +254,17 @@ export function setupBoardClickHandler(callbacks: {
         mode: string;
         selectedUnitId: number | null;
         orientation?: number;
+        activeModelId?: string | null;
       }>
     ).detail;
+    console.log("[DEBUG boardHexClick]", { col, row, phase, mode, selectedUnitId, activeModelId });
+    if (mode === "squadModelMove") {
+      // Plan provisoire : pose la figurine active a l'hex clique (dans son pool BFS).
+      if (activeModelId && callbacks.onMoveModelInPlan) {
+        callbacks.onMoveModelInPlan(activeModelId, col, row);
+      }
+      return;
+    }
     if (mode === "chargePreview" && selectedUnitId !== null) {
       if (callbacks.onMoveCharger) {
         callbacks.onMoveCharger(selectedUnitId, col, row);
@@ -255,7 +296,14 @@ export function setupBoardClickHandler(callbacks: {
       if (callbacks.onPileInMove) {
         callbacks.onPileInMove(selectedUnitId, col, row);
       }
+    } else if (mode === "movePreview" && phase === "move") {
+      // Move phase: hover keeps movePreview.dest snapped to the valid pool, so a
+      // left-click anywhere confirms the move at the currently previewed destination.
+      // Cancellation in move phase is via right-click on the active unit (boardUnitClick).
+      console.log("[DEBUG] → onConfirmMove (move phase + movePreview)");
+      callbacks.onConfirmMove();
     } else if (mode === "movePreview") {
+      console.log("[DEBUG] → onCancelMove (movePreview mode, non-move phase)");
       callbacks.onCancelMove?.();
     }
   };

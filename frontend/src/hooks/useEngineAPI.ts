@@ -409,6 +409,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [mode, setMode] = useState<
     | "select"
     | "movePreview"
+    | "squadModelMove"
     | "attackPreview"
     | "targetPreview"
     | "chargePreview"
@@ -425,6 +426,25 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [pendingPreviewAction, setPendingPreviewAction] = useState<
     "move" | "move_after_shooting" | null
   >(null);
+  /**
+   * Move par-figurine (squad.md brique 3) — plan provisoire NON committe au backend.
+   * ``models`` : position provisoire de chaque figurine (model_id -> {col,row}).
+   * ``perModelValid`` : voile rouge (false = position interdite ou hors cohesion).
+   * ``canValidate`` : toutes les figs valides + cohesion OK (bouton Validate actif).
+   */
+  const [squadMovePlan, setSquadMovePlan] = useState<{
+    unitId: number;
+    /** Positions provisoires courantes (model_id -> {col,row}). */
+    models: Record<string, { col: number; row: number }>;
+    /** Positions de DEBUT de mode (pour reset par-fig clic droit + cancel escouade). */
+    originModels: Record<string, { col: number; row: number }>;
+    activeModelId: string | null;
+    perModelValid: Record<string, boolean>;
+    coherencyOk: boolean;
+    canValidate: boolean;
+  } | null>(null);
+  /** Pool BFS (hexes atteignables) de la figurine en cours de repositionnement. */
+  const squadMoveModelPoolRef = useRef<Set<string>>(new Set());
   const [attackPreview, setAttackPreview] = useState<{
     unitId: number;
     col: number;
@@ -2715,6 +2735,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if ((mode === "advancePreview" || mode === "chargePreview") && numericUnitId !== null) {
         return;
       }
+      // En mode plan par-figurine, bloquer les clics PIXI (onSelectUnit) pour éviter que
+      // handleSelectUnit remette mode="select" (l'unité n'est plus dans moveActivationPool
+      // après activate_unit). La sélection est gérée par onPointerDownSelect (positions provisoires).
+      if (mode === "squadModelMove" && numericUnitId !== null) {
+        return;
+      }
 
       // Shooting phase click handling
       if (gameState && gameState.phase === "shoot") {
@@ -3050,10 +3076,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   const handleStartMovePreview = useCallback(
     (unitId: number | string, col: number | string, row: number | string) => {
+      console.log("[DEBUG handleStartMovePreview]", {
+        unitId,
+        col,
+        row,
+        phase: gameState?.phase,
+        pendingPreviewAction,
+      });
       const parsedUnitId = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
       const orientation = readEngineOrientationStepFromGameState(unitId);
       if (gameState?.phase === "shoot") {
         if (pendingPreviewAction !== "move_after_shooting") {
+          console.log("[DEBUG handleStartMovePreview] shoot phase early-return (wrong pendingPreviewAction)");
           return;
         }
         setMovePreview({
@@ -3065,6 +3099,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setMode("movePreview");
         return;
       }
+      console.log("[DEBUG handleStartMovePreview] setting mode=movePreview");
       setMovePreview({
         unitId: parsedUnitId,
         destCol: typeof col === "string" ? parseInt(col, 10) : col,
@@ -3084,6 +3119,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       row: number | string,
       orientation?: number
     ) => {
+      console.log("[DEBUG handleDirectMove] called", { unitId, col, row, orientation });
       const action: {
         action: "move";
         unitId: string;
@@ -3104,7 +3140,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
 
       try {
-        await executeAction(action);
+        console.log("[DEBUG handleDirectMove] executeAction", action);
+        const result = await executeAction(action);
+        const u8 = result?.game_state?.units?.find?.(
+          (u: { id?: number | string; col?: number; row?: number }) =>
+            String(u.id) === String(action.unitId)
+        );
+        const u8Cache = (result?.game_state?.units_cache as Record<string, unknown>)?.[
+          String(action.unitId)
+        ] as { col?: number; row?: number; occupied_hexes_by_model?: Record<string, [number, number]> } | undefined;
+        const occVals = u8Cache?.occupied_hexes_by_model
+          ? JSON.stringify(Object.values(u8Cache.occupied_hexes_by_model))
+          : "(none)";
+        console.log(
+          `[DEBUG handleDirectMove] returned success=${result?.success} | units[${action.unitId}]=(${u8?.col},${u8?.row}) | cache=(${u8Cache?.col},${u8Cache?.row}) | occupied=${occVals}`
+        );
         setMovePreview(null);
         setPendingPreviewAction(null);
         setMode("select");
@@ -3140,6 +3190,199 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     },
     [validateOrientationStep]
   );
+
+  /**
+   * Requete read-only vers le moteur (pool BFS fig / dry-run plan provisoire).
+   * Ne passe PAS par executeAction : la reponse n'a pas de game_state et ne doit
+   * pas declencher le traitement d'etat principal. Retourne ``data.result``.
+   */
+  const postEngineQuery = useCallback(
+    async (action: Record<string, unknown>): Promise<Record<string, unknown> | null> => {
+      console.log("[SQUAD-MOVE] query →", action.action, action);
+      const response = await fetch(`${API_BASE}/game/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(action),
+      });
+      if (!response.ok) {
+        console.warn("[SQUAD-MOVE] query HTTP error", action.action, response.status);
+        throw new Error(`Engine query failed: ${response.status}`);
+      }
+      const data = await response.json();
+      if (data?.success === false) {
+        console.warn("[SQUAD-MOVE] query backend error", action.action, data?.error);
+        throw new Error(typeof data?.error === "string" ? data.error : "engine query failed");
+      }
+      console.log("[SQUAD-MOVE] query ←", action.action, data?.result);
+      return (data?.result ?? null) as Record<string, unknown> | null;
+    },
+    []
+  );
+
+  /** Positions par-figurine actuelles d'une escouade (depuis units_cache.occupied_hexes_by_model). */
+  const readSquadModelPositions = useCallback(
+    (unitId: number | string): Record<string, { col: number; row: number }> => {
+      const entry = (
+        gameState?.units_cache as
+          | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+          | undefined
+      )?.[String(unitId)];
+      const byModel = entry?.occupied_hexes_by_model;
+      const out: Record<string, { col: number; row: number }> = {};
+      if (byModel) {
+        for (const [mid, pos] of Object.entries(byModel)) {
+          out[mid] = { col: pos[0], row: pos[1] };
+        }
+      }
+      return out;
+    },
+    [gameState?.units_cache]
+  );
+
+  /** Dry-run du plan provisoire → maj voile rouge / cohesion / can_validate. */
+  const refreshSquadMovePlanValidity = useCallback(
+    async (unitId: number, models: Record<string, { col: number; row: number }>) => {
+      const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row]);
+      const result = await postEngineQuery({
+        action: "preview_move_plan",
+        unitId: String(unitId),
+        plan,
+      });
+      const perModelValid = (result?.per_model ?? {}) as Record<string, boolean>;
+      const coherencyOk = result?.coherency_ok === true;
+      const canValidate = result?.can_validate === true;
+      const redModels = Object.entries(perModelValid)
+        .filter(([, ok]) => !ok)
+        .map(([mid]) => mid);
+      console.log(
+        `[SQUAD-MOVE] validity unit=${unitId} canValidate=${canValidate} coherencyOk=${coherencyOk} red=[${redModels.join(",")}]`
+      );
+      setSquadMovePlan((prev) =>
+        prev && prev.unitId === unitId
+          ? { ...prev, perModelValid, coherencyOk, canValidate }
+          : prev
+      );
+    },
+    [postEngineQuery]
+  );
+
+  /** Double-clic escouade / simple-clic fig : entre en mode plan provisoire par-figurine. */
+  const handleStartSquadModelMove = useCallback(
+    async (unitId: number | string) => {
+      const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      const models = readSquadModelPositions(uid);
+      console.log(
+        `[SQUAD-MOVE] startSquadModelMove unit=${uid} models=${Object.keys(models).length}`,
+        models
+      );
+      if (Object.keys(models).length === 0) {
+        console.warn(`[SQUAD-MOVE] startSquadModelMove ABORT unit=${uid} (aucune fig dans occupied_hexes_by_model)`);
+        return;
+      }
+      squadMoveModelPoolRef.current = new Set();
+      setSquadMovePlan({
+        unitId: uid,
+        models,
+        originModels: { ...models },
+        activeModelId: null,
+        perModelValid: {},
+        coherencyOk: true,
+        canValidate: false,
+      });
+      setMode("squadModelMove");
+      setSelectedUnitId(uid);
+      await refreshSquadMovePlanValidity(uid, models);
+    },
+    [readSquadModelPositions, refreshSquadMovePlanValidity]
+  );
+
+  /** Selectionne la figurine a repositionner : recupere sa BFS (move_model_destinations). */
+  const handleSelectModelForMove = useCallback(
+    async (modelId: string) => {
+      const result = await postEngineQuery({
+        action: "move_model_destinations",
+        model_id: modelId,
+      });
+      const dests = (result?.destinations ?? []) as Array<[number, number]>;
+      const set = new Set<string>();
+      for (const [c, r] of dests) {
+        set.add(`${c},${r}`);
+      }
+      squadMoveModelPoolRef.current = set;
+      console.log(`[SQUAD-MOVE] selectModel active=${modelId} poolSize=${set.size}`);
+      setSquadMovePlan((prev) => (prev ? { ...prev, activeModelId: modelId } : prev));
+    },
+    [postEngineQuery]
+  );
+
+  /** Pose la figurine active a (col,row) dans le plan provisoire + refresh validite. */
+  const handleMoveModelInPlan = useCallback(
+    (modelId: string, col: number, row: number) => {
+      console.log(`[SQUAD-MOVE] moveModelInPlan model=${modelId} → (${col},${row}) [pose + deselect]`);
+      // Fig posee → on la deselectionne (vide le pool, sort du preview de cette fig).
+      squadMoveModelPoolRef.current = new Set();
+      setSquadMovePlan((prev) => {
+        if (!prev) return prev;
+        const models = { ...prev.models, [modelId]: { col, row } };
+        void refreshSquadMovePlanValidity(prev.unitId, models);
+        return { ...prev, models, activeModelId: null };
+      });
+    },
+    [refreshSquadMovePlanValidity]
+  );
+
+  /** Clic droit sur la fig active : annule SON deplacement → retour position de debut de phase. */
+  const handleResetModelInPlan = useCallback(
+    (modelId: string) => {
+      console.log(`[SQUAD-MOVE] resetModelInPlan model=${modelId} → origine`);
+      setSquadMovePlan((prev) => {
+        if (!prev) return prev;
+        const origin = prev.originModels[modelId];
+        if (!origin) return prev;
+        const models = { ...prev.models, [modelId]: { ...origin } };
+        void refreshSquadMovePlanValidity(prev.unitId, models);
+        return { ...prev, models };
+      });
+    },
+    [refreshSquadMovePlanValidity]
+  );
+
+  /** Bouton Validate : commit atomique du plan complet (commit_move_plan). */
+  const handleCommitSquadMovePlan = useCallback(async () => {
+    if (!squadMovePlan) {
+      console.warn("[SQUAD-MOVE] commit ABORT (pas de plan)");
+      return;
+    }
+    if (!squadMovePlan.canValidate) {
+      console.warn("[SQUAD-MOVE] commit ABORT (canValidate=false, il reste du rouge)");
+      return;
+    }
+    const plan = Object.entries(squadMovePlan.models).map(([mid, p]) => [mid, p.col, p.row]);
+    console.log(`[SQUAD-MOVE] commit unit=${squadMovePlan.unitId}`, plan);
+    try {
+      await executeAction({
+        action: "commit_move_plan",
+        unitId: String(squadMovePlan.unitId),
+        plan,
+      });
+      console.log(`[SQUAD-MOVE] commit OK unit=${squadMovePlan.unitId}`);
+      squadMoveModelPoolRef.current = new Set();
+      setSquadMovePlan(null);
+      setMode("select");
+      setSelectedUnitId(null);
+    } catch (e) {
+      console.error("[SQUAD-MOVE] commit FAILED", e);
+    }
+  }, [squadMovePlan, executeAction]);
+
+  /** Annule le plan provisoire (aucune ecriture backend). */
+  const handleCancelSquadMove = useCallback(() => {
+    console.log("[SQUAD-MOVE] cancel (plan abandonne)");
+    squadMoveModelPoolRef.current = new Set();
+    setSquadMovePlan(null);
+    setMode("select");
+    setSelectedUnitId(null);
+  }, []);
 
   const shouldShowRetreatAlert = useCallback((): boolean => {
     return readRequiredBooleanSetting(RETREAT_ALERT_STORAGE_KEY, true);
@@ -3244,50 +3487,67 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [executeAction]
   );
 
+  const confirmMoveInFlightRef = useRef(false);
   const handleConfirmMove = useCallback(async () => {
+    console.log("[DEBUG handleConfirmMove] called", {
+      movePreview,
+      pendingPreviewAction,
+      inFlight: confirmMoveInFlightRef.current,
+      ts: performance.now(),
+    });
+    if (confirmMoveInFlightRef.current) {
+      console.log("[DEBUG handleConfirmMove] already in-flight, skip duplicate");
+      return;
+    }
     if (!movePreview) {
+      console.log("[DEBUG handleConfirmMove] movePreview null, abort");
       return;
     }
+    confirmMoveInFlightRef.current = true;
 
-    if (pendingPreviewAction === "move_after_shooting") {
-      await executeAction({
-        action: "move_after_shooting",
-        unitId: movePreview.unitId.toString(),
-        destCol: movePreview.destCol,
-        destRow: movePreview.destRow,
-      });
-      setMovePreview(null);
-      setPendingPreviewAction(null);
-      setPostShootMoveDestinations([]);
-      setMode("select");
-      return;
-    }
-
-    if (pendingPreviewAction === "move" || pendingPreviewAction == null) {
-      const willFlee = isFleeMovePreview(
-        movePreview.unitId,
-        movePreview.destCol,
-        movePreview.destRow
-      );
-      if (willFlee && shouldShowRetreatAlert()) {
-        setFleeWarningPopup({
-          unitId: movePreview.unitId,
+    try {
+      if (pendingPreviewAction === "move_after_shooting") {
+        await executeAction({
+          action: "move_after_shooting",
+          unitId: movePreview.unitId.toString(),
           destCol: movePreview.destCol,
           destRow: movePreview.destRow,
-          dontRemind: false,
-          timestamp: Date.now(),
         });
+        setMovePreview(null);
+        setPendingPreviewAction(null);
+        setPostShootMoveDestinations([]);
+        setMode("select");
         return;
       }
-    }
 
-    await handleDirectMove(
-      movePreview.unitId,
-      movePreview.destCol,
-      movePreview.destRow,
-      movePreview.orientation
-    );
-    setPendingPreviewAction(null);
+      if (pendingPreviewAction === "move" || pendingPreviewAction == null) {
+        const willFlee = isFleeMovePreview(
+          movePreview.unitId,
+          movePreview.destCol,
+          movePreview.destRow
+        );
+        if (willFlee && shouldShowRetreatAlert()) {
+          setFleeWarningPopup({
+            unitId: movePreview.unitId,
+            destCol: movePreview.destCol,
+            destRow: movePreview.destRow,
+            dontRemind: false,
+            timestamp: Date.now(),
+          });
+          return;
+        }
+      }
+
+      await handleDirectMove(
+        movePreview.unitId,
+        movePreview.destCol,
+        movePreview.destRow,
+        movePreview.orientation
+      );
+      setPendingPreviewAction(null);
+    } finally {
+      confirmMoveInFlightRef.current = false;
+    }
   }, [
     movePreview,
     pendingPreviewAction,
@@ -4151,6 +4411,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onStartMovePreview: () => {},
       onDirectMove: () => {},
       onBumpMovePreviewOrientation: () => {},
+      squadMovePlan: null,
+      squadMoveModelPoolRef,
+      onStartSquadModelMove: async () => {},
+      onSelectModelForMove: async () => {},
+      onMoveModelInPlan: () => {},
+      onResetModelInPlan: () => {},
+      onCommitSquadMovePlan: async () => {},
+      onCancelSquadMove: () => {},
       onStartAttackPreview: () => {},
       onConfirmMove: () => {},
       onCancelMove: () => {},
@@ -4256,6 +4524,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onStartMovePreview: handleStartMovePreview,
     onDirectMove: handleDirectMove,
     onBumpMovePreviewOrientation: handleBumpMovePreviewOrientation,
+    // Move par-figurine (squad.md brique 3)
+    squadMovePlan,
+    squadMoveModelPoolRef,
+    onStartSquadModelMove: handleStartSquadModelMove,
+    onSelectModelForMove: handleSelectModelForMove,
+    onMoveModelInPlan: handleMoveModelInPlan,
+    onResetModelInPlan: handleResetModelInPlan,
+    onCommitSquadMovePlan: handleCommitSquadMovePlan,
+    onCancelSquadMove: handleCancelSquadMove,
     onStartAttackPreview: onStartAttackPreviewMemo,
     onConfirmMove: handleConfirmMove,
     onCancelMove: handleCancelMove,

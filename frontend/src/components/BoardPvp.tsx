@@ -398,6 +398,24 @@ type BoardProps = {
     orientation?: number
   ) => void;
   onBumpMovePreviewOrientation?: (delta: number) => void;
+  /** Move par-figurine (squad.md brique 3) — plan provisoire non committe. */
+  squadMovePlan?: {
+    unitId: number;
+    models: Record<string, { col: number; row: number }>;
+    originModels: Record<string, { col: number; row: number }>;
+    activeModelId: string | null;
+    perModelValid: Record<string, boolean>;
+    coherencyOk: boolean;
+    canValidate: boolean;
+  } | null;
+  /** Pool BFS (hexes atteignables) de la figurine en cours de repositionnement. */
+  squadMoveModelPoolRef?: React.RefObject<Set<string>>;
+  onStartSquadModelMove?: (unitId: number | string) => void | Promise<void>;
+  onSelectModelForMove?: (modelId: string) => void | Promise<void>;
+  onMoveModelInPlan?: (modelId: string, col: number, row: number) => void;
+  onResetModelInPlan?: (modelId: string) => void;
+  onCommitSquadMovePlan?: () => void | Promise<void>;
+  onCancelSquadMove?: () => void;
   onStartAttackPreview: (unitId: number, col: number, row: number) => void;
   onConfirmMove: () => void;
   onCancelMove: () => void;
@@ -642,6 +660,14 @@ export default function Board({
   onStartMovePreview,
   onDirectMove,
   onBumpMovePreviewOrientation,
+  squadMovePlan = null,
+  squadMoveModelPoolRef,
+  onStartSquadModelMove,
+  onSelectModelForMove,
+  onMoveModelInPlan,
+  onResetModelInPlan,
+  onCommitSquadMovePlan,
+  onCancelSquadMove,
   onStartAttackPreview,
   onConfirmMove,
   onCancelMove,
@@ -771,7 +797,11 @@ export default function Board({
   const measureLineRedrawRef = useRef<((clientX: number, clientY: number) => void) | null>(null);
   const hoveredHexRef = useRef<{ col: number; row: number } | null>(null);
   /** Contexte actif quand hoveredHexRef a été mis à jour — pour invalider la restauration si le contexte change. */
-  const hoveredHexContextRef = useRef<{ mode: string; unitId: number | null } | null>(null);
+  const hoveredHexContextRef = useRef<{
+    mode: string;
+    unitId: number | null;
+    modelId?: string | null;
+  } | null>(null);
   const losHexRef = useRef<{ col: number; row: number } | null>(null);
   const movePreviewBackendLosCacheRef = useRef<Map<string, BackendMoveLosPreviewPayload>>(
     new Map()
@@ -847,6 +877,27 @@ export default function Board({
     onPileInMove,
     onSkipPileIn,
   });
+
+  /** Callbacks move par-figurine (squad.md brique 3) — ref toujours a jour pour les handlers d'event stables. */
+  const squadMoveCallbacksRef = useRef({
+    onStartSquadModelMove,
+    onSelectModelForMove,
+    onMoveModelInPlan,
+    onResetModelInPlan,
+    onCommitSquadMovePlan,
+    onCancelSquadMove,
+  });
+  squadMoveCallbacksRef.current = {
+    onStartSquadModelMove,
+    onSelectModelForMove,
+    onMoveModelInPlan,
+    onResetModelInPlan,
+    onCommitSquadMovePlan,
+    onCancelSquadMove,
+  };
+  /** Plan provisoire toujours a jour pour les handlers d'event stables (sans relancer le draw). */
+  const squadMovePlanRef = useRef(squadMovePlan);
+  squadMovePlanRef.current = squadMovePlan;
 
   // Update refs when props change but don't trigger re-render - MOVE THIS BEFORE useEffect
   stableCallbacks.current = {
@@ -1621,7 +1672,10 @@ export default function Board({
   ]);
 
   const effectiveBlinkingUnitsWithMovePreview = useMemo(() => {
-    const useMoveLosPreview = phase === "move" && (mode === "select" || mode === "movePreview");
+    // LoS preview during squad movePreview is disabled per user requirement:
+    // "preview LoS QUE quand UNE figurine est selectionnée" — re-introduce in
+    // the per-fig flow only, not during squad-level hover/preview.
+    const useMoveLosPreview = phase === "move" && mode === "select";
     const mergedIds = useMoveLosPreview ? movePreviewLosBlinkIds : (stableBlinkingUnits ?? []);
     const uc = gameState?.units_cache as Record<string, unknown> | undefined;
     return filterBlinkIdsToLivingUnitsCache(mergedIds, uc, units);
@@ -1638,9 +1692,14 @@ export default function Board({
     movePreviewBackendLosCacheRef.current.clear();
   }, [phase, mode, gameState?.active_movement_unit]);
 
+
   // Prévisualisation LoS (move) : uniquement depuis onMouseMove = position de l’icône, pas l’hex sous le curseur
   useEffect(() => {
     if (!boardConfig || !gameConfig) return;
+
+    // En mode plan par-figurine, un effet dédié gère entièrement le preview (ghost + hoveredHex).
+    // Ce gros effet NE doit PAS tourner pour éviter le conflit avec active_movement_unit.
+    if (mode === "squadModelMove") return;
 
     const HEX_RADIUS_H = boardConfig.hex_radius;
     const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
@@ -1680,7 +1739,10 @@ export default function Board({
 
     const buildZonePixels = () => {
       let pool: Set<string> | undefined | null;
-      if (phase === "charge" && mode === "chargePreview") {
+      if (mode === "squadModelMove" && squadMovePlan?.activeModelId) {
+        // Move par-figurine : zone = pool BFS de la fig active (pas le pool rigide du squad).
+        pool = squadMoveModelPoolRef?.current;
+      } else if (phase === "charge" && mode === "chargePreview") {
         const z = chargeFootprintZoneRef?.current;
         const a = chargeDestPoolRef?.current;
         if (z && z.size > 0) {
@@ -1714,9 +1776,11 @@ export default function Board({
 
     const buildDestPixels = () => {
       const pool =
-        phase === "charge" && mode === "chargePreview"
-          ? chargeDestPoolRef?.current
-          : resolvedMoveDestPoolRef.current;
+        mode === "squadModelMove" && squadMovePlan?.activeModelId
+          ? squadMoveModelPoolRef?.current
+          : phase === "charge" && mode === "chargePreview"
+            ? chargeDestPoolRef?.current
+            : resolvedMoveDestPoolRef.current;
       destPixelBuckets = null;
       if (!pool || pool.size === 0) {
         destPixels = null;
@@ -1870,6 +1934,19 @@ export default function Board({
     // DOM mousemove: icon follows cursor pixel-perfect (move, advance tir, charge destination)
     const canvas = canvasContainerRef.current?.querySelector("canvas");
     const onMouseMove = (ev: MouseEvent) => {
+      // squad.md brique 3 : en mode plan par-figurine, le fantome ne suit le curseur QUE si une
+      // fig est active. Des qu'on a pose la fig (deselection), on cache le preview (sinon il "reste").
+      if (mode === "squadModelMove" && !squadMovePlanRef.current?.activeModelId) {
+        if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
+          hoverSpriteRef.current.visible = false;
+        }
+        if (hoverOverlayRef.current) hoverOverlayRef.current.visible = false;
+        if (movePreviewGuideLineRef.current && !movePreviewGuideLineRef.current.destroyed) {
+          movePreviewGuideLineRef.current.clear();
+          movePreviewGuideLineRef.current.visible = false;
+        }
+        return;
+      }
       const activeMovementUnitId =
         phase === "move" && gameState?.active_movement_unit != null
           ? parseRequiredUnitId(gameState.active_movement_unit, "gameState.active_movement_unit")
@@ -2024,7 +2101,10 @@ export default function Board({
 
       // Snap direct sur l’ancre la plus proche (pas de lerp : coût perçu + inutile car positions discrètes).
       container.position.set(best.x, best.y);
-      container.visible = true;
+      // In move phase + movePreview, the multi-fig ghost (MOVE PREVIEW RENDERING)
+      // is the source of truth for the destination preview. Hide the single-fig
+      // hover sprite so we don't show two overlapping previews.
+      container.visible = !(phase === "move" && mode === "movePreview");
       const hoverBaseShape = container.getChildByName("hover-base-shape");
       if (hoverBaseShape && hoverMoveOrientationStepRef.current !== null) {
         hoverBaseShape.rotation = (hoverMoveOrientationStepRef.current * Math.PI) / 3;
@@ -2102,15 +2182,21 @@ export default function Board({
       }
 
       hoveredHexRef.current = { col: iconCol, row: iconRow };
-      hoveredHexContextRef.current = { mode, unitId: movementPreviewUnitId };
+      hoveredHexContextRef.current = {
+        mode,
+        unitId: movementPreviewUnitId,
+        modelId: mode === "squadModelMove" ? (squadMovePlanRef.current?.activeModelId ?? null) : null,
+      };
 
       // Find nearest valid center for LoS (icon may be on a footprint extension hex)
       let losCol = iconCol;
       let losRow = iconRow;
       const anchorPoolForLos =
-        phase === "charge" && mode === "chargePreview"
-          ? chargeDestPoolRef?.current
-          : resolvedMoveDestPoolRef.current;
+        mode === "squadModelMove" && squadMovePlan?.activeModelId
+          ? squadMoveModelPoolRef?.current
+          : phase === "charge" && mode === "chargePreview"
+            ? chargeDestPoolRef?.current
+            : resolvedMoveDestPoolRef.current;
       if (!anchorPoolForLos?.has(`${iconCol},${iconRow}`)) {
         const nearLos = nearestDestToPixel(container.position.x, container.position.y);
         if (nearLos) {
@@ -2123,6 +2209,23 @@ export default function Board({
       const losHexChanged = !prevLos || prevLos.col !== losCol || prevLos.row !== losRow;
       losHexRef.current = { col: losCol, row: losRow };
 
+      // Move phase movePreview: track ghost destination on the valid pool.
+      // Calls onStartMovePreview which also re-sets mode/pendingPreviewAction (idempotent).
+      if (
+        phase === "move" &&
+        mode === "movePreview" &&
+        losHexChanged &&
+        movePreview &&
+        resolvedMoveDestPoolRef.current?.has(`${losCol},${losRow}`)
+      ) {
+        console.log("[DEBUG mousemove movePreview] updating dest", {
+          unitId: movePreview.unitId,
+          losCol,
+          losRow,
+        });
+        onStartMovePreview(movePreview.unitId, losCol, losRow);
+      }
+
       if (phase === "shoot" && mode === "advancePreview") {
         setShootAdvanceLosAnchor((prev) =>
           prev && prev.col === losCol && prev.row === losRow ? prev : { col: losCol, row: losRow }
@@ -2132,7 +2235,8 @@ export default function Board({
       if (
         losHexChanged &&
         !(phase === "charge" && mode === "chargePreview") &&
-        !(phase === "shoot" && mode === "advancePreview")
+        !(phase === "shoot" && mode === "advancePreview") &&
+        !(phase === "move" && mode === "movePreview")
       ) {
         triggerLosForHex(losCol, losRow, LOS_MOUSEMOVE_DEBOUNCE_MS);
       }
@@ -2218,6 +2322,7 @@ export default function Board({
           0.4,
           app.renderer
         );
+        console.log("[DEBUG LoS overlay show] scheduleVisualLosForHex callback", { phase, mode });
         overlay.visible = true;
       });
     };
@@ -2319,6 +2424,7 @@ export default function Board({
             0.4,
             app.renderer
           );
+          console.log("[DEBUG LoS overlay show] processBackendLosRequest", { phase, mode });
           overlay.visible = true;
         }
 
@@ -2367,15 +2473,10 @@ export default function Board({
       scheduleBackendLosRequest(delayMs);
     };
 
-    if (phase === "move" && mode === "movePreview" && movePreview) {
-      const prevLos = losHexRef.current;
-      const losHexChanged =
-        !prevLos || prevLos.col !== movePreview.destCol || prevLos.row !== movePreview.destRow;
-      losHexRef.current = { col: movePreview.destCol, row: movePreview.destRow };
-      if (losHexChanged) {
-        triggerLosForHex(movePreview.destCol, movePreview.destRow, LOS_INITIAL_PREVIEW_DEBOUNCE_MS);
-      }
-    }
+    // LoS preview during squad-level movePreview hover is intentionally disabled:
+    // user only wants LoS computed when a single figurine is selected post-commit
+    // (per-fig preview flow, not group hover). Re-enabling would re-introduce the
+    // backend MOVE_LOS_PREVIEW_PERF spam on every hovered hex (300ms per call).
 
     if (canvas) canvas.addEventListener("mousemove", onMouseMove);
     // Restaure la visibilité du ghost si on était déjà en hover (la cleanup l'a caché sans le déplacer)
@@ -2393,7 +2494,12 @@ export default function Board({
           (phase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview")));
       const sameContext =
         hoveredHexContextRef.current?.mode === mode &&
-        hoveredHexContextRef.current?.unitId === previewUnitIdRestore;
+        hoveredHexContextRef.current?.unitId === previewUnitIdRestore &&
+        // En mode plan, le contexte change avec la fig active : sinon le restore ré-affiche
+        // le preview de la fig précédente (squad.md).
+        (mode !== "squadModelMove" ||
+          (hoveredHexContextRef.current?.modelId ?? null) ===
+            (squadMovePlanRef.current?.activeModelId ?? null));
       if (!sameContext) {
         hoveredHexRef.current = null;
         hoveredHexContextRef.current = null;
@@ -2408,7 +2514,11 @@ export default function Board({
         hoverSpriteRef.current.visible = true;
         // hoverOverlayRef n'est pas rempli en advancePreview (triggerLosForHex y est skippé) :
         // le ghost LoS vient de appendShootingPreviewCells. Restaurer ici afficherait du contenu périmé.
-        if (mode !== "advancePreview" && hoverOverlayRef.current && !hoverOverlayRef.current.destroyed) {
+        // En movePreview move-phase : LoS désactivée pendant le hover squad (user requirement).
+        const allowOverlayRestore =
+          mode !== "advancePreview" && !(phase === "move" && mode === "movePreview");
+        if (allowOverlayRestore && hoverOverlayRef.current && !hoverOverlayRef.current.destroyed) {
+          console.log("[DEBUG LoS overlay show] restore block (useEffect setup)", { phase, mode });
           hoverOverlayRef.current.visible = true;
         }
       }
@@ -2448,6 +2558,8 @@ export default function Board({
     wallHexesOverride,
     footprintZoneRef?.current,
     resolvedMoveDestPoolRef.current?.has,
+    squadMovePlan?.activeModelId,
+    squadMoveModelPoolRef?.current,
     footprintMaskLoopsRef?.current,
     footprintZoneRef,
     chargeFootprintZoneRef?.current?.has,
@@ -2457,6 +2569,7 @@ export default function Board({
     chargeDestPoolRef?.current,
     resolvedMoveDestPoolRef,
     footprintMaskLoopsRef,
+    onStartMovePreview,
   ]);
 
   /**
@@ -2471,6 +2584,9 @@ export default function Board({
     if (!canvas) return;
 
     const poolHasHoveredAnchor = (key: string): boolean => {
+      if (mode === "squadModelMove") {
+        return squadMoveModelPoolRef?.current?.has(key) ?? false;
+      }
       if (phase === "charge" && mode === "chargePreview") {
         return chargeDestPoolRef?.current?.has(key) ?? false;
       }
@@ -2478,21 +2594,52 @@ export default function Board({
     };
 
     const shouldConfirmAtIcon =
-      selectedUnitId != null &&
-      ((effectivePhase === "move" && mode === "select") ||
-        mode === "advancePreview" ||
-        (phase === "charge" && mode === "chargePreview") ||
-        (phase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview")));
+      (mode === "squadModelMove" && squadMovePlan?.activeModelId != null) ||
+      (selectedUnitId != null &&
+        ((effectivePhase === "move" && mode === "select") ||
+          (effectivePhase === "move" && mode === "movePreview") ||
+          mode === "advancePreview" ||
+          (phase === "charge" && mode === "chargePreview") ||
+          (phase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview"))));
+
+    console.log("[DEBUG shouldConfirmAtIcon useEffect]", {
+      shouldConfirmAtIcon,
+      effectivePhase,
+      phase,
+      mode,
+      selectedUnitId,
+    });
 
     if (!shouldConfirmAtIcon) return;
 
     const onPointerDownCapture = (e: PointerEvent) => {
+      console.log("[DEBUG canvas pointerdown capture]", {
+        button: e.button,
+        hoveredHex: hoveredHexRef.current,
+        phase: effectivePhase,
+        mode,
+        selectedUnitId,
+        shouldConfirmAtIcon,
+      });
       if (e.button !== 0) return;
       const h = hoveredHexRef.current;
-      if (!h) return;
+      if (!h) {
+        console.log("[DEBUG canvas pointerdown] no hoveredHex, abort");
+        return;
+      }
       const key = `${h.col},${h.row}`;
-      if (!poolHasHoveredAnchor(key)) return;
+      if (!poolHasHoveredAnchor(key)) {
+        console.log("[DEBUG canvas pointerdown] hex not in valid pool, abort", { key });
+        return;
+      }
 
+      console.log("[DEBUG canvas pointerdown] dispatching boardHexClick", {
+        col: h.col,
+        row: h.row,
+        phase: effectivePhase,
+        mode,
+        selectedUnitId,
+      });
       e.preventDefault();
       e.stopImmediatePropagation();
 
@@ -2505,6 +2652,7 @@ export default function Board({
             mode,
             selectedUnitId,
             orientation: hoverMoveOrientationStepRef.current ?? undefined,
+            activeModelId: squadMovePlan?.activeModelId ?? null,
           },
         })
       );
@@ -2519,8 +2667,432 @@ export default function Board({
     effectivePhase,
     mode,
     selectedUnitId,
+    squadMovePlan?.activeModelId,
+    squadMoveModelPoolRef?.current?.has,
     chargeDestPoolRef?.current?.has,
     resolvedMoveDestPoolRef.current?.has,
+  ]);
+
+  // Native DOM double-click on the canvas: enter movePreview mode for the squad
+  // whose footprint contains the clicked hex. Routed via boardUnitDoubleClick so
+  // boardClickHandler centralises the move-phase routing.
+  // We use the browser's dblclick (OS-level click cadence) rather than PIXI's
+  // e.detail, which resets to 1 across React re-renders that recreate unitCircle.
+  useEffect(() => {
+    if (phase !== "move") return;
+    if (!boardConfig) return;
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!canvas) return;
+    const app = appRef.current;
+    if (!app) return;
+
+    const onDoubleClick = (e: MouseEvent) => {
+      console.log("[DEBUG dblclick] fired", { button: e.button, phase, mode, selectedUnitId });
+      if (e.button !== 0) return;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
+      const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
+      const px = (e.clientX - rect.left) * scaleX;
+      const py = (e.clientY - rect.top) * scaleY;
+      const HEX_RADIUS = boardConfig.hex_radius;
+      const MARGIN = boardConfig.margin;
+      const { col, row } = pixelToHex(
+        px,
+        py,
+        HEX_RADIUS,
+        MARGIN,
+        boardConfig.cols,
+        boardConfig.rows
+      );
+      console.log("[DEBUG dblclick] hex", { col, row });
+      if (col < 0 || col >= boardConfig.cols || row < 0 || row >= boardConfig.rows) {
+        console.log("[DEBUG dblclick] hex out of bounds, abort");
+        return;
+      }
+
+      const unitsCache = gameState?.units_cache as
+        | Record<
+            string,
+            {
+              occupied_hexes_by_model?: Record<string, [number, number]>;
+              col?: number;
+              row?: number;
+              player?: number;
+            }
+          >
+        | undefined;
+      if (!unitsCache) {
+        console.log("[DEBUG dblclick] no units_cache, abort");
+        return;
+      }
+      // Tolerance: model base may span several hexes visually (Terminator
+      // BASE_SIZE=16 → ~2-hex radius). Match any model within cube distance 4
+      // and pick the nearest. Threshold high enough for large bases without
+      // matching a distant squad.
+      const HEX_HIT_TOLERANCE = 4;
+      const clickCube = offsetToCube(col, row);
+      let foundUnitId: number | string | null = null;
+      let foundCol = -1;
+      let foundRow = -1;
+      let bestDistance = Infinity;
+      for (const [uid, entry] of Object.entries(unitsCache)) {
+        if (entry.player !== current_player) continue;
+        const occupied = entry.occupied_hexes_by_model;
+        const positions: Array<[number, number]> = occupied
+          ? (Object.values(occupied) as Array<[number, number]>)
+          : entry.col != null && entry.row != null
+            ? [[entry.col, entry.row]]
+            : [];
+        for (const [mC, mR] of positions) {
+          const d = cubeDistance(clickCube, offsetToCube(mC, mR));
+          if (d <= HEX_HIT_TOLERANCE && d < bestDistance) {
+            bestDistance = d;
+            foundUnitId = Number.isNaN(Number(uid)) ? uid : Number(uid);
+            foundCol = entry.col ?? mC;
+            foundRow = entry.row ?? mR;
+          }
+        }
+      }
+      console.log("[DEBUG dblclick] lookup result", { foundUnitId, bestDistance });
+      if (foundUnitId === null) {
+        console.log("[DEBUG dblclick] no unit found at hex, abort");
+        return;
+      }
+
+      console.log("[DEBUG dblclick] dispatching boardUnitDoubleClick", {
+        unitId: foundUnitId,
+        foundCol,
+        foundRow,
+        current_player,
+      });
+      e.preventDefault();
+      window.dispatchEvent(
+        new CustomEvent("boardUnitDoubleClick", {
+          detail: {
+            unitId: foundUnitId,
+            unitCol: foundCol,
+            unitRow: foundRow,
+            phase,
+            mode,
+            selectedUnitId,
+          },
+        })
+      );
+    };
+
+    canvas.addEventListener("dblclick", onDoubleClick);
+    return () => canvas.removeEventListener("dblclick", onDoubleClick);
+  }, [phase, mode, selectedUnitId, boardConfig, gameState?.units_cache, current_player]);
+
+  // squad.md brique 3 : ENTREE single-clic. En phase move + mode select, un clic gauche sur
+  // une fig OWN entre en mode plan par-figurine + selectionne cette fig. Capture-phase +
+  // stopImmediatePropagation pour empecher la selection rigide par defaut (PIXI → onSelectUnit).
+  useEffect(() => {
+    if (phase !== "move" || mode !== "select") return;
+    if (measureMode.kind !== "off") return;
+    if (!boardConfig) return;
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!canvas) return;
+    const app = appRef.current;
+    if (!app) return;
+
+    const onEntryPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
+      const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
+      const px = (e.clientX - rect.left) * scaleX;
+      const py = (e.clientY - rect.top) * scaleY;
+      const { col, row } = pixelToHex(
+        px,
+        py,
+        boardConfig.hex_radius,
+        boardConfig.margin,
+        boardConfig.cols,
+        boardConfig.rows
+      );
+      const unitsCache = gameState?.units_cache as
+        | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]>; player?: number }>
+        | undefined;
+      if (!unitsCache) return;
+      const HEX_HIT_TOLERANCE = 4;
+      const clickCube = offsetToCube(col, row);
+      let foundUnitId: number | string | null = null;
+      let foundModelId: string | null = null;
+      let bestDistance = Infinity;
+      for (const [uid, entry] of Object.entries(unitsCache)) {
+        if (entry.player !== current_player) continue;
+        if (!eligibleUnitIds.includes(Number(uid))) continue;
+        const byModel = entry.occupied_hexes_by_model;
+        if (!byModel) continue;
+        for (const [mid, pos] of Object.entries(byModel)) {
+          const d = cubeDistance(clickCube, offsetToCube(pos[0], pos[1]));
+          if (d <= HEX_HIT_TOLERANCE && d < bestDistance) {
+            bestDistance = d;
+            foundUnitId = Number.isNaN(Number(uid)) ? uid : Number(uid);
+            foundModelId = mid;
+          }
+        }
+      }
+      if (foundUnitId === null || foundModelId === null) return;
+      // Empeche la selection rigide par defaut (PIXI boardUnitClick → onSelectUnit).
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      console.log("[SQUAD-MOVE] ENTRY single-click → unit", foundUnitId, "model", foundModelId, "mode=", mode);
+      const uid = foundUnitId;
+      const mid = foundModelId;
+      void (async () => {
+        // En mode squadModelMove : NE PAS appeler onStartSquadModelMove (ça reset toutes les positions
+        // provisoires à l'état backend, détruisant les placements déjà faits). Juste sélectionner la fig.
+        if (mode !== "squadModelMove") {
+          await squadMoveCallbacksRef.current.onStartSquadModelMove?.(uid);
+        }
+        await squadMoveCallbacksRef.current.onSelectModelForMove?.(mid);
+      })();
+    };
+
+    canvas.addEventListener("pointerdown", onEntryPointerDown, true);
+    return () => canvas.removeEventListener("pointerdown", onEntryPointerDown, true);
+  }, [phase, mode, measureMode.kind, boardConfig, gameState?.units_cache, current_player, eligibleUnitIds]);
+
+  // squad.md brique 3 : en mode plan par-figurine, un clic gauche sur une fig de l'escouade
+  // la selectionne (resout model_id depuis les positions provisoires du plan) → onSelectModelForMove.
+  // Phase bubble : si le clic a deja servi a POSER la fig active (hex dans son pool, capture-phase
+  // stopImmediatePropagation), ce handler ne se declenche pas.
+  useEffect(() => {
+    if (mode !== "squadModelMove" || !squadMovePlan) return;
+    if (!boardConfig) return;
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!canvas) return;
+    const app = appRef.current;
+    if (!app) return;
+
+    const onPointerDownSelect = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
+      const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
+      const px = (e.clientX - rect.left) * scaleX;
+      const py = (e.clientY - rect.top) * scaleY;
+      const { col, row } = pixelToHex(
+        px,
+        py,
+        boardConfig.hex_radius,
+        boardConfig.margin,
+        boardConfig.cols,
+        boardConfig.rows
+      );
+      // Resout la fig la plus proche de l'hex clique parmi les positions provisoires du plan.
+      const HEX_HIT_TOLERANCE = 4;
+      const clickCube = offsetToCube(col, row);
+      let foundModelId: string | null = null;
+      let bestDistance = Infinity;
+      for (const [mid, pos] of Object.entries(squadMovePlan.models)) {
+        const d = cubeDistance(clickCube, offsetToCube(pos.col, pos.row));
+        if (d <= HEX_HIT_TOLERANCE && d < bestDistance) {
+          bestDistance = d;
+          foundModelId = mid;
+        }
+      }
+      console.log("[SQUAD-MOVE] select-click hex", { col, row, foundModelId, bestDistance });
+      if (foundModelId === null) return;
+      // Ne pas re-selectionner la fig deja active (le clic sert alors a la poser, gere ailleurs).
+      if (foundModelId === squadMovePlan.activeModelId) return;
+      void squadMoveCallbacksRef.current.onSelectModelForMove?.(foundModelId);
+    };
+
+    canvas.addEventListener("pointerdown", onPointerDownSelect);
+    return () => canvas.removeEventListener("pointerdown", onPointerDownSelect);
+  }, [mode, squadMovePlan, boardConfig]);
+
+  // squad.md brique 3 : dès qu'AUCUNE fig n'est active en mode plan (fig posée → deselect, ou
+  // entrée sans selection), couper TOUT le preview (fantome curseur + LoS + ligne guide + tooltip).
+  // Le preview (ghost + LoS) n'existe QUE pendant qu'une fig est en cours de placement.
+  useEffect(() => {
+    if (mode !== "squadModelMove") return;
+    if (squadMovePlan?.activeModelId) return; // une fig active → preview autorisé
+    if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
+      hoverSpriteRef.current.visible = false;
+    }
+    if (hoverOverlayRef.current && !hoverOverlayRef.current.destroyed) {
+      hoverOverlayRef.current.visible = false;
+    }
+    if (movePreviewGuideLineRef.current && !movePreviewGuideLineRef.current.destroyed) {
+      movePreviewGuideLineRef.current.clear();
+      movePreviewGuideLineRef.current.visible = false;
+    }
+    losHexRef.current = null;
+    setMovePreviewLosBlinkIds([]);
+    setMovePreviewLosCoverById({});
+    setMovePreviewDistanceTooltip(null);
+  }, [mode, squadMovePlan?.activeModelId]);
+
+  // Ghost per-figurine (squad move plan) : ghost suit le curseur, hoveredHexRef mis à jour pour le
+  // click handler (shouldConfirmAtIcon). Complètement indépendant de active_movement_unit.
+  // S'active uniquement quand mode === "squadModelMove" && activeModelId est set.
+  useEffect(() => {
+    if (mode !== "squadModelMove") return;
+    if (!boardConfig) return;
+    const activeModelId = squadMovePlan?.activeModelId ?? null;
+    if (!activeModelId) return; // l'effet "cut preview" au-dessus gère le cas !activeModelId
+
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!canvas) return;
+    const app = appRef.current;
+    if (!app) return;
+
+    const squadUnit = units.find((u) => String(u.id) === String(squadMovePlan?.unitId ?? -1));
+    if (!squadUnit) return;
+
+    const pool = squadMoveModelPoolRef.current;
+    if (!pool || pool.size === 0) {
+      console.log(`[SQUAD-MOVE] per-fig effect: pool vide pour activeModel=${activeModelId}, abort`);
+      return;
+    }
+
+    const HEX_RADIUS_H = boardConfig.hex_radius;
+    const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
+    const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
+    const MARGIN_H = boardConfig.margin;
+
+    const hxX = (col: number) => col * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H;
+    const hxY = (col: number, row: number) =>
+      row * HEX_HEIGHT_H + ((col % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H;
+
+    // Snapshot pixel positions du pool BFS au moment de la création de l'effet.
+    const destPixels: { x: number; y: number; col: number; row: number }[] = [];
+    for (const k of pool) {
+      const sep = k.indexOf(",");
+      const c = Number(k.substring(0, sep));
+      const r = Number(k.substring(sep + 1));
+      destPixels.push({ x: hxX(c), y: hxY(c, r), col: c, row: r });
+    }
+
+    const nearestDest = (px: number, py: number) => {
+      let best = destPixels[0]!;
+      let bestD = Infinity;
+      for (const dp of destPixels) {
+        const d = (dp.x - px) * (dp.x - px) + (dp.y - py) * (dp.y - py);
+        if (d < bestD) { bestD = d; best = dp; }
+      }
+      return best;
+    };
+
+    // Construit (ou reconstruit) le ghost sprite pour cette fig. On détruit toujours
+    // l'existant pour éviter de réutiliser un sprite construit pour une autre unité.
+    const buildSprite = () => {
+      if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
+        hoverSpriteRef.current.destroy({ children: true });
+        hoverSpriteRef.current = null;
+      }
+      const container = new PIXI.Container();
+      container.zIndex = 900;
+      container.eventMode = "none";
+      container.interactiveChildren = false;
+      app.stage.addChild(container);
+
+      const HEX_R = HEX_RADIUS_H;
+      const nrHover = getNonRoundBasePixelLayout(squadUnit, HEX_R);
+      const bdSel = resolveBaseSizeForUnitDisplay(squadUnit);
+      const baseSizeVal = bdSel > 1 ? bdSel : undefined;
+      const defaultIconDiam = baseSizeVal
+        ? baseSizeVal * 1.5 * HEX_RADIUS_H
+        : HEX_RADIUS_H * (squadUnit.ICON_SCALE ?? 1.0);
+
+      const baseColor = squadUnit.player === 1 ? 0x1d4ed8 : 0x882222;
+      const baseCircle = new PIXI.Graphics();
+      baseCircle.name = "hover-base-shape";
+      baseCircle.beginFill(baseColor, 0.7);
+      if (nrHover) {
+        if (nrHover.kind === "oval") {
+          baseCircle.drawEllipse(0, 0, nrHover.outerRx, nrHover.outerRy);
+        } else {
+          const h = nrHover.squareHalf;
+          const s = nrHover.squareSide;
+          baseCircle.drawRoundedRect(-h, -h, s, s, getSquareCornerRadiusPx());
+        }
+      } else {
+        baseCircle.drawCircle(0, 0, defaultIconDiam / 2);
+      }
+      baseCircle.endFill();
+      container.addChild(baseCircle);
+
+      if (squadUnit.ICON) {
+        const iconPath =
+          squadUnit.player === 2
+            ? squadUnit.ICON.replace(".webp", "_red.webp")
+            : squadUnit.ICON;
+        const texture = PIXI.Texture.from(iconPath);
+        const iconSprite = new PIXI.Sprite(texture);
+        iconSprite.anchor.set(0.5);
+        const nonRoundIconR = getNonRoundIconRadius(squadUnit, HEX_R);
+        const iconDiam = nonRoundIconR != null ? nonRoundIconR * 2 : defaultIconDiam;
+        iconSprite.width = iconDiam;
+        iconSprite.height = iconDiam;
+        if (nonRoundIconR != null) {
+          const maskG = new PIXI.Graphics();
+          maskG.beginFill(0xffffff);
+          maskG.drawCircle(0, 0, nonRoundIconR);
+          maskG.endFill();
+          iconSprite.mask = maskG;
+          container.addChild(maskG);
+        }
+        container.addChild(iconSprite);
+      }
+      container.alpha = 0.65;
+      container.visible = false;
+      hoverSpriteRef.current = container;
+      console.log(`[SQUAD-MOVE] per-fig ghost sprite built for unit=${squadUnit.id} model=${activeModelId}`);
+    };
+
+    buildSprite();
+
+    const onMouseMove = (ev: MouseEvent) => {
+      // Guard sur activeModelId (state) ET sur la taille du pool (ref synchrone).
+      // handleMoveModelInPlan vide le pool AVANT setSquadMovePlan → la race condition
+      // (render pas encore arrivé, mais placement déjà fait) est couverte par la 2ème condition.
+      if (!squadMovePlanRef.current?.activeModelId || !squadMoveModelPoolRef?.current?.size) {
+        if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
+          hoverSpriteRef.current.visible = false;
+        }
+        hoveredHexRef.current = null;
+        return;
+      }
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
+      const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
+      const px = (ev.clientX - rect.left) * scaleX;
+      const py = (ev.clientY - rect.top) * scaleY;
+
+      const best = nearestDest(px, py);
+
+      const sprite = hoverSpriteRef.current;
+      if (sprite && !sprite.destroyed) {
+        sprite.position.set(best.x, best.y);
+        sprite.visible = true;
+      }
+      hoveredHexRef.current = { col: best.col, row: best.row };
+      console.log(`[SQUAD-MOVE] per-fig ghost move model=${squadMovePlanRef.current?.activeModelId} → hex(${best.col},${best.row})`);
+    };
+
+    canvas.addEventListener("mousemove", onMouseMove);
+    console.log(`[SQUAD-MOVE] per-fig effect SETUP ok model=${activeModelId} poolSize=${pool.size}`);
+
+    return () => {
+      canvas.removeEventListener("mousemove", onMouseMove);
+      if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
+        hoverSpriteRef.current.visible = false;
+      }
+      hoveredHexRef.current = null;
+      console.log(`[SQUAD-MOVE] per-fig effect CLEANUP model=${activeModelId}`);
+    };
+  }, [
+    mode,
+    squadMovePlan?.activeModelId,
+    squadMovePlan?.unitId,
+    boardConfig,
+    units,
+    squadMoveModelPoolRef.current,
   ]);
 
   // Mode mesure : clic gauche = ancre ou fin de ligne (puis armed) ; clic droit = jonction — prioritaire sur les unités.
@@ -3200,6 +3772,12 @@ export default function Board({
         clearMovePreviewLos();
         onDirectMove(unitId, col, row, orientation);
       },
+      onStartSquadModelMove: (unitId: number | string) => {
+        void squadMoveCallbacksRef.current.onStartSquadModelMove?.(unitId);
+      },
+      onMoveModelInPlan: (modelId: string, col: number, row: number) => {
+        squadMoveCallbacksRef.current.onMoveModelInPlan?.(modelId, col, row);
+      },
     });
 
     // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Listen for advance button click
@@ -3215,6 +3793,17 @@ export default function Board({
     // Right click cancels current action
     const contextMenuHandler = (e: Event) => {
       e.preventDefault();
+
+      // squad.md brique 3 : clic droit en mode plan par-figurine = annule le deplacement
+      // de la fig ACTIVE → la replace a sa position de debut de phase (ne quitte pas le mode).
+      if (mode === "squadModelMove") {
+        const activeMid = squadMovePlanRef.current?.activeModelId;
+        if (activeMid) {
+          console.log("[SQUAD-MOVE] right-click → reset fig active", activeMid);
+          squadMoveCallbacksRef.current.onResetModelInPlan?.(activeMid);
+        }
+        return;
+      }
 
       const isMoveUiPhase = phase === "move" || phase === "command";
       if (isMoveUiPhase && mode === "select") {
@@ -3282,6 +3871,21 @@ export default function Board({
               row: Number((hex as { row: number }).row),
             });
           }
+        });
+      }
+    }
+
+    // squad.md brique 3 : surbrillance du pool BFS de la figurine active (move par-figurine).
+    if (
+      mode === "squadModelMove" &&
+      squadMovePlan?.activeModelId &&
+      squadMoveModelPoolRef?.current
+    ) {
+      for (const key of squadMoveModelPoolRef.current) {
+        const sep = key.indexOf(",");
+        availableCells.push({
+          col: Number(key.slice(0, sep)),
+          row: Number(key.slice(sep + 1)),
         });
       }
     }
@@ -3485,7 +4089,10 @@ export default function Board({
         };
       }
 
-      if (mode === "movePreview" && movePreview) {
+      // Shoot-phase movePreview = advance-preview: source LoS depuis la destination
+      // pour visualiser le tir post-advance. En move-phase squad movePreview, on ne
+      // calcule pas de LoS (user requirement : zero LoS pendant le hover squad).
+      if (mode === "movePreview" && movePreview && phase === "shoot") {
         const movePreviewUnit = units.find((u) => u.id === movePreview.unitId);
         if (!movePreviewUnit) {
           return null;
@@ -3987,7 +4594,19 @@ export default function Board({
         .slice()
         .sort((a, b) => a - b)
         .join(",");
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}`;
+      // squad.md brique 3 : le ghost rend les figs aux positions du PLAN provisoire (pas units_cache).
+      // Sans ca dans l'empreinte, un deplacement de fig ne re-render pas (ghost fige) → "move annule".
+      const squadPlanFp = squadMovePlan
+        ? `${squadMovePlan.unitId}:${squadMovePlan.activeModelId ?? ""}:` +
+          Object.entries(squadMovePlan.models)
+            .map(([m, p]) => `${m}@${p.col},${p.row}`)
+            .join(",") +
+          ":" +
+          Object.entries(squadMovePlan.perModelValid)
+            .map(([m, v]) => `${m}=${v ? 1 : 0}`)
+            .join(",")
+        : "";
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -4317,12 +4936,42 @@ export default function Board({
           continue;
         }
 
-        const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const centerY =
-          unit.row * HEX_VERT_SPACING +
-          ((unit.col % 2) * HEX_VERT_SPACING) / 2 +
-          HEX_HEIGHT / 2 +
-          MARGIN;
+        const cacheEntry = unitsCache?.[unitIdStr] as
+          | { occupied_hexes_by_model?: Record<string, [number, number]> }
+          | undefined;
+        const occupiedHexesByModel = cacheEntry?.occupied_hexes_by_model;
+        // squad.md brique 3 : pour l'escouade en mode plan, afficher les figs aux positions
+        // PROVISOIRES (ghost) + flag de validite par fig (voile rouge sur les invalides).
+        const isSquadGhost =
+          mode === "squadModelMove" &&
+          !!squadMovePlan &&
+          String(squadMovePlan.unitId) === unitIdStr;
+        let modelPositions: Array<[number, number]>;
+        let modelValidFlags: boolean[];
+        if (occupiedHexesByModel) {
+          const entries = Object.entries(occupiedHexesByModel) as Array<
+            [string, [number, number]]
+          >;
+          modelPositions = entries.map(([mid, pos]) => {
+            const planPos = isSquadGhost ? squadMovePlan!.models[mid] : undefined;
+            return planPos ? ([planPos.col, planPos.row] as [number, number]) : pos;
+          });
+          modelValidFlags = entries.map(([mid]) =>
+            isSquadGhost ? squadMovePlan!.perModelValid[mid] !== false : true
+          );
+        } else {
+          modelPositions = [[unit.col, unit.row]];
+          modelValidFlags = [true];
+        }
+
+        const modelCenters: Array<[number, number]> = modelPositions.map(([mCol, mRow]) => [
+          mCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN,
+          mRow * HEX_VERT_SPACING +
+            ((mCol % 2) * HEX_VERT_SPACING) / 2 +
+            HEX_HEIGHT / 2 +
+            MARGIN,
+        ]);
+        const [anchorCenterX, anchorCenterY] = modelCenters[0];
 
         // Skip units that are being previewed elsewhere
         if (mode === "attackPreview" && attackPreview && unit.id === attackPreview.unitId) continue;
@@ -4458,8 +5107,9 @@ export default function Board({
 
         renderUnit({
           unit: unitToRender,
-          centerX,
-          centerY,
+          centerX: anchorCenterX,
+          centerY: anchorCenterY,
+          modelCenters,
           app,
           renderTarget: unitsLayer,
           uiElementsContainer: uiElementsContainerRef.current!,
@@ -4574,6 +5224,20 @@ export default function Board({
           debugMode: showHexCoordinates,
           chargeMaxDistance,
         });
+
+        // squad.md brique 3 : voile rouge sur les figs invalides (hex interdit OU hors cohesion).
+        if (isSquadGhost && modelValidFlags.some((ok) => !ok)) {
+          const veil = new PIXI.Graphics();
+          modelCenters.forEach(([cx, cy], i) => {
+            if (!modelValidFlags[i]) {
+              veil.beginFill(0xff0000, 0.45);
+              veil.drawCircle(cx, cy, HEX_RADIUS * 1.2);
+              veil.endFill();
+            }
+          });
+          veil.zIndex = 3000;
+          unitsLayer.addChild(veil);
+        }
       }
 
       // ✅ MOVE PREVIEW RENDERING
@@ -4587,10 +5251,48 @@ export default function Board({
             HEX_HEIGHT / 2 +
             MARGIN;
 
+          // Multi-fig squad ghost: rigid-body translation in PIXEL space.
+          // Hex-coord delta would corrupt vertical positioning whenever the
+          // delta col flips column parity (odd-column half-hex offset).
+          const previewUnitsCache = gameState?.units_cache as
+            | Record<string, unknown>
+            | undefined;
+          const previewCacheEntry = previewUnitsCache?.[String(previewUnit.id)] as
+            | { occupied_hexes_by_model?: Record<string, [number, number]> }
+            | undefined;
+          const previewOccupied = previewCacheEntry?.occupied_hexes_by_model;
+          const previewModelPositions: Array<[number, number]> = previewOccupied
+            ? (Object.values(previewOccupied) as Array<[number, number]>)
+            : [[previewUnit.col, previewUnit.row]];
+          const anchorPixelX =
+            previewUnit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const anchorPixelY =
+            previewUnit.row * HEX_VERT_SPACING +
+            ((previewUnit.col % 2) * HEX_VERT_SPACING) / 2 +
+            HEX_HEIGHT / 2 +
+            MARGIN;
+          const pixelDeltaX = centerX - anchorPixelX;
+          const pixelDeltaY = centerY - anchorPixelY;
+          const previewModelCenters: Array<[number, number]> = previewModelPositions.map(
+            ([mCol, mRow]) => {
+              const mPixelX = mCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+              const mPixelY =
+                mRow * HEX_VERT_SPACING +
+                ((mCol % 2) * HEX_VERT_SPACING) / 2 +
+                HEX_HEIGHT / 2 +
+                MARGIN;
+              return [mPixelX + pixelDeltaX, mPixelY + pixelDeltaY];
+            }
+          );
+          console.log(
+            `[DEBUG MOVE_PREVIEW_RENDER] u${previewUnit.id} unit=(${previewUnit.col},${previewUnit.row}) dest=(${movePreview.destCol},${movePreview.destRow}) positions=${JSON.stringify(previewModelPositions)} anchorPx=(${anchorPixelX.toFixed(1)},${anchorPixelY.toFixed(1)}) destPx=(${centerX.toFixed(1)},${centerY.toFixed(1)}) delta=(${pixelDeltaX.toFixed(1)},${pixelDeltaY.toFixed(1)}) modelCenters=${JSON.stringify(previewModelCenters.map(([x, y]) => [Math.round(x), Math.round(y)]))}`
+          );
+
           renderUnit({
             unit: previewUnit,
             centerX,
             centerY,
+            modelCenters: previewModelCenters,
             app,
             renderTarget: unitsLayer,
             useOverlayIcons: true,
@@ -5288,6 +5990,7 @@ export default function Board({
     footprintZoneRef,
     blinkingCoverByUnitId,
     objectiveControlOverride,
+    squadMovePlan,
   ]);
 
   // Handle weapon selection
@@ -5367,6 +6070,55 @@ export default function Board({
           display: "inline-block",
         }}
       >
+        {/* squad.md brique 3 : boutons Validate / Cancel du move par-figurine (bas-droite). */}
+        {mode === "squadModelMove" && squadMovePlan && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: 12,
+              right: 12,
+              zIndex: 1700,
+              display: "flex",
+              gap: 8,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => onCancelSquadMove?.()}
+              style={{
+                border: "1px solid rgba(255,255,255,0.28)",
+                borderRadius: 6,
+                background: "rgba(75,85,99,0.92)",
+                color: "#e5e7eb",
+                cursor: "pointer",
+                fontSize: 14,
+                fontWeight: 700,
+                padding: "8px 14px",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!squadMovePlan.canValidate}
+              onClick={() => onCommitSquadMovePlan?.()}
+              style={{
+                border: "1px solid rgba(255,255,255,0.28)",
+                borderRadius: 6,
+                background: squadMovePlan.canValidate
+                  ? "rgba(22,163,74,0.95)"
+                  : "rgba(75,85,99,0.55)",
+                color: squadMovePlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+                cursor: squadMovePlan.canValidate ? "pointer" : "not-allowed",
+                fontSize: 14,
+                fontWeight: 700,
+                padding: "8px 14px",
+              }}
+            >
+              Validate
+            </button>
+          </div>
+        )}
         <div
           style={{
             position: "absolute",

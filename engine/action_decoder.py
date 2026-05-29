@@ -17,8 +17,19 @@ from engine.phase_handlers.shared_utils import (
     is_unit_alive,
     compute_candidate_footprint,
     build_occupied_positions_set,
+    build_squad_action_mask,
+    get_enemy_slot_mapping,
+    charge_check_eligibility,
+    roll_advance_for_squad,
 )
-from engine.macro_intents import BASE_ZONE_INTENT, TOTAL_ACTION_SIZE, MAX_OBJECTIVES, is_zone_intent_action, decode_zone_intent_action
+from engine.macro_intents import (
+    BASE_ZONE_INTENT,
+    TOTAL_ACTION_SIZE,
+    MAX_OBJECTIVES,
+    is_zone_intent_action,
+    decode_zone_intent_action,
+    get_best_enemy_score_for_unit,
+)
 
 # Game phases - single source of truth for phase count
 GAME_PHASES = ["deployment", "command", "move", "shoot", "charge", "fight"]
@@ -131,6 +142,75 @@ class ActionDecoder:
             raise ValueError(f"Unit {unit_id} is not eligible in phase '{current_phase}'")
         mask = self._build_mask_for_units(current_phase, [selected_unit], game_state)
         return mask, [selected_unit]
+
+    def get_squad_action_mask_and_eligible_units(
+        self, game_state: Dict[str, Any]
+    ) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
+        """Build 41-element squad mask + eligible units for the squad pipeline.
+
+        Deployment : actions 4-8 (deploy hexes, logique legacy préservée).
+        Command    : wait (18) + zone intents (26-40).
+        Move/Shoot/Charge/Fight : build_squad_action_mask (0-25) pour le squad actif.
+        Advance roll : rollé ici une seule fois par activation, stocké dans game_state.
+        """
+        mask = np.zeros(self.total_action_size, dtype=bool)
+        eligible_units = self._get_eligible_units_for_current_phase(game_state)
+        current_phase = game_state["phase"]
+
+        if current_phase == "deployment":
+            if eligible_units:
+                current_deployer = self._get_current_deployer(game_state)
+                active_unit = eligible_units[0]
+                valid_hexes = self._get_valid_deployment_hexes(
+                    game_state, current_deployer, str(require_key(active_unit, "id"))
+                )
+                num_hexes = len(valid_hexes)
+                if num_hexes == 0:
+                    raise ValueError(
+                        f"Deployment deadlock: no valid hex for player {current_deployer}, "
+                        f"unit {active_unit.get('id')}"
+                    )
+                for i in range(min(5, num_hexes)):
+                    mask[4 + i] = True
+            return mask, eligible_units
+
+        if current_phase == "command":
+            mask[18] = True
+            free_steps = game_state["zone_intent_free_steps_remaining"]
+            if free_steps > 0:
+                objectives = game_state["objectives"]
+                num_zones = min(len(objectives), MAX_OBJECTIVES)
+                for zone_idx in range(num_zones):
+                    for intent_val in range(3):
+                        action_idx = BASE_ZONE_INTENT + zone_idx * 3 + intent_val
+                        if action_idx < self.total_action_size:
+                            mask[action_idx] = True
+            return mask, eligible_units
+
+        if not eligible_units:
+            return mask, eligible_units
+
+        squad_id = str(eligible_units[0]["id"])
+        units_cache = require_key(game_state, "units_cache")
+        cache_entry = units_cache.get(squad_id)
+        if cache_entry is None:
+            raise KeyError(f"Squad {squad_id} missing from units_cache")
+        our_player = int(require_key(cache_entry, "player"))
+        enemy_slot_ids = get_enemy_slot_mapping(game_state, our_player)
+
+        advance_roll: Optional[int] = None
+        if current_phase == "move":
+            squad_advance_rolls = game_state.setdefault("_squad_advance_rolls", {})
+            if squad_id not in squad_advance_rolls:
+                squad_advance_rolls[squad_id] = roll_advance_for_squad(squad_id, game_state)
+            advance_roll = squad_advance_rolls[squad_id]
+
+        squad_mask_26 = build_squad_action_mask(game_state, squad_id, enemy_slot_ids, advance_roll)
+        for i, v in enumerate(squad_mask_26):
+            if v:
+                mask[i] = True
+
+        return mask, eligible_units
 
     def _build_mask_for_units(
         self,
@@ -755,6 +835,152 @@ class ActionDecoder:
         
         # SKIP is system response when no valid actions possible (not agent choice)
         return {"action": "skip", "reason": "no_valid_action_found"}
+
+    def convert_squad_action(
+        self,
+        action_int: int,
+        game_state: Dict[str, Any],
+        eligible_units: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """Convertit un action int (0-40) en dict sémantique pour le pipeline squad.
+
+        eligible_units : pool pré-calculé (évite recalcul si déjà disponible depuis step).
+        Raise sur toute incohérence — aucun fallback silencieux.
+        """
+        current_phase = game_state["phase"]
+
+        # Zone intents (26-40) : command uniquement
+        if is_zone_intent_action(action_int):
+            if current_phase != "command":
+                raise ValueError(
+                    f"convert_squad_action: zone_intent action {action_int} "
+                    f"interdit en phase '{current_phase}'"
+                )
+            zone_idx, intent_value = decode_zone_intent_action(action_int)
+            return {"action": "zone_intent", "zone_idx": zone_idx, "intent_value": intent_value}
+
+        # Deployment : actions 4-8 → deploy_unit (logique existante préservée)
+        if current_phase == "deployment":
+            if eligible_units is None:
+                eligible_units = self._get_eligible_units_for_current_phase(game_state)
+            if not eligible_units:
+                raise ValueError(
+                    "convert_squad_action: aucune unité eligible en phase deployment"
+                )
+            selected_unit_id = eligible_units[0]["id"]
+            if action_int not in [4, 5, 6, 7, 8]:
+                raise ValueError(
+                    f"convert_squad_action: action {action_int} invalide en phase deployment"
+                )
+            current_deployer = self._get_current_deployer(game_state)
+            valid_hexes = self._get_valid_deployment_hexes(
+                game_state, current_deployer, str(selected_unit_id)
+            )
+            if not valid_hexes:
+                raise ValueError(
+                    f"convert_squad_action: aucun hex de deployment pour unité {selected_unit_id}"
+                )
+            dest_col, dest_row = self._select_deployment_hex_for_action(
+                action_int=action_int,
+                unit_id=selected_unit_id,
+                game_state=game_state,
+                current_deployer=current_deployer,
+                valid_hexes=valid_hexes,
+            )
+            return {
+                "action": "deploy_unit",
+                "unitId": selected_unit_id,
+                "destCol": dest_col,
+                "destRow": dest_row,
+            }
+
+        # En phase command, action 18 = passer sans unité sélectionnée
+        if current_phase == "command" and action_int == 18:
+            return {"action": "command_wait"}
+
+        # Actions squad micro (0-25)
+        if eligible_units is None:
+            eligible_units = self._get_eligible_units_for_current_phase(game_state)
+        if not eligible_units:
+            raise ValueError(
+                f"convert_squad_action: aucune unité eligible en phase '{current_phase}' "
+                f"pour action {action_int}"
+            )
+        squad_id = str(eligible_units[0]["id"])
+
+        if 0 <= action_int <= 5:
+            return {"action": "squad_normal_move", "direction": action_int, "squad_id": squad_id}
+
+        if 6 <= action_int <= 11:
+            squad_advance_rolls = game_state.get("_squad_advance_rolls", {})
+            advance_roll = squad_advance_rolls.get(squad_id)
+            if advance_roll is None:
+                raise ValueError(
+                    f"convert_squad_action: advance_roll manquant pour squad {squad_id} "
+                    "— get_squad_action_mask_and_eligible_units doit être appelé avant"
+                )
+            return {
+                "action": "squad_advance",
+                "direction": action_int - 6,
+                "squad_id": squad_id,
+                "advance_roll": advance_roll,
+            }
+
+        if 12 <= action_int <= 17:
+            return {
+                "action": "squad_fall_back",
+                "direction": action_int - 12,
+                "squad_id": squad_id,
+            }
+
+        if action_int == 18:
+            return {"action": "squad_wait", "squad_id": squad_id}
+
+        if 19 <= action_int <= 23:
+            return {
+                "action": "squad_shoot",
+                "target_slot": action_int - 19,
+                "squad_id": squad_id,
+            }
+
+        if action_int == 24:
+            units_cache = require_key(game_state, "units_cache")
+            cache_entry = units_cache.get(squad_id)
+            if cache_entry is None:
+                raise KeyError(f"Squad {squad_id} missing from units_cache")
+            our_player = int(require_key(cache_entry, "player"))
+            enemy_slots = get_enemy_slot_mapping(game_state, our_player)
+            best_target_id: Optional[str] = None
+            best_score = -1.0
+            for esid in enemy_slots:
+                if esid is None or esid not in units_cache:
+                    continue
+                if not charge_check_eligibility(game_state, squad_id, [esid]):
+                    continue
+                enemy_unit = get_unit_by_id(esid, game_state)
+                if enemy_unit is None:
+                    continue
+                score = get_best_enemy_score_for_unit(enemy_unit, game_state)
+                if score > best_score:
+                    best_score = score
+                    best_target_id = esid
+            if best_target_id is None:
+                raise ValueError(
+                    f"convert_squad_action: aucune cible chargeable pour squad {squad_id} "
+                    "— le mask aurait dû empêcher action 24"
+                )
+            return {
+                "action": "squad_charge",
+                "squad_id": squad_id,
+                "target_squad_id": best_target_id,
+            }
+
+        if action_int == 25:
+            return {"action": "squad_fight", "squad_id": squad_id}
+
+        raise ValueError(
+            f"convert_squad_action: action {action_int} non gérée en phase '{current_phase}'"
+        )
 
     def _get_current_deployer(self, game_state: Dict[str, Any]) -> int:
         """Return current deployment player with strict validation."""
