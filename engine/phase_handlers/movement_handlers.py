@@ -1883,6 +1883,15 @@ def movement_build_model_destinations_pool(
         base_shape = unit.get("BASE_SHAPE", "round")
         orientation = unit.get("orientation", 0)
         off_even, off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
+        # Fix fonctionnel : exclure les destinations dont l'empreinte complète
+        # chevauche wall_hexes (le BFS ne vérifie que le hex central).
+        valid_reachable: List[Tuple[int, int]] = []
+        for ac, ar in reachable:
+            offs = off_even if (ac & 1) == 0 else off_odd
+            if not any((ac + dc, ar + dr) in wall_hexes for dc, dr in offs):
+                valid_reachable.append((ac, ar))
+        reachable = valid_reachable
+        # Footprint zone depuis les destinations valides uniquement.
         footprint_zone = set()
         for ac, ar in reachable:
             offs = off_even if (ac & 1) == 0 else off_odd
@@ -1891,6 +1900,8 @@ def movement_build_model_destinations_pool(
         s_offs = off_even if (start_col & 1) == 0 else off_odd
         for dc, dr in s_offs:
             footprint_zone.add((start_col + dc, start_row + dr))
+        # Fix visuel : l'expansion du start peut déborder sur des murs adjacents.
+        footprint_zone -= wall_hexes
 
     # Calcul mask loops sans ecriture permanente dans game_state.
     _prev_loops = game_state.get("move_preview_footprint_mask_loops")
