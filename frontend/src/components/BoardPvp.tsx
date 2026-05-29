@@ -2812,6 +2812,7 @@ export default function Board({
 
     const onEntryPointerDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
+      if (e.target !== canvas) return;
       const rect = canvas.getBoundingClientRect();
       const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
       const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
@@ -2865,8 +2866,8 @@ export default function Board({
       })();
     };
 
-    canvas.addEventListener("pointerdown", onEntryPointerDown, true);
-    return () => canvas.removeEventListener("pointerdown", onEntryPointerDown, true);
+    document.addEventListener("pointerdown", onEntryPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onEntryPointerDown, true);
   }, [phase, mode, measureMode.kind, boardConfig, gameState?.units_cache, current_player, eligibleUnitIds]);
 
   // squad.md brique 3 : en mode plan par-figurine, un clic gauche sur une fig de l'escouade
