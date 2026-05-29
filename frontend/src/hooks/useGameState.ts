@@ -90,7 +90,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
             return {
               ...unit,
               SHOOT_LEFT: 0,
-              HP_CUR: unit.HP_CUR ?? unit.HP_MAX,
+              HP_CUR: unit.HP_CUR,
             };
           }
           // Get NB from selected or first weapon
@@ -101,7 +101,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
           return {
             ...unit,
             SHOOT_LEFT: getDiceAverage(selectedWeapon.NB),
-            HP_CUR: unit.HP_CUR ?? unit.HP_MAX,
+            HP_CUR: unit.HP_CUR,
           };
         }),
       }));

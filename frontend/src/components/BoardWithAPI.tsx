@@ -2005,17 +2005,17 @@ export const BoardWithAPI: React.FC = () => {
     const hasAiUnitsInPool = (pool: Array<string | number>, state: { units: Unit[] }): boolean =>
       pool.some((unitId) => {
         const unit = state.units.find((u: Unit) => String(u.id) === String(unitId));
-        return !!unit && isAiUnit(unit) && (unit.HP_CUR ?? unit.HP_MAX) > 0;
+        return !!unit && isAiUnit(unit) && unit.HP_CUR > 0;
       });
 
     const isAiEnabled = isAiMode;
 
     // Check if game is over by examining unit health
     const player1Alive = apiProps.gameState.units.some(
-      (u) => u.player === 1 && (u.HP_CUR ?? u.HP_MAX) > 0
+      (u) => u.player === 1 && u.HP_CUR > 0
     );
     const player2Alive = apiProps.gameState.units.some(
-      (u) => u.player === 2 && (u.HP_CUR ?? u.HP_MAX) > 0
+      (u) => u.player === 2 && u.HP_CUR > 0
     );
     const gameNotOver = player1Alive && player2Alive;
 
@@ -2832,39 +2832,6 @@ export const BoardWithAPI: React.FC = () => {
           );
         })()}
 
-      {false && (
-        <div className="scoring-panel">
-          {(() => {
-            const p1Score = victoryPoints?.[1] ?? victoryPoints?.["1"] ?? 0;
-            const p2Score = victoryPoints?.[2] ?? victoryPoints?.["2"] ?? 0;
-            const total = p1Score + p2Score;
-            const p1Percent = total > 0 ? (p1Score / total) * 100 : 50;
-            const p2Percent = 100 - p1Percent;
-            return (
-              <div
-                className="scoring-panel__bar"
-                role="img"
-                aria-label={`Scoring P1 ${p1Score} points, P2 ${p2Score} points`}
-              >
-                <div
-                  className="scoring-panel__segment scoring-panel__segment--p1"
-                  style={{ width: `${p1Percent}%` }}
-                />
-                <div
-                  className="scoring-panel__segment scoring-panel__segment--p2"
-                  style={{ width: `${p2Percent}%` }}
-                />
-                <div className="scoring-panel__divider" />
-                <div className="scoring-panel__labels">
-                  <span className="scoring-panel__score">P1 - Primary: {p1Score}</span>
-                  <span className="scoring-panel__score">P2 - Primary: {p2Score}</span>
-                </div>
-              </div>
-            );
-          })()}
-        </div>
-      )}
-
       {deploymentPanel}
       {deploymentTooltip?.visible && (
         <div
@@ -2884,8 +2851,8 @@ export const BoardWithAPI: React.FC = () => {
             <div className="deployment-panel__picker-content" style={{ display: "block" }}>
               <div className="deployment-panel__picker-tooltip">
                 {(() => {
-                  const p1 = victoryPoints?.[1] ?? victoryPoints?.["1"] ?? 0;
-                  const p2 = victoryPoints?.[2] ?? victoryPoints?.["2"] ?? 0;
+                  const p1 = getVictoryPointsForPlayer(1);
+                  const p2 = getVictoryPointsForPlayer(2);
                   const winner = apiProps.gameState?.winner;
                   const winnerText =
                     winner === 1 ? "Winner: Player 1" : winner === 2 ? "Winner: Player 2" : "Draw";
@@ -3295,10 +3262,10 @@ export const BoardWithAPI: React.FC = () => {
                     currentBlinkStep: apiProps.targetPreview.currentBlinkStep ?? 0,
                     totalBlinkSteps: apiProps.targetPreview.totalBlinkSteps ?? 2,
                     blinkTimer: apiProps.targetPreview.blinkTimer ?? null,
-                    hitProbability: apiProps.targetPreview.hitProbability ?? 0.5,
-                    woundProbability: apiProps.targetPreview.woundProbability ?? 0.5,
-                    saveProbability: apiProps.targetPreview.saveProbability ?? 0.5,
-                    overallProbability: apiProps.targetPreview.overallProbability ?? 0.25,
+                    hitProbability: apiProps.targetPreview.hitProbability,
+                    woundProbability: apiProps.targetPreview.woundProbability,
+                    saveProbability: apiProps.targetPreview.saveProbability,
+                    overallProbability: apiProps.targetPreview.overallProbability,
                   }
                 : null
             }

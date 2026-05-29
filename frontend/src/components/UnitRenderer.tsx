@@ -455,7 +455,7 @@ export class UnitRenderer {
     }
     const unitWithFlags = unit as UnitWithFlags;
     const isJustKilled = unitWithFlags.isJustKilled === true;
-    const hpCurValue = Number(unit.HP_CUR ?? unit.HP_MAX ?? 0);
+    const hpCurValue = Number(unit.HP_CUR);
     if (Number.isNaN(hpCurValue)) {
       throw new Error(`Invalid HP_CUR value for unit ${unit.id}`);
     }
@@ -1563,7 +1563,7 @@ export class UnitRenderer {
     const finalBarY = shouldShowBlinkingHP ? barY - (finalBarHeight - HP_BAR_HEIGHT) : barY;
 
     // HP calculation with preview
-    const currentHP = Math.max(0, unit.HP_CUR ?? unit.HP_MAX);
+    const currentHP = Math.max(0, unit.HP_CUR);
     let displayHP = currentHP;
     if (isTargetPreviewed && targetPreview) {
       const shooter = units.find((u) => u.id === targetPreview.shooterId);

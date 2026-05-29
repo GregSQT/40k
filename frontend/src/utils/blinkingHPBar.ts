@@ -272,7 +272,7 @@ export function refreshBlinkingHpBarSlices(
     return;
 
   const currentHP =
-    sliceHpCur !== undefined ? Math.max(0, sliceHpCur) : Math.max(0, unit.HP_CUR ?? unit.HP_MAX);
+    sliceHpCur !== undefined ? Math.max(0, sliceHpCur) : Math.max(0, unit.HP_CUR);
   const shooterDamage = attacker ? calculateDamagePerAttack(attacker, unit, phase, inCover) : 0;
 
   const lostColor = getCSSColor("--hp-bar-lost");
@@ -444,7 +444,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   const currentHP =
     sliceHpCurFromConfig !== undefined
       ? Math.max(0, sliceHpCurFromConfig)
-      : Math.max(0, unit.HP_CUR ?? unit.HP_MAX);
+      : Math.max(0, unit.HP_CUR);
 
   // Create HP slices
   const normalSlices: PIXI.Graphics[] = [];

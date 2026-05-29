@@ -73,7 +73,7 @@ export const useGameActions = ({
       } = gameState;
 
       // Universal eligibility checks
-      if ((unit.HP_CUR ?? unit.HP_MAX) <= 0) return false;
+      if (unit.HP_CUR <= 0) return false;
       if (unit.player !== current_player) return false;
 
       switch (phase) {
@@ -88,7 +88,7 @@ export const useGameActions = ({
           const hasAdjacentEnemy = gameState.units.some(
             (enemy) =>
               enemy.player !== unit.player &&
-              (enemy.HP_CUR ?? enemy.HP_MAX) > 0 &&
+              enemy.HP_CUR > 0 &&
               cubeDistance(offsetToCube(unit.col, unit.row), offsetToCube(enemy.col, enemy.row)) <=
                 1
           );

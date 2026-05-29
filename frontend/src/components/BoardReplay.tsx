@@ -838,7 +838,7 @@ export const BoardReplay: React.FC = () => {
         let p1_oc = 0;
         let p2_oc = 0;
         for (const unit of enrichedUnits) {
-          if (unit.id < 0 || (unit.HP_CUR ?? unit.HP_MAX) <= 0) continue;
+          if (unit.id < 0 || unit.HP_CUR <= 0) continue;
           if (hexSet.has(`${unit.col},${unit.row}`)) {
             const oc = unit.OC ?? 0;
             if (unit.player === 1) p1_oc += oc;
@@ -1185,7 +1185,7 @@ export const BoardReplay: React.FC = () => {
           if (unit.id < 0) {
             continue;
           }
-          if ((unit.HP_CUR ?? unit.HP_MAX) <= 0) {
+          if (unit.HP_CUR <= 0) {
             continue;
           }
           const unitHex = `${unit.col},${unit.row}`;

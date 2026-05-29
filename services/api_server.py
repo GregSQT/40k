@@ -9,6 +9,7 @@ import os
 import sqlite3
 import sys
 import time
+import traceback
 import yaml
 from pathlib import Path
 import hashlib
@@ -21,6 +22,7 @@ from typing import Any, Dict, Optional, Tuple
 from uuid import UUID
 from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
+from werkzeug.exceptions import HTTPException
 
 # Add parent directory (project root) to path
 parent_dir = os.path.join(os.path.dirname(__file__), '..')
@@ -997,6 +999,26 @@ CORS(
     expose_headers=["Server-Timing", "X-W40k-Payload-Bytes"],
 )  # Server-Timing + taille payload (perf) lisibles en JS si W40K_PERF_TIMING=1
 
+
+@app.errorhandler(Exception)
+def handle_uncaught_exception(error: Exception):
+    """Centralise toute exception non gérée : log du traceback complet côté
+    serveur + réponse JSON explicite (type + message + traceback). Remplace les
+    anciens `except Exception -> jsonify(str(e)), 500` qui masquaient la cause."""
+    # Laisser passer les erreurs HTTP volontaires (abort(404), 405, etc.).
+    if isinstance(error, HTTPException):
+        return error
+    tb = traceback.format_exc()
+    print(f"🔥 UNCAUGHT EXCEPTION ({type(error).__name__}): {error}")
+    print(tb)
+    return jsonify({
+        "success": False,
+        "error": str(error),
+        "error_type": type(error).__name__,
+        "traceback": tb,
+    }), 500
+
+
 # Minimal Flask logging for debugging when needed
 flask_request_logs = []
 
@@ -1238,15 +1260,11 @@ def initialize_engine(scenario_file: Optional[str] = None):
         
         print("✅ W40K Engine initialized successfully (PvP mode)")
         return True
-    except Exception as e:
+    except Exception:
         # Restore original working directory on error
         if original_cwd is not None:
             os.chdir(original_cwd)
-        print(f"❌ Failed to initialize engine: {e}")
-        print(f"❌ Exception type: {type(e).__name__}")
-        import traceback
-        print(f"❌ Full traceback: {traceback.format_exc()}")
-        return False
+        raise
 
 def initialize_pve_engine(scenario_file: Optional[str] = None):
     """
@@ -1440,15 +1458,11 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
         
         print("✅ W40K Engine initialized successfully (PvE mode)")
         return True
-    except Exception as e:
+    except Exception:
         # Restore original working directory on error
         if original_cwd is not None:
             os.chdir(original_cwd)
-        print(f"❌ Failed to initialize PvE engine: {e}")
-        print(f"❌ Exception type: {type(e).__name__}")
-        import traceback
-        print(f"❌ Full traceback: {traceback.format_exc()}")
-        return False
+        raise
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -1623,29 +1637,22 @@ def current_user():
 @app.route('/api/debug/engine-test', methods=['GET'])
 def test_engine():
     """Test engine initialization directly."""
-    try:
-        # Test config loading
-        original_cwd = os.getcwd()
-        project_root = os.path.join(os.path.dirname(__file__), '..')
-        os.chdir(os.path.abspath(project_root))
-        
-        from main import load_config
-        config = load_config()
-        
-        os.chdir(original_cwd)
-        
-        return jsonify({
-            "success": True,
-            "config_loaded": True,
-            "units_count": len(config.get("units", [])),
-            "board_config": bool(config.get("board"))
-        })
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e),
-            "traceback": str(e.__class__.__name__)
-        }), 500
+    # Test config loading
+    original_cwd = os.getcwd()
+    project_root = os.path.join(os.path.dirname(__file__), '..')
+    os.chdir(os.path.abspath(project_root))
+
+    from main import load_config
+    config = load_config()
+
+    os.chdir(original_cwd)
+
+    return jsonify({
+        "success": True,
+        "config_loaded": True,
+        "units_count": len(config.get("units", [])),
+        "board_config": bool(config.get("board"))
+    })
 
 @app.route('/api/game/start', methods=['POST'])
 @with_engine_state_lock
@@ -1712,25 +1719,21 @@ def start_game():
             _prev_board = os.environ.get("W40K_BOARD_PATH")
             os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
             try:
-                ok = initialize_engine(scenario_file=scenario_file)
+                initialize_engine(scenario_file=scenario_file)
             finally:
                 if _prev_board is not None:
                     os.environ["W40K_BOARD_PATH"] = _prev_board
                 elif "W40K_BOARD_PATH" in os.environ:
                     del os.environ["W40K_BOARD_PATH"]
-            if not ok:
-                return jsonify({"success": False, "error": "PvP Test engine initialization failed"}), 500
         elif requested_mode == "pvp":
             print("DEBUG: Initializing engine for PvP mode")
-            if not initialize_engine(scenario_file=scenario_file):
-                return jsonify({"success": False, "error": "PvP engine initialization failed"}), 500
+            initialize_engine(scenario_file=scenario_file)
         elif requested_mode == "pve":
             print("DEBUG: Initializing engine for PvE mode (copied from Test mode)")
-            if not initialize_test_engine(
+            initialize_test_engine(
                 scenario_file=scenario_file,
                 forced_agent_key="CoreAgent",
-            ):
-                return jsonify({"success": False, "error": "PvE engine initialization failed"}), 500
+            )
         elif requested_mode == "pve_test":
             print("DEBUG: Initializing engine for PvE Test mode")
             if board_path is None:
@@ -1741,7 +1744,7 @@ def start_game():
             _prev_board = os.environ.get("W40K_BOARD_PATH")
             os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
             try:
-                ok = initialize_test_engine(
+                initialize_test_engine(
                     scenario_file=scenario_file,
                     forced_agent_key="CoreAgent",
                 )
@@ -1750,21 +1753,17 @@ def start_game():
                     os.environ["W40K_BOARD_PATH"] = _prev_board
                 elif "W40K_BOARD_PATH" in os.environ:
                     del os.environ["W40K_BOARD_PATH"]
-            if not ok:
-                return jsonify({"success": False, "error": "PvE Test engine initialization failed"}), 500
         elif requested_mode == ED_MODE_CODE:
             print("DEBUG: Initializing engine for Endless Duty mode")
             if scenario_file is None:
                 scenario_file = ED_SCENARIO_DEFAULT
-            if not initialize_test_engine(
+            initialize_test_engine(
                 scenario_file=scenario_file,
                 forced_agent_key="CoreAgent",
-            ):
-                return jsonify({"success": False, "error": "Endless Duty engine initialization failed"}), 500
+            )
         else:
             print("DEBUG: Initializing engine for PvP mode")
-            if not initialize_engine(scenario_file=scenario_file):
-                return jsonify({"success": False, "error": "PvP engine initialization failed"}), 500
+            initialize_engine(scenario_file=scenario_file)
 
         assert engine is not None
 
@@ -1931,11 +1930,8 @@ def start_game():
             "message": f"Game started successfully ({mode_label} mode)",
         })
     
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": f"Failed to start game: {str(e)}"
-        }), 500
+    except Exception:
+        raise
 
 @app.route('/api/game/action', methods=['POST'])
 @with_engine_state_lock
@@ -2189,16 +2185,8 @@ def execute_action():
 
         return resp
     
-    except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"🔥 FULL ERROR TRACEBACK:")
-        print(error_details)
-        return jsonify({
-            "success": False,
-            "error": f"Action execution failed: {str(e)}",
-            "traceback": error_details
-        }), 500
+    except Exception:
+        raise
 
 
 def _get_activation_pool_key_for_phase(phase: str) -> str:
@@ -2635,10 +2623,7 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
 @app.route('/api/armies', methods=['GET'])
 def list_armies():
     """List selectable armies from config/armies."""
-    try:
-        return jsonify({"success": True, "armies": _list_armies()})
-    except Exception as e:
-        return jsonify({"success": False, "error": f"Failed to list armies: {str(e)}"}), 500
+    return jsonify({"success": True, "armies": _list_armies()})
 
 @app.route('/api/game/state', methods=['GET'])
 @with_engine_state_lock
@@ -2668,56 +2653,43 @@ def reset_game():
     if not engine:
         return jsonify({"success": False, "error": "Engine not initialized"}), 400
     
-    try:
-        obs, info = engine.reset()
-        serializable_state = _game_state_for_json(engine)
-        _sync_units_hp_from_cache(serializable_state, engine.game_state)
-        _attach_player_types(serializable_state, engine)
+    obs, info = engine.reset()
+    serializable_state = _game_state_for_json(engine)
+    _sync_units_hp_from_cache(serializable_state, engine.game_state)
+    _attach_player_types(serializable_state, engine)
 
-        return api_json_response({
-            "success": True,
-            "game_state": serializable_state,
-            "message": "Game reset successfully",
-        })
-    
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": f"Reset failed: {str(e)}"
-        }), 500
+    return api_json_response({
+        "success": True,
+        "game_state": serializable_state,
+        "message": "Game reset successfully",
+    })
 
 @app.route('/api/config/tutorial/steps', methods=['GET'])
 def get_tutorial_steps():
     """Serve tutorial steps from tutorial_scenario.yaml (single source of truth)."""
-    try:
-        project_root = Path(__file__).resolve().parent.parent
-        path = project_root / "config" / "tutorial" / "tutorial_scenario.yaml"
-        if not path.exists():
-            return jsonify({"success": False, "error": "tutorial_scenario.yaml not found"}), 404
+    project_root = Path(__file__).resolve().parent.parent
+    path = project_root / "config" / "tutorial" / "tutorial_scenario.yaml"
+    if not path.exists():
+        return jsonify({"success": False, "error": "tutorial_scenario.yaml not found"}), 404
 
-        with open(path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-        if not isinstance(data, dict) or "steps" not in data or not isinstance(data["steps"], list):
-            return jsonify({
-                "success": False,
-                "error": "tutorial_scenario.yaml must be an object with a steps[] array"
-            }), 500
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if not isinstance(data, dict) or "steps" not in data or not isinstance(data["steps"], list):
+        return jsonify({
+            "success": False,
+            "error": "tutorial_scenario.yaml must be an object with a steps[] array"
+        }), 500
 
-        return jsonify({"steps": data["steps"]})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    return jsonify({"steps": data["steps"]})
 
 
 @app.route('/api/config/defaults', methods=['GET'])
 def get_config_defaults():
     """Expose config.json defaults section to the frontend."""
-    try:
-        from config_loader import get_config_loader
-        config_loader = get_config_loader()
-        config = config_loader.load_config("config", force_reload=False)
-        return jsonify({"success": True, "defaults": config.get("defaults", {})})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    from config_loader import get_config_loader
+    config_loader = get_config_loader()
+    config = config_loader.load_config("config", force_reload=False)
+    return jsonify({"success": True, "defaults": require_key(config, "defaults")})
 
 
 @app.route('/api/config/board', methods=['GET'])
@@ -2747,14 +2719,17 @@ def get_board_config():
             board_data = config_loader.get_board_config()
         board_spec = board_data["default"]
         config_json = config_loader.load_config("config", force_reload=False)
-        board_subdir = BOARD_PATH_MAP[board_path_param] if board_path_param else config_json.get("paths", {}).get("board")
+        if board_path_param:
+            board_subdir = BOARD_PATH_MAP[board_path_param]
+        else:
+            board_subdir = require_key(require_key(config_json, "paths"), "board")
         if not board_subdir:
-            return jsonify({"success": True, "config": board_spec})
+            raise ValueError("config.json: 'paths.board' must be a non-empty value")
 
         project_root = Path(__file__).resolve().parent.parent
         board_dir = project_root / "config" / board_subdir
-        wall_ref = board_spec.get("wall_ref", "walls-01.json")
-        objectives_ref = board_spec.get("objectives_ref", "objectives-01.json")
+        wall_ref = board_spec.get("wall_ref")
+        objectives_ref = board_spec.get("objectives_ref")
 
         scenario_file_raw = request.args.get("scenario_file")
         scenario_data = None
@@ -2813,28 +2788,31 @@ def get_board_config():
             wall_hexes = scenario_wall_hexes
         elif wall_ref and wall_ref.endswith(".json"):
             wall_path = board_dir / "walls" / wall_ref
-            if wall_path.exists():
-                with open(wall_path, "r", encoding="utf-8-sig") as f:
-                    wall_data = json.load(f)
-                if "walls" in wall_data:
-                    wall_hexes = []
-                    for gi, g in enumerate(wall_data.get("walls", [])):
-                        if not isinstance(g, dict):
-                            raise ValueError(f"wall group {gi} must be an object")
-                        hint = f"{wall_path} walls[{gi}]"
-                        has_segments = bool(g.get("segments"))
-                        if has_segments:
-                            for seg in g["segments"]:
-                                if isinstance(seg, list) and len(seg) == 2:
-                                    a, b = seg[0], seg[1]
-                                    wall_segments_raw.append({
-                                        "start": {"col": int(a[0]), "row": int(a[1])},
-                                        "end": {"col": int(b[0]), "row": int(b[1])},
-                                    })
-                        from engine.hex_utils import expand_wall_group_to_hex_list as _expand
-                        wall_hexes.extend(_expand(g, path_hint=hint))
-                else:
-                    wall_hexes = wall_data.get("wall_hexes", [])
+            if not wall_path.exists():
+                raise FileNotFoundError(f"Referenced wall file not found: {wall_path}")
+            with open(wall_path, "r", encoding="utf-8-sig") as f:
+                wall_data = json.load(f)
+            if "walls" in wall_data:
+                wall_hexes = []
+                for gi, g in enumerate(wall_data.get("walls", [])):
+                    if not isinstance(g, dict):
+                        raise ValueError(f"wall group {gi} must be an object")
+                    hint = f"{wall_path} walls[{gi}]"
+                    has_segments = bool(g.get("segments"))
+                    if has_segments:
+                        for seg in g["segments"]:
+                            if isinstance(seg, list) and len(seg) == 2:
+                                a, b = seg[0], seg[1]
+                                wall_segments_raw.append({
+                                    "start": {"col": int(a[0]), "row": int(a[1])},
+                                    "end": {"col": int(b[0]), "row": int(b[1])},
+                                })
+                    from engine.hex_utils import expand_wall_group_to_hex_list as _expand
+                    wall_hexes.extend(_expand(g, path_hint=hint))
+            elif "wall_hexes" in wall_data:
+                wall_hexes = wall_data["wall_hexes"]
+            else:
+                raise ValueError(f"Wall file {wall_path} must contain 'walls' or 'wall_hexes'")
 
         objectives = []
         if scenario_file and isinstance(scenario_data, dict) and "objectives" in scenario_data:
@@ -2844,10 +2822,13 @@ def get_board_config():
             objectives = scenario_objectives
         elif objectives_ref and objectives_ref.endswith(".json"):
             obj_path = board_dir / "objectives" / objectives_ref
-            if obj_path.exists():
-                with open(obj_path, "r", encoding="utf-8-sig") as f:
-                    obj_data = json.load(f)
-                objectives = obj_data.get("objectives", [])
+            if not obj_path.exists():
+                raise FileNotFoundError(f"Referenced objectives file not found: {obj_path}")
+            with open(obj_path, "r", encoding="utf-8-sig") as f:
+                obj_data = json.load(f)
+            if "objectives" not in obj_data:
+                raise ValueError(f"Objectives file {obj_path} must contain 'objectives'")
+            objectives = obj_data["objectives"]
         from engine.hex_utils import expand_objectives_to_hex_list as _expand_objectives
         board_cols = int(require_key(board_spec, "cols"))
         board_rows = int(require_key(board_spec, "rows"))
@@ -2871,11 +2852,6 @@ def get_board_config():
             "success": False,
             "error": str(e)
         }), 404
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": f"Config load failed: {str(e)}"
-        }), 500
 
 @app.route('/api/debug/actions', methods=['GET'])
 def get_available_actions():
@@ -3036,9 +3012,9 @@ def execute_ai_turn():
                 else None
             ),
         })
-            
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+
+    except Exception:
+        raise
 
 @app.route('/api/replay/parse', methods=['POST'])
 def parse_replay_log():
@@ -3056,24 +3032,20 @@ def parse_replay_log():
             "episodes": [...]
         }
     """
-    try:
-        from services.replay_parser import parse_log_file
+    from services.replay_parser import parse_log_file
 
-        data = request.get_json() or {}
-        log_path = data.get('log_path', 'train_step.log')
+    data = request.get_json() or {}
+    log_path = data.get('log_path', 'train_step.log')
 
-        # Security: Only allow logs in current directory or subdirectories
-        if '..' in log_path or log_path.startswith('/'):
-            return jsonify({"error": "Invalid log path"}), 400
+    # Security: Only allow logs in current directory or subdirectories
+    if '..' in log_path or log_path.startswith('/'):
+        return jsonify({"error": "Invalid log path"}), 400
 
-        if not os.path.exists(log_path):
-            return jsonify({"error": f"Log file not found: {log_path}"}), 404
+    if not os.path.exists(log_path):
+        return jsonify({"error": f"Log file not found: {log_path}"}), 404
 
-        replay_data = parse_log_file(log_path)
-        return jsonify(replay_data)
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    replay_data = parse_log_file(log_path)
+    return jsonify(replay_data)
 
 
 @app.route('/api/replay/default', methods=['GET'])
@@ -3084,23 +3056,19 @@ def get_default_replay_log():
     Returns:
         Raw text content of step.log
     """
-    try:
-        # Look in project root (one directory up from services/)
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        log_path = os.path.join(project_root, 'step.log')
+    # Look in project root (one directory up from services/)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    log_path = os.path.join(project_root, 'step.log')
 
-        if not os.path.exists(log_path):
-            return jsonify({"error": "step.log not found"}), 404
+    if not os.path.exists(log_path):
+        return jsonify({"error": "step.log not found"}), 404
 
-        with open(log_path, 'r', encoding='utf-8') as f:
-            content = f.read()
+    with open(log_path, 'r', encoding='utf-8') as f:
+        content = f.read()
 
-        # Return as plain text for frontend parsing
-        from flask import Response
-        return Response(content, mimetype='text/plain')
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    # Return as plain text for frontend parsing
+    from flask import Response
+    return Response(content, mimetype='text/plain')
 
 @app.route('/api/replay/file/<filename>', methods=['GET'])
 def get_replay_log_file(filename):
@@ -3113,30 +3081,26 @@ def get_replay_log_file(filename):
     Returns:
         Raw text content of the log file
     """
-    try:
-        # Security: Only allow .log files, no path traversal
-        if not filename.endswith('.log'):
-            return jsonify({"error": "Only .log files are allowed"}), 400
-        
-        if '..' in filename or '/' in filename or '\\' in filename:
-            return jsonify({"error": "Invalid filename"}), 400
+    # Security: Only allow .log files, no path traversal
+    if not filename.endswith('.log'):
+        return jsonify({"error": "Only .log files are allowed"}), 400
 
-        # Look in project root (one directory up from services/)
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        log_path = os.path.join(project_root, filename)
+    if '..' in filename or '/' in filename or '\\' in filename:
+        return jsonify({"error": "Invalid filename"}), 400
 
-        if not os.path.exists(log_path):
-            return jsonify({"error": f"Log file not found: {filename}"}), 404
+    # Look in project root (one directory up from services/)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    log_path = os.path.join(project_root, filename)
 
-        with open(log_path, 'r', encoding='utf-8') as f:
-            content = f.read()
+    if not os.path.exists(log_path):
+        return jsonify({"error": f"Log file not found: {filename}"}), 404
 
-        # Return as plain text for frontend parsing
-        from flask import Response
-        return Response(content, mimetype='text/plain')
+    with open(log_path, 'r', encoding='utf-8') as f:
+        content = f.read()
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    # Return as plain text for frontend parsing
+    from flask import Response
+    return Response(content, mimetype='text/plain')
 
 
 @app.route('/api/replay/list', methods=['GET'])
@@ -3152,38 +3116,34 @@ def list_replay_logs():
             ]
         }
     """
-    try:
-        logs = []
-        
-        # Look in project root (one directory up from services/)
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    logs = []
 
-        # Check for train_step.log in project root
-        train_step_path = os.path.join(project_root, 'train_step.log')
-        if os.path.exists(train_step_path):
-            stats = os.stat(train_step_path)
-            logs.append({
-                'name': 'train_step.log',
-                'size': stats.st_size,
-                'modified': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stats.st_mtime))
-            })
+    # Look in project root (one directory up from services/)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-        # Check for other .log files in project root
-        for filename in os.listdir(project_root):
-            if filename.endswith('.log') and filename != 'train_step.log':
-                file_path = os.path.join(project_root, filename)
-                if os.path.isfile(file_path):
-                    stats = os.stat(file_path)
-                    logs.append({
-                        'name': filename,
-                        'size': stats.st_size,
-                        'modified': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stats.st_mtime))
-                    })
+    # Check for train_step.log in project root
+    train_step_path = os.path.join(project_root, 'train_step.log')
+    if os.path.exists(train_step_path):
+        stats = os.stat(train_step_path)
+        logs.append({
+            'name': 'train_step.log',
+            'size': stats.st_size,
+            'modified': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stats.st_mtime))
+        })
 
-        return jsonify({'logs': logs})
+    # Check for other .log files in project root
+    for filename in os.listdir(project_root):
+        if filename.endswith('.log') and filename != 'train_step.log':
+            file_path = os.path.join(project_root, filename)
+            if os.path.isfile(file_path):
+                stats = os.stat(file_path)
+                logs.append({
+                    'name': filename,
+                    'size': stats.st_size,
+                    'modified': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stats.st_mtime))
+                })
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify({'logs': logs})
 
 
 @app.route('/', methods=['GET'])

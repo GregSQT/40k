@@ -462,7 +462,7 @@ export function calculateDamage(
 }
 
 export function applyDamage(unit: Unit, damage: number): Unit {
-  const currentHP = unit.HP_CUR ?? unit.HP_MAX;
+  const currentHP = unit.HP_CUR;
   const newHP = Math.max(0, currentHP - damage);
 
   return {
@@ -472,7 +472,7 @@ export function applyDamage(unit: Unit, damage: number): Unit {
 }
 
 export function isUnitAlive(unit: Unit): boolean {
-  const currentHP = unit.HP_CUR ?? unit.HP_MAX;
+  const currentHP = unit.HP_CUR;
   return currentHP > 0;
 }
 
@@ -508,7 +508,7 @@ export function logGameState(units: Unit[], phase: string, current_player: numbe
   if (typeof window !== "undefined" && import.meta.env?.DEV) {
     console.group(`Game State - Phase: ${phase}, Player: ${current_player}`);
     units.forEach((unit) => {
-      const hp = unit.HP_CUR ?? unit.HP_MAX;
+      const hp = unit.HP_CUR;
       console.log(
         `${unit.name} (P${unit.player}): ${hp}/${unit.HP_MAX} HP at (${unit.col}, ${unit.row})`
       );

@@ -6017,20 +6017,26 @@ export default function Board({
         }),
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.game_state) {
-          window.dispatchEvent(
-            new CustomEvent("weaponSelected", {
-              detail: { gameState: data.game_state, weaponDisplayName },
-            })
-          );
-        }
-      } else {
-        console.error("Failed to select weapon: response not OK");
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error ?? `HTTP ${response.status}`);
       }
+      const data = await response.json();
+      if (!data.success || !data.game_state) {
+        throw new Error(data.error ?? "weapon selection rejected by engine");
+      }
+      window.dispatchEvent(
+        new CustomEvent("weaponSelected", {
+          detail: { gameState: data.game_state, weaponDisplayName },
+        })
+      );
     } catch (error) {
       console.error("🔴 WEAPON SELECT ERROR:", error);
+      window.dispatchEvent(
+        new CustomEvent("weaponSelectError", {
+          detail: { message: error instanceof Error ? error.message : String(error) },
+        })
+      );
     }
   };
 

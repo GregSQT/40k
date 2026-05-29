@@ -534,12 +534,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     currentBlinkStep?: number;
     totalBlinkSteps?: number;
     blinkTimer?: number | null;
-    hitProbability?: number;
-    woundProbability?: number;
-    saveProbability?: number;
-    overallProbability?: number;
-    potentialDamage?: number;
-    expectedDamage?: number;
+    hitProbability: number;
+    woundProbability: number;
+    saveProbability: number;
+    overallProbability: number;
+    potentialDamage: number;
+    expectedDamage: number;
     lastUpdate?: number;
   } | null>(null);
 
@@ -954,9 +954,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
     };
 
+    const weaponSelectErrorHandler = (e: Event) => {
+      const detail = (e as CustomEvent<{ message?: string }>).detail;
+      setError(`Weapon selection failed: ${detail?.message ?? "unknown error"}`);
+    };
+
     window.addEventListener("weaponSelected", weaponSelectedHandler);
+    window.addEventListener("weaponSelectError", weaponSelectErrorHandler);
     return () => {
       window.removeEventListener("weaponSelected", weaponSelectedHandler);
+      window.removeEventListener("weaponSelectError", weaponSelectErrorHandler);
     };
   }, [targetPreview, blinkingUnits.blinkTimer]);
 
@@ -1917,7 +1924,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           // NEW RULE: Handle charge failure - show failed roll badge
           // Use EXACT same logic as successful charges: reset mode immediately, store targetId
           else if (data.result?.charge_failed && data.result?.charge_roll !== undefined) {
-            const failedUnitId = parseInt(data.result.unitId || "0", 10);
+            if (data.result.unitId == null) {
+              throw new Error("charge_failed result missing unitId");
+            }
+            const failedUnitId = parseInt(String(data.result.unitId), 10);
             const targetId = data.result.targetId ? parseInt(data.result.targetId, 10) : undefined;
             setPendingChargeRollDisplay(null);
             setChargePreviewTargetId(null);
@@ -2274,6 +2284,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           });
         }
         console.error("Action error:", err);
+        setError(formatApiConnectionError(err));
         return undefined;
       }
     },
@@ -3001,6 +3012,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           setPendingPreviewAction(null);
         } catch (error) {
           console.error("Postpone movement (right_click) failed:", error);
+          setError(`Postpone movement failed: ${formatApiConnectionError(error)}`);
         }
         return;
       }
@@ -3016,6 +3028,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setMode("select");
       } catch (error) {
         console.error("Skip unit failed:", error);
+        setError(`Skip unit failed: ${formatApiConnectionError(error)}`);
       }
     },
     [executeAction, gameState?.phase, gameState?.active_movement_unit]
@@ -3161,6 +3174,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       } catch (error) {
         console.error("❌ DIRECT MOVE FAILED:", error);
         console.error("Move failed:", error);
+        setError(`Move failed: ${formatApiConnectionError(error)}`);
       }
     },
     [executeAction, validateOrientationStep]
@@ -3372,6 +3386,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setSelectedUnitId(null);
     } catch (e) {
       console.error("[SQUAD-MOVE] commit FAILED", e);
+      setError(`Squad move failed: ${formatApiConnectionError(e)}`);
     }
   }, [squadMovePlan, executeAction]);
 
@@ -3436,6 +3451,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setMode("select");
       } catch (error) {
         console.error("❌ DEPLOY FAILED:", error);
+        setError(`Deploy failed: ${formatApiConnectionError(error)}`);
       }
     },
     [executeAction, gameState]
@@ -4001,34 +4017,34 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return unitId === numericTargetId;
       });
 
-      let hitProbability = 0.5;
-      let woundProbability = 0.5;
-      let saveProbability = 0.5;
-      let potentialDamage = 0;
-
-      if (shooter && target) {
-        // Arme à feu sélectionnée (alignée sur HP blink / tir effectif)
-        // Convert shooter to proper Unit type (id as number, player as PlayerId)
-        const shooterUnit: Unit = {
-          ...shooter,
-          id: typeof shooter.id === "string" ? parseInt(shooter.id, 10) : shooter.id,
-          player: shooter.player as PlayerId,
-        };
-        const targetUnit: Unit = {
-          ...target,
-          id: typeof target.id === "string" ? parseInt(target.id, 10) : target.id,
-          player: target.player as PlayerId,
-        };
-        const rangedEff = getSelectedRangedWeaponAgainstTarget(shooterUnit, targetUnit);
-        if (!rangedEff) {
-          return;
-        }
-
-        hitProbability = rangedEff.hitProbability;
-        woundProbability = rangedEff.woundProbability;
-        saveProbability = rangedEff.saveProbability;
-        potentialDamage = rangedEff.potentialDamage;
+      if (!shooter || !target) {
+        throw new Error(
+          `Cannot build target preview: shooter (${numericShooterId}) or target (${numericTargetId}) not found in game_state`
+        );
       }
+      // Arme à feu sélectionnée (alignée sur HP blink / tir effectif)
+      // Convert shooter to proper Unit type (id as number, player as PlayerId)
+      const shooterUnit: Unit = {
+        ...shooter,
+        id: typeof shooter.id === "string" ? parseInt(shooter.id, 10) : shooter.id,
+        player: shooter.player as PlayerId,
+      };
+      const targetUnit: Unit = {
+        ...target,
+        id: typeof target.id === "string" ? parseInt(target.id, 10) : target.id,
+        player: target.player as PlayerId,
+      };
+      const rangedEff = getSelectedRangedWeaponAgainstTarget(shooterUnit, targetUnit);
+      if (!rangedEff) {
+        throw new Error(
+          `No ranged weapon available for unit ${shooterUnit.id} when starting target preview`
+        );
+      }
+
+      const hitProbability = rangedEff.hitProbability;
+      const woundProbability = rangedEff.woundProbability;
+      const saveProbability = rangedEff.saveProbability;
+      const potentialDamage = rangedEff.potentialDamage;
 
       const overallProbability = hitProbability * woundProbability * (1 - saveProbability);
       const expectedDamage = overallProbability * potentialDamage;
@@ -5058,7 +5074,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   }
                 }
               } catch (stateErr) {
-                void stateErr;
+                console.error("AI auto-play: game-state refresh failed:", stateErr);
               }
               // Exit loop - no more AI units eligible
               break;
@@ -5625,7 +5641,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   }
                 }
               } catch (err) {
-                void err;
+                console.error("AI auto-play: activation loop error:", err);
                 break; // Exit loop on error
               }
             } else {
@@ -5720,7 +5736,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 );
                 return (
                   !!unit &&
-                  (unit.HP_CUR ?? unit.HP_MAX) > 0 &&
+                  unit.HP_CUR > 0 &&
                   isAiUnitInState(updatedGameState as APIGameState, unitId)
                 );
               });
@@ -5732,7 +5748,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   );
                   return (
                     !!unit &&
-                    (unit.HP_CUR ?? unit.HP_MAX) > 0 &&
+                    unit.HP_CUR > 0 &&
                     isAiUnitInState(updatedGameState as APIGameState, unitId)
                   );
                 }
@@ -5745,7 +5761,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   );
                   return (
                     !!unit &&
-                    (unit.HP_CUR ?? unit.HP_MAX) > 0 &&
+                    unit.HP_CUR > 0 &&
                     isAiUnitInState(updatedGameState as APIGameState, unitId)
                   );
                 }

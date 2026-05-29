@@ -412,7 +412,7 @@ const UnitRow = memo<UnitRowProps>(
     if (!unit.HP_MAX) {
       throw new Error(`Unit ${unit.id} missing required HP_MAX field`);
     }
-    const currentHP = unit.HP_CUR ?? unit.HP_MAX;
+    const currentHP = unit.HP_CUR;
 
     const rngWeapons = unit.RNG_WEAPONS || [];
     const ccWeapons = unit.CC_WEAPONS || [];
@@ -1357,7 +1357,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     // Filter units for this player and exclude dead units ; preview plateau : unité ciblée en tête de liste
     const playerUnits = useMemo(() => {
       const filtered = units.filter(
-        (unit) => unit.player === player && (unit.HP_CUR ?? unit.HP_MAX) > 0
+        (unit) => unit.player === player && unit.HP_CUR > 0
       );
       if (detailPreviewUnitId === null) {
         return filtered;
