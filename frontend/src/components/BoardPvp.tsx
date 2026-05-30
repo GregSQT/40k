@@ -794,6 +794,10 @@ export default function Board({
   const measureGuideLineRef = useRef<PIXI.Graphics | null>(null);
   /** Timestamp d'entrée en squadModelMove depuis movePreview — bloque onPointerDownSelect pour le clic de confirmation */
   const squadMoveEntryTimeRef = useRef<number | null>(null);
+  /** Double-click détecté manuellement dans onEntryPointerDown : { unitId, ts } du dernier clic sur une unité */
+  const lastUnitClickRef = useRef<{ unitId: number | string; ts: number } | null>(null);
+  /** Timestamp du dernier dispatch de boardUnitDoubleClick depuis onEntryPointerDown — pour supprimer le dblclick natif redondant */
+  const dblClickFromEntryRef = useRef<number>(0);
   /** Dernier clientX/clientY pendant la mesure — pour redessiner après un setState (ex. jonction) sans attendre mousemove. */
   const measurePointerClientRef = useRef<{ clientX: number; clientY: number } | null>(null);
   /** Toujours à jour : permet aux handlers (effet stable) de lire l’état courant sans redémonter l’effet à chaque jonction. */
@@ -2706,6 +2710,12 @@ export default function Board({
     const onDoubleClick = (e: MouseEvent) => {
       console.log("[DEBUG dblclick] fired", { button: e.button, phase, mode, selectedUnitId });
       if (e.button !== 0) return;
+      // Supprime le dblclick natif si onEntryPointerDown l'a déjà géré (< 500ms),
+      // pour éviter de déclencher handleStartMovePreview en double.
+      if (performance.now() - dblClickFromEntryRef.current < 500) {
+        console.log("[DEBUG dblclick] already handled by onEntryPointerDown, skip");
+        return;
+      }
       const rect = canvas.getBoundingClientRect();
       const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
       const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
@@ -2771,6 +2781,24 @@ export default function Board({
         }
       }
       console.log("[DEBUG dblclick] lookup result", { foundUnitId, bestDistance });
+      // Fallback : après handleConfirmMove, les unités sont à des positions PROVISOIRES dans
+      // squadMovePlan (pas encore commitées backend). Si units_cache échoue, chercher dans le plan.
+      if (foundUnitId === null) {
+        const plan = squadMovePlanRef.current;
+        if (plan) {
+          for (const pos of Object.values(plan.models)) {
+            const d = cubeDistance(clickCube, offsetToCube(pos.col, pos.row));
+            if (d <= HEX_HIT_TOLERANCE && d < bestDistance) {
+              bestDistance = d;
+              foundUnitId = plan.unitId;
+              // Utiliser la position d'ancrage du cache si dispo (position de référence pour le preview)
+              const cacheEntry = unitsCache?.[String(plan.unitId)];
+              foundCol = cacheEntry?.col ?? pos.col;
+              foundRow = cacheEntry?.row ?? pos.row;
+            }
+          }
+        }
+      }
       if (foundUnitId === null) {
         console.log("[DEBUG dblclick] no unit found at hex, abort");
         return;
@@ -2830,13 +2858,15 @@ export default function Board({
         boardConfig.rows
       );
       const unitsCache = gameState?.units_cache as
-        | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]>; player?: number }>
+        | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]>; col?: number; row?: number; player?: number }>
         | undefined;
       if (!unitsCache) return;
       const HEX_HIT_TOLERANCE = 4;
       const clickCube = offsetToCube(col, row);
       let foundUnitId: number | string | null = null;
       let foundModelId: string | null = null;
+      let foundUnitCol = -1;
+      let foundUnitRow = -1;
       let bestDistance = Infinity;
       for (const [uid, entry] of Object.entries(unitsCache)) {
         if (entry.player !== current_player) continue;
@@ -2849,14 +2879,38 @@ export default function Board({
             bestDistance = d;
             foundUnitId = Number.isNaN(Number(uid)) ? uid : Number(uid);
             foundModelId = mid;
+            foundUnitCol = entry.col ?? pos[0];
+            foundUnitRow = entry.row ?? pos[1];
           }
         }
       }
       if (foundUnitId === null || foundModelId === null) return;
       // stopImmediatePropagation en capture-phase sur document suffit à bloquer PIXI (le canvas ne
       // reçoit jamais l'event). On NE PAS appeler preventDefault() : cela supprimerait la synthèse
-      // des events click/dblclick par le navigateur, cassant le double-clic → movePreview.
+      // des events click/dblclick par le navigateur.
       e.stopImmediatePropagation();
+
+      // Détection double-click manuelle : ne pas dépendre du dblclick natif qui peut être supprimé
+      // par PIXI (autoPreventDefault) si React re-render a supprimé onEntryPointerDown entre les 2 clics.
+      const now = performance.now();
+      const lastClick = lastUnitClickRef.current;
+      const isDoubleClick =
+        lastClick !== null &&
+        Number(lastClick.unitId) === Number(foundUnitId) &&
+        now - lastClick.ts < 500;
+      lastUnitClickRef.current = isDoubleClick ? null : { unitId: foundUnitId, ts: now };
+
+      if (isDoubleClick) {
+        console.log("[SQUAD-MOVE] ENTRY double-click → unit", foundUnitId, "→ movePreview");
+        dblClickFromEntryRef.current = now;
+        window.dispatchEvent(
+          new CustomEvent("boardUnitDoubleClick", {
+            detail: { unitId: foundUnitId, unitCol: foundUnitCol, unitRow: foundUnitRow, phase, mode, selectedUnitId },
+          })
+        );
+        return;
+      }
+
       console.log("[SQUAD-MOVE] ENTRY single-click → unit", foundUnitId, "model", foundModelId, "mode=", mode);
       const uid = foundUnitId;
       const mid = foundModelId;
@@ -2876,7 +2930,7 @@ export default function Board({
 
     document.addEventListener("pointerdown", onEntryPointerDown, true);
     return () => document.removeEventListener("pointerdown", onEntryPointerDown, true);
-  }, [phase, mode, measureMode.kind, boardConfig, gameState?.units_cache, current_player, eligibleUnitIds]);
+  }, [phase, mode, measureMode.kind, boardConfig, gameState?.units_cache, current_player, eligibleUnitIds, selectedUnitId]);
 
   // squad.md brique 3 : en mode plan par-figurine, un clic gauche sur une fig de l'escouade
   // la selectionne (resout model_id depuis les positions provisoires du plan) → onSelectModelForMove.
@@ -3972,6 +4026,11 @@ export default function Board({
       app.renderer.resolution = renderResolution;
       app.renderer.resize(canvasWidth, canvasHeight);
     }
+    // PIXI calls nativeEvent.preventDefault() on pointer events by default, which suppresses
+    // click/dblclick synthesis by the browser. This breaks double-click → movePreview when
+    // React re-renders between the two clicks (removing the document capture handler that
+    // previously blocked PIXI). Safe to disable on a game canvas (no text selection needed).
+    app.renderer.events.autoPreventDefault = false;
     app.stage.position.set(canvasPaddingX, canvasPaddingTop);
 
     // Remove previous tutorial death ghost (étape 1-25) if any
