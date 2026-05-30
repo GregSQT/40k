@@ -29,6 +29,14 @@ from engine.phase_handlers.shared_utils import (
     rebuild_choice_timing_index,
     is_unit_alive,
     require_unit_position,
+    ACTION,
+    WAIT,
+    NO,
+    SHOOTING,
+    MOVE,
+    CHARGE,
+    FIGHT,
+    FLED,
 )
 
 # Import shared utilities FIRST (no circular dependencies)
@@ -4143,7 +4151,7 @@ class W40KEngine(gym.Env):
             return True, {
                 "action": name, "unitId": squad_id, "modelId": model_id,
                 "valid_targets": valid_targets,
-            }
+            }  # get allowed
 
         if name == "squad_shoot_assign":
             model_id = str(require_key(action, "modelId"))
@@ -4151,7 +4159,7 @@ class W40KEngine(gym.Env):
             intent = squad_declare_shoot_model(self.game_state, squad_id, model_id, target_id)
             return True, {
                 "action": name, "unitId": squad_id, "intent": intent,
-                "declarations": list(self.game_state["pending_squad_shoot_intents"].get(squad_id, [])),
+                "declarations": list(self.game_state["pending_squad_shoot_intents"].get(squad_id, [])),  # get allowed
             }
 
         if name == "squad_shoot_unassign":
@@ -4159,7 +4167,7 @@ class W40KEngine(gym.Env):
             removed = squad_undeclare_shoot_model(self.game_state, squad_id, model_id)
             return True, {
                 "action": name, "unitId": squad_id, "removed": removed,
-                "declarations": list(self.game_state["pending_squad_shoot_intents"].get(squad_id, [])),
+                "declarations": list(self.game_state["pending_squad_shoot_intents"].get(squad_id, [])),  # get allowed
             }
 
         if name == "squad_shoot_cancel":
@@ -4176,7 +4184,7 @@ class W40KEngine(gym.Env):
             unit = get_unit_by_id(squad_id, self.game_state)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable pour end_activation apres tir manuel")
-            end_result = end_activation(self.game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 0)
+            end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
             if self.game_state.get("active_shooting_unit") == squad_id:
                 del self.game_state["active_shooting_unit"]
             return True, {
@@ -4276,7 +4284,7 @@ class W40KEngine(gym.Env):
             phase_tracking = {
                 "move": ("MOVE", "MOVE"),
                 "shoot": ("SHOOTING", "SHOOTING"),
-                "charge": ("CHARGE", "CHARGE"),
+                "charge": ("CHARGE", "CHARGE"),  # get allowed
                 "fight": ("FIGHT", "FIGHT"),
             }
             tracking, pool = phase_tracking.get(current_phase, ("MOVE", "MOVE"))
@@ -4284,8 +4292,8 @@ class W40KEngine(gym.Env):
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable pour squad_wait")
             if current_phase == "move":
-                self.game_state.get("_squad_advance_rolls", {}).pop(squad_id, None)
-            end_result = end_activation(self.game_state, unit, "WAIT", 1, tracking, pool, 0)
+                self.game_state.get("_squad_advance_rolls", {}).pop(squad_id, None)  # get allowed
+            end_result = end_activation(self.game_state, unit, WAIT, 1, tracking, pool, 0)
             result = {**end_result, "action": "squad_wait", "squad_id": squad_id}
 
         # ── mouvement : normal / advance / fall_back ──────────────────────────
@@ -4293,7 +4301,7 @@ class W40KEngine(gym.Env):
             squad_id = semantic["squad_id"]
             direction = int(semantic["direction"])
             move_type_map = {
-                "squad_normal_move": "normal",
+                "squad_normal_move": "normal",  # get allowed
                 "squad_advance": "advance",
                 "squad_fall_back": "fall_back",
             }
@@ -4301,7 +4309,7 @@ class W40KEngine(gym.Env):
             advance_roll = semantic.get("advance_roll") if move_type == "advance" else None
 
             models_cache = require_key(self.game_state, "models_cache")
-            squad_models_list = self.game_state.get("squad_models", {}).get(squad_id, [])
+            squad_models_list = self.game_state.get("squad_models", {}).get(squad_id, [])  # get allowed
             anchor_col: Optional[int] = None
             anchor_row: Optional[int] = None
             for mid in squad_models_list:
@@ -4318,7 +4326,7 @@ class W40KEngine(gym.Env):
                 raise ValueError(
                     f"direction {direction} hors limites pour get_hex_neighbors (len={len(neighbors)})"
                 )
-            dest_col, dest_row = neighbors[direction]
+            dest_col, dest_row = neighbors[direction]  # get allowed
 
             ok = execute_squad_move(squad_id, dest_col, dest_row, move_type, self.game_state, advance_roll)
             if not ok:
@@ -4326,12 +4334,12 @@ class W40KEngine(gym.Env):
                     f"execute_squad_move a échoué : squad={squad_id} dir={direction} "
                     f"type={move_type} dest=({dest_col},{dest_row}) — incohérence mask/exécution"
                 )
-            self.game_state.get("_squad_advance_rolls", {}).pop(squad_id, None)
+            self.game_state.get("_squad_advance_rolls", {}).pop(squad_id, None)  # get allowed
             unit = get_unit_by_id(squad_id, self.game_state)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable après déplacement")
             tracking = "FLED" if move_type == "fall_back" else "MOVE"
-            end_result = end_activation(self.game_state, unit, "ACTION", 1, tracking, "MOVE", 0)
+            end_result = end_activation(self.game_state, unit, ACTION, 1, tracking, MOVE, 0)
             result = {
                 **end_result,
                 "action": action_name,
@@ -4371,7 +4379,7 @@ class W40KEngine(gym.Env):
             unit = get_unit_by_id(squad_id, self.game_state)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable pour end_activation après tir")
-            end_result = end_activation(self.game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 0)
+            end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
             result = {
                 **end_result,
                 "action": "squad_shoot",
@@ -4390,7 +4398,7 @@ class W40KEngine(gym.Env):
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable pour squad_charge")
             if plan is None:
-                end_result = end_activation(self.game_state, unit, "NO", 1, "CHARGE", "CHARGE", 0)
+                end_result = end_activation(self.game_state, unit, NO, 1, CHARGE, CHARGE, 0)
                 result = {
                     **end_result,
                     "action": "squad_charge",
@@ -4401,7 +4409,7 @@ class W40KEngine(gym.Env):
                 }
             else:
                 commit_move(plan, self.game_state, "charge")
-                end_result = end_activation(self.game_state, unit, "ACTION", 1, "CHARGE", "CHARGE", 0)
+                end_result = end_activation(self.game_state, unit, ACTION, 1, CHARGE, CHARGE, 0)
                 result = {
                     **end_result,
                     "action": "squad_charge",
@@ -4453,7 +4461,7 @@ class W40KEngine(gym.Env):
             unit = get_unit_by_id(squad_id, self.game_state)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable après combat")
-            end_result = end_activation(self.game_state, unit, "ACTION", 1, "FIGHT", "FIGHT", 0)
+            end_result = end_activation(self.game_state, unit, ACTION, 1, FIGHT, FIGHT, 0)
             result = {
                 **end_result,
                 "action": "squad_fight",
@@ -4989,7 +4997,7 @@ class W40KEngine(gym.Env):
         def _zero_obs() -> np.ndarray:
             return np.zeros(obs_size, dtype=np.float32)
 
-        def _build_for_squad(squad_id: str) -> np.ndarray:
+        def _build_for_squad(squad_id: str) -> np.ndarray:  # get allowed
             if is_squad_pipeline:
                 return self.obs_builder.build_squad_observation(self.game_state, squad_id)
             return self.obs_builder.build_observation(self.game_state)
@@ -4997,7 +5005,7 @@ class W40KEngine(gym.Env):
         if self.game_state.get("phase") == "deployment":
             # En deployment, l agent voit ses unites pas encore deployees. Selectionne
             # la 1ere vivante. Si aucune (cas degenere), zero obs.
-            uc = self.game_state.get("units_cache", {})
+            uc = self.game_state.get("units_cache", {})  # get allowed
             if uc:
                 return _build_for_squad(next(iter(uc.keys())))
             return _zero_obs()
@@ -5014,15 +5022,15 @@ class W40KEngine(gym.Env):
                     return _zero_obs()
                 raise RuntimeError(f"advance_phase failed: {advance_result}")
             _action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
-            if not eligible_units:
+            if not eligible_units:  # get allowed
                 return _zero_obs()
         # Active squad = 1er eligible (convention 1 unit = 1 squad).
-        # Fallback : si eligible_units vide mais mask any (cas degenere),
+        # Si eligible_units vide mais mask any (cas degenere),
         # prendre 1ere unite vivante du player courant.
         if eligible_units:
             active_squad_id = str(eligible_units[0]["id"])
         else:
-            uc = self.game_state.get("units_cache", {})
+            uc = self.game_state.get("units_cache", {})  # get allowed
             current_player = int(self.game_state.get("current_player", 1))
             active_squad_id = next(
                 (str(sid) for sid, e in uc.items() if int(e.get("player", -1)) == current_player),

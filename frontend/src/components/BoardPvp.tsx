@@ -570,14 +570,18 @@ function closestChargerHexToTargetFootprint(
 function hpCurForBoardFingerprint(
   unit: Unit,
   unitsCache: Record<string, unknown> | undefined
-): number | "" {
-  if (!unitsCache) return unit.HP_CUR ?? "";
+): number {
+  if (!unitsCache) {
+    if (unit.HP_CUR == null) throw new Error(`Unit ${unit.id} missing HP_CUR`);
+    return unit.HP_CUR;
+  }
   const raw = unitsCache[String(unit.id)];
   if (raw && typeof raw === "object" && raw !== null && "HP_CUR" in raw) {
     const hp = (raw as { HP_CUR: unknown }).HP_CUR;
     if (typeof hp === "number") return hp;
   }
-  return unit.HP_CUR ?? "";
+  if (unit.HP_CUR == null) throw new Error(`Unit ${unit.id} missing HP_CUR`);
+  return unit.HP_CUR;
 }
 
 /** Fusionne ``HP_CUR`` depuis ``units_cache`` pour l’affichage (barres HP, blink, etc.). */
@@ -1728,8 +1732,11 @@ export default function Board({
     if (range <= 0) return empty;
 
     const gameRules = gameConfig.game_rules;
-    const losMin = gameRules?.los_visibility_min_ratio ?? 0;
-    const coverRatio = gameRules?.cover_ratio ?? 0;
+    if (!gameRules) throw new Error("LOS preview: game_rules absent in gameConfig");
+    if (gameRules.los_visibility_min_ratio == null) throw new Error("LOS preview: los_visibility_min_ratio absent in game_rules");
+    if (gameRules.cover_ratio == null) throw new Error("LOS preview: cover_ratio absent in game_rules");
+    const losMin = gameRules.los_visibility_min_ratio;
+    const coverRatio = gameRules.cover_ratio;
 
     try {
       const losPreview = buildLosPreviewFromSource({
@@ -4533,7 +4540,8 @@ export default function Board({
           if (u.player === selectedUnit.player) {
             return false;
           }
-          let hp = u.HP_CUR ?? 0;
+          if (u.HP_CUR == null) throw new Error(`Unit ${u.id} missing HP_CUR for fight target filter`);
+          let hp = u.HP_CUR;
           const ce = ucFight?.[String(u.id)];
           if (ce && typeof ce.HP_CUR === "number") {
             hp = ce.HP_CUR;
@@ -6802,22 +6810,19 @@ export default function Board({
 
         const availableWeapons = unit.available_weapons;
 
-        if (availableWeapons && availableWeapons.length > 0) {
-          return availableWeapons.map((w) => ({
+        if (!availableWeapons || availableWeapons.length === 0) {
+          throw new Error(`Unit ${unit.id} missing available_weapons`);
+        }
+        return availableWeapons.map((w) => {
+          const canUse = w.can_use ?? w.canUse;
+          if (canUse == null) throw new Error(`Weapon ${w.index} of unit ${unit.id} missing can_use`);
+          return {
             index: w.index,
             weapon: w.weapon,
-            canUse: w.can_use ?? w.canUse ?? false,
+            canUse,
             reason: w.reason,
-          }));
-        }
-
-        // Fallback: build from unit weapons (for backward compatibility)
-        return unit.RNG_WEAPONS.map((weapon, index) => ({
-          index,
-          weapon,
-          canUse: true, // All weapons can be used during selection
-          reason: undefined,
-        }));
+          };
+        });
       })()
     : [];
 

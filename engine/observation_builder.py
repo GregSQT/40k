@@ -1286,7 +1286,7 @@ class ObservationBuilder:
             missing = [k for k in ("units_cache", "models_cache", "squad_models", "squad_cache") if k not in game_state]
             raise RuntimeError(
                 f"build_squad_observation requires fully initialized caches. "
-                f"Missing: {missing}. Call build_units_cache(game_state) first."
+                f"Missing: {missing}. Initialize caches via build_units_cache before calling this function."
             )
         units_cache = game_state["units_cache"]
         models_cache = game_state["models_cache"]
@@ -1304,13 +1304,13 @@ class ObservationBuilder:
         obs[0] = 1.0 if current_player == active_player else 0.0
         phase_encoding = {"deployment": 0.0, "command": 0.0, "move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}
         obs[1] = phase_encoding.get(game_state.get("phase", "command"), 0.0)
-        obs[2] = min(1.0, int(game_state.get("turn", 0)) / 5.0)
-        obs[3] = min(1.0, int(game_state.get("episode_steps", 0)) / 100.0)
+        obs[2] = min(1.0, int(game_state.get("turn", 0)) / 5.0)  # get allowed
+        obs[3] = min(1.0, int(game_state.get("episode_steps", 0)) / 100.0)  # get allowed
         # HP pct du squad actif
         model_count_at_start = max(1, int(active_sq.get("model_count_at_start", 1)))
         # HP_MAX par modele (mono-fig: HP_MAX direct; multi-fig: somme via models_cache)
         total_hp_pool = 0
-        for mid in squad_models.get(active_squad_id, []):
+        for mid in squad_models.get(active_squad_id, []):  # get allowed
             m = models_cache.get(mid)
             if m is not None:
                 total_hp_pool += int(m["HP_MAX"])
@@ -1348,16 +1348,16 @@ class ObservationBuilder:
         nb_alive = int(active_sq["model_count"])
         obs[16] = min(1.0, nb_alive / float(model_count_at_start))
         obs[17] = 1.0 if active_sq.get("is_coherent", False) else 0.0
-        obs[18] = min(1.0, int(active_sq.get("oc_total", 0)) / 10.0)
+        obs[18] = min(1.0, int(active_sq.get("oc_total", 0)) / 10.0)  # get allowed
         obs[19] = min(1.0, int(active_entry["HP_CUR"]) / float(total_hp_pool)) if total_hp_pool > 0 else 0.0
         # Firepower estimate : sum(P(hit)*P(wound)*D) sur les armes RNG selectionnees,
         # vs cible generique T=4, Sv=4 (normalisation /10)
         firepower = 0.0
-        for mid in squad_models.get(active_squad_id, []):
+        for mid in squad_models.get(active_squad_id, []):  # get allowed
             m = models_cache.get(mid)
             if m is None:
                 continue
-            weapons = m.get("RNG_WEAPONS", [])
+            weapons = m.get("RNG_WEAPONS", [])  # get allowed
             sel = m.get("selectedRngWeaponIndex")
             if not weapons or sel is None or not (0 <= int(sel) < len(weapons)):
                 continue
@@ -1366,7 +1366,7 @@ class ObservationBuilder:
                 continue
             bs = int(w.get("ATK", w.get("BS", 4)))
             s = int(w.get("STR", w.get("S", 4)))
-            ap = int(w.get("AP", 0))
+            ap = int(w.get("AP", 0))  # get allowed
             dmg_raw = w.get("DMG", 1)
             try:
                 d = float(expected_dice_value(dmg_raw, "obs_firepower"))
@@ -1400,11 +1400,11 @@ class ObservationBuilder:
         for sid, e in units_cache.items():
             if int(e["player"]) == active_player:
                 continue
-            for mid in squad_models.get(sid, []):
+            for mid in squad_models.get(sid, []):  # get allowed
                 m = models_cache.get(mid)
                 if m is not None:
                     enemy_positions.append((int(m["col"]), int(m["row"])))
-        alive_mids = [m for m in squad_models.get(active_squad_id, []) if m in models_cache]
+        alive_mids = [m for m in squad_models.get(active_squad_id, []) if m in models_cache]  # get allowed
         for k_idx in range(self.SQUAD_TOP_K):
             base = 21 + k_idx * self.SQUAD_PER_MODEL
             if k_idx >= len(alive_mids):
@@ -1456,7 +1456,7 @@ class ObservationBuilder:
         for sid, e in units_cache.items():
             if int(e["player"]) != active_player:
                 continue
-            for mid in squad_models.get(sid, []):
+            for mid in squad_models.get(sid, []):  # get allowed
                 m = models_cache.get(mid)
                 if m is not None:
                     ally_positions.append((int(m["col"]), int(m["row"])))
@@ -1464,7 +1464,7 @@ class ObservationBuilder:
         active_sample_weapon: Optional[Dict[str, Any]] = None
         if alive_mids:
             a_sample = models_cache[alive_mids[0]]
-            a_weapons = a_sample.get("RNG_WEAPONS", [])
+            a_weapons = a_sample.get("RNG_WEAPONS", [])  # get allowed
             a_sel = a_sample.get("selectedRngWeaponIndex")
             if a_weapons and a_sel is not None and 0 <= int(a_sel) < len(a_weapons):
                 active_sample_weapon = a_weapons[int(a_sel)]
@@ -1474,15 +1474,15 @@ class ObservationBuilder:
                 continue  # slot vide (mask=0)
             esid = enemy_squads[slot_i]
             e_entry = units_cache[esid]
-            e_sq = squad_cache.get(esid, {})
-            e_mids = [m for m in squad_models.get(esid, []) if m in models_cache]
+            e_sq = squad_cache.get(esid, {})  # get allowed
+            e_mids = [m for m in squad_models.get(esid, []) if m in models_cache]  # get allowed
             e_size = len(e_mids)
-            e_hp_total = int(e_entry.get("HP_CUR", 0))
+            e_hp_total = int(e_entry.get("HP_CUR", 0))  # get allowed
             obs[base + 0] = min(1.0, e_size / 10.0)
             obs[base + 1] = min(1.0, e_hp_total / 30.0)
             obs[base + 2] = max(-1.0, min(1.0, (int(e_entry["col"]) - cx) / pr))
             obs[base + 3] = max(-1.0, min(1.0, (int(e_entry["row"]) - cy) / pr))
-            obs[base + 4] = min(1.0, int(e_sq.get("oc_total", 0)) / 10.0)
+            obs[base + 4] = min(1.0, int(e_sq.get("oc_total", 0)) / 10.0)  # get allowed
             obs[base + 5] = 1.0  # slot_mask (alive)
             # is_locked_by_friendly_er : au moins une fig de e en ER d un allié
             is_locked = False
@@ -1502,7 +1502,7 @@ class ObservationBuilder:
                 invul_target = int(models_cache[e_mids[0]].get("INVUL_SAVE", 7))
                 bs = int(active_sample_weapon.get("ATK", active_sample_weapon.get("BS", 4)))
                 s = int(active_sample_weapon.get("STR", active_sample_weapon.get("S", 4)))
-                ap = int(active_sample_weapon.get("AP", 0))
+                ap = int(active_sample_weapon.get("AP", 0))  # get allowed
                 dmg_raw = active_sample_weapon.get("DMG", 1)
                 try:
                     d_mean = float(expected_dice_value(dmg_raw, "obs_ttk_dmg"))
@@ -1527,7 +1527,7 @@ class ObservationBuilder:
             # threat_level = expected damage des armes ennemies sur notre escouade
             if e_mids:
                 e_sample = models_cache[e_mids[0]]
-                e_weapons = e_sample.get("RNG_WEAPONS", [])
+                e_weapons = e_sample.get("RNG_WEAPONS", [])  # get allowed
                 e_sel = e_sample.get("selectedRngWeaponIndex")
                 if e_weapons and e_sel is not None and 0 <= int(e_sel) < len(e_weapons):
                     ew = e_weapons[int(e_sel)]
@@ -1538,7 +1538,7 @@ class ObservationBuilder:
                         our_inv = int(models_cache[alive_mids[0]].get("INVUL_SAVE", 7))
                         e_bs = int(ew.get("ATK", ew.get("BS", 4)))
                         e_s = int(ew.get("STR", ew.get("S", 4)))
-                        e_ap = int(ew.get("AP", 0))
+                        e_ap = int(ew.get("AP", 0))  # get allowed
                         e_dmg_raw = ew.get("DMG", 1)
                         try:
                             e_d = float(expected_dice_value(e_dmg_raw, "obs_threat_dmg"))

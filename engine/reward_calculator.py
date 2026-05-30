@@ -591,17 +591,17 @@ class RewardCalculator:
             return wait_reward
 
         elif action_type == "squad_shoot":
-            shoot_result = result.get("shoot_result", {})
-            attacks_made = shoot_result.get("attacks_made", 0)
+            shoot_result = result.get("shoot_result", {})  # get allowed
+            attacks_made = shoot_result.get("attacks_made", 0)  # get allowed
             if attacks_made == 0:
                 reward_breakdown['total'] = objective_turn_reward
                 game_state['last_reward_breakdown'] = reward_breakdown
                 return objective_turn_reward
             unit_rewards = self._get_unit_reward_config(acting_unit)
             base_actions = require_key(unit_rewards, "base_actions")
-            result_bonuses = unit_rewards.get("result_bonuses", {})
+            result_bonuses = unit_rewards.get("result_bonuses", {})  # get allowed
             base = float(base_actions.get("ranged_attack", 0.0))
-            kill_bonus = float(result_bonuses.get("kill_target", 0.0)) * shoot_result.get("models_killed", 0)
+            kill_bonus = float(result_bonuses.get("kill_target", 0.0)) * shoot_result.get("models_killed", 0)  # get allowed
             calculated = base + kill_bonus + objective_turn_reward
             reward_breakdown['base_actions'] = base
             reward_breakdown['result_bonuses'] = kill_bonus
@@ -658,11 +658,11 @@ class RewardCalculator:
                 raise ValueError(f"Fight target not found: {target_squad_id}")
             enriched_target = self._enrich_unit_for_reward_mapper(target) if is_unit_alive(str(target["id"]), game_state) else target
             all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit, game_state)]
-            fight_result = result.get("fight_result", {})
+            fight_result = result.get("fight_result", {})  # get allowed
             fight_reward = reward_mapper.get_combat_priority_reward(enriched_unit, enriched_target, all_targets, game_state) + objective_turn_reward
             reward_breakdown['base_actions'] = fight_reward - objective_turn_reward
             reward_breakdown['total'] = fight_reward
-            models_killed = fight_result.get("models_killed", 0)
+            models_killed = fight_result.get("models_killed", 0)  # get allowed
             if models_killed > 0:
                 unit_rewards = self._get_unit_reward_config(acting_unit)
                 result_bonuses_cfg = require_key(unit_rewards, "result_bonuses")

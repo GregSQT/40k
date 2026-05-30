@@ -6915,7 +6915,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
         target_col, target_row = require_unit_position(target, game_state)
         _gym_training = bool(
             game_state.get("gym_training_mode", False)
-            or game_state.get("config", {}).get("gym_training_mode", False)
+            or game_state.get("config", {}).get("gym_training_mode", False)  # get allowed
         )
         if _gym_training:
             target_hexes = [(int(target_col), int(target_row))]

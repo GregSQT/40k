@@ -1116,7 +1116,7 @@ def build_wall_set(game_state: Dict[str, Any]) -> Set[Tuple[int, int]]:
 ENGAGEMENT_NORM_HEX_WIDTH: float = 1.5
 
 
-def round_base_radius_norm(base_size: int) -> float:
+def round_base_radius_norm(base_size: float) -> float:
     """Rayon d'un socle rond en unités _hex_center (identique à ``_footprint_round``)."""
     if base_size < 1:
         base_size = 1
@@ -1126,10 +1126,10 @@ def round_base_radius_norm(base_size: int) -> float:
 def euclidean_edge_clearance_round_round(
     center_col_a: int,
     center_row_a: int,
-    base_size_a: int,
+    base_size_a: float,
     center_col_b: int,
     center_row_b: int,
-    base_size_b: int,
+    base_size_b: float,
     *,
     mover_center_xy: Optional[Tuple[float, float]] = None,
 ) -> float:

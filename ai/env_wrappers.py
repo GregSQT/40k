@@ -998,7 +998,7 @@ class SelfPlayWrapper(gym.Wrapper):
                 debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
                 with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
                     f.write(
-                        f"RESET_START episode={int(self.engine.game_state.get('episode_number', 0))} "
+                        f"RESET_START episode={int(self.engine.game_state.get('episode_number', 0))} "  # get allowed
                         f"seed={seed!r} options_present={options is not None}\n"
                     )
             except (OSError, IOError):

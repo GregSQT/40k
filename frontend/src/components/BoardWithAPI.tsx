@@ -169,9 +169,12 @@ function buildPickMenusByProfile(config: EvolutionCatalogConfig): Map<string, Pr
     if (!profileCatalog) {
       continue;
     }
-    const baseCost = Number(profileCatalog.base ?? 0);
-    const rows = profileCatalog.rows ?? [];
-    const packages = profileCatalog.packages ?? [];
+    if (profileCatalog.base == null) throw new Error(`Evolution catalog profile '${profile}': missing 'base' cost`);
+    const baseCost = Number(profileCatalog.base);
+    if (!Array.isArray(profileCatalog.rows)) throw new Error(`Evolution catalog profile '${profile}': missing 'rows'`);
+    const rows = profileCatalog.rows;
+    if (!Array.isArray(profileCatalog.packages)) throw new Error(`Evolution catalog profile '${profile}': missing 'packages'`);
+    const packages = profileCatalog.packages;
     const data: ProfilePickMenuData = {
       baseCost,
       primaryPackages: [],
@@ -187,7 +190,8 @@ function buildPickMenusByProfile(config: EvolutionCatalogConfig): Map<string, Pr
       if (typeof pkg.id !== "string") {
         continue;
       }
-      const cost = Number(pkg.cost ?? 0);
+      if (pkg.cost == null) throw new Error(`Evolution package '${pkg.id}': missing cost`);
+      const cost = Number(pkg.cost);
       data.primaryPackages.push({
         id: pkg.id,
         cost,
@@ -201,7 +205,8 @@ function buildPickMenusByProfile(config: EvolutionCatalogConfig): Map<string, Pr
       if (typeof row.slot !== "string" || typeof row.pick !== "string") {
         continue;
       }
-      const cost = Number(row.cost ?? 0);
+      if (row.cost == null) throw new Error(`Evolution row '${row.pick}' slot '${row.slot}': missing cost`);
+      const cost = Number(row.cost);
       const option: PickOption = {
         id: row.pick,
         cost,
@@ -226,7 +231,8 @@ function buildDefaultPicksByProfile(
   config: EvolutionCatalogConfig
 ): Map<string, EndlessDutyPickState> {
   const defaults = new Map<string, EndlessDutyPickState>();
-  const loadouts = config.loadouts ?? [];
+  if (!Array.isArray(config.loadouts)) throw new Error("Evolution config missing 'loadouts' array");
+  const loadouts = config.loadouts;
   for (const loadout of loadouts) {
     const profile = typeof loadout.profile === "string" ? loadout.profile : null;
     if (!profile || defaults.has(profile)) {
@@ -1495,11 +1501,15 @@ export const BoardWithAPI: React.FC = () => {
     const endlessCfg = (
       endlessDutyScenarioConfig as { endless_duty?: { wave_unlock_rules?: Record<string, number> } }
     ).endless_duty;
-    const waveUnlockRules = endlessCfg?.wave_unlock_rules ?? {};
+    if (!endlessCfg?.wave_unlock_rules) throw new Error("endless_duty scenario missing wave_unlock_rules");
+    const waveUnlockRules = endlessCfg.wave_unlock_rules;
+    if (waveUnlockRules.leader == null) throw new Error("wave_unlock_rules missing 'leader'");
+    if (waveUnlockRules.melee == null) throw new Error("wave_unlock_rules missing 'melee'");
+    if (waveUnlockRules.range == null) throw new Error("wave_unlock_rules missing 'range'");
     return {
-      leader: Number(waveUnlockRules.leader ?? 1),
-      melee: Number(waveUnlockRules.melee ?? 15),
-      range: Number(waveUnlockRules.range ?? 10),
+      leader: Number(waveUnlockRules.leader),
+      melee: Number(waveUnlockRules.melee),
+      range: Number(waveUnlockRules.range),
     };
   }, []);
   const endlessDutyPickMenus = useMemo(
@@ -1651,7 +1661,8 @@ export const BoardWithAPI: React.FC = () => {
       const armies = await apiProps.listArmies();
       setRosterPickerArmies(armies);
       const availableFactions = Array.from(new Set(armies.map((army) => army.faction))).sort();
-      setRosterPickerSelectedFaction(availableFactions[0] ?? "");
+      if (availableFactions.length === 0) throw new Error("No factions available in army list");
+      setRosterPickerSelectedFaction(availableFactions[0]);
     } catch (err) {
       setRosterPickerError(err instanceof Error ? err.message : "Failed to load armies");
     } finally {
@@ -2095,7 +2106,7 @@ export const BoardWithAPI: React.FC = () => {
 
     // Removed duplicate log - now handled below with change detection
 
-    const fightSubphaseForKey = apiProps.fightSubPhase || apiProps.gameState?.fight_subphase || "";
+    const fightSubphaseForKey = apiProps.fightSubPhase ?? apiProps.gameState?.fight_subphase ?? "";
     const turnKey = `${apiProps.gameState?.current_player}-${currentPhase}-${fightSubphaseForKey}-${apiProps.gameState?.currentTurn || 1}`;
 
     // Reset lastProcessedTurn if turn/phase has changed (prevents blocking on failed AI turns)
@@ -2244,7 +2255,7 @@ export const BoardWithAPI: React.FC = () => {
   // Update lastProcessedTurn when phase/turn changes (to track phase transitions)
   useEffect(() => {
     if (!apiProps.gameState) return;
-    const fightSubphaseForKey = apiProps.fightSubPhase || apiProps.gameState?.fight_subphase || "";
+    const fightSubphaseForKey = apiProps.fightSubPhase ?? apiProps.gameState?.fight_subphase ?? "";
     const currentTurnKey = `${apiProps.gameState?.current_player}-${apiProps.gameState?.phase}-${fightSubphaseForKey}-${apiProps.gameState?.currentTurn || 1}`;
 
     // Only update if phase/turn actually changed (not just on every render)
@@ -2488,8 +2499,10 @@ export const BoardWithAPI: React.FC = () => {
               if (b.VALUE !== a.VALUE) {
                 return b.VALUE - a.VALUE;
               }
-              const aName = a.DISPLAY_NAME || a.name || a.type || a.unitType || "";
-              const bName = b.DISPLAY_NAME || b.name || b.type || b.unitType || "";
+              const aName = a.DISPLAY_NAME || a.name || a.type || a.unitType;
+              if (!aName) throw new Error(`Unit missing all name fields (DISPLAY_NAME/name/type/unitType)`);
+              const bName = b.DISPLAY_NAME || b.name || b.type || b.unitType;
+              if (!bName) throw new Error(`Unit missing all name fields (DISPLAY_NAME/name/type/unitType)`);
               return aName.localeCompare(bName);
             });
           });
@@ -3259,8 +3272,14 @@ export const BoardWithAPI: React.FC = () => {
                 ? {
                     targetId: apiProps.targetPreview.targetId,
                     shooterId: apiProps.targetPreview.shooterId,
-                    currentBlinkStep: apiProps.targetPreview.currentBlinkStep ?? 0,
-                    totalBlinkSteps: apiProps.targetPreview.totalBlinkSteps ?? 2,
+                    currentBlinkStep: (() => {
+                      if (apiProps.targetPreview.currentBlinkStep == null) throw new Error("targetPreview.currentBlinkStep absent");
+                      return apiProps.targetPreview.currentBlinkStep;
+                    })(),
+                    totalBlinkSteps: (() => {
+                      if (apiProps.targetPreview.totalBlinkSteps == null) throw new Error("targetPreview.totalBlinkSteps absent");
+                      return apiProps.targetPreview.totalBlinkSteps;
+                    })(),
                     blinkTimer: apiProps.targetPreview.blinkTimer ?? null,
                     hitProbability: apiProps.targetPreview.hitProbability,
                     woundProbability: apiProps.targetPreview.woundProbability,

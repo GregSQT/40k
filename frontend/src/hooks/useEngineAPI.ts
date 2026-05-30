@@ -404,7 +404,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [endlessDutyState, setEndlessDutyState] = useState<EndlessDutyState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [maxTurnsFromConfig, setMaxTurnsFromConfig] = useState<number>(8);
+  const [maxTurnsFromConfig, setMaxTurnsFromConfig] = useState<number | null>(null);
   const [selectedUnitId, setSelectedUnitId] = useState<number | null>(null);
   const [mode, setMode] = useState<
     | "select"
@@ -1241,7 +1241,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   saveRoll: logEntry.saveRoll || logEntry.save_roll || shootDetail?.saveRoll,
                   saveTarget:
                     logEntry.saveTarget || logEntry.save_target || shootDetail?.saveTarget,
-                  saveSkipped: logEntry.saveSkipped || logEntry.save_skipped || false,
+                  saveSkipped: logEntry.saveSkipped ?? logEntry.save_skipped,
                   saveSkipReason: logEntry.saveSkipReason || logEntry.save_skip_reason,
                   devastatingWoundsApplied:
                     logEntry.devastatingWoundsApplied ||
@@ -1619,9 +1619,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           // STEP 2: Propagate available_weapons to unit in game_state (required for weapon icon)
           // CRITICAL: This must happen BEFORE setGameState to ensure React detects the change
           if (data.result?.available_weapons && Array.isArray(data.result.available_weapons)) {
-            // Check both data.game_state.active_shooting_unit AND data.result.unitId (fallback)
-            const activeUnitId = data.game_state.active_shooting_unit || data.result.unitId;
-            if (activeUnitId && data.game_state.units) {
+            const activeUnitId = data.game_state.active_shooting_unit ?? data.result.unitId;
+            if (activeUnitId == null) {
+              throw new Error("available_weapons: active_shooting_unit and result.unitId both absent");
+            }
+            if (data.game_state.units) {
               const unitIndex = data.game_state.units.findIndex(
                 (u: { id: string | number }) => u.id.toString() === activeUnitId.toString()
               );
@@ -1882,7 +1884,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             data.result?.action === "charge_target_selected"
           ) {
             const pd = data.result.preview_data as { violet_hexes?: unknown } | undefined;
-            const raw = data.result.valid_destinations ?? pd?.violet_hexes ?? [];
+            const raw = data.result.valid_destinations ?? pd?.violet_hexes;
+            if (raw == null) {
+              throw new Error("charge_target_selected: valid_destinations and preview_data.violet_hexes both absent");
+            }
             const anchorsNorm = normalizeChargeDestinationsFromApi(raw);
             const displayRaw = (data.result as { charge_preview_display_hexes?: unknown })
               .charge_preview_display_hexes;
@@ -2122,7 +2127,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 return false;
               }
               const waitUid = parseInt(
-                String(data.result.unitId ?? data.game_state.active_fight_unit ?? ""),
+                String((() => {
+                  const uid = data.result.unitId ?? data.game_state.active_fight_unit;
+                  if (uid == null) throw new Error("fight wait: unitId and active_fight_unit both absent");
+                  return uid;
+                })()),
                 10
               );
               if (!Number.isFinite(waitUid)) {
@@ -3324,7 +3333,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         provisional_plan: provisionalPlan,
       });
       if (squadMoveSessionRef.current !== sessionAtCall) return;
-      const dests = (result?.destinations ?? []) as Array<[number, number]>;
+      if (!result?.destinations) {
+        throw new Error("move_model_destinations: destinations absent in response");
+      }
+      const dests = result.destinations as Array<[number, number]>;
       const set = new Set<string>();
       for (const [c, r] of dests) {
         set.add(`${c},${r}`);
@@ -3490,7 +3502,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return;
       }
       if (squadShootSessionRef.current !== sessionAtCall) return;
-      const validTargets = ((result?.valid_targets ?? []) as string[]).map((id) =>
+      if (!result?.valid_targets) {
+        throw new Error("squad_shoot select_model: valid_targets absent in response");
+      }
+      const validTargets = (result.valid_targets as string[]).map((id) =>
         parseInt(id, 10)
       );
       setBlinkingUnits((prev) => {
@@ -4696,7 +4711,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       unitsAdvanced: memoizedUnitsAdvanced,
       targetPreview: null,
       currentTurn: gameState.turn,
-      maxTurns: maxTurnsFromConfig,
+      maxTurns: maxTurnsFromConfig as number,
       unitChargeRolls: {},
       pve_mode: gameState.pve_mode,
       player_types: gameState.player_types,
@@ -4756,7 +4771,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     maxTurnsFromConfig,
   ]);
 
-  if (loading || !gameState) {
+  if (loading || !gameState || maxTurnsFromConfig === null) {
     const blinkBoardPropsIdle: UseEngineAPIBlinkBoardProps = {
       blinkingUnits: [],
       blinkingAttackerId: null,
@@ -4888,7 +4903,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     attackPreview,
     targetPreview,
     current_player: gameState.current_player as PlayerId,
-    maxTurns: maxTurnsFromConfig,
+    maxTurns: maxTurnsFromConfig as number,
     unitsMoved: memoizedUnitsMoved,
     unitsCharged: memoizedUnitsCharged,
     unitsAttacked: memoizedUnitsAttacked,
@@ -5062,7 +5077,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           return;
         }
         const deployer = deploymentState.current_deployer;
-        const pool = deploymentState.deployable_units?.[String(deployer)] || [];
+        const pool = deploymentState.deployable_units?.[String(deployer)];
+        if (!pool) {
+          throw new Error(`deployment: deployable_units missing for deployer ${String(deployer)}`);
+        }
         eligibleAICount = getPlayerType(deployer) === "ai" ? pool.length : 0;
       } else if (phaseCheck === "shoot" && gameState.shoot_activation_pool) {
         const shootPool = gameState.shoot_activation_pool || [];
@@ -5122,7 +5140,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           aiEligibleUnits = 0;
         } else {
           const deployer = deploymentState.current_deployer;
-          const pool = deploymentState.deployable_units?.[String(deployer)] || [];
+          const pool = deploymentState.deployable_units?.[String(deployer)];
+          if (!pool) {
+            throw new Error(`deployment: deployable_units missing for deployer ${String(deployer)}`);
+          }
           aiEligibleUnits = getPlayerType(deployer) === "ai" ? pool.length : 0;
         }
       } else if (currentPhase === "move" && gameState.move_activation_pool) {
@@ -5569,7 +5590,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                     saveRoll: logEntry.saveRoll || logEntry.save_roll || shootDetail?.saveRoll,
                     saveTarget:
                       logEntry.saveTarget || logEntry.save_target || shootDetail?.saveTarget,
-                    saveSkipped: logEntry.saveSkipped || logEntry.save_skipped || false,
+                    saveSkipped: logEntry.saveSkipped ?? logEntry.save_skipped,
                     saveSkipReason: logEntry.saveSkipReason || logEntry.save_skip_reason,
                     devastatingWoundsApplied:
                       logEntry.devastatingWoundsApplied ||
@@ -5916,7 +5937,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                         saveRoll: logEntry.saveRoll || logEntry.save_roll || shootDetail?.saveRoll,
                         saveTarget:
                           logEntry.saveTarget || logEntry.save_target || shootDetail?.saveTarget,
-                        saveSkipped: logEntry.saveSkipped || logEntry.save_skipped || false,
+                        saveSkipped: logEntry.saveSkipped ?? logEntry.save_skipped,
                         saveSkipReason: logEntry.saveSkipReason || logEntry.save_skip_reason,
                         devastatingWoundsApplied:
                           logEntry.devastatingWoundsApplied ||

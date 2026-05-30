@@ -1817,15 +1817,15 @@ class BotEvaluationCallback(BaseCallback):
         """
         model_zip_path = self._ensure_zip_path(save_path)
         policy = self.model.policy
-        patched_forward = policy.__dict__.pop("forward", None)
-        patched_train = self.model.__dict__.pop("train", None)
+        patched_forward = vars(policy).pop("forward", None)
+        patched_train = vars(self.model).pop("train", None)
         try:
             self.model.save(model_zip_path)
         finally:
             if patched_forward is not None:
                 policy.forward = patched_forward
             if patched_train is not None:
-                self.model.train = patched_train
+                setattr(self.model, "train", patched_train)
         if not os.path.exists(model_zip_path):
             raise FileNotFoundError(
                 f"Model save did not produce expected .zip artifact: {model_zip_path}"

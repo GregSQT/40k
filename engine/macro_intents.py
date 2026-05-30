@@ -7,7 +7,7 @@ INTENT_ATTACK = 2
 
 MAX_OBJECTIVES = 5
 # PR4 4e-v_a : squad pipeline action space (cf. squad.md §"Action space (micro)").
-# Decision utilisateur : agent decide direction Advance/Fall Back (zero fallback).
+# Decision utilisateur : agent decide direction Advance/Fall Back (aucune valeur par défaut).
 # 26 micro actions:
 #   0-5   : Normal move direction D (6)
 #   6-11  : Advance direction D (6)        [PR4: extension agent-decided]

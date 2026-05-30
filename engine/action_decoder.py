@@ -845,7 +845,7 @@ class ActionDecoder:
         """Convertit un action int (0-40) en dict sémantique pour le pipeline squad.
 
         eligible_units : pool pré-calculé (évite recalcul si déjà disponible depuis step).
-        Raise sur toute incohérence — aucun fallback silencieux.
+        Raise sur toute incohérence — aucune valeur par défaut silencieuse.
         """
         current_phase = game_state["phase"]
 
@@ -912,7 +912,7 @@ class ActionDecoder:
             return {"action": "squad_normal_move", "direction": action_int, "squad_id": squad_id}
 
         if 6 <= action_int <= 11:
-            squad_advance_rolls = game_state.get("_squad_advance_rolls", {})
+            squad_advance_rolls = game_state.get("_squad_advance_rolls", {})  # get allowed
             advance_roll = squad_advance_rolls.get(squad_id)
             if advance_roll is None:
                 raise ValueError(

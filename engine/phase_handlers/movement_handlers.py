@@ -1840,15 +1840,13 @@ def movement_build_model_destinations_pool(
 
     player = int(model["player"])
     cache_key = f"enemy_adjacent_hexes_player_{player}"
-    enemy_adjacent_hexes = game_state.get(cache_key)
-    if enemy_adjacent_hexes is None:
-        enemy_adjacent_hexes = build_enemy_adjacent_hexes(game_state, player)
+    enemy_adjacent_hexes = require_key(game_state, cache_key)
     enemy_occupied = build_enemy_occupied_positions_set(game_state, current_player=player)
 
     # Cellules occupees par les AUTRES escouades (collision destination interdite).
     other_occupied: Set[Tuple[int, int]] = set()
-    for sid, entry in game_state.get("units_cache", {}).items():
-        if str(sid) == squad_id:
+    for sid, entry in game_state.get("units_cache", {}).items():  # get allowed
+        if str(sid) == squad_id:  # get allowed
             continue
         occ = entry.get("occupied_hexes")
         if occ:
@@ -1859,9 +1857,9 @@ def movement_build_model_destinations_pool(
     # provisional_plan override les positions sibling déjà déplacées dans le plan UI.
     same_squad_occupied: Set[Tuple[int, int]] = set()
     _models_cache = require_key(game_state, "models_cache")
-    _squad_models = game_state.get("squad_models", {})
-    for mid in _squad_models.get(squad_id, []):
-        if str(mid) == str(model_id):
+    _squad_models = game_state.get("squad_models", {})  # get allowed
+    for mid in _squad_models.get(squad_id, []):  # get allowed
+        if str(mid) == str(model_id):  # get allowed
             continue
         if provisional_plan and str(mid) in provisional_plan:
             prov_col, prov_row = provisional_plan[str(mid)]
@@ -1906,8 +1904,8 @@ def movement_build_model_destinations_pool(
     # Footprint zone per-fig : destinations ∪ start, expandées selon BASE_SIZE.
     base_size = unit["BASE_SIZE"]
     base_shape = unit["BASE_SHAPE"]
-    orientation = unit.get("orientation", 0)
-    is_single_hex = (base_size == 1 or not isinstance(base_size, int) or base_size <= 1)
+    orientation = unit.get("orientation", 0)  # get allowed
+    is_single_hex = (base_size == 1 or not isinstance(base_size, int) or base_size <= 1)  # get allowed
     if is_single_hex:
         footprint_zone: Set[Tuple[int, int]] = set(reachable)
         footprint_zone.add(start_pos)
@@ -1938,8 +1936,8 @@ def movement_build_model_destinations_pool(
     # Calcul mask loops sans ecriture permanente dans game_state.
     _prev_loops = game_state.get("move_preview_footprint_mask_loops")
     _sync_move_preview_mask_loops(game_state, footprint_zone)
-    mask_loops = game_state.get("move_preview_footprint_mask_loops", [])
-    game_state["move_preview_footprint_mask_loops"] = _prev_loops
+    mask_loops = game_state.get("move_preview_footprint_mask_loops", [])  # get allowed
+    game_state["move_preview_footprint_mask_loops"] = _prev_loops  # get allowed
 
     return {"destinations": reachable, "footprint_mask_loops": mask_loops}
 
@@ -1980,12 +1978,12 @@ def movement_preview_move_plan(
 
     # Calcul des empreintes par fig
     from engine.hex_utils import precompute_footprint_offsets as _pfo
-    units_cache = game_state.get("units_cache", {})
-    unit_entry = units_cache.get(str(squad_id), {})
-    base_shape = require_key(unit_entry, "BASE_SHAPE")
+    units_cache = game_state.get("units_cache", {})  # get allowed
+    unit_entry = units_cache.get(str(squad_id), {})  # get allowed
+    base_shape = require_key(unit_entry, "BASE_SHAPE")  # get allowed
     base_size = require_key(unit_entry, "BASE_SIZE")
-    orientation = int(unit_entry.get("orientation", 0))
-    is_single_hex = not isinstance(base_size, int) or base_size <= 1
+    orientation = int(unit_entry.get("orientation", 0))  # get allowed
+    is_single_hex = not isinstance(base_size, int) or base_size <= 1  # get allowed
     if is_single_hex:
         footprints: List[Set[Tuple[int, int]]] = [{pos} for pos in positions]
     else:
@@ -2020,8 +2018,8 @@ def movement_preview_move_plan(
 
     comp_size: Dict[int, int] = {}
     for c in comp_id:
-        comp_size[c] = comp_size.get(c, 0) + 1
-
+        comp_size[c] = comp_size.get(c, 0) + 1  # get allowed
+  # get allowed
     # cohesion_red[i] = la composante de la fig i n'est PAS strictement majoritaire.
     cohesion_red = [comp_size[comp_id[i]] * 2 <= n for i in range(n)] if n > 1 else [False] * n
 
@@ -2082,8 +2080,8 @@ def movement_commit_move_plan_handler(
 
     squad_models = require_key(game_state, "squad_models")
     models_cache = require_key(game_state, "models_cache")
-    alive = {m for m in squad_models.get(str(squad_id), []) if m in models_cache}
-    plan_ids = {mid for mid, _, _ in plan}
+    alive = {m for m in squad_models.get(str(squad_id), []) if m in models_cache}  # get allowed
+    plan_ids = {mid for mid, _, _ in plan}  # get allowed
     if plan_ids != alive:
         return False, {
             "error": "plan_models_mismatch",
@@ -2110,8 +2108,8 @@ def movement_commit_move_plan_handler(
         return False, {"error": "unit_not_found", "unitId": squad_id}
     # Sync ancre de la liste units sur l'ancre recalculee dans units_cache
     # (commit_move ne touche que models_cache/units_cache).
-    entry = game_state.get("units_cache", {}).get(str(squad_id))
-    if entry is not None:
+    entry = game_state.get("units_cache", {}).get(str(squad_id))  # get allowed
+    if entry is not None:  # get allowed
         set_unit_coordinates(unit, int(entry["col"]), int(entry["row"]))
 
     _invalidate_all_destination_pools_after_movement(game_state)

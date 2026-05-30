@@ -491,13 +491,13 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
         # Fill occupied_hexes_by_model from models_cache (PR4 4e-i)
         units_cache[unit_id]["occupied_hexes_by_model"] = {
             mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"]))
-            for mid in squad_models.get(unit_id, [])
+            for mid in squad_models.get(unit_id, [])  # get allowed
             if mid in models_cache
         }
         # F2 fix (audit) : pour multi-fig, recompute occupied_hexes = union des
         # footprints de toutes les figs. Pour mono-fig (1 fig au anchor),
         # occupied_hexes deja correct depuis _compute_unit_occupied_hexes(col,row,...).
-        if len(squad_models.get(unit_id, [])) > 1:
+        if len(squad_models.get(unit_id, [])) > 1:  # get allowed
             # game_state["units_cache"] pas encore set globalement, on patch via la variable locale
             game_state_view = dict(game_state)
             game_state_view["units_cache"] = units_cache
@@ -1308,7 +1308,7 @@ def _apply_enemy_adjacent_delta_for_moved_unit(
             if h not in player_counters:
                 if game_state is not None and game_state.get("debug_mode", False):
                     from engine.game_utils import add_debug_file_log
-                    units_cache = game_state.get("units_cache", {})
+                    units_cache = game_state.get("units_cache", {})  # get allowed
                     unit_positions = {
                         uid: (e.get("col"), e.get("row"), e.get("player"), e.get("occupied_hexes"))
                         for uid, e in units_cache.items()
@@ -2190,7 +2190,7 @@ def _compute_squad_cache_entry(
     """
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    model_ids = squad_models.get(squad_id, [])
+    model_ids = squad_models.get(squad_id, [])  # get allowed
     alive = [models_cache[m] for m in model_ids if m in models_cache]
     n = len(alive)
     if n == 0:
@@ -2232,7 +2232,7 @@ def _recompute_squad_cache(game_state: Dict[str, Any], squad_id: str) -> None:
         new_entry["model_count_at_start"] = old_entry["model_count_at_start"]
     squad_cache[squad_id] = new_entry
     # Mirror OC_TOTAL → units_cache (cf. spec §"Contrat units_cache").
-    units_entry = game_state.get("units_cache", {}).get(squad_id)
+    units_entry = game_state.get("units_cache", {}).get(squad_id)  # get allowed
     if units_entry is not None:
         units_entry["OC_TOTAL"] = new_entry["oc_total"]
 
@@ -2251,7 +2251,7 @@ def validate_squad_coherency(game_state: Dict[str, Any], squad_id: str) -> bool:
     """
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    model_ids = squad_models.get(squad_id, [])
+    model_ids = squad_models.get(squad_id, [])  # get allowed
     alive = [models_cache[m] for m in model_ids if m in models_cache]
     n = len(alive)
     if n <= 1:
@@ -2289,7 +2289,7 @@ def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -
     Egalement met a jour occupation_map (reverse lookup cell -> unit_id).
     Idempotent. Pas d'effet si squad_id absent du units_cache.
     """
-    units_cache = game_state.get("units_cache", {})
+    units_cache = game_state.get("units_cache", {})  # get allowed
     entry = units_cache.get(squad_id)
     if entry is None:
         return
@@ -2297,7 +2297,7 @@ def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -
     squad_models = require_key(game_state, "squad_models")
     base_shape = entry["BASE_SHAPE"]
     base_size = entry["BASE_SIZE"]
-    orientation = int(entry.get("orientation", 0))
+    orientation = int(entry.get("orientation", 0))  # get allowed
     unit_stub = {
         "BASE_SHAPE": base_shape,
         "BASE_SIZE": base_size,
@@ -2306,7 +2306,7 @@ def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -
     old_occupied = entry.get("occupied_hexes", set())
     new_occupied: Set[Tuple[int, int]] = set()
     new_by_model: Dict[str, Tuple[int, int]] = {}
-    for mid in squad_models.get(squad_id, []):
+    for mid in squad_models.get(squad_id, []):  # get allowed
         m = models_cache.get(mid)
         if m is None:
             continue
@@ -2341,7 +2341,7 @@ def translate_squad_to_destination(
     que l'ancre — utilisé après une mort de figurine pour resync l'ancre sans
     toucher aux figs survivantes.
     """
-    units_cache = game_state.get("units_cache", {})
+    units_cache = game_state.get("units_cache", {})  # get allowed
     entry = units_cache.get(squad_id)
     if entry is None:
         return
@@ -2353,11 +2353,11 @@ def translate_squad_to_destination(
     if delta_col != 0 or delta_row != 0:
         models_cache = require_key(game_state, "models_cache")
         squad_models = require_key(game_state, "squad_models")
-        for mid in squad_models.get(squad_id, []):
+        for mid in squad_models.get(squad_id, []):  # get allowed
             m = models_cache.get(mid)
             if m is None:
                 continue
-            if int(m.get("HP_CUR", 0)) <= 0:
+            if int(m.get("HP_CUR", 0)) <= 0:  # get allowed
                 continue
             m["col"] = int(m["col"]) + delta_col
             m["row"] = int(m["row"]) + delta_row
@@ -2375,7 +2375,7 @@ def _recompute_squad_hp_total(game_state: Dict[str, Any], squad_id: str) -> int:
     """
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    model_ids = squad_models.get(squad_id, [])
+    model_ids = squad_models.get(squad_id, [])  # get allowed
     total = 0
     for mid in model_ids:
         m = models_cache.get(mid)
@@ -2391,7 +2391,7 @@ def _recompute_squad_anchor(game_state: Dict[str, Any], squad_id: str) -> Option
     """
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    for mid in squad_models.get(squad_id, []):
+    for mid in squad_models.get(squad_id, []):  # get allowed
         m = models_cache.get(mid)
         if m is not None:
             return (int(m["col"]), int(m["row"]))
@@ -2417,7 +2417,7 @@ def update_model_position(
 
     squad_id = str(model["squad_id"])
     # PR4 4e-i : sync occupied_hexes_by_model
-    units_entry_oh = game_state.get("units_cache", {}).get(squad_id)
+    units_entry_oh = game_state.get("units_cache", {}).get(squad_id)  # get allowed
     if units_entry_oh is not None:
         oh_by_model = units_entry_oh.setdefault("occupied_hexes_by_model", {})
         oh_by_model[model_id] = (norm_col, norm_row)
@@ -2428,7 +2428,7 @@ def update_model_position(
         anchor_col, anchor_row = anchor
         # Propage uniquement si l ancre a vraiment bouge — evite recompute
         # inutile pour les figurines non-ancres.
-        units_entry = game_state.get("units_cache", {}).get(squad_id)
+        units_entry = game_state.get("units_cache", {}).get(squad_id)  # get allowed
         if units_entry is not None and (
             int(units_entry.get("col", -1)) != anchor_col
             or int(units_entry.get("row", -1)) != anchor_row
@@ -2454,7 +2454,7 @@ def update_model_hp(game_state: Dict[str, Any], model_id: str, new_hp_cur: int) 
     model["HP_CUR"] = effective_hp
     squad_id = str(model["squad_id"])
     squad_total = _recompute_squad_hp_total(game_state, squad_id)
-    units_entry = game_state.get("units_cache", {}).get(squad_id)
+    units_entry = game_state.get("units_cache", {}).get(squad_id)  # get allowed
     if units_entry is not None:
         units_entry["HP_CUR"] = squad_total
 
@@ -2497,7 +2497,7 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
     if squad_list is not None and model_id in squad_list:
         squad_list.remove(model_id)
     # PR4 4e-i : sync occupied_hexes_by_model (retire entree fig morte)
-    units_entry_oh = game_state.get("units_cache", {}).get(squad_id)
+    units_entry_oh = game_state.get("units_cache", {}).get(squad_id)  # get allowed
     if units_entry_oh is not None:
         oh_by_model = units_entry_oh.get("occupied_hexes_by_model")
         if oh_by_model is not None:
@@ -2516,7 +2516,7 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
     )
 
     # 3/4/5. Cascade vers units_cache.
-    units_entry = game_state.get("units_cache", {}).get(squad_id)
+    units_entry = game_state.get("units_cache", {}).get(squad_id)  # get allowed
     if units_entry is None:
         return  # squad deja absent du units_cache (cas degenere)
 
@@ -2573,7 +2573,7 @@ def build_rigid_plan(
     """
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    mids = squad_models.get(squad_id, [])
+    mids = squad_models.get(squad_id, [])  # get allowed
     alive_mids = [m for m in mids if m in models_cache]
     if not alive_mids:
         return None
@@ -2654,14 +2654,12 @@ def validate_move_plan(
     enemy_er_zone: Optional[Set[Tuple[int, int]]] = None
     if c["forbid_enemy_er"]:
         cache_key = f"enemy_adjacent_hexes_player_{player}"
-        enemy_er_zone = game_state.get(cache_key)
-        if enemy_er_zone is None:
-            enemy_er_zone = build_enemy_adjacent_hexes(game_state, player)
+        enemy_er_zone = require_key(game_state, cache_key)
 
     # Cellules occupees par les AUTRES escouades (collisions interdites).
     other_occupied: Set[Tuple[int, int]] = set()
     if not c["allow_collisions"]:
-        units_cache = game_state.get("units_cache", {})
+        units_cache = game_state.get("units_cache", {})  # get allowed
         for sid, entry in units_cache.items():
             if str(sid) == squad_id:
                 continue
@@ -2792,8 +2790,8 @@ def get_squad_move_budget(
     if move_type in ("pile_in", "consolidation"):
         ish = int(require_key(game_state, "inches_to_subhex"))
         return 3 * ish
-    units = game_state.get("units", [])
-    unit = next((u for u in units if str(u.get("id")) == str(squad_id)), None)
+    units = game_state.get("units", [])  # get allowed
+    unit = next((u for u in units if str(u.get("id")) == str(squad_id)), None)  # get allowed
     if unit is None:
         raise KeyError(f"get_squad_move_budget: squad {squad_id} not in game_state['units']")
     move_stat = int(require_key(unit, "MOVE"))
@@ -2854,7 +2852,7 @@ def execute_squad_move(
 def _enemy_squad_ids(game_state: Dict[str, Any], player: int) -> List[str]:
     """Liste des squad_id ennemis vivants (player != donne)."""
     out: List[str] = []
-    for sid, entry in game_state.get("units_cache", {}).items():
+    for sid, entry in game_state.get("units_cache", {}).items():  # get allowed
         try:
             if int(entry.get("player", -1)) != int(player):
                 out.append(str(sid))
@@ -2867,7 +2865,7 @@ def _squad_model_positions(game_state: Dict[str, Any], squad_id: str) -> List[Tu
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     out: List[Tuple[int, int]] = []
-    for mid in squad_models.get(squad_id, []):
+    for mid in squad_models.get(squad_id, []):  # get allowed
         m = models_cache.get(mid)
         if m is not None:
             out.append((int(m["col"]), int(m["row"])))
@@ -2905,8 +2903,8 @@ def charge_check_eligibility(
     threshold_12 = CHARGE_THRESHOLD_INCHES * ish
 
     # Position ennemies (tous)
-    units_cache = game_state.get("units_cache", {})
-    our_player = int(units_cache.get(str(squad_id), {}).get("player", -1))
+    units_cache = game_state.get("units_cache", {})  # get allowed
+    our_player = int(units_cache.get(str(squad_id), {}).get("player", -1))  # get allowed
     enemy_positions: List[Tuple[int, int]] = []
     for tsid in target_squad_ids:
         enemy_positions.extend(_squad_model_positions(game_state, str(tsid)))
@@ -2956,7 +2954,7 @@ def _hex_legal_for_charge(
     if wall_hexes and cell in wall_hexes:
         return False
     # Collision : autres escouades (sauf nous-meme)
-    units_cache = game_state.get("units_cache", {})
+    units_cache = game_state.get("units_cache", {})  # get allowed
     for sid, entry in units_cache.items():
         if str(sid) == str(squad_id):
             continue
@@ -2964,7 +2962,7 @@ def _hex_legal_for_charge(
         if occ and cell in occ:
             return False
     # ER des escouades non-cibles
-    our_player = int(units_cache.get(str(squad_id), {}).get("player", -1))
+    our_player = int(units_cache.get(str(squad_id), {}).get("player", -1))  # get allowed
     er_dist = get_engagement_range_subhex(game_state)
     for esid in _enemy_squad_ids(game_state, our_player):
         if esid in [str(t) for t in target_squad_ids]:
@@ -3000,7 +2998,7 @@ def charge_build_valid_plan(
         return None
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]
+    mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
     if not mids:
         return None
 
@@ -3187,7 +3185,7 @@ def reset_wounds_allocated_for_squad(game_state: Dict[str, Any], squad_id: str) 
     scope per-activation par-cible (cf. spec §"Allocation prioritaire").
     """
     models_cache = require_key(game_state, "models_cache")
-    for mid in game_state.get("squad_models", {}).get(squad_id, []):
+    for mid in game_state.get("squad_models", {}).get(squad_id, []):  # get allowed
         m = models_cache.get(mid)
         if m is not None:
             m["wounds_allocated_this_activation"] = 0
@@ -3215,11 +3213,11 @@ def squad_shooting_unit_activation_start(
     assert_no_pending_shoot_intent(game_state, squad_id)
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    for mid in squad_models.get(squad_id, []):
+    for mid in squad_models.get(squad_id, []):  # get allowed
         m = models_cache.get(mid)
         if m is None:
             continue
-        weapons = m.get("RNG_WEAPONS", [])
+        weapons = m.get("RNG_WEAPONS", [])  # get allowed
         sel = m.get("selectedRngWeaponIndex")
         if weapons and sel is not None and 0 <= int(sel) < len(weapons):
             w = weapons[int(sel)]
@@ -3247,9 +3245,9 @@ def _model_can_shoot_target(
       - arme RNG selectionnee existe avec RNG > 0
       - au moins un modele cible dans le rayon RNG (subhexes) ET avec LoS depuis l attaquant
     """
-    if int(attacker_model.get("SHOOT_LEFT", 0)) <= 0:
+    if int(attacker_model.get("SHOOT_LEFT", 0)) <= 0:  # get allowed
         return False
-    weapons = attacker_model.get("RNG_WEAPONS", [])
+    weapons = attacker_model.get("RNG_WEAPONS", [])  # get allowed
     sel = attacker_model.get("selectedRngWeaponIndex")
     if not weapons or sel is None or not (0 <= int(sel) < len(weapons)):
         return False
@@ -3318,10 +3316,10 @@ def squad_declare_shoot(
 
     def _target_size(target_sid: str) -> int:
         return sum(
-            1 for mid in squad_models.get(target_sid, []) if mid in models_cache
+            1 for mid in squad_models.get(target_sid, []) if mid in models_cache  # get allowed
         )
 
-    for mid in squad_models.get(attacker_squad_id, []):
+    for mid in squad_models.get(attacker_squad_id, []):  # get allowed
         m = models_cache.get(mid)
         if m is None:
             continue
@@ -3343,7 +3341,7 @@ def squad_declare_shoot(
         # F3 fix (audit) : resoudre NB UNE SEULE FOIS a la declaration, stocker
         # dans l intent. Sinon le double-roll de_resolve_squad_shoot decouple le
         # nombre d attaques effectif de SHOOT_LEFT pour les armes a NB variable (D3/D6).
-        weapons = m.get("RNG_WEAPONS", [])
+        weapons = m.get("RNG_WEAPONS", [])  # get allowed
         n_attacks_resolved = 0
         if 0 <= weapon_idx < len(weapons):
             w = weapons[weapon_idx]
@@ -3374,7 +3372,7 @@ def squad_declare_shoot_model(
     joueur assigne explicitement la cible d UNE figurine. Re-appeler avec un
     model_id deja declare REMPLACE sa cible (le joueur change d avis).
 
-    Validation stricte (pas de fallback) :
+    Validation stricte (pas de valeur par défaut) :
       - activation tir demarree (pending initialise),
       - figurine appartient a l escouade attaquante et vivante,
       - escouade cible vivante,
@@ -3393,7 +3391,7 @@ def squad_declare_shoot_model(
             f"squad_declare_shoot_model called before squad_shooting_unit_activation_start "
             f"for squad {attacker_squad_id!r}"
         )
-    if attacker_model_id not in squad_models.get(attacker_squad_id, []):
+    if attacker_model_id not in squad_models.get(attacker_squad_id, []):  # get allowed
         raise ValueError(
             f"Model {attacker_model_id!r} not in squad {attacker_squad_id!r}"
         )
@@ -3401,7 +3399,7 @@ def squad_declare_shoot_model(
     if m is None:
         raise ValueError(f"Model {attacker_model_id!r} not alive (absent de models_cache)")
     if target_squad_id not in squad_models or not any(
-        mid in models_cache for mid in squad_models.get(target_squad_id, [])
+        mid in models_cache for mid in squad_models.get(target_squad_id, [])  # get allowed
     ):
         raise ValueError(f"Target squad {target_squad_id!r} not alive")
     if not _model_can_shoot_target(game_state, m, target_squad_id):
@@ -3419,7 +3417,7 @@ def squad_declare_shoot_model(
 
     sel = m.get("selectedRngWeaponIndex")
     weapon_idx = int(sel) if sel is not None else 0
-    weapons = m.get("RNG_WEAPONS", [])
+    weapons = m.get("RNG_WEAPONS", [])  # get allowed
     n_attacks_resolved = 0
     if 0 <= weapon_idx < len(weapons):
         w = weapons[weapon_idx]
@@ -3431,7 +3429,7 @@ def squad_declare_shoot_model(
             except Exception:
                 n_attacks_resolved = int(w["NB"]) if isinstance(w["NB"], (int, float)) else 1
     target_size = sum(
-        1 for mid in squad_models.get(target_squad_id, []) if mid in models_cache
+        1 for mid in squad_models.get(target_squad_id, []) if mid in models_cache  # get allowed
     )
     intent = {
         "model_id": attacker_model_id,
@@ -3500,7 +3498,7 @@ def squad_lock_shoot(game_state: Dict[str, Any], squad_id: str) -> List[Dict[str
     Retourne la liste verrouillee pour usage immediat par la resolution.
     """
     init_pending_intents(game_state)
-    return list(game_state["pending_squad_shoot_intents"].get(squad_id, []))
+    return list(game_state["pending_squad_shoot_intents"].get(squad_id, []))  # get allowed
 
 
 # ============================================================================
@@ -3570,12 +3568,12 @@ def _allocate_damage_to_squad(
     """
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    alive = [m for m in squad_models.get(target_squad_id, []) if m in models_cache]
+    alive = [m for m in squad_models.get(target_squad_id, []) if m in models_cache]  # get allowed
     if not alive:
         return None
     target_mid: Optional[str] = None
     for mid in alive:
-        if int(models_cache[mid].get("wounds_allocated_this_activation", 0)) > 0:
+        if int(models_cache[mid].get("wounds_allocated_this_activation", 0)) > 0:  # get allowed
             target_mid = mid
             break
     if target_mid is None:
@@ -3594,7 +3592,7 @@ def _allocate_damage_to_squad(
         destroy_model(game_state, target_mid, reason="combat")
         destroyed = True
     else:
-        m["wounds_allocated_this_activation"] = int(m.get("wounds_allocated_this_activation", 0)) + damage_dealt
+        m["wounds_allocated_this_activation"] = int(m.get("wounds_allocated_this_activation", 0)) + damage_dealt  # get allowed
         update_model_hp(game_state, target_mid, new_hp)
     return {
         "model_id": target_mid, "damage_dealt": damage_dealt, "destroyed": destroyed,
@@ -3628,7 +3626,7 @@ def resolve_squad_shoot(
     """
     init_pending_intents(game_state)
     models_cache = require_key(game_state, "models_cache")
-    intents = list(game_state["pending_squad_shoot_intents"].get(attacker_squad_id, []))
+    intents = list(game_state["pending_squad_shoot_intents"].get(attacker_squad_id, []))  # get allowed
     summary: Dict[str, Any] = {
         "attacks_made": 0,
         "hits": 0,
@@ -3646,7 +3644,7 @@ def resolve_squad_shoot(
         if attacker is None:
             continue  # fig morte mid-resolution
         target_sid = str(intent["target_unit_id"])
-        if target_sid not in game_state.get("squad_models", {}):
+        if target_sid not in game_state.get("squad_models", {}):  # get allowed
             continue  # cible deja wipe
         if target_sid not in targets_meta:
             _tgt_uc = require_key(game_state, "units_cache")[target_sid]
@@ -3656,15 +3654,15 @@ def resolve_squad_shoot(
                 "model_count_at_start": int(require_key(_tgt_sc, "model_count_at_start")),
                 "player": int(require_key(_tgt_uc, "player")),
             }
-        weapon_index = int(intent.get("weapon_index", 0))
-        weapons = attacker.get("RNG_WEAPONS", [])
+        weapon_index = int(intent.get("weapon_index", 0))  # get allowed
+        weapons = attacker.get("RNG_WEAPONS", [])  # get allowed
         if not (0 <= weapon_index < len(weapons)):
             continue
         weapon = weapons[weapon_index]
         if not isinstance(weapon, dict):
             continue
         # F3 fix (audit) : lire n_attacks_resolved depuis l intent (resolu a la
-        # declaration). Fallback sur re-roll de NB si absent (compat legacy intents).
+        # declaration). Re-roll de NB si absent (compat legacy intents).
         if "n_attacks_resolved" in intent:
             n_attacks = int(intent["n_attacks_resolved"])
         else:
@@ -3674,7 +3672,7 @@ def resolve_squad_shoot(
             except Exception:
                 n_attacks = int(nb_raw) if isinstance(nb_raw, (int, float)) else 1
         if _has_blast_keyword(weapon):
-            tgt_size = int(intent.get("target_squad_size_at_declaration", 0))
+            tgt_size = int(intent.get("target_squad_size_at_declaration", 0))  # get allowed
             n_attacks += tgt_size // 5
         if n_attacks <= 0:
             continue
@@ -3682,7 +3680,7 @@ def resolve_squad_shoot(
         # weapon["ATK"] = seuil hit (BS/WS), weapon["STR"] = force, weapon["AP"] = AP modifier
         bs = int(weapon.get("ATK", weapon.get("BS", 4)))
         strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))
-        ap = int(weapon.get("AP", 0))
+        ap = int(weapon.get("AP", 0))  # get allowed
         dmg_raw = weapon.get("DMG", 1)
         wound_th_lookup: Dict[int, int] = {}  # cache wound threshold by T
 
@@ -3698,7 +3696,7 @@ def resolve_squad_shoot(
             # Recheck cible alive et attaquant alive avant chaque attaque
             if attacker_mid not in models_cache:
                 break
-            target_alive = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]
+            target_alive = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
             if not target_alive:
                 break
             summary["attacks_made"] += 1
@@ -3759,7 +3757,7 @@ def resolve_squad_shoot(
             })
         # Apres toutes les attaques de cet intent, decrement SHOOT_LEFT du modele attaquant
         if attacker_mid in models_cache:
-            sl = int(models_cache[attacker_mid].get("SHOOT_LEFT", 0))
+            sl = int(models_cache[attacker_mid].get("SHOOT_LEFT", 0))  # get allowed
             models_cache[attacker_mid]["SHOOT_LEFT"] = max(0, sl - 1)
 
         # Log du tir par figurine
@@ -3767,11 +3765,11 @@ def resolve_squad_shoot(
             attacker_squad_id_str = str(attacker.get("squad_id", attacker_mid))
             weapon_name = weapon.get("NAME", weapon.get("name", ""))
             weapon_suffix = f" [{weapon_name}]" if weapon_name else ""
-            ac = int(attacker.get("col", 0))
-            ar = int(attacker.get("row", 0))
-            tgt_uc = game_state.get("units_cache", {}).get(target_sid, {})
-            tc = int(tgt_uc.get("col", 0))
-            tr = int(tgt_uc.get("row", 0))
+            ac = int(attacker.get("col", 0))  # get allowed
+            ar = int(attacker.get("row", 0))  # get allowed
+            tgt_uc = game_state.get("units_cache", {}).get(target_sid, {})  # get allowed
+            tc = int(tgt_uc.get("col", 0))  # get allowed
+            tr = int(tgt_uc.get("row", 0))  # get allowed
             attack_log = (
                 f"{intent_attacks} att, {intent_hits} hits, "
                 f"{intent_wounds} wounds, {intent_failed_saves} unsaved"
@@ -3788,12 +3786,12 @@ def resolve_squad_shoot(
             append_action_log(game_state, {
                 "type": "shoot",
                 "message": msg,
-                "turn": game_state.get("turn", 0),
+                "turn": game_state.get("turn", 0),  # get allowed
                 "phase": "shoot",
                 "shooterId": attacker_squad_id_str,
                 "targetId": target_sid,
                 "weaponName": weapon_name if weapon_name else None,
-                "player": int(attacker.get("player", 0)),
+                "player": int(attacker.get("player", 0)),  # get allowed
                 "shooterCol": ac,
                 "shooterRow": ar,
                 "targetCol": tc,
@@ -3801,17 +3799,17 @@ def resolve_squad_shoot(
                 "damage": intent_damage,
                 "target_died": intent_kills > 0,
                 "timestamp": "server_time",
-                "is_ai_action": int(attacker.get("player", 0)) == 1,
+                "is_ai_action": int(attacker.get("player", 0)) == 1,  # get allowed
             })
             for dead_mid in killed_model_ids:
                 append_action_log(game_state, {
                     "type": "death",
                     "message": f"Unit {target_sid} model {dead_mid} DESTROYED",
-                    "turn": game_state.get("turn", 0),
+                    "turn": game_state.get("turn", 0),  # get allowed
                     "phase": "shoot",
                     "targetId": target_sid,
                     "unitId": target_sid,
-                    "player": int(tgt_uc.get("player", 0)),
+                    "player": int(tgt_uc.get("player", 0)),  # get allowed
                     "timestamp": "server_time",
                 })
 
@@ -3819,7 +3817,7 @@ def resolve_squad_shoot(
     summary["targets_meta"] = targets_meta
     summary["squads_wiped"] = [
         sid for sid in targets_meta
-        if not [m for m in game_state["squad_models"].get(sid, []) if m in models_cache]
+        if not [m for m in game_state["squad_models"].get(sid, []) if m in models_cache]  # get allowed
     ]
     # Nettoyage atomique
     clear_pending_shoot_intent(game_state, attacker_squad_id)
@@ -3852,11 +3850,11 @@ def squad_fight_unit_activation_start(
     assert_no_pending_fight_intent(game_state, squad_id)
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    for mid in squad_models.get(squad_id, []):
+    for mid in squad_models.get(squad_id, []):  # get allowed
         m = models_cache.get(mid)
         if m is None:
             continue
-        weapons = m.get("CC_WEAPONS", [])
+        weapons = m.get("CC_WEAPONS", [])  # get allowed
         sel = m.get("selectedCcWeaponIndex")
         if weapons and sel is not None and 0 <= int(sel) < len(weapons):
             w = weapons[int(sel)]
@@ -3876,7 +3874,7 @@ def _squad_is_in_fight(game_state: Dict[str, Any], squad_id: str) -> bool:
     """
     if squad_id in game_state.get("units_charged", set()):
         return True
-    units_cache = game_state.get("units_cache", {})
+    units_cache = game_state.get("units_cache", {})  # get allowed
     our_entry = units_cache.get(squad_id)
     if our_entry is None:
         return False
@@ -3911,7 +3909,7 @@ def squad_fight_activation_order(
     bool optionnel — defaut False.
     """
     units_charged = game_state.get("units_charged", set())
-    units_cache = game_state.get("units_cache", {})
+    units_cache = game_state.get("units_cache", {})  # get allowed
     eligible: Dict[str, str] = {}
     for sid, entry in units_cache.items():
         if not _squad_is_in_fight(game_state, str(sid)):
@@ -3923,7 +3921,7 @@ def squad_fight_activation_order(
             eligible[str(sid)] = "remaining"
 
     def _player_of(sid: str) -> int:
-        return int(units_cache.get(sid, {}).get("player", -1))
+        return int(units_cache.get(sid, {}).get("player", -1))  # get allowed
 
     def _alternate(squads_in_step: List[str], step_name: str) -> List[Tuple[str, str]]:
         # Tri non-active d abord, puis active. A egalite : ordre d'id (deterministe).
@@ -3980,11 +3978,11 @@ def fight_pile_in_plan(
     """
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]
+    mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
     if not mids:
         return None
 
-    units_cache = game_state.get("units_cache", {})
+    units_cache = game_state.get("units_cache", {})  # get allowed
     our_entry = units_cache.get(squad_id)
     if our_entry is None:
         return None
@@ -4117,11 +4115,11 @@ def get_fighting_models(game_state: Dict[str, Any], squad_id: str) -> List[str]:
     """
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]
+    mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
     if not mids:
         return []
-    units_cache = game_state.get("units_cache", {})
-    our_player = int(units_cache.get(squad_id, {}).get("player", -1))
+    units_cache = game_state.get("units_cache", {})  # get allowed
+    our_player = int(units_cache.get(squad_id, {}).get("player", -1))  # get allowed
     er_threshold = get_engagement_range_subhex(game_state)
     enemy_positions: List[Tuple[int, int]] = []
     for esid in _enemy_squad_ids(game_state, our_player):
@@ -4181,7 +4179,7 @@ def _auto_select_cc_weapon_for_fig(
 
     Tie-break : index d arme le plus bas. Si pas d arme : retourne 0 (no-op).
     """
-    weapons = attacker.get("CC_WEAPONS", [])
+    weapons = attacker.get("CC_WEAPONS", [])  # get allowed
     if not weapons:
         return 0
     best_idx = 0
@@ -4191,7 +4189,7 @@ def _auto_select_cc_weapon_for_fig(
             continue
         ws = int(w.get("ATK", w.get("WS", 4)))  # WS via ATK convention
         s = int(w.get("STR", w.get("S", 4)))
-        ap = int(w.get("AP", 0))
+        ap = int(w.get("AP", 0))  # get allowed
         dmg_raw = w.get("DMG", 1)
         try:
             dmg = float(expected_dice_value(dmg_raw, f"auto_select_cc_dmg"))
@@ -4238,7 +4236,7 @@ def squad_declare_fight(
         )
     # Target info pour auto-select
     target_alive = [
-        m for m in squad_models.get(target_squad_id, []) if m in models_cache
+        m for m in squad_models.get(target_squad_id, []) if m in models_cache  # get allowed
     ]
     if not target_alive:
         return []  # cible deja wipe
@@ -4259,7 +4257,7 @@ def squad_declare_fight(
         chosen_idx = _auto_select_cc_weapon_for_fig(m, target_t, target_sv, target_invul)
         m["selectedCcWeaponIndex"] = chosen_idx
         # F3 fix (audit) : resoudre NB UNE SEULE FOIS, stocker dans intent.
-        weapons = m.get("CC_WEAPONS", [])
+        weapons = m.get("CC_WEAPONS", [])  # get allowed
         n_attacks_resolved = 0
         if 0 <= chosen_idx < len(weapons):
             w = weapons[chosen_idx]
@@ -4290,7 +4288,7 @@ def resolve_squad_fight(
     """
     init_pending_intents(game_state)
     models_cache = require_key(game_state, "models_cache")
-    intents = list(game_state["pending_squad_fight_intents"].get(attacker_squad_id, []))
+    intents = list(game_state["pending_squad_fight_intents"].get(attacker_squad_id, []))  # get allowed
     summary: Dict[str, Any] = {
         "attacks_made": 0, "hits": 0, "wounds": 0,
         "failed_saves": 0, "damage_total": 0, "models_killed": 0, "events": [],
@@ -4303,7 +4301,7 @@ def resolve_squad_fight(
         if attacker is None:
             continue
         target_sid = str(intent["target_unit_id"])
-        if target_sid not in game_state.get("squad_models", {}):
+        if target_sid not in game_state.get("squad_models", {}):  # get allowed
             continue
         if target_sid not in targets_meta:
             _tgt_uc = require_key(game_state, "units_cache")[target_sid]
@@ -4313,8 +4311,8 @@ def resolve_squad_fight(
                 "model_count_at_start": int(require_key(_tgt_sc, "model_count_at_start")),
                 "player": int(require_key(_tgt_uc, "player")),
             }
-        weapon_index = int(intent.get("weapon_index", 0))
-        weapons = attacker.get("CC_WEAPONS", [])
+        weapon_index = int(intent.get("weapon_index", 0))  # get allowed
+        weapons = attacker.get("CC_WEAPONS", [])  # get allowed
         if not (0 <= weapon_index < len(weapons)):
             continue
         weapon = weapons[weapon_index]
@@ -4333,13 +4331,13 @@ def resolve_squad_fight(
             continue
         ws = int(weapon.get("ATK", weapon.get("WS", 4)))
         strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))
-        ap = int(weapon.get("AP", 0))
+        ap = int(weapon.get("AP", 0))  # get allowed
         dmg_raw = weapon.get("DMG", 1)
         wound_th_lookup: Dict[int, int] = {}
         for _ in range(int(n_attacks)):
             if attacker_mid not in models_cache:
                 break
-            target_alive = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]
+            target_alive = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
             if not target_alive:
                 break
             summary["attacks_made"] += 1
@@ -4383,12 +4381,12 @@ def resolve_squad_fight(
                 "damage": int(res["damage_dealt"]), "destroyed": bool(res["destroyed"]),
             })
         if attacker_mid in models_cache:
-            al = int(models_cache[attacker_mid].get("ATTACK_LEFT", 0))
+            al = int(models_cache[attacker_mid].get("ATTACK_LEFT", 0))  # get allowed
             models_cache[attacker_mid]["ATTACK_LEFT"] = max(0, al - int(n_attacks))
     summary["targets_meta"] = targets_meta
     summary["squads_wiped"] = [
         sid for sid in targets_meta
-        if not [m for m in game_state["squad_models"].get(sid, []) if m in models_cache]
+        if not [m for m in game_state["squad_models"].get(sid, []) if m in models_cache]  # get allowed
     ]
     clear_pending_fight_intent(game_state, attacker_squad_id)
     return summary
@@ -4415,10 +4413,10 @@ def squad_consolidate_plan(
     """
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]
+    mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
     if not mids:
         return None
-    units_cache = game_state.get("units_cache", {})
+    units_cache = game_state.get("units_cache", {})  # get allowed
     our_entry = units_cache.get(squad_id)
     if our_entry is None:
         return None
@@ -4525,7 +4523,7 @@ def squad_consolidate_plan(
 SQUAD_ACTION_SIZE = 26
 SQUAD_ACTION_MOVE_DIR_BASE = 0
 SQUAD_ACTION_MOVE_DIR_COUNT = 6
-# PR4 4e-v_a : Advance et Fall Back ont chacun 6 directions (agent decide, zero fallback)
+# PR4 4e-v_a : Advance et Fall Back ont chacun 6 directions (agent decide, aucune valeur par défaut)
 SQUAD_ACTION_ADVANCE_DIR_BASE = 6
 SQUAD_ACTION_ADVANCE_DIR_COUNT = 6
 SQUAD_ACTION_FALL_BACK_DIR_BASE = 12
@@ -4539,7 +4537,7 @@ SQUAD_ACTION_FIGHT = 25
 
 def _squad_is_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:
     """True si AU MOINS UNE figurine du squad est dans l ER d une fig ennemie."""
-    units_cache = game_state.get("units_cache", {})
+    units_cache = game_state.get("units_cache", {})  # get allowed
     entry = units_cache.get(squad_id)
     if entry is None:
         return False
@@ -4575,7 +4573,7 @@ def _squad_direction_move_legal(
     """
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    alive_mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]
+    alive_mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
     if not alive_mids:
         return False
     anchor = models_cache[alive_mids[0]]
@@ -4602,7 +4600,7 @@ def build_squad_action_mask(
 
     Decision utilisateur : agent decide direction Advance/Fall Back. Per-direction
     dry-run validation : chaque direction est mask=1 SEULEMENT si le plan rigide
-    correspondant est valide (zero fallback).
+    correspondant est valide (aucune valeur par défaut).
 
     Phase courante lue depuis game_state['phase']. Si squad absent/mort, mask all-zero.
 
@@ -4614,7 +4612,7 @@ def build_squad_action_mask(
     roll D6 partage. Si None, mask Advance fully a 0 (impossible de savoir le budget).
     """
     mask = [0] * SQUAD_ACTION_SIZE
-    units_cache = game_state.get("units_cache", {})
+    units_cache = game_state.get("units_cache", {})  # get allowed
     if squad_id not in units_cache:
         return mask
     entry = units_cache[squad_id]
@@ -4681,9 +4679,9 @@ def build_squad_action_mask(
                 )
                 if locked_by_ally:
                     continue
-                models_cache = game_state.get("models_cache", {})
+                models_cache = game_state.get("models_cache", {})  # get allowed
                 can_any_hit = False
-                for mid in game_state.get("squad_models", {}).get(squad_id, []):
+                for mid in game_state.get("squad_models", {}).get(squad_id, []):  # get allowed
                     m = models_cache.get(mid)
                     if m is None:
                         continue
@@ -4743,9 +4741,9 @@ def init_enemy_slot_mapping(game_state: Dict[str, Any], our_player: int) -> None
     cache_key = f"enemy_slot_mapping_p{int(our_player)}"
     if cache_key in game_state:
         return
-    units_cache = game_state.get("units_cache", {})
-    squad_models = game_state.get("squad_models", {})
-    models_cache = game_state.get("models_cache", {})
+    units_cache = game_state.get("units_cache", {})  # get allowed
+    squad_models = game_state.get("squad_models", {})  # get allowed
+    models_cache = game_state.get("models_cache", {})  # get allowed
     # Calcule (squad_id, threat) pour chaque ennemi vivant a l init
     candidates: List[Tuple[str, float, int]] = []  # (sid, threat, idx)
     enemy_sorted = sorted(
@@ -4754,14 +4752,14 @@ def init_enemy_slot_mapping(game_state: Dict[str, Any], our_player: int) -> None
     )
     for idx, sid in enumerate(enemy_sorted):
         entry = units_cache[sid]
-        hp_total = int(entry.get("HP_CUR", 0))
-        # OC_total : prefer cache value, fallback sum
-        oc_total = int(entry.get("OC_TOTAL", 0))
+        hp_total = int(entry.get("HP_CUR", 0))  # get allowed
+        # OC_total : prefer cache value, calcul de secours
+        oc_total = int(entry.get("OC_TOTAL", 0))  # get allowed
         if oc_total == 0:
-            for mid in squad_models.get(sid, []):
+            for mid in squad_models.get(sid, []):  # get allowed
                 m = models_cache.get(mid)
                 if m is not None:
-                    oc_total += int(m.get("OC", 0))
+                    oc_total += int(m.get("OC", 0))  # get allowed
         threat = float(hp_total) * float(oc_total)
         candidates.append((str(sid), threat, idx))
     # Tri : menace decroissante, tie-break index croissant (ordre creation)
@@ -4784,7 +4782,7 @@ def get_enemy_slot_mapping(
     if cache_key not in game_state:
         init_enemy_slot_mapping(game_state, our_player)
     raw = game_state.get(cache_key, [None] * SQUAD_ACTION_SHOOT_SLOT_COUNT)
-    units_cache = game_state.get("units_cache", {})
+    units_cache = game_state.get("units_cache", {})  # get allowed
     return [sid if (sid is not None and sid in units_cache) else None for sid in raw]
 
 
@@ -4806,8 +4804,8 @@ def end_of_turn_coherency_removal(
     """
     removed: List[str] = []
     while True:
-        models_cache = game_state.get("models_cache", {})
-        squad_models = game_state.get("squad_models", {}).get(squad_id, [])
+        models_cache = game_state.get("models_cache", {})  # get allowed
+        squad_models = game_state.get("squad_models", {}).get(squad_id, [])  # get allowed
         alive = [m for m in squad_models if m in models_cache]
         if len(alive) <= 1:
             break
