@@ -1149,16 +1149,13 @@ def _compute_enemy_adjacent_cache_for_player_from_units_cache(
         if entry_player == player_int:
             continue
 
-        occ = entry.get("occupied_hexes")
-        if occ:
-            all_enemy_occupied.update(occ)
-            per_unit_occupied.append(occ)
+        by_model = entry.get("occupied_hexes_by_model")
+        if by_model:
+            unit_cells = set(by_model.values())
         else:
-            enemy_col = require_key(entry, "col")
-            enemy_row = require_key(entry, "row")
-            cell = (enemy_col, enemy_row)
-            all_enemy_occupied.add(cell)
-            per_unit_occupied.append({cell})
+            unit_cells = {(int(require_key(entry, "col")), int(require_key(entry, "row")))}
+        all_enemy_occupied.update(unit_cells)
+        per_unit_occupied.append(unit_cells)
 
     from engine.hex_utils import dilate_hex_set
     zone_hexes = dilate_hex_set(all_enemy_occupied, ez_dilation, board_cols, board_rows)
@@ -1254,12 +1251,12 @@ def _build_enemy_adjacent_structures_from_units_cache(
             raise ValueError(
                 f"Invalid player value in units_cache entry: {unit_player_raw!r}"
             ) from exc
-        occupied = cache_entry.get("occupied_hexes")
-        if not occupied or len(occupied) == 0:
-            unit_col = require_key(cache_entry, "col")
-            unit_row = require_key(cache_entry, "row")
-            occupied = {(unit_col, unit_row)}
-        unit_zone = dilate_hex_set(occupied, ez_dilation, board_cols, board_rows)
+        by_model = cache_entry.get("occupied_hexes_by_model")
+        if by_model:
+            unit_cells = set(by_model.values())
+        else:
+            unit_cells = {(int(require_key(cache_entry, "col")), int(require_key(cache_entry, "row")))}
+        unit_zone = dilate_hex_set(unit_cells, ez_dilation, board_cols, board_rows)
         for perspective_player in players_present:
             if perspective_player == unit_player_int:
                 continue

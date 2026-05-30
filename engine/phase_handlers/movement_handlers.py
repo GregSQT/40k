@@ -1195,31 +1195,34 @@ def _build_multi_hex_vectorized(
         hex_mixed_mask = np.zeros((board_cols, board_rows), dtype=bool)
         has_hex_mixed = False
         for _, ce in enemy_list:
-            e_col = int(require_key(ce, "col"))
-            e_row = int(require_key(ce, "row"))
             e_shape = require_key(ce, "BASE_SHAPE")
             e_bs = _require_footprint_base_size(
                 e_shape,
                 require_key(ce, "BASE_SIZE"),
-                f"units_cache enemy at ({e_col},{e_row})",
+                f"units_cache enemy {ce.get('id', '?')}",
             )
+            by_model = ce.get("occupied_hexes_by_model")
+            model_positions = list(by_model.values()) if by_model else [
+                (int(require_key(ce, "col")), int(require_key(ce, "row")))
+            ]
             if mover_is_round and e_shape == "round":
                 e_r_norm = round_base_radius_norm(e_bs)
-                ex, ey = _hex_center(e_col, e_row)
-                dx = xs - float(ex)
-                dy = ys - float(ey)
-                d = np.hypot(dx, dy)
-                eng_bad |= (d - mover_r_norm - e_r_norm) <= (req + 1e-6)
+                for e_col, e_row in model_positions:
+                    ex, ey = _hex_center(e_col, e_row)
+                    dx = xs - float(ex)
+                    dy = ys - float(ey)
+                    d = np.hypot(dx, dy)
+                    eng_bad |= (d - mover_r_norm - e_r_norm) <= (req + 1e-6)
             else:
-                # Dépose l'empreinte hex de l'ennemi (peu importe sa forme) dans le mask commun.
                 e_orient = int(require_key(ce, "orientation"))
                 e_off_even, e_off_odd = precompute_footprint_offsets(e_shape, e_bs, e_orient)
-                e_off = e_off_even if (e_col & 1) == 0 else e_off_odd
-                for dc, dr in e_off:
-                    fc = e_col + int(dc)
-                    fr = e_row + int(dr)
-                    if 0 <= fc < board_cols and 0 <= fr < board_rows:
-                        hex_mixed_mask[fc, fr] = True
+                for e_col, e_row in model_positions:
+                    e_off = e_off_even if (e_col & 1) == 0 else e_off_odd
+                    for dc, dr in e_off:
+                        fc = e_col + int(dc)
+                        fr = e_row + int(dr)
+                        if 0 <= fc < board_cols and 0 <= fr < board_rows:
+                            hex_mixed_mask[fc, fr] = True
                 has_hex_mixed = True
 
         if has_hex_mixed:

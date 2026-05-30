@@ -177,29 +177,33 @@ def move_anchor_violates_engagement_clearance(
         )
 
     for _, cache_entry in enemy_iter:
-        enemy_fp = cache_entry.get("occupied_hexes")
-        if not enemy_fp:
-            ec = require_key(cache_entry, "col")
-            er = require_key(cache_entry, "row")
-            enemy_fp = {(ec, er)}
         e_shape = cache_entry["BASE_SHAPE"]
         e_bs_i = cache_entry["BASE_SIZE"]
-        e_col = require_key(cache_entry, "col")
-        e_row = require_key(cache_entry, "row")
 
         if mover_shape == "round" and e_shape == "round":
-            gap = euclidean_edge_clearance_round_round(
-                center_col,
-                center_row,
-                mover_bs_i,
-                e_col,
-                e_row,
-                e_bs_i,
-                mover_center_xy=mover_center_xy_rr,
-            )
-            if gap <= req + 1e-6:
-                return True
+            by_model = cache_entry.get("occupied_hexes_by_model")
+            if by_model:
+                model_positions: Any = by_model.values()
+            else:
+                model_positions = ((require_key(cache_entry, "col"), require_key(cache_entry, "row")),)
+            for e_col, e_row in model_positions:
+                gap = euclidean_edge_clearance_round_round(
+                    center_col,
+                    center_row,
+                    mover_bs_i,
+                    e_col,
+                    e_row,
+                    e_bs_i,
+                    mover_center_xy=mover_center_xy_rr,
+                )
+                if gap <= req + 1e-6:
+                    return True
         else:
+            enemy_fp = cache_entry.get("occupied_hexes")
+            if not enemy_fp:
+                ec = require_key(cache_entry, "col")
+                er = require_key(cache_entry, "row")
+                enemy_fp = {(ec, er)}
             if (
                 min_distance_between_sets(
                     candidate_fp, enemy_fp, max_distance=engagement_zone_ez
