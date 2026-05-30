@@ -3686,6 +3686,14 @@ def resolve_squad_shoot(
         dmg_raw = weapon.get("DMG", 1)
         wound_th_lookup: Dict[int, int] = {}  # cache wound threshold by T
 
+        intent_attacks = 0
+        intent_hits = 0
+        intent_wounds = 0
+        intent_failed_saves = 0
+        intent_damage = 0
+        intent_kills = 0
+        killed_model_ids: List[str] = []
+
         for _ in range(int(n_attacks)):
             # Recheck cible alive et attaquant alive avant chaque attaque
             if attacker_mid not in models_cache:
@@ -3694,6 +3702,7 @@ def resolve_squad_shoot(
             if not target_alive:
                 break
             summary["attacks_made"] += 1
+            intent_attacks += 1
             # 1. Hit roll
             hit_roll = random.randint(1, 6)
             if hit_roll == 1:  # 1 always miss (regle 10e)
@@ -3701,6 +3710,7 @@ def resolve_squad_shoot(
             if hit_roll < bs:
                 continue
             summary["hits"] += 1
+            intent_hits += 1
             # 2. Wound roll — utilise T de la fig "allocation prioritaire" (proxy : 1ere vivante)
             first_alive = models_cache[target_alive[0]]
             t_target = int(first_alive["T"])
@@ -3714,6 +3724,7 @@ def resolve_squad_shoot(
             if wound_roll < wth:
                 continue
             summary["wounds"] += 1
+            intent_wounds += 1
             # 3. Save roll — meme cible (allocation prioritaire dans _allocate_damage_to_squad)
             sv = int(first_alive["ARMOR_SAVE"])
             invul = int(first_alive.get("INVUL_SAVE", 7))
@@ -3722,6 +3733,7 @@ def resolve_squad_shoot(
             if save_roll != 1 and save_roll >= save_th:
                 continue  # save reussi
             summary["failed_saves"] += 1
+            intent_failed_saves += 1
             # 4. Damage
             try:
                 dmg = resolve_dice_value(dmg_raw, f"squad_shoot_dmg_{attacker_mid}")
@@ -3733,8 +3745,11 @@ def resolve_squad_shoot(
             if res is None:
                 break  # cible wipe
             summary["damage_total"] += int(res["damage_dealt"])
+            intent_damage += int(res["damage_dealt"])
             if res["destroyed"]:
                 summary["models_killed"] += 1
+                intent_kills += 1
+                killed_model_ids.append(str(res["model_id"]))
             summary["events"].append({
                 "attacker": attacker_mid, "target": res["model_id"],
                 "target_squad_id": target_sid,
@@ -3746,6 +3761,59 @@ def resolve_squad_shoot(
         if attacker_mid in models_cache:
             sl = int(models_cache[attacker_mid].get("SHOOT_LEFT", 0))
             models_cache[attacker_mid]["SHOOT_LEFT"] = max(0, sl - 1)
+
+        # Log du tir par figurine
+        if intent_attacks > 0:
+            attacker_squad_id_str = str(attacker.get("squad_id", attacker_mid))
+            weapon_name = weapon.get("NAME", weapon.get("name", ""))
+            weapon_suffix = f" [{weapon_name}]" if weapon_name else ""
+            ac = int(attacker.get("col", 0))
+            ar = int(attacker.get("row", 0))
+            tgt_uc = game_state.get("units_cache", {}).get(target_sid, {})
+            tc = int(tgt_uc.get("col", 0))
+            tr = int(tgt_uc.get("row", 0))
+            attack_log = (
+                f"{intent_attacks} att, {intent_hits} hits, "
+                f"{intent_wounds} wounds, {intent_failed_saves} unsaved"
+            )
+            if intent_damage > 0:
+                attack_log += f", {intent_damage} dmg"
+            if intent_kills > 0:
+                attack_log += f", {intent_kills} killed"
+            msg = (
+                f"Unit {attacker_squad_id_str}({ac},{ar}) SHOT"
+                f" at Unit {target_sid}({tc},{tr}){weapon_suffix}"
+                f" - {attack_log}"
+            )
+            append_action_log(game_state, {
+                "type": "shoot",
+                "message": msg,
+                "turn": game_state.get("turn", 0),
+                "phase": "shoot",
+                "shooterId": attacker_squad_id_str,
+                "targetId": target_sid,
+                "weaponName": weapon_name if weapon_name else None,
+                "player": int(attacker.get("player", 0)),
+                "shooterCol": ac,
+                "shooterRow": ar,
+                "targetCol": tc,
+                "targetRow": tr,
+                "damage": intent_damage,
+                "target_died": intent_kills > 0,
+                "timestamp": "server_time",
+                "is_ai_action": int(attacker.get("player", 0)) == 1,
+            })
+            for dead_mid in killed_model_ids:
+                append_action_log(game_state, {
+                    "type": "death",
+                    "message": f"Unit {target_sid} model {dead_mid} DESTROYED",
+                    "turn": game_state.get("turn", 0),
+                    "phase": "shoot",
+                    "targetId": target_sid,
+                    "unitId": target_sid,
+                    "player": int(tgt_uc.get("player", 0)),
+                    "timestamp": "server_time",
+                })
 
     # Meta cibles + escouades wipe (pour reward shaping proportionnel)
     summary["targets_meta"] = targets_meta
