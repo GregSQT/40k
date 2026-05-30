@@ -2010,8 +2010,16 @@ def execute_action():
                 "error": "move_model_destinations requires model_id",
             }), 400
         from engine.phase_handlers import movement_handlers as _mh_model
+        _raw_plan = action.get("provisional_plan")
+        _provisional_plan: Optional[Dict[str, Tuple[int, int]]] = None
+        if isinstance(_raw_plan, dict):
+            _provisional_plan = {
+                str(k): (int(v[0]), int(v[1]))
+                for k, v in _raw_plan.items()
+                if isinstance(v, (list, tuple)) and len(v) == 2
+            }
         _model_pool = _mh_model.movement_build_model_destinations_pool(
-            engine.game_state, str(model_id)
+            engine.game_state, str(model_id), provisional_plan=_provisional_plan
         )
         return api_json_response({
             "success": True,

@@ -443,6 +443,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     coherencyOk: boolean;
     canValidate: boolean;
   } | null>(null);
+  /** Ref miroir de squadMovePlan pour accès synchrone dans les callbacks. */
+  const squadMovePlanRef = useRef<typeof squadMovePlan>(null);
+  squadMovePlanRef.current = squadMovePlan;
   /** Pool BFS (hexes atteignables) de la figurine en cours de repositionnement. */
   const squadMoveModelPoolRef = useRef<Set<string>>(new Set());
   /** Incrémenté à chaque nouvelle session squad move. Invalide les callbacks onSelectModelForMove obsolètes. */
@@ -3285,9 +3288,19 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleSelectModelForMove = useCallback(
     async (modelId: string) => {
       const sessionAtCall = squadMoveSessionRef.current;
+      const currentPlan = squadMovePlanRef.current;
+      const provisionalPlan: Record<string, [number, number]> = {};
+      if (currentPlan) {
+        for (const [mid, pos] of Object.entries(currentPlan.models)) {
+          if (mid !== modelId) {
+            provisionalPlan[mid] = [pos.col, pos.row];
+          }
+        }
+      }
       const result = await postEngineQuery({
         action: "move_model_destinations",
         model_id: modelId,
+        provisional_plan: provisionalPlan,
       });
       if (squadMoveSessionRef.current !== sessionAtCall) return;
       const dests = (result?.destinations ?? []) as Array<[number, number]>;

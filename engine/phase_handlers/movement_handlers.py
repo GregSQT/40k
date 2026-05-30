@@ -1793,9 +1793,15 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
 
 def movement_build_model_destinations_pool(
-    game_state: Dict[str, Any], model_id: str
+    game_state: Dict[str, Any],
+    model_id: str,
+    provisional_plan: Optional[Dict[str, Tuple[int, int]]] = None,
 ) -> Dict[str, Any]:
     """BFS des hexes atteignables pour UNE figurine (move par-figurine, squad.md).
+
+    provisional_plan : {model_id: (col, row)} positions provisoires des figs
+    déjà déplacées dans le plan. Si fourni, remplace models_cache pour les
+    sibling figures (évite que les hexes originaux restent bloqués).
 
     Move normal : budget = MOVE de l'escouade (subhexes). Origine = position
     courante de la figurine dans models_cache (= position de debut de phase, car
@@ -1850,18 +1856,24 @@ def movement_build_model_destinations_pool(
                 other_occupied.add((int(cell[0]), int(cell[1])))
 
     # Cellules occupees par les AUTRES figs du meme squad (collision intra-squad interdite).
+    # provisional_plan override les positions sibling déjà déplacées dans le plan UI.
     same_squad_occupied: Set[Tuple[int, int]] = set()
     _models_cache = require_key(game_state, "models_cache")
     _squad_models = game_state.get("squad_models", {})
     for mid in _squad_models.get(squad_id, []):
         if str(mid) == str(model_id):
             continue
-        sibling = _models_cache.get(str(mid))
-        if sibling is not None:
+        if provisional_plan and str(mid) in provisional_plan:
+            prov_col, prov_row = provisional_plan[str(mid)]
+            sibling_fp = _compute_unit_occupied_hexes(prov_col, prov_row, unit, game_state)
+        else:
+            sibling = _models_cache.get(str(mid))
+            if sibling is None:
+                continue
             sibling_fp = _compute_unit_occupied_hexes(
                 int(sibling["col"]), int(sibling["row"]), unit, game_state
             )
-            same_squad_occupied.update(sibling_fp)
+        same_squad_occupied.update(sibling_fp)
 
     has_fly = _unit_has_keyword(unit, "fly")
 
