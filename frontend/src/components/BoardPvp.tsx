@@ -1583,6 +1583,9 @@ export default function Board({
     return sorted;
   }, [blinkingUnits]);
 
+  const stableBlinkingUnitsRef = useRef<number[] | undefined>(stableBlinkingUnits);
+  stableBlinkingUnitsRef.current = stableBlinkingUnits;
+
   const unitsBoardLayoutKey = useMemo(() => {
     const uc = gameState?.units_cache as Record<string, unknown> | undefined;
     return [...units]
@@ -3187,9 +3190,15 @@ export default function Board({
       if (enemy != null) {
         e.stopImmediatePropagation();
         if (plan.activeModelId) {
-          void cbs.onAssignShootTarget?.(enemy);
+          const validTargets = stableBlinkingUnitsRef.current;
+          const isValid = validTargets != null && validTargets.length > 0
+            ? validTargets.includes(Number(enemy))
+            : false;
+          if (isValid) {
+            void cbs.onAssignShootTarget?.(enemy);
+          }
         }
-        // sinon : aucune fig active → sélectionne d'abord une fig (clic ignoré).
+        // sinon : aucune fig active, ou cible hors valid_targets → clic ignoré.
       }
     };
 
@@ -5535,6 +5544,25 @@ export default function Board({
       onConfirmMove();
     };
 
+    // Tir par-figurine : palette couleur par cible (partagée tireurs + cibles).
+    const SQUAD_SHOOT_PALETTE = [
+      0x22c55e, // vert
+      0xeab308, // jaune
+      0x3b82f6, // bleu
+      0xf97316, // orange
+      0xa855f7, // violet
+      0x06b6d4, // cyan
+    ];
+    const squadShootTargetColorMap = new Map<string, number>();
+    if (mode === "squadModelShoot" && squadShootPlan) {
+      for (const tgtId of Object.values(squadShootPlan.targets)) {
+        const key = String(tgtId);
+        if (!squadShootTargetColorMap.has(key)) {
+          squadShootTargetColorMap.set(key, SQUAD_SHOOT_PALETTE[squadShootTargetColorMap.size % SQUAD_SHOOT_PALETTE.length]!);
+        }
+      }
+    }
+
     // ✅ UNIFIED UNIT RENDERING USING COMPONENT — skip if fingerprint unchanged
     if (unitsChanged) {
       unitsFingerprintRef.current = unitsFingerprint;
@@ -5866,30 +5894,31 @@ export default function Board({
           unitsLayer.addChild(veil);
         }
 
-        // Tir par-figurine : voile vert sur les figs ayant désigné une cible.
+        // Tir par-figurine : voile + ligne colorés par cible.
         if (
           mode === "squadModelShoot" &&
           squadShootPlan &&
           String(squadShootPlan.unitId) === unitIdStr
         ) {
-          const greenVeil = new PIXI.Graphics();
+          const targetColorMap = squadShootTargetColorMap;
+
+          const veil = new PIXI.Graphics();
           const gvBase = resolveBaseSizeForUnitDisplay(unit);
           const gvRadius = gvBase > 1
             ? (gvBase * 1.5 * HEX_RADIUS) / 2
             : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
           modelCenters.forEach(([cx, cy], i) => {
-            if (squadShootPlan.targets[modelIds[i]]) {
-              greenVeil.beginFill(0x22c55e, 0.5);
-              greenVeil.drawCircle(cx, cy, gvRadius);
-              greenVeil.endFill();
-            }
+            const tgtId = squadShootPlan.targets[modelIds[i]];
+            if (!tgtId) return;
+            const color = targetColorMap.get(String(tgtId)) ?? SQUAD_SHOOT_PALETTE[0]!;
+            veil.beginFill(color, 0.5);
+            veil.drawCircle(cx, cy, gvRadius);
+            veil.endFill();
           });
-          greenVeil.zIndex = 3000;
-          unitsLayer.addChild(greenVeil);
+          veil.zIndex = 3000;
+          unitsLayer.addChild(veil);
 
           // Ligne de visée : fig tireuse → fig cible la plus proche (1 par assignation).
-          // Même container/coords que le voile → alignement garanti. L'assignation
-          // garantit déjà portée+LoS (backend), donc la ligne respecte la LoS.
           const shootLines = new PIXI.Graphics();
           const shootUc = gameState?.units_cache as
             | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
@@ -5917,12 +5946,30 @@ export default function Board({
               ((nearest[0] % 2) * HEX_VERT_SPACING) / 2 +
               HEX_HEIGHT / 2 +
               MARGIN;
-            shootLines.lineStyle(3, 0xff3030, 0.9);
+            const color = targetColorMap.get(String(tgtSid)) ?? SQUAD_SHOOT_PALETTE[0]!;
+            shootLines.lineStyle(3, color, 0.9);
             shootLines.moveTo(cx, cy);
             shootLines.lineTo(tx, ty);
           });
           shootLines.zIndex = 3001;
           unitsLayer.addChild(shootLines);
+        }
+
+        // Voile coloré sur les unités cibles (couleur = même que les tireurs assignés).
+        const targetColor = squadShootTargetColorMap.get(unitIdStr);
+        if (targetColor !== undefined && modelCenters.length > 0) {
+          const tgtVeil = new PIXI.Graphics();
+          const tvBase = resolveBaseSizeForUnitDisplay(unit);
+          const tvRadius = tvBase > 1
+            ? (tvBase * 1.5 * HEX_RADIUS) / 2
+            : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
+          modelCenters.forEach(([cx, cy]) => {
+            tgtVeil.beginFill(targetColor, 0.4);
+            tgtVeil.drawCircle(cx, cy, tvRadius);
+            tgtVeil.endFill();
+          });
+          tgtVeil.zIndex = 3000;
+          unitsLayer.addChild(tgtVeil);
         }
       }
 

@@ -588,14 +588,13 @@ class GameStateManager:
                             m_rng = copy.deepcopy(require_key(m_data, "RNG_WEAPONS"))
                             m_cc = copy.deepcopy(require_key(m_data, "CC_WEAPONS"))
                             _ish_local = self._get_inches_to_subhex()
-                            _scale_local = _ish_local / 5
-                            if _scale_local != 1.0:
+                            if _ish_local != 1:
                                 for w in m_rng:
                                     if "RNG" in w:
-                                        w["RNG"] = int(w["RNG"]) * _scale_local
+                                        w["RNG"] = int(w["RNG"]) * _ish_local
                                 for w in m_cc:
                                     if "RNG" in w:
-                                        w["RNG"] = int(w["RNG"]) * _scale_local
+                                        w["RNG"] = int(w["RNG"]) * _ish_local
                             m_spec.update({
                                 "unit_type": model_unit_type,
                                 "HP_MAX": int(require_key(m_data, "HP_MAX")),
