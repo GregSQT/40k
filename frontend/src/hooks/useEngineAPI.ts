@@ -2789,6 +2789,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (mode === "squadModelMove" && numericUnitId !== null) {
         return;
       }
+      // En mode tir par-figurine, bloquer les clics sur d'autres unités pour éviter
+      // un friendly_unit_switch involontaire vers une autre escouade.
+      if (mode === "squadModelShoot" && numericUnitId !== null) {
+        return;
+      }
 
       // Shooting phase click handling
       if (gameState && gameState.phase === "shoot") {
