@@ -3588,6 +3588,59 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [executeAction]
   );
 
+  /** Double-clic sur une unité ennemie : assigne toutes les figs de l'escouade qui ont une LoS valide.
+   *  Le backend valide lui-même la LoS dans squad_shoot_assign — pas besoin de squad_shoot_select_model. */
+  const handleAutoAssignAllModels = useCallback(
+    async (targetUnitId: number | string) => {
+      const plan = squadShootPlanRef.current;
+      console.log(`[SQUAD-SHOOT][auto] START target=${targetUnitId} plan=${plan ? `unit=${plan.unitId} models=${plan.models.length} targets=${JSON.stringify(plan.targets)}` : "null"}`);
+      if (!plan) return;
+      const targetId = String(targetUnitId);
+      let assignedCount = 0;
+      // Snapshot des targets au début (le state React peut ne pas encore refléter les assigns en vol).
+      const alreadyAssigned = { ...plan.targets };
+
+      for (const modelId of plan.models) {
+        console.log(`[SQUAD-SHOOT][auto] loop model=${modelId} alreadyAssigned=${!!alreadyAssigned[modelId]}`);
+        if (alreadyAssigned[modelId]) continue; // déjà assignée
+        try {
+          await executeAction({
+            action: "squad_shoot_assign",
+            unitId: String(plan.unitId),
+            modelId,
+            targetId,
+          });
+        } catch {
+          // Backend rejette (hors portée ou pas de LoS) → skip silencieux.
+          console.log(`[SQUAD-SHOOT][auto] model=${modelId} rejeté par backend, skip`);
+          continue;
+        }
+        alreadyAssigned[modelId] = targetId;
+        assignedCount++;
+        console.log(`[SQUAD-SHOOT][auto] assign model=${modelId} → target=${targetId}`);
+      }
+
+      if (assignedCount > 0) {
+        setBlinkingUnits((prev) => {
+          if (prev.blinkTimer) clearInterval(prev.blinkTimer);
+          return { unitIds: [], blinkTimer: null, attackerId: null };
+        });
+        setSquadShootPlan((prev) =>
+          prev
+            ? {
+                ...prev,
+                targets: { ...alreadyAssigned },
+                activeModelId: null,
+                canValidate: true,
+              }
+            : prev
+        );
+      }
+      console.log(`[SQUAD-SHOOT][auto] terminé : ${assignedCount} fig(s) assignée(s) → ${targetId}`);
+    },
+    [executeAction]
+  );
+
   /** Clic droit sur une fig assignée : retire sa cible (squad_shoot_unassign). */
   const handleUnassignShootModel = useCallback(
     async (modelId: string) => {
@@ -4870,6 +4923,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onStartSquadModelShoot: handleStartSquadModelShoot,
     onSelectModelForShoot: handleSelectModelForShoot,
     onAssignShootTarget: handleAssignShootTarget,
+    onAutoAssignAllModels: handleAutoAssignAllModels,
     onUnassignShootModel: handleUnassignShootModel,
     onCommitSquadShoot: handleCommitSquadShoot,
     onCancelSquadShoot: handleCancelSquadShoot,

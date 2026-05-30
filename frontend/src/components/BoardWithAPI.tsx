@@ -3304,6 +3304,7 @@ export const BoardWithAPI: React.FC = () => {
             onStartSquadModelShoot={isGameOver ? async () => {} : apiProps.onStartSquadModelShoot}
             onSelectModelForShoot={isGameOver ? async () => {} : apiProps.onSelectModelForShoot}
             onAssignShootTarget={isGameOver ? async () => {} : apiProps.onAssignShootTarget}
+            onAutoAssignAllModels={isGameOver ? async () => {} : apiProps.onAutoAssignAllModels}
             onUnassignShootModel={isGameOver ? async () => {} : apiProps.onUnassignShootModel}
             onCommitSquadShoot={isGameOver ? async () => {} : apiProps.onCommitSquadShoot}
             onCancelSquadShoot={isGameOver ? async () => {} : apiProps.onCancelSquadShoot}

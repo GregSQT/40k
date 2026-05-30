@@ -430,6 +430,7 @@ type BoardProps = {
   onStartSquadModelShoot?: (unitId: number | string, initialModelId?: string) => void | Promise<void>;
   onSelectModelForShoot?: (modelId: string) => void | Promise<void>;
   onAssignShootTarget?: (targetUnitId: number | string) => void | Promise<void>;
+  onAutoAssignAllModels?: (targetUnitId: number | string) => void | Promise<void>;
   onUnassignShootModel?: (modelId: string) => void | Promise<void>;
   onCommitSquadShoot?: () => void | Promise<void>;
   onCancelSquadShoot?: () => void | Promise<void>;
@@ -690,6 +691,7 @@ export default function Board({
   onStartSquadModelShoot,
   onSelectModelForShoot,
   onAssignShootTarget,
+  onAutoAssignAllModels,
   onUnassignShootModel,
   onCommitSquadShoot,
   onCancelSquadShoot,
@@ -936,6 +938,7 @@ export default function Board({
     onStartSquadModelShoot,
     onSelectModelForShoot,
     onAssignShootTarget,
+    onAutoAssignAllModels,
     onUnassignShootModel,
     onCommitSquadShoot,
     onCancelSquadShoot,
@@ -944,6 +947,7 @@ export default function Board({
     onStartSquadModelShoot,
     onSelectModelForShoot,
     onAssignShootTarget,
+    onAutoAssignAllModels,
     onUnassignShootModel,
     onCommitSquadShoot,
     onCancelSquadShoot,
@@ -951,6 +955,8 @@ export default function Board({
   /** Plan de tir toujours a jour pour les handlers d'event stables. */
   const squadShootPlanRef = useRef(squadShootPlan);
   squadShootPlanRef.current = squadShootPlan;
+  // Persiste entre les re-renders (contrairement à une variable locale dans useEffect).
+  const lastEnemyClickRef = useRef<{ targetId: number | string; time: number } | null>(null);
 
   // Update refs when props change but don't trigger re-render - MOVE THIS BEFORE useEffect
   stableCallbacks.current = {
@@ -3189,6 +3195,18 @@ export default function Board({
       const enemy = findEnemyUnit(col, row);
       if (enemy != null) {
         e.stopImmediatePropagation();
+        // Double-clic : auto-assign toutes les figs avec LoS valide sur cette cible.
+        const now = e.timeStamp;
+        const prev = lastEnemyClickRef.current;
+        console.log(`[SQUAD-SHOOT][dblclick-detect] enemy=${enemy} prev=${prev ? `${prev.targetId}@${prev.time}` : "null"} now=${now} delta=${prev ? now - prev.time : "n/a"} onAutoAssign=${!!cbs.onAutoAssignAllModels}`);
+        if (prev && String(prev.targetId) === String(enemy) && now - prev.time < 400) {
+          lastEnemyClickRef.current = null;
+          console.log(`[SQUAD-SHOOT][dblclick-detect] → DOUBLE-CLIC détecté, appel onAutoAssignAllModels`);
+          void cbs.onAutoAssignAllModels?.(enemy);
+          return;
+        }
+        lastEnemyClickRef.current = { targetId: enemy, time: now };
+        // Clic simple : assigne la fig active si valide.
         if (plan.activeModelId) {
           const validTargets = stableBlinkingUnitsRef.current;
           const isValid = validTargets != null && validTargets.length > 0
