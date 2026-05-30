@@ -1966,11 +1966,6 @@ def movement_preview_move_plan(
     """
     budget = get_squad_move_budget(str(squad_id), game_state, "normal")
     c_individual = {"budget_per_model": budget, "require_coherency": False}
-    cell_count: Dict[Tuple[int, int], int] = {}
-    for _, nc, nr in plan:
-        key = (int(nc), int(nr))
-        cell_count[key] = cell_count.get(key, 0) + 1
-
     # Cohesion par COMPOSANTES CONNEXES (squad.md) : on relie les figs distantes de <=
     # coherency_dist (2"), puis on cherche les groupes connectes. Le groupe STRICTEMENT
     # majoritaire (taille*2 > effectif total) reste vert ; tout groupe minoritaire ou a
@@ -2030,13 +2025,26 @@ def movement_preview_move_plan(
     # cohesion_red[i] = la composante de la fig i n'est PAS strictement majoritaire.
     cohesion_red = [comp_size[comp_id[i]] * 2 <= n for i in range(n)] if n > 1 else [False] * n
 
+    wall_hexes_set = game_state.get("wall_hexes", set())
+    other_occ_set: Set[Tuple[int, int]] = set()
+    for sid, entry in units_cache.items():
+        if str(sid) == str(squad_id):
+            continue
+        occ = entry.get("occupied_hexes")
+        if occ:
+            for cell in occ:
+                other_occ_set.add((int(cell[0]), int(cell[1])))
+
     per_model: Dict[str, bool] = {}
     for idx, (mid, nc, nr) in enumerate(plan):
         base_valid = validate_move_plan(
             [(str(mid), int(nc), int(nr))], game_state, c_individual
         )
-        no_overlap = cell_count[(int(nc), int(nr))] == 1
-        per_model[str(mid)] = bool(base_valid and no_overlap and not cohesion_red[idx])
+        fp = footprints[idx]
+        fp_wall = bool(wall_hexes_set and fp & wall_hexes_set)
+        fp_other = bool(other_occ_set and fp & other_occ_set)
+        fp_intra = any(bool(footprints[j] & fp) for j in range(n) if j != idx)
+        per_model[str(mid)] = bool(base_valid and not fp_wall and not fp_other and not fp_intra and not cohesion_red[idx])
 
     coherency_ok = not any(cohesion_red)
     all_valid = len(per_model) > 0 and all(per_model.values())
