@@ -23,7 +23,7 @@ import {
   isFightAttackSelectionUiOpen,
 } from "../utils/activationClickTarget";
 import { logFightClick } from "../utils/fightClickDebug";
-import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
+import { cubeDistance, cubeToOffset, offsetToCube } from "../utils/gameHelpers";
 import { addHexKeysToSet } from "../utils/movePoolRefsSync";
 import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
 import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
@@ -445,6 +445,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   } | null>(null);
   /** Pool BFS (hexes atteignables) de la figurine en cours de repositionnement. */
   const squadMoveModelPoolRef = useRef<Set<string>>(new Set());
+  /** Incrémenté à chaque nouvelle session squad move. Invalide les callbacks onSelectModelForMove obsolètes. */
+  const squadMoveSessionRef = useRef(0);
   /** Mask loops per-fig (polygone lissé) reçus de move_model_destinations. */
   const squadMoveModelMaskLoopsRef = useRef<number[][] | null>(null);
   const [attackPreview, setAttackPreview] = useState<{
@@ -3090,7 +3092,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   );
 
   const handleStartMovePreview = useCallback(
-    (unitId: number | string, col: number | string, row: number | string) => {
+    async (unitId: number | string, col: number | string, row: number | string) => {
       console.log("[DEBUG handleStartMovePreview]", {
         unitId,
         col,
@@ -3098,6 +3100,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         phase: gameState?.phase,
         pendingPreviewAction,
       });
+      // Double-clic depuis squadModelMove : nettoyer le plan provisoire avant d'entrer en movePreview.
+      squadMoveSessionRef.current += 1;
+      squadMoveModelPoolRef.current = new Set();
+      setSquadMovePlan(null);
       const parsedUnitId = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
       const orientation = readEngineOrientationStepFromGameState(unitId);
       if (gameState?.phase === "shoot") {
@@ -3114,72 +3120,28 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setMode("movePreview");
         return;
       }
+      // Phase move : si l'unité n'est pas encore activée (double-clic direct sans single-clic préalable),
+      // appeler activate_unit pour que le backend calcule valid_move_destinations_pool.
+      if (
+        gameState?.phase === "move" &&
+        gameState?.active_movement_unit !== String(parsedUnitId)
+      ) {
+        console.log("[DEBUG handleStartMovePreview] activate_unit required", { parsedUnitId });
+        setSelectedUnitId(parsedUnitId);
+        await executeAction({ action: "activate_unit", unitId: String(parsedUnitId) });
+      }
       console.log("[DEBUG handleStartMovePreview] setting mode=movePreview");
+      const latestOrientation = readEngineOrientationStepFromGameState(unitId);
       setMovePreview({
         unitId: parsedUnitId,
         destCol: typeof col === "string" ? parseInt(col, 10) : col,
         destRow: typeof row === "string" ? parseInt(row, 10) : row,
-        orientation,
+        orientation: latestOrientation,
       });
       setPendingPreviewAction("move");
       setMode("movePreview");
     },
-    [gameState?.phase, pendingPreviewAction, readEngineOrientationStepFromGameState]
-  );
-
-  const handleDirectMove = useCallback(
-    async (
-      unitId: number | string,
-      col: number | string,
-      row: number | string,
-      orientation?: number
-    ) => {
-      console.log("[DEBUG handleDirectMove] called", { unitId, col, row, orientation });
-      const action: {
-        action: "move";
-        unitId: string;
-        destCol: number;
-        destRow: number;
-        orientation?: number;
-      } = {
-        action: "move",
-        unitId: typeof unitId === "string" ? unitId : unitId.toString(),
-        destCol: typeof col === "string" ? parseInt(col, 10) : col,
-        destRow: typeof row === "string" ? parseInt(row, 10) : row,
-      };
-      if (orientation !== undefined) {
-        action.orientation = validateOrientationStep(
-          orientation,
-          `Move action unit ${action.unitId}`
-        );
-      }
-
-      try {
-        console.log("[DEBUG handleDirectMove] executeAction", action);
-        const result = await executeAction(action);
-        const u8 = result?.game_state?.units?.find?.(
-          (u: { id?: number | string; col?: number; row?: number }) =>
-            String(u.id) === String(action.unitId)
-        );
-        const u8Cache = (result?.game_state?.units_cache as Record<string, unknown>)?.[
-          String(action.unitId)
-        ] as { col?: number; row?: number; occupied_hexes_by_model?: Record<string, [number, number]> } | undefined;
-        const occVals = u8Cache?.occupied_hexes_by_model
-          ? JSON.stringify(Object.values(u8Cache.occupied_hexes_by_model))
-          : "(none)";
-        console.log(
-          `[DEBUG handleDirectMove] returned success=${result?.success} | units[${action.unitId}]=(${u8?.col},${u8?.row}) | cache=(${u8Cache?.col},${u8Cache?.row}) | occupied=${occVals}`
-        );
-        setMovePreview(null);
-        setPendingPreviewAction(null);
-        setMode("select");
-      } catch (error) {
-        console.error("❌ DIRECT MOVE FAILED:", error);
-        console.error("Move failed:", error);
-        setError(`Move failed: ${formatApiConnectionError(error)}`);
-      }
-    },
-    [executeAction, validateOrientationStep]
+    [gameState?.phase, gameState?.active_movement_unit, pendingPreviewAction, readEngineOrientationStepFromGameState, executeAction]
   );
 
   const handleBumpMovePreviewOrientation = useCallback(
@@ -3295,6 +3257,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         console.warn(`[SQUAD-MOVE] startSquadModelMove ABORT unit=${uid} (aucune fig dans occupied_hexes_by_model)`);
         return;
       }
+      squadMoveSessionRef.current += 1;
       squadMoveModelPoolRef.current = new Set();
       setSquadMovePlan({
         unitId: uid,
@@ -3315,10 +3278,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Selectionne la figurine a repositionner : recupere sa BFS (move_model_destinations). */
   const handleSelectModelForMove = useCallback(
     async (modelId: string) => {
+      const sessionAtCall = squadMoveSessionRef.current;
       const result = await postEngineQuery({
         action: "move_model_destinations",
         model_id: modelId,
       });
+      if (squadMoveSessionRef.current !== sessionAtCall) return;
       const dests = (result?.destinations ?? []) as Array<[number, number]>;
       const set = new Set<string>();
       for (const [c, r] of dests) {
@@ -3366,6 +3331,62 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [refreshSquadMovePlanValidity]
   );
 
+  const handleDirectMove = useCallback(
+    async (
+      unitId: number | string,
+      col: number | string,
+      row: number | string,
+      orientation?: number
+    ) => {
+      console.log("[DEBUG handleDirectMove] called", { unitId, col, row, orientation });
+      const action: {
+        action: "move";
+        unitId: string;
+        destCol: number;
+        destRow: number;
+        orientation?: number;
+      } = {
+        action: "move",
+        unitId: typeof unitId === "string" ? unitId : unitId.toString(),
+        destCol: typeof col === "string" ? parseInt(col, 10) : col,
+        destRow: typeof row === "string" ? parseInt(row, 10) : row,
+      };
+      if (orientation !== undefined) {
+        action.orientation = validateOrientationStep(
+          orientation,
+          `Move action unit ${action.unitId}`
+        );
+      }
+
+      try {
+        console.log("[DEBUG handleDirectMove] executeAction", action);
+        const result = await executeAction(action);
+        const u8 = result?.game_state?.units?.find?.(
+          (u: { id?: number | string; col?: number; row?: number }) =>
+            String(u.id) === String(action.unitId)
+        );
+        const u8Cache = (result?.game_state?.units_cache as Record<string, unknown>)?.[
+          String(action.unitId)
+        ] as { col?: number; row?: number; occupied_hexes_by_model?: Record<string, [number, number]> } | undefined;
+        const occVals = u8Cache?.occupied_hexes_by_model
+          ? JSON.stringify(Object.values(u8Cache.occupied_hexes_by_model))
+          : "(none)";
+        console.log(
+          `[DEBUG handleDirectMove] returned success=${result?.success} | units[${action.unitId}]=(${u8?.col},${u8?.row}) | cache=(${u8Cache?.col},${u8Cache?.row}) | occupied=${occVals}`
+        );
+        setMovePreview(null);
+        setPendingPreviewAction(null);
+        setSelectedUnitId(null);
+        setMode("select");
+      } catch (error) {
+        console.error("❌ DIRECT MOVE FAILED:", error);
+        console.error("Move failed:", error);
+        setError(`Move failed: ${formatApiConnectionError(error)}`);
+      }
+    },
+    [executeAction, validateOrientationStep]
+  );
+
   /** Bouton Validate : commit atomique du plan complet (commit_move_plan). */
   const handleCommitSquadMovePlan = useCallback(async () => {
     if (!squadMovePlan) {
@@ -3398,6 +3419,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Annule le plan provisoire (aucune ecriture backend). */
   const handleCancelSquadMove = useCallback(() => {
     console.log("[SQUAD-MOVE] cancel (plan abandonne)");
+    squadMoveSessionRef.current += 1;
     squadMoveModelPoolRef.current = new Set();
     setSquadMovePlan(null);
     setMode("select");
@@ -3557,6 +3579,51 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           });
           return;
         }
+        if (!willFlee) {
+          // Mouvement normal (non-flee) : calcul des positions rigides de chaque fig par delta cube,
+          // puis entrée en squad move pour affiner. Seul Validate (commit_move_plan) finalise côté backend.
+          const uid = movePreview.unitId;
+          const unitEntry = (
+            latestGameStateRef.current?.units_cache as
+              | Record<string, { col?: number; row?: number; occupied_hexes_by_model?: Record<string, [number, number]> }>
+              | undefined
+          )?.[String(uid)];
+          const anchorCube = offsetToCube(unitEntry?.col ?? movePreview.destCol, unitEntry?.row ?? movePreview.destRow);
+          const destCube = offsetToCube(movePreview.destCol, movePreview.destRow);
+          const dx = destCube.x - anchorCube.x;
+          const dy = destCube.y - anchorCube.y;
+          const dz = destCube.z - anchorCube.z;
+          const byModel = unitEntry?.occupied_hexes_by_model;
+          const models: Record<string, { col: number; row: number }> = {};
+          if (byModel) {
+            for (const [mid, pos] of Object.entries(byModel)) {
+              const fc = offsetToCube(pos[0], pos[1]);
+              models[mid] = cubeToOffset({ x: fc.x + dx, y: fc.y + dy, z: fc.z + dz });
+            }
+          }
+          setMovePreview(null);
+          setPendingPreviewAction(null);
+          if (Object.keys(models).length > 0) {
+            squadMoveSessionRef.current += 1;
+            squadMoveModelPoolRef.current = new Set();
+            setSquadMovePlan({
+              unitId: uid,
+              models,
+              originModels: { ...models },
+              activeModelId: null,
+              perModelValid: {},
+              coherencyOk: true,
+              canValidate: false,
+            });
+            setSelectedUnitId(uid);
+            setMode("squadModelMove");
+            void refreshSquadMovePlanValidity(uid, models);
+          } else {
+            setSelectedUnitId(null);
+            setMode("select");
+          }
+          return;
+        }
       }
 
       await handleDirectMove(
@@ -3576,6 +3643,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     handleDirectMove,
     isFleeMovePreview,
     shouldShowRetreatAlert,
+    refreshSquadMovePlanValidity,
   ]);
 
   const handleCancelMove = useCallback(async () => {

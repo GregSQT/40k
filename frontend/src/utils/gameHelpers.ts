@@ -18,6 +18,12 @@ export function offsetToCube(col: number, row: number): { x: number; y: number; 
   return { x, y, z };
 }
 
+export function cubeToOffset(cube: { x: number; y: number; z: number }): { col: number; row: number } {
+  const col = cube.x;
+  const row = cube.z + ((cube.x - (cube.x & 1)) >> 1);
+  return { col, row };
+}
+
 export function cubeDistance(
   a: { x: number; y: number; z: number },
   b: { x: number; y: number; z: number }

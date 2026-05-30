@@ -1998,7 +1998,7 @@ export default function Board({
         }
         hoverMoveOrientationStepRef.current = null;
         const container = new PIXI.Container();
-        container.zIndex = 900;
+        container.zIndex = 2500;
         container.eventMode = "none";
         container.interactiveChildren = false;
         app.stage.addChild(container);
@@ -2851,8 +2851,9 @@ export default function Board({
         }
       }
       if (foundUnitId === null || foundModelId === null) return;
-      // Empeche la selection rigide par defaut (PIXI boardUnitClick → onSelectUnit).
-      e.preventDefault();
+      // stopImmediatePropagation en capture-phase sur document suffit à bloquer PIXI (le canvas ne
+      // reçoit jamais l'event). On NE PAS appeler preventDefault() : cela supprimerait la synthèse
+      // des events click/dblclick par le navigateur, cassant le double-clic → movePreview.
       e.stopImmediatePropagation();
       console.log("[SQUAD-MOVE] ENTRY single-click → unit", foundUnitId, "model", foundModelId, "mode=", mode);
       const uid = foundUnitId;
@@ -2863,6 +2864,10 @@ export default function Board({
         if (mode !== "squadModelMove") {
           await squadMoveCallbacksRef.current.onStartSquadModelMove?.(uid);
         }
+        // Si le plan a été annulé pendant l'await (ex: double-clic → handleStartMovePreview → setSquadMovePlan(null)),
+        // ne pas appeler onSelectModelForMove (ça activerait une fig dans un plan obsolète).
+        const planAfterStart = squadMovePlanRef.current;
+        if (!planAfterStart || Number(planAfterStart.unitId) !== Number(uid)) return;
         await squadMoveCallbacksRef.current.onSelectModelForMove?.(mid);
       })();
     };
@@ -3002,7 +3007,7 @@ export default function Board({
         hoverSpriteRef.current = null;
       }
       const container = new PIXI.Container();
-      container.zIndex = 900;
+      container.zIndex = 2500;
       container.eventMode = "none";
       container.interactiveChildren = false;
       app.stage.addChild(container);
@@ -3091,7 +3096,7 @@ export default function Board({
 
     // Overlay PIXI dédié au voile rouge hover — mis à jour directement, pas via React state.
     const veilOverlay = new PIXI.Graphics();
-    veilOverlay.zIndex = 950; // au-dessus du ghost sprite (900), sous unitsLayer (2000)
+    veilOverlay.zIndex = 2600; // au-dessus du ghost sprite (2500) et des unités (2000)
     app.stage.addChild(veilOverlay);
     squadMoveVeilOverlayRef.current = veilOverlay;
 
