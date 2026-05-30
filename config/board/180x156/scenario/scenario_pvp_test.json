@@ -59,13 +59,13 @@
     { "id": 108, "unit_type": "VonRyanLeaper",        "player": 2, "col": 35,  "row": 50  },
     { "id": 109, "unit_type": "VonRyanLeaper",        "player": 2, "col": 30,  "row": 110 },
     {
-      "id": 110, "unit_type": "Barbgaunt", "player": 2, "col": 44, "row": 38,
+      "id": 110, "unit_type": "Barbgaunt", "player": 2, "col": 94, "row": 38,
       "models": [
-        { "col": 44, "row": 38 },
-        { "col": 50, "row": 38 },
-        { "col": 56, "row": 38 },
-        { "col": 62, "row": 38 },
-        { "col": 68, "row": 38 }
+        { "col": 94, "row": 38 },
+        { "col": 100, "row": 38 },
+        { "col": 106, "row": 38 },
+        { "col": 112, "row": 38 },
+        { "col": 118, "row": 38 }
       ]
     },
     {

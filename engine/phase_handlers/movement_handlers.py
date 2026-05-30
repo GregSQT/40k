@@ -30,7 +30,7 @@ from .shared_utils import (
     compute_candidate_footprint,
     is_footprint_placement_valid, get_engagement_zone, get_max_base_size_hex,
     get_squad_move_budget, validate_move_plan, _validate_plan_coherency, commit_move,
-    get_coherency_subhex,
+    get_coherency_subhex, _compute_unit_occupied_hexes,
 )
 from engine.hex_utils import (
     _hex_center,
@@ -1855,7 +1855,10 @@ def movement_build_model_destinations_pool(
             continue
         sibling = _models_cache.get(str(mid))
         if sibling is not None:
-            same_squad_occupied.add((int(sibling["col"]), int(sibling["row"])))
+            sibling_fp = _compute_unit_occupied_hexes(
+                int(sibling["col"]), int(sibling["row"]), unit, game_state
+            )
+            same_squad_occupied.update(sibling_fp)
 
     has_fly = _unit_has_keyword(unit, "fly")
 
@@ -1886,15 +1889,15 @@ def movement_build_model_destinations_pool(
             reachable.append(cell)
 
     # Footprint zone per-fig : destinations ∪ start, expandées selon BASE_SIZE.
-    base_size = unit.get("BASE_SIZE", 1)
+    base_size = unit["BASE_SIZE"]
+    base_shape = unit["BASE_SHAPE"]
+    orientation = unit.get("orientation", 0)
     is_single_hex = (base_size == 1 or not isinstance(base_size, int) or base_size <= 1)
     if is_single_hex:
         footprint_zone: Set[Tuple[int, int]] = set(reachable)
         footprint_zone.add(start_pos)
     else:
         from engine.hex_utils import precompute_footprint_offsets
-        base_shape = unit.get("BASE_SHAPE", "round")
-        orientation = unit.get("orientation", 0)
         off_even, off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
         # Fix fonctionnel : exclure les destinations dont l'empreinte complète
         # chevauche dest_blocked (murs, figs alliées, figs ennemies, engagement).
@@ -1969,8 +1972,8 @@ def movement_preview_move_plan(
     from engine.hex_utils import precompute_footprint_offsets as _pfo
     units_cache = game_state.get("units_cache", {})
     unit_entry = units_cache.get(str(squad_id), {})
-    base_shape = unit_entry.get("BASE_SHAPE", "round")
-    base_size = unit_entry.get("BASE_SIZE", 1)
+    base_shape = require_key(unit_entry, "BASE_SHAPE")
+    base_size = require_key(unit_entry, "BASE_SIZE")
     orientation = int(unit_entry.get("orientation", 0))
     is_single_hex = not isinstance(base_size, int) or base_size <= 1
     if is_single_hex:

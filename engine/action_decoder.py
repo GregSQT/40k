@@ -1053,7 +1053,7 @@ class ActionDecoder:
 
         base_size = unit["BASE_SIZE"]
         from engine.phase_handlers.shared_utils import get_engagement_zone as _get_ez
-        ez = _get_ez(game_state) if "config" in game_state else 1
+        ez = _get_ez(game_state)
 
         obstacles = wall_hexes | occupied
 

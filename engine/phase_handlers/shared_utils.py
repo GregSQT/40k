@@ -179,10 +179,7 @@ def _compute_unit_occupied_hexes(
     Multi-hex footprints are only computed on Board ×10 (engagement_zone > 1).
     On legacy boards (engagement_zone=1), all units occupy a single cell.
     """
-    if game_state is None or "config" not in game_state:
-        ez = 1
-    else:
-        ez = get_engagement_zone(game_state)
+    ez = get_engagement_zone(game_state)
     if ez <= 1:
         return {(col, row)}
     base_shape = unit["BASE_SHAPE"]
@@ -1134,7 +1131,7 @@ def _compute_enemy_adjacent_cache_for_player_from_units_cache(
     units_cache = require_key(game_state, "units_cache")
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
-    engagement_zone = get_engagement_zone(game_state)
+    ez_dilation = int(require_key(game_state, "inches_to_subhex"))
     player_int = int(player)
 
     all_enemy_occupied: Set[Tuple[int, int]] = set()
@@ -1164,7 +1161,7 @@ def _compute_enemy_adjacent_cache_for_player_from_units_cache(
             per_unit_occupied.append({cell})
 
     from engine.hex_utils import dilate_hex_set
-    zone_hexes = dilate_hex_set(all_enemy_occupied, engagement_zone, board_cols, board_rows)
+    zone_hexes = dilate_hex_set(all_enemy_occupied, ez_dilation, board_cols, board_rows)
 
     counts: Dict[Tuple[int, int], int] = {h: 1 for h in zone_hexes}
 
@@ -1236,7 +1233,7 @@ def _build_enemy_adjacent_structures_from_units_cache(
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
     units_cache = require_key(game_state, "units_cache")
-    engagement_zone = get_engagement_zone(game_state)
+    ez_dilation = int(require_key(game_state, "inches_to_subhex"))
     from engine.hex_utils import dilate_hex_set
 
     counters_by_player: Dict[int, Dict[Tuple[int, int], int]] = {
@@ -1262,7 +1259,7 @@ def _build_enemy_adjacent_structures_from_units_cache(
             unit_col = require_key(cache_entry, "col")
             unit_row = require_key(cache_entry, "row")
             occupied = {(unit_col, unit_row)}
-        unit_zone = dilate_hex_set(occupied, engagement_zone, board_cols, board_rows)
+        unit_zone = dilate_hex_set(occupied, ez_dilation, board_cols, board_rows)
         for perspective_player in players_present:
             if perspective_player == unit_player_int:
                 continue

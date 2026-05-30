@@ -758,7 +758,7 @@ def _fight_build_pile_in_valid_destinations(
 
     from engine.hex_utils import precompute_footprint_offsets
     from engine.phase_handlers.shared_utils import get_engagement_zone as _get_ez
-    _bfs_ez = _get_ez(game_state) if "config" in game_state else 1
+    _bfs_ez = _get_ez(game_state)
     _bfs_base_size = unit["BASE_SIZE"]
     _bfs_single_hex = (_bfs_ez <= 1 or _bfs_base_size == 1)
     _bfs_off_e: Tuple[Tuple[int, int], ...] = ()
