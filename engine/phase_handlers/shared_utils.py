@@ -453,6 +453,10 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
             "row": row,
             "HP_CUR": hp_cur,
             "player": player,
+            # VALUE (points) : source de verite reward, requis par resolve_squad_shoot
+            # / resolve_squad_fight. Present sur chaque unit (deja require_key dans
+            # _build_models_for_unit).
+            "VALUE": int(require_key(unit, "VALUE")),
             "BASE_SHAPE": base_shape,
             "BASE_SIZE": base_size,
             "orientation": orientation,
@@ -3233,14 +3237,15 @@ def _model_can_shoot_target(
 ) -> bool:
     """Eligibilite d une figurine attaquante a tirer sur une escouade cible.
 
-    PR3 3b MVP : check distance + portee. LoS via murs **non verifiee** (deferree —
-    a integrer avec build_unit_los_cache en PR3 3c+). La cible est eligible si
-    AU MOINS UNE figurine cible est a portee de l arme selectionnee.
+    Per-fig (squad.md §"LOS cache — strategie avec escouades") : la cible est
+    eligible si AU MOINS UNE figurine cible est a la fois a portee de l arme
+    selectionnee ET visible (LoS murs) depuis la position de la figurine
+    attaquante. La LoS est testee figurine -> figurine cible, pas ancre -> ancre.
 
     Conditions :
       - attaquant a SHOOT_LEFT > 0
       - arme RNG selectionnee existe avec RNG > 0
-      - au moins un modele cible dans le rayon RNG (en subhexes)
+      - au moins un modele cible dans le rayon RNG (subhexes) ET avec LoS depuis l attaquant
     """
     if int(attacker_model.get("SHOOT_LEFT", 0)) <= 0:
         return False
@@ -3255,10 +3260,15 @@ def _model_can_shoot_target(
     range_subhex = int(weapon["RNG"])
     if range_subhex <= 0:
         return False
+    # Import lazy : shooting_handlers importe shared_utils (eviter le cycle).
+    from engine.phase_handlers.shooting_handlers import _get_los_visibility_state
     ac = int(attacker_model["col"])
     ar = int(attacker_model["row"])
     for tc, tr in _squad_model_positions(game_state, target_squad_id):
-        if calculate_hex_distance(ac, ar, tc, tr) <= range_subhex:
+        if calculate_hex_distance(ac, ar, tc, tr) > range_subhex:
+            continue
+        _, can_see, _ = _get_los_visibility_state(game_state, ac, ar, tc, tr)
+        if can_see:
             return True
     return False
 
@@ -3350,6 +3360,135 @@ def squad_declare_shoot(
             "n_attacks_resolved": n_attacks_resolved,
         })
     return intents
+
+
+def squad_declare_shoot_model(
+    game_state: Dict[str, Any],
+    attacker_squad_id: str,
+    attacker_model_id: str,
+    target_squad_id: str,
+) -> Dict[str, Any]:
+    """Declaration MANUELLE d une seule figurine (flux PvP humain).
+
+    Contrairement a squad_declare_shoot (auto : cible prioritaire -> per-fig), le
+    joueur assigne explicitement la cible d UNE figurine. Re-appeler avec un
+    model_id deja declare REMPLACE sa cible (le joueur change d avis).
+
+    Validation stricte (pas de fallback) :
+      - activation tir demarree (pending initialise),
+      - figurine appartient a l escouade attaquante et vivante,
+      - escouade cible vivante,
+      - la figurine peut tirer la cible (portee + LoS, _model_can_shoot_target).
+
+    Reset wounds_allocated sur la cible a la PREMIERE declaration de l escouade
+    sur cette cible (scope per-cible par-activation, mirroir de squad_declare_shoot).
+
+    Returns l intent cree (pour feedback frontend).
+    """
+    init_pending_intents(game_state)
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    if attacker_squad_id not in game_state["pending_squad_shoot_intents"]:
+        raise RuntimeError(
+            f"squad_declare_shoot_model called before squad_shooting_unit_activation_start "
+            f"for squad {attacker_squad_id!r}"
+        )
+    if attacker_model_id not in squad_models.get(attacker_squad_id, []):
+        raise ValueError(
+            f"Model {attacker_model_id!r} not in squad {attacker_squad_id!r}"
+        )
+    m = models_cache.get(attacker_model_id)
+    if m is None:
+        raise ValueError(f"Model {attacker_model_id!r} not alive (absent de models_cache)")
+    if target_squad_id not in squad_models or not any(
+        mid in models_cache for mid in squad_models.get(target_squad_id, [])
+    ):
+        raise ValueError(f"Target squad {target_squad_id!r} not alive")
+    if not _model_can_shoot_target(game_state, m, target_squad_id):
+        raise ValueError(
+            f"Model {attacker_model_id!r} cannot shoot target {target_squad_id!r} "
+            f"(hors portee ou pas de LoS)"
+        )
+
+    intents: List[Dict[str, Any]] = game_state["pending_squad_shoot_intents"][attacker_squad_id]
+    # Remplace toute declaration existante de cette figurine.
+    intents[:] = [i for i in intents if i.get("model_id") != attacker_model_id]
+    # Premiere declaration de l escouade sur cette cible -> reset wounds cible.
+    if not any(str(i.get("target_unit_id")) == str(target_squad_id) for i in intents):
+        reset_wounds_allocated_for_squad(game_state, target_squad_id)
+
+    sel = m.get("selectedRngWeaponIndex")
+    weapon_idx = int(sel) if sel is not None else 0
+    weapons = m.get("RNG_WEAPONS", [])
+    n_attacks_resolved = 0
+    if 0 <= weapon_idx < len(weapons):
+        w = weapons[weapon_idx]
+        if isinstance(w, dict) and "NB" in w:
+            try:
+                n_attacks_resolved = int(
+                    resolve_dice_value(w["NB"], f"squad_declare_shoot_model_NB_{attacker_model_id}")
+                )
+            except Exception:
+                n_attacks_resolved = int(w["NB"]) if isinstance(w["NB"], (int, float)) else 1
+    target_size = sum(
+        1 for mid in squad_models.get(target_squad_id, []) if mid in models_cache
+    )
+    intent = {
+        "model_id": attacker_model_id,
+        "weapon_index": weapon_idx,
+        "target_unit_id": target_squad_id,
+        "target_squad_size_at_declaration": target_size,
+        "n_attacks_resolved": n_attacks_resolved,
+    }
+    intents.append(intent)
+    return intent
+
+
+def squad_model_valid_targets(
+    game_state: Dict[str, Any], attacker_squad_id: str, attacker_model_id: str
+) -> List[str]:
+    """Liste des escouades ennemies qu UNE figurine peut cibler (portee + LoS).
+
+    Reutilise _model_can_shoot_target (meme eligibilite que squad_declare_shoot_model).
+    Sert a alimenter le HP blink frontend pour la fig selectionnee (cibles valides
+    clignotent, les autres sont grisees) — meme mecanisme que l activation legacy.
+
+    Returns une liste de squad_id ennemis (str), vide si la fig ne peut rien viser.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    m = models_cache.get(attacker_model_id)
+    if m is None:
+        raise ValueError(f"Model {attacker_model_id!r} not alive (absent de models_cache)")
+    attacker_player = int(m["player"])
+    valid: List[str] = []
+    for sid, mids in squad_models.items():
+        if sid == attacker_squad_id:
+            continue
+        first = next((mid for mid in mids if mid in models_cache), None)
+        if first is None:
+            continue  # escouade morte
+        if int(models_cache[first]["player"]) == attacker_player:
+            continue  # allie
+        if _model_can_shoot_target(game_state, m, sid):
+            valid.append(sid)
+    return valid
+
+
+def squad_undeclare_shoot_model(
+    game_state: Dict[str, Any], attacker_squad_id: str, attacker_model_id: str
+) -> bool:
+    """Retire la declaration d une figurine (flux PvP humain : le joueur deselectionne).
+
+    Returns True si une declaration a ete retiree, False sinon.
+    """
+    init_pending_intents(game_state)
+    intents = game_state["pending_squad_shoot_intents"].get(attacker_squad_id)
+    if not intents:
+        return False
+    before = len(intents)
+    intents[:] = [i for i in intents if i.get("model_id") != attacker_model_id]
+    return len(intents) < before
 
 
 def squad_lock_shoot(game_state: Dict[str, Any], squad_id: str) -> List[Dict[str, Any]]:

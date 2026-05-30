@@ -4106,8 +4106,87 @@ class W40KEngine(gym.Env):
                 f"duration_s={_t_tail - _t_post_cascade:.6f} early_return=none"
             )
         return success, result
-    
-    
+
+    def _process_squad_manual_shoot(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """Tir PvP humain par figurine (pipeline squad, shared_utils).
+
+        Actions frontend :
+          - squad_shoot_activate : demarre l activation tir de l escouade (SHOOT_LEFT/pending).
+          - squad_shoot_assign   : assigne la cible d UNE figurine (modelId -> targetId).
+          - squad_shoot_unassign : retire la cible d une figurine.
+          - squad_shoot_validate : lock + resolution simultanee + end_activation.
+        Le pipeline mono-fig legacy reste intact pour l IA/training.
+        """
+        from engine.phase_handlers.shared_utils import (
+            squad_shooting_unit_activation_start,
+            squad_declare_shoot_model,
+            squad_undeclare_shoot_model,
+            squad_model_valid_targets,
+            squad_lock_shoot,
+            resolve_squad_shoot,
+            clear_pending_shoot_intent,
+        )
+        from engine.phase_handlers.generic_handlers import end_activation
+
+        name = action.get("action")
+        squad_id = str(require_key(action, "unitId"))
+
+        if name == "squad_shoot_activate":
+            squad_shooting_unit_activation_start(self.game_state, squad_id)
+            self.game_state["active_shooting_unit"] = squad_id
+            return True, {"action": name, "unitId": squad_id, "activation_started": True}
+
+        if name == "squad_shoot_select_model":
+            # Read-only : cibles valides de la fig (alimente le HP blink frontend).
+            model_id = str(require_key(action, "modelId"))
+            valid_targets = squad_model_valid_targets(self.game_state, squad_id, model_id)
+            return True, {
+                "action": name, "unitId": squad_id, "modelId": model_id,
+                "valid_targets": valid_targets,
+            }
+
+        if name == "squad_shoot_assign":
+            model_id = str(require_key(action, "modelId"))
+            target_id = str(require_key(action, "targetId"))
+            intent = squad_declare_shoot_model(self.game_state, squad_id, model_id, target_id)
+            return True, {
+                "action": name, "unitId": squad_id, "intent": intent,
+                "declarations": list(self.game_state["pending_squad_shoot_intents"].get(squad_id, [])),
+            }
+
+        if name == "squad_shoot_unassign":
+            model_id = str(require_key(action, "modelId"))
+            removed = squad_undeclare_shoot_model(self.game_state, squad_id, model_id)
+            return True, {
+                "action": name, "unitId": squad_id, "removed": removed,
+                "declarations": list(self.game_state["pending_squad_shoot_intents"].get(squad_id, [])),
+            }
+
+        if name == "squad_shoot_cancel":
+            # Annulation : nettoie le pending + libere l unite active SANS la retirer
+            # du pool (elle pourra etre re-selectionnee). Pas de end_activation.
+            clear_pending_shoot_intent(self.game_state, squad_id)
+            if self.game_state.get("active_shooting_unit") == squad_id:
+                del self.game_state["active_shooting_unit"]
+            return True, {"action": name, "unitId": squad_id, "cancelled": True}
+
+        if name == "squad_shoot_validate":
+            squad_lock_shoot(self.game_state, squad_id)
+            shoot_result = resolve_squad_shoot(self.game_state, squad_id)
+            unit = get_unit_by_id(squad_id, self.game_state)
+            if unit is None:
+                raise KeyError(f"Squad {squad_id} introuvable pour end_activation apres tir manuel")
+            end_result = end_activation(self.game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 0)
+            if self.game_state.get("active_shooting_unit") == squad_id:
+                del self.game_state["active_shooting_unit"]
+            return True, {
+                **end_result, "action": "squad_shoot", "unitId": squad_id,
+                "shoot_result": shoot_result,
+            }
+
+        raise ValueError(f"Unknown squad manual shoot action: {name!r}")
+
+
     # ============================================================================
     # SQUAD PIPELINE DISPATCH
     # ============================================================================
@@ -4560,6 +4639,12 @@ class W40KEngine(gym.Env):
             shooting_handlers.shooting_phase_start(self.game_state)
             self._shooting_phase_initialized = True
             _t_ps1 = time.perf_counter()
+        # Tir PvP humain par figurine : pipeline squad (shared_utils), pas le legacy mono-fig.
+        if action.get("action") in (
+            "squad_shoot_activate", "squad_shoot_select_model", "squad_shoot_assign",
+            "squad_shoot_unassign", "squad_shoot_validate", "squad_shoot_cancel",
+        ):
+            return self._process_squad_manual_shoot(action)
         # Pure delegation - handler manages initialization, player progression, everything
         _t_ex0 = time.perf_counter() if _pw else None
         handler_response = shooting_handlers.execute_action(self.game_state, None, action, self.config)

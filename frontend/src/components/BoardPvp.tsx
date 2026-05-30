@@ -418,6 +418,20 @@ type BoardProps = {
   onResetModelInPlan?: (modelId: string) => void;
   onCommitSquadMovePlan?: () => void | Promise<void>;
   onCancelSquadMove?: () => void;
+  /** Tir par-figurine (PvP manuel). */
+  squadShootPlan?: {
+    unitId: number;
+    models: string[];
+    targets: Record<string, string>;
+    activeModelId: string | null;
+    canValidate: boolean;
+  } | null;
+  onStartSquadModelShoot?: (unitId: number | string, initialModelId?: string) => void | Promise<void>;
+  onSelectModelForShoot?: (modelId: string) => void | Promise<void>;
+  onAssignShootTarget?: (targetUnitId: number | string) => void | Promise<void>;
+  onUnassignShootModel?: (modelId: string) => void | Promise<void>;
+  onCommitSquadShoot?: () => void | Promise<void>;
+  onCancelSquadShoot?: () => void | Promise<void>;
   onStartAttackPreview: (unitId: number, col: number, row: number) => void;
   onConfirmMove: () => void;
   onCancelMove: () => void;
@@ -671,6 +685,13 @@ export default function Board({
   onResetModelInPlan,
   onCommitSquadMovePlan,
   onCancelSquadMove,
+  squadShootPlan = null,
+  onStartSquadModelShoot,
+  onSelectModelForShoot,
+  onAssignShootTarget,
+  onUnassignShootModel,
+  onCommitSquadShoot,
+  onCancelSquadShoot,
   onStartAttackPreview,
   onConfirmMove,
   onCancelMove,
@@ -908,6 +929,27 @@ export default function Board({
   /** Plan provisoire toujours a jour pour les handlers d'event stables (sans relancer le draw). */
   const squadMovePlanRef = useRef(squadMovePlan);
   squadMovePlanRef.current = squadMovePlan;
+
+  /** Callbacks tir par-figurine — ref toujours a jour pour les handlers d'event stables. */
+  const squadShootCallbacksRef = useRef({
+    onStartSquadModelShoot,
+    onSelectModelForShoot,
+    onAssignShootTarget,
+    onUnassignShootModel,
+    onCommitSquadShoot,
+    onCancelSquadShoot,
+  });
+  squadShootCallbacksRef.current = {
+    onStartSquadModelShoot,
+    onSelectModelForShoot,
+    onAssignShootTarget,
+    onUnassignShootModel,
+    onCommitSquadShoot,
+    onCancelSquadShoot,
+  };
+  /** Plan de tir toujours a jour pour les handlers d'event stables. */
+  const squadShootPlanRef = useRef(squadShootPlan);
+  squadShootPlanRef.current = squadShootPlan;
 
   // Update refs when props change but don't trigger re-render - MOVE THIS BEFORE useEffect
   stableCallbacks.current = {
@@ -2987,6 +3029,135 @@ export default function Board({
     return () => canvas.removeEventListener("pointerdown", onPointerDownSelect);
   }, [mode, squadMovePlan, boardConfig]);
 
+  // TIR par-figurine (PvP manuel) : phase shoot. Entrée sur escouade OWN multi-fig →
+  // mode squadModelShoot. En mode : clic fig OWN = sélection (blink cibles valides),
+  // clic ennemi = assignation cible de la fig active, clic droit fig = unassign.
+  // Capture-phase + stopImmediatePropagation pour bloquer la sélection PIXI legacy
+  // UNIQUEMENT quand on traite l'event (mono-fig → laisse passer au flux legacy).
+  useEffect(() => {
+    if (phase !== "shoot") return;
+    if (measureMode.kind !== "off") return;
+    if (!boardConfig) return;
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!canvas) return;
+    const app = appRef.current;
+    if (!app) return;
+
+    const HEX_HIT_TOLERANCE = 4;
+    const getUnitsCache = () =>
+      gameState?.units_cache as
+        | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]>; col?: number; row?: number; player?: number }>
+        | undefined;
+
+    const resolveHex = (e: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
+      const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
+      const px = (e.clientX - rect.left) * scaleX;
+      const py = (e.clientY - rect.top) * scaleY;
+      return pixelToHex(px, py, boardConfig.hex_radius, boardConfig.margin, boardConfig.cols, boardConfig.rows);
+    };
+
+    const findOwnFig = (col: number, row: number) => {
+      const uc = getUnitsCache();
+      if (!uc) return null;
+      const clickCube = offsetToCube(col, row);
+      let best: { uid: number | string; mid: string; nFigs: number } | null = null;
+      let bestD = Infinity;
+      for (const [uid, entry] of Object.entries(uc)) {
+        if (entry.player !== current_player) continue;
+        const byModel = entry.occupied_hexes_by_model;
+        if (!byModel) continue;
+        const nFigs = Object.keys(byModel).length;
+        for (const [mid, pos] of Object.entries(byModel)) {
+          const d = cubeDistance(clickCube, offsetToCube(pos[0], pos[1]));
+          if (d <= HEX_HIT_TOLERANCE && d < bestD) {
+            bestD = d;
+            best = { uid: Number.isNaN(Number(uid)) ? uid : Number(uid), mid, nFigs };
+          }
+        }
+      }
+      return best;
+    };
+
+    const findEnemyUnit = (col: number, row: number): number | string | null => {
+      const uc = getUnitsCache();
+      if (!uc) return null;
+      const clickCube = offsetToCube(col, row);
+      let best: number | string | null = null;
+      let bestD = Infinity;
+      for (const [uid, entry] of Object.entries(uc)) {
+        if (entry.player === current_player) continue;
+        const byModel = entry.occupied_hexes_by_model;
+        const positions: Array<[number, number]> = byModel
+          ? Object.values(byModel)
+          : entry.col != null && entry.row != null
+            ? [[entry.col, entry.row]]
+            : [];
+        for (const pos of positions) {
+          const d = cubeDistance(clickCube, offsetToCube(pos[0], pos[1]));
+          if (d <= HEX_HIT_TOLERANCE && d < bestD) {
+            bestD = d;
+            best = Number.isNaN(Number(uid)) ? uid : Number(uid);
+          }
+        }
+      }
+      return best;
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.target !== canvas) return;
+      const { col, row } = resolveHex(e);
+      const plan = squadShootPlanRef.current;
+      const cbs = squadShootCallbacksRef.current;
+
+      // Clic droit : unassign d'une fig assignée (mode actif uniquement).
+      if (e.button === 2) {
+        if (mode !== "squadModelShoot" || !plan) return;
+        const own = findOwnFig(col, row);
+        if (own && Number(own.uid) === Number(plan.unitId) && plan.targets[own.mid]) {
+          e.stopImmediatePropagation();
+          void cbs.onUnassignShootModel?.(own.mid);
+        }
+        return;
+      }
+      if (e.button !== 0) return;
+
+      if (mode !== "squadModelShoot") {
+        // Entrée : escouade OWN multi-fig éligible (dans le pool) → démarre + sélectionne la fig.
+        const own = findOwnFig(col, row);
+        if (own && own.nFigs > 1 && eligibleUnitIds.includes(Number(own.uid))) {
+          e.stopImmediatePropagation();
+          void cbs.onStartSquadModelShoot?.(own.uid, own.mid);
+        }
+        return;
+      }
+
+      if (!plan) return;
+      // 1) clic sur une fig de l'escouade active → la sélectionner.
+      const own = findOwnFig(col, row);
+      if (own && Number(own.uid) === Number(plan.unitId)) {
+        e.stopImmediatePropagation();
+        if (own.mid !== plan.activeModelId) {
+          void cbs.onSelectModelForShoot?.(own.mid);
+        }
+        return;
+      }
+      // 2) clic sur une unité ennemie → bloque le legacy (en mode tir) et assigne si une fig est active.
+      const enemy = findEnemyUnit(col, row);
+      if (enemy != null) {
+        e.stopImmediatePropagation();
+        if (plan.activeModelId) {
+          void cbs.onAssignShootTarget?.(enemy);
+        }
+        // sinon : aucune fig active → sélectionne d'abord une fig (clic ignoré).
+      }
+    };
+
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [phase, mode, measureMode.kind, boardConfig, gameState?.units_cache, current_player, eligibleUnitIds]);
+
   // squad.md brique 3 : dès qu'AUCUNE fig n'est active en mode plan (fig posée → deselect, ou
   // entrée sans selection), couper TOUT le preview (fantome curseur + LoS + ligne guide + tooltip).
   // Le preview (ghost + LoS) n'existe QUE pendant qu'une fig est en cours de placement.
@@ -4975,7 +5146,14 @@ export default function Board({
             .map(([m, v]) => `${m}=${v ? 1 : 0}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}`;
+      // Tir par-fig : empreinte des assignations (redraw du voile vert quand elles changent).
+      const squadShootFp = squadShootPlan
+        ? `${squadShootPlan.unitId}:` +
+          Object.entries(squadShootPlan.targets)
+            .map(([m, t]) => `${m}>${t}`)
+            .join(",")
+        : "";
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -5338,10 +5516,12 @@ export default function Board({
           String(squadMovePlan.unitId) === unitIdStr;
         let modelPositions: Array<[number, number]>;
         let modelValidFlags: boolean[];
+        let modelIds: string[];
         if (occupiedHexesByModel) {
           const entries = Object.entries(occupiedHexesByModel) as Array<
             [string, [number, number]]
           >;
+          modelIds = entries.map(([mid]) => mid);
           modelPositions = entries.map(([mid, pos]) => {
             const planPos = isSquadGhost ? squadMovePlan!.models[mid] : undefined;
             return planPos ? ([planPos.col, planPos.row] as [number, number]) : pos;
@@ -5350,6 +5530,7 @@ export default function Board({
             isSquadGhost ? squadMovePlan!.perModelValid[mid] !== false : true
           );
         } else {
+          modelIds = [String(unit.id)];
           modelPositions = [[unit.col, unit.row]];
           modelValidFlags = [true];
         }
@@ -5631,6 +5812,65 @@ export default function Board({
           });
           veil.zIndex = 3000;
           unitsLayer.addChild(veil);
+        }
+
+        // Tir par-figurine : voile vert sur les figs ayant désigné une cible.
+        if (
+          mode === "squadModelShoot" &&
+          squadShootPlan &&
+          String(squadShootPlan.unitId) === unitIdStr
+        ) {
+          const greenVeil = new PIXI.Graphics();
+          const gvBase = resolveBaseSizeForUnitDisplay(unit);
+          const gvRadius = gvBase > 1
+            ? (gvBase * 1.5 * HEX_RADIUS) / 2
+            : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
+          modelCenters.forEach(([cx, cy], i) => {
+            if (squadShootPlan.targets[modelIds[i]]) {
+              greenVeil.beginFill(0x22c55e, 0.5);
+              greenVeil.drawCircle(cx, cy, gvRadius);
+              greenVeil.endFill();
+            }
+          });
+          greenVeil.zIndex = 3000;
+          unitsLayer.addChild(greenVeil);
+
+          // Ligne de visée : fig tireuse → fig cible la plus proche (1 par assignation).
+          // Même container/coords que le voile → alignement garanti. L'assignation
+          // garantit déjà portée+LoS (backend), donc la ligne respecte la LoS.
+          const shootLines = new PIXI.Graphics();
+          const shootUc = gameState?.units_cache as
+            | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+            | undefined;
+          modelCenters.forEach(([cx, cy], i) => {
+            const tgtSid = squadShootPlan.targets[modelIds[i]];
+            if (!tgtSid) return;
+            const tgtByModel = shootUc?.[String(tgtSid)]?.occupied_hexes_by_model;
+            if (!tgtByModel) return;
+            const [ownCol, ownRow] = modelPositions[i];
+            const ownCube = offsetToCube(ownCol, ownRow);
+            let nearest: [number, number] | null = null;
+            let bestD = Infinity;
+            for (const pos of Object.values(tgtByModel)) {
+              const d = cubeDistance(ownCube, offsetToCube(pos[0], pos[1]));
+              if (d < bestD) {
+                bestD = d;
+                nearest = pos;
+              }
+            }
+            if (!nearest) return;
+            const tx = nearest[0] * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+            const ty =
+              nearest[1] * HEX_VERT_SPACING +
+              ((nearest[0] % 2) * HEX_VERT_SPACING) / 2 +
+              HEX_HEIGHT / 2 +
+              MARGIN;
+            shootLines.lineStyle(3, 0xff3030, 0.9);
+            shootLines.moveTo(cx, cy);
+            shootLines.lineTo(tx, ty);
+          });
+          shootLines.zIndex = 3001;
+          unitsLayer.addChild(shootLines);
         }
       }
 
@@ -6387,6 +6627,7 @@ export default function Board({
     squadMovePlan,
     squadMoveModelPoolRef,
     squadMoveModelMaskLoopsRef?.current,
+    squadShootPlan,
   ]);
 
   // Handle weapon selection
@@ -6518,6 +6759,67 @@ export default function Board({
               }}
             >
               Validate
+            </button>
+          </div>
+        )}
+        {mode === "squadModelShoot" && squadShootPlan && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: 12,
+              right: 12,
+              zIndex: 1700,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span
+              style={{
+                color: "#e5e7eb",
+                fontSize: 13,
+                fontWeight: 600,
+                background: "rgba(17,24,39,0.8)",
+                borderRadius: 6,
+                padding: "6px 10px",
+              }}
+            >
+              {Object.keys(squadShootPlan.targets).length}/{squadShootPlan.models.length} figs assignées
+            </span>
+            <button
+              type="button"
+              onClick={() => onCancelSquadShoot?.()}
+              style={{
+                border: "1px solid rgba(255,255,255,0.28)",
+                borderRadius: 6,
+                background: "rgba(75,85,99,0.92)",
+                color: "#e5e7eb",
+                cursor: "pointer",
+                fontSize: 14,
+                fontWeight: 700,
+                padding: "8px 14px",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!squadShootPlan.canValidate}
+              onClick={() => onCommitSquadShoot?.()}
+              style={{
+                border: "1px solid rgba(255,255,255,0.28)",
+                borderRadius: 6,
+                background: squadShootPlan.canValidate
+                  ? "rgba(22,163,74,0.95)"
+                  : "rgba(75,85,99,0.55)",
+                color: squadShootPlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+                cursor: squadShootPlan.canValidate ? "pointer" : "not-allowed",
+                fontSize: 14,
+                fontWeight: 700,
+                padding: "8px 14px",
+              }}
+            >
+              Tirer
             </button>
           </div>
         )}

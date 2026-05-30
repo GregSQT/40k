@@ -410,6 +410,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     | "select"
     | "movePreview"
     | "squadModelMove"
+    | "squadModelShoot"
     | "attackPreview"
     | "targetPreview"
     | "chargePreview"
@@ -452,6 +453,26 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const squadMoveSessionRef = useRef(0);
   /** Mask loops per-fig (polygone lissé) reçus de move_model_destinations. */
   const squadMoveModelMaskLoopsRef = useRef<number[][] | null>(null);
+  /**
+   * Tir par-figurine (PvP manuel) — plan provisoire de cibles assignées par fig.
+   * ``targets`` : model_id -> squad_id ennemi assigné (cible de cette fig pour la phase).
+   * ``activeModelId`` : fig sélectionnée dont on assigne la cible au prochain clic ennemi.
+   * ``canValidate`` : au moins une fig a une cible → bouton Valider actif (figs non
+   * assignées = skip au tir, décision utilisateur).
+   * Les cibles valides de la fig active clignotent (blinkingUnits), les autres grisées.
+   */
+  const [squadShootPlan, setSquadShootPlan] = useState<{
+    unitId: number;
+    models: string[];
+    targets: Record<string, string>;
+    activeModelId: string | null;
+    canValidate: boolean;
+  } | null>(null);
+  /** Ref miroir de squadShootPlan pour accès synchrone dans les callbacks. */
+  const squadShootPlanRef = useRef<typeof squadShootPlan>(null);
+  squadShootPlanRef.current = squadShootPlan;
+  /** Incrémenté à chaque session de tir squad. Invalide les select_model obsolètes. */
+  const squadShootSessionRef = useRef(0);
   const [attackPreview, setAttackPreview] = useState<{
     unitId: number;
     col: number;
@@ -3445,6 +3466,201 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setSelectedUnitId(null);
   }, []);
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // TIR PAR FIGURINE (PvP manuel) — calque squadModelMove, pipeline squad backend
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Coeur de la sélection d une fig : query cibles valides → HP blink + activeModelId.
+   * Prend ``unitId`` explicitement (pas via ref) pour être utilisable juste après
+   * setSquadShootPlan (ref pas encore rafraîchie par un re-render).
+   */
+  const selectShootModelForUnit = useCallback(
+    async (unitId: number, modelId: string) => {
+      const sessionAtCall = squadShootSessionRef.current;
+      let result: Record<string, unknown> | null = null;
+      try {
+        result = await postEngineQuery({
+          action: "squad_shoot_select_model",
+          unitId: String(unitId),
+          modelId,
+        });
+      } catch (e) {
+        console.error(`[SQUAD-SHOOT] select model=${modelId} ERROR`, e);
+        return;
+      }
+      if (squadShootSessionRef.current !== sessionAtCall) return;
+      const validTargets = ((result?.valid_targets ?? []) as string[]).map((id) =>
+        parseInt(id, 10)
+      );
+      setBlinkingUnits((prev) => {
+        if (prev.blinkTimer) clearInterval(prev.blinkTimer);
+        const timer = validTargets.length ? window.setInterval(() => {}, 500) : null;
+        return { unitIds: validTargets, blinkTimer: timer, attackerId: unitId };
+      });
+      setSquadShootPlan((prev) =>
+        prev && prev.unitId === unitId ? { ...prev, activeModelId: modelId } : prev
+      );
+      console.log(`[SQUAD-SHOOT] select model=${modelId} validTargets=[${validTargets.join(",")}]`);
+    },
+    [postEngineQuery]
+  );
+
+  /** Entre en mode tir par-figurine : active l escouade + sélectionne la fig cliquée. */
+  const handleStartSquadModelShoot = useCallback(
+    async (unitId: number | string, initialModelId?: string) => {
+      const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      const models = Object.keys(readSquadModelPositions(uid));
+      if (models.length === 0) {
+        console.warn(`[SQUAD-SHOOT] start ABORT unit=${uid} (aucune fig)`);
+        return;
+      }
+      try {
+        await executeAction({ action: "squad_shoot_activate", unitId: String(uid) });
+      } catch (e) {
+        console.error("[SQUAD-SHOOT] activate FAILED", e);
+        setError(`Squad shoot activate failed: ${formatApiConnectionError(e)}`);
+        return;
+      }
+      squadShootSessionRef.current += 1;
+      setSquadShootPlan({
+        unitId: uid,
+        models,
+        targets: {},
+        activeModelId: null,
+        canValidate: false,
+      });
+      setMode("squadModelShoot");
+      setSelectedUnitId(uid);
+      console.log(`[SQUAD-SHOOT] start unit=${uid} models=${models.length}`);
+      if (initialModelId) {
+        await selectShootModelForUnit(uid, initialModelId);
+      }
+    },
+    [readSquadModelPositions, executeAction, selectShootModelForUnit]
+  );
+
+  /** Sélectionne une fig (clic en mode actif) : délègue au coeur via l unité du plan. */
+  const handleSelectModelForShoot = useCallback(
+    async (modelId: string) => {
+      const plan = squadShootPlanRef.current;
+      if (!plan) return;
+      await selectShootModelForUnit(plan.unitId, modelId);
+    },
+    [selectShootModelForUnit]
+  );
+
+  /** Clic sur une unité ennemie valide : assigne la cible de la fig active. */
+  const handleAssignShootTarget = useCallback(
+    async (targetUnitId: number | string) => {
+      const plan = squadShootPlanRef.current;
+      if (!plan?.activeModelId) return;
+      const modelId = plan.activeModelId;
+      try {
+        await executeAction({
+          action: "squad_shoot_assign",
+          unitId: String(plan.unitId),
+          modelId,
+          targetId: String(targetUnitId),
+        });
+      } catch (e) {
+        console.error(`[SQUAD-SHOOT] assign model=${modelId} target=${targetUnitId} FAILED`, e);
+        setError(`Cible refusée: ${formatApiConnectionError(e)}`);
+        return;
+      }
+      // Fig assignée → vide le blink et déselectionne.
+      setBlinkingUnits((prev) => {
+        if (prev.blinkTimer) clearInterval(prev.blinkTimer);
+        return { unitIds: [], blinkTimer: null, attackerId: null };
+      });
+      setSquadShootPlan((prev) =>
+        prev
+          ? {
+              ...prev,
+              targets: { ...prev.targets, [modelId]: String(targetUnitId) },
+              activeModelId: null,
+              canValidate: true,
+            }
+          : prev
+      );
+      console.log(`[SQUAD-SHOOT] assign model=${modelId} → target=${targetUnitId}`);
+    },
+    [executeAction]
+  );
+
+  /** Clic droit sur une fig assignée : retire sa cible (squad_shoot_unassign). */
+  const handleUnassignShootModel = useCallback(
+    async (modelId: string) => {
+      const plan = squadShootPlanRef.current;
+      if (!plan) return;
+      try {
+        await executeAction({
+          action: "squad_shoot_unassign",
+          unitId: String(plan.unitId),
+          modelId,
+        });
+      } catch (e) {
+        console.error(`[SQUAD-SHOOT] unassign model=${modelId} FAILED`, e);
+        return;
+      }
+      setSquadShootPlan((prev) => {
+        if (!prev) return prev;
+        const targets = { ...prev.targets };
+        delete targets[modelId];
+        return { ...prev, targets, canValidate: Object.keys(targets).length > 0 };
+      });
+      console.log(`[SQUAD-SHOOT] unassign model=${modelId}`);
+    },
+    [executeAction]
+  );
+
+  /** Bouton Valider : lock + résolution simultanée (squad_shoot_validate). */
+  const handleCommitSquadShoot = useCallback(async () => {
+    const plan = squadShootPlanRef.current;
+    if (!plan) return;
+    if (!plan.canValidate) {
+      console.warn("[SQUAD-SHOOT] commit ABORT (aucune cible assignée)");
+      return;
+    }
+    try {
+      await executeAction({ action: "squad_shoot_validate", unitId: String(plan.unitId) });
+    } catch (e) {
+      console.error("[SQUAD-SHOOT] validate FAILED", e);
+      setError(`Squad shoot failed: ${formatApiConnectionError(e)}`);
+      return;
+    }
+    squadShootSessionRef.current += 1;
+    setBlinkingUnits((prev) => {
+      if (prev.blinkTimer) clearInterval(prev.blinkTimer);
+      return { unitIds: [], blinkTimer: null, attackerId: null };
+    });
+    setSquadShootPlan(null);
+    setMode("select");
+    setSelectedUnitId(null);
+    console.log(`[SQUAD-SHOOT] commit unit=${plan.unitId}`);
+  }, [executeAction]);
+
+  /** Annule le tir : nettoie l état backend (pending + active), garde l unité dans le pool. */
+  const handleCancelSquadShoot = useCallback(async () => {
+    const plan = squadShootPlanRef.current;
+    squadShootSessionRef.current += 1;
+    if (plan) {
+      try {
+        await executeAction({ action: "squad_shoot_cancel", unitId: String(plan.unitId) });
+      } catch (e) {
+        console.error("[SQUAD-SHOOT] cancel FAILED", e);
+      }
+    }
+    setBlinkingUnits((prev) => {
+      if (prev.blinkTimer) clearInterval(prev.blinkTimer);
+      return { unitIds: [], blinkTimer: null, attackerId: null };
+    });
+    setSquadShootPlan(null);
+    setMode("select");
+    setSelectedUnitId(null);
+    console.log("[SQUAD-SHOOT] cancel");
+  }, [executeAction]);
+
   const shouldShowRetreatAlert = useCallback((): boolean => {
     return readRequiredBooleanSetting(RETREAT_ALERT_STORAGE_KEY, true);
   }, []);
@@ -4528,6 +4744,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onResetModelInPlan: () => {},
       onCommitSquadMovePlan: async () => {},
       onCancelSquadMove: () => {},
+      squadShootPlan: null,
+      onStartSquadModelShoot: async () => {},
+      onSelectModelForShoot: async () => {},
+      onAssignShootTarget: async () => {},
+      onUnassignShootModel: async () => {},
+      onCommitSquadShoot: async () => {},
+      onCancelSquadShoot: async () => {},
       onStartAttackPreview: () => {},
       onConfirmMove: () => {},
       onCancelMove: () => {},
@@ -4643,6 +4866,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onResetModelInPlan: handleResetModelInPlan,
     onCommitSquadMovePlan: handleCommitSquadMovePlan,
     onCancelSquadMove: handleCancelSquadMove,
+    squadShootPlan,
+    onStartSquadModelShoot: handleStartSquadModelShoot,
+    onSelectModelForShoot: handleSelectModelForShoot,
+    onAssignShootTarget: handleAssignShootTarget,
+    onUnassignShootModel: handleUnassignShootModel,
+    onCommitSquadShoot: handleCommitSquadShoot,
+    onCancelSquadShoot: handleCancelSquadShoot,
     onStartAttackPreview: onStartAttackPreviewMemo,
     onConfirmMove: handleConfirmMove,
     onCancelMove: handleCancelMove,

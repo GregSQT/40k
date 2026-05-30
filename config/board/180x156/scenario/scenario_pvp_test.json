@@ -29,13 +29,13 @@
       ]
     },
     {
-      "id": 8, "unit_type": "Terminator", "player": 1, "col": 120, "row": 56,
+      "id": 8, "unit_type": "Terminator", "player": 1, "col": 70, "row": 66,
       "models": [
-        { "col": 120, "row": 56 },
-        { "col": 130, "row": 56 },
-        { "col": 140, "row": 56 },
-        { "col": 125, "row": 64 },
-        { "col": 135, "row": 64, "unit_type": "TerminatorCyclone" }
+        { "col": 70, "row": 66 },
+        { "col": 80, "row": 66 },
+        { "col": 90, "row": 66 },
+        { "col": 75, "row": 74 },
+        { "col": 85, "row": 74, "unit_type": "TerminatorCyclone" }
       ]
     },
     {
