@@ -792,6 +792,8 @@ export default function Board({
   const hoverMoveOrientationStepRef = useRef<number | null>(null);
   /** Ligne mesure règle (ancre → hex sous curseur) */
   const measureGuideLineRef = useRef<PIXI.Graphics | null>(null);
+  /** Timestamp d'entrée en squadModelMove depuis movePreview — bloque onPointerDownSelect pour le clic de confirmation */
+  const squadMoveEntryTimeRef = useRef<number | null>(null);
   /** Dernier clientX/clientY pendant la mesure — pour redessiner après un setState (ex. jonction) sans attendre mousemove. */
   const measurePointerClientRef = useRef<{ clientX: number; clientY: number } | null>(null);
   /** Toujours à jour : permet aux handlers (effet stable) de lire l’état courant sans redémonter l’effet à chaque jonction. */
@@ -2890,6 +2892,11 @@ export default function Board({
 
     const onPointerDownSelect = (e: PointerEvent) => {
       if (e.button !== 0) return;
+      // Ignorer le clic qui a confirmé le movePreview (même événement, propagé après la transition)
+      if (squadMoveEntryTimeRef.current !== null && performance.now() - squadMoveEntryTimeRef.current < 300) {
+        squadMoveEntryTimeRef.current = null;
+        return;
+      }
       const rect = canvas.getBoundingClientRect();
       const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
       const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
@@ -4043,6 +4050,7 @@ export default function Board({
       onCombatAttack: stableCallbacks.current.onFightAttack || (() => {}),
       onConfirmMove: () => {
         clearMovePreviewLos();
+        squadMoveEntryTimeRef.current = performance.now();
         stableCallbacks.current.onConfirmMove();
       },
       onCancelMove: stableCallbacks.current.onCancelMove,
@@ -5231,6 +5239,13 @@ export default function Board({
 
     const chargeMaxDistance = gameConfig?.game_rules?.charge_max_distance ?? 12;
 
+    // Wrapper qui enregistre le timestamp d'entrée en squadModelMove avant de confirmer le move.
+    // Utilisé pour ignorer le select-click qui suit immédiatement la confirmation du movePreview.
+    const onConfirmMoveForRender = () => {
+      squadMoveEntryTimeRef.current = performance.now();
+      onConfirmMove();
+    };
+
     // ✅ UNIFIED UNIT RENDERING USING COMPONENT — skip if fingerprint unchanged
     if (unitsChanged) {
       unitsFingerprintRef.current = unitsFingerprint;
@@ -5464,7 +5479,7 @@ export default function Board({
           chargeTargets,
           fightTargets,
           targetPreview,
-          onConfirmMove,
+          onConfirmMove: onConfirmMoveForRender,
           parseColor,
           onUnitIconHoverChange: handleUnitIconHoverChange,
           // Pass blinking state (unified: movePreview and attackPreview use same code path)
@@ -5648,7 +5663,7 @@ export default function Board({
             chargeTargets,
             fightTargets,
             targetPreview,
-            onConfirmMove,
+            onConfirmMove: onConfirmMoveForRender,
             parseColor,
             autoSelectWeapon,
             onUnitTooltip: handleUnitTooltip,
@@ -5708,7 +5723,7 @@ export default function Board({
             chargeTargets,
             fightTargets,
             targetPreview,
-            onConfirmMove,
+            onConfirmMove: onConfirmMoveForRender,
             parseColor,
             onUnitTooltip: handleUnitTooltip,
             onBlinkProbHtml: handleBlinkProbHtml,
