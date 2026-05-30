@@ -173,6 +173,16 @@ def test_tactical_bot_movement_position_helpers(monkeypatch: pytest.MonkeyPatch)
             {"id": "e2", "player": 1, "col": 10, "row": 10, "CC_DMG": 1, "RNG_DMG": 3},
         ],
         "units_cache": {},
+        "config": {
+            "game_rules": {
+                "engagement_zone": 1,
+                "max_base_size_hex": 35,
+                "los_visibility_min_ratio": 0.0,
+                "cover_ratio": 0.3,
+                "avg_charge_roll": 7,
+            },
+            "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+        },
     }
     unit = {"id": "u0", "player": 0, "RNG_WEAPONS": [{"RNG": 6}]}
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: uid in {"e1", "e2"})

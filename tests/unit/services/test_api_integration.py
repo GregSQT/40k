@@ -49,13 +49,18 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
         "col": col,
         "row": row,
         "HP_CUR": hp,
+        "HP_MAX": hp,
+        "VALUE": 100,
+        "OC": 1,
         "BASE_SIZE": 1,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
         "T": 4,
         "ARMOR_SAVE": 4,
-        "INVUL_SAVE": 0,
+        "INVUL_SAVE": 7,
+        "SHOOT_LEFT": 1,
+        "ATTACK_LEFT": 1,
         "RNG_WEAPONS": [
             {"ATK": 2, "STR": 4, "AP": 0, "DMG": 1, "RNG": 24, "NB": 1, "WEAPON_RULES": []}
         ],
@@ -124,6 +129,7 @@ def _make_full_gs(units: List[Dict[str, Any]], phase: str = "move") -> Dict[str,
         "tutorial_fight_no_death_unit_ids": None,
         "macro_target_objective_index": 0,
         "macro_target_objective_id": "test_obj",
+        "inches_to_subhex": 1,
     }
     build_units_cache(gs)
     build_enemy_adjacent_hexes(gs, gs["current_player"])

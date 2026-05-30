@@ -24,11 +24,20 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 2) -> Dict[str, A
         "col": col,
         "row": row,
         "HP_CUR": hp,
+        "HP_MAX": hp,
+        "VALUE": 50,
+        "OC": 1,
+        "T": 4,
+        "ARMOR_SAVE": 3,
+        "INVUL_SAVE": 7,
+        "SHOOT_LEFT": 1,
+        "ATTACK_LEFT": 1,
         "BASE_SIZE": 3,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
         "RNG_WEAPONS": [{"RNG": 24, "SHOTS": "1", "STRENGTH": 4, "AP": 0, "DAMAGE": 1}],
+        "CC_WEAPONS": [],
     }
 
 

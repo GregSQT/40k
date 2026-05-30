@@ -72,22 +72,24 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
         "row": row,
         "HP_CUR": hp,
         "HP_MAX": hp,
+        "VALUE": 100,
+        "OC": 1,
         "BASE_SIZE": 1,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
         "T": 4,
         "ARMOR_SAVE": 4,
-        "INVUL_SAVE": 0,
+        "INVUL_SAVE": 7,
+        "SHOOT_LEFT": 1,
+        "ATTACK_LEFT": 1,
         "RNG_WEAPONS": [_weapon()],
         "CC_WEAPONS": [],
         "selectedRngWeaponIndex": 0,
         "_rapid_fire_rule_value": 0,
         "_rapid_fire_bonus_shot_current": False,
-        "OC": 1,
         "unitType": "TestUnit",
         "DISPLAY_NAME": f"Unit {uid}",
-        "VALUE": 100,
     }
 
 
@@ -155,6 +157,7 @@ def _make_shoot_gs(attacker: Dict, target: Dict) -> Dict[str, Any]:
         "objectives": [{"id": "obj1", "name": "Alpha", "hexes": [[5, 5]]}],
         "pending_shooting_phase_init": False,
         "charge_range_rolls": {},
+        "inches_to_subhex": 1,
         "rewards_configs": {
             "default": {
                 "base_actions": {

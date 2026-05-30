@@ -38,7 +38,11 @@ def _sm(config: Dict[str, Any] | None = None) -> GameStateManager:
 
 def _raw_unit(uid: int, player: int, value: int = 100) -> Dict[str, Any]:
     return {"id": uid, "player": player, "col": uid, "row": 0,
-            "HP_CUR": 3, "BASE_SHAPE": "round", "BASE_SIZE": 1, "VALUE": value}
+            "HP_CUR": 3, "HP_MAX": 3, "VALUE": value, "OC": 1,
+            "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
+            "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
+            "RNG_WEAPONS": [], "CC_WEAPONS": [],
+            "BASE_SHAPE": "round", "BASE_SIZE": 1}
 
 
 def _make_gs(p1_vp: int, p2_vp: int,

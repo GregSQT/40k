@@ -19,11 +19,26 @@ def test_build_units_cache_normalizes_coordinates_hp_and_player() -> None:
                 "col": "3.0",
                 "row": 4.0,
                 "HP_CUR": "2",
+                "HP_MAX": 2,
+                "VALUE": 50,
+                "OC": 1,
+                "T": 4,
+                "ARMOR_SAVE": 3,
+                "INVUL_SAVE": 7,
+                "SHOOT_LEFT": 1,
+                "ATTACK_LEFT": 1,
+                "RNG_WEAPONS": [],
+                "CC_WEAPONS": [],
+                "UNIT_RULES": [],
                 "player": "1",
                 "BASE_SHAPE": "round",
                 "BASE_SIZE": 1,
             }
-        ]
+        ],
+        "config": {
+            "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+            "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+        },
     }
 
     build_units_cache(game_state)
@@ -81,7 +96,11 @@ def test_update_units_cache_position_updates_existing_entry_with_normalization()
     game_state = {
         "units_cache": {
             "u1": {"col": 1, "row": 2, "HP_CUR": 3, "player": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1},
-        }
+        },
+        "config": {
+            "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+            "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+        },
     }
 
     update_units_cache_position(game_state, "u1", cast(int, "6.0"), cast(int, 8.0))
@@ -103,6 +122,9 @@ def test_update_units_cache_position_is_noop_when_unit_absent() -> None:
 def test_update_units_cache_unit_updates_existing_entry() -> None:
     game_state = {"units_cache": {
         "u9": {"col": 1, "row": 1, "HP_CUR": 10, "player": 2, "BASE_SHAPE": "round", "BASE_SIZE": 1},
+    }, "config": {
+        "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+        "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
     }}
 
     update_units_cache_unit(game_state, "u9", cast(int, "2"), cast(int, "3.0"), 4, 2)

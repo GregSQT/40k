@@ -21,13 +21,19 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 4) -> Dict[str, A
         "col": col,
         "row": row,
         "HP_CUR": hp,
+        "HP_MAX": hp,
+        "VALUE": 100,
+        "OC": 1,
         "BASE_SIZE": 1,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
         "T": 4,
         "ARMOR_SAVE": 3,
-        "INVUL_SAVE": 0,
+        "INVUL_SAVE": 7,
+        "SHOOT_LEFT": 1,
+        "ATTACK_LEFT": 1,
+        "RNG_WEAPONS": [],
         "CC_WEAPONS": [_weapon()],
         "selectedCcWeaponIndex": 0,
     }
@@ -57,6 +63,7 @@ def _make_game_state(units: List[Dict[str, Any]]) -> Dict[str, Any]:
         "shoot_activation_pool": [],
         "move_activation_pool": [],
         "charge_activation_pool": [],
+        "inches_to_subhex": 1,
     }
     build_units_cache(gs)
     return gs

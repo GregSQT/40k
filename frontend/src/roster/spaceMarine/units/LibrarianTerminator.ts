@@ -40,7 +40,7 @@ export class LibrarianTerminator extends LeaderEliteMeleeElite {
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 20; // Size of the base
   static ICON_SCALE = 1.9; // Size of the icon
-  static ILLUSTRATION_RATIO = 100; // Illustration size ratio in percent
+  static ILLUSTRATION_RATIO = 150; // Illustration size ratio in percent
 
   constructor(name: string, startPos: [number, number]) {
     super(name, LibrarianTerminator.HP_MAX, startPos);

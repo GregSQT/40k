@@ -70,13 +70,16 @@ def _unit(uid: int, player: int, col: int, row: int, oc: int = 1) -> Dict[str, A
         "row": row,
         "HP_CUR": 3,
         "HP_MAX": 3,
+        "VALUE": 100,
         "BASE_SIZE": 1,
         "BASE_SHAPE": "round",
         "OC": oc,
         "MOVE": 6,
         "T": 4,
         "ARMOR_SAVE": 4,
-        "INVUL_SAVE": 0,
+        "INVUL_SAVE": 7,
+        "SHOOT_LEFT": 1,
+        "ATTACK_LEFT": 1,
         "RNG_WEAPONS": [],
         "CC_WEAPONS": [],
         "UNIT_RULES": [],
@@ -92,6 +95,7 @@ def _make_gs(
     objectives = [{"id": "obj1", "name": "Alpha", "hexes": [[5, 5]]}]
     gs: Dict[str, Any] = {
         "units": units,
+        "unit_by_id": {str(u["id"]): u for u in units},
         "turn": turn,
         "current_player": current_player,
         "phase": "command",
@@ -105,6 +109,10 @@ def _make_gs(
         "board_rows": 13,
         "wall_hexes": set(),
         "turn_limit_reached": False,
+        "config": {
+            "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+            "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+        },
     }
     build_units_cache(gs)
     return gs

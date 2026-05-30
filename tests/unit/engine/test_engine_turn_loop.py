@@ -165,14 +165,20 @@ def _unit_entry(uid: int, player: int, hp: int = 3, value: int = 100) -> Dict[st
         "col": 5,
         "row": 5,
         "HP_CUR": hp,
+        "HP_MAX": hp,
+        "VALUE": value,
+        "OC": 1,
         "BASE_SIZE": 1,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
         "T": 4,
         "ARMOR_SAVE": 4,
-        "INVUL_SAVE": 0,
-        "VALUE": value,
+        "INVUL_SAVE": 7,
+        "SHOOT_LEFT": 1,
+        "ATTACK_LEFT": 1,
+        "RNG_WEAPONS": [],
+        "CC_WEAPONS": [],
     }
 
 

@@ -318,7 +318,7 @@ class TestComputeOccupiedHexesRound:
         assert h0 == h3
 
     def test_invalid_type_raises(self):
-        with pytest.raises(ValueError, match="round base_size must be int"):
+        with pytest.raises(ValueError, match="round base_size must be numeric"):
             compute_occupied_hexes(10, 10, "round", [13, 8])
 
 
@@ -371,7 +371,7 @@ class TestComputeOccupiedHexesSquare:
         assert h0 != h1
 
     def test_invalid_type_raises(self):
-        with pytest.raises(ValueError, match="square base_size must be int"):
+        with pytest.raises(ValueError, match="square base_size must be numeric"):
             compute_occupied_hexes(10, 10, "square", [10, 5])
 
 

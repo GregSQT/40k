@@ -4,7 +4,7 @@ engine/phase_handlers/shared_utils.py - Shared utility functions for phase handl
 Functions used across multiple phase handlers to avoid duplication.
 """
 
-from typing import Dict, List, Tuple, Set, Optional, Any, Union
+from typing import Dict, List, Tuple, Set, Optional, Any, Union, cast
 import copy
 import inspect
 
@@ -19,6 +19,7 @@ from engine.combat_utils import (
     resolve_dice_value,
     get_unit_by_id,
     set_unit_coordinates,
+    DiceValue,
 )
 
 # end_activation / _handle_shooting_end_activation argument constants (AI_TURN.md)
@@ -179,6 +180,8 @@ def _compute_unit_occupied_hexes(
     Multi-hex footprints are only computed on Board ×10 (engagement_zone > 1).
     On legacy boards (engagement_zone=1), all units occupy a single cell.
     """
+    if game_state is None:
+        return {(col, row)}
     ez = get_engagement_zone(game_state)
     if ez <= 1:
         return {(col, row)}
@@ -3578,6 +3581,7 @@ def _allocate_damage_to_squad(
             break
     if target_mid is None:
         target_mid = alive[0]
+    assert target_mid is not None
     m = models_cache[target_mid]
     hp_before = int(m["HP_CUR"])
     target_points_per_hp = float(require_key(m, "points_per_hp"))
@@ -3734,7 +3738,7 @@ def resolve_squad_shoot(
             intent_failed_saves += 1
             # 4. Damage
             try:
-                dmg = resolve_dice_value(dmg_raw, f"squad_shoot_dmg_{attacker_mid}")
+                dmg = resolve_dice_value(cast(DiceValue, dmg_raw), f"squad_shoot_dmg_{attacker_mid}")
             except Exception:
                 dmg = int(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1
             if dmg <= 0:
@@ -4362,7 +4366,7 @@ def resolve_squad_fight(
                 continue
             summary["failed_saves"] += 1
             try:
-                dmg = resolve_dice_value(dmg_raw, f"squad_fight_dmg_{attacker_mid}")
+                dmg = resolve_dice_value(cast(DiceValue, dmg_raw), f"squad_fight_dmg_{attacker_mid}")
             except Exception:
                 dmg = int(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1
             if dmg <= 0:

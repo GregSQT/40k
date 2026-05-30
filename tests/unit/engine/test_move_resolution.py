@@ -17,9 +17,20 @@ def _unit(uid: int, player: int, col: int, row: int, move: int = 3, fly: bool = 
         "row": row,
         "MOVE": move,
         "HP_CUR": 2,
+        "HP_MAX": 2,
+        "VALUE": 50,
+        "OC": 1,
+        "T": 4,
+        "ARMOR_SAVE": 3,
+        "INVUL_SAVE": 7,
+        "SHOOT_LEFT": 1,
+        "ATTACK_LEFT": 1,
+        "RNG_WEAPONS": [],
+        "CC_WEAPONS": [],
         "BASE_SIZE": 1,
         "BASE_SHAPE": "round",
         "UNIT_KEYWORDS": keywords,
+        "UNIT_RULES": [],
     }
 
 
@@ -46,6 +57,7 @@ def _make_game_state(
         "units_fled": set(),
         "console_logs": [],
         "gym_training_mode": True,  # skip mask_loops polygon computation
+        "inches_to_subhex": 1,
     }
     build_units_cache(gs)
     build_enemy_adjacent_hexes(gs, current_player)

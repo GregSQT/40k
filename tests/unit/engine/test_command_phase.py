@@ -23,7 +23,11 @@ from engine.reward_calculator import RewardCalculator
 
 def _cmd_unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
     return {"id": uid, "player": player, "col": col, "row": row,
-            "HP_CUR": 3, "BASE_SHAPE": "round", "BASE_SIZE": 1}
+            "HP_CUR": 3, "HP_MAX": 3, "VALUE": 100, "OC": 1,
+            "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
+            "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
+            "RNG_WEAPONS": [], "CC_WEAPONS": [], "UNIT_RULES": [],
+            "BASE_SHAPE": "round", "BASE_SIZE": 1}
 
 
 def _make_cmd_gs() -> Dict[str, Any]:
@@ -34,7 +38,10 @@ def _make_cmd_gs() -> Dict[str, Any]:
         "episode_steps": 0,
         "game_over": False,
         "turn_limit_reached": False,
-        "config": {"game_rules": {"engagement_zone": 1}},
+        "config": {
+            "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+            "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+        },
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
         "primary_objective": None,
@@ -57,7 +64,8 @@ def _unit_cfg(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
     return {"id": uid, "player": player, "col": col, "row": row,
             "unitType": "T", "DISPLAY_NAME": f"U{uid}",
             "HP_CUR": 3, "HP_MAX": 3, "MOVE": 6, "T": 4,
-            "ARMOR_SAVE": 4, "INVUL_SAVE": 0,
+            "ARMOR_SAVE": 4, "INVUL_SAVE": 7,
+            "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
             "RNG_WEAPONS": [_weapon_cfg()], "CC_WEAPONS": [],
             "UNIT_RULES": [], "UNIT_KEYWORDS": [],
             "LD": 7, "OC": 1, "VALUE": 100, "ICON": "t",

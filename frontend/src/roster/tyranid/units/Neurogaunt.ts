@@ -40,7 +40,7 @@ export class Neurogaunt extends SwarmMeleeSwarm {
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 10; // Size of the base
   static ICON_SCALE = 1.2; // Size of the icon
-  static ILLUSTRATION_RATIO = 100; // Illustration size ratio in percent
+  static ILLUSTRATION_RATIO = 80; // Illustration size ratio in percent
 
   constructor(name: string, startPos: [number, number]) {
     super(name, Neurogaunt.HP_MAX, startPos);

@@ -1372,8 +1372,8 @@ class ObservationBuilder:
                 d = float(expected_dice_value(dmg_raw, "obs_firepower"))
             except Exception:
                 d = float(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1.0
+            nb_raw = w.get("NB", 1)
             try:
-                nb_raw = w.get("NB", 1)
                 n = float(expected_dice_value(nb_raw, "obs_firepower_nb"))
             except Exception:
                 n = float(nb_raw) if isinstance(nb_raw, (int, float)) else 1.0

@@ -1137,6 +1137,12 @@ def _resolve_tensorboard_run_dir(
     experiment_dir = os.path.join(base_log_root, f"{training_config_name}_{agent_key}")
     os.makedirs(experiment_dir, exist_ok=True)
 
+    if append_training and not new_model:
+        meta = _read_tensorboard_run_meta(model_path)
+        existing_run_dir = meta.get("run_dir") if meta else None
+        if existing_run_dir and os.path.isdir(existing_run_dir):
+            return experiment_dir, existing_run_dir
+
     if append_training:
         run_id = time.strftime("%Y%m%d-%H%M%S")
         run_dir = os.path.join(experiment_dir, f"run_{run_id}")

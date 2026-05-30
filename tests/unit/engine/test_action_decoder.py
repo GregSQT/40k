@@ -26,6 +26,16 @@ def _unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
         "col": col,
         "row": row,
         "HP_CUR": 3,
+        "HP_MAX": 3,
+        "VALUE": 50,
+        "OC": 1,
+        "T": 4,
+        "ARMOR_SAVE": 3,
+        "INVUL_SAVE": 7,
+        "SHOOT_LEFT": 1,
+        "ATTACK_LEFT": 1,
+        "RNG_WEAPONS": [],
+        "CC_WEAPONS": [],
         "BASE_SIZE": 1,
         "BASE_SHAPE": "round",
         "MOVE": 6,
@@ -52,6 +62,7 @@ def _build_gs(units: List[Dict[str, Any]], phase: str, current_player: int = 1) 
         "config": _base_config(),
         "zone_intent_free_steps_remaining": 0,
         "objectives": [],
+        "inches_to_subhex": 1,
     }
     build_units_cache(gs)
     return gs

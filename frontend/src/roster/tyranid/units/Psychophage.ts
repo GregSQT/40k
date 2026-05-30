@@ -37,7 +37,7 @@ export class Psychophage extends TroopMeleeTroop {
   /** Diamètres sur la grille micro-hex (engine/hex_utils ``compute_occupied_hexes``), pas des mm. */
   static BASE_SIZE = [47, 36];
   static ICON_SCALE = 2.2; // Size of the icon
-  static ILLUSTRATION_RATIO = 140; // Illustration size ratio in percent
+  static ILLUSTRATION_RATIO = 120; // Illustration size ratio in percent
 
   constructor(name: string, startPos: [number, number]) {
     super(name, Psychophage.HP_MAX, startPos);

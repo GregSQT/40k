@@ -2589,7 +2589,7 @@ class W40KEngine(gym.Env):
         }
     
     
-    def _process_semantic_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    def _process_semantic_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:  # pyright: ignore[reportGeneralTypeIssues]
         """
         Process semantic action with detailed execution debugging.
         CRITICAL: This is the SINGLE POINT OF LOGGING for all actions (training, frontend, PvE).
@@ -4205,6 +4205,7 @@ class W40KEngine(gym.Env):
         from engine.phase_handlers.generic_handlers import end_activation
         from engine.phase_handlers.shared_utils import (
             execute_squad_move,
+            _squad_direction_move_legal,
             squad_shooting_unit_activation_start,
             squad_declare_shoot,
             squad_lock_shoot,
@@ -4318,7 +4319,7 @@ class W40KEngine(gym.Env):
                     anchor_col = int(m["col"])
                     anchor_row = int(m["row"])
                     break
-            if anchor_col is None:
+            if anchor_col is None or anchor_row is None:
                 raise ValueError(f"Squad {squad_id} n'a aucun modèle vivant pour l'ancre de déplacement")
 
             neighbors = get_hex_neighbors(anchor_col, anchor_row)
@@ -4328,27 +4329,37 @@ class W40KEngine(gym.Env):
                 )
             dest_col, dest_row = neighbors[direction]  # get allowed
 
-            ok = execute_squad_move(squad_id, dest_col, dest_row, move_type, self.game_state, advance_roll)
-            if not ok:
-                raise ValueError(
-                    f"execute_squad_move a échoué : squad={squad_id} dir={direction} "
-                    f"type={move_type} dest=({dest_col},{dest_row}) — incohérence mask/exécution"
-                )
-            self.game_state.get("_squad_advance_rolls", {}).pop(squad_id, None)  # get allowed
-            unit = get_unit_by_id(squad_id, self.game_state)
-            if unit is None:
-                raise KeyError(f"Squad {squad_id} introuvable après déplacement")
-            tracking = "FLED" if move_type == "fall_back" else "MOVE"
-            end_result = end_activation(self.game_state, unit, ACTION, 1, tracking, MOVE, 0)
-            result = {
-                **end_result,
-                "action": action_name,
-                "squad_id": squad_id,
-                "direction": direction,
-                "move_type": move_type,
-                "toCol": dest_col,
-                "toRow": dest_row,
-            }
+            if not _squad_direction_move_legal(self.game_state, squad_id, direction, move_type, advance_roll=advance_roll):
+                # Direction blocked (e.g. out of bounds, wall, ER) — action was outside mask.
+                # Treat as squad_wait: end activation without moving.
+                unit = get_unit_by_id(squad_id, self.game_state)
+                if unit is None:
+                    raise KeyError(f"Squad {squad_id} introuvable pour squad_wait (direction illégale)")
+                tracking, pool = {"normal": ("MOVE", MOVE), "advance": ("MOVE", MOVE), "fall_back": ("FLED", FLED)}.get(move_type, ("MOVE", MOVE))
+                end_result = end_activation(self.game_state, unit, WAIT, 1, tracking, pool, 0)
+                result = {**end_result, "action": "squad_wait", "squad_id": squad_id}
+            else:
+                ok = execute_squad_move(squad_id, dest_col, dest_row, move_type, self.game_state, advance_roll)
+                if not ok:
+                    raise ValueError(
+                        f"execute_squad_move a échoué : squad={squad_id} dir={direction} "
+                        f"type={move_type} dest=({dest_col},{dest_row}) — incohérence mask/exécution"
+                    )
+                self.game_state.get("_squad_advance_rolls", {}).pop(squad_id, None)  # get allowed
+                unit = get_unit_by_id(squad_id, self.game_state)
+                if unit is None:
+                    raise KeyError(f"Squad {squad_id} introuvable après déplacement")
+                tracking = "FLED" if move_type == "fall_back" else "MOVE"
+                end_result = end_activation(self.game_state, unit, ACTION, 1, tracking, MOVE, 0)
+                result = {
+                    **end_result,
+                    "action": action_name,
+                    "squad_id": squad_id,
+                    "direction": direction,
+                    "move_type": move_type,
+                    "toCol": dest_col,
+                    "toRow": dest_row,
+                }
 
         # ── tir ───────────────────────────────────────────────────────────────
         elif action_name == "squad_shoot":

@@ -44,13 +44,18 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
         "col": col,
         "row": row,
         "HP_CUR": hp,
+        "HP_MAX": hp,
+        "VALUE": 100,
+        "OC": 1,
         "BASE_SIZE": 1,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
         "T": 4,
         "ARMOR_SAVE": 4,
-        "INVUL_SAVE": 0,
+        "INVUL_SAVE": 7,
+        "SHOOT_LEFT": 1,
+        "ATTACK_LEFT": 1,
         "RNG_WEAPONS": [],
         "CC_WEAPONS": [],
     }
@@ -122,6 +127,7 @@ def _make_gs(units: List[Dict[str, Any]], phase: str = "charge") -> Dict[str, An
         "pending_charge_targets": [],
         "pending_charge_unit_id": None,
         "objectives": [{"id": "obj1", "hexes": [[5, 5]]}],
+        "inches_to_subhex": 1,
     }
     build_units_cache(gs)
     build_enemy_adjacent_hexes(gs, gs["current_player"])

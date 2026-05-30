@@ -17,6 +17,10 @@ class _DummyActionDecoder:
         _ = game_state
         return self._mask, self._eligible
 
+    def get_squad_action_mask_and_eligible_units(self, game_state):
+        _ = game_state
+        return self._mask, self._eligible
+
     def normalize_action_input(self, raw_action, phase, source, action_space_size):
         _ = (phase, source, action_space_size)
         return int(raw_action) if self._normalized_action is None else self._normalized_action
@@ -123,7 +127,7 @@ def test_get_bot_action_returns_wait_when_no_eligible_units() -> None:
     decoder = _DummyActionDecoder(mask=[False] * 12, eligible=[])
     engine = _DummyEngine(decoder=decoder)
     wrapper = BotControlledEnv(engine, bot=_DummyBot(action=4))
-    assert wrapper._get_bot_action() == 11
+    assert wrapper._get_bot_action() == 18
 
 
 def test_get_bot_action_raises_on_empty_mask_with_eligible_units() -> None:
@@ -165,7 +169,7 @@ def test_self_play_wrapper_get_frozen_model_action_fallback_paths(monkeypatch: p
     # No eligible units -> WAIT
     decoder_no_units = _DummyActionDecoder(mask=[False] * 12, eligible=[])
     wrapper_no_units = SelfPlayWrapper(_DummyEngine(decoder=decoder_no_units))
-    assert wrapper_no_units._get_frozen_model_action() == 11
+    assert wrapper_no_units._get_frozen_model_action() == 18
 
     # Eligible units but no valid action -> explicit error
     decoder_empty = _DummyActionDecoder(mask=[False] * 12, eligible=[{"id": "u1", "player": 2}])

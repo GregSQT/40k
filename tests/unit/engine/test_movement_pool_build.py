@@ -30,9 +30,25 @@ def _make_unit_by_id(units: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {str(u["id"]): u for u in units}
 
 
+def _fill(unit: Dict[str, Any]) -> Dict[str, Any]:
+    """Fill in required fields for build_units_cache with minimal test defaults."""
+    unit.setdefault("HP_MAX", unit.get("HP_CUR", 2))
+    unit.setdefault("VALUE", 50)
+    unit.setdefault("OC", 1)
+    unit.setdefault("T", 4)
+    unit.setdefault("ARMOR_SAVE", 3)
+    unit.setdefault("INVUL_SAVE", 7)
+    unit.setdefault("SHOOT_LEFT", 1)
+    unit.setdefault("ATTACK_LEFT", 1)
+    unit.setdefault("RNG_WEAPONS", [])
+    unit.setdefault("CC_WEAPONS", [])
+    unit.setdefault("UNIT_RULES", [])
+    return unit
+
+
 def test_movement_engagement_violates_enemy_cache_items_matches_full_scan() -> None:
     """Liste ennemis préfiltrée ≡ filtre inline sur ``units_cache`` (ez > 1)."""
-    units = [
+    units = [_fill(u) for u in [
         {
             "id": 1,
             "col": 10,
@@ -52,7 +68,7 @@ def test_movement_engagement_violates_enemy_cache_items_matches_full_scan() -> N
             "BASE_SIZE": 1,
             "BASE_SHAPE": "round",
         },
-    ]
+    ]]
     game_state: Dict[str, Any] = {
         "config": _board_config(),
         "board_cols": 40,
@@ -62,6 +78,7 @@ def test_movement_engagement_violates_enemy_cache_items_matches_full_scan() -> N
         "wall_hexes": set(),
         "units": units,
         "unit_by_id": _make_unit_by_id(units),
+        "inches_to_subhex": 1,
     }
     build_units_cache(game_state)
     units_cache = require_key(game_state, "units_cache")
@@ -133,7 +150,7 @@ def test_movement_engagement_violates_enemy_cache_items_matches_full_scan() -> N
 
 def test_pruned_enemy_horizon_matches_full_scan_with_far_dummy_enemy() -> None:
     """La prune spatiale (``_enemy_items_within_move_engagement_horizon``) ⊂ cache mais même verdict que le scan complet."""
-    units = [
+    units = [_fill(u) for u in [
         {
             "id": 1,
             "col": 20,
@@ -162,7 +179,7 @@ def test_pruned_enemy_horizon_matches_full_scan_with_far_dummy_enemy() -> None:
             "BASE_SIZE": 1,
             "BASE_SHAPE": "round",
         },
-    ]
+    ]]
     game_state: Dict[str, Any] = {
         "config": _board_config(),
         "board_cols": 80,
@@ -172,6 +189,7 @@ def test_pruned_enemy_horizon_matches_full_scan_with_far_dummy_enemy() -> None:
         "wall_hexes": set(),
         "units": units,
         "unit_by_id": _make_unit_by_id(units),
+        "inches_to_subhex": 1,
     }
     build_units_cache(game_state)
     units_cache = require_key(game_state, "units_cache")
@@ -234,6 +252,7 @@ def _run_pool(
     walls: Set[Tuple[int, int]] | None = None,
 ) -> Tuple[List[Tuple[int, int]], Set[Tuple[int, int]], Dict[str, Any]]:
     """Appelle ``movement_build_valid_destinations_pool`` (chemin unique vectorisé NumPy)."""
+    units = [_fill(u) for u in units]
     config = {
         "game_rules": {"engagement_zone": ez, "max_base_size_hex": 35},
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
@@ -247,6 +266,7 @@ def _run_pool(
         "wall_hexes": walls or set(),
         "units": units,
         "unit_by_id": _make_unit_by_id(units),
+        "inches_to_subhex": 1,
     }
     build_units_cache(game_state)
     build_enemy_adjacent_hexes(game_state, 0)
@@ -401,7 +421,7 @@ def test_vectorized_multi_hex_matches_oracle_mixed_square_enemy_ez10() -> None:
 
 def test_movement_build_valid_destinations_pool_deterministic() -> None:
     """Deux appels identiques → mêmes ancres et même zone d’empreinte."""
-    units = [
+    units = [_fill(u) for u in [
         {
             "id": 1,
             "col": 5,
@@ -421,7 +441,7 @@ def test_movement_build_valid_destinations_pool_deterministic() -> None:
             "BASE_SIZE": 1,
             "BASE_SHAPE": "round",
         },
-    ]
+    ]]
     game_state: Dict[str, Any] = {
         "config": {
             "game_rules": {"engagement_zone": 1},
@@ -434,6 +454,7 @@ def test_movement_build_valid_destinations_pool_deterministic() -> None:
         "wall_hexes": set(),
         "units": units,
         "unit_by_id": _make_unit_by_id(units),
+        "inches_to_subhex": 1,
     }
     build_units_cache(game_state)
     build_enemy_adjacent_hexes(game_state, 0)

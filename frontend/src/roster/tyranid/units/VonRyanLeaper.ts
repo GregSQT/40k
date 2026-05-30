@@ -32,11 +32,11 @@ export class VonRyanLeaper extends TroopMeleeTroop {
   ];
 
   // ICON
-  static ICON = "/icons/VonRyanLeapers.webp"; // Path relative to public folder
+  static ICON = "/icons/VonRyanLeaper.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 16; // Size of the base
   static ICON_SCALE = 2.2; // Size of the icon
-  static ILLUSTRATION_RATIO = 140; // Illustration size ratio in percent
+  static ILLUSTRATION_RATIO = 150; // Illustration size ratio in percent
 
   constructor(name: string, startPos: [number, number]) {
     super(name, VonRyanLeaper.HP_MAX, startPos);

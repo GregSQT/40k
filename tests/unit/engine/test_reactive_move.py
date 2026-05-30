@@ -19,13 +19,20 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
         "col": col,
         "row": row,
         "HP_CUR": hp,
+        "HP_MAX": hp,
+        "VALUE": 100,
+        "OC": 1,
         "BASE_SIZE": 1,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
         "T": 4,
         "ARMOR_SAVE": 4,
-        "INVUL_SAVE": 0,
+        "INVUL_SAVE": 7,
+        "SHOOT_LEFT": 1,
+        "ATTACK_LEFT": 1,
+        "RNG_WEAPONS": [],
+        "CC_WEAPONS": [],
     }
 
 
@@ -69,6 +76,7 @@ def _make_game_state(units: List[Dict[str, Any]], current_player: int = 1) -> Di
         "units_moved": set(),
         "los_cache": {},
         "hex_los_cache": {},
+        "inches_to_subhex": 1,
     }
     build_units_cache(gs)
     return gs
