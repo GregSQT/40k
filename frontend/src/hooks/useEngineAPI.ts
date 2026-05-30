@@ -3221,11 +3221,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const refreshSquadMovePlanValidity = useCallback(
     async (unitId: number, models: Record<string, { col: number; row: number }>) => {
       const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row]);
-      const result = await postEngineQuery({
-        action: "preview_move_plan",
-        unitId: String(unitId),
-        plan,
-      });
+      let result: Record<string, unknown> | null = null;
+      try {
+        result = await postEngineQuery({
+          action: "preview_move_plan",
+          unitId: String(unitId),
+          plan,
+        });
+      } catch (err) {
+        console.error(`[SQUAD-MOVE] validity ERROR unit=${unitId}`, err, { plan });
+        return;
+      }
       const perModelValid = (result?.per_model ?? {}) as Record<string, boolean>;
       const coherencyOk = result?.coherency_ok === true;
       const canValidate = result?.can_validate === true;
