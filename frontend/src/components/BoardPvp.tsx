@@ -1660,6 +1660,17 @@ export default function Board({
         if (!apUnit || String(apUnit.id) !== String(selectedUnitId)) return null;
         return { unit: apUnit, fromCol: apUnit.col, fromRow: apUnit.row };
       }
+      if (mode === "squadModelShoot") {
+        if (!squadShootPlan?.activeModelId) return null;
+        const shootUnit = units.find((u) => String(u.id) === String(squadShootPlan.unitId));
+        if (!shootUnit) return null;
+        const uc = gameState?.units_cache as
+          | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+          | undefined;
+        const pos = uc?.[String(squadShootPlan.unitId)]?.occupied_hexes_by_model?.[squadShootPlan.activeModelId];
+        if (!pos) return null;
+        return { unit: shootUnit, fromCol: pos[0], fromRow: pos[1] };
+      }
       const sel =
         selectedUnitId == null
           ? undefined
@@ -1721,6 +1732,9 @@ export default function Board({
     shootAdvanceLosAnchor?.col,
     shootAdvanceLosAnchor?.row,
     shootAdvanceLosAnchor,
+    squadShootPlan?.activeModelId,
+    squadShootPlan?.unitId,
+    gameState?.units_cache,
   ]);
 
   const effectiveBlinkingUnitsWithMovePreview = useMemo(() => {
@@ -4654,6 +4668,19 @@ export default function Board({
           fromCol: attackPreviewUnit.col,
           fromRow: attackPreviewUnit.row,
         };
+      }
+
+      if (phase === "shoot" && mode === "squadModelShoot") {
+        if (!squadShootPlanRef.current?.activeModelId) return null;
+        const plan = squadShootPlanRef.current;
+        const shootUnit = units.find((u) => String(u.id) === String(plan.unitId));
+        if (!shootUnit) return null;
+        const uc = gameState?.units_cache as
+          | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+          | undefined;
+        const pos = uc?.[String(plan.unitId)]?.occupied_hexes_by_model?.[plan.activeModelId];
+        if (!pos) return null;
+        return { unit: shootUnit, fromCol: pos[0], fromRow: pos[1] };
       }
 
       if (phase === "shoot" && selectedUnit) {
