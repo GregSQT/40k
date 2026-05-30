@@ -22,6 +22,7 @@ import {
   DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX,
   type HPBlinkContainer,
   type HpBarHtmlTooltipPayload,
+  pixiStagePointToClientScreen,
 } from "../utils/blinkingHPBar";
 // import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from "../utils/boardClickHandler";
@@ -1115,6 +1116,26 @@ export default function Board({
     };
   }, [handleBoardWheel]);
 
+  useEffect(() => {
+    const viewport = boardViewportRef.current;
+    if (!viewport) return;
+    const onScroll = () => {
+      const app = appRef.current;
+      if (!app) return;
+      setBlinkProbHtmlByUnitId((prev) => {
+        if (Object.keys(prev).length === 0) return prev;
+        const next: typeof prev = {};
+        for (const [idStr, data] of Object.entries(prev)) {
+          const screen = pixiStagePointToClientScreen(app, data.stageX, data.stageY);
+          next[Number(idStr)] = { ...data, left: screen.x, top: screen.y };
+        }
+        return next;
+      });
+    };
+    viewport.addEventListener("scroll", onScroll, { passive: true });
+    return () => viewport.removeEventListener("scroll", onScroll);
+  }, []);
+
   const handleBoardPanStart = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       const viewport = boardViewportRef.current;
@@ -1263,6 +1284,8 @@ export default function Board({
       {
         left: number;
         top: number;
+        stageX: number;
+        stageY: number;
         label: string;
         showCoverShield: boolean;
         probabilityHelpText: string;
@@ -1360,6 +1383,8 @@ export default function Board({
           [payload.unitId]: {
             left: payload.left,
             top: payload.top,
+            stageX: payload.stageX,
+            stageY: payload.stageY,
             label: payload.label,
             showCoverShield: payload.showCoverShield,
             probabilityHelpText: payload.probabilityHelpText,

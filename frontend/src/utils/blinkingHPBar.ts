@@ -53,6 +53,9 @@ export type BlinkProbHtmlPayload =
       /** Position fixe (px) : le conteneur est centré horizontalement avec `translateX(-50%)`. */
       left: number;
       top: number;
+      /** Coordonnées PIXI stage (avant viewport scroll/zoom CSS) — pour recalculer la position après scroll. */
+      stageX: number;
+      stageY: number;
       label: string;
       showCoverShield: boolean;
       probabilityHelpText: string;
@@ -562,6 +565,8 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     unitId: unitIdNum,
     left: screenPos.x,
     top: screenPos.y,
+    stageX: barCenterX,
+    stageY: squareY,
     label: probLabel,
     showCoverShield: hasCoverIcon,
     probabilityHelpText,
