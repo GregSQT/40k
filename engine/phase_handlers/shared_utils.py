@@ -3641,6 +3641,8 @@ def resolve_squad_shoot(
         "events": [],
     }
     targets_meta: Dict[str, Dict[str, Any]] = {}
+    # Accumulation par (weapon_name, target_sid) pour émettre 1 log par arme par escouade
+    weapon_groups: Dict[tuple, Dict[str, Any]] = {}
     import random
     for intent in intents:
         attacker_mid = intent["model_id"]
@@ -3688,6 +3690,15 @@ def resolve_squad_shoot(
         dmg_raw = weapon.get("DMG", 1)
         wound_th_lookup: Dict[int, int] = {}  # cache wound threshold by T
 
+        # Pré-calcul des seuils pour l'affichage (Hit/Wound/Save)
+        _pre_alive = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
+        display_wth = 0
+        display_save_th = 0
+        if _pre_alive:
+            _pre_tgt = models_cache[_pre_alive[0]]
+            display_wth = wound_threshold(strength, int(_pre_tgt["T"]))
+            display_save_th = save_threshold(int(_pre_tgt["ARMOR_SAVE"]), int(_pre_tgt.get("INVUL_SAVE", 7)), ap)
+
         intent_attacks = 0
         intent_hits = 0
         intent_wounds = 0
@@ -3695,7 +3706,6 @@ def resolve_squad_shoot(
         intent_damage = 0
         intent_kills = 0
         killed_model_ids: List[str] = []
-        per_attack_logs: List[str] = []
 
         for _ in range(int(n_attacks)):
             # Recheck cible alive et attaquant alive avant chaque attaque
@@ -3709,10 +3719,8 @@ def resolve_squad_shoot(
             # 1. Hit roll
             hit_roll = random.randint(1, 6)
             if hit_roll == 1:  # 1 always miss (regle 10e)
-                per_attack_logs.append(f"Hit:{bs}+:{hit_roll}(FAIL)")
                 continue
             if hit_roll < bs:
-                per_attack_logs.append(f"Hit:{bs}+:{hit_roll}(FAIL)")
                 continue
             summary["hits"] += 1
             intent_hits += 1
@@ -3725,10 +3733,8 @@ def resolve_squad_shoot(
                 wound_th_lookup[t_target] = wth
             wound_roll = random.randint(1, 6)
             if wound_roll == 1:  # 1 always fail
-                per_attack_logs.append(f"Hit:{bs}+:{hit_roll}(HIT) Wound:{wth}+:{wound_roll}(FAIL)")
                 continue
             if wound_roll < wth:
-                per_attack_logs.append(f"Hit:{bs}+:{hit_roll}(HIT) Wound:{wth}+:{wound_roll}(FAIL)")
                 continue
             summary["wounds"] += 1
             intent_wounds += 1
@@ -3738,7 +3744,6 @@ def resolve_squad_shoot(
             save_th = save_threshold(sv, invul, ap)
             save_roll = random.randint(1, 6)
             if save_roll != 1 and save_roll >= save_th:
-                per_attack_logs.append(f"Hit:{bs}+:{hit_roll}(HIT) Wound:{wth}+:{wound_roll}(HIT) Save:{save_th}+:{save_roll}(PASS)")
                 continue  # save reussi
             summary["failed_saves"] += 1
             intent_failed_saves += 1
@@ -3748,11 +3753,9 @@ def resolve_squad_shoot(
             except Exception:
                 dmg = int(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1
             if dmg <= 0:
-                per_attack_logs.append(f"Hit:{bs}+:{hit_roll}(HIT) Wound:{wth}+:{wound_roll}(HIT) Save:{save_th}+:{save_roll}(FAIL) Dmg:0HP")
                 continue
             res = _allocate_damage_to_squad(game_state, target_sid, dmg)
             if res is None:
-                per_attack_logs.append(f"Hit:{bs}+:{hit_roll}(HIT) Wound:{wth}+:{wound_roll}(HIT) Save:{save_th}+:{save_roll}(FAIL) Dmg:{dmg}HP [WIPE]")
                 break  # cible wipe
             summary["damage_total"] += int(res["damage_dealt"])
             intent_damage += int(res["damage_dealt"])
@@ -3760,7 +3763,6 @@ def resolve_squad_shoot(
                 summary["models_killed"] += 1
                 intent_kills += 1
                 killed_model_ids.append(str(res["model_id"]))
-            per_attack_logs.append(f"Hit:{bs}+:{hit_roll}(HIT) Wound:{wth}+:{wound_roll}(HIT) Save:{save_th}+:{save_roll}(FAIL) Dmg:{int(res['damage_dealt'])}HP")
             summary["events"].append({
                 "attacker": attacker_mid, "target": res["model_id"],
                 "target_squad_id": target_sid,
@@ -3773,54 +3775,79 @@ def resolve_squad_shoot(
             sl = int(models_cache[attacker_mid].get("SHOOT_LEFT", 0))  # get allowed
             models_cache[attacker_mid]["SHOOT_LEFT"] = max(0, sl - 1)
 
-        # Log du tir par figurine
+        # Accumulation par groupe (weapon, target) — log émis après la boucle
         if intent_attacks > 0:
-            attacker_squad_id_str = str(attacker.get("squad_id", attacker_mid))
             weapon_name = weapon.get("display_name", weapon.get("NAME", weapon.get("name", "")))
-            weapon_suffix = f" [{weapon_name}]" if weapon_name else ""
-            ac = int(attacker.get("col", 0))  # get allowed
-            ar = int(attacker.get("row", 0))  # get allowed
-            tgt_uc = game_state.get("units_cache", {}).get(target_sid, {})  # get allowed
-            tc = int(tgt_uc.get("col", 0))  # get allowed
-            tr = int(tgt_uc.get("row", 0))  # get allowed
-            attack_log = " / ".join(per_attack_logs) if per_attack_logs else (
-                f"{intent_attacks} att, {intent_hits} hits, "
-                f"{intent_wounds} wounds, {intent_failed_saves} unsaved"
-            )
-            msg = (
-                f"Unit {attacker_squad_id_str}({ac},{ar}) SHOT"
-                f" at Unit {target_sid}({tc},{tr}){weapon_suffix}"
-                f" - {attack_log}"
-            )
-            append_action_log(game_state, {
-                "type": "shoot",
-                "message": msg,
-                "turn": game_state.get("turn", 0),  # get allowed
-                "phase": "shoot",
-                "shooterId": attacker_squad_id_str,
-                "targetId": target_sid,
-                "weaponName": weapon_name if weapon_name else None,
-                "player": int(attacker.get("player", 0)),  # get allowed
-                "shooterCol": ac,
-                "shooterRow": ar,
-                "targetCol": tc,
-                "targetRow": tr,
-                "damage": intent_damage,
-                "target_died": intent_kills > 0,
-                "timestamp": "server_time",
-                "is_ai_action": int(attacker.get("player", 0)) == 1,  # get allowed
-            })
-            for dead_mid in killed_model_ids:
-                append_action_log(game_state, {
-                    "type": "death",
-                    "message": f"Unit {target_sid} model {dead_mid} DESTROYED",
-                    "turn": game_state.get("turn", 0),  # get allowed
-                    "phase": "shoot",
-                    "targetId": target_sid,
-                    "unitId": target_sid,
-                    "player": int(tgt_uc.get("player", 0)),  # get allowed
-                    "timestamp": "server_time",
-                })
+            group_key = (weapon_name, target_sid)
+            if group_key not in weapon_groups:
+                weapon_groups[group_key] = {
+                    "attacker_squad_id": str(attacker.get("squad_id", attacker_mid)),
+                    "weapon_name": weapon_name,
+                    "target_sid": target_sid,
+                    "bs": bs,
+                    "display_wth": display_wth,
+                    "display_save_th": display_save_th,
+                    "player": int(attacker.get("player", 0)),  # get allowed
+                    "attacks": 0,
+                    "damage": 0,
+                    "kills": 0,
+                    "killed_model_ids": [],
+                }
+            g = weapon_groups[group_key]
+            g["attacks"] += intent_attacks
+            g["damage"] += intent_damage
+            g["kills"] += intent_kills
+            g["killed_model_ids"].extend(killed_model_ids)
+
+    # Emit 1 log par groupe (weapon, target) pour toute l'escouade
+    for (weapon_name_g, target_sid_g), g in weapon_groups.items():
+        attacker_squad_id_str = g["attacker_squad_id"]
+        sq_uc = game_state.get("units_cache", {}).get(attacker_squad_id_str, {})  # get allowed
+        tgt_uc = game_state.get("units_cache", {}).get(target_sid_g, {})  # get allowed
+        ac = int(sq_uc.get("col", 0))  # get allowed
+        ar = int(sq_uc.get("row", 0))  # get allowed
+        tc = int(tgt_uc.get("col", 0))  # get allowed
+        tr = int(tgt_uc.get("row", 0))  # get allowed
+        weapon_suffix = f" [{weapon_name_g}]" if weapon_name_g else ""
+        attack_log = (
+            f"Shots:{g['attacks']} - "
+            f"Hit:{g['bs']}+ Wound:{g['display_wth']}+ Save:{g['display_save_th']}+ - "
+            f"HP lost:{g['damage']} Killed:{g['kills']}"
+        )
+        msg = (
+            f"Unit {attacker_squad_id_str}({ac},{ar}) SHOT"
+            f" at Unit {target_sid_g}({tc},{tr}){weapon_suffix}"
+            f" - {attack_log}"
+        )
+        append_action_log(game_state, {
+            "type": "shoot",
+            "message": msg,
+            "turn": game_state.get("turn", 0),  # get allowed
+            "phase": "shoot",
+            "shooterId": attacker_squad_id_str,
+            "targetId": target_sid_g,
+            "weaponName": weapon_name_g if weapon_name_g else None,
+            "player": g["player"],
+            "shooterCol": ac,
+            "shooterRow": ar,
+            "targetCol": tc,
+            "targetRow": tr,
+            "damage": g["damage"],
+            "target_died": g["kills"] > 0,
+            "timestamp": "server_time",
+            "is_ai_action": g["player"] == 1,
+        })
+        # for dead_mid in g["killed_model_ids"]:
+        #     append_action_log(game_state, {
+        #         "type": "death",
+        #         #"message": f"Unit {target_sid_g} model {dead_mid} DESTROYED",
+        #         "turn": game_state.get("turn", 0),
+        #         "phase": "shoot",
+        #         "targetId": target_sid_g,
+        #         "unitId": target_sid_g,
+        #         "player": int(tgt_uc.get("player", 0)),
+        #         "timestamp": "server_time",
+        #     })
 
     # Meta cibles + escouades wipe (pour reward shaping proportionnel)
     summary["targets_meta"] = targets_meta

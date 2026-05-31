@@ -473,6 +473,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   squadShootPlanRef.current = squadShootPlan;
   /** Incrémenté à chaque session de tir squad. Invalide les select_model obsolètes. */
   const squadShootSessionRef = useRef(0);
+  /** Guard contre le double-clic : bloque un second squad_shoot_activate concurrent. */
+  const squadShootActivatingRef = useRef(false);
   const [attackPreview, setAttackPreview] = useState<{
     unitId: number;
     col: number;
@@ -3531,10 +3533,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Entre en mode tir par-figurine : active l escouade + sélectionne la fig cliquée. */
   const handleStartSquadModelShoot = useCallback(
     async (unitId: number | string, initialModelId?: string) => {
+      if (squadShootActivatingRef.current) return;
+      squadShootActivatingRef.current = true;
       const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
       const models = Object.keys(readSquadModelPositions(uid));
       if (models.length === 0) {
         console.warn(`[SQUAD-SHOOT] start ABORT unit=${uid} (aucune fig)`);
+        squadShootActivatingRef.current = false;
         return;
       }
       try {
@@ -3542,6 +3547,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       } catch (e) {
         console.error("[SQUAD-SHOOT] activate FAILED", e);
         setError(`Squad shoot activate failed: ${formatApiConnectionError(e)}`);
+        squadShootActivatingRef.current = false;
         return;
       }
       squadShootSessionRef.current += 1;
@@ -3558,6 +3564,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (initialModelId) {
         await selectShootModelForUnit(uid, initialModelId);
       }
+      squadShootActivatingRef.current = false;
     },
     [readSquadModelPositions, executeAction, selectShootModelForUnit]
   );
