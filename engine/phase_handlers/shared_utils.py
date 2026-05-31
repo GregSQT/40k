@@ -3695,6 +3695,7 @@ def resolve_squad_shoot(
         intent_damage = 0
         intent_kills = 0
         killed_model_ids: List[str] = []
+        per_attack_logs: List[str] = []
 
         for _ in range(int(n_attacks)):
             # Recheck cible alive et attaquant alive avant chaque attaque
@@ -3708,8 +3709,10 @@ def resolve_squad_shoot(
             # 1. Hit roll
             hit_roll = random.randint(1, 6)
             if hit_roll == 1:  # 1 always miss (regle 10e)
+                per_attack_logs.append(f"Hit:{bs}+:{hit_roll}(FAIL)")
                 continue
             if hit_roll < bs:
+                per_attack_logs.append(f"Hit:{bs}+:{hit_roll}(FAIL)")
                 continue
             summary["hits"] += 1
             intent_hits += 1
@@ -3722,8 +3725,10 @@ def resolve_squad_shoot(
                 wound_th_lookup[t_target] = wth
             wound_roll = random.randint(1, 6)
             if wound_roll == 1:  # 1 always fail
+                per_attack_logs.append(f"Hit:{bs}+:{hit_roll}(HIT) Wound:{wth}+:{wound_roll}(FAIL)")
                 continue
             if wound_roll < wth:
+                per_attack_logs.append(f"Hit:{bs}+:{hit_roll}(HIT) Wound:{wth}+:{wound_roll}(FAIL)")
                 continue
             summary["wounds"] += 1
             intent_wounds += 1
@@ -3733,6 +3738,7 @@ def resolve_squad_shoot(
             save_th = save_threshold(sv, invul, ap)
             save_roll = random.randint(1, 6)
             if save_roll != 1 and save_roll >= save_th:
+                per_attack_logs.append(f"Hit:{bs}+:{hit_roll}(HIT) Wound:{wth}+:{wound_roll}(HIT) Save:{save_th}+:{save_roll}(PASS)")
                 continue  # save reussi
             summary["failed_saves"] += 1
             intent_failed_saves += 1
@@ -3742,9 +3748,11 @@ def resolve_squad_shoot(
             except Exception:
                 dmg = int(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1
             if dmg <= 0:
+                per_attack_logs.append(f"Hit:{bs}+:{hit_roll}(HIT) Wound:{wth}+:{wound_roll}(HIT) Save:{save_th}+:{save_roll}(FAIL) Dmg:0HP")
                 continue
             res = _allocate_damage_to_squad(game_state, target_sid, dmg)
             if res is None:
+                per_attack_logs.append(f"Hit:{bs}+:{hit_roll}(HIT) Wound:{wth}+:{wound_roll}(HIT) Save:{save_th}+:{save_roll}(FAIL) Dmg:{dmg}HP [WIPE]")
                 break  # cible wipe
             summary["damage_total"] += int(res["damage_dealt"])
             intent_damage += int(res["damage_dealt"])
@@ -3752,6 +3760,7 @@ def resolve_squad_shoot(
                 summary["models_killed"] += 1
                 intent_kills += 1
                 killed_model_ids.append(str(res["model_id"]))
+            per_attack_logs.append(f"Hit:{bs}+:{hit_roll}(HIT) Wound:{wth}+:{wound_roll}(HIT) Save:{save_th}+:{save_roll}(FAIL) Dmg:{int(res['damage_dealt'])}HP")
             summary["events"].append({
                 "attacker": attacker_mid, "target": res["model_id"],
                 "target_squad_id": target_sid,
@@ -3767,21 +3776,17 @@ def resolve_squad_shoot(
         # Log du tir par figurine
         if intent_attacks > 0:
             attacker_squad_id_str = str(attacker.get("squad_id", attacker_mid))
-            weapon_name = weapon.get("NAME", weapon.get("name", ""))
+            weapon_name = weapon.get("display_name", weapon.get("NAME", weapon.get("name", "")))
             weapon_suffix = f" [{weapon_name}]" if weapon_name else ""
             ac = int(attacker.get("col", 0))  # get allowed
             ar = int(attacker.get("row", 0))  # get allowed
             tgt_uc = game_state.get("units_cache", {}).get(target_sid, {})  # get allowed
             tc = int(tgt_uc.get("col", 0))  # get allowed
             tr = int(tgt_uc.get("row", 0))  # get allowed
-            attack_log = (
+            attack_log = " / ".join(per_attack_logs) if per_attack_logs else (
                 f"{intent_attacks} att, {intent_hits} hits, "
                 f"{intent_wounds} wounds, {intent_failed_saves} unsaved"
             )
-            if intent_damage > 0:
-                attack_log += f", {intent_damage} dmg"
-            if intent_kills > 0:
-                attack_log += f", {intent_kills} killed"
             msg = (
                 f"Unit {attacker_squad_id_str}({ac},{ar}) SHOT"
                 f" at Unit {target_sid}({tc},{tr}){weapon_suffix}"

@@ -6323,12 +6323,17 @@ export default function Board({
             mode === "advancePreview" ||
             mode === "movePreview" ||
             mode === "targetPreview");
-        const shouldShowShootingActionIcons =
-          phase === "shoot" &&
-          unit.player === current_player &&
-          isActiveShootingFromState &&
-          isExplicitlyActivatedInUi;
-        if (shouldShowShootingActionIcons) {
+        const isSquadShootActivated =
+          mode === "squadModelShoot" && selectedUnitId === unitIdNum;
+        const isActiveShooterForCurrentPlayer =
+          phase === "shoot" && unit.player === current_player && isActiveShootingFromState;
+        // Advance : mono-fig et multi-fig (squadModelShoot).
+        const shouldShowAdvanceIcon =
+          isActiveShooterForCurrentPlayer && (isExplicitlyActivatedInUi || isSquadShootActivated);
+        // Weapon : mono-fig et multi-fig, avec >1 arme utilisable.
+        const shouldShowWeaponIcon =
+          isActiveShooterForCurrentPlayer && (isExplicitlyActivatedInUi || isSquadShootActivated);
+        if (shouldShowAdvanceIcon || shouldShowWeaponIcon) {
           /* Taille lue depuis :root (App.css) — pas de fallback TS ici. Pour agrandir/réduire :
              --icon-advance-size, --icon-square-icon-scale, --shooting-overlay-action-icon-boost */
           const iconSize = getRequiredCssNumber("--icon-advance-size");
@@ -6339,48 +6344,52 @@ export default function Board({
           const squareSize = HEX_RADIUS * squareSizeRatio;
           const positionY = barY - squareSize / 2 - Math.max(2, HP_BAR_HEIGHT * 0.7);
 
-          const canAdvance = (() => {
-            if (unitsFled?.includes(unitIdNum)) return false;
-            const unitsAdvanced = gameState?.unitsAdvanced || [];
-            if (unitsAdvanced.includes(unitIdNum)) return false;
-            const isAdjacentToEnemy = units.some(
-              (enemy: Unit) =>
-                enemy.player !== unit.player && enemy.HP_CUR > 0 && areUnitsAdjacent(unit, enemy)
-            );
-            return !isAdjacentToEnemy;
-          })();
+          if (shouldShowAdvanceIcon) {
+            const canAdvance = (() => {
+              if (unitsFled?.includes(unitIdNum)) return false;
+              const unitsAdvanced = gameState?.unitsAdvanced || [];
+              if (unitsAdvanced.includes(unitIdNum)) return false;
+              const isAdjacentToEnemy = units.some(
+                (enemy: Unit) =>
+                  enemy.player !== unit.player && enemy.HP_CUR > 0 && areUnitsAdjacent(unit, enemy)
+              );
+              return !isAdjacentToEnemy;
+            })();
 
-          // Icône « lancer l’advance » : règle locale ``canAdvance`` (pas adjacent, pas déjà avancé, etc.).
-          // Masquée seulement pendant ``advancePreview`` (choix d’hex), pour éviter un second clic ``advance``.
-          const showStartAdvanceIcon = mode !== "advancePreview";
-          if (canAdvance && showStartAdvanceIcon && onAdvance && !hideAdvanceIconForTutorial) {
-            addOverlayIcon(
-              "/icons/Action_Logo/3-5 - Advance.png",
-              centerX,
-              positionY,
-              iconDisplaySize,
-              () => onAdvance(unitIdNum),
-              `advance-${unitIdNum}`
-            );
+            // Masquée seulement pendant ``advancePreview`` (choix d’hex).
+            const showStartAdvanceIcon = mode !== "advancePreview";
+            if (canAdvance && showStartAdvanceIcon && onAdvance && !hideAdvanceIconForTutorial) {
+              addOverlayIcon(
+                "/icons/Action_Logo/3-5 - Advance.png",
+                centerX,
+                positionY,
+                iconDisplaySize,
+                () => onAdvance(unitIdNum),
+                `advance-${unitIdNum}`
+              );
+            }
           }
 
-          const availableWeapons = unit.available_weapons;
-          if (availableWeapons?.some((w) => (w.can_use ?? w.canUse) === true)) {
-            const spacing = iconDisplaySize * 1.2;
-            addOverlayIcon(
-              "/icons/Action_Logo/3-1 - Gun_Choice.png",
-              centerX + spacing,
-              positionY,
-              iconDisplaySize,
-              () => {
-                window.dispatchEvent(
-                  new CustomEvent("boardWeaponSelectionClick", {
-                    detail: { unitId: unitIdNum },
-                  })
-                );
-              },
-              `weapon-${unitIdNum}`
-            );
+          if (shouldShowWeaponIcon) {
+            const availableWeapons = unit.available_weapons;
+            const usableWeapons = availableWeapons?.filter((w) => (w.can_use ?? w.canUse) === true);
+            if (usableWeapons && usableWeapons.length > 1) {
+              const spacing = iconDisplaySize * 1.2;
+              addOverlayIcon(
+                "/icons/Action_Logo/3-1 - Gun_Choice.png",
+                centerX + spacing,
+                positionY,
+                iconDisplaySize,
+                () => {
+                  window.dispatchEvent(
+                    new CustomEvent("boardWeaponSelectionClick", {
+                      detail: { unitId: unitIdNum },
+                    })
+                  );
+                },
+                `weapon-${unitIdNum}`
+              );
+            }
           }
         }
       }
@@ -6762,6 +6771,7 @@ export default function Board({
     const unit = units.find((u) => u.id === weaponSelectionMenu.unitId);
     const weapon = unit?.RNG_WEAPONS?.[weaponIndex];
     const weaponDisplayName = weapon?.display_name ?? undefined;
+    const isSquadMode = mode === "squadModelShoot";
 
     // Close menu immediately (optimistic update)
     setWeaponSelectionMenu(null);
@@ -6772,7 +6782,7 @@ export default function Board({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "select_weapon",
+          action: isSquadMode ? "squad_select_weapon" : "select_weapon",
           unitId: weaponSelectionMenu.unitId.toString(),
           weaponIndex: weaponIndex,
           autoSelectWeapon: autoSelectWeapon,
@@ -6789,7 +6799,7 @@ export default function Board({
       }
       window.dispatchEvent(
         new CustomEvent("weaponSelected", {
-          detail: { gameState: data.game_state, weaponDisplayName },
+          detail: { gameState: data.game_state, weaponDisplayName, availableWeapons: data.result?.available_weapons },
         })
       );
     } catch (error) {
@@ -6810,19 +6820,15 @@ export default function Board({
 
         const availableWeapons = unit.available_weapons;
 
-        if (!availableWeapons || availableWeapons.length === 0) {
-          throw new Error(`Unit ${unit.id} missing available_weapons`);
+        if (availableWeapons && availableWeapons.length > 0) {
+          return availableWeapons.map((w) => {
+            const canUse = w.can_use ?? w.canUse;
+            if (canUse == null) throw new Error(`Weapon ${w.index} of unit ${unit.id} missing can_use`);
+            return { index: w.index, weapon: w.weapon, canUse, reason: w.reason };
+          });
         }
-        return availableWeapons.map((w) => {
-          const canUse = w.can_use ?? w.canUse;
-          if (canUse == null) throw new Error(`Weapon ${w.index} of unit ${unit.id} missing can_use`);
-          return {
-            index: w.index,
-            weapon: w.weapon,
-            canUse,
-            reason: w.reason,
-          };
-        });
+        // Fallback : available_weapons pas encore patchée (ex. squad entre squad_shoot_activate et réponse).
+        return unit.RNG_WEAPONS.map((w, idx) => ({ index: idx, weapon: w, canUse: true, reason: undefined }));
       })()
     : [];
 

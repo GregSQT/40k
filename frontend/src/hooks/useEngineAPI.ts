@@ -913,8 +913,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const weaponSelectedHandler = (e: Event) => {
       interface WeaponSelectedEventDetail {
         gameState: APIGameState;
+        availableWeapons?: Array<{ index: number; weapon: unknown; can_use?: boolean; canUse?: boolean; reason?: string }>;
       }
-      const { gameState: newGameState } = (e as CustomEvent<WeaponSelectedEventDetail>).detail;
+      const { gameState: newGameState, availableWeapons } = (e as CustomEvent<WeaponSelectedEventDetail>).detail;
       if (newGameState) {
         if (newGameState.units && newGameState.active_shooting_unit) {
           const activeId = newGameState.active_shooting_unit.toString();
@@ -926,6 +927,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             updatedUnits[unitIndex] = {
               ...updatedUnits[unitIndex],
               manualWeaponSelected: true,
+              ...(availableWeapons ? { available_weapons: availableWeapons } : {}),
             };
             newGameState.units = updatedUnits;
           }
@@ -3623,15 +3625,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       for (const modelId of plan.models) {
         console.log(`[SQUAD-SHOOT][auto] loop model=${modelId} alreadyAssigned=${!!alreadyAssigned[modelId]}`);
         if (alreadyAssigned[modelId]) continue; // déjà assignée
-        try {
-          await executeAction({
-            action: "squad_shoot_assign",
-            unitId: String(plan.unitId),
-            modelId,
-            targetId,
-          });
-        } catch {
-          // Backend rejette (hors portée ou pas de LoS) → skip silencieux.
+        const assignResult = await executeAction({
+          action: "squad_shoot_assign",
+          unitId: String(plan.unitId),
+          modelId,
+          targetId,
+        });
+        if (!assignResult || assignResult.success === false) {
           console.log(`[SQUAD-SHOOT][auto] model=${modelId} rejeté par backend, skip`);
           continue;
         }

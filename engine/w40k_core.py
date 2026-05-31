@@ -4119,10 +4119,11 @@ class W40KEngine(gym.Env):
         """Tir PvP humain par figurine (pipeline squad, shared_utils).
 
         Actions frontend :
-          - squad_shoot_activate : demarre l activation tir de l escouade (SHOOT_LEFT/pending).
-          - squad_shoot_assign   : assigne la cible d UNE figurine (modelId -> targetId).
-          - squad_shoot_unassign : retire la cible d une figurine.
-          - squad_shoot_validate : lock + resolution simultanee + end_activation.
+          - squad_shoot_activate  : demarre l activation tir de l escouade (SHOOT_LEFT/pending).
+          - squad_select_weapon   : change l arme pour toutes les figs de l escouade.
+          - squad_shoot_assign    : assigne la cible d UNE figurine (modelId -> targetId).
+          - squad_shoot_unassign  : retire la cible d une figurine.
+          - squad_shoot_validate  : lock + resolution simultanee + end_activation.
         Le pipeline mono-fig legacy reste intact pour l IA/training.
         """
         from engine.phase_handlers.shared_utils import (
@@ -4135,14 +4136,59 @@ class W40KEngine(gym.Env):
             clear_pending_shoot_intent,
         )
         from engine.phase_handlers.generic_handlers import end_activation
+        from engine.phase_handlers.shooting_handlers import (
+            weapon_availability_check,
+            _is_adjacent_to_enemy_within_cc_range,
+        )
 
         name = action.get("action")
         squad_id = str(require_key(action, "unitId"))
 
+        def _squad_available_weapons(unit: Dict[str, Any]) -> List[Dict[str, Any]]:
+            """Calcule available_weapons pour le frontend (icone arme + dropdown)."""
+            weapon_rule = self.game_state.get("weapon_rule", 1)
+            adjacent = _is_adjacent_to_enemy_within_cc_range(self.game_state, unit)
+            pool = weapon_availability_check(self.game_state, unit, weapon_rule, 0, 1 if adjacent else 0)
+            return [
+                {"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")}
+                for w in pool
+            ]
+
         if name == "squad_shoot_activate":
             squad_shooting_unit_activation_start(self.game_state, squad_id)
             self.game_state["active_shooting_unit"] = squad_id
-            return True, {"action": name, "unitId": squad_id, "activation_started": True}
+            unit = get_unit_by_id(squad_id, self.game_state)
+            available_weapons = _squad_available_weapons(unit) if unit is not None else []
+            return True, {"action": name, "unitId": squad_id, "activation_started": True, "available_weapons": available_weapons}
+
+        if name == "squad_select_weapon":
+            weapon_index_raw = action.get("weaponIndex")
+            if weapon_index_raw is None:
+                return False, {"error": "missing_weapon_index"}
+            try:
+                weapon_index = int(weapon_index_raw)
+            except (TypeError, ValueError):
+                return False, {"error": "invalid_weapon_index_type"}
+            unit = get_unit_by_id(squad_id, self.game_state)
+            if unit is None:
+                return False, {"error": "unit_not_found", "unitId": squad_id}
+            rng_weapons = require_key(unit, "RNG_WEAPONS")
+            if weapon_index < 0 or weapon_index >= len(rng_weapons):
+                return False, {"error": "invalid_weapon_index", "weaponIndex": weapon_index}
+            unit["selectedRngWeaponIndex"] = weapon_index
+            unit["_manual_weapon_selected"] = True
+            unit["manualWeaponSelected"] = True
+            # Propage le choix d arme a chaque figurine du squad.
+            models_cache = self.game_state.get("models_cache", {})
+            squad_models_map = self.game_state.get("squad_models", {})
+            for mid in squad_models_map.get(squad_id, []):
+                m = models_cache.get(mid)
+                if m is not None:
+                    model_weapons = m.get("RNG_WEAPONS", [])
+                    if weapon_index < len(model_weapons):
+                        m["selectedRngWeaponIndex"] = weapon_index
+            available_weapons = _squad_available_weapons(unit)
+            return True, {"action": name, "unitId": squad_id, "available_weapons": available_weapons}
 
         if name == "squad_shoot_select_model":
             # Read-only : cibles valides de la fig (alimente le HP blink frontend).
@@ -4156,7 +4202,10 @@ class W40KEngine(gym.Env):
         if name == "squad_shoot_assign":
             model_id = str(require_key(action, "modelId"))
             target_id = str(require_key(action, "targetId"))
-            intent = squad_declare_shoot_model(self.game_state, squad_id, model_id, target_id)
+            try:
+                intent = squad_declare_shoot_model(self.game_state, squad_id, model_id, target_id)
+            except ValueError as e:
+                return False, {"error": "cannot_shoot", "reason": str(e)}
             return True, {
                 "action": name, "unitId": squad_id, "intent": intent,
                 "declarations": list(self.game_state["pending_squad_shoot_intents"].get(squad_id, [])),  # get allowed
@@ -4660,8 +4709,8 @@ class W40KEngine(gym.Env):
             _t_ps1 = time.perf_counter()
         # Tir PvP humain par figurine : pipeline squad (shared_utils), pas le legacy mono-fig.
         if action.get("action") in (
-            "squad_shoot_activate", "squad_shoot_select_model", "squad_shoot_assign",
-            "squad_shoot_unassign", "squad_shoot_validate", "squad_shoot_cancel",
+            "squad_shoot_activate", "squad_select_weapon", "squad_shoot_select_model",
+            "squad_shoot_assign", "squad_shoot_unassign", "squad_shoot_validate", "squad_shoot_cancel",
         ):
             return self._process_squad_manual_shoot(action)
         # Pure delegation - handler manages initialization, player progression, everything

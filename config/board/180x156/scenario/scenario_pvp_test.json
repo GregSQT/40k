@@ -9,13 +9,13 @@
     { "id": 4, "unit_type": "ApothecaryBiologis",                  "player": 1, "col": 164, "row": 102 },
     { "id": 5, "unit_type": "DreadnoughtBallistus",                "player": 1, "col": 170, "row": 115 },
     {
-      "id": 6, "unit_type": "SternguardVeteranBoltRifle", "player": 1, "col": 124, "row": 78,
+      "id": 6, "unit_type": "SternguardVeteranBoltRifle", "player": 1, "col": 94, "row": 78,
       "models": [
-        { "col": 124, "row": 78 },
-        { "col": 130, "row": 78 },
-        { "col": 136, "row": 78 },
-        { "col": 127, "row": 84 },
-        { "col": 133, "row": 84, "unit_type": "SternguardVeteranSergeantPowerFist" }
+        { "col": 94, "row": 78 },
+        { "col": 100, "row": 78 },
+        { "col": 106, "row": 78 },
+        { "col": 97, "row": 84 },
+        { "col": 103, "row": 84, "unit_type": "SternguardVeteranSergeantPowerFist" }
       ]
     },
     {
