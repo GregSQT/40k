@@ -15,7 +15,7 @@ from .generic_handlers import end_activation
 from shared.data_validation import require_key, require_present
 from engine.action_log_utils import append_action_log
 from engine.hex_utils import hex_distance as _hex_distance
-from engine.game_utils import add_console_log, safe_print, add_debug_file_log
+from engine.game_utils import add_console_log, safe_print, add_debug_file_log, _write_diagnostic_to_debug_log
 from engine.combat_utils import (
     normalize_coordinates,
     get_unit_by_id,
@@ -650,7 +650,8 @@ def _charge_reverse_goal_bfs_for_eligibility(
         for _eid, _ee in indexed_enemy_engagement:
             if _ee["BASE_SHAPE"] == "round":
                 _e_bs = _ee["BASE_SIZE"]
-                _e_r = max(1, (_e_bs + 1) // 2)
+                _e_bs_int = max(_e_bs) if isinstance(_e_bs, (list, tuple)) else int(_e_bs)
+                _e_r = max(1, (_e_bs_int + 1) // 2)
                 _rr_proximity[_eid] = engagement_zone + _mover_r + _e_r + 1
 
     goals: List[Tuple[int, int]] = []
@@ -1822,7 +1823,8 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
             early_exit_if_valid=True,
         )
     except Exception as e:
-        # If BFS fails, log error and return False (no valid targets)
+        import traceback
+        _write_diagnostic_to_debug_log(f"[HVT BFS EXCEPTION] unit={_uid} error={e!r}\n{traceback.format_exc()}")
         add_console_log(game_state, f"ERROR: BFS failed for unit {unit['id']}: {str(e)}")
         if _perf and _t_hvt0 is not None:
             append_perf_timing_line(
@@ -1997,6 +1999,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     unit_id_str = str(unit["id"])
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
     CHARGE_MAX_DISTANCE = require_key(game_rules, "charge_max_distance")
+    CHARGE_MAX_DISTANCE_SUBHEX = CHARGE_MAX_DISTANCE
     tid_arg: Optional[str] = str(target_id) if target_id is not None else None
     bfs_max_distance = _charge_bfs_max_distance(game_state, unit_id_str, int(charge_range), tid_arg)
     cache = game_state.setdefault("_charge_dest_bfs_cache", {})
@@ -2008,7 +2011,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     )
     if (
         not early_exit_if_valid
-        and charge_range == CHARGE_MAX_DISTANCE
+        and charge_range == CHARGE_MAX_DISTANCE_SUBHEX
         and tid_arg is None
         and cache_key in cache
     ):
@@ -2073,7 +2076,8 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         _ec = int(require_key(_ce, "col"))
         _er = int(require_key(_ce, "row"))
         _e_bs = _ce["BASE_SIZE"]
-        _e_r = max(1, (_e_bs + 1) // 2)
+        _e_bs_int = max(_e_bs) if isinstance(_e_bs, (list, tuple)) else int(_e_bs)
+        _e_r = max(1, (_e_bs_int + 1) // 2)
         _charge_enemy_prox.append((_ec, _er, engagement_zone + _mover_r + _e_r + 1))
 
     if _charge_enemy_prox and all(
@@ -2081,7 +2085,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         for pec, per, peth in _charge_enemy_prox
     ):
         game_state["valid_charge_destinations_pool"] = []
-        if charge_range == CHARGE_MAX_DISTANCE and not early_exit_if_valid and tid_arg is None:
+        if charge_range == CHARGE_MAX_DISTANCE_SUBHEX and not early_exit_if_valid and tid_arg is None:
             cache[cache_key] = ([], {})
         if _perf and _t_func0 is not None:
             _t_done_lb = time.perf_counter()
@@ -2110,7 +2114,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         )
     ):
         game_state["valid_charge_destinations_pool"] = []
-        if charge_range == CHARGE_MAX_DISTANCE and not early_exit_if_valid and tid_arg is None:
+        if charge_range == CHARGE_MAX_DISTANCE_SUBHEX and not early_exit_if_valid and tid_arg is None:
             cache[cache_key] = ([], {})
         if _perf and _t_func0 is not None:
             _t_done_lb = time.perf_counter()
@@ -2127,7 +2131,10 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             )
         return []
 
-    if early_exit_if_valid and tid_arg is None:
+    # NOTE: _charge_reverse_goal_bfs_for_eligibility is disabled for scaled boards (inches_to_subhex > 1)
+    # because its intermediate footprint checks are too restrictive for large footprints — the forward BFS
+    # single-hex traversal is correct and supports early_exit_if_valid natively.
+    if early_exit_if_valid and tid_arg is None and int(game_state.get("inches_to_subhex", 1)) <= 1:
         reverse_result = _charge_reverse_goal_bfs_for_eligibility(
             game_state,
             unit,
@@ -2147,7 +2154,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     valid_destinations = []
     # Track (distance, engaging_enemy_ids) per valid destination for target-selection fast path.
     # Only built when the result will be stored in cache (activation BFS, no specific target).
-    _track_engages = (tid_arg is None and charge_range == CHARGE_MAX_DISTANCE and not early_exit_if_valid)
+    _track_engages = (tid_arg is None and charge_range == CHARGE_MAX_DISTANCE_SUBHEX and not early_exit_if_valid)
     pos_dist_engage: Dict[Tuple[int, int], Tuple[int, FrozenSet[str]]] = {} if _track_engages else {}
 
     # Precompute for O(1) bounds check before footprint computation
@@ -2327,7 +2334,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     _t_bfs1 = time.perf_counter() if _perf else None
 
     game_state["valid_charge_destinations_pool"] = valid_destinations
-    if charge_range == CHARGE_MAX_DISTANCE and not early_exit_if_valid and tid_arg is None:
+    if charge_range == CHARGE_MAX_DISTANCE_SUBHEX and not early_exit_if_valid and tid_arg is None:
         cache[cache_key] = (list(valid_destinations), pos_dist_engage)
 
     if _perf and _t_func0 is not None and _t_bfs0 is not None and _t_bfs1 is not None:
