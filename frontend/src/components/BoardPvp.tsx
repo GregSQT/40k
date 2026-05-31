@@ -1596,6 +1596,23 @@ export default function Board({
   const stableBlinkingUnitsRef = useRef<number[] | undefined>(stableBlinkingUnits);
   stableBlinkingUnitsRef.current = stableBlinkingUnits;
 
+  // Dead model ghosts: track model positions that disappear from units_cache during a phase.
+  interface DeadModelGhost {
+    unit: Unit;
+    col: number;
+    row: number;
+  }
+  const [deadModelGhosts, setDeadModelGhosts] = useState<DeadModelGhost[]>([]);
+  // key: "unitId:modelId" (or "unitId:_" for single-model units) → [col, row]
+  const prevModelPosRef = useRef<Map<string, [number, number]>>(new Map());
+
+  // Only expose ghosts to PIXI during shoot phase — prevents false detections during
+  // phase transitions from affecting unitsFingerprint / unitsChanged outside of shoot.
+  const deadModelGhostsForRender = useMemo(
+    () => (effectivePhase === "shoot" ? deadModelGhosts : []),
+    [effectivePhase, deadModelGhosts]
+  );
+
   const unitsBoardLayoutKey = useMemo(() => {
     const uc = gameState?.units_cache as Record<string, unknown> | undefined;
     return [...units]
@@ -3888,6 +3905,42 @@ export default function Board({
     };
   }, [boardConfig, isMeasuring]);
 
+  // Track model positions to detect dead models (disappear from occupied_hexes_by_model).
+  // Runs BEFORE the PIXI render effect. Only fires when units_cache changes (shoot actions).
+  useEffect(() => {
+    const unitsCache = gameState?.units_cache as
+      | Record<string, { col?: number; row?: number; occupied_hexes_by_model?: Record<string, [number, number]> }>
+      | undefined;
+
+    const newPosMap = new Map<string, [number, number]>();
+    if (unitsCache) {
+      for (const [unitId, entry] of Object.entries(unitsCache)) {
+        if (entry.occupied_hexes_by_model) {
+          for (const [modelId, pos] of Object.entries(entry.occupied_hexes_by_model)) {
+            newPosMap.set(`${unitId}:${modelId}`, pos as [number, number]);
+          }
+        } else if (entry.col !== undefined && entry.row !== undefined) {
+          newPosMap.set(`${unitId}:_`, [entry.col, entry.row]);
+        }
+      }
+    }
+
+    const newGhosts: DeadModelGhost[] = [];
+    for (const [key, pos] of prevModelPosRef.current) {
+      if (!newPosMap.has(key)) {
+        const unitId = key.split(":")[0];
+        const parentUnit = units.find((u) => String(u.id) === unitId);
+        if (parentUnit) {
+          newGhosts.push({ unit: parentUnit, col: pos[0], row: pos[1] });
+        }
+      }
+    }
+    if (newGhosts.length > 0) {
+      setDeadModelGhosts((prev) => [...prev, ...newGhosts]);
+    }
+    prevModelPosRef.current = newPosMap;
+  }, [gameState?.units_cache, units]);
+
   // ✅ HOOK 3: useEffect - MINIMAL DEPENDENCIES TO PREVENT RE-RENDER LOOPS
   useEffect(() => {
     // Early returns INSIDE useEffect to avoid hooks order violation
@@ -5240,7 +5293,7 @@ export default function Board({
             .map(([m, t]) => `${m}>${t}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#dg:${deadModelGhostsForRender.length}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -5604,9 +5657,16 @@ export default function Board({
           unitsCache !== undefined &&
           !isPresentInUnitsCache;
 
+        // Dead units killed during shoot phase: keep visible as grey ghosts until phase transition.
+        const isDeadGhost =
+          !isPresentInUnitsCache &&
+          !isHazardousDeathGhost &&
+          enginePhaseForPools === "shoot" &&
+          (unit.HP_CUR ?? 0) <= 0;
+
         // units_cache is the single source of truth for living units.
-        // Keep only the hazardous-death ghost visible during the current shooting activation.
-        if (!isPresentInUnitsCache && !isHazardousDeathGhost) {
+        // Keep only the hazardous-death ghost and shoot-phase dead ghosts visible.
+        if (!isPresentInUnitsCache && !isHazardousDeathGhost && !isDeadGhost) {
           continue;
         }
 
@@ -5777,10 +5837,11 @@ export default function Board({
           effectiveShootTargetsSet !== null &&
           !effectiveShootTargetsSet.has(String(unit.id));
 
-        const unitToRender =
-          isChargeOrigin || isMoveOriginGhost || isHazardousDeathGhost || isShootingPreviewGhost
-            ? ({ ...unit, isGhost: true } as Unit & { isGhost: boolean })
-            : unit;
+        const unitToRender = isDeadGhost
+          ? ({ ...unit, isJustKilled: true } as Unit & { isJustKilled: boolean })
+          : isChargeOrigin || isMoveOriginGhost || isHazardousDeathGhost || isShootingPreviewGhost
+          ? ({ ...unit, isGhost: true } as Unit & { isGhost: boolean })
+          : unit;
 
         renderUnit({
           unit: unitToRender,
@@ -6096,6 +6157,50 @@ export default function Board({
             chargeMaxDistance,
           });
         }
+      }
+
+      // ✅ DEAD MODEL GHOSTS — models that died during shoot phase, rendered as grey ghosts
+      for (const ghost of deadModelGhostsForRender) {
+        const gCenterX = ghost.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+        const gCenterY =
+          ghost.row * HEX_VERT_SPACING +
+          ((ghost.col % 2) * HEX_VERT_SPACING) / 2 +
+          HEX_HEIGHT / 2 +
+          MARGIN;
+        renderUnit({
+          unit: { ...ghost.unit, isJustKilled: true } as Unit & { isJustKilled: boolean },
+          centerX: gCenterX,
+          centerY: gCenterY,
+          modelCenters: [[gCenterX, gCenterY]],
+          app,
+          renderTarget: unitsLayer,
+          boardConfig: boardConfigForRender,
+          parseColor,
+          HEX_RADIUS,
+          HEX_HORIZ_SPACING,
+          ICON_SCALE,
+          ELIGIBLE_OUTLINE_WIDTH,
+          ELIGIBLE_COLOR,
+          ELIGIBLE_OUTLINE_ALPHA,
+          HP_BAR_WIDTH_RATIO,
+          HP_BAR_HEIGHT,
+          UNIT_CIRCLE_RADIUS_RATIO,
+          UNIT_TEXT_SIZE,
+          SELECTED_BORDER_WIDTH,
+          CHARGE_TARGET_BORDER_WIDTH,
+          DEFAULT_BORDER_WIDTH,
+          phase: effectivePhase,
+          mode,
+          current_player,
+          selectedUnitId: null,
+          unitsMoved,
+          chargeTargets: [],
+          fightTargets: [],
+          units,
+          isEligible: false,
+          isShootable: false,
+          useOverlayIcons: false,
+        });
       }
 
       // ✅ ATTACK PREVIEW RENDERING
@@ -6762,7 +6867,9 @@ export default function Board({
     squadMoveModelPoolRef,
     squadMoveModelMaskLoopsRef?.current,
     squadShootPlan,
+    deadModelGhostsForRender,
   ]);
+
 
   // Handle weapon selection
   const handleSelectWeapon = async (weaponIndex: number) => {

@@ -625,9 +625,9 @@ export class UnitRenderer {
 
     // Just-killed unit styling (show as grey ghost before removal)
     if (unitWithFlags.isJustKilled) {
-      finalSocleFill = 0x444444; // Dark grey fill
-      finalBorderColor = 0x666666; // Medium grey border
-      circleAlpha = 0.5;
+      finalSocleFill = 0x999999;
+      finalBorderColor = 0xbbbbbb;
+      circleAlpha = 0.65;
     }
 
     const displayCircle = resolveBaseSizeForUnitDisplay(unit);
