@@ -73,6 +73,11 @@ export interface WeaponOption {
   weapon: Weapon;
   canUse: boolean;
   reason?: string;
+  color?: number;
+  /** Tir squad : true si cette arme a déjà une cible désignée (texte grisé dans le menu). */
+  assigned?: boolean;
+  /** Tir squad : true si un AUTRE profil de la même arme combinée est assigné (clic bloqué). */
+  locked?: boolean;
 }
 
 export interface WeaponSelectionState {

@@ -4,11 +4,17 @@ import weaponRules from "../../../config/weapon_rules.json";
 import type { WeaponOption } from "../types/game";
 import TooltipWrapper from "./TooltipWrapper";
 
+function weaponColorToCSS(color: number): string {
+  return `#${color.toString(16).padStart(6, "0")}`;
+}
+
 interface WeaponDropdownProps {
   weapons: WeaponOption[];
   position: { x: number; y: number };
   onSelectWeapon: (index: number) => void;
   onClose: () => void;
+  /** Flux squad : le menu reste affiché (pas de fermeture au clic dehors) jusqu'au Validate. */
+  persistent?: boolean;
 }
 
 export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
@@ -16,10 +22,12 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
   position,
   onSelectWeapon,
   onClose,
+  persistent = false,
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (persistent) return; // menu persistant : fermé explicitement (Validate/Cancel), pas au clic dehors
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         onClose();
@@ -28,7 +36,7 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [onClose]);
+  }, [onClose, persistent]);
 
   return (
     <div
@@ -55,8 +63,9 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
         <tbody>
           {weapons.map((weaponOption) => {
             const weapon = weaponOption.weapon;
-            const isDisabled = !weaponOption.canUse;
-            const disabledReason = isDisabled ? weaponOption.reason : null;
+            // locked : profil frère d'une combi déjà assignée (une combi ne tire qu'un profil).
+            const isDisabled = !weaponOption.canUse || weaponOption.locked === true;
+            const disabledReason = !weaponOption.canUse ? weaponOption.reason : null;
 
             return (
               <tr
@@ -70,12 +79,34 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
               >
                 <td>
                   <TooltipWrapper text={disabledReason}>
+                    {weaponOption.color != null && (
+                      <span
+                        style={{
+                          display: "inline-block",
+                          width: "10px",
+                          height: "10px",
+                          borderRadius: "50%",
+                          backgroundColor: weaponColorToCSS(weaponOption.color),
+                          marginRight: "6px",
+                          flexShrink: 0,
+                          opacity: isDisabled ? 0.4 : 1,
+                        }}
+                      />
+                    )}
                     {weapon.COMBI_WEAPON && (
                       <TooltipWrapper text="Combi weapon">
                         <span className="combi-badge">C</span>
                       </TooltipWrapper>
                     )}
-                    {weapon.display_name}
+                    <span
+                      style={
+                        weaponOption.assigned
+                          ? { color: "#888", opacity: 0.6 }
+                          : undefined
+                      }
+                    >
+                      {weapon.display_name}
+                    </span>
                     {weapon.WEAPON_RULES?.map((rule) => (
                       <span key={rule} className="rule-badge-wrapper">
                         <span className="rule-badge">

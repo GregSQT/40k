@@ -3411,15 +3411,20 @@ def squad_declare_shoot_model(
             f"(hors portee ou pas de LoS)"
         )
 
+    sel = m.get("selectedRngWeaponIndex")
+    weapon_idx = int(sel) if sel is not None else 0
+
     intents: List[Dict[str, Any]] = game_state["pending_squad_shoot_intents"][attacker_squad_id]
-    # Remplace toute declaration existante de cette figurine.
-    intents[:] = [i for i in intents if i.get("model_id") != attacker_model_id]
+    # Remplace la declaration existante de cette figurine POUR CETTE ARME (split fire :
+    # une fig peut tirer plusieurs de ses armes sur des cibles differentes -> cle (model, arme)).
+    intents[:] = [
+        i for i in intents
+        if not (i.get("model_id") == attacker_model_id and int(i.get("weapon_index", -1)) == weapon_idx)
+    ]
     # Premiere declaration de l escouade sur cette cible -> reset wounds cible.
     if not any(str(i.get("target_unit_id")) == str(target_squad_id) for i in intents):
         reset_wounds_allocated_for_squad(game_state, target_squad_id)
 
-    sel = m.get("selectedRngWeaponIndex")
-    weapon_idx = int(sel) if sel is not None else 0
     weapons = m.get("RNG_WEAPONS", [])  # get allowed
     n_attacks_resolved = 0
     if 0 <= weapon_idx < len(weapons):
@@ -3490,6 +3495,183 @@ def squad_undeclare_shoot_model(
     before = len(intents)
     intents[:] = [i for i in intents if i.get("model_id") != attacker_model_id]
     return len(intents) < before
+
+
+# ============================================================================
+# SQUAD SHOOTING — assignation PAR ARME (split fire PvP humain)
+# ============================================================================
+# Le flux par-figurine ci-dessus assigne 1 cible par figurine (arme selectionnee).
+# Le flux par-arme ci-dessous assigne l ARME au niveau de l ESCOUADE : choisir
+# l arme W dans le menu puis cliquer une cible T => toutes les figs portant W
+# tirent W sur T. Intents indexes par (model_id, weapon_index) : une fig peut
+# donc tirer plusieurs de ses armes sur des cibles differentes (split fire).
+# Marche pour mono ET multi-figurine (mono = squad d 1 modele).
+
+
+def _model_can_shoot_target_with_weapon(
+    game_state: Dict[str, Any],
+    attacker_model: Dict[str, Any],
+    target_squad_id: str,
+    weapon_index: int,
+) -> bool:
+    """Eligibilite per-arme : la fig peut tirer l arme `weapon_index` sur la cible.
+
+    Contrairement a _model_can_shoot_target (arme selectionnee + SHOOT_LEFT > 0),
+    teste une arme PRECISE (portee + LoS) sans gater sur SHOOT_LEFT : en 10e une
+    figurine tire CHACUNE de ses armes une fois (split fire), SHOOT_LEFT etant le
+    NB d une seule arme et donc inadapte comme garde multi-armes.
+    """
+    weapons = attacker_model.get("RNG_WEAPONS", [])  # get allowed
+    if not (0 <= int(weapon_index) < len(weapons)):
+        return False
+    weapon = weapons[int(weapon_index)]
+    if not isinstance(weapon, dict) or "RNG" not in weapon:
+        return False
+    # weapon["RNG"] est DEJA en subhexes (cf. _model_can_shoot_target).
+    range_subhex = int(weapon["RNG"])
+    if range_subhex <= 0:
+        return False
+    from engine.phase_handlers.shooting_handlers import _get_los_visibility_state
+    ac = int(attacker_model["col"])
+    ar = int(attacker_model["row"])
+    for tc, tr in _squad_model_positions(game_state, target_squad_id):
+        if calculate_hex_distance(ac, ar, tc, tr) > range_subhex:
+            continue
+        _, can_see, _ = _get_los_visibility_state(game_state, ac, ar, tc, tr)
+        if can_see:
+            return True
+    return False
+
+
+def squad_declare_shoot_weapon(
+    game_state: Dict[str, Any],
+    attacker_squad_id: str,
+    weapon_index: int,
+    target_squad_id: str,
+) -> List[Dict[str, Any]]:
+    """Assigne l arme `weapon_index` (niveau escouade) a la cible.
+
+    Pour CHAQUE figurine vivante de l escouade qui possede cette arme et peut
+    tirer la cible (portee + LoS), cree un intent (model_id, weapon_index) -> T.
+    Re-appeler avec la meme arme REMPLACE la cible (retire d abord tous les
+    intents de cette arme, toutes figs confondues).
+
+    Reset wounds_allocated sur la cible a la PREMIERE declaration de l escouade
+    sur cette cible (scope per-cible par-activation, mirroir squad_declare_shoot).
+
+    Validation stricte (pas de valeur par defaut) :
+      - activation tir demarree (pending initialise),
+      - escouade cible vivante,
+      - au moins une figurine peut tirer l arme sur la cible (sinon ValueError).
+
+    Returns la liste des intents crees pour cette arme.
+    """
+    init_pending_intents(game_state)
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    if attacker_squad_id not in game_state["pending_squad_shoot_intents"]:
+        raise RuntimeError(
+            f"squad_declare_shoot_weapon called before squad_shooting_unit_activation_start "
+            f"for squad {attacker_squad_id!r}"
+        )
+    if target_squad_id not in squad_models or not any(
+        mid in models_cache for mid in squad_models.get(target_squad_id, [])  # get allowed
+    ):
+        raise ValueError(f"Target squad {target_squad_id!r} not alive")
+
+    intents: List[Dict[str, Any]] = game_state["pending_squad_shoot_intents"][attacker_squad_id]
+    widx = int(weapon_index)
+    # Remplace toute declaration existante de CETTE arme (changement de cible).
+    intents[:] = [i for i in intents if int(i.get("weapon_index", -1)) != widx]
+    # Premiere declaration de l escouade sur cette cible -> reset wounds cible.
+    if not any(str(i.get("target_unit_id")) == str(target_squad_id) for i in intents):
+        reset_wounds_allocated_for_squad(game_state, target_squad_id)
+
+    target_size = sum(
+        1 for mid in squad_models.get(target_squad_id, []) if mid in models_cache  # get allowed
+    )
+    created: List[Dict[str, Any]] = []
+    for mid in squad_models.get(attacker_squad_id, []):  # get allowed
+        m = models_cache.get(mid)
+        if m is None:
+            continue
+        if not _model_can_shoot_target_with_weapon(game_state, m, target_squad_id, widx):
+            continue
+        weapons = m.get("RNG_WEAPONS", [])  # get allowed
+        w = weapons[widx]
+        n_attacks_resolved = 0
+        if isinstance(w, dict) and "NB" in w:
+            try:
+                n_attacks_resolved = int(
+                    resolve_dice_value(w["NB"], f"squad_declare_shoot_weapon_NB_{mid}_{widx}")
+                )
+            except Exception:
+                n_attacks_resolved = int(w["NB"]) if isinstance(w["NB"], (int, float)) else 1
+        intent = {
+            "model_id": mid,
+            "weapon_index": widx,
+            "target_unit_id": target_squad_id,
+            "target_squad_size_at_declaration": target_size,
+            "n_attacks_resolved": n_attacks_resolved,
+        }
+        intents.append(intent)
+        created.append(intent)
+    if not created:
+        raise ValueError(
+            f"Aucune figurine de {attacker_squad_id!r} ne peut tirer l arme {widx} "
+            f"sur {target_squad_id!r} (hors portee ou pas de LoS)"
+        )
+    return created
+
+
+def squad_undeclare_shoot_weapon(
+    game_state: Dict[str, Any], attacker_squad_id: str, weapon_index: int
+) -> bool:
+    """Retire toutes les declarations de l arme `weapon_index`. Returns True si retire."""
+    init_pending_intents(game_state)
+    intents = game_state["pending_squad_shoot_intents"].get(attacker_squad_id)
+    if not intents:
+        return False
+    widx = int(weapon_index)
+    before = len(intents)
+    intents[:] = [i for i in intents if int(i.get("weapon_index", -1)) != widx]
+    return len(intents) < before
+
+
+def squad_weapon_valid_targets(
+    game_state: Dict[str, Any], attacker_squad_id: str, weapon_index: int
+) -> List[str]:
+    """Escouades ennemies qu AU MOINS UNE figurine peut viser avec l arme `weapon_index`.
+
+    Reutilise _model_can_shoot_target_with_weapon (meme eligibilite que la
+    declaration par-arme). Alimente le HP blink frontend pour l arme active.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    attacker_player: Optional[int] = None
+    for mid in squad_models.get(attacker_squad_id, []):  # get allowed
+        m = models_cache.get(mid)
+        if m is not None:
+            attacker_player = int(m["player"])
+            break
+    if attacker_player is None:
+        return []
+    valid: List[str] = []
+    for sid, mids in squad_models.items():
+        if sid == attacker_squad_id:
+            continue
+        first = next((mid for mid in mids if mid in models_cache), None)
+        if first is None:
+            continue  # escouade morte
+        if int(models_cache[first]["player"]) == attacker_player:
+            continue  # allie
+        if any(
+            _model_can_shoot_target_with_weapon(game_state, models_cache[amid], sid, weapon_index)
+            for amid in squad_models.get(attacker_squad_id, [])  # get allowed
+            if amid in models_cache
+        ):
+            valid.append(sid)
+    return valid
 
 
 def squad_lock_shoot(game_state: Dict[str, Any], squad_id: str) -> List[Dict[str, Any]]:

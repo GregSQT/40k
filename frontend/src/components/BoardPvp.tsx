@@ -425,7 +425,9 @@ type BoardProps = {
     unitId: number;
     models: string[];
     targets: Record<string, string>;
+    declarations: Array<{ model_id: string; weapon_index: number; target_unit_id: string }>;
     activeModelId: string | null;
+    activeWeaponIndex: number | null;
     canValidate: boolean;
   } | null;
   onStartSquadModelShoot?: (unitId: number | string, initialModelId?: string) => void | Promise<void>;
@@ -518,6 +520,30 @@ const BOARD_ZOOM_SLIDER_STEP = 0.05;
 const BOARD_ZOOM_WHEEL_IN_FACTOR = 1.1;
 const BOARD_ZOOM_WHEEL_OUT_FACTOR = 1 / BOARD_ZOOM_WHEEL_IN_FACTOR;
 const UNIT_ILLUSTRATION_HOVER_DELAY_MS = 100;
+
+const WEAPON_COLOR_PALETTE = [
+  0x22c55e, // vert
+  0xeab308, // jaune
+  0x3b82f6, // bleu
+  0xf97316, // orange
+  0xa855f7, // violet
+  0x06b6d4, // cyan
+];
+
+/** Couleur d'une arme (pastille/voile/ligne). Les profils d'une même arme combinée
+ *  (même COMBI_WEAPON) partagent la couleur du 1er profil du groupe. */
+function weaponColorFor(
+  rngWeapons: ReadonlyArray<{ COMBI_WEAPON?: string }> | undefined,
+  weaponIndex: number
+): number {
+  let colorKey = weaponIndex;
+  const w = rngWeapons?.[weaponIndex];
+  if (w?.COMBI_WEAPON) {
+    const first = rngWeapons!.findIndex((rw) => rw?.COMBI_WEAPON === w.COMBI_WEAPON);
+    if (first >= 0) colorKey = first;
+  }
+  return WEAPON_COLOR_PALETTE[colorKey % WEAPON_COLOR_PALETTE.length]!;
+}
 
 function clampBoardZoom(value: number): number {
   return Math.min(BOARD_ZOOM_MAX, Math.max(BOARD_ZOOM_MIN, value));
@@ -1007,6 +1033,7 @@ export default function Board({
     unitId: number;
     position: { x: number; y: number };
   } | null>(null);
+  const prevActiveShootingUnitRef = useRef<string | number | null>(null);
   const [hexCoordTooltip, setHexCoordTooltip] = useState<{
     visible: boolean;
     x: number;
@@ -1493,6 +1520,40 @@ export default function Board({
       window.removeEventListener("boardWeaponSelectionClick", weaponClickHandler);
     };
   }, [units, boardConfig]);
+
+  // Auto-open weapon menu when a multi-weapon unit becomes the active shooting unit
+  useEffect(() => {
+    const activeShootingUnit = gameState?.active_shooting_unit;
+    if (phase !== "shoot" || !activeShootingUnit) {
+      prevActiveShootingUnitRef.current = activeShootingUnit ?? null;
+      return;
+    }
+    if (activeShootingUnit === prevActiveShootingUnitRef.current) return;
+    prevActiveShootingUnitRef.current = activeShootingUnit;
+
+    const unitId =
+      typeof activeShootingUnit === "string"
+        ? parseInt(activeShootingUnit, 10)
+        : activeShootingUnit;
+    const unit = units.find((u) => u.id === unitId);
+    if (!unit) return;
+
+    const usableWeapons = unit.available_weapons?.filter(
+      (w) => (w.can_use ?? w.canUse) === true
+    );
+    if (!usableWeapons || usableWeapons.length <= 1) return;
+
+    window.dispatchEvent(
+      new CustomEvent("boardWeaponSelectionClick", { detail: { unitId } })
+    );
+  }, [gameState?.active_shooting_unit, phase, units]);
+
+  // Flux squad : fermer le menu d'armes quand l'activation se termine (Validate/Cancel → sortie du mode).
+  useEffect(() => {
+    if (mode !== "squadModelShoot") {
+      setWeaponSelectionMenu(null);
+    }
+  }, [mode]);
 
   // Tutoriel : halo autour de l'Intercessor quand la popup "Phase de mouvement" est affichée
   const tutorial = useTutorial();
@@ -3200,11 +3261,19 @@ export default function Board({
       if (e.button !== 0) return;
 
       if (mode !== "squadModelShoot") {
-        // Entrée : escouade OWN multi-fig éligible (dans le pool) → démarre + sélectionne la fig.
+        // Entrée flux assign+validate : escouade multi-fig OU unité multi-armes éligible (pool).
+        // Les unités mono-fig mono-arme gardent le flux de tir legacy (pas d'interception).
         const own = findOwnFig(col, row);
-        if (own && own.nFigs > 1 && eligibleUnitIds.includes(Number(own.uid))) {
-          e.stopImmediatePropagation();
-          void cbs.onStartSquadModelShoot?.(own.uid, own.mid);
+        if (own && eligibleUnitIds.includes(Number(own.uid))) {
+          // available_weapons n'est peuplé qu'après activation backend : au 1er clic on se base
+          // sur RNG_WEAPONS (>1 = multi-armes). Le flux squad gère ensuite l'éligibilité par arme.
+          const gsUnits = (gameState?.units ?? []) as Array<{ id: string | number; RNG_WEAPONS?: unknown[] }>;
+          const ownUnit = gsUnits.find((u) => String(u.id) === String(own.uid));
+          const multiWeapon = (ownUnit?.RNG_WEAPONS?.length ?? 0) > 1;
+          if (own.nFigs > 1 || multiWeapon) {
+            e.stopImmediatePropagation();
+            void cbs.onStartSquadModelShoot?.(own.uid, own.mid);
+          }
         }
         return;
       }
@@ -3250,7 +3319,7 @@ export default function Board({
 
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
-  }, [phase, mode, measureMode.kind, boardConfig, gameState?.units_cache, current_player, eligibleUnitIds]);
+  }, [phase, mode, measureMode.kind, boardConfig, gameState?.units_cache, gameState?.units, current_player, eligibleUnitIds]);
 
   // squad.md brique 3 : dès qu'AUCUNE fig n'est active en mode plan (fig posée → deselect, ou
   // entrée sans selection), couper TOUT le preview (fantome curseur + LoS + ligne guide + tooltip).
@@ -4625,15 +4694,34 @@ export default function Board({
           );
         });
 
-        // Preview rouge : couronne euclidienne (même logique « ronde » que l’empreinte), pas dilatation hex
-        fightPreviewCells.push(
-          ...engagementRoundRingPreviewHexesOnBoard(
-            selectedUnit,
+        // Preview rouge : couronne euclidienne par FIGURINE (union du squad), pas l'ancre.
+        const ringByModel = ucFight?.[String(selectedUnit.id)]?.occupied_hexes_by_model;
+        const ringCenters: Array<[number, number]> =
+          ringByModel && Object.values(ringByModel).length > 0
+            ? Object.values(ringByModel).map(([c, r]) => [Number(c), Number(r)] as [number, number])
+            : [[selectedUnit.col, selectedUnit.row]];
+        const ringUnionFp =
+          squadFootprintHexKeysFromModelCenters(ringByModel, selectedUnit) ??
+          unitFootprintHexKeys(selectedUnit);
+        const ringSeen = new Set<string>();
+        for (const [cc, cr] of ringCenters) {
+          for (const cell of engagementRoundRingPreviewHexesOnBoard(
+            {
+              col: cc,
+              row: cr,
+              BASE_SHAPE: selectedUnit.BASE_SHAPE,
+              BASE_SIZE: selectedUnit.BASE_SIZE,
+            },
             fightEngagementHexSteps,
             BOARD_COLS,
             BOARD_ROWS
-          )
-        );
+          )) {
+            const k = `${cell.col},${cell.row}`;
+            if (ringUnionFp.has(k) || ringSeen.has(k)) continue;
+            ringSeen.add(k);
+            fightPreviewCells.push(cell);
+          }
+        }
       }
     }
 
@@ -5302,11 +5390,11 @@ export default function Board({
             .map(([m, v]) => `${m}=${v ? 1 : 0}`)
             .join(",")
         : "";
-      // Tir par-fig : empreinte des assignations (redraw du voile vert quand elles changent).
+      // Tir par-arme : empreinte des intents (redraw des voiles/lignes quand ils changent).
       const squadShootFp = squadShootPlan
-        ? `${squadShootPlan.unitId}:` +
-          Object.entries(squadShootPlan.targets)
-            .map(([m, t]) => `${m}>${t}`)
+        ? `${squadShootPlan.unitId}:w${squadShootPlan.activeWeaponIndex ?? ""}:` +
+          squadShootPlan.declarations
+            .map((d) => `${d.model_id}.${d.weapon_index}>${d.target_unit_id}`)
             .join(",")
         : "";
       return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#dg:${deadModelGhostsForRender.length}`;
@@ -5346,12 +5434,22 @@ export default function Board({
           })()
         : undefined;
 
+    // Cercle lisse unique : seulement pour une figurine seule. Pour un squad multi-figs, la bande
+    // de cases par-fig (fightPreviewCells) tient lieu de zone d'engagement (union propre).
+    const fightRingByModel = (
+      gameState?.units_cache as
+        | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+        | undefined
+    )?.[String(selectedUnit?.id)]?.occupied_hexes_by_model;
+    const fightRingIsSingleFigure =
+      !fightRingByModel || Object.values(fightRingByModel).length <= 1;
     const fightEngagementRing =
       enginePhaseForPools === "fight" &&
       selectedUnit &&
       mode === "attackPreview" &&
       selectedUnit.CC_WEAPONS &&
-      selectedUnit.CC_WEAPONS.length > 0
+      selectedUnit.CC_WEAPONS.length > 0 &&
+      fightRingIsSingleFigure
         ? getFightEngagementRingBoardPixels(
             selectedUnit,
             fightEngagementHexSteps,
@@ -5639,24 +5737,56 @@ export default function Board({
       onConfirmMove();
     };
 
-    // Tir par-figurine : palette couleur par cible (partagée tireurs + cibles).
-    const SQUAD_SHOOT_PALETTE = [
-      0x22c55e, // vert
-      0xeab308, // jaune
-      0x3b82f6, // bleu
-      0xf97316, // orange
-      0xa855f7, // violet
-      0x06b6d4, // cyan
-    ];
-    const squadShootTargetColorMap = new Map<string, number>();
+    // Tir par-arme : couleur = arme (profils d'une même combi → couleur partagée).
+    // weaponColorsByTarget : pour chaque escouade cible, les couleurs distinctes des armes qui
+    // la visent → voile splitté. Au-delà de la palette : blanc.
+    const VEIL_WHITE = 0xffffff;
+    const weaponColorsByTarget = new Map<string, number[]>();
     if (mode === "squadModelShoot" && squadShootPlan) {
-      for (const tgtId of Object.values(squadShootPlan.targets)) {
-        const key = String(tgtId);
-        if (!squadShootTargetColorMap.has(key)) {
-          squadShootTargetColorMap.set(key, SQUAD_SHOOT_PALETTE[squadShootTargetColorMap.size % SQUAD_SHOOT_PALETTE.length]!);
+      const shooterUnit = units.find((u) => String(u.id) === String(squadShootPlan.unitId));
+      const shooterRngWeapons = shooterUnit?.RNG_WEAPONS;
+      const seenColorPerTarget = new Map<string, Set<number>>();
+      for (const decl of squadShootPlan.declarations) {
+        const key = String(decl.target_unit_id);
+        const color = weaponColorFor(shooterRngWeapons, decl.weapon_index);
+        let seen = seenColorPerTarget.get(key);
+        if (!seen) {
+          seen = new Set<number>();
+          seenColorPerTarget.set(key, seen);
+          weaponColorsByTarget.set(key, []);
+        }
+        if (!seen.has(color)) {
+          seen.add(color);
+          weaponColorsByTarget.get(key)!.push(color);
         }
       }
     }
+    /** Dessine un voile : 1 couleur = disque plein ; N couleurs = N secteurs ; >6 = blanc. */
+    const drawSplitVeil = (
+      g: PIXI.Graphics, cx: number, cy: number, radius: number, colors: number[], alpha: number
+    ): void => {
+      if (colors.length === 0) return;
+      if (colors.length > WEAPON_COLOR_PALETTE.length) {
+        g.beginFill(VEIL_WHITE, alpha);
+        g.drawCircle(cx, cy, radius);
+        g.endFill();
+        return;
+      }
+      if (colors.length === 1) {
+        g.beginFill(colors[0]!, alpha);
+        g.drawCircle(cx, cy, radius);
+        g.endFill();
+        return;
+      }
+      const step = (Math.PI * 2) / colors.length;
+      colors.forEach((col, i) => {
+        g.beginFill(col, alpha);
+        g.moveTo(cx, cy);
+        g.arc(cx, cy, radius, i * step, (i + 1) * step);
+        g.lineTo(cx, cy);
+        g.endFill();
+      });
+    };
 
     // ✅ UNIFIED UNIT RENDERING USING COMPONENT — skip if fingerprint unchanged
     if (unitsChanged) {
@@ -5997,79 +6127,89 @@ export default function Board({
           unitsLayer.addChild(veil);
         }
 
-        // Tir par-figurine : voile + ligne colorés par cible.
+        // Tir par-arme : voile (splitté par arme) sur les figs tireuses + lignes colorées par arme.
         if (
           mode === "squadModelShoot" &&
           squadShootPlan &&
           String(squadShootPlan.unitId) === unitIdStr
         ) {
-          const targetColorMap = squadShootTargetColorMap;
-
-          const veil = new PIXI.Graphics();
+          const decls = squadShootPlan.declarations;
           const gvBase = resolveBaseSizeForUnitDisplay(unit);
           const gvRadius = gvBase > 1
             ? (gvBase * 1.5 * HEX_RADIUS) / 2
             : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
+
+          // Voile tireur : couleurs des armes que CHAQUE fig a assignées (split si plusieurs).
+          const veil = new PIXI.Graphics();
           modelCenters.forEach(([cx, cy], i) => {
-            const tgtId = squadShootPlan.targets[modelIds[i]];
-            if (!tgtId) return;
-            const color = targetColorMap.get(String(tgtId)) ?? SQUAD_SHOOT_PALETTE[0]!;
-            veil.beginFill(color, 0.5);
-            veil.drawCircle(cx, cy, gvRadius);
-            veil.endFill();
+            const mid = String(modelIds[i]);
+            const seen = new Set<number>();
+            const colors: number[] = [];
+            for (const d of decls) {
+              if (String(d.model_id) !== mid) continue;
+              const color = weaponColorFor(unit.RNG_WEAPONS, d.weapon_index);
+              if (seen.has(color)) continue;
+              seen.add(color);
+              colors.push(color);
+            }
+            drawSplitVeil(veil, cx, cy, gvRadius, colors, 0.5);
           });
           veil.zIndex = 3000;
           unitsLayer.addChild(veil);
 
-          // Ligne de visée : fig tireuse → fig cible la plus proche (1 par assignation).
+          // Lignes de visée : 1 par intent (fig → fig cible la plus proche), couleur de l'arme.
           const shootLines = new PIXI.Graphics();
           const shootUc = gameState?.units_cache as
             | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
             | undefined;
+          const centerByModel = new Map<string, [number, number]>();
+          const posByModel = new Map<string, [number, number]>();
           modelCenters.forEach(([cx, cy], i) => {
-            const tgtSid = squadShootPlan.targets[modelIds[i]];
-            if (!tgtSid) return;
-            const tgtByModel = shootUc?.[String(tgtSid)]?.occupied_hexes_by_model;
-            if (!tgtByModel) return;
-            const [ownCol, ownRow] = modelPositions[i];
-            const ownCube = offsetToCube(ownCol, ownRow);
+            centerByModel.set(String(modelIds[i]), [cx, cy]);
+            posByModel.set(String(modelIds[i]), modelPositions[i]);
+          });
+          for (const d of decls) {
+            const origin = centerByModel.get(String(d.model_id));
+            const ownPos = posByModel.get(String(d.model_id));
+            if (!origin || !ownPos) continue;
+            const tgtByModel = shootUc?.[String(d.target_unit_id)]?.occupied_hexes_by_model;
+            if (!tgtByModel) continue;
+            const ownCube = offsetToCube(ownPos[0], ownPos[1]);
             let nearest: [number, number] | null = null;
             let bestD = Infinity;
             for (const pos of Object.values(tgtByModel)) {
-              const d = cubeDistance(ownCube, offsetToCube(pos[0], pos[1]));
-              if (d < bestD) {
-                bestD = d;
+              const dd = cubeDistance(ownCube, offsetToCube(pos[0], pos[1]));
+              if (dd < bestD) {
+                bestD = dd;
                 nearest = pos;
               }
             }
-            if (!nearest) return;
+            if (!nearest) continue;
             const tx = nearest[0] * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
             const ty =
               nearest[1] * HEX_VERT_SPACING +
               ((nearest[0] % 2) * HEX_VERT_SPACING) / 2 +
               HEX_HEIGHT / 2 +
               MARGIN;
-            const color = targetColorMap.get(String(tgtSid)) ?? SQUAD_SHOOT_PALETTE[0]!;
+            const color = weaponColorFor(unit.RNG_WEAPONS, d.weapon_index);
             shootLines.lineStyle(3, color, 0.9);
-            shootLines.moveTo(cx, cy);
+            shootLines.moveTo(origin[0], origin[1]);
             shootLines.lineTo(tx, ty);
-          });
+          }
           shootLines.zIndex = 3001;
           unitsLayer.addChild(shootLines);
         }
 
-        // Voile coloré sur les unités cibles (couleur = même que les tireurs assignés).
-        const targetColor = squadShootTargetColorMap.get(unitIdStr);
-        if (targetColor !== undefined && modelCenters.length > 0) {
+        // Voile par arme sur les unités cibles (couleurs des armes qui les visent, splitté).
+        const tgtColors = weaponColorsByTarget.get(unitIdStr);
+        if (tgtColors && tgtColors.length > 0 && modelCenters.length > 0) {
           const tgtVeil = new PIXI.Graphics();
           const tvBase = resolveBaseSizeForUnitDisplay(unit);
           const tvRadius = tvBase > 1
             ? (tvBase * 1.5 * HEX_RADIUS) / 2
             : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
           modelCenters.forEach(([cx, cy]) => {
-            tgtVeil.beginFill(targetColor, 0.4);
-            tgtVeil.drawCircle(cx, cy, tvRadius);
-            tgtVeil.endFill();
+            drawSplitVeil(tgtVeil, cx, cy, tvRadius, tgtColors, 0.4);
           });
           tgtVeil.zIndex = 3000;
           unitsLayer.addChild(tgtVeil);
@@ -6896,8 +7036,11 @@ export default function Board({
     const weaponDisplayName = weapon?.display_name ?? undefined;
     const isSquadMode = mode === "squadModelShoot";
 
-    // Close menu immediately (optimistic update)
-    setWeaponSelectionMenu(null);
+    // Flux squad : le menu reste affiché jusqu'au Validate (sélection d'arme répétée possible).
+    // Flux legacy (targetPreview) : fermeture immédiate (optimistic update).
+    if (!isSquadMode) {
+      setWeaponSelectionMenu(null);
+    }
 
     try {
       const API_BASE = "/api";
@@ -6922,7 +7065,14 @@ export default function Board({
       }
       window.dispatchEvent(
         new CustomEvent("weaponSelected", {
-          detail: { gameState: data.game_state, weaponDisplayName, availableWeapons: data.result?.available_weapons },
+          detail: {
+            gameState: data.game_state,
+            weaponDisplayName,
+            availableWeapons: data.result?.available_weapons,
+            weaponIndex,
+            validTargets: data.result?.valid_targets,
+            isSquadMode,
+          },
         })
       );
     } catch (error) {
@@ -6941,17 +7091,43 @@ export default function Board({
         const unit = units.find((u) => u.id === weaponSelectionMenu.unitId);
         if (!unit?.RNG_WEAPONS) return [];
 
+        const rngWeapons = unit.RNG_WEAPONS;
+        // Indices d'armes déjà assignés (une cible désignée).
+        const assignedWeapons = new Set<number>(
+          squadShootPlan && String(squadShootPlan.unitId) === String(weaponSelectionMenu.unitId)
+            ? squadShootPlan.declarations.map((d) => d.weapon_index)
+            : []
+        );
+        // Groupes d'armes combinées (COMBI_WEAPON) dont un profil est déjà assigné :
+        // une combi ne tire qu'avec UN profil → ses autres profils sont grisés + verrouillés.
+        const assignedCombiGroups = new Set<string>();
+        for (const idx of assignedWeapons) {
+          const combi = rngWeapons[idx]?.COMBI_WEAPON;
+          if (combi) assignedCombiGroups.add(combi);
+        }
+        // assigned = grisé (visuel) ; locked = clic bloqué (profil frère d'une combi déjà assignée).
+        const weaponFlags = (idx: number): { assigned: boolean; locked: boolean } => {
+          const direct = assignedWeapons.has(idx);
+          const combi = rngWeapons[idx]?.COMBI_WEAPON;
+          const siblingAssigned = combi != null && assignedCombiGroups.has(combi) && !direct;
+          return { assigned: direct || siblingAssigned, locked: siblingAssigned };
+        };
+
         const availableWeapons = unit.available_weapons;
 
         if (availableWeapons && availableWeapons.length > 0) {
           return availableWeapons.map((w) => {
             const canUse = w.can_use ?? w.canUse;
             if (canUse == null) throw new Error(`Weapon ${w.index} of unit ${unit.id} missing can_use`);
-            return { index: w.index, weapon: w.weapon, canUse, reason: w.reason };
+            const flags = weaponFlags(w.index);
+            return { index: w.index, weapon: w.weapon, canUse, reason: w.reason, color: weaponColorFor(rngWeapons, w.index), assigned: flags.assigned, locked: flags.locked };
           });
         }
         // Fallback : available_weapons pas encore patchée (ex. squad entre squad_shoot_activate et réponse).
-        return unit.RNG_WEAPONS.map((w, idx) => ({ index: idx, weapon: w, canUse: true, reason: undefined }));
+        return unit.RNG_WEAPONS.map((w, idx) => {
+          const flags = weaponFlags(idx);
+          return { index: idx, weapon: w, canUse: true, reason: undefined, color: weaponColorFor(rngWeapons, idx), assigned: flags.assigned, locked: flags.locked };
+        });
       })()
     : [];
 
@@ -7434,6 +7610,7 @@ export default function Board({
           position={weaponSelectionMenu.position}
           onSelectWeapon={handleSelectWeapon}
           onClose={() => setWeaponSelectionMenu(null)}
+          persistent={mode === "squadModelShoot"}
         />
       )}
     </div>

@@ -4131,6 +4131,9 @@ class W40KEngine(gym.Env):
             squad_declare_shoot_model,
             squad_undeclare_shoot_model,
             squad_model_valid_targets,
+            squad_declare_shoot_weapon,
+            squad_undeclare_shoot_weapon,
+            squad_weapon_valid_targets,
             squad_lock_shoot,
             resolve_squad_shoot,
             clear_pending_shoot_intent,
@@ -4188,7 +4191,12 @@ class W40KEngine(gym.Env):
                     if weapon_index < len(model_weapons):
                         m["selectedRngWeaponIndex"] = weapon_index
             available_weapons = _squad_available_weapons(unit)
-            return True, {"action": name, "unitId": squad_id, "available_weapons": available_weapons}
+            # Cibles valides de l arme choisie (alimente le HP blink frontend pour l arme active).
+            valid_targets = squad_weapon_valid_targets(self.game_state, squad_id, weapon_index)
+            return True, {
+                "action": name, "unitId": squad_id, "weaponIndex": weapon_index,
+                "available_weapons": available_weapons, "valid_targets": valid_targets,
+            }
 
         if name == "squad_shoot_select_model":
             # Read-only : cibles valides de la fig (alimente le HP blink frontend).
@@ -4216,6 +4224,54 @@ class W40KEngine(gym.Env):
             removed = squad_undeclare_shoot_model(self.game_state, squad_id, model_id)
             return True, {
                 "action": name, "unitId": squad_id, "removed": removed,
+                "declarations": list(self.game_state["pending_squad_shoot_intents"].get(squad_id, [])),  # get allowed
+            }
+
+        if name == "squad_shoot_weapon_targets":
+            # Read-only : cibles valides de l arme (alimente le HP blink frontend).
+            weapon_index_raw = action.get("weaponIndex")
+            if weapon_index_raw is None:
+                return False, {"error": "missing_weapon_index"}
+            try:
+                weapon_index = int(weapon_index_raw)
+            except (TypeError, ValueError):
+                return False, {"error": "invalid_weapon_index_type"}
+            valid_targets = squad_weapon_valid_targets(self.game_state, squad_id, weapon_index)
+            return True, {
+                "action": name, "unitId": squad_id, "weaponIndex": weapon_index,
+                "valid_targets": valid_targets,
+            }
+
+        if name == "squad_shoot_assign_weapon":
+            weapon_index_raw = action.get("weaponIndex")
+            if weapon_index_raw is None:
+                return False, {"error": "missing_weapon_index"}
+            try:
+                weapon_index = int(weapon_index_raw)
+            except (TypeError, ValueError):
+                return False, {"error": "invalid_weapon_index_type"}
+            target_id = str(require_key(action, "targetId"))
+            try:
+                created = squad_declare_shoot_weapon(self.game_state, squad_id, weapon_index, target_id)
+            except ValueError as e:
+                return False, {"error": "cannot_shoot", "reason": str(e)}
+            return True, {
+                "action": name, "unitId": squad_id, "weaponIndex": weapon_index,
+                "target_unit_id": target_id, "created": created,
+                "declarations": list(self.game_state["pending_squad_shoot_intents"].get(squad_id, [])),  # get allowed
+            }
+
+        if name == "squad_shoot_unassign_weapon":
+            weapon_index_raw = action.get("weaponIndex")
+            if weapon_index_raw is None:
+                return False, {"error": "missing_weapon_index"}
+            try:
+                weapon_index = int(weapon_index_raw)
+            except (TypeError, ValueError):
+                return False, {"error": "invalid_weapon_index_type"}
+            removed = squad_undeclare_shoot_weapon(self.game_state, squad_id, weapon_index)
+            return True, {
+                "action": name, "unitId": squad_id, "weaponIndex": weapon_index, "removed": removed,
                 "declarations": list(self.game_state["pending_squad_shoot_intents"].get(squad_id, [])),  # get allowed
             }
 
@@ -4711,6 +4767,7 @@ class W40KEngine(gym.Env):
         if action.get("action") in (
             "squad_shoot_activate", "squad_select_weapon", "squad_shoot_select_model",
             "squad_shoot_assign", "squad_shoot_unassign", "squad_shoot_validate", "squad_shoot_cancel",
+            "squad_shoot_assign_weapon", "squad_shoot_unassign_weapon", "squad_shoot_weapon_targets",
         ):
             return self._process_squad_manual_shoot(action)
         # Pure delegation - handler manages initialization, player progression, everything

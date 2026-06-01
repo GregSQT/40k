@@ -396,6 +396,15 @@ export type UseEngineAPIBlinkBoardProps = {
   blinkVersion: number;
 };
 
+/** Dérive targets (model_id -> une de ses cibles) depuis les intents backend. */
+const deriveShootTargets = (
+  decls: Array<{ model_id: string; weapon_index: number; target_unit_id: string }>
+): Record<string, string> => {
+  const t: Record<string, string> = {};
+  for (const d of decls) t[String(d.model_id)] = String(d.target_unit_id);
+  return t;
+};
+
 export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const getTutorialShootOptionsRef = options?.getTutorialShootOptionsRef;
   const stopAiAfterPhaseChangeRef = options?.stopAiAfterPhaseChangeRef;
@@ -464,8 +473,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [squadShootPlan, setSquadShootPlan] = useState<{
     unitId: number;
     models: string[];
+    /** Dérivé de declarations : model_id -> une de ses cibles (count, fingerprint, clic-droit). */
     targets: Record<string, string>;
+    /** Source de vérité du rendu (voile/ligne par arme) : intents backend. */
+    declarations: Array<{ model_id: string; weapon_index: number; target_unit_id: string }>;
     activeModelId: string | null;
+    /** Arme active (pilotée par le menu d'armes) pour l'assignation par simple/double clic. */
+    activeWeaponIndex: number | null;
     canValidate: boolean;
   } | null>(null);
   /** Ref miroir de squadShootPlan pour accès synchrone dans les callbacks. */
@@ -916,8 +930,34 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       interface WeaponSelectedEventDetail {
         gameState: APIGameState;
         availableWeapons?: Array<{ index: number; weapon: unknown; can_use?: boolean; canUse?: boolean; reason?: string }>;
+        weaponIndex?: number;
+        validTargets?: Array<string | number>;
+        isSquadMode?: boolean;
       }
-      const { gameState: newGameState, availableWeapons } = (e as CustomEvent<WeaponSelectedEventDetail>).detail;
+      const {
+        gameState: newGameState,
+        availableWeapons,
+        weaponIndex: selectedWeaponIndex,
+        validTargets: weaponValidTargets,
+        isSquadMode: weaponIsSquadMode,
+      } = (e as CustomEvent<WeaponSelectedEventDetail>).detail;
+
+      // Mode squad : l'arme choisie devient l'arme active du plan + blink des cibles valides de cette arme.
+      if (weaponIsSquadMode && selectedWeaponIndex !== undefined && squadShootPlanRef.current) {
+        // Ne PAS désélectionner la fig active : sinon le simple clic per-fig (1 clic = désignation)
+        // ne marcherait plus et il faudrait double-cliquer. La fig reste active après le choix d'arme.
+        setSquadShootPlan((prev) =>
+          prev ? { ...prev, activeWeaponIndex: selectedWeaponIndex } : prev
+        );
+        const blinkIds = Array.isArray(weaponValidTargets)
+          ? weaponValidTargets.map((x) => (typeof x === "string" ? parseInt(x, 10) : x))
+          : [];
+        setBlinkingUnits((prev) => {
+          if (prev.blinkTimer) clearInterval(prev.blinkTimer);
+          const timer = blinkIds.length ? window.setInterval(() => {}, 500) : null;
+          return { unitIds: blinkIds, blinkTimer: timer, attackerId: squadShootPlanRef.current?.unitId ?? null };
+        });
+      }
       if (newGameState) {
         if (newGameState.units && newGameState.active_shooting_unit) {
           const activeId = newGameState.active_shooting_unit.toString();
@@ -3555,7 +3595,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         unitId: uid,
         models,
         targets: {},
+        declarations: [],
         activeModelId: null,
+        activeWeaponIndex: null,
         canValidate: false,
       });
       setMode("squadModelShoot");
@@ -3579,14 +3621,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [selectShootModelForUnit]
   );
 
-  /** Clic sur une unité ennemie valide : assigne la cible de la fig active. */
+  /** Clic sur une unité ennemie valide : la fig active tire l'arme active sur la cible (per-fig). */
   const handleAssignShootTarget = useCallback(
     async (targetUnitId: number | string) => {
       const plan = squadShootPlanRef.current;
       if (!plan?.activeModelId) return;
       const modelId = plan.activeModelId;
+      let result: Awaited<ReturnType<typeof executeAction>>;
       try {
-        await executeAction({
+        result = await executeAction({
           action: "squad_shoot_assign",
           unitId: String(plan.unitId),
           modelId,
@@ -3597,6 +3640,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setError(`Cible refusée: ${formatApiConnectionError(e)}`);
         return;
       }
+      if (!result || result.success === false) {
+        console.log(`[SQUAD-SHOOT] assign model=${modelId} rejeté par backend`);
+        return;
+      }
+      const decls = (result.result?.declarations ?? []) as Array<{
+        model_id: string; weapon_index: number; target_unit_id: string;
+      }>;
       // Fig assignée → vide le blink et déselectionne.
       setBlinkingUnits((prev) => {
         if (prev.blinkTimer) clearInterval(prev.blinkTimer);
@@ -3606,75 +3656,76 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         prev
           ? {
               ...prev,
-              targets: { ...prev.targets, [modelId]: String(targetUnitId) },
-              activeModelId: null,
-              canValidate: true,
+              declarations: decls,
+              targets: deriveShootTargets(decls),
+              // Mono-fig : on garde la fig active (split fire arme A→X puis arme B→Y sans re-clic fig).
+              // Multi-fig : on déselectionne (l'utilisateur re-sélectionne explicitement une fig).
+              activeModelId: prev.models.length === 1 ? prev.activeModelId : null,
+              canValidate: decls.length > 0,
             }
           : prev
       );
-      console.log(`[SQUAD-SHOOT] assign model=${modelId} → target=${targetUnitId}`);
+      console.log(`[SQUAD-SHOOT] assign model=${modelId} → target=${targetUnitId} (${decls.length} intents)`);
     },
     [executeAction]
   );
 
-  /** Double-clic sur une unité ennemie : assigne toutes les figs de l'escouade qui ont une LoS valide.
-   *  Le backend valide lui-même la LoS dans squad_shoot_assign — pas besoin de squad_shoot_select_model. */
+  /** Double-clic sur une unité ennemie : toutes les figs ayant l'arme active + LoS tirent dessus
+   *  (squad_shoot_assign_weapon — assignation par arme au niveau escouade). */
   const handleAutoAssignAllModels = useCallback(
     async (targetUnitId: number | string) => {
       const plan = squadShootPlanRef.current;
-      console.log(`[SQUAD-SHOOT][auto] START target=${targetUnitId} plan=${plan ? `unit=${plan.unitId} models=${plan.models.length} targets=${JSON.stringify(plan.targets)}` : "null"}`);
       if (!plan) return;
-      const targetId = String(targetUnitId);
-      let assignedCount = 0;
-      // Snapshot des targets au début (le state React peut ne pas encore refléter les assigns en vol).
-      const alreadyAssigned = { ...plan.targets };
-
-      for (const modelId of plan.models) {
-        console.log(`[SQUAD-SHOOT][auto] loop model=${modelId} alreadyAssigned=${!!alreadyAssigned[modelId]}`);
-        if (alreadyAssigned[modelId]) continue; // déjà assignée
-        const assignResult = await executeAction({
-          action: "squad_shoot_assign",
+      const weaponIndex = plan.activeWeaponIndex ?? 0;
+      console.log(`[SQUAD-SHOOT][weapon] START target=${targetUnitId} weapon=${weaponIndex}`);
+      let result: Awaited<ReturnType<typeof executeAction>>;
+      try {
+        result = await executeAction({
+          action: "squad_shoot_assign_weapon",
           unitId: String(plan.unitId),
-          modelId,
-          targetId,
+          weaponIndex,
+          targetId: String(targetUnitId),
         });
-        if (!assignResult || assignResult.success === false) {
-          console.log(`[SQUAD-SHOOT][auto] model=${modelId} rejeté par backend, skip`);
-          continue;
-        }
-        alreadyAssigned[modelId] = targetId;
-        assignedCount++;
-        console.log(`[SQUAD-SHOOT][auto] assign model=${modelId} → target=${targetId}`);
+      } catch (e) {
+        console.error(`[SQUAD-SHOOT][weapon] assign weapon=${weaponIndex} target=${targetUnitId} FAILED`, e);
+        setError(`Cible refusée: ${formatApiConnectionError(e)}`);
+        return;
       }
-
-      if (assignedCount > 0) {
-        setBlinkingUnits((prev) => {
-          if (prev.blinkTimer) clearInterval(prev.blinkTimer);
-          return { unitIds: [], blinkTimer: null, attackerId: null };
-        });
-        setSquadShootPlan((prev) =>
-          prev
-            ? {
-                ...prev,
-                targets: { ...alreadyAssigned },
-                activeModelId: null,
-                canValidate: true,
-              }
-            : prev
-        );
+      if (!result || result.success === false) {
+        console.log(`[SQUAD-SHOOT][weapon] weapon=${weaponIndex} rejeté par backend`);
+        return;
       }
-      console.log(`[SQUAD-SHOOT][auto] terminé : ${assignedCount} fig(s) assignée(s) → ${targetId}`);
+      const decls = (result.result?.declarations ?? []) as Array<{
+        model_id: string; weapon_index: number; target_unit_id: string;
+      }>;
+      setBlinkingUnits((prev) => {
+        if (prev.blinkTimer) clearInterval(prev.blinkTimer);
+        return { unitIds: [], blinkTimer: null, attackerId: null };
+      });
+      setSquadShootPlan((prev) =>
+        prev
+          ? {
+              ...prev,
+              declarations: decls,
+              targets: deriveShootTargets(decls),
+              activeModelId: null,
+              canValidate: decls.length > 0,
+            }
+          : prev
+      );
+      console.log(`[SQUAD-SHOOT][weapon] terminé weapon=${weaponIndex} → ${targetUnitId} (${decls.length} intents)`);
     },
     [executeAction]
   );
 
-  /** Clic droit sur une fig assignée : retire sa cible (squad_shoot_unassign). */
+  /** Clic droit sur une fig assignée : retire toutes ses armes (squad_shoot_unassign). */
   const handleUnassignShootModel = useCallback(
     async (modelId: string) => {
       const plan = squadShootPlanRef.current;
       if (!plan) return;
+      let result: Awaited<ReturnType<typeof executeAction>>;
       try {
-        await executeAction({
+        result = await executeAction({
           action: "squad_shoot_unassign",
           unitId: String(plan.unitId),
           modelId,
@@ -3683,13 +3734,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         console.error(`[SQUAD-SHOOT] unassign model=${modelId} FAILED`, e);
         return;
       }
-      setSquadShootPlan((prev) => {
-        if (!prev) return prev;
-        const targets = { ...prev.targets };
-        delete targets[modelId];
-        return { ...prev, targets, canValidate: Object.keys(targets).length > 0 };
-      });
-      console.log(`[SQUAD-SHOOT] unassign model=${modelId}`);
+      if (!result || result.success === false) return;
+      const decls = (result.result?.declarations ?? []) as Array<{
+        model_id: string; weapon_index: number; target_unit_id: string;
+      }>;
+      setSquadShootPlan((prev) =>
+        prev
+          ? {
+              ...prev,
+              declarations: decls,
+              targets: deriveShootTargets(decls),
+              canValidate: decls.length > 0,
+            }
+          : prev
+      );
+      console.log(`[SQUAD-SHOOT] unassign model=${modelId} (${decls.length} intents restants)`);
     },
     [executeAction]
   );
