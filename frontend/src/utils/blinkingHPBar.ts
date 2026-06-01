@@ -87,7 +87,7 @@ export type ChargeMinRollOverlay = {
 
 /**
  * @param distanceSubhexRaw Distance minimale entre empreintes en **pas de grille** (Board×10 : sous-hex).
- * @param chargeMaxInches Maximum du jet 2D6 en **pouces** (ex. 12), aligné sur `game_rules.charge_max_distance`.
+ * @param chargeMaxInches Maximum du jet 2D6 en **pouces** (ex. 12), aligné sur `charge.charge_max_distance`.
  * @param inchesToSubhex Pas sous-hex par pouce (ex. 10) — `board_config.inches_to_subhex`.
  */
 export function buildChargeMinRollOverlay(

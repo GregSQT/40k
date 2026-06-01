@@ -195,7 +195,7 @@ class GameReplayLogger:
             from config_loader import get_config_loader
             config = get_config_loader()
             game_config = config.get_game_config()
-            charge_max_distance = game_config["game_rules"]["charge_max_distance"]
+            charge_max_distance = game_config["charge"]["charge_max_distance"]
             charge_succeeded = distance_needed <= charge_roll and distance_needed <= charge_max_distance
             charge_details.append({
                 "rollType": "charge",

@@ -1061,7 +1061,7 @@ class ObservationBuilder:
                 if "MOVE" not in unit:
                     raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
                 _gr = require_key(require_key(game_state, "config"), "game_rules")
-                max_charge_range = unit["MOVE"] + require_key(_gr, "charge_max_distance")
+                max_charge_range = unit["MOVE"] + require_key(require_key(game_state["config"], "charge"), "charge_max_distance")
                 unit_col, unit_row = positions[str(unit["id"])]
                 target_col, target_row = positions[str(target["id"])]
                 distance = calculate_hex_distance(unit_col, unit_row, target_col, target_row)
@@ -2294,7 +2294,7 @@ class ObservationBuilder:
                     ally_col, ally_row = positions[ally_id]
                     if "MOVE" not in ally:
                         raise KeyError(f"Unit missing required 'MOVE' field: {ally}")
-                    _charge_max = require_key(require_key(require_key(game_state, "config"), "game_rules"), "charge_max_distance")
+                    _charge_max = require_key(require_key(require_key(game_state, "config"), "charge"), "charge_max_distance")
                     if calculate_hex_distance(ally_col, ally_row, enemy_col, enemy_row) > ally["MOVE"] + _charge_max:
                         continue
 
@@ -2493,7 +2493,7 @@ class ObservationBuilder:
                 distance = calculate_pathfinding_distance(
                     active_col, active_row, enemy_col, enemy_row, game_state
                 )
-                _charge_max_d = require_key(require_key(require_key(game_state, "config"), "game_rules"), "charge_max_distance")
+                _charge_max_d = require_key(require_key(require_key(game_state, "config"), "charge"), "charge_max_distance")
                 if distance <= active_unit["MOVE"] + _charge_max_d:
                     valid_targets.append(enemy)
         elif current_phase == "fight":

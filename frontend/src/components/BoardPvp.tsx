@@ -5728,7 +5728,7 @@ export default function Board({
     }
     const unitsLayer = unitsLayerRef.current;
 
-    const chargeMaxDistance = gameConfig?.game_rules?.charge_max_distance ?? 12;
+    const chargeMaxDistance = gameConfig?.charge?.charge_max_distance;
 
     // Wrapper qui enregistre le timestamp d'entrée en squadModelMove avant de confirmer le move.
     // Utilisé pour ignorer le select-click qui suit immédiatement la confirmation du movePreview.

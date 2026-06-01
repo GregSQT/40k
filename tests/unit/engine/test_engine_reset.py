@@ -89,6 +89,8 @@ def _minimal_config_with_units() -> Dict[str, Any]:
         "game_rules": {
             "engagement_zone": 1,
             "max_base_size_hex": 35,
+        },
+        "charge": {
             "charge_max_distance": 12,
         },
         "pve_mode": False,

@@ -94,11 +94,16 @@ interface GameRules {
   engagement_zone?: number;
   /** Plafond diamètre hex (prune engagement moteur, défaut côté JSON). */
   max_base_size_hex?: number;
-  charge_max_distance?: number;
+}
+
+interface ChargeConfig {
+  charge_max_distance: number;
+  select_target_before_roll: boolean;
 }
 
 interface GameConfig {
   game_rules: GameRules;
+  charge: ChargeConfig;
   gameplay: {
     phase_order: string[];
     simultaneous_actions: boolean;

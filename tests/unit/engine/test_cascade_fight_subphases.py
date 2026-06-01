@@ -29,6 +29,8 @@ def _base_config() -> Dict[str, Any]:
             "max_base_size_hex": 35,
             "los_visibility_min_ratio": 0.0,
             "cover_ratio": 0.0,
+        },
+        "charge": {
             "charge_max_distance": 12,
         },
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},

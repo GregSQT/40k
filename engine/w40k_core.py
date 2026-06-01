@@ -308,6 +308,7 @@ class W40KEngine(gym.Env):
             self.config = {
                 "board": board_config,
                 "game_rules": require_key(game_config, "game_rules"),
+                "charge": require_key(game_config, "charge"),
                 "units": scenario_units,
                 "name": scenario_name,  # Store scenario name for logging
                 "rewards_config_name": self.rewards_config_name,
@@ -401,13 +402,18 @@ class W40KEngine(gym.Env):
                 self.config["game_rules"] = gr
                 for _key in (
                     "engagement_zone",
-                    "charge_max_distance",
                     "advance_distance_range",
                     "avg_charge_roll",
                     "max_search_distance",
                 ):
                     if _key in gr:
                         gr[_key] = int(gr[_key]) * _scale
+            charge_cfg = self.config.get("charge")
+            if charge_cfg:
+                charge_cfg = copy.deepcopy(charge_cfg)
+                self.config["charge"] = charge_cfg
+                if "charge_max_distance" in charge_cfg:
+                    charge_cfg["charge_max_distance"] = int(charge_cfg["charge_max_distance"]) * _scale
             op = self.config.get("observation_params")
             if op and "perception_radius" in op:
                 op = copy.deepcopy(op)

@@ -47,6 +47,8 @@ def _config() -> Dict[str, Any]:
         "game_rules": {
             "engagement_zone": 1,
             "max_base_size_hex": 35,
+        },
+        "charge": {
             "charge_max_distance": 12,
         },
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},

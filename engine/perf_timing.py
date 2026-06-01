@@ -101,7 +101,7 @@ Lignes typiques (référence) :
   ``bfs_candidate_fp_s`` / ``bfs_placement_s`` / ``bfs_engagement_s`` détaillent le BFS historique,
   avec compteurs ``bfs_rejected_placement_n``, ``bfs_overlap_n``, ``bfs_no_engagement_n``,
   ``bfs_engagement_checks_n``.
-  ``charge_roll`` est en **pas de grille** (sous-hex) : sur plateau Boardx10, ``game_rules.charge_max_distance``
+  ``charge_roll`` est en **pas de grille** (sous-hex) : sur plateau Boardx10, ``charge.charge_max_distance``
   est déjà multiplié par ``inches_to_subhex`` (ex. 12\" → 120).
   ``fp=offset`` : empreinte par offsets pré-calculés (multi-hex ×10) ; ``fp=legacy`` : ``compute_candidate_footprint``.
 - Logs verbeux ``[CHARGE DEBUG]`` (positions / occupation) : ``W40K_CHARGE_DEBUG=1`` ou

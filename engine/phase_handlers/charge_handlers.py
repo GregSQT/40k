@@ -1395,7 +1395,7 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
         return _bvt_cache[_bvt_key]
 
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
-    CHARGE_MAX_DISTANCE = require_key(game_rules, "charge_max_distance")
+    CHARGE_MAX_DISTANCE = require_key(require_key(game_state["config"], "charge"), "charge_max_distance")
     valid_targets = []
 
     # Build all hexes reachable via BFS within max charge distance
@@ -1814,7 +1814,7 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
         return _hvt_cache[_hvt_key]
 
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
-    CHARGE_MAX_DISTANCE = require_key(game_rules, "charge_max_distance")
+    CHARGE_MAX_DISTANCE = require_key(require_key(game_state["config"], "charge"), "charge_max_distance")
 
     # Fast precheck: skip BFS if all enemies are beyond max reachable distance.
     # A charge of CHARGE_MAX_DISTANCE can land adjacent to a target at CHARGE_MAX_DISTANCE+1.
@@ -2016,7 +2016,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
     unit_id_str = str(unit["id"])
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
-    CHARGE_MAX_DISTANCE = require_key(game_rules, "charge_max_distance")
+    CHARGE_MAX_DISTANCE = require_key(require_key(game_state["config"], "charge"), "charge_max_distance")
     CHARGE_MAX_DISTANCE_SUBHEX = CHARGE_MAX_DISTANCE
     tid_arg: Optional[str] = str(target_id) if target_id is not None else None
     bfs_max_distance = _charge_bfs_max_distance(game_state, unit_id_str, int(charge_range), tid_arg)
@@ -2647,7 +2647,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         # avec la zone cible-centrée pour respecter la spec d’affichage autour de la cible.
         _t_bfs0 = time.perf_counter() if _perf else None
         _game_rules_tsel = require_key(require_key(game_state, "config"), "game_rules")
-        _CHARGE_MAX_DIST_TSEL = require_key(_game_rules_tsel, "charge_max_distance")
+        _CHARGE_MAX_DIST_TSEL = require_key(require_key(game_state["config"], "charge"), "charge_max_distance")
         _activation_key_tsel = (str(unit_id), _CHARGE_MAX_DIST_TSEL, None, _CHARGE_DEST_BFS_CACHE_SCHEMA)
         _activation_entry_tsel = game_state["_charge_dest_bfs_cache"].get(_activation_key_tsel)
         _bfs_fast_path = False

@@ -100,10 +100,12 @@ def _minimal_config() -> Dict[str, Any]:
         "game_rules": {
             "engagement_zone": 1,
             "max_base_size_hex": 35,
-            "charge_max_distance": 12,
             "los_visibility_min_ratio": 0.0,
             "cover_ratio": 0.3,
             "avg_charge_roll": 7,
+        },
+        "charge": {
+            "charge_max_distance": 12,
         },
         "pve_mode": False,
         "observation_params": obs_params,

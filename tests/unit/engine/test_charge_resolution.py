@@ -46,8 +46,10 @@ def _make_game_state(
         "config": {
             "game_rules": {
                 "engagement_zone": 1,
-                "charge_max_distance": charge_max,
                 "max_base_size_hex": 35,
+            },
+            "charge": {
+                "charge_max_distance": charge_max,
             },
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },

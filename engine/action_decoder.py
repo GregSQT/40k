@@ -1882,7 +1882,7 @@ class ActionDecoder:
                     from shared.data_validation import require_key as _rk
                     from engine.hex_utils import min_distance_between_sets as _mds
                     _gr = _rk(_rk(game_state, "config"), "game_rules")
-                    max_charge_range = unit["MOVE"] + _rk(_gr, "charge_max_distance")
+                    max_charge_range = unit["MOVE"] + _rk(_rk(game_state["config"], "charge"), "charge_max_distance")
                     _cache = _rk(game_state, "units_cache")
                     _ue = _cache.get(str(unit["id"]))
                     _te = _cache.get(str(target["id"]))
