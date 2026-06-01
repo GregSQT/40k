@@ -678,6 +678,24 @@ export class UnitRenderer {
       unitCircle.eventMode = "static";
       unitCircle.cursor = "pointer";
       this.attachTooltipHandlers(unitCircle);
+
+      // PIXI's Graphics.containsPoint() uses worldTransform which can be stale when circles are
+      // freshly added to the stage. Override with a direct algebraic check using stage.position,
+      // which is the only transform in the hierarchy (unitsLayer has no additional transform).
+      if (!nrBase) {
+        const _cx = centerX;
+        const _cy = centerY;
+        const _r2 = circleRadius * circleRadius;
+        const _stage = this.props.app.stage;
+        (unitCircle as PIXI.Graphics & { containsPoint: (p: PIXI.IPointData) => boolean }).containsPoint =
+          (p: PIXI.IPointData): boolean => {
+            const lx = p.x - _stage.position.x;
+            const ly = p.y - _stage.position.y;
+            const dx = lx - _cx;
+            const dy = ly - _cy;
+            return dx * dx + dy * dy <= _r2;
+          };
+      }
     }
 
     if (
@@ -1491,6 +1509,13 @@ export class UnitRenderer {
     } = this.props;
 
     if (!unit.HP_MAX) return; // Only skip if no HP_MAX, not if isPreview
+
+    // DEBUG — charge blink diagnostic
+    if (this.props.phase === "charge" && this.props.mode === "chargePreview" && unit.player !== this.props.current_player) {
+      const isInBlink = Array.isArray(this.props.blinkingUnits) &&
+        this.props.blinkingUnits.some((id) => String(id) === String(unit.id));
+      console.log(`[CHARGE_HP] unit=${unit.id}(${unit.DISPLAY_NAME}) blinkingUnits=${JSON.stringify(this.props.blinkingUnits)} inBlink=${isInBlink}`);
+    }
 
     const nrHp = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
     const hpDisplayBase = resolveBaseSizeForUnitDisplay(unit);

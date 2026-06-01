@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from engine.hex_utils import (
     _hex_center,
+    compute_occupied_hexes,
     engagement_minimum_clearance_norm,
     euclidean_edge_clearance_round_round,
     min_distance_between_sets,
@@ -79,6 +80,27 @@ def _cache_entry_round_base_size(cache_entry: Dict[str, Any]) -> float:
     return base_size
 
 
+def _entry_is_multi_figure(cache_entry: Dict[str, Any]) -> bool:
+    """True when a cache entry's live footprint spans more than one base (a squad).
+
+    Uses ``occupied_hexes`` (kept live from models_cache, dead figs removed) compared to
+    the footprint of a single base — never the stale init-time ``entry["models"]`` snapshot.
+    A multi-figure squad cannot be reduced to one round circle at its anchor, so the
+    euclidean round-round shortcut is invalid for it and the footprint metric is used.
+    """
+    occ = cache_entry.get("occupied_hexes")
+    if not occ:
+        return False
+    single = compute_occupied_hexes(
+        int(require_key(cache_entry, "col")),
+        int(require_key(cache_entry, "row")),
+        require_key(cache_entry, "BASE_SHAPE"),
+        require_key(cache_entry, "BASE_SIZE"),
+        int(cache_entry.get("orientation", 0)),
+    )
+    return len(occ) > len(single)
+
+
 def unit_entries_within_engagement_zone(
     first_entry: Dict[str, Any],
     second_entry: Dict[str, Any],
@@ -87,9 +109,16 @@ def unit_entries_within_engagement_zone(
     """Return True when two unit cache entries are within the shared engagement contract."""
     first_shape = first_entry["BASE_SHAPE"]
     second_shape = second_entry["BASE_SHAPE"]
-    # Euclidean round-base check is only meaningful on micro-grid boards (engagement_zone > 1).
-    # On legacy boards (engagement_zone == 1, 1 hex = 1 inch), hex footprint adjacency is used.
-    if engagement_zone > 1 and first_shape == "round" and second_shape == "round":
+    # Euclidean round-base check is only meaningful on micro-grid boards (engagement_zone > 1)
+    # AND only valid for single round bases: a multi-figure squad must use the footprint
+    # metric (nearest figure), else it collapses to one circle on its anchor.
+    if (
+        engagement_zone > 1
+        and first_shape == "round"
+        and second_shape == "round"
+        and not _entry_is_multi_figure(first_entry)
+        and not _entry_is_multi_figure(second_entry)
+    ):
         req = engagement_minimum_clearance_norm(engagement_zone)
         gap = euclidean_edge_clearance_round_round(
             require_key(first_entry, "col"),

@@ -1469,6 +1469,24 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
 
     _bvt_cache[_bvt_key] = valid_targets
 
+    # DEBUG LOG — charge target diagnostic
+    _valid_ids = [str(t["id"]) for t in valid_targets]
+    _excluded = []
+    for eid, eentry, _ in enemy_index:
+        if str(eid) not in _valid_ids:
+            _excluded.append(
+                f"unit_{eid}(col={eentry['col']},row={eentry['row']})"
+                f" has_geom={per_enemy_has_geom.get(eid)} non_occ={per_enemy_non_occ.get(eid)}"
+            )
+    add_console_log(game_state, (
+        f"[CHARGE_BVT] charger={unit_id} reachable={len(reachable_hexes)} "
+        f"valid={_valid_ids} excluded={_excluded}"
+    ))
+    safe_print(game_state, (
+        f"[CHARGE_BVT] charger={unit_id} reachable={len(reachable_hexes)} "
+        f"valid={_valid_ids} excluded={_excluded}"
+    ))
+
     if _perf and _t_bvt0 is not None and _t_after_bfs is not None and _t_geom0 is not None and _t_geom1 is not None:
         append_perf_timing_line(
             f"CHARGE_BUILD_VALID_TARGETS episode={_ep} turn={_turn} unit_id={unit_id} "
@@ -2080,9 +2098,12 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         _e_r = max(1, (_e_bs_int + 1) // 2)
         _charge_enemy_prox.append((_ec, _er, engagement_zone + _mover_r + _e_r + 1))
 
+    def _min_dist_to_enemy(start_c: int, start_r: int, ce: Dict[str, Any], pec: int, per: int) -> int:
+        occ = ce.get("occupied_hexes") or {(pec, per)}
+        return min(_calculate_hex_distance(start_c, start_r, int(mc), int(mr)) for mc, mr in occ)
     if _charge_enemy_prox and all(
-        _calculate_hex_distance(start_col, start_row, pec, per) > bfs_max_distance + peth
-        for pec, per, peth in _charge_enemy_prox
+        _min_dist_to_enemy(start_col, start_row, ce, pec, per) > bfs_max_distance + peth
+        for (_, ce), (pec, per, peth) in zip(indexed_enemy_engagement, _charge_enemy_prox)
     ):
         game_state["valid_charge_destinations_pool"] = []
         if charge_range == CHARGE_MAX_DISTANCE_SUBHEX and not early_exit_if_valid and tid_arg is None:
@@ -2178,27 +2199,33 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             )
 
     # Precompute set of all hexes within proximity threshold of any enemy → O(1) lookup in BFS loop.
+    # Use ALL occupied hexes (not just anchor) so multi-model squads are fully covered.
     from engine.hex_utils import dilate_hex_set_unbounded as _dilate_unbounded
     _near_enemy_set: Set[Tuple[int, int]] = set()
-    for _pec, _per, _peth in _charge_enemy_prox:
-        _near_enemy_set.update(_dilate_unbounded({(_pec, _per)}, _peth))
+    for (_ene_id_prox, _ce_prox), (_pec, _per, _peth) in zip(indexed_enemy_engagement, _charge_enemy_prox):
+        _ce_occ_all: Set[Tuple[int, int]] = _ce_prox.get("occupied_hexes") or {(_pec, _per)}
+        _near_enemy_set.update(_dilate_unbounded({(int(c), int(r)) for c, r in _ce_occ_all}, _peth))
 
     # Opt 3 — neighbor offsets inlinés : évite get_hex_neighbors (normalize_coordinates + int() redondants).
     _BFS_OFF_EVEN = ((0, -1), (1, -1), (1, 0), (0, 1), (-1, 0), (-1, -1))
     _BFS_OFF_ODD  = ((0, -1), (1, 0),  (1, 1), (0, 1), (-1, 1), (-1, 0))
 
     # Opt 1 — prefiltre per-enemy : évite unit_entries_within_engagement_zone sur les hexes
-    # clairement hors portée d'un ennemi spécifique (miroir de _charge_reverse_goal_bfs_for_eligibility).
+    # clairement hors portée d'un ennemi spécifique. Use all occupied hexes (not just anchor)
+    # so multi-model squads are fully covered (far-side models not missed).
     _bfs_is_mover_round = (unit["BASE_SHAPE"] == "round")
     _bfs_enemy_eng_zones: Dict[Any, Set[Tuple[int, int]]] = {}
-    _bfs_rr_prox: Dict[Any, int] = {}
+    _bfs_rr_near_set: Dict[Any, Set[Tuple[int, int]]] = {}  # replaces _bfs_rr_prox for round-round
     for (_bfs_eid, _bfs_ee), (_bfs_pec, _bfs_per, _bfs_peth) in zip(indexed_enemy_engagement, _charge_enemy_prox):
+        _bfs_ee_occ_all = _bfs_ee.get("occupied_hexes") or {(int(_bfs_pec), int(_bfs_per))}
         if _bfs_is_mover_round and _bfs_ee.get("BASE_SHAPE") == "round":
-            _bfs_rr_prox[_bfs_eid] = _bfs_peth
+            # Round-round: proximity set from all model positions (not just anchor)
+            _bfs_rr_near_set[_bfs_eid] = _dilate_unbounded(
+                {(int(c), int(r)) for c, r in _bfs_ee_occ_all}, _bfs_peth
+            )
         else:
-            _bfs_ee_fp = _bfs_ee.get("occupied_hexes") or {(int(_bfs_pec), int(_bfs_per))}
             _bfs_enemy_eng_zones[_bfs_eid] = _dilate_unbounded(
-                {(int(fc), int(fr)) for fc, fr in _bfs_ee_fp}, engagement_zone
+                {(int(fc), int(fr)) for fc, fr in _bfs_ee_occ_all}, engagement_zone
             )
 
     _t_bfs0 = time.perf_counter() if _perf else None
@@ -2299,7 +2326,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                 # Opt 1 — prefiltre per-enemy avant l'appel coûteux unit_entries_within_engagement_zone.
                 _bfs_ee_is_rr = (_bfs_is_mover_round and enemy_entry["BASE_SHAPE"] == "round")
                 if _bfs_ee_is_rr:
-                    if _eid in _bfs_rr_prox and _calculate_hex_distance(neighbor_col_int, neighbor_row_int, ec, er) > _bfs_rr_prox[_eid]:
+                    if _eid in _bfs_rr_near_set and neighbor_pos not in _bfs_rr_near_set[_eid]:
                         continue
                 elif _eid in _bfs_enemy_eng_zones:
                     if not (candidate_fp & _bfs_enemy_eng_zones[_eid]):
@@ -2332,6 +2359,18 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             queue.append((neighbor_pos, neighbor_dist))
 
     _t_bfs1 = time.perf_counter() if _perf else None
+
+    # DEBUG LOG — BFS destinations diagnostic
+    _dbg_near_sz = len(_near_enemy_set)
+    add_console_log(game_state, (
+        f"[CHARGE_BFS] unit={unit_id} bfs_max={bfs_max_distance} start=({start_col},{start_row}) "
+        f"near_set_sz={_dbg_near_sz} visited={len(visited)} valid_dest={len(valid_destinations)} "
+        f"enemies={[(str(eid), int(ce['col']), int(ce['row'])) for eid,ce in indexed_enemy_engagement]}"
+    ))
+    safe_print(game_state, (
+        f"[CHARGE_BFS] unit={unit_id} bfs_max={bfs_max_distance} start=({start_col},{start_row}) "
+        f"near_set_sz={_dbg_near_sz} visited={len(visited)} valid_dest={len(valid_destinations)}"
+    ))
 
     game_state["valid_charge_destinations_pool"] = valid_destinations
     if charge_range == CHARGE_MAX_DISTANCE_SUBHEX and not early_exit_if_valid and tid_arg is None:

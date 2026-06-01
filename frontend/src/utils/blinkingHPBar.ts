@@ -424,6 +424,9 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   hpContainer.name = "hp-blink-container";
   hpContainer.zIndex = HP_BLINK_STAGE_Z_INDEX;
   hpContainer.sortableChildren = true;
+  // Prevent HP bar graphics from intercepting pointer events meant for unit circles below
+  hpContainer.eventMode = "none";
+  hpContainer.interactiveChildren = false;
   hpContainer.unitId = unitIdNum;
   hpContainer.attackerId = attackerIdNum;
   hpContainer.weaponSignature = weaponSignature;
