@@ -364,6 +364,54 @@ export function minHexDistanceBetweenUnitFootprints(
   return minHexDistanceBetweenFootprintKeySets(setA, setB, maxDistance);
 }
 
+/**
+ * Empreinte hex (clés "col,row") d'un SQUAD multi-figurines : union des bases calculées à
+ * chaque centre de figurine VIVANTE (``occupied_hexes_by_model`` du units_cache moteur : map
+ * model_id -> [col,row]). C'est la source de vérité par-figurine (figs mortes déjà retirées
+ * côté backend). Renvoie ``null`` si la map est absente/vide → l'appelant retombe sur
+ * ``unitFootprintHexKeys`` (base unique à l'ancre, valable pour une figurine seule).
+ */
+export function squadFootprintHexKeysFromModelCenters(
+  occupiedHexesByModel: Record<string, [number, number]> | undefined,
+  unit: { BASE_SHAPE?: string; BASE_SIZE?: number | [number, number] }
+): Set<string> | null {
+  if (!occupiedHexesByModel) return null;
+  const centers = Object.values(occupiedHexesByModel);
+  if (centers.length === 0) return null;
+  const shape = unit.BASE_SHAPE ?? "round";
+  const keys = new Set<string>();
+  if (shape !== "round") {
+    for (const [c, r] of centers) keys.add(`${c},${r}`);
+    return keys;
+  }
+  const size = resolveBaseSizeForFootprint(unit);
+  for (const [c, r] of centers) {
+    for (const [hc, hr] of computeOccupiedHexes(c, r, shape, size)) {
+      keys.add(`${hc},${hr}`);
+    }
+  }
+  return keys;
+}
+
+/**
+ * Distance min entre deux unités en mesurant **figurine la plus proche à figurine la plus
+ * proche** : empreinte union de chaque squad depuis ses centres de figs (``occupied_hexes_by_model``),
+ * avec repli sur la base unique à l'ancre quand la map par-fig est absente.
+ */
+export function minHexDistanceBetweenUnitFootprintsLive(
+  charger: UnitFootprintInput,
+  target: UnitFootprintInput,
+  chargerByModel: Record<string, [number, number]> | undefined,
+  targetByModel: Record<string, [number, number]> | undefined,
+  maxDistance: number
+): number {
+  const setA =
+    squadFootprintHexKeysFromModelCenters(chargerByModel, charger) ?? unitFootprintHexKeys(charger);
+  const setB =
+    squadFootprintHexKeysFromModelCenters(targetByModel, target) ?? unitFootprintHexKeys(target);
+  return minHexDistanceBetweenFootprintKeySets(setA, setB, maxDistance);
+}
+
 // --- Pixel ↔ Hex conversion ---
 
 /**

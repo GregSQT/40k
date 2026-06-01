@@ -20,7 +20,7 @@ import {
 import { logFightClick } from "../utils/fightClickDebug";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import {
-  minHexDistanceBetweenUnitFootprints,
+  minHexDistanceBetweenUnitFootprintsLive,
   resolveBaseSizeForUnitDisplay,
 } from "../utils/hexFootprint";
 import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
@@ -1675,10 +1675,21 @@ export class UnitRenderer {
           : 10;
       const inchesToSubhex = Math.max(1, Math.floor(inchesToSubhexRaw));
       const chargeMaxSubhex = chargeMaxInches * inchesToSubhex;
+      // Distance figurine-la-plus-proche : empreinte union de chaque squad depuis les centres
+      // de figs vivants (units_cache.occupied_hexes_by_model), pas l'ancre du squad.
+      const unitsCacheForFootprint = this.props.gameState?.units_cache as
+        | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+        | undefined;
       const chargeMinRollOverlay =
         blinkPhase === "charge" && attacker
           ? buildChargeMinRollOverlay(
-              minHexDistanceBetweenUnitFootprints(attacker, unit, chargeMaxSubhex),
+              minHexDistanceBetweenUnitFootprintsLive(
+                attacker,
+                unit,
+                unitsCacheForFootprint?.[String(attacker.id)]?.occupied_hexes_by_model,
+                unitsCacheForFootprint?.[String(unit.id)]?.occupied_hexes_by_model,
+                chargeMaxSubhex
+              ),
               chargeMaxInches,
               inchesToSubhex
             )
