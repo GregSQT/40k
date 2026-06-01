@@ -42,6 +42,7 @@ import {
   minHexDistanceBetweenFootprintKeySets,
   pixelToHex,
   resolveBaseSizeForUnitDisplay,
+  squadFootprintHexKeysFromModelCenters,
   unitFootprintHexKeys,
 } from "../utils/hexFootprint";
 import type { HexUnionMaskLayout } from "../utils/hexUnionBoundaryPolygon";
@@ -2289,7 +2290,10 @@ export default function Board({
       const previewIconX = container.position.x;
       const previewIconY = container.position.y;
       const hexSteps = hexDistOff(startCol, startRow, iconCol, iconRow);
-      const distanceDisplay = (hexSteps / HEX_STEPS_PER_INCH_DISPLAY).toFixed(1);
+      const stepsPerInch =
+        (boardConfig as unknown as { inches_to_subhex?: number }).inches_to_subhex ||
+        HEX_STEPS_PER_INCH_DISPLAY;
+      const distanceDisplay = (hexSteps / stepsPerInch).toFixed(1);
       const tooltipCharge =
         phase === "charge" &&
         mode === "chargePreview" &&
@@ -3851,7 +3855,10 @@ export default function Board({
         const b = pathHexes[i + 1]!;
         hexStepsTotal += hexDistOff(a.col, a.row, b.col, b.row);
       }
-      const distanceDisplay = (hexStepsTotal / HEX_STEPS_PER_INCH_DISPLAY).toFixed(1);
+      const stepsPerInch =
+        (boardConfig as unknown as { inches_to_subhex?: number }).inches_to_subhex ||
+        HEX_STEPS_PER_INCH_DISPLAY;
+      const distanceDisplay = (hexStepsTotal / stepsPerInch).toFixed(1);
 
       if (!measureGuideLineRef.current || measureGuideLineRef.current.destroyed) {
         const g = new PIXI.Graphics();
@@ -4586,9 +4593,16 @@ export default function Board({
           );
         }
       } else {
-        const attackerFp = unitFootprintHexKeys(selectedUnit);
-        // Aligné sur min_distance_between_sets (empreinte ↔ empreinte), §3.3 moteur
-        const ucFight = gameState?.units_cache as Record<string, { HP_CUR?: number }> | undefined;
+        // Aligné sur min_distance_between_sets (empreinte ↔ empreinte), §3.3 moteur.
+        // Empreinte = union des figs vivantes (occupied_hexes_by_model), pas l'ancre du squad.
+        const ucFight = gameState?.units_cache as
+          | Record<string, { HP_CUR?: number; occupied_hexes_by_model?: Record<string, [number, number]> }>
+          | undefined;
+        const attackerFp =
+          squadFootprintHexKeysFromModelCenters(
+            ucFight?.[String(selectedUnit.id)]?.occupied_hexes_by_model,
+            selectedUnit
+          ) ?? unitFootprintHexKeys(selectedUnit);
         fightTargets = units.filter((u) => {
           if (u.player === selectedUnit.player) {
             return false;
@@ -4602,7 +4616,9 @@ export default function Board({
           if (hp <= 0) {
             return false;
           }
-          const enemyFp = unitFootprintHexKeys(u);
+          const enemyFp =
+            squadFootprintHexKeysFromModelCenters(ce?.occupied_hexes_by_model, u) ??
+            unitFootprintHexKeys(u);
           return (
             minHexDistanceBetweenFootprintKeySets(attackerFp, enemyFp, fightEngagementHexSteps) <=
             fightEngagementHexSteps

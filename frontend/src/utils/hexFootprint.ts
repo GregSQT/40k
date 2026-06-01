@@ -341,28 +341,14 @@ export function minHexDistanceBetweenFootprintKeySets(
   return maxDistance + 1;
 }
 
-/** Unité source pour {@link minHexDistanceBetweenUnitFootprints}. */
+/** Unité source pour {@link minHexDistanceBetweenUnitFootprintsLive}. */
 export type UnitFootprintInput = {
+  id?: number | string;
   col: number;
   row: number;
   BASE_SHAPE?: string;
   BASE_SIZE?: number | [number, number];
 };
-
-/**
- * Distance minimale entre deux empreintes en **pas de grille** (voisins 6), plafonnée par `maxDistance`.
- * Sur plateau Board×10, un pas = un sous-hex ; comparer au budget `jet 2D6 × inches_to_subhex`.
- * Un résultat &gt; `maxDistance` indique une distance strictement supérieure (hors fenêtre de recherche).
- */
-export function minHexDistanceBetweenUnitFootprints(
-  charger: UnitFootprintInput,
-  target: UnitFootprintInput,
-  maxDistance: number
-): number {
-  const setA = unitFootprintHexKeys(charger);
-  const setB = unitFootprintHexKeys(target);
-  return minHexDistanceBetweenFootprintKeySets(setA, setB, maxDistance);
-}
 
 /**
  * Empreinte hex (clés "col,row") d'un SQUAD multi-figurines : union des bases calculées à
