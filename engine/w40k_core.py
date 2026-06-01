@@ -97,8 +97,8 @@ def _load_topology_cached(
     cache_key = f"{board_cols}x{board_rows}-{wall_id}"
 
     if cache_key not in _topology_cache:
-        _root = Path(__file__).resolve().parent.parent
-        _board_dir = _root / "config" / "board" / f"{board_cols}x{board_rows}"
+        from config_loader import get_config_loader
+        _board_dir = get_config_loader().get_board_dir()
         _topology_path = _board_dir / f"topology_{cache_key}.npz"
         if not _topology_path.exists():
             import logging

@@ -75,6 +75,22 @@ class ConfigLoader:
         cols = board_config["default"]["cols"]
         rows = board_config["default"]["rows"]
         return (cols, rows)
+
+    def get_board_dir(self) -> Path:
+        """Get the active board directory as single source of truth for walls/objectives.
+
+        Resolves the real board subdir (W40K_BOARD_PATH env override, else config.json
+        paths.board) instead of reconstructing it from {cols}x{rows}, so the folder name
+        may differ from the subhex dimensions (e.g. board/44x60x5).
+        """
+        board_override = os.environ.get("W40K_BOARD_PATH", "").strip()
+        if board_override:
+            return self.config_dir / board_override
+        config = self.load_config("config", force_reload=False)
+        board_subdir = config.get("paths", {}).get("board")
+        if not board_subdir:
+            raise ValueError("config/config.json: 'paths.board' must be a non-empty value")
+        return self.config_dir / board_subdir
     
     def get_turn_limit_penalty(self) -> float:
         """Get penalty applied when reaching turn limit."""

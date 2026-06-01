@@ -1143,8 +1143,7 @@ class GameStateManager:
         """Load shared wall_hexes file referenced by scenario wall_ref."""
         if isinstance(wall_ref, str) and wall_ref.strip() == "random":
             from config_loader import get_config_loader
-            cols, rows = get_config_loader().get_board_size()
-            walls_dir = Path(__file__).resolve().parent.parent / "config" / "board" / f"{cols}x{rows}" / "walls"
+            walls_dir = get_config_loader().get_board_dir() / "walls"
             candidates = sorted(p for p in walls_dir.glob("walls-*.json") if p.stem != "walls-none")
             if not candidates:
                 raise FileNotFoundError(f"No walls-*.json files found in {walls_dir} for random wall_ref in scenario {scenario_file}")
@@ -1194,8 +1193,7 @@ class GameStateManager:
         """Load shared objectives file referenced by scenario objectives_ref."""
         if isinstance(objectives_ref, str) and objectives_ref.strip() == "random":
             from config_loader import get_config_loader
-            cols, rows = get_config_loader().get_board_size()
-            objectives_dir = Path(__file__).resolve().parent.parent / "config" / "board" / f"{cols}x{rows}" / "objectives"
+            objectives_dir = get_config_loader().get_board_dir() / "objectives"
             candidates = sorted(objectives_dir.glob("objectives-*.json"))
             if not candidates:
                 raise FileNotFoundError(f"No objectives-*.json files found in {objectives_dir} for random objectives_ref in scenario {scenario_file}")
@@ -1259,8 +1257,7 @@ class GameStateManager:
 
         project_root = Path(__file__).resolve().parent.parent
         from config_loader import get_config_loader
-        cols, rows = get_config_loader().get_board_size()
-        board_dir = project_root / "config" / "board" / f"{cols}x{rows}"
+        board_dir = get_config_loader().get_board_dir()
         if shared_dir_name == "_walls":
             return board_dir / "walls" / normalized
         if shared_dir_name == "_objectives":

@@ -46,6 +46,7 @@ const BOARD_OPTIONS = [
   { key: "x1", label: "25×21" },
   { key: "x5", label: "360×312 (x5)" },
   { key: "x10", label: "360×312 (x10)" },
+  { key: "x5_44x60", label: "44×60 (x5)" },
 ] as const;
 
 type BoardKey = (typeof BOARD_OPTIONS)[number]["key"];

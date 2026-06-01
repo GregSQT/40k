@@ -56,6 +56,7 @@ BOARD_PATH_MAP = {
     "x1": "board/25x21",
     "x5": "board/180x156",
     "x10": "board/360x312",
+    "x5_44x60": "board/44x60x5",
 }
 
 try:
