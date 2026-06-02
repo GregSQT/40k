@@ -46,6 +46,7 @@ interface ObjectiveZone {
   vertices?: [number, number][];
   top_left?: [number, number];
   bottom_right?: [number, number];
+  objective?: boolean;
 }
 
 interface Wall {

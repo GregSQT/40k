@@ -2026,10 +2026,14 @@ export const drawBoard = (
           c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN,
           r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN,
         ];
-        const terrainColor = 0x9a8060;
+        const terrainColorCss = getComputedStyle(document.documentElement).getPropertyValue("--terrain-color").trim();
+        const terrainColor = parseInt(terrainColorCss.replace("#", ""), 16);
+        const terrainObjectiveColorCss = getComputedStyle(document.documentElement).getPropertyValue("--terrain-objective-color").trim();
+        const terrainObjectiveColor = parseInt(terrainObjectiveColorCss.replace("#", ""), 16);
         const terrainLineWidth = Math.max(1.5, HEX_RADIUS * 0.3);
         for (const zone of boardConfig.terrain_zones) {
           const g = new PIXI.Graphics();
+          const zoneColor = zone.objective ? terrainObjectiveColor : terrainColor;
           if (zone.shape === "rect" && zone.top_left && zone.bottom_right) {
             const [x1, y1] = toPixelT(zone.top_left[0], zone.top_left[1]);
             const [x2, y2] = toPixelT(zone.bottom_right[0], zone.bottom_right[1]);
@@ -2037,8 +2041,8 @@ export const drawBoard = (
             const ry = Math.min(y1, y2);
             const rw = Math.abs(x2 - x1);
             const rh = Math.abs(y2 - y1);
-            g.beginFill(terrainColor, 0.1);
-            g.lineStyle(terrainLineWidth, terrainColor, 0.85);
+            g.beginFill(zoneColor, 0.1);
+            g.lineStyle(terrainLineWidth, zoneColor, 0.85);
             g.drawRect(rx, ry, rw, rh);
             g.endFill();
           } else if (
@@ -2047,8 +2051,8 @@ export const drawBoard = (
             zone.vertices.length === 3
           ) {
             const pts = zone.vertices.map(([c, r]) => toPixelT(c, r));
-            g.beginFill(terrainColor, 0.1);
-            g.lineStyle(terrainLineWidth, terrainColor, 0.85);
+            g.beginFill(zoneColor, 0.1);
+            g.lineStyle(terrainLineWidth, zoneColor, 0.85);
             g.moveTo(pts[0]![0], pts[0]![1]);
             g.lineTo(pts[1]![0], pts[1]![1]);
             g.lineTo(pts[2]![0], pts[2]![1]);
@@ -2060,8 +2064,8 @@ export const drawBoard = (
             zone.vertices.length >= 3
           ) {
             const pts = zone.vertices.map(([c, r]) => toPixelT(c, r));
-            g.beginFill(terrainColor, 0.1);
-            g.lineStyle(terrainLineWidth, terrainColor, 0.85);
+            g.beginFill(zoneColor, 0.1);
+            g.lineStyle(terrainLineWidth, zoneColor, 0.85);
             g.moveTo(pts[0]![0], pts[0]![1]);
             for (let i = 1; i < pts.length; i++) {
               g.lineTo(pts[i]![0], pts[i]![1]);
@@ -2075,7 +2079,7 @@ export const drawBoard = (
           ) {
             const [x1, y1] = toPixelT(zone.vertices[0]![0], zone.vertices[0]![1]);
             const [x2, y2] = toPixelT(zone.vertices[1]![0], zone.vertices[1]![1]);
-            g.lineStyle(terrainLineWidth, terrainColor, 0.85);
+            g.lineStyle(terrainLineWidth, zoneColor, 0.85);
             g.moveTo(x1, y1);
             g.lineTo(x2, y2);
           } else {

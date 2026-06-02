@@ -2869,6 +2869,8 @@ def get_board_config():
                 entry["top_left"] = o["top_left"]
             if "bottom_right" in o:
                 entry["bottom_right"] = o["bottom_right"]
+            if "objective" in o:
+                entry["objective"] = o["objective"]
             return entry
         merged["objective_zones"] = [_zone_entry(o) for o in objectives]
 
