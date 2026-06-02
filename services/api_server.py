@@ -2890,6 +2890,20 @@ def get_board_config():
                 path_hint=f"board terrain ({board_subdir})",
             )
             terrain_zones = [_zone_entry(t) for t in terrain_features]
+            for gi, g in enumerate(terrain_data.get("walls", [])):
+                if not isinstance(g, dict):
+                    continue
+                for seg in g.get("segments", []):
+                    if isinstance(seg, list) and len(seg) == 2:
+                        a, b = seg[0], seg[1]
+                        wall_segments_raw.append({
+                            "start": {"col": int(a[0]), "row": int(a[1])},
+                            "end":   {"col": int(b[0]), "row": int(b[1])},
+                        })
+                wall_hexes.extend(expand_wall_group_to_hex_list(g, path_hint=f"board terrain ({board_subdir}) walls[{gi}]"))
+            merged["wall_hexes"] = wall_hexes
+            if wall_segments_raw:
+                merged["walls"] = wall_segments_raw
         merged["terrain_zones"] = terrain_zones
         return jsonify({"success": True, "config": merged})
     except FileNotFoundError as e:

@@ -1,10 +1,10 @@
 {
   "terrain_id": "terrain-mc1",
   "terrain": [
-    { "id": "ruin_center", "name": " tri_2 Centre", "shape": "polygon", "vertices": [[85,120],[135,120],[135,180],[85,180]], "objective": true },
-    { "id": "ruin_ne", "name": "rect_g NE", "shape": "polygon", "vertices": [[151,63],[200,30],[220,52],[171,85]], "objective": true },
-    { "id": "ruin_sw", "name": "rect_g SW", "shape": "polygon", "vertices": [[69,237],[20,270],[0,248],[49,215]], "objective": true },
     { "id": "ruin_nw", "name": "rect_g NW", "shape": "polygon", "vertices": [[25,30],[60,30],[60,88],[25,88]], "objective": true },
+    { "id": "ruin_ne", "name": "rect_g NE", "shape": "polygon", "vertices": [[151,63],[200,30],[220,52],[171,85]], "objective": true },
+    { "id": "ruin_center", "name": " tri_2 Centre", "shape": "polygon", "vertices": [[85,120],[135,120],[135,180],[85,180]], "objective": true },
+    { "id": "ruin_sw", "name": "rect_g SW", "shape": "polygon", "vertices": [[69,237],[20,270],[0,248],[49,215]], "objective": true },
     { "id": "ruin_se", "name": "rect_g SE", "shape": "polygon", "vertices": [[195,270],[160,270],[160,212],[195,212]], "objective": true },
     { "id": "line_1_n", "name": "line_s NW", "shape": "polygon", "vertices": [[0,150],[25,132],[32,140],[6,158]], "objective": false },
     { "id": "line_1_s", "name": "line_s SE", "shape": "polygon", "vertices": [[220,150],[195,167],[188,160],[213,142]], "objective": false },
@@ -19,5 +19,10 @@
     { "id": "line_deploiement_top", "name": "Ligne zone déploiement", "shape": "line", "vertices": [[0,150],[220,0]], "objective": false },
     { "id": "line_deploiement_bot", "name": "Ligne zone déploiement bas", "shape": "line", "vertices": [[220,150],[0,300]], "objective": false },
     { "id": "line_dz_centrale", "name": "Ligne centrale", "shape": "line", "vertices": [[0,225],[220,75]], "objective": false }
+  ],
+  "walls": [
+    { "name": "ruin_nw_n", "segments": [[[28, 33], [44, 33]], [[28, 33], [28, 43]], [[57, 85], [57, 50]], [[57, 85], [47, 85]]]},
+    { "name": "ruin_nw_s", "segments": [[[171, 81], [155, 63]], [[171, 81], [181, 74]]]},
+    { "name": "ruin_nw_s", "segments": [[[199, 33], [210, 46]], [[199, 33], [170, 54]]]}
   ]
 }
