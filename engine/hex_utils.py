@@ -9,7 +9,7 @@ All functions are O(1) per call unless documented otherwise.
 """
 
 import math
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 
@@ -461,6 +461,114 @@ def expand_wall_group_to_hex_list(
     return out
 
 
+def _hex_projected(c: int, r: int) -> tuple:
+    hex_horiz_spacing = 1.5
+    hex_vert_spacing = math.sqrt(3.0)
+    hx = c * hex_horiz_spacing
+    hy = r * hex_vert_spacing + ((c % 2) * hex_vert_spacing) / 2.0
+    return hx, hy
+
+
+def _objective_rect_hexes(
+    *,
+    top_left: list,
+    bottom_right: list,
+    cols: int,
+    rows: int,
+) -> List[List[int]]:
+    px_min, py_min = _hex_projected(int(top_left[0]), int(top_left[1]))
+    px_max, py_max = _hex_projected(int(bottom_right[0]), int(bottom_right[1]))
+    if px_min > px_max:
+        px_min, px_max = px_max, px_min
+    if py_min > py_max:
+        py_min, py_max = py_max, py_min
+
+    c1 = max(0, min(int(top_left[0]), int(bottom_right[0])))
+    c2 = min(cols - 1, max(int(top_left[0]), int(bottom_right[0])))
+    r1 = max(0, min(int(top_left[1]), int(bottom_right[1])))
+    r2 = min(rows - 1, max(int(top_left[1]), int(bottom_right[1])))
+
+    out: List[List[int]] = []
+    for c in range(c1, c2 + 1):
+        for r in range(r1, r2 + 1):
+            hx, hy = _hex_projected(c, r)
+            if px_min <= hx <= px_max and py_min <= hy <= py_max:
+                out.append([c, r])
+    return out
+
+
+def _objective_triangle_hexes(
+    *,
+    vertices: list,
+    cols: int,
+    rows: int,
+) -> List[List[int]]:
+    (ax, ay) = _hex_projected(int(vertices[0][0]), int(vertices[0][1]))
+    (bx, by) = _hex_projected(int(vertices[1][0]), int(vertices[1][1]))
+    (cx, cy) = _hex_projected(int(vertices[2][0]), int(vertices[2][1]))
+
+    col_min = max(0, min(int(v[0]) for v in vertices) - 1)
+    col_max = min(cols - 1, max(int(v[0]) for v in vertices) + 1)
+    row_min = max(0, min(int(v[1]) for v in vertices) - 1)
+    row_max = min(rows - 1, max(int(v[1]) for v in vertices) + 1)
+
+    def _sign(px, py, x1, y1, x2, y2) -> float:
+        return (px - x2) * (y1 - y2) - (x1 - x2) * (py - y2)
+
+    out: List[List[int]] = []
+    for c in range(col_min, col_max + 1):
+        for r in range(row_min, row_max + 1):
+            px, py = _hex_projected(c, r)
+            d1 = _sign(px, py, ax, ay, bx, by)
+            d2 = _sign(px, py, bx, by, cx, cy)
+            d3 = _sign(px, py, cx, cy, ax, ay)
+            has_neg = (d1 < 0) or (d2 < 0) or (d3 < 0)
+            has_pos = (d1 > 0) or (d2 > 0) or (d3 > 0)
+            if not (has_neg and has_pos):
+                out.append([c, r])
+    return out
+
+
+def _objective_polygon_hexes(
+    *,
+    vertices: list,
+    cols: int,
+    rows: int,
+) -> List[List[int]]:
+    """Generate hexes inside an arbitrary polygon (3+ vertices) via ray-casting.
+
+    Uses the same odd-q projection as rect/triangle so tilted (rotated)
+    footprints are captured exactly from their corner coordinates.
+    """
+    pts = [_hex_projected(int(v[0]), int(v[1])) for v in vertices]
+    n = len(pts)
+    col_min = max(0, min(int(v[0]) for v in vertices) - 1)
+    col_max = min(cols - 1, max(int(v[0]) for v in vertices) + 1)
+    row_min = max(0, min(int(v[1]) for v in vertices) - 1)
+    row_max = min(rows - 1, max(int(v[1]) for v in vertices) + 1)
+
+    def _inside(px: float, py: float) -> bool:
+        inside = False
+        j = n - 1
+        for i in range(n):
+            xi, yi = pts[i]
+            xj, yj = pts[j]
+            if ((yi > py) != (yj > py)) and (
+                px < (xj - xi) * (py - yi) / (yj - yi) + xi
+            ):
+                inside = not inside
+            j = i
+        return inside
+
+    out: List[List[int]] = []
+    for c in range(col_min, col_max + 1):
+        for r in range(row_min, row_max + 1):
+            px, py = _hex_projected(c, r)
+            if _inside(px, py):
+                out.append([c, r])
+    return out
+
+
 def _objective_disc_hexes(
     *,
     center_col: int,
@@ -507,6 +615,36 @@ def _objective_disc_hexes(
     return out
 
 
+def _objective_line_hexes(
+    p1: Sequence[int],
+    p2: Sequence[int],
+    cols: int,
+    rows: int,
+) -> List[List[int]]:
+    c0, r0 = int(p1[0]), int(p1[1])
+    c1, r1 = int(p2[0]), int(p2[1])
+    dc = abs(c1 - c0)
+    dr = abs(r1 - r0)
+    sc = 1 if c1 > c0 else -1
+    sr = 1 if r1 > r0 else -1
+    err = dc - dr
+    c, r = c0, r0
+    out: List[List[int]] = []
+    while True:
+        if 0 <= c < cols and 0 <= r < rows:
+            out.append([c, r])
+        if c == c1 and r == r1:
+            break
+        e2 = 2 * err
+        if e2 > -dr:
+            err -= dr
+            c += sc
+        if e2 < dc:
+            err += dc
+            r += sr
+    return out
+
+
 def expand_objectives_to_hex_list(
     objectives_raw: Any,
     *,
@@ -517,9 +655,10 @@ def expand_objectives_to_hex_list(
     """Expand objective definitions to explicit `hexes`.
 
     Supported objective formats:
-    - Explicit: {"id": ..., "name": ..., "hexes": [[c, r], ...]}
-    - Declarative disc:
-      {"id": ..., "name": ..., "shape": "disc", "center": [c, r], "diameter": N}
+    - Explicit:  {"id": ..., "name": ..., "hexes": [[c, r], ...]}
+    - Disc:      {"id": ..., "name": ..., "shape": "disc", "center": [c, r], "diameter": N}
+    - Rectangle: {"id": ..., "name": ..., "shape": "rect", "top_left": [c, r], "bottom_right": [c, r]}
+    - Triangle:  {"id": ..., "name": ..., "shape": "triangle", "vertices": [[c,r],[c,r],[c,r]]}
     """
     if not isinstance(objectives_raw, list):
         raise ValueError(f"{path_hint}: objectives must be a list")
@@ -561,35 +700,101 @@ def expand_objectives_to_hex_list(
             )
 
         shape = objective["shape"]
-        if shape != "disc":
-            raise ValueError(
-                f"{path_hint}: objective[{idx}] unsupported shape {shape!r} (expected 'disc')"
+        if shape == "disc":
+            center = objective.get("center")
+            if not isinstance(center, (list, tuple)) or len(center) < 2:
+                raise ValueError(
+                    f"{path_hint}: objective[{idx}] field 'center' must be [col, row]"
+                )
+            diameter_raw = objective.get("diameter")
+            if not isinstance(diameter_raw, int):
+                raise ValueError(
+                    f"{path_hint}: objective[{idx}] field 'diameter' must be an int"
+                )
+            center_col = int(center[0])
+            center_row = int(center[1])
+            if center_col < 0 or center_col >= cols or center_row < 0 or center_row >= rows:
+                raise ValueError(
+                    f"{path_hint}: objective[{idx}] center {(center_col, center_row)} out of bounds "
+                    f"for board {cols}x{rows}"
+                )
+            objective_out["hexes"] = _objective_disc_hexes(
+                center_col=center_col,
+                center_row=center_row,
+                diameter=diameter_raw,
+                cols=cols,
+                rows=rows,
             )
-        center = objective.get("center")
-        if not isinstance(center, (list, tuple)) or len(center) < 2:
-            raise ValueError(
-                f"{path_hint}: objective[{idx}] field 'center' must be [col, row]"
+        elif shape == "rect":
+            top_left = objective.get("top_left")
+            bottom_right = objective.get("bottom_right")
+            if not isinstance(top_left, (list, tuple)) or len(top_left) < 2:
+                raise ValueError(
+                    f"{path_hint}: objective[{idx}] field 'top_left' must be [col, row]"
+                )
+            if not isinstance(bottom_right, (list, tuple)) or len(bottom_right) < 2:
+                raise ValueError(
+                    f"{path_hint}: objective[{idx}] field 'bottom_right' must be [col, row]"
+                )
+            objective_out["hexes"] = _objective_rect_hexes(
+                top_left=top_left,
+                bottom_right=bottom_right,
+                cols=cols,
+                rows=rows,
             )
-        diameter_raw = objective.get("diameter")
-        if not isinstance(diameter_raw, int):
-            raise ValueError(
-                f"{path_hint}: objective[{idx}] field 'diameter' must be an int"
+        elif shape == "triangle":
+            vertices = objective.get("vertices")
+            if not isinstance(vertices, (list, tuple)) or len(vertices) != 3:
+                raise ValueError(
+                    f"{path_hint}: objective[{idx}] field 'vertices' must be a list of 3 [col, row]"
+                )
+            for vi, v in enumerate(vertices):
+                if not isinstance(v, (list, tuple)) or len(v) < 2:
+                    raise ValueError(
+                        f"{path_hint}: objective[{idx}] vertices[{vi}] must be [col, row]"
+                    )
+            objective_out["hexes"] = _objective_triangle_hexes(
+                vertices=vertices,
+                cols=cols,
+                rows=rows,
             )
-
-        center_col = int(center[0])
-        center_row = int(center[1])
-        if center_col < 0 or center_col >= cols or center_row < 0 or center_row >= rows:
-            raise ValueError(
-                f"{path_hint}: objective[{idx}] center {(center_col, center_row)} out of bounds "
-                f"for board {cols}x{rows}"
+        elif shape == "line":
+            vertices = objective.get("vertices")
+            if not isinstance(vertices, (list, tuple)) or len(vertices) != 2:
+                raise ValueError(
+                    f"{path_hint}: objective[{idx}] field 'vertices' must be a list of 2 [col, row]"
+                )
+            for vi, v in enumerate(vertices):
+                if not isinstance(v, (list, tuple)) or len(v) < 2:
+                    raise ValueError(
+                        f"{path_hint}: objective[{idx}] vertices[{vi}] must be [col, row]"
+                    )
+            objective_out["hexes"] = _objective_line_hexes(
+                p1=vertices[0],
+                p2=vertices[1],
+                cols=cols,
+                rows=rows,
             )
-        objective_out["hexes"] = _objective_disc_hexes(
-            center_col=center_col,
-            center_row=center_row,
-            diameter=diameter_raw,
-            cols=cols,
-            rows=rows,
-        )
+        elif shape == "polygon":
+            vertices = objective.get("vertices")
+            if not isinstance(vertices, (list, tuple)) or len(vertices) < 3:
+                raise ValueError(
+                    f"{path_hint}: objective[{idx}] field 'vertices' must be a list of >= 3 [col, row]"
+                )
+            for vi, v in enumerate(vertices):
+                if not isinstance(v, (list, tuple)) or len(v) < 2:
+                    raise ValueError(
+                        f"{path_hint}: objective[{idx}] vertices[{vi}] must be [col, row]"
+                    )
+            objective_out["hexes"] = _objective_polygon_hexes(
+                vertices=vertices,
+                cols=cols,
+                rows=rows,
+            )
+        else:
+            raise ValueError(
+                f"{path_hint}: objective[{idx}] unsupported shape {shape!r} (expected 'disc', 'rect', 'triangle', or 'polygon')"
+            )
         expanded.append(objective_out)
 
     return expanded

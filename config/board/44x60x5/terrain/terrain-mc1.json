@@ -1,0 +1,11 @@
+{
+  "terrain_id": "terrain-mc1",
+  "terrain": [
+    { "id": "ruin_nw", "name": "Ruine NO", "shape": "polygon", "vertices": [[25,30],[60,30],[60,88],[25,88]], "objective": true },
+    { "id": "line_dz", "name": "Ligne zone deploiement", "shape": "polygon", "vertices": [[0,150],[25,133],[31,141],[6,158]], "objective": false },
+    { "id": "line_dz2", "name": "Ligne 10x2.5", "shape": "polygon", "vertices": [[25,133],[66,105],[72,113],[31,141]], "objective": false },
+    { "id": "ruin_center", "name": "Ruine centrale", "shape": "polygon", "vertices": [[85,120],[135,120],[135,180],[85,180]], "objective": true },
+    { "id": "ruin_se", "name": "Ruine SE", "shape": "polygon",  "vertices": [[160,270],[195,270],[195,212],[160,212]], "objective": true },
+    { "id": "line_dz_full", "name": "Ligne zone déploiement", "shape": "line", "vertices": [[0,150],[220,0]], "objective": false }
+  ]
+}

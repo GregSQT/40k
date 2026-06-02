@@ -1,0 +1,15 @@
+{
+  "name": "mc1",
+  "p1": {
+    "shapes": [
+      { "shape": "rect", "top_left": [0, 225], "bottom_right": [220, 300] },
+      { "shape": "triangle", "vertices": [[0, 225], [220, 225], [220, 150]] }
+    ]
+  },
+  "p2": {
+    "shapes": [
+      { "shape": "rect", "top_left": [0, 0], "bottom_right": [220, 75] },
+      { "shape": "triangle", "vertices": [[0, 75], [0, 150], [220, 75]] }
+    ]
+  }
+}

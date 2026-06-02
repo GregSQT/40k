@@ -1,0 +1,146 @@
+{
+  "mission_id": "new40k-diagonal-5obj",
+  "board": { "cols": 220, "rows": 300, "width_inches": 44, "height_inches": 60, "hexes_per_inch": 5 },
+  "deployment_zones": [
+    {
+      "id": "dz_p1",
+      "player": 1,
+      "shapes": [
+        { "shape": "rect", "top_left": [0, 0], "bottom_right": [220, 75] },
+        { "shape": "triangle", "vertices": [[0, 75], [0, 150], [220, 75]] }
+      ]
+    },
+    {
+      "id": "dz_p2",
+      "player": 2,
+      "shapes": [
+        { "shape": "rect", "top_left": [0, 225], "bottom_right": [220, 300] },
+        { "shape": "triangle", "vertices": [[0, 225], [220, 225], [220, 150]] }
+      ]
+    }
+  ],
+  "terrain": [
+    {
+      "id": "ruin_nw",
+      "name": "Ruine Nord-Ouest",
+      "shape": "rect",
+      "top_left": [40, 35],
+      "bottom_right": [75, 90],
+      "objective": false,
+      "cover": true,
+      "obstruction": false
+    },
+    {
+      "id": "ruin_ne",
+      "name": "Ruine Nord-Est",
+      "shape": "rect",
+      "top_left": [140, 45],
+      "bottom_right": [190, 90],
+      "objective": false,
+      "cover": true,
+      "obstruction": false
+    },
+    {
+      "id": "ruin_center",
+      "name": "Grande ruine centrale",
+      "shape": "rect",
+      "top_left": [85, 95],
+      "bottom_right": [140, 160],
+      "objective": false,
+      "cover": true,
+      "obstruction": false
+    },
+    {
+      "id": "ruin_w_mid",
+      "name": "Ruine Ouest-centre",
+      "shape": "rect",
+      "top_left": [45, 105],
+      "bottom_right": [70, 135],
+      "objective": false,
+      "cover": true,
+      "obstruction": false
+    },
+    {
+      "id": "ruin_e_mid",
+      "name": "Ruine Est-centre",
+      "shape": "rect",
+      "top_left": [160, 90],
+      "bottom_right": [195, 120],
+      "objective": false,
+      "cover": true,
+      "obstruction": false
+    },
+    {
+      "id": "ruin_w_low",
+      "name": "Ruine Ouest-bas",
+      "shape": "rect",
+      "top_left": [35, 175],
+      "bottom_right": [65, 195],
+      "objective": false,
+      "cover": true,
+      "obstruction": false
+    },
+    {
+      "id": "ruin_sw",
+      "name": "Ruine Sud-Ouest",
+      "shape": "rect",
+      "top_left": [25, 200],
+      "bottom_right": [80, 250],
+      "objective": false,
+      "cover": true,
+      "obstruction": false
+    },
+    {
+      "id": "ruin_se",
+      "name": "Ruine Sud-Est",
+      "shape": "rect",
+      "top_left": [150, 205],
+      "bottom_right": [205, 260],
+      "objective": false,
+      "cover": true,
+      "obstruction": false
+    },
+    {
+      "id": "battery_n",
+      "name": "Batterie de canons Nord",
+      "objective": false,
+      "cover": true,
+      "obstruction": true,
+      "note": "Œil barré sur la carte = terrain obscurant",
+      "walls": [ { "segments": [ [[95, 130], [120, 152]] ] } ]
+    },
+    {
+      "id": "battery_s",
+      "name": "Batterie de canons Sud",
+      "objective": false,
+      "cover": true,
+      "obstruction": true,
+      "note": "Œil barré sur la carte = terrain obscurant",
+      "walls": [ { "segments": [ [[90, 182], [118, 212]] ] } ]
+    },
+    {
+      "id": "wall_w",
+      "name": "Barricade Ouest",
+      "objective": false,
+      "cover": true,
+      "obstruction": false,
+      "walls": [ { "segments": [ [[5, 115], [50, 116]] ] } ]
+    },
+    {
+      "id": "wall_e",
+      "name": "Barricade Est",
+      "objective": false,
+      "cover": true,
+      "obstruction": false,
+      "walls": [ { "segments": [ [[165, 145], [205, 146]] ] } ]
+    },
+    {
+      "id": "wall_sw",
+      "name": "Barricade Sud-Ouest",
+      "objective": false,
+      "cover": true,
+      "obstruction": false,
+      "walls": [ { "segments": [ [[50, 217], [85, 218]] ] } ]
+    }
+  ]
+}

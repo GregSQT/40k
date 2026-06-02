@@ -747,12 +747,24 @@ interface BoardConfig {
   objective_zones?: Array<{
     id: string;
     hexes: Array<[number, number] | { col: number; row: number }>;
+    shape?: string;
+    vertices?: [number, number][];
+    top_left?: [number, number];
+    bottom_right?: [number, number];
   }>;
   wall_hexes: [number, number][];
   walls?: Array<{
     start: { col: number; row: number };
     end: { col: number; row: number };
     thickness?: number;
+  }>;
+  terrain_zones?: Array<{
+    id: string;
+    hexes: Array<[number, number] | { col: number; row: number }>;
+    shape?: string;
+    vertices?: [number, number][];
+    top_left?: [number, number];
+    bottom_right?: [number, number];
   }>;
 }
 
@@ -2008,6 +2020,71 @@ export const drawBoard = (
         baseHexContainer.addChild(wallDot);
       }
 
+      // Terrain décoratif (ruines) : périmètre dessiné, non bloquant, sans scoring.
+      if (Array.isArray(boardConfig.terrain_zones)) {
+        const toPixelT = (c: number, r: number): [number, number] => [
+          c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN,
+          r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN,
+        ];
+        const terrainColor = 0x9a8060;
+        const terrainLineWidth = Math.max(1.5, HEX_RADIUS * 0.3);
+        for (const zone of boardConfig.terrain_zones) {
+          const g = new PIXI.Graphics();
+          if (zone.shape === "rect" && zone.top_left && zone.bottom_right) {
+            const [x1, y1] = toPixelT(zone.top_left[0], zone.top_left[1]);
+            const [x2, y2] = toPixelT(zone.bottom_right[0], zone.bottom_right[1]);
+            const rx = Math.min(x1, x2);
+            const ry = Math.min(y1, y2);
+            const rw = Math.abs(x2 - x1);
+            const rh = Math.abs(y2 - y1);
+            g.beginFill(terrainColor, 0.1);
+            g.lineStyle(terrainLineWidth, terrainColor, 0.85);
+            g.drawRect(rx, ry, rw, rh);
+            g.endFill();
+          } else if (
+            zone.shape === "triangle" &&
+            Array.isArray(zone.vertices) &&
+            zone.vertices.length === 3
+          ) {
+            const pts = zone.vertices.map(([c, r]) => toPixelT(c, r));
+            g.beginFill(terrainColor, 0.1);
+            g.lineStyle(terrainLineWidth, terrainColor, 0.85);
+            g.moveTo(pts[0]![0], pts[0]![1]);
+            g.lineTo(pts[1]![0], pts[1]![1]);
+            g.lineTo(pts[2]![0], pts[2]![1]);
+            g.closePath();
+            g.endFill();
+          } else if (
+            zone.shape === "polygon" &&
+            Array.isArray(zone.vertices) &&
+            zone.vertices.length >= 3
+          ) {
+            const pts = zone.vertices.map(([c, r]) => toPixelT(c, r));
+            g.beginFill(terrainColor, 0.1);
+            g.lineStyle(terrainLineWidth, terrainColor, 0.85);
+            g.moveTo(pts[0]![0], pts[0]![1]);
+            for (let i = 1; i < pts.length; i++) {
+              g.lineTo(pts[i]![0], pts[i]![1]);
+            }
+            g.closePath();
+            g.endFill();
+          } else if (
+            zone.shape === "line" &&
+            Array.isArray(zone.vertices) &&
+            zone.vertices.length === 2
+          ) {
+            const [x1, y1] = toPixelT(zone.vertices[0]![0], zone.vertices[0]![1]);
+            const [x2, y2] = toPixelT(zone.vertices[1]![0], zone.vertices[1]![1]);
+            g.lineStyle(terrainLineWidth, terrainColor, 0.85);
+            g.moveTo(x1, y1);
+            g.lineTo(x2, y2);
+          } else {
+            continue;
+          }
+          baseHexContainer.addChild(g);
+        }
+      }
+
       if (objectiveSmoothContour && Array.isArray(boardConfig.objective_zones)) {
         const displayCfg = boardConfig.display;
         const ringColorStr =
@@ -2085,12 +2162,48 @@ export const drawBoard = (
               : centerColorParsed;
 
             const smoothZone = new PIXI.Graphics();
-            smoothZone.lineStyle(ringWidth, zoneRingColor, ringAlpha);
-            smoothZone.drawCircle(mec.cx, mec.cy, outerR);
-            smoothZone.lineStyle(0);
-            smoothZone.beginFill(zoneCenterColor, centerAlpha);
-            smoothZone.drawCircle(mec.cx, mec.cy, innerR);
-            smoothZone.endFill();
+
+            const toPixel = (c: number, r: number): [number, number] => [
+              c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN,
+              r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN,
+            ];
+
+            if (zone.shape === "triangle" && Array.isArray(zone.vertices) && zone.vertices.length === 3) {
+              const pts = zone.vertices.map(([c, r]) => toPixel(c, r));
+              smoothZone.lineStyle(ringWidth, zoneRingColor, ringAlpha);
+              smoothZone.moveTo(pts[0]![0], pts[0]![1]);
+              smoothZone.lineTo(pts[1]![0], pts[1]![1]);
+              smoothZone.lineTo(pts[2]![0], pts[2]![1]);
+              smoothZone.closePath();
+              smoothZone.lineStyle(0);
+              smoothZone.beginFill(zoneCenterColor, centerAlpha);
+              smoothZone.moveTo(pts[0]![0], pts[0]![1]);
+              smoothZone.lineTo(pts[1]![0], pts[1]![1]);
+              smoothZone.lineTo(pts[2]![0], pts[2]![1]);
+              smoothZone.closePath();
+              smoothZone.endFill();
+            } else if (zone.shape === "rect" && zone.top_left && zone.bottom_right) {
+              const [x1, y1] = toPixel(zone.top_left[0], zone.top_left[1]);
+              const [x2, y2] = toPixel(zone.bottom_right[0], zone.bottom_right[1]);
+              const rx = Math.min(x1, x2);
+              const ry = Math.min(y1, y2);
+              const rw = Math.abs(x2 - x1);
+              const rh = Math.abs(y2 - y1);
+              smoothZone.lineStyle(ringWidth, zoneRingColor, ringAlpha);
+              smoothZone.drawRect(rx, ry, rw, rh);
+              smoothZone.lineStyle(0);
+              smoothZone.beginFill(zoneCenterColor, centerAlpha);
+              smoothZone.drawRect(rx, ry, rw, rh);
+              smoothZone.endFill();
+            } else {
+              smoothZone.lineStyle(ringWidth, zoneRingColor, ringAlpha);
+              smoothZone.drawCircle(mec.cx, mec.cy, outerR);
+              smoothZone.lineStyle(0);
+              smoothZone.beginFill(zoneCenterColor, centerAlpha);
+              smoothZone.drawCircle(mec.cx, mec.cy, innerR);
+              smoothZone.endFill();
+            }
+
             baseHexContainer.addChild(smoothZone);
           }
         }

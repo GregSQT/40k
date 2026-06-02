@@ -42,6 +42,10 @@ interface DisplayConfig {
 interface ObjectiveZone {
   id: string;
   hexes: Array<{ col: number; row: number }>;
+  shape?: string;
+  vertices?: [number, number][];
+  top_left?: [number, number];
+  bottom_right?: [number, number];
 }
 
 interface Wall {
@@ -77,6 +81,7 @@ interface BoardConfig {
     objective: string;
   };
   objective_zones?: ObjectiveZone[];
+  terrain_zones?: ObjectiveZone[];
   walls?: Wall[];
   display?: DisplayConfig;
 }
@@ -199,6 +204,7 @@ export const useGameConfig = (_boardConfigName: string = "default"): ExtendedGam
           x1: "board/25x21",
           x5: "board/180x156",
           x10: "board/360x312",
+          x5_44x60: "board/44x60x5",
         };
         const scenarioMap: Record<string, string> = {
           tutorial: "config/tutorial/scenario_etape1.json",

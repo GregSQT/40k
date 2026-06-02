@@ -318,10 +318,8 @@ class GameStateManager:
 
             deploy_pools = {}
             if deployment_zone:
-                if deployment_zone not in ("hammer", "hammer_tutorial"):
-                    raise ValueError(
-                        f"Unsupported deployment_zone '{deployment_zone}' in {scenario_file}"
-                    )
+                # Le nom de zone est validé par l'existence du fichier ci-dessous
+                # (config/deployment/<board>/<zone>.json) — pas de whitelist figée.
                 project_root = os.path.dirname(os.path.dirname(__file__))
                 board_size_dir = f"{board_cols}x{board_rows}"
                 deployment_path = os.path.join(
@@ -338,6 +336,40 @@ class GameStateManager:
                     raise KeyError(f"Deployment file {deployment_path} missing required p1/p2 zones")
                 
                 def _build_deploy_pool(zone: Dict[str, Any]) -> set[tuple[int, int]]:
+                    # Format géométrique : liste de shapes rect/triangle (zones diagonales).
+                    if "shapes" in zone:
+                        from engine.hex_utils import (
+                            _objective_rect_hexes,
+                            _objective_triangle_hexes,
+                        )
+                        shapes = zone["shapes"]
+                        if not isinstance(shapes, list) or not shapes:
+                            raise ValueError("deploy zone 'shapes' must be a non-empty list")
+                        pool: set[tuple[int, int]] = set()
+                        for si, shp in enumerate(shapes):
+                            kind = require_key(shp, "shape")
+                            if kind == "rect":
+                                hexes = _objective_rect_hexes(
+                                    top_left=require_key(shp, "top_left"),
+                                    bottom_right=require_key(shp, "bottom_right"),
+                                    cols=board_cols,
+                                    rows=board_rows,
+                                )
+                            elif kind == "triangle":
+                                hexes = _objective_triangle_hexes(
+                                    vertices=require_key(shp, "vertices"),
+                                    cols=board_cols,
+                                    rows=board_rows,
+                                )
+                            else:
+                                raise ValueError(
+                                    f"deploy zone shape[{si}] unsupported '{kind}' (rect or triangle)"
+                                )
+                            for c, r in hexes:
+                                if _is_valid_deploy_hex(c, r):
+                                    pool.add((int(c), int(r)))
+                        return pool
+                    # Format historique : bbox rectangulaire.
                     col_min = require_key(zone, "col_min")
                     col_max = require_key(zone, "col_max")
                     row_min = require_key(zone, "row_min")

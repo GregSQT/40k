@@ -5177,6 +5177,14 @@ export default function Board({
         end: { col: number; row: number };
         thickness?: number;
       }>;
+      terrain_zones?: Array<{
+        id: string;
+        hexes: Array<[number, number] | { col: number; row: number }>;
+        shape?: string;
+        vertices?: [number, number][];
+        top_left?: [number, number];
+        bottom_right?: [number, number];
+      }>;
     }
     const effectiveObjectiveZones =
       objectivesOverride && objectivesOverride.length > 0
@@ -5406,7 +5414,10 @@ export default function Board({
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([k, v]) => `${k}:${v ?? "n"}`)
       .join("|");
-    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}|oc:${objControlKey}`;
+    const zonesKey = (boardConfigWithOverrides.objective_zones ?? [])
+      .map((z) => `${z.id}:${(z as { shape?: string }).shape ?? "hexes"}`)
+      .join(",");
+    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}|oc:${objControlKey}|oz:${zonesKey}`;
     const canReuseStatic =
       staticBoardConfigKeyRef.current === bcKey && staticBoardRef.current !== null;
 
