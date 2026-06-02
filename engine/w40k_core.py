@@ -575,14 +575,12 @@ class W40KEngine(gym.Env):
         self.game_state["weapon_damage_table"] = load_weapon_damage_table()
 
         objectives = require_key(self.game_state, "objectives")
-        if not objectives:
-            raise ValueError("objectives are required for macro target initialization")
         assert len(objectives) <= MAX_OBJECTIVES, (
             f"Scenario has {len(objectives)} objectives but MAX_OBJECTIVES={MAX_OBJECTIVES}. "
             "Increase MAX_OBJECTIVES in macro_intents.py or reduce scenario objectives."
         )
-        self.game_state["macro_target_objective_index"] = 0
-        self.game_state["macro_target_objective_id"] = str(require_key(objectives[0], "id"))
+        self.game_state["macro_target_objective_index"] = 0 if objectives else None
+        self.game_state["macro_target_objective_id"] = str(require_key(objectives[0], "id")) if objectives else None
 
         # CRITICAL: Instantiate all module managers BEFORE using them
         self.state_manager = GameStateManager(self.config, self.unit_registry)
@@ -998,8 +996,6 @@ class W40KEngine(gym.Env):
         self.game_state["deployment_type_by_player"] = self.config.get("deployment_type_by_player")
         self.game_state["deployment_zone"] = self.config.get("deployment_zone")
         objectives = require_key(self.game_state, "objectives")
-        if not objectives:
-            raise ValueError("objectives are required for episode reset")
         assert len(objectives) <= MAX_OBJECTIVES, (
             f"Scenario has {len(objectives)} objectives but MAX_OBJECTIVES={MAX_OBJECTIVES}."
         )
@@ -5384,10 +5380,8 @@ class W40KEngine(gym.Env):
             self._tutorial_fight_no_death_unit_ids
         )
         objectives = require_key(self.game_state, "objectives")
-        if not objectives:
-            raise ValueError("objectives are required after scenario reload")
-        self.game_state["macro_target_objective_index"] = 0
-        self.game_state["macro_target_objective_id"] = str(require_key(objectives[0], "id"))
+        self.game_state["macro_target_objective_index"] = 0 if objectives else None
+        self.game_state["macro_target_objective_id"] = str(require_key(objectives[0], "id")) if objectives else None
 
 
 # ============================================================================

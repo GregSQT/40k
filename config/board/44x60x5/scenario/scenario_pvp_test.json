@@ -1,7 +1,7 @@
 {
   "primary_objectives": ["objectives_control"],
   "wall_ref": "walls-mc1.json",
-  "objectives_ref": "objectives-mc1.json",
+  "objectives_ref": "objectives-none.json",
   "terrain_ref": "terrain-mc1.json",
   "units": [
     { "id": 1, "unit_type": "CaptainTerminatorRelicWeaponBolter", "player": 1, "col": 148, "row": 228 },
@@ -57,7 +57,7 @@
     { "id": 105, "unit_type": "RipperSwarm",          "player": 2, "col": 8,   "row": 260 },
     { "id": 106, "unit_type": "RipperSwarm",          "player": 2, "col": 8,   "row": 200 },
     { "id": 107, "unit_type": "VonRyanLeaper",        "player": 2, "col": 14,  "row": 125 },
-    { "id": 108, "unit_type": "VonRyanLeaper",        "player": 2, "col": 24,  "row": 120 },
+    { "id": 108, "unit_type": "VonRyanLeaper",        "player": 2, "col": 25,  "row": 132 },
     { "id": 109, "unit_type": "VonRyanLeaper",        "player": 2, "col": 8,  "row": 143 },
     {
       "id": 110, "unit_type": "Barbgaunt", "player": 2, "col": 94, "row": 252,
