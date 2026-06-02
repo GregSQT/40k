@@ -766,6 +766,14 @@ interface BoardConfig {
     top_left?: [number, number];
     bottom_right?: [number, number];
   }>;
+  terrain_icons?: Array<{
+    id: number | string;
+    name: string;
+    path: string;
+    center: [number, number];
+    size?: number;
+    alpha?: number;
+  }>;
 }
 
 interface HighlightCell {
@@ -2086,6 +2094,27 @@ export const drawBoard = (
             continue;
           }
           baseHexContainer.addChild(g);
+        }
+      }
+
+      if (Array.isArray(boardConfig.terrain_icons) && boardConfig.terrain_icons.length > 0) {
+        const toPixelI = (c: number, r: number): [number, number] => [
+          c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN,
+          r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN,
+        ];
+        for (const icon of boardConfig.terrain_icons) {
+          const publicPath = icon.path.replace(/^frontend[/\\]public/, "");
+          const [px, py] = toPixelI(icon.center[0], icon.center[1]);
+          const sprite = PIXI.Sprite.from(publicPath);
+          sprite.anchor.set(0.5);
+          sprite.x = px;
+          sprite.y = py;
+          if (icon.size !== undefined) {
+            sprite.width = icon.size;
+            sprite.height = icon.size;
+          }
+          sprite.alpha = icon.alpha ?? 1.0;
+          baseHexContainer.addChild(sprite);
         }
       }
 

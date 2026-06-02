@@ -15,7 +15,6 @@
     { "id": "rect_s_e_OK", "name": "rect s E", "shape": "polygon", "vertices": [[190,120],[159,140],[147,128],[177,107]], "objective": false },
     { "id": "line_s_e_OK", "name": "line s SE", "shape": "polygon", "vertices": [[220,150],[195,167],[188,160],[213,142]], "objective": false },
     { "id": "line_l_e_OK", "name": "line l SE", "shape": "polygon", "vertices": [[196,169],[153,198],[145,189],[188,160]], "objective": false },
-
     { "id": "line_s_s_OK", "name": "line s S", "shape": "polygon", "vertices": [[110,225],[129,245],[137,239],[118,219]], "objective": false },
     { "id": "line_deploiement_top", "name": "Ligne zone déploiement", "shape": "line", "vertices": [[0,150],[220,0]], "objective": false },
     { "id": "line_deploiement_bot", "name": "Ligne zone déploiement bas", "shape": "line", "vertices": [[220,150],[0,300]], "objective": false },
@@ -33,11 +32,14 @@
     { "name": "rect_s_w_OK", "segments": [[[41, 178], [50, 182]], [[50, 182], [60, 175]], [[60, 175], [58, 167]], [[58, 167], [41, 178]]]},
     { "name": "rect_b_sw_OK", "segments": [[[49, 219], [64, 236]], [[49, 219], [39, 226]], [[21, 265], [10, 254]], [[21, 265], [50, 246]]]},
     { "name": "rect_b_se_OK", "segments": [[[192, 267], [176, 267]], [[192, 267], [192, 257]], [[163, 215], [163, 250]], [[163, 215], [173, 215]]]},
-    
     { "name": "rect_s_s_OK", "segments": [[[105, 224], [98, 217]], [[105, 224], [100, 228]], [[77, 229], [84, 236]], [[77, 229], [82, 226]]]},
     { "name": "rect_s_e_OK", "segments": [[[179, 122], [170, 118]], [[170, 118], [160, 125]], [[160, 125], [163, 133]], [[163, 133], [179, 122]]]},
     { "name": "line_s_e_OK", "segments": [[[213, 148], [194, 161]]]},
     { "name": "line_l_e_OK", "segments": [[[190, 164], [149, 192]]]},
     { "name": "line_s_s_OK", "segments": [[[114, 219], [139, 245]], [[112, 222], [134, 245]]]}
+  ],
+  "icons": [
+    { "id": 1, "name": "HomeRed", "path": "frontend/public/icons/Terrain/HomeRed.png", "center": [40, 60], "size": 80, "alpha": 0.7 },
+    { "id": 2, "name": "HomeBlue", "path": "frontend/public/icons/Terrain/HomeBlue.png", "center": [180, 240], "size": 80, "alpha": 0.7 }
   ]
 }

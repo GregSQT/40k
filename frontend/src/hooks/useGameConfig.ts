@@ -83,6 +83,14 @@ interface BoardConfig {
   };
   objective_zones?: ObjectiveZone[];
   terrain_zones?: ObjectiveZone[];
+  terrain_icons?: Array<{
+    id: number | string;
+    name: string;
+    path: string;
+    center: [number, number];
+    size?: number;
+    alpha?: number;
+  }>;
   walls?: Wall[];
   display?: DisplayConfig;
 }

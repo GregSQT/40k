@@ -2884,6 +2884,7 @@ def get_board_config():
         # Terrain décoratif (ruines) : shapes dessinées en périmètre, NON bloquantes
         # (jamais expandées dans wall_hexes). Canal distinct des murs et des objectifs.
         terrain_zones: list = []
+        terrain_icons: list = []
         if terrain_ref and terrain_ref.endswith(".json"):
             terrain_path = board_dir / "terrain" / terrain_ref
             if not terrain_path.exists():
@@ -2899,6 +2900,7 @@ def get_board_config():
                 path_hint=f"board terrain ({board_subdir})",
             )
             terrain_zones = [_zone_entry(t) for t in terrain_features]
+            terrain_icons = terrain_data.get("icons", [])
             for gi, g in enumerate(terrain_data.get("walls", [])):
                 if not isinstance(g, dict):
                     continue
@@ -2914,6 +2916,7 @@ def get_board_config():
             if wall_segments_raw:
                 merged["walls"] = wall_segments_raw
         merged["terrain_zones"] = terrain_zones
+        merged["terrain_icons"] = terrain_icons
         return jsonify({"success": True, "config": merged})
     except FileNotFoundError as e:
         return jsonify({
