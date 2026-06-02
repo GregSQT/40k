@@ -230,6 +230,12 @@ class GameStateManager:
                         require_key(scenario_data, "wall_ref"),
                         scenario_file
                     )
+                if "terrain_ref" in scenario_data:
+                    terrain_walls = self._load_terrain_walls_from_ref(
+                        scenario_data["terrain_ref"], scenario_file
+                    )
+                    if terrain_walls:
+                        resolved_scenario_walls = list(resolved_scenario_walls or []) + terrain_walls
 
                 has_objectives_inline = "objectives" in scenario_data
                 has_objective_hexes_legacy = "objective_hexes" in scenario_data
@@ -1220,6 +1226,25 @@ class GameStateManager:
         _walls_json_cache[cache_key] = copy.deepcopy(wall_hexes)
         _walls_json_mtime_ns[cache_key] = wall_path.stat().st_mtime_ns
         return wall_hexes
+
+    def _load_terrain_walls_from_ref(self, terrain_ref: str, scenario_file: str) -> List[List[int]]:
+        """Load wall hexes from the 'walls' section of a terrain file referenced by terrain_ref."""
+        from config_loader import get_config_loader
+        terrain_path = get_config_loader().get_board_dir() / "terrain" / terrain_ref
+        if not terrain_path.exists():
+            raise FileNotFoundError(f"Terrain file not found for scenario {scenario_file}: {terrain_path}")
+        try:
+            with open(terrain_path, "r", encoding="utf-8-sig") as f:
+                terrain_data = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in terrain file {terrain_path}: {e}")
+        result: List[List[int]] = []
+        for gi, g in enumerate(terrain_data.get("walls", [])):
+            if not isinstance(g, dict):
+                continue
+            hint = f"Terrain file {terrain_path} walls[{gi}]"
+            result.extend(expand_wall_group_to_hex_list(g, path_hint=hint))
+        return result
 
     def _load_shared_objectives_from_ref(self, objectives_ref: Any, scenario_file: str) -> List[Dict[str, Any]]:
         """Load shared objectives file referenced by scenario objectives_ref."""

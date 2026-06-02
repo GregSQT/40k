@@ -4,19 +4,19 @@
   "objectives_ref": "objectives-mc1.json",
   "terrain_ref": "terrain-mc1.json",
   "units": [
-    { "id": 1, "unit_type": "CaptainTerminatorRelicWeaponBolter", "player": 1, "col": 168, "row": 228 },
-    { "id": 2, "unit_type": "LibrarianTerminator",                 "player": 1, "col": 164, "row": 218 },
+    { "id": 1, "unit_type": "CaptainTerminatorRelicWeaponBolter", "player": 1, "col": 148, "row": 228 },
+    { "id": 2, "unit_type": "LibrarianTerminator",                 "player": 1, "col": 144, "row": 218 },
     { "id": 3, "unit_type": "LieutenantCombiWeapon",               "player": 1, "col": 168, "row": 208 },
     { "id": 4, "unit_type": "ApothecaryBiologis",                  "player": 1, "col": 164, "row": 198 },
-    { "id": 5, "unit_type": "DreadnoughtBallistus",                "player": 1, "col": 170, "row": 185 },
+    { "id": 5, "unit_type": "DreadnoughtBallistus",                "player": 1, "col": 112, "row": 104 },
     {
       "id": 6, "unit_type": "SternguardVeteranBoltRifle", "player": 1, "col": 94, "row": 222,
       "models": [
-        { "col": 94, "row": 222 },
-        { "col": 100, "row": 222 },
-        { "col": 106, "row": 222 },
-        { "col": 97, "row": 216 },
-        { "col": 103, "row": 216, "unit_type": "SternguardVeteranSergeantPowerFist" }
+        { "col": 94, "row": 252 },
+        { "col": 100, "row": 252 },
+        { "col": 106, "row": 252 },
+        { "col": 97, "row": 246 },
+        { "col": 103, "row": 246, "unit_type": "SternguardVeteranSergeantPowerFist" }
       ]
     },
     {
@@ -30,13 +30,13 @@
       ]
     },
     {
-      "id": 8, "unit_type": "Terminator", "player": 1, "col": 70, "row": 234,
+      "id": 8, "unit_type": "Terminator", "player": 1, "col": 60, "row": 254,
       "models": [
-        { "col": 70, "row": 234 },
-        { "col": 80, "row": 234 },
-        { "col": 90, "row": 234 },
-        { "col": 75, "row": 226 },
-        { "col": 85, "row": 226, "unit_type": "TerminatorCyclone" }
+        { "col": 60, "row": 254 },
+        { "col": 70, "row": 254 },
+        { "col": 80, "row": 254 },
+        { "col": 65, "row": 246 },
+        { "col": 75, "row": 246, "unit_type": "TerminatorCyclone" }
       ]
     },
     {
@@ -50,13 +50,13 @@
       ]
     },
 
-    { "id": 101, "unit_type": "WingedTyranidPrime", "player": 2, "col": 14,  "row": 250 },
+    { "id": 101, "unit_type": "WingedTyranidPrime", "player": 2, "col": 14,  "row": 240 },
     { "id": 102, "unit_type": "Neurotyrant",         "player": 2, "col": 14,  "row": 225 },
     { "id": 103, "unit_type": "Psychophage",          "player": 2, "col": 19,  "row": 176 },
-    { "id": 104, "unit_type": "ScreamerKiller",       "player": 2, "col": 65,  "row": 175 },
+    { "id": 104, "unit_type": "ScreamerKiller",       "player": 2, "col": 81,  "row": 198 },
     { "id": 105, "unit_type": "RipperSwarm",          "player": 2, "col": 8,   "row": 260 },
     { "id": 106, "unit_type": "RipperSwarm",          "player": 2, "col": 8,   "row": 200 },
-    { "id": 107, "unit_type": "VonRyanLeaper",        "player": 2, "col": 30,  "row": 255 },
+    { "id": 107, "unit_type": "VonRyanLeaper",        "player": 2, "col": 26,  "row": 237 },
     { "id": 108, "unit_type": "VonRyanLeaper",        "player": 2, "col": 35,  "row": 248 },
     { "id": 109, "unit_type": "VonRyanLeaper",        "player": 2, "col": 30,  "row": 190 },
     {
