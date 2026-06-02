@@ -1116,7 +1116,10 @@ def initialize_engine(scenario_file: Optional[str] = None):
         
         # Define scenario file path for PvP mode (default if not provided)
         if scenario_file is None:
-            scenario_file = os.path.join("config", "scenario_pvp.json")
+            from config_loader import get_config_loader as _gcl
+            _cfg = _gcl().load_config("config", force_reload=False)
+            board_path = _cfg.get("defaults", {}).get("test_board", "x5")
+            scenario_file = os.path.join("config", BOARD_PATH_MAP[board_path], "scenario", "scenario_pvp_test.json")
         elif not isinstance(scenario_file, str):
             raise ValueError(f"scenario_file must be a string if provided (got {type(scenario_file).__name__})")
 
@@ -2209,13 +2212,12 @@ def _get_activation_pool_key_for_phase(phase: str) -> str:
 def _execute_end_phase_action(engine_instance: W40KEngine, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     End current phase by applying WAIT/SKIP end_activation to all remaining units in pool.
-    Only supports move/shoot/charge phases.
+    Supports move/shoot/charge phases. For fight, delegates to advance_phase.
     """
     from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
 
     game_state = require_key(engine_instance.__dict__, "game_state")
     current_phase = require_key(game_state, "phase")
-    pool_key = _get_activation_pool_key_for_phase(current_phase)
     current_player = require_key(game_state, "current_player")
 
     if "player" not in action:
@@ -2228,6 +2230,11 @@ def _execute_end_phase_action(engine_instance: W40KEngine, action: Dict[str, Any
             "requested_player": requested_player,
             "phase": current_phase,
         }
+
+    if current_phase == "fight":
+        return engine_instance.execute_semantic_action({"action": "advance_phase", "from": "fight"})
+
+    pool_key = _get_activation_pool_key_for_phase(current_phase)
 
     _perf = perf_timing_enabled(game_state)
     _t_ep0 = time.perf_counter() if _perf else None

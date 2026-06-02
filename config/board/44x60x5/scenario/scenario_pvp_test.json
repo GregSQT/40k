@@ -8,106 +8,106 @@
     { "id": 2, "unit_type": "LibrarianTerminator",                 "player": 1, "col": 144, "row": 218 },
     { "id": 3, "unit_type": "LieutenantCombiWeapon",               "player": 1, "col": 168, "row": 208 },
     { "id": 4, "unit_type": "ApothecaryBiologis",                  "player": 1, "col": 164, "row": 198 },
-    { "id": 5, "unit_type": "DreadnoughtBallistus",                "player": 1, "col": 112, "row": 104 },
+    { "id": 5, "unit_type": "DreadnoughtBallistus",                "player": 1, "col": 115, "row": 50 },
     {
-      "id": 6, "unit_type": "SternguardVeteranBoltRifle", "player": 1, "col": 94, "row": 222,
+      "id": 6, "unit_type": "SternguardVeteranBoltRifle", "player": 1, "col": 107, "row": 146,
+      "models": [
+        { "col": 107, "row": 146 },
+        { "col": 104, "row": 152 },
+        { "col": 110, "row": 152 },
+        { "col": 116, "row": 152 },        
+        { "col": 113, "row": 146, "unit_type": "SternguardVeteranSergeantPowerFist" }
+      ]
+    },
+    {
+      "id": 7, "unit_type": "Infernus", "player": 1, "col": 124, "row": 220,
+      "models": [
+        { "col": 124, "row": 220 },
+        { "col": 130, "row": 220 },
+        { "col": 136, "row": 220 },
+        { "col": 127, "row": 214 },
+        { "col": 133, "row": 214 }
+      ]
+    },
+    {
+      "id": 8, "unit_type": "Terminator", "player": 1, "col": 45, "row": 142,
+      "models": [
+        { "col": 45, "row": 142 },
+        { "col": 55, "row": 142 },
+        { "col": 40, "row": 150 },
+        { "col": 50, "row": 150 },      
+        { "col": 60, "row": 150, "unit_type": "TerminatorCyclone" }
+      ]
+    },
+    {
+      "id": 9, "unit_type": "Terminator", "player": 1, "col": 130, "row": 142,
+      "models": [
+        { "col": 130, "row": 142 },
+        { "col": 145, "row": 150 },
+        { "col": 135, "row": 150 },
+        { "col": 125, "row": 150 },
+        { "col": 140, "row": 142, "unit_type": "TerminatorCyclone" }
+      ]
+    },
+
+    { "id": 101, "unit_type": "WingedTyranidPrime", "player": 2, "col": 95,  "row": 130 },
+    { "id": 102, "unit_type": "Neurotyrant",         "player": 2, "col": 14,  "row": 225 },
+    { "id": 103, "unit_type": "Psychophage",          "player": 2, "col": 18,  "row": 54 },
+    { "id": 104, "unit_type": "ScreamerKiller",       "player": 2, "col": 145,  "row": 90 },
+    { "id": 105, "unit_type": "RipperSwarm",          "player": 2, "col": 8,   "row": 260 },
+    { "id": 106, "unit_type": "RipperSwarm",          "player": 2, "col": 8,   "row": 200 },
+    { "id": 107, "unit_type": "VonRyanLeaper",        "player": 2, "col": 14,  "row": 125 },
+    { "id": 108, "unit_type": "VonRyanLeaper",        "player": 2, "col": 24,  "row": 120 },
+    { "id": 109, "unit_type": "VonRyanLeaper",        "player": 2, "col": 8,  "row": 143 },
+    {
+      "id": 110, "unit_type": "Barbgaunt", "player": 2, "col": 94, "row": 252,
       "models": [
         { "col": 94, "row": 252 },
         { "col": 100, "row": 252 },
         { "col": 106, "row": 252 },
-        { "col": 97, "row": 246 },
-        { "col": 103, "row": 246, "unit_type": "SternguardVeteranSergeantPowerFist" }
+        { "col": 112, "row": 252 },
+        { "col": 118, "row": 252 }
       ]
     },
     {
-      "id": 7, "unit_type": "Infernus", "player": 1, "col": 124, "row": 210,
+      "id": 111, "unit_type": "Neurogaunt", "player": 2, "col": 41, "row": 228,
       "models": [
-        { "col": 124, "row": 210 },
-        { "col": 130, "row": 210 },
-        { "col": 136, "row": 210 },
-        { "col": 127, "row": 204 },
-        { "col": 133, "row": 204 }
-      ]
-    },
-    {
-      "id": 8, "unit_type": "Terminator", "player": 1, "col": 60, "row": 254,
-      "models": [
-        { "col": 60, "row": 254 },
-        { "col": 70, "row": 254 },
-        { "col": 80, "row": 254 },
-        { "col": 65, "row": 246 },
-        { "col": 75, "row": 246, "unit_type": "TerminatorCyclone" }
-      ]
-    },
-    {
-      "id": 9, "unit_type": "Terminator", "player": 1, "col": 120, "row": 192,
-      "models": [
-        { "col": 120, "row": 192 },
-        { "col": 130, "row": 192 },
-        { "col": 140, "row": 192 },
-        { "col": 125, "row": 184 },
-        { "col": 135, "row": 184, "unit_type": "TerminatorCyclone" }
-      ]
-    },
-
-    { "id": 101, "unit_type": "WingedTyranidPrime", "player": 2, "col": 14,  "row": 240 },
-    { "id": 102, "unit_type": "Neurotyrant",         "player": 2, "col": 14,  "row": 225 },
-    { "id": 103, "unit_type": "Psychophage",          "player": 2, "col": 19,  "row": 176 },
-    { "id": 104, "unit_type": "ScreamerKiller",       "player": 2, "col": 81,  "row": 198 },
-    { "id": 105, "unit_type": "RipperSwarm",          "player": 2, "col": 8,   "row": 260 },
-    { "id": 106, "unit_type": "RipperSwarm",          "player": 2, "col": 8,   "row": 200 },
-    { "id": 107, "unit_type": "VonRyanLeaper",        "player": 2, "col": 26,  "row": 237 },
-    { "id": 108, "unit_type": "VonRyanLeaper",        "player": 2, "col": 35,  "row": 248 },
-    { "id": 109, "unit_type": "VonRyanLeaper",        "player": 2, "col": 30,  "row": 190 },
-    {
-      "id": 110, "unit_type": "Barbgaunt", "player": 2, "col": 94, "row": 262,
-      "models": [
-        { "col": 94, "row": 262 },
-        { "col": 100, "row": 262 },
-        { "col": 106, "row": 262 },
-        { "col": 112, "row": 262 },
-        { "col": 118, "row": 262 }
-      ]
-    },
-    {
-      "id": 111, "unit_type": "Neurogaunt", "player": 2, "col": 38, "row": 240,
-      "models": [
-        { "col": 38, "row": 240 },
-        { "col": 44, "row": 240 },
-        { "col": 50, "row": 240 },
-        { "col": 56, "row": 240 },
+        { "col": 41, "row": 228 },
+        { "col": 47, "row": 228 },
+        { "col": 53, "row": 228 },
         { "col": 38, "row": 234 },
         { "col": 44, "row": 234 },
         { "col": 50, "row": 234 },
         { "col": 56, "row": 234 },
-        { "col": 41, "row": 228 },
-        { "col": 47, "row": 228 },
-        { "col": 53, "row": 228 }
+        { "col": 38, "row": 240 },
+        { "col": 44, "row": 240 },
+        { "col": 50, "row": 240 },
+        { "col": 56, "row": 240 }
       ]
     },
     {
-      "id": 112, "unit_type": "Termagant", "player": 2, "col": 33, "row": 216,
+      "id": 112, "unit_type": "Termagant", "player": 2, "col": 83, "row": 98,
       "models": [
-        { "col": 33, "row": 216 },
-        { "col": 39, "row": 216 },
-        { "col": 45, "row": 216 },
-        { "col": 51, "row": 216 },
-        { "col": 57, "row": 216 },
-        { "col": 33, "row": 210 },
-        { "col": 39, "row": 210 },
-        { "col": 45, "row": 210 },
-        { "col": 51, "row": 210 },
-        { "col": 57, "row": 210 },
-        { "col": 33, "row": 204 },
-        { "col": 39, "row": 204 },
-        { "col": 45, "row": 204 },
-        { "col": 51, "row": 204 },
-        { "col": 57, "row": 204 },
-        { "col": 33, "row": 198 },
-        { "col": 39, "row": 198 },
-        { "col": 45, "row": 198 },
-        { "col": 51, "row": 198 },
-        { "col": 57, "row": 198 }
+        { "col": 83, "row": 98 },
+        { "col": 83, "row": 104 },
+        { "col": 83, "row": 110 },
+        { "col": 83, "row": 116 },
+        { "col": 89, "row": 98 },
+        { "col": 89, "row": 104 },
+        { "col": 89, "row": 110 },
+        { "col": 89, "row": 116 },       
+        { "col": 95, "row": 98 },
+        { "col": 95, "row": 104 },
+        { "col": 95, "row": 110 },
+        { "col": 95, "row": 116 },
+        { "col": 101, "row": 98 },
+        { "col": 101, "row": 104 },
+        { "col": 101, "row": 110 },
+        { "col": 101, "row": 116 },
+        { "col": 107, "row": 98 },
+        { "col": 107, "row": 104 },
+        { "col": 107, "row": 110 },
+        { "col": 107, "row": 116 }
       ]
     }
   ]

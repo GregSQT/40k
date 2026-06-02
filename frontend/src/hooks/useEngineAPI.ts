@@ -3133,10 +3133,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (
         gameState.phase !== "move" &&
         gameState.phase !== "shoot" &&
-        gameState.phase !== "charge"
+        gameState.phase !== "charge" &&
+        gameState.phase !== "fight"
       ) {
         throw new Error(
-          `end_phase is only supported in move/shoot/charge phases, got '${gameState.phase}'`
+          `end_phase is only supported in move/shoot/charge/fight phases, got '${gameState.phase}'`
         );
       }
 

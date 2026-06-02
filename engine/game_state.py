@@ -1180,8 +1180,13 @@ class GameStateManager:
     def _load_shared_walls_from_ref(self, wall_ref: Any, scenario_file: str) -> List[List[int]]:
         """Load shared wall_hexes file referenced by scenario wall_ref."""
         if isinstance(wall_ref, str) and wall_ref.strip() == "random":
-            from config_loader import get_config_loader
-            walls_dir = get_config_loader().get_board_dir() / "walls"
+            scenario_parent = Path(scenario_file).parent
+            if scenario_parent.name != "scenario":
+                raise ValueError(
+                    f"Scenario '{scenario_file}' must be in 'config/board/<board>/scenario/' to use random wall_ref"
+                )
+            project_root = Path(__file__).resolve().parent.parent
+            walls_dir = project_root / scenario_parent.parent / "walls"
             candidates = sorted(p for p in walls_dir.glob("walls-*.json") if p.stem != "walls-none")
             if not candidates:
                 raise FileNotFoundError(f"No walls-*.json files found in {walls_dir} for random wall_ref in scenario {scenario_file}")
@@ -1229,8 +1234,14 @@ class GameStateManager:
 
     def _load_terrain_walls_from_ref(self, terrain_ref: str, scenario_file: str) -> List[List[int]]:
         """Load wall hexes from the 'walls' section of a terrain file referenced by terrain_ref."""
-        from config_loader import get_config_loader
-        terrain_path = get_config_loader().get_board_dir() / "terrain" / terrain_ref
+        scenario_parent = Path(scenario_file).parent
+        if scenario_parent.name != "scenario":
+            raise ValueError(
+                f"Scenario '{scenario_file}' must be located in a 'config/board/<board>/scenario/' directory "
+                f"to resolve terrain ref, got parent: '{scenario_parent}'"
+            )
+        project_root = Path(__file__).resolve().parent.parent
+        terrain_path = project_root / scenario_parent.parent / "terrain" / terrain_ref
         if not terrain_path.exists():
             raise FileNotFoundError(f"Terrain file not found for scenario {scenario_file}: {terrain_path}")
         try:
@@ -1249,8 +1260,13 @@ class GameStateManager:
     def _load_shared_objectives_from_ref(self, objectives_ref: Any, scenario_file: str) -> List[Dict[str, Any]]:
         """Load shared objectives file referenced by scenario objectives_ref."""
         if isinstance(objectives_ref, str) and objectives_ref.strip() == "random":
-            from config_loader import get_config_loader
-            objectives_dir = get_config_loader().get_board_dir() / "objectives"
+            scenario_parent = Path(scenario_file).parent
+            if scenario_parent.name != "scenario":
+                raise ValueError(
+                    f"Scenario '{scenario_file}' must be in 'config/board/<board>/scenario/' to use random objectives_ref"
+                )
+            project_root = Path(__file__).resolve().parent.parent
+            objectives_dir = project_root / scenario_parent.parent / "objectives"
             candidates = sorted(objectives_dir.glob("objectives-*.json"))
             if not candidates:
                 raise FileNotFoundError(f"No objectives-*.json files found in {objectives_dir} for random objectives_ref in scenario {scenario_file}")
@@ -1313,8 +1329,13 @@ class GameStateManager:
             normalized = f"{normalized}.json"
 
         project_root = Path(__file__).resolve().parent.parent
-        from config_loader import get_config_loader
-        board_dir = get_config_loader().get_board_dir()
+        scenario_parent = Path(scenario_file).parent
+        if scenario_parent.name != "scenario":
+            raise ValueError(
+                f"Scenario '{scenario_file}' must be located in a 'config/board/<board>/scenario/' directory "
+                f"to resolve shared config refs, got parent: '{scenario_parent}'"
+            )
+        board_dir = project_root / scenario_parent.parent
         if shared_dir_name == "_walls":
             return board_dir / "walls" / normalized
         if shared_dir_name == "_objectives":
