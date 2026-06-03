@@ -680,22 +680,10 @@ export class UnitRenderer {
       unitCircle.cursor = "pointer";
       this.attachTooltipHandlers(unitCircle);
 
-      // PIXI's Graphics.containsPoint() uses worldTransform which can be stale when circles are
-      // freshly added to the stage. Override with a direct algebraic check using stage.position,
-      // which is the only transform in the hierarchy (unitsLayer has no additional transform).
+      // hitArea bypasses PIXI v7's stale bounding-box pre-check and routes directly to the
+      // shape's contains() — reliable for freshly-added circles in the unitsLayer.
       if (!nrBase) {
-        const _cx = centerX;
-        const _cy = centerY;
-        const _r2 = circleRadius * circleRadius;
-        const _stage = this.props.app.stage;
-        (unitCircle as PIXI.Graphics & { containsPoint: (p: PIXI.IPointData) => boolean }).containsPoint =
-          (p: PIXI.IPointData): boolean => {
-            const lx = p.x - _stage.position.x;
-            const ly = p.y - _stage.position.y;
-            const dx = lx - _cx;
-            const dy = ly - _cy;
-            return dx * dx + dy * dy <= _r2;
-          };
+        unitCircle.hitArea = new PIXI.Circle(centerX, centerY, circleRadius);
       }
     }
 
