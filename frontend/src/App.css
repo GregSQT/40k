@@ -2674,7 +2674,7 @@ textarea:focus {
   padding: 8px;
   min-width: 400px;
   max-width: 600px;
-  z-index: 10001; /* Au-dessus de l’overlay tutoriel (10000) pour pouvoir cliquer Bolt Rifle en 1-23 */
+  z-index: 100000;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
@@ -2724,7 +2724,8 @@ textarea:focus {
   border-bottom: 1px solid #333;
 }
 
-.weapon-table tbody tr:hover:not(.disabled) {
+.weapon-table tbody tr:hover:not(.disabled),
+.weapon-table tbody tr.selected:not(.disabled) {
   background: rgba(76, 175, 80, 0.15);
 }
 

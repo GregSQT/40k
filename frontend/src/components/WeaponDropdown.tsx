@@ -26,6 +26,7 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x: position.x, y: position.y });
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const dragOffset = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
@@ -95,9 +96,13 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
             return (
               <tr
                 key={weaponOption.index}
-                className={isDisabled ? "disabled" : ""}
+                className={[
+                  isDisabled ? "disabled" : "",
+                  selectedIndex === weaponOption.index ? "selected" : "",
+                ].filter(Boolean).join(" ")}
                 onClick={() => {
                   if (!isDisabled) {
+                    setSelectedIndex(weaponOption.index);
                     onSelectWeapon(weaponOption.index);
                   }
                 }}
