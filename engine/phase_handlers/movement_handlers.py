@@ -195,12 +195,21 @@ def _enemy_items_within_move_engagement_horizon(
             continue
         if int(require_key(ce, "player")) == mover_player_int:
             continue
-        e_col = int(require_key(ce, "col"))
-        e_row = int(require_key(ce, "row"))
         e_span = min(_move_preview_footprint_span(ce), max_bs)
         e_r = _hex_radius_upper_for_engagement_prune(e_span)
         h = horizon_without_enemy_r + e_r
-        if calculate_hex_distance(start_col, start_row, e_col, e_row) <= h:
+        # Distance à la figurine la PLUS PROCHE du squad (pas seulement l'ancre) : une escouade
+        # multi-fig s'étend bien au-delà de son ancre (ex. 20 Termagants sur ~24 hex), donc un
+        # filtre basé sur l'ancre seule omettrait un squad dont une fig est pourtant à portée.
+        by_model = ce.get("occupied_hexes_by_model")
+        if by_model:
+            positions: Any = by_model.values()
+        else:
+            positions = ((int(require_key(ce, "col")), int(require_key(ce, "row"))),)
+        if any(
+            calculate_hex_distance(start_col, start_row, int(pc), int(pr)) <= h
+            for pc, pr in positions
+        ):
             out.append((eid, ce))
     return out
 
@@ -1012,6 +1021,166 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     return result
 
 
+def _compute_mover_ez_forbidden_mask(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    enemy_items: Optional[List[Tuple[Any, Any]]],
+    ez: int,
+    board_cols: int,
+    board_rows: int,
+) -> "np.ndarray":
+    """Masque ``(board_cols, board_rows)`` des ancres dont le placement du mover viole l'EZ ennemie.
+
+    Source UNIQUE de la géométrie d'engagement (Board ×N, ``ez > 1``), partagée par le path IA
+    vectorisé (``_build_multi_hex_vectorized``) et le path PvP par-figurine
+    (``movement_build_model_destinations_pool`` / voile rouge). Garantit IA == PvP.
+
+    Sémantique (identique à ``move_anchor_violates_engagement_clearance``) :
+      - Paire **mover rond ↔ ennemi rond** : écart bord à bord euclidien (centres ``_hex_center``)
+        ≥ ``engagement_minimum_clearance_norm(ez)``.
+      - Sinon (mover non-rond ou ennemi non-rond) : ``min_distance_between_sets(fp_mover, fp_enemy)
+        ≤ ez`` — équivalent à l'intersection de l'empreinte du mover avec la dilatation hex de
+        rayon ``ez`` des empreintes ennemies.
+
+    ``eng_bad[c, r] == True`` ⇔ placer l'ANCRE du mover en ``(c, r)`` viole l'EZ (empreinte du
+    mover déjà prise en compte). À tester au niveau ancre, ne PAS re-dilater par l'empreinte.
+    """
+    import numpy as np
+    from engine.hex_utils import (
+        engagement_minimum_clearance_norm,
+        round_base_radius_norm,
+        _hex_center,
+        precompute_footprint_offsets,
+    )
+
+    mover_shape = unit["BASE_SHAPE"]
+    mover_bs_i = unit["BASE_SIZE"]
+    if "orientation" in unit:
+        mover_orient = int(require_key(unit, "orientation"))
+    else:
+        mover_orient = 0
+    off_even, off_odd = precompute_footprint_offsets(mover_shape, mover_bs_i, mover_orient)
+    off_even_arr = np.asarray(off_even, dtype=np.int64).reshape(-1, 2)
+    off_odd_arr = np.asarray(off_odd, dtype=np.int64).reshape(-1, 2)
+
+    col_is_even = (np.arange(board_cols, dtype=np.int64) & 1) == 0
+    col_parity_mask = np.broadcast_to(
+        col_is_even[:, None], (board_cols, board_rows)
+    ).copy()
+
+    def _dilate_by_kernel(src: "np.ndarray", kernel: "np.ndarray") -> "np.ndarray":
+        out = np.zeros_like(src)
+        if kernel.size == 0:
+            return out
+        for dc, dr in kernel:
+            c_src_lo = max(0, int(dc))
+            c_src_hi = board_cols - max(0, -int(dc))
+            r_src_lo = max(0, int(dr))
+            r_src_hi = board_rows - max(0, -int(dr))
+            if c_src_lo >= c_src_hi or r_src_lo >= r_src_hi:
+                continue
+            c_dst_lo = c_src_lo - int(dc)
+            c_dst_hi = c_src_hi - int(dc)
+            r_dst_lo = r_src_lo - int(dr)
+            r_dst_hi = r_src_hi - int(dr)
+            out[c_dst_lo:c_dst_hi, r_dst_lo:r_dst_hi] |= src[
+                c_src_lo:c_src_hi, r_src_lo:r_src_hi
+            ]
+        return out
+
+    def _spread_by_kernel(src: "np.ndarray", kernel: "np.ndarray") -> "np.ndarray":
+        out = np.zeros_like(src)
+        for dc, dr in kernel:
+            src_c_lo = max(0, -int(dc))
+            src_c_hi = board_cols - max(0, int(dc))
+            src_r_lo = max(0, -int(dr))
+            src_r_hi = board_rows - max(0, int(dr))
+            if src_c_lo >= src_c_hi or src_r_lo >= src_r_hi:
+                continue
+            dst_c_lo = src_c_lo + int(dc)
+            dst_c_hi = src_c_hi + int(dc)
+            dst_r_lo = src_r_lo + int(dr)
+            dst_r_hi = src_r_hi + int(dr)
+            out[dst_c_lo:dst_c_hi, dst_r_lo:dst_r_hi] |= src[
+                src_c_lo:src_c_hi, src_r_lo:src_r_hi
+            ]
+        return out
+
+    nb_even = np.asarray(
+        [(0, -1), (1, -1), (1, 0), (0, 1), (-1, 0), (-1, -1)], dtype=np.int64
+    )
+    nb_odd = np.asarray(
+        [(0, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0)], dtype=np.int64
+    )
+
+    req = engagement_minimum_clearance_norm(ez)
+    mover_is_round = (mover_shape == "round")
+
+    cs = np.arange(board_cols, dtype=np.float64)[:, None]
+    rs = np.arange(board_rows, dtype=np.float64)[None, :]
+    hex_width = 1.5
+    hex_height = float(np.sqrt(3.0))
+    xs = cs * hex_width + hex_width / 2.0
+    parity_shift = ((np.arange(board_cols, dtype=np.int64) & 1).astype(np.float64))[:, None]
+    ys = rs * hex_height + parity_shift * (hex_height / 2.0) + hex_height / 2.0
+
+    eng_bad = np.zeros((board_cols, board_rows), dtype=bool)
+    enemy_list = enemy_items if enemy_items is not None else []
+
+    mover_r_norm = round_base_radius_norm(mover_bs_i) if mover_is_round else 0.0
+    hex_mixed_mask = np.zeros((board_cols, board_rows), dtype=bool)
+    has_hex_mixed = False
+    for _, ce in enemy_list:
+        e_shape = require_key(ce, "BASE_SHAPE")
+        e_bs = _require_footprint_base_size(
+            e_shape,
+            require_key(ce, "BASE_SIZE"),
+            f"units_cache enemy {ce.get('id', '?')}",
+        )
+        by_model = ce.get("occupied_hexes_by_model")
+        model_positions = list(by_model.values()) if by_model else [
+            (int(require_key(ce, "col")), int(require_key(ce, "row")))
+        ]
+        if mover_is_round and e_shape == "round":
+            e_r_norm = round_base_radius_norm(e_bs)
+            for e_col, e_row in model_positions:
+                ex, ey = _hex_center(e_col, e_row)
+                dx = xs - float(ex)
+                dy = ys - float(ey)
+                d = np.hypot(dx, dy)
+                eng_bad |= (d - mover_r_norm - e_r_norm) <= (req + 1e-6)
+        else:
+            e_orient = int(require_key(ce, "orientation"))
+            e_off_even, e_off_odd = precompute_footprint_offsets(e_shape, e_bs, e_orient)
+            for e_col, e_row in model_positions:
+                e_off = e_off_even if (e_col & 1) == 0 else e_off_odd
+                for dc, dr in e_off:
+                    fc = e_col + int(dc)
+                    fr = e_row + int(dr)
+                    if 0 <= fc < board_cols and 0 <= fr < board_rows:
+                        hex_mixed_mask[fc, fr] = True
+            has_hex_mixed = True
+
+    if has_hex_mixed:
+        # Dilatation hex (cube-distance) de rayon ``ez`` par propagation itérative par parité,
+        # puis dilatation par l'empreinte du mover → ``min_distance_between_sets ≤ ez``.
+        dilated = hex_mixed_mask.copy()
+        for _ in range(int(ez)):
+            even_src = dilated & col_parity_mask
+            odd_src = dilated & ~col_parity_mask
+            nxt = dilated | _spread_by_kernel(even_src, nb_even) | _spread_by_kernel(
+                odd_src, nb_odd
+            )
+            if np.array_equal(nxt, dilated):
+                break
+            dilated = nxt
+        eng_bad_even_mix = _dilate_by_kernel(dilated, off_even_arr)
+        eng_bad_odd_mix = _dilate_by_kernel(dilated, off_odd_arr)
+        eng_bad |= np.where(col_parity_mask, eng_bad_even_mix, eng_bad_odd_mix)
+
+    return eng_bad
+
+
 def _build_multi_hex_vectorized(
     *,
     game_state: Dict[str, Any],
@@ -1157,91 +1326,11 @@ def _build_multi_hex_vectorized(
     if not fly:
         bad_traverse = _placement_bad(obstacles_traverse_mask)
 
-    # Voisins hex (offset coordinates). Définis ici car utilisés à la fois par la dilatation hex
-    # de l'engagement mixte et par la propagation BFS.
-    nb_even = np.asarray(
-        [(0, -1), (1, -1), (1, 0), (0, 1), (-1, 0), (-1, -1)], dtype=np.int64
-    )
-    nb_odd = np.asarray(
-        [(0, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0)], dtype=np.int64
-    )
-
     if ez > 1:
-        from engine.hex_utils import (
-            engagement_minimum_clearance_norm,
-            round_base_radius_norm,
-            _hex_center,
-            precompute_footprint_offsets,
+        # Géométrie d'engagement : source unique partagée avec le path PvP (garantit IA == PvP).
+        eng_bad = _compute_mover_ez_forbidden_mask(
+            game_state, unit, enemy_items, ez, board_cols, board_rows
         )
-        req = engagement_minimum_clearance_norm(ez)
-        mover_shape = unit["BASE_SHAPE"]
-        mover_bs_i = unit["BASE_SIZE"]
-        mover_is_round = (mover_shape == "round")
-
-        cs = np.arange(board_cols, dtype=np.float64)[:, None]
-        rs = np.arange(board_rows, dtype=np.float64)[None, :]
-        hex_width = 1.5
-        hex_height = float(np.sqrt(3.0))
-        xs = cs * hex_width + hex_width / 2.0
-        parity_shift = ((np.arange(board_cols, dtype=np.int64) & 1).astype(np.float64))[:, None]
-        ys = rs * hex_height + parity_shift * (hex_height / 2.0) + hex_height / 2.0
-
-        eng_bad = np.zeros((board_cols, board_rows), dtype=bool)
-        enemy_list = enemy_items if enemy_items is not None else []
-
-        # Partitionne les ennemis : paire round/round → formule euclidienne vectorisée ;
-        # autres → on agrège leurs empreintes dans un mask dilatable en distance hex.
-        mover_r_norm = round_base_radius_norm(mover_bs_i) if mover_is_round else 0.0
-        hex_mixed_mask = np.zeros((board_cols, board_rows), dtype=bool)
-        has_hex_mixed = False
-        for _, ce in enemy_list:
-            e_shape = require_key(ce, "BASE_SHAPE")
-            e_bs = _require_footprint_base_size(
-                e_shape,
-                require_key(ce, "BASE_SIZE"),
-                f"units_cache enemy {ce.get('id', '?')}",
-            )
-            by_model = ce.get("occupied_hexes_by_model")
-            model_positions = list(by_model.values()) if by_model else [
-                (int(require_key(ce, "col")), int(require_key(ce, "row")))
-            ]
-            if mover_is_round and e_shape == "round":
-                e_r_norm = round_base_radius_norm(e_bs)
-                for e_col, e_row in model_positions:
-                    ex, ey = _hex_center(e_col, e_row)
-                    dx = xs - float(ex)
-                    dy = ys - float(ey)
-                    d = np.hypot(dx, dy)
-                    eng_bad |= (d - mover_r_norm - e_r_norm) <= (req + 1e-6)
-            else:
-                e_orient = int(require_key(ce, "orientation"))
-                e_off_even, e_off_odd = precompute_footprint_offsets(e_shape, e_bs, e_orient)
-                for e_col, e_row in model_positions:
-                    e_off = e_off_even if (e_col & 1) == 0 else e_off_odd
-                    for dc, dr in e_off:
-                        fc = e_col + int(dc)
-                        fr = e_row + int(dr)
-                        if 0 <= fc < board_cols and 0 <= fr < board_rows:
-                            hex_mixed_mask[fc, fr] = True
-                has_hex_mixed = True
-
-        if has_hex_mixed:
-            # Dilatation hex (cube-distance) de rayon ``ez`` par propagation itérative par parité.
-            # Équivalent à ``dilate_hex_set(mask, ez)`` : l'ancre viole l'engagement si une cellule
-            # de son empreinte tombe dans cette dilatation → ``min_distance_between_sets ≤ ez``.
-            dilated = hex_mixed_mask.copy()
-            for _ in range(int(ez)):
-                even_src = dilated & col_parity_mask
-                odd_src = dilated & ~col_parity_mask
-                nxt = dilated | _spread_by_kernel(even_src, nb_even) | _spread_by_kernel(
-                    odd_src, nb_odd
-                )
-                if np.array_equal(nxt, dilated):
-                    break
-                dilated = nxt
-            eng_bad_even_mix = _dilate_by_kernel(dilated, off_even_arr)
-            eng_bad_odd_mix = _dilate_by_kernel(dilated, off_odd_arr)
-            eng_bad |= np.where(col_parity_mask, eng_bad_even_mix, eng_bad_odd_mix)
     elif ez == 1 and enemy_adjacent_hexes:
         enemy_adj_mask = _mask_from_cells(enemy_adjacent_hexes)
         eng_bad_even = _dilate_by_kernel(enemy_adj_mask, off_even_arr)
@@ -1875,7 +1964,31 @@ def movement_build_model_destinations_pool(
 
     has_fly = _unit_has_keyword(unit, "fly")
 
-    dest_blocked = wall_hexes | other_occupied | same_squad_occupied | enemy_adjacent_hexes
+    # Zone d'engagement ennemie au niveau ANCRE.
+    # ez > 1 (Board ×N) : géométrie euclidienne par-mover, source unique partagée avec le path IA
+    #   (``_compute_mover_ez_forbidden_mask``) → garantit IA == PvP. L'empreinte du mover est déjà
+    #   prise en compte dans le masque, donc l'EZ se teste sur l'ancre et N'EST PAS re-dilatée par
+    #   l'empreinte plus bas (``dest_blocked`` ne contient que la géométrie).
+    # ez <= 1 (legacy) : dilatation hex pré-calculée (``enemy_adjacent_hexes``), traitée comme la
+    #   géométrie (dilatée par l'empreinte dans le filtre multi-hex) — comportement inchangé.
+    ez = get_engagement_zone(game_state)
+    if ez > 1:
+        import numpy as np
+        units_cache = require_key(game_state, "units_cache")
+        _enemy_items_ez = _enemy_items_within_move_engagement_horizon(
+            game_state, unit, squad_id, player, start_col, start_row, int(budget), units_cache
+        )
+        _ez_mask = _compute_mover_ez_forbidden_mask(
+            game_state, unit, _enemy_items_ez, ez, board_cols, board_rows
+        )
+        _ez_cols, _ez_rows = np.where(_ez_mask)
+        ez_anchor_forbidden: Set[Tuple[int, int]] = {
+            (int(c), int(r)) for c, r in zip(_ez_cols, _ez_rows)
+        }
+        dest_blocked = wall_hexes | other_occupied | same_squad_occupied
+    else:
+        ez_anchor_forbidden = enemy_adjacent_hexes
+        dest_blocked = wall_hexes | other_occupied | same_squad_occupied | enemy_adjacent_hexes
 
     visited: Set[Tuple[int, int]] = {start_pos}
     reachable: List[Tuple[int, int]] = []
@@ -1891,13 +2004,14 @@ def movement_build_model_destinations_pool(
             if cell in visited:
                 continue
             if not has_fly and (
-                cell in wall_hexes or cell in enemy_occupied or cell in enemy_adjacent_hexes
+                cell in wall_hexes or cell in enemy_occupied or cell in ez_anchor_forbidden
             ):
                 continue
             visited.add(cell)
             queue.append((nc, nr, d + 1))
-            # Validite destination : murs + toutes figs occupant la cellule + engagement ennemi.
-            if cell in dest_blocked:
+            # Validite destination : murs + toutes figs occupant la cellule + engagement ennemi
+            # (ez_anchor_forbidden = EZ au niveau ancre).
+            if cell in dest_blocked or cell in ez_anchor_forbidden:
                 continue
             reachable.append(cell)
 
@@ -1963,7 +2077,14 @@ def movement_preview_move_plan(
       - can_validate: bool — toutes les figs valides (placement + cohesion).
     """
     budget = get_squad_move_budget(str(squad_id), game_state, "normal")
+    ez = get_engagement_zone(game_state)
+    unit_obj = get_unit_by_id(game_state, str(squad_id))
     c_individual = {"budget_per_model": budget, "require_coherency": False}
+    if ez > 1:
+        # Board ×N : l'EZ est vérifiée ci-dessous par la formule euclidienne par-mover
+        # (``_movement_engagement_violates``, même géométrie que le pathfinding → IA == PvP).
+        # On désactive le check legacy centre-à-centre de ``validate_move_plan``.
+        c_individual["forbid_enemy_er"] = False
     # Cohesion par COMPOSANTES CONNEXES (squad.md) : on relie les figs distantes de <=
     # coherency_dist (2"), puis on cherche les groupes connectes. Le groupe STRICTEMENT
     # majoritaire (taille*2 > effectif total) reste vert ; tout groupe minoritaire ou a
@@ -2042,7 +2163,20 @@ def movement_preview_move_plan(
         fp_wall = bool(wall_hexes_set and fp & wall_hexes_set)
         fp_other = bool(other_occ_set and fp & other_occ_set)
         fp_intra = any(bool(footprints[j] & fp) for j in range(n) if j != idx)
-        per_model[str(mid)] = bool(base_valid and not fp_wall and not fp_other and not fp_intra and not cohesion_red[idx])
+        # Board ×N : voile rouge si l'empreinte de la fig viole l'EZ ennemie (formule euclidienne
+        # par-mover, identique au pathfinding). ez <= 1 : déjà couvert par validate_move_plan.
+        ez_violation = (
+            ez > 1
+            and unit_obj is not None
+            and _movement_engagement_violates(
+                game_state, unit_obj, int(nc), int(nr), fp, units_cache,
+                None, enemy_cache_items=None, engagement_zone_ez=ez,
+            )
+        )
+        per_model[str(mid)] = bool(
+            base_valid and not fp_wall and not fp_other and not fp_intra
+            and not cohesion_red[idx] and not ez_violation
+        )
 
     coherency_ok = not any(cohesion_red)
     all_valid = len(per_model) > 0 and all(per_model.values())
