@@ -1,6 +1,10 @@
 /* App.css - Improved with BEM methodology and CSS custom properties */
 
 :root {
+  /* Weapon Dropdown Handle */
+  --weapon-handle-bg: #0b410d;
+  --weapon-handle-color: #a5d6a7;
+
   /* Color System */
   --terrain-color: #9a8060;
   --terrain-objective-color: #c49a2e;
@@ -2672,6 +2676,19 @@ textarea:focus {
   max-width: 600px;
   z-index: 10001; /* Au-dessus de l’overlay tutoriel (10000) pour pouvoir cliquer Bolt Rifle en 1-23 */
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.weapon-dropdown-handle {
+  cursor: grab;
+  padding: 4px 8px;
+  background: var(--weapon-handle-bg);
+  color: var(--weapon-handle-color);
+  font-weight: 700;
+  width: 100%;
+  border: none;
+  text-align: left;
+  user-select: none;
+  border-radius: 4px 4px 0 0;
 }
 
 .weapon-table {

@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import weaponRules from "../../../config/weapon_rules.json";
 import type { WeaponOption } from "../types/game";
 import TooltipWrapper from "./TooltipWrapper";
@@ -25,18 +25,36 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
   persistent = false,
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ x: position.x, y: position.y });
+  const dragOffset = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
-    if (persistent) return; // menu persistant : fermé explicitement (Validate/Cancel), pas au clic dehors
+    if (persistent) return;
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         onClose();
       }
     };
-
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [onClose, persistent]);
+
+  const onDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!dragOffset.current) return;
+      setPos({ x: ev.clientX - dragOffset.current.x, y: ev.clientY - dragOffset.current.y });
+    };
+    const onMouseUp = () => {
+      dragOffset.current = null;
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, [pos]);
 
   return (
     <div
@@ -44,10 +62,17 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
       className="weapon-dropdown"
       style={{
         position: "absolute",
-        left: `${position.x}px`,
-        top: `${position.y}px`,
+        left: `${pos.x}px`,
+        top: `${pos.y}px`,
       }}
     >
+      <button
+        type="button"
+        className="weapon-dropdown-handle"
+        onMouseDown={onDragStart}
+      >
+        ⠿ WEAPON CHOICE
+      </button>
       <table className="weapon-table">
         <thead>
           <tr>
