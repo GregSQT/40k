@@ -40,6 +40,9 @@
   ],
   "icons": [
     { "id": 1, "name": "HomeRed", "path": "frontend/public/icons/Terrain/HomeRed.png", "center": [40, 60], "size": 80, "alpha": 0.7 },
-    { "id": 2, "name": "HomeBlue", "path": "frontend/public/icons/Terrain/HomeBlue.png", "center": [180, 240], "size": 80, "alpha": 0.7 }
+    { "id": 2, "name": "HomeBlue", "path": "frontend/public/icons/Terrain/HomeBlue.png", "center": [180, 240], "size": 80, "alpha": 0.7 },
+    { "id": 3, "name": "SkullRound", "path": "frontend/public/icons/Terrain/SkullRound.png", "center": [110, 150], "size": 80, "alpha": 0.7 },
+    { "id": 4, "name": "SkullSquare1", "path": "frontend/public/icons/Terrain/SkullSquare.png", "center": [191, 56], "size": 80, "alpha": 0.7 },
+    { "id": 5, "name": "SkullSquare2", "path": "frontend/public/icons/Terrain/SkullSquare.png", "center": [32, 242], "size": 80, "alpha": 0.7 }
   ]
 }
