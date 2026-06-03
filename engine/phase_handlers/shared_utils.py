@@ -3888,6 +3888,7 @@ def resolve_squad_shoot(
         intent_damage = 0
         intent_kills = 0
         killed_model_ids: List[str] = []
+        intent_shot_records: List[Dict[str, Any]] = []
 
         for _ in range(int(n_attacks)):
             # Recheck cible alive et attaquant alive avant chaque attaque
@@ -3900,9 +3901,8 @@ def resolve_squad_shoot(
             intent_attacks += 1
             # 1. Hit roll
             hit_roll = random.randint(1, 6)
-            if hit_roll == 1:  # 1 always miss (regle 10e)
-                continue
-            if hit_roll < bs:
+            if hit_roll == 1 or hit_roll < bs:
+                intent_shot_records.append({"attackRoll": hit_roll, "hitResult": "MISS", "hitTarget": bs})
                 continue
             summary["hits"] += 1
             intent_hits += 1
@@ -3914,9 +3914,8 @@ def resolve_squad_shoot(
                 wth = wound_threshold(strength, t_target)
                 wound_th_lookup[t_target] = wth
             wound_roll = random.randint(1, 6)
-            if wound_roll == 1:  # 1 always fail
-                continue
-            if wound_roll < wth:
+            if wound_roll == 1 or wound_roll < wth:
+                intent_shot_records.append({"attackRoll": hit_roll, "hitResult": "HIT", "hitTarget": bs, "strengthRoll": wound_roll, "strengthResult": "FAILED", "woundTarget": wth})
                 continue
             summary["wounds"] += 1
             intent_wounds += 1
@@ -3926,6 +3925,7 @@ def resolve_squad_shoot(
             save_th = save_threshold(sv, invul, ap)
             save_roll = random.randint(1, 6)
             if save_roll != 1 and save_roll >= save_th:
+                intent_shot_records.append({"attackRoll": hit_roll, "hitResult": "HIT", "hitTarget": bs, "strengthRoll": wound_roll, "strengthResult": "SUCCESS", "woundTarget": wth, "saveRoll": save_roll, "saveTarget": save_th, "saveSuccess": True, "damageDealt": 0})
                 continue  # save reussi
             summary["failed_saves"] += 1
             intent_failed_saves += 1
@@ -3935,6 +3935,7 @@ def resolve_squad_shoot(
             except Exception:
                 dmg = int(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1
             if dmg <= 0:
+                intent_shot_records.append({"attackRoll": hit_roll, "hitResult": "HIT", "hitTarget": bs, "strengthRoll": wound_roll, "strengthResult": "SUCCESS", "woundTarget": wth, "saveRoll": save_roll, "saveTarget": save_th, "saveSuccess": False, "damageDealt": 0})
                 continue
             res = _allocate_damage_to_squad(game_state, target_sid, dmg)
             if res is None:
@@ -3952,6 +3953,7 @@ def resolve_squad_shoot(
                 "points_per_hp": float(res["points_per_hp"]),
                 "damage": int(res["damage_dealt"]), "destroyed": bool(res["destroyed"]),
             })
+            intent_shot_records.append({"attackRoll": hit_roll, "hitResult": "HIT", "hitTarget": bs, "strengthRoll": wound_roll, "strengthResult": "SUCCESS", "woundTarget": wth, "saveRoll": save_roll, "saveTarget": save_th, "saveSuccess": False, "damageDealt": int(res["damage_dealt"]), "targetDied": bool(res["destroyed"])})
         # Apres toutes les attaques de cet intent, decrement SHOOT_LEFT du modele attaquant
         if attacker_mid in models_cache:
             sl = int(models_cache[attacker_mid].get("SHOOT_LEFT", 0))  # get allowed
@@ -3974,12 +3976,14 @@ def resolve_squad_shoot(
                     "damage": 0,
                     "kills": 0,
                     "killed_model_ids": [],
+                    "shots": [],
                 }
             g = weapon_groups[group_key]
             g["attacks"] += intent_attacks
             g["damage"] += intent_damage
             g["kills"] += intent_kills
             g["killed_model_ids"].extend(killed_model_ids)
+            g["shots"].extend(intent_shot_records)
 
     # Emit 1 log par groupe (weapon, target) pour toute l'escouade
     for (weapon_name_g, target_sid_g), g in weapon_groups.items():
@@ -4018,6 +4022,7 @@ def resolve_squad_shoot(
             "target_died": g["kills"] > 0,
             "timestamp": "server_time",
             "is_ai_action": g["player"] == 1,
+            "shootDetails": [{"shotNumber": i + 1, **s} for i, s in enumerate(g["shots"])],
         })
         # for dead_mid in g["killed_model_ids"]:
         #     append_action_log(game_state, {

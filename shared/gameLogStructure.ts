@@ -78,8 +78,8 @@ export interface TrainingLogEntry extends BaseLogEntry {
  */
 export interface ShootDetail {
   shotNumber: number;
-  attackRoll: number;
-  strengthRoll: number;
+  attackRoll?: number;
+  strengthRoll?: number;
   hitResult: "HIT" | "MISS";
   strengthResult: "SUCCESS" | "FAILED";
   hitTarget?: number;

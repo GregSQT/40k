@@ -213,6 +213,19 @@ export const GameLog: React.FC<GameLogProps> = ({
   const headerRef = React.useRef<HTMLDivElement>(null);
   const topEntryRefs = React.useRef<Array<HTMLDivElement | null>>([]);
   const tutorial = useTutorial();
+  const [expandedEntries, setExpandedEntries] = React.useState<Set<string>>(new Set());
+
+  const toggleExpanded = React.useCallback((id: string) => {
+    setExpandedEntries((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
   const _spotlightLayoutTick = tutorial?.spotlightLayoutTick ?? 0;
   const [_gameLogScrollTick, setGameLogScrollTick] = React.useState(0);
 
@@ -504,6 +517,16 @@ export const GameLog: React.FC<GameLogProps> = ({
                   className={`game-log-entry ${getEventTypeClass(event)} ${waitClass} ${objectiveControlClass}`}
                 >
                   <div className="game-log-entry__single-line">
+                    {event.shootDetails && event.shootDetails.length > 0 && (
+                      <button
+                        type="button"
+                        className="game-log-entry__expand-btn"
+                        onClick={() => toggleExpanded(event.id)}
+                        aria-label={expandedEntries.has(event.id) ? "Réduire le détail" : "Voir le détail"}
+                      >
+                        {expandedEntries.has(event.id) ? "−" : "+"}
+                      </button>
+                    )}
                     <span className={`game-log-entry__icon game-log-entry__icon--${event.type}`}>
                       {getEventIcon(event.type)}
                     </span>
@@ -540,6 +563,33 @@ export const GameLog: React.FC<GameLogProps> = ({
                       </span>
                     )}
                   </div>
+                  {expandedEntries.has(event.id) && event.shootDetails && event.shootDetails.length > 0 && (
+                    <div className="game-log-entry__shot-details">
+                      {event.shootDetails.map((shot) => {
+                        const parts: string[] = [`#${shot.shotNumber}`];
+                        parts.push(`Tir: ${shot.hitResult === "HIT" ? "✓" : "✗"}${shot.attackRoll !== undefined ? ` (${shot.attackRoll})` : ""}`);
+                        if (shot.hitResult === "HIT") {
+                          parts.push(`Bless: ${shot.strengthResult === "SUCCESS" ? "✓" : "✗"}${shot.strengthRoll !== undefined ? ` (${shot.strengthRoll})` : ""}`);
+                        }
+                        if (shot.strengthResult === "SUCCESS") {
+                          if (shot.saveRoll !== undefined) {
+                            parts.push(`Svg: ${shot.saveSuccess ? "✓" : "✗"} (${shot.saveRoll})`);
+                          }
+                          if (!shot.saveSuccess && shot.damageDealt !== undefined) {
+                            parts.push(`Dmg: ${shot.damageDealt}`);
+                          }
+                          if (shot.targetDied) {
+                            parts.push("💀");
+                          }
+                        }
+                        return (
+                          <div key={shot.shotNumber} className="game-log-entry__shot-detail-row">
+                            {parts.join(" | ")}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })}
