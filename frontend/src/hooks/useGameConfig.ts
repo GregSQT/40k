@@ -23,7 +23,8 @@ interface DisplayConfig {
   background_image?: string;
   background_image_alpha?: number;
   background_overlay_alpha?: number;
-  wall_texture?: string;
+  wall_texture_light?: string;
+  wall_texture_dense?: string;
   wall_texture_alpha?: number;
   objective_texture?: string;
   objective_texture_alpha?: number;
@@ -54,6 +55,7 @@ interface Wall {
   start: { col: number; row: number };
   end: { col: number; row: number };
   thickness?: number;
+  type?: "dense" | "light";
 }
 
 interface BoardConfig {

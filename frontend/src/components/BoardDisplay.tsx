@@ -722,7 +722,8 @@ interface BoardConfig {
     background_image?: string;
     background_image_alpha?: number;
     background_overlay_alpha?: number;
-    wall_texture?: string;
+    wall_texture_light?: string;
+    wall_texture_dense?: string;
     wall_texture_alpha?: number;
     /** Chemin public (ex. /textures/obj1.webp). Teinte = couleur objectif / contrôle. */
     objective_texture?: string;
@@ -2749,12 +2750,14 @@ export const drawBoard = (
       wallsContainer.name = "walls";
 
       const halfW = HEX_HEIGHT * 1.0;
-      const wallTexturePath = boardConfig.display?.wall_texture?.trim() || "/textures/wall1.webp";
+      const wallTextureLightPath = boardConfig.display?.wall_texture_light?.trim() || "/textures/wall1.webp";
+      const wallTextureDensePath = boardConfig.display?.wall_texture_dense?.trim() || "/textures/wall1.webp";
       const wallTextureAlpha =
         typeof boardConfig.display?.wall_texture_alpha === "number"
           ? boardConfig.display.wall_texture_alpha
           : 1.0;
-      const wallTexture = PIXI.Texture.from(wallTexturePath);
+      const wallTextureLight = PIXI.Texture.from(wallTextureLightPath);
+      const wallTextureDense = PIXI.Texture.from(wallTextureDensePath);
 
       const toPixel = (col: number, row: number): [number, number] => [
         col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN,
@@ -2773,10 +2776,11 @@ export const drawBoard = (
         const ny = (dx / len) * halfW;
 
         const g = new PIXI.Graphics();
-        g.beginTextureFill({
-          texture: wallTexture,
-          alpha: wallTextureAlpha,
-        });
+        if (wall.type === "light") {
+          g.beginTextureFill({ texture: wallTextureLight, alpha: wallTextureAlpha });
+        } else {
+          g.beginTextureFill({ texture: wallTextureDense, alpha: wallTextureAlpha });
+        }
         g.drawCircle(sx, sy, halfW);
         g.drawCircle(ex, ey, halfW);
         g.drawPolygon([sx + nx, sy + ny, ex + nx, ey + ny, ex - nx, ey - ny, sx - nx, sy - ny]);

@@ -1243,7 +1243,7 @@ def initialize_engine(scenario_file: Optional[str] = None):
             )
         
         config["observation_params"] = obs_params  # Inclut obs_size validé
-        
+
         # Create engine with proper parameters
         engine = W40KEngine(
             config=config,
@@ -1253,7 +1253,8 @@ def initialize_engine(scenario_file: Optional[str] = None):
             active_agents=None,
             scenario_file=scenario_file,
             unit_registry=unit_registry,
-            quiet=True
+            quiet=True,
+            debug_mode=os.environ.get('W40K_DEBUG', 'false').lower() == 'true'
         )
         
         # CRITICAL FIX: Add rewards_configs to game_state after engine creation
@@ -2910,6 +2911,7 @@ def get_board_config():
                         wall_segments_raw.append({
                             "start": {"col": int(a[0]), "row": int(a[1])},
                             "end":   {"col": int(b[0]), "row": int(b[1])},
+                            "type":  g.get("type", "dense"),
                         })
                 wall_hexes.extend(expand_wall_group_to_hex_list(g, path_hint=f"board terrain ({board_subdir}) walls[{gi}]"))
             merged["wall_hexes"] = wall_hexes
