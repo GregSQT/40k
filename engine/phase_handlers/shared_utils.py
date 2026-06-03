@@ -3233,6 +3233,49 @@ def squad_shooting_unit_activation_start(
     game_state["pending_squad_shoot_intents"][squad_id] = []
 
 
+def _attacker_model_can_reach_squad(
+    game_state: Dict[str, Any],
+    ac: int,
+    ar: int,
+    target_squad_id: str,
+    range_subhex: int,
+) -> bool:
+    """Eligibilite LoS per-fig, alignee sur le chemin non-squad (empreinte + ratio).
+
+    Pour CHAQUE figurine cible vivante : si son centre est a portee (<= range_subhex)
+    ET si son empreinte est visible depuis (ac, ar) au sens du ratio de couverture
+    (_compute_target_visibility_from_hexes : ratio >= los_visibility_min_ratio), la
+    cible est atteignable. Renvoie True des qu'une figurine satisfait les deux.
+
+    Difference voulue avec le non-squad : origine = centre de la figurine tireuse
+    (per-fig) et empreinte evaluee PAR figurine cible (pas l'union de l'escouade) —
+    sinon une grosse base partiellement masquee par un mur etait grisee a tort car
+    seul son centre etait teste. Reutilise la primitive de ratio (seuils 0.05/0.95)
+    et son cache _hex_los_state_cache. Sur board ×1 (base_size 1), l'empreinte se
+    reduit au centre : comportement identique a l'ancien test.
+    """
+    from engine.phase_handlers.shooting_handlers import _compute_target_visibility_from_hexes
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    units_cache = require_key(game_state, "units_cache")
+    base_unit = units_cache.get(str(target_squad_id))
+    if base_unit is None:
+        return False
+    for mid in squad_models.get(target_squad_id, []):  # get allowed
+        tm = models_cache.get(mid)
+        if tm is None:
+            continue
+        tc = int(tm["col"])
+        tr = int(tm["row"])
+        if calculate_hex_distance(ac, ar, tc, tr) > range_subhex:
+            continue
+        footprint = list(_compute_unit_occupied_hexes(tc, tr, base_unit, game_state))
+        _, can_see, _, _, _ = _compute_target_visibility_from_hexes(game_state, ac, ar, footprint)
+        if can_see:
+            return True
+    return False
+
+
 def _model_can_shoot_target(
     game_state: Dict[str, Any], attacker_model: Dict[str, Any], target_squad_id: str
 ) -> bool:
@@ -3262,16 +3305,9 @@ def _model_can_shoot_target(
     if range_subhex <= 0:
         return False
     # Import lazy : shooting_handlers importe shared_utils (eviter le cycle).
-    from engine.phase_handlers.shooting_handlers import _get_los_visibility_state
     ac = int(attacker_model["col"])
     ar = int(attacker_model["row"])
-    for tc, tr in _squad_model_positions(game_state, target_squad_id):
-        if calculate_hex_distance(ac, ar, tc, tr) > range_subhex:
-            continue
-        _, can_see, _ = _get_los_visibility_state(game_state, ac, ar, tc, tr)
-        if can_see:
-            return True
-    return False
+    return _attacker_model_can_reach_squad(game_state, ac, ar, target_squad_id, range_subhex)
 
 
 def squad_declare_shoot(
@@ -3531,16 +3567,9 @@ def _model_can_shoot_target_with_weapon(
     range_subhex = int(weapon["RNG"])
     if range_subhex <= 0:
         return False
-    from engine.phase_handlers.shooting_handlers import _get_los_visibility_state
     ac = int(attacker_model["col"])
     ar = int(attacker_model["row"])
-    for tc, tr in _squad_model_positions(game_state, target_squad_id):
-        if calculate_hex_distance(ac, ar, tc, tr) > range_subhex:
-            continue
-        _, can_see, _ = _get_los_visibility_state(game_state, ac, ar, tc, tr)
-        if can_see:
-            return True
-    return False
+    return _attacker_model_can_reach_squad(game_state, ac, ar, target_squad_id, range_subhex)
 
 
 def squad_declare_shoot_weapon(
