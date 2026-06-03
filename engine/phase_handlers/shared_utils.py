@@ -3254,13 +3254,21 @@ def _attacker_model_can_reach_squad(
     et son cache _hex_los_state_cache. Sur board ×1 (base_size 1), l'empreinte se
     reduit au centre : comportement identique a l'ancien test.
     """
-    from engine.phase_handlers.shooting_handlers import _compute_target_visibility_from_hexes
+    # Obscuring-aware LoS (single source of truth): the firing model (single hex at ac,ar) must see
+    # at least los_visibility_min_ratio of a target model's footprint, with dense walls AND obscuring
+    # terrain blocking (rule 13.10). Routed through the same primitive as the non-squad path so the
+    # squad target pool can never include a target the model cannot actually see.
+    from engine.phase_handlers.shooting_handlers import _compute_visibility_with_obscuring
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    min_ratio = float(game_rules.get("los_visibility_min_ratio", 0.0))
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     units_cache = require_key(game_state, "units_cache")
     base_unit = units_cache.get(str(target_squad_id))
     if base_unit is None:
         return False
+    shooter_anchor = (ac, ar)
+    shooter_hexes = [shooter_anchor]
     for mid in squad_models.get(target_squad_id, []):  # get allowed
         tm = models_cache.get(mid)
         if tm is None:
@@ -3270,8 +3278,10 @@ def _attacker_model_can_reach_squad(
         if calculate_hex_distance(ac, ar, tc, tr) > range_subhex:
             continue
         footprint = list(_compute_unit_occupied_hexes(tc, tr, base_unit, game_state))
-        _, can_see, _, _, _ = _compute_target_visibility_from_hexes(game_state, ac, ar, footprint)
-        if can_see:
+        visible, total = _compute_visibility_with_obscuring(
+            game_state, shooter_anchor, shooter_hexes, (tc, tr), footprint
+        )
+        if total > 0 and (visible / total) >= min_ratio:
             return True
     return False
 

@@ -435,6 +435,7 @@ export class UnitRenderer {
     this.renderAttackCounter(unitIconScale);
     this.renderChargeRollBadge(unitIconScale);
     this.renderAdvanceRollBadge(unitIconScale);
+    this.renderHiddenBadge(unitIconScale);
 
     this.props.centerX = originalCenterX;
     this.props.centerY = originalCenterY;
@@ -2210,6 +2211,52 @@ export class UnitRenderer {
     rollText.name = `charge-badge-${unitIdNum}-text`;
     rollText.zIndex = 10002; // Above badge background and everything else
     targetContainer.addChild(rollText);
+  }
+
+  private renderHiddenBadge(unitIconScale: number): void {
+    const { unit, centerX, centerY, app, HEX_RADIUS, uiElementsContainer } = this.props;
+    const targetContainer = uiElementsContainer || app.stage;
+    const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
+
+    // Clean up any existing hidden badge for this unit (avoids stale duplicates across renders).
+    if (uiElementsContainer) {
+      const prefix = `hidden-badge-${unitIdNum}`;
+      const existing = uiElementsContainer.children.filter(
+        (child: PIXI.DisplayObject) =>
+          typeof child.name === "string" &&
+          (child.name === prefix || child.name.startsWith(`${prefix}-`))
+      );
+      existing.forEach((child: PIXI.DisplayObject) => {
+        uiElementsContainer.removeChild(child);
+        if ("destroy" in child && typeof child.destroy === "function") child.destroy();
+      });
+    }
+
+    // Hidden flag (rule 13.09) — only visible within detection range to the enemy.
+    if (!unit.hidden) return;
+
+    // Bottom-left of unit (mirror of the bottom-right charge badge).
+    const scaledOffset = ((HEX_RADIUS * unitIconScale) / 2) * 0.8;
+    const badgeX = centerX - scaledOffset;
+    const badgeY = centerY + scaledOffset;
+    const r = Math.max(7, HEX_RADIUS * 0.32);
+
+    const g = new PIXI.Graphics();
+    // Dark grey disc with light border.
+    g.beginFill(0x1e1e1e, 0.9);
+    g.lineStyle(2, 0xb0b0b0, 1);
+    g.drawCircle(badgeX, badgeY, r);
+    g.endFill();
+    // Small eye (white) + red diagonal slash → reads as "hidden / not seen".
+    g.beginFill(0xe8e8e8, 1);
+    g.drawCircle(badgeX, badgeY, r * 0.28);
+    g.endFill();
+    g.lineStyle(2, 0xff5555, 1);
+    g.moveTo(badgeX - r * 0.7, badgeY - r * 0.7);
+    g.lineTo(badgeX + r * 0.7, badgeY + r * 0.7);
+    g.name = `hidden-badge-${unitIdNum}`;
+    g.zIndex = 10001;
+    targetContainer.addChild(g);
   }
 
   private renderUnitIdDebug(iconZIndex: number): void {

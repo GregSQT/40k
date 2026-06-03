@@ -766,6 +766,7 @@ interface BoardConfig {
     vertices?: [number, number][];
     top_left?: [number, number];
     bottom_right?: [number, number];
+    obscuring?: boolean;
   }>;
   terrain_icons?: Array<{
     id: number | string;
@@ -2043,6 +2044,8 @@ export const drawBoard = (
         for (const zone of boardConfig.terrain_zones) {
           const g = new PIXI.Graphics();
           const zoneColor = zone.objective ? terrainObjectiveColor : terrainColor;
+          // Obscuring terrain (rule 13.10) gets a denser fill to read as blocking cover.
+          const fillAlpha = zone.obscuring ? 0.18 : 0.1;
           if (zone.shape === "rect" && zone.top_left && zone.bottom_right) {
             const [x1, y1] = toPixelT(zone.top_left[0], zone.top_left[1]);
             const [x2, y2] = toPixelT(zone.bottom_right[0], zone.bottom_right[1]);
@@ -2050,7 +2053,7 @@ export const drawBoard = (
             const ry = Math.min(y1, y2);
             const rw = Math.abs(x2 - x1);
             const rh = Math.abs(y2 - y1);
-            g.beginFill(zoneColor, 0.1);
+            g.beginFill(zoneColor, fillAlpha);
             g.lineStyle(terrainLineWidth, zoneColor, 0.85);
             g.drawRect(rx, ry, rw, rh);
             g.endFill();
@@ -2060,7 +2063,7 @@ export const drawBoard = (
             zone.vertices.length === 3
           ) {
             const pts = zone.vertices.map(([c, r]) => toPixelT(c, r));
-            g.beginFill(zoneColor, 0.1);
+            g.beginFill(zoneColor, fillAlpha);
             g.lineStyle(terrainLineWidth, zoneColor, 0.85);
             g.moveTo(pts[0]![0], pts[0]![1]);
             g.lineTo(pts[1]![0], pts[1]![1]);
@@ -2073,7 +2076,7 @@ export const drawBoard = (
             zone.vertices.length >= 3
           ) {
             const pts = zone.vertices.map(([c, r]) => toPixelT(c, r));
-            g.beginFill(zoneColor, 0.1);
+            g.beginFill(zoneColor, fillAlpha);
             g.lineStyle(terrainLineWidth, zoneColor, 0.85);
             g.moveTo(pts[0]![0], pts[0]![1]);
             for (let i = 1; i < pts.length; i++) {

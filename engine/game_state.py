@@ -13,13 +13,28 @@ import re
 from shared.data_validation import ConfigurationError, require_key
 from engine.combat_utils import normalize_coordinates, get_unit_coordinates, resolve_dice_value
 from engine.phase_handlers.shared_utils import is_unit_alive
-from engine.hex_utils import expand_objectives_to_hex_list, expand_wall_group_to_hex_list
+from engine.hex_utils import expand_objectives_to_hex_list, expand_wall_group_to_hex_list, polygon_to_hex_list
 
 # PERF: In-memory caches to avoid repeated disk I/O during scenario rotation.
 _scenario_json_cache: Dict[str, Any] = {}
 _walls_json_cache: Dict[str, List[List[int]]] = {}
 _walls_json_mtime_ns: Dict[str, int] = {}
 _objectives_json_cache: Dict[str, List[Dict[str, Any]]] = {}
+
+# Keywords granting the "hideable" property (Benefit of Cover / Hidden rules 13.08-13.09).
+_HIDEABLE_KEYWORDS = ("infantry", "beast", "swarm")
+
+
+def compute_hideable(unit_keywords: Any) -> bool:
+    """True if the unit has an INFANTRY/BEASTS/SWARM keyword (eligible for cover/hidden)."""
+    if not isinstance(unit_keywords, list):
+        raise TypeError(f"UNIT_KEYWORDS must be a list, got {type(unit_keywords).__name__}")
+    for kw in unit_keywords:
+        if not isinstance(kw, dict):
+            raise TypeError(f"UNIT_KEYWORDS entries must be dicts, got {kw!r}")
+        if str(require_key(kw, "keywordId")).strip().lower() in _HIDEABLE_KEYWORDS:
+            return True
+    return False
 
 
 class GameStateManager:
@@ -145,7 +160,11 @@ class GameStateManager:
             
             # AI_TURN.md action tracking fields
             "SHOOT_LEFT": shoot_left,
-            "ATTACK_LEFT": attack_left
+            "ATTACK_LEFT": attack_left,
+
+            # Terrain visibility (rules 13.08-13.09): hideable derived from keywords, hidden is runtime state
+            "hideable": compute_hideable(unit_keywords),
+            "hidden": False,
         }
         if models_passthrough is not None:
             result["models"] = copy.deepcopy(models_passthrough)
@@ -216,6 +235,7 @@ class GameStateManager:
             deployment_type_by_player: Dict[int, str] = {1: "fixed", 2: "fixed"}
             resolved_scenario_walls = None
             resolved_scenario_objectives = None
+            resolved_terrain_areas = None
             if isinstance(scenario_data, dict):
                 has_wall_hexes = "wall_hexes" in scenario_data
                 has_wall_ref = "wall_ref" in scenario_data
@@ -236,6 +256,9 @@ class GameStateManager:
                     )
                     if terrain_walls:
                         resolved_scenario_walls = list(resolved_scenario_walls or []) + terrain_walls
+                    resolved_terrain_areas = self._load_terrain_areas_from_ref(
+                        scenario_data["terrain_ref"], scenario_file
+                    )
 
                 has_objectives_inline = "objectives" in scenario_data
                 has_objective_hexes_legacy = "objective_hexes" in scenario_data
@@ -588,7 +611,11 @@ class GameStateManager:
                     "UNIT_RULES": copy.deepcopy(require_key(full_unit_data, "UNIT_RULES")),
                     "UNIT_KEYWORDS": copy.deepcopy(require_key(full_unit_data, "UNIT_KEYWORDS")),
                     "SHOOT_LEFT": shoot_left,
-                    "ATTACK_LEFT": attack_left
+                    "ATTACK_LEFT": attack_left,
+
+                    # Terrain visibility (rules 13.08-13.09): hideable derived from keywords, hidden is runtime state
+                    "hideable": compute_hideable(require_key(full_unit_data, "UNIT_KEYWORDS")),
+                    "hidden": False,
                 }
 
                 # PR4 4c : pass-through champ optionnel "models" (multi-fig squad)
@@ -714,6 +741,7 @@ class GameStateManager:
             return {
                 "units": enhanced_units,
                 "wall_hexes": scenario_walls,
+                "terrain_areas": resolved_terrain_areas or [],
                 "wall_ref": scenario_wall_ref,
                 "objectives": scenario_objectives,
                 "primary_objectives": scenario_primary_objectives,
@@ -1232,8 +1260,8 @@ class GameStateManager:
         _walls_json_mtime_ns[cache_key] = wall_path.stat().st_mtime_ns
         return wall_hexes
 
-    def _load_terrain_walls_from_ref(self, terrain_ref: str, scenario_file: str) -> List[List[int]]:
-        """Load wall hexes from the 'walls' section of a terrain file referenced by terrain_ref."""
+    def _read_terrain_file(self, terrain_ref: str, scenario_file: str) -> Tuple[Dict[str, Any], Path]:
+        """Resolve and parse the terrain JSON file referenced by terrain_ref. Returns (data, path)."""
         scenario_parent = Path(scenario_file).parent
         if scenario_parent.name != "scenario":
             raise ValueError(
@@ -1249,6 +1277,11 @@ class GameStateManager:
                 terrain_data = json.load(f)
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in terrain file {terrain_path}: {e}")
+        return terrain_data, terrain_path
+
+    def _load_terrain_walls_from_ref(self, terrain_ref: str, scenario_file: str) -> List[List[int]]:
+        """Load wall hexes from the 'walls' section of a terrain file referenced by terrain_ref."""
+        terrain_data, terrain_path = self._read_terrain_file(terrain_ref, scenario_file)
         result: List[List[int]] = []
         for gi, g in enumerate(terrain_data.get("walls", [])):
             if not isinstance(g, dict):
@@ -1256,6 +1289,36 @@ class GameStateManager:
             hint = f"Terrain file {terrain_path} walls[{gi}]"
             result.extend(expand_wall_group_to_hex_list(g, path_hint=hint))
         return result
+
+    def _load_terrain_areas_from_ref(self, terrain_ref: str, scenario_file: str) -> List[Dict[str, Any]]:
+        """Load polygon terrain areas from the 'terrain' section of a terrain file referenced by terrain_ref.
+
+        Only 'polygon' shapes are kept (lines like deployment markers are excluded). Each area is
+        {id, obscuring, polygon_vertices, hexes}; vertices stay in col/row sub-hex space and `hexes`
+        is the rasterized set of occupied board hexes (same odd-q projection as objectives/renderer).
+        """
+        from config_loader import get_config_loader
+        cols, rows = get_config_loader().get_board_size()
+        terrain_data, terrain_path = self._read_terrain_file(terrain_ref, scenario_file)
+        areas: List[Dict[str, Any]] = []
+        for ai, area in enumerate(terrain_data.get("terrain", [])):
+            if not isinstance(area, dict):
+                continue
+            if area.get("shape") != "polygon":
+                continue
+            hint = f"Terrain file {terrain_path} terrain[{ai}]"
+            area_id = require_key(area, "id")
+            vertices = require_key(area, "vertices")
+            if not isinstance(vertices, list) or len(vertices) < 3:
+                raise ValueError(f"{hint}: polygon 'vertices' must be a list of >= 3 points, got {vertices!r}")
+            poly = [[int(v[0]), int(v[1])] for v in vertices]
+            areas.append({
+                "id": area_id,
+                "obscuring": bool(area.get("obscuring", False)),
+                "polygon_vertices": poly,
+                "hexes": polygon_to_hex_list(poly, cols, rows),
+            })
+        return areas
 
     def _load_shared_objectives_from_ref(self, objectives_ref: Any, scenario_file: str) -> List[Dict[str, Any]]:
         """Load shared objectives file referenced by scenario objectives_ref."""

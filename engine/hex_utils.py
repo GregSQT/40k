@@ -569,6 +569,18 @@ def _objective_polygon_hexes(
     return out
 
 
+def polygon_to_hex_list(vertices: list, cols: int, rows: int) -> List[List[int]]:
+    """Rasterize an arbitrary polygon (3+ [col, row] vertices) to the list of board hexes
+    whose centers fall inside it, using the same odd-q projection as objectives/terrain rendering.
+
+    Public wrapper around the objective polygon rasterizer so terrain areas share the exact
+    same hex membership semantics as objective zones and the frontend board renderer.
+    """
+    if not isinstance(vertices, (list, tuple)) or len(vertices) < 3:
+        raise ValueError(f"polygon_to_hex_list: need >= 3 vertices, got {vertices!r}")
+    return _objective_polygon_hexes(vertices=vertices, cols=cols, rows=rows)
+
+
 def _objective_disc_hexes(
     *,
     center_col: int,

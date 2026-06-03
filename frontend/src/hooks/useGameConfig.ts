@@ -48,6 +48,7 @@ interface ObjectiveZone {
   top_left?: [number, number];
   bottom_right?: [number, number];
   objective?: boolean;
+  obscuring?: boolean;
 }
 
 interface Wall {

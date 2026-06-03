@@ -1129,7 +1129,10 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # uses shooter["los_cache"] when present, else _has_line_of_sight (e.g. activation pool build).
     if "los_cache" in game_state:
         game_state["los_cache"] = {}
-    
+
+    # Compute hidden status (rule 13.09) before targeting so enemy units carry the flag.
+    compute_hidden_statuses(game_state)
+
     # Build activation pool
     eligible_units = shooting_build_activation_pool(game_state)
 
@@ -1171,6 +1174,32 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
         "eligible_units": len(eligible_units),
         "phase_complete": len(eligible_units) == 0
     }
+
+
+def compute_hidden_statuses(game_state: Dict[str, Any]) -> None:
+    """Set ``unit['hidden']`` for every unit (rule 13.09 Hidden).
+
+    A unit is hidden while it is hideable (INFANTRY/BEASTS/SWARM), within an obscuring
+    terrain area, and made no ranged attack this turn nor the previous turn. Computed at
+    shooting phase start so enemy targets carry the correct hidden flag for targeting.
+    """
+    from engine.terrain_utils import resolve_unit_hexes, hexes_in_obscuring_terrain
+    terrain_areas = game_state.get("terrain_areas", [])
+    shot_ids = {str(x) for x in game_state.get("units_shot", set())}
+    shot_prev_ids = {str(x) for x in game_state.get("units_shot_previous_turn", set())}
+    units_cache = require_key(game_state, "units_cache")
+    for unit_id in units_cache.keys():
+        unit = _get_unit_by_id(game_state, str(unit_id))
+        if unit is None:
+            continue
+        if not is_unit_alive(str(unit_id), game_state) or not bool(unit.get("hideable")):
+            unit["hidden"] = False
+            continue
+        if str(unit_id) in shot_ids or str(unit_id) in shot_prev_ids:
+            unit["hidden"] = False
+            continue
+        unit_hexes = resolve_unit_hexes(unit, game_state)
+        unit["hidden"] = hexes_in_obscuring_terrain(unit_hexes, terrain_areas)
 
 
 def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
@@ -1215,71 +1244,37 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
     # Get unit's player for filtering enemies
     unit_player = int(unit["player"]) if unit["player"] is not None else None
 
-    game_rules = require_key(require_key(game_state, "config"), "game_rules")
-    los_visibility_min_ratio = float(game_rules.get("los_visibility_min_ratio", 0.0))
-    cover_ratio = float(require_key(game_rules, "cover_ratio"))
-
     # Build in a local dict then assign once (avoids KeyError if unit["los_cache"] is cleared mid-build).
     los_map: Dict[str, bool] = {}
     cover_map: Dict[str, bool] = {}
 
-    # Calculate LoS for each enemy in units_cache (only alive enemies — dead must not appear in pool)
+    # Calculate LoS for each enemy in units_cache (only alive enemies — dead must not appear in pool).
+    # All visibility/cover is delegated to compute_unit_los() — the single source of truth.
     for target_id, target_data in units_cache.items():
         # Skip friendly units (only calculate LoS to enemies)
-        target_player = target_data["player"]
-        if target_player == unit_player:
+        if target_data["player"] == unit_player:
             continue
         # CRITICAL: Exclude dead units so they never appear in los_cache → valid_target_pool
         if not is_unit_alive(str(target_id), game_state):
             continue
+        target_unit = _get_unit_by_id(game_state, str(target_id))
+        if target_unit is None:
+            continue
 
-        target_col = target_data["col"]
-        target_row = target_data["row"]
-        target_hexes: List[Tuple[int, int]] = []
-        gym_training = bool(
-            game_state.get("gym_training_mode", False)
-            or require_key(game_state, "config").get("gym_training_mode", False)
-        )
-        if not gym_training:
-            occupied_hexes = target_data.get("occupied_hexes")
-            if isinstance(occupied_hexes, (set, list, tuple)) and len(occupied_hexes) > 0:
-                for hx in occupied_hexes:
-                    if isinstance(hx, (list, tuple)) and len(hx) >= 2:
-                        hc, hr = normalize_coordinates(hx[0], hx[1])
-                        target_hexes.append((hc, hr))
-        if not target_hexes:
-            tc, tr = normalize_coordinates(target_col, target_row)
-            target_hexes = [(tc, tr)]
-
-        visible_hexes = 0
-        for tc, tr in target_hexes:
-            _, can_see_hex, _ = _get_los_visibility_state(
-                game_state,
-                int(unit_col),
-                int(unit_row),
-                int(tc),
-                int(tr),
-            )
-            if can_see_hex:
-                visible_hexes += 1
-        target_visibility_ratio = visible_hexes / len(target_hexes)
-        has_los = target_visibility_ratio >= los_visibility_min_ratio
-
-        los_map[str(target_id)] = has_los
-        cover_map[str(target_id)] = has_los and target_visibility_ratio < cover_ratio
+        los = compute_unit_los(game_state, unit, target_unit)
+        los_map[str(target_id)] = los["can_see"]
+        cover_map[str(target_id)] = los["cover"]
 
         if os.environ.get("LOS_DEBUG") == "1":
             import sys
-            try:
-                ratio, can_see, _ = _get_los_visibility_state(
-                    game_state, int(unit_col), int(unit_row), int(target_col), int(target_row)
-                )
-                topo_str = f"topology={ratio:.6f}"
-            except Exception:
-                topo_str = "topology=N/A"
+            tcol, trow = target_data["col"], target_data["row"]
             ep = game_state.get("episode_number", "?")
             turn = game_state.get("turn", "?")
-            msg = f"[LOS_DEBUG] build_unit_los_cache unit={unit_id} target={target_id} ({unit_col},{unit_row})->({target_col},{target_row}) has_los={has_los} {topo_str} ep={ep} turn={turn}\n"
+            msg = (
+                f"[LOS_DEBUG] build_unit_los_cache unit={unit_id} target={target_id} "
+                f"({unit_col},{unit_row})->({tcol},{trow}) can_see={los['can_see']} "
+                f"visible={los['visible']}/{los['total']} cover={los['cover']} ep={ep} turn={turn}\n"
+            )
             sys.stderr.write(msg)
             sys.stderr.flush()
 
@@ -2567,6 +2562,12 @@ def valid_target_pool_build(
             if rw > max_usable_rng:
                 max_usable_rng = rw
     
+    # Hidden targets (rule 13.09) are only visible to shooters within detection range (15").
+    detection_range_subhex = (
+        float(require_key(require_key(require_key(game_state, "config"), "game_rules"), "detection_range"))
+        * int(require_key(game_state, "inches_to_subhex"))
+    )
+
     # For each target_id in targets_with_los.keys():
     units_cache = require_key(game_state, "units_cache")
     unit_col, unit_row = require_unit_position(unit, game_state)
@@ -2752,6 +2753,17 @@ def valid_target_pool_build(
         # CRITICAL: Convert ID to string for consistent comparison (target_id is passed as str)
         # Note: Friendly units are already filtered out at line 949-960 above
         if unit_within_range:
+            # Rule 13.09: a hidden enemy can only be targeted by a shooter within detection range.
+            if bool(enemy.get("hidden")) and distance > detection_range_subhex:
+                if game_state.get("debug_mode", False):
+                    from engine.game_utils import add_debug_file_log
+                    add_debug_file_log(
+                        game_state,
+                        f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
+                        f"Enemy {enemy_id_normalized} EXCLUDED - hidden beyond detection range "
+                        f"(distance={distance}, detection={detection_range_subhex})"
+                    )
+                continue
             # CRITICAL: Double-check friendly status before adding (defense in depth)
             # This should never happen if line 1030 is correct, but adds safety
             if enemy_player == current_player_int:
@@ -3258,70 +3270,25 @@ def focus_fire_valid_target_ids_for_reward(
 
 
 def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
+    """Unit→unit Line of Sight (obscuring-aware). Thin wrapper over compute_unit_los() — the single
+    source of truth — so eligibility, target validation, reward and deployment exposure all enforce
+    the same visibility as the shooting pool.
+
+    Shooter/target may be full unit dicts (with "id") or coordinate-only dicts ({"col","row"}); in
+    the coordinate-only case the footprint collapses to the anchor hex. Positions always originate
+    from units_cache (single source of truth).
     """
-    Line of sight check with proper hex pathfinding.
-    Fixed to get wall data from multiple possible sources.
-
-    Shooter/target may be:
-    - Full unit dicts (with "id"): position read via require_unit_position() from units_cache.
-    - Coordinate-only dicts ({"col", "row"}): when called from has_line_of_sight_coords();
-      those coordinates are already derived from units_cache in build_unit_los_cache().
-    So positions used for LoS always originate from units_cache (single source of truth).
-    """
-    debug_mode = game_state.get("debug_mode", False)
-    from engine.game_utils import add_debug_log
-    episode: Any = "?"
-    turn: Any = "?"
-    shooter_id: Any = "?"
-    target_id: Any = "?"
-    if debug_mode:
-        episode = game_state.get("episode_number", "?")
-        turn = game_state.get("turn", "?")
-        shooter_id = shooter.get("id", "?")
-        target_id = target.get("id", "?")
-    if "id" in shooter:
-        start_col, start_row = require_unit_position(shooter, game_state)
-    else:
-        if "col" not in shooter or "row" not in shooter:
-            raise KeyError(f"Shooter dict must have 'id' or 'col'/'row': {list(shooter.keys())}")
-        start_col, start_row = int(shooter["col"]), int(shooter["row"])
-    if "id" in target:
-        end_col, end_row = require_unit_position(target, game_state)
-    else:
-        if "col" not in target or "row" not in target:
-            raise KeyError(f"Target dict must have 'id' or 'col'/'row': {list(target.keys())}")
-        end_col, end_row = int(target["col"]), int(target["row"])
-
-    start_col_int = int(start_col)
-    start_row_int = int(start_row)
-    end_col_int = int(end_col)
-    end_row_int = int(end_row)
-
-    # Keep frontend/backend LoS rules aligned:
-    # - 7-point sampling per hex (center + 6 vertices)
-    # - visibility ratio thresholds from config:
-    #   < los_visibility_min_ratio => blocked
-    #   [los_visibility_min_ratio, cover_ratio) => in cover
-    #   >= cover_ratio => clear
-    target_hexes = _resolve_target_hexes_for_los(game_state, target, end_col_int, end_row_int)
-    target_visibility_ratio, can_see_target, in_cover_target, visible_hexes, max_visibility_ratio = (
-        _compute_target_visibility_from_hexes(
-            game_state,
-            start_col_int,
-            start_row_int,
-            target_hexes,
-        )
-    )
-    if debug_mode:
-        visibility_state = "BLOCKED" if not can_see_target else ("COVER" if in_cover_target else "CLEAR")
+    los = compute_unit_los(game_state, shooter, target)
+    if game_state.get("debug_mode", False):
+        from engine.game_utils import add_debug_log
+        state = "CLEAR" if los["fully_visible"] else ("COVER" if los["can_see"] else "BLOCKED")
         add_debug_log(
             game_state,
-            f"[LOS DEBUG] E{episode} T{turn} Shooter {shooter_id}({start_col},{start_row}) "
-            f"-> Target {target_id}({end_col},{end_row}): {visibility_state} "
-            f"target_vis_ratio={target_visibility_ratio:.3f} max_hex_ratio={max_visibility_ratio:.3f} "
-            f"visible_hexes={visible_hexes}/{len(target_hexes)}"
+            f"[LOS DEBUG] E{game_state.get('episode_number', '?')} T{game_state.get('turn', '?')} "
+            f"Shooter {shooter.get('id', '?')} -> Target {target.get('id', '?')}: {state} "
+            f"visible={los['visible']}/{los['total']}"
         )
-    return can_see_target
+    return los["can_see"]
 
 
 def _resolve_target_hexes_for_los(
@@ -3562,6 +3529,254 @@ def _get_wall_set(game_state: Dict[str, Any]) -> Set[Tuple[int, int]]:
     return ws
 
 
+def _get_obscuring_area_sets(game_state: Dict[str, Any]) -> List[Tuple[str, Set[Tuple[int, int]]]]:
+    """Return [(area_id, hex_set), ...] for every obscuring terrain area, cached per game_state."""
+    cached = game_state.get("_obscuring_area_sets_cache")
+    if cached is not None:
+        return cached
+    out: List[Tuple[str, Set[Tuple[int, int]]]] = []
+    for area in game_state.get("terrain_areas", []):
+        if not area.get("obscuring"):
+            continue
+        hex_set = {(int(h[0]), int(h[1])) for h in require_key(area, "hexes")}
+        out.append((str(require_key(area, "id")), hex_set))
+    game_state["_obscuring_area_sets_cache"] = out
+    return out
+
+
+def _get_obscuring_hex_to_area(game_state: Dict[str, Any]) -> Dict[Tuple[int, int], str]:
+    """Map every obscuring hex → its area id, cached per game_state (terrain is static).
+
+    Lets LoS test whether a hit hex belongs to an excluded area in O(1) without unioning area
+    hex-sets per pair — the per-pair hot path for eligibility/observation.
+    """
+    cached = game_state.get("_obscuring_hex_to_area_cache")
+    if cached is not None:
+        return cached
+    out: Dict[Tuple[int, int], str] = {}
+    for area_id, hex_set in _get_obscuring_area_sets(game_state):
+        for h in hex_set:
+            out[h] = area_id
+    game_state["_obscuring_hex_to_area_cache"] = out
+    return out
+
+
+def _shooter_lateral_vantage_hexes(
+    shooter_anchor: Tuple[int, int],
+    shooter_hexes: List[Tuple[int, int]],
+    target_anchor: Tuple[int, int],
+) -> List[Tuple[int, int]]:
+    """Return up to 2 shooter footprint hexes that are the perpendicular extremes relative to
+    the anchor→target axis (the lateral "peek" vantage points, rule: LoS from any part of the
+    observing model). Empty when the footprint collapses to the anchor (single-hex base).
+
+    Geometry is computed in the odd-q projected space (same projection as the renderer and the
+    obscuring rasterizer), so "perpendicular" is geometrically faithful, then mapped back to the
+    actual footprint hexes (no rounding artefacts — the points are real occupied hexes).
+    """
+    if len(shooter_hexes) <= 1:
+        return []
+    from engine.hex_utils import _hex_projected
+
+    ax, ay = _hex_projected(int(shooter_anchor[0]), int(shooter_anchor[1]))
+    tx, ty = _hex_projected(int(target_anchor[0]), int(target_anchor[1]))
+    dx, dy = tx - ax, ty - ay
+    if dx == 0.0 and dy == 0.0:
+        return []
+    perp_x, perp_y = -dy, dx  # 90° rotation of the anchor→target axis
+
+    best_pos: Optional[Tuple[int, int]] = None
+    best_neg: Optional[Tuple[int, int]] = None
+    max_d = float("-inf")
+    min_d = float("inf")
+    for hc, hr in shooter_hexes:
+        hx, hy = _hex_projected(int(hc), int(hr))
+        d = (hx - ax) * perp_x + (hy - ay) * perp_y
+        if d > max_d:
+            max_d = d
+            best_pos = (int(hc), int(hr))
+        if d < min_d:
+            min_d = d
+            best_neg = (int(hc), int(hr))
+
+    anchor = (int(shooter_anchor[0]), int(shooter_anchor[1]))
+    out: List[Tuple[int, int]] = []
+    if best_pos is not None and best_pos != anchor:
+        out.append(best_pos)
+    if best_neg is not None and best_neg != anchor and best_neg != best_pos:
+        out.append(best_neg)
+    return out
+
+
+def _compute_visibility_with_obscuring(
+    game_state: Dict[str, Any],
+    shooter_anchor: Tuple[int, int],
+    shooter_hexes: List[Tuple[int, int]],
+    target_anchor: Tuple[int, int],
+    target_hexes: List[Tuple[int, int]],
+) -> Tuple[int, int]:
+    """Count target footprint hexes reachable by a clear hex-line from the shooter.
+
+    Rule (LoS, §1.x + terrain §13.10): the observing unit sees a target hex if a 1mm line can be
+    drawn from ANY part of the observing model to that hex. We approximate "any part of the
+    observer" with the anchor hex plus the two perpendicular footprint extremes (lateral peek),
+    evaluated as a 2nd chance only when the anchor line is blocked. A line is blocked by a dense
+    wall (always) or by an obscuring terrain area that neither the shooter nor the target occupies
+    (excluding areas one or both units are within). Returns (visible_hexes, total_hexes).
+    """
+    from engine.hex_utils import hex_line
+
+    wall_set = _get_wall_set(game_state)
+    obscuring_by_hex = _get_obscuring_hex_to_area(game_state)
+
+    # Areas the shooter or target occupies are excluded as blockers (rule 13.10). Resolved via the
+    # hex→area map (cheap lookups) instead of unioning every obscuring area's hexes on every pair —
+    # the union was the dominant per-pair cost.
+    excluded_areas: Set[str] = set()
+    for c, r in shooter_hexes:
+        area = obscuring_by_hex.get((int(c), int(r)))
+        if area is not None:
+            excluded_areas.add(area)
+    for c, r in target_hexes:
+        area = obscuring_by_hex.get((int(c), int(r)))
+        if area is not None:
+            excluded_areas.add(area)
+
+    anchor = (int(shooter_anchor[0]), int(shooter_anchor[1]))
+    laterals = _shooter_lateral_vantage_hexes(anchor, shooter_hexes, target_anchor)
+    source_points: List[Tuple[int, int]] = [anchor, *laterals]
+
+    def _line_clear(sc: int, sr: int, tc: int, tr: int) -> bool:
+        for c, r in hex_line(sc, sr, int(tc), int(tr))[1:-1]:
+            if (c, r) in wall_set:
+                return False
+            area = obscuring_by_hex.get((c, r))
+            if area is not None and area not in excluded_areas:
+                return False
+        return True
+
+    visible = 0
+    for tc, tr in target_hexes:
+        # Anchor first; lateral vantage points only as a 2nd chance when the anchor is blocked.
+        if any(_line_clear(sp[0], sp[1], tc, tr) for sp in source_points):
+            visible += 1
+    return visible, len(target_hexes)
+
+
+def _resolve_unit_anchor_and_footprint(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    *,
+    gym_training: bool,
+) -> Tuple[Tuple[int, int], List[Tuple[int, int]]]:
+    """Return (anchor, footprint) for a unit. Anchor is its single source-of-truth position;
+    footprint is the list of occupied hexes (anchor only in gym training or single-cell units).
+
+    Positions always originate from units_cache (single source of truth). A coordinate-only dict
+    ({"col","row"}) is also accepted (its anchor is its own coords, footprint = anchor).
+    """
+    if "id" in unit:
+        anchor = require_unit_position(unit, game_state)
+    else:
+        anchor = normalize_coordinates(int(unit["col"]), int(unit["row"]))
+    footprint: List[Tuple[int, int]] = [anchor]
+    if not gym_training and "id" in unit:
+        units_cache = require_key(game_state, "units_cache")
+        entry = units_cache.get(str(unit["id"]))
+        occ = entry.get("occupied_hexes") if isinstance(entry, dict) else None
+        if isinstance(occ, (set, list, tuple)) and len(occ) > 0:
+            resolved = [
+                normalize_coordinates(hx[0], hx[1])
+                for hx in occ
+                if isinstance(hx, (list, tuple)) and len(hx) >= 2
+            ]
+            if resolved:
+                footprint = resolved
+    return anchor, footprint
+
+
+def compute_unit_los(
+    game_state: Dict[str, Any],
+    shooter: Dict[str, Any],
+    target: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Single source of truth for unit→unit Line of Sight (obscuring-aware).
+
+    Returns {can_see, fully_visible, cover, visible, total}:
+    - can_see: at least ``los_visibility_min_ratio`` of the target footprint is reachable.
+    - fully_visible: every target footprint hex is reachable (no intervening terrain).
+    - cover (rule 13.08, unit-level): can_see AND ((target hideable AND within a terrain area)
+      OR not fully_visible).
+
+    All shooting LoS/cover/eligibility/observation must route through this function so the engine
+    enforces one consistent visibility everywhere.
+
+    Per-pair cache: visibility is static for a fixed board layout + unit positions, so results are
+    cached by (shooter_id, target_id) and invalidated whenever any unit moves (via the global
+    ``_unit_move_version``). Coordinate-only dicts (e.g. deployment exposure) have no id and bypass
+    the cache. This keeps the per-step observation cost and the eligibility sweep cheap.
+    """
+    sid = shooter.get("id")
+    tid = target.get("id")
+    if sid is not None and tid is not None:
+        ver = game_state.get("_unit_move_version", 0)
+        holder = game_state.get("_unit_los_pair_cache")
+        if holder is None or holder[0] != ver:
+            holder = (ver, {})
+            game_state["_unit_los_pair_cache"] = holder
+        key = (str(sid), str(tid))
+        cached = holder[1].get(key)
+        if cached is not None:
+            return cached
+        result = _compute_unit_los_uncached(game_state, shooter, target)
+        holder[1][key] = result
+        return result
+    return _compute_unit_los_uncached(game_state, shooter, target)
+
+
+def _compute_unit_los_uncached(
+    game_state: Dict[str, Any],
+    shooter: Dict[str, Any],
+    target: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Uncached core of compute_unit_los() — see that function for semantics."""
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    min_ratio = float(game_rules.get("los_visibility_min_ratio", 0.0))
+    gym_training = bool(
+        game_state.get("gym_training_mode", False)
+        or require_key(game_state, "config").get("gym_training_mode", False)
+    )
+
+    shooter_anchor, shooter_hexes = _resolve_unit_anchor_and_footprint(
+        game_state, shooter, gym_training=gym_training
+    )
+    target_anchor, target_hexes = _resolve_unit_anchor_and_footprint(
+        game_state, target, gym_training=gym_training
+    )
+
+    visible, total = _compute_visibility_with_obscuring(
+        game_state, shooter_anchor, shooter_hexes, target_anchor, target_hexes
+    )
+    ratio = (visible / total) if total else 0.0
+    can_see = ratio >= min_ratio
+    fully_visible = total > 0 and visible == total
+
+    from engine.terrain_utils import hexes_in_any_terrain
+    terrain_areas = game_state.get("terrain_areas", [])
+    cond_terrain = bool(
+        can_see and target.get("hideable") and hexes_in_any_terrain(target_hexes, terrain_areas)
+    )
+    cover = bool(can_see and (cond_terrain or not fully_visible))
+
+    return {
+        "can_see": can_see,
+        "fully_visible": fully_visible,
+        "cover": cover,
+        "visible": visible,
+        "total": total,
+    }
+
+
 def _update_unit_los_preview_data(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -3618,7 +3833,37 @@ def _update_unit_los_preview_data(
             f"board_cols={type(board_cols).__name__}, board_rows={type(board_rows).__name__}"
         )
 
+    from engine.hex_utils import hex_line
+
     shooter_col, shooter_row = require_unit_position(unit, game_state)
+
+    # Obscuring-aware hex preview (shooter anchor → each in-range hex). Blockers = dense walls +
+    # obscuring areas, EXCEPT areas the shooter occupies and EXCEPT the target hex's own area
+    # (a model inside an obscuring area is still visible at its edge — rule 13.10 exclusion).
+    # A visible hex that lies within any terrain area is a cover tile (a unit there benefits from
+    # terrain cover); a visible hex in the open is a clear attack tile. Single-source-of-truth
+    # blockers (no walls-only ratio); the authoritative per-target cover stays in los_cover_cache.
+    gym_training = bool(
+        game_state.get("gym_training_mode", False)
+        or require_key(game_state, "config").get("gym_training_mode", False)
+    )
+    _shooter_anchor, _shooter_hexes = _resolve_unit_anchor_and_footprint(
+        game_state, unit, gym_training=gym_training
+    )
+    wall_set = _get_wall_set(game_state)
+    shooter_set = {(int(c), int(r)) for c, r in _shooter_hexes}
+    obscuring_by_hex: Dict[Tuple[int, int], str] = {}
+    for _area_id, _hex_set in _get_obscuring_area_sets(game_state):
+        if shooter_set & _hex_set:
+            continue  # area the shooter occupies → never blocks for this shooter
+        for _h in _hex_set:
+            obscuring_by_hex[_h] = _area_id
+    terrain_hex_set: Set[Tuple[int, int]] = set()
+    for _area in game_state.get("terrain_areas", []):
+        for _h in require_key(_area, "hexes"):
+            terrain_hex_set.add((int(_h[0]), int(_h[1])))
+
+    sc, sr = int(shooter_col), int(shooter_row)
     attack_cells: List[Dict[str, int]] = []
     cover_cells: List[Dict[str, int]] = []
     ratio_by_hex: Dict[str, float] = {}
@@ -3627,20 +3872,23 @@ def _update_unit_los_preview_data(
         for row in range(board_rows):
             if row == board_rows - 1 and (col % 2) == 1:
                 continue
-            distance = _calculate_hex_distance(shooter_col, shooter_row, col, row)
+            distance = _calculate_hex_distance(sc, sr, col, row)
             if distance <= 0 or distance > max_range:
                 continue
-            visibility_ratio, can_see, in_cover = _get_los_visibility_state(
-                game_state,
-                int(shooter_col),
-                int(shooter_row),
-                int(col),
-                int(row),
-            )
-            ratio_by_hex[f"{col},{row}"] = float(visibility_ratio)
-            if not can_see:
+            hex_area = obscuring_by_hex.get((col, row))
+            blocked = False
+            for c, r in hex_line(sc, sr, int(col), int(row))[1:-1]:
+                if (c, r) in wall_set:
+                    blocked = True
+                    break
+                area = obscuring_by_hex.get((c, r))
+                if area is not None and area != hex_area:
+                    blocked = True
+                    break
+            ratio_by_hex[f"{col},{row}"] = 0.0 if blocked else 1.0
+            if blocked:
                 continue
-            if in_cover:
+            if (col, row) in terrain_hex_set:
                 cover_cells.append({"col": int(col), "row": int(row)})
             else:
                 attack_cells.append({"col": int(col), "row": int(row)})
@@ -5436,7 +5684,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             return False, {"error": "unit_not_found"}
         
         valid_targets = unit["valid_target_pool"] if "valid_target_pool" in unit else []
-        
+
         # AI_TURN.md: If pool is empty, go to EMPTY_TARGET_HANDLING (advance or WAIT)
         # Pool should not be empty here if unit was properly activated, but if all targets died
         # between activation and this call, allow agent to choose advance or WAIT
@@ -6049,7 +6297,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         )
     shooter = _get_unit_by_id(game_state, unit_id)
     target = _get_unit_by_id(game_state, target_id)
-    
+
     if not shooter or not target:
         return {"error": "unit_or_target_not_found"}
 
@@ -6670,25 +6918,44 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     import random
     from engine.utils.weapon_helpers import get_selected_ranged_weapon
     
-    attacker_id = attacker["id"] 
+    attacker_id = attacker["id"]
     target_id = target["id"]
-    
+
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get selected weapon
     weapon = get_selected_ranged_weapon(attacker)
     if not weapon:
         raise ValueError(f"Attacker {attacker_id} has no selected ranged weapon")
     
-    # Hit roll -> hit_roll >= weapon.ATK
+    # Benefit of Cover (rule 13.08): worsen the attack's BS by 1. Cover now affects the hit
+    # roll (not the save). Cover is precomputed per target in the shooter's los_cover_cache.
+    target_in_cover = False
+    if not _weapon_has_ignores_cover_rule(weapon):
+        cover_cache = require_key(attacker, "los_cover_cache")
+        if str(target_id) not in cover_cache:
+            raise KeyError(
+                f"Target {target_id} absent from attacker {attacker_id} los_cover_cache "
+                f"(build_unit_los_cache must run at activation)"
+            )
+        target_in_cover = bool(cover_cache[str(target_id)])
+
+    # Hit roll -> hit_roll >= effective hit target (HEAVY improves BS by 1, cover worsens it by 1)
     hit_roll = random.randint(1, 6)
     base_hit_target = weapon["ATK"]
     heavy_applied = _weapon_has_heavy_rule(weapon) and _is_unit_stationary_for_heavy(attacker_id, game_state)
+    hit_target = base_hit_target
     if heavy_applied:
-        hit_target = max(2, base_hit_target - 1)
-    else:
-        hit_target = base_hit_target
+        hit_target -= 1
+    if target_in_cover:
+        hit_target += 1
+    hit_target = max(2, hit_target)
+    hit_modified = heavy_applied or target_in_cover
     hit_target_display = f"{hit_target}+"
-    hit_target_display_with_heavy = f"{base_hit_target}+->{hit_target}+" if heavy_applied else hit_target_display
-    heavy_log_suffix = " [HEAVY]" if heavy_applied else ""
+    hit_target_display_with_heavy = f"{base_hit_target}+->{hit_target}+" if hit_modified else hit_target_display
+    heavy_log_suffix = ""
+    if heavy_applied:
+        heavy_log_suffix += " [HEAVY]"
+    if target_in_cover:
+        heavy_log_suffix += " [COVER]"
     hit_success = hit_roll >= hit_target
     
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name in attack_log
@@ -6906,53 +7173,14 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
                     )
                 ap_modifier_ability_display_name = source_rule_display_name
                 effective_ap = effective_ap - 1
+    # Cover no longer affects the save: rule 13.08 applies the Benefit of Cover as a -1 BS
+    # penalty on the hit roll (handled above), so the save target is unmodified by cover.
     save_target_base = _calculate_save_target(target, effective_ap, save_bonus=0)
-    target_in_cover = False
     cover_bonus_applied = False
     cover_bonus_value = 0
-    if not _weapon_has_ignores_cover_rule(weapon):
-        attacker_col, attacker_row = require_unit_position(attacker, game_state)
-        target_col, target_row = require_unit_position(target, game_state)
-        _gym_training = bool(
-            game_state.get("gym_training_mode", False)
-            or game_state.get("config", {}).get("gym_training_mode", False)  # get allowed
-        )
-        if _gym_training:
-            target_hexes = [(int(target_col), int(target_row))]
-        else:
-            target_hexes = _resolve_target_hexes_for_los(
-                game_state,
-                target,
-                int(target_col),
-                int(target_row),
-            )
-        target_visibility_ratio, can_see, target_in_cover, _visible_hexes, _max_hex_ratio = (
-            _compute_target_visibility_from_hexes(
-                game_state,
-                int(attacker_col),
-                int(attacker_row),
-                target_hexes,
-            )
-        )
-        if not can_see:
-            _dump_los_contradiction_diagnostic(
-                game_state, attacker, target, attacker_id, target_id,
-                attacker_col, attacker_row, target_col, target_row,
-            )
-            raise ValueError(
-                f"Target {target_id} became not visible during save calculation "
-                f"(target_visibility_ratio={target_visibility_ratio:.3f})"
-            )
-        if target_in_cover:
-            cover_bonus_applied = True
-            cover_bonus_value = 1
-    save_target = _calculate_save_target(target, effective_ap, save_bonus=cover_bonus_value)
-    save_target_display = (
-        f"{save_target_base}+->{save_target}+"
-        if cover_bonus_applied
-        else f"{save_target}+"
-    )
-    save_cover_log_suffix = " [COVER]" if cover_bonus_applied else ""
+    save_target = save_target_base
+    save_target_display = f"{save_target}+"
+    save_cover_log_suffix = ""
     save_log_suffix = (
         f" [{ap_modifier_ability_display_name}]"
         if isinstance(ap_modifier_ability_display_name, str) and ap_modifier_ability_display_name.strip()

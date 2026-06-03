@@ -241,7 +241,7 @@ obs[37] = ARMOR_SAVE / 6.0           # Armor save
 [enemy_base + 11] = best_weapon_index              # 0-2 normalized / 2.0
 [enemy_base + 12] = best_kill_probability           # 0.0-1.0: can I kill them
 [enemy_base + 13] = danger_to_me                    # 0.0-1.0: can they kill ME
-[enemy_base + 14] = visibility_to_allies            # How many allies see them
+[enemy_base + 14] = visibility_to_allies            # How many allies see them (obscuring-aware, compute_unit_los)
 [enemy_base + 15] = combined_friendly_threat        # Total threat from allies
 [enemy_base + 16] = melee_charge_preference         # 0.0-1.0: TTK melee vs range
 [enemy_base + 17] = target_efficiency               # 0.0-1.0: TTK with best weapon
@@ -719,7 +719,7 @@ print('✅ v2.4 implementation verified!')
 - **Fixed layout** — 355 floats in rule-aware mode, fixed slots for allies/enemies/targets: simple for the policy, no variable-length handling.
 
 **Trade-offs and limits:**
-- **Cost of rich enemy features** — Features 14–16 (visibility_to_allies, combined_friendly_threat, melee_charge_preference) are expensive (LoS, danger, pathfinding). The Observation_fix1.md pre-compute LoS plan addresses the main bottleneck; feature 16 can be capped or cached if needed.
+- **Cost of rich enemy features** — Features 14–16 (visibility_to_allies, combined_friendly_threat, melee_charge_preference) are expensive (LoS, danger, pathfinding). `visibility_to_allies` is now **obscuring-aware** (routed through `compute_unit_los`, same LoS as gameplay) and memoized per `(ally, enemy)` pair via `_unit_los_pair_cache` (invalidated on any move), so a full observation stays a few ms; feature 16 can be capped or cached if needed.
 - **Cap at 6 enemies / 6 allies** — Fine for typical squad sizes; in very large battles, some units are unseen. Acceptable unless you explicitly target 10+ unit battles.
 - **No explicit opponent model** — The observation does not encode "what the other player tends to do"; the network infers it from outcomes. For symmetric PPO vs bots, this is normal.
 - **Redundancy** — Some info appears both in enemy section and valid targets (e.g. kill_prob, danger). That redundancy helps learning (direct mapping) at the cost of a few dozen floats; reasonable.

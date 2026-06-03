@@ -289,6 +289,7 @@ class W40KEngine(gym.Env):
             self._scenario_wall_hexes = scenario_wall_hexes
             self._scenario_wall_ref = scenario_result.get("wall_ref")
             self._scenario_objectives = scenario_objectives
+            self._scenario_terrain_areas = scenario_result.get("terrain_areas")
             self._scenario_primary_objective = primary_objective_config
             self._scenario_roster_info = scenario_roster_info
             self._scenario_has_random_agent_roster = bool(
@@ -383,6 +384,7 @@ class W40KEngine(gym.Env):
             self._scenario_wall_hexes = self.config.get("scenario_wall_hexes")
             self._scenario_wall_ref = self.config.get("scenario_wall_ref")
             self._scenario_objectives = self.config.get("scenario_objectives")
+            self._scenario_terrain_areas = self.config.get("scenario_terrain_areas")
             self._scenario_primary_objective = self.config.get("primary_objective")
             self._tutorial_fight_no_death_unit_ids = self.config.get(
                 "tutorial_fight_no_death_unit_ids"
@@ -503,6 +505,7 @@ class W40KEngine(gym.Env):
             "units_fled": set(),
             "units_cannot_charge": set(),
             "units_shot": set(),
+            "units_shot_previous_turn": set(),
             "units_charged": set(),
             "units_attacked": set(),
             "units_reacted_this_enemy_turn": set(),
@@ -556,6 +559,8 @@ class W40KEngine(gym.Env):
             "max_range": max_range,
             # Use scenario terrain if loaded, otherwise use board config
             "wall_hexes": base_wall_hexes,
+            # Polygon terrain areas (obscuring/cover, rules 13.08-13.10), rasterized to hexes
+            "terrain_areas": getattr(self, "_scenario_terrain_areas", None) or [],
             # Objectives: grouped structure with id, name, hexes (for objective control calculation)
             "objectives": self._scenario_objectives if self._scenario_objectives is not None else ((self.config["board"]["default"]["objectives"] if "objectives" in self.config["board"]["default"] else []) if "default" in self.config["board"] else (self.config["board"]["objectives"] if "objectives" in self.config["board"] else [])),
             "tutorial_fight_no_death_unit_ids": getattr(
@@ -571,6 +576,9 @@ class W40KEngine(gym.Env):
             self.game_state,
         )
         self.game_state.pop("_wall_set_cache", None)
+        self.game_state.pop("_obscuring_area_sets_cache", None)
+        self.game_state.pop("_obscuring_hex_to_area_cache", None)
+        self.game_state.pop("_unit_los_pair_cache", None)
 
         self.game_state["weapon_damage_table"] = load_weapon_damage_table()
 
@@ -964,6 +972,7 @@ class W40KEngine(gym.Env):
             "units_fled": set(),
             "units_cannot_charge": set(),
             "units_shot": set(),
+            "units_shot_previous_turn": set(),
             "units_charged": set(),
             "units_attacked": set(),
             "units_advanced": set(),
@@ -5376,6 +5385,14 @@ class W40KEngine(gym.Env):
             self.game_state["objectives"] = self._scenario_objectives
         if "primary_objective" in self.game_state:
             self.game_state["primary_objective"] = self._scenario_primary_objective
+        # Terrain areas change on scenario rotation: refresh and drop derived static caches.
+        self._scenario_terrain_areas = scenario_result.get("terrain_areas")
+        self.game_state["terrain_areas"] = self._scenario_terrain_areas or []
+        self.game_state.pop("_obscuring_area_sets_cache", None)
+        self.game_state.pop("_obscuring_hex_to_area_cache", None)
+        self.game_state.pop("_unit_los_pair_cache", None)
+        self.game_state.pop("_wall_set_cache", None)
+        self.game_state.pop("_hex_los_state_cache", None)
         self.game_state["tutorial_fight_no_death_unit_ids"] = (
             self._tutorial_fight_no_death_unit_ids
         )

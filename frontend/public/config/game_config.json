@@ -1,6 +1,5 @@
 {
   "game_rules": {
-    "engagement_zone": 1,
     "max_turns": 5,
     "max_steps_per_turn": 500,
     "max_steps_per_turn_detail": "nb units (50) * nb actions per turn (7) = 350 + marge",
@@ -10,6 +9,8 @@
     "cover_ratio_rule": "A unit is considered in cover when visibility_ratio is below cover_ratio and can_see is true.",
     "los_debug_show_ratio": false,
     "los_debug_show_ratio_rule": "When true, shooting preview overlays visibility ratio percentages on evaluated hexes.",
+    "engagement_zone": 2,
+    "detection_range": 15,
     "advance_distance_range": 6,
     "avg_charge_roll": 7,
     "max_search_distance": 50,

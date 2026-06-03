@@ -16,7 +16,7 @@ from engine.combat_utils import (
     normalize_coordinates,
 )
 from engine.game_utils import get_unit_by_id
-from engine.phase_handlers.shooting_handlers import _calculate_save_target, _calculate_wound_target as _calculate_wound_target_engine
+from engine.phase_handlers.shooting_handlers import _calculate_save_target, _calculate_wound_target as _calculate_wound_target_engine, compute_unit_los
 from engine.phase_handlers.shared_utils import (
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position,
@@ -2263,13 +2263,11 @@ class ObservationBuilder:
                 obs[feature_base + 13] = self._calculate_danger_probability(active_unit, enemy, game_state, positions)
                 
                 # Features 14-16: Allied coordination (3 floats, était 13-15) - DÉCALÉ
-                # visibility_to_allies: use los_topology directly (O(1) per pair, no los_cache needed)
+                # visibility_to_allies: obscuring-aware LoS (single source of truth, cached per pair).
                 visibility = 0.0
                 combined_threat = 0.0
-                enemy_col, enemy_row = positions[str(enemy["id"])]
                 for ally_id, ally in allies_list:
-                    ally_col, ally_row = positions[ally_id]
-                    if self._has_los_from_topology(ally_col, ally_row, enemy_col, enemy_row, game_state):
+                    if compute_unit_los(game_state, ally, enemy)["can_see"]:
                         visibility += 1.0
                     combined_threat += self._calculate_danger_probability(enemy, ally, game_state, positions)
                 obs[feature_base + 14] = min(1.0, visibility / 6.0)  # visibility_to_allies (était feature 13)

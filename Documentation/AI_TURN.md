@@ -385,9 +385,13 @@ units_cache = {
 
 ### Unit-Specific Cache
 ```javascript
-// Cache LoS par unité active (stocké sur l'unité)
+// Cache LoS par unité active (stocké sur l'unité) — obscuring-aware (compute_unit_los)
 unit["los_cache"] = {
-    target_id: has_los,  // booléen
+    target_id: can_see,  // booléen (murs + obscuring, rule 13.10)
+    ...
+}
+unit["los_cover_cache"] = {
+    target_id: cover,    // booléen (rule 13.08 → −1 BS au tir)
     ...
 }
 // Calculé à:
@@ -439,15 +443,45 @@ end_activation(result_type, step_count, action_type, phase, remove_from_pool, in
 
 **Note**: The shooting preview displays all hexes within Line of Sight and within the selected weapon's range in blue color for both AI and Human players.
 
-**LoS ratio thresholds (config-driven):**
-- Read from `config/game_config.json` → `game_rules`:
-  - `los_visibility_min_ratio`
-  - `cover_ratio`
-- Rule:
-  - `visibility_ratio < los_visibility_min_ratio` → target/hex is **not visible**
-  - `los_visibility_min_ratio <= visibility_ratio < cover_ratio` → target/hex is **visible in cover**
-  - `visibility_ratio >= cover_ratio` → target/hex is **visible clear**
-- Constraint: `los_visibility_min_ratio < cover_ratio` (must be validated, no fallback)
+**Line of Sight & Cover — terrain-aware (rules 13.07–13.10), single source of truth.**
+
+All unit→unit visibility now flows through one obscuring-aware primitive,
+`compute_unit_los(game_state, shooter, target) → {can_see, fully_visible, cover, visible, total}`
+(`engine/phase_handlers/shooting_handlers.py`). Pool building, eligibility, target validation,
+shot resolution, preview AND the AI observation route through it, so the engine enforces one
+consistent visibility everywhere. `_has_line_of_sight()` is a thin wrapper over it. The squad-shoot
+path uses the same primitive via `_attacker_model_can_reach_squad`.
+
+**What blocks a line (hex-based, on-demand):** a hex-line is blocked by a **dense wall** (always) OR
+by an **obscuring terrain area** that *neither* the shooter nor the target occupies (rule 13.10 —
+intervening obscuring, excluding areas one or both models are within). Models never block LoS, only
+terrain. Obscuring areas are polygon terrain zones rasterized to hexes at load time (`terrain_areas`
+on the game_state, each `{id, obscuring, polygon_vertices, hexes}`).
+
+**Sampling (rule 1.x “any part → any part”):** the **target** is sampled on its **full footprint**
+(visible iff any part is reachable); the **shooter** is sampled on its **anchor hex + two
+perpendicular footprint extremes** (lateral “peek”, evaluated as a 2nd chance only when the anchor
+line is blocked). `visible/total` is the fraction of target footprint hexes reachable.
+
+- `can_see` ⇔ `visible/total ≥ los_visibility_min_ratio` (still read from `game_rules`).
+- `fully_visible` ⇔ every target footprint hex is reachable.
+
+**Benefit of Cover (rule 13.08) — applies as −1 BS, not a save bonus.** A target has cover when it
+is visible AND meets ≥1 condition (unit-level): (1) it is **hideable** (INFANTRY/BEASTS/SWARM) AND
+**within a terrain area**, OR (2) it is **not fully visible**. When a target has cover and the weapon
+lacks `IGNORES_COVER`, the attack’s **hit target is worsened by +1** (BS −1) — the save is no longer
+modified by cover. The legacy `cover_ratio` threshold is **no longer used** for the cover decision
+(it lingers only in some preview-overlay diagnostics and may be removed).
+
+**Hidden (rule 13.09):** a unit is `hidden` when it is hideable, **within an obscuring terrain
+area**, and made **no ranged attack this turn nor the previous turn** (`units_shot` /
+`units_shot_previous_turn`, snapshotted at each turn start). A hidden enemy can only be targeted by a
+shooter within **detection range** (`detection_range` in `game_rules`, default 15″, scaled by
+`inches_to_subhex`); beyond it, the hidden unit is excluded from the valid target pool.
+
+**Perf:** `compute_unit_los` is cached per `(shooter_id, target_id)` and invalidated whenever any
+unit moves (`_unit_move_version`); obscuring hexes are pre-mapped (`hex → area id`) so the exclusion
+is O(1) per traced cell. A full observation costs a few ms.
 
 ---
 
@@ -499,7 +533,7 @@ For each weapon:
     └── YES → Check if at least ONE enemy unit meets ALL conditions:
         │   Conditions (ALL must be true for at least one enemy):
         │   ├── Within weapon.RNG range (distance <= weapon.RNG)
-        │   ├── In Line of Sight (no walls blocking)
+        │   ├── In Line of Sight (no dense wall AND no intervening obscuring terrain blocking — compute_unit_los)
         │   ├── HP_CUR > 0 (alive)
         │   └── NOT adjacent to friendly unit (excluding active unit)
         │       └── EXCEPTION: If enemy is adjacent to shooter AND weapon has PISTOL rule:
@@ -535,23 +569,20 @@ build_units_cache():
 **Returns**: void (met à jour unit["los_cache"])
 
 **Reference (LoS definition in shooting phase):**
-- The underlying LoS computation MUST apply the shooting-phase ratio rule above
-  (via `los_visibility_min_ratio` and `cover_ratio` from `game_config.json`).
-- `unit["los_cache"]` stores visibility (`can_see`) and is used by `valid_target_pool_build`.
+- The underlying LoS computation is **`compute_unit_los()`** (obscuring-aware, single source of
+  truth — see the LoS & Cover section above). `can_see` uses `los_visibility_min_ratio`; cover is
+  condition-based (NOT `cover_ratio`).
+- `unit["los_cache"]` stores visibility (`can_see` per target) and `unit["los_cover_cache"]` stores
+  the per-target cover bool. Both are consumed by `valid_target_pool_build` and the shot resolution.
 
 ```javascript
 build_unit_los_cache(unit_id):
 ├── unit = get_unit_by_id(unit_id)
-├── unit["los_cache"] = {}
-├── unit_col, unit_row = unit["col"], unit["row"]
-├── For each target in units_cache (ennemis vivants):
-│   ├── target_col, target_row = units_cache[target_id]["col"], units_cache[target_id]["row"]
-│   ├── PERFORMANCE: Use has_line_of_sight_coords() instead of _get_unit_by_id() + _has_line_of_sight()
-│   ├── has_los = has_line_of_sight_coords(unit_col, unit_row, target_col, target_row, game_state)
-│   │   └── Uses hex_los_cache internally for additional performance
-│   ├── unit["los_cache"][target_id] = has_los
-│   └── Continue
-└── Cache calculé et stocké sur l'unité
+├── For each alive enemy target in units_cache:
+│   ├── los = compute_unit_los(game_state, unit, target_unit)   // walls + obscuring (rule 13.10)
+│   ├── unit["los_cache"][target_id]       = los["can_see"]
+│   └── unit["los_cover_cache"][target_id] = los["cover"]        // rule 13.08 (→ −1 BS at resolution)
+└── Caches stored on the unit; per-pair results memoized in _unit_los_pair_cache
 ```
 
 **Optimisation de performance :**
@@ -1021,14 +1052,16 @@ UNIT_ACTIVABLE_CHECK
 
 **Valid Target Requirements (ALL must be true):**
 1. **Range check**: Enemy within unit's selected_weapon.RNG hexes (varies by weapon)
-2. **Line of sight (ratio rule)**:
-   - Compute `visibility_ratio` with LoS sampling
-   - `visibility_ratio >= los_visibility_min_ratio` required for visibility
-   - Cover classification uses `cover_ratio`:
-     - `< cover_ratio` = in cover
-     - `>= cover_ratio` = clear visibility
+2. **Line of sight (obscuring-aware, `compute_unit_los`)**:
+   - `can_see` ⇔ `visible/total ≥ los_visibility_min_ratio`, where a line is blocked by a dense
+     wall OR an intervening obscuring terrain area not occupied by shooter/target (rule 13.10)
+   - **Cover** (rule 13.08) is condition-based, not a ratio: `can_see AND ((hideable AND in a
+     terrain area) OR not fully_visible)` → applies **−1 BS** at resolution (no save bonus, no
+     `cover_ratio`)
 3. **Fight exclusion**: Enemy NOT adjacent to shooter (adjacent = melee fight)
 4. **Friendly fire prevention**: Enemy NOT adjacent to any friendly units
+5. **Hidden (rule 13.09)**: a `hidden` enemy is only valid if a shooter model is within
+   `detection_range` (default 15″)
 
 **Target becomes invalid when:**
 - Enemy dies during shooting action

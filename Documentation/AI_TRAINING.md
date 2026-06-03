@@ -1675,6 +1675,17 @@ Deux caches hex distincts, traitement différencié :
 
 Le choix de conserver l'invalidation de `hex_los_cache` : son résultat dépend de `occupied_hexes` (footprint multi-hex), qui varie selon l'unité. Si une unité A quitte un hex et une unité B avec une empreinte différente arrive au même hex, un cache stale donnerait un résultat incorrect. `_hex_los_state_cache` n'a pas ce problème car il est purement géométrique (hex-pair → terrain).
 
+> **⚠️ Superseded [2026-06] — terrain obscuring.** Ce qui précède décrit le LoS **murs-seulement**
+> (`_hex_los_state_cache` / `_get_los_visibility_state`), désormais legacy. Le chemin de tir,
+> d'éligibilité, de cover et d'observation passe maintenant par **`compute_unit_los`**
+> (obscuring-aware) : en plus des murs, les **terrains obscuring** bloquent (rule 13.10, avec
+> exclusion des zones occupées par le tireur/la cible). Conséquence : le résultat LoS n'est **plus**
+> une constante de la map indépendante des positions — l'exclusion dépend de quelles zones les deux
+> unités occupent. D'où un nouveau cache **par-paire** `_unit_los_pair_cache` (clé
+> `(shooter_id, target_id)`, invalidé au `_unit_move_version`) plutôt qu'un cache purement
+> géométrique. La map `hex → area id` (`_obscuring_hex_to_area_cache`, terrain statique) reste, elle,
+> une constante de la map.
+
 **Tests mis à jour**
 
 `tests/unit/engine/test_los_cache_invalidation.py` — 2 tests obsolètes remplacés :

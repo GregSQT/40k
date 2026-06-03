@@ -338,6 +338,9 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
     "_choice_timing_fired_events",
     "_deployment_random_mix_forced_steps",
     "_wall_set_cache",
+    "_obscuring_area_sets_cache",
+    "_obscuring_hex_to_area_cache",
+    "_unit_los_pair_cache",
     "_shooting_phase_initialized",
     "_fight_consolidation_ctx",
     "_fight_pile_in_ctx",
@@ -1180,6 +1183,7 @@ def initialize_engine(scenario_file: Optional[str] = None):
             "scenario_wall_hexes": scenario_wall_hexes,
             "scenario_wall_ref": scenario_wall_ref,
             "scenario_objectives": scenario_objectives,
+            "scenario_terrain_areas": scenario_result.get("terrain_areas"),
             "deployment_type": scenario_deployment_type,
             "deployment_type_by_player": scenario_deployment_type_by_player,
             "deployment_zone": scenario_deployment_zone,
@@ -1351,6 +1355,7 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
             "scenario_wall_hexes": scenario_wall_hexes,
             "scenario_wall_ref": scenario_wall_ref,
             "scenario_objectives": scenario_objectives,
+            "scenario_terrain_areas": scenario_result.get("terrain_areas"),
             "deployment_type": scenario_deployment_type,
             "deployment_type_by_player": scenario_deployment_type_by_player,
             "deployment_zone": scenario_deployment_zone,
@@ -2879,6 +2884,8 @@ def get_board_config():
                 entry["bottom_right"] = o["bottom_right"]
             if "objective" in o:
                 entry["objective"] = o["objective"]
+            if "obscuring" in o:
+                entry["obscuring"] = o["obscuring"]
             return entry
         merged["objective_zones"] = [_zone_entry(o) for o in objectives]
 

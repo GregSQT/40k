@@ -372,8 +372,9 @@ engine/
 - `set_unit_coordinates(unit, col, row)` - Set and normalize unit coordinates in unit dict
 - `calculate_hex_distance(col1, row1, col2, row2)` - Cube coordinate hex distance
 - `get_hex_line(start_col, start_row, end_col, end_row)` - Hex line for LoS
-- `has_line_of_sight(shooter, target, game_state)` - LoS check via handlers
-- `check_los_cached(shooter, target, game_state)` - LoS with cache lookup
+- `compute_unit_los(game_state, shooter, target) → {can_see, fully_visible, cover, …}` - **single source of truth**, obscuring-aware (dense walls + obscuring terrain, rule 13.10); cached per `(shooter,target)` pair
+- `has_line_of_sight(shooter, target, game_state)` - thin wrapper over `compute_unit_los().can_see`
+- `check_los_cached(shooter, target, game_state)` - LoS with cache lookup (reads `unit["los_cache"]`, built obscuring-aware)
 - `calculate_wound_target(strength, toughness)` - W40K wound chart
 - `has_valid_shooting_targets(unit, game_state)` - Check if unit can shoot
 - `is_valid_shooting_target(shooter, target, game_state)` - Validate specific target
@@ -1259,7 +1260,15 @@ API Server (Flask):
 
 Line-of-sight calculations are cached on the active shooter (`unit["los_cache"]`) when a unit is activated for shooting. `shooting_phase_start()` no longer builds a global LoS cache for all units; it clears stale global cache data and lets `shooting_unit_activation_start()` call `build_unit_los_cache(game_state, unit_id)` for the active unit only. This avoids phase-start LoS spikes while preserving backend targetability as the source of truth.
 
-`build_unit_los_cache()` also writes `unit["los_cover_cache"]`. Cover status for valid shooting targets is read from this cache by `build_cover_by_unit_id_for_valid_targets()` instead of recomputing target visibility after `valid_target_pool_build()`.
+`build_unit_los_cache()` delegates every target to `compute_unit_los()` (obscuring-aware, rule 13.10) and writes both `unit["los_cache"]` (can_see) and `unit["los_cover_cache"]` (cover). Cover status for valid shooting targets is read from this cache by `build_cover_by_unit_id_for_valid_targets()` instead of recomputing target visibility after `valid_target_pool_build()`. Cover applies as **−1 BS** on the hit roll (rule 13.08), not a save bonus.
+
+> **Squad shoot (human PvP) path.** Manual per-model shooting (`squad_shoot_assign` →
+> `squad_declare_shoot_model` → `_model_can_shoot_target` → `_attacker_model_can_reach_squad`, and the
+> per-weapon pool via `_model_can_shoot_target_with_weapon`) is a **distinct** resolution path from
+> the non-squad `shooting_attack_controller`. It now routes its eligibility/LoS through the same
+> obscuring-aware primitive (`_compute_visibility_with_obscuring`), so the squad target pool, the
+> blinking/greying, the assignment guard and the resolution all agree with `compute_unit_los`. A unit
+> that moved behind obscuring terrain since activation can no longer be assigned/resolved as a target.
 
 ### Move Preview LoS / HP Blink Contract
 

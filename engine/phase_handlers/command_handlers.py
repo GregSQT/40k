@@ -35,6 +35,11 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     units_cache = require_key(game_state, "units_cache")
     add_debug_file_log(game_state, f"[PHASE START] E{episode} T{turn} command units_cache={units_cache}")
 
+    # Snapshot last turn's shooting BEFORE reset (rule 13.09 Hidden: "did not make ranged
+    # attacks during this turn or during the previous turn"). Captured at each turn start so
+    # it holds the previous player-turn's shots when evaluating enemy targets.
+    game_state["units_shot_previous_turn"] = set(game_state.get("units_shot", set()))
+
     # Reset ALL tracking sets (moved from movement_phase_start)
     game_state["units_moved"] = set()
     game_state["units_fled"] = set()

@@ -174,6 +174,10 @@ export interface Unit {
   hasChargedThisTurn?: boolean;
   UNIT_RULES?: UnitRule[];
   UNIT_KEYWORDS?: UnitKeyword[];
+
+  // Terrain visibility (rules 13.08-13.09)
+  hideable?: boolean; // INFANTRY/BEASTS/SWARM — eligible for cover/hidden
+  hidden?: boolean; // currently hidden (in obscuring terrain, no ranged attack this/previous turn)
 }
 
 export interface SingleShotState {
