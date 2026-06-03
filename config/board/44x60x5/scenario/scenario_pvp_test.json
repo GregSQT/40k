@@ -4,19 +4,19 @@
   "objectives_ref": "objectives-none.json",
   "terrain_ref": "terrain-mc1.json",
   "units": [
-    { "id": 1, "unit_type": "CaptainTerminatorRelicWeaponBolter", "player": 1, "col": 148, "row": 228 },
+    { "id": 1, "unit_type": "CaptainTerminatorRelicWeaponBolter", "player": 1, "col": 130, "row": 115 },
     { "id": 2, "unit_type": "LibrarianTerminator",                 "player": 1, "col": 144, "row": 218 },
     { "id": 3, "unit_type": "LieutenantCombiWeapon",               "player": 1, "col": 168, "row": 208 },
     { "id": 4, "unit_type": "ApothecaryBiologis",                  "player": 1, "col": 164, "row": 198 },
     { "id": 5, "unit_type": "DreadnoughtBallistus",                "player": 1, "col": 115, "row": 50 },
     {
-      "id": 6, "unit_type": "SternguardVeteranBoltRifle", "player": 1, "col": 107, "row": 146,
+      "id": 6, "unit_type": "SternguardVeteranBoltRifle", "player": 1, "col": 107, "row": 166,
       "models": [
-        { "col": 107, "row": 146 },
-        { "col": 104, "row": 152 },
-        { "col": 110, "row": 152 },
-        { "col": 116, "row": 152 },        
-        { "col": 113, "row": 146, "unit_type": "SternguardVeteranSergeantPowerFist" }
+        { "col": 107, "row": 166 },
+        { "col": 104, "row": 172 },
+        { "col": 110, "row": 172 },
+        { "col": 116, "row": 172 },        
+        { "col": 113, "row": 166, "unit_type": "SternguardVeteranSergeantPowerFist" }
       ]
     },
     {
@@ -60,13 +60,13 @@
     { "id": 108, "unit_type": "VonRyanLeaper",        "player": 2, "col": 25,  "row": 132 },
     { "id": 109, "unit_type": "VonRyanLeaper",        "player": 2, "col": 8,  "row": 143 },
     {
-      "id": 110, "unit_type": "Barbgaunt", "player": 2, "col": 94, "row": 252,
+      "id": 110, "unit_type": "Barbgaunt", "player": 2, "col": 94, "row": 192,
       "models": [
-        { "col": 94, "row": 252 },
-        { "col": 100, "row": 252 },
-        { "col": 106, "row": 252 },
-        { "col": 112, "row": 252 },
-        { "col": 118, "row": 252 }
+        { "col": 94, "row": 192 },
+        { "col": 100, "row": 192 },
+        { "col": 106, "row": 192 },
+        { "col": 112, "row": 192 },
+        { "col": 118, "row": 192 }
       ]
     },
     {

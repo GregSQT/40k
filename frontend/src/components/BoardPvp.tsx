@@ -1222,7 +1222,7 @@ export default function Board({
   const handleCanvasMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       boardZoomAnchorClientRef.current = { x: e.clientX, y: e.clientY };
-      if (!boardConfig || !showHexCoordinates) {
+      if (!boardConfig) {
         setHexCoordTooltip(null);
         return;
       }
@@ -1239,6 +1239,32 @@ export default function Board({
       const M = boardConfig.margin;
       const HW = 1.5 * HR;
       const HH = Math.sqrt(3) * HR;
+
+      // Filet de sécurité : si Pixi n'a pas déclenché pointerout (cercle reconstruit lors de
+      // unitsChanged), on détecte ici que la souris a quitté l'unité et on masque le tooltip.
+      const hoverTooltip = unitHoverTooltipRef.current;
+      if (hoverTooltip?.visible && hoverTooltip.text) {
+        const idMatch = hoverTooltip.text.match(/\bID\s+(\d+)/);
+        if (idMatch) {
+          const hovUnit = unitsRef.current.find((u) => String(u.id) === idMatch[1]);
+          if (hovUnit) {
+            const stx = app.stage.position.x;
+            const sty = app.stage.position.y;
+            const ucx = hovUnit.col * HW + HW / 2 + M + stx;
+            const ucy = hovUnit.row * HH + ((hovUnit.col % 2) * HH) / 2 + HH / 2 + M + sty;
+            const dx = px - ucx;
+            const dy = py - ucy;
+            if (dx * dx + dy * dy > (HR * 2.5) * (HR * 2.5)) {
+              setUnitHoverTooltip(null);
+            }
+          }
+        }
+      }
+
+      if (!showHexCoordinates) {
+        setHexCoordTooltip(null);
+        return;
+      }
       const ux = px - M;
       const uy = py - M;
       const cols = boardConfig.cols;
@@ -1281,6 +1307,10 @@ export default function Board({
   );
 
   const [unitHoverTooltip, setUnitHoverTooltip] = useState<HpBarHtmlTooltipPayload | null>(null);
+  const unitHoverTooltipRef = useRef(unitHoverTooltip);
+  unitHoverTooltipRef.current = unitHoverTooltip;
+  const unitsRef = useRef(units);
+  unitsRef.current = units;
   const unitIllustrationHoverTimerRef = useRef<number | null>(null);
 
   const clearUnitIllustrationHoverTimer = useCallback(() => {
