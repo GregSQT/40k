@@ -3579,8 +3579,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
       const models = Object.keys(readSquadModelPositions(uid));
       if (models.length === 0) {
-        console.warn(`[SQUAD-SHOOT] start ABORT unit=${uid} (aucune fig)`);
+        // No silent fallback: every eligible unit must expose its models (occupied_hexes_by_model).
+        // If this ever fires, it is a state-sync bug to surface loudly, not to swallow.
         squadShootActivatingRef.current = false;
+        setError(`Squad shoot: aucune figurine pour l'unité ${uid} (occupied_hexes_by_model manquant dans units_cache)`);
         return;
       }
       try {

@@ -3291,19 +3291,12 @@ export default function Board({
       if (e.button !== 0) return;
 
       if (mode !== "squadModelShoot") {
-        // Entrée flux assign+validate : escouade multi-fig OU unité multi-armes éligible (pool).
-        // Les unités mono-fig mono-arme gardent le flux de tir legacy (pas d'interception).
+        // Flux UNIQUE assign+validate pour TOUTE unité éligible (y compris mono-fig mono-arme).
+        // Pas de flux de tir legacy direct, pas de fallback : un seul chemin, cohérent.
         const own = findOwnFig(col, row);
         if (own && eligibleUnitIds.includes(Number(own.uid))) {
-          // available_weapons n'est peuplé qu'après activation backend : au 1er clic on se base
-          // sur RNG_WEAPONS (>1 = multi-armes). Le flux squad gère ensuite l'éligibilité par arme.
-          const gsUnits = (gameState?.units ?? []) as Array<{ id: string | number; RNG_WEAPONS?: unknown[] }>;
-          const ownUnit = gsUnits.find((u) => String(u.id) === String(own.uid));
-          const multiWeapon = (ownUnit?.RNG_WEAPONS?.length ?? 0) > 1;
-          if (own.nFigs > 1 || multiWeapon) {
-            e.stopImmediatePropagation();
-            void cbs.onStartSquadModelShoot?.(own.uid, own.mid);
-          }
+          e.stopImmediatePropagation();
+          void cbs.onStartSquadModelShoot?.(own.uid, own.mid);
         }
         return;
       }
@@ -3349,7 +3342,7 @@ export default function Board({
 
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
-  }, [phase, mode, measureMode.kind, boardConfig, gameState?.units_cache, gameState?.units, current_player, eligibleUnitIds]);
+  }, [phase, mode, measureMode.kind, boardConfig, gameState?.units_cache, current_player, eligibleUnitIds]);
 
   // squad.md brique 3 : dès qu'AUCUNE fig n'est active en mode plan (fig posée → deselect, ou
   // entrée sans selection), couper TOUT le preview (fantome curseur + LoS + ligne guide + tooltip).
