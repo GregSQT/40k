@@ -138,9 +138,8 @@ export function hasLineOfSight(
   fromUnit: Unit | Position,
   toUnit: Unit | Position,
   wallHexes: [number, number][],
-  coverRatio: number,
   losVisibilityMinRatio: number
-): { canSee: boolean; inCover: boolean; visibilityRatio: number } {
+): { canSee: boolean; visibilityRatio: number } {
   const fromPos = "col" in fromUnit ? { col: fromUnit.col, row: fromUnit.row } : fromUnit;
   const toPos = "col" in toUnit ? { col: toUnit.col, row: toUnit.row } : toUnit;
 
@@ -192,14 +191,6 @@ export function hasLineOfSight(
   }
 
   if (
-    typeof coverRatio !== "number" ||
-    Number.isNaN(coverRatio) ||
-    coverRatio <= 0 ||
-    coverRatio > 1
-  ) {
-    throw new Error(`Invalid coverRatio: ${coverRatio}`);
-  }
-  if (
     typeof losVisibilityMinRatio !== "number" ||
     Number.isNaN(losVisibilityMinRatio) ||
     losVisibilityMinRatio <= 0 ||
@@ -207,24 +198,10 @@ export function hasLineOfSight(
   ) {
     throw new Error(`Invalid losVisibilityMinRatio: ${losVisibilityMinRatio}`);
   }
-  if (losVisibilityMinRatio >= coverRatio) {
-    throw new Error(
-      `Invalid LoS thresholds: losVisibilityMinRatio (${losVisibilityMinRatio}) must be < coverRatio (${coverRatio})`
-    );
-  }
 
-  // Visibility ratio rule:
-  // - ratio < losVisibilityMinRatio -> blocked
-  // - losVisibilityMinRatio <= ratio < coverRatio -> visible in cover (light blue)
-  // - ratio >= coverRatio -> clear visibility (blue)
   const visibilityRatio = clearSightLines / totalSightLines;
-  if (visibilityRatio < losVisibilityMinRatio) {
-    return { canSee: false, inCover: false, visibilityRatio };
-  }
-  if (visibilityRatio < coverRatio) {
-    return { canSee: true, inCover: true, visibilityRatio };
-  }
-  return { canSee: true, inCover: false, visibilityRatio };
+  const canSee = visibilityRatio >= losVisibilityMinRatio;
+  return { canSee, visibilityRatio };
 }
 
 // Simple straight-line algorithm for hex grids using linear interpolation

@@ -43,9 +43,8 @@ describe("gameHelpers", () => {
   it("retourne LoS direct sans murs", () => {
     const shooter = makeUnit(1, 1, 0, 0);
     const target = makeUnit(2, 2, 3, 0);
-    const los = hasLineOfSight(shooter, target, [], 0.6, 0.4);
+    const los = hasLineOfSight(shooter, target, [], 0.4);
     expect(los.canSee).toBe(true);
-    expect(los.inCover).toBe(false);
     expect(los.visibilityRatio).toBe(1);
   });
 

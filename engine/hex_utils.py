@@ -853,9 +853,8 @@ def compute_los_state(
     to_row: int,
     wall_set: Set[Tuple[int, int]],
     los_visibility_min_ratio: float,
-    cover_ratio: float,
-) -> Tuple[float, bool, bool]:
-    """Compute (visibility_ratio, can_see, in_cover) for a single-hex pair.
+) -> Tuple[float, bool]:
+    """Compute (visibility_ratio, can_see) for a single-hex pair.
 
     Drop-in replacement for _get_los_visibility_state (shooting_handlers)
     and _has_los_from_topology (observation_builder) without needing the
@@ -866,15 +865,13 @@ def compute_los_state(
         to_col, to_row: Target position.
         wall_set: Set of (col, row) wall hexes.
         los_visibility_min_ratio: P threshold (§7.2) — from game_rules.
-        cover_ratio: C threshold (§7.2) — from game_rules.
 
     Returns:
-        (visibility_ratio, can_see, in_cover)
+        (visibility_ratio, can_see)
     """
     v = compute_los_visibility(from_col, from_row, to_col, to_row, wall_set)
     can_see = v >= los_visibility_min_ratio
-    in_cover = can_see and v < cover_ratio
-    return v, can_see, in_cover
+    return v, can_see
 
 
 # ---------------------------------------------------------------------------

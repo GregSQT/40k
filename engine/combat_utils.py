@@ -479,7 +479,7 @@ def _trace_hex_los(
     import sys
     try:
         from engine.phase_handlers import shooting_handlers
-        ratio, can_see, _ = shooting_handlers._get_los_visibility_state(
+        ratio, can_see = shooting_handlers._get_los_visibility_state(
             game_state, from_col, from_row, to_col, to_row
         )
         topo_str = f"topology={ratio:.6f} can_see={can_see}"

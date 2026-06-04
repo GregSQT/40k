@@ -102,8 +102,6 @@ interface GameRules {
   max_turns: number;
   turn_limit_penalty: number;
   los_visibility_min_ratio: number;
-  cover_ratio: number;
-  cover_ratio_rule: string;
   los_debug_show_ratio: boolean;
   los_debug_show_ratio_rule: string;
   max_units_per_player: number;
@@ -181,8 +179,6 @@ const isGameConfig = (value: unknown): value is GameConfig => {
   if (!isRecord(value.ai_behavior)) return false;
   if (typeof value.game_rules.max_turns !== "number") return false;
   if (typeof value.game_rules.los_visibility_min_ratio !== "number") return false;
-  if (typeof value.game_rules.cover_ratio !== "number") return false;
-  if (typeof value.game_rules.cover_ratio_rule !== "string") return false;
   if (typeof value.game_rules.los_debug_show_ratio !== "boolean") return false;
   if (typeof value.game_rules.los_debug_show_ratio_rule !== "string") return false;
   if (value.game_rules.board_size !== undefined && !Array.isArray(value.game_rules.board_size)) {

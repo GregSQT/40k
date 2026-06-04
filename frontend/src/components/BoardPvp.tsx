@@ -1843,9 +1843,7 @@ export default function Board({
     const gameRules = gameConfig.game_rules;
     if (!gameRules) throw new Error("LOS preview: game_rules absent in gameConfig");
     if (gameRules.los_visibility_min_ratio == null) throw new Error("LOS preview: los_visibility_min_ratio absent in game_rules");
-    if (gameRules.cover_ratio == null) throw new Error("LOS preview: cover_ratio absent in game_rules");
     const losMin = gameRules.los_visibility_min_ratio;
-    const coverRatio = gameRules.cover_ratio;
 
     try {
       const losPreview = buildLosPreviewFromSource({
@@ -1857,7 +1855,6 @@ export default function Board({
         wallHexesOverride,
         maxRange: range,
         losVisibilityMinRatio: losMin,
-        coverRatio,
       });
       const blinkIds = losPreview.blinkIds;
       const coverByUnitId = losPreview.coverByUnitId;
@@ -2530,7 +2527,6 @@ export default function Board({
           wallHexesOverride,
           maxRange: pending.range,
           losVisibilityMinRatio: gameConfig.game_rules?.los_visibility_min_ratio ?? 0,
-          coverRatio: gameConfig.game_rules?.cover_ratio ?? 0,
         });
         const losUnionLayout: HexUnionMaskLayout = {
           HEX_HORIZ_SPACING: HEX_WIDTH_H,
@@ -3633,7 +3629,6 @@ export default function Board({
           wallHexesOverride,
           maxRange: shootRange,
           losVisibilityMinRatio: gameConfig.game_rules?.los_visibility_min_ratio ?? 0,
-          coverRatio: gameConfig.game_rules?.cover_ratio ?? 0,
         });
         const allVisualLosCells = [...visualPreview.terrainCoverCells, ...visualPreview.clearCells];
         mountLosPolarClippedByVisibleUnion(
@@ -4339,15 +4334,11 @@ export default function Board({
     if (!gameRules) {
       throw new Error("Missing required configuration value: gameConfig.game_rules");
     }
-    if (typeof gameRules.cover_ratio !== "number") {
-      throw new Error("Missing required configuration value: gameConfig.game_rules.cover_ratio");
-    }
     if (typeof gameRules.los_visibility_min_ratio !== "number") {
       throw new Error(
         "Missing required configuration value: gameConfig.game_rules.los_visibility_min_ratio"
       );
     }
-    const coverRatio = gameRules.cover_ratio;
     const losVisibilityMinRatio = gameRules.los_visibility_min_ratio;
 
     // ✅ NOW SAFE TO ASSIGN WITH TYPE ASSERTIONS
@@ -4952,10 +4943,6 @@ export default function Board({
         return;
       }
 
-      const unitsCacheForShootPreview = gameState?.units_cache as
-        | Record<string, unknown>
-        | undefined;
-
       const attackCellSet = new Set<string>();
       const range = getMaxRangedRange(source.unit);
       if (range <= 0) {
@@ -4974,7 +4961,6 @@ export default function Board({
           wallHexesOverride,
           maxRange: range,
           losVisibilityMinRatio,
-          coverRatio,
         });
         if (enforceBackendTargetsOnly) {
           // Même cône LoS terrain que le survol move (WASM + pastilles clair/couvert), sans corridor hex tireur→cible.
@@ -4983,7 +4969,7 @@ export default function Board({
             const key = `${cell.col},${cell.row}`;
             coverKeyDedupe.add(key);
             coverCells.push(cell);
-            losVisibilityRatioByHex.set(key, coverRatio * 0.99);
+            losVisibilityRatioByHex.set(key, 0.5);
           }
           for (const cell of losPreview.clearCells) {
             const key = `${cell.col},${cell.row}`;
@@ -5000,44 +4986,6 @@ export default function Board({
               }
             }
           }
-          const visibleHexKeySet = losPreview.visibleHexKeySet;
-          for (const enemy of units) {
-            if (enemy.player === source.unit.player) continue;
-            if (
-              unitsCacheForShootPreview !== undefined &&
-              !Object.hasOwn(unitsCacheForShootPreview, String(enemy.id))
-            ) {
-              continue;
-            }
-            const eBaseRaw = resolveBaseSizeForUnitDisplay(enemy);
-            const eBase = eBaseRaw > 1 ? eBaseRaw : 0;
-            const scanR = eBase > 0 ? Math.ceil(eBase / 2) : 0;
-            let totalHexes = 0;
-            let visCount = 0;
-            for (let dc = -scanR; dc <= scanR; dc++) {
-              for (let dr = -scanR; dr <= scanR; dr++) {
-                if (hexDistOff(enemy.col, enemy.row, enemy.col + dc, enemy.row + dr) > scanR)
-                  continue;
-                totalHexes++;
-                if (visibleHexKeySet.has(`${enemy.col + dc},${enemy.row + dr}`)) visCount++;
-              }
-            }
-            const ratio = totalHexes > 0 ? visCount / totalHexes : 0;
-            if (ratio >= losVisibilityMinRatio && ratio < coverRatio) {
-              for (let dc = -scanR; dc <= scanR; dc++) {
-                for (let dr = -scanR; dr <= scanR; dr++) {
-                  if (hexDistOff(enemy.col, enemy.row, enemy.col + dc, enemy.row + dr) > scanR)
-                    continue;
-                  const ek = `${enemy.col + dc},${enemy.row + dr}`;
-                  if (visibleHexKeySet.has(ek) && !coverKeyDedupe.has(ek)) {
-                    coverKeyDedupe.add(ek);
-                    coverCells.push({ col: enemy.col + dc, row: enemy.row + dr });
-                    losVisibilityRatioByHex.set(ek, ratio);
-                  }
-                }
-              }
-            }
-          }
           return;
         }
         const coverKeyDedupe = new Set<string>();
@@ -5045,7 +4993,7 @@ export default function Board({
           const key = `${cell.col},${cell.row}`;
           coverKeyDedupe.add(key);
           coverCells.push(cell);
-          losVisibilityRatioByHex.set(key, coverRatio * 0.99);
+          losVisibilityRatioByHex.set(key, 0.5);
         }
         for (const cell of losPreview.clearCells) {
           const key = `${cell.col},${cell.row}`;
@@ -5058,44 +5006,6 @@ export default function Board({
         for (const [id, inCover] of Object.entries(losPreview.coverByUnitId)) {
           if (inCover) {
             coverTargets.add(id);
-          }
-        }
-        const visibleHexKeySet = losPreview.visibleHexKeySet;
-        for (const enemy of units) {
-          if (enemy.player === source.unit.player) continue;
-          if (
-            unitsCacheForShootPreview !== undefined &&
-            !Object.hasOwn(unitsCacheForShootPreview, String(enemy.id))
-          ) {
-            continue;
-          }
-          const eBaseRawB = resolveBaseSizeForUnitDisplay(enemy);
-          const eBase = eBaseRawB > 1 ? eBaseRawB : 0;
-          const scanR = eBase > 0 ? Math.ceil(eBase / 2) : 0;
-          let totalHexes = 0;
-          let visCount = 0;
-          for (let dc = -scanR; dc <= scanR; dc++) {
-            for (let dr = -scanR; dr <= scanR; dr++) {
-              if (hexDistOff(enemy.col, enemy.row, enemy.col + dc, enemy.row + dr) > scanR)
-                continue;
-              totalHexes++;
-              if (visibleHexKeySet.has(`${enemy.col + dc},${enemy.row + dr}`)) visCount++;
-            }
-          }
-          const ratio = totalHexes > 0 ? visCount / totalHexes : 0;
-          if (ratio >= losVisibilityMinRatio && ratio < coverRatio) {
-            for (let dc = -scanR; dc <= scanR; dc++) {
-              for (let dr = -scanR; dr <= scanR; dr++) {
-                if (hexDistOff(enemy.col, enemy.row, enemy.col + dc, enemy.row + dr) > scanR)
-                  continue;
-                const ek = `${enemy.col + dc},${enemy.row + dr}`;
-                if (visibleHexKeySet.has(ek) && !coverKeyDedupe.has(ek)) {
-                  coverKeyDedupe.add(ek);
-                  coverCells.push({ col: enemy.col + dc, row: enemy.row + dr });
-                  losVisibilityRatioByHex.set(ek, ratio);
-                }
-              }
-            }
           }
         }
       }
@@ -5582,7 +5492,6 @@ export default function Board({
       cachedWalls: canReuseStatic ? staticWallsRef.current : null,
       losDebugShowRatio: showLosDebugOverlay && phase === "shoot" && shootingPreviewSource !== null,
       losDebugRatioByHex: Object.fromEntries(losVisibilityRatioByHex),
-      losDebugCoverRatio: coverRatio,
       losDebugVisibilityMinRatio: losVisibilityMinRatio,
       chargeEngagementHalo,
       fightEngagementRing,

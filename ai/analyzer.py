@@ -42,7 +42,7 @@ def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: A
 
 
 # Cache for LoS thresholds (loaded from game_config, same as engine)
-_los_thresholds_cache: Optional[Tuple[float, float]] = None
+_los_thresholds_cache: Optional[float] = None
 _inches_to_subhex_analyzer_cache: Optional[int] = None
 _engagement_zone_analyzer_cache: Optional[int] = None
 
@@ -534,8 +534,8 @@ def get_hex_points(center_x: float, center_y: float, radius: float = 21.0) -> Li
     return points
 
 
-def _get_los_thresholds() -> Tuple[float, float]:
-    """Load los_visibility_min_ratio and cover_ratio from game_config (same as engine)."""
+def _get_los_thresholds() -> float:
+    """Load los_visibility_min_ratio from game_config (same as engine)."""
     global _los_thresholds_cache
     if _los_thresholds_cache is not None:
         return _los_thresholds_cache
@@ -543,8 +543,7 @@ def _get_los_thresholds() -> Tuple[float, float]:
     game_config = get_config_loader().get_game_config()
     game_rules = require_key(game_config, "game_rules")
     los_visibility_min_ratio = float(require_key(game_rules, "los_visibility_min_ratio"))
-    cover_ratio = float(require_key(game_rules, "cover_ratio"))
-    _los_thresholds_cache = (los_visibility_min_ratio, cover_ratio)
+    _los_thresholds_cache = los_visibility_min_ratio
     return _los_thresholds_cache
 
 
@@ -567,18 +566,14 @@ def has_line_of_sight(shooter_col: int, shooter_row: int, target_col: int, targe
     """
     Check line of sight using the same algorithm as the game engine.
     
-    CRITICAL: Uses _compute_los_visibility_ratio (7-point sampling: center + 6 vertices)
-    to match the engine's LoS calculation exactly. This ensures analyzer detects
-    the same LoS violations as the game engine.
-    
     Algorithm (matches shooting_handlers._get_los_visibility_state):
     1. Augment wall_hexes with board boundary (bottom_row for odd cols)
-    2. Compute visibility ratio via 7-point sampling per hex
+    2. Compute visibility ratio via hex line trace
     3. can_see = visibility_ratio >= los_visibility_min_ratio (from game_config)
     """
-    from engine.phase_handlers.shooting_handlers import _compute_los_visibility_ratio
+    from engine.hex_utils import compute_los_state
 
-    los_visibility_min_ratio, cover_ratio = _get_los_thresholds()
+    los_visibility_min_ratio = _get_los_thresholds()
     effective_walls = _get_los_wall_hexes(wall_hexes)
 
     try:
@@ -587,14 +582,13 @@ def has_line_of_sight(shooter_col: int, shooter_row: int, target_col: int, targe
         target_col_int = int(target_col)
         target_row_int = int(target_row)
 
-        _, can_see, _ = _compute_los_visibility_ratio(
+        _, can_see = compute_los_state(
             shooter_col_int,
             shooter_row_int,
             target_col_int,
             target_row_int,
             effective_walls,
             los_visibility_min_ratio,
-            cover_ratio,
         )
         return can_see
 

@@ -3227,7 +3227,7 @@ def shooting_build_valid_target_pool(
                 tc, tr = entry["col"], entry["row"]
                 has_los = has_line_of_sight_coords(int(sc), int(sr), int(tc), int(tr), game_state)
                 try:
-                    ratio, can_see, _ = _get_los_visibility_state(
+                    ratio, can_see = _get_los_visibility_state(
                         game_state, int(sc), int(sr), int(tc), int(tr)
                     )
                     topo_str = f"topology={ratio:.6f} can_see={can_see}"
@@ -3315,37 +3315,6 @@ def _resolve_target_hexes_for_los(
     return target_hexes
 
 
-def _compute_target_visibility_from_hexes(
-    game_state: Dict[str, Any],
-    shooter_col: int,
-    shooter_row: int,
-    target_hexes: List[Tuple[int, int]],
-) -> Tuple[float, bool, bool, int, float]:
-    """
-    Compute target-level visibility from footprint hexes, aligned with shooting pool logic.
-    Returns: (target_visibility_ratio, can_see_target, in_cover_target, visible_hexes, max_hex_ratio)
-    """
-    game_rules = require_key(require_key(game_state, "config"), "game_rules")
-    los_visibility_min_ratio = float(game_rules.get("los_visibility_min_ratio", 0.0))
-    cover_ratio = float(game_rules.get("cover_ratio", 1.0))
-    visible_hexes = 0
-    max_hex_ratio = 0.0
-    for tc, tr in target_hexes:
-        visibility_ratio, can_see_hex, _ = _get_los_visibility_state(
-            game_state,
-            int(shooter_col),
-            int(shooter_row),
-            int(tc),
-            int(tr),
-        )
-        if visibility_ratio > max_hex_ratio:
-            max_hex_ratio = float(visibility_ratio)
-        if can_see_hex:
-            visible_hexes += 1
-    target_visibility_ratio = visible_hexes / len(target_hexes) if target_hexes else 0.0
-    can_see_target = visible_hexes > 0 and target_visibility_ratio >= los_visibility_min_ratio
-    in_cover_target = can_see_target and target_visibility_ratio < cover_ratio
-    return target_visibility_ratio, can_see_target, in_cover_target, visible_hexes, max_hex_ratio
 
 
 def _dump_los_contradiction_diagnostic(
@@ -3466,8 +3435,8 @@ def _get_los_visibility_state(
     start_row: int,
     end_col: int,
     end_row: int,
-) -> Tuple[float, bool, bool]:
-    """Return (visibility_ratio, can_see, in_cover).
+) -> Tuple[float, bool]:
+    """Return (visibility_ratio, can_see).
 
     Uses precomputed los_topology when available (legacy boards with .npz).
     Falls back to on-demand hex line trace (Board ×10) via hex_utils.
@@ -3475,7 +3444,6 @@ def _get_los_visibility_state(
     config = require_key(game_state, "config")
     game_rules = require_key(config, "game_rules")
     los_visibility_min_ratio = float(require_key(game_rules, "los_visibility_min_ratio"))
-    cover_ratio = float(require_key(game_rules, "cover_ratio"))
 
     board_cols = game_state.get("board_cols")
     board_rows = game_state.get("board_rows")
@@ -3487,7 +3455,7 @@ def _get_los_visibility_state(
         and 0 <= end_col < board_cols
         and 0 <= end_row < board_rows
     ):
-        return 0.0, False, False
+        return 0.0, False
 
     los_topology = game_state.get("los_topology")
     if los_topology is not None:
@@ -3505,7 +3473,7 @@ def _get_los_visibility_state(
         wall_set = _get_wall_set(game_state)
         _result = compute_los_state(
             start_col, start_row, end_col, end_row,
-            wall_set, los_visibility_min_ratio, cover_ratio,
+            wall_set, los_visibility_min_ratio,
         )
         if _state_cache is None:
             _state_cache = {}
@@ -3514,8 +3482,7 @@ def _get_los_visibility_state(
         return _result
 
     can_see = visibility_ratio >= los_visibility_min_ratio
-    in_cover = can_see and visibility_ratio < cover_ratio
-    return visibility_ratio, can_see, in_cover
+    return visibility_ratio, can_see
 
 
 def _get_wall_set(game_state: Dict[str, Any]) -> Set[Tuple[int, int]]:
@@ -3984,82 +3951,6 @@ def _line_passes_through_hex(
     return False
 
 
-def _compute_los_visibility_ratio(
-    start_col: int,
-    start_row: int,
-    end_col: int,
-    end_row: int,
-    wall_hexes: Set[Tuple[int, int]],
-    los_visibility_min_ratio: float,
-    cover_ratio: float,
-) -> Tuple[float, bool, bool]:
-    """
-    Compute LoS visibility ratio using hex-native sampling (center + 6 vertices).
-
-    Returns:
-        (visibility_ratio, can_see, in_cover)
-        - can_see is True when visibility_ratio >= los_visibility_min_ratio.
-    """
-    if not isinstance(los_visibility_min_ratio, (int, float)):
-        raise TypeError(
-            f"los_visibility_min_ratio must be numeric, got {type(los_visibility_min_ratio).__name__}"
-        )
-    if (
-        math.isnan(float(los_visibility_min_ratio))
-        or los_visibility_min_ratio <= 0
-        or los_visibility_min_ratio > 1
-    ):
-        raise ValueError(
-            f"los_visibility_min_ratio must be in (0, 1], got {los_visibility_min_ratio}"
-        )
-    if not isinstance(cover_ratio, (int, float)):
-        raise TypeError(f"cover_ratio must be numeric, got {type(cover_ratio).__name__}")
-    if math.isnan(float(cover_ratio)) or cover_ratio <= 0 or cover_ratio > 1:
-        raise ValueError(f"cover_ratio must be in (0, 1], got {cover_ratio}")
-    if float(los_visibility_min_ratio) >= float(cover_ratio):
-        raise ValueError(
-            f"Invalid LoS thresholds: los_visibility_min_ratio ({los_visibility_min_ratio}) "
-            f"must be < cover_ratio ({cover_ratio})"
-        )
-
-    hex_radius = 21.0
-    shooter_x, shooter_y = _hex_to_pixel(start_col, start_row, hex_radius)
-    target_x, target_y = _hex_to_pixel(end_col, end_row, hex_radius)
-
-    def build_hex_points(center_x: float, center_y: float) -> List[Tuple[float, float]]:
-        points: List[Tuple[float, float]] = [(center_x, center_y)]
-        for i in range(6):
-            angle = (i * math.pi) / 3.0
-            px = center_x + hex_radius * 0.8 * math.cos(angle)
-            py = center_y + hex_radius * 0.8 * math.sin(angle)
-            points.append((px, py))
-        return points
-
-    shooter_points = build_hex_points(shooter_x, shooter_y)
-    target_points = build_hex_points(target_x, target_y)
-    clear_sight_lines = 0
-    total_sight_lines = len(shooter_points) * len(target_points)
-
-    for shooter_point in shooter_points:
-        for target_point in target_points:
-            line_blocked = False
-            for wall_col, wall_row in wall_hexes:
-                if _line_passes_through_hex(
-                    shooter_point,
-                    target_point,
-                    int(wall_col),
-                    int(wall_row),
-                    hex_radius,
-                ):
-                    line_blocked = True
-                    break
-            if not line_blocked:
-                clear_sight_lines += 1
-
-    visibility_ratio = clear_sight_lines / total_sight_lines
-    can_see = visibility_ratio >= float(los_visibility_min_ratio)
-    in_cover = can_see and visibility_ratio < float(cover_ratio)
-    return visibility_ratio, can_see, in_cover
 
 def _get_accurate_hex_line(start_col: int, start_row: int, end_col: int, end_row: int) -> List[Tuple[int, int]]:
     """Accurate hex line using cube coordinates."""

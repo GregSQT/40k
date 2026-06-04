@@ -39,7 +39,6 @@ export interface BuildLosPreviewFromSourceParams {
   wallHexesOverride?: WallHexOverrideForLos[];
   maxRange: number;
   losVisibilityMinRatio: number;
-  coverRatio: number;
 }
 
 export interface LosPreviewFromSource {
@@ -96,7 +95,6 @@ export function buildShootingLosPreviewFromVisibleHexes(
   units: MinimalUnitForLos[],
   shooterPlayer: number,
   losVisibilityMinRatio: number,
-  coverRatio: number
 ): {
   clearCells: Array<{ col: number; row: number }>;
   terrainCoverCells: Array<{ col: number; row: number }>;
@@ -138,10 +136,9 @@ export function buildShootingLosPreviewFromVisibleHexes(
     const ratio = totalHexes > 0 ? visibleCount / totalHexes : 0;
     const isVisible = ratio >= losVisibilityMinRatio;
     if (!isVisible) continue;
-    const inCover = ratio < coverRatio;
     const uid = typeof u.id === "string" ? parseInt(u.id, 10) : u.id;
     blinkIds.push(uid);
-    coverByUnitId[String(u.id)] = inCover;
+    coverByUnitId[String(u.id)] = false;
   }
 
   return {
@@ -170,14 +167,12 @@ export function buildLosPreviewFromSource(
     params.boardRows,
     effectiveWallHexes,
     params.losVisibilityMinRatio,
-    params.coverRatio
   );
   const losPreview = buildShootingLosPreviewFromVisibleHexes(
     visibleHexes,
     params.units,
     params.source.unit.player,
     params.losVisibilityMinRatio,
-    params.coverRatio
   );
   const key = [
     params.source.fromCol,
