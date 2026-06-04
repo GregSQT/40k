@@ -5,7 +5,7 @@
   "terrain_ref": "terrain-mc1.json",
   "units": [
     { "id": 1, "unit_type": "CaptainTerminatorRelicWeaponBolter", "player": 1, "col": 130, "row": 115 },
-    { "id": 2, "unit_type": "LibrarianTerminator",                 "player": 1, "col": 144, "row": 218 },
+    { "id": 2, "unit_type": "LibrarianTerminator",                 "player": 1, "col": 155, "row": 47 },
     { "id": 3, "unit_type": "LieutenantCombiWeapon",               "player": 1, "col": 168, "row": 208 },
     { "id": 4, "unit_type": "ApothecaryBiologis",                  "player": 1, "col": 164, "row": 198 },
     { "id": 5, "unit_type": "DreadnoughtBallistus",                "player": 1, "col": 115, "row": 50 },
@@ -22,11 +22,11 @@
     {
       "id": 7, "unit_type": "Infernus", "player": 1, "col": 124, "row": 220,
       "models": [
-        { "col": 124, "row": 220 },
-        { "col": 130, "row": 220 },
-        { "col": 136, "row": 220 },
-        { "col": 127, "row": 214 },
-        { "col": 133, "row": 214 }
+        { "col": 124, "row": 20 },
+        { "col": 130, "row": 20 },
+        { "col": 136, "row": 20 },
+        { "col": 127, "row": 14 },
+        { "col": 133, "row": 14 }
       ]
     },
     {
@@ -72,17 +72,17 @@
     {
       "id": 111, "unit_type": "Neurogaunt", "player": 2, "col": 41, "row": 228,
       "models": [
-        { "col": 41, "row": 228 },
-        { "col": 47, "row": 228 },
-        { "col": 53, "row": 228 },
-        { "col": 38, "row": 234 },
-        { "col": 44, "row": 234 },
-        { "col": 50, "row": 234 },
-        { "col": 56, "row": 234 },
-        { "col": 38, "row": 240 },
-        { "col": 44, "row": 240 },
-        { "col": 50, "row": 240 },
-        { "col": 56, "row": 240 }
+        { "col": 141, "row": 28 },
+        { "col": 147, "row": 28 },
+        { "col": 153, "row": 28 },
+        { "col": 138, "row": 34 },
+        { "col": 144, "row": 34 },
+        { "col": 150, "row": 34 },
+        { "col": 156, "row": 34 },
+        { "col": 138, "row": 40 },
+        { "col": 144, "row": 40 },
+        { "col": 150, "row": 40 },
+        { "col": 156, "row": 40 }
       ]
     },
     {

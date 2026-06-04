@@ -2757,6 +2757,51 @@ def apply_snap_corrections(
     return corrected
 
 
+def is_unit_at_half_strength(unit_id: str, game_state: Dict[str, Any]) -> bool:
+    """Vérifie si une unité est à la half-strength (règle 08.03).
+
+    - Multi-modèles (model_count_at_start > 1) : alive <= initial / 2
+    - Mono-modèle  (model_count_at_start == 1) : HP_CUR <= HP_MAX / 2
+    """
+    squad_cache = require_key(game_state, "squad_cache")
+    entry = squad_cache.get(str(unit_id))
+    if entry is None:
+        raise KeyError(f"is_unit_at_half_strength: unit {unit_id} not in squad_cache")
+    count_start = int(entry["model_count_at_start"])
+    count_now = int(entry["model_count"])
+    if count_start > 1:
+        return count_now <= count_start / 2
+    # Mono-modèle : check HP
+    units = require_key(game_state, "units")
+    unit = next((u for u in units if str(u.get("id")) == str(unit_id)), None)
+    if unit is None:
+        raise KeyError(f"is_unit_at_half_strength: unit {unit_id} not found in game_state['units']")
+    hp_cur = int(require_key(unit, "HP_CUR"))
+    hp_max = int(require_key(unit, "HP_MAX"))
+    return hp_cur <= hp_max / 2
+
+
+def roll_battle_shock(unit_id: str, game_state: Dict[str, Any]) -> bool:
+    """Battle-shock roll pour une unité (règle 01.07).
+
+    Tire 2D6 et compare au LD de l'unité.
+    Si résultat >= LD : succès, l'unité n'est PAS battle-shocked.
+    Si résultat < LD  : échec, l'unité devient battle-shocked.
+
+    Retourne True si l'unité est désormais battle-shocked, False sinon.
+    """
+    import random
+    units = require_key(game_state, "units")
+    unit = next((u for u in units if str(u.get("id")) == str(unit_id)), None)
+    if unit is None:
+        raise KeyError(f"roll_battle_shock: unit {unit_id} not found in game_state['units']")
+    ld = int(require_key(unit, "LD"))
+    roll = random.randint(1, 6) + random.randint(1, 6)
+    battle_shocked = roll < ld
+    unit["battle_shocked"] = battle_shocked
+    return battle_shocked
+
+
 def roll_advance_for_squad(squad_id: str, game_state: Dict[str, Any]) -> int:
     """Roll 1D6 partage par l escouade pour un Advance move.
 

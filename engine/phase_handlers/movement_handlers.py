@@ -31,7 +31,7 @@ from .shared_utils import (
     compute_candidate_footprint,
     is_footprint_placement_valid, get_engagement_zone, get_max_base_size_hex,
     get_squad_move_budget, validate_move_plan, _validate_plan_coherency, commit_move,
-    get_coherency_subhex, _compute_unit_occupied_hexes,
+    get_coherency_subhex, _compute_unit_occupied_hexes, _squad_is_in_enemy_er,
 )
 from engine.hex_utils import (
     _hex_center,
@@ -798,7 +798,7 @@ def _attempt_movement_to_destination(
     orig_col, orig_row = require_unit_position(unit, game_state)
 
     # Flee detection: was adjacent to enemy before move
-    was_adjacent = _is_adjacent_to_enemy(game_state, unit)
+    was_adjacent = _is_in_enemy_engagement_zone(game_state, unit)
 
     # Final footprint-aware occupation check IMMEDIATELY before position assignment.
     # Prevents race conditions from reactive moves between pool build and commit.
@@ -985,7 +985,7 @@ def _attempt_movement_to_destination(
     }
 
 
-def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+def _is_in_enemy_engagement_zone(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
     AI_TURN.md flee detection logic.
 
@@ -2194,7 +2194,7 @@ def movement_commit_move_plan_handler(
 
     ``action["plan"]`` : liste de ``[model_id, col, row]``, DOIT couvrir toutes
     les figurines vivantes de l'escouade (sinon la cohesion est fausse). Move
-    normal uniquement.
+    normal ou fall_back selon engagement de l'escouade au moment du commit.
 
     Note brique 1 : aucun reactive move n'est declenche ici (move par-figurine) —
     a ajouter dans une tranche ulterieure si necessaire.
@@ -2235,7 +2235,9 @@ def movement_commit_move_plan_handler(
             "coherency_ok": preview["coherency_ok"],
         }
 
-    commit_move(plan, game_state, "normal")
+    was_engaged = _squad_is_in_enemy_er(game_state, str(squad_id))
+    move_type = "fall_back" if was_engaged else "normal"
+    commit_move(plan, game_state, move_type)
 
     unit = get_unit_by_id(game_state, squad_id)
     if not unit:

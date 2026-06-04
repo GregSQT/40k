@@ -49,6 +49,7 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["units_attacked"] = set()
     game_state["units_advanced"] = set()
     game_state["units_reacted_this_enemy_turn"] = set()
+
     game_state["reactive_macro_order_current_window"] = []
     game_state["reaction_window_active"] = False
     game_state["reactive_decision_payload"] = {}
@@ -64,6 +65,23 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Clear enemy reachable positions cache (enemy positions may have changed)
     # Used by RewardCalculator._get_enemy_reachable_positions for defensive threat calculation
     game_state["enemy_reachable_cache"] = {}
+
+    # Battle-shock step (règle 08.03) — avant l'activation pool
+    from engine.phase_handlers.shared_utils import is_unit_at_half_strength, roll_battle_shock, is_unit_alive
+    current_player = require_key(game_state, "current_player")
+    for unit in game_state.get("units", []):
+        if unit.get("player") != current_player:
+            continue
+        unit_id = str(unit["id"])
+        if not is_unit_alive(unit_id, game_state):
+            continue
+        needs_roll = unit.get("battle_shocked", False) or is_unit_at_half_strength(unit_id, game_state)
+        if needs_roll:
+            shocked = roll_battle_shock(unit_id, game_state)
+            add_debug_file_log(
+                game_state,
+                f"[BATTLE-SHOCK] E{episode} T{turn} unit={unit_id} shocked={shocked} ld={unit.get('LD')}"
+            )
 
     # Build activation pool (empty for now, structure ready for future)
     command_build_activation_pool(game_state)

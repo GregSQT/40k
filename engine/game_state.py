@@ -165,6 +165,9 @@ class GameStateManager:
             # Terrain visibility (rules 13.08-13.09): hideable derived from keywords, hidden is runtime state
             "hideable": compute_hideable(unit_keywords),
             "hidden": False,
+
+            # Battle-shock state (règle 01.07) — reset au début de la command phase du joueur
+            "battle_shocked": False,
         }
         if models_passthrough is not None:
             result["models"] = copy.deepcopy(models_passthrough)
@@ -616,6 +619,9 @@ class GameStateManager:
                     # Terrain visibility (rules 13.08-13.09): hideable derived from keywords, hidden is runtime state
                     "hideable": compute_hideable(require_key(full_unit_data, "UNIT_KEYWORDS")),
                     "hidden": False,
+
+                    # Battle-shock state (règle 01.07) — reset au début de la command phase du joueur
+                    "battle_shocked": False,
                 }
 
                 # PR4 4c : pass-through champ optionnel "models" (multi-fig squad)

@@ -602,7 +602,6 @@ def _build_weapon_availability_enemy_precheck(
             los_cache_true = bool(_los_map[_enemy_id_str]) if (isinstance(_los_map, dict) and _enemy_id_str in _los_map) else False
 
             out.append({
-                "enemy": enemy,
                 "enemy_id_str": _enemy_id_str,
                 "distance": d,
                 "enemy_engaged_with_shooter": enemy_adjacent_to_shooter,
@@ -770,7 +769,10 @@ def weapon_availability_check(
                                 continue
                             weapon_has_valid_target = True
                             break
-                        is_valid = _is_valid_shooting_target(game_state, temp_unit, row["enemy"])
+                        _row_enemy = get_unit_by_id(game_state, row["enemy_id_str"])
+                        if _row_enemy is None:
+                            continue
+                        is_valid = _is_valid_shooting_target(game_state, temp_unit, _row_enemy)
                         if is_valid:
                             weapon_has_valid_target = True
                             break
