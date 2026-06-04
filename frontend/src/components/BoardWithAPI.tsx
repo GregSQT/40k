@@ -2793,8 +2793,8 @@ export const BoardWithAPI: React.FC = () => {
             currentPhase={apiProps.gameState?.phase ?? "move"}
             phases={
               apiProps.gameState?.deployment_type === "active"
-                ? ["deployment", "move", "shoot", "charge", "fight"]
-                : ["move", "shoot", "charge", "fight"]
+                ? ["deployment", "command", "move", "shoot", "charge", "fight"]
+                : ["command", "move", "shoot", "charge", "fight"]
             }
             current_player={apiProps.gameState?.current_player}
             onEndPhaseClick={isGameOver ? undefined : apiProps.onEndPhase}

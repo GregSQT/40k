@@ -93,6 +93,7 @@ export function useGameLog(currentTurn?: number) {
         reward: logData.reward,
         action_name: logData.action_name,
         is_ai_action: logData.is_ai_action,
+        result: logData.result,
         shootDetails,
       });
     };

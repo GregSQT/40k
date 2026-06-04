@@ -823,6 +823,27 @@ body {
   gap: 8px;
 }
 
+/* Phase buttons */
+.phase-btn {
+  font-weight: normal;
+}
+
+/* Phase button colors */
+:root {
+  --phase-command-bg: #FCD34D;
+  --phase-command-border: #F59E0B;
+  --phase-move-bg: #15803D;
+  --phase-move-border: #166534;
+  --phase-shoot-bg: #1D4ED8;
+  --phase-shoot-border: #1E40AF;
+  --phase-charge-bg: #7E22CE;
+  --phase-charge-border: #6B21A8;
+  --phase-fight-bg: #B91C1C;
+  --phase-fight-border: #991B1B;
+  --phase-default-bg: #6B7280;
+  --phase-default-border: #4B5563;
+}
+
 .scoring-panel {
   width: 100%;
   background: transparent;
@@ -2005,6 +2026,16 @@ textarea:focus {
   border-radius: var(--icon-square-border-radius) px;
   color: #ffffff;
   font-weight: 700;
+}
+
+.game-log-entry--battle-shock-success {
+  border-left-color: #d97706;
+  background: rgb(200, 168, 20);
+}
+
+.game-log-entry--battle-shock-fail {
+  border-left-color: #ca8a04;
+  background: rgb(161, 124, 10);
 }
 
 .game-log-entry__icon--shoot {

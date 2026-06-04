@@ -1311,6 +1311,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   weaponName: logEntry.weaponName,
                   // Pass through shootDetails for direct use by getEventTypeClass color logic
                   shootDetails: logEntry.shootDetails,
+                  result: logEntry.result,
                   timestamp: new Date(),
                 },
               })
@@ -3558,7 +3559,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         models,
         targets: {},
         declarations: [],
-        activeModelId: null,
+        activeModelId: initialModelId ?? null,
         activeWeaponIndex: null,
         canValidate: false,
       });
@@ -3614,6 +3615,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         if (prev.blinkTimer) clearInterval(prev.blinkTimer);
         return { unitIds: [], blinkTimer: null, attackerId: null };
       });
+      const isMono = plan.models.length === 1;
       setSquadShootPlan((prev) =>
         prev
           ? {
@@ -3622,14 +3624,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               targets: deriveShootTargets(decls),
               // Mono-fig : on garde la fig active (split fire arme A→X puis arme B→Y sans re-clic fig).
               // Multi-fig : on déselectionne (l'utilisateur re-sélectionne explicitement une fig).
-              activeModelId: prev.models.length === 1 ? prev.activeModelId : null,
+              activeModelId: isMono ? prev.activeModelId : null,
               canValidate: decls.length > 0,
             }
           : prev
       );
+      // Mono-fig : re-query les cibles valides pour que le prochain simple-clic fonctionne sans re-clic fig.
+      if (isMono) {
+        await selectShootModelForUnit(plan.unitId, modelId);
+      }
       console.log(`[SQUAD-SHOOT] assign model=${modelId} → target=${targetUnitId} (${decls.length} intents)`);
     },
-    [executeAction]
+    [executeAction, selectShootModelForUnit]
   );
 
   /** Double-clic sur une unité ennemie : toutes les figs ayant l'arme active + LoS tirent dessus
@@ -5631,6 +5637,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                       false,
                     weaponName: logEntry.weaponName, // MULTIPLE_WEAPONS_IMPLEMENTATION.md
                     shootDetails: logEntry.shootDetails,
+                    result: logEntry.result,
                     action_name: logEntry.action_name,
                     reward: logEntry.reward,
                     is_ai_action: logEntry.is_ai_action,
@@ -5978,6 +5985,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                           false,
                         weaponName: logEntry.weaponName, // MULTIPLE_WEAPONS_IMPLEMENTATION.md
                         shootDetails: logEntry.shootDetails,
+                        result: logEntry.result,
                         action_name: logEntry.action_name,
                         reward: logEntry.reward,
                         is_ai_action: logEntry.is_ai_action,

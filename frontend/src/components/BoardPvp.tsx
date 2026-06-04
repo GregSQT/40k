@@ -3323,16 +3323,17 @@ export default function Board({
         }
         lastEnemyClickRef.current = { targetId: enemy, time: now };
         // Clic simple : assigne la fig active si valide.
+        // Si blinkingUnits est vide (valid_targets pas encore chargés), on laisse passer — le backend valide.
         if (plan.activeModelId) {
           const validTargets = stableBlinkingUnitsRef.current;
-          const isValid = validTargets != null && validTargets.length > 0
-            ? validTargets.includes(Number(enemy))
-            : false;
+          const isValid = !validTargets || validTargets.length === 0
+            ? true
+            : validTargets.includes(Number(enemy));
           if (isValid) {
             void cbs.onAssignShootTarget?.(enemy);
           }
         }
-        // sinon : aucune fig active, ou cible hors valid_targets → clic ignoré.
+        // sinon : aucune fig active → clic ignoré.
       }
     };
 

@@ -262,17 +262,17 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
   const getPhaseBaseColor = (phase: string): { bg: string; text: string; border: string } => {
     switch (phase.toLowerCase()) {
       case "command":
-        return { bg: "#FCD34D", text: "#FFFFFF", border: "#F59E0B" }; // yellow-300, white, yellow-500
+        return { bg: "var(--phase-command-bg)", text: "#FFFFFF", border: "var(--phase-command-border)" };
       case "move":
-        return { bg: "#15803D", text: "#FFFFFF", border: "#166534" }; // green-700, white, green-800
+        return { bg: "var(--phase-move-bg)", text: "#FFFFFF", border: "var(--phase-move-border)" };
       case "shoot":
-        return { bg: "#1D4ED8", text: "#FFFFFF", border: "#1E40AF" }; // blue-700, white, blue-800
+        return { bg: "var(--phase-shoot-bg)", text: "#FFFFFF", border: "var(--phase-shoot-border)" };
       case "charge":
-        return { bg: "#7E22CE", text: "#FFFFFF", border: "#6B21A8" }; // purple-700, white, purple-800
+        return { bg: "var(--phase-charge-bg)", text: "#FFFFFF", border: "var(--phase-charge-border)" };
       case "fight":
-        return { bg: "#B91C1C", text: "#FFFFFF", border: "#991B1B" }; // red-700, white, red-800
+        return { bg: "var(--phase-fight-bg)", text: "#FFFFFF", border: "var(--phase-fight-border)" };
       default:
-        return { bg: "#6B7280", text: "#FFFFFF", border: "#4B5563" }; // grey-500, white, grey-600
+        return { bg: "var(--phase-default-bg)", text: "#FFFFFF", border: "var(--phase-default-border)" };
     }
   };
 
@@ -284,7 +284,6 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
     const baseStyle: React.CSSProperties = {
       padding: "4px 8px",
       borderRadius: "4px",
-      fontWeight: "medium",
       fontSize: "14px",
       border: "1px solid",
       cursor: hasClickHandler ? "pointer" : "default",
@@ -313,9 +312,9 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
       case "upcoming":
         return {
           ...baseStyle,
-          backgroundColor: `${baseColor.bg}80`, // Add transparency
+          backgroundColor: baseColor.bg,
           color: baseColor.text,
-          borderColor: `${baseColor.border}80`,
+          borderColor: baseColor.border,
           opacity: 0.7,
         };
       default:
@@ -549,6 +548,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
                     }
                     type="button"
                     key={phase}
+                    className="phase-btn"
                     style={style}
                     disabled={!onPhaseClick}
                     onClick={() => onPhaseClick?.(phase)}

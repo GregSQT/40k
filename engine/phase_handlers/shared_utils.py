@@ -2829,6 +2829,21 @@ def roll_battle_shock(unit_id: str, game_state: Dict[str, Any]) -> bool:
     roll = random.randint(1, 6) + random.randint(1, 6)
     battle_shocked = roll < ld
     unit["battle_shocked"] = battle_shocked
+
+    col = int(unit.get("col", -1))
+    row = int(unit.get("row", -1))
+    result_str = "FAIL" if battle_shocked else "SUCCESS"
+    msg = f"Unit {unit_id}({col},{row}) did a BATTLE-SHOCK test. Ld: {ld}+ - Roll: {roll} - {result_str}"
+    append_action_log(game_state, {
+        "type": "battle_shock",
+        "message": msg,
+        "turn": game_state.get("turn", 0),
+        "phase": "command",
+        "unitId": int(unit_id),
+        "player": int(unit.get("player", -1)),
+        "result": result_str,
+    })
+
     return battle_shocked
 
 

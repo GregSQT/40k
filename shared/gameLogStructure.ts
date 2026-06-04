@@ -47,8 +47,10 @@ export interface BaseLogEntry {
     | "move_cancel"
     | "charge_cancel"
     | "advance"
-    | "roll_info";
+    | "roll_info"
+    | "battle_shock";
   message: string;
+  result?: string;
   turnNumber?: number;
   phase?: string;
   unitType?: string;
@@ -365,6 +367,8 @@ export function getEventIcon(type: string): string {
       return "⇒"; // Double arrow for advance
     case "roll_info":
       return "i"; // Informational roll result
+    case "battle_shock":
+      return "🌀";
     case "wait":
       return "⏸"; // Pause icon for wait
     default:
@@ -441,6 +445,10 @@ export function getEventTypeClass(event: BaseLogEntry | TrainingLogEntry): strin
       return "game-log-entry--advance";
     case "roll_info":
       return "game-log-entry--rule-choice";
+    case "battle_shock":
+      return event.result === "SUCCESS"
+        ? "game-log-entry--battle-shock-success"
+        : "game-log-entry--battle-shock-fail";
     default:
       return "game-log-entry--default";
   }
