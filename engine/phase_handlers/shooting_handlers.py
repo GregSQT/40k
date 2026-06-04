@@ -31,6 +31,7 @@ from .shared_utils import (
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
     get_source_unit_rule_display_name_for_effect as shared_get_source_unit_rule_display_name_for_effect,
     build_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
+    _compute_unit_occupied_hexes,
 )
 
 # ============================================================================
@@ -1179,13 +1180,16 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def compute_hidden_statuses(game_state: Dict[str, Any]) -> None:
-    """Set ``unit['hidden']`` for every unit (rule 13.09 Hidden).
+    """Set ``unit['hidden']`` and ``unit['hidden_models']`` for every unit (rule 13.09 Hidden).
 
-    A unit is hidden while it is hideable (INFANTRY/BEASTS/SWARM), within an obscuring
-    terrain area, and made no ranged attack this turn nor the previous turn. Computed at
-    shooting phase start so enemy targets carry the correct hidden flag for targeting.
+    A model is hidden while it is hideable (INFANTRY/BEASTS/SWARM), its footprint touches
+    an obscuring terrain area, and its unit made no ranged attack this turn nor the previous
+    turn. Computed per model at shooting phase start.
+
+    unit['hidden_models']: list of model_ids whose footprint touches obscuring terrain.
+    unit['hidden']: True only if ALL alive models are hidden.
     """
-    from engine.terrain_utils import resolve_unit_hexes, hexes_in_obscuring_terrain
+    from engine.terrain_utils import hexes_in_obscuring_terrain
     terrain_areas = require_key(game_state, "terrain_areas")
     shot_ids = {str(x) for x in game_state.get("units_shot", set())}
     shot_prev_ids = {str(x) for x in game_state.get("units_shot_previous_turn", set())}
@@ -1196,12 +1200,20 @@ def compute_hidden_statuses(game_state: Dict[str, Any]) -> None:
             continue
         if not is_unit_alive(str(unit_id), game_state) or not bool(unit.get("hideable")):
             unit["hidden"] = False
+            unit["hidden_models"] = []
             continue
         if str(unit_id) in shot_ids or str(unit_id) in shot_prev_ids:
             unit["hidden"] = False
+            unit["hidden_models"] = []
             continue
-        unit_hexes = resolve_unit_hexes(unit, game_state)
-        unit["hidden"] = hexes_in_obscuring_terrain(unit_hexes, terrain_areas)
+        by_model = units_cache[str(unit_id)].get("occupied_hexes_by_model", {})
+        hidden_model_ids = []
+        for mid, (col, row) in by_model.items():
+            footprint = _compute_unit_occupied_hexes(int(col), int(row), unit, game_state)
+            if hexes_in_obscuring_terrain(list(footprint), terrain_areas):
+                hidden_model_ids.append(mid)
+        unit["hidden_models"] = hidden_model_ids
+        unit["hidden"] = len(hidden_model_ids) == len(by_model) and len(by_model) > 0
 
 
 def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:

@@ -177,7 +177,8 @@ export interface Unit {
 
   // Terrain visibility (rules 13.08-13.09)
   hideable?: boolean; // INFANTRY/BEASTS/SWARM — eligible for cover/hidden
-  hidden?: boolean; // currently hidden (in obscuring terrain, no ranged attack this/previous turn)
+  hidden?: boolean; // True only if ALL models are hidden (rule 13.09)
+  hidden_models?: string[]; // model_ids whose footprint touches obscuring terrain
   battle_shocked?: boolean;
 }
 

@@ -165,6 +165,7 @@ class GameStateManager:
             # Terrain visibility (rules 13.08-13.09): hideable derived from keywords, hidden is runtime state
             "hideable": compute_hideable(unit_keywords),
             "hidden": False,
+            "hidden_models": [],
 
             # Battle-shock state (règle 01.07) — reset au début de la command phase du joueur
             "battle_shocked": False,
@@ -619,6 +620,7 @@ class GameStateManager:
                     # Terrain visibility (rules 13.08-13.09): hideable derived from keywords, hidden is runtime state
                     "hideable": compute_hideable(require_key(full_unit_data, "UNIT_KEYWORDS")),
                     "hidden": False,
+                    "hidden_models": [],
 
                     # Battle-shock state (règle 01.07) — reset au début de la command phase du joueur
                     "battle_shocked": False,
