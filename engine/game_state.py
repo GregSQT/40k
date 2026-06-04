@@ -333,9 +333,7 @@ class GameStateManager:
             if resolved_scenario_walls is not None:
                 wall_hex_set = {(int(col), int(row)) for col, row in resolved_scenario_walls}
             
-            from config_loader import get_config_loader
-            config_loader = get_config_loader()
-            board_config = config_loader.get_board_config()
+            board_config = require_key(self.config, "board")
             board_spec = board_config["default"] if "default" in board_config else board_config
             board_cols = require_key(board_spec, "cols")
             board_rows = require_key(board_spec, "rows")

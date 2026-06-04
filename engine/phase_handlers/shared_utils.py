@@ -384,7 +384,6 @@ def _build_models_for_unit(
             "HP_CUR": spec_hp_cur,
             "HP_MAX": spec_hp_max,
             "player": unit_player,
-            "wounds_allocated_this_activation": 0,
             "SHOOT_LEFT": shoot_left,
             "ATTACK_LEFT": attack_left,
             "OC": int(spec.get("OC", oc)),
@@ -3270,20 +3269,6 @@ def clear_pending_fight_intent(game_state: Dict[str, Any], squad_id: str) -> Non
     game_state["pending_squad_fight_intents"].pop(squad_id, None)
 
 
-def reset_wounds_allocated_for_squad(game_state: Dict[str, Any], squad_id: str) -> None:
-    """Reset wounds_allocated_this_activation sur toutes les figs vivantes d une escouade.
-
-    Appele au moment de la declaration de cible (par activation attaquante)
-    sur l ESCOUADE CIBLE. NE PAS reset sur toutes les escouades du jeu —
-    scope per-activation par-cible (cf. spec §"Allocation prioritaire").
-    """
-    models_cache = require_key(game_state, "models_cache")
-    for mid in game_state.get("squad_models", {}).get(squad_id, []):  # get allowed
-        m = models_cache.get(mid)
-        if m is not None:
-            m["wounds_allocated_this_activation"] = 0
-
-
 # ============================================================================
 # SQUAD SHOOTING — declaration / lock (squad.md PR3 3b)
 # ============================================================================
@@ -3299,9 +3284,6 @@ def squad_shooting_unit_activation_start(
     - Verifie pas de pending leftover (bug detection).
     - Initialise pending_squad_shoot_intents[squad_id] = [].
     - Reset SHOOT_LEFT par fig selon l arme RNG selectionnee (NB).
-
-    Reset de wounds_allocated_this_activation : NON ici — fait au moment de la
-    declaration de cible (squad_declare_shoot), scope par-cible.
     """
     assert_no_pending_shoot_intent(game_state, squad_id)
     models_cache = require_key(game_state, "models_cache")
@@ -3439,9 +3421,6 @@ def squad_declare_shoot(
          peut tirer.
       3. Sinon, fig ne tire pas (pas d entree dans intents).
 
-    Au premier tir declare sur une cible donnee : `reset_wounds_allocated_for_squad`
-    sur cette cible (scope per-cible par-activation).
-
     Capture `target_squad_size_at_declaration` (taille de l escouade cible au
     moment de la declaration) — utilise pour BLAST bonus en resolution.
 
@@ -3461,12 +3440,6 @@ def squad_declare_shoot(
         )
 
     intents: List[Dict[str, Any]] = game_state["pending_squad_shoot_intents"][attacker_squad_id]
-    reset_targets: Set[str] = set()
-
-    def _maybe_reset_target_wounds(target_sid: str) -> None:
-        if target_sid not in reset_targets:
-            reset_wounds_allocated_for_squad(game_state, target_sid)
-            reset_targets.add(target_sid)
 
     def _target_size(target_sid: str) -> int:
         return sum(
@@ -3489,7 +3462,6 @@ def squad_declare_shoot(
                     break
         if chosen_target is None:
             continue  # fig bloquee, ne tire pas
-        _maybe_reset_target_wounds(chosen_target)
         sel = m.get("selectedRngWeaponIndex")
         weapon_idx = int(sel) if sel is not None else 0
         # F3 fix (audit) : resoudre NB UNE SEULE FOIS a la declaration, stocker
@@ -3532,9 +3504,6 @@ def squad_declare_shoot_model(
       - escouade cible vivante,
       - la figurine peut tirer la cible (portee + LoS, _model_can_shoot_target).
 
-    Reset wounds_allocated sur la cible a la PREMIERE declaration de l escouade
-    sur cette cible (scope per-cible par-activation, mirroir de squad_declare_shoot).
-
     Returns l intent cree (pour feedback frontend).
     """
     init_pending_intents(game_state)
@@ -3572,10 +3541,6 @@ def squad_declare_shoot_model(
         i for i in intents
         if not (i.get("model_id") == attacker_model_id and int(i.get("weapon_index", -1)) == weapon_idx)
     ]
-    # Premiere declaration de l escouade sur cette cible -> reset wounds cible.
-    if not any(str(i.get("target_unit_id")) == str(target_squad_id) for i in intents):
-        reset_wounds_allocated_for_squad(game_state, target_squad_id)
-
     weapons = m.get("RNG_WEAPONS", [])  # get allowed
     n_attacks_resolved = 0
     if 0 <= weapon_idx < len(weapons):
@@ -3700,9 +3665,6 @@ def squad_declare_shoot_weapon(
     Re-appeler avec la meme arme REMPLACE la cible (retire d abord tous les
     intents de cette arme, toutes figs confondues).
 
-    Reset wounds_allocated sur la cible a la PREMIERE declaration de l escouade
-    sur cette cible (scope per-cible par-activation, mirroir squad_declare_shoot).
-
     Validation stricte (pas de valeur par defaut) :
       - activation tir demarree (pending initialise),
       - escouade cible vivante,
@@ -3727,10 +3689,6 @@ def squad_declare_shoot_weapon(
     widx = int(weapon_index)
     # Remplace toute declaration existante de CETTE arme (changement de cible).
     intents[:] = [i for i in intents if int(i.get("weapon_index", -1)) != widx]
-    # Premiere declaration de l escouade sur cette cible -> reset wounds cible.
-    if not any(str(i.get("target_unit_id")) == str(target_squad_id) for i in intents):
-        reset_wounds_allocated_for_squad(game_state, target_squad_id)
-
     target_size = sum(
         1 for mid in squad_models.get(target_squad_id, []) if mid in models_cache  # get allowed
     )
@@ -3886,12 +3844,13 @@ def _allocate_damage_to_squad(
 ) -> Optional[Dict[str, Any]]:
     """Applique `damage` HP a une figurine vivante du squad selon allocation prioritaire.
 
-    Priorite (regle officielle simplifiee per-activation) :
-      1. Premier modele vivant avec wounds_allocated_this_activation > 0.
+    Priorite (regle officielle 05.04) :
+      1. Premier modele vivant deja blesse (HP_CUR < HP_MAX), persistant
+         entre activations.
       2. Sinon : premier modele vivant par ordre d index.
     Damage excess (> HP_CUR du modele) perdu — pas de carry-over.
     Si le modele est tue → destroy_model(reason='combat').
-    Sinon → update_model_hp + increment wounds_allocated_this_activation.
+    Sinon → update_model_hp.
 
     Returns {model_id, damage_dealt, destroyed} ou None si pas de cible vivante.
     """
@@ -3902,7 +3861,8 @@ def _allocate_damage_to_squad(
         return None
     target_mid: Optional[str] = None
     for mid in alive:
-        if int(models_cache[mid].get("wounds_allocated_this_activation", 0)) > 0:  # get allowed
+        m_entry = models_cache[mid]
+        if int(m_entry["HP_CUR"]) < int(m_entry["HP_MAX"]):
             target_mid = mid
             break
     if target_mid is None:
@@ -3916,13 +3876,9 @@ def _allocate_damage_to_squad(
     new_hp = hp_before - damage_dealt
     destroyed = False
     if new_hp <= 0:
-        # F4 cleanup (audit) : pas d incrementation wounds_allocated_this_activation
-        # avant destroy — la fig est immediatement detachee du cache, l ecriture
-        # serait un no-op silencieux.
         destroy_model(game_state, target_mid, reason="combat")
         destroyed = True
     else:
-        m["wounds_allocated_this_activation"] = int(m.get("wounds_allocated_this_activation", 0)) + damage_dealt  # get allowed
         update_model_hp(game_state, target_mid, new_hp)
     return {
         "model_id": target_mid, "damage_dealt": damage_dealt, "destroyed": destroyed,
@@ -4199,9 +4155,6 @@ def squad_fight_unit_activation_start(
     de connaitre T et Sv de la cible, cf. spec §"Auto-selection de l arme").
     Si la fig change d arme en declaration, ATTACK_LEFT sera recalcule a ce
     moment-la (responsabilite du caller de declaration).
-
-    Reset de wounds_allocated sur la cible : NON ici — fait apres Pile In au
-    moment de la declaration (scope per-cible).
     """
     assert_no_pending_fight_intent(game_state, squad_id)
     models_cache = require_key(game_state, "models_cache")
@@ -4576,7 +4529,6 @@ def squad_declare_fight(
 
     PR3 3f MVP : auto-cible = target_squad_id passe par le caller (l agent a deja
     choisi). Auto-selection d arme CC par fig selon expected damage vs T/Sv cible.
-    Reset wounds_allocated_this_activation sur la cible (per-cible per-activation).
 
     Eligibilite per fig = `get_fighting_models` (in ER OR buddy rule).
 
@@ -4600,9 +4552,6 @@ def squad_declare_fight(
     target_t = int(t_sample.get("T", 4))
     target_sv = int(t_sample.get("ARMOR_SAVE", 7))
     target_invul = int(t_sample.get("INVUL_SAVE", 7))
-
-    # Reset wounds_allocated sur la cible (per-cible per-activation).
-    reset_wounds_allocated_for_squad(game_state, target_squad_id)
 
     fighting = get_fighting_models(game_state, attacker_squad_id)
     intents: List[Dict[str, Any]] = game_state["pending_squad_fight_intents"][attacker_squad_id]

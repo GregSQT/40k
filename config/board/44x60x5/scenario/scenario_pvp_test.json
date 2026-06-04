@@ -109,6 +109,14 @@
         { "col": 107, "row": 110 },
         { "col": 107, "row": 116 }
       ]
+    },
+    {
+      "id": 113, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 100, "row": 50,
+      "models": [
+        { "col": 100, "row": 50 },
+        { "col": 110, "row": 50 },
+        { "col": 105, "row": 58 }
+      ]
     }
   ]
 }
