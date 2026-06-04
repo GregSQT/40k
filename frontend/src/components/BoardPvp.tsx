@@ -6980,21 +6980,13 @@ export default function Board({
     const unit = units.find((u) => u.id === weaponSelectionMenu.unitId);
     const weapon = unit?.RNG_WEAPONS?.[weaponIndex];
     const weaponDisplayName = weapon?.display_name ?? undefined;
-    const isSquadMode = mode === "squadModelShoot";
-
-    // Flux squad : le menu reste affiché jusqu'au Validate (sélection d'arme répétée possible).
-    // Flux legacy (targetPreview) : fermeture immédiate (optimistic update).
-    if (!isSquadMode) {
-      setWeaponSelectionMenu(null);
-    }
-
     try {
       const API_BASE = "/api";
       const response = await fetch(`${API_BASE}/game/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: isSquadMode ? "squad_select_weapon" : "select_weapon",
+          action: "squad_select_weapon",
           unitId: weaponSelectionMenu.unitId.toString(),
           weaponIndex: weaponIndex,
           autoSelectWeapon: autoSelectWeapon,
@@ -7018,7 +7010,7 @@ export default function Board({
             weaponIndex,
             validTargets: data.result?.valid_targets,
             coverByUnitId: data.result?.cover_by_unit_id,
-            isSquadMode,
+            isSquadMode: true,
           },
         })
       );

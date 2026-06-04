@@ -2855,79 +2855,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return;
       }
 
-      // Shooting phase click handling
+      // Shooting phase: all activations go through squad path (onStartSquadModelShoot).
       if (gameState && gameState.phase === "shoot") {
-        if (numericUnitId === null && mode === "attackPreview" && selectedUnitId !== null) {
-          // Shooting phase: postpone (deselect active unit, return to pool)
-          const activeShooterId = gameState.active_shooting_unit;
-          if (activeShooterId) {
-            await executeAction({
-              action: "left_click",
-              unitId: activeShooterId.toString(),
-              clickTarget: "active_unit",
-            });
-          }
-          setSelectedUnitId(null);
-          setMode("select");
-          return;
-        } else if (numericUnitId !== null) {
-          if (!gameState.shoot_activation_pool) {
-            throw new Error(
-              `API ERROR: Missing required shoot_activation_pool during shooting phase`
-            );
-          }
-          const shootActivationPool = gameState.shoot_activation_pool.map((id) => parseInt(id, 10));
-
-          if (
-            gameState.active_shooting_unit &&
-            String(gameState.active_shooting_unit) !== String(numericUnitId)
-          ) {
-            if (shootTargetClickInProgressRef.current) {
-              return;
-            }
-            // Any click while a shooting unit is active belongs to that activation.
-            const clickTarget = determineActivationClickTarget("shoot", numericUnitId, gameState);
-            const payload: Record<string, unknown> = {
-              action: "left_click",
-              unitId: gameState.active_shooting_unit,
-              targetId: numericUnitId.toString(),
-              clickTarget,
-            };
-            const tutorialOpts = getTutorialShootOptionsRef?.current?.();
-            if (tutorialOpts?.forceKill === true) {
-              payload.tutorial_force_kill = true;
-            }
-            if (tutorialOpts?.forceMiss === true) {
-              payload.tutorial_force_miss = true;
-            }
-            shootTargetClickInProgressRef.current = true;
-            try {
-              await executeAction(payload);
-            } finally {
-              shootTargetClickInProgressRef.current = false;
-            }
-            return;
-          }
-
-          if (shootActivationPool.includes(numericUnitId)) {
-            if (activationInProgressRef.current) {
-              return;
-            }
-            activationInProgressRef.current = true;
-            setSelectedUnitId(numericUnitId);
-            setActivationPendingUnitId(numericUnitId);
-            try {
-              await executeAction({
-                action: "activate_unit",
-                unitId: numericUnitId.toString(),
-              });
-            } finally {
-              activationInProgressRef.current = false;
-              setActivationPendingUnitId(null);
-            }
-            return;
-          }
-        }
         return;
       }
 
