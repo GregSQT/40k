@@ -2590,6 +2590,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         available_weapons: unit.available_weapons,
         UNIT_RULES: unit.UNIT_RULES,
         UNIT_KEYWORDS: unit.UNIT_KEYWORDS,
+        battle_shocked: unit.battle_shocked === true ? true : undefined,
+        hideable: unit.hideable,
+        hidden: unit.hidden,
       };
     });
   }, []);

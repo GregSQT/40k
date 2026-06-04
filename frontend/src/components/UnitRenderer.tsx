@@ -437,6 +437,7 @@ export class UnitRenderer {
     this.renderChargeRollBadge(unitIconScale);
     this.renderAdvanceRollBadge(unitIconScale);
     this.renderHiddenBadge(unitIconScale);
+    this.renderBattleShockedIndicator(iconZIndex);
 
     this.props.centerX = originalCenterX;
     this.props.centerY = originalCenterY;
@@ -2247,6 +2248,61 @@ export class UnitRenderer {
     g.name = `hidden-badge-${unitIdNum}`;
     g.zIndex = 10001;
     targetContainer.addChild(g);
+  }
+
+  private renderBattleShockedIndicator(iconZIndex: number): void {
+    const {
+      unit,
+      centerX,
+      centerY,
+      HEX_RADIUS,
+      UNIT_CIRCLE_RADIUS_RATIO,
+      HEX_HORIZ_SPACING,
+      app,
+      uiElementsContainer,
+    } = this.props;
+    const targetContainer = uiElementsContainer || app.stage;
+    const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
+
+    if (uiElementsContainer) {
+      const prefix = `battle-shocked-${unitIdNum}`;
+      const existing = uiElementsContainer.children.filter(
+        (child: PIXI.DisplayObject) =>
+          typeof child.name === "string" && child.name.startsWith(prefix)
+      );
+      existing.forEach((child: PIXI.DisplayObject) => {
+        uiElementsContainer.removeChild(child);
+        if ("destroy" in child && typeof child.destroy === "function") child.destroy();
+      });
+    }
+
+    if (!unit.battle_shocked) return;
+
+    const nr = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
+    let bottomExtentY: number;
+    if (nr) {
+      bottomExtentY = nr.topExtentY;
+    } else {
+      const displayBase = resolveBaseSizeForUnitDisplay(unit);
+      bottomExtentY =
+        displayBase > 1
+          ? (displayBase / 2) * HEX_HORIZ_SPACING
+          : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
+    }
+
+    const emojiSize = bottomExtentY * 0.7;
+    const posX = centerX;
+    const posY = centerY + bottomExtentY - 0.25 * emojiSize;
+
+    const text = new PIXI.Text("🌀", {
+      fontSize: emojiSize,
+      align: "center",
+    });
+    text.anchor.set(0.5, 0.5);
+    text.position.set(posX, posY);
+    text.name = `battle-shocked-${unitIdNum}`;
+    text.zIndex = iconZIndex + 1;
+    targetContainer.addChild(text);
   }
 
   private renderUnitIdDebug(iconZIndex: number): void {

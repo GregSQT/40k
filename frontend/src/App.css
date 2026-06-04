@@ -2708,7 +2708,6 @@ textarea:focus {
   border-radius: 6px;
   padding: 8px;
   min-width: 400px;
-  max-width: 600px;
   z-index: 100000;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }

@@ -178,6 +178,7 @@ export interface Unit {
   // Terrain visibility (rules 13.08-13.09)
   hideable?: boolean; // INFANTRY/BEASTS/SWARM — eligible for cover/hidden
   hidden?: boolean; // currently hidden (in obscuring terrain, no ranged attack this/previous turn)
+  battle_shocked?: boolean;
 }
 
 export interface SingleShotState {

@@ -2757,6 +2757,36 @@ def apply_snap_corrections(
     return corrected
 
 
+def roll_hazard_for_unit(unit_id: str, game_state: Dict[str, Any]) -> int:
+    """Hazard roll pour une unité (règle 06.03) — avant un Desperate Escape fall-back.
+
+    Tire 1D6 par figurine vivante simultanément.
+    Sur 1-2 : 1 mortal wound (ou 3 si toute l'unité est MONSTER ou VEHICLE).
+    Retourne le total de mortal wounds appliqués.
+    """
+    import random
+    squad_models = require_key(game_state, "squad_models")
+    models_cache = require_key(game_state, "models_cache")
+    alive_count = sum(
+        1 for mid in squad_models.get(str(unit_id), []) if mid in models_cache
+    )
+    if alive_count == 0:
+        return 0
+    units = require_key(game_state, "units")
+    unit = next((u for u in units if str(u.get("id")) == str(unit_id)), None)
+    if unit is None:
+        raise KeyError(f"roll_hazard_for_unit: unit {unit_id} not found in game_state['units']")
+    keywords = [k.lower() for k in unit.get("UNIT_KEYWORDS", [])]
+    wounds_per_fail = 3 if ("monster" in keywords or "vehicle" in keywords) else 1
+    total_wounds = sum(
+        wounds_per_fail for _ in range(alive_count) if random.randint(1, 6) <= 2
+    )
+    if total_wounds > 0:
+        current_hp = require_hp_from_cache(str(unit_id), game_state)
+        update_units_cache_hp(game_state, str(unit_id), max(0, current_hp - total_wounds))
+    return total_wounds
+
+
 def is_unit_at_half_strength(unit_id: str, game_state: Dict[str, Any]) -> bool:
     """Vérifie si une unité est à la half-strength (règle 08.03).
 

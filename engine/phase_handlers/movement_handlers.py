@@ -32,6 +32,7 @@ from .shared_utils import (
     is_footprint_placement_valid, get_engagement_zone, get_max_base_size_hex,
     get_squad_move_budget, validate_move_plan, _validate_plan_coherency, commit_move,
     get_coherency_subhex, _compute_unit_occupied_hexes, _squad_is_in_enemy_er,
+    roll_hazard_for_unit, roll_battle_shock,
 )
 from engine.hex_utils import (
     _hex_center,
@@ -1964,6 +1965,13 @@ def movement_build_model_destinations_pool(
 
     has_fly = _unit_has_keyword(unit, "fly")
 
+    # Desperate Escape : unité battle-shocked tentant un fall-back depuis l'ER ennemie.
+    # Les figurines peuvent traverser les positions ennemies (règle 09.07).
+    desperate_escape = (
+        unit.get("battle_shocked", False)
+        and _squad_is_in_enemy_er(game_state, squad_id)
+    )
+
     # Zone d'engagement ennemie au niveau ANCRE.
     # ez > 1 (Board ×N) : géométrie euclidienne par-mover, source unique partagée avec le path IA
     #   (``_compute_mover_ez_forbidden_mask``) → garantit IA == PvP. L'empreinte du mover est déjà
@@ -2003,10 +2011,11 @@ def movement_build_model_destinations_pool(
             cell = (nc, nr)
             if cell in visited:
                 continue
-            if not has_fly and (
-                cell in wall_hexes or cell in enemy_occupied or cell in ez_anchor_forbidden
-            ):
-                continue
+            if not has_fly:
+                if cell in wall_hexes:
+                    continue
+                if not desperate_escape and (cell in enemy_occupied or cell in ez_anchor_forbidden):
+                    continue
             visited.add(cell)
             queue.append((nc, nr, d + 1))
             # Validite destination : murs + toutes figs occupant la cellule + engagement ennemi
@@ -2236,8 +2245,31 @@ def movement_commit_move_plan_handler(
         }
 
     was_engaged = _squad_is_in_enemy_er(game_state, str(squad_id))
+    unit_pre_move = get_unit_by_id(game_state, str(squad_id))
+    if unit_pre_move is None:
+        return False, {"error": "unit_not_found_pre_move", "unitId": squad_id}
+    desperate_escape = was_engaged and unit_pre_move.get("battle_shocked", False)
+
+    if desperate_escape:
+        hazard_wounds = roll_hazard_for_unit(str(squad_id), game_state)
+        if not is_unit_alive(str(squad_id), game_state):
+            _invalidate_all_destination_pools_after_movement(game_state)
+            movement_clear_preview(game_state)
+            return True, {
+                "action": "desperate_escape_died",
+                "unitId": squad_id,
+                "hazard_wounds": hazard_wounds,
+                "activation_complete": True,
+                "waiting_for_player": False,
+            }
+
     move_type = "fall_back" if was_engaged else "normal"
     commit_move(plan, game_state, move_type)
+
+    if desperate_escape:
+        unit_post_move = get_unit_by_id(game_state, str(squad_id))
+        if unit_post_move and not unit_post_move.get("battle_shocked", False):
+            roll_battle_shock(str(squad_id), game_state)
 
     unit = get_unit_by_id(game_state, squad_id)
     if not unit:
