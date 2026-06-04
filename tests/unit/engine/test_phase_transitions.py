@@ -26,6 +26,8 @@ from engine.phase_handlers.shared_utils import (
     get_hp_from_cache,
 )
 
+from _config_helpers import build_game_rules
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers communs
@@ -33,7 +35,7 @@ from engine.phase_handlers.shared_utils import (
 
 def _base_config() -> Dict[str, Any]:
     return {
-        "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35, "los_visibility_min_ratio": 0.0, "cover_ratio": 0.0},
+        "game_rules": build_game_rules(engagement_zone=1, max_base_size_hex=35, los_visibility_min_ratio=0.0, cover_ratio=0.0),
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
     }
 
@@ -184,6 +186,11 @@ def _make_shoot_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
         "inches_to_subhex": 1,
     }
     build_units_cache(gs)
+    # Contrat moteur : build_unit_los_cache() peuple los_cover_cache à l'activation.
+    # Ce fixture appelle _attack_sequence_rng() en direct (hors activation) : on reproduit
+    # le cache (aucune cible en cover) pour rester déterministe sans dépendance terrain/LoS.
+    for u in units:
+        u["los_cover_cache"] = {str(o["id"]): False for o in units}
     return gs
 
 

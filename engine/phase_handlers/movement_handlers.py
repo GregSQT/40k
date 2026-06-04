@@ -8,6 +8,7 @@ ZERO TOLERANCE for state storage or wrapper patterns
 """
 
 from typing import Dict, List, Tuple, Set, Optional, Any
+import numpy as np
 from collections import deque, OrderedDict
 from .generic_handlers import end_activation, _log_with_context
 from shared.data_validation import require_key, require_present
@@ -1045,7 +1046,6 @@ def _compute_mover_ez_forbidden_mask(
     ``eng_bad[c, r] == True`` ⇔ placer l'ANCRE du mover en ``(c, r)`` viole l'EZ (empreinte du
     mover déjà prise en compte). À tester au niveau ancre, ne PAS re-dilater par l'empreinte.
     """
-    import numpy as np
     from engine.hex_utils import (
         engagement_minimum_clearance_norm,
         round_base_radius_norm,

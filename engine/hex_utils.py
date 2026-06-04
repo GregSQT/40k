@@ -471,8 +471,8 @@ def _hex_projected(c: int, r: int) -> tuple:
 
 def _objective_rect_hexes(
     *,
-    top_left: list,
-    bottom_right: list,
+    top_left: Sequence,
+    bottom_right: Sequence,
     cols: int,
     rows: int,
 ) -> List[List[int]]:
@@ -499,7 +499,7 @@ def _objective_rect_hexes(
 
 def _objective_triangle_hexes(
     *,
-    vertices: list,
+    vertices: Sequence,
     cols: int,
     rows: int,
 ) -> List[List[int]]:
@@ -531,7 +531,7 @@ def _objective_triangle_hexes(
 
 def _objective_polygon_hexes(
     *,
-    vertices: list,
+    vertices: Sequence,
     cols: int,
     rows: int,
 ) -> List[List[int]]:

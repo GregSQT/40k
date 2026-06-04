@@ -96,7 +96,7 @@ def _entry_is_multi_figure(cache_entry: Dict[str, Any]) -> bool:
         int(require_key(cache_entry, "row")),
         require_key(cache_entry, "BASE_SHAPE"),
         require_key(cache_entry, "BASE_SIZE"),
-        int(cache_entry.get("orientation", 0)),
+        int(require_key(cache_entry, "orientation")),
     )
     return len(occ) > len(single)
 

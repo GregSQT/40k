@@ -3278,7 +3278,7 @@ def _attacker_model_can_reach_squad(
         if calculate_hex_distance(ac, ar, tc, tr) > range_subhex:
             continue
         footprint = list(_compute_unit_occupied_hexes(tc, tr, base_unit, game_state))
-        visible, total = _compute_visibility_with_obscuring(
+        visible, total, _ = _compute_visibility_with_obscuring(
             game_state, shooter_anchor, shooter_hexes, (tc, tr), footprint
         )
         if total > 0 and (visible / total) >= min_ratio:
@@ -4063,17 +4063,6 @@ def resolve_squad_shoot(
             "is_ai_action": g["player"] == 1,
             "shootDetails": [{"shotNumber": i + 1, **s} for i, s in enumerate(g["shots"])],
         })
-        # for dead_mid in g["killed_model_ids"]:
-        #     append_action_log(game_state, {
-        #         "type": "death",
-        #         #"message": f"Unit {target_sid_g} model {dead_mid} DESTROYED",
-        #         "turn": game_state.get("turn", 0),
-        #         "phase": "shoot",
-        #         "targetId": target_sid_g,
-        #         "unitId": target_sid_g,
-        #         "player": int(tgt_uc.get("player", 0)),
-        #         "timestamp": "server_time",
-        #     })
 
     # Meta cibles + escouades wipe (pour reward shaping proportionnel)
     summary["targets_meta"] = targets_meta

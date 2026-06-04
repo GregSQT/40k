@@ -17,6 +17,8 @@ import pytest
 from engine.phase_handlers.shooting_handlers import _attack_sequence_rng
 from engine.phase_handlers.shared_utils import build_units_cache
 
+from _config_helpers import build_game_rules
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -65,12 +67,12 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 5) -> Dict[str, A
 def _make_game_state(units: List[Dict[str, Any]]) -> Dict[str, Any]:
     gs: Dict[str, Any] = {
         "config": {
-            "game_rules": {
-                "engagement_zone": 1,
-                "max_base_size_hex": 35,
-                "los_visibility_min_ratio": 0.0,
-                "cover_ratio": 0.0,
-            },
+            "game_rules": build_game_rules(
+                engagement_zone=1,
+                max_base_size_hex=35,
+                los_visibility_min_ratio=0.0,
+                cover_ratio=0.0,
+            ),
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },
         "board_cols": 25,
@@ -92,6 +94,11 @@ def _make_game_state(units: List[Dict[str, Any]]) -> Dict[str, Any]:
         "charge_activation_pool": [],
     }
     build_units_cache(gs)
+    # Contrat moteur : build_unit_los_cache() peuple los_cover_cache à l'activation.
+    # Ces tests appellent _attack_sequence_rng() en direct (hors activation) : on reproduit
+    # le cache (aucune cible en cover) pour rester déterministe sans dépendance terrain/LoS.
+    for u in units:
+        u["los_cover_cache"] = {str(o["id"]): False for o in units}
     return gs
 
 

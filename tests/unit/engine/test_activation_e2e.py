@@ -15,6 +15,8 @@ import pytest
 from engine.w40k_core import W40KEngine
 from engine.phase_handlers.shared_utils import build_units_cache, build_enemy_adjacent_hexes
 
+from _config_helpers import build_game_rules
+
 
 @pytest.fixture(autouse=True)
 def mock_reward_systems(monkeypatch):
@@ -37,12 +39,12 @@ def mock_reward_systems(monkeypatch):
 
 def _base_config() -> Dict[str, Any]:
     return {
-        "game_rules": {
-            "engagement_zone": 1,
-            "max_base_size_hex": 35,
-            "los_visibility_min_ratio": 0.0,
-            "cover_ratio": 0.0,
-        },
+        "game_rules": build_game_rules(
+            engagement_zone=1,
+            max_base_size_hex=35,
+            los_visibility_min_ratio=0.0,
+            cover_ratio=0.0,
+        ),
         "charge": {
             "charge_max_distance": 12,
         },

@@ -4193,12 +4193,12 @@ class W40KEngine(gym.Env):
             unit["_manual_weapon_selected"] = True
             unit["manualWeaponSelected"] = True
             # Propage le choix d arme a chaque figurine du squad.
-            models_cache = self.game_state.get("models_cache", {})
-            squad_models_map = self.game_state.get("squad_models", {})
-            for mid in squad_models_map.get(squad_id, []):
+            models_cache = require_key(self.game_state, "models_cache")
+            squad_models_map = require_key(self.game_state, "squad_models")
+            for mid in squad_models_map.get(squad_id, []):  # get allowed
                 m = models_cache.get(mid)
                 if m is not None:
-                    model_weapons = m.get("RNG_WEAPONS", [])
+                    model_weapons = require_key(m, "RNG_WEAPONS")
                     if weapon_index < len(model_weapons):
                         m["selectedRngWeaponIndex"] = weapon_index
             available_weapons = _squad_available_weapons(unit)

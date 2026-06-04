@@ -1283,7 +1283,7 @@ class GameStateManager:
         """Load wall hexes from the 'walls' section of a terrain file referenced by terrain_ref."""
         terrain_data, terrain_path = self._read_terrain_file(terrain_ref, scenario_file)
         result: List[List[int]] = []
-        for gi, g in enumerate(terrain_data.get("walls", [])):
+        for gi, g in enumerate(terrain_data.get("walls", [])):  # get allowed
             if not isinstance(g, dict):
                 continue
             hint = f"Terrain file {terrain_path} walls[{gi}]"
@@ -1301,7 +1301,7 @@ class GameStateManager:
         cols, rows = get_config_loader().get_board_size()
         terrain_data, terrain_path = self._read_terrain_file(terrain_ref, scenario_file)
         areas: List[Dict[str, Any]] = []
-        for ai, area in enumerate(terrain_data.get("terrain", [])):
+        for ai, area in enumerate(terrain_data.get("terrain", [])):  # get allowed
             if not isinstance(area, dict):
                 continue
             if area.get("shape") != "polygon":

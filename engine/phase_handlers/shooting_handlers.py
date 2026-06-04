@@ -1184,7 +1184,7 @@ def compute_hidden_statuses(game_state: Dict[str, Any]) -> None:
     shooting phase start so enemy targets carry the correct hidden flag for targeting.
     """
     from engine.terrain_utils import resolve_unit_hexes, hexes_in_obscuring_terrain
-    terrain_areas = game_state.get("terrain_areas", [])
+    terrain_areas = require_key(game_state, "terrain_areas")
     shot_ids = {str(x) for x in game_state.get("units_shot", set())}
     shot_prev_ids = {str(x) for x in game_state.get("units_shot_previous_turn", set())}
     units_cache = require_key(game_state, "units_cache")
@@ -3535,7 +3535,7 @@ def _get_obscuring_area_sets(game_state: Dict[str, Any]) -> List[Tuple[str, Set[
     if cached is not None:
         return cached
     out: List[Tuple[str, Set[Tuple[int, int]]]] = []
-    for area in game_state.get("terrain_areas", []):
+    for area in require_key(game_state, "terrain_areas"):
         if not area.get("obscuring"):
             continue
         hex_set = {(int(h[0]), int(h[1])) for h in require_key(area, "hexes")}
@@ -3614,7 +3614,7 @@ def _compute_visibility_with_obscuring(
     shooter_hexes: List[Tuple[int, int]],
     target_anchor: Tuple[int, int],
     target_hexes: List[Tuple[int, int]],
-) -> Tuple[int, int]:
+) -> Tuple[int, int, Set[Tuple[int, int]]]:
     """Count target footprint hexes reachable by a clear hex-line from the shooter.
 
     Rule (LoS, §1.x + terrain §13.10): the observing unit sees a target hex if a 1mm line can be
@@ -3622,7 +3622,8 @@ def _compute_visibility_with_obscuring(
     observer" with the anchor hex plus the two perpendicular footprint extremes (lateral peek),
     evaluated as a 2nd chance only when the anchor line is blocked. A line is blocked by a dense
     wall (always) or by an obscuring terrain area that neither the shooter nor the target occupies
-    (excluding areas one or both units are within). Returns (visible_hexes, total_hexes).
+    (excluding areas one or both units are within).
+    Returns (visible_hexes, total_hexes, visible_hex_set).
     """
     from engine.hex_utils import hex_line
 
@@ -3656,11 +3657,13 @@ def _compute_visibility_with_obscuring(
         return True
 
     visible = 0
+    visible_hex_set: Set[Tuple[int, int]] = set()
     for tc, tr in target_hexes:
         # Anchor first; lateral vantage points only as a 2nd chance when the anchor is blocked.
         if any(_line_clear(sp[0], sp[1], tc, tr) for sp in source_points):
             visible += 1
-    return visible, len(target_hexes)
+            visible_hex_set.add((int(tc), int(tr)))
+    return visible, len(target_hexes), visible_hex_set
 
 
 def _resolve_unit_anchor_and_footprint(
@@ -3719,7 +3722,7 @@ def compute_unit_los(
     sid = shooter.get("id")
     tid = target.get("id")
     if sid is not None and tid is not None:
-        ver = game_state.get("_unit_move_version", 0)
+        ver = game_state["_unit_move_version"]
         holder = game_state.get("_unit_los_pair_cache")
         if holder is None or holder[0] != ver:
             holder = (ver, {})
@@ -3754,7 +3757,7 @@ def _compute_unit_los_uncached(
         game_state, target, gym_training=gym_training
     )
 
-    visible, total = _compute_visibility_with_obscuring(
+    visible, total, visible_hex_set = _compute_visibility_with_obscuring(
         game_state, shooter_anchor, shooter_hexes, target_anchor, target_hexes
     )
     ratio = (visible / total) if total else 0.0
@@ -3762,10 +3765,36 @@ def _compute_unit_los_uncached(
     fully_visible = total > 0 and visible == total
 
     from engine.terrain_utils import hexes_in_any_terrain
-    terrain_areas = game_state.get("terrain_areas", [])
-    cond_terrain = bool(
-        can_see and target.get("hideable") and hexes_in_any_terrain(target_hexes, terrain_areas)
-    )
+    from engine.hex_utils import compute_occupied_hexes
+    terrain_areas = require_key(game_state, "terrain_areas")
+    cond_terrain = False
+
+    if can_see and target.get("hideable"):
+        target_id = str(require_key(target, "id"))
+        squad_models_map = require_key(game_state, "squad_models")
+        models_cache = require_key(game_state, "models_cache")
+        model_ids = squad_models_map.get(target_id)
+        if not model_ids:
+            raise ValueError(f"Target unit {target_id} has no models in squad_models")
+        base_shape = require_key(target, "BASE_SHAPE")
+        base_size = require_key(target, "BASE_SIZE")
+        orientation = require_key(target, "orientation")
+        all_visible_in_terrain = True
+        for mid in model_ids:
+            m = models_cache.get(mid)
+            if m is None:
+                raise KeyError(f"Model {mid} missing from models_cache")
+            if int(require_key(m, "HP_CUR")) <= 0:
+                continue
+            model_hexes = list(compute_occupied_hexes(
+                int(m["col"]), int(m["row"]), base_shape, base_size, orientation
+            ))
+            if any((int(hx[0]), int(hx[1])) in visible_hex_set for hx in model_hexes):
+                if not hexes_in_any_terrain(model_hexes, terrain_areas):
+                    all_visible_in_terrain = False
+                    break
+        cond_terrain = all_visible_in_terrain
+
     cover = bool(can_see and (cond_terrain or not fully_visible))
 
     return {
@@ -3859,7 +3888,7 @@ def _update_unit_los_preview_data(
         for _h in _hex_set:
             obscuring_by_hex[_h] = _area_id
     terrain_hex_set: Set[Tuple[int, int]] = set()
-    for _area in game_state.get("terrain_areas", []):
+    for _area in require_key(game_state, "terrain_areas"):
         for _h in require_key(_area, "hexes"):
             terrain_hex_set.add((int(_h[0]), int(_h[1])))
 

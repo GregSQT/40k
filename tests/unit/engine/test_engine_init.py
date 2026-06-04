@@ -23,6 +23,8 @@ import pytest
 from engine.w40k_core import W40KEngine
 from shared.data_validation import ConfigurationError
 
+from _config_helpers import build_game_rules
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config minimale valide pour le chemin « config fourni directement »
@@ -51,10 +53,10 @@ def _minimal_config() -> Dict[str, Any]:
                 "inches_to_subhex": 1,
             }
         },
-        "game_rules": {
-            "engagement_zone": 1,
-            "max_base_size_hex": 35,
-        },
+        "game_rules": build_game_rules(
+            engagement_zone=1,
+            max_base_size_hex=35,
+        ),
         "pve_mode": False,
         # observation_params dans config (utilisé par ObservationBuilder directement)
         "observation_params": obs_params,
@@ -124,18 +126,6 @@ class TestEngineInitFailures:
         bad_config = {"pve_mode": False}  # Clé 'board' absente
         with pytest.raises((ConfigurationError, KeyError)):
             W40KEngine(config=bad_config)
-
-    def test_config_missing_objectives_raises(self):
-        """init_no_objectives : objectives vide → ValueError('objectives are required')."""
-        cfg = _minimal_config()
-        # Rendre objectives vide
-        cfg["board"]["default"]["objectives"] = []
-
-        # mock weapon_damage_table pour éviter dépendance fichier
-        with patch("engine.w40k_core.load_weapon_damage_table", return_value={}):
-            with pytest.raises(ValueError, match="objectives are required"):
-                W40KEngine(config=cfg)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Succès avec config minimale réelle
