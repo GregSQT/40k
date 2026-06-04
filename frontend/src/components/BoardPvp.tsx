@@ -5990,7 +5990,10 @@ export default function Board({
             }
             if (
               phase === "shoot" &&
-              (mode === "select" || mode === "attackPreview" || mode === "movePreview") &&
+              (mode === "select" ||
+                mode === "attackPreview" ||
+                mode === "movePreview" ||
+                mode === "squadModelShoot") &&
               blinkingCoverByUnitId !== undefined
             ) {
               return blinkingCoverByUnitId;
@@ -7014,6 +7017,7 @@ export default function Board({
             availableWeapons: data.result?.available_weapons,
             weaponIndex,
             validTargets: data.result?.valid_targets,
+            coverByUnitId: data.result?.cover_by_unit_id,
             isSquadMode,
           },
         })

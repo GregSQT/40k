@@ -4153,6 +4153,8 @@ class W40KEngine(gym.Env):
         from engine.phase_handlers.shooting_handlers import (
             weapon_availability_check,
             _is_adjacent_to_enemy_within_cc_range,
+            build_unit_los_cache,
+            build_cover_by_unit_id_for_valid_targets,
         )
 
         name = action.get("action")
@@ -4167,6 +4169,16 @@ class W40KEngine(gym.Env):
                 {"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")}
                 for w in pool
             ]
+
+        def _squad_cover_by_unit_id(valid_targets: List[str]) -> Dict[str, bool]:
+            """Cover geometrique par cible valide (brique LoS partagee, single source of truth).
+
+            IGNORES_COVER est applique cote arme par le frontend ; ici le cover est purement
+            geometrique (cible en terrain / partiellement visible), identique au tir mono-fig.
+            """
+            build_unit_los_cache(self.game_state, squad_id)
+            unit_obj = get_unit_by_id(squad_id, self.game_state)
+            return build_cover_by_unit_id_for_valid_targets(self.game_state, unit_obj, valid_targets)
 
         if name == "squad_shoot_activate":
             squad_shooting_unit_activation_start(self.game_state, squad_id)
@@ -4207,6 +4219,7 @@ class W40KEngine(gym.Env):
             return True, {
                 "action": name, "unitId": squad_id, "weaponIndex": weapon_index,
                 "available_weapons": available_weapons, "valid_targets": valid_targets,
+                "cover_by_unit_id": _squad_cover_by_unit_id(valid_targets),
             }
 
         if name == "squad_shoot_select_model":
@@ -4216,6 +4229,7 @@ class W40KEngine(gym.Env):
             return True, {
                 "action": name, "unitId": squad_id, "modelId": model_id,
                 "valid_targets": valid_targets,
+                "cover_by_unit_id": _squad_cover_by_unit_id(valid_targets),
             }  # get allowed
 
         if name == "squad_shoot_assign":
@@ -4251,6 +4265,7 @@ class W40KEngine(gym.Env):
             return True, {
                 "action": name, "unitId": squad_id, "weaponIndex": weapon_index,
                 "valid_targets": valid_targets,
+                "cover_by_unit_id": _squad_cover_by_unit_id(valid_targets),
             }
 
         if name == "squad_shoot_assign_weapon":

@@ -932,6 +932,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         availableWeapons?: Array<{ index: number; weapon: unknown; can_use?: boolean; canUse?: boolean; reason?: string }>;
         weaponIndex?: number;
         validTargets?: Array<string | number>;
+        coverByUnitId?: Record<string, boolean>;
         isSquadMode?: boolean;
       }
       const {
@@ -939,6 +940,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         availableWeapons,
         weaponIndex: selectedWeaponIndex,
         validTargets: weaponValidTargets,
+        coverByUnitId: weaponCoverByUnitId,
         isSquadMode: weaponIsSquadMode,
       } = (e as CustomEvent<WeaponSelectedEventDetail>).detail;
 
@@ -952,10 +954,24 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         const blinkIds = Array.isArray(weaponValidTargets)
           ? weaponValidTargets.map((x) => (typeof x === "string" ? parseInt(x, 10) : x))
           : [];
+        if (
+          !weaponCoverByUnitId ||
+          typeof weaponCoverByUnitId !== "object" ||
+          Array.isArray(weaponCoverByUnitId)
+        ) {
+          throw new Error("squad_select_weapon: cover_by_unit_id absent/invalid in response");
+        }
+        const coverByUnitId: Record<string, boolean> = {};
+        for (const [tid, inCover] of Object.entries(weaponCoverByUnitId)) {
+          if (typeof inCover !== "boolean") {
+            throw new Error(`squad_select_weapon: cover_by_unit_id.${tid} must be boolean`);
+          }
+          coverByUnitId[tid] = inCover;
+        }
         setBlinkingUnits((prev) => {
           if (prev.blinkTimer) clearInterval(prev.blinkTimer);
           const timer = blinkIds.length ? window.setInterval(() => {}, 500) : null;
-          return { unitIds: blinkIds, blinkTimer: timer, attackerId: squadShootPlanRef.current?.unitId ?? null };
+          return { unitIds: blinkIds, blinkTimer: timer, attackerId: squadShootPlanRef.current?.unitId ?? null, coverByUnitId };
         });
       }
       if (newGameState) {
@@ -3555,13 +3571,24 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (!result?.valid_targets) {
         throw new Error("squad_shoot select_model: valid_targets absent in response");
       }
+      const rawCover = result.cover_by_unit_id;
+      if (!rawCover || typeof rawCover !== "object" || Array.isArray(rawCover)) {
+        throw new Error("squad_shoot select_model: cover_by_unit_id absent/invalid in response");
+      }
+      const coverByUnitId: Record<string, boolean> = {};
+      for (const [tid, inCover] of Object.entries(rawCover as Record<string, unknown>)) {
+        if (typeof inCover !== "boolean") {
+          throw new Error(`squad_shoot select_model: cover_by_unit_id.${tid} must be boolean`);
+        }
+        coverByUnitId[tid] = inCover;
+      }
       const validTargets = (result.valid_targets as string[]).map((id) =>
         parseInt(id, 10)
       );
       setBlinkingUnits((prev) => {
         if (prev.blinkTimer) clearInterval(prev.blinkTimer);
         const timer = validTargets.length ? window.setInterval(() => {}, 500) : null;
-        return { unitIds: validTargets, blinkTimer: timer, attackerId: unitId };
+        return { unitIds: validTargets, blinkTimer: timer, attackerId: unitId, coverByUnitId };
       });
       setSquadShootPlan((prev) =>
         prev && prev.unitId === unitId ? { ...prev, activeModelId: modelId } : prev

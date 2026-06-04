@@ -298,7 +298,8 @@ export class UnitRenderer {
         } else if (
           (this.props.mode === "movePreview" ||
             this.props.mode === "select" ||
-            this.props.mode === "attackPreview") &&
+            this.props.mode === "attackPreview" ||
+            this.props.mode === "squadModelShoot") &&
           this.props.movePreviewShootingTargetInCoverByUnitId
         ) {
           const key = String(this.props.unit.id);
@@ -1553,7 +1554,8 @@ export class UnitRenderer {
       if (
         (this.props.mode === "movePreview" ||
           this.props.mode === "select" ||
-          this.props.mode === "attackPreview") &&
+          this.props.mode === "attackPreview" ||
+          this.props.mode === "squadModelShoot") &&
         this.props.movePreviewShootingTargetInCoverByUnitId
       ) {
         const key = String(this.props.unit.id);
