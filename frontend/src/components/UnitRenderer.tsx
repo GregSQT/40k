@@ -1024,8 +1024,7 @@ export class UnitRenderer {
           !isPreview &&
           hasShootingPreviewContextSprite &&
           unit.player !== current_player &&
-          this.props.blinkingUnits &&
-          this.props.blinkingUnits.length > 0
+          this.props.blinkingUnits != null
         ) {
           const isShootable =
             this.props.isShootable !== undefined
@@ -2224,9 +2223,7 @@ export class UnitRenderer {
     }
 
     // Hidden flag (rule 13.09) — show if at least one model is hidden.
-    const hiddenCount = unit.hidden_models?.length ?? (unit.hidden ? 1 : 0);
-    if (hiddenCount === 0) return;
-    const fullyHidden = !!unit.hidden;
+    if (!unit.hidden) return;
 
     // Bottom-left of unit (mirror of the bottom-right charge badge).
     const scaledOffset = ((HEX_RADIUS * unitIconScale) / 2) * 0.8;
@@ -2235,9 +2232,8 @@ export class UnitRenderer {
     const r = Math.max(7, HEX_RADIUS * 0.32);
 
     const g = new PIXI.Graphics();
-    // Fully hidden: dark disc / Partially hidden: lighter disc.
-    g.beginFill(fullyHidden ? 0x1e1e1e : 0x4a4a4a, 0.9);
-    g.lineStyle(2, fullyHidden ? 0xb0b0b0 : 0xffaa44, 1);
+    g.beginFill(0x1e1e1e, 0.9);
+    g.lineStyle(2, 0xb0b0b0, 1);
     g.drawCircle(badgeX, badgeY, r);
     g.endFill();
     // Small eye (white) + red diagonal slash → reads as "hidden / not seen".

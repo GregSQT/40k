@@ -3342,6 +3342,21 @@ def _attacker_model_can_reach_squad(
     base_unit = units_cache.get(str(target_squad_id))
     if base_unit is None:
         return False
+    # Rule 13.09: hidden unit only targetable within detection range (15").
+    _units = game_state.get("units", [])
+    _target_unit = next((u for u in _units if str(u.get("id")) == str(target_squad_id)), None)
+    if _target_unit and bool(_target_unit.get("hidden")):
+        detection_range_subhex = (
+            float(game_rules.get("detection_range", 15))
+            * int(require_key(game_state, "inches_to_subhex"))
+        )
+        _any_within = any(
+            calculate_hex_distance(ac, ar, int(tm["col"]), int(tm["row"])) <= detection_range_subhex
+            for mid in squad_models.get(target_squad_id, [])
+            if (tm := models_cache.get(mid)) is not None
+        )
+        if not _any_within:
+            return False
     shooter_anchor = (ac, ar)
     shooter_hexes = [shooter_anchor]
     for mid in squad_models.get(target_squad_id, []):  # get allowed
