@@ -94,6 +94,8 @@ export function useGameLog(currentTurn?: number) {
         action_name: logData.action_name,
         is_ai_action: logData.is_ai_action,
         result: logData.result,
+        weaponName: logData.weaponName,
+        targetUnitType: logData.targetUnitType,
         shootDetails,
       });
     };

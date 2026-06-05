@@ -66,7 +66,7 @@ import {
   drawBoard,
   updateMovePreviewPolygonLayerInHighlightContainer,
 } from "./BoardDisplay";
-import { renderUnit } from "./UnitRenderer";
+import { renderUnit, type ModelVisualMeta } from "./UnitRenderer";
 import { WeaponDropdown } from "./WeaponDropdown";
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
@@ -1693,10 +1693,13 @@ export default function Board({
     unit: Unit;
     col: number;
     row: number;
+    meta: ModelVisualMeta | null;
   }
   const [deadModelGhosts, setDeadModelGhosts] = useState<DeadModelGhost[]>([]);
   // key: "unitId:modelId" (or "unitId:_" for single-model units) → [col, row]
-  const prevModelPosRef = useRef<Map<string, [number, number]>>(new Map());
+  const prevModelPosRef = useRef<
+    Map<string, { pos: [number, number]; meta: ModelVisualMeta | null }>
+  >(new Map());
 
   // Only expose ghosts to PIXI during shoot phase — prevents false detections during
   // phase transitions from affecting unitsFingerprint / unitsChanged outside of shoot.
@@ -4004,29 +4007,38 @@ export default function Board({
   // Runs BEFORE the PIXI render effect. Only fires when units_cache changes (shoot actions).
   useEffect(() => {
     const unitsCache = gameState?.units_cache as
-      | Record<string, { col?: number; row?: number; occupied_hexes_by_model?: Record<string, [number, number]> }>
+      | Record<
+          string,
+          {
+            col?: number;
+            row?: number;
+            occupied_hexes_by_model?: Record<string, [number, number]>;
+            models_meta_by_model?: Record<string, ModelVisualMeta>;
+          }
+        >
       | undefined;
 
-    const newPosMap = new Map<string, [number, number]>();
+    const newPosMap = new Map<string, { pos: [number, number]; meta: ModelVisualMeta | null }>();
     if (unitsCache) {
       for (const [unitId, entry] of Object.entries(unitsCache)) {
         if (entry.occupied_hexes_by_model) {
           for (const [modelId, pos] of Object.entries(entry.occupied_hexes_by_model)) {
-            newPosMap.set(`${unitId}:${modelId}`, pos as [number, number]);
+            const meta = entry.models_meta_by_model?.[modelId] ?? null;
+            newPosMap.set(`${unitId}:${modelId}`, { pos: pos as [number, number], meta });
           }
         } else if (entry.col !== undefined && entry.row !== undefined) {
-          newPosMap.set(`${unitId}:_`, [entry.col, entry.row]);
+          newPosMap.set(`${unitId}:_`, { pos: [entry.col, entry.row], meta: null });
         }
       }
     }
 
     const newGhosts: DeadModelGhost[] = [];
-    for (const [key, pos] of prevModelPosRef.current) {
+    for (const [key, prev] of prevModelPosRef.current) {
       if (!newPosMap.has(key)) {
         const unitId = key.split(":")[0];
         const parentUnit = units.find((u) => String(u.id) === unitId);
         if (parentUnit) {
-          newGhosts.push({ unit: parentUnit, col: pos[0], row: pos[1] });
+          newGhosts.push({ unit: parentUnit, col: prev.pos[0], row: prev.pos[1], meta: prev.meta });
         }
       }
     }
@@ -5761,9 +5773,13 @@ export default function Board({
         }
 
         const cacheEntry = unitsCache?.[unitIdStr] as
-          | { occupied_hexes_by_model?: Record<string, [number, number]> }
+          | {
+              occupied_hexes_by_model?: Record<string, [number, number]>;
+              models_meta_by_model?: Record<string, ModelVisualMeta>;
+            }
           | undefined;
         const occupiedHexesByModel = cacheEntry?.occupied_hexes_by_model;
+        const modelMetasByModel = cacheEntry?.models_meta_by_model;
         // squad.md brique 3 : pour l'escouade en mode plan, afficher les figs aux positions
         // PROVISOIRES (ghost) + flag de validite par fig (voile rouge sur les invalides).
         const isSquadGhost =
@@ -5798,6 +5814,9 @@ export default function Board({
             HEX_HEIGHT / 2 +
             MARGIN,
         ]);
+        const modelMetas: Array<ModelVisualMeta | null> = modelMetasByModel
+          ? modelIds.map((mid) => modelMetasByModel[mid] ?? null)
+          : [];
         const [anchorCenterX, anchorCenterY] = modelCenters[0];
 
         // Skip units that are being previewed elsewhere
@@ -5938,6 +5957,7 @@ export default function Board({
           centerX: anchorCenterX,
           centerY: anchorCenterY,
           modelCenters,
+          modelMetas,
           app,
           renderTarget: unitsLayer,
           uiElementsContainer: uiElementsContainerRef.current!,
@@ -6181,12 +6201,21 @@ export default function Board({
             | Record<string, unknown>
             | undefined;
           const previewCacheEntry = previewUnitsCache?.[String(previewUnit.id)] as
-            | { occupied_hexes_by_model?: Record<string, [number, number]> }
+            | {
+                occupied_hexes_by_model?: Record<string, [number, number]>;
+                models_meta_by_model?: Record<string, ModelVisualMeta>;
+              }
             | undefined;
           const previewOccupied = previewCacheEntry?.occupied_hexes_by_model;
+          const previewMetasByModel = previewCacheEntry?.models_meta_by_model;
           const previewModelPositions: Array<[number, number]> = previewOccupied
             ? (Object.values(previewOccupied) as Array<[number, number]>)
             : [[previewUnit.col, previewUnit.row]];
+          // Metas alignées sur previewModelPositions (même ordre de clés que occupied_hexes_by_model).
+          const previewModelMetas: Array<ModelVisualMeta | null> =
+            previewOccupied && previewMetasByModel
+              ? Object.keys(previewOccupied).map((mid) => previewMetasByModel[mid] ?? null)
+              : [];
           const anchorPixelX =
             previewUnit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
           const anchorPixelY =
@@ -6216,6 +6245,7 @@ export default function Board({
             centerX,
             centerY,
             modelCenters: previewModelCenters,
+            modelMetas: previewModelMetas,
             app,
             renderTarget: unitsLayer,
             useOverlayIcons: true,
@@ -6275,6 +6305,7 @@ export default function Board({
           centerX: gCenterX,
           centerY: gCenterY,
           modelCenters: [[gCenterX, gCenterY]],
+          modelMetas: [ghost.meta],
           app,
           renderTarget: unitsLayer,
           boardConfig: boardConfigForRender,

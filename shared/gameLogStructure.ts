@@ -91,6 +91,7 @@ export interface ShootDetail {
   saveSuccess?: boolean;
   damageDealt?: number;
   targetDied?: boolean;
+  targetUnitType?: string;
 }
 
 /**

@@ -566,7 +566,11 @@ export const GameLog: React.FC<GameLogProps> = ({
                   {expandedEntries.has(event.id) && event.shootDetails && event.shootDetails.length > 0 && (
                     <div className="game-log-entry__shot-details">
                       {event.shootDetails.map((shot) => {
-                        const parts: string[] = [`#${shot.shotNumber}`];
+                        const total = event.shootDetails!.length;
+                        const parts: string[] = [`${shot.shotNumber}/${total}`];
+                        if (event.weaponName) parts.push(event.weaponName);
+                        const targetType = shot.targetUnitType ?? event.targetUnitType;
+                        if (targetType) parts.push(targetType);
                         parts.push(`Tir: ${shot.hitResult === "HIT" ? "✓" : "✗"}${shot.attackRoll !== undefined ? ` (${shot.attackRoll})` : ""}`);
                         if (shot.hitResult === "HIT") {
                           parts.push(`Bless: ${shot.strengthResult === "SUCCESS" ? "✓" : "✗"}${shot.strengthRoll !== undefined ? ` (${shot.strengthRoll})` : ""}`);

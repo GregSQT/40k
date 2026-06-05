@@ -1309,6 +1309,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                     false,
                   // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Pass through weapon name
                   weaponName: logEntry.weaponName,
+                  targetUnitType: logEntry.targetUnitType,
                   // Pass through shootDetails for direct use by getEventTypeClass color logic
                   shootDetails: logEntry.shootDetails,
                   result: logEntry.result,
@@ -5636,6 +5637,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                       logEntry.devastating_wounds_applied ||
                       false,
                     weaponName: logEntry.weaponName, // MULTIPLE_WEAPONS_IMPLEMENTATION.md
+                    targetUnitType: logEntry.targetUnitType,
                     shootDetails: logEntry.shootDetails,
                     result: logEntry.result,
                     action_name: logEntry.action_name,
@@ -5984,6 +5986,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                           logEntry.devastating_wounds_applied ||
                           false,
                         weaponName: logEntry.weaponName, // MULTIPLE_WEAPONS_IMPLEMENTATION.md
+                        targetUnitType: logEntry.targetUnitType,
                         shootDetails: logEntry.shootDetails,
                         result: logEntry.result,
                         action_name: logEntry.action_name,

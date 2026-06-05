@@ -38,6 +38,18 @@ import {
   getSelectedRangedWeapon,
 } from "../utils/weaponHelpers";
 
+/**
+ * Profil visuel d'une figurine dans une escouade hétérogène (override de l'unité
+ * parente). Valeurs déjà prêtes à l'affichage (BASE_SIZE transformé subhex côté backend).
+ */
+export interface ModelVisualMeta {
+  DISPLAY_NAME?: string;
+  ICON?: string;
+  ICON_SCALE?: number;
+  BASE_SHAPE?: string;
+  BASE_SIZE?: number | [number, number];
+}
+
 interface UnitRendererProps {
   unit: Unit;
   centerX: number;
@@ -50,6 +62,13 @@ interface UnitRendererProps {
    * located at (centerX, centerY) — legacy behaviour.
    */
   modelCenters?: Array<[number, number]>;
+  /**
+   * Per-model visual overrides, aligned index-for-index with modelCenters.
+   * A non-null entry replaces the unit's icon/scale/base for that figure
+   * (heterogeneous squad: Sergeant / attached character). Empty array or null
+   * entries fall back to the parent unit's own visual fields.
+   */
+  modelMetas?: Array<ModelVisualMeta | null>;
   app: PIXI.Application;
   uiElementsContainer?: PIXI.Container; // Persistent container for UI elements (target logos, badges) that should never be cleaned up
   useOverlayIcons?: boolean; // Render advance/weapon icons in DOM overlay
@@ -412,14 +431,29 @@ export class UnitRenderer {
     const originalCenterY = this.props.centerY;
 
 
-    for (const [mx, my] of modelCenters) {
+    // Escouade hétérogène : chaque figurine peut avoir son propre profil visuel
+    // (icône, échelle, base). On substitue temporairement this.props.unit par un
+    // "unit virtuel" pour que TOUTES les fonctions de rendu (cercle, icône, rayon
+    // de base) voient les bonnes valeurs sans réécriture. Restauré après la boucle.
+    const modelMetas = this.props.modelMetas;
+    const originalUnit = this.props.unit;
+    modelCenters.forEach(([mx, my], i) => {
       this.props.centerX = mx;
       this.props.centerY = my;
+      const meta = modelMetas?.[i];
+      this.props.unit = meta ? ({ ...originalUnit, ...meta } as Unit) : originalUnit;
+      // Échelle d'icône recalculée par figurine (dépend de BASE_SIZE / ICON_SCALE).
+      const figDisplayBase = resolveBaseSizeForUnitDisplay(this.props.unit);
+      const figBaseSize = figDisplayBase > 1 ? figDisplayBase : undefined;
+      const figIconScale = figBaseSize
+        ? (figBaseSize * HEX_HORIZ_SPACING) / this.props.HEX_RADIUS
+        : this.props.unit.ICON_SCALE || this.props.ICON_SCALE;
       this.renderUnitCircle(iconZIndex);
       this.renderUnitIcon(iconZIndex);
-      this.renderGreenActivationCircle(isEligible, unitIconScale);
+      this.renderGreenActivationCircle(isEligible, figIconScale);
       this.renderUnitIdDebug(iconZIndex);
-    }
+    });
+    this.props.unit = originalUnit;
 
     // Squad-level UI anchored at first model center
     this.props.centerX = modelCenters[0][0];

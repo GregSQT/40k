@@ -350,7 +350,7 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
 })
 
 
-_UNITS_CACHE_FRONTEND_KEYS = ("col", "row", "HP_CUR", "player", "orientation", "occupied_hexes_by_model")
+_UNITS_CACHE_FRONTEND_KEYS = ("col", "row", "HP_CUR", "player", "orientation", "occupied_hexes_by_model", "models_meta_by_model")
 
 # Ne pas omettre les boucles masque sur la base du seul hash client si le contour est petit
 # (évite un aller-retour inutile et reste tolérant aux clients sans cache).

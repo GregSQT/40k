@@ -4,7 +4,6 @@
   "objectives_ref": "objectives-none.json",
   "terrain_ref": "terrain-mc1.json",
   "units": [
-    { "id": 1, "unit_type": "CaptainTerminatorRelicWeaponBolter", "player": 1, "col": 130, "row": 115 },
     { "id": 2, "unit_type": "LibrarianTerminator",                 "player": 1, "col": 155, "row": 47 },
     { "id": 3, "unit_type": "LieutenantCombiWeapon",               "player": 1, "col": 168, "row": 208 },
     { "id": 4, "unit_type": "ApothecaryBiologis",                  "player": 1, "col": 164, "row": 198 },
@@ -46,7 +45,8 @@
         { "col": 145, "row": 150 },
         { "col": 135, "row": 150 },
         { "col": 125, "row": 150 },
-        { "col": 140, "row": 142, "unit_type": "TerminatorCyclone" }
+        { "col": 140, "row": 142, "unit_type": "TerminatorCyclone" },
+        { "col": 120, "row": 140, "unit_type": "CaptainTerminatorRelicWeaponBolter" }
       ]
     },
 
@@ -116,6 +116,17 @@
         { "col": 100, "row": 50 },
         { "col": 110, "row": 50 },
         { "col": 105, "row": 58 }
+      ]
+    },
+    {
+      "id": 114, "unit_type": "Intercessor", "player": 2, "col": 30, "row": 10,
+      "models": [
+        { "col": 24, "row": 10, "unit_type": "LieutenantCloseCombatBolter" },
+        { "col": 30, "row": 10, "unit_type": "IntercessorGrenadeLauncher" },
+        { "col": 38, "row": 10 },
+        { "col": 46, "row": 10 },
+        { "col": 34, "row": 15, "unit_type": "IntercessorSergeant" },
+        { "col": 42, "row": 15 }
       ]
     }
   ]

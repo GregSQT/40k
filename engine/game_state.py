@@ -666,8 +666,24 @@ class GameStateManager:
                                 for w in m_cc:
                                     if "RNG" in w:
                                         w["RNG"] = int(w["RNG"]) * _ish_local
+                            # BASE_SIZE : même transformation subhex que l'unité parente
+                            # (cf. enhanced_unit ci-dessus) pour un affichage cohérent.
+                            _m_base_raw = require_key(m_data, "BASE_SIZE")
+                            if _ish_local > 1:
+                                _m_base_size = (
+                                    [max(1, round(s * _ish_local / 10)) for s in _m_base_raw]
+                                    if isinstance(_m_base_raw, list)
+                                    else max(1, round(_m_base_raw * _ish_local / 10))
+                                )
+                            else:
+                                _m_base_size = 1
                             m_spec.update({
                                 "unit_type": model_unit_type,
+                                "DISPLAY_NAME": require_key(m_data, "DISPLAY_NAME"),
+                                "ICON": require_key(m_data, "ICON"),
+                                "ICON_SCALE": require_key(m_data, "ICON_SCALE"),
+                                "BASE_SHAPE": require_key(m_data, "BASE_SHAPE"),
+                                "BASE_SIZE": _m_base_size,
                                 "HP_MAX": int(require_key(m_data, "HP_MAX")),
                                 "T": int(require_key(m_data, "T")),
                                 "ARMOR_SAVE": int(require_key(m_data, "ARMOR_SAVE")),
