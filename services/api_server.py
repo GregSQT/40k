@@ -352,6 +352,49 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
 
 _UNITS_CACHE_FRONTEND_KEYS = ("col", "row", "HP_CUR", "player", "orientation", "occupied_hexes_by_model", "models_meta_by_model")
 
+# Clés moteur internes par unité / par arme, non consommées par l'UI web (le grep frontend est vide).
+# Filtrées de la réponse JSON (allège chaque POST /action : roster complet × armes), conservées côté moteur.
+_UNIT_EXCLUDE_KEYS_FOR_API = frozenset({"_wdc_def_key", "_precheck_cache"})
+_WEAPON_EXCLUDE_KEYS_FOR_API = frozenset({"_wdc_off_key", "_parsed_rules"})
+
+
+def _slim_weapon_for_api(weapon: Any) -> Any:
+    """Copie d'une arme sans les clés moteur internes (``_wdc_off_key``, ``_parsed_rules``)."""
+    if not isinstance(weapon, dict):
+        return weapon
+    return {k: v for k, v in weapon.items() if k not in _WEAPON_EXCLUDE_KEYS_FOR_API}
+
+
+def _slim_unit_for_api(unit: Any) -> Any:
+    """Copie d'une unité pour la réponse API.
+
+    Retire les caches/clés moteur de l'unité (``_wdc_def_key``, ``_precheck_cache``) et des armes
+    (``RNG_WEAPONS`` / ``CC_WEAPONS``, y compris par modèle dans ``models``). Copies superficielles
+    ciblées : ne mute jamais l'unité du moteur (le moteur garde ``_precheck_cache`` / clés WDC).
+    """
+    if not isinstance(unit, dict):
+        return unit
+    out = {k: v for k, v in unit.items() if k not in _UNIT_EXCLUDE_KEYS_FOR_API}
+    for wkey in ("RNG_WEAPONS", "CC_WEAPONS"):
+        weapons = out.get(wkey)
+        if isinstance(weapons, list):
+            out[wkey] = [_slim_weapon_for_api(w) for w in weapons]
+    models = out.get("models")
+    if isinstance(models, list):
+        new_models = []
+        for m in models:
+            if isinstance(m, dict):
+                mm = dict(m)
+                for wkey in ("RNG_WEAPONS", "CC_WEAPONS"):
+                    mweapons = mm.get(wkey)
+                    if isinstance(mweapons, list):
+                        mm[wkey] = [_slim_weapon_for_api(w) for w in mweapons]
+                new_models.append(mm)
+            else:
+                new_models.append(m)
+        out["models"] = new_models
+    return out
+
 # Ne pas omettre les boucles masque sur la base du seul hash client si le contour est petit
 # (évite un aller-retour inutile et reste tolérant aux clients sans cache).
 _MASK_LOOPS_OMIT_MIN_TOTAL_COORDS = 128
@@ -522,6 +565,9 @@ def _game_state_for_json(
             uid: {fk: entry[fk] for fk in _UNITS_CACHE_FRONTEND_KEYS if fk in entry}
             for uid, entry in raw_cache.items()
         }
+    raw_units = engine_instance.game_state.get("units")
+    if isinstance(raw_units, list):
+        gs["units"] = [_slim_unit_for_api(u) for u in raw_units]
     _apply_move_preview_mask_loops_transport_to_gs(gs, mask_loops_client_hash=mask_loops_client_hash)
     # Preview move : boucles masque monde — si présentes côté moteur, ne pas envoyer ``move_preview_footprint_zone``
     # (milliers de couples ; même silhouette via les polygones).
