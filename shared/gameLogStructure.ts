@@ -92,6 +92,8 @@ export interface ShootDetail {
   damageDealt?: number;
   targetDied?: boolean;
   targetUnitType?: string;
+  targetCol?: number;
+  targetRow?: number;
 }
 
 /**

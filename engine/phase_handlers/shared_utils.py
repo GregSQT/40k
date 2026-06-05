@@ -3987,6 +3987,8 @@ def _allocate_damage_to_squad(
     target_points_per_hp = float(require_key(m, "points_per_hp"))
     target_player = int(require_key(m, "player"))
     target_unit_type = m.get("unitType")
+    target_col = m.get("col")
+    target_row = m.get("row")
     damage_dealt = min(int(damage), hp_before)
     new_hp = hp_before - damage_dealt
     destroyed = False
@@ -3999,6 +4001,8 @@ def _allocate_damage_to_squad(
         "model_id": target_mid, "damage_dealt": damage_dealt, "destroyed": destroyed,
         "points_per_hp": target_points_per_hp, "target_player": target_player,
         "unitType": target_unit_type,
+        "col": target_col,
+        "row": target_row,
     }
 
 
@@ -4197,6 +4201,8 @@ def resolve_squad_shoot(
             pd["rec"]["damageDealt"] = int(res["damage_dealt"])
             pd["rec"]["targetDied"] = bool(res["destroyed"])
             pd["rec"]["targetUnitType"] = res.get("unitType")
+            pd["rec"]["targetCol"] = res.get("col")
+            pd["rec"]["targetRow"] = res.get("row")
         # Apres toutes les attaques de cet intent, decrement SHOOT_LEFT du modele attaquant
         if attacker_mid in models_cache:
             sl = int(models_cache[attacker_mid].get("SHOOT_LEFT", 0))  # get allowed

@@ -588,6 +588,9 @@ export const GameLog: React.FC<GameLogProps> = ({
                                 }
                                 if (!shot.saveSuccess && shot.damageDealt !== undefined) {
                                   parts.push(`Dmg: ${shot.damageDealt}`);
+                                  if (shot.targetCol !== undefined && shot.targetRow !== undefined) {
+                                    parts.push(`(${shot.targetCol},${shot.targetRow})`);
+                                  }
                                 }
                                 if (shot.targetDied) {
                                   parts.push("💀");
