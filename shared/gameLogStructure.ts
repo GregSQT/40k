@@ -91,6 +91,8 @@ export interface ShootDetail {
   saveSuccess?: boolean;
   damageDealt?: number;
   targetDied?: boolean;
+  /** Tir perdu : l'escouade cible etait deja entierement detruite (overkill). */
+  wasted?: boolean;
   targetUnitType?: string;
   targetCol?: number;
   targetRow?: number;

@@ -4203,6 +4203,17 @@ def resolve_squad_shoot(
             pd["rec"]["targetUnitType"] = res.get("unitType")
             pd["rec"]["targetCol"] = res.get("col")
             pd["rec"]["targetRow"] = res.get("row")
+        # Overkill reel : si l escouade cible est ENTIEREMENT detruite par cette salve,
+        # les tirs au-dela du dernier kill n avaient plus de cible -> marques wasted.
+        # (Si une figurine survit, aucun tir n est wasted : tout a ete tire sur la cible.)
+        target_still_alive = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
+        if not target_still_alive:
+            last_kill_pos = -1
+            for _i, _r in enumerate(intent_shot_records):
+                if _r.get("targetDied"):
+                    last_kill_pos = _i
+            for _r in intent_shot_records[last_kill_pos + 1:]:
+                _r["wasted"] = True
         # Apres toutes les attaques de cet intent, decrement SHOOT_LEFT du modele attaquant
         if attacker_mid in models_cache:
             sl = int(models_cache[attacker_mid].get("SHOOT_LEFT", 0))  # get allowed

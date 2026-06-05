@@ -568,9 +568,8 @@ export const GameLog: React.FC<GameLogProps> = ({
                       {(() => {
                         const allShots = event.shootDetails!;
                         const total = allShots.length;
-                        const lastKillIdx = allShots.reduce((last, s, i) => s.targetDied ? i : last, -1);
-                        const visibleShots = lastKillIdx >= 0 ? allShots.slice(0, lastKillIdx + 1) : allShots;
-                        const wastedCount = lastKillIdx >= 0 ? total - (lastKillIdx + 1) : 0;
+                        const visibleShots = allShots.filter((s) => !s.wasted);
+                        const wastedCount = total - visibleShots.length;
                         return (
                           <>
                             {visibleShots.map((shot) => {
