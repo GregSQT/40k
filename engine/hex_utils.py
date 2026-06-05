@@ -107,54 +107,67 @@ def min_distance_between_sets(
     Returns 0 if sets overlap. Raises ValueError if either set is empty.
 
     Args:
-        max_distance: If > 0, stop searching beyond this distance and return
-            max_distance + 1 when sets are farther apart. Critical for performance
-            when only checking adjacency (max_distance=1) on large footprints.
+        max_distance: If > 0, the result is only guaranteed exact while it is
+            <= max_distance. When the sets are farther apart, a value strictly
+            greater than max_distance is returned (a cube bounding-box lower
+            bound, not necessarily max_distance + 1) — sufficient for the
+            threshold tests (<= / >) every caller performs. With max_distance == 0
+            the exact distance is always returned.
 
-    For large footprints, uses multi-source BFS from the smaller set to avoid
-    O(|A|*|B|) brute-force which is prohibitive for base_size=35 (1113 hexes).
+    Computes a cube bounding-box lower bound in O(|A|+|B|); if that already
+    exceeds max_distance the bound is returned without pairwise work. Otherwise
+    the cells of A are scanned nearest-first (by cube distance to B's bounding-box
+    centre) against B with early-exit, avoiding the O(|A|*|B|) worst case on large
+    overlapping footprints (base_size=18 ≈ 211 hexes, base_size=35 ≈ 1113 hexes).
     """
     if not set_a or not set_b:
         raise ValueError("Cannot compute distance between empty sets")
     if set_a & set_b:
         return 0
 
-    if len(set_a) <= 64 and len(set_b) <= 64:
-        best = _UNREACHABLE
-        for c1, r1 in set_a:
-            x1, y1, z1 = offset_to_cube(c1, r1)
-            for c2, r2 in set_b:
-                x2, y2, z2 = offset_to_cube(c2, r2)
-                d = max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
-                if d < best:
-                    best = d
-                    if best == 1:
-                        return 1
-        return best
+    cubes_a = [offset_to_cube(c, r) for c, r in set_a]
+    cubes_b = [offset_to_cube(c, r) for c, r in set_b]
+    bxs = [c[0] for c in cubes_b]
+    bys = [c[1] for c in cubes_b]
+    bzs = [c[2] for c in cubes_b]
+    bxmin, bxmax = min(bxs), max(bxs)
+    bymin, bymax = min(bys), max(bys)
+    bzmin, bzmax = min(bzs), max(bzs)
+    axs = [c[0] for c in cubes_a]
+    ays = [c[1] for c in cubes_a]
+    azs = [c[2] for c in cubes_a]
 
-    if len(set_a) > len(set_b):
-        set_a, set_b = set_b, set_a
+    def _axis_gap(lo1: int, hi1: int, lo2: int, hi2: int) -> int:
+        if hi1 < lo2:
+            return lo2 - hi1
+        if hi2 < lo1:
+            return lo1 - hi2
+        return 0
 
-    visited: Set[Tuple[int, int]] = set(set_a)
-    frontier = list(set_a)
-    dist = 0
-    while frontier:
-        dist += 1
-        if max_distance > 0 and dist > max_distance:
-            return max_distance + 1
-        next_frontier: List[Tuple[int, int]] = []
-        for c, r in frontier:
-            offsets = _NEIGHBORS_ODD_COL if (c & 1) else _NEIGHBORS_EVEN_COL
-            for dc, dr in offsets:
-                nc, nr = c + dc, r + dr
-                npos = (nc, nr)
-                if npos in set_b:
-                    return dist
-                if npos not in visited:
-                    visited.add(npos)
-                    next_frontier.append(npos)
-        frontier = next_frontier
-    return _UNREACHABLE
+    lower = max(
+        _axis_gap(min(axs), max(axs), bxmin, bxmax),
+        _axis_gap(min(ays), max(ays), bymin, bymax),
+        _axis_gap(min(azs), max(azs), bzmin, bzmax),
+    )
+    if max_distance > 0 and lower > max_distance:
+        return lower
+
+    # Scan A nearest-first so a near-optimal `best` appears early, then early-exit
+    # as soon as `best` cannot be beaten (best <= 1, or best already hits `lower`).
+    cbx = (bxmin + bxmax) / 2.0
+    cby = (bymin + bymax) / 2.0
+    cbz = (bzmin + bzmax) / 2.0
+    cubes_a.sort(key=lambda p: max(abs(p[0] - cbx), abs(p[1] - cby), abs(p[2] - cbz)))
+
+    best = _UNREACHABLE
+    for x1, y1, z1 in cubes_a:
+        for x2, y2, z2 in cubes_b:
+            d = max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
+            if d < best:
+                best = d
+                if best <= 1 or best == lower:
+                    return best
+    return best
 
 
 def dilate_hex_set_unbounded(
@@ -163,8 +176,9 @@ def dilate_hex_set_unbounded(
 ) -> Set[Tuple[int, int]]:
     """All hexes on the infinite odd-q grid within ``radius`` steps of ``fp`` (inclusive).
 
-    Uses the same 6-neighbor expansion as ``min_distance_between_sets`` (unbounded BFS).
-    For disjoint non-empty footprints A and B: ``min_distance_between_sets(A, B) <= radius``
+    Uses the 6-neighbor odd-q expansion (multi-source unbounded BFS). Consistent
+    with the cube hex metric of ``min_distance_between_sets``: for disjoint
+    non-empty footprints A and B, ``min_distance_between_sets(A, B) <= radius``
     iff ``A & dilate_hex_set_unbounded(B, radius)`` is non-empty (and same symmetrically).
 
     Args:
