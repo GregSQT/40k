@@ -157,7 +157,10 @@ class GameStateManager:
             "orientation": orientation_init,
             "UNIT_RULES": unit_rules,
             "UNIT_KEYWORDS": unit_keywords,
-            
+            # Attached units (rule 19.01): bodyguard unit-name keywords this leader/support may attach to.
+            # Empty list for non-leader units (valid business case, not an error fallback).
+            "CAN_LEAD": copy.deepcopy(config.get("CAN_LEAD", [])),
+
             # AI_TURN.md action tracking fields
             "SHOOT_LEFT": shoot_left,
             "ATTACK_LEFT": attack_left,
@@ -612,6 +615,8 @@ class GameStateManager:
                     "orientation": orientation_u,
                     "UNIT_RULES": copy.deepcopy(require_key(full_unit_data, "UNIT_RULES")),
                     "UNIT_KEYWORDS": copy.deepcopy(require_key(full_unit_data, "UNIT_KEYWORDS")),
+                    # Attached units (rule 19.01): empty list for non-leader units (valid business case).
+                    "CAN_LEAD": copy.deepcopy(full_unit_data.get("CAN_LEAD", [])),
                     "SHOOT_LEFT": shoot_left,
                     "ATTACK_LEFT": attack_left,
 
@@ -690,6 +695,7 @@ class GameStateManager:
                                 "INVUL_SAVE": int(require_key(m_data, "INVUL_SAVE")),
                                 "OC": int(require_key(m_data, "OC")),
                                 "VALUE": int(require_key(m_data, "VALUE")),
+                                "UNIT_RULES": copy.deepcopy(require_key(m_data, "UNIT_RULES")),
                                 "RNG_WEAPONS": m_rng,
                                 "CC_WEAPONS": m_cc,
                                 "selectedRngWeaponIndex": 0 if m_rng else None,

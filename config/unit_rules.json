@@ -123,5 +123,25 @@
     "name": "Reroll To Wound on Objective (Targeted Intercession)",
     "alias": "reroll_towound_target_on_objective",
     "description": "Display rule for Targeted Intercession: reroll wound rolls against targets on objective."
+  },
+  "leader": {
+    "id": "leader",
+    "name": "Leader",
+    "description": "Before the battle, this unit can be attached to one eligible bodyguard unit (listed in CAN_LEAD) to form an attached unit (rules 19.01/24.22). Each bodyguard unit can have only one leader unit attached."
+  },
+  "support": {
+    "id": "support",
+    "name": "Support",
+    "description": "Before the battle, this unit can be attached to one eligible bodyguard unit (listed in CAN_LEAD) to form an attached unit (rules 19.01/24.34). Each bodyguard unit can have only one support unit attached."
+  },
+  "special_weapon": {
+    "id": "special_weapon",
+    "name": "Special Weapon",
+    "description": "Role marker: this model is the squad's special/heavy weapon bearer."
+  },
+  "sergeant": {
+    "id": "sergeant",
+    "name": "Sergeant",
+    "description": "Role marker: this model is the squad leader (sergeant / pack leader)."
   }
 }

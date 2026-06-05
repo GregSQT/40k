@@ -1,11 +1,11 @@
-// frontend/src/roster/spaceMarine/units/WolfGuardTerminator.ts
+// frontend/src/roster/spaceMarine/units/WolfGuardTerminatorPackLeader.ts
 
-import { getWeapons } from "../armory";
+import { getWeapons } from "../armory.ts";
 import { EliteMeleeElite } from "../classes/EliteMeleeElite.ts";
 
-export class WolfGuardTerminator extends EliteMeleeElite {
-  static NAME = "WolfGuardTerminator";
-  static DISPLAY_NAME = "Wolf Guard Terminator";
+export class WolfGuardTerminatorPackLeader extends EliteMeleeElite {
+  static NAME = "WolfGuardTerminatorPackLeader";
+  static DISPLAY_NAME = "Wolf Guard Terminator (Pack Leader)";
 
   // BASE
   static MOVE = 6; // Move distance
@@ -18,10 +18,13 @@ export class WolfGuardTerminator extends EliteMeleeElite {
   static VALUE = 33; // Unit value (W40K points cost)
 
   // WEAPONS
-  static RNG_WEAPON_CODES = ["storm_bolter_wolf_guard"];
-  static RNG_WEAPONS = getWeapons(WolfGuardTerminator.RNG_WEAPON_CODES);
-  static CC_WEAPON_CODES = ["master_crafted_power_weapon"];
-  static CC_WEAPONS = getWeapons(WolfGuardTerminator.CC_WEAPON_CODES);
+  static RNG_WEAPON_CODES: string[] = [];
+  static RNG_WEAPONS = getWeapons(WolfGuardTerminatorPackLeader.RNG_WEAPON_CODES);
+  static CC_WEAPON_CODES = ["relic_greataxe"];
+  static CC_WEAPONS = getWeapons(WolfGuardTerminatorPackLeader.CC_WEAPON_CODES);
+
+  // UNIT RULES
+  static UNIT_RULES = [{ ruleId: "sergeant", displayName: "Pack Leader" }];
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
@@ -31,13 +34,13 @@ export class WolfGuardTerminator extends EliteMeleeElite {
     { keywordId: "wolf guard terminator squad" },
   ];
 
-  static ICON = "/icons/WolfGuardTerminator.webp"; // Path relative to public folder
+  static ICON = "/icons/WolfGuardTerminatorPackLeader.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 16; // Size of the base
   static ICON_SCALE = 2.0; // Size of the icon
   static ILLUSTRATION_RATIO = 100; // Illustration size ratio in percent
 
   constructor(name: string, startPos: [number, number]) {
-    super(name, WolfGuardTerminator.HP_MAX, startPos);
+    super(name, WolfGuardTerminatorPackLeader.HP_MAX, startPos);
   }
 }

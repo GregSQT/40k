@@ -174,6 +174,7 @@ export interface Unit {
   hasChargedThisTurn?: boolean;
   UNIT_RULES?: UnitRule[];
   UNIT_KEYWORDS?: UnitKeyword[];
+  CAN_LEAD?: string[]; // Attached units (rule 19.01): bodyguard unit-name keywords a leader/support may attach to
 
   // Terrain visibility (rules 13.08-13.09)
   hideable?: boolean; // INFANTRY/BEASTS/SWARM — eligible for cover/hidden

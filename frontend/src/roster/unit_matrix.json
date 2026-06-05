@@ -499,16 +499,6 @@
     },
     {
       "army": "SpaceMarine",
-      "unit_name": "CaptainTerminator",
-      "agent_key": "CoreAgent",
-      "base_class": "LeaderEliteMeleeElite",
-      "value": 95,
-      "melee_weapons": ["relic_fist"],
-      "ranged_weapons": ["storm_bolter_wolf_guard"],
-      "special_rules": ["Unstoppable Valour"]
-    },
-    {
-      "army": "SpaceMarine",
       "unit_name": "DeathCompanyJumpPackEviscerator",
       "agent_key": "CoreAgent",
       "base_class": "TroopMeleeTroop",

@@ -305,6 +305,28 @@ def is_footprint_placement_valid(
     return True
 
 
+# Roles d allocation defensive (rule 05.04) : ordre de sacrifice croissant.
+# base (None) < special_weapon < sergeant < support < leader. Les characters
+# (support/leader) passent toujours apres les non-characters par cet ordre.
+ROLE_TIER: Dict[str, int] = {"special_weapon": 1, "sergeant": 2, "support": 3, "leader": 4}
+
+
+def _derive_model_role(unit_rules: List[Dict[str, Any]]) -> Optional[str]:
+    """Role d allocation d une figurine, derive de ses UNIT_RULES.
+
+    Retourne le ruleId de role ("special_weapon"/"sergeant"/"support"/"leader")
+    ou None (figurine de base). Erreur explicite si plusieurs roles distincts
+    (faute de donnees, pas un cas metier).
+    """
+    roles = {
+        r["ruleId"] for r in unit_rules
+        if isinstance(r, dict) and r.get("ruleId") in ROLE_TIER
+    }
+    if len(roles) > 1:
+        raise ValueError(f"Figurine avec roles d allocation conflictuels: {sorted(roles)}")
+    return next(iter(roles)) if roles else None
+
+
 def _build_models_for_unit(
     unit: Dict[str, Any],
     unit_id: str,
@@ -377,9 +399,11 @@ def _build_models_for_unit(
         )
         spec_hp_max = int(spec.get("HP_MAX", hp_max))
         spec_hp_cur = int(spec.get("HP_CUR", spec_hp_max))
+        spec_role = _derive_model_role(spec.get("UNIT_RULES", unit.get("UNIT_RULES", [])))
         models_cache[model_id] = {
             "squad_id": unit_id,
             "unitType": spec.get("unit_type") or unit.get("unitType"),
+            "role": spec_role,
             "col": spec_col,
             "row": spec_row,
             "DISPLAY_NAME": spec.get("DISPLAY_NAME", unit.get("DISPLAY_NAME")),
@@ -3909,9 +3933,9 @@ def _select_allocation_model(
       - A3 branchera ici le choix du joueur humain (defenseur) ;
       - l etape B y branchera la decision de l agent RL.
 
-    Cascade actuelle (decider non-humain, heuristique A2a) :
+    Cascade actuelle (decider non-humain, heuristique A2b) :
       1. (regle) figurine deja blessee (HP_CUR < HP_MAX) en priorite ;
-      2. figurines de l unit_type de base avant les overrides ;
+      2. tier de role croissant (base < special_weapon < sergeant < support < leader) ;
       3. la plus proche d un ennemi (`dist_cache`) ;
       4. ordre d index (tie-break deterministe).
     """
@@ -3921,17 +3945,17 @@ def _select_allocation_model(
         e = models_cache[mid]
         if int(e["HP_CUR"]) < int(e["HP_MAX"]):
             return mid
-    # 2. Heuristique defensive sur les figurines pleines.
-    unit_by_id = {str(u["id"]): u for u in game_state["units"]}
-    base_unit_type = unit_by_id.get(str(target_squad_id), {}).get("unitType")
+    # 2. Heuristique defensive sur les figurines pleines : tier de role croissant
+    #    (base < special_weapon < sergeant < support < leader), puis proximite
+    #    ennemi, puis index. L ordre du tier met les characters en dernier.
     if dist_cache is None:
         dist_cache = _precompute_nearest_enemy_dist(game_state, target_squad_id)
 
     def _key(item: tuple) -> tuple:
         idx, mid = item
         e = models_cache[mid]
-        is_override = 0 if e.get("unitType") == base_unit_type else 1
-        return (is_override, dist_cache.get(mid, 0), idx)
+        tier = ROLE_TIER.get(e.get("role"), 0)
+        return (tier, dist_cache.get(mid, 0), idx)
 
     return min(enumerate(alive), key=_key)[1]
 
