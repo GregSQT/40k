@@ -119,14 +119,14 @@
       ]
     },
     {
-      "id": 114, "unit_type": "Intercessor", "player": 2, "col": 30, "row": 10,
+      "id": 114, "unit_type": "Terminator", "player": 2, "col": 22, "row": 10,
       "models": [
-        { "col": 24, "row": 10, "unit_type": "LieutenantCloseCombatBolter" },
-        { "col": 30, "row": 10, "unit_type": "IntercessorGrenadeLauncher" },
+        { "col": 22, "row": 10, "unit_type": "TerminatorCyclone" },
+        { "col": 30, "row": 10 },
         { "col": 38, "row": 10 },
         { "col": 46, "row": 10 },
-        { "col": 34, "row": 15, "unit_type": "IntercessorSergeant" },
-        { "col": 42, "row": 15 }
+        { "col": 34, "row": 18 },
+        { "col": 44, "row": 18, "unit_type": "LibrarianTerminator" }
       ]
     }
   ]

@@ -565,33 +565,48 @@ export const GameLog: React.FC<GameLogProps> = ({
                   </div>
                   {expandedEntries.has(event.id) && event.shootDetails && event.shootDetails.length > 0 && (
                     <div className="game-log-entry__shot-details">
-                      {event.shootDetails.map((shot) => {
-                        const total = event.shootDetails!.length;
-                        const parts: string[] = [`${shot.shotNumber}/${total}`];
-                        if (event.weaponName) parts.push(event.weaponName);
-                        const targetType = shot.targetUnitType ?? event.targetUnitType;
-                        if (targetType) parts.push(targetType);
-                        parts.push(`Tir: ${shot.hitResult === "HIT" ? "✓" : "✗"}${shot.attackRoll !== undefined ? ` (${shot.attackRoll})` : ""}`);
-                        if (shot.hitResult === "HIT") {
-                          parts.push(`Bless: ${shot.strengthResult === "SUCCESS" ? "✓" : "✗"}${shot.strengthRoll !== undefined ? ` (${shot.strengthRoll})` : ""}`);
-                        }
-                        if (shot.strengthResult === "SUCCESS") {
-                          if (shot.saveRoll !== undefined) {
-                            parts.push(`Svg: ${shot.saveSuccess ? "✓" : "✗"} (${shot.saveRoll})`);
-                          }
-                          if (!shot.saveSuccess && shot.damageDealt !== undefined) {
-                            parts.push(`Dmg: ${shot.damageDealt}`);
-                          }
-                          if (shot.targetDied) {
-                            parts.push("💀");
-                          }
-                        }
+                      {(() => {
+                        const allShots = event.shootDetails!;
+                        const total = allShots.length;
+                        const lastKillIdx = allShots.reduce((last, s, i) => s.targetDied ? i : last, -1);
+                        const visibleShots = lastKillIdx >= 0 ? allShots.slice(0, lastKillIdx + 1) : allShots;
+                        const wastedCount = lastKillIdx >= 0 ? total - (lastKillIdx + 1) : 0;
                         return (
-                          <div key={shot.shotNumber} className="game-log-entry__shot-detail-row">
-                            {parts.join(" | ")}
-                          </div>
+                          <>
+                            {visibleShots.map((shot) => {
+                              const parts: string[] = [`${shot.shotNumber}/${total}`];
+                              if (event.weaponName) parts.push(event.weaponName);
+                              const targetType = shot.targetUnitType ?? event.targetUnitType;
+                              if (targetType) parts.push(targetType);
+                              parts.push(`Tir: ${shot.hitResult === "HIT" ? "✓" : "✗"}${shot.attackRoll !== undefined ? ` (${shot.attackRoll})` : ""}`);
+                              if (shot.hitResult === "HIT") {
+                                parts.push(`Bless: ${shot.strengthResult === "SUCCESS" ? "✓" : "✗"}${shot.strengthRoll !== undefined ? ` (${shot.strengthRoll})` : ""}`);
+                              }
+                              if (shot.strengthResult === "SUCCESS") {
+                                if (shot.saveRoll !== undefined) {
+                                  parts.push(`Svg: ${shot.saveSuccess ? "✓" : "✗"} (${shot.saveRoll})`);
+                                }
+                                if (!shot.saveSuccess && shot.damageDealt !== undefined) {
+                                  parts.push(`Dmg: ${shot.damageDealt}`);
+                                }
+                                if (shot.targetDied) {
+                                  parts.push("💀");
+                                }
+                              }
+                              return (
+                                <div key={shot.shotNumber} className="game-log-entry__shot-detail-row">
+                                  {parts.join(" | ")}
+                                </div>
+                              );
+                            })}
+                            {wastedCount > 0 && (
+                              <div className="game-log-entry__shot-detail-row game-log-entry__shot-detail-row--wasted">
+                                {`No more target - shots remaining: ${wastedCount}/${total}`}
+                              </div>
+                            )}
+                          </>
                         );
-                      })}
+                      })()}
                     </div>
                   )}
                 </div>

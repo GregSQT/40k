@@ -3869,15 +3869,83 @@ def _has_blast_keyword(weapon: Dict[str, Any]) -> bool:
     return False
 
 
+def _precompute_nearest_enemy_dist(
+    game_state: Dict[str, Any], target_squad_id: str
+) -> Dict[str, int]:
+    """Distance (hex) de chaque fig vivante du squad cible a l ennemi le plus proche.
+
+    Positions fixes pendant la resolution d une salve -> calcule une fois, reutilise
+    a chaque allocation (cf. `_allocate_damage_to_squad`).
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive = [m for m in squad_models.get(target_squad_id, []) if m in models_cache]  # get allowed
+    if not alive:
+        return {}
+    defender_player = int(models_cache[alive[0]]["player"])
+    enemy_pos = [
+        (int(e["col"]), int(e["row"]))
+        for e in models_cache.values()
+        if int(e["player"]) != defender_player
+    ]
+    dist: Dict[str, int] = {}
+    for mid in alive:
+        e = models_cache[mid]
+        c, r = int(e["col"]), int(e["row"])
+        dist[mid] = min(
+            (calculate_hex_distance(c, r, ec, er) for ec, er in enemy_pos),
+            default=0,
+        )
+    return dist
+
+
+def _select_allocation_model(
+    game_state: Dict[str, Any], target_squad_id: str, alive: List[str],
+    dist_cache: Optional[Dict[str, int]] = None,
+) -> str:
+    """Choisit la figurine du squad cible qui encaisse la prochaine attaque.
+
+    Point unique de variation de l allocation defensive :
+      - A3 branchera ici le choix du joueur humain (defenseur) ;
+      - l etape B y branchera la decision de l agent RL.
+
+    Cascade actuelle (decider non-humain, heuristique A2a) :
+      1. (regle) figurine deja blessee (HP_CUR < HP_MAX) en priorite ;
+      2. figurines de l unit_type de base avant les overrides ;
+      3. la plus proche d un ennemi (`dist_cache`) ;
+      4. ordre d index (tie-break deterministe).
+    """
+    models_cache = require_key(game_state, "models_cache")
+    # 1. Regle : finir une figurine deja entamee avant d en exposer une neuve.
+    for mid in alive:
+        e = models_cache[mid]
+        if int(e["HP_CUR"]) < int(e["HP_MAX"]):
+            return mid
+    # 2. Heuristique defensive sur les figurines pleines.
+    unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+    base_unit_type = unit_by_id.get(str(target_squad_id), {}).get("unitType")
+    if dist_cache is None:
+        dist_cache = _precompute_nearest_enemy_dist(game_state, target_squad_id)
+
+    def _key(item: tuple) -> tuple:
+        idx, mid = item
+        e = models_cache[mid]
+        is_override = 0 if e.get("unitType") == base_unit_type else 1
+        return (is_override, dist_cache.get(mid, 0), idx)
+
+    return min(enumerate(alive), key=_key)[1]
+
+
 def _allocate_damage_to_squad(
-    game_state: Dict[str, Any], target_squad_id: str, damage: int
+    game_state: Dict[str, Any], target_squad_id: str, damage: int,
+    dist_cache: Optional[Dict[str, int]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Applique `damage` HP a une figurine vivante du squad selon allocation prioritaire.
 
-    Priorite (regle officielle 05.04) :
-      1. Premier modele vivant deja blesse (HP_CUR < HP_MAX), persistant
-         entre activations.
-      2. Sinon : premier modele vivant par ordre d index.
+    Selection de la figurine deleguee a `_select_allocation_model` (point unique de
+    variation : heuristique aujourd hui ; choix humain en A3 ; agent RL en B).
+    `dist_cache` (optionnel) = distances pre-calculees fig->ennemi le plus proche,
+    evite de les recalculer a chaque allocation d une meme salve.
     Damage excess (> HP_CUR du modele) perdu — pas de carry-over.
     Si le modele est tue → destroy_model(reason='combat').
     Sinon → update_model_hp.
@@ -3889,15 +3957,7 @@ def _allocate_damage_to_squad(
     alive = [m for m in squad_models.get(target_squad_id, []) if m in models_cache]  # get allowed
     if not alive:
         return None
-    target_mid: Optional[str] = None
-    for mid in alive:
-        m_entry = models_cache[mid]
-        if int(m_entry["HP_CUR"]) < int(m_entry["HP_MAX"]):
-            target_mid = mid
-            break
-    if target_mid is None:
-        target_mid = alive[0]
-    assert target_mid is not None
+    target_mid = _select_allocation_model(game_state, target_squad_id, alive, dist_cache)
     m = models_cache[target_mid]
     hp_before = int(m["HP_CUR"])
     target_points_per_hp = float(require_key(m, "points_per_hp"))
@@ -3957,6 +4017,8 @@ def resolve_squad_shoot(
     targets_meta: Dict[str, Dict[str, Any]] = {}
     # Accumulation par (weapon_name, target_sid) pour émettre 1 log par arme par escouade
     weapon_groups: Dict[tuple, Dict[str, Any]] = {}
+    # Cache distances fig->ennemi par cible (A2a) : positions fixes pendant la salve.
+    dist_cache_by_target: Dict[str, Dict[str, int]] = {}
     import random
     for intent in intents:
         attacker_mid = intent["model_id"]
@@ -4082,11 +4144,17 @@ def resolve_squad_shoot(
 
         # PASSE 2 (application) : alloue chaque paquet de degats fig par fig (deterministe,
         # aucun RNG). Excess perdu par figurine ; tirs restants perdus si cible wipe.
+        # Distances fig->ennemi pre-calculees une fois par cible (positions fixes ici).
+        _dist_cache = None
+        if pending_damages:
+            if target_sid not in dist_cache_by_target:
+                dist_cache_by_target[target_sid] = _precompute_nearest_enemy_dist(game_state, target_sid)
+            _dist_cache = dist_cache_by_target[target_sid]
         for pd in pending_damages:
             target_alive = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
             if not target_alive:
                 break  # overkill : tirs restants sans cible -> perdus
-            res = _allocate_damage_to_squad(game_state, target_sid, pd["dmg"])
+            res = _allocate_damage_to_squad(game_state, target_sid, pd["dmg"], _dist_cache)
             if res is None:
                 break
             summary["damage_total"] += int(res["damage_dealt"])
