@@ -80,6 +80,27 @@ def _cache_entry_round_base_size(cache_entry: Dict[str, Any]) -> float:
     return base_size
 
 
+# Hex count of a single base, memoized by geometry. The COUNT is invariant under
+# translation and depends only on (shape, size, orientation, column parity) — see
+# precompute_footprint_offsets: only column parity shifts the odd-q footprint.
+_SINGLE_BASE_HEX_COUNT_CACHE: Dict[Tuple[Any, ...], int] = {}
+
+
+def _single_base_hex_count(
+    base_shape: str, base_size: Any, orientation: int, col_parity: int
+) -> int:
+    """Memoized number of hexes occupied by one base of the given geometry."""
+    size_key = tuple(base_size) if isinstance(base_size, (list, tuple)) else base_size
+    key = (base_shape, size_key, orientation, col_parity)
+    cached = _SINGLE_BASE_HEX_COUNT_CACHE.get(key)
+    if cached is None:
+        # col_parity as the reference column preserves odd-q parity; row 0 is arbitrary
+        # (the count is translation-invariant), matching the legacy per-call computation.
+        cached = len(compute_occupied_hexes(col_parity, 0, base_shape, base_size, orientation))
+        _SINGLE_BASE_HEX_COUNT_CACHE[key] = cached
+    return cached
+
+
 def _entry_is_multi_figure(cache_entry: Dict[str, Any]) -> bool:
     """True when a cache entry's live footprint spans more than one base (a squad).
 
@@ -91,14 +112,13 @@ def _entry_is_multi_figure(cache_entry: Dict[str, Any]) -> bool:
     occ = cache_entry.get("occupied_hexes")
     if not occ:
         return False
-    single = compute_occupied_hexes(
-        int(require_key(cache_entry, "col")),
-        int(require_key(cache_entry, "row")),
+    single_count = _single_base_hex_count(
         require_key(cache_entry, "BASE_SHAPE"),
         require_key(cache_entry, "BASE_SIZE"),
         int(require_key(cache_entry, "orientation")),
+        int(require_key(cache_entry, "col")) & 1,
     )
-    return len(occ) > len(single)
+    return len(occ) > single_count
 
 
 def unit_entries_within_engagement_zone(
