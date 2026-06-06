@@ -418,6 +418,23 @@ export class UnitRenderer {
       if (isJustKilled) {
         console.log(`Rendering just-killed unit ${unit.id} as grey ghost`);
       } else {
+        // Unit destroyed: purge its persistent UI badges (hidden / battle-shocked)
+        // from uiElementsContainer, which survives drawBoard cleanup.
+        const { uiElementsContainer } = this.props;
+        if (uiElementsContainer) {
+          const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
+          const prefixes = [`hidden-badge-${unitIdNum}`, `battle-shocked-${unitIdNum}`];
+          uiElementsContainer.children
+            .filter(
+              (child: PIXI.DisplayObject) =>
+                typeof child.name === "string" &&
+                prefixes.some((p) => child.name === p || child.name!.startsWith(`${p}-`))
+            )
+            .forEach((child: PIXI.DisplayObject) => {
+              uiElementsContainer.removeChild(child);
+              if ("destroy" in child && typeof child.destroy === "function") child.destroy();
+            });
+        }
         return;
       }
     }
@@ -2346,17 +2363,36 @@ export class UnitRenderer {
       const badgeX = cx - scaledOffset;
       const badgeY = cy + scaledOffset;
       const g = new PIXI.Graphics();
-      g.beginFill(0x1e1e1e, 0.9);
+      // Black outer ring to detach the badge from the board.
+      g.lineStyle(0);
+      g.beginFill(0x000000, 1);
+      g.drawCircle(badgeX, badgeY, r + 2);
+      g.endFill();
+      // Badge body (black fill, light-grey border).
+      g.beginFill(0x000000, 0.9);
       g.lineStyle(2, 0xb0b0b0, 1);
       g.drawCircle(badgeX, badgeY, r);
       g.endFill();
-      // Small eye (white) + red diagonal slash → reads as "hidden / not seen".
-      g.beginFill(0xe8e8e8, 1);
-      g.drawCircle(badgeX, badgeY, r * 0.28);
-      g.endFill();
-      g.lineStyle(2, 0xff5555, 1);
-      g.moveTo(badgeX - r * 0.7, badgeY - r * 0.7);
-      g.lineTo(badgeX + r * 0.7, badgeY + r * 0.7);
+      // "Visibility off" icon (light grey on black) → reads as "hidden / not seen".
+      const eyeColor = 0xc8c8c8;
+      const ew = r * 0.82;
+      const eh = r * 0.52;
+      const lw = Math.max(1.5, r * 0.2);
+      // Almond eye outline.
+      g.lineStyle(lw, eyeColor, 1);
+      g.moveTo(badgeX - ew, badgeY);
+      g.quadraticCurveTo(badgeX, badgeY - eh, badgeX + ew, badgeY);
+      g.quadraticCurveTo(badgeX, badgeY + eh, badgeX - ew, badgeY);
+      // Iris ring.
+      g.drawCircle(badgeX, badgeY, r * 0.26);
+      // Diagonal slash: dark under-stroke creates the gap, light stroke on top.
+      const s = r * 0.82;
+      g.lineStyle(lw * 2, 0x000000, 1);
+      g.moveTo(badgeX - s, badgeY - s);
+      g.lineTo(badgeX + s, badgeY + s);
+      g.lineStyle(lw, eyeColor, 1);
+      g.moveTo(badgeX - s, badgeY - s);
+      g.lineTo(badgeX + s, badgeY + s);
       g.name = name;
       g.zIndex = 10001;
       targetContainer.addChild(g);
@@ -2421,6 +2457,15 @@ export class UnitRenderer {
     const emojiSize = bottomExtentY * 0.7;
     const posX = centerX;
     const posY = centerY + bottomExtentY - 0.25 * emojiSize;
+
+    // Black circular background behind the emoji to detach it from the board.
+    const bg = new PIXI.Graphics();
+    bg.beginFill(0x000000, 0.9);
+    bg.drawCircle(posX, posY, emojiSize * 0.55);
+    bg.endFill();
+    bg.name = `battle-shocked-${unitIdNum}-bg`;
+    bg.zIndex = iconZIndex;
+    targetContainer.addChild(bg);
 
     const text = new PIXI.Text("🌀", {
       fontSize: emojiSize,

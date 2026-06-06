@@ -2854,12 +2854,17 @@ def is_unit_at_half_strength(unit_id: str, game_state: Dict[str, Any]) -> bool:
     count_now = int(entry["model_count"])
     if count_start > 1:
         return count_now <= count_start / 2
-    # Mono-modèle : check HP
+    # Mono-modèle : check HP. HP_CUR vient de units_cache (source de vérité vivante,
+    # mise à jour à chaque dégât) ; HP_MAX est immuable et lu sur l'unité.
+    units_cache = require_key(game_state, "units_cache")
+    cache_entry = units_cache.get(str(unit_id))
+    if cache_entry is None:
+        raise KeyError(f"is_unit_at_half_strength: unit {unit_id} not in units_cache")
     units = require_key(game_state, "units")
     unit = next((u for u in units if str(u.get("id")) == str(unit_id)), None)
     if unit is None:
         raise KeyError(f"is_unit_at_half_strength: unit {unit_id} not found in game_state['units']")
-    hp_cur = int(require_key(unit, "HP_CUR"))
+    hp_cur = int(require_key(cache_entry, "HP_CUR"))
     hp_max = int(require_key(unit, "HP_MAX"))
     return hp_cur <= hp_max / 2
 
