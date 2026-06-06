@@ -52,7 +52,6 @@ import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import TutorialOverlay from "./TutorialOverlay";
 import { UnitStatusTable } from "./UnitStatusTable";
 
-/** Libellé court d'un groupe d'allocation (W/Sv/InSv, taille, statut). */
 /** "WolfGuardTerminator" → "Wolf Guard Terminator" (camelCase → mots espacés). */
 function prettifyUnitType(t: string | null): string {
   if (!t) return "";
@@ -62,19 +61,12 @@ function prettifyUnitType(t: string | null): string {
     .trim();
 }
 
-function manualGroupLabel(g: ManualOrderGroup): string {
-  const inv = g.InSv < 7 ? `/Inv${g.InSv}+` : "";
-  const kind = prettifyUnitType(g.unit_type) || (g.is_character ? "CHARACTER" : "Figs");
-  const wounded = g.has_wounded ? " ⚠ blessé" : "";
-  return `${kind} — W${g.W} Sv${g.Sv}+${inv} ×${g.model_ids.length}${wounded}`;
-}
-
 /**
  * Déclaration de l'ordre d'allocation des pertes (règles 40k 05.03) : le défenseur
- * ordonne les groupes (cible hétérogène / CHARACTER). Les contraintes sont garanties
- * par construction (seuls les groupes valides au coup suivant sont cliquables) :
- * non-CHARACTER avant CHARACTER ; groupe blessé avant sain (par classe). Le backend
- * revalide.
+ * ordonne les groupes (cible hétérogène / CHARACTER). Même layout que le menu d'arme
+ * (panneau flottant déplaçable + table). Contraintes garanties par construction (seules
+ * les lignes valides au coup suivant sont cliquables) : non-CHARACTER avant CHARACTER ;
+ * groupe blessé avant sain (par classe). Le backend revalide.
  */
 function ManualOrderPicker({
   request,
@@ -85,8 +77,25 @@ function ManualOrderPicker({
 }) {
   // L'état est réinitialisé par remount (key sur le call-site) à chaque nouvelle requête.
   const [order, setOrder] = useState<number[]>([]);
+  const [pos, setPos] = useState({ x: 360, y: 140 });
+  const dragOffset = useRef<{ x: number; y: number } | null>(null);
 
-  const byId = new Map(request.groups.map((g) => [g.group_id, g]));
+  const onDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!dragOffset.current) return;
+      setPos({ x: ev.clientX - dragOffset.current.x, y: ev.clientY - dragOffset.current.y });
+    };
+    const onMouseUp = () => {
+      dragOffset.current = null;
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, [pos]);
+
   const remaining = request.groups.filter((g) => !order.includes(g.group_id));
   const nonChar = remaining.filter((g) => !g.is_character);
   let pickable: ManualOrderGroup[];
@@ -98,47 +107,62 @@ function ManualOrderPicker({
     const wounded = chars.filter((g) => g.has_wounded);
     pickable = wounded.length > 0 ? wounded : chars;
   }
+  const pickableIds = new Set(pickable.map((g) => g.group_id));
   const complete = order.length === request.groups.length;
 
   return (
-    <div className="manual-order-picker">
-      <div className="manual-order-picker__title">
-        Ordre d'allocation des pertes — Unité {request.target_unit_id}
-      </div>
-      <div className="manual-order-picker__hint">
-        Clique les groupes dans l'ordre où ils encaisseront (blessés d'abord, CHARACTER en
-        dernier).
-      </div>
-      <ol className="manual-order-picker__order">
-        {order.map((gid, i) => {
-          const g = byId.get(gid);
-          return (
-            <li key={gid}>
-              {i + 1}. {g ? manualGroupLabel(g) : gid}
-            </li>
-          );
-        })}
-      </ol>
-      {!complete && (
-        <div className="manual-order-picker__choices">
-          {pickable.map((g) => (
-            <button
-              type="button"
-              key={g.group_id}
-              className="manual-order-picker__choice"
-              onClick={() => setOrder((prev) => [...prev, g.group_id])}
-            >
-              {manualGroupLabel(g)}
-            </button>
-          ))}
-        </div>
-      )}
-      <div className="manual-order-picker__actions">
-        <button
-          type="button"
-          disabled={order.length === 0}
-          onClick={() => setOrder([])}
-        >
+    <div
+      className="weapon-dropdown"
+      style={{ position: "absolute", left: `${pos.x}px`, top: `${pos.y}px` }}
+    >
+      <button type="button" className="weapon-dropdown-handle" onMouseDown={onDragStart}>
+        ⠿ ORDRE D'ALLOCATION — Unité {request.target_unit_id}
+      </button>
+      <table className="weapon-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Unité</th>
+            <th>W</th>
+            <th>Sv</th>
+            <th>Inv</th>
+            <th>Nb</th>
+            <th>État</th>
+          </tr>
+        </thead>
+        <tbody>
+          {request.groups.map((g) => {
+            const orderIdx = order.indexOf(g.group_id);
+            const inOrder = orderIdx >= 0;
+            const isPickable = pickableIds.has(g.group_id);
+            const isDisabled = !inOrder && !isPickable;
+            return (
+              <tr
+                key={g.group_id}
+                className={[inOrder ? "selected" : "", isDisabled ? "disabled" : ""]
+                  .filter(Boolean)
+                  .join(" ")}
+                onClick={() => {
+                  if (isPickable) setOrder((prev) => [...prev, g.group_id]);
+                }}
+              >
+                <td>{inOrder ? orderIdx + 1 : "—"}</td>
+                <td>{prettifyUnitType(g.unit_type) || (g.is_character ? "CHARACTER" : "Figs")}</td>
+                <td>{g.W}</td>
+                <td>{g.Sv}+</td>
+                <td>{g.InSv < 7 ? `${g.InSv}+` : "-"}</td>
+                <td>{g.model_ids.length}</td>
+                <td>
+                  {g.is_character ? "CHAR " : ""}
+                  {g.has_wounded ? "⚠ blessé" : ""}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div className="weapon-dropdown-actions">
+        <button type="button" disabled={order.length === 0} onClick={() => setOrder([])}>
           Réinitialiser
         </button>
         <button type="button" disabled={!complete} onClick={() => onSubmit(order)}>
@@ -3139,13 +3163,11 @@ export const BoardWithAPI: React.FC = () => {
 
       {/* Déclaration de l'ordre d'allocation des pertes (cible hétérogène / CHARACTER) */}
       {apiProps.manualOrderRequest && (
-        <div className="manual-order-overlay">
-          <ManualOrderPicker
-            key={`${apiProps.manualOrderRequest.attacker_unit_id}:${apiProps.manualOrderRequest.target_unit_id}:${apiProps.manualOrderRequest.groups.map((g) => g.group_id).join("-")}`}
-            request={apiProps.manualOrderRequest}
-            onSubmit={(o) => apiProps.onDeclareOrder(o)}
-          />
-        </div>
+        <ManualOrderPicker
+          key={`${apiProps.manualOrderRequest.attacker_unit_id}:${apiProps.manualOrderRequest.target_unit_id}:${apiProps.manualOrderRequest.groups.map((g) => g.group_id).join("-")}`}
+          request={apiProps.manualOrderRequest}
+          onSubmit={(o) => apiProps.onDeclareOrder(o)}
+        />
       )}
 
       {/* AI Error Display */}

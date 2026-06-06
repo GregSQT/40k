@@ -3321,71 +3321,14 @@ textarea:focus {
   border-color: #66bb6a;
 }
 
-/* Déclaration de l'ordre d'allocation des pertes (tir manuel hétérogène / CHARACTER) */
-.manual-order-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 4000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
-}
-.manual-order-picker {
-  background: #1b1f2a;
-  border: 1px solid #3a4256;
-  border-radius: 8px;
-  padding: 16px 18px;
-  min-width: 320px;
-  max-width: 460px;
-  color: #e6e9f0;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
-}
-.manual-order-picker__title {
-  font-weight: 700;
-  font-size: 15px;
-  margin-bottom: 6px;
-}
-.manual-order-picker__hint {
-  font-size: 12px;
-  color: #9aa3b8;
-  margin-bottom: 10px;
-}
-.manual-order-picker__order {
-  margin: 0 0 10px;
-  padding-left: 18px;
-  font-size: 13px;
-}
-.manual-order-picker__order li {
-  margin: 2px 0;
-  color: #ffcc66;
-}
-.manual-order-picker__choices {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-.manual-order-picker__choice {
-  text-align: left;
-  background: #2a3142;
-  border: 1px solid #41506b;
-  border-radius: 6px;
-  padding: 8px 10px;
-  color: #e6e9f0;
-  cursor: pointer;
-  font-size: 13px;
-}
-.manual-order-picker__choice:hover {
-  background: #34405a;
-  border-color: #5b6f96;
-}
-.manual-order-picker__actions {
+/* Boutons d'action du popup d'ordre d'allocation (réutilise le layout weapon-dropdown). */
+.weapon-dropdown-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+  padding: 8px;
 }
-.manual-order-picker__actions button {
+.weapon-dropdown-actions button {
   background: #2a3142;
   border: 1px solid #41506b;
   border-radius: 6px;
@@ -3394,10 +3337,10 @@ textarea:focus {
   cursor: pointer;
   font-size: 13px;
 }
-.manual-order-picker__actions button:disabled {
+.weapon-dropdown-actions button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
-.manual-order-picker__actions button:not(:disabled):hover {
+.weapon-dropdown-actions button:not(:disabled):hover {
   background: #34405a;
 }
