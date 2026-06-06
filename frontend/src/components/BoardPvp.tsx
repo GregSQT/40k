@@ -511,6 +511,7 @@ type BoardProps = {
   objectiveControlOverride?: Record<string, number | null>; // For replay mode: pre-computed objective control (bypasses sticky-ref heuristic)
   replayActionIndex?: number; // For replay mode: detect rollback and reset objective control
   autoSelectWeapon?: boolean;
+  hpBarPerModel?: boolean; // true → barre HP par figurine ; false → une barre par escouade (hors characters)
   /** Mode mesure (règle) : armed → 1er clic pose l’ancre ; clic droit = jonction ; 2e clic termine la ligne → armed. Sortie : bouton règle uniquement. */
   measureMode?: MeasureModeState;
   onMeasureHexCommit?: (col: number, row: number) => void;
@@ -794,6 +795,7 @@ export default function Board({
   objectiveControlOverride,
   replayActionIndex,
   autoSelectWeapon,
+  hpBarPerModel,
   measureMode = { kind: "off" },
   onMeasureHexCommit,
   onMeasureJunctionCommit,
@@ -5457,7 +5459,7 @@ export default function Board({
             .map((d) => `${d.model_id}.${d.weapon_index}>${d.target_unit_id}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#dg:${deadModelGhostsForRender.length}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -5888,10 +5890,15 @@ export default function Board({
           | {
               occupied_hexes_by_model?: Record<string, [number, number]>;
               models_meta_by_model?: Record<string, ModelVisualMeta>;
+              models_hp_by_model?: Record<
+                string,
+                { HP_CUR: number; HP_MAX: number; is_character: boolean }
+              >;
             }
           | undefined;
         const occupiedHexesByModel = cacheEntry?.occupied_hexes_by_model;
         const modelMetasByModel = cacheEntry?.models_meta_by_model;
+        const modelHpsByModel = cacheEntry?.models_hp_by_model;
         // squad.md brique 3 : pour l'escouade en mode plan, afficher les figs aux positions
         // PROVISOIRES (ghost) + flag de validite par fig (voile rouge sur les invalides).
         const isSquadGhost =
@@ -5929,6 +5936,9 @@ export default function Board({
         const modelMetas: Array<ModelVisualMeta | null> = modelMetasByModel
           ? modelIds.map((mid) => modelMetasByModel[mid] ?? null)
           : [];
+        const modelHps: Array<
+          { HP_CUR: number; HP_MAX: number; is_character: boolean } | null
+        > = modelHpsByModel ? modelIds.map((mid) => modelHpsByModel[mid] ?? null) : [];
         const [anchorCenterX, anchorCenterY] = modelCenters[0];
 
         // Skip units that are being previewed elsewhere
@@ -6070,6 +6080,8 @@ export default function Board({
           centerY: anchorCenterY,
           modelCenters,
           modelMetas,
+          modelHps,
+          hpBarPerModel,
           app,
           renderTarget: unitsLayer,
           uiElementsContainer: uiElementsContainerRef.current!,
@@ -7022,6 +7034,7 @@ export default function Board({
     advancingUnitId,
     attackPreview,
     autoSelectWeapon,
+    hpBarPerModel,
     availableCellsOverride,
     isBlinkingActive,
     stableBlinkingUnits,

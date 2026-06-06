@@ -37,7 +37,7 @@ from engine.w40k_core import W40KEngine
 from main import load_config
 from shared.data_validation import require_key
 from engine.combat_utils import resolve_dice_value, set_unit_coordinates
-from engine.phase_handlers.shared_utils import build_units_cache, rebuild_choice_timing_index
+from engine.phase_handlers.shared_utils import build_units_cache, rebuild_choice_timing_index, _is_character_role
 from engine.phase_handlers import command_handlers, movement_handlers, deployment_handlers
 from engine.hex_utils import expand_wall_group_to_hex_list
 from services.endless_duty_runtime import (
@@ -567,10 +567,26 @@ def _game_state_for_json(
     }
     raw_cache = engine_instance.game_state.get("units_cache")
     if raw_cache is not None:
-        gs["units_cache"] = {
-            uid: {fk: entry[fk] for fk in _UNITS_CACHE_FRONTEND_KEYS if fk in entry}
-            for uid, entry in raw_cache.items()
-        }
+        models_cache = engine_instance.game_state.get("models_cache") or {}
+        squad_models = engine_instance.game_state.get("squad_models") or {}
+        trimmed_cache: Dict[str, Any] = {}
+        for uid, entry in raw_cache.items():
+            slim = {fk: entry[fk] for fk in _UNITS_CACHE_FRONTEND_KEYS if fk in entry}
+            # PV live par figurine (source models_cache, maj par update_model_hp) +
+            # flag character (role support/leader) : consommé par le rendu des barres HP.
+            mids = squad_models.get(uid, [])
+            if mids:
+                slim["models_hp_by_model"] = {
+                    mid: {
+                        "HP_CUR": int(models_cache[mid]["HP_CUR"]),
+                        "HP_MAX": int(models_cache[mid]["HP_MAX"]),
+                        "is_character": _is_character_role(models_cache[mid].get("role")),
+                    }
+                    for mid in mids
+                    if mid in models_cache
+                }
+            trimmed_cache[uid] = slim
+        gs["units_cache"] = trimmed_cache
     raw_units = engine_instance.game_state.get("units")
     if isinstance(raw_units, list):
         gs["units"] = [_slim_unit_for_api(u) for u in raw_units]

@@ -69,6 +69,17 @@ interface UnitRendererProps {
    * entries fall back to the parent unit's own visual fields.
    */
   modelMetas?: Array<ModelVisualMeta | null>;
+  /**
+   * PV réels par figurine, alignés index-pour-index avec modelCenters.
+   * Source : units_cache.models_hp_by_model (backend). Permet d'afficher la
+   * barre HP propre des figs character et, en mode hpBarPerModel, de chaque fig.
+   */
+  modelHps?: Array<{ HP_CUR: number; HP_MAX: number; is_character: boolean } | null>;
+  /**
+   * true → une barre HP par figurine. false (défaut) → une barre agrégée par
+   * escouade (figs non-character uniquement) ; les characters gardent leur barre.
+   */
+  hpBarPerModel?: boolean;
   app: PIXI.Application;
   uiElementsContainer?: PIXI.Container; // Persistent container for UI elements (target logos, badges) that should never be cleaned up
   useOverlayIcons?: boolean; // Render advance/weapon icons in DOM overlay
@@ -436,7 +447,17 @@ export class UnitRenderer {
     // "unit virtuel" pour que TOUTES les fonctions de rendu (cercle, icône, rayon
     // de base) voient les bonnes valeurs sans réécriture. Restauré après la boucle.
     const modelMetas = this.props.modelMetas;
+    const modelHps = this.props.modelHps;
     const originalUnit = this.props.unit;
+    const multiModel = modelCenters.length > 1;
+    // Barre HP par-figurine désactivée quand l'escouade entière clignote (preview
+    // de tir/charge) : la barre squad prend le relais le temps du survol.
+    const squadBlinkActive =
+      (Array.isArray(this.props.blinkingUnits) &&
+        this.props.blinkingUnits.some((id) => String(id) === String(originalUnit.id))) ||
+      ((this.props.mode === "targetPreview" || this.props.mode === "attackPreview") &&
+        !!this.props.targetPreview &&
+        this.props.targetPreview.targetId === originalUnit.id);
     modelCenters.forEach(([mx, my], i) => {
       this.props.centerX = mx;
       this.props.centerY = my;
@@ -452,6 +473,12 @@ export class UnitRenderer {
       this.renderUnitIcon(iconZIndex);
       this.renderGreenActivationCircle(isEligible, figIconScale);
       this.renderUnitIdDebug(iconZIndex);
+      // Barre HP propre de la figurine : pour toutes les figs en mode
+      // hpBarPerModel, et TOUJOURS pour un character (les deux modes).
+      const mh = modelHps?.[i];
+      if (mh && multiModel && !squadBlinkActive && (this.props.hpBarPerModel || mh.is_character)) {
+        this.drawStaticHpBar(mh.HP_CUR, mh.HP_MAX, figIconScale);
+      }
     });
     this.props.unit = originalUnit;
 
@@ -1522,8 +1549,6 @@ export class UnitRenderer {
       centerY,
       targetPreview,
       units,
-      boardConfig,
-      parseColor,
       mode,
       HEX_RADIUS,
       HEX_HORIZ_SPACING,
@@ -1760,47 +1785,95 @@ export class UnitRenderer {
       // Skip normal HP bar rendering when blinking
       return;
     } else {
-      // Normal non-blinking HP slices
-      // Create background for normal HP bar
-      const barBg = new PIXI.Graphics();
-      barBg.beginFill(0x222222, 1);
-      const cornerRadius = Math.max(0.5, finalBarHeight * 0.3);
-      const rawSlicePad = Math.max(0.3, finalBarHeight * 0.1);
-      const slicePad = Math.min(rawSlicePad, sliceWidth * 0.15);
-      barBg.drawRoundedRect(finalBarX, finalBarY, finalBarWidth, finalBarHeight, cornerRadius);
-      barBg.endFill();
-      barBg.zIndex = 350;
-      this.target.addChild(barBg);
-
-      for (let i = 0; i < unit.HP_MAX; i++) {
-        const slice = new PIXI.Graphics();
-        const hpDamagedColor =
-          boardConfig &&
-          typeof boardConfig === "object" &&
-          "colors" in boardConfig &&
-          boardConfig.colors &&
-          typeof boardConfig.colors === "object" &&
-          "hp_damaged" in boardConfig.colors
-            ? (boardConfig.colors as { hp_damaged?: string }).hp_damaged
-            : undefined;
-        const color =
-          i < displayHP
-            ? unit.player === 1
-              ? this.getCSSColor("--hp-bar-player1")
-              : this.getCSSColor("--hp-bar-player2")
-            : parseColor(hpDamagedColor || "#666666");
-        slice.beginFill(color, 1);
-        slice.drawRoundedRect(
-          finalBarX + i * sliceWidth + slicePad,
-          finalBarY + slicePad,
-          sliceWidth - slicePad * 2,
-          finalBarHeight - slicePad * 2,
-          Math.max(0.5, cornerRadius * 0.7)
-        );
-        slice.endFill();
-        slice.zIndex = 350;
-        this.target.addChild(slice);
+      // Mode "par figurine" : chaque fig a sa propre barre (boucle multi-fig),
+      // donc pas de barre squad unique.
+      if (
+        this.props.hpBarPerModel &&
+        this.props.modelCenters &&
+        this.props.modelCenters.length > 1
+      ) {
+        return;
       }
+      // Défaut : une seule barre par escouade (comportement d'origine).
+      this.drawStaticHpBar(displayHP, unit.HP_MAX, unitIconScale);
+    }
+  }
+
+  /**
+   * Barre HP statique (slices) dessinée à la position courante (this.props.centerX/Y)
+   * en se basant sur this.props.unit pour la taille/forme de base. Réutilisée par la
+   * barre squad agrégée et par les barres par-figurine (characters / mode hpBarPerModel).
+   */
+  private drawStaticHpBar(hpCur: number, hpMax: number, unitIconScale: number): void {
+    if (!hpMax) return;
+    const {
+      unit,
+      centerX,
+      centerY,
+      boardConfig,
+      parseColor,
+      HEX_RADIUS,
+      HEX_HORIZ_SPACING,
+      HP_BAR_WIDTH_RATIO,
+      HP_BAR_HEIGHT,
+      UNIT_CIRCLE_RADIUS_RATIO,
+    } = this.props;
+
+    const nrHp = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
+    const hpDisplayBase = resolveBaseSizeForUnitDisplay(unit);
+    const baseSizeVal = hpDisplayBase > 1 ? hpDisplayBase : 0;
+    const tokenTop = getUnitTokenTopExtentY(
+      unit,
+      HEX_RADIUS,
+      HEX_HORIZ_SPACING,
+      UNIT_CIRCLE_RADIUS_RATIO
+    );
+    const hpWidthBase = getHpBarWidthBase(unit, HEX_RADIUS, HEX_HORIZ_SPACING, unitIconScale);
+    const barWidth =
+      (baseSizeVal > 0 || nrHp ? hpWidthBase : HEX_RADIUS * unitIconScale) * HP_BAR_WIDTH_RATIO;
+    const barX = centerX - barWidth / 2;
+    const barY = centerY - tokenTop - HP_BAR_HEIGHT - 1;
+    const displayHP = Math.max(0, hpCur);
+    const sliceWidth = barWidth / hpMax;
+
+    const barBg = new PIXI.Graphics();
+    barBg.beginFill(0x222222, 1);
+    const cornerRadius = Math.max(0.5, HP_BAR_HEIGHT * 0.3);
+    const rawSlicePad = Math.max(0.3, HP_BAR_HEIGHT * 0.1);
+    const slicePad = Math.min(rawSlicePad, sliceWidth * 0.15);
+    barBg.drawRoundedRect(barX, barY, barWidth, HP_BAR_HEIGHT, cornerRadius);
+    barBg.endFill();
+    barBg.zIndex = 350;
+    this.target.addChild(barBg);
+
+    const hpDamagedColor =
+      boardConfig &&
+      typeof boardConfig === "object" &&
+      "colors" in boardConfig &&
+      boardConfig.colors &&
+      typeof boardConfig.colors === "object" &&
+      "hp_damaged" in boardConfig.colors
+        ? (boardConfig.colors as { hp_damaged?: string }).hp_damaged
+        : undefined;
+    for (let i = 0; i < hpMax; i++) {
+      const slice = new PIXI.Graphics();
+      const color =
+        i < displayHP
+          ? unit.player === 1
+            ? this.getCSSColor("--hp-bar-player1")
+            : this.getCSSColor("--hp-bar-player2")
+          : parseColor(hpDamagedColor || "#666666");
+      slice.beginFill(color, 1);
+      slice.drawRoundedRect(
+        barX + i * sliceWidth + slicePad,
+        barY + slicePad,
+        sliceWidth - slicePad * 2,
+        HP_BAR_HEIGHT - slicePad * 2,
+        Math.max(0.5, cornerRadius * 0.7)
+      );
+      slice.endFill();
+      slice.zIndex = 350;
+      this.target.addChild(slice);
     }
   }
 

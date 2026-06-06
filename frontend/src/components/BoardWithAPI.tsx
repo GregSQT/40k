@@ -2001,6 +2001,7 @@ export const BoardWithAPI: React.FC = () => {
     const showDebugStr = localStorage.getItem("showDebug");
     const showDebugLoSStr = localStorage.getItem("showDebugLoS");
     const autoSelectWeaponStr = localStorage.getItem("autoSelectWeapon");
+    const hpBarPerModelStr = localStorage.getItem("hpBarPerModel");
     const retreatAlertEnabledStr = localStorage.getItem(RETREAT_ALERT_STORAGE_KEY);
     const modeGuidesActivatedStr = localStorage.getItem(MODE_GUIDES_ACTIVATED_STORAGE_KEY);
     const pveGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVE_STORAGE_KEY) === "true";
@@ -2013,6 +2014,7 @@ export const BoardWithAPI: React.FC = () => {
       showDebugLoS: showDebugLoSStr ? JSON.parse(showDebugLoSStr) : false,
       autoSelectWeapon:
         canUseAutoWeaponSelection && (autoSelectWeaponStr ? JSON.parse(autoSelectWeaponStr) : true),
+      hpBarPerModel: hpBarPerModelStr ? JSON.parse(hpBarPerModelStr) : false,
       retreatAlertEnabled: retreatAlertEnabledStr ? JSON.parse(retreatAlertEnabledStr) : true,
       modeGuidesActivated:
         modeGuidesActivatedStr != null
@@ -2050,6 +2052,11 @@ export const BoardWithAPI: React.FC = () => {
     }
     setSettings((prev) => ({ ...prev, autoSelectWeapon: value }));
     localStorage.setItem("autoSelectWeapon", JSON.stringify(value));
+  };
+
+  const handleToggleHpBarPerModel = (value: boolean) => {
+    setSettings((prev) => ({ ...prev, hpBarPerModel: value }));
+    localStorage.setItem("hpBarPerModel", JSON.stringify(value));
   };
 
   const handleToggleRetreatAlert = (value: boolean) => {
@@ -3540,6 +3547,7 @@ export const BoardWithAPI: React.FC = () => {
             onSkipAdvanceWarning={isGameOver ? () => {} : apiProps.onSkipAdvanceWarning}
             showAdvanceWarningPopup={false}
             autoSelectWeapon={settings.autoSelectWeapon}
+            hpBarPerModel={settings.hpBarPerModel}
             deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
             objectivesOverride={objectivesOverride}
             measureMode={measureMode}
@@ -4571,6 +4579,8 @@ export const BoardWithAPI: React.FC = () => {
         autoSelectWeapon={settings.autoSelectWeapon}
         canToggleAutoSelectWeapon={canUseAutoWeaponSelection}
         onToggleAutoSelectWeapon={handleToggleAutoSelectWeapon}
+        hpBarPerModel={settings.hpBarPerModel}
+        onToggleHpBarPerModel={handleToggleHpBarPerModel}
         retreatAlertEnabled={settings.retreatAlertEnabled}
         onToggleRetreatAlert={handleToggleRetreatAlert}
         modeGuidesActivated={settings.modeGuidesActivated}

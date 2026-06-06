@@ -15,6 +15,8 @@ interface SettingsMenuProps {
   autoSelectWeapon: boolean;
   canToggleAutoSelectWeapon: boolean;
   onToggleAutoSelectWeapon: (value: boolean) => void;
+  hpBarPerModel?: boolean;
+  onToggleHpBarPerModel?: (value: boolean) => void;
   retreatAlertEnabled?: boolean;
   onToggleRetreatAlert?: (value: boolean) => void;
   modeGuidesActivated?: boolean;
@@ -35,6 +37,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   autoSelectWeapon,
   canToggleAutoSelectWeapon,
   onToggleAutoSelectWeapon,
+  hpBarPerModel = false,
+  onToggleHpBarPerModel,
   retreatAlertEnabled = true,
   onToggleRetreatAlert,
   modeGuidesActivated = true,
@@ -141,6 +145,26 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
             </label>
             <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
               Désactiver pour choisir manuellement l'arme à utiliser pour chaque tir.
+            </p>
+          </div>
+        )}
+
+        {onToggleHpBarPerModel && (
+          <div style={{ marginBottom: "16px" }}>
+            <label
+              style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}
+            >
+              <input
+                type="checkbox"
+                checked={hpBarPerModel}
+                onChange={(e) => onToggleHpBarPerModel(e.target.checked)}
+                style={{ marginRight: "12px", width: "18px", height: "18px", cursor: "pointer" }}
+              />
+              <span>Barre HP par figurine</span>
+            </label>
+            <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
+              Activé : une barre de vie sur chaque figurine. Désactivé : une seule barre par
+              escouade (hors personnages). Les personnages affichent toujours leurs PV réels.
             </p>
           </div>
         )}
