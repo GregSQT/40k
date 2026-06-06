@@ -1839,6 +1839,53 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         )
 
     _m_bfs_end = _perf_clock.perf_counter() if _pt else None
+
+    # Bornage rigide d'escouade : une ancre n'est valide que si TOUTES les figs vivantes
+    # restent dans le plateau après translation rigide (delta = dest_ancre - ancre_origine).
+    # Borne les CENTRES des figs (même définition de "hors board" que validate_move_plan).
+    # N'affecte PAS footprint_zone (calculé séparément côté multi-hex) → la zone reste
+    # complète, donc inZone ne rétrécit pas et le ghost PvP ne blink pas au bord.
+    if not is_single_hex:
+        _sq_entry = units_cache.get(unit_id_str)
+        _by_model = _sq_entry.get("occupied_hexes_by_model") if _sq_entry else None
+        if _by_model:
+            _fc = [int(c) for c, _ in _by_model.values()]
+            _fr = [int(r) for _, r in _by_model.values()]
+            _min_fc, _max_fc = min(_fc), max(_fc)
+            _min_fr, _max_fr = min(_fr), max(_fr)
+            # Enveloppe d'empreinte (socle multi-hex) sur les DEUX parités : garantit qu'aucune
+            # cellule de l'empreinte d'aucune fig ne déborde, quelle que soit la parité de la
+            # colonne de destination (qui peut flipper avec delta_col).
+            _foff_c = [int(c) for c, _ in _off_even] + [int(c) for c, _ in _off_odd]
+            _foff_r = [int(r) for _, r in _off_even] + [int(r) for _, r in _off_odd]
+            _fc_off_min, _fc_off_max = min(_foff_c), max(_foff_c)
+            _fr_off_min, _fr_off_max = min(_foff_r), max(_foff_r)
+            _lo_c = start_col - _min_fc - _fc_off_min
+            _hi_c = start_col + (board_cols - 1) - _max_fc - _fc_off_max
+            _lo_r = start_row - _min_fr - _fr_off_min
+            _hi_r = start_row + (board_rows - 1) - _max_fr - _fr_off_max
+            _n_before = len(valid_destinations)
+            valid_destinations = [
+                (c, r)
+                for (c, r) in valid_destinations
+                if _lo_c <= c <= _hi_c and _lo_r <= r <= _hi_r
+            ]
+            print(
+                f"[DEBUG SQUAD_BOUNDS] u={unit_id} start=({start_col},{start_row}) "
+                f"board=({board_cols}x{board_rows}) n_figs={len(_by_model)} "
+                f"bbox_c=[{_min_fc},{_max_fc}] bbox_r=[{_min_fr},{_max_fr}] "
+                f"fp_off_c=[{_fc_off_min},{_fc_off_max}] fp_off_r=[{_fr_off_min},{_fr_off_max}] "
+                f"rect_c=[{_lo_c},{_hi_c}] rect_r=[{_lo_r},{_hi_r}] "
+                f"pool {_n_before}->{len(valid_destinations)}",
+                flush=True,
+            )
+        else:
+            print(
+                f"[DEBUG SQUAD_BOUNDS] u={unit_id} _by_model ABSENT/VIDE "
+                f"(entry={'present' if _sq_entry else 'None'}) -> AUCUN bornage",
+                flush=True,
+            )
+
     game_state["valid_move_destinations_pool"] = valid_destinations
     game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
 
@@ -2039,11 +2086,25 @@ def movement_build_model_destinations_pool(
         # chevauche dest_blocked (murs, figs alliées, figs ennemies, engagement).
         # Le BFS ne vérifie que le hex central ; ici on vérifie chaque cellule de l'empreinte.
         valid_reachable: List[Tuple[int, int]] = []
+        _n_before_fp = len(reachable)
         for ac, ar in reachable:
             offs = off_even if (ac & 1) == 0 else off_odd
+            # Empreinte complète dans le plateau : le BFS ne borne que le centre,
+            # une cellule d'empreinte hors board n'est dans aucun set bloquant.
+            if any(
+                not (0 <= ac + dc < board_cols and 0 <= ar + dr < board_rows)
+                for dc, dr in offs
+            ):
+                continue
             if not any((ac + dc, ar + dr) in dest_blocked for dc, dr in offs):
                 valid_reachable.append((ac, ar))
         reachable = valid_reachable
+        print(
+            f"[DEBUG MODEL_BOUNDS] model={model_id} start=({start_col},{start_row}) "
+            f"board=({board_cols}x{board_rows}) base_size={base_size} "
+            f"dest {_n_before_fp}->{len(reachable)}",
+            flush=True,
+        )
         # Footprint zone depuis les destinations valides uniquement.
         footprint_zone = set()
         for ac, ar in reachable:

@@ -19,7 +19,7 @@
       ]
     },
     {
-      "id": 7, "unit_type": "Infernus", "player": 1, "col": 124, "row": 220,
+      "id": 7, "unit_type": "Infernus", "player": 1, "col": 124, "row": 20,
       "models": [
         { "col": 124, "row": 20 },
         { "col": 130, "row": 20 },
