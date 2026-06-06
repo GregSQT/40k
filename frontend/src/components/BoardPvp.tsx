@@ -437,6 +437,15 @@ type BoardProps = {
   onUnassignShootModel?: (modelId: string) => void | Promise<void>;
   onCommitSquadShoot?: () => void | Promise<void>;
   onCancelSquadShoot?: () => void | Promise<void>;
+  /** Allocation manuelle des pertes au tir (defenseur humain) : figs choisissables. */
+  manualAllocation?: {
+    attacker_unit_id: string;
+    target_unit_id: string;
+    defender_player: number;
+    choices: Array<{ model_id: string; col: number; row: number; HP_CUR: number; HP_MAX: number }>;
+    wounds_remaining: number;
+  } | null;
+  onAllocateModel?: (modelId: string) => void | Promise<void>;
   onStartAttackPreview: (unitId: number, col: number, row: number) => void;
   onConfirmMove: () => void;
   onCancelMove: () => void;
@@ -726,6 +735,8 @@ export default function Board({
   onUnassignShootModel,
   onCommitSquadShoot,
   onCancelSquadShoot,
+  manualAllocation = null,
+  onAllocateModel,
   onStartAttackPreview,
   onConfirmMove,
   onCancelMove,
@@ -842,6 +853,7 @@ export default function Board({
   const hoverOverlayRef = useRef<PIXI.Container | null>(null);
   const hoverSpriteRef = useRef<PIXI.Container | null>(null);
   const squadMoveVeilOverlayRef = useRef<PIXI.Graphics | null>(null);
+  const manualAllocOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Ligne départ → pointeur + libellé distance hex (preview move) */
   const movePreviewGuideLineRef = useRef<PIXI.Graphics | null>(null);
   const hoverMoveOrientationStepRef = useRef<number | null>(null);
@@ -986,6 +998,11 @@ export default function Board({
   /** Plan de tir toujours a jour pour les handlers d'event stables. */
   const squadShootPlanRef = useRef(squadShootPlan);
   squadShootPlanRef.current = squadShootPlan;
+  /** Allocation manuelle des pertes + callback, refs à jour pour le handler de clic. */
+  const manualAllocationRef = useRef(manualAllocation);
+  manualAllocationRef.current = manualAllocation;
+  const onAllocateModelRef = useRef(onAllocateModel);
+  onAllocateModelRef.current = onAllocateModel;
   // Persiste entre les re-renders (contrairement à une variable locale dans useEffect).
   const lastEnemyClickRef = useRef<{ targetId: number | string; time: number } | null>(null);
 
@@ -3274,6 +3291,31 @@ export default function Board({
     const onPointerDown = (e: PointerEvent) => {
       if (e.target !== canvas) return;
       const { col, row } = resolveHex(e);
+
+      // Allocation manuelle des pertes : priorité absolue tant qu'elle est active.
+      // Le défenseur clique une figurine choisissable (cible) → elle encaisse.
+      const alloc = manualAllocationRef.current;
+      if (alloc) {
+        if (e.button !== 0) return; // clic droit ignoré pendant l'allocation
+        // Match par tolérance (comme le hit-test cible) : les bases larges débordent de
+        // l'hex d'ancre, un match exact col/row raterait le clic sur l'icône.
+        const clickCube = offsetToCube(col, row);
+        let chosen: string | null = null;
+        let bestD = Infinity;
+        for (const c of alloc.choices) {
+          const d = cubeDistance(clickCube, offsetToCube(c.col, c.row));
+          if (d <= HEX_HIT_TOLERANCE && d < bestD) {
+            bestD = d;
+            chosen = c.model_id;
+          }
+        }
+        if (chosen) {
+          e.stopImmediatePropagation();
+          void onAllocateModelRef.current?.(chosen);
+        }
+        return; // bloque tout autre traitement de clic pendant l'allocation
+      }
+
       const plan = squadShootPlanRef.current;
       const cbs = squadShootCallbacksRef.current;
 
@@ -3343,6 +3385,70 @@ export default function Board({
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
   }, [phase, mode, measureMode.kind, boardConfig, gameState?.units_cache, current_player, eligibleUnitIds]);
+
+  // Allocation manuelle des pertes : anneau de surbrillance sur les figurines
+  // choisissables (cible). Overlay PIXI dédié sur app.stage (même repère monde que
+  // les unités), redessiné à chaque changement d'allocation (donc à chaque mort).
+  useEffect(() => {
+    const app = appRef.current;
+    if (!app) return;
+    const overlay = new PIXI.Graphics();
+    overlay.zIndex = 2700; // au-dessus des unités (2000) et du veil move (2600)
+    overlay.eventMode = "none";
+    app.stage.addChild(overlay);
+    manualAllocOverlayRef.current = overlay;
+    overlay.clear();
+    if (manualAllocation && manualAllocation.choices.length > 0 && boardConfig) {
+      const HEX_RADIUS_H = boardConfig.hex_radius;
+      const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
+      const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
+      const MARGIN_H = boardConfig.margin;
+      // Rayon de l'anneau calé sur la base de la fig cible (comme le voile rouge ~3589), + 25 %
+      // pour former un halo autour de l'icône (sinon noyé dessous : base >> 0.85*hex_radius).
+      const targetUnit = units.find(
+        (u) => String(u.id) === String(manualAllocation.target_unit_id)
+      );
+      const baseSz = targetUnit ? resolveBaseSizeForUnitDisplay(targetUnit) : 1;
+      const modelR = baseSz > 1 ? (baseSz * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
+      const ringR = modelR * 1.25;
+      const lineW = Math.max(1.5, HEX_RADIUS_H * 0.5);
+      // Anneau jaune sur TOUTE l'escouade cible (marque la cible en cours d'allocation) ;
+      // voile gris EN PLUS sur les figs non choisissables (hors groupe courant). L'anneau
+      // les distingue d'une fig morte (ghost gris sans anneau).
+      const choiceIds = new Set(manualAllocation.choices.map((c) => c.model_id));
+      const tgtCache = (gameState as unknown as {
+        units_cache?: Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>;
+      })?.units_cache?.[String(manualAllocation.target_unit_id)];
+      const byModel = tgtCache?.occupied_hexes_by_model;
+      if (byModel) {
+        for (const [mid, pos] of Object.entries(byModel)) {
+          const cx = pos[0] * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H;
+          const cy = pos[1] * HEX_HEIGHT_H + ((pos[0] % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H;
+          const selectable = choiceIds.has(mid);
+          // 1. voile gris sous l'anneau pour les non-selectionnables.
+          if (!selectable) {
+            overlay.lineStyle(0);
+            overlay.beginFill(0x444444, 0.5);
+            overlay.drawCircle(cx, cy, modelR);
+            overlay.endFill();
+          }
+          // 2. anneau jaune sur toutes les figs (fill leger uniquement si selectionnable).
+          overlay.lineStyle(lineW, 0xffcc00, 0.95);
+          overlay.beginFill(0xffcc00, selectable ? 0.18 : 0.0);
+          overlay.drawCircle(cx, cy, ringR);
+          overlay.endFill();
+        }
+      }
+    }
+    return () => {
+      if (!overlay.destroyed) {
+        overlay.clear();
+        app.stage.removeChild(overlay);
+        overlay.destroy();
+      }
+      if (manualAllocOverlayRef.current === overlay) manualAllocOverlayRef.current = null;
+    };
+  }, [manualAllocation, boardConfig, units, gameState]);
 
   // squad.md brique 3 : dès qu'AUCUNE fig n'est active en mode plan (fig posée → deselect, ou
   // entrée sans selection), couper TOUT le preview (fantome curseur + LoS + ligne guide + tooltip).
@@ -5544,6 +5650,7 @@ export default function Board({
       const savedVeilOverlay = squadMoveVeilOverlayRef.current;
       const savedMovePreviewGuideLine = movePreviewGuideLineRef.current;
       const savedMeasureGuideLine = measureGuideLineRef.current;
+      const savedManualAllocOverlay = manualAllocOverlayRef.current;
       if (savedStatic?.parent) app.stage.removeChild(savedStatic);
       if (savedWalls?.parent) app.stage.removeChild(savedWalls);
       if (savedUi?.parent) app.stage.removeChild(savedUi);
@@ -5554,6 +5661,7 @@ export default function Board({
       if (savedVeilOverlay?.parent) app.stage.removeChild(savedVeilOverlay);
       if (savedMovePreviewGuideLine?.parent) app.stage.removeChild(savedMovePreviewGuideLine);
       if (savedMeasureGuideLine?.parent) app.stage.removeChild(savedMeasureGuideLine);
+      if (savedManualAllocOverlay?.parent) app.stage.removeChild(savedManualAllocOverlay);
       if (
         canReuseExistingHighlightsThroughDestroy &&
         highlightsLayerRef.current?.parent === app.stage
@@ -5613,6 +5721,10 @@ export default function Board({
       if (savedMeasureGuideLine && !savedMeasureGuideLine.destroyed) {
         savedMeasureGuideLine.zIndex = MEASURE_GUIDE_LINE_Z_INDEX;
         app.stage.addChild(savedMeasureGuideLine);
+      }
+      if (savedManualAllocOverlay && !savedManualAllocOverlay.destroyed) {
+        savedManualAllocOverlay.zIndex = 2700;
+        app.stage.addChild(savedManualAllocOverlay);
       }
 
       // Nettoyer pastilles cible / jet de charge seulement quand on reconstruit les unités.

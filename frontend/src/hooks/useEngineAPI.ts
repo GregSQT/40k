@@ -378,6 +378,36 @@ interface RuleChoicePrompt {
   options: RuleChoiceOption[];
 }
 
+/** Allocation manuelle des pertes au tir (defenseur humain) : le backend renvoie ce
+ * payload tant qu'une figurine doit etre choisie pour encaisser (regle 05.04). */
+export interface ManualAllocation {
+  attacker_unit_id: string;
+  target_unit_id: string;
+  defender_player: number;
+  choices: Array<{ model_id: string; col: number; row: number; HP_CUR: number; HP_MAX: number }>;
+  current_group_id?: number | null;
+  wounds_remaining: number;
+}
+
+export interface ManualOrderGroup {
+  group_id: number;
+  is_character: boolean;
+  role: string | null;
+  unit_type: string | null;
+  W: number;
+  Sv: number;
+  InSv: number;
+  model_ids: string[];
+  has_wounded: boolean;
+}
+
+export interface ManualOrderRequest {
+  attacker_unit_id: string;
+  target_unit_id: string;
+  defender_player: number;
+  groups: ManualOrderGroup[];
+}
+
 export interface UseEngineAPIOptions {
   /** Ref à un getter appelé avant envoi d'un tir (left_click enemy) ; si forceKill, le backend force la mort de la cible (tutoriel 1-24, 2e tir). */
   getTutorialShootOptionsRef?: MutableRefObject<() => { forceKill?: boolean; forceMiss?: boolean }>;
@@ -615,6 +645,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     targetId: number;
   } | null>(null);
   const [ruleChoicePrompt, setRuleChoicePrompt] = useState<RuleChoicePrompt | null>(null);
+  /** Allocation manuelle des pertes en cours (defenseur humain) ; null hors allocation. */
+  const [manualAllocation, setManualAllocation] = useState<ManualAllocation | null>(null);
+  /** Ref miroir pour accès synchrone dans executeAction / callbacks de clic. */
+  const manualAllocationRef = useRef<ManualAllocation | null>(null);
+  manualAllocationRef.current = manualAllocation;
+  /** Déclaration de l'ordre des groupes d'allocation (cible hétérogène / CHARACTER). */
+  const [manualOrderRequest, setManualOrderRequest] = useState<ManualOrderRequest | null>(null);
+  const manualOrderRequestRef = useRef<ManualOrderRequest | null>(null);
+  manualOrderRequestRef.current = manualOrderRequest;
 
   // Track last action to detect activate_unit in shoot phase
   const lastActionRef = useRef<{ action: string; phase: string; unitId?: string } | null>(null);
@@ -1394,6 +1433,55 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               setSelectedUnitId(ruleChoicePreviousSelectedUnitIdRef.current);
               ruleChoicePreviousSelectedUnitIdRef.current = null;
             }
+          }
+
+          // Déclaration de l'ordre des groupes d'allocation (cible hétérogène / CHARACTER) :
+          // le backend attend l'ordre avant l'allocation fig par fig.
+          if (
+            data.result?.action === "squad_shoot_declare_order" &&
+            data.result?.waiting_for_player === true &&
+            data.result?.order_request
+          ) {
+            setManualOrderRequest(data.result.order_request as ManualOrderRequest);
+            if (manualAllocationRef.current !== null) setManualAllocation(null);
+            setGameState((p) => {
+              const merged = mergeGameStatePreservingOmittedObjectives(
+                p,
+                data.game_state as APIGameState
+              );
+              latestGameStateRef.current = merged;
+              return merged;
+            });
+            return;
+          }
+
+          // Allocation manuelle des pertes (defenseur humain) : le backend attend un
+          // choix de figurine. Capté ici comme rule_choice ; le garde-fou backend renvoie
+          // le même payload tant que l'allocation n'est pas terminée → l'état se ré-arme.
+          if (
+            data.result?.action === "squad_shoot_manual_alloc" &&
+            data.result?.waiting_for_player === true &&
+            data.result?.allocation
+          ) {
+            setManualAllocation(data.result.allocation as ManualAllocation);
+            if (manualOrderRequestRef.current !== null) setManualOrderRequest(null);
+            setGameState((p) => {
+              const merged = mergeGameStatePreservingOmittedObjectives(
+                p,
+                data.game_state as APIGameState
+              );
+              latestGameStateRef.current = merged;
+              return merged;
+            });
+            return;
+          }
+          // Toute autre réponse alors qu'une allocation/déclaration était en cours = terminée
+          // (done) → on libère les états manuels.
+          if (manualAllocationRef.current !== null) {
+            setManualAllocation(null);
+          }
+          if (manualOrderRequestRef.current !== null) {
+            setManualOrderRequest(null);
           }
 
           // Last move emptied move pool: PvP defers shooting init to a second request — chain it.
@@ -3769,6 +3857,38 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     console.log("[SQUAD-SHOOT] cancel");
   }, [executeAction]);
 
+  /** Allocation manuelle des pertes : le défenseur a cliqué la figurine qui encaisse. */
+  const handleAllocateModel = useCallback(async (modelId: string) => {
+    const alloc = manualAllocationRef.current;
+    if (!alloc) return;
+    try {
+      await executeAction({
+        action: "squad_shoot_allocate_model",
+        unitId: String(alloc.attacker_unit_id),
+        modelId: String(modelId),
+      });
+    } catch (e) {
+      console.error("[MANUAL-ALLOC] allocate FAILED", e);
+      setError(`Allocation failed: ${formatApiConnectionError(e)}`);
+    }
+  }, [executeAction]);
+
+  /** Allocation manuelle : le défenseur a déclaré l'ordre des groupes (cible hétérogène). */
+  const handleDeclareOrder = useCallback(async (order: number[]) => {
+    const req = manualOrderRequestRef.current;
+    if (!req) return;
+    try {
+      await executeAction({
+        action: "squad_shoot_declare_order",
+        unitId: String(req.attacker_unit_id),
+        order,
+      });
+    } catch (e) {
+      console.error("[MANUAL-ALLOC] declare_order FAILED", e);
+      setError(`Declare order failed: ${formatApiConnectionError(e)}`);
+    }
+  }, [executeAction]);
+
   const shouldShowRetreatAlert = useCallback((): boolean => {
     return readRequiredBooleanSetting(RETREAT_ALERT_STORAGE_KEY, true);
   }, []);
@@ -4982,6 +5102,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onUnassignShootModel: handleUnassignShootModel,
     onCommitSquadShoot: handleCommitSquadShoot,
     onCancelSquadShoot: handleCancelSquadShoot,
+    manualAllocation,
+    onAllocateModel: handleAllocateModel,
+    manualOrderRequest,
+    onDeclareOrder: handleDeclareOrder,
     onStartAttackPreview: onStartAttackPreviewMemo,
     onConfirmMove: handleConfirmMove,
     onCancelMove: handleCancelMove,

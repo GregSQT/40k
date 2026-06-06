@@ -31,7 +31,12 @@ import {
   type TutorialSpotlightRect,
   useTutorial,
 } from "../contexts/TutorialContext";
-import { type UseEngineAPIBlinkBoardProps, useEngineAPI } from "../hooks/useEngineAPI";
+import {
+  type UseEngineAPIBlinkBoardProps,
+  type ManualOrderRequest,
+  type ManualOrderGroup,
+  useEngineAPI,
+} from "../hooks/useEngineAPI";
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
 import type { GamePhase, GameState, PlayerId, TargetPreview, Unit } from "../types";
@@ -46,6 +51,103 @@ import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import TutorialOverlay from "./TutorialOverlay";
 import { UnitStatusTable } from "./UnitStatusTable";
+
+/** Libellé court d'un groupe d'allocation (W/Sv/InSv, taille, statut). */
+/** "WolfGuardTerminator" → "Wolf Guard Terminator" (camelCase → mots espacés). */
+function prettifyUnitType(t: string | null): string {
+  if (!t) return "";
+  return t
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .trim();
+}
+
+function manualGroupLabel(g: ManualOrderGroup): string {
+  const inv = g.InSv < 7 ? `/Inv${g.InSv}+` : "";
+  const kind = prettifyUnitType(g.unit_type) || (g.is_character ? "CHARACTER" : "Figs");
+  const wounded = g.has_wounded ? " ⚠ blessé" : "";
+  return `${kind} — W${g.W} Sv${g.Sv}+${inv} ×${g.model_ids.length}${wounded}`;
+}
+
+/**
+ * Déclaration de l'ordre d'allocation des pertes (règles 40k 05.03) : le défenseur
+ * ordonne les groupes (cible hétérogène / CHARACTER). Les contraintes sont garanties
+ * par construction (seuls les groupes valides au coup suivant sont cliquables) :
+ * non-CHARACTER avant CHARACTER ; groupe blessé avant sain (par classe). Le backend
+ * revalide.
+ */
+function ManualOrderPicker({
+  request,
+  onSubmit,
+}: {
+  request: ManualOrderRequest;
+  onSubmit: (order: number[]) => void;
+}) {
+  // L'état est réinitialisé par remount (key sur le call-site) à chaque nouvelle requête.
+  const [order, setOrder] = useState<number[]>([]);
+
+  const byId = new Map(request.groups.map((g) => [g.group_id, g]));
+  const remaining = request.groups.filter((g) => !order.includes(g.group_id));
+  const nonChar = remaining.filter((g) => !g.is_character);
+  let pickable: ManualOrderGroup[];
+  if (nonChar.length > 0) {
+    const wounded = nonChar.filter((g) => g.has_wounded);
+    pickable = wounded.length > 0 ? wounded : nonChar;
+  } else {
+    const chars = remaining.filter((g) => g.is_character);
+    const wounded = chars.filter((g) => g.has_wounded);
+    pickable = wounded.length > 0 ? wounded : chars;
+  }
+  const complete = order.length === request.groups.length;
+
+  return (
+    <div className="manual-order-picker">
+      <div className="manual-order-picker__title">
+        Ordre d'allocation des pertes — Unité {request.target_unit_id}
+      </div>
+      <div className="manual-order-picker__hint">
+        Clique les groupes dans l'ordre où ils encaisseront (blessés d'abord, CHARACTER en
+        dernier).
+      </div>
+      <ol className="manual-order-picker__order">
+        {order.map((gid, i) => {
+          const g = byId.get(gid);
+          return (
+            <li key={gid}>
+              {i + 1}. {g ? manualGroupLabel(g) : gid}
+            </li>
+          );
+        })}
+      </ol>
+      {!complete && (
+        <div className="manual-order-picker__choices">
+          {pickable.map((g) => (
+            <button
+              type="button"
+              key={g.group_id}
+              className="manual-order-picker__choice"
+              onClick={() => setOrder((prev) => [...prev, g.group_id])}
+            >
+              {manualGroupLabel(g)}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="manual-order-picker__actions">
+        <button
+          type="button"
+          disabled={order.length === 0}
+          onClick={() => setOrder([])}
+        >
+          Réinitialiser
+        </button>
+        <button type="button" disabled={!complete} onClick={() => onSubmit(order)}>
+          Valider l'ordre
+        </button>
+      </div>
+    </div>
+  );
+}
 
 type RuleChoicePrompt = {
   trigger: "on_deploy" | "turn_start" | "player_turn_start" | "phase_start" | "activation_start";
@@ -3035,6 +3137,17 @@ export const BoardWithAPI: React.FC = () => {
         </div>
       )}
 
+      {/* Déclaration de l'ordre d'allocation des pertes (cible hétérogène / CHARACTER) */}
+      {apiProps.manualOrderRequest && (
+        <div className="manual-order-overlay">
+          <ManualOrderPicker
+            key={`${apiProps.manualOrderRequest.attacker_unit_id}:${apiProps.manualOrderRequest.target_unit_id}:${apiProps.manualOrderRequest.groups.map((g) => g.group_id).join("-")}`}
+            request={apiProps.manualOrderRequest}
+            onSubmit={(o) => apiProps.onDeclareOrder(o)}
+          />
+        </div>
+      )}
+
       {/* AI Error Display */}
       {aiError && (
         <div className="bg-red-900 border border-red-700 rounded p-3 mb-2">
@@ -3327,6 +3440,8 @@ export const BoardWithAPI: React.FC = () => {
             onUnassignShootModel={isGameOver ? async () => {} : apiProps.onUnassignShootModel}
             onCommitSquadShoot={isGameOver ? async () => {} : apiProps.onCommitSquadShoot}
             onCancelSquadShoot={isGameOver ? async () => {} : apiProps.onCancelSquadShoot}
+            manualAllocation={apiProps.manualAllocation}
+            onAllocateModel={isGameOver ? async () => {} : apiProps.onAllocateModel}
             onStartAttackPreview={isGameOver ? () => {} : apiProps.onStartAttackPreview}
             onDeployUnit={
               isGameOver ||

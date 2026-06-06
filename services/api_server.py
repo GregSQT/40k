@@ -59,6 +59,12 @@ BOARD_PATH_MAP = {
     "x5_44x60": "board/44x60x5",
 }
 
+# Sérialise toute section qui mute W40K_BOARD_PATH (état global processus) puis
+# lit/charge le board. Évite la race entre GET /api/config/board et
+# POST /api/game/start sur le serveur Flask multithread (cf. footprint « invalid hex »
+# intermittent quand un thread lisait le board d'un autre).
+_BOARD_ENV_LOCK = RLock()
+
 try:
     import orjson as _orjson
 except ImportError:
@@ -1766,61 +1772,64 @@ def start_game():
         ), 403
         
     # CRITICAL: Always reinitialize engine based on requested mode to prevent mode contamination
-    if requested_mode == "pvp_test":
-        print("DEBUG: Initializing engine for PvP Test mode")
-        if board_path is None:
-            from config_loader import get_config_loader as _gcl
-            _cfg = _gcl().load_config("config", force_reload=False)
-            board_path = _cfg.get("defaults", {}).get("test_board", "x5")
-        scenario_file = os.path.join("config", BOARD_PATH_MAP[board_path], "scenario", "scenario_pvp_test.json")
-        _prev_board = os.environ.get("W40K_BOARD_PATH")
-        os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
-        try:
+    # Lock: l'init lit le board via W40K_BOARD_PATH (état global) ; exclusion mutuelle
+    # avec GET /api/config/board pour qu'un thread ne lise pas le board d'un autre.
+    with _BOARD_ENV_LOCK:
+        if requested_mode == "pvp_test":
+            print("DEBUG: Initializing engine for PvP Test mode")
+            if board_path is None:
+                from config_loader import get_config_loader as _gcl
+                _cfg = _gcl().load_config("config", force_reload=False)
+                board_path = _cfg.get("defaults", {}).get("test_board", "x5")
+            scenario_file = os.path.join("config", BOARD_PATH_MAP[board_path], "scenario", "scenario_pvp_test.json")
+            _prev_board = os.environ.get("W40K_BOARD_PATH")
+            os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
+            try:
+                initialize_engine(scenario_file=scenario_file)
+            finally:
+                if _prev_board is not None:
+                    os.environ["W40K_BOARD_PATH"] = _prev_board
+                elif "W40K_BOARD_PATH" in os.environ:
+                    del os.environ["W40K_BOARD_PATH"]
+        elif requested_mode == "pvp":
+            print("DEBUG: Initializing engine for PvP mode")
             initialize_engine(scenario_file=scenario_file)
-        finally:
-            if _prev_board is not None:
-                os.environ["W40K_BOARD_PATH"] = _prev_board
-            elif "W40K_BOARD_PATH" in os.environ:
-                del os.environ["W40K_BOARD_PATH"]
-    elif requested_mode == "pvp":
-        print("DEBUG: Initializing engine for PvP mode")
-        initialize_engine(scenario_file=scenario_file)
-    elif requested_mode == "pve":
-        print("DEBUG: Initializing engine for PvE mode (copied from Test mode)")
-        initialize_test_engine(
-            scenario_file=scenario_file,
-            forced_agent_key="CoreAgent",
-        )
-    elif requested_mode == "pve_test":
-        print("DEBUG: Initializing engine for PvE Test mode")
-        if board_path is None:
-            from config_loader import get_config_loader as _gcl
-            _cfg = _gcl().load_config("config", force_reload=False)
-            board_path = _cfg.get("defaults", {}).get("test_board", "x5")
-        scenario_file = os.path.join("config", BOARD_PATH_MAP[board_path], "scenario", "scenario_pve_test.json")
-        _prev_board = os.environ.get("W40K_BOARD_PATH")
-        os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
-        try:
+        elif requested_mode == "pve":
+            print("DEBUG: Initializing engine for PvE mode (copied from Test mode)")
             initialize_test_engine(
                 scenario_file=scenario_file,
                 forced_agent_key="CoreAgent",
             )
-        finally:
-            if _prev_board is not None:
-                os.environ["W40K_BOARD_PATH"] = _prev_board
-            elif "W40K_BOARD_PATH" in os.environ:
-                del os.environ["W40K_BOARD_PATH"]
-    elif requested_mode == ED_MODE_CODE:
-        print("DEBUG: Initializing engine for Endless Duty mode")
-        if scenario_file is None:
-            scenario_file = ED_SCENARIO_DEFAULT
-        initialize_test_engine(
-            scenario_file=scenario_file,
-            forced_agent_key="CoreAgent",
-        )
-    else:
-        print("DEBUG: Initializing engine for PvP mode")
-        initialize_engine(scenario_file=scenario_file)
+        elif requested_mode == "pve_test":
+            print("DEBUG: Initializing engine for PvE Test mode")
+            if board_path is None:
+                from config_loader import get_config_loader as _gcl
+                _cfg = _gcl().load_config("config", force_reload=False)
+                board_path = _cfg.get("defaults", {}).get("test_board", "x5")
+            scenario_file = os.path.join("config", BOARD_PATH_MAP[board_path], "scenario", "scenario_pve_test.json")
+            _prev_board = os.environ.get("W40K_BOARD_PATH")
+            os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
+            try:
+                initialize_test_engine(
+                    scenario_file=scenario_file,
+                    forced_agent_key="CoreAgent",
+                )
+            finally:
+                if _prev_board is not None:
+                    os.environ["W40K_BOARD_PATH"] = _prev_board
+                elif "W40K_BOARD_PATH" in os.environ:
+                    del os.environ["W40K_BOARD_PATH"]
+        elif requested_mode == ED_MODE_CODE:
+            print("DEBUG: Initializing engine for Endless Duty mode")
+            if scenario_file is None:
+                scenario_file = ED_SCENARIO_DEFAULT
+            initialize_test_engine(
+                scenario_file=scenario_file,
+                forced_agent_key="CoreAgent",
+            )
+        else:
+            print("DEBUG: Initializing engine for PvP mode")
+            initialize_engine(scenario_file=scenario_file)
 
     assert engine is not None
 
@@ -2771,15 +2780,16 @@ def get_board_config():
         if board_path_param is not None and board_path_param not in BOARD_PATH_MAP:
             raise ValueError(f"board_path must be one of {sorted(BOARD_PATH_MAP)} (got {board_path_param!r})")
         if board_path_param is not None:
-            prev = os.environ.get("W40K_BOARD_PATH")
-            os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path_param]
-            try:
-                board_data = config_loader.get_board_config()
-            finally:
-                if prev is not None:
-                    os.environ["W40K_BOARD_PATH"] = prev
-                elif "W40K_BOARD_PATH" in os.environ:
-                    del os.environ["W40K_BOARD_PATH"]
+            with _BOARD_ENV_LOCK:
+                prev = os.environ.get("W40K_BOARD_PATH")
+                os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path_param]
+                try:
+                    board_data = config_loader.get_board_config()
+                finally:
+                    if prev is not None:
+                        os.environ["W40K_BOARD_PATH"] = prev
+                    elif "W40K_BOARD_PATH" in os.environ:
+                        del os.environ["W40K_BOARD_PATH"]
         else:
             board_data = config_loader.get_board_config()
         board_spec = board_data["default"]

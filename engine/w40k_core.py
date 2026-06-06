@@ -2625,6 +2625,15 @@ class W40KEngine(gym.Env):
                 "player": int(require_key(active_prompt, "player")),
             }
 
+        # Block gameplay actions while a manual casualty allocation is pending
+        # (defenseur humain). Only the allocation action is allowed through.
+        if (
+            self.game_state.get("pending_shoot_allocation") is not None
+            and action.get("action") not in ("squad_shoot_allocate_model", "squad_shoot_declare_order")
+        ):
+            from engine.phase_handlers.shared_utils import manual_allocation_waiting_payload
+            return True, manual_allocation_waiting_payload(self.game_state)
+
         current_phase = self.game_state["phase"]
         
         # CRITICAL: Capture phase, player, turn, episode, and positions BEFORE action execution for accurate logging
@@ -4147,6 +4156,9 @@ class W40KEngine(gym.Env):
             squad_weapon_valid_targets,
             squad_lock_shoot,
             resolve_squad_shoot,
+            build_manual_shoot_allocation,
+            apply_manual_shoot_allocation,
+            apply_manual_shoot_declare_order,
             clear_pending_shoot_intent,
         )
         from engine.phase_handlers.generic_handlers import end_activation
@@ -4311,10 +4323,20 @@ class W40KEngine(gym.Env):
 
         if name == "squad_shoot_validate":
             squad_lock_shoot(self.game_state, squad_id)
-            shoot_result = resolve_squad_shoot(self.game_state, squad_id)
             unit = get_unit_by_id(squad_id, self.game_state)
             if unit is None:
-                raise KeyError(f"Squad {squad_id} introuvable pour end_activation apres tir manuel")
+                raise KeyError(f"Squad {squad_id} introuvable pour resolution tir manuel")
+            attacker_player = int(require_key(unit, "player"))
+            defender_player = 2 if attacker_player == 1 else 1
+            if self._is_player_human(defender_player):
+                # Allocation manuelle des pertes par le defenseur (regle 05.04) :
+                # jets resolus, application differee, end_activation reporte a la fin.
+                alloc_result = build_manual_shoot_allocation(self.game_state, squad_id)
+                if alloc_result.get("waiting_for_player"):
+                    return True, alloc_result
+                return True, self._finish_manual_shoot_after_allocation(squad_id, alloc_result)
+            # Defenseur IA : allocation auto (chemin inchange).
+            shoot_result = resolve_squad_shoot(self.game_state, squad_id)
             end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
             if self.game_state.get("active_shooting_unit") == squad_id:
                 del self.game_state["active_shooting_unit"]
@@ -4323,7 +4345,41 @@ class W40KEngine(gym.Env):
                 "shoot_result": shoot_result,
             }
 
+        if name == "squad_shoot_allocate_model":
+            chosen = action.get("modelId")
+            if chosen is None:
+                return False, {"error": "missing_model_id"}
+            alloc_result = apply_manual_shoot_allocation(self.game_state, str(chosen))
+            if alloc_result.get("waiting_for_player"):
+                return True, alloc_result
+            return True, self._finish_manual_shoot_after_allocation(squad_id, alloc_result)
+
+        if name == "squad_shoot_declare_order":
+            order = action.get("order")
+            if order is None:
+                return False, {"error": "missing_order"}
+            alloc_result = apply_manual_shoot_declare_order(self.game_state, list(order))
+            if alloc_result.get("waiting_for_player"):
+                return True, alloc_result
+            return True, self._finish_manual_shoot_after_allocation(squad_id, alloc_result)
+
         raise ValueError(f"Unknown squad manual shoot action: {name!r}")
+
+    def _finish_manual_shoot_after_allocation(
+        self, squad_id: str, alloc_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """end_activation differe : appele quand l allocation manuelle est terminee (done)."""
+        from engine.phase_handlers.generic_handlers import end_activation
+        unit = get_unit_by_id(squad_id, self.game_state)
+        if unit is None:
+            raise KeyError(f"Squad {squad_id} introuvable pour end_activation apres allocation")
+        end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
+        if self.game_state.get("active_shooting_unit") == squad_id:
+            del self.game_state["active_shooting_unit"]
+        return {
+            **end_result, "action": "squad_shoot", "unitId": squad_id,
+            "shoot_result": alloc_result.get("shoot_result"),
+        }
 
 
     # ============================================================================
@@ -4794,6 +4850,7 @@ class W40KEngine(gym.Env):
             "squad_shoot_activate", "squad_select_weapon", "squad_shoot_select_model",
             "squad_shoot_assign", "squad_shoot_unassign", "squad_shoot_validate", "squad_shoot_cancel",
             "squad_shoot_assign_weapon", "squad_shoot_unassign_weapon", "squad_shoot_weapon_targets",
+            "squad_shoot_allocate_model", "squad_shoot_declare_order",
         ):
             return self._process_squad_manual_shoot(action)
         # Pure delegation - handler manages initialization, player progression, everything
