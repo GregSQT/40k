@@ -129,6 +129,16 @@
         { "col": 49, "row": 38, "unit_type": "LibrarianTerminator" },
         { "col": 69, "row": 38, "unit_type": "CaptainTerminatorRelicWeaponBolter" }
       ]
+    },
+    {
+      "id": 115, "unit_type": "Barbgaunt", "player": 2, "col": 10, "row": 240,
+      "models": [
+        { "col": 10, "row": 240 },
+        { "col": 16, "row": 240 },
+        { "col": 22, "row": 240 },
+        { "col": 28, "row": 240 },
+        { "col": 34, "row": 240 }
+      ]
     }
   ]
 }

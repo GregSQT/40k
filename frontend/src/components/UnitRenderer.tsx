@@ -76,10 +76,20 @@ interface UnitRendererProps {
    */
   modelHps?: Array<{ HP_CUR: number; HP_MAX: number; is_character: boolean } | null>;
   /**
+   * Flag "caché" (rule 13.09) par figurine, aligné index-pour-index avec modelCenters.
+   * Utilisé uniquement en mode hiddenBadgePerModel pour poser un badge sur chaque fig cachée.
+   */
+  modelHidden?: boolean[];
+  /**
    * true → une barre HP par figurine. false (défaut) → une barre agrégée par
    * escouade (figs non-character uniquement) ; les characters gardent leur barre.
    */
   hpBarPerModel?: boolean;
+  /**
+   * true → un badge "caché" sur chaque figurine cachée (suit modelHidden).
+   * false (défaut) → un seul badge si toute l'escouade est cachée (unit.hidden).
+   */
+  hiddenBadgePerModel?: boolean;
   app: PIXI.Application;
   uiElementsContainer?: PIXI.Container; // Persistent container for UI elements (target logos, badges) that should never be cleaned up
   useOverlayIcons?: boolean; // Render advance/weapon icons in DOM overlay
@@ -2315,7 +2325,7 @@ export class UnitRenderer {
     const targetContainer = uiElementsContainer || app.stage;
     const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
 
-    // Clean up any existing hidden badge for this unit (avoids stale duplicates across renders).
+    // Clean up any existing hidden badge(s) for this unit (avoids stale duplicates across renders).
     if (uiElementsContainer) {
       const prefix = `hidden-badge-${unitIdNum}`;
       const existing = uiElementsContainer.children.filter(
@@ -2329,30 +2339,43 @@ export class UnitRenderer {
       });
     }
 
-    // Hidden flag (rule 13.09) — show only if the whole squad is hidden (all models).
-    if (!unit.hidden) return;
-
-    // Bottom-left of unit (mirror of the bottom-right charge badge).
-    const scaledOffset = ((HEX_RADIUS * unitIconScale) / 2) * 0.8;
-    const badgeX = centerX - scaledOffset;
-    const badgeY = centerY + scaledOffset;
     const r = Math.max(7, HEX_RADIUS * 0.32);
+    const scaledOffset = ((HEX_RADIUS * unitIconScale) / 2) * 0.8;
+    // Bottom-left of a figure (mirror of the bottom-right charge badge).
+    const drawBadgeAt = (cx: number, cy: number, name: string): void => {
+      const badgeX = cx - scaledOffset;
+      const badgeY = cy + scaledOffset;
+      const g = new PIXI.Graphics();
+      g.beginFill(0x1e1e1e, 0.9);
+      g.lineStyle(2, 0xb0b0b0, 1);
+      g.drawCircle(badgeX, badgeY, r);
+      g.endFill();
+      // Small eye (white) + red diagonal slash → reads as "hidden / not seen".
+      g.beginFill(0xe8e8e8, 1);
+      g.drawCircle(badgeX, badgeY, r * 0.28);
+      g.endFill();
+      g.lineStyle(2, 0xff5555, 1);
+      g.moveTo(badgeX - r * 0.7, badgeY - r * 0.7);
+      g.lineTo(badgeX + r * 0.7, badgeY + r * 0.7);
+      g.name = name;
+      g.zIndex = 10001;
+      targetContainer.addChild(g);
+    };
 
-    const g = new PIXI.Graphics();
-    g.beginFill(0x1e1e1e, 0.9);
-    g.lineStyle(2, 0xb0b0b0, 1);
-    g.drawCircle(badgeX, badgeY, r);
-    g.endFill();
-    // Small eye (white) + red diagonal slash → reads as "hidden / not seen".
-    g.beginFill(0xe8e8e8, 1);
-    g.drawCircle(badgeX, badgeY, r * 0.28);
-    g.endFill();
-    g.lineStyle(2, 0xff5555, 1);
-    g.moveTo(badgeX - r * 0.7, badgeY - r * 0.7);
-    g.lineTo(badgeX + r * 0.7, badgeY + r * 0.7);
-    g.name = `hidden-badge-${unitIdNum}`;
-    g.zIndex = 10001;
-    targetContainer.addChild(g);
+    if (this.props.hiddenBadgePerModel) {
+      // Per-figure mode (rule 13.09) — one badge on each hidden figure (follows modelHidden).
+      const centers = this.props.modelCenters;
+      const flags = this.props.modelHidden;
+      if (!centers || !flags) return;
+      centers.forEach(([cx, cy], i) => {
+        if (flags[i]) drawBadgeAt(cx, cy, `hidden-badge-${unitIdNum}-${i}`);
+      });
+      return;
+    }
+
+    // Squad mode — single badge only if the whole squad is hidden (all models).
+    if (!unit.hidden) return;
+    drawBadgeAt(centerX, centerY, `hidden-badge-${unitIdNum}`);
   }
 
   private renderBattleShockedIndicator(iconZIndex: number): void {

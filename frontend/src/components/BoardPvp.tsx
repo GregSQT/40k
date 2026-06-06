@@ -516,6 +516,7 @@ type BoardProps = {
   replayActionIndex?: number; // For replay mode: detect rollback and reset objective control
   autoSelectWeapon?: boolean;
   hpBarPerModel?: boolean; // true → barre HP par figurine ; false → une barre par escouade (hors characters)
+  hiddenBadgePerModel?: boolean; // true → badge "caché" par figurine ; false → un seul badge si toute l'escouade est cachée
   /** Mode mesure (règle) : armed → 1er clic pose l’ancre ; clic droit = jonction ; 2e clic termine la ligne → armed. Sortie : bouton règle uniquement. */
   measureMode?: MeasureModeState;
   onMeasureHexCommit?: (col: number, row: number) => void;
@@ -804,6 +805,7 @@ export default function Board({
   replayActionIndex,
   autoSelectWeapon,
   hpBarPerModel,
+  hiddenBadgePerModel,
   measureMode = { kind: "off" },
   onMeasureHexCommit,
   onMeasureJunctionCommit,
@@ -5515,7 +5517,7 @@ export default function Board({
             .map((d) => `${d.model_id}.${d.weapon_index}>${d.target_unit_id}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hbpm:${hiddenBadgePerModel ? 1 : 0}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -5995,6 +5997,9 @@ export default function Board({
         const modelHps: Array<
           { HP_CUR: number; HP_MAX: number; is_character: boolean } | null
         > = modelHpsByModel ? modelIds.map((mid) => modelHpsByModel[mid] ?? null) : [];
+        // Rule 13.09 : flag "caché" par figurine (aligné sur modelCenters) pour le mode badge par-fig.
+        const hiddenModelIds = new Set((unit.hidden_models ?? []).map((m) => String(m)));
+        const modelHidden: boolean[] = modelIds.map((mid) => hiddenModelIds.has(String(mid)));
         const [anchorCenterX, anchorCenterY] = modelCenters[0];
 
         // Skip units that are being previewed elsewhere
@@ -6137,7 +6142,9 @@ export default function Board({
           modelCenters,
           modelMetas,
           modelHps,
+          modelHidden,
           hpBarPerModel,
+          hiddenBadgePerModel,
           app,
           renderTarget: unitsLayer,
           uiElementsContainer: uiElementsContainerRef.current!,
@@ -7091,6 +7098,7 @@ export default function Board({
     attackPreview,
     autoSelectWeapon,
     hpBarPerModel,
+    hiddenBadgePerModel,
     availableCellsOverride,
     isBlinkingActive,
     stableBlinkingUnits,

@@ -17,6 +17,8 @@ interface SettingsMenuProps {
   onToggleAutoSelectWeapon: (value: boolean) => void;
   hpBarPerModel?: boolean;
   onToggleHpBarPerModel?: (value: boolean) => void;
+  hiddenBadgePerModel?: boolean;
+  onToggleHiddenBadgePerModel?: (value: boolean) => void;
   retreatAlertEnabled?: boolean;
   onToggleRetreatAlert?: (value: boolean) => void;
   modeGuidesActivated?: boolean;
@@ -39,6 +41,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   onToggleAutoSelectWeapon,
   hpBarPerModel = false,
   onToggleHpBarPerModel,
+  hiddenBadgePerModel = false,
+  onToggleHiddenBadgePerModel,
   retreatAlertEnabled = true,
   onToggleRetreatAlert,
   modeGuidesActivated = true,
@@ -165,6 +169,26 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
             <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
               Activé : une barre de vie sur chaque figurine. Désactivé : une seule barre par
               escouade (hors personnages). Les personnages affichent toujours leurs PV réels.
+            </p>
+          </div>
+        )}
+
+        {onToggleHiddenBadgePerModel && (
+          <div style={{ marginBottom: "16px" }}>
+            <label
+              style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}
+            >
+              <input
+                type="checkbox"
+                checked={hiddenBadgePerModel}
+                onChange={(e) => onToggleHiddenBadgePerModel(e.target.checked)}
+                style={{ marginRight: "12px", width: "18px", height: "18px", cursor: "pointer" }}
+              />
+              <span>Badge "caché" par figurine</span>
+            </label>
+            <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
+              Activé : un badge sur chaque figurine cachée. Désactivé : un seul badge sur l'escouade
+              (uniquement si toutes les figurines sont cachées).
             </p>
           </div>
         )}

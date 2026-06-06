@@ -2691,6 +2691,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         battle_shocked: unit.battle_shocked === true ? true : undefined,
         hideable: unit.hideable,
         hidden: unit.hidden,
+        hidden_models: unit.hidden_models,
       };
     });
   }, []);
