@@ -2329,7 +2329,7 @@ export class UnitRenderer {
       });
     }
 
-    // Hidden flag (rule 13.09) — show if at least one model is hidden.
+    // Hidden flag (rule 13.09) — show only if the whole squad is hidden (all models).
     if (!unit.hidden) return;
 
     // Bottom-left of unit (mirror of the bottom-right charge badge).

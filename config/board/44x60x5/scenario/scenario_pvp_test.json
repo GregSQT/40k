@@ -5,7 +5,7 @@
   "terrain_ref": "terrain-mc1.json",
   "units": [
     { "id": 2, "unit_type": "LibrarianTerminator",                 "player": 1, "col": 155, "row": 47 },
-    { "id": 3, "unit_type": "LieutenantCombiWeapon",               "player": 1, "col": 168, "row": 208 },
+    { "id": 3, "unit_type": "LieutenantCombiWeapon",               "player": 1, "col": 170, "row": 150 },
     { "id": 4, "unit_type": "ApothecaryBiologis",                  "player": 1, "col": 164, "row": 198 },
     { "id": 5, "unit_type": "DreadnoughtBallistus",                "player": 1, "col": 180, "row": 10 },
     {
@@ -51,14 +51,14 @@
     },
 
     { "id": 101, "unit_type": "WingedTyranidPrime", "player": 2, "col": 95,  "row": 130 },
-    { "id": 102, "unit_type": "Neurotyrant",         "player": 2, "col": 14,  "row": 225 },
+    { "id": 102, "unit_type": "Neurotyrant",         "player": 2, "col": 87,  "row": 197 },
     { "id": 103, "unit_type": "Psychophage",          "player": 2, "col": 18,  "row": 54 },
     { "id": 104, "unit_type": "ScreamerKiller",       "player": 2, "col": 145,  "row": 90 },
     { "id": 105, "unit_type": "RipperSwarm",          "player": 2, "col": 8,   "row": 260 },
     { "id": 106, "unit_type": "RipperSwarm",          "player": 2, "col": 8,   "row": 200 },
-    { "id": 107, "unit_type": "VonRyanLeaper",        "player": 2, "col": 14,  "row": 125 },
+    { "id": 107, "unit_type": "VonRyanLeaper",        "player": 2, "col": 31,  "row": 61 },
     { "id": 108, "unit_type": "VonRyanLeaper",        "player": 2, "col": 25,  "row": 132 },
-    { "id": 109, "unit_type": "VonRyanLeaper",        "player": 2, "col": 31,  "row": 61 },
+    { "id": 109, "unit_type": "VonRyanLeaper",        "player": 2, "col": 87,  "row": 147 },
     {
       "id": 110, "unit_type": "Barbgaunt", "player": 2, "col": 44, "row": 46,
       "models": [

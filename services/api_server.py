@@ -560,6 +560,11 @@ def _game_state_for_json(
     Si identique au contour courant et contour volumineux, les boucles sont omises du JSON et
     ``move_preview_footprint_mask_loops_unchanged`` vaut True (le client réutilise son cache).
     """
+    # Rule 13.09: keep unit['hidden'] fresh in every phase (not just shooting), so the
+    # hidden badge stays accurate as figs move. Cheap: only hideable units, footprint vs terrain.
+    from engine.phase_handlers.shooting_handlers import compute_hidden_statuses
+    compute_hidden_statuses(engine_instance.game_state)
+
     had_engine_mask_loops = bool(engine_instance.game_state.get("move_preview_footprint_mask_loops"))
     gs = {
         k: v for k, v in engine_instance.game_state.items()
