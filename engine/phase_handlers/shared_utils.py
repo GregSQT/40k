@@ -3651,6 +3651,38 @@ def squad_model_valid_targets(
     return valid
 
 
+def squad_shoot_los_overview(
+    game_state: Dict[str, Any], attacker_squad_id: str
+) -> Dict[str, Any]:
+    """Agrege les cibles tirables de TOUTE l escouade (double-click frontend).
+
+    Pour chaque fig vivante de l escouade, reutilise squad_model_valid_targets
+    (meme eligibilite que le blink mono-fig : arme selectionnee + LoS + portee),
+    puis compte par ennemi le nombre N de figs qui peuvent le cibler. Read-only :
+    n ecrit rien dans game_state.
+
+    Returns:
+        valid_targets    : union des squad_id ennemis vises par >= 1 fig
+        count_by_unit_id : {squad_id ennemi: N figs qui peuvent le cibler}
+        squad_alive_count: M = nb de figs vivantes de l escouade attaquante
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    mids = squad_models.get(attacker_squad_id)
+    if mids is None:
+        raise ValueError(f"Squad {attacker_squad_id!r} absent de squad_models")
+    alive = [mid for mid in mids if mid in models_cache]
+    count: Dict[str, int] = {}
+    for mid in alive:
+        for sid in squad_model_valid_targets(game_state, attacker_squad_id, mid):
+            count[sid] = count.get(sid, 0) + 1
+    return {
+        "valid_targets": list(count.keys()),
+        "count_by_unit_id": count,
+        "squad_alive_count": len(alive),
+    }
+
+
 def squad_undeclare_shoot_model(
     game_state: Dict[str, Any], attacker_squad_id: str, attacker_model_id: str
 ) -> bool:

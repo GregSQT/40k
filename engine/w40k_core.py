@@ -4151,6 +4151,7 @@ class W40KEngine(gym.Env):
             squad_declare_shoot_model,
             squad_undeclare_shoot_model,
             squad_model_valid_targets,
+            squad_shoot_los_overview,
             squad_declare_shoot_weapon,
             squad_undeclare_shoot_weapon,
             squad_weapon_valid_targets,
@@ -4242,6 +4243,18 @@ class W40KEngine(gym.Env):
                 "action": name, "unitId": squad_id, "modelId": model_id,
                 "valid_targets": valid_targets,
                 "cover_by_unit_id": _squad_cover_by_unit_id(valid_targets),
+            }  # get allowed
+
+        if name == "squad_shoot_los_overview":
+            # Read-only : cibles tirables de TOUTE l escouade + nb de figs qui voient
+            # chaque ennemi (double-click frontend : blink escouade + compteur N/M).
+            overview = squad_shoot_los_overview(self.game_state, squad_id)
+            return True, {
+                "action": name, "unitId": squad_id,
+                "valid_targets": overview["valid_targets"],
+                "count_by_unit_id": overview["count_by_unit_id"],
+                "squad_alive_count": overview["squad_alive_count"],
+                "cover_by_unit_id": _squad_cover_by_unit_id(overview["valid_targets"]),
             }  # get allowed
 
         if name == "squad_shoot_assign":
@@ -4850,7 +4863,7 @@ class W40KEngine(gym.Env):
             "squad_shoot_activate", "squad_select_weapon", "squad_shoot_select_model",
             "squad_shoot_assign", "squad_shoot_unassign", "squad_shoot_validate", "squad_shoot_cancel",
             "squad_shoot_assign_weapon", "squad_shoot_unassign_weapon", "squad_shoot_weapon_targets",
-            "squad_shoot_allocate_model", "squad_shoot_declare_order",
+            "squad_shoot_allocate_model", "squad_shoot_declare_order", "squad_shoot_los_overview",
         ):
             return self._process_squad_manual_shoot(action)
         # Pure delegation - handler manages initialization, player progression, everything

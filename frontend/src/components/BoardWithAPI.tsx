@@ -3433,6 +3433,9 @@ export const BoardWithAPI: React.FC = () => {
             blinkingUnits={engineApiBlink.blinkingUnits}
             blinkingAttackerId={engineApiBlink.blinkingAttackerId}
             blinkingCoverByUnitId={engineApiBlink.blinkingCoverByUnitId}
+            blinkingLosCountByUnitId={engineApiBlink.blinkingLosCountByUnitId}
+            blinkingSquadAliveCount={engineApiBlink.blinkingSquadAliveCount}
+            blinkingLosOverviewUnitId={engineApiBlink.blinkingLosOverviewUnitId}
             isBlinkingActive={engineApiBlink.isBlinkingActive}
             blinkVersion={engineApiBlink.blinkVersion}
             onSelectUnit={
@@ -3464,6 +3467,7 @@ export const BoardWithAPI: React.FC = () => {
             squadShootPlan={apiProps.squadShootPlan}
             onStartSquadModelShoot={isGameOver ? async () => {} : apiProps.onStartSquadModelShoot}
             onSelectModelForShoot={isGameOver ? async () => {} : apiProps.onSelectModelForShoot}
+            onSquadShootLosOverview={isGameOver ? async () => {} : apiProps.onSquadShootLosOverview}
             onAssignShootTarget={isGameOver ? async () => {} : apiProps.onAssignShootTarget}
             onAutoAssignAllModels={isGameOver ? async () => {} : apiProps.onAutoAssignAllModels}
             onUnassignShootModel={isGameOver ? async () => {} : apiProps.onUnassignShootModel}

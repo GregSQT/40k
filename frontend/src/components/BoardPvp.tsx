@@ -383,6 +383,9 @@ type BoardProps = {
   blinkingUnits?: number[];
   blinkingAttackerId?: number | null;
   blinkingCoverByUnitId?: Record<string, boolean>;
+  blinkingLosCountByUnitId?: Record<string, number>;
+  blinkingSquadAliveCount?: number;
+  blinkingLosOverviewUnitId?: number | null;
   isBlinkingActive?: boolean;
   blinkVersion?: number;
   blinkState?: boolean;
@@ -432,6 +435,7 @@ type BoardProps = {
   } | null;
   onStartSquadModelShoot?: (unitId: number | string, initialModelId?: string) => void | Promise<void>;
   onSelectModelForShoot?: (modelId: string) => void | Promise<void>;
+  onSquadShootLosOverview?: (unitId: number) => void | Promise<void>;
   onAssignShootTarget?: (targetUnitId: number | string) => void | Promise<void>;
   onAutoAssignAllModels?: (targetUnitId: number | string) => void | Promise<void>;
   onUnassignShootModel?: (modelId: string) => void | Promise<void>;
@@ -712,6 +716,9 @@ export default function Board({
   blinkingUnits,
   blinkingAttackerId,
   blinkingCoverByUnitId,
+  blinkingLosCountByUnitId,
+  blinkingSquadAliveCount,
+  blinkingLosOverviewUnitId,
   isBlinkingActive,
   blinkVersion,
   onSelectUnit,
@@ -731,6 +738,7 @@ export default function Board({
   squadShootPlan = null,
   onStartSquadModelShoot,
   onSelectModelForShoot,
+  onSquadShootLosOverview,
   onAssignShootTarget,
   onAutoAssignAllModels,
   onUnassignShootModel,
@@ -982,6 +990,7 @@ export default function Board({
   const squadShootCallbacksRef = useRef({
     onStartSquadModelShoot,
     onSelectModelForShoot,
+    onSquadShootLosOverview,
     onAssignShootTarget,
     onAutoAssignAllModels,
     onUnassignShootModel,
@@ -991,6 +1000,7 @@ export default function Board({
   squadShootCallbacksRef.current = {
     onStartSquadModelShoot,
     onSelectModelForShoot,
+    onSquadShootLosOverview,
     onAssignShootTarget,
     onAutoAssignAllModels,
     onUnassignShootModel,
@@ -1000,6 +1010,9 @@ export default function Board({
   /** Plan de tir toujours a jour pour les handlers d'event stables. */
   const squadShootPlanRef = useRef(squadShootPlan);
   squadShootPlanRef.current = squadShootPlan;
+  /** Unité en "vue escouade" (double-clic), à jour pour le handler de clic stable. */
+  const blinkingLosOverviewUnitIdRef = useRef<number | null>(null);
+  blinkingLosOverviewUnitIdRef.current = blinkingLosOverviewUnitId ?? null;
   /** Allocation manuelle des pertes + callback, refs à jour pour le handler de clic. */
   const manualAllocationRef = useRef(manualAllocation);
   manualAllocationRef.current = manualAllocation;
@@ -1007,6 +1020,7 @@ export default function Board({
   onAllocateModelRef.current = onAllocateModel;
   // Persiste entre les re-renders (contrairement à une variable locale dans useEffect).
   const lastEnemyClickRef = useRef<{ targetId: number | string; time: number } | null>(null);
+  const lastOwnFigClickRef = useRef<{ modelId: string; time: number } | null>(null);
 
   // Update refs when props change but don't trigger re-render - MOVE THIS BEFORE useEffect
   stableCallbacks.current = {
@@ -3339,17 +3353,39 @@ export default function Board({
         const own = findOwnFig(col, row);
         if (own && eligibleUnitIds.includes(Number(own.uid))) {
           e.stopImmediatePropagation();
+          const now = e.timeStamp;
+          const prevOwn = lastOwnFigClickRef.current;
+          if (prevOwn && String(prevOwn.modelId) === String(own.mid) && now - prevOwn.time < 400) {
+            // Double-clic direct (escouade pas encore activée) : le 1er clic l'active,
+            // l'overview ne dépend pas de la fin de l'activation (armes/SHOOT_LEFT déjà prêts).
+            lastOwnFigClickRef.current = null;
+            void cbs.onSquadShootLosOverview?.(Number(own.uid));
+            return;
+          }
+          lastOwnFigClickRef.current = { modelId: own.mid, time: now };
           void cbs.onStartSquadModelShoot?.(own.uid, own.mid);
         }
         return;
       }
 
       if (!plan) return;
-      // 1) clic sur une fig de l'escouade active → la sélectionner.
+      // 1) clic sur une fig de l'escouade active → simple = sélectionner la fig,
+      //    double = vue LoS de TOUTE l'escouade (cibles tirables de l'escouade + N/M).
       const own = findOwnFig(col, row);
       if (own && Number(own.uid) === Number(plan.unitId)) {
         e.stopImmediatePropagation();
+        const now = e.timeStamp;
+        const prevOwn = lastOwnFigClickRef.current;
+        if (prevOwn && String(prevOwn.modelId) === String(own.mid) && now - prevOwn.time < 400) {
+          lastOwnFigClickRef.current = null;
+          void cbs.onSquadShootLosOverview?.(Number(plan.unitId));
+          return;
+        }
+        lastOwnFigClickRef.current = { modelId: own.mid, time: now };
         if (own.mid !== plan.activeModelId) {
+          void cbs.onSelectModelForShoot?.(own.mid);
+        } else if (blinkingLosOverviewUnitIdRef.current != null) {
+          // Re-clic simple sur la fig déjà active pendant la vue escouade → revenir au blink mono-fig.
           void cbs.onSelectModelForShoot?.(own.mid);
         }
         return;
@@ -5134,7 +5170,27 @@ export default function Board({
 
     const shootingPreviewSource = resolveShootingPreviewSource();
     if (shootingPreviewSource) {
-      appendShootingPreviewCells(shootingPreviewSource);
+      const overviewUnitId = blinkingLosOverviewUnitId ?? null;
+      const ucOverview = gameState?.units_cache as
+        | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+        | undefined;
+      const byModel =
+        overviewUnitId != null &&
+        Number(shootingPreviewSource.unit.id) === Number(overviewUnitId)
+          ? ucOverview?.[String(overviewUnitId)]?.occupied_hexes_by_model
+          : undefined;
+      if (byModel) {
+        // Vue escouade : voile LoS depuis CHAQUE fig vivante de l'escouade (union des cellules).
+        for (const pos of Object.values(byModel)) {
+          appendShootingPreviewCells({
+            unit: shootingPreviewSource.unit,
+            fromCol: pos[0],
+            fromRow: pos[1],
+          });
+        }
+      } else {
+        appendShootingPreviewCells(shootingPreviewSource);
+      }
     }
     if (phase === "fight" && selectedUnit && mode === "attackPreview") {
       attackCells.push(...fightPreviewCells);
@@ -7121,6 +7177,7 @@ export default function Board({
     chargePreviewOverlayHexes,
     footprintZoneRef,
     blinkingCoverByUnitId,
+    blinkingLosOverviewUnitId,
     objectiveControlOverride,
     squadMovePlan,
     squadMoveModelPoolRef,
@@ -7559,7 +7616,17 @@ export default function Board({
         {typeof document !== "undefined" &&
           Object.keys(blinkProbHtmlByUnitId).length > 0 &&
           createPortal(
-            Object.entries(blinkProbHtmlByUnitId).map(([idStr, data]) => (
+            Object.entries(blinkProbHtmlByUnitId).map(([idStr, data]) => {
+              // Vue escouade (double-clic) : N figs de l'escouade qui peuvent viser cet ennemi / M vivantes.
+              const losN =
+                blinkingLosOverviewUnitId != null &&
+                blinkingLosCountByUnitId != null &&
+                blinkingSquadAliveCount != null
+                  ? blinkingLosCountByUnitId[idStr]
+                  : undefined;
+              const losText =
+                losN != null ? `${losN}/${blinkingSquadAliveCount}` : null;
+              return (
               <div
                 key={`blink-prob-${idStr}`}
                 className="rule-tooltip unit-icon-tooltip"
@@ -7605,6 +7672,29 @@ export default function Board({
                   setUnitHoverTooltip(null);
                 }}
               >
+                {losText ? (
+                  <>
+                    <span
+                      data-blink-prob-los-eye="1"
+                      style={{ display: "inline-flex", alignItems: "center" }}
+                      aria-hidden
+                    >
+                      <svg aria-hidden={true} width="14" height="14" viewBox="0 0 24 24" style={{ display: "block" }}>
+                        <path
+                          fill="currentColor"
+                          d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5C21.27 7.61 17 4.5 12 4.5zm0 12a4.5 4.5 0 110-9 4.5 4.5 0 010 9zm0-7a2.5 2.5 0 100 5 2.5 2.5 0 000-5z"
+                        />
+                      </svg>
+                    </span>
+                    <span
+                      data-blink-prob-los="1"
+                      style={{ fontWeight: 700, opacity: 0.9, whiteSpace: "nowrap" }}
+                    >
+                      {losText}
+                    </span>
+                    <span data-blink-prob-sep="1" style={{ opacity: 0.5 }}>|</span>
+                  </>
+                ) : null}
                 <span data-blink-prob-label="1">{data.label}</span>
                 {data.showCoverShield ? (
                   <span
@@ -7621,7 +7711,8 @@ export default function Board({
                   </span>
                 ) : null}
               </div>
-            )),
+              );
+            }),
             document.body
           )}
         {movePreviewDistanceTooltip?.visible && (

@@ -422,6 +422,9 @@ export type UseEngineAPIBlinkBoardProps = {
   blinkingUnits: number[];
   blinkingAttackerId: number | null;
   blinkingCoverByUnitId: Record<string, boolean> | undefined;
+  blinkingLosCountByUnitId: Record<string, number> | undefined;
+  blinkingSquadAliveCount: number | undefined;
+  blinkingLosOverviewUnitId: number | null;
   isBlinkingActive: boolean;
   blinkVersion: number;
 };
@@ -623,6 +626,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     blinkTimer: number | null;
     attackerId?: number | null;
     coverByUnitId?: Record<string, boolean>;
+    // Mode "vue escouade" (double-clic sur une fig) : N figs qui voient chaque
+    // ennemi + M figs vivantes. Absents = mode mono-fig classique.
+    losCountByUnitId?: Record<string, number>;
+    squadAliveCount?: number;
+    losOverviewUnitId?: number | null;
   }>({ unitIds: [], blinkTimer: null, attackerId: null });
   const [blinkVersion, setBlinkVersion] = useState(0);
 
@@ -3620,6 +3628,73 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [postEngineQuery]
   );
 
+  /**
+   * Vue escouade (double-clic sur une fig) : cibles tirables de TOUTE l escouade
+   * (union) + nombre N de figs qui peuvent viser chaque ennemi (compteur N/M).
+   * Read-only backend. Alimente le blink (union) et le compteur N/M frontend.
+   */
+  const handleSquadShootLosOverview = useCallback(
+    async (unitId: number) => {
+      const sessionAtCall = squadShootSessionRef.current;
+      let result: Record<string, unknown> | null = null;
+      try {
+        result = await postEngineQuery({
+          action: "squad_shoot_los_overview",
+          unitId: String(unitId),
+        });
+      } catch (e) {
+        console.error(`[SQUAD-SHOOT] los_overview unit=${unitId} ERROR`, e);
+        return;
+      }
+      if (squadShootSessionRef.current !== sessionAtCall) return;
+      if (!result?.valid_targets) {
+        throw new Error("squad_shoot_los_overview: valid_targets absent in response");
+      }
+      const rawCover = result.cover_by_unit_id;
+      if (!rawCover || typeof rawCover !== "object" || Array.isArray(rawCover)) {
+        throw new Error("squad_shoot_los_overview: cover_by_unit_id absent/invalid in response");
+      }
+      const coverByUnitId: Record<string, boolean> = {};
+      for (const [tid, inCover] of Object.entries(rawCover as Record<string, unknown>)) {
+        if (typeof inCover !== "boolean") {
+          throw new Error(`squad_shoot_los_overview: cover_by_unit_id.${tid} must be boolean`);
+        }
+        coverByUnitId[tid] = inCover;
+      }
+      const rawCount = result.count_by_unit_id;
+      if (!rawCount || typeof rawCount !== "object" || Array.isArray(rawCount)) {
+        throw new Error("squad_shoot_los_overview: count_by_unit_id absent/invalid in response");
+      }
+      const losCountByUnitId: Record<string, number> = {};
+      for (const [tid, n] of Object.entries(rawCount as Record<string, unknown>)) {
+        if (typeof n !== "number") {
+          throw new Error(`squad_shoot_los_overview: count_by_unit_id.${tid} must be number`);
+        }
+        losCountByUnitId[tid] = n;
+      }
+      const aliveRaw = result.squad_alive_count;
+      if (typeof aliveRaw !== "number") {
+        throw new Error("squad_shoot_los_overview: squad_alive_count absent/invalid in response");
+      }
+      const validTargets = (result.valid_targets as string[]).map((id) => parseInt(id, 10));
+      setBlinkingUnits((prev) => {
+        if (prev.blinkTimer) clearInterval(prev.blinkTimer);
+        const timer = validTargets.length ? window.setInterval(() => {}, 500) : null;
+        return {
+          unitIds: validTargets,
+          blinkTimer: timer,
+          attackerId: unitId,
+          coverByUnitId,
+          losCountByUnitId,
+          squadAliveCount: aliveRaw,
+          losOverviewUnitId: unitId,
+        };
+      });
+      console.log(`[SQUAD-SHOOT] los_overview unit=${unitId} targets=[${validTargets.join(",")}] alive=${aliveRaw}`);
+    },
+    [postEngineQuery]
+  );
+
   /** Entre en mode tir par-figurine : active l escouade + sélectionne la fig cliquée. */
   const handleStartSquadModelShoot = useCallback(
     async (unitId: number | string, initialModelId?: string) => {
@@ -4936,6 +5011,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       blinkingUnits: [],
       blinkingAttackerId: null,
       blinkingCoverByUnitId: undefined,
+      blinkingLosCountByUnitId: undefined,
+      blinkingSquadAliveCount: undefined,
+      blinkingLosOverviewUnitId: null,
       isBlinkingActive: false,
       blinkVersion: 0,
     };
@@ -5049,6 +5127,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     blinkingUnits: blinkingUnitsIds,
     blinkingAttackerId: blinkingUnits.attackerId ?? null,
     blinkingCoverByUnitId: blinkingUnits.coverByUnitId,
+    blinkingLosCountByUnitId: blinkingUnits.losCountByUnitId,
+    blinkingSquadAliveCount: blinkingUnits.squadAliveCount,
+    blinkingLosOverviewUnitId: blinkingUnits.losOverviewUnitId ?? null,
     isBlinkingActive: isBlinkingActiveMemo,
     blinkVersion,
   };
@@ -5097,6 +5178,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     squadShootPlan,
     onStartSquadModelShoot: handleStartSquadModelShoot,
     onSelectModelForShoot: handleSelectModelForShoot,
+    onSquadShootLosOverview: handleSquadShootLosOverview,
     onAssignShootTarget: handleAssignShootTarget,
     onAutoAssignAllModels: handleAutoAssignAllModels,
     onUnassignShootModel: handleUnassignShootModel,
