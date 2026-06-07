@@ -34,14 +34,12 @@ import {
   getContestedObjectives,
   getFightEngagementRingBoardPixels,
   type HexCoord,
-  footprintTouchesObscuring,
   hexToPixel,
   isFootprintInBounds,
   isFootprintInDeployPool,
   isFootprintOnWall,
   isFootprintOverlapping,
   minHexDistanceBetweenFootprintKeySets,
-  obscuringTerrainHexSet,
   pixelToHex,
   resolveBaseSizeForUnitDisplay,
   squadFootprintHexKeysFromModelCenters,
@@ -1418,6 +1416,15 @@ export default function Board({
   const [movePreviewLosCoverById, setMovePreviewLosCoverById] = useState<Record<string, boolean>>(
     {}
   );
+  /**
+   * Rule 13.09 : model_ids "cachés" à la destination du move preview, calculés PAR LE BACKEND
+   * (action preview_hidden_from_position → même fonction compute_unit_hidden_models qu'au drop).
+   * Source unique → le badge en preview est identique au statut après pose, pour toute forme de base.
+   */
+  const [movePreviewHiddenModelIds, setMovePreviewHiddenModelIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const movePreviewHiddenCacheRef = useRef<Map<string, string[]>>(new Map());
 
   /**
    * Tir + advance : seule source pour ``fromCol``/``fromRow`` (LoS plateau + WASM blink).
@@ -1956,6 +1963,93 @@ export default function Board({
     movePreviewBackendLosCacheRef.current.clear();
   }, [phase, mode, gameState?.active_movement_unit]);
 
+  // Rule 13.09 : figs cachées à la destination du move preview, calculées PAR LE BACKEND
+  // (preview_hidden_from_position = même fonction qu'au drop). Debounce + cache par
+  // unitId/destCol/destRow/orientation pour limiter les appels au survol.
+  useEffect(() => {
+    // Construit la requête selon le mode preview actif : squad entier (translation rigide) ou
+    // figurine-par-figurine (positions explicites du plan). Les deux → même fonction backend.
+    let req: { key: string; body: Record<string, unknown> } | null = null;
+    if (phase === "move" && mode === "movePreview" && movePreview) {
+      const { unitId, destCol, destRow, orientation } = movePreview;
+      req = {
+        key: `pos:${unitId}:${destCol}:${destRow}:${orientation ?? ""}`,
+        body: {
+          action: "preview_hidden_from_position",
+          unitId: String(unitId),
+          destCol,
+          destRow,
+          orientation,
+        },
+      };
+    } else if (mode === "squadModelMove" && squadMovePlan) {
+      const unitId = squadMovePlan.unitId;
+      const occupied = (
+        gameState?.units_cache as
+          | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+          | undefined
+      )?.[String(unitId)]?.occupied_hexes_by_model;
+      if (occupied) {
+        // Position finale par fig : provisoire (plan) si présente, sinon position actuelle.
+        const modelPositions: Record<string, [number, number]> = {};
+        for (const [mid, pos] of Object.entries(occupied)) {
+          const planPos = squadMovePlan.models[mid];
+          modelPositions[mid] = planPos ? [planPos.col, planPos.row] : pos;
+        }
+        req = {
+          key:
+            `plan:${unitId}:` +
+            Object.entries(modelPositions)
+              .map(([m, p]) => `${m}@${p[0]},${p[1]}`)
+              .join(","),
+          body: {
+            action: "preview_hidden_from_model_positions",
+            unitId: String(unitId),
+            modelPositions,
+          },
+        };
+      }
+    }
+
+    if (!req) {
+      setMovePreviewHiddenModelIds((prev) => (prev.size === 0 ? prev : new Set()));
+      return;
+    }
+    const { key, body } = req;
+    const cached = movePreviewHiddenCacheRef.current.get(key);
+    if (cached) {
+      setMovePreviewHiddenModelIds(new Set(cached));
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        const response = await fetch("/api/game/action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+          throw new Error(`hidden preview failed with HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        if (data?.success !== true) {
+          throw new Error("hidden preview returned success=false");
+        }
+        const hiddenModels: string[] = Array.isArray(data.result?.hidden_models)
+          ? data.result.hidden_models.map((m: unknown) => String(m))
+          : [];
+        movePreviewHiddenCacheRef.current.set(key, hiddenModels);
+        if (!cancelled) setMovePreviewHiddenModelIds(new Set(hiddenModels));
+      })().catch((err) => {
+        if (!cancelled) console.error(err);
+      });
+    }, 25); // debounce survol (ms) avant l'appel backend du hidden preview
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [phase, mode, movePreview, squadMovePlan, gameState?.units_cache]);
 
   // Prévisualisation LoS (move) : uniquement depuis onMouseMove = position de l’icône, pas l’hex sous le curseur
   useEffect(() => {
@@ -3578,13 +3672,25 @@ export default function Board({
       container.interactiveChildren = false;
       app.stage.addChild(container);
 
+      // Escouade hétérogène : appliquer le visuel COMPLET (icône, taille, forme, échelle) de la
+      // figurine active (models_meta_by_model[activeModelId]) sur l'unité de base, sinon le ghost
+      // prend l'apparence d'une figurine de base d'un autre type.
+      const activeMeta = activeModelId
+        ? (
+            gameState?.units_cache as
+              | Record<string, { models_meta_by_model?: Record<string, ModelVisualMeta> }>
+              | undefined
+          )?.[String(squadUnit.id)]?.models_meta_by_model?.[activeModelId]
+        : undefined;
+      const effectiveUnit = activeMeta ? { ...squadUnit, ...activeMeta } : squadUnit;
+
       const HEX_R = HEX_RADIUS_H;
-      const nrHover = getNonRoundBasePixelLayout(squadUnit, HEX_R);
-      const bdSel = resolveBaseSizeForUnitDisplay(squadUnit);
+      const nrHover = getNonRoundBasePixelLayout(effectiveUnit, HEX_R);
+      const bdSel = resolveBaseSizeForUnitDisplay(effectiveUnit);
       const baseSizeVal = bdSel > 1 ? bdSel : undefined;
       const defaultIconDiam = baseSizeVal
         ? baseSizeVal * 1.5 * HEX_RADIUS_H
-        : HEX_RADIUS_H * (squadUnit.ICON_SCALE ?? 1.0);
+        : HEX_RADIUS_H * (effectiveUnit.ICON_SCALE ?? 1.0);
 
       const baseColor = squadUnit.player === 1 ? 0x1d4ed8 : 0x882222;
       const baseCircle = new PIXI.Graphics();
@@ -3604,15 +3710,15 @@ export default function Board({
       baseCircle.endFill();
       container.addChild(baseCircle);
 
-      if (squadUnit.ICON) {
+      if (effectiveUnit.ICON) {
         const iconPath =
           squadUnit.player === 2
-            ? squadUnit.ICON.replace(".webp", "_red.webp")
-            : squadUnit.ICON;
+            ? effectiveUnit.ICON.replace(".webp", "_red.webp")
+            : effectiveUnit.ICON;
         const texture = PIXI.Texture.from(iconPath);
         const iconSprite = new PIXI.Sprite(texture);
         iconSprite.anchor.set(0.5);
-        const nonRoundIconR = getNonRoundIconRadius(squadUnit, HEX_R);
+        const nonRoundIconR = getNonRoundIconRadius(effectiveUnit, HEX_R);
         const iconDiam = nonRoundIconR != null ? nonRoundIconR * 2 : defaultIconDiam;
         iconSprite.width = iconDiam;
         iconSprite.height = iconDiam;
@@ -3952,6 +4058,7 @@ export default function Board({
     unitsBoardLayoutKey,
     gameState?.turn,
     gameState?.episode_steps,
+    gameState?.units_cache,
     squadMoveModelPoolRef.current,
   ]);
 
@@ -5519,7 +5626,7 @@ export default function Board({
             .map((d) => `${d.model_id}.${d.weapon_index}>${d.target_unit_id}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hbpm:${hiddenBadgePerModel ? 1 : 0}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hbpm:${hiddenBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -6001,7 +6108,12 @@ export default function Board({
         > = modelHpsByModel ? modelIds.map((mid) => modelHpsByModel[mid] ?? null) : [];
         // Rule 13.09 : flag "caché" par figurine (aligné sur modelCenters) pour le mode badge par-fig.
         const hiddenModelIds = new Set((unit.hidden_models ?? []).map((m) => String(m)));
-        const modelHidden: boolean[] = modelIds.map((mid) => hiddenModelIds.has(String(mid)));
+        // En plan fig-par-fig (squadModelMove), le statut "caché" est recalculé par le backend pour
+        // les positions provisoires (movePreviewHiddenModelIds) ; sinon le badge resterait figé sur la
+        // position actuelle (unit.hidden_models) et n'apparaîtrait jamais au survol.
+        const modelHidden: boolean[] = isSquadGhost
+          ? modelIds.map((mid) => movePreviewHiddenModelIds.has(String(mid)))
+          : modelIds.map((mid) => hiddenModelIds.has(String(mid)));
         const [anchorCenterX, anchorCenterY] = modelCenters[0];
 
         // Skip units that are being previewed elsewhere
@@ -6142,6 +6254,14 @@ export default function Board({
               // de nommage PIXI (même `hidden-badge-${id}`) qui faisait clignoter le badge.
               ...(isMoveOriginGhost ? { hidden: false } : {}),
             } as Unit & { isGhost: boolean })
+          : isSquadGhost
+          ? // Plan fig-par-fig : en mode badge "escouade" (hiddenBadgePerModel off), renderHiddenBadge
+            // lit unit.hidden → le recalculer depuis le hidden des positions PROVISOIRES du plan,
+            // cohérent avec le badge par-fig (modelHidden).
+            ({
+              ...unit,
+              hidden: modelHidden.length > 0 && modelHidden.every(Boolean),
+            } as Unit)
           : unit;
 
         renderUnit({
@@ -6398,6 +6518,8 @@ export default function Board({
             | undefined;
           const previewCacheEntry = previewUnitsCache?.[String(previewUnit.id)] as
             | {
+                col?: number;
+                row?: number;
                 occupied_hexes_by_model?: Record<string, [number, number]>;
                 models_meta_by_model?: Record<string, ModelVisualMeta>;
               }
@@ -6436,40 +6558,16 @@ export default function Board({
             `[DEBUG MOVE_PREVIEW_RENDER] u${previewUnit.id} unit=(${previewUnit.col},${previewUnit.row}) dest=(${movePreview.destCol},${movePreview.destRow}) positions=${JSON.stringify(previewModelPositions)} anchorPx=(${anchorPixelX.toFixed(1)},${anchorPixelY.toFixed(1)}) destPx=(${centerX.toFixed(1)},${centerY.toFixed(1)}) delta=(${pixelDeltaX.toFixed(1)},${pixelDeltaY.toFixed(1)}) modelCenters=${JSON.stringify(previewModelCenters.map(([x, y]) => [Math.round(x), Math.round(y)]))}`
           );
 
-          // Rule 13.09 : badge "caché" recalculé À LA DESTINATION du preview, par figurine.
-          // Le critère "n'a pas tiré" (ce tour + tour précédent) est indépendant de la position ;
-          // s'il est rempli aucune figurine ne peut être cachée quelle que soit la destination.
-          const previewTerrainZones = (
-            boardConfig as unknown as {
-              terrain_zones?: Array<{
-                obscuring?: boolean;
-                hexes?: Array<[number, number] | { col: number; row: number }>;
-              }>;
-            } | null
-          )?.terrain_zones;
-          const previewShotIds = new Set<string>([
-            ...((gameState?.units_shot ?? []) as string[]).map(String),
-            ...((gameState?.units_shot_previous_turn ?? []) as string[]).map(String),
-          ]);
-          const previewCanHide =
-            !!previewUnit.hideable && !previewShotIds.has(String(previewUnit.id));
-          const previewObscuringSet = previewCanHide
-            ? obscuringTerrainHexSet(previewTerrainZones)
-            : new Set<string>();
-          // Hidden calculé sur l'hex où chaque figurine est RÉELLEMENT dessinée (previewModelCenters,
-          // translation pixel du ghost) → le badge coïncide avec la figurine visible.
-          const previewModelHidden: boolean[] = previewModelCenters.map(([px, py]) => {
-            if (!previewCanHide) return false;
-            const { col, row } = pixelToHex(
-              px,
-              py,
-              HEX_RADIUS,
-              MARGIN,
-              boardConfig?.cols,
-              boardConfig?.rows
-            );
-            return footprintTouchesObscuring(col, row, previewUnit, previewObscuringSet);
-          });
+          // Rule 13.09 : statut "caché" À LA DESTINATION = calculé par le BACKEND
+          // (movePreviewHiddenModelIds, alimenté par preview_hidden_from_position → même fonction
+          // compute_unit_hidden_models qu'au drop). Source unique : identique au statut après pose,
+          // pour toute forme de base. Aligné par model_id (même ordre que occupied_hexes_by_model).
+          const previewModelIds = previewOccupied
+            ? Object.keys(previewOccupied)
+            : [String(previewUnit.id)];
+          const previewModelHidden: boolean[] = previewModelIds.map((mid) =>
+            movePreviewHiddenModelIds.has(String(mid))
+          );
           const previewHiddenSquad =
             previewModelHidden.length > 0 && previewModelHidden.every(Boolean);
 
@@ -7200,6 +7298,7 @@ export default function Board({
     tutorial?.currentStep?.stage,
     tutorial?.lastEnemyDeathPosition,
     movePreviewLosBlinkIds,
+    movePreviewHiddenModelIds,
     movePreviewLosCoverKey,
     blinkingCoverByUnitIdKey,
     shootPreviewWasmLos.key,

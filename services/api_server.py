@@ -2175,6 +2175,39 @@ def execute_action():
             },
         })
 
+    if action.get("action") == "preview_hidden_from_position":
+        unit_id = action.get("unitId")
+        dest_col = action.get("destCol")
+        dest_row = action.get("destRow")
+        orientation = action.get("orientation")
+        if unit_id is None or dest_col is None or dest_row is None:
+            return jsonify({
+                "success": False,
+                "error": "preview_hidden_from_position requires unitId, destCol, destRow",
+            }), 400
+        from engine.phase_handlers.shooting_handlers import preview_hidden_models_from_position
+        hidden_payload = preview_hidden_models_from_position(
+            engine.game_state, str(unit_id), int(dest_col), int(dest_row),
+            orientation=None if orientation is None else int(orientation),
+        )
+        return jsonify({"success": True, "result": hidden_payload})
+
+    if action.get("action") == "preview_hidden_from_model_positions":
+        unit_id = action.get("unitId")
+        model_positions = action.get("modelPositions")
+        orientation = action.get("orientation")
+        if unit_id is None or not isinstance(model_positions, dict):
+            return jsonify({
+                "success": False,
+                "error": "preview_hidden_from_model_positions requires unitId, modelPositions(dict)",
+            }), 400
+        from engine.phase_handlers.shooting_handlers import preview_hidden_models_from_model_positions
+        hidden_payload = preview_hidden_models_from_model_positions(
+            engine.game_state, str(unit_id), model_positions,
+            orientation=None if orientation is None else int(orientation),
+        )
+        return jsonify({"success": True, "result": hidden_payload})
+
     # Route ALL actions through engine consistently
     if success is None:
         from engine.perf_timing import append_perf_timing_line, perf_timing_enabled

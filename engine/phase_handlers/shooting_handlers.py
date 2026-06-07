@@ -1075,6 +1075,32 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def compute_unit_hidden_models(
+    unit: Dict[str, Any],
+    by_model: Dict[Any, Any],
+    game_state: Dict[str, Any],
+    terrain_areas: List[Dict[str, Any]],
+) -> List[Any]:
+    """SOURCE UNIQUE du test "caché" par figurine (rule 13.09).
+
+    Pour chaque figurine de ``by_model`` (map model_id -> (col, row)), calcule son empreinte à
+    cette position (``_compute_unit_occupied_hexes`` — dépend de engagement_zone, base_shape,
+    base_size et de ``unit['orientation']``) et la teste contre les zones obscurantes
+    (intersection = au moins une case touchée). Read-only, sans effet de bord.
+
+    Appelée par ``compute_hidden_statuses`` (statut réel) ET ``preview_hidden_models_from_position``
+    (preview de mouvement) → garantit un résultat identique entre preview et drop, pour toute
+    forme de base. Les gates niveau-unité (vivant, hideable, a tiré) sont gérés par l'appelant.
+    """
+    from engine.terrain_utils import hexes_in_obscuring_terrain
+    hidden_model_ids: List[Any] = []
+    for mid, (col, row) in by_model.items():
+        footprint = _compute_unit_occupied_hexes(int(col), int(row), unit, game_state)
+        if hexes_in_obscuring_terrain(list(footprint), terrain_areas):
+            hidden_model_ids.append(mid)
+    return hidden_model_ids
+
+
 def compute_hidden_statuses(game_state: Dict[str, Any]) -> None:
     """Set ``unit['hidden']`` and ``unit['hidden_models']`` for every unit (rule 13.09 Hidden).
 
@@ -1085,7 +1111,6 @@ def compute_hidden_statuses(game_state: Dict[str, Any]) -> None:
     unit['hidden_models']: list of model_ids whose footprint touches obscuring terrain.
     unit['hidden']: True only if ALL alive models are hidden.
     """
-    from engine.terrain_utils import hexes_in_obscuring_terrain
     terrain_areas = require_key(game_state, "terrain_areas")
     shot_ids = {str(x) for x in game_state.get("units_shot", set())}
     shot_prev_ids = {str(x) for x in game_state.get("units_shot_previous_turn", set())}
@@ -1103,13 +1128,101 @@ def compute_hidden_statuses(game_state: Dict[str, Any]) -> None:
             unit["hidden_models"] = []
             continue
         by_model = units_cache[str(unit_id)].get("occupied_hexes_by_model", {})
-        hidden_model_ids = []
-        for mid, (col, row) in by_model.items():
-            footprint = _compute_unit_occupied_hexes(int(col), int(row), unit, game_state)
-            if hexes_in_obscuring_terrain(list(footprint), terrain_areas):
-                hidden_model_ids.append(mid)
+        hidden_model_ids = compute_unit_hidden_models(unit, by_model, game_state, terrain_areas)
         unit["hidden_models"] = hidden_model_ids
         unit["hidden"] = len(hidden_model_ids) == len(by_model) and len(by_model) > 0
+
+
+def preview_hidden_models_from_position(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    dest_col: int,
+    dest_row: int,
+    orientation: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Read-only : statut "caché" (rule 13.09) de chaque figurine SI l'escouade était déplacée à
+    (dest_col, dest_row) avec ``orientation``. Reproduit le chemin du move réel
+    (``translate_squad_to_destination`` : translation offset rigide des figs ; l'orientation est
+    appliquée à l'unité avant recalcul du footprint) puis réutilise ``compute_unit_hidden_models``
+    → résultat identique au recalcul effectué après le drop, sans muter ``game_state`` ni deepcopy.
+
+    Retourne ``{"hidden_models": [...], "hidden": bool}``.
+    """
+    unit_id_str = str(unit_id)
+    empty = {"hidden_models": [], "hidden": False}
+    unit = _get_unit_by_id(game_state, unit_id_str)
+    if unit is None:
+        return empty
+    # Gates niveau-unité, identiques à compute_hidden_statuses.
+    if not is_unit_alive(unit_id_str, game_state) or not bool(unit.get("hideable")):
+        return empty
+    shot_ids = {str(x) for x in game_state.get("units_shot", set())}
+    shot_prev_ids = {str(x) for x in game_state.get("units_shot_previous_turn", set())}
+    if unit_id_str in shot_ids or unit_id_str in shot_prev_ids:
+        return empty
+    units_cache = require_key(game_state, "units_cache")
+    entry = units_cache.get(unit_id_str)
+    if entry is None:
+        return empty
+    terrain_areas = require_key(game_state, "terrain_areas")
+    norm_dest_col, norm_dest_row = normalize_coordinates(int(dest_col), int(dest_row))
+    old_col = int(entry.get("col", norm_dest_col))
+    old_row = int(entry.get("row", norm_dest_row))
+    delta_col = norm_dest_col - old_col
+    delta_row = norm_dest_row - old_row
+    by_model = entry.get("occupied_hexes_by_model", {})
+    # Translation offset rigide des figs (cf. translate_squad_to_destination), sans mutation.
+    moved_by_model = {
+        mid: (int(c) + delta_col, int(r) + delta_row)
+        for mid, (c, r) in by_model.items()
+    }
+    # Le move applique unit['orientation'] = orientation avant de recalculer le footprint.
+    unit_for_footprint = unit if orientation is None else {**unit, "orientation": int(orientation)}
+    hidden_model_ids = compute_unit_hidden_models(
+        unit_for_footprint, moved_by_model, game_state, terrain_areas
+    )
+    return {
+        "hidden_models": hidden_model_ids,
+        "hidden": len(hidden_model_ids) == len(moved_by_model) and len(moved_by_model) > 0,
+    }
+
+
+def preview_hidden_models_from_model_positions(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    model_positions: Dict[Any, Any],
+    orientation: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Read-only : statut "caché" (rule 13.09) de chaque figurine SI elles étaient aux positions
+    EXPLICITES données (``model_positions`` : map model_id -> [col, row]). Pour le déplacement
+    figurine-par-figurine (squadModelMove), où chaque fig a sa propre position provisoire (pas une
+    translation rigide). Réutilise ``compute_unit_hidden_models`` → identique au recalcul après pose.
+
+    Retourne ``{"hidden_models": [...], "hidden": bool}``.
+    """
+    unit_id_str = str(unit_id)
+    empty = {"hidden_models": [], "hidden": False}
+    unit = _get_unit_by_id(game_state, unit_id_str)
+    if unit is None:
+        return empty
+    if not is_unit_alive(unit_id_str, game_state) or not bool(unit.get("hideable")):
+        return empty
+    shot_ids = {str(x) for x in game_state.get("units_shot", set())}
+    shot_prev_ids = {str(x) for x in game_state.get("units_shot_previous_turn", set())}
+    if unit_id_str in shot_ids or unit_id_str in shot_prev_ids:
+        return empty
+    terrain_areas = require_key(game_state, "terrain_areas")
+    by_model = {
+        str(mid): (int(pos[0]), int(pos[1])) for mid, pos in model_positions.items()
+    }
+    unit_for_footprint = unit if orientation is None else {**unit, "orientation": int(orientation)}
+    hidden_model_ids = compute_unit_hidden_models(
+        unit_for_footprint, by_model, game_state, terrain_areas
+    )
+    return {
+        "hidden_models": hidden_model_ids,
+        "hidden": len(hidden_model_ids) == len(by_model) and len(by_model) > 0,
+    }
 
 
 def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:

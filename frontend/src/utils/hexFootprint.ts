@@ -517,56 +517,6 @@ export function getContestedObjectives(
 }
 
 /**
- * Ensemble des hexes ("col,row") appartenant à une zone de terrain OBSCURANT.
- * Source de vérité règle 13.09 (Hidden) côté front : un footprint qui touche un de ces hexes
- * est candidat "caché". Accepte les deux formats d'hex présents dans terrain_zones :
- * `{ col, row }` (useGameConfig) ou `[col, row]` (BoardConfig).
- */
-export function obscuringTerrainHexSet(
-  terrainZones:
-    | Array<{
-        obscuring?: boolean;
-        hexes?: Array<[number, number] | { col: number; row: number }>;
-      }>
-    | undefined
-    | null
-): Set<string> {
-  const set = new Set<string>();
-  if (!terrainZones) return set;
-  for (const zone of terrainZones) {
-    if (!zone?.obscuring || !zone.hexes) continue;
-    for (const h of zone.hexes) {
-      const c = Array.isArray(h) ? h[0] : h.col;
-      const r = Array.isArray(h) ? h[1] : h.row;
-      set.add(`${c},${r}`);
-    }
-  }
-  return set;
-}
-
-/**
- * True si l'empreinte d'une figurine centrée en (col,row) touche au moins un hex obscurant.
- * Port front de engine.terrain_utils.hexes_in_obscuring_terrain (pure, sans effet de bord).
- */
-export function footprintTouchesObscuring(
-  col: number,
-  row: number,
-  unit: { BASE_SHAPE?: string; BASE_SIZE?: number | [number, number] },
-  obscuringSet: Set<string>
-): boolean {
-  if (obscuringSet.size === 0) return false;
-  const shape = unit.BASE_SHAPE ?? "round";
-  if (shape !== "round") {
-    return obscuringSet.has(`${col},${row}`);
-  }
-  const size = resolveBaseSizeForUnitDisplay({ BASE_SIZE: unit.BASE_SIZE });
-  for (const [c, r] of computeOccupiedHexes(col, row, shape, size)) {
-    if (obscuringSet.has(`${c},${r}`)) return true;
-  }
-  return false;
-}
-
-/**
  * Build a set of occupied hex keys from units, excluding a specific unit.
  */
 export function buildOccupiedSet(
