@@ -197,7 +197,6 @@ export function setupBoardClickHandler(callbacks: {
         selectedUnitId: number | null;
       }>
     ).detail;
-    console.log("[DEBUG boardUnitDoubleClick]", { unitId, unitCol, unitRow, phase });
     if (phase !== "move") return;
     if (!callbacks.onStartMovePreview) {
       throw new Error("onStartMovePreview callback is required to enter movePreview on double-click");
@@ -257,7 +256,6 @@ export function setupBoardClickHandler(callbacks: {
         activeModelId?: string | null;
       }>
     ).detail;
-    console.log("[DEBUG boardHexClick]", { col, row, phase, mode, selectedUnitId, activeModelId });
     if (mode === "squadModelMove") {
       // Plan provisoire : pose la figurine active a l'hex clique (dans son pool BFS).
       if (activeModelId && callbacks.onMoveModelInPlan) {
@@ -300,10 +298,8 @@ export function setupBoardClickHandler(callbacks: {
       // Move phase: hover keeps movePreview.dest snapped to the valid pool, so a
       // left-click anywhere confirms the move at the currently previewed destination.
       // Cancellation in move phase is via right-click on the active unit (boardUnitClick).
-      console.log("[DEBUG] → onConfirmMove (move phase + movePreview)");
       callbacks.onConfirmMove();
     } else if (mode === "movePreview") {
-      console.log("[DEBUG] → onCancelMove (movePreview mode, non-move phase)");
       callbacks.onCancelMove?.();
     }
   };

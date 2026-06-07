@@ -46,6 +46,7 @@ import {
   unitFootprintHexKeys,
 } from "../utils/hexFootprint";
 import type { HexUnionMaskLayout } from "../utils/hexUnionBoundaryPolygon";
+import { drawHiddenEyeBadge } from "../utils/hiddenBadgeDraw";
 import { mountLosPolarClippedByVisibleUnion } from "../utils/losPolarMaskedByVisibleUnion";
 import { buildLosPreviewFromSource, hexDistOff } from "../utils/losPreviewHelpers";
 import { syncMoveDestinationPoolRefs } from "../utils/movePoolRefsSync";
@@ -2579,11 +2580,6 @@ export default function Board({
         movePreview &&
         resolvedMoveDestPoolRef.current?.has(`${losCol},${losRow}`)
       ) {
-        console.log("[DEBUG mousemove movePreview] updating dest", {
-          unitId: movePreview.unitId,
-          losCol,
-          losRow,
-        });
         onStartMovePreview(movePreview.unitId, losCol, losRow);
       }
 
@@ -2682,7 +2678,6 @@ export default function Board({
           0.4,
           app.renderer
         );
-        console.log("[DEBUG LoS overlay show] scheduleVisualLosForHex callback", { phase, mode });
         overlay.visible = true;
       });
     };
@@ -2784,7 +2779,6 @@ export default function Board({
             0.4,
             app.renderer
           );
-          console.log("[DEBUG LoS overlay show] processBackendLosRequest", { phase, mode });
           overlay.visible = true;
         }
 
@@ -2878,7 +2872,6 @@ export default function Board({
         const allowOverlayRestore =
           mode !== "advancePreview" && !(phase === "move" && mode === "movePreview");
         if (allowOverlayRestore && hoverOverlayRef.current && !hoverOverlayRef.current.destroyed) {
-          console.log("[DEBUG LoS overlay show] restore block (useEffect setup)", { phase, mode });
           hoverOverlayRef.current.visible = true;
         }
       }
@@ -2962,44 +2955,20 @@ export default function Board({
           (phase === "charge" && mode === "chargePreview") ||
           (phase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview"))));
 
-    console.log("[DEBUG shouldConfirmAtIcon useEffect]", {
-      shouldConfirmAtIcon,
-      effectivePhase,
-      phase,
-      mode,
-      selectedUnitId,
-    });
 
     if (!shouldConfirmAtIcon) return;
 
     const onPointerDownCapture = (e: PointerEvent) => {
-      console.log("[DEBUG canvas pointerdown capture]", {
-        button: e.button,
-        hoveredHex: hoveredHexRef.current,
-        phase: effectivePhase,
-        mode,
-        selectedUnitId,
-        shouldConfirmAtIcon,
-      });
       if (e.button !== 0) return;
       const h = hoveredHexRef.current;
       if (!h) {
-        console.log("[DEBUG canvas pointerdown] no hoveredHex, abort");
         return;
       }
       const key = `${h.col},${h.row}`;
       if (!poolHasHoveredAnchor(key)) {
-        console.log("[DEBUG canvas pointerdown] hex not in valid pool, abort", { key });
         return;
       }
 
-      console.log("[DEBUG canvas pointerdown] dispatching boardHexClick", {
-        col: h.col,
-        row: h.row,
-        phase: effectivePhase,
-        mode,
-        selectedUnitId,
-      });
       e.preventDefault();
       e.stopImmediatePropagation();
 
@@ -3047,12 +3016,10 @@ export default function Board({
     if (!app) return;
 
     const onDoubleClick = (e: MouseEvent) => {
-      console.log("[DEBUG dblclick] fired", { button: e.button, phase, mode, selectedUnitId });
       if (e.button !== 0) return;
       // Supprime le dblclick natif si onEntryPointerDown l'a déjà géré (< 500ms),
       // pour éviter de déclencher handleStartMovePreview en double.
       if (performance.now() - dblClickFromEntryRef.current < 500) {
-        console.log("[DEBUG dblclick] already handled by onEntryPointerDown, skip");
         return;
       }
       const rect = canvas.getBoundingClientRect();
@@ -3070,9 +3037,7 @@ export default function Board({
         boardConfig.cols,
         boardConfig.rows
       );
-      console.log("[DEBUG dblclick] hex", { col, row });
       if (col < 0 || col >= boardConfig.cols || row < 0 || row >= boardConfig.rows) {
-        console.log("[DEBUG dblclick] hex out of bounds, abort");
         return;
       }
 
@@ -3088,7 +3053,6 @@ export default function Board({
           >
         | undefined;
       if (!unitsCache) {
-        console.log("[DEBUG dblclick] no units_cache, abort");
         return;
       }
       // Tolerance: model base may span several hexes visually (Terminator
@@ -3119,7 +3083,6 @@ export default function Board({
           }
         }
       }
-      console.log("[DEBUG dblclick] lookup result", { foundUnitId, bestDistance });
       // Fallback : après handleConfirmMove, les unités sont à des positions PROVISOIRES dans
       // squadMovePlan (pas encore commitées backend). Si units_cache échoue, chercher dans le plan.
       if (foundUnitId === null) {
@@ -3139,16 +3102,9 @@ export default function Board({
         }
       }
       if (foundUnitId === null) {
-        console.log("[DEBUG dblclick] no unit found at hex, abort");
         return;
       }
 
-      console.log("[DEBUG dblclick] dispatching boardUnitDoubleClick", {
-        unitId: foundUnitId,
-        foundCol,
-        foundRow,
-        current_player,
-      });
       e.preventDefault();
       window.dispatchEvent(
         new CustomEvent("boardUnitDoubleClick", {
@@ -3240,7 +3196,6 @@ export default function Board({
       lastUnitClickRef.current = isDoubleClick ? null : { unitId: foundUnitId, ts: now };
 
       if (isDoubleClick) {
-        console.log("[SQUAD-MOVE] ENTRY double-click → unit", foundUnitId, "→ movePreview");
         dblClickFromEntryRef.current = now;
         window.dispatchEvent(
           new CustomEvent("boardUnitDoubleClick", {
@@ -3250,7 +3205,6 @@ export default function Board({
         return;
       }
 
-      console.log("[SQUAD-MOVE] ENTRY single-click → unit", foundUnitId, "model", foundModelId, "mode=", mode);
       const uid = foundUnitId;
       const mid = foundModelId;
       void (async () => {
@@ -3315,7 +3269,6 @@ export default function Board({
           foundModelId = mid;
         }
       }
-      console.log("[SQUAD-MOVE] select-click hex", { col, row, foundModelId, bestDistance });
       if (foundModelId === null) return;
       // Ne pas re-selectionner la fig deja active (le clic sert alors a la poser, gere ailleurs).
       if (foundModelId === squadMovePlan.activeModelId) return;
@@ -3627,7 +3580,6 @@ export default function Board({
 
     const pool = squadMoveModelPoolRef.current;
     if (!pool || pool.size === 0) {
-      console.log(`[SQUAD-MOVE] per-fig effect: pool vide pour activeModel=${activeModelId}, abort`);
       return;
     }
 
@@ -3635,6 +3587,10 @@ export default function Board({
     const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
     const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
     const MARGIN_H = boardConfig.margin;
+    const iconScaleCfg = boardConfig.display.icon_scale;
+    if (iconScaleCfg === undefined || iconScaleCfg === null) {
+      throw new Error("Missing required configuration value: boardConfig.display.icon_scale");
+    }
 
     const hxX = (col: number) => col * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H;
     const hxY = (col: number, row: number) =>
@@ -3658,6 +3614,10 @@ export default function Board({
       }
       return best;
     };
+
+    // Badge "œil barré" (caché, rule 13.09) du ghost — enfant du container ghost (suit donc le
+    // curseur gratuitement). Visibilité togglée en live par le fetch hidden plus bas.
+    let ghostBadge: PIXI.Graphics | null = null;
 
     // Construit (ou reconstruit) le ghost sprite pour cette fig. On détruit toujours
     // l'existant pour éviter de réutiliser un sprite construit pour une autre unité.
@@ -3732,10 +3692,24 @@ export default function Board({
         }
         container.addChild(iconSprite);
       }
+      // Badge "caché" en bas-gauche de la fig — même géométrie/offset que renderHiddenBadge
+      // (util partagé). Fig centrée en (0,0), container placé au curseur → offset local.
+      const badgeIconScale = (() => {
+        const db = resolveBaseSizeForUnitDisplay(effectiveUnit);
+        return db > 1 ? db * 1.5 : effectiveUnit.ICON_SCALE || iconScaleCfg;
+      })();
+      const badgeR = Math.max(7, HEX_RADIUS_H * 0.32);
+      const badgeOffset = ((HEX_RADIUS_H * badgeIconScale) / 2) * 0.8;
+      const badgeG = new PIXI.Graphics();
+      drawHiddenEyeBadge(badgeG, -badgeOffset, badgeOffset, badgeR);
+      badgeG.zIndex = 10001;
+      badgeG.visible = false;
+      container.sortableChildren = true;
+      container.addChild(badgeG);
+      ghostBadge = badgeG;
       container.alpha = 0.65;
       container.visible = false;
       hoverSpriteRef.current = container;
-      console.log(`[SQUAD-MOVE] per-fig ghost sprite built for unit=${squadUnit.id} model=${activeModelId}`);
     };
 
     buildSprite();
@@ -3983,10 +3957,113 @@ export default function Board({
       scheduleShootBackend(col, row);
     };
 
+    // --- Badge "caché" per-fig (rule 13.09) : statut backend de la fig active à l'hex survolé.
+    // Source unique = backend (preview_hidden_from_model_positions), comme le group preview.
+    // Debounce + coalescing + cache (movePreviewHiddenCacheRef) partagés, calqués sur le shoot.
+    let hiddenInFlight = false;
+    let pendingHidden: { col: number; row: number } | null = null;
+    let hiddenTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastHiddenHexKey: string | null = null;
+
+    const buildHiddenModelPositions = (
+      col: number,
+      row: number
+    ): Record<string, [number, number]> | null => {
+      const occ = (
+        gameState?.units_cache as
+          | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+          | undefined
+      )?.[String(squadUnit.id)]?.occupied_hexes_by_model;
+      if (!occ) return null;
+      const mp: Record<string, [number, number]> = {};
+      for (const [mid, pos] of Object.entries(occ)) {
+        if (mid === activeModelId) {
+          mp[mid] = [col, row];
+        } else {
+          const planPos = squadMovePlanRef.current?.models?.[mid];
+          mp[mid] = planPos ? [planPos.col, planPos.row] : pos;
+        }
+      }
+      return mp;
+    };
+
+    async function runHiddenBackend(): Promise<void> {
+      if (hiddenInFlight) return;
+      hiddenInFlight = true;
+      try {
+        const pending = pendingHidden;
+        pendingHidden = null;
+        if (!pending) return;
+        const mp = buildHiddenModelPositions(pending.col, pending.row);
+        if (!mp) return;
+        const key =
+          `plan:${squadUnit.id}:` +
+          Object.entries(mp)
+            .map(([m, p]) => `${m}@${p[0]},${p[1]}`)
+            .join(",");
+        let hiddenModels = movePreviewHiddenCacheRef.current.get(key);
+        if (!hiddenModels) {
+          const response = await fetch("/api/game/action", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "preview_hidden_from_model_positions",
+              unitId: String(squadUnit.id),
+              modelPositions: mp,
+            }),
+          });
+          if (!response.ok) {
+            throw new Error(
+              `preview_hidden_from_model_positions failed with HTTP ${response.status}`
+            );
+          }
+          const data = await response.json();
+          if (data?.success !== true) {
+            throw new Error("preview_hidden_from_model_positions returned success=false");
+          }
+          hiddenModels = Array.isArray(data.result?.hidden_models)
+            ? data.result.hidden_models.map((m: unknown) => String(m))
+            : [];
+          movePreviewHiddenCacheRef.current.set(key, hiddenModels);
+        }
+        if (!shootPreviewActive) return;
+        if (ghostBadge && !ghostBadge.destroyed) {
+          ghostBadge.visible = hiddenModels.includes(String(activeModelId));
+        }
+      } catch (error) {
+        if (!shootPreviewActive) return;
+        console.error("Squad per-fig hidden preview backend failed:", error);
+      } finally {
+        hiddenInFlight = false;
+        if (shootPreviewActive && pendingHidden) {
+          scheduleHidden(pendingHidden.col, pendingHidden.row);
+        }
+      }
+    }
+
+    const scheduleHidden = (col: number, row: number) => {
+      pendingHidden = { col, row };
+      if (hiddenTimer || hiddenInFlight) return;
+      hiddenTimer = setTimeout(() => {
+        hiddenTimer = null;
+        void runHiddenBackend();
+      }, 25);
+    };
+
+    const triggerHiddenPreview = (col: number, row: number) => {
+      const hexKey = `${col},${row}`;
+      if (hexKey === lastHiddenHexKey) return;
+      lastHiddenHexKey = hexKey;
+      scheduleHidden(col, row);
+    };
+
     // Apparition immédiate à la sélection : preview depuis la position courante de la fig active.
     const activeModelPos = squadMovePlan?.models?.[String(activeModelId)];
     if (hasRangedPreview && activeModelPos) {
       triggerShootPreview(activeModelPos.col, activeModelPos.row);
+    }
+    if (activeModelPos) {
+      triggerHiddenPreview(activeModelPos.col, activeModelPos.row);
     }
 
     const onMouseMove = (ev: MouseEvent) => {
@@ -4016,6 +4093,8 @@ export default function Board({
       hoveredHexRef.current = { col: best.col, row: best.row };
       // Le preview de tir suit le ghost : recalcul depuis l'hex destination survolé.
       triggerShootPreview(best.col, best.row);
+      // Badge "caché" : recalcul backend (debouncé) du statut de la fig active à l'hex survolé.
+      triggerHiddenPreview(best.col, best.row);
       // Voile rouge hover : recalcul côté client à chaque changement d'hex (pas de backend).
       const vKey = `${best.col},${best.row}`;
       if (vKey !== lastValidityHexKey) {
@@ -4025,7 +4104,6 @@ export default function Board({
     };
 
     canvas.addEventListener("mousemove", onMouseMove);
-    console.log(`[SQUAD-MOVE] per-fig effect SETUP ok model=${activeModelId} poolSize=${pool.size}`);
 
     return () => {
       canvas.removeEventListener("mousemove", onMouseMove);
@@ -4037,6 +4115,7 @@ export default function Board({
       shootPreviewActive = false;
       if (visualLosFrame !== null) window.cancelAnimationFrame(visualLosFrame);
       if (shootBackendTimer) clearTimeout(shootBackendTimer);
+      if (hiddenTimer) clearTimeout(hiddenTimer);
       if (!veilOverlay.destroyed) veilOverlay.destroy();
       squadMoveVeilOverlayRef.current = null;
       if (hoverOverlayRef.current && !hoverOverlayRef.current.destroyed) {
@@ -4044,7 +4123,6 @@ export default function Board({
       }
       setMovePreviewLosBlinkIds([]);
       setMovePreviewLosCoverById({});
-      console.log(`[SQUAD-MOVE] per-fig effect CLEANUP model=${activeModelId}`);
     };
   }, [
     mode,
@@ -4823,7 +4901,6 @@ export default function Board({
       if (mode === "squadModelMove") {
         const activeMid = squadMovePlanRef.current?.activeModelId;
         if (activeMid) {
-          console.log("[SQUAD-MOVE] right-click → reset fig active", activeMid);
           squadMoveCallbacksRef.current.onResetModelInPlan?.(activeMid);
         }
         return;
@@ -6553,9 +6630,6 @@ export default function Board({
                 MARGIN;
               return [mPixelX + pixelDeltaX, mPixelY + pixelDeltaY];
             }
-          );
-          console.log(
-            `[DEBUG MOVE_PREVIEW_RENDER] u${previewUnit.id} unit=(${previewUnit.col},${previewUnit.row}) dest=(${movePreview.destCol},${movePreview.destRow}) positions=${JSON.stringify(previewModelPositions)} anchorPx=(${anchorPixelX.toFixed(1)},${anchorPixelY.toFixed(1)}) destPx=(${centerX.toFixed(1)},${centerY.toFixed(1)}) delta=(${pixelDeltaX.toFixed(1)},${pixelDeltaY.toFixed(1)}) modelCenters=${JSON.stringify(previewModelCenters.map(([x, y]) => [Math.round(x), Math.round(y)]))}`
           );
 
           // Rule 13.09 : statut "caché" À LA DESTINATION = calculé par le BACKEND

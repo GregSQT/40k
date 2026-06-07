@@ -23,6 +23,7 @@ import {
   minHexDistanceBetweenUnitFootprintsLive,
   resolveBaseSizeForUnitDisplay,
 } from "../utils/hexFootprint";
+import { drawHiddenEyeBadge } from "../utils/hiddenBadgeDraw";
 import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 import {
   getHpBarWidthBase,
@@ -1081,11 +1082,6 @@ export class UnitRenderer {
             sprite.eventMode = "static";
             sprite.cursor = "pointer";
             sprite.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-              console.log("[DEBUG ghost sprite pointerdown]", {
-                unitId: unit.id,
-                button: e.button,
-                ts: performance.now(),
-              });
               if (e.button === 0) onConfirmMove?.();
             });
           }
@@ -2363,36 +2359,7 @@ export class UnitRenderer {
       const badgeX = cx - scaledOffset;
       const badgeY = cy + scaledOffset;
       const g = new PIXI.Graphics();
-      // Black outer ring to detach the badge from the board.
-      g.lineStyle(0);
-      g.beginFill(0x000000, 1);
-      g.drawCircle(badgeX, badgeY, r + 2);
-      g.endFill();
-      // Badge body (black fill, light-grey border).
-      g.beginFill(0x000000, 0.9);
-      g.lineStyle(2, 0xb0b0b0, 1);
-      g.drawCircle(badgeX, badgeY, r);
-      g.endFill();
-      // "Visibility off" icon (light grey on black) → reads as "hidden / not seen".
-      const eyeColor = 0xc8c8c8;
-      const ew = r * 0.82;
-      const eh = r * 0.52;
-      const lw = Math.max(1.5, r * 0.2);
-      // Almond eye outline.
-      g.lineStyle(lw, eyeColor, 1);
-      g.moveTo(badgeX - ew, badgeY);
-      g.quadraticCurveTo(badgeX, badgeY - eh, badgeX + ew, badgeY);
-      g.quadraticCurveTo(badgeX, badgeY + eh, badgeX - ew, badgeY);
-      // Iris ring.
-      g.drawCircle(badgeX, badgeY, r * 0.26);
-      // Diagonal slash: dark under-stroke creates the gap, light stroke on top.
-      const s = r * 0.82;
-      g.lineStyle(lw * 2, 0x000000, 1);
-      g.moveTo(badgeX - s, badgeY - s);
-      g.lineTo(badgeX + s, badgeY + s);
-      g.lineStyle(lw, eyeColor, 1);
-      g.moveTo(badgeX - s, badgeY - s);
-      g.lineTo(badgeX + s, badgeY + s);
+      drawHiddenEyeBadge(g, badgeX, badgeY, r);
       g.name = name;
       g.zIndex = 10001;
       targetContainer.addChild(g);
