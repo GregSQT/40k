@@ -34,12 +34,14 @@ import {
   getContestedObjectives,
   getFightEngagementRingBoardPixels,
   type HexCoord,
+  footprintTouchesObscuring,
   hexToPixel,
   isFootprintInBounds,
   isFootprintInDeployPool,
   isFootprintOnWall,
   isFootprintOverlapping,
   minHexDistanceBetweenFootprintKeySets,
+  obscuringTerrainHexSet,
   pixelToHex,
   resolveBaseSizeForUnitDisplay,
   squadFootprintHexKeysFromModelCenters,
@@ -6132,7 +6134,14 @@ export default function Board({
         const unitToRender = isDeadGhost
           ? ({ ...unit, isJustKilled: true } as Unit & { isJustKilled: boolean })
           : isChargeOrigin || isMoveOriginGhost || isHazardousDeathGhost || isShootingPreviewGhost
-          ? ({ ...unit, isGhost: true } as Unit & { isGhost: boolean })
+          ? ({
+              ...unit,
+              isGhost: true,
+              // Pendant un move preview, le badge "caché" n'a de sens qu'à la destination (rendu
+              // par le bloc preview) : on l'éteint sur le ghost d'origine pour éviter le conflit
+              // de nommage PIXI (même `hidden-badge-${id}`) qui faisait clignoter le badge.
+              ...(isMoveOriginGhost ? { hidden: false } : {}),
+            } as Unit & { isGhost: boolean })
           : unit;
 
         renderUnit({
@@ -6142,7 +6151,7 @@ export default function Board({
           modelCenters,
           modelMetas,
           modelHps,
-          modelHidden,
+          modelHidden: isMoveOriginGhost ? [] : modelHidden,
           hpBarPerModel,
           hiddenBadgePerModel,
           app,
@@ -6427,14 +6436,56 @@ export default function Board({
             `[DEBUG MOVE_PREVIEW_RENDER] u${previewUnit.id} unit=(${previewUnit.col},${previewUnit.row}) dest=(${movePreview.destCol},${movePreview.destRow}) positions=${JSON.stringify(previewModelPositions)} anchorPx=(${anchorPixelX.toFixed(1)},${anchorPixelY.toFixed(1)}) destPx=(${centerX.toFixed(1)},${centerY.toFixed(1)}) delta=(${pixelDeltaX.toFixed(1)},${pixelDeltaY.toFixed(1)}) modelCenters=${JSON.stringify(previewModelCenters.map(([x, y]) => [Math.round(x), Math.round(y)]))}`
           );
 
+          // Rule 13.09 : badge "caché" recalculé À LA DESTINATION du preview, par figurine.
+          // Le critère "n'a pas tiré" (ce tour + tour précédent) est indépendant de la position ;
+          // s'il est rempli aucune figurine ne peut être cachée quelle que soit la destination.
+          const previewTerrainZones = (
+            boardConfig as unknown as {
+              terrain_zones?: Array<{
+                obscuring?: boolean;
+                hexes?: Array<[number, number] | { col: number; row: number }>;
+              }>;
+            } | null
+          )?.terrain_zones;
+          const previewShotIds = new Set<string>([
+            ...((gameState?.units_shot ?? []) as string[]).map(String),
+            ...((gameState?.units_shot_previous_turn ?? []) as string[]).map(String),
+          ]);
+          const previewCanHide =
+            !!previewUnit.hideable && !previewShotIds.has(String(previewUnit.id));
+          const previewObscuringSet = previewCanHide
+            ? obscuringTerrainHexSet(previewTerrainZones)
+            : new Set<string>();
+          // Hidden calculé sur l'hex où chaque figurine est RÉELLEMENT dessinée (previewModelCenters,
+          // translation pixel du ghost) → le badge coïncide avec la figurine visible.
+          const previewModelHidden: boolean[] = previewModelCenters.map(([px, py]) => {
+            if (!previewCanHide) return false;
+            const { col, row } = pixelToHex(
+              px,
+              py,
+              HEX_RADIUS,
+              MARGIN,
+              boardConfig?.cols,
+              boardConfig?.rows
+            );
+            return footprintTouchesObscuring(col, row, previewUnit, previewObscuringSet);
+          });
+          const previewHiddenSquad =
+            previewModelHidden.length > 0 && previewModelHidden.every(Boolean);
+
           renderUnit({
-            unit: previewUnit,
+            unit: { ...previewUnit, hidden: previewHiddenSquad },
             centerX,
             centerY,
             modelCenters: previewModelCenters,
             modelMetas: previewModelMetas,
+            modelHidden: previewModelHidden,
+            hiddenBadgePerModel,
             app,
             renderTarget: unitsLayer,
+            // Le badge "caché" doit aller dans le conteneur UI persistant (comme la boucle normale),
+            // sinon il est dessiné sur app.stage qui est détruit à chaque rendu → clignote puis disparaît.
+            uiElementsContainer: uiElementsContainerRef.current!,
             useOverlayIcons: true,
             isPreview: true,
             previewType: "move",

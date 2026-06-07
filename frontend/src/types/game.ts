@@ -273,7 +273,8 @@ export interface GameState {
   // AI_TURN.md tracking sets (Frontend format - converted from Engine string[] to UnitId[])
   unitsMoved?: UnitId[];
   unitsFled?: UnitId[];
-  units_shot?: string[]; // Not used in frontend, kept for compatibility
+  units_shot?: string[]; // IDs des unités ayant tiré ce tour (règle 13.09 Hidden)
+  units_shot_previous_turn?: string[]; // IDs des unités ayant tiré au tour précédent (règle 13.09 Hidden)
   unitsCharged?: UnitId[];
   unitsAttacked?: UnitId[];
   unitsAdvanced?: UnitId[];

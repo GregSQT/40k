@@ -212,6 +212,7 @@ export interface APIGameState {
   units_moved: string[];
   units_fled: string[];
   units_shot: string[];
+  units_shot_previous_turn?: string[]; // Règle 13.09 Hidden
   units_charged: string[];
   units_attacked: string[];
   units_advanced?: string[]; // Units that have advanced this turn
