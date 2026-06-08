@@ -334,6 +334,8 @@ function calculateObjectiveControl(
 type Mode =
   | "select"
   | "movePreview"
+  | "squadModelMove"
+  | "squadModelShoot"
   | "attackPreview"
   | "targetPreview"
   | "chargePreview"

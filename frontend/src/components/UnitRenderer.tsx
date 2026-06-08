@@ -2433,7 +2433,9 @@ export class UnitRenderer {
       // Per-figure mode — one badge on each living figure (fled is a unit-level status).
       const centers = this.props.modelCenters;
       if (!centers) return;
-      centers.forEach(([cx, cy], i) => drawBadgeAt(cx, cy, `fled-badge-${unitIdNum}-${i}`));
+      centers.forEach(([cx, cy], i) => {
+        drawBadgeAt(cx, cy, `fled-badge-${unitIdNum}-${i}`);
+      });
       return;
     }
 
