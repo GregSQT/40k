@@ -1505,7 +1505,7 @@ def _advance_roll_for(squad_id: str, game_state: Dict[str, Any]) -> Optional[int
     """
     if str(squad_id) not in game_state.get("units_advanced", set()):
         return None
-    roll = game_state.get("advance_rolls", {}).get(str(squad_id))
+    roll = game_state["advance_rolls"].get(str(squad_id))
     return int(roll) if roll is not None else None
 
 

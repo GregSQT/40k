@@ -4900,7 +4900,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     return gameState?.units_fled ? gameState.units_fled.map((id) => parseInt(id, 10)) : [];
   }, [gameState?.units_fled]);
 
-  const memoizedUnitsAdvanced = useMemo(() => {
+  const memoizedUnitsAdvanced = useMemo((): number[] => {
     return gameState?.units_advanced ? gameState.units_advanced.map((id) => parseInt(id, 10)) : [];
   }, [gameState?.units_advanced]);
 
@@ -5064,7 +5064,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       unitsCharged: [],
       unitsAttacked: [],
       unitsFled: [],
-      unitsAdvanced: [],
+      unitsAdvanced: [] as number[],
       phase: null,
       gameState: null,
       onSelectUnit: () => {},

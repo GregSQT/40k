@@ -3112,7 +3112,9 @@ export const BoardWithAPI: React.FC = () => {
                     if (canAdvance) apiProps.onSetAdvanceMode?.(advUnitId);
                   })}
                   {modeBtn("Fall-back", fallbackState, yellow)}
-                  {modeBtn("Stationary", "relief", grey, () => apiProps.onStationary?.(advUnitId))}
+                  {modeBtn("Stationary", advanced ? "disabled" : "relief", grey, () =>
+                    apiProps.onStationary?.(advUnitId)
+                  )}
                 </>
               );
             })()}
