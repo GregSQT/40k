@@ -72,6 +72,7 @@ def _make_gs(units: List[Dict[str, Any]], phase: str = "charge") -> Dict[str, An
         "current_player": 1,
         "phase": phase,
         "wall_hexes": set(),
+        "terrain_areas": [],
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
         "console_logs": [],

@@ -44,7 +44,7 @@ def test_api_json_response_orjson_encodes_set_and_numpy_without_pre_walk() -> No
 
 
 def test_game_state_for_json_removes_topology_arrays() -> None:
-    engine_instance = type("E", (), {"game_state": {"los_topology": 1, "pathfinding_topology": 2, "x": 3}})()
+    engine_instance = type("E", (), {"game_state": {"los_topology": 1, "pathfinding_topology": 2, "x": 3, "terrain_areas": [], "units_cache": {}}})()
     state = api_server._game_state_for_json(engine_instance)
     assert "los_topology" not in state
     assert "pathfinding_topology" not in state
@@ -58,6 +58,8 @@ def test_game_state_for_json_drops_footprint_zone_when_mask_loops_present() -> N
         {
             "game_state": {
                 "phase": "move",
+                "terrain_areas": [],
+                "units_cache": {},
                 "move_preview_footprint_zone": {(1, 2), (3, 4)},
                 "move_preview_footprint_mask_loops": [[[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]],
             },
@@ -80,6 +82,8 @@ def test_game_state_for_json_omits_large_mask_loops_when_client_hash_matches() -
         {
             "game_state": {
                 "phase": "move",
+                "terrain_areas": [],
+                "units_cache": {},
                 "move_preview_footprint_zone": {(0, 0)},
                 "move_preview_footprint_mask_loops": loops,
             },
@@ -101,6 +105,8 @@ def test_game_state_for_json_does_not_omit_small_mask_loops_even_if_hash_matches
         {
             "game_state": {
                 "phase": "move",
+                "terrain_areas": [],
+                "units_cache": {},
                 "move_preview_footprint_mask_loops": loops,
             },
         },
@@ -119,6 +125,8 @@ def test_game_state_for_json_strips_internal_engine_keys() -> None:
         {
             "game_state": {
                 "phase": "move",
+                "terrain_areas": [],
+                "units_cache": {},
                 "turn": 1,
                 "units_cache_prev": {"1": {"col": 0, "row": 0}},
                 "last_compliance_data": {"x": 1},
@@ -144,6 +152,8 @@ def test_game_state_for_json_drops_preview_hexes_when_move_pool_present() -> Non
         {
             "game_state": {
                 "phase": "move",
+                "terrain_areas": [],
+                "units_cache": {},
                 "valid_move_destinations_pool": anchors,
                 "preview_hexes": list(anchors),
             },
@@ -161,6 +171,8 @@ def test_game_state_for_json_omits_objectives_when_for_post_action() -> None:
         {
             "game_state": {
                 "phase": "move",
+                "terrain_areas": [],
+                "units_cache": {},
                 "objectives": [{"name": "A", "hexes": [{"col": 0, "row": 0}]}],
                 "turn": 1,
             },
@@ -205,6 +217,8 @@ def test_game_state_for_json_excludes_config_blob() -> None:
         {
             "game_state": {
                 "phase": "move",
+                "terrain_areas": [],
+                "units_cache": {},
                 "config": {"game_rules": {"max_turns": 5}, "board": {"x": 1}},
                 "turn": 1,
             },
@@ -222,6 +236,8 @@ def test_game_state_for_json_excludes_weapon_damage_table_and_per_player_adjacen
         {
             "game_state": {
                 "phase": "move",
+                "terrain_areas": [],
+                "units_cache": {},
                 "weapon_damage_table": {"A": {"B": {"C": 1}}},
                 "enemy_adjacent_hexes_player_1": {(1, 2), (3, 4)},
                 "enemy_adjacent_counts_player_2": {"x": 3},
@@ -243,6 +259,8 @@ def test_game_state_for_json_excludes_move_preview_border() -> None:
         {
             "game_state": {
                 "phase": "move",
+                "terrain_areas": [],
+                "units_cache": {},
                 "valid_move_destinations_pool": [[1, 2], [3, 4]],
                 "move_preview_border": [[1, 2]],
             },

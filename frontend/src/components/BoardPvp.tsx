@@ -67,7 +67,7 @@ import {
   drawBoard,
   updateMovePreviewPolygonLayerInHighlightContainer,
 } from "./BoardDisplay";
-import { renderUnit, type ModelVisualMeta } from "./UnitRenderer";
+import { type ModelVisualMeta, renderUnit } from "./UnitRenderer";
 import { WeaponDropdown } from "./WeaponDropdown";
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
@@ -434,7 +434,10 @@ type BoardProps = {
     activeWeaponIndex: number | null;
     canValidate: boolean;
   } | null;
-  onStartSquadModelShoot?: (unitId: number | string, initialModelId?: string) => void | Promise<void>;
+  onStartSquadModelShoot?: (
+    unitId: number | string,
+    initialModelId?: string
+  ) => void | Promise<void>;
   onSelectModelForShoot?: (modelId: string) => void | Promise<void>;
   onSquadShootLosOverview?: (unitId: number) => void | Promise<void>;
   onAssignShootTarget?: (targetUnitId: number | string) => void | Promise<void>;
@@ -508,7 +511,13 @@ type BoardProps = {
   showAdvanceWarningPopup?: boolean; // If false, skip advance warning popup
   /** Tutoriel : masquer l’icône Advance au-dessus des unités pendant certains steps. */
   hideAdvanceIconForTutorial?: boolean;
-  boardConfigOverride?: { cols: number; rows: number; hex_radius: number; margin: number; inches_to_subhex: number };
+  boardConfigOverride?: {
+    cols: number;
+    rows: number;
+    hex_radius: number;
+    margin: number;
+    inches_to_subhex: number;
+  };
   wallHexesOverride?: Array<{ col: number; row: number }>; // For replay mode: override walls from log
   availableCellsOverride?: Array<{ col: number; row: number }>; // Replay / pile in : surbrillance des hexes disponibles
   deploymentState?: GameState["deployment_state"];
@@ -517,7 +526,7 @@ type BoardProps = {
   replayActionIndex?: number; // For replay mode: detect rollback and reset objective control
   autoSelectWeapon?: boolean;
   hpBarPerModel?: boolean; // true → barre HP par figurine ; false → une barre par escouade (hors characters)
-  hiddenBadgePerModel?: boolean; // true → badge "caché" par figurine ; false → un seul badge si toute l'escouade est cachée
+  statusBadgePerModel?: boolean; // true → badge de statut (caché/fui/choc) par figurine ; false → un seul badge si toute l'escouade a le statut
   /** Mode mesure (règle) : armed → 1er clic pose l’ancre ; clic droit = jonction ; 2e clic termine la ligne → armed. Sortie : bouton règle uniquement. */
   measureMode?: MeasureModeState;
   onMeasureHexCommit?: (col: number, row: number) => void;
@@ -806,7 +815,7 @@ export default function Board({
   replayActionIndex,
   autoSelectWeapon,
   hpBarPerModel,
-  hiddenBadgePerModel,
+  statusBadgePerModel,
   measureMode = { kind: "off" },
   onMeasureHexCommit,
   onMeasureJunctionCommit,
@@ -899,9 +908,10 @@ export default function Board({
 
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
   const { boardConfig: _boardConfigFromHook, gameConfig, loading, error } = useGameConfig();
-  const _rawBoardConfig = boardConfigOverride && _boardConfigFromHook
-    ? { ..._boardConfigFromHook, ...boardConfigOverride }
-    : _boardConfigFromHook;
+  const _rawBoardConfig =
+    boardConfigOverride && _boardConfigFromHook
+      ? { ..._boardConfigFromHook, ...boardConfigOverride }
+      : _boardConfigFromHook;
   const boardConfig = (() => {
     if (!_rawBoardConfig) return _rawBoardConfig;
     const ds = (_rawBoardConfig.display as { display_scale?: number } | undefined)?.display_scale;
@@ -1290,7 +1300,7 @@ export default function Board({
             const ucy = hovUnit.row * HH + ((hovUnit.col % 2) * HH) / 2 + HH / 2 + M + sty;
             const dx = px - ucx;
             const dy = py - ucy;
-            if (dx * dx + dy * dy > (HR * 2.5) * (HR * 2.5)) {
+            if (dx * dx + dy * dy > HR * 2.5 * (HR * 2.5)) {
               setUnitHoverTooltip(null);
             }
           }
@@ -1613,14 +1623,10 @@ export default function Board({
     const unit = units.find((u) => u.id === unitId);
     if (!unit) return;
 
-    const usableWeapons = unit.available_weapons?.filter(
-      (w) => (w.can_use ?? w.canUse) === true
-    );
+    const usableWeapons = unit.available_weapons?.filter((w) => (w.can_use ?? w.canUse) === true);
     if (!usableWeapons || usableWeapons.length <= 1) return;
 
-    window.dispatchEvent(
-      new CustomEvent("boardWeaponSelectionClick", { detail: { unitId } })
-    );
+    window.dispatchEvent(new CustomEvent("boardWeaponSelectionClick", { detail: { unitId } }));
   }, [gameState?.active_shooting_unit, phase, units]);
 
   // Flux squad : fermer le menu d'armes quand l'activation se termine (Validate/Cancel → sortie du mode).
@@ -1862,7 +1868,10 @@ export default function Board({
         const uc = gameState?.units_cache as
           | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
           | undefined;
-        const pos = uc?.[String(squadShootPlan.unitId)]?.occupied_hexes_by_model?.[squadShootPlan.activeModelId];
+        const pos =
+          uc?.[String(squadShootPlan.unitId)]?.occupied_hexes_by_model?.[
+            squadShootPlan.activeModelId
+          ];
         if (!pos) return null;
         return { unit: shootUnit, fromCol: pos[0], fromRow: pos[1] };
       }
@@ -1890,7 +1899,8 @@ export default function Board({
 
     const gameRules = gameConfig.game_rules;
     if (!gameRules) throw new Error("LOS preview: game_rules absent in gameConfig");
-    if (gameRules.los_visibility_min_ratio == null) throw new Error("LOS preview: los_visibility_min_ratio absent in game_rules");
+    if (gameRules.los_visibility_min_ratio == null)
+      throw new Error("LOS preview: los_visibility_min_ratio absent in game_rules");
     const losMin = gameRules.los_visibility_min_ratio;
 
     try {
@@ -1938,8 +1948,7 @@ export default function Board({
     // the per-fig flow only, not during squad-level hover/preview.
     const useMoveLosPreview =
       phase === "move" &&
-      (mode === "select" ||
-        (mode === "squadModelMove" && squadMovePlan?.activeModelId != null));
+      (mode === "select" || (mode === "squadModelMove" && squadMovePlan?.activeModelId != null));
     const mergedIds = useMoveLosPreview ? movePreviewLosBlinkIds : (stableBlinkingUnits ?? []);
     const uc = gameState?.units_cache as Record<string, unknown> | undefined;
     return filterBlinkIdsToLivingUnitsCache(mergedIds, uc, units);
@@ -2547,7 +2556,8 @@ export default function Board({
       hoveredHexContextRef.current = {
         mode,
         unitId: movementPreviewUnitId,
-        modelId: mode === "squadModelMove" ? (squadMovePlanRef.current?.activeModelId ?? null) : null,
+        modelId:
+          mode === "squadModelMove" ? (squadMovePlanRef.current?.activeModelId ?? null) : null,
       };
 
       // Find nearest valid center for LoS (icon may be on a footprint extension hex)
@@ -2955,7 +2965,6 @@ export default function Board({
           (phase === "charge" && mode === "chargePreview") ||
           (phase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview"))));
 
-
     if (!shouldConfirmAtIcon) return;
 
     const onPointerDownCapture = (e: PointerEvent) => {
@@ -3153,7 +3162,15 @@ export default function Board({
         boardConfig.rows
       );
       const unitsCache = gameState?.units_cache as
-        | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]>; col?: number; row?: number; player?: number }>
+        | Record<
+            string,
+            {
+              occupied_hexes_by_model?: Record<string, [number, number]>;
+              col?: number;
+              row?: number;
+              player?: number;
+            }
+          >
         | undefined;
       if (!unitsCache) return;
       const HEX_HIT_TOLERANCE = 4;
@@ -3199,7 +3216,14 @@ export default function Board({
         dblClickFromEntryRef.current = now;
         window.dispatchEvent(
           new CustomEvent("boardUnitDoubleClick", {
-            detail: { unitId: foundUnitId, unitCol: foundUnitCol, unitRow: foundUnitRow, phase, mode, selectedUnitId },
+            detail: {
+              unitId: foundUnitId,
+              unitCol: foundUnitCol,
+              unitRow: foundUnitRow,
+              phase,
+              mode,
+              selectedUnitId,
+            },
           })
         );
         return;
@@ -3223,7 +3247,16 @@ export default function Board({
 
     document.addEventListener("pointerdown", onEntryPointerDown, true);
     return () => document.removeEventListener("pointerdown", onEntryPointerDown, true);
-  }, [phase, mode, measureMode.kind, boardConfig, gameState?.units_cache, current_player, eligibleUnitIds, selectedUnitId]);
+  }, [
+    phase,
+    mode,
+    measureMode.kind,
+    boardConfig,
+    gameState?.units_cache,
+    current_player,
+    eligibleUnitIds,
+    selectedUnitId,
+  ]);
 
   // squad.md brique 3 : en mode plan par-figurine, un clic gauche sur une fig de l'escouade
   // la selectionne (resout model_id depuis les positions provisoires du plan) → onSelectModelForMove.
@@ -3240,7 +3273,10 @@ export default function Board({
     const onPointerDownSelect = (e: PointerEvent) => {
       if (e.button !== 0) return;
       // Ignorer le clic qui a confirmé le movePreview (même événement, propagé après la transition)
-      if (squadMoveEntryTimeRef.current !== null && performance.now() - squadMoveEntryTimeRef.current < 300) {
+      if (
+        squadMoveEntryTimeRef.current !== null &&
+        performance.now() - squadMoveEntryTimeRef.current < 300
+      ) {
         squadMoveEntryTimeRef.current = null;
         return;
       }
@@ -3296,7 +3332,15 @@ export default function Board({
     const HEX_HIT_TOLERANCE = 4;
     const getUnitsCache = () =>
       gameState?.units_cache as
-        | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]>; col?: number; row?: number; player?: number }>
+        | Record<
+            string,
+            {
+              occupied_hexes_by_model?: Record<string, [number, number]>;
+              col?: number;
+              row?: number;
+              player?: number;
+            }
+          >
         | undefined;
 
     const resolveHex = (e: PointerEvent) => {
@@ -3305,7 +3349,14 @@ export default function Board({
       const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
       const px = (e.clientX - rect.left) * scaleX;
       const py = (e.clientY - rect.top) * scaleY;
-      return pixelToHex(px, py, boardConfig.hex_radius, boardConfig.margin, boardConfig.cols, boardConfig.rows);
+      return pixelToHex(
+        px,
+        py,
+        boardConfig.hex_radius,
+        boardConfig.margin,
+        boardConfig.cols,
+        boardConfig.rows
+      );
     };
 
     const findOwnFig = (col: number, row: number) => {
@@ -3448,10 +3499,14 @@ export default function Board({
         // Double-clic : auto-assign toutes les figs avec LoS valide sur cette cible.
         const now = e.timeStamp;
         const prev = lastEnemyClickRef.current;
-        console.log(`[SQUAD-SHOOT][dblclick-detect] enemy=${enemy} prev=${prev ? `${prev.targetId}@${prev.time}` : "null"} now=${now} delta=${prev ? now - prev.time : "n/a"} onAutoAssign=${!!cbs.onAutoAssignAllModels}`);
+        console.log(
+          `[SQUAD-SHOOT][dblclick-detect] enemy=${enemy} prev=${prev ? `${prev.targetId}@${prev.time}` : "null"} now=${now} delta=${prev ? now - prev.time : "n/a"} onAutoAssign=${!!cbs.onAutoAssignAllModels}`
+        );
         if (prev && String(prev.targetId) === String(enemy) && now - prev.time < 400) {
           lastEnemyClickRef.current = null;
-          console.log(`[SQUAD-SHOOT][dblclick-detect] → DOUBLE-CLIC détecté, appel onAutoAssignAllModels`);
+          console.log(
+            `[SQUAD-SHOOT][dblclick-detect] → DOUBLE-CLIC détecté, appel onAutoAssignAllModels`
+          );
           void cbs.onAutoAssignAllModels?.(enemy);
           return;
         }
@@ -3460,9 +3515,10 @@ export default function Board({
         // Si blinkingUnits est vide (valid_targets pas encore chargés), on laisse passer — le backend valide.
         if (plan.activeModelId) {
           const validTargets = stableBlinkingUnitsRef.current;
-          const isValid = !validTargets || validTargets.length === 0
-            ? true
-            : validTargets.includes(Number(enemy));
+          const isValid =
+            !validTargets || validTargets.length === 0
+              ? true
+              : validTargets.includes(Number(enemy));
           if (isValid) {
             void cbs.onAssignShootTarget?.(enemy);
           }
@@ -3473,7 +3529,15 @@ export default function Board({
 
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
-  }, [phase, mode, measureMode.kind, boardConfig, gameState?.units_cache, current_player, eligibleUnitIds]);
+  }, [
+    phase,
+    mode,
+    measureMode.kind,
+    boardConfig,
+    gameState?.units_cache,
+    current_player,
+    eligibleUnitIds,
+  ]);
 
   // Allocation manuelle des pertes : anneau de surbrillance sur les figurines
   // choisissables (cible). Overlay PIXI dédié sur app.stage (même repère monde que
@@ -3505,14 +3569,20 @@ export default function Board({
       // voile gris EN PLUS sur les figs non choisissables (hors groupe courant). L'anneau
       // les distingue d'une fig morte (ghost gris sans anneau).
       const choiceIds = new Set(manualAllocation.choices.map((c) => c.model_id));
-      const tgtCache = (gameState as unknown as {
-        units_cache?: Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>;
-      })?.units_cache?.[String(manualAllocation.target_unit_id)];
+      const tgtCache = (
+        gameState as unknown as {
+          units_cache?: Record<
+            string,
+            { occupied_hexes_by_model?: Record<string, [number, number]> }
+          >;
+        }
+      )?.units_cache?.[String(manualAllocation.target_unit_id)];
       const byModel = tgtCache?.occupied_hexes_by_model;
       if (byModel) {
         for (const [mid, pos] of Object.entries(byModel)) {
           const cx = pos[0] * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H;
-          const cy = pos[1] * HEX_HEIGHT_H + ((pos[0] % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H;
+          const cy =
+            pos[1] * HEX_HEIGHT_H + ((pos[0] % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H;
           const selectable = choiceIds.has(mid);
           // 1. voile gris sous l'anneau pour les non-selectionnables.
           if (!selectable) {
@@ -3610,7 +3680,10 @@ export default function Board({
       let bestD = Infinity;
       for (const dp of destPixels) {
         const d = (dp.x - px) * (dp.x - px) + (dp.y - py) * (dp.y - py);
-        if (d < bestD) { bestD = d; best = dp; }
+        if (d < bestD) {
+          bestD = d;
+          best = dp;
+        }
       }
       return best;
     };
@@ -3746,19 +3819,22 @@ export default function Board({
     app.stage.addChild(veilOverlay);
     squadMoveVeilOverlayRef.current = veilOverlay;
 
-    const inchesToSubhex = (boardConfig as unknown as { inches_to_subhex?: number }).inches_to_subhex ?? 10;
+    const inchesToSubhex =
+      (boardConfig as unknown as { inches_to_subhex?: number }).inches_to_subhex ?? 10;
     const coherencyDist = 2 * inchesToSubhex;
     const baseSize = resolveBaseSizeForUnitDisplay(squadUnit);
     const baseShape = typeof squadUnit.BASE_SHAPE === "string" ? squadUnit.BASE_SHAPE : "round";
     const veilRadius = baseSize > 1 ? (baseSize * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
 
     function hexDist(c1: number, r1: number, c2: number, r2: number): number {
-      const z1 = r1 - Math.floor(c1 / 2), y1 = -c1 - z1;
-      const z2 = r2 - Math.floor(c2 / 2), y2 = -c2 - z2;
+      const z1 = r1 - Math.floor(c1 / 2),
+        y1 = -c1 - z1;
+      const z2 = r2 - Math.floor(c2 / 2),
+        y2 = -c2 - z2;
       return Math.max(Math.abs(c1 - c2), Math.abs(y1 - y2), Math.abs(z1 - z2));
     }
 
-    function minFootprintDist(fpA: Array<[number,number]>, fpB: Array<[number,number]>): number {
+    function minFootprintDist(fpA: Array<[number, number]>, fpB: Array<[number, number]>): number {
       let best = Infinity;
       for (const [ac, ar] of fpA) {
         for (const [bc, br] of fpB) {
@@ -3781,8 +3857,8 @@ export default function Board({
       // Positions avec fig active à la position hover
       const positions = mids.map((mid) =>
         mid === plan.activeModelId
-          ? [hoverCol, hoverRow] as [number, number]
-          : [plan.models[mid].col, plan.models[mid].row] as [number, number]
+          ? ([hoverCol, hoverRow] as [number, number])
+          : ([plan.models[mid].col, plan.models[mid].row] as [number, number])
       );
 
       // Footprints
@@ -3811,7 +3887,10 @@ export default function Board({
         while (stack.length) {
           const k = stack.pop()!;
           for (let nb = 0; nb < n; nb++) {
-            if (adj[k][nb] && comp[nb] === -1) { comp[nb] = numComp; stack.push(nb); }
+            if (adj[k][nb] && comp[nb] === -1) {
+              comp[nb] = numComp;
+              stack.push(nb);
+            }
           }
         }
         numComp++;
@@ -3823,7 +3902,8 @@ export default function Board({
         if (compSize[comp[i]] * 2 > n) continue; // majorité → valide
         const [col, row] = positions[i]; // positions[i] est déjà hoverCol/hoverRow pour la fig active
         const cx = col * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H;
-        const cy = row * HEX_HEIGHT_H + ((col % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H;
+        const cy =
+          row * HEX_HEIGHT_H + ((col % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H;
         veilOverlay.beginFill(0xff0000, 0.45);
         veilOverlay.drawCircle(cx, cy, veilRadius);
         veilOverlay.endFill();
@@ -4530,7 +4610,10 @@ export default function Board({
         const baseSize = typeof selUnit.BASE_SIZE === "number" ? selUnit.BASE_SIZE : 1;
         const baseShape = typeof selUnit.BASE_SHAPE === "string" ? selUnit.BASE_SHAPE : "round";
         const fpZone = new Set<string>();
-        const anchors = [...resolvedMoveDestPoolRef.current, `${Number(selUnit.col)},${Number(selUnit.row)}`];
+        const anchors = [
+          ...resolvedMoveDestPoolRef.current,
+          `${Number(selUnit.col)},${Number(selUnit.row)}`,
+        ];
         for (const key of anchors) {
           const parts = key.split(",");
           const ac = Number(parts[0]);
@@ -5024,7 +5107,10 @@ export default function Board({
         // Aligné sur min_distance_between_sets (empreinte ↔ empreinte), §3.3 moteur.
         // Empreinte = union des figs vivantes (occupied_hexes_by_model), pas l'ancre du squad.
         const ucFight = gameState?.units_cache as
-          | Record<string, { HP_CUR?: number; occupied_hexes_by_model?: Record<string, [number, number]> }>
+          | Record<
+              string,
+              { HP_CUR?: number; occupied_hexes_by_model?: Record<string, [number, number]> }
+            >
           | undefined;
         const attackerFp =
           squadFootprintHexKeysFromModelCenters(
@@ -5035,7 +5121,8 @@ export default function Board({
           if (u.player === selectedUnit.player) {
             return false;
           }
-          if (u.HP_CUR == null) throw new Error(`Unit ${u.id} missing HP_CUR for fight target filter`);
+          if (u.HP_CUR == null)
+            throw new Error(`Unit ${u.id} missing HP_CUR for fight target filter`);
           let hp = u.HP_CUR;
           const ce = ucFight?.[String(u.id)];
           if (ce && typeof ce.HP_CUR === "number") {
@@ -5363,8 +5450,7 @@ export default function Board({
         | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
         | undefined;
       const byModel =
-        overviewUnitId != null &&
-        Number(shootingPreviewSource.unit.id) === Number(overviewUnitId)
+        overviewUnitId != null && Number(shootingPreviewSource.unit.id) === Number(overviewUnitId)
           ? ucOverview?.[String(overviewUnitId)]?.occupied_hexes_by_model
           : undefined;
       if (byModel) {
@@ -5703,7 +5789,7 @@ export default function Board({
             .map((d) => `${d.model_id}.${d.weapon_index}>${d.target_unit_id}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hbpm:${hiddenBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -5793,12 +5879,11 @@ export default function Board({
     const activeFootprintMaskLoops = (() => {
       let raw: number[][] | null;
       if (mode === "squadModelMove") {
-        raw = squadMovePlan?.activeModelId
-          ? (squadMoveModelMaskLoopsRef?.current ?? null)
-          : null;
+        raw = squadMovePlan?.activeModelId ? (squadMoveModelMaskLoopsRef?.current ?? null) : null;
       } else {
         raw =
-          effectivePhase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview")
+          effectivePhase === "fight" &&
+          (mode === "pileInPreview" || mode === "consolidationPreview")
             ? null
             : normalizeMaskLoopsFromApi(
                 (gameState as { move_preview_footprint_mask_loops?: unknown })
@@ -6077,7 +6162,12 @@ export default function Board({
     }
     /** Dessine un voile : 1 couleur = disque plein ; N couleurs = N secteurs ; >6 = blanc. */
     const drawSplitVeil = (
-      g: PIXI.Graphics, cx: number, cy: number, radius: number, colors: number[], alpha: number
+      g: PIXI.Graphics,
+      cx: number,
+      cy: number,
+      radius: number,
+      colors: number[],
+      alpha: number
     ): void => {
       if (colors.length === 0) return;
       if (colors.length > WEAPON_COLOR_PALETTE.length) {
@@ -6153,9 +6243,7 @@ export default function Board({
         let modelValidFlags: boolean[];
         let modelIds: string[];
         if (occupiedHexesByModel) {
-          const entries = Object.entries(occupiedHexesByModel) as Array<
-            [string, [number, number]]
-          >;
+          const entries = Object.entries(occupiedHexesByModel) as Array<[string, [number, number]]>;
           modelIds = entries.map(([mid]) => mid);
           modelPositions = entries.map(([mid, pos]) => {
             const planPos = isSquadGhost ? squadMovePlan!.models[mid] : undefined;
@@ -6172,17 +6260,13 @@ export default function Board({
 
         const modelCenters: Array<[number, number]> = modelPositions.map(([mCol, mRow]) => [
           mCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN,
-          mRow * HEX_VERT_SPACING +
-            ((mCol % 2) * HEX_VERT_SPACING) / 2 +
-            HEX_HEIGHT / 2 +
-            MARGIN,
+          mRow * HEX_VERT_SPACING + ((mCol % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN,
         ]);
         const modelMetas: Array<ModelVisualMeta | null> = modelMetasByModel
           ? modelIds.map((mid) => modelMetasByModel[mid] ?? null)
           : [];
-        const modelHps: Array<
-          { HP_CUR: number; HP_MAX: number; is_character: boolean } | null
-        > = modelHpsByModel ? modelIds.map((mid) => modelHpsByModel[mid] ?? null) : [];
+        const modelHps: Array<{ HP_CUR: number; HP_MAX: number; is_character: boolean } | null> =
+          modelHpsByModel ? modelIds.map((mid) => modelHpsByModel[mid] ?? null) : [];
         // Rule 13.09 : flag "caché" par figurine (aligné sur modelCenters) pour le mode badge par-fig.
         const hiddenModelIds = new Set((unit.hidden_models ?? []).map((m) => String(m)));
         // En plan fig-par-fig (squadModelMove), le statut "caché" est recalculé par le backend pour
@@ -6323,23 +6407,23 @@ export default function Board({
         const unitToRender = isDeadGhost
           ? ({ ...unit, isJustKilled: true } as Unit & { isJustKilled: boolean })
           : isChargeOrigin || isMoveOriginGhost || isHazardousDeathGhost || isShootingPreviewGhost
-          ? ({
-              ...unit,
-              isGhost: true,
-              // Pendant un move preview, le badge "caché" n'a de sens qu'à la destination (rendu
-              // par le bloc preview) : on l'éteint sur le ghost d'origine pour éviter le conflit
-              // de nommage PIXI (même `hidden-badge-${id}`) qui faisait clignoter le badge.
-              ...(isMoveOriginGhost ? { hidden: false } : {}),
-            } as Unit & { isGhost: boolean })
-          : isSquadGhost
-          ? // Plan fig-par-fig : en mode badge "escouade" (hiddenBadgePerModel off), renderHiddenBadge
-            // lit unit.hidden → le recalculer depuis le hidden des positions PROVISOIRES du plan,
-            // cohérent avec le badge par-fig (modelHidden).
-            ({
-              ...unit,
-              hidden: modelHidden.length > 0 && modelHidden.every(Boolean),
-            } as Unit)
-          : unit;
+            ? ({
+                ...unit,
+                isGhost: true,
+                // Pendant un move preview, le badge "caché" n'a de sens qu'à la destination (rendu
+                // par le bloc preview) : on l'éteint sur le ghost d'origine pour éviter le conflit
+                // de nommage PIXI (même `hidden-badge-${id}`) qui faisait clignoter le badge.
+                ...(isMoveOriginGhost ? { hidden: false } : {}),
+              } as Unit & { isGhost: boolean })
+            : isSquadGhost
+              ? // Plan fig-par-fig : en mode badge "escouade" (statusBadgePerModel off), renderHiddenBadge
+                // lit unit.hidden → le recalculer depuis le hidden des positions PROVISOIRES du plan,
+                // cohérent avec le badge par-fig (modelHidden).
+                ({
+                  ...unit,
+                  hidden: modelHidden.length > 0 && modelHidden.every(Boolean),
+                } as Unit)
+              : unit;
 
         renderUnit({
           unit: unitToRender,
@@ -6350,7 +6434,7 @@ export default function Board({
           modelHps,
           modelHidden: isMoveOriginGhost ? [] : modelHidden,
           hpBarPerModel,
-          hiddenBadgePerModel,
+          statusBadgePerModel,
           app,
           renderTarget: unitsLayer,
           uiElementsContainer: uiElementsContainerRef.current!,
@@ -6473,9 +6557,10 @@ export default function Board({
         if (isSquadGhost && modelValidFlags.some((ok) => !ok)) {
           const veil = new PIXI.Graphics();
           const veilDisplayBase = resolveBaseSizeForUnitDisplay(unit);
-          const veilRadius = veilDisplayBase > 1
-            ? (veilDisplayBase * 1.5 * HEX_RADIUS) / 2
-            : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
+          const veilRadius =
+            veilDisplayBase > 1
+              ? (veilDisplayBase * 1.5 * HEX_RADIUS) / 2
+              : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
           modelCenters.forEach(([cx, cy], i) => {
             if (!modelValidFlags[i]) {
               veil.beginFill(0xff0000, 0.45);
@@ -6495,9 +6580,8 @@ export default function Board({
         ) {
           const decls = squadShootPlan.declarations;
           const gvBase = resolveBaseSizeForUnitDisplay(unit);
-          const gvRadius = gvBase > 1
-            ? (gvBase * 1.5 * HEX_RADIUS) / 2
-            : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
+          const gvRadius =
+            gvBase > 1 ? (gvBase * 1.5 * HEX_RADIUS) / 2 : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
 
           // Voile tireur : couleurs des armes que CHAQUE fig a assignées (split si plusieurs).
           const veil = new PIXI.Graphics();
@@ -6565,9 +6649,8 @@ export default function Board({
         if (tgtColors && tgtColors.length > 0 && modelCenters.length > 0) {
           const tgtVeil = new PIXI.Graphics();
           const tvBase = resolveBaseSizeForUnitDisplay(unit);
-          const tvRadius = tvBase > 1
-            ? (tvBase * 1.5 * HEX_RADIUS) / 2
-            : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
+          const tvRadius =
+            tvBase > 1 ? (tvBase * 1.5 * HEX_RADIUS) / 2 : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
           modelCenters.forEach(([cx, cy]) => {
             drawSplitVeil(tgtVeil, cx, cy, tvRadius, tgtColors, 0.4);
           });
@@ -6590,9 +6673,7 @@ export default function Board({
           // Multi-fig squad ghost: rigid-body translation in PIXEL space.
           // Hex-coord delta would corrupt vertical positioning whenever the
           // delta col flips column parity (odd-column half-hex offset).
-          const previewUnitsCache = gameState?.units_cache as
-            | Record<string, unknown>
-            | undefined;
+          const previewUnitsCache = gameState?.units_cache as Record<string, unknown> | undefined;
           const previewCacheEntry = previewUnitsCache?.[String(previewUnit.id)] as
             | {
                 col?: number;
@@ -6611,8 +6692,7 @@ export default function Board({
             previewOccupied && previewMetasByModel
               ? Object.keys(previewOccupied).map((mid) => previewMetasByModel[mid] ?? null)
               : [];
-          const anchorPixelX =
-            previewUnit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const anchorPixelX = previewUnit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
           const anchorPixelY =
             previewUnit.row * HEX_VERT_SPACING +
             ((previewUnit.col % 2) * HEX_VERT_SPACING) / 2 +
@@ -6652,7 +6732,7 @@ export default function Board({
             modelCenters: previewModelCenters,
             modelMetas: previewModelMetas,
             modelHidden: previewModelHidden,
-            hiddenBadgePerModel,
+            statusBadgePerModel,
             app,
             renderTarget: unitsLayer,
             // Le badge "caché" doit aller dans le conteneur UI persistant (comme la boucle normale),
@@ -6972,8 +7052,7 @@ export default function Board({
             mode === "advancePreview" ||
             mode === "movePreview" ||
             mode === "targetPreview");
-        const isSquadShootActivated =
-          mode === "squadModelShoot" && selectedUnitId === unitIdNum;
+        const isSquadShootActivated = mode === "squadModelShoot" && selectedUnitId === unitIdNum;
         const isActiveShooterForCurrentPlayer =
           phase === "shoot" && unit.player === current_player && isActiveShootingFromState;
         // Advance : mono-fig et multi-fig (squadModelShoot).
@@ -6988,7 +7067,8 @@ export default function Board({
           const iconSize = getRequiredCssNumber("--icon-advance-size");
           const iconScale = getRequiredCssNumber("--icon-square-icon-scale");
           const iconBoost = getRequiredCssNumber("--shooting-overlay-action-icon-boost");
-          const iconDisplaySize = HEX_RADIUS * (inchesToSubhex / 10) * iconSize * iconScale * iconBoost;
+          const iconDisplaySize =
+            HEX_RADIUS * (inchesToSubhex / 10) * iconSize * iconScale * iconBoost;
           const squareSizeRatio = getRequiredCssNumber("--icon-square-standard-size");
           const squareSize = HEX_RADIUS * squareSizeRatio;
           const positionY = barY - squareSize / 2 - Math.max(2, HP_BAR_HEIGHT * 0.7);
@@ -7321,7 +7401,7 @@ export default function Board({
     attackPreview,
     autoSelectWeapon,
     hpBarPerModel,
-    hiddenBadgePerModel,
+    statusBadgePerModel,
     availableCellsOverride,
     isBlinkingActive,
     stableBlinkingUnits,
@@ -7418,7 +7498,6 @@ export default function Board({
     deadModelGhostsForRender,
   ]);
 
-
   // Handle weapon selection
   const handleSelectWeapon = async (weaponIndex: number) => {
     if (!weaponSelectionMenu) return;
@@ -7503,18 +7582,60 @@ export default function Board({
         if (availableWeapons && availableWeapons.length > 0) {
           return availableWeapons.map((w) => {
             const canUse = w.can_use ?? w.canUse;
-            if (canUse == null) throw new Error(`Weapon ${w.index} of unit ${unit.id} missing can_use`);
+            if (canUse == null)
+              throw new Error(`Weapon ${w.index} of unit ${unit.id} missing can_use`);
             const flags = weaponFlags(w.index);
-            return { index: w.index, weapon: w.weapon, canUse, reason: w.reason, color: weaponColorFor(rngWeapons, w.index), assigned: flags.assigned, locked: flags.locked };
+            return {
+              index: w.index,
+              weapon: w.weapon,
+              canUse,
+              reason: w.reason,
+              color: weaponColorFor(rngWeapons, w.index),
+              assigned: flags.assigned,
+              locked: flags.locked,
+            };
           });
         }
         // Fallback : available_weapons pas encore patchée (ex. squad entre squad_shoot_activate et réponse).
         return unit.RNG_WEAPONS.map((w, idx) => {
           const flags = weaponFlags(idx);
-          return { index: idx, weapon: w, canUse: true, reason: undefined, color: weaponColorFor(rngWeapons, idx), assigned: flags.assigned, locked: flags.locked };
+          return {
+            index: idx,
+            weapon: w,
+            canUse: true,
+            reason: undefined,
+            color: weaponColorFor(rngWeapons, idx),
+            assigned: flags.assigned,
+            locked: flags.locked,
+          };
         });
       })()
     : [];
+
+  const squadMoveButtonTop = (() => {
+    if (!boardConfig || !squadMovePlan || !boardViewportSize) return undefined;
+    const HEX_HEIGHT = Math.sqrt(3) * boardConfig.hex_radius;
+    const models = Object.values(squadMovePlan.models);
+    if (models.length === 0) return undefined;
+    const maxRow = Math.max(...models.map((m) => m.row));
+    const col = (models.find((m) => m.row === maxRow) ?? models[0]).col;
+    const unitBottomY =
+      maxRow * HEX_HEIGHT + (col % 2) * (HEX_HEIGHT / 2) + HEX_HEIGHT + boardConfig.margin;
+    return Math.min(unitBottomY + 5 * HEX_HEIGHT, boardViewportSize.height - 60);
+  })();
+
+  const squadShootButtonTop = (() => {
+    if (!boardConfig || !squadShootPlan || !boardViewportSize) return undefined;
+    const HEX_HEIGHT = Math.sqrt(3) * boardConfig.hex_radius;
+    const shootUnit = units.find((u) => String(u.id) === String(squadShootPlan.unitId));
+    if (!shootUnit) return undefined;
+    const unitBottomY =
+      shootUnit.row * HEX_HEIGHT +
+      (shootUnit.col % 2) * (HEX_HEIGHT / 2) +
+      HEX_HEIGHT +
+      boardConfig.margin;
+    return Math.min(unitBottomY + 5 * HEX_HEIGHT, boardViewportSize.height - 60);
+  })();
 
   // Simple container return - loading/error handled inside useEffect
   return (
@@ -7526,11 +7647,11 @@ export default function Board({
         }}
       >
         {/* squad.md brique 3 : boutons Validate / Cancel du move par-figurine (bas-droite). */}
-        {mode === "squadModelMove" && squadMovePlan && (
+        {mode === "squadModelMove" && squadMovePlan && squadMovePlan.activeModelId === null && (
           <div
             style={{
               position: "absolute",
-              bottom: 12,
+              ...(squadMoveButtonTop !== undefined ? { top: squadMoveButtonTop } : { bottom: 12 }),
               right: 12,
               zIndex: 1700,
               display: "flex",
@@ -7578,7 +7699,7 @@ export default function Board({
           <div
             style={{
               position: "absolute",
-              bottom: 12,
+              ...(squadShootButtonTop !== undefined ? { top: squadShootButtonTop } : { bottom: 12 }),
               right: 12,
               zIndex: 1700,
               display: "flex",
@@ -7596,7 +7717,8 @@ export default function Board({
                 padding: "6px 10px",
               }}
             >
-              {Object.keys(squadShootPlan.targets).length}/{squadShootPlan.models.length} figs assignées
+              {Object.keys(squadShootPlan.targets).length}/{squadShootPlan.models.length} figs
+              assignées
             </span>
             <button
               type="button"
@@ -7856,93 +7978,106 @@ export default function Board({
                 blinkingSquadAliveCount != null
                   ? blinkingLosCountByUnitId[idStr]
                   : undefined;
-              const losText =
-                losN != null ? `${losN}/${blinkingSquadAliveCount}` : null;
+              const losText = losN != null ? `${losN}/${blinkingSquadAliveCount}` : null;
               return (
-              <div
-                key={`blink-prob-${idStr}`}
-                className="rule-tooltip unit-icon-tooltip"
-                role="presentation"
-                style={{
-                  position: "fixed",
-                  left: `${data.left}px`,
-                  top: `${data.top}px`,
-                  marginBottom: 0,
-                  zIndex: DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX,
-                  visibility: "visible",
-                  opacity: 1,
-                  transform: "translateX(-50%)",
-                  pointerEvents: "auto",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  maxWidth: "min(92vw, var(--tooltip-max-width))",
-                }}
-                onPointerMove={(e) => {
-                  const el = e.target as HTMLElement;
-                  if (el.closest('[data-blink-prob-shield="1"]')) {
-                    setUnitHoverTooltip({
-                      visible: true,
-                      text: "Couvert (COVER) : +1 au jet de sauvegarde.",
-                      x: e.clientX,
-                      y: e.clientY,
-                      zIndex: DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX,
-                      opacity: DAMAGE_PROBABILITY_TOOLTIP_HTML_OPACITY,
-                    });
-                  } else {
-                    setUnitHoverTooltip({
-                      visible: true,
-                      text: data.probabilityHelpText,
-                      x: e.clientX,
-                      y: e.clientY,
-                      zIndex: DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX,
-                      opacity: DAMAGE_PROBABILITY_TOOLTIP_HTML_OPACITY,
-                    });
-                  }
-                }}
-                onPointerLeave={() => {
-                  setUnitHoverTooltip(null);
-                }}
-              >
-                {losText ? (
-                  <>
+                <div
+                  key={`blink-prob-${idStr}`}
+                  className="rule-tooltip unit-icon-tooltip"
+                  role="presentation"
+                  style={{
+                    position: "fixed",
+                    left: `${data.left}px`,
+                    top: `${data.top}px`,
+                    marginBottom: 0,
+                    zIndex: DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX,
+                    visibility: "visible",
+                    opacity: 1,
+                    transform: "translateX(-50%)",
+                    pointerEvents: "auto",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    maxWidth: "min(92vw, var(--tooltip-max-width))",
+                  }}
+                  onPointerMove={(e) => {
+                    const el = e.target as HTMLElement;
+                    if (el.closest('[data-blink-prob-shield="1"]')) {
+                      setUnitHoverTooltip({
+                        visible: true,
+                        text: "Couvert (COVER) : +1 au jet de sauvegarde.",
+                        x: e.clientX,
+                        y: e.clientY,
+                        zIndex: DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX,
+                        opacity: DAMAGE_PROBABILITY_TOOLTIP_HTML_OPACITY,
+                      });
+                    } else {
+                      setUnitHoverTooltip({
+                        visible: true,
+                        text: data.probabilityHelpText,
+                        x: e.clientX,
+                        y: e.clientY,
+                        zIndex: DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX,
+                        opacity: DAMAGE_PROBABILITY_TOOLTIP_HTML_OPACITY,
+                      });
+                    }
+                  }}
+                  onPointerLeave={() => {
+                    setUnitHoverTooltip(null);
+                  }}
+                >
+                  {losText ? (
+                    <>
+                      <span
+                        data-blink-prob-los-eye="1"
+                        style={{ display: "inline-flex", alignItems: "center" }}
+                        aria-hidden
+                      >
+                        <svg
+                          aria-hidden={true}
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          style={{ display: "block" }}
+                        >
+                          <path
+                            fill="currentColor"
+                            d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5C21.27 7.61 17 4.5 12 4.5zm0 12a4.5 4.5 0 110-9 4.5 4.5 0 010 9zm0-7a2.5 2.5 0 100 5 2.5 2.5 0 000-5z"
+                          />
+                        </svg>
+                      </span>
+                      <span
+                        data-blink-prob-los="1"
+                        style={{ fontWeight: 700, opacity: 0.9, whiteSpace: "nowrap" }}
+                      >
+                        {losText}
+                      </span>
+                      <span data-blink-prob-sep="1" style={{ opacity: 0.5 }}>
+                        |
+                      </span>
+                    </>
+                  ) : null}
+                  <span data-blink-prob-label="1">{data.label}</span>
+                  {data.showCoverShield ? (
                     <span
-                      data-blink-prob-los-eye="1"
+                      data-blink-prob-shield="1"
                       style={{ display: "inline-flex", alignItems: "center" }}
                       aria-hidden
                     >
-                      <svg aria-hidden={true} width="14" height="14" viewBox="0 0 24 24" style={{ display: "block" }}>
+                      <svg
+                        aria-hidden={true}
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        style={{ display: "block" }}
+                      >
                         <path
                           fill="currentColor"
-                          d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5C21.27 7.61 17 4.5 12 4.5zm0 12a4.5 4.5 0 110-9 4.5 4.5 0 010 9zm0-7a2.5 2.5 0 100 5 2.5 2.5 0 000-5z"
+                          d="M12 2L4 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-8-3z"
                         />
                       </svg>
                     </span>
-                    <span
-                      data-blink-prob-los="1"
-                      style={{ fontWeight: 700, opacity: 0.9, whiteSpace: "nowrap" }}
-                    >
-                      {losText}
-                    </span>
-                    <span data-blink-prob-sep="1" style={{ opacity: 0.5 }}>|</span>
-                  </>
-                ) : null}
-                <span data-blink-prob-label="1">{data.label}</span>
-                {data.showCoverShield ? (
-                  <span
-                    data-blink-prob-shield="1"
-                    style={{ display: "inline-flex", alignItems: "center" }}
-                    aria-hidden
-                  >
-                    <svg aria-hidden={true} width="14" height="14" viewBox="0 0 24 24" style={{ display: "block" }}>
-                      <path
-                        fill="currentColor"
-                        d="M12 2L4 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-8-3z"
-                      />
-                    </svg>
-                  </span>
-                ) : null}
-              </div>
+                  ) : null}
+                </div>
               );
             }),
             document.body

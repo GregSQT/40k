@@ -17,8 +17,8 @@ interface SettingsMenuProps {
   onToggleAutoSelectWeapon: (value: boolean) => void;
   hpBarPerModel?: boolean;
   onToggleHpBarPerModel?: (value: boolean) => void;
-  hiddenBadgePerModel?: boolean;
-  onToggleHiddenBadgePerModel?: (value: boolean) => void;
+  statusBadgePerModel?: boolean;
+  onToggleStatusBadgePerModel?: (value: boolean) => void;
   retreatAlertEnabled?: boolean;
   onToggleRetreatAlert?: (value: boolean) => void;
   modeGuidesActivated?: boolean;
@@ -41,8 +41,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   onToggleAutoSelectWeapon,
   hpBarPerModel = false,
   onToggleHpBarPerModel,
-  hiddenBadgePerModel = false,
-  onToggleHiddenBadgePerModel,
+  statusBadgePerModel = false,
+  onToggleStatusBadgePerModel,
   retreatAlertEnabled = true,
   onToggleRetreatAlert,
   modeGuidesActivated = true,
@@ -173,22 +173,22 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
           </div>
         )}
 
-        {onToggleHiddenBadgePerModel && (
+        {onToggleStatusBadgePerModel && (
           <div style={{ marginBottom: "16px" }}>
             <label
               style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}
             >
               <input
                 type="checkbox"
-                checked={hiddenBadgePerModel}
-                onChange={(e) => onToggleHiddenBadgePerModel(e.target.checked)}
+                checked={statusBadgePerModel}
+                onChange={(e) => onToggleStatusBadgePerModel(e.target.checked)}
                 style={{ marginRight: "12px", width: "18px", height: "18px", cursor: "pointer" }}
               />
-              <span>Badge "caché" par figurine</span>
+              <span>Badges de statut par figurine</span>
             </label>
             <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
-              Activé : un badge sur chaque figurine cachée. Désactivé : un seul badge sur l'escouade
-              (uniquement si toutes les figurines sont cachées).
+              Activé : un badge (caché, fui, choc) sur chaque figurine concernée. Désactivé : un seul
+              badge sur l'escouade (uniquement si toutes les figurines ont le statut).
             </p>
           </div>
         )}

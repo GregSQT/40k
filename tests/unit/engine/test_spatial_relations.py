@@ -97,6 +97,7 @@ def test_round_round_engagement_uses_euclidean_clearance_not_hex_footprints(monk
         "player": 1,
         "BASE_SHAPE": "round",
         "BASE_SIZE": 2,
+        "orientation": 0,
         "occupied_hexes": {(20, 10)},
     }
     second_entry = {
@@ -105,6 +106,7 @@ def test_round_round_engagement_uses_euclidean_clearance_not_hex_footprints(monk
         "player": 2,
         "BASE_SHAPE": "round",
         "BASE_SIZE": 2,
+        "orientation": 0,
         "occupied_hexes": {(10, 10)},
     }
 

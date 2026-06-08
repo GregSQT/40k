@@ -16,7 +16,6 @@ import {
 import type { ActivationPointerGameState } from "../utils/activationClickTarget";
 import {
   buildActivationPointerPayload,
-  determineActivationClickTarget,
   getActiveFightUnitIdString,
   getFightActivationPoolUnitIds,
   getFightAttackerAttackLeft,
@@ -440,7 +439,6 @@ const deriveShootTargets = (
 };
 
 export const useEngineAPI = (options?: UseEngineAPIOptions) => {
-  const getTutorialShootOptionsRef = options?.getTutorialShootOptionsRef;
   const stopAiAfterPhaseChangeRef = options?.stopAiAfterPhaseChangeRef;
   const onStopAfterPhaseChange = options?.onStopAfterPhaseChange;
   const [gameState, setGameState] = useState<APIGameState | null>(null);
@@ -669,8 +667,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const ruleChoicePreviousSelectedUnitIdRef = useRef<number | null>(null);
   /** Bloque les doubles clics d’activation (move / tir / fight) pendant la requête API. */
   const activationInProgressRef = useRef(false);
-  /** Bloque les clics cible tir concurrents (double-clic spam). */
-  const shootTargetClickInProgressRef = useRef(false);
   /**
    * Une seule requête ``fight`` à la fois : clics rapides sur la cible envoyaient plusieurs POST
    * en parallèle ; la N+1 peut recevoir ``no_attacks_remaining`` (ATTACK_LEFT déjà à 0) alors que
@@ -3101,7 +3097,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       executeAction,
       mode,
       selectedUnitId,
-      getTutorialShootOptionsRef,
       clearChargePoolRefs,
       clearFightAttackActivationUi,
       enqueueFightRequest,
@@ -3354,9 +3349,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const perModelValid = (result?.per_model ?? {}) as Record<string, boolean>;
       const coherencyOk = result?.coherency_ok === true;
       const canValidate = result?.can_validate === true;
-      const redModels = Object.entries(perModelValid)
-        .filter(([, ok]) => !ok)
-        .map(([mid]) => mid);
       setSquadMovePlan((prev) =>
         prev && prev.unitId === unitId
           ? { ...prev, perModelValid, coherencyOk, canValidate }
@@ -3486,17 +3478,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
 
       try {
-        const result = await executeAction(action);
-        const u8 = result?.game_state?.units?.find?.(
-          (u: { id?: number | string; col?: number; row?: number }) =>
-            String(u.id) === String(action.unitId)
-        );
-        const u8Cache = (result?.game_state?.units_cache as Record<string, unknown>)?.[
-          String(action.unitId)
-        ] as { col?: number; row?: number; occupied_hexes_by_model?: Record<string, [number, number]> } | undefined;
-        const occVals = u8Cache?.occupied_hexes_by_model
-          ? JSON.stringify(Object.values(u8Cache.occupied_hexes_by_model))
-          : "(none)";
+        await executeAction(action);
         setMovePreview(null);
         setPendingPreviewAction(null);
         setSelectedUnitId(null);

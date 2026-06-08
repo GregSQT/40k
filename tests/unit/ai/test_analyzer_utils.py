@@ -178,13 +178,13 @@ def test_geometry_and_los_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
             return (4, 3)
 
     monkeypatch.setattr("config_loader.get_config_loader", lambda: _Cfg())
-    assert an._get_los_thresholds() == (0.4, 0.2)
+    assert an._get_los_thresholds() == 0.4
     walls = an._get_los_wall_hexes(set())
     assert (1, 2) in walls and (3, 2) in walls
 
     monkeypatch.setattr(
-        "engine.phase_handlers.shooting_handlers._compute_los_visibility_ratio",
-        lambda *args, **kwargs: (0.7, True, False),
+        "engine.hex_utils.compute_los_state",
+        lambda *args, **kwargs: (0.7, True),
     )
     assert an.has_line_of_sight(1, 1, 2, 2, set()) is True
 

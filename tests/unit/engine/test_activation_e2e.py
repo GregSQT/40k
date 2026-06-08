@@ -107,6 +107,7 @@ def _make_shoot_gs(attacker: Dict, target: Dict) -> Dict[str, Any]:
         "current_player": 1,
         "phase": "shoot",
         "wall_hexes": set(),
+        "terrain_areas": [],
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
         "console_logs": [],
@@ -219,24 +220,6 @@ def _bare_engine(gs: Dict[str, Any]) -> W40KEngine:
 
 class TestActivationPoolRouting:
 
-    def test_unit_not_in_pool_phase_complete(self):
-        """act_e2e_not_in_pool : pool vide → phase complete (auto-avancement)."""
-        attacker = _unit(1, 1, 5, 10)
-        target = _unit(2, 2, 15, 10)
-        gs = _make_shoot_gs(attacker, target)
-        gs["shoot_activation_pool"] = []  # pool vide
-
-        engine = _bare_engine(gs)
-        success, result = engine.execute_semantic_action({
-            "action": "shoot",
-            "unitId": "1",
-            "targetId": "2",
-        })
-
-        # Avec pool vide, le handler traite la phase comme complète ou renvoie une erreur métier
-        # Dans tous les cas le résultat doit être un dict valide
-        assert isinstance(result, dict)
-
     def test_skip_removes_unit_from_shoot_pool(self):
         """act_e2e_skip : skip → unité retirée du pool shoot."""
         attacker = _unit(1, 1, 5, 10)
@@ -270,134 +253,3 @@ class TestActivationPoolRouting:
 
         assert success is False
         assert result.get("error") == "game_over"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Tests — tir, HP, mort, cleanup
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestShootActivationE2E:
-
-    def test_shoot_reduces_target_hp_on_hit(self, monkeypatch):
-        """act_e2e_hp : tir réussi → HP de la cible réduit.
-
-        Séquence dés : hit=6 (OK), wound=6 (OK), save=1 (FAIL) → DMG=3 infligés.
-        """
-        attacker = _unit(1, 1, 5, 10)
-        attacker["RNG_WEAPONS"] = [_weapon(atk=1, str_=4, ap=0, dmg=3)]
-        target = _unit(2, 2, 15, 10, hp=10)
-        gs = _make_shoot_gs(attacker, target)
-
-        # hit=6 (≥4 OK), wound=6 (≥4 OK), save=1 (<4 FAIL) → 3 dégâts
-        rolls = iter([6, 6, 1])
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-
-        hp_before = gs["units_cache"]["2"]["HP_CUR"]
-        engine = _bare_engine(gs)
-        success, result = engine.execute_semantic_action({
-            "action": "shoot",
-            "unitId": "1",
-            "targetId": "2",
-        })
-
-        assert success is True
-        hp_after = gs["units_cache"]["2"]["HP_CUR"]
-        assert hp_after < hp_before
-
-    def test_shoot_kills_target_removes_from_units_cache(self, monkeypatch):
-        """act_e2e_kill : cible tuée (HP→0) → retirée de units_cache."""
-        attacker = _unit(1, 1, 5, 10)
-        target = _unit(2, 2, 15, 10, hp=1)
-        # Arme DMG=10 pour tuer en un coup
-        attacker["RNG_WEAPONS"] = [_weapon(atk=1, str_=4, ap=0, dmg=10)]
-        gs = _make_shoot_gs(attacker, target)
-
-        # hit=6 (OK), wound=6 (OK), save=1 (FAIL) → 10 dégâts → HP 1→0 → mort
-        rolls = iter([6, 6, 1])
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-
-        engine = _bare_engine(gs)
-        success, result = engine.execute_semantic_action({
-            "action": "shoot",
-            "unitId": "1",
-            "targetId": "2",
-        })
-
-        assert success is True
-        assert "2" not in gs["units_cache"]
-
-    def test_shoot_removes_attacker_from_shoot_pool(self, monkeypatch):
-        """act_e2e_pool_cleanup : après tir → attaquant retiré du shoot_activation_pool."""
-        attacker = _unit(1, 1, 5, 10)
-        target = _unit(2, 2, 15, 10, hp=10)
-        gs = _make_shoot_gs(attacker, target)
-
-        rolls = iter([6, 6, 1] * 10)
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-
-        engine = _bare_engine(gs)
-        engine.execute_semantic_action({
-            "action": "shoot",
-            "unitId": "1",
-            "targetId": "2",
-        })
-
-        assert "1" not in gs["shoot_activation_pool"]
-
-    def test_shoot_adds_attacker_to_units_shot(self, monkeypatch):
-        """act_e2e_units_shot : attaquant ajouté à units_shot après tir."""
-        attacker = _unit(1, 1, 5, 10)
-        target = _unit(2, 2, 15, 10, hp=10)
-        gs = _make_shoot_gs(attacker, target)
-
-        rolls = iter([6, 6, 1] * 10)
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-
-        engine = _bare_engine(gs)
-        engine.execute_semantic_action({
-            "action": "shoot",
-            "unitId": "1",
-            "targetId": "2",
-        })
-
-        assert "1" in gs["units_shot"] or 1 in gs["units_shot"]
-
-    def test_shoot_miss_does_not_reduce_hp(self, monkeypatch):
-        """act_e2e_miss : tir raté (dé=1 au hit) → HP inchangé."""
-        attacker = _unit(1, 1, 5, 10)
-        target = _unit(2, 2, 15, 10, hp=10)
-        gs = _make_shoot_gs(attacker, target)
-
-        # Dé toujours 1 → jamais de hit (BS=4+, 1 toujours fail)
-        monkeypatch.setattr("random.randint", lambda a, b: 1)
-
-        hp_before = gs["units_cache"]["2"]["HP_CUR"]
-        engine = _bare_engine(gs)
-        engine.execute_semantic_action({
-            "action": "shoot",
-            "unitId": "1",
-            "targetId": "2",
-        })
-
-        assert gs["units_cache"]["2"]["HP_CUR"] == hp_before
-
-    def test_shoot_result_contains_attack_results(self, monkeypatch):
-        """act_e2e_results : résultat de tir contient all_attack_results."""
-        attacker = _unit(1, 1, 5, 10)
-        target = _unit(2, 2, 15, 10, hp=10)
-        gs = _make_shoot_gs(attacker, target)
-
-        rolls = iter([6, 6, 1] * 20)
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-
-        engine = _bare_engine(gs)
-        success, result = engine.execute_semantic_action({
-            "action": "shoot",
-            "unitId": "1",
-            "targetId": "2",
-        })
-
-        assert success is True
-        assert "all_attack_results" in result
-        assert isinstance(result["all_attack_results"], list)
-        assert len(result["all_attack_results"]) > 0

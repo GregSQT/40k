@@ -399,7 +399,7 @@ def _build_models_for_unit(
         )
         spec_hp_max = int(spec.get("HP_MAX", hp_max))
         spec_hp_cur = int(spec.get("HP_CUR", spec_hp_max))
-        spec_role = _derive_model_role(spec.get("UNIT_RULES", unit.get("UNIT_RULES", [])))
+        spec_role = _derive_model_role(cast(List[Dict[str, Any]], spec.get("UNIT_RULES", require_key(unit, "UNIT_RULES"))))
         models_cache[model_id] = {
             "squad_id": unit_id,
             "unitType": spec.get("unit_type") or unit.get("unitType"),
@@ -2820,16 +2820,18 @@ def roll_hazard_for_unit(unit_id: str, game_state: Dict[str, Any]) -> int:
     import random
     squad_models = require_key(game_state, "squad_models")
     models_cache = require_key(game_state, "models_cache")
-    alive_count = sum(
-        1 for mid in squad_models.get(str(unit_id), []) if mid in models_cache
-    )
+    unit_id_str = str(unit_id)
+    if unit_id_str not in squad_models:
+        raise KeyError(f"roll_hazard_for_unit: unit {unit_id} not in squad_models")
+    alive_count = sum(1 for mid in squad_models[unit_id_str] if mid in models_cache)
     if alive_count == 0:
         return 0
     units = require_key(game_state, "units")
-    unit = next((u for u in units if str(u.get("id")) == str(unit_id)), None)
-    if unit is None:
+    try:
+        unit = next(u for u in units if str(u.get("id")) == str(unit_id))
+    except StopIteration:
         raise KeyError(f"roll_hazard_for_unit: unit {unit_id} not found in game_state['units']")
-    keywords = [k.lower() for k in unit.get("UNIT_KEYWORDS", [])]
+    keywords = [k.lower() for k in require_key(unit, "UNIT_KEYWORDS")]
     wounds_per_fail = 3 if ("monster" in keywords or "vehicle" in keywords) else 1
     total_wounds = sum(
         wounds_per_fail for _ in range(alive_count) if random.randint(1, 6) <= 2
@@ -2861,8 +2863,9 @@ def is_unit_at_half_strength(unit_id: str, game_state: Dict[str, Any]) -> bool:
     if cache_entry is None:
         raise KeyError(f"is_unit_at_half_strength: unit {unit_id} not in units_cache")
     units = require_key(game_state, "units")
-    unit = next((u for u in units if str(u.get("id")) == str(unit_id)), None)
-    if unit is None:
+    try:
+        unit = next(u for u in units if str(u.get("id")) == str(unit_id))
+    except StopIteration:
         raise KeyError(f"is_unit_at_half_strength: unit {unit_id} not found in game_state['units']")
     hp_cur = int(require_key(cache_entry, "HP_CUR"))
     hp_max = int(require_key(unit, "HP_MAX"))
@@ -2880,8 +2883,9 @@ def roll_battle_shock(unit_id: str, game_state: Dict[str, Any]) -> bool:
     """
     import random
     units = require_key(game_state, "units")
-    unit = next((u for u in units if str(u.get("id")) == str(unit_id)), None)
-    if unit is None:
+    try:
+        unit = next(u for u in units if str(u.get("id")) == str(unit_id))
+    except StopIteration:
         raise KeyError(f"roll_battle_shock: unit {unit_id} not found in game_state['units']")
     ld = int(require_key(unit, "LD"))
     roll = random.randint(1, 6) + random.randint(1, 6)
@@ -2895,7 +2899,7 @@ def roll_battle_shock(unit_id: str, game_state: Dict[str, Any]) -> bool:
     append_action_log(game_state, {
         "type": "battle_shock",
         "message": msg,
-        "turn": game_state.get("turn", 0),
+        "turn": require_key(game_state, "turn"),
         "phase": "command",
         "unitId": int(unit_id),
         "player": int(unit.get("player", -1)),
@@ -3399,8 +3403,15 @@ def _attacker_model_can_reach_squad(
     if base_unit is None:
         return False
     # Rule 13.09: hidden unit only targetable within detection range (15").
-    _units = game_state.get("units", [])
-    _target_unit = next((u for u in _units if str(u.get("id")) == str(target_squad_id)), None)
+    _units = require_key(game_state, "units")
+    try:
+        _target_unit = next(u for u in _units if str(u.get("id")) == str(target_squad_id))
+    except StopIteration:
+        _target_unit = None
+    target_squad_id_str = str(target_squad_id)
+    if target_squad_id_str not in squad_models:
+        raise KeyError(f"_attacker_model_can_reach_squad: unit {target_squad_id} not in squad_models")
+    target_mids = squad_models[target_squad_id_str]
     if _target_unit and bool(_target_unit.get("hidden")):
         detection_range_subhex = (
             float(game_rules.get("detection_range", 15))
@@ -3408,14 +3419,14 @@ def _attacker_model_can_reach_squad(
         )
         _any_within = any(
             calculate_hex_distance(ac, ar, int(tm["col"]), int(tm["row"])) <= detection_range_subhex
-            for mid in squad_models.get(target_squad_id, [])
+            for mid in target_mids
             if (tm := models_cache.get(mid)) is not None
         )
         if not _any_within:
             return False
     shooter_anchor = (ac, ar)
     shooter_hexes = [shooter_anchor]
-    for mid in squad_models.get(target_squad_id, []):  # get allowed
+    for mid in target_mids:
         tm = models_cache.get(mid)
         if tm is None:
             continue
@@ -3680,7 +3691,9 @@ def squad_shoot_los_overview(
     count: Dict[str, int] = {}
     for mid in alive:
         for sid in squad_model_valid_targets(game_state, attacker_squad_id, mid):
-            count[sid] = count.get(sid, 0) + 1
+            if sid not in count:
+                count[sid] = 0
+            count[sid] += 1
     return {
         "valid_targets": list(count.keys()),
         "count_by_unit_id": count,
@@ -3991,8 +4004,9 @@ def _select_allocation_model(
     def _key(item: tuple) -> tuple:
         idx, mid = item
         e = models_cache[mid]
-        tier = ROLE_TIER.get(e.get("role"), 0)
-        return (tier, dist_cache.get(mid, 0), idx)
+        _role = e.get("role")
+        tier = ROLE_TIER[_role] if _role in ROLE_TIER else 0
+        return (tier, dist_cache[mid], idx)
 
     return min(enumerate(alive), key=_key)[1]
 
@@ -4234,6 +4248,8 @@ def _resolve_shoot_intent_pass1(
     # Seuils figes sur la 1ere fig vivante au debut de la salve (homogene : invariant
     # par fig ; hetereogene/persos = etape ulterieure avec groupes d allocation).
     _alive0 = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
+    wth = 0
+    save_th = 0
     if _alive0 and attacker_mid in models_cache:
         first_alive = models_cache[_alive0[0]]
         t_target = int(first_alive["T"])
@@ -4448,7 +4464,9 @@ def _target_majority_toughness(game_state: Dict[str, Any], target_sid: str) -> i
     counts: Dict[int, int] = {}
     for m in alive:
         t = int(models_cache[m]["T"])
-        counts[t] = counts.get(t, 0) + 1
+        if t not in counts:
+            counts[t] = 0
+        counts[t] += 1
     max_count = max(counts.values())
     return max(t for t, c in counts.items() if c == max_count)
 
@@ -4914,7 +4932,7 @@ def build_manual_shoot_allocation(game_state: Dict[str, Any], attacker_squad_id:
 def apply_manual_shoot_declare_order(game_state: Dict[str, Any], order: List[Any]) -> Dict[str, Any]:
     """Enregistre l ordre des groupes declare par le defenseur (apres les jets) puis avance.
 
-    Valide (erreur explicite, pas de fallback) : permutation des groupes vivants ;
+    Valide (erreur explicite, KeyError si invalide) : permutation des groupes vivants ;
     aucun CHARACTER avant un non-CHARACTER ; groupe non-CHARACTER blesse avant non-CHARACTER
     sain ; CHARACTER blesse avant CHARACTER sain."""
     alloc = require_key(game_state, "pending_shoot_allocation")

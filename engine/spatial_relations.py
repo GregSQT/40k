@@ -1,6 +1,6 @@
 """Shared spatial relation helpers for footprint contact and engagement checks."""
 
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, cast
 
 from engine.hex_utils import (
     _hex_center,
@@ -96,7 +96,7 @@ def _single_base_hex_count(
     if cached is None:
         # col_parity as the reference column preserves odd-q parity; row 0 is arbitrary
         # (the count is translation-invariant), matching the legacy per-call computation.
-        cached = len(compute_occupied_hexes(col_parity, 0, base_shape, base_size, orientation))
+        cached = len(compute_occupied_hexes(col_parity, 0, base_shape, cast("int | list[int]", base_size), orientation))
         _SINGLE_BASE_HEX_COUNT_CACHE[key] = cached
     return cached
 

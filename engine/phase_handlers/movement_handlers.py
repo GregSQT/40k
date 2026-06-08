@@ -1762,6 +1762,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     blocked_enemy_adjacent_count = 0
     footprint_zone: Set[Tuple[int, int]] = set()
     _off_even: Tuple[Tuple[int, int], ...] = ()
+    _off_odd: Tuple[Tuple[int, int], ...] = ()
 
     _occupied = occupied_positions
     _enemy_occ = enemy_occupied

@@ -69,7 +69,7 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Battle-shock step (règle 08.03) — avant l'activation pool
     from engine.phase_handlers.shared_utils import is_unit_at_half_strength, roll_battle_shock, is_unit_alive
     current_player = require_key(game_state, "current_player")
-    for unit in game_state.get("units", []):
+    for unit in require_key(game_state, "units"):
         if unit.get("player") != current_player:
             continue
         unit_id = str(unit["id"])

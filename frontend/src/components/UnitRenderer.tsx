@@ -78,7 +78,7 @@ interface UnitRendererProps {
   modelHps?: Array<{ HP_CUR: number; HP_MAX: number; is_character: boolean } | null>;
   /**
    * Flag "caché" (rule 13.09) par figurine, aligné index-pour-index avec modelCenters.
-   * Utilisé uniquement en mode hiddenBadgePerModel pour poser un badge sur chaque fig cachée.
+   * Utilisé uniquement en mode statusBadgePerModel pour poser un badge sur chaque fig cachée.
    */
   modelHidden?: boolean[];
   /**
@@ -87,10 +87,12 @@ interface UnitRendererProps {
    */
   hpBarPerModel?: boolean;
   /**
-   * true → un badge "caché" sur chaque figurine cachée (suit modelHidden).
-   * false (défaut) → un seul badge si toute l'escouade est cachée (unit.hidden).
+   * Option générique badges de statut (caché / fui / battle-shock).
+   * true → un badge sur chaque figurine concernée (caché suit modelHidden ; fui et
+   *        battle-shock sont au niveau unité → un badge sur chaque fig vivante).
+   * false (défaut) → un seul badge si toute l'escouade a le statut.
    */
-  hiddenBadgePerModel?: boolean;
+  statusBadgePerModel?: boolean;
   app: PIXI.Application;
   uiElementsContainer?: PIXI.Container; // Persistent container for UI elements (target logos, badges) that should never be cleaned up
   useOverlayIcons?: boolean; // Render advance/weapon icons in DOM overlay
@@ -424,7 +426,11 @@ export class UnitRenderer {
         const { uiElementsContainer } = this.props;
         if (uiElementsContainer) {
           const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
-          const prefixes = [`hidden-badge-${unitIdNum}`, `battle-shocked-${unitIdNum}`];
+          const prefixes = [
+            `hidden-badge-${unitIdNum}`,
+            `fled-badge-${unitIdNum}`,
+            `battle-shocked-${unitIdNum}`,
+          ];
           uiElementsContainer.children
             .filter(
               (child: PIXI.DisplayObject) =>
@@ -526,6 +532,7 @@ export class UnitRenderer {
     this.renderChargeRollBadge(unitIconScale);
     this.renderAdvanceRollBadge(unitIconScale);
     this.renderHiddenBadge(unitIconScale);
+    this.renderFledBadge(unitIconScale);
     this.renderBattleShockedIndicator(iconZIndex);
 
     this.props.centerX = originalCenterX;
@@ -2365,7 +2372,7 @@ export class UnitRenderer {
       targetContainer.addChild(g);
     };
 
-    if (this.props.hiddenBadgePerModel) {
+    if (this.props.statusBadgePerModel) {
       // Per-figure mode (rule 13.09) — one badge on each hidden figure (follows modelHidden).
       const centers = this.props.modelCenters;
       const flags = this.props.modelHidden;
@@ -2379,6 +2386,67 @@ export class UnitRenderer {
     // Squad mode — single badge only if the whole squad is hidden (all models).
     if (!unit.hidden) return;
     drawBadgeAt(centerX, centerY, `hidden-badge-${unitIdNum}`);
+  }
+
+  /**
+   * Badge "a fui" (units_fled) — emoji 🏃 en bas-droite de la figurine.
+   * Le statut est au niveau unité : en mode par-fig, un badge sur chaque fig vivante ;
+   * en mode escouade, un seul badge à l'ancre. Suit l'option statusBadgePerModel.
+   */
+  private renderFledBadge(unitIconScale: number): void {
+    const { unit, centerX, centerY, app, HEX_RADIUS, unitsFled, uiElementsContainer } = this.props;
+    const targetContainer = uiElementsContainer || app.stage;
+    const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
+
+    // Clean up any existing fled badge(s) for this unit (avoids stale duplicates across renders).
+    if (uiElementsContainer) {
+      const prefix = `fled-badge-${unitIdNum}`;
+      const existing = uiElementsContainer.children.filter(
+        (child: PIXI.DisplayObject) =>
+          typeof child.name === "string" &&
+          (child.name === prefix || child.name.startsWith(`${prefix}-`))
+      );
+      existing.forEach((child: PIXI.DisplayObject) => {
+        uiElementsContainer.removeChild(child);
+        if ("destroy" in child && typeof child.destroy === "function") child.destroy();
+      });
+    }
+
+    if (!unitsFled?.includes(unit.id)) return;
+
+    const r = Math.max(7, HEX_RADIUS * 0.32);
+    const scaledOffset = ((HEX_RADIUS * unitIconScale) / 2) * 0.8;
+    // Bottom-right of a figure (mirror of the bottom-left hidden badge ; no clash with the
+    // charge-roll badge since a unit that fled cannot charge).
+    const drawBadgeAt = (cx: number, cy: number, name: string): void => {
+      const badgeX = cx + scaledOffset;
+      const badgeY = cy + scaledOffset;
+      const bg = new PIXI.Graphics();
+      bg.beginFill(0x000000, 1);
+      bg.drawCircle(badgeX, badgeY, r + 2);
+      bg.endFill();
+      bg.name = `${name}-bg`;
+      bg.zIndex = 10001;
+      targetContainer.addChild(bg);
+
+      const text = new PIXI.Text("🏃", { fontSize: r * 1.6, align: "center" });
+      text.anchor.set(0.5, 0.5);
+      text.position.set(badgeX, badgeY);
+      text.name = name;
+      text.zIndex = 10002;
+      targetContainer.addChild(text);
+    };
+
+    if (this.props.statusBadgePerModel) {
+      // Per-figure mode — one badge on each living figure (fled is a unit-level status).
+      const centers = this.props.modelCenters;
+      if (!centers) return;
+      centers.forEach(([cx, cy], i) => drawBadgeAt(cx, cy, `fled-badge-${unitIdNum}-${i}`));
+      return;
+    }
+
+    // Squad mode — single badge at the unit anchor.
+    drawBadgeAt(centerX, centerY, `fled-badge-${unitIdNum}`);
   }
 
   private renderBattleShockedIndicator(iconZIndex: number): void {
@@ -2409,6 +2477,36 @@ export class UnitRenderer {
 
     if (!unit.battle_shocked) return;
 
+    // Centre-bas d'une figurine : fond noir + emoji 🌀.
+    const drawAt = (posX: number, posY: number, emojiSize: number, name: string): void => {
+      const bg = new PIXI.Graphics();
+      bg.beginFill(0x000000, 0.9);
+      bg.drawCircle(posX, posY, emojiSize * 0.55);
+      bg.endFill();
+      bg.name = `${name}-bg`;
+      bg.zIndex = iconZIndex;
+      targetContainer.addChild(bg);
+
+      const text = new PIXI.Text("🌀", { fontSize: emojiSize, align: "center" });
+      text.anchor.set(0.5, 0.5);
+      text.position.set(posX, posY);
+      text.name = name;
+      text.zIndex = iconZIndex + 1;
+      targetContainer.addChild(text);
+    };
+
+    if (this.props.statusBadgePerModel) {
+      // Per-figure mode — one emoji centred-bottom of each living figure (unit-level status).
+      const centers = this.props.modelCenters;
+      if (!centers) return;
+      const figExtentY = HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
+      const emojiSize = figExtentY * 0.7;
+      centers.forEach(([cx, cy], i) => {
+        drawAt(cx, cy + figExtentY - 0.25 * emojiSize, emojiSize, `battle-shocked-${unitIdNum}-${i}`);
+      });
+      return;
+    }
+
     const nr = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
     let bottomExtentY: number;
     if (nr) {
@@ -2422,27 +2520,7 @@ export class UnitRenderer {
     }
 
     const emojiSize = bottomExtentY * 0.7;
-    const posX = centerX;
-    const posY = centerY + bottomExtentY - 0.25 * emojiSize;
-
-    // Black circular background behind the emoji to detach it from the board.
-    const bg = new PIXI.Graphics();
-    bg.beginFill(0x000000, 0.9);
-    bg.drawCircle(posX, posY, emojiSize * 0.55);
-    bg.endFill();
-    bg.name = `battle-shocked-${unitIdNum}-bg`;
-    bg.zIndex = iconZIndex;
-    targetContainer.addChild(bg);
-
-    const text = new PIXI.Text("🌀", {
-      fontSize: emojiSize,
-      align: "center",
-    });
-    text.anchor.set(0.5, 0.5);
-    text.position.set(posX, posY);
-    text.name = `battle-shocked-${unitIdNum}`;
-    text.zIndex = iconZIndex + 1;
-    targetContainer.addChild(text);
+    drawAt(centerX, centerY + bottomExtentY - 0.25 * emojiSize, emojiSize, `battle-shocked-${unitIdNum}`);
   }
 
   private renderUnitIdDebug(iconZIndex: number): void {

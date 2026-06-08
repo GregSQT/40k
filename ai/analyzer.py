@@ -681,6 +681,7 @@ def is_within_engine_engagement_zone(
             "occupied_hexes": {pos},
             "BASE_SHAPE": "round",
             "BASE_SIZE": 1,
+            "orientation": 0,
         }
     if position_override is not None:
         hp_value = _get_unit_hp_value(unit_hp, unit_id)
@@ -693,6 +694,7 @@ def is_within_engine_engagement_zone(
             "occupied_hexes": {position_override},
             "BASE_SHAPE": "round",
             "BASE_SIZE": 1,
+            "orientation": 0,
         }
     if unit_id not in units_cache:
         return False

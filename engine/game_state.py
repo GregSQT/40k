@@ -158,8 +158,8 @@ class GameStateManager:
             "UNIT_RULES": unit_rules,
             "UNIT_KEYWORDS": unit_keywords,
             # Attached units (rule 19.01): bodyguard unit-name keywords this leader/support may attach to.
-            # Empty list for non-leader units (valid business case, not an error fallback).
-            "CAN_LEAD": copy.deepcopy(config.get("CAN_LEAD", [])),
+            # Empty list for non-leader units (valid business case: the LEADER rule is absent from their config).
+            "CAN_LEAD": copy.deepcopy(config["CAN_LEAD"] if "CAN_LEAD" in config else []),
 
             # AI_TURN.md action tracking fields
             "SHOOT_LEFT": shoot_left,
@@ -616,7 +616,7 @@ class GameStateManager:
                     "UNIT_RULES": copy.deepcopy(require_key(full_unit_data, "UNIT_RULES")),
                     "UNIT_KEYWORDS": copy.deepcopy(require_key(full_unit_data, "UNIT_KEYWORDS")),
                     # Attached units (rule 19.01): empty list for non-leader units (valid business case).
-                    "CAN_LEAD": copy.deepcopy(full_unit_data.get("CAN_LEAD", [])),
+                    "CAN_LEAD": copy.deepcopy(full_unit_data["CAN_LEAD"] if "CAN_LEAD" in full_unit_data else []),
                     "SHOOT_LEFT": shoot_left,
                     "ATTACK_LEFT": attack_left,
 

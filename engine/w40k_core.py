@@ -4191,6 +4191,7 @@ class W40KEngine(gym.Env):
             """
             build_unit_los_cache(self.game_state, squad_id)
             unit_obj = get_unit_by_id(squad_id, self.game_state)
+            assert unit_obj is not None, f"unit {squad_id} not found in game_state"
             return build_cover_by_unit_id_for_valid_targets(self.game_state, unit_obj, valid_targets)
 
         if name == "squad_shoot_activate":

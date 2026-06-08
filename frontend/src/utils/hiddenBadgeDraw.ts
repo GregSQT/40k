@@ -5,7 +5,7 @@
  *
  * `(badgeX, badgeY)` = centre du badge dans le repère local de `g`. `r` = rayon du corps.
  */
-import * as PIXI from "pixi.js-legacy";
+import type * as PIXI from "pixi.js-legacy";
 
 export function drawHiddenEyeBadge(
   g: PIXI.Graphics,

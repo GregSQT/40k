@@ -32,6 +32,7 @@ from .shared_utils import (
     get_source_unit_rule_display_name_for_effect as shared_get_source_unit_rule_display_name_for_effect,
     build_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
     _compute_unit_occupied_hexes,
+    _roll_squad_shot_sequence, wound_threshold, save_threshold,
 )
 
 # ============================================================================
@@ -1127,7 +1128,7 @@ def compute_hidden_statuses(game_state: Dict[str, Any]) -> None:
             unit["hidden"] = False
             unit["hidden_models"] = []
             continue
-        by_model = units_cache[str(unit_id)].get("occupied_hexes_by_model", {})
+        by_model = require_key(units_cache[str(unit_id)], "occupied_hexes_by_model")
         hidden_model_ids = compute_unit_hidden_models(unit, by_model, game_state, terrain_areas)
         unit["hidden_models"] = hidden_model_ids
         unit["hidden"] = len(hidden_model_ids) == len(by_model) and len(by_model) > 0
@@ -1170,7 +1171,7 @@ def preview_hidden_models_from_position(
     old_row = int(entry.get("row", norm_dest_row))
     delta_col = norm_dest_col - old_col
     delta_row = norm_dest_row - old_row
-    by_model = entry.get("occupied_hexes_by_model", {})
+    by_model = require_key(entry, "occupied_hexes_by_model")
     # Translation offset rigide des figs (cf. translate_squad_to_destination), sans mutation.
     moved_by_model = {
         mid: (int(c) + delta_col, int(r) + delta_row)
@@ -5591,3 +5592,186 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             "advance_destinations": [{"col": (norm_coords := normalize_coordinates(d[0], d[1]))[0], "row": norm_coords[1]} for d in valid_destinations],
             "highlight_color": "orange"
         }
+
+
+def _attack_sequence_rng(
+    attacker: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Séquence d'une attaque complète avec règles spéciales. Utilisé par les tests via monkeypatch de random.randint.
+
+    Ordre des jets : hit → hazardous (si HAZARDOUS) → wound (si hit) → reroll wound (si règle) → save (si wound non-critique).
+    """
+    import random
+
+    weapon_index = int(require_key(attacker, "selectedRngWeaponIndex"))
+    weapon = attacker["RNG_WEAPONS"][weapon_index]
+    weapon_rules = [r.upper() for r in (weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else [])]
+    unit_rules: List[Dict[str, Any]] = require_key(attacker, "UNIT_RULES")
+    weapon_name: str = weapon.get("display_name", weapon.get("NAME", weapon.get("name", "")))
+    attacker_id = str(attacker["id"])
+
+    # AP de base, potentiellement amélioré par closest_target_penetration
+    ap = int(weapon["AP"] if "AP" in weapon else 0)
+    ap_modifier_ability_display_name: Optional[str] = None
+    try:
+        ctp_rule = next(r for r in unit_rules if r.get("ruleId") == "closest_target_penetration")
+    except StopIteration:
+        ctp_rule = None
+    if ctp_rule:
+        pool = shooting_build_valid_target_pool(game_state, attacker_id)
+        target_id_str = str(target["id"])
+        if pool:
+            unit_by_id = require_key(game_state, "unit_by_id")
+            def _dist(uid: str) -> int:
+                if uid not in unit_by_id:
+                    raise KeyError(f"_attack_sequence_rng: unit {uid} not in unit_by_id")
+                u = unit_by_id[uid]
+                return _calculate_hex_distance(
+                    int(require_key(attacker, "col")), int(require_key(attacker, "row")),
+                    int(require_key(u, "col")), int(require_key(u, "row")),
+                )
+            closest_id = min(pool, key=_dist)
+            if closest_id == target_id_str:
+                ap = ap - 1
+                ap_modifier_ability_display_name = ctp_rule.get("displayName", "").upper()
+
+    # Stats de base
+    bs = int(weapon.get("ATK", weapon.get("BS", 4)))
+    strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))
+    dmg_raw = weapon.get("DMG", 1)
+
+    # HEAVY : réduit le seuil de touche de 1 si l'attaquant n'a pas bougé
+    has_heavy = "HEAVY" in weapon_rules
+    attacker_moved = (
+        attacker_id in game_state.get("units_moved", set())
+        or attacker_id in game_state.get("units_advanced", set())
+    )
+    hit_target_base = bs
+    hit_rule_modifier: Optional[str] = None
+    effective_bs = bs
+    if has_heavy and not attacker_moved:
+        effective_bs = max(2, bs - 1)
+        hit_rule_modifier = "HEAVY"
+    hit_target = effective_bs
+
+    # Seuils
+    wth = wound_threshold(strength, int(target["T"]))
+    save_th = save_threshold(int(target["ARMOR_SAVE"]), int(target.get("INVUL_SAVE", 7)), ap)
+
+    has_hazardous = "HAZARDOUS" in weapon_rules
+    has_devastating = "DEVASTATING_WOUNDS" in weapon_rules
+
+    def _base_result(**overrides: Any) -> Dict[str, Any]:
+        base: Dict[str, Any] = {
+            "hit_success": False, "wound_success": False, "save_success": False, "damage": 0,
+            "hit_roll": None, "hit_target": hit_target, "hit_target_base": hit_target_base,
+            "hit_rule_modifier": hit_rule_modifier,
+            "wound_roll": None, "wound_target": wth, "wound_ability_display_name": None,
+            "save_roll": 0, "save_target": save_th, "save_skipped": False, "save_skip_reason": None,
+            "critical_wound_unmodified": False, "devastating_wounds_applied": False,
+            "hazardous_test_required": has_hazardous, "hazardous_test_roll": None, "hazardous_triggered": False,
+            "ap_modifier_ability_display_name": ap_modifier_ability_display_name,
+            "weapon_name": weapon_name,
+        }
+        base.update(overrides)
+        parts = [f"HIT:{base.get('hit_roll','?')}/{hit_target}"]
+        if base.get("wound_roll") is not None:
+            parts.append(f"WOUND:{base['wound_roll']}/{wth}")
+        if base.get("save_roll"):
+            parts.append(f"SAVE:{base['save_roll']}/{save_th}")
+        parts.append(f"DMG:{base['damage']}")
+        base["attack_log"] = " ".join(parts)
+        base["devastating_wounds_flag"] = base["devastating_wounds_applied"]
+        return base
+
+    # 1. Jet de touche
+    hit_roll = random.randint(1, 6)
+
+    # 2. Jet HAZARDOUS (même en cas de miss)
+    hazardous_test_roll: Optional[int] = None
+    hazardous_triggered = False
+    if has_hazardous:
+        hazardous_test_roll = random.randint(1, 6)
+        hazardous_triggered = hazardous_test_roll == 1
+
+    hit_success = hit_roll != 1 and hit_roll >= effective_bs
+    if not hit_success:
+        return _base_result(
+            hit_success=False, hit_roll=hit_roll,
+            hazardous_test_roll=hazardous_test_roll, hazardous_triggered=hazardous_triggered,
+        )
+
+    # 3. Jet de blessure (avec reroll éventuel)
+    wound_roll = random.randint(1, 6)
+    wound_ability_display_name: Optional[str] = None
+
+    try:
+        reroll1 = next(r for r in unit_rules if r.get("ruleId") == "reroll_1_towound")
+    except StopIteration:
+        reroll1 = None
+    if reroll1 and wound_roll == 1:
+        wound_roll = random.randint(1, 6)
+        wound_ability_display_name = reroll1.get("displayName", "").upper()
+
+    wound_success_pre = wound_roll != 1 and wound_roll >= wth
+    if not wound_success_pre:
+        try:
+            reroll_obj = next(r for r in unit_rules if r.get("ruleId") == "reroll_towound_target_on_objective")
+        except StopIteration:
+            reroll_obj = None
+        if reroll_obj:
+            target_col, target_row = int(target.get("col", -1)), int(target.get("row", -1))
+            on_obj = any(
+                [target_col, target_row] == list(h)[:2]
+                for obj in require_key(game_state, "objectives")
+                for h in require_key(obj, "hexes")
+            )
+            if on_obj:
+                wound_roll = random.randint(1, 6)
+                wound_ability_display_name = reroll_obj.get("displayName", "").upper()
+
+    wound_success = wound_roll != 1 and wound_roll >= wth
+    critical_wound = wound_roll == 6
+
+    if not wound_success:
+        return _base_result(
+            hit_success=True, hit_roll=hit_roll,
+            wound_roll=wound_roll, wound_ability_display_name=wound_ability_display_name,
+            critical_wound_unmodified=critical_wound,
+            hazardous_test_roll=hazardous_test_roll, hazardous_triggered=hazardous_triggered,
+        )
+
+    # 4. DEVASTATING_WOUNDS : blessure critique (6) → save sauté
+    if has_devastating and critical_wound:
+        try:
+            dmg = resolve_dice_value(dmg_raw, f"attack_seq_dmg_{attacker_id}")
+        except Exception:
+            dmg = int(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1
+        return _base_result(
+            hit_success=True, wound_success=True, save_success=False, damage=dmg,
+            hit_roll=hit_roll,
+            wound_roll=wound_roll, wound_ability_display_name=wound_ability_display_name,
+            save_roll=0, save_skipped=True, save_skip_reason="DEVASTATING_WOUNDS",
+            critical_wound_unmodified=True, devastating_wounds_applied=True,
+            hazardous_test_roll=hazardous_test_roll, hazardous_triggered=hazardous_triggered,
+        )
+
+    # 5. Jet de sauvegarde
+    save_roll = random.randint(1, 6)
+    save_success = save_roll != 1 and save_roll >= save_th
+
+    damage = 0
+    if not save_success:
+        try:
+            damage = resolve_dice_value(dmg_raw, f"attack_seq_dmg_{attacker_id}")
+        except Exception:
+            damage = int(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1
+
+    return _base_result(
+        hit_success=True, wound_success=True, save_success=save_success, damage=damage,
+        hit_roll=hit_roll,
+        wound_roll=wound_roll, wound_ability_display_name=wound_ability_display_name,
+        save_roll=save_roll, save_skipped=False,
+        critical_wound_unmodified=critical_wound, devastating_wounds_applied=False,
+        hazardous_test_roll=hazardous_test_roll, hazardous_triggered=hazardous_triggered,
+    )

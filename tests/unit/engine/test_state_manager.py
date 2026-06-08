@@ -41,7 +41,7 @@ def _raw_unit(uid: int, player: int, value: int = 100) -> Dict[str, Any]:
             "HP_CUR": 3, "HP_MAX": 3, "VALUE": value, "OC": 1,
             "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
             "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
-            "RNG_WEAPONS": [], "CC_WEAPONS": [],
+            "RNG_WEAPONS": [], "CC_WEAPONS": [], "UNIT_RULES": [],
             "BASE_SHAPE": "round", "BASE_SIZE": 1}
 
 

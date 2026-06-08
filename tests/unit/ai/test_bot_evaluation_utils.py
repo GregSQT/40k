@@ -429,7 +429,7 @@ def test_collect_parallel_results_with_timeouts_aborts_pool_on_hung_task(
             return {done_future}, {hung_future}
         return set(), {hung_future}
 
-    monotonic_values = chain([0.0, 2.0], repeat(2.0))  # keep returning timed-out clock value
+    monotonic_values = chain([0.0, 0.0, 2.0], repeat(2.0))  # 2 starts at 0.0 (order-independent), then now=2.0
     monkeypatch.setattr(be, "wait", _fake_wait)
     monkeypatch.setattr(be.time, "monotonic", lambda: next(monotonic_values))
 
