@@ -22,7 +22,7 @@ from engine.phase_handlers.shared_utils import (
     get_unit_position, require_unit_position,
     unit_has_rule_effect,
     # PR4 4a: nouveau pipeline d observation squad
-    get_engagement_range_subhex, get_fighting_models,
+    get_fighting_models,
     wound_threshold, save_threshold,
     BASE_TO_BASE_SUBHEX,
 )
@@ -1450,16 +1450,12 @@ class ObservationBuilder:
             (sid for sid, e in units_cache.items() if int(e["player"]) != active_player),
             key=lambda s: str(s)
         )
-        er_threshold = get_engagement_range_subhex(game_state)
-        # ER zone des alliés (pour is_locked_by_friendly_er)
-        ally_positions: List[Tuple[int, int]] = []
-        for sid, e in units_cache.items():
-            if int(e["player"]) != active_player:
-                continue
-            for mid in squad_models.get(sid, []):  # get allowed
-                m = models_cache.get(mid)
-                if m is not None:
-                    ally_positions.append((int(m["col"]), int(m["row"])))
+        # Entrees alliees (pour is_locked_by_friendly_er, mesure bord-a-bord)
+        from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
+        ez = get_engagement_zone(game_state)
+        ally_entries: List[Dict[str, Any]] = [
+            e for sid, e in units_cache.items() if int(e["player"]) == active_player
+        ]
         # Pour value_over_ttk et threat_level : utiliser arme RNG[0] de l active squad
         active_sample_weapon: Optional[Dict[str, Any]] = None
         if alive_mids:
@@ -1484,14 +1480,11 @@ class ObservationBuilder:
             obs[base + 3] = max(-1.0, min(1.0, (int(e_entry["row"]) - cy) / pr))
             obs[base + 4] = min(1.0, int(e_sq.get("oc_total", 0)) / 10.0)  # get allowed
             obs[base + 5] = 1.0  # slot_mask (alive)
-            # is_locked_by_friendly_er : au moins une fig de e en ER d un allié
-            is_locked = False
-            for em in e_mids:
-                mm = models_cache[em]
-                ec_, er_ = int(mm["col"]), int(mm["row"])
-                if any(calculate_hex_distance(ec_, er_, ac, ar) <= er_threshold for ac, ar in ally_positions):
-                    is_locked = True
-                    break
+            # is_locked_by_friendly_er : l escouade ennemie est dans l ER (bord-a-bord)
+            # d au moins une escouade alliee.
+            is_locked = any(
+                unit_entries_within_engagement_zone(e_entry, ae, ez) for ae in ally_entries
+            )
             obs[base + 6] = 1.0 if is_locked else 0.0
             # value_over_ttk = VALUE_cible / TTK, normalise (cap a 1.0)
             value_over_ttk = 0.0

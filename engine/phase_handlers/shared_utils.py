@@ -2192,12 +2192,6 @@ def maybe_resolve_reactive_move(
 BASE_TO_BASE_SUBHEX = 1
 
 
-def get_engagement_range_subhex(game_state: Dict[str, Any]) -> int:
-    """Engagement Range = 2" horizontal (V11).
-    Retourne le seuil ER en subhexes pour l echelle du scenario."""
-    return 2 * int(require_key(game_state, "inches_to_subhex"))
-
-
 def get_coherency_subhex(game_state: Dict[str, Any]) -> int:
     """Unit Coherency = 2" horizontal (regle officielle).
     Retourne le seuil coherency en subhexes pour l echelle du scenario."""
@@ -2208,13 +2202,6 @@ def is_base_to_base(col_a: int, row_a: int, col_b: int, row_b: int) -> bool:
     """B2B: hexes directement adjacents (distance hex == 1).
     Strictement plus contraignant que l Engagement Range."""
     return calculate_hex_distance(col_a, row_a, col_b, row_b) == BASE_TO_BASE_SUBHEX
-
-
-def is_in_engagement_range(
-    col_a: int, row_a: int, col_b: int, row_b: int, game_state: Dict[str, Any]
-) -> bool:
-    """ER: distance <= 1" horizontal."""
-    return calculate_hex_distance(col_a, row_a, col_b, row_b) <= get_engagement_range_subhex(game_state)
 
 
 # ============================================================================
@@ -3027,6 +3014,33 @@ def _squad_model_positions(game_state: Dict[str, Any], squad_id: str) -> List[Tu
     return out
 
 
+def _synth_model_entry(
+    game_state: Dict[str, Any], squad_id: str, col: int, row: int
+) -> Dict[str, Any]:
+    """Entree units_cache synthetique pour UNE figurine du squad placee en (col,row).
+
+    Reutilise la geometrie de base du squad (BASE_SHAPE/BASE_SIZE/orientation) pour
+    tester l engagement bord-a-bord (unit_entries_within_engagement_zone) sur une
+    position candidate, sans muter le cache. Entree complete (orientation + player
+    inclus) pour rester valide quelle que soit la branche de la primitive."""
+    from engine.hex_utils import compute_occupied_hexes
+    entry = game_state.get("units_cache", {}).get(str(squad_id), {})  # get allowed
+    shape = require_key(entry, "BASE_SHAPE")
+    size = require_key(entry, "BASE_SIZE")
+    orient = int(require_key(entry, "orientation"))
+    fp = compute_occupied_hexes(int(col), int(row), shape, size, orient)
+    return {
+        "id": f"_synth_{squad_id}",
+        "player": int(entry.get("player", -1)),  # get allowed
+        "col": int(col),
+        "row": int(row),
+        "occupied_hexes": set(fp),
+        "BASE_SHAPE": shape,
+        "BASE_SIZE": size,
+        "orientation": orient,
+    }
+
+
 CHARGE_THRESHOLD_INCHES = 12
 
 
@@ -3054,18 +3068,16 @@ def charge_check_eligibility(
     if not our_positions:
         return False
     ish = int(require_key(game_state, "inches_to_subhex"))
-    er_dist = get_engagement_range_subhex(game_state)
     threshold_12 = CHARGE_THRESHOLD_INCHES * ish
 
     # Position ennemies (tous)
-    units_cache = game_state.get("units_cache", {})  # get allowed
-    our_player = int(units_cache.get(str(squad_id), {}).get("player", -1))  # get allowed
     enemy_positions: List[Tuple[int, int]] = []
     for tsid in target_squad_ids:
         enemy_positions.extend(_squad_model_positions(game_state, str(tsid)))
     if not enemy_positions:
         return False
-    # 12" check
+    # 12" check (portee de charge, mesure figurine la plus proche — distance centre,
+    # independante de l engagement_zone)
     in_range = False
     for oc, orow in our_positions:
         for ec, er in enemy_positions:
@@ -3076,14 +3088,9 @@ def charge_check_eligibility(
             break
     if not in_range:
         return False
-    # Locked check (au moins une fig dans l ER d un ennemi quelconque)
-    all_enemy_positions: List[Tuple[int, int]] = []
-    for esid in _enemy_squad_ids(game_state, our_player):
-        all_enemy_positions.extend(_squad_model_positions(game_state, esid))
-    for oc, orow in our_positions:
-        for ec, er in all_enemy_positions:
-            if calculate_hex_distance(oc, orow, ec, er) <= er_dist:
-                return False
+    # Locked check : interdit si deja dans l ER (bord-a-bord) d un ennemi quelconque.
+    if _squad_is_in_enemy_er(game_state, str(squad_id)):
+        return False
     return True
 
 
@@ -3116,15 +3123,21 @@ def _hex_legal_for_charge(
         occ = entry.get("occupied_hexes")
         if occ and cell in occ:
             return False
-    # ER des escouades non-cibles
+    # ER des escouades non-cibles (bord-a-bord) : la figurine candidate ne doit pas
+    # finir dans l ER d un ennemi NON-cible.
+    from engine.spatial_relations import unit_entries_within_engagement_zone
     our_player = int(units_cache.get(str(squad_id), {}).get("player", -1))  # get allowed
-    er_dist = get_engagement_range_subhex(game_state)
+    ez = get_engagement_zone(game_state)
+    synth = _synth_model_entry(game_state, str(squad_id), col, row)
+    targets = {str(t) for t in target_squad_ids}
     for esid in _enemy_squad_ids(game_state, our_player):
-        if esid in [str(t) for t in target_squad_ids]:
+        if esid in targets:
             continue
-        for ec, er in _squad_model_positions(game_state, esid):
-            if calculate_hex_distance(col, row, ec, er) <= er_dist:
-                return False
+        enemy_entry = units_cache.get(esid)
+        if enemy_entry is None:
+            continue
+        if unit_entries_within_engagement_zone(synth, enemy_entry, ez):
+            return False
     return True
 
 
@@ -3153,13 +3166,13 @@ def charge_build_valid_plan(
         return None
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
+    units_cache = game_state.get("units_cache", {})  # get allowed
     mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
     if not mids:
         return None
 
     ish = int(require_key(game_state, "inches_to_subhex"))
     budget = int(charge_roll) * ish
-    er_threshold = get_engagement_range_subhex(game_state)
 
     # Toutes les positions de figurines cibles
     target_positions: List[Tuple[int, int]] = []
@@ -3227,13 +3240,16 @@ def charge_build_valid_plan(
         plan.append((mid, picked[0], picked[1]))
         occupied_after.add(picked)
 
-    # Validation finale : ER pour chaque fig
+    # Validation finale : chaque fig finit dans l ER (bord-a-bord) d au moins un
+    # modele cible (regle officielle : charge legale exige ER apres deplacement).
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    ez = get_engagement_zone(game_state)
+    target_entries = [
+        te for te in (units_cache.get(str(t)) for t in target_squad_ids) if te is not None
+    ]
     for mid, nc, nr in plan:
-        in_er = any(
-            calculate_hex_distance(nc, nr, tc, tr) <= er_threshold
-            for tc, tr in target_positions
-        )
-        if not in_er:
+        synth = _synth_model_entry(game_state, str(squad_id), nc, nr)
+        if not any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
             return None
 
     # Coherency finale
@@ -5092,21 +5108,8 @@ def _squad_is_in_fight(game_state: Dict[str, Any], squad_id: str) -> bool:
     """
     if squad_id in game_state.get("units_charged", set()):
         return True
-    units_cache = game_state.get("units_cache", {})  # get allowed
-    our_entry = units_cache.get(squad_id)
-    if our_entry is None:
-        return False
-    our_player = int(our_entry.get("player", -1))
-    er = get_engagement_range_subhex(game_state)
-    our_positions = _squad_model_positions(game_state, squad_id)
-    if not our_positions:
-        return False
-    for esid in _enemy_squad_ids(game_state, our_player):
-        for tc, tr in _squad_model_positions(game_state, esid):
-            for oc, orow in our_positions:
-                if calculate_hex_distance(oc, orow, tc, tr) <= er:
-                    return True
-    return False
+    # ER bord-a-bord : au moins une figurine dans l ER d une unite ennemie.
+    return _squad_is_in_enemy_er(game_state, str(squad_id))
 
 
 def squad_fight_activation_order(
@@ -5215,7 +5218,6 @@ def fight_pile_in_plan(
 
     ish = int(require_key(game_state, "inches_to_subhex"))
     pile_in_budget = 3 * ish  # 3" en subhexes
-    er_threshold = get_engagement_range_subhex(game_state)
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
     wall_hexes = game_state.get("wall_hexes", set())
@@ -5308,13 +5310,20 @@ def fight_pile_in_plan(
     plan_positions = {mid: (c, r) for mid, c, r in plan}
     if not _validate_plan_coherency(plan_positions, game_state):
         return None
-    in_er_count = 0
+    # Au moins une figurine doit finir dans l ER (bord-a-bord) d une unite ennemie.
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    ez = get_engagement_zone(game_state)
+    enemy_entries = [
+        e for e in (units_cache.get(esid) for esid in _enemy_squad_ids(game_state, our_player))
+        if e is not None
+    ]
+    in_er = False
     for mid, c, r in plan:
-        for ec, er in enemy_positions:
-            if calculate_hex_distance(c, r, ec, er) <= er_threshold:
-                in_er_count += 1
-                break
-    if in_er_count == 0:
+        synth = _synth_model_entry(game_state, str(squad_id), c, r)
+        if any(unit_entries_within_engagement_zone(synth, ee, ez) for ee in enemy_entries):
+            in_er = True
+            break
+    if not in_er:
         return None
     return plan
 
@@ -5338,14 +5347,19 @@ def get_fighting_models(game_state: Dict[str, Any], squad_id: str) -> List[str]:
         return []
     units_cache = game_state.get("units_cache", {})  # get allowed
     our_player = int(units_cache.get(squad_id, {}).get("player", -1))  # get allowed
-    er_threshold = get_engagement_range_subhex(game_state)
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    ez = get_engagement_zone(game_state)
     enemy_positions: List[Tuple[int, int]] = []
+    enemy_entries: List[Dict[str, Any]] = []
     for esid in _enemy_squad_ids(game_state, our_player):
         enemy_positions.extend(_squad_model_positions(game_state, esid))
+        ee = units_cache.get(esid)
+        if ee is not None:
+            enemy_entries.append(ee)
     if not enemy_positions:
         return []
 
-    # Pre-calcule : pour chaque fig, est-elle en ER d un ennemi ? + position
+    # Pre-calcule : pour chaque fig, est-elle en ER (bord-a-bord) d un ennemi ? + position
     positions: Dict[str, Tuple[int, int]] = {}
     in_er: Dict[str, bool] = {}
     b2b_enemy: Dict[str, bool] = {}
@@ -5353,9 +5367,9 @@ def get_fighting_models(game_state: Dict[str, Any], squad_id: str) -> List[str]:
         m = models_cache[mid]
         pos = (int(m["col"]), int(m["row"]))
         positions[mid] = pos
+        synth = _synth_model_entry(game_state, str(squad_id), pos[0], pos[1])
         in_er[mid] = any(
-            calculate_hex_distance(pos[0], pos[1], ec, er) <= er_threshold
-            for ec, er in enemy_positions
+            unit_entries_within_engagement_zone(synth, ee, ez) for ee in enemy_entries
         )
         b2b_enemy[mid] = any(
             calculate_hex_distance(pos[0], pos[1], ec, er) == BASE_TO_BASE_SUBHEX
@@ -5636,14 +5650,17 @@ def squad_consolidate_plan(
         return None
     our_player = int(our_entry.get("player", -1))
     enemy_positions: List[Tuple[int, int]] = []
+    enemy_entries: List[Dict[str, Any]] = []
     for esid in _enemy_squad_ids(game_state, our_player):
         enemy_positions.extend(_squad_model_positions(game_state, esid))
+        ee = units_cache.get(esid)
+        if ee is not None:
+            enemy_entries.append(ee)
     if not enemy_positions:
         return None  # plus d ennemi → consolidation (2) seulement, deferree
 
     ish = int(require_key(game_state, "inches_to_subhex"))
     budget = 3 * ish
-    er_threshold = get_engagement_range_subhex(game_state)
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
     wall_hexes = game_state.get("wall_hexes", set())
@@ -5705,8 +5722,15 @@ def squad_consolidate_plan(
     plan_positions = {mid: (c, r) for mid, c, r in plan}
     if not _validate_plan_coherency(plan_positions, game_state):
         return None
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    ez = get_engagement_zone(game_state)
     in_er = any(
-        any(calculate_hex_distance(c, r, ec, er) <= er_threshold for ec, er in enemy_positions)
+        any(
+            unit_entries_within_engagement_zone(
+                _synth_model_entry(game_state, str(squad_id), c, r), ee, ez
+            )
+            for ee in enemy_entries
+        )
         for _, c, r in plan
     )
     if not in_er:
@@ -5750,22 +5774,20 @@ SQUAD_ACTION_FIGHT = 25
 
 
 def _squad_is_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:
-    """True si AU MOINS UNE figurine du squad est dans l ER d une fig ennemie."""
+    """True si AU MOINS UNE figurine du squad est dans l ER (bord-a-bord) d une fig ennemie.
+
+    Delegue a la primitive canonique d engagement (unit_within_engagement_zone_footprints :
+    empreintes multi-fig + socles ronds euclidien), exactement comme les handlers
+    shoot/fight/charge unit-level. Remplace l ancienne mesure centre-a-centre qui
+    sous-detectait l engagement pour des bases ecartees (regle 03.04 : 2" entre figurines)."""
+    from engine.spatial_relations import unit_within_engagement_zone_footprints
     units_cache = game_state.get("units_cache", {})  # get allowed
-    entry = units_cache.get(squad_id)
+    entry = units_cache.get(str(squad_id))
     if entry is None:
         return False
-    our_player = int(entry.get("player", -1))
-    er = get_engagement_range_subhex(game_state)
-    our_pos = _squad_model_positions(game_state, squad_id)
-    if not our_pos:
-        return False
-    for esid in _enemy_squad_ids(game_state, our_player):
-        for ec, er_pos in _squad_model_positions(game_state, esid):
-            for oc, orow in our_pos:
-                if calculate_hex_distance(oc, orow, ec, er_pos) <= er:
-                    return True
-    return False
+    ez = get_engagement_zone(game_state)
+    stub = {"id": str(squad_id), "player": int(entry.get("player", -1))}
+    return unit_within_engagement_zone_footprints(game_state, stub, ez, max_distance=ez)
 
 
 def _squad_direction_move_legal(
@@ -5878,19 +5900,18 @@ def build_squad_action_mask(
             for slot_i, esid in enumerate(enemy_slot_ids):
                 if esid is None or esid not in units_cache:
                     continue
-                er = get_engagement_range_subhex(game_state)
-                e_pos = _squad_model_positions(game_state, esid)
-                ally_pos: List[Tuple[int, int]] = []
-                for sid, e in units_cache.items():
-                    if int(e["player"]) != our_player:
-                        continue
-                    if str(sid) == squad_id:
-                        continue
-                    ally_pos.extend(_squad_model_positions(game_state, str(sid)))
-                locked_by_ally = any(
-                    any(calculate_hex_distance(ec, er_, ac, ar) <= er for ac, ar in ally_pos)
-                    for ec, er_ in e_pos
-                )
+                # Ennemi verrouille par un allie (bord-a-bord) => pas ciblable au tir.
+                from engine.spatial_relations import unit_entries_within_engagement_zone
+                ez = get_engagement_zone(game_state)
+                enemy_entry = units_cache.get(esid)
+                locked_by_ally = False
+                if enemy_entry is not None:
+                    for sid, e in units_cache.items():
+                        if int(e["player"]) != our_player or str(sid) == squad_id:
+                            continue
+                        if unit_entries_within_engagement_zone(enemy_entry, e, ez):
+                            locked_by_ally = True
+                            break
                 if locked_by_ally:
                     continue
                 models_cache = game_state.get("models_cache", {})  # get allowed

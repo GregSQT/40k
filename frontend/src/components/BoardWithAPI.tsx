@@ -2955,6 +2955,133 @@ export const BoardWithAPI: React.FC = () => {
         <div className="turn-phase-tracker-right">Loading game configuration...</div>
       )}
 
+      {/* Boutons Cancel / Validate du squad move / shoot par-figurine (déplacés du board). */}
+      {apiProps.mode === "squadModelMove" &&
+        apiProps.squadMovePlan &&
+        apiProps.squadMovePlan.activeModelId === null && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              background: "#1f2937",
+              border: "1px solid #555",
+              borderRadius: "8px",
+              padding: 8,
+              marginTop: -6,
+              marginBottom: 2,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                if (!isGameOver) apiProps.onCancelSquadMove?.();
+              }}
+              style={{
+                border: "1px solid rgba(255,255,255,0.28)",
+                borderRadius: 6,
+                background: "rgba(75,85,99,0.92)",
+                color: "#e5e7eb",
+                cursor: "pointer",
+                fontSize: 14,
+                fontWeight: 700,
+                padding: "8px 14px",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!apiProps.squadMovePlan.canValidate}
+              onClick={() => {
+                if (!isGameOver) apiProps.onCommitSquadMovePlan?.();
+              }}
+              style={{
+                border: "1px solid rgba(255,255,255,0.28)",
+                borderRadius: 6,
+                background: apiProps.squadMovePlan.canValidate
+                  ? "rgba(22,163,74,0.95)"
+                  : "rgba(75,85,99,0.55)",
+                color: apiProps.squadMovePlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+                cursor: apiProps.squadMovePlan.canValidate ? "pointer" : "not-allowed",
+                fontSize: 14,
+                fontWeight: 700,
+                padding: "8px 14px",
+              }}
+            >
+              Validate
+            </button>
+          </div>
+        )}
+      {apiProps.mode === "squadModelShoot" && apiProps.squadShootPlan && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            background: "#1f2937",
+            border: "1px solid #555",
+            borderRadius: "8px",
+            padding: 8,
+            marginTop: -6,
+            marginBottom: 2,
+          }}
+        >
+          <span
+            style={{
+              color: "#e5e7eb",
+              fontSize: 13,
+              fontWeight: 600,
+              background: "rgba(17,24,39,0.8)",
+              borderRadius: 6,
+              padding: "6px 10px",
+            }}
+          >
+            {Object.keys(apiProps.squadShootPlan.targets).length}/
+            {apiProps.squadShootPlan.models.length} figs assignées
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              if (!isGameOver) apiProps.onCancelSquadShoot?.();
+            }}
+            style={{
+              border: "1px solid rgba(255,255,255,0.28)",
+              borderRadius: 6,
+              background: "rgba(75,85,99,0.92)",
+              color: "#e5e7eb",
+              cursor: "pointer",
+              fontSize: 14,
+              fontWeight: 700,
+              padding: "8px 14px",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!apiProps.squadShootPlan.canValidate}
+            onClick={() => {
+              if (!isGameOver) apiProps.onCommitSquadShoot?.();
+            }}
+            style={{
+              border: "1px solid rgba(255,255,255,0.28)",
+              borderRadius: 6,
+              background: apiProps.squadShootPlan.canValidate
+                ? "rgba(22,163,74,0.95)"
+                : "rgba(75,85,99,0.55)",
+              color: apiProps.squadShootPlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+              cursor: apiProps.squadShootPlan.canValidate ? "pointer" : "not-allowed",
+              fontSize: 14,
+              fontWeight: 700,
+              padding: "8px 14px",
+            }}
+          >
+            Tirer
+          </button>
+        </div>
+      )}
+
       {/* AI Status Display */}
       {isAiMode &&
         (() => {
@@ -3463,6 +3590,7 @@ export const BoardWithAPI: React.FC = () => {
               isGameOver ? () => {} : apiProps.onBumpMovePreviewOrientation
             }
             squadMovePlan={apiProps.squadMovePlan}
+            fleePreviewUnitId={apiProps.fleePreviewUnitId}
             squadMoveModelPoolRef={apiProps.squadMoveModelPoolRef}
             squadMoveModelMaskLoopsRef={apiProps.squadMoveModelMaskLoopsRef}
             onStartSquadModelMove={isGameOver ? async () => {} : apiProps.onStartSquadModelMove}

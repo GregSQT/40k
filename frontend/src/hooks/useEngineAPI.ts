@@ -484,10 +484,22 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     perModelValid: Record<string, boolean>;
     coherencyOk: boolean;
     canValidate: boolean;
+    /** Escouade actuellement engagée → tout commit = Fall Back (badge fui en preview). */
+    wouldFlee: boolean;
   } | null>(null);
   /** Ref miroir de squadMovePlan pour accès synchrone dans les callbacks. */
   const squadMovePlanRef = useRef<typeof squadMovePlan>(null);
   squadMovePlanRef.current = squadMovePlan;
+  /**
+   * Unité dont le move en cours est un Fall Back (badge fui en preview). État STABLE,
+   * découplé de squadMovePlan (qui churne et effacerait le badge entre deux rendus).
+   * Posé quand le dry-run renvoie would_flee=true ; effacé à la sortie du mode move.
+   */
+  const [fleePreviewUnitId, setFleePreviewUnitId] = useState<number | null>(null);
+  // Le badge "fui" en preview ne vit que pendant le mode plan de move : clear à la sortie.
+  useEffect(() => {
+    if (mode !== "squadModelMove") setFleePreviewUnitId(null);
+  }, [mode]);
   /** Pool BFS (hexes atteignables) de la figurine en cours de repositionnement. */
   const squadMoveModelPoolRef = useRef<Set<string>>(new Set());
   /** Incrémenté à chaque nouvelle session squad move. Invalide les callbacks onSelectModelForMove obsolètes. */
@@ -3349,9 +3361,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const perModelValid = (result?.per_model ?? {}) as Record<string, boolean>;
       const coherencyOk = result?.coherency_ok === true;
       const canValidate = result?.can_validate === true;
+      const wouldFlee = result?.would_flee === true;
+      // État stable découplé : posé dès que le backend détecte l'engagement, jamais
+      // remis à null ici (le clear est fait à la sortie du mode move) → pas de clignotement.
+      if (wouldFlee) setFleePreviewUnitId(unitId);
       setSquadMovePlan((prev) =>
         prev && prev.unitId === unitId
-          ? { ...prev, perModelValid, coherencyOk, canValidate }
+          ? { ...prev, perModelValid, coherencyOk, canValidate, wouldFlee }
           : prev
       );
     },
@@ -3369,7 +3385,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
       squadMoveSessionRef.current += 1;
       squadMoveModelPoolRef.current = new Set();
-      setSquadMovePlan({
+      setSquadMovePlan((prev) => ({
         unitId: uid,
         models,
         originModels: { ...models },
@@ -3377,7 +3393,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         perModelValid: {},
         coherencyOk: true,
         canValidate: false,
-      });
+        // Préserver wouldFlee sur ré-init de la même unité (sinon clignotement → badge effacé).
+        wouldFlee: prev?.unitId === uid ? prev.wouldFlee : false,
+      }));
       setMode("squadModelMove");
       setSelectedUnitId(uid);
       await refreshSquadMovePlanValidity(uid, models);
@@ -4090,7 +4108,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           if (Object.keys(models).length > 0) {
             squadMoveSessionRef.current += 1;
             squadMoveModelPoolRef.current = new Set();
-            setSquadMovePlan({
+            setSquadMovePlan((prev) => ({
               unitId: uid,
               models,
               originModels: { ...models },
@@ -4098,7 +4116,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               perModelValid: {},
               coherencyOk: true,
               canValidate: false,
-            });
+              // Préserver wouldFlee sur ré-init de la même unité (sinon clignotement → badge effacé).
+              wouldFlee: prev?.unitId === uid ? prev.wouldFlee : false,
+            }));
             setSelectedUnitId(uid);
             setMode("squadModelMove");
             void refreshSquadMovePlanValidity(uid, models);
@@ -4988,6 +5008,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onDirectMove: () => {},
       onBumpMovePreviewOrientation: () => {},
       squadMovePlan: null,
+      fleePreviewUnitId: null,
       squadMoveModelPoolRef,
       squadMoveModelMaskLoopsRef,
       onStartSquadModelMove: async () => {},
@@ -5113,6 +5134,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onBumpMovePreviewOrientation: handleBumpMovePreviewOrientation,
     // Move par-figurine (squad.md brique 3)
     squadMovePlan,
+    fleePreviewUnitId,
     squadMoveModelPoolRef,
     squadMoveModelMaskLoopsRef,
     onStartSquadModelMove: handleStartSquadModelMove,

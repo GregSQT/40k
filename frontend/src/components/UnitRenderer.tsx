@@ -24,6 +24,7 @@ import {
   resolveBaseSizeForUnitDisplay,
 } from "../utils/hexFootprint";
 import { drawHiddenEyeBadge } from "../utils/hiddenBadgeDraw";
+import { drawFledRunnerBadge } from "../utils/fledBadgeDraw";
 import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 import {
   getHpBarWidthBase,
@@ -2421,20 +2422,11 @@ export class UnitRenderer {
     const drawBadgeAt = (cx: number, cy: number, name: string): void => {
       const badgeX = cx + scaledOffset;
       const badgeY = cy + scaledOffset;
-      const bg = new PIXI.Graphics();
-      bg.beginFill(0x000000, 1);
-      bg.drawCircle(badgeX, badgeY, r + 2);
-      bg.endFill();
-      bg.name = `${name}-bg`;
-      bg.zIndex = 10001;
-      targetContainer.addChild(bg);
-
-      const text = new PIXI.Text("🏃", { fontSize: r * 1.6, align: "center" });
-      text.anchor.set(0.5, 0.5);
-      text.position.set(badgeX, badgeY);
-      text.name = name;
-      text.zIndex = 10002;
-      targetContainer.addChild(text);
+      const g = new PIXI.Graphics();
+      drawFledRunnerBadge(g, badgeX, badgeY, r);
+      g.name = name;
+      g.zIndex = 10001;
+      targetContainer.addChild(g);
     };
 
     if (this.props.statusBadgePerModel) {

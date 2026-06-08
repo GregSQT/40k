@@ -2269,10 +2269,15 @@ def movement_preview_move_plan(
 
     coherency_ok = not any(cohesion_red)
     all_valid = len(per_model) > 0 and all(per_model.values())
+    # would_flee : l escouade est-elle actuellement engagee (positions PRE-move) ? Si oui,
+    # tout commit sera un Fall Back => badge fui sur le ghost de preview. Independant du plan
+    # (meme primitive bord-a-bord que le commit, cf was_engaged dans le handler de commit).
+    would_flee = _squad_is_in_enemy_er(game_state, str(squad_id))
     return {
         "per_model": per_model,
         "coherency_ok": coherency_ok,
         "can_validate": bool(all_valid),
+        "would_flee": bool(would_flee),
     }
 
 

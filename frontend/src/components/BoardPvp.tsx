@@ -413,7 +413,10 @@ type BoardProps = {
     perModelValid: Record<string, boolean>;
     coherencyOk: boolean;
     canValidate: boolean;
+    wouldFlee: boolean;
   } | null;
+  /** Unité dont le move en cours est un Fall Back → badge fui sur son ghost de preview. */
+  fleePreviewUnitId?: number | null;
   /** Pool BFS (hexes atteignables) de la figurine en cours de repositionnement. */
   squadMoveModelPoolRef?: React.RefObject<Set<string>>;
   /** Mask loops per-fig (polygone lissé) reçus de move_model_destinations. */
@@ -738,6 +741,7 @@ export default function Board({
   onDirectMove,
   onBumpMovePreviewOrientation,
   squadMovePlan = null,
+  fleePreviewUnitId = null,
   squadMoveModelPoolRef,
   squadMoveModelMaskLoopsRef,
   onStartSquadModelMove,
@@ -5789,7 +5793,7 @@ export default function Board({
             .map((d) => `${d.model_id}.${d.weapon_index}>${d.target_unit_id}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -6425,6 +6429,16 @@ export default function Board({
                 } as Unit)
               : unit;
 
+        // Badge "fui" en preview : l'unité dont le move en cours est un Fall Back (état stable
+        // fleePreviewUnitId, découplé de squadMovePlan qui churne) → on l'injecte dans unitsFled
+        // pour TOUS ses rendus (ghost ou non), même si units_fled backend n'est peuplé qu'au commit.
+        const unitsFledForRender =
+          fleePreviewUnitId != null &&
+          Number(fleePreviewUnitId) === Number(unit.id) &&
+          !unitsFled?.includes(Number(unit.id))
+            ? [...(unitsFled ?? []), Number(unit.id)]
+            : unitsFled;
+
         renderUnit({
           unit: unitToRender,
           centerX: anchorCenterX,
@@ -6465,7 +6479,7 @@ export default function Board({
           unitsMoved,
           unitsCharged,
           unitsAttacked,
-          unitsFled,
+          unitsFled: unitsFledForRender,
           fightSubPhase,
           fightActivePlayer,
           gameState,
@@ -7492,6 +7506,7 @@ export default function Board({
     blinkingLosOverviewUnitId,
     objectiveControlOverride,
     squadMovePlan,
+    fleePreviewUnitId,
     squadMoveModelPoolRef,
     squadMoveModelMaskLoopsRef?.current,
     squadShootPlan,
@@ -7612,31 +7627,6 @@ export default function Board({
       })()
     : [];
 
-  const squadMoveButtonTop = (() => {
-    if (!boardConfig || !squadMovePlan || !boardViewportSize) return undefined;
-    const HEX_HEIGHT = Math.sqrt(3) * boardConfig.hex_radius;
-    const models = Object.values(squadMovePlan.models);
-    if (models.length === 0) return undefined;
-    const maxRow = Math.max(...models.map((m) => m.row));
-    const col = (models.find((m) => m.row === maxRow) ?? models[0]).col;
-    const unitBottomY =
-      maxRow * HEX_HEIGHT + (col % 2) * (HEX_HEIGHT / 2) + HEX_HEIGHT + boardConfig.margin;
-    return Math.min(unitBottomY + 5 * HEX_HEIGHT, boardViewportSize.height - 60);
-  })();
-
-  const squadShootButtonTop = (() => {
-    if (!boardConfig || !squadShootPlan || !boardViewportSize) return undefined;
-    const HEX_HEIGHT = Math.sqrt(3) * boardConfig.hex_radius;
-    const shootUnit = units.find((u) => String(u.id) === String(squadShootPlan.unitId));
-    if (!shootUnit) return undefined;
-    const unitBottomY =
-      shootUnit.row * HEX_HEIGHT +
-      (shootUnit.col % 2) * (HEX_HEIGHT / 2) +
-      HEX_HEIGHT +
-      boardConfig.margin;
-    return Math.min(unitBottomY + 5 * HEX_HEIGHT, boardViewportSize.height - 60);
-  })();
-
   // Simple container return - loading/error handled inside useEffect
   return (
     <div>
@@ -7646,117 +7636,6 @@ export default function Board({
           display: "inline-block",
         }}
       >
-        {/* squad.md brique 3 : boutons Validate / Cancel du move par-figurine (bas-droite). */}
-        {mode === "squadModelMove" && squadMovePlan && squadMovePlan.activeModelId === null && (
-          <div
-            style={{
-              position: "absolute",
-              ...(squadMoveButtonTop !== undefined ? { top: squadMoveButtonTop } : { bottom: 12 }),
-              right: 12,
-              zIndex: 1700,
-              display: "flex",
-              gap: 8,
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => onCancelSquadMove?.()}
-              style={{
-                border: "1px solid rgba(255,255,255,0.28)",
-                borderRadius: 6,
-                background: "rgba(75,85,99,0.92)",
-                color: "#e5e7eb",
-                cursor: "pointer",
-                fontSize: 14,
-                fontWeight: 700,
-                padding: "8px 14px",
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              disabled={!squadMovePlan.canValidate}
-              onClick={() => onCommitSquadMovePlan?.()}
-              style={{
-                border: "1px solid rgba(255,255,255,0.28)",
-                borderRadius: 6,
-                background: squadMovePlan.canValidate
-                  ? "rgba(22,163,74,0.95)"
-                  : "rgba(75,85,99,0.55)",
-                color: squadMovePlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
-                cursor: squadMovePlan.canValidate ? "pointer" : "not-allowed",
-                fontSize: 14,
-                fontWeight: 700,
-                padding: "8px 14px",
-              }}
-            >
-              Validate
-            </button>
-          </div>
-        )}
-        {mode === "squadModelShoot" && squadShootPlan && (
-          <div
-            style={{
-              position: "absolute",
-              ...(squadShootButtonTop !== undefined ? { top: squadShootButtonTop } : { bottom: 12 }),
-              right: 12,
-              zIndex: 1700,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <span
-              style={{
-                color: "#e5e7eb",
-                fontSize: 13,
-                fontWeight: 600,
-                background: "rgba(17,24,39,0.8)",
-                borderRadius: 6,
-                padding: "6px 10px",
-              }}
-            >
-              {Object.keys(squadShootPlan.targets).length}/{squadShootPlan.models.length} figs
-              assignées
-            </span>
-            <button
-              type="button"
-              onClick={() => onCancelSquadShoot?.()}
-              style={{
-                border: "1px solid rgba(255,255,255,0.28)",
-                borderRadius: 6,
-                background: "rgba(75,85,99,0.92)",
-                color: "#e5e7eb",
-                cursor: "pointer",
-                fontSize: 14,
-                fontWeight: 700,
-                padding: "8px 14px",
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              disabled={!squadShootPlan.canValidate}
-              onClick={() => onCommitSquadShoot?.()}
-              style={{
-                border: "1px solid rgba(255,255,255,0.28)",
-                borderRadius: 6,
-                background: squadShootPlan.canValidate
-                  ? "rgba(22,163,74,0.95)"
-                  : "rgba(75,85,99,0.55)",
-                color: squadShootPlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
-                cursor: squadShootPlan.canValidate ? "pointer" : "not-allowed",
-                fontSize: 14,
-                fontWeight: 700,
-                padding: "8px 14px",
-              }}
-            >
-              Tirer
-            </button>
-          </div>
-        )}
         <div
           style={{
             position: "absolute",
