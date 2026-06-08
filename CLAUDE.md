@@ -12,6 +12,22 @@ CONVENTIONS IMPORTANTES :
 - Format de code : Python type hints, docstrings, respect AI_TURN.md
 - Ne jamais utiliser de fallbacks ou de workaround ou de valeur par défaut pour masquer des erreurs potentielles
 
+=== RÈGLES 40K OFFICIELLES ===
+
+SOURCE UNIQUE DE VÉRITÉ : Documentation/40k_rules/
+Ne jamais assumer une règle de jeu. En cas de doute ou de contradiction code/règles :
+→ Lire le PDF correspondant avec l'outil Read AVANT de répondre.
+→ Une réponse sur une règle sans lecture du PDF = réponse invalide.
+
+PDFs disponibles (lire uniquement le(s) pertinent(s)) :
+- 01 Core concepts / 02 Datasheets / 03 Moving / 04 Making attacks
+- 05 Attack sequence / 06 Other concepts / 07 The battle round
+- 08 Command phase / 09 Movement phase / 10 Shooting phase / 11 Charge phase
+- 12 Fights phase / 13 Terrain / 14 Objectives / 15 Stratagems / 16 Actions
+- 17 Monsters and vehicles / 18 Transports / 19 Attached units
+- 20 Strategic reserves / 21 Flying and surging / 22 Other rules and abilities
+- 23 Aircraft / 24 Core abilities / 25 Rules appendix
+
 === COMMANDES UTILES ===
 
 ENVIRONNEMENT :

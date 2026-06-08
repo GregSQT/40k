@@ -799,7 +799,7 @@ def _attempt_movement_to_destination(
     orig_col, orig_row = require_unit_position(unit, game_state)
 
     # Flee detection: was adjacent to enemy before move
-    was_adjacent = _is_in_enemy_engagement_zone(game_state, unit)
+    was_adjacent = _squad_is_in_enemy_er(game_state, str(unit["id"]))
 
     # Final footprint-aware occupation check IMMEDIATELY before position assignment.
     # Prevents race conditions from reactive moves between pool build and commit.
@@ -947,9 +947,9 @@ def _attempt_movement_to_destination(
     # Normalize unit ID to string for consistent storage (units_fled stores strings)
     unit_id_str = str(unit["id"])
     game_state["units_moved"].add(unit_id_str)
-    if was_adjacent:
-        game_state["units_fled"].add(unit_id_str)
-        # Units that fled are also marked as moved (units_fled is a subset of units_moved)
+    # Source unique du marquage de fuite (partagée avec le commit par-figurine PvP).
+    # units_fled est un sous-ensemble de units_moved.
+    flee_action = finalize_flee_marking(game_state, unit_id_str, was_adjacent)
 
     # Invalidate LoS cache when unit moves
     # When a unit moves, all LoS calculations involving that unit are now invalid
@@ -971,13 +971,13 @@ def _attempt_movement_to_destination(
     # This prevents invalidating the "moved" tracking of units that just moved
 
     # Log successful movement
-    action_type = "FLEE" if was_adjacent else "MOVE"
+    action_type = flee_action.upper()
     _log_movement_debug(game_state, "attempt_movement", str(unit["id"]), f"({orig_col},{orig_row})→({dest_col_int},{dest_row_int}) SUCCESS {action_type}")
 
     # Use normalized coordinates (dest_col_int, dest_row_int) in result
     # NOT dest_col/dest_row which might not be normalized
     return True, {
-        "action": "flee" if was_adjacent else "move",
+        "action": flee_action,
         "unitId": unit["id"],
         "fromCol": orig_col,
         "fromRow": orig_row,
@@ -1019,8 +1019,26 @@ def _is_in_enemy_engagement_zone(game_state: Dict[str, Any], unit: Dict[str, Any
     
     # Log adjacency check result
     _log_movement_debug(game_state, "is_adjacent_to_enemy", str(unit["id"]), f"ADJACENT" if result else "NOT_ADJACENT")
-    
+
     return result
+
+
+def finalize_flee_marking(game_state: Dict[str, Any], squad_id: str, was_engaged: bool) -> str:
+    """Source unique du marquage de fuite, partagée par les deux chemins de commit move :
+    le move rigide à l'ancre (``_attempt_movement_to_destination``) et le commit du plan
+    par-figurine PvP (``movement_commit_move_plan_handler``).
+
+    ``was_engaged`` est détecté en amont sur les positions PRÉ-déplacement via
+    ``_squad_is_in_enemy_er`` (≥ 1 figurine de l'escouade dans l'Engagement Range d'une
+    figurine ennemie — règle 09.07, toutes figs). Si vrai, l'escouade est ajoutée à
+    ``units_fled``. À appeler APRÈS un déplacement réussi.
+
+    Retourne le libellé d'action : "flee" si fuite, sinon "move".
+    """
+    squad_id_str = str(squad_id)
+    if was_engaged:
+        game_state["units_fled"].add(squad_id_str)
+    return "flee" if was_engaged else "move"
 
 
 def _compute_mover_ez_forbidden_mask(
@@ -2345,10 +2363,14 @@ def movement_commit_move_plan_handler(
     _invalidate_all_destination_pools_after_movement(game_state)
     movement_clear_preview(game_state)
 
+    # Source unique du marquage de fuite (partagée avec le move rigide à l'ancre) :
+    # marque units_fled + libellé "flee" si l'escouade était engagée avant le commit.
+    flee_action = finalize_flee_marking(game_state, str(squad_id), was_engaged)
+
     result = end_activation(game_state, unit, ACTION, 1, MOVE, MOVE, 1)
     result.update(
         {
-            "action": "move",
+            "action": flee_action,
             "unitId": unit["id"],
             "activation_complete": True,
             "waiting_for_player": False,

@@ -2193,9 +2193,9 @@ BASE_TO_BASE_SUBHEX = 1
 
 
 def get_engagement_range_subhex(game_state: Dict[str, Any]) -> int:
-    """Engagement Range = 1" horizontal (regle officielle).
+    """Engagement Range = 2" horizontal (V11).
     Retourne le seuil ER en subhexes pour l echelle du scenario."""
-    return int(require_key(game_state, "inches_to_subhex"))
+    return 2 * int(require_key(game_state, "inches_to_subhex"))
 
 
 def get_coherency_subhex(game_state: Dict[str, Any]) -> int:
