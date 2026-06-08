@@ -633,6 +633,10 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
     elif action_type == "skip":
         # Engine determined unit has no valid actions (e.g. no valid destinations)
         return _handle_skip_action(game_state, active_unit, had_valid_destinations=False)
+
+    elif action_type == "wait":
+        # V11 : Stationary humain — terminer l'activation sans bouger (log WAIT).
+        return _handle_skip_action(game_state, active_unit, had_valid_destinations=True)
     
     elif action_type == "left_click":
         return movement_click_handler(game_state, unit_id, action)
@@ -804,7 +808,10 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
             "unitId": unit_id,  # ADDED: Required for reward calculation
             "valid_destinations": game_state["valid_move_destinations_pool"],
             "preview_data": preview_data,
-            "waiting_for_player": True
+            "waiting_for_player": True,
+            # V11 : engagement de l'escouade dès l'activation (positions PRE-move). Pilote l'UI
+            # des modes de deplacement (engagee => Fall-back/Stationary ; non engagee => Move/Advance).
+            "would_flee": bool(_squad_is_in_enemy_er(game_state, str(unit_id))),
         }
 
 

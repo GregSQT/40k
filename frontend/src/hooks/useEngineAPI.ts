@@ -569,6 +569,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   >([]);
   const [advancingUnitId, setAdvancingUnitId] = useState<number | null>(null);
   const [advanceRoll, setAdvanceRoll] = useState<number | null>(null);
+  /** V11 : engagement de l'unité active (posé à l'activation via would_flee). Pilote l'UI des
+   *  modes de déplacement (engagée → Fall-back/Stationary ; non engagée → Move/Advance). */
+  const [activeUnitEngaged, setActiveUnitEngaged] = useState<number | null>(null);
   const moveDestPoolRef = useRef<Set<string>>(new Set());
   const footprintZoneRef = useRef<Set<string>>(new Set());
   /** Boucles masque monde (API) — hit-test quand ``move_preview_footprint_zone`` est absent du JSON. */
@@ -1138,6 +1141,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setPostShootMoveDestinations([]);
       setAdvancingUnitId(null);
       setAdvanceRoll(null);
+      setActiveUnitEngaged(null);
     }
   }, [gameState?.phase, targetPreview?.blinkTimer, clearChargePoolRefs]);
 
@@ -1981,6 +1985,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             const uid = data.result?.unitId ?? data.game_state.active_movement_unit;
             if (uid != null) {
               setSelectedUnitId(parseInt(String(uid), 10));
+              setActiveUnitEngaged(
+                data.result?.would_flee === true ? parseInt(String(uid), 10) : null
+              );
             }
             const poolSet = new Set<string>();
             const anchorSrc =
@@ -3533,6 +3540,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setSelectedUnitId(null);
       setAdvancingUnitId(null);
       setAdvanceRoll(null);
+      setActiveUnitEngaged(null);
     } catch (e) {
       console.error("[SQUAD-MOVE] commit FAILED", e);
       setError(`Squad move failed: ${formatApiConnectionError(e)}`);
@@ -3548,6 +3556,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setSelectedUnitId(null);
     setAdvancingUnitId(null);
     setAdvanceRoll(null);
+    setActiveUnitEngaged(null);
   }, []);
 
   /** Bouton Advance (phase move) : bascule l'activation squad en mode Advance (jet D6 backend). */
@@ -3569,6 +3578,23 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
     },
     [executeAction, refreshSquadMovePlanValidity]
+  );
+
+  /** Bouton Stationary (phase move) : termine l'activation sans bouger (log WAIT backend). */
+  const handleStationary = useCallback(
+    async (unitId: number | string) => {
+      const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      squadMoveSessionRef.current += 1;
+      squadMoveModelPoolRef.current = new Set();
+      setSquadMovePlan(null);
+      setMode("select");
+      setSelectedUnitId(null);
+      setAdvancingUnitId(null);
+      setAdvanceRoll(null);
+      setActiveUnitEngaged(null);
+      await executeAction({ action: "wait", unitId: String(uid) });
+    },
+    [executeAction]
   );
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -5044,6 +5070,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onCommitSquadMovePlan: async () => {},
       onCancelSquadMove: () => {},
       onSetAdvanceMode: async () => {},
+      onStationary: async () => {},
+      activeUnitEngaged: null,
       squadShootPlan: null,
       onStartSquadModelShoot: async () => {},
       onSelectModelForShoot: async () => {},
@@ -5178,6 +5206,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onCommitSquadMovePlan: handleCommitSquadMovePlan,
     onCancelSquadMove: handleCancelSquadMove,
     onSetAdvanceMode: handleSetAdvanceMode,
+    onStationary: handleStationary,
+    activeUnitEngaged,
     squadShootPlan,
     onStartSquadModelShoot: handleStartSquadModelShoot,
     onSelectModelForShoot: handleSelectModelForShoot,
