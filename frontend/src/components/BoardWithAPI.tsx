@@ -2959,10 +2959,7 @@ export const BoardWithAPI: React.FC = () => {
           Affichée dès l'activation (movePreview) et en plan par-figurine (squadModelMove). */}
       {apiProps.gameState?.phase === "move" &&
         (apiProps.gameState?.active_movement_unit != null ||
-          apiProps.squadMovePlan != null) &&
-        !(apiProps.mode === "squadModelMove" &&
-          apiProps.squadMovePlan != null &&
-          apiProps.squadMovePlan.activeModelId !== null) && (
+          apiProps.squadMovePlan != null) && (
         <div
           className="squad-action-bar"
           style={{
@@ -3041,8 +3038,11 @@ export const BoardWithAPI: React.FC = () => {
               if (advUnitId === null) return null;
               const isAdv = apiProps.advancingUnitId === advUnitId;
               const alreadyAdvanced = (apiProps.unitsAdvanced ?? []).includes(advUnitId);
+              // V11 : Advance figé = irréversible. Une fois advancé (état moteur units_advanced,
+              // ou advance en cours cette activation), le mode reste verrouillé tout le tour.
+              const advanced = alreadyAdvanced || isAdv;
               const engaged = apiProps.activeUnitEngaged === advUnitId;
-              const canAdvance = !alreadyAdvanced && !engaged;
+              const canAdvance = !advanced && !engaged;
               // Règle 09 : non engagée → Move (défaut) + Advance ; engagée → Fall-back (défaut) + Stationary.
               // Move/Fall-back = purement visuels (le commit applique flee si engagé). Stationary = action wait.
               // 3 états : "selected" (enfoncé), "relief" (possible), "disabled" (grisé).
@@ -3093,24 +3093,23 @@ export const BoardWithAPI: React.FC = () => {
               const orange = { relief: "#ea580c", down: "#c2410c", shadow: "0 6px 0 #9a3412" };
               const yellow = { relief: "#ca8a04", down: "#a16207", shadow: "0 6px 0 #854d0e" };
               const grey = { relief: "#6b7280", down: "#4b5563", shadow: "0 6px 0 #374151" };
-              const moveState: "selected" | "relief" | "disabled" = engaged
-                ? "disabled"
-                : isAdv
-                  ? "relief"
-                  : "selected";
+              // Advancé → Move grisé (verrouillé). Sinon engagé → grisé, libre → sélectionné.
+              const moveState: "selected" | "relief" | "disabled" =
+                engaged || advanced ? "disabled" : "selected";
               const fallbackState: "selected" | "relief" | "disabled" = engaged
                 ? "selected"
                 : "disabled";
-              const advanceState: "selected" | "relief" | "disabled" = !canAdvance
-                ? "disabled"
-                : isAdv
-                  ? "selected"
+              // Advancé → bouton enfoncé (sélectionné, irréversible). Engagé → grisé. Libre → relief.
+              const advanceState: "selected" | "relief" | "disabled" = advanced
+                ? "selected"
+                : engaged
+                  ? "disabled"
                   : "relief";
               return (
                 <>
                   {modeBtn("Move", moveState, green)}
                   {modeBtn("Advance", advanceState, orange, () => {
-                    if (!isAdv) apiProps.onSetAdvanceMode?.(advUnitId);
+                    if (canAdvance) apiProps.onSetAdvanceMode?.(advUnitId);
                   })}
                   {modeBtn("Fall-back", fallbackState, yellow)}
                   {modeBtn("Stationary", "relief", grey, () => apiProps.onStationary?.(advUnitId))}

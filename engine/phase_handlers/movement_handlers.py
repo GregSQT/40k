@@ -676,20 +676,30 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
 
 
 def movement_set_advance_mode_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-    """V11 : bascule l'activation move courante en mode Advance (Règles 09.06).
+    """V11 : déclare l'Advance de l'escouade active (Règles 09.06).
 
-    Lance 1D6 et pose le marqueur ``active_advance`` (escouade + jet), lu par les
-    constructeurs de pool (budget M+jet, cf. ``_advance_roll_for``) et par le commit
-    (``move_type='advance'`` → ``commit_move`` marque ``units_advanced``). Le déplacement
-    reste piloté par le flow squad par-figurine (bloc + placements fins, commit_move_plan) :
-    les pools par-figurine relisent le marqueur à chaque clic.
+    Lance 1D6 (figé), ajoute l'escouade à ``units_advanced`` et mémorise le jet dans
+    ``advance_rolls`` — source unique persistante lue par ``_advance_roll_for`` (budget M+jet
+    des pools, commit ``move_type='advance'``, blocage tir/charge). L'Advance survit donc aux
+    cancel/ré-activations jusqu'à la phase de commandement suivante. Le déplacement reste piloté
+    par le flow squad par-figurine (bloc + placements fins, commit_move_plan).
     """
     unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id}
 
-    roll = roll_advance_for_squad(str(unit_id), game_state)
-    game_state["active_advance"] = {"squad_id": str(unit_id), "roll": int(roll)}
+    # Advance = engagement irréversible : marque l'escouade ``units_advanced`` (bloque tir/charge)
+    # et fige son jet dans ``advance_rolls``. Jet figé : un squad déjà advancé réutilise son jet
+    # (pas de re-roll), donc le mode survit aux cancel/ré-activations jusqu'à la fin de la phase.
+    rolls = game_state.setdefault("advance_rolls", {})
+    existing = rolls.get(str(unit_id))
+    if existing is not None:
+        roll = int(existing)
+        game_state["current_advance_roll"] = roll
+    else:
+        roll = int(roll_advance_for_squad(str(unit_id), game_state))
+        rolls[str(unit_id)] = roll
+    game_state.setdefault("units_advanced", set()).add(str(unit_id))
     # Reconstruit le pool d'ancre au budget gonflé : le preview rigide (movePreview)
     # s'étend, et le front le re-synchronise depuis game_state. Volontairement hors du
     # result (sinon le flow advancePreview V10 se déclencherait côté front).
@@ -748,7 +758,8 @@ def movement_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     game_state["preview_hexes"] = []
     game_state["move_preview_footprint_span"] = None
     game_state["active_movement_unit"] = unit_id
-    game_state.pop("active_advance", None)
+    # Le mode Advance d'une escouade vit dans ``units_advanced``/``advance_rolls`` (persistant
+    # tout le tour) : rien à nettoyer ici, la ré-activation retrouve le budget M+jet figé.
 
 
 def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tuple[bool, Dict[str, Any]]:
@@ -812,6 +823,9 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
             # V11 : engagement de l'escouade dès l'activation (positions PRE-move). Pilote l'UI
             # des modes de deplacement (engagee => Fall-back/Stationary ; non engagee => Move/Advance).
             "would_flee": bool(_squad_is_in_enemy_er(game_state, str(unit_id))),
+            # V11 : jet d'Advance figé si l'escouade a déjà advancé ce tour (sinon None) — restaure
+            # le badge + l'état « advancé » du bouton à la ré-activation après un cancel.
+            "advance_roll": _advance_roll_for(str(unit_id), game_state),
         }
 
 
@@ -1481,15 +1495,18 @@ def _build_multi_hex_vectorized(
 
 
 def _advance_roll_for(squad_id: str, game_state: Dict[str, Any]) -> Optional[int]:
-    """Jet d'Advance actif pour cette escouade, sinon None.
+    """Jet d'Advance de cette escouade pour le tour, sinon None.
 
-    Source unique du « mode Advance » d'une activation move (Règles 09.06) : si présent,
-    les pools de destinations utilisent un budget M+jet et le commit marque units_advanced.
+    Source unique du « mode Advance » (Règles 09.06) : une escouade qui a déclaré Advance
+    est dans ``units_advanced`` (persistant jusqu'à la phase de commandement suivante) et son
+    jet est mémorisé dans ``advance_rolls`` (squad_id → jet). Tant qu'elle y est, les pools
+    de destinations utilisent un budget M+jet, le mode survit aux cancel/ré-activations, et
+    elle ne peut ni tirer ni charger. Le jet est figé (pas de re-roll).
     """
-    adv = game_state.get("active_advance")
-    if adv is not None and str(adv.get("squad_id")) == str(squad_id):
-        return int(adv["roll"])
-    return None
+    if str(squad_id) not in game_state.get("units_advanced", set()):
+        return None
+    roll = game_state.get("advance_rolls", {}).get(str(squad_id))
+    return int(roll) if roll is not None else None
 
 
 @profile_move_pool_build
@@ -2417,7 +2434,6 @@ def movement_commit_move_plan_handler(
     else:
         move_type = "fall_back" if was_engaged else "normal"
     commit_move(plan, game_state, move_type)
-    game_state.pop("active_advance", None)
 
     if desperate_escape:
         unit_post_move = get_unit_by_id(game_state, str(squad_id))
@@ -2731,11 +2747,8 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         
         return False, move_result
     
-    # V11 : commit du preview rigide en mode Advance — marque units_advanced (ce chemin
-    # ne passe pas par commit_move) et libère le marqueur active_advance.
-    if _advance_roll_for(str(unit["id"]), game_state) is not None:
-        game_state.setdefault("units_advanced", set()).add(str(unit["id"]))
-        game_state.pop("active_advance", None)
+    # V11 : Advance déjà marqué dans units_advanced au clic (movement_set_advance_mode_handler) ;
+    # il persiste tout le tour, rien à faire ici (ce chemin ne passe pas par commit_move).
 
     # Extract movement info from result
     # Log successful destination selection

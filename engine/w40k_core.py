@@ -976,6 +976,7 @@ class W40KEngine(gym.Env):
             "units_charged": set(),
             "units_attacked": set(),
             "units_advanced": set(),
+            "advance_rolls": {},
             "units_reacted_this_enemy_turn": set(),
             "reaction_window_active": False,
             "_unit_move_version": 0,

@@ -1984,10 +1984,19 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           ) {
             const uid = data.result?.unitId ?? data.game_state.active_movement_unit;
             if (uid != null) {
-              setSelectedUnitId(parseInt(String(uid), 10));
-              setActiveUnitEngaged(
-                data.result?.would_flee === true ? parseInt(String(uid), 10) : null
-              );
+              const uidNum = parseInt(String(uid), 10);
+              setSelectedUnitId(uidNum);
+              setActiveUnitEngaged(data.result?.would_flee === true ? uidNum : null);
+              // V11 : restaure l'état Advance figé du squad (badge + bouton sélectionné) à la
+              // (ré-)activation. advance_roll non-null = squad déjà advancé ce tour.
+              const advRoll = (data.result as { advance_roll?: number | null })?.advance_roll;
+              if (advRoll != null) {
+                setAdvancingUnitId(uidNum);
+                setAdvanceRoll(advRoll);
+              } else {
+                setAdvancingUnitId(null);
+                setAdvanceRoll(null);
+              }
             }
             const poolSet = new Set<string>();
             const anchorSrc =
@@ -3575,9 +3584,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const plan = squadMovePlanRef.current;
       if (plan && plan.unitId === uid) {
         await refreshSquadMovePlanValidity(uid, plan.models);
+        // Fig active déjà sélectionnée : reconstruire SON pool atteignable au budget gonflé
+        // (M+jet). Sinon la zone reste à M tant qu'on ne re-sélectionne pas la figurine.
+        if (plan.activeModelId) {
+          await handleSelectModelForMove(plan.activeModelId);
+        }
       }
     },
-    [executeAction, refreshSquadMovePlanValidity]
+    [executeAction, refreshSquadMovePlanValidity, handleSelectModelForMove]
   );
 
   /** Bouton Stationary (phase move) : termine l'activation sans bouger (log WAIT backend). */
