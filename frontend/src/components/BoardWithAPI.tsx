@@ -2955,66 +2955,121 @@ export const BoardWithAPI: React.FC = () => {
         <div className="turn-phase-tracker-right">Loading game configuration...</div>
       )}
 
-      {/* Boutons Cancel / Validate du squad move / shoot par-figurine (déplacés du board). */}
-      {apiProps.mode === "squadModelMove" &&
-        apiProps.squadMovePlan &&
-        apiProps.squadMovePlan.activeModelId === null && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              background: "#1f2937",
-              border: "1px solid #555",
-              borderRadius: "8px",
-              padding: 8,
-              marginTop: -6,
-              marginBottom: 2,
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => {
-                if (!isGameOver) apiProps.onCancelSquadMove?.();
-              }}
-              style={{
-                border: "1px solid rgba(255,255,255,0.28)",
-                borderRadius: 6,
-                background: "rgba(75,85,99,0.92)",
-                color: "#e5e7eb",
-                cursor: "pointer",
-                fontSize: 14,
-                fontWeight: 700,
-                padding: "8px 14px",
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              disabled={!apiProps.squadMovePlan.canValidate}
-              onClick={() => {
-                if (!isGameOver) apiProps.onCommitSquadMovePlan?.();
-              }}
-              style={{
-                border: "1px solid rgba(255,255,255,0.28)",
-                borderRadius: 6,
-                background: apiProps.squadMovePlan.canValidate
-                  ? "rgba(22,163,74,0.95)"
-                  : "rgba(75,85,99,0.55)",
-                color: apiProps.squadMovePlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
-                cursor: apiProps.squadMovePlan.canValidate ? "pointer" : "not-allowed",
-                fontSize: 14,
-                fontWeight: 700,
-                padding: "8px 14px",
-              }}
-            >
-              Validate
-            </button>
+      {/* Barre d'action move : Cancel/Validate (moitié gauche) + boutons de mode (moitié droite).
+          Affichée dès l'activation (movePreview) et en plan par-figurine (squadModelMove). */}
+      {apiProps.gameState?.phase === "move" &&
+        (apiProps.gameState?.active_movement_unit != null ||
+          apiProps.squadMovePlan != null) &&
+        !(apiProps.mode === "squadModelMove" &&
+          apiProps.squadMovePlan != null &&
+          apiProps.squadMovePlan.activeModelId !== null) && (
+        <div
+          className="squad-action-bar"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            background: "#1f2937",
+            border: "1px solid #555",
+            borderRadius: "8px",
+            padding: 8,
+            marginTop: -6,
+            marginBottom: 2,
+          }}
+        >
+          {/* Moitié gauche : Cancel / Validate (plan par-figurine uniquement). */}
+          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
+            {apiProps.squadMovePlan && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isGameOver) apiProps.onCancelSquadMove?.();
+                  }}
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.28)",
+                    borderRadius: 6,
+                    background: "rgba(75,85,99,0.92)",
+                    color: "#e5e7eb",
+                    cursor: "pointer",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    padding: "8px 14px",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!apiProps.squadMovePlan.canValidate}
+                  onClick={() => {
+                    if (!isGameOver) apiProps.onCommitSquadMovePlan?.();
+                  }}
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.28)",
+                    borderRadius: 6,
+                    background: apiProps.squadMovePlan.canValidate
+                      ? "rgba(22,163,74,0.95)"
+                      : "rgba(75,85,99,0.55)",
+                    color: apiProps.squadMovePlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+                    cursor: apiProps.squadMovePlan.canValidate ? "pointer" : "not-allowed",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    padding: "8px 14px",
+                  }}
+                >
+                  Validate
+                </button>
+              </>
+            )}
           </div>
-        )}
+          {/* Moitié droite : boutons de mode, alignés à gauche. */}
+          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-start" }}>
+            {(() => {
+              const advUnitId =
+                apiProps.squadMovePlan?.unitId ??
+                apiProps.movePreview?.unitId ??
+                (apiProps.gameState?.active_movement_unit != null
+                  ? parseInt(apiProps.gameState.active_movement_unit, 10)
+                  : null);
+              if (advUnitId === null) return null;
+              const isAdv = apiProps.advancingUnitId === advUnitId;
+              const alreadyAdvanced = (apiProps.unitsAdvanced ?? []).includes(advUnitId);
+              const canAdvance = !alreadyAdvanced; // exclusion "engagé" (fall-back) : étape ultérieure
+              return (
+                <button
+                  type="button"
+                  disabled={!canAdvance}
+                  onClick={() => {
+                    if (canAdvance && !isAdv && !isGameOver) apiProps.onSetAdvanceMode?.(advUnitId);
+                  }}
+                  style={{
+                    border: "1px solid rgba(0,0,0,0.35)",
+                    borderRadius: 6,
+                    color: "#fff",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    padding: "8px 14px",
+                    background: !canAdvance ? "rgba(75,85,99,0.55)" : isAdv ? "#c2410c" : "#ea580c",
+                    boxShadow: !canAdvance
+                      ? "none"
+                      : isAdv
+                        ? "inset 0 2px 4px rgba(0,0,0,0.45)"
+                        : "0 3px 0 #9a3412",
+                    transform: isAdv && canAdvance ? "translateY(2px)" : "translateY(0)",
+                    cursor: !canAdvance ? "not-allowed" : isAdv ? "default" : "pointer",
+                    opacity: canAdvance ? 1 : 0.6,
+                  }}
+                >
+                  Advance
+                </button>
+              );
+            })()}
+          </div>
+        </div>
+      )}
       {apiProps.mode === "squadModelShoot" && apiProps.squadShootPlan && (
         <div
+          className="squad-action-bar"
           style={{
             display: "flex",
             alignItems: "center",

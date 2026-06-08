@@ -3531,6 +3531,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setSquadMovePlan(null);
       setMode("select");
       setSelectedUnitId(null);
+      setAdvancingUnitId(null);
+      setAdvanceRoll(null);
     } catch (e) {
       console.error("[SQUAD-MOVE] commit FAILED", e);
       setError(`Squad move failed: ${formatApiConnectionError(e)}`);
@@ -3544,7 +3546,30 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setSquadMovePlan(null);
     setMode("select");
     setSelectedUnitId(null);
+    setAdvancingUnitId(null);
+    setAdvanceRoll(null);
   }, []);
+
+  /** Bouton Advance (phase move) : bascule l'activation squad en mode Advance (jet D6 backend). */
+  const handleSetAdvanceMode = useCallback(
+    async (unitId: number | string) => {
+      const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      const data = await executeAction({ action: "advance", unitId: String(uid) });
+      const roll = (data as { result?: { advance_roll?: number } })?.result?.advance_roll;
+      if (roll === undefined || roll === null) {
+        throw new Error(`[ADVANCE] réponse sans advance_roll pour unit=${uid}`);
+      }
+      setAdvanceRoll(roll);
+      setAdvancingUnitId(uid);
+      // Plan par-figurine actif : re-valide au nouveau budget (M+jet). En preview rigide,
+      // le pool d'ancre gonflé est re-synchronisé depuis game_state (phase move).
+      const plan = squadMovePlanRef.current;
+      if (plan && plan.unitId === uid) {
+        await refreshSquadMovePlanValidity(uid, plan.models);
+      }
+    },
+    [executeAction, refreshSquadMovePlanValidity]
+  );
 
   // ──────────────────────────────────────────────────────────────────────────
   // TIR PAR FIGURINE (PvP manuel) — calque squadModelMove, pipeline squad backend
@@ -4999,6 +5024,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       unitsCharged: [],
       unitsAttacked: [],
       unitsFled: [],
+      unitsAdvanced: [],
       phase: null,
       gameState: null,
       onSelectUnit: () => {},
@@ -5017,6 +5043,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onResetModelInPlan: () => {},
       onCommitSquadMovePlan: async () => {},
       onCancelSquadMove: () => {},
+      onSetAdvanceMode: async () => {},
       squadShootPlan: null,
       onStartSquadModelShoot: async () => {},
       onSelectModelForShoot: async () => {},
@@ -5122,6 +5149,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     unitsCharged: memoizedUnitsCharged,
     unitsAttacked: memoizedUnitsAttacked,
     unitsFled: memoizedUnitsFled,
+    unitsAdvanced: memoizedUnitsAdvanced,
     phase: gameState.phase as "deployment" | "move" | "shoot" | "charge" | "fight",
     // Expose fight_subphase for UnitRenderer click handling
     fightSubPhase: gameState.fight_subphase as
@@ -5149,6 +5177,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onResetModelInPlan: handleResetModelInPlan,
     onCommitSquadMovePlan: handleCommitSquadMovePlan,
     onCancelSquadMove: handleCancelSquadMove,
+    onSetAdvanceMode: handleSetAdvanceMode,
     squadShootPlan,
     onStartSquadModelShoot: handleStartSquadModelShoot,
     onSelectModelForShoot: handleSelectModelForShoot,

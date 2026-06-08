@@ -32,7 +32,7 @@ from .shared_utils import (
     is_footprint_placement_valid, get_engagement_zone, get_max_base_size_hex,
     get_squad_move_budget, validate_move_plan, _validate_plan_coherency, commit_move,
     get_coherency_subhex, _compute_unit_occupied_hexes, _squad_is_in_enemy_er,
-    roll_hazard_for_unit, roll_battle_shock,
+    roll_hazard_for_unit, roll_battle_shock, roll_advance_for_squad,
 )
 from engine.hex_utils import (
     _hex_center,
@@ -622,6 +622,10 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         # Execute movement directly (destination already in action for gym training)
         return movement_destination_selection_handler(game_state, unit_id, action)
 
+    elif action_type == "advance":
+        # V11 : bascule l'activation move en mode Advance (jet D6 + budget M+jet). Commit via commit_move_plan.
+        return movement_set_advance_mode_handler(game_state, unit_id, action)
+
     elif action_type == "commit_move_plan":
         # Validate (= bouton Validate) + commit d'un plan provisoire par-figurine.
         return movement_commit_move_plan_handler(game_state, unit_id, action)
@@ -665,6 +669,34 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
     
     else:
         return False, {"error": "invalid_action_for_phase", "action": action_type, "phase": "move"}
+
+
+def movement_set_advance_mode_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    """V11 : bascule l'activation move courante en mode Advance (Règles 09.06).
+
+    Lance 1D6 et pose le marqueur ``active_advance`` (escouade + jet), lu par les
+    constructeurs de pool (budget M+jet, cf. ``_advance_roll_for``) et par le commit
+    (``move_type='advance'`` → ``commit_move`` marque ``units_advanced``). Le déplacement
+    reste piloté par le flow squad par-figurine (bloc + placements fins, commit_move_plan) :
+    les pools par-figurine relisent le marqueur à chaque clic.
+    """
+    unit = get_unit_by_id(game_state, unit_id)
+    if not unit:
+        return False, {"error": "unit_not_found", "unit_id": unit_id}
+
+    roll = roll_advance_for_squad(str(unit_id), game_state)
+    game_state["active_advance"] = {"squad_id": str(unit_id), "roll": int(roll)}
+    # Reconstruit le pool d'ancre au budget gonflé : le preview rigide (movePreview)
+    # s'étend, et le front le re-synchronise depuis game_state. Volontairement hors du
+    # result (sinon le flow advancePreview V10 se déclencherait côté front).
+    pool = movement_build_valid_destinations_pool(game_state, unit_id)
+    return True, {
+        "action": "advance_mode_set",
+        "unitId": unit["id"],
+        "advance_roll": roll,
+        "valid_destinations": pool,
+        "waiting_for_player": True,
+    }
 
 
 def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
@@ -712,6 +744,7 @@ def movement_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     game_state["preview_hexes"] = []
     game_state["move_preview_footprint_span"] = None
     game_state["active_movement_unit"] = unit_id
+    game_state.pop("active_advance", None)
 
 
 def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tuple[bool, Dict[str, Any]]:
@@ -1440,6 +1473,18 @@ def _build_multi_hex_vectorized(
     return valid_destinations, footprint_zone, visited_count
 
 
+def _advance_roll_for(squad_id: str, game_state: Dict[str, Any]) -> Optional[int]:
+    """Jet d'Advance actif pour cette escouade, sinon None.
+
+    Source unique du « mode Advance » d'une activation move (Règles 09.06) : si présent,
+    les pools de destinations utilisent un budget M+jet et le commit marque units_advanced.
+    """
+    adv = game_state.get("active_advance")
+    if adv is not None and str(adv.get("squad_id")) == str(squad_id):
+        return int(adv["roll"])
+    return None
+
+
 @profile_move_pool_build
 def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str) -> List[Tuple[int, int]]:
     """
@@ -1471,6 +1516,9 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         return []
 
     move_range = unit["MOVE"]
+    _adv_roll = _advance_roll_for(str(unit_id), game_state)
+    if _adv_roll is not None:
+        move_range = get_squad_move_budget(str(unit_id), game_state, "advance", advance_roll=_adv_roll)
     # Normalize coordinates to int - raises error if invalid
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
@@ -1985,7 +2033,11 @@ def movement_build_model_destinations_pool(
     if not unit:
         return {"destinations": [], "footprint_mask_loops": []}
 
-    budget = get_squad_move_budget(squad_id, game_state, "normal")
+    _adv_roll = _advance_roll_for(squad_id, game_state)
+    if _adv_roll is not None:
+        budget = get_squad_move_budget(squad_id, game_state, "advance", advance_roll=_adv_roll)
+    else:
+        budget = get_squad_move_budget(squad_id, game_state, "normal")
     start_col = int(model["col"])
     start_row = int(model["row"])
     start_pos = (start_col, start_row)
@@ -2165,7 +2217,11 @@ def movement_preview_move_plan(
       - coherency_ok: bool — cohesion respectee sur l'ensemble du plan.
       - can_validate: bool — toutes les figs valides (placement + cohesion).
     """
-    budget = get_squad_move_budget(str(squad_id), game_state, "normal")
+    _adv_roll = _advance_roll_for(str(squad_id), game_state)
+    if _adv_roll is not None:
+        budget = get_squad_move_budget(str(squad_id), game_state, "advance", advance_roll=_adv_roll)
+    else:
+        budget = get_squad_move_budget(str(squad_id), game_state, "normal")
     ez = get_engagement_zone(game_state)
     unit_obj = get_unit_by_id(game_state, str(squad_id))
     c_individual = {"budget_per_model": budget, "require_coherency": False}
@@ -2348,8 +2404,13 @@ def movement_commit_move_plan_handler(
                 "waiting_for_player": False,
             }
 
-    move_type = "fall_back" if was_engaged else "normal"
+    _adv_roll = _advance_roll_for(str(squad_id), game_state)
+    if _adv_roll is not None:
+        move_type = "advance"
+    else:
+        move_type = "fall_back" if was_engaged else "normal"
     commit_move(plan, game_state, move_type)
+    game_state.pop("active_advance", None)
 
     if desperate_escape:
         unit_post_move = get_unit_by_id(game_state, str(squad_id))
@@ -2663,6 +2724,12 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         
         return False, move_result
     
+    # V11 : commit du preview rigide en mode Advance — marque units_advanced (ce chemin
+    # ne passe pas par commit_move) et libère le marqueur active_advance.
+    if _advance_roll_for(str(unit["id"]), game_state) is not None:
+        game_state.setdefault("units_advanced", set()).add(str(unit["id"]))
+        game_state.pop("active_advance", None)
+
     # Extract movement info from result
     # Log successful destination selection
     _log_movement_debug(game_state, "destination_selection", str(unit_id), f"destination ({dest_col},{dest_row}) SELECTED")

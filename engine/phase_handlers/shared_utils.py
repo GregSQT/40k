@@ -2940,7 +2940,9 @@ def get_squad_move_budget(
     if move_type == "advance":
         if advance_roll is None:
             raise ValueError("get_squad_move_budget: advance_roll required for move_type='advance'")
-        return move_stat + int(advance_roll)
+        # advance_roll est en POUCES (1D6) → convertir en subhexes comme MOVE.
+        ish = int(require_key(game_state, "inches_to_subhex"))
+        return move_stat + int(advance_roll) * ish
     if move_type == "charge":
         if advance_roll is None:
             raise ValueError("get_squad_move_budget: charge_roll (passed via advance_roll) required for move_type='charge'")
