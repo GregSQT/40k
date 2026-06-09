@@ -3771,6 +3771,7 @@ export const BoardWithAPI: React.FC = () => {
             onLogChargeRoll={isGameOver ? () => {} : apiProps.onLogChargeRoll}
             chargingUnitId={apiProps.chargingUnitId}
             chargeTargetId={apiProps.chargeTargetId ?? null}
+            chargePreviewTargetIds={apiProps.chargePreviewTargetIds}
             chargeRoll={apiProps.chargeRoll}
             chargeSuccess={apiProps.chargeSuccess}
             gameState={apiProps.gameState as GameState}

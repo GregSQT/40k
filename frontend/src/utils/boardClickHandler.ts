@@ -124,6 +124,17 @@ export function setupBoardClickHandler(callbacks: {
         }
       }
       return; // Prevent fallthrough to other handlers
+    } else if (phase === "charge" && mode === "chargeTargetSelect" && selectedUnitId !== null) {
+      // V11 multi-cibles (pré-validation) : clic ennemi = toggle de la cible ;
+      // clic droit sur l'unité active = annuler la charge (consomme l'unité via skip).
+      if (selectedUnitId === unitId) {
+        if (clickType === "right") {
+          callbacks.onCancelCharge?.();
+        }
+      } else if (callbacks.onChargeEnemyUnit) {
+        callbacks.onChargeEnemyUnit(selectedUnitId, unitId);
+      }
+      return; // Prevent fallthrough to other handlers
     } else if (phase === "charge" && mode === "chargePreview" && selectedUnitId !== null) {
       if (selectedUnitId === unitId) {
         if (clickType === "right") {

@@ -454,6 +454,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     | "squadModelShoot"
     | "attackPreview"
     | "targetPreview"
+    | "chargeTargetSelect"
     | "chargePreview"
     | "advancePreview"
     | "pileInPreview"
@@ -659,8 +660,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     unitId: number;
     roll: number;
   } | null>(null);
-  /** Cible déclarée pour la charge en cours (icône + halo d’engagement) */
+  /** Cible déclarée pour la charge en cours (icône + halo d’engagement) — post-jet (sélection destination) */
   const [chargePreviewTargetId, setChargePreviewTargetId] = useState<number | null>(null);
+  /**
+   * V11 multi-cibles : ensemble des cibles toggleées en mode `chargeTargetSelect` (pré-validation).
+   * Le clic ennemi ajoute/retire une cible ; le bouton « Charge » envoie cette liste au backend.
+   */
+  const [chargePreviewTargetIds, setChargePreviewTargetIds] = useState<number[]>([]);
   // State for successful charge target display
   const [successfulChargeTarget, setSuccessfulChargeTarget] = useState<{
     unitId: number;
@@ -2058,7 +2064,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
 
             setSelectedUnitId(parseInt(data.result.unitId, 10));
-            setMode("chargePreview");
+            // V11 RAW : le jet 2D6 est fait à l'activation côté backend. On entre en sous-mode
+            // « sélection des cibles » (pré-validation) ; le badge du jet s'affiche dès maintenant.
+            setChargePreviewTargetIds([]);
+            const actRoll = (data.result as { charge_roll?: number | null }).charge_roll;
+            if (actRoll != null && data.result.unitId != null) {
+              setPendingChargeRollDisplay({
+                unitId: parseInt(String(data.result.unitId), 10),
+                roll: actRoll,
+              });
+            }
+            setMode("chargeTargetSelect");
           }
           // Charge : cible validée → jet 2D6 + zone violette (pool). Ne pas dépendre seulement de
           // waiting_for_player (sinon la branche "shoot" plus bas effaçait selectedUnitId).
@@ -2966,8 +2982,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     async (unitId: number | string | null) => {
       const numericUnitId = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
 
-      // Block unit selection when in advancePreview or chargePreview mode (but allow deselection with null)
-      if ((mode === "advancePreview" || mode === "chargePreview") && numericUnitId !== null) {
+      // Block unit selection when in advancePreview, chargeTargetSelect or chargePreview mode
+      // (but allow deselection with null)
+      if (
+        (mode === "advancePreview" ||
+          mode === "chargeTargetSelect" ||
+          mode === "chargePreview") &&
+        numericUnitId !== null
+      ) {
         return;
       }
       // En mode plan par-figurine, bloquer les clics PIXI (onSelectUnit) pour éviter que
@@ -4573,25 +4595,61 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   // Handle clicking on enemy unit in chargePreview mode - triggers charge roll and destination building
   const handleChargeEnemyUnit = useCallback(
-    async (chargerId: number | string, enemyUnitId: number | string) => {
-      const numericChargerId = typeof chargerId === "string" ? parseInt(chargerId, 10) : chargerId;
+    async (_chargerId: number | string, enemyUnitId: number | string) => {
       const numericEnemyId =
         typeof enemyUnitId === "string" ? parseInt(enemyUnitId, 10) : enemyUnitId;
+      // V11 RAW multi-cibles : le clic ennemi TOGGLE la cible (aucun jet ici — déjà fait à
+      // l'activation). Seules les cibles éligibles (clignotantes = dans la distance jetée) sont
+      // toggle-ables ; un clic sur un ennemi hors portée est ignoré.
+      if (!blinkingUnits.unitIds.some((id) => id === numericEnemyId)) {
+        return;
+      }
+      setChargePreviewTargetIds((prev) =>
+        prev.includes(numericEnemyId)
+          ? prev.filter((id) => id !== numericEnemyId)
+          : [...prev, numericEnemyId]
+      );
+    },
+    [blinkingUnits]
+  );
 
-      // Send left_click action with targetId to backend
-      // Backend will:
-      // 1. Roll 2d6 for charge_range
-      // 2. Build valid_charge_destinations_pool via BFS pathfinding
-      // 3. Return destinations for violet highlighting
+  // V11 multi-cibles : bouton « Charge » → envoie la liste des cibles déclarées. Le backend
+  // réutilise le jet fait à l'activation, bâtit le pool (intersection eng==declared) et bascule
+  // en sélection de destination (mode chargePreview).
+  const handleValidateCharge = useCallback(
+    async (chargerId: number | string) => {
+      const numericChargerId =
+        typeof chargerId === "string" ? parseInt(chargerId, 10) : chargerId;
+      if (chargePreviewTargetIds.length === 0) {
+        return; // aucune cible déclarée : le bouton ne doit pas être actif
+      }
       await executeAction({
-        action: "left_click",
+        action: "charge",
         unitId: numericChargerId.toString(),
-        targetId: numericEnemyId.toString(),
-        clickTarget: "enemy",
+        targetIds: chargePreviewTargetIds.map((id) => id.toString()),
       });
     },
-    [executeAction]
+    [executeAction, chargePreviewTargetIds]
   );
+
+  // V11 RAW : le jet ayant déjà eu lieu à l'activation, annuler = résoudre la charge sans
+  // mouvement (l'unité est consommée via « skip »). On nettoie la sélection locale de cibles.
+  const handleCancelCharge = useCallback(async () => {
+    const activeId = selectedUnitId;
+    setChargePreviewTargetIds([]);
+    setPendingChargeRollDisplay(null);
+    if (activeId == null) {
+      setMode("select");
+      return;
+    }
+    try {
+      await executeAction({ action: "skip", unitId: activeId.toString() });
+    } catch (error) {
+      console.error("Cancel charge (skip) failed:", error);
+    }
+    setSelectedUnitId(null);
+    setMode("select");
+  }, [executeAction, selectedUnitId]);
 
   const handleMoveCharger = useCallback(
     async (chargerId: number | string, destCol: number, destRow: number) => {
@@ -5254,8 +5312,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onChargeEnemyUnit: handleChargeEnemyUnit,
     onMoveCharger: handleMoveCharger,
     onAdvanceMove: handleAdvanceMove,
-    onCancelCharge: emptyCallback,
-    onValidateCharge: emptyCallback,
+    onCancelCharge: handleCancelCharge,
+    onValidateCharge: handleValidateCharge,
     onLogChargeRoll: emptyCallback,
     getChargeDestinations,
     chargePreviewOverlayHexes,
@@ -5308,6 +5366,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         null;
       return targetId;
     })(),
+    // V11 multi-cibles : cibles toggleées en mode chargeTargetSelect (voile violet + activation bouton Charge)
+    chargePreviewTargetIds,
     // Add AI turn execution for PvE mode
     executeAITurn: async (options?: { stopAfterPhaseChange?: boolean }) => {
       if (aiTurnInProgress) {

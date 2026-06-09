@@ -123,6 +123,8 @@ interface UnitRendererProps {
   // Charge indicator (for replay mode lightning icon)
   chargingUnitId?: number | null;
   chargeTargetId?: number | null;
+  /** V11 multi-cibles : cibles toggleées en mode chargeTargetSelect (voile violet pré-validation). */
+  chargePreviewTargetIds?: number[];
 
   // Fight indicator (for replay mode crossed swords icon)
   fightingUnitId?: number | null;
@@ -506,6 +508,7 @@ export class UnitRenderer {
         : this.props.unit.ICON_SCALE || this.props.ICON_SCALE;
       this.renderUnitCircle(iconZIndex);
       this.renderUnitIcon(iconZIndex);
+      this.renderChargeTargetVeil(iconZIndex);
       this.renderGreenActivationCircle(isEligible, figIconScale);
       this.renderUnitIdDebug(iconZIndex);
       // Barre HP propre de la figurine : pour toutes les figs en mode
@@ -853,7 +856,8 @@ export class UnitRenderer {
       if (
         phase === "charge" &&
         unit.player !== current_player &&
-        this.props.mode !== "chargePreview"
+        this.props.mode !== "chargePreview" &&
+        this.props.mode !== "chargeTargetSelect"
       ) {
         addClickHandler = false;
       }
@@ -1175,6 +1179,45 @@ export class UnitRenderer {
     unitText.alpha = textAlpha;
     unitText.zIndex = iconZIndex;
     this.target.addChild(unitText);
+  }
+
+  /**
+   * V11 multi-cibles : voile violet semi-transparent sur une unité toggleée comme cible de
+   * charge (mode `chargeTargetSelect`, avant validation par le bouton « Charge »).
+   */
+  private renderChargeTargetVeil(iconZIndex: number): void {
+    const { unit, centerX, centerY, mode, HEX_RADIUS, UNIT_CIRCLE_RADIUS_RATIO } = this.props;
+    if (mode !== "chargeTargetSelect") return;
+    const ids = this.props.chargePreviewTargetIds;
+    if (!ids || ids.length === 0) return;
+    const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
+    if (!ids.some((id) => id === unitIdNum)) return;
+
+    const VIOLET = 0x8a2be2;
+    const nrBase = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
+    const veil = new PIXI.Graphics();
+    veil.beginFill(VIOLET, 0.45);
+    veil.lineStyle(3, VIOLET, 0.95);
+    if (nrBase) {
+      if (nrBase.kind === "oval") {
+        veil.drawEllipse(centerX, centerY, nrBase.outerRx, nrBase.outerRy);
+      } else {
+        const h = nrBase.squareHalf;
+        const s = nrBase.squareSide;
+        veil.drawRoundedRect(centerX - h, centerY - h, s, s, getSquareCornerRadiusPx());
+      }
+    } else {
+      const displayBase = resolveBaseSizeForUnitDisplay(unit);
+      const baseSizeVal = displayBase > 1 ? displayBase : undefined;
+      const radius = baseSizeVal
+        ? (baseSizeVal / 2) * 1.5 * HEX_RADIUS
+        : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
+      veil.drawCircle(centerX, centerY, radius);
+    }
+    veil.endFill();
+    veil.zIndex = iconZIndex + 60; // au-dessus de l'icône
+    veil.eventMode = "none";
+    this.target.addChild(veil);
   }
 
   private renderGreenActivationCircle(isEligible: boolean, unitIconScale: number): void {

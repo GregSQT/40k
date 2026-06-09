@@ -371,6 +371,7 @@ type BoardProps = {
   movingUnitId?: number | null; // For replay mode: shows boot icon on moving unit
   chargingUnitId?: number | null; // For replay mode: shows lightning icon on charging unit
   chargeTargetId?: number | null; // Cible charge (replay / après coup) + fusion avec prévisualisation
+  chargePreviewTargetIds?: number[]; // V11 multi-cibles : cibles toggleées en mode chargeTargetSelect (voile violet)
   fightingUnitId?: number | null; // For replay mode: shows crossed swords icon on fighting unit
   fightTargetId?: number | null; // For replay mode: shows explosion icon on fight target
   // Charge roll display for replay mode
@@ -719,6 +720,7 @@ export default function Board({
   movingUnitId,
   chargingUnitId,
   chargeTargetId,
+  chargePreviewTargetIds,
   fightingUnitId,
   fightTargetId,
   chargeRoll,
@@ -5795,7 +5797,7 @@ export default function Board({
             .map((d) => `${d.model_id}.${d.weapon_index}>${d.target_unit_id}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -6529,6 +6531,8 @@ export default function Board({
               chargeTargetId ?? (chargeTargets.length > 0 ? chargeTargets[0].id : null);
             return finalTargetId;
           })(),
+          // V11 multi-cibles : voile violet sur les cibles toggleées (mode chargeTargetSelect)
+          chargePreviewTargetIds,
           // Pass fight indicators
           fightingUnitId,
           fightTargetId,
@@ -7638,6 +7642,70 @@ export default function Board({
           display: "inline-block",
         }}
       >
+        {phase === "charge" && mode === "chargeTargetSelect" && selectedUnitId !== null && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: 16,
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 1700,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "10px 14px",
+              border: "1px solid rgba(138,43,226,0.6)",
+              borderRadius: 10,
+              background: "rgba(17,24,39,0.94)",
+              color: "#e5e7eb",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+            }}
+          >
+            <span style={{ fontSize: 13, fontWeight: 700 }}>
+              {chargePreviewTargetIds?.length ?? 0} cible
+              {(chargePreviewTargetIds?.length ?? 0) > 1 ? "s" : ""} déclarée
+              {(chargePreviewTargetIds?.length ?? 0) > 1 ? "s" : ""}
+            </span>
+            <button
+              type="button"
+              onClick={() => onCancelCharge?.()}
+              style={{
+                border: "1px solid rgba(255,255,255,0.28)",
+                borderRadius: 6,
+                background: "rgba(255,255,255,0.08)",
+                color: "#e5e7eb",
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: 700,
+                padding: "6px 12px",
+              }}
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              disabled={(chargePreviewTargetIds?.length ?? 0) === 0}
+              onClick={() => {
+                if (selectedUnitId !== null) onValidateCharge?.(selectedUnitId);
+              }}
+              style={{
+                border: "1px solid rgba(138,43,226,0.8)",
+                borderRadius: 6,
+                background:
+                  (chargePreviewTargetIds?.length ?? 0) === 0
+                    ? "rgba(138,43,226,0.25)"
+                    : "rgba(138,43,226,0.85)",
+                color: "#ffffff",
+                cursor: (chargePreviewTargetIds?.length ?? 0) === 0 ? "not-allowed" : "pointer",
+                fontSize: 13,
+                fontWeight: 800,
+                padding: "6px 14px",
+              }}
+            >
+              Charger
+            </button>
+          </div>
+        )}
         <div
           style={{
             position: "absolute",

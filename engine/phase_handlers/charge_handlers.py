@@ -1166,6 +1166,18 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         else:
             return False, {"error": "invalid_charge_action", "action": action}
 
+    elif action_type == "commit_charge_plan":
+        # V11 PvP : commit du mouvement de charge par-figurine (plan 3 phases).
+        return charge_commit_move_plan_handler(game_state, unit_id, action)
+
+    elif action_type == "charge_plan_state":
+        # V11 PvP (lecture pure) : phase courante + pools éligibles par fig pour le plan provisoire.
+        prov: Dict[str, Tuple[int, int]] = {}
+        for entry in (action.get("plan") or []):
+            prov[str(entry[0])] = (int(entry[1]), int(entry[2]))
+        state = charge_model_plan_state(game_state, unit_id, prov)
+        return True, {"action": "charge_plan_state", "unitId": unit_id, **state}
+
     elif action_type == "skip":
         # Fin de phase manuelle (API) : forfait charge sans WAIT ni journalisation « wait » par unité
         # (had_valid_destinations=False → end_activation PASS, pas d'entrée action_logs type wait, pas +step).
@@ -1382,6 +1394,216 @@ def _ai_select_charge_target_pve(game_state: Dict[str, Any], unit: Dict[str, Any
     return best_target
 
 
+def charge_build_model_destinations_pool(
+    game_state: Dict[str, Any],
+    model_id: str,
+    target_ids: List[str],
+    charge_roll_subhex: int,
+    provisional_plan: Optional[Dict[str, Tuple[int, int]]] = None,
+) -> Dict[str, Any]:
+    """Pool de destinations par-figurine pour le mouvement de charge (V11, move par-figurine).
+
+    BFS d'UNE figurine du squad chargeur dans le budget = jet de charge (sous-hex), sans
+    traverser murs ni figs (ennemies, alliées, coéquipières). ``provisional_plan``
+    ({model_id: (col, row)}) remplace les positions des coéquipières déjà posées dans le plan UI
+    (recompute temps réel). Contrairement au move, l'EZ ennemie n'est PAS interdite (une charge
+    finit dans l'EZ des cibles déclarées).
+
+    Chaque destination valide est classée selon 11.04 WHILE MOVING ; toute destination où la
+    figurine engagerait un ennemi NON déclaré est exclue (AFTER MOVING : aucun non-cible) :
+      - within_1 : la figurine finit à <= 1" d'au moins une cible déclarée
+      - engaged  : la figurine finit engagée (<= EZ) d'au moins une cible déclarée
+      - closer   : la figurine finit plus proche d'au moins une cible qu'à son départ (= pool légal de base)
+
+    within_1 ⊆ engaged ⊆ closer. Retour : {"within_1", "engaged", "closer"} (listes de [col, row]).
+    Lecture pure (aucune écriture permanente dans game_state).
+    """
+    from collections import deque
+    from engine.hex_utils import min_distance_between_sets
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from .shared_utils import get_engagement_zone
+
+    models_cache = require_key(game_state, "models_cache")
+    model = models_cache.get(str(model_id))
+    if model is None:
+        raise KeyError(f"charge_build_model_destinations_pool: model {model_id} not in models_cache")
+    squad_id = str(model["squad_id"])
+    unit = get_unit_by_id(game_state, squad_id)
+    empty = {"within_1": [], "engaged": [], "closer": []}
+    if not unit:
+        return empty
+
+    ez = int(get_engagement_zone(game_state))
+    within_1_zone = int(game_state["inches_to_subhex"])  # 1" en sous-hex
+    budget = int(charge_roll_subhex)
+
+    board_cols = int(require_key(game_state, "board_cols"))
+    board_rows = int(require_key(game_state, "board_rows"))
+    wall_hexes = game_state.get("wall_hexes", set())
+    player = int(model["player"])
+    units_cache = require_key(game_state, "units_cache")
+
+    # Cibles déclarées (entrées + empreintes) et ennemis NON déclarés (exclusion d'engagement).
+    declared = {str(t) for t in target_ids}
+    target_entries: List[Dict[str, Any]] = []
+    target_fps: List[Set[Tuple[int, int]]] = []
+    nontarget_entries: List[Dict[str, Any]] = []
+    enemy_occupied: Set[Tuple[int, int]] = set()
+    other_occupied: Set[Tuple[int, int]] = set()
+    for eid, entry in units_cache.items():
+        occ = entry.get("occupied_hexes")
+        cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
+        if int(entry["player"]) != player:
+            enemy_occupied |= cells
+            if str(eid) in declared:
+                target_entries.append(entry)
+                target_fps.append(cells)
+            else:
+                nontarget_entries.append(entry)
+        elif str(eid) != squad_id:
+            other_occupied |= cells
+    if not target_entries:
+        return empty
+
+    fp_offset_pair = _charge_prepare_footprint_offsets(unit, game_state)
+
+    # Coéquipières : collision (le plan provisoire override les figs déjà posées).
+    same_squad_occupied: Set[Tuple[int, int]] = set()
+    squad_models = game_state.get("squad_models", {})
+    for mid in squad_models.get(squad_id, []):
+        if str(mid) == str(model_id):
+            continue
+        if provisional_plan and str(mid) in provisional_plan:
+            pc, pr = provisional_plan[str(mid)]
+            sib_fp = _candidate_footprint_charge(int(pc), int(pr), unit, game_state, fp_offset_pair)
+        else:
+            sib = models_cache.get(str(mid))
+            if sib is None:
+                continue
+            sib_fp = _candidate_footprint_charge(
+                int(sib["col"]), int(sib["row"]), unit, game_state, fp_offset_pair
+            )
+        same_squad_occupied |= sib_fp
+
+    blocked = set(wall_hexes) | enemy_occupied | other_occupied | same_squad_occupied
+
+    start_col, start_row = int(model["col"]), int(model["row"])
+    start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_offset_pair)
+    start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
+
+    # BFS centre-à-centre dans le budget (la charge ne traverse ni mur ni fig).
+    visited: Set[Tuple[int, int]] = {(start_col, start_row)}
+    reachable: List[Tuple[int, int]] = []
+    queue: deque = deque([(start_col, start_row, 0)])
+    while queue:
+        c, r, d = queue.popleft()
+        if d >= budget:
+            continue
+        for nc, nr in get_hex_neighbors(c, r):
+            if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                continue
+            cell = (nc, nr)
+            if cell in visited or cell in blocked:
+                continue
+            visited.add(cell)
+            queue.append((nc, nr, d + 1))
+            reachable.append(cell)
+
+    within_1: List[List[int]] = []
+    engaged: List[List[int]] = []
+    closer: List[List[int]] = []
+    for cc, rr in reachable:
+        cand_fp = _candidate_footprint_charge(cc, rr, unit, game_state, fp_offset_pair)
+        if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
+            continue
+        if cand_fp & blocked:
+            continue
+        d_min = min(
+            min_distance_between_sets(cand_fp, tfp, max_distance=start_min) for tfp in target_fps
+        )
+        if d_min >= start_min:
+            continue  # WHILE MOVING : doit finir plus proche d'au moins une cible
+        synth = _charge_synthetic_charger_cache_entry(game_state, unit, cc, rr, cand_fp)
+        if any(unit_entries_within_engagement_zone(synth, ne, ez) for ne in nontarget_entries):
+            continue  # AFTER MOVING : aucun engagement avec un ennemi non déclaré
+        closer.append([cc, rr])
+        if any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
+            engaged.append([cc, rr])
+        if any(unit_entries_within_engagement_zone(synth, te, within_1_zone) for te in target_entries):
+            within_1.append([cc, rr])
+
+    return {"within_1": within_1, "engaged": engaged, "closer": closer}
+
+
+def charge_model_plan_state(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    provisional_plan: Dict[str, Tuple[int, int]],
+) -> Dict[str, Any]:
+    """Orchestration UI du mouvement de charge par-figurine (V11, 3 phases 11.04). Lecture pure.
+
+    ``provisional_plan`` : {model_id: (col, row)} figs déjà posées dans le plan UI. Les figs
+    absentes sont « non posées » (restent à leur position de départ, models_cache).
+
+    Détermine la PHASE COURANTE = la plus serrée encore réalisable par une fig non posée :
+      - 1 (≤1") tant qu'une fig non posée peut finir within_1 ;
+      - sinon 2 (engagé) tant qu'une fig peut finir engaged ;
+      - sinon 3 (closer).
+    Pour chaque fig non posée éligible dans la phase courante, renvoie son pool de destinations
+    (= cercle violet). ``can_validate`` n'est vrai que lorsque toutes les figs sont posées et que
+    la config finale est légale (``charge_preview_move_plan``).
+
+    Retour : {current_phase, eligible: {mid: [[c,r],...]}, unplaced: [...], can_validate}.
+    """
+    empty = {"current_phase": 3, "eligible": {}, "unplaced": [], "can_validate": False}
+    unit = get_unit_by_id(game_state, str(unit_id))
+    if not unit:
+        return empty
+    if str(unit_id) not in game_state.get("charge_target_selections", {}):
+        return empty
+    if str(unit_id) not in game_state.get("charge_roll_values", {}):
+        return empty
+    _stored = game_state["charge_target_selections"][str(unit_id)]
+    target_ids = list(_stored) if isinstance(_stored, (list, tuple)) else [_stored]
+    roll_subhex = int(game_state["charge_roll_values"][str(unit_id)]) * int(game_state["inches_to_subhex"])
+
+    squad_models = require_key(game_state, "squad_models")
+    models_cache = require_key(game_state, "models_cache")
+    alive = [m for m in squad_models.get(str(unit_id), []) if m in models_cache]
+    placed = {str(k) for k in provisional_plan}
+    unplaced = [m for m in alive if str(m) not in placed]
+
+    pools = {
+        m: charge_build_model_destinations_pool(
+            game_state, m, target_ids, roll_subhex, provisional_plan=provisional_plan
+        )
+        for m in unplaced
+    }
+    if any(pools[m]["within_1"] for m in unplaced):
+        phase = 1
+        key = "within_1"
+    elif any(pools[m]["engaged"] for m in unplaced):
+        phase = 2
+        key = "engaged"
+    else:
+        phase = 3
+        key = "closer"
+
+    eligible = {m: pools[m][key] for m in unplaced if pools[m][key]}
+
+    can_validate = False
+    if not unplaced and alive:
+        full_plan = [[str(m), int(provisional_plan[m][0]), int(provisional_plan[m][1])] for m in alive]
+        can_validate = charge_preview_move_plan(game_state, str(unit_id), full_plan, target_ids)["can_validate"]
+
+    return {
+        "current_phase": phase,
+        "eligible": {str(m): dests for m, dests in eligible.items()},
+        "unplaced": [str(m) for m in unplaced],
+        "can_validate": can_validate,
+    }
+
+
 def charge_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> None:
     """
     Charge unit activation initialization - NO ROLL YET.
@@ -1395,7 +1617,7 @@ def charge_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> No
     # Do NOT roll 2d6 here - roll happens after target selection
 
 
-def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List[Dict[str, Any]]:
+def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str, max_distance: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Build list of valid charge targets for unit activation.
 
@@ -1420,7 +1642,7 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
 
     _bvt_cache = game_state.setdefault("_charge_build_valid_targets_cache", {})
     _move_version = game_state["_unit_move_version"]
-    _bvt_key = (str(unit_id), _move_version)
+    _bvt_key = (str(unit_id), _move_version, max_distance)
     if _bvt_key in _bvt_cache:
         if _perf and _t_bvt0 is not None:
             append_perf_timing_line(
@@ -1432,11 +1654,12 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
 
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
     CHARGE_MAX_DISTANCE = require_key(require_key(game_state["config"], "charge"), "charge_max_distance")
+    effective_max = int(max_distance) if max_distance is not None else CHARGE_MAX_DISTANCE
     valid_targets = []
 
-    # Build all hexes reachable via BFS within max charge distance
+    # Build all hexes reachable via BFS within max charge distance (jet en roll-first, sinon 12").
     try:
-        reachable_hexes = charge_build_valid_destinations_pool(game_state, unit_id, CHARGE_MAX_DISTANCE)
+        reachable_hexes = charge_build_valid_destinations_pool(game_state, unit_id, effective_max)
     except Exception as e:
         add_console_log(game_state, f"ERROR: BFS failed for unit {unit_id}: {str(e)}")
         return []
@@ -1551,9 +1774,25 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id, "action": "charge"}
 
-    # Build valid targets (enemies with non-occupied adjacent hexes reachable within 12 hexes)
+    # V11 RAW (PvP/PvE) : le jet 2D6 a lieu À L'ACTIVATION (11.02 étape 2), AVANT la
+    # déclaration des cibles. Les cibles éligibles sont ensuite bornées par la distance
+    # jetée (11.04 « within the maximum distance »). En gym (RL), on conserve le jet au
+    # moment de la sélection pour ne pas changer le MDP de l'agent.
+    is_gym = game_state.get("gym_training_mode", False)
+    charge_roll = None
+    max_distance_subhex = None
+    if not is_gym:
+        if unit_id in game_state["charge_roll_values"]:
+            charge_roll = game_state["charge_roll_values"][unit_id]
+        else:
+            import random
+            charge_roll = random.randint(1, 6) + random.randint(1, 6)
+            game_state["charge_roll_values"][unit_id] = charge_roll
+        max_distance_subhex = int(charge_roll * game_state["inches_to_subhex"])
+
+    # Build valid targets : bornées par la distance jetée en roll-first, sinon par charge_max_distance.
     _t_bvt0 = time.perf_counter() if _perf else None
-    valid_targets = charge_build_valid_targets(game_state, unit_id)
+    valid_targets = charge_build_valid_targets(game_state, unit_id, max_distance=max_distance_subhex)
     _t_bvt1 = time.perf_counter() if _perf else None
     if _perf and _t_el0 is not None and _t_bvt0 is not None and _t_bvt1 is not None:
         append_perf_timing_line(
@@ -1577,7 +1816,7 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
     result = {
         "unit_activated": True,
         "unitId": unit_id,
-        "charge_roll": None,  # No roll yet - will be rolled after target selection
+        "charge_roll": charge_roll,  # V11 RAW : jet fait à l'activation (None en gym)
         "valid_targets": valid_targets,  # List of target dicts
         "waiting_for_player": True
     }
@@ -2683,13 +2922,18 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
     if _charge_unit_within_engagement_zone(game_state, unit):
         return _handle_skip_action(game_state, unit, had_valid_destinations=False)
 
-    # Roll 2d6 AFTER target selection — résultat en POUCES (règles GW).
-    # Le badge UI affiche la valeur en inches (2..12). Sur Board ×10 les distances
-    # moteur sont en sous-hex : on scale via ``inches_to_subhex`` pour rester homogène
-    # avec ``charge_max_distance``, ``engagement_zone`` et les footprints.
-    import random
-    charge_roll = random.randint(1, 6) + random.randint(1, 6)
-    game_state["charge_roll_values"][unit_id] = charge_roll
+    # V11 RAW (PvP/PvE) : réutiliser le jet 2D6 effectué à L'ACTIVATION
+    # (charge_unit_execution_loop), conformément à 11.02 (jet avant déclaration des cibles).
+    # En gym (RL), le jet a lieu ici comme avant pour ne pas changer le MDP de l'agent.
+    # Résultat en POUCES (2..12) ; scalé en sous-hex via ``inches_to_subhex`` pour rester
+    # homogène avec ``charge_max_distance``, ``engagement_zone`` et les footprints.
+    is_gym = game_state.get("gym_training_mode", False)
+    if not is_gym and unit_id in game_state["charge_roll_values"]:
+        charge_roll = game_state["charge_roll_values"][unit_id]
+    else:
+        import random
+        charge_roll = random.randint(1, 6) + random.randint(1, 6)
+        game_state["charge_roll_values"][unit_id] = charge_roll
     _charge_scale = game_state["inches_to_subhex"]
     charge_roll_subhex = charge_roll * _charge_scale
     # Store the declared target LIST for destination selection (V11 multi-cibles).
@@ -2885,10 +3129,304 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
             return False, {"error": "no_valid_destinations_after_target_selection", "action": "charge"}
 
 
+def _apply_charge_impact(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    target_id: Any,
+    dest_col: int,
+    dest_row: int,
+    target_col: int,
+    target_row: int,
+    current_turn: int,
+) -> None:
+    """Applique la règle ``charge_impact`` (D6 → blessures mortelles) si l'unité la possède.
+
+    Extrait de ``charge_destination_selection_handler`` pour être partagé avec le commit
+    par-figurine (``charge_commit_move_plan_handler``) — comportement strictement identique.
+    """
+    if not _unit_has_rule(unit, "charge_impact"):
+        return
+    impact_ability_display_name = _get_source_unit_rule_display_name_for_effect(unit, "charge_impact")
+    if impact_ability_display_name is None:
+        unit_name = unit.get("DISPLAY_NAME") or unit.get("unitType") or "UNKNOWN"
+        raise ValueError(
+            f"Unit {unit['id']} ({unit_name}) triggered charge_impact without source rule displayName"
+        )
+    impact_roll = resolve_dice_value("D6", "charge_impact_roll")
+    impact_hit_result = "FAIL"
+    if impact_roll >= CHARGE_IMPACT_TRIGGER_THRESHOLD:
+        impact_hit_result = "HIT"
+        mortal_wounds = CHARGE_IMPACT_MORTAL_WOUNDS
+        target_hp = require_hp_from_cache(str(target_id), game_state)
+        new_target_hp = max(0, target_hp - mortal_wounds)
+        update_units_cache_hp(game_state, str(target_id), new_target_hp)
+    else:
+        mortal_wounds = 0
+    impact_message = (
+        f"Unit {unit['id']}({dest_col},{dest_row}) IMPACTED [{impact_ability_display_name}] "
+        f"Unit {target_id}({target_col},{target_row}) - "
+        f"Hit:{CHARGE_IMPACT_TRIGGER_THRESHOLD}+:{impact_roll}({impact_hit_result})"
+    )
+    if impact_hit_result == "HIT":
+        impact_message += f" Wound:AUTO Save:NONE[MW] Dmg:{mortal_wounds}HP"
+    append_action_log(
+        game_state,
+        {
+            "type": "charge_impact",
+            "message": impact_message,
+            "turn": current_turn,
+            "phase": "charge",
+            "unitId": unit["id"],
+            "targetId": target_id,
+            "player": unit["player"],
+            "impact_roll": impact_roll,
+            "impact_threshold": CHARGE_IMPACT_TRIGGER_THRESHOLD,
+            "impact_hit_result": impact_hit_result,
+            "mortal_wounds": mortal_wounds,
+            "ability_display_name": impact_ability_display_name,
+            "attackerCol": dest_col,
+            "attackerRow": dest_row,
+            "targetCol": target_col,
+            "targetRow": target_row,
+            "reward": 0.0,
+            "timestamp": "server_time",
+            "is_ai_action": unit["player"] == 1,
+        },
+    )
+    add_console_log(game_state, impact_message)
+
+
+def charge_preview_move_plan(
+    game_state: Dict[str, Any], squad_id: str, plan: List[Tuple[str, int, int]], target_ids: List[str]
+) -> Dict[str, Any]:
+    """Dry-run d'un plan de charge par-figurine (11.04 WHILE/AFTER MOVING). Lecture pure.
+
+    ``plan`` = liste de ``[model_id, col, row]`` couvrant TOUTES les figs vivantes. Source unique
+    de vérité : la légalité par-fig réutilise ``charge_build_model_destinations_pool`` (mêmes
+    contraintes que le cercle violet : budget = jet, pas de traversée, finit plus proche, n'engage
+    aucun non-cible), avec les autres figs du plan en positions provisoires. On ajoute :
+      - cohésion 03.03 (mêmes 2 puces que le move, empreinte-à-empreinte) ;
+      - engaged_all : chaque cible déclarée est engagée par >=1 fig (AFTER MOVING).
+
+    Retour : {per_model: {mid: bool}, can_validate, engaged_all, missing_targets}.
+    """
+    from engine.hex_utils import min_distance_between_sets
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from .shared_utils import (
+        get_engagement_zone,
+        get_coherency_subhex,
+        get_cohesion_max_subhex,
+        get_min_neighbors,
+    )
+
+    unit = get_unit_by_id(game_state, str(squad_id))
+    empty = {"per_model": {}, "can_validate": False, "engaged_all": False, "missing_targets": []}
+    if not unit:
+        return empty
+    norm = [(str(m), int(c), int(r)) for m, c, r in plan]
+    n = len(norm)
+    if n == 0:
+        return empty
+    roll = game_state["charge_roll_values"].get(str(squad_id))
+    if roll is None:
+        return empty
+    roll_subhex = int(roll) * int(game_state["inches_to_subhex"])
+
+    # 1) Légalité per-fig = appartenance au pool Slice E (budget + traversée + closer + no-non-cible),
+    #    les autres figs du plan servant de positions provisoires (collision intra-squad).
+    pos_by_model = {mid: (c, r) for mid, c, r in norm}
+    per_model: Dict[str, bool] = {}
+    for mid, c, r in norm:
+        prov = {m2: pos_by_model[m2] for m2 in pos_by_model if m2 != mid}
+        pool = charge_build_model_destinations_pool(
+            game_state, mid, target_ids, roll_subhex, provisional_plan=prov
+        )
+        per_model[mid] = [c, r] in pool["closer"]
+
+    # 2) Cohésion (identique au move : 1re puce voisins < min, 2e puce une fig à > coh_max).
+    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
+    fps = [_candidate_footprint_charge(c, r, unit, game_state, fp_pair) for _, c, r in norm]
+    coh = get_coherency_subhex(game_state)
+    coh_max = get_cohesion_max_subhex(game_state)
+    min_nb = get_min_neighbors(game_state)
+    neigh = [0] * n
+    too_far = [False] * n
+    for i in range(n):
+        for j in range(i + 1, n):
+            d = min_distance_between_sets(fps[i], fps[j], max_distance=coh_max)
+            if d <= coh:
+                neigh[i] += 1
+                neigh[j] += 1
+            if d > coh_max:
+                too_far[i] = True
+                too_far[j] = True
+    if n > 1:
+        for i, (mid, _c, _r) in enumerate(norm):
+            if neigh[i] < min_nb or too_far[i]:
+                per_model[mid] = False
+
+    # 3) engaged_all : chaque cible déclarée est engagée par au moins une figurine.
+    ez = int(get_engagement_zone(game_state))
+    units_cache = require_key(game_state, "units_cache")
+    missing: List[str] = []
+    for tid in (str(t) for t in target_ids):
+        tentry = units_cache.get(tid)
+        if tentry is None:
+            missing.append(tid)
+            continue
+        engaged = False
+        for idx, (mid, c, r) in enumerate(norm):
+            synth = _charge_synthetic_charger_cache_entry(game_state, unit, c, r, fps[idx])
+            if unit_entries_within_engagement_zone(synth, tentry, ez):
+                engaged = True
+                break
+        if not engaged:
+            missing.append(tid)
+    engaged_all = len(missing) == 0
+    can_validate = bool(n > 0 and all(per_model.values()) and engaged_all)
+    return {
+        "per_model": per_model,
+        "can_validate": can_validate,
+        "engaged_all": engaged_all,
+        "missing_targets": missing,
+    }
+
+
+def charge_commit_move_plan_handler(
+    game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]
+) -> Tuple[bool, Dict[str, Any]]:
+    """Commit d'un plan de charge par-figurine (V11 PvP). ``action["plan"]`` = ``[[mid,col,row],...]``
+    couvrant toutes les figs vivantes. Valide la config finale (``charge_preview_move_plan``), pose les
+    figs (``commit_move`` type ``charge`` → positions + ``units_charged``), applique ``charge_impact`` et
+    clôt l'activation. Le jet et les cibles déclarées proviennent de l'état stocké (roll-first)."""
+    if "plan" not in action:
+        raise KeyError(f"commit_charge_plan action missing required 'plan' field: {action}")
+    raw_plan = action["plan"]
+    if not isinstance(raw_plan, list) or not raw_plan:
+        return False, {"error": "empty_charge_plan", "unitId": unit_id}
+    plan: List[Tuple[str, int, int]] = []
+    for entry in raw_plan:
+        if not (isinstance(entry, (list, tuple)) and len(entry) == 3):
+            raise ValueError(
+                f"commit_charge_plan: plan entry must be [model_id, col, row], got {entry!r}"
+            )
+        plan.append((str(entry[0]), int(entry[1]), int(entry[2])))
+
+    unit = get_unit_by_id(game_state, unit_id)
+    if not unit:
+        return False, {"error": "unit_not_found", "unit_id": unit_id, "action": "charge"}
+    if "charge_target_selections" not in game_state or unit_id not in game_state["charge_target_selections"]:
+        return False, {"error": "target_not_selected", "unit_id": unit_id, "action": "charge"}
+    if "charge_roll_values" not in game_state or unit_id not in game_state["charge_roll_values"]:
+        return False, {"error": "charge_roll_missing", "unit_id": unit_id, "action": "charge"}
+    _stored = game_state["charge_target_selections"][unit_id]
+    target_ids = list(_stored) if isinstance(_stored, (list, tuple)) else [_stored]
+    target_id = target_ids[0]
+    charge_roll = game_state["charge_roll_values"][unit_id]
+
+    # Le plan doit couvrir exactement les figs vivantes de l'escouade.
+    squad_models = require_key(game_state, "squad_models")
+    models_cache = require_key(game_state, "models_cache")
+    alive = {m for m in squad_models.get(str(unit_id), []) if m in models_cache}
+    plan_ids = {mid for mid, _, _ in plan}
+    if plan_ids != alive:
+        return False, {
+            "error": "plan_models_mismatch",
+            "unitId": unit_id,
+            "expected": sorted(alive),
+            "got": sorted(plan_ids),
+        }
+
+    preview = charge_preview_move_plan(game_state, str(unit_id), plan, target_ids)
+    if not preview["can_validate"]:
+        return False, {
+            "error": "invalid_charge_plan",
+            "unitId": unit_id,
+            "per_model": preview["per_model"],
+            "engaged_all": preview["engaged_all"],
+            "missing_targets": preview["missing_targets"],
+        }
+
+    orig_col, orig_row = require_unit_position(unit, game_state)
+
+    from .shared_utils import commit_move, set_unit_coordinates
+    from .movement_handlers import _invalidate_all_destination_pools_after_movement
+
+    commit_move(plan, game_state, "charge")  # pose per-modèle + units_charged.add
+
+    entry = require_key(game_state, "units_cache").get(str(unit_id))
+    if entry is not None:
+        set_unit_coordinates(unit, int(entry["col"]), int(entry["row"]))
+    dest_col, dest_row = require_unit_position(unit, game_state)
+
+    _invalidate_all_destination_pools_after_movement(game_state)
+    game_state["_unit_move_version"] += 1
+
+    current_turn = game_state["current_turn"] if "current_turn" in game_state else 1
+    target_col, target_row = require_unit_position(target_id, game_state)
+    charge_message = (
+        f"Unit {unit['id']} ({orig_col}, {orig_row}) CHARGED Units {target_ids} "
+        f"from ({orig_col}, {orig_row}) to ({dest_col}, {dest_row}) [Roll:{charge_roll}]"
+    )
+    append_action_log(
+        game_state,
+        {
+            "type": "charge",
+            "message": charge_message,
+            "turn": current_turn,
+            "phase": "charge",
+            "unitId": unit["id"],
+            "player": unit["player"],
+            "fromCol": orig_col,
+            "fromRow": orig_row,
+            "toCol": dest_col,
+            "toRow": dest_row,
+            "targetId": target_id,
+            "charge_roll": charge_roll,
+            "timestamp": "server_time",
+            "is_ai_action": unit["player"] == 1,
+        },
+    )
+    add_console_log(game_state, charge_message)
+
+    _apply_charge_impact(game_state, unit, target_id, dest_col, dest_row, target_col, target_row, current_turn)
+
+    if unit_id in game_state["charge_roll_values"]:
+        del game_state["charge_roll_values"][unit_id]
+    if "charge_target_selections" in game_state and unit_id in game_state["charge_target_selections"]:
+        del game_state["charge_target_selections"][unit_id]
+    if "pending_charge_targets" in game_state:
+        del game_state["pending_charge_targets"]
+    if "pending_charge_unit_id" in game_state:
+        del game_state["pending_charge_unit_id"]
+
+    charge_clear_preview(game_state)
+    result = end_activation(game_state, unit, ACTION, 1, CHARGE, CHARGE, 0)
+    result.update(
+        {
+            "action": "charge",
+            "phase": "charge",
+            "unitId": unit["id"],
+            "targetId": target_id,
+            "targetIds": target_ids,
+            "fromCol": orig_col,
+            "fromRow": orig_row,
+            "toCol": dest_col,
+            "toRow": dest_row,
+            "charge_roll": charge_roll,
+            "charge_succeeded": True,
+            "activation_complete": True,
+        }
+    )
+    if not game_state["charge_activation_pool"]:
+        result.update(charge_phase_end(game_state))
+    return True, result
+
+
 def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     Handle charge destination selection and execute charge.
-    
+
     This is called AFTER target selection and roll (charge_target_selection_handler).
     """
     # AI_TURN.md COMPLIANCE: Direct field access with validation
@@ -3130,55 +3668,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     )
     add_console_log(game_state, charge_message)
 
-    if _unit_has_rule(unit, "charge_impact"):
-        impact_ability_display_name = _get_source_unit_rule_display_name_for_effect(unit, "charge_impact")
-        if impact_ability_display_name is None:
-            unit_name = unit.get("DISPLAY_NAME") or unit.get("unitType") or "UNKNOWN"
-            raise ValueError(
-                f"Unit {unit['id']} ({unit_name}) triggered charge_impact without source rule displayName"
-            )
-        impact_roll = resolve_dice_value("D6", "charge_impact_roll")
-        impact_hit_result = "FAIL"
-        if impact_roll >= CHARGE_IMPACT_TRIGGER_THRESHOLD:
-            impact_hit_result = "HIT"
-            mortal_wounds = CHARGE_IMPACT_MORTAL_WOUNDS
-            target_hp = require_hp_from_cache(str(target_id), game_state)
-            new_target_hp = max(0, target_hp - mortal_wounds)
-            update_units_cache_hp(game_state, str(target_id), new_target_hp)
-        else:
-            mortal_wounds = 0
-        impact_message = (
-            f"Unit {unit['id']}({dest_col},{dest_row}) IMPACTED [{impact_ability_display_name}] "
-            f"Unit {target_id}({target_col},{target_row}) - "
-            f"Hit:{CHARGE_IMPACT_TRIGGER_THRESHOLD}+:{impact_roll}({impact_hit_result})"
-        )
-        if impact_hit_result == "HIT":
-            impact_message += f" Wound:AUTO Save:NONE[MW] Dmg:{mortal_wounds}HP"
-        append_action_log(
-            game_state,
-            {
-            "type": "charge_impact",
-            "message": impact_message,
-            "turn": current_turn,
-            "phase": "charge",
-            "unitId": unit["id"],
-            "targetId": target_id,
-            "player": unit["player"],
-            "impact_roll": impact_roll,
-            "impact_threshold": CHARGE_IMPACT_TRIGGER_THRESHOLD,
-            "impact_hit_result": impact_hit_result,
-            "mortal_wounds": mortal_wounds,
-            "ability_display_name": impact_ability_display_name,
-            "attackerCol": dest_col,
-            "attackerRow": dest_row,
-            "targetCol": target_col,
-            "targetRow": target_row,
-            "reward": 0.0,
-            "timestamp": "server_time",
-            "is_ai_action": unit["player"] == 1,
-            },
-        )
-        add_console_log(game_state, impact_message)
+    _apply_charge_impact(game_state, unit, target_id, dest_col, dest_row, target_col, target_row, current_turn)
 
     # Clear preview
     charge_clear_preview(game_state)
