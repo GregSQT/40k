@@ -93,11 +93,17 @@ export type ChargeMinRollOverlay = {
 export function buildChargeMinRollOverlay(
   distanceSubhexRaw: number,
   chargeMaxInches: number,
-  inchesToSubhex: number
+  inchesToSubhex: number,
+  engagementSubhex: number = 0
 ): ChargeMinRollOverlay {
   const scale = Math.max(1, Math.floor(inchesToSubhex));
   const maxSubhex = chargeMaxInches * scale;
   const dSub = Math.floor(distanceSubhexRaw);
+  // Charger ne demande pas de TOUCHER la cible : il suffit de finir dans l'Engagement Range.
+  // Le mouvement réellement nécessaire ne couvre donc que la distance AU-DELÀ de l'EZ, et le
+  // jet minimum reflète (distance empreintes − EZ) — sinon le badge surestime de ~2".
+  const ezSub = Math.max(0, Math.floor(engagementSubhex));
+  const moveNeededSubhex = Math.max(0, distanceSubhexRaw - ezSub);
 
   if (dSub <= 0) {
     return {
@@ -105,18 +111,18 @@ export function buildChargeMinRollOverlay(
       tooltipText: "Empreintes adjacentes ou superposées : charge impossible vers cette cible.",
     };
   }
-  if (distanceSubhexRaw > maxSubhex) {
-    const approxIn = Math.ceil(distanceSubhexRaw / scale);
+  if (moveNeededSubhex > maxSubhex) {
+    const approxIn = Math.ceil(moveNeededSubhex / scale);
     return {
       primaryText: "—",
-      tooltipText: `Distance minimale ≈ ${approxIn}″ (${dSub} pas sous-hex) : au-delà du maximum du jet 2D6 (${chargeMaxInches}″).`,
+      tooltipText: `Mouvement minimal ≈ ${approxIn}″ pour engager : au-delà du maximum du jet 2D6 (${chargeMaxInches}″).`,
     };
   }
-  // Jet 2D6 (2–12) en pouces ; minimum pour couvrir la distance en sous-hex.
-  const minRollInches = Math.max(2, Math.ceil(distanceSubhexRaw / scale));
+  // Jet 2D6 (2–12) en pouces ; minimum pour engager (distance empreintes − EZ).
+  const minRollInches = Math.max(2, Math.ceil(moveNeededSubhex / scale));
   return {
     primaryText: `${minRollInches}+`,
-    tooltipText: `Jet 2D6 minimum : ${minRollInches}+ pour couvrir environ ${minRollInches}″ entre empreintes (1″ = ${scale} pas de grille ; ${dSub} pas mesurés).`,
+    tooltipText: `Jet 2D6 minimum : ${minRollInches}+ pour engager (distance empreintes ${dSub} pas − EZ ${ezSub} pas ; 1″ = ${scale} pas).`,
   };
 }
 

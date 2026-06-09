@@ -1799,6 +1799,15 @@ export class UnitRenderer {
           : 10;
       const inchesToSubhex = Math.max(1, Math.floor(inchesToSubhexRaw));
       const chargeMaxSubhex = chargeMaxInches * inchesToSubhex;
+      // Engagement Range en sous-hex (le moteur expose engagement_zone scalé, souvent 10 = 2").
+      // Repli sur 2× inches_to_subhex si la config locale reste à 1 (même logique que BoardPvp).
+      const ezRules = (
+        this.props.gameState as
+          | { config?: { game_rules?: { engagement_zone?: number } } }
+          | undefined
+      )?.config?.game_rules?.engagement_zone;
+      const engagementSubhex =
+        typeof ezRules === "number" && ezRules > 1 ? ezRules : inchesToSubhex * 2;
       // Distance figurine-la-plus-proche : empreinte union de chaque squad depuis les centres
       // de figs vivants (units_cache.occupied_hexes_by_model), pas l'ancre du squad.
       const unitsCacheForFootprint = this.props.gameState?.units_cache as
@@ -1815,7 +1824,8 @@ export class UnitRenderer {
                 chargeMaxSubhex
               ),
               chargeMaxInches,
-              inchesToSubhex
+              inchesToSubhex,
+              engagementSubhex
             )
           : null;
 

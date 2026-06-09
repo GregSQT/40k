@@ -1131,6 +1131,22 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
     else:
         active_charge_unit_exists = bool(game_state["active_charge_unit"])
 
+    # Refresh / désync : si le frontend a perdu son mode (reload de page) alors que CE chargeur est
+    # déjà l'unité active côté backend, un left_click nu doit le RÉ-ACTIVER (reconstruit le preview
+    # des cibles : reuse du jet roll-first + clignotement). N'affecte pas le commit, qui porte
+    # toujours targetId(s)/destCol/plan.
+    _act_cu = game_state.get("active_charge_unit")
+    if (
+        action_type == "left_click"
+        and _act_cu is not None
+        and str(_act_cu) == str(unit_id)
+        and "targetId" not in action
+        and "targetIds" not in action
+        and "destCol" not in action
+        and "plan" not in action
+    ):
+        return _handle_unit_activation(game_state, active_unit, config)
+
     if not active_charge_unit_exists and action_type in ["charge", "left_click"]:
         if is_gym_training:
             # AI_TURN.md COMPLIANCE: In gym training, ActionDecoder may construct complete charge action
@@ -1802,7 +1818,47 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
 
     # Check if valid targets exist
     if not valid_targets:
-        # No valid targets - pass (no step increment, no tracking)
+        if charge_roll is not None:
+            # V11 RAW (roll-first) : l'unité a DÉCLARÉ une charge en s'activant et le jet
+            # n'atteint aucune cible → charge ÉCHOUÉE, unité consommée (pas un simple wait
+            # qui la laisserait re-jeter). Badge d'échec côté UI (chemin charge_failed).
+            if "current_turn" not in game_state:
+                current_turn = 1
+            else:
+                current_turn = game_state["current_turn"]
+            append_action_log(
+                game_state,
+                {
+                    "type": "charge_fail",
+                    "message": f"Unit {unit['id']} FAILED charge (Roll: {charge_roll} too short to reach any target)",
+                    "turn": current_turn,
+                    "phase": "charge",
+                    "unitId": unit["id"],
+                    "player": unit["player"],
+                    "charge_roll": charge_roll,
+                    "charge_failed": True,
+                    "timestamp": "server_time",
+                },
+            )
+            if unit_id in game_state["charge_roll_values"]:
+                del game_state["charge_roll_values"][unit_id]
+            charge_clear_preview(game_state)
+            current_pos = require_unit_position(unit, game_state)
+            result = end_activation(game_state, unit, PASS, 1, PASS, CHARGE, 0)
+            result.update({
+                "action": "charge_fail",
+                "unitId": unit["id"],
+                "charge_roll": charge_roll,
+                "charge_failed": True,
+                "charge_failed_reason": "roll_too_short",
+                "start_pos": current_pos,
+                "end_pos": current_pos,
+                "activation_complete": True,
+            })
+            if not game_state["charge_activation_pool"]:
+                result.update(charge_phase_end(game_state))
+            return True, result
+        # Gym (jet-après) : aucune cible atteignable = pass neutre (comportement inchangé).
         return _handle_skip_action(game_state, unit, had_valid_destinations=False)
 
     # Extract target IDs for blinking effect (PvP and PvE modes only)

@@ -2955,6 +2955,86 @@ export const BoardWithAPI: React.FC = () => {
         <div className="turn-phase-tracker-right">Loading game configuration...</div>
       )}
 
+      {/* Barre d'action charge (V11 multi-cibles) : Cancel + Charger, même emplacement/style que
+          move/shoot. Affichée pendant la sélection des cibles (mode chargeTargetSelect). */}
+      {apiProps.gameState?.phase === "charge" &&
+        apiProps.mode === "chargeTargetSelect" &&
+        apiProps.selectedUnitId != null && (
+        <div
+          className="squad-action-bar"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            background: "#1f2937",
+            border: "1px solid #555",
+            borderRadius: "8px",
+            padding: 8,
+            marginTop: -6,
+            marginBottom: 2,
+          }}
+        >
+          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => {
+                if (!isGameOver) apiProps.onCancelCharge?.();
+              }}
+              style={{
+                border: "1px solid rgba(0,0,0,0.35)",
+                borderRadius: 6,
+                background: "#6b7280",
+                boxShadow: "0 6px 0 #374151",
+                color: "#fff",
+                cursor: "pointer",
+                fontSize: 14,
+                fontWeight: 700,
+                padding: "8px 14px",
+                width: 110,
+                textAlign: "center",
+              }}
+            >
+              Cancel
+            </button>
+            {(() => {
+              const nbTargets = apiProps.chargePreviewTargetIds?.length ?? 0;
+              const canCharge = nbTargets > 0;
+              return (
+                <button
+                  type="button"
+                  disabled={!canCharge}
+                  onClick={() => {
+                    if (!isGameOver && canCharge && apiProps.selectedUnitId != null) {
+                      apiProps.onValidateCharge?.(apiProps.selectedUnitId);
+                    }
+                  }}
+                  style={{
+                    border: "1px solid rgba(0,0,0,0.35)",
+                    borderRadius: 6,
+                    background: canCharge ? "#7c3aed" : "rgba(75,85,99,0.55)",
+                    boxShadow: canCharge ? "0 6px 0 #4c1d95" : "none",
+                    color: canCharge ? "#fff" : "rgba(229,231,235,0.5)",
+                    cursor: canCharge ? "pointer" : "not-allowed",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    padding: "8px 14px",
+                    width: 110,
+                    textAlign: "center",
+                    opacity: canCharge ? 1 : 0.6,
+                  }}
+                >
+                  Charger
+                </button>
+              );
+            })()}
+            <span style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 600, marginLeft: 4 }}>
+              {apiProps.chargePreviewTargetIds?.length ?? 0} cible
+              {(apiProps.chargePreviewTargetIds?.length ?? 0) > 1 ? "s" : ""} déclarée
+              {(apiProps.chargePreviewTargetIds?.length ?? 0) > 1 ? "s" : ""}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Barre d'action move : Cancel/Validate (moitié gauche) + boutons de mode (moitié droite).
           Affichée dès l'activation (movePreview) et en plan par-figurine (squadModelMove). */}
       {apiProps.gameState?.phase === "move" &&
