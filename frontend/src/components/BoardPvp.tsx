@@ -3794,6 +3794,38 @@ export default function Board({
           overlay.endFill();
         }
       }
+      // 03.04 : voile cible par UNITÉ pendant la charge per-fig — ROUGE = cible non satisfaite
+      // (aucune fig chargeant à ≤ EZ), VIOLET = satisfaite (≥ 1 fig engagée). Backend fournit les
+      // deux listes dans chargeMovePlan ; redraw via la dep chargeMovePlan de cet effet.
+      const RED = 0xef4444;
+      const GREEN = 0x22c55e;
+      const ucTargets = (
+        gameState as unknown as {
+          units_cache?: Record<
+            string,
+            { occupied_hexes_by_model?: Record<string, [number, number]> }
+          >;
+        }
+      )?.units_cache;
+      const drawTargetVeil = (uid: number, color: number) => {
+        const tu = units.find((u) => String(u.id) === String(uid));
+        if (!tu) return;
+        const tBase = resolveBaseSizeForUnitDisplay(tu);
+        const tR = tBase > 1 ? (tBase * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
+        const tByModel = ucTargets?.[String(uid)]?.occupied_hexes_by_model;
+        const positions: Array<[number, number]> = tByModel
+          ? Object.values(tByModel)
+          : [[tu.col, tu.row]];
+        overlay.lineStyle(0);
+        for (const [c, r] of positions) {
+          const [cx, cy] = hexCenter(c, r);
+          overlay.beginFill(color, 0.4);
+          overlay.drawCircle(cx, cy, tR);
+          overlay.endFill();
+        }
+      };
+      for (const uid of chargeMovePlan.unsatisfiedTargets) drawTargetVeil(uid, RED);
+      for (const uid of chargeMovePlan.satisfiedTargets) drawTargetVeil(uid, GREEN);
     }
     return () => {
       if (!overlay.destroyed) {
