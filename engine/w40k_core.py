@@ -309,6 +309,7 @@ class W40KEngine(gym.Env):
             self.config = {
                 "board": board_config,
                 "game_rules": require_key(game_config, "game_rules"),
+                "move": require_key(game_config, "move"),
                 "charge": require_key(game_config, "charge"),
                 "units": scenario_units,
                 "name": scenario_name,  # Store scenario name for logging

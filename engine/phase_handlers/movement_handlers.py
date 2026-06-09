@@ -1271,6 +1271,9 @@ def _build_multi_hex_vectorized(
     enemy_adjacent_hexes: Set[Tuple[int, int]],
     enemy_items: Optional[List[Tuple[Any, Any]]],
     ez: int,
+    thru_ez: bool,
+    thru_enemy: bool,
+    thru_friendly: bool,
     fly: bool = False,
 ) -> Tuple[List[Tuple[int, int]], Set[Tuple[int, int]], int]:
     """BFS/disk multi-hex vectorisé NumPy (``ground`` et ``fly``). Gère toutes les formes de socles.
@@ -1279,10 +1282,10 @@ def _build_multi_hex_vectorized(
 
     Invariants de sémantique (équivalence stricte avec le BFS Python hex orig.) :
 
-    - **Bounds + walls + enemy_occupied** : filtre de traversée. L'empreinte doit tenir dans le
-      plateau et ne chevaucher ni mur ni cellule occupée par un ennemi. Une ancre invalide ne
-      peut pas être traversée par le BFS.
-    - **Engagement zone** :
+    - **Bounds + walls + traversée** : l'empreinte doit tenir dans le plateau et ne chevaucher
+      aucun mur. Les figs ennemies (``thru_enemy``), amies (``thru_friendly``) et la bande d'EZ
+      (``thru_ez``) ne bloquent la traversée que si le toggle config correspondant est ``False``.
+    - **Engagement zone** (toujours exclue de la **destination**, ``valid_mask & ~eng_bad``) :
         * ``ez <= 1`` : ``enemy_adjacent_hexes`` déjà pré-dilaté par ``build_enemy_adjacent_hexes``.
           Une ancre viole l'engagement ssi une cellule de son empreinte est dans cet ensemble.
         * ``ez > 1`` (Board ×10) :
@@ -1368,7 +1371,12 @@ def _build_multi_hex_vectorized(
     obstacles_dest_mask = _mask_from_cells(obstacles_dest_any)
     obstacles_traverse_mask: np.ndarray = obstacles_dest_mask
     if not fly:
-        obstacles_traverse = walls_set | enemy_occupied_set
+        # Traversée selon toggles : murs toujours bloquants ; figs ennemies/amies selon config.
+        obstacles_traverse = set(walls_set)
+        if not thru_enemy:
+            obstacles_traverse |= enemy_occupied_set
+        if not thru_friendly:
+            obstacles_traverse |= (occupied_set - enemy_occupied_set)
         obstacles_traverse_mask = _mask_from_cells(obstacles_traverse)
 
     def _bounds_bad_parity(offsets_arr: "np.ndarray") -> "np.ndarray":
@@ -1426,7 +1434,8 @@ def _build_multi_hex_vectorized(
         reach = cube_d <= np.int64(move_range)
         valid_mask = reach & ~bad_dest & ~eng_bad
     else:
-        traverse_bad = bad_traverse | eng_bad
+        # EZ traversable selon toggle ; toujours exclue de la destination (unengaged 09.05).
+        traverse_bad = bad_traverse if thru_ez else (bad_traverse | eng_bad)
 
         # Deque BFS : visite uniquement les ancres accessibles — O(reachable) au lieu de
         # O(move_range × board_cols × board_rows) pour le wavefront NumPy.
@@ -1465,7 +1474,7 @@ def _build_multi_hex_vectorized(
                 reach[nc, nr] = True
                 _bfs_queue.append((nc, nr, nd))
 
-        valid_mask = reach & ~bad_dest
+        valid_mask = reach & ~bad_dest & ~eng_bad
     valid_mask[start_col, start_row] = False
 
     valid_coords_cols, valid_coords_rows = np.where(valid_mask)
@@ -1509,6 +1518,27 @@ def _advance_roll_for(squad_id: str, game_state: Dict[str, Any]) -> Optional[int
     return int(roll) if roll is not None else None
 
 
+def _get_move_traversal_rules(game_state: Dict[str, Any]) -> Tuple[bool, bool, bool]:
+    """Lit les 3 toggles de traversée depuis ``config["move"]`` (Règles 03.01).
+
+    Retourne ``(thru_ez, thru_enemy, thru_friendly)`` :
+      - ``can_move_through_enemy_engagement_zone`` : traverser la bande d'EZ ennemie.
+      - ``can_move_through_enemy_model`` : traverser une figurine ennemie.
+      - ``can_move_through_friendly_model`` : traverser une figurine amie.
+
+    Ces toggles ne concernent QUE la traversée (pathfinding). Finir son move sur une case
+    occupée ou dans l'EZ ennemie reste toujours interdit (occupation 03.01 / unengaged 09.05),
+    indépendamment de ces valeurs. Pas de défaut : clé manquante = erreur explicite.
+    """
+    config = require_key(game_state, "config")
+    move_rules = require_key(config, "move")
+    return (
+        bool(require_key(move_rules, "can_move_through_enemy_engagement_zone")),
+        bool(require_key(move_rules, "can_move_through_enemy_model")),
+        bool(require_key(move_rules, "can_move_through_friendly_model")),
+    )
+
+
 @profile_move_pool_build
 def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str) -> List[Tuple[int, int]]:
     """
@@ -1519,11 +1549,11 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
     Pre-computes enemy adjacent hexes and occupied positions once at BFS start for O(1) lookups.
 
-    Ground (non-Fly): BFS never steps through an enemy engagement hex — those neighbors are
-    rejected before enqueue (``enemy_adjacent_hexes`` / ``_movement_engagement_violates`` on the
-    footprint). You cannot cross that band to reach hexes beyond it without Fly. Ally-occupied
-    hexes may be traversed but the footprint cannot end on any occupied hex; enemy-occupied
-    hexes block traversal.
+    Ground (non-Fly): la traversée suit les toggles ``config["move"]`` (``_get_move_traversal_rules``) :
+    figs ennemies (``can_move_through_enemy_model``), amies (``can_move_through_friendly_model``)
+    et bande d'EZ (``can_move_through_enemy_engagement_zone``) ne bloquent le pas du BFS que si
+    le toggle est ``False``. La destination, elle, ne peut JAMAIS finir sur une case occupée
+    (03.01) ni dans l'EZ ennemie (unengaged, 09.05), quels que soient les toggles.
 
     Fly: exploration ignores walls and occupation along the path; walls, occupation and engagement
     are enforced on the destination footprint only (see fly branch below).
@@ -1568,6 +1598,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     )
     units_cache = require_key(game_state, "units_cache")
     ez = get_engagement_zone(game_state)
+    _thru_ez, _thru_enemy, _thru_friendly = _get_move_traversal_rules(game_state)
     _mover_player_int = int(require_key(unit, "player"))
     # ez > 1 : une seule liste d’ennemis pour ``_movement_engagement_violates`` (évite O(units)×BFS).
     _enemy_items_for_engagement_ez: Optional[List[Tuple[Any, Any]]] = None
@@ -1692,6 +1723,9 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 enemy_adjacent_hexes=enemy_adjacent_hexes,
                 enemy_items=_enemy_items_for_engagement_ez,
                 ez=ez,
+                thru_ez=_thru_ez,
+                thru_enemy=_thru_enemy,
+                thru_friendly=_thru_friendly,
             )
             _m_bfs_end = _perf_clock.perf_counter() if _pt else None
             game_state["valid_move_destinations_pool"] = valid_destinations
@@ -1861,6 +1895,12 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     _bcols = board_cols
     _brows = board_rows
 
+    # Toggles de traversée (config["move"]). La destination exclut toujours occupé + EZ.
+    _check_enemy = not _thru_enemy
+    _check_friendly = not _thru_friendly
+    _check_ez = not _thru_ez
+    _friendly_occ = (_occupied - _enemy_occ) if _check_friendly else frozenset()
+
     _m_bfs_start = _perf_clock.perf_counter() if _pt else None
     if is_single_hex:
         while queue:
@@ -1888,16 +1928,19 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                     continue
                 if nb in _walls:
                     continue
-                if nb in _enemy_occ:
+                if _check_enemy and nb in _enemy_occ:
                     continue
-                if nb in _enemy_adj:
+                if _check_friendly and nb in _friendly_occ:
+                    continue
+                if _check_ez and nb in _enemy_adj:
                     blocked_enemy_adjacent_count += 1
                     continue
                 _vis[_vidx] = 1
                 visited_n += 1
                 queue.append((nb, nd))
-                # Traversal may pass through allied hexes; cannot end on any occupied cell.
-                if nb != start_pos and nb not in _occupied:
+                # Traversal selon toggles ; la destination ne peut jamais finir sur une case
+                # occupée (03.01) ni dans l'EZ ennemie (unengaged, 09.05).
+                if nb != start_pos and nb not in _occupied and nb not in _enemy_adj:
                     valid_destinations.append(nb)
     else:
         # Multi-hex units: pre-compute footprint offsets ONCE, then translate
@@ -1927,6 +1970,9 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             enemy_adjacent_hexes=_enemy_adj,
             enemy_items=_enemy_items_for_engagement_ez,
             ez=ez,
+            thru_ez=_thru_ez,
+            thru_enemy=_thru_enemy,
+            thru_friendly=_thru_friendly,
         )
 
     _m_bfs_end = _perf_clock.perf_counter() if _pt else None
@@ -2035,9 +2081,10 @@ def movement_build_model_destinations_pool(
     courante de la figurine dans models_cache (= position de debut de phase, car
     les moves par-figurine ne sont pas committes avant Validate).
 
-    Sol (non-Fly) : ne traverse jamais mur / hex occupe par un ennemi / bande
-    d'engagement ennemie (enemy_adjacent_hexes). Les hexes allies sont
-    traversables. Fly : traversal libre, seule la destination est validee.
+    Sol (non-Fly) : ne traverse jamais un mur ; les figs ennemies, amies et la bande
+    d'engagement ennemie ne bloquent la traversee que selon les toggles config["move"]
+    (_get_move_traversal_rules). Desperate Escape (09.07) traverse les figs ennemies.
+    Fly : traversal libre, seule la destination est validee.
 
     Destination retenue selon les memes regles que validate_move_plan (1 fig,
     sans coherency) : dans le plateau, hors mur, hors collision avec une AUTRE
@@ -2122,6 +2169,7 @@ def movement_build_model_destinations_pool(
     # ez <= 1 (legacy) : dilatation hex pré-calculée (``enemy_adjacent_hexes``), traitée comme la
     #   géométrie (dilatée par l'empreinte dans le filtre multi-hex) — comportement inchangé.
     ez = get_engagement_zone(game_state)
+    thru_ez, thru_enemy, thru_friendly = _get_move_traversal_rules(game_state)
     if ez > 1:
         import numpy as np
         units_cache = require_key(game_state, "units_cache")
@@ -2140,6 +2188,15 @@ def movement_build_model_destinations_pool(
         ez_anchor_forbidden = enemy_adjacent_hexes
         dest_blocked = wall_hexes | other_occupied | same_squad_occupied | enemy_adjacent_hexes
 
+    # Traversée selon toggles config["move"]. Desperate Escape (09.07) traverse les figs ennemies
+    # quoi qu'il arrive. La destination (dest_blocked + ez_anchor_forbidden) reste inchangée :
+    # jamais sur une case occupée, jamais dans l'EZ ennemie.
+    _friendly_traverse = (
+        (other_occupied | same_squad_occupied) - enemy_occupied
+        if not thru_friendly
+        else frozenset()
+    )
+
     visited: Set[Tuple[int, int]] = {start_pos}
     reachable: List[Tuple[int, int]] = []
     queue: deque = deque([(start_col, start_row, 0)])
@@ -2156,7 +2213,11 @@ def movement_build_model_destinations_pool(
             if not has_fly:
                 if cell in wall_hexes:
                     continue
-                if not desperate_escape and (cell in enemy_occupied or cell in ez_anchor_forbidden):
+                if not (desperate_escape or thru_enemy) and cell in enemy_occupied:
+                    continue
+                if not thru_friendly and cell in _friendly_traverse:
+                    continue
+                if not (desperate_escape or thru_ez) and cell in ez_anchor_forbidden:
                     continue
             visited.add(cell)
             queue.append((nc, nr, d + 1))

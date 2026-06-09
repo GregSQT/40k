@@ -29,3 +29,14 @@ def build_game_rules(**overrides: Any) -> Dict[str, Any]:
     rules = _real_game_rules()
     rules.update(overrides)
     return rules
+
+
+def _real_move_rules() -> Dict[str, Any]:
+    return json.loads(_CONFIG_PATH.read_text())["move"]
+
+
+def build_move_rules(**overrides: Any) -> Dict[str, Any]:
+    """``move`` réels (toggles de traversée, Règles 03.01) + overrides de test."""
+    rules = _real_move_rules()
+    rules.update(overrides)
+    return rules

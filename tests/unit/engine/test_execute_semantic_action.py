@@ -15,6 +15,8 @@ import pytest
 from engine.w40k_core import W40KEngine
 from engine.phase_handlers.shared_utils import build_units_cache, build_enemy_adjacent_hexes
 
+from _config_helpers import build_move_rules
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -28,6 +30,7 @@ def _base_config() -> Dict[str, Any]:
             "los_visibility_min_ratio": 0.0,
             "cover_ratio": 0.0,
         },
+        "move": build_move_rules(),
         "charge": {
             "charge_max_distance": 12,
         },

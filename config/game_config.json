@@ -20,6 +20,11 @@
     },
     "max_base_size_hex": 35
   },
+  "move": {
+    "can_move_through_enemy_engagement_zone": true,
+    "can_move_through_enemy_model": false,
+    "can_move_through_friendly_model": true
+  },
   "charge": {
     "charge_max_distance": 12,
     "select_target_before_roll": false

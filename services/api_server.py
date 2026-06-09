@@ -1250,6 +1250,7 @@ def initialize_engine(scenario_file: Optional[str] = None):
         config = {
             "board": board_config,
             "game_rules": require_key(game_config, "game_rules"),
+            "move": require_key(game_config, "move"),
             "charge": require_key(game_config, "charge"),
             "units": scenario_units,
             "primary_objective": primary_objective_config,
@@ -1422,6 +1423,7 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
         config = {
             "board": board_config,
             "game_rules": require_key(game_config, "game_rules"),
+            "move": require_key(game_config, "move"),
             "charge": require_key(game_config, "charge"),
             "units": scenario_units,
             "primary_objective": primary_objective_config,

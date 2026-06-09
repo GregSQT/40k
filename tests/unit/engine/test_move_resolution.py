@@ -7,6 +7,8 @@ from typing import Any, Dict, List
 from engine.phase_handlers.movement_handlers import movement_build_valid_destinations_pool
 from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache
 
+from _config_helpers import build_move_rules
+
 
 def _unit(uid: int, player: int, col: int, row: int, move: int = 3, fly: bool = False) -> Dict[str, Any]:
     keywords = [{"keywordId": "fly"}] if fly else []
@@ -43,6 +45,7 @@ def _make_game_state(
     gs: Dict[str, Any] = {
         "config": {
             "game_rules": {"engagement_zone": engagement_zone, "max_base_size_hex": 35},
+            "move": build_move_rules(),
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },
         "board_cols": 25,

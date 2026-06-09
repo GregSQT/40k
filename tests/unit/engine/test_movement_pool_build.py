@@ -15,6 +15,8 @@ from engine.phase_handlers.movement_handlers import (
 from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache
 from shared.data_validation import require_key
 
+from _config_helpers import build_move_rules
+
 
 def _board_config() -> Dict[str, Any]:
     return {
@@ -22,6 +24,7 @@ def _board_config() -> Dict[str, Any]:
             "engagement_zone": 10,
             "max_base_size_hex": 35,
         },
+        "move": build_move_rules(),
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
     }
 
@@ -255,6 +258,7 @@ def _run_pool(
     units = [_fill(u) for u in units]
     config = {
         "game_rules": {"engagement_zone": ez, "max_base_size_hex": 35},
+        "move": build_move_rules(),
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
     }
     game_state: Dict[str, Any] = {
@@ -280,9 +284,10 @@ def _oracle_pool(
     unit_id: str,
     ez: int,
 ) -> Set[Tuple[int, int]]:
-    """Oracle brute-force : énumère chaque ancre valide selon la sémantique de référence
-    (``_movement_engagement_violates`` + bounds + walls + occupation). Équivaut à un BFS
-    exhaustif dans la limite des ``MOVE`` via expansion itérative hex.
+    """Oracle brute-force : énumère chaque ancre valide selon la sémantique de référence V11.
+    Traversée = bounds + walls + figs ennemies (l'EZ est traversable, toggle
+    ``can_move_through_enemy_engagement_zone``). Destination = empreinte hors occupation ET
+    hors EZ ennemie (``_movement_engagement_violates``). BFS exhaustif borné par ``MOVE``.
     """
     from engine.hex_utils import precompute_footprint_offsets
 
@@ -324,6 +329,7 @@ def _oracle_pool(
     ]
 
     def _anchor_traversable(ac: int, ar: int) -> bool:
+        # Traversée V11 : bounds + murs + figs ennemies. L'EZ ne bloque PLUS la traversée.
         offs = off_even if (ac & 1) == 0 else off_odd
         for dc, dr in offs:
             fc, fr = ac + dc, ar + dr
@@ -331,8 +337,12 @@ def _oracle_pool(
                 return False
             if (fc, fr) in walls or (fc, fr) in enemy_occupied:
                 return False
+        return True
+
+    def _anchor_in_enemy_ez(ac: int, ar: int) -> bool:
+        offs = off_even if (ac & 1) == 0 else off_odd
         fp = {(ac + dc, ar + dr) for dc, dr in offs}
-        return not _movement_engagement_violates(
+        return _movement_engagement_violates(
             game_state, unit, ac, ar, fp, units_cache, None,
             enemy_cache_items=enemy_items, engagement_zone_ez=ez,
         )
@@ -361,12 +371,12 @@ def _oracle_pool(
         current = next_level
 
     reach.discard((start_c, start_r))
-    # Retire les ancres dont l'empreinte chevauche une cellule occupée (allié ou ennemi).
+    # Destination : empreinte hors occupation (allié ou ennemi) ET hors EZ ennemie (unengaged).
     valid: Set[Tuple[int, int]] = set()
     for ac, ar in reach:
         offs = off_even if (ac & 1) == 0 else off_odd
         fp = {(ac + dc, ar + dr) for dc, dr in offs}
-        if not (fp & occupied):
+        if not (fp & occupied) and not _anchor_in_enemy_ez(ac, ar):
             valid.add((ac, ar))
     return valid
 
@@ -445,6 +455,7 @@ def test_movement_build_valid_destinations_pool_deterministic() -> None:
     game_state: Dict[str, Any] = {
         "config": {
             "game_rules": {"engagement_zone": 1},
+            "move": build_move_rules(),
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },
         "board_cols": 20,
