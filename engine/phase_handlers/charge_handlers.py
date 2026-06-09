@@ -1155,10 +1155,10 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
 
     elif action_type == "charge":
         # Route based on what's in the action:
-        # - If targetId but no destCol/destRow -> target selection (roll, build pool, preview)
+        # - If targetId(s) but no destCol/destRow -> target selection (roll, build pool, preview)
         # - If destCol/destRow -> destination selection (execute charge)
-        if "targetId" in action and "destCol" not in action:
-            # Target selection step
+        if ("targetIds" in action or "targetId" in action) and "destCol" not in action:
+            # Target selection step (validation des cibles déclarées)
             return charge_target_selection_handler(game_state, unit_id, action)
         elif "destCol" in action and "destRow" in action:
             # Destination selection step
@@ -1598,7 +1598,7 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
     return True, result
 
 
-def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, Any], dest_col: int, dest_row: int, target_id: str, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, Any], dest_col: int, dest_row: int, target_ids: List[str], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     AI_TURN.md charge execution with destination validation.
 
@@ -1647,7 +1647,7 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
 
     # Validate destination per AI_TURN.md charge rules
     _t_valid0 = time.perf_counter() if _perf else None
-    if not _is_valid_charge_destination(game_state, dest_col, dest_row, unit, target_id, charge_roll, config):
+    if not _is_valid_charge_destination(game_state, dest_col, dest_row, unit, target_ids, charge_roll, config):
         return False, {"error": "invalid_charge_destination", "target": (dest_col, dest_row), "action": "charge"}
     _t_valid1 = time.perf_counter() if _perf else None
 
@@ -1765,7 +1765,8 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     return True, {
         "action": "charge",
         "unitId": unit["id"],
-        "targetId": target_id,
+        "targetId": target_ids[0],
+        "targetIds": target_ids,
         "fromCol": orig_col,
         "fromRow": orig_row,
         "toCol": dest_col,
@@ -1775,7 +1776,7 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
 
 
 def _is_valid_charge_destination(game_state: Dict[str, Any], col: int, row: int, unit: Dict[str, Any],
-                                 target_id: str, charge_roll: int, config: Dict[str, Any]) -> bool:
+                                 target_ids: List[str], charge_roll: int, config: Dict[str, Any]) -> bool:
     """
     AI_TURN.md charge destination validation.
 
@@ -2662,12 +2663,16 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
     _turn = game_state.get("turn", "?")
     _t_tsel0 = time.perf_counter() if _perf else None
 
-    if "targetId" not in action:
-        raise KeyError(f"Action missing required 'targetId' field: {action}")
-
-    target_id = action["targetId"]
-    if target_id is None:
+    # Multi-cibles V11 : ``targetIds`` (liste, validation par le clic « Charge ») prioritaire ;
+    # ``targetId`` (cible unique) accepté pour rétro-compat (PvE/gym/legacy).
+    if "targetIds" in action and action["targetIds"]:
+        _raw_targets = list(action["targetIds"])
+    elif "targetId" in action and action["targetId"] is not None:
+        _raw_targets = [action["targetId"]]
+    else:
         return False, {"error": "missing_target", "action": "charge"}
+    target_ids = [str(t) for t in _raw_targets]
+    target_id = target_ids[0]  # 1ère cible déclarée — sert aux messages/retours d'affichage
 
     unit = get_unit_by_id(game_state, unit_id)
     if not unit:
@@ -2687,99 +2692,61 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
     game_state["charge_roll_values"][unit_id] = charge_roll
     _charge_scale = game_state["inches_to_subhex"]
     charge_roll_subhex = charge_roll * _charge_scale
-    # Store target_id for destination selection
+    # Store the declared target LIST for destination selection (V11 multi-cibles).
     if "charge_target_selections" not in game_state:
         game_state["charge_target_selections"] = {}
-    game_state["charge_target_selections"][unit_id] = target_id
-    
+    game_state["charge_target_selections"][unit_id] = target_ids
+
     # Clear pending targets after selection
     if "pending_charge_targets" in game_state:
         del game_state["pending_charge_targets"]
     if "pending_charge_unit_id" in game_state:
         del game_state["pending_charge_unit_id"]
 
-    # Build pool with actual roll for THIS SPECIFIC TARGET — zone cible-centrée
-    # (spec utilisateur) : anneau autour de la cible [1 .. diamètre_chargeur + engagement_zone]
-    # filtré par distance ≤ charge_roll depuis l'hex du chargeur le plus proche de la cible.
+    # Pool multi-cibles : ancres atteignables dont l'empreinte engage EXACTEMENT l'ensemble déclaré
+    # (toutes les cibles, aucun ennemi non-cible) — moteur 1a (``eng == declared``). Puis préférence
+    # socle-à-socle avec ≥1 cible déclarée. La zone violette d'affichage vient de l'union des
+    # empreintes finales légales (``_charge_footprint_union_for_anchors``), pas d'une zone théorique.
     _ref_c, _ref_r = require_unit_position(unit, game_state)
     charge_reference_hex: Tuple[int, int] = (int(_ref_c), int(_ref_r))
-    target_unit_entry = get_unit_by_id(game_state, target_id)
-    if (
-        not target_unit_entry
-        or target_unit_entry["player"] == unit["player"]
-        or not is_unit_alive(str(target_unit_entry["id"]), game_state)
-    ):
-        display_zone_set: Set[Tuple[int, int]] = set()
-        valid_pool: List[Tuple[int, int]] = []
-    else:
-        _t_zone0 = time.perf_counter() if _perf else None
-        display_zone_set, closest_ch = _compute_charge_preview_zone(
-            game_state, unit, target_unit_entry, int(charge_roll_subhex)
-        )
-        _t_zone1 = time.perf_counter() if _perf else None
-        charge_reference_hex = (int(closest_ch[0]), int(closest_ch[1]))
-        # Ancres géométriques (anneau cible + portée depuis l’hex allié le plus proche).
-        _t_anch0 = time.perf_counter() if _perf else None
-        zone_anchors = _build_charge_anchors_in_zone(
-            game_state, unit, target_unit_entry, display_zone_set, int(charge_roll_subhex)
-        )
-        _t_anch1 = time.perf_counter() if _perf else None
-        # BFS : chaque pas vérifie murs + empreintes (autres unités) — impossible de « traverser »
-        # un mur ou un socle (allié ou ennemi) comme si c’était du vide. On garde l’intersection
-        # avec la zone cible-centrée pour respecter la spec d’affichage autour de la cible.
+    target_entries: List[Dict[str, Any]] = []
+    valid_pool: List[Tuple[int, int]] = []
+    _targets_ok = True
+    for _tid in target_ids:
+        _te = get_unit_by_id(game_state, _tid)
+        if not _te or _te["player"] == unit["player"] or not is_unit_alive(str(_te["id"]), game_state):
+            _targets_ok = False
+            break
+        target_entries.append(_te)
+    if _targets_ok and target_entries:
         _t_bfs0 = time.perf_counter() if _perf else None
-        _game_rules_tsel = require_key(require_key(game_state, "config"), "game_rules")
-        _CHARGE_MAX_DIST_TSEL = require_key(require_key(game_state["config"], "charge"), "charge_max_distance")
-        _activation_key_tsel = (str(unit_id), _CHARGE_MAX_DIST_TSEL, None, _CHARGE_DEST_BFS_CACHE_SCHEMA)
-        _activation_entry_tsel = game_state["_charge_dest_bfs_cache"].get(_activation_key_tsel)
-        _bfs_fast_path = False
-        bfs_reachable: List[Tuple[int, int]] = []
-        if _activation_entry_tsel is not None and isinstance(_activation_entry_tsel, tuple):
-            _extra_tsel = (
-                _charge_bfs_max_distance(game_state, str(unit_id), int(charge_roll_subhex), str(target_id))
-                - int(charge_roll_subhex)
-            )
-            _effective_max_tsel = int(charge_roll_subhex) + _extra_tsel
-            if _effective_max_tsel <= _CHARGE_MAX_DIST_TSEL:
-                _, _pos_dist_engage_tsel = _activation_entry_tsel
-                _str_tid_tsel = str(target_id)
-                bfs_reachable = [
-                    pos for pos, (d, eng) in _pos_dist_engage_tsel.items()
-                    if d <= _effective_max_tsel and _str_tid_tsel in eng
-                ]
-                _bfs_fast_path = True
-        if not _bfs_fast_path:
-            bfs_reachable = charge_build_valid_destinations_pool(
-                game_state,
-                str(unit_id),
-                int(charge_roll_subhex),
-                target_id=str(target_id),
-            )
-        _t_bfs1 = time.perf_counter() if _perf else None
-        bfs_set = set(bfs_reachable)
-        _t_socle0 = time.perf_counter() if _perf else None
-        valid_pool = [p for p in zone_anchors if p in bfs_set]
-        valid_pool = _charge_pool_must_socle_a_socle_if_possible(
-            game_state, unit, target_unit_entry, valid_pool
+        bfs_reachable = charge_build_valid_destinations_pool(
+            game_state,
+            str(unit_id),
+            int(charge_roll_subhex),
+            target_ids=target_ids,
         )
-        _t_socle1 = time.perf_counter() if _perf else None
-        if _perf and _t_tsel0 is not None:
-            _z0 = require_present(_t_zone0, "_t_zone0")
-            _z1 = require_present(_t_zone1, "_t_zone1")
-            _a0 = require_present(_t_anch0, "_t_anch0")
-            _a1 = require_present(_t_anch1, "_t_anch1")
-            _b0 = require_present(_t_bfs0, "_t_bfs0")
-            _b1 = require_present(_t_bfs1, "_t_bfs1")
-            _s0 = require_present(_t_socle0, "_t_socle0")
-            _s1 = require_present(_t_socle1, "_t_socle1")
+        _t_bfs1 = time.perf_counter() if _perf else None
+        valid_pool = _charge_pool_must_socle_a_socle_if_possible(
+            game_state, unit, target_entries, bfs_reachable
+        )
+        # Hex de référence = case du chargeur la plus proche de l'union des empreintes cibles.
+        _uc = require_key(game_state, "units_cache")
+        _ue = _uc.get(str(unit_id))
+        if _ue:
+            _charger_fp = set(_ue.get("occupied_hexes") or {(int(_ue["col"]), int(_ue["row"]))})
+            _union_tfp: Set[Tuple[int, int]] = set()
+            for _te in target_entries:
+                _tc, _tr = int(_te["col"]), int(_te["row"])
+                _te_cache = _uc.get(str(_te["id"])) or {}
+                _union_tfp |= set(_te_cache.get("occupied_hexes") or {(_tc, _tr)})
+            _closest_ch, _ = _charge_closest_charger_hex_to_target(_charger_fp, _union_tfp)
+            charge_reference_hex = (int(_closest_ch[0]), int(_closest_ch[1]))
+        if _perf and _t_tsel0 is not None and _t_bfs0 is not None and _t_bfs1 is not None:
             append_perf_timing_line(
                 f"CHARGE_TARGET_SEL episode={_ep} turn={_turn} unit_id={unit_id} "
-                f"preview_zone_s={_z1 - _z0:.6f} "
-                f"anchors_s={_a1 - _a0:.6f} "
-                f"bfs_s={_b1 - _b0:.6f} "
-                f"pool_filter_s={_s1 - _s0:.6f} "
-                f"total_s={_s1 - _t_tsel0:.6f} "
-                f"pool_size={len(valid_pool)}"
+                f"n_targets={len(target_ids)} bfs_s={_t_bfs1 - _t_bfs0:.6f} "
+                f"total_s={time.perf_counter() - _t_tsel0:.6f} pool_size={len(valid_pool)}"
             )
     game_state["valid_charge_destinations_pool"] = valid_pool
     if "debug_mode" in game_state and game_state["debug_mode"]:
@@ -2883,6 +2850,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
             "action": "charge_target_selected",
             "unitId": unit_id,
             "targetId": target_id,
+            "targetIds": target_ids,
             "charge_roll": charge_roll,
             # Hex de référence pour la portée (empreinte chargeur la plus proche de la cible) —
             # l’UI doit l’utiliser pour la règle / tooltip ; ne pas le recalculer depuis units_cache.
@@ -2952,7 +2920,9 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     if "charge_roll_values" not in game_state or unit_id not in game_state["charge_roll_values"]:
         return False, {"error": "charge_roll_missing", "unit_id": unit_id, "action": "charge"}
     
-    target_id = game_state["charge_target_selections"][unit_id]
+    _stored_targets = game_state["charge_target_selections"][unit_id]
+    target_ids = list(_stored_targets) if isinstance(_stored_targets, (list, tuple)) else [_stored_targets]
+    target_id = target_ids[0]  # 1ère cible déclarée — pour messages/retours d'affichage
     charge_roll = game_state["charge_roll_values"][unit_id]
 
     # Verify pool exists and destination is in it
@@ -3044,7 +3014,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     _turn = game_state.get("turn", "?")
     _t_dsel0 = time.perf_counter() if _perf else None
     config = {}
-    charge_success, charge_result = _attempt_charge_to_destination(game_state, unit, dest_col, dest_row, target_id, config)
+    charge_success, charge_result = _attempt_charge_to_destination(game_state, unit, dest_col, dest_row, target_ids, config)
 
     if not charge_success:
         # CRITICAL FIX: When charge fails, FORCE action type to charge_fail and add missing fields for proper logging
