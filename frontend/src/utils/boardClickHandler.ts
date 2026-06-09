@@ -29,6 +29,9 @@ export function setupBoardClickHandler(callbacks: {
   // Move par-figurine (squad.md brique 3)
   onStartSquadModelMove?(unitId: UnitId): void;
   onMoveModelInPlan?(modelId: string, col: number, row: number): void;
+  // Charge par-figurine (V11 11.04, Slice G)
+  onMoveModelInChargePlan?(modelId: string, col: number, row: number): void;
+  onCancelChargeModelMove?(): void;
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action callbacks
   onAdvanceMove?(unitId: UnitId, destCol: number, destRow: number): void;
   onDeployUnit?(unitId: UnitId, destCol: number, destRow: number): void;
@@ -133,6 +136,14 @@ export function setupBoardClickHandler(callbacks: {
         }
       } else if (callbacks.onChargeEnemyUnit) {
         callbacks.onChargeEnemyUnit(selectedUnitId, unitId);
+      }
+      return; // Prevent fallthrough to other handlers
+    } else if (phase === "charge" && mode === "chargeModelMove") {
+      // Charge par-figurine : la sélection de fig + la pose sont gérées par les handlers canvas
+      // (onPointerDownSelect / capture). Un clic sur une unité ne doit PAS retomber sur onSelectUnit
+      // (qui désactiverait la charge). Clic droit sur le chargeur = annuler (forfait).
+      if (clickType === "right" && selectedUnitId === unitId) {
+        callbacks.onCancelChargeModelMove?.();
       }
       return; // Prevent fallthrough to other handlers
     } else if (phase === "charge" && mode === "chargePreview" && selectedUnitId !== null) {
@@ -271,6 +282,13 @@ export function setupBoardClickHandler(callbacks: {
       // Plan provisoire : pose la figurine active a l'hex clique (dans son pool BFS).
       if (activeModelId && callbacks.onMoveModelInPlan) {
         callbacks.onMoveModelInPlan(activeModelId, col, row);
+      }
+      return;
+    }
+    if (mode === "chargeModelMove") {
+      // Plan de charge par-figurine : pose la fig active a l'hex clique (dans son pool eligible).
+      if (activeModelId && callbacks.onMoveModelInChargePlan) {
+        callbacks.onMoveModelInChargePlan(activeModelId, col, row);
       }
       return;
     }

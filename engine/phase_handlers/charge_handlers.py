@@ -1191,7 +1191,10 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         prov: Dict[str, Tuple[int, int]] = {}
         for entry in (action.get("plan") or []):
             prov[str(entry[0])] = (int(entry[1]), int(entry[2]))
-        state = charge_model_plan_state(game_state, unit_id, prov)
+        sel = action.get("selected_model")
+        state = charge_model_plan_state(
+            game_state, unit_id, prov, selected_model=(str(sel) if sel is not None else None)
+        )
         return True, {"action": "charge_plan_state", "unitId": unit_id, **state}
 
     elif action_type == "skip":
@@ -1555,23 +1558,38 @@ def charge_model_plan_state(
     game_state: Dict[str, Any],
     unit_id: str,
     provisional_plan: Dict[str, Tuple[int, int]],
+    selected_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Orchestration UI du mouvement de charge par-figurine (V11, 3 phases 11.04). Lecture pure.
 
     ``provisional_plan`` : {model_id: (col, row)} figs déjà posées dans le plan UI. Les figs
     absentes sont « non posées » (restent à leur position de départ, models_cache).
 
-    Détermine la PHASE COURANTE = la plus serrée encore réalisable par une fig non posée :
-      - 1 (≤1") tant qu'une fig non posée peut finir within_1 ;
-      - sinon 2 (engagé) tant qu'une fig peut finir engaged ;
-      - sinon 3 (closer).
-    Pour chaque fig non posée éligible dans la phase courante, renvoie son pool de destinations
-    (= cercle violet). ``can_validate`` n'est vrai que lorsque toutes les figs sont posées et que
-    la config finale est légale (``charge_preview_move_plan``).
+    Perf (Slice G) : la **classification par hex** (empreinte + distances + tests d'engagement) est
+    quasi indépendante de la figurine qui bouge — seules la reachability (BFS) et le seuil « finit
+    plus proche que son départ » (``start_min``, scalaire) le sont. On calcule donc :
+      1. la **reachability BFS par fig** (cheap, sans classification) ;
+      2. la **classification de l'UNION** des hexes atteignables UNE SEULE FOIS (la part chère).
+    Puis on déduit, par fig, ses hexes qualifiants par intersection.
 
-    Retour : {current_phase, eligible: {mid: [[c,r],...]}, unplaced: [...], can_validate}.
+    Phase courante = la plus serrée encore réalisable par une fig non posée (1 ≤1", 2 engagé, 3
+    plus proche). ``eligible_models`` = figs pouvant agir dans cette phase (pour le voile). ``pool``
+    = destinations de ``selected_model`` (la zone violette) — calculé seulement si demandé.
+    ``can_validate`` n'est vrai que lorsque toutes les figs sont posées et que la config finale est
+    légale (``charge_preview_move_plan``).
+
+    Retour : {current_phase, eligible_models, pool, unplaced, can_validate,
+              satisfied_targets, unsatisfied_targets}.
     """
-    empty = {"current_phase": 3, "eligible": {}, "unplaced": [], "can_validate": False}
+    empty = {
+        "current_phase": 3,
+        "eligible_models": [],
+        "pool": [],
+        "unplaced": [],
+        "can_validate": False,
+        "satisfied_targets": [],
+        "unsatisfied_targets": [],
+    }
     unit = get_unit_by_id(game_state, str(unit_id))
     if not unit:
         return empty
@@ -1583,40 +1601,267 @@ def charge_model_plan_state(
     target_ids = list(_stored) if isinstance(_stored, (list, tuple)) else [_stored]
     roll_subhex = int(game_state["charge_roll_values"][str(unit_id)]) * int(game_state["inches_to_subhex"])
 
+    from collections import deque
+    from engine.hex_utils import min_distance_between_sets
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from .shared_utils import get_engagement_zone
+
     squad_models = require_key(game_state, "squad_models")
     models_cache = require_key(game_state, "models_cache")
+    units_cache = require_key(game_state, "units_cache")
     alive = [m for m in squad_models.get(str(unit_id), []) if m in models_cache]
     placed = {str(k) for k in provisional_plan}
-    unplaced = [m for m in alive if str(m) not in placed]
+    unplaced = [str(m) for m in alive if str(m) not in placed]
 
-    pools = {
-        m: charge_build_model_destinations_pool(
-            game_state, m, target_ids, roll_subhex, provisional_plan=provisional_plan
+    ez = int(get_engagement_zone(game_state))
+    within_1_zone = int(game_state["inches_to_subhex"])
+    budget = int(roll_subhex)
+    board_cols = int(require_key(game_state, "board_cols"))
+    board_rows = int(require_key(game_state, "board_rows"))
+    wall_hexes = game_state.get("wall_hexes", set())
+    player = int(unit["player"])
+    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
+
+    # Cibles déclarées (empreintes) + ennemis non déclarés (exclusion d'engagement) + occupation.
+    declared = {str(t) for t in target_ids}
+    target_entries: List[Dict[str, Any]] = []
+    target_fps: List[Set[Tuple[int, int]]] = []
+    nontarget_entries: List[Dict[str, Any]] = []
+    enemy_occupied: Set[Tuple[int, int]] = set()
+    other_occupied: Set[Tuple[int, int]] = set()
+    for eid, entry in units_cache.items():
+        occ = entry.get("occupied_hexes")
+        cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
+        if int(entry["player"]) != player:
+            enemy_occupied |= cells
+            if str(eid) in declared:
+                target_entries.append(entry)
+                target_fps.append(cells)
+            else:
+                nontarget_entries.append(entry)
+        elif str(eid) != str(unit_id):
+            other_occupied |= cells
+
+    # Empreintes des coéquipières : posées (plan) = bloquage stable ; non posées = bloquage à
+    # l'origine (par fig, on retire l'origine de la fig qui bouge).
+    placed_fp: Set[Tuple[int, int]] = set()
+    for _pc, _pr in provisional_plan.values():
+        placed_fp |= _candidate_footprint_charge(int(_pc), int(_pr), unit, game_state, fp_pair)
+    origin_fp: Dict[str, Set[Tuple[int, int]]] = {}
+    for m in unplaced:
+        sib = models_cache.get(str(m))
+        origin_fp[m] = (
+            _candidate_footprint_charge(int(sib["col"]), int(sib["row"]), unit, game_state, fp_pair)
+            if sib else set()
         )
-        for m in unplaced
-    }
-    if any(pools[m]["within_1"] for m in unplaced):
-        phase = 1
-        key = "within_1"
-    elif any(pools[m]["engaged"] for m in unplaced):
-        phase = 2
-        key = "engaged"
-    else:
-        phase = 3
-        key = "closer"
+    blocked_static = set(wall_hexes) | enemy_occupied | other_occupied | placed_fp
 
-    eligible = {m: pools[m][key] for m in unplaced if pools[m][key]}
+    def _bfs_reach(start_col: int, start_row: int, blocked: Set[Tuple[int, int]]) -> List[Tuple[int, int]]:
+        visited: Set[Tuple[int, int]] = {(start_col, start_row)}
+        reach: List[Tuple[int, int]] = []
+        queue: deque = deque([(start_col, start_row, 0)])
+        while queue:
+            c, r, d = queue.popleft()
+            if d >= budget:
+                continue
+            for nc, nr in get_hex_neighbors(c, r):
+                if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                    continue
+                cell = (nc, nr)
+                if cell in visited or cell in blocked:
+                    continue
+                visited.add(cell)
+                queue.append((nc, nr, d + 1))
+                reach.append(cell)
+        return reach
+
+    # Marge (sous-hex) autour des unités où l'on lance le check d'engagement PRÉCIS : couvre l'écart
+    # entre distance d'empreinte (hex) et clairance euclidienne (socles ronds). Au-delà = jamais engagé.
+    _ENG_MARGIN = within_1_zone
+
+    def _dist_field(seeds: Set[Tuple[int, int]], max_steps: int) -> Dict[Tuple[int, int], int]:
+        """BFS multi-source : distance (hex) de chaque case à ``seeds``, bornée à ``max_steps`` (cases
+        au-delà absentes). Ne traverse pas les murs. Sert à obtenir d_min en O(1) par hex (le calcul de
+        distance par hex via min_distance_between_sets était le 2e poste de coût)."""
+        dist: Dict[Tuple[int, int], int] = {}
+        frontier: List[Tuple[int, int]] = []
+        for s in seeds:
+            if 0 <= s[0] < board_cols and 0 <= s[1] < board_rows:
+                dist[s] = 0
+                frontier.append(s)
+        step = 0
+        while frontier and step < max_steps:
+            step += 1
+            nxt: List[Tuple[int, int]] = []
+            for (c, r) in frontier:
+                for nc, nr in get_hex_neighbors(c, r):
+                    if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                        continue
+                    cell = (nc, nr)
+                    if cell in dist or cell in wall_hexes:
+                        continue
+                    dist[cell] = step
+                    nxt.append(cell)
+            frontier = nxt
+        return dist
+
+    can_classify = bool(target_fps)
+    # 1) Reachability BFS par fig (cheap) + champs de distance (cibles / non-cibles), calculés 1×.
+    reach_by_model: Dict[str, List[Tuple[int, int]]] = {}
+    start_min_by_model: Dict[str, int] = {}
+    other_origins_by_model: Dict[str, Set[Tuple[int, int]]] = {}
+    dist_tgt: Dict[Tuple[int, int], int] = {}
+    dist_ntgt: Dict[Tuple[int, int], int] = {}
+    INF = int(budget) + 1
+    if can_classify:
+        for m in unplaced:
+            sib = models_cache.get(str(m))
+            if sib is None:
+                continue
+            sc, sr = int(sib["col"]), int(sib["row"])
+            other_origins = set()
+            for m2 in unplaced:
+                if m2 != m:
+                    other_origins |= origin_fp[m2]
+            other_origins_by_model[m] = other_origins
+            reach_by_model[m] = _bfs_reach(sc, sr, blocked_static | other_origins)
+        tgt_union: Set[Tuple[int, int]] = set()
+        for tfp in target_fps:
+            tgt_union |= tfp
+        dist_tgt = _dist_field(tgt_union, int(budget))
+        for m in list(reach_by_model.keys()):
+            sib = models_cache.get(str(m))
+            sfp = _candidate_footprint_charge(int(sib["col"]), int(sib["row"]), unit, game_state, fp_pair)
+            start_min_by_model[m] = min((dist_tgt.get(h, INF) for h in sfp), default=INF)
+        if nontarget_entries:
+            ntgt_union: Set[Tuple[int, int]] = set()
+            for ne in nontarget_entries:
+                occ = ne.get("occupied_hexes")
+                ntgt_union |= set(occ) if occ else {(int(ne["col"]), int(ne["row"]))}
+            dist_ntgt = _dist_field(ntgt_union, ez + _ENG_MARGIN)
+
+    # 2) Classification de l'UNION des hexes atteignables, UNE SEULE FOIS. Le check d'engagement
+    #    PRÉCIS (coûteux) n'est lancé que pour les hexes PROCHES d'une unité (via les champs de
+    #    distance) ; les milliers d'hexes lointains → engagé/within_1 = False sans appel.
+    region: Dict[Tuple[int, int], Dict[str, Any]] = {}
+    if can_classify:
+        cap_all = max(start_min_by_model.values()) if start_min_by_model else INF
+        candidate_union: Set[Tuple[int, int]] = set()
+        for reach in reach_by_model.values():
+            candidate_union.update(reach)
+        synth_base = dict(require_key(units_cache, str(require_key(unit, "id"))))
+        synth_base.pop("occupied_hexes_by_model", None)
+        for (cc, rr) in candidate_union:
+            cand_fp = _candidate_footprint_charge(cc, rr, unit, game_state, fp_pair)
+            if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
+                continue
+            if cand_fp & blocked_static:
+                continue
+            d_min = min((dist_tgt.get(h, INF) for h in cand_fp), default=INF)
+            # Jamais plus proche que le départ d'AUCUNE fig → inutile (élague l'essentiel du reachable).
+            if d_min >= cap_all:
+                continue
+            d_ntgt = (
+                min((dist_ntgt.get(h, INF) for h in cand_fp), default=INF) if dist_ntgt else INF
+            )
+            near_ntgt = d_ntgt <= ez + _ENG_MARGIN
+            near_tgt = d_min <= ez + _ENG_MARGIN
+            near_w1 = d_min <= within_1_zone + _ENG_MARGIN
+            if near_ntgt or near_tgt or near_w1:
+                synth_base["col"] = cc
+                synth_base["row"] = rr
+                synth_base["occupied_hexes"] = cand_fp
+            if near_ntgt and any(
+                unit_entries_within_engagement_zone(synth_base, ne, ez) for ne in nontarget_entries
+            ):
+                continue
+            engaged_f = (
+                near_tgt
+                and any(unit_entries_within_engagement_zone(synth_base, te, ez) for te in target_entries)
+            )
+            within1_f = (
+                near_w1
+                and any(
+                    unit_entries_within_engagement_zone(synth_base, te, within_1_zone)
+                    for te in target_entries
+                )
+            )
+            region[(cc, rr)] = {"fp": cand_fp, "d_min": d_min, "within_1": within1_f, "engaged": engaged_f}
+
+    def _qualifying(model_id: str, key: str) -> List[List[int]]:
+        """Hexes de ``model_id`` qualifiant ``key`` (within_1 / engaged / closer) : reach ∩ region,
+        plus proche que son départ, sans chevaucher une coéquipière encore à l'origine."""
+        out: List[List[int]] = []
+        reach = reach_by_model.get(model_id)
+        if not reach:
+            return out
+        start_min = start_min_by_model.get(model_id)
+        if start_min is None:
+            return out
+        others = other_origins_by_model.get(model_id, set())
+        for h in reach:
+            rg = region.get(h)
+            if rg is None:
+                continue
+            if rg["d_min"] >= start_min:
+                continue
+            if others and (rg["fp"] & others):
+                continue
+            if key == "within_1" and not rg["within_1"]:
+                continue
+            if key == "engaged" and not rg["engaged"]:
+                continue
+            out.append([h[0], h[1]])
+        return out
+
+    # Phase courante = la plus serrée réalisable par une fig non posée.
+    has_within1 = any(_qualifying(m, "within_1") for m in reach_by_model)
+    if has_within1:
+        phase, key = 1, "within_1"
+    elif any(_qualifying(m, "engaged") for m in reach_by_model):
+        phase, key = 2, "engaged"
+    else:
+        phase, key = 3, "closer"
+
+    eligible_models = [m for m in unplaced if _qualifying(m, key)]
+    pool: List[List[int]] = (
+        _qualifying(str(selected_model), key)
+        if selected_model is not None and str(selected_model) in reach_by_model
+        else []
+    )
 
     can_validate = False
     if not unplaced and alive:
         full_plan = [[str(m), int(provisional_plan[m][0]), int(provisional_plan[m][1])] for m in alive]
         can_validate = charge_preview_move_plan(game_state, str(unit_id), full_plan, target_ids)["can_validate"]
 
+    # Satisfaction par cible (voile UI) : une cible-UNITÉ est ENGAGÉE dès qu'≥1 fig POSÉE est à
+    # ≤EZ d'elle (03.04, engagement au niveau unité). violet = satisfaite, rouge = pas.
+    placed_synths = []
+    for _c, _r in provisional_plan.values():
+        _fp = _candidate_footprint_charge(int(_c), int(_r), unit, game_state, fp_pair)
+        placed_synths.append(
+            _charge_synthetic_charger_cache_entry(game_state, unit, int(_c), int(_r), _fp)
+        )
+    satisfied: List[str] = []
+    unsatisfied: List[str] = []
+    for tid in (str(t) for t in target_ids):
+        tentry = units_cache.get(tid)
+        if tentry is None:
+            continue
+        engaged_t = any(
+            unit_entries_within_engagement_zone(synth, tentry, ez) for synth in placed_synths
+        )
+        (satisfied if engaged_t else unsatisfied).append(tid)
+
     return {
         "current_phase": phase,
-        "eligible": {str(m): dests for m, dests in eligible.items()},
-        "unplaced": [str(m) for m in unplaced],
+        "eligible_models": eligible_models,
+        "pool": pool,
+        "unplaced": unplaced,
         "can_validate": can_validate,
+        "satisfied_targets": satisfied,
+        "unsatisfied_targets": unsatisfied,
     }
 
 
@@ -3252,6 +3497,115 @@ def _apply_charge_impact(
     add_console_log(game_state, impact_message)
 
 
+def _charge_model_pos_is_closer(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    model_id: str,
+    dest_c: int,
+    dest_r: int,
+    target_ids: List[str],
+    roll_subhex: int,
+    provisional_plan: Dict[str, Tuple[int, int]],
+) -> bool:
+    """Légalité d'UNE position (c,r) pour la fig ``model_id`` (membre "closer" du pool Slice E), sans
+    construire le pool complet : BFS reachability avec early-exit sur ``dest`` + classification du
+    seul hex final. Mêmes contraintes que ``charge_build_model_destinations_pool`` (budget, pas de
+    traversée mur/fig, finit plus proche, n'engage aucun non-cible)."""
+    from collections import deque
+    from engine.hex_utils import min_distance_between_sets
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from .shared_utils import get_engagement_zone
+
+    models_cache = require_key(game_state, "models_cache")
+    model = models_cache.get(str(model_id))
+    if model is None:
+        return False
+    ez = int(get_engagement_zone(game_state))
+    budget = int(roll_subhex)
+    board_cols = int(require_key(game_state, "board_cols"))
+    board_rows = int(require_key(game_state, "board_rows"))
+    wall_hexes = game_state.get("wall_hexes", set())
+    player = int(model["player"])
+    squad_id = str(model["squad_id"])
+    units_cache = require_key(game_state, "units_cache")
+
+    declared = {str(t) for t in target_ids}
+    target_fps: List[Set[Tuple[int, int]]] = []
+    nontarget_entries: List[Dict[str, Any]] = []
+    enemy_occupied: Set[Tuple[int, int]] = set()
+    other_occupied: Set[Tuple[int, int]] = set()
+    for eid, entry in units_cache.items():
+        occ = entry.get("occupied_hexes")
+        cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
+        if int(entry["player"]) != player:
+            enemy_occupied |= cells
+            if str(eid) in declared:
+                target_fps.append(cells)
+            else:
+                nontarget_entries.append(entry)
+        elif str(eid) != squad_id:
+            other_occupied |= cells
+    if not target_fps:
+        return False
+
+    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
+    same_squad_occupied: Set[Tuple[int, int]] = set()
+    for mid in game_state.get("squad_models", {}).get(squad_id, []):
+        if str(mid) == str(model_id):
+            continue
+        if provisional_plan and str(mid) in provisional_plan:
+            pc, pr = provisional_plan[str(mid)]
+            same_squad_occupied |= _candidate_footprint_charge(int(pc), int(pr), unit, game_state, fp_pair)
+        else:
+            sib = models_cache.get(str(mid))
+            if sib is not None:
+                same_squad_occupied |= _candidate_footprint_charge(
+                    int(sib["col"]), int(sib["row"]), unit, game_state, fp_pair
+                )
+    blocked = set(wall_hexes) | enemy_occupied | other_occupied | same_squad_occupied
+
+    start_col, start_row = int(model["col"]), int(model["row"])
+    start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_pair)
+    start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
+    dest = (int(dest_c), int(dest_r))
+
+    # Reachability BFS (centre-à-centre, sans traverser mur/fig) avec early-exit sur dest.
+    if dest != (start_col, start_row):
+        visited: Set[Tuple[int, int]] = {(start_col, start_row)}
+        queue: deque = deque([(start_col, start_row, 0)])
+        found = False
+        while queue and not found:
+            c, r, d = queue.popleft()
+            if d >= budget:
+                continue
+            for nc, nr in get_hex_neighbors(c, r):
+                if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                    continue
+                cell = (nc, nr)
+                if cell in visited or cell in blocked:
+                    continue
+                if cell == dest:
+                    found = True
+                    break
+                visited.add(cell)
+                queue.append((nc, nr, d + 1))
+        if not found:
+            return False
+
+    cand_fp = _candidate_footprint_charge(dest[0], dest[1], unit, game_state, fp_pair)
+    if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
+        return False
+    if cand_fp & blocked:
+        return False
+    d_min = min(min_distance_between_sets(cand_fp, tfp, max_distance=start_min) for tfp in target_fps)
+    if d_min >= start_min:
+        return False
+    synth = _charge_synthetic_charger_cache_entry(game_state, unit, dest[0], dest[1], cand_fp)
+    if any(unit_entries_within_engagement_zone(synth, ne, ez) for ne in nontarget_entries):
+        return False
+    return True
+
+
 def charge_preview_move_plan(
     game_state: Dict[str, Any], squad_id: str, plan: List[Tuple[str, int, int]], target_ids: List[str]
 ) -> Dict[str, Any]:
@@ -3294,10 +3648,10 @@ def charge_preview_move_plan(
     per_model: Dict[str, bool] = {}
     for mid, c, r in norm:
         prov = {m2: pos_by_model[m2] for m2 in pos_by_model if m2 != mid}
-        pool = charge_build_model_destinations_pool(
-            game_state, mid, target_ids, roll_subhex, provisional_plan=prov
+        # Check ciblé d'une seule position (BFS early-exit) au lieu de construire tout le pool.
+        per_model[mid] = _charge_model_pos_is_closer(
+            game_state, unit, mid, c, r, target_ids, roll_subhex, provisional_plan=prov
         )
-        per_model[mid] = [c, r] in pool["closer"]
 
     # 2) Cohésion (identique au move : 1re puce voisins < min, 2e puce une fig à > coh_max).
     fp_pair = _charge_prepare_footprint_offsets(unit, game_state)

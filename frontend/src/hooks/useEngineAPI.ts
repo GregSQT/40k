@@ -456,6 +456,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     | "targetPreview"
     | "chargeTargetSelect"
     | "chargePreview"
+    | "chargeModelMove"
     | "advancePreview"
     | "pileInPreview"
     | "consolidationPreview"
@@ -507,6 +508,29 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const squadMoveSessionRef = useRef(0);
   /** Mask loops per-fig (polygone lissé) reçus de move_model_destinations. */
   const squadMoveModelMaskLoopsRef = useRef<number[][] | null>(null);
+  /**
+   * Charge par-figurine (V11 11.04, Slice G) — plan provisoire des figs POSÉES, NON committé.
+   * ``models`` : figs déjà posées (model_id -> {col,row}) ; les autres sont dans ``unplaced``.
+   * ``eligible`` : destinations valides par fig non posée pour la phase courante (cercle violet).
+   * ``satisfied/unsatisfiedTargets`` : voile par UNITÉ cible (violet = engagée, rouge = pas encore).
+   * ``canValidate`` : toutes les figs posées + config finale légale (bouton Charger actif).
+   */
+  const [chargeMovePlan, setChargeMovePlan] = useState<{
+    unitId: number;
+    models: Record<string, { col: number; row: number }>;
+    /** Figs non posées pouvant agir dans la phase courante (voile violet). Pool calculé à la demande. */
+    eligibleModels: string[];
+    unplaced: string[];
+    activeModelId: string | null;
+    currentPhase: 1 | 2 | 3;
+    canValidate: boolean;
+    satisfiedTargets: number[];
+    unsatisfiedTargets: number[];
+  } | null>(null);
+  const chargeMovePlanRef = useRef<typeof chargeMovePlan>(null);
+  chargeMovePlanRef.current = chargeMovePlan;
+  /** Pool (hexes "col,row") de la fig active = eligible[activeModelId]. */
+  const chargeModelPoolRef = useRef<Set<string>>(new Set());
   /**
    * Tir par-figurine (PvP manuel) — plan provisoire de cibles assignées par fig.
    * ``targets`` : model_id -> squad_id ennemi assigné (cible de cette fig pour la phase).
@@ -2082,39 +2106,51 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             data.game_state?.phase === "charge" &&
             data.result?.action === "charge_target_selected"
           ) {
-            const pd = data.result.preview_data as { violet_hexes?: unknown } | undefined;
-            const raw = data.result.valid_destinations ?? pd?.violet_hexes;
-            if (raw == null) {
-              throw new Error("charge_target_selected: valid_destinations and preview_data.violet_hexes both absent");
-            }
-            const anchorsNorm = normalizeChargeDestinationsFromApi(raw);
-            const displayRaw = (data.result as { charge_preview_display_hexes?: unknown })
-              .charge_preview_display_hexes;
-            const overlayNorm = normalizeChargeDestinationsFromApi(displayRaw ?? []);
-            setChargeDestinations(anchorsNorm);
-            setChargePreviewOverlayHexes(overlayNorm);
-            syncChargePoolRefs(anchorsNorm, overlayNorm);
-            const refH = (data.result as { charge_reference_hex?: unknown }).charge_reference_hex;
-            if (Array.isArray(refH) && refH.length >= 2) {
-              setChargeReferenceHex({ col: Number(refH[0]), row: Number(refH[1]) });
+            const chargerUid = parseInt(String(data.result.unitId), 10);
+            // V11 11.04 (Slice G) : escouade chargeuse multi-fig → mouvement par-figurine (plan 3
+            // phases backend). Mono-fig → flux rigide actuel (preview → clic destination), inchangé.
+            const figCount = Object.keys(readSquadModelPositions(chargerUid)).length;
+            if (figCount > 1) {
+              if (blinkingUnits.blinkTimer) {
+                clearInterval(blinkingUnits.blinkTimer);
+              }
+              setBlinkingUnits({ unitIds: [], blinkTimer: null, attackerId: null });
+              void handleStartChargeModelMove(chargerUid);
             } else {
-              setChargeReferenceHex(null);
+              const pd = data.result.preview_data as { violet_hexes?: unknown } | undefined;
+              const raw = data.result.valid_destinations ?? pd?.violet_hexes;
+              if (raw == null) {
+                throw new Error("charge_target_selected: valid_destinations and preview_data.violet_hexes both absent");
+              }
+              const anchorsNorm = normalizeChargeDestinationsFromApi(raw);
+              const displayRaw = (data.result as { charge_preview_display_hexes?: unknown })
+                .charge_preview_display_hexes;
+              const overlayNorm = normalizeChargeDestinationsFromApi(displayRaw ?? []);
+              setChargeDestinations(anchorsNorm);
+              setChargePreviewOverlayHexes(overlayNorm);
+              syncChargePoolRefs(anchorsNorm, overlayNorm);
+              const refH = (data.result as { charge_reference_hex?: unknown }).charge_reference_hex;
+              if (Array.isArray(refH) && refH.length >= 2) {
+                setChargeReferenceHex({ col: Number(refH[0]), row: Number(refH[1]) });
+              } else {
+                setChargeReferenceHex(null);
+              }
+              if (data.result.targetId != null) {
+                setChargePreviewTargetId(parseInt(String(data.result.targetId), 10));
+              }
+              if (data.result.unitId != null && data.result.charge_roll != null) {
+                setPendingChargeRollDisplay({
+                  unitId: parseInt(String(data.result.unitId), 10),
+                  roll: data.result.charge_roll as number,
+                });
+              }
+              setSelectedUnitId(chargerUid);
+              setMode("chargePreview");
+              if (blinkingUnits.blinkTimer) {
+                clearInterval(blinkingUnits.blinkTimer);
+              }
+              setBlinkingUnits({ unitIds: [], blinkTimer: null, attackerId: null });
             }
-            if (data.result.targetId != null) {
-              setChargePreviewTargetId(parseInt(String(data.result.targetId), 10));
-            }
-            if (data.result.unitId != null && data.result.charge_roll != null) {
-              setPendingChargeRollDisplay({
-                unitId: parseInt(String(data.result.unitId), 10),
-                roll: data.result.charge_roll as number,
-              });
-            }
-            setSelectedUnitId(parseInt(String(data.result.unitId), 10));
-            setMode("chargePreview");
-            if (blinkingUnits.blinkTimer) {
-              clearInterval(blinkingUnits.blinkTimer);
-            }
-            setBlinkingUnits({ unitIds: [], blinkTimer: null, attackerId: null });
           }
           // Fallback : anciennes réponses sans action === charge_target_selected
           else if (
@@ -4693,6 +4729,190 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [executeAction, gameState, chargePreviewTargetId]
   );
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // CHARGE PAR FIGURINE (V11 11.04, Slice G) — calque squadModelMove, contrat backend
+  // charge_plan_state (lecture pure) + commit_charge_plan.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /** Applique une réponse charge_plan_state : voile (eligible_models) + pool de la fig sélectionnée. */
+  const applyChargePlanState = useCallback(
+    (result: Record<string, unknown>, selectedModel: string | null) => {
+      const eligibleModels = ((result.eligible_models ?? []) as unknown[]).map((m) => String(m));
+      const poolArr = (result.pool ?? []) as Array<[number, number]>;
+      const unplaced = ((result.unplaced ?? []) as unknown[]).map((m) => String(m));
+      const currentPhase = (Number(result.current_phase) || 3) as 1 | 2 | 3;
+      const canValidate = result.can_validate === true;
+      const satisfiedTargets = ((result.satisfied_targets ?? []) as unknown[]).map((t) =>
+        parseInt(String(t), 10)
+      );
+      const unsatisfiedTargets = ((result.unsatisfied_targets ?? []) as unknown[]).map((t) =>
+        parseInt(String(t), 10)
+      );
+      setChargeMovePlan((prev) => {
+        if (!prev) return prev;
+        // Fig active = celle sélectionnée si encore éligible, sinon l'ancienne si toujours éligible,
+        // sinon aucune (ex: fig posée → sort de eligible_models). Le pool ne vaut que pour elle.
+        const active =
+          selectedModel != null && eligibleModels.includes(selectedModel)
+            ? selectedModel
+            : prev.activeModelId && eligibleModels.includes(prev.activeModelId)
+              ? prev.activeModelId
+              : null;
+        const pool = new Set<string>();
+        if (active != null && active === selectedModel) {
+          for (const [c, r] of poolArr) pool.add(`${Number(c)},${Number(r)}`);
+        }
+        chargeModelPoolRef.current = pool;
+        return {
+          ...prev,
+          eligibleModels,
+          unplaced,
+          currentPhase,
+          canValidate,
+          satisfiedTargets,
+          unsatisfiedTargets,
+          activeModelId: active,
+        };
+      });
+    },
+    []
+  );
+
+  /** Lecture pure : recalcule l'état du plan de charge depuis le backend. ``selectedModel`` → le
+   * backend renvoie le pool (zone) de CETTE fig uniquement (la part chère n'est faite que pour elle). */
+  const refreshChargePlanState = useCallback(
+    async (
+      unitId: number,
+      models: Record<string, { col: number; row: number }>,
+      selectedModel: string | null = null
+    ) => {
+      const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row]);
+      const action: Record<string, unknown> = {
+        action: "charge_plan_state",
+        unitId: String(unitId),
+        plan,
+      };
+      if (selectedModel != null) action.selected_model = selectedModel;
+      const result = await postEngineQuery(action);
+      if (!result) throw new Error("charge_plan_state: réponse vide");
+      applyChargePlanState(result, selectedModel);
+    },
+    [postEngineQuery, applyChargePlanState]
+  );
+
+  /** Entrée en mode chargeModelMove (escouade chargeuse multi-fig). Plan provisoire vide au départ. */
+  const handleStartChargeModelMove = useCallback(
+    async (unitId: number) => {
+      const models = readSquadModelPositions(unitId);
+      if (Object.keys(models).length === 0) {
+        throw new Error(`charge model move: aucune fig pour l'unité ${unitId} (occupied_hexes_by_model)`);
+      }
+      chargeModelPoolRef.current = new Set();
+      setChargeMovePlan({
+        unitId,
+        models: {},
+        eligibleModels: [],
+        unplaced: Object.keys(models),
+        activeModelId: null,
+        currentPhase: 1,
+        canValidate: false,
+        satisfiedTargets: [],
+        unsatisfiedTargets: [],
+      });
+      setSelectedUnitId(unitId);
+      setMode("chargeModelMove");
+      await refreshChargePlanState(unitId, {});
+    },
+    [readSquadModelPositions, refreshChargePlanState]
+  );
+
+  /** Clic sur une fig éligible : la rend active + demande SON pool au backend (calcul ciblé). */
+  const handleSelectChargeModel = useCallback(
+    (modelId: string) => {
+      const plan = chargeMovePlanRef.current;
+      if (!plan || !plan.eligibleModels.includes(modelId)) return; // non éligible → ignore
+      chargeModelPoolRef.current = new Set();
+      setChargeMovePlan((prev) => (prev ? { ...prev, activeModelId: modelId } : prev));
+      void refreshChargePlanState(plan.unitId, plan.models, modelId);
+    },
+    [refreshChargePlanState]
+  );
+
+  /** Pose la fig active à (col,row) (dans son pool) → MAJ plan + re-charge_plan_state. */
+  const handleMoveModelInChargePlan = useCallback(
+    (modelId: string, col: number, row: number) => {
+      if (!chargeModelPoolRef.current.has(`${col},${row}`)) return;
+      chargeModelPoolRef.current = new Set();
+      setChargeMovePlan((prev) => {
+        if (!prev) return prev;
+        const models = { ...prev.models, [modelId]: { col, row } };
+        // Pose → fig désélectionnée ; refresh sans selected (juste le voile des figs restantes).
+        void refreshChargePlanState(prev.unitId, models, null);
+        return { ...prev, models, activeModelId: null };
+      });
+    },
+    [refreshChargePlanState]
+  );
+
+  /** Clic sur une fig DÉJÀ POSÉE : la retire du plan (redevient éligible) pour la repositionner. */
+  const handleUnplaceChargeModel = useCallback(
+    (modelId: string) => {
+      setChargeMovePlan((prev) => {
+        if (!prev || !prev.models[modelId]) return prev;
+        const models = { ...prev.models };
+        delete models[modelId];
+        // Re-sélectionne la fig dé-posée (selected) → sa zone réapparaît directement.
+        void refreshChargePlanState(prev.unitId, models, modelId);
+        return { ...prev, models, activeModelId: modelId };
+      });
+    },
+    [refreshChargePlanState]
+  );
+
+  /** Bouton Charger : commit atomique du plan complet (commit_charge_plan). */
+  const handleCommitChargePlan = useCallback(async () => {
+    const plan = chargeMovePlanRef.current;
+    if (!plan || !plan.canValidate) return;
+    const planArr = Object.entries(plan.models).map(([mid, p]) => [mid, p.col, p.row]);
+    try {
+      await executeAction({
+        action: "commit_charge_plan",
+        unitId: String(plan.unitId),
+        plan: planArr,
+      });
+      chargeModelPoolRef.current = new Set();
+      setChargeMovePlan(null);
+      setChargePreviewTargetIds([]);
+      setPendingChargeRollDisplay(null);
+      setSelectedUnitId(null);
+      setMode("select");
+    } catch (e) {
+      console.error("[CHARGE-MOVE] commit FAILED", e);
+      setError(`Charge move failed: ${formatApiConnectionError(e)}`);
+    }
+  }, [executeAction]);
+
+  /** Bouton Cancel : forfait charge (skip, consomme l'unité), nettoie le plan local. */
+  const handleCancelChargeModelMove = useCallback(async () => {
+    const plan = chargeMovePlanRef.current;
+    const uid = plan?.unitId ?? selectedUnitId;
+    chargeModelPoolRef.current = new Set();
+    setChargeMovePlan(null);
+    setChargePreviewTargetIds([]);
+    setPendingChargeRollDisplay(null);
+    if (uid == null) {
+      setMode("select");
+      return;
+    }
+    try {
+      await executeAction({ action: "skip", unitId: String(uid) });
+    } catch (e) {
+      console.error("Cancel charge model move (skip) failed:", e);
+    }
+    setSelectedUnitId(null);
+    setMode("select");
+  }, [executeAction, selectedUnitId]);
+
   const handleStartTargetPreview = useCallback(
     async (shooterId: number | string, targetId: number | string) => {
       const numericShooterId = typeof shooterId === "number" ? shooterId : parseInt(shooterId, 10);
@@ -5141,6 +5361,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onResetModelInPlan: () => {},
       onCommitSquadMovePlan: async () => {},
       onCancelSquadMove: () => {},
+      chargeMovePlan: null,
+      chargeModelPoolRef,
+      onSelectChargeModel: () => {},
+      onMoveModelInChargePlan: () => {},
+      onUnplaceChargeModel: () => {},
+      onCommitChargePlan: async () => {},
+      onCancelChargeModelMove: async () => {},
       onSetAdvanceMode: async () => {},
       onStationary: async () => {},
       activeUnitEngaged: null,
@@ -5277,6 +5504,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onResetModelInPlan: handleResetModelInPlan,
     onCommitSquadMovePlan: handleCommitSquadMovePlan,
     onCancelSquadMove: handleCancelSquadMove,
+    // Charge par-figurine (V11 11.04, Slice G)
+    chargeMovePlan,
+    chargeModelPoolRef,
+    onSelectChargeModel: handleSelectChargeModel,
+    onMoveModelInChargePlan: handleMoveModelInChargePlan,
+    onUnplaceChargeModel: handleUnplaceChargeModel,
+    onCommitChargePlan: handleCommitChargePlan,
+    onCancelChargeModelMove: handleCancelChargeModelMove,
     onSetAdvanceMode: handleSetAdvanceMode,
     onStationary: handleStationary,
     activeUnitEngaged,

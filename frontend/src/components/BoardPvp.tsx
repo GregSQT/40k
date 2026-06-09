@@ -339,6 +339,7 @@ type Mode =
   | "attackPreview"
   | "targetPreview"
   | "chargePreview"
+  | "chargeModelMove"
   | "advancePreview"
   | "pileInPreview"
   | "consolidationPreview";
@@ -430,6 +431,25 @@ type BoardProps = {
   onResetModelInPlan?: (modelId: string) => void;
   onCommitSquadMovePlan?: () => void | Promise<void>;
   onCancelSquadMove?: () => void;
+  /** Charge par-figurine (V11 11.04, Slice G) — plan provisoire des figs posées. */
+  chargeMovePlan?: {
+    unitId: number;
+    models: Record<string, { col: number; row: number }>;
+    eligibleModels: string[];
+    unplaced: string[];
+    activeModelId: string | null;
+    currentPhase: 1 | 2 | 3;
+    canValidate: boolean;
+    satisfiedTargets: number[];
+    unsatisfiedTargets: number[];
+  } | null;
+  /** Pool (hexes "col,row") de la fig de charge active = eligible[activeModelId]. */
+  chargeModelPoolRef?: React.RefObject<Set<string>>;
+  onSelectChargeModel?: (modelId: string) => void;
+  onMoveModelInChargePlan?: (modelId: string, col: number, row: number) => void;
+  onUnplaceChargeModel?: (modelId: string) => void;
+  onCommitChargePlan?: () => void | Promise<void>;
+  onCancelChargeModelMove?: () => void | Promise<void>;
   /** Tir par-figurine (PvP manuel). */
   squadShootPlan?: {
     unitId: number;
@@ -754,6 +774,12 @@ export default function Board({
   onResetModelInPlan,
   onCommitSquadMovePlan,
   onCancelSquadMove,
+  chargeMovePlan = null,
+  chargeModelPoolRef,
+  onSelectChargeModel,
+  onMoveModelInChargePlan,
+  onUnplaceChargeModel,
+  onCancelChargeModelMove,
   squadShootPlan = null,
   onStartSquadModelShoot,
   onSelectModelForShoot,
@@ -884,6 +910,8 @@ export default function Board({
   const hoverSpriteRef = useRef<PIXI.Container | null>(null);
   const squadMoveVeilOverlayRef = useRef<PIXI.Graphics | null>(null);
   const manualAllocOverlayRef = useRef<PIXI.Graphics | null>(null);
+  /** Slice G : overlay voile violet des figs éligibles en chargeModelMove (préservé au redraw). */
+  const chargeModelVeilOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Ligne départ → pointeur + libellé distance hex (preview move) */
   const movePreviewGuideLineRef = useRef<PIXI.Graphics | null>(null);
   const hoverMoveOrientationStepRef = useRef<number | null>(null);
@@ -1003,9 +1031,56 @@ export default function Board({
     onCommitSquadMovePlan,
     onCancelSquadMove,
   };
+  /** Callbacks charge par-figurine — ref a jour pour les handlers d'event stables (Slice G). */
+  const chargeModelCallbacksRef = useRef({ onMoveModelInChargePlan, onCancelChargeModelMove });
+  chargeModelCallbacksRef.current = { onMoveModelInChargePlan, onCancelChargeModelMove };
   /** Plan provisoire toujours a jour pour les handlers d'event stables (sans relancer le draw). */
   const squadMovePlanRef = useRef(squadMovePlan);
   squadMovePlanRef.current = squadMovePlan;
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Slice G : la machinerie per-modèle (hover/pool/pose/sélection) est partagée entre le move
+  // (squadModelMove) et la charge (chargeModelMove). On expose une vue "squad-shaped" du plan de
+  // charge + des alias ``effectivePerModel*`` pour réutiliser ces handlers sans dupliquer la PIXI.
+  // ──────────────────────────────────────────────────────────────────────────
+  /** Vue squad-shaped du plan de charge : figs posées = plan, figs non posées = position d'origine. */
+  const chargeModelPlanView = useMemo(() => {
+    if (mode !== "chargeModelMove" || !chargeMovePlan) return null;
+    const uid = chargeMovePlan.unitId;
+    const occupied = (
+      gameState?.units_cache as
+        | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+        | undefined
+    )?.[String(uid)]?.occupied_hexes_by_model;
+    if (!occupied) return null;
+    const models: Record<string, { col: number; row: number }> = {};
+    const originModels: Record<string, { col: number; row: number }> = {};
+    for (const [mid, pos] of Object.entries(occupied)) {
+      originModels[mid] = { col: pos[0], row: pos[1] };
+      const placed = chargeMovePlan.models[mid];
+      models[mid] = placed ? { col: placed.col, row: placed.row } : { col: pos[0], row: pos[1] };
+    }
+    return {
+      unitId: uid,
+      models,
+      originModels,
+      activeModelId: chargeMovePlan.activeModelId,
+      perModelValid: {} as Record<string, boolean>,
+      coherencyOk: true,
+      canValidate: chargeMovePlan.canValidate,
+      wouldFlee: false,
+    };
+  }, [mode, chargeMovePlan, gameState?.units_cache]);
+
+  /** true si on est dans un mode plan par-figurine (move OU charge). */
+  const isPerModelMove = mode === "squadModelMove" || mode === "chargeModelMove";
+  /** Plan per-modèle actif (squad ou charge) — même forme pour la machinerie partagée. */
+  const effectivePerModelPlan = mode === "chargeModelMove" ? chargeModelPlanView : squadMovePlan;
+  /** Ref de pool de la fig active (squad BFS ou charge eligible). */
+  const effectivePerModelPoolRef =
+    mode === "chargeModelMove" ? (chargeModelPoolRef ?? null) : (squadMoveModelPoolRef ?? null);
+  const effectivePerModelPlanRef = useRef(effectivePerModelPlan);
+  effectivePerModelPlanRef.current = effectivePerModelPlan;
 
   /** Callbacks tir par-figurine — ref toujours a jour pour les handlers d'event stables. */
   const squadShootCallbacksRef = useRef({
@@ -2073,9 +2148,10 @@ export default function Board({
   useEffect(() => {
     if (!boardConfig || !gameConfig) return;
 
-    // En mode plan par-figurine, un effet dédié gère entièrement le preview (ghost + hoveredHex).
-    // Ce gros effet NE doit PAS tourner pour éviter le conflit avec active_movement_unit.
-    if (mode === "squadModelMove") return;
+    // En mode plan par-figurine (move OU charge), un effet dédié gère le preview ; ce gros effet de
+    // preview LoS au survol NE doit PAS tourner (coûteux par mouvement + inutile pour la charge,
+    // dont la pose se fait au clic sur l'hex).
+    if (mode === "squadModelMove" || mode === "chargeModelMove") return;
 
     const HEX_RADIUS_H = boardConfig.hex_radius;
     const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
@@ -2115,9 +2191,9 @@ export default function Board({
 
     const buildZonePixels = () => {
       let pool: Set<string> | undefined | null;
-      if (mode === "squadModelMove" && squadMovePlan?.activeModelId) {
-        // Move par-figurine : zone = pool BFS de la fig active (pas le pool rigide du squad).
-        pool = squadMoveModelPoolRef?.current;
+      if (isPerModelMove && effectivePerModelPlan?.activeModelId) {
+        // Plan par-figurine (move BFS ou charge eligible) : zone = pool de la fig active.
+        pool = effectivePerModelPoolRef?.current;
       } else if (phase === "charge" && mode === "chargePreview") {
         const z = chargeFootprintZoneRef?.current;
         const a = chargeDestPoolRef?.current;
@@ -2152,8 +2228,8 @@ export default function Board({
 
     const buildDestPixels = () => {
       const pool =
-        mode === "squadModelMove" && squadMovePlan?.activeModelId
-          ? squadMoveModelPoolRef?.current
+        isPerModelMove && effectivePerModelPlan?.activeModelId
+          ? effectivePerModelPoolRef?.current
           : phase === "charge" && mode === "chargePreview"
             ? chargeDestPoolRef?.current
             : resolvedMoveDestPoolRef.current;
@@ -2312,7 +2388,7 @@ export default function Board({
     const onMouseMove = (ev: MouseEvent) => {
       // squad.md brique 3 : en mode plan par-figurine, le fantome ne suit le curseur QUE si une
       // fig est active. Des qu'on a pose la fig (deselection), on cache le preview (sinon il "reste").
-      if (mode === "squadModelMove" && !squadMovePlanRef.current?.activeModelId) {
+      if (isPerModelMove && !effectivePerModelPlanRef.current?.activeModelId) {
         if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
           hoverSpriteRef.current.visible = false;
         }
@@ -2564,16 +2640,15 @@ export default function Board({
       hoveredHexContextRef.current = {
         mode,
         unitId: movementPreviewUnitId,
-        modelId:
-          mode === "squadModelMove" ? (squadMovePlanRef.current?.activeModelId ?? null) : null,
+        modelId: isPerModelMove ? (effectivePerModelPlanRef.current?.activeModelId ?? null) : null,
       };
 
       // Find nearest valid center for LoS (icon may be on a footprint extension hex)
       let losCol = iconCol;
       let losRow = iconRow;
       const anchorPoolForLos =
-        mode === "squadModelMove" && squadMovePlan?.activeModelId
-          ? squadMoveModelPoolRef?.current
+        isPerModelMove && effectivePerModelPlan?.activeModelId
+          ? effectivePerModelPoolRef?.current
           : phase === "charge" && mode === "chargePreview"
             ? chargeDestPoolRef?.current
             : resolvedMoveDestPoolRef.current;
@@ -2955,8 +3030,8 @@ export default function Board({
     if (!canvas) return;
 
     const poolHasHoveredAnchor = (key: string): boolean => {
-      if (mode === "squadModelMove") {
-        return squadMoveModelPoolRef?.current?.has(key) ?? false;
+      if (isPerModelMove) {
+        return effectivePerModelPoolRef?.current?.has(key) ?? false;
       }
       if (phase === "charge" && mode === "chargePreview") {
         return chargeDestPoolRef?.current?.has(key) ?? false;
@@ -2965,7 +3040,8 @@ export default function Board({
     };
 
     const shouldConfirmAtIcon =
-      (mode === "squadModelMove" && squadMovePlan?.activeModelId != null) ||
+      // Charge par-figurine : la pose se fait à l'hex CLIQUÉ (onPointerDownSelect), pas en hover-snap.
+      (mode === "squadModelMove" && effectivePerModelPlan?.activeModelId != null) ||
       (selectedUnitId != null &&
         ((effectivePhase === "move" && mode === "select") ||
           (effectivePhase === "move" && mode === "movePreview") ||
@@ -2998,7 +3074,7 @@ export default function Board({
             mode,
             selectedUnitId,
             orientation: hoverMoveOrientationStepRef.current ?? undefined,
-            activeModelId: squadMovePlan?.activeModelId ?? null,
+            activeModelId: effectivePerModelPlan?.activeModelId ?? null,
           },
         })
       );
@@ -3013,6 +3089,9 @@ export default function Board({
     effectivePhase,
     mode,
     selectedUnitId,
+    isPerModelMove,
+    effectivePerModelPlan?.activeModelId,
+    effectivePerModelPoolRef?.current?.has,
     squadMovePlan?.activeModelId,
     squadMoveModelPoolRef?.current?.has,
     chargeDestPoolRef?.current?.has,
@@ -3271,12 +3350,13 @@ export default function Board({
   // Phase bubble : si le clic a deja servi a POSER la fig active (hex dans son pool, capture-phase
   // stopImmediatePropagation), ce handler ne se declenche pas.
   useEffect(() => {
-    if (mode !== "squadModelMove" || !squadMovePlan) return;
+    if (!isPerModelMove || !effectivePerModelPlan) return;
     if (!boardConfig) return;
     const canvas = canvasContainerRef.current?.querySelector("canvas");
     if (!canvas) return;
     const app = appRef.current;
     if (!app) return;
+    const plan = effectivePerModelPlan;
 
     const onPointerDownSelect = (e: PointerEvent) => {
       if (e.button !== 0) return;
@@ -3306,22 +3386,69 @@ export default function Board({
       const clickCube = offsetToCube(col, row);
       let foundModelId: string | null = null;
       let bestDistance = Infinity;
-      for (const [mid, pos] of Object.entries(squadMovePlan.models)) {
+      for (const [mid, pos] of Object.entries(plan.models)) {
         const d = cubeDistance(clickCube, offsetToCube(pos.col, pos.row));
         if (d <= HEX_HIT_TOLERANCE && d < bestDistance) {
           bestDistance = d;
           foundModelId = mid;
         }
       }
+      if (mode === "chargeModelMove") {
+        const active = plan.activeModelId;
+        const poolRef = chargeModelPoolRef?.current;
+        // 0) Clic sur une fig DÉJÀ POSÉE → la dé-poser (réajustement / cohésion).
+        if (foundModelId && chargeMovePlan?.models?.[foundModelId]) {
+          onUnplaceChargeModel?.(foundModelId);
+          return;
+        }
+        // 1) Clic dans le pool de la fig active → pose. Match exact, sinon snap à l'ancre la plus
+        // proche (≤2 sous-hex) pour tolérer un clic légèrement hors hex.
+        let placeC = col;
+        let placeR = row;
+        let ok = active != null && (poolRef?.has(`${col},${row}`) ?? false);
+        if (active && !ok && poolRef && poolRef.size > 0) {
+          const clickCube2 = offsetToCube(col, row);
+          let bestD = Infinity;
+          for (const k of poolRef) {
+            const s = k.indexOf(",");
+            const kc = Number(k.slice(0, s));
+            const kr = Number(k.slice(s + 1));
+            const d = cubeDistance(clickCube2, offsetToCube(kc, kr));
+            if (d < bestD) {
+              bestD = d;
+              placeC = kc;
+              placeR = kr;
+            }
+          }
+          if (bestD <= 2) ok = true;
+        }
+        if (active && ok) {
+          chargeModelCallbacksRef.current.onMoveModelInChargePlan?.(active, placeC, placeR);
+          return;
+        }
+        // 2) Clic sur une AUTRE figurine (non active) → la sélectionne (si éligible, sinon ignoré par le hook).
+        if (foundModelId && foundModelId !== active) {
+          onSelectChargeModel?.(foundModelId);
+        }
+        return;
+      }
       if (foundModelId === null) return;
       // Ne pas re-selectionner la fig deja active (le clic sert alors a la poser, gere ailleurs).
-      if (foundModelId === squadMovePlan.activeModelId) return;
+      if (foundModelId === plan.activeModelId) return;
       void squadMoveCallbacksRef.current.onSelectModelForMove?.(foundModelId);
     };
 
     canvas.addEventListener("pointerdown", onPointerDownSelect);
     return () => canvas.removeEventListener("pointerdown", onPointerDownSelect);
-  }, [mode, squadMovePlan, boardConfig]);
+  }, [
+    mode,
+    isPerModelMove,
+    effectivePerModelPlan,
+    onSelectChargeModel,
+    onUnplaceChargeModel,
+    chargeMovePlan,
+    boardConfig,
+  ]);
 
   // TIR par-figurine (PvP manuel) : phase shoot. Entrée sur escouade OWN multi-fig →
   // mode squadModelShoot. En mode : clic fig OWN = sélection (blink cibles valides),
@@ -3616,6 +3743,76 @@ export default function Board({
       if (manualAllocOverlayRef.current === overlay) manualAllocOverlayRef.current = null;
     };
   }, [manualAllocation, boardConfig, units, gameState]);
+
+  // Slice G : voile violet sur les figurines ÉLIGIBLES du chargeur en chargeModelMove (phase
+  // courante). La fig active a un anneau plus marqué ; sa zone de landing est dessinée ailleurs.
+  // L'utilisateur choisit une fig voilée → sa zone apparaît, puis il la pose.
+  useEffect(() => {
+    const app = appRef.current;
+    if (!app) return;
+    const overlay = new PIXI.Graphics();
+    overlay.zIndex = 2700;
+    overlay.eventMode = "none";
+    app.stage.addChild(overlay);
+    chargeModelVeilOverlayRef.current = overlay;
+    overlay.clear();
+    if (mode === "chargeModelMove" && chargeMovePlan && boardConfig) {
+      const HEX_RADIUS_H = boardConfig.hex_radius;
+      const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
+      const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
+      const MARGIN_H = boardConfig.margin;
+      const charger = units.find((u) => String(u.id) === String(chargeMovePlan.unitId));
+      const baseSz = charger ? resolveBaseSizeForUnitDisplay(charger) : 1;
+      const modelR = baseSz > 1 ? (baseSz * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
+      const ringR = modelR * 1.25;
+      const lineW = Math.max(1.5, HEX_RADIUS_H * 0.5);
+      const byModel = (
+        gameState as unknown as {
+          units_cache?: Record<
+            string,
+            { occupied_hexes_by_model?: Record<string, [number, number]> }
+          >;
+        }
+      )?.units_cache?.[String(chargeMovePlan.unitId)]?.occupied_hexes_by_model;
+      const eligibleIds = new Set(chargeMovePlan.eligibleModels);
+      const VIOLET = 0xa855f7;
+      const GREEN = 0x22c55e; // figs déjà posées dans le plan (ghost-lite)
+      const hexCenter = (c: number, r: number): [number, number] => [
+        c * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H,
+        r * HEX_HEIGHT_H + ((c % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H,
+      ];
+      // 1) Figs POSÉES dans le plan → disque vert plein à la position provisoire (confirme la pose).
+      for (const [mid, p] of Object.entries(chargeMovePlan.models)) {
+        const [cx, cy] = hexCenter(p.col, p.row);
+        overlay.lineStyle(lineW, GREEN, 0.95);
+        overlay.beginFill(GREEN, 0.55);
+        overlay.drawCircle(cx, cy, modelR);
+        overlay.endFill();
+        void mid;
+      }
+      // 2) Figs ÉLIGIBLES non posées → voile violet plein (anneau + remplissage marqué si active).
+      if (byModel) {
+        for (const [mid, pos] of Object.entries(byModel)) {
+          if (!eligibleIds.has(mid)) continue;
+          if (chargeMovePlan.models[mid]) continue; // déjà posée → traitée au-dessus
+          const [cx, cy] = hexCenter(pos[0], pos[1]);
+          const isActive = mid === chargeMovePlan.activeModelId;
+          overlay.lineStyle(lineW, VIOLET, 1);
+          overlay.beginFill(VIOLET, isActive ? 0.7 : 0.45);
+          overlay.drawCircle(cx, cy, ringR);
+          overlay.endFill();
+        }
+      }
+    }
+    return () => {
+      if (!overlay.destroyed) {
+        overlay.clear();
+        app.stage.removeChild(overlay);
+        overlay.destroy();
+      }
+      if (chargeModelVeilOverlayRef.current === overlay) chargeModelVeilOverlayRef.current = null;
+    };
+  }, [mode, chargeMovePlan, boardConfig, units, gameState]);
 
   // squad.md brique 3 : dès qu'AUCUNE fig n'est active en mode plan (fig posée → deselect, ou
   // entrée sans selection), couper TOUT le preview (fantome curseur + LoS + ligne guide + tooltip).
@@ -4971,6 +5168,12 @@ export default function Board({
       onMoveModelInPlan: (modelId: string, col: number, row: number) => {
         squadMoveCallbacksRef.current.onMoveModelInPlan?.(modelId, col, row);
       },
+      onMoveModelInChargePlan: (modelId: string, col: number, row: number) => {
+        chargeModelCallbacksRef.current.onMoveModelInChargePlan?.(modelId, col, row);
+      },
+      onCancelChargeModelMove: () => {
+        void chargeModelCallbacksRef.current.onCancelChargeModelMove?.();
+      },
     });
 
     // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Listen for advance button click
@@ -5067,13 +5270,13 @@ export default function Board({
       }
     }
 
-    // squad.md brique 3 : surbrillance du pool BFS de la figurine active (move par-figurine).
+    // Surbrillance du pool de la figurine active : move (BFS) OU charge (eligible) par-figurine.
     if (
-      mode === "squadModelMove" &&
-      squadMovePlan?.activeModelId &&
-      squadMoveModelPoolRef?.current
+      isPerModelMove &&
+      effectivePerModelPlan?.activeModelId &&
+      effectivePerModelPoolRef?.current
     ) {
-      for (const key of squadMoveModelPoolRef.current) {
+      for (const key of effectivePerModelPoolRef.current) {
         const sep = key.indexOf(",");
         availableCells.push({
           col: Number(key.slice(0, sep)),
@@ -5242,6 +5445,17 @@ export default function Board({
           });
         });
       }
+    }
+
+    // Slice G : charge par-figurine — zone de landing = pool eligible de la fig active, rendu en
+    // hexes simples (1:1 avec les hexes cliquables, pas en disques d'empreinte).
+    if (mode === "chargeModelMove" && chargeMovePlan?.activeModelId && chargeModelPoolRef?.current) {
+      const cells: { col: number; row: number }[] = [];
+      for (const key of chargeModelPoolRef.current) {
+        const sep = key.indexOf(",");
+        cells.push({ col: Number(key.slice(0, sep)), row: Number(key.slice(sep + 1)) });
+      }
+      chargeCells = cells;
     }
 
     // ✅ MOVEMENT PREVIEW: Use backend-computed destinations (valid_move_destinations_pool)
@@ -5990,6 +6204,7 @@ export default function Board({
       const savedMovePreviewGuideLine = movePreviewGuideLineRef.current;
       const savedMeasureGuideLine = measureGuideLineRef.current;
       const savedManualAllocOverlay = manualAllocOverlayRef.current;
+      const savedChargeVeilOverlay = chargeModelVeilOverlayRef.current;
       if (savedStatic?.parent) app.stage.removeChild(savedStatic);
       if (savedWalls?.parent) app.stage.removeChild(savedWalls);
       if (savedUi?.parent) app.stage.removeChild(savedUi);
@@ -6001,6 +6216,7 @@ export default function Board({
       if (savedMovePreviewGuideLine?.parent) app.stage.removeChild(savedMovePreviewGuideLine);
       if (savedMeasureGuideLine?.parent) app.stage.removeChild(savedMeasureGuideLine);
       if (savedManualAllocOverlay?.parent) app.stage.removeChild(savedManualAllocOverlay);
+      if (savedChargeVeilOverlay?.parent) app.stage.removeChild(savedChargeVeilOverlay);
       if (
         canReuseExistingHighlightsThroughDestroy &&
         highlightsLayerRef.current?.parent === app.stage
@@ -6064,6 +6280,10 @@ export default function Board({
       if (savedManualAllocOverlay && !savedManualAllocOverlay.destroyed) {
         savedManualAllocOverlay.zIndex = 2700;
         app.stage.addChild(savedManualAllocOverlay);
+      }
+      if (savedChargeVeilOverlay && !savedChargeVeilOverlay.destroyed) {
+        savedChargeVeilOverlay.zIndex = 2700;
+        app.stage.addChild(savedChargeVeilOverlay);
       }
 
       // Nettoyer pastilles cible / jet de charge seulement quand on reconstruit les unités.
@@ -7517,6 +7737,10 @@ export default function Board({
     squadMoveModelMaskLoopsRef?.current,
     squadShootPlan,
     deadModelGhostsForRender,
+    // Slice G : redraw du pool/cercles charge à chaque pose / sélection de fig.
+    chargeMovePlan,
+    effectivePerModelPlan?.activeModelId,
+    chargeModelPoolRef,
   ]);
 
   // Handle weapon selection

@@ -3035,6 +3035,92 @@ export const BoardWithAPI: React.FC = () => {
         </div>
       )}
 
+      {/* Barre d'action charge par-figurine (Slice G) : Cancel + Charger (commit du plan complet).
+          Affichée en mode chargeModelMove ; Charger actif quand can_validate (toutes figs posées,
+          toutes cibles engagées, cohésion OK). */}
+      {apiProps.gameState?.phase === "charge" &&
+        apiProps.mode === "chargeModelMove" &&
+        apiProps.chargeMovePlan != null && (
+        <div
+          className="squad-action-bar"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            background: "#1f2937",
+            border: "1px solid #555",
+            borderRadius: "8px",
+            padding: 8,
+            marginTop: -6,
+            marginBottom: 2,
+          }}
+        >
+          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => {
+                if (!isGameOver) apiProps.onCancelChargeModelMove?.();
+              }}
+              style={{
+                border: "1px solid rgba(0,0,0,0.35)",
+                borderRadius: 6,
+                background: "#6b7280",
+                boxShadow: "0 6px 0 #374151",
+                color: "#fff",
+                cursor: "pointer",
+                fontSize: 14,
+                fontWeight: 700,
+                padding: "8px 14px",
+                width: 110,
+                textAlign: "center",
+              }}
+            >
+              Cancel
+            </button>
+            {(() => {
+              const canValidate = apiProps.chargeMovePlan?.canValidate === true;
+              return (
+                <button
+                  type="button"
+                  disabled={!canValidate}
+                  onClick={() => {
+                    if (!isGameOver && canValidate) apiProps.onCommitChargePlan?.();
+                  }}
+                  style={{
+                    border: "1px solid rgba(0,0,0,0.35)",
+                    borderRadius: 6,
+                    background: canValidate ? "#7c3aed" : "rgba(75,85,99,0.55)",
+                    boxShadow: canValidate ? "0 6px 0 #4c1d95" : "none",
+                    color: canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+                    cursor: canValidate ? "pointer" : "not-allowed",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    padding: "8px 14px",
+                    width: 110,
+                    textAlign: "center",
+                    opacity: canValidate ? 1 : 0.6,
+                  }}
+                >
+                  Charger
+                </button>
+              );
+            })()}
+            {(() => {
+              const plan = apiProps.chargeMovePlan;
+              if (!plan) return null;
+              const nbUnplaced = plan.unplaced?.length ?? 0;
+              const nbSat = plan.satisfiedTargets?.length ?? 0;
+              const nbTot = nbSat + (plan.unsatisfiedTargets?.length ?? 0);
+              return (
+                <span style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 600, marginLeft: 4 }}>
+                  {nbSat}/{nbTot} cible{nbTot > 1 ? "s" : ""} engagée{nbTot > 1 ? "s" : ""}
+                  {nbUnplaced > 0 ? ` · ${nbUnplaced} fig${nbUnplaced > 1 ? "s" : ""} à placer` : ""}
+                </span>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
       {/* Barre d'action move : Cancel/Validate (moitié gauche) + boutons de mode (moitié droite).
           Affichée dès l'activation (movePreview) et en plan par-figurine (squadModelMove). */}
       {apiProps.gameState?.phase === "move" &&
@@ -3790,6 +3876,14 @@ export const BoardWithAPI: React.FC = () => {
               isGameOver ? async () => {} : apiProps.onCommitSquadMovePlan
             }
             onCancelSquadMove={isGameOver ? () => {} : apiProps.onCancelSquadMove}
+            chargeMovePlan={apiProps.chargeMovePlan}
+            chargeModelPoolRef={apiProps.chargeModelPoolRef}
+            onSelectChargeModel={isGameOver ? () => {} : apiProps.onSelectChargeModel}
+            onMoveModelInChargePlan={isGameOver ? () => {} : apiProps.onMoveModelInChargePlan}
+            onUnplaceChargeModel={isGameOver ? () => {} : apiProps.onUnplaceChargeModel}
+            onCancelChargeModelMove={
+              isGameOver ? async () => {} : apiProps.onCancelChargeModelMove
+            }
             squadShootPlan={apiProps.squadShootPlan}
             onStartSquadModelShoot={isGameOver ? async () => {} : apiProps.onStartSquadModelShoot}
             onSelectModelForShoot={isGameOver ? async () => {} : apiProps.onSelectModelForShoot}
