@@ -2193,9 +2193,58 @@ BASE_TO_BASE_SUBHEX = 1
 
 
 def get_coherency_subhex(game_state: Dict[str, Any]) -> int:
-    """Unit Coherency = 2" horizontal (regle officielle).
-    Retourne le seuil coherency en subhexes pour l echelle du scenario."""
-    return 2 * int(require_key(game_state, "inches_to_subhex"))
+    """Unit Coherency, 1re puce (03.03) : distance fig-a-voisin (officiel 2" horizontal).
+    Lue depuis game_rules.unit_model_cohesion_range, DEJA convertie en subhexes par
+    w40k_core (pre-scale ×inches_to_subhex a l'init) : on la retourne telle quelle."""
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    return int(require_key(game_rules, "unit_model_cohesion_range"))
+
+
+def get_cohesion_max_subhex(game_state: Dict[str, Any]) -> int:
+    """Unit Coherency, 2e puce (03.03) : ecart max fig-a-fig (officiel 9" horizontal).
+    Lue depuis game_rules.unit_global_cohesion_range, DEJA convertie en subhexes par
+    w40k_core (pre-scale ×inches_to_subhex a l'init) : on la retourne telle quelle."""
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    return int(require_key(game_rules, "unit_global_cohesion_range"))
+
+
+def get_min_neighbors(game_state: Dict[str, Any]) -> int:
+    """Voisins min a <= unit_model_cohesion_range exiges par fig (03.03, 1re puce).
+    Officiel 10e : 1 quelle que soit la taille de l'escouade."""
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    return int(require_key(game_rules, "squad_min_neighbors"))
+
+
+def _positions_in_coherency(
+    positions: List[Tuple[int, int]], game_state: Dict[str, Any]
+) -> bool:
+    """Coherency (03.03) sur une liste de positions (centre-a-centre, horizontal).
+
+    Source de verite unique pour validate_squad_coherency et _validate_plan_coherency.
+    Pour chaque fig, les DEUX puces doivent tenir :
+      - 1re puce : >= min_neighbors autres figs a <= unit_model_cohesion_range.
+      - 2e puce  : aucune autre fig a > unit_global_cohesion_range.
+    Unite <= 1 fig : coherente d'office (la regle ne contraint que les unites > 1 fig).
+    """
+    n = len(positions)
+    if n <= 1:
+        return True
+    coh = get_coherency_subhex(game_state)
+    coh_max = get_cohesion_max_subhex(game_state)
+    min_neighbors = get_min_neighbors(game_state)
+    for i, (ci, ri) in enumerate(positions):
+        neighbors = 0
+        for j, (cj, rj) in enumerate(positions):
+            if i == j:
+                continue
+            d = calculate_hex_distance(ci, ri, cj, rj)
+            if d > coh_max:
+                return False  # 2e puce violee : ecart > 9"
+            if d <= coh:
+                neighbors += 1
+        if neighbors < min_neighbors:
+            return False  # 1re puce violee : pas assez de voisins a <= 2"
+    return True
 
 
 def is_base_to_base(col_a: int, row_a: int, col_b: int, row_b: int) -> bool:
@@ -2285,35 +2334,18 @@ def validate_squad_coherency(game_state: Dict[str, Any], squad_id: str) -> bool:
 
     Ne lit PAS squad_cache["is_coherent"] — recompute depuis models_cache.
 
-    Regles officielles (Core Concepts) :
-      - squad_size == 1 : vacuously True (cas degenere).
-      - 2 <= squad_size <= 6 : chaque figurine a >= 1 voisin a <= 2".
-      - squad_size >= 7 : chaque figurine a >= 2 voisins a <= 2".
-    Distance horizontale uniquement (moteur 2D, pas de verticale).
-    Propriete locale (1 ou 2 voisins directs), pas de connectivite transitive.
+    Regles officielles (03.03), distance horizontale uniquement (moteur 2D) :
+      - <= 1 fig : coherente d'office.
+      - chaque fig : >= squad_min_neighbors voisin(s) a <= unit_model_cohesion_range,
+        ET aucune fig a > unit_global_cohesion_range.
+    Logique deleguee a _positions_in_coherency (source unique partagee avec le plan).
     """
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     model_ids = squad_models.get(squad_id, [])  # get allowed
     alive = [models_cache[m] for m in model_ids if m in models_cache]
-    n = len(alive)
-    if n <= 1:
-        return True
-    coherency_dist = get_coherency_subhex(game_state)
-    min_neighbors = 2 if n >= 7 else 1
     positions = [(int(m["col"]), int(m["row"])) for m in alive]
-    for i, (ci, ri) in enumerate(positions):
-        neighbors = 0
-        for j, (cj, rj) in enumerate(positions):
-            if i == j:
-                continue
-            if calculate_hex_distance(ci, ri, cj, rj) <= coherency_dist:
-                neighbors += 1
-                if neighbors >= min_neighbors:
-                    break
-        if neighbors < min_neighbors:
-            return False
-    return True
+    return _positions_in_coherency(positions, game_state)
 
 
 def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -> None:
@@ -2639,26 +2671,10 @@ def _validate_plan_coherency(
 ) -> bool:
     """Verifie la coherency d un plan (positions hypothetiques, sans toucher caches).
 
-    Meme regles que validate_squad_coherency : <=6 modeles → 1 voisin, >=7 → 2.
+    Memes regles que validate_squad_coherency (deleguees a _positions_in_coherency).
     """
-    n = len(plan_positions)
-    if n <= 1:
-        return True
-    coherency_dist = get_coherency_subhex(game_state)
-    min_neighbors = 2 if n >= 7 else 1
     positions = list(plan_positions.values())
-    for i, (ci, ri) in enumerate(positions):
-        neighbors = 0
-        for j, (cj, rj) in enumerate(positions):
-            if i == j:
-                continue
-            if calculate_hex_distance(ci, ri, cj, rj) <= coherency_dist:
-                neighbors += 1
-                if neighbors >= min_neighbors:
-                    break
-        if neighbors < min_neighbors:
-            return False
-    return True
+    return _positions_in_coherency(positions, game_state)
 
 
 def validate_move_plan(

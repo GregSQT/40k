@@ -31,7 +31,8 @@ from .shared_utils import (
     compute_candidate_footprint,
     is_footprint_placement_valid, get_engagement_zone, get_max_base_size_hex,
     get_squad_move_budget, validate_move_plan, _validate_plan_coherency, commit_move,
-    get_coherency_subhex, _compute_unit_occupied_hexes, _squad_is_in_enemy_er,
+    get_coherency_subhex, get_cohesion_max_subhex, get_min_neighbors,
+    _compute_unit_occupied_hexes, _squad_is_in_enemy_er,
     roll_hazard_for_unit, roll_battle_shock, roll_advance_for_squad,
 )
 from engine.hex_utils import (
@@ -2315,10 +2316,10 @@ def movement_preview_move_plan(
         # (``_movement_engagement_violates``, même géométrie que le pathfinding → IA == PvP).
         # On désactive le check legacy centre-à-centre de ``validate_move_plan``.
         c_individual["forbid_enemy_er"] = False
-    # Cohesion par COMPOSANTES CONNEXES (squad.md) : on relie les figs distantes de <=
-    # coherency_dist (2"), puis on cherche les groupes connectes. Le groupe STRICTEMENT
-    # majoritaire (taille*2 > effectif total) reste vert ; tout groupe minoritaire ou a
-    # egalite (taille*2 <= total) passe en rouge → 2 moities egales = tout le squad rouge.
+    # Cohesion 03.03 appliquee PAR FIG (les 2 puces de la regle), identique a
+    # validate_squad_coherency cote commit. Voile rouge sur une fig si :
+    #   - 1re puce : moins de min_neighbors autres figs a <= unit_model_cohesion_range, OU
+    #   - 2e puce  : au moins une autre fig a > unit_global_cohesion_range.
     #
     # La distance utilisée est l'empreinte-à-empreinte (pas centre-à-centre) pour les
     # unités avec une grande base : deux figs dont les empreintes se touchent à ≤2" sont
@@ -2344,35 +2345,25 @@ def movement_preview_move_plan(
             offs = _off_even if (col & 1) == 0 else _off_odd
             footprints.append({(col + dc, row + dr) for dc, dr in offs})
 
-    adjacency: List[List[int]] = [[] for _ in range(n)]
+    coh_max = get_cohesion_max_subhex(game_state)
+    min_neighbors = get_min_neighbors(game_state)
+    neighbor_count = [0] * n
+    too_far = [False] * n
     for i in range(n):
         for j in range(i + 1, n):
-            d = min_distance_between_sets(footprints[i], footprints[j], max_distance=coherency_dist)
+            d = min_distance_between_sets(footprints[i], footprints[j], max_distance=coh_max)
             if d <= coherency_dist:
-                adjacency[i].append(j)
-                adjacency[j].append(i)
+                neighbor_count[i] += 1
+                neighbor_count[j] += 1
+            if d > coh_max:
+                too_far[i] = True
+                too_far[j] = True
 
-    comp_id = [-1] * n
-    comp_count = 0
-    for start in range(n):
-        if comp_id[start] != -1:
-            continue
-        stack = [start]
-        comp_id[start] = comp_count
-        while stack:
-            k = stack.pop()
-            for nb in adjacency[k]:
-                if comp_id[nb] == -1:
-                    comp_id[nb] = comp_count
-                    stack.append(nb)
-        comp_count += 1
-
-    comp_size: Dict[int, int] = {}
-    for c in comp_id:
-        comp_size[c] = comp_size.get(c, 0) + 1  # get allowed
-  # get allowed
-    # cohesion_red[i] = la composante de la fig i n'est PAS strictement majoritaire.
-    cohesion_red = [comp_size[comp_id[i]] * 2 <= n for i in range(n)] if n > 1 else [False] * n
+    # cohesion_red[i] : 1re puce (voisins < min_neighbors) OU 2e puce (une fig a > 9").
+    cohesion_red = (
+        [neighbor_count[i] < min_neighbors or too_far[i] for i in range(n)]
+        if n > 1 else [False] * n
+    )
 
     wall_hexes_set = game_state.get("wall_hexes", set())
     other_occ_set: Set[Tuple[int, int]] = set()

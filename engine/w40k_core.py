@@ -408,6 +408,8 @@ class W40KEngine(gym.Env):
                     "advance_distance_range",
                     "avg_charge_roll",
                     "max_search_distance",
+                    "unit_model_cohesion_range",
+                    "unit_global_cohesion_range",
                 ):
                     if _key in gr:
                         gr[_key] = int(gr[_key]) * _scale
