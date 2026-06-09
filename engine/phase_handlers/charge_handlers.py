@@ -26,7 +26,7 @@ from engine.combat_utils import (
 )
 from .shared_utils import (
     ACTION, WAIT, NO, ERROR, PASS, CHARGE,
-    update_units_cache_position, update_units_cache_hp, is_unit_alive, get_hp_from_cache, require_hp_from_cache,
+    update_units_cache_position, translate_squad_to_destination, update_units_cache_hp, is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position,
     update_enemy_adjacent_caches_after_unit_move,
     unit_has_rule_effect as shared_unit_has_rule_effect,
@@ -1700,9 +1700,12 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     chg_old_entry = require_key(game_state, "units_cache").get(chg_uid_str)
     chg_old_occupied = chg_old_entry.get("occupied_hexes") if chg_old_entry else None
 
-    # Update units_cache after position change
+    # Update units_cache after position change.
+    # Déplacement RIGIDE du squad (ancre + toutes les figs translatées + occupied_hexes_by_model
+    # resync) — même sémantique que la phase move. update_units_cache_position seul ne bougeait que
+    # l'ancre, laissant les figs multi-fig affichées à l'ancienne position (charge « sans effet visuel »).
     _t_upd0 = time.perf_counter() if _perf else None
-    update_units_cache_position(game_state, chg_uid_str, dest_col_int, dest_row_int)
+    translate_squad_to_destination(game_state, chg_uid_str, dest_col_int, dest_row_int)
     _t_upd1 = time.perf_counter() if _perf else None
 
     chg_new_entry = require_key(game_state, "units_cache").get(chg_uid_str)
