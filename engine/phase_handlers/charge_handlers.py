@@ -117,6 +117,7 @@ def _candidate_footprint_charge(
 
 
 def _charge_synthetic_charger_cache_entry(
+    game_state: Dict[str, Any],
     unit: Dict[str, Any],
     anchor_col: int,
     anchor_row: int,
@@ -124,15 +125,26 @@ def _charge_synthetic_charger_cache_entry(
 ) -> Dict[str, Any]:
     """
     Entrée au format ``units_cache`` pour tester l'engagement en fin de charge,
-    alignée sur ``_fight_build_valid_target_pool`` (``unit_entries_within_engagement_zone``).
+    consommée par ``unit_entries_within_engagement_zone`` (même contrat que la phase fight).
+
+    Construite en **copiant la vraie entrée ``units_cache``** du chargeur, puis en surchargeant la
+    position (``col``/``row``/``occupied_hexes``). En héritant de l'entrée réelle, l'entrée synthétique
+    reste alignée sur la forme attendue par ``spatial_relations`` quel que soit le champ requis
+    (``orientation``, ``BASE_SHAPE``/``BASE_SIZE`` …) — c'est ce qui empêche un champ statique
+    nouvellement requis de la casser silencieusement (cf. ``orientation`` exigé par
+    ``_entry_is_multi_figure``).
+
+    ``occupied_hexes_by_model`` est volontairement retiré : il est position-dépendant et ne peut pas
+    être recalculé pour une ancre hypothétique. L'absence (KeyError explicite si un futur consommateur
+    l'exige) est préférable à une valeur obsolète silencieusement fausse.
     """
-    return {
-        "col": int(anchor_col),
-        "row": int(anchor_row),
-        "BASE_SHAPE": require_key(unit, "BASE_SHAPE"),
-        "BASE_SIZE": require_key(unit, "BASE_SIZE"),
-        "occupied_hexes": set(candidate_fp),
-    }
+    units_cache = require_key(game_state, "units_cache")
+    base = dict(require_key(units_cache, str(require_key(unit, "id"))))
+    base["col"] = int(anchor_col)
+    base["row"] = int(anchor_row)
+    base["occupied_hexes"] = set(candidate_fp)
+    base.pop("occupied_hexes_by_model", None)
+    return base
 
 
 def _charge_footprint_union_for_anchors(
@@ -337,7 +349,7 @@ def _build_charge_anchors_in_zone(
         candidate_fp = _candidate_footprint_charge(int(ac), int(ar), unit, game_state, fp_pair)
         if candidate_fp & target_fp:
             continue
-        synth = _charge_synthetic_charger_cache_entry(unit, int(ac), int(ar), candidate_fp)
+        synth = _charge_synthetic_charger_cache_entry(game_state, unit, int(ac), int(ar), candidate_fp)
         if not unit_entries_within_engagement_zone(synth, te, engagement_zone):
             continue
         if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
@@ -380,13 +392,22 @@ def _charge_anchor_is_socle_a_socle_with_target(
 def _charge_pool_must_socle_a_socle_if_possible(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
-    target: Dict[str, Any],
+    targets: Any,
     valid_pool: List[Tuple[int, int]],
 ) -> List[Tuple[int, int]]:
-    """Si au moins une ancre « socle à socle » avec la cible est possible, ne retourne que celles-ci."""
+    """Si ≥1 ancre « socle à socle » avec **au moins une** cible déclarée existe, ne garder que celles-ci.
+
+    V11 (WHILE MOVING) : « each model that can end engaged with **one or more** charge targets must
+    do so » — donc « au moins une », pas « toutes » (l'engagement de toutes est garanti par le pool).
+    ``targets`` accepte une cible unique (dict, legacy) ou une liste de cibles déclarées (multi).
+    """
+    target_list = [targets] if isinstance(targets, dict) else list(targets)
     touching: List[Tuple[int, int]] = []
     for ac, ar in valid_pool:
-        if _charge_anchor_is_socle_a_socle_with_target(game_state, unit, target, int(ac), int(ar)):
+        if any(
+            _charge_anchor_is_socle_a_socle_with_target(game_state, unit, t, int(ac), int(ar))
+            for t in target_list
+        ):
             touching.append((int(ac), int(ar)))
     return touching if touching else list(valid_pool)
 
@@ -395,7 +416,8 @@ def _charge_bfs_max_distance(
     game_state: Dict[str, Any],
     unit_id: str,
     charge_roll: int,
-    target_id: Optional[str],
+    target_id: Optional[str] = None,
+    target_ids: Optional[List[str]] = None,
 ) -> int:
     """
     Nombre maximum de pas d'ancre pour le BFS de charge.
@@ -404,27 +426,41 @@ def _charge_bfs_max_distance(
     plateau ×10, l'ancre ``col``/``row`` peut être du côté opposé à la cible alors qu'un hex de
     l'empreinte est déjà proche. On ajoute la distance hex (primaire → hex allié le plus proche
     de l'empreinte ennemie) au jet, pour que le pool et la zone violette s'étendent vers la cible.
+
+    Multi-cibles (``target_ids``) : la borne se mesure vers la cible déclarée **la plus proche**
+    (union des empreintes), borne permissive ; l'intersection ``eng==declared`` élague ensuite.
     """
     from engine.hex_utils import hex_distance
 
     rid = int(charge_roll)
-    if not target_id:
+    if target_ids:
+        tids = [str(t) for t in target_ids]
+    elif target_id:
+        tids = [str(target_id)]
+    else:
         return rid
 
     units_cache = require_key(game_state, "units_cache")
     uid = str(unit_id)
-    tid = str(target_id)
     ue = units_cache.get(uid)
-    te = units_cache.get(tid)
-    if not ue or not te:
+    if not ue:
         return rid
 
     own_hexes = ue.get("occupied_hexes")
     if not own_hexes:
         own_hexes = {(int(ue["col"]), int(ue["row"]))}
-    enemy_fp = te.get("occupied_hexes")
+    # Union des empreintes des cibles déclarées (la boucle ci-dessous garde la plus proche).
+    enemy_fp: Set[Tuple[int, int]] = set()
+    for tid in tids:
+        te = units_cache.get(tid)
+        if not te:
+            continue
+        tfp = te.get("occupied_hexes")
+        if not tfp:
+            tfp = {(int(te["col"]), int(te["row"]))}
+        enemy_fp |= {(int(c), int(r)) for c, r in tfp}
     if not enemy_fp:
-        enemy_fp = {(int(te["col"]), int(te["row"]))}
+        return rid
 
     primary = (int(ue["col"]), int(ue["row"]))
     best_h: Optional[Tuple[int, int]] = None
@@ -684,7 +720,7 @@ def _charge_reverse_goal_bfs_for_eligibility(
             goal_placement_s += time.perf_counter() - _t_placement0
 
         _t_engagement0 = time.perf_counter() if _perf else None
-        synth = _charge_synthetic_charger_cache_entry(unit, anchor[0], anchor[1], candidate_fp)
+        synth = _charge_synthetic_charger_cache_entry(game_state, unit, anchor[0], anchor[1], candidate_fp)
         hex_overlaps_enemy = False
         engages_enemy = False
         for eid, enemy_entry in indexed_enemy_engagement:
@@ -1446,7 +1482,7 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
     for dest_col, dest_row in reachable_hexes:
         candidate_fp = _candidate_footprint_charge(dest_col, dest_row, unit, game_state, fp_offset_pair)
         blocked_by_occupation = bool(candidate_fp & occupied_positions)
-        synth = _charge_synthetic_charger_cache_entry(unit, dest_col, dest_row, candidate_fp)
+        synth = _charge_synthetic_charger_cache_entry(game_state, unit, dest_col, dest_row, candidate_fp)
         for enemy_id, enemy_entry, enemy_fp in enemy_index:
             if candidate_fp & enemy_fp:
                 continue
@@ -1817,16 +1853,30 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
     CHARGE_MAX_DISTANCE = require_key(require_key(game_state["config"], "charge"), "charge_max_distance")
 
     # Fast precheck: skip BFS if all enemies are beyond max reachable distance.
-    # A charge of CHARGE_MAX_DISTANCE can land adjacent to a target at CHARGE_MAX_DISTANCE+1.
-    # hex_distance is straight-line (no walls) — conservative lower bound, never a false negative.
+    # La distance de charge se mesure **bord à bord** (fig la plus proche → fig ennemie la plus proche),
+    # PAS centre à centre : un gros socle (ex. Dreadnought) a son centre loin alors que son bord est à
+    # portée. On borne donc par ``hex_distance(centres) - rayon_chargeur - rayon_ennemi`` via les rayons
+    # d'empreinte (distance max ancre → case d'empreinte). Borne conservatrice : surestime le rayon côté
+    # opposé, donc n'élargit le seuil que dans le bon sens → jamais de faux rejet.
     units_cache = require_key(game_state, "units_cache")
-    unit_col, unit_row = int(require_key(units_cache[str(unit["id"])], "col")), int(require_key(units_cache[str(unit["id"])], "row"))
+    _charger_entry = require_key(units_cache, str(unit["id"]))
+    unit_col, unit_row = int(require_key(_charger_entry, "col")), int(require_key(_charger_entry, "row"))
     unit_player = int(unit["player"])
-    _precheck_threshold = CHARGE_MAX_DISTANCE + 1
+    _charger_occ = _charger_entry.get("occupied_hexes") or {(unit_col, unit_row)}
+    _charger_radius = max(
+        _hex_distance(unit_col, unit_row, int(_c), int(_r)) for _c, _r in _charger_occ
+    )
+
+    def _enemy_radius(_e: Dict[str, Any], _ec: int, _er: int) -> int:
+        _occ = _e.get("occupied_hexes") or {(_ec, _er)}
+        return max(_hex_distance(_ec, _er, int(_c), int(_r)) for _c, _r in _occ)
+
     _any_enemy_in_range = any(
-        _hex_distance(unit_col, unit_row, int(e["col"]), int(e["row"])) <= _precheck_threshold
+        _hex_distance(unit_col, unit_row, _ec, _er)
+        <= CHARGE_MAX_DISTANCE + 1 + _charger_radius + _enemy_radius(e, _ec, _er)
         for e in units_cache.values()
         if int(e["player"]) != unit_player
+        for _ec, _er in (((int(e["col"]), int(e["row"])),))
     )
     if not _any_enemy_in_range:
         _hvt_cache[_hvt_key] = False
@@ -1960,7 +2010,8 @@ def _find_adjacent_enemy_at_destination(game_state: Dict[str, Any], col: int, ro
 def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str, charge_roll: int,
                                         target_id: Optional[str] = None,
                                         full_occupied_positions: Optional[Set[Tuple[int, int]]] = None,
-                                        early_exit_if_valid: bool = False) -> List[Tuple[int, int]]:
+                                        early_exit_if_valid: bool = False,
+                                        target_ids: Optional[List[str]] = None) -> List[Tuple[int, int]]:
     """
     Build valid charge destinations using BFS pathfinding.
 
@@ -2000,8 +2051,23 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
 
-    # Get target enemy if specified, otherwise all enemies
-    if target_id:
+    # Cibles : ensemble déclaré (multi, V11) prioritaire, sinon cible unique (legacy), sinon tous.
+    # En mode multi, ``enemies`` = TOUS les ennemis (pour détecter l'engagement d'un non-cible),
+    # et ``_multi_declared`` sert au filtre final ``eng == declared``.
+    _multi_declared: Optional[Set[str]] = None
+    if target_ids:
+        _multi_declared = set()
+        for _t in target_ids:
+            _tt = get_unit_by_id(game_state, _t)
+            if not _tt or _tt["player"] == unit["player"] or not is_unit_alive(str(_tt["id"]), game_state):
+                return []  # Cible déclarée invalide
+            _multi_declared.add(str(_tt["id"]))
+        unit_player = int(unit["player"]) if unit["player"] is not None else None
+        enemies = [enemy_id for enemy_id, cache_entry in units_cache.items()
+                   if int(cache_entry["player"]) != unit_player]
+        if not enemies:
+            return []  # No enemies to charge
+    elif target_id:
         target = get_unit_by_id(game_state, target_id)
         if not target or target["player"] == unit["player"] or not is_unit_alive(str(target["id"]), game_state):
             return []  # Invalid target
@@ -2019,7 +2085,10 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     CHARGE_MAX_DISTANCE = require_key(require_key(game_state["config"], "charge"), "charge_max_distance")
     CHARGE_MAX_DISTANCE_SUBHEX = CHARGE_MAX_DISTANCE
     tid_arg: Optional[str] = str(target_id) if target_id is not None else None
-    bfs_max_distance = _charge_bfs_max_distance(game_state, unit_id_str, int(charge_range), tid_arg)
+    bfs_max_distance = _charge_bfs_max_distance(
+        game_state, unit_id_str, int(charge_range), tid_arg,
+        target_ids=sorted(_multi_declared) if _multi_declared else None,
+    )
     cache = game_state.setdefault("_charge_dest_bfs_cache", {})
     cache_key = (
         unit_id_str,
@@ -2031,6 +2100,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         not early_exit_if_valid
         and charge_range == CHARGE_MAX_DISTANCE_SUBHEX
         and tid_arg is None
+        and _multi_declared is None
         and cache_key in cache
     ):
         cached_list, _ = cache[cache_key]
@@ -2175,7 +2245,8 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     valid_destinations = []
     # Track (distance, engaging_enemy_ids) per valid destination for target-selection fast path.
     # Only built when the result will be stored in cache (activation BFS, no specific target).
-    _track_engages = (tid_arg is None and charge_range == CHARGE_MAX_DISTANCE_SUBHEX and not early_exit_if_valid)
+    _track_engages = ((tid_arg is None and charge_range == CHARGE_MAX_DISTANCE_SUBHEX and not early_exit_if_valid)
+                      or _multi_declared is not None)
     pos_dist_engage: Dict[Tuple[int, int], Tuple[int, FrozenSet[str]]] = {} if _track_engages else {}
 
     # Precompute for O(1) bounds check before footprint computation
@@ -2315,7 +2386,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             _cur_engaging: Optional[Set[str]] = set() if _track_engages else None
             _t_engagement0 = time.perf_counter() if _perf else None
             synth = _charge_synthetic_charger_cache_entry(
-                unit, neighbor_col_int, neighbor_row_int, candidate_fp
+                game_state, unit, neighbor_col_int, neighbor_row_int, candidate_fp
             )
             for _eid, enemy_entry in indexed_enemy_engagement:
                 ec, er = int(enemy_entry["col"]), int(enemy_entry["row"])
@@ -2372,8 +2443,16 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         f"near_set_sz={_dbg_near_sz} visited={len(visited)} valid_dest={len(valid_destinations)}"
     ))
 
+    # Multi-cibles V11 : ne garder que les ancres dont l'ensemble d'ennemis engagés est EXACTEMENT
+    # l'ensemble déclaré → ``declared ⊆ eng`` (toutes les cibles) ET ``eng ⊆ declared`` (aucun non-cible).
+    if _multi_declared is not None:
+        valid_destinations = [
+            p for p in valid_destinations
+            if pos_dist_engage.get(p, (0, frozenset()))[1] == _multi_declared
+        ]
+
     game_state["valid_charge_destinations_pool"] = valid_destinations
-    if charge_range == CHARGE_MAX_DISTANCE_SUBHEX and not early_exit_if_valid and tid_arg is None:
+    if charge_range == CHARGE_MAX_DISTANCE_SUBHEX and not early_exit_if_valid and tid_arg is None and _multi_declared is None:
         cache[cache_key] = (list(valid_destinations), pos_dist_engage)
 
     if _perf and _t_func0 is not None and _t_bfs0 is not None and _t_bfs1 is not None:
