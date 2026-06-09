@@ -3776,21 +3776,12 @@ export default function Board({
       )?.units_cache?.[String(chargeMovePlan.unitId)]?.occupied_hexes_by_model;
       const eligibleIds = new Set(chargeMovePlan.eligibleModels);
       const VIOLET = 0xa855f7;
-      const GREEN = 0x22c55e; // figs déjà posées dans le plan (ghost-lite)
       const hexCenter = (c: number, r: number): [number, number] => [
         c * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H,
         r * HEX_HEIGHT_H + ((c % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H,
       ];
-      // 1) Figs POSÉES dans le plan → disque vert plein à la position provisoire (confirme la pose).
-      for (const [mid, p] of Object.entries(chargeMovePlan.models)) {
-        const [cx, cy] = hexCenter(p.col, p.row);
-        overlay.lineStyle(lineW, GREEN, 0.95);
-        overlay.beginFill(GREEN, 0.55);
-        overlay.drawCircle(cx, cy, modelR);
-        overlay.endFill();
-        void mid;
-      }
-      // 2) Figs ÉLIGIBLES non posées → voile violet plein (anneau + remplissage marqué si active).
+      // Figs ÉLIGIBLES non posées → voile violet plein (anneau + remplissage marqué si active).
+      // (Les figs posées sont désormais rendues comme vrai sprite déplacé via isSquadGhost.)
       if (byModel) {
         for (const [mid, pos] of Object.entries(byModel)) {
           if (!eligibleIds.has(mid)) continue;
@@ -6004,6 +5995,14 @@ export default function Board({
             .map(([m, v]) => `${m}=${v ? 1 : 0}`)
             .join(",")
         : "";
+      // Charge par-figurine (Slice G) : même logique que squadPlanFp — sans les positions du plan de
+      // charge dans l'empreinte, poser/sélectionner une fig ne re-render pas le ghost (fige à l'origine).
+      const chargePlanFp = chargeMovePlan
+        ? `${chargeMovePlan.unitId}:${chargeMovePlan.activeModelId ?? ""}:` +
+          Object.entries(chargeMovePlan.models)
+            .map(([m, p]) => `${m}@${p.col},${p.row}`)
+            .join(",")
+        : "";
       // Tir par-arme : empreinte des intents (redraw des voiles/lignes quand ils changent).
       const squadShootFp = squadShootPlan
         ? `${squadShootPlan.unitId}:w${squadShootPlan.activeWeaponIndex ?? ""}:` +
@@ -6011,7 +6010,7 @@ export default function Board({
             .map((d) => `${d.model_id}.${d.weapon_index}>${d.target_unit_id}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -6464,9 +6463,9 @@ export default function Board({
         // squad.md brique 3 : pour l'escouade en mode plan, afficher les figs aux positions
         // PROVISOIRES (ghost) + flag de validite par fig (voile rouge sur les invalides).
         const isSquadGhost =
-          mode === "squadModelMove" &&
-          !!squadMovePlan &&
-          String(squadMovePlan.unitId) === unitIdStr;
+          isPerModelMove &&
+          !!effectivePerModelPlan &&
+          String(effectivePerModelPlan.unitId) === unitIdStr;
         let modelPositions: Array<[number, number]>;
         let modelValidFlags: boolean[];
         let modelIds: string[];
@@ -6474,11 +6473,11 @@ export default function Board({
           const entries = Object.entries(occupiedHexesByModel) as Array<[string, [number, number]]>;
           modelIds = entries.map(([mid]) => mid);
           modelPositions = entries.map(([mid, pos]) => {
-            const planPos = isSquadGhost ? squadMovePlan!.models[mid] : undefined;
+            const planPos = isSquadGhost ? effectivePerModelPlan!.models[mid] : undefined;
             return planPos ? ([planPos.col, planPos.row] as [number, number]) : pos;
           });
           modelValidFlags = entries.map(([mid]) =>
-            isSquadGhost ? squadMovePlan!.perModelValid[mid] !== false : true
+            isSquadGhost ? effectivePerModelPlan!.perModelValid[mid] !== false : true
           );
         } else {
           modelIds = [String(unit.id)];
@@ -6500,9 +6499,10 @@ export default function Board({
         // En plan fig-par-fig (squadModelMove), le statut "caché" est recalculé par le backend pour
         // les positions provisoires (movePreviewHiddenModelIds) ; sinon le badge resterait figé sur la
         // position actuelle (unit.hidden_models) et n'apparaîtrait jamais au survol.
-        const modelHidden: boolean[] = isSquadGhost
-          ? modelIds.map((mid) => movePreviewHiddenModelIds.has(String(mid)))
-          : modelIds.map((mid) => hiddenModelIds.has(String(mid)));
+        const modelHidden: boolean[] =
+          isSquadGhost && mode === "squadModelMove"
+            ? modelIds.map((mid) => movePreviewHiddenModelIds.has(String(mid)))
+            : modelIds.map((mid) => hiddenModelIds.has(String(mid)));
         const [anchorCenterX, anchorCenterY] = modelCenters[0];
 
         // Skip units that are being previewed elsewhere
