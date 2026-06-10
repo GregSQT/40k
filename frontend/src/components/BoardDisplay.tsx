@@ -2486,25 +2486,6 @@ export const drawBoard = (
         drawGroup(attackCells, ATTACK_COLOR, 0.4, false);
       }
     }
-    if (interactionPhase === "charge") {
-      // eslint-disable-next-line no-console
-      console.log("[CHARGE_ZONE_DBG]", {
-        mode,
-        interactionPhase,
-        useChargeDestPoolDiskDraw,
-        chargePoolSize: chargeDestPoolRef?.current?.size ?? null,
-        maskLoops: chargeModelMaskLoops?.length ?? null,
-        footprintSpanForPool,
-        availableCellsLen: availableCells.length,
-        chargeCellsLen: chargeCells.length,
-        branch:
-          mode === "chargeModelMove" && useChargeDestPoolDiskDraw && chargeDestPoolRef?.current
-            ? "BLUR(move-like)"
-            : useChargeDestPoolDiskDraw && chargeDestPoolRef?.current
-              ? "DISK(fallback)"
-              : "drawGroup(chargeCells)",
-      });
-    }
     if (mode === "chargeModelMove" && useChargeDestPoolDiskDraw && chargeDestPoolRef?.current) {
       // chargeModelMove : zone de landing rendue EXACTEMENT comme le move per-fig — MÊME pipeline
       // (``renderMoveAdvanceDestPoolCircleLayer`` : masque polygone d'union → RT → BlurFilter sur
