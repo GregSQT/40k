@@ -533,7 +533,6 @@ export class UnitRenderer {
     this.renderChargeIndicator(iconZIndex);
     this.renderFightIndicator(iconZIndex);
     this.renderAttackCounter(unitIconScale);
-    this.renderChargeRollBadge(unitIconScale);
     this.renderHiddenBadge(unitIconScale);
     this.renderMoveStatusBadge(unitIconScale);
     this.renderBattleShockedIndicator(iconZIndex);
@@ -2292,91 +2291,6 @@ export class UnitRenderer {
     // Ensure attack counter is always on top of other elements
     attackText.zIndex = 10000;
     this.target.addChild(attackText);
-  }
-
-  private renderChargeRollBadge(unitIconScale: number): void {
-    const {
-      unit,
-      chargingUnitId,
-      chargeRoll,
-      chargeSuccess,
-      centerX,
-      centerY,
-      app,
-      HEX_RADIUS,
-      uiElementsContainer,
-    } = this.props;
-
-    // Use persistent UI container if provided, otherwise fall back to stage
-    const targetContainer = uiElementsContainer || app.stage;
-
-    // Show charge roll badge ONLY on the unit that is charging or failed charging
-    // CRITICAL: Only show badge if this is the charging unit (identified by chargingUnitId)
-    if (!chargingUnitId || unit.id !== chargingUnitId) {
-      return; // Not the charging unit, don't show badge
-    }
-
-    // Must have a charge roll value to display
-    if (chargeRoll === undefined || chargeRoll === null) return;
-
-    // Clean up any existing charge badge for this unit from the container
-    const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
-    if (uiElementsContainer) {
-      const prefix = `charge-badge-${unitIdNum}`;
-      const existingElements = uiElementsContainer.children.filter(
-        (child: PIXI.DisplayObject) =>
-          typeof child.name === "string" &&
-          (child.name === prefix || child.name.startsWith(`${prefix}-`))
-      );
-      existingElements.forEach((child: PIXI.DisplayObject) => {
-        uiElementsContainer.removeChild(child);
-        if ("destroy" in child && typeof child.destroy === "function") child.destroy();
-      });
-    }
-
-    // Calculate badge position (bottom-right of unit)
-    const scaledOffset = ((HEX_RADIUS * unitIconScale) / 2) * 0.8;
-    const badgeX = centerX + scaledOffset;
-    const badgeY = centerY + scaledOffset;
-
-    // Badge colors based on success/failure
-    // Success: light green text (#90EE90) on dark green background (#006400)
-    // Failure: light red text (#FF6B6B) on dark red background (#8B0000)
-    const textColor = chargeSuccess ? 0x90ee90 : 0xff6b6b;
-    const bgColor = chargeSuccess ? 0x006400 : 0x8b0000;
-
-    // Create badge background (rounded rectangle)
-    const badgeWidth = 28;
-    const badgeHeight = 20;
-    const badgeBg = new PIXI.Graphics();
-    badgeBg.beginFill(bgColor, 0.95);
-    badgeBg.lineStyle(2, chargeSuccess ? 0x00aa00 : 0xaa0000, 1);
-    badgeBg.drawRoundedRect(
-      badgeX - badgeWidth / 2,
-      badgeY - badgeHeight / 2,
-      badgeWidth,
-      badgeHeight,
-      4
-    );
-    badgeBg.endFill();
-    badgeBg.name = `charge-badge-${unitIdNum}-bg`;
-    badgeBg.zIndex = 10001; // Above everything
-    targetContainer.addChild(badgeBg);
-
-    // Create roll number text
-    const rollText = new PIXI.Text(`${chargeRoll}`, {
-      fontSize: 14,
-      fill: textColor,
-      align: "center",
-      fontWeight: "bold",
-      stroke: 0x000000,
-      strokeThickness: 1,
-    });
-    rollText.anchor.set(0.5);
-    rollText.position.set(badgeX, badgeY);
-    rollText.name = `charge-badge-${unitIdNum}-text`;
-    rollText.zIndex = 10002; // Above badge background and everything else
-    targetContainer.addChild(rollText);
   }
 
   private renderHiddenBadge(unitIconScale: number): void {

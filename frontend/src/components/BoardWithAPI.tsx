@@ -3008,19 +3008,23 @@ export const BoardWithAPI: React.FC = () => {
                   style={{
                     border: "1px solid rgba(0,0,0,0.35)",
                     borderRadius: 6,
-                    background: canCharge ? "#7c3aed" : "rgba(75,85,99,0.55)",
-                    boxShadow: canCharge ? "0 6px 0 #4c1d95" : "none",
-                    color: canCharge ? "#fff" : "rgba(229,231,235,0.5)",
+                    background: canCharge ? "#7c3aed" : "#4c1d95",
+                    boxShadow: canCharge ? "0 6px 0 #4c1d95" : "0 6px 0 #2e1065",
+                    color: "#fff",
                     cursor: canCharge ? "pointer" : "not-allowed",
                     fontSize: 14,
                     fontWeight: 700,
                     padding: "8px 14px",
-                    width: 110,
+                    minWidth: 110,
+                    whiteSpace: "nowrap",
                     textAlign: "center",
-                    opacity: canCharge ? 1 : 0.6,
+                    opacity: canCharge ? 1 : 0.85,
                   }}
                 >
-                  Charger
+                  {(() => {
+                    const suffix = apiProps.chargeRoll != null ? ` (Roll: ${apiProps.chargeRoll})` : "";
+                    return canCharge ? `Charge !${suffix}` : `Select target${suffix}`;
+                  })()}
                 </button>
               );
             })()}
