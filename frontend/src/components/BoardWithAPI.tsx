@@ -51,6 +51,7 @@ import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import TutorialOverlay from "./TutorialOverlay";
 import { UnitStatusTable } from "./UnitStatusTable";
+import UnitStatusBadges from "./UnitStatusBadges";
 
 /** "WolfGuardTerminator" → "Wolf Guard Terminator" (camelCase → mots espacés). */
 function prettifyUnitType(t: string | null): string {
@@ -2891,8 +2892,27 @@ export const BoardWithAPI: React.FC = () => {
     unit: Unit,
     visible: boolean,
     fadeMs: number
-  ): React.ReactElement => (
+  ): React.ReactElement => {
+    const moved = ((apiProps.unitsMoved ?? []) as number[]).includes(unit.id);
+    const advanced = (apiProps.unitsAdvanced ?? []).includes(unit.id);
+    const fellBack = ((apiProps.unitsFled ?? []) as number[]).includes(unit.id);
+    // Stationary (09.04) : déjà activée en phase move (sortie de la pool) sans aucun déplacement.
+    const stationary =
+      !moved &&
+      !advanced &&
+      !fellBack &&
+      !(apiProps.gameState?.move_activation_pool ?? []).includes(String(unit.id));
+    return (
     <aside className="unit-illustration-preview" aria-label={`Illustration unit ${unit.id}`}>
+      <UnitStatusBadges
+        hidden={unit.hidden === true || (unit.hidden_models?.length ?? 0) > 0}
+        battleShocked={unit.battle_shocked === true}
+        advanced={advanced}
+        moved={moved}
+        charged={((apiProps.unitsCharged ?? []) as number[]).includes(unit.id)}
+        fellBack={fellBack}
+        stationary={stationary}
+      />
       <img
         className="unit-illustration-preview__image"
         src={getUnitIllustrationSrc(unit)}
@@ -2924,7 +2944,8 @@ export const BoardWithAPI: React.FC = () => {
         }}
       />
     </aside>
-  );
+    );
+  };
 
   const rightColumnContent = (
     <RightColumnTutorialSpotlight>

@@ -6954,6 +6954,7 @@ export default function Board({
           unitsCharged,
           unitsAttacked,
           unitsFled: unitsFledForRender,
+          unitsAdvanced: gameState?.unitsAdvanced || [],
           fightSubPhase,
           fightActivePlayer,
           gameState,

@@ -24,7 +24,7 @@ import {
   resolveBaseSizeForUnitDisplay,
 } from "../utils/hexFootprint";
 import { drawHiddenEyeBadge } from "../utils/hiddenBadgeDraw";
-import { drawFledRunnerBadge } from "../utils/fledBadgeDraw";
+import { drawMoveStatusBadge, type MoveStatusKind } from "../utils/moveStatusBadgeDraw";
 import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 import {
   getHpBarWidthBase,
@@ -187,6 +187,7 @@ interface UnitRendererProps {
   unitsCharged?: number[];
   unitsAttacked?: number[];
   unitsFled?: number[];
+  unitsAdvanced?: number[];
   fightSubPhase?: FightSubPhase; // NEW
   fightActivePlayer?: PlayerId; // NEW
   gameState?: GameState; // Add gameState property for active_shooting_unit access
@@ -432,6 +433,7 @@ export class UnitRenderer {
           const prefixes = [
             `hidden-badge-${unitIdNum}`,
             `fled-badge-${unitIdNum}`,
+            `move-status-${unitIdNum}`,
             `battle-shocked-${unitIdNum}`,
           ];
           uiElementsContainer.children
@@ -536,7 +538,7 @@ export class UnitRenderer {
     this.renderChargeRollBadge(unitIconScale);
     this.renderAdvanceRollBadge(unitIconScale);
     this.renderHiddenBadge(unitIconScale);
-    this.renderFledBadge(unitIconScale);
+    this.renderMoveStatusBadge(unitIconScale);
     this.renderBattleShockedIndicator(iconZIndex);
 
     this.props.centerX = originalCenterX;
@@ -2443,18 +2445,31 @@ export class UnitRenderer {
   }
 
   /**
-   * Badge "a fui" (units_fled) — emoji 🏃 en bas-droite de la figurine.
-   * Le statut est au niveau unité : en mode par-fig, un badge sur chaque fig vivante ;
-   * en mode escouade, un seul badge à l'ancre. Suit l'option statusBadgePerModel.
+   * Badge-statut de mouvement (bas-droite de la figurine) — une seule icône selon la priorité
+   * charge > fall-back > advance > move > stationary. Remplace l'ancien badge "fui" vert.
+   * Stationary n'est posé que sur les unités du joueur actif déjà sorties de la pool d'activation.
    */
-  private renderFledBadge(unitIconScale: number): void {
-    const { unit, centerX, centerY, app, HEX_RADIUS, unitsFled, uiElementsContainer } = this.props;
+  private renderMoveStatusBadge(unitIconScale: number): void {
+    const {
+      unit,
+      centerX,
+      centerY,
+      app,
+      HEX_RADIUS,
+      unitsMoved,
+      unitsCharged,
+      unitsFled,
+      unitsAdvanced,
+      gameState,
+      current_player,
+      uiElementsContainer,
+    } = this.props;
     const targetContainer = uiElementsContainer || app.stage;
     const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
 
-    // Clean up any existing fled badge(s) for this unit (avoids stale duplicates across renders).
+    // Nettoyage des badges-statut existants de cette unité (évite les doublons entre rendus).
     if (uiElementsContainer) {
-      const prefix = `fled-badge-${unitIdNum}`;
+      const prefix = `move-status-${unitIdNum}`;
       const existing = uiElementsContainer.children.filter(
         (child: PIXI.DisplayObject) =>
           typeof child.name === "string" &&
@@ -2466,34 +2481,43 @@ export class UnitRenderer {
       });
     }
 
-    if (!unitsFled?.includes(unit.id)) return;
+    // Sélection du statut par priorité.
+    let kind: MoveStatusKind | null = null;
+    if (unitsCharged?.includes(unit.id)) kind = "charge";
+    else if (unitsFled?.includes(unit.id)) kind = "fallback";
+    else if (unitsAdvanced?.includes(unit.id)) kind = "advance";
+    else if (unitsMoved.includes(unit.id)) kind = "move";
+    else if (
+      unit.player === current_player &&
+      !gameState?.move_activation_pool?.includes(String(unit.id))
+    ) {
+      kind = "stationary";
+    }
+    if (!kind) return;
 
     const r = Math.max(7, HEX_RADIUS * 0.32);
     const scaledOffset = ((HEX_RADIUS * unitIconScale) / 2) * 0.8;
-    // Bottom-right of a figure (mirror of the bottom-left hidden badge ; no clash with the
-    // charge-roll badge since a unit that fled cannot charge).
+    // Bas-droite de la figurine (emplacement de l'ancien badge "fui").
     const drawBadgeAt = (cx: number, cy: number, name: string): void => {
       const badgeX = cx + scaledOffset;
       const badgeY = cy + scaledOffset;
       const g = new PIXI.Graphics();
-      drawFledRunnerBadge(g, badgeX, badgeY, r);
+      drawMoveStatusBadge(g, badgeX, badgeY, r, kind!);
       g.name = name;
       g.zIndex = 10001;
       targetContainer.addChild(g);
     };
 
     if (this.props.statusBadgePerModel) {
-      // Per-figure mode — one badge on each living figure (fled is a unit-level status).
       const centers = this.props.modelCenters;
       if (!centers) return;
       centers.forEach(([cx, cy], i) => {
-        drawBadgeAt(cx, cy, `fled-badge-${unitIdNum}-${i}`);
+        drawBadgeAt(cx, cy, `move-status-${unitIdNum}-${i}`);
       });
       return;
     }
 
-    // Squad mode — single badge at the unit anchor.
-    drawBadgeAt(centerX, centerY, `fled-badge-${unitIdNum}`);
+    drawBadgeAt(centerX, centerY, `move-status-${unitIdNum}`);
   }
 
   private renderBattleShockedIndicator(iconZIndex: number): void {
