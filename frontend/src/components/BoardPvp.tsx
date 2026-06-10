@@ -3768,10 +3768,37 @@ export default function Board({
         c * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H,
         r * HEX_HEIGHT_H + ((c % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H,
       ];
-      // Figs ÉLIGIBLES : plus de voile violet plein sur les socles — il se superposait à la zone de
-      // landing (polygone lissé) et créait une 2e teinte violette plus foncée (blob sur l'escouade
-      // groupée). La zone au sol reste d'UN SEUL violet pâle ; la fig active est indiquée par le
-      // ghost qui suit le curseur. (Voiles cible rouge/vert conservés ci-dessous.)
+      // Figs ÉLIGIBLES non posées → cercle violet sur le socle : montre les figs qui PEUVENT (et
+      // doivent) agir dans la phase courante (1 = ≤1", 2 = ≤2", 3 = se rapprocher). ``eligibleModels``
+      // est recalculé en temps réel par le backend (charge_plan_state) → le voile suit l'évolution des
+      // phases. Active = remplissage marqué (en plus du ghost) ; posée = exclue.
+      const charger = units.find((u) => String(u.id) === String(chargeMovePlan.unitId));
+      const baseSz = charger ? resolveBaseSizeForUnitDisplay(charger) : 1;
+      const modelR = baseSz > 1 ? (baseSz * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
+      const ringR = modelR * 1.25;
+      const lineW = Math.max(1.5, HEX_RADIUS_H * 0.5);
+      const VIOLET = 0xa855f7;
+      const byModel = (
+        gameState as unknown as {
+          units_cache?: Record<
+            string,
+            { occupied_hexes_by_model?: Record<string, [number, number]> }
+          >;
+        }
+      )?.units_cache?.[String(chargeMovePlan.unitId)]?.occupied_hexes_by_model;
+      const eligibleIds = new Set(chargeMovePlan.eligibleModels);
+      if (byModel) {
+        for (const [mid, pos] of Object.entries(byModel)) {
+          if (!eligibleIds.has(mid)) continue;
+          if (chargeMovePlan.models[mid]) continue; // déjà posée → traitée comme ghost déplacé
+          const [cx, cy] = hexCenter(pos[0], pos[1]);
+          const isActive = mid === chargeMovePlan.activeModelId;
+          overlay.lineStyle(lineW, VIOLET, 1);
+          overlay.beginFill(VIOLET, isActive ? 0.7 : 0.45);
+          overlay.drawCircle(cx, cy, ringR);
+          overlay.endFill();
+        }
+      }
       // 03.04 : voile cible par UNITÉ pendant la charge per-fig — ROUGE = cible non satisfaite
       // (aucune fig chargeant à ≤ EZ), VIOLET = satisfaite (≥ 1 fig engagée). Backend fournit les
       // deux listes dans chargeMovePlan ; redraw via la dep chargeMovePlan de cet effet.
