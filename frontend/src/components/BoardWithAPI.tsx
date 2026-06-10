@@ -3878,6 +3878,7 @@ export const BoardWithAPI: React.FC = () => {
             onCancelSquadMove={isGameOver ? () => {} : apiProps.onCancelSquadMove}
             chargeMovePlan={apiProps.chargeMovePlan}
             chargeModelPoolRef={apiProps.chargeModelPoolRef}
+            chargeModelMaskLoopsRef={apiProps.chargeModelMaskLoopsRef}
             onSelectChargeModel={isGameOver ? () => {} : apiProps.onSelectChargeModel}
             onMoveModelInChargePlan={isGameOver ? () => {} : apiProps.onMoveModelInChargePlan}
             onUnplaceChargeModel={isGameOver ? () => {} : apiProps.onUnplaceChargeModel}

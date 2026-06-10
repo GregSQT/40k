@@ -531,6 +531,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   chargeMovePlanRef.current = chargeMovePlan;
   /** Pool (hexes "col,row") de la fig active = eligible[activeModelId]. */
   const chargeModelPoolRef = useRef<Set<string>>(new Set());
+  /** Mask loops (polygone lissé monde) de la zone de landing de la fig active — même contrat que
+   * ``squadMoveModelMaskLoopsRef`` pour le move per-fig. Rendu lissé au lieu de disques bruts. */
+  const chargeModelMaskLoopsRef = useRef<number[][] | null>(null);
   /**
    * Tir par-figurine (PvP manuel) — plan provisoire de cibles assignées par fig.
    * ``targets`` : model_id -> squad_id ennemi assigné (cible de cette fig pour la phase).
@@ -4739,6 +4742,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     (result: Record<string, unknown>, selectedModel: string | null) => {
       const eligibleModels = ((result.eligible_models ?? []) as unknown[]).map((m) => String(m));
       const poolArr = (result.pool ?? []) as Array<[number, number]>;
+      const maskLoopsRaw = result.footprint_mask_loops;
       const unplaced = ((result.unplaced ?? []) as unknown[]).map((m) => String(m));
       const currentPhase = (Number(result.current_phase) || 3) as 1 | 2 | 3;
       const canValidate = result.can_validate === true;
@@ -4763,6 +4767,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           for (const [c, r] of poolArr) pool.add(`${Number(c)},${Number(r)}`);
         }
         chargeModelPoolRef.current = pool;
+        // Mask loops valides uniquement pour la fig active sélectionnée (le backend ne les calcule
+        // que pour son pool). Sinon null → pas de rendu lissé fantôme d'une autre fig.
+        chargeModelMaskLoopsRef.current =
+          active != null && active === selectedModel && Array.isArray(maskLoopsRaw)
+            ? (maskLoopsRaw as number[][])
+            : null;
         return {
           ...prev,
           eligibleModels,
@@ -4808,6 +4818,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         throw new Error(`charge model move: aucune fig pour l'unité ${unitId} (occupied_hexes_by_model)`);
       }
       chargeModelPoolRef.current = new Set();
+      chargeModelMaskLoopsRef.current = null;
       setChargeMovePlan({
         unitId,
         models: {},
@@ -4832,6 +4843,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const plan = chargeMovePlanRef.current;
       if (!plan || !plan.eligibleModels.includes(modelId)) return; // non éligible → ignore
       chargeModelPoolRef.current = new Set();
+      chargeModelMaskLoopsRef.current = null;
       setChargeMovePlan((prev) => (prev ? { ...prev, activeModelId: modelId } : prev));
       void refreshChargePlanState(plan.unitId, plan.models, modelId);
     },
@@ -4843,6 +4855,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     (modelId: string, col: number, row: number) => {
       if (!chargeModelPoolRef.current.has(`${col},${row}`)) return;
       chargeModelPoolRef.current = new Set();
+      chargeModelMaskLoopsRef.current = null;
       setChargeMovePlan((prev) => {
         if (!prev) return prev;
         const models = { ...prev.models, [modelId]: { col, row } };
@@ -4881,6 +4894,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         plan: planArr,
       });
       chargeModelPoolRef.current = new Set();
+      chargeModelMaskLoopsRef.current = null;
       setChargeMovePlan(null);
       setChargePreviewTargetIds([]);
       setPendingChargeRollDisplay(null);
@@ -4897,6 +4911,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const plan = chargeMovePlanRef.current;
     const uid = plan?.unitId ?? selectedUnitId;
     chargeModelPoolRef.current = new Set();
+    chargeModelMaskLoopsRef.current = null;
     setChargeMovePlan(null);
     setChargePreviewTargetIds([]);
     setPendingChargeRollDisplay(null);
@@ -5363,6 +5378,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onCancelSquadMove: () => {},
       chargeMovePlan: null,
       chargeModelPoolRef,
+      chargeModelMaskLoopsRef,
       onSelectChargeModel: () => {},
       onMoveModelInChargePlan: () => {},
       onUnplaceChargeModel: () => {},
@@ -5507,6 +5523,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     // Charge par-figurine (V11 11.04, Slice G)
     chargeMovePlan,
     chargeModelPoolRef,
+    chargeModelMaskLoopsRef,
     onSelectChargeModel: handleSelectChargeModel,
     onMoveModelInChargePlan: handleMoveModelInChargePlan,
     onUnplaceChargeModel: handleUnplaceChargeModel,

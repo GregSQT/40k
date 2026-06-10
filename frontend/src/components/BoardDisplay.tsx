@@ -199,6 +199,7 @@ export function computeDrawBoardPartialRedrawFingerprint(
     selectedUnitBaseSize,
     selectedUnitAnchor,
     movePreviewFootprintMaskLoops = null,
+    chargeModelMaskLoops = null,
     chargeEngagementHalo,
     fightEngagementRing,
   } = options || {};
@@ -248,7 +249,7 @@ export function computeDrawBoardPartialRedrawFingerprint(
 
   const useChargeDestPoolDiskDraw =
     interactionPhase === "charge" &&
-    (mode === "select" || mode === "chargePreview") &&
+    (mode === "select" || mode === "chargePreview" || mode === "chargeModelMove") &&
     !!chargeDestPoolRef?.current &&
     chargeDestPoolRef.current.size > 0;
 
@@ -856,6 +857,9 @@ export interface DrawBoardOptions {
    * ``footprintZonePoolRef`` (évite un gros JSON de milliers d’hex).
    */
   movePreviewFootprintMaskLoops?: number[][] | null;
+  /** chargeModelMove : boucles lissées (monde, plat) de la zone de landing de la fig de charge
+   * active. Rendu lissé (Chaikin) au lieu de disques bruts, comme le move per-fig. */
+  chargeModelMaskLoops?: number[][] | null;
 }
 
 export interface DrawBoardResult {
@@ -1859,6 +1863,7 @@ export const drawBoard = (
       chargeEngagementHalo,
       fightEngagementRing,
       movePreviewFootprintMaskLoops = null,
+      chargeModelMaskLoops = null,
     } = options || {};
 
     // Parse objective control colors - use same colors as player units
@@ -2295,7 +2300,7 @@ export const drawBoard = (
 
     const useChargeDestPoolDiskDraw =
       interactionPhase === "charge" &&
-      (mode === "select" || mode === "chargePreview") &&
+      (mode === "select" || mode === "chargePreview" || mode === "chargeModelMove") &&
       chargeDestPoolRef?.current &&
       chargeDestPoolRef.current.size > 0;
 
@@ -2441,7 +2446,11 @@ export const drawBoard = (
           usePostShootMovePoolLikeMove) &&
         !movePoolForDiskDraw &&
         availableCells.length === 0;
-      const cellsForHighlight = moveOrAdvanceNoAnchors ? [] : availableCells;
+      // chargeModelMove : la zone de landing est rendue par la couche blur (branche charge plus bas).
+      // ``availableCells`` contient les mêmes hexes → les redessiner ici en disques rayon-hex crée la
+      // couche festonnée parallèle (la vraie cause du « toujours pareil »). On la supprime ici.
+      const cellsForHighlight =
+        moveOrAdvanceNoAnchors || mode === "chargeModelMove" ? [] : availableCells;
       drawGroup(cellsForHighlight, availableCellsDrawColor, 0.4, false, availableCellCircleR);
     }
     {
@@ -2477,7 +2486,55 @@ export const drawBoard = (
         drawGroup(attackCells, ATTACK_COLOR, 0.4, false);
       }
     }
-    if (useChargeDestPoolDiskDraw && chargeDestPoolRef?.current) {
+    if (interactionPhase === "charge") {
+      // eslint-disable-next-line no-console
+      console.log("[CHARGE_ZONE_DBG]", {
+        mode,
+        interactionPhase,
+        useChargeDestPoolDiskDraw,
+        chargePoolSize: chargeDestPoolRef?.current?.size ?? null,
+        maskLoops: chargeModelMaskLoops?.length ?? null,
+        footprintSpanForPool,
+        availableCellsLen: availableCells.length,
+        chargeCellsLen: chargeCells.length,
+        branch:
+          mode === "chargeModelMove" && useChargeDestPoolDiskDraw && chargeDestPoolRef?.current
+            ? "BLUR(move-like)"
+            : useChargeDestPoolDiskDraw && chargeDestPoolRef?.current
+              ? "DISK(fallback)"
+              : "drawGroup(chargeCells)",
+      });
+    }
+    if (mode === "chargeModelMove" && useChargeDestPoolDiskDraw && chargeDestPoolRef?.current) {
+      // chargeModelMove : zone de landing rendue EXACTEMENT comme le move per-fig — MÊME pipeline
+      // (``renderMoveAdvanceDestPoolCircleLayer`` : masque polygone d'union → RT → BlurFilter sur
+      // l'alpha → bords DOUX + trous gérés via even-odd). Le ``drawPolygon`` nu précédent donnait des
+      // bords nets/festonnés (visible surtout en petite base) ≠ move. Géométrie = boucles backend
+      // (footprint_mask_loops, fp_zone tracé serveur) ; repli client sur le pool d'ancres si absentes
+      // → la charge ne retombe JAMAIS sur les disques festonnés (plus de fallback bloquant).
+      const footprintRadius = (footprintSpanForPool / 2) * HEX_HORIZ_SPACING;
+      const maskGeom = resolveMovePreviewMaskLoopsBeforeSmooth(
+        chargeModelMaskLoops && chargeModelMaskLoops.length > 0 ? chargeModelMaskLoops : null,
+        chargeDestPoolRef.current,
+        HEX_RADIUS,
+        HEX_HORIZ_SPACING,
+        HEX_WIDTH,
+        HEX_HEIGHT,
+        HEX_VERT_SPACING,
+        MARGIN,
+        "charge-model-dest-pool",
+        chargeDestPoolRef.current.size
+      );
+      renderMoveAdvanceDestPoolCircleLayer(
+        highlightContainer,
+        app,
+        chargeDestPoolRef.current,
+        footprintRadius,
+        CHARGE_DESTINATION_HEX_FILL,
+        "charge-model-dest-pool",
+        maskGeom
+      );
+    } else if (useChargeDestPoolDiskDraw && chargeDestPoolRef?.current) {
       const footprintRadius = (footprintSpanForPool / 2) * HEX_HORIZ_SPACING;
       const chargeGfx = new PIXI.Graphics();
       chargeGfx.name = "charge-dest-pool-gfx";

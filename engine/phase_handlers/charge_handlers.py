@@ -1585,6 +1585,7 @@ def charge_model_plan_state(
         "current_phase": 3,
         "eligible_models": [],
         "pool": [],
+        "footprint_mask_loops": [],
         "unplaced": [],
         "can_validate": False,
         "satisfied_targets": [],
@@ -1830,6 +1831,22 @@ def charge_model_plan_state(
         else []
     )
 
+    # Empreinte lissée de la zone de landing (même rendu que le move per-fig) : union des empreintes
+    # (region[ancre]["fp"]) des ancres du pool → boucles monde via le helper move. Calculé seulement
+    # pour la fig sélectionnée (le pool n'existe que pour elle). Le front rend ces loops en polygone
+    # lissé (Chaikin), au lieu de disques bruts festonnés.
+    footprint_mask_loops: List[List[List[float]]] = []
+    if pool:
+        from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
+        fp_zone: Set[Tuple[int, int]] = set()
+        for _c, _r in pool:
+            rg = region.get((int(_c), int(_r)))
+            if rg is not None:
+                fp_zone |= rg["fp"]
+        loops = compute_move_preview_mask_loops_world(fp_zone, game_state)
+        if loops:
+            footprint_mask_loops = [[[float(x), float(y)] for (x, y) in loop] for loop in loops]
+
     can_validate = False
     if not unplaced and alive:
         full_plan = [[str(m), int(provisional_plan[m][0]), int(provisional_plan[m][1])] for m in alive]
@@ -1858,6 +1875,7 @@ def charge_model_plan_state(
         "current_phase": phase,
         "eligible_models": eligible_models,
         "pool": pool,
+        "footprint_mask_loops": footprint_mask_loops,
         "unplaced": unplaced,
         "can_validate": can_validate,
         "satisfied_targets": satisfied,

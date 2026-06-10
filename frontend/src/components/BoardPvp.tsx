@@ -445,6 +445,8 @@ type BoardProps = {
   } | null;
   /** Pool (hexes "col,row") de la fig de charge active = eligible[activeModelId]. */
   chargeModelPoolRef?: React.RefObject<Set<string>>;
+  /** Mask loops (polygone lissé monde) de la zone de landing de la fig de charge active. */
+  chargeModelMaskLoopsRef?: React.RefObject<number[][] | null>;
   onSelectChargeModel?: (modelId: string) => void;
   onMoveModelInChargePlan?: (modelId: string, col: number, row: number) => void;
   onUnplaceChargeModel?: (modelId: string) => void;
@@ -776,6 +778,7 @@ export default function Board({
   onCancelSquadMove,
   chargeMovePlan = null,
   chargeModelPoolRef,
+  chargeModelMaskLoopsRef,
   onSelectChargeModel,
   onMoveModelInChargePlan,
   onUnplaceChargeModel,
@@ -3761,39 +3764,14 @@ export default function Board({
       const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
       const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
       const MARGIN_H = boardConfig.margin;
-      const charger = units.find((u) => String(u.id) === String(chargeMovePlan.unitId));
-      const baseSz = charger ? resolveBaseSizeForUnitDisplay(charger) : 1;
-      const modelR = baseSz > 1 ? (baseSz * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
-      const ringR = modelR * 1.25;
-      const lineW = Math.max(1.5, HEX_RADIUS_H * 0.5);
-      const byModel = (
-        gameState as unknown as {
-          units_cache?: Record<
-            string,
-            { occupied_hexes_by_model?: Record<string, [number, number]> }
-          >;
-        }
-      )?.units_cache?.[String(chargeMovePlan.unitId)]?.occupied_hexes_by_model;
-      const eligibleIds = new Set(chargeMovePlan.eligibleModels);
-      const VIOLET = 0xa855f7;
       const hexCenter = (c: number, r: number): [number, number] => [
         c * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H,
         r * HEX_HEIGHT_H + ((c % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H,
       ];
-      // Figs ÉLIGIBLES non posées → voile violet plein (anneau + remplissage marqué si active).
-      // (Les figs posées sont désormais rendues comme vrai sprite déplacé via isSquadGhost.)
-      if (byModel) {
-        for (const [mid, pos] of Object.entries(byModel)) {
-          if (!eligibleIds.has(mid)) continue;
-          if (chargeMovePlan.models[mid]) continue; // déjà posée → traitée au-dessus
-          const [cx, cy] = hexCenter(pos[0], pos[1]);
-          const isActive = mid === chargeMovePlan.activeModelId;
-          overlay.lineStyle(lineW, VIOLET, 1);
-          overlay.beginFill(VIOLET, isActive ? 0.7 : 0.45);
-          overlay.drawCircle(cx, cy, ringR);
-          overlay.endFill();
-        }
-      }
+      // Figs ÉLIGIBLES : plus de voile violet plein sur les socles — il se superposait à la zone de
+      // landing (polygone lissé) et créait une 2e teinte violette plus foncée (blob sur l'escouade
+      // groupée). La zone au sol reste d'UN SEUL violet pâle ; la fig active est indiquée par le
+      // ghost qui suit le curseur. (Voiles cible rouge/vert conservés ci-dessous.)
       // 03.04 : voile cible par UNITÉ pendant la charge per-fig — ROUGE = cible non satisfaite
       // (aucune fig chargeant à ≤ EZ), VIOLET = satisfaite (≥ 1 fig engagée). Backend fournit les
       // deux listes dans chargeMovePlan ; redraw via la dep chargeMovePlan de cet effet.
@@ -3836,6 +3814,180 @@ export default function Board({
       if (chargeModelVeilOverlayRef.current === overlay) chargeModelVeilOverlayRef.current = null;
     };
   }, [mode, chargeMovePlan, boardConfig, units, gameState]);
+
+  // Ghost per-figurine (charge model move) : calque exact du ghost move per-fig — le fantôme de la
+  // fig active suit le curseur et snappe sur le pool de landing (chargeModelPoolRef), maj
+  // hoveredHexRef. Volontairement SANS preview de tir / badge caché / voile cohésion (propres au
+  // move). La pose reste gérée par onPointerDownSelect (clic). Actif quand mode === "chargeModelMove"
+  // && activeModelId set ; sinon le ghost est caché.
+  useEffect(() => {
+    if (mode !== "chargeModelMove") return;
+    if (!boardConfig) return;
+    const activeModelId = chargeMovePlan?.activeModelId ?? null;
+    if (!activeModelId) {
+      if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
+        hoverSpriteRef.current.visible = false;
+      }
+      hoveredHexRef.current = null;
+      return;
+    }
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!canvas) return;
+    const app = appRef.current;
+    if (!app) return;
+
+    const charger = units.find((u) => String(u.id) === String(chargeMovePlan?.unitId ?? -1));
+    if (!charger) return;
+
+    const pool = chargeModelPoolRef?.current;
+    if (!pool || pool.size === 0) return;
+
+    const HEX_RADIUS_H = boardConfig.hex_radius;
+    const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
+    const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
+    const MARGIN_H = boardConfig.margin;
+
+    const hxX = (col: number) => col * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H;
+    const hxY = (col: number, row: number) =>
+      row * HEX_HEIGHT_H + ((col % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H;
+
+    // Snapshot pixel positions du pool de landing au moment de la sélection de la fig.
+    const destPixels: { x: number; y: number; col: number; row: number }[] = [];
+    for (const k of pool) {
+      const sep = k.indexOf(",");
+      const c = Number(k.substring(0, sep));
+      const r = Number(k.substring(sep + 1));
+      destPixels.push({ x: hxX(c), y: hxY(c, r), col: c, row: r });
+    }
+    const nearestDest = (px: number, py: number) => {
+      let best = destPixels[0]!;
+      let bestD = Infinity;
+      for (const dp of destPixels) {
+        const d = (dp.x - px) * (dp.x - px) + (dp.y - py) * (dp.y - py);
+        if (d < bestD) {
+          bestD = d;
+          best = dp;
+        }
+      }
+      return best;
+    };
+
+    // Construit le ghost de la fig active (visuel complet de la fig : icône/taille/forme via
+    // models_meta_by_model si escouade hétérogène), comme le ghost move.
+    if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
+      hoverSpriteRef.current.destroy({ children: true });
+      hoverSpriteRef.current = null;
+    }
+    const container = new PIXI.Container();
+    container.zIndex = 2500;
+    container.eventMode = "none";
+    container.interactiveChildren = false;
+    app.stage.addChild(container);
+
+    const activeMeta = (
+      gameState?.units_cache as
+        | Record<string, { models_meta_by_model?: Record<string, ModelVisualMeta> }>
+        | undefined
+    )?.[String(charger.id)]?.models_meta_by_model?.[activeModelId];
+    const effectiveUnit = activeMeta ? { ...charger, ...activeMeta } : charger;
+
+    const HEX_R = HEX_RADIUS_H;
+    const nrHover = getNonRoundBasePixelLayout(effectiveUnit, HEX_R);
+    const bdSel = resolveBaseSizeForUnitDisplay(effectiveUnit);
+    const baseSizeVal = bdSel > 1 ? bdSel : undefined;
+    const defaultIconDiam = baseSizeVal
+      ? baseSizeVal * 1.5 * HEX_RADIUS_H
+      : HEX_RADIUS_H * (effectiveUnit.ICON_SCALE ?? 1.0);
+
+    const baseColor = charger.player === 1 ? 0x1d4ed8 : 0x882222;
+    const baseCircle = new PIXI.Graphics();
+    baseCircle.name = "hover-base-shape";
+    baseCircle.beginFill(baseColor, 0.7);
+    if (nrHover) {
+      if (nrHover.kind === "oval") {
+        baseCircle.drawEllipse(0, 0, nrHover.outerRx, nrHover.outerRy);
+      } else {
+        const h = nrHover.squareHalf;
+        const s = nrHover.squareSide;
+        baseCircle.drawRoundedRect(-h, -h, s, s, getSquareCornerRadiusPx());
+      }
+    } else {
+      baseCircle.drawCircle(0, 0, defaultIconDiam / 2);
+    }
+    baseCircle.endFill();
+    container.addChild(baseCircle);
+
+    if (effectiveUnit.ICON) {
+      const iconPath =
+        charger.player === 2
+          ? effectiveUnit.ICON.replace(".webp", "_red.webp")
+          : effectiveUnit.ICON;
+      const texture = PIXI.Texture.from(iconPath);
+      const iconSprite = new PIXI.Sprite(texture);
+      iconSprite.anchor.set(0.5);
+      const nonRoundIconR = getNonRoundIconRadius(effectiveUnit, HEX_R);
+      const iconDiam = nonRoundIconR != null ? nonRoundIconR * 2 : defaultIconDiam;
+      iconSprite.width = iconDiam;
+      iconSprite.height = iconDiam;
+      if (nonRoundIconR != null) {
+        const maskG = new PIXI.Graphics();
+        maskG.beginFill(0xffffff);
+        maskG.drawCircle(0, 0, nonRoundIconR);
+        maskG.endFill();
+        iconSprite.mask = maskG;
+        container.addChild(maskG);
+      }
+      container.addChild(iconSprite);
+    }
+    container.alpha = 0.65;
+    container.visible = false;
+    hoverSpriteRef.current = container;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      // Guard activeModelId (state via ref synchrone) + pool (ref synchrone) : couvre la race
+      // pose-faite / render-pas-encore-arrivé, comme le ghost move.
+      if (!effectivePerModelPlanRef.current?.activeModelId || !chargeModelPoolRef?.current?.size) {
+        if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
+          hoverSpriteRef.current.visible = false;
+        }
+        hoveredHexRef.current = null;
+        return;
+      }
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
+      const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
+      const px = (ev.clientX - rect.left) * scaleX;
+      const py = (ev.clientY - rect.top) * scaleY;
+      const best = nearestDest(px, py);
+      const sprite = hoverSpriteRef.current;
+      if (sprite && !sprite.destroyed) {
+        sprite.position.set(best.x, best.y);
+        sprite.visible = true;
+      }
+      hoveredHexRef.current = { col: best.col, row: best.row };
+    };
+
+    canvas.addEventListener("mousemove", onMouseMove);
+
+    return () => {
+      canvas.removeEventListener("mousemove", onMouseMove);
+      if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
+        hoverSpriteRef.current.visible = false;
+      }
+      hoveredHexRef.current = null;
+    };
+  }, [
+    mode,
+    // Objet complet (pas seulement activeModelId) : ``onSelectChargeModel`` pose activeModelId de
+    // façon optimiste AVANT que le backend remplisse ``chargeModelPoolRef``. La réponse
+    // (applyChargePlanState) recrée ``chargeMovePlan`` → nouvelle identité → l'effet re-tourne et
+    // construit le ghost avec le pool désormais rempli.
+    chargeMovePlan,
+    boardConfig,
+    units,
+    gameState?.units_cache,
+    chargeModelPoolRef,
+  ]);
 
   // squad.md brique 3 : dès qu'AUCUNE fig n'est active en mode plan (fig posée → deselect, ou
   // entrée sans selection), couper TOUT le preview (fantome curseur + LoS + ligne guide + tooltip).
@@ -6150,6 +6302,18 @@ export default function Board({
       return raw.map((loop) => loop.map((v) => v * ds));
     })();
 
+    // chargeModelMove : boucles lissées (monde) de la zone de landing de la fig active, fournies par
+    // le backend (charge_plan_state). Normalisées au format plat + display_scale, comme la branche
+    // gameState ci-dessus. Rendu lissé (Chaikin) au lieu de disques bruts festonnés.
+    const chargeModelMaskLoops = (() => {
+      if (mode !== "chargeModelMove") return null;
+      const norm = normalizeMaskLoopsFromApi(chargeModelMaskLoopsRef?.current);
+      if (!norm) return null;
+      const ds =
+        (boardConfig?.display as { display_scale?: number } | undefined)?.display_scale ?? 1;
+      return ds === 1 ? norm : norm.map((loop) => loop.map((v) => v * ds));
+    })();
+
     const drawBoardOptions: DrawBoardOptions = {
       availableCells: effectiveAvailableCells,
       attackCells,
@@ -6178,8 +6342,10 @@ export default function Board({
         gameState as { move_preview_footprint_span?: number | null }
       ).move_preview_footprint_span,
       movePreviewFootprintMaskLoops: activeFootprintMaskLoops,
+      chargeModelMaskLoops,
       pendingMoveAfterShooting,
-      chargeDestPoolRef,
+      chargeDestPoolRef:
+        mode === "chargeModelMove" && chargeModelPoolRef ? chargeModelPoolRef : chargeDestPoolRef,
       selectedUnitBaseSize: unitForFootprintBase
         ? resolveBaseSizeForUnitDisplay(unitForFootprintBase)
         : undefined,
