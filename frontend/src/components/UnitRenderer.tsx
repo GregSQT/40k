@@ -422,9 +422,7 @@ export class UnitRenderer {
     const unitWithFlags = unit as UnitWithFlags;
     const isJustKilled = unitWithFlags.isJustKilled === true;
     if (unit.HP_CUR <= 0) {
-      if (isJustKilled) {
-        console.log(`Rendering just-killed unit ${unit.id} as grey ghost`);
-      } else {
+      if (!isJustKilled) {
         // Unit destroyed: purge its persistent UI badges (hidden / battle-shocked)
         // from uiElementsContainer, which survives drawBoard cleanup.
         const { uiElementsContainer } = this.props;
@@ -892,13 +890,6 @@ export class UnitRenderer {
           unitCircle.cursor = "default";
         } else {
           unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-            console.log("[DEBUG UnitRenderer pointerdown]", {
-              unitId: unit.id,
-              button: e.button,
-              phase,
-              mode,
-              selectedUnitId,
-            });
             if (e.button === 0 || e.button === 2) {
               // Left or right click
               // Prevent context menu and event bubbling
@@ -1634,13 +1625,6 @@ export class UnitRenderer {
     } = this.props;
 
     if (!unit.HP_MAX) return; // Only skip if no HP_MAX, not if isPreview
-
-    // DEBUG — charge blink diagnostic
-    if (this.props.phase === "charge" && this.props.mode === "chargePreview" && unit.player !== this.props.current_player) {
-      const isInBlink = Array.isArray(this.props.blinkingUnits) &&
-        this.props.blinkingUnits.some((id) => String(id) === String(unit.id));
-      console.log(`[CHARGE_HP] unit=${unit.id}(${unit.DISPLAY_NAME}) blinkingUnits=${JSON.stringify(this.props.blinkingUnits)} inBlink=${isInBlink}`);
-    }
 
     const nrHp = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
     const hpDisplayBase = resolveBaseSizeForUnitDisplay(unit);

@@ -3640,14 +3640,8 @@ export default function Board({
         // Double-clic : auto-assign toutes les figs avec LoS valide sur cette cible.
         const now = e.timeStamp;
         const prev = lastEnemyClickRef.current;
-        console.log(
-          `[SQUAD-SHOOT][dblclick-detect] enemy=${enemy} prev=${prev ? `${prev.targetId}@${prev.time}` : "null"} now=${now} delta=${prev ? now - prev.time : "n/a"} onAutoAssign=${!!cbs.onAutoAssignAllModels}`
-        );
         if (prev && String(prev.targetId) === String(enemy) && now - prev.time < 400) {
           lastEnemyClickRef.current = null;
-          console.log(
-            `[SQUAD-SHOOT][dblclick-detect] → DOUBLE-CLIC détecté, appel onAutoAssignAllModels`
-          );
           void cbs.onAutoAssignAllModels?.(enemy);
           return;
         }
@@ -5385,7 +5379,6 @@ export default function Board({
     // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Listen for advance button click
     const advanceClickHandler = (e: Event) => {
       const { unitId } = (e as CustomEvent<{ unitId: number }>).detail;
-      console.log("🟠 ADVANCE CLICK: unitId =", unitId);
       if (onAdvance) {
         onAdvance(unitId);
       }
@@ -6789,18 +6782,6 @@ export default function Board({
             const isActive =
               activeShootingUnit && String(activeShootingUnit.id) === String(unit.id);
             const result = inQueue || isActive;
-
-            if (unit.id === 8 || unit.id === 9) {
-              // Debug key units
-              console.log(
-                `🟢 ELIGIBILITY DEBUG Unit ${unit.id}: inQueue=${inQueue}, isActive=${isActive}, result=${result}`
-              );
-              console.log(
-                `🟢 Queue IDs:`,
-                shootingActivationQueue.map((u) => u.id)
-              );
-              console.log(`🟢 Active unit:`, activeShootingUnit?.id || "none");
-            }
 
             return result;
           }

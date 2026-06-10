@@ -432,7 +432,6 @@ function TutorialOverlayGate(): React.ReactNode {
   const isStep2_4 =
     matchesTutorialStagePattern(stage, "1-24") || matchesTutorialStagePattern(stage, "1-24-*");
   const isStep1_25 = stage === "1-25";
-  const stageUiBehavior = stage !== "" ? getTutorialUiBehavior(stage) : {};
   const configuredSpotlightIds = currentStep?.spotlightIds;
   const hasConfiguredSpotlights = configuredSpotlightIds != null;
   const hasSpotlight = (id: TutorialSpotlightId): boolean =>
@@ -444,15 +443,7 @@ function TutorialOverlayGate(): React.ReactNode {
     if (!popupVisible || currentStep == null) return;
     if (lastDebugStageRef.current === stage) return;
     lastDebugStageRef.current = stage;
-    console.info("[tutorial-ui-debug]", {
-      stage,
-      spotlightIds: configuredSpotlightIds ?? null,
-      allowedClickSpotlightIds: currentStep.allowedClickSpotlightIds ?? null,
-      forceNoFog: stageUiBehavior.forceNoFog ?? false,
-      forceRightPanelFog: stageUiBehavior.forceRightPanelFog ?? false,
-      overlayBackdropOpacity: stageUiBehavior.overlayBackdropOpacity ?? null,
-    });
-  }, [debugMode, popupVisible, currentStep, stage, stageUiBehavior, configuredSpotlightIds]);
+  }, [debugMode, popupVisible, currentStep, stage]);
   if (!popupVisible || currentStep == null) return null;
   const isStep2_2Or3Or4 = isStep2_2 || isStep2_3 || isStep2_4;
   const isShootButtonStep =
@@ -2378,20 +2369,6 @@ export const BoardWithAPI: React.FC = () => {
       }, 1500);
     } else if (isAiEnabled && isAITurn && !hasEligibleAIUnits) {
       // AI turn skipped - no eligible units
-    } else if (isAiEnabled && !shouldTriggerAI && hasChanged) {
-      // Only log when values change, and only in debug scenarios
-      // Suppress the "NOT triggered" warning to reduce console noise
-      // Uncomment below if you need to debug AI triggering issues
-      // console.log(`⚠️ [BOARD_WITH_API] AI turn NOT triggered. Reasons:`, {
-      //   isPvEMode,
-      //   isAITurn,
-      //   isAIProcessing: isAIProcessingRef.current,
-      //   gameNotOver,
-      //   hasEligibleAIUnits,
-      //   lastProcessedTurn,
-      //   turnKey,
-      //   turnKeyMatches: lastProcessedTurn === turnKey
-      // });
     }
   }, [isAiMode, apiProps, gameMode, lastProcessedTurn, pauseAIForTutorial, isTutorialMode]);
 
