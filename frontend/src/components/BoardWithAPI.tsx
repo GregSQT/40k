@@ -3272,9 +3272,16 @@ export const BoardWithAPI: React.FC = () => {
               return (
                 <>
                   {modeBtn("Move", moveState, green)}
-                  {modeBtn("Advance", advanceState, orange, () => {
-                    if (canAdvance) apiProps.onSetAdvanceMode?.(advUnitId);
-                  })}
+                  {modeBtn(
+                    isAdv && apiProps.advanceRoll != null
+                      ? `Advance (Roll: ${apiProps.advanceRoll})`
+                      : "Advance",
+                    advanceState,
+                    orange,
+                    () => {
+                      if (canAdvance) apiProps.onSetAdvanceMode?.(advUnitId);
+                    }
+                  )}
                   {modeBtn("Fall-back", fallbackState, yellow)}
                   {modeBtn("Stationary", advanced ? "disabled" : "relief", grey, () =>
                     apiProps.onStationary?.(advUnitId)

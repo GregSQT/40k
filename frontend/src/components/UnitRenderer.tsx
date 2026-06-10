@@ -534,7 +534,6 @@ export class UnitRenderer {
     this.renderFightIndicator(iconZIndex);
     this.renderAttackCounter(unitIconScale);
     this.renderChargeRollBadge(unitIconScale);
-    this.renderAdvanceRollBadge(unitIconScale);
     this.renderHiddenBadge(unitIconScale);
     this.renderMoveStatusBadge(unitIconScale);
     this.renderBattleShockedIndicator(iconZIndex);
@@ -2614,94 +2613,6 @@ export class UnitRenderer {
     this.target.addChild(unitIdText);
   }
 
-  private renderAdvanceRollBadge(unitIconScale: number): void {
-    const {
-      unit,
-      advancingUnitId,
-      advanceRoll,
-      centerX,
-      centerY,
-      app,
-      HEX_RADIUS,
-      uiElementsContainer,
-    } = this.props;
-
-    // Use persistent UI container if provided, otherwise fall back to stage
-    const targetContainer = uiElementsContainer || app.stage;
-    const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
-
-    // Always clean up stale advance badges for this unit before deciding to render a new one.
-    if (uiElementsContainer) {
-      const staleElements = uiElementsContainer.children.filter((child: PIXI.DisplayObject) =>
-        child.name?.startsWith(`advance-badge-${unitIdNum}-`)
-      );
-      staleElements.forEach((child: PIXI.DisplayObject) => {
-        uiElementsContainer.removeChild(child);
-        if ("destroy" in child && typeof child.destroy === "function") child.destroy();
-      });
-    } else {
-      const staleElements = app.stage.children.filter(
-        (child: PIXI.DisplayObject) =>
-          (child instanceof PIXI.Graphics || child instanceof PIXI.Text) &&
-          child.name?.startsWith(`advance-badge-${unitIdNum}-`)
-      );
-      staleElements.forEach((child: PIXI.DisplayObject) => {
-        app.stage.removeChild(child);
-        if ("destroy" in child && typeof child.destroy === "function") child.destroy();
-      });
-    }
-
-    // Show advance roll badge ONLY on the unit that is advancing
-    if (!advancingUnitId || unit.id !== advancingUnitId) {
-      return; // Not the advancing unit, don't show badge
-    }
-
-    // Must have an advance roll value to display
-    if (advanceRoll === undefined || advanceRoll === null) return;
-
-    // Calculate badge position (bottom-right of unit) - same as charge roll badge
-    const scaledOffset = ((HEX_RADIUS * unitIconScale) / 2) * 0.8;
-    const badgeX = centerX + scaledOffset;
-    const badgeY = centerY + scaledOffset;
-
-    // Badge colors - same as charge roll success (green theme)
-    // Success: light green text (#90EE90) on dark green background (#006400)
-    const textColor = 0x90ee90;
-    const bgColor = 0x006400;
-
-    // Create badge background (rounded rectangle)
-    const badgeWidth = 28;
-    const badgeHeight = 20;
-    const badgeBg = new PIXI.Graphics();
-    badgeBg.beginFill(bgColor, 0.95);
-    badgeBg.lineStyle(2, 0x00aa00, 1);
-    badgeBg.drawRoundedRect(
-      badgeX - badgeWidth / 2,
-      badgeY - badgeHeight / 2,
-      badgeWidth,
-      badgeHeight,
-      4
-    );
-    badgeBg.endFill();
-    badgeBg.name = `advance-badge-${unitIdNum}-bg`;
-    badgeBg.zIndex = 10001; // Above everything
-    targetContainer.addChild(badgeBg);
-
-    // Create roll number text
-    const rollText = new PIXI.Text(`${advanceRoll}`, {
-      fontSize: 14,
-      fill: textColor,
-      align: "center",
-      fontWeight: "bold",
-      stroke: 0x000000,
-      strokeThickness: 1,
-    });
-    rollText.anchor.set(0.5);
-    rollText.position.set(badgeX, badgeY);
-    rollText.name = `advance-badge-${unitIdNum}-text`;
-    rollText.zIndex = 10002; // Above badge background and everything else
-    targetContainer.addChild(rollText);
-  }
 }
 
 // Helper function to create and render a unit
