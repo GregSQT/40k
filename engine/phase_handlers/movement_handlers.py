@@ -241,6 +241,24 @@ def _unit_has_keyword(unit: Dict[str, Any], keyword_id: str) -> bool:
     return False
 
 
+def _fly_traversal_active(game_state: Dict[str, Any], unit: Dict[str, Any], unit_id: Any) -> bool:
+    """Take to the skies (Règles 21.03) : la traversée FLY (murs/figurines + ignore vertical) est
+    active si l'unité a le keyword fly ET :
+    - hors phase de mouvement, ou unité IA (gym / PvE joueur 2) → vol auto legacy (inchangé) ;
+    - en phase move pour un joueur humain → seulement si le vol a été déclaré (units_took_to_skies).
+    Source unique partagée par le pool d'ancre, le reachable par-figurine et le log de move.
+    """
+    if not _unit_has_keyword(unit, "fly"):
+        return False
+    in_move_phase = game_state.get("phase") == "move"
+    is_gym = bool(game_state.get("gym_training_mode", False))
+    is_pve = bool(game_state.get("pve_mode", False)) or bool(game_state.get("is_pve_mode", False))
+    is_ai_unit = is_gym or (is_pve and int(require_key(unit, "player")) == 2)
+    if not (in_move_phase and not is_ai_unit):
+        return True
+    return str(unit_id) in game_state.get("units_took_to_skies", set())
+
+
 def _movement_engagement_violates(
     game_state: Dict[str, Any],
     mover: Dict[str, Any],
@@ -627,6 +645,10 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         # V11 : bascule l'activation move en mode Advance (jet D6 + budget M+jet). Commit via commit_move_plan.
         return movement_set_advance_mode_handler(game_state, unit_id, action)
 
+    elif action_type == "take_to_skies":
+        # Règles 21.03 : (dé)clare le vol de l'escouade FLY active (-2" + traversée murs/figurines).
+        return movement_set_fly_mode_handler(game_state, unit_id, action)
+
     elif action_type == "commit_move_plan":
         # Validate (= bouton Validate) + commit d'un plan provisoire par-figurine.
         return movement_commit_move_plan_handler(game_state, unit_id, action)
@@ -711,6 +733,43 @@ def movement_set_advance_mode_handler(game_state: Dict[str, Any], unit_id: str, 
         "advance_roll": roll,
         "valid_destinations": pool,
         "waiting_for_player": True,
+    }
+
+
+def movement_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    """Take to the skies (Règles 21.03) : (dé)clare le vol de l'escouade FLY active.
+
+    Toggle : ajoute/retire l'escouade de ``units_took_to_skies``. Effet (lu par les pools et le
+    commit via ``get_squad_move_budget`` + ``movement_build_valid_destinations_pool``) :
+    -2" sur la distance max du move ET traversée des murs/figurines pendant ce déplacement.
+    Déclaration faite avant de bouger l'unité ; réversible tant que le move n'est pas commit.
+    """
+    unit = get_unit_by_id(game_state, unit_id)
+    if not unit:
+        return False, {"error": "unit_not_found", "unit_id": unit_id}
+    if not _unit_has_keyword(unit, "fly"):
+        return False, {"error": "unit_cannot_fly", "unitId": unit["id"]}
+
+    tts = game_state.setdefault("units_took_to_skies", set())
+    uid = str(unit_id)
+    if uid in tts:
+        tts.discard(uid)
+        declared = False
+    else:
+        tts.add(uid)
+        declared = True
+    # Rebuild le pool au nouveau budget/traversée ; le front re-synchronise depuis game_state.
+    pool = movement_build_valid_destinations_pool(game_state, unit_id)
+    # Réponse état-complète comme l'activation : le front re-dérive engagement (would_flee) et
+    # mode Advance (advance_roll) à partir de la réponse ; les omettre les réinitialiserait.
+    return True, {
+        "action": "fly_mode_set",
+        "unitId": unit["id"],
+        "took_to_skies": declared,
+        "valid_destinations": pool,
+        "waiting_for_player": True,
+        "would_flee": bool(_squad_is_in_enemy_er(game_state, str(unit_id))),
+        "advance_roll": _advance_roll_for(str(unit_id), game_state),
     }
 
 
@@ -1570,10 +1629,12 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     if not unit:
         return []
 
-    move_range = unit["MOVE"]
     _adv_roll = _advance_roll_for(str(unit_id), game_state)
     if _adv_roll is not None:
         move_range = get_squad_move_budget(str(unit_id), game_state, "advance", advance_roll=_adv_roll)
+    else:
+        # Normal/fall-back via budget unique : applique aussi le malus Take to the skies (-2", Règles 21.03).
+        move_range = get_squad_move_budget(str(unit_id), game_state, "normal")
     # Normalize coordinates to int - raises error if invalid
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
@@ -1624,8 +1685,6 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         add_console_log(game_state, log_msg)
         safe_print(game_state, log_msg)
 
-    has_fly_keyword = _unit_has_keyword(unit, "fly")
-
     # Generic cache-coherence diagnostics (debug mode only):
     # compare precomputed enemy adjacency cache vs. fresh reconstruction from units_cache.
     if game_state.get("debug_mode", False):
@@ -1673,10 +1732,14 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
     _m_prep_end = _perf_clock.perf_counter() if _pt else None
 
+    # Take to the skies (Règles 21.03) : en phase move, une unité FLY ne traverse murs/figurines
+    # QUE si le joueur a déclaré le vol. Logique partagée via _fly_traversal_active.
+    _fly_active = _fly_traversal_active(game_state, unit, unit_id)
+
     # FLY units: BFS ignoring walls/occupation for traversal.
     # Only destination validation checks walls, occupation and engagement zone.
     # This replaces the O(cols×rows) scan with O(reachable) BFS.
-    if has_fly_keyword:
+    if _fly_active:
         board_cols = require_key(game_state, "board_cols")
         board_rows = require_key(game_state, "board_rows")
         fly_visited_n = 0
@@ -2153,7 +2216,9 @@ def movement_build_model_destinations_pool(
             )
         same_squad_occupied.update(sibling_fp)
 
-    has_fly = _unit_has_keyword(unit, "fly")
+    # Take to the skies (Règles 21.03) : traversée FLY active seulement si vol déclaré (phase move,
+    # humain) — sinon BFS sol. Pilote le reachable par-figurine ET, via lui, la validation au commit.
+    has_fly = _fly_traversal_active(game_state, unit, squad_id)
 
     # Desperate Escape : unité battle-shocked tentant un fall-back depuis l'ER ennemie.
     # Les figurines peuvent traverser les positions ennemies (règle 09.07).
@@ -2859,7 +2924,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     action_reward = 0.0
     action_name = "FLEE" if was_adjacent else "MOVE"
     
-    is_fly_move = _unit_has_keyword(unit, "fly")
+    is_fly_move = _fly_traversal_active(game_state, unit, unit_id)
     if was_adjacent:
         if is_fly_move:
             movement_message = (

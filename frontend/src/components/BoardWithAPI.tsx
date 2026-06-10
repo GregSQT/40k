@@ -3147,6 +3147,7 @@ export const BoardWithAPI: React.FC = () => {
           style={{
             display: "flex",
             alignItems: "center",
+            justifyContent: "space-between",
             background: "#1f2937",
             border: "1px solid #555",
             borderRadius: "8px",
@@ -3155,61 +3156,107 @@ export const BoardWithAPI: React.FC = () => {
             marginBottom: 2,
           }}
         >
-          {/* Moitié gauche : Cancel / Validate (plan par-figurine uniquement). */}
-          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
-            {apiProps.squadMovePlan && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!isGameOver) apiProps.onCancelSquadMove?.();
-                  }}
-                  style={{
-                    border: "1px solid rgba(0,0,0,0.35)",
-                    borderRadius: 6,
-                    background: "#6b7280",
-                    boxShadow: "0 6px 0 #374151",
-                    color: "#fff",
-                    cursor: "pointer",
-                    fontSize: 14,
-                    fontWeight: 700,
-                    padding: "8px 14px",
-                    width: 110,
-                    textAlign: "center",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={!apiProps.squadMovePlan.canValidate}
-                  onClick={() => {
-                    if (!isGameOver) apiProps.onCommitSquadMovePlan?.();
-                  }}
-                  style={{
-                    border: "1px solid rgba(0,0,0,0.35)",
-                    borderRadius: 6,
-                    background: apiProps.squadMovePlan.canValidate
-                      ? "#16a34a"
-                      : "rgba(75,85,99,0.55)",
-                    boxShadow: apiProps.squadMovePlan.canValidate ? "0 6px 0 #14532d" : "none",
-                    color: apiProps.squadMovePlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
-                    cursor: apiProps.squadMovePlan.canValidate ? "pointer" : "not-allowed",
-                    fontSize: 14,
-                    fontWeight: 700,
-                    padding: "8px 14px",
-                    width: 110,
-                    textAlign: "center",
-                    opacity: apiProps.squadMovePlan.canValidate ? 1 : 0.6,
-                  }}
-                >
-                  Validate
-                </button>
-              </>
-            )}
+          {/* Bloc gauche : Cancel (toujours, preview inclus) / Validate (si plan). */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Cancel : toujours affiché dès l'activation (preview inclus). */}
+          <button
+            type="button"
+            onClick={() => {
+              if (!isGameOver) apiProps.onCancelSquadMove?.();
+            }}
+            style={{
+              border: "1px solid rgba(0,0,0,0.35)",
+              borderRadius: 6,
+              background: "#6b7280",
+              boxShadow: "0 6px 0 #374151",
+              color: "#fff",
+              cursor: "pointer",
+              fontSize: 14,
+              fontWeight: 700,
+              padding: "8px 14px",
+              width: 110,
+              textAlign: "center",
+            }}
+          >
+            Cancel
+          </button>
+          {/* Validate : uniquement quand un plan par-figurine existe. */}
+          {apiProps.squadMovePlan && (
+            <button
+              type="button"
+              disabled={!apiProps.squadMovePlan.canValidate}
+              onClick={() => {
+                if (!isGameOver) apiProps.onCommitSquadMovePlan?.();
+              }}
+              style={{
+                border: "1px solid rgba(0,0,0,0.35)",
+                borderRadius: 6,
+                background: apiProps.squadMovePlan.canValidate
+                  ? "#16a34a"
+                  : "rgba(75,85,99,0.55)",
+                boxShadow: apiProps.squadMovePlan.canValidate ? "0 6px 0 #14532d" : "none",
+                color: apiProps.squadMovePlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+                cursor: apiProps.squadMovePlan.canValidate ? "pointer" : "not-allowed",
+                fontSize: 14,
+                fontWeight: 700,
+                padding: "8px 14px",
+                width: 110,
+                textAlign: "center",
+                opacity: apiProps.squadMovePlan.canValidate ? 1 : 0.6,
+              }}
+            >
+              Validate
+            </button>
+          )}
           </div>
-          {/* Moitié droite : boutons de mode, alignés à gauche. */}
-          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-start" }}>
+          {/* To the sky (unités FLY) : centré entre les deux blocs (space-between). */}
+          {(() => {
+            const flyUnitId =
+              apiProps.squadMovePlan?.unitId ??
+              apiProps.movePreview?.unitId ??
+              (apiProps.gameState?.active_movement_unit != null
+                ? parseInt(apiProps.gameState.active_movement_unit, 10)
+                : null);
+            if (flyUnitId === null) return null;
+            const flyUnit = (apiProps.gameState?.units ?? []).find((u) => u.id === flyUnitId);
+            const canFly = !!flyUnit?.UNIT_KEYWORDS?.some(
+              (k) => k.keywordId?.toLowerCase() === "fly"
+            );
+            if (!canFly) return null;
+            const advancedFly =
+              (apiProps.unitsAdvanced ?? []).includes(flyUnitId) ||
+              apiProps.advancingUnitId === flyUnitId;
+            // Apparence figée sur l'état du vol seul (l'Advance ne change pas le rendu) ;
+            // toggle neutralisé une fois l'unité advancée (figé à la sélection de l'Advance).
+            const tookToSkies = (apiProps.unitsTookToSkies ?? []).includes(flyUnitId);
+            return (
+              <button
+                type="button"
+                key="to-the-sky"
+                onClick={() => {
+                  if (!advancedFly && !isGameOver) apiProps.onTakeToSkies?.(flyUnitId);
+                }}
+                style={{
+                  border: "1px solid rgba(0,0,0,0.35)",
+                  borderRadius: 6,
+                  color: "#fff",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  padding: "8px 14px",
+                  width: 110,
+                  textAlign: "center",
+                  background: tookToSkies ? "#0ea5e9" : "#38bdf8",
+                  boxShadow: tookToSkies ? "inset 0 4px 7px rgba(0,0,0,0.55)" : "0 6px 0 #0369a1",
+                  transform: tookToSkies ? "translateY(5px)" : "translateY(0)",
+                  cursor: advancedFly ? "default" : "pointer",
+                }}
+              >
+                To the sky (M-2)
+              </button>
+            );
+          })()}
+          {/* Boutons de mode (Move / Advance / Fall-back / Stationary). */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-start" }}>
             {(() => {
               const advUnitId =
                 apiProps.squadMovePlan?.unitId ??

@@ -2953,12 +2953,18 @@ def get_squad_move_budget(
     if unit is None:
         raise KeyError(f"get_squad_move_budget: squad {squad_id} not in game_state['units']")
     move_stat = int(require_key(unit, "MOVE"))
+    # Take to the skies (Règles 21.03) : si l'escouade a déclaré le vol ce tour, retrancher 2"
+    # de la distance max du move (normal/advance/fall_back). Le malus est en subhexes comme MOVE.
+    tts_penalty = 0
+    if str(squad_id) in game_state.get("units_took_to_skies", set()):
+        ish = int(require_key(game_state, "inches_to_subhex"))
+        tts_penalty = 2 * ish
     if move_type == "advance":
         if advance_roll is None:
             raise ValueError("get_squad_move_budget: advance_roll required for move_type='advance'")
         # advance_roll est en POUCES (1D6) → convertir en subhexes comme MOVE.
         ish = int(require_key(game_state, "inches_to_subhex"))
-        return move_stat + int(advance_roll) * ish
+        return max(0, move_stat + int(advance_roll) * ish - tts_penalty)
     if move_type == "charge":
         if advance_roll is None:
             raise ValueError("get_squad_move_budget: charge_roll (passed via advance_roll) required for move_type='charge'")
@@ -2966,7 +2972,7 @@ def get_squad_move_budget(
         # pour rester coherent avec les autres move_types qui retournent subhexes.
         ish = int(require_key(game_state, "inches_to_subhex"))
         return int(advance_roll) * ish
-    return move_stat  # normal, fall_back
+    return max(0, move_stat - tts_penalty)  # normal, fall_back
 
 
 def execute_squad_move(

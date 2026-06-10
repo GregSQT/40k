@@ -215,6 +215,7 @@ export interface APIGameState {
   units_charged: string[];
   units_attacked: string[];
   units_advanced?: string[]; // Units that have advanced this turn
+  units_took_to_skies?: string[]; // Units FLY ayant déclaré le vol ce tour (Règles 21.03)
   move_activation_pool: string[];
   shoot_activation_pool: string[];
   charge_activation_pool: string[];
@@ -3661,6 +3662,24 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [executeAction, refreshSquadMovePlanValidity, handleSelectModelForMove]
   );
 
+  /** Bouton Take to the sky (phase move, unités FLY) : (dé)clare le vol (-2" + traversée, Règles 21.03). */
+  const handleTakeToSkies = useCallback(
+    async (unitId: number | string) => {
+      const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      await executeAction({ action: "take_to_skies", unitId: String(uid) });
+      // Toggle change le budget (-2") ET la traversée : re-valide le plan et reconstruit le pool
+      // de la figurine active, comme l'Advance.
+      const plan = squadMovePlanRef.current;
+      if (plan && plan.unitId === uid) {
+        await refreshSquadMovePlanValidity(uid, plan.models);
+        if (plan.activeModelId) {
+          await handleSelectModelForMove(plan.activeModelId);
+        }
+      }
+    },
+    [executeAction, refreshSquadMovePlanValidity, handleSelectModelForMove]
+  );
+
   /** Bouton Stationary (phase move) : termine l'activation sans bouger (log WAIT backend). */
   const handleStationary = useCallback(
     async (unitId: number | string) => {
@@ -5203,6 +5222,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     return gameState?.units_advanced ? gameState.units_advanced.map((id) => parseInt(id, 10)) : [];
   }, [gameState?.units_advanced]);
 
+  const memoizedUnitsTookToSkies = useMemo((): number[] => {
+    return gameState?.units_took_to_skies
+      ? gameState.units_took_to_skies.map((id) => parseInt(id, 10))
+      : [];
+  }, [gameState?.units_took_to_skies]);
+
   const memoizedDeploymentState = useMemo(() => {
     if (!gameState?.deployment_state) {
       return undefined;
@@ -5274,6 +5299,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       unitsAttacked: memoizedUnitsAttacked,
       unitsFled: memoizedUnitsFled,
       unitsAdvanced: memoizedUnitsAdvanced,
+      unitsTookToSkies: memoizedUnitsTookToSkies,
       targetPreview: null,
       currentTurn: gameState.turn,
       maxTurns: maxTurnsFromConfig as number,
@@ -5332,6 +5358,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     memoizedUnitsAttacked,
     memoizedUnitsFled,
     memoizedUnitsAdvanced,
+    memoizedUnitsTookToSkies,
     memoizedDeploymentState,
     maxTurnsFromConfig,
   ]);
@@ -5364,6 +5391,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       unitsAttacked: [],
       unitsFled: [],
       unitsAdvanced: [] as number[],
+      unitsTookToSkies: [] as number[],
       phase: null,
       gameState: null,
       onSelectUnit: () => {},
@@ -5391,6 +5419,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onCommitChargePlan: async () => {},
       onCancelChargeModelMove: async () => {},
       onSetAdvanceMode: async () => {},
+      onTakeToSkies: async () => {},
       onStationary: async () => {},
       activeUnitEngaged: null,
       squadShootPlan: null,
@@ -5499,6 +5528,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     unitsAttacked: memoizedUnitsAttacked,
     unitsFled: memoizedUnitsFled,
     unitsAdvanced: memoizedUnitsAdvanced,
+    unitsTookToSkies: memoizedUnitsTookToSkies,
     phase: gameState.phase as "deployment" | "move" | "shoot" | "charge" | "fight",
     // Expose fight_subphase for UnitRenderer click handling
     fightSubPhase: gameState.fight_subphase as
@@ -5536,6 +5566,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onCommitChargePlan: handleCommitChargePlan,
     onCancelChargeModelMove: handleCancelChargeModelMove,
     onSetAdvanceMode: handleSetAdvanceMode,
+    onTakeToSkies: handleTakeToSkies,
     onStationary: handleStationary,
     activeUnitEngaged,
     squadShootPlan,

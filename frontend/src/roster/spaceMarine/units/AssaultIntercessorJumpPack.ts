@@ -29,7 +29,7 @@ export class AssaultIntercessorJumpPack extends TroopMeleeTroop {
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
-    { keywordId: "infantry" },
+    //{ keywordId: "infantry" },
     { keywordId: "grenades" },
     { keywordId: "jump_pack" },
     { keywordId: "fly" },
