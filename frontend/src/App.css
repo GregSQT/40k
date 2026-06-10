@@ -3368,3 +3368,9 @@ textarea:focus {
 .weapon-dropdown-actions button:not(:disabled):hover {
   background: #34405a;
 }
+
+/* Pas de focus ring bleu natif au clic souris sur les boutons des barres d'action ;
+   conservé pour la navigation clavier (:focus-visible). */
+.squad-action-bar button:focus:not(:focus-visible) {
+  outline: none;
+}

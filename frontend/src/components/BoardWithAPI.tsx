@@ -2938,6 +2938,9 @@ export const BoardWithAPI: React.FC = () => {
     );
   };
 
+  // Relief commun aux boutons des barres d'action : highlight haut + ombre interne bas + ombre portée.
+  const RELIEF =
+    "inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -3px 6px rgba(0,0,0,0.30), 0 2px 4px rgba(0,0,0,0.35)";
   const rightColumnContent = (
     <RightColumnTutorialSpotlight>
       {gameConfig ? (
@@ -2995,7 +2998,7 @@ export const BoardWithAPI: React.FC = () => {
                 border: "1px solid rgba(0,0,0,0.35)",
                 borderRadius: 6,
                 background: "#6b7280",
-                boxShadow: "0 6px 0 #374151",
+                boxShadow: RELIEF,
                 color: "#fff",
                 cursor: "pointer",
                 fontSize: 14,
@@ -3022,8 +3025,8 @@ export const BoardWithAPI: React.FC = () => {
                   style={{
                     border: "1px solid rgba(0,0,0,0.35)",
                     borderRadius: 6,
-                    background: canCharge ? "#7c3aed" : "#4c1d95",
-                    boxShadow: canCharge ? "0 6px 0 #4c1d95" : "0 6px 0 #2e1065",
+                    background: canCharge ? "#7c3aed" : "#3b0764",
+                    boxShadow: RELIEF,
                     color: "#fff",
                     cursor: canCharge ? "pointer" : "not-allowed",
                     fontSize: 14,
@@ -3032,7 +3035,7 @@ export const BoardWithAPI: React.FC = () => {
                     minWidth: 110,
                     whiteSpace: "nowrap",
                     textAlign: "center",
-                    opacity: canCharge ? 1 : 0.85,
+                    opacity: 1,
                   }}
                 >
                   {(() => {
@@ -3075,9 +3078,8 @@ export const BoardWithAPI: React.FC = () => {
                     width: 130,
                     textAlign: "center",
                     marginLeft: "auto",
-                    background: tookToSkies ? "#0ea5e9" : "#38bdf8",
-                    boxShadow: tookToSkies ? "inset 0 4px 7px rgba(0,0,0,0.55)" : "0 6px 0 #0369a1",
-                    transform: tookToSkies ? "translateY(5px)" : "translateY(0)",
+                    background: "#38bdf8",
+                    boxShadow: tookToSkies ? `0 0 0 2px #fff, 0 0 10px 3px rgba(255,255,255,0.8), ${RELIEF}` : RELIEF,
                     cursor: "pointer",
                   }}
                 >
@@ -3118,7 +3120,7 @@ export const BoardWithAPI: React.FC = () => {
                 border: "1px solid rgba(0,0,0,0.35)",
                 borderRadius: 6,
                 background: "#6b7280",
-                boxShadow: "0 6px 0 #374151",
+                boxShadow: RELIEF,
                 color: "#fff",
                 cursor: "pointer",
                 fontSize: 14,
@@ -3142,8 +3144,8 @@ export const BoardWithAPI: React.FC = () => {
                   style={{
                     border: "1px solid rgba(0,0,0,0.35)",
                     borderRadius: 6,
-                    background: canValidate ? "#7c3aed" : "rgba(75,85,99,0.55)",
-                    boxShadow: canValidate ? "0 6px 0 #4c1d95" : "none",
+                    background: canValidate ? "#7c3aed" : "#3b0764",
+                    boxShadow: RELIEF,
                     color: canValidate ? "#fff" : "rgba(229,231,235,0.5)",
                     cursor: canValidate ? "pointer" : "not-allowed",
                     fontSize: 14,
@@ -3151,7 +3153,7 @@ export const BoardWithAPI: React.FC = () => {
                     padding: "8px 14px",
                     width: 110,
                     textAlign: "center",
-                    opacity: canValidate ? 1 : 0.6,
+                    opacity: 1,
                   }}
                 >
                   Charger
@@ -3206,7 +3208,7 @@ export const BoardWithAPI: React.FC = () => {
               border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
               background: "#6b7280",
-              boxShadow: "0 6px 0 #374151",
+              boxShadow: RELIEF,
               color: "#fff",
               cursor: "pointer",
               fontSize: 14,
@@ -3231,8 +3233,8 @@ export const BoardWithAPI: React.FC = () => {
                 borderRadius: 6,
                 background: apiProps.squadMovePlan.canValidate
                   ? "#16a34a"
-                  : "rgba(75,85,99,0.55)",
-                boxShadow: apiProps.squadMovePlan.canValidate ? "0 6px 0 #14532d" : "none",
+                  : "#052e16",
+                boxShadow: RELIEF,
                 color: apiProps.squadMovePlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
                 cursor: apiProps.squadMovePlan.canValidate ? "pointer" : "not-allowed",
                 fontSize: 14,
@@ -3240,7 +3242,7 @@ export const BoardWithAPI: React.FC = () => {
                 padding: "8px 14px",
                 width: 110,
                 textAlign: "center",
-                opacity: apiProps.squadMovePlan.canValidate ? 1 : 0.6,
+                opacity: 1,
               }}
             >
               Validate
@@ -3283,9 +3285,8 @@ export const BoardWithAPI: React.FC = () => {
                   padding: "8px 14px",
                   width: 110,
                   textAlign: "center",
-                  background: tookToSkies ? "#0ea5e9" : "#38bdf8",
-                  boxShadow: tookToSkies ? "inset 0 4px 7px rgba(0,0,0,0.55)" : "0 6px 0 #0369a1",
-                  transform: tookToSkies ? "translateY(5px)" : "translateY(0)",
+                  background: "#38bdf8",
+                  boxShadow: tookToSkies ? `0 0 0 2px #fff, 0 0 10px 3px rgba(255,255,255,0.8), ${RELIEF}` : RELIEF,
                   cursor: advancedFly ? "default" : "pointer",
                 }}
               >
@@ -3316,7 +3317,7 @@ export const BoardWithAPI: React.FC = () => {
               const modeBtn = (
                 label: string,
                 state: "selected" | "relief" | "disabled",
-                accent: { relief: string; down: string; shadow: string },
+                accent: { relief: string; dark: string },
                 onClick?: () => void
               ) => (
                 <button
@@ -3335,31 +3336,20 @@ export const BoardWithAPI: React.FC = () => {
                     padding: "8px 14px",
                     width: 110,
                     textAlign: "center",
-                    background:
-                      state === "disabled"
-                        ? "rgba(75,85,99,0.55)"
-                        : state === "selected"
-                          ? accent.down
-                          : accent.relief,
-                    boxShadow:
-                      state === "disabled"
-                        ? "none"
-                        : state === "selected"
-                          ? "inset 0 4px 7px rgba(0,0,0,0.55)"
-                          : accent.shadow,
-                    transform: state === "selected" ? "translateY(5px)" : "translateY(0)",
+                    background: state === "disabled" ? accent.dark : accent.relief,
+                    boxShadow: state === "selected" ? `0 0 0 2px #fff, 0 0 10px 3px rgba(255,255,255,0.8), ${RELIEF}` : RELIEF,
                     cursor:
                       state === "disabled" ? "not-allowed" : state === "selected" ? "default" : "pointer",
-                    opacity: state === "disabled" ? 0.6 : 1,
+                    opacity: 1,
                   }}
                 >
                   {label}
                 </button>
               );
-              const green = { relief: "#16a34a", down: "#15803d", shadow: "0 6px 0 #14532d" };
-              const orange = { relief: "#ea580c", down: "#c2410c", shadow: "0 6px 0 #9a3412" };
-              const yellow = { relief: "#ca8a04", down: "#a16207", shadow: "0 6px 0 #854d0e" };
-              const grey = { relief: "#6b7280", down: "#4b5563", shadow: "0 6px 0 #374151" };
+              const green = { relief: "#16a34a", dark: "#052e16" };
+              const orange = { relief: "#ea580c", dark: "#431407" };
+              const yellow = { relief: "#ca8a04", dark: "#422006" };
+              const grey = { relief: "#6b7280", dark: "#1f2937" };
               // Advancé → Move grisé (verrouillé). Sinon engagé → grisé, libre → sélectionné.
               const moveState: "selected" | "relief" | "disabled" =
                 engaged || advanced ? "disabled" : "selected";
@@ -3429,10 +3419,11 @@ export const BoardWithAPI: React.FC = () => {
               if (!isGameOver) apiProps.onCancelSquadShoot?.();
             }}
             style={{
-              border: "1px solid rgba(255,255,255,0.28)",
+              border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
-              background: "rgba(75,85,99,0.92)",
-              color: "#e5e7eb",
+              background: "#6b7280",
+              boxShadow: RELIEF,
+              color: "#fff",
               cursor: "pointer",
               fontSize: 14,
               fontWeight: 700,
@@ -3448,11 +3439,12 @@ export const BoardWithAPI: React.FC = () => {
               if (!isGameOver) apiProps.onCommitSquadShoot?.();
             }}
             style={{
-              border: "1px solid rgba(255,255,255,0.28)",
+              border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
               background: apiProps.squadShootPlan.canValidate
-                ? "rgba(22,163,74,0.95)"
-                : "rgba(75,85,99,0.55)",
+                ? "#16a34a"
+                : "#052e16",
+              boxShadow: RELIEF,
               color: apiProps.squadShootPlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
               cursor: apiProps.squadShootPlan.canValidate ? "pointer" : "not-allowed",
               fontSize: 14,
