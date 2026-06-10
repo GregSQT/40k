@@ -3311,7 +3311,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // Double-clic depuis squadModelMove : nettoyer le plan provisoire avant d'entrer en movePreview.
       squadMoveSessionRef.current += 1;
       squadMoveModelPoolRef.current = new Set();
-      setSquadMovePlan(null);
+      // NE PAS nuller le plan ici : à cause de l'``await activate_unit`` plus bas, un setSquadMovePlan(null)
+      // précoce est commité dans un render AVANT setMode → frame où mode=squadModelMove mais plan=null →
+      // l'escouade saute à sa position d'origine = clignotement. On nulle juste avant chaque setMode
+      // ("movePreview"), batché avec, pour un switch atomique sans frame intermédiaire.
       const parsedUnitId = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
       const orientation = readEngineOrientationStepFromGameState(unitId);
       if (gameState?.phase === "shoot") {
@@ -3324,6 +3327,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           destRow: typeof row === "string" ? parseInt(row, 10) : row,
           orientation,
         });
+        setSquadMovePlan(null);
         setMode("movePreview");
         return;
       }
@@ -3343,6 +3347,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         destRow: typeof row === "string" ? parseInt(row, 10) : row,
         orientation: latestOrientation,
       });
+      setSquadMovePlan(null);
       setPendingPreviewAction("move");
       setMode("movePreview");
     },

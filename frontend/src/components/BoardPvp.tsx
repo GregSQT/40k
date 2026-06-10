@@ -6228,6 +6228,28 @@ export default function Board({
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
+    // [DIAG TEMP blink squad move] — à retirer. Confirme le mécanisme du blink des figs.
+    // Steady-state uniquement : mode squadModelMove AVANT et APRÈS (pas d'entrée/transition).
+    {
+      const prevSegs = unitsFingerprintRef.current.split("#");
+      const wasSquadMove = prevSegs[3] === "squadModelMove";
+      if (mode === "squadModelMove" && wasSquadMove && unitsChanged) {
+        const planNull = squadMovePlan == null;
+        const planActive = squadMovePlan?.activeModelId ?? null;
+        const planModelCount = squadMovePlan ? Object.keys(squadMovePlan.models).length : 0;
+        const sqFpNow = squadMovePlan
+          ? Object.entries(squadMovePlan.models)
+              .map(([m, p]) => `${m}@${p.col},${p.row}`)
+              .join(",")
+          : "<null>";
+        const losNow = [...movePreviewLosBlinkIds].sort((a, b) => a - b).join(",");
+        // eslint-disable-next-line no-console
+        console.log(
+          `[DIAG blink steady] planNull=${planNull} active=${planActive} models=${planModelCount} | planPos=${sqFpNow} | los=[${losNow}]`
+        );
+      }
+    }
+
     // Reuse cached static board layers when the board config and objective control haven't changed.
     const objControlKey = Object.entries(objectiveControl)
       .sort(([a], [b]) => a.localeCompare(b))
@@ -6597,8 +6619,10 @@ export default function Board({
     if (!movePreviewGhostLayerRef.current.parent) {
       app.stage.addChild(movePreviewGhostLayerRef.current);
     }
-    // Repartir propre à chaque rendu : le ghost preview n'est dessiné qu'à un seul endroit.
-    movePreviewGhostLayerRef.current.removeChildren();
+    // Vider UNIQUEMENT quand on reconstruit les unités (unitsChanged) : le redraw du ghost est dans
+    // la boucle gardée par `if (unitsChanged)`. Vider à chaque render (même sans rebuild) laisse le
+    // layer vide sur les renders où unitsChanged=false → le ghost disparaît/réapparaît = clignotement.
+    if (unitsChanged) movePreviewGhostLayerRef.current.removeChildren();
     const movePreviewGhostLayer = movePreviewGhostLayerRef.current;
 
     const chargeMaxDistance = gameConfig?.charge?.charge_max_distance;
@@ -6751,6 +6775,14 @@ export default function Board({
             ? modelIds.map((mid) => movePreviewHiddenModelIds.has(String(mid)))
             : modelIds.map((mid) => hiddenModelIds.has(String(mid)));
         const [anchorCenterX, anchorCenterY] = modelCenters[0];
+
+        // [DIAG TEMP blink squad] — à retirer.
+        if (isSquadGhost && mode === "squadModelMove") {
+          // eslint-disable-next-line no-console
+          console.log(
+            `[DIAG squad render] unit=${unitIdStr} figs=${modelIds.length} hidden=[${modelHidden.map((h) => (h ? 1 : 0)).join("")}] valid=[${modelValidFlags.map((v) => (v ? 1 : 0)).join("")}] hiddenSet={${[...movePreviewHiddenModelIds].join(",")}} pos=${modelPositions.map((p) => p.join("|")).join(" ")}`
+          );
+        }
 
         // Skip units that are being previewed elsewhere
         if (mode === "attackPreview" && attackPreview && unit.id === attackPreview.unitId) continue;
