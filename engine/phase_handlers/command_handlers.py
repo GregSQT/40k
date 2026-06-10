@@ -50,6 +50,7 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["units_advanced"] = set()
     game_state["advance_rolls"] = {}
     game_state["units_took_to_skies"] = set()
+    game_state["units_took_to_skies_charge"] = set()
     game_state["units_reacted_this_enemy_turn"] = set()
 
     game_state["reactive_macro_order_current_window"] = []

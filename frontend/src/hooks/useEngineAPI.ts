@@ -215,7 +215,8 @@ export interface APIGameState {
   units_charged: string[];
   units_attacked: string[];
   units_advanced?: string[]; // Units that have advanced this turn
-  units_took_to_skies?: string[]; // Units FLY ayant déclaré le vol ce tour (Règles 21.03)
+  units_took_to_skies?: string[]; // Units FLY ayant déclaré le vol en phase MOVE ce tour (Règles 21.03)
+  units_took_to_skies_charge?: string[]; // Units FLY ayant déclaré le vol en phase CHARGE ce tour (Règles 21.03)
   move_activation_pool: string[];
   shoot_activation_pool: string[];
   charge_activation_pool: string[];
@@ -532,6 +533,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   chargeMovePlanRef.current = chargeMovePlan;
   /** Pool (hexes "col,row") de la fig active = eligible[activeModelId]. */
   const chargeModelPoolRef = useRef<Set<string>>(new Set());
+  /** Distance de mouvement (sous-hex) de la fig active vers chaque ancre de son pool "col,row" →
+   * path réel au sol, distance directe en vol. Source du tooltip de charge par-figurine. */
+  const chargeModelDistancesRef = useRef<Map<string, number>>(new Map());
   /** Mask loops (polygone lissé monde) de la zone de landing de la fig active — même contrat que
    * ``squadMoveModelMaskLoopsRef`` pour le move per-fig. Rendu lissé au lieu de disques bruts. */
   const chargeModelMaskLoopsRef = useRef<number[][] | null>(null);
@@ -608,6 +612,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Ancres charge valides + zone violette (empreintes) — même usage que moveDestPoolRef pour l’icône sous le curseur. */
   const chargeDestPoolRef = useRef<Set<string>>(new Set());
   const chargeFootprintZoneRef = useRef<Set<string>>(new Set());
+  /** Distance de mouvement réelle (sous-hex) par ancre de charge "col,row" → respecte le pathfinding
+   * (détours autour des murs/figs au sol ; distance directe en vol déclaré). Source du tooltip charge. */
+  const chargeDestDistancesRef = useRef<Map<string, number>>(new Map());
 
   const syncChargePoolRefs = useCallback(
     (
@@ -632,6 +639,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const clearChargePoolRefs = useCallback(() => {
     chargeDestPoolRef.current = new Set();
     chargeFootprintZoneRef.current = new Set();
+    chargeDestDistancesRef.current = new Map();
   }, []);
 
   const [advanceWarningPopup, setAdvanceWarningPopup] = useState<{
@@ -2134,6 +2142,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               setChargeDestinations(anchorsNorm);
               setChargePreviewOverlayHexes(overlayNorm);
               syncChargePoolRefs(anchorsNorm, overlayNorm);
+              // Map distance réelle par ancre (sous-hex) pour le tooltip de charge (path au sol / direct en vol).
+              const distMap = new Map<string, number>();
+              const distRaw = (data.result as { charge_dest_distances?: unknown }).charge_dest_distances;
+              if (Array.isArray(distRaw)) {
+                for (const e of distRaw) {
+                  if (Array.isArray(e) && e.length >= 3) {
+                    distMap.set(`${Number(e[0])},${Number(e[1])}`, Number(e[2]));
+                  }
+                }
+              }
+              chargeDestDistancesRef.current = distMap;
               const refH = (data.result as { charge_reference_hex?: unknown }).charge_reference_hex;
               if (Array.isArray(refH) && refH.length >= 2) {
                 setChargeReferenceHex({ col: Number(refH[0]), row: Number(refH[1]) });
@@ -3662,23 +3681,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [executeAction, refreshSquadMovePlanValidity, handleSelectModelForMove]
   );
 
-  /** Bouton Take to the sky (phase move, unités FLY) : (dé)clare le vol (-2" + traversée, Règles 21.03). */
-  const handleTakeToSkies = useCallback(
-    async (unitId: number | string) => {
-      const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
-      await executeAction({ action: "take_to_skies", unitId: String(uid) });
-      // Toggle change le budget (-2") ET la traversée : re-valide le plan et reconstruit le pool
-      // de la figurine active, comme l'Advance.
-      const plan = squadMovePlanRef.current;
-      if (plan && plan.unitId === uid) {
-        await refreshSquadMovePlanValidity(uid, plan.models);
-        if (plan.activeModelId) {
-          await handleSelectModelForMove(plan.activeModelId);
-        }
-      }
-    },
-    [executeAction, refreshSquadMovePlanValidity, handleSelectModelForMove]
-  );
+  // handleTakeToSkies est défini plus bas (après refreshChargePlanState dont il dépend en phase charge).
 
   /** Bouton Stationary (phase move) : termine l'activation sans bouger (log WAIT backend). */
   const handleStationary = useCallback(
@@ -4767,6 +4770,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     (result: Record<string, unknown>, selectedModel: string | null) => {
       const eligibleModels = ((result.eligible_models ?? []) as unknown[]).map((m) => String(m));
       const poolArr = (result.pool ?? []) as Array<[number, number]>;
+      const poolDistArr = (result.pool_distances ?? []) as Array<[number, number, number]>;
       const maskLoopsRaw = result.footprint_mask_loops;
       const unplaced = ((result.unplaced ?? []) as unknown[]).map((m) => String(m));
       const currentPhase = (Number(result.current_phase) || 3) as 1 | 2 | 3;
@@ -4788,10 +4792,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               ? prev.activeModelId
               : null;
         const pool = new Set<string>();
+        const distMap = new Map<string, number>();
         if (active != null && active === selectedModel) {
           for (const [c, r] of poolArr) pool.add(`${Number(c)},${Number(r)}`);
+          for (const e of poolDistArr) {
+            if (Array.isArray(e) && e.length >= 3) {
+              distMap.set(`${Number(e[0])},${Number(e[1])}`, Number(e[2]));
+            }
+          }
         }
         chargeModelPoolRef.current = pool;
+        chargeModelDistancesRef.current = distMap;
         // Mask loops valides uniquement pour la fig active sélectionnée (le backend ne les calcule
         // que pour son pool). Sinon null → pas de rendu lissé fantôme d'une autre fig.
         chargeModelMaskLoopsRef.current =
@@ -4833,6 +4844,42 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       applyChargePlanState(result, selectedModel);
     },
     [postEngineQuery, applyChargePlanState]
+  );
+
+  /** Bouton Take to the sky (unités FLY) : (dé)clare le vol (-2" + traversée, Règles 21.03).
+   * Phase charge (plan par-fig actif) → re-calcule les pools ; phase move → re-valide le plan move. */
+  const handleTakeToSkies = useCallback(
+    async (unitId: number | string) => {
+      const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      const data = await executeAction({ action: "take_to_skies", unitId: String(uid) });
+      // Phase charge, plan par-fig actif (sécurité) : le toggle change budget (-2") + traversée → recalcul.
+      const chargePlan = chargeMovePlanRef.current;
+      if (chargePlan && chargePlan.unitId === uid) {
+        await refreshChargePlanState(uid, chargePlan.models, chargePlan.activeModelId);
+        return;
+      }
+      // Phase charge, étape sélection de cible : le backend renvoie les cibles éligibles re-bornées par
+      // la distance -2" (blinking_units). On force le surlignage (la logique needsNewTimer ne rafraîchit
+      // pas un ensemble qui rétrécit) et on purge les cibles pré-déclarées devenues hors portée.
+      if (data?.game_state?.phase === "charge") {
+        const res = data.result as Record<string, unknown> | undefined;
+        const blink = Array.isArray(res?.blinking_units)
+          ? (res.blinking_units as string[]).map((id) => parseInt(id, 10))
+          : [];
+        setBlinkingUnits((prev) => ({ ...prev, unitIds: blink }));
+        setChargePreviewTargetIds((prev) => prev.filter((id) => blink.includes(id)));
+        return;
+      }
+      // Phase move : re-valide le plan et reconstruit le pool de la figurine active, comme l'Advance.
+      const plan = squadMovePlanRef.current;
+      if (plan && plan.unitId === uid) {
+        await refreshSquadMovePlanValidity(uid, plan.models);
+        if (plan.activeModelId) {
+          await handleSelectModelForMove(plan.activeModelId);
+        }
+      }
+    },
+    [executeAction, refreshSquadMovePlanValidity, handleSelectModelForMove, refreshChargePlanState]
   );
 
   /** Entrée en mode chargeModelMove (escouade chargeuse multi-fig). Plan provisoire vide au départ. */
@@ -5228,6 +5275,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       : [];
   }, [gameState?.units_took_to_skies]);
 
+  const memoizedUnitsTookToSkiesCharge = useMemo((): number[] => {
+    return gameState?.units_took_to_skies_charge
+      ? gameState.units_took_to_skies_charge.map((id) => parseInt(id, 10))
+      : [];
+  }, [gameState?.units_took_to_skies_charge]);
+
   const memoizedDeploymentState = useMemo(() => {
     if (!gameState?.deployment_state) {
       return undefined;
@@ -5300,6 +5353,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       unitsFled: memoizedUnitsFled,
       unitsAdvanced: memoizedUnitsAdvanced,
       unitsTookToSkies: memoizedUnitsTookToSkies,
+      unitsTookToSkiesCharge: memoizedUnitsTookToSkiesCharge,
       targetPreview: null,
       currentTurn: gameState.turn,
       maxTurns: maxTurnsFromConfig as number,
@@ -5359,6 +5413,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     memoizedUnitsFled,
     memoizedUnitsAdvanced,
     memoizedUnitsTookToSkies,
+    memoizedUnitsTookToSkiesCharge,
     memoizedDeploymentState,
     maxTurnsFromConfig,
   ]);
@@ -5392,6 +5447,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       unitsFled: [],
       unitsAdvanced: [] as number[],
       unitsTookToSkies: [] as number[],
+      unitsTookToSkiesCharge: [] as number[],
       phase: null,
       gameState: null,
       onSelectUnit: () => {},
@@ -5412,6 +5468,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onCancelSquadMove: () => {},
       chargeMovePlan: null,
       chargeModelPoolRef,
+      chargeModelDistancesRef,
       chargeModelMaskLoopsRef,
       onSelectChargeModel: () => {},
       onMoveModelInChargePlan: () => {},
@@ -5465,6 +5522,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       footprintZoneRef,
       footprintMaskLoopsRef,
       chargeDestPoolRef,
+      chargeDestDistancesRef,
       chargeFootprintZoneRef,
       pendingMoveAfterShooting: false,
       activationPendingUnitId: null,
@@ -5529,6 +5587,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     unitsFled: memoizedUnitsFled,
     unitsAdvanced: memoizedUnitsAdvanced,
     unitsTookToSkies: memoizedUnitsTookToSkies,
+    unitsTookToSkiesCharge: memoizedUnitsTookToSkiesCharge,
     phase: gameState.phase as "deployment" | "move" | "shoot" | "charge" | "fight",
     // Expose fight_subphase for UnitRenderer click handling
     fightSubPhase: gameState.fight_subphase as
@@ -5559,6 +5618,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     // Charge par-figurine (V11 11.04, Slice G)
     chargeMovePlan,
     chargeModelPoolRef,
+    chargeModelDistancesRef,
     chargeModelMaskLoopsRef,
     onSelectChargeModel: handleSelectChargeModel,
     onMoveModelInChargePlan: handleMoveModelInChargePlan,
@@ -5610,6 +5670,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     moveDestPoolRef,
     footprintZoneRef,
     footprintMaskLoopsRef,
+    chargeDestDistancesRef,
     chargeDestPoolRef,
     chargeFootprintZoneRef,
     pendingMoveAfterShooting: pendingPreviewAction === "move_after_shooting",

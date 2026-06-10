@@ -446,6 +446,9 @@ type BoardProps = {
   } | null;
   /** Pool (hexes "col,row") de la fig de charge active = eligible[activeModelId]. */
   chargeModelPoolRef?: React.RefObject<Set<string>>;
+  /** Distance de mouvement (sous-hex) de la fig active vers chaque ancre de son pool "col,row" —
+   * path au sol / direct en vol. Source du tooltip de charge par-figurine. */
+  chargeModelDistancesRef?: React.RefObject<Map<string, number>>;
   /** Mask loops (polygone lissé monde) de la zone de landing de la fig de charge active. */
   chargeModelMaskLoopsRef?: React.RefObject<number[][] | null>;
   onSelectChargeModel?: (modelId: string) => void;
@@ -527,6 +530,9 @@ type BoardProps = {
   activationPendingUnitId?: number | null;
   /** Phase charge : ancres valides + zone violette (empreinte) pour l’icône sous le curseur. */
   chargeDestPoolRef?: React.RefObject<Set<string>>;
+  /** Distance de mouvement réelle (sous-hex) par ancre "col,row" — path au sol / direct en vol.
+   * Source du tooltip de charge (au lieu de la distance à vol d'oiseau, qui sous-estime les détours). */
+  chargeDestDistancesRef?: React.RefObject<Map<string, number>>;
   chargeFootprintZoneRef?: React.RefObject<Set<string>>;
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action callback
   onAdvance?: (unitId: number) => void;
@@ -780,6 +786,7 @@ export default function Board({
   onCancelSquadMove,
   chargeMovePlan = null,
   chargeModelPoolRef,
+  chargeModelDistancesRef,
   chargeModelMaskLoopsRef,
   onSelectChargeModel,
   onMoveModelInChargePlan,
@@ -834,6 +841,7 @@ export default function Board({
   pendingMoveAfterShooting = false,
   activationPendingUnitId = null,
   chargeDestPoolRef,
+  chargeDestDistancesRef,
   chargeFootprintZoneRef,
   onAdvance,
   onAdvanceMove,
@@ -2613,7 +2621,18 @@ export default function Board({
       }
       const previewIconX = container.position.x;
       const previewIconY = container.position.y;
-      const hexSteps = hexDistOff(startCol, startRow, iconCol, iconRow);
+      let hexSteps = hexDistOff(startCol, startRow, iconCol, iconRow);
+      // En charge, préférer la distance de mouvement RÉELLE (pathfinding du moteur) à la ligne droite :
+      // au sol, le détour autour d'un mur/figs compte (la ligne droite sous-estime) ; en vol déclaré,
+      // le moteur renvoie la distance directe. Clé = ancre snappée (iconCol,iconRow), dans le pool valide.
+      if (phase === "charge" && mode === "chargePreview") {
+        const pathDist = chargeDestDistancesRef?.current?.get(`${iconCol},${iconRow}`);
+        if (pathDist != null) hexSteps = pathDist;
+      } else if (phase === "charge" && mode === "chargeModelMove") {
+        // Plan par-figurine : distance réelle de la fig active vers l'ancre snappée (path au sol).
+        const pathDist = chargeModelDistancesRef?.current?.get(`${iconCol},${iconRow}`);
+        if (pathDist != null) hexSteps = pathDist;
+      }
       const stepsPerInch =
         (boardConfig as unknown as { inches_to_subhex?: number }).inches_to_subhex ||
         HEX_STEPS_PER_INCH_DISPLAY;
@@ -3022,6 +3041,10 @@ export default function Board({
     resolvedMoveDestPoolRef.current.size,
     resolvedMoveDestPoolRef.current,
     chargeDestPoolRef?.current,
+    chargeDestDistancesRef?.current?.get,
+    chargeDestDistancesRef?.current,
+    chargeModelDistancesRef?.current?.get,
+    chargeModelDistancesRef?.current,
     resolvedMoveDestPoolRef,
     footprintMaskLoopsRef,
     onStartMovePreview,

@@ -48,6 +48,54 @@ def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
     return shared_unit_has_rule_effect(unit, rule_id)
 
 
+def _charge_is_ai_unit(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """IA gym / PvE joueur 2 : pilotée par le modèle, jamais de déclaration humaine de vol."""
+    is_gym = bool(game_state.get("gym_training_mode", False))
+    is_pve = bool(game_state.get("pve_mode", False)) or bool(game_state.get("is_pve_mode", False))
+    return is_gym or (is_pve and int(require_key(unit, "player")) == 2)
+
+
+def _charge_fly_declared(game_state: Dict[str, Any], unit_id: Any) -> bool:
+    """True si le vol de charge (take to the skies) a été DÉCLARÉ pour cette unité ce tour."""
+    return str(unit_id) in game_state.get("units_took_to_skies_charge", set())
+
+
+def _charge_fly_active(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    unit_id: Any,
+    *,
+    for_eligibility: bool = False,
+) -> bool:
+    """Take to the skies en CHARGE (Règles 21.03) : la traversée FLY (murs + figurines + ignore
+    vertical) est active si l'unité a le keyword fly ET :
+    - IA (gym / PvE J2) → JAMAIS (comportement de charge IA inchangé, pas de régression training) ;
+    - humain, ``for_eligibility`` → toujours (l'éligibilité est généreuse : la charge est proposée
+      si une cible est atteignable par les airs, même avant déclaration) ;
+    - humain, mouvement réel → seulement si le vol a été déclaré (``units_took_to_skies_charge``).
+    Source unique partagée par les 4 BFS de charge et le pool d'éligibilité.
+    """
+    from .movement_handlers import _unit_has_keyword
+    if not _unit_has_keyword(unit, "fly"):
+        return False
+    if _charge_is_ai_unit(game_state, unit):
+        return False
+    if for_eligibility:
+        return True
+    return _charge_fly_declared(game_state, unit_id)
+
+
+def _charge_budget_subhex(game_state: Dict[str, Any], unit_id: Any, charge_roll_inches: int) -> int:
+    """Budget de mouvement de charge en sous-hex = jet 2D6 (pouces) × ``inches_to_subhex``, moins
+    2" (Règles 21.03) si le vol a été DÉCLARÉ pour cette unité. Source unique des 4 sites de calcul
+    de distance de charge. Le malus ne s'applique qu'à la déclaration humaine (l'IA ne déclare pas)."""
+    ish = int(game_state["inches_to_subhex"])
+    budget = int(charge_roll_inches) * ish
+    if _charge_fly_declared(game_state, unit_id):
+        budget -= 2 * ish
+    return max(0, budget)
+
+
 def _get_source_unit_rule_id_for_effect(unit: Dict[str, Any], effect_rule_id: str) -> Optional[str]:
     """Return source UNIT_RULES.ruleId that grants/owns the effect; None if absent."""
     return shared_get_source_unit_rule_id_for_effect(unit, effect_rule_id)
@@ -389,17 +437,50 @@ def _charge_anchor_is_socle_a_socle_with_target(
         return False
 
 
+def _charge_anchor_within_1_of_target(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    target: Dict[str, Any],
+    anchor_col: int,
+    anchor_row: int,
+) -> bool:
+    """True si, à cette ancre, l'empreinte du chargeur finit à <= 1" (within_1_zone) de celle de la
+    cible, sans chevauchement. Même définition que le palier ``within_1`` du plan par-figurine
+    (``unit_entries_within_engagement_zone`` à ``within_1_zone``) — source unique du « <=1" ». """
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+
+    units_cache = require_key(game_state, "units_cache")
+    te = units_cache.get(str(require_key(target, "id")))
+    if not te:
+        return False
+    within_1_zone = int(game_state["inches_to_subhex"])  # 1" en sous-hex
+    target_fp = set(te.get("occupied_hexes") or {(int(te["col"]), int(te["row"]))})
+    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
+    candidate_fp = _candidate_footprint_charge(int(anchor_col), int(anchor_row), unit, game_state, fp_pair)
+    if candidate_fp & target_fp:
+        return False
+    synth = _charge_synthetic_charger_cache_entry(
+        game_state, unit, int(anchor_col), int(anchor_row), candidate_fp
+    )
+    return unit_entries_within_engagement_zone(synth, te, within_1_zone)
+
+
 def _charge_pool_must_socle_a_socle_if_possible(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
     targets: Any,
     valid_pool: List[Tuple[int, int]],
 ) -> List[Tuple[int, int]]:
-    """Si ≥1 ancre « socle à socle » avec **au moins une** cible déclarée existe, ne garder que celles-ci.
+    """Applique la priorité 11.04 (WHILE MOVING) au pool mono-figurine. « au moins une » cible
+    suffit (l'engagement de toutes est garanti par le pool). ``targets`` : cible unique (dict, legacy)
+    ou liste de cibles déclarées (multi).
 
-    V11 (WHILE MOVING) : « each model that can end engaged with **one or more** charge targets must
-    do so » — donc « au moins une », pas « toutes » (l'engagement de toutes est garanti par le pool).
-    ``targets`` accepte une cible unique (dict, legacy) ou une liste de cibles déclarées (multi).
+    Trois paliers, du plus serré au plus large (chacun « si possible ») :
+      1. socle à socle (contact) avec >=1 cible → ne garder que ces ancres ;
+      2. sinon, <=1" (within_1) d'>=1 cible → ne garder que ces ancres (puce « within 1" must do so ») ;
+      3. sinon, tout le pool engageant (<= EZ).
+    Sans le palier 2, le pool retombait directement sur « tout l'engagé (<=2") » dès que le contact
+    était bloqué, laissant finir à 1"-2" alors qu'un placement <=1" était obligatoire.
     """
     target_list = [targets] if isinstance(targets, dict) else list(targets)
     touching: List[Tuple[int, int]] = []
@@ -409,7 +490,16 @@ def _charge_pool_must_socle_a_socle_if_possible(
             for t in target_list
         ):
             touching.append((int(ac), int(ar)))
-    return touching if touching else list(valid_pool)
+    if touching:
+        return touching
+    within_1: List[Tuple[int, int]] = []
+    for ac, ar in valid_pool:
+        if any(
+            _charge_anchor_within_1_of_target(game_state, unit, t, int(ac), int(ar))
+            for t in target_list
+        ):
+            within_1.append((int(ac), int(ar)))
+    return within_1 if within_1 else list(valid_pool)
 
 
 def _charge_bfs_max_distance(
@@ -1182,6 +1272,10 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         else:
             return False, {"error": "invalid_charge_action", "action": action}
 
+    elif action_type == "take_to_skies":
+        # Règles 21.03 : (dé)clare le vol de charge de l'unité FLY active (-2" + traversée murs/figurines).
+        return charge_set_fly_mode_handler(game_state, unit_id, action)
+
     elif action_type == "commit_charge_plan":
         # V11 PvP : commit du mouvement de charge par-figurine (plan 3 phases).
         return charge_commit_move_plan_handler(game_state, unit_id, action)
@@ -1505,12 +1599,16 @@ def charge_build_model_destinations_pool(
         same_squad_occupied |= sib_fp
 
     blocked = set(wall_hexes) | enemy_occupied | other_occupied | same_squad_occupied
+    # Take to the skies (21.03) : si le vol est actif, la traversée ignore murs + figs ; seul le
+    # placement final (``cand_fp & blocked``) reste interdit d'overlap. Sinon, traversée sol classique.
+    fly_active = _charge_fly_active(game_state, unit, squad_id)
+    traverse_blocked = set() if fly_active else blocked
 
     start_col, start_row = int(model["col"]), int(model["row"])
     start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_offset_pair)
     start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
 
-    # BFS centre-à-centre dans le budget (la charge ne traverse ni mur ni fig).
+    # BFS centre-à-centre dans le budget (la charge ne traverse ni mur ni fig, sauf vol actif).
     visited: Set[Tuple[int, int]] = {(start_col, start_row)}
     reachable: List[Tuple[int, int]] = []
     queue: deque = deque([(start_col, start_row, 0)])
@@ -1522,7 +1620,7 @@ def charge_build_model_destinations_pool(
             if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
                 continue
             cell = (nc, nr)
-            if cell in visited or cell in blocked:
+            if cell in visited or cell in traverse_blocked:
                 continue
             visited.add(cell)
             queue.append((nc, nr, d + 1))
@@ -1585,6 +1683,7 @@ def charge_model_plan_state(
         "current_phase": 3,
         "eligible_models": [],
         "pool": [],
+        "pool_distances": [],
         "footprint_mask_loops": [],
         "unplaced": [],
         "can_validate": False,
@@ -1600,7 +1699,8 @@ def charge_model_plan_state(
         return empty
     _stored = game_state["charge_target_selections"][str(unit_id)]
     target_ids = list(_stored) if isinstance(_stored, (list, tuple)) else [_stored]
-    roll_subhex = int(game_state["charge_roll_values"][str(unit_id)]) * int(game_state["inches_to_subhex"])
+    # Take to the skies (21.03) : -2" sur la distance max de charge si le vol est déclaré.
+    roll_subhex = _charge_budget_subhex(game_state, unit_id, game_state["charge_roll_values"][str(unit_id)])
 
     from collections import deque
     from engine.hex_utils import min_distance_between_sets
@@ -1656,10 +1756,19 @@ def charge_model_plan_state(
             if sib else set()
         )
     blocked_static = set(wall_hexes) | enemy_occupied | other_occupied | placed_fp
+    # Take to the skies (21.03) : vol actif → la reachability BFS et le champ de distance ignorent
+    # murs + figs (traversée libre) ; le placement final (``cand_fp & blocked_static``, collision
+    # ``others``) reste interdit d'overlap.
+    fly_active = _charge_fly_active(game_state, unit, unit_id)
 
-    def _bfs_reach(start_col: int, start_row: int, blocked: Set[Tuple[int, int]]) -> List[Tuple[int, int]]:
+    def _bfs_reach(
+        start_col: int, start_row: int, blocked: Set[Tuple[int, int]]
+    ) -> Tuple[List[Tuple[int, int]], Dict[Tuple[int, int], int]]:
+        """Retourne (reach, dist) : hexes atteignables dans le budget + distance de mouvement (profondeur
+        BFS, sous-hex) par hex. Au sol = path (détours autour murs/figs) ; en vol = distance directe."""
         visited: Set[Tuple[int, int]] = {(start_col, start_row)}
         reach: List[Tuple[int, int]] = []
+        dist: Dict[Tuple[int, int], int] = {(start_col, start_row): 0}
         queue: deque = deque([(start_col, start_row, 0)])
         while queue:
             c, r, d = queue.popleft()
@@ -1672,9 +1781,10 @@ def charge_model_plan_state(
                 if cell in visited or cell in blocked:
                     continue
                 visited.add(cell)
+                dist[cell] = d + 1
                 queue.append((nc, nr, d + 1))
                 reach.append(cell)
-        return reach
+        return reach, dist
 
     # Marge (sous-hex) autour des unités où l'on lance le check d'engagement PRÉCIS : couvre l'écart
     # entre distance d'empreinte (hex) et clairance euclidienne (socles ronds). Au-delà = jamais engagé.
@@ -1699,7 +1809,7 @@ def charge_model_plan_state(
                     if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
                         continue
                     cell = (nc, nr)
-                    if cell in dist or cell in wall_hexes:
+                    if cell in dist or (not fly_active and cell in wall_hexes):
                         continue
                     dist[cell] = step
                     nxt.append(cell)
@@ -1709,6 +1819,7 @@ def charge_model_plan_state(
     can_classify = bool(target_fps)
     # 1) Reachability BFS par fig (cheap) + champs de distance (cibles / non-cibles), calculés 1×.
     reach_by_model: Dict[str, List[Tuple[int, int]]] = {}
+    dist_by_model: Dict[str, Dict[Tuple[int, int], int]] = {}
     start_min_by_model: Dict[str, int] = {}
     other_origins_by_model: Dict[str, Set[Tuple[int, int]]] = {}
     dist_tgt: Dict[Tuple[int, int], int] = {}
@@ -1725,7 +1836,9 @@ def charge_model_plan_state(
                 if m2 != m:
                     other_origins |= origin_fp[m2]
             other_origins_by_model[m] = other_origins
-            reach_by_model[m] = _bfs_reach(sc, sr, blocked_static | other_origins)
+            reach_by_model[m], dist_by_model[m] = _bfs_reach(
+                sc, sr, set() if fly_active else (blocked_static | other_origins)
+            )
         tgt_union: Set[Tuple[int, int]] = set()
         for tfp in target_fps:
             tgt_union |= tfp
@@ -1830,6 +1943,15 @@ def charge_model_plan_state(
         if selected_model is not None and str(selected_model) in reach_by_model
         else []
     )
+    # Distance de mouvement (sous-hex) de la fig sélectionnée vers chaque ancre du pool : profondeur
+    # BFS = path réel au sol (détours murs/figs), distance directe en vol. Source du tooltip charge
+    # par-figurine (au lieu de la ligne droite qui sous-estime les détours).
+    _sel_dist = dist_by_model.get(str(selected_model), {}) if selected_model is not None else {}
+    pool_distances: List[List[int]] = [
+        [int(c), int(r), int(_sel_dist[(int(c), int(r))])]
+        for (c, r) in pool
+        if (int(c), int(r)) in _sel_dist
+    ]
 
     # Empreinte lissée de la zone de landing (même rendu que le move per-fig) : union des empreintes
     # (region[ancre]["fp"]) des ancres du pool → boucles monde via le helper move. Calculé seulement
@@ -1875,6 +1997,7 @@ def charge_model_plan_state(
         "current_phase": phase,
         "eligible_models": eligible_models,
         "pool": pool,
+        "pool_distances": pool_distances,
         "footprint_mask_loops": footprint_mask_loops,
         "unplaced": unplaced,
         "can_validate": can_validate,
@@ -2067,7 +2190,8 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
             import random
             charge_roll = random.randint(1, 6) + random.randint(1, 6)
             game_state["charge_roll_values"][unit_id] = charge_roll
-        max_distance_subhex = int(charge_roll * game_state["inches_to_subhex"])
+        # Take to the skies (21.03) : -2" sur la distance max si le vol est déclaré (borne les cibles éligibles).
+        max_distance_subhex = _charge_budget_subhex(game_state, unit_id, charge_roll)
 
     # Build valid targets : bornées par la distance jetée en roll-first, sinon par charge_max_distance.
     _t_bvt0 = time.perf_counter() if _perf else None
@@ -2605,6 +2729,11 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     if not unit:
         return []
 
+    # Take to the skies (21.03) : vol actif en charge → traversée murs + figs. En éligibilité
+    # (early_exit) l'humain FLY est généreusement traité comme volant ; sinon, seulement si déclaré.
+    # L'IA garde la charge sol (pas de régression training).
+    _fly = _charge_fly_active(game_state, unit, unit_id, for_eligibility=early_exit_if_valid)
+
     units_cache = require_key(game_state, "units_cache")
 
     charge_range = charge_roll  # 2d6 result
@@ -2656,6 +2785,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         unit_id_str,
         int(charge_range),
         target_id if target_id else None,
+        bool(_fly),
         _CHARGE_DEST_BFS_CACHE_SCHEMA,
     )
     if (
@@ -2756,7 +2886,8 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         return []
 
     if (
-        not _charge_skip_hex_lb_prune_round_round_engagement(unit, indexed_enemy_engagement)
+        not _fly
+        and not _charge_skip_hex_lb_prune_round_round_engagement(unit, indexed_enemy_engagement)
         and _charge_impossible_by_primary_to_enemy_hex_lower_bound(
             game_state,
             unit_id_str=unit_id_str,
@@ -2787,7 +2918,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     # NOTE: _charge_reverse_goal_bfs_for_eligibility is disabled for scaled boards (inches_to_subhex > 1)
     # because its intermediate footprint checks are too restrictive for large footprints — the forward BFS
     # single-hex traversal is correct and supports early_exit_if_valid natively.
-    if early_exit_if_valid and tid_arg is None and int(game_state.get("inches_to_subhex", 1)) <= 1:
+    if not _fly and early_exit_if_valid and tid_arg is None and int(game_state.get("inches_to_subhex", 1)) <= 1:
         reverse_result = _charge_reverse_goal_bfs_for_eligibility(
             game_state,
             unit,
@@ -2815,6 +2946,78 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     _bfs_board_cols = int(require_key(game_state, "board_cols"))
     _bfs_board_rows = int(require_key(game_state, "board_rows"))
     _bfs_wall_hexes: Set[Tuple[int, int]] = game_state.get("wall_hexes", set())
+
+    # Take to the skies (21.03) : la charge FLY traverse murs + figs → reachability = disque cube de
+    # rayon ``bfs_max_distance`` (traversée libre, comme la phase move). Seuls le placement final
+    # (empreinte dans le plateau, aucun overlap murs/figurines) et l'engagement classent les
+    # destinations valides. Court-circuite le step-BFS sol et ses prunes (déjà sautées plus haut).
+    if _fly:
+        valid_destinations = []
+        _R = int(bfs_max_distance)
+        _sx = start_col
+        _sz = start_row - ((start_col - (start_col & 1)) >> 1)
+        _fly_short = False
+        for _dx in range(-_R, _R + 1):
+            if _fly_short:
+                break
+            _dy_lo = max(-_R, -_R - _dx)
+            _dy_hi = min(_R, _R - _dx) + 1
+            for _dy in range(_dy_lo, _dy_hi):
+                nc = _sx + _dx
+                nr = (_sz - _dx - _dy) + ((nc - (nc & 1)) >> 1)
+                if nc < 0 or nr < 0 or nc >= _bfs_board_cols or nr >= _bfs_board_rows:
+                    continue
+                neighbor_pos = (nc, nr)
+                if neighbor_pos == start_pos:
+                    continue
+                candidate_fp = _candidate_footprint_charge(nc, nr, unit, game_state, fp_offset_pair)
+                if any(not (0 <= x < _bfs_board_cols and 0 <= y < _bfs_board_rows) for (x, y) in candidate_fp):
+                    continue
+                if (_bfs_wall_hexes and (candidate_fp & _bfs_wall_hexes)) or (
+                    occupied_positions and (candidate_fp & occupied_positions)
+                ):
+                    continue
+                synth = _charge_synthetic_charger_cache_entry(
+                    game_state, unit, nc, nr, candidate_fp
+                )
+                is_adjacent_to_enemy = False
+                hex_overlaps_enemy = False
+                _cur_engaging: Optional[Set[str]] = set() if _track_engages else None
+                for _eid, enemy_entry in indexed_enemy_engagement:
+                    ec, er = int(enemy_entry["col"]), int(enemy_entry["row"])
+                    enemy_fp = enemy_entry.get("occupied_hexes", {(ec, er)})
+                    if candidate_fp & enemy_fp:
+                        hex_overlaps_enemy = True
+                        break
+                    if unit_entries_within_engagement_zone(synth, enemy_entry, engagement_zone):
+                        is_adjacent_to_enemy = True
+                        if _cur_engaging is not None:
+                            _cur_engaging.add(str(_eid))
+                        if tid_arg:
+                            break
+                if is_adjacent_to_enemy and not hex_overlaps_enemy:
+                    valid_destinations.append(neighbor_pos)
+                    if _track_engages and _cur_engaging is not None:
+                        pos_dist_engage[neighbor_pos] = (
+                            _hex_distance(start_col, start_row, nc, nr), frozenset(_cur_engaging)
+                        )
+                    if early_exit_if_valid:
+                        _fly_short = True
+                        break
+        if _multi_declared is not None:
+            valid_destinations = [
+                p for p in valid_destinations
+                if pos_dist_engage.get(p, (0, frozenset()))[1] == _multi_declared
+            ]
+        game_state["valid_charge_destinations_pool"] = valid_destinations
+        # Distance de mouvement par ancre (sous-hex) : ici disque vol → distance directe (le vol
+        # traverse), cohérente avec l'affichage. Source unique pour le tooltip de charge.
+        game_state["valid_charge_dest_distances"] = {
+            p: pos_dist_engage[p][0] for p in valid_destinations if p in pos_dist_engage
+        }
+        if charge_range == CHARGE_MAX_DISTANCE_SUBHEX and not early_exit_if_valid and tid_arg is None and _multi_declared is None:
+            cache[cache_key] = (list(valid_destinations), pos_dist_engage)
+        return valid_destinations
     # Bounding box of footprint offsets for fast OOB detection (even/odd column variants)
     _fp_bbox_e: Optional[Tuple[int, int, int, int]] = None
     _fp_bbox_o: Optional[Tuple[int, int, int, int]] = None
@@ -3014,6 +3217,11 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         ]
 
     game_state["valid_charge_destinations_pool"] = valid_destinations
+    # Distance de mouvement par ancre (sous-hex) : step-BFS sol → profondeur de chemin (respecte
+    # murs + figs), exactement la distance réelle de la charge. Source unique pour le tooltip.
+    game_state["valid_charge_dest_distances"] = {
+        p: pos_dist_engage[p][0] for p in valid_destinations if p in pos_dist_engage
+    }
     if charge_range == CHARGE_MAX_DISTANCE_SUBHEX and not early_exit_if_valid and tid_arg is None and _multi_declared is None:
         cache[cache_key] = (list(valid_destinations), pos_dist_engage)
 
@@ -3254,7 +3462,8 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         charge_roll = random.randint(1, 6) + random.randint(1, 6)
         game_state["charge_roll_values"][unit_id] = charge_roll
     _charge_scale = game_state["inches_to_subhex"]
-    charge_roll_subhex = charge_roll * _charge_scale
+    # Take to the skies (21.03) : -2" sur la distance max de charge si le vol est déclaré.
+    charge_roll_subhex = _charge_budget_subhex(game_state, unit_id, charge_roll)
     # Store the declared target LIST for destination selection (V11 multi-cibles).
     if "charge_target_selections" not in game_state:
         game_state["charge_target_selections"] = {}
@@ -3408,6 +3617,16 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         )
         display_hexes = [[int(c), int(r)] for (c, r) in display_union]
 
+        # Distance de mouvement réelle par ancre (sous-hex), depuis le BFS de charge : profondeur de
+        # chemin au sol (respecte murs/figs), distance directe en vol déclaré. Sert au tooltip pour
+        # afficher la vraie distance de charge au lieu de la ligne droite (qui sous-estime les détours).
+        _dist_map = game_state.get("valid_charge_dest_distances", {})
+        charge_dest_distances = [
+            [int(c), int(r), int(_dist_map[(c, r)])]
+            for (c, r) in valid_pool
+            if (c, r) in _dist_map
+        ]
+
         # Human players: return waiting_for_player for destination selection
         return True, {
             "action": "charge_target_selected",
@@ -3419,6 +3638,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
             # l’UI doit l’utiliser pour la règle / tooltip ; ne pas le recalculer depuis units_cache.
             "charge_reference_hex": [charge_reference_hex[0], charge_reference_hex[1]],
             "valid_destinations": valid_pool,
+            "charge_dest_distances": charge_dest_distances,
             "charge_preview_display_hexes": display_hexes,
             "preview_data": preview_data,
             "clear_blinking_gentle": True,  # Stop blinking when target is selected
@@ -3582,13 +3802,17 @@ def _charge_model_pos_is_closer(
                     int(sib["col"]), int(sib["row"]), unit, game_state, fp_pair
                 )
     blocked = set(wall_hexes) | enemy_occupied | other_occupied | same_squad_occupied
+    # Take to the skies (21.03) : vol actif → traversée libre (murs + figs ignorés) ; placement final
+    # (``cand_fp & blocked``) reste interdit d'overlap.
+    fly_active = _charge_fly_active(game_state, unit, squad_id)
+    traverse_blocked = set() if fly_active else blocked
 
     start_col, start_row = int(model["col"]), int(model["row"])
     start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_pair)
     start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
     dest = (int(dest_c), int(dest_r))
 
-    # Reachability BFS (centre-à-centre, sans traverser mur/fig) avec early-exit sur dest.
+    # Reachability BFS (centre-à-centre, sans traverser mur/fig sauf vol actif) avec early-exit sur dest.
     if dest != (start_col, start_row):
         visited: Set[Tuple[int, int]] = {(start_col, start_row)}
         queue: deque = deque([(start_col, start_row, 0)])
@@ -3601,7 +3825,7 @@ def _charge_model_pos_is_closer(
                 if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
                     continue
                 cell = (nc, nr)
-                if cell in visited or cell in blocked:
+                if cell in visited or cell in traverse_blocked:
                     continue
                 if cell == dest:
                     found = True
@@ -3659,7 +3883,8 @@ def charge_preview_move_plan(
     roll = game_state["charge_roll_values"].get(str(squad_id))
     if roll is None:
         return empty
-    roll_subhex = int(roll) * int(game_state["inches_to_subhex"])
+    # Take to the skies (21.03) : -2" sur la distance max de charge si le vol est déclaré.
+    roll_subhex = _charge_budget_subhex(game_state, squad_id, roll)
 
     # 1) Légalité per-fig = appartenance au pool Slice E (budget + traversée + closer + no-non-cible),
     #    les autres figs du plan servant de positions provisoires (collision intra-squad).
@@ -3718,6 +3943,70 @@ def charge_preview_move_plan(
         "can_validate": can_validate,
         "engaged_all": engaged_all,
         "missing_targets": missing,
+    }
+
+
+def charge_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    """Take to the skies en CHARGE (Règles 21.03) : (dé)clare le vol de l'unité FLY active.
+
+    Toggle : ajoute/retire l'escouade de ``units_took_to_skies_charge`` (set DÉDIÉ à la charge,
+    distinct de la phase move). Effet lu par ``_charge_budget_subhex`` (-2") et ``_charge_fly_active``
+    (traversée murs/figurines) : pools de cibles, BFS par-figurine et validation au commit. Réversible
+    tant que la charge n'est pas commit. Déclaration par-déplacement, faite avant de bouger l'unité.
+
+    Refresh état-complet selon l'étape : cibles déjà déclarées → recompute du plan par-figurine ;
+    sinon → preview des cibles éligibles (re-bornées par la distance -2").
+    """
+    unit = get_unit_by_id(game_state, unit_id)
+    if not unit:
+        return False, {"error": "unit_not_found", "unit_id": unit_id}
+    from .movement_handlers import _unit_has_keyword
+    if not _unit_has_keyword(unit, "fly"):
+        return False, {"error": "unit_cannot_fly", "unitId": unit["id"]}
+
+    tts = game_state.setdefault("units_took_to_skies_charge", set())
+    uid = str(unit_id)
+    if uid in tts:
+        tts.discard(uid)
+        declared = False
+    else:
+        tts.add(uid)
+        declared = True
+
+    # Cibles déjà déclarées → le toggle recompute le plan par-figurine au nouveau budget/traversée.
+    if "charge_target_selections" in game_state and uid in game_state["charge_target_selections"]:
+        prov: Dict[str, Tuple[int, int]] = {}
+        for entry in (action.get("plan") or []):
+            prov[str(entry[0])] = (int(entry[1]), int(entry[2]))
+        sel = action.get("selected_model")
+        state = charge_model_plan_state(
+            game_state, unit_id, prov, selected_model=(str(sel) if sel is not None else None)
+        )
+        return True, {
+            "action": "charge_fly_mode_set",
+            "unitId": unit["id"],
+            "took_to_skies": declared,
+            **state,
+        }
+
+    # Sinon (avant sélection de cible) → re-borne les cibles éligibles au budget -2", SANS l'effet de
+    # bord d'échec de ``charge_unit_execution_loop`` (qui consommerait l'unité si plus aucune cible
+    # n'est atteignable). Le toggle reste réversible : zéro cible = liste vide, l'unité reste active.
+    charge_roll = game_state.get("charge_roll_values", {}).get(unit_id)
+    max_distance_subhex = (
+        _charge_budget_subhex(game_state, unit_id, charge_roll) if charge_roll is not None else None
+    )
+    valid_targets = charge_build_valid_targets(game_state, unit_id, max_distance=max_distance_subhex)
+    target_ids_blink = [str(t["id"]) for t in valid_targets]
+    return True, {
+        "action": "charge_fly_mode_set",
+        "unitId": unit["id"],
+        "took_to_skies": declared,
+        "charge_roll": charge_roll,
+        "valid_targets": valid_targets,
+        "waiting_for_player": True,
+        "blinking_units": target_ids_blink,
+        "start_blinking": True,
     }
 
 

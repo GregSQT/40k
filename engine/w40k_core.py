@@ -981,6 +981,7 @@ class W40KEngine(gym.Env):
             "units_advanced": set(),
             "advance_rolls": {},
             "units_took_to_skies": set(),
+            "units_took_to_skies_charge": set(),
             "units_reacted_this_enemy_turn": set(),
             "reaction_window_active": False,
             "_unit_move_version": 0,

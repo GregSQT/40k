@@ -3047,6 +3047,44 @@ export const BoardWithAPI: React.FC = () => {
               {(apiProps.chargePreviewTargetIds?.length ?? 0) > 1 ? "s" : ""} déclarée
               {(apiProps.chargePreviewTargetIds?.length ?? 0) > 1 ? "s" : ""}
             </span>
+            {/* To the sky (charge, unités FLY) : -2" sur le jet + traversée murs/figurines (Règles 21.03).
+                Déclaré AVANT le choix de cible → re-borne dynamiquement les cibles éligibles. */}
+            {(() => {
+              const flyUnitId = apiProps.selectedUnitId ?? null;
+              if (flyUnitId === null) return null;
+              const flyUnit = (apiProps.gameState?.units ?? []).find((u) => u.id === flyUnitId);
+              const canFly = !!flyUnit?.UNIT_KEYWORDS?.some(
+                (k) => k.keywordId?.toLowerCase() === "fly"
+              );
+              if (!canFly) return null;
+              const tookToSkies = (apiProps.unitsTookToSkiesCharge ?? []).includes(flyUnitId);
+              return (
+                <button
+                  type="button"
+                  key="charge-to-the-sky"
+                  onClick={() => {
+                    if (!isGameOver) apiProps.onTakeToSkies?.(flyUnitId);
+                  }}
+                  style={{
+                    border: "1px solid rgba(0,0,0,0.35)",
+                    borderRadius: 6,
+                    color: "#fff",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    padding: "8px 14px",
+                    width: 130,
+                    textAlign: "center",
+                    marginLeft: "auto",
+                    background: tookToSkies ? "#0ea5e9" : "#38bdf8",
+                    boxShadow: tookToSkies ? "inset 0 4px 7px rgba(0,0,0,0.55)" : "0 6px 0 #0369a1",
+                    transform: tookToSkies ? "translateY(5px)" : "translateY(0)",
+                    cursor: "pointer",
+                  }}
+                >
+                  To the sky (-2)
+                </button>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -3949,6 +3987,7 @@ export const BoardWithAPI: React.FC = () => {
             onCancelSquadMove={isGameOver ? () => {} : apiProps.onCancelSquadMove}
             chargeMovePlan={apiProps.chargeMovePlan}
             chargeModelPoolRef={apiProps.chargeModelPoolRef}
+            chargeModelDistancesRef={apiProps.chargeModelDistancesRef}
             chargeModelMaskLoopsRef={apiProps.chargeModelMaskLoopsRef}
             onSelectChargeModel={isGameOver ? () => {} : apiProps.onSelectChargeModel}
             onMoveModelInChargePlan={isGameOver ? () => {} : apiProps.onMoveModelInChargePlan}
@@ -4030,6 +4069,7 @@ export const BoardWithAPI: React.FC = () => {
             footprintZoneRef={apiProps.footprintZoneRef}
             footprintMaskLoopsRef={apiProps.footprintMaskLoopsRef}
             chargeDestPoolRef={apiProps.chargeDestPoolRef}
+            chargeDestDistancesRef={apiProps.chargeDestDistancesRef}
             chargeFootprintZoneRef={apiProps.chargeFootprintZoneRef}
             onAdvance={isGameOver ? () => {} : apiProps.onAdvance}
             onAdvanceMove={isGameOver ? () => {} : apiProps.onAdvanceMove}
