@@ -199,7 +199,6 @@ export function computeDrawBoardPartialRedrawFingerprint(
     selectedUnitBaseSize,
     selectedUnitAnchor,
     movePreviewFootprintMaskLoops = null,
-    chargeModelMaskLoops = null,
     chargeEngagementHalo,
     fightEngagementRing,
   } = options || {};

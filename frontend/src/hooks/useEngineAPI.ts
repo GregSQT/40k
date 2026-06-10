@@ -1201,6 +1201,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   }, []);
 
   // Execute action via API
+  // biome-ignore lint/correctness/useExhaustiveDependencies: handleStartChargeModelMove and readSquadModelPositions are declared later in the file — adding them to deps would cause noInvalidUseBeforeDeclaration
   const executeAction = useCallback(
     async (action: Record<string, unknown>) => {
       logClientDebugConsoleNotifyIfEnabled();
@@ -4846,7 +4847,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleSelectChargeModel = useCallback(
     (modelId: string) => {
       const plan = chargeMovePlanRef.current;
-      if (!plan || !plan.eligibleModels.includes(modelId)) return; // non éligible → ignore
+      if (!plan?.eligibleModels.includes(modelId)) return; // non éligible → ignore
       chargeModelPoolRef.current = new Set();
       chargeModelMaskLoopsRef.current = null;
       setChargeMovePlan((prev) => (prev ? { ...prev, activeModelId: modelId } : prev));
@@ -4876,7 +4877,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleUnplaceChargeModel = useCallback(
     (modelId: string) => {
       setChargeMovePlan((prev) => {
-        if (!prev || !prev.models[modelId]) return prev;
+        if (!prev?.models[modelId]) return prev;
         const models = { ...prev.models };
         delete models[modelId];
         // Re-sélectionne la fig dé-posée (selected) → sa zone réapparaît directement.
@@ -4890,7 +4891,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Bouton Charger : commit atomique du plan complet (commit_charge_plan). */
   const handleCommitChargePlan = useCallback(async () => {
     const plan = chargeMovePlanRef.current;
-    if (!plan || !plan.canValidate) return;
+    if (!plan?.canValidate) return;
     const planArr = Object.entries(plan.models).map(([mid, p]) => [mid, p.col, p.row]);
     try {
       await executeAction({

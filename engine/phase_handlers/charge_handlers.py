@@ -1488,8 +1488,8 @@ def charge_build_model_destinations_pool(
 
     # Coéquipières : collision (le plan provisoire override les figs déjà posées).
     same_squad_occupied: Set[Tuple[int, int]] = set()
-    squad_models = game_state.get("squad_models", {})
-    for mid in squad_models.get(squad_id, []):
+    squad_models = require_key(game_state, "squad_models")
+    for mid in require_key(squad_models, squad_id):
         if str(mid) == str(model_id):
             continue
         if provisional_plan and str(mid) in provisional_plan:
@@ -1594,9 +1594,9 @@ def charge_model_plan_state(
     unit = get_unit_by_id(game_state, str(unit_id))
     if not unit:
         return empty
-    if str(unit_id) not in game_state.get("charge_target_selections", {}):
+    if "charge_target_selections" not in game_state or str(unit_id) not in game_state["charge_target_selections"]:
         return empty
-    if str(unit_id) not in game_state.get("charge_roll_values", {}):
+    if "charge_roll_values" not in game_state or str(unit_id) not in game_state["charge_roll_values"]:
         return empty
     _stored = game_state["charge_target_selections"][str(unit_id)]
     target_ids = list(_stored) if isinstance(_stored, (list, tuple)) else [_stored]
@@ -1610,7 +1610,7 @@ def charge_model_plan_state(
     squad_models = require_key(game_state, "squad_models")
     models_cache = require_key(game_state, "models_cache")
     units_cache = require_key(game_state, "units_cache")
-    alive = [m for m in squad_models.get(str(unit_id), []) if m in models_cache]
+    alive = [m for m in require_key(squad_models, str(unit_id)) if m in models_cache]
     placed = {str(k) for k in provisional_plan}
     unplaced = [str(m) for m in alive if str(m) not in placed]
 
@@ -1849,7 +1849,7 @@ def charge_model_plan_state(
 
     can_validate = False
     if not unplaced and alive:
-        full_plan = [[str(m), int(provisional_plan[m][0]), int(provisional_plan[m][1])] for m in alive]
+        full_plan = [(str(m), int(provisional_plan[m][0]), int(provisional_plan[m][1])) for m in alive]
         can_validate = charge_preview_move_plan(game_state, str(unit_id), full_plan, target_ids)["can_validate"]
 
     # Satisfaction par cible (voile UI) : une cible-UNITÉ est ENGAGÉE dès qu'≥1 fig POSÉE est à
@@ -3568,7 +3568,8 @@ def _charge_model_pos_is_closer(
 
     fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
     same_squad_occupied: Set[Tuple[int, int]] = set()
-    for mid in game_state.get("squad_models", {}).get(squad_id, []):
+    squad_models = require_key(game_state, "squad_models")
+    for mid in require_key(squad_models, squad_id):
         if str(mid) == str(model_id):
             continue
         if provisional_plan and str(mid) in provisional_plan:
@@ -3755,7 +3756,7 @@ def charge_commit_move_plan_handler(
     # Le plan doit couvrir exactement les figs vivantes de l'escouade.
     squad_models = require_key(game_state, "squad_models")
     models_cache = require_key(game_state, "models_cache")
-    alive = {m for m in squad_models.get(str(unit_id), []) if m in models_cache}
+    alive = {m for m in require_key(squad_models, str(unit_id)) if m in models_cache}
     plan_ids = {mid for mid, _, _ in plan}
     if plan_ids != alive:
         return False, {

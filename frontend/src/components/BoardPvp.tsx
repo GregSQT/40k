@@ -3010,8 +3010,9 @@ export default function Board({
     wallHexesOverride,
     footprintZoneRef?.current,
     resolvedMoveDestPoolRef.current?.has,
-    squadMovePlan?.activeModelId,
-    squadMoveModelPoolRef?.current,
+    effectivePerModelPlan?.activeModelId,
+    isPerModelMove,
+    effectivePerModelPoolRef?.current,
     footprintMaskLoopsRef?.current,
     footprintZoneRef,
     chargeFootprintZoneRef?.current?.has,
@@ -3098,8 +3099,6 @@ export default function Board({
     isPerModelMove,
     effectivePerModelPlan?.activeModelId,
     effectivePerModelPoolRef?.current?.has,
-    squadMovePlan?.activeModelId,
-    squadMoveModelPoolRef?.current?.has,
     chargeDestPoolRef?.current?.has,
     resolvedMoveDestPoolRef.current?.has,
   ]);
@@ -3454,6 +3453,7 @@ export default function Board({
     onUnplaceChargeModel,
     chargeMovePlan,
     boardConfig,
+    chargeModelPoolRef?.current,
   ]);
 
   // TIR par-figurine (PvP manuel) : phase shoot. Entrée sur escouade OWN multi-fig →
@@ -4872,6 +4872,7 @@ export default function Board({
   }, [gameState?.units_cache, units]);
 
   // ✅ HOOK 3: useEffect - MINIMAL DEPENDENCIES TO PREVENT RE-RENDER LOOPS
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional minimal deps to prevent re-render loops
   useEffect(() => {
     // Early returns INSIDE useEffect to avoid hooks order violation
     if (!canvasContainerRef.current) return;
@@ -6228,28 +6229,6 @@ export default function Board({
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
-    // [DIAG TEMP blink squad move] — à retirer. Confirme le mécanisme du blink des figs.
-    // Steady-state uniquement : mode squadModelMove AVANT et APRÈS (pas d'entrée/transition).
-    {
-      const prevSegs = unitsFingerprintRef.current.split("#");
-      const wasSquadMove = prevSegs[3] === "squadModelMove";
-      if (mode === "squadModelMove" && wasSquadMove && unitsChanged) {
-        const planNull = squadMovePlan == null;
-        const planActive = squadMovePlan?.activeModelId ?? null;
-        const planModelCount = squadMovePlan ? Object.keys(squadMovePlan.models).length : 0;
-        const sqFpNow = squadMovePlan
-          ? Object.entries(squadMovePlan.models)
-              .map(([m, p]) => `${m}@${p.col},${p.row}`)
-              .join(",")
-          : "<null>";
-        const losNow = [...movePreviewLosBlinkIds].sort((a, b) => a - b).join(",");
-        // eslint-disable-next-line no-console
-        console.log(
-          `[DIAG blink steady] planNull=${planNull} active=${planActive} models=${planModelCount} | planPos=${sqFpNow} | los=[${losNow}]`
-        );
-      }
-    }
-
     // Reuse cached static board layers when the board config and objective control haven't changed.
     const objControlKey = Object.entries(objectiveControl)
       .sort(([a], [b]) => a.localeCompare(b))
@@ -6775,14 +6754,6 @@ export default function Board({
             ? modelIds.map((mid) => movePreviewHiddenModelIds.has(String(mid)))
             : modelIds.map((mid) => hiddenModelIds.has(String(mid)));
         const [anchorCenterX, anchorCenterY] = modelCenters[0];
-
-        // [DIAG TEMP blink squad] — à retirer.
-        if (isSquadGhost && mode === "squadModelMove") {
-          // eslint-disable-next-line no-console
-          console.log(
-            `[DIAG squad render] unit=${unitIdStr} figs=${modelIds.length} hidden=[${modelHidden.map((h) => (h ? 1 : 0)).join("")}] valid=[${modelValidFlags.map((v) => (v ? 1 : 0)).join("")}] hiddenSet={${[...movePreviewHiddenModelIds].join(",")}} pos=${modelPositions.map((p) => p.join("|")).join(" ")}`
-          );
-        }
 
         // Skip units that are being previewed elsewhere
         if (mode === "attackPreview" && attackPreview && unit.id === attackPreview.unitId) continue;
@@ -8018,7 +7989,7 @@ export default function Board({
     deadModelGhostsForRender,
     // Slice G : redraw du pool/cercles charge à chaque pose / sélection de fig.
     chargeMovePlan,
-    effectivePerModelPlan?.activeModelId,
+    effectivePerModelPlan,
     chargeModelPoolRef,
   ]);
 
