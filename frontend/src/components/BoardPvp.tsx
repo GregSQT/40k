@@ -907,6 +907,9 @@ export default function Board({
   const lastHighlightsStructuralKeyRef = useRef<string>("");
   const lastMovePolygonCacheKeyRef = useRef<string>("");
   const unitsLayerRef = useRef<PIXI.Container | null>(null);
+  // Ghost de destination du move preview (collé à la souris) : rendu dans son propre layer
+  // au-dessus des barres HP (20000) et des logos (10000) des autres unités.
+  const movePreviewGhostLayerRef = useRef<PIXI.Container | null>(null);
   const unitsFingerprintRef = useRef<string>("");
   // Hover preview: imperative PIXI layers (no React re-render)
   const hoverOverlayRef = useRef<PIXI.Container | null>(null);
@@ -6419,6 +6422,7 @@ export default function Board({
       const savedUi = uiElementsContainerRef.current;
       const savedDragOverlay = dragOverlayRef.current;
       const savedUnitsLayer = unitsLayerRef.current;
+      const savedMovePreviewGhost = movePreviewGhostLayerRef.current;
       const savedBlinks: PIXI.DisplayObject[] = [];
       // Move-preview LoS / icône / ligne / règle : même principe que hp-blink — sinon chaque re-run du
       // useEffect détruit le stage et la preview (ou la ligne mesure) disparaît + les refs sont perdues.
@@ -6434,6 +6438,7 @@ export default function Board({
       if (savedUi?.parent) app.stage.removeChild(savedUi);
       if (savedDragOverlay?.parent) app.stage.removeChild(savedDragOverlay);
       if (savedUnitsLayer?.parent) app.stage.removeChild(savedUnitsLayer);
+      if (savedMovePreviewGhost?.parent) app.stage.removeChild(savedMovePreviewGhost);
       if (savedHoverOverlay?.parent) app.stage.removeChild(savedHoverOverlay);
       if (savedHoverSprite?.parent) app.stage.removeChild(savedHoverSprite);
       if (savedVeilOverlay?.parent) app.stage.removeChild(savedVeilOverlay);
@@ -6490,6 +6495,7 @@ export default function Board({
       );
       for (const blink of blinksToReattach) app.stage.addChild(blink);
       if (savedUnitsLayer) app.stage.addChild(savedUnitsLayer);
+      if (savedMovePreviewGhost) app.stage.addChild(savedMovePreviewGhost);
       if (savedDragOverlay) app.stage.addChild(savedDragOverlay);
       if (savedHoverOverlay && !savedHoverOverlay.destroyed) app.stage.addChild(savedHoverOverlay);
       if (savedHoverSprite && !savedHoverSprite.destroyed) app.stage.addChild(savedHoverSprite);
@@ -6578,6 +6584,22 @@ export default function Board({
       app.stage.addChild(unitsLayerRef.current);
     }
     const unitsLayer = unitsLayerRef.current;
+
+    // ✅ Layer dédié au ghost de destination du move preview (collé à la souris).
+    // zIndex 25000 → au-dessus des barres HP (hp-blink 20000) et des logos (ui 10000) des
+    // autres unités, pour que le ghost ne soit jamais masqué quand il chevauche une unité.
+    if (!movePreviewGhostLayerRef.current) {
+      movePreviewGhostLayerRef.current = new PIXI.Container();
+      movePreviewGhostLayerRef.current.name = "move-preview-ghost-layer";
+      movePreviewGhostLayerRef.current.sortableChildren = true;
+    }
+    movePreviewGhostLayerRef.current.zIndex = 25000;
+    if (!movePreviewGhostLayerRef.current.parent) {
+      app.stage.addChild(movePreviewGhostLayerRef.current);
+    }
+    // Repartir propre à chaque rendu : le ghost preview n'est dessiné qu'à un seul endroit.
+    movePreviewGhostLayerRef.current.removeChildren();
+    const movePreviewGhostLayer = movePreviewGhostLayerRef.current;
 
     const chargeMaxDistance = gameConfig?.charge?.charge_max_distance;
 
@@ -7199,10 +7221,10 @@ export default function Board({
             modelHidden: previewModelHidden,
             statusBadgePerModel,
             app,
-            renderTarget: unitsLayer,
-            // Le badge "caché" doit aller dans le conteneur UI persistant (comme la boucle normale),
-            // sinon il est dessiné sur app.stage qui est détruit à chaque rendu → clignote puis disparaît.
-            uiElementsContainer: uiElementsContainerRef.current!,
+            // Ghost de destination (collé à la souris) : corps + badges/logos dans le layer dédié
+            // zIndex 25000 → au-dessus des barres HP et logos des autres unités.
+            renderTarget: movePreviewGhostLayer,
+            uiElementsContainer: movePreviewGhostLayer,
             useOverlayIcons: true,
             isPreview: true,
             previewType: "move",
