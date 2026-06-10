@@ -1544,6 +1544,8 @@ export const BoardWithAPI: React.FC = () => {
   const [illustrationPreviewUnitId, setIllustrationPreviewUnitId] = useState<Unit["id"] | null>(
     null
   );
+  // Unité "épinglée" via clic sur une unité non-activable : affiche durablement son illustration + logos
+  const [displaySelectedUnitId, setDisplaySelectedUnitId] = useState<Unit["id"] | null>(null);
   const [showDefaultIllustration, setShowDefaultIllustration] = useState(false);
   const [displayedIllustrationUnit, setDisplayedIllustrationUnit] = useState<Unit | null>(null);
   const [showDisplayedIllustrationUnit, setShowDisplayedIllustrationUnit] = useState(false);
@@ -2392,9 +2394,16 @@ export const BoardWithAPI: React.FC = () => {
     }
   }, [apiProps.gameState, apiProps.fightSubPhase, lastProcessedTurn]);
 
+  // Activer/sélectionner une unité efface l'épinglage (l'unité épinglée n'est plus celle affichée)
+  useEffect(() => {
+    if (apiProps.selectedUnitId != null) {
+      setDisplaySelectedUnitId(null);
+    }
+  }, [apiProps.selectedUnitId]);
+
   const illustrationPreviewUnit = useMemo(() => {
     const effectiveIllustrationUnitId =
-      illustrationPreviewUnitId ?? apiProps.selectedUnitId ?? null;
+      illustrationPreviewUnitId ?? displaySelectedUnitId ?? apiProps.selectedUnitId ?? null;
     const statusUnits = apiProps.gameState?.units;
     if (effectiveIllustrationUnitId === null || !statusUnits) {
       return null;
@@ -2404,7 +2413,12 @@ export const BoardWithAPI: React.FC = () => {
         (unit) => String(unit.id) === String(effectiveIllustrationUnitId) && unit.HP_CUR > 0
       ) ?? null
     );
-  }, [apiProps.gameState?.units, apiProps.selectedUnitId, illustrationPreviewUnitId]);
+  }, [
+    apiProps.gameState?.units,
+    apiProps.selectedUnitId,
+    illustrationPreviewUnitId,
+    displaySelectedUnitId,
+  ]);
 
   useEffect(() => {
     if (typeof Image === "undefined") {
@@ -3824,6 +3838,7 @@ export const BoardWithAPI: React.FC = () => {
             showHexCoordinates={settings.showDebug}
             showLosDebugOverlay={settings.showDebugLoS}
             onUnitIllustrationPreviewChange={setIllustrationPreviewUnitId}
+            onUnitDisplaySelectChange={setDisplaySelectedUnitId}
             eligibleUnitIds={apiProps.eligibleUnitIds}
             mode={apiProps.mode}
             movePreview={apiProps.movePreview}

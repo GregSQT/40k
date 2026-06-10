@@ -365,6 +365,7 @@ type BoardProps = {
   showHexCoordinates?: boolean;
   showLosDebugOverlay?: boolean;
   onUnitIllustrationPreviewChange?: (unitId: UnitId | null) => void;
+  onUnitDisplaySelectChange?: (unitId: UnitId | null) => void;
   shootingActivationQueue?: Unit[];
   activeShootingUnit?: Unit | null;
   shootingTargetId?: number | null; // For replay mode: shows explosion icon on target
@@ -735,6 +736,7 @@ export default function Board({
   showHexCoordinates = false,
   showLosDebugOverlay = false,
   onUnitIllustrationPreviewChange,
+  onUnitDisplaySelectChange,
   shootingActivationQueue,
   activeShootingUnit,
   shootingTargetId,
@@ -6946,6 +6948,7 @@ export default function Board({
           onConfirmMove: onConfirmMoveForRender,
           parseColor,
           onUnitIconHoverChange: handleUnitIconHoverChange,
+          onUnitDisplaySelect: (unitId: UnitId) => onUnitDisplaySelectChange?.(unitId),
           // Pass blinking state (unified: movePreview and attackPreview use same code path)
           blinkingUnits: effectiveBlinkingUnits,
           blinkingAttackerId: effectiveBlinkingAttackerId,

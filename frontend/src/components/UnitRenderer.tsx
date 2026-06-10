@@ -211,6 +211,8 @@ interface UnitRendererProps {
   debugMode?: boolean;
   onUnitTooltip?: (tooltip: HpBarHtmlTooltipPayload) => void;
   onUnitIconHoverChange?: (unitId: UnitId | null) => void;
+  /** Clic gauche sur une unité non-activable : épingle son illustration (display-select). */
+  onUnitDisplaySelect?: (unitId: UnitId) => void;
   /** Cadre % / bouclier net (HTML) au-dessus de la barre blink */
   onBlinkProbHtml?: (payload: BlinkProbHtmlPayload) => void;
   renderTarget?: PIXI.Container;
@@ -282,9 +284,22 @@ export class UnitRenderer {
         y: 0,
       });
     };
+    const handlePointerDown = (e: PIXI.FederatedPointerEvent): void => {
+      const { unit, selectedUnitId, current_player, isEligible, onUnitDisplaySelect } = this.props;
+      // Display-select (épingle) seulement si : clic gauche, aucune unité en cours d'activation,
+      // et l'unité cliquée n'est pas elle-même activable (sinon ce clic l'active).
+      const noActiveUnit = selectedUnitId == null;
+      const isActivatable = unit.player === current_player && (isEligible ?? false);
+      if (e.button === 0 && noActiveUnit && !isActivatable && onUnitDisplaySelect) {
+        e.stopPropagation();
+        onUnitDisplaySelect(unit.id);
+        return; // on épingle : ne pas masquer l'illustration
+      }
+      hideTooltip();
+    };
     displayObject.on("pointerout", hideTooltip);
     displayObject.on("pointerleave", hideTooltip);
-    displayObject.on("pointerdown", hideTooltip);
+    displayObject.on("pointerdown", handlePointerDown);
   }
 
   private cleanupExistingBlinkIntervals(): void {
