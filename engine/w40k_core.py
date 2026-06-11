@@ -2632,14 +2632,7 @@ class W40KEngine(gym.Env):
             }
 
         auto_resolve = bool(self.game_state.get("gym_training_mode", False))
-        print(f"[HAZARD] confirm unit {uid}: engaged={was_engaged} auto_resolve={auto_resolve} -> rolling", flush=True)
         desperate_escape_pre_move(str(uid), self.game_state, was_engaged, auto_resolve)
-        from engine.phase_handlers.shared_utils import is_unit_alive
-        print(
-            f"[HAZARD] confirm unit {uid} done: alive={is_unit_alive(str(uid), self.game_state)} "
-            f"pending_alloc={self.game_state.get('pending_hazard_allocation') is not None}",
-            flush=True,
-        )
 
         # Un choix d'attribution joueur est-il en attente ? → prompt (clic figurine).
         if self.game_state.get("pending_hazard_allocation") is not None:
@@ -2702,6 +2695,10 @@ class W40KEngine(gym.Env):
             "waiting_for_player": True,
             "would_flee": True,
             "advance_roll": _mh._advance_roll_for(sid, self.game_state),
+            # Desperate Escape : le hazard a consommé le clic qui, normalement, entre dans le plan
+            # par-figurine. Ce marqueur dit au front d'auto-entrer en squadModelMove (Fall Back)
+            # pour les survivants, sinon l'unité reste en mode select (trou → quick-move au clic).
+            "fall_back_resume": True,
         }
 
 
@@ -2712,8 +2709,6 @@ class W40KEngine(gym.Env):
         """
         if self.game_state.get("game_over", False):
             return False, {"error": "game_over", "winner": self.game_state.get("winner")}
-
-        print(f"[ACTION] phase={self.game_state.get('phase')} action={action.get('action')} unitId={action.get('unitId')} active_move={self.game_state.get('active_movement_unit')}", flush=True)
 
         self._initialize_rule_choice_runtime_state()
 

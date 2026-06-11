@@ -661,6 +661,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   // Ref miroir pour lecture synchrone juste après un await (ex. gate d'entrée du move preview).
   const hazardWarningPopupRef = useRef<{ unitId: number } | null>(null);
   hazardWarningPopupRef.current = hazardWarningPopup;
+  // Desperate Escape : id de l'unité dont le hazard vient d'être résolu (vivante) → l'effet
+  // dédié auto-entre dans le plan Fall Back par-figurine (squadModelMove), comblant le trou
+  // mode select laissé par le resume (le clic d'activation a été consommé par le popup hazard).
+  const [fallBackResumeUnitId, setFallBackResumeUnitId] = useState<number | null>(null);
   // TEST/DEBUG : mode toggle « battle-shock test ». Quand actif, cliquer une unité (non activée)
   // lui fait un battle-shock test au lieu de la sélectionner → l'unité est shockée AVANT son
   // activation, donc le Desperate Escape se déclenche dès l'activation (avant le move preview).
@@ -2134,6 +2138,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               const uidNum = parseInt(String(uid), 10);
               setSelectedUnitId(uidNum);
               setActiveUnitEngaged(data.result?.would_flee === true ? uidNum : null);
+              // Desperate Escape : reprise après hazard → auto-entrer dans le plan Fall Back
+              // par-figurine (consommé par un effet, une fois manualAllocation/render à jour).
+              if (data.result?.fall_back_resume === true) {
+                setFallBackResumeUnitId(uidNum);
+              }
               // V11 : restaure l'état Advance figé du squad (badge + bouton sélectionné) à la
               // (ré-)activation. advance_roll non-null = squad déjà advancé ce tour.
               const advRoll = (data.result as { advance_roll?: number | null })?.advance_roll;
@@ -3642,6 +3651,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     },
     [readSquadModelPositions, refreshSquadMovePlanValidity, ensureActivatedNoHazard]
   );
+
+  // Desperate Escape : après résolution du hazard (resume), auto-entrer dans le plan Fall Back
+  // par-figurine. Exécuté APRÈS le render qui a clearé manualAllocation (sinon le top-guard de
+  // handleStartSquadModelMove bail). L'unité est déjà active (active_movement_unit posé par le
+  // resume) → ensureActivatedNoHazard skippe l'activation → aucun re-déclenchement du hazard.
+  useEffect(() => {
+    if (fallBackResumeUnitId === null) return;
+    if (manualAllocation !== null) return; // attendre le clear de l'allocation (re-run via dep)
+    const uid = fallBackResumeUnitId;
+    setFallBackResumeUnitId(null);
+    void handleStartSquadModelMove(uid);
+  }, [fallBackResumeUnitId, manualAllocation, handleStartSquadModelMove]);
 
   /** Selectionne la figurine a repositionner : recupere sa BFS (move_model_destinations). */
   const handleSelectModelForMove = useCallback(

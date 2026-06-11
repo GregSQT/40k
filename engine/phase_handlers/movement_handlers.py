@@ -879,11 +879,6 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
         # engagée mais saine = Ordered Retreat (aucun hazard) → flux normal ci-dessous.
         engaged_de = _squad_is_in_enemy_er(game_state, str(unit_id))
         shocked_de = bool(unit.get("battle_shocked", False))
-        print(
-            f"[DESPERATE-ESCAPE] activation unit {unit_id}: engaged={engaged_de} "
-            f"battle_shocked={shocked_de} -> requires_hazard={engaged_de and shocked_de}",
-            flush=True,
-        )
         if engaged_de and shocked_de:
             # Desperate Escape : résolution SÉQUENTIELLE. Tant que le hazard n'est pas roulé/
             # attribué, l'unité ne doit PAS être en cours de déplacement côté front : aucun pool

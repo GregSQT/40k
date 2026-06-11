@@ -404,16 +404,15 @@ body {
 }
 
 .unit-status-badge__svg--battle-shock {
-  width: 26px;
-  height: 26px;
-  font-size: 19px;
+  width: 23px;
+  height: 23px;
+  font-size: 17px;
 }
 
 .unit-illustration-preview__image {
   display: block;
   width: 100%;
   height: 100%;
-  max-width: 240px;
   object-fit: contain;
   object-position: center bottom;
   transform-origin: center bottom;
