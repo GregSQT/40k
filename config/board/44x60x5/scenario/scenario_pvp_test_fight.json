@@ -1,0 +1,39 @@
+{
+  "_comment": "Roster de test phase FIGHT V11 (Documentation/phase_fight_v11.md) — board 44x60x5 (220x300, scale 5). 4 couloirs P1 vs P2 couvrant la matrice mono/multi-figurine x fly/non-fly, paires a ~30 sous-hex (6\") = a portee de charge mais non engagees, pour derouler charge -> Fights First -> pile-in -> fight -> consolidate. Sauvegarde de l'ancien roster : scenario_pvp_test.bak.json. walls-none pour ne pas gener le BFS pile-in/consolidation ; objectives-51 pour tester la consolidation Objective (couloir D pres de l'objectif South).",
+  "primary_objectives": ["objectives_control"],
+  "wall_ref": "walls-none.json",
+  "objectives_ref": "objectives-51.json",
+  "units": [
+    {
+      "_lane": "A - mono-fig, NO fly (Intercessor base unique)",
+      "id": 1, "unit_type": "Intercessor", "player": 1, "col": 90, "row": 30
+    },
+    { "id": 2, "unit_type": "Intercessor", "player": 2, "col": 120, "row": 30 },
+
+    {
+      "_lane": "B - mono-fig, FLY (AssaultIntercessorJumpPack base unique)",
+      "id": 3, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 90, "row": 90
+    },
+    { "id": 4, "unit_type": "AssaultIntercessorJumpPack", "player": 2, "col": 120, "row": 90 },
+
+    {
+      "_lane": "C - multi-fig, NO fly (squad Intercessor, 3 modeles)",
+      "id": 5, "unit_type": "Intercessor", "player": 1, "col": 90, "row": 190,
+      "models": [ { "col": 90, "row": 190 }, { "col": 87, "row": 196 }, { "col": 93, "row": 196 } ]
+    },
+    {
+      "id": 6, "unit_type": "Intercessor", "player": 2, "col": 120, "row": 190,
+      "models": [ { "col": 120, "row": 190 }, { "col": 117, "row": 196 }, { "col": 123, "row": 196 } ]
+    },
+
+    {
+      "_lane": "D - multi-fig, FLY (squad AssaultIntercessorJumpPack, 3 modeles) - pres objectif South",
+      "id": 7, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 90, "row": 250,
+      "models": [ { "col": 90, "row": 250 }, { "col": 87, "row": 256 }, { "col": 93, "row": 256 } ]
+    },
+    {
+      "id": 8, "unit_type": "AssaultIntercessorJumpPack", "player": 2, "col": 120, "row": 250,
+      "models": [ { "col": 120, "row": 250 }, { "col": 117, "row": 256 }, { "col": 123, "row": 256 } ]
+    }
+  ]
+}

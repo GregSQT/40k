@@ -8,6 +8,8 @@
     "los_debug_show_ratio": false,
     "los_debug_show_ratio_rule": "When true, shooting preview overlays visibility ratio percentages on evaluated hexes.",
     "engagement_zone": 2,
+    "pile_in_target_range": 5,
+    "consolidation_trigger_range": 3,
     "unit_model_cohesion_range": 2,
     "unit_global_cohesion_range": 9,
     "squad_min_neighbors": 1,

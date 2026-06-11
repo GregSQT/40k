@@ -4054,4 +4054,252 @@ def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str,
             if distance <= rng_rng:
                 return True
 
+
+# =====================================================================
+# === V11 FIGHT PHASE — FONDATIONS (Bloc 0) ===========================
+# =====================================================================
+# Helpers et primitives V11 (PDF `12 Fights phase.pdf`). ADDITIF PUR :
+# NON branchés sur le flux V10 actif → comportement de jeu inchangé.
+# Câblés aux blocs 1-5. Réf : Documentation/phase_fight_v11.md.
+#
+# Unités de distance : `engagement_zone` est exprimé dans la métrique
+# native du moteur (contrat d'engagement, cf. spatial_relations). Les
+# portées en POUCES (pile_in_target_range=5", consolidation_trigger_range=3")
+# sont converties via `inches_to_subhex`, comme l'existant `bfs_max = 3*scale`.
+
+
+def is_fights_first(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
+    """
+    True si l'unité est une **Fights First unit** (ability 24.13).
+
+    Source du grant V1 : le charge move effectué ce tour confère l'ability
+    « jusqu'à la fin du tour » (11.04 AFTER MOVING). On lit donc ``units_charged``
+    (alimenté uniquement après un charge move effectué). L'API reste « ability » :
+    le jour où l'ability datasheet existe (config/unit_rules.json), il suffira
+    d'ajouter ici un ``or _unit_has_rule(unit, "fights_first")``.
+    """
+    if "units_charged" not in game_state:
+        raise KeyError(
+            "game_state missing required 'units_charged' field "
+            "- charge phase must run before is_fights_first()"
+        )
+    units_charged = {str(uid) for uid in game_state["units_charged"]}
+    return str(require_key(unit, "id")) in units_charged
+
+
+def fight_ensure_v11_state(game_state: Dict[str, Any]) -> None:
+    """
+    Initialise (idempotent) les sets de suivi V11 de la phase de combat (§6) :
+    - ``units_selected_to_fight`` : « selected to fight » cette phase (12.04) ;
+    - ``pile_in_done`` / ``consolidation_done`` : 1 move max/unité par étape groupée.
+    Suit le pattern d'init paresseuse de ``units_fought``.
+    """
+    if "units_selected_to_fight" not in game_state:
+        game_state["units_selected_to_fight"] = set()
+    if "pile_in_done" not in game_state:
+        game_state["pile_in_done"] = set()
+    if "consolidation_done" not in game_state:
+        game_state["consolidation_done"] = set()
+
+
+def fight_compute_engaged_snapshot(game_state: Dict[str, Any]) -> Dict[str, bool]:
+    """
+    Snapshot ``engaged_at_fight_step_start`` (12.04 / 12.06).
+
+    Pour chaque unité vivante : True si engagée (zone d'engagement) avec ≥1 ennemi
+    MAINTENANT. À appeler au DÉBUT de l'étape FIGHT (donc APRÈS le pile-in groupé).
+    Sert à : éligibilité fight 12.04 (« was engaged at the start of this step ») ET
+    overrun 12.06 (« was unengaged at the start of the Fight step » = négation).
+    """
+    from engine.spatial_relations import (
+        get_engagement_zone,
+        unit_within_engagement_zone_footprints,
+    )
+
+    ez = get_engagement_zone(game_state)
+    snapshot: Dict[str, bool] = {}
+    for u in require_key(game_state, "units"):
+        uid = str(require_key(u, "id"))
+        if not is_unit_alive(uid, game_state):
+            continue
+        snapshot[uid] = unit_within_engagement_zone_footprints(
+            game_state, u, engagement_zone=ez, max_distance=ez
+        )
+    return snapshot
+
+
+def _fight_units_engaged_with(game_state: Dict[str, Any], unit: Dict[str, Any]) -> List[str]:
+    """Liste des ids d'unités ennemies actuellement engagées avec ``unit`` (zone d'engagement)."""
+    from engine.spatial_relations import (
+        get_engagement_zone,
+        unit_entries_within_engagement_zone,
+    )
+
+    ez = get_engagement_zone(game_state)
+    units_cache = require_key(game_state, "units_cache")
+    unit_id_str = str(require_key(unit, "id"))
+    entry = units_cache.get(unit_id_str)
+    if entry is None:
+        raise ValueError(f"Unit {unit_id_str} not in units_cache; cannot compute engagement")
+    unit_player = int(require_key(entry, "player"))
+    engaged: List[str] = []
+    for eid, ce in units_cache.items():
+        if str(eid) == unit_id_str:
+            continue
+        if int(require_key(ce, "player")) == unit_player:
+            continue
+        if unit_entries_within_engagement_zone(entry, ce, ez):
+            engaged.append(str(eid))
+    return engaged
+
+
+def pile_in_targets_within_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> List[str]:
+    """Unités ennemies dont l'empreinte est dans ``pile_in_target_range`` (5" × inches_to_subhex)."""
+    from engine.hex_utils import min_distance_between_sets
+
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    rng_inches = int(require_key(game_rules, "pile_in_target_range"))
+    scale = require_key(game_state, "inches_to_subhex")
+    rng = rng_inches * int(scale)
+    units_cache = require_key(game_state, "units_cache")
+    unit_id_str = str(require_key(unit, "id"))
+    entry = units_cache.get(unit_id_str)
+    if entry is None:
+        raise ValueError(f"Unit {unit_id_str} not in units_cache; cannot compute pile-in targets")
+    unit_player = int(require_key(entry, "player"))
+    unit_fp = entry.get("occupied_hexes", {(entry["col"], entry["row"])})
+    within: List[str] = []
+    for eid, ce in units_cache.items():
+        if str(eid) == unit_id_str:
+            continue
+        if int(require_key(ce, "player")) == unit_player:
+            continue
+        enemy_fp = ce.get("occupied_hexes", {(ce["col"], ce["row"])})
+        if min_distance_between_sets(unit_fp, enemy_fp, max_distance=rng) <= rng:
+            within.append(str(eid))
+    return within
+
+
+def pile_in_select_targets_12_03(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    chosen_target_ids: Optional[List[str]] = None,
+) -> List[str]:
+    """
+    BEFORE MOVING (12.03) — sélection des cibles de pile-in :
+    - unité **engagée** → toutes les unités ennemies engagées (``chosen_target_ids`` ignoré) ;
+    - unité **non engagée** → ``chosen_target_ids`` requis : 1+ unités ennemies dans 5"
+      (``pile_in_target_range``), validées ici (choix joueur PvP / heuristique IA en amont).
+    """
+    engaged = _fight_units_engaged_with(game_state, unit)
+    if engaged:
+        return engaged
+    within = set(pile_in_targets_within_range(game_state, unit))
+    if chosen_target_ids is None:
+        raise ValueError(
+            "pile_in_select_targets_12_03: chosen_target_ids required when unit is unengaged"
+        )
+    chosen = [str(t) for t in chosen_target_ids]
+    if not chosen:
+        raise ValueError("pile_in_select_targets_12_03: empty target selection for unengaged unit")
+    invalid = [t for t in chosen if t not in within]
+    if invalid:
+        raise ValueError(
+            f"pile_in_select_targets_12_03: targets not enemy units within "
+            f"{int(require_key(require_key(game_state, 'config'), 'game_rules')['pile_in_target_range'])}\": {invalid}"
+        )
+    return chosen
+
+
+def pile_in_move_destinations_12_03(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    target_ids: List[str],
+) -> List[Tuple[int, int]]:
+    """
+    WHILE / AFTER MOVING (12.03) — ancres valides d'un pile-in vers ``target_ids``.
+
+    Contraintes DURES (le moteur déplace l'empreinte de l'unité d'un bloc — modèle
+    atomique de figurine ; les contraintes par-figurine sont traduites au niveau empreinte) :
+    - **figurines en contact socle immobiles** : si l'unité est déjà « collée » (contact
+      bord-à-bord avec un ennemi) → aucune ancre (pas de pile-in possible) ;
+    - **BFS ≤ 3"** (× inches_to_subhex), placement d'empreinte valide (pas de chevauchement) ;
+    - **WHILE** : fin strictement plus proche de la cible de pile-in la plus proche ;
+    - **AFTER** : l'unité doit finir **engagée** (filtre dur) ; chaque unité ennemie
+      engagée AVANT le move doit **rester** engagée après (filtre dur).
+
+    Retour : liste d'ancres (col, row), hors position de départ. Vide ⇒ pas de pile-in possible.
+    """
+    from engine.hex_utils import min_distance_between_sets
+    from engine.spatial_relations import (
+        get_engagement_zone,
+        unit_entries_within_engagement_zone,
+    )
+
+    if not target_ids:
+        raise ValueError("pile_in_move_destinations_12_03: target_ids must be non-empty")
+
+    # Contrainte « figurines en contact socle immobiles » → empreinte atomique collée = pas de move.
+    if _fight_unit_is_hex_adjacent_to_enemy_footprint(game_state, unit):
+        return []
+
+    ez = get_engagement_zone(game_state)
+    units_cache = require_key(game_state, "units_cache")
+    unit_id_str = str(require_key(unit, "id"))
+    entry = units_cache.get(unit_id_str)
+    if entry is None:
+        raise ValueError(f"Unit {unit_id_str} not in units_cache; cannot plan pile-in")
+    unit_fp = entry.get("occupied_hexes", {(entry["col"], entry["row"])})
+
+    # Palier de la cible de pile-in la plus proche (parmi les cibles sélectionnées).
+    d_min_sel: Optional[int] = None
+    closest_tier: List[str] = []
+    for tid in target_ids:
+        ce = units_cache.get(str(tid))
+        if ce is None:
+            continue
+        efp = ce.get("occupied_hexes", {(ce["col"], ce["row"])})
+        d = min_distance_between_sets(unit_fp, efp)
+        if d_min_sel is None or d < d_min_sel:
+            d_min_sel = d
+            closest_tier = [str(tid)]
+        elif d == d_min_sel:
+            closest_tier.append(str(tid))
+    if d_min_sel is None:
+        raise ValueError("pile_in_move_destinations_12_03: no live target footprints among target_ids")
+
+    # Unités ennemies engagées AVANT le move (à conserver après).
+    engaged_before = _fight_units_engaged_with(game_state, unit)
+    engaged_before_entries = [
+        (eid, units_cache[str(eid)]) for eid in engaged_before if str(eid) in units_cache
+    ]
+
+    start_col, start_row = require_unit_position(unit, game_state)
+    start_pos = (start_col, start_row)
+    visited, fp_by_anchor = _fight_bfs_reachable_anchors_consolidation(game_state, unit)
+
+    destinations: List[Tuple[int, int]] = []
+    for anchor in visited:
+        if anchor == start_pos:
+            continue
+        fp = fp_by_anchor[anchor]
+        ac, ar = anchor
+        # WHILE : strictement plus proche de la cible de pile-in la plus proche.
+        if not _fight_pile_in_new_fp_strictly_closer_to_closest_tier(
+            game_state, fp, d_min_sel, closest_tier
+        ):
+            continue
+        # AFTER : l'unité doit finir engagée (avec au moins un ennemi).
+        if not _fight_footprint_in_engagement_with_any_enemy(game_state, unit, int(ac), int(ar), fp):
+            continue
+        # AFTER : conserver chaque engagement de départ.
+        synth = _fight_synth_cache_entry_at_footprint(unit, game_state, int(ac), int(ar), fp)
+        if not all(
+            unit_entries_within_engagement_zone(synth, ce, ez)
+            for _eid, ce in engaged_before_entries
+        ):
+            continue
+        destinations.append(anchor)
+    return destinations
+
     return False

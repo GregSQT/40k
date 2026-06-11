@@ -3468,6 +3468,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // État stable découplé : posé dès que le backend détecte l'engagement, jamais
       // remis à null ici (le clear est fait à la sortie du mode move) → pas de clignotement.
       if (wouldFlee) setFleePreviewUnitId(unitId);
+      setActiveUnitEngaged(wouldFlee ? unitId : null);
       setSquadMovePlan((prev) =>
         prev && prev.unitId === unitId
           ? { ...prev, perModelValid, coherencyOk, canValidate, wouldFlee }
