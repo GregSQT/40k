@@ -363,33 +363,6 @@ Stay option: 80% chance of death but maintain capabilities
 Decision factors: Unit value, importance of actions this turn, long term strategy, alternative threats
   ```
 
-## 🆕 V11 COMPLIANCE MATRIX — MOVEMENT PHASE
-
-> Source de vérité : `Documentation/40k_rules`. Statut établi par lecture du code (`engine/phase_handlers/movement_handlers.py`, `config/game_config.json`). Distances exprimées en **pouces** ; conversion hex = pouces × `inches_to_subhex` (board-dépendant : 25x21→1, 44x60x5→5, 180x156→5, 360x312→10). **Ne jamais coder une équivalence pouce↔hex en dur.**
-
-| Règle | Contenu | Statut moteur | Mapping / notes |
-|---|---|---|---|
-| 09.01 | Start of Movement phase | ✅ | `movement_phase_start()` |
-| 09.02 | Move Units : sélection unité + type de move ; *toutes* les unités (y c. réserves) | 🟡 Partiel | sélection via `execute_action` ; clause « y compris strategic reserves » ⛔ sans objet (pas de réserves) |
-| 09.03 | End of Movement phase | ✅ | transition → shoot |
-| 09.04 | Remain stationary (aucun trigger start/end move) | ✅ | action `wait` |
-| 09.05 | Normal move (max = M ; unengaged avant/après) | ✅ | budget = M (`get_squad_move_budget`) |
-| 09.06 | Advance (max = M + D6 ; après : pas de charge ni action) | ✅ | `roll_advance_for_squad`, `units_advanced` ; tir après advance → voir section Shooting (ASSAULT / `shoot_after_advance`) |
-| 09.07 | Fall-back (engaged ; Ordered Retreat / Desperate Escape ; hazard ; battle-shock ; après : pas tir/charge/action) | ✅ | `desperate_escape = battle_shocked`, `roll_hazard_for_unit`, `roll_battle_shock`, `units_fled`, traversée ennemis en Desperate Escape |
-| 18.04 | Disembark move | ⛔ Non implémenté | pas de transports |
-| 20.04 | Ingress move | ⛔ Non implémenté | pas de réserves |
-| 03.01 | Moving (traverse alliés, pas ennemis, pas hors plateau) | ✅ | config `move.can_move_through_friendly_model` / `can_move_through_enemy_model` ; bord = bounds plateau |
-| 03.02 | Set up (déploiement) | ✅ | `deployment_handlers` |
-| 03.03 | Coherency (2″H/5″V d'≥1 modèle ; 9″H/5″V de chaque modèle ; regain en End of Turn) | 🟡 Adapté | `unit_model_cohesion_range`=2, `unit_global_cohesion_range`=9 (hex) ; composante verticale 5″ sans objet (2D) |
-| 03.04 | Engagement range = 2″H/5″V | 🟡 Adapté + ⚠️ | `engagement_zone` (hex). ⚠️ `engagement_zone=2` ne vaut 2″ que si 1 hex=1″ (board 25x21) ; sur boards fins (5/10 hex par ″) → **vérifier override par board**. Vertical 5″ sans objet (2D) |
-| 21.02 | Surge move | ⛔ Non implémenté | aucune unité avec capacité de surge |
-| 21.03 | Flying (take to skies : −2″, ignore vertical, traverse tous modèles/terrains) | ✅ / 🟡 | `_fly_traversal_active`, malus −2″ (cf. commentaire 21.03) ; « ignore vertical » trivial en 2D |
-
-**Limites techniques (moteur 2D / hex) :**
-- **2D** → pas de mouvement vertical (13.06) ; toute clause « X″ vertical » (coherency, engagement, « ignore vertical » de Fly) est sans objet ou triviale.
-- **Hex** → distances stockées en hex = pouces × `inches_to_subhex`. La règle reste exprimée en pouces ; le hex en dérive par board.
-- **Pas de transports/réserves** → 18.04 / 20.04 sans objet.
-
 ## 🎯 SHOOTING PHASE Decision Tree (Optimized)
 
 **⚠️ ADVANCE_IMPLEMENTATION_PLAN.md**: Shooting phase now supports ADVANCE action in addition to SHOOT.
@@ -1337,63 +1310,6 @@ ASSERT: game_state["units_cache"] exists (doit être construit au reset)
 
 ---
 
-## 🆕 V11 COMPLIANCE MATRIX — SHOOTING PHASE
-
-> Source de vérité : `Documentation/40k_rules`. Statut établi par lecture du code (`engine/phase_handlers/shooting_handlers.py`, `engine/phase_handlers/shared_utils.py`, `engine/combat_utils.py`, `config/weapon_rules.json`).
-
-**Phase & séquence d'attaque**
-
-| Règle | Contenu | Statut moteur | Mapping / notes |
-|---|---|---|---|
-| 10.01 | Start of Shooting phase | ✅ | |
-| 10.02 | Shoot : sélection unité + type de tir ; éligible si sur plateau et pas déjà sélectionnée | ✅ | |
-| 10.03 | End of Shooting phase | ✅ | transition → charge |
-| 10.04 | Normal shooting (unengaged, pas d'advance ce tour ; après : pas d'action) | ✅ | éligibilité `shooting_handlers` |
-| 10.05 | Assault shooting (unengaged + advance + arme [ASSAULT] ; seules armes [ASSAULT]) | ✅ | `_can_unit_shoot_after_advance_with_weapon`, `_weapon_has_assault_rule` |
-| 10.06 | Close-quarters shooting (engaged, pas d'advance ; arme [CLOSE-QUARTERS]/[PISTOL] ou MONSTER/VEHICLE ; cible unités engagées) | 🟡 | code via `_weapon_has_pistol_rule` ; [PISTOL] ≡ [CLOSE-QUARTERS] (24.27) ; malus −1 to hit MONSTER/VEHICLE → ⚠️ à vérifier |
-| 10.07 | Indirect shooting (unengaged, pas d'advance, arme [INDIRECT FIRE] ; cible non-visible, cover forcé, échec 1-5 sauf stationnaire visible → 1-3, pas de re-roll) | ⛔ + ⚠️ | `INDIRECT_FIRE` reconnu au registry mais effets (cible non-visible, cover forcé, seuils 1-5/1-3) **non appliqués** en résolution |
-| 04.01 | Select weapons (≥1 arme ranged par modèle) | ✅ | `weapon_selection` |
-| 04.02 | Select targets (visible 06.01, à portée, unengaged) | ✅ | LOS/portée/`valid_target_pool` ; cible unengaged sauf close-quarters |
-| 04.03 | Resolve attacks (gather A dés, identical attacks, par unité) | ✅ | `_roll_squad_shot_sequence` |
-| 05.01 | Hit rolls (≥ BS ; 6 = critical hit ; 1 = échec) | 🟡 | seuil BS appliqué ; **critical hit non géré** (base de Lethal/Sustained) |
-| 05.02 | Wound rolls (table S vs T ; 6 = critical wound) | 🟡 | `wound_threshold` (valeurs conformes) ; **critical wound non géré** (base d'Anti/Devastating) |
-| 05.03 | Save rolls (Sv modifiée par AP, ou InSv ; groupes d'allocation, CHARACTER en dernier, blessés en premier) | 🟡 | `save_threshold` (AP + invuln OK) ; ordre d'allocation par groupes/CHARACTER → ⚠️ à vérifier |
-| 05.04 | Inflict damage (perte = D ; Feel No Pain) | 🟡 | dégâts = D OK ; **Feel No Pain (24.12) non appliqué** |
-
-**Weapon abilities (24.03-24.38) — reconnu au registry vs appliqué en résolution**
-
-> ⚠️ `WeaponRulesRegistry._apply_single_rule` est un **stub pass-through** : être reconnu au registry n'implique PAS être appliqué dans la séquence de résolution.
-
-| Ability | Registry | Appliqué | Note |
-|---|---|---|---|
-| BLAST 24.05 | ✅ | ✅ | +1 dé / 5 figs (`_has_blast_keyword`) |
-| ANTI 24.03 | ✅ | 🟡 | crit wound conditionnel — partiel, à vérifier |
-| AP / InSv (05.03) | — | ✅ | `save_threshold` |
-| ASSAULT 24.04 | ✅ | ✅ | éligibilité tir post-advance |
-| PISTOL / CLOSE-QUARTERS 24.27 / 24.07 | ✅ | ✅ | tir en état engaged |
-| RAPID FIRE 24.30 | ✅ | ⛔ | +X dés à demi-portée non appliqué |
-| MELTA 24.25 | ✅ | ⛔ | +X D à demi-portée non appliqué |
-| SUSTAINED HITS 24.36 | ✅ | ⛔ | dépend du critical hit (non géré) |
-| LETHAL HITS 24.23 | ✅ | ⛔ | dépend du critical hit (non géré) |
-| DEVASTATING WOUNDS 24.10 | ✅ | ⛔ | dépend du critical wound (non géré) |
-| TWIN-LINKED 24.38 | ✅ | ⛔ | re-roll wound non appliqué |
-| TORRENT 24.37 | ✅ | ⛔ | auto-hit non appliqué |
-| HEAVY 24.16 | ✅ | ⛔ | +1 hit si quasi-stationnaire non appliqué |
-| IGNORES COVER 24.18 | ✅ | ⛔ | non appliqué |
-| HAZARDOUS 24.15 | ✅ | 🟡 | `roll_hazard_for_unit` existe ; application post-tir à vérifier |
-| EXTRA ATTACKS 24.11 | ✅ | ⚠️ | melee → voir section Fight |
-| CLEAVE 24.06 | ⛔ | ⛔ | absent du registry |
-| LANCE 24.21 | ⛔ | ⛔ | absent du registry |
-| ONE SHOT 24.26 | ⛔ | ⛔ | absent du registry |
-| PRECISION 24.28 | ⛔ | ⛔ | absent du registry |
-| PSYCHIC 24.29 | ⛔ | ⛔ | absent du registry |
-
-**Limites techniques (moteur 2D / hex) :**
-- **LOS / cover** en 2D via `compute_unit_los` (ratio de visibilité) ; pas de blocage par hauteur verticale.
-- Portées et demi-portées (Rapid Fire, Melta) en hex = pouces × `inches_to_subhex`.
-
----
-
 ## ⚡ CHARGE PHASE
 │   │   │       │   ├── Build VALID_ACTIONS list based on current state:
 │   │   │       │   │   ├── If unit.CAN_SHOOT = true AND valid_target_pool NOT empty → Add "shoot"
@@ -1922,7 +1838,7 @@ Decision: Weigh 42% failure risk vs fight advantage gained
 ### Charge Priority Logic
 
 **Fight Priority Benefit:**
-- **Fights First**: a charge grants the Fights First ability (24.13), so charging units are resolved in the Fights First step
+- **Sub-phase 1**: Charging units attack first in fight phase
 - **Tactical advantage**: Can eliminate enemies before they fight back
 
 **Why Charging Units Fight First:**
@@ -1936,32 +1852,30 @@ Decision: Weigh 42% failure risk vs fight advantage gained
 
 ### Fight Phase Overview
 
-**Two-Step Structure (V11 12.04):**
-1. **Resolve Fights First Combats**: units with the Fights First ability (24.13) — which includes every unit that made a charge move this turn — are resolved first. Both players alternate, **starting with the active player** (the player whose turn it is).
-2. **Resolve Remaining Combats**: all other eligible units alternate (active player starts). After a remaining combat, if a unit has become eligible as a Fights First unit, return to step 1.
+**Two-Part Structure:**
+1. **Charging Priority** (Sub-phase 1): Current player's charging units attack first
+2. **Alternating Fight** (Sub-phase 2): Remaining units alternate between players
 
 **Key Principles:**
-- **Fights First Reward**: a successful charge grants the Fights First ability until end of turn (24.13)
+- **Charge Reward**: Successful charges grant first-strike advantage
 - **Mutual Fight**: Both players' units can act (unique to fight phase)
 - **Sequential Resolution**: Complete one unit's attacks before next unit acts
 - **Target Validation**: Check for adjacent enemies before each attack
 
 ### FIGHT Decision Tree
 
-> **Ordre d'activation V11 (12.04) — normatif :** on résout d'abord TOUS les *Fights First* (unités avec l'ability Fights First 24.13, ce qui inclut toute unité ayant chargé ce tour), les deux joueurs alternant en **commençant par le joueur actif** ; puis les *Remaining Combats* (même alternance, actif d'abord). Après un Remaining combat, si une unité devient *Fights First* éligible, revenir à l'étape 1. L'arbre ci-dessous détaille la résolution par unité (boucle d'attaque, sélection de cible, fin d'activation).
-
 ```javascript
 Start of the Figh Phase:
 │
-│   ##### Step 1 : Resolve Fights First Combats (V11 12.04) — units_charged OU ability Fights First (24.13) ; alternance, joueur actif d'abord
+│   ##### Sub-Phase 1 : Charging units attack first
 │
 ├── For each unit : ELIGIBILITY CHECK (Pool Building Phase)
 │   ├── unit.HP_CUR > 0?
 │   │   └── NO → ❌ Dead unit (Skip, no log)
 │   ├── unit.player === current_player?
 │   │   └── NO → ❌ Wrong player (Skip, no log)
-│   ├── units_charged.includes(unit.id) OR unit has Fights First ability (24.13)?
-│   │   └── NO → ❌ Not a Fights First unit (Skip, no log)
+│   ├── units_charged.includes(unit.id)?
+│   │   └── NO → ❌ Not a charging unit (Skip, no log)
 │   ├── Adjacent to enemy unit within CC_RNG?
 │   │   └── NO → ❌ No fight targets (Skip, no log)
 │   └── ALL conditions met → ✅ Add to charging_activation_pool
@@ -2047,7 +1961,7 @@ Start of the Figh Phase:
 │   │       └── end_activation (ACTION, 1, FIGHT, FIGHT, 1, 1)
 │   └── NO → All charging units processed → GO TO STEP : ATLERNATE_FIGHT
 │
-│   ##### Step 2 : Resolve Remaining Combats (V11 12.04) — alternance, joueur actif d'abord
+│   ##### Sub-Phase 2 : Alternate activation
 │
 ├── ACTIVE PLAYER ELIGIBILITY CHECK (Pool Building Phase)
 │   ├── unit.HP_CUR > 0?
@@ -2077,8 +1991,8 @@ Start of the Figh Phase:
 │
 ├── STEP : ATLERNATE_FIGHT → active_alternating_activation_pool AND non_active_alternating_activation_pool are NOT empty ?
 │   ├── YES → ALTERNATING LOOP: while active_alternating_activation_pool AND non_active_alternating_activation_pool are NOT empty
-│   │   ├── Active player turn → Active player is an AI player ?
-│   │   │   ├── YES → Active player Select a unit from active_alternating_activation_pool
+│   │   ├── Non-active player turn → Non-active player is an AI player ?
+│   │   │   ├── YES → Non-active player Select a unit from non_active_alternating_activation_pool
 │   │   │   │   ├── Clear any unit remaining in valid_target_pool
 │   │   │   │   ├── Clear TOTAL_ATTACK_LOG
 │   │   │   │   ├── ATTACK_LEFT = CC_NB
@@ -2159,8 +2073,8 @@ Start of the Figh Phase:
 │   │   │       └── Check: Either pool empty?
 │   │   │           ├── YES → Exit loop, GO TO STEP : ONE_PLAYER_HAS_UNITS_LEFT
 │   │   │           └── NO → Continue → GO TO STEP : ATLERNATE_FIGHT
-│   │   └── Non-active player turn → Non-active player is an AI player ?
-│   │       ├── YES → Non-active player Select a unit from non_active_alternating_activation_pool
+│   │   └── Active player turn → Active player is an AI player ?
+│   │       ├── YES → Active player Select a unit from active_alternating_activation_pool
 │   │       │   ├── Clear any unit remaining in valid_target_pool
 │   │       │   ├── Clear TOTAL_ATTACK_LOG
 │   │       │   ├── ATTACK_LEFT = CC_NB
@@ -3218,43 +3132,3 @@ See AI_INTEGRATION.md for complete test scenarios that validate
 AI_TURN.md compliance across multiple phases.
 
 **This streamlined document brings Claude to Level 4 understanding, enabling expert-level rule comprehension and intelligent decision-making in any implementation context.**
-
----
-
-## 🆕 V11 COMPLIANCE MATRIX — CHARGE PHASE
-
-> Source de vérité : `Documentation/40k_rules`. Statut établi par lecture du code (`engine/phase_handlers/charge_handlers.py`, `engine/phase_handlers/shared_utils.py`, `config/game_config.json`).
-
-| Règle | Contenu | Statut moteur | Mapping / notes |
-|---|---|---|---|
-| 11.01 | Start of Charge phase | ✅ | init pools, `charge_roll_values` / `charge_target_selections` |
-| 11.02 | Charge : declare + charge roll 2D6 + attempt | ✅ | jet 2D6 stocké par unité ; budget = 2D6 × `inches_to_subhex` |
-| 11.02 | Éligible si sur plateau, à 12″ d'un ennemi, PAS engaged, PAS d'advance/fall-back ce tour | ✅ | exclut `units_advanced` (sauf rule `charge_after_advance`) et `units_fled` (sauf rule) ; portée via `charge_max_distance`=12 |
-| 11.03 | End of Charge phase | ✅ | transition → fight |
-| 11.04 | Charge move (max = charge roll ; cibles à 12″ et ≤ max ; fin engaged avec TOUTES les cibles, PAS engaged avec des non-cibles ; Fights First jusqu'à fin du tour 24.13) | 🟡 | budget/cibles OK ; Fights First → `units_charged` (lu par l'ordre Fight) ; contrainte « pas engaged avec une non-cible » → ⚠️ à vérifier |
-
-**Limites techniques :** distances en hex = pouces × `inches_to_subhex` ; engagement range = `engagement_zone` (cf. matrice Movement).
-
----
-
-## 🆕 V11 COMPLIANCE MATRIX — FIGHT PHASE
-
-> Source de vérité : `Documentation/40k_rules`. Statut établi par lecture du code (`engine/phase_handlers/fight_handlers.py`, `engine/phase_handlers/shared_utils.py`). La séquence d'attaque mêlée réutilise Making Attacks (04) / Attack Sequence (05) — **mêmes lacunes que la matrice Shooting** (critical hit/wound, Feel No Pain, Lethal/Sustained/Devastating/Twin-Linked/Anti non appliqués).
-
-| Règle | Contenu | Statut moteur | Mapping / notes |
-|---|---|---|---|
-| 12.01 | Start of Fight phase | ✅ | |
-| 12.02 | Pile in (les deux joueurs, unités éligibles) | ✅ | implémenté |
-| 12.03 | Pile-in move (3″ ; éligible si engaged / a chargé / overrun ; fin engaged ; modèles en base-contact non déplaçables) | 🟡 | 3″ via `3 * scale` ; base-contact = adjacence hex ; branche `overrun` ⛔ absente |
-| 12.04 | Fight : alterné, **Fights First** puis **Remaining** ; éligible si engaged ou a chargé | 🟡 + ⚠️ | structure FF/remaining OK (`units_charged` + ability `units_cache[sid].fights_first`) ; **DIVERGENCE : le moteur démarre l'alternance par le non-active player ; V11 (12.04) démarre Fights First par le joueur actif (« the player whose turn it is »)** |
-| 12.05 | Normal fight (engaged) | ✅ | |
-| 12.06 | Overrun fight (unengaged devenu engaged → pile-in additionnel) | ⛔ Non implémenté | aucune branche `overrun` |
-| 12.07 | Consolidate (les deux joueurs) | 🟡 | consolidation implémentée (3″) |
-| 12.08 | Consolidation move (3″ ; 3 modes : Ongoing / Engaging / Objective ; Engaging peut tirer de nouvelles unités au combat) | 🟡 | distance 3″ OK ; **les 3 modes nommés V11 et leurs contraintes (objective consolidation, engaging → nouvelles unités éligibles à combattre) non modélisés** |
-| 12.09 | End of Fight phase | ✅ | |
-
-**Abilities mêlée (24) :** EXTRA ATTACKS 24.11 (registry ✅, application ⚠️ à vérifier) ; FIGHTS FIRST 24.13 (✅ via flag `fights_first`) ; LANCE 24.21 (⛔ absent du registry) ; CLEAVE 24.06 (⛔ absent du registry).
-
-**Limites techniques (moteur 2D / hex) :**
-- Distances pile-in / consolidation 3″ = 3 × `inches_to_subhex` ; base-contact ≈ adjacence hex.
-- Séquence d'attaque mêlée = mêmes limites que la séquence de tir (cf. matrice Shooting).
