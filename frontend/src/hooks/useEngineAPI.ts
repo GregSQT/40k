@@ -3144,6 +3144,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   // Event handlers aligned with backend
   const handleSelectUnit = useCallback(
     async (unitId: number | string | null) => {
+      // Allocation manuelle des pertes en cours (Desperate Escape) : aucun changement de
+      // sélection/activation tant que les mortal wounds ne sont pas attribuées.
+      if (manualAllocationRef.current && unitId !== null) return;
       const numericUnitId = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
 
       // TEST/DEBUG : mode battle-shock test actif → tout clic sur une unité lui fait un
@@ -3456,6 +3459,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   const handleStartMovePreview = useCallback(
     async (unitId: number | string, col: number | string, row: number | string) => {
+      // Desperate Escape : allocation des mortal wounds en cours → ne pas entrer en preview.
+      if (manualAllocationRef.current) return;
       // Double-clic depuis squadModelMove : nettoyer le plan provisoire avant d'entrer en movePreview.
       squadMoveSessionRef.current += 1;
       squadMoveModelPoolRef.current = new Set();
@@ -3607,6 +3612,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Double-clic escouade / simple-clic fig : entre en mode plan provisoire par-figurine. */
   const handleStartSquadModelMove = useCallback(
     async (unitId: number | string) => {
+      // Desperate Escape : allocation des mortal wounds en cours → ne pas entrer dans le plan.
+      if (manualAllocationRef.current) return;
       const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
       // Desperate Escape : activer d'abord ; si hazard requis, ne PAS entrer dans le plan
       // par-figurine (le popup ☢️ doit être résolu avant tout déplacement).

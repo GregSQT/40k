@@ -885,6 +885,13 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
             flush=True,
         )
         if engaged_de and shocked_de:
+            # Desperate Escape : résolution SÉQUENTIELLE. Tant que le hazard n'est pas roulé/
+            # attribué, l'unité ne doit PAS être en cours de déplacement côté front : aucun pool
+            # vert, aucun ghost. movement_clear_preview met aussi active_movement_unit=None, et on
+            # le laisse ainsi (les handlers hazard n'en dépendent pas : confirm via action.unitId,
+            # allocate via pending_hazard_allocation). _resume_after_hazard re-posera l'unité active
+            # + le pool Fall Back une fois les MW attribuées → le flux move normal reprend.
+            movement_clear_preview(game_state)
             return True, {
                 "action": "requires_hazard",
                 "unitId": unit_id,

@@ -2686,6 +2686,10 @@ class W40KEngine(gym.Env):
                 "activation_complete": True,
                 "waiting_for_player": False,
             }
+        # Hazard résolu, unité vivante → on (re)pose l'unité active + le pool Fall Back. Côté
+        # front, ce payload est identique à une activation engagée normale → le flux move preview
+        # (ghost + Valider) reprend exactement comme pour une unité non hazardée.
+        self.game_state["active_movement_unit"] = sid
         _mh.movement_build_valid_destinations_pool(self.game_state, sid)
         pool = self.game_state["valid_move_destinations_pool"]
         self.game_state["preview_hexes"] = pool

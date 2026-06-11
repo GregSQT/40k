@@ -3266,6 +3266,10 @@ export default function Board({
     const onEntryPointerDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
       if (e.target !== canvas) return;
+      // Allocation manuelle des pertes en cours (Desperate Escape) : NE PAS entrer en
+      // mode plan par-figurine. On bail SANS stopImmediatePropagation pour laisser le clic
+      // au handler d'allocation move (effet suivant, enregistré après en capture-phase).
+      if (manualAllocationRef.current) return;
       const rect = canvas.getBoundingClientRect();
       const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
       const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
@@ -3375,6 +3379,62 @@ export default function Board({
     eligibleUnitIds,
     selectedUnitId,
   ]);
+
+  // Desperate Escape (phase move) : allocation manuelle des mortal wounds. L'effet tir
+  // (gated phase==="shoot") ne traite pas le clic en move ; on reproduit ici son bloc
+  // d'allocation. Enregistré APRÈS onEntryPointerDown (qui bail sur manualAllocationRef
+  // sans stopImmediate) → ce handler capte le clic et bloque tout traitement aval.
+  useEffect(() => {
+    if (phase !== "move") return;
+    if (measureMode.kind !== "off") return;
+    if (!boardConfig) return;
+
+    const HEX_HIT_TOLERANCE = 4;
+    const onPointerDown = (e: PointerEvent) => {
+      // Canvas/app résolus PARESSEUSEMENT au clic : à l'enregistrement de l'effet, le canvas
+      // PIXI peut ne pas encore exister (init asynchrone). Les résoudre ici garantit que le
+      // listener est attaché dès la phase move, sans dépendre du timing d'init.
+      const canvas = canvasContainerRef.current?.querySelector("canvas");
+      const app = appRef.current;
+      if (!canvas || !app) return;
+      if (e.target !== canvas) return;
+      const alloc = manualAllocationRef.current;
+      if (!alloc) return;
+      if (e.button !== 0) return; // clic droit ignoré pendant l'allocation
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
+      const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
+      const px = (e.clientX - rect.left) * scaleX;
+      const py = (e.clientY - rect.top) * scaleY;
+      const { col, row } = pixelToHex(
+        px,
+        py,
+        boardConfig.hex_radius,
+        boardConfig.margin,
+        boardConfig.cols,
+        boardConfig.rows
+      );
+      // Allocation active : on bloque TOUT clic gauche board (pas seulement les matchs) pour
+      // éviter qu'un clic hors figurine confirme/annule un move pendant l'attribution.
+      e.stopImmediatePropagation();
+      const clickCube = offsetToCube(col, row);
+      let chosen: string | null = null;
+      let bestD = Infinity;
+      for (const c of alloc.choices) {
+        const d = cubeDistance(clickCube, offsetToCube(c.col, c.row));
+        if (d <= HEX_HIT_TOLERANCE && d < bestD) {
+          bestD = d;
+          chosen = c.model_id;
+        }
+      }
+      if (chosen) {
+        void onAllocateModelRef.current?.(chosen);
+      }
+    };
+
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [phase, measureMode.kind, boardConfig]);
 
   // squad.md brique 3 : en mode plan par-figurine, un clic gauche sur une fig de l'escouade
   // la selectionne (resout model_id depuis les positions provisoires du plan) → onSelectModelForMove.
