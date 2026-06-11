@@ -5140,27 +5140,48 @@ export const BoardWithAPI: React.FC = () => {
             aria-modal="true"
             aria-labelledby="hazard-warning-title"
             style={{
-              width: "min(640px, calc(100vw - 32px))",
-              backgroundColor: "#1a0a06",
-              border: "2px solid #f59e0b",
-              borderRadius: "10px",
-              boxShadow: "0 14px 40px rgba(0,0,0,0.55)",
-              padding: "22px 24px 18px 24px",
-              color: "#fdebd0",
+              width: "min(420px, calc(100vw - 32px))",
+              background: "rgba(20, 20, 20, 0.98)",
+              border: "2px solid #4caf50",
+              borderRadius: "6px",
+              boxShadow: "0 4px 12px rgba(0, 0, 0, 0.5)",
+              padding: "16px 18px 14px 18px",
+              color: "#fff",
             }}
             onClick={(event) => event.stopPropagation()}
             onKeyDown={(event) => event.stopPropagation()}
           >
             <h2
               id="hazard-warning-title"
-              style={{ margin: "0 0 12px 0", color: "#fbbf24", fontSize: "30px" }}
+              style={{
+                margin: "0 0 16px 0",
+                color: "#a5d6a7",
+                background: "#0b410d",
+                fontSize: "16px",
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.5px",
+                padding: "6px 10px",
+                borderRadius: "4px",
+              }}
             >
               ☢️ Desperate Escape !
             </h2>
-            <p style={{ margin: 0, lineHeight: 1.5, fontSize: "19px" }}>
-              Cette unité est sous le choc (Battle-shock) et engagée. La déplacer = Fall Back en
-              Desperate Escape : un jet de hazardous par figurine (1 mortal wound sur 1-2) AVANT de
-              bouger. Continuer ?
+            <p style={{ margin: 0, lineHeight: 1.5, fontSize: "14px", color: "#c8e6cf" }}>
+              Le mouvement Desperate Escape que cette unité va effectuer entraine des{" "}
+              <TooltipWrapper text="Roll D6 per model: on a 1-2, that unit suffers 1 (or 3 if it is a MONSTER/VEHICLE) mortal wounds.">
+                <span
+                  style={{
+                    color: "#fde68a",
+                    fontWeight: 700,
+                    textDecoration: "underline",
+                    cursor: "help",
+                  }}
+                >
+                  HAZARD ROLLS
+                </span>
+              </TooltipWrapper>
+              . Continuer ?
             </p>
             <div
               style={{
@@ -5175,12 +5196,12 @@ export const BoardWithAPI: React.FC = () => {
                 onClick={() => apiProps.onCancelHazardWarning()}
                 style={{
                   padding: "10px 14px",
-                  border: "1px solid #9ca3af",
+                  border: "1px solid #41506b",
                   borderRadius: "6px",
-                  background: "rgba(31, 41, 55, 0.9)",
-                  color: "#f3f4f6",
+                  background: "#0c3d14",
+                  color: "#e6e9f0",
                   cursor: "pointer",
-                  fontSize: "16px",
+                  fontSize: "14px",
                 }}
               >
                 Annuler
@@ -5190,16 +5211,16 @@ export const BoardWithAPI: React.FC = () => {
                 onClick={() => void apiProps.onConfirmHazardWarning()}
                 style={{
                   padding: "10px 14px",
-                  border: "1px solid #f59e0b",
+                  border: "1px solid #4caf50",
                   borderRadius: "6px",
-                  background: "#7c2d12",
-                  color: "#fff7ed",
+                  background: "#1b7a2b",
+                  color: "#eafff0",
                   cursor: "pointer",
-                  fontSize: "16px",
-                  fontWeight: 600,
+                  fontSize: "14px",
+                  fontWeight: 700,
                 }}
               >
-                Rouler le hazard
+                Confirmer
               </button>
             </div>
           </div>
