@@ -2938,9 +2938,6 @@ export const BoardWithAPI: React.FC = () => {
     );
   };
 
-  // Relief commun aux boutons des barres d'action : highlight haut + ombre interne bas + ombre portée.
-  const RELIEF =
-    "inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -3px 6px rgba(0,0,0,0.30), 0 2px 4px rgba(0,0,0,0.35)";
   const rightColumnContent = (
     <RightColumnTutorialSpotlight>
       {gameConfig ? (
@@ -2997,9 +2994,7 @@ export const BoardWithAPI: React.FC = () => {
               style={{
                 border: "1px solid rgba(0,0,0,0.35)",
                 borderRadius: 6,
-                background: "#6b7280",
-                boxShadow: RELIEF,
-                color: "#fff",
+                background: "#6b7280",                color: "#fff",
                 cursor: "pointer",
                 fontSize: 14,
                 fontWeight: 700,
@@ -3025,9 +3020,7 @@ export const BoardWithAPI: React.FC = () => {
                   style={{
                     border: "1px solid rgba(0,0,0,0.35)",
                     borderRadius: 6,
-                    background: canCharge ? "#7c3aed" : "#3b0764",
-                    boxShadow: RELIEF,
-                    color: "#fff",
+                    background: canCharge ? "#7c3aed" : "#3b0764",                    color: "#fff",
                     cursor: canCharge ? "pointer" : "not-allowed",
                     fontSize: 14,
                     fontWeight: 700,
@@ -3065,6 +3058,7 @@ export const BoardWithAPI: React.FC = () => {
                 <button
                   type="button"
                   key="charge-to-the-sky"
+                  className={tookToSkies ? "btn-active" : undefined}
                   onClick={() => {
                     if (!isGameOver) apiProps.onTakeToSkies?.(flyUnitId);
                   }}
@@ -3078,9 +3072,7 @@ export const BoardWithAPI: React.FC = () => {
                     width: 130,
                     textAlign: "center",
                     marginLeft: "auto",
-                    background: "#38bdf8",
-                    boxShadow: tookToSkies ? `0 0 0 2px #86efac, 0 0 10px 3px rgba(134,239,172,0.85), ${RELIEF}` : RELIEF,
-                    cursor: "pointer",
+                    background: "#38bdf8",                    cursor: "pointer",
                   }}
                 >
                   To the sky (-2)
@@ -3119,9 +3111,7 @@ export const BoardWithAPI: React.FC = () => {
               style={{
                 border: "1px solid rgba(0,0,0,0.35)",
                 borderRadius: 6,
-                background: "#6b7280",
-                boxShadow: RELIEF,
-                color: "#fff",
+                background: "#6b7280",                color: "#fff",
                 cursor: "pointer",
                 fontSize: 14,
                 fontWeight: 700,
@@ -3144,9 +3134,7 @@ export const BoardWithAPI: React.FC = () => {
                   style={{
                     border: "1px solid rgba(0,0,0,0.35)",
                     borderRadius: 6,
-                    background: canValidate ? "#7c3aed" : "#3b0764",
-                    boxShadow: RELIEF,
-                    color: canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+                    background: canValidate ? "#7c3aed" : "#3b0764",                    color: canValidate ? "#fff" : "rgba(229,231,235,0.5)",
                     cursor: canValidate ? "pointer" : "not-allowed",
                     fontSize: 14,
                     fontWeight: 700,
@@ -3207,9 +3195,7 @@ export const BoardWithAPI: React.FC = () => {
             style={{
               border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
-              background: "#6b7280",
-              boxShadow: RELIEF,
-              color: "#fff",
+              background: "#6b7280",              color: "#fff",
               cursor: "pointer",
               fontSize: 14,
               fontWeight: 700,
@@ -3233,9 +3219,7 @@ export const BoardWithAPI: React.FC = () => {
                 borderRadius: 6,
                 background: apiProps.squadMovePlan.canValidate
                   ? "#16a34a"
-                  : "#052e16",
-                boxShadow: RELIEF,
-                color: apiProps.squadMovePlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+                  : "#052e16",                color: apiProps.squadMovePlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
                 cursor: apiProps.squadMovePlan.canValidate ? "pointer" : "not-allowed",
                 fontSize: 14,
                 fontWeight: 700,
@@ -3273,6 +3257,7 @@ export const BoardWithAPI: React.FC = () => {
               <button
                 type="button"
                 key="to-the-sky"
+                className={tookToSkies ? "btn-active" : undefined}
                 onClick={() => {
                   if (!advancedFly && !isGameOver) apiProps.onTakeToSkies?.(flyUnitId);
                 }}
@@ -3285,9 +3270,7 @@ export const BoardWithAPI: React.FC = () => {
                   padding: "8px 14px",
                   width: 110,
                   textAlign: "center",
-                  background: "#38bdf8",
-                  boxShadow: tookToSkies ? `0 0 0 2px #86efac, 0 0 10px 3px rgba(134,239,172,0.85), ${RELIEF}` : RELIEF,
-                  cursor: advancedFly ? "default" : "pointer",
+                  background: "#38bdf8",                  cursor: advancedFly ? "default" : "pointer",
                 }}
               >
                 To the sky (M-2)
@@ -3323,6 +3306,7 @@ export const BoardWithAPI: React.FC = () => {
                 <button
                   type="button"
                   key={label}
+                  className={state === "selected" ? "btn-active" : undefined}
                   disabled={state === "disabled"}
                   onClick={() => {
                     if (state !== "disabled" && !isGameOver) onClick?.();
@@ -3336,9 +3320,7 @@ export const BoardWithAPI: React.FC = () => {
                     padding: "8px 14px",
                     width: 110,
                     textAlign: "center",
-                    background: state === "disabled" ? accent.dark : accent.relief,
-                    boxShadow: state === "selected" ? `0 0 0 2px #86efac, 0 0 10px 3px rgba(134,239,172,0.85), ${RELIEF}` : RELIEF,
-                    cursor:
+                    background: state === "disabled" ? accent.dark : accent.relief,                    cursor:
                       state === "disabled" ? "not-allowed" : state === "selected" ? "default" : "pointer",
                     opacity: 1,
                   }}
@@ -3421,9 +3403,7 @@ export const BoardWithAPI: React.FC = () => {
             style={{
               border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
-              background: "#6b7280",
-              boxShadow: RELIEF,
-              color: "#fff",
+              background: "#6b7280",              color: "#fff",
               cursor: "pointer",
               fontSize: 14,
               fontWeight: 700,
@@ -3443,9 +3423,7 @@ export const BoardWithAPI: React.FC = () => {
               borderRadius: 6,
               background: apiProps.squadShootPlan.canValidate
                 ? "#16a34a"
-                : "#052e16",
-              boxShadow: RELIEF,
-              color: apiProps.squadShootPlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+                : "#052e16",              color: apiProps.squadShootPlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
               cursor: apiProps.squadShootPlan.canValidate ? "pointer" : "not-allowed",
               fontSize: 14,
               fontWeight: 700,

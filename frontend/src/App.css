@@ -3374,3 +3374,25 @@ textarea:focus {
 .squad-action-bar button:focus:not(:focus-visible) {
   outline: none;
 }
+
+/* Relief commun + liseret/halo des boutons activés (toggle ON), centralisés ici.
+   Les backgrounds (couleurs d'état) restent gérés en JS car spécifiques à chaque bouton.
+   Ajuster la couleur du halo via --btn-glow / --btn-glow-soft. */
+.squad-action-bar {
+  --btn-glow: #86efac;
+  --btn-glow-soft: rgba(134, 239, 172, 0.85);
+}
+.squad-action-bar button {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.3),
+    0 2px 4px rgba(0, 0, 0, 0.35);
+}
+.squad-action-bar button.btn-active {
+  box-shadow:
+    0 0 0 2px var(--btn-glow),
+    0 0 10px 3px var(--btn-glow-soft),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.3),
+    0 2px 4px rgba(0, 0, 0, 0.35);
+}
