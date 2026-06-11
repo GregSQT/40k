@@ -3176,6 +3176,46 @@ export const BoardWithAPI: React.FC = () => {
 
       {/* Barre d'action move : Cancel/Validate (moitié gauche) + boutons de mode (moitié droite).
           Affichée dès l'activation (movePreview) et en plan par-figurine (squadModelMove). */}
+      {settings.battleShockTestEnabled &&
+        apiProps.gameState?.phase === "move" &&
+        apiProps.gameState?.active_movement_unit == null &&
+        apiProps.squadMovePlan == null && (
+        <div
+          className="squad-action-bar"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-start",
+            background: "#1f2937",
+            border: "1px solid #555",
+            borderRadius: "8px",
+            padding: 8,
+            marginTop: -6,
+            marginBottom: 2,
+          }}
+        >
+          <button
+            type="button"
+            className={apiProps.battleShockTestMode ? "btn-active" : undefined}
+            onClick={() => apiProps.onToggleBattleShockTestMode?.()}
+            style={{
+              border: "1px solid rgba(0,0,0,0.35)",
+              borderRadius: 6,
+              color: "#fff",
+              fontSize: 14,
+              fontWeight: 700,
+              padding: "8px 14px",
+              textAlign: "center",
+              background: apiProps.battleShockTestMode ? "#7c3aed" : "#2e1065",
+              cursor: "pointer",
+            }}
+          >
+            {apiProps.battleShockTestMode
+              ? "Battle-shock test : ON — clique une unité"
+              : "Battle-shock test : OFF"}
+          </button>
+        </div>
+      )}
       {apiProps.gameState?.phase === "move" &&
         (apiProps.gameState?.active_movement_unit != null ||
           apiProps.squadMovePlan != null) && (
@@ -3370,13 +3410,6 @@ export const BoardWithAPI: React.FC = () => {
                   {modeBtn("Stationary", advanced ? "disabled" : "relief", grey, () =>
                     apiProps.onStationary?.(advUnitId)
                   )}
-                  {settings.battleShockTestEnabled &&
-                    modeBtn(
-                      "Battle-shock",
-                      "relief",
-                      { relief: "#7c3aed", dark: "#2e1065" },
-                      () => apiProps.onForceBattleShock?.(advUnitId)
-                    )}
                 </>
               );
             })()}
@@ -5082,6 +5115,92 @@ export const BoardWithAPI: React.FC = () => {
                   Valider
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {apiProps.hazardWarningPopup && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — stopPropagation intentionnel
+        <div
+          role="presentation"
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.72)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 12000,
+          }}
+          onClick={() => apiProps.onCancelHazardWarning()}
+          onKeyDown={() => apiProps.onCancelHazardWarning()}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="hazard-warning-title"
+            style={{
+              width: "min(640px, calc(100vw - 32px))",
+              backgroundColor: "#1a0a06",
+              border: "2px solid #f59e0b",
+              borderRadius: "10px",
+              boxShadow: "0 14px 40px rgba(0,0,0,0.55)",
+              padding: "22px 24px 18px 24px",
+              color: "#fdebd0",
+            }}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            <h2
+              id="hazard-warning-title"
+              style={{ margin: "0 0 12px 0", color: "#fbbf24", fontSize: "30px" }}
+            >
+              ☢️ Desperate Escape !
+            </h2>
+            <p style={{ margin: 0, lineHeight: 1.5, fontSize: "19px" }}>
+              Cette unité est sous le choc (Battle-shock) et engagée. La déplacer = Fall Back en
+              Desperate Escape : un jet de hazardous par figurine (1 mortal wound sur 1-2) AVANT de
+              bouger. Continuer ?
+            </p>
+            <div
+              style={{
+                marginTop: "20px",
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "10px",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => apiProps.onCancelHazardWarning()}
+                style={{
+                  padding: "10px 14px",
+                  border: "1px solid #9ca3af",
+                  borderRadius: "6px",
+                  background: "rgba(31, 41, 55, 0.9)",
+                  color: "#f3f4f6",
+                  cursor: "pointer",
+                  fontSize: "16px",
+                }}
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => void apiProps.onConfirmHazardWarning()}
+                style={{
+                  padding: "10px 14px",
+                  border: "1px solid #f59e0b",
+                  borderRadius: "6px",
+                  background: "#7c2d12",
+                  color: "#fff7ed",
+                  cursor: "pointer",
+                  fontSize: "16px",
+                  fontWeight: 600,
+                }}
+              >
+                Rouler le hazard
+              </button>
             </div>
           </div>
         </div>

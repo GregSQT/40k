@@ -479,6 +479,7 @@ type BoardProps = {
   onCancelSquadShoot?: () => void | Promise<void>;
   /** Allocation manuelle des pertes au tir (defenseur humain) : figs choisissables. */
   manualAllocation?: {
+    kind?: "shoot" | "hazard";
     attacker_unit_id: string;
     target_unit_id: string;
     defender_player: number;

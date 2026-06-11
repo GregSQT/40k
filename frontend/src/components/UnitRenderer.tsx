@@ -2327,7 +2327,7 @@ export class UnitRenderer {
       });
     }
 
-    const r = Math.max(5, HEX_RADIUS * 0.32);
+    const r = Math.max(5, HEX_RADIUS * 0.22);
     const scaledOffset = ((HEX_RADIUS * unitIconScale) / 2) * 0.8;
     // Bottom-left of a figure (mirror of the bottom-right charge badge).
     const drawBadgeAt = (cx: number, cy: number, name: string): void => {
@@ -2491,7 +2491,7 @@ export class UnitRenderer {
           ? (displayBase / 2) * HEX_HORIZ_SPACING
           : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
     }
-    const emojiSize = bottomExtentY * 0.7;
+    const emojiSize = bottomExtentY * 1.0;
 
     if (this.props.statusBadgePerModel) {
       // Per-figure mode — one emoji centred-bottom of each living figure (unit-level status).

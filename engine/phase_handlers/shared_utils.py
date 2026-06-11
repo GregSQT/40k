@@ -2553,7 +2553,7 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
     """
     require_key(game_state, "models_cache")
     require_key(game_state, "squad_models")
-    valid_reasons = ("combat", "coherency_removal", "deployment_no_space")
+    valid_reasons = ("combat", "coherency_removal", "deployment_no_space", "hazard")
     if reason not in valid_reasons:
         raise ValueError(f"destroy_model: invalid reason {reason!r}, expected one of {valid_reasons}")
 
@@ -2813,12 +2813,14 @@ def apply_snap_corrections(
     return corrected
 
 
-def roll_hazard_for_unit(unit_id: str, game_state: Dict[str, Any]) -> int:
+def roll_hazard_for_unit(unit_id: str, game_state: Dict[str, Any], auto_resolve: bool) -> int:
     """Hazard roll pour une unité (règle 06.03) — avant un Desperate Escape fall-back.
 
     Tire 1D6 par figurine vivante simultanément.
     Sur 1-2 : 1 mortal wound (ou 3 si toute l'unité est MONSTER ou VEHICLE).
-    Retourne le total de mortal wounds appliqués.
+    Les MW sont attribuées via la séquence 06.02 (``allocate_mortal_wounds``) :
+    ``auto_resolve`` est propagé (IA/gym = choix déterministe ; humain = prompt étape 3).
+    Retourne le total de mortal wounds rollés (avant arrêt éventuel si l'unité meurt).
     """
     import random
     squad_models = require_key(game_state, "squad_models")
@@ -2844,8 +2846,9 @@ def roll_hazard_for_unit(unit_id: str, game_state: Dict[str, Any]) -> int:
     fails = sum(1 for r in rolls if r <= 2)
     total_wounds = fails * wounds_per_fail
     if total_wounds > 0:
-        current_hp = require_hp_from_cache(str(unit_id), game_state)
-        update_units_cache_hp(game_state, str(unit_id), max(0, current_hp - total_wounds))
+        # 06.02 : attribution figurine par figurine via destroy_model (retrait propre),
+        # PAS l'agrégat units_cache qui ne retirait aucune figurine sur du multi-fig.
+        allocate_mortal_wounds(game_state, str(unit_id), total_wounds, auto_resolve)
 
     col = int(unit.get("col", -1))
     row = int(unit.get("row", -1))
@@ -2863,6 +2866,152 @@ def roll_hazard_for_unit(unit_id: str, game_state: Dict[str, Any]) -> int:
         "result": f"{total_wounds} MW",
     })
     return total_wounds
+
+
+def select_eligible_models(game_state: Dict[str, Any], squad_id: str) -> List[str]:
+    """Figurines éligibles à recevoir le prochain mortal wound (séquence 06.02).
+
+    Ordre 40k « Select Model » — première catégorie non vide :
+      1. non-CHARACTER déjà blessée (HP_CUR < HP_MAX) ;
+      2. sinon non-CHARACTER (toutes) ;
+      3. sinon CHARACTER déjà blessée ;
+      4. sinon CHARACTER (toutes).
+
+    Retourne les model_ids de cette catégorie. Le choix du joueur n'existe que si
+    ``len(...) >= 2`` (figs également éligibles) ; ``len == 1`` = figurine forcée.
+    Liste vide = unité sans figurine vivante (détruite).
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    sid = str(squad_id)
+    if sid not in squad_models:
+        raise KeyError(f"select_eligible_models: unit {squad_id} not in squad_models")
+    alive = [m for m in squad_models[sid] if m in models_cache]
+    non_char = [m for m in alive if not _is_character_role(models_cache[m].get("role"))]
+    char = [m for m in alive if _is_character_role(models_cache[m].get("role"))]
+
+    def wounded(mids: List[str]) -> List[str]:
+        return [m for m in mids
+                if int(models_cache[m]["HP_CUR"]) < int(models_cache[m]["HP_MAX"])]
+
+    for group in (wounded(non_char), non_char, wounded(char), char):
+        if group:
+            return list(group)
+    return []
+
+
+def allocate_mortal_wounds(
+    game_state: Dict[str, Any], squad_id: str, n_wounds: int, auto_resolve: bool
+) -> int:
+    """Attribue ``n_wounds`` mortal wounds à une unité (séquence 06.02), une par une.
+
+    - ``auto_resolve=True`` (IA / gym, pas de prompt possible) : choix déterministe
+      ``eligibles[0]`` quand plusieurs figs sont également éligibles.
+    - ``auto_resolve=False`` (joueur humain) : si un choix existe (>= 2 figs également
+      éligibles), l'allocation est SUSPENDUE — on pose ``pending_hazard_allocation`` et
+      on rend la main (le clic figurine reprendra via ``apply_hazard_allocate_model``).
+
+    Chaque MW retire 1 HP à la figurine choisie ; la figurine n'est retirée du jeu
+    (``destroy_model`` reason='hazard') qu'à ``HP_CUR == 0``. On s'arrête si l'unité
+    est détruite avant d'avoir attribué toutes les MW (06.02 : « until … destroyed »).
+
+    Retourne le nombre de mortal wounds réellement attribués avant un éventuel pending.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    sid = str(squad_id)
+    remaining = int(n_wounds)
+    applied = 0
+    while remaining > 0:
+        eligibles = select_eligible_models(game_state, sid)
+        if not eligibles:
+            break  # unité détruite : plus rien à blesser
+        if len(eligibles) == 1 or auto_resolve:
+            target = eligibles[0]
+        else:
+            # Choix joueur humain : suspendre l'allocation, poser le prompt.
+            unit = get_unit_by_id(game_state, sid)
+            if unit is None:
+                raise KeyError(f"allocate_mortal_wounds: unit {sid} not found")
+            game_state["pending_hazard_allocation"] = {
+                "squad_id": sid,
+                "controlling_player": int(require_key(unit, "player")),
+                "wounds_remaining": remaining,
+                "resume": "move_activation",
+            }
+            return applied
+        new_hp = int(models_cache[target]["HP_CUR"]) - 1
+        if new_hp <= 0:
+            destroy_model(game_state, target, reason="hazard")
+        else:
+            update_model_hp(game_state, target, new_hp)
+        applied += 1
+        remaining -= 1
+    return applied
+
+
+def hazard_allocation_waiting_payload(game_state: Dict[str, Any]) -> Dict[str, Any]:
+    """Payload waiting d'une attribution de mortal wounds (hazard) en cours.
+
+    Read-only : reconstruit les figurines choisissables (séquence 06.02 courante) +
+    ``wounds_remaining``. Utilisé par le garde-fou et après chaque clic. Suppose un
+    ``pending_hazard_allocation`` présent (sinon lève). Forme calquée sur l'allocation
+    manuelle du tir (``choices: [{model_id, col, row, HP_CUR, HP_MAX}]``)."""
+    pending = require_key(game_state, "pending_hazard_allocation")
+    models_cache = require_key(game_state, "models_cache")
+    sid = str(pending["squad_id"])
+    eligibles = select_eligible_models(game_state, sid)
+    choices = [
+        {
+            "model_id": mid,
+            "col": models_cache[mid].get("col"),  # get allowed
+            "row": models_cache[mid].get("row"),  # get allowed
+            "HP_CUR": int(models_cache[mid]["HP_CUR"]),
+            "HP_MAX": int(models_cache[mid]["HP_MAX"]),
+        }
+        for mid in eligibles
+    ]
+    return {
+        "action": "squad_hazard_manual_alloc",
+        "waiting_for_player": True,
+        "phase": "move",
+        "allocation": {
+            "squad_id": sid,
+            "controlling_player": int(pending["controlling_player"]),
+            "choices": choices,
+            "wounds_remaining": int(pending["wounds_remaining"]),
+        },
+    }
+
+
+def apply_hazard_allocate_model(game_state: Dict[str, Any], model_id: str) -> None:
+    """Applique 1 mortal wound à la figurine choisie par le joueur (clic), puis poursuit
+    la séquence 06.02 : figs forcées en auto, nouveau prompt si un nouveau choix apparaît.
+
+    Suppose un ``pending_hazard_allocation`` présent. Lève si la figurine n'est pas
+    éligible à l'étape courante, ou si aucun choix n'était réellement en attente."""
+    pending = require_key(game_state, "pending_hazard_allocation")
+    models_cache = require_key(game_state, "models_cache")
+    sid = str(pending["squad_id"])
+    mid = str(model_id)
+    eligibles = select_eligible_models(game_state, sid)
+    if mid not in eligibles:
+        raise ValueError(
+            f"apply_hazard_allocate_model: model {mid} non éligible (éligibles={eligibles})"
+        )
+    if len(eligibles) < 2:
+        raise ValueError("apply_hazard_allocate_model: aucun choix en attente (allocation forcée)")
+    remaining = int(pending["wounds_remaining"])
+    new_hp = int(models_cache[mid]["HP_CUR"]) - 1
+    if new_hp <= 0:
+        destroy_model(game_state, mid, reason="hazard")
+    else:
+        update_model_hp(game_state, mid, new_hp)
+    remaining -= 1
+    # Wound courante consommée : on efface le pending puis on poursuit la séquence
+    # (auto pour les figs forcées ; re-pose un pending si un nouveau choix apparaît).
+    del game_state["pending_hazard_allocation"]
+    if remaining > 0:
+        allocate_mortal_wounds(game_state, sid, remaining, auto_resolve=False)
 
 
 def is_unit_at_half_strength(unit_id: str, game_state: Dict[str, Any]) -> bool:
@@ -2933,12 +3082,13 @@ def roll_battle_shock(unit_id: str, game_state: Dict[str, Any]) -> bool:
 
 
 def desperate_escape_pre_move(
-    squad_id: str, game_state: Dict[str, Any], was_engaged: bool
+    squad_id: str, game_state: Dict[str, Any], was_engaged: bool, auto_resolve: bool
 ) -> Tuple[bool, bool, int]:
     """Desperate Escape (09.07) — phase AVANT le mouvement.
 
     Une unité engagée ET battle-shocked qui fait un Fall Back doit faire un Desperate Escape :
-    un hazard roll (06.03) par figurine est résolu AVANT de bouger.
+    un hazard roll (06.03) par figurine est résolu AVANT de bouger. ``auto_resolve`` pilote
+    l'attribution 06.02 (IA/gym déterministe ; humain → prompt étape 3).
 
     Retourne ``(is_desperate, is_alive, hazard_wounds)`` :
     - ``is_desperate`` : True si l'unité fait un Desperate Escape (engagée + battle-shocked).
@@ -2951,7 +3101,7 @@ def desperate_escape_pre_move(
     is_desperate = bool(was_engaged) and bool(unit.get("battle_shocked", False))
     if not is_desperate:
         return False, True, 0
-    hazard_wounds = roll_hazard_for_unit(str(squad_id), game_state)
+    hazard_wounds = roll_hazard_for_unit(str(squad_id), game_state, auto_resolve)
     return True, is_unit_alive(str(squad_id), game_state), hazard_wounds
 
 

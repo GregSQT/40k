@@ -34,7 +34,6 @@ from .shared_utils import (
     get_coherency_subhex, get_cohesion_max_subhex, get_min_neighbors,
     _compute_unit_occupied_hexes, _squad_is_in_enemy_er,
     roll_advance_for_squad,
-    desperate_escape_pre_move, desperate_escape_post_move,
 )
 from engine.hex_utils import (
     _hex_center,
@@ -874,6 +873,24 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
             "waiting_for_player": False  # AI executes movement directly, no waiting
         }
     else:
+        # Desperate Escape (09.07) : escouade engagée ET battle-shocked → on SUSPEND le move.
+        # Pas de preview ; le front affiche un popup d'avertissement, et sa validation déclenche
+        # l'action hazard_confirm (hazard 06.03 + attribution 06.02 AVANT de bouger). Une escouade
+        # engagée mais saine = Ordered Retreat (aucun hazard) → flux normal ci-dessous.
+        engaged_de = _squad_is_in_enemy_er(game_state, str(unit_id))
+        shocked_de = bool(unit.get("battle_shocked", False))
+        print(
+            f"[DESPERATE-ESCAPE] activation unit {unit_id}: engaged={engaged_de} "
+            f"battle_shocked={shocked_de} -> requires_hazard={engaged_de and shocked_de}",
+            flush=True,
+        )
+        if engaged_de and shocked_de:
+            return True, {
+                "action": "requires_hazard",
+                "unitId": unit_id,
+                "requires_hazard": True,
+                "waiting_for_player": True,
+            }
         # Human players: return waiting_for_player for destination selection
         return True, {
             "unit_activated": True,
@@ -2527,20 +2544,9 @@ def movement_commit_move_plan_handler(
             "coherency_ok": preview["coherency_ok"],
         }
 
+    # Desperate Escape (09.07) : le hazard est désormais résolu à l'ACTIVATION (action
+    # hazard_confirm), plus au commit. Ici on commit un Fall Back déjà autorisé.
     was_engaged = _squad_is_in_enemy_er(game_state, str(squad_id))
-    desperate_escape, is_alive, hazard_wounds = desperate_escape_pre_move(
-        str(squad_id), game_state, was_engaged
-    )
-    if desperate_escape and not is_alive:
-        _invalidate_all_destination_pools_after_movement(game_state)
-        movement_clear_preview(game_state)
-        return True, {
-            "action": "desperate_escape_died",
-            "unitId": squad_id,
-            "hazard_wounds": hazard_wounds,
-            "activation_complete": True,
-            "waiting_for_player": False,
-        }
 
     _adv_roll = _advance_roll_for(str(squad_id), game_state)
     if _adv_roll is not None:
@@ -2548,9 +2554,6 @@ def movement_commit_move_plan_handler(
     else:
         move_type = "fall_back" if was_engaged else "normal"
     commit_move(plan, game_state, move_type)
-
-    if desperate_escape:
-        desperate_escape_post_move(str(squad_id), game_state)
 
     unit = get_unit_by_id(game_state, squad_id)
     if not unit:
@@ -2816,23 +2819,9 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id}
 
-    # Desperate Escape (09.07) : une unité engagée ET battle-shocked qui fait un Fall Back déclenche
-    # un hazard roll (06.03) par figurine AVANT de bouger. Même logique que le commit par-figurine
-    # (movement_commit_move_plan_handler) — mutualisée dans desperate_escape_pre_move.
-    was_engaged_pre = _squad_is_in_enemy_er(game_state, str(unit_id))
-    desperate_escape, is_alive, hazard_wounds = desperate_escape_pre_move(
-        str(unit_id), game_state, was_engaged_pre
-    )
-    if desperate_escape and not is_alive:
-        _invalidate_all_destination_pools_after_movement(game_state)
-        movement_clear_preview(game_state)
-        return True, {
-            "action": "desperate_escape_died",
-            "unitId": unit["id"],
-            "hazard_wounds": hazard_wounds,
-            "activation_complete": True,
-            "waiting_for_player": False,
-        }
+    # Desperate Escape (09.07) : le hazard roll (06.03) est désormais résolu à l'ACTIVATION
+    # (action hazard_confirm), AVANT le preview — plus ici au commit. Ce chemin commit un
+    # Fall Back déjà autorisé.
 
     # Destination validation is already done in movement_build_valid_destinations_pool()
     # (BFS + zone ennemie euclidienne bord à bord sur plateau ×10). Le pool doit rester
@@ -2876,11 +2865,6 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
                     return _handle_skip_action(game_state, unit, had_valid_destinations=False)
         
         return False, move_result
-
-    # Desperate Escape (09.07) — après le mouvement : battle-shock roll si l'unité n'est pas déjà
-    # shocked (no-op tant que le Desperate Escape n'est déclenché que pour des unités shocked).
-    if desperate_escape:
-        desperate_escape_post_move(str(unit_id), game_state)
 
     # V11 : Advance déjà marqué dans units_advanced au clic (movement_set_advance_mode_handler) ;
     # il persiste tout le tour, rien à faire ici (ce chemin ne passe pas par commit_move).

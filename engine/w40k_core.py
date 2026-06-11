@@ -2606,6 +2606,101 @@ class W40KEngine(gym.Env):
         }
     
     
+    def _handle_hazard_confirm(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """Desperate Escape (09.07) — validation du popup hazard à l'activation.
+
+        Résout le hazard (06.03) + attribution 06.02 AVANT de bouger, puis :
+        - unité détruite → fin d'activation sans move (``desperate_escape_died``) ;
+        - unité vivante  → (re)construit le pool Fall Back et repasse en preview.
+        """
+        from engine.phase_handlers.shared_utils import (
+            desperate_escape_pre_move, _squad_is_in_enemy_er,
+        )
+
+        uid = action.get("unitId")
+        if uid is None:
+            return False, {"error": "hazard_confirm requires unitId"}
+        unit = self._get_unit_by_id(str(uid))
+        if unit is None:
+            return False, {"error": f"hazard_confirm: unit {uid} not found"}
+
+        was_engaged = _squad_is_in_enemy_er(self.game_state, str(uid))
+        if not was_engaged or not bool(unit.get("battle_shocked", False)):
+            return False, {
+                "error": f"hazard_confirm: unit {uid} not in Desperate Escape "
+                          "(engaged + battle_shocked required)"
+            }
+
+        auto_resolve = bool(self.game_state.get("gym_training_mode", False))
+        print(f"[HAZARD] confirm unit {uid}: engaged={was_engaged} auto_resolve={auto_resolve} -> rolling", flush=True)
+        desperate_escape_pre_move(str(uid), self.game_state, was_engaged, auto_resolve)
+        from engine.phase_handlers.shared_utils import is_unit_alive
+        print(
+            f"[HAZARD] confirm unit {uid} done: alive={is_unit_alive(str(uid), self.game_state)} "
+            f"pending_alloc={self.game_state.get('pending_hazard_allocation') is not None}",
+            flush=True,
+        )
+
+        # Un choix d'attribution joueur est-il en attente ? → prompt (clic figurine).
+        if self.game_state.get("pending_hazard_allocation") is not None:
+            from engine.phase_handlers.shared_utils import hazard_allocation_waiting_payload
+            return True, hazard_allocation_waiting_payload(self.game_state)
+
+        # Attribution terminée (auto / pas de choix) → reprise du flux move.
+        return self._resume_after_hazard(str(uid))
+
+
+    def _handle_hazard_allocate_model(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """Clic figurine pour l'attribution manuelle des mortal wounds (hazard, 06.02).
+
+        Applique 1 MW à la figurine choisie puis poursuit la séquence : si un nouveau choix
+        apparaît → re-prompt ; sinon → reprise du flux move (Fall Back ou mort de l'unité)."""
+        from engine.phase_handlers.shared_utils import (
+            apply_hazard_allocate_model, hazard_allocation_waiting_payload,
+        )
+        pending = self.game_state.get("pending_hazard_allocation")
+        if pending is None:
+            return False, {"error": "squad_hazard_allocate_model: no pending hazard allocation"}
+        model_id = action.get("modelId")
+        if model_id is None:
+            return False, {"error": "squad_hazard_allocate_model requires modelId"}
+        uid = str(pending["squad_id"])
+        apply_hazard_allocate_model(self.game_state, str(model_id))
+        if self.game_state.get("pending_hazard_allocation") is not None:
+            return True, hazard_allocation_waiting_payload(self.game_state)
+        return self._resume_after_hazard(uid)
+
+
+    def _resume_after_hazard(self, uid: str) -> Tuple[bool, Dict[str, Any]]:
+        """Reprise du flux move après attribution du hazard : unité morte → fin d'activation
+        sans move (``desperate_escape_died``) ; sinon → pool Fall Back + preview."""
+        from engine.phase_handlers.shared_utils import is_unit_alive
+        from engine.phase_handlers import movement_handlers as _mh
+        sid = str(uid)
+        if not is_unit_alive(sid, self.game_state):
+            _mh._invalidate_all_destination_pools_after_movement(self.game_state)
+            _mh.movement_clear_preview(self.game_state)
+            return True, {
+                "action": "desperate_escape_died",
+                "unitId": sid,
+                "activation_complete": True,
+                "waiting_for_player": False,
+            }
+        _mh.movement_build_valid_destinations_pool(self.game_state, sid)
+        pool = self.game_state["valid_move_destinations_pool"]
+        self.game_state["preview_hexes"] = pool
+        unit = self._get_unit_by_id(sid)
+        return True, {
+            "unit_activated": True,
+            "unitId": unit["id"],
+            "valid_destinations": pool,
+            "preview_data": _mh.movement_preview(pool),
+            "waiting_for_player": True,
+            "would_flee": True,
+            "advance_roll": _mh._advance_roll_for(sid, self.game_state),
+        }
+
+
     def _process_semantic_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:  # pyright: ignore[reportGeneralTypeIssues]
         """
         Process semantic action with detailed execution debugging.
@@ -2613,6 +2708,8 @@ class W40KEngine(gym.Env):
         """
         if self.game_state.get("game_over", False):
             return False, {"error": "game_over", "winner": self.game_state.get("winner")}
+
+        print(f"[ACTION] phase={self.game_state.get('phase')} action={action.get('action')} unitId={action.get('unitId')} active_move={self.game_state.get('active_movement_unit')}", flush=True)
 
         self._initialize_rule_choice_runtime_state()
 
@@ -2635,6 +2732,25 @@ class W40KEngine(gym.Env):
                 "unitId": str(uid),
                 "battle_shocked": shocked,
             }
+
+        # Desperate Escape (09.07) : tant qu'une attribution de mortal wounds (hazard) est en
+        # attente d'un choix joueur, seul le clic figurine (squad_hazard_allocate_model) passe.
+        if (
+            self.game_state.get("pending_hazard_allocation") is not None
+            and action.get("action") != "squad_hazard_allocate_model"
+        ):
+            from engine.phase_handlers.shared_utils import hazard_allocation_waiting_payload
+            return True, hazard_allocation_waiting_payload(self.game_state)
+
+        # Desperate Escape (09.07) : le joueur a validé le popup hazard affiché à l'activation.
+        # On résout le hazard (06.03) + l'attribution des mortal wounds (06.02) AVANT de bouger,
+        # puis on reprend le move preview (Fall Back) ou on termine l'activation si l'unité meurt.
+        if action.get("action") == "hazard_confirm":
+            return self._handle_hazard_confirm(action)
+
+        # Clic figurine pour l'attribution manuelle des mortal wounds (hazard).
+        if action.get("action") == "squad_hazard_allocate_model":
+            return self._handle_hazard_allocate_model(action)
 
         # Block gameplay actions while an explicit choice prompt is pending.
         active_prompt = self.game_state.get("active_rule_choice_prompt")

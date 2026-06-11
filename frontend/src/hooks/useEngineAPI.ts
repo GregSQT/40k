@@ -383,6 +383,8 @@ interface RuleChoicePrompt {
 /** Allocation manuelle des pertes au tir (defenseur humain) : le backend renvoie ce
  * payload tant qu'une figurine doit etre choisie pour encaisser (regle 05.04). */
 export interface ManualAllocation {
+  /** "shoot" = pertes du tir (défaut) ; "hazard" = mortal wounds du Desperate Escape (06.02). */
+  kind?: "shoot" | "hazard";
   attacker_unit_id: string;
   target_unit_id: string;
   defender_player: number;
@@ -653,6 +655,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     dontRemind: boolean;
     timestamp: number;
   } | null>(null);
+  // Desperate Escape (09.07) : popup d'avertissement hazard affiché à l'activation d'une
+  // unité engagée ET battle-shocked. Confirmer = rouler le hazard (06.03) avant de bouger.
+  const [hazardWarningPopup, setHazardWarningPopup] = useState<{ unitId: number } | null>(null);
+  // Ref miroir pour lecture synchrone juste après un await (ex. gate d'entrée du move preview).
+  const hazardWarningPopupRef = useRef<{ unitId: number } | null>(null);
+  hazardWarningPopupRef.current = hazardWarningPopup;
+  // TEST/DEBUG : mode toggle « battle-shock test ». Quand actif, cliquer une unité (non activée)
+  // lui fait un battle-shock test au lieu de la sélectionner → l'unité est shockée AVANT son
+  // activation, donc le Desperate Escape se déclenche dès l'activation (avant le move preview).
+  const [battleShockTestMode, setBattleShockTestMode] = useState(false);
+  const battleShockTestModeRef = useRef(false);
+  battleShockTestModeRef.current = battleShockTestMode;
   const [postShootMoveDestinations, setPostShootMoveDestinations] = useState<
     Array<{ col: number; row: number }>
   >([]);
@@ -1554,6 +1568,81 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             });
             return;
           }
+
+          // Desperate Escape (09.07) : popup hazard à l'activation (engagée + battle-shocked).
+          // Le move est suspendu côté backend ; le joueur confirme pour rouler le hazard.
+          if (
+            data.result?.action === "requires_hazard" &&
+            data.result?.requires_hazard === true
+          ) {
+            const huid = data.result?.unitId ?? data.game_state?.active_movement_unit;
+            if (huid != null) {
+              const hp = { unitId: parseInt(String(huid), 10) };
+              setHazardWarningPopup(hp);
+              hazardWarningPopupRef.current = hp; // synchro immédiate pour le gate post-await
+            }
+            setGameState((p) => {
+              const merged = mergeGameStatePreservingOmittedObjectives(
+                p,
+                data.game_state as APIGameState
+              );
+              latestGameStateRef.current = merged;
+              return merged;
+            });
+            return;
+          }
+
+          // Desperate Escape : attribution manuelle des mortal wounds (06.02). Même rendu que
+          // l'allocation du tir (anneaux + clic figurine) via le flag kind:"hazard".
+          if (
+            data.result?.action === "squad_hazard_manual_alloc" &&
+            data.result?.waiting_for_player === true &&
+            data.result?.allocation
+          ) {
+            const ha = data.result.allocation as {
+              squad_id: string;
+              controlling_player: number;
+              choices: ManualAllocation["choices"];
+              wounds_remaining: number;
+            };
+            setManualAllocation({
+              kind: "hazard",
+              attacker_unit_id: String(ha.squad_id),
+              target_unit_id: String(ha.squad_id),
+              defender_player: ha.controlling_player,
+              choices: ha.choices,
+              wounds_remaining: ha.wounds_remaining,
+            });
+            setGameState((p) => {
+              const merged = mergeGameStatePreservingOmittedObjectives(
+                p,
+                data.game_state as APIGameState
+              );
+              latestGameStateRef.current = merged;
+              return merged;
+            });
+            return;
+          }
+
+          // Desperate Escape : l'unité est détruite par le hazard → fin d'activation sans move.
+          if (data.result?.action === "desperate_escape_died") {
+            if (manualAllocationRef.current !== null) setManualAllocation(null);
+            setHazardWarningPopup(null);
+            hazardWarningPopupRef.current = null;
+            setActiveUnitEngaged(null);
+            setSelectedUnitId(null);
+            setMode("select");
+            setGameState((p) => {
+              const merged = mergeGameStatePreservingOmittedObjectives(
+                p,
+                data.game_state as APIGameState
+              );
+              latestGameStateRef.current = merged;
+              return merged;
+            });
+            return;
+          }
+
           // Toute autre réponse alors qu'une allocation/déclaration était en cours = terminée
           // (done) → on libère les états manuels.
           if (manualAllocationRef.current !== null) {
@@ -3057,6 +3146,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     async (unitId: number | string | null) => {
       const numericUnitId = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
 
+      // TEST/DEBUG : mode battle-shock test actif → tout clic sur une unité lui fait un
+      // battle-shock test (au lieu de la sélectionner). Permet de shocker AVANT activation.
+      if (battleShockTestModeRef.current && numericUnitId !== null) {
+        await executeAction({ action: "force_battle_shock", unitId: String(numericUnitId) });
+        return;
+      }
+
       // Block unit selection when in advancePreview, chargeTargetSelect or chargePreview mode
       // (but allow deselection with null)
       if (
@@ -3342,6 +3438,22 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [gameState?.units, gameState?.units_cache, validateOrientationStep]
   );
 
+  /**
+   * Active l'unité si besoin et indique s'il faut SUSPENDRE l'entrée dans le move preview/plan
+   * parce qu'un Desperate Escape (hazard) doit être résolu d'abord. Retourne false = ne pas
+   * entrer (le popup ☢️ est affiché ; après résolution le backend renvoie le pool de move).
+   */
+  const ensureActivatedNoHazard = useCallback(
+    async (unitId: number | string): Promise<boolean> => {
+      const sid = String(typeof unitId === "string" ? parseInt(unitId, 10) : unitId);
+      if (String(latestGameStateRef.current?.active_movement_unit) !== sid) {
+        await executeAction({ action: "activate_unit", unitId: sid });
+      }
+      return hazardWarningPopupRef.current === null;
+    },
+    [executeAction]
+  );
+
   const handleStartMovePreview = useCallback(
     async (unitId: number | string, col: number | string, row: number | string) => {
       // Double-clic depuis squadModelMove : nettoyer le plan provisoire avant d'entrer en movePreview.
@@ -3367,14 +3479,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setMode("movePreview");
         return;
       }
-      // Phase move : si l'unité n'est pas encore activée (double-clic direct sans single-clic préalable),
-      // appeler activate_unit pour que le backend calcule valid_move_destinations_pool.
-      if (
-        gameState?.phase === "move" &&
-        gameState?.active_movement_unit !== String(parsedUnitId)
-      ) {
+      // Phase move : activer l'unité (calcule valid_move_destinations_pool). Si l'unité est
+      // engagée ET battle-shocked, l'activation déclenche le popup Desperate Escape → on
+      // SUSPEND l'entrée en preview (le hazard doit être résolu avant de bouger).
+      if (gameState?.phase === "move") {
         setSelectedUnitId(parsedUnitId);
-        await executeAction({ action: "activate_unit", unitId: String(parsedUnitId) });
+        const ok = await ensureActivatedNoHazard(parsedUnitId);
+        if (!ok) return;
       }
       const latestOrientation = readEngineOrientationStepFromGameState(unitId);
       setMovePreview({
@@ -3387,7 +3498,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setPendingPreviewAction("move");
       setMode("movePreview");
     },
-    [gameState?.phase, gameState?.active_movement_unit, pendingPreviewAction, readEngineOrientationStepFromGameState, executeAction]
+    [gameState?.phase, pendingPreviewAction, readEngineOrientationStepFromGameState, ensureActivatedNoHazard]
   );
 
   const handleBumpMovePreviewOrientation = useCallback(
@@ -3497,6 +3608,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleStartSquadModelMove = useCallback(
     async (unitId: number | string) => {
       const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      // Desperate Escape : activer d'abord ; si hazard requis, ne PAS entrer dans le plan
+      // par-figurine (le popup ☢️ doit être résolu avant tout déplacement).
+      if (!(await ensureActivatedNoHazard(uid))) return;
       const models = readSquadModelPositions(uid);
       if (Object.keys(models).length === 0) {
         console.warn(`[SQUAD-MOVE] startSquadModelMove ABORT unit=${uid} (aucune fig dans occupied_hexes_by_model)`);
@@ -3519,7 +3633,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setSelectedUnitId(uid);
       await refreshSquadMovePlanValidity(uid, models);
     },
-    [readSquadModelPositions, refreshSquadMovePlanValidity]
+    [readSquadModelPositions, refreshSquadMovePlanValidity, ensureActivatedNoHazard]
   );
 
   /** Selectionne la figurine a repositionner : recupere sa BFS (move_model_destinations). */
@@ -3724,6 +3838,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     },
     [executeAction]
   );
+
+  /** TEST/DEBUG : toggle du mode « battle-shock test » (cliquer une unité la shocke). */
+  const handleToggleBattleShockTestMode = useCallback(() => {
+    setBattleShockTestMode((v) => !v);
+  }, []);
 
   // ──────────────────────────────────────────────────────────────────────────
   // TIR PAR FIGURINE (PvP manuel) — calque squadModelMove, pipeline squad backend
@@ -4088,6 +4207,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const alloc = manualAllocationRef.current;
     if (!alloc) return;
     try {
+      if (alloc.kind === "hazard") {
+        // Desperate Escape (06.02) : clic figurine pour attribuer une mortal wound du hazard.
+        await executeAction({
+          action: "squad_hazard_allocate_model",
+          unitId: String(alloc.target_unit_id),
+          modelId: String(modelId),
+        });
+        return;
+      }
       await executeAction({
         action: "squad_shoot_allocate_model",
         unitId: String(alloc.attacker_unit_id),
@@ -4098,6 +4226,27 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setError(`Allocation failed: ${formatApiConnectionError(e)}`);
     }
   }, [executeAction]);
+
+  /** Desperate Escape : le joueur confirme le popup hazard → roule le hazard avant de bouger. */
+  const handleConfirmHazardWarning = useCallback(async () => {
+    const popup = hazardWarningPopup;
+    if (!popup) return;
+    setHazardWarningPopup(null);
+    hazardWarningPopupRef.current = null;
+    try {
+      await executeAction({ action: "hazard_confirm", unitId: String(popup.unitId) });
+    } catch (e) {
+      console.error("[HAZARD] confirm FAILED", e);
+      setError(`Hazard confirm failed: ${formatApiConnectionError(e)}`);
+    }
+  }, [hazardWarningPopup, executeAction]);
+
+  /** Desperate Escape : le joueur annule → l'unité reste sélectionnée mais non déplacée. */
+  const handleCancelHazardWarning = useCallback(() => {
+    setHazardWarningPopup(null);
+    hazardWarningPopupRef.current = null;
+    setMode("select");
+  }, []);
 
   /** Allocation manuelle : le défenseur a déclaré l'ordre des groupes (cible hétérogène). */
   const handleDeclareOrder = useCallback(async (order: number[]) => {
@@ -5568,6 +5717,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onConfirmFleeWarning: async () => {},
       onCancelFleeWarning: async () => {},
       onToggleFleeWarningDontRemind: () => {},
+      hazardWarningPopup: null,
+      onConfirmHazardWarning: async () => {},
+      onCancelHazardWarning: () => {},
+      battleShockTestMode: false,
+      onToggleBattleShockTestMode: () => {},
       availableCellsOverride: undefined,
       ...blinkBoardPropsIdle,
       ruleChoicePrompt: null,
@@ -5716,6 +5870,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onConfirmFleeWarning: handleConfirmFleeWarning,
     onCancelFleeWarning: handleCancelFleeWarning,
     onToggleFleeWarningDontRemind: handleToggleFleeWarningDontRemind,
+    hazardWarningPopup,
+    onConfirmHazardWarning: handleConfirmHazardWarning,
+    onCancelHazardWarning: handleCancelHazardWarning,
+    battleShockTestMode,
+    onToggleBattleShockTestMode: handleToggleBattleShockTestMode,
     availableCellsOverride: combinedAvailableCellsOverride,
     // Export blinking state for HP bar components
     ...blinkBoardPropsReady,

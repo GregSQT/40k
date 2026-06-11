@@ -399,8 +399,14 @@ body {
 }
 
 .unit-status-badge__svg--hidden {
+  width: 20px;
+  height: 20px;
+}
+
+.unit-status-badge__svg--battle-shock {
   width: 26px;
   height: 26px;
+  font-size: 19px;
 }
 
 .unit-illustration-preview__image {

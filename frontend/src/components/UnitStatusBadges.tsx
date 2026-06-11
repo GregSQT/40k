@@ -39,7 +39,7 @@ function HiddenIcon() {
 function BattleShockIcon() {
   return (
     <span
-      className="unit-status-badge__svg"
+      className="unit-status-badge__svg unit-status-badge__svg--battle-shock"
       aria-hidden="true"
       style={{
         display: "inline-flex",
@@ -48,7 +48,6 @@ function BattleShockIcon() {
         borderRadius: "50%",
         background: "#000000",
         boxSizing: "border-box",
-        fontSize: "17px",
         lineHeight: 1,
       }}
     >
