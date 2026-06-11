@@ -3079,7 +3079,7 @@ export const BoardWithAPI: React.FC = () => {
                     textAlign: "center",
                     marginLeft: "auto",
                     background: "#38bdf8",
-                    boxShadow: tookToSkies ? `0 0 0 2px #fff, 0 0 10px 3px rgba(255,255,255,0.8), ${RELIEF}` : RELIEF,
+                    boxShadow: tookToSkies ? `0 0 0 2px #86efac, 0 0 10px 3px rgba(134,239,172,0.85), ${RELIEF}` : RELIEF,
                     cursor: "pointer",
                   }}
                 >
@@ -3286,7 +3286,7 @@ export const BoardWithAPI: React.FC = () => {
                   width: 110,
                   textAlign: "center",
                   background: "#38bdf8",
-                  boxShadow: tookToSkies ? `0 0 0 2px #fff, 0 0 10px 3px rgba(255,255,255,0.8), ${RELIEF}` : RELIEF,
+                  boxShadow: tookToSkies ? `0 0 0 2px #86efac, 0 0 10px 3px rgba(134,239,172,0.85), ${RELIEF}` : RELIEF,
                   cursor: advancedFly ? "default" : "pointer",
                 }}
               >
@@ -3337,7 +3337,7 @@ export const BoardWithAPI: React.FC = () => {
                     width: 110,
                     textAlign: "center",
                     background: state === "disabled" ? accent.dark : accent.relief,
-                    boxShadow: state === "selected" ? `0 0 0 2px #fff, 0 0 10px 3px rgba(255,255,255,0.8), ${RELIEF}` : RELIEF,
+                    boxShadow: state === "selected" ? `0 0 0 2px #86efac, 0 0 10px 3px rgba(134,239,172,0.85), ${RELIEF}` : RELIEF,
                     cursor:
                       state === "disabled" ? "not-allowed" : state === "selected" ? "default" : "pointer",
                     opacity: 1,
