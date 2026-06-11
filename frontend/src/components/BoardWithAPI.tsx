@@ -2000,6 +2000,7 @@ export const BoardWithAPI: React.FC = () => {
     const statusBadgePerModelStr =
       localStorage.getItem("statusBadgePerModel") ?? localStorage.getItem("hiddenBadgePerModel");
     const retreatAlertEnabledStr = localStorage.getItem(RETREAT_ALERT_STORAGE_KEY);
+    const battleShockTestEnabledStr = localStorage.getItem("battleShockTestEnabled");
     const modeGuidesActivatedStr = localStorage.getItem(MODE_GUIDES_ACTIVATED_STORAGE_KEY);
     const pveGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVE_STORAGE_KEY) === "true";
     const pvpGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVP_STORAGE_KEY) === "true";
@@ -2014,6 +2015,9 @@ export const BoardWithAPI: React.FC = () => {
       hpBarPerModel: hpBarPerModelStr ? JSON.parse(hpBarPerModelStr) : false,
       statusBadgePerModel: statusBadgePerModelStr ? JSON.parse(statusBadgePerModelStr) : false,
       retreatAlertEnabled: retreatAlertEnabledStr ? JSON.parse(retreatAlertEnabledStr) : true,
+      battleShockTestEnabled: battleShockTestEnabledStr
+        ? JSON.parse(battleShockTestEnabledStr)
+        : false,
       modeGuidesActivated:
         modeGuidesActivatedStr != null
           ? JSON.parse(modeGuidesActivatedStr)
@@ -2037,6 +2041,11 @@ export const BoardWithAPI: React.FC = () => {
   const handleToggleDebug = (value: boolean) => {
     setSettings((prev) => ({ ...prev, showDebug: value }));
     localStorage.setItem("showDebug", JSON.stringify(value));
+  };
+
+  const handleToggleBattleShockTest = (value: boolean) => {
+    setSettings((prev) => ({ ...prev, battleShockTestEnabled: value }));
+    localStorage.setItem("battleShockTestEnabled", JSON.stringify(value));
   };
 
   const handleToggleDebugLoS = (value: boolean) => {
@@ -3361,6 +3370,13 @@ export const BoardWithAPI: React.FC = () => {
                   {modeBtn("Stationary", advanced ? "disabled" : "relief", grey, () =>
                     apiProps.onStationary?.(advUnitId)
                   )}
+                  {settings.battleShockTestEnabled &&
+                    modeBtn(
+                      "Battle-shock",
+                      "relief",
+                      { relief: "#7c3aed", dark: "#2e1065" },
+                      () => apiProps.onForceBattleShock?.(advUnitId)
+                    )}
                 </>
               );
             })()}
@@ -5093,6 +5109,8 @@ export const BoardWithAPI: React.FC = () => {
         onToggleStatusBadgePerModel={handleToggleStatusBadgePerModel}
         retreatAlertEnabled={settings.retreatAlertEnabled}
         onToggleRetreatAlert={handleToggleRetreatAlert}
+        battleShockTestEnabled={settings.battleShockTestEnabled}
+        onToggleBattleShockTest={handleToggleBattleShockTest}
         modeGuidesActivated={settings.modeGuidesActivated}
         onToggleModeGuidesActivated={handleToggleModeGuidesActivated}
       />

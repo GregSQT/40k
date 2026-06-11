@@ -2834,14 +2834,34 @@ def roll_hazard_for_unit(unit_id: str, game_state: Dict[str, Any]) -> int:
         unit = next(u for u in units if str(u.get("id")) == str(unit_id))
     except StopIteration:
         raise KeyError(f"roll_hazard_for_unit: unit {unit_id} not found in game_state['units']")
-    keywords = [k.lower() for k in require_key(unit, "UNIT_KEYWORDS")]
-    wounds_per_fail = 3 if ("monster" in keywords or "vehicle" in keywords) else 1
-    total_wounds = sum(
-        wounds_per_fail for _ in range(alive_count) if random.randint(1, 6) <= 2
-    )
+    # UNIT_KEYWORDS = liste d'objets {"keywordId": "..."} (cf. game_state). Pattern canonique.
+    keyword_ids = {
+        str(require_key(kw, "keywordId")).strip().lower()
+        for kw in require_key(unit, "UNIT_KEYWORDS")
+    }
+    wounds_per_fail = 3 if ("monster" in keyword_ids or "vehicle" in keyword_ids) else 1
+    rolls = [random.randint(1, 6) for _ in range(alive_count)]
+    fails = sum(1 for r in rolls if r <= 2)
+    total_wounds = fails * wounds_per_fail
     if total_wounds > 0:
         current_hp = require_hp_from_cache(str(unit_id), game_state)
         update_units_cache_hp(game_state, str(unit_id), max(0, current_hp - total_wounds))
+
+    col = int(unit.get("col", -1))
+    row = int(unit.get("row", -1))
+    msg = (
+        f"Unit {unit_id}({col},{row}) [HAZARD] roll (Desperate Escape): {alive_count} rolls "
+        f"- {fails} fail(s) - {total_wounds} mortal wound(s)"
+    )
+    append_action_log(game_state, {
+        "type": "hazard",
+        "message": msg,
+        "turn": require_key(game_state, "turn"),
+        "phase": require_key(game_state, "phase"),
+        "unitId": int(unit_id),
+        "player": int(unit.get("player", -1)),
+        "result": f"{total_wounds} MW",
+    })
     return total_wounds
 
 
@@ -2910,6 +2930,40 @@ def roll_battle_shock(unit_id: str, game_state: Dict[str, Any]) -> bool:
     })
 
     return battle_shocked
+
+
+def desperate_escape_pre_move(
+    squad_id: str, game_state: Dict[str, Any], was_engaged: bool
+) -> Tuple[bool, bool, int]:
+    """Desperate Escape (09.07) — phase AVANT le mouvement.
+
+    Une unité engagée ET battle-shocked qui fait un Fall Back doit faire un Desperate Escape :
+    un hazard roll (06.03) par figurine est résolu AVANT de bouger.
+
+    Retourne ``(is_desperate, is_alive, hazard_wounds)`` :
+    - ``is_desperate`` : True si l'unité fait un Desperate Escape (engagée + battle-shocked).
+    - ``is_alive`` : False si le hazard a détruit l'unité (le move ne doit alors PAS avoir lieu).
+    - ``hazard_wounds`` : total de mortal wounds infligés par le hazard (0 si non-desperate).
+    """
+    unit = get_unit_by_id(game_state, str(squad_id))
+    if unit is None:
+        raise KeyError(f"desperate_escape_pre_move: unit {squad_id} not found")
+    is_desperate = bool(was_engaged) and bool(unit.get("battle_shocked", False))
+    if not is_desperate:
+        return False, True, 0
+    hazard_wounds = roll_hazard_for_unit(str(squad_id), game_state)
+    return True, is_unit_alive(str(squad_id), game_state), hazard_wounds
+
+
+def desperate_escape_post_move(squad_id: str, game_state: Dict[str, Any]) -> None:
+    """Desperate Escape (09.07) — phase APRÈS le mouvement.
+
+    Si l'unité n'est PAS battle-shocked, elle doit faire un battle-shock roll (01.07). No-op tant
+    que le Desperate Escape n'est déclenché que pour des unités déjà battle-shocked (cf. 09.07 :
+    Ordered Retreat pour non-shocked, Desperate Escape sinon)."""
+    unit = get_unit_by_id(game_state, str(squad_id))
+    if unit is not None and not unit.get("battle_shocked", False):
+        roll_battle_shock(str(squad_id), game_state)
 
 
 def roll_advance_for_squad(squad_id: str, game_state: Dict[str, Any]) -> int:

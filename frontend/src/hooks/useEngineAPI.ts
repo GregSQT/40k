@@ -1459,6 +1459,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
 
         if (data.success) {
+          // TEST/DEBUG : force_battle_shock est une action de côté qui ne touche QUE le flag
+          // battle_shocked de l'unité. On merge le game_state pour le refléter et on sort, sans
+          // passer par la machine d'état d'activation (qui sinon déselectionne l'unité active et
+          // casse le rendu du move en cours).
+          if (data.result?.action === "force_battle_shock") {
+            setGameState((p) => {
+              const merged = mergeGameStatePreservingOmittedObjectives(
+                p,
+                data.game_state as APIGameState
+              );
+              latestGameStateRef.current = merged;
+              return merged;
+            });
+            return;
+          }
           if (
             data.result?.action === "waiting_for_rule_choice" &&
             data.result?.waiting_for_player === true &&
@@ -3701,6 +3716,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [executeAction]
   );
 
+  /** TEST/DEBUG : force un battle-shock roll (01.07) sur l'unité — pour tester le Desperate Escape. */
+  const handleForceBattleShock = useCallback(
+    async (unitId: number | string) => {
+      const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      await executeAction({ action: "force_battle_shock", unitId: String(uid) });
+    },
+    [executeAction]
+  );
+
   // ──────────────────────────────────────────────────────────────────────────
   // TIR PAR FIGURINE (PvP manuel) — calque squadModelMove, pipeline squad backend
   // ──────────────────────────────────────────────────────────────────────────
@@ -5479,6 +5503,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onSetAdvanceMode: async () => {},
       onTakeToSkies: async () => {},
       onStationary: async () => {},
+      onForceBattleShock: async () => {},
       activeUnitEngaged: null,
       squadShootPlan: null,
       onStartSquadModelShoot: async () => {},
@@ -5629,6 +5654,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onSetAdvanceMode: handleSetAdvanceMode,
     onTakeToSkies: handleTakeToSkies,
     onStationary: handleStationary,
+    onForceBattleShock: handleForceBattleShock,
     activeUnitEngaged,
     squadShootPlan,
     onStartSquadModelShoot: handleStartSquadModelShoot,

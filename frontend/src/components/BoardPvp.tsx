@@ -6208,7 +6208,7 @@ export default function Board({
       for (const u of units) {
         const orientation = orientationStepForBoard(u, gameState?.units_cache);
         parts.push(
-          `${u.id},${u.col},${u.row},o${orientation ?? ""},${hpCurForBoardFingerprint(u, ucFp)},rng${u.selectedRngWeaponIndex ?? ""},cc${u.selectedCcWeaponIndex ?? ""},mw${u.manualWeaponSelected ? 1 : 0}`
+          `${u.id},${u.col},${u.row},o${orientation ?? ""},${hpCurForBoardFingerprint(u, ucFp)},rng${u.selectedRngWeaponIndex ?? ""},cc${u.selectedCcWeaponIndex ?? ""},mw${u.manualWeaponSelected ? 1 : 0},bs${u.battle_shocked ? 1 : 0}`
         );
       }
       const moveLosIds = [...movePreviewLosBlinkIds].sort((a, b) => a - b).join(",");

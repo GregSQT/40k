@@ -48,7 +48,8 @@ export interface BaseLogEntry {
     | "charge_cancel"
     | "advance"
     | "roll_info"
-    | "battle_shock";
+    | "battle_shock"
+    | "hazard";
   message: string;
   result?: string;
   turnNumber?: number;
@@ -374,6 +375,8 @@ export function getEventIcon(type: string): string {
       return "i"; // Informational roll result
     case "battle_shock":
       return "🌀";
+    case "hazard":
+      return "☢️";
     case "wait":
       return "⏸"; // Pause icon for wait
     default:
@@ -454,6 +457,8 @@ export function getEventTypeClass(event: BaseLogEntry | TrainingLogEntry): strin
       return event.result === "SUCCESS"
         ? "game-log-entry--battle-shock-success"
         : "game-log-entry--battle-shock-fail";
+    case "hazard":
+      return "game-log-entry--hazard";
     default:
       return "game-log-entry--default";
   }

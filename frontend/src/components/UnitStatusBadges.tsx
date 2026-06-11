@@ -35,13 +35,25 @@ function HiddenIcon() {
   );
 }
 
-/** Éclair jaune sur fond rouge — battle-shock (01.07). */
+/** 🌀 sur fond noir — battle-shock (01.07), identique au logo sous la figurine. */
 function BattleShockIcon() {
   return (
-    <svg className="unit-status-badge__svg" viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="12" cy="12" r="10" fill="#991b1b" stroke="#450a0a" strokeWidth="1.5" />
-      <path d="M13 3 L8 13 L11.5 13 L10 21 L17 9 L13 9 Z" fill="#fde047" />
-    </svg>
+    <span
+      className="unit-status-badge__svg"
+      aria-hidden="true"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: "50%",
+        background: "#000000",
+        boxSizing: "border-box",
+        fontSize: "17px",
+        lineHeight: 1,
+      }}
+    >
+      🌀
+    </span>
   );
 }
 

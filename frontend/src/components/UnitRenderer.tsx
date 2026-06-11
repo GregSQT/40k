@@ -550,7 +550,7 @@ export class UnitRenderer {
     this.renderAttackCounter(unitIconScale);
     this.renderHiddenBadge(unitIconScale);
     this.renderMoveStatusBadge(unitIconScale);
-    this.renderBattleShockedIndicator(iconZIndex);
+    this.renderBattleShockedIndicator();
 
     this.props.centerX = originalCenterX;
     this.props.centerY = originalCenterY;
@@ -2432,7 +2432,7 @@ export class UnitRenderer {
     drawBadgeAt(centerX, centerY, `move-status-${unitIdNum}`);
   }
 
-  private renderBattleShockedIndicator(iconZIndex: number): void {
+  private renderBattleShockedIndicator(): void {
     const {
       unit,
       centerX,
@@ -2467,29 +2467,19 @@ export class UnitRenderer {
       bg.drawCircle(posX, posY, emojiSize * 0.55);
       bg.endFill();
       bg.name = `${name}-bg`;
-      bg.zIndex = iconZIndex;
+      bg.zIndex = 10001;
       targetContainer.addChild(bg);
 
-      const text = new PIXI.Text("🌀", { fontSize: emojiSize, align: "center" });
+      const text = new PIXI.Text("🌀", { fontSize: emojiSize, align: "center", fill: 0xffffff });
       text.anchor.set(0.5, 0.5);
       text.position.set(posX, posY);
       text.name = name;
-      text.zIndex = iconZIndex + 1;
+      text.zIndex = 10002;
       targetContainer.addChild(text);
     };
 
-    if (this.props.statusBadgePerModel) {
-      // Per-figure mode — one emoji centred-bottom of each living figure (unit-level status).
-      const centers = this.props.modelCenters;
-      if (!centers) return;
-      const figExtentY = HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
-      const emojiSize = figExtentY * 0.7;
-      centers.forEach(([cx, cy], i) => {
-        drawAt(cx, cy + figExtentY - 0.25 * emojiSize, emojiSize, `battle-shocked-${unitIdNum}-${i}`);
-      });
-      return;
-    }
-
+    // Rayon vertical de la base d'UNE figurine (même base pour toutes les figs de l'unité),
+    // calculé en tenant compte de la BASE_SIZE réelle (pas du fallback UNIT_CIRCLE_RADIUS_RATIO).
     const nr = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
     let bottomExtentY: number;
     if (nr) {
@@ -2501,8 +2491,18 @@ export class UnitRenderer {
           ? (displayBase / 2) * HEX_HORIZ_SPACING
           : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
     }
-
     const emojiSize = bottomExtentY * 0.7;
+
+    if (this.props.statusBadgePerModel) {
+      // Per-figure mode — one emoji centred-bottom of each living figure (unit-level status).
+      const centers = this.props.modelCenters;
+      if (!centers) return;
+      centers.forEach(([cx, cy], i) => {
+        drawAt(cx, cy + bottomExtentY - 0.25 * emojiSize, emojiSize, `battle-shocked-${unitIdNum}-${i}`);
+      });
+      return;
+    }
+
     drawAt(centerX, centerY + bottomExtentY - 0.25 * emojiSize, emojiSize, `battle-shocked-${unitIdNum}`);
   }
 

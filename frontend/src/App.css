@@ -2062,6 +2062,15 @@ textarea:focus {
   background: rgb(161, 124, 10);
 }
 
+.game-log-entry--hazard {
+  border-left-color: #b91c1c;
+  background: rgba(127, 29, 29, 0.55);
+}
+
+.game-log-entry--hazard .game-log-entry__message {
+  font-style: normal;
+}
+
 .game-log-entry__icon--shoot {
   background: rgba(var(--icon-shoot-bg-rgb), var(--icon-square-bg-alpha-gamelog));
   border: var(--icon-square-border-width) px solid

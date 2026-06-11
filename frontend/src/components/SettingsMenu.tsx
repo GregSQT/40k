@@ -23,6 +23,8 @@ interface SettingsMenuProps {
   onToggleRetreatAlert?: (value: boolean) => void;
   modeGuidesActivated?: boolean;
   onToggleModeGuidesActivated?: (value: boolean) => void;
+  battleShockTestEnabled?: boolean;
+  onToggleBattleShockTest?: (value: boolean) => void;
 }
 
 export const SettingsMenu: React.FC<SettingsMenuProps> = ({
@@ -47,6 +49,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   onToggleRetreatAlert,
   modeGuidesActivated = true,
   onToggleModeGuidesActivated,
+  battleShockTestEnabled = false,
+  onToggleBattleShockTest,
 }) => {
   if (!isOpen) return null;
 
@@ -133,6 +137,26 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
             Affiche le ratio de visibilité LoS (%) en phase de tir.
           </p>
         </div>
+
+        {onToggleBattleShockTest && (
+          <div style={{ marginBottom: "16px" }}>
+            <label
+              style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}
+            >
+              <input
+                type="checkbox"
+                checked={battleShockTestEnabled}
+                onChange={(e) => onToggleBattleShockTest(e.target.checked)}
+                style={{ marginRight: "12px", width: "18px", height: "18px", cursor: "pointer" }}
+              />
+              <span>Bouton test Battle-shock</span>
+            </label>
+            <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
+              Affiche un bouton dans la barre de move pour forcer un battle-shock roll (01.07) sur
+              l&apos;unité active — sert à tester le Desperate Escape (09.07).
+            </p>
+          </div>
+        )}
 
         {canToggleAutoSelectWeapon && (
           <div style={{ marginBottom: "16px" }}>

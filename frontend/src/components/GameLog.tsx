@@ -311,6 +311,12 @@ export const GameLog: React.FC<GameLogProps> = ({
       "Cover: +1 au jet de sauvegarde d'armure pour cette attaque (bonus total capé a +1, non cumulable).",
       false
     );
+    setRuleDescription(
+      descriptions,
+      "HAZARD",
+      "Roll one D6: on a 1-2, the model suffers 1 (or 3 if it is a MONSTER or VEHICLE) mortal wound.",
+      false
+    );
 
     return descriptions;
   }, []);

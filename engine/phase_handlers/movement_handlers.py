@@ -22,7 +22,7 @@ from engine.combat_utils import (
 )
 from .shared_utils import (
     ACTION, WAIT, NO, PASS, ERROR, MOVE, FLED,
-    build_enemy_adjacent_hexes, update_units_cache_position, translate_squad_to_destination, is_unit_alive,
+    build_enemy_adjacent_hexes, update_units_cache_position, translate_squad_to_destination,
     get_unit_position, require_unit_position,
     update_enemy_adjacent_caches_after_unit_move,
     maybe_resolve_reactive_move,
@@ -33,7 +33,8 @@ from .shared_utils import (
     get_squad_move_budget, validate_move_plan, _validate_plan_coherency, commit_move,
     get_coherency_subhex, get_cohesion_max_subhex, get_min_neighbors,
     _compute_unit_occupied_hexes, _squad_is_in_enemy_er,
-    roll_hazard_for_unit, roll_battle_shock, roll_advance_for_squad,
+    roll_advance_for_squad,
+    desperate_escape_pre_move, desperate_escape_post_move,
 )
 from engine.hex_utils import (
     _hex_center,
@@ -2527,23 +2528,19 @@ def movement_commit_move_plan_handler(
         }
 
     was_engaged = _squad_is_in_enemy_er(game_state, str(squad_id))
-    unit_pre_move = get_unit_by_id(game_state, str(squad_id))
-    if unit_pre_move is None:
-        return False, {"error": "unit_not_found_pre_move", "unitId": squad_id}
-    desperate_escape = was_engaged and unit_pre_move.get("battle_shocked", False)
-
-    if desperate_escape:
-        hazard_wounds = roll_hazard_for_unit(str(squad_id), game_state)
-        if not is_unit_alive(str(squad_id), game_state):
-            _invalidate_all_destination_pools_after_movement(game_state)
-            movement_clear_preview(game_state)
-            return True, {
-                "action": "desperate_escape_died",
-                "unitId": squad_id,
-                "hazard_wounds": hazard_wounds,
-                "activation_complete": True,
-                "waiting_for_player": False,
-            }
+    desperate_escape, is_alive, hazard_wounds = desperate_escape_pre_move(
+        str(squad_id), game_state, was_engaged
+    )
+    if desperate_escape and not is_alive:
+        _invalidate_all_destination_pools_after_movement(game_state)
+        movement_clear_preview(game_state)
+        return True, {
+            "action": "desperate_escape_died",
+            "unitId": squad_id,
+            "hazard_wounds": hazard_wounds,
+            "activation_complete": True,
+            "waiting_for_player": False,
+        }
 
     _adv_roll = _advance_roll_for(str(squad_id), game_state)
     if _adv_roll is not None:
@@ -2553,9 +2550,7 @@ def movement_commit_move_plan_handler(
     commit_move(plan, game_state, move_type)
 
     if desperate_escape:
-        unit_post_move = get_unit_by_id(game_state, str(squad_id))
-        if unit_post_move and not unit_post_move.get("battle_shocked", False):
-            roll_battle_shock(str(squad_id), game_state)
+        desperate_escape_post_move(str(squad_id), game_state)
 
     unit = get_unit_by_id(game_state, squad_id)
     if not unit:
@@ -2821,6 +2816,24 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id}
 
+    # Desperate Escape (09.07) : une unité engagée ET battle-shocked qui fait un Fall Back déclenche
+    # un hazard roll (06.03) par figurine AVANT de bouger. Même logique que le commit par-figurine
+    # (movement_commit_move_plan_handler) — mutualisée dans desperate_escape_pre_move.
+    was_engaged_pre = _squad_is_in_enemy_er(game_state, str(unit_id))
+    desperate_escape, is_alive, hazard_wounds = desperate_escape_pre_move(
+        str(unit_id), game_state, was_engaged_pre
+    )
+    if desperate_escape and not is_alive:
+        _invalidate_all_destination_pools_after_movement(game_state)
+        movement_clear_preview(game_state)
+        return True, {
+            "action": "desperate_escape_died",
+            "unitId": unit["id"],
+            "hazard_wounds": hazard_wounds,
+            "activation_complete": True,
+            "waiting_for_player": False,
+        }
+
     # Destination validation is already done in movement_build_valid_destinations_pool()
     # (BFS + zone ennemie euclidienne bord à bord sur plateau ×10). Le pool doit rester
     # aligné avec _attempt_movement_to_destination (revalidation stricte au commit).
@@ -2863,7 +2876,12 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
                     return _handle_skip_action(game_state, unit, had_valid_destinations=False)
         
         return False, move_result
-    
+
+    # Desperate Escape (09.07) — après le mouvement : battle-shock roll si l'unité n'est pas déjà
+    # shocked (no-op tant que le Desperate Escape n'est déclenché que pour des unités shocked).
+    if desperate_escape:
+        desperate_escape_post_move(str(unit_id), game_state)
+
     # V11 : Advance déjà marqué dans units_advanced au clic (movement_set_advance_mode_handler) ;
     # il persiste tout le tour, rien à faire ici (ce chemin ne passe pas par commit_move).
 

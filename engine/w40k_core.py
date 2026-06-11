@@ -2620,6 +2620,22 @@ class W40KEngine(gym.Env):
         if action.get("action") == "select_rule_choice":
             return self._handle_select_rule_choice_action(action)
 
+        # TEST/DEBUG : force un battle-shock roll (01.07) sur une unité, hors séquence de jeu.
+        # Permet de tester le Desperate Escape (09.07) en rendant une unité battle-shocked à la demande.
+        if action.get("action") == "force_battle_shock":
+            from engine.phase_handlers.shared_utils import roll_battle_shock
+            uid = action.get("unitId")
+            if uid is None:
+                return False, {"error": "force_battle_shock requires unitId"}
+            if self._get_unit_by_id(str(uid)) is None:
+                return False, {"error": f"force_battle_shock: unit {uid} not found"}
+            shocked = roll_battle_shock(str(uid), self.game_state)
+            return True, {
+                "action": "force_battle_shock",
+                "unitId": str(uid),
+                "battle_shocked": shocked,
+            }
+
         # Block gameplay actions while an explicit choice prompt is pending.
         active_prompt = self.game_state.get("active_rule_choice_prompt")
         if active_prompt is not None:

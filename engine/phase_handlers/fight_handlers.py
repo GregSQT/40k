@@ -4302,4 +4302,703 @@ def pile_in_move_destinations_12_03(
         destinations.append(anchor)
     return destinations
 
+
+# =====================================================================
+# === V11 FIGHT PHASE — ÉLIGIBILITÉS & MACHINE DE SÉLECTION (Bloc 1) ===
+# =====================================================================
+# Fonctions ADDITIVES PURES (non branchées sur le routage V10 actif).
+# Implémentent le cœur règles de l'étape FIGHT V11 (PDF 12.04→12.06) :
+# éligibilités, types de fight, et la machine de sélection FF→Remaining.
+# Pré-condition d'appel : `engaged_at_fight_step_start` (snapshot 12.04)
+# présent dans game_state (pris au début de l'étape FIGHT, cf.
+# fight_compute_engaged_snapshot). Câblage du routage = cut-over final.
+
+
+def _fight_v11_engaged_now(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """True si l'unité est engagée (zone d'engagement) avec ≥1 ennemi MAINTENANT."""
+    from engine.spatial_relations import (
+        get_engagement_zone,
+        unit_within_engagement_zone_footprints,
+    )
+
+    ez = get_engagement_zone(game_state)
+    return unit_within_engagement_zone_footprints(
+        game_state, unit, engagement_zone=ez, max_distance=ez
+    )
+
+
+def _fight_v11_charged_this_turn(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """True si l'unité a fait un charge move ce tour (source units_charged)."""
+    if "units_charged" not in game_state:
+        raise KeyError("game_state missing required 'units_charged' field")
+    return str(require_key(unit, "id")) in {str(x) for x in game_state["units_charged"]}
+
+
+def fight_v11_is_pile_in_eligible(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """
+    Éligibilité PILE IN groupé (étape n°2, 12.03 — sans le bullet overrun) :
+    engagée maintenant OU a fait un charge move ce tour.
+    """
+    return _fight_v11_engaged_now(game_state, unit) or _fight_v11_charged_this_turn(game_state, unit)
+
+
+def fight_v11_is_eligible_to_fight(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """
+    Éligibilité FIGHT 12.04 : pas déjà « selected to fight » cette phase ET
+    (engagée maintenant OU engagée au début de l'étape FIGHT OU a chargé ce tour).
+    **Indépendant de la présence de cibles** (cas overrun : a chargé, cible détruite).
+    """
+    uid = str(require_key(unit, "id"))
+    selected = {str(x) for x in game_state.get("units_selected_to_fight", set())}
+    if uid in selected:
+        return False
+    if _fight_v11_engaged_now(game_state, unit):
+        return True
+    snapshot = require_key(game_state, "engaged_at_fight_step_start")
+    if not isinstance(snapshot, dict):
+        raise TypeError("game_state['engaged_at_fight_step_start'] must be a dict")
+    if snapshot.get(uid, False):
+        return True
+    return _fight_v11_charged_this_turn(game_state, unit)
+
+
+def fight_v11_is_overrun_eligible(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """
+    Éligibilité OVERRUN fight 12.06 : unengaged maintenant, OU était UNengaged au
+    début de l'étape FIGHT (négation du snapshot) et est devenue engagée pendant la phase.
+    """
+    engaged_now = _fight_v11_engaged_now(game_state, unit)
+    if not engaged_now:
+        return True
+    snapshot = require_key(game_state, "engaged_at_fight_step_start")
+    was_engaged_at_start = bool(snapshot.get(str(require_key(unit, "id")), False))
+    return (not was_engaged_at_start) and engaged_now
+
+
+def fight_v11_is_normal_fight_eligible(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """Éligibilité NORMAL fight 12.05 : l'unité est engagée."""
+    return _fight_v11_engaged_now(game_state, unit)
+
+
+def fight_v11_is_consolidation_eligible(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """
+    Éligibilité CONSOLIDATION 12.08 : l'unité « was eligible to fight this phase »
+    (≈ a été sélectionnée, cf. décision plan §6) ET est vivante.
+    """
+    uid = str(require_key(unit, "id"))
+    if not is_unit_alive(uid, game_state):
+        return False
+    selected = {str(x) for x in game_state.get("units_selected_to_fight", set())}
+    return uid in selected
+
+
+def fight_v11_eligible_unit_ids(
+    game_state: Dict[str, Any],
+    player: int,
+    *,
+    fights_first_only: bool,
+) -> List[str]:
+    """Ids des unités vivantes de ``player`` éligibles à combattre (12.04), filtrées FF si demandé."""
+    player = int(player)
+    out: List[str] = []
+    for u in require_key(game_state, "units"):
+        if int(require_key(u, "player")) != player:
+            continue
+        uid = str(require_key(u, "id"))
+        if not is_unit_alive(uid, game_state):
+            continue
+        if not fight_v11_is_eligible_to_fight(game_state, u):
+            continue
+        if fights_first_only and not is_fights_first(u, game_state):
+            continue
+        out.append(uid)
+    return out
+
+
+def fight_v11_advance_selection(game_state: Dict[str, Any]) -> Optional[str]:
+    """
+    Machine de sélection 12.04 (exhaustive). Détermine l'unité que le sélecteur
+    courant doit sélectionner ensuite, en mettant à jour ``fight_step`` /
+    ``fight_selector`` (handoff). Retourne l'id de l'unité, ou None quand l'étape
+    FIGHT est terminée. Ne marque PAS « selected to fight » (l'appelant le fait à
+    la sélection effective).
+
+    Pré-conditions : ``current_player``, ``fight_step`` ∈ {"fights_first","remaining"},
+    ``fight_selector`` ∈ {1,2}, snapshot ``engaged_at_fight_step_start`` présents.
+    """
+    active = int(require_key(game_state, "current_player"))
+    step = require_key(game_state, "fight_step")
+    selector = int(require_key(game_state, "fight_selector"))
+    if step not in ("fights_first", "remaining"):
+        raise ValueError(f"Invalid fight_step: {step!r}")
+    if selector not in (1, 2):
+        raise ValueError(f"Invalid fight_selector: {selector!r}")
+
+    # Retour à Resolve Fights First (12.04) : si des unités FF redeviennent
+    # éligibles pendant Remaining → re-sélecteur = joueur actif (inatteignable
+    # tant que FF = charge seule, mais implémenté pour conformité).
+    if step == "remaining":
+        if (
+            fight_v11_eligible_unit_ids(game_state, active, fights_first_only=True)
+            or fight_v11_eligible_unit_ids(game_state, 3 - active, fights_first_only=True)
+        ):
+            step = "fights_first"
+            selector = active
+
+    # Boucle de transition (bornée : ff→remaining une fois, handoff sélecteur ≤2).
+    for _ in range(8):
+        if step == "fights_first":
+            mine = fight_v11_eligible_unit_ids(game_state, selector, fights_first_only=True)
+            if mine:
+                game_state["fight_step"] = step
+                game_state["fight_selector"] = selector
+                return mine[0]
+            theirs = fight_v11_eligible_unit_ids(game_state, 3 - selector, fights_first_only=True)
+            if theirs:
+                selector = 3 - selector  # l'autre joueur sélectionne
+                continue
+            # Plus aucune FF des deux côtés → Remaining, ce même joueur sélectionne.
+            step = "remaining"
+            continue
+        else:  # remaining
+            mine = fight_v11_eligible_unit_ids(game_state, selector, fights_first_only=False)
+            if mine:
+                game_state["fight_step"] = step
+                game_state["fight_selector"] = selector
+                return mine[0]
+            theirs = fight_v11_eligible_unit_ids(game_state, 3 - selector, fights_first_only=False)
+            if theirs:
+                selector = 3 - selector
+                continue
+            # Plus aucune unité éligible → fin de l'étape FIGHT.
+            game_state["fight_step"] = step
+            game_state["fight_selector"] = selector
+            return None
+    raise RuntimeError("fight_v11_advance_selection: transition loop did not converge")
+
+
+# =====================================================================
+# === V11 FIGHT PHASE — CONSOLIDATION : cascade 3 modes (Bloc 5) ======
+# =====================================================================
+# Fonctions ADDITIVES PURES (non branchées). Cascade obligatoire 12.08 :
+# Ongoing (engagée) → Engaging (ennemi dans 3") → Objective (objectif dans 3").
+# Portées en pouces converties via inches_to_subhex.
+
+
+def _fight_v11_enemies_within_range(
+    game_state: Dict[str, Any], unit: Dict[str, Any], range_inches: int
+) -> List[str]:
+    """Ids des unités ennemies dont l'empreinte est dans ``range_inches`` (× inches_to_subhex)."""
+    from engine.hex_utils import min_distance_between_sets
+
+    scale = int(require_key(game_state, "inches_to_subhex"))
+    rng = int(range_inches) * scale
+    units_cache = require_key(game_state, "units_cache")
+    uid = str(require_key(unit, "id"))
+    entry = units_cache.get(uid)
+    if entry is None:
+        raise ValueError(f"Unit {uid} not in units_cache; cannot compute range query")
+    up = int(require_key(entry, "player"))
+    ufp = entry.get("occupied_hexes", {(entry["col"], entry["row"])})
+    out: List[str] = []
+    for eid, ce in units_cache.items():
+        if str(eid) == uid:
+            continue
+        if int(require_key(ce, "player")) == up:
+            continue
+        efp = ce.get("occupied_hexes", {(ce["col"], ce["row"])})
+        if min_distance_between_sets(ufp, efp, max_distance=rng) <= rng:
+            out.append(str(eid))
+    return out
+
+
+def _fight_v11_objective_hex_sets(game_state: Dict[str, Any]) -> List[Tuple[Any, Set[Tuple[int, int]]]]:
+    """(id, set des hexes) par objectif. Utilise ``hexes`` (zone de contrôle runtime)."""
+    objectives = game_state.get("objectives")
+    if not isinstance(objectives, (list, tuple)):
+        return []
+    out: List[Tuple[Any, Set[Tuple[int, int]]]] = []
+    for obj in objectives:
+        if not isinstance(obj, dict):
+            continue
+        hexes = obj.get("hexes")
+        s: Set[Tuple[int, int]] = set()
+        if isinstance(hexes, (list, tuple)):
+            for h in hexes:
+                if isinstance(h, dict):
+                    s.add((int(require_key(h, "col")), int(require_key(h, "row"))))
+                elif isinstance(h, (list, tuple)) and len(h) >= 2:
+                    s.add((int(h[0]), int(h[1])))
+        if s:
+            out.append((obj.get("id"), s))
+    return out
+
+
+def _fight_v11_objectives_within_range(
+    game_state: Dict[str, Any], unit: Dict[str, Any], range_inches: int
+) -> List[Any]:
+    """Ids des objectifs dont la zone de contrôle est dans ``range_inches`` de l'unité."""
+    from engine.hex_utils import min_distance_between_sets
+
+    scale = int(require_key(game_state, "inches_to_subhex"))
+    rng = int(range_inches) * scale
+    units_cache = require_key(game_state, "units_cache")
+    uid = str(require_key(unit, "id"))
+    entry = units_cache.get(uid)
+    if entry is None:
+        raise ValueError(f"Unit {uid} not in units_cache; cannot compute objective range")
+    ufp = entry.get("occupied_hexes", {(entry["col"], entry["row"])})
+    out: List[Any] = []
+    for oid, hexes in _fight_v11_objective_hex_sets(game_state):
+        if min_distance_between_sets(ufp, hexes, max_distance=rng) <= rng:
+            out.append(oid)
+    return out
+
+
+def fight_v11_consolidation_mode(game_state: Dict[str, Any], unit: Dict[str, Any]) -> Optional[str]:
+    """
+    Cascade obligatoire 12.08 (mode imposé) :
+    - ``"ongoing"``   : l'unité est engagée ;
+    - ``"engaging"``  : sinon, 1+ unités ennemies dans ``consolidation_trigger_range`` (3") ;
+    - ``"objective"`` : sinon, 1+ objectifs dans 3" ;
+    - ``None``        : aucune branche applicable (pas de consolidation possible).
+    """
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    trig = int(require_key(game_rules, "consolidation_trigger_range"))
+    if _fight_v11_engaged_now(game_state, unit):
+        return "ongoing"
+    if _fight_v11_enemies_within_range(game_state, unit, trig):
+        return "engaging"
+    if _fight_v11_objectives_within_range(game_state, unit, trig):
+        return "objective"
+    return None
+
+
+def fight_v11_engaging_triggered_unit_ids(
+    game_state: Dict[str, Any], unit: Dict[str, Any]
+) -> List[str]:
+    """
+    Engaging consolidation (12.08 AFTER) : ennemis engagés avec l'unité (après le move)
+    non encore « selected to fight » cette phase → l'adversaire devra les sélectionner
+    et ils combattent in-place. Retourne ces ids.
+    """
+    selected = {str(x) for x in game_state.get("units_selected_to_fight", set())}
+    return [eid for eid in _fight_units_engaged_with(game_state, unit) if eid not in selected]
+
+
+# =====================================================================
+# === V11 FIGHT PHASE — ORCHESTRATION (drivers, Blocs 1/2/5) ==========
+# =====================================================================
+# Drivers ADDITIFS PURS (non branchés sur execute_action). Pilotent la
+# séquence des 5 étapes V11 (12.01→12.09). Le flip des points d'entrée
+# (execute_action/fight_phase_start) = cut-over final.
+
+
+def fight_v11_start(game_state: Dict[str, Any]) -> None:
+    """
+    START OF FIGHT PHASE (12.01) → entre dans l'étape PILE IN (12.02).
+    Réinitialise les états de suivi V11 de la phase et positionne la sous-phase.
+    """
+    game_state["phase"] = "fight"
+    if "units_fought" not in game_state:
+        game_state["units_fought"] = set()
+    if "units_charged" not in game_state:
+        raise KeyError("game_state missing required 'units_charged' field at fight_v11_start")
+    game_state["units_selected_to_fight"] = set()
+    game_state["pile_in_done"] = set()
+    game_state["consolidation_done"] = set()
+    game_state.pop("engaged_at_fight_step_start", None)
+    game_state["fight_step"] = None
+    game_state["fight_selector"] = None
+    game_state["fight_subphase"] = "pile_in"
+
+
+def fight_v11_enter_fight_step(game_state: Dict[str, Any]) -> None:
+    """
+    Transition PILE IN → FIGHT (étape 3). Prend le snapshot
+    ``engaged_at_fight_step_start`` (APRÈS le pile-in groupé) et initialise la
+    machine de sélection 12.04 (Resolve Fights First, sélecteur = joueur actif).
+    """
+    game_state["engaged_at_fight_step_start"] = fight_compute_engaged_snapshot(game_state)
+    game_state["fight_subphase"] = "fight"
+    game_state["fight_step"] = "fights_first"
+    game_state["fight_selector"] = int(require_key(game_state, "current_player"))
+
+
+def fight_v11_enter_consolidate(game_state: Dict[str, Any]) -> None:
+    """Transition FIGHT → CONSOLIDATE (étape 4)."""
+    game_state["fight_subphase"] = "consolidate"
+    game_state["fight_step"] = None
+    game_state["fight_selector"] = None
+
+
+def _fight_v11_grouped_step_eligible(
+    game_state: Dict[str, Any], subphase: str, player: int
+) -> List[str]:
+    """Unités vivantes de ``player`` éligibles pour l'étape groupée ``subphase``, non encore traitées."""
+    if subphase == "pile_in":
+        done = {str(x) for x in game_state.get("pile_in_done", set())}
+    elif subphase == "consolidate":
+        done = {str(x) for x in game_state.get("consolidation_done", set())}
+    else:
+        raise ValueError(f"_fight_v11_grouped_step_eligible: bad subphase {subphase!r}")
+    player = int(player)
+    out: List[str] = []
+    for u in require_key(game_state, "units"):
+        if int(require_key(u, "player")) != player:
+            continue
+        uid = str(require_key(u, "id"))
+        if not is_unit_alive(uid, game_state):
+            continue
+        if uid in done:
+            continue
+        if subphase == "pile_in":
+            if fight_v11_is_pile_in_eligible(game_state, u):
+                out.append(uid)
+        else:
+            if fight_v11_is_consolidation_eligible(game_state, u):
+                out.append(uid)
+    return out
+
+
+def fight_v11_grouped_next(
+    game_state: Dict[str, Any], subphase: str
+) -> Optional[Tuple[int, List[str]]]:
+    """
+    Étape groupée (PILE IN 12.02 / CONSOLIDATE 12.07) : joueur **actif d'abord**
+    (toutes ses unités éligibles non traitées), puis l'adverse. Retourne
+    ``(player, [unit_ids])`` pour le tour de groupe courant, ou ``None`` quand les
+    deux camps ont épuisé leurs unités éligibles (→ transition d'étape).
+    « Skip » = marquer l'unité dans le set ``*_done`` sans déplacement.
+    """
+    if subphase not in ("pile_in", "consolidate"):
+        raise ValueError(f"fight_v11_grouped_next: bad subphase {subphase!r}")
+    active = int(require_key(game_state, "current_player"))
+    mine = _fight_v11_grouped_step_eligible(game_state, subphase, active)
+    if mine:
+        return (active, mine)
+    theirs = _fight_v11_grouped_step_eligible(game_state, subphase, 3 - active)
+    if theirs:
+        return (3 - active, theirs)
+    return None
+
+
+def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Fin de phase FIGHT V11 (12.09) → progression joueur / tour (Fight = dernière phase).
+    Sémantique identique à ``_fight_phase_complete`` mais SANS les pools V10.
+    """
+    game_state["fight_subphase"] = None
+    game_state["fight_step"] = None
+    game_state["fight_selector"] = None
+    add_console_log(game_state, "FIGHT PHASE COMPLETE (V11)")
+
+    current_player = int(require_key(game_state, "current_player"))
+    if current_player not in (1, 2):
+        raise ValueError(f"Invalid current_player value: {current_player}")
+    units_processed = len(game_state.get("units_selected_to_fight", set()))
+
+    if current_player == 1:
+        game_state["current_player"] = 2
+        return {
+            "phase_complete": True, "phase_transition": True, "next_phase": "command",
+            "current_player": 2, "units_processed": units_processed,
+            "clear_blinking_gentle": True, "reset_mode": "select",
+            "clear_selected_unit": True, "clear_attack_preview": True,
+        }
+    # current_player == 2
+    cfg = game_state.get("config")
+    tc = cfg.get("training_config") if isinstance(cfg, dict) else None
+    max_turns = tc.get("max_turns_per_episode") if isinstance(tc, dict) else None
+    if max_turns and (game_state["turn"] + 1) > max_turns:
+        state_manager = GameStateManager(require_key(game_state, "config"))
+        state_manager.apply_primary_objective_scoring(game_state, "fight")
+        game_state["turn_limit_reached"] = True
+        game_state["game_over"] = True
+        return {
+            "phase_complete": True, "game_over": True, "turn_limit_reached": True,
+            "units_processed": units_processed, "clear_blinking_gentle": True,
+            "reset_mode": "select", "clear_selected_unit": True, "clear_attack_preview": True,
+        }
+    game_state["turn"] += 1
+    game_state["current_player"] = 1
+    return {
+        "phase_complete": True, "phase_transition": True, "next_phase": "command",
+        "current_player": 1, "new_turn": game_state["turn"], "units_processed": units_processed,
+        "clear_blinking_gentle": True, "reset_mode": "select",
+        "clear_selected_unit": True, "clear_attack_preview": True,
+    }
+
+
+def _fight_v11_resolve_attacks(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    config: Dict[str, Any],
+    *,
+    preferred_target_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Résout les attaques de mêlée d'une unité « selected to fight » (réutilise le
+    résolveur de dés ``_execute_fight_attack_sequence``). Sélectionne l'arme vs la
+    cible préférée/auto, roule NB, déplète les attaques en reciblant si une cible meurt.
+    Retourne la liste des ``attack_result``. Liste vide = fight « à vide » (aucune cible).
+    """
+    from engine.ai.weapon_selector import select_best_melee_weapon
+
+    unit_id = str(require_key(unit, "id"))
+    results: List[Dict[str, Any]] = []
+    cc_weapons = unit.get("CC_WEAPONS") or []
+    if not cc_weapons:
+        return results
+
+    targets = _fight_build_valid_target_pool(game_state, unit)
+    if not targets:
+        return results
+    tid = preferred_target_id if (preferred_target_id in targets) else _ai_select_fight_target(
+        game_state, unit_id, targets
+    )
+    tgt = get_unit_by_id(game_state, tid)
+    if not tgt:
+        return results
+    widx = select_best_melee_weapon(unit, tgt, game_state)
+    if widx < 0:
+        return results
+    unit["selectedCcWeaponIndex"] = widx
+    weapon = unit["CC_WEAPONS"][widx]
+    unit["ATTACK_LEFT"] = resolve_dice_value(require_key(weapon, "NB"), "fight_v11_nb")
+
+    while unit["ATTACK_LEFT"] > 0:
+        targets = _fight_build_valid_target_pool(game_state, unit)
+        if not targets:
+            break
+        if tid not in targets:
+            tid = _ai_select_fight_target(game_state, unit_id, targets)
+        attack_result = _execute_fight_attack_sequence(game_state, unit, tid)
+        attack_result["attackerId"] = unit_id
+        attack_result["targetId"] = tid
+        results.append(attack_result)
+        unit["ATTACK_LEFT"] -= 1
+        if attack_result.get("target_died"):
+            _remove_dead_unit_from_fight_pools(game_state, tid)
+    return results
+
+
+def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:  # noqa: F811 (V11 override of V10)
+    """
+    START OF FIGHT PHASE V11 (12.01) — override de la version V10.
+    Initialise les états V11 et entre dans l'étape PILE IN. Si aucune unité n'est
+    éligible à aucune étape, termine la phase immédiatement.
+    """
+    if "units_cache" not in game_state:
+        raise KeyError("units_cache must exist at fight_phase_start (should be built at reset)")
+    fight_v11_start(game_state)
+    add_console_log(game_state, "FIGHT PHASE START (V11)")
+    return {"phase_initialized": True, "fight_subphase": "pile_in", "phase_complete": False}
+
+
+def _fight_v11_auto_pile_in(game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]) -> None:
+    """Pile-in groupé AUTO (politique décision #7 : toujours si possible). Marque pile_in_done."""
+    uid = str(require_key(unit, "id"))
+    try:
+        engaged = _fight_units_engaged_with(game_state, unit)
+        targets = engaged if engaged else pile_in_targets_within_range(game_state, unit)
+        if targets:
+            dests = pile_in_move_destinations_12_03(game_state, unit, targets)
+            if dests:
+                d_min, _closest = _fight_pile_in_closest_enemy_snapshot(game_state, unit)
+                pc, pr = _ai_select_pile_in_destination(
+                    game_state, unit, dests, d_min, [str(t) for t in targets]
+                )
+                try:
+                    _fight_apply_pile_in_move(game_state, unit, pc, pr)
+                except ValueError:
+                    pass  # destination devenue invalide entre BFS et application
+    finally:
+        game_state["pile_in_done"].add(uid)
+
+
+def _fight_v11_auto_overrun_pile_in(game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]) -> None:
+    """Pile-in additionnel d'un overrun fight AUTO (12.06) : se rapprocher/engager si possible."""
+    within = pile_in_targets_within_range(game_state, unit)
+    if not within:
+        return
+    dests = pile_in_move_destinations_12_03(game_state, unit, within)
+    if not dests:
+        return
+    pc, pr = _ai_select_pile_in_destination(game_state, unit, dests, 0, within)
+    try:
+        _fight_apply_pile_in_move(game_state, unit, pc, pr)
+    except ValueError:
+        pass
+
+
+def _fight_v11_auto_consolidate(game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]) -> None:
+    """
+    Consolidation AUTO (V1) : skip (consolidation est OPTIONNELLE, 12 encart) — choix
+    légal et conservateur. Marque consolidation_done. La consolidation auto effective
+    (3 modes + déclencheur Engaging, décision #7) est affinée avec l'UI (Bloc front).
+    """
+    game_state["consolidation_done"].add(str(require_key(unit, "id")))
+
+
+def _fight_v11_auto_step(game_state: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    """Une activation V11 par appel (granularité V10), résolution automatique (IA/gym/PvE)."""
+    for _ in range(6):
+        sub = require_key(game_state, "fight_subphase")
+        if sub == "pile_in":
+            nxt = fight_v11_grouped_next(game_state, "pile_in")
+            if nxt is None:
+                fight_v11_enter_fight_step(game_state)
+                continue
+            uid = nxt[1][0]
+            u = get_unit_by_id(game_state, uid)
+            if u is None:
+                raise KeyError(f"Unit {uid} missing for pile-in")
+            _fight_v11_auto_pile_in(game_state, u, config)
+            return True, {"action": "pile_in", "phase": "fight", "unitId": uid,
+                          "fight_subphase": "pile_in", "waiting_for_player": False}
+        if sub == "fight":
+            uid = fight_v11_advance_selection(game_state)
+            if uid is None:
+                fight_v11_enter_consolidate(game_state)
+                continue
+            u = get_unit_by_id(game_state, uid)
+            if u is None:
+                raise KeyError(f"Unit {uid} missing for fight")
+            game_state["units_selected_to_fight"].add(uid)
+            game_state.setdefault("units_fought", set()).add(uid)
+            overrun = (
+                fight_v11_is_overrun_eligible(game_state, u)
+                and not _fight_v11_engaged_now(game_state, u)
+            )
+            if overrun:
+                _fight_v11_auto_overrun_pile_in(game_state, u, config)
+            results = _fight_v11_resolve_attacks(game_state, u, config)
+            return True, {"action": "combat", "phase": "fight", "unitId": uid,
+                          "fight_subphase": "fight", "all_attack_results": results,
+                          "fight_type": "overrun" if overrun else "normal",
+                          "waiting_for_player": False}
+        if sub == "consolidate":
+            nxt = fight_v11_grouped_next(game_state, "consolidate")
+            if nxt is None:
+                return True, _fight_v11_phase_complete(game_state)
+            uid = nxt[1][0]
+            u = get_unit_by_id(game_state, uid)
+            if u is None:
+                raise KeyError(f"Unit {uid} missing for consolidate")
+            _fight_v11_auto_consolidate(game_state, u, config)
+            return True, {"action": "consolidation", "phase": "fight", "unitId": uid,
+                          "fight_subphase": "consolidate", "waiting_for_player": False}
+        return True, _fight_v11_phase_complete(game_state)
+    raise RuntimeError("_fight_v11_auto_step did not converge")
+
+
+def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    """État actionnable courant pour le joueur humain (PvP). Avance les transitions de sous-phase."""
+    for _ in range(6):
+        sub = require_key(game_state, "fight_subphase")
+        if sub == "pile_in":
+            nxt = fight_v11_grouped_next(game_state, "pile_in")
+            if nxt is None:
+                fight_v11_enter_fight_step(game_state)
+                continue
+            player, eligible = nxt
+            return True, {"phase": "fight", "fight_subphase": "pile_in",
+                          "group_player": player, "eligible_units": eligible,
+                          "waiting_for_player": True, "action": "wait"}
+        if sub == "fight":
+            uid = fight_v11_advance_selection(game_state)
+            if uid is None:
+                fight_v11_enter_consolidate(game_state)
+                continue
+            u = get_unit_by_id(game_state, uid)
+            valid_targets = _fight_build_valid_target_pool(game_state, u) if u else []
+            return True, {"phase": "fight", "fight_subphase": "fight",
+                          "fight_step": game_state["fight_step"],
+                          "fight_selector": game_state["fight_selector"],
+                          "active_fight_unit": uid, "valid_targets": valid_targets,
+                          "overrun_eligible": bool(u and fight_v11_is_overrun_eligible(game_state, u)),
+                          "waiting_for_player": True, "action": "wait"}
+        if sub == "consolidate":
+            nxt = fight_v11_grouped_next(game_state, "consolidate")
+            if nxt is None:
+                return True, _fight_v11_phase_complete(game_state)
+            player, eligible = nxt
+            return True, {"phase": "fight", "fight_subphase": "consolidate",
+                          "group_player": player, "eligible_units": eligible,
+                          "waiting_for_player": True, "action": "wait"}
+        return True, _fight_v11_phase_complete(game_state)
+    raise RuntimeError("_fight_v11_manual_state did not converge")
+
+
+def _fight_v11_manual_step(
+    game_state: Dict[str, Any],
+    unit: Optional[Dict[str, Any]],
+    action: Dict[str, Any],
+    config: Dict[str, Any],
+) -> Tuple[bool, Dict[str, Any]]:
+    """Traite une action humaine (PvP) dans l'étape V11 courante, puis renvoie l'état suivant."""
+    sub = require_key(game_state, "fight_subphase")
+    atype = action.get("action")
+    uid = action.get("unitId")
+    if uid is None and unit is not None:
+        uid = unit["id"]
+    uid = str(uid) if uid is not None else None
+    skip = action.get("skip") is True or atype in ("skip", "right_click")
+
+    if sub == "pile_in":
+        nxt = fight_v11_grouped_next(game_state, "pile_in")
+        if nxt is not None and uid in nxt[1]:
+            u = get_unit_by_id(game_state, uid)
+            if not skip and "destCol" in action and "destRow" in action:
+                dest = normalize_coordinates(action["destCol"], action["destRow"])
+                targets = pile_in_select_targets_12_03(
+                    game_state, u, action.get("targetIds")
+                )
+                dests = [tuple(d) for d in pile_in_move_destinations_12_03(game_state, u, targets)]
+                if dest in dests:
+                    _fight_apply_pile_in_move(game_state, u, dest[0], dest[1])
+            game_state["pile_in_done"].add(uid)
+        return _fight_v11_manual_state(game_state)
+
+    if sub == "fight":
+        sel = fight_v11_advance_selection(game_state)
+        if sel is not None and (uid is None or uid == sel) and atype in ("fight", "left_click"):
+            u = get_unit_by_id(game_state, sel)
+            game_state["units_selected_to_fight"].add(sel)
+            game_state.setdefault("units_fought", set()).add(sel)
+            if action.get("fight_type") == "overrun" and fight_v11_is_overrun_eligible(game_state, u):
+                _fight_v11_auto_overrun_pile_in(game_state, u, config)
+            _fight_v11_resolve_attacks(
+                game_state, u, config, preferred_target_id=(str(action["targetId"]) if "targetId" in action else None)
+            )
+        return _fight_v11_manual_state(game_state)
+
+    if sub == "consolidate":
+        nxt = fight_v11_grouped_next(game_state, "consolidate")
+        if nxt is not None and uid in nxt[1]:
+            game_state["consolidation_done"].add(uid)  # move UI (3 modes) câblée au Bloc front
+        return _fight_v11_manual_state(game_state)
+
+    return _fight_v11_manual_state(game_state)
+
+
+def execute_action(  # noqa: F811 (V11 override of V10)
+    game_state: Dict[str, Any],
+    unit: Optional[Dict[str, Any]],
+    action: Dict[str, Any],
+    config: Dict[str, Any],
+) -> Tuple[bool, Dict[str, Any]]:
+    """
+    Routage de la phase FIGHT V11 (override). Sous-phases pile_in → fight → consolidate.
+    - PvE / gym / endless (auto autorisé) : une activation résolue par appel (_fight_v11_auto_step).
+    - PvP / pvp_test (manuel) : traite l'action humaine et renvoie l'état actionnable suivant.
+    """
+    if game_state.get("phase") != "fight":
+        fight_phase_start(game_state)
+    fight_ensure_v11_state(game_state)
+    if _is_fight_auto_execution_allowed(game_state):
+        return _fight_v11_auto_step(game_state, config)
+    return _fight_v11_manual_step(game_state, unit, action, config)
+
     return False
