@@ -20,7 +20,7 @@ interface UnitStatusBadgesProps {
 /** Œil barré sur fond noir — caché (13.09). */
 function HiddenIcon() {
   return (
-    <svg className="unit-status-badge__svg" viewBox="0 0 24 24" aria-hidden="true">
+    <svg className="unit-status-badge__svg unit-status-badge__svg--hidden" viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="12" r="10" fill="#000000" stroke="#b0b0b0" strokeWidth="1.5" />
       <path
         d="M3.8 12 Q12 6.8 20.2 12 Q12 17.2 3.8 12"

@@ -16,18 +16,18 @@ export function drawHiddenEyeBadge(
   // Anneau noir externe pour détacher le badge du plateau.
   g.lineStyle(0);
   g.beginFill(0x000000, 1);
-  g.drawCircle(badgeX, badgeY, r + 2);
+  g.drawCircle(badgeX, badgeY, r + 1);
   g.endFill();
   // Corps du badge (noir, bord gris clair).
   g.beginFill(0x000000, 0.9);
-  g.lineStyle(2, 0xb0b0b0, 1);
+  g.lineStyle(1, 0xb0b0b0, 1);
   g.drawCircle(badgeX, badgeY, r);
   g.endFill();
   // Icône "visibility off" (gris clair sur noir) → se lit comme "caché / non vu".
   const eyeColor = 0xc8c8c8;
   const ew = r * 0.82;
   const eh = r * 0.52;
-  const lw = Math.max(1.5, r * 0.2);
+  const lw = Math.max(0.8, r * 0.15);
   // Contour de l'œil en amande.
   g.lineStyle(lw, eyeColor, 1);
   g.moveTo(badgeX - ew, badgeY);

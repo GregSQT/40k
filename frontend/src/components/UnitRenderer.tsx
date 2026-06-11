@@ -2327,7 +2327,7 @@ export class UnitRenderer {
       });
     }
 
-    const r = Math.max(7, HEX_RADIUS * 0.32);
+    const r = Math.max(5, HEX_RADIUS * 0.32);
     const scaledOffset = ((HEX_RADIUS * unitIconScale) / 2) * 0.8;
     // Bottom-left of a figure (mirror of the bottom-right charge badge).
     const drawBadgeAt = (cx: number, cy: number, name: string): void => {
