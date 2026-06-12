@@ -89,11 +89,15 @@ class TestGroupedNext:
         ], current_player=1)
         gs["pile_in_done"] = set()
         # actif d'abord
-        player, units = fight_v11_grouped_next(gs, "pile_in")
+        nxt = fight_v11_grouped_next(gs, "pile_in")
+        assert nxt is not None
+        player, units = nxt
         assert player == 1 and units == ["p1"]
         # p1 traité (skip = done)
         gs["pile_in_done"].add("p1")
-        player, units = fight_v11_grouped_next(gs, "pile_in")
+        nxt = fight_v11_grouped_next(gs, "pile_in")
+        assert nxt is not None
+        player, units = nxt
         assert player == 2 and units == ["e1"]
         gs["pile_in_done"].add("e1")
         assert fight_v11_grouped_next(gs, "pile_in") is None
@@ -104,10 +108,14 @@ class TestGroupedNext:
             {"id": "p2", "player": 2, "col": 9, "row": 9},
         ], current_player=1, units_selected_to_fight=["p1", "p2"])
         gs["consolidation_done"] = set()
-        player, units = fight_v11_grouped_next(gs, "consolidate")
+        nxt = fight_v11_grouped_next(gs, "consolidate")
+        assert nxt is not None
+        player, units = nxt
         assert player == 1 and units == ["p1"]
         gs["consolidation_done"].add("p1")
-        player, units = fight_v11_grouped_next(gs, "consolidate")
+        nxt = fight_v11_grouped_next(gs, "consolidate")
+        assert nxt is not None
+        player, units = nxt
         assert player == 2 and units == ["p2"]
         gs["consolidation_done"].add("p2")
         assert fight_v11_grouped_next(gs, "consolidate") is None

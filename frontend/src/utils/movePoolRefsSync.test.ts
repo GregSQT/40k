@@ -6,14 +6,26 @@ import { addHexKeysToSet, syncMoveDestinationPoolRefs } from "./movePoolRefsSync
 describe("addHexKeysToSet", () => {
   it("parses [col, row] array pairs", () => {
     const out = new Set<string>();
-    addHexKeysToSet([[5, 10], [3, 7]], out);
+    addHexKeysToSet(
+      [
+        [5, 10],
+        [3, 7],
+      ],
+      out
+    );
     expect(out.has("5,10")).toBe(true);
     expect(out.has("3,7")).toBe(true);
   });
 
   it("parses { col, row } objects", () => {
     const out = new Set<string>();
-    addHexKeysToSet([{ col: 4, row: 9 }, { col: 12, row: 1 }], out);
+    addHexKeysToSet(
+      [
+        { col: 4, row: 9 },
+        { col: 12, row: 1 },
+      ],
+      out
+    );
     expect(out.has("4,9")).toBe(true);
     expect(out.has("12,1")).toBe(true);
   });
@@ -93,7 +105,13 @@ describe("syncMoveDestinationPoolRefs", () => {
   it("fills moveDestPoolRef from valid_move_destinations_pool in move phase", () => {
     const moveRef = makeRef(new Set<string>());
     syncMoveDestinationPoolRefs({
-      gameState: { valid_move_destinations_pool: [[5, 10], [6, 10], [7, 10]] },
+      gameState: {
+        valid_move_destinations_pool: [
+          [5, 10],
+          [6, 10],
+          [7, 10],
+        ],
+      },
       phase: "move",
       mode: "default",
       selectedUnitId: 1,
@@ -106,7 +124,12 @@ describe("syncMoveDestinationPoolRefs", () => {
   it("falls back to preview_hexes when valid_move_destinations_pool absent", () => {
     const moveRef = makeRef(new Set<string>());
     syncMoveDestinationPoolRefs({
-      gameState: { preview_hexes: [[8, 5], [9, 5]] },
+      gameState: {
+        preview_hexes: [
+          [8, 5],
+          [9, 5],
+        ],
+      },
       phase: "move",
       mode: "default",
       selectedUnitId: 1,
@@ -143,7 +166,12 @@ describe("syncMoveDestinationPoolRefs", () => {
   it("fills refs in shoot phase with pendingMoveAfterShooting and selectedUnitId", () => {
     const moveRef = makeRef(new Set<string>());
     syncMoveDestinationPoolRefs({
-      gameState: { valid_move_destinations_pool: [[5, 5], [6, 5]] },
+      gameState: {
+        valid_move_destinations_pool: [
+          [5, 5],
+          [6, 5],
+        ],
+      },
       phase: "shoot",
       mode: "default",
       selectedUnitId: 1,
@@ -181,7 +209,12 @@ describe("syncMoveDestinationPoolRefs", () => {
   it("successive calls replace content, not merge (second call clears first then refills)", () => {
     const moveRef = makeRef(new Set<string>());
     const args = {
-      gameState: { valid_move_destinations_pool: [[5, 10], [6, 10]] },
+      gameState: {
+        valid_move_destinations_pool: [
+          [5, 10],
+          [6, 10],
+        ],
+      },
       phase: "move" as const,
       mode: "default" as const,
       selectedUnitId: 1,

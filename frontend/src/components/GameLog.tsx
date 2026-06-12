@@ -9,7 +9,6 @@ import {
   getEventIcon,
   getEventTypeClass,
 } from "../../../shared/gameLogStructure.ts";
-import { useTutorial } from "../contexts/TutorialContext";
 
 const RULE_TOKEN_REGEX = /\[([^\]]+)\]/g;
 
@@ -212,7 +211,6 @@ export const GameLog: React.FC<GameLogProps> = ({
   const lastEntryRef = React.useRef<HTMLDivElement>(null);
   const headerRef = React.useRef<HTMLDivElement>(null);
   const topEntryRefs = React.useRef<Array<HTMLDivElement | null>>([]);
-  const tutorial = useTutorial();
   const [expandedEntries, setExpandedEntries] = React.useState<Set<string>>(new Set());
 
   const toggleExpanded = React.useCallback((id: string) => {
@@ -226,7 +224,6 @@ export const GameLog: React.FC<GameLogProps> = ({
       return next;
     });
   }, []);
-  const _spotlightLayoutTick = tutorial?.spotlightLayoutTick ?? 0;
   const [_gameLogScrollTick, setGameLogScrollTick] = React.useState(0);
 
   React.useLayoutEffect(() => {
@@ -528,7 +525,9 @@ export const GameLog: React.FC<GameLogProps> = ({
                         type="button"
                         className="game-log-entry__expand-btn"
                         onClick={() => toggleExpanded(event.id)}
-                        aria-label={expandedEntries.has(event.id) ? "Réduire le détail" : "Voir le détail"}
+                        aria-label={
+                          expandedEntries.has(event.id) ? "Réduire le détail" : "Voir le détail"
+                        }
                       >
                         {expandedEntries.has(event.id) ? "−" : "+"}
                       </button>
@@ -569,54 +568,68 @@ export const GameLog: React.FC<GameLogProps> = ({
                       </span>
                     )}
                   </div>
-                  {expandedEntries.has(event.id) && event.shootDetails && event.shootDetails.length > 0 && (
-                    <div className="game-log-entry__shot-details">
-                      {(() => {
-                        const allShots = event.shootDetails!;
-                        const total = allShots.length;
-                        const visibleShots = allShots.filter((s) => !s.wasted);
-                        const wastedCount = total - visibleShots.length;
-                        return (
-                          <>
-                            {visibleShots.map((shot) => {
-                              const parts: string[] = [`${shot.shotNumber}/${total}`];
-                              if (event.weaponName) parts.push(event.weaponName);
-                              const targetType = shot.targetUnitType ?? event.targetUnitType;
-                              if (targetType) parts.push(targetType);
-                              parts.push(`Tir: ${shot.hitResult === "HIT" ? "✓" : "✗"}${shot.attackRoll !== undefined ? ` (${shot.attackRoll})` : ""}`);
-                              if (shot.hitResult === "HIT") {
-                                parts.push(`Bless: ${shot.strengthResult === "SUCCESS" ? "✓" : "✗"}${shot.strengthRoll !== undefined ? ` (${shot.strengthRoll})` : ""}`);
-                              }
-                              if (shot.strengthResult === "SUCCESS") {
-                                if (shot.saveRoll !== undefined) {
-                                  parts.push(`Svg: ${shot.saveSuccess ? "✓" : "✗"} (${shot.saveRoll})`);
+                  {expandedEntries.has(event.id) &&
+                    event.shootDetails &&
+                    event.shootDetails.length > 0 && (
+                      <div className="game-log-entry__shot-details">
+                        {(() => {
+                          const allShots = event.shootDetails!;
+                          const total = allShots.length;
+                          const visibleShots = allShots.filter((s) => !s.wasted);
+                          const wastedCount = total - visibleShots.length;
+                          return (
+                            <>
+                              {visibleShots.map((shot) => {
+                                const parts: string[] = [`${shot.shotNumber}/${total}`];
+                                if (event.weaponName) parts.push(event.weaponName);
+                                const targetType = shot.targetUnitType ?? event.targetUnitType;
+                                if (targetType) parts.push(targetType);
+                                parts.push(
+                                  `Tir: ${shot.hitResult === "HIT" ? "✓" : "✗"}${shot.attackRoll !== undefined ? ` (${shot.attackRoll})` : ""}`
+                                );
+                                if (shot.hitResult === "HIT") {
+                                  parts.push(
+                                    `Bless: ${shot.strengthResult === "SUCCESS" ? "✓" : "✗"}${shot.strengthRoll !== undefined ? ` (${shot.strengthRoll})` : ""}`
+                                  );
                                 }
-                                if (!shot.saveSuccess && shot.damageDealt !== undefined) {
-                                  parts.push(`Dmg: ${shot.damageDealt}`);
-                                  if (shot.targetCol !== undefined && shot.targetRow !== undefined) {
-                                    parts.push(`(${shot.targetCol},${shot.targetRow})`);
+                                if (shot.strengthResult === "SUCCESS") {
+                                  if (shot.saveRoll !== undefined) {
+                                    parts.push(
+                                      `Svg: ${shot.saveSuccess ? "✓" : "✗"} (${shot.saveRoll})`
+                                    );
+                                  }
+                                  if (!shot.saveSuccess && shot.damageDealt !== undefined) {
+                                    parts.push(`Dmg: ${shot.damageDealt}`);
+                                    if (
+                                      shot.targetCol !== undefined &&
+                                      shot.targetRow !== undefined
+                                    ) {
+                                      parts.push(`(${shot.targetCol},${shot.targetRow})`);
+                                    }
+                                  }
+                                  if (shot.targetDied) {
+                                    parts.push("💀");
                                   }
                                 }
-                                if (shot.targetDied) {
-                                  parts.push("💀");
-                                }
-                              }
-                              return (
-                                <div key={shot.shotNumber} className="game-log-entry__shot-detail-row">
-                                  {parts.join(" | ")}
+                                return (
+                                  <div
+                                    key={shot.shotNumber}
+                                    className="game-log-entry__shot-detail-row"
+                                  >
+                                    {parts.join(" | ")}
+                                  </div>
+                                );
+                              })}
+                              {wastedCount > 0 && (
+                                <div className="game-log-entry__shot-detail-row game-log-entry__shot-detail-row--wasted">
+                                  {`No more target - shots remaining: ${wastedCount}/${total}`}
                                 </div>
-                              );
-                            })}
-                            {wastedCount > 0 && (
-                              <div className="game-log-entry__shot-detail-row game-log-entry__shot-detail-row--wasted">
-                                {`No more target - shots remaining: ${wastedCount}/${total}`}
-                              </div>
-                            )}
-                          </>
-                        );
-                      })()}
-                    </div>
-                  )}
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
                 </div>
               );
             })}

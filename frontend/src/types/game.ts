@@ -12,14 +12,8 @@ export type GameMode =
   | "advancePreview"
   | "pileInPreview"
   | "consolidationPreview";
-// AI_TURN.md COMPLIANCE: Fight subphase names match backend exactly
-export type FightSubPhase =
-  | "charging"
-  | "alternating_non_active"
-  | "alternating_active"
-  | "cleanup_non_active"
-  | "cleanup_active"
-  | null;
+// V11 (PDF 12) : sous-phases fight = pile_in -> fight -> consolidate.
+export type FightSubPhase = "pile_in" | "fight" | "consolidate" | null;
 
 // NEW: Debug reward display fields
 export interface ActionReward {
@@ -287,8 +281,14 @@ export interface GameState {
   board_height?: number;
   wall_hexes?: number[][];
 
-  // Fight phase pools (AI_TURN.md)
+  // Fight phase V11 (PDF 12)
   fight_subphase?: FightSubPhase;
+  // Unités actionnables dans la sous-phase fight courante (exposé moteur).
+  fight_eligible_units?: string[];
+  fight_step?: "fights_first" | "remaining" | null;
+  fight_selector?: number | null;
+  active_fight_unit?: string | null;
+  // Déprécié V11 (le moteur émet ces pools vides ; éligibilité = fight_eligible_units).
   charging_activation_pool?: string[];
   active_alternating_activation_pool?: string[];
   non_active_alternating_activation_pool?: string[];
@@ -331,7 +331,6 @@ export interface GameState {
   /** Obsolète : le moteur n’envoie plus les boucles ; l’UI dérive le masque depuis ``fight_consolidation_footprint_zone``. */
   fight_consolidation_footprint_mask_loops?: Array<Array<[number, number]>>;
   active_shooting_unit?: string; // Active unit ID in shooting phase
-  active_fight_unit?: string; // Active unit ID in fight phase
   active_charge_unit?: string; // Active unit ID in charge phase
   victory_points?: Record<string, number>;
   primary_objective?: PrimaryObjectiveRule | PrimaryObjectiveRule[] | null;

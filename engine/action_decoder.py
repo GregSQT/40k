@@ -467,22 +467,9 @@ class ActionDecoder:
                     eligible.append(unit)
             return eligible
         elif current_phase == "fight":
-            # Fight phase has multiple sub-pools
-            # Check all fight pools in priority order
-            subphase = game_state.get("fight_subphase")
-            if subphase == "charging":
-                pool_unit_ids = require_key(game_state, "charging_activation_pool")
-            elif subphase in ("alternating_active", "cleanup_active"):
-                pool_unit_ids = require_key(game_state, "active_alternating_activation_pool")
-            elif subphase in ("alternating_non_active", "alternating", "cleanup_non_active"):
-                pool_unit_ids = require_key(game_state, "non_active_alternating_activation_pool")
-            else:
-                # Check all pools (all keys required)
-                pool_unit_ids = (
-                    require_key(game_state, "charging_activation_pool") +
-                    require_key(game_state, "active_alternating_activation_pool") +
-                    require_key(game_state, "non_active_alternating_activation_pool")
-                )
+            # V11 : éligibilité dérivée de la machine de sélection (non-mutante).
+            from engine.phase_handlers.fight_handlers import fight_v11_current_pool
+            pool_unit_ids = fight_v11_current_pool(game_state)
             # CRITICAL: Filter out dead units (units can die between pool build and use)
             eligible = []
             for uid in pool_unit_ids:

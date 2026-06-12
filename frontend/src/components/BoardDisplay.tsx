@@ -758,6 +758,7 @@ interface BoardConfig {
     start: { col: number; row: number };
     end: { col: number; row: number };
     thickness?: number;
+    type?: "light" | "dense";
   }>;
   terrain_zones?: Array<{
     id: string;
@@ -766,6 +767,7 @@ interface BoardConfig {
     vertices?: [number, number][];
     top_left?: [number, number];
     bottom_right?: [number, number];
+    objective?: boolean;
     obscuring?: boolean;
   }>;
   terrain_icons?: Array<{
@@ -2038,9 +2040,13 @@ export const drawBoard = (
           c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN,
           r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN,
         ];
-        const terrainColorCss = getComputedStyle(document.documentElement).getPropertyValue("--terrain-color").trim();
+        const terrainColorCss = getComputedStyle(document.documentElement)
+          .getPropertyValue("--terrain-color")
+          .trim();
         const terrainColor = parseInt(terrainColorCss.replace("#", ""), 16);
-        const terrainObjectiveColorCss = getComputedStyle(document.documentElement).getPropertyValue("--terrain-objective-color").trim();
+        const terrainObjectiveColorCss = getComputedStyle(document.documentElement)
+          .getPropertyValue("--terrain-objective-color")
+          .trim();
         const terrainObjectiveColor = parseInt(terrainObjectiveColorCss.replace("#", ""), 16);
         const terrainLineWidth = Math.max(1.5, HEX_RADIUS * 0.3);
         for (const zone of boardConfig.terrain_zones) {
@@ -2189,16 +2195,22 @@ export const drawBoard = (
             const innerR = Math.max(0.5, outerR * centerRadiusRatio);
 
             // Determine zone controller from objectiveControl (any zone hex works — all share the same controller)
-            const sampleHexKey = zoneCells.length > 0 ? `${zoneCells[0]![0]},${zoneCells[0]![1]}` : null;
-            const zoneController = sampleHexKey != null ? (objectiveControl[sampleHexKey] ?? null) : null;
+            const sampleHexKey =
+              zoneCells.length > 0 ? `${zoneCells[0]![0]},${zoneCells[0]![1]}` : null;
+            const zoneController =
+              sampleHexKey != null ? (objectiveControl[sampleHexKey] ?? null) : null;
             const zoneRingColor =
-              zoneController === 1 ? OBJECTIVE_P0_COLOR
-              : zoneController === 2 ? OBJECTIVE_P1_COLOR
-              : ringColorParsed;
+              zoneController === 1
+                ? OBJECTIVE_P0_COLOR
+                : zoneController === 2
+                  ? OBJECTIVE_P1_COLOR
+                  : ringColorParsed;
             const zoneCenterColor =
-              zoneController === 1 ? OBJECTIVE_P0_COLOR
-              : zoneController === 2 ? OBJECTIVE_P1_COLOR
-              : centerColorParsed;
+              zoneController === 1
+                ? OBJECTIVE_P0_COLOR
+                : zoneController === 2
+                  ? OBJECTIVE_P1_COLOR
+                  : centerColorParsed;
 
             const smoothZone = new PIXI.Graphics();
 
@@ -2207,7 +2219,11 @@ export const drawBoard = (
               r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN,
             ];
 
-            if (zone.shape === "triangle" && Array.isArray(zone.vertices) && zone.vertices.length === 3) {
+            if (
+              zone.shape === "triangle" &&
+              Array.isArray(zone.vertices) &&
+              zone.vertices.length === 3
+            ) {
               const pts = zone.vertices.map(([c, r]) => toPixel(c, r));
               smoothZone.lineStyle(ringWidth, zoneRingColor, ringAlpha);
               smoothZone.moveTo(pts[0]![0], pts[0]![1]);
@@ -2788,8 +2804,10 @@ export const drawBoard = (
       wallsContainer.name = "walls";
 
       const halfW = HEX_HEIGHT * 1.0;
-      const wallTextureLightPath = boardConfig.display?.wall_texture_light?.trim() || "/textures/wall1.webp";
-      const wallTextureDensePath = boardConfig.display?.wall_texture_dense?.trim() || "/textures/wall1.webp";
+      const wallTextureLightPath =
+        boardConfig.display?.wall_texture_light?.trim() || "/textures/wall1.webp";
+      const wallTextureDensePath =
+        boardConfig.display?.wall_texture_dense?.trim() || "/textures/wall1.webp";
       const wallTextureAlpha =
         typeof boardConfig.display?.wall_texture_alpha === "number"
           ? boardConfig.display.wall_texture_alpha

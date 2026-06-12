@@ -18,7 +18,10 @@ export function offsetToCube(col: number, row: number): { x: number; y: number; 
   return { x, y, z };
 }
 
-export function cubeToOffset(cube: { x: number; y: number; z: number }): { col: number; row: number } {
+export function cubeToOffset(cube: { x: number; y: number; z: number }): {
+  col: number;
+  row: number;
+} {
   const col = cube.x;
   const row = cube.z + ((cube.x - (cube.x & 1)) >> 1);
   return { col, row };
@@ -144,7 +147,7 @@ export function hasLineOfSight(
   const toPos = "col" in toUnit ? { col: toUnit.col, row: toUnit.row } : toUnit;
 
   if (!wallHexes || wallHexes.length === 0) {
-    return { canSee: true, inCover: false, visibilityRatio: 1 };
+    return { canSee: true, visibilityRatio: 1 };
   }
 
   // Convert hex coordinates to pixel coordinates for accurate line testing

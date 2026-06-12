@@ -140,13 +140,12 @@ export function appendLosPreviewSmoothHexUnionFillOrThrow(
 
 /**
  * Applique un léger ``BlurFilter`` + ``filterArea`` plein écran pour éviter la coupe des bords,
- * et ``roundPixels = false`` pour le sous-pixel sur les contours lissés.
+ * pour le sous-pixel sur les contours lissés.
  */
 export function configureLosPreviewOverlaySoftEdges(
   obj: PIXI.DisplayObject,
   renderer: PIXI.IRenderer | PIXI.Renderer | null
 ): void {
-  obj.roundPixels = false;
   const blur = new PIXI.BlurFilter(
     LOS_PREVIEW_OVERLAY_BLUR_STRENGTH,
     LOS_PREVIEW_OVERLAY_BLUR_QUALITY

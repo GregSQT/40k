@@ -221,7 +221,9 @@ export function setupBoardClickHandler(callbacks: {
     ).detail;
     if (phase !== "move") return;
     if (!callbacks.onStartMovePreview) {
-      throw new Error("onStartMovePreview callback is required to enter movePreview on double-click");
+      throw new Error(
+        "onStartMovePreview callback is required to enter movePreview on double-click"
+      );
     }
     callbacks.onStartMovePreview(unitId, unitCol, unitRow);
   };

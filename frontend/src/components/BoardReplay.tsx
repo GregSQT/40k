@@ -124,7 +124,13 @@ interface ReplayEpisode {
   scenario: string;
   bot_name: string;
   win_method?: string | null;
-  board: { cols: number; rows: number; inches_to_subhex: number; hex_radius: number; margin: number };
+  board: {
+    cols: number;
+    rows: number;
+    inches_to_subhex: number;
+    hex_radius: number;
+    margin: number;
+  };
   initial_state: ReplayGameState;
   actions: ReplayAction[];
   states: ReplayGameState[];
@@ -470,7 +476,10 @@ export const BoardReplay: React.FC = () => {
     // Action index N = state after Nth action (states[N-1])
     if (clampedActionIndex === 0) {
       // Enrich initial state units with stats
-      const enrichedUnits = enrichUnitsWithStats(episode.initial_state.units || [], episode.board.inches_to_subhex);
+      const enrichedUnits = enrichUnitsWithStats(
+        episode.initial_state.units || [],
+        episode.board.inches_to_subhex
+      );
       return {
         ...episode.initial_state,
         units: enrichedUnits,
@@ -486,7 +495,10 @@ export const BoardReplay: React.FC = () => {
       }
 
       // Enrich state units with stats
-      const enrichedUnits = enrichUnitsWithStats(state?.units || [], episode.board.inches_to_subhex);
+      const enrichedUnits = enrichUnitsWithStats(
+        state?.units || [],
+        episode.board.inches_to_subhex
+      );
 
       return {
         ...state,
@@ -625,7 +637,10 @@ export const BoardReplay: React.FC = () => {
       }
 
       const ocByPosition: Record<string, { p1: number; p2: number }> = {};
-      const enrichedUnits = enrichUnitsWithStats(state.units || [], currentEpisode.board.inches_to_subhex);
+      const enrichedUnits = enrichUnitsWithStats(
+        state.units || [],
+        currentEpisode.board.inches_to_subhex
+      );
       for (const unit of enrichedUnits) {
         if ((unit.HP_CUR ?? 0) <= 0) {
           continue;
@@ -808,7 +823,11 @@ export const BoardReplay: React.FC = () => {
         let alreadyFought = false;
         for (let j = 0; j < i; j++) {
           const prev = currentEpisode.actions[j];
-          if (parseInt(prev.turn.replace("T", ""), 10) === 5 && prev.player === 2 && prev.type === "fight") {
+          if (
+            parseInt(prev.turn.replace("T", ""), 10) === 5 &&
+            prev.player === 2 &&
+            prev.type === "fight"
+          ) {
             alreadyFought = true;
             break;
           }
@@ -825,7 +844,8 @@ export const BoardReplay: React.FC = () => {
 
       const stateAfterAction = currentEpisode.states[i];
       if (!stateAfterAction?.units) continue;
-      const objectives = stateAfterAction.objectives || currentEpisode.initial_state.objectives || [];
+      const objectives =
+        stateAfterAction.objectives || currentEpisode.initial_state.objectives || [];
       if (objectives.length === 0) continue;
 
       const enrichedUnits = enrichUnitsWithStats(
@@ -849,7 +869,8 @@ export const BoardReplay: React.FC = () => {
         let newController = controlMethod === "sticky" ? prev : null;
         if (p1_oc > p2_oc) newController = 1;
         else if (p2_oc > p1_oc) newController = 2;
-        else if (controlMethod === "sticky" && prev === null && tieBehavior === "no_control") newController = null;
+        else if (controlMethod === "sticky" && prev === null && tieBehavior === "no_control")
+          newController = null;
         controllers[obj.name] = newController;
       }
     }
@@ -857,7 +878,8 @@ export const BoardReplay: React.FC = () => {
     // Convert zone-name → player to hexKey → player
     const objectives =
       (currentActionIndex > 0 ? currentEpisode.states[currentActionIndex - 1]?.objectives : null) ||
-      currentEpisode.initial_state.objectives || [];
+      currentEpisode.initial_state.objectives ||
+      [];
     const map: Record<string, number | null> = {};
     for (const obj of objectives) {
       const c = controllers[obj.name] ?? null;
@@ -1591,7 +1613,10 @@ export const BoardReplay: React.FC = () => {
         stateAfterAction?.units &&
         isObjectiveScoringWindow(action, i, turnNumber)
       ) {
-        const enrichedObjectiveUnits = enrichUnitsWithStats(stateAfterAction.units as Unit[], currentEpisode.board.inches_to_subhex);
+        const enrichedObjectiveUnits = enrichUnitsWithStats(
+          stateAfterAction.units as Unit[],
+          currentEpisode.board.inches_to_subhex
+        );
         logObjectiveControlChanges(
           enrichedObjectiveUnits,
           objectives,

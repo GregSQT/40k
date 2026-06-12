@@ -8,12 +8,7 @@
  */
 import type * as PIXI from "pixi.js-legacy";
 
-export function drawFledRunnerBadge(
-  g: PIXI.Graphics,
-  cx: number,
-  cy: number,
-  r: number
-): void {
+export function drawFledRunnerBadge(g: PIXI.Graphics, cx: number, cy: number, r: number): void {
   // Cercle de fond vert avec liseré noir (tracé centré sur le bord → on
   // réduit le rayon de la moitié de l'épaisseur pour tout garder dans r).
   const bw = Math.max(1.0, r * 0.12);
@@ -32,13 +27,20 @@ export function drawFledRunnerBadge(
   g.lineStyle(0);
   g.beginFill(white, 1);
   g.drawPolygon([
-    px(-0.62), py(0.0),    // pointe (gauche)
-    px(-0.16), py(-0.46),  // coin haut de la tête
-    px(-0.16), py(-0.2),   // épaule haute (début tige)
-    px(0.56), py(-0.2),    // coin haut-droit de la tige
-    px(0.56), py(0.2),     // coin bas-droit de la tige
-    px(-0.16), py(0.2),    // épaule basse
-    px(-0.16), py(0.46),   // coin bas de la tête
+    px(-0.62),
+    py(0.0), // pointe (gauche)
+    px(-0.16),
+    py(-0.46), // coin haut de la tête
+    px(-0.16),
+    py(-0.2), // épaule haute (début tige)
+    px(0.56),
+    py(-0.2), // coin haut-droit de la tige
+    px(0.56),
+    py(0.2), // coin bas-droit de la tige
+    px(-0.16),
+    py(0.2), // épaule basse
+    px(-0.16),
+    py(0.46), // coin bas de la tête
   ]);
   g.endFill();
 }

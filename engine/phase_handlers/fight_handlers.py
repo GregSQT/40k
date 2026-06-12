@@ -177,70 +177,9 @@ def _append_fight_nb_roll_info_log(
         },
     )
 
-def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Initialize fight phase and build activation pools.
-
-    CRITICAL: Fight phase has THREE sub-phases:
-    1. Charging units (units in units_charged) attack first
-    2. Alternating activation between players (remaining units adjacent to enemies)
-    3. Cleanup (process remaining pool if any)
-    """
-    # Set phase
-    game_state["phase"] = "fight"
-
-    from engine.game_utils import add_debug_file_log
-    episode = game_state.get("episode_number", "?")
-    turn = game_state.get("turn", "?")
-    units_cache = require_key(game_state, "units_cache")
-    add_debug_file_log(game_state, f"[PHASE START] E{episode} T{turn} fight units_cache={units_cache}")
-
-    # UNITS_CACHE: Verify units_cache exists (built at reset, not here - "reset only" policy)
-    if "units_cache" not in game_state:
-        raise KeyError("units_cache must exist at fight_phase_start (should be built at reset)")
-
-    # Build ALL fight pools (charging + alternating for both players)
-    # NOTE: ATTACK_LEFT is NOT set at phase start - it's set per unit activation
-    fight_build_activation_pools(game_state)
-
-    # Check if phase complete immediately (no eligible units)
-    # AI_TURN.md COMPLIANCE: Direct field access - pools are set by fight_build_activation_pools()
-    if "charging_activation_pool" not in game_state:
-        raise KeyError("game_state missing required 'charging_activation_pool' field after fight_build_activation_pools()")
-    if "active_alternating_activation_pool" not in game_state:
-        raise KeyError("game_state missing required 'active_alternating_activation_pool' field after fight_build_activation_pools()")
-    if "non_active_alternating_activation_pool" not in game_state:
-        raise KeyError("game_state missing required 'non_active_alternating_activation_pool' field after fight_build_activation_pools()")
-
-    charging_pool = game_state["charging_activation_pool"]
-    active_alternating = game_state["active_alternating_activation_pool"]
-    non_active_alternating = game_state["non_active_alternating_activation_pool"]
-
-    # Kill probability cache is built lazily on first use (select_best_melee_weapon) to avoid step spike.
-    has_eligible = bool(charging_pool or active_alternating or non_active_alternating)
-
-    # Console log
-    add_console_log(game_state, "FIGHT PHASE START")
-
-    # AI_TURN.md COMPLIANCE: Set initial fight_subphase based on which pools have units
-    if charging_pool:
-        game_state["fight_subphase"] = "charging"
-    elif non_active_alternating or active_alternating:
-        # Non-active player goes FIRST in alternating phase
-        game_state["fight_subphase"] = "alternating_non_active"
-    else:
-        game_state["fight_subphase"] = None
-
-    if not has_eligible:
-        return fight_phase_end(game_state)
-
-    return {
-        "phase_initialized": True,
-        "charging_units": len(charging_pool),
-        "active_alternating": len(active_alternating),
-        "non_active_alternating": len(non_active_alternating),
-        "phase_complete": False
-    }
+# [V10 fight_phase_start supprimé — remplacé par fight_phase_start V11 (voir plus bas).
+#  fight_build_activation_pools reste défini ci-dessous : encore utilisé par
+#  tests/unit/engine/test_fight_activation_pools.py.]
 
 
 def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
@@ -2127,8 +2066,9 @@ def fight_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """Fight phase end - redirects to complete function"""
     return _fight_phase_complete(game_state)
 
-def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+def _execute_action_v10_unused(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
+    [DÉPRÉCIÉ V10 — code mort, remplacé par execute_action V11 plus bas.]
     Fight phase handler action routing with 3 sub-phases.
 
     Sub-Phase 1: Charging units (charging_activation_pool)
@@ -4053,6 +3993,7 @@ def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str,
             distance = min_distance_between_sets(unit_fp, enemy_fp)
             if distance <= rng_rng:
                 return True
+    return False
 
 
 # =====================================================================
@@ -4594,6 +4535,15 @@ def fight_v11_engaging_triggered_unit_ids(
 # (execute_action/fight_phase_start) = cut-over final.
 
 
+def _fight_v11_log(game_state: Dict[str, Any], message: str) -> None:
+    """Log V11 fight (console_logs + terminal serveur). Trace le flux pile_in→fight→consolidate."""
+    msg = f"[FIGHT V11] {message}"
+    add_console_log(game_state, msg)
+    # safe_print est désactivé (no-op) → écriture directe sur stderr pour visibilité terminal.
+    sys.stderr.write(msg + "\n")
+    sys.stderr.flush()
+
+
 def fight_v11_start(game_state: Dict[str, Any]) -> None:
     """
     START OF FIGHT PHASE (12.01) → entre dans l'étape PILE IN (12.02).
@@ -4623,6 +4573,12 @@ def fight_v11_enter_fight_step(game_state: Dict[str, Any]) -> None:
     game_state["fight_subphase"] = "fight"
     game_state["fight_step"] = "fights_first"
     game_state["fight_selector"] = int(require_key(game_state, "current_player"))
+    _fight_v11_log(
+        game_state,
+        f"PILE IN terminé → étape FIGHT (snapshot engagés="
+        f"{sorted(k for k, v in game_state['engaged_at_fight_step_start'].items() if v)}, "
+        f"selector=P{game_state['fight_selector']})",
+    )
 
 
 def fight_v11_enter_consolidate(game_state: Dict[str, Any]) -> None:
@@ -4630,6 +4586,7 @@ def fight_v11_enter_consolidate(game_state: Dict[str, Any]) -> None:
     game_state["fight_subphase"] = "consolidate"
     game_state["fight_step"] = None
     game_state["fight_selector"] = None
+    _fight_v11_log(game_state, "FIGHT terminé → étape CONSOLIDATE")
 
 
 def _fight_v11_grouped_step_eligible(
@@ -4683,6 +4640,42 @@ def fight_v11_grouped_next(
     return None
 
 
+def fight_v11_current_pool(game_state: Dict[str, Any]) -> List[str]:
+    """
+    Liste NON-MUTANTE des unités actionnables dans la sous-phase FIGHT V11 courante
+    (pour observation_builder / action_decoder / masking). Miroir lecture-seule des
+    drivers : grouped_next pour pile_in/consolidate, machine de sélection 12.04 pour fight.
+    """
+    sub = game_state.get("fight_subphase")
+    if sub in ("pile_in", "consolidate"):
+        nxt = fight_v11_grouped_next(game_state, sub)
+        return list(nxt[1]) if nxt else []
+    if sub == "fight":
+        active = int(require_key(game_state, "current_player"))
+        step = game_state.get("fight_step") or "fights_first"
+        selector = int(game_state.get("fight_selector") or active)
+        if step == "remaining" and (
+            fight_v11_eligible_unit_ids(game_state, active, fights_first_only=True)
+            or fight_v11_eligible_unit_ids(game_state, 3 - active, fights_first_only=True)
+        ):
+            step, selector = "fights_first", active
+        for _ in range(8):
+            ff = step == "fights_first"
+            mine = fight_v11_eligible_unit_ids(game_state, selector, fights_first_only=ff)
+            if mine:
+                return mine
+            theirs = fight_v11_eligible_unit_ids(game_state, 3 - selector, fights_first_only=ff)
+            if theirs:
+                selector = 3 - selector
+                continue
+            if ff:
+                step = "remaining"
+                continue
+            return []
+        return []
+    return []
+
+
 def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Fin de phase FIGHT V11 (12.09) → progression joueur / tour (Fight = dernière phase).
@@ -4691,6 +4684,8 @@ def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["fight_subphase"] = None
     game_state["fight_step"] = None
     game_state["fight_selector"] = None
+    game_state["fight_eligible_units"] = []
+    game_state["active_fight_unit"] = None
     add_console_log(game_state, "FIGHT PHASE COMPLETE (V11)")
 
     current_player = int(require_key(game_state, "current_player"))
@@ -4793,6 +4788,34 @@ def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:  # noqa: F8
         raise KeyError("units_cache must exist at fight_phase_start (should be built at reset)")
     fight_v11_start(game_state)
     add_console_log(game_state, "FIGHT PHASE START (V11)")
+    # Phase vide : aucune unité engagée ni ayant chargé → rien à résoudre à aucune étape
+    # (pile-in/fight/consolidate) → compléter immédiatement (progression joueur/tour).
+    any_actionable = any(
+        is_unit_alive(str(require_key(u, "id")), game_state)
+        and (_fight_v11_engaged_now(game_state, u) or _fight_v11_charged_this_turn(game_state, u))
+        for u in require_key(game_state, "units")
+    )
+    if not any_actionable:
+        _fight_v11_log(game_state, "Aucune unité engagée/chargée → phase FIGHT vide, complétion immédiate")
+        return _fight_v11_phase_complete(game_state)
+
+    if not _is_fight_auto_execution_allowed(game_state):
+        # Manuel (PvP) : entre dans l'étape PILE IN interactive (aperçu des destinations ≤3").
+        # _fight_v11_manual_state présente la 1ère unité et renvoie le contrat waiting_for_pile_in
+        # (consommé par le front : mode pileInPreview). Consolidation reste auto-skip (V1).
+        _fight_v11_log(game_state, "START (manuel) → étape PILE IN interactive")
+        _ok, state = _fight_v11_manual_state(game_state)
+        out = dict(state)
+        out["phase_initialized"] = True
+        return out
+
+    # Auto (PvE/gym) : reste en PILE IN, _fight_v11_auto_step gère les moves.
+    game_state["fight_eligible_units"] = fight_v11_current_pool(game_state)
+    game_state["active_fight_unit"] = None
+    _fight_v11_log(
+        game_state,
+        f"START → étape PILE IN (éligibles pile-in courants={game_state['fight_eligible_units']})",
+    )
     return {"phase_initialized": True, "fight_subphase": "pile_in", "phase_complete": False}
 
 
@@ -4893,19 +4916,76 @@ def _fight_v11_auto_step(game_state: Dict[str, Any], config: Dict[str, Any]) -> 
     raise RuntimeError("_fight_v11_auto_step did not converge")
 
 
+def _fight_v11_pile_in_targets(game_state: Dict[str, Any], unit: Dict[str, Any]) -> List[str]:
+    """Cibles de pile-in (12.03) en auto-sélection : toutes les unités engagées si engagée,
+    sinon les ennemis dans ``pile_in_target_range`` (5\")."""
+    engaged = _fight_units_engaged_with(game_state, unit)
+    return engaged if engaged else pile_in_targets_within_range(game_state, unit)
+
+
+def _fight_v11_clear_pile_in_preview(game_state: Dict[str, Any]) -> None:
+    game_state.pop("fight_pile_in_footprint_zone", None)
+    game_state.pop("_fight_v11_pile_in_dests", None)
+
+
+def _fight_v11_pile_in_present(
+    game_state: Dict[str, Any], unit: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """Prépare l'aperçu pile-in d'une unité (destinations ≤3" + footprint zone), exposé au front.
+    Retourne le dict résultat ``waiting_for_pile_in`` ou None si aucune destination utile."""
+    targets = _fight_v11_pile_in_targets(game_state, unit)
+    if not targets:
+        return None
+    dests = pile_in_move_destinations_12_03(game_state, unit, targets)
+    if not dests:
+        return None
+    uid = str(require_key(unit, "id"))
+    game_state["active_fight_unit"] = uid
+    game_state["fight_eligible_units"] = [uid]
+    game_state["fight_pile_in_footprint_zone"] = list(
+        _fight_compute_pile_in_footprint_zone(game_state, unit, dests)
+    )
+    game_state["_fight_v11_pile_in_dests"] = [(int(c), int(r)) for c, r in dests]
+    return {
+        "phase": "fight", "fight_subphase": "pile_in", "waiting_for_pile_in": True,
+        "valid_pile_in_destinations": [[int(c), int(r)] for c, r in dests],
+        "unitId": uid, "active_fight_unit": uid,
+        "waiting_for_player": True, "action": "wait",
+    }
+
+
 def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """État actionnable courant pour le joueur humain (PvP). Avance les transitions de sous-phase."""
-    for _ in range(6):
+    for _ in range(64):
         sub = require_key(game_state, "fight_subphase")
         if sub == "pile_in":
             nxt = fight_v11_grouped_next(game_state, "pile_in")
             if nxt is None:
                 fight_v11_enter_fight_step(game_state)
                 continue
+            # Présente la 1ère unité éligible du groupe avec ses destinations de pile-in.
+            # Unité sans destination utile (déjà collée / aucun move rapprochant+engageant) → skip auto.
             player, eligible = nxt
-            return True, {"phase": "fight", "fight_subphase": "pile_in",
-                          "group_player": player, "eligible_units": eligible,
-                          "waiting_for_player": True, "action": "wait"}
+            presented: Optional[Dict[str, Any]] = None
+            for uid in eligible:
+                u = get_unit_by_id(game_state, uid)
+                if u is None:
+                    game_state["pile_in_done"].add(uid)
+                    continue
+                res = _fight_v11_pile_in_present(game_state, u)
+                if res is None:
+                    game_state["pile_in_done"].add(uid)
+                    _fight_v11_log(game_state, f"PILE IN unit {uid} : aucune destination utile → skip auto")
+                    continue
+                presented = res
+                _fight_v11_log(
+                    game_state,
+                    f"PILE IN P{player} : unit {uid} → {len(res['valid_pile_in_destinations'])} destinations proposées",
+                )
+                break
+            if presented is None:
+                continue
+            return True, presented
         if sub == "fight":
             uid = fight_v11_advance_selection(game_state)
             if uid is None:
@@ -4913,6 +4993,14 @@ def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str,
                 continue
             u = get_unit_by_id(game_state, uid)
             valid_targets = _fight_build_valid_target_pool(game_state, u) if u else []
+            game_state["fight_eligible_units"] = [uid]
+            game_state["active_fight_unit"] = uid
+            game_state["valid_fight_targets"] = valid_targets
+            _fight_v11_log(
+                game_state,
+                f"état: FIGHT — unit {uid} à activer (step={game_state['fight_step']}, "
+                f"selector=P{game_state['fight_selector']}, cibles={valid_targets})",
+            )
             return True, {"phase": "fight", "fight_subphase": "fight",
                           "fight_step": game_state["fight_step"],
                           "fight_selector": game_state["fight_selector"],
@@ -4923,10 +5011,12 @@ def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str,
             nxt = fight_v11_grouped_next(game_state, "consolidate")
             if nxt is None:
                 return True, _fight_v11_phase_complete(game_state)
+            # UI consolidation non câblée → auto-skip du groupe (move OPTIONNEL), on avance.
             player, eligible = nxt
-            return True, {"phase": "fight", "fight_subphase": "consolidate",
-                          "group_player": player, "eligible_units": eligible,
-                          "waiting_for_player": True, "action": "wait"}
+            for u in eligible:
+                game_state["consolidation_done"].add(u)
+            _fight_v11_log(game_state, f"CONSOLIDATE P{player} auto-skip (UI non câblée): {list(eligible)}")
+            continue
         return True, _fight_v11_phase_complete(game_state)
     raise RuntimeError("_fight_v11_manual_state did not converge")
 
@@ -4945,39 +5035,73 @@ def _fight_v11_manual_step(
         uid = unit["id"]
     uid = str(uid) if uid is not None else None
     skip = action.get("skip") is True or atype in ("skip", "right_click")
+    _fight_v11_log(game_state, f"action manuelle reçue: subphase={sub} action={atype!r} unitId={uid} skip={skip}")
 
     if sub == "pile_in":
         nxt = fight_v11_grouped_next(game_state, "pile_in")
-        if nxt is not None and uid in nxt[1]:
+        eligible = nxt[1] if nxt else []
+        if atype == "pile_in":
+            # Move (destCol/destRow) ou skip sur l'unité active (présentée par manual_state).
+            active = game_state.get("active_fight_unit")
+            act_uid = str(active) if active is not None else uid
+            if act_uid is not None and act_uid in eligible:
+                u = get_unit_by_id(game_state, act_uid)
+                if u is None:
+                    raise KeyError(f"Pile-in unit {act_uid} missing from game_state['units']")
+                if skip:
+                    _fight_v11_log(game_state, f"PILE IN unit {act_uid} → SKIP (joueur)")
+                elif "destCol" in action and "destRow" in action:
+                    dest = normalize_coordinates(action["destCol"], action["destRow"])
+                    valid = game_state.get("_fight_v11_pile_in_dests") or []
+                    if (int(dest[0]), int(dest[1])) in valid:
+                        _fight_apply_pile_in_move(game_state, u, dest[0], dest[1])
+                        _fight_v11_log(game_state, f"PILE IN unit {act_uid} → déplacement {dest}")
+                    else:
+                        _fight_v11_log(game_state, f"PILE IN unit {act_uid} → destination {dest} invalide, skip")
+                else:
+                    _fight_v11_log(game_state, f"PILE IN unit {act_uid} → SKIP (action sans destination)")
+                game_state["pile_in_done"].add(act_uid)
+            _fight_v11_clear_pile_in_preview(game_state)
+            return _fight_v11_manual_state(game_state)
+        if atype == "activate_unit" and uid in eligible:
+            # Sélection explicite d'une autre unité éligible → présenter son pile-in.
             u = get_unit_by_id(game_state, uid)
-            if not skip and "destCol" in action and "destRow" in action:
-                dest = normalize_coordinates(action["destCol"], action["destRow"])
-                targets = pile_in_select_targets_12_03(
-                    game_state, u, action.get("targetIds")
-                )
-                dests = [tuple(d) for d in pile_in_move_destinations_12_03(game_state, u, targets)]
-                if dest in dests:
-                    _fight_apply_pile_in_move(game_state, u, dest[0], dest[1])
-            game_state["pile_in_done"].add(uid)
+            if u is not None:
+                res = _fight_v11_pile_in_present(game_state, u)
+                if res is not None:
+                    _fight_v11_log(game_state, f"PILE IN : unit {uid} sélectionnée par le joueur")
+                    return True, res
+                game_state["pile_in_done"].add(uid)
+                _fight_v11_log(game_state, f"PILE IN unit {uid} : aucune destination → skip auto")
+            return _fight_v11_manual_state(game_state)
+        # Autre action en pile_in → ré-afficher l'état courant.
         return _fight_v11_manual_state(game_state)
 
     if sub == "fight":
         sel = fight_v11_advance_selection(game_state)
         if sel is not None and (uid is None or uid == sel) and atype in ("fight", "left_click"):
             u = get_unit_by_id(game_state, sel)
+            if u is None:
+                raise KeyError(f"Fight unit {sel} missing from game_state['units']")
             game_state["units_selected_to_fight"].add(sel)
             game_state.setdefault("units_fought", set()).add(sel)
+            ftype = "normal"
             if action.get("fight_type") == "overrun" and fight_v11_is_overrun_eligible(game_state, u):
+                ftype = "overrun"
                 _fight_v11_auto_overrun_pile_in(game_state, u, config)
+            _fight_v11_log(game_state, f"FIGHT unit {sel} sélectionnée (type={ftype}, step={game_state.get('fight_step')})")
             _fight_v11_resolve_attacks(
                 game_state, u, config, preferred_target_id=(str(action["targetId"]) if "targetId" in action else None)
             )
+        else:
+            _fight_v11_log(game_state, f"FIGHT: action ignorée (sélecteur attend unit {sel}, reçu {uid}, action {atype!r})")
         return _fight_v11_manual_state(game_state)
 
     if sub == "consolidate":
         nxt = fight_v11_grouped_next(game_state, "consolidate")
         if nxt is not None and uid in nxt[1]:
             game_state["consolidation_done"].add(uid)  # move UI (3 modes) câblée au Bloc front
+            _fight_v11_log(game_state, f"CONSOLIDATE unit {uid} → SKIP (UI move non câblée, V1)")
         return _fight_v11_manual_state(game_state)
 
     return _fight_v11_manual_state(game_state)

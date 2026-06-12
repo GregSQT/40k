@@ -280,8 +280,7 @@ export function refreshBlinkingHpBarSlices(
   if (normalSlices.length !== highlightSlices.length || normalSlices.length !== layout.hpMax)
     return;
 
-  const currentHP =
-    sliceHpCur !== undefined ? Math.max(0, sliceHpCur) : Math.max(0, unit.HP_CUR);
+  const currentHP = sliceHpCur !== undefined ? Math.max(0, sliceHpCur) : Math.max(0, unit.HP_CUR);
   const shooterDamage = attacker ? calculateDamagePerAttack(attacker, unit, phase, inCover) : 0;
 
   const lostColor = getCSSColor("--hp-bar-lost");

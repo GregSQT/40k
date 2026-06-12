@@ -32,9 +32,9 @@ import {
   useTutorial,
 } from "../contexts/TutorialContext";
 import {
-  type UseEngineAPIBlinkBoardProps,
-  type ManualOrderRequest,
   type ManualOrderGroup,
+  type ManualOrderRequest,
+  type UseEngineAPIBlinkBoardProps,
   useEngineAPI,
 } from "../hooks/useEngineAPI";
 import { useGameConfig } from "../hooks/useGameConfig";
@@ -50,8 +50,8 @@ import SharedLayout from "./SharedLayout";
 import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import TutorialOverlay from "./TutorialOverlay";
-import { UnitStatusTable } from "./UnitStatusTable";
 import UnitStatusBadges from "./UnitStatusBadges";
+import { UnitStatusTable } from "./UnitStatusTable";
 
 /** "WolfGuardTerminator" → "Wolf Guard Terminator" (camelCase → mots espacés). */
 function prettifyUnitType(t: string | null): string {
@@ -81,21 +81,24 @@ function ManualOrderPicker({
   const [pos, setPos] = useState({ x: 360, y: 140 });
   const dragOffset = useRef<{ x: number; y: number } | null>(null);
 
-  const onDragStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!dragOffset.current) return;
-      setPos({ x: ev.clientX - dragOffset.current.x, y: ev.clientY - dragOffset.current.y });
-    };
-    const onMouseUp = () => {
-      dragOffset.current = null;
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
-    };
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
-  }, [pos]);
+  const onDragStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      dragOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+      const onMouseMove = (ev: MouseEvent) => {
+        if (!dragOffset.current) return;
+        setPos({ x: ev.clientX - dragOffset.current.x, y: ev.clientY - dragOffset.current.y });
+      };
+      const onMouseUp = () => {
+        dragOffset.current = null;
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+      };
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    },
+    [pos]
+  );
 
   const remaining = request.groups.filter((g) => !order.includes(g.group_id));
   const nonChar = remaining.filter((g) => !g.is_character);
@@ -296,11 +299,14 @@ function buildPickMenusByProfile(config: EvolutionCatalogConfig): Map<string, Pr
     if (!profileCatalog) {
       continue;
     }
-    if (profileCatalog.base == null) throw new Error(`Evolution catalog profile '${profile}': missing 'base' cost`);
+    if (profileCatalog.base == null)
+      throw new Error(`Evolution catalog profile '${profile}': missing 'base' cost`);
     const baseCost = Number(profileCatalog.base);
-    if (!Array.isArray(profileCatalog.rows)) throw new Error(`Evolution catalog profile '${profile}': missing 'rows'`);
+    if (!Array.isArray(profileCatalog.rows))
+      throw new Error(`Evolution catalog profile '${profile}': missing 'rows'`);
     const rows = profileCatalog.rows;
-    if (!Array.isArray(profileCatalog.packages)) throw new Error(`Evolution catalog profile '${profile}': missing 'packages'`);
+    if (!Array.isArray(profileCatalog.packages))
+      throw new Error(`Evolution catalog profile '${profile}': missing 'packages'`);
     const packages = profileCatalog.packages;
     const data: ProfilePickMenuData = {
       baseCost,
@@ -332,7 +338,8 @@ function buildPickMenusByProfile(config: EvolutionCatalogConfig): Map<string, Pr
       if (typeof row.slot !== "string" || typeof row.pick !== "string") {
         continue;
       }
-      if (row.cost == null) throw new Error(`Evolution row '${row.pick}' slot '${row.slot}': missing cost`);
+      if (row.cost == null)
+        throw new Error(`Evolution row '${row.pick}' slot '${row.slot}': missing cost`);
       const cost = Number(row.cost);
       const option: PickOption = {
         id: row.pick,
@@ -1621,7 +1628,8 @@ export const BoardWithAPI: React.FC = () => {
     const endlessCfg = (
       endlessDutyScenarioConfig as { endless_duty?: { wave_unlock_rules?: Record<string, number> } }
     ).endless_duty;
-    if (!endlessCfg?.wave_unlock_rules) throw new Error("endless_duty scenario missing wave_unlock_rules");
+    if (!endlessCfg?.wave_unlock_rules)
+      throw new Error("endless_duty scenario missing wave_unlock_rules");
     const waveUnlockRules = endlessCfg.wave_unlock_rules;
     if (waveUnlockRules.leader == null) throw new Error("wave_unlock_rules missing 'leader'");
     if (waveUnlockRules.melee == null) throw new Error("wave_unlock_rules missing 'melee'");
@@ -2167,12 +2175,8 @@ export const BoardWithAPI: React.FC = () => {
     const isAiEnabled = isAiMode;
 
     // Check if game is over by examining unit health
-    const player1Alive = apiProps.gameState.units.some(
-      (u) => u.player === 1 && u.HP_CUR > 0
-    );
-    const player2Alive = apiProps.gameState.units.some(
-      (u) => u.player === 2 && u.HP_CUR > 0
-    );
+    const player1Alive = apiProps.gameState.units.some((u) => u.player === 1 && u.HP_CUR > 0);
+    const player2Alive = apiProps.gameState.units.some((u) => u.player === 2 && u.HP_CUR > 0);
     const gameNotOver = player1Alive && player2Alive;
 
     // CRITICAL: Check if AI has eligible units in current phase
@@ -2210,34 +2214,10 @@ export const BoardWithAPI: React.FC = () => {
         );
       }
     } else if (currentPhase === "fight") {
-      // Fight phase: Check fight subphase pools for AI eligibility
-      // Try both apiProps.fightSubPhase and apiProps.gameState.fight_subphase
-      const fightSubphase = apiProps.fightSubPhase || apiProps.gameState?.fight_subphase;
-
-      let fightPool: string[] = [];
-      if (fightSubphase === "charging" && apiProps.gameState.charging_activation_pool) {
-        fightPool = apiProps.gameState.charging_activation_pool;
-      } else if (
-        fightSubphase === "alternating_non_active" &&
-        apiProps.gameState.non_active_alternating_activation_pool
-      ) {
-        fightPool = apiProps.gameState.non_active_alternating_activation_pool;
-      } else if (
-        fightSubphase === "alternating_active" &&
-        apiProps.gameState.active_alternating_activation_pool
-      ) {
-        fightPool = apiProps.gameState.active_alternating_activation_pool;
-      } else if (
-        fightSubphase === "cleanup_non_active" &&
-        apiProps.gameState.non_active_alternating_activation_pool
-      ) {
-        fightPool = apiProps.gameState.non_active_alternating_activation_pool;
-      } else if (
-        fightSubphase === "cleanup_active" &&
-        apiProps.gameState.active_alternating_activation_pool
-      ) {
-        fightPool = apiProps.gameState.active_alternating_activation_pool;
-      }
+      // Fight phase V11 : pool actionnable unique exposé par le moteur (fight_eligible_units).
+      const fightPool: string[] = (apiProps.gameState?.fight_eligible_units ?? []).map((id) =>
+        String(id)
+      );
 
       hasEligibleAIUnits = hasAiUnitsInPool(fightPool, apiProps.gameState);
     }
@@ -2324,31 +2304,10 @@ export const BoardWithAPI: React.FC = () => {
             return;
           }
           if (latestPhase === "fight") {
-            const latestFightSubphase = apiProps.fightSubPhase || latestState.fight_subphase;
-            let latestFightPool: string[] = [];
-            if (latestFightSubphase === "charging" && latestState.charging_activation_pool) {
-              latestFightPool = latestState.charging_activation_pool;
-            } else if (
-              latestFightSubphase === "alternating_non_active" &&
-              latestState.non_active_alternating_activation_pool
-            ) {
-              latestFightPool = latestState.non_active_alternating_activation_pool;
-            } else if (
-              latestFightSubphase === "alternating_active" &&
-              latestState.active_alternating_activation_pool
-            ) {
-              latestFightPool = latestState.active_alternating_activation_pool;
-            } else if (
-              latestFightSubphase === "cleanup_non_active" &&
-              latestState.non_active_alternating_activation_pool
-            ) {
-              latestFightPool = latestState.non_active_alternating_activation_pool;
-            } else if (
-              latestFightSubphase === "cleanup_active" &&
-              latestState.active_alternating_activation_pool
-            ) {
-              latestFightPool = latestState.active_alternating_activation_pool;
-            }
+            // V11 : pool actionnable unique exposé par le moteur.
+            const latestFightPool: string[] = (latestState.fight_eligible_units ?? []).map((id) =>
+              String(id)
+            );
             const isAITurnNow = hasAiUnitsInPool(latestFightPool, latestState);
             if (!isAITurnNow) {
               return;
@@ -2643,9 +2602,11 @@ export const BoardWithAPI: React.FC = () => {
                 return b.VALUE - a.VALUE;
               }
               const aName = a.DISPLAY_NAME || a.name || a.type || a.unitType;
-              if (!aName) throw new Error(`Unit missing all name fields (DISPLAY_NAME/name/type/unitType)`);
+              if (!aName)
+                throw new Error(`Unit missing all name fields (DISPLAY_NAME/name/type/unitType)`);
               const bName = b.DISPLAY_NAME || b.name || b.type || b.unitType;
-              if (!bName) throw new Error(`Unit missing all name fields (DISPLAY_NAME/name/type/unitType)`);
+              if (!bName)
+                throw new Error(`Unit missing all name fields (DISPLAY_NAME/name/type/unitType)`);
               return aName.localeCompare(bName);
             });
           });
@@ -2903,47 +2864,47 @@ export const BoardWithAPI: React.FC = () => {
       !fellBack &&
       !(apiProps.gameState?.move_activation_pool ?? []).includes(String(unit.id));
     return (
-    <aside className="unit-illustration-preview" aria-label={`Illustration unit ${unit.id}`}>
-      <UnitStatusBadges
-        hidden={unit.hidden === true || (unit.hidden_models?.length ?? 0) > 0}
-        battleShocked={unit.battle_shocked === true}
-        advanced={advanced}
-        moved={moved}
-        charged={((apiProps.unitsCharged ?? []) as number[]).includes(unit.id)}
-        fellBack={fellBack}
-        stationary={stationary}
-      />
-      <img
-        className="unit-illustration-preview__image"
-        src={getUnitIllustrationSrc(unit)}
-        alt={`Unit ${unit.id} illustration`}
-        onTransitionEnd={(event) => {
-          if (event.propertyName !== "opacity" || showDisplayedIllustrationUnit) {
-            return;
-          }
-          const pendingUnit = pendingIllustrationUnitRef.current;
-          if (!pendingUnit) {
-            return;
-          }
-          pendingIllustrationUnitRef.current = null;
-          setDisplayedIllustrationUnit(pendingUnit);
-          displayedIllustrationUnitRef.current = pendingUnit;
-          setDisplayedIllustrationFadeMs(UNIT_ILLUSTRATION_SWAP_FADE_MS);
-          requestAnimationFrame(() => {
+      <aside className="unit-illustration-preview" aria-label={`Illustration unit ${unit.id}`}>
+        <UnitStatusBadges
+          hidden={unit.hidden === true || (unit.hidden_models?.length ?? 0) > 0}
+          battleShocked={unit.battle_shocked === true}
+          advanced={advanced}
+          moved={moved}
+          charged={((apiProps.unitsCharged ?? []) as number[]).includes(unit.id)}
+          fellBack={fellBack}
+          stationary={stationary}
+        />
+        <img
+          className="unit-illustration-preview__image"
+          src={getUnitIllustrationSrc(unit)}
+          alt={`Unit ${unit.id} illustration`}
+          onTransitionEnd={(event) => {
+            if (event.propertyName !== "opacity" || showDisplayedIllustrationUnit) {
+              return;
+            }
+            const pendingUnit = pendingIllustrationUnitRef.current;
+            if (!pendingUnit) {
+              return;
+            }
+            pendingIllustrationUnitRef.current = null;
+            setDisplayedIllustrationUnit(pendingUnit);
+            displayedIllustrationUnitRef.current = pendingUnit;
+            setDisplayedIllustrationFadeMs(UNIT_ILLUSTRATION_SWAP_FADE_MS);
             requestAnimationFrame(() => {
-              setShowDisplayedIllustrationUnit(true);
+              requestAnimationFrame(() => {
+                setShowDisplayedIllustrationUnit(true);
+              });
             });
-          });
-        }}
-        style={{
-          opacity: visible ? 1 : 0,
-          transform: `scale(${getUnitIllustrationScale(unit)})`,
-          transition: `opacity ${fadeMs}ms ease`,
-          willChange: "opacity",
-          backfaceVisibility: "hidden",
-        }}
-      />
-    </aside>
+          }}
+          style={{
+            opacity: visible ? 1 : 0,
+            transform: `scale(${getUnitIllustrationScale(unit)})`,
+            transition: `opacity ${fadeMs}ms ease`,
+            willChange: "opacity",
+            backfaceVisibility: "hidden",
+          }}
+        />
+      </aside>
     );
   };
 
@@ -2981,116 +2942,120 @@ export const BoardWithAPI: React.FC = () => {
       {apiProps.gameState?.phase === "charge" &&
         apiProps.mode === "chargeTargetSelect" &&
         apiProps.selectedUnitId != null && (
-        <div
-          className="squad-action-bar"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            background: "#1f2937",
-            border: "1px solid #555",
-            borderRadius: "8px",
-            padding: 8,
-            marginTop: -6,
-            marginBottom: 2,
-          }}
-        >
-          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
-            <button
-              type="button"
-              onClick={() => {
-                if (!isGameOver) apiProps.onCancelCharge?.();
-              }}
-              style={{
-                border: "1px solid rgba(0,0,0,0.35)",
-                borderRadius: 6,
-                background: "#6b7280",                color: "#fff",
-                cursor: "pointer",
-                fontSize: 14,
-                fontWeight: 700,
-                padding: "8px 14px",
-                width: 110,
-                textAlign: "center",
-              }}
-            >
-              Cancel
-            </button>
-            {(() => {
-              const nbTargets = apiProps.chargePreviewTargetIds?.length ?? 0;
-              const canCharge = nbTargets > 0;
-              return (
-                <button
-                  type="button"
-                  disabled={!canCharge}
-                  onClick={() => {
-                    if (!isGameOver && canCharge && apiProps.selectedUnitId != null) {
-                      apiProps.onValidateCharge?.(apiProps.selectedUnitId);
-                    }
-                  }}
-                  style={{
-                    border: "1px solid rgba(0,0,0,0.35)",
-                    borderRadius: 6,
-                    background: canCharge ? "#7c3aed" : "#3b0764",                    color: "#fff",
-                    cursor: canCharge ? "pointer" : "not-allowed",
-                    fontSize: 14,
-                    fontWeight: 700,
-                    padding: "8px 14px",
-                    minWidth: 110,
-                    whiteSpace: "nowrap",
-                    textAlign: "center",
-                    opacity: 1,
-                  }}
-                >
-                  {(() => {
-                    const suffix = apiProps.chargeRoll != null ? ` (Roll: ${apiProps.chargeRoll})` : "";
-                    return canCharge ? `Charge !${suffix}` : `Select target${suffix}`;
-                  })()}
-                </button>
-              );
-            })()}
-            <span style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 600, marginLeft: 4 }}>
-              {apiProps.chargePreviewTargetIds?.length ?? 0} cible
-              {(apiProps.chargePreviewTargetIds?.length ?? 0) > 1 ? "s" : ""} déclarée
-              {(apiProps.chargePreviewTargetIds?.length ?? 0) > 1 ? "s" : ""}
-            </span>
-            {/* To the sky (charge, unités FLY) : -2" sur le jet + traversée murs/figurines (Règles 21.03).
+          <div
+            className="squad-action-bar"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              background: "#1f2937",
+              border: "1px solid #555",
+              borderRadius: "8px",
+              padding: 8,
+              marginTop: -6,
+              marginBottom: 2,
+            }}
+          >
+            <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isGameOver) apiProps.onCancelCharge?.();
+                }}
+                style={{
+                  border: "1px solid rgba(0,0,0,0.35)",
+                  borderRadius: 6,
+                  background: "#6b7280",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  padding: "8px 14px",
+                  width: 110,
+                  textAlign: "center",
+                }}
+              >
+                Cancel
+              </button>
+              {(() => {
+                const nbTargets = apiProps.chargePreviewTargetIds?.length ?? 0;
+                const canCharge = nbTargets > 0;
+                return (
+                  <button
+                    type="button"
+                    disabled={!canCharge}
+                    onClick={() => {
+                      if (!isGameOver && canCharge && apiProps.selectedUnitId != null) {
+                        apiProps.onValidateCharge?.(apiProps.selectedUnitId);
+                      }
+                    }}
+                    style={{
+                      border: "1px solid rgba(0,0,0,0.35)",
+                      borderRadius: 6,
+                      background: canCharge ? "#7c3aed" : "#3b0764",
+                      color: "#fff",
+                      cursor: canCharge ? "pointer" : "not-allowed",
+                      fontSize: 14,
+                      fontWeight: 700,
+                      padding: "8px 14px",
+                      minWidth: 110,
+                      whiteSpace: "nowrap",
+                      textAlign: "center",
+                      opacity: 1,
+                    }}
+                  >
+                    {(() => {
+                      const suffix =
+                        apiProps.chargeRoll != null ? ` (Roll: ${apiProps.chargeRoll})` : "";
+                      return canCharge ? `Charger !${suffix}` : `Select target${suffix}`;
+                    })()}
+                  </button>
+                );
+              })()}
+              <span style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 600, marginLeft: 4 }}>
+                {apiProps.chargePreviewTargetIds?.length ?? 0} cible
+                {(apiProps.chargePreviewTargetIds?.length ?? 0) > 1 ? "s" : ""} déclarée
+                {(apiProps.chargePreviewTargetIds?.length ?? 0) > 1 ? "s" : ""}
+              </span>
+              {/* To the sky (charge, unités FLY) : -2" sur le jet + traversée murs/figurines (Règles 21.03).
                 Déclaré AVANT le choix de cible → re-borne dynamiquement les cibles éligibles. */}
-            {(() => {
-              const flyUnitId = apiProps.selectedUnitId ?? null;
-              if (flyUnitId === null) return null;
-              const flyUnit = (apiProps.gameState?.units ?? []).find((u) => u.id === flyUnitId);
-              const canFly = !!flyUnit?.UNIT_KEYWORDS?.some(
-                (k) => k.keywordId?.toLowerCase() === "fly"
-              );
-              if (!canFly) return null;
-              const tookToSkies = (apiProps.unitsTookToSkiesCharge ?? []).includes(flyUnitId);
-              return (
-                <button
-                  type="button"
-                  key="charge-to-the-sky"
-                  className={tookToSkies ? "btn-active" : undefined}
-                  onClick={() => {
-                    if (!isGameOver) apiProps.onTakeToSkies?.(flyUnitId);
-                  }}
-                  style={{
-                    border: "1px solid rgba(0,0,0,0.35)",
-                    borderRadius: 6,
-                    color: "#fff",
-                    fontSize: 14,
-                    fontWeight: 700,
-                    padding: "8px 14px",
-                    width: 130,
-                    textAlign: "center",
-                    marginLeft: "auto",
-                    background: "#38bdf8",                    cursor: "pointer",
-                  }}
-                >
-                  To the sky (-2)
-                </button>
-              );
-            })()}
+              {(() => {
+                const flyUnitId = apiProps.selectedUnitId ?? null;
+                if (flyUnitId === null) return null;
+                const flyUnit = (apiProps.gameState?.units ?? []).find((u) => u.id === flyUnitId);
+                const canFly = !!flyUnit?.UNIT_KEYWORDS?.some(
+                  (k) => k.keywordId?.toLowerCase() === "fly"
+                );
+                if (!canFly) return null;
+                const tookToSkies = (apiProps.unitsTookToSkiesCharge ?? []).includes(flyUnitId);
+                return (
+                  <button
+                    type="button"
+                    key="charge-to-the-sky"
+                    className={tookToSkies ? "btn-active" : undefined}
+                    onClick={() => {
+                      if (!isGameOver) apiProps.onTakeToSkies?.(flyUnitId);
+                    }}
+                    style={{
+                      border: "1px solid rgba(0,0,0,0.35)",
+                      borderRadius: 6,
+                      color: "#fff",
+                      fontSize: 14,
+                      fontWeight: 700,
+                      padding: "8px 14px",
+                      width: 130,
+                      textAlign: "center",
+                      marginLeft: "auto",
+                      background: "#38bdf8",
+                      cursor: "pointer",
+                    }}
+                  >
+                    To the sky (-2)
+                  </button>
+                );
+              })()}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
       {/* Barre d'action charge par-figurine (Slice G) : Cancel + Charger (commit du plan complet).
           Affichée en mode chargeModelMove ; Charger actif quand can_validate (toutes figs posées,
@@ -3098,53 +3063,178 @@ export const BoardWithAPI: React.FC = () => {
       {apiProps.gameState?.phase === "charge" &&
         apiProps.mode === "chargeModelMove" &&
         apiProps.chargeMovePlan != null && (
-        <div
-          className="squad-action-bar"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            background: "#1f2937",
-            border: "1px solid #555",
-            borderRadius: "8px",
-            padding: 8,
-            marginTop: -6,
-            marginBottom: 2,
-          }}
-        >
-          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
+          <div
+            className="squad-action-bar"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              background: "#1f2937",
+              border: "1px solid #555",
+              borderRadius: "8px",
+              padding: 8,
+              marginTop: -6,
+              marginBottom: 2,
+            }}
+          >
+            <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isGameOver) apiProps.onCancelChargeModelMove?.();
+                }}
+                style={{
+                  border: "1px solid rgba(0,0,0,0.35)",
+                  borderRadius: 6,
+                  background: "#6b7280",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  padding: "8px 14px",
+                  width: 110,
+                  textAlign: "center",
+                }}
+              >
+                Cancel
+              </button>
+              {(() => {
+                const canValidate = apiProps.chargeMovePlan?.canValidate === true;
+                return (
+                  <button
+                    type="button"
+                    disabled={!canValidate}
+                    onClick={() => {
+                      if (!isGameOver && canValidate) apiProps.onCommitChargePlan?.();
+                    }}
+                    style={{
+                      border: "1px solid rgba(0,0,0,0.35)",
+                      borderRadius: 6,
+                      background: canValidate ? "#7c3aed" : "#3b0764",
+                      color: canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+                      cursor: canValidate ? "pointer" : "not-allowed",
+                      fontSize: 14,
+                      fontWeight: 700,
+                      padding: "8px 14px",
+                      width: 110,
+                      textAlign: "center",
+                      opacity: 1,
+                    }}
+                  >
+                    Valider
+                  </button>
+                );
+              })()}
+              {(() => {
+                const plan = apiProps.chargeMovePlan;
+                if (!plan) return null;
+                const nbUnplaced = plan.unplaced?.length ?? 0;
+                const nbSat = plan.satisfiedTargets?.length ?? 0;
+                const nbTot = nbSat + (plan.unsatisfiedTargets?.length ?? 0);
+                return (
+                  <span style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 600, marginLeft: 4 }}>
+                    {nbSat}/{nbTot} cible{nbTot > 1 ? "s" : ""} engagée{nbTot > 1 ? "s" : ""}
+                    {nbUnplaced > 0
+                      ? ` · ${nbUnplaced} fig${nbUnplaced > 1 ? "s" : ""} à placer`
+                      : ""}
+                  </span>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+
+      {/* Barre d'action move : Cancel/Validate (moitié gauche) + boutons de mode (moitié droite).
+          Affichée dès l'activation (movePreview) et en plan par-figurine (squadModelMove). */}
+      {settings.battleShockTestEnabled && (
+          <div
+            className="squad-action-bar"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "flex-start",
+              background: "#1f2937",
+              border: "1px solid #555",
+              borderRadius: "8px",
+              padding: 8,
+              marginTop: -6,
+              marginBottom: 2,
+            }}
+          >
             <button
               type="button"
-              onClick={() => {
-                if (!isGameOver) apiProps.onCancelChargeModelMove?.();
-              }}
+              className={apiProps.battleShockTestMode ? "btn-active" : undefined}
+              onClick={() => apiProps.onToggleBattleShockTestMode?.()}
               style={{
                 border: "1px solid rgba(0,0,0,0.35)",
                 borderRadius: 6,
-                background: "#6b7280",                color: "#fff",
-                cursor: "pointer",
+                color: "#fff",
                 fontSize: 14,
                 fontWeight: 700,
                 padding: "8px 14px",
-                width: 110,
                 textAlign: "center",
+                background: apiProps.battleShockTestMode ? "#7c3aed" : "#2e1065",
+                cursor: "pointer",
               }}
             >
-              Cancel
+              {apiProps.battleShockTestMode
+                ? "Battle-shock test : ON — clique une unité"
+                : "Battle-shock test : OFF"}
             </button>
-            {(() => {
-              const canValidate = apiProps.chargeMovePlan?.canValidate === true;
-              return (
+          </div>
+        )}
+      {apiProps.gameState?.phase === "move" &&
+        (apiProps.gameState?.active_movement_unit != null || apiProps.squadMovePlan != null) && (
+          <div
+            className="squad-action-bar"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              background: "#1f2937",
+              border: "1px solid #555",
+              borderRadius: "8px",
+              padding: 8,
+              marginTop: -6,
+              marginBottom: 2,
+            }}
+          >
+            {/* Bloc gauche : Cancel (toujours, preview inclus) / Validate (si plan). */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {/* Cancel : toujours affiché dès l'activation (preview inclus). */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isGameOver) apiProps.onCancelSquadMove?.();
+                }}
+                style={{
+                  border: "1px solid rgba(0,0,0,0.35)",
+                  borderRadius: 6,
+                  background: "#6b7280",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  padding: "8px 14px",
+                  width: 110,
+                  textAlign: "center",
+                }}
+              >
+                Cancel
+              </button>
+              {/* Validate : uniquement quand un plan par-figurine existe. */}
+              {apiProps.squadMovePlan && (
                 <button
                   type="button"
-                  disabled={!canValidate}
+                  disabled={!apiProps.squadMovePlan.canValidate}
                   onClick={() => {
-                    if (!isGameOver && canValidate) apiProps.onCommitChargePlan?.();
+                    if (!isGameOver) apiProps.onCommitSquadMovePlan?.();
                   }}
                   style={{
                     border: "1px solid rgba(0,0,0,0.35)",
                     borderRadius: 6,
-                    background: canValidate ? "#7c3aed" : "#3b0764",                    color: canValidate ? "#fff" : "rgba(229,231,235,0.5)",
-                    cursor: canValidate ? "pointer" : "not-allowed",
+                    background: apiProps.squadMovePlan.canValidate ? "#16a34a" : "#052e16",
+                    color: apiProps.squadMovePlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+                    cursor: apiProps.squadMovePlan.canValidate ? "pointer" : "not-allowed",
                     fontSize: 14,
                     fontWeight: 700,
                     padding: "8px 14px",
@@ -3153,212 +3243,37 @@ export const BoardWithAPI: React.FC = () => {
                     opacity: 1,
                   }}
                 >
-                  Charger
+                  Validate
                 </button>
-              );
-            })()}
+              )}
+            </div>
+            {/* To the sky (unités FLY) : centré entre les deux blocs (space-between). */}
             {(() => {
-              const plan = apiProps.chargeMovePlan;
-              if (!plan) return null;
-              const nbUnplaced = plan.unplaced?.length ?? 0;
-              const nbSat = plan.satisfiedTargets?.length ?? 0;
-              const nbTot = nbSat + (plan.unsatisfiedTargets?.length ?? 0);
-              return (
-                <span style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 600, marginLeft: 4 }}>
-                  {nbSat}/{nbTot} cible{nbTot > 1 ? "s" : ""} engagée{nbTot > 1 ? "s" : ""}
-                  {nbUnplaced > 0 ? ` · ${nbUnplaced} fig${nbUnplaced > 1 ? "s" : ""} à placer` : ""}
-                </span>
-              );
-            })()}
-          </div>
-        </div>
-      )}
-
-      {/* Barre d'action move : Cancel/Validate (moitié gauche) + boutons de mode (moitié droite).
-          Affichée dès l'activation (movePreview) et en plan par-figurine (squadModelMove). */}
-      {settings.battleShockTestEnabled &&
-        apiProps.gameState?.phase === "move" &&
-        apiProps.gameState?.active_movement_unit == null &&
-        apiProps.squadMovePlan == null && (
-        <div
-          className="squad-action-bar"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "flex-start",
-            background: "#1f2937",
-            border: "1px solid #555",
-            borderRadius: "8px",
-            padding: 8,
-            marginTop: -6,
-            marginBottom: 2,
-          }}
-        >
-          <button
-            type="button"
-            className={apiProps.battleShockTestMode ? "btn-active" : undefined}
-            onClick={() => apiProps.onToggleBattleShockTestMode?.()}
-            style={{
-              border: "1px solid rgba(0,0,0,0.35)",
-              borderRadius: 6,
-              color: "#fff",
-              fontSize: 14,
-              fontWeight: 700,
-              padding: "8px 14px",
-              textAlign: "center",
-              background: apiProps.battleShockTestMode ? "#7c3aed" : "#2e1065",
-              cursor: "pointer",
-            }}
-          >
-            {apiProps.battleShockTestMode
-              ? "Battle-shock test : ON — clique une unité"
-              : "Battle-shock test : OFF"}
-          </button>
-        </div>
-      )}
-      {apiProps.gameState?.phase === "move" &&
-        (apiProps.gameState?.active_movement_unit != null ||
-          apiProps.squadMovePlan != null) && (
-        <div
-          className="squad-action-bar"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            background: "#1f2937",
-            border: "1px solid #555",
-            borderRadius: "8px",
-            padding: 8,
-            marginTop: -6,
-            marginBottom: 2,
-          }}
-        >
-          {/* Bloc gauche : Cancel (toujours, preview inclus) / Validate (si plan). */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {/* Cancel : toujours affiché dès l'activation (preview inclus). */}
-          <button
-            type="button"
-            onClick={() => {
-              if (!isGameOver) apiProps.onCancelSquadMove?.();
-            }}
-            style={{
-              border: "1px solid rgba(0,0,0,0.35)",
-              borderRadius: 6,
-              background: "#6b7280",              color: "#fff",
-              cursor: "pointer",
-              fontSize: 14,
-              fontWeight: 700,
-              padding: "8px 14px",
-              width: 110,
-              textAlign: "center",
-            }}
-          >
-            Cancel
-          </button>
-          {/* Validate : uniquement quand un plan par-figurine existe. */}
-          {apiProps.squadMovePlan && (
-            <button
-              type="button"
-              disabled={!apiProps.squadMovePlan.canValidate}
-              onClick={() => {
-                if (!isGameOver) apiProps.onCommitSquadMovePlan?.();
-              }}
-              style={{
-                border: "1px solid rgba(0,0,0,0.35)",
-                borderRadius: 6,
-                background: apiProps.squadMovePlan.canValidate
-                  ? "#16a34a"
-                  : "#052e16",                color: apiProps.squadMovePlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
-                cursor: apiProps.squadMovePlan.canValidate ? "pointer" : "not-allowed",
-                fontSize: 14,
-                fontWeight: 700,
-                padding: "8px 14px",
-                width: 110,
-                textAlign: "center",
-                opacity: 1,
-              }}
-            >
-              Validate
-            </button>
-          )}
-          </div>
-          {/* To the sky (unités FLY) : centré entre les deux blocs (space-between). */}
-          {(() => {
-            const flyUnitId =
-              apiProps.squadMovePlan?.unitId ??
-              apiProps.movePreview?.unitId ??
-              (apiProps.gameState?.active_movement_unit != null
-                ? parseInt(apiProps.gameState.active_movement_unit, 10)
-                : null);
-            if (flyUnitId === null) return null;
-            const flyUnit = (apiProps.gameState?.units ?? []).find((u) => u.id === flyUnitId);
-            const canFly = !!flyUnit?.UNIT_KEYWORDS?.some(
-              (k) => k.keywordId?.toLowerCase() === "fly"
-            );
-            if (!canFly) return null;
-            const advancedFly =
-              (apiProps.unitsAdvanced ?? []).includes(flyUnitId) ||
-              apiProps.advancingUnitId === flyUnitId;
-            // Apparence figée sur l'état du vol seul (l'Advance ne change pas le rendu) ;
-            // toggle neutralisé une fois l'unité advancée (figé à la sélection de l'Advance).
-            const tookToSkies = (apiProps.unitsTookToSkies ?? []).includes(flyUnitId);
-            return (
-              <button
-                type="button"
-                key="to-the-sky"
-                className={tookToSkies ? "btn-active" : undefined}
-                onClick={() => {
-                  if (!advancedFly && !isGameOver) apiProps.onTakeToSkies?.(flyUnitId);
-                }}
-                style={{
-                  border: "1px solid rgba(0,0,0,0.35)",
-                  borderRadius: 6,
-                  color: "#fff",
-                  fontSize: 14,
-                  fontWeight: 700,
-                  padding: "8px 14px",
-                  width: 110,
-                  textAlign: "center",
-                  background: "#38bdf8",                  cursor: advancedFly ? "default" : "pointer",
-                }}
-              >
-                To the sky (M-2)
-              </button>
-            );
-          })()}
-          {/* Boutons de mode (Move / Advance / Fall-back / Stationary). */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-start" }}>
-            {(() => {
-              const advUnitId =
+              const flyUnitId =
                 apiProps.squadMovePlan?.unitId ??
                 apiProps.movePreview?.unitId ??
                 (apiProps.gameState?.active_movement_unit != null
                   ? parseInt(apiProps.gameState.active_movement_unit, 10)
                   : null);
-              if (advUnitId === null) return null;
-              const isAdv = apiProps.advancingUnitId === advUnitId;
-              const alreadyAdvanced = (apiProps.unitsAdvanced ?? []).includes(advUnitId);
-              // V11 : Advance figé = irréversible. Une fois advancé (état moteur units_advanced,
-              // ou advance en cours cette activation), le mode reste verrouillé tout le tour.
-              const advanced = alreadyAdvanced || isAdv;
-              const engaged = apiProps.activeUnitEngaged === advUnitId;
-              const canAdvance = !advanced && !engaged;
-              // Règle 09 : non engagée → Move (défaut) + Advance ; engagée → Fall-back (défaut) + Stationary.
-              // Move/Fall-back = purement visuels (le commit applique flee si engagé). Stationary = action wait.
-              // 3 états : "selected" (enfoncé), "relief" (possible), "disabled" (grisé).
-              const modeBtn = (
-                label: string,
-                state: "selected" | "relief" | "disabled",
-                accent: { relief: string; dark: string },
-                onClick?: () => void
-              ) => (
+              if (flyUnitId === null) return null;
+              const flyUnit = (apiProps.gameState?.units ?? []).find((u) => u.id === flyUnitId);
+              const canFly = !!flyUnit?.UNIT_KEYWORDS?.some(
+                (k) => k.keywordId?.toLowerCase() === "fly"
+              );
+              if (!canFly) return null;
+              const advancedFly =
+                (apiProps.unitsAdvanced ?? []).includes(flyUnitId) ||
+                apiProps.advancingUnitId === flyUnitId;
+              // Apparence figée sur l'état du vol seul (l'Advance ne change pas le rendu) ;
+              // toggle neutralisé une fois l'unité advancée (figé à la sélection de l'Advance).
+              const tookToSkies = (apiProps.unitsTookToSkies ?? []).includes(flyUnitId);
+              return (
                 <button
                   type="button"
-                  key={label}
-                  className={state === "selected" ? "btn-active" : undefined}
-                  disabled={state === "disabled"}
+                  key="to-the-sky"
+                  className={tookToSkies ? "btn-active" : undefined}
                   onClick={() => {
-                    if (state !== "disabled" && !isGameOver) onClick?.();
+                    if (!advancedFly && !isGameOver) apiProps.onTakeToSkies?.(flyUnitId);
                   }}
                   style={{
                     border: "1px solid rgba(0,0,0,0.35)",
@@ -3369,53 +3284,116 @@ export const BoardWithAPI: React.FC = () => {
                     padding: "8px 14px",
                     width: 110,
                     textAlign: "center",
-                    background: state === "disabled" ? accent.dark : accent.relief,                    cursor:
-                      state === "disabled" ? "not-allowed" : state === "selected" ? "default" : "pointer",
-                    opacity: 1,
+                    background: "#38bdf8",
+                    cursor: advancedFly ? "default" : "pointer",
                   }}
                 >
-                  {label}
+                  To the sky (M-2)
                 </button>
               );
-              const green = { relief: "#16a34a", dark: "#052e16" };
-              const orange = { relief: "#ea580c", dark: "#431407" };
-              const yellow = { relief: "#ca8a04", dark: "#422006" };
-              const grey = { relief: "#6b7280", dark: "#1f2937" };
-              // Advancé → Move grisé (verrouillé). Sinon engagé → grisé, libre → sélectionné.
-              const moveState: "selected" | "relief" | "disabled" =
-                engaged || advanced ? "disabled" : "selected";
-              const fallbackState: "selected" | "relief" | "disabled" = engaged
-                ? "selected"
-                : "disabled";
-              // Advancé → bouton enfoncé (sélectionné, irréversible). Engagé → grisé. Libre → relief.
-              const advanceState: "selected" | "relief" | "disabled" = advanced
-                ? "selected"
-                : engaged
-                  ? "disabled"
-                  : "relief";
-              return (
-                <>
-                  {modeBtn("Move", moveState, green)}
-                  {modeBtn(
-                    isAdv && apiProps.advanceRoll != null
-                      ? `Advance (Roll: ${apiProps.advanceRoll})`
-                      : "Advance",
-                    advanceState,
-                    orange,
-                    () => {
-                      if (canAdvance) apiProps.onSetAdvanceMode?.(advUnitId);
-                    }
-                  )}
-                  {modeBtn("Fall-back", fallbackState, yellow)}
-                  {modeBtn("Stationary", advanced ? "disabled" : "relief", grey, () =>
-                    apiProps.onStationary?.(advUnitId)
-                  )}
-                </>
-              );
             })()}
+            {/* Boutons de mode (Move / Advance / Fall-back / Stationary). */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                justifyContent: "flex-start",
+              }}
+            >
+              {(() => {
+                const advUnitId =
+                  apiProps.squadMovePlan?.unitId ??
+                  apiProps.movePreview?.unitId ??
+                  (apiProps.gameState?.active_movement_unit != null
+                    ? parseInt(apiProps.gameState.active_movement_unit, 10)
+                    : null);
+                if (advUnitId === null) return null;
+                const isAdv = apiProps.advancingUnitId === advUnitId;
+                const alreadyAdvanced = (apiProps.unitsAdvanced ?? []).includes(advUnitId);
+                // V11 : Advance figé = irréversible. Une fois advancé (état moteur units_advanced,
+                // ou advance en cours cette activation), le mode reste verrouillé tout le tour.
+                const advanced = alreadyAdvanced || isAdv;
+                const engaged = apiProps.activeUnitEngaged === advUnitId;
+                const canAdvance = !advanced && !engaged;
+                // Règle 09 : non engagée → Move (défaut) + Advance ; engagée → Fall-back (défaut) + Stationary.
+                // Move/Fall-back = purement visuels (le commit applique flee si engagé). Stationary = action wait.
+                // 3 états : "selected" (enfoncé), "relief" (possible), "disabled" (grisé).
+                const modeBtn = (
+                  label: string,
+                  state: "selected" | "relief" | "disabled",
+                  accent: { relief: string; dark: string },
+                  onClick?: () => void
+                ) => (
+                  <button
+                    type="button"
+                    key={label}
+                    className={state === "selected" ? "btn-active" : undefined}
+                    disabled={state === "disabled"}
+                    onClick={() => {
+                      if (state !== "disabled" && !isGameOver) onClick?.();
+                    }}
+                    style={{
+                      border: "1px solid rgba(0,0,0,0.35)",
+                      borderRadius: 6,
+                      color: "#fff",
+                      fontSize: 14,
+                      fontWeight: 700,
+                      padding: "8px 14px",
+                      width: 110,
+                      textAlign: "center",
+                      background: state === "disabled" ? accent.dark : accent.relief,
+                      cursor:
+                        state === "disabled"
+                          ? "not-allowed"
+                          : state === "selected"
+                            ? "default"
+                            : "pointer",
+                      opacity: 1,
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+                const green = { relief: "#16a34a", dark: "#052e16" };
+                const orange = { relief: "#ea580c", dark: "#431407" };
+                const yellow = { relief: "#ca8a04", dark: "#422006" };
+                const grey = { relief: "#6b7280", dark: "#1f2937" };
+                // Advancé → Move grisé (verrouillé). Sinon engagé → grisé, libre → sélectionné.
+                const moveState: "selected" | "relief" | "disabled" =
+                  engaged || advanced ? "disabled" : "selected";
+                const fallbackState: "selected" | "relief" | "disabled" = engaged
+                  ? "selected"
+                  : "disabled";
+                // Advancé → bouton enfoncé (sélectionné, irréversible). Engagé → grisé. Libre → relief.
+                const advanceState: "selected" | "relief" | "disabled" = advanced
+                  ? "selected"
+                  : engaged
+                    ? "disabled"
+                    : "relief";
+                return (
+                  <>
+                    {modeBtn("Move", moveState, green)}
+                    {modeBtn(
+                      isAdv && apiProps.advanceRoll != null
+                        ? `Advance (Roll: ${apiProps.advanceRoll})`
+                        : "Advance",
+                      advanceState,
+                      orange,
+                      () => {
+                        if (canAdvance) apiProps.onSetAdvanceMode?.(advUnitId);
+                      }
+                    )}
+                    {modeBtn("Fall-back", fallbackState, yellow)}
+                    {modeBtn("Stationary", advanced ? "disabled" : "relief", grey, () =>
+                      apiProps.onStationary?.(advUnitId)
+                    )}
+                  </>
+                );
+              })()}
+            </div>
           </div>
-        </div>
-      )}
+        )}
       {apiProps.mode === "squadModelShoot" && apiProps.squadShootPlan && (
         <div
           className="squad-action-bar"
@@ -3452,7 +3430,8 @@ export const BoardWithAPI: React.FC = () => {
             style={{
               border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
-              background: "#6b7280",              color: "#fff",
+              background: "#6b7280",
+              color: "#fff",
               cursor: "pointer",
               fontSize: 14,
               fontWeight: 700,
@@ -3470,9 +3449,8 @@ export const BoardWithAPI: React.FC = () => {
             style={{
               border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
-              background: apiProps.squadShootPlan.canValidate
-                ? "#16a34a"
-                : "#052e16",              color: apiProps.squadShootPlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+              background: apiProps.squadShootPlan.canValidate ? "#16a34a" : "#052e16",
+              color: apiProps.squadShootPlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
               cursor: apiProps.squadShootPlan.canValidate ? "pointer" : "not-allowed",
               fontSize: 14,
               fontWeight: 700,
@@ -3954,11 +3932,13 @@ export const BoardWithAPI: React.FC = () => {
                     targetId: apiProps.targetPreview.targetId,
                     shooterId: apiProps.targetPreview.shooterId,
                     currentBlinkStep: (() => {
-                      if (apiProps.targetPreview.currentBlinkStep == null) throw new Error("targetPreview.currentBlinkStep absent");
+                      if (apiProps.targetPreview.currentBlinkStep == null)
+                        throw new Error("targetPreview.currentBlinkStep absent");
                       return apiProps.targetPreview.currentBlinkStep;
                     })(),
                     totalBlinkSteps: (() => {
-                      if (apiProps.targetPreview.totalBlinkSteps == null) throw new Error("targetPreview.totalBlinkSteps absent");
+                      if (apiProps.targetPreview.totalBlinkSteps == null)
+                        throw new Error("targetPreview.totalBlinkSteps absent");
                       return apiProps.targetPreview.totalBlinkSteps;
                     })(),
                     blinkTimer: apiProps.targetPreview.blinkTimer ?? null,
@@ -3986,6 +3966,8 @@ export const BoardWithAPI: React.FC = () => {
                 ? () => {}
                 : apiProps.onSelectUnit
             }
+            battleShockTestMode={settings.battleShockTestEnabled && apiProps.battleShockTestMode}
+            onForceBattleShock={apiProps.onForceBattleShock}
             onSkipUnit={isGameOver ? () => {} : apiProps.onSkipUnit}
             onStartMovePreview={isGameOver ? () => {} : apiProps.onStartMovePreview}
             onDirectMove={isGameOver ? () => {} : apiProps.onDirectMove}
@@ -4000,9 +3982,7 @@ export const BoardWithAPI: React.FC = () => {
             onSelectModelForMove={isGameOver ? async () => {} : apiProps.onSelectModelForMove}
             onMoveModelInPlan={isGameOver ? () => {} : apiProps.onMoveModelInPlan}
             onResetModelInPlan={isGameOver ? () => {} : apiProps.onResetModelInPlan}
-            onCommitSquadMovePlan={
-              isGameOver ? async () => {} : apiProps.onCommitSquadMovePlan
-            }
+            onCommitSquadMovePlan={isGameOver ? async () => {} : apiProps.onCommitSquadMovePlan}
             onCancelSquadMove={isGameOver ? () => {} : apiProps.onCancelSquadMove}
             chargeMovePlan={apiProps.chargeMovePlan}
             chargeModelPoolRef={apiProps.chargeModelPoolRef}
@@ -4011,9 +3991,7 @@ export const BoardWithAPI: React.FC = () => {
             onSelectChargeModel={isGameOver ? () => {} : apiProps.onSelectChargeModel}
             onMoveModelInChargePlan={isGameOver ? () => {} : apiProps.onMoveModelInChargePlan}
             onUnplaceChargeModel={isGameOver ? () => {} : apiProps.onUnplaceChargeModel}
-            onCancelChargeModelMove={
-              isGameOver ? async () => {} : apiProps.onCancelChargeModelMove
-            }
+            onCancelChargeModelMove={isGameOver ? async () => {} : apiProps.onCancelChargeModelMove}
             squadShootPlan={apiProps.squadShootPlan}
             onStartSquadModelShoot={isGameOver ? async () => {} : apiProps.onStartSquadModelShoot}
             onSelectModelForShoot={isGameOver ? async () => {} : apiProps.onSelectModelForShoot}

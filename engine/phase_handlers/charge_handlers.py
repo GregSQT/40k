@@ -1946,7 +1946,11 @@ def charge_model_plan_state(
     # Distance de mouvement (sous-hex) de la fig sélectionnée vers chaque ancre du pool : profondeur
     # BFS = path réel au sol (détours murs/figs), distance directe en vol. Source du tooltip charge
     # par-figurine (au lieu de la ligne droite qui sous-estime les détours).
-    _sel_dist = dist_by_model.get(str(selected_model), {}) if selected_model is not None else {}
+    _sel_dist = (
+        (dist_by_model[str(selected_model)] if str(selected_model) in dist_by_model else {})
+        if selected_model is not None
+        else {}
+    )
     pool_distances: List[List[int]] = [
         [int(c), int(r), int(_sel_dist[(int(c), int(r))])]
         for (c, r) in pool
@@ -3620,7 +3624,11 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         # Distance de mouvement réelle par ancre (sous-hex), depuis le BFS de charge : profondeur de
         # chemin au sol (respecte murs/figs), distance directe en vol déclaré. Sert au tooltip pour
         # afficher la vraie distance de charge au lieu de la ligne droite (qui sous-estime les détours).
-        _dist_map = game_state.get("valid_charge_dest_distances", {})
+        _dist_map = (
+            game_state["valid_charge_dest_distances"]
+            if "valid_charge_dest_distances" in game_state
+            else {}
+        )
         charge_dest_distances = [
             [int(c), int(r), int(_dist_map[(c, r)])]
             for (c, r) in valid_pool
@@ -3992,7 +4000,9 @@ def charge_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, action
     # Sinon (avant sélection de cible) → re-borne les cibles éligibles au budget -2", SANS l'effet de
     # bord d'échec de ``charge_unit_execution_loop`` (qui consommerait l'unité si plus aucune cible
     # n'est atteignable). Le toggle reste réversible : zéro cible = liste vide, l'unité reste active.
-    charge_roll = game_state.get("charge_roll_values", {}).get(unit_id)
+    charge_roll = (
+        game_state["charge_roll_values"] if "charge_roll_values" in game_state else {}
+    ).get(unit_id)
     max_distance_subhex = (
         _charge_budget_subhex(game_state, unit_id, charge_roll) if charge_roll is not None else None
     )

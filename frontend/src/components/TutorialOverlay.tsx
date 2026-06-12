@@ -343,7 +343,7 @@ function renderBodyWithClickIcon(
               </>
             )}
             {hasPlaceholder
-              ? parts.map((part) => (
+              ? parts.map((part, j) => (
                   <span key={`part-${part.slice(0, 20)}`}>
                     {replaceCursorInText(part)}
                     {j < parts.length - 1 && (
@@ -824,13 +824,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
                   const c = s as TutorialSpotlightCircle;
                   const r = c.radius + 20;
                   return (
-                    <circle
-                      key={`circle-${c.x}-${c.y}`}
-                      cx={c.x}
-                      cy={c.y}
-                      r={r}
-                      fill="black"
-                    />
+                    <circle key={`circle-${c.x}-${c.y}`} cx={c.x} cy={c.y} r={r} fill="black" />
                   );
                 }
                 const r = s as TutorialSpotlightRect;
@@ -866,59 +860,6 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
     setDialogPosition(null);
     setViewportInsetNudge({ x: 0, y: 0 });
   }, []);
-
-  const _tutorialLayoutDepsKey = useMemo(() => {
-    const spotlightSig = spotlights
-      .map((s) => {
-        if (s.shape === "circle") {
-          const c = s as TutorialSpotlightCircle;
-          return `circle:${c.x},${c.y},${c.radius}`;
-        }
-        const r = s as TutorialSpotlightRect;
-        return `rect:${r.left},${r.top},${r.width},${r.height}`;
-      })
-      .join("|");
-    const tableSig =
-      tableNameMSpotlightRectsForLayout != null
-        ? tableNameMSpotlightRectsForLayout
-            .map((r) => `${r.left},${r.top},${r.width},${r.height}`)
-            .join(";")
-        : "";
-    const panelSig =
-      panelLeftSpotlightForLayout != null
-        ? `${panelLeftSpotlightForLayout.left},${panelLeftSpotlightForLayout.top},${panelLeftSpotlightForLayout.width},${panelLeftSpotlightForLayout.height}`
-        : "";
-    const anchorSig =
-      tutorialPopupAnchor != null &&
-      typeof tutorialPopupAnchor.centerX === "number" &&
-      typeof tutorialPopupAnchor.bottomY === "number"
-        ? `${tutorialPopupAnchor.centerX},${tutorialPopupAnchor.bottomY}`
-        : "";
-    const popupPosSig =
-      step.popupPosition &&
-      step.popupPosition !== "center" &&
-      typeof step.popupPosition === "object"
-        ? JSON.stringify(step.popupPosition)
-        : String(step.popupPosition ?? "");
-    return [
-      step.stage,
-      dialogPosition?.x ?? "x",
-      dialogPosition?.y ?? "y",
-      anchorSig,
-      panelSig,
-      tableSig,
-      spotlightSig,
-      popupPosSig,
-    ].join("::");
-  }, [
-    step.stage,
-    dialogPosition,
-    tutorialPopupAnchor,
-    panelLeftSpotlightForLayout,
-    tableNameMSpotlightRectsForLayout,
-    spotlights,
-    step.popupPosition,
-  ]);
 
   const clampDialogToViewport = useCallback(() => {
     const el = dialogRef.current;

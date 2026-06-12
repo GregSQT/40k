@@ -11,7 +11,6 @@ import {
 } from "react";
 import unitRules from "../../../config/unit_rules.json";
 import weaponRules from "../../../config/weapon_rules.json";
-import { useTutorial } from "../contexts/TutorialContext";
 import type { Unit, UnitId } from "../types/game";
 import TooltipWrapper from "./TooltipWrapper";
 
@@ -218,8 +217,6 @@ const UnitRow = memo<UnitRowProps>(
     isDetailPreviewHighlight = false,
     tablePlayer,
   }) => {
-    const tutorial = useTutorial();
-    const _spotlightLayoutTick = tutorial?.spotlightLayoutTick ?? 0;
     const nameCellRef = useRef<HTMLTableCellElement>(null);
     const mCellRef = useRef<HTMLTableCellElement>(null);
     const unitRowRef = useRef<HTMLTableRowElement>(null);
@@ -852,10 +849,7 @@ const UnitRow = memo<UnitRowProps>(
                           {weapon.WEAPON_RULES?.map((ruleId) => {
                             const { displayName, tooltipText } = getWeaponRuleDisplay(ruleId);
                             return (
-                              <span
-                                key={`${unit.id}-rng-${ruleId}`}
-                                className="rule-badge-wrapper"
-                              >
+                              <span key={`${unit.id}-rng-${ruleId}`} className="rule-badge-wrapper">
                                 <span className="rule-badge">{displayName}</span>
                                 <span className="rule-tooltip">{tooltipText}</span>
                               </span>
@@ -1095,10 +1089,7 @@ const UnitRow = memo<UnitRowProps>(
                           {weapon.WEAPON_RULES?.map((ruleId) => {
                             const { displayName, tooltipText } = getWeaponRuleDisplay(ruleId);
                             return (
-                              <span
-                                key={`${unit.id}-cc-${ruleId}`}
-                                className="rule-badge-wrapper"
-                              >
+                              <span key={`${unit.id}-cc-${ruleId}`} className="rule-badge-wrapper">
                                 <span className="rule-badge">{displayName}</span>
                                 <span className="rule-tooltip">{tooltipText}</span>
                               </span>
@@ -1356,9 +1347,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
 
     // Filter units for this player and exclude dead units ; preview plateau : unité ciblée en tête de liste
     const playerUnits = useMemo(() => {
-      const filtered = units.filter(
-        (unit) => unit.player === player && unit.HP_CUR > 0
-      );
+      const filtered = units.filter((unit) => unit.player === player && unit.HP_CUR > 0);
       if (detailPreviewUnitId === null) {
         return filtered;
       }

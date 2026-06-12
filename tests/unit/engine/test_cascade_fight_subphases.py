@@ -196,13 +196,14 @@ class TestCascadeChargeFight:
         success, result = engine.execute_semantic_action({"action": "advance_phase", "from": "charge"})
 
         assert success is True
-        # Fight phase initialisé avec unités éligibles
+        # Fight phase V11 initialisée avec unités éligibles
         assert gs["phase"] == "fight"
-        # Le pool charging doit contenir l'unité 1
-        assert "1" in gs["charging_activation_pool"]
+        # L'unité 1 (chargée, engagée) est actionnable dans la sous-phase V11 courante.
+        from engine.phase_handlers.fight_handlers import fight_v11_current_pool
+        assert "1" in fight_v11_current_pool(gs)
 
     def test_advance_from_charge_adjacent_charged_unit_sets_fight_subphase(self):
-        """cascade_charge_subphase : fight initialisé avec pool charging → fight_subphase='charging'."""
+        """cascade_charge_subphase (V11) : fight initialisé → fight_subphase='pile_in'."""
         p1 = _unit(1, 1, 5, 10)
         p2 = _unit(2, 2, 5, 11)
         gs = _make_gs([p1, p2], phase="charge")
@@ -211,7 +212,7 @@ class TestCascadeChargeFight:
 
         engine.execute_semantic_action({"action": "advance_phase", "from": "charge"})
 
-        assert gs["fight_subphase"] == "charging"
+        assert gs["fight_subphase"] == "pile_in"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -310,6 +311,7 @@ class TestCascadeFullTurn:
         success, result = engine.execute_semantic_action({"action": "advance_phase", "from": "move"})
 
         assert success is True
-        # La cascade devrait s'être arrêtée à fight (pool non vide)
+        # La cascade devrait s'être arrêtée à fight (unité actionnable V11)
         assert gs["phase"] == "fight"
-        assert len(gs["charging_activation_pool"]) > 0
+        from engine.phase_handlers.fight_handlers import fight_v11_current_pool
+        assert len(fight_v11_current_pool(gs)) > 0

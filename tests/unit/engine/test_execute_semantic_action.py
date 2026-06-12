@@ -399,36 +399,41 @@ class TestExecuteSemanticActionShoot:
 class TestExecuteSemanticActionFight:
     """Routing execute_semantic_action → _process_fight_phase."""
 
-    def test_fight_unit_not_in_alternating_active_pool_returns_error(self):
-        """esa_fight_not_in_pool : unit absente du pool alternating_active → 'unit_not_in_current_pool'."""
-        # Unit 1 (P1) essaie de combattre mais seule unit 1 est dans le pool,
-        # on demande unit 2 qui est absente du pool.
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
+    def test_fight_v11_auto_drives_and_selects(self):
+        """esa_fight_v11_auto : action fight (mode auto) pilote la machine V11 et sélectionne."""
+        from engine.phase_handlers.fight_handlers import fight_phase_start
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]  # engagés
         gs = _make_fight_gs(units)
-        gs["fight_subphase"] = "alternating_active"
-        gs["fight_alternating_turn"] = "active"
-        gs["active_alternating_activation_pool"] = ["1"]  # Unit 2 ABSENTE
-        engine = _bare_engine(gs)
-
-        success, result = engine.execute_semantic_action({"action": "fight", "unitId": "2"})
-
-        assert success is False
-        assert result.get("error") == "unit_not_in_current_pool"
-
-    def test_fight_charging_subphase_unit_not_in_pool_returns_error(self):
-        """esa_fight_charging : sous-phase charging, unit absente du charging_pool → error."""
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
-        gs = _make_fight_gs(units)
-        gs["fight_subphase"] = "charging"
-        gs["fight_alternating_turn"] = None
-        gs["charging_activation_pool"] = ["1"]  # Seule unit 1 dans le pool charging
+        gs["current_player"] = 1
+        gs["current_mode_code"] = "pve"  # auto autorisé
+        gs["player_types"] = {"1": "ai", "2": "ai"}
         gs["units_charged"] = {"1"}
+        gs["phase"] = "charge"
+        fight_phase_start(gs)
         engine = _bare_engine(gs)
+        result = {}
+        for _ in range(20):
+            success, result = engine.execute_semantic_action({"action": "fight", "unitId": "1"})
+            assert success is True
+            if result.get("phase_complete"):
+                break
+        # Au moins une unité a été sélectionnée pour combattre (machine 12.04).
+        assert gs["units_selected_to_fight"]
 
+    def test_fight_v11_manual_ineligible_unit_no_resolution(self):
+        """esa_fight_v11_manual : unité non éligible → aucune résolution (V11 ne combat que l'éligible)."""
+        from engine.phase_handlers.fight_handlers import fight_phase_start
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]  # aucun engagé, aucun chargé
+        gs = _make_fight_gs(units)
+        gs["current_player"] = 1
+        gs["current_mode_code"] = "pvp_test"  # manuel
+        gs["player_types"] = {"1": "human", "2": "human"}
+        gs["phase"] = "charge"
+        fight_phase_start(gs)
+        engine = _bare_engine(gs)
         success, result = engine.execute_semantic_action({"action": "fight", "unitId": "2"})
-
-        assert success is False
-        assert result.get("error") == "unit_not_in_current_pool"
+        assert success is True
+        assert not gs["units_selected_to_fight"]
 
     def test_fight_routing_not_invalid_phase(self):
         """esa_fight_routing : phase='fight' → routing correct vers fight handler (pas 'invalid_phase')."""

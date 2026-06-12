@@ -331,9 +331,7 @@ const Navigation: React.FC<NavigationProps> = ({
           }}
         >
           {(location.search.includes("mode=pvp_test") ||
-            location.search.includes("mode=pve_test")) && (
-            <BoardResolutionPicker />
-          )}
+            location.search.includes("mode=pve_test")) && <BoardResolutionPicker />}
           {onToggleMeasureMode && (
             <TooltipWrapper
               text={

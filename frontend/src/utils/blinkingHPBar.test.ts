@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { Unit } from "../types/game";
 import {
-  HP_BLINK_STAGE_Z_INDEX,
   buildChargeMinRollOverlay,
   buildWeaponSignature,
   calculateDamagePerAttack,
   calculateWoundProbability,
+  HP_BLINK_STAGE_Z_INDEX,
 } from "./blinkingHPBar";
 
 // ─── buildChargeMinRollOverlay ────────────────────────────────────────────────
@@ -129,7 +129,8 @@ describe("calculateWoundProbability", () => {
   it("melee equal STR/T, normal save → hit 3/6 × wound 3/6 × fail 2/6 = 1/12", () => {
     // ATK=4 → hit=(7-4)/6=0.5 | STR=T=4 → wound=3/6 | ARMOR=3 AP=0 → save=3 → fail=2/6
     const attacker = {
-      id: 1, player: 1,
+      id: 1,
+      player: 1,
       CC_WEAPONS: [{ id: "m1", display_name: "Fists", ATK: 4, STR: 4, AP: 0, DMG: 1, NB: 1 }],
     } as unknown as Unit;
     expect(calculateWoundProbability(attacker, target, "fight")).toBeCloseTo(1 / 12, 5);
@@ -138,7 +139,8 @@ describe("calculateWoundProbability", () => {
   it("melee STR double T, AP strips save → hit 5/6 × wound 5/6 × fail 1/6 = 25/216", () => {
     // ATK=2 → hit=5/6 | STR=8 >= T*2=8 → wound=5/6 | ARMOR=5 AP=3 → save=max(2,2)=2 → fail=1/6
     const attacker = {
-      id: 1, player: 1,
+      id: 1,
+      player: 1,
       CC_WEAPONS: [{ id: "m2", display_name: "Power Fist", ATK: 2, STR: 8, AP: 3, DMG: 2, NB: 1 }],
     } as unknown as Unit;
     const toughTarget = { ...target, ARMOR_SAVE: 5 } as unknown as Unit;
@@ -148,7 +150,8 @@ describe("calculateWoundProbability", () => {
   it("melee STR < T, invuln save active → hit 4/6 × wound 2/6 × fail 2/6 = 16/216", () => {
     // ATK=3 → hit=4/6 | STR=3 < T=5 → wound=2/6 | ARMOR=3 AP=0 INVUL=5 → save=max(2,min(3,5))=3 → fail=2/6
     const attacker = {
-      id: 1, player: 1,
+      id: 1,
+      player: 1,
       CC_WEAPONS: [{ id: "m3", display_name: "Scratch", ATK: 3, STR: 3, AP: 0, DMG: 1, NB: 1 }],
     } as unknown as Unit;
     const invulTarget = { ...target, T: 5, ARMOR_SAVE: 3, INVUL_SAVE: 5 } as unknown as Unit;
@@ -160,8 +163,22 @@ describe("calculateWoundProbability", () => {
     // Without cover: ARMOR=3 AP=0 → save=3+ → fail=2/6 → prob=9/216=1/24≈0.0417
     // With cover: ARMOR=3-1=2 → save=2+ → fail=1/6 → prob=9/216/2=1/48≈0.0208
     const attacker = {
-      id: 1, player: 1,
-      RNG_WEAPONS: [{ id: "r1", display_name: "Bolter", ATK: 4, STR: 4, AP: 0, DMG: 1, NB: 1, RNG: 24, SHOTS: 1, WEAPON_RULES: [] }],
+      id: 1,
+      player: 1,
+      RNG_WEAPONS: [
+        {
+          id: "r1",
+          display_name: "Bolter",
+          ATK: 4,
+          STR: 4,
+          AP: 0,
+          DMG: 1,
+          NB: 1,
+          RNG: 24,
+          SHOTS: 1,
+          WEAPON_RULES: [],
+        },
+      ],
       CC_WEAPONS: [],
       MEL_WEAPONS: [],
     } as unknown as Unit;
@@ -176,7 +193,16 @@ describe("calculateWoundProbability", () => {
 // ─── calculateDamagePerAttack ─────────────────────────────────────────────────
 
 describe("calculateDamagePerAttack", () => {
-  const target = { id: 2, player: 2, HP_CUR: 3, HP_MAX: 3, T: 4, ARMOR_SAVE: 3, RNG_WEAPONS: [], MEL_WEAPONS: [] } as unknown as Unit;
+  const target = {
+    id: 2,
+    player: 2,
+    HP_CUR: 3,
+    HP_MAX: 3,
+    T: 4,
+    ARMOR_SAVE: 3,
+    RNG_WEAPONS: [],
+    MEL_WEAPONS: [],
+  } as unknown as Unit;
 
   it("returns 0 when attacker has no melee weapon (fight phase)", () => {
     const attacker = { id: 1, player: 1, CC_WEAPONS: [] } as unknown as Unit;

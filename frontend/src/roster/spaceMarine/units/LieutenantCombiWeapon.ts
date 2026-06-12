@@ -23,7 +23,6 @@ export class LieutenantCombiWeapon extends LeaderEliteMeleeElite {
   static CC_WEAPON_CODES = ["paired_combat_blade_lieutenant"];
   static CC_WEAPONS = getWeapons(LieutenantCombiWeapon.CC_WEAPON_CODES);
 
-
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
     { keywordId: "infantry" },

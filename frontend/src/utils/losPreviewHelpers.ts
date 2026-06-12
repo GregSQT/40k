@@ -94,7 +94,7 @@ export function buildShootingLosPreviewFromVisibleHexes(
   visibleHexes: VisibleHex[],
   units: MinimalUnitForLos[],
   shooterPlayer: number,
-  losVisibilityMinRatio: number,
+  losVisibilityMinRatio: number
 ): {
   clearCells: Array<{ col: number; row: number }>;
   terrainCoverCells: Array<{ col: number; row: number }>;
@@ -166,13 +166,13 @@ export function buildLosPreviewFromSource(
     params.boardCols,
     params.boardRows,
     effectiveWallHexes,
-    params.losVisibilityMinRatio,
+    params.losVisibilityMinRatio
   );
   const losPreview = buildShootingLosPreviewFromVisibleHexes(
     visibleHexes,
     params.units,
     params.source.unit.player,
-    params.losVisibilityMinRatio,
+    params.losVisibilityMinRatio
   );
   const key = [
     params.source.fromCol,

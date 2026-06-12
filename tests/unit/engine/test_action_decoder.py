@@ -376,12 +376,15 @@ class TestConvertGymActionShoot:
 
 class TestConvertGymActionFight:
     def _make_gs(self) -> Dict[str, Any]:
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]  # engagés (dist 1)
         gs = _build_gs(units, "fight", current_player=1)
-        gs["fight_subphase"] = "charging"
-        gs["charging_activation_pool"] = [1]
-        gs["active_alternating_activation_pool"] = []
-        gs["non_active_alternating_activation_pool"] = []
+        # État fight V11 : unité 1 engagée → éligible (machine de sélection).
+        gs["fight_subphase"] = "fight"
+        gs["fight_step"] = "remaining"
+        gs["fight_selector"] = 1
+        gs["engaged_at_fight_step_start"] = {"1": True, "2": True}
+        gs["units_selected_to_fight"] = set()
+        gs["units_charged"] = set()
         return gs
 
     def test_fight_action_10_returns_fight(self):
@@ -498,10 +501,13 @@ class TestGetActionMaskFight:
         """mask_fight_10 : unité éligible en fight → mask[10]=True."""
         units = [_unit(1, 1, 5, 10), _unit(2, 2, 15, 10)]
         gs = _build_gs(units, "fight", current_player=1)
-        gs["fight_subphase"] = "alternating"
-        gs["charging_activation_pool"] = []
-        gs["active_alternating_activation_pool"] = []
-        gs["non_active_alternating_activation_pool"] = [1]
+        # État fight V11 : unité 1 a chargé → éligible.
+        gs["fight_subphase"] = "fight"
+        gs["fight_step"] = "remaining"
+        gs["fight_selector"] = 1
+        gs["engaged_at_fight_step_start"] = {}
+        gs["units_selected_to_fight"] = set()
+        gs["units_charged"] = {"1"}
         d = _make_decoder()
         mask = d.get_action_mask(gs)
         assert bool(mask[10]) is True
@@ -553,15 +559,14 @@ class TestConvertGymActionFightAlternating:
     def _make_gs(self, subphase: str, pool: List[int]) -> Dict[str, Any]:
         units = [_unit(1, 1, 5, 10), _unit(2, 2, 15, 10)]
         gs = _build_gs(units, "fight", current_player=1)
-        gs["fight_subphase"] = subphase
-        gs["charging_activation_pool"] = []
-        gs["active_alternating_activation_pool"] = []
-        gs["non_active_alternating_activation_pool"] = []
-        # Placer les unités dans le bon pool selon le sous-type
-        if subphase in ("alternating_non_active", "alternating"):
-            gs["non_active_alternating_activation_pool"] = pool
-        elif subphase == "alternating_active":
-            gs["active_alternating_activation_pool"] = pool
+        # V11 : sous-phase fight unique ; les unités du pool sont rendues éligibles (chargées).
+        # Le paramètre `subphase` (legacy V10) est ignoré.
+        gs["fight_subphase"] = "fight"
+        gs["fight_step"] = "remaining"
+        gs["fight_selector"] = 1
+        gs["engaged_at_fight_step_start"] = {}
+        gs["units_selected_to_fight"] = set()
+        gs["units_charged"] = {str(u) for u in pool}
         return gs
 
     def test_subphase_alternating_action10_returns_fight(self):

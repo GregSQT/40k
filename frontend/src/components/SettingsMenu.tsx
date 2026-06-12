@@ -211,8 +211,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
               <span>Badges de statut par figurine</span>
             </label>
             <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
-              Activé : un badge (caché, fui, choc) sur chaque figurine concernée. Désactivé : un seul
-              badge sur l'escouade (uniquement si toutes les figurines ont le statut).
+              Activé : un badge (caché, fui, choc) sur chaque figurine concernée. Désactivé : un
+              seul badge sur l'escouade (uniquement si toutes les figurines ont le statut).
             </p>
           </div>
         )}

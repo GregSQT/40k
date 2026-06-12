@@ -2053,17 +2053,12 @@ class W40KEngine(gym.Env):
             move_pool = len(require_key(self.game_state, "move_activation_pool"))
             shoot_pool = len(require_key(self.game_state, "shoot_activation_pool"))
             charge_pool = len(require_key(self.game_state, "charge_activation_pool"))
-            charging_pool = len(require_key(self.game_state, "charging_activation_pool"))
-            active_alt_pool = len(require_key(self.game_state, "active_alternating_activation_pool"))
-            non_active_alt_pool = len(require_key(self.game_state, "non_active_alternating_activation_pool"))
             error_msg = (
                 f"\n ❌ ERROR: Episode exceeded 1000 steps (episode={episode}, turn={turn}, "
                 f"phase={phase}, scenario={scenario_name}, scenario_path={current_scenario}, "
                 f"player={current_player}, fight_subphase={fight_subphase}, "
                 f"active_unit_id={active_unit_id}, active_unit_name={active_unit_name}, "
-                f"move_pool={move_pool}, shoot_pool={shoot_pool}, charge_pool={charge_pool}, "
-                f"charging_pool={charging_pool}, active_alt_pool={active_alt_pool}, "
-                f"non_active_alt_pool={non_active_alt_pool}{shoot_diag}, "
+                f"move_pool={move_pool}, shoot_pool={shoot_pool}, charge_pool={charge_pool}{shoot_diag}, "
                 f"last_action_debug={self.game_state.get('_last_action_debug')}). Forcing termination."
             )
             print(error_msg, flush=True)
@@ -2124,18 +2119,12 @@ class W40KEngine(gym.Env):
         
         # For fight phase, check if AI has eligible units in the appropriate pool
         if current_phase == "fight":
+            from engine.phase_handlers.fight_handlers import fight_v11_current_pool
             fight_subphase = self.game_state.get("fight_subphase")
-            # Check if AI has eligible units in the current fight subphase pool
+            # V11 : éligibilité dérivée de la machine de sélection (non-mutante).
             has_eligible_ai = False
-            pool_to_check = []
-            
-            if fight_subphase == "charging" and self.game_state.get("charging_activation_pool"):
-                pool_to_check = self.game_state["charging_activation_pool"]
-            elif fight_subphase in ["alternating_non_active", "cleanup_non_active"] and self.game_state.get("non_active_alternating_activation_pool"):
-                pool_to_check = list(self.game_state["non_active_alternating_activation_pool"])  # Make a copy to avoid reference issues
-            elif fight_subphase in ["alternating_active", "cleanup_active"] and self.game_state.get("active_alternating_activation_pool"):
-                pool_to_check = self.game_state["active_alternating_activation_pool"]
-            
+            pool_to_check = fight_v11_current_pool(self.game_state) if fight_subphase else []
+
             # Check if any unit in the pool is an AI unit (player 2)
             for unit_id in pool_to_check:
                 unit = self._get_unit_by_id(str(unit_id))
@@ -2687,6 +2676,8 @@ class W40KEngine(gym.Env):
         pool = self.game_state["valid_move_destinations_pool"]
         self.game_state["preview_hexes"] = pool
         unit = self._get_unit_by_id(sid)
+        if unit is None:
+            raise KeyError(f"Flee-preview unit {sid} missing from game_state['units']")
         return True, {
             "unit_activated": True,
             "unitId": unit["id"],

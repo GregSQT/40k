@@ -268,18 +268,15 @@ class TestFightPhaseStart:
         # fight_subphase doit être défini (non-None car des unités sont éligibles)
         assert gs.get("fight_subphase") is not None
 
-    def test_adjacent_enemy_in_alternating_pool(self):
-        """fight_start_adj_pool : unité joueur 1 adjacente à ennemi → dans un pool fight."""
+    def test_adjacent_enemy_eligible_in_fight_v11(self):
+        """fight_start_adj_pool (V11) : unité adjacente à un ennemi → actionnable (pool V11)."""
         # col=5 et col=6 → hexes adjacents → engagement zone 1
         units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]
         gs = _make_fight_state(units)
         fight_phase_start(gs)
-        all_pool_units = (
-            gs["charging_activation_pool"]
-            + gs["active_alternating_activation_pool"]
-            + gs["non_active_alternating_activation_pool"]
-        )
-        assert "1" in all_pool_units or "2" in all_pool_units
+        from engine.phase_handlers.fight_handlers import fight_v11_current_pool
+        pool = fight_v11_current_pool(gs)
+        assert "1" in pool or "2" in pool
 
     def test_units_cache_present(self):
         """fight_start_cache : units_cache présent après fight_phase_start."""

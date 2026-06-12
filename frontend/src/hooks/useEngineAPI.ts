@@ -3,7 +3,7 @@ import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAuthSession } from "../auth/authStorage";
 import type { GameMode, PlayerId, Unit } from "../types";
-import type { DiceValue } from "../types/game";
+import type { DiceValue, Weapon } from "../types/game";
 import {
   CROSS_ACTION_LOG_SUPPRESS_MS,
   dedupeActionLogBatch,
@@ -145,8 +145,8 @@ export interface APIGameState {
     }>;
     available_weapons?: Array<{
       index: number;
-      weapon: Record<string, unknown>;
-      can_use: boolean;
+      weapon: Weapon;
+      can_use?: boolean;
       reason?: string;
     }>;
     CC_WEAPONS: Array<{
@@ -182,6 +182,11 @@ export interface APIGameState {
     los_preview_cover_cells?: Array<{ col: number; row: number }>;
     los_preview_ratio_by_hex?: Record<string, number>;
     selected_target_id?: string;
+    // Règle 13.09 Hidden / battle-shock (exposé moteur)
+    hideable?: boolean;
+    hidden?: boolean;
+    hidden_models?: string[];
+    battle_shocked?: boolean;
     TOTAL_ATTACK_LOG?: string;
     UNIT_RULES: Array<{
       ruleId: string;
@@ -224,6 +229,8 @@ export interface APIGameState {
   active_alternating_activation_pool: string[];
   non_active_alternating_activation_pool: string[];
   fight_subphase: string | null;
+  // Unités actionnables dans la sous-phase fight courante (moteur : List[str]).
+  fight_eligible_units?: string[];
   units_cache?: Record<
     string,
     { col: number; row: number; HP_CUR: number; player: number; orientation?: number }
@@ -537,6 +544,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const chargeModelPoolRef = useRef<Set<string>>(new Set());
   /** Distance de mouvement (sous-hex) de la fig active vers chaque ancre de son pool "col,row" →
    * path réel au sol, distance directe en vol. Source du tooltip de charge par-figurine. */
+  // A SUPPRIMER : feature distance charge par-figurine jamais fonctionnelle (lecteur inatteignable, supprimé côté BoardPvp).
   const chargeModelDistancesRef = useRef<Map<string, number>>(new Map());
   /** Mask loops (polygone lissé monde) de la zone de landing de la fig active — même contrat que
    * ``squadMoveModelMaskLoopsRef`` pour le move per-fig. Rendu lissé au lieu de disques bruts. */
@@ -669,8 +677,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   // lui fait un battle-shock test au lieu de la sélectionner → l'unité est shockée AVANT son
   // activation, donc le Desperate Escape se déclenche dès l'activation (avant le move preview).
   const [battleShockTestMode, setBattleShockTestMode] = useState(false);
-  const battleShockTestModeRef = useRef(false);
-  battleShockTestModeRef.current = battleShockTestMode;
   const [postShootMoveDestinations, setPostShootMoveDestinations] = useState<
     Array<{ col: number; row: number }>
   >([]);
@@ -1048,7 +1054,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const weaponSelectedHandler = (e: Event) => {
       interface WeaponSelectedEventDetail {
         gameState: APIGameState;
-        availableWeapons?: Array<{ index: number; weapon: unknown; can_use?: boolean; canUse?: boolean; reason?: string }>;
+        availableWeapons?: Array<{
+          index: number;
+          weapon: Weapon;
+          can_use?: boolean;
+          canUse?: boolean;
+          reason?: string;
+        }>;
         weaponIndex?: number;
         validTargets?: Array<string | number>;
         coverByUnitId?: Record<string, boolean>;
@@ -1090,7 +1102,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setBlinkingUnits((prev) => {
           if (prev.blinkTimer) clearInterval(prev.blinkTimer);
           const timer = blinkIds.length ? window.setInterval(() => {}, 500) : null;
-          return { unitIds: blinkIds, blinkTimer: timer, attackerId: squadShootPlanRef.current?.unitId ?? null, coverByUnitId };
+          return {
+            unitIds: blinkIds,
+            blinkTimer: timer,
+            attackerId: squadShootPlanRef.current?.unitId ?? null,
+            coverByUnitId,
+          };
         });
       }
       if (newGameState) {
@@ -1575,10 +1592,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
           // Desperate Escape (09.07) : popup hazard à l'activation (engagée + battle-shocked).
           // Le move est suspendu côté backend ; le joueur confirme pour rouler le hazard.
-          if (
-            data.result?.action === "requires_hazard" &&
-            data.result?.requires_hazard === true
-          ) {
+          if (data.result?.action === "requires_hazard" && data.result?.requires_hazard === true) {
             const huid = data.result?.unitId ?? data.game_state?.active_movement_unit;
             if (huid != null) {
               const hp = { unitId: parseInt(String(huid), 10) };
@@ -1674,26 +1688,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }, 100);
           }
 
-          // CRITICAL: Handle empty fight phase pools - all 3 pools must be empty
+          // V11 : avancer la phase fight quand aucune unité n'est actionnable
+          // (fight_eligible_units vide ; le moteur gère les transitions de sous-phase).
           if (data.game_state?.phase === "fight") {
-            const chargingPool = Array.isArray(data.game_state.charging_activation_pool)
-              ? data.game_state.charging_activation_pool
-              : [];
-            const activePool = Array.isArray(data.game_state.active_alternating_activation_pool)
-              ? data.game_state.active_alternating_activation_pool
-              : [];
-            const nonActivePool = Array.isArray(
-              data.game_state.non_active_alternating_activation_pool
-            )
-              ? data.game_state.non_active_alternating_activation_pool
+            const fightPool = Array.isArray(data.game_state.fight_eligible_units)
+              ? data.game_state.fight_eligible_units
               : [];
 
-            const allPoolsEmpty =
-              chargingPool.length === 0 && activePool.length === 0 && nonActivePool.length === 0;
+            const allPoolsEmpty = fightPool.length === 0;
 
             const fightActivePending =
-              (data.game_state as { fight_consolidation_pending?: boolean }).fight_consolidation_pending === true ||
-              Boolean((data.game_state as { fight_pile_in_pending?: boolean }).fight_pile_in_pending);
+              (data.game_state as { fight_consolidation_pending?: boolean })
+                .fight_consolidation_pending === true ||
+              Boolean(
+                (data.game_state as { fight_pile_in_pending?: boolean }).fight_pile_in_pending
+              );
 
             if (allPoolsEmpty && !fightActivePending) {
               setTimeout(async () => {
@@ -1943,7 +1952,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           if (data.result?.available_weapons && Array.isArray(data.result.available_weapons)) {
             const activeUnitId = data.game_state.active_shooting_unit ?? data.result.unitId;
             if (activeUnitId == null) {
-              throw new Error("available_weapons: active_shooting_unit and result.unitId both absent");
+              throw new Error(
+                "available_weapons: active_shooting_unit and result.unitId both absent"
+              );
             }
             if (data.game_state.units) {
               const unitIndex = data.game_state.units.findIndex(
@@ -2246,7 +2257,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               const pd = data.result.preview_data as { violet_hexes?: unknown } | undefined;
               const raw = data.result.valid_destinations ?? pd?.violet_hexes;
               if (raw == null) {
-                throw new Error("charge_target_selected: valid_destinations and preview_data.violet_hexes both absent");
+                throw new Error(
+                  "charge_target_selected: valid_destinations and preview_data.violet_hexes both absent"
+                );
               }
               const anchorsNorm = normalizeChargeDestinationsFromApi(raw);
               const displayRaw = (data.result as { charge_preview_display_hexes?: unknown })
@@ -2257,7 +2270,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               syncChargePoolRefs(anchorsNorm, overlayNorm);
               // Map distance réelle par ancre (sous-hex) pour le tooltip de charge (path au sol / direct en vol).
               const distMap = new Map<string, number>();
-              const distRaw = (data.result as { charge_dest_distances?: unknown }).charge_dest_distances;
+              const distRaw = (data.result as { charge_dest_distances?: unknown })
+                .charge_dest_distances;
               if (Array.isArray(distRaw)) {
                 for (const e of distRaw) {
                   if (Array.isArray(e) && e.length >= 3) {
@@ -2499,11 +2513,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 return false;
               }
               const waitUid = parseInt(
-                String((() => {
-                  const uid = data.result.unitId ?? data.game_state.active_fight_unit;
-                  if (uid == null) throw new Error("fight wait: unitId and active_fight_unit both absent");
-                  return uid;
-                })()),
+                String(
+                  (() => {
+                    const uid = data.result.unitId ?? data.game_state.active_fight_unit;
+                    if (uid == null)
+                      throw new Error("fight wait: unitId and active_fight_unit both absent");
+                    return uid;
+                  })()
+                ),
                 10
               );
               if (!Number.isFinite(waitUid)) {
@@ -3123,14 +3140,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           clearFightAttackActivationUi();
           return;
         }
-        if (clickType === "left") {
-          const aid = parseInt(activeFightStr, 10);
-          const al = getFightAttackerAttackLeft(gsNow, aid);
-          if (typeof al === "number" && al <= 0) {
-            clearFightAttackActivationUi();
-            return;
-          }
-        }
         const gsForPayload = {
           ...gsNow,
           active_fight_unit: activeFightStr,
@@ -3158,19 +3167,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (manualAllocationRef.current && unitId !== null) return;
       const numericUnitId = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
 
-      // TEST/DEBUG : mode battle-shock test actif → tout clic sur une unité lui fait un
-      // battle-shock test (au lieu de la sélectionner). Permet de shocker AVANT activation.
-      if (battleShockTestModeRef.current && numericUnitId !== null) {
-        await executeAction({ action: "force_battle_shock", unitId: String(numericUnitId) });
-        return;
-      }
-
       // Block unit selection when in advancePreview, chargeTargetSelect or chargePreview mode
       // (but allow deselection with null)
       if (
-        (mode === "advancePreview" ||
-          mode === "chargeTargetSelect" ||
-          mode === "chargePreview") &&
+        (mode === "advancePreview" || mode === "chargeTargetSelect" || mode === "chargePreview") &&
         numericUnitId !== null
       ) {
         return;
@@ -3512,7 +3512,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setPendingPreviewAction("move");
       setMode("movePreview");
     },
-    [gameState?.phase, pendingPreviewAction, readEngineOrientationStepFromGameState, ensureActivatedNoHazard]
+    [
+      gameState?.phase,
+      pendingPreviewAction,
+      readEngineOrientationStepFromGameState,
+      ensureActivatedNoHazard,
+    ]
   );
 
   const handleBumpMovePreviewOrientation = useCallback(
@@ -3629,7 +3634,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (!(await ensureActivatedNoHazard(uid))) return;
       const models = readSquadModelPositions(uid);
       if (Object.keys(models).length === 0) {
-        console.warn(`[SQUAD-MOVE] startSquadModelMove ABORT unit=${uid} (aucune fig dans occupied_hexes_by_model)`);
+        console.warn(
+          `[SQUAD-MOVE] startSquadModelMove ABORT unit=${uid} (aucune fig dans occupied_hexes_by_model)`
+        );
         return;
       }
       squadMoveSessionRef.current += 1;
@@ -3693,7 +3700,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
       squadMoveModelPoolRef.current = set;
       const rawLoops = result?.footprint_mask_loops;
-      squadMoveModelMaskLoopsRef.current = Array.isArray(rawLoops) ? (rawLoops as number[][]) : null;
+      squadMoveModelMaskLoopsRef.current = Array.isArray(rawLoops)
+        ? (rawLoops as number[][])
+        : null;
       setSquadMovePlan((prev) => (prev ? { ...prev, activeModelId: modelId } : prev));
     },
     [postEngineQuery]
@@ -3910,9 +3919,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
         coverByUnitId[tid] = inCover;
       }
-      const validTargets = (result.valid_targets as string[]).map((id) =>
-        parseInt(id, 10)
-      );
+      const validTargets = (result.valid_targets as string[]).map((id) => parseInt(id, 10));
       setBlinkingUnits((prev) => {
         if (prev.blinkTimer) clearInterval(prev.blinkTimer);
         const timer = validTargets.length ? window.setInterval(() => {}, 500) : null;
@@ -3988,7 +3995,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           losOverviewUnitId: unitId,
         };
       });
-      console.log(`[SQUAD-SHOOT] los_overview unit=${unitId} targets=[${validTargets.join(",")}] alive=${aliveRaw}`);
+      console.log(
+        `[SQUAD-SHOOT] los_overview unit=${unitId} targets=[${validTargets.join(",")}] alive=${aliveRaw}`
+      );
     },
     [postEngineQuery]
   );
@@ -4004,7 +4013,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         // No silent fallback: every eligible unit must expose its models (occupied_hexes_by_model).
         // If this ever fires, it is a state-sync bug to surface loudly, not to swallow.
         squadShootActivatingRef.current = false;
-        setError(`Squad shoot: aucune figurine pour l'unité ${uid} (occupied_hexes_by_model manquant dans units_cache)`);
+        setError(
+          `Squad shoot: aucune figurine pour l'unité ${uid} (occupied_hexes_by_model manquant dans units_cache)`
+        );
         return;
       }
       try {
@@ -4070,7 +4081,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return;
       }
       const decls = (result.result?.declarations ?? []) as Array<{
-        model_id: string; weapon_index: number; target_unit_id: string;
+        model_id: string;
+        weapon_index: number;
+        target_unit_id: string;
       }>;
       // Fig assignée → vide le blink et déselectionne.
       setBlinkingUnits((prev) => {
@@ -4095,7 +4108,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (isMono) {
         await selectShootModelForUnit(plan.unitId, modelId);
       }
-      console.log(`[SQUAD-SHOOT] assign model=${modelId} → target=${targetUnitId} (${decls.length} intents)`);
+      console.log(
+        `[SQUAD-SHOOT] assign model=${modelId} → target=${targetUnitId} (${decls.length} intents)`
+      );
     },
     [executeAction, selectShootModelForUnit]
   );
@@ -4117,7 +4132,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           targetId: String(targetUnitId),
         });
       } catch (e) {
-        console.error(`[SQUAD-SHOOT][weapon] assign weapon=${weaponIndex} target=${targetUnitId} FAILED`, e);
+        console.error(
+          `[SQUAD-SHOOT][weapon] assign weapon=${weaponIndex} target=${targetUnitId} FAILED`,
+          e
+        );
         setError(`Cible refusée: ${formatApiConnectionError(e)}`);
         return;
       }
@@ -4126,7 +4144,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return;
       }
       const decls = (result.result?.declarations ?? []) as Array<{
-        model_id: string; weapon_index: number; target_unit_id: string;
+        model_id: string;
+        weapon_index: number;
+        target_unit_id: string;
       }>;
       setBlinkingUnits((prev) => {
         if (prev.blinkTimer) clearInterval(prev.blinkTimer);
@@ -4143,7 +4163,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
           : prev
       );
-      console.log(`[SQUAD-SHOOT][weapon] terminé weapon=${weaponIndex} → ${targetUnitId} (${decls.length} intents)`);
+      console.log(
+        `[SQUAD-SHOOT][weapon] terminé weapon=${weaponIndex} → ${targetUnitId} (${decls.length} intents)`
+      );
     },
     [executeAction]
   );
@@ -4166,7 +4188,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
       if (!result || result.success === false) return;
       const decls = (result.result?.declarations ?? []) as Array<{
-        model_id: string; weapon_index: number; target_unit_id: string;
+        model_id: string;
+        weapon_index: number;
+        target_unit_id: string;
       }>;
       setSquadShootPlan((prev) =>
         prev
@@ -4231,29 +4255,32 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   }, [executeAction]);
 
   /** Allocation manuelle des pertes : le défenseur a cliqué la figurine qui encaisse. */
-  const handleAllocateModel = useCallback(async (modelId: string) => {
-    const alloc = manualAllocationRef.current;
-    if (!alloc) return;
-    try {
-      if (alloc.kind === "hazard") {
-        // Desperate Escape (06.02) : clic figurine pour attribuer une mortal wound du hazard.
+  const handleAllocateModel = useCallback(
+    async (modelId: string) => {
+      const alloc = manualAllocationRef.current;
+      if (!alloc) return;
+      try {
+        if (alloc.kind === "hazard") {
+          // Desperate Escape (06.02) : clic figurine pour attribuer une mortal wound du hazard.
+          await executeAction({
+            action: "squad_hazard_allocate_model",
+            unitId: String(alloc.target_unit_id),
+            modelId: String(modelId),
+          });
+          return;
+        }
         await executeAction({
-          action: "squad_hazard_allocate_model",
-          unitId: String(alloc.target_unit_id),
+          action: "squad_shoot_allocate_model",
+          unitId: String(alloc.attacker_unit_id),
           modelId: String(modelId),
         });
-        return;
+      } catch (e) {
+        console.error("[MANUAL-ALLOC] allocate FAILED", e);
+        setError(`Allocation failed: ${formatApiConnectionError(e)}`);
       }
-      await executeAction({
-        action: "squad_shoot_allocate_model",
-        unitId: String(alloc.attacker_unit_id),
-        modelId: String(modelId),
-      });
-    } catch (e) {
-      console.error("[MANUAL-ALLOC] allocate FAILED", e);
-      setError(`Allocation failed: ${formatApiConnectionError(e)}`);
-    }
-  }, [executeAction]);
+    },
+    [executeAction]
+  );
 
   /** Desperate Escape : le joueur confirme le popup hazard → roule le hazard avant de bouger. */
   const handleConfirmHazardWarning = useCallback(async () => {
@@ -4277,20 +4304,23 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   }, []);
 
   /** Allocation manuelle : le défenseur a déclaré l'ordre des groupes (cible hétérogène). */
-  const handleDeclareOrder = useCallback(async (order: number[]) => {
-    const req = manualOrderRequestRef.current;
-    if (!req) return;
-    try {
-      await executeAction({
-        action: "squad_shoot_declare_order",
-        unitId: String(req.attacker_unit_id),
-        order,
-      });
-    } catch (e) {
-      console.error("[MANUAL-ALLOC] declare_order FAILED", e);
-      setError(`Declare order failed: ${formatApiConnectionError(e)}`);
-    }
-  }, [executeAction]);
+  const handleDeclareOrder = useCallback(
+    async (order: number[]) => {
+      const req = manualOrderRequestRef.current;
+      if (!req) return;
+      try {
+        await executeAction({
+          action: "squad_shoot_declare_order",
+          unitId: String(req.attacker_unit_id),
+          order,
+        });
+      } catch (e) {
+        console.error("[MANUAL-ALLOC] declare_order FAILED", e);
+        setError(`Declare order failed: ${formatApiConnectionError(e)}`);
+      }
+    },
+    [executeAction]
+  );
 
   const shouldShowRetreatAlert = useCallback((): boolean => {
     return readRequiredBooleanSetting(RETREAT_ALERT_STORAGE_KEY, true);
@@ -4443,10 +4473,20 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           const uid = movePreview.unitId;
           const unitEntry = (
             latestGameStateRef.current?.units_cache as
-              | Record<string, { col?: number; row?: number; occupied_hexes_by_model?: Record<string, [number, number]> }>
+              | Record<
+                  string,
+                  {
+                    col?: number;
+                    row?: number;
+                    occupied_hexes_by_model?: Record<string, [number, number]>;
+                  }
+                >
               | undefined
           )?.[String(uid)];
-          const anchorCube = offsetToCube(unitEntry?.col ?? movePreview.destCol, unitEntry?.row ?? movePreview.destRow);
+          const anchorCube = offsetToCube(
+            unitEntry?.col ?? movePreview.destCol,
+            unitEntry?.row ?? movePreview.destRow
+          );
           const destCube = offsetToCube(movePreview.destCol, movePreview.destRow);
           const dx = destCube.x - anchorCube.x;
           const dy = destCube.y - anchorCube.y;
@@ -4887,8 +4927,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   // en sélection de destination (mode chargePreview).
   const handleValidateCharge = useCallback(
     async (chargerId: number | string) => {
-      const numericChargerId =
-        typeof chargerId === "string" ? parseInt(chargerId, 10) : chargerId;
+      const numericChargerId = typeof chargerId === "string" ? parseInt(chargerId, 10) : chargerId;
       if (chargePreviewTargetIds.length === 0) {
         return; // aucune cible déclarée : le bouton ne doit pas être actif
       }
@@ -4994,6 +5033,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               ? prev.activeModelId
               : null;
         const pool = new Set<string>();
+        // A SUPPRIMER : distMap alimente chargeModelDistancesRef (feature charge par-fig morte).
         const distMap = new Map<string, number>();
         if (active != null && active === selectedModel) {
           for (const [c, r] of poolArr) pool.add(`${Number(c)},${Number(r)}`);
@@ -5089,7 +5129,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     async (unitId: number) => {
       const models = readSquadModelPositions(unitId);
       if (Object.keys(models).length === 0) {
-        throw new Error(`charge model move: aucune fig pour l'unité ${unitId} (occupied_hexes_by_model)`);
+        throw new Error(
+          `charge model move: aucune fig pour l'unité ${unitId} (occupied_hexes_by_model)`
+        );
       }
       chargeModelPoolRef.current = new Set();
       chargeModelMaskLoopsRef.current = null;
@@ -5344,53 +5386,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         .filter((id) => !Number.isNaN(id));
       return eligible;
     } else if (gameState.phase === "fight") {
-      // Fight phase has sub-phases - only show units from current sub-phase
-      const subphase = gameState.fight_subphase;
-
-      if (subphase === "charging") {
-        // Sub-Phase 1: Only charging units (current player's charged units)
-        if (!gameState.charging_activation_pool) {
-          return [];
-        }
-        return gameState.charging_activation_pool
-          .map((id) => parseInt(id, 10))
-          .filter((id) => !Number.isNaN(id));
-      } else if (subphase === "alternating_non_active") {
-        // Sub-Phase 2: Non-active player's turn in alternating
-        if (!gameState.non_active_alternating_activation_pool) {
-          return [];
-        }
-        return gameState.non_active_alternating_activation_pool
-          .map((id) => parseInt(id, 10))
-          .filter((id) => !Number.isNaN(id));
-      } else if (subphase === "alternating_active") {
-        // Sub-Phase 2: Active player's turn in alternating
-        if (!gameState.active_alternating_activation_pool) {
-          return [];
-        }
-        return gameState.active_alternating_activation_pool
-          .map((id) => parseInt(id, 10))
-          .filter((id) => !Number.isNaN(id));
-      } else if (subphase === "cleanup_non_active") {
-        // Sub-Phase 3: Cleanup - only non-active pool has units left
-        if (!gameState.non_active_alternating_activation_pool) {
-          return [];
-        }
-        return gameState.non_active_alternating_activation_pool
-          .map((id) => parseInt(id, 10))
-          .filter((id) => !Number.isNaN(id));
-      } else if (subphase === "cleanup_active") {
-        // Sub-Phase 3: Cleanup - only active pool has units left
-        if (!gameState.active_alternating_activation_pool) {
-          return [];
-        }
-        return gameState.active_alternating_activation_pool
-          .map((id) => parseInt(id, 10))
-          .filter((id) => !Number.isNaN(id));
+      // V11 : pool actionnable unique exposé par le moteur (pile_in/fight/consolidate).
+      const pool = gameState.fight_eligible_units;
+      if (!pool) {
+        return [];
       }
-
-      // No subphase set or unknown subphase - return empty (phase not ready)
-      return [];
+      return pool.map((id) => parseInt(String(id), 10)).filter((id) => !Number.isNaN(id));
     }
 
     throw new Error(`API ERROR: Unsupported phase for eligible units: ${gameState.phase}`);
@@ -5568,16 +5569,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       shoot_activation_pool: gameState.shoot_activation_pool,
       charge_activation_pool: gameState.charge_activation_pool,
       fight_subphase: gameState.fight_subphase as
-        | "charging"
-        | "alternating_non_active"
-        | "alternating_active"
-        | "cleanup_non_active"
-        | "cleanup_active"
+        | "pile_in"
+        | "fight"
+        | "consolidate"
         | null
         | undefined,
-      charging_activation_pool: gameState.charging_activation_pool,
-      active_alternating_activation_pool: gameState.active_alternating_activation_pool,
-      non_active_alternating_activation_pool: gameState.non_active_alternating_activation_pool,
+      fight_eligible_units: gameState.fight_eligible_units,
       active_movement_unit: gameState.active_movement_unit,
       /** Requis pour sync moveDestPoolRef / cercles d’ancre (sinon seul move_preview_footprint_zone → « hex géant »). */
       valid_move_destinations_pool: gameState.valid_move_destinations_pool,
@@ -5670,7 +5667,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onCancelSquadMove: () => {},
       chargeMovePlan: null,
       chargeModelPoolRef,
-      chargeModelDistancesRef,
+      chargeModelDistancesRef, // A SUPPRIMER (feature charge par-fig morte)
       chargeModelMaskLoopsRef,
       onSelectChargeModel: () => {},
       onMoveModelInChargePlan: () => {},
@@ -5751,6 +5748,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       battleShockTestMode: false,
       onToggleBattleShockTestMode: () => {},
       availableCellsOverride: undefined,
+      chargePreviewTargetIds: [],
       ...blinkBoardPropsIdle,
       ruleChoicePrompt: null,
       onSelectRuleChoice: async (_prompt: RuleChoicePrompt, _selectedDisplayRuleId: string) => {},
@@ -5798,13 +5796,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     unitsTookToSkiesCharge: memoizedUnitsTookToSkiesCharge,
     phase: gameState.phase as "deployment" | "move" | "shoot" | "charge" | "fight",
     // Expose fight_subphase for UnitRenderer click handling
-    fightSubPhase: gameState.fight_subphase as
-      | "charging"
-      | "alternating_non_active"
-      | "alternating_active"
-      | "cleanup_non_active"
-      | "cleanup_active"
-      | null,
+    fightSubPhase: gameState.fight_subphase as "pile_in" | "fight" | "consolidate" | null,
     gameState: memoizedGameState,
     onSelectUnit: handleSelectUnit,
     onSkipUnit: handleSkipUnit,
@@ -5826,7 +5818,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     // Charge par-figurine (V11 11.04, Slice G)
     chargeMovePlan,
     chargeModelPoolRef,
-    chargeModelDistancesRef,
+    chargeModelDistancesRef, // A SUPPRIMER (feature charge par-fig morte)
     chargeModelMaskLoopsRef,
     onSelectChargeModel: handleSelectChargeModel,
     onMoveModelInChargePlan: handleMoveModelInChargePlan,
@@ -6011,34 +6003,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           isAiUnitId(unitId)
         ).length;
       } else if (phaseCheck === "fight") {
-        // Fight phase has 3 sub-phases with different pools
-        const fightSubphase = gameState.fight_subphase;
-
-        let fightPool: string[] = [];
-        if (fightSubphase === "charging" && gameState.charging_activation_pool) {
-          fightPool = gameState.charging_activation_pool;
-        } else if (
-          fightSubphase === "alternating_active" &&
-          gameState.active_alternating_activation_pool
-        ) {
-          fightPool = gameState.active_alternating_activation_pool;
-        } else if (
-          fightSubphase === "alternating_non_active" &&
-          gameState.non_active_alternating_activation_pool
-        ) {
-          fightPool = gameState.non_active_alternating_activation_pool;
-        } else if (
-          fightSubphase === "cleanup_active" &&
-          gameState.active_alternating_activation_pool
-        ) {
-          fightPool = gameState.active_alternating_activation_pool;
-        } else if (
-          fightSubphase === "cleanup_non_active" &&
-          gameState.non_active_alternating_activation_pool
-        ) {
-          fightPool = gameState.non_active_alternating_activation_pool;
-        }
-
+        // V11 : pool actionnable unique exposé par le moteur (pile_in/fight/consolidate).
+        const fightPool: string[] = (gameState.fight_eligible_units ?? []).map((id) => String(id));
         eligibleAICount = fightPool.filter((unitId) => isAiUnitId(unitId)).length;
       }
 
@@ -6059,7 +6025,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           const deployer = deploymentState.current_deployer;
           const pool = deploymentState.deployable_units?.[String(deployer)];
           if (!pool) {
-            throw new Error(`deployment: deployable_units missing for deployer ${String(deployer)}`);
+            throw new Error(
+              `deployment: deployable_units missing for deployer ${String(deployer)}`
+            );
           }
           aiEligibleUnits = getPlayerType(deployer) === "ai" ? pool.length : 0;
         }
@@ -6075,33 +6043,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           isAiUnitId(unitId)
         ).length;
       } else if (currentPhase === "fight") {
-        // Same fight pool logic as above
-        const fightSubphase = gameState.fight_subphase;
-        let fightPool: string[] = [];
-        if (fightSubphase === "charging" && gameState.charging_activation_pool) {
-          fightPool = gameState.charging_activation_pool;
-        } else if (
-          fightSubphase === "alternating_active" &&
-          gameState.active_alternating_activation_pool
-        ) {
-          fightPool = gameState.active_alternating_activation_pool;
-        } else if (
-          fightSubphase === "alternating_non_active" &&
-          gameState.non_active_alternating_activation_pool
-        ) {
-          fightPool = gameState.non_active_alternating_activation_pool;
-        } else if (
-          fightSubphase === "cleanup_active" &&
-          gameState.active_alternating_activation_pool
-        ) {
-          fightPool = gameState.active_alternating_activation_pool;
-        } else if (
-          fightSubphase === "cleanup_non_active" &&
-          gameState.non_active_alternating_activation_pool
-        ) {
-          fightPool = gameState.non_active_alternating_activation_pool;
-        }
-
+        // V11 : pool actionnable unique exposé par le moteur (pile_in/fight/consolidate).
+        const fightPool: string[] = (gameState.fight_eligible_units ?? []).map((id) => String(id));
         aiEligibleUnits = fightPool.filter((unitId) => isAiUnitId(unitId)).length;
       }
 
@@ -6331,25 +6274,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               if (!fightSubphase) {
                 throw new Error("Missing fight_subphase in gameState during AI turn check");
               }
-              let pool: Array<string | number> | undefined;
-              if (fightSubphase === "charging") {
-                pool = gameState.charging_activation_pool;
-              } else if (
-                fightSubphase === "alternating_non_active" ||
-                fightSubphase === "cleanup_non_active"
-              ) {
-                pool = gameState.non_active_alternating_activation_pool;
-              } else if (
-                fightSubphase === "alternating_active" ||
-                fightSubphase === "cleanup_active"
-              ) {
-                pool = gameState.active_alternating_activation_pool;
-              } else {
-                throw new Error(`Unknown fight_subphase during AI turn check: ${fightSubphase}`);
-              }
-              if (!pool) {
-                throw new Error(`Missing fight activation pool for subphase: ${fightSubphase}`);
-              }
+              // V11 : pool actionnable unique exposé par le moteur.
+              const pool: string[] = gameState.fight_eligible_units ?? [];
               return pool.some((id) => isAiUnitId(id));
             }
             return getPlayerType(gameState.current_player) === "ai";

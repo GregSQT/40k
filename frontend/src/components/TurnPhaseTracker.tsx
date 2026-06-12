@@ -9,7 +9,6 @@ import {
   TUTORIAL_STEP_TITLE_PHASES,
   TUTORIAL_STEP_TITLE_ROUNDS,
   TUTORIAL_STEP_TITLE_TURNS,
-  useTutorial,
 } from "../contexts/TutorialContext";
 import TooltipWrapper from "./TooltipWrapper";
 
@@ -78,8 +77,6 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
   const phasesContentRef = useRef<HTMLDivElement>(null);
   const movePhaseButtonRef = useRef<HTMLButtonElement | null>(null);
   const shootPhaseButtonRef = useRef<HTMLButtonElement | null>(null);
-  const tutorial = useTutorial();
-  const _spotlightLayoutTick = tutorial?.spotlightLayoutTick ?? 0;
 
   useLayoutEffect(() => {
     if (!onTutorialRects || !tutorialStepTitle) {
@@ -262,17 +259,37 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
   const getPhaseBaseColor = (phase: string): { bg: string; text: string; border: string } => {
     switch (phase.toLowerCase()) {
       case "command":
-        return { bg: "var(--phase-command-bg)", text: "#FFFFFF", border: "var(--phase-command-border)" };
+        return {
+          bg: "var(--phase-command-bg)",
+          text: "#FFFFFF",
+          border: "var(--phase-command-border)",
+        };
       case "move":
         return { bg: "var(--phase-move-bg)", text: "#FFFFFF", border: "var(--phase-move-border)" };
       case "shoot":
-        return { bg: "var(--phase-shoot-bg)", text: "#FFFFFF", border: "var(--phase-shoot-border)" };
+        return {
+          bg: "var(--phase-shoot-bg)",
+          text: "#FFFFFF",
+          border: "var(--phase-shoot-border)",
+        };
       case "charge":
-        return { bg: "var(--phase-charge-bg)", text: "#FFFFFF", border: "var(--phase-charge-border)" };
+        return {
+          bg: "var(--phase-charge-bg)",
+          text: "#FFFFFF",
+          border: "var(--phase-charge-border)",
+        };
       case "fight":
-        return { bg: "var(--phase-fight-bg)", text: "#FFFFFF", border: "var(--phase-fight-border)" };
+        return {
+          bg: "var(--phase-fight-bg)",
+          text: "#FFFFFF",
+          border: "var(--phase-fight-border)",
+        };
       default:
-        return { bg: "var(--phase-default-bg)", text: "#FFFFFF", border: "var(--phase-default-border)" };
+        return {
+          bg: "var(--phase-default-bg)",
+          text: "#FFFFFF",
+          border: "var(--phase-default-border)",
+        };
     }
   };
 

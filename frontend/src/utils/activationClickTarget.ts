@@ -14,31 +14,19 @@ export interface ActivationPointerGameState {
   active_fight_unit?: string | null;
   shoot_activation_pool?: string[];
   fight_subphase?: string | null;
-  charging_activation_pool?: string[];
-  active_alternating_activation_pool?: string[];
-  non_active_alternating_activation_pool?: string[];
+  // V11 : unités actionnables dans la sous-phase fight courante (pile_in/fight/consolidate),
+  // exposées par le moteur (fight_handlers._fight_v11_manual_state).
+  fight_eligible_units?: Array<string | number>;
 }
 
-/** Pool d’activation CC courant (même logique que ``getEligibleUnitIds`` / phase fight). */
+/** Pool d’activation CC courant V11 (pile_in / fight / consolidate). */
 export function getFightActivationPoolUnitIds(gs: ActivationPointerGameState): number[] {
   if (gs.phase !== "fight") {
     return [];
   }
-  const subphase = gs.fight_subphase;
-  const parsePool = (pool: string[] | undefined): number[] => {
-    if (!pool?.length) return [];
-    return pool.map((id) => parseInt(id, 10)).filter((id) => !Number.isNaN(id));
-  };
-  if (subphase === "charging") {
-    return parsePool(gs.charging_activation_pool);
-  }
-  if (subphase === "alternating_non_active" || subphase === "cleanup_non_active") {
-    return parsePool(gs.non_active_alternating_activation_pool);
-  }
-  if (subphase === "alternating_active" || subphase === "cleanup_active") {
-    return parsePool(gs.active_alternating_activation_pool);
-  }
-  return [];
+  const pool = gs.fight_eligible_units;
+  if (!pool?.length) return [];
+  return pool.map((id) => parseInt(String(id), 10)).filter((id) => !Number.isNaN(id));
 }
 
 /**

@@ -243,25 +243,11 @@ class ObservationBuilder:
         elif current_phase == "charge":
             pool = require_key(game_state, "charge_activation_pool")
         elif current_phase == "fight":
-            fight_subphase = require_key(game_state, "fight_subphase")
-            if fight_subphase == "charging":
-                pool = require_key(game_state, "charging_activation_pool")
-            elif fight_subphase in ("alternating_active", "cleanup_active"):
-                pool = require_key(game_state, "active_alternating_activation_pool")
-            elif fight_subphase in ("alternating_non_active", "cleanup_non_active"):
-                pool = require_key(game_state, "non_active_alternating_activation_pool")
-            elif fight_subphase is None:
-                charging_pool = require_key(game_state, "charging_activation_pool")
-                active_pool = require_key(game_state, "active_alternating_activation_pool")
-                non_active_pool = require_key(game_state, "non_active_alternating_activation_pool")
-                if charging_pool or active_pool or non_active_pool:
-                    raise ValueError(
-                        "fight_subphase is None but fight pools are not empty: "
-                        f"charging={len(charging_pool)} active={len(active_pool)} non_active={len(non_active_pool)}"
-                    )
+            # V11 : éligibilité dérivée de la machine de sélection (non-mutante).
+            from engine.phase_handlers.fight_handlers import fight_v11_current_pool
+            if game_state.get("fight_subphase") is None:
                 return set()
-            else:
-                raise KeyError(f"Unknown fight_subphase for macro eligibility: {fight_subphase}")
+            pool = fight_v11_current_pool(game_state)
         elif current_phase == "deployment":
             deployment_state = require_key(game_state, "deployment_state")
             current_deployer = int(require_key(deployment_state, "current_deployer"))
@@ -1867,17 +1853,10 @@ class ObservationBuilder:
         elif current_phase == "charge":
             pool = require_key(game_state, "charge_activation_pool")
         elif current_phase == "fight":
-            fight_subphase = require_key(game_state, "fight_subphase")
-            if fight_subphase == "charging":
-                pool = require_key(game_state, "charging_activation_pool")
-            elif fight_subphase in ("alternating_active", "cleanup_active"):
-                pool = require_key(game_state, "active_alternating_activation_pool")
-            elif fight_subphase in ("alternating_non_active", "cleanup_non_active"):
-                pool = require_key(game_state, "non_active_alternating_activation_pool")
-            elif fight_subphase is None:
+            from engine.phase_handlers.fight_handlers import fight_v11_current_pool
+            if game_state.get("fight_subphase") is None:
                 raise ValueError("fight_subphase is None while phase is fight")
-            else:
-                raise KeyError(f"Unknown fight_subphase: {fight_subphase}")
+            pool = fight_v11_current_pool(game_state)
         elif current_phase == "command":
             # Return first alive unit of current player as reference for zone intent observation.
             # Zone intents are global (not per-unit), but the obs builder needs a unit to encode

@@ -690,7 +690,7 @@ export function TutorialProvider({
         ((phase === "move" && !releasedSteps.has("2-11")) ||
           (phase === "shoot" && !releasedSteps.has("2-12")) ||
           (phase === "charge" && !releasedSteps.has("2-13")) ||
-          (phase === "fight" && fightSubphase === "charging" && !releasedSteps.has("2-14"))));
+          (phase === "fight" && fightSubphase === "pile_in" && !releasedSteps.has("2-14"))));
   if (tutorialPauseAiSyncRef) {
     tutorialPauseAiSyncRef.current = shouldPauseAI;
   }

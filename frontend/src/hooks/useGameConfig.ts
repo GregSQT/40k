@@ -207,7 +207,8 @@ export const useGameConfig = (_boardConfigName: string = "default"): ExtendedGam
         const isTestMode = mode === "pvp_test" || mode === "pve_test";
         const DEFAULT_TEST_BOARD = "x5";
         const boardParam = isTestMode ? (urlParams.get("board") ?? DEFAULT_TEST_BOARD) : null;
-        const scenarioName = mode === "pve_test" ? "scenario_pve_test.json" : "scenario_pvp_test.json";
+        const scenarioName =
+          mode === "pve_test" ? "scenario_pve_test.json" : "scenario_pvp_test.json";
         const boardDirMap: Record<string, string> = {
           x1: "board/25x21",
           x5: "board/180x156",

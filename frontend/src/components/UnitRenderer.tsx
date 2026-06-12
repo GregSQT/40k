@@ -48,7 +48,7 @@ export interface ModelVisualMeta {
   DISPLAY_NAME?: string;
   ICON?: string;
   ICON_SCALE?: number;
-  BASE_SHAPE?: string;
+  BASE_SHAPE?: "round" | "oval" | "square";
   BASE_SIZE?: number | [number, number];
 }
 
@@ -493,7 +493,6 @@ export class UnitRenderer {
     const originalCenterX = this.props.centerX;
     const originalCenterY = this.props.centerY;
 
-
     // Escouade hétérogène : chaque figurine peut avoir son propre profil visuel
     // (icône, échelle, base). On substitue temporairement this.props.unit par un
     // "unit virtuel" pour que TOUTES les fonctions de rendu (cercle, icône, rayon
@@ -835,11 +834,9 @@ export class UnitRenderer {
       // Lines 738, 765, 820, 847: "player activate one unit by left clicking on it"
       const isFightPhaseActive =
         phase === "fight" &&
-        (this.props.fightSubPhase === "charging" ||
-          this.props.fightSubPhase === "alternating_non_active" ||
-          this.props.fightSubPhase === "alternating_active" ||
-          this.props.fightSubPhase === "cleanup_non_active" ||
-          this.props.fightSubPhase === "cleanup_active");
+        (this.props.fightSubPhase === "pile_in" ||
+          this.props.fightSubPhase === "fight" ||
+          this.props.fightSubPhase === "consolidate");
 
       // Block enemy clicks when no unit is selected (prevents stuck preview)
       // EXCEPT during fight phase where eligible units must be clickable
@@ -973,11 +970,9 @@ export class UnitRenderer {
             fightSubPhase: this.props.fightSubPhase,
             isFightPhaseActive:
               phase === "fight" &&
-              (this.props.fightSubPhase === "charging" ||
-                this.props.fightSubPhase === "alternating_non_active" ||
-                this.props.fightSubPhase === "alternating_active" ||
-                this.props.fightSubPhase === "cleanup_non_active" ||
-                this.props.fightSubPhase === "cleanup_active"),
+              (this.props.fightSubPhase === "pile_in" ||
+                this.props.fightSubPhase === "fight" ||
+                this.props.fightSubPhase === "consolidate"),
           });
         }
       }
@@ -1298,10 +1293,11 @@ export class UnitRenderer {
     eligibleOutline.zIndex = greenCircleZIndex;
     this.target.addChild(eligibleOutline);
 
-    // NEW: Add red circle around green circle for charged units in fight phase
+    // Anneau rouge pour les unités ayant chargé (Fights First V11) — visible pendant
+    // les sous-phases pile_in et fight.
     if (
       phase === "fight" &&
-      fightSubPhase === "charging" &&
+      (fightSubPhase === "pile_in" || fightSubPhase === "fight") &&
       unit.hasChargedThisTurn &&
       isEligible
     ) {
@@ -2075,8 +2071,13 @@ export class UnitRenderer {
     iconSprite.anchor.set(0.5);
     iconSprite.position.set(positionX, positionY);
     const bc = this.props.boardConfig;
-    const itsRawAdv = bc && typeof bc === "object" && "inches_to_subhex" in bc && typeof (bc as { inches_to_subhex?: unknown }).inches_to_subhex === "number"
-      ? (bc as { inches_to_subhex: number }).inches_to_subhex : 10;
+    const itsRawAdv =
+      bc &&
+      typeof bc === "object" &&
+      "inches_to_subhex" in bc &&
+      typeof (bc as { inches_to_subhex?: unknown }).inches_to_subhex === "number"
+        ? (bc as { inches_to_subhex: number }).inches_to_subhex
+        : 10;
     const iconScaleRatioAdv = itsRawAdv / 10;
     const iconDisplaySize = HEX_RADIUS * iconScaleRatioAdv * iconSize * iconScale * iconBoost;
     iconSprite.width = iconDisplaySize;
@@ -2168,8 +2169,13 @@ export class UnitRenderer {
     /* Si la variable existe sur :root (App.css), la valeur CSS prime — le 2e argument n'est pas utilisé. */
     const iconBoost = this.getCSSNumber("--shooting-overlay-action-icon-boost", 1.45);
     const bc = this.props.boardConfig;
-    const itsRawWpn = bc && typeof bc === "object" && "inches_to_subhex" in bc && typeof (bc as { inches_to_subhex?: unknown }).inches_to_subhex === "number"
-      ? (bc as { inches_to_subhex: number }).inches_to_subhex : 10;
+    const itsRawWpn =
+      bc &&
+      typeof bc === "object" &&
+      "inches_to_subhex" in bc &&
+      typeof (bc as { inches_to_subhex?: unknown }).inches_to_subhex === "number"
+        ? (bc as { inches_to_subhex: number }).inches_to_subhex
+        : 10;
     const iconScaleRatioWpn = itsRawWpn / 10;
     const iconDisplaySize = HEX_RADIUS * iconScaleRatioWpn * iconSize * iconScale * iconBoost;
     const spacing = iconDisplaySize * 1.2; // Spacing between icons
@@ -2209,13 +2215,11 @@ export class UnitRenderer {
       centerX,
       centerY,
       phase,
-      current_player,
       HEX_RADIUS,
       unitsFled,
       units,
       mode,
       selectedUnitId,
-      fightSubPhase,
       isEligible,
     } = this.props;
 
@@ -2232,19 +2236,9 @@ export class UnitRenderer {
       // Not actively attacking - check if eligible in current subphase pool
       let shouldShowIfEligible = false;
 
-      // In replay mode (no fightSubPhase), allow counter for any eligible unit
-      if (!fightSubPhase) {
-        shouldShowIfEligible = true;
-      } else if (fightSubPhase === "charging") {
-        shouldShowIfEligible = unit.player === current_player;
-      } else if (
-        fightSubPhase === "alternating_non_active" ||
-        fightSubPhase === "cleanup_non_active"
-      ) {
-        shouldShowIfEligible = unit.player !== current_player;
-      } else if (fightSubPhase === "alternating_active" || fightSubPhase === "cleanup_active") {
-        shouldShowIfEligible = unit.player === current_player;
-      }
+      // V11 : l'éligibilité (isEligible) reflète déjà le pool actionnable courant
+      // (fight_eligible_units, tout joueur confondu) → le compteur suit isEligible.
+      shouldShowIfEligible = true;
 
       if (!shouldShowIfEligible || !isEligible) return;
     }
@@ -2491,19 +2485,43 @@ export class UnitRenderer {
           ? (displayBase / 2) * HEX_HORIZ_SPACING
           : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
     }
-    const emojiSize = bottomExtentY * 1.0;
+    // Taille de l'emoji calée sur le DIAMÈTRE de l'icône affichée (même calcul que
+    // renderUnitIcon), et non sur le rayon du socle : sinon le badge paraît
+    // proportionnellement plus gros sur les grosses figs (icône == socle) que sur
+    // les petites (icône plus grande que le socle via ICON_SCALE).
+    const unitIconScale = unit.ICON_SCALE || this.props.ICON_SCALE;
+    const displayIcon = resolveBaseSizeForUnitDisplay(unit);
+    const baseSizeIcon = displayIcon > 1 ? displayIcon : undefined;
+    const nonRoundIconR = getNonRoundIconRadius(unit, HEX_RADIUS);
+    const iconDiameter =
+      nonRoundIconR != null
+        ? nonRoundIconR * 2
+        : baseSizeIcon
+          ? baseSizeIcon * 1.5 * HEX_RADIUS
+          : HEX_RADIUS * unitIconScale;
+    const emojiSize = iconDiameter / 2;
 
     if (this.props.statusBadgePerModel) {
       // Per-figure mode — one emoji centred-bottom of each living figure (unit-level status).
       const centers = this.props.modelCenters;
       if (!centers) return;
       centers.forEach(([cx, cy], i) => {
-        drawAt(cx, cy + bottomExtentY - 0.25 * emojiSize, emojiSize, `battle-shocked-${unitIdNum}-${i}`);
+        drawAt(
+          cx,
+          cy + bottomExtentY - 0.25 * emojiSize,
+          emojiSize,
+          `battle-shocked-${unitIdNum}-${i}`
+        );
       });
       return;
     }
 
-    drawAt(centerX, centerY + bottomExtentY - 0.25 * emojiSize, emojiSize, `battle-shocked-${unitIdNum}`);
+    drawAt(
+      centerX,
+      centerY + bottomExtentY - 0.25 * emojiSize,
+      emojiSize,
+      `battle-shocked-${unitIdNum}`
+    );
   }
 
   private renderUnitIdDebug(iconZIndex: number): void {
@@ -2541,7 +2559,6 @@ export class UnitRenderer {
     unitIdText.zIndex = iconZIndex + 2001;
     this.target.addChild(unitIdText);
   }
-
 }
 
 // Helper function to create and render a unit

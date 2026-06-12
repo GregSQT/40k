@@ -18,7 +18,11 @@ export class LibrarianTerminator extends LeaderEliteMeleeElite {
   static VALUE = 75; // Unit value (W40K points cost)
 
   // WEAPONS
-  static RNG_WEAPON_CODES = ["combi_weapon_librarian", "smite_witchfire", "smite_focused_witchfire"];
+  static RNG_WEAPON_CODES = [
+    "combi_weapon_librarian",
+    "smite_witchfire",
+    "smite_focused_witchfire",
+  ];
   static RNG_WEAPONS = getWeapons(LibrarianTerminator.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["force_weapon"];
   static CC_WEAPONS = getWeapons(LibrarianTerminator.CC_WEAPON_CODES);
@@ -50,5 +54,5 @@ export class LibrarianTerminator extends LeaderEliteMeleeElite {
 
   constructor(name: string, startPos: [number, number]) {
     super(name, LibrarianTerminator.HP_MAX, startPos);
-  } 
+  }
 }

@@ -53,7 +53,7 @@ export function computeVisibleHexes(
   boardCols: number,
   boardRows: number,
   wallHexes: Array<[number, number]> | number[][],
-  losVisibilityMinRatio: number,
+  losVisibilityMinRatio: number
 ): VisibleHex[] {
   if (!wasmReady) {
     throw new Error("WASM not initialized — call ensureWasmLoaded() first");
@@ -86,19 +86,14 @@ export function computeLosSingle(
   toCol: number,
   toRow: number,
   wallHexes: Array<[number, number]> | number[][],
-  losVisibilityMinRatio: number,
+  losVisibilityMinRatio: number
 ): 0 | 1 | 2 {
   if (!wasmReady) {
     throw new Error("WASM not initialized — call ensureWasmLoaded() first");
   }
   const wallData = getWallData(wallHexes);
-  return compute_los_single(
-    fromCol,
-    fromRow,
-    toCol,
-    toRow,
-    wallData,
-    losVisibilityMinRatio,
-    1.0
-  ) as 0 | 1 | 2;
+  return compute_los_single(fromCol, fromRow, toCol, toRow, wallData, losVisibilityMinRatio, 1.0) as
+    | 0
+    | 1
+    | 2;
 }

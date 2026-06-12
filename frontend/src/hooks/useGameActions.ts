@@ -119,12 +119,13 @@ export const useGameActions = ({
 
       // Player validation with fight phase exception
       // Fight phase alternating allows non-active player units to be selected
+      // V11 : les deux joueurs agissent à chaque sous-phase fight ; l'unité actionnable
+      // (active ou adverse) est dictée par fight_selector/group_player côté moteur.
       const isFightPhaseAlternating =
         gameState.phase === "fight" &&
-        (gameState.fight_subphase === "alternating_non_active" ||
-          gameState.fight_subphase === "alternating_active" ||
-          gameState.fight_subphase === "cleanup_non_active" ||
-          gameState.fight_subphase === "cleanup_active");
+        (gameState.fight_subphase === "pile_in" ||
+          gameState.fight_subphase === "fight" ||
+          gameState.fight_subphase === "consolidate");
 
       const playerCheck = isFightPhaseAlternating
         ? true

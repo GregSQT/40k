@@ -338,6 +338,7 @@ type Mode =
   | "squadModelShoot"
   | "attackPreview"
   | "targetPreview"
+  | "chargeTargetSelect"
   | "chargePreview"
   | "chargeModelMove"
   | "advancePreview"
@@ -448,6 +449,7 @@ type BoardProps = {
   chargeModelPoolRef?: React.RefObject<Set<string>>;
   /** Distance de mouvement (sous-hex) de la fig active vers chaque ancre de son pool "col,row" —
    * path au sol / direct en vol. Source du tooltip de charge par-figurine. */
+  // A SUPPRIMER : feature distance charge par-figurine jamais fonctionnelle (lecteur inatteignable, supprimé).
   chargeModelDistancesRef?: React.RefObject<Map<string, number>>;
   /** Mask loops (polygone lissé monde) de la zone de landing de la fig de charge active. */
   chargeModelMaskLoopsRef?: React.RefObject<number[][] | null>;
@@ -511,6 +513,10 @@ type BoardProps = {
   onCancelCharge?: () => void;
   onValidateCharge?: (chargerId: number) => void;
   onLogChargeRoll?: (unit: Unit, roll: number) => void;
+  /** TEST/DEBUG : mode « battle-shock test ». Quand ON, un clic DROIT sur n'importe quelle unité
+   * (toutes phases, tous players) force un battle-shock roll au lieu de l'action normale. */
+  battleShockTestMode?: boolean;
+  onForceBattleShock?: (unitId: number | string) => void | Promise<void>;
   shootingPhaseState?: ShootingPhaseState;
   targetPreview?: TargetPreview | null;
   onCancelTargetPreview?: () => void;
@@ -787,7 +793,6 @@ export default function Board({
   onCancelSquadMove,
   chargeMovePlan = null,
   chargeModelPoolRef,
-  chargeModelDistancesRef,
   chargeModelMaskLoopsRef,
   onSelectChargeModel,
   onMoveModelInChargePlan,
@@ -829,6 +834,8 @@ export default function Board({
   onCancelCharge,
   onValidateCharge,
   onLogChargeRoll,
+  battleShockTestMode,
+  onForceBattleShock,
   targetPreview,
   onCancelTargetPreview,
   gameState,
@@ -1870,53 +1877,6 @@ export default function Board({
       .join("|");
   }, [units, gameState?.units_cache]);
 
-  /** Évite de relancer le gros useEffect Pixi à chaque nouvelle référence ``gameState`` (perte WebGL / gel). */
-  const _gameStateBoardDepsKey = useMemo(() => {
-    if (!gameState) return "";
-    const g = gameState;
-    const uc = g.units_cache;
-    const cacheSig =
-      uc && typeof uc === "object"
-        ? Object.keys(uc)
-            .sort()
-            .map((k) => {
-              const e = uc[k]!;
-              return `${k}:${e.col},${e.row}:${e.HP_CUR}`;
-            })
-            .join("|")
-        : "";
-    const parts = [
-      g.phase,
-      String(g.turn ?? g.currentTurn ?? ""),
-      String(g.episode_steps ?? ""),
-      String(g.current_player ?? ""),
-      String(g.game_over ?? ""),
-      cacheSig,
-      poolEdgeSig(g.valid_move_destinations_pool),
-      poolEdgeSig(g.preview_hexes),
-      String(g.active_shooting_unit ?? ""),
-      String(g.active_movement_unit ?? ""),
-      String(g.active_charge_unit ?? ""),
-      String(g.active_fight_unit ?? ""),
-      String(g.fight_subphase ?? g.fightSubPhase ?? ""),
-      poolEdgeSig(g.charge_activation_pool),
-      poolEdgeSig(g.shoot_activation_pool),
-      poolEdgeSig(g.move_activation_pool),
-      String(g.move_preview_footprint_span ?? ""),
-      JSON.stringify(g.move_preview_footprint_mask_loops ?? null),
-      poolEdgeSig(g.move_preview_footprint_zone),
-      poolEdgeSig(g.fight_pile_in_footprint_zone),
-      poolEdgeSig(g.fight_consolidation_footprint_zone),
-      JSON.stringify(g.unitsMoved ?? []),
-      JSON.stringify(g.unitsFled ?? []),
-      JSON.stringify(g.unitsCharged ?? []),
-      JSON.stringify(g.unitsAttacked ?? []),
-      JSON.stringify(g.unitsAdvanced ?? []),
-      JSON.stringify(g.deployment_state ?? null),
-    ];
-    return parts.join("\u001e");
-  }, [gameState]);
-
   /**
    * Phase tir : même source LoS frontend que le survol move — ``buildLosPreviewFromSource``.
    * Le backend reste la vérité métier pour la validation finale des cibles.
@@ -2629,10 +2589,6 @@ export default function Board({
       if (phase === "charge" && mode === "chargePreview") {
         const pathDist = chargeDestDistancesRef?.current?.get(`${iconCol},${iconRow}`);
         if (pathDist != null) hexSteps = pathDist;
-      } else if (phase === "charge" && mode === "chargeModelMove") {
-        // Plan par-figurine : distance réelle de la fig active vers l'ancre snappée (path au sol).
-        const pathDist = chargeModelDistancesRef?.current?.get(`${iconCol},${iconRow}`);
-        if (pathDist != null) hexSteps = pathDist;
       }
       const stepsPerInch =
         (boardConfig as unknown as { inches_to_subhex?: number }).inches_to_subhex ||
@@ -2835,6 +2791,14 @@ export default function Board({
           return;
         }
 
+        if (!hoverOverlayRef.current || hoverOverlayRef.current.destroyed) {
+          const root = new PIXI.Container();
+          root.name = "los-hover-polar-masked";
+          root.eventMode = "none";
+          root.zIndex = 40;
+          app.stage.addChild(root);
+          hoverOverlayRef.current = root;
+        }
         const overlay = hoverOverlayRef.current;
 
         const cacheKey = [
@@ -2969,12 +2933,7 @@ export default function Board({
           (phase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview")));
       const sameContext =
         hoveredHexContextRef.current?.mode === mode &&
-        hoveredHexContextRef.current?.unitId === previewUnitIdRestore &&
-        // En mode plan, le contexte change avec la fig active : sinon le restore ré-affiche
-        // le preview de la fig précédente (squad.md).
-        (mode !== "squadModelMove" ||
-          (hoveredHexContextRef.current?.modelId ?? null) ===
-            (squadMovePlanRef.current?.activeModelId ?? null));
+        hoveredHexContextRef.current?.unitId === previewUnitIdRestore;
       if (!sameContext) {
         hoveredHexRef.current = null;
         hoveredHexContextRef.current = null;
@@ -3044,8 +3003,6 @@ export default function Board({
     chargeDestPoolRef?.current,
     chargeDestDistancesRef?.current?.get,
     chargeDestDistancesRef?.current,
-    chargeModelDistancesRef?.current?.get,
-    chargeModelDistancesRef?.current,
     resolvedMoveDestPoolRef,
     footprintMaskLoopsRef,
     onStartMovePreview,
@@ -3354,11 +3311,8 @@ export default function Board({
       const uid = foundUnitId;
       const mid = foundModelId;
       void (async () => {
-        // En mode squadModelMove : NE PAS appeler onStartSquadModelMove (ça reset toutes les positions
-        // provisoires à l'état backend, détruisant les placements déjà faits). Juste sélectionner la fig.
-        if (mode !== "squadModelMove") {
-          await squadMoveCallbacksRef.current.onStartSquadModelMove?.(uid);
-        }
+        // Ce handler est gardé en amont par ``mode === "select"`` (useEffect) : on sélectionne la fig.
+        await squadMoveCallbacksRef.current.onStartSquadModelMove?.(uid);
         // Si le plan a été annulé pendant l'await (ex: double-clic → handleStartMovePreview → setSquadMovePlan(null)),
         // ne pas appeler onSelectModelForMove (ça activerait une fig dans un plan obsolète).
         const planAfterStart = squadMovePlanRef.current;
@@ -3379,6 +3333,65 @@ export default function Board({
     eligibleUnitIds,
     selectedUnitId,
   ]);
+
+  // TEST/DEBUG : mode « battle-shock test ». Quand le toggle est ON, un clic DROIT sur n'importe
+  // quelle unité (toutes phases, tous players, statut indifférent) force un battle-shock roll.
+  // Capture-phase + stopImmediatePropagation : coupe avant PIXI (skip/cancel/sélection) et avant
+  // le menu contextuel. Le clic gauche n'est jamais touché → garde sa fonction normale.
+  useEffect(() => {
+    if (!battleShockTestMode) return;
+    if (measureMode.kind !== "off") return;
+    if (!boardConfig) return;
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!canvas) return;
+    const app = appRef.current;
+    if (!app) return;
+
+    const onRightClickBattleShock = (e: PointerEvent) => {
+      if (e.button !== 2) return;
+      if (e.target !== canvas) return;
+      const unitsCache = gameState?.units_cache as
+        | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+        | undefined;
+      if (!unitsCache) return;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
+      const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
+      const px = (e.clientX - rect.left) * scaleX;
+      const py = (e.clientY - rect.top) * scaleY;
+      const { col, row } = pixelToHex(
+        px,
+        py,
+        boardConfig.hex_radius,
+        boardConfig.margin,
+        boardConfig.cols,
+        boardConfig.rows
+      );
+      const HEX_HIT_TOLERANCE = 4;
+      const clickCube = offsetToCube(col, row);
+      let foundUnitId: number | string | null = null;
+      let bestDistance = Infinity;
+      // Toutes les unités, sans filtre de player ni d'éligibilité.
+      for (const [uid, entry] of Object.entries(unitsCache)) {
+        const byModel = entry.occupied_hexes_by_model;
+        if (!byModel) continue;
+        for (const pos of Object.values(byModel)) {
+          const d = cubeDistance(clickCube, offsetToCube(pos[0], pos[1]));
+          if (d <= HEX_HIT_TOLERANCE && d < bestDistance) {
+            bestDistance = d;
+            foundUnitId = Number.isNaN(Number(uid)) ? uid : Number(uid);
+          }
+        }
+      }
+      if (foundUnitId === null) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      void onForceBattleShock?.(foundUnitId);
+    };
+
+    document.addEventListener("pointerdown", onRightClickBattleShock, true);
+    return () => document.removeEventListener("pointerdown", onRightClickBattleShock, true);
+  }, [battleShockTestMode, measureMode.kind, boardConfig, gameState?.units_cache, onForceBattleShock]);
 
   // Desperate Escape (phase move) : allocation manuelle des mortal wounds. L'effet tir
   // (gated phase==="shoot") ne traite pas le clic en move ; on reproduit ici son bloc
@@ -4137,8 +4150,10 @@ export default function Board({
 
     const squadUnit = units.find((u) => String(u.id) === String(squadMovePlan?.unitId ?? -1));
     if (!squadUnit) return;
+    // TS perd le narrowing de ``squadUnit`` (const) dans les async closures internes : id capturé ici.
+    const squadUnitIdStr = String(squadUnit.id);
 
-    const pool = squadMoveModelPoolRef.current;
+    const pool = squadMoveModelPoolRef?.current;
     if (!pool || pool.size === 0) {
       return;
     }
@@ -4147,7 +4162,7 @@ export default function Board({
     const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
     const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
     const MARGIN_H = boardConfig.margin;
-    const iconScaleCfg = boardConfig.display.icon_scale;
+    const iconScaleCfg = boardConfig.display?.icon_scale;
     if (iconScaleCfg === undefined || iconScaleCfg === null) {
       throw new Error("Missing required configuration value: boardConfig.display.icon_scale");
     }
@@ -4456,7 +4471,7 @@ export default function Board({
         pendingShootBackend = null;
         if (!pending) return;
         const cacheKey = [
-          String(squadUnit.id),
+          squadUnitIdStr,
           `${pending.col},${pending.row}`,
           unitsBoardLayoutKey,
           String(gameState?.turn ?? ""),
@@ -4469,7 +4484,7 @@ export default function Board({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               action: "preview_shoot_from_position",
-              unitId: String(squadUnit.id),
+              unitId: squadUnitIdStr,
               destCol: pending.col,
               destRow: pending.row,
               advancePosition: false,
@@ -4567,18 +4582,21 @@ export default function Board({
         const mp = buildHiddenModelPositions(pending.col, pending.row);
         if (!mp) return;
         const key =
-          `plan:${squadUnit.id}:` +
+          `plan:${squadUnitIdStr}:` +
           Object.entries(mp)
             .map(([m, p]) => `${m}@${p[0]},${p[1]}`)
             .join(",");
-        let hiddenModels = movePreviewHiddenCacheRef.current.get(key);
-        if (!hiddenModels) {
+        const cached = movePreviewHiddenCacheRef.current.get(key);
+        let hiddenModels: string[];
+        if (cached) {
+          hiddenModels = cached;
+        } else {
           const response = await fetch("/api/game/action", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               action: "preview_hidden_from_model_positions",
-              unitId: String(squadUnit.id),
+              unitId: squadUnitIdStr,
               modelPositions: mp,
             }),
           });
@@ -4707,7 +4725,7 @@ export default function Board({
     gameState?.turn,
     gameState?.episode_steps,
     gameState?.units_cache,
-    squadMoveModelPoolRef.current,
+    squadMoveModelPoolRef?.current,
   ]);
 
   // Mode mesure : clic gauche = ancre ou fin de ligne (puis armed) ; clic droit = jonction — prioritaire sur les unités.
@@ -5734,7 +5752,11 @@ export default function Board({
 
     // Slice G : charge par-figurine — zone de landing = pool eligible de la fig active, rendu en
     // hexes simples (1:1 avec les hexes cliquables, pas en disques d'empreinte).
-    if (mode === "chargeModelMove" && chargeMovePlan?.activeModelId && chargeModelPoolRef?.current) {
+    if (
+      mode === "chargeModelMove" &&
+      chargeMovePlan?.activeModelId &&
+      chargeModelPoolRef?.current
+    ) {
       const cells: { col: number; row: number }[] = [];
       for (const key of chargeModelPoolRef.current) {
         const sep = key.indexOf(",");
@@ -5848,7 +5870,10 @@ export default function Board({
         const uc = gameState?.units_cache as
           | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
           | undefined;
-        const pos = uc?.[String(plan.unitId)]?.occupied_hexes_by_model?.[plan.activeModelId];
+        const pos =
+          plan.activeModelId != null
+            ? uc?.[String(plan.unitId)]?.occupied_hexes_by_model?.[plan.activeModelId]
+            : undefined;
         if (!pos) return null;
         return { unit: shootUnit, fromCol: pos[0], fromRow: pos[1] };
       }
@@ -6884,27 +6909,8 @@ export default function Board({
                 typeof unit.id === "number" ? unit.id : parseInt(unit.id as string, 10)
               );
             }
-            let fightPool: Array<number | string> | undefined;
-            if (currentFightSubPhase === "charging") {
-              fightPool = gameState.charging_activation_pool;
-            } else if (
-              currentFightSubPhase === "alternating_non_active" ||
-              currentFightSubPhase === "cleanup_non_active"
-            ) {
-              fightPool = gameState.non_active_alternating_activation_pool;
-            } else if (
-              currentFightSubPhase === "alternating_active" ||
-              currentFightSubPhase === "cleanup_active"
-            ) {
-              fightPool = gameState.active_alternating_activation_pool;
-            } else {
-              throw new Error(`Unknown fight_subphase: ${currentFightSubPhase}`);
-            }
-            if (!fightPool) {
-              throw new Error(
-                `Missing fight activation pool for subphase: ${currentFightSubPhase}`
-              );
-            }
+            // V11 : pool actionnable unique exposé par le moteur (pile_in/fight/consolidate).
+            const fightPool: Array<number | string> = gameState.fight_eligible_units ?? [];
             return fightPool.some((id) => String(id) === String(unit.id));
           }
           // All other phases: use standard eligibility

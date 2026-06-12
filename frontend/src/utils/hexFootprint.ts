@@ -104,12 +104,6 @@ export function resolveBaseSizeForUnitDisplay(unit: {
       return Math.max(1, Math.max(a, b));
     }
   }
-  if (Array.isArray(bs) && bs.length === 1) {
-    const a = Number(bs[0]);
-    if (Number.isFinite(a)) {
-      return Math.max(1, a);
-    }
-  }
   return 1;
 }
 
@@ -124,7 +118,7 @@ function resolveBaseSizeForFootprint(unit: { BASE_SIZE?: number | [number, numbe
 export function unitFootprintHexKeys(unit: {
   col: number;
   row: number;
-  BASE_SHAPE?: string;
+  BASE_SHAPE?: "round" | "oval" | "square";
   BASE_SIZE?: number | [number, number];
 }): Set<string> {
   const shape = unit.BASE_SHAPE ?? "round";
@@ -200,7 +194,7 @@ export function getFightEngagementRingBoardPixels(
   unit: {
     col: number;
     row: number;
-    BASE_SHAPE?: string;
+    BASE_SHAPE?: "round" | "oval" | "square";
     BASE_SIZE?: number | [number, number];
   },
   engagementSteps: number,
@@ -226,7 +220,7 @@ export function engagementRoundRingPreviewHexesOnBoard(
   unit: {
     col: number;
     row: number;
-    BASE_SHAPE?: string;
+    BASE_SHAPE?: "round" | "oval" | "square";
     BASE_SIZE?: number | [number, number];
   },
   engagementSteps: number,
@@ -346,7 +340,7 @@ export type UnitFootprintInput = {
   id?: number | string;
   col: number;
   row: number;
-  BASE_SHAPE?: string;
+  BASE_SHAPE?: "round" | "oval" | "square";
   BASE_SIZE?: number | [number, number];
 };
 
@@ -524,7 +518,7 @@ export function buildOccupiedSet(
     id: number;
     col: number;
     row: number;
-    BASE_SHAPE?: string;
+    BASE_SHAPE?: "round" | "oval" | "square";
     BASE_SIZE?: number | [number, number];
     alive?: boolean;
   }>,

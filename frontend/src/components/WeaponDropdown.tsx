@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import weaponRules from "../../../config/weapon_rules.json";
 import type { WeaponOption } from "../types/game";
 import TooltipWrapper from "./TooltipWrapper";
@@ -40,22 +40,25 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [onClose, persistent]);
 
-  const onDragStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+  const onDragStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      dragOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
 
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!dragOffset.current) return;
-      setPos({ x: ev.clientX - dragOffset.current.x, y: ev.clientY - dragOffset.current.y });
-    };
-    const onMouseUp = () => {
-      dragOffset.current = null;
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
-    };
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
-  }, [pos]);
+      const onMouseMove = (ev: MouseEvent) => {
+        if (!dragOffset.current) return;
+        setPos({ x: ev.clientX - dragOffset.current.x, y: ev.clientY - dragOffset.current.y });
+      };
+      const onMouseUp = () => {
+        dragOffset.current = null;
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+      };
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    },
+    [pos]
+  );
 
   return (
     <div
@@ -67,11 +70,7 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
         top: `${pos.y}px`,
       }}
     >
-      <button
-        type="button"
-        className="weapon-dropdown-handle"
-        onMouseDown={onDragStart}
-      >
+      <button type="button" className="weapon-dropdown-handle" onMouseDown={onDragStart}>
         ⠿ WEAPON CHOICE
       </button>
       <table className="weapon-table">
@@ -99,7 +98,9 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
                 className={[
                   isDisabled ? "disabled" : "",
                   selectedIndex === weaponOption.index ? "selected" : "",
-                ].filter(Boolean).join(" ")}
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
                 onClick={() => {
                   if (!isDisabled) {
                     setSelectedIndex(weaponOption.index);
@@ -129,11 +130,7 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
                       </TooltipWrapper>
                     )}
                     <span
-                      style={
-                        weaponOption.assigned
-                          ? { color: "#888", opacity: 0.6 }
-                          : undefined
-                      }
+                      style={weaponOption.assigned ? { color: "#888", opacity: 0.6 } : undefined}
                     >
                       {weapon.display_name}
                     </span>
