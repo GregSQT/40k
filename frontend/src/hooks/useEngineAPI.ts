@@ -2452,6 +2452,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setSelectedUnitId(uid);
             setMode("pileInPreview");
           }
+          // Fight : sous-phase pile_in SANS unité active (présentation paresseuse).
+          // Le moteur expose seulement le pool éligible (sélection libre) ; on nettoie
+          // tout aperçu résiduel d'une unité précédente et on reste en sélection.
+          else if (
+            data.game_state?.phase === "fight" &&
+            data.game_state?.fight_subphase === "pile_in" &&
+            !data.result?.waiting_for_pile_in
+          ) {
+            setPileInDestinations([]);
+            moveDestPoolRef.current = new Set();
+            footprintZoneRef.current = new Set();
+            footprintMaskLoopsRef.current = null;
+            setSelectedUnitId(null);
+            setMode("select");
+          }
           // Fight : consolidation après attaques (≤ 3") — sans destination valide = fin d'activation (comme le moteur)
           else if (data.game_state?.phase === "fight" && data.result?.waiting_for_consolidation) {
             const raw = data.result.valid_consolidation_destinations as
@@ -4736,6 +4751,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     });
   }, [executeAction, selectedUnitId, mode]);
 
+  // Bouton « Terminer le pile-in » : clôt l'étape pile-in groupée du joueur actif
+  // (les unités non pilées sont passées) → le moteur enchaîne sur le groupe adverse
+  // puis la sous-phase FIGHT.
+  const handleEndPileIn = useCallback(async () => {
+    await executeAction({ action: "end_pile_in" });
+  }, [executeAction]);
+
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance action
   const handleAdvance = useCallback(
     async (unitId: number) => {
@@ -5879,6 +5901,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onActivateFight: handleActivateFight,
     onPileInMove: handlePileInMove,
     onSkipPileIn: handleSkipPileIn,
+    onEndPileIn: handleEndPileIn,
     onCharge: emptyCallback,
     onActivateCharge: handleActivateCharge,
     onChargeEnemyUnit: handleChargeEnemyUnit,

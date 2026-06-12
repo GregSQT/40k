@@ -4209,6 +4209,11 @@ def pile_in_move_destinations_12_03(
     if d_min_sel is None:
         raise ValueError("pile_in_move_destinations_12_03: no live target footprints among target_ids")
 
+    # Cible(s) la/les plus proche(s) — pour le palier WHILE « engaged with it if possible ».
+    closest_tier_entries = [
+        units_cache[str(tid)] for tid in closest_tier if str(tid) in units_cache
+    ]
+
     # Unités ennemies engagées AVANT le move (à conserver après).
     engaged_before = _fight_units_engaged_with(game_state, unit)
     engaged_before_entries = [
@@ -4220,6 +4225,7 @@ def pile_in_move_destinations_12_03(
     visited, fp_by_anchor = _fight_bfs_reachable_anchors_consolidation(game_state, unit)
 
     destinations: List[Tuple[int, int]] = []
+    engaging_closest: List[Tuple[int, int]] = []
     for anchor in visited:
         if anchor == start_pos:
             continue
@@ -4241,7 +4247,16 @@ def pile_in_move_destinations_12_03(
         ):
             continue
         destinations.append(anchor)
-    return destinations
+        # WHILE « engaged with it if possible » : ancre engageant la cible la plus proche.
+        if any(
+            unit_entries_within_engagement_zone(synth, ce, ez)
+            for ce in closest_tier_entries
+        ):
+            engaging_closest.append(anchor)
+    # Phase 1 (12.03 WHILE « engaged with it if possible ») : si au moins une ancre engage la
+    # cible de pile-in la plus proche, le move DOIT s'y faire → on ne garde que celles-là.
+    # Phase 2 (fallback) : sinon, tout le pool dur (plus proche + engagé + engagements conservés).
+    return engaging_closest if engaging_closest else destinations
 
 
 # =====================================================================
@@ -4280,17 +4295,7 @@ def fight_v11_is_pile_in_eligible(game_state: Dict[str, Any], unit: Dict[str, An
     Éligibilité PILE IN groupé (étape n°2, 12.03 — sans le bullet overrun) :
     engagée maintenant OU a fait un charge move ce tour.
     """
-    engaged_now = _fight_v11_engaged_now(game_state, unit)
-    charged = _fight_v11_charged_this_turn(game_state, unit)
-    eligible = engaged_now or charged
-    if not eligible:
-        uid = str(require_key(unit, "id"))
-        _fight_v11_log(
-            game_state,
-            f"PILE IN unit {uid} NON éligible : engaged_now={engaged_now}, "
-            f"charged_this_turn={charged} (il faut l'un des deux à True)",
-        )
-    return eligible
+    return _fight_v11_engaged_now(game_state, unit) or _fight_v11_charged_this_turn(game_state, unit)
 
 
 def fight_v11_is_eligible_to_fight(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
@@ -4612,22 +4617,12 @@ def _fight_v11_grouped_step_eligible(
     player = int(player)
     out: List[str] = []
     for u in require_key(game_state, "units"):
-        uid = str(require_key(u, "id"))
-        u_player = int(require_key(u, "player"))
-        if u_player != player:
-            if subphase == "pile_in":
-                _fight_v11_log(
-                    game_state,
-                    f"PILE IN unit {uid} écartée (filtre joueur) : player={u_player} != groupe traité {player}",
-                )
+        if int(require_key(u, "player")) != player:
             continue
+        uid = str(require_key(u, "id"))
         if not is_unit_alive(uid, game_state):
-            if subphase == "pile_in":
-                _fight_v11_log(game_state, f"PILE IN unit {uid} écartée : unité morte")
             continue
         if uid in done:
-            if subphase == "pile_in":
-                _fight_v11_log(game_state, f"PILE IN unit {uid} écartée : déjà dans pile_in_done")
             continue
         if subphase == "pile_in":
             if fight_v11_is_pile_in_eligible(game_state, u):
@@ -4824,73 +4819,6 @@ def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:  # noqa: F8
         # _fight_v11_manual_state présente la 1ère unité et renvoie le contrat waiting_for_pile_in
         # (consommé par le front : mode pileInPreview). Consolidation reste auto-skip (V1).
         _fight_v11_log(game_state, "START (manuel) → étape PILE IN interactive")
-        _ucache = require_key(game_state, "units_cache")
-        for u in require_key(game_state, "units"):
-            uid = str(require_key(u, "id"))
-            alive = is_unit_alive(uid, game_state)
-            try:
-                col, row = require_unit_position(u, game_state)
-            except Exception:
-                col, row = u.get("col"), u.get("row")
-            _ce = _ucache.get(uid)
-            if _ce is None:
-                _occ_n = "NO_CACHE"
-                _shape = None
-                _bymodel_n = None
-            else:
-                _occ = _ce.get("occupied_hexes")
-                _occ_n = len(_occ) if _occ else 0
-                _shape = _ce.get("BASE_SHAPE")
-                _bym = _ce.get("occupied_hexes_by_model")
-                _bymodel_n = len(_bym) if _bym else 0
-            _fight_v11_log(
-                game_state,
-                f"UNIT DUMP id={uid} player={u.get('player')} alive={alive} "
-                f"pos=({col},{row}) shape={_shape} occupied_hexes={_occ_n} by_model={_bymodel_n}",
-            )
-        from engine.hex_utils import min_distance_between_sets as _mdbs
-        from engine.spatial_relations import (
-            get_engagement_zone as _gez,
-            unit_entries_within_engagement_zone as _uewez,
-        )
-        _ez = _gez(game_state)
-        for _u in require_key(game_state, "units"):
-            _uid = str(require_key(_u, "id"))
-            if _uid not in ("2", "7"):
-                continue
-            _ce = _ucache.get(_uid)
-            _eng_now = _fight_v11_engaged_now(game_state, _u)
-            _chg = _fight_v11_charged_this_turn(game_state, _u)
-            _elig_fight = fight_v11_is_eligible_to_fight(game_state, _u)
-            _fight_v11_log(
-                game_state,
-                f"DIAG unit {_uid} : EZ={_ez} engaged_now={_eng_now} charged={_chg} eligible_to_fight={_elig_fight}",
-            )
-            _ufp = _ce.get("occupied_hexes") or {(_ce["col"], _ce["row"])}
-            _up = int(require_key(_ce, "player"))
-            for _eid, _ece in _ucache.items():
-                if str(_eid) == _uid or int(require_key(_ece, "player")) == _up:
-                    continue
-                _efp = _ece.get("occupied_hexes") or {(_ece["col"], _ece["row"])}
-                _d = _mdbs(_ufp, _efp, max_distance=_ez + 5)
-                _within = _uewez(_ce, _ece, _ez)
-                if _within or _d <= _ez + 3:
-                    _fight_v11_log(
-                        game_state,
-                        f"DIAG unit {_uid} vs enemy {_eid} : fp_dist={_d} within_EZ={_within}",
-                    )
-        _c111 = _ucache.get("111")
-        if _c111 is not None:
-            _o111 = _c111.get("occupied_hexes") or set()
-            if _o111:
-                _cs = [c for c, r in _o111]
-                _rs = [r for c, r in _o111]
-                _fight_v11_log(
-                    game_state,
-                    f"DIAG 111 occupied_hexes bbox: col[{min(_cs)}..{max(_cs)}] row[{min(_rs)}..{max(_rs)}] n={len(_o111)} anchor=({_c111.get('col')},{_c111.get('row')})",
-                )
-            _bm111 = _c111.get("occupied_hexes_by_model") or {}
-            _fight_v11_log(game_state, f"DIAG 111 by_model positions: {dict(list(_bm111.items()))}")
         _ok, state = _fight_v11_manual_state(game_state)
         out = dict(state)
         out["phase_initialized"] = True
@@ -5052,33 +4980,27 @@ def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str,
             if nxt is None:
                 fight_v11_enter_fight_step(game_state)
                 continue
-            # Présente la 1ère unité éligible du groupe avec ses destinations de pile-in.
-            # Unité sans destination utile (déjà collée / aucun move rapprochant+engageant) → skip auto.
+            # Présentation PARESSEUSE : on n'auto-présente AUCUNE unité (aucun BFS calculé
+            # d'avance). Le joueur choisit librement l'unité à piler (clic → activate_unit,
+            # qui déclenche le calcul de SES destinations) ou termine l'étape (end_pile_in).
+            # On expose seulement le pool cliquable + aucune unité active.
             player, eligible = nxt
-            presented: Optional[Dict[str, Any]] = None
-            for uid in eligible:
-                u = get_unit_by_id(game_state, uid)
-                if u is None:
-                    game_state["pile_in_done"].add(uid)
-                    continue
-                res = _fight_v11_pile_in_present(game_state, u)
-                if res is None:
-                    game_state["pile_in_done"].add(uid)
-                    _fight_v11_log(game_state, f"PILE IN unit {uid} : aucune destination utile → skip auto")
-                    continue
-                presented = res
-                _fight_v11_log(
-                    game_state,
-                    f"PILE IN P{player} : unit {uid} → {len(res['valid_pile_in_destinations'])} destinations proposées",
-                )
-                break
-            if presented is None:
-                continue
-            # Pool cliquable = tout le groupe éligible non encore traité (libre choix
-            # de l'unité à piler), pas seulement l'unité présentée.
             done = {str(x) for x in game_state.get("pile_in_done", set())}
-            game_state["fight_eligible_units"] = [u for u in eligible if str(u) not in done]
-            return True, presented
+            pool = [str(u) for u in eligible if str(u) not in done]
+            game_state["fight_eligible_units"] = pool
+            game_state["active_fight_unit"] = None
+            _fight_v11_clear_pile_in_preview(game_state)
+            _fight_v11_log(
+                game_state,
+                f"PILE IN P{player} : unités éligibles = {pool} (sélection libre)",
+            )
+            return True, {
+                "phase": "fight", "fight_subphase": "pile_in",
+                "fight_eligible_units": pool,
+                "active_fight_unit": None,
+                "waiting_for_player": True, "action": "wait",
+                "unitId": "SYSTEM",
+            }
         if sub == "fight":
             uid = fight_v11_advance_selection(game_state)
             if uid is None:
@@ -5133,6 +5055,18 @@ def _fight_v11_manual_step(
     if sub == "pile_in":
         nxt = fight_v11_grouped_next(game_state, "pile_in")
         eligible = nxt[1] if nxt else []
+        if atype == "end_pile_in":
+            # Bouton « Terminer le pile-in » : marque tout le groupe actif comme traité
+            # (les unités non pilées sont simplement passées) → on avance vers le groupe
+            # adverse puis la sous-phase FIGHT.
+            for e in eligible:
+                game_state["pile_in_done"].add(str(e))
+            _fight_v11_clear_pile_in_preview(game_state)
+            _fight_v11_log(
+                game_state,
+                f"PILE IN → fin demandée par le joueur (groupe {list(eligible)} marqué traité)",
+            )
+            return _fight_v11_manual_state(game_state)
         if atype == "pile_in":
             # Move (destCol/destRow) ou skip sur l'unité active (présentée par manual_state).
             active = game_state.get("active_fight_unit")
