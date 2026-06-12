@@ -5050,13 +5050,19 @@ def _fight_pile_in_build_model_pool(
             )
         same_squad_occupied |= sib_fp
 
-    blocked = set(wall_hexes) | enemy_occupied | other_occupied | same_squad_occupied
+    # 03.01 : une figurine se déplace À TRAVERS les figs amies, mais PAS à travers les ennemies
+    # (ni les murs). Donc le CHEMIN ne bloque que murs + ennemis ; les amis (coéquipières + autres
+    # unités amies) ne bloquent pas le passage.
+    path_blocked = set(wall_hexes) | enemy_occupied
+    # 03 « Ending a move » : aucune fig ne peut FINIR sur une autre fig → l'empreinte finale ne doit
+    # chevaucher aucune autre fig (amie ou ennemie) ni un mur.
+    end_blocked = path_blocked | other_occupied | same_squad_occupied
 
     start_col, start_row = int(model["col"]), int(model["row"])
     start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_offset_pair)
     start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
 
-    # BFS centre-à-centre ≤ budget (le pile-in ne traverse ni mur ni fig).
+    # BFS centre-à-centre ≤ budget : ne traverse ni mur ni fig ENNEMIE (les amies sont traversables).
     visited: Set[Tuple[int, int]] = {(start_col, start_row)}
     reachable: List[Tuple[int, int]] = []
     queue: deque = deque([(start_col, start_row, 0)])
@@ -5068,7 +5074,7 @@ def _fight_pile_in_build_model_pool(
             if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
                 continue
             cell = (nc, nr)
-            if cell in visited or cell in blocked:
+            if cell in visited or cell in path_blocked:
                 continue
             visited.add(cell)
             queue.append((nc, nr, d + 1))
@@ -5080,7 +5086,7 @@ def _fight_pile_in_build_model_pool(
         cand_fp = _candidate_footprint_charge(cc, rr, unit, game_state, fp_offset_pair)
         if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
             continue
-        if cand_fp & blocked:
+        if cand_fp & end_blocked:
             continue
         d_min = min(
             min_distance_between_sets(cand_fp, tfp, max_distance=start_min) for tfp in target_fps
@@ -5307,6 +5313,12 @@ def _fight_pile_in_model_plan_state(
         "footprint_mask_loops": mask_loops,
         "unplaced": unplaced,
         "can_validate": prev["can_validate"],
+        # Sous-conditions de légalité (diagnostic + voile rouge front) : voile par-fig invalide
+        # (per_model False) et raisons unité (cohésion / engagement / engagements conservés).
+        "per_model_valid": prev["per_model"],
+        "coherency_ok": prev["coherency_ok"],
+        "unit_engaged": prev["unit_engaged"],
+        "kept_engagements": prev["kept_engagements"],
         "waiting_for_player": True,
         "action": "wait",
     }

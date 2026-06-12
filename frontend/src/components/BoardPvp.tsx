@@ -466,6 +466,11 @@ type BoardProps = {
     unplaced: string[];
     activeModelId: string | null;
     canValidate: boolean;
+    /** Légalité par-fig (false = posée hors zone → voile rouge). */
+    perModelValid: Record<string, boolean>;
+    coherencyOk: boolean;
+    unitEngaged: boolean;
+    keptEngagements: boolean;
   } | null;
   /** Pool (hexes "col,row") de la fig de pile-in active. */
   pileInModelPoolRef?: React.RefObject<Set<string>>;
@@ -3967,6 +3972,19 @@ export default function Board({
           overlay.endFill();
         }
       }
+      // Pile-in : voile ROUGE sur les figs POSÉES hors zone valide (per_model_valid false) → leur
+      // empreinte/chemin a été bloqué par une fig posée après ; l'utilisateur doit les replacer.
+      if (isPileInModelMove && pileInMovePlan) {
+        const RED_INVALID = 0xef4444;
+        for (const [mid, pos] of Object.entries(pileInMovePlan.models)) {
+          if (pileInMovePlan.perModelValid[mid] !== false) continue;
+          const [cx, cy] = hexCenter(pos.col, pos.row);
+          overlay.lineStyle(lineW, RED_INVALID, 1);
+          overlay.beginFill(RED_INVALID, 0.5);
+          overlay.drawCircle(cx, cy, ringR);
+          overlay.endFill();
+        }
+      }
       // 03.04 : voile cible par UNITÉ — uniquement en charge (le pile-in n'a pas de cibles satisfaites).
       // (aucune fig chargeant à ≤ EZ), VIOLET = satisfaite (≥ 1 fig engagée). Backend fournit les
       // deux listes dans chargeMovePlan ; redraw via la dep chargeMovePlan de cet effet.
@@ -4015,6 +4033,7 @@ export default function Board({
     isPileInModelMove,
     activeChargeLikePlan,
     chargeMovePlan,
+    pileInMovePlan,
     boardConfig,
     units,
     gameState,

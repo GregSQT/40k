@@ -564,6 +564,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     unplaced: string[];
     activeModelId: string | null;
     canValidate: boolean;
+    /** Sous-conditions de légalité (bouton « Check pile-in » + voile rouge par-fig). */
+    perModelValid: Record<string, boolean>;
+    coherencyOk: boolean;
+    unitEngaged: boolean;
+    keptEngagements: boolean;
   } | null>(null);
   const pileInMovePlanRef = useRef<typeof pileInMovePlan>(null);
   pileInMovePlanRef.current = pileInMovePlan;
@@ -2500,28 +2505,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             data.game_state?.fight_subphase === "pile_in" &&
             !data.result?.waiting_for_pile_in
           ) {
-            console.log("[PILE_IN_DEBUG] branch=RESET(2458) lazy pile_in", {
-              subphase: data.game_state?.fight_subphase,
-              waiting_for_pile_in: data.result?.waiting_for_pile_in,
-              waiting_for_player: data.result?.waiting_for_player,
-              pile_in_completed: data.result?.pile_in_completed,
-              error: data.result?.error,
-              valid_targets: data.result?.valid_targets,
-              posU2_received: (data.game_state?.units ?? [])
-                .filter((u: { id: string | number }) => String(u.id) === "2")
-                .map(
-                  (u: { id: string | number; col?: number; row?: number }) =>
-                    `${u.id}:(${u.col},${u.row})`
-                )
-                .join(" "),
-              posU2_merged: (latestGameStateRef.current?.units ?? [])
-                .filter((u: { id: string | number }) => String(u.id) === "2")
-                .map(
-                  (u: { id: string | number; col?: number; row?: number }) =>
-                    `${u.id}:(${u.col},${u.row})`
-                )
-                .join(" "),
-            });
             setPileInDestinations([]);
             moveDestPoolRef.current = new Set();
             footprintZoneRef.current = new Set();
@@ -5372,6 +5355,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const unplaced = ((result.unplaced ?? []) as unknown[]).map((m) => String(m));
     const canValidate = result.can_validate === true;
     const selectedModel = result.selected_model != null ? String(result.selected_model) : null;
+    // Sous-conditions de légalité (alimentent le bouton « Check pile-in » + voile rouge par-fig).
+    const perModelValid = (result.per_model_valid ?? {}) as Record<string, boolean>;
+    const coherencyOk = result.coherency_ok === true;
+    const unitEngaged = result.unit_engaged === true;
+    const keptEngagements = result.kept_engagements === true;
     setPileInMovePlan((prev) => {
       const base = prev ?? {
         unitId: parseInt(String(result.unitId), 10),
@@ -5384,6 +5372,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         unplaced: [],
         activeModelId: null,
         canValidate: false,
+        perModelValid: {} as Record<string, boolean>,
+        coherencyOk: false,
+        unitEngaged: false,
+        keptEngagements: false,
       };
       // Fig active = celle échoée par le backend si encore éligible, sinon l'ancienne si toujours
       // éligible, sinon aucune. Le pool ne vaut que pour elle (calcul ciblé backend).
@@ -5402,7 +5394,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         active != null && active === selectedModel && Array.isArray(maskLoopsRaw)
           ? (maskLoopsRaw as number[][])
           : null;
-      return { ...base, eligibleModels, unplaced, canValidate, activeModelId: active };
+      return {
+        ...base,
+        eligibleModels,
+        unplaced,
+        canValidate,
+        activeModelId: active,
+        perModelValid,
+        coherencyOk,
+        unitEngaged,
+        keptEngagements,
+      };
     });
   }, []);
 

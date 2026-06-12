@@ -1598,17 +1598,23 @@ def charge_build_model_destinations_pool(
             )
         same_squad_occupied |= sib_fp
 
-    blocked = set(wall_hexes) | enemy_occupied | other_occupied | same_squad_occupied
-    # Take to the skies (21.03) : si le vol est actif, la traversée ignore murs + figs ; seul le
-    # placement final (``cand_fp & blocked``) reste interdit d'overlap. Sinon, traversée sol classique.
+    # 03.01 : une figurine se déplace À TRAVERS les figs amies, mais PAS à travers les ennemies (ni
+    # les murs). Chemin au sol = murs + ennemis seulement ; les amis (coéquipières + autres unités
+    # amies) ne bloquent pas le passage.
+    path_blocked = set(wall_hexes) | enemy_occupied
+    # 03 « Ending a move » : aucune fig ne peut FINIR sur une autre fig → l'empreinte finale ne doit
+    # chevaucher aucune autre fig (amie ou ennemie) ni un mur.
+    end_blocked = path_blocked | other_occupied | same_squad_occupied
+    # Take to the skies (21.03) : si le vol est actif, la traversée ignore tout ; seul le placement
+    # final (``cand_fp & end_blocked``) reste interdit d'overlap. Sinon, traversée sol classique.
     fly_active = _charge_fly_active(game_state, unit, squad_id)
-    traverse_blocked = set() if fly_active else blocked
+    traverse_blocked = set() if fly_active else path_blocked
 
     start_col, start_row = int(model["col"]), int(model["row"])
     start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_offset_pair)
     start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
 
-    # BFS centre-à-centre dans le budget (la charge ne traverse ni mur ni fig, sauf vol actif).
+    # BFS centre-à-centre dans le budget : ne traverse ni mur ni fig ENNEMIE (amies traversables, vol = tout).
     visited: Set[Tuple[int, int]] = {(start_col, start_row)}
     reachable: List[Tuple[int, int]] = []
     queue: deque = deque([(start_col, start_row, 0)])
@@ -1633,7 +1639,7 @@ def charge_build_model_destinations_pool(
         cand_fp = _candidate_footprint_charge(cc, rr, unit, game_state, fp_offset_pair)
         if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
             continue
-        if cand_fp & blocked:
+        if cand_fp & end_blocked:
             continue
         d_min = min(
             min_distance_between_sets(cand_fp, tfp, max_distance=start_min) for tfp in target_fps
@@ -1755,10 +1761,14 @@ def charge_model_plan_state(
             _candidate_footprint_charge(int(sib["col"]), int(sib["row"]), unit, game_state, fp_pair)
             if sib else set()
         )
-    blocked_static = set(wall_hexes) | enemy_occupied | other_occupied | placed_fp
+    # 03.01 : le déplacement traverse les figs AMIES, pas les ennemies ni les murs → chemin = murs +
+    # ennemis seulement. Les coéquipières (posées ou à l'origine) ne bloquent que la position FINALE
+    # (``cand_fp & blocked_static`` posées + check ``others`` origines dans ``_qualifying``).
+    path_blocked = set(wall_hexes) | enemy_occupied
+    blocked_static = path_blocked | other_occupied | placed_fp
     # Take to the skies (21.03) : vol actif → la reachability BFS et le champ de distance ignorent
-    # murs + figs (traversée libre) ; le placement final (``cand_fp & blocked_static``, collision
-    # ``others``) reste interdit d'overlap.
+    # tout (traversée libre) ; le placement final (``cand_fp & blocked_static``, collision ``others``)
+    # reste interdit d'overlap.
     fly_active = _charge_fly_active(game_state, unit, unit_id)
 
     def _bfs_reach(
@@ -1837,7 +1847,7 @@ def charge_model_plan_state(
                     other_origins |= origin_fp[m2]
             other_origins_by_model[m] = other_origins
             reach_by_model[m], dist_by_model[m] = _bfs_reach(
-                sc, sr, set() if fly_active else (blocked_static | other_origins)
+                sc, sr, set() if fly_active else path_blocked
             )
         tgt_union: Set[Tuple[int, int]] = set()
         for tfp in target_fps:
@@ -3809,18 +3819,21 @@ def _charge_model_pos_is_closer(
                 same_squad_occupied |= _candidate_footprint_charge(
                     int(sib["col"]), int(sib["row"]), unit, game_state, fp_pair
                 )
-    blocked = set(wall_hexes) | enemy_occupied | other_occupied | same_squad_occupied
+    # 03.01 : déplacement À TRAVERS les figs amies autorisé, PAS à travers les ennemies ni les murs.
+    path_blocked = set(wall_hexes) | enemy_occupied
+    # 03 « Ending a move » : pas de fig sur une autre fig → empreinte finale sans chevauchement.
+    end_blocked = path_blocked | other_occupied | same_squad_occupied
     # Take to the skies (21.03) : vol actif → traversée libre (murs + figs ignorés) ; placement final
-    # (``cand_fp & blocked``) reste interdit d'overlap.
+    # (``cand_fp & end_blocked``) reste interdit d'overlap.
     fly_active = _charge_fly_active(game_state, unit, squad_id)
-    traverse_blocked = set() if fly_active else blocked
+    traverse_blocked = set() if fly_active else path_blocked
 
     start_col, start_row = int(model["col"]), int(model["row"])
     start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_pair)
     start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
     dest = (int(dest_c), int(dest_r))
 
-    # Reachability BFS (centre-à-centre, sans traverser mur/fig sauf vol actif) avec early-exit sur dest.
+    # Reachability BFS (centre-à-centre, traverse les amies, pas mur/ennemi sauf vol actif), early-exit dest.
     if dest != (start_col, start_row):
         visited: Set[Tuple[int, int]] = {(start_col, start_row)}
         queue: deque = deque([(start_col, start_row, 0)])
@@ -3846,7 +3859,7 @@ def _charge_model_pos_is_closer(
     cand_fp = _candidate_footprint_charge(dest[0], dest[1], unit, game_state, fp_pair)
     if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
         return False
-    if cand_fp & blocked:
+    if cand_fp & end_blocked:
         return False
     d_min = min(min_distance_between_sets(cand_fp, tfp, max_distance=start_min) for tfp in target_fps)
     if d_min >= start_min:

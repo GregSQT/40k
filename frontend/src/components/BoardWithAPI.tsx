@@ -1548,6 +1548,8 @@ export const BoardWithAPI: React.FC = () => {
 
   // Track clicked (but not selected) units for blue highlighting
   const [clickedUnitId, setClickedUnitId] = useState<number | null>(null);
+  /** Message du bouton « Check pile-in » : raison du blocage de la validation (null = masqué). */
+  const [pileInCheckMsg, setPileInCheckMsg] = useState<string | null>(null);
   const [illustrationPreviewUnitId, setIllustrationPreviewUnitId] = useState<Unit["id"] | null>(
     null
   );
@@ -3265,6 +3267,68 @@ export const BoardWithAPI: React.FC = () => {
                   </span>
                 );
               })()}
+              <button
+                type="button"
+                onClick={() => {
+                  const plan = apiProps.pileInMovePlan;
+                  if (!plan) {
+                    setPileInCheckMsg(null);
+                    return;
+                  }
+                  if (plan.canValidate) {
+                    setPileInCheckMsg("Pile-in valide ✓ (tu peux valider)");
+                    return;
+                  }
+                  const reasons: string[] = [];
+                  const invalid = Object.entries(plan.perModelValid ?? {})
+                    .filter(([, v]) => v === false)
+                    .map(([m]) => m);
+                  if (invalid.length > 0) {
+                    reasons.push(
+                      `${invalid.length} figurine(s) hors zone de déplacement (${invalid.join(", ")})`
+                    );
+                  }
+                  if (!plan.unitEngaged) {
+                    reasons.push("l'unité ne finit pas au contact d'un ennemi (zone d'engagement)");
+                  }
+                  if (!plan.coherencyOk) {
+                    reasons.push("cohésion d'unité rompue (figs trop éloignées entre elles)");
+                  }
+                  if (!plan.keptEngagements) {
+                    reasons.push("un engagement de départ est perdu");
+                  }
+                  setPileInCheckMsg(
+                    reasons.length > 0
+                      ? `Non validable — ${reasons.join(" ; ")}`
+                      : "Non validable (raison inconnue)"
+                  );
+                }}
+                style={{
+                  border: "1px solid rgba(0,0,0,0.35)",
+                  borderRadius: 6,
+                  background: "#0ea5e9",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  padding: "6px 12px",
+                  marginLeft: 8,
+                }}
+              >
+                Check pile-in
+              </button>
+              {pileInCheckMsg && (
+                <span
+                  style={{
+                    color: apiProps.pileInMovePlan?.canValidate ? "#86efac" : "#fca5a5",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    marginLeft: 8,
+                  }}
+                >
+                  {pileInCheckMsg}
+                </span>
+              )}
             </div>
           </div>
         )}
