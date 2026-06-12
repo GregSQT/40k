@@ -32,6 +32,9 @@ export function setupBoardClickHandler(callbacks: {
   // Charge par-figurine (V11 11.04, Slice G)
   onMoveModelInChargePlan?(modelId: string, col: number, row: number): void;
   onCancelChargeModelMove?(): void;
+  // Pile-in par-figurine (V11 12.04, mode fin type charge)
+  onMovePileInModel?(modelId: string, col: number, row: number): void;
+  onCancelPileInModelMove?(): void;
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action callbacks
   onAdvanceMove?(unitId: UnitId, destCol: number, destRow: number): void;
   onDeployUnit?(unitId: UnitId, destCol: number, destRow: number): void;
@@ -144,6 +147,13 @@ export function setupBoardClickHandler(callbacks: {
       // (qui désactiverait la charge). Clic droit sur le chargeur = annuler (forfait).
       if (clickType === "right" && selectedUnitId === unitId) {
         callbacks.onCancelChargeModelMove?.();
+      }
+      return; // Prevent fallthrough to other handlers
+    } else if (phase === "fight" && mode === "pileInModelMove") {
+      // Pile-in par-figurine (miroir charge) : sélection/pose gérées par les handlers canvas.
+      // Clic sur une unité ne doit PAS retomber sur onSelectUnit. Clic droit sur l'unité = annuler.
+      if (clickType === "right" && selectedUnitId === unitId) {
+        callbacks.onCancelPileInModelMove?.();
       }
       return; // Prevent fallthrough to other handlers
     } else if (phase === "charge" && mode === "chargePreview" && selectedUnitId !== null) {
@@ -291,6 +301,13 @@ export function setupBoardClickHandler(callbacks: {
       // Plan de charge par-figurine : pose la fig active a l'hex clique (dans son pool eligible).
       if (activeModelId && callbacks.onMoveModelInChargePlan) {
         callbacks.onMoveModelInChargePlan(activeModelId, col, row);
+      }
+      return;
+    }
+    if (mode === "pileInModelMove") {
+      // Plan de pile-in par-figurine : pose la fig active a l'hex clique (dans son pool ≤3").
+      if (activeModelId && callbacks.onMovePileInModel) {
+        callbacks.onMovePileInModel(activeModelId, col, row);
       }
       return;
     }

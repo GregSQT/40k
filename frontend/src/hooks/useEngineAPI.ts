@@ -470,6 +470,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     | "chargeModelMove"
     | "advancePreview"
     | "pileInPreview"
+    | "pileInModelMove"
     | "consolidationPreview"
   >("select");
   const [movePreview, setMovePreview] = useState<{
@@ -549,6 +550,27 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Mask loops (polygone lissé monde) de la zone de landing de la fig active — même contrat que
    * ``squadMoveModelMaskLoopsRef`` pour le move per-fig. Rendu lissé au lieu de disques bruts. */
   const chargeModelMaskLoopsRef = useRef<number[][] | null>(null);
+  /**
+   * Pile-in par-figurine (V11 12.04, mode fin type charge) — plan provisoire NON committé.
+   * ``models`` : figs déjà posées (model_id -> {col,row}) ; les non-posées restent à l'origine.
+   * ``eligibleModels`` : figs non posées pouvant finir plus proche du palier ennemi (voile violet).
+   * ``activeModelId`` : fig sélectionnée dont le pool (≤3") est affiché. ``canValidate`` : plan légal.
+   * Contrat backend simplifié vs charge : pas de phases, ni distances, ni cibles satisfaites.
+   */
+  const [pileInMovePlan, setPileInMovePlan] = useState<{
+    unitId: number;
+    models: Record<string, { col: number; row: number }>;
+    eligibleModels: string[];
+    unplaced: string[];
+    activeModelId: string | null;
+    canValidate: boolean;
+  } | null>(null);
+  const pileInMovePlanRef = useRef<typeof pileInMovePlan>(null);
+  pileInMovePlanRef.current = pileInMovePlan;
+  /** Pool (hexes "col,row") de la fig pile-in active. */
+  const pileInModelPoolRef = useRef<Set<string>>(new Set());
+  /** Mask loops (polygone lissé monde) de la zone de landing de la fig pile-in active. */
+  const pileInModelMaskLoopsRef = useRef<number[][] | null>(null);
   /**
    * Tir par-figurine (PvP manuel) — plan provisoire de cibles assignées par fig.
    * ``targets`` : model_id -> squad_id ennemi assigné (cible de cette fig pour la phase).
@@ -2413,6 +2435,24 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
             setBlinkingUnits({ unitIds: [], blinkTimer: null, attackerId: null });
           }
+          // Fight phase : pile-in PAR-FIGURINE (mode fin type charge). La réponse d'activate_unit
+          // (et des refresh suivants) porte ``pile_in_model_move:true`` → on entre/maintient le mode
+          // et on applique le plan_state. Doit précéder les branches V10 (waiting_for_pile_in) et
+          // la réinitialisation paresseuse (fight_subphase pile_in sans waiting).
+          else if (data.game_state?.phase === "fight" && data.result?.pile_in_model_move === true) {
+            const uid = parseInt(
+              String(data.result.unitId ?? data.game_state.active_fight_unit),
+              10
+            );
+            // Purge des artefacts du pile-in rigide V10 (disques + empreinte) pour éviter un rendu fantôme.
+            setPileInDestinations([]);
+            moveDestPoolRef.current = new Set();
+            footprintZoneRef.current = new Set();
+            footprintMaskLoopsRef.current = null;
+            setSelectedUnitId(uid);
+            setMode("pileInModelMove");
+            applyPileInPlanState(data.result as Record<string, unknown>);
+          }
           // Fight phase : pile in avant sélection de cible CC
           else if (
             data.game_state?.phase === "fight" &&
@@ -2460,6 +2500,28 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             data.game_state?.fight_subphase === "pile_in" &&
             !data.result?.waiting_for_pile_in
           ) {
+            console.log("[PILE_IN_DEBUG] branch=RESET(2458) lazy pile_in", {
+              subphase: data.game_state?.fight_subphase,
+              waiting_for_pile_in: data.result?.waiting_for_pile_in,
+              waiting_for_player: data.result?.waiting_for_player,
+              pile_in_completed: data.result?.pile_in_completed,
+              error: data.result?.error,
+              valid_targets: data.result?.valid_targets,
+              posU2_received: (data.game_state?.units ?? [])
+                .filter((u: { id: string | number }) => String(u.id) === "2")
+                .map(
+                  (u: { id: string | number; col?: number; row?: number }) =>
+                    `${u.id}:(${u.col},${u.row})`
+                )
+                .join(" "),
+              posU2_merged: (latestGameStateRef.current?.units ?? [])
+                .filter((u: { id: string | number }) => String(u.id) === "2")
+                .map(
+                  (u: { id: string | number; col?: number; row?: number }) =>
+                    `${u.id}:(${u.col},${u.row})`
+                )
+                .join(" "),
+            });
             setPileInDestinations([]);
             moveDestPoolRef.current = new Set();
             footprintZoneRef.current = new Set();
@@ -2556,6 +2618,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               return true;
             })()
           ) {
+            console.log("[PILE_IN_DEBUG] branch=FIGHT_TARGET(2531) waiting_for_player", {
+              subphase: data.game_state?.fight_subphase,
+              valid_targets: data.result?.valid_targets,
+              pile_in_completed: data.result?.pile_in_completed,
+            });
             setPileInDestinations([]);
             if (targetPreview?.blinkTimer) {
               clearInterval(targetPreview.blinkTimer);
@@ -4728,6 +4795,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handlePileInMove = useCallback(
     async (unitId: number, destCol: number, destRow: number) => {
       const isConsolidation = mode === "consolidationPreview";
+      console.log("[PILE_IN_DEBUG] send", {
+        action: isConsolidation ? "consolidation" : "pile_in",
+        unitId: String(unitId),
+        destCol,
+        destRow,
+      });
       await executeAction({
         action: isConsolidation ? "consolidation" : "pile_in",
         unitId: String(unitId),
@@ -5284,6 +5357,147 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setMode("select");
   }, [executeAction, selectedUnitId]);
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // PILE-IN PAR FIGURINE (V11 12.04, mode fin type charge) — contrat backend
+  // pile_in_plan_state (lecture pure) + commit_pile_in_plan. L'unité active vient
+  // de game_state.active_fight_unit (posée par activate_unit) → pas d'unitId dans l'action.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /** Applique une réponse pile_in_model_move (plan_state) : voile (eligible_models) + pool de la
+   * fig sélectionnée. Initialise le plan local depuis ``provisional`` au premier appel (prev null). */
+  const applyPileInPlanState = useCallback((result: Record<string, unknown>) => {
+    const eligibleModels = ((result.eligible_models ?? []) as unknown[]).map((m) => String(m));
+    const poolArr = (result.pool ?? []) as Array<[number, number]>;
+    const maskLoopsRaw = result.footprint_mask_loops;
+    const unplaced = ((result.unplaced ?? []) as unknown[]).map((m) => String(m));
+    const canValidate = result.can_validate === true;
+    const selectedModel = result.selected_model != null ? String(result.selected_model) : null;
+    setPileInMovePlan((prev) => {
+      const base = prev ?? {
+        unitId: parseInt(String(result.unitId), 10),
+        models: Object.fromEntries(
+          Object.entries((result.provisional ?? {}) as Record<string, [number, number]>).map(
+            ([m, p]) => [m, { col: Number(p[0]), row: Number(p[1]) }]
+          )
+        ),
+        eligibleModels: [],
+        unplaced: [],
+        activeModelId: null,
+        canValidate: false,
+      };
+      // Fig active = celle échoée par le backend si encore éligible, sinon l'ancienne si toujours
+      // éligible, sinon aucune. Le pool ne vaut que pour elle (calcul ciblé backend).
+      const active =
+        selectedModel != null && eligibleModels.includes(selectedModel)
+          ? selectedModel
+          : base.activeModelId && eligibleModels.includes(base.activeModelId)
+            ? base.activeModelId
+            : null;
+      const pool = new Set<string>();
+      if (active != null && active === selectedModel) {
+        for (const [c, r] of poolArr) pool.add(`${Number(c)},${Number(r)}`);
+      }
+      pileInModelPoolRef.current = pool;
+      pileInModelMaskLoopsRef.current =
+        active != null && active === selectedModel && Array.isArray(maskLoopsRaw)
+          ? (maskLoopsRaw as number[][])
+          : null;
+      return { ...base, eligibleModels, unplaced, canValidate, activeModelId: active };
+    });
+  }, []);
+
+  /** Lecture pure : recalcule l'état du plan pile-in depuis le backend (active_fight_unit). */
+  const refreshPileInPlanState = useCallback(
+    async (
+      models: Record<string, { col: number; row: number }>,
+      selectedModel: string | null = null
+    ) => {
+      const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row]);
+      const action: Record<string, unknown> = { action: "pile_in_plan_state", plan };
+      if (selectedModel != null) action.selected_model = selectedModel;
+      const result = await postEngineQuery(action);
+      if (!result) throw new Error("pile_in_plan_state: réponse vide");
+      applyPileInPlanState(result);
+    },
+    [postEngineQuery, applyPileInPlanState]
+  );
+
+  /** Clic sur une fig éligible : la rend active + demande SON pool au backend (calcul ciblé). */
+  const handleSelectPileInModel = useCallback(
+    (modelId: string) => {
+      const plan = pileInMovePlanRef.current;
+      if (!plan?.eligibleModels.includes(modelId)) return; // non éligible → ignore
+      pileInModelPoolRef.current = new Set();
+      pileInModelMaskLoopsRef.current = null;
+      setPileInMovePlan((prev) => (prev ? { ...prev, activeModelId: modelId } : prev));
+      void refreshPileInPlanState(plan.models, modelId);
+    },
+    [refreshPileInPlanState]
+  );
+
+  /** Pose la fig active à (col,row) (dans son pool) → MAJ plan + re-pile_in_plan_state. */
+  const handleMovePileInModel = useCallback(
+    (modelId: string, col: number, row: number) => {
+      if (!pileInModelPoolRef.current.has(`${col},${row}`)) return;
+      pileInModelPoolRef.current = new Set();
+      pileInModelMaskLoopsRef.current = null;
+      setPileInMovePlan((prev) => {
+        if (!prev) return prev;
+        const models = { ...prev.models, [modelId]: { col, row } };
+        // Pose → fig désélectionnée ; refresh sans selected (juste le voile des figs restantes).
+        void refreshPileInPlanState(models, null);
+        return { ...prev, models, activeModelId: null };
+      });
+    },
+    [refreshPileInPlanState]
+  );
+
+  /** Clic sur une fig DÉJÀ POSÉE : la retire du plan (redevient éligible) pour la repositionner. */
+  const handleUnplacePileInModel = useCallback(
+    (modelId: string) => {
+      setPileInMovePlan((prev) => {
+        if (!prev?.models[modelId]) return prev;
+        const models = { ...prev.models };
+        delete models[modelId];
+        void refreshPileInPlanState(models, modelId);
+        return { ...prev, models, activeModelId: modelId };
+      });
+    },
+    [refreshPileInPlanState]
+  );
+
+  /** Bouton Valider le pile-in : commit atomique du plan complet (commit_pile_in_plan). */
+  const handleCommitPileInPlan = useCallback(async () => {
+    const plan = pileInMovePlanRef.current;
+    if (!plan?.canValidate) return;
+    const planArr = Object.entries(plan.models).map(([mid, p]) => [mid, p.col, p.row]);
+    try {
+      await executeAction({ action: "commit_pile_in_plan", plan: planArr });
+      pileInModelPoolRef.current = new Set();
+      pileInModelMaskLoopsRef.current = null;
+      setPileInMovePlan(null);
+      setSelectedUnitId(null);
+      setMode("select");
+    } catch (e) {
+      console.error("[PILE-IN] commit FAILED", e);
+      setError(`Pile-in failed: ${formatApiConnectionError(e)}`);
+    }
+  }, [executeAction]);
+
+  /** Bouton Annuler : renonce à piler l'unité active (skip, la consomme), nettoie le plan local. */
+  const handleCancelPileInModelMove = useCallback(async () => {
+    pileInModelPoolRef.current = new Set();
+    pileInModelMaskLoopsRef.current = null;
+    setPileInMovePlan(null);
+    try {
+      await executeAction({ action: "skip" });
+    } catch (e) {
+      console.error("Cancel pile-in model move (skip) failed:", e);
+    }
+    setSelectedUnitId(null);
+    setMode("select");
+  }, [executeAction]);
+
   const handleStartTargetPreview = useCallback(
     async (shooterId: number | string, targetId: number | string) => {
       const numericShooterId = typeof shooterId === "number" ? shooterId : parseInt(shooterId, 10);
@@ -5714,6 +5928,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onUnplaceChargeModel: () => {},
       onCommitChargePlan: async () => {},
       onCancelChargeModelMove: async () => {},
+      pileInMovePlan: null,
+      pileInModelPoolRef,
+      pileInModelMaskLoopsRef,
+      onSelectPileInModel: () => {},
+      onMovePileInModel: () => {},
+      onUnplacePileInModel: () => {},
+      onCommitPileInPlan: async () => {},
+      onCancelPileInModelMove: async () => {},
       onSetAdvanceMode: async () => {},
       onTakeToSkies: async () => {},
       onStationary: async () => {},
@@ -5868,6 +6090,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onUnplaceChargeModel: handleUnplaceChargeModel,
     onCommitChargePlan: handleCommitChargePlan,
     onCancelChargeModelMove: handleCancelChargeModelMove,
+    // Pile-in par-figurine (V11 12.04, mode fin type charge)
+    pileInMovePlan,
+    pileInModelPoolRef,
+    pileInModelMaskLoopsRef,
+    onSelectPileInModel: handleSelectPileInModel,
+    onMovePileInModel: handleMovePileInModel,
+    onUnplacePileInModel: handleUnplacePileInModel,
+    onCommitPileInPlan: handleCommitPileInPlan,
+    onCancelPileInModelMove: handleCancelPileInModelMove,
     onSetAdvanceMode: handleSetAdvanceMode,
     onTakeToSkies: handleTakeToSkies,
     onStationary: handleStationary,

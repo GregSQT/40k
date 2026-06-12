@@ -247,8 +247,10 @@ export function computeDrawBoardPartialRedrawFingerprint(
     movePoolForDiskDraw.size > 0;
 
   const useChargeDestPoolDiskDraw =
-    interactionPhase === "charge" &&
-    (mode === "select" || mode === "chargePreview" || mode === "chargeModelMove") &&
+    ((interactionPhase === "charge" &&
+      (mode === "select" || mode === "chargePreview" || mode === "chargeModelMove")) ||
+      // Pile-in par-figurine (phase fight) : zone de landing rendue comme la charge par-fig.
+      (interactionPhase === "fight" && mode === "pileInModelMove")) &&
     !!chargeDestPoolRef?.current &&
     chargeDestPoolRef.current.size > 0;
 
@@ -2314,8 +2316,10 @@ export const drawBoard = (
         : HIGHLIGHT_COLOR;
 
     const useChargeDestPoolDiskDraw =
-      interactionPhase === "charge" &&
-      (mode === "select" || mode === "chargePreview" || mode === "chargeModelMove") &&
+      ((interactionPhase === "charge" &&
+        (mode === "select" || mode === "chargePreview" || mode === "chargeModelMove")) ||
+        // Pile-in par-figurine (phase fight) : zone de landing rendue comme la charge par-fig.
+        (interactionPhase === "fight" && mode === "pileInModelMove")) &&
       chargeDestPoolRef?.current &&
       chargeDestPoolRef.current.size > 0;
 
@@ -2465,7 +2469,9 @@ export const drawBoard = (
       // ``availableCells`` contient les mêmes hexes → les redessiner ici en disques rayon-hex crée la
       // couche festonnée parallèle (la vraie cause du « toujours pareil »). On la supprime ici.
       const cellsForHighlight =
-        moveOrAdvanceNoAnchors || mode === "chargeModelMove" ? [] : availableCells;
+        moveOrAdvanceNoAnchors || mode === "chargeModelMove" || mode === "pileInModelMove"
+          ? []
+          : availableCells;
       drawGroup(cellsForHighlight, availableCellsDrawColor, 0.4, false, availableCellCircleR);
     }
     {
@@ -2501,8 +2507,12 @@ export const drawBoard = (
         drawGroup(attackCells, ATTACK_COLOR, 0.4, false);
       }
     }
-    if (mode === "chargeModelMove" && useChargeDestPoolDiskDraw && chargeDestPoolRef?.current) {
-      // chargeModelMove : zone de landing rendue EXACTEMENT comme le move per-fig — MÊME pipeline
+    if (
+      (mode === "chargeModelMove" || mode === "pileInModelMove") &&
+      useChargeDestPoolDiskDraw &&
+      chargeDestPoolRef?.current
+    ) {
+      // charge/pile-in ModelMove : zone de landing rendue EXACTEMENT comme le move per-fig — MÊME pipeline
       // (``renderMoveAdvanceDestPoolCircleLayer`` : masque polygone d'union → RT → BlurFilter sur
       // l'alpha → bords DOUX + trous gérés via even-odd). Le ``drawPolygon`` nu précédent donnait des
       // bords nets/festonnés (visible surtout en petite base) ≠ move. Géométrie = boucles backend

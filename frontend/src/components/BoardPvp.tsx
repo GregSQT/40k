@@ -458,6 +458,24 @@ type BoardProps = {
   onUnplaceChargeModel?: (modelId: string) => void;
   onCommitChargePlan?: () => void | Promise<void>;
   onCancelChargeModelMove?: () => void | Promise<void>;
+  /** Pile-in par-figurine (V11 12.04, mode fin type charge) — plan provisoire des figs posées. */
+  pileInMovePlan?: {
+    unitId: number;
+    models: Record<string, { col: number; row: number }>;
+    eligibleModels: string[];
+    unplaced: string[];
+    activeModelId: string | null;
+    canValidate: boolean;
+  } | null;
+  /** Pool (hexes "col,row") de la fig de pile-in active. */
+  pileInModelPoolRef?: React.RefObject<Set<string>>;
+  /** Mask loops (polygone lissé monde) de la zone de landing de la fig de pile-in active. */
+  pileInModelMaskLoopsRef?: React.RefObject<number[][] | null>;
+  onSelectPileInModel?: (modelId: string) => void;
+  onMovePileInModel?: (modelId: string, col: number, row: number) => void;
+  onUnplacePileInModel?: (modelId: string) => void;
+  onCommitPileInPlan?: () => void | Promise<void>;
+  onCancelPileInModelMove?: () => void | Promise<void>;
   /** Tir par-figurine (PvP manuel). */
   squadShootPlan?: {
     unitId: number;
@@ -802,6 +820,13 @@ export default function Board({
   onMoveModelInChargePlan,
   onUnplaceChargeModel,
   onCancelChargeModelMove,
+  pileInMovePlan = null,
+  pileInModelPoolRef,
+  pileInModelMaskLoopsRef,
+  onSelectPileInModel,
+  onMovePileInModel,
+  onUnplacePileInModel,
+  onCancelPileInModelMove,
   squadShootPlan = null,
   onStartSquadModelShoot,
   onSelectModelForShoot,
@@ -1064,19 +1089,38 @@ export default function Board({
   /** Callbacks charge par-figurine — ref a jour pour les handlers d'event stables (Slice G). */
   const chargeModelCallbacksRef = useRef({ onMoveModelInChargePlan, onCancelChargeModelMove });
   chargeModelCallbacksRef.current = { onMoveModelInChargePlan, onCancelChargeModelMove };
+  /** Callbacks pile-in par-figurine — ref a jour (miroir charge). */
+  const pileInModelCallbacksRef = useRef({ onMovePileInModel, onCancelPileInModelMove });
+  pileInModelCallbacksRef.current = { onMovePileInModel, onCancelPileInModelMove };
   /** Plan provisoire toujours a jour pour les handlers d'event stables (sans relancer le draw). */
   const squadMovePlanRef = useRef(squadMovePlan);
   squadMovePlanRef.current = squadMovePlan;
 
   // ──────────────────────────────────────────────────────────────────────────
   // Slice G : la machinerie per-modèle (hover/pool/pose/sélection) est partagée entre le move
-  // (squadModelMove) et la charge (chargeModelMove). On expose une vue "squad-shaped" du plan de
-  // charge + des alias ``effectivePerModel*`` pour réutiliser ces handlers sans dupliquer la PIXI.
+  // (squadModelMove) et les modes « charge-like » (charge + pile-in : pose/dé-pose/sélection d'une
+  // fig dans un pool). On route le plan/pool/mask/callbacks du mode charge-like actif, puis on expose
+  // une vue "squad-shaped" + des alias ``effectivePerModel*`` pour réutiliser ces handlers PIXI.
   // ──────────────────────────────────────────────────────────────────────────
-  /** Vue squad-shaped du plan de charge : figs posées = plan, figs non posées = position d'origine. */
-  const chargeModelPlanView = useMemo(() => {
-    if (mode !== "chargeModelMove" || !chargeMovePlan) return null;
-    const uid = chargeMovePlan.unitId;
+  /** Modes « charge-like » : pose/dé-pose d'une fig dans un pool (charge OU pile-in). */
+  const isPileInModelMove = mode === "pileInModelMove";
+  const perModelChargeLike = mode === "chargeModelMove" || isPileInModelMove;
+  /** Plan source brut du mode charge-like actif. */
+  const activeChargeLikePlan = isPileInModelMove ? pileInMovePlan : chargeMovePlan;
+  /** Pool de la fig active du mode charge-like actif. */
+  const activeChargeLikePoolRef = isPileInModelMove ? pileInModelPoolRef : chargeModelPoolRef;
+  /** Mask loops de la zone de landing du mode charge-like actif. */
+  const activeChargeLikeMaskLoopsRef = isPileInModelMove
+    ? pileInModelMaskLoopsRef
+    : chargeModelMaskLoopsRef;
+  /** Callbacks select/unplace du mode charge-like actif (le move/cancel passent par les refs). */
+  const activeChargeLikeSelect = isPileInModelMove ? onSelectPileInModel : onSelectChargeModel;
+  const activeChargeLikeUnplace = isPileInModelMove ? onUnplacePileInModel : onUnplaceChargeModel;
+
+  /** Vue squad-shaped du plan charge-like : figs posées = plan, non posées = position d'origine. */
+  const perModelPlanView = useMemo(() => {
+    if (!perModelChargeLike || !activeChargeLikePlan) return null;
+    const uid = activeChargeLikePlan.unitId;
     const occupied = (
       gameState?.units_cache as
         | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
@@ -1087,28 +1131,29 @@ export default function Board({
     const originModels: Record<string, { col: number; row: number }> = {};
     for (const [mid, pos] of Object.entries(occupied)) {
       originModels[mid] = { col: pos[0], row: pos[1] };
-      const placed = chargeMovePlan.models[mid];
+      const placed = activeChargeLikePlan.models[mid];
       models[mid] = placed ? { col: placed.col, row: placed.row } : { col: pos[0], row: pos[1] };
     }
     return {
       unitId: uid,
       models,
       originModels,
-      activeModelId: chargeMovePlan.activeModelId,
+      activeModelId: activeChargeLikePlan.activeModelId,
       perModelValid: {} as Record<string, boolean>,
       coherencyOk: true,
-      canValidate: chargeMovePlan.canValidate,
+      canValidate: activeChargeLikePlan.canValidate,
       wouldFlee: false,
     };
-  }, [mode, chargeMovePlan, gameState?.units_cache]);
+  }, [perModelChargeLike, activeChargeLikePlan, gameState?.units_cache]);
 
-  /** true si on est dans un mode plan par-figurine (move OU charge). */
-  const isPerModelMove = mode === "squadModelMove" || mode === "chargeModelMove";
-  /** Plan per-modèle actif (squad ou charge) — même forme pour la machinerie partagée. */
-  const effectivePerModelPlan = mode === "chargeModelMove" ? chargeModelPlanView : squadMovePlan;
-  /** Ref de pool de la fig active (squad BFS ou charge eligible). */
-  const effectivePerModelPoolRef =
-    mode === "chargeModelMove" ? (chargeModelPoolRef ?? null) : (squadMoveModelPoolRef ?? null);
+  /** true si on est dans un mode plan par-figurine (move OU charge OU pile-in). */
+  const isPerModelMove = mode === "squadModelMove" || perModelChargeLike;
+  /** Plan per-modèle actif (squad ou charge-like) — même forme pour la machinerie partagée. */
+  const effectivePerModelPlan = perModelChargeLike ? perModelPlanView : squadMovePlan;
+  /** Ref de pool de la fig active (squad BFS ou charge-like eligible). */
+  const effectivePerModelPoolRef = perModelChargeLike
+    ? (activeChargeLikePoolRef ?? null)
+    : (squadMoveModelPoolRef ?? null);
   const effectivePerModelPlanRef = useRef(effectivePerModelPlan);
   effectivePerModelPlanRef.current = effectivePerModelPlan;
 
@@ -3519,12 +3564,12 @@ export default function Board({
           foundModelId = mid;
         }
       }
-      if (mode === "chargeModelMove") {
+      if (perModelChargeLike) {
         const active = plan.activeModelId;
-        const poolRef = chargeModelPoolRef?.current;
+        const poolRef = activeChargeLikePoolRef?.current;
         // 0) Clic sur une fig DÉJÀ POSÉE → la dé-poser (réajustement / cohésion).
-        if (foundModelId && chargeMovePlan?.models?.[foundModelId]) {
-          onUnplaceChargeModel?.(foundModelId);
+        if (foundModelId && activeChargeLikePlan?.models?.[foundModelId]) {
+          activeChargeLikeUnplace?.(foundModelId);
           return;
         }
         // 1) Clic dans le pool de la fig active → pose. Match exact, sinon snap à l'ancre la plus
@@ -3549,12 +3594,16 @@ export default function Board({
           if (bestD <= 2) ok = true;
         }
         if (active && ok) {
-          chargeModelCallbacksRef.current.onMoveModelInChargePlan?.(active, placeC, placeR);
+          if (isPileInModelMove) {
+            pileInModelCallbacksRef.current.onMovePileInModel?.(active, placeC, placeR);
+          } else {
+            chargeModelCallbacksRef.current.onMoveModelInChargePlan?.(active, placeC, placeR);
+          }
           return;
         }
         // 2) Clic sur une AUTRE figurine (non active) → la sélectionne (si éligible, sinon ignoré par le hook).
         if (foundModelId && foundModelId !== active) {
-          onSelectChargeModel?.(foundModelId);
+          activeChargeLikeSelect?.(foundModelId);
         }
         return;
       }
@@ -3567,14 +3616,15 @@ export default function Board({
     canvas.addEventListener("pointerdown", onPointerDownSelect);
     return () => canvas.removeEventListener("pointerdown", onPointerDownSelect);
   }, [
-    mode,
     isPerModelMove,
+    perModelChargeLike,
+    isPileInModelMove,
     effectivePerModelPlan,
-    onSelectChargeModel,
-    onUnplaceChargeModel,
-    chargeMovePlan,
+    activeChargeLikePlan,
+    activeChargeLikeSelect,
+    activeChargeLikeUnplace,
+    activeChargeLikePoolRef?.current,
     boardConfig,
-    chargeModelPoolRef?.current,
   ]);
 
   // TIR par-figurine (PvP manuel) : phase shoot. Entrée sur escouade OWN multi-fig →
@@ -3877,7 +3927,7 @@ export default function Board({
     app.stage.addChild(overlay);
     chargeModelVeilOverlayRef.current = overlay;
     overlay.clear();
-    if (mode === "chargeModelMove" && chargeMovePlan && boardConfig) {
+    if (perModelChargeLike && activeChargeLikePlan && boardConfig) {
       const HEX_RADIUS_H = boardConfig.hex_radius;
       const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
       const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
@@ -3890,7 +3940,7 @@ export default function Board({
       // doivent) agir dans la phase courante (1 = ≤1", 2 = ≤2", 3 = se rapprocher). ``eligibleModels``
       // est recalculé en temps réel par le backend (charge_plan_state) → le voile suit l'évolution des
       // phases. Active = remplissage marqué (en plus du ghost) ; posée = exclue.
-      const charger = units.find((u) => String(u.id) === String(chargeMovePlan.unitId));
+      const charger = units.find((u) => String(u.id) === String(activeChargeLikePlan.unitId));
       const baseSz = charger ? resolveBaseSizeForUnitDisplay(charger) : 1;
       const modelR = baseSz > 1 ? (baseSz * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
       const ringR = modelR * 1.25;
@@ -3903,21 +3953,21 @@ export default function Board({
             { occupied_hexes_by_model?: Record<string, [number, number]> }
           >;
         }
-      )?.units_cache?.[String(chargeMovePlan.unitId)]?.occupied_hexes_by_model;
-      const eligibleIds = new Set(chargeMovePlan.eligibleModels);
+      )?.units_cache?.[String(activeChargeLikePlan.unitId)]?.occupied_hexes_by_model;
+      const eligibleIds = new Set(activeChargeLikePlan.eligibleModels);
       if (byModel) {
         for (const [mid, pos] of Object.entries(byModel)) {
           if (!eligibleIds.has(mid)) continue;
-          if (chargeMovePlan.models[mid]) continue; // déjà posée → traitée comme ghost déplacé
+          if (activeChargeLikePlan.models[mid]) continue; // déjà posée → traitée comme ghost déplacé
           const [cx, cy] = hexCenter(pos[0], pos[1]);
-          const isActive = mid === chargeMovePlan.activeModelId;
+          const isActive = mid === activeChargeLikePlan.activeModelId;
           overlay.lineStyle(lineW, VIOLET, 1);
           overlay.beginFill(VIOLET, isActive ? 0.7 : 0.45);
           overlay.drawCircle(cx, cy, ringR);
           overlay.endFill();
         }
       }
-      // 03.04 : voile cible par UNITÉ pendant la charge per-fig — ROUGE = cible non satisfaite
+      // 03.04 : voile cible par UNITÉ — uniquement en charge (le pile-in n'a pas de cibles satisfaites).
       // (aucune fig chargeant à ≤ EZ), VIOLET = satisfaite (≥ 1 fig engagée). Backend fournit les
       // deux listes dans chargeMovePlan ; redraw via la dep chargeMovePlan de cet effet.
       const RED = 0xef4444;
@@ -3947,8 +3997,10 @@ export default function Board({
           overlay.endFill();
         }
       };
-      for (const uid of chargeMovePlan.unsatisfiedTargets) drawTargetVeil(uid, RED);
-      for (const uid of chargeMovePlan.satisfiedTargets) drawTargetVeil(uid, GREEN);
+      if (!isPileInModelMove && chargeMovePlan) {
+        for (const uid of chargeMovePlan.unsatisfiedTargets) drawTargetVeil(uid, RED);
+        for (const uid of chargeMovePlan.satisfiedTargets) drawTargetVeil(uid, GREEN);
+      }
     }
     return () => {
       if (!overlay.destroyed) {
@@ -3958,7 +4010,15 @@ export default function Board({
       }
       if (chargeModelVeilOverlayRef.current === overlay) chargeModelVeilOverlayRef.current = null;
     };
-  }, [mode, chargeMovePlan, boardConfig, units, gameState]);
+  }, [
+    perModelChargeLike,
+    isPileInModelMove,
+    activeChargeLikePlan,
+    chargeMovePlan,
+    boardConfig,
+    units,
+    gameState,
+  ]);
 
   // Ghost per-figurine (charge model move) : calque exact du ghost move per-fig — le fantôme de la
   // fig active suit le curseur et snappe sur le pool de landing (chargeModelPoolRef), maj
@@ -3966,9 +4026,9 @@ export default function Board({
   // move). La pose reste gérée par onPointerDownSelect (clic). Actif quand mode === "chargeModelMove"
   // && activeModelId set ; sinon le ghost est caché.
   useEffect(() => {
-    if (mode !== "chargeModelMove") return;
+    if (!perModelChargeLike) return;
     if (!boardConfig) return;
-    const activeModelId = chargeMovePlan?.activeModelId ?? null;
+    const activeModelId = activeChargeLikePlan?.activeModelId ?? null;
     if (!activeModelId) {
       if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
         hoverSpriteRef.current.visible = false;
@@ -3981,10 +4041,10 @@ export default function Board({
     const app = appRef.current;
     if (!app) return;
 
-    const charger = units.find((u) => String(u.id) === String(chargeMovePlan?.unitId ?? -1));
+    const charger = units.find((u) => String(u.id) === String(activeChargeLikePlan?.unitId ?? -1));
     if (!charger) return;
 
-    const pool = chargeModelPoolRef?.current;
+    const pool = activeChargeLikePoolRef?.current;
     if (!pool || pool.size === 0) return;
 
     const HEX_RADIUS_H = boardConfig.hex_radius;
@@ -4091,7 +4151,10 @@ export default function Board({
     const onMouseMove = (ev: MouseEvent) => {
       // Guard activeModelId (state via ref synchrone) + pool (ref synchrone) : couvre la race
       // pose-faite / render-pas-encore-arrivé, comme le ghost move.
-      if (!effectivePerModelPlanRef.current?.activeModelId || !chargeModelPoolRef?.current?.size) {
+      if (
+        !effectivePerModelPlanRef.current?.activeModelId ||
+        !activeChargeLikePoolRef?.current?.size
+      ) {
         if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
           hoverSpriteRef.current.visible = false;
         }
@@ -4122,16 +4185,15 @@ export default function Board({
       hoveredHexRef.current = null;
     };
   }, [
-    mode,
-    // Objet complet (pas seulement activeModelId) : ``onSelectChargeModel`` pose activeModelId de
-    // façon optimiste AVANT que le backend remplisse ``chargeModelPoolRef``. La réponse
-    // (applyChargePlanState) recrée ``chargeMovePlan`` → nouvelle identité → l'effet re-tourne et
-    // construit le ghost avec le pool désormais rempli.
-    chargeMovePlan,
+    perModelChargeLike,
+    // Objet complet (pas seulement activeModelId) : ``onSelect*Model`` pose activeModelId de façon
+    // optimiste AVANT que le backend remplisse le pool. La réponse recrée le plan (charge ou pile-in)
+    // → nouvelle identité → l'effet re-tourne et construit le ghost avec le pool désormais rempli.
+    activeChargeLikePlan,
     boardConfig,
     units,
     gameState?.units_cache,
-    chargeModelPoolRef,
+    activeChargeLikePoolRef,
   ]);
 
   // squad.md brique 3 : dès qu'AUCUNE fig n'est active en mode plan (fig posée → deselect, ou
@@ -5500,6 +5562,12 @@ export default function Board({
       onCancelChargeModelMove: () => {
         void chargeModelCallbacksRef.current.onCancelChargeModelMove?.();
       },
+      onMovePileInModel: (modelId: string, col: number, row: number) => {
+        pileInModelCallbacksRef.current.onMovePileInModel?.(modelId, col, row);
+      },
+      onCancelPileInModelMove: () => {
+        void pileInModelCallbacksRef.current.onCancelPileInModelMove?.();
+      },
     });
 
     // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Listen for advance button click
@@ -5772,15 +5840,15 @@ export default function Board({
       }
     }
 
-    // Slice G : charge par-figurine — zone de landing = pool eligible de la fig active, rendu en
-    // hexes simples (1:1 avec les hexes cliquables, pas en disques d'empreinte).
+    // Slice G : charge/pile-in par-figurine — zone de landing = pool eligible de la fig active, rendu
+    // en hexes simples (1:1 avec les hexes cliquables, pas en disques d'empreinte).
     if (
-      mode === "chargeModelMove" &&
-      chargeMovePlan?.activeModelId &&
-      chargeModelPoolRef?.current
+      perModelChargeLike &&
+      activeChargeLikePlan?.activeModelId &&
+      activeChargeLikePoolRef?.current
     ) {
       const cells: { col: number; row: number }[] = [];
-      for (const key of chargeModelPoolRef.current) {
+      for (const key of activeChargeLikePoolRef.current) {
         const sep = key.indexOf(",");
         cells.push({ col: Number(key.slice(0, sep)), row: Number(key.slice(sep + 1)) });
       }
@@ -6336,11 +6404,11 @@ export default function Board({
             .map(([m, v]) => `${m}=${v ? 1 : 0}`)
             .join(",")
         : "";
-      // Charge par-figurine (Slice G) : même logique que squadPlanFp — sans les positions du plan de
-      // charge dans l'empreinte, poser/sélectionner une fig ne re-render pas le ghost (fige à l'origine).
-      const chargePlanFp = chargeMovePlan
-        ? `${chargeMovePlan.unitId}:${chargeMovePlan.activeModelId ?? ""}:` +
-          Object.entries(chargeMovePlan.models)
+      // Charge/pile-in par-figurine : même logique que squadPlanFp — sans les positions du plan dans
+      // l'empreinte, poser/sélectionner une fig ne re-render pas le ghost (fige à l'origine).
+      const chargePlanFp = activeChargeLikePlan
+        ? `${activeChargeLikePlan.unitId}:${activeChargeLikePlan.activeModelId ?? ""}:` +
+          Object.entries(activeChargeLikePlan.models)
             .map(([m, p]) => `${m}@${p.col},${p.row}`)
             .join(",")
         : "";
@@ -6459,12 +6527,12 @@ export default function Board({
       return raw.map((loop) => loop.map((v) => v * ds));
     })();
 
-    // chargeModelMove : boucles lissées (monde) de la zone de landing de la fig active, fournies par
-    // le backend (charge_plan_state). Normalisées au format plat + display_scale, comme la branche
-    // gameState ci-dessus. Rendu lissé (Chaikin) au lieu de disques bruts festonnés.
+    // charge/pile-in ModelMove : boucles lissées (monde) de la zone de landing de la fig active,
+    // fournies par le backend (charge_plan_state / pile_in_plan_state). Normalisées au format plat +
+    // display_scale, comme la branche gameState ci-dessus. Rendu lissé (Chaikin) au lieu de disques.
     const chargeModelMaskLoops = (() => {
-      if (mode !== "chargeModelMove") return null;
-      const norm = normalizeMaskLoopsFromApi(chargeModelMaskLoopsRef?.current);
+      if (!perModelChargeLike) return null;
+      const norm = normalizeMaskLoopsFromApi(activeChargeLikeMaskLoopsRef?.current);
       if (!norm) return null;
       const ds =
         (boardConfig?.display as { display_scale?: number } | undefined)?.display_scale ?? 1;
@@ -6502,7 +6570,7 @@ export default function Board({
       chargeModelMaskLoops,
       pendingMoveAfterShooting,
       chargeDestPoolRef:
-        mode === "chargeModelMove" && chargeModelPoolRef ? chargeModelPoolRef : chargeDestPoolRef,
+        perModelChargeLike && activeChargeLikePoolRef ? activeChargeLikePoolRef : chargeDestPoolRef,
       selectedUnitBaseSize: unitForFootprintBase
         ? resolveBaseSizeForUnitDisplay(unitForFootprintBase)
         : undefined,
@@ -8084,10 +8152,12 @@ export default function Board({
     squadMoveModelMaskLoopsRef?.current,
     squadShootPlan,
     deadModelGhostsForRender,
-    // Slice G : redraw du pool/cercles charge à chaque pose / sélection de fig.
+    // Slice G : redraw du pool/cercles charge/pile-in à chaque pose / sélection de fig.
     chargeMovePlan,
+    pileInMovePlan,
     effectivePerModelPlan,
     chargeModelPoolRef,
+    pileInModelPoolRef,
   ]);
 
   // Handle weapon selection

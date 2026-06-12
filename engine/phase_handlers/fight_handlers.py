@@ -43,6 +43,7 @@ from .shared_utils import (
     compute_candidate_footprint,
     is_footprint_placement_valid,
     update_units_cache_position,
+    translate_squad_to_destination,
     update_enemy_adjacent_caches_after_unit_move,
 )
 
@@ -896,9 +897,13 @@ def _fight_apply_pile_in_move(
 
     set_unit_coordinates(unit, dest_col_i, dest_row_i)
     old_cache = require_key(game_state, "units_cache").get(unit_id_str)
-    old_occupied = old_cache.get("occupied_hexes") if old_cache else None
+    old_occupied = set(old_cache.get("occupied_hexes")) if old_cache else None
 
-    update_units_cache_position(game_state, unit_id_str, dest_col_i, dest_row_i)
+    # Déplacement rigide : translate TOUTES les figurines (models_cache) + resync
+    # occupied_hexes_by_model (source de vérité par-modèle lue par le front). Ne pas
+    # utiliser update_units_cache_position seul, qui ne bouge que l'ancre → les socles
+    # restaient figés à l'écran après un pile-in.
+    translate_squad_to_destination(game_state, unit_id_str, dest_col_i, dest_row_i)
 
     new_cache = require_key(game_state, "units_cache").get(unit_id_str)
     new_occupied = new_cache.get("occupied_hexes") if new_cache else None
@@ -1817,18 +1822,34 @@ def _handle_fight_pile_in_resolution(
         raise TypeError("game_state['_fight_pile_in_ctx'] must be a dict when fight_pile_in_pending")
 
     skip = action.get("skip") is True
+    safe_print(
+        game_state,
+        f"[PILE_IN_DEBUG] resolution unit={unit_id} skip={skip} "
+        f"action_keys={sorted(action.keys())} raw_dest=({action.get('destCol')},{action.get('destRow')}) "
+        f"valids_count={len(ctx.get('valid_destinations') or [])} valids={ctx.get('valid_destinations')}",
+    )
     if not skip:
         if "destCol" not in action or "destRow" not in action:
             return False, {"error": "pile_in_requires_dest_or_skip", "unitId": unit_id}
         dest_col, dest_row = normalize_coordinates(action["destCol"], action["destRow"])
         valids: List[Tuple[int, int]] = ctx.get("valid_destinations") or []
         if (dest_col, dest_row) not in valids:
+            safe_print(
+                game_state,
+                f"[PILE_IN_DEBUG] INVALID dest=({dest_col},{dest_row}) NOT in valids unit={unit_id}",
+            )
             return False, {
                 "error": "invalid_pile_in_destination",
                 "unitId": unit_id,
                 "destination": (dest_col, dest_row),
             }
+        _pos_before = require_unit_position(unit, game_state)
         _fight_apply_pile_in_move(game_state, unit, dest_col, dest_row)
+        _pos_after = require_unit_position(unit, game_state)
+        safe_print(
+            game_state,
+            f"[PILE_IN_DEBUG] APPLIED unit={unit_id} {_pos_before}->{_pos_after} dest=({dest_col},{dest_row})",
+        )
         game_state["_pile_in_toCol"] = dest_col
         game_state["_pile_in_toRow"] = dest_row
 
@@ -1859,6 +1880,12 @@ def _handle_fight_pile_in_resolution(
         else:
             _toggle_fight_alternation(game_state)
             _update_fight_subphase(game_state)
+        safe_print(
+            game_state,
+            f"[PILE_IN_DEBUG] RETURN no_targets unit={unit_id} "
+            f"phase_complete={result.get('phase_complete')} subphase={game_state.get('fight_subphase')!r} "
+            f"result_action={result.get('action')!r}",
+        )
         return True, result
 
     game_state["active_fight_unit"] = unit_id
@@ -1875,6 +1902,11 @@ def _handle_fight_pile_in_resolution(
         if target_id:
             return _handle_fight_attack(game_state, unit, target_id, config)
 
+    safe_print(
+        game_state,
+        f"[PILE_IN_DEBUG] RETURN waiting_for_player unit={unit_id} "
+        f"valid_targets={valid_targets} subphase={game_state.get('fight_subphase')!r}",
+    )
     return True, {
         "unitId": unit_id,
         "waiting_for_player": True,
@@ -4931,6 +4963,367 @@ def _fight_v11_auto_step(game_state: Dict[str, Any], config: Dict[str, Any]) -> 
     raise RuntimeError("_fight_v11_auto_step did not converge")
 
 
+def _fight_pile_in_build_model_pool(
+    game_state: Dict[str, Any],
+    model_id: str,
+    closest_tier_ids: List[str],
+    provisional_plan: Optional[Dict[str, Tuple[int, int]]] = None,
+) -> Dict[str, List[List[int]]]:
+    """Pool de destinations PAR-FIGURINE pour le pile-in (12.03, move par-figurine).
+
+    BFS d'UNE figurine du squad dans le budget fixe de 3" (× ``inches_to_subhex``), sans
+    traverser murs ni figs (ennemies, alliées, coéquipières). ``provisional_plan``
+    ({model_id: (col, row)}) remplace les positions des coéquipières déjà posées dans le plan UI
+    (recompute temps réel). ``closest_tier_ids`` = unité(s) ennemie(s) la/les plus proche(s) de
+    l'ESCOUADE (palier WHILE commun à toutes les figs, cf. ``pile_in_move_destinations_12_03``).
+
+    WHILE MOVING (12.03) : chaque destination doit finir l'empreinte du socle **strictement plus
+    proche** du palier le plus proche qu'à son départ. Les contraintes AFTER au niveau unité
+    (escouade engagée, engagements conservés) et la cohésion sont vérifiées au commit, pas ici.
+
+    Retour : {"closer": [[col,row],...], "engaged": [[col,row],...]} (engaged ⊆ closer ; engaged =
+    le socle finit à <= EZ d'au moins une cible du palier). Lecture pure.
+    """
+    from collections import deque
+    from engine.hex_utils import min_distance_between_sets
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from .shared_utils import get_engagement_zone
+    from .charge_handlers import (
+        _charge_prepare_footprint_offsets,
+        _candidate_footprint_charge,
+        _charge_synthetic_charger_cache_entry,
+    )
+
+    models_cache = require_key(game_state, "models_cache")
+    model = models_cache.get(str(model_id))
+    if model is None:
+        raise KeyError(f"_fight_pile_in_build_model_pool: model {model_id} not in models_cache")
+    squad_id = str(model["squad_id"])
+    unit = get_unit_by_id(game_state, squad_id)
+    empty: Dict[str, List[List[int]]] = {"closer": [], "engaged": []}
+    if not unit:
+        return empty
+
+    ez = int(get_engagement_zone(game_state))
+    budget = 3 * int(require_key(game_state, "inches_to_subhex"))
+    board_cols = int(require_key(game_state, "board_cols"))
+    board_rows = int(require_key(game_state, "board_rows"))
+    wall_hexes = game_state.get("wall_hexes", set())
+    player = int(model["player"])
+    units_cache = require_key(game_state, "units_cache")
+
+    closest = {str(t) for t in closest_tier_ids}
+    target_entries: List[Dict[str, Any]] = []
+    target_fps: List[Set[Tuple[int, int]]] = []
+    enemy_occupied: Set[Tuple[int, int]] = set()
+    other_occupied: Set[Tuple[int, int]] = set()
+    for eid, entry in units_cache.items():
+        occ = entry.get("occupied_hexes")
+        cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
+        if int(entry["player"]) != player:
+            enemy_occupied |= cells
+            if str(eid) in closest:
+                target_entries.append(entry)
+                target_fps.append(cells)
+        elif str(eid) != squad_id:
+            other_occupied |= cells
+    if not target_entries:
+        return empty
+
+    fp_offset_pair = _charge_prepare_footprint_offsets(unit, game_state)
+
+    # Coéquipières : collision (le plan provisoire override les figs déjà posées).
+    same_squad_occupied: Set[Tuple[int, int]] = set()
+    squad_models = require_key(game_state, "squad_models")
+    for mid in require_key(squad_models, squad_id):
+        if str(mid) == str(model_id):
+            continue
+        if provisional_plan and str(mid) in provisional_plan:
+            pc, pr = provisional_plan[str(mid)]
+            sib_fp = _candidate_footprint_charge(int(pc), int(pr), unit, game_state, fp_offset_pair)
+        else:
+            sib = models_cache.get(str(mid))
+            if sib is None:
+                continue
+            sib_fp = _candidate_footprint_charge(
+                int(sib["col"]), int(sib["row"]), unit, game_state, fp_offset_pair
+            )
+        same_squad_occupied |= sib_fp
+
+    blocked = set(wall_hexes) | enemy_occupied | other_occupied | same_squad_occupied
+
+    start_col, start_row = int(model["col"]), int(model["row"])
+    start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_offset_pair)
+    start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
+
+    # BFS centre-à-centre ≤ budget (le pile-in ne traverse ni mur ni fig).
+    visited: Set[Tuple[int, int]] = {(start_col, start_row)}
+    reachable: List[Tuple[int, int]] = []
+    queue: deque = deque([(start_col, start_row, 0)])
+    while queue:
+        c, r, d = queue.popleft()
+        if d >= budget:
+            continue
+        for nc, nr in get_hex_neighbors(c, r):
+            if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                continue
+            cell = (nc, nr)
+            if cell in visited or cell in blocked:
+                continue
+            visited.add(cell)
+            queue.append((nc, nr, d + 1))
+            reachable.append(cell)
+
+    closer: List[List[int]] = []
+    engaged: List[List[int]] = []
+    for cc, rr in reachable:
+        cand_fp = _candidate_footprint_charge(cc, rr, unit, game_state, fp_offset_pair)
+        if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
+            continue
+        if cand_fp & blocked:
+            continue
+        d_min = min(
+            min_distance_between_sets(cand_fp, tfp, max_distance=start_min) for tfp in target_fps
+        )
+        if d_min >= start_min:
+            continue  # WHILE MOVING : strictement plus proche du palier le plus proche
+        closer.append([cc, rr])
+        synth = _charge_synthetic_charger_cache_entry(game_state, unit, cc, rr, cand_fp)
+        if any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
+            engaged.append([cc, rr])
+
+    return {"closer": closer, "engaged": engaged}
+
+
+def _fight_pile_in_closest_tier_ids(
+    game_state: Dict[str, Any], unit: Dict[str, Any], target_ids: List[str]
+) -> List[str]:
+    """Sous-ensemble de ``target_ids`` au palier de distance minimale de l'empreinte de l'unité —
+    palier WHILE commun à toutes les figs (cf. ``pile_in_move_destinations_12_03``)."""
+    from engine.hex_utils import min_distance_between_sets
+
+    units_cache = require_key(game_state, "units_cache")
+    uid = str(require_key(unit, "id"))
+    entry = units_cache.get(uid)
+    if entry is None:
+        return []
+    unit_fp = set(entry.get("occupied_hexes") or {(int(entry["col"]), int(entry["row"]))})
+    d_min: Optional[int] = None
+    tier: List[str] = []
+    for tid in target_ids:
+        ce = units_cache.get(str(tid))
+        if ce is None:
+            continue
+        efp = set(ce.get("occupied_hexes") or {(int(ce["col"]), int(ce["row"]))})
+        d = min_distance_between_sets(unit_fp, efp)
+        if d_min is None or d < d_min:
+            d_min = d
+            tier = [str(tid)]
+        elif d == d_min:
+            tier.append(str(tid))
+    return tier
+
+
+def _fight_pile_in_preview_plan(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    plan: List[Tuple[str, int, int]],
+    closest_tier_ids: List[str],
+    engaged_before_ids: List[str],
+) -> Dict[str, Any]:
+    """Dry-run d'un plan pile-in par-figurine (12.03 WHILE/AFTER + cohésion 03.03). Lecture pure.
+
+    ``plan`` couvre TOUTES les figs vivantes. Légalité par-fig = appartenance au pool ``closer``
+    (ou figurine laissée à sa position d'origine). On ajoute la cohésion d'unité et les contraintes
+    AFTER au niveau unité : l'escouade finit engagée et chaque engagement de départ est conservé.
+
+    Retour : {per_model, coherency_ok, unit_engaged, kept_engagements, can_validate}.
+    """
+    from engine.hex_utils import min_distance_between_sets
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from .shared_utils import (
+        get_engagement_zone,
+        get_coherency_subhex,
+        get_cohesion_max_subhex,
+        get_min_neighbors,
+    )
+    from .charge_handlers import _charge_prepare_footprint_offsets, _candidate_footprint_charge
+
+    unit = get_unit_by_id(game_state, str(squad_id))
+    empty = {
+        "per_model": {},
+        "coherency_ok": False,
+        "unit_engaged": False,
+        "kept_engagements": False,
+        "can_validate": False,
+    }
+    if not unit:
+        return empty
+    models_cache = require_key(game_state, "models_cache")
+    norm = [(str(m), int(c), int(r)) for m, c, r in plan]
+    n = len(norm)
+    if n == 0:
+        return empty
+
+    # 1) Légalité par-fig : dans son pool ``closer`` (autres figs = positions provisoires) ou immobile.
+    pos_by_model = {mid: (c, r) for mid, c, r in norm}
+    per_model: Dict[str, bool] = {}
+    for mid, c, r in norm:
+        prov = {m2: pos_by_model[m2] for m2 in pos_by_model if m2 != mid}
+        m = models_cache.get(mid)
+        orig = (int(m["col"]), int(m["row"])) if m else None
+        if orig is not None and (c, r) == orig:
+            per_model[mid] = True
+            continue
+        pool = _fight_pile_in_build_model_pool(
+            game_state, mid, closest_tier_ids, provisional_plan=prov
+        )["closer"]
+        per_model[mid] = [c, r] in pool
+
+    # 2) Cohésion 03.03 (empreinte-à-empreinte, mêmes 2 puces que le move).
+    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
+    fps = [_candidate_footprint_charge(c, r, unit, game_state, fp_pair) for _, c, r in norm]
+    coh = get_coherency_subhex(game_state)
+    coh_max = get_cohesion_max_subhex(game_state)
+    min_nb = get_min_neighbors(game_state)
+    coherency_ok = True
+    if n > 1:
+        neigh = [0] * n
+        too_far = [False] * n
+        for i in range(n):
+            for j in range(i + 1, n):
+                d = min_distance_between_sets(fps[i], fps[j], max_distance=coh_max)
+                if d <= coh:
+                    neigh[i] += 1
+                    neigh[j] += 1
+                if d > coh_max:
+                    too_far[i] = True
+                    too_far[j] = True
+        for i in range(n):
+            if neigh[i] < min_nb or too_far[i]:
+                coherency_ok = False
+                break
+
+    # 3) AFTER (12.03) au niveau unité : empreinte union engagée + engagements de départ conservés.
+    union_fp: Set[Tuple[int, int]] = set()
+    for f in fps:
+        union_fp |= f
+    anchor_c, anchor_r = norm[0][1], norm[0][2]
+    synth_unit = _fight_synth_cache_entry_at_footprint(unit, game_state, anchor_c, anchor_r, union_fp)
+    ez = int(get_engagement_zone(game_state))
+    units_cache = require_key(game_state, "units_cache")
+    player = int(require_key(unit, "player"))
+    unit_engaged = any(
+        int(ce["player"]) != player and unit_entries_within_engagement_zone(synth_unit, ce, ez)
+        for eid, ce in units_cache.items()
+        if str(eid) != str(squad_id)
+    )
+    kept_engagements = True
+    for eid in engaged_before_ids:
+        ce = units_cache.get(str(eid))
+        if ce is None:
+            continue
+        if not unit_entries_within_engagement_zone(synth_unit, ce, ez):
+            kept_engagements = False
+            break
+
+    can_validate = bool(
+        all(per_model.values()) and coherency_ok and unit_engaged and kept_engagements
+    )
+    return {
+        "per_model": per_model,
+        "coherency_ok": coherency_ok,
+        "unit_engaged": unit_engaged,
+        "kept_engagements": kept_engagements,
+        "can_validate": can_validate,
+    }
+
+
+def _fight_pile_in_model_plan_state(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    provisional_plan: Optional[Dict[str, Tuple[int, int]]] = None,
+    selected_model: Optional[str] = None,
+) -> Dict[str, Any]:
+    """État du plan pile-in par-figurine exposé au front (miroir simplifié de ``charge_model_plan_state``).
+
+    Une seule « phase » (pas de within_1/engaged/closer) : chaque fig peut se déplacer ≤3" en finissant
+    plus proche du palier ennemi le plus proche. ``provisional_plan`` = figs déjà posées ; les autres
+    restent à leur position d'origine. ``selected_model`` non-None → calcule SON pool + empreinte lissée.
+    """
+    from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
+    from .charge_handlers import _charge_prepare_footprint_offsets, _candidate_footprint_charge
+
+    squad_id = str(require_key(unit, "id"))
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive = [str(m) for m in require_key(squad_models, squad_id) if str(m) in models_cache]
+    prov: Dict[str, Tuple[int, int]] = {
+        str(m): (int(c), int(r)) for m, (c, r) in (provisional_plan or {}).items()
+    }
+    origin = {m: (int(models_cache[m]["col"]), int(models_cache[m]["row"])) for m in alive}
+
+    targets = _fight_v11_pile_in_targets(game_state, unit)
+    closest_tier = _fight_pile_in_closest_tier_ids(game_state, unit, targets) if targets else []
+
+    unplaced = [m for m in alive if m not in prov]
+    eligible: List[str] = []
+    for m in unplaced:
+        if _fight_pile_in_build_model_pool(game_state, m, closest_tier, provisional_plan=prov)["closer"]:
+            eligible.append(m)
+
+    pool: List[List[int]] = []
+    mask_loops: List[List[List[float]]] = []
+    if selected_model is not None and str(selected_model) in alive:
+        sel = str(selected_model)
+        sel_prov = {k: v for k, v in prov.items() if k != sel}
+        pool = _fight_pile_in_build_model_pool(game_state, sel, closest_tier, provisional_plan=sel_prov)["closer"]
+        if pool:
+            fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
+            fp_zone: Set[Tuple[int, int]] = set()
+            for cc, rr in pool:
+                fp_zone |= _candidate_footprint_charge(int(cc), int(rr), unit, game_state, fp_pair)
+            loops = compute_move_preview_mask_loops_world(fp_zone, game_state)
+            if loops:
+                mask_loops = [[[float(x), float(y)] for (x, y) in loop] for loop in loops]
+
+    full_plan: List[Tuple[str, int, int]] = [
+        (m, prov[m][0], prov[m][1]) if m in prov else (m, origin[m][0], origin[m][1]) for m in alive
+    ]
+    engaged_before = _fight_units_engaged_with(game_state, unit)
+    prev = _fight_pile_in_preview_plan(game_state, squad_id, full_plan, closest_tier, engaged_before)
+
+    return {
+        "phase": "fight",
+        "fight_subphase": "pile_in",
+        "pile_in_model_move": True,
+        "unitId": squad_id,
+        "active_fight_unit": squad_id,
+        "origin_models": {m: [c, r] for m, (c, r) in origin.items()},
+        "provisional": {m: [c, r] for m, (c, r) in prov.items()},
+        "eligible_models": eligible,
+        "selected_model": str(selected_model) if selected_model is not None else None,
+        "pool": pool,
+        "footprint_mask_loops": mask_loops,
+        "unplaced": unplaced,
+        "can_validate": prev["can_validate"],
+        "waiting_for_player": True,
+        "action": "wait",
+    }
+
+
+def _fight_pile_in_commit_plan(
+    game_state: Dict[str, Any], unit: Dict[str, Any], plan: List[Tuple[str, int, int]]
+) -> None:
+    """Pose le plan pile-in par-figurine (``commit_move`` type ``pile_in``) + resync l'ancre de l'unité."""
+    from .shared_utils import commit_move, set_unit_coordinates
+
+    commit_move(plan, game_state, "pile_in")
+    entry = require_key(game_state, "units_cache").get(str(require_key(unit, "id")))
+    if entry is not None:
+        set_unit_coordinates(unit, int(entry["col"]), int(entry["row"]))
+
+
 def _fight_v11_pile_in_targets(game_state: Dict[str, Any], unit: Dict[str, Any]) -> List[str]:
     """Cibles de pile-in (12.03) en auto-sélection : toutes les unités engagées si engagée,
     sinon les ennemis dans ``pile_in_target_range`` (5\")."""
@@ -5067,42 +5460,83 @@ def _fight_v11_manual_step(
                 f"PILE IN → fin demandée par le joueur (groupe {list(eligible)} marqué traité)",
             )
             return _fight_v11_manual_state(game_state)
-        if atype == "pile_in":
-            # Move (destCol/destRow) ou skip sur l'unité active (présentée par manual_state).
-            active = game_state.get("active_fight_unit")
-            act_uid = str(active) if active is not None else uid
+        # --- Pile-in PAR-FIGURINE (move fin, miroir charge) ---
+        active = game_state.get("active_fight_unit")
+        act_uid = str(active) if active is not None else None
+
+        def _prov_from_action() -> Dict[str, Tuple[int, int]]:
+            prov: Dict[str, Tuple[int, int]] = {}
+            for e in (action.get("plan") or []):
+                prov[str(e[0])] = (int(e[1]), int(e[2]))
+            return prov
+
+        if skip:
+            # Le joueur renonce à piler l'unité active → marquée traitée sans déplacement.
             if act_uid is not None and act_uid in eligible:
-                u = get_unit_by_id(game_state, act_uid)
-                if u is None:
-                    raise KeyError(f"Pile-in unit {act_uid} missing from game_state['units']")
-                if skip:
-                    _fight_v11_log(game_state, f"PILE IN unit {act_uid} → SKIP (joueur)")
-                elif "destCol" in action and "destRow" in action:
-                    dest = normalize_coordinates(action["destCol"], action["destRow"])
-                    valid = game_state.get("_fight_v11_pile_in_dests") or []
-                    if (int(dest[0]), int(dest[1])) in valid:
-                        _fight_apply_pile_in_move(game_state, u, dest[0], dest[1])
-                        _fight_v11_log(game_state, f"PILE IN unit {act_uid} → déplacement {dest}")
-                    else:
-                        _fight_v11_log(game_state, f"PILE IN unit {act_uid} → destination {dest} invalide, skip")
-                else:
-                    _fight_v11_log(game_state, f"PILE IN unit {act_uid} → SKIP (action sans destination)")
                 game_state["pile_in_done"].add(act_uid)
+                _fight_v11_log(game_state, f"PILE IN unit {act_uid} → SKIP (joueur)")
             _fight_v11_clear_pile_in_preview(game_state)
             return _fight_v11_manual_state(game_state)
-        if atype == "activate_unit" and uid in eligible:
-            # Sélection explicite d'une autre unité éligible → présenter son pile-in.
-            u = get_unit_by_id(game_state, uid)
-            if u is not None:
-                res = _fight_v11_pile_in_present(game_state, u)
-                if res is not None:
-                    done = {str(x) for x in game_state.get("pile_in_done", set())}
-                    game_state["fight_eligible_units"] = [e for e in eligible if str(e) not in done]
-                    _fight_v11_log(game_state, f"PILE IN : unit {uid} sélectionnée par le joueur")
-                    return True, res
-                game_state["pile_in_done"].add(uid)
-                _fight_v11_log(game_state, f"PILE IN unit {uid} : aucune destination → skip auto")
+
+        if atype == "pile_in_plan_state":
+            # Refresh de l'aperçu par-figurine (plan provisoire + figurine sélectionnée).
+            if act_uid is None or act_uid not in eligible:
+                return _fight_v11_manual_state(game_state)
+            u = get_unit_by_id(game_state, act_uid)
+            if u is None:
+                raise KeyError(f"Pile-in unit {act_uid} missing from game_state['units']")
+            sel = action.get("selected_model")
+            return True, _fight_pile_in_model_plan_state(
+                game_state, u, _prov_from_action(), str(sel) if sel is not None else None
+            )
+
+        if atype == "commit_pile_in_plan":
+            # Validation finale : pose toutes les figs (posées + origine) si le plan est légal.
+            if act_uid is None or act_uid not in eligible:
+                return _fight_v11_manual_state(game_state)
+            u = get_unit_by_id(game_state, act_uid)
+            if u is None:
+                raise KeyError(f"Pile-in unit {act_uid} missing from game_state['units']")
+            prov = _prov_from_action()
+            models_cache = require_key(game_state, "models_cache")
+            squad_models = require_key(game_state, "squad_models")
+            alive = [str(m) for m in require_key(squad_models, act_uid) if str(m) in models_cache]
+            origin = {m: (int(models_cache[m]["col"]), int(models_cache[m]["row"])) for m in alive}
+            full_plan: List[Tuple[str, int, int]] = [
+                (m, prov[m][0], prov[m][1]) if m in prov else (m, origin[m][0], origin[m][1])
+                for m in alive
+            ]
+            targets = _fight_v11_pile_in_targets(game_state, u)
+            closest = _fight_pile_in_closest_tier_ids(game_state, u, targets) if targets else []
+            engaged_before = _fight_units_engaged_with(game_state, u)
+            prev = _fight_pile_in_preview_plan(game_state, act_uid, full_plan, closest, engaged_before)
+            if not prev["can_validate"]:
+                _fight_v11_log(game_state, f"PILE IN unit {act_uid} → plan invalide {prev}")
+                return True, _fight_pile_in_model_plan_state(game_state, u, prov, None)
+            _fight_pile_in_commit_plan(game_state, u, full_plan)
+            game_state["pile_in_done"].add(act_uid)
+            _fight_v11_clear_pile_in_preview(game_state)
+            _fight_v11_log(
+                game_state, f"PILE IN unit {act_uid} → commit par-figurine ({len(full_plan)} figs)"
+            )
             return _fight_v11_manual_state(game_state)
+
+        if atype == "activate_unit" and uid in eligible:
+            # Sélection d'une unité à piler → présenter son plan par-figurine (mode fin).
+            u = get_unit_by_id(game_state, uid)
+            if u is None:
+                raise KeyError(f"Pile-in unit {uid} missing from game_state['units']")
+            game_state["active_fight_unit"] = uid
+            done = {str(x) for x in game_state.get("pile_in_done", set())}
+            game_state["fight_eligible_units"] = [e for e in eligible if str(e) not in done]
+            state = _fight_pile_in_model_plan_state(game_state, u)
+            _fight_v11_log(
+                game_state,
+                f"PILE IN : unit {uid} sélectionnée (par-figurine, "
+                f"{len(state['eligible_models'])} figs déplaçables)",
+            )
+            return True, state
+
         # Autre action en pile_in → ré-afficher l'état courant.
         return _fight_v11_manual_state(game_state)
 

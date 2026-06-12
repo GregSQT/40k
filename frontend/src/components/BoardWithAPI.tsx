@@ -3187,15 +3187,16 @@ export const BoardWithAPI: React.FC = () => {
           </div>
         )}
 
-      {/* Barre d'action move : Cancel/Validate (moitié gauche) + boutons de mode (moitié droite).
-          Affichée dès l'activation (movePreview) et en plan par-figurine (squadModelMove). */}
-      {settings.battleShockTestEnabled && (
+      {/* Barre d'action pile-in par-figurine (V11 12.04, mode fin type charge) : Cancel + Valider
+          (commit du plan complet). Affichée en mode pileInModelMove ; Valider actif quand can_validate. */}
+      {apiProps.gameState?.phase === "fight" &&
+        apiProps.mode === "pileInModelMove" &&
+        apiProps.pileInMovePlan != null && (
           <div
             className="squad-action-bar"
             style={{
               display: "flex",
               alignItems: "center",
-              justifyContent: "flex-start",
               background: "#1f2937",
               border: "1px solid #555",
               borderRadius: "8px",
@@ -3204,58 +3205,139 @@ export const BoardWithAPI: React.FC = () => {
               marginBottom: 2,
             }}
           >
-            <button
-              type="button"
-              className={apiProps.battleShockTestMode ? "btn-active" : undefined}
-              onClick={() => apiProps.onToggleBattleShockTestMode?.()}
-              style={{
-                border: "1px solid rgba(0,0,0,0.35)",
-                borderRadius: 6,
-                color: "#fff",
-                fontSize: 14,
-                fontWeight: 700,
-                padding: "8px 14px",
-                textAlign: "center",
-                background: apiProps.battleShockTestMode ? "#ca8a04" : "#713f12",
-                cursor: "pointer",
-              }}
-            >
-              {apiProps.battleShockTestMode
-                ? "Battle-shock test : ON — clic droit sur une unité"
-                : "Battle-shock test : OFF"}
-            </button>
-            {(() => {
-              const chargedDisabled = apiProps.gameState?.phase !== "charge";
-              return (
-                <button
-                  type="button"
-                  disabled={chargedDisabled}
-                  className={apiProps.chargedTestMode ? "btn-active" : undefined}
-                  onClick={() => apiProps.onToggleChargedTestMode?.()}
-                  style={{
-                    border: "1px solid rgba(0,0,0,0.35)",
-                    borderRadius: 6,
-                    color: "#fff",
-                    fontSize: 14,
-                    fontWeight: 700,
-                    padding: "8px 14px",
-                    marginLeft: 8,
-                    textAlign: "center",
-                    background: apiProps.chargedTestMode ? "#7c3aed" : "#2e1065",
-                    opacity: chargedDisabled ? 0.4 : 1,
-                    cursor: chargedDisabled ? "not-allowed" : "pointer",
-                  }}
-                >
-                  {chargedDisabled
-                    ? "A chargé test (phase charge)"
-                    : apiProps.chargedTestMode
-                      ? "A chargé test : ON — clic droit sur une unité"
-                      : "A chargé test : OFF"}
-                </button>
-              );
-            })()}
+            <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isGameOver) apiProps.onCancelPileInModelMove?.();
+                }}
+                style={{
+                  border: "1px solid rgba(0,0,0,0.35)",
+                  borderRadius: 6,
+                  background: "#6b7280",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  padding: "8px 14px",
+                  width: 110,
+                  textAlign: "center",
+                }}
+              >
+                Cancel
+              </button>
+              {(() => {
+                const canValidate = apiProps.pileInMovePlan?.canValidate === true;
+                return (
+                  <button
+                    type="button"
+                    disabled={!canValidate}
+                    onClick={() => {
+                      if (!isGameOver && canValidate) apiProps.onCommitPileInPlan?.();
+                    }}
+                    style={{
+                      border: "1px solid rgba(0,0,0,0.35)",
+                      borderRadius: 6,
+                      background: canValidate ? "#7c3aed" : "#3b0764",
+                      color: canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+                      cursor: canValidate ? "pointer" : "not-allowed",
+                      fontSize: 14,
+                      fontWeight: 700,
+                      padding: "8px 14px",
+                      width: 140,
+                      textAlign: "center",
+                      opacity: 1,
+                    }}
+                  >
+                    Valider le pile-in
+                  </button>
+                );
+              })()}
+              {(() => {
+                const plan = apiProps.pileInMovePlan;
+                if (!plan) return null;
+                const nbUnplaced = plan.unplaced?.length ?? 0;
+                return (
+                  <span style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 600, marginLeft: 4 }}>
+                    {nbUnplaced > 0
+                      ? `${nbUnplaced} fig${nbUnplaced > 1 ? "s" : ""} déplaçable${nbUnplaced > 1 ? "s" : ""}`
+                      : "pile-in prêt"}
+                  </span>
+                );
+              })()}
+            </div>
           </div>
         )}
+
+      {/* Barre d'action move : Cancel/Validate (moitié gauche) + boutons de mode (moitié droite).
+          Affichée dès l'activation (movePreview) et en plan par-figurine (squadModelMove). */}
+      {settings.battleShockTestEnabled && (
+        <div
+          className="squad-action-bar"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-start",
+            background: "#1f2937",
+            border: "1px solid #555",
+            borderRadius: "8px",
+            padding: 8,
+            marginTop: -6,
+            marginBottom: 2,
+          }}
+        >
+          <button
+            type="button"
+            className={apiProps.battleShockTestMode ? "btn-active" : undefined}
+            onClick={() => apiProps.onToggleBattleShockTestMode?.()}
+            style={{
+              border: "1px solid rgba(0,0,0,0.35)",
+              borderRadius: 6,
+              color: "#fff",
+              fontSize: 14,
+              fontWeight: 700,
+              padding: "8px 14px",
+              textAlign: "center",
+              background: apiProps.battleShockTestMode ? "#ca8a04" : "#713f12",
+              cursor: "pointer",
+            }}
+          >
+            {apiProps.battleShockTestMode
+              ? "Battle-shock test : ON — clic droit sur une unité"
+              : "Battle-shock test : OFF"}
+          </button>
+          {(() => {
+            const chargedDisabled = apiProps.gameState?.phase !== "charge";
+            return (
+              <button
+                type="button"
+                disabled={chargedDisabled}
+                className={apiProps.chargedTestMode ? "btn-active" : undefined}
+                onClick={() => apiProps.onToggleChargedTestMode?.()}
+                style={{
+                  border: "1px solid rgba(0,0,0,0.35)",
+                  borderRadius: 6,
+                  color: "#fff",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  padding: "8px 14px",
+                  marginLeft: 8,
+                  textAlign: "center",
+                  background: apiProps.chargedTestMode ? "#7c3aed" : "#2e1065",
+                  opacity: chargedDisabled ? 0.4 : 1,
+                  cursor: chargedDisabled ? "not-allowed" : "pointer",
+                }}
+              >
+                {chargedDisabled
+                  ? "A chargé test (phase charge)"
+                  : apiProps.chargedTestMode
+                    ? "A chargé test : ON — clic droit sur une unité"
+                    : "A chargé test : OFF"}
+              </button>
+            );
+          })()}
+        </div>
+      )}
       {apiProps.gameState?.phase === "move" &&
         (apiProps.gameState?.active_movement_unit != null || apiProps.squadMovePlan != null) && (
           <div
@@ -4068,6 +4150,13 @@ export const BoardWithAPI: React.FC = () => {
             onMoveModelInChargePlan={isGameOver ? () => {} : apiProps.onMoveModelInChargePlan}
             onUnplaceChargeModel={isGameOver ? () => {} : apiProps.onUnplaceChargeModel}
             onCancelChargeModelMove={isGameOver ? async () => {} : apiProps.onCancelChargeModelMove}
+            pileInMovePlan={apiProps.pileInMovePlan}
+            pileInModelPoolRef={apiProps.pileInModelPoolRef}
+            pileInModelMaskLoopsRef={apiProps.pileInModelMaskLoopsRef}
+            onSelectPileInModel={isGameOver ? () => {} : apiProps.onSelectPileInModel}
+            onMovePileInModel={isGameOver ? () => {} : apiProps.onMovePileInModel}
+            onUnplacePileInModel={isGameOver ? () => {} : apiProps.onUnplacePileInModel}
+            onCancelPileInModelMove={isGameOver ? async () => {} : apiProps.onCancelPileInModelMove}
             squadShootPlan={apiProps.squadShootPlan}
             onStartSquadModelShoot={isGameOver ? async () => {} : apiProps.onStartSquadModelShoot}
             onSelectModelForShoot={isGameOver ? async () => {} : apiProps.onSelectModelForShoot}
