@@ -517,6 +517,10 @@ type BoardProps = {
    * (toutes phases, tous players) force un battle-shock roll au lieu de l'action normale. */
   battleShockTestMode?: boolean;
   onForceBattleShock?: (unitId: number | string) => void | Promise<void>;
+  /** TEST/DEBUG : mode « a chargé test ». Quand ON, un clic DROIT force le statut « a chargé »
+   * (uniquement en phase charge). Cumulable avec le bs test : un clic droit applique les deux. */
+  chargedTestMode?: boolean;
+  onForceCharged?: (unitId: number | string) => void | Promise<void>;
   shootingPhaseState?: ShootingPhaseState;
   targetPreview?: TargetPreview | null;
   onCancelTargetPreview?: () => void;
@@ -836,6 +840,8 @@ export default function Board({
   onLogChargeRoll,
   battleShockTestMode,
   onForceBattleShock,
+  chargedTestMode,
+  onForceCharged,
   targetPreview,
   onCancelTargetPreview,
   gameState,
@@ -3334,12 +3340,13 @@ export default function Board({
     selectedUnitId,
   ]);
 
-  // TEST/DEBUG : mode « battle-shock test ». Quand le toggle est ON, un clic DROIT sur n'importe
-  // quelle unité (toutes phases, tous players, statut indifférent) force un battle-shock roll.
-  // Capture-phase + stopImmediatePropagation : coupe avant PIXI (skip/cancel/sélection) et avant
-  // le menu contextuel. Le clic gauche n'est jamais touché → garde sa fonction normale.
+  // TEST/DEBUG : modes « battle-shock test » / « a chargé test ». Quand l'un des toggles est ON,
+  // un clic DROIT sur n'importe quelle unité (tous players, statut indifférent) force le(s) statut(s)
+  // correspondant(s) : battle-shock (toutes phases) et/ou « a chargé » (phase charge uniquement).
+  // Les deux ON → applique les deux. Capture-phase + stopImmediatePropagation : coupe avant PIXI
+  // (skip/cancel/sélection) et avant le menu contextuel. Le clic gauche n'est jamais touché.
   useEffect(() => {
-    if (!battleShockTestMode) return;
+    if (!battleShockTestMode && !chargedTestMode) return;
     if (measureMode.kind !== "off") return;
     if (!boardConfig) return;
     const canvas = canvasContainerRef.current?.querySelector("canvas");
@@ -3350,6 +3357,11 @@ export default function Board({
     const onRightClickBattleShock = (e: PointerEvent) => {
       if (e.button !== 2) return;
       if (e.target !== canvas) return;
+      // « A chargé » n'est applicable qu'en phase charge (bouton grisé ailleurs).
+      const willShock = !!battleShockTestMode;
+      const willCharge = !!chargedTestMode && phase === "charge";
+      // Aucune action applicable → ne pas couper le clic droit normal (skip/cancel).
+      if (!willShock && !willCharge) return;
       const unitsCache = gameState?.units_cache as
         | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
         | undefined;
@@ -3386,12 +3398,22 @@ export default function Board({
       if (foundUnitId === null) return;
       e.preventDefault();
       e.stopImmediatePropagation();
-      void onForceBattleShock?.(foundUnitId);
+      if (willShock) void onForceBattleShock?.(foundUnitId);
+      if (willCharge) void onForceCharged?.(foundUnitId);
     };
 
     document.addEventListener("pointerdown", onRightClickBattleShock, true);
     return () => document.removeEventListener("pointerdown", onRightClickBattleShock, true);
-  }, [battleShockTestMode, measureMode.kind, boardConfig, gameState?.units_cache, onForceBattleShock]);
+  }, [
+    battleShockTestMode,
+    chargedTestMode,
+    phase,
+    measureMode.kind,
+    boardConfig,
+    gameState?.units_cache,
+    onForceBattleShock,
+    onForceCharged,
+  ]);
 
   // Desperate Escape (phase move) : allocation manuelle des mortal wounds. L'effet tir
   // (gated phase==="shoot") ne traite pas le clic en move ; on reproduit ici son bloc
@@ -6294,7 +6316,7 @@ export default function Board({
       for (const u of units) {
         const orientation = orientationStepForBoard(u, gameState?.units_cache);
         parts.push(
-          `${u.id},${u.col},${u.row},o${orientation ?? ""},${hpCurForBoardFingerprint(u, ucFp)},rng${u.selectedRngWeaponIndex ?? ""},cc${u.selectedCcWeaponIndex ?? ""},mw${u.manualWeaponSelected ? 1 : 0},bs${u.battle_shocked ? 1 : 0}`
+          `${u.id},${u.col},${u.row},o${orientation ?? ""},${hpCurForBoardFingerprint(u, ucFp)},rng${u.selectedRngWeaponIndex ?? ""},cc${u.selectedCcWeaponIndex ?? ""},mw${u.manualWeaponSelected ? 1 : 0},bs${u.battle_shocked ? 1 : 0},cg${unitsCharged?.includes(Number(u.id)) ? 1 : 0}`
         );
       }
       const moveLosIds = [...movePreviewLosBlinkIds].sort((a, b) => a - b).join(",");

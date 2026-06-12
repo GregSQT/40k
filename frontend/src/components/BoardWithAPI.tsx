@@ -3172,14 +3172,44 @@ export const BoardWithAPI: React.FC = () => {
                 fontWeight: 700,
                 padding: "8px 14px",
                 textAlign: "center",
-                background: apiProps.battleShockTestMode ? "#7c3aed" : "#2e1065",
+                background: apiProps.battleShockTestMode ? "#ca8a04" : "#713f12",
                 cursor: "pointer",
               }}
             >
               {apiProps.battleShockTestMode
-                ? "Battle-shock test : ON — clique une unité"
+                ? "Battle-shock test : ON — clic droit sur une unité"
                 : "Battle-shock test : OFF"}
             </button>
+            {(() => {
+              const chargedDisabled = apiProps.gameState?.phase !== "charge";
+              return (
+                <button
+                  type="button"
+                  disabled={chargedDisabled}
+                  className={apiProps.chargedTestMode ? "btn-active" : undefined}
+                  onClick={() => apiProps.onToggleChargedTestMode?.()}
+                  style={{
+                    border: "1px solid rgba(0,0,0,0.35)",
+                    borderRadius: 6,
+                    color: "#fff",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    padding: "8px 14px",
+                    marginLeft: 8,
+                    textAlign: "center",
+                    background: apiProps.chargedTestMode ? "#7c3aed" : "#2e1065",
+                    opacity: chargedDisabled ? 0.4 : 1,
+                    cursor: chargedDisabled ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {chargedDisabled
+                    ? "A chargé test (phase charge)"
+                    : apiProps.chargedTestMode
+                      ? "A chargé test : ON — clic droit sur une unité"
+                      : "A chargé test : OFF"}
+                </button>
+              );
+            })()}
           </div>
         )}
       {apiProps.gameState?.phase === "move" &&
@@ -3968,6 +3998,8 @@ export const BoardWithAPI: React.FC = () => {
             }
             battleShockTestMode={settings.battleShockTestEnabled && apiProps.battleShockTestMode}
             onForceBattleShock={apiProps.onForceBattleShock}
+            chargedTestMode={settings.battleShockTestEnabled && apiProps.chargedTestMode}
+            onForceCharged={apiProps.onForceCharged}
             onSkipUnit={isGameOver ? () => {} : apiProps.onSkipUnit}
             onStartMovePreview={isGameOver ? () => {} : apiProps.onStartMovePreview}
             onDirectMove={isGameOver ? () => {} : apiProps.onDirectMove}

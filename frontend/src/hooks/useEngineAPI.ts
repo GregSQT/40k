@@ -677,6 +677,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   // lui fait un battle-shock test au lieu de la sélectionner → l'unité est shockée AVANT son
   // activation, donc le Desperate Escape se déclenche dès l'activation (avant le move preview).
   const [battleShockTestMode, setBattleShockTestMode] = useState(false);
+  const [chargedTestMode, setChargedTestMode] = useState(false);
   const [postShootMoveDestinations, setPostShootMoveDestinations] = useState<
     Array<{ col: number; row: number }>
   >([]);
@@ -1498,7 +1499,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           // battle_shocked de l'unité. On merge le game_state pour le refléter et on sort, sans
           // passer par la machine d'état d'activation (qui sinon déselectionne l'unité active et
           // casse le rendu du move en cours).
-          if (data.result?.action === "force_battle_shock") {
+          if (
+            data.result?.action === "force_battle_shock" ||
+            data.result?.action === "force_charged"
+          ) {
             setGameState((p) => {
               const merged = mergeGameStatePreservingOmittedObjectives(
                 p,
@@ -3881,6 +3885,20 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setBattleShockTestMode((v) => !v);
   }, []);
 
+  /** TEST/DEBUG : force le statut « a chargé » sur l'unité — pour tester l'ordre Fights First. */
+  const handleForceCharged = useCallback(
+    async (unitId: number | string) => {
+      const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      await executeAction({ action: "force_charged", unitId: String(uid) });
+    },
+    [executeAction]
+  );
+
+  /** TEST/DEBUG : toggle du mode « a chargé test » (clic droit sur une unité la marque chargée). */
+  const handleToggleChargedTestMode = useCallback(() => {
+    setChargedTestMode((v) => !v);
+  }, []);
+
   // ──────────────────────────────────────────────────────────────────────────
   // TIR PAR FIGURINE (PvP manuel) — calque squadModelMove, pipeline squad backend
   // ──────────────────────────────────────────────────────────────────────────
@@ -5678,6 +5696,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onTakeToSkies: async () => {},
       onStationary: async () => {},
       onForceBattleShock: async () => {},
+      onForceCharged: async () => {},
       activeUnitEngaged: null,
       squadShootPlan: null,
       onStartSquadModelShoot: async () => {},
@@ -5747,6 +5766,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onCancelHazardWarning: () => {},
       battleShockTestMode: false,
       onToggleBattleShockTestMode: () => {},
+      chargedTestMode: false,
+      onToggleChargedTestMode: () => {},
       availableCellsOverride: undefined,
       chargePreviewTargetIds: [],
       ...blinkBoardPropsIdle,
@@ -5829,6 +5850,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onTakeToSkies: handleTakeToSkies,
     onStationary: handleStationary,
     onForceBattleShock: handleForceBattleShock,
+    onForceCharged: handleForceCharged,
     activeUnitEngaged,
     squadShootPlan,
     onStartSquadModelShoot: handleStartSquadModelShoot,
@@ -5895,6 +5917,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onCancelHazardWarning: handleCancelHazardWarning,
     battleShockTestMode,
     onToggleBattleShockTestMode: handleToggleBattleShockTestMode,
+    chargedTestMode,
+    onToggleChargedTestMode: handleToggleChargedTestMode,
     availableCellsOverride: combinedAvailableCellsOverride,
     // Export blinking state for HP bar components
     ...blinkBoardPropsReady,

@@ -2723,6 +2723,21 @@ class W40KEngine(gym.Env):
                 "battle_shocked": shocked,
             }
 
+        # TEST/DEBUG : force le statut « a chargé » (ajout à units_charged) sur une unité, hors
+        # séquence de jeu. Permet de tester l'ordre Fights First (12.x) en phase fight à la demande.
+        if action.get("action") == "force_charged":
+            uid = action.get("unitId")
+            if uid is None:
+                return False, {"error": "force_charged requires unitId"}
+            if self._get_unit_by_id(str(uid)) is None:
+                return False, {"error": f"force_charged: unit {uid} not found"}
+            self.game_state.setdefault("units_charged", set()).add(str(uid))
+            return True, {
+                "action": "force_charged",
+                "unitId": str(uid),
+                "charged": True,
+            }
+
         # Desperate Escape (09.07) : tant qu'une attribution de mortal wounds (hazard) est en
         # attente d'un choix joueur, seul le clic figurine (squad_hazard_allocate_model) passe.
         if (

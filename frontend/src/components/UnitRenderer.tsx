@@ -41,6 +41,15 @@ import {
 } from "../utils/weaponHelpers";
 
 /**
+ * Rayon commun à tous les badges-statut (hidden / mouvement / battle-shock).
+ * Taille FIXE, basée uniquement sur HEX_RADIUS : les badges gardent la même taille
+ * absolue quelle que soit la taille de la figurine.
+ */
+function statusBadgeRadius(HEX_RADIUS: number): number {
+  return Math.max(7, HEX_RADIUS * 0.32);
+}
+
+/**
  * Profil visuel d'une figurine dans une escouade hétérogène (override de l'unité
  * parente). Valeurs déjà prêtes à l'affichage (BASE_SIZE transformé subhex côté backend).
  */
@@ -2321,7 +2330,7 @@ export class UnitRenderer {
       });
     }
 
-    const r = Math.max(5, HEX_RADIUS * 0.22);
+    const r = statusBadgeRadius(HEX_RADIUS);
     const scaledOffset = ((HEX_RADIUS * unitIconScale) / 2) * 0.8;
     // Bottom-left of a figure (mirror of the bottom-right charge badge).
     const drawBadgeAt = (cx: number, cy: number, name: string): void => {
@@ -2401,7 +2410,7 @@ export class UnitRenderer {
     }
     if (!kind) return;
 
-    const r = Math.max(7, HEX_RADIUS * 0.32);
+    const r = statusBadgeRadius(HEX_RADIUS);
     const scaledOffset = ((HEX_RADIUS * unitIconScale) / 2) * 0.8;
     // Bas-droite de la figurine (emplacement de l'ancien badge "fui").
     const drawBadgeAt = (cx: number, cy: number, name: string): void => {
@@ -2485,21 +2494,9 @@ export class UnitRenderer {
           ? (displayBase / 2) * HEX_HORIZ_SPACING
           : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
     }
-    // Taille de l'emoji calée sur le DIAMÈTRE de l'icône affichée (même calcul que
-    // renderUnitIcon), et non sur le rayon du socle : sinon le badge paraît
-    // proportionnellement plus gros sur les grosses figs (icône == socle) que sur
-    // les petites (icône plus grande que le socle via ICON_SCALE).
-    const unitIconScale = unit.ICON_SCALE || this.props.ICON_SCALE;
-    const displayIcon = resolveBaseSizeForUnitDisplay(unit);
-    const baseSizeIcon = displayIcon > 1 ? displayIcon : undefined;
-    const nonRoundIconR = getNonRoundIconRadius(unit, HEX_RADIUS);
-    const iconDiameter =
-      nonRoundIconR != null
-        ? nonRoundIconR * 2
-        : baseSizeIcon
-          ? baseSizeIcon * 1.5 * HEX_RADIUS
-          : HEX_RADIUS * unitIconScale;
-    const emojiSize = iconDiameter / 2;
+    // Même rayon de fond que les autres badges-statut : le fond noir a un rayon de
+    // emojiSize * 0.55, donc on dérive emojiSize pour que ce rayon == statusBadgeRadius.
+    const emojiSize = statusBadgeRadius(HEX_RADIUS) / 0.55;
 
     if (this.props.statusBadgePerModel) {
       // Per-figure mode — one emoji centred-bottom of each living figure (unit-level status).
