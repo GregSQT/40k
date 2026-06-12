@@ -87,7 +87,7 @@
       ]
     },
     {
-      "id": 111, "unit_type": "Neurogaunt", "player": 2, "col": 41, "row": 228,
+      "id": 111, "unit_type": "Neurogaunt", "player": 2, "col": 141, "row": 28,
       "models": [
         { "col": 141, "row": 28 },
         { "col": 147, "row": 28 },
@@ -158,7 +158,7 @@
       ]
     },
     {
-      "id": 116, "unit_type": "Barbgaunt", "player": 2, "col": 109, "row": 5,
+      "id": 116, "unit_type": "Barbgaunt", "player": 2, "col": 109, "row": 3,
       "models": [
         { "col": 109, "row": 3 },
         { "col": 109, "row": 8 },

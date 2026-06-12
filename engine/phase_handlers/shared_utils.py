@@ -466,6 +466,23 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
 
         unit_id = str(require_key(unit, "id"))
         col, row = get_unit_coordinates(unit)  # Already normalizes
+        # Invariant multi-fig : l'ancre (col/row niveau-unité) DOIT coïncider avec
+        # la position de la 1ère figurine (models[0]). Une donnée incohérente (ex.
+        # typo de saisie sur le col/row d'unité) désynchronise l'ancre de l'empreinte
+        # réelle et fausse silencieusement toute fonction lisant l'ancre. Erreur
+        # explicite plutôt que correction silencieuse.
+        _explicit_models = unit.get("models")
+        if isinstance(_explicit_models, list) and len(_explicit_models) > 0:
+            _m0_col, _m0_row = normalize_coordinates(
+                int(require_key(_explicit_models[0], "col")),
+                int(require_key(_explicit_models[0], "row")),
+            )
+            if (_m0_col, _m0_row) != (col, row):
+                raise ValueError(
+                    f"Unit {unit_id}: anchor col/row=({col},{row}) ne correspond pas à "
+                    f"models[0]=({_m0_col},{_m0_row}). Corriger le col/row de l'unité dans "
+                    f"le scénario (il doit égaler la position de la 1ère figurine)."
+                )
         player_raw = require_key(unit, "player")
         try:
             player = int(player_raw)
