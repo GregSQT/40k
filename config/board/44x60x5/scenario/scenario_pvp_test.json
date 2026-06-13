@@ -160,13 +160,13 @@
     {
       "id": 116, "unit_type": "Barbgaunt", "player": 2, "col": 109, "row": 3,
       "models": [
-        { "col": 109, "row": 3 },
-        { "col": 109, "row": 8 },
-        { "col": 109, "row": 13 },
-        { "col": 109, "row": 18 },
-        { "col": 109, "row": 23 },
-        { "col": 109, "row": 28 },
-        { "col": 109, "row": 33 }
+        { "col": 112, "row": 3 },
+        { "col": 112, "row": 8 },
+        { "col": 112, "row": 13 },
+        { "col": 112, "row": 18 },
+        { "col": 112, "row": 23 },
+        { "col": 112, "row": 28 },
+        { "col": 112, "row": 33 }
       ]
     }
   ]

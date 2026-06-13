@@ -3415,3 +3415,28 @@ textarea:focus {
     inset 0 -3px 6px rgba(0, 0, 0, 0.3),
     0 2px 4px rgba(0, 0, 0, 0.35);
 }
+
+/* Pile-in : couleurs d'identité des boutons Focus (déf = bleu, off = rouge) et Valider (vert). */
+.pile-in-focus-def {
+  background: #1d4ed8;
+  color: #fff;
+}
+.pile-in-focus-def.btn-active {
+  background: #3b82f6;
+}
+.pile-in-focus-off {
+  background: #b91c1c;
+  color: #fff;
+}
+.pile-in-focus-off.btn-active {
+  background: #ef4444;
+}
+.pile-in-validate {
+  background: #16a34a;
+  color: #fff;
+}
+.pile-in-validate:disabled {
+  background: #14532d;
+  color: rgba(229, 231, 235, 0.5);
+  cursor: not-allowed;
+}

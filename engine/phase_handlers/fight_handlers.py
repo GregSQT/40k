@@ -5398,10 +5398,14 @@ def _fight_model_in_base_contact(
 
 
 def pile_in_autoplace_plan(
-    game_state: Dict[str, Any], squad_id: str, focus_target_id: str
+    game_state: Dict[str, Any], squad_id: str, focus_target_id: str, mode: str = "defensive"
 ) -> Dict[str, Any]:
     """Auto-placement de pile-in (12.03) : positionne les figs du squad pour MAXIMISER le nombre de
     figs en mesure de frapper le focus (empreinte ≤ EZ bord-à-bord de ``focus_target_id``). Lecture pure.
+
+    ``mode`` (départage à nombre de figs engagées ÉGAL, priorité absolue conservée) :
+      - ``"defensive"`` : maximiser la distance au focus → rester à la limite EZ, le plus loin possible ;
+      - ``"offensive"`` : minimiser la distance au focus → socle-à-socle où possible, sinon au plus près.
 
     Optimum EXACT par programme linéaire en nombres entiers (``scipy.optimize.milp`` / HiGHS), car les
     socles sont multi-hex (Board ×10) : le non-chevauchement entre empreintes est modélisé par une
@@ -5551,8 +5555,8 @@ def pile_in_autoplace_plan(
     for mid in movable:
         by_base.setdefault(_base_key(models_cache[mid]), []).append(mid)
 
-    # Liste GLOBALE des slots (toutes bases) : (col, row, Socle, slot_min_to_tier).
-    all_slots: List[Tuple[int, int, Any, int]] = []
+    # Liste GLOBALE des slots (toutes bases) : (col, row, Socle, slot_min_to_tier, dist_to_focus).
+    all_slots: List[Tuple[int, int, Any, int, int]] = []
     # slots_by_base[bkey] = [index dans all_slots, ...]
     slots_by_base: Dict[Tuple[Any, Any], List[int]] = {}
     fcs = [c for c, _ in focus_fp]
@@ -5578,7 +5582,9 @@ def pile_in_autoplace_plan(
                 if not _engages_focus(c, r, set(soc.fp)):
                     continue
                 idxs.append(len(all_slots))
-                all_slots.append((c, r, soc, _fp_min_to_tier(set(soc.fp))))
+                all_slots.append(
+                    (c, r, soc, _fp_min_to_tier(set(soc.fp)), min_distance_between_sets(set(soc.fp), focus_fp))
+                )
         slots_by_base[bkey] = idxs
 
     # --- Atteignabilité par fig (BFS centre-à-centre ≤ budget, amies traversables). ---
@@ -5624,7 +5630,7 @@ def pile_in_autoplace_plan(
         reach = _reachable(mid)
         start_eng = _start_engagements(mid)
         for si in slots_by_base[_base_key(models_cache[mid])]:
-            sc, sr, soc, slot_min = all_slots[si]
+            sc, sr, soc, slot_min, _df = all_slots[si]
             if slot_min >= sm:
                 continue  # WHILE : strictement plus proche du palier
             pd = reach.get((sc, sr))
@@ -5671,9 +5677,17 @@ def pile_in_autoplace_plan(
         A = coo_matrix(([1.0] * len(rows), (rows, cols)), shape=(n_rows, n))
         lc = LinearConstraint(A, np.zeros(n_rows), np.ones(n_rows))
         max_pd = max((e[2] for e in edges), default=0) + 1
-        # Objectif : maximiser le nb de figs posées (gain BIG/fig), départage par distance parcourue.
+        max_df = max((all_slots[e[1]][4] for e in edges), default=0) + 1
+        # Objectif lexicographique (BIG ≫ W2 ≫ tie) : (1) maximiser le nb de figs engagées ; (2) selon
+        # le mode, MIN distance au focus (offensif) ou MAX distance (défensif) ; (3) déplacement minimal.
         BIG = 1.0e6
-        c = np.array([-BIG + e[2] / max_pd for e in edges], dtype=float)
+        W2 = 1.0e3
+        sign = 1.0 if mode == "offensive" else -1.0  # offensif → minimise dist ; défensif → maximise
+        c = np.array(
+            [-BIG + sign * W2 * (all_slots[si][4] / max_df) + pd / (max_pd * 1.0e3)
+             for (_mid, si, pd) in edges],
+            dtype=float,
+        )
         res = milp(
             c=c, constraints=[lc], integrality=np.ones(n),
             bounds=Bounds(0, 1), options={"time_limit": 2.0},
@@ -5682,7 +5696,7 @@ def pile_in_autoplace_plan(
             for e_i, x in enumerate(res.x):
                 if x > 0.5:
                     mid, si, _pd = edges[e_i]
-                    sc, sr, soc, _sm = all_slots[si]
+                    sc, sr, soc, _sm, _df = all_slots[si]
                     provisional[mid] = (sc, sr)
                     placed_socles.append(soc)
 
@@ -5911,7 +5925,8 @@ def _fight_v11_manual_step(
             focus = action.get("targetId")
             if focus is None:
                 return False, {"error": "pile_in_autoplace requires targetId", "action": action}
-            out = pile_in_autoplace_plan(game_state, act_uid, str(focus))
+            mode = str(action.get("mode", "defensive"))
+            out = pile_in_autoplace_plan(game_state, act_uid, str(focus), mode=mode)
             return True, {"action": "pile_in_autoplace", "unitId": act_uid, **out}
 
         if atype == "commit_pile_in_plan":

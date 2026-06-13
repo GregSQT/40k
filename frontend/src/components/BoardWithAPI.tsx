@@ -3257,21 +3257,26 @@ export const BoardWithAPI: React.FC = () => {
               >
                 Cancel
               </button>
-              {(() => {
-                const focusActive = apiProps.pileInFocusActive === true;
+              {(["offensive", "defensive"] as const).map((m) => {
+                const active = apiProps.pileInFocusMode === m;
+                const label = m === "defensive" ? "Focus déf." : "Focus off.";
+                const title =
+                  m === "defensive"
+                    ? "Focus défensif : max de figs engagées, le plus loin possible de la cible"
+                    : "Focus offensif : max de figs engagées, socle-à-socle / au plus près de la cible";
+                const colorClass = m === "defensive" ? "pile-in-focus-def" : "pile-in-focus-off";
                 return (
                   <button
+                    key={m}
                     type="button"
-                    className={focusActive ? "btn-active" : undefined}
+                    className={`${colorClass}${active ? " btn-active" : ""}`}
                     onClick={() => {
-                      if (!isGameOver) apiProps.onTogglePileInFocus?.();
+                      if (!isGameOver) apiProps.onSetPileInFocus?.(m);
                     }}
-                    title="Focus : clique sur une cible pour placer automatiquement toutes les figurines"
+                    title={title}
                     style={{
                       border: "1px solid rgba(0,0,0,0.35)",
                       borderRadius: 6,
-                      background: focusActive ? "#8a2be2" : "#5b21b6",
-                      color: "#fff",
                       cursor: "pointer",
                       fontSize: 14,
                       fontWeight: 700,
@@ -3280,15 +3285,16 @@ export const BoardWithAPI: React.FC = () => {
                       textAlign: "center",
                     }}
                   >
-                    Focus
+                    {label}
                   </button>
                 );
-              })()}
+              })}
               {(() => {
                 const canValidate = apiProps.pileInMovePlan?.canValidate === true;
                 return (
                   <button
                     type="button"
+                    className="pile-in-validate"
                     disabled={!canValidate}
                     onClick={() => {
                       if (!isGameOver && canValidate) apiProps.onCommitPileInPlan?.();
@@ -3296,8 +3302,6 @@ export const BoardWithAPI: React.FC = () => {
                     style={{
                       border: "1px solid rgba(0,0,0,0.35)",
                       borderRadius: 6,
-                      background: canValidate ? "#7c3aed" : "#3b0764",
-                      color: canValidate ? "#fff" : "rgba(229,231,235,0.5)",
                       cursor: canValidate ? "pointer" : "not-allowed",
                       fontSize: 14,
                       fontWeight: 700,
@@ -3307,7 +3311,7 @@ export const BoardWithAPI: React.FC = () => {
                       opacity: 1,
                     }}
                   >
-                    Valider le pile-in
+                    Validate
                   </button>
                 );
               })()}
