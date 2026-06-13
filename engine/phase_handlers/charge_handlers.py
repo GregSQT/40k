@@ -4373,6 +4373,7 @@ def charge_autoplace_plan(
     Retour : {"plan": [[model_id, col, row], ...]} couvrant toutes les figs vivantes.
     """
     from collections import deque
+    import math
     import numpy as np
     from scipy.optimize import milp, LinearConstraint, Bounds
     from scipy.sparse import coo_matrix
@@ -4436,6 +4437,10 @@ def charge_autoplace_plan(
         raise ValueError(f"charge_autoplace_plan: aucune cible déclarée présente pour {squad_id}")
     all_target_fps = [target_fp_by_id[t] for t in present_target_ids]
 
+    import sys as _sys
+    _perf_start = time.perf_counter()
+    _diag: Dict[str, Any] = {}
+
     obstacle_socles = _charge_obstacle_socles(game_state, str(squad_id))
     fly_active = _charge_fly_active(game_state, unit, str(squad_id))
     traverse_blocked = set() if fly_active else (walls | enemy_occupied)
@@ -4465,8 +4470,6 @@ def charge_autoplace_plan(
     all_t_cells: Set[Tuple[int, int]] = set()
     for tfp in all_target_fps:
         all_t_cells |= tfp
-    tcs = [c for c, _ in all_t_cells]
-    trs = [r for _, r in all_t_cells]
 
     # all_slots[i] = (col, row, socle, slot_min_to_targets, engaged_target_ids)
     all_slots: List[Tuple[int, int, Any, int, frozenset]] = []
@@ -4476,32 +4479,80 @@ def charge_autoplace_plan(
         bs = rep["BASE_SIZE"]
         base_dim = max(bs) if isinstance(bs, (list, tuple)) else bs
         margin = ez + int(base_dim) + 2
+        # Centres candidats = DILATATION des empreintes cibles par ``margin`` (disque autour des cibles)
+        # au lieu de la bbox carrée englobante : évite de tester les coins vides entre/autour des cibles.
+        near_cells: Set[Tuple[int, int]] = set(all_t_cells)
+        frontier: List[Tuple[int, int]] = list(all_t_cells)
+        for _ in range(margin):
+            nxt: List[Tuple[int, int]] = []
+            for cc, rr in frontier:
+                for nc, nr in get_hex_neighbors(cc, rr):
+                    if 0 <= nc < board_cols and 0 <= nr < board_rows and (nc, nr) not in near_cells:
+                        near_cells.add((nc, nr))
+                        nxt.append((nc, nr))
+            frontier = nxt
         idxs: List[int] = []
-        for c in range(min(tcs) - margin, max(tcs) + margin + 1):
-            if c < 0 or c >= board_cols:
+        for (c, r) in near_cells:
+            fp = _charge_model_footprint(game_state, rep, c, r)
+            if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in fp):
                 continue
-            for r in range(min(trs) - margin, max(trs) + margin + 1):
-                if r < 0 or r >= board_rows:
-                    continue
-                fp = _charge_model_footprint(game_state, rep, c, r)
-                if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in fp):
-                    continue
-                socle = _charge_model_socle(game_state, rep, c, r)
-                if _charge_model_placement_overlaps(socle, obstacle_socles, [], walls):
-                    continue
-                synth = _charge_synthetic_charger_cache_entry(game_state, unit, c, r, fp)
-                eng = frozenset(
-                    t for t in present_target_ids
-                    if unit_entries_within_engagement_zone(synth, target_entry_by_id[t], ez)
-                )
-                if not eng:
-                    continue  # n'engage aucune cible déclarée → inutile comme slot
-                if any(unit_entries_within_engagement_zone(synth, ne, ez) for ne in nontarget_entries):
-                    continue  # engagerait un ennemi non déclaré → interdit (11.04 AFTER)
-                idxs.append(len(all_slots))
-                all_slots.append((c, r, socle, _fp_min_to_targets(set(fp)), eng))
+            socle = _charge_model_socle(game_state, rep, c, r)
+            if _charge_model_placement_overlaps(socle, obstacle_socles, [], walls):
+                continue
+            synth = _charge_synthetic_charger_cache_entry(game_state, unit, c, r, fp)
+            eng = frozenset(
+                t for t in present_target_ids
+                if unit_entries_within_engagement_zone(synth, target_entry_by_id[t], ez)
+            )
+            if not eng:
+                continue  # n'engage aucune cible déclarée → inutile comme slot
+            if any(unit_entries_within_engagement_zone(synth, ne, ez) for ne in nontarget_entries):
+                continue  # engagerait un ennemi non déclaré → interdit (11.04 AFTER)
+            idxs.append(len(all_slots))
+            all_slots.append((c, r, socle, _fp_min_to_targets(set(fp)), eng))
         slots_by_base[bkey] = idxs
 
+    # --- Plafond : par (base, cible), bucketing angulaire → garder le slot le plus PROCHE (contact,
+    #     mode offensif) et le plus LOIN (externe ≈ EZ, mode défensif) de chaque secteur. Borne n_slot à
+    #     ≈ 2·N_SECTORS·n_cibles → conflict_pairs O(n_slot²) maîtrisé, sans casser la répartition autour
+    #     des cibles ni la couverture (chaque cible garde ≥1 slot). ---
+    N_SECTORS = 12
+    target_centroid: Dict[str, Tuple[float, float]] = {}
+    for t in present_target_ids:
+        cells = target_fp_by_id[t]
+        target_centroid[t] = (
+            sum(c for c, _ in cells) / len(cells),
+            sum(r for _, r in cells) / len(cells),
+        )
+    by_base_target: Dict[Tuple[Tuple[Any, Any], str], List[int]] = {}
+    for bkey, idxs in slots_by_base.items():
+        for si in idxs:
+            for t in all_slots[si][4]:
+                by_base_target.setdefault((bkey, t), []).append(si)
+    keep: Set[int] = set()
+    for (bkey, t), sis in by_base_target.items():
+        cx, cy = target_centroid[t]
+        near_sec: Dict[int, int] = {}
+        far_sec: Dict[int, int] = {}
+        for si in sis:
+            sc, sr, _soc, smin, _eng = all_slots[si]
+            ang = math.atan2(sr - cy, sc - cx)
+            sec = int((ang + math.pi) / (2.0 * math.pi + 1e-9) * N_SECTORS)
+            if sec not in near_sec or smin < all_slots[near_sec[sec]][3]:
+                near_sec[sec] = si
+            if sec not in far_sec or smin > all_slots[far_sec[sec]][3]:
+                far_sec[sec] = si
+        keep.update(near_sec.values())
+        keep.update(far_sec.values())
+    kept_sorted = sorted(keep)
+    remap = {old: new for new, old in enumerate(kept_sorted)}
+    all_slots = [all_slots[old] for old in kept_sorted]
+    slots_by_base = {
+        bkey: [remap[si] for si in idxs if si in remap]
+        for bkey, idxs in slots_by_base.items()
+    }
+
+    _perf_slots = time.perf_counter()
     # --- Atteignabilité par fig (BFS centre-à-centre ≤ budget, amies traversables). ---
     starts = {mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"])) for mid in alive}
     start_min = {mid: _fp_min_to_targets(_model_fp(mid, *starts[mid])) for mid in alive}
@@ -4525,14 +4576,12 @@ def charge_autoplace_plan(
         return dist
 
     # --- Arêtes ILP (fig, slot) légales : strictement plus proche + atteignable. ---
-    reach_cache: Dict[str, Dict[Tuple[int, int], int]] = {}
     edges: List[Tuple[str, int, int]] = []  # (mid, slot_index, pathdist)
     for mid in alive:
         sm = start_min[mid]
         if sm <= 0:
             continue  # déjà au contact d'une cible : aucun slot strictement plus proche
         reach = _reachable(mid)
-        reach_cache[mid] = reach
         for si in slots_by_base[_base_key(models_cache[mid])]:
             sc, sr, _soc, slot_min, _eng = all_slots[si]
             if slot_min >= sm:
@@ -4541,6 +4590,8 @@ def charge_autoplace_plan(
             if pd is None:
                 continue  # hors budget (atteignabilité réelle)
             edges.append((mid, si, pd))
+
+    _perf_edges = time.perf_counter()
 
     def _solve(cover: bool) -> Optional[Dict[str, Tuple[int, int]]]:
         """Résout l'ILP d'affectation ; ``cover`` ajoute la contrainte dure « chaque cible engagée ».
@@ -4573,6 +4624,9 @@ def charge_autoplace_plan(
         for k, (s1, s2) in enumerate(conflict_pairs):
             for e_i in edges_by_slot.get(s1, []) + edges_by_slot.get(s2, []):
                 rows.append(base_rows + k); cols.append(e_i)
+        _diag[f"n_conf_cover{int(cover)}"] = len(conflict_pairs)
+        _diag["n_edges"] = nvar
+        _diag["n_slot"] = n_slot
         n_pack = base_rows + len(conflict_pairs)
         A = coo_matrix(([1.0] * len(rows), (rows, cols)), shape=(n_pack, nvar))
         constraints = [LinearConstraint(A, np.zeros(n_pack), np.ones(n_pack))]
@@ -4602,8 +4656,15 @@ def charge_autoplace_plan(
              for (_mid, si, pd) in edges],
             dtype=float,
         )
+        _t_milp = time.perf_counter()
         res = milp(c=c, constraints=constraints, integrality=np.ones(nvar),
                    bounds=Bounds(0, 1), options={"time_limit": 2.0})
+        _diag.setdefault("milp", []).append((
+            f"cover{int(cover)}",
+            int(getattr(res, "status", -1)),
+            (int(round(float(res.x.sum()))) if res.x is not None else -1),
+            round(time.perf_counter() - _t_milp, 3),
+        ))
         if res.x is None:
             return None
         out: Dict[str, Tuple[int, int]] = {}
@@ -4616,6 +4677,7 @@ def charge_autoplace_plan(
     assign = _solve(cover=True)
     if assign is None:
         assign = _solve(cover=False)  # couverture impossible → au moins le focus ; Check liste le reste
+    _perf_milp = time.perf_counter()
 
     provisional: Dict[str, Tuple[int, int]] = {}
     # Socles occupants : une entrée par fig vivante (départ, puis MAJ à la pose) — bloque une fig encore
@@ -4633,36 +4695,74 @@ def charge_autoplace_plan(
             return True
         return any(footprints_overlap(soc, s) for m, s in occ_by_mid.items() if m != self_mid)
 
-    # --- Repli : figs non posées par l'ILP → rapprochées au max (closer, sans overlap ni non-cible). ---
+    # --- Repli : figs non posées par l'ILP → rapprochées par DESCENTE DE GRADIENT vers les cibles
+    #     (O(budget) par fig, vs O(reach) avant — décisif avec le budget de charge >> 3" du pile-in).
+    #     Champ de distance multi-source BFS depuis les empreintes cibles (traverse amies, pas
+    #     murs/ennemis), calculé UNE fois, partagé par toutes les bases. Validation closer/overlap/
+    #     non-cible seulement sur les ≤ budget positions du chemin (pas chaque case atteignable). ---
+    straggler_df: Dict[Tuple[int, int], int] = {}
+    _q: deque = deque()
+    for tfp in all_target_fps:
+        for cell in tfp:
+            if cell not in straggler_df:
+                straggler_df[cell] = 0
+                _q.append(cell)
+    while _q:
+        cur = _q.popleft()
+        d = straggler_df[cur]
+        for nb in get_hex_neighbors(cur[0], cur[1]):
+            nc, nr = nb
+            if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                continue
+            if nb in straggler_df or nb in traverse_blocked:
+                continue
+            straggler_df[nb] = d + 1
+            _q.append(nb)
+
     for mid in alive:
         if mid in provisional:
             continue
         sm = start_min[mid]
-        best: Optional[Tuple[int, int]] = None
-        if sm > 0:
-            reach = reach_cache.get(mid) or _reachable(mid)
-            best_score: Optional[int] = None
-            for (cc, rr) in reach:
-                if (cc, rr) == starts[mid]:
-                    continue
-                soc = _socle(mid, cc, rr)
-                if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in soc.fp):
-                    continue
-                if _overlaps_world(soc, mid):
-                    continue
-                if _fp_min_to_targets(set(soc.fp)) >= sm:
-                    continue  # WHILE : strictement plus proche
-                if _engages_nontarget(cc, rr, set(soc.fp)):
-                    continue  # n'engage aucun ennemi non déclaré
-                d_targets = _fp_min_to_targets(set(soc.fp))
-                score = d_targets if mode == "offensive" else -d_targets
-                if best_score is None or score < best_score:
-                    best_score = score
-                    best = (cc, rr)
-            if best is not None:
-                provisional[mid] = best
-                occ_by_mid[mid] = _socle(mid, *best)
-        if mid not in provisional:
+        if sm <= 0:
+            provisional[mid] = starts[mid]  # déjà au contact : ne peut finir plus proche
+            continue
+        start = starts[mid]
+        # Chemin de descente (≤ budget pas) du départ vers la cible la plus proche.
+        path: List[Tuple[int, int]] = []
+        cur = start
+        if start in straggler_df:
+            steps = 0
+            while steps < budget:
+                nxt = None
+                for nb in get_hex_neighbors(cur[0], cur[1]):
+                    if straggler_df.get(nb, 1 << 30) == straggler_df[cur] - 1:
+                        nxt = nb
+                        break
+                if nxt is None:
+                    break
+                cur = nxt
+                path.append(cur)
+                steps += 1
+        # Offensif → position la plus proche de la cible (fin du chemin) ; défensif → déplacement
+        # minimal (début du chemin). On garde la 1re du parcours qui est closer + valide.
+        order = list(reversed(path)) if mode == "offensive" else path
+        chosen: Optional[Tuple[int, int]] = None
+        for pos in order:
+            soc = _socle(mid, pos[0], pos[1])
+            if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in soc.fp):
+                continue
+            if _overlaps_world(soc, mid):
+                continue
+            if _fp_min_to_targets(set(soc.fp)) >= sm:
+                continue  # WHILE : strictement plus proche
+            if _engages_nontarget(pos[0], pos[1], set(soc.fp)):
+                continue  # n'engage aucun ennemi non déclaré
+            chosen = pos
+            break
+        if chosen is not None:
+            provisional[mid] = chosen
+            occ_by_mid[mid] = _socle(mid, *chosen)
+        else:
             provisional[mid] = starts[mid]  # ne peut se rapprocher : reste au départ (Check → per_model)
 
     # Garde-fou : aucun chevauchement de socle dans le plan produit. Erreur explicite plutôt qu'un
@@ -4677,6 +4777,28 @@ def charge_autoplace_plan(
                     f"charge_autoplace_plan: chevauchement de socles entre {placed[i][0]} "
                     f"({provisional[placed[i][0]]}) et {placed[j][0]} ({provisional[placed[j][0]]})"
                 )
+
+    _perf_end = time.perf_counter()
+    # Diagnostic divergence ILP↔preview : ce que le VRAI preview voit sur le plan produit.
+    _prev = charge_preview_move_plan(
+        game_state, str(squad_id),
+        [(mid, int(provisional[mid][0]), int(provisional[mid][1])) for mid in alive],
+        present_target_ids,
+    )
+    _diag["preview"] = {
+        "engaged_all": _prev["engaged_all"],
+        "missing": _prev["missing_targets"],
+        "coherency_ok": _prev["coherency_ok"],
+        "per_model_false": [m for m, v in _prev["per_model"].items() if not v],
+    }
+    print(
+        f"[CHARGE_AUTOPLACE] mode={mode} n_alive={len(alive)} n_targets={len(present_target_ids)} "
+        f"n_slots={len(all_slots)} n_edges={len(edges)} diag={_diag} "
+        f"t_slots={_perf_slots - _perf_start:.3f}s t_edges={_perf_edges - _perf_slots:.3f}s "
+        f"t_milp={_perf_milp - _perf_edges:.3f}s t_repli={_perf_end - _perf_milp:.3f}s "
+        f"t_total={_perf_end - _perf_start:.3f}s n_assigned={len(assign or {})}",
+        file=_sys.stderr, flush=True,
+    )
 
     plan = [[mid, int(provisional[mid][0]), int(provisional[mid][1])] for mid in alive]
     return {"plan": plan}
