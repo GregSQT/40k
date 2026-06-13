@@ -3086,8 +3086,8 @@ export default function Board({
     };
 
     const shouldConfirmAtIcon =
-      // Charge par-figurine : la pose se fait à l'hex CLIQUÉ (onPointerDownSelect), pas en hover-snap.
       (mode === "squadModelMove" && effectivePerModelPlan?.activeModelId != null) ||
+      (perModelChargeLike && effectivePerModelPlan?.activeModelId != null) ||
       (selectedUnitId != null &&
         ((effectivePhase === "move" && mode === "select") ||
           (effectivePhase === "move" && mode === "movePreview") ||
@@ -3136,6 +3136,7 @@ export default function Board({
     mode,
     selectedUnitId,
     isPerModelMove,
+    perModelChargeLike,
     effectivePerModelPlan?.activeModelId,
     effectivePerModelPoolRef?.current?.has,
     chargeDestPoolRef?.current?.has,
