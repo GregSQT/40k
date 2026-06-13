@@ -31,6 +31,7 @@ from .shared_utils import (
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
     get_source_unit_rule_display_name_for_effect as shared_get_source_unit_rule_display_name_for_effect,
     build_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
+    is_placement_valid_with_clearance,
     _compute_unit_occupied_hexes,
     _roll_squad_shot_sequence, wound_threshold, save_threshold,
 )
@@ -5267,9 +5268,12 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         conditional_debug_print(game_state, f"[OCCUPATION CHECK] E{episode} T{turn} {phase}: Unit {unit['id']} checking advance destination ({dest_col_int},{dest_row_int})")
 
         unit_id_str = str(unit["id"])
-        occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
         candidate_fp = compute_candidate_footprint(dest_col_int, dest_row_int, unit, game_state)
-        if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+        if not is_placement_valid_with_clearance(
+            game_state, candidate_fp,
+            shape=unit["BASE_SHAPE"], base_size=unit["BASE_SIZE"],
+            col=dest_col_int, row=dest_row_int, exclude_unit_id=unit_id_str,
+        ):
             if "console_logs" not in game_state:
                 game_state["console_logs"] = []
             log_msg = f"[ADVANCE COLLISION PREVENTED] E{episode} T{turn} {phase}: Unit {unit['id']} cannot advance to ({dest_col_int},{dest_row_int}) - footprint blocked"

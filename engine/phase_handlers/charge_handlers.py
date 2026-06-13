@@ -33,6 +33,7 @@ from .shared_utils import (
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
     get_source_unit_rule_display_name_for_effect as shared_get_source_unit_rule_display_name_for_effect,
     build_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
+    is_placement_valid_with_clearance, candidate_overlaps_any_unit,
 )
 
 CHARGE_IMPACT_TRIGGER_THRESHOLD = 4
@@ -162,6 +163,64 @@ def _candidate_footprint_charge(
         offs = off_e if (center_col & 1) == 0 else off_o
         return {(center_col + dc, center_row + dr) for dc, dr in offs}
     return compute_candidate_footprint(center_col, center_row, unit, game_state)
+
+
+def _charge_offsets_for_base(
+    game_state: Dict[str, Any], shape: str, base_size: Any, orientation: int
+) -> FootprintOffsetPair:
+    """Offsets even/odd pour une base (shape/size/orient) DONNÉE — pas celle de l'unité.
+
+    Permet une géométrie par-figurine (unités à bases hétérogènes : personnage attaché). Cache par
+    base (réutilisé entre figs de même socle). ``None`` = mono-hex / legacy → fallback empreinte.
+    """
+    from .shared_utils import get_engagement_zone
+
+    cache: Dict[Any, FootprintOffsetPair] = game_state.setdefault("_charge_fp_offset_by_base_cache", {})
+    key = (shape, tuple(base_size) if isinstance(base_size, (list, tuple)) else base_size, int(orientation))
+    if key in cache:
+        return cache[key]
+    ez = get_engagement_zone(game_state)
+    if ez <= 1 or base_size == 1:
+        cache[key] = None
+        return None
+    try:
+        from engine.hex_utils import precompute_footprint_offsets
+        off_e, off_o = precompute_footprint_offsets(shape, base_size, int(orientation))
+        out: FootprintOffsetPair = (off_e, off_o)
+    except Exception:
+        out = None
+    cache[key] = out
+    return out
+
+
+def _charge_model_footprint(
+    game_state: Dict[str, Any], model_entry: Dict[str, Any], col: int, row: int
+) -> Set[Tuple[int, int]]:
+    """Empreinte d'une figurine à (col,row) selon SA propre base (``models_cache``)."""
+    shape = model_entry["BASE_SHAPE"]
+    bs = model_entry["BASE_SIZE"]
+    orient = int(model_entry.get("orientation", 0))
+    offs = _charge_offsets_for_base(game_state, shape, bs, orient)
+    if offs is not None:
+        off_e, off_o = offs
+        o = off_e if (col & 1) == 0 else off_o
+        return {(col + dc, row + dr) for dc, dr in o}
+    return compute_candidate_footprint(
+        col, row, {"BASE_SHAPE": shape, "BASE_SIZE": bs, "orientation": orient}, game_state
+    )
+
+
+def _charge_model_socle(
+    game_state: Dict[str, Any], model_entry: Dict[str, Any], col: int, row: int
+) -> Any:
+    """``Socle`` d'une figurine selon sa propre base, pour les tests de chevauchement continu."""
+    from engine.hex_utils import Socle
+
+    fp = _charge_model_footprint(game_state, model_entry, col, row)
+    return Socle(
+        shape=model_entry["BASE_SHAPE"], base_size=model_entry["BASE_SIZE"],
+        col=col, row=row, fp=fp,
+    )
 
 
 def _charge_synthetic_charger_cache_entry(
@@ -1507,6 +1566,51 @@ def _ai_select_charge_target_pve(game_state: Dict[str, Any], unit: Dict[str, Any
     return best_target
 
 
+def _charge_obstacle_socles(game_state: Dict[str, Any], exclude_unit_id: str) -> List[Any]:
+    """Socles des unités obstacles (``units_cache`` hors squad chargeur), construits UNE fois.
+
+    Perf : évite de reconstruire les socles voisins à chaque cellule candidate dans les BFS de pool.
+    """
+    from engine.hex_utils import Socle
+
+    units_cache = require_key(game_state, "units_cache")
+    out: List[Any] = []
+    for uid, entry in units_cache.items():
+        if str(uid) == str(exclude_unit_id):
+            continue
+        occ = entry.get("occupied_hexes")
+        col = int(entry["col"])
+        row = int(entry["row"])
+        fp = set(occ) if occ else {(col, row)}
+        out.append(Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"], col=col, row=row, fp=fp))
+    return out
+
+
+def _charge_model_placement_overlaps(
+    cand_socle: Any,
+    obstacle_socles: List[Any],
+    sibling_socles: List[Any],
+    wall_hexes: Set[Tuple[int, int]],
+) -> bool:
+    """True si le placement final d'une figurine de charge chevauche un obstacle.
+
+    Murs : discret (``cand_fp & wall_hexes``). Autres unités/ennemis (``obstacle_socles``,
+    pré-construits) et coéquipières (``sibling_socles``) : clearance continu rond↔rond, fallback
+    empreinte — via ``footprints_overlap``.
+    """
+    from engine.hex_utils import footprints_overlap
+
+    if wall_hexes and (cand_socle.fp & wall_hexes):
+        return True
+    for o in obstacle_socles:
+        if footprints_overlap(cand_socle, o):
+            return True
+    for sib in sibling_socles:
+        if footprints_overlap(cand_socle, sib):
+            return True
+    return False
+
+
 def charge_build_model_destinations_pool(
     game_state: Dict[str, Any],
     model_id: str,
@@ -1578,40 +1682,36 @@ def charge_build_model_destinations_pool(
     if not target_entries:
         return empty
 
-    fp_offset_pair = _charge_prepare_footprint_offsets(unit, game_state)
-
-    # Coéquipières : collision (le plan provisoire override les figs déjà posées).
-    same_squad_occupied: Set[Tuple[int, int]] = set()
+    # Coéquipières : collision PAR-FIGURINE — chaque fig (et la fig mobile) utilise SA propre base
+    # (models_cache), pas celle de l'unité (cf. personnage attaché à plus grande base). Le plan
+    # provisoire override les figs déjà posées.
+    sibling_socles: List[Any] = []
     squad_models = require_key(game_state, "squad_models")
     for mid in require_key(squad_models, squad_id):
         if str(mid) == str(model_id):
             continue
+        sib = models_cache.get(str(mid))
+        if sib is None:
+            continue
         if provisional_plan and str(mid) in provisional_plan:
             pc, pr = provisional_plan[str(mid)]
-            sib_fp = _candidate_footprint_charge(int(pc), int(pr), unit, game_state, fp_offset_pair)
         else:
-            sib = models_cache.get(str(mid))
-            if sib is None:
-                continue
-            sib_fp = _candidate_footprint_charge(
-                int(sib["col"]), int(sib["row"]), unit, game_state, fp_offset_pair
-            )
-        same_squad_occupied |= sib_fp
+            pc, pr = int(sib["col"]), int(sib["row"])
+        sibling_socles.append(_charge_model_socle(game_state, sib, int(pc), int(pr)))
 
     # 03.01 : une figurine se déplace À TRAVERS les figs amies, mais PAS à travers les ennemies (ni
     # les murs). Chemin au sol = murs + ennemis seulement ; les amis (coéquipières + autres unités
     # amies) ne bloquent pas le passage.
     path_blocked = set(wall_hexes) | enemy_occupied
-    # 03 « Ending a move » : aucune fig ne peut FINIR sur une autre fig → l'empreinte finale ne doit
-    # chevaucher aucune autre fig (amie ou ennemie) ni un mur.
-    end_blocked = path_blocked | other_occupied | same_squad_occupied
+    # 03 « Ending a move » : le non-chevauchement final (murs + unités + coéquipières) est délégué à
+    # _charge_model_placement_overlaps (clearance continu rond↔rond, fallback empreinte).
     # Take to the skies (21.03) : si le vol est actif, la traversée ignore tout ; seul le placement
     # final (``cand_fp & end_blocked``) reste interdit d'overlap. Sinon, traversée sol classique.
     fly_active = _charge_fly_active(game_state, unit, squad_id)
     traverse_blocked = set() if fly_active else path_blocked
 
     start_col, start_row = int(model["col"]), int(model["row"])
-    start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_offset_pair)
+    start_fp = _charge_model_footprint(game_state, model, start_col, start_row)
     start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
 
     # BFS centre-à-centre dans le budget : ne traverse ni mur ni fig ENNEMIE (amies traversables, vol = tout).
@@ -1635,11 +1735,14 @@ def charge_build_model_destinations_pool(
     within_1: List[List[int]] = []
     engaged: List[List[int]] = []
     closer: List[List[int]] = []
+    obstacle_socles = _charge_obstacle_socles(game_state, squad_id)
+    _walls = set(wall_hexes)
     for cc, rr in reachable:
-        cand_fp = _candidate_footprint_charge(cc, rr, unit, game_state, fp_offset_pair)
+        cand_socle = _charge_model_socle(game_state, model, cc, rr)
+        cand_fp = cand_socle.fp
         if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
             continue
-        if cand_fp & end_blocked:
+        if _charge_model_placement_overlaps(cand_socle, obstacle_socles, sibling_socles, _walls):
             continue
         d_min = min(
             min_distance_between_sets(cand_fp, tfp, max_distance=start_min) for tfp in target_fps
@@ -1727,7 +1830,6 @@ def charge_model_plan_state(
     board_rows = int(require_key(game_state, "board_rows"))
     wall_hexes = game_state.get("wall_hexes", set())
     player = int(unit["player"])
-    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
 
     # Cibles déclarées (empreintes) + ennemis non déclarés (exclusion d'engagement) + occupation.
     declared = {str(t) for t in target_ids}
@@ -1749,23 +1851,25 @@ def charge_model_plan_state(
         elif str(eid) != str(unit_id):
             other_occupied |= cells
 
-    # Empreintes des coéquipières : posées (plan) = bloquage stable ; non posées = bloquage à
-    # l'origine (par fig, on retire l'origine de la fig qui bouge).
-    placed_fp: Set[Tuple[int, int]] = set()
-    for _pc, _pr in provisional_plan.values():
-        placed_fp |= _candidate_footprint_charge(int(_pc), int(_pr), unit, game_state, fp_pair)
+    # Coéquipières PAR-FIGURINE (chaque fig a sa base) : posées (plan) = bloquage stable ; non posées
+    # = bloquage à l'origine (la fig mobile retire le sien dans _qualifying).
+    placed_sibling_socles: List[Any] = []
+    for _mid, (_pc, _pr) in provisional_plan.items():
+        _sib = models_cache.get(str(_mid))
+        if _sib is None:
+            continue
+        placed_sibling_socles.append(_charge_model_socle(game_state, _sib, int(_pc), int(_pr)))
     origin_fp: Dict[str, Set[Tuple[int, int]]] = {}
     for m in unplaced:
         sib = models_cache.get(str(m))
         origin_fp[m] = (
-            _candidate_footprint_charge(int(sib["col"]), int(sib["row"]), unit, game_state, fp_pair)
+            _charge_model_footprint(game_state, sib, int(sib["col"]), int(sib["row"]))
             if sib else set()
         )
     # 03.01 : le déplacement traverse les figs AMIES, pas les ennemies ni les murs → chemin = murs +
     # ennemis seulement. Les coéquipières (posées ou à l'origine) ne bloquent que la position FINALE
     # (``cand_fp & blocked_static`` posées + check ``others`` origines dans ``_qualifying``).
     path_blocked = set(wall_hexes) | enemy_occupied
-    blocked_static = path_blocked | other_occupied | placed_fp
     # Take to the skies (21.03) : vol actif → la reachability BFS et le champ de distance ignorent
     # tout (traversée libre) ; le placement final (``cand_fp & blocked_static``, collision ``others``)
     # reste interdit d'overlap.
@@ -1855,7 +1959,7 @@ def charge_model_plan_state(
         dist_tgt = _dist_field(tgt_union, int(budget))
         for m in list(reach_by_model.keys()):
             sib = models_cache.get(str(m))
-            sfp = _candidate_footprint_charge(int(sib["col"]), int(sib["row"]), unit, game_state, fp_pair)
+            sfp = _charge_model_footprint(game_state, sib, int(sib["col"]), int(sib["row"]))
             start_min_by_model[m] = min((dist_tgt.get(h, INF) for h in sfp), default=INF)
         if nontarget_entries:
             ntgt_union: Set[Tuple[int, int]] = set()
@@ -1864,53 +1968,81 @@ def charge_model_plan_state(
                 ntgt_union |= set(occ) if occ else {(int(ne["col"]), int(ne["row"]))}
             dist_ntgt = _dist_field(ntgt_union, ez + _ENG_MARGIN)
 
-    # 2) Classification de l'UNION des hexes atteignables, UNE SEULE FOIS. Le check d'engagement
-    #    PRÉCIS (coûteux) n'est lancé que pour les hexes PROCHES d'une unité (via les champs de
-    #    distance) ; les milliers d'hexes lointains → engagé/within_1 = False sans appel.
-    region: Dict[Tuple[int, int], Dict[str, Any]] = {}
+    # 2) Classification PAR BASE (pas par figurine) : les figs de MÊME socle (ex. 9 terminators)
+    #    classent les hexes à l'identique → on classe une seule fois par base distincte (1 pour une
+    #    escouade homogène, 2 avec un personnage attaché). dist_tgt/dist_ntgt sont indépendants de la
+    #    base (calculés 1×) ; seul le footprint candidat dépend de la base. Le filtre « plus proche que
+    #    le départ » (per-modèle) est appliqué dans _qualifying ; ici on élague au cap global de la base.
+    def _base_key(model_entry: Dict[str, Any]) -> Tuple[Any, Any, int]:
+        bs = model_entry["BASE_SIZE"]
+        return (
+            model_entry["BASE_SHAPE"],
+            tuple(bs) if isinstance(bs, (list, tuple)) else bs,
+            int(model_entry.get("orientation", 0)),
+        )
+
+    base_of_model: Dict[str, Tuple[Any, Any, int]] = {}
+    reach_by_base: Dict[Tuple[Any, Any, int], Tuple[Dict[str, Any], Set[Tuple[int, int]], int]] = {}
+    for m in reach_by_model:
+        m_model = models_cache.get(str(m))
+        if m_model is None:
+            continue
+        bk = _base_key(m_model)
+        base_of_model[m] = bk
+        m_cap = start_min_by_model.get(m, INF)
+        if bk not in reach_by_base:
+            reach_by_base[bk] = (m_model, set(reach_by_model[m]), m_cap)
+        else:
+            rep, cells, cap = reach_by_base[bk]
+            cells.update(reach_by_model[m])
+            reach_by_base[bk] = (rep, cells, max(cap, m_cap))
+
+    region_by_base: Dict[Tuple[Any, Any, int], Dict[Tuple[int, int], Dict[str, Any]]] = {}
     if can_classify:
-        cap_all = max(start_min_by_model.values()) if start_min_by_model else INF
-        candidate_union: Set[Tuple[int, int]] = set()
-        for reach in reach_by_model.values():
-            candidate_union.update(reach)
+        obstacle_socles = _charge_obstacle_socles(game_state, unit_id)
+        _walls = set(wall_hexes)
         synth_base = dict(require_key(units_cache, str(require_key(unit, "id"))))
         synth_base.pop("occupied_hexes_by_model", None)
-        for (cc, rr) in candidate_union:
-            cand_fp = _candidate_footprint_charge(cc, rr, unit, game_state, fp_pair)
-            if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
-                continue
-            if cand_fp & blocked_static:
-                continue
-            d_min = min((dist_tgt.get(h, INF) for h in cand_fp), default=INF)
-            # Jamais plus proche que le départ d'AUCUNE fig → inutile (élague l'essentiel du reachable).
-            if d_min >= cap_all:
-                continue
-            d_ntgt = (
-                min((dist_ntgt.get(h, INF) for h in cand_fp), default=INF) if dist_ntgt else INF
-            )
-            near_ntgt = d_ntgt <= ez + _ENG_MARGIN
-            near_tgt = d_min <= ez + _ENG_MARGIN
-            near_w1 = d_min <= within_1_zone + _ENG_MARGIN
-            if near_ntgt or near_tgt or near_w1:
-                synth_base["col"] = cc
-                synth_base["row"] = rr
-                synth_base["occupied_hexes"] = cand_fp
-            if near_ntgt and any(
-                unit_entries_within_engagement_zone(synth_base, ne, ez) for ne in nontarget_entries
-            ):
-                continue
-            engaged_f = (
-                near_tgt
-                and any(unit_entries_within_engagement_zone(synth_base, te, ez) for te in target_entries)
-            )
-            within1_f = (
-                near_w1
-                and any(
-                    unit_entries_within_engagement_zone(synth_base, te, within_1_zone)
-                    for te in target_entries
+        for bk, (rep_model, cells, cap_base) in reach_by_base.items():
+            reg_b: Dict[Tuple[int, int], Dict[str, Any]] = {}
+            for (cc, rr) in cells:
+                cand_socle = _charge_model_socle(game_state, rep_model, cc, rr)
+                cand_fp = cand_socle.fp
+                if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
+                    continue
+                if _charge_model_placement_overlaps(cand_socle, obstacle_socles, placed_sibling_socles, _walls):
+                    continue
+                d_min = min((dist_tgt.get(h, INF) for h in cand_fp), default=INF)
+                # Élague au cap global de la base (aucune de ses figs ne peut finir aussi loin).
+                if d_min >= cap_base:
+                    continue
+                d_ntgt = (
+                    min((dist_ntgt.get(h, INF) for h in cand_fp), default=INF) if dist_ntgt else INF
                 )
-            )
-            region[(cc, rr)] = {"fp": cand_fp, "d_min": d_min, "within_1": within1_f, "engaged": engaged_f}
+                near_ntgt = d_ntgt <= ez + _ENG_MARGIN
+                near_tgt = d_min <= ez + _ENG_MARGIN
+                near_w1 = d_min <= within_1_zone + _ENG_MARGIN
+                if near_ntgt or near_tgt or near_w1:
+                    synth_base["col"] = cc
+                    synth_base["row"] = rr
+                    synth_base["occupied_hexes"] = cand_fp
+                if near_ntgt and any(
+                    unit_entries_within_engagement_zone(synth_base, ne, ez) for ne in nontarget_entries
+                ):
+                    continue
+                engaged_f = (
+                    near_tgt
+                    and any(unit_entries_within_engagement_zone(synth_base, te, ez) for te in target_entries)
+                )
+                within1_f = (
+                    near_w1
+                    and any(
+                        unit_entries_within_engagement_zone(synth_base, te, within_1_zone)
+                        for te in target_entries
+                    )
+                )
+                reg_b[(cc, rr)] = {"fp": cand_fp, "d_min": d_min, "within_1": within1_f, "engaged": engaged_f}
+            region_by_base[bk] = reg_b
 
     def _qualifying(model_id: str, key: str) -> List[List[int]]:
         """Hexes de ``model_id`` qualifiant ``key`` (within_1 / engaged / closer) : reach ∩ region,
@@ -1923,8 +2055,9 @@ def charge_model_plan_state(
         if start_min is None:
             return out
         others = other_origins_by_model.get(model_id, set())
+        reg_m = region_by_base.get(base_of_model.get(model_id), {})
         for h in reach:
-            rg = region.get(h)
+            rg = reg_m.get(h)
             if rg is None:
                 continue
             if rg["d_min"] >= start_min:
@@ -1974,9 +2107,10 @@ def charge_model_plan_state(
     footprint_mask_loops: List[List[List[float]]] = []
     if pool:
         from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
+        _sel_region = region_by_base.get(base_of_model.get(str(selected_model)), {}) if selected_model is not None else {}
         fp_zone: Set[Tuple[int, int]] = set()
         for _c, _r in pool:
-            rg = region.get((int(_c), int(_r)))
+            rg = _sel_region.get((int(_c), int(_r)))
             if rg is not None:
                 fp_zone |= rg["fp"]
         loops = compute_move_preview_mask_loops_world(fp_zone, game_state)
@@ -1991,8 +2125,11 @@ def charge_model_plan_state(
     # Satisfaction par cible (voile UI) : une cible-UNITÉ est ENGAGÉE dès qu'≥1 fig POSÉE est à
     # ≤EZ d'elle (03.04, engagement au niveau unité). violet = satisfaite, rouge = pas.
     placed_synths = []
-    for _c, _r in provisional_plan.values():
-        _fp = _candidate_footprint_charge(int(_c), int(_r), unit, game_state, fp_pair)
+    for _mid, (_c, _r) in provisional_plan.items():
+        _sib = models_cache.get(str(_mid))
+        if _sib is None:
+            continue
+        _fp = _charge_model_footprint(game_state, _sib, int(_c), int(_r))
         placed_synths.append(
             _charge_synthetic_charger_cache_entry(game_state, unit, int(_c), int(_r), _fp)
         )
@@ -2360,12 +2497,16 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     dest_col_int, dest_row_int = normalize_coordinates(dest_col, dest_row)
 
     unit_id_str = str(unit["id"])
-    _t_occ0 = time.perf_counter() if _perf else None
-    occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
-    _t_occ1 = time.perf_counter() if _perf else None
     _fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
     candidate_fp = _candidate_footprint_charge(dest_col_int, dest_row_int, unit, game_state, _fp_pair)
-    if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+    _t_occ0 = time.perf_counter() if _perf else None
+    _placement_ok = is_placement_valid_with_clearance(
+        game_state, candidate_fp,
+        shape=unit["BASE_SHAPE"], base_size=unit["BASE_SIZE"],
+        col=dest_col_int, row=dest_row_int, exclude_unit_id=unit_id_str,
+    )
+    _t_occ1 = time.perf_counter() if _perf else None
+    if not _placement_ok:
         if "console_logs" not in game_state:
             game_state["console_logs"] = []
         log_msg = f"[CHARGE COLLISION PREVENTED] E{episode} T{turn} {phase}: Unit {unit['id']} cannot charge to ({dest_col_int},{dest_row_int}) - footprint blocked"
@@ -3804,32 +3945,30 @@ def _charge_model_pos_is_closer(
     if not target_fps:
         return False
 
-    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
-    same_squad_occupied: Set[Tuple[int, int]] = set()
+    # Géométrie PAR-FIGURINE : la fig mobile et chaque coéquipière utilisent LEUR propre base
+    # (models_cache), pas celle de l'unité (cf. personnage attaché à plus grande base).
+    sibling_socles: List[Any] = []
     squad_models = require_key(game_state, "squad_models")
     for mid in require_key(squad_models, squad_id):
         if str(mid) == str(model_id):
             continue
+        sib = models_cache.get(str(mid))
+        if sib is None:
+            continue
         if provisional_plan and str(mid) in provisional_plan:
             pc, pr = provisional_plan[str(mid)]
-            same_squad_occupied |= _candidate_footprint_charge(int(pc), int(pr), unit, game_state, fp_pair)
         else:
-            sib = models_cache.get(str(mid))
-            if sib is not None:
-                same_squad_occupied |= _candidate_footprint_charge(
-                    int(sib["col"]), int(sib["row"]), unit, game_state, fp_pair
-                )
+            pc, pr = int(sib["col"]), int(sib["row"])
+        sibling_socles.append(_charge_model_socle(game_state, sib, int(pc), int(pr)))
     # 03.01 : déplacement À TRAVERS les figs amies autorisé, PAS à travers les ennemies ni les murs.
     path_blocked = set(wall_hexes) | enemy_occupied
-    # 03 « Ending a move » : pas de fig sur une autre fig → empreinte finale sans chevauchement.
-    end_blocked = path_blocked | other_occupied | same_squad_occupied
-    # Take to the skies (21.03) : vol actif → traversée libre (murs + figs ignorés) ; placement final
-    # (``cand_fp & end_blocked``) reste interdit d'overlap.
+    # 03 « Ending a move » : non-chevauchement final délégué à _charge_model_placement_overlaps.
+    # Take to the skies (21.03) : vol actif → traversée libre ; placement final reste interdit d'overlap.
     fly_active = _charge_fly_active(game_state, unit, squad_id)
     traverse_blocked = set() if fly_active else path_blocked
 
     start_col, start_row = int(model["col"]), int(model["row"])
-    start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_pair)
+    start_fp = _charge_model_footprint(game_state, model, start_col, start_row)
     start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
     dest = (int(dest_c), int(dest_r))
 
@@ -3856,10 +3995,12 @@ def _charge_model_pos_is_closer(
         if not found:
             return False
 
-    cand_fp = _candidate_footprint_charge(dest[0], dest[1], unit, game_state, fp_pair)
+    cand_socle = _charge_model_socle(game_state, model, dest[0], dest[1])
+    cand_fp = cand_socle.fp
     if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
         return False
-    if cand_fp & end_blocked:
+    obstacle_socles = _charge_obstacle_socles(game_state, squad_id)
+    if _charge_model_placement_overlaps(cand_socle, obstacle_socles, sibling_socles, set(wall_hexes)):
         return False
     d_min = min(min_distance_between_sets(cand_fp, tfp, max_distance=start_min) for tfp in target_fps)
     if d_min >= start_min:
@@ -3919,8 +4060,9 @@ def charge_preview_move_plan(
         )
 
     # 2) Cohésion (identique au move : 1re puce voisins < min, 2e puce une fig à > coh_max).
-    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
-    fps = [_candidate_footprint_charge(c, r, unit, game_state, fp_pair) for _, c, r in norm]
+    #    Empreintes PAR-FIGURINE (chaque fig a sa base).
+    _mc_cohesion = require_key(game_state, "models_cache")
+    fps = [_charge_model_footprint(game_state, _mc_cohesion[str(mid)], c, r) for mid, c, r in norm]
     coh = get_coherency_subhex(game_state)
     coh_max = get_cohesion_max_subhex(game_state)
     min_nb = get_min_neighbors(game_state)

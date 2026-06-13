@@ -9,7 +9,7 @@ All functions are O(1) per call unless documented otherwise.
 """
 
 import math
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 
 import numpy as np
 
@@ -1384,3 +1384,69 @@ def engagement_minimum_clearance_norm(engagement_zone: int) -> float:
     if engagement_zone <= 0:
         return 0.0
     return float(engagement_zone) * ENGAGEMENT_NORM_HEX_WIDTH
+
+
+# ---------------------------------------------------------------------------
+# Chevauchement de socles — test unifié (plan collision continue, étape 0)
+# ---------------------------------------------------------------------------
+
+# Tolérance flottante : un écart bord-à-bord >= -_OVERLAP_TOL est considéré « sans
+# chevauchement » (tangence/contact toléré, superposition interdite). Même ordre de
+# grandeur que le 1e-6 du test d'engagement.
+_OVERLAP_TOL: float = 1e-6
+
+
+class Socle(NamedTuple):
+    """Socle d'une figurine pour les tests de chevauchement.
+
+    ``fp`` (empreinte = cellules occupées) n'est nécessaire que pour le fallback
+    empreinte (toute paire impliquant une base non ronde). Pour une paire ronde↔ronde,
+    le test est purement géométrique (centre + base_size) et ``fp`` peut rester None.
+    ``base_size`` : diamètre (round/square) ou [major, minor] (oval).
+    """
+    shape: str
+    base_size: "int | list[int]"
+    col: int
+    row: int
+    fp: Optional[Set[Tuple[int, int]]] = None
+
+
+def bounding_radius_norm(shape: str, base_size: "int | list[int]") -> float:
+    """Rayon englobant (unités ``_hex_center``), toutes formes — pour la broad-phase.
+
+    Conservateur : pour oval/square on prend la plus grande dimension. Aligné sur
+    ``_FOOTPRINT_SIZE_SCALE`` comme ``round_base_radius_norm``.
+    """
+    dim = max(base_size) if isinstance(base_size, (list, tuple)) else base_size
+    if dim < 1:
+        dim = 1
+    return (dim / 2.0) * _FOOTPRINT_SIZE_SCALE
+
+
+def footprints_overlap(a: Socle, b: Socle) -> bool:
+    """True si les deux socles se chevauchent (superposition interdite ; contact toléré).
+
+    - Paire ronde↔ronde : clearance euclidien **continu** (exact). Chevauchement si l'écart
+      bord-à-bord est strictement négatif (``< -_OVERLAP_TOL``) ; tangence (gap≈0) autorisée.
+    - Toute paire impliquant une base non ronde : **fallback empreinte** (intersection des
+      cellules). ``a.fp`` et ``b.fp`` doivent alors être fournis.
+
+    Broad-phase (distance des centres vs rayons englobants) appliquée UNIQUEMENT devant le
+    fallback empreinte : pour une paire ronde le test précis est déjà O(1), une broad-phase
+    y serait redondante.
+    """
+    if a.shape == "round" and b.shape == "round":
+        gap = euclidean_edge_clearance_round_round(
+            a.col, a.row, a.base_size, b.col, b.row, b.base_size
+        )
+        return gap < -_OVERLAP_TOL
+    # Fallback empreinte (au moins une base non ronde) : broad-phase, puis intersection.
+    cxa, cya = _hex_center(a.col, a.row)
+    cxb, cyb = _hex_center(b.col, b.row)
+    d = math.hypot(cxb - cxa, cyb - cya)
+    reach = bounding_radius_norm(a.shape, a.base_size) + bounding_radius_norm(b.shape, b.base_size)
+    if d > reach + _OVERLAP_TOL:
+        return False
+    if a.fp is None or b.fp is None:
+        raise ValueError("footprints_overlap: empreinte (fp) requise pour une paire non ronde")
+    return bool(a.fp & b.fp)

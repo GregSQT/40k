@@ -42,6 +42,7 @@ from .shared_utils import (
     build_occupied_positions_set,
     compute_candidate_footprint,
     is_footprint_placement_valid,
+    is_placement_valid_with_clearance,
     update_units_cache_position,
     translate_squad_to_destination,
     update_enemy_adjacent_caches_after_unit_move,
@@ -877,10 +878,13 @@ def _fight_apply_pile_in_move(
     dest_col_i, dest_row_i = normalize_coordinates(dest_col, dest_row)
     orig_col, orig_row = require_unit_position(unit, game_state)
     unit_id_str = str(unit["id"])
-    occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
     fp_pair = _fight_prepare_footprint_offsets(unit, game_state)
     candidate_fp = _candidate_footprint_fight(dest_col_i, dest_row_i, unit, game_state, fp_pair)
-    if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+    if not is_placement_valid_with_clearance(
+        game_state, candidate_fp,
+        shape=unit["BASE_SHAPE"], base_size=unit["BASE_SIZE"],
+        col=dest_col_i, row=dest_row_i, exclude_unit_id=unit_id_str,
+    ):
         raise ValueError(
             f"Pile in illegal placement unit={unit_id_str} dest=({dest_col_i},{dest_row_i})"
         )

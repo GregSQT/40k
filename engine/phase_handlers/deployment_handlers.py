@@ -12,6 +12,7 @@ from engine.combat_utils import set_unit_coordinates
 from engine.phase_handlers.shared_utils import (
     update_units_cache_position, rebuild_choice_timing_index,
     compute_candidate_footprint, build_occupied_positions_set,
+    candidate_overlaps_any_unit,
 )
 
 
@@ -47,11 +48,21 @@ def _get_deployable_remaining(deployment_state: Dict[str, Any], player: int) -> 
 def _is_footprint_overlapping(
     game_state: Dict[str, Any],
     candidate_fp: Set[Tuple[int, int]],
+    *,
+    shape: str,
+    base_size: "int | list[int]",
+    col: int,
+    row: int,
     exclude_unit_id: Optional[str] = None,
 ) -> bool:
-    """Check if candidate footprint overlaps any deployed unit's footprint."""
-    occupied = build_occupied_positions_set(game_state, exclude_unit_id=exclude_unit_id)
-    return bool(candidate_fp & occupied)
+    """True si le socle candidat chevauche celui d'une unité déjà déployée.
+
+    Clearance continu rond↔rond, fallback empreinte (via ``candidate_overlaps_any_unit``).
+    """
+    from engine.hex_utils import Socle
+
+    cand = Socle(shape=shape, base_size=base_size, col=col, row=row, fp=candidate_fp)
+    return candidate_overlaps_any_unit(game_state, cand, exclude_unit_id=exclude_unit_id)
 
 
 def _mark_deployed(deployment_state: Dict[str, Any], unit_id: str, current_deployer: int) -> None:
@@ -151,7 +162,11 @@ def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]
         if (c, r) in wall_hexes:
             return False, {"error": "deploy_footprint_on_wall", "cell": (c, r)}
 
-    if _is_footprint_overlapping(game_state, candidate_fp, exclude_unit_id=unit_id):
+    if _is_footprint_overlapping(
+        game_state, candidate_fp,
+        shape=unit["BASE_SHAPE"], base_size=unit["BASE_SIZE"],
+        col=int(dest_col), row=int(dest_row), exclude_unit_id=unit_id,
+    ):
         return False, {"error": "deploy_footprint_occupied", "unitId": unit_id}
 
     set_unit_coordinates(unit, dest_col, dest_row)

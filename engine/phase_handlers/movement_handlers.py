@@ -29,7 +29,8 @@ from .shared_utils import (
     build_occupied_positions_set,
     build_enemy_occupied_positions_set,
     compute_candidate_footprint,
-    is_footprint_placement_valid, get_engagement_zone, get_max_base_size_hex,
+    is_footprint_placement_valid, is_placement_valid_with_clearance,
+    get_engagement_zone, get_max_base_size_hex,
     get_squad_move_budget, validate_move_plan, _validate_plan_coherency, commit_move,
     get_coherency_subhex, get_cohesion_max_subhex, get_min_neighbors,
     _compute_unit_occupied_hexes, _squad_is_in_enemy_er,
@@ -954,10 +955,13 @@ def _attempt_movement_to_destination(
             "BASE_SIZE": unit["BASE_SIZE"],
             "orientation": orientation,
         }
-    occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
     candidate_fp = compute_candidate_footprint(dest_col_int, dest_row_int, footprint_unit, game_state)
     _mct1 = _mct.perf_counter() if _mct_pt else None
-    if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+    if not is_placement_valid_with_clearance(
+        game_state, candidate_fp,
+        shape=footprint_unit["BASE_SHAPE"], base_size=footprint_unit["BASE_SIZE"],
+        col=dest_col_int, row=dest_row_int, exclude_unit_id=unit_id_str,
+    ):
         if "console_logs" not in game_state:
             game_state["console_logs"] = []
         log_msg = f"[MOVE COLLISION PREVENTED] E{episode} T{turn} {phase}: Unit {unit['id']} cannot move to ({dest_col_int},{dest_row_int}) - footprint blocked"

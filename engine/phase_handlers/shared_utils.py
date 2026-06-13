@@ -305,6 +305,71 @@ def is_footprint_placement_valid(
     return True
 
 
+def candidate_overlaps_any_unit(
+    game_state: Dict[str, Any],
+    candidate: "Socle",
+    exclude_unit_id: Optional[str] = None,
+) -> bool:
+    """True si le socle ``candidate`` chevauche celui d'une autre unité vivante.
+
+    Test unifié (``hex_utils.footprints_overlap``) : ronde↔ronde en clearance euclidien
+    continu (exact), toute paire impliquant un non-rond en fallback empreinte. ``candidate.fp``
+    doit être fourni dès que ``candidate`` ou un voisin est non rond. ``exclude_unit_id`` :
+    l'unité en mouvement, exclue d'elle-même.
+
+    Ne teste QUE le chevauchement entre unités — les bornes plateau et les murs restent à la
+    charge de ``is_footprint_placement_valid`` (discret, inchangé).
+    """
+    from engine.hex_utils import Socle, footprints_overlap
+
+    units_cache = require_key(game_state, "units_cache")
+    for uid, entry in units_cache.items():
+        if exclude_unit_id is not None and str(uid) == str(exclude_unit_id):
+            continue
+        e_col = require_key(entry, "col")
+        e_row = require_key(entry, "row")
+        occ = entry.get("occupied_hexes")
+        e_fp = set(occ) if occ else {(e_col, e_row)}
+        neighbor = Socle(
+            shape=require_key(entry, "BASE_SHAPE"),
+            base_size=require_key(entry, "BASE_SIZE"),
+            col=e_col,
+            row=e_row,
+            fp=e_fp,
+        )
+        if footprints_overlap(candidate, neighbor):
+            return True
+    return False
+
+
+def is_placement_valid_with_clearance(
+    game_state: Dict[str, Any],
+    candidate_fp: Set[Tuple[int, int]],
+    *,
+    shape: str,
+    base_size: "int | list[int]",
+    col: int,
+    row: int,
+    exclude_unit_id: Optional[str] = None,
+    enemy_adjacent_hexes: Optional[Set[Tuple[int, int]]] = None,
+) -> bool:
+    """Placement légal = bornes + murs (discret, inchangé) ET aucun chevauchement de socle.
+
+    Le volet bornes/murs reste ``is_footprint_placement_valid`` (avec ``occupied_positions``
+    vide : le chevauchement n'est plus testé par cellules ici). Le chevauchement entre unités
+    passe par ``candidate_overlaps_any_unit`` (clearance continu rond↔rond, fallback empreinte).
+    Remplace 1:1 le couple ``build_occupied_positions_set`` + ``is_footprint_placement_valid``.
+    """
+    if not is_footprint_placement_valid(candidate_fp, game_state, set(), enemy_adjacent_hexes):
+        return False
+    from engine.hex_utils import Socle
+
+    cand = Socle(shape=shape, base_size=base_size, col=col, row=row, fp=candidate_fp)
+    if candidate_overlaps_any_unit(game_state, cand, exclude_unit_id=exclude_unit_id):
+        return False
+    return True
+
+
 # Roles d allocation defensive (rule 05.04) : ordre de sacrifice croissant.
 # base (None) < special_weapon < sergeant < support < leader. Les characters
 # (support/leader) passent toujours apres les non-characters par cet ordre.
