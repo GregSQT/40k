@@ -4377,8 +4377,8 @@ def charge_autoplace_plan(
     import numpy as np
     from scipy.optimize import milp, LinearConstraint, Bounds
     from scipy.sparse import coo_matrix
-    from engine.hex_utils import min_distance_between_sets, footprints_overlap
-    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from engine.hex_utils import min_distance_between_sets, footprints_overlap, dilate_hex_set_unbounded
+    from engine.spatial_relations import unit_entries_within_engagement_zone, _entry_is_multi_figure
     from .shared_utils import get_engagement_zone
 
     if mode not in ("offensive", "defensive"):
@@ -4509,21 +4509,64 @@ def charge_autoplace_plan(
     # all_slots[i] = (col, row, socle, slot_min_to_targets, engaged_target_ids)
     all_slots: List[Tuple[int, int, Any, int, frozenset]] = []
     slots_by_base: Dict[Tuple[Any, Any], List[int]] = {}
+
+    # Champ de distance géométrique (hex, sans obstacle) multi-source depuis les cellules cibles, calculé
+    # UNE fois. Rayon = plus grande marge candidate + plus grand rayon d'empreinte (pour couvrir les
+    # cellules d'empreinte des slots extérieurs au moment du calcul de slot_min). Remplace les milliers
+    # d'appels min_distance_between_sets centre→cible par un lookup O(1) par cellule. dist_to_t[cell] =
+    # distance hex (= métrique cube) à la cellule cible la plus proche → slot_min EXACT et identique.
+    _t_field0 = time.perf_counter()
+    _max_margin = max((ez + r + 2 for r in fp_radius_by_base.values()), default=ez + 2)
+    _field_radius = _max_margin + _max_fp_radius + 1
+    dist_to_t: Dict[Tuple[int, int], int] = {cell: 0 for cell in all_t_cells}
+    _ff: List[Tuple[int, int]] = list(all_t_cells)
+    for _lay in range(1, _field_radius + 1):
+        _nf: List[Tuple[int, int]] = []
+        for cc, rr in _ff:
+            for nc, nr in get_hex_neighbors(cc, rr):
+                if 0 <= nc < board_cols and 0 <= nr < board_rows and (nc, nr) not in dist_to_t:
+                    dist_to_t[(nc, nr)] = _lay
+                    _nf.append((nc, nr))
+        _ff = _nf
+
+    # Engagement EXACT sans min_distance_between_sets : identité hex_utils
+    # « min_distance(A,B) <= k ⟺ A ∩ dilate(B,k) ≠ ∅ ». On dilate UNE fois l'empreinte de chaque
+    # cible/non-cible par EZ ; tester un slot = intersecter son empreinte (early-exit). La branche
+    # euclidienne (socle rond simple, EZ>1) de unit_entries_within_engagement_zone est conservée à
+    # l'identique (appel original via le synth) pour ne rien dégrader sur ce cas.
+    _charger_shape = require_key(units_cache, str(require_key(unit, "id")))["BASE_SHAPE"]
+
+    def _entry_engage_struct(entry: Dict[str, Any]) -> Tuple[str, Any]:
+        euclid = (
+            ez > 1 and _charger_shape == "round" and entry["BASE_SHAPE"] == "round"
+            and not _entry_is_multi_figure(entry)
+        )
+        if euclid:
+            return ("euclid", entry)
+        e_fp = set(entry.get("occupied_hexes") or {(int(entry["col"]), int(entry["row"]))})
+        return ("fp", dilate_hex_set_unbounded(e_fp, ez))
+
+    target_eng = {t: _entry_engage_struct(target_entry_by_id[t]) for t in present_target_ids}
+    nontarget_eng = [_entry_engage_struct(ne) for ne in nontarget_entries]
+    _need_synth = any(s[0] == "euclid" for s in target_eng.values()) or any(
+        s[0] == "euclid" for s in nontarget_eng
+    )
+
+    def _fp_engages(fp_set: Set[Tuple[int, int]], struct: Tuple[str, Any], synth: Any) -> bool:
+        if struct[0] == "fp":
+            d = struct[1]
+            for cell in fp_set:
+                if cell in d:
+                    return True
+            return False
+        return unit_entries_within_engagement_zone(synth, struct[1], ez)
+
+    _diag["t_field"] = round(time.perf_counter() - _t_field0, 3)
+    _loop_t0 = time.perf_counter()
     for bkey, mids in by_base.items():
         rep = models_cache[mids[0]]
         margin = ez + fp_radius_by_base[bkey] + 2
-        # Centres candidats = DILATATION des empreintes cibles par ``margin`` (disque autour des cibles)
-        # au lieu de la bbox carrée englobante : évite de tester les coins vides entre/autour des cibles.
-        near_cells: Set[Tuple[int, int]] = set(all_t_cells)
-        frontier: List[Tuple[int, int]] = list(all_t_cells)
-        for _ in range(margin):
-            nxt: List[Tuple[int, int]] = []
-            for cc, rr in frontier:
-                for nc, nr in get_hex_neighbors(cc, rr):
-                    if 0 <= nc < board_cols and 0 <= nr < board_rows and (nc, nr) not in near_cells:
-                        near_cells.add((nc, nr))
-                        nxt.append((nc, nr))
-            frontier = nxt
+        near_cells = sorted(cell for cell, d in dist_to_t.items() if d <= margin)
         idxs: List[int] = []
         _diag["n_cells"] = _diag.get("n_cells", 0) + len(near_cells)
         for (c, r) in near_cells:
@@ -4531,26 +4574,26 @@ def charge_autoplace_plan(
             if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in fp):
                 continue
             fps = set(fp)
-            # Pré-filtre BON MARCHÉ : distance-cellule empreinte→cible. Si clairement > EZ, la case ne
-            # peut pas engager → on saute les tests chers (socle, overlap, synth, engagement).
-            d_t = min(min_distance_between_sets(fps, tfp, max_distance=ez + 2) for tfp in all_target_fps)
-            if d_t > ez + 1:
-                continue
-            socle = _charge_model_socle(game_state, rep, c, r)
-            if _charge_model_placement_overlaps(socle, obstacle_socles, [], walls):
-                continue
-            synth = _charge_synthetic_charger_cache_entry(game_state, unit, c, r, fp)
+            synth = (
+                _charge_synthetic_charger_cache_entry(game_state, unit, c, r, fp)
+                if _need_synth else None
+            )
             eng = frozenset(
-                t for t in present_target_ids
-                if unit_entries_within_engagement_zone(synth, target_entry_by_id[t], ez)
+                t for t in present_target_ids if _fp_engages(fps, target_eng[t], synth)
             )
             if not eng:
                 continue  # n'engage aucune cible déclarée → inutile comme slot
-            if any(unit_entries_within_engagement_zone(synth, ne, ez) for ne in nontarget_entries):
+            socle = _charge_model_socle(game_state, rep, c, r)
+            if _charge_model_placement_overlaps(socle, obstacle_socles, [], walls):
+                continue
+            if any(_fp_engages(fps, s, synth) for s in nontarget_eng):
                 continue  # engagerait un ennemi non déclaré → interdit (11.04 AFTER)
+            slot_min = min((dist_to_t[cell] for cell in fps if cell in dist_to_t), default=_field_radius + 1)
             idxs.append(len(all_slots))
-            all_slots.append((c, r, socle, _fp_min_to_targets(fps), eng))
+            all_slots.append((c, r, socle, slot_min, eng))
         slots_by_base[bkey] = idxs
+    _diag["n_slot_raw"] = len(all_slots)
+    _diag["t_loop"] = round(time.perf_counter() - _loop_t0, 3)
 
     # --- Plafond : par (base, cible), bucketing angulaire → garder le slot le plus PROCHE (contact,
     #     mode offensif) et le plus LOIN (externe ≈ EZ, mode défensif) de chaque secteur. Borne n_slot à
