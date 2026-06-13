@@ -3589,31 +3589,17 @@ export default function Board({
       if (perModelChargeLike) {
         // Mode Focus : un clic sur une cible déclarée déclenche l'auto-placement (pas la pose de fig).
         // Hit-test sur les positions par-figurine de la cible (occupied_hexes_by_model, source unique).
-        console.log("[FOCUS] pointerdown chargeModelMove", {
-          chargeFocusActive,
-          targets: chargePreviewTargetIds,
-          clickColRow: [col, row],
-        });
         if (chargeFocusActive && (chargePreviewTargetIds?.length ?? 0) > 0) {
           const uc = gameState?.units_cache as
             | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
             | undefined;
           const hitTarget = (chargePreviewTargetIds ?? []).find((tid) => {
             const byModel = uc?.[String(tid)]?.occupied_hexes_by_model;
-            console.log("[FOCUS] test cible", tid, {
-              byModel,
-              dists: byModel
-                ? Object.values(byModel).map(([oc, orr]) =>
-                    cubeDistance(clickCube, offsetToCube(oc, orr))
-                  )
-                : null,
-            });
             if (!byModel) return false;
             return Object.values(byModel).some(
               ([oc, orr]) => cubeDistance(clickCube, offsetToCube(oc, orr)) <= HEX_HIT_TOLERANCE
             );
           });
-          console.log("[FOCUS] hitTarget =", hitTarget);
           if (hitTarget != null) {
             void chargeModelCallbacksRef.current.onChargeFocusTargetClick?.(hitTarget);
             return;

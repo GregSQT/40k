@@ -4325,8 +4325,6 @@ def charge_autoplace_plan(
     Retour : {"plan": [[model_id, col, row], ...]} couvrant toutes les figs vivantes.
     """
     from engine.hex_utils import min_distance_between_sets
-    from engine.spatial_relations import unit_entries_within_engagement_zone
-    from .shared_utils import get_engagement_zone
 
     unit = get_unit_by_id(game_state, str(squad_id))
     if not unit:
@@ -4355,7 +4353,6 @@ def charge_autoplace_plan(
         raise ValueError(f"charge_autoplace_plan: jet de charge absent pour {squad_id}")
     budget = _charge_budget_subhex(game_state, squad_id, roll)
 
-    ez = int(get_engagement_zone(game_state))
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     alive = [str(m) for m in require_key(squad_models, str(squad_id)) if str(m) in models_cache]
@@ -4365,15 +4362,15 @@ def charge_autoplace_plan(
         set(focus_occ) if focus_occ else {(int(focus_entry["col"]), int(focus_entry["row"]))}
     )
 
-    def _dist_to_focus(model: Dict[str, Any], col: int, row: int) -> int:
-        fp = _charge_model_footprint(game_state, model, int(col), int(row))
-        return min_distance_between_sets(fp, focus_fp)
+    def _center_dist(col: int, row: int) -> int:
+        """Distance hex du centre d'une fig (col,row) à l'empreinte de la focus (O(|focus|), léger)."""
+        return min_distance_between_sets({(int(col), int(row))}, focus_fp)
 
     # Ordre most-constrained-first : distance de départ à la focus, décroissante (déterministe).
     ordered = sorted(
         alive,
         key=lambda mid: (
-            -_dist_to_focus(models_cache[mid], int(models_cache[mid]["col"]), int(models_cache[mid]["row"])),
+            -_center_dist(int(models_cache[mid]["col"]), int(models_cache[mid]["row"])),
             int(mid) if str(mid).isdigit() else mid,
         ),
     )
@@ -4381,27 +4378,17 @@ def charge_autoplace_plan(
     provisional: Dict[str, Tuple[int, int]] = {}
     for mid in ordered:
         model = models_cache[mid]
+        # Le pool a DÉJÀ appliqué toutes les contraintes (budget, traversée, finit plus proche, aucun
+        # non-cible) et classé : « engaged » = engage ≥1 cible déclarée, « closer » = légal de base.
         pool = charge_build_model_destinations_pool(game_state, mid, target_ids, budget, provisional)
-        closer = [(int(c), int(r)) for c, r in pool["closer"]]
-        if not closer:
+        candidates = pool["engaged"] or pool["closer"]
+        if not candidates:
             # Bloquée (aucune position plus proche atteignable) → reste à sa position de départ.
             provisional[mid] = (int(model["col"]), int(model["row"]))
             continue
-        # Classement : (engage la focus ?, distance à la focus, col, row) — prédicat d'engagement
-        # IDENTIQUE au moteur (unit_entries_within_engagement_zone sur entrée synthétique).
-        scored: List[Tuple[bool, int, int, int]] = []
-        for c, r in closer:
-            cand_fp = _charge_model_footprint(game_state, model, c, r)
-            synth = _charge_synthetic_charger_cache_entry(game_state, unit, c, r, cand_fp)
-            engages_focus = bool(unit_entries_within_engagement_zone(synth, focus_entry, ez))
-            d = min_distance_between_sets(cand_fp, focus_fp)
-            scored.append((engages_focus, d, c, r))
-        engaged_focus = [s for s in scored if s[0]]
-        pick_from = engaged_focus if engaged_focus else scored
-        # Engagée → la plus proche de la focus (contact serré, packe l'arc) ; sinon → au plus proche.
-        pick_from.sort(key=lambda s: (s[1], s[2], s[3]))
-        _eng, _d, pc, pr = pick_from[0]
-        provisional[mid] = (pc, pr)
+        # Plus proche de la focus (contact serré, packe l'arc) ; sinon « rapprocher au max ». O(1)-léger.
+        best = min(candidates, key=lambda cr: (_center_dist(cr[0], cr[1]), int(cr[0]), int(cr[1])))
+        provisional[mid] = (int(best[0]), int(best[1]))
 
     plan = [[mid, int(provisional[mid][0]), int(provisional[mid][1])] for mid in alive]
     return {"plan": plan}

@@ -5268,25 +5268,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleChargeFocusTargetClick = useCallback(
     async (targetId: number | string) => {
       const plan = chargeMovePlanRef.current;
-      console.log("[FOCUS] hook handleChargeFocusTargetClick", {
-        targetId,
-        hasPlan: !!plan,
-        focusActive: chargeFocusActiveRef.current,
-        declared: chargePreviewTargetIdsRef.current,
-      });
       if (!plan || !chargeFocusActiveRef.current) return;
       const tid = typeof targetId === "string" ? parseInt(targetId, 10) : targetId;
       // Garde : seule une cible déclarée de la charge est focusable.
-      if (!chargePreviewTargetIdsRef.current.includes(tid)) {
-        console.log("[FOCUS] hook : cible non déclarée, ignore", tid);
-        return;
-      }
+      if (!chargePreviewTargetIdsRef.current.includes(tid)) return;
       const result = await postEngineQuery({
         action: "charge_autoplace",
         unitId: String(plan.unitId),
         targetId: String(tid),
       });
-      console.log("[FOCUS] hook : réponse backend", result);
       if (!result) throw new Error("charge_autoplace: réponse vide");
       const planArr = (result.plan ?? []) as Array<[string, number, number]>;
       const models: Record<string, { col: number; row: number }> = {};
