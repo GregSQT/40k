@@ -541,6 +541,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   } | null>(null);
   const chargeMovePlanRef = useRef<typeof chargeMovePlan>(null);
   chargeMovePlanRef.current = chargeMovePlan;
+  /** Mode Focus (bouton) en chargeModelMove : voile violet sur les cibles déclarées, clic sur une
+   * cible → auto-placement optimal de toutes les figs (charge_autoplace). */
+  const [chargeFocusActive, setChargeFocusActive] = useState(false);
+  const chargeFocusActiveRef = useRef(false);
+  chargeFocusActiveRef.current = chargeFocusActive;
   /** Pool (hexes "col,row") de la fig active = eligible[activeModelId]. */
   const chargeModelPoolRef = useRef<Set<string>>(new Set());
   /** Distance de mouvement (sous-hex) de la fig active vers chaque ancre de son pool "col,row" →
@@ -755,6 +760,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
    * Le clic ennemi ajoute/retire une cible ; le bouton « Charge » envoie cette liste au backend.
    */
   const [chargePreviewTargetIds, setChargePreviewTargetIds] = useState<number[]>([]);
+  const chargePreviewTargetIdsRef = useRef<number[]>([]);
+  chargePreviewTargetIdsRef.current = chargePreviewTargetIds;
   // State for successful charge target display
   const [successfulChargeTarget, setSuccessfulChargeTarget] = useState<{
     unitId: number;
@@ -5242,11 +5249,57 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         satisfiedTargets: [],
         unsatisfiedTargets: [],
       });
+      setChargeFocusActive(false);
       setSelectedUnitId(unitId);
       setMode("chargeModelMove");
       await refreshChargePlanState(unitId, {});
     },
     [readSquadModelPositions, refreshChargePlanState]
+  );
+
+  /** Bouton Focus : (dé)active le mode focus en chargeModelMove (voile violet sur les cibles). */
+  const handleToggleChargeFocus = useCallback(() => {
+    setChargeFocusActive((v) => !v);
+  }, []);
+
+  /** Clic sur une cible déclarée en mode focus : demande le plan d'auto-placement optimal au backend
+   * (charge_autoplace), charge ce plan dans le plan provisoire, puis revalide (refreshChargePlanState).
+   * L'ajustement manuel reste ensuite possible (positions non verrouillées). */
+  const handleChargeFocusTargetClick = useCallback(
+    async (targetId: number | string) => {
+      const plan = chargeMovePlanRef.current;
+      console.log("[FOCUS] hook handleChargeFocusTargetClick", {
+        targetId,
+        hasPlan: !!plan,
+        focusActive: chargeFocusActiveRef.current,
+        declared: chargePreviewTargetIdsRef.current,
+      });
+      if (!plan || !chargeFocusActiveRef.current) return;
+      const tid = typeof targetId === "string" ? parseInt(targetId, 10) : targetId;
+      // Garde : seule une cible déclarée de la charge est focusable.
+      if (!chargePreviewTargetIdsRef.current.includes(tid)) {
+        console.log("[FOCUS] hook : cible non déclarée, ignore", tid);
+        return;
+      }
+      const result = await postEngineQuery({
+        action: "charge_autoplace",
+        unitId: String(plan.unitId),
+        targetId: String(tid),
+      });
+      console.log("[FOCUS] hook : réponse backend", result);
+      if (!result) throw new Error("charge_autoplace: réponse vide");
+      const planArr = (result.plan ?? []) as Array<[string, number, number]>;
+      const models: Record<string, { col: number; row: number }> = {};
+      for (const [mid, c, r] of planArr) {
+        models[String(mid)] = { col: Number(c), row: Number(r) };
+      }
+      chargeModelPoolRef.current = new Set();
+      chargeModelMaskLoopsRef.current = null;
+      setChargeFocusActive(false);
+      setChargeMovePlan((prev) => (prev ? { ...prev, models, activeModelId: null } : prev));
+      await refreshChargePlanState(plan.unitId, models, null);
+    },
+    [postEngineQuery, refreshChargePlanState]
   );
 
   /** Clic sur une fig éligible : la rend active + demande SON pool au backend (calcul ciblé). */
@@ -5307,6 +5360,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       });
       chargeModelPoolRef.current = new Set();
       chargeModelMaskLoopsRef.current = null;
+      setChargeFocusActive(false);
       setChargeMovePlan(null);
       setChargePreviewTargetIds([]);
       setPendingChargeRollDisplay(null);
@@ -5324,6 +5378,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const uid = plan?.unitId ?? selectedUnitId;
     chargeModelPoolRef.current = new Set();
     chargeModelMaskLoopsRef.current = null;
+    setChargeFocusActive(false);
     setChargeMovePlan(null);
     setChargePreviewTargetIds([]);
     setPendingChargeRollDisplay(null);
@@ -5922,6 +5977,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onCommitSquadMovePlan: async () => {},
       onCancelSquadMove: () => {},
       chargeMovePlan: null,
+      chargeFocusActive: false,
       chargeModelPoolRef,
       chargeModelDistancesRef, // A SUPPRIMER (feature charge par-fig morte)
       chargeModelMaskLoopsRef,
@@ -5930,6 +5986,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onUnplaceChargeModel: () => {},
       onCommitChargePlan: async () => {},
       onCancelChargeModelMove: async () => {},
+      onToggleChargeFocus: () => {},
+      onChargeFocusTargetClick: async () => {},
       pileInMovePlan: null,
       pileInModelPoolRef,
       pileInModelMaskLoopsRef,
@@ -6084,6 +6142,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onCancelSquadMove: handleCancelSquadMove,
     // Charge par-figurine (V11 11.04, Slice G)
     chargeMovePlan,
+    chargeFocusActive,
     chargeModelPoolRef,
     chargeModelDistancesRef, // A SUPPRIMER (feature charge par-fig morte)
     chargeModelMaskLoopsRef,
@@ -6092,6 +6151,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onUnplaceChargeModel: handleUnplaceChargeModel,
     onCommitChargePlan: handleCommitChargePlan,
     onCancelChargeModelMove: handleCancelChargeModelMove,
+    onToggleChargeFocus: handleToggleChargeFocus,
+    onChargeFocusTargetClick: handleChargeFocusTargetClick,
     // Pile-in par-figurine (V11 12.04, mode fin type charge)
     pileInMovePlan,
     pileInModelPoolRef,

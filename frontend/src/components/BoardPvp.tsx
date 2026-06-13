@@ -458,6 +458,9 @@ type BoardProps = {
   onUnplaceChargeModel?: (modelId: string) => void;
   onCommitChargePlan?: () => void | Promise<void>;
   onCancelChargeModelMove?: () => void | Promise<void>;
+  /** Mode Focus (chargeModelMove) : voile violet sur les cibles + clic cible → auto-placement. */
+  chargeFocusActive?: boolean;
+  onChargeFocusTargetClick?: (targetId: number) => void | Promise<void>;
   /** Pile-in par-figurine (V11 12.04, mode fin type charge) — plan provisoire des figs posées. */
   pileInMovePlan?: {
     unitId: number;
@@ -827,6 +830,8 @@ export default function Board({
   onMoveModelInChargePlan,
   onUnplaceChargeModel,
   onCancelChargeModelMove,
+  chargeFocusActive = false,
+  onChargeFocusTargetClick,
   pileInMovePlan = null,
   pileInModelPoolRef,
   pileInModelMaskLoopsRef,
@@ -1095,8 +1100,16 @@ export default function Board({
     onCancelSquadMove,
   };
   /** Callbacks charge par-figurine — ref a jour pour les handlers d'event stables (Slice G). */
-  const chargeModelCallbacksRef = useRef({ onMoveModelInChargePlan, onCancelChargeModelMove });
-  chargeModelCallbacksRef.current = { onMoveModelInChargePlan, onCancelChargeModelMove };
+  const chargeModelCallbacksRef = useRef({
+    onMoveModelInChargePlan,
+    onCancelChargeModelMove,
+    onChargeFocusTargetClick,
+  });
+  chargeModelCallbacksRef.current = {
+    onMoveModelInChargePlan,
+    onCancelChargeModelMove,
+    onChargeFocusTargetClick,
+  };
   /** Callbacks pile-in par-figurine — ref a jour (miroir charge). */
   const pileInModelCallbacksRef = useRef({ onMovePileInModel, onCancelPileInModelMove });
   pileInModelCallbacksRef.current = { onMovePileInModel, onCancelPileInModelMove };
@@ -3574,6 +3587,38 @@ export default function Board({
         }
       }
       if (perModelChargeLike) {
+        // Mode Focus : un clic sur une cible déclarée déclenche l'auto-placement (pas la pose de fig).
+        // Hit-test sur les positions par-figurine de la cible (occupied_hexes_by_model, source unique).
+        console.log("[FOCUS] pointerdown chargeModelMove", {
+          chargeFocusActive,
+          targets: chargePreviewTargetIds,
+          clickColRow: [col, row],
+        });
+        if (chargeFocusActive && (chargePreviewTargetIds?.length ?? 0) > 0) {
+          const uc = gameState?.units_cache as
+            | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+            | undefined;
+          const hitTarget = (chargePreviewTargetIds ?? []).find((tid) => {
+            const byModel = uc?.[String(tid)]?.occupied_hexes_by_model;
+            console.log("[FOCUS] test cible", tid, {
+              byModel,
+              dists: byModel
+                ? Object.values(byModel).map(([oc, orr]) =>
+                    cubeDistance(clickCube, offsetToCube(oc, orr))
+                  )
+                : null,
+            });
+            if (!byModel) return false;
+            return Object.values(byModel).some(
+              ([oc, orr]) => cubeDistance(clickCube, offsetToCube(oc, orr)) <= HEX_HIT_TOLERANCE
+            );
+          });
+          console.log("[FOCUS] hitTarget =", hitTarget);
+          if (hitTarget != null) {
+            void chargeModelCallbacksRef.current.onChargeFocusTargetClick?.(hitTarget);
+            return;
+          }
+        }
         const active = plan.activeModelId;
         const poolRef = activeChargeLikePoolRef?.current;
         // 0) Clic sur une fig DÉJÀ POSÉE → la dé-poser (réajustement / cohésion).
@@ -3634,6 +3679,9 @@ export default function Board({
     activeChargeLikeUnplace,
     activeChargeLikePoolRef?.current,
     boardConfig,
+    chargeFocusActive,
+    chargePreviewTargetIds,
+    gameState?.units_cache,
   ]);
 
   // TIR par-figurine (PvP manuel) : phase shoot. Entrée sur escouade OWN multi-fig →
@@ -4021,9 +4069,28 @@ export default function Board({
           overlay.endFill();
         }
       };
+      // Mode Focus : pas de voile rouge/vert ; un CERCLE violet (contour) entoure les cibles focusables.
+      const drawTargetRing = (uid: number, color: number) => {
+        const tu = units.find((u) => String(u.id) === String(uid));
+        if (!tu) return;
+        const tBase = resolveBaseSizeForUnitDisplay(tu);
+        const tR = tBase > 1 ? (tBase * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
+        const tByModel = ucTargets?.[String(uid)]?.occupied_hexes_by_model;
+        if (!tByModel) return;
+        for (const [c, r] of Object.values(tByModel)) {
+          const [cx, cy] = hexCenter(c, r);
+          overlay.lineStyle(Math.max(3, lineW), color, 1);
+          overlay.drawCircle(cx, cy, tR + 3);
+        }
+      };
       if (!isPileInModelMove && chargeMovePlan) {
-        for (const uid of chargeMovePlan.unsatisfiedTargets) drawTargetVeil(uid, RED);
-        for (const uid of chargeMovePlan.satisfiedTargets) drawTargetVeil(uid, GREEN);
+        if (chargeFocusActive) {
+          const VIOLET = 0x8a2be2;
+          for (const uid of chargePreviewTargetIds ?? []) drawTargetRing(uid, VIOLET);
+        } else {
+          for (const uid of chargeMovePlan.unsatisfiedTargets) drawTargetVeil(uid, RED);
+          for (const uid of chargeMovePlan.satisfiedTargets) drawTargetVeil(uid, GREEN);
+        }
       }
     }
     return () => {
@@ -4044,6 +4111,8 @@ export default function Board({
     units,
     gameState,
     hideIndicators,
+    chargeFocusActive,
+    chargePreviewTargetIds,
   ]);
 
   // Ghost per-figurine (charge model move) : calque exact du ghost move per-fig — le fantôme de la
@@ -5590,6 +5659,9 @@ export default function Board({
       onCancelChargeModelMove: () => {
         void chargeModelCallbacksRef.current.onCancelChargeModelMove?.();
       },
+      onChargeFocusTargetClick: (targetId: number) => {
+        void chargeModelCallbacksRef.current.onChargeFocusTargetClick?.(targetId);
+      },
       onMovePileInModel: (modelId: string, col: number, row: number) => {
         pileInModelCallbacksRef.current.onMovePileInModel?.(modelId, col, row);
       },
@@ -6447,7 +6519,7 @@ export default function Board({
             .map((d) => `${d.model_id}.${d.weapon_index}>${d.target_unit_id}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -8195,6 +8267,7 @@ export default function Board({
     deadModelGhostsForRender,
     // Slice G : redraw du pool/cercles charge/pile-in à chaque pose / sélection de fig.
     chargeMovePlan,
+    chargeFocusActive,
     pileInMovePlan,
     effectivePerModelPlan,
     chargeModelPoolRef,

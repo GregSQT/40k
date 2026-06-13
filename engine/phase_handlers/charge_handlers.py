@@ -1339,6 +1339,14 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         # V11 PvP : commit du mouvement de charge par-figurine (plan 3 phases).
         return charge_commit_move_plan_handler(game_state, unit_id, action)
 
+    elif action_type == "charge_autoplace":
+        # V11 PvP (lecture pure) : plan d'auto-placement optimal vers la cible focus (Focus).
+        focus = action.get("targetId")
+        if focus is None:
+            return False, {"error": "charge_autoplace requires targetId", "action": action}
+        out = charge_autoplace_plan(game_state, str(unit_id), str(focus))
+        return True, {"action": "charge_autoplace", "unitId": unit_id, **out}
+
     elif action_type == "charge_plan_state":
         # V11 PvP (lecture pure) : phase courante + pools éligibles par fig pour le plan provisoire.
         prov: Dict[str, Tuple[int, int]] = {}
@@ -4293,6 +4301,110 @@ def charge_preview_move_plan(
         "engaged_all": engaged_all,
         "missing_targets": missing,
     }
+
+
+def charge_autoplace_plan(
+    game_state: Dict[str, Any], squad_id: str, focus_target_id: str
+) -> Dict[str, Any]:
+    """Auto-placement de charge : positionne les figs du chargeur pour MAXIMISER le nombre de figs
+    engagées (à portée d'engagement) avec la cible ``focus_target_id``. Lecture pure.
+
+    Stratégie « slots + affectation » (most-constrained-first) :
+      - ordre des figs = distance DÉCROISSANTE à la focus (la plus éloignée, donc la moins libre,
+        d'abord ; les figs à marge comblent ensuite sans prendre la place des autres) ;
+      - chaque fig prend, parmi son pool légal, la position ENGAGEANT la focus la plus proche de
+        celle-ci (contact serré) ; les figs déjà posées bloquent via ``provisional`` (l'occupation
+        est donc réévaluée à chaque pose, pas figée au départ) ;
+      - fig qui ne peut engager la focus → rapprochée au max (position légale la plus proche d'elle).
+
+    Toutes les contraintes de règle (budget = jet, pas de traversée mur/fig, finit plus proche,
+    n'engage AUCUN ennemi non déclaré) sont héritées de ``charge_build_model_destinations_pool`` ;
+    le contact avec les AUTRES cibles déclarées reste autorisé. Aucune contrainte de cohésion ici
+    (filet = ajustement manuel + validation au commit via ``charge_preview_move_plan``).
+
+    Retour : {"plan": [[model_id, col, row], ...]} couvrant toutes les figs vivantes.
+    """
+    from engine.hex_utils import min_distance_between_sets
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from .shared_utils import get_engagement_zone
+
+    unit = get_unit_by_id(game_state, str(squad_id))
+    if not unit:
+        return {"plan": []}
+
+    units_cache = require_key(game_state, "units_cache")
+    focus_entry = units_cache.get(str(focus_target_id))
+    if focus_entry is None:
+        raise ValueError(
+            f"charge_autoplace_plan: cible focus {focus_target_id} absente de units_cache"
+        )
+
+    # Cibles déclarées : la légalité doit autoriser le contact avec TOUTES (seules les unités NON
+    # déclarées sont interdites d'engagement). La focus doit en faire partie.
+    stored = require_key(game_state, "charge_target_selections").get(str(squad_id))
+    if stored is None:
+        raise ValueError(f"charge_autoplace_plan: aucune cible déclarée pour {squad_id}")
+    target_ids = [str(t) for t in (stored if isinstance(stored, (list, tuple)) else [stored])]
+    if str(focus_target_id) not in target_ids:
+        raise ValueError(
+            f"charge_autoplace_plan: focus {focus_target_id} hors cibles déclarées {target_ids}"
+        )
+
+    roll = require_key(game_state, "charge_roll_values").get(str(squad_id))
+    if roll is None:
+        raise ValueError(f"charge_autoplace_plan: jet de charge absent pour {squad_id}")
+    budget = _charge_budget_subhex(game_state, squad_id, roll)
+
+    ez = int(get_engagement_zone(game_state))
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive = [str(m) for m in require_key(squad_models, str(squad_id)) if str(m) in models_cache]
+
+    focus_occ = focus_entry.get("occupied_hexes")
+    focus_fp = (
+        set(focus_occ) if focus_occ else {(int(focus_entry["col"]), int(focus_entry["row"]))}
+    )
+
+    def _dist_to_focus(model: Dict[str, Any], col: int, row: int) -> int:
+        fp = _charge_model_footprint(game_state, model, int(col), int(row))
+        return min_distance_between_sets(fp, focus_fp)
+
+    # Ordre most-constrained-first : distance de départ à la focus, décroissante (déterministe).
+    ordered = sorted(
+        alive,
+        key=lambda mid: (
+            -_dist_to_focus(models_cache[mid], int(models_cache[mid]["col"]), int(models_cache[mid]["row"])),
+            int(mid) if str(mid).isdigit() else mid,
+        ),
+    )
+
+    provisional: Dict[str, Tuple[int, int]] = {}
+    for mid in ordered:
+        model = models_cache[mid]
+        pool = charge_build_model_destinations_pool(game_state, mid, target_ids, budget, provisional)
+        closer = [(int(c), int(r)) for c, r in pool["closer"]]
+        if not closer:
+            # Bloquée (aucune position plus proche atteignable) → reste à sa position de départ.
+            provisional[mid] = (int(model["col"]), int(model["row"]))
+            continue
+        # Classement : (engage la focus ?, distance à la focus, col, row) — prédicat d'engagement
+        # IDENTIQUE au moteur (unit_entries_within_engagement_zone sur entrée synthétique).
+        scored: List[Tuple[bool, int, int, int]] = []
+        for c, r in closer:
+            cand_fp = _charge_model_footprint(game_state, model, c, r)
+            synth = _charge_synthetic_charger_cache_entry(game_state, unit, c, r, cand_fp)
+            engages_focus = bool(unit_entries_within_engagement_zone(synth, focus_entry, ez))
+            d = min_distance_between_sets(cand_fp, focus_fp)
+            scored.append((engages_focus, d, c, r))
+        engaged_focus = [s for s in scored if s[0]]
+        pick_from = engaged_focus if engaged_focus else scored
+        # Engagée → la plus proche de la focus (contact serré, packe l'arc) ; sinon → au plus proche.
+        pick_from.sort(key=lambda s: (s[1], s[2], s[3]))
+        _eng, _d, pc, pr = pick_from[0]
+        provisional[mid] = (pc, pr)
+
+    plan = [[mid, int(provisional[mid][0]), int(provisional[mid][1])] for mid in alive]
+    return {"plan": plan}
 
 
 def charge_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:

@@ -32,6 +32,8 @@ export function setupBoardClickHandler(callbacks: {
   // Charge par-figurine (V11 11.04, Slice G)
   onMoveModelInChargePlan?(modelId: string, col: number, row: number): void;
   onCancelChargeModelMove?(): void;
+  /** Mode Focus (chargeModelMove) : clic sur une cible déclarée → auto-placement. */
+  onChargeFocusTargetClick?(targetId: UnitId): void;
   // Pile-in par-figurine (V11 12.04, mode fin type charge)
   onMovePileInModel?(modelId: string, col: number, row: number): void;
   onCancelPileInModelMove?(): void;
@@ -147,6 +149,10 @@ export function setupBoardClickHandler(callbacks: {
       // (qui désactiverait la charge). Clic droit sur le chargeur = annuler (forfait).
       if (clickType === "right" && selectedUnitId === unitId) {
         callbacks.onCancelChargeModelMove?.();
+      } else if (clickType === "left" && selectedUnitId !== unitId) {
+        // Mode Focus : clic gauche sur une autre unité (cible) → auto-placement. Le handler ignore
+        // si le mode focus est inactif ou si l'unité n'est pas une cible déclarée (garde côté hook).
+        callbacks.onChargeFocusTargetClick?.(unitId);
       }
       return; // Prevent fallthrough to other handlers
     } else if (phase === "fight" && mode === "pileInModelMove") {

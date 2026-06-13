@@ -3146,6 +3146,32 @@ export const BoardWithAPI: React.FC = () => {
                 Cancel
               </button>
               {(() => {
+                const focusActive = apiProps.chargeFocusActive === true;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isGameOver) apiProps.onToggleChargeFocus?.();
+                    }}
+                    title="Focus : clique sur une cible pour placer automatiquement toutes les figurines"
+                    style={{
+                      border: focusActive ? "2px solid #fff" : "1px solid rgba(0,0,0,0.35)",
+                      borderRadius: 6,
+                      background: focusActive ? "#8a2be2" : "#5b21b6",
+                      color: "#fff",
+                      cursor: "pointer",
+                      fontSize: 14,
+                      fontWeight: 700,
+                      padding: "8px 14px",
+                      width: 110,
+                      textAlign: "center",
+                    }}
+                  >
+                    Focus
+                  </button>
+                );
+              })()}
+              {(() => {
                 const canValidate = apiProps.chargeMovePlan?.canValidate === true;
                 return (
                   <button
@@ -4218,6 +4244,8 @@ export const BoardWithAPI: React.FC = () => {
             onMoveModelInChargePlan={isGameOver ? () => {} : apiProps.onMoveModelInChargePlan}
             onUnplaceChargeModel={isGameOver ? () => {} : apiProps.onUnplaceChargeModel}
             onCancelChargeModelMove={isGameOver ? async () => {} : apiProps.onCancelChargeModelMove}
+            chargeFocusActive={apiProps.chargeFocusActive}
+            onChargeFocusTargetClick={isGameOver ? async () => {} : apiProps.onChargeFocusTargetClick}
             pileInMovePlan={apiProps.pileInMovePlan}
             pileInModelPoolRef={apiProps.pileInModelPoolRef}
             pileInModelMaskLoopsRef={apiProps.pileInModelMaskLoopsRef}
