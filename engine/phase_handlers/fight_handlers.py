@@ -4119,13 +4119,32 @@ def _fight_units_engaged_with(game_state: Dict[str, Any], unit: Dict[str, Any]) 
     if entry is None:
         raise ValueError(f"Unit {unit_id_str} not in units_cache; cannot compute engagement")
     unit_player = int(require_key(entry, "player"))
+    # --- LOG TEMPORAIRE JETABLE (diagnostic pile-in C exclue) ---
+    from engine.hex_utils import min_distance_between_sets as _dbg_mds
+    _a_occ = entry.get("occupied_hexes")
+    _a_bm = entry.get("occupied_hexes_by_model")
+    print(f"[PILEIN-DBG] ez={ez} A={unit_id_str} col/row=({entry.get('col')},{entry.get('row')}) "
+          f"occ={len(_a_occ) if _a_occ else 0} by_model={len(_a_bm) if _a_bm else 0}", flush=True)
     engaged: List[str] = []
     for eid, ce in units_cache.items():
         if str(eid) == unit_id_str:
             continue
         if int(require_key(ce, "player")) == unit_player:
             continue
-        if unit_entries_within_engagement_zone(entry, ce, ez):
+        res = unit_entries_within_engagement_zone(entry, ce, ez)
+        # --- LOG TEMPORAIRE JETABLE ---
+        _e_occ = ce.get("occupied_hexes")
+        _e_bm = ce.get("occupied_hexes_by_model")
+        try:
+            _af = _a_occ if _a_occ else {(entry["col"], entry["row"])}
+            _ef = _e_occ if _e_occ else {(ce["col"], ce["row"])}
+            _cube = _dbg_mds(_af, _ef)
+        except Exception as _ex:
+            _cube = f"ERR({_ex})"
+        print(f"[PILEIN-DBG]   enemy={eid} col/row=({ce.get('col')},{ce.get('row')}) "
+              f"occ={len(_e_occ) if _e_occ else 0} by_model={len(_e_bm) if _e_bm else 0} "
+              f"cube_dist={_cube} ez={ez} engaged={res}", flush=True)
+        if res:
             engaged.append(str(eid))
     return engaged
 

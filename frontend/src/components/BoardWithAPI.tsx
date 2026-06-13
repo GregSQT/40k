@@ -1550,6 +1550,7 @@ export const BoardWithAPI: React.FC = () => {
   const [clickedUnitId, setClickedUnitId] = useState<number | null>(null);
   /** Message du bouton « Check pile-in » : raison du blocage de la validation (null = masqué). */
   const [pileInCheckMsg, setPileInCheckMsg] = useState<string | null>(null);
+  const [chargeCheckMsg, setChargeCheckMsg] = useState<string | null>(null);
   const [illustrationPreviewUnitId, setIllustrationPreviewUnitId] = useState<Unit["id"] | null>(
     null
   );
@@ -3145,20 +3146,29 @@ export const BoardWithAPI: React.FC = () => {
               >
                 Cancel
               </button>
-              {(() => {
-                const focusActive = apiProps.chargeFocusActive === true;
+              {(["offensive", "defensive"] as const).map((m) => {
+                const active = apiProps.chargeFocusMode === m;
+                const label = m === "defensive" ? "Focus déf." : "Focus off.";
+                const title =
+                  m === "defensive"
+                    ? "Focus défensif : engage toutes les cibles déclarées, au plus loin possible"
+                    : "Focus offensif : engage toutes les cibles déclarées, au plus près (socle à socle)";
                 return (
                   <button
                     type="button"
-                    className={focusActive ? "btn-active" : undefined}
+                    key={m}
+                    className={active ? "btn-active" : undefined}
                     onClick={() => {
-                      if (!isGameOver) apiProps.onToggleChargeFocus?.();
+                      if (!isGameOver) {
+                        setChargeCheckMsg(null);
+                        void apiProps.onChargeAutoplace?.(m);
+                      }
                     }}
-                    title="Focus : clique sur une cible pour placer automatiquement toutes les figurines"
+                    title={title}
                     style={{
                       border: "1px solid rgba(0,0,0,0.35)",
                       borderRadius: 6,
-                      background: focusActive ? "#8a2be2" : "#5b21b6",
+                      background: active ? "#8a2be2" : "#5b21b6",
                       color: "#fff",
                       cursor: "pointer",
                       fontSize: 14,
@@ -3168,10 +3178,10 @@ export const BoardWithAPI: React.FC = () => {
                       textAlign: "center",
                     }}
                   >
-                    Focus
+                    {label}
                   </button>
                 );
-              })()}
+              })}
               {(() => {
                 const canValidate = apiProps.chargeMovePlan?.canValidate === true;
                 return (
@@ -3214,6 +3224,70 @@ export const BoardWithAPI: React.FC = () => {
                   </span>
                 );
               })()}
+              <button
+                type="button"
+                onClick={() => {
+                  const plan = apiProps.chargeMovePlan;
+                  if (!plan) {
+                    setChargeCheckMsg(null);
+                    return;
+                  }
+                  if (plan.canValidate) {
+                    setChargeCheckMsg("Charge valide ✓ (tu peux valider)");
+                    return;
+                  }
+                  const reasons: string[] = [];
+                  const nbUnplaced = plan.unplaced?.length ?? 0;
+                  if (nbUnplaced > 0) {
+                    reasons.push(`${nbUnplaced} figurine(s) non placée(s)`);
+                  }
+                  const invalid = Object.entries(plan.perModelValid ?? {})
+                    .filter(([, v]) => v === false)
+                    .map(([m]) => m);
+                  if (invalid.length > 0) {
+                    reasons.push(
+                      `${invalid.length} figurine(s) hors budget / pas plus près d'une cible (${invalid.join(", ")})`
+                    );
+                  }
+                  if (plan.coherencyOk === false) {
+                    reasons.push("cohésion d'unité rompue (figs trop éloignées entre elles)");
+                  }
+                  const missing = plan.missingTargets ?? [];
+                  if (missing.length > 0) {
+                    reasons.push(`cible(s) non engagée(s) : ${missing.join(", ")}`);
+                  }
+                  setChargeCheckMsg(
+                    reasons.length > 0
+                      ? `Non validable — ${reasons.join(" ; ")}`
+                      : "Non validable (raison inconnue)"
+                  );
+                }}
+                style={{
+                  border: "1px solid rgba(0,0,0,0.35)",
+                  borderRadius: 6,
+                  background: "#0ea5e9",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  padding: "6px 12px",
+                  marginLeft: 8,
+                }}
+              >
+                Check charge
+              </button>
+              {chargeCheckMsg && (
+                <span
+                  style={{
+                    color: chargeCheckMsg.startsWith("Charge valide") ? "#86efac" : "#fca5a5",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    marginLeft: 8,
+                  }}
+                >
+                  {chargeCheckMsg}
+                </span>
+              )}
             </div>
           </div>
         )}

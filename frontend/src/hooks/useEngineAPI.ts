@@ -540,6 +540,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     unsatisfiedTargets: number[];
     /** Figs POSÉES engagées (≤ EZ) avec une cible déclarée → voile vert (en mesure de frapper). */
     engagedModels: string[];
+    /** Sous-conditions de non-validation (bouton « Check charge ») : légalité par-fig (budget/closer),
+     * cohésion d'unité, cibles déclarées non encore engagées. */
+    perModelValid: Record<string, boolean>;
+    coherencyOk: boolean;
+    missingTargets: number[];
   } | null>(null);
   const chargeMovePlanRef = useRef<typeof chargeMovePlan>(null);
   chargeMovePlanRef.current = chargeMovePlan;
@@ -548,6 +553,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [chargeFocusActive, setChargeFocusActive] = useState(false);
   const chargeFocusActiveRef = useRef(false);
   chargeFocusActiveRef.current = chargeFocusActive;
+  /** Dernier mode Focus charge déclenché (surbrillance des boutons off./déf.). */
+  const [chargeFocusMode, setChargeFocusMode] = useState<null | "offensive" | "defensive">(null);
   /** Pool (hexes "col,row") de la fig active = eligible[activeModelId]. */
   const chargeModelPoolRef = useRef<Set<string>>(new Set());
   /** Distance de mouvement (sous-hex) de la fig active vers chaque ancre de son pool "col,row" →
@@ -5136,6 +5143,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         parseInt(String(t), 10)
       );
       const engagedModels = ((result.engaged_models ?? []) as unknown[]).map((m) => String(m));
+      const perModelValid = (result.per_model ?? {}) as Record<string, boolean>;
+      const coherencyOk = result.coherency_ok !== false;
+      const missingTargets = ((result.missing_targets ?? []) as unknown[]).map((t) =>
+        parseInt(String(t), 10)
+      );
       setChargeMovePlan((prev) => {
         if (!prev) return prev;
         // Fig active = celle sélectionnée si encore éligible, sinon l'ancienne si toujours éligible,
@@ -5174,6 +5186,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           satisfiedTargets,
           unsatisfiedTargets,
           engagedModels,
+          perModelValid,
+          coherencyOk,
+          missingTargets,
           activeModelId: active,
         };
       });
@@ -5261,8 +5276,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         satisfiedTargets: [],
         unsatisfiedTargets: [],
         engagedModels: [],
+        perModelValid: {},
+        coherencyOk: true,
+        missingTargets: [],
       });
       setChargeFocusActive(false);
+      setChargeFocusMode(null);
       setSelectedUnitId(unitId);
       setMode("chargeModelMove");
       await refreshChargePlanState(unitId, {});
@@ -5289,6 +5308,34 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         action: "charge_autoplace",
         unitId: String(plan.unitId),
         targetId: String(tid),
+      });
+      if (!result) throw new Error("charge_autoplace: réponse vide");
+      const planArr = (result.plan ?? []) as Array<[string, number, number]>;
+      const models: Record<string, { col: number; row: number }> = {};
+      for (const [mid, c, r] of planArr) {
+        models[String(mid)] = { col: Number(c), row: Number(r) };
+      }
+      chargeModelPoolRef.current = new Set();
+      chargeModelMaskLoopsRef.current = null;
+      setChargeFocusActive(false);
+      setChargeMovePlan((prev) => (prev ? { ...prev, models, activeModelId: null } : prev));
+      await refreshChargePlanState(plan.unitId, models, null);
+    },
+    [postEngineQuery, refreshChargePlanState]
+  );
+
+  /** Bouton Focus off./déf. : auto-placement de TOUTES les figs vers TOUTES les cibles déclarées
+   * (charge_autoplace, ILP), dans le mode choisi. Pas de re-sélection de cible. Charge le plan dans le
+   * plan provisoire puis revalide ; l'ajustement manuel reste possible ensuite. */
+  const handleChargeAutoplace = useCallback(
+    async (mode: "offensive" | "defensive") => {
+      const plan = chargeMovePlanRef.current;
+      if (!plan) return;
+      setChargeFocusMode(mode);
+      const result = await postEngineQuery({
+        action: "charge_autoplace",
+        unitId: String(plan.unitId),
+        mode,
       });
       if (!result) throw new Error("charge_autoplace: réponse vide");
       const planArr = (result.plan ?? []) as Array<[string, number, number]>;
@@ -5364,6 +5411,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       chargeModelPoolRef.current = new Set();
       chargeModelMaskLoopsRef.current = null;
       setChargeFocusActive(false);
+      setChargeFocusMode(null);
       setChargeMovePlan(null);
       setChargePreviewTargetIds([]);
       setPendingChargeRollDisplay(null);
@@ -5382,6 +5430,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     chargeModelPoolRef.current = new Set();
     chargeModelMaskLoopsRef.current = null;
     setChargeFocusActive(false);
+    setChargeFocusMode(null);
     setChargeMovePlan(null);
     setChargePreviewTargetIds([]);
     setPendingChargeRollDisplay(null);
@@ -6030,6 +6079,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onCancelChargeModelMove: async () => {},
       onToggleChargeFocus: () => {},
       onChargeFocusTargetClick: async () => {},
+      chargeFocusMode: null as null | "offensive" | "defensive",
+      onChargeAutoplace: async (_mode: "offensive" | "defensive") => {},
       pileInMovePlan: null,
       pileInFocusActive: false,
       pileInFocusMode: null as null | "defensive" | "offensive",
@@ -6199,6 +6250,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onCancelChargeModelMove: handleCancelChargeModelMove,
     onToggleChargeFocus: handleToggleChargeFocus,
     onChargeFocusTargetClick: handleChargeFocusTargetClick,
+    chargeFocusMode,
+    onChargeAutoplace: handleChargeAutoplace,
     // Pile-in par-figurine (V11 12.04, mode fin type charge)
     pileInMovePlan,
     pileInFocusActive: pileInFocusMode != null,

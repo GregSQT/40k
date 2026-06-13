@@ -158,15 +158,15 @@
       ]
     },
     {
-      "id": 116, "unit_type": "Barbgaunt", "player": 2, "col": 109, "row": 3,
+      "id": 116, "unit_type": "Barbgaunt", "player": 2, "col": 110, "row": 3,
       "models": [
-        { "col": 112, "row": 3 },
-        { "col": 112, "row": 8 },
-        { "col": 112, "row": 13 },
-        { "col": 112, "row": 18 },
-        { "col": 112, "row": 23 },
-        { "col": 112, "row": 28 },
-        { "col": 112, "row": 33 }
+        { "col": 110, "row": 3 },
+        { "col": 110, "row": 8 },
+        { "col": 110, "row": 13 },
+        { "col": 110, "row": 18 },
+        { "col": 110, "row": 23 },
+        { "col": 110, "row": 28 },
+        { "col": 110, "row": 33 }
       ]
     }
   ]
