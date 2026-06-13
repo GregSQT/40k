@@ -1761,60 +1761,66 @@ def charge_build_model_destinations_pool(
     return {"within_1": within_1, "engaged": engaged, "closer": closer}
 
 
-def charge_model_plan_state(
+def _charge_qualifying(
+    reach_by_model: Dict[str, List[Tuple[int, int]]],
+    start_min_by_model: Dict[str, int],
+    other_origins_by_model: Dict[str, Set[Tuple[int, int]]],
+    region_by_base: Dict[Any, Dict[Tuple[int, int], Dict[str, Any]]],
+    base_of_model: Dict[str, Any],
+    model_id: str,
+    key: str,
+) -> List[List[int]]:
+    """Hexes de ``model_id`` qualifiant ``key`` (within_1 / engaged / closer) : reach ∩ region,
+    plus proche que son départ, sans chevaucher une coéquipière encore à l'origine. Lit uniquement
+    les structures du contexte mémoïsé (aucun calcul lourd) → utilisable sur cache hit."""
+    out: List[List[int]] = []
+    reach = reach_by_model.get(model_id)
+    if not reach:
+        return out
+    start_min = start_min_by_model.get(model_id)
+    if start_min is None:
+        return out
+    others = other_origins_by_model.get(model_id, set())
+    reg_m = region_by_base.get(base_of_model.get(model_id), {})
+    for h in reach:
+        rg = reg_m.get(h)
+        if rg is None:
+            continue
+        if rg["d_min"] >= start_min:
+            continue
+        if others and (rg["fp"] & others):
+            continue
+        if key == "within_1" and not rg["within_1"]:
+            continue
+        if key == "engaged" and not rg["engaged"]:
+            continue
+        out.append([h[0], h[1]])
+    return out
+
+
+def _compute_plan_context(
     game_state: Dict[str, Any],
+    unit: Dict[str, Any],
     unit_id: str,
     provisional_plan: Dict[str, Tuple[int, int]],
-    selected_model: Optional[str] = None,
+    target_ids: List[Any],
+    roll_subhex: int,
+    fly_active: bool,
+    _perf: bool,
 ) -> Dict[str, Any]:
-    """Orchestration UI du mouvement de charge par-figurine (V11, 3 phases 11.04). Lecture pure.
+    """Calcul lourd PLAN-dépendant (indépendant de ``selected_model``) → mis en cache.
 
-    ``provisional_plan`` : {model_id: (col, row)} figs déjà posées dans le plan UI. Les figs
-    absentes sont « non posées » (restent à leur position de départ, models_cache).
-
-    Perf (Slice G) : la **classification par hex** (empreinte + distances + tests d'engagement) est
-    quasi indépendante de la figurine qui bouge — seules la reachability (BFS) et le seuil « finit
-    plus proche que son départ » (``start_min``, scalaire) le sont. On calcule donc :
-      1. la **reachability BFS par fig** (cheap, sans classification) ;
-      2. la **classification de l'UNION** des hexes atteignables UNE SEULE FOIS (la part chère).
-    Puis on déduit, par fig, ses hexes qualifiants par intersection.
-
-    Phase courante = la plus serrée encore réalisable par une fig non posée (1 ≤1", 2 engagé, 3
-    plus proche). ``eligible_models`` = figs pouvant agir dans cette phase (pour le voile). ``pool``
-    = destinations de ``selected_model`` (la zone violette) — calculé seulement si demandé.
-    ``can_validate`` n'est vrai que lorsque toutes les figs sont posées et que la config finale est
-    légale (``charge_preview_move_plan``).
-
-    Retour : {current_phase, eligible_models, pool, unplaced, can_validate,
-              satisfied_targets, unsatisfied_targets}.
+    Produit : reachability BFS par fig, champs de distance, classification ``region_by_base`` (le
+    poste dominant ~92 %), phase courante, éligibilité, validation finale et satisfaction des cibles.
+    Renvoie le ``ctx`` réutilisé tant que (plan, positions, roll, vol, cibles) ne changent pas.
     """
-    empty = {
-        "current_phase": 3,
-        "eligible_models": [],
-        "pool": [],
-        "pool_distances": [],
-        "footprint_mask_loops": [],
-        "unplaced": [],
-        "can_validate": False,
-        "satisfied_targets": [],
-        "unsatisfied_targets": [],
-    }
-    unit = get_unit_by_id(game_state, str(unit_id))
-    if not unit:
-        return empty
-    if "charge_target_selections" not in game_state or str(unit_id) not in game_state["charge_target_selections"]:
-        return empty
-    if "charge_roll_values" not in game_state or str(unit_id) not in game_state["charge_roll_values"]:
-        return empty
-    _stored = game_state["charge_target_selections"][str(unit_id)]
-    target_ids = list(_stored) if isinstance(_stored, (list, tuple)) else [_stored]
-    # Take to the skies (21.03) : -2" sur la distance max de charge si le vol est déclaré.
-    roll_subhex = _charge_budget_subhex(game_state, unit_id, game_state["charge_roll_values"][str(unit_id)])
-
     from collections import deque
-    from engine.hex_utils import min_distance_between_sets
-    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from engine.spatial_relations import unit_entries_within_engagement_zone, _entry_is_multi_figure
     from .shared_utils import get_engagement_zone
+
+    _acc_bfs = 0.0
+    _acc_distfield = 0.0
+    _acc_region = 0.0
 
     squad_models = require_key(game_state, "squad_models")
     models_cache = require_key(game_state, "models_cache")
@@ -1950,13 +1956,19 @@ def charge_model_plan_state(
                 if m2 != m:
                     other_origins |= origin_fp[m2]
             other_origins_by_model[m] = other_origins
+            _tb = time.perf_counter() if _perf else None
             reach_by_model[m], dist_by_model[m] = _bfs_reach(
                 sc, sr, set() if fly_active else path_blocked
             )
+            if _perf and _tb is not None:
+                _acc_bfs += time.perf_counter() - _tb
         tgt_union: Set[Tuple[int, int]] = set()
         for tfp in target_fps:
             tgt_union |= tfp
+        _td = time.perf_counter() if _perf else None
         dist_tgt = _dist_field(tgt_union, int(budget))
+        if _perf and _td is not None:
+            _acc_distfield += time.perf_counter() - _td
         for m in list(reach_by_model.keys()):
             sib = models_cache.get(str(m))
             sfp = _charge_model_footprint(game_state, sib, int(sib["col"]), int(sib["row"]))
@@ -1966,7 +1978,10 @@ def charge_model_plan_state(
             for ne in nontarget_entries:
                 occ = ne.get("occupied_hexes")
                 ntgt_union |= set(occ) if occ else {(int(ne["col"]), int(ne["row"]))}
+            _td2 = time.perf_counter() if _perf else None
             dist_ntgt = _dist_field(ntgt_union, ez + _ENG_MARGIN)
+            if _perf and _td2 is not None:
+                _acc_distfield += time.perf_counter() - _td2
 
     # 2) Classification PAR BASE (pas par figurine) : les figs de MÊME socle (ex. 9 terminators)
     #    classent les hexes à l'identique → on classe une seule fois par base distincte (1 pour une
@@ -1998,11 +2013,79 @@ def charge_model_plan_state(
             reach_by_base[bk] = (rep, cells, max(cap, m_cap))
 
     region_by_base: Dict[Tuple[Any, Any, int], Dict[Tuple[int, int], Dict[str, Any]]] = {}
+    _tr = time.perf_counter() if _perf else None
     if can_classify:
         obstacle_socles = _charge_obstacle_socles(game_state, unit_id)
         _walls = set(wall_hexes)
         synth_base = dict(require_key(units_cache, str(require_key(unit, "id"))))
         synth_base.pop("occupied_hexes_by_model", None)
+        synth_shape = synth_base["BASE_SHAPE"]
+
+        # PERF : le test d'engagement précis (``unit_entries_within_engagement_zone``) coûte un
+        # ``min_distance_between_sets`` en O(empreinte × empreinte) par cellule (poste dominant ~92 %).
+        # Pour les ennemis qui passent par la **métrique d'empreinte** (multi-figurine ou base non-ronde),
+        # ``min_distance_between_sets(cand_fp, enemy_fp) <= r`` ⟺ ``cand_fp ∩ dilate(enemy_fp, r) ≠ ∅``.
+        # On précalcule donc le masque dilaté (set) par ennemi → test = intersection de set native.
+        # Les ennemis **ronds simples** gardent le chemin euclidien per-cell (précis, inchangé).
+        # Masques mis en cache par ``_unit_move_version`` (positions ennemies) → réutilisés entre voiles.
+        def _dilate(seed_fp: Set[Tuple[int, int]], radius: int) -> Set[Tuple[int, int]]:
+            seen: Set[Tuple[int, int]] = set(seed_fp)
+            frontier: List[Tuple[int, int]] = list(seed_fp)
+            for _ in range(int(radius)):
+                nxt: List[Tuple[int, int]] = []
+                for (c, r) in frontier:
+                    for nc, nr in get_hex_neighbors(c, r):
+                        cell = (nc, nr)
+                        if cell not in seen:
+                            seen.add(cell)
+                            nxt.append(cell)
+                frontier = nxt
+            return seen
+
+        _mv = game_state["_unit_move_version"]
+        _mcache = game_state.get("_charge_engage_mask_cache")
+        if _mcache is None or _mcache.get("version") != _mv:
+            _mcache = {"version": _mv, "masks": {}}
+            game_state["_charge_engage_mask_cache"] = _mcache
+        _masks = _mcache["masks"]
+
+        def _enemy_masks(enemy_fp: Set[Tuple[int, int]]) -> Dict[str, Set[Tuple[int, int]]]:
+            k = frozenset(enemy_fp)
+            m = _masks.get(k)
+            if m is None:
+                m = {"ez": _dilate(enemy_fp, ez), "w1": _dilate(enemy_fp, within_1_zone)}
+                _masks[k] = m
+            return m
+
+        # Propriétés constantes par ennemi (forme, multi-figurine) + empreinte + masques.
+        nontarget_fps = [
+            set(ne["occupied_hexes"]) if ne.get("occupied_hexes") else {(int(ne["col"]), int(ne["row"]))}
+            for ne in nontarget_entries
+        ]
+        tgt_shape = [te["BASE_SHAPE"] for te in target_entries]
+        tgt_multi = [_entry_is_multi_figure(te) for te in target_entries]
+        tgt_masks = [_enemy_masks(fp) for fp in target_fps]
+        ntgt_shape = [ne["BASE_SHAPE"] for ne in nontarget_entries]
+        ntgt_multi = [_entry_is_multi_figure(ne) for ne in nontarget_entries]
+        ntgt_masks = [_enemy_masks(fp) for fp in nontarget_fps]
+
+        _verify = bool(os.environ.get("W40K_CHARGE_VERIFY"))
+
+        def _eng(enemy_entry, e_shape, e_multi, mask, radius, cand_fp, cand_is_multi):
+            # Chemin euclidien (rond simple ↔ rond simple) : on conserve la fonction partagée (précis).
+            if radius > 1 and synth_shape == "round" and e_shape == "round" and not cand_is_multi and not e_multi:
+                return unit_entries_within_engagement_zone(synth_base, enemy_entry, radius)
+            # Chemin empreinte : intersection avec le masque dilaté (équivalent exact à min_distance ≤ r).
+            res = bool(cand_fp & mask)
+            if _verify:
+                ref = unit_entries_within_engagement_zone(synth_base, enemy_entry, radius)
+                if ref != res:
+                    raise AssertionError(
+                        f"CHARGE_VERIFY mask mismatch @({synth_base['col']},{synth_base['row']}) "
+                        f"radius={radius}: ref={ref} mask={res}"
+                    )
+            return res
+
         for bk, (rep_model, cells, cap_base) in reach_by_base.items():
             reg_b: Dict[Tuple[int, int], Dict[str, Any]] = {}
             for (cc, rr) in cells:
@@ -2022,67 +2105,194 @@ def charge_model_plan_state(
                 near_ntgt = d_ntgt <= ez + _ENG_MARGIN
                 near_tgt = d_min <= ez + _ENG_MARGIN
                 near_w1 = d_min <= within_1_zone + _ENG_MARGIN
+                cand_is_multi = False
                 if near_ntgt or near_tgt or near_w1:
                     synth_base["col"] = cc
                     synth_base["row"] = rr
                     synth_base["occupied_hexes"] = cand_fp
+                    cand_is_multi = _entry_is_multi_figure(synth_base)
                 if near_ntgt and any(
-                    unit_entries_within_engagement_zone(synth_base, ne, ez) for ne in nontarget_entries
+                    _eng(ne, ntgt_shape[i], ntgt_multi[i], ntgt_masks[i]["ez"], ez, cand_fp, cand_is_multi)
+                    for i, ne in enumerate(nontarget_entries)
                 ):
                     continue
                 engaged_f = (
                     near_tgt
-                    and any(unit_entries_within_engagement_zone(synth_base, te, ez) for te in target_entries)
+                    and any(
+                        _eng(te, tgt_shape[i], tgt_multi[i], tgt_masks[i]["ez"], ez, cand_fp, cand_is_multi)
+                        for i, te in enumerate(target_entries)
+                    )
                 )
                 within1_f = (
                     near_w1
                     and any(
-                        unit_entries_within_engagement_zone(synth_base, te, within_1_zone)
-                        for te in target_entries
+                        _eng(te, tgt_shape[i], tgt_multi[i], tgt_masks[i]["w1"], within_1_zone, cand_fp, cand_is_multi)
+                        for i, te in enumerate(target_entries)
                     )
                 )
                 reg_b[(cc, rr)] = {"fp": cand_fp, "d_min": d_min, "within_1": within1_f, "engaged": engaged_f}
             region_by_base[bk] = reg_b
+    if _perf and _tr is not None:
+        _acc_region += time.perf_counter() - _tr
 
-    def _qualifying(model_id: str, key: str) -> List[List[int]]:
-        """Hexes de ``model_id`` qualifiant ``key`` (within_1 / engaged / closer) : reach ∩ region,
-        plus proche que son départ, sans chevaucher une coéquipière encore à l'origine."""
-        out: List[List[int]] = []
-        reach = reach_by_model.get(model_id)
-        if not reach:
-            return out
-        start_min = start_min_by_model.get(model_id)
-        if start_min is None:
-            return out
-        others = other_origins_by_model.get(model_id, set())
-        reg_m = region_by_base.get(base_of_model.get(model_id), {})
-        for h in reach:
-            rg = reg_m.get(h)
-            if rg is None:
-                continue
-            if rg["d_min"] >= start_min:
-                continue
-            if others and (rg["fp"] & others):
-                continue
-            if key == "within_1" and not rg["within_1"]:
-                continue
-            if key == "engaged" and not rg["engaged"]:
-                continue
-            out.append([h[0], h[1]])
-        return out
+    def _qual(m: str, k: str) -> List[List[int]]:
+        return _charge_qualifying(
+            reach_by_model, start_min_by_model, other_origins_by_model,
+            region_by_base, base_of_model, m, k,
+        )
 
     # Phase courante = la plus serrée réalisable par une fig non posée.
-    has_within1 = any(_qualifying(m, "within_1") for m in reach_by_model)
+    has_within1 = any(_qual(m, "within_1") for m in reach_by_model)
     if has_within1:
         phase, key = 1, "within_1"
-    elif any(_qualifying(m, "engaged") for m in reach_by_model):
+    elif any(_qual(m, "engaged") for m in reach_by_model):
         phase, key = 2, "engaged"
     else:
         phase, key = 3, "closer"
 
-    eligible_models = [m for m in unplaced if _qualifying(m, key)]
+    eligible_models = [m for m in unplaced if _qual(m, key)]
+
+    can_validate = False
+    if not unplaced and alive:
+        full_plan = [(str(m), int(provisional_plan[m][0]), int(provisional_plan[m][1])) for m in alive]
+        can_validate = charge_preview_move_plan(game_state, str(unit_id), full_plan, target_ids)["can_validate"]
+
+    # Satisfaction par cible (voile UI) : une cible-UNITÉ est ENGAGÉE dès qu'≥1 fig POSÉE est à
+    # ≤EZ d'elle (03.04, engagement au niveau unité). violet = satisfaite, rouge = pas.
+    placed_synths = []
+    for _mid, (_c, _r) in provisional_plan.items():
+        _sib = models_cache.get(str(_mid))
+        if _sib is None:
+            continue
+        _fp = _charge_model_footprint(game_state, _sib, int(_c), int(_r))
+        placed_synths.append(
+            _charge_synthetic_charger_cache_entry(game_state, unit, int(_c), int(_r), _fp)
+        )
+    satisfied: List[str] = []
+    unsatisfied: List[str] = []
+    for tid in (str(t) for t in target_ids):
+        tentry = units_cache.get(tid)
+        if tentry is None:
+            continue
+        engaged_t = any(
+            unit_entries_within_engagement_zone(synth, tentry, ez) for synth in placed_synths
+        )
+        (satisfied if engaged_t else unsatisfied).append(tid)
+
+    return {
+        "reach_by_model": reach_by_model,
+        "dist_by_model": dist_by_model,
+        "start_min_by_model": start_min_by_model,
+        "other_origins_by_model": other_origins_by_model,
+        "region_by_base": region_by_base,
+        "base_of_model": base_of_model,
+        "key": key,
+        "phase": phase,
+        "eligible_models": eligible_models,
+        "unplaced": unplaced,
+        "can_validate": can_validate,
+        "satisfied": satisfied,
+        "unsatisfied": unsatisfied,
+        "_timings": {"bfs": _acc_bfs, "distfield": _acc_distfield, "region": _acc_region},
+    }
+
+
+def charge_model_plan_state(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    provisional_plan: Dict[str, Tuple[int, int]],
+    selected_model: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Orchestration UI du mouvement de charge par-figurine (V11, 3 phases 11.04). Lecture pure
+    (hormis l'écriture du cache mémo).
+
+    ``provisional_plan`` : {model_id: (col, row)} figs déjà posées dans le plan UI. Les figs
+    absentes sont « non posées » (restent à leur position de départ, models_cache).
+
+    Mémoïsation (le contexte lourd ``ctx`` est indépendant de ``selected_model``) : entre deux
+    sélections de figurine sur le MÊME plan, on saute entièrement ``_compute_plan_context`` (BFS,
+    champs de distance, classification ``region_by_base`` ~92 % du coût) et on ne recalcule que la
+    partie sélection-dépendante (``pool`` / ``pool_distances`` / ``footprint_mask_loops``). La
+    signature inclut ``_unit_move_version`` → toute pose/déplacement invalide le cache.
+
+    Retour : {current_phase, eligible_models, pool, pool_distances, footprint_mask_loops, unplaced,
+              can_validate, satisfied_targets, unsatisfied_targets}.
+    """
+    empty = {
+        "current_phase": 3,
+        "eligible_models": [],
+        "pool": [],
+        "pool_distances": [],
+        "footprint_mask_loops": [],
+        "unplaced": [],
+        "can_validate": False,
+        "satisfied_targets": [],
+        "unsatisfied_targets": [],
+    }
+    unit = get_unit_by_id(game_state, str(unit_id))
+    if not unit:
+        return empty
+    if "charge_target_selections" not in game_state or str(unit_id) not in game_state["charge_target_selections"]:
+        return empty
+    if "charge_roll_values" not in game_state or str(unit_id) not in game_state["charge_roll_values"]:
+        return empty
+    _stored = game_state["charge_target_selections"][str(unit_id)]
+    target_ids = list(_stored) if isinstance(_stored, (list, tuple)) else [_stored]
+    _charge_roll = game_state["charge_roll_values"][str(unit_id)]
+    # Take to the skies (21.03) : -2" sur la distance max de charge si le vol est déclaré.
+    roll_subhex = _charge_budget_subhex(game_state, unit_id, _charge_roll)
+    # Take to the skies (21.03) : vol actif → BFS/champ de distance ignorent tout (traversée libre).
+    fly_active = _charge_fly_active(game_state, unit, unit_id)
+
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+    _perf = perf_timing_enabled(game_state)
+    _ep = game_state.get("episode_number", "?")
+    _turn = game_state.get("turn", "?")
+    _t0 = time.perf_counter() if _perf else None
+
+    # Mémoïsation (Tâche 1) : signature capturant TOUT ce qui influe sur le ctx. ``_unit_move_version``
+    # est incrémenté à chaque commit move/charge → invalidation auto au moindre déplacement. La sig est
+    # comparée par égalité (pas de hash requis) ; en cas de doute on invalide plutôt que servir obsolète.
+    sig = (
+        str(unit_id),
+        tuple(sorted(provisional_plan.items())),
+        game_state["_unit_move_version"],
+        bool(fly_active),
+        _charge_roll,
+        tuple(sorted(map(str, target_ids))),
+    )
+    _cache = game_state.get("_charge_plan_state_cache")
+    if _cache is not None and _cache.get("sig") == sig:
+        ctx = _cache["ctx"]
+        _cache_hit = 1
+    else:
+        ctx = _compute_plan_context(
+            game_state, unit, unit_id, provisional_plan, target_ids, roll_subhex, fly_active, _perf
+        )
+        game_state["_charge_plan_state_cache"] = {"sig": sig, "ctx": ctx}
+        _cache_hit = 0
+
+    reach_by_model = ctx["reach_by_model"]
+    dist_by_model = ctx["dist_by_model"]
+    start_min_by_model = ctx["start_min_by_model"]
+    other_origins_by_model = ctx["other_origins_by_model"]
+    region_by_base = ctx["region_by_base"]
+    base_of_model = ctx["base_of_model"]
+    key = ctx["key"]
+    phase = ctx["phase"]
+    eligible_models = ctx["eligible_models"]
+    unplaced = ctx["unplaced"]
+    can_validate = ctx["can_validate"]
+    satisfied = ctx["satisfied"]
+    unsatisfied = ctx["unsatisfied"]
+
+    # Partie SÉLECTION-dépendante (cheap) : pool de la fig sélectionnée (zone violette).
+    _tsel = time.perf_counter() if _perf else None
     pool: List[List[int]] = (
-        _qualifying(str(selected_model), key)
+        _charge_qualifying(
+            reach_by_model, start_min_by_model, other_origins_by_model,
+            region_by_base, base_of_model, str(selected_model), key,
+        )
         if selected_model is not None and str(selected_model) in reach_by_model
         else []
     )
@@ -2117,32 +2327,16 @@ def charge_model_plan_state(
         if loops:
             footprint_mask_loops = [[[float(x), float(y)] for (x, y) in loop] for loop in loops]
 
-    can_validate = False
-    if not unplaced and alive:
-        full_plan = [(str(m), int(provisional_plan[m][0]), int(provisional_plan[m][1])) for m in alive]
-        can_validate = charge_preview_move_plan(game_state, str(unit_id), full_plan, target_ids)["can_validate"]
-
-    # Satisfaction par cible (voile UI) : une cible-UNITÉ est ENGAGÉE dès qu'≥1 fig POSÉE est à
-    # ≤EZ d'elle (03.04, engagement au niveau unité). violet = satisfaite, rouge = pas.
-    placed_synths = []
-    for _mid, (_c, _r) in provisional_plan.items():
-        _sib = models_cache.get(str(_mid))
-        if _sib is None:
-            continue
-        _fp = _charge_model_footprint(game_state, _sib, int(_c), int(_r))
-        placed_synths.append(
-            _charge_synthetic_charger_cache_entry(game_state, unit, int(_c), int(_r), _fp)
+    if _perf and _t0 is not None:
+        _total = time.perf_counter() - _t0
+        _sel_s = (time.perf_counter() - _tsel) if _tsel is not None else 0.0
+        _tmg = ctx.get("_timings", {})
+        append_perf_timing_line(
+            f"CHARGE_MODEL_PLAN_STATE episode={_ep} turn={_turn} unit_id={unit_id} "
+            f"selected={selected_model} bfs_s={_tmg.get('bfs', 0.0):.6f} distfield_s={_tmg.get('distfield', 0.0):.6f} "
+            f"region_s={_tmg.get('region', 0.0):.6f} sel_s={_sel_s:.6f} total_s={_total:.6f} "
+            f"n_unplaced={len(unplaced)} n_bases={len(region_by_base)} phase={phase} cache_hit={_cache_hit}"
         )
-    satisfied: List[str] = []
-    unsatisfied: List[str] = []
-    for tid in (str(t) for t in target_ids):
-        tentry = units_cache.get(tid)
-        if tentry is None:
-            continue
-        engaged_t = any(
-            unit_entries_within_engagement_zone(synth, tentry, ez) for synth in placed_synths
-        )
-        (satisfied if engaged_t else unsatisfied).append(tid)
 
     return {
         "current_phase": phase,
@@ -3785,6 +3979,18 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
             for (c, r) in valid_pool
             if (c, r) in _dist_map
         ]
+
+        # DIAG (gated par W40K_DUMP_CHARGE_STATE) : snapshot pickle du game_state au moment de la
+        # charge → rejouable hors UI (mesure mémo charge_model_plan_state + inspection
+        # occupied_hexes_by_model / squad_models pour le diag figCount unité attachée).
+        _dump_path = os.environ.get("W40K_DUMP_CHARGE_STATE")
+        if _dump_path:
+            import pickle
+            with open(_dump_path, "wb") as _f:
+                pickle.dump(
+                    {"game_state": game_state, "unit_id": str(unit_id), "target_ids": target_ids}, _f
+                )
+            add_console_log(game_state, f"[CHARGE DUMP] game_state écrit → {_dump_path}")
 
         # Human players: return waiting_for_player for destination selection
         return True, {
