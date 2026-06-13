@@ -5262,10 +5262,17 @@ def _fight_pile_in_model_plan_state(
     restent à leur position d'origine. ``selected_model`` non-None → calcule SON pool + empreinte lissée.
     """
     from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
-    from .charge_handlers import _charge_prepare_footprint_offsets, _candidate_footprint_charge
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from .shared_utils import get_engagement_zone
+    from .charge_handlers import (
+        _charge_prepare_footprint_offsets,
+        _candidate_footprint_charge,
+        _charge_synthetic_charger_cache_entry,
+    )
 
     squad_id = str(require_key(unit, "id"))
     models_cache = require_key(game_state, "models_cache")
+    units_cache = require_key(game_state, "units_cache")
     squad_models = require_key(game_state, "squad_models")
     alive = [str(m) for m in require_key(squad_models, squad_id) if str(m) in models_cache]
     prov: Dict[str, Tuple[int, int]] = {
@@ -5303,10 +5310,24 @@ def _fight_pile_in_model_plan_state(
     engaged_before = _fight_units_engaged_with(game_state, unit)
     prev = _fight_pile_in_preview_plan(game_state, squad_id, full_plan, closest_tier, engaged_before)
 
+    # Figs (posées ou à l'origine) dont l'empreinte finit à ≤ EZ d'une cible pile-in → voile vert UI
+    # (en mesure de frapper). Cibles exposées au front pour le cercle violet + hit-test du Focus.
+    ez = int(get_engagement_zone(game_state))
+    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
+    target_entries = [units_cache[t] for t in targets if t in units_cache]
+    engaged_models: List[str] = []
+    for m, c, r in full_plan:
+        fp = _candidate_footprint_charge(int(c), int(r), unit, game_state, fp_pair)
+        synth = _charge_synthetic_charger_cache_entry(game_state, unit, int(c), int(r), fp)
+        if any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
+            engaged_models.append(m)
+
     return {
         "phase": "fight",
         "fight_subphase": "pile_in",
         "pile_in_model_move": True,
+        "engaged_models": engaged_models,
+        "pile_in_targets": [str(t) for t in targets],
         "unitId": squad_id,
         "active_fight_unit": squad_id,
         "origin_models": {m: [c, r] for m, (c, r) in origin.items()},
@@ -5338,6 +5359,383 @@ def _fight_pile_in_commit_plan(
     entry = require_key(game_state, "units_cache").get(str(require_key(unit, "id")))
     if entry is not None:
         set_unit_coordinates(unit, int(entry["col"]), int(entry["row"]))
+
+
+def _fight_model_in_base_contact(
+    game_state: Dict[str, Any], model_entry: Dict[str, Any]
+) -> bool:
+    """True si la figurine est en base-contact (socles collés, écart ≤ 0) avec ≥1 fig ennemie.
+
+    Règle 12.03 WHILE : « Models in base-contact with one or more enemy models cannot be moved. »
+    Socles ronds (Board ×10) → écart euclidien bord-à-bord ; sinon métrique empreinte (contact ⟺
+    distance 0). Lecture pure, réutilise les primitives moteur (aucune géométrie réimplémentée).
+    """
+    from engine.hex_utils import euclidean_edge_clearance_round_round, min_distance_between_sets
+    from .charge_handlers import _charge_model_footprint
+
+    mc, mr = int(model_entry["col"]), int(model_entry["row"])
+    mshape = model_entry["BASE_SHAPE"]
+    mbs = model_entry["BASE_SIZE"]
+    player = int(model_entry["player"])
+    fp = _charge_model_footprint(game_state, model_entry, mc, mr)
+    units_cache = require_key(game_state, "units_cache")
+    for ce in units_cache.values():
+        if int(ce["player"]) == player:
+            continue
+        eshape = ce["BASE_SHAPE"]
+        ebs = ce["BASE_SIZE"]
+        if mshape == "round" and eshape == "round" and isinstance(mbs, int) and isinstance(ebs, int):
+            by_model = ce.get("occupied_hexes_by_model")
+            positions = by_model.values() if by_model else [(int(ce["col"]), int(ce["row"]))]
+            for ec, er in positions:
+                if euclidean_edge_clearance_round_round(mc, mr, mbs, int(ec), int(er), ebs) <= 1e-6:
+                    return True
+        else:
+            efp = ce.get("occupied_hexes") or {(int(ce["col"]), int(ce["row"]))}
+            if min_distance_between_sets(fp, efp, max_distance=0) <= 0:
+                return True
+    return False
+
+
+def pile_in_autoplace_plan(
+    game_state: Dict[str, Any], squad_id: str, focus_target_id: str
+) -> Dict[str, Any]:
+    """Auto-placement de pile-in (12.03) : positionne les figs du squad pour MAXIMISER le nombre de
+    figs en mesure de frapper le focus (empreinte ≤ EZ bord-à-bord de ``focus_target_id``). Lecture pure.
+
+    Optimum EXACT par programme linéaire en nombres entiers (``scipy.optimize.milp`` / HiGHS), car les
+    socles sont multi-hex (Board ×10) : le non-chevauchement entre empreintes est modélisé par une
+    contrainte **par cellule** (chaque hex couvert par ≤ 1 fig posée), ce qu'un simple matching biparti
+    ne capture pas. Formulation :
+      - variable binaire x[f,s] = fig f posée au slot s (créée seulement pour les arêtes LÉGALES) ;
+      - 1 fig ≤ 1 slot : Σ_s x[f,s] ≤ 1 ;
+      - non-chevauchement : pour chaque cellule h, Σ_{(f,s): h ∈ empreinte(s)} x[f,s] ≤ 1 ;
+      - objectif : maximiser Σ x (toutes les arêtes engagent le focus), départage = distance minimale.
+
+    Contraintes de règle (12.03), par arête, conformes au pool/commit pile-in existant :
+      - budget 3" (× inches_to_subhex), atteignabilité BFS centre-à-centre (mur/ennemi bloquent, amies
+        traversables — 03.01) ;
+      - figs en base-contact FIGÉES (ne bougent pas) ;
+      - WHILE : empreinte au slot strictement plus proche du palier le plus proche que le départ de la fig ;
+      - AFTER : chaque engagement de départ de la fig est conservé au slot.
+
+    Les slots sont générés UNE fois par taille de socle sur la BANDE d'engagement du focus (pas tout le
+    rayon). Les figs non affectées par l'ILP sont rapprochées au max le long de leur zone atteignable
+    (strictement plus proche, sans chevaucher). Garde-fou final : aucun chevauchement de cellules.
+
+    Retour : {"plan": [[model_id, col, row], ...]} couvrant toutes les figs vivantes.
+    """
+    import numpy as np
+    from scipy.optimize import milp, LinearConstraint, Bounds
+    from scipy.sparse import coo_matrix
+    from engine.hex_utils import min_distance_between_sets, footprints_overlap, Socle
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from .shared_utils import get_engagement_zone
+    from .charge_handlers import (
+        _charge_model_footprint,
+        _charge_model_socle,
+        _charge_synthetic_charger_cache_entry,
+    )
+
+    unit = get_unit_by_id(game_state, str(squad_id))
+    if not unit:
+        return {"plan": []}
+
+    units_cache = require_key(game_state, "units_cache")
+    focus_entry = units_cache.get(str(focus_target_id))
+    if focus_entry is None:
+        raise ValueError(
+            f"pile_in_autoplace_plan: cible focus {focus_target_id} absente de units_cache"
+        )
+
+    targets = _fight_v11_pile_in_targets(game_state, unit)
+    if str(focus_target_id) not in {str(t) for t in targets}:
+        raise ValueError(
+            f"pile_in_autoplace_plan: focus {focus_target_id} hors cibles pile-in {targets}"
+        )
+    closest_tier = _fight_pile_in_closest_tier_ids(game_state, unit, targets)
+    if not closest_tier:
+        raise ValueError(f"pile_in_autoplace_plan: palier le plus proche introuvable pour {squad_id}")
+
+    ez = int(get_engagement_zone(game_state))
+    budget = 3 * int(require_key(game_state, "inches_to_subhex"))
+    board_cols = int(require_key(game_state, "board_cols"))
+    board_rows = int(require_key(game_state, "board_rows"))
+    walls = set(game_state.get("wall_hexes", set()))
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive = [str(m) for m in require_key(squad_models, str(squad_id)) if str(m) in models_cache]
+    if not alive:
+        return {"plan": []}
+
+    player = int(require_key(unit, "player"))
+    focus_occ = focus_entry.get("occupied_hexes")
+    focus_fp = set(focus_occ) if focus_occ else {(int(focus_entry["col"]), int(focus_entry["row"]))}
+
+    # Palier WHILE : empreintes des cibles les plus proches de l'unité.
+    tier_fps: List[Set[Tuple[int, int]]] = []
+    for tid in closest_tier:
+        ce = units_cache.get(str(tid))
+        if ce is None:
+            continue
+        occ = ce.get("occupied_hexes")
+        tier_fps.append(set(occ) if occ else {(int(ce["col"]), int(ce["row"]))})
+
+    # Collision = test EUCLIDIEN officiel du jeu (``footprints_overlap`` : rond↔rond bord-à-bord
+    # continu, fallback empreinte sinon), pas l'intersection de cellules — sinon des socles ronds
+    # disjoints en cellules mais chevauchants visuellement passent à travers.
+    def _socle(mid: str, c: int, r: int) -> Any:
+        return _charge_model_socle(game_state, models_cache[mid], c, r)
+
+    def _overlaps(s: Any, others: List[Any]) -> bool:
+        if walls and (s.fp & walls):
+            return True
+        return any(footprints_overlap(s, o) for o in others)
+
+    # Socles bloquants PAR FIGURINE : ennemis + autres unités amies (rond↔rond exact par modèle).
+    blocker_socles: List[Any] = []
+    for eid, entry in units_cache.items():
+        if str(eid) == str(squad_id):
+            continue
+        by_model = entry.get("occupied_hexes_by_model")
+        if by_model:
+            for mc, mr in by_model.values():
+                blocker_socles.append(
+                    Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
+                          col=int(mc), row=int(mr), fp={(int(mc), int(mr))})
+                )
+        else:
+            occ = entry.get("occupied_hexes")
+            blocker_socles.append(
+                Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
+                      col=int(entry["col"]), row=int(entry["row"]),
+                      fp=set(occ) if occ else {(int(entry["col"]), int(entry["row"]))})
+            )
+
+    # Ennemis (cellules occupées) : bloquent la TRAVERSÉE du BFS (les amies sont traversables, 03.01).
+    enemy_occupied: Set[Tuple[int, int]] = set()
+    for entry in units_cache.values():
+        if int(entry["player"]) != player:
+            occ = entry.get("occupied_hexes")
+            enemy_occupied |= set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
+
+    # Figs figées (base-contact) : ne bougent pas ; leurs socles bloquent les placements.
+    frozen_socles: List[Any] = []
+    movable: List[str] = []
+    for mid in alive:
+        m = models_cache[mid]
+        if _fight_model_in_base_contact(game_state, m):
+            frozen_socles.append(_socle(mid, int(m["col"]), int(m["row"])))
+        else:
+            movable.append(mid)
+
+    path_blocked = walls | enemy_occupied
+    static_blockers = blocker_socles + frozen_socles
+
+    def _model_fp(mid: str, c: int, r: int) -> Set[Tuple[int, int]]:
+        return _charge_model_footprint(game_state, models_cache[mid], c, r)
+
+    def _engages_focus(c: int, r: int, fp: Set[Tuple[int, int]]) -> bool:
+        synth = _charge_synthetic_charger_cache_entry(game_state, unit, c, r, fp)
+        return unit_entries_within_engagement_zone(synth, focus_entry, ez)
+
+    def _fp_min_to_tier(fp: Set[Tuple[int, int]]) -> int:
+        return min(min_distance_between_sets(fp, t) for t in tier_fps) if tier_fps else 1 << 30
+
+    # --- Slots : bande d'engagement du focus, par taille de socle distincte (coût). ---
+    def _base_key(m: Dict[str, Any]) -> Tuple[Any, Any]:
+        bs = m["BASE_SIZE"]
+        return (m["BASE_SHAPE"], tuple(bs) if isinstance(bs, (list, tuple)) else bs)
+
+    by_base: Dict[Tuple[Any, Any], List[str]] = {}
+    for mid in movable:
+        by_base.setdefault(_base_key(models_cache[mid]), []).append(mid)
+
+    # Liste GLOBALE des slots (toutes bases) : (col, row, Socle, slot_min_to_tier).
+    all_slots: List[Tuple[int, int, Any, int]] = []
+    # slots_by_base[bkey] = [index dans all_slots, ...]
+    slots_by_base: Dict[Tuple[Any, Any], List[int]] = {}
+    fcs = [c for c, _ in focus_fp]
+    frs = [r for _, r in focus_fp]
+    for bkey, mids in by_base.items():
+        rep_id = mids[0]
+        rep = models_cache[rep_id]
+        bs = rep["BASE_SIZE"]
+        base_dim = max(bs) if isinstance(bs, (list, tuple)) else bs
+        margin = ez + int(base_dim) + 2
+        idxs: List[int] = []
+        for c in range(min(fcs) - margin, max(fcs) + margin + 1):
+            if c < 0 or c >= board_cols:
+                continue
+            for r in range(min(frs) - margin, max(frs) + margin + 1):
+                if r < 0 or r >= board_rows:
+                    continue
+                soc = _socle(rep_id, c, r)
+                if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in soc.fp):
+                    continue
+                if _overlaps(soc, static_blockers):
+                    continue
+                if not _engages_focus(c, r, set(soc.fp)):
+                    continue
+                idxs.append(len(all_slots))
+                all_slots.append((c, r, soc, _fp_min_to_tier(set(soc.fp))))
+        slots_by_base[bkey] = idxs
+
+    # --- Atteignabilité par fig (BFS centre-à-centre ≤ budget, amies traversables). ---
+    starts = {mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"])) for mid in movable}
+    start_fp = {mid: _model_fp(mid, *starts[mid]) for mid in movable}
+    start_min = {mid: _fp_min_to_tier(start_fp[mid]) for mid in movable}
+
+    def _reachable(mid: str) -> Dict[Tuple[int, int], int]:
+        sc, sr = starts[mid]
+        dist: Dict[Tuple[int, int], int] = {(sc, sr): 0}
+        queue: deque = deque([(sc, sr, 0)])
+        while queue:
+            c, r, d = queue.popleft()
+            if d >= budget:
+                continue
+            for nc, nr in get_hex_neighbors(c, r):
+                if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                    continue
+                cell = (nc, nr)
+                if cell in dist or cell in path_blocked:
+                    continue
+                dist[cell] = d + 1
+                queue.append((nc, nr, d + 1))
+        return dist
+
+    # Engagements de départ par fig (AFTER : à conserver au slot).
+    def _start_engagements(mid: str) -> List[Dict[str, Any]]:
+        synth = _charge_synthetic_charger_cache_entry(game_state, unit, *starts[mid], start_fp[mid])
+        out: List[Dict[str, Any]] = []
+        for eid, ce in units_cache.items():
+            if int(ce["player"]) == player or str(eid) == str(squad_id):
+                continue
+            if unit_entries_within_engagement_zone(synth, ce, ez):
+                out.append(ce)
+        return out
+
+    # --- Arêtes ILP : (fig f, slot s) légales. edges_by_slot[s] = liste d'indices d'arête. ---
+    edges: List[Tuple[str, int, int]] = []  # (mid, slot_index, pathdist)
+    for mid in movable:
+        sm = start_min[mid]
+        if sm <= 0:
+            continue  # déjà au contact du palier : aucun slot strictement plus proche
+        reach = _reachable(mid)
+        start_eng = _start_engagements(mid)
+        for si in slots_by_base[_base_key(models_cache[mid])]:
+            sc, sr, soc, slot_min = all_slots[si]
+            if slot_min >= sm:
+                continue  # WHILE : strictement plus proche du palier
+            pd = reach.get((sc, sr))
+            if pd is None:
+                continue  # slot hors budget (atteignabilité réelle)
+            if start_eng:
+                synth_slot = _charge_synthetic_charger_cache_entry(game_state, unit, sc, sr, set(soc.fp))
+                if not all(unit_entries_within_engagement_zone(synth_slot, ce, ez) for ce in start_eng):
+                    continue  # AFTER : un engagement de départ serait perdu
+            edges.append((mid, si, pd))
+
+    provisional: Dict[str, Tuple[int, int]] = {}
+    placed_socles: List[Any] = list(static_blockers)
+
+    if edges:
+        n = len(edges)
+        mids_idx = {mid: i for i, mid in enumerate(sorted({e[0] for e in edges}))}
+        used_slots = sorted({e[1] for e in edges})
+        slot_row = {si: k for k, si in enumerate(used_slots)}
+        n_model = len(mids_idx)
+        n_slot = len(used_slots)
+        # Contraintes : (1) 1 fig ≤ 1 slot ; (2) 1 slot ≤ 1 fig ; (3) slots en CHEVAUCHEMENT euclidien
+        # mutuellement exclusifs (packing exact multi-hex). Lignes : modèles, puis slots, puis conflits.
+        rows: List[int] = []
+        cols: List[int] = []
+        for e_i, (mid, si, _pd) in enumerate(edges):
+            rows.append(mids_idx[mid]); cols.append(e_i)              # (1)
+            rows.append(n_model + slot_row[si]); cols.append(e_i)     # (2)
+        # (3) paires de slots utilisés qui se chevauchent → 1 ligne par paire.
+        conflict_pairs: List[Tuple[int, int]] = []
+        for a in range(n_slot):
+            sa = all_slots[used_slots[a]][2]
+            for b in range(a + 1, n_slot):
+                if footprints_overlap(sa, all_slots[used_slots[b]][2]):
+                    conflict_pairs.append((used_slots[a], used_slots[b]))
+        edges_by_slot: Dict[int, List[int]] = {}
+        for e_i, (_mid, si, _pd) in enumerate(edges):
+            edges_by_slot.setdefault(si, []).append(e_i)
+        base_rows = n_model + n_slot
+        for k, (s1, s2) in enumerate(conflict_pairs):
+            for e_i in edges_by_slot.get(s1, []) + edges_by_slot.get(s2, []):
+                rows.append(base_rows + k); cols.append(e_i)
+        n_rows = base_rows + len(conflict_pairs)
+        A = coo_matrix(([1.0] * len(rows), (rows, cols)), shape=(n_rows, n))
+        lc = LinearConstraint(A, np.zeros(n_rows), np.ones(n_rows))
+        max_pd = max((e[2] for e in edges), default=0) + 1
+        # Objectif : maximiser le nb de figs posées (gain BIG/fig), départage par distance parcourue.
+        BIG = 1.0e6
+        c = np.array([-BIG + e[2] / max_pd for e in edges], dtype=float)
+        res = milp(
+            c=c, constraints=[lc], integrality=np.ones(n),
+            bounds=Bounds(0, 1), options={"time_limit": 2.0},
+        )
+        if res.x is not None:
+            for e_i, x in enumerate(res.x):
+                if x > 0.5:
+                    mid, si, _pd = edges[e_i]
+                    sc, sr, soc, _sm = all_slots[si]
+                    provisional[mid] = (sc, sr)
+                    placed_socles.append(soc)
+
+    # Figs mobiles non posées par l'ILP : rapprochement au max (strictement plus proche, sans chevaucher).
+    placed = set(provisional)
+    for mid in movable:
+        if mid in placed:
+            continue
+        sm = start_min[mid]
+        best: Optional[Tuple[int, int]] = None
+        if sm > 0:
+            best_score = None
+            for (cc, rr), _pd in _reachable(mid).items():
+                if (cc, rr) == starts[mid]:
+                    continue
+                soc = _socle(mid, cc, rr)
+                if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in soc.fp):
+                    continue
+                if _overlaps(soc, placed_socles):
+                    continue
+                d_tier = _fp_min_to_tier(set(soc.fp))
+                if d_tier >= sm:
+                    continue  # WHILE
+                d_focus = min_distance_between_sets(set(soc.fp), focus_fp)
+                if best_score is None or d_focus < best_score:
+                    best_score = d_focus
+                    best = (cc, rr)
+            if best is not None:
+                provisional[mid] = best
+                placed_socles.append(_socle(mid, *best))
+        if mid not in provisional:
+            provisional[mid] = starts[mid]  # reste à sa position (départ)
+
+    # Figs figées : conservées à leur départ.
+    for mid in alive:
+        if mid not in provisional:
+            m = models_cache[mid]
+            provisional[mid] = (int(m["col"]), int(m["row"]))
+
+    # Garde-fou : aucun chevauchement de socles (test euclidien officiel) dans le plan produit.
+    # Erreur explicite plutôt qu'un plan illégal silencieux (le contact tangent gap≈0 reste autorisé).
+    socs = {mid: _socle(mid, *provisional[mid]) for mid in alive}
+    items = list(socs.items())
+    for i in range(len(items)):
+        for j in range(i + 1, len(items)):
+            if footprints_overlap(items[i][1], items[j][1]):
+                raise ValueError(
+                    f"pile_in_autoplace_plan: chevauchement de socles entre {items[i][0]} "
+                    f"({provisional[items[i][0]]}) et {items[j][0]} ({provisional[items[j][0]]})"
+                )
+
+    plan = [[mid, int(provisional[mid][0]), int(provisional[mid][1])] for mid in alive]
+    return {"plan": plan}
 
 
 def _fight_v11_pile_in_targets(game_state: Dict[str, Any], unit: Dict[str, Any]) -> List[str]:
@@ -5505,6 +5903,16 @@ def _fight_v11_manual_step(
             return True, _fight_pile_in_model_plan_state(
                 game_state, u, _prov_from_action(), str(sel) if sel is not None else None
             )
+
+        if atype == "pile_in_autoplace":
+            # Focus : auto-placement optimal (ILP) des figs pour maximiser celles frappant la cible.
+            if act_uid is None or act_uid not in eligible:
+                return _fight_v11_manual_state(game_state)
+            focus = action.get("targetId")
+            if focus is None:
+                return False, {"error": "pile_in_autoplace requires targetId", "action": action}
+            out = pile_in_autoplace_plan(game_state, act_uid, str(focus))
+            return True, {"action": "pile_in_autoplace", "unitId": act_uid, **out}
 
         if atype == "commit_pile_in_plan":
             # Validation finale : pose toutes les figs (posées + origine) si le plan est légal.

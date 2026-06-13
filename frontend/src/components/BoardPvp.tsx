@@ -475,7 +475,14 @@ type BoardProps = {
     coherencyOk: boolean;
     unitEngaged: boolean;
     keptEngagements: boolean;
+    /** Figs posées en mesure de frapper (≤ EZ d'une cible) → voile vert. */
+    engagedModels: string[];
+    /** Cibles pile-in (focus) → cercle violet + hit-test. */
+    pileInTargets: string[];
   } | null;
+  /** Mode Focus pile-in : voile violet sur les cibles + clic cible → auto-placement. */
+  pileInFocusActive?: boolean;
+  onPileInFocusTargetClick?: (targetId: number | string) => void | Promise<void>;
   /** Pool (hexes "col,row") de la fig de pile-in active. */
   pileInModelPoolRef?: React.RefObject<Set<string>>;
   /** Mask loops (polygone lissé monde) de la zone de landing de la fig de pile-in active. */
@@ -834,6 +841,8 @@ export default function Board({
   chargeFocusActive = false,
   onChargeFocusTargetClick,
   pileInMovePlan = null,
+  pileInFocusActive = false,
+  onPileInFocusTargetClick,
   pileInModelPoolRef,
   pileInModelMaskLoopsRef,
   onSelectPileInModel,
@@ -1112,8 +1121,16 @@ export default function Board({
     onChargeFocusTargetClick,
   };
   /** Callbacks pile-in par-figurine — ref a jour (miroir charge). */
-  const pileInModelCallbacksRef = useRef({ onMovePileInModel, onCancelPileInModelMove });
-  pileInModelCallbacksRef.current = { onMovePileInModel, onCancelPileInModelMove };
+  const pileInModelCallbacksRef = useRef({
+    onMovePileInModel,
+    onCancelPileInModelMove,
+    onPileInFocusTargetClick,
+  });
+  pileInModelCallbacksRef.current = {
+    onMovePileInModel,
+    onCancelPileInModelMove,
+    onPileInFocusTargetClick,
+  };
   /** Plan provisoire toujours a jour pour les handlers d'event stables (sans relancer le draw). */
   const squadMovePlanRef = useRef(squadMovePlan);
   squadMovePlanRef.current = squadMovePlan;
@@ -3606,6 +3623,23 @@ export default function Board({
             return;
           }
         }
+        // Idem pile-in : clic sur une cible pile-in en mode focus → auto-placement (ILP).
+        if (isPileInModelMove && pileInFocusActive && (pileInMovePlan?.pileInTargets?.length ?? 0) > 0) {
+          const uc = gameState?.units_cache as
+            | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+            | undefined;
+          const hitTarget = (pileInMovePlan?.pileInTargets ?? []).find((tid) => {
+            const byModel = uc?.[String(tid)]?.occupied_hexes_by_model;
+            if (!byModel) return false;
+            return Object.values(byModel).some(
+              ([oc, orr]) => cubeDistance(clickCube, offsetToCube(oc, orr)) <= HEX_HIT_TOLERANCE
+            );
+          });
+          if (hitTarget != null) {
+            void pileInModelCallbacksRef.current.onPileInFocusTargetClick?.(hitTarget);
+            return;
+          }
+        }
         const active = plan.activeModelId;
         const poolRef = activeChargeLikePoolRef?.current;
         // 0) Clic sur une fig DÉJÀ POSÉE → la dé-poser (réajustement / cohésion).
@@ -3668,6 +3702,8 @@ export default function Board({
     boardConfig,
     chargeFocusActive,
     chargePreviewTargetIds,
+    pileInFocusActive,
+    pileInMovePlan?.pileInTargets,
     gameState?.units_cache,
   ]);
 
@@ -4015,7 +4051,8 @@ export default function Board({
       }
       // Pile-in : voile ROUGE sur les figs POSÉES hors zone valide (per_model_valid false) → leur
       // empreinte/chemin a été bloqué par une fig posée après ; l'utilisateur doit les replacer.
-      if (isPileInModelMove && pileInMovePlan) {
+      // En mode Focus : pas de voile rouge (seulement le cercle violet des cibles).
+      if (isPileInModelMove && pileInMovePlan && !pileInFocusActive) {
         const RED_INVALID = 0xef4444;
         for (const [mid, pos] of Object.entries(pileInMovePlan.models)) {
           if (pileInMovePlan.perModelValid[mid] !== false) continue;
@@ -4094,6 +4131,31 @@ export default function Board({
           }
         }
       }
+      // Pile-in : Focus → cercle violet (contour) sur les cibles ; voile VERT sur les figs en mesure
+      // de frapper (≤ EZ d'une cible). Le voile vert s'affiche que le Focus soit actif ou non.
+      if (isPileInModelMove && pileInMovePlan) {
+        if (pileInFocusActive) {
+          const VIOLET = 0x8a2be2;
+          for (const uid of pileInMovePlan.pileInTargets) drawTargetRing(uid, VIOLET);
+        }
+        const pu = units.find((u) => String(u.id) === String(pileInMovePlan.unitId));
+        const pByModel = ucTargets?.[String(pileInMovePlan.unitId)]?.occupied_hexes_by_model;
+        if (pu) {
+          const pBase = resolveBaseSizeForUnitDisplay(pu);
+          const pR = pBase > 1 ? (pBase * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
+          overlay.lineStyle(0);
+          for (const mid of pileInMovePlan.engagedModels) {
+            // Position posée (plan) si présente, sinon position d'origine (figs non bougées engagées).
+            const placed = pileInMovePlan.models[mid];
+            const pos = placed ?? (pByModel?.[mid] ? { col: pByModel[mid][0], row: pByModel[mid][1] } : null);
+            if (!pos) continue;
+            const [cx, cy] = hexCenter(pos.col, pos.row);
+            overlay.beginFill(GREEN, 0.45);
+            overlay.drawCircle(cx, cy, pR);
+            overlay.endFill();
+          }
+        }
+      }
     }
     return () => {
       if (!overlay.destroyed) {
@@ -4115,6 +4177,7 @@ export default function Board({
     hideIndicators,
     chargeFocusActive,
     chargePreviewTargetIds,
+    pileInFocusActive,
   ]);
 
   // Ghost per-figurine (charge model move) : calque exact du ghost move per-fig — le fantôme de la
@@ -6521,7 +6584,7 @@ export default function Board({
             .map((d) => `${d.model_id}.${d.weapon_index}>${d.target_unit_id}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 

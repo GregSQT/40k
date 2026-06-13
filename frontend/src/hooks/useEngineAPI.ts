@@ -576,9 +576,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     coherencyOk: boolean;
     unitEngaged: boolean;
     keptEngagements: boolean;
+    /** Figs posées en mesure de frapper (≤ EZ d'une cible) → voile vert. */
+    engagedModels: string[];
+    /** Cibles pile-in (focus) → cercle violet + hit-test. */
+    pileInTargets: string[];
   } | null>(null);
   const pileInMovePlanRef = useRef<typeof pileInMovePlan>(null);
   pileInMovePlanRef.current = pileInMovePlan;
+  /** Mode Focus pile-in : voile violet sur les cibles + clic cible → auto-placement (ILP). */
+  const [pileInFocusActive, setPileInFocusActive] = useState(false);
+  const pileInFocusActiveRef = useRef(false);
+  pileInFocusActiveRef.current = pileInFocusActive;
   /** Pool (hexes "col,row") de la fig pile-in active. */
   const pileInModelPoolRef = useRef<Set<string>>(new Set());
   /** Mask loops (polygone lissé monde) de la zone de landing de la fig pile-in active. */
@@ -5410,6 +5418,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const coherencyOk = result.coherency_ok === true;
     const unitEngaged = result.unit_engaged === true;
     const keptEngagements = result.kept_engagements === true;
+    const engagedModels = ((result.engaged_models ?? []) as unknown[]).map((m) => String(m));
+    const pileInTargets = ((result.pile_in_targets ?? []) as unknown[]).map((m) => String(m));
     setPileInMovePlan((prev) => {
       const base = prev ?? {
         unitId: parseInt(String(result.unitId), 10),
@@ -5426,6 +5436,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         coherencyOk: false,
         unitEngaged: false,
         keptEngagements: false,
+        engagedModels: [] as string[],
+        pileInTargets: [] as string[],
       };
       // Fig active = celle échoée par le backend si encore éligible, sinon l'ancienne si toujours
       // éligible, sinon aucune. Le pool ne vaut que pour elle (calcul ciblé backend).
@@ -5454,6 +5466,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         coherencyOk,
         unitEngaged,
         keptEngagements,
+        engagedModels,
+        pileInTargets,
       };
     });
   }, []);
@@ -5472,6 +5486,35 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       applyPileInPlanState(result);
     },
     [postEngineQuery, applyPileInPlanState]
+  );
+
+  /** Bouton Focus pile-in : (dé)active le mode focus (voile violet sur les cibles). */
+  const handleTogglePileInFocus = useCallback(() => {
+    setPileInFocusActive((v) => !v);
+  }, []);
+
+  /** Clic sur une cible pile-in en mode focus : demande l'auto-placement optimal (pile_in_autoplace),
+   * charge ce plan dans le plan provisoire, puis revalide. L'ajustement manuel reste possible ensuite. */
+  const handlePileInFocusTargetClick = useCallback(
+    async (targetId: number | string) => {
+      const plan = pileInMovePlanRef.current;
+      if (!plan || !pileInFocusActiveRef.current) return;
+      const tid = String(targetId);
+      if (!plan.pileInTargets.includes(tid)) return; // seule une cible pile-in est focusable
+      const result = await postEngineQuery({ action: "pile_in_autoplace", targetId: tid });
+      if (!result) throw new Error("pile_in_autoplace: réponse vide");
+      const planArr = (result.plan ?? []) as Array<[string, number, number]>;
+      const models: Record<string, { col: number; row: number }> = {};
+      for (const [mid, c, r] of planArr) {
+        models[String(mid)] = { col: Number(c), row: Number(r) };
+      }
+      pileInModelPoolRef.current = new Set();
+      pileInModelMaskLoopsRef.current = null;
+      setPileInFocusActive(false);
+      setPileInMovePlan((prev) => (prev ? { ...prev, models, activeModelId: null } : prev));
+      await refreshPileInPlanState(models, null);
+    },
+    [postEngineQuery, refreshPileInPlanState]
   );
 
   /** Clic sur une fig éligible : la rend active + demande SON pool au backend (calcul ciblé). */
@@ -5527,6 +5570,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       await executeAction({ action: "commit_pile_in_plan", plan: planArr });
       pileInModelPoolRef.current = new Set();
       pileInModelMaskLoopsRef.current = null;
+      setPileInFocusActive(false);
       setPileInMovePlan(null);
       setSelectedUnitId(null);
       setMode("select");
@@ -5540,6 +5584,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleCancelPileInModelMove = useCallback(async () => {
     pileInModelPoolRef.current = new Set();
     pileInModelMaskLoopsRef.current = null;
+    setPileInFocusActive(false);
     setPileInMovePlan(null);
     try {
       await executeAction({ action: "skip" });
@@ -5984,6 +6029,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onToggleChargeFocus: () => {},
       onChargeFocusTargetClick: async () => {},
       pileInMovePlan: null,
+      pileInFocusActive: false,
       pileInModelPoolRef,
       pileInModelMaskLoopsRef,
       onSelectPileInModel: () => {},
@@ -5991,6 +6037,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onUnplacePileInModel: () => {},
       onCommitPileInPlan: async () => {},
       onCancelPileInModelMove: async () => {},
+      onTogglePileInFocus: () => {},
+      onPileInFocusTargetClick: async () => {},
       onSetAdvanceMode: async () => {},
       onTakeToSkies: async () => {},
       onStationary: async () => {},
@@ -6150,6 +6198,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onChargeFocusTargetClick: handleChargeFocusTargetClick,
     // Pile-in par-figurine (V11 12.04, mode fin type charge)
     pileInMovePlan,
+    pileInFocusActive,
     pileInModelPoolRef,
     pileInModelMaskLoopsRef,
     onSelectPileInModel: handleSelectPileInModel,
@@ -6157,6 +6206,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onUnplacePileInModel: handleUnplacePileInModel,
     onCommitPileInPlan: handleCommitPileInPlan,
     onCancelPileInModelMove: handleCancelPileInModelMove,
+    onTogglePileInFocus: handleTogglePileInFocus,
+    onPileInFocusTargetClick: handlePileInFocusTargetClick,
     onSetAdvanceMode: handleSetAdvanceMode,
     onTakeToSkies: handleTakeToSkies,
     onStationary: handleStationary,

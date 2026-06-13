@@ -3258,6 +3258,33 @@ export const BoardWithAPI: React.FC = () => {
                 Cancel
               </button>
               {(() => {
+                const focusActive = apiProps.pileInFocusActive === true;
+                return (
+                  <button
+                    type="button"
+                    className={focusActive ? "btn-active" : undefined}
+                    onClick={() => {
+                      if (!isGameOver) apiProps.onTogglePileInFocus?.();
+                    }}
+                    title="Focus : clique sur une cible pour placer automatiquement toutes les figurines"
+                    style={{
+                      border: "1px solid rgba(0,0,0,0.35)",
+                      borderRadius: 6,
+                      background: focusActive ? "#8a2be2" : "#5b21b6",
+                      color: "#fff",
+                      cursor: "pointer",
+                      fontSize: 14,
+                      fontWeight: 700,
+                      padding: "8px 14px",
+                      width: 110,
+                      textAlign: "center",
+                    }}
+                  >
+                    Focus
+                  </button>
+                );
+              })()}
+              {(() => {
                 const canValidate = apiProps.pileInMovePlan?.canValidate === true;
                 return (
                   <button
@@ -4248,6 +4275,8 @@ export const BoardWithAPI: React.FC = () => {
             chargeFocusActive={apiProps.chargeFocusActive}
             onChargeFocusTargetClick={isGameOver ? async () => {} : apiProps.onChargeFocusTargetClick}
             pileInMovePlan={apiProps.pileInMovePlan}
+            pileInFocusActive={apiProps.pileInFocusActive}
+            onPileInFocusTargetClick={isGameOver ? async () => {} : apiProps.onPileInFocusTargetClick}
             pileInModelPoolRef={apiProps.pileInModelPoolRef}
             pileInModelMaskLoopsRef={apiProps.pileInModelMaskLoopsRef}
             onSelectPileInModel={isGameOver ? () => {} : apiProps.onSelectPileInModel}
