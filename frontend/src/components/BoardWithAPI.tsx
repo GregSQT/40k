@@ -3150,12 +3150,13 @@ export const BoardWithAPI: React.FC = () => {
                 return (
                   <button
                     type="button"
+                    className={focusActive ? "btn-active" : undefined}
                     onClick={() => {
                       if (!isGameOver) apiProps.onToggleChargeFocus?.();
                     }}
                     title="Focus : clique sur une cible pour placer automatiquement toutes les figurines"
                     style={{
-                      border: focusActive ? "2px solid #fff" : "1px solid rgba(0,0,0,0.35)",
+                      border: "1px solid rgba(0,0,0,0.35)",
                       borderRadius: 6,
                       background: focusActive ? "#8a2be2" : "#5b21b6",
                       color: "#fff",
