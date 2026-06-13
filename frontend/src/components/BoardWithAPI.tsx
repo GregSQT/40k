@@ -1997,6 +1997,8 @@ export const BoardWithAPI: React.FC = () => {
     });
   }, []);
   const measureModeActive = measureMode.kind !== "off";
+  const [hideIndicators, setHideIndicators] = useState(false);
+  const handleToggleHideIndicators = useCallback(() => setHideIndicators((v) => !v), []);
   const [advanceWarningDontRemind, setAdvanceWarningDontRemind] = useState(false);
 
   // Settings preferences (from localStorage)
@@ -4128,6 +4130,8 @@ export const BoardWithAPI: React.FC = () => {
         onOpenSettings={handleOpenSettings}
         onToggleMeasureMode={handleToggleMeasureMode}
         measureModeActive={measureModeActive}
+        onToggleHideIndicators={handleToggleHideIndicators}
+        hideIndicatorsActive={hideIndicators}
       >
         {/*
         In test deployment setup, lock gameplay interactions until Start Game! is clicked.
@@ -4317,6 +4321,7 @@ export const BoardWithAPI: React.FC = () => {
             measureMode={measureMode}
             onMeasureHexCommit={handleMeasureHexCommit}
             onMeasureJunctionCommit={handleMeasureJunctionCommit}
+            hideIndicators={hideIndicators}
           />
           {isRosterSetupMode &&
             apiProps.gameState?.phase === "deployment" &&

@@ -15,12 +15,18 @@ interface SharedLayoutProps {
   onToggleMeasureMode?: () => void;
   /** Règle « allumée » : entre deux lignes (armed) ou pendant une mesure. */
   measureModeActive?: boolean;
+  /** Bascule le masquage de tous les indicateurs autour des icônes de figurines. */
+  onToggleHideIndicators?: () => void;
+  /** true → indicateurs actuellement masqués. */
+  hideIndicatorsActive?: boolean;
 }
 
 interface NavigationProps {
   onOpenSettings?: () => void;
   onToggleMeasureMode?: () => void;
   measureModeActive?: boolean;
+  onToggleHideIndicators?: () => void;
+  hideIndicatorsActive?: boolean;
 }
 
 /** Logo règle (assets : `frontend/public/icons/Action_Logo/Ruler.png`). */
@@ -39,6 +45,28 @@ function RulerMenuIcon({ active }: { active: boolean }) {
         objectFit: "contain",
       }}
     />
+  );
+}
+
+/** Œil barré (indicateurs masqués) / œil ouvert (indicateurs visibles). */
+function EyeIndicatorsIcon({ hidden }: { hidden: boolean }) {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <title>Indicateurs</title>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+      {hidden && <line x1="3" y1="3" x2="21" y2="21" />}
+    </svg>
   );
 }
 
@@ -182,6 +210,8 @@ const Navigation: React.FC<NavigationProps> = ({
   onOpenSettings,
   onToggleMeasureMode,
   measureModeActive = false,
+  onToggleHideIndicators,
+  hideIndicatorsActive = false,
 }) => {
   const measureRulerButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -332,6 +362,34 @@ const Navigation: React.FC<NavigationProps> = ({
         >
           {(location.search.includes("mode=pvp_test") ||
             location.search.includes("mode=pve_test")) && <BoardResolutionPicker />}
+          {onToggleHideIndicators && (
+            <TooltipWrapper
+              text={
+                hideIndicatorsActive
+                  ? "Réafficher les indicateurs autour des figurines (PV, statuts, voiles, tooltips)."
+                  : "Masquer tous les indicateurs autour des figurines (PV, statuts, voiles, tooltips). Les icônes restent visibles."
+              }
+            >
+              <button
+                type="button"
+                onClick={onToggleHideIndicators}
+                className="settings-button"
+                aria-pressed={hideIndicatorsActive}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  color: hideIndicatorsActive ? "#93c5fd" : "#9ca3af",
+                  padding: "4px",
+                }}
+              >
+                <EyeIndicatorsIcon hidden={hideIndicatorsActive} />
+              </button>
+            </TooltipWrapper>
+          )}
           {onToggleMeasureMode && (
             <TooltipWrapper
               text={
@@ -391,6 +449,8 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
   onOpenSettings,
   onToggleMeasureMode,
   measureModeActive,
+  onToggleHideIndicators,
+  hideIndicatorsActive,
 }) => {
   return (
     <div
@@ -413,6 +473,8 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
               onOpenSettings={onOpenSettings}
               onToggleMeasureMode={onToggleMeasureMode}
               measureModeActive={measureModeActive}
+              onToggleHideIndicators={onToggleHideIndicators}
+              hideIndicatorsActive={hideIndicatorsActive}
             />
             {rightColumnContent}
           </div>

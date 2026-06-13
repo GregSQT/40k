@@ -601,6 +601,8 @@ type BoardProps = {
   onMeasureHexCommit?: (col: number, row: number) => void;
   /** Pendant `measuring` : clic droit sur un hex ajoute une jonction et poursuit la mesure depuis ce hex. */
   onMeasureJunctionCommit?: (col: number, row: number) => void;
+  /** true → masque tous les indicateurs autour des icônes (HP, badges, cercle vert, voiles, tooltips). Les icônes restent visibles. */
+  hideIndicators?: boolean;
 };
 
 /** Échelle affichage tooltip mouvement : nombre de pas hex entre centres pour 1″ (règle plateau). */
@@ -910,6 +912,7 @@ export default function Board({
   measureMode = { kind: "off" },
   onMeasureHexCommit,
   onMeasureJunctionCommit,
+  hideIndicators = false,
 }: BoardProps) {
   /** Aligné sur drawBoard / ``boardHexClick`` (command & déploiement → move). */
   const effectivePhase = phase === "command" || phase === "deployment" ? "move" : phase;
@@ -3862,6 +3865,7 @@ export default function Board({
     overlay.eventMode = "none";
     app.stage.addChild(overlay);
     manualAllocOverlayRef.current = overlay;
+    overlay.visible = !hideIndicators;
     overlay.clear();
     if (manualAllocation && manualAllocation.choices.length > 0 && boardConfig) {
       const HEX_RADIUS_H = boardConfig.hex_radius;
@@ -3919,7 +3923,7 @@ export default function Board({
       }
       if (manualAllocOverlayRef.current === overlay) manualAllocOverlayRef.current = null;
     };
-  }, [manualAllocation, boardConfig, units, gameState]);
+  }, [manualAllocation, boardConfig, units, gameState, hideIndicators]);
 
   // Slice G : voile violet sur les figurines ÉLIGIBLES du chargeur en chargeModelMove (phase
   // courante). La fig active a un anneau plus marqué ; sa zone de landing est dessinée ailleurs.
@@ -3932,6 +3936,7 @@ export default function Board({
     overlay.eventMode = "none";
     app.stage.addChild(overlay);
     chargeModelVeilOverlayRef.current = overlay;
+    overlay.visible = !hideIndicators;
     overlay.clear();
     if (perModelChargeLike && activeChargeLikePlan && boardConfig) {
       const HEX_RADIUS_H = boardConfig.hex_radius;
@@ -4038,6 +4043,7 @@ export default function Board({
     boardConfig,
     units,
     gameState,
+    hideIndicators,
   ]);
 
   // Ghost per-figurine (charge model move) : calque exact du ghost move per-fig — le fantôme de la
@@ -4427,6 +4433,7 @@ export default function Board({
     veilOverlay.zIndex = 2600; // au-dessus du ghost sprite (2500) et des unités (2000)
     app.stage.addChild(veilOverlay);
     squadMoveVeilOverlayRef.current = veilOverlay;
+    veilOverlay.visible = !hideIndicators;
 
     const inchesToSubhex =
       (boardConfig as unknown as { inches_to_subhex?: number }).inches_to_subhex ?? 10;
@@ -4720,7 +4727,7 @@ export default function Board({
         }
         if (!shootPreviewActive) return;
         if (ghostBadge && !ghostBadge.destroyed) {
-          ghostBadge.visible = hiddenModels.includes(String(activeModelId));
+          ghostBadge.visible = !hideIndicators && hiddenModels.includes(String(activeModelId));
         }
       } catch (error) {
         if (!shootPreviewActive) return;
@@ -4830,6 +4837,7 @@ export default function Board({
     gameState?.episode_steps,
     gameState?.units_cache,
     squadMoveModelPoolRef?.current,
+    hideIndicators,
   ]);
 
   // Mode mesure : clic gauche = ancre ou fin de ligne (puis armed) ; clic droit = jonction — prioritaire sur les unités.
@@ -6439,7 +6447,7 @@ export default function Board({
             .map((d) => `${d.model_id}.${d.weapon_index}>${d.target_unit_id}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#bc:${blinkingCoverByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -6702,13 +6710,21 @@ export default function Board({
       if (savedStatic) app.stage.addChild(savedStatic);
       if (savedWalls) app.stage.addChild(savedWalls);
       if (savedHighlightsThroughDestroy) app.stage.addChild(savedHighlightsThroughDestroy);
-      if (savedUi) app.stage.addChild(savedUi);
+      if (savedUi) {
+        // Indicateurs persistants (logos d'action, badges hidden/move-status/battle-shock) :
+        // masqués d'un bloc quand hideIndicators (UnitRenderer saute déjà le redraw, ceci cache les restes).
+        savedUi.visible = !hideIndicators;
+        app.stage.addChild(savedUi);
+      }
       const unitsCacheForBlinkSweep = gameState?.units_cache as Record<string, unknown> | undefined;
       const blinksToReattach = destroyAndFilterOrphanHpBlinkContainers(
         savedBlinks,
         unitsCacheForBlinkSweep
       );
-      for (const blink of blinksToReattach) app.stage.addChild(blink);
+      for (const blink of blinksToReattach) {
+        blink.visible = !hideIndicators;
+        app.stage.addChild(blink);
+      }
       if (savedUnitsLayer) app.stage.addChild(savedUnitsLayer);
       if (savedMovePreviewGhost) app.stage.addChild(savedMovePreviewGhost);
       if (savedDragOverlay) app.stage.addChild(savedDragOverlay);
@@ -7097,6 +7113,7 @@ export default function Board({
             : unitsFled;
 
         renderUnit({
+          hideIndicators,
           unit: unitToRender,
           centerX: anchorCenterX,
           centerY: anchorCenterY,
@@ -7401,6 +7418,7 @@ export default function Board({
             previewModelHidden.length > 0 && previewModelHidden.every(Boolean);
 
           renderUnit({
+            hideIndicators,
             unit: { ...previewUnit, hidden: previewHiddenSquad },
             centerX,
             centerY,
@@ -7466,6 +7484,7 @@ export default function Board({
           HEX_HEIGHT / 2 +
           MARGIN;
         renderUnit({
+          hideIndicators,
           unit: { ...ghost.unit, isJustKilled: true } as Unit & { isJustKilled: boolean },
           centerX: gCenterX,
           centerY: gCenterY,
@@ -7514,6 +7533,7 @@ export default function Board({
             MARGIN;
 
           renderUnit({
+            hideIndicators,
             unit: previewUnit,
             centerX,
             centerY,
@@ -8077,6 +8097,7 @@ export default function Board({
     autoSelectWeapon,
     hpBarPerModel,
     statusBadgePerModel,
+    hideIndicators,
     availableCellsOverride,
     isBlinkingActive,
     stableBlinkingUnits,
@@ -8514,6 +8535,7 @@ export default function Board({
             document.body
           )}
         {typeof document !== "undefined" &&
+          !hideIndicators &&
           Object.keys(blinkProbHtmlByUnitId).length > 0 &&
           createPortal(
             Object.entries(blinkProbHtmlByUnitId).map(([idStr, data]) => {
@@ -8628,7 +8650,7 @@ export default function Board({
             }),
             document.body
           )}
-        {movePreviewDistanceTooltip?.visible && (
+        {!hideIndicators && movePreviewDistanceTooltip?.visible && (
           <div
             className="rule-tooltip unit-icon-tooltip"
             style={{

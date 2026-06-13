@@ -103,6 +103,8 @@ interface UnitRendererProps {
    * false (défaut) → un seul badge si toute l'escouade a le statut.
    */
   statusBadgePerModel?: boolean;
+  /** true → masque tous les indicateurs autour des icônes (HP, badges, cercle vert, voile charge, debug-id). L'icône et son cercle de base restent visibles. */
+  hideIndicators?: boolean;
   app: PIXI.Application;
   uiElementsContainer?: PIXI.Container; // Persistent container for UI elements (target logos, badges) that should never be cleaned up
   useOverlayIcons?: boolean; // Render advance/weapon icons in DOM overlay
@@ -531,14 +533,16 @@ export class UnitRenderer {
         : this.props.unit.ICON_SCALE || this.props.ICON_SCALE;
       this.renderUnitCircle(iconZIndex);
       this.renderUnitIcon(iconZIndex);
-      this.renderChargeTargetVeil(iconZIndex);
-      this.renderGreenActivationCircle(isEligible, figIconScale);
-      this.renderUnitIdDebug(iconZIndex);
-      // Barre HP propre de la figurine : pour toutes les figs en mode
-      // hpBarPerModel, et TOUJOURS pour un character (les deux modes).
-      const mh = modelHps?.[i];
-      if (mh && multiModel && !squadBlinkActive && (this.props.hpBarPerModel || mh.is_character)) {
-        this.drawStaticHpBar(mh.HP_CUR, mh.HP_MAX, figIconScale);
+      if (!this.props.hideIndicators) {
+        this.renderChargeTargetVeil(iconZIndex);
+        this.renderGreenActivationCircle(isEligible, figIconScale);
+        this.renderUnitIdDebug(iconZIndex);
+        // Barre HP propre de la figurine : pour toutes les figs en mode
+        // hpBarPerModel, et TOUJOURS pour un character (les deux modes).
+        const mh = modelHps?.[i];
+        if (mh && multiModel && !squadBlinkActive && (this.props.hpBarPerModel || mh.is_character)) {
+          this.drawStaticHpBar(mh.HP_CUR, mh.HP_MAX, figIconScale);
+        }
       }
     });
     this.props.unit = originalUnit;
@@ -546,19 +550,21 @@ export class UnitRenderer {
     // Squad-level UI anchored at first model center
     this.props.centerX = modelCenters[0][0];
     this.props.centerY = modelCenters[0][1];
-    this.renderHPBar(unitIconScale);
-    this.renderShootingCounter(unitIconScale);
-    this.renderAdvanceButton(unitIconScale, iconZIndex);
-    this.renderWeaponSelectionIcon(unitIconScale, iconZIndex);
-    this.renderTargetIndicator(iconZIndex);
-    this.renderShootingIndicator(iconZIndex);
-    this.renderMovementIndicator(iconZIndex);
-    this.renderChargeIndicator(iconZIndex);
-    this.renderFightIndicator(iconZIndex);
-    this.renderAttackCounter(unitIconScale);
-    this.renderHiddenBadge(unitIconScale);
-    this.renderMoveStatusBadge(unitIconScale);
-    this.renderBattleShockedIndicator();
+    if (!this.props.hideIndicators) {
+      this.renderHPBar(unitIconScale);
+      this.renderShootingCounter(unitIconScale);
+      this.renderAdvanceButton(unitIconScale, iconZIndex);
+      this.renderWeaponSelectionIcon(unitIconScale, iconZIndex);
+      this.renderTargetIndicator(iconZIndex);
+      this.renderShootingIndicator(iconZIndex);
+      this.renderMovementIndicator(iconZIndex);
+      this.renderChargeIndicator(iconZIndex);
+      this.renderFightIndicator(iconZIndex);
+      this.renderAttackCounter(unitIconScale);
+      this.renderHiddenBadge(unitIconScale);
+      this.renderMoveStatusBadge(unitIconScale);
+      this.renderBattleShockedIndicator();
+    }
 
     this.props.centerX = originalCenterX;
     this.props.centerY = originalCenterY;
