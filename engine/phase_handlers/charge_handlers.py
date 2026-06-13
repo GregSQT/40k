@@ -2069,22 +2069,12 @@ def _compute_plan_context(
         ntgt_multi = [_entry_is_multi_figure(ne) for ne in nontarget_entries]
         ntgt_masks = [_enemy_masks(fp) for fp in nontarget_fps]
 
-        _verify = bool(os.environ.get("W40K_CHARGE_VERIFY"))
-
         def _eng(enemy_entry, e_shape, e_multi, mask, radius, cand_fp, cand_is_multi):
             # Chemin euclidien (rond simple ↔ rond simple) : on conserve la fonction partagée (précis).
             if radius > 1 and synth_shape == "round" and e_shape == "round" and not cand_is_multi and not e_multi:
                 return unit_entries_within_engagement_zone(synth_base, enemy_entry, radius)
             # Chemin empreinte : intersection avec le masque dilaté (équivalent exact à min_distance ≤ r).
-            res = bool(cand_fp & mask)
-            if _verify:
-                ref = unit_entries_within_engagement_zone(synth_base, enemy_entry, radius)
-                if ref != res:
-                    raise AssertionError(
-                        f"CHARGE_VERIFY mask mismatch @({synth_base['col']},{synth_base['row']}) "
-                        f"radius={radius}: ref={ref} mask={res}"
-                    )
-            return res
+            return bool(cand_fp & mask)
 
         for bk, (rep_model, cells, cap_base) in reach_by_base.items():
             reg_b: Dict[Tuple[int, int], Dict[str, Any]] = {}
@@ -2093,11 +2083,13 @@ def _compute_plan_context(
                 cand_fp = cand_socle.fp
                 if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
                     continue
-                if _charge_model_placement_overlaps(cand_socle, obstacle_socles, placed_sibling_socles, _walls):
-                    continue
                 d_min = min((dist_tgt.get(h, INF) for h in cand_fp), default=INF)
                 # Élague au cap global de la base (aucune de ses figs ne peut finir aussi loin).
+                # PERF : prune cheap (lookups dist_tgt) AVANT le check collision (cher) — une cellule
+                # élaguée ici n'entre jamais dans region, donc son verdict collision est sans effet.
                 if d_min >= cap_base:
+                    continue
+                if _charge_model_placement_overlaps(cand_socle, obstacle_socles, placed_sibling_socles, _walls):
                     continue
                 d_ntgt = (
                     min((dist_ntgt.get(h, INF) for h in cand_fp), default=INF) if dist_ntgt else INF
@@ -3979,18 +3971,6 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
             for (c, r) in valid_pool
             if (c, r) in _dist_map
         ]
-
-        # DIAG (gated par W40K_DUMP_CHARGE_STATE) : snapshot pickle du game_state au moment de la
-        # charge → rejouable hors UI (mesure mémo charge_model_plan_state + inspection
-        # occupied_hexes_by_model / squad_models pour le diag figCount unité attachée).
-        _dump_path = os.environ.get("W40K_DUMP_CHARGE_STATE")
-        if _dump_path:
-            import pickle
-            with open(_dump_path, "wb") as _f:
-                pickle.dump(
-                    {"game_state": game_state, "unit_id": str(unit_id), "target_ids": target_ids}, _f
-                )
-            add_console_log(game_state, f"[CHARGE DUMP] game_state écrit → {_dump_path}")
 
         # Human players: return waiting_for_player for destination selection
         return True, {
