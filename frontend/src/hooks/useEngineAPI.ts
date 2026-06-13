@@ -538,6 +538,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     canValidate: boolean;
     satisfiedTargets: number[];
     unsatisfiedTargets: number[];
+    /** Figs POSÉES engagées (≤ EZ) avec une cible déclarée → voile vert (en mesure de frapper). */
+    engagedModels: string[];
   } | null>(null);
   const chargeMovePlanRef = useRef<typeof chargeMovePlan>(null);
   chargeMovePlanRef.current = chargeMovePlan;
@@ -5125,6 +5127,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const unsatisfiedTargets = ((result.unsatisfied_targets ?? []) as unknown[]).map((t) =>
         parseInt(String(t), 10)
       );
+      const engagedModels = ((result.engaged_models ?? []) as unknown[]).map((m) => String(m));
       setChargeMovePlan((prev) => {
         if (!prev) return prev;
         // Fig active = celle sélectionnée si encore éligible, sinon l'ancienne si toujours éligible,
@@ -5162,6 +5165,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           canValidate,
           satisfiedTargets,
           unsatisfiedTargets,
+          engagedModels,
           activeModelId: active,
         };
       });
@@ -5248,6 +5252,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         canValidate: false,
         satisfiedTargets: [],
         unsatisfiedTargets: [],
+        engagedModels: [],
       });
       setChargeFocusActive(false);
       setSelectedUnitId(unitId);

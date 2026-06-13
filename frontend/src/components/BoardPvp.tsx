@@ -444,6 +444,7 @@ type BoardProps = {
     canValidate: boolean;
     satisfiedTargets: number[];
     unsatisfiedTargets: number[];
+    engagedModels: string[];
   } | null;
   /** Pool (hexes "col,row") de la fig de charge active = eligible[activeModelId]. */
   chargeModelPoolRef?: React.RefObject<Set<string>>;
@@ -4076,6 +4077,21 @@ export default function Board({
         } else {
           for (const uid of chargeMovePlan.unsatisfiedTargets) drawTargetVeil(uid, RED);
           for (const uid of chargeMovePlan.satisfiedTargets) drawTargetVeil(uid, GREEN);
+        }
+        // Voile VERT sur les figs POSÉES engagées (≤ EZ d'une cible) → en mesure de frapper.
+        const cu = units.find((u) => String(u.id) === String(chargeMovePlan.unitId));
+        if (cu) {
+          const cBase = resolveBaseSizeForUnitDisplay(cu);
+          const cR = cBase > 1 ? (cBase * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
+          overlay.lineStyle(0);
+          for (const mid of chargeMovePlan.engagedModels) {
+            const pos = chargeMovePlan.models[mid];
+            if (!pos) continue;
+            const [cx, cy] = hexCenter(pos.col, pos.row);
+            overlay.beginFill(GREEN, 0.45);
+            overlay.drawCircle(cx, cy, cR);
+            overlay.endFill();
+          }
         }
       }
     }
