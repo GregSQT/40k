@@ -3153,11 +3153,12 @@ export const BoardWithAPI: React.FC = () => {
                   m === "defensive"
                     ? "Focus défensif : engage toutes les cibles déclarées, au plus loin possible"
                     : "Focus offensif : engage toutes les cibles déclarées, au plus près (socle à socle)";
+                const colorClass = m === "defensive" ? "charge-focus-def" : "charge-focus-off";
                 return (
                   <button
                     type="button"
                     key={m}
-                    className={active ? "btn-active" : undefined}
+                    className={`${colorClass}${active ? " btn-active" : ""}`}
                     onClick={() => {
                       if (!isGameOver) {
                         setChargeCheckMsg(null);
@@ -3168,7 +3169,6 @@ export const BoardWithAPI: React.FC = () => {
                     style={{
                       border: "1px solid rgba(0,0,0,0.35)",
                       borderRadius: 6,
-                      background: active ? "#8a2be2" : "#5b21b6",
                       color: "#fff",
                       cursor: "pointer",
                       fontSize: 14,
@@ -3187,6 +3187,7 @@ export const BoardWithAPI: React.FC = () => {
                 return (
                   <button
                     type="button"
+                    className="charge-validate"
                     disabled={!canValidate}
                     onClick={() => {
                       if (!isGameOver && canValidate) apiProps.onCommitChargePlan?.();
@@ -3194,8 +3195,6 @@ export const BoardWithAPI: React.FC = () => {
                     style={{
                       border: "1px solid rgba(0,0,0,0.35)",
                       borderRadius: 6,
-                      background: canValidate ? "#7c3aed" : "#3b0764",
-                      color: canValidate ? "#fff" : "rgba(229,231,235,0.5)",
                       cursor: canValidate ? "pointer" : "not-allowed",
                       fontSize: 14,
                       fontWeight: 700,
@@ -3205,7 +3204,7 @@ export const BoardWithAPI: React.FC = () => {
                       opacity: 1,
                     }}
                   >
-                    Valider
+                    Validate
                   </button>
                 );
               })()}

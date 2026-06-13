@@ -4467,18 +4467,51 @@ def charge_autoplace_plan(
     for mid in alive:
         by_base.setdefault(_base_key(models_cache[mid]), []).append(mid)
 
+    # Rayon de l'empreinte EN CASES (et non BASE_SIZE en mm) : c'est la bonne unité pour la marge de
+    # dilatation. BASE_SIZE=40 (mm) dilatait ~13× trop loin (6100 cases balayées pour 71 slots).
+    def _base_fp_radius(rep_model: Dict[str, Any]) -> int:
+        rmax = 0
+        for pc, pr in ((0, 0), (1, 0)):  # les deux parités de colonne
+            for cell in _charge_model_footprint(game_state, rep_model, pc, pr):
+                rmax = max(rmax, min_distance_between_sets({(pc, pr)}, {cell}))
+        return int(rmax)
+
+    fp_radius_by_base = {b: _base_fp_radius(models_cache[m[0]]) for b, m in by_base.items()}
+    _max_fp_radius = max(fp_radius_by_base.values()) if fp_radius_by_base else 0
+
     all_t_cells: Set[Tuple[int, int]] = set()
     for tfp in all_target_fps:
         all_t_cells |= tfp
+
+    # Zone d'intérêt = dilatation des cibles par le plus grand rayon utile (margin max + EZ). Au-delà,
+    # un obstacle ne peut chevaucher aucun slot et un non-cible ne peut être engagé par aucun slot : on
+    # les écarte UNE fois → coût par case réduit (placement_overlaps + test non-cible sur ~quelques
+    # unités au lieu de toutes). Les closures _overlaps_world / _engages_nontarget voient ces listes
+    # filtrées (late binding). Sûr : seules les unités proches peuvent interférer.
+    _zone: Set[Tuple[int, int]] = set(all_t_cells)
+    _zf: List[Tuple[int, int]] = list(all_t_cells)
+    for _ in range(ez + _max_fp_radius + 2 + ez + 1):
+        _nx: List[Tuple[int, int]] = []
+        for cc, rr in _zf:
+            for nc, nr in get_hex_neighbors(cc, rr):
+                if 0 <= nc < board_cols and 0 <= nr < board_rows and (nc, nr) not in _zone:
+                    _zone.add((nc, nr))
+                    _nx.append((nc, nr))
+        _zf = _nx
+    obstacle_socles = [o for o in obstacle_socles if o.fp & _zone]
+    nontarget_entries = [
+        ne for ne in nontarget_entries
+        if set(ne.get("occupied_hexes") or {(int(ne["col"]), int(ne["row"]))}) & _zone
+    ]
+    _diag["n_obstacles"] = len(obstacle_socles)
+    _diag["n_nontarget"] = len(nontarget_entries)
 
     # all_slots[i] = (col, row, socle, slot_min_to_targets, engaged_target_ids)
     all_slots: List[Tuple[int, int, Any, int, frozenset]] = []
     slots_by_base: Dict[Tuple[Any, Any], List[int]] = {}
     for bkey, mids in by_base.items():
         rep = models_cache[mids[0]]
-        bs = rep["BASE_SIZE"]
-        base_dim = max(bs) if isinstance(bs, (list, tuple)) else bs
-        margin = ez + int(base_dim) + 2
+        margin = ez + fp_radius_by_base[bkey] + 2
         # Centres candidats = DILATATION des empreintes cibles par ``margin`` (disque autour des cibles)
         # au lieu de la bbox carrée englobante : évite de tester les coins vides entre/autour des cibles.
         near_cells: Set[Tuple[int, int]] = set(all_t_cells)
@@ -4492,9 +4525,16 @@ def charge_autoplace_plan(
                         nxt.append((nc, nr))
             frontier = nxt
         idxs: List[int] = []
+        _diag["n_cells"] = _diag.get("n_cells", 0) + len(near_cells)
         for (c, r) in near_cells:
             fp = _charge_model_footprint(game_state, rep, c, r)
             if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in fp):
+                continue
+            fps = set(fp)
+            # Pré-filtre BON MARCHÉ : distance-cellule empreinte→cible. Si clairement > EZ, la case ne
+            # peut pas engager → on saute les tests chers (socle, overlap, synth, engagement).
+            d_t = min(min_distance_between_sets(fps, tfp, max_distance=ez + 2) for tfp in all_target_fps)
+            if d_t > ez + 1:
                 continue
             socle = _charge_model_socle(game_state, rep, c, r)
             if _charge_model_placement_overlaps(socle, obstacle_socles, [], walls):
@@ -4509,7 +4549,7 @@ def charge_autoplace_plan(
             if any(unit_entries_within_engagement_zone(synth, ne, ez) for ne in nontarget_entries):
                 continue  # engagerait un ennemi non déclaré → interdit (11.04 AFTER)
             idxs.append(len(all_slots))
-            all_slots.append((c, r, socle, _fp_min_to_targets(set(fp)), eng))
+            all_slots.append((c, r, socle, _fp_min_to_targets(fps), eng))
         slots_by_base[bkey] = idxs
 
     # --- Plafond : par (base, cible), bucketing angulaire → garder le slot le plus PROCHE (contact,
@@ -4790,6 +4830,31 @@ def charge_autoplace_plan(
         "missing": _prev["missing_targets"],
         "coherency_ok": _prev["coherency_ok"],
         "per_model_false": [m for m, v in _prev["per_model"].items() if not v],
+    }
+    # Détail cohésion sur le plan produit : seuils + voisins/écart par fig → tranche faux-positif vs rupture.
+    from .shared_utils import (
+        get_coherency_subhex as _gc, get_cohesion_max_subhex as _gcm, get_min_neighbors as _gmn,
+    )
+    _coh, _cohmax, _minnb = _gc(game_state), _gcm(game_state), _gmn(game_state)
+    _cfps = [
+        _charge_model_footprint(game_state, models_cache[mid], int(provisional[mid][0]), int(provisional[mid][1]))
+        for mid in alive
+    ]
+    _neigh = [0] * len(alive)
+    _dmax = [0] * len(alive)
+    for i in range(len(alive)):
+        for j in range(len(alive)):
+            if i == j:
+                continue
+            _dd = min_distance_between_sets(_cfps[i], _cfps[j])
+            if _dd <= _coh:
+                _neigh[i] += 1
+            _dmax[i] = max(_dmax[i], _dd)
+    _diag["coh"] = {
+        "coh": _coh, "coh_max": _cohmax, "min_nb": _minnb,
+        "isolated": [alive[i] for i in range(len(alive)) if _neigh[i] < _minnb],
+        "too_far": [alive[i] for i in range(len(alive)) if _dmax[i] > _cohmax],
+        "neigh": _neigh, "dmax": _dmax,
     }
     print(
         f"[CHARGE_AUTOPLACE] mode={mode} n_alive={len(alive)} n_targets={len(present_target_ids)} "

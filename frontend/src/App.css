@@ -3416,26 +3416,32 @@ textarea:focus {
     0 2px 4px rgba(0, 0, 0, 0.35);
 }
 
-/* Pile-in : couleurs d'identité des boutons Focus (déf = bleu, off = rouge) et Valider (vert). */
-.pile-in-focus-def {
+/* Pile-in & charge : couleurs d'identité des boutons Focus (déf = bleu, off = rouge) et Valider (vert). */
+.pile-in-focus-def,
+.charge-focus-def {
   background: #1d4ed8;
   color: #fff;
 }
-.pile-in-focus-def.btn-active {
+.pile-in-focus-def.btn-active,
+.charge-focus-def.btn-active {
   background: #3b82f6;
 }
-.pile-in-focus-off {
+.pile-in-focus-off,
+.charge-focus-off {
   background: #b91c1c;
   color: #fff;
 }
-.pile-in-focus-off.btn-active {
+.pile-in-focus-off.btn-active,
+.charge-focus-off.btn-active {
   background: #ef4444;
 }
-.pile-in-validate {
+.pile-in-validate,
+.charge-validate {
   background: #16a34a;
   color: #fff;
 }
-.pile-in-validate:disabled {
+.pile-in-validate:disabled,
+.charge-validate:disabled {
   background: #14532d;
   color: rgba(229, 231, 235, 0.5);
   cursor: not-allowed;
