@@ -2629,11 +2629,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               return true;
             })()
           ) {
-            console.log("[PILE_IN_DEBUG] branch=FIGHT_TARGET(2531) waiting_for_player", {
-              subphase: data.game_state?.fight_subphase,
-              valid_targets: data.result?.valid_targets,
-              pile_in_completed: data.result?.pile_in_completed,
-            });
             setPileInDestinations([]);
             if (targetPreview?.blinkTimer) {
               clearInterval(targetPreview.blinkTimer);
@@ -4806,12 +4801,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handlePileInMove = useCallback(
     async (unitId: number, destCol: number, destRow: number) => {
       const isConsolidation = mode === "consolidationPreview";
-      console.log("[PILE_IN_DEBUG] send", {
-        action: isConsolidation ? "consolidation" : "pile_in",
-        unitId: String(unitId),
-        destCol,
-        destRow,
-      });
       await executeAction({
         action: isConsolidation ? "consolidation" : "pile_in",
         unitId: String(unitId),
