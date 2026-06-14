@@ -862,6 +862,31 @@ body {
   font-weight: normal;
 }
 
+/* Bouton « Pile-in » (terminer la sous-phase pile-in) — à droite de Fight */
+.pile-in-end-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1;
+  font-weight: bold;
+  color: #FFFFFF;
+  background-color: #16a34a;
+  border: 1px solid #15803d;
+  cursor: pointer;
+  outline: none;
+  white-space: nowrap;
+}
+.pile-in-end-btn span {
+  font-size: 1em;
+  line-height: 1;
+}
+.pile-in-end-btn:hover {
+  background-color: #15803d;
+}
+
 /* Phase button colors */
 :root {
   --phase-command-bg: #FCD34D;

@@ -43,6 +43,8 @@ interface TurnPhaseTrackerProps {
   onPhaseClick?: (phase: string) => void; // Optional callback for phase button clicks (replay mode)
   onPlayerClick?: (player: number) => void; // Optional callback for player button clicks (replay mode)
   onEndPhaseClick?: (player: number) => void; // End current phase for active player
+  showPileIn?: boolean; // Affiche le bouton « Pile-in » (sous-phase pile_in en cours)
+  onEndPileIn?: () => void; // Termine la sous-phase pile-in et passe à la suivante
   /** Titre de l'étape tutoriel en cours (Rounds / Tours / Phases) pour halos. */
   tutorialStepTitle?: string | null;
   /** Callback pour rapporter les rects viewport des zones à mettre en halo. */
@@ -64,6 +66,8 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
   onPhaseClick,
   onPlayerClick,
   onEndPhaseClick,
+  showPileIn,
+  onEndPileIn,
   tutorialStepTitle,
   onTutorialRects,
   onTutorialPopupAnchor,
@@ -438,7 +442,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
           style={{
             display: "flex",
             gap: "2px",
-            flex: 1,
+            flex: "0 0 auto",
             justifyContent: "flex-start",
             alignItems: "center",
           }}
@@ -485,22 +489,11 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
             })}
           </div>
         </div>
+        <div style={{ flex: 1 }} />
         {current_player !== undefined && (
           <div
             style={{ display: "flex", gap: "2px", alignItems: "center", justifyContent: "center" }}
           >
-            {current_player === 1 && onEndPhaseClick && (
-              <TooltipWrapper text="Terminer immédiatement la phase pour P1">
-                <button
-                  type="button"
-                  style={getEndPhaseStyle(1, true, !!onEndPhaseClick)}
-                  onClick={() => onEndPhaseClick?.(1)}
-                  disabled={!onEndPhaseClick}
-                >
-                  End Phase
-                </button>
-              </TooltipWrapper>
-            )}
             <button
               ref={p1ButtonRef}
               type="button"
@@ -510,6 +503,18 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
             >
               P1
             </button>
+            {onEndPhaseClick && (
+              <TooltipWrapper text={`Terminer immédiatement la phase pour P${current_player}`}>
+                <button
+                  type="button"
+                  style={getEndPhaseStyle(current_player, true, !!onEndPhaseClick)}
+                  onClick={() => onEndPhaseClick?.(current_player)}
+                  disabled={!onEndPhaseClick}
+                >
+                  End Phase
+                </button>
+              </TooltipWrapper>
+            )}
             <button
               ref={p2ButtonRef}
               type="button"
@@ -519,23 +524,12 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
             >
               P2
             </button>
-            {current_player === 2 && onEndPhaseClick && (
-              <TooltipWrapper text="Terminer immédiatement la phase pour P2">
-                <button
-                  type="button"
-                  style={getEndPhaseStyle(2, true, !!onEndPhaseClick)}
-                  onClick={() => onEndPhaseClick?.(2)}
-                  disabled={!onEndPhaseClick}
-                >
-                  End Phase
-                </button>
-              </TooltipWrapper>
-            )}
           </div>
         )}
+        <div style={{ flex: 1 }} />
         <div
           ref={phasesContainerRef}
-          style={{ display: "flex", gap: "2px", flex: 1, justifyContent: "flex-end" }}
+          style={{ display: "flex", gap: "2px", flex: "0 0 auto", justifyContent: "flex-end" }}
         >
           <div
             ref={phasesContentRef}
@@ -574,6 +568,16 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
                   </button>
                 );
               })}
+            {showPileIn && onEndPileIn && (
+              <button
+                type="button"
+                className="pile-in-end-btn"
+                onClick={() => onEndPileIn()}
+              >
+                Pile-in
+                <span aria-hidden="true">→</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

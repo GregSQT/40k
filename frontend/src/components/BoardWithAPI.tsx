@@ -2927,6 +2927,11 @@ export const BoardWithAPI: React.FC = () => {
             }
             current_player={apiProps.gameState?.current_player}
             onEndPhaseClick={isGameOver ? undefined : apiProps.onEndPhase}
+            showPileIn={
+              apiProps.gameState?.phase === "fight" &&
+              apiProps.gameState?.fight_subphase === "pile_in"
+            }
+            onEndPileIn={isGameOver ? undefined : apiProps.onEndPileIn}
             maxTurns={(() => {
               if (!gameConfig?.game_rules?.max_turns) {
                 throw new Error(
@@ -2941,50 +2946,6 @@ export const BoardWithAPI: React.FC = () => {
       ) : (
         <div className="turn-phase-tracker-right">Loading game configuration...</div>
       )}
-
-      {/* Barre d'action pile-in (V11 présentation paresseuse) : bouton « Terminer le pile-in »,
-          même emplacement/style que les barres move/charge. Affichée pendant toute la sous-phase
-          pile_in (sélection libre des unités à piler). */}
-      {apiProps.gameState?.phase === "fight" &&
-        apiProps.gameState?.fight_subphase === "pile_in" && (
-          <div
-            className="squad-action-bar"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              background: "#1f2937",
-              border: "1px solid #555",
-              borderRadius: "8px",
-              padding: 8,
-              marginTop: -6,
-              marginBottom: 2,
-            }}
-          >
-            <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!isGameOver) apiProps.onEndPileIn?.();
-                }}
-                style={{
-                  border: "1px solid rgba(0,0,0,0.35)",
-                  borderRadius: 6,
-                  background: "#7c3aed",
-                  color: "#fff",
-                  cursor: "pointer",
-                  fontSize: 14,
-                  fontWeight: 700,
-                  padding: "8px 14px",
-                  minWidth: 110,
-                  whiteSpace: "nowrap",
-                  textAlign: "center",
-                }}
-              >
-                Terminer le pile-in
-              </button>
-            </div>
-          </div>
-        )}
 
       {/* Barre d'action charge (V11 multi-cibles) : Cancel + Charger, même emplacement/style que
           move/shoot. Affichée pendant la sélection des cibles (mode chargeTargetSelect). */}
