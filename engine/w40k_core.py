@@ -2774,8 +2774,8 @@ class W40KEngine(gym.Env):
             self.game_state.get("pending_shoot_allocation") is not None
             and action.get("action") not in ("squad_shoot_allocate_model", "squad_shoot_declare_order")
         ):
-            from engine.phase_handlers.shared_utils import manual_allocation_waiting_payload
-            return True, manual_allocation_waiting_payload(self.game_state)
+            from engine.phase_handlers.shared_utils import manual_allocation_waiting_payload, SHOOT_CTX
+            return True, manual_allocation_waiting_payload(self.game_state, SHOOT_CTX)
 
         current_phase = self.game_state["phase"]
         
@@ -4304,6 +4304,7 @@ class W40KEngine(gym.Env):
             apply_manual_shoot_allocation,
             apply_manual_shoot_declare_order,
             clear_pending_shoot_intent,
+            SHOOT_CTX,
         )
         from engine.phase_handlers.generic_handlers import end_activation
         from engine.phase_handlers.shooting_handlers import (
@@ -4506,7 +4507,7 @@ class W40KEngine(gym.Env):
             chosen = action.get("modelId")
             if chosen is None:
                 return False, {"error": "missing_model_id"}
-            alloc_result = apply_manual_shoot_allocation(self.game_state, str(chosen))
+            alloc_result = apply_manual_shoot_allocation(self.game_state, str(chosen), SHOOT_CTX)
             if alloc_result.get("waiting_for_player"):
                 return True, alloc_result
             return True, self._finish_manual_shoot_after_allocation(squad_id, alloc_result)
@@ -4515,7 +4516,7 @@ class W40KEngine(gym.Env):
             order = action.get("order")
             if order is None:
                 return False, {"error": "missing_order"}
-            alloc_result = apply_manual_shoot_declare_order(self.game_state, list(order))
+            alloc_result = apply_manual_shoot_declare_order(self.game_state, list(order), SHOOT_CTX)
             if alloc_result.get("waiting_for_player"):
                 return True, alloc_result
             return True, self._finish_manual_shoot_after_allocation(squad_id, alloc_result)

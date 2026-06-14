@@ -122,6 +122,11 @@ function ManualOrderPicker({
       <button type="button" className="weapon-dropdown-handle" onMouseDown={onDragStart}>
         ⠿ ORDRE D'ALLOCATION — Unité {request.target_unit_id}
       </button>
+      <div className="weapon-dropdown-subtitle">
+        {request.weapon_name || "Arme"} — {request.wounds_to_save} save
+        {request.wounds_to_save > 1 ? "s" : ""} · PA {request.weapon_ap} · Dég{" "}
+        {request.weapon_damage}
+      </div>
       <table className="weapon-table">
         <thead>
           <tr>

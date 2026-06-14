@@ -5,6 +5,7 @@ Functions used across multiple phase handlers to avoid duplication.
 """
 
 from typing import Dict, List, Tuple, Set, Optional, Any, Union, cast
+from dataclasses import dataclass
 import copy
 import inspect
 
@@ -35,6 +36,32 @@ FIGHT = "FIGHT"
 FLED = "FLED"
 ADVANCE = "ADVANCE"
 NOT_REMOVED = "NOT_REMOVED"
+
+
+@dataclass(frozen=True)
+class ManualAllocCtx:
+    """Parametrage du moteur d allocation manuelle des pertes (regles 05.03 / 05.04).
+
+    Mutualise UNIQUEMENT la couche allocation des pertes (groupes, ordre, selection
+    de figurine, save check, application des degats). La resolution des jets reste
+    specifique a chaque phase (cf. Documentation/refactor_attack_shoot_fight1.md).
+    """
+    alloc_key: str            # cle game_state de l allocation pending
+    declare_order_action: str # action des payloads de declaration d ordre
+    manual_alloc_action: str  # action des payloads de choix de figurine
+    phase_label: str          # champ "phase" des payloads et logs
+    log_type: str             # champ "type" de l action_log
+    log_verb: str             # verbe du message de log (ex. "SHOT")
+
+
+SHOOT_CTX = ManualAllocCtx(
+    alloc_key="pending_shoot_allocation",
+    declare_order_action="squad_shoot_declare_order",
+    manual_alloc_action="squad_shoot_manual_alloc",
+    phase_label="shoot",
+    log_type="shoot",
+    log_verb="SHOT",
+)
 
 ALLOWED_CHOICE_TIMING_TRIGGERS = {
     "on_deploy",
@@ -4383,7 +4410,7 @@ def _allocate_damage_to_squad(
     }
 
 
-def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any]) -> None:
+def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: ManualAllocCtx) -> None:
     """Emet 1 action_log de tir pour un groupe (arme, cible).
 
     Partage entre l allocation auto (resolve_squad_shoot) et l allocation manuelle
@@ -4408,15 +4435,15 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any]) -> None
         f"HP lost:{g['damage']} Killed:{g['kills']}"
     )
     msg = (
-        f"Unit {attacker_squad_id_str}({ac},{ar}) SHOT"
+        f"Unit {attacker_squad_id_str}({ac},{ar}) {ctx.log_verb}"
         f" at Unit {target_sid_g}({tc},{tr}){weapon_suffix}"
         f" - {attack_log}"
     )
     append_action_log(game_state, {
-        "type": "shoot",
+        "type": ctx.log_type,
         "message": msg,
         "turn": game_state.get("turn", 0),  # get allowed
-        "phase": "shoot",
+        "phase": ctx.phase_label,
         "shooterId": attacker_squad_id_str,
         "targetId": target_sid_g,
         "weaponName": weapon_name_g if weapon_name_g else None,
@@ -4744,7 +4771,7 @@ def resolve_squad_shoot(
 
     # Emit 1 log par groupe (weapon, target) pour toute l'escouade
     for g in weapon_groups.values():
-        _emit_squad_shoot_log(game_state, g)
+        _emit_squad_shoot_log(game_state, g, SHOOT_CTX)
 
     # Meta cibles + escouades wipe (pour reward shaping proportionnel)
     summary["targets_meta"] = targets_meta
@@ -4846,23 +4873,24 @@ def _group_alive(game_state: Dict[str, Any], g: Dict[str, Any]) -> bool:
     return any(m in models_cache for m in g["model_ids"])
 
 
-def _current_live_group(game_state: Dict[str, Any], tentry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Groupe courant (ordre declare), en sautant les groupes vides. MUTE
+def _current_live_group(game_state: Dict[str, Any], batch: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Groupe courant (ordre declare) du lot, en sautant les groupes vides. MUTE
     current_group_index (avance). Retourne None si tous les groupes sont morts."""
-    groups_by_id = {g["group_id"]: g for g in tentry["alloc_groups"]}
-    order = tentry["declared_order"]
-    while tentry["current_group_index"] < len(order):
-        g = groups_by_id[order[tentry["current_group_index"]]]
+    groups_by_id = {g["group_id"]: g for g in batch["alloc_groups"]}
+    order = batch["declared_order"]
+    while batch["current_group_index"] < len(order):
+        g = groups_by_id[order[batch["current_group_index"]]]
         if _group_alive(game_state, g):
             return g
-        tentry["current_group_index"] += 1
+        batch["current_group_index"] += 1
     return None
 
 
 def _declare_order_payload(
-    game_state: Dict[str, Any], tentry: Dict[str, Any], live_groups: List[Dict[str, Any]]
+    game_state: Dict[str, Any], batch: Dict[str, Any], live_groups: List[Dict[str, Any]],
+    ctx: ManualAllocCtx,
 ) -> Dict[str, Any]:
-    """Payload waiting : le defenseur doit declarer l ordre des groupes (>=2 groupes)."""
+    """Payload waiting : le defenseur doit declarer l ordre des groupes du lot (>=2 groupes)."""
     models_cache = require_key(game_state, "models_cache")
 
     def _wounded_in(g: Dict[str, Any]) -> bool:
@@ -4878,15 +4906,21 @@ def _declare_order_payload(
         "model_ids": [m for m in g["model_ids"] if m in models_cache],
         "has_wounded": _wounded_in(g),
     } for g in live_groups]
-    attacker_unit_id = str(require_key(game_state, "pending_shoot_allocation")["attacker_squad_id"])
+    alloc = require_key(game_state, ctx.alloc_key)
+    attacker_unit_id = str(alloc["attacker_squad_id"])
+    wg = alloc["weapon_groups"][batch["weapon_group_idx"]]
     return {
-        "action": "squad_shoot_declare_order",
+        "action": ctx.declare_order_action,
         "waiting_for_player": True,
-        "phase": "shoot",
+        "phase": ctx.phase_label,
         "order_request": {
             "attacker_unit_id": attacker_unit_id,
-            "target_unit_id": tentry["target_sid"],
-            "defender_player": tentry["defender_player"],
+            "target_unit_id": batch["target_sid"],
+            "defender_player": batch["defender_player"],
+            "weapon_name": wg["weapon_name"],
+            "weapon_ap": int(wg["ap"]),
+            "weapon_damage": wg["dmg_raw"],
+            "wounds_to_save": len(batch["pool"]),
             "groups": groups,
         },
     }
@@ -4983,7 +5017,8 @@ def _manual_roll_intent(
 
 
 def _manual_waiting_payload(
-    game_state: Dict[str, Any], tentry: Dict[str, Any], alive_group: List[str]
+    game_state: Dict[str, Any], batch: Dict[str, Any], alive_group: List[str],
+    ctx: ManualAllocCtx,
 ) -> Dict[str, Any]:
     """Payload rendu au frontend quand le defenseur doit choisir une figurine.
 
@@ -5001,42 +5036,43 @@ def _manual_waiting_payload(
         }
         for mid in alive_group
     ]
-    attacker_unit_id = str(require_key(game_state, "pending_shoot_allocation")["attacker_squad_id"])
-    order = tentry["declared_order"]
+    attacker_unit_id = str(require_key(game_state, ctx.alloc_key)["attacker_squad_id"])
+    order = batch["declared_order"]
     cur_gid = (
-        order[tentry["current_group_index"]]
-        if order is not None and tentry["current_group_index"] < len(order)
+        order[batch["current_group_index"]]
+        if order is not None and batch["current_group_index"] < len(order)
         else None
     )
     return {
-        "action": "squad_shoot_manual_alloc",
+        "action": ctx.manual_alloc_action,
         "waiting_for_player": True,
-        "phase": "shoot",
+        "phase": ctx.phase_label,
         "allocation": {
             "attacker_unit_id": attacker_unit_id,
-            "target_unit_id": tentry["target_sid"],
-            "defender_player": tentry["defender_player"],
+            "target_unit_id": batch["target_sid"],
+            "defender_player": batch["defender_player"],
             "choices": choices,
             "current_group_id": cur_gid,
-            "wounds_remaining": len(tentry["pool"]) - tentry["pool_index"],
+            "wounds_remaining": len(batch["pool"]) - batch["pool_index"],
         },
     }
 
 
-def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any], tentry: Dict[str, Any]) -> None:
-    """Resout la prochaine blessure du pool sur tentry["current_model_id"] (conforme).
+def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any], batch: Dict[str, Any]) -> None:
+    """Resout la prochaine blessure du pool du lot sur batch["current_model_id"] (conforme).
 
-    Compare le save_roll (pre-tire) au seuil de la fig allouee (Sv/InSv + AP arme).
-    Save reussie -> aucun degat. Save echouee -> tire les degats et les applique
-    (excess perdu par fig ; destroy_model si HP<=0 sinon update_model_hp). Complete le
-    shot_record (saveTarget/saveSuccess/damageDealt). Remet current_model_id a None si
-    la fig meurt (declenche un nouveau choix)."""
+    AP et degats proviennent du profil d arme du lot (batch["weapon_group_idx"]). Compare
+    le save_roll (pre-tire) au seuil de la fig allouee (Sv/InSv + AP arme). Save reussie ->
+    aucun degat. Save echouee -> tire les degats et les applique (excess perdu par fig ;
+    destroy_model si HP<=0 sinon update_model_hp). Complete le shot_record
+    (saveTarget/saveSuccess/damageDealt). Remet current_model_id a None si la fig meurt
+    (declenche un nouveau choix)."""
     models_cache = require_key(game_state, "models_cache")
     summary = alloc["summary"]
-    cur = tentry["current_model_id"]
-    pw = tentry["pool"][tentry["pool_index"]]
+    cur = batch["current_model_id"]
+    pw = batch["pool"][batch["pool_index"]]
     m = models_cache[cur]
-    g = alloc["weapon_groups"][pw["group_idx"]]
+    g = alloc["weapon_groups"][batch["weapon_group_idx"]]
     ap = int(g["ap"])
     dmg_raw = g["dmg_raw"]
     rec = pw["rec"]
@@ -5047,7 +5083,7 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     if save_roll != 1 and save_roll >= save_th:
         rec["saveSuccess"] = True
         rec["damageDealt"] = 0
-        tentry["pool_index"] += 1
+        batch["pool_index"] += 1
         return
     rec["saveSuccess"] = False
     summary["failed_saves"] += 1
@@ -5059,7 +5095,7 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     if dmg <= 0:
         rec["damageDealt"] = 0
         rec["targetDied"] = False
-        tentry["pool_index"] += 1
+        batch["pool_index"] += 1
         return
     hp_before = int(m["HP_CUR"])
     dmg_dealt = min(int(dmg), hp_before)
@@ -5086,98 +5122,104 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
         update_model_hp(game_state, cur, new_hp)
     summary["events"].append({
         "attacker": pw["attacker_mid"], "target": cur,
-        "target_squad_id": tentry["target_sid"],
+        "target_squad_id": batch["target_sid"],
         "target_player": target_player, "points_per_hp": points_per_hp,
         "damage": dmg_dealt, "destroyed": destroyed,
     })
-    tentry["pool_index"] += 1
+    batch["pool_index"] += 1
     if destroyed:
-        tentry["current_model_id"] = None
+        batch["current_model_id"] = None
 
 
-def _mark_manual_overkill_wasted(tentry: Dict[str, Any]) -> None:
+def _mark_manual_overkill_wasted(batch: Dict[str, Any]) -> None:
     """Cible entierement detruite avec des paquets non alloues : tirs restants perdus."""
-    for pd in tentry["pool"][tentry["pool_index"]:]:
+    for pd in batch["pool"][batch["pool_index"]:]:
         pd["rec"]["wasted"] = True
-    tentry["pool_index"] = len(tentry["pool"])
+    batch["pool_index"] = len(batch["pool"])
 
 
-def _finalize_manual_allocation(game_state: Dict[str, Any]) -> Dict[str, Any]:
+def _finalize_manual_allocation(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> Dict[str, Any]:
     """Emet les logs (apres allocation complete) + nettoie l etat. Retourne le summary."""
-    alloc = require_key(game_state, "pending_shoot_allocation")
+    alloc = require_key(game_state, ctx.alloc_key)
     models_cache = require_key(game_state, "models_cache")
     summary = alloc["summary"]
     for g in alloc["weapon_groups"]:
-        _emit_squad_shoot_log(game_state, g)
+        _emit_squad_shoot_log(game_state, g, ctx)
     targets_meta = summary.get("targets_meta", {})  # get allowed
     summary["squads_wiped"] = [
         sid for sid in targets_meta
         if not [m for m in game_state["squad_models"].get(sid, []) if m in models_cache]  # get allowed
     ]
-    del game_state["pending_shoot_allocation"]
+    del game_state[ctx.alloc_key]
     return {
-        "action": "squad_shoot_manual_alloc",
+        "action": ctx.manual_alloc_action,
         "waiting_for_player": False,
         "done": True,
         "shoot_result": summary,
     }
 
 
-def _manual_allocation_step(game_state: Dict[str, Any]) -> Dict[str, Any]:
+def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> Dict[str, Any]:
     """Machine a etats : avance jusqu au prochain point de decision.
 
-    Par cible : exige d abord la declaration de l ordre des groupes (>=2 groupes),
-    puis resout les blessures groupe par groupe (ordre declare). Dans un groupe :
-    une fig blessee est forcee, sinon waiting (choix libre parmi les figs vivantes
-    DU GROUPE COURANT). Passe au groupe suivant quand le courant est vide, a la cible
-    suivante quand le pool est epuise ou la cible entierement detruite. Termine par
-    _finalize_manual_allocation."""
-    alloc = require_key(game_state, "pending_shoot_allocation")
+    Resout LOT PAR LOT (cible x profil d arme, regle 04.03). Pour chaque lot :
+    1) cree les groupes d allocation (05.03) sur l etat COURANT de la cible (les blessures
+       infligees par les lots precedents sont donc prises en compte) ;
+    2) exige la declaration de l ordre des groupes (>=2 groupes vivants) ;
+    3) resout les blessures du lot (pool deja trie save croissant, 05.04) groupe par groupe :
+       une fig blessee est forcee, sinon waiting (choix libre dans le groupe courant).
+    Passe au lot suivant quand son pool est epuise ou la cible entierement detruite.
+    Termine par _finalize_manual_allocation."""
+    alloc = require_key(game_state, ctx.alloc_key)
     models_cache = require_key(game_state, "models_cache")
-    while alloc["current_target_index"] < len(alloc["targets"]):
-        tentry = alloc["targets"][alloc["current_target_index"]]
-        # 1. Declaration de l ordre des groupes si necessaire (apres les jets).
-        if tentry["declared_order"] is None:
-            live_groups = [g for g in tentry["alloc_groups"] if _group_alive(game_state, g)]
+    while alloc["current_batch_index"] < len(alloc["batches"]):
+        batch = alloc["batches"][alloc["current_batch_index"]]
+        # 1. Creation des groupes d allocation au debut du lot (etat courant de la cible).
+        if batch["alloc_groups"] is None:
+            batch["alloc_groups"] = _build_alloc_groups(game_state, batch["target_sid"])
+        # 2. Declaration de l ordre des groupes du lot si necessaire (apres les jets).
+        if batch["declared_order"] is None:
+            live_groups = [g for g in batch["alloc_groups"] if _group_alive(game_state, g)]
             if len(live_groups) >= 2:
-                return _declare_order_payload(game_state, tentry, live_groups)
-            tentry["declared_order"] = [g["group_id"] for g in live_groups]  # ordre implicite
-            tentry["current_group_index"] = 0
-        # 2. Allocation groupe par groupe.
-        advanced_target = False
+                return _declare_order_payload(game_state, batch, live_groups, ctx)
+            batch["declared_order"] = [g["group_id"] for g in live_groups]  # ordre implicite
+            batch["current_group_index"] = 0
+        # 3. Allocation groupe par groupe (du lot).
+        advanced_batch = False
         while True:
-            if tentry["pool_index"] >= len(tentry["pool"]):
-                alloc["current_target_index"] += 1
-                advanced_target = True
+            if batch["pool_index"] >= len(batch["pool"]):
+                alloc["current_batch_index"] += 1
+                advanced_batch = True
                 break
-            grp = _current_live_group(game_state, tentry)
+            grp = _current_live_group(game_state, batch)
             if grp is None:
-                _mark_manual_overkill_wasted(tentry)  # cible wipe : tirs restants perdus
-                alloc["current_target_index"] += 1
-                advanced_target = True
+                _mark_manual_overkill_wasted(batch)  # cible wipe : tirs restants perdus
+                alloc["current_batch_index"] += 1
+                advanced_batch = True
                 break
             alive_grp = [m for m in grp["model_ids"] if m in models_cache]
-            cur = tentry["current_model_id"]
+            cur = batch["current_model_id"]
             if cur is None or cur not in models_cache or cur not in alive_grp:
                 wounded = [
                     m for m in alive_grp
                     if int(models_cache[m]["HP_CUR"]) < int(models_cache[m]["HP_MAX"])
                 ]
                 if wounded:
-                    tentry["current_model_id"] = wounded[0]  # regle : finir une fig entamee
+                    batch["current_model_id"] = wounded[0]  # regle : finir une fig entamee
                 else:
-                    return _manual_waiting_payload(game_state, tentry, alive_grp)  # choix libre
-            _resolve_one_manual_wound(game_state, alloc, tentry)
-        if not advanced_target:
+                    return _manual_waiting_payload(game_state, batch, alive_grp, ctx)  # choix libre
+            _resolve_one_manual_wound(game_state, alloc, batch)
+        if not advanced_batch:
             break
-    return _finalize_manual_allocation(game_state)
+    return _finalize_manual_allocation(game_state, ctx)
 
 
 def build_manual_shoot_allocation(game_state: Dict[str, Any], attacker_squad_id: str) -> Dict[str, Any]:
     """Mode manuel (defenseur humain), 100% regles : resout les jets (hit/wound/save_roll)
     de tous les intents puis DIFFERE save+degats a l allocation. Persiste
-    game_state["pending_shoot_allocation"] (pool par cible + groupes d allocation),
-    decremente SHOOT_LEFT, nettoie les pending intents, rend la main au defenseur
+    game_state["pending_shoot_allocation"] sous forme de LOTS (cible x profil d arme,
+    regle 04.03), chacun resolu independamment (groupes + ordre + save croissant 05.04).
+    Decremente SHOOT_LEFT, nettoie les pending intents, rend la main au defenseur
     (declaration d ordre puis choix de figs) ou termine directement (aucune blessure)."""
     init_pending_intents(game_state)
     models_cache = require_key(game_state, "models_cache")
@@ -5189,8 +5231,7 @@ def build_manual_shoot_allocation(game_state: Dict[str, Any], attacker_squad_id:
     targets_meta: Dict[str, Dict[str, Any]] = {}
     weapon_groups: List[Dict[str, Any]] = []
     group_index_by_key: Dict[tuple, int] = {}
-    targets: List[Dict[str, Any]] = []
-    target_index_by_sid: Dict[str, int] = {}
+    batch_pool_by_gidx: Dict[int, List[Dict[str, Any]]] = {}
 
     for intent in intents:
         r = _manual_roll_intent(game_state, intent, targets_meta)
@@ -5221,20 +5262,13 @@ def build_manual_shoot_allocation(game_state: Dict[str, Any], attacker_squad_id:
         g["attacks"] += counts["attacks"]
         g["shots"].extend(r["shot_records"])
 
-        if target_sid not in target_index_by_sid:
-            target_index_by_sid[target_sid] = len(targets)
-            targets.append({
-                "target_sid": target_sid,
-                "defender_player": int(targets_meta[target_sid]["player"]),
-                "alloc_groups": _build_alloc_groups(game_state, target_sid),
-                "declared_order": None, "current_group_index": 0,
-                "current_model_id": None, "pool": [], "pool_index": 0,
-            })
-        tentry = targets[target_index_by_sid[target_sid]]
-        # Pool en ORDRE D ATTAQUE (pas de tri par save : la save est resolue par fig allouee).
+        # Blessures accumulees PAR PROFIL d arme (gidx) : chaque profil = un lot resolu
+        # independamment (regle 04.03). Triees save croissant a la construction du lot.
+        if gidx not in batch_pool_by_gidx:
+            batch_pool_by_gidx[gidx] = []
         for pw in r["pending_wounds"]:
-            tentry["pool"].append({
-                "save_roll": pw["save_roll"], "group_idx": gidx,
+            batch_pool_by_gidx[gidx].append({
+                "save_roll": pw["save_roll"],
                 "rec": pw["rec"], "attacker_mid": attacker_mid,
             })
 
@@ -5243,34 +5277,62 @@ def build_manual_shoot_allocation(game_state: Dict[str, Any], attacker_squad_id:
             sl = int(models_cache[attacker_mid].get("SHOOT_LEFT", 0))  # get allowed
             models_cache[attacker_mid]["SHOOT_LEFT"] = max(0, sl - 1)
 
+    # Construction des lots (cible x profil d arme, regle 04.03) : tous les profils d une
+    # meme cible sont resolus consecutivement (ordre de premiere apparition), avant la
+    # cible suivante. Un lot par profil ayant au moins une blessure a resoudre.
+    target_order: List[str] = []
+    for g in weapon_groups:
+        if g["target_sid"] not in target_order:
+            target_order.append(g["target_sid"])
+    batches: List[Dict[str, Any]] = []
+    for tsid in target_order:
+        for gidx, g in enumerate(weapon_groups):
+            if g["target_sid"] != tsid:
+                continue
+            pool = batch_pool_by_gidx.get(gidx, [])
+            if not pool:
+                continue  # ce profil n a inflige aucune blessure -> aucun lot a resoudre
+            # Regle 05.04 (INFLICT DAMAGE) : du save_roll le plus bas au plus haut (tri
+            # stable, l ordre d attaque departage les egalites). Determine l ordre de
+            # tirage des degats des armes a degats variables (conforme, voulu).
+            pool_sorted = sorted(pool, key=lambda pw: pw["save_roll"])
+            batches.append({
+                "target_sid": tsid,
+                "weapon_group_idx": gidx,
+                "defender_player": int(targets_meta[tsid]["player"]),
+                "alloc_groups": None,  # cree au debut du lot (etat courant de la cible)
+                "declared_order": None, "current_group_index": 0,
+                "current_model_id": None, "pool": pool_sorted, "pool_index": 0,
+            })
+
     summary["targets_meta"] = targets_meta
-    game_state["pending_shoot_allocation"] = {
+    game_state[SHOOT_CTX.alloc_key] = {
         "attacker_squad_id": str(attacker_squad_id),
         "weapon_groups": weapon_groups,
-        "targets": targets,
-        "current_target_index": 0,
+        "batches": batches,
+        "current_batch_index": 0,
         "summary": summary,
     }
     clear_pending_shoot_intent(game_state, attacker_squad_id)
-    return _manual_allocation_step(game_state)
+    return _manual_allocation_step(game_state, SHOOT_CTX)
 
 
-def apply_manual_shoot_declare_order(game_state: Dict[str, Any], order: List[Any]) -> Dict[str, Any]:
+def apply_manual_shoot_declare_order(game_state: Dict[str, Any], order: List[Any], ctx: ManualAllocCtx) -> Dict[str, Any]:
     """Enregistre l ordre des groupes declare par le defenseur (apres les jets) puis avance.
 
     Valide (erreur explicite, KeyError si invalide) : permutation des groupes vivants ;
     aucun CHARACTER avant un non-CHARACTER ; groupe non-CHARACTER blesse avant non-CHARACTER
     sain ; CHARACTER blesse avant CHARACTER sain."""
-    alloc = require_key(game_state, "pending_shoot_allocation")
+    alloc = require_key(game_state, ctx.alloc_key)
     models_cache = require_key(game_state, "models_cache")
-    ti = alloc["current_target_index"]
-    if ti >= len(alloc["targets"]):
-        raise ValueError("aucune cible courante pour declarer l ordre des groupes")
-    tentry = alloc["targets"][ti]
-    if tentry["declared_order"] is not None:
-        raise ValueError("ordre des groupes deja declare pour cette cible")
-    groups_by_id = {g["group_id"]: g for g in tentry["alloc_groups"]}
-    live_ids = [g["group_id"] for g in tentry["alloc_groups"] if _group_alive(game_state, g)]
+    bi = alloc["current_batch_index"]
+    if bi >= len(alloc["batches"]):
+        raise ValueError("aucun lot courant pour declarer l ordre des groupes")
+    batch = alloc["batches"][bi]
+    if batch["declared_order"] is not None:
+        raise ValueError("ordre des groupes deja declare pour ce lot")
+    groups_by_id = {g["group_id"]: g for g in batch["alloc_groups"]}
+    live_ids = [g["group_id"] for g in batch["alloc_groups"] if _group_alive(game_state, g)]
     order_int = [int(x) for x in order]
     if sorted(order_int) != sorted(live_ids):
         raise ValueError(f"ordre {order_int} n est pas une permutation des groupes vivants {live_ids}")
@@ -5309,30 +5371,30 @@ def apply_manual_shoot_declare_order(game_state: Dict[str, Any], order: List[Any
         else:
             seen_char_healthy = True
 
-    tentry["declared_order"] = order_int
-    tentry["current_group_index"] = 0
-    return _manual_allocation_step(game_state)
+    batch["declared_order"] = order_int
+    batch["current_group_index"] = 0
+    return _manual_allocation_step(game_state, ctx)
 
 
-def apply_manual_shoot_allocation(game_state: Dict[str, Any], chosen_model_id: str) -> Dict[str, Any]:
+def apply_manual_shoot_allocation(game_state: Dict[str, Any], chosen_model_id: str, ctx: ManualAllocCtx) -> Dict[str, Any]:
     """Enregistre le choix du defenseur (figurine qui encaisse) puis avance l allocation.
 
     Valide que chosen_model_id est une figurine vivante du GROUPE COURANT, et qu une
     figurine blessee du groupe n est pas contournee (regle 05.04). Retourne le payload
     du point de decision suivant (waiting) ou le summary final (done)."""
-    alloc = require_key(game_state, "pending_shoot_allocation")
+    alloc = require_key(game_state, ctx.alloc_key)
     models_cache = require_key(game_state, "models_cache")
-    ti = alloc["current_target_index"]
-    if ti >= len(alloc["targets"]):
-        return _finalize_manual_allocation(game_state)
-    tentry = alloc["targets"][ti]
-    order = tentry["declared_order"]
+    bi = alloc["current_batch_index"]
+    if bi >= len(alloc["batches"]):
+        return _finalize_manual_allocation(game_state, ctx)
+    batch = alloc["batches"][bi]
+    order = batch["declared_order"]
     if order is None:
         raise ValueError("ordre des groupes non declare avant l allocation")
-    if tentry["current_group_index"] >= len(order):
+    if batch["current_group_index"] >= len(order):
         raise ValueError("aucun groupe courant pour l allocation")
-    gid = order[tentry["current_group_index"]]
-    grp = next(g for g in tentry["alloc_groups"] if g["group_id"] == gid)
+    gid = order[batch["current_group_index"]]
+    grp = next(g for g in batch["alloc_groups"] if g["group_id"] == gid)
     alive_grp = [m for m in grp["model_ids"] if m in models_cache]
     if chosen_model_id not in alive_grp:
         raise ValueError(
@@ -5347,28 +5409,28 @@ def apply_manual_shoot_allocation(game_state: Dict[str, Any], chosen_model_id: s
         raise ValueError(
             f"must allocate to a wounded model first (regle 05.04): wounded={wounded}"
         )
-    tentry["current_model_id"] = chosen_model_id
-    return _manual_allocation_step(game_state)
+    batch["current_model_id"] = chosen_model_id
+    return _manual_allocation_step(game_state, ctx)
 
 
-def manual_allocation_waiting_payload(game_state: Dict[str, Any]) -> Dict[str, Any]:
+def manual_allocation_waiting_payload(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> Dict[str, Any]:
     """Reconstruit (read-only) le payload waiting courant d une allocation manuelle en
     cours (declaration d ordre OU choix de fig). Utilise par le garde-fou pour re-signaler
     l attente sans muter l etat. Suppose qu une allocation est pending (sinon leve)."""
-    alloc = require_key(game_state, "pending_shoot_allocation")
+    alloc = require_key(game_state, ctx.alloc_key)
     models_cache = require_key(game_state, "models_cache")
-    tentry = alloc["targets"][alloc["current_target_index"]]
-    if tentry["declared_order"] is None:
-        live_groups = [g for g in tentry["alloc_groups"] if _group_alive(game_state, g)]
+    batch = alloc["batches"][alloc["current_batch_index"]]
+    if batch["declared_order"] is None:
+        live_groups = [g for g in batch["alloc_groups"] if _group_alive(game_state, g)]
         if len(live_groups) >= 2:
-            return _declare_order_payload(game_state, tentry, live_groups)
-    order = tentry["declared_order"]
+            return _declare_order_payload(game_state, batch, live_groups, ctx)
+    order = batch["declared_order"]
     grp = None
-    if order is not None and tentry["current_group_index"] < len(order):
-        gid = order[tentry["current_group_index"]]
-        grp = next((g for g in tentry["alloc_groups"] if g["group_id"] == gid), None)
+    if order is not None and batch["current_group_index"] < len(order):
+        gid = order[batch["current_group_index"]]
+        grp = next((g for g in batch["alloc_groups"] if g["group_id"] == gid), None)
     alive_grp = [m for m in (grp["model_ids"] if grp else []) if m in models_cache]
-    return _manual_waiting_payload(game_state, tentry, alive_grp)
+    return _manual_waiting_payload(game_state, batch, alive_grp, ctx)
 
 
 # ============================================================================

@@ -416,6 +416,10 @@ export interface ManualOrderRequest {
   attacker_unit_id: string;
   target_unit_id: string;
   defender_player: number;
+  weapon_name: string;
+  weapon_ap: number;
+  weapon_damage: number | string;
+  wounds_to_save: number;
   groups: ManualOrderGroup[];
 }
 
