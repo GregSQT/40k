@@ -46,6 +46,16 @@ from .shared_utils import (
     update_units_cache_position,
     translate_squad_to_destination,
     update_enemy_adjacent_caches_after_unit_move,
+    ManualAllocCtx,
+    _build_manual_allocation,
+    apply_manual_shoot_declare_order,
+    apply_manual_shoot_allocation,
+    manual_allocation_waiting_payload,
+    _target_majority_toughness,
+    save_threshold,
+    get_fighting_models,
+    squad_fight_unit_activation_start,
+    squad_declare_fight,
 )
 
 _ADJACENT_EDGE_GAP_TOLERANCE_NORM = ENGAGEMENT_NORM_HEX_WIDTH
@@ -5885,25 +5895,50 @@ def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str,
                 "unitId": "SYSTEM",
             }
         if sub == "fight":
-            uid = fight_v11_advance_selection(game_state)
-            if uid is None:
+            # advance_selection synchronise fight_step/fight_selector (handoff 12.04) et
+            # termine l'étape si plus personne n'est éligible. On ignore l'unité renvoyée :
+            # le JOUEUR choisit librement parmi le pool du sélecteur courant (12.04), au lieu
+            # de se voir imposer la première.
+            if fight_v11_advance_selection(game_state) is None:
                 fight_v11_enter_consolidate(game_state)
                 continue
-            u = get_unit_by_id(game_state, uid)
-            valid_targets = _fight_build_valid_target_pool(game_state, u) if u else []
-            game_state["fight_eligible_units"] = [uid]
-            game_state["active_fight_unit"] = uid
-            game_state["valid_fight_targets"] = valid_targets
+            pool = fight_v11_current_pool(game_state)
+            if not pool:
+                fight_v11_enter_consolidate(game_state)
+                continue
+            game_state["fight_eligible_units"] = list(pool)
+            active = game_state.get("active_fight_unit")
+            active = str(active) if active is not None else None
+            if active is not None and active in pool:
+                # L'unité a été choisie (activate_unit) → on présente ses cibles à frapper.
+                u = get_unit_by_id(game_state, active)
+                valid_targets = _fight_build_valid_target_pool(game_state, u) if u else []
+                game_state["valid_fight_targets"] = valid_targets
+                _fight_v11_log(
+                    game_state,
+                    f"état: FIGHT — unit {active} ACTIVE (selector=P{game_state['fight_selector']}, "
+                    f"cibles={valid_targets})",
+                )
+                return True, {"phase": "fight", "fight_subphase": "fight",
+                              "fight_step": game_state["fight_step"],
+                              "fight_selector": game_state["fight_selector"],
+                              "fight_eligible_units": list(pool),
+                              "active_fight_unit": active, "valid_targets": valid_targets,
+                              "overrun_eligible": bool(u and fight_v11_is_overrun_eligible(game_state, u)),
+                              "waiting_for_player": True, "action": "wait"}
+            # Aucune unité active → le joueur doit choisir (cercle vert sur le pool).
+            game_state["active_fight_unit"] = None
+            game_state["valid_fight_targets"] = []
             _fight_v11_log(
                 game_state,
-                f"état: FIGHT — unit {uid} à activer (step={game_state['fight_step']}, "
-                f"selector=P{game_state['fight_selector']}, cibles={valid_targets})",
+                f"état: FIGHT — choisir une unité (selector=P{game_state['fight_selector']}, "
+                f"pool={list(pool)})",
             )
             return True, {"phase": "fight", "fight_subphase": "fight",
                           "fight_step": game_state["fight_step"],
                           "fight_selector": game_state["fight_selector"],
-                          "active_fight_unit": uid, "valid_targets": valid_targets,
-                          "overrun_eligible": bool(u and fight_v11_is_overrun_eligible(game_state, u)),
+                          "fight_eligible_units": list(pool),
+                          "active_fight_unit": None, "valid_targets": [],
                           "waiting_for_player": True, "action": "wait"}
         if sub == "consolidate":
             nxt = fight_v11_grouped_next(game_state, "consolidate")
@@ -5917,6 +5952,149 @@ def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str,
             continue
         return True, _fight_v11_phase_complete(game_state)
     raise RuntimeError("_fight_v11_manual_state did not converge")
+
+
+# ============================================================================
+# COMBAT MANUEL — allocation des pertes par le defenseur (PvP), regles 05.03/05.04
+# ============================================================================
+# Reutilise le moteur d allocation generique (shared_utils) via FIGHT_CTX. La RESOLUTION
+# des jets reste specifique au combat (_manual_roll_fight_intent : rerolls fight preserves,
+# §B/§O). L application des degats est PAR-FIGURINE (update_model_hp/destroy_model) + les
+# invalidations de cache fight (§D), via les hooks du ctx. Le chemin auto (PvE/gym) reste
+# strictement inchange (HP-pool unite).
+
+
+def _manual_roll_fight_intent(
+    game_state: Dict[str, Any], intent: Dict[str, Any], targets_meta: Dict[str, Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Jets melee d un intent (manuel) : hit -> wound (vs T majoritaire) -> save_roll BRUT,
+    avec les 4 rerolls de combat (reroll_1_tohit / reroll_towound_objective / reroll_1_towound
+    cote attaquant ; reroll_1_save cote cible). Ne compare PAS la save et ne tire PAS les
+    degats (differes a l allocation, par figurine choisie). Meme forme de retour que le
+    roller tir, consommee par _build_manual_allocation."""
+    import random
+    models_cache = require_key(game_state, "models_cache")
+    attacker_mid = intent["model_id"]
+    attacker = models_cache.get(attacker_mid)
+    if attacker is None:
+        return None
+    target_sid = str(intent["target_unit_id"])
+    if target_sid not in game_state.get("squad_models", {}):  # get allowed
+        return None
+    target = get_unit_by_id(game_state, target_sid)
+    if target is None:
+        return None
+    if target_sid not in targets_meta:
+        _tgt_uc = require_key(game_state, "units_cache")[target_sid]
+        _tgt_sc = require_key(game_state, "squad_cache")[target_sid]
+        targets_meta[target_sid] = {
+            "value": float(require_key(_tgt_uc, "VALUE")),
+            "model_count_at_start": int(require_key(_tgt_sc, "model_count_at_start")),
+            "player": int(require_key(_tgt_uc, "player")),
+        }
+    weapon_index = int(intent.get("weapon_index", 0))  # get allowed
+    weapons = attacker.get("CC_WEAPONS", [])  # get allowed
+    if not (0 <= weapon_index < len(weapons)):
+        return None
+    weapon = weapons[weapon_index]
+    if not isinstance(weapon, dict):
+        return None
+    n_attacks = int(intent["n_attacks_resolved"]) if "n_attacks_resolved" in intent else 0
+    if n_attacks <= 0:
+        return None
+    ws = int(weapon["ATK"])
+    strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))
+    ap = int(weapon.get("AP", 0))  # get allowed
+    dmg_raw = require_key(weapon, "DMG")
+    alive0 = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
+    if not alive0:
+        return None
+    wth = _calculate_wound_target(strength, _target_majority_toughness(game_state, target_sid))
+    first_alive = models_cache[alive0[0]]
+    display_wth = wth
+    display_save_th = save_threshold(int(first_alive["ARMOR_SAVE"]), int(first_alive.get("INVUL_SAVE", 7)), ap)
+    weapon_name = weapon.get("display_name", weapon.get("NAME", weapon.get("name", "")))  # get allowed
+    # Conditions de reroll (constantes pour cet intent : abilities UNITE, pas figurine).
+    # `attacker` est une figurine (models_cache) ; les UNIT_RULES sont sur l unite.
+    attacker_unit = get_unit_by_id(game_state, str(attacker["squad_id"]))
+    reroll_hit1 = attacker_unit is not None and _unit_has_rule(attacker_unit, "reroll_1_tohit_fight")
+    reroll_wound1 = attacker_unit is not None and _unit_has_rule(attacker_unit, "reroll_1_towound")
+    reroll_wound_obj = (
+        attacker_unit is not None
+        and _unit_has_rule(attacker_unit, "reroll_towound_target_on_objective")
+        and _is_unit_on_objective(target, game_state)
+    )
+    reroll_save1 = _unit_has_rule(target, "reroll_1_save_fight")
+    shot_records: List[Dict[str, Any]] = []
+    pending_wounds: List[Dict[str, Any]] = []
+    attacks = hits = wounds = 0
+    for _ in range(int(n_attacks)):
+        attacks += 1
+        hit_roll = random.randint(1, 6)
+        if hit_roll == 1 and reroll_hit1:
+            hit_roll = random.randint(1, 6)
+        if hit_roll < ws:
+            shot_records.append({"attackRoll": hit_roll, "hitResult": "MISS", "hitTarget": ws})
+            continue
+        hits += 1
+        wound_roll = random.randint(1, 6)
+        wound_success = wound_roll >= wth
+        if not wound_success and ((wound_roll == 1 and reroll_wound1) or reroll_wound_obj):
+            wound_roll = random.randint(1, 6)
+            wound_success = wound_roll >= wth
+        if not wound_success:
+            shot_records.append({"attackRoll": hit_roll, "hitResult": "HIT", "hitTarget": ws, "strengthRoll": wound_roll, "strengthResult": "FAILED", "woundTarget": wth})
+            continue
+        wounds += 1
+        save_roll = random.randint(1, 6)
+        if save_roll == 1 and reroll_save1:
+            save_roll = random.randint(1, 6)
+        rec = {"attackRoll": hit_roll, "hitResult": "HIT", "hitTarget": ws, "strengthRoll": wound_roll, "strengthResult": "SUCCESS", "woundTarget": wth, "saveRoll": save_roll, "damageDealt": 0}
+        shot_records.append(rec)
+        pending_wounds.append({"save_roll": save_roll, "rec": rec})
+    return {
+        "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
+        "weapon_name": weapon_name, "bs": ws, "ap": ap, "dmg_raw": dmg_raw,
+        "display_wth": display_wth, "display_save_th": display_save_th,
+        "shot_records": shot_records, "pending_wounds": pending_wounds,
+        "counts": {"attacks": attacks, "hits": hits, "wounds": wounds},
+    }
+
+
+def _fight_on_target_damaged(game_state: Dict[str, Any], target_sid: str) -> None:
+    """Hook fight : invalide le kill_probability_cache de la cible a chaque blessure (§D)."""
+    from engine.ai.weapon_selector import invalidate_cache_for_target
+    cache = game_state["kill_probability_cache"] if "kill_probability_cache" in game_state else {}
+    invalidate_cache_for_target(cache, str(target_sid))
+
+
+def _fight_on_unit_destroyed(game_state: Dict[str, Any], target_sid: str) -> None:
+    """Hook fight : unite cible detruite -> retrait des pools de combat + invalidation cache (§D)."""
+    _remove_dead_unit_from_fight_pools(game_state, str(target_sid))
+    from engine.ai.weapon_selector import invalidate_cache_for_unit
+    cache = game_state["kill_probability_cache"] if "kill_probability_cache" in game_state else {}
+    invalidate_cache_for_unit(cache, str(target_sid))
+
+
+FIGHT_CTX = ManualAllocCtx(
+    alloc_key="pending_fight_allocation",
+    declare_order_action="squad_fight_declare_order",
+    manual_alloc_action="squad_fight_manual_alloc",
+    phase_label="fight",
+    log_type="combat",
+    log_verb="FOUGHT",
+    attacks_left_attr="ATTACK_LEFT",
+    intents_key="pending_squad_fight_intents",
+    decrement_by_attacks=True,
+    emit_unit_death_log=True,
+    on_target_damaged=_fight_on_target_damaged,
+    on_unit_destroyed=_fight_on_unit_destroyed,
+)
+
+
+def build_manual_fight_allocation(game_state: Dict[str, Any], attacker_squad_id: str) -> Dict[str, Any]:
+    """Allocation manuelle des pertes au COMBAT (defenseur humain). Cf. _build_manual_allocation."""
+    return _build_manual_allocation(game_state, attacker_squad_id, FIGHT_CTX, _manual_roll_fight_intent)
 
 
 def _fight_v11_manual_step(
@@ -5934,6 +6112,31 @@ def _fight_v11_manual_step(
     uid = str(uid) if uid is not None else None
     skip = action.get("skip") is True or atype in ("skip", "right_click")
     _fight_v11_log(game_state, f"action manuelle reçue: subphase={sub} action={atype!r} unitId={uid} skip={skip}")
+
+    # Allocation manuelle des pertes (defenseur) en cours : seules les actions d allocation
+    # passent ; toute autre action re-signale l attente (garde-fou, §J).
+    if "pending_fight_allocation" in game_state:
+        if atype == "squad_fight_declare_order":
+            order = action.get("order")
+            if order is None:
+                return False, {"error": "missing_order"}
+            res = apply_manual_shoot_declare_order(game_state, list(order), FIGHT_CTX)
+            if res.get("waiting_for_player"):
+                return True, res
+            return _fight_v11_manual_state(game_state)
+        if atype == "squad_fight_manual_alloc":
+            chosen = action.get("modelId")
+            if chosen is None:
+                return False, {"error": "missing_model_id"}
+            res = apply_manual_shoot_allocation(game_state, str(chosen), FIGHT_CTX)
+            if res.get("waiting_for_player"):
+                return True, res
+            return _fight_v11_manual_state(game_state)
+        if atype == "squad_fight_cancel":
+            del game_state["pending_fight_allocation"]
+            _fight_v11_log(game_state, "FIGHT allocation annulee par le joueur")
+            return _fight_v11_manual_state(game_state)
+        return True, manual_allocation_waiting_payload(game_state, FIGHT_CTX)
 
     if sub == "pile_in":
         nxt = fight_v11_grouped_next(game_state, "pile_in")
@@ -6042,8 +6245,27 @@ def _fight_v11_manual_step(
         return _fight_v11_manual_state(game_state)
 
     if sub == "fight":
-        sel = fight_v11_advance_selection(game_state)
-        if sel is not None and (uid is None or uid == sel) and atype in ("fight", "left_click"):
+        pool = fight_v11_current_pool(game_state)  # unités éligibles du sélecteur courant (12.04)
+        active = game_state.get("active_fight_unit")
+        active = str(active) if active is not None else None
+        _fight_v11_log(
+            game_state,
+            f"FIGHT dispatch: pool={pool} active={active} uid_recu={uid} action={atype!r} "
+            f"step={game_state.get('fight_step')} fought={sorted(game_state.get('units_fought', set()))}"
+        )
+
+        # ÉTAPE 1 — le joueur choisit librement une de SES unités éligibles (12.04).
+        if atype == "activate_unit":
+            if uid is not None and uid in pool:
+                game_state["active_fight_unit"] = uid
+                _fight_v11_log(game_state, f"FIGHT unit {uid} ACTIVÉE par le joueur")
+            else:
+                _fight_v11_log(game_state, f"FIGHT activate ignoré : {uid} hors pool {pool}")
+            return _fight_v11_manual_state(game_state)
+
+        # ÉTAPE 2 — unité active + clic sur une cible → résolution + allocation.
+        if active is not None and active in pool and atype in ("fight", "left_click"):
+            sel = active
             u = get_unit_by_id(game_state, sel)
             if u is None:
                 raise KeyError(f"Fight unit {sel} missing from game_state['units']")
@@ -6053,12 +6275,36 @@ def _fight_v11_manual_step(
             if action.get("fight_type") == "overrun" and fight_v11_is_overrun_eligible(game_state, u):
                 ftype = "overrun"
                 _fight_v11_auto_overrun_pile_in(game_state, u, config)
-            _fight_v11_log(game_state, f"FIGHT unit {sel} sélectionnée (type={ftype}, step={game_state.get('fight_step')})")
-            _fight_v11_resolve_attacks(
-                game_state, u, config, preferred_target_id=(str(action["targetId"]) if "targetId" in action else None)
-            )
-        else:
-            _fight_v11_log(game_state, f"FIGHT: action ignorée (sélecteur attend unit {sel}, reçu {uid}, action {atype!r})")
+            valid = _fight_build_valid_target_pool(game_state, u)
+            _fight_v11_log(game_state, f"FIGHT unit {sel} (type={ftype}) : pool cibles = {valid}")
+            if valid:
+                pref = str(action["targetId"]) if "targetId" in action else None
+                target_id = pref if (pref is not None and pref in valid) else _ai_select_fight_target(game_state, sel, valid)
+                target_unit = get_unit_by_id(game_state, target_id)
+                defender_human = target_unit is not None and not _is_ai_controlled_fight_unit(game_state, target_unit)
+                _fight_v11_log(game_state, f"FIGHT unit {sel} -> cible {target_id} (clic={pref}) defenseur_humain={defender_human}")
+                # L'unité a fini d'attaquer : on libère l'active (la prochaine sera re-choisie).
+                game_state["active_fight_unit"] = None
+                if defender_human:
+                    # Defenseur humain (§G) : allocation manuelle des pertes (par-figurine).
+                    squad_fight_unit_activation_start(game_state, sel)
+                    squad_declare_fight(game_state, sel, target_id)
+                    alloc_result = build_manual_fight_allocation(game_state, sel)
+                    _fight_v11_log(
+                        game_state,
+                        f"FIGHT unit {sel} : alloc waiting={alloc_result.get('waiting_for_player')} done={alloc_result.get('done')}"
+                    )
+                    if alloc_result.get("waiting_for_player"):
+                        return True, alloc_result
+                else:
+                    # Defenseur IA : resolution auto (chemin V11 inchange, HP-pool unite).
+                    _fight_v11_log(game_state, f"FIGHT unit {sel} : defenseur IA -> resolution auto")
+                    _fight_v11_resolve_attacks(game_state, u, config, preferred_target_id=target_id)
+            else:
+                _fight_v11_log(game_state, f"FIGHT unit {sel} : aucune cible valide")
+            return _fight_v11_manual_state(game_state)
+
+        _fight_v11_log(game_state, f"FIGHT: action ignorée (active={active}, uid={uid}, action={atype!r})")
         return _fight_v11_manual_state(game_state)
 
     if sub == "consolidate":

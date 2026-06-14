@@ -2777,6 +2777,16 @@ class W40KEngine(gym.Env):
             from engine.phase_handlers.shared_utils import manual_allocation_waiting_payload, SHOOT_CTX
             return True, manual_allocation_waiting_payload(self.game_state, SHOOT_CTX)
 
+        # Idem combat (defenseur humain) : pendant l'allocation des pertes, seules les
+        # actions d'allocation fight passent.
+        if (
+            self.game_state.get("pending_fight_allocation") is not None
+            and action.get("action") not in ("squad_fight_manual_alloc", "squad_fight_declare_order", "squad_fight_cancel")
+        ):
+            from engine.phase_handlers.shared_utils import manual_allocation_waiting_payload
+            from engine.phase_handlers.fight_handlers import FIGHT_CTX
+            return True, manual_allocation_waiting_payload(self.game_state, FIGHT_CTX)
+
         current_phase = self.game_state["phase"]
         
         # CRITICAL: Capture phase, player, turn, episode, and positions BEFORE action execution for accurate logging

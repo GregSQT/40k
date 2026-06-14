@@ -4,7 +4,7 @@ engine/phase_handlers/shared_utils.py - Shared utility functions for phase handl
 Functions used across multiple phase handlers to avoid duplication.
 """
 
-from typing import Dict, List, Tuple, Set, Optional, Any, Union, cast
+from typing import Dict, List, Tuple, Set, Optional, Any, Union, Callable, cast
 from dataclasses import dataclass
 import copy
 import inspect
@@ -52,6 +52,17 @@ class ManualAllocCtx:
     phase_label: str          # champ "phase" des payloads et logs
     log_type: str             # champ "type" de l action_log
     log_verb: str             # verbe du message de log (ex. "SHOT")
+    attacks_left_attr: str    # attribut figurine decremente par intent (SHOOT_LEFT / ATTACK_LEFT)
+    intents_key: str          # cle game_state des intents (pending_squad_*_intents)
+    # Tir : SHOOT_LEFT = 1 activation -> decrement de 1. Combat : ATTACK_LEFT = nombre
+    # d attaques -> decrement du nombre d attaques de l intent (consomme tout).
+    decrement_by_attacks: bool = False
+    # Hooks d application des degats specifiques a la phase (None = comportement tir pur).
+    # on_target_damaged(game_state, target_sid) : appele a chaque blessure infligee.
+    # on_unit_destroyed(game_state, target_sid) : appele quand l unite cible est detruite.
+    emit_unit_death_log: bool = False
+    on_target_damaged: Optional[Callable[[Dict[str, Any], str], None]] = None
+    on_unit_destroyed: Optional[Callable[[Dict[str, Any], str], None]] = None
 
 
 SHOOT_CTX = ManualAllocCtx(
@@ -61,6 +72,8 @@ SHOOT_CTX = ManualAllocCtx(
     phase_label="shoot",
     log_type="shoot",
     log_verb="SHOT",
+    attacks_left_attr="SHOOT_LEFT",
+    intents_key="pending_squad_shoot_intents",
 )
 
 ALLOWED_CHOICE_TIMING_TRIGGERS = {
@@ -5058,7 +5071,7 @@ def _manual_waiting_payload(
     }
 
 
-def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any], batch: Dict[str, Any]) -> None:
+def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any], batch: Dict[str, Any], ctx: ManualAllocCtx) -> None:
     """Resout la prochaine blessure du pool du lot sur batch["current_model_id"] (conforme).
 
     AP et degats proviennent du profil d arme du lot (batch["weapon_group_idx"]). Compare
@@ -5120,6 +5133,14 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
         summary["models_killed"] += 1
     else:
         update_model_hp(game_state, cur, new_hp)
+    # Hooks d application specifiques a la phase (fight : invalidations de cache + pools).
+    # destroy_model/update_model_hp resynchronisent deja units_cache (somme des figs).
+    if ctx.on_target_damaged is not None:
+        ctx.on_target_damaged(game_state, batch["target_sid"])
+    if destroyed and ctx.on_unit_destroyed is not None:
+        squad_models = require_key(game_state, "squad_models")
+        if not [mm for mm in squad_models.get(batch["target_sid"], []) if mm in models_cache]:
+            ctx.on_unit_destroyed(game_state, batch["target_sid"])
     summary["events"].append({
         "attacker": pw["attacker_mid"], "target": cur,
         "target_squad_id": batch["target_sid"],
@@ -5150,6 +5171,21 @@ def _finalize_manual_allocation(game_state: Dict[str, Any], ctx: ManualAllocCtx)
         sid for sid in targets_meta
         if not [m for m in game_state["squad_models"].get(sid, []) if m in models_cache]  # get allowed
     ]
+    # Log de mort separe (type:"death") quand l unite cible est entierement detruite.
+    # Le manuel tir ne l emet pas ; le combat oui (parite avec le chemin auto fight, §I).
+    if ctx.emit_unit_death_log:
+        for sid in summary["squads_wiped"]:
+            tgt_unit = next((u for u in game_state["units"] if str(u["id"]) == str(sid)), None)
+            append_action_log(game_state, {
+                "type": "death",
+                "message": f"Unit {sid} was DESTROYED",
+                "turn": game_state.get("turn", 0),  # get allowed
+                "phase": ctx.phase_label,
+                "targetId": str(sid),
+                "unitId": str(sid),
+                "player": int(tgt_unit["player"]) if tgt_unit is not None else 0,
+                "timestamp": "server_time",
+            })
     del game_state[ctx.alloc_key]
     return {
         "action": ctx.manual_alloc_action,
@@ -5208,22 +5244,27 @@ def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> 
                     batch["current_model_id"] = wounded[0]  # regle : finir une fig entamee
                 else:
                     return _manual_waiting_payload(game_state, batch, alive_grp, ctx)  # choix libre
-            _resolve_one_manual_wound(game_state, alloc, batch)
+            _resolve_one_manual_wound(game_state, alloc, batch, ctx)
         if not advanced_batch:
             break
     return _finalize_manual_allocation(game_state, ctx)
 
 
-def build_manual_shoot_allocation(game_state: Dict[str, Any], attacker_squad_id: str) -> Dict[str, Any]:
-    """Mode manuel (defenseur humain), 100% regles : resout les jets (hit/wound/save_roll)
-    de tous les intents puis DIFFERE save+degats a l allocation. Persiste
-    game_state["pending_shoot_allocation"] sous forme de LOTS (cible x profil d arme,
-    regle 04.03), chacun resolu independamment (groupes + ordre + save croissant 05.04).
-    Decremente SHOOT_LEFT, nettoie les pending intents, rend la main au defenseur
-    (declaration d ordre puis choix de figs) ou termine directement (aucune blessure)."""
+def _build_manual_allocation(
+    game_state: Dict[str, Any], attacker_squad_id: str, ctx: ManualAllocCtx,
+    roll_intent_fn: Callable[[Dict[str, Any], Dict[str, Any], Dict[str, Any]], Optional[Dict[str, Any]]],
+) -> Dict[str, Any]:
+    """Moteur generique d allocation manuelle des pertes (tir ET combat).
+
+    Resout les jets (hit/wound/save_roll) de tous les intents via `roll_intent_fn`
+    (specifique a la phase), puis DIFFERE save+degats a l allocation. Persiste
+    game_state[ctx.alloc_key] sous forme de LOTS (cible x profil d arme, regle 04.03),
+    chacun resolu independamment (groupes + ordre + save croissant 05.04). Decremente
+    ctx.attacks_left_attr par intent, nettoie les pending intents (ctx.intents_key), rend
+    la main au defenseur (declaration d ordre puis choix de figs) ou termine directement."""
     init_pending_intents(game_state)
     models_cache = require_key(game_state, "models_cache")
-    intents = list(game_state["pending_squad_shoot_intents"].get(attacker_squad_id, []))  # get allowed
+    intents = list(game_state[ctx.intents_key].get(attacker_squad_id, []))  # get allowed
     summary: Dict[str, Any] = {
         "attacks_made": 0, "hits": 0, "wounds": 0, "failed_saves": 0,
         "damage_total": 0, "models_killed": 0, "events": [],
@@ -5234,7 +5275,7 @@ def build_manual_shoot_allocation(game_state: Dict[str, Any], attacker_squad_id:
     batch_pool_by_gidx: Dict[int, List[Dict[str, Any]]] = {}
 
     for intent in intents:
-        r = _manual_roll_intent(game_state, intent, targets_meta)
+        r = roll_intent_fn(game_state, intent, targets_meta)
         if r is None:
             continue
         attacker_mid = r["attacker_mid"]
@@ -5272,10 +5313,11 @@ def build_manual_shoot_allocation(game_state: Dict[str, Any], attacker_squad_id:
                 "rec": pw["rec"], "attacker_mid": attacker_mid,
             })
 
-        # decrement SHOOT_LEFT (comme resolve_squad_shoot : 1 par intent resolu)
+        # decrement attacks_left (tir : 1 par intent ; combat : nb d attaques de l intent)
         if attacker_mid in models_cache:
-            sl = int(models_cache[attacker_mid].get("SHOOT_LEFT", 0))  # get allowed
-            models_cache[attacker_mid]["SHOOT_LEFT"] = max(0, sl - 1)
+            al = int(models_cache[attacker_mid].get(ctx.attacks_left_attr, 0))  # get allowed
+            dec = int(counts["attacks"]) if ctx.decrement_by_attacks else 1
+            models_cache[attacker_mid][ctx.attacks_left_attr] = max(0, al - dec)
 
     # Construction des lots (cible x profil d arme, regle 04.03) : tous les profils d une
     # meme cible sont resolus consecutivement (ordre de premiere apparition), avant la
@@ -5306,15 +5348,21 @@ def build_manual_shoot_allocation(game_state: Dict[str, Any], attacker_squad_id:
             })
 
     summary["targets_meta"] = targets_meta
-    game_state[SHOOT_CTX.alloc_key] = {
+    game_state[ctx.alloc_key] = {
         "attacker_squad_id": str(attacker_squad_id),
         "weapon_groups": weapon_groups,
         "batches": batches,
         "current_batch_index": 0,
         "summary": summary,
     }
-    clear_pending_shoot_intent(game_state, attacker_squad_id)
-    return _manual_allocation_step(game_state, SHOOT_CTX)
+    init_pending_intents(game_state)
+    game_state[ctx.intents_key].pop(str(attacker_squad_id), None)
+    return _manual_allocation_step(game_state, ctx)
+
+
+def build_manual_shoot_allocation(game_state: Dict[str, Any], attacker_squad_id: str) -> Dict[str, Any]:
+    """Allocation manuelle des pertes au TIR (defenseur humain). Cf. _build_manual_allocation."""
+    return _build_manual_allocation(game_state, attacker_squad_id, SHOOT_CTX, _manual_roll_intent)
 
 
 def apply_manual_shoot_declare_order(game_state: Dict[str, Any], order: List[Any], ctx: ManualAllocCtx) -> Dict[str, Any]:

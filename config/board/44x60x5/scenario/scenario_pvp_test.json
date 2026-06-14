@@ -24,8 +24,8 @@
       "id": 7, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 124, "row": 20,
       "models": [
         { "col": 124, "row": 20 },
-        { "col": 130, "row": 20 },
-        { "col": 136, "row": 20 },
+        { "col": 130, "row": 25, "unit_type": "CaptainPowerWeaponBolter" },
+        { "col": 136, "row": 20, "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer" },
         { "col": 142, "row": 20 },
         { "col": 127, "row": 14 },
         { "col": 133, "row": 14 },
@@ -87,19 +87,15 @@
       ]
     },
     {
-      "id": 111, "unit_type": "Neurogaunt", "player": 2, "col": 141, "row": 28,
+      "id": 111, "unit_type": "WolfGuardTerminator", "player": 2, "col": 141, "row": 28,
       "models": [
-        { "col": 141, "row": 28 },
-        { "col": 147, "row": 28 },
-        { "col": 153, "row": 28 },
-        { "col": 138, "row": 34 },
-        { "col": 144, "row": 34 },
-        { "col": 150, "row": 34 },
-        { "col": 156, "row": 34 },
-        { "col": 138, "row": 40 },
-        { "col": 144, "row": 40 },
-        { "col": 150, "row": 40 },
-        { "col": 156, "row": 40 }
+        { "col": 141, "row": 28, "unit_type": "WolfGuardTerminatorPackLeader" },
+        { "col": 150, "row": 28, "unit_type": "WolfGuardTerminatorAssaultCannon" },
+        { "col": 159, "row": 28 },
+        { "col": 145, "row": 38 },
+        { "col": 154, "row": 38 },
+        { "col": 163, "row": 38, "unit_type": "LibrarianTerminator" },
+        { "col": 172, "row": 38, "unit_type": "CaptainTerminatorRelicWeaponBolter" }
       ]
     },
     {

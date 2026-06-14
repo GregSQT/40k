@@ -30,7 +30,6 @@ import { areUnitsAdjacent, cubeDistance, offsetToCube } from "../utils/gameHelpe
 import {
   buildOccupiedSet,
   computeOccupiedHexes,
-  engagementRoundRingPreviewHexesOnBoard,
   getContestedObjectives,
   getFightEngagementRingBoardPixels,
   type HexCoord,
@@ -517,7 +516,7 @@ type BoardProps = {
   onCancelSquadShoot?: () => void | Promise<void>;
   /** Allocation manuelle des pertes au tir (defenseur humain) : figs choisissables. */
   manualAllocation?: {
-    kind?: "shoot" | "hazard";
+    kind?: "shoot" | "fight" | "hazard";
     attacker_unit_id: string;
     target_unit_id: string;
     defender_player: number;
@@ -3927,6 +3926,59 @@ export default function Board({
     eligibleUnitIds,
   ]);
 
+  // Allocation manuelle des pertes en COMBAT (PvP) : l'effet de tir ci-dessus est gaté
+  // sur phase==="shoot" et ne couvre donc pas le fight. Ce handler dédié (phase fight,
+  // allocation active) capte le clic du défenseur sur une figurine choisissable de la
+  // cible et l'alloue, exactement comme au tir.
+  useEffect(() => {
+    if (phase !== "fight") return;
+    if (!manualAllocation) return;
+    if (!boardConfig) return;
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!canvas) return;
+    const app = appRef.current;
+    if (!app) return;
+    const HEX_HIT_TOLERANCE = 4;
+    const resolveHex = (e: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
+      const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
+      const px = (e.clientX - rect.left) * scaleX;
+      const py = (e.clientY - rect.top) * scaleY;
+      return pixelToHex(
+        px,
+        py,
+        boardConfig.hex_radius,
+        boardConfig.margin,
+        boardConfig.cols,
+        boardConfig.rows
+      );
+    };
+    const onAllocPointerDown = (e: PointerEvent) => {
+      if (e.target !== canvas) return;
+      const alloc = manualAllocationRef.current;
+      if (!alloc) return;
+      if (e.button !== 0) return;
+      const { col, row } = resolveHex(e);
+      const clickCube = offsetToCube(col, row);
+      let chosen: string | null = null;
+      let bestD = Infinity;
+      for (const c of alloc.choices) {
+        const d = cubeDistance(clickCube, offsetToCube(c.col, c.row));
+        if (d <= HEX_HIT_TOLERANCE && d < bestD) {
+          bestD = d;
+          chosen = c.model_id;
+        }
+      }
+      if (chosen) {
+        e.stopImmediatePropagation();
+        void onAllocateModelRef.current?.(chosen);
+      }
+    };
+    document.addEventListener("pointerdown", onAllocPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onAllocPointerDown, true);
+  }, [phase, manualAllocation, boardConfig]);
+
   // Allocation manuelle des pertes : anneau de surbrillance sur les figurines
   // choisissables (cible). Overlay PIXI dédié sur app.stage (même repère monde que
   // les unités), redessiné à chaque changement d'allocation (donc à chaque mort).
@@ -5853,7 +5905,9 @@ export default function Board({
 
     // Fight preview: fightTargets for red outline on enemies within fight range
     let fightTargets: Unit[] = [];
-    const fightPreviewCells: { col: number; row: number }[] = [];
+    // Centres des socles (par-figurine) de l'unité combattante : rendus en disques lisses
+    // (zone d'engagement) côté board, au lieu de cases hex dures.
+    const fightEngagementModelCenters: Array<[number, number]> = [];
     const gsRulesFight = (
       gameState as { config?: { game_rules?: { engagement_zone?: number } } } | null | undefined
     )?.config?.game_rules;
@@ -5863,9 +5917,9 @@ export default function Board({
     const inchesToSubhexRaw = (boardConfig as unknown as { inches_to_subhex?: number })
       .inches_to_subhex;
     const inchesToSubhex = typeof inchesToSubhexRaw === "number" ? inchesToSubhexRaw : 10;
-    // Plateau ×10 : 1″ ≈ inches_to_subhex pas ; le moteur expose engagement_zone (souvent 10). Si la config
-    // locale reste à 1, on retombe sur inches_to_subhex pour coller à la règle.
-    const fightEngagementHexSteps = engagementFromRules > 1 ? engagementFromRules : inchesToSubhex;
+    // engagement_zone est en POUCES ; conversion en sous-hexes via inches_to_subhex (miroir backend
+    // spatial_relations.get_engagement_zone). Ex. 2" sur board ×5 → 10 sous-hexes.
+    const fightEngagementHexSteps = engagementFromRules * inchesToSubhex;
 
     if (phase === "fight" && selectedUnit && (mode === "select" || mode === "attackPreview")) {
       // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers (imported at top)
@@ -5913,34 +5967,14 @@ export default function Board({
           );
         });
 
-        // Preview rouge : couronne euclidienne par FIGURINE (union du squad), pas l'ancre.
+        // Zone d'engagement par FIGURINE (union du squad), pas l'ancre : on collecte les centres
+        // de socles ; le board les rend en disques lisses fondus (cf. fightEngagementZone).
         const ringByModel = ucFight?.[String(selectedUnit.id)]?.occupied_hexes_by_model;
         const ringCenters: Array<[number, number]> =
           ringByModel && Object.values(ringByModel).length > 0
             ? Object.values(ringByModel).map(([c, r]) => [Number(c), Number(r)] as [number, number])
             : [[selectedUnit.col, selectedUnit.row]];
-        const ringUnionFp =
-          squadFootprintHexKeysFromModelCenters(ringByModel, selectedUnit) ??
-          unitFootprintHexKeys(selectedUnit);
-        const ringSeen = new Set<string>();
-        for (const [cc, cr] of ringCenters) {
-          for (const cell of engagementRoundRingPreviewHexesOnBoard(
-            {
-              col: cc,
-              row: cr,
-              BASE_SHAPE: selectedUnit.BASE_SHAPE,
-              BASE_SIZE: selectedUnit.BASE_SIZE,
-            },
-            fightEngagementHexSteps,
-            BOARD_COLS,
-            BOARD_ROWS
-          )) {
-            const k = `${cell.col},${cell.row}`;
-            if (ringUnionFp.has(k) || ringSeen.has(k)) continue;
-            ringSeen.add(k);
-            fightPreviewCells.push(cell);
-          }
-        }
+        fightEngagementModelCenters.push(...ringCenters);
       }
     }
 
@@ -6256,9 +6290,6 @@ export default function Board({
       } else {
         appendShootingPreviewCells(shootingPreviewSource);
       }
-    }
-    if (phase === "fight" && selectedUnit && mode === "attackPreview") {
-      attackCells.push(...fightPreviewCells);
     }
 
     // Les HP blink / unités en LoS viennent uniquement du backend pour éviter toute fausse cible.
@@ -6608,7 +6639,9 @@ export default function Board({
       gameState as { config?: { game_rules?: { engagement_zone?: number } } } | null | undefined
     )?.config?.game_rules;
     const cfgRules = gameConfig?.game_rules as { engagement_zone?: number } | undefined;
-    const engagementZoneSteps = gsRules?.engagement_zone ?? cfgRules?.engagement_zone ?? 1;
+    // engagement_zone en POUCES → sous-hexes via inches_to_subhex (miroir backend get_engagement_zone).
+    const engagementZoneSteps =
+      (gsRules?.engagement_zone ?? cfgRules?.engagement_zone ?? 1) * inchesToSubhex;
     const hasChargeFootprintOverlay = (chargePreviewOverlayHexes?.length ?? 0) > 0;
     const chargeEngagementHalo =
       !hasChargeFootprintOverlay &&
@@ -6628,8 +6661,8 @@ export default function Board({
           })()
         : undefined;
 
-    // Cercle lisse unique : seulement pour une figurine seule. Pour un squad multi-figs, la bande
-    // de cases par-fig (fightPreviewCells) tient lieu de zone d'engagement (union propre).
+    // Contour lisse fig seule. Pour un squad multi-figs, le remplissage par disques fondus
+    // (fightEngagementZone) tient lieu de zone d'engagement (union propre).
     const fightRingByModel = (
       gameState?.units_cache as
         | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
@@ -6651,6 +6684,34 @@ export default function Board({
             MARGIN
           )
         : undefined;
+
+    // Zone d'engagement rendue en disques pleins fondus (union par-figurine), même rayon que le
+    // contour ci-dessus → rendu lisse identique aux previews move/charge/pile-in.
+    const fightEngagementZone =
+      enginePhaseForPools === "fight" &&
+      selectedUnit &&
+      mode === "attackPreview" &&
+      selectedUnit.CC_WEAPONS &&
+      selectedUnit.CC_WEAPONS.length > 0 &&
+      fightEngagementModelCenters.length > 0 &&
+      fightEngagementHexSteps > 0
+        ? {
+            disks: fightEngagementModelCenters.map(([cc, cr]) => {
+              const ring = getFightEngagementRingBoardPixels(
+                {
+                  col: cc,
+                  row: cr,
+                  BASE_SHAPE: selectedUnit.BASE_SHAPE,
+                  BASE_SIZE: selectedUnit.BASE_SIZE,
+                },
+                fightEngagementHexSteps,
+                HEX_RADIUS,
+                MARGIN
+              );
+              return { cx: ring.cx, cy: ring.cy, rOuter: ring.rOuter };
+            }),
+          }
+        : null;
 
     /**
      * Ancres pour les disques : UI **ou** moteur en move/command (évite désaccord phase affichée / ``game_state``).
@@ -6758,6 +6819,7 @@ export default function Board({
       losDebugVisibilityMinRatio: losVisibilityMinRatio,
       chargeEngagementHalo,
       fightEngagementRing,
+      fightEngagementZone,
     };
 
     const partialFp = computeDrawBoardPartialRedrawFingerprint(

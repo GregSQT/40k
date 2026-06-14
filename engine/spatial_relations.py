@@ -24,17 +24,26 @@ def _require_unit_position_from_cache(
     return int(require_key(unit_entry, "col")), int(require_key(unit_entry, "row"))
 
 
+def _get_inches_to_subhex_from_config(config: Dict[str, Any]) -> int:
+    """Read the board scale (sub-hex per inch) from a config dictionary."""
+    board = require_key(config, "board")
+    default = require_key(board, "default") if "default" in board else board
+    return int(require_key(default, "inches_to_subhex"))
+
+
 def get_engagement_zone(game_state: Dict[str, Any]) -> int:
-    """Read the canonical engagement_zone from game_state config."""
+    """Engagement zone in sub-hexes: engagement_zone (inches) x inches_to_subhex."""
     config = require_key(game_state, "config")
     game_rules = require_key(config, "game_rules")
-    return int(require_key(game_rules, "engagement_zone"))
+    inches = int(require_key(game_rules, "engagement_zone"))
+    return inches * _get_inches_to_subhex_from_config(config)
 
 
 def get_engagement_zone_from_config(config: Dict[str, Any]) -> int:
-    """Read the canonical engagement_zone from a config dictionary."""
+    """Engagement zone in sub-hexes: engagement_zone (inches) x inches_to_subhex."""
     game_rules = require_key(config, "game_rules")
-    return int(require_key(game_rules, "engagement_zone"))
+    inches = int(require_key(game_rules, "engagement_zone"))
+    return inches * _get_inches_to_subhex_from_config(config)
 
 
 def enemy_footprint_distances(

@@ -304,6 +304,37 @@ des pertes** ; conserver `_execute_fight_attack_sequence` pour la résolution + 
 
 ---
 
+## P-bis. État d'implémentation réel (2026-06-14)
+
+**Approche retenue : tranches verticales** (backend + frontend testables ensemble en PvP), PAS l'ordre backend-puis-frontend du tableau ci-dessus — parce que le seul moyen de valider est le test PvP manuel (training cassé), donc une étape backend seule n'est pas validable.
+
+**FAIT et VALIDÉ en PvP :**
+
+1. **Tir — extraction du moteur d'allocation ctx-paramétré** (étape 1) :
+   - `ManualAllocCtx` + `SHOOT_CTX` dans `shared_utils.py` ; build factorisé `_build_manual_allocation` ; `build_manual_shoot_allocation` = wrapper.
+   - Tri 05.04 (save croissant) par lot (cible × profil d'arme, 04.03).
+   - Modale d'ordre enrichie : nom d'arme + PA + dégâts + nb de saves.
+
+2. **Combat — allocation manuelle des pertes** (cœur des étapes 3-4) :
+   - `FIGHT_CTX` + roller dédié `_manual_roll_fight_intent` (fight_handlers.py) : **rerolls combat préservés** (§B/§O), application **par-figurine** (`update_model_hp`/`destroy_model`) + invalidations cache fight (`invalidate_cache_for_target/_unit`, `_remove_dead_unit_from_fight_pools`, §D) via hooks du ctx.
+   - Greffe dans `_fight_v11_manual_step` sous-phase "fight" ; garde-fou `pending_fight_allocation` (w40k_core + manual step) ; log `type:"death"` paramétré.
+   - **Chemin auto PvE/gym strictement inchangé** (HP-pool unité).
+
+3. **Combat — sélection manuelle de l'unité combattante** (12.04) :
+   - `_fight_v11_manual_state`/dispatch exposent tout le pool éligible du sélecteur courant (`fight_eligible_units` → cercles verts) + 2 temps (`activate_unit` puis clic cible).
+   - Frontend : infra réutilisée (anneau vert, `handleSelectUnit`→activate_unit, `handleFightPhaseClick`→left_click) ; ajout d'un effet de clic d'allocation dédié fight (l'effet tir était gaté `phase==="shoot"`).
+
+**Fichiers touchés :** `shared_utils.py`, `fight_handlers.py`, `w40k_core.py`, `frontend/.../useEngineAPI.ts`, `frontend/.../BoardPvp.tsx`.
+
+**NON FAIT (tranches suivantes) :**
+- Choix d'**arme manuel** par figurine (attaquant — actuellement auto par expected damage).
+- Choix de **cible manuel** par figurine / multi-cibles (split melee §04.03 / R.1) — actuellement 1 cible auto par unité.
+- `_model_can_fight_target[_with_weapon]` par-figurine (étape 2 du plan) — non nécessaire pour ces tranches (pool unité-level suffit tant que cible auto).
+- **Precision** (§24.28) et autres abilities non implémentées (pré-existant, tout le moteur).
+- Alternance 12.04 **stricte par-unité** : le V11 actuel laisse un joueur épuiser ses unités avant l'autre (non-alternant) — pré-existant.
+
+---
+
 ## Q. Décisions de revue (2026-06-14)
 
 Vérifications de code + règles menées après rédaction initiale. Trois décisions actées.

@@ -390,8 +390,8 @@ interface RuleChoicePrompt {
 /** Allocation manuelle des pertes au tir (defenseur humain) : le backend renvoie ce
  * payload tant qu'une figurine doit etre choisie pour encaisser (regle 05.04). */
 export interface ManualAllocation {
-  /** "shoot" = pertes du tir (défaut) ; "hazard" = mortal wounds du Desperate Escape (06.02). */
-  kind?: "shoot" | "hazard";
+  /** "shoot" = pertes du tir (défaut) ; "fight" = pertes du combat ; "hazard" = mortal wounds Desperate Escape (06.02). */
+  kind?: "shoot" | "fight" | "hazard";
   attacker_unit_id: string;
   target_unit_id: string;
   defender_player: number;
@@ -413,6 +413,8 @@ export interface ManualOrderGroup {
 }
 
 export interface ManualOrderRequest {
+  /** "shoot" = ordre d'allocation du tir (défaut) ; "fight" = du combat. */
+  kind?: "shoot" | "fight";
   attacker_unit_id: string;
   target_unit_id: string;
   defender_player: number;
@@ -1615,11 +1617,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           // Déclaration de l'ordre des groupes d'allocation (cible hétérogène / CHARACTER) :
           // le backend attend l'ordre avant l'allocation fig par fig.
           if (
-            data.result?.action === "squad_shoot_declare_order" &&
+            (data.result?.action === "squad_shoot_declare_order" ||
+              data.result?.action === "squad_fight_declare_order") &&
             data.result?.waiting_for_player === true &&
             data.result?.order_request
           ) {
-            setManualOrderRequest(data.result.order_request as ManualOrderRequest);
+            const isFightOrder = data.result.action === "squad_fight_declare_order";
+            setManualOrderRequest({
+              ...(data.result.order_request as ManualOrderRequest),
+              kind: isFightOrder ? "fight" : "shoot",
+            });
             if (manualAllocationRef.current !== null) setManualAllocation(null);
             setGameState((p) => {
               const merged = mergeGameStatePreservingOmittedObjectives(
@@ -1636,11 +1643,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           // choix de figurine. Capté ici comme rule_choice ; le garde-fou backend renvoie
           // le même payload tant que l'allocation n'est pas terminée → l'état se ré-arme.
           if (
-            data.result?.action === "squad_shoot_manual_alloc" &&
+            (data.result?.action === "squad_shoot_manual_alloc" ||
+              data.result?.action === "squad_fight_manual_alloc") &&
             data.result?.waiting_for_player === true &&
             data.result?.allocation
           ) {
-            setManualAllocation(data.result.allocation as ManualAllocation);
+            const isFightAlloc = data.result.action === "squad_fight_manual_alloc";
+            setManualAllocation({
+              ...(data.result.allocation as ManualAllocation),
+              kind: isFightAlloc ? "fight" : "shoot",
+            });
             if (manualOrderRequestRef.current !== null) setManualOrderRequest(null);
             setGameState((p) => {
               const merged = mergeGameStatePreservingOmittedObjectives(
@@ -4379,6 +4391,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           });
           return;
         }
+        if (alloc.kind === "fight") {
+          // Combat (05.04) : clic figurine pour allouer une perte de mêlée.
+          await executeAction({
+            action: "squad_fight_manual_alloc",
+            unitId: String(alloc.attacker_unit_id),
+            modelId: String(modelId),
+          });
+          return;
+        }
         await executeAction({
           action: "squad_shoot_allocate_model",
           unitId: String(alloc.attacker_unit_id),
@@ -4420,7 +4441,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (!req) return;
       try {
         await executeAction({
-          action: "squad_shoot_declare_order",
+          action: req.kind === "fight" ? "squad_fight_declare_order" : "squad_shoot_declare_order",
           unitId: String(req.attacker_unit_id),
           order,
         });

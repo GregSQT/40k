@@ -201,6 +201,7 @@ export function computeDrawBoardPartialRedrawFingerprint(
     movePreviewFootprintMaskLoops = null,
     chargeEngagementHalo,
     fightEngagementRing,
+    fightEngagementZone,
   } = options || {};
 
   const useAdvanceMovePoolLikeMove = mode === "advancePreview";
@@ -315,6 +316,7 @@ export function computeDrawBoardPartialRedrawFingerprint(
         : null,
     chargeEngagementHalo: chargeEngagementHalo ?? null,
     fightEngagementRing: fightEngagementRing ?? null,
+    fightEngagementZone: fightEngagementZone ?? null,
   };
 
   const structuralKey = JSON.stringify(structuralPayload);
@@ -855,6 +857,10 @@ export interface DrawBoardOptions {
     rInner: number;
     rOuter: number;
   };
+  /** Zone d'engagement combat : disques pleins fondus (union par-figurine) → rendu lisse. */
+  fightEngagementZone?: {
+    disks: Array<{ cx: number; cy: number; rOuter: number }>;
+  } | null;
   /**
    * Contours masque move (coord. monde), envoyés par l’API — prioritaires sur
    * ``footprintZonePoolRef`` (évite un gros JSON de milliers d’hex).
@@ -1865,6 +1871,7 @@ export const drawBoard = (
       losDebugVisibilityMinRatio: _losDebugVisibilityMinRatio = 0,
       chargeEngagementHalo,
       fightEngagementRing,
+      fightEngagementZone,
       movePreviewFootprintMaskLoops = null,
       chargeModelMaskLoops = null,
     } = options || {};
@@ -2780,6 +2787,27 @@ export const drawBoard = (
       );
 
       highlightContainer.addChild(hitArea);
+    }
+
+    if (fightEngagementZone && fightEngagementZone.disks.length > 0) {
+      const ezGfx = new PIXI.Graphics();
+      ezGfx.name = "fight-engagement-zone-fill";
+      ezGfx.eventMode = "none";
+      // beginFill alpha=1 dans un seul Graphics : les disques se fondent sans surbrillance des
+      // recouvrements ; l'alpha doux est appliqué au sprite (cf. union move/charge).
+      ezGfx.beginFill(ATTACK_COLOR, 1.0);
+      for (const d of fightEngagementZone.disks) {
+        if (
+          Number.isFinite(d.cx) &&
+          Number.isFinite(d.cy) &&
+          Number.isFinite(d.rOuter) &&
+          d.rOuter > 1
+        ) {
+          ezGfx.drawCircle(d.cx, d.cy, d.rOuter);
+        }
+      }
+      ezGfx.endFill();
+      addFootprintHighlightSprite(app, highlightContainer, ezGfx, 0.18, "fight-engagement-zone");
     }
 
     if (
