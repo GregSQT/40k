@@ -482,6 +482,8 @@ type BoardProps = {
   } | null;
   /** Mode Focus pile-in : voile violet sur les cibles + clic cible → auto-placement. */
   pileInFocusActive?: boolean;
+  /** Cible pile-in mémorisée (focus) → anneau distinct. */
+  pileInFocusTargetId?: string | null;
   onPileInFocusTargetClick?: (targetId: number | string) => void | Promise<void>;
   /** Pool (hexes "col,row") de la fig de pile-in active. */
   pileInModelPoolRef?: React.RefObject<Set<string>>;
@@ -842,6 +844,7 @@ export default function Board({
   onChargeFocusTargetClick,
   pileInMovePlan = null,
   pileInFocusActive = false,
+  pileInFocusTargetId = null,
   onPileInFocusTargetClick,
   pileInModelPoolRef,
   pileInModelMaskLoopsRef,
@@ -3623,8 +3626,8 @@ export default function Board({
             return;
           }
         }
-        // Idem pile-in : clic sur une cible pile-in en mode focus → auto-placement (ILP).
-        if (isPileInModelMove && pileInFocusActive && (pileInMovePlan?.pileInTargets?.length ?? 0) > 0) {
+        // Idem pile-in : clic sur une cible pile-in → mémorise la cible (+ autoplace si mode actif).
+        if (isPileInModelMove && (pileInMovePlan?.pileInTargets?.length ?? 0) > 0) {
           const uc = gameState?.units_cache as
             | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
             | undefined;
@@ -3702,7 +3705,6 @@ export default function Board({
     boardConfig,
     chargeFocusActive,
     chargePreviewTargetIds,
-    pileInFocusActive,
     pileInMovePlan?.pileInTargets,
     gameState?.units_cache,
   ]);
@@ -4134,9 +4136,10 @@ export default function Board({
       // Pile-in : Focus → cercle violet (contour) sur les cibles ; voile VERT sur les figs en mesure
       // de frapper (≤ EZ d'une cible). Le voile vert s'affiche que le Focus soit actif ou non.
       if (isPileInModelMove && pileInMovePlan) {
-        if (pileInFocusActive) {
-          const VIOLET = 0x8a2be2;
-          for (const uid of pileInMovePlan.pileInTargets) drawTargetRing(uid, VIOLET);
+        const VIOLET = 0x8a2be2;
+        const FOCUS = 0xffd700; // cible mémorisée → anneau or
+        for (const uid of pileInMovePlan.pileInTargets) {
+          drawTargetRing(uid, String(uid) === String(pileInFocusTargetId) ? FOCUS : VIOLET);
         }
         const pu = units.find((u) => String(u.id) === String(pileInMovePlan.unitId));
         const pByModel = ucTargets?.[String(pileInMovePlan.unitId)]?.occupied_hexes_by_model;
@@ -4178,6 +4181,7 @@ export default function Board({
     chargeFocusActive,
     chargePreviewTargetIds,
     pileInFocusActive,
+    pileInFocusTargetId,
   ]);
 
   // Ghost per-figurine (charge model move) : calque exact du ghost move per-fig — le fantôme de la

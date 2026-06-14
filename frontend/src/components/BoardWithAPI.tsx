@@ -4353,6 +4353,7 @@ export const BoardWithAPI: React.FC = () => {
             onChargeFocusTargetClick={isGameOver ? async () => {} : apiProps.onChargeFocusTargetClick}
             pileInMovePlan={apiProps.pileInMovePlan}
             pileInFocusActive={apiProps.pileInFocusActive}
+            pileInFocusTargetId={apiProps.pileInFocusTargetId}
             onPileInFocusTargetClick={isGameOver ? async () => {} : apiProps.onPileInFocusTargetClick}
             pileInModelPoolRef={apiProps.pileInModelPoolRef}
             pileInModelMaskLoopsRef={apiProps.pileInModelMaskLoopsRef}

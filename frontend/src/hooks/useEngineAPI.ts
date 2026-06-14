@@ -594,6 +594,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [pileInFocusMode, setPileInFocusMode] = useState<null | "defensive" | "offensive">(null);
   const pileInFocusModeRef = useRef<null | "defensive" | "offensive">(null);
   pileInFocusModeRef.current = pileInFocusMode;
+  /** Cible pile-in mémorisée (focus) : relance l'autoplace quand un mode est (re)choisi. */
+  const [pileInFocusTargetId, setPileInFocusTargetId] = useState<string | null>(null);
+  const pileInFocusTargetIdRef = useRef<string | null>(null);
+  pileInFocusTargetIdRef.current = pileInFocusTargetId;
   /** Pool (hexes "col,row") de la fig pile-in active. */
   const pileInModelPoolRef = useRef<Set<string>>(new Set());
   /** Mask loops (polygone lissé monde) de la zone de landing de la fig pile-in active. */
@@ -5537,22 +5541,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [postEngineQuery, applyPileInPlanState]
   );
 
-  /** Boutons Focus pile-in (Défensif / Offensif) : (dé)active le mode (re-clic même mode = off). */
-  const handleSetPileInFocus = useCallback((mode: "defensive" | "offensive") => {
-    setPileInFocusMode((prev) => (prev === mode ? null : mode));
-  }, []);
-
-  /** Clic sur une cible pile-in en mode focus : demande l'auto-placement optimal (pile_in_autoplace)
-   * selon le mode actif, charge ce plan dans le plan provisoire, puis revalide. Ajustement manuel
-   * possible ensuite. */
-  const handlePileInFocusTargetClick = useCallback(
-    async (targetId: number | string) => {
-      const plan = pileInMovePlanRef.current;
-      const mode = pileInFocusModeRef.current;
-      if (!plan || !mode) return;
-      const tid = String(targetId);
-      if (!plan.pileInTargets.includes(tid)) return; // seule une cible pile-in est focusable
-      const result = await postEngineQuery({ action: "pile_in_autoplace", targetId: tid, mode });
+  /** Lance pile_in_autoplace pour (cible, mode) et charge le plan optimal dans le plan provisoire,
+   * puis revalide. Ne reset NI le mode NI la cible mémorisés : on peut enchaîner les changements. */
+  const runPileInAutoplace = useCallback(
+    async (targetId: string, mode: "defensive" | "offensive") => {
+      const result = await postEngineQuery({ action: "pile_in_autoplace", targetId, mode });
       if (!result) throw new Error("pile_in_autoplace: réponse vide");
       const planArr = (result.plan ?? []) as Array<[string, number, number]>;
       const models: Record<string, { col: number; row: number }> = {};
@@ -5561,11 +5554,37 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
       pileInModelPoolRef.current = new Set();
       pileInModelMaskLoopsRef.current = null;
-      setPileInFocusMode(null);
       setPileInMovePlan((prev) => (prev ? { ...prev, models, activeModelId: null } : prev));
       await refreshPileInPlanState(models, null);
     },
     [postEngineQuery, refreshPileInPlanState]
+  );
+
+  /** Boutons Focus pile-in (Défensif / Offensif) : (dé)active le mode (re-clic même mode = off).
+   * Si une cible est déjà mémorisée, (re)lance l'autoplace avec ce mode. */
+  const handleSetPileInFocus = useCallback(
+    (mode: "defensive" | "offensive") => {
+      const next = pileInFocusModeRef.current === mode ? null : mode;
+      setPileInFocusMode(next);
+      const tid = pileInFocusTargetIdRef.current;
+      if (next && tid) void runPileInAutoplace(tid, next);
+    },
+    [runPileInAutoplace]
+  );
+
+  /** Clic sur une cible pile-in : la mémorise (focus). Si un mode est déjà actif, (re)lance
+   * l'auto-placement optimal pour cette cible. Ajustement manuel possible ensuite. */
+  const handlePileInFocusTargetClick = useCallback(
+    async (targetId: number | string) => {
+      const plan = pileInMovePlanRef.current;
+      if (!plan) return;
+      const tid = String(targetId);
+      if (!plan.pileInTargets.includes(tid)) return; // seule une cible pile-in est focusable
+      setPileInFocusTargetId(tid);
+      const mode = pileInFocusModeRef.current;
+      if (mode) await runPileInAutoplace(tid, mode);
+    },
+    [runPileInAutoplace]
   );
 
   /** Clic sur une fig éligible : la rend active + demande SON pool au backend (calcul ciblé). */
@@ -5622,6 +5641,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       pileInModelPoolRef.current = new Set();
       pileInModelMaskLoopsRef.current = null;
       setPileInFocusMode(null);
+      setPileInFocusTargetId(null);
       setPileInMovePlan(null);
       setSelectedUnitId(null);
       setMode("select");
@@ -5636,6 +5656,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     pileInModelPoolRef.current = new Set();
     pileInModelMaskLoopsRef.current = null;
     setPileInFocusMode(null);
+    setPileInFocusTargetId(null);
     setPileInMovePlan(null);
     try {
       await executeAction({ action: "skip" });
@@ -6084,6 +6105,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       pileInMovePlan: null,
       pileInFocusActive: false,
       pileInFocusMode: null as null | "defensive" | "offensive",
+      pileInFocusTargetId: null as string | null,
       pileInModelPoolRef,
       pileInModelMaskLoopsRef,
       onSelectPileInModel: () => {},
@@ -6256,6 +6278,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     pileInMovePlan,
     pileInFocusActive: pileInFocusMode != null,
     pileInFocusMode,
+    pileInFocusTargetId,
     pileInModelPoolRef,
     pileInModelMaskLoopsRef,
     onSelectPileInModel: handleSelectPileInModel,
