@@ -2655,18 +2655,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setSelectedUnitId(unitId);
             setMode("attackPreview");
 
-            // Set attackPreview state for red hexes to appear
-            interface UnitWithId {
-              id: string | number;
-              col: number;
-              row: number;
-            }
-            const unit = data.game_state.units.find(
-              (u: UnitWithId) => parseInt(u.id.toString(), 10) === unitId
-            );
-            if (unit) {
-              setAttackPreview({ unitId, col: unit.col, row: unit.row });
-            }
+            // L'EZ rouge du combat dépend du MODE "attackPreview", pas de l'OBJET attackPreview
+            // (concept TIR : tireur à sa position de preview). En fight l'unité n'a pas bougé et a
+            // plusieurs figurines → poser l'objet la ferait sauter du rendu principal (BoardPvp
+            // continue 7204) puis redessiner en figurine unique à l'ancre. On le laisse donc null.
+            setAttackPreview(null);
 
             // Start/update blinking for valid fight targets (keep attacker in sync)
             if (data.result.valid_targets.length > 0) {
