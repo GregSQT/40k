@@ -62,6 +62,62 @@ function prettifyUnitType(t: string | null): string {
     .trim();
 }
 
+/** Clé stable d'un groupe (le group_id change à chaque activation) pour mémoriser l'ordre. */
+function manualOrderGroupKey(g: ManualOrderGroup): string {
+  return `${g.unit_type ?? "?"}|${g.role ?? "?"}|${g.is_character ? "C" : "N"}`;
+}
+
+/**
+ * Bucket de contrainte d'allocation (40k 05.03), priorité croissante :
+ * 0 = non-CHARACTER blessé, 1 = non-CHARACTER sain, 2 = CHARACTER blessé, 3 = CHARACTER sain.
+ * Un ordre est légal ssi les buckets sont non décroissants ; le réordonnancement par
+ * drag & drop n'est autorisé qu'à l'intérieur d'un même bucket.
+ */
+function manualOrderBucket(g: ManualOrderGroup): number {
+  return (g.is_character ? 2 : 0) + (g.has_wounded ? 0 : 1);
+}
+
+/** Vrai si la séquence respecte la contrainte de bucket (non décroissant). */
+function isManualOrderLegal(groups: ManualOrderGroup[]): boolean {
+  for (let i = 1; i < groups.length; i++) {
+    if (manualOrderBucket(groups[i]) < manualOrderBucket(groups[i - 1])) return false;
+  }
+  return true;
+}
+
+/** Déplace l'élément `from` vers la position `to` (copie). */
+function moveItem<T>(arr: T[], from: number, to: number): T[] {
+  const next = arr.slice();
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
+/** Préférence d'ordre mémorisée entre activations (tir/combat séparés), par clé de type. */
+const manualOrderPreference: { shoot: string[]; fight: string[] } = { shoot: [], fight: [] };
+
+/**
+ * Ordre par défaut : contrainte de bucket d'abord, puis préférence mémorisée (si demandée),
+ * puis group_id pour la stabilité.
+ */
+function defaultManualOrder(
+  groups: ManualOrderGroup[],
+  kind: "shoot" | "fight",
+  usePreference: boolean
+): ManualOrderGroup[] {
+  const pref = manualOrderPreference[kind];
+  const prefIndex = (g: ManualOrderGroup) => {
+    const i = pref.indexOf(manualOrderGroupKey(g));
+    return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+  };
+  return [...groups].sort(
+    (a, b) =>
+      manualOrderBucket(a) - manualOrderBucket(b) ||
+      (usePreference ? prefIndex(a) - prefIndex(b) : 0) ||
+      a.group_id - b.group_id
+  );
+}
+
 /**
  * Déclaration de l'ordre d'allocation des pertes (règles 40k 05.03) : le défenseur
  * ordonne les groupes (cible hétérogène / CHARACTER). Même layout que le menu d'arme
@@ -77,7 +133,12 @@ function ManualOrderPicker({
   onSubmit: (order: number[]) => void;
 }) {
   // L'état est réinitialisé par remount (key sur le call-site) à chaque nouvelle requête.
-  const [order, setOrder] = useState<number[]>([]);
+  const kind: "shoot" | "fight" = request.kind === "fight" ? "fight" : "shoot";
+  // Ordre complet pré-rempli (contrainte + préférence mémorisée) ; réordonnable par DnD.
+  const [orderedGroups, setOrderedGroups] = useState<ManualOrderGroup[]>(() =>
+    defaultManualOrder(request.groups, kind, true)
+  );
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [pos, setPos] = useState({ x: 360, y: 140 });
   const dragOffset = useRef<{ x: number; y: number } | null>(null);
 
@@ -100,19 +161,21 @@ function ManualOrderPicker({
     [pos]
   );
 
-  const remaining = request.groups.filter((g) => !order.includes(g.group_id));
-  const nonChar = remaining.filter((g) => !g.is_character);
-  let pickable: ManualOrderGroup[];
-  if (nonChar.length > 0) {
-    const wounded = nonChar.filter((g) => g.has_wounded);
-    pickable = wounded.length > 0 ? wounded : nonChar;
-  } else {
-    const chars = remaining.filter((g) => g.is_character);
-    const wounded = chars.filter((g) => g.has_wounded);
-    pickable = wounded.length > 0 ? wounded : chars;
-  }
-  const pickableIds = new Set(pickable.map((g) => g.group_id));
-  const complete = order.length === request.groups.length;
+  // Cible du drop : autorisée uniquement si le réordonnancement reste légal (même bucket).
+  const dropAllowed = (target: number) =>
+    dragIdx !== null && isManualOrderLegal(moveItem(orderedGroups, dragIdx, target));
+
+  const onRowDrop = (target: number) => {
+    if (dragIdx === null) return;
+    const next = moveItem(orderedGroups, dragIdx, target);
+    if (isManualOrderLegal(next)) setOrderedGroups(next);
+    setDragIdx(null);
+  };
+
+  const handleSubmit = () => {
+    manualOrderPreference[kind] = orderedGroups.map(manualOrderGroupKey);
+    onSubmit(orderedGroups.map((g) => g.group_id));
+  };
 
   return (
     <div
@@ -140,22 +203,25 @@ function ManualOrderPicker({
           </tr>
         </thead>
         <tbody>
-          {request.groups.map((g) => {
-            const orderIdx = order.indexOf(g.group_id);
-            const inOrder = orderIdx >= 0;
-            const isPickable = pickableIds.has(g.group_id);
-            const isDisabled = !inOrder && !isPickable;
+          {orderedGroups.map((g, i) => {
+            const isDragging = dragIdx === i;
+            const canDrop = dragIdx !== null && dragIdx !== i && dropAllowed(i);
             return (
               <tr
                 key={g.group_id}
-                className={[inOrder ? "selected" : "", isDisabled ? "disabled" : ""]
+                className={["selected", isDragging ? "dragging" : "", canDrop ? "drop-target" : ""]
                   .filter(Boolean)
                   .join(" ")}
-                onClick={() => {
-                  if (isPickable) setOrder((prev) => [...prev, g.group_id]);
+                draggable
+                onDragStart={() => setDragIdx(i)}
+                onDragOver={(e) => {
+                  if (canDrop) e.preventDefault();
                 }}
+                onDrop={() => onRowDrop(i)}
+                onDragEnd={() => setDragIdx(null)}
+                title="Glisser pour réordonner (à l'intérieur de la même catégorie)"
               >
-                <td>{inOrder ? orderIdx + 1 : "—"}</td>
+                <td>⠿ {i + 1}</td>
                 <td>{prettifyUnitType(g.unit_type) || (g.is_character ? "CHARACTER" : "Figs")}</td>
                 <td>{g.W}</td>
                 <td>{g.Sv}+</td>
@@ -171,10 +237,13 @@ function ManualOrderPicker({
         </tbody>
       </table>
       <div className="weapon-dropdown-actions">
-        <button type="button" disabled={order.length === 0} onClick={() => setOrder([])}>
+        <button
+          type="button"
+          onClick={() => setOrderedGroups(defaultManualOrder(request.groups, kind, false))}
+        >
           Réinitialiser
         </button>
-        <button type="button" disabled={!complete} onClick={() => onSubmit(order)}>
+        <button type="button" disabled={orderedGroups.length === 0} onClick={handleSubmit}>
           Valider l'ordre
         </button>
       </div>

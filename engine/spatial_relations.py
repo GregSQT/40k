@@ -24,26 +24,18 @@ def _require_unit_position_from_cache(
     return int(require_key(unit_entry, "col")), int(require_key(unit_entry, "row"))
 
 
-def _get_inches_to_subhex_from_config(config: Dict[str, Any]) -> int:
-    """Read the board scale (sub-hex per inch) from a config dictionary."""
-    board = require_key(config, "board")
-    default = require_key(board, "default") if "default" in board else board
-    return int(require_key(default, "inches_to_subhex"))
-
-
 def get_engagement_zone(game_state: Dict[str, Any]) -> int:
-    """Engagement zone in sub-hexes: engagement_zone (inches) x inches_to_subhex."""
+    """Engagement zone en sous-hexes. NB: game_rules['engagement_zone'] est DÉJÀ converti
+    (× inches_to_subhex) au chargement dans w40k_core (clé scalée). Ne PAS re-multiplier ici."""
     config = require_key(game_state, "config")
     game_rules = require_key(config, "game_rules")
-    inches = int(require_key(game_rules, "engagement_zone"))
-    return inches * _get_inches_to_subhex_from_config(config)
+    return int(require_key(game_rules, "engagement_zone"))
 
 
 def get_engagement_zone_from_config(config: Dict[str, Any]) -> int:
-    """Engagement zone in sub-hexes: engagement_zone (inches) x inches_to_subhex."""
+    """engagement_zone déjà converti au chargement (cf. get_engagement_zone)."""
     game_rules = require_key(config, "game_rules")
-    inches = int(require_key(game_rules, "engagement_zone"))
-    return inches * _get_inches_to_subhex_from_config(config)
+    return int(require_key(game_rules, "engagement_zone"))
 
 
 def enemy_footprint_distances(

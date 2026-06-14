@@ -1307,13 +1307,15 @@ def _compute_enemy_adjacent_cache_for_player_from_units_cache(
 ) -> Tuple[Dict[Tuple[int, int], int], Set[Tuple[int, int]]]:
     """Compute per-player engagement-zone counters and set from current units_cache.
 
-    Uses engagement_zone from game_rules (1 for legacy, 10 for ×10).
-    For each enemy unit, dilates its occupied_hexes by engagement_zone distance.
+    For each enemy unit, dilates its occupied_hexes by the engagement zone distance
+    (get_engagement_zone = engagement_zone inches × inches_to_subhex), cohérent avec
+    l'éligibilité fight/pile-in et le blocage mouvement. NB: avant, ce cache dilatait de
+    inches_to_subhex (1") en supposant engagement_zone == 1" ; faux dès engagement_zone ≠ 1".
     """
     units_cache = require_key(game_state, "units_cache")
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
-    ez_dilation = int(require_key(game_state, "inches_to_subhex"))
+    ez_dilation = int(get_engagement_zone(game_state))
     player_int = int(player)
 
     all_enemy_occupied: Set[Tuple[int, int]] = set()
@@ -1412,7 +1414,9 @@ def _build_enemy_adjacent_structures_from_units_cache(
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
     units_cache = require_key(game_state, "units_cache")
-    ez_dilation = int(require_key(game_state, "inches_to_subhex"))
+    # engagement zone réelle (engagement_zone inches × inches_to_subhex), PAS inches_to_subhex seul
+    # (= 1") : sinon move/tir détectent l'engagement à 1" et le fight à 2" (incohérent).
+    ez_dilation = int(get_engagement_zone(game_state))
     from engine.hex_utils import dilate_hex_set
 
     counters_by_player: Dict[int, Dict[Tuple[int, int], int]] = {
