@@ -5574,36 +5574,73 @@ def pile_in_autoplace_plan(
     for mid in movable:
         by_base.setdefault(_base_key(models_cache[mid]), []).append(mid)
 
+    # Rayon d'empreinte EN CASES par base (marge de balayage correcte ; cf. charge_autoplace_plan :
+    # BASE_SIZE en mm dilatait ~13× trop loin). Les deux parités de colonne sont couvertes.
+    def _base_fp_radius(rep_model: Dict[str, Any]) -> int:
+        rmax = 0
+        for pc, pr in ((0, 0), (1, 0)):
+            for cell in _charge_model_footprint(game_state, rep_model, pc, pr):
+                rmax = max(rmax, min_distance_between_sets({(pc, pr)}, {cell}))
+        return int(rmax)
+
+    fp_radius_by_base = {b: _base_fp_radius(models_cache[m[0]]) for b, m in by_base.items()}
+    _max_fp_radius = max(fp_radius_by_base.values()) if fp_radius_by_base else 0
+
+    # Champs de distance hex multi-source (sans obstacle), calculés UNE fois. Identité métrique cube
+    # (hex_utils) : min_distance_between_sets(fp, S) == min(dist_field_S[cell] for cell in fp). Remplace
+    # les appels par-slot min_distance_between_sets par un lookup O(1). dist_to_focus → df (objectif) et
+    # near_cells (balayage borné, vs rectangle plein) ; dist_to_tier → slot_min (WHILE « plus proche »).
+    def _distance_field(sources: Set[Tuple[int, int]], radius: int) -> Dict[Tuple[int, int], int]:
+        field: Dict[Tuple[int, int], int] = {cell: 0 for cell in sources}
+        frontier: List[Tuple[int, int]] = list(sources)
+        for _lay in range(1, radius + 1):
+            nf: List[Tuple[int, int]] = []
+            for cc, rr in frontier:
+                for nc, nr in get_hex_neighbors(cc, rr):
+                    if 0 <= nc < board_cols and 0 <= nr < board_rows and (nc, nr) not in field:
+                        field[(nc, nr)] = _lay
+                        nf.append((nc, nr))
+            frontier = nf
+            if not frontier:
+                break
+        return field
+
+    _max_margin = max((ez + r + 2 for r in fp_radius_by_base.values()), default=ez + 2)
+    _focus_field_radius = _max_margin + _max_fp_radius + 1
+    dist_to_focus = _distance_field(set(focus_fp), _focus_field_radius)
+    _tier_sources: Set[Tuple[int, int]] = set()
+    for _tfp in tier_fps:
+        _tier_sources |= _tfp
+    dist_to_tier = _distance_field(_tier_sources, board_cols + board_rows)
+
+    # Zone d'intérêt = cellules ≤ _focus_field_radius du focus. Au-delà, un blocker ne peut chevaucher
+    # aucun slot (dont l'empreinte est dans cette zone) → on filtre UNE fois pour le balayage des slots.
+    # Le repli garde static_blockers complet (positions de repli potentiellement hors zone).
+    _zone = set(dist_to_focus)
+    near_blockers = [s for s in static_blockers if s.fp & _zone]
+
     # Liste GLOBALE des slots (toutes bases) : (col, row, Socle, slot_min_to_tier, dist_to_focus).
     all_slots: List[Tuple[int, int, Any, int, int]] = []
     # slots_by_base[bkey] = [index dans all_slots, ...]
     slots_by_base: Dict[Tuple[Any, Any], List[int]] = {}
-    fcs = [c for c, _ in focus_fp]
-    frs = [r for _, r in focus_fp]
     for bkey, mids in by_base.items():
         rep_id = mids[0]
-        rep = models_cache[rep_id]
-        bs = rep["BASE_SIZE"]
-        base_dim = max(bs) if isinstance(bs, (list, tuple)) else bs
-        margin = ez + int(base_dim) + 2
+        margin = ez + fp_radius_by_base[bkey] + 2
+        near_cells = sorted(cell for cell, d in dist_to_focus.items() if d <= margin)
         idxs: List[int] = []
-        for c in range(min(fcs) - margin, max(fcs) + margin + 1):
-            if c < 0 or c >= board_cols:
+        for (c, r) in near_cells:
+            soc = _socle(rep_id, c, r)
+            fps = set(soc.fp)
+            if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in fps):
                 continue
-            for r in range(min(frs) - margin, max(frs) + margin + 1):
-                if r < 0 or r >= board_rows:
-                    continue
-                soc = _socle(rep_id, c, r)
-                if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in soc.fp):
-                    continue
-                if _overlaps(soc, static_blockers):
-                    continue
-                if not _engages_focus(c, r, set(soc.fp)):
-                    continue
-                idxs.append(len(all_slots))
-                all_slots.append(
-                    (c, r, soc, _fp_min_to_tier(set(soc.fp)), min_distance_between_sets(set(soc.fp), focus_fp))
-                )
+            if _overlaps(soc, near_blockers):
+                continue
+            if not _engages_focus(c, r, fps):
+                continue
+            slot_min = min((dist_to_tier[cell] for cell in fps if cell in dist_to_tier), default=1 << 30)
+            df_slot = min((dist_to_focus[cell] for cell in fps if cell in dist_to_focus), default=1 << 30)
+            idxs.append(len(all_slots))
+            all_slots.append((c, r, soc, slot_min, df_slot))
         slots_by_base[bkey] = idxs
 
     # --- Atteignabilité par fig (BFS centre-à-centre ≤ budget, amies traversables). ---
@@ -5611,7 +5648,12 @@ def pile_in_autoplace_plan(
     start_fp = {mid: _model_fp(mid, *starts[mid]) for mid in movable}
     start_min = {mid: _fp_min_to_tier(start_fp[mid]) for mid in movable}
 
+    _reach_cache: Dict[str, Dict[Tuple[int, int], int]] = {}
+
     def _reachable(mid: str) -> Dict[Tuple[int, int], int]:
+        cached = _reach_cache.get(mid)
+        if cached is not None:
+            return cached  # même fig réutilisée au repli → pas de 2e BFS
         sc, sr = starts[mid]
         dist: Dict[Tuple[int, int], int] = {(sc, sr): 0}
         queue: deque = deque([(sc, sr, 0)])
@@ -5627,6 +5669,7 @@ def pile_in_autoplace_plan(
                     continue
                 dist[cell] = d + 1
                 queue.append((nc, nr, d + 1))
+        _reach_cache[mid] = dist
         return dist
 
     # Engagements de départ par fig (AFTER : à conserver au slot).
