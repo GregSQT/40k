@@ -99,6 +99,13 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
             const weapon = weaponOption.weapon;
             const isDisabled = !weaponOption.canUse;
             const disabledReason = !weaponOption.canUse ? weaponOption.reason : null;
+            // Combi non déclarée : texte légèrement grisé. Arme déclarée : fond vert foncé.
+            const isCombi = !!weapon.COMBI_WEAPON;
+            const nameStyle = weaponOption.assigned
+              ? undefined
+              : isCombi
+                ? { color: "#aaa", opacity: 0.75 }
+                : undefined;
 
             return (
               <tr
@@ -109,6 +116,9 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
                 ]
                   .filter(Boolean)
                   .join(" ")}
+                style={
+                  weaponOption.assigned ? { backgroundColor: "rgba(20,83,45,0.7)" } : undefined
+                }
                 onClick={() => {
                   if (!isDisabled) {
                     setSelectedIndex(weaponOption.index);
@@ -137,11 +147,7 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
                         <span className="combi-badge">C</span>
                       </TooltipWrapper>
                     )}
-                    <span
-                      style={weaponOption.assigned ? { color: "#888", opacity: 0.6 } : undefined}
-                    >
-                      {weapon.display_name}
-                    </span>
+                    <span style={nameStyle}>{weapon.display_name}</span>
                     {weapon.WEAPON_RULES?.map((rule) => (
                       <span key={rule} className="rule-badge-wrapper">
                         <span className="rule-badge">
