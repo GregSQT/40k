@@ -2107,28 +2107,11 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             _hi_c = start_col + (board_cols - 1) - _max_fc - _fc_off_max
             _lo_r = start_row - _min_fr - _fr_off_min
             _hi_r = start_row + (board_rows - 1) - _max_fr - _fr_off_max
-            _n_before = len(valid_destinations)
             valid_destinations = [
                 (c, r)
                 for (c, r) in valid_destinations
                 if _lo_c <= c <= _hi_c and _lo_r <= r <= _hi_r
             ]
-            if not read_only:
-                print(
-                    f"[DEBUG SQUAD_BOUNDS] u={unit_id} start=({start_col},{start_row}) "
-                    f"board=({board_cols}x{board_rows}) n_figs={len(_by_model)} "
-                    f"bbox_c=[{_min_fc},{_max_fc}] bbox_r=[{_min_fr},{_max_fr}] "
-                    f"fp_off_c=[{_fc_off_min},{_fc_off_max}] fp_off_r=[{_fr_off_min},{_fr_off_max}] "
-                    f"rect_c=[{_lo_c},{_hi_c}] rect_r=[{_lo_r},{_hi_r}] "
-                    f"pool {_n_before}->{len(valid_destinations)}",
-                    flush=True,
-                )
-        elif not read_only:
-            print(
-                f"[DEBUG SQUAD_BOUNDS] u={unit_id} _by_model ABSENT/VIDE "
-                f"(entry={'present' if _sq_entry else 'None'}) -> AUCUN bornage",
-                flush=True,
-            )
 
     if read_only:
         return valid_destinations
@@ -2339,6 +2322,48 @@ def movement_build_model_destinations_pool(
                 continue
             reachable.append(cell)
 
+    # Empêche le DÉPÔT sur un chevauchement de socle avec une coéquipière (au lieu de le
+    # détecter après coup via le voile rouge) : on retire du pool les destinations où le socle
+    # du mover chevaucherait une fig sœur, en clearance euclidienne par base RÉELLE — même
+    # primitive (footprints_overlap) que movement_preview_move_plan → pool et voile cohérents.
+    # Tangence (gap≈0) tolérée. dest_blocked (footprint hex) sous-estime le disque et laissait
+    # passer ~16% de recouvrement à 5 sous-hex ; ce filtre le supprime à la source.
+    from engine.hex_utils import Socle, footprints_overlap
+    _mover_shape = require_key(model, "BASE_SHAPE")
+    _mover_base = require_key(model, "BASE_SIZE")
+    _mover_orient = int(unit.get("orientation", 0))  # get allowed
+    _sibling_socles: List[Socle] = []
+    for _sid_m in _squad_models.get(squad_id, []):  # get allowed
+        if str(_sid_m) == str(model_id):  # get allowed
+            continue
+        _sib = models_cache.get(str(_sid_m))  # get allowed
+        if _sib is None:
+            continue
+        if provisional_plan and str(_sid_m) in provisional_plan:
+            _sc, _sr = int(provisional_plan[str(_sid_m)][0]), int(provisional_plan[str(_sid_m)][1])
+        else:
+            _sc, _sr = int(_sib["col"]), int(_sib["row"])
+        _s_shape = require_key(_sib, "BASE_SHAPE")
+        _s_base = require_key(_sib, "BASE_SIZE")
+        _s_fp = None if _s_shape == "round" else compute_candidate_footprint(
+            _sc, _sr,
+            {"BASE_SHAPE": _s_shape, "BASE_SIZE": _s_base, "orientation": _mover_orient},
+            game_state,
+        )
+        _sibling_socles.append(Socle(shape=_s_shape, base_size=_s_base, col=_sc, row=_sr, fp=_s_fp))
+    if _sibling_socles:
+        _intra_filtered: List[Tuple[int, int]] = []
+        for _dc, _dr in reachable:
+            _m_fp = None if _mover_shape == "round" else compute_candidate_footprint(
+                _dc, _dr,
+                {"BASE_SHAPE": _mover_shape, "BASE_SIZE": _mover_base, "orientation": _mover_orient},
+                game_state,
+            )
+            _m_socle = Socle(shape=_mover_shape, base_size=_mover_base, col=_dc, row=_dr, fp=_m_fp)
+            if not any(footprints_overlap(_m_socle, _s) for _s in _sibling_socles):
+                _intra_filtered.append((_dc, _dr))
+        reachable = _intra_filtered
+
     # Footprint zone per-fig : destinations ∪ start, expandées selon BASE_SIZE.
     base_size = unit["BASE_SIZE"]
     base_shape = unit["BASE_SHAPE"]
@@ -2354,7 +2379,6 @@ def movement_build_model_destinations_pool(
         # chevauche dest_blocked (murs, figs alliées, figs ennemies, engagement).
         # Le BFS ne vérifie que le hex central ; ici on vérifie chaque cellule de l'empreinte.
         valid_reachable: List[Tuple[int, int]] = []
-        _n_before_fp = len(reachable)
         for ac, ar in reachable:
             offs = off_even if (ac & 1) == 0 else off_odd
             # Empreinte complète dans le plateau : le BFS ne borne que le centre,
@@ -2367,12 +2391,6 @@ def movement_build_model_destinations_pool(
             if not any((ac + dc, ar + dr) in dest_blocked for dc, dr in offs):
                 valid_reachable.append((ac, ar))
         reachable = valid_reachable
-        print(
-            f"[DEBUG MODEL_BOUNDS] model={model_id} start=({start_col},{start_row}) "
-            f"board=({board_cols}x{board_rows}) base_size={base_size} "
-            f"dest {_n_before_fp}->{len(reachable)}",
-            flush=True,
-        )
         # Footprint zone depuis les destinations valides uniquement.
         footprint_zone = set()
         for ac, ar in reachable:
@@ -2486,6 +2504,30 @@ def movement_preview_move_plan(
             for cell in occ:
                 other_occ_set.add((int(cell[0]), int(cell[1])))
 
+    # Collision intra-escouade : clearance EUCLIDIENNE par-figurine (≠ intersection de
+    # footprints hex, qui sous-estime le disque et laisse passer un chevauchement de socle
+    # ~16% à 5 sous-hex d'écart). Socle construit avec la base RÉELLE de chaque fig
+    # (models_cache) → un Captain (base 8) parmi des Intercessors (base 6) n'est plus
+    # sous-estimé. Tangence (gap≈0) tolérée, superposition stricte interdite.
+    from engine.hex_utils import Socle, footprints_overlap
+    _models_cache_intra = require_key(game_state, "models_cache")
+    intra_socles: List["Socle"] = []
+    for (mid, nc, nr), fp_par in zip(plan, footprints):
+        m = require_key(_models_cache_intra, str(mid))
+        m_shape = require_key(m, "BASE_SHAPE")
+        m_base = require_key(m, "BASE_SIZE")
+        if m_shape == base_shape and m_base == base_size:
+            m_fp = fp_par
+        else:
+            m_fp = compute_candidate_footprint(
+                int(nc), int(nr),
+                {"BASE_SHAPE": m_shape, "BASE_SIZE": m_base, "orientation": orientation},
+                game_state,
+            )
+        intra_socles.append(
+            Socle(shape=m_shape, base_size=m_base, col=int(nc), row=int(nr), fp=m_fp)
+        )
+
     per_model: Dict[str, bool] = {}
     for idx, (mid, nc, nr) in enumerate(plan):
         base_valid = validate_move_plan(
@@ -2494,7 +2536,11 @@ def movement_preview_move_plan(
         fp = footprints[idx]
         fp_wall = bool(wall_hexes_set and fp & wall_hexes_set)
         fp_other = bool(other_occ_set and fp & other_occ_set)
-        fp_intra = any(bool(footprints[j] & fp) for j in range(n) if j != idx)
+        fp_intra = any(
+            footprints_overlap(intra_socles[idx], intra_socles[j])
+            for j in range(n)
+            if j != idx
+        )
         # Board ×N : voile rouge si l'empreinte de la fig viole l'EZ ennemie (formule euclidienne
         # par-mover, identique au pathfinding). ez <= 1 : déjà couvert par validate_move_plan.
         ez_violation = (

@@ -53,6 +53,46 @@ function statusBadgeRadius(HEX_RADIUS: number): number {
 const EYE_COLOR_TOO_FAR = 0xff3b30;
 
 /**
+ * Cache des textures d'icône rognées en disque (clé = chemin d'icône). Une base ronde est
+ * rendue via un sprite CARRÉ : sans rognage, les coins de l'illustration dépassent le disque
+ * de base d'un facteur √2 et débordent sur les figurines tangentes. On pré-bake UNE fois par
+ * icône une texture où l'art carré est masqué par le cercle inscrit, puis on la réutilise pour
+ * toutes les figurines (scale uniforme → le cercle reste cercle, valable à tout zoom).
+ * Coût : 1 render-pass par icône distincte ; ZÉRO masque/surcoût par figurine, sprites batchés.
+ */
+const circularIconTextureCache = new Map<string, PIXI.Texture>();
+
+/**
+ * Renvoie la texture circulaire en cache pour ``iconPath`` ; ``null`` si la texture source
+ * n'est pas encore chargée (l'appelant réessaie via ``baseTexture.once('loaded')``).
+ */
+function getCircularIconTexture(
+  source: PIXI.Texture,
+  iconPath: string,
+  renderer: PIXI.IRenderer
+): PIXI.Texture | null {
+  const cached = circularIconTextureCache.get(iconPath);
+  if (cached) return cached;
+  if (!source.baseTexture.valid) return null;
+  const diameter = Math.min(source.width, source.height);
+  if (!(diameter > 0)) return null;
+
+  // Rognage via beginTextureFill + drawCircle (PAS sprite.mask) : le masque stencil est
+  // ignoré lors d'un rendu vers RenderTexture en WebGL → la texture ressortirait carrée.
+  // Le disque rempli par la texture donne un rognage circulaire fiable.
+  const renderTexture = PIXI.RenderTexture.create({ width: diameter, height: diameter });
+  const g = new PIXI.Graphics();
+  g.beginTextureFill({ texture: source });
+  g.drawCircle(diameter / 2, diameter / 2, diameter / 2);
+  g.endFill();
+  renderer.render(g, { renderTexture });
+  g.destroy();
+
+  circularIconTextureCache.set(iconPath, renderTexture);
+  return renderTexture;
+}
+
+/**
  * Profil visuel d'une figurine dans une escouade hétérogène (override de l'unité
  * parente). Valeurs déjà prêtes à l'affichage (BASE_SIZE transformé subhex côté backend).
  */
@@ -1079,6 +1119,26 @@ export class UnitRenderer {
         const sprite = new PIXI.Sprite(texture);
         sprite.anchor.set(0.5);
         sprite.position.set(centerX, centerY);
+
+        // Base ronde : rogner l'illustration carrée en disque (rayon = rayon de collision) via la
+        // texture circulaire mutualisée → les coins ne débordent plus sur les voisines tangentes.
+        if (nonRoundIconR == null) {
+          const circular = getCircularIconTexture(texture, iconPath, this.props.app.renderer);
+          if (circular) {
+            sprite.texture = circular;
+          } else {
+            texture.baseTexture.once("loaded", () => {
+              if (sprite.destroyed) return;
+              const t = getCircularIconTexture(texture, iconPath, this.props.app.renderer);
+              if (t) {
+                sprite.texture = t;
+                sprite.width = iconDiameter;
+                sprite.height = iconDiameter;
+              }
+            });
+          }
+        }
+
         sprite.width = iconDiameter;
         sprite.height = iconDiameter;
         sprite.zIndex = iconZIndex;
