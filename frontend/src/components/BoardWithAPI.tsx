@@ -3159,7 +3159,7 @@ export const BoardWithAPI: React.FC = () => {
                       cursor: "pointer",
                     }}
                   >
-                    To the sky (-2)
+                    To the sky
                   </button>
                 );
               })()}
@@ -3702,7 +3702,7 @@ export const BoardWithAPI: React.FC = () => {
                     cursor: advancedFly ? "default" : "pointer",
                   }}
                 >
-                  To the sky (M-2)
+                  To the sky
                 </button>
               );
             })()}
