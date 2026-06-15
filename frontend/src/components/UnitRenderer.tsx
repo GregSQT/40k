@@ -2476,7 +2476,9 @@ export class UnitRenderer {
     }
     const movePhaseLosHover =
       this.props.phase === "move" &&
-      (this.props.mode === "select" || this.props.mode === "movePreview") &&
+      (this.props.mode === "select" ||
+        this.props.mode === "movePreview" ||
+        this.props.mode === "squadModelMove") &&
       this.props.movePreviewHiddenTooFarByUnitId !== undefined;
     if (this.props.phase !== "shoot" && this.props.mode !== "movePreview" && !movePhaseLosHover) {
       return false;
@@ -2484,6 +2486,7 @@ export class UnitRenderer {
     if (
       (this.props.mode === "movePreview" ||
         this.props.mode === "select" ||
+        this.props.mode === "squadModelMove" ||
         this.props.mode === "attackPreview" ||
         this.props.mode === "squadModelShoot") &&
       this.props.movePreviewHiddenTooFarByUnitId

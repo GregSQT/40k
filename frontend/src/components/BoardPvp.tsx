@@ -4468,9 +4468,71 @@ export default function Board({
     losHexRef.current = null;
     setMovePreviewLosBlinkIds([]);
     setMovePreviewLosCoverById({});
-    setMovePreviewLosTooFarById({});
     setMovePreviewDistanceTooltip(null);
-  }, [mode, squadMovePlan?.activeModelId]);
+
+    // Baseline œil "trop loin" au repos (aucune fig active) : recalculée depuis la position ACTUELLE
+    // de l'unité, pour que le badge persiste tant que l'unité est active — pas seulement au survol.
+    const restUnit = units.find((u) => String(u.id) === String(squadMovePlan?.unitId ?? -1));
+    const restRange =
+      restUnit?.RNG_WEAPONS && restUnit.RNG_WEAPONS.length > 0 ? getMaxRangedRange(restUnit) : 0;
+    if (!restUnit || restRange <= 0) {
+      setMovePreviewLosTooFarById({});
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const cacheKey = [
+          String(restUnit.id),
+          `${restUnit.col},${restUnit.row}`,
+          unitsBoardLayoutKey,
+          String(gameState?.turn ?? ""),
+          String(gameState?.episode_steps ?? ""),
+        ].join("|");
+        let losPreview = movePreviewBackendLosCacheRef.current.get(cacheKey);
+        if (!losPreview) {
+          const response = await fetch("/api/game/action", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "preview_shoot_from_position",
+              unitId: String(restUnit.id),
+              destCol: restUnit.col,
+              destRow: restUnit.row,
+              advancePosition: false,
+              includeLosCells: false,
+            }),
+          });
+          if (!response.ok) {
+            throw new Error(`preview_shoot_from_position failed with HTTP ${response.status}`);
+          }
+          const data = await response.json();
+          if (data?.success !== true) {
+            throw new Error("preview_shoot_from_position returned success=false");
+          }
+          losPreview = parseBackendMoveLosPreviewPayload(data.result, cacheKey);
+          movePreviewBackendLosCacheRef.current.set(cacheKey, losPreview);
+        }
+        if (cancelled) return;
+        setMovePreviewLosTooFarById(losPreview.hiddenTooFarByUnitId);
+      } catch (error) {
+        if (cancelled) return;
+        setMovePreviewLosTooFarById({});
+        console.error("Move rest baseline too-far failed:", error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    mode,
+    squadMovePlan?.activeModelId,
+    squadMovePlan?.unitId,
+    units,
+    unitsBoardLayoutKey,
+    gameState?.turn,
+    gameState?.episode_steps,
+  ]);
 
   // Ghost per-figurine (squad move plan) : ghost suit le curseur, hoveredHexRef mis à jour pour le
   // click handler (shouldConfirmAtIcon). Complètement indépendant de active_movement_unit.
@@ -7433,7 +7495,10 @@ export default function Board({
             return undefined;
           })(),
           movePreviewHiddenTooFarByUnitId: (() => {
-            if (phase === "move" && (mode === "select" || mode === "movePreview")) {
+            if (
+              phase === "move" &&
+              (mode === "select" || mode === "movePreview" || mode === "squadModelMove")
+            ) {
               return movePreviewLosTooFarById;
             }
             if (
