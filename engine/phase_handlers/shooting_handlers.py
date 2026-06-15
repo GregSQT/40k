@@ -1094,11 +1094,16 @@ def compute_unit_hidden_models(
     (preview de mouvement) → garantit un résultat identique entre preview et drop, pour toute
     forme de base. Les gates niveau-unité (vivant, hideable, a tiré) sont gérés par l'appelant.
     """
-    from engine.terrain_utils import hexes_in_obscuring_terrain
+    from engine.terrain_utils import model_within_terrain
+    base_shape = require_key(unit, "BASE_SHAPE")
+    base_size = require_key(unit, "BASE_SIZE")
+    orientation = int(require_key(unit, "orientation"))
     hidden_model_ids: List[Any] = []
     for mid, (col, row) in by_model.items():
-        footprint = _compute_unit_occupied_hexes(int(col), int(row), unit, game_state)
-        if hexes_in_obscuring_terrain(list(footprint), terrain_areas):
+        if model_within_terrain(
+            int(col), int(row), base_shape, base_size, orientation,
+            terrain_areas, obscuring_only=True,
+        ):
             hidden_model_ids.append(mid)
     return hidden_model_ids
 
@@ -3796,7 +3801,7 @@ def _compute_unit_los_uncached(
     can_see = ratio >= min_ratio
     fully_visible = total > 0 and visible == total
 
-    from engine.terrain_utils import hexes_in_any_terrain
+    from engine.terrain_utils import model_within_terrain
     from engine.hex_utils import compute_occupied_hexes
     terrain_areas = require_key(game_state, "terrain_areas")
     cond_terrain = False
@@ -3822,7 +3827,10 @@ def _compute_unit_los_uncached(
                 int(m["col"]), int(m["row"]), base_shape, base_size, orientation
             ))
             if any((int(hx[0]), int(hx[1])) in visible_hex_set for hx in model_hexes):
-                if not hexes_in_any_terrain(model_hexes, terrain_areas):
+                if not model_within_terrain(
+                    int(m["col"]), int(m["row"]), base_shape, base_size, orientation,
+                    terrain_areas, obscuring_only=False,
+                ):
                     all_visible_in_terrain = False
                     break
         cond_terrain = all_visible_in_terrain

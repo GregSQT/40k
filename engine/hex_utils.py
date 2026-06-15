@@ -1452,3 +1452,62 @@ def footprints_overlap(a: Socle, b: Socle) -> bool:
     if a.fp is None or b.fp is None:
         raise ValueError("footprints_overlap: empreinte (fp) requise pour une paire non ronde")
     return bool(a.fp & b.fp)
+
+
+def _point_in_polygon(px: float, py: float, poly: Sequence[Tuple[float, float]]) -> bool:
+    """Ray casting : True si (px,py) est à l'intérieur du polygone (mêmes semantiques que
+    le rasterizer ``_objective_polygon_hexes``)."""
+    inside = False
+    n = len(poly)
+    j = n - 1
+    for i in range(n):
+        xi, yi = poly[i]
+        xj, yj = poly[j]
+        if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+def _point_segment_dist_sq(
+    px: float, py: float, ax: float, ay: float, bx: float, by: float
+) -> float:
+    """Distance au carré minimale du point (px,py) au segment [a,b]."""
+    dx, dy = bx - ax, by - ay
+    seg_sq = dx * dx + dy * dy
+    if seg_sq <= 0.0:
+        return (px - ax) ** 2 + (py - ay) ** 2  # segment dégénéré -> distance au point a
+    t = ((px - ax) * dx + (py - ay) * dy) / seg_sq
+    if t < 0.0:
+        t = 0.0
+    elif t > 1.0:
+        t = 1.0
+    qx, qy = ax + t * dx, ay + t * dy
+    return (px - qx) ** 2 + (py - qy) ** 2
+
+
+def disc_overlaps_polygon(
+    cx: float, cy: float, r: float, poly: Sequence[Tuple[float, float]]
+) -> bool:
+    """True si un disque (centre (cx,cy), rayon r) chevauche ou touche un polygone.
+
+    Repère ``_hex_center`` : (cx,cy) ET les sommets ``poly`` doivent y être exprimés, cohérent
+    avec ``round_base_radius_norm`` (le rayon) et avec le rendu terrain (vertices projetés par
+    ``toPixelT`` côté frontend, même projection que ``_hex_center``). Pendant fig↔terrain de
+    ``euclidean_edge_clearance_round_round`` (fig↔fig) : sert au test « within a terrain area »
+    (règles 13.08 cover / 13.09 hidden) pour les bases rondes.
+
+    Overlap si le centre est dans le polygone, OU si une arête est à distance <= r (contact /
+    tangence compté comme « within », cohérent avec la base qui touche la zone)."""
+    if len(poly) < 3:
+        raise ValueError(f"disc_overlaps_polygon: polygone invalide ({len(poly)} sommets)")
+    if _point_in_polygon(cx, cy, poly):
+        return True
+    r_sq = r * r
+    n = len(poly)
+    j = n - 1
+    for i in range(n):
+        if _point_segment_dist_sq(cx, cy, poly[j][0], poly[j][1], poly[i][0], poly[i][1]) <= r_sq:
+            return True
+        j = i
+    return False
