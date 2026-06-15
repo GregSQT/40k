@@ -15,6 +15,11 @@ interface WeaponDropdownProps {
   onClose: () => void;
   /** Flux squad : le menu reste affiché (pas de fermeture au clic dehors) jusqu'au Validate. */
   persistent?: boolean;
+  /** Affiche les boutons Cancel/Tirer en bas de la fenêtre (flux squad). */
+  showActions?: boolean;
+  canValidate?: boolean;
+  onCancel?: () => void | Promise<void>;
+  onFire?: () => void | Promise<void>;
 }
 
 export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
@@ -23,6 +28,10 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
   onSelectWeapon,
   onClose,
   persistent = false,
+  showActions = false,
+  canValidate = false,
+  onCancel,
+  onFire,
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x: position.x, y: position.y });
@@ -88,8 +97,7 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
         <tbody>
           {weapons.map((weaponOption) => {
             const weapon = weaponOption.weapon;
-            // locked : profil frère d'une combi déjà assignée (une combi ne tire qu'un profil).
-            const isDisabled = !weaponOption.canUse || weaponOption.locked === true;
+            const isDisabled = !weaponOption.canUse;
             const disabledReason = !weaponOption.canUse ? weaponOption.reason : null;
 
             return (
@@ -157,6 +165,50 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
           })}
         </tbody>
       </table>
+      {showActions && (
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            justifyContent: "flex-end",
+            padding: "8px",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => onCancel?.()}
+            style={{
+              border: "1px solid rgba(0,0,0,0.35)",
+              borderRadius: 6,
+              background: "#6b7280",
+              color: "#fff",
+              cursor: "pointer",
+              fontSize: 13,
+              fontWeight: 700,
+              padding: "6px 12px",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!canValidate}
+            onClick={() => onFire?.()}
+            style={{
+              border: "1px solid rgba(0,0,0,0.35)",
+              borderRadius: 6,
+              background: canValidate ? "#16a34a" : "#052e16",
+              color: canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+              cursor: canValidate ? "pointer" : "not-allowed",
+              fontSize: 13,
+              fontWeight: 700,
+              padding: "6px 12px",
+            }}
+          >
+            Shoot
+          </button>
+        </div>
+      )}
     </div>
   );
 };

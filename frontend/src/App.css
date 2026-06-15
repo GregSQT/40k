@@ -2824,6 +2824,29 @@ textarea:focus {
   border-radius: 4px 4px 0 0;
 }
 
+.weapon-dropdown-subtitle {
+  padding: 4px 8px;
+  text-align: center;
+}
+
+.alloc-saves {
+  font-size: 1.35em;
+  font-weight: 700;
+  color: #fff;
+}
+
+.alloc-stats {
+  font-size: 0.7em;
+  font-weight: 400;
+  color: #bbb;
+}
+
+.alloc-weapons {
+  margin-top: 2px;
+  font-size: 0.8em;
+  color: #a5d6a7;
+}
+
 .weapon-table {
   width: 100%;
   border-collapse: collapse;

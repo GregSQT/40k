@@ -512,6 +512,7 @@ type BoardProps = {
   onAssignShootTarget?: (targetUnitId: number | string) => void | Promise<void>;
   onAutoAssignAllModels?: (targetUnitId: number | string) => void | Promise<void>;
   onUnassignShootModel?: (modelId: string) => void | Promise<void>;
+  onUnassignShootWeapon?: (weaponIndex: number) => void | Promise<void>;
   onCommitSquadShoot?: () => void | Promise<void>;
   onCancelSquadShoot?: () => void | Promise<void>;
   /** Allocation manuelle des pertes au tir (defenseur humain) : figs choisissables. */
@@ -858,6 +859,7 @@ export default function Board({
   onAssignShootTarget,
   onAutoAssignAllModels,
   onUnassignShootModel,
+  onUnassignShootWeapon,
   onCommitSquadShoot,
   onCancelSquadShoot,
   manualAllocation = null,
@@ -8412,6 +8414,26 @@ export default function Board({
     const unit = units.find((u) => u.id === weaponSelectionMenu.unitId);
     const weapon = unit?.RNG_WEAPONS?.[weaponIndex];
     const weaponDisplayName = weapon?.display_name ?? undefined;
+
+    // Arme combinée : si un AUTRE profil de la même combi est déjà déclaré, on le
+    // désassigne d'abord pour basculer sur le profil cliqué (une combi ne tire qu'un profil).
+    const clickedCombi = weapon?.COMBI_WEAPON;
+    if (
+      clickedCombi &&
+      unit?.RNG_WEAPONS &&
+      squadShootPlan &&
+      String(squadShootPlan.unitId) === String(weaponSelectionMenu.unitId)
+    ) {
+      const siblingDecl = squadShootPlan.declarations.find(
+        (d) =>
+          d.weapon_index !== weaponIndex &&
+          unit.RNG_WEAPONS?.[d.weapon_index]?.COMBI_WEAPON === clickedCombi
+      );
+      if (siblingDecl) {
+        await onUnassignShootWeapon?.(siblingDecl.weapon_index);
+      }
+    }
+
     try {
       const API_BASE = "/api";
       const response = await fetch(`${API_BASE}/game/action`, {
@@ -8469,19 +8491,10 @@ export default function Board({
             ? squadShootPlan.declarations.map((d) => d.weapon_index)
             : []
         );
-        // Groupes d'armes combinées (COMBI_WEAPON) dont un profil est déjà assigné :
-        // une combi ne tire qu'avec UN profil → ses autres profils sont grisés + verrouillés.
-        const assignedCombiGroups = new Set<string>();
-        for (const idx of assignedWeapons) {
-          const combi = rngWeapons[idx]?.COMBI_WEAPON;
-          if (combi) assignedCombiGroups.add(combi);
-        }
-        // assigned = grisé (visuel) ; locked = clic bloqué (profil frère d'une combi déjà assignée).
+        // assigned = grisé (visuel) si ce profil exact a une cible déclarée.
+        // Profil frère d'une combi : reste cliquable (remplacement combi géré dans handleSelectWeapon).
         const weaponFlags = (idx: number): { assigned: boolean; locked: boolean } => {
-          const direct = assignedWeapons.has(idx);
-          const combi = rngWeapons[idx]?.COMBI_WEAPON;
-          const siblingAssigned = combi != null && assignedCombiGroups.has(combi) && !direct;
-          return { assigned: direct || siblingAssigned, locked: siblingAssigned };
+          return { assigned: assignedWeapons.has(idx), locked: false };
         };
 
         const availableWeapons = unit.available_weapons;
@@ -8937,6 +8950,10 @@ export default function Board({
           onSelectWeapon={handleSelectWeapon}
           onClose={() => setWeaponSelectionMenu(null)}
           persistent={mode === "squadModelShoot"}
+          showActions={mode === "squadModelShoot" && !!squadShootPlan}
+          canValidate={squadShootPlan?.canValidate ?? false}
+          onCancel={onCancelSquadShoot}
+          onFire={onCommitSquadShoot}
         />
       )}
     </div>

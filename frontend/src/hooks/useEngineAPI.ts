@@ -419,6 +419,8 @@ export interface ManualOrderRequest {
   target_unit_id: string;
   defender_player: number;
   weapon_name: string;
+  /** Noms distincts des armes de profil identique fusionnées dans ce lot (04.03). */
+  weapon_names?: string[];
   weapon_ap: number;
   weapon_damage: number | string;
   wounds_to_save: number;
@@ -4322,6 +4324,45 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [executeAction]
   );
 
+  /** Remplacement combi : retire la déclaration d'une arme donnée (squad_shoot_unassign_weapon). */
+  const handleUnassignShootWeapon = useCallback(
+    async (weaponIndex: number) => {
+      const plan = squadShootPlanRef.current;
+      if (!plan) return;
+      let result: Awaited<ReturnType<typeof executeAction>>;
+      try {
+        result = await executeAction({
+          action: "squad_shoot_unassign_weapon",
+          unitId: String(plan.unitId),
+          weaponIndex,
+        });
+      } catch (e) {
+        console.error(`[SQUAD-SHOOT] unassign weapon=${weaponIndex} FAILED`, e);
+        return;
+      }
+      if (!result || result.success === false) return;
+      const decls = (result.result?.declarations ?? []) as Array<{
+        model_id: string;
+        weapon_index: number;
+        target_unit_id: string;
+      }>;
+      setSquadShootPlan((prev) =>
+        prev
+          ? {
+              ...prev,
+              declarations: decls,
+              targets: deriveShootTargets(decls),
+              canValidate: decls.length > 0,
+            }
+          : prev
+      );
+      console.log(
+        `[SQUAD-SHOOT] unassign weapon=${weaponIndex} (${decls.length} intents restants)`
+      );
+    },
+    [executeAction]
+  );
+
   /** Bouton Valider : lock + résolution simultanée (squad_shoot_validate). */
   const handleCommitSquadShoot = useCallback(async () => {
     const plan = squadShootPlanRef.current;
@@ -6135,6 +6176,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onAssignShootTarget: async () => {},
       onAutoAssignAllModels: async () => {},
       onUnassignShootModel: async () => {},
+      onUnassignShootWeapon: async () => {},
       onCommitSquadShoot: async () => {},
       onCancelSquadShoot: async () => {},
       manualAllocation: null,
@@ -6308,6 +6350,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onAssignShootTarget: handleAssignShootTarget,
     onAutoAssignAllModels: handleAutoAssignAllModels,
     onUnassignShootModel: handleUnassignShootModel,
+    onUnassignShootWeapon: handleUnassignShootWeapon,
     onCommitSquadShoot: handleCommitSquadShoot,
     onCancelSquadShoot: handleCancelSquadShoot,
     manualAllocation,

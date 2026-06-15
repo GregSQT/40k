@@ -177,6 +177,16 @@ function ManualOrderPicker({
     onSubmit(orderedGroups.map((g) => g.group_id));
   };
 
+  // Type du profil principal de la cible (1er groupe non-CHARACTER, sinon 1er groupe).
+  const targetGroup = request.groups.find((g) => !g.is_character) ?? request.groups[0];
+  const targetLabel = targetGroup
+    ? prettifyUnitType(targetGroup.unit_type) || (targetGroup.is_character ? "CHARACTER" : "")
+    : "";
+  const weaponNames =
+    request.weapon_names && request.weapon_names.length > 0
+      ? request.weapon_names
+      : [request.weapon_name || "Arme"];
+
   return (
     <div
       className="weapon-dropdown"
@@ -184,22 +194,32 @@ function ManualOrderPicker({
     >
       <button type="button" className="weapon-dropdown-handle" onMouseDown={onDragStart}>
         ⠿ ORDRE D'ALLOCATION — Unité {request.target_unit_id}
+        {targetLabel ? ` — ${targetLabel}` : ""}
       </button>
       <div className="weapon-dropdown-subtitle">
-        {request.weapon_name || "Arme"} — {request.wounds_to_save} save
-        {request.wounds_to_save > 1 ? "s" : ""} · PA {request.weapon_ap} · Dég{" "}
-        {request.weapon_damage}
+        <div className="alloc-saves">
+          {request.wounds_to_save} save{request.wounds_to_save > 1 ? "s" : ""}
+          <span className="alloc-stats">
+            {" "}
+            · PA {request.weapon_ap} · Dég {request.weapon_damage}
+          </span>
+        </div>
+        <div className="alloc-weapons">
+          {weaponNames.map((n) => (
+            <div key={n}>{n}</div>
+          ))}
+        </div>
       </div>
       <table className="weapon-table">
         <thead>
           <tr>
             <th>#</th>
-            <th>Unité</th>
+            <th>Unit</th>
             <th>W</th>
             <th>Sv</th>
             <th>Inv</th>
             <th>Nb</th>
-            <th>État</th>
+            <th>Type</th>
           </tr>
         </thead>
         <tbody>
@@ -239,12 +259,18 @@ function ManualOrderPicker({
       <div className="weapon-dropdown-actions">
         <button
           type="button"
+          style={{ backgroundColor: "#1b5e20", color: "#fff" }}
           onClick={() => setOrderedGroups(defaultManualOrder(request.groups, kind, false))}
         >
-          Réinitialiser
+          Reset
         </button>
-        <button type="button" disabled={orderedGroups.length === 0} onClick={handleSubmit}>
-          Valider l'ordre
+        <button
+          type="button"
+          style={{ backgroundColor: "#4caf50", color: "#fff" }}
+          disabled={orderedGroups.length === 0}
+          onClick={handleSubmit}
+        >
+          Validate
         </button>
       </div>
     </div>
@@ -3845,7 +3871,7 @@ export const BoardWithAPI: React.FC = () => {
               padding: "8px 14px",
             }}
           >
-            Tirer
+            Shoot
           </button>
         </div>
       )}
@@ -4403,6 +4429,7 @@ export const BoardWithAPI: React.FC = () => {
             onAssignShootTarget={isGameOver ? async () => {} : apiProps.onAssignShootTarget}
             onAutoAssignAllModels={isGameOver ? async () => {} : apiProps.onAutoAssignAllModels}
             onUnassignShootModel={isGameOver ? async () => {} : apiProps.onUnassignShootModel}
+            onUnassignShootWeapon={isGameOver ? async () => {} : apiProps.onUnassignShootWeapon}
             onCommitSquadShoot={isGameOver ? async () => {} : apiProps.onCommitSquadShoot}
             onCancelSquadShoot={isGameOver ? async () => {} : apiProps.onCancelSquadShoot}
             manualAllocation={apiProps.manualAllocation}

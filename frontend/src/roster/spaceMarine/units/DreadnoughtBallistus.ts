@@ -21,6 +21,7 @@ export class DreadnoughtBallistus extends EliteRangeElite {
   static RNG_WEAPON_CODES = [
     "ballistus_missile_launcher_frag",
     "ballistus_missile_launcher_krak",
+    "ballistus_missile_launcher_krak_bis",
     "ballistus_lascannon",
     "twin_storm_bolter",
   ];

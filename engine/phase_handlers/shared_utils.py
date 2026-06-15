@@ -4935,6 +4935,7 @@ def _declare_order_payload(
             "target_unit_id": batch["target_sid"],
             "defender_player": batch["defender_player"],
             "weapon_name": wg["weapon_name"],
+            "weapon_names": wg.get("weapon_names", [wg["weapon_name"]]),
             "weapon_ap": int(wg["ap"]),
             "weapon_damage": wg["dmg_raw"],
             "wounds_to_save": len(batch["pool"]),
@@ -5291,12 +5292,15 @@ def _build_manual_allocation(
         summary["wounds"] += counts["wounds"]
 
         weapon_name = r["weapon_name"]
-        gkey = (weapon_name, target_sid)
+        # Regle 04.03 : les armes de PROFIL identique sur une meme cible se resolvent
+        # ensemble (1 seul lot d allocation). La cle de groupe est donc le profil (et non
+        # le nom) ; les noms distincts sont accumules pour l affichage (fenetre + log).
+        gkey = (r["bs"], r["ap"], r["dmg_raw"], r["display_wth"], r["display_save_th"], target_sid)
         if gkey not in group_index_by_key:
             group_index_by_key[gkey] = len(weapon_groups)
             weapon_groups.append({
                 "attacker_squad_id": str(attacker.get("squad_id", attacker_mid)),
-                "weapon_name": weapon_name, "target_sid": target_sid,
+                "weapon_name": weapon_name, "weapon_names": [weapon_name], "target_sid": target_sid,
                 "bs": r["bs"], "ap": r["ap"], "dmg_raw": r["dmg_raw"],
                 "display_wth": r["display_wth"], "display_save_th": r["display_save_th"],
                 "player": int(attacker.get("player", 0)),  # get allowed
@@ -5304,6 +5308,9 @@ def _build_manual_allocation(
             })
         gidx = group_index_by_key[gkey]
         g = weapon_groups[gidx]
+        if weapon_name not in g["weapon_names"]:
+            g["weapon_names"].append(weapon_name)
+            g["weapon_name"] = " / ".join(g["weapon_names"])
         g["attacks"] += counts["attacks"]
         g["shots"].extend(r["shot_records"])
 
