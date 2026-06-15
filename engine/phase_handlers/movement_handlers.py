@@ -457,6 +457,16 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         if move_range <= 0:
             continue
 
+        # Unité ENGAGÉE (régime fin ez>1) : son seul déplacement légal est un Fall Back, qui
+        # AUTORISE le passage dans l'EZ. L'heuristique "voisin immédiat hors EZ" ci-dessous
+        # l'exclurait à tort (elle démarre DANS l'EZ). On délègue au builder de pool (BFS
+        # fall-back rules-exact) en lecture seule : éligible ssi au moins une destination légale
+        # (arrivée hors EZ de tous les ennemis, atteignable en M, empreinte valide) existe.
+        if ez_elig > 1 and _squad_is_in_enemy_er(game_state, unit_id):
+            if movement_build_valid_destinations_pool(game_state, unit_id, read_only=True):
+                eligible_units.append(unit_id)
+            continue
+
         # This ensures the unit can actually move
         unit_col, unit_row = require_unit_position(unit_id, game_state)
         
@@ -535,7 +545,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
                 ):
                     has_valid_adjacent_hex = True
                     break
-        
+
         if not has_valid_adjacent_hex:
             continue  # Unit cannot move (no valid adjacent hex)
 
@@ -1624,9 +1634,13 @@ def _get_move_traversal_rules(game_state: Dict[str, Any]) -> Tuple[bool, bool, b
 
 
 @profile_move_pool_build
-def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str) -> List[Tuple[int, int]]:
+def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str, read_only: bool = False) -> List[Tuple[int, int]]:
     """
     Build valid movement destinations using BFS pathfinding.
+
+    ``read_only=True`` : calcule et RENVOIE la liste des destinations sans écrire le moindre
+    état preview dans ``game_state`` (pool / footprint_zone / span / border / mask_loops). Utilisé
+    par ``get_eligible_units`` comme oracle fall-back (source unique = ce builder, zéro divergence).
 
     Uses BFS to find REACHABLE hexes, not just hexes within distance.
     This prevents movement through walls (AI_TURN.md compliance).
@@ -1816,6 +1830,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 thru_friendly=_thru_friendly,
             )
             _m_bfs_end = _perf_clock.perf_counter() if _pt else None
+            if read_only:
+                return valid_destinations
             game_state["valid_move_destinations_pool"] = valid_destinations
             game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
             if game_state.get("gym_training_mode"):
@@ -1908,6 +1924,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                     else:
                         fly_rejected_footprint += 1
         _m_bfs_end = _perf_clock.perf_counter() if _pt else None
+        if read_only:
+            return valid_destinations
         game_state["valid_move_destinations_pool"] = valid_destinations
         game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
         if game_state.get("gym_training_mode"):
@@ -2095,21 +2113,25 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 for (c, r) in valid_destinations
                 if _lo_c <= c <= _hi_c and _lo_r <= r <= _hi_r
             ]
-            print(
-                f"[DEBUG SQUAD_BOUNDS] u={unit_id} start=({start_col},{start_row}) "
-                f"board=({board_cols}x{board_rows}) n_figs={len(_by_model)} "
-                f"bbox_c=[{_min_fc},{_max_fc}] bbox_r=[{_min_fr},{_max_fr}] "
-                f"fp_off_c=[{_fc_off_min},{_fc_off_max}] fp_off_r=[{_fr_off_min},{_fr_off_max}] "
-                f"rect_c=[{_lo_c},{_hi_c}] rect_r=[{_lo_r},{_hi_r}] "
-                f"pool {_n_before}->{len(valid_destinations)}",
-                flush=True,
-            )
-        else:
+            if not read_only:
+                print(
+                    f"[DEBUG SQUAD_BOUNDS] u={unit_id} start=({start_col},{start_row}) "
+                    f"board=({board_cols}x{board_rows}) n_figs={len(_by_model)} "
+                    f"bbox_c=[{_min_fc},{_max_fc}] bbox_r=[{_min_fr},{_max_fr}] "
+                    f"fp_off_c=[{_fc_off_min},{_fc_off_max}] fp_off_r=[{_fr_off_min},{_fr_off_max}] "
+                    f"rect_c=[{_lo_c},{_hi_c}] rect_r=[{_lo_r},{_hi_r}] "
+                    f"pool {_n_before}->{len(valid_destinations)}",
+                    flush=True,
+                )
+        elif not read_only:
             print(
                 f"[DEBUG SQUAD_BOUNDS] u={unit_id} _by_model ABSENT/VIDE "
                 f"(entry={'present' if _sq_entry else 'None'}) -> AUCUN bornage",
                 flush=True,
             )
+
+    if read_only:
+        return valid_destinations
 
     game_state["valid_move_destinations_pool"] = valid_destinations
     game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)

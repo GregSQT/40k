@@ -349,15 +349,15 @@ def profile_move_pool_build(fn: F) -> F:
     """
 
     @functools.wraps(fn)
-    def wrapper(game_state: Dict[str, Any], unit_id: str) -> Any:
+    def wrapper(game_state: Dict[str, Any], unit_id: str, *args: Any, **kwargs: Any) -> Any:
         if not perf_profile_enabled(game_state):
-            return fn(game_state, unit_id)
+            return fn(game_state, unit_id, *args, **kwargs)
         import cProfile
 
         pr = cProfile.Profile()
         pr.enable()
         try:
-            return fn(game_state, unit_id)
+            return fn(game_state, unit_id, *args, **kwargs)
         finally:
             pr.disable()
             append_cprofile_dump(pr, fn.__name__, unit_id=str(unit_id))

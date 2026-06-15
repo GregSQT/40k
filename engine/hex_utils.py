@@ -1376,9 +1376,11 @@ def euclidean_edge_clearance_round_round(
 
 
 def engagement_minimum_clearance_norm(engagement_zone: int) -> float:
-    """Écart bord à bord minimal (1″ en ×10) en unités _hex_center.
+    """Écart bord à bord minimal d'engagement, en unités ``_hex_center``.
 
-    ``engagement_zone`` sous-pas pour 1″ (ex. 10) × pas horizontal — aligné
+    ``engagement_zone`` : portée d'engagement exprimée en SOUS-HEX, soit
+    ``game_rules['engagement_zone']`` (en pouces) × ``inches_to_subhex``, déjà convertie au
+    chargement. Le seuil renvoyé = ``engagement_zone`` × pas horizontal normalisé — aligné
     ``getFightEngagementRingBoardPixels`` / ``engagementRoundRingPreviewHexesOnBoard``.
     """
     if engagement_zone <= 0:
