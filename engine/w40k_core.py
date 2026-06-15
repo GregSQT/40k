@@ -4322,6 +4322,7 @@ class W40KEngine(gym.Env):
             _is_adjacent_to_enemy_within_cc_range,
             build_unit_los_cache,
             build_cover_by_unit_id_for_valid_targets,
+            build_hidden_too_far_by_unit_id,
         )
 
         name = action.get("action")
@@ -4347,6 +4348,14 @@ class W40KEngine(gym.Env):
             unit_obj = get_unit_by_id(squad_id, self.game_state)
             assert unit_obj is not None, f"unit {squad_id} not found in game_state"
             return build_cover_by_unit_id_for_valid_targets(self.game_state, unit_obj, valid_targets)
+
+        def _squad_hidden_too_far() -> Dict[str, bool]:
+            """Ennemis cachés-trop-loin (œil rouge) relativement au squad actif. Même brique LoS
+            partagée que ``_squad_cover_by_unit_id`` (build_unit_los_cache idempotent)."""
+            build_unit_los_cache(self.game_state, squad_id)
+            unit_obj = get_unit_by_id(squad_id, self.game_state)
+            assert unit_obj is not None, f"unit {squad_id} not found in game_state"
+            return build_hidden_too_far_by_unit_id(self.game_state, unit_obj)
 
         if name == "squad_shoot_activate":
             squad_shooting_unit_activation_start(self.game_state, squad_id)
@@ -4388,6 +4397,7 @@ class W40KEngine(gym.Env):
                 "action": name, "unitId": squad_id, "weaponIndex": weapon_index,
                 "available_weapons": available_weapons, "valid_targets": valid_targets,
                 "cover_by_unit_id": _squad_cover_by_unit_id(valid_targets),
+                "hidden_too_far_by_unit_id": _squad_hidden_too_far(),
             }
 
         if name == "squad_shoot_select_model":
@@ -4398,6 +4408,7 @@ class W40KEngine(gym.Env):
                 "action": name, "unitId": squad_id, "modelId": model_id,
                 "valid_targets": valid_targets,
                 "cover_by_unit_id": _squad_cover_by_unit_id(valid_targets),
+                "hidden_too_far_by_unit_id": _squad_hidden_too_far(),
             }  # get allowed
 
         if name == "squad_shoot_los_overview":
@@ -4410,6 +4421,7 @@ class W40KEngine(gym.Env):
                 "count_by_unit_id": overview["count_by_unit_id"],
                 "squad_alive_count": overview["squad_alive_count"],
                 "cover_by_unit_id": _squad_cover_by_unit_id(overview["valid_targets"]),
+                "hidden_too_far_by_unit_id": _squad_hidden_too_far(),
             }  # get allowed
 
         if name == "squad_shoot_assign":
@@ -4446,6 +4458,7 @@ class W40KEngine(gym.Env):
                 "action": name, "unitId": squad_id, "weaponIndex": weapon_index,
                 "valid_targets": valid_targets,
                 "cover_by_unit_id": _squad_cover_by_unit_id(valid_targets),
+                "hidden_too_far_by_unit_id": _squad_hidden_too_far(),
             }
 
         if name == "squad_shoot_assign_weapon":

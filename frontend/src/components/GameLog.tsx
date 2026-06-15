@@ -293,25 +293,25 @@ export const GameLog: React.FC<GameLogProps> = ({
     setRuleDescription(
       descriptions,
       "FLY",
-      "FLY: this unit can ignore walls and units during movement pathing, but must still end on a legal destination.",
+      "This unit can ignore walls and units during movement pathing, but must still end on a legal destination.",
       false
     );
     setRuleDescription(
       descriptions,
       "MW",
-      "Mortal Wound: degat direct qui contourne les jets de sauvegarde.",
+      "Direct damages, no save roll.",
       false
     );
     setRuleDescription(
       descriptions,
       "COVER",
-      "Cover: +1 au jet de sauvegarde d'armure pour cette attaque (bonus total capé a +1, non cumulable).",
+      "-1 BS for the shooter against this target.",
       false
     );
     setRuleDescription(
       descriptions,
       "HAZARD",
-      "Roll one D6: on a 1-2, the model suffers 1 (or 3 if it is a MONSTER or VEHICLE) mortal wound.",
+      "Roll one D6: on a 1-2, the model suffers 1 (or 3 if it is a MONSTER or VEHICLE) Mortal Wound.",
       false
     );
 

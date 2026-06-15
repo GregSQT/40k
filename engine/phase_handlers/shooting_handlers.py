@@ -1427,6 +1427,7 @@ def preview_shoot_valid_targets_from_position(
         "los_preview_cover_cells": [],
         "los_preview_ratio_by_hex": {},
         "cover_by_unit_id": {},
+        "hidden_too_far_by_unit_id": {},
     }
 
     unit_id_str = str(unit_id)
@@ -1570,6 +1571,7 @@ def preview_shoot_valid_targets_from_position(
         "los_preview_cover_cells": require_key(u, "los_preview_cover_cells"),
         "los_preview_ratio_by_hex": require_key(u, "los_preview_ratio_by_hex"),
         "cover_by_unit_id": cover_by_unit_id,
+        "hidden_too_far_by_unit_id": build_hidden_too_far_by_unit_id(gs, u),
     }
     if preview_cache_key is not None:
         if len(_move_los_preview_cache) >= _cache_size_limit:
@@ -1592,6 +1594,68 @@ def build_cover_by_unit_id_for_valid_targets(
             raise KeyError(f"Target {target_id_str} is in valid_target_pool but missing from los_cover_cache")
         cover_by_unit_id[target_id_str] = bool(los_cover_cache[target_id_str])
     return cover_by_unit_id
+
+
+def build_hidden_too_far_by_unit_id(
+    game_state: Dict[str, Any],
+    shooter: Dict[str, Any],
+) -> Dict[str, bool]:
+    """Ennemis "cachés trop loin" relativement au tireur actif (œil rouge frontend).
+
+    Une unité ``hidden`` (rule 13.09, empreinte en terrain obscurcissant), dans la LoS et à
+    portée d'une arme du tireur, MAIS au-delà de ``detection_range`` (15") : elle est exclue du
+    pool de cibles valides (donc absente de ``cover_by_unit_id``) alors qu'elle reste "en vue
+    géométriquement". Source unique pour les deux moteurs de résolution (mono-unité et squad) :
+    read-only, relatif au tireur actif. Réutilise ``unit['los_cache']`` (build_unit_los_cache).
+    """
+    from engine.hex_utils import min_distance_between_sets
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    detection_range_subhex = (
+        float(require_key(game_rules, "detection_range"))
+        * int(require_key(game_state, "inches_to_subhex"))
+    )
+    rng_weapons = shooter.get("RNG_WEAPONS", [])
+    max_rng = max((require_key(w, "RNG") for w in rng_weapons), default=0)
+    if max_rng <= 0:
+        return {}
+    los_cache = shooter.get("los_cache")
+    if not los_cache:
+        return {}
+    units_cache = require_key(game_state, "units_cache")
+    shooter_id = str(require_key(shooter, "id"))
+    shooter_player = int(require_key(shooter, "player"))
+    shooter_col, shooter_row = require_unit_position(shooter, game_state)
+    shooter_entry = units_cache.get(shooter_id)
+    shooter_fp = (
+        shooter_entry.get("occupied_hexes", {(shooter_col, shooter_row)})
+        if shooter_entry else {(shooter_col, shooter_row)}
+    )
+    result: Dict[str, bool] = {}
+    for target_id, has_los in los_cache.items():
+        if not has_los:
+            continue
+        target_id_str = str(target_id)
+        if target_id_str == shooter_id:
+            continue
+        enemy = _get_unit_by_id(game_state, target_id_str)
+        if enemy is None or not is_unit_alive(target_id_str, game_state):
+            continue
+        if int(require_key(enemy, "player")) == shooter_player:
+            continue
+        if not bool(enemy.get("hidden")):
+            continue
+        enemy_entry = units_cache.get(target_id_str)
+        if enemy_entry is None:
+            continue
+        enemy_fp = enemy_entry.get(
+            "occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])}
+        )
+        distance = min_distance_between_sets(shooter_fp, enemy_fp)
+        if distance > max_rng:
+            continue  # hors portée : pas "à portée mais trop loin"
+        if distance > detection_range_subhex:
+            result[target_id_str] = True
+    return result
 
 
 def update_los_cache_after_target_death(game_state: Dict[str, Any], dead_target_id: str) -> None:
@@ -5504,6 +5568,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 "waiting_for_player": True,
                 "available_weapons": available_weapons,
                 "cover_by_unit_id": cover_by_unit_id,
+                "hidden_too_far_by_unit_id": build_hidden_too_far_by_unit_id(game_state, unit),
             }
         else:
             # NO -> Unit advanced but no valid targets -> end_activation(ACTION, 1, ADVANCE, SHOOTING, 1)

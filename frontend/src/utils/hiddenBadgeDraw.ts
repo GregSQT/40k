@@ -11,7 +11,8 @@ export function drawHiddenEyeBadge(
   g: PIXI.Graphics,
   badgeX: number,
   badgeY: number,
-  r: number
+  r: number,
+  eyeColor: number = 0xc8c8c8
 ): void {
   // Anneau noir externe pour détacher le badge du plateau.
   g.lineStyle(0);
@@ -23,8 +24,7 @@ export function drawHiddenEyeBadge(
   g.lineStyle(1, 0xb0b0b0, 1);
   g.drawCircle(badgeX, badgeY, r);
   g.endFill();
-  // Icône "visibility off" (gris clair sur noir) → se lit comme "caché / non vu".
-  const eyeColor = 0xc8c8c8;
+  // Icône "visibility off" → gris clair = couvert ; rouge = caché trop loin (hors detection range).
   const ew = r * 0.82;
   const eh = r * 0.52;
   const lw = Math.max(0.8, r * 0.15);

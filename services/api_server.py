@@ -2174,6 +2174,7 @@ def execute_action():
                 "los_preview_cover_cells": preview_payload["los_preview_cover_cells"],
                 "los_preview_ratio_by_hex": preview_payload["los_preview_ratio_by_hex"],
                 "cover_by_unit_id": preview_payload["cover_by_unit_id"],
+                "hidden_too_far_by_unit_id": preview_payload["hidden_too_far_by_unit_id"],
             },
         })
 

@@ -4368,6 +4368,7 @@ export const BoardWithAPI: React.FC = () => {
             blinkingUnits={engineApiBlink.blinkingUnits}
             blinkingAttackerId={engineApiBlink.blinkingAttackerId}
             blinkingCoverByUnitId={engineApiBlink.blinkingCoverByUnitId}
+            blinkingHiddenTooFarByUnitId={engineApiBlink.blinkingHiddenTooFarByUnitId}
             blinkingLosCountByUnitId={engineApiBlink.blinkingLosCountByUnitId}
             blinkingSquadAliveCount={engineApiBlink.blinkingSquadAliveCount}
             blinkingLosOverviewUnitId={engineApiBlink.blinkingLosOverviewUnitId}

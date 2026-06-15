@@ -441,6 +441,7 @@ export type UseEngineAPIBlinkBoardProps = {
   blinkingUnits: number[];
   blinkingAttackerId: number | null;
   blinkingCoverByUnitId: Record<string, boolean> | undefined;
+  blinkingHiddenTooFarByUnitId: Record<string, boolean> | undefined;
   blinkingLosCountByUnitId: Record<string, number> | undefined;
   blinkingSquadAliveCount: number | undefined;
   blinkingLosOverviewUnitId: number | null;
@@ -763,6 +764,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     blinkTimer: number | null;
     attackerId?: number | null;
     coverByUnitId?: Record<string, boolean>;
+    hiddenTooFarByUnitId?: Record<string, boolean>;
     // Mode "vue escouade" (double-clic sur une fig) : N figs qui voient chaque
     // ennemi + M figs vivantes. Absents = mode mono-fig classique.
     losCountByUnitId?: Record<string, number>;
@@ -1128,6 +1130,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         weaponIndex?: number;
         validTargets?: Array<string | number>;
         coverByUnitId?: Record<string, boolean>;
+        hiddenTooFarByUnitId?: Record<string, boolean>;
         isSquadMode?: boolean;
       }
       const {
@@ -1136,6 +1139,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         weaponIndex: selectedWeaponIndex,
         validTargets: weaponValidTargets,
         coverByUnitId: weaponCoverByUnitId,
+        hiddenTooFarByUnitId: weaponHiddenTooFarByUnitId,
         isSquadMode: weaponIsSquadMode,
       } = (e as CustomEvent<WeaponSelectedEventDetail>).detail;
 
@@ -1163,6 +1167,20 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           }
           coverByUnitId[tid] = inCover;
         }
+        if (
+          !weaponHiddenTooFarByUnitId ||
+          typeof weaponHiddenTooFarByUnitId !== "object" ||
+          Array.isArray(weaponHiddenTooFarByUnitId)
+        ) {
+          throw new Error("squad_select_weapon: hidden_too_far_by_unit_id absent/invalid in response");
+        }
+        const hiddenTooFarByUnitId: Record<string, boolean> = {};
+        for (const [tid, tooFar] of Object.entries(weaponHiddenTooFarByUnitId)) {
+          if (typeof tooFar !== "boolean") {
+            throw new Error(`squad_select_weapon: hidden_too_far_by_unit_id.${tid} must be boolean`);
+          }
+          hiddenTooFarByUnitId[tid] = tooFar;
+        }
         setBlinkingUnits((prev) => {
           if (prev.blinkTimer) clearInterval(prev.blinkTimer);
           const timer = blinkIds.length ? window.setInterval(() => {}, 500) : null;
@@ -1171,6 +1189,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             blinkTimer: timer,
             attackerId: squadShootPlanRef.current?.unitId ?? null,
             coverByUnitId,
+            hiddenTooFarByUnitId,
           };
         });
       }
@@ -1968,11 +1987,35 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 coverByUnitId[unitId] = inCover;
               }
             }
+            let hiddenTooFarByUnitId: Record<string, boolean> | undefined;
+            if (phase === "shoot") {
+              const rawTooFar = data.result.hidden_too_far_by_unit_id;
+              if (!rawTooFar || typeof rawTooFar !== "object" || Array.isArray(rawTooFar)) {
+                throw new Error("shoot blinking response missing required hidden_too_far_by_unit_id");
+              }
+              hiddenTooFarByUnitId = {};
+              for (const [unitId, tooFar] of Object.entries(rawTooFar as Record<string, unknown>)) {
+                if (typeof tooFar !== "boolean") {
+                  throw new Error(
+                    `shoot blinking response hidden_too_far_by_unit_id.${unitId} must be boolean`
+                  );
+                }
+                hiddenTooFarByUnitId[unitId] = tooFar;
+              }
+            }
             const coverKey = JSON.stringify(
               Object.entries(coverByUnitId ?? {}).sort(([a], [b]) => a.localeCompare(b))
             );
             const previousCoverKey = JSON.stringify(
               Object.entries(blinkingUnits.coverByUnitId ?? {}).sort(([a], [b]) =>
+                a.localeCompare(b)
+              )
+            );
+            const tooFarKey = JSON.stringify(
+              Object.entries(hiddenTooFarByUnitId ?? {}).sort(([a], [b]) => a.localeCompare(b))
+            );
+            const previousTooFarKey = JSON.stringify(
+              Object.entries(blinkingUnits.hiddenTooFarByUnitId ?? {}).sort(([a], [b]) =>
                 a.localeCompare(b)
               )
             );
@@ -1983,11 +2026,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               !newUnitIds.every((id: number) => blinkingUnits.unitIds.includes(id));
             const attackerIdChanged = newAttackerId !== blinkingUnits.attackerId;
             const coverByUnitIdChanged = coverKey !== previousCoverKey;
+            const tooFarByUnitIdChanged = tooFarKey !== previousTooFarKey;
             const needsUpdate =
               !blinkingUnits.blinkTimer ||
               unitIdsChanged ||
               attackerIdChanged ||
-              coverByUnitIdChanged;
+              coverByUnitIdChanged ||
+              tooFarByUnitIdChanged;
 
             if (needsUpdate) {
               // Clear any existing blinking timer
@@ -2017,6 +2062,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 blinkTimer: timer,
                 attackerId: newAttackerId,
                 coverByUnitId,
+                hiddenTooFarByUnitId,
               });
               setBlinkVersion((prev) => prev + 1);
             }
@@ -4036,11 +4082,28 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
         coverByUnitId[tid] = inCover;
       }
+      const rawTooFar = result.hidden_too_far_by_unit_id;
+      if (!rawTooFar || typeof rawTooFar !== "object" || Array.isArray(rawTooFar)) {
+        throw new Error("squad_shoot select_model: hidden_too_far_by_unit_id absent/invalid in response");
+      }
+      const hiddenTooFarByUnitId: Record<string, boolean> = {};
+      for (const [tid, tooFar] of Object.entries(rawTooFar as Record<string, unknown>)) {
+        if (typeof tooFar !== "boolean") {
+          throw new Error(`squad_shoot select_model: hidden_too_far_by_unit_id.${tid} must be boolean`);
+        }
+        hiddenTooFarByUnitId[tid] = tooFar;
+      }
       const validTargets = (result.valid_targets as string[]).map((id) => parseInt(id, 10));
       setBlinkingUnits((prev) => {
         if (prev.blinkTimer) clearInterval(prev.blinkTimer);
         const timer = validTargets.length ? window.setInterval(() => {}, 500) : null;
-        return { unitIds: validTargets, blinkTimer: timer, attackerId: unitId, coverByUnitId };
+        return {
+          unitIds: validTargets,
+          blinkTimer: timer,
+          attackerId: unitId,
+          coverByUnitId,
+          hiddenTooFarByUnitId,
+        };
       });
       setSquadShootPlan((prev) =>
         prev && prev.unitId === unitId ? { ...prev, activeModelId: modelId } : prev
@@ -4083,6 +4146,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
         coverByUnitId[tid] = inCover;
       }
+      const rawTooFar = result.hidden_too_far_by_unit_id;
+      if (!rawTooFar || typeof rawTooFar !== "object" || Array.isArray(rawTooFar)) {
+        throw new Error("squad_shoot_los_overview: hidden_too_far_by_unit_id absent/invalid in response");
+      }
+      const hiddenTooFarByUnitId: Record<string, boolean> = {};
+      for (const [tid, tooFar] of Object.entries(rawTooFar as Record<string, unknown>)) {
+        if (typeof tooFar !== "boolean") {
+          throw new Error(`squad_shoot_los_overview: hidden_too_far_by_unit_id.${tid} must be boolean`);
+        }
+        hiddenTooFarByUnitId[tid] = tooFar;
+      }
       const rawCount = result.count_by_unit_id;
       if (!rawCount || typeof rawCount !== "object" || Array.isArray(rawCount)) {
         throw new Error("squad_shoot_los_overview: count_by_unit_id absent/invalid in response");
@@ -4107,6 +4181,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           blinkTimer: timer,
           attackerId: unitId,
           coverByUnitId,
+          hiddenTooFarByUnitId,
           losCountByUnitId,
           squadAliveCount: aliveRaw,
           losOverviewUnitId: unitId,
@@ -6093,6 +6168,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       blinkingUnits: [],
       blinkingAttackerId: null,
       blinkingCoverByUnitId: undefined,
+      blinkingHiddenTooFarByUnitId: undefined,
       blinkingLosCountByUnitId: undefined,
       blinkingSquadAliveCount: undefined,
       blinkingLosOverviewUnitId: null,
@@ -6262,6 +6338,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     blinkingUnits: blinkingUnitsIds,
     blinkingAttackerId: blinkingUnits.attackerId ?? null,
     blinkingCoverByUnitId: blinkingUnits.coverByUnitId,
+    blinkingHiddenTooFarByUnitId: blinkingUnits.hiddenTooFarByUnitId,
     blinkingLosCountByUnitId: blinkingUnits.losCountByUnitId,
     blinkingSquadAliveCount: blinkingUnits.squadAliveCount,
     blinkingLosOverviewUnitId: blinkingUnits.losOverviewUnitId ?? null,

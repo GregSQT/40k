@@ -69,6 +69,13 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
     [pos]
   );
 
+  // Groupes combi dont un profil est déjà déclaré (cible désignée).
+  const assignedCombiGroups = new Set<string>(
+    weapons
+      .filter((w) => w.assigned && w.weapon.COMBI_WEAPON)
+      .map((w) => w.weapon.COMBI_WEAPON as string)
+  );
+
   return (
     <div
       ref={dropdownRef}
@@ -99,13 +106,13 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
             const weapon = weaponOption.weapon;
             const isDisabled = !weaponOption.canUse;
             const disabledReason = !weaponOption.canUse ? weaponOption.reason : null;
-            // Combi non déclarée : texte légèrement grisé. Arme déclarée : fond vert foncé.
-            const isCombi = !!weapon.COMBI_WEAPON;
-            const nameStyle = weaponOption.assigned
-              ? undefined
-              : isCombi
-                ? { color: "#aaa", opacity: 0.75 }
-                : undefined;
+            // Profil frère d'une combi dont un AUTRE profil est déjà déclaré : texte grisé.
+            // Arme déclarée : fond vert foncé. Sinon (aucun déclaré) : affichage normal.
+            const combiSiblingDeclared =
+              !!weapon.COMBI_WEAPON &&
+              !weaponOption.assigned &&
+              assignedCombiGroups.has(weapon.COMBI_WEAPON);
+            const nameStyle = combiSiblingDeclared ? { color: "#aaa", opacity: 0.75 } : undefined;
 
             return (
               <tr

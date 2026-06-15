@@ -49,6 +49,9 @@ function statusBadgeRadius(HEX_RADIUS: number): number {
   return Math.max(7, HEX_RADIUS * 0.32);
 }
 
+/** Couleur de l'œil "caché trop loin" (hors detection range), distincte du gris "couvert". */
+const EYE_COLOR_TOO_FAR = 0xff3b30;
+
 /**
  * Profil visuel d'une figurine dans une escouade hétérogène (override de l'unité
  * parente). Valeurs déjà prêtes à l'affichage (BASE_SIZE transformé subhex côté backend).
@@ -123,6 +126,10 @@ interface UnitRendererProps {
   shootingTargetInCover?: boolean;
   /** Per-unit cover from move-preview LoS hover (footprint ratio); overrides shootingTargetInCover when set */
   movePreviewShootingTargetInCoverByUnitId?: Record<string, boolean>;
+  /** True if this target is hidden beyond the active shooter's detection range ("trop loin" → œil rouge). */
+  hiddenTooFar?: boolean;
+  /** Per-unit "trop loin" from LoS hover/blink; overrides hiddenTooFar when set. Parallèle au cover. */
+  movePreviewHiddenTooFarByUnitId?: Record<string, boolean>;
 
   // Shooting target (for replay mode explosion icon)
   shootingTargetId?: number | null;
@@ -1676,39 +1683,8 @@ export class UnitRenderer {
       Array.isArray(this.props.blinkingUnits) &&
       this.props.blinkingUnits.some((id) => String(id) === String(unit.id));
 
-    const getEffectiveTargetInCover = (attacker: Unit | null): boolean => {
-      if (!attacker) {
-        return false;
-      }
-      const movePhaseLosHover =
-        this.props.phase === "move" &&
-        (this.props.mode === "select" || this.props.mode === "movePreview") &&
-        this.props.movePreviewShootingTargetInCoverByUnitId !== undefined;
-      if (this.props.phase !== "shoot" && this.props.mode !== "movePreview" && !movePhaseLosHover) {
-        return false;
-      }
-      const selectedRangedWeapon = getSelectedRangedWeapon(attacker);
-      const selectedWeaponIgnoresCover =
-        Array.isArray(selectedRangedWeapon?.WEAPON_RULES) &&
-        selectedRangedWeapon.WEAPON_RULES.some((rule) => rule === "IGNORES_COVER");
-      if (selectedWeaponIgnoresCover) {
-        return false;
-      }
-      if (
-        (this.props.mode === "movePreview" ||
-          this.props.mode === "select" ||
-          this.props.mode === "attackPreview" ||
-          this.props.mode === "squadModelShoot") &&
-        this.props.movePreviewShootingTargetInCoverByUnitId
-      ) {
-        const key = String(this.props.unit.id);
-        const map = this.props.movePreviewShootingTargetInCoverByUnitId;
-        if (Object.hasOwn(map, key)) {
-          return map[key] === true;
-        }
-      }
-      return this.props.shootingTargetInCover === true;
-    };
+    const getEffectiveTargetInCover = (attacker: Unit | null): boolean =>
+      this.getEffectiveTargetInCover(attacker);
 
     // Use either individual target preview OR multi-unit blinking
     const shouldShowBlinkingHP = isTargetPreviewed || shouldBlink;
@@ -2339,11 +2315,11 @@ export class UnitRenderer {
     const r = statusBadgeRadius(HEX_RADIUS);
     const scaledOffset = ((HEX_RADIUS * unitIconScale) / 2) * 0.8;
     // Bottom-left of a figure (mirror of the bottom-right charge badge).
-    const drawBadgeAt = (cx: number, cy: number, name: string): void => {
+    const drawBadgeAt = (cx: number, cy: number, name: string, eyeColor?: number): void => {
       const badgeX = cx - scaledOffset;
       const badgeY = cy + scaledOffset;
       const g = new PIXI.Graphics();
-      drawHiddenEyeBadge(g, badgeX, badgeY, r);
+      drawHiddenEyeBadge(g, badgeX, badgeY, r, eyeColor);
       g.name = name;
       g.zIndex = 10001;
       targetContainer.addChild(g);
@@ -2351,18 +2327,114 @@ export class UnitRenderer {
 
     if (this.props.statusBadgePerModel) {
       // Per-figure mode (rule 13.09) — one badge on each hidden figure (follows modelHidden).
+      // Couleur relative au tireur actif : rouge si l'unité est cachée hors detection range
+      // ("trop loin"), gris sinon (statut caché/couvert). Trop-loin = par unité → toutes ses figs.
       const centers = this.props.modelCenters;
       const flags = this.props.modelHidden;
       if (!centers || !flags) return;
+      const eyeColor = this.getEffectiveTargetTooFar(this.getActiveAttacker())
+        ? EYE_COLOR_TOO_FAR
+        : undefined;
       centers.forEach(([cx, cy], i) => {
-        if (flags[i]) drawBadgeAt(cx, cy, `hidden-badge-${unitIdNum}-${i}`);
+        if (flags[i]) drawBadgeAt(cx, cy, `hidden-badge-${unitIdNum}-${i}`, eyeColor);
       });
       return;
     }
 
-    // Squad mode — single badge only if the whole squad is hidden (all models).
-    if (!unit.hidden) return;
-    drawBadgeAt(centerX, centerY, `hidden-badge-${unitIdNum}`);
+    // Squad mode — œil relatif au tireur actif : rouge si l'ennemi est caché au-delà de la
+    // detection range ("trop loin"), gris s'il est en couvert (ajusté arme). Mutuellement exclusifs
+    // (le backend ne met une unité que dans un seul des deux maps). Sinon aucun badge.
+    const attacker = this.getActiveAttacker();
+    if (this.getEffectiveTargetTooFar(attacker)) {
+      drawBadgeAt(centerX, centerY, `hidden-badge-${unitIdNum}`, EYE_COLOR_TOO_FAR);
+      return;
+    }
+    if (this.getEffectiveTargetInCover(attacker)) {
+      drawBadgeAt(centerX, centerY, `hidden-badge-${unitIdNum}`);
+    }
+  }
+
+  /** Tireur actif (source de l'œil couvert/trop-loin), résolu comme dans render(). */
+  private getActiveAttacker(): Unit | null {
+    const attackerId =
+      this.props.blinkingAttackerId ||
+      this.props.gameState?.active_shooting_unit ||
+      this.props.gameState?.active_fight_unit ||
+      this.props.gameState?.active_charge_unit ||
+      this.props.selectedUnitId;
+    if (!attackerId) return null;
+    const attackerIdNum =
+      typeof attackerId === "string" ? parseInt(attackerId, 10) : attackerId;
+    return (
+      this.props.units.find((u) => {
+        const idNum = typeof u.id === "string" ? parseInt(u.id, 10) : u.id;
+        return idNum === attackerIdNum;
+      }) || null
+    );
+  }
+
+  /** Couvert effectif de cette unité-cible vis-à-vis du tireur (ajusté IGNORES_COVER). */
+  private getEffectiveTargetInCover(attacker: Unit | null): boolean {
+    if (!attacker) {
+      return false;
+    }
+    const movePhaseLosHover =
+      this.props.phase === "move" &&
+      (this.props.mode === "select" || this.props.mode === "movePreview") &&
+      this.props.movePreviewShootingTargetInCoverByUnitId !== undefined;
+    if (this.props.phase !== "shoot" && this.props.mode !== "movePreview" && !movePhaseLosHover) {
+      return false;
+    }
+    const selectedRangedWeapon = getSelectedRangedWeapon(attacker);
+    const selectedWeaponIgnoresCover =
+      Array.isArray(selectedRangedWeapon?.WEAPON_RULES) &&
+      selectedRangedWeapon.WEAPON_RULES.some((rule) => rule === "IGNORES_COVER");
+    if (selectedWeaponIgnoresCover) {
+      return false;
+    }
+    if (
+      (this.props.mode === "movePreview" ||
+        this.props.mode === "select" ||
+        this.props.mode === "attackPreview" ||
+        this.props.mode === "squadModelShoot") &&
+      this.props.movePreviewShootingTargetInCoverByUnitId
+    ) {
+      const key = String(this.props.unit.id);
+      const map = this.props.movePreviewShootingTargetInCoverByUnitId;
+      if (Object.hasOwn(map, key)) {
+        return map[key] === true;
+      }
+    }
+    return this.props.shootingTargetInCover === true;
+  }
+
+  /** "Trop loin" : cette unité-cible est cachée hors detection range du tireur (œil rouge).
+   * Indépendant de l'arme (detection range, pas couvert) ; même gating de contexte que le couvert. */
+  private getEffectiveTargetTooFar(attacker: Unit | null): boolean {
+    if (!attacker) {
+      return false;
+    }
+    const movePhaseLosHover =
+      this.props.phase === "move" &&
+      (this.props.mode === "select" || this.props.mode === "movePreview") &&
+      this.props.movePreviewHiddenTooFarByUnitId !== undefined;
+    if (this.props.phase !== "shoot" && this.props.mode !== "movePreview" && !movePhaseLosHover) {
+      return false;
+    }
+    if (
+      (this.props.mode === "movePreview" ||
+        this.props.mode === "select" ||
+        this.props.mode === "attackPreview" ||
+        this.props.mode === "squadModelShoot") &&
+      this.props.movePreviewHiddenTooFarByUnitId
+    ) {
+      const key = String(this.props.unit.id);
+      const map = this.props.movePreviewHiddenTooFarByUnitId;
+      if (Object.hasOwn(map, key)) {
+        return map[key] === true;
+      }
+    }
+    return this.props.hiddenTooFar === true;
   }
 
   /**

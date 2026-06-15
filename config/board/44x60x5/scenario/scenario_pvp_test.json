@@ -8,6 +8,7 @@
     { "id": 3, "unit_type": "LieutenantCombiWeapon",               "player": 1, "col": 170, "row": 150 },
     { "id": 4, "unit_type": "ApothecaryBiologis",                  "player": 1, "col": 164, "row": 198 },
     { "id": 5, "unit_type": "DreadnoughtBallistus",                "player": 1, "col": 180, "row": 10 },
+    { "id": 10003, "unit_type": "DreadnoughtBallistus",                "player": 1, "col": 72, "row": 8 },
     { "id": 10001, "unit_type": "FenrisianWolf",                "player": 1, "col": 68, "row": 188 },
     { "id": 10002, "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer", "player": 1, "col": 63, "row": 65 },
     {
@@ -18,6 +19,16 @@
         { "col": 110, "row": 172 },
         { "col": 116, "row": 172 },        
         { "col": 113, "row": 166 }
+      ]
+    },
+    {
+      "id":10004, "unit_type": "Intercessor", "player": 1, "col": 88, "row": 17,
+      "models": [
+        { "col": 88, "row": 17 },
+        { "col": 94, "row": 17 },
+        { "col": 92, "row": 4, "unit_type": "CaptainPowerWeaponBolter" },
+        { "col": 85, "row": 11, "unit_type": "IntercessorSergeant" },
+        { "col": 91, "row": 11, "unit_type": "IntercessorGrenadeLauncher" }
       ]
     },
     {
@@ -73,7 +84,7 @@
     { "id": 104, "unit_type": "ScreamerKiller",       "player": 2, "col": 145,  "row": 90 },
     { "id": 105, "unit_type": "RipperSwarm",          "player": 2, "col": 20,   "row": 160 },
     { "id": 106, "unit_type": "RipperSwarm",          "player": 2, "col": 8,   "row": 200 },
-    { "id": 107, "unit_type": "VonRyanLeaper",        "player": 2, "col": 31,  "row": 61 },
+    { "id": 107, "unit_type": "VonRyanLeaper",        "player": 2, "col": 36,  "row": 53 },
     { "id": 108, "unit_type": "VonRyanLeaper",        "player": 2, "col": 25,  "row": 132 },
     { "id": 109, "unit_type": "VonRyanLeaper",        "player": 2, "col": 87,  "row": 147 },
     {
@@ -83,7 +94,7 @@
         { "col": 50, "row": 46 },
         { "col": 56, "row": 46 },
         { "col": 62, "row": 46 },
-        { "col": 68, "row": 46 }
+        { "col": 38, "row": 46 }
       ]
     },
     {

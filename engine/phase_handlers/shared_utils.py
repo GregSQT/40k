@@ -4446,9 +4446,16 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
     tc = int(tgt_uc.get("col", 0))  # get allowed
     tr = int(tgt_uc.get("row", 0))  # get allowed
     weapon_suffix = f" [{weapon_name_g}]" if weapon_name_g else ""
+    # Cover (13.08, ranged-only) : si la cible avait le couvert, afficher la degradation
+    # du seuil de touche (ex 3+->4+) + token [COVER] (tooltip regle cote frontend).
+    # Absent au combat -> branche standard.
+    if g.get("cover"):
+        hit_part = f"Hit:{g['bs_base']}+->{g['bs']}+[COVER]"
+    else:
+        hit_part = f"Hit:{g['bs']}+"
     attack_log = (
         f"Shots:{g['attacks']} - "
-        f"Hit:{g['bs']}+ Wound:{g['display_wth']}+ Save:{g['display_save_th']}+ - "
+        f"{hit_part} Wound:{g['display_wth']}+ Save:{g['display_save_th']}+ - "
         f"HP lost:{g['damage']} Killed:{g['kills']}"
     )
     msg = (
@@ -4543,6 +4550,34 @@ def _roll_squad_shot_sequence(
     }
 
 
+def _cover_worsened_bs(
+    game_state: Dict[str, Any], attacker: Dict[str, Any], target_sid: str, bs: int,
+) -> Tuple[int, bool]:
+    """Applique le Benefit of Cover (regle 13.08) au seuil de touche d un tir.
+
+    Cover = ranged-only, niveau UNITE tout-ou-rien : « worsen the BS characteristic of
+    that attack by 1 ». Source autoritative : compute_unit_los(tireur, cible)["cover"]
+    (pair-cache par _unit_move_version) = exactement la valeur affichee au frontend
+    (los_cover_cache derive du meme calcul). Clamp a 6 : un 6 non-modifie touche toujours
+    (CRITICAL HIT, 05.01), donc un BS6+ sous cover reste touche-sur-6.
+
+    Retourne (bs_effectif, cover). Pas de fallback : si une unite est introuvable c est
+    un bug -> erreur explicite.
+    """
+    from engine.phase_handlers.shooting_handlers import compute_unit_los, _get_unit_by_id
+    shooter_sid = str(require_key(attacker, "squad_id"))
+    shooter_unit = _get_unit_by_id(game_state, shooter_sid)
+    target_unit = _get_unit_by_id(game_state, str(target_sid))
+    if shooter_unit is None:
+        raise ValueError(f"Cover: tireur {shooter_sid!r} introuvable (unit_by_id)")
+    if target_unit is None:
+        raise ValueError(f"Cover: cible {target_sid!r} introuvable (unit_by_id)")
+    cover = bool(compute_unit_los(game_state, shooter_unit, target_unit)["cover"])
+    if not cover:
+        return bs, False
+    return min(bs + 1, 6), True
+
+
 def _resolve_shoot_intent_pass1(
     game_state: Dict[str, Any], intent: Dict[str, Any],
     targets_meta: Dict[str, Dict[str, Any]],
@@ -4600,7 +4635,8 @@ def _resolve_shoot_intent_pass1(
         return None
     # Convention moteur (cf. shooting_handlers.py:3010-3011, 6683, 6748) :
     # weapon["ATK"] = seuil hit (BS/WS), weapon["STR"] = force, weapon["AP"] = AP modifier
-    bs = int(weapon.get("ATK", weapon.get("BS", 4)))
+    bs_base = int(weapon.get("ATK", weapon.get("BS", 4)))
+    bs, cover = _cover_worsened_bs(game_state, attacker, target_sid, bs_base)
     strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))
     ap = int(weapon.get("AP", 0))  # get allowed
     dmg_raw = weapon.get("DMG", 1)
@@ -4643,6 +4679,8 @@ def _resolve_shoot_intent_pass1(
         "target_sid": target_sid,
         "weapon_name": weapon_name,
         "bs": bs,
+        "bs_base": bs_base,
+        "cover": cover,
         "display_wth": display_wth,
         "display_save_th": display_save_th,
         "shot_records": _roll["shot_records"],
@@ -4770,6 +4808,8 @@ def resolve_squad_shoot(
                     "weapon_name": weapon_name,
                     "target_sid": target_sid,
                     "bs": p1["bs"],
+                    "bs_base": p1["bs_base"],
+                    "cover": p1["cover"],
                     "display_wth": p1["display_wth"],
                     "display_save_th": p1["display_save_th"],
                     "player": int(attacker.get("player", 0)),  # get allowed
@@ -4991,7 +5031,8 @@ def _manual_roll_intent(
         n_attacks += tgt_size // 5
     if n_attacks <= 0:
         return None
-    bs = int(weapon.get("ATK", weapon.get("BS", 4)))  # get allowed
+    bs_base = int(weapon.get("ATK", weapon.get("BS", 4)))  # get allowed
+    bs, cover = _cover_worsened_bs(game_state, attacker, target_sid, bs_base)
     strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))  # get allowed
     ap = int(weapon.get("AP", 0))  # get allowed
     dmg_raw = weapon.get("DMG", 1)  # get allowed
@@ -5027,7 +5068,7 @@ def _manual_roll_intent(
         pending_wounds.append({"save_roll": save_roll, "rec": rec})
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
-        "weapon_name": weapon_name, "bs": bs, "ap": ap, "dmg_raw": dmg_raw,
+        "weapon_name": weapon_name, "bs": bs, "bs_base": bs_base, "cover": cover, "ap": ap, "dmg_raw": dmg_raw,
         "display_wth": display_wth, "display_save_th": display_save_th,
         "shot_records": shot_records, "pending_wounds": pending_wounds,
         "counts": {"attacks": attacks, "hits": hits, "wounds": wounds},
@@ -5298,14 +5339,20 @@ def _build_manual_allocation(
         gkey = (r["bs"], r["ap"], r["dmg_raw"], r["display_wth"], r["display_save_th"], target_sid)
         if gkey not in group_index_by_key:
             group_index_by_key[gkey] = len(weapon_groups)
-            weapon_groups.append({
+            _grp = {
                 "attacker_squad_id": str(attacker.get("squad_id", attacker_mid)),
                 "weapon_name": weapon_name, "weapon_names": [weapon_name], "target_sid": target_sid,
                 "bs": r["bs"], "ap": r["ap"], "dmg_raw": r["dmg_raw"],
                 "display_wth": r["display_wth"], "display_save_th": r["display_save_th"],
                 "player": int(attacker.get("player", 0)),  # get allowed
                 "attacks": 0, "damage": 0, "kills": 0, "killed_model_ids": [], "shots": [],
-            })
+            }
+            # Cover (regle 13.08) : ranged-only -> present uniquement sur le chemin tir
+            # (le chemin combat partage cette fonction mais ne fournit pas ces cles).
+            if "cover" in r:
+                _grp["bs_base"] = r["bs_base"]
+                _grp["cover"] = r["cover"]
+            weapon_groups.append(_grp)
         gidx = group_index_by_key[gkey]
         g = weapon_groups[gidx]
         if weapon_name not in g["weapon_names"]:
