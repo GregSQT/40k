@@ -4009,16 +4009,26 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   }, [squadMovePlan, executeAction]);
 
   /** Annule le plan provisoire (aucune ecriture backend). */
-  const handleCancelSquadMove = useCallback(() => {
+  const handleCancelSquadMove = useCallback(async () => {
     squadMoveSessionRef.current += 1;
     squadMoveModelPoolRef.current = new Set();
+    // Désactiver l'unité côté moteur (postpone : clear active_movement_unit sans la retirer du
+    // pool d'activation). Sinon le bloc de boutons reste affiché car gaté par active_movement_unit.
+    const activeMu = latestGameStateRef.current?.active_movement_unit;
+    if (activeMu != null && activeMu !== "") {
+      await executeAction({
+        action: "left_click",
+        unitId: String(activeMu),
+        clickTarget: "active_unit",
+      });
+    }
     setSquadMovePlan(null);
     setMode("select");
     setSelectedUnitId(null);
     setAdvancingUnitId(null);
     setAdvanceRoll(null);
     setActiveUnitEngaged(null);
-  }, []);
+  }, [executeAction]);
 
   /** Bouton Advance (phase move) : bascule l'activation squad en mode Advance (jet D6 backend). */
   const handleSetAdvanceMode = useCallback(
