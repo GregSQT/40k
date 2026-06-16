@@ -57,7 +57,7 @@ def _is_footprint_overlapping(
 ) -> bool:
     """True si le socle candidat chevauche celui d'une unité déjà déployée.
 
-    Clearance continu rond↔rond, fallback empreinte (via ``candidate_overlaps_any_unit``).
+    Clearance continu rond↔rond, méthode empreinte (via ``candidate_overlaps_any_unit``).
     """
     from engine.hex_utils import Socle
 

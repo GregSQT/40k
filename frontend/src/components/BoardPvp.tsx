@@ -355,6 +355,7 @@ type Mode =
   | "chargeModelMove"
   | "advancePreview"
   | "pileInPreview"
+  | "pileInModelMove"
   | "consolidationPreview";
 
 /** État du mode mesure (règle dans la barre). */
@@ -4185,7 +4186,7 @@ export default function Board({
         }
       };
       // Mode Focus : pas de voile rouge/vert ; un CERCLE violet (contour) entoure les cibles focusables.
-      const drawTargetRing = (uid: number, color: number) => {
+      const drawTargetRing = (uid: number | string, color: number) => {
         const tu = units.find((u) => String(u.id) === String(uid));
         if (!tu) return;
         const tBase = resolveBaseSizeForUnitDisplay(tu);

@@ -6235,6 +6235,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onSelectPileInModel: () => {},
       onMovePileInModel: () => {},
       onUnplacePileInModel: () => {},
+      onEndPileIn: () => {},
       onCommitPileInPlan: async () => {},
       onCancelPileInModelMove: async () => {},
       onSetPileInFocus: (_mode: "defensive" | "offensive") => {},

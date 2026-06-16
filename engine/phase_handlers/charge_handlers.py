@@ -10,7 +10,7 @@ ZERO TOLERANCE for state storage or wrapper patterns
 import os
 import time
 from collections import deque
-from typing import Dict, List, Tuple, Set, Optional, Any, FrozenSet
+from typing import Dict, List, Tuple, Set, Optional, Any, FrozenSet, cast
 from .generic_handlers import end_activation
 from shared.data_validation import require_key, require_present
 from engine.action_log_utils import append_action_log
@@ -171,7 +171,7 @@ def _charge_offsets_for_base(
     """Offsets even/odd pour une base (shape/size/orient) DONNÉE — pas celle de l'unité.
 
     Permet une géométrie par-figurine (unités à bases hétérogènes : personnage attaché). Cache par
-    base (réutilisé entre figs de même socle). ``None`` = mono-hex / legacy → fallback empreinte.
+    base (réutilisé entre figs de même socle). ``None`` = mono-hex / legacy → méthode empreinte.
     """
     from .shared_utils import get_engagement_zone
 
@@ -185,7 +185,7 @@ def _charge_offsets_for_base(
         return None
     try:
         from engine.hex_utils import precompute_footprint_offsets
-        off_e, off_o = precompute_footprint_offsets(shape, base_size, int(orientation))
+        off_e, off_o = precompute_footprint_offsets(shape, cast("int | list[int]", base_size), int(orientation))
         out: FootprintOffsetPair = (off_e, off_o)
     except Exception:
         out = None
@@ -199,7 +199,7 @@ def _charge_model_footprint(
     """Empreinte d'une figurine à (col,row) selon SA propre base (``models_cache``)."""
     shape = model_entry["BASE_SHAPE"]
     bs = model_entry["BASE_SIZE"]
-    orient = int(model_entry.get("orientation", 0))
+    orient = int(model_entry.get("orientation", 0))  # get allowed
     offs = _charge_offsets_for_base(game_state, shape, bs, orient)
     if offs is not None:
         off_e, off_o = offs
@@ -1604,7 +1604,7 @@ def _charge_model_placement_overlaps(
     """True si le placement final d'une figurine de charge chevauche un obstacle.
 
     Murs : discret (``cand_fp & wall_hexes``). Autres unités/ennemis (``obstacle_socles``,
-    pré-construits) et coéquipières (``sibling_socles``) : clearance continu rond↔rond, fallback
+    pré-construits) et coéquipières (``sibling_socles``) : clearance continu rond↔rond, méthode
     empreinte — via ``footprints_overlap``.
     """
     from engine.hex_utils import footprints_overlap
@@ -1713,7 +1713,7 @@ def charge_build_model_destinations_pool(
     # amies) ne bloquent pas le passage.
     path_blocked = set(wall_hexes) | enemy_occupied
     # 03 « Ending a move » : le non-chevauchement final (murs + unités + coéquipières) est délégué à
-    # _charge_model_placement_overlaps (clearance continu rond↔rond, fallback empreinte).
+    # _charge_model_placement_overlaps (clearance continu rond↔rond, méthode empreinte).
     # Take to the skies (21.03) : si le vol est actif, la traversée ignore tout ; seul le placement
     # final (``cand_fp & end_blocked``) reste interdit d'overlap. Sinon, traversée sol classique.
     fly_active = _charge_fly_active(game_state, unit, squad_id)
@@ -1790,7 +1790,7 @@ def _charge_qualifying(
     if start_min is None:
         return out
     others = other_origins_by_model.get(model_id, set())
-    reg_m = region_by_base.get(base_of_model.get(model_id), {})
+    reg_m = region_by_base.get(base_of_model.get(model_id), {})  # get allowed
     for h in reach:
         rg = reg_m.get(h)
         if rg is None:
@@ -2002,7 +2002,7 @@ def _compute_plan_context(
         return (
             model_entry["BASE_SHAPE"],
             tuple(bs) if isinstance(bs, (list, tuple)) else bs,
-            int(model_entry.get("orientation", 0)),
+            int(model_entry.get("orientation", 0)),  # get allowed
         )
 
     base_of_model: Dict[str, Tuple[Any, Any, int]] = {}
@@ -2345,7 +2345,7 @@ def charge_model_plan_state(
     footprint_mask_loops: List[List[List[float]]] = []
     if pool:
         from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
-        _sel_region = region_by_base.get(base_of_model.get(str(selected_model)), {}) if selected_model is not None else {}
+        _sel_region = region_by_base.get(base_of_model.get(str(selected_model)), {}) if selected_model is not None else {}  # get allowed
         fp_zone: Set[Tuple[int, int]] = set()
         for _c, _r in pool:
             rg = _sel_region.get((int(_c), int(_r)))
@@ -2358,7 +2358,7 @@ def charge_model_plan_state(
     if _perf and _t0 is not None:
         _total = time.perf_counter() - _t0
         _sel_s = (time.perf_counter() - _tsel) if _tsel is not None else 0.0
-        _tmg = ctx.get("_timings", {})
+        _tmg = ctx.get("_timings", {})  # get allowed
         append_perf_timing_line(
             f"CHARGE_MODEL_PLAN_STATE episode={_ep} turn={_turn} unit_id={unit_id} "
             f"selected={selected_model} bfs_s={_tmg.get('bfs', 0.0):.6f} distfield_s={_tmg.get('distfield', 0.0):.6f} "
@@ -4690,11 +4690,11 @@ def charge_autoplace_plan(
             edges_by_slot.setdefault(si, []).append(e_i)
         base_rows = n_model + n_slot
         for k, (s1, s2) in enumerate(conflict_pairs):
-            for e_i in edges_by_slot.get(s1, []) + edges_by_slot.get(s2, []):
+            for e_i in edges_by_slot.get(s1, []) + edges_by_slot.get(s2, []):  # get allowed
                 rows.append(base_rows + k); cols.append(e_i)
         n_pack = base_rows + len(conflict_pairs)
         A = coo_matrix(([1.0] * len(rows), (rows, cols)), shape=(n_pack, nvar))
-        constraints = [LinearConstraint(A, np.zeros(n_pack), np.ones(n_pack))]
+        constraints = [LinearConstraint(A, np.zeros(n_pack), np.ones(n_pack))]  # type: ignore[arg-type]
         # (4) Couverture DURE : chaque cible déclarée présente reçoit ≥ 1 fig l'engageant.
         if cover:
             crows: List[int] = []
@@ -4706,7 +4706,7 @@ def charge_autoplace_plan(
             if crows:
                 ncov = len(present_target_ids)
                 Ac = coo_matrix(([1.0] * len(crows), (crows, ccols)), shape=(ncov, nvar))
-                constraints.append(LinearConstraint(Ac, np.ones(ncov), np.full(ncov, float(nvar))))
+                constraints.append(LinearConstraint(Ac, np.ones(ncov), np.full(ncov, float(nvar))))  # type: ignore[arg-type]
         max_pd = max((e[2] for e in edges), default=0) + 1
         max_dt = max((all_slots[e[1]][3] for e in edges), default=0) + 1
         BIG = 1.0e6

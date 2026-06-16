@@ -11,7 +11,7 @@ Membership is answered by testing hex appartenance against the precomputed
 ``hexes`` sets — same odd-q projection as objectives and the frontend renderer,
 so a unit "within a terrain area" matches exactly what the player sees on board.
 """
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple, cast
 
 from shared.data_validation import require_key
 
@@ -88,7 +88,7 @@ def model_within_terrain(
     ``polygon_vertices``), pendant fig↔terrain de ``euclidean_edge_clearance_round_round``
     (fig↔fig) — aligné pixel-pour-pixel sur le rendu (disque d'icône + polygone terrain),
     contrairement à l'intersection de hexes rasterisés qui rogne ~½ hex de chaque côté.
-    Base OVAL/SQUARE : fallback empreinte hex (intersection cellules), exactement la même
+    Base OVAL/SQUARE : méthode empreinte hex (intersection cellules), exactement la même
     convention hybride que l'engagement (round=euclidien, autres=hex).
 
     ``obscuring_only=True`` restreint aux zones obscurantes (hidden 13.09) ; ``False`` = toute
@@ -99,7 +99,7 @@ def model_within_terrain(
     if base_shape == "round":
         from engine.hex_utils import _hex_center, round_base_radius_norm, disc_overlaps_polygon
         cx, cy = _hex_center(int(col), int(row))
-        r = round_base_radius_norm(base_size)
+        r = round_base_radius_norm(cast(float, base_size))
         for area in areas:
             poly = [_hex_center(int(v[0]), int(v[1])) for v in require_key(area, "polygon_vertices")]
             if disc_overlaps_polygon(cx, cy, r, poly):

@@ -1619,7 +1619,7 @@ def build_hidden_too_far_by_unit_id(
         float(require_key(game_rules, "detection_range"))
         * int(require_key(game_state, "inches_to_subhex"))
     )
-    rng_weapons = shooter.get("RNG_WEAPONS", [])
+    rng_weapons = require_key(shooter, "RNG_WEAPONS")
     max_rng = max((require_key(w, "RNG") for w in rng_weapons), default=0)
     if max_rng <= 0:
         return {}

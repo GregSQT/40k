@@ -9,7 +9,7 @@ All functions are O(1) per call unless documented otherwise.
 """
 
 import math
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple, cast
 
 import numpy as np
 
@@ -1401,7 +1401,7 @@ _OVERLAP_TOL: float = 1e-6
 class Socle(NamedTuple):
     """Socle d'une figurine pour les tests de chevauchement.
 
-    ``fp`` (empreinte = cellules occupées) n'est nécessaire que pour le fallback
+    ``fp`` (empreinte = cellules occupées) n'est nécessaire que pour la méthode
     empreinte (toute paire impliquant une base non ronde). Pour une paire ronde↔ronde,
     le test est purement géométrique (centre + base_size) et ``fp`` peut rester None.
     ``base_size`` : diamètre (round/square) ou [major, minor] (oval).
@@ -1430,19 +1430,19 @@ def footprints_overlap(a: Socle, b: Socle) -> bool:
 
     - Paire ronde↔ronde : clearance euclidien **continu** (exact). Chevauchement si l'écart
       bord-à-bord est strictement négatif (``< -_OVERLAP_TOL``) ; tangence (gap≈0) autorisée.
-    - Toute paire impliquant une base non ronde : **fallback empreinte** (intersection des
+    - Toute paire impliquant une base non ronde : **méthode empreinte** (intersection des
       cellules). ``a.fp`` et ``b.fp`` doivent alors être fournis.
 
     Broad-phase (distance des centres vs rayons englobants) appliquée UNIQUEMENT devant le
-    fallback empreinte : pour une paire ronde le test précis est déjà O(1), une broad-phase
+    méthode empreinte : pour une paire ronde le test précis est déjà O(1), une broad-phase
     y serait redondante.
     """
     if a.shape == "round" and b.shape == "round":
         gap = euclidean_edge_clearance_round_round(
-            a.col, a.row, a.base_size, b.col, b.row, b.base_size
+            a.col, a.row, cast(float, a.base_size), b.col, b.row, cast(float, b.base_size)
         )
         return gap < -_OVERLAP_TOL
-    # Fallback empreinte (au moins une base non ronde) : broad-phase, puis intersection.
+    # Méthode empreinte (au moins une base non ronde) : broad-phase, puis intersection.
     cxa, cya = _hex_center(a.col, a.row)
     cxb, cyb = _hex_center(b.col, b.row)
     d = math.hypot(cxb - cxa, cyb - cya)

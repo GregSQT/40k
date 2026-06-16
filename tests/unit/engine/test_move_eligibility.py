@@ -28,6 +28,11 @@ def _board_config() -> Dict[str, Any]:
             "max_base_size_hex": 35,
         },
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+        "move": {
+            "can_move_through_enemy_engagement_zone": True,
+            "can_move_through_enemy_model": False,
+            "can_move_through_friendly_model": True,
+        },
     }
 
 

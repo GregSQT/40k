@@ -4,10 +4,13 @@ engine/phase_handlers/shared_utils.py - Shared utility functions for phase handl
 Functions used across multiple phase handlers to avoid duplication.
 """
 
-from typing import Dict, List, Tuple, Set, Optional, Any, Union, Callable, cast
+from typing import Dict, List, Tuple, Set, Optional, Any, Union, Callable, cast, TYPE_CHECKING
 from dataclasses import dataclass
 import copy
 import inspect
+
+if TYPE_CHECKING:
+    from engine.hex_utils import Socle
 
 from shared.data_validation import require_key
 from engine.action_log_utils import append_action_log
@@ -353,7 +356,7 @@ def candidate_overlaps_any_unit(
     """True si le socle ``candidate`` chevauche celui d'une autre unité vivante.
 
     Test unifié (``hex_utils.footprints_overlap``) : ronde↔ronde en clearance euclidien
-    continu (exact), toute paire impliquant un non-rond en fallback empreinte. ``candidate.fp``
+    continu (exact), toute paire impliquant un non-rond en méthode empreinte. ``candidate.fp``
     doit être fourni dès que ``candidate`` ou un voisin est non rond. ``exclude_unit_id`` :
     l'unité en mouvement, exclue d'elle-même.
 
@@ -397,7 +400,7 @@ def is_placement_valid_with_clearance(
 
     Le volet bornes/murs reste ``is_footprint_placement_valid`` (avec ``occupied_positions``
     vide : le chevauchement n'est plus testé par cellules ici). Le chevauchement entre unités
-    passe par ``candidate_overlaps_any_unit`` (clearance continu rond↔rond, fallback empreinte).
+    passe par ``candidate_overlaps_any_unit`` (clearance continu rond↔rond, méthode empreinte).
     Remplace 1:1 le couple ``build_occupied_positions_set`` + ``is_footprint_placement_valid``.
     """
     if not is_footprint_placement_valid(candidate_fp, game_state, set(), enemy_adjacent_hexes):
@@ -4561,7 +4564,7 @@ def _cover_worsened_bs(
     (los_cover_cache derive du meme calcul). Clamp a 6 : un 6 non-modifie touche toujours
     (CRITICAL HIT, 05.01), donc un BS6+ sous cover reste touche-sur-6.
 
-    Retourne (bs_effectif, cover). Pas de fallback : si une unite est introuvable c est
+    Retourne (bs_effectif, cover). Aucun repli : si une unite est introuvable c est
     un bug -> erreur explicite.
     """
     from engine.phase_handlers.shooting_handlers import compute_unit_los, _get_unit_by_id
@@ -5185,7 +5188,7 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
         ctx.on_target_damaged(game_state, batch["target_sid"])
     if destroyed and ctx.on_unit_destroyed is not None:
         squad_models = require_key(game_state, "squad_models")
-        if not [mm for mm in squad_models.get(batch["target_sid"], []) if mm in models_cache]:
+        if not [mm for mm in squad_models.get(batch["target_sid"], []) if mm in models_cache]:  # get allowed
             ctx.on_unit_destroyed(game_state, batch["target_sid"])
     summary["events"].append({
         "attacker": pw["attacker_mid"], "target": cur,
@@ -5389,7 +5392,7 @@ def _build_manual_allocation(
         for gidx, g in enumerate(weapon_groups):
             if g["target_sid"] != tsid:
                 continue
-            pool = batch_pool_by_gidx.get(gidx, [])
+            pool = batch_pool_by_gidx.get(gidx, [])  # get allowed
             if not pool:
                 continue  # ce profil n a inflige aucune blessure -> aucun lot a resoudre
             # Regle 05.04 (INFLICT DAMAGE) : du save_roll le plus bas au plus haut (tri

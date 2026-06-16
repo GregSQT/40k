@@ -4320,7 +4320,7 @@ def pile_in_move_destinations_12_03(
             engaging_closest.append(anchor)
     # Phase 1 (12.03 WHILE « engaged with it if possible ») : si au moins une ancre engage la
     # cible de pile-in la plus proche, le move DOIT s'y faire → on ne garde que celles-là.
-    # Phase 2 (fallback) : sinon, tout le pool dur (plus proche + engagé + engagements conservés).
+    # Phase 2 (repli) : sinon, tout le pool dur (plus proche + engagé + engagements conservés).
     return engaging_closest if engaging_closest else destinations
 
 
@@ -5515,7 +5515,7 @@ def pile_in_autoplace_plan(
         tier_fps.append(set(occ) if occ else {(int(ce["col"]), int(ce["row"]))})
 
     # Collision = test EUCLIDIEN officiel du jeu (``footprints_overlap`` : rond↔rond bord-à-bord
-    # continu, fallback empreinte sinon), pas l'intersection de cellules — sinon des socles ronds
+    # continu, méthode empreinte sinon), pas l'intersection de cellules — sinon des socles ronds
     # disjoints en cellules mais chevauchants visuellement passent à travers.
     def _socle(mid: str, c: int, r: int) -> Any:
         return _charge_model_socle(game_state, models_cache[mid], c, r)
@@ -5743,11 +5743,11 @@ def pile_in_autoplace_plan(
             edges_by_slot.setdefault(si, []).append(e_i)
         base_rows = n_model + n_slot
         for k, (s1, s2) in enumerate(conflict_pairs):
-            for e_i in edges_by_slot.get(s1, []) + edges_by_slot.get(s2, []):
+            for e_i in edges_by_slot.get(s1, []) + edges_by_slot.get(s2, []):  # get allowed
                 rows.append(base_rows + k); cols.append(e_i)
         n_rows = base_rows + len(conflict_pairs)
         A = coo_matrix(([1.0] * len(rows), (rows, cols)), shape=(n_rows, n))
-        lc = LinearConstraint(A, np.zeros(n_rows), np.ones(n_rows))
+        lc = LinearConstraint(A, np.zeros(n_rows), np.ones(n_rows))  # type: ignore[arg-type]
         max_pd = max((e[2] for e in edges), default=0) + 1
         max_df = max((all_slots[e[1]][4] for e in edges), default=0) + 1
         # Objectif lexicographique (BIG ≫ W2 ≫ tie) : (1) maximiser le nb de figs engagées ; (2) selon
