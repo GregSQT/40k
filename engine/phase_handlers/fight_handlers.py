@@ -56,6 +56,10 @@ from .shared_utils import (
     get_fighting_models,
     squad_fight_unit_activation_start,
     squad_declare_fight,
+    DeclareAttackCtx,
+    declare_attack_model,
+    declare_attack_weapon,
+    _synth_model_entry,
 )
 
 _ADJACENT_EDGE_GAP_TOLERANCE_NORM = ENGAGEMENT_NORM_HEX_WIDTH
@@ -2953,6 +2957,107 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
         valid_targets.append(target_id)
 
     return valid_targets
+
+
+def _model_can_fight_target(
+    game_state: Dict[str, Any],
+    attacker_model: Dict[str, Any],
+    attacker_squad_id: str,
+    target_squad_id: str,
+) -> bool:
+    """Eligibilite per-figurine au COMBAT (regle 04.02 — Select Targets / While Fighting).
+
+    La cible doit etre ENGAGED avec la figurine qui porte l arme : on teste si la
+    figurine attaquante (empreinte synthetique a sa position) est dans la zone
+    d engagement d au moins une figurine de l unite cible. Pas de LoS en melee.
+
+    Le squad_id attaquant est fourni par le moteur (les modeles n ont pas tous le
+    champ "squad_id" — on ne le devine donc pas depuis le modele).
+    """
+    from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
+    units_cache = require_key(game_state, "units_cache")
+    target_entry = units_cache.get(str(target_squad_id))
+    if target_entry is None:
+        return False
+    if not attacker_squad_id:
+        return False
+    ez = get_engagement_zone(game_state)
+    synth = _synth_model_entry(
+        game_state, str(attacker_squad_id), int(attacker_model["col"]), int(attacker_model["row"])
+    )
+    return unit_entries_within_engagement_zone(synth, target_entry, ez)
+
+
+def _model_can_fight_target_with_weapon(
+    game_state: Dict[str, Any],
+    attacker_model: Dict[str, Any],
+    attacker_squad_id: str,
+    target_squad_id: str,
+    weapon_index: int,
+) -> bool:
+    """Eligibilite per-arme melee : la fig possede l arme CC `weapon_index` ET est
+    engagee avec la cible. Les armes de melee n ont pas de portee : la validite se
+    reduit a l engagement (cf. _model_can_fight_target)."""
+    weapons = attacker_model.get("CC_WEAPONS", [])  # get allowed
+    if not (0 <= int(weapon_index) < len(weapons)):
+        return False
+    if not isinstance(weapons[int(weapon_index)], dict):
+        return False
+    return _model_can_fight_target(game_state, attacker_model, attacker_squad_id, target_squad_id)
+
+
+# Contexte de declaration COMBAT : engagement (pas de LoS/portee). Jumeau de
+# SHOOT_DECLARE_CTX cote tir. Reutilise le moteur generique declare_attack_*.
+FIGHT_DECLARE_CTX = DeclareAttackCtx(
+    intents_key="pending_squad_fight_intents",
+    selected_weapon_attr="selectedCcWeaponIndex",
+    weapons_key="CC_WEAPONS",
+    phase_label="fight",
+    can_target=_model_can_fight_target,
+    can_target_with_weapon=_model_can_fight_target_with_weapon,
+)
+
+
+def squad_declare_fight_model(
+    game_state: Dict[str, Any],
+    attacker_squad_id: str,
+    attacker_model_id: str,
+    target_squad_id: str,
+) -> Dict[str, Any]:
+    """Declaration MANUELLE d UNE figurine au COMBAT (flux PvP humain).
+
+    Wrapper fin de declare_attack_model via FIGHT_DECLARE_CTX (engagement).
+    """
+    return declare_attack_model(
+        game_state, FIGHT_DECLARE_CTX, attacker_squad_id, attacker_model_id, target_squad_id
+    )
+
+
+def squad_declare_fight_weapon(
+    game_state: Dict[str, Any],
+    attacker_squad_id: str,
+    weapon_index: int,
+    target_squad_id: str,
+) -> List[Dict[str, Any]]:
+    """Assigne l arme CC `weapon_index` (niveau escouade) a la cible, au COMBAT.
+
+    Wrapper fin de declare_attack_weapon via FIGHT_DECLARE_CTX (engagement).
+    """
+    return declare_attack_weapon(
+        game_state, FIGHT_DECLARE_CTX, attacker_squad_id, weapon_index, target_squad_id
+    )
+
+
+def _fight_ensure_activation_started(game_state: Dict[str, Any], squad_id: str) -> None:
+    """Demarre l activation fight de l escouade si pas deja en cours (idempotent).
+
+    Initialise pending_squad_fight_intents[squad_id] = [] pour accueillir les
+    declarations manuelles. Ne reinitialise pas si des declarations existent deja
+    (re-activation : on conserve l etat declare)."""
+    from .shared_utils import init_pending_intents
+    init_pending_intents(game_state)
+    if squad_id not in game_state["pending_squad_fight_intents"]:
+        squad_fight_unit_activation_start(game_state, squad_id)
 
 
 def _fight_ensure_current_fight_nb(unit: Dict[str, Any], unit_id: Any) -> None:
@@ -5914,16 +6019,23 @@ def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str,
                 u = get_unit_by_id(game_state, active)
                 valid_targets = _fight_build_valid_target_pool(game_state, u) if u else []
                 game_state["valid_fight_targets"] = valid_targets
+                # Declarations offensives en cours (flux manuel par arme/figurine).
+                fight_decls = [
+                    {"model_id": i["model_id"], "weapon_index": i["weapon_index"],
+                     "target_unit_id": i["target_unit_id"]}
+                    for i in game_state.get("pending_squad_fight_intents", {}).get(active, [])
+                ]
                 _fight_v11_log(
                     game_state,
                     f"état: FIGHT — unit {active} ACTIVE (selector=P{game_state['fight_selector']}, "
-                    f"cibles={valid_targets})",
+                    f"cibles={valid_targets}, declarations={len(fight_decls)})",
                 )
                 return True, {"phase": "fight", "fight_subphase": "fight",
                               "fight_step": game_state["fight_step"],
                               "fight_selector": game_state["fight_selector"],
                               "fight_eligible_units": list(pool),
                               "active_fight_unit": active, "valid_targets": valid_targets,
+                              "declarations": fight_decls,
                               "overrun_eligible": bool(u and fight_v11_is_overrun_eligible(game_state, u)),
                               "waiting_for_player": True, "action": "wait"}
             # Aucune unité active → le joueur doit choisir (cercle vert sur le pool).
@@ -6261,6 +6373,59 @@ def _fight_v11_manual_step(
                 _fight_v11_log(game_state, f"FIGHT unit {uid} ACTIVÉE par le joueur")
             else:
                 _fight_v11_log(game_state, f"FIGHT activate ignoré : {uid} hors pool {pool}")
+            return _fight_v11_manual_state(game_state)
+
+        # ÉTAPE 2 (flux manuel par arme/figurine, calque du tir) — declarations
+        # offensives puis validation. Additif : coexiste avec le clic-resolution direct.
+        if active is not None and active in pool and atype in ("squad_fight_assign", "squad_fight_assign_weapon"):
+            sel = active
+            _fight_ensure_activation_started(game_state, sel)
+            target_id = str(require_key(action, "targetId"))
+            if atype == "squad_fight_assign":
+                model_id = str(require_key(action, "modelId"))
+                # Choix d arme optionnel par figurine (sinon arme courante / index 0).
+                if "weaponIndex" in action:
+                    models_cache = require_key(game_state, "models_cache")
+                    m = models_cache.get(model_id)
+                    if m is not None:
+                        m["selectedCcWeaponIndex"] = int(action["weaponIndex"])
+                squad_declare_fight_model(game_state, sel, model_id, target_id)
+            else:
+                widx = int(require_key(action, "weaponIndex"))
+                squad_declare_fight_weapon(game_state, sel, widx, target_id)
+            return _fight_v11_manual_state(game_state)
+
+        # VALIDATION — resout les attaques DECLAREES (allocation manuelle des pertes).
+        if active is not None and active in pool and atype == "squad_fight_validate":
+            sel = active
+            u = get_unit_by_id(game_state, sel)
+            if u is None:
+                raise KeyError(f"Fight unit {sel} missing from game_state['units']")
+            from .shared_utils import init_pending_intents
+            init_pending_intents(game_state)
+            intents = game_state["pending_squad_fight_intents"].get(sel, [])
+            if not intents:
+                _fight_v11_log(game_state, f"FIGHT validate {sel} : aucune declaration -> ignore")
+                return _fight_v11_manual_state(game_state)
+            # Defenseur : en PvP test les cibles appartiennent au joueur adverse (humain).
+            target_id = str(intents[0]["target_unit_id"])
+            target_unit = get_unit_by_id(game_state, target_id)
+            defender_human = target_unit is not None and not _is_ai_controlled_fight_unit(game_state, target_unit)
+            if not defender_human:
+                raise RuntimeError(
+                    f"FIGHT validate {sel} : flux de declaration manuelle non supporte "
+                    f"pour un defenseur IA (cible {target_id})"
+                )
+            game_state["units_selected_to_fight"].add(sel)
+            game_state.setdefault("units_fought", set()).add(sel)
+            game_state["active_fight_unit"] = None
+            alloc_result = build_manual_fight_allocation(game_state, sel)
+            _fight_v11_log(
+                game_state,
+                f"FIGHT validate {sel} : alloc waiting={alloc_result.get('waiting_for_player')}"
+            )
+            if alloc_result.get("waiting_for_player"):
+                return True, alloc_result
             return _fight_v11_manual_state(game_state)
 
         # ÉTAPE 2 — unité active + clic sur une cible → résolution + allocation.

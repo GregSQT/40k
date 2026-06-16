@@ -531,6 +531,19 @@ type BoardProps = {
   onUnassignShootWeapon?: (weaponIndex: number) => void | Promise<void>;
   onCommitSquadShoot?: () => void | Promise<void>;
   onCancelSquadShoot?: () => void | Promise<void>;
+  /** Combat par-figurine (PvP manuel). */
+  squadFightPlan?: {
+    unitId: number;
+    models: string[];
+    targets: Record<string, string>;
+    declarations: Array<{ model_id: string; weapon_index: number; target_unit_id: string }>;
+    activeModelId: string | null;
+    activeWeaponIndex: number | null;
+    canValidate: boolean;
+  } | null;
+  onSelectModelForFight?: (modelId: string) => void;
+  onAssignFightTarget?: (targetUnitId: number | string) => void | Promise<void>;
+  onAssignFightWeapon?: (targetUnitId: number | string) => void | Promise<void>;
   /** Allocation manuelle des pertes au tir (defenseur humain) : figs choisissables. */
   manualAllocation?: {
     kind?: "shoot" | "fight" | "hazard";
@@ -879,6 +892,10 @@ export default function Board({
   onUnassignShootWeapon,
   onCommitSquadShoot,
   onCancelSquadShoot,
+  squadFightPlan = null,
+  onSelectModelForFight,
+  onAssignFightTarget,
+  onAssignFightWeapon,
   manualAllocation = null,
   onAllocateModel,
   onStartAttackPreview,
@@ -1252,6 +1269,65 @@ export default function Board({
   // Persiste entre les re-renders (contrairement à une variable locale dans useEffect).
   const lastEnemyClickRef = useRef<{ targetId: number | string; time: number } | null>(null);
   const lastOwnFigClickRef = useRef<{ modelId: string; time: number } | null>(null);
+  /** Combat par-figurine : callbacks + plan + dernier clic ennemi, refs à jour pour le handler stable. */
+  const squadFightCallbacksRef = useRef({
+    onSelectModelForFight,
+    onAssignFightTarget,
+    onAssignFightWeapon,
+  });
+  squadFightCallbacksRef.current = {
+    onSelectModelForFight,
+    onAssignFightTarget,
+    onAssignFightWeapon,
+  };
+  const squadFightPlanRef = useRef(squadFightPlan);
+  squadFightPlanRef.current = squadFightPlan;
+  const lastFightEnemyClickRef = useRef<{ targetId: number | string; time: number } | null>(null);
+
+  /** Combat : figs de l'unité active engagées avec >=1 ennemi (règle 04.02). Les autres
+   * sont grisées + non sélectionnables à l'attribution. Même métrique que le contour rouge. */
+  const fightEngagedModelIds = useMemo(() => {
+    const result = new Set<string>();
+    if (phase !== "fight" || !squadFightPlan) return result;
+    const uc = gameState?.units_cache as
+      | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]>; player?: number }>
+      | undefined;
+    if (!uc) return result;
+    const activeEntry = uc[String(squadFightPlan.unitId)];
+    const activeUnit = units.find((u) => String(u.id) === String(squadFightPlan.unitId));
+    const byModel = activeEntry?.occupied_hexes_by_model;
+    if (!byModel || !activeUnit) return result;
+    const gsRules = (
+      gameState as { config?: { game_rules?: { engagement_zone?: number } } } | null | undefined
+    )?.config?.game_rules;
+    const cfgRules = gameConfig?.game_rules as { engagement_zone?: number } | undefined;
+    const engRules = gsRules?.engagement_zone ?? cfgRules?.engagement_zone ?? 1;
+    const i2sRaw = (boardConfig as unknown as { inches_to_subhex?: number } | null)?.inches_to_subhex;
+    const i2s = typeof i2sRaw === "number" ? i2sRaw : 10;
+    const steps = engRules * i2s;
+    const enemyFps: Array<Set<string>> = [];
+    for (const [eid, e] of Object.entries(uc)) {
+      const eu = units.find((u) => String(u.id) === eid);
+      if (!eu || eu.player === activeUnit.player) continue;
+      const efp =
+        squadFootprintHexKeysFromModelCenters(e.occupied_hexes_by_model, eu) ??
+        unitFootprintHexKeys(eu);
+      if (efp) enemyFps.push(efp);
+    }
+    for (const [mid, pos] of Object.entries(byModel)) {
+      const figFp = squadFootprintHexKeysFromModelCenters({ [mid]: pos }, activeUnit);
+      if (!figFp) continue;
+      for (const efp of enemyFps) {
+        if (minHexDistanceBetweenFootprintKeySets(figFp, efp, steps) <= steps) {
+          result.add(mid);
+          break;
+        }
+      }
+    }
+    return result;
+  }, [phase, squadFightPlan, gameState, gameConfig, boardConfig, units]);
+  const fightEngagedModelIdsRef = useRef(fightEngagedModelIds);
+  fightEngagedModelIdsRef.current = fightEngagedModelIds;
 
   // Update refs when props change but don't trigger re-render - MOVE THIS BEFORE useEffect
   stableCallbacks.current = {
@@ -3962,6 +4038,184 @@ export default function Board({
     gameState?.units_cache,
     current_player,
     eligibleUnitIds,
+  ]);
+
+  // ── COMBAT par-figurine (PvP) : handler capture jumeau du tir ──────────────
+  // Quand un plan fight est actif (unité activée) : clic sur une fig de l'unité active =
+  // sélection (onSelectModelForFight) ; clic simple sur ennemi = attribution de la fig
+  // active (onAssignFightTarget) ; double-clic ennemi = toute l'unité par arme
+  // (onAssignFightWeapon). Capture-phase + stopImmediatePropagation pour bloquer la
+  // résolution immédiate legacy.
+  useEffect(() => {
+    if (phase !== "fight") return;
+    if (measureMode.kind !== "off") return;
+    if (!boardConfig) return;
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!canvas) return;
+    const app = appRef.current;
+    if (!app) return;
+
+    const HEX_HIT_TOLERANCE = 4;
+    const getUnitsCache = () =>
+      gameState?.units_cache as
+        | Record<
+            string,
+            {
+              occupied_hexes_by_model?: Record<string, [number, number]>;
+              col?: number;
+              row?: number;
+              player?: number;
+            }
+          >
+        | undefined;
+
+    const resolveHex = (e: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
+      const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
+      const px = (e.clientX - rect.left) * scaleX;
+      const py = (e.clientY - rect.top) * scaleY;
+      return pixelToHex(
+        px,
+        py,
+        boardConfig.hex_radius,
+        boardConfig.margin,
+        boardConfig.cols,
+        boardConfig.rows
+      );
+    };
+
+    const findOwnFig = (col: number, row: number) => {
+      const uc = getUnitsCache();
+      if (!uc) return null;
+      const clickCube = offsetToCube(col, row);
+      let best: { uid: number | string; mid: string } | null = null;
+      let bestD = Infinity;
+      for (const [uid, entry] of Object.entries(uc)) {
+        if (entry.player !== current_player) continue;
+        const byModel = entry.occupied_hexes_by_model;
+        if (!byModel) continue;
+        for (const [mid, pos] of Object.entries(byModel)) {
+          const d = cubeDistance(clickCube, offsetToCube(pos[0], pos[1]));
+          if (d <= HEX_HIT_TOLERANCE && d < bestD) {
+            bestD = d;
+            best = { uid: Number.isNaN(Number(uid)) ? uid : Number(uid), mid };
+          }
+        }
+      }
+      return best;
+    };
+
+    const findEnemyUnit = (col: number, row: number): number | string | null => {
+      const uc = getUnitsCache();
+      if (!uc) return null;
+      const clickCube = offsetToCube(col, row);
+      let best: number | string | null = null;
+      let bestD = Infinity;
+      for (const [uid, entry] of Object.entries(uc)) {
+        if (entry.player === current_player) continue;
+        const byModel = entry.occupied_hexes_by_model;
+        const positions: Array<[number, number]> = byModel
+          ? Object.values(byModel)
+          : entry.col != null && entry.row != null
+            ? [[entry.col, entry.row]]
+            : [];
+        for (const pos of positions) {
+          const d = cubeDistance(clickCube, offsetToCube(pos[0], pos[1]));
+          if (d <= HEX_HIT_TOLERANCE && d < bestD) {
+            bestD = d;
+            best = Number.isNaN(Number(uid)) ? uid : Number(uid);
+          }
+        }
+      }
+      return best;
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.target !== canvas) return;
+      if (manualAllocationRef.current) return; // allocation des pertes : handler dédié (enregistré après)
+      if (e.button !== 0) return;
+      const plan = squadFightPlanRef.current;
+      if (!plan) return; // pas de plan → activation/sélection via le flux normal (onSelectUnit)
+      const { col, row } = resolveHex(e);
+      const cbs = squadFightCallbacksRef.current;
+
+      // 1) Clic sur une fig de l'unité ACTIVE → sélection de la figurine.
+      const own = findOwnFig(col, row);
+      if (own && Number(own.uid) === Number(plan.unitId)) {
+        e.stopImmediatePropagation();
+        // Fig non engagée (ne peut frapper aucun ennemi) : grisée, non sélectionnable.
+        if (!fightEngagedModelIdsRef.current.has(String(own.mid))) return;
+        void cbs.onSelectModelForFight?.(own.mid);
+        return;
+      }
+      // Clic sur une AUTRE unité amie → laisser passer (switch d'activation via onSelectUnit).
+      if (own) return;
+
+      // 2) Clic sur un ennemi → simple = fig active ; double = toute l'unité (par arme).
+      const enemy = findEnemyUnit(col, row);
+      if (enemy != null) {
+        e.stopImmediatePropagation();
+        // Filtre engagement (règle 04.02) : ne rien envoyer si l'ennemi n'est pas engagé.
+        // Mêmes calculs que le contour rouge des cibles (squadFootprint + min distance EZ).
+        const uc = getUnitsCache();
+        const activeEntry = uc?.[String(plan.unitId)];
+        const activeUnit = units.find((u) => String(u.id) === String(plan.unitId));
+        const enemyEntry = uc?.[String(enemy)];
+        const enemyUnit = units.find((u) => String(u.id) === String(enemy));
+        const gsRules = (
+          gameState as { config?: { game_rules?: { engagement_zone?: number } } } | null | undefined
+        )?.config?.game_rules;
+        const cfgRules = gameConfig?.game_rules as { engagement_zone?: number } | undefined;
+        const engRules = gsRules?.engagement_zone ?? cfgRules?.engagement_zone ?? 1;
+        const i2sRaw = (boardConfig as unknown as { inches_to_subhex?: number }).inches_to_subhex;
+        const i2s = typeof i2sRaw === "number" ? i2sRaw : 10;
+        const steps = engRules * i2s;
+        const enemyFp = enemyUnit
+          ? (squadFootprintHexKeysFromModelCenters(
+              enemyEntry?.occupied_hexes_by_model,
+              enemyUnit
+            ) ?? unitFootprintHexKeys(enemyUnit))
+          : null;
+        const isEngaged = (attackerByModel: Record<string, [number, number]> | undefined): boolean => {
+          if (!enemyFp || !activeUnit) return false;
+          const aFp = squadFootprintHexKeysFromModelCenters(attackerByModel, activeUnit);
+          if (!aFp) return false;
+          return minHexDistanceBetweenFootprintKeySets(aFp, enemyFp, steps) <= steps;
+        };
+        const now = e.timeStamp;
+        const prev = lastFightEnemyClickRef.current;
+        if (prev && String(prev.targetId) === String(enemy) && now - prev.time < 400) {
+          lastFightEnemyClickRef.current = null;
+          // double-clic : toute l'unité → au moins une fig doit être engagée.
+          if (isEngaged(activeEntry?.occupied_hexes_by_model)) {
+            void cbs.onAssignFightWeapon?.(enemy);
+          }
+          return;
+        }
+        lastFightEnemyClickRef.current = { targetId: enemy, time: now };
+        if (plan.activeModelId) {
+          // simple clic : la FIGURINE sélectionnée doit être engagée (règle 04.02).
+          const figPos = activeEntry?.occupied_hexes_by_model?.[plan.activeModelId];
+          if (figPos && isEngaged({ [plan.activeModelId]: figPos })) {
+            void cbs.onAssignFightTarget?.(enemy);
+          }
+        }
+        // sinon : ennemi non engagé / aucune fig sélectionnée → clic ignoré.
+      }
+    };
+
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [
+    phase,
+    measureMode.kind,
+    boardConfig,
+    gameState?.units_cache,
+    gameState,
+    gameConfig,
+    units,
+    current_player,
   ]);
 
   // Allocation manuelle des pertes en COMBAT (PvP) : l'effet de tir ci-dessus est gaté
@@ -6723,7 +6977,14 @@ export default function Board({
             .map((d) => `${d.model_id}.${d.weapon_index}>${d.target_unit_id}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}`;
+      // Combat par-figurine : empreinte des intents (redraw voile/lignes vertes quand ils changent).
+      const squadFightFp = squadFightPlan
+        ? `${squadFightPlan.unitId}:m${squadFightPlan.activeModelId ?? ""}:` +
+          squadFightPlan.declarations
+            .map((d) => `${d.model_id}.${d.weapon_index}>${d.target_unit_id}`)
+            .join(",")
+        : "";
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -7662,6 +7923,73 @@ export default function Board({
           unitsLayer.addChild(shootLines);
         }
 
+        // Combat par-figurine : voile VERT sur les figs attribuées + lignes vertes vers la cible.
+        if (phase === "fight" && squadFightPlan && String(squadFightPlan.unitId) === unitIdStr) {
+          const decls = squadFightPlan.declarations;
+          const FIGHT_GREEN = 0x22c55e;
+          const fvBase = resolveBaseSizeForUnitDisplay(unit);
+          const fvRadius =
+            fvBase > 1 ? (fvBase * 1.5 * HEX_RADIUS) / 2 : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
+          const assignedMids = new Set(decls.map((d) => String(d.model_id)));
+          // Voile : vert = fig attribuée ; gris = fig non engagée (non sélectionnable, 04.02).
+          const veil = new PIXI.Graphics();
+          modelCenters.forEach(([cx, cy], i) => {
+            const mid = String(modelIds[i]);
+            if (assignedMids.has(mid)) {
+              veil.beginFill(FIGHT_GREEN, 0.5);
+              veil.drawCircle(cx, cy, fvRadius);
+              veil.endFill();
+            } else if (!fightEngagedModelIds.has(mid)) {
+              veil.beginFill(0x6b7280, 0.55); // gris : figurine non engagée
+              veil.drawCircle(cx, cy, fvRadius);
+              veil.endFill();
+            }
+          });
+          veil.zIndex = 3000;
+          unitsLayer.addChild(veil);
+
+          // Lignes vertes : fig attribuée → fig cible la plus proche.
+          const fightLines = new PIXI.Graphics();
+          const fightUc = gameState?.units_cache as
+            | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+            | undefined;
+          const centerByModel = new Map<string, [number, number]>();
+          const posByModel = new Map<string, [number, number]>();
+          modelCenters.forEach(([cx, cy], i) => {
+            centerByModel.set(String(modelIds[i]), [cx, cy]);
+            posByModel.set(String(modelIds[i]), modelPositions[i]);
+          });
+          for (const d of decls) {
+            const origin = centerByModel.get(String(d.model_id));
+            const ownPos = posByModel.get(String(d.model_id));
+            if (!origin || !ownPos) continue;
+            const tgtByModel = fightUc?.[String(d.target_unit_id)]?.occupied_hexes_by_model;
+            if (!tgtByModel) continue;
+            const ownCube = offsetToCube(ownPos[0], ownPos[1]);
+            let nearest: [number, number] | null = null;
+            let bestD = Infinity;
+            for (const pos of Object.values(tgtByModel)) {
+              const dd = cubeDistance(ownCube, offsetToCube(pos[0], pos[1]));
+              if (dd < bestD) {
+                bestD = dd;
+                nearest = pos;
+              }
+            }
+            if (!nearest) continue;
+            const tx = nearest[0] * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+            const ty =
+              nearest[1] * HEX_VERT_SPACING +
+              ((nearest[0] % 2) * HEX_VERT_SPACING) / 2 +
+              HEX_HEIGHT / 2 +
+              MARGIN;
+            fightLines.lineStyle(3, FIGHT_GREEN, 0.9);
+            fightLines.moveTo(origin[0], origin[1]);
+            fightLines.lineTo(tx, ty);
+          }
+          fightLines.zIndex = 3001;
+          unitsLayer.addChild(fightLines);
+        }
+
         // Voile par arme sur les unités cibles (couleurs des armes qui les visent, splitté).
         const tgtColors = weaponColorsByTarget.get(unitIdStr);
         if (tgtColors && tgtColors.length > 0 && modelCenters.length > 0) {
@@ -8522,6 +8850,8 @@ export default function Board({
     squadMoveModelPoolRef,
     squadMoveModelMaskLoopsRef?.current,
     squadShootPlan,
+    squadFightPlan,
+    fightEngagedModelIds,
     deadModelGhostsForRender,
     // Slice G : redraw du pool/cercles charge/pile-in à chaque pose / sélection de fig.
     chargeMovePlan,

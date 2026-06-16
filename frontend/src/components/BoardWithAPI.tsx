@@ -3876,6 +3876,74 @@ export const BoardWithAPI: React.FC = () => {
         </div>
       )}
 
+      {apiProps.gameState?.phase === "fight" && apiProps.squadFightPlan && (
+        <div
+          className="squad-action-bar"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            background: "#1f2937",
+            border: "1px solid #555",
+            borderRadius: "8px",
+            padding: 8,
+            marginTop: -6,
+            marginBottom: 2,
+          }}
+        >
+          <span
+            style={{
+              color: "#e5e7eb",
+              fontSize: 13,
+              fontWeight: 600,
+              background: "rgba(17,24,39,0.8)",
+              borderRadius: 6,
+              padding: "6px 10px",
+            }}
+          >
+            {Object.keys(apiProps.squadFightPlan.targets).length}/
+            {apiProps.squadFightPlan.models.length} figs assignées
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              if (!isGameOver) apiProps.onCancelSquadFight?.();
+            }}
+            style={{
+              border: "1px solid rgba(0,0,0,0.35)",
+              borderRadius: 6,
+              background: "#6b7280",
+              color: "#fff",
+              cursor: "pointer",
+              fontSize: 14,
+              fontWeight: 700,
+              padding: "8px 14px",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!apiProps.squadFightPlan.canValidate}
+            onClick={() => {
+              if (!isGameOver) apiProps.onCommitSquadFight?.();
+            }}
+            style={{
+              border: "1px solid rgba(0,0,0,0.35)",
+              borderRadius: 6,
+              background: apiProps.squadFightPlan.canValidate ? "#16a34a" : "#052e16",
+              color: apiProps.squadFightPlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+              cursor: apiProps.squadFightPlan.canValidate ? "pointer" : "not-allowed",
+              fontSize: 14,
+              fontWeight: 700,
+              padding: "8px 14px",
+            }}
+          >
+            Fight
+          </button>
+        </div>
+      )}
+
       {/* AI Status Display */}
       {isAiMode &&
         (() => {
@@ -4433,6 +4501,10 @@ export const BoardWithAPI: React.FC = () => {
             onUnassignShootWeapon={isGameOver ? async () => {} : apiProps.onUnassignShootWeapon}
             onCommitSquadShoot={isGameOver ? async () => {} : apiProps.onCommitSquadShoot}
             onCancelSquadShoot={isGameOver ? async () => {} : apiProps.onCancelSquadShoot}
+            squadFightPlan={apiProps.squadFightPlan}
+            onSelectModelForFight={isGameOver ? () => {} : apiProps.onSelectModelForFight}
+            onAssignFightTarget={isGameOver ? async () => {} : apiProps.onAssignFightTarget}
+            onAssignFightWeapon={isGameOver ? async () => {} : apiProps.onAssignFightWeapon}
             manualAllocation={apiProps.manualAllocation}
             onAllocateModel={isGameOver ? async () => {} : apiProps.onAllocateModel}
             onStartAttackPreview={isGameOver ? () => {} : apiProps.onStartAttackPreview}

@@ -79,6 +79,26 @@ SHOOT_CTX = ManualAllocCtx(
     intents_key="pending_squad_shoot_intents",
 )
 
+
+@dataclass(frozen=True)
+class DeclareAttackCtx:
+    """Parametrage du moteur de DECLARATION offensive (attribution manuelle des
+    attaques tir/combat). Jumeau offensif de ManualAllocCtx.
+
+    Mutualise l ossature commune de la declaration per-figurine / per-arme
+    (validation, remplacement de cible, resolution NB une seule fois — fix F3).
+    Les differences tir vs combat sont injectees : cle intents, attribut d arme
+    selectionnee, liste d armes, et callbacks d eligibilite cible.
+    """
+    intents_key: str          # cle game_state des intents (pending_squad_*_intents)
+    selected_weapon_attr: str # attribut figurine de l arme selectionnee (selectedRngWeaponIndex / selectedCcWeaponIndex)
+    weapons_key: str          # cle figurine de la liste d armes (RNG_WEAPONS / CC_WEAPONS)
+    phase_label: str          # tag debug resolve_dice_value + messages d erreur
+    # can_target(game_state, attacker_model, attacker_squad_id, target_squad_id) -> bool
+    can_target: Callable[[Dict[str, Any], Dict[str, Any], str, str], bool]
+    # can_target_with_weapon(game_state, attacker_model, attacker_squad_id, target_squad_id, weapon_index) -> bool
+    can_target_with_weapon: Callable[[Dict[str, Any], Dict[str, Any], str, str, int], bool]
+
 ALLOWED_CHOICE_TIMING_TRIGGERS = {
     "on_deploy",
     "turn_start",
@@ -3929,32 +3949,52 @@ def squad_declare_shoot(
     return intents
 
 
-def squad_declare_shoot_model(
+def _resolve_intent_nb(
+    weapons: List[Any], weapon_idx: int, roll_label: str
+) -> int:
+    """Resout le NB d une arme UNE SEULE FOIS a la declaration (fix audit F3).
+
+    Retourne 0 si l index est hors limites ou l arme n a pas de NB. Le label sert
+    uniquement de tag debug a resolve_dice_value (aucun impact sur le RNG).
+    """
+    if not (0 <= weapon_idx < len(weapons)):
+        return 0
+    w = weapons[weapon_idx]
+    if not (isinstance(w, dict) and "NB" in w):
+        return 0
+    try:
+        return int(resolve_dice_value(w["NB"], roll_label))
+    except Exception:
+        return int(w["NB"]) if isinstance(w["NB"], (int, float)) else 1
+
+
+def declare_attack_model(
     game_state: Dict[str, Any],
+    ctx: DeclareAttackCtx,
     attacker_squad_id: str,
     attacker_model_id: str,
     target_squad_id: str,
 ) -> Dict[str, Any]:
-    """Declaration MANUELLE d une seule figurine (flux PvP humain).
+    """Declaration MANUELLE d UNE figurine (flux PvP humain), tir OU combat.
 
-    Contrairement a squad_declare_shoot (auto : cible prioritaire -> per-fig), le
-    joueur assigne explicitement la cible d UNE figurine. Re-appeler avec un
-    model_id deja declare REMPLACE sa cible (le joueur change d avis).
+    Moteur generique parametre par ctx (cf. DeclareAttackCtx). Le joueur assigne
+    explicitement la cible d UNE figurine. Re-appeler pour une figurine deja
+    declaree avec la MEME arme REMPLACE sa cible (split fire : cle (model, arme)).
 
     Validation stricte (pas de valeur par défaut) :
-      - activation tir demarree (pending initialise),
+      - activation demarree (pending initialise),
       - figurine appartient a l escouade attaquante et vivante,
       - escouade cible vivante,
-      - la figurine peut tirer la cible (portee + LoS, _model_can_shoot_target).
+      - la figurine peut viser la cible (ctx.can_target).
 
     Returns l intent cree (pour feedback frontend).
     """
     init_pending_intents(game_state)
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    if attacker_squad_id not in game_state["pending_squad_shoot_intents"]:
+    if attacker_squad_id not in game_state[ctx.intents_key]:
         raise RuntimeError(
-            f"squad_declare_shoot_model called before squad_shooting_unit_activation_start "
+            f"declare_attack_model ({ctx.phase_label}) called before activation start "
             f"for squad {attacker_squad_id!r}"
         )
     if attacker_model_id not in squad_models.get(attacker_squad_id, []):  # get allowed
@@ -3968,33 +4008,26 @@ def squad_declare_shoot_model(
         mid in models_cache for mid in squad_models.get(target_squad_id, [])  # get allowed
     ):
         raise ValueError(f"Target squad {target_squad_id!r} not alive")
-    if not _model_can_shoot_target(game_state, m, target_squad_id):
+    if not ctx.can_target(game_state, m, attacker_squad_id, target_squad_id):
         raise ValueError(
-            f"Model {attacker_model_id!r} cannot shoot target {target_squad_id!r} "
-            f"(hors portee ou pas de LoS)"
+            f"Model {attacker_model_id!r} cannot attack target {target_squad_id!r} "
+            f"({ctx.phase_label}: hors portee/engagement ou pas de LoS)"
         )
 
-    sel = m.get("selectedRngWeaponIndex")
+    sel = m.get(ctx.selected_weapon_attr)
     weapon_idx = int(sel) if sel is not None else 0
 
-    intents: List[Dict[str, Any]] = game_state["pending_squad_shoot_intents"][attacker_squad_id]
+    intents: List[Dict[str, Any]] = game_state[ctx.intents_key][attacker_squad_id]
     # Remplace la declaration existante de cette figurine POUR CETTE ARME (split fire :
     # une fig peut tirer plusieurs de ses armes sur des cibles differentes -> cle (model, arme)).
     intents[:] = [
         i for i in intents
         if not (i.get("model_id") == attacker_model_id and int(i.get("weapon_index", -1)) == weapon_idx)
     ]
-    weapons = m.get("RNG_WEAPONS", [])  # get allowed
-    n_attacks_resolved = 0
-    if 0 <= weapon_idx < len(weapons):
-        w = weapons[weapon_idx]
-        if isinstance(w, dict) and "NB" in w:
-            try:
-                n_attacks_resolved = int(
-                    resolve_dice_value(w["NB"], f"squad_declare_shoot_model_NB_{attacker_model_id}")
-                )
-            except Exception:
-                n_attacks_resolved = int(w["NB"]) if isinstance(w["NB"], (int, float)) else 1
+    weapons = m.get(ctx.weapons_key, [])  # get allowed
+    n_attacks_resolved = _resolve_intent_nb(
+        weapons, weapon_idx, f"{ctx.phase_label}_declare_model_NB_{attacker_model_id}"
+    )
     target_size = sum(
         1 for mid in squad_models.get(target_squad_id, []) if mid in models_cache  # get allowed
     )
@@ -4007,6 +4040,90 @@ def squad_declare_shoot_model(
     }
     intents.append(intent)
     return intent
+
+
+def declare_attack_weapon(
+    game_state: Dict[str, Any],
+    ctx: DeclareAttackCtx,
+    attacker_squad_id: str,
+    weapon_index: int,
+    target_squad_id: str,
+) -> List[Dict[str, Any]]:
+    """Assigne l arme `weapon_index` (niveau escouade) a la cible, tir OU combat.
+
+    Moteur generique parametre par ctx. Pour CHAQUE figurine vivante de l escouade
+    qui possede cette arme et peut viser la cible (ctx.can_target_with_weapon), cree
+    un intent (model_id, weapon_index) -> T. Re-appeler avec la meme arme REMPLACE
+    la cible (retire d abord tous les intents de cette arme, toutes figs confondues).
+
+    Validation stricte (pas de valeur par defaut) :
+      - activation demarree (pending initialise),
+      - escouade cible vivante,
+      - au moins une figurine peut viser l arme sur la cible (sinon ValueError).
+
+    Returns la liste des intents crees pour cette arme.
+    """
+    init_pending_intents(game_state)
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    if attacker_squad_id not in game_state[ctx.intents_key]:
+        raise RuntimeError(
+            f"declare_attack_weapon ({ctx.phase_label}) called before activation start "
+            f"for squad {attacker_squad_id!r}"
+        )
+    if target_squad_id not in squad_models or not any(
+        mid in models_cache for mid in squad_models.get(target_squad_id, [])  # get allowed
+    ):
+        raise ValueError(f"Target squad {target_squad_id!r} not alive")
+
+    intents: List[Dict[str, Any]] = game_state[ctx.intents_key][attacker_squad_id]
+    widx = int(weapon_index)
+    # Remplace toute declaration existante de CETTE arme (changement de cible).
+    intents[:] = [i for i in intents if int(i.get("weapon_index", -1)) != widx]
+    target_size = sum(
+        1 for mid in squad_models.get(target_squad_id, []) if mid in models_cache  # get allowed
+    )
+    created: List[Dict[str, Any]] = []
+    for mid in squad_models.get(attacker_squad_id, []):  # get allowed
+        m = models_cache.get(mid)
+        if m is None:
+            continue
+        if not ctx.can_target_with_weapon(game_state, m, attacker_squad_id, target_squad_id, widx):
+            continue
+        weapons = m.get(ctx.weapons_key, [])  # get allowed
+        n_attacks_resolved = _resolve_intent_nb(
+            weapons, widx, f"{ctx.phase_label}_declare_weapon_NB_{mid}_{widx}"
+        )
+        intent = {
+            "model_id": mid,
+            "weapon_index": widx,
+            "target_unit_id": target_squad_id,
+            "target_squad_size_at_declaration": target_size,
+            "n_attacks_resolved": n_attacks_resolved,
+        }
+        intents.append(intent)
+        created.append(intent)
+    if not created:
+        raise ValueError(
+            f"Aucune figurine de {attacker_squad_id!r} ne peut viser l arme {widx} "
+            f"sur {target_squad_id!r} ({ctx.phase_label}: hors portee/engagement ou pas de LoS)"
+        )
+    return created
+
+
+def squad_declare_shoot_model(
+    game_state: Dict[str, Any],
+    attacker_squad_id: str,
+    attacker_model_id: str,
+    target_squad_id: str,
+) -> Dict[str, Any]:
+    """Declaration MANUELLE d une seule figurine au TIR (flux PvP humain).
+
+    Wrapper fin de declare_attack_model via SHOOT_DECLARE_CTX (portee + LoS).
+    """
+    return declare_attack_model(
+        game_state, SHOOT_DECLARE_CTX, attacker_squad_id, attacker_model_id, target_squad_id
+    )
 
 
 def squad_model_valid_targets(
@@ -4129,78 +4246,34 @@ def _model_can_shoot_target_with_weapon(
     return _attacker_model_can_reach_squad(game_state, ac, ar, target_squad_id, range_subhex)
 
 
+# Contexte de declaration TIR : portee + LoS. Defini ici car il reference les deux
+# callbacks d eligibilite ci-dessus (_model_can_shoot_target / _with_weapon).
+SHOOT_DECLARE_CTX = DeclareAttackCtx(
+    intents_key="pending_squad_shoot_intents",
+    selected_weapon_attr="selectedRngWeaponIndex",
+    weapons_key="RNG_WEAPONS",
+    phase_label="shoot",
+    # Le tir n a pas besoin du squad_id attaquant (validite = portee + LoS depuis la fig).
+    can_target=lambda gs, m, _sq, tsid: _model_can_shoot_target(gs, m, tsid),
+    can_target_with_weapon=lambda gs, m, _sq, tsid, widx: _model_can_shoot_target_with_weapon(
+        gs, m, tsid, widx
+    ),
+)
+
+
 def squad_declare_shoot_weapon(
     game_state: Dict[str, Any],
     attacker_squad_id: str,
     weapon_index: int,
     target_squad_id: str,
 ) -> List[Dict[str, Any]]:
-    """Assigne l arme `weapon_index` (niveau escouade) a la cible.
+    """Assigne l arme `weapon_index` (niveau escouade) a la cible, au TIR.
 
-    Pour CHAQUE figurine vivante de l escouade qui possede cette arme et peut
-    tirer la cible (portee + LoS), cree un intent (model_id, weapon_index) -> T.
-    Re-appeler avec la meme arme REMPLACE la cible (retire d abord tous les
-    intents de cette arme, toutes figs confondues).
-
-    Validation stricte (pas de valeur par defaut) :
-      - activation tir demarree (pending initialise),
-      - escouade cible vivante,
-      - au moins une figurine peut tirer l arme sur la cible (sinon ValueError).
-
-    Returns la liste des intents crees pour cette arme.
+    Wrapper fin de declare_attack_weapon via SHOOT_DECLARE_CTX (portee + LoS).
     """
-    init_pending_intents(game_state)
-    models_cache = require_key(game_state, "models_cache")
-    squad_models = require_key(game_state, "squad_models")
-    if attacker_squad_id not in game_state["pending_squad_shoot_intents"]:
-        raise RuntimeError(
-            f"squad_declare_shoot_weapon called before squad_shooting_unit_activation_start "
-            f"for squad {attacker_squad_id!r}"
-        )
-    if target_squad_id not in squad_models or not any(
-        mid in models_cache for mid in squad_models.get(target_squad_id, [])  # get allowed
-    ):
-        raise ValueError(f"Target squad {target_squad_id!r} not alive")
-
-    intents: List[Dict[str, Any]] = game_state["pending_squad_shoot_intents"][attacker_squad_id]
-    widx = int(weapon_index)
-    # Remplace toute declaration existante de CETTE arme (changement de cible).
-    intents[:] = [i for i in intents if int(i.get("weapon_index", -1)) != widx]
-    target_size = sum(
-        1 for mid in squad_models.get(target_squad_id, []) if mid in models_cache  # get allowed
+    return declare_attack_weapon(
+        game_state, SHOOT_DECLARE_CTX, attacker_squad_id, weapon_index, target_squad_id
     )
-    created: List[Dict[str, Any]] = []
-    for mid in squad_models.get(attacker_squad_id, []):  # get allowed
-        m = models_cache.get(mid)
-        if m is None:
-            continue
-        if not _model_can_shoot_target_with_weapon(game_state, m, target_squad_id, widx):
-            continue
-        weapons = m.get("RNG_WEAPONS", [])  # get allowed
-        w = weapons[widx]
-        n_attacks_resolved = 0
-        if isinstance(w, dict) and "NB" in w:
-            try:
-                n_attacks_resolved = int(
-                    resolve_dice_value(w["NB"], f"squad_declare_shoot_weapon_NB_{mid}_{widx}")
-                )
-            except Exception:
-                n_attacks_resolved = int(w["NB"]) if isinstance(w["NB"], (int, float)) else 1
-        intent = {
-            "model_id": mid,
-            "weapon_index": widx,
-            "target_unit_id": target_squad_id,
-            "target_squad_size_at_declaration": target_size,
-            "n_attacks_resolved": n_attacks_resolved,
-        }
-        intents.append(intent)
-        created.append(intent)
-    if not created:
-        raise ValueError(
-            f"Aucune figurine de {attacker_squad_id!r} ne peut tirer l arme {widx} "
-            f"sur {target_squad_id!r} (hors portee ou pas de LoS)"
-        )
-    return created
 
 
 def squad_undeclare_shoot_weapon(

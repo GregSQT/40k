@@ -634,6 +634,25 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Ref miroir de squadShootPlan pour accès synchrone dans les callbacks. */
   const squadShootPlanRef = useRef<typeof squadShootPlan>(null);
   squadShootPlanRef.current = squadShootPlan;
+  /**
+   * Combat par-figurine (PvP manuel) — calque allégé de squadShootPlan. La mêlée n'a
+   * ni portée ni LoS : les cibles valides (unité engagée) viennent de gameState.valid_targets,
+   * et la validité par-figurine (règle 04.02) est tranchée côté backend à l'assignation.
+   */
+  const [squadFightPlan, setSquadFightPlan] = useState<{
+    unitId: number;
+    models: string[];
+    /** Dérivé de declarations : model_id -> sa cible (count / clic-droit). */
+    targets: Record<string, string>;
+    /** Source de vérité : intents backend (pending_squad_fight_intents). */
+    declarations: Array<{ model_id: string; weapon_index: number; target_unit_id: string }>;
+    activeModelId: string | null;
+    activeWeaponIndex: number | null;
+    canValidate: boolean;
+  } | null>(null);
+  /** Ref miroir de squadFightPlan pour accès synchrone dans les callbacks. */
+  const squadFightPlanRef = useRef<typeof squadFightPlan>(null);
+  squadFightPlanRef.current = squadFightPlan;
   /** Incrémenté à chaque session de tir squad. Invalide les select_model obsolètes. */
   const squadShootSessionRef = useRef(0);
   /** Guard contre le double-clic : bloque un second squad_shoot_activate concurrent. */
@@ -3386,6 +3405,24 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 action: "activate_unit",
                 unitId: numericUnitId.toString(),
               });
+              // Flux manuel par arme/figurine : initialise le plan local. Figs lues
+              // depuis le cache (occupied_hexes_by_model) pour éviter la dép. à
+              // readSquadModelPositions (déclaré plus bas → TDZ/lint).
+              const gsModels = (latestGameStateRef.current ?? gameState) as {
+                units_cache?: Record<string, { occupied_hexes_by_model?: Record<string, unknown> }>;
+              };
+              const fightModels = Object.keys(
+                gsModels.units_cache?.[String(numericUnitId)]?.occupied_hexes_by_model ?? {}
+              );
+              setSquadFightPlan({
+                unitId: numericUnitId,
+                models: fightModels,
+                targets: {},
+                declarations: [],
+                activeModelId: null,
+                activeWeaponIndex: null,
+                canValidate: false,
+              });
             } finally {
               activationInProgressRef.current = false;
               setActivationPendingUnitId(null);
@@ -3398,6 +3435,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             gameState as ActivationPointerGameState
           );
           if (activeFightStr) {
+            // Flux manuel par arme/figurine : les clics sur figurines/ennemis sont
+            // interceptés par le handler capture de BoardPvp (sélection fig + attribution).
+            // Ici, si un plan est actif, on ignore le flux de résolution immédiate legacy.
+            if (squadFightPlanRef.current) {
+              return;
+            }
             const aid = parseInt(activeFightStr, 10);
             const al = getFightAttackerAttackLeft(gsPtr, aid);
             if (typeof al === "number" && al <= 0) {
@@ -4485,6 +4528,123 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     console.log("[SQUAD-SHOOT] cancel");
   }, [executeAction]);
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // COMBAT par-figurine (PvP manuel) — attribution par arme/figurine (calque tir).
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /** Sélectionne une fig de l'unité active : son prochain clic ennemi l'assignera. */
+  const handleSelectModelForFight = useCallback((modelId: string) => {
+    setSquadFightPlan((prev) => (prev ? { ...prev, activeModelId: modelId } : prev));
+  }, []);
+
+  /** Clic sur une unité ennemie engagée : la fig active l'attaque (squad_fight_assign, per-fig). */
+  const handleAssignFightTarget = useCallback(
+    async (targetUnitId: number | string) => {
+      const plan = squadFightPlanRef.current;
+      if (!plan?.activeModelId) return;
+      const modelId = plan.activeModelId;
+      let result: Awaited<ReturnType<typeof executeAction>>;
+      try {
+        const payload: Record<string, unknown> = {
+          action: "squad_fight_assign",
+          unitId: String(plan.unitId),
+          modelId,
+          targetId: String(targetUnitId),
+        };
+        if (plan.activeWeaponIndex != null) payload.weaponIndex = plan.activeWeaponIndex;
+        result = await executeAction(payload);
+      } catch (e) {
+        console.error(`[SQUAD-FIGHT] assign model=${modelId} target=${targetUnitId} FAILED`, e);
+        setError(`Cible refusée: ${formatApiConnectionError(e)}`);
+        return;
+      }
+      if (!result || result.success === false) return;
+      const decls = (result.result?.declarations ?? []) as Array<{
+        model_id: string;
+        weapon_index: number;
+        target_unit_id: string;
+      }>;
+      const isMono = plan.models.length === 1;
+      setSquadFightPlan((prev) =>
+        prev
+          ? {
+              ...prev,
+              declarations: decls,
+              targets: deriveShootTargets(decls),
+              activeModelId: isMono ? prev.activeModelId : null,
+              canValidate: decls.length > 0,
+            }
+          : prev
+      );
+      console.log(`[SQUAD-FIGHT] assign model=${modelId} → ${targetUnitId} (${decls.length} intents)`);
+    },
+    [executeAction]
+  );
+
+  /** Double-clic sur une unité ennemie : toutes les figs portant l'arme active l'attaquent
+   *  (squad_fight_assign_weapon — attribution par arme au niveau escouade). */
+  const handleAssignFightWeapon = useCallback(
+    async (targetUnitId: number | string) => {
+      const plan = squadFightPlanRef.current;
+      if (!plan) return;
+      const weaponIndex = plan.activeWeaponIndex ?? 0;
+      let result: Awaited<ReturnType<typeof executeAction>>;
+      try {
+        result = await executeAction({
+          action: "squad_fight_assign_weapon",
+          unitId: String(plan.unitId),
+          weaponIndex,
+          targetId: String(targetUnitId),
+        });
+      } catch (e) {
+        console.error(`[SQUAD-FIGHT] assign weapon=${weaponIndex} target=${targetUnitId} FAILED`, e);
+        setError(`Cible refusée: ${formatApiConnectionError(e)}`);
+        return;
+      }
+      if (!result || result.success === false) return;
+      const decls = (result.result?.declarations ?? []) as Array<{
+        model_id: string;
+        weapon_index: number;
+        target_unit_id: string;
+      }>;
+      setSquadFightPlan((prev) =>
+        prev
+          ? {
+              ...prev,
+              declarations: decls,
+              targets: deriveShootTargets(decls),
+              activeModelId: null,
+              canValidate: decls.length > 0,
+            }
+          : prev
+      );
+      console.log(`[SQUAD-FIGHT] assign weapon=${weaponIndex} → ${targetUnitId} (${decls.length} intents)`);
+    },
+    [executeAction]
+  );
+
+  /** Bouton Valider : résout les attaques déclarées (squad_fight_validate → allocation des pertes). */
+  const handleCommitSquadFight = useCallback(async () => {
+    const plan = squadFightPlanRef.current;
+    if (!plan || !plan.canValidate) return;
+    try {
+      await executeAction({ action: "squad_fight_validate", unitId: String(plan.unitId) });
+    } catch (e) {
+      console.error("[SQUAD-FIGHT] validate FAILED", e);
+      setError(`Combat échoué: ${formatApiConnectionError(e)}`);
+      return;
+    }
+    setSquadFightPlan(null);
+    console.log(`[SQUAD-FIGHT] commit unit=${plan.unitId}`);
+  }, [executeAction]);
+
+  /** Annule l'attribution en cours (plan local). Les déclarations pending backend seront
+   *  écrasées à la prochaine activation/assignation (declare_attack_* remplace par arme/fig). */
+  const handleCancelSquadFight = useCallback(async () => {
+    setSquadFightPlan(null);
+    console.log("[SQUAD-FIGHT] cancel");
+  }, []);
+
   /** Allocation manuelle des pertes : le défenseur a cliqué la figurine qui encaisse. */
   const handleAllocateModel = useCallback(
     async (modelId: string) => {
@@ -4924,12 +5084,23 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           action: "activate_unit",
           unitId: numericFighterId.toString(),
         });
+        // Flux manuel par arme/figurine : initialise le plan local (cibles via gameState).
+        const fightModels = Object.keys(readSquadModelPositions(numericFighterId));
+        setSquadFightPlan({
+          unitId: numericFighterId,
+          models: fightModels,
+          targets: {},
+          declarations: [],
+          activeModelId: null,
+          activeWeaponIndex: null,
+          canValidate: false,
+        });
       } finally {
         activationInProgressRef.current = false;
         setActivationPendingUnitId(null);
       }
     },
-    [executeAction]
+    [executeAction, readSquadModelPositions]
   );
 
   const handlePileInMove = useCallback(
@@ -6256,6 +6427,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onUnassignShootWeapon: async () => {},
       onCommitSquadShoot: async () => {},
       onCancelSquadShoot: async () => {},
+      squadFightPlan: null,
+      onSelectModelForFight: () => {},
+      onAssignFightTarget: async () => {},
+      onAssignFightWeapon: async () => {},
+      onCommitSquadFight: async () => {},
+      onCancelSquadFight: async () => {},
       manualAllocation: null,
       onAllocateModel: async () => {},
       manualOrderRequest: null,
@@ -6431,6 +6608,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onUnassignShootWeapon: handleUnassignShootWeapon,
     onCommitSquadShoot: handleCommitSquadShoot,
     onCancelSquadShoot: handleCancelSquadShoot,
+    squadFightPlan,
+    onSelectModelForFight: handleSelectModelForFight,
+    onAssignFightTarget: handleAssignFightTarget,
+    onAssignFightWeapon: handleAssignFightWeapon,
+    onCommitSquadFight: handleCommitSquadFight,
+    onCancelSquadFight: handleCancelSquadFight,
     manualAllocation,
     onAllocateModel: handleAllocateModel,
     manualOrderRequest,
