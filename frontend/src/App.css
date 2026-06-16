@@ -873,18 +873,40 @@ body {
   line-height: 1;
   font-weight: bold;
   color: #FFFFFF;
-  background-color: #16a34a;
-  border: 1px solid #15803d;
   cursor: pointer;
   outline: none;
   white-space: nowrap;
+}
+/* Couleur d'identité du joueur qui doit faire le pile-in (mêmes bleu/rouge que les headers UnitStatus). */
+.pile-in-end-btn--p1 {
+  background-color: #1D4ED8;
+  border: 1px solid #1E3A8A;
+}
+.pile-in-end-btn--p1:hover {
+  background-color: #1E3A8A;
+}
+.pile-in-end-btn--p2 {
+  background-color: #dc2626;
+  border: 1px solid #b91c1c;
+}
+.pile-in-end-btn--p2:hover {
+  background-color: #b91c1c;
 }
 .pile-in-end-btn span {
   font-size: 1em;
   line-height: 1;
 }
-.pile-in-end-btn:hover {
-  background-color: #15803d;
+/* Halo vert clair brillant à la sélection (identique aux boutons squad-action-bar actifs).
+   On neutralise l'outline bleu global (button:focus) qui masquerait le halo. */
+.pile-in-end-btn:focus,
+.pile-in-end-btn:active {
+  outline: none;
+  box-shadow:
+    0 0 0 2px #86efac,
+    0 0 10px 3px rgba(134, 239, 172, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.3),
+    0 2px 4px rgba(0, 0, 0, 0.35);
 }
 
 /* Phase button colors */

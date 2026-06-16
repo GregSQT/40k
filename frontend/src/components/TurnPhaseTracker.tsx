@@ -44,6 +44,7 @@ interface TurnPhaseTrackerProps {
   onPlayerClick?: (player: number) => void; // Optional callback for player button clicks (replay mode)
   onEndPhaseClick?: (player: number) => void; // End current phase for active player
   showPileIn?: boolean; // Affiche le bouton « Pile-in » (sous-phase pile_in en cours)
+  pileInPlayer?: number; // Joueur (1/2) qui doit faire le pile-in → couleur du bouton
   onEndPileIn?: () => void; // Termine la sous-phase pile-in et passe à la suivante
   /** Titre de l'étape tutoriel en cours (Rounds / Tours / Phases) pour halos. */
   tutorialStepTitle?: string | null;
@@ -67,6 +68,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
   onPlayerClick,
   onEndPhaseClick,
   showPileIn,
+  pileInPlayer,
   onEndPileIn,
   tutorialStepTitle,
   onTutorialRects,
@@ -571,7 +573,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
             {showPileIn && onEndPileIn && (
               <button
                 type="button"
-                className="pile-in-end-btn"
+                className={`pile-in-end-btn ${(pileInPlayer ?? current_player) === 2 ? "pile-in-end-btn--p2" : "pile-in-end-btn--p1"}`}
                 onClick={() => onEndPileIn()}
               >
                 Pile-in

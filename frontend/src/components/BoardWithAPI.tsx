@@ -3031,6 +3031,13 @@ export const BoardWithAPI: React.FC = () => {
               apiProps.gameState?.phase === "fight" &&
               apiProps.gameState?.fight_subphase === "pile_in"
             }
+            pileInPlayer={(() => {
+              const eligible = apiProps.gameState?.fight_eligible_units;
+              if (!eligible || eligible.length === 0) return undefined;
+              return apiProps.gameState?.units?.find(
+                (u) => String(u.id) === String(eligible[0])
+              )?.player;
+            })()}
             onEndPileIn={isGameOver ? undefined : apiProps.onEndPileIn}
             maxTurns={(() => {
               if (!gameConfig?.game_rules?.max_turns) {
