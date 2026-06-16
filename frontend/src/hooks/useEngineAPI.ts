@@ -653,6 +653,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Ref miroir de squadFightPlan pour accès synchrone dans les callbacks. */
   const squadFightPlanRef = useRef<typeof squadFightPlan>(null);
   squadFightPlanRef.current = squadFightPlan;
+  /** Nombre de figs ASSIGNABLES (engagées) de l'unité fight active, remonté par BoardPvp
+   * (qui a la géométrie + boardConfig). Sert de dénominateur au décompte de la barre. */
+  const [fightAssignableCount, setFightAssignableCount] = useState(0);
+  const handleReportFightAssignable = useCallback((n: number) => {
+    setFightAssignableCount(n);
+  }, []);
   /** Incrémenté à chaque session de tir squad. Invalide les select_model obsolètes. */
   const squadShootSessionRef = useRef(0);
   /** Guard contre le double-clic : bloque un second squad_shoot_activate concurrent. */
@@ -6433,6 +6439,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onAssignFightWeapon: async () => {},
       onCommitSquadFight: async () => {},
       onCancelSquadFight: async () => {},
+      fightAssignableCount: 0,
+      onReportFightAssignable: () => {},
       manualAllocation: null,
       onAllocateModel: async () => {},
       manualOrderRequest: null,
@@ -6614,6 +6622,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onAssignFightWeapon: handleAssignFightWeapon,
     onCommitSquadFight: handleCommitSquadFight,
     onCancelSquadFight: handleCancelSquadFight,
+    fightAssignableCount,
+    onReportFightAssignable: handleReportFightAssignable,
     manualAllocation,
     onAllocateModel: handleAllocateModel,
     manualOrderRequest,

@@ -544,6 +544,8 @@ type BoardProps = {
   onSelectModelForFight?: (modelId: string) => void;
   onAssignFightTarget?: (targetUnitId: number | string) => void | Promise<void>;
   onAssignFightWeapon?: (targetUnitId: number | string) => void | Promise<void>;
+  /** Remonte le nombre de figs ASSIGNABLES (engagées) de l'unité active → décompte barre. */
+  onReportFightAssignable?: (count: number) => void;
   /** Allocation manuelle des pertes au tir (defenseur humain) : figs choisissables. */
   manualAllocation?: {
     kind?: "shoot" | "fight" | "hazard";
@@ -896,6 +898,7 @@ export default function Board({
   onSelectModelForFight,
   onAssignFightTarget,
   onAssignFightWeapon,
+  onReportFightAssignable,
   manualAllocation = null,
   onAllocateModel,
   onStartAttackPreview,
@@ -1328,6 +1331,16 @@ export default function Board({
   }, [phase, squadFightPlan, gameState, gameConfig, boardConfig, units]);
   const fightEngagedModelIdsRef = useRef(fightEngagedModelIds);
   fightEngagedModelIdsRef.current = fightEngagedModelIds;
+  /** Remonte le compte de figs assignables au hook (décompte barre = assignables, pas total). */
+  const lastReportedFightCountRef = useRef<number>(-1);
+  useEffect(() => {
+    if (!onReportFightAssignable) return;
+    const n = phase === "fight" && squadFightPlan ? fightEngagedModelIds.size : 0;
+    if (lastReportedFightCountRef.current !== n) {
+      lastReportedFightCountRef.current = n;
+      onReportFightAssignable(n);
+    }
+  }, [phase, squadFightPlan, fightEngagedModelIds, onReportFightAssignable]);
 
   // Update refs when props change but don't trigger re-render - MOVE THIS BEFORE useEffect
   stableCallbacks.current = {
@@ -7940,7 +7953,7 @@ export default function Board({
               veil.drawCircle(cx, cy, fvRadius);
               veil.endFill();
             } else if (!fightEngagedModelIds.has(mid)) {
-              veil.beginFill(0x6b7280, 0.55); // gris : figurine non engagée
+              veil.beginFill(0x111827, 0.5); // gris foncé : figurine non engagée (non éligible)
               veil.drawCircle(cx, cy, fvRadius);
               veil.endFill();
             }

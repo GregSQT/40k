@@ -3902,7 +3902,7 @@ export const BoardWithAPI: React.FC = () => {
             }}
           >
             {Object.keys(apiProps.squadFightPlan.targets).length}/
-            {apiProps.squadFightPlan.models.length} figs assignées
+            {apiProps.fightAssignableCount} figs assignées
           </span>
           <button
             type="button"
@@ -4505,6 +4505,7 @@ export const BoardWithAPI: React.FC = () => {
             onSelectModelForFight={isGameOver ? () => {} : apiProps.onSelectModelForFight}
             onAssignFightTarget={isGameOver ? async () => {} : apiProps.onAssignFightTarget}
             onAssignFightWeapon={isGameOver ? async () => {} : apiProps.onAssignFightWeapon}
+            onReportFightAssignable={apiProps.onReportFightAssignable}
             manualAllocation={apiProps.manualAllocation}
             onAllocateModel={isGameOver ? async () => {} : apiProps.onAllocateModel}
             onStartAttackPreview={isGameOver ? () => {} : apiProps.onStartAttackPreview}
