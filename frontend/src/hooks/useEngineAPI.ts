@@ -5280,6 +5280,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     await executeAction({ action: "end_pile_in" });
   }, [executeAction]);
 
+  // Bouton « Skip » (sous-phase fight) : abandonne toutes les attaques restantes des 2
+  // joueurs et passe directement à la consolidation.
+  const handleSkipFight = useCallback(async () => {
+    await executeAction({ action: "skip_fight" });
+  }, [executeAction]);
+
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance action
   const handleAdvance = useCallback(
     async (unitId: number) => {
@@ -6792,6 +6798,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onMovePileInModel: () => {},
       onUnplacePileInModel: () => {},
       onEndPileIn: () => {},
+      onSkipFight: () => {},
       onCommitPileInPlan: async () => {},
       onCancelPileInModelMove: async () => {},
       onSetPileInFocus: (_mode: "defensive" | "offensive") => {},
@@ -7047,6 +7054,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onPileInMove: handlePileInMove,
     onSkipPileIn: handleSkipPileIn,
     onEndPileIn: handleEndPileIn,
+    onSkipFight: handleSkipFight,
     onCharge: emptyCallback,
     onActivateCharge: handleActivateCharge,
     onChargeEnemyUnit: handleChargeEnemyUnit,

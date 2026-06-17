@@ -7062,6 +7062,20 @@ def _fight_v11_manual_step(
                 )
             return _fight_v11_manual_state(game_state)
 
+        if atype == "skip_fight":
+            # Bouton « Skip » : abandonne TOUTES les attaques restantes (2 joueurs) et passe
+            # directement à la consolidation. Contourne sciemment l'obligation de combattre
+            # (raccourci de confort). Les unités encore éligibles sont marquées « selected to
+            # fight » (sans attaque) pour rester éligibles à la consolidation (12.08, cf.
+            # fight_v11_is_consolidation_eligible).
+            for p in (1, 2):
+                for e in fight_v11_eligible_unit_ids(game_state, p, fights_first_only=False):
+                    game_state["units_selected_to_fight"].add(str(e))
+            game_state["active_fight_unit"] = None
+            fight_v11_enter_consolidate(game_state)
+            _fight_v11_log(game_state, "FIGHT → SKIP global (toutes attaques abandonnées) → CONSOLIDATE")
+            return _fight_v11_manual_state(game_state)
+
         # ÉTAPE 1 — le joueur choisit librement une de SES unités éligibles (12.04).
         if atype == "activate_unit":
             if uid is not None and uid in pool:

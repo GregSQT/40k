@@ -3062,6 +3062,7 @@ export const BoardWithAPI: React.FC = () => {
                     apiProps.onSelectUnit(Number(eligible[0]));
                   }
             }
+            onSkipFight={isGameOver ? undefined : apiProps.onSkipFight}
             maxTurns={(() => {
               if (!gameConfig?.game_rules?.max_turns) {
                 throw new Error(
