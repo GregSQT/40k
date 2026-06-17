@@ -4197,14 +4197,14 @@ export default function Board({
       );
     };
 
-    const findOwnFig = (col: number, row: number) => {
+    const findOwnFig = (col: number, row: number, activePlayer: 1 | 2) => {
       const uc = getUnitsCache();
       if (!uc) return null;
       const clickCube = offsetToCube(col, row);
       let best: { uid: number | string; mid: string } | null = null;
       let bestD = Infinity;
       for (const [uid, entry] of Object.entries(uc)) {
-        if (entry.player !== current_player) continue;
+        if (entry.player !== activePlayer) continue;
         const byModel = entry.occupied_hexes_by_model;
         if (!byModel) continue;
         for (const [mid, pos] of Object.entries(byModel)) {
@@ -4218,14 +4218,18 @@ export default function Board({
       return best;
     };
 
-    const findEnemyUnit = (col: number, row: number): number | string | null => {
+    const findEnemyUnit = (
+      col: number,
+      row: number,
+      activePlayer: 1 | 2
+    ): number | string | null => {
       const uc = getUnitsCache();
       if (!uc) return null;
       const clickCube = offsetToCube(col, row);
       let best: number | string | null = null;
       let bestD = Infinity;
       for (const [uid, entry] of Object.entries(uc)) {
-        if (entry.player === current_player) continue;
+        if (entry.player === activePlayer) continue;
         const byModel = entry.occupied_hexes_by_model;
         const positions: Array<[number, number]> = byModel
           ? Object.values(byModel)
@@ -4252,8 +4256,14 @@ export default function Board({
       const { col, row } = resolveHex(e);
       const cbs = squadFightCallbacksRef.current;
 
+      // Référence ami/ennemi = player de l'unité ACTIVE (plan.unitId), PAS current_player :
+      // en alternance fight (12.04), l'unité active peut appartenir au joueur non actif.
+      const activeUnitForOwnership = units.find((u) => String(u.id) === String(plan.unitId));
+      if (activeUnitForOwnership == null) return;
+      const activePlayer = activeUnitForOwnership.player as 1 | 2;
+
       // 1) Clic sur une fig de l'unité ACTIVE → sélection de la figurine.
-      const own = findOwnFig(col, row);
+      const own = findOwnFig(col, row, activePlayer);
       if (own && Number(own.uid) === Number(plan.unitId)) {
         e.stopImmediatePropagation();
         // Fig non engagée (ne peut frapper aucun ennemi) : grisée, non sélectionnable.
@@ -4265,7 +4275,7 @@ export default function Board({
       if (own) return;
 
       // 2) Clic sur un ennemi → simple = fig active ; double = toute l'unité (par arme).
-      const enemy = findEnemyUnit(col, row);
+      const enemy = findEnemyUnit(col, row, activePlayer);
       if (enemy != null) {
         e.stopImmediatePropagation();
         // Filtre engagement (règle 04.02) : ne rien envoyer si l'ennemi n'est pas engagé.
@@ -4327,7 +4337,6 @@ export default function Board({
     gameState,
     gameConfig,
     units,
-    current_player,
   ]);
 
   // Allocation manuelle des pertes en COMBAT (PvP) : l'effet de tir ci-dessus est gaté

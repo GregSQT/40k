@@ -4436,6 +4436,22 @@ def fight_v11_eligible_unit_ids(
     return out
 
 
+def _fight_v11_register_selection(game_state: Dict[str, Any], uid: str) -> None:
+    """
+    Enregistre une unité « selected to fight » (12.04) et passe la main à l'adversaire
+    (alternance par unité : « players alternate selecting one friendly unit »). Si l'autre
+    joueur n'a plus d'unité éligible, ``fight_v11_advance_selection`` rebascule
+    automatiquement vers le sélecteur courant. À appeler au moment de la sélection
+    EFFECTIVE (pas dans advance_selection, qui doit rester idempotent pour le peek/PvP).
+    """
+    uid = str(uid)
+    game_state["units_selected_to_fight"].add(uid)
+    game_state.setdefault("units_fought", set()).add(uid)
+    selector = game_state.get("fight_selector")
+    if selector in (1, 2):
+        game_state["fight_selector"] = 3 - selector
+
+
 def fight_v11_advance_selection(game_state: Dict[str, Any]) -> Optional[str]:
     """
     Machine de sélection 12.04 (exhaustive). Détermine l'unité que le sélecteur
@@ -4968,8 +4984,7 @@ def _fight_v11_auto_step(game_state: Dict[str, Any], config: Dict[str, Any]) -> 
             u = get_unit_by_id(game_state, uid)
             if u is None:
                 raise KeyError(f"Unit {uid} missing for fight")
-            game_state["units_selected_to_fight"].add(uid)
-            game_state.setdefault("units_fought", set()).add(uid)
+            _fight_v11_register_selection(game_state, uid)
             overrun = (
                 fight_v11_is_overrun_eligible(game_state, u)
                 and not _fight_v11_engaged_now(game_state, u)
@@ -6568,8 +6583,7 @@ def _fight_v11_consolidation_new_foes_step(
             raise RuntimeError(
                 f"NEW FOE validate {active} : flux de declaration manuelle non supporte pour defenseur IA"
             )
-        game_state["units_selected_to_fight"].add(active)
-        game_state.setdefault("units_fought", set()).add(active)
+        _fight_v11_register_selection(game_state, active)
         game_state["active_fight_unit"] = None
         alloc_result = build_manual_fight_allocation(game_state, active)
         if alloc_result.get("waiting_for_player"):
@@ -6581,13 +6595,11 @@ def _fight_v11_consolidation_new_foes_step(
         valid = _fight_build_valid_target_pool(game_state, u)
         if not valid:
             # Aucun ennemi à frapper (cas limite) : le New Foe est tout de même « selected to fight ».
-            game_state["units_selected_to_fight"].add(active)
-            game_state.setdefault("units_fought", set()).add(active)
+            _fight_v11_register_selection(game_state, active)
             game_state["active_fight_unit"] = None
             _fight_v11_log(game_state, f"NEW FOE {active} : aucune cible valide (sélectionné sans attaque)")
             return _fight_v11_manual_state(game_state)
-        game_state["units_selected_to_fight"].add(active)
-        game_state.setdefault("units_fought", set()).add(active)
+        _fight_v11_register_selection(game_state, active)
         pref = str(action["targetId"]) if "targetId" in action else None
         target_id = pref if (pref is not None and pref in valid) else _ai_select_fight_target(game_state, active, valid)
         target_unit = get_unit_by_id(game_state, target_id)
@@ -7042,8 +7054,7 @@ def _fight_v11_manual_step(
                         f"(obligation de combattre, encart 12)",
                     )
                     return _fight_v11_manual_state(game_state)
-                game_state["units_selected_to_fight"].add(active)
-                game_state.setdefault("units_fought", set()).add(active)
+                _fight_v11_register_selection(game_state, active)
                 game_state["active_fight_unit"] = None
                 _fight_v11_log(
                     game_state,
@@ -7101,8 +7112,7 @@ def _fight_v11_manual_step(
                     f"FIGHT validate {sel} : flux de declaration manuelle non supporte "
                     f"pour un defenseur IA (cible {target_id})"
                 )
-            game_state["units_selected_to_fight"].add(sel)
-            game_state.setdefault("units_fought", set()).add(sel)
+            _fight_v11_register_selection(game_state, sel)
             game_state["active_fight_unit"] = None
             alloc_result = build_manual_fight_allocation(game_state, sel)
             _fight_v11_log(
@@ -7119,8 +7129,7 @@ def _fight_v11_manual_step(
             u = get_unit_by_id(game_state, sel)
             if u is None:
                 raise KeyError(f"Fight unit {sel} missing from game_state['units']")
-            game_state["units_selected_to_fight"].add(sel)
-            game_state.setdefault("units_fought", set()).add(sel)
+            _fight_v11_register_selection(game_state, sel)
             ftype = "normal"
             if action.get("fight_type") == "overrun" and fight_v11_is_overrun_eligible(game_state, u):
                 ftype = "overrun"
