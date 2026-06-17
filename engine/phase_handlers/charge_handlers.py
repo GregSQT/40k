@@ -4347,11 +4347,25 @@ def charge_preview_move_plan(
 
 
 def charge_autoplace_plan(
-    game_state: Dict[str, Any], squad_id: str, mode: str = "offensive"
+    game_state: Dict[str, Any], squad_id: str, mode: str = "offensive",
+    *,
+    target_ids_override: Optional[List[str]] = None,
+    budget_override: Optional[int] = None,
+    allow_nontarget_engagement: bool = False,
+    disable_fly: bool = False,
 ) -> Dict[str, Any]:
     """Auto-placement de charge (Focus) : place les figs du chargeur pour ENGAGER toutes les cibles
     déclarées (11.04 AFTER « engaged with all of the charge targets »), en maximisant le nombre de
     figs engagées. Toutes les cibles sont traitées à égalité (pas de cible prioritaire). Lecture pure.
+
+    Paramètres optionnels (défauts = comportement charge inchangé) — réutilisé tel quel par la
+    consolidation « engaging » (12.08), dont l'AFTER « engagée avec toutes les cibles sélectionnées »
+    est exactement la contrainte de couverture dure (4) ci-dessous :
+      - ``target_ids_override`` : cibles fournies directement (sinon ``charge_target_selections``) ;
+      - ``budget_override`` : budget de déplacement en sous-hex (sinon jet de charge) — conso = 3" ;
+      - ``allow_nontarget_engagement`` : autorise l'engagement d'ennemis non sélectionnés (conso
+        engaging « New Foes To Face », 12.08) ; en charge (False) il reste interdit (11.04) ;
+      - ``disable_fly`` : ignore FLY (mouvement normal de consolidation, pas une charge).
 
     Affectation GLOBALE par ILP (vs glouton) — modèle repris de ``pile_in_autoplace_plan``, adapté aux
     contraintes de charge :
@@ -4392,15 +4406,23 @@ def charge_autoplace_plan(
 
     # Cibles déclarées : la légalité autorise le contact avec TOUTES (seules les unités NON déclarées
     # sont interdites d'engagement). L'autoplace les engage toutes, sans cible prioritaire.
-    stored = require_key(game_state, "charge_target_selections").get(str(squad_id))
-    if stored is None:
-        raise ValueError(f"charge_autoplace_plan: aucune cible déclarée pour {squad_id}")
-    target_ids = [str(t) for t in (stored if isinstance(stored, (list, tuple)) else [stored])]
+    if target_ids_override is not None:
+        target_ids = [str(t) for t in target_ids_override]
+        if not target_ids:
+            raise ValueError(f"charge_autoplace_plan: target_ids_override vide pour {squad_id}")
+    else:
+        stored = require_key(game_state, "charge_target_selections").get(str(squad_id))
+        if stored is None:
+            raise ValueError(f"charge_autoplace_plan: aucune cible déclarée pour {squad_id}")
+        target_ids = [str(t) for t in (stored if isinstance(stored, (list, tuple)) else [stored])]
 
-    roll = require_key(game_state, "charge_roll_values").get(str(squad_id))
-    if roll is None:
-        raise ValueError(f"charge_autoplace_plan: jet de charge absent pour {squad_id}")
-    budget = int(_charge_budget_subhex(game_state, squad_id, roll))
+    if budget_override is not None:
+        budget = int(budget_override)
+    else:
+        roll = require_key(game_state, "charge_roll_values").get(str(squad_id))
+        if roll is None:
+            raise ValueError(f"charge_autoplace_plan: jet de charge absent pour {squad_id}")
+        budget = int(_charge_budget_subhex(game_state, squad_id, roll))
 
     ez = int(get_engagement_zone(game_state))
     board_cols = int(require_key(game_state, "board_cols"))
@@ -4437,8 +4459,14 @@ def charge_autoplace_plan(
         raise ValueError(f"charge_autoplace_plan: aucune cible déclarée présente pour {squad_id}")
     all_target_fps = [target_fp_by_id[t] for t in present_target_ids]
 
+    # Conso « engaging » : l'engagement d'ennemis non sélectionnés est autorisé (New Foes, 12.08).
+    # Vider la liste neutralise les 3 filtres non-cible (slots, repli, zone) en une fois. Les ennemis
+    # restent dans ``enemy_occupied`` → la traversée BFS demeure bloquée (mouvement normal, 03.01).
+    if allow_nontarget_engagement:
+        nontarget_entries = []
+
     obstacle_socles = _charge_obstacle_socles(game_state, str(squad_id))
-    fly_active = _charge_fly_active(game_state, unit, str(squad_id))
+    fly_active = False if disable_fly else _charge_fly_active(game_state, unit, str(squad_id))
     traverse_blocked = set() if fly_active else (walls | enemy_occupied)
 
     def _socle(mid: str, c: int, r: int) -> Any:

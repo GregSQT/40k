@@ -653,6 +653,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [consolidationNewFoes, setConsolidationNewFoes] = useState<string[]>([]);
   const consolidationNewFoesRef = useRef<string[]>([]);
   consolidationNewFoesRef.current = consolidationNewFoes;
+  /** Mode Focus consolidation (Défensif / Offensif) ; null = aucun (miroir pile-in). */
+  const [consolidationFocusMode, setConsolidationFocusMode] = useState<null | "defensive" | "offensive">(null);
+  const consolidationFocusModeRef = useRef<null | "defensive" | "offensive">(null);
+  consolidationFocusModeRef.current = consolidationFocusMode;
   /**
    * Tir par-figurine (PvP manuel) — plan provisoire de cibles assignées par fig.
    * ``targets`` : model_id -> squad_id ennemi assigné (cible de cette fig pour la phase).
@@ -6223,6 +6227,37 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [postEngineQuery, applyConsolidationPlanState]
   );
 
+  /** Lance consolidate_autoplace (12.08) pour le mode courant et charge le plan optimal dans le plan
+   * provisoire, puis revalide. Le backend route ongoing → pile-in, engaging → charge ; objective non
+   * supporté (les boutons sont masqués pour ce mode côté UI). Ajustement manuel possible ensuite. */
+  const runConsolidationAutoplace = useCallback(
+    async (mode: "defensive" | "offensive") => {
+      const result = await postEngineQuery({ action: "consolidate_autoplace", mode });
+      if (!result) throw new Error("consolidate_autoplace: réponse vide");
+      const planArr = (result.plan ?? []) as Array<[string, number, number]>;
+      const models: Record<string, { col: number; row: number }> = {};
+      for (const [mid, c, r] of planArr) {
+        models[String(mid)] = { col: Number(c), row: Number(r) };
+      }
+      consolidationModelPoolRef.current = new Set();
+      consolidationModelMaskLoopsRef.current = null;
+      setConsolidationMovePlan((prev) => (prev ? { ...prev, models, activeModelId: null } : prev));
+      await refreshConsolidationPlanState(models, null);
+    },
+    [postEngineQuery, refreshConsolidationPlanState]
+  );
+
+  /** Boutons Focus consolidation (Défensif / Offensif) : (dé)active le mode (re-clic même mode = off).
+   * Si actif, (re)lance l'auto-placement optimal pour le mode de consolidation courant. */
+  const handleSetConsolidationFocus = useCallback(
+    (mode: "defensive" | "offensive") => {
+      const next = consolidationFocusModeRef.current === mode ? null : mode;
+      setConsolidationFocusMode(next);
+      if (next) void runConsolidationAutoplace(next);
+    },
+    [runConsolidationAutoplace]
+  );
+
   /** Engaging : toggle d'un ennemi candidat (≤3") avant le move (consolidation_select_target). */
   const handleConsolidationSelectTarget = useCallback(
     async (targetId: number | string) => {
@@ -6315,6 +6350,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       await executeAction({ action: "commit_consolidation_plan", plan: planArr });
       consolidationModelPoolRef.current = new Set();
       consolidationModelMaskLoopsRef.current = null;
+      setConsolidationFocusMode(null);
       setConsolidationMovePlan(null);
       setSelectedUnitId(null);
       setMode("select");
@@ -6324,15 +6360,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     }
   }, [executeAction]);
 
-  /** Bouton Annuler : renonce à consolider l'unité active (skip), nettoie le plan local. */
+  /** Bouton Annuler : annule le plan de consolidation en cours SANS consommer l'unité — elle
+   * redevient sélectionnable (cancel_consolidation côté moteur), nettoie le plan local. */
   const handleCancelConsolidationModelMove = useCallback(async () => {
     consolidationModelPoolRef.current = new Set();
     consolidationModelMaskLoopsRef.current = null;
+    setConsolidationFocusMode(null);
     setConsolidationMovePlan(null);
     try {
-      await executeAction({ action: "skip" });
+      await executeAction({ action: "cancel_consolidation" });
     } catch (e) {
-      console.error("Cancel consolidation model move (skip) failed:", e);
+      console.error("Cancel consolidation model move failed:", e);
     }
     setSelectedUnitId(null);
     setMode("select");
@@ -6342,6 +6380,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleEndConsolidation = useCallback(async () => {
     consolidationModelPoolRef.current = new Set();
     consolidationModelMaskLoopsRef.current = null;
+    setConsolidationFocusMode(null);
     setConsolidationMovePlan(null);
     try {
       await executeAction({ action: "end_consolidation" });
@@ -6807,6 +6846,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       consolidationModelPoolRef,
       consolidationModelMaskLoopsRef,
       consolidationNewFoes: [] as string[],
+      consolidationFocusMode: null as null | "defensive" | "offensive",
+      onSetConsolidationFocus: (_mode: "defensive" | "offensive") => {},
       onSelectConsolidationModel: () => {},
       onMoveConsolidationModel: () => {},
       onUnplaceConsolidationModel: () => {},
@@ -7003,6 +7044,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     consolidationModelPoolRef,
     consolidationModelMaskLoopsRef,
     consolidationNewFoes,
+    consolidationFocusMode,
+    onSetConsolidationFocus: handleSetConsolidationFocus,
     onSelectConsolidationModel: handleSelectConsolidationModel,
     onMoveConsolidationModel: handleMoveConsolidationModel,
     onUnplaceConsolidationModel: handleUnplaceConsolidationModel,

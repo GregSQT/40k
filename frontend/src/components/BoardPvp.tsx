@@ -4653,6 +4653,11 @@ export default function Board({
           }
         }
       }
+      // Consolidation engaging : cercle JAUNE (contour) autour des unités cibles potentielles (≤3").
+      if (isConsolidationModelMove && consolidationMovePlan?.consolidationMode === "engaging") {
+        const YELLOW = 0xffd700;
+        for (const uid of consolidationMovePlan.engagingCandidates) drawTargetRing(uid, YELLOW);
+      }
     }
     return () => {
       if (!overlay.destroyed) {
@@ -4676,6 +4681,8 @@ export default function Board({
     chargePreviewTargetIds,
     pileInFocusActive,
     pileInFocusTargetId,
+    isConsolidationModelMove,
+    consolidationMovePlan,
   ]);
 
   // Ghost per-figurine (charge model move) : calque exact du ghost move per-fig — le fantôme de la

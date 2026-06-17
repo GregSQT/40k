@@ -3598,7 +3598,30 @@ export const BoardWithAPI: React.FC = () => {
               >
                 Cancel
               </button>
-              <span style={{ color: "#cbd5e1", fontSize: 13, fontWeight: 700 }}>
+              <span
+                style={{ color: "#cbd5e1", fontSize: 13, fontWeight: 700, cursor: "help" }}
+                title={[
+                  "CONSOLIDATION MOVE 12.08",
+                  "Distance max : 3\"",
+                  "Éligible : phase de Fight et unité ayant été éligible à combattre cette phase.",
+                  "Effet : l'unité bouge comme décrit dans Moving (03).",
+                  "",
+                  "AVANT DE BOUGER — sélection du mode (cascade) :",
+                  "• Ongoing : si l'unité est engagée, mode obligatoire ; sélectionne toutes les unités ennemies engagées.",
+                  "• Engaging : sinon, si l'unité est à ≤3\" d'unités ennemies, mode obligatoire ; sélectionne ≥1 de ces unités.",
+                  "• Objective : sinon, si l'unité est à ≤3\" d'objectifs, mode obligatoire ; sélectionne un de ces objectifs.",
+                  "",
+                  "PENDANT LE MOUVEMENT :",
+                  "• Ongoing : les figurines au contact socle d'un ennemi ne peuvent pas bouger. Chaque figurine déplacée doit finir plus près de l'unité ennemie sélectionnée la plus proche, et engagée avec elle si possible.",
+                  "• Engaging : chaque figurine déplacée doit finir plus près de l'unité ennemie sélectionnée la plus proche, et engagée si possible.",
+                  "• Objective : chaque figurine déplacée doit finir à portée de l'objectif sélectionné si possible, sinon plus près.",
+                  "",
+                  "APRÈS LE MOUVEMENT :",
+                  "• Ongoing : chaque figurine ayant commencé le move engagée avec une unité ennemie doit toujours l'être.",
+                  "• Engaging : l'unité doit être engagée avec toutes les unités ennemies sélectionnées. Toute unité ennemie engagée non sélectionnée pour combattre devient éligible et sélectionnée pour combattre (12.04).",
+                  "• Objective : l'unité doit être à portée de l'objectif sélectionné.",
+                ].join("\n")}
+              >
                 {apiProps.consolidationMovePlan.consolidationMode === "ongoing"
                   ? "Ongoing"
                   : apiProps.consolidationMovePlan.consolidationMode === "engaging"
@@ -3638,6 +3661,48 @@ export const BoardWithAPI: React.FC = () => {
                     Objectif {String(oid)}
                   </button>
                 ))}
+              {/* Focus off./déf. (12.08) : auto-placement ILP. Disponible en ongoing et en engaging
+                  (une fois ≥1 cible sélectionnée) ; masqué en objective (cible = zone, non supporté). */}
+              {(() => {
+                const cm = apiProps.consolidationMovePlan;
+                if (!cm) return null;
+                const focusable =
+                  cm.consolidationMode === "ongoing" ||
+                  (cm.consolidationMode === "engaging" && !cm.awaitingTargetSelection);
+                if (!focusable) return null;
+                return (["offensive", "defensive"] as const).map((m) => {
+                  const active = apiProps.consolidationFocusMode === m;
+                  const label = m === "defensive" ? "Focus déf." : "Focus off.";
+                  const title =
+                    m === "defensive"
+                      ? "Focus défensif : max de figs engagées, le plus loin possible de la cible"
+                      : "Focus offensif : max de figs engagées, socle-à-socle / au plus près de la cible";
+                  const colorClass = m === "defensive" ? "pile-in-focus-def" : "pile-in-focus-off";
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      className={`${colorClass}${active ? " btn-active" : ""}`}
+                      onClick={() => {
+                        if (!isGameOver) apiProps.onSetConsolidationFocus?.(m);
+                      }}
+                      title={title}
+                      style={{
+                        border: "1px solid rgba(0,0,0,0.35)",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                        fontSize: 14,
+                        fontWeight: 700,
+                        padding: "8px 14px",
+                        width: 110,
+                        textAlign: "center",
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                });
+              })()}
               {(() => {
                 const canValidate = apiProps.consolidationMovePlan?.canValidate === true;
                 return (
@@ -3661,6 +3726,30 @@ export const BoardWithAPI: React.FC = () => {
                   >
                     Validate
                   </button>
+                );
+              })()}
+              {/* Raison du blocage de Validate (les 3 conditions 12.08). Masqué tant qu'une sélection
+                  préalable est en attente (déjà signalée plus haut). */}
+              {(() => {
+                const cm = apiProps.consolidationMovePlan;
+                if (!cm || cm.canValidate) return null;
+                if (cm.awaitingTargetSelection || cm.awaitingObjectiveSelection) return null;
+                const reasons: string[] = [];
+                if (Object.values(cm.perModelValid ?? {}).some((v) => v === false))
+                  reasons.push("une ou plusieurs figurines ne finissent pas plus près de la cible la plus proche");
+                if (cm.coherencyOk === false)
+                  reasons.push("l'unité n'est pas en cohésion d'unité (03.03)");
+                if (cm.consolidationMode === "engaging" && cm.engagedWithAllSelected === false)
+                  reasons.push("l'unité n'est pas engagée avec toutes les cibles sélectionnées");
+                if (cm.consolidationMode === "ongoing" && cm.keptEngagements === false)
+                  reasons.push("une figurine perdrait un de ses engagements de départ");
+                if (cm.consolidationMode === "objective" && cm.withinObjectiveRange === false)
+                  reasons.push("l'unité n'est pas à portée de l'objectif");
+                if (reasons.length === 0) return null;
+                return (
+                  <span style={{ color: "#fca5a5", fontSize: 13, fontWeight: 600, marginLeft: 4 }}>
+                    Validate impossible : {reasons.join(" ; ")}.
+                  </span>
                 );
               })()}
               <button

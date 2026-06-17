@@ -5839,6 +5839,62 @@ def pile_in_autoplace_plan(
     return {"plan": plan}
 
 
+def consolidate_autoplace_plan(
+    game_state: Dict[str, Any], squad_id: str, mode: str = "defensive"
+) -> Dict[str, Any]:
+    """Auto-placement de consolidation (Focus off./déf., 12.08) — miroir du Focus pile-in/charge.
+
+    Route vers le moteur ILP existant dont l'AFTER correspond exactement au mode V11 courant
+    (déterminé par ``_fight_v11_consolidation_targets``) :
+      - ``ongoing``  : AFTER « chaque fig conserve SES engagements de départ » (par-figurine) +
+        figs base-contact figées → ``pile_in_autoplace_plan`` (focus = ennemi du palier le plus
+        proche parmi les unités engagées) ;
+      - ``engaging`` : AFTER « unité engagée avec TOUTES les cibles sélectionnées » (par-unité) →
+        ``charge_autoplace_plan`` (couverture dure), budget 3", engagement d'ennemis non sélectionnés
+        autorisé (New Foes To Face), FLY ignoré (mouvement normal) ;
+      - ``objective`` : cible = zone (pas d'engagement) → non couvert par le Focus, erreur explicite.
+
+    ``mode`` est l'intention du bouton : "offensive" (au plus près) | "defensive" (au plus loin).
+    Lecture pure (renvoie {"plan": [[model_id, col, row], ...]}).
+    """
+    if mode not in ("offensive", "defensive"):
+        raise ValueError(f"consolidate_autoplace_plan: mode invalide {mode!r}")
+    unit = get_unit_by_id(game_state, str(squad_id))
+    if not unit:
+        return {"plan": []}
+
+    cons_mode, tier = _fight_v11_consolidation_targets(game_state, unit)
+    if cons_mode == "ongoing":
+        closest = _fight_pile_in_closest_tier_ids(game_state, unit, list(tier))
+        if not closest:
+            raise ValueError(
+                f"consolidate_autoplace_plan: ongoing sans ennemi le plus proche pour {squad_id}"
+            )
+        return pile_in_autoplace_plan(game_state, str(squad_id), str(closest[0]), mode=mode)
+    if cons_mode == "engaging":
+        if not tier:
+            raise ValueError(
+                f"consolidate_autoplace_plan: engaging sans cible sélectionnée pour {squad_id}"
+            )
+        from .charge_handlers import charge_autoplace_plan
+        budget = 3 * int(require_key(game_state, "inches_to_subhex"))
+        return charge_autoplace_plan(
+            game_state, str(squad_id), mode,
+            target_ids_override=[str(t) for t in tier],
+            budget_override=budget,
+            allow_nontarget_engagement=True,
+            disable_fly=True,
+        )
+    if cons_mode == "objective":
+        raise ValueError(
+            f"consolidate_autoplace_plan: mode objective non supporté par le Focus "
+            f"(cible = zone d'objectif, pas d'engagement) pour {squad_id}"
+        )
+    raise ValueError(
+        f"consolidate_autoplace_plan: aucune consolidation applicable pour {squad_id}"
+    )
+
+
 def _fight_v11_pile_in_targets(game_state: Dict[str, Any], unit: Dict[str, Any]) -> List[str]:
     """Cibles de pile-in (12.03) en auto-sélection : toutes les unités engagées si engagée,
     sinon les ennemis dans ``pile_in_target_range`` (5\")."""
@@ -5995,7 +6051,9 @@ def _fight_consolidation_build_model_pool(
         _charge_prepare_footprint_offsets,
         _candidate_footprint_charge,
         _charge_synthetic_charger_cache_entry,
+        _charge_model_socle,
     )
+    from engine.hex_utils import footprints_overlap, Socle
 
     if tier_kind not in ("enemy", "zone"):
         raise ValueError(f"_fight_consolidation_build_model_pool: tier_kind invalide {tier_kind!r}")
@@ -6026,7 +6084,10 @@ def _fight_consolidation_build_model_pool(
     target_entries: List[Dict[str, Any]] = []
     target_fps: List[Set[Tuple[int, int]]] = []
     enemy_occupied: Set[Tuple[int, int]] = set()
-    other_occupied: Set[Tuple[int, int]] = set()
+    # Bloqueurs (ennemis + autres unités amies) → collision par TEST EUCLIDIEN officiel
+    # (footprints_overlap), comme les autoplaces. Le test par cellules (cand_fp & occupied) rejetait
+    # à tort des socles ronds TANGENTS (socle-à-socle légal) → Validate bloqué après Focus off.
+    blocker_socles: List[Any] = []
     for eid, entry in units_cache.items():
         occ = entry.get("occupied_hexes")
         cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
@@ -6035,8 +6096,16 @@ def _fight_consolidation_build_model_pool(
             if tier_kind == "enemy" and str(eid) in closest:
                 target_entries.append(entry)
                 target_fps.append(cells)
-        elif str(eid) != squad_id:
-            other_occupied |= cells
+        if str(eid) == squad_id:
+            continue  # coéquipières traitées à part (positions provisoires)
+        by_model = entry.get("occupied_hexes_by_model")
+        if by_model:
+            for mc, mr in by_model.values():
+                blocker_socles.append(Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
+                    col=int(mc), row=int(mr), fp={(int(mc), int(mr))}))
+        else:
+            blocker_socles.append(Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
+                col=int(entry["col"]), row=int(entry["row"]), fp=cells))
     if tier_kind == "enemy" and not target_entries:
         return empty
     if tier_kind == "zone" and not zone_set:
@@ -6044,27 +6113,24 @@ def _fight_consolidation_build_model_pool(
 
     fp_offset_pair = _charge_prepare_footprint_offsets(unit, game_state)
 
-    # Coéquipières : collision (le plan provisoire override les figs déjà posées).
-    same_squad_occupied: Set[Tuple[int, int]] = set()
+    # Coéquipières (collision euclidienne) : le plan provisoire override les figs déjà posées.
+    sib_socles: List[Any] = []
     squad_models = require_key(game_state, "squad_models")
     for mid in require_key(squad_models, squad_id):
         if str(mid) == str(model_id):
             continue
+        sib = models_cache.get(str(mid))
+        if sib is None:
+            continue
         if provisional_plan and str(mid) in provisional_plan:
             pc, pr = provisional_plan[str(mid)]
-            sib_fp = _candidate_footprint_charge(int(pc), int(pr), unit, game_state, fp_offset_pair)
         else:
-            sib = models_cache.get(str(mid))
-            if sib is None:
-                continue
-            sib_fp = _candidate_footprint_charge(
-                int(sib["col"]), int(sib["row"]), unit, game_state, fp_offset_pair
-            )
-        same_squad_occupied |= sib_fp
+            pc, pr = int(sib["col"]), int(sib["row"])
+        sib_socles.append(_charge_model_socle(game_state, sib, int(pc), int(pr)))
 
-    # 03.01 : traverse les amies, PAS les ennemies ni les murs ; FIN sur aucune fig ni mur.
-    path_blocked = set(wall_hexes) | enemy_occupied
-    end_blocked = path_blocked | other_occupied | same_squad_occupied
+    # 03.01 : traverse les amies, PAS les ennemies ni les murs (traversée BFS = cellules).
+    wall_set = set(wall_hexes)
+    path_blocked = wall_set | enemy_occupied
 
     start_col, start_row = int(model["col"]), int(model["row"])
     start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_offset_pair)
@@ -6096,8 +6162,13 @@ def _fight_consolidation_build_model_pool(
         cand_fp = _candidate_footprint_charge(cc, rr, unit, game_state, fp_offset_pair)
         if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
             continue
-        if cand_fp & end_blocked:
-            continue
+        if cand_fp & wall_set:
+            continue  # finir sur un mur interdit (cellules)
+        cand_socle = _charge_model_socle(game_state, model, int(cc), int(rr))
+        if any(footprints_overlap(cand_socle, b) for b in blocker_socles):
+            continue  # chevauchement ennemi / autre unité amie (euclidien officiel, tangence OK)
+        if any(footprints_overlap(cand_socle, b) for b in sib_socles):
+            continue  # chevauchement coéquipière (idem)
         if tier_kind == "enemy":
             d_min = min(
                 min_distance_between_sets(cand_fp, tfp, max_distance=start_min) for tfp in target_fps
@@ -7222,6 +7293,18 @@ def _fight_v11_manual_step(
             _fight_v11_clear_consolidation_preview(game_state)
             return _fight_v11_manual_state(game_state)
 
+        if atype == "cancel_consolidation":
+            # Annulation du plan en cours : désélectionne l'unité SANS la consommer (elle reste
+            # éligible/sélectionnable) et purge le preview + les sélections engaging/objective.
+            if act_uid is not None:
+                game_state["active_fight_unit"] = None
+                _fight_v11_log(
+                    game_state,
+                    f"CONSOLIDATE unit {act_uid} → annulation (unité reste sélectionnable)",
+                )
+            _fight_v11_clear_consolidation_preview(game_state)
+            return _fight_v11_manual_state(game_state)
+
         if atype == "activate_unit" and uid in eligible:
             # Sélection d'une unité à consolider → repart d'une sélection vierge + plan par-figurine.
             u = get_unit_by_id(game_state, uid)
@@ -7290,6 +7373,12 @@ def _fight_v11_manual_step(
             return True, _fight_consolidation_model_plan_state(
                 game_state, u, _prov_from_action(), str(sel) if sel is not None else None
             )
+
+        if atype == "consolidate_autoplace":
+            # Focus off./déf. : auto-placement ILP conforme 12.08 (ongoing → pile-in ; engaging → charge).
+            mode = str(action.get("mode", "defensive"))
+            out = consolidate_autoplace_plan(game_state, act_uid, mode=mode)
+            return True, {"action": "consolidate_autoplace", "unitId": act_uid, **out}
 
         if atype == "commit_consolidation_plan":
             mode, tier = _fight_v11_consolidation_targets(game_state, u)
