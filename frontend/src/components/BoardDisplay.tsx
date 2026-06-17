@@ -210,6 +210,10 @@ export function computeDrawBoardPartialRedrawFingerprint(
   const usePileInPoolLikeMoveHoisted =
     interactionPhase === "fight" && (mode === "pileInPreview" || mode === "consolidationPreview");
   const useConsolidationPreview = interactionPhase === "fight" && mode === "consolidationPreview";
+  /** Move par-figurine « charge-like » en phase fight : pile-in OU consolidation (même pipeline). */
+  const isPerFigChargeLikeMove =
+    interactionPhase === "fight" &&
+    (mode === "pileInModelMove" || mode === "consolidationModelMove");
 
   const spanFromEngine =
     typeof movePreviewFootprintSpanFromState === "number" &&
@@ -250,8 +254,8 @@ export function computeDrawBoardPartialRedrawFingerprint(
   const useChargeDestPoolDiskDraw =
     ((interactionPhase === "charge" &&
       (mode === "select" || mode === "chargePreview" || mode === "chargeModelMove")) ||
-      // Pile-in par-figurine (phase fight) : zone de landing rendue comme la charge par-fig.
-      (interactionPhase === "fight" && mode === "pileInModelMove")) &&
+      // Pile-in / consolidation par-figurine (phase fight) : zone de landing rendue comme la charge par-fig.
+      isPerFigChargeLikeMove) &&
     !!chargeDestPoolRef?.current &&
     chargeDestPoolRef.current.size > 0;
 
@@ -2333,6 +2337,10 @@ export const drawBoard = (
     // pas un remplissage hex-par-hex de move_preview_footprint_zone (blob « hex géant » si BASE_SIZE
     // tuple/oval et selectedUnitBaseSize était undefined).
     const useConsolidationPreview = interactionPhase === "fight" && mode === "consolidationPreview";
+    /** Move par-figurine « charge-like » en phase fight : pile-in OU consolidation (même pipeline). */
+    const isPerFigChargeLikeMove =
+      interactionPhase === "fight" &&
+      (mode === "pileInModelMove" || mode === "consolidationModelMove");
     const availableCellsDrawColor = useAdvanceMovePoolLikeMove
       ? advanceZoneFillColor
       : usePileInPoolLikeMoveHoisted
@@ -2344,8 +2352,8 @@ export const drawBoard = (
     const useChargeDestPoolDiskDraw =
       ((interactionPhase === "charge" &&
         (mode === "select" || mode === "chargePreview" || mode === "chargeModelMove")) ||
-        // Pile-in par-figurine (phase fight) : zone de landing rendue comme la charge par-fig.
-        (interactionPhase === "fight" && mode === "pileInModelMove")) &&
+        // Pile-in / consolidation par-figurine (phase fight) : zone de landing rendue comme la charge par-fig.
+        isPerFigChargeLikeMove) &&
       chargeDestPoolRef?.current &&
       chargeDestPoolRef.current.size > 0;
 
@@ -2495,7 +2503,7 @@ export const drawBoard = (
       // ``availableCells`` contient les mêmes hexes → les redessiner ici en disques rayon-hex crée la
       // couche festonnée parallèle (la vraie cause du « toujours pareil »). On la supprime ici.
       const cellsForHighlight =
-        moveOrAdvanceNoAnchors || mode === "chargeModelMove" || mode === "pileInModelMove"
+        moveOrAdvanceNoAnchors || mode === "chargeModelMove" || isPerFigChargeLikeMove
           ? []
           : availableCells;
       drawGroup(cellsForHighlight, availableCellsDrawColor, 0.4, false, availableCellCircleR);
@@ -2534,7 +2542,7 @@ export const drawBoard = (
       }
     }
     if (
-      (mode === "chargeModelMove" || mode === "pileInModelMove") &&
+      (mode === "chargeModelMove" || isPerFigChargeLikeMove) &&
       useChargeDestPoolDiskDraw &&
       chargeDestPoolRef?.current
     ) {
