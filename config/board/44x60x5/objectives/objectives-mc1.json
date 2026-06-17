@@ -1,6 +1,0 @@
-{
-  "objectives_id": "objectives-mc1",
-  "objectives": [
-    { "id": 1, "name": "Chateau NO (zone P1)", "shape": "disc", "center": [55, 60], "diameter": 15 }
-  ]
-}
