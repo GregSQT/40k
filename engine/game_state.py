@@ -13,13 +13,12 @@ import re
 from shared.data_validation import ConfigurationError, require_key
 from engine.combat_utils import normalize_coordinates, get_unit_coordinates, resolve_dice_value
 from engine.phase_handlers.shared_utils import is_unit_alive
-from engine.hex_utils import expand_objectives_to_hex_list, expand_wall_group_to_hex_list, polygon_to_hex_list
+from engine.hex_utils import expand_wall_group_to_hex_list, polygon_to_hex_list
 
 # PERF: In-memory caches to avoid repeated disk I/O during scenario rotation.
 _scenario_json_cache: Dict[str, Any] = {}
 _walls_json_cache: Dict[str, List[List[int]]] = {}
 _walls_json_mtime_ns: Dict[str, int] = {}
-_objectives_json_cache: Dict[str, List[Dict[str, Any]]] = {}
 
 # Keywords granting the "hideable" property (Benefit of Cover / Hidden rules 13.08-13.09).
 _HIDEABLE_KEYWORDS = ("infantry", "beast", "swarm")
@@ -267,29 +266,16 @@ class GameStateManager:
                         scenario_data["terrain_ref"], scenario_file
                     )
 
-                has_objectives_inline = "objectives" in scenario_data
-                has_objective_hexes_legacy = "objective_hexes" in scenario_data
-                has_objectives_ref = "objectives_ref" in scenario_data
-                if has_objectives_ref and (has_objectives_inline or has_objective_hexes_legacy):
-                    raise ValueError(
-                        f"Scenario file {scenario_file} cannot define both objectives inline and 'objectives_ref'"
-                    )
-                if has_objectives_ref:
-                    resolved_scenario_objectives = self._load_shared_objectives_from_ref(
-                        require_key(scenario_data, "objectives_ref"),
-                        scenario_file
-                    )
-                elif has_objectives_inline:
-                    from config_loader import get_config_loader
-                    cols, rows = get_config_loader().get_board_size()
-                    resolved_scenario_objectives = expand_objectives_to_hex_list(
-                        require_key(scenario_data, "objectives"),
-                        cols=cols,
-                        rows=rows,
-                        path_hint=f"Scenario file {scenario_file} objectives",
-                    )
-                elif has_objective_hexes_legacy:
-                    resolved_scenario_objectives = require_key(scenario_data, "objective_hexes")
+                # Objectifs : source UNIQUE = terrains "objective": true (14.01/14.02).
+                # L'ancien système (objectives_ref / objectives inline / objective_hexes)
+                # est supprimé — toute clé legacy est une erreur explicite, pas un fallback.
+                for legacy_key in ("objectives", "objectives_ref", "objective_hexes"):
+                    if legacy_key in scenario_data:
+                        raise ValueError(
+                            f"Scenario file {scenario_file} uses removed objective key "
+                            f"'{legacy_key}'. Objectives are now sourced exclusively from terrain "
+                            f"areas flagged \"objective\": true (see terrain_ref)."
+                        )
 
                 has_deployment_zone = "deployment_zone" in scenario_data
                 has_deployment_type = "deployment_type" in scenario_data
@@ -332,6 +318,14 @@ class GameStateManager:
                             f"in {scenario_file} (expected one of {valid_deployment_types})"
                         )
             
+            # Objectifs runtime {id, hexes} dérivés des terrains "objective": true.
+            # Aucun terrain objectif → liste vide (zéro objectif), pas de fallback.
+            resolved_scenario_objectives = [
+                {"id": area["id"], "name": area.get("name", area["id"]), "hexes": area["hexes"]}
+                for area in (resolved_terrain_areas or [])
+                if area.get("objective")
+            ]
+
             wall_hex_set = set()
             if resolved_scenario_walls is not None:
                 wall_hex_set = {(int(col), int(row)) for col, row in resolved_scenario_walls}
@@ -1342,58 +1336,13 @@ class GameStateManager:
             poly = [[int(v[0]), int(v[1])] for v in vertices]
             areas.append({
                 "id": area_id,
+                "name": area.get("name", area_id),
                 "obscuring": bool(area.get("obscuring", False)),
+                "objective": bool(area.get("objective", False)),
                 "polygon_vertices": poly,
                 "hexes": polygon_to_hex_list(poly, cols, rows),
             })
         return areas
-
-    def _load_shared_objectives_from_ref(self, objectives_ref: Any, scenario_file: str) -> List[Dict[str, Any]]:
-        """Load shared objectives file referenced by scenario objectives_ref."""
-        if isinstance(objectives_ref, str) and objectives_ref.strip() == "random":
-            scenario_parent = Path(scenario_file).parent
-            if scenario_parent.name != "scenario":
-                raise ValueError(
-                    f"Scenario '{scenario_file}' must be in 'config/board/<board>/scenario/' to use random objectives_ref"
-                )
-            project_root = Path(__file__).resolve().parent.parent
-            objectives_dir = project_root / scenario_parent.parent / "objectives"
-            candidates = sorted(objectives_dir.glob("objectives-*.json"))
-            if not candidates:
-                raise FileNotFoundError(f"No objectives-*.json files found in {objectives_dir} for random objectives_ref in scenario {scenario_file}")
-            import random as _random
-            objectives_ref = _random.choice(candidates).stem
-        objectives_path = self._resolve_shared_config_path(
-            "_objectives",
-            objectives_ref,
-            scenario_file,
-            "objectives_ref"
-        )
-        cache_key = str(objectives_path)
-        if cache_key in _objectives_json_cache:
-            return copy.deepcopy(_objectives_json_cache[cache_key])
-        if not objectives_path.exists():
-            raise FileNotFoundError(
-                f"Shared objectives file not found for scenario {scenario_file}: {objectives_path}"
-            )
-        try:
-            with open(objectives_path, "r", encoding="utf-8-sig") as f:
-                objectives_data = json.load(f)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in shared objectives file {objectives_path}: {e}")
-        if not isinstance(objectives_data, dict):
-            raise ValueError(f"Shared objectives file {objectives_path} must be JSON object")
-        objectives = require_key(objectives_data, "objectives")
-        from config_loader import get_config_loader
-        cols, rows = get_config_loader().get_board_size()
-        expanded_objectives = expand_objectives_to_hex_list(
-            objectives,
-            cols=cols,
-            rows=rows,
-            path_hint=f"Shared objectives file {objectives_path}",
-        )
-        _objectives_json_cache[cache_key] = copy.deepcopy(expanded_objectives)
-        return expanded_objectives
 
     def _resolve_shared_config_path(
         self,

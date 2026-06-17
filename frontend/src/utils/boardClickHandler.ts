@@ -37,6 +37,9 @@ export function setupBoardClickHandler(callbacks: {
   // Pile-in par-figurine (V11 12.04, mode fin type charge)
   onMovePileInModel?(modelId: string, col: number, row: number): void;
   onCancelPileInModelMove?(): void;
+  // Consolidation par-figurine (V11 12.08, miroir pile-in)
+  onMoveConsolidationModel?(modelId: string, col: number, row: number): void;
+  onCancelConsolidationModelMove?(): void;
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action callbacks
   onAdvanceMove?(unitId: UnitId, destCol: number, destRow: number): void;
   onDeployUnit?(unitId: UnitId, destCol: number, destRow: number): void;
@@ -160,6 +163,13 @@ export function setupBoardClickHandler(callbacks: {
       // Clic sur une unité ne doit PAS retomber sur onSelectUnit. Clic droit sur l'unité = annuler.
       if (clickType === "right" && selectedUnitId === unitId) {
         callbacks.onCancelPileInModelMove?.();
+      }
+      return; // Prevent fallthrough to other handlers
+    } else if (phase === "fight" && mode === "consolidationModelMove") {
+      // Consolidation par-figurine (miroir pile-in) : sélection/pose/sélection-cible gérées par les
+      // handlers canvas. Clic droit sur l'unité active = annuler.
+      if (clickType === "right" && selectedUnitId === unitId) {
+        callbacks.onCancelConsolidationModelMove?.();
       }
       return; // Prevent fallthrough to other handlers
     } else if (phase === "charge" && mode === "chargePreview" && selectedUnitId !== null) {
@@ -314,6 +324,13 @@ export function setupBoardClickHandler(callbacks: {
       // Plan de pile-in par-figurine : pose la fig active a l'hex clique (dans son pool ≤3").
       if (activeModelId && callbacks.onMovePileInModel) {
         callbacks.onMovePileInModel(activeModelId, col, row);
+      }
+      return;
+    }
+    if (mode === "consolidationModelMove") {
+      // Plan de consolidation par-figurine : pose la fig active a l'hex clique (dans son pool ≤3").
+      if (activeModelId && callbacks.onMoveConsolidationModel) {
+        callbacks.onMoveConsolidationModel(activeModelId, col, row);
       }
       return;
     }

@@ -1,7 +1,6 @@
 {
   "primary_objectives": ["objectives_control"],
   "wall_ref": "walls-11.json",
-  "objectives_ref": "objectives-51.json",
   "units": [
     { "id": 3, "unit_type": "DreadnoughtBallistus", "player": 1, "col": 21, "row": 17 },
     { "id": 5, "unit_type": "Intercessor", "player": 1, "col": 17, "row": 11 },

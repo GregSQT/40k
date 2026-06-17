@@ -2,7 +2,7 @@
   "_comment": "Roster de test phase FIGHT V11 (Documentation/phase_fight_v11.md) — board 44x60x5 (220x300, scale 5). 4 couloirs P1 vs P2 couvrant la matrice mono/multi-figurine x fly/non-fly, paires a ~30 sous-hex (6\") = a portee de charge mais non engagees, pour derouler charge -> Fights First -> pile-in -> fight -> consolidate. Sauvegarde de l'ancien roster : scenario_pvp_test.bak.json. walls-none pour ne pas gener le BFS pile-in/consolidation ; objectives-51 pour tester la consolidation Objective (couloir D pres de l'objectif South).",
   "primary_objectives": ["objectives_control"],
   "wall_ref": "walls-none.json",
-  "objectives_ref": "objectives-51.json",
+  "terrain_ref": "terrain-mc1.json",
   "units": [
     {
       "_lane": "A - mono-fig, NO fly (Intercessor base unique)",

@@ -481,6 +481,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     | "pileInPreview"
     | "pileInModelMove"
     | "consolidationPreview"
+    | "consolidationModelMove"
   >("select");
   const [movePreview, setMovePreview] = useState<{
     unitId: number;
@@ -611,6 +612,47 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const pileInModelPoolRef = useRef<Set<string>>(new Set());
   /** Mask loops (polygone lissé monde) de la zone de landing de la fig pile-in active. */
   const pileInModelMaskLoopsRef = useRef<number[][] | null>(null);
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // CONSOLIDATION PAR-FIGURINE (V11 12.08, miroir pile-in). Cascade 3 modes :
+  // ongoing / engaging (sélection de cibles d'abord) / objective (sélection objectif si >1).
+  // ──────────────────────────────────────────────────────────────────────────
+  const [consolidationMovePlan, setConsolidationMovePlan] = useState<{
+    unitId: number;
+    models: Record<string, { col: number; row: number }>;
+    eligibleModels: string[];
+    unplaced: string[];
+    activeModelId: string | null;
+    canValidate: boolean;
+    perModelValid: Record<string, boolean>;
+    coherencyOk: boolean;
+    unitEngaged: boolean;
+    keptEngagements: boolean;
+    engagedWithAllSelected: boolean;
+    withinObjectiveRange: boolean;
+    engagedModels: string[];
+    /** Mode imposé par la cascade 12.08 (ongoing|engaging|objective). */
+    consolidationMode: string | null;
+    /** Engaging : ennemis candidats (≤3") cliquables ; sélectionnés = consolidation_targets. */
+    engagingCandidates: string[];
+    /** Objective : objectifs candidats (≤3") cliquables. */
+    objectiveCandidates: string[];
+    /** Cibles ennemies du palier (info). */
+    consolidationTargets: string[];
+    /** Sélection préalable requise (Engaging) / objectif requis (Objective >1 candidat). */
+    awaitingTargetSelection: boolean;
+    awaitingObjectiveSelection: boolean;
+  } | null>(null);
+  const consolidationMovePlanRef = useRef<typeof consolidationMovePlan>(null);
+  consolidationMovePlanRef.current = consolidationMovePlan;
+  /** Pool (hexes "col,row") de la fig de consolidation active. */
+  const consolidationModelPoolRef = useRef<Set<string>>(new Set());
+  /** Mask loops (polygone lissé monde) de la zone de la fig de consolidation active. */
+  const consolidationModelMaskLoopsRef = useRef<number[][] | null>(null);
+  /** New Foes to Face (12.08 engaging AFTER) présentés à l'adversaire (sélecteur). */
+  const [consolidationNewFoes, setConsolidationNewFoes] = useState<string[]>([]);
+  const consolidationNewFoesRef = useRef<string[]>([]);
+  consolidationNewFoesRef.current = consolidationNewFoes;
   /**
    * Tir par-figurine (PvP manuel) — plan provisoire de cibles assignées par fig.
    * ``targets`` : model_id -> squad_id ennemi assigné (cible de cette fig pour la phase).
@@ -2575,6 +2617,43 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setMode("pileInModelMove");
             applyPileInPlanState(data.result as Record<string, unknown>);
           }
+          // Fight phase : CONSOLIDATION PAR-FIGURINE (V11 12.08, miroir pile-in). La réponse
+          // d'activate_unit / des refresh porte ``consolidation_model_move:true`` → on entre/maintient
+          // le mode et on applique le plan_state (cascade ongoing/engaging/objective).
+          else if (data.game_state?.phase === "fight" && data.result?.consolidation_model_move === true) {
+            const uid = parseInt(
+              String(data.result.unitId ?? data.game_state.active_fight_unit),
+              10
+            );
+            setPileInDestinations([]);
+            moveDestPoolRef.current = new Set();
+            footprintZoneRef.current = new Set();
+            footprintMaskLoopsRef.current = null;
+            setConsolidationNewFoes([]);
+            setSelectedUnitId(uid);
+            setMode("consolidationModelMove");
+            applyConsolidationPlanState(data.result as Record<string, unknown>);
+          }
+          // Fight phase : « New Foes to Face » (12.08 engaging AFTER) — l'adversaire doit faire
+          // combattre les ennemis nouvellement engagés. Pool = consolidation_new_foes ; on réutilise
+          // le flux FIGHT (sélection pool → activate_unit ; cible → résolution + allocation).
+          else if (
+            data.game_state?.phase === "fight" &&
+            Array.isArray(data.result?.consolidation_new_foes)
+          ) {
+            const foes = (data.result.consolidation_new_foes as unknown[]).map((m) => String(m));
+            setConsolidationNewFoes(foes);
+            setConsolidationMovePlan(null);
+            consolidationModelPoolRef.current = new Set();
+            consolidationModelMaskLoopsRef.current = null;
+            setPileInDestinations([]);
+            moveDestPoolRef.current = new Set();
+            footprintZoneRef.current = new Set();
+            footprintMaskLoopsRef.current = null;
+            const af = data.result.active_fight_unit ?? data.game_state.active_fight_unit;
+            setSelectedUnitId(af != null ? parseInt(String(af), 10) : null);
+            setMode("select");
+          }
           // Fight phase : pile in avant sélection de cible CC
           else if (
             data.game_state?.phase === "fight" &&
@@ -2622,6 +2701,27 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             data.game_state?.fight_subphase === "pile_in" &&
             !data.result?.waiting_for_pile_in
           ) {
+            setPileInDestinations([]);
+            moveDestPoolRef.current = new Set();
+            footprintZoneRef.current = new Set();
+            footprintMaskLoopsRef.current = null;
+            setSelectedUnitId(null);
+            setMode("select");
+          }
+          // Fight : sous-phase consolidate SANS unité active (présentation paresseuse, miroir pile_in).
+          // Pool éligible exposé par le moteur (sélection libre → activate_unit). On nettoie les
+          // aperçus résiduels et on reste en sélection.
+          else if (
+            data.game_state?.phase === "fight" &&
+            data.game_state?.fight_subphase === "consolidate" &&
+            data.result?.consolidation_model_move !== true &&
+            !Array.isArray(data.result?.consolidation_new_foes) &&
+            !data.result?.waiting_for_consolidation
+          ) {
+            setConsolidationMovePlan(null);
+            consolidationModelPoolRef.current = new Set();
+            consolidationModelMaskLoopsRef.current = null;
+            setConsolidationNewFoes([]);
             setPileInDestinations([]);
             moveDestPoolRef.current = new Set();
             footprintZoneRef.current = new Set();
@@ -2761,6 +2861,31 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               }
               setBlinkingUnits({ unitIds: [], blinkTimer: null, attackerId: null });
             }
+          }
+          // Unité fight activée SANS cible (ex: a chargé, cible morte avant son activation) :
+          // on entre quand même en attackPreview pour permettre de la PASSER (clic droit →
+          // skip backend gardé). Sans ce cas, l'unité reste active sans aucun mode → cul-de-sac
+          // (cercle vert persistant, impossible à traiter).
+          else if (
+            data.game_state?.phase === "fight" &&
+            data.result?.waiting_for_player === true &&
+            data.game_state?.active_fight_unit != null &&
+            Array.isArray(data.result.valid_targets) &&
+            data.result.valid_targets.length === 0 &&
+            !data.result.activation_ended
+          ) {
+            setPileInDestinations([]);
+            if (targetPreview?.blinkTimer) {
+              clearInterval(targetPreview.blinkTimer);
+            }
+            setTargetPreview(null);
+            setSelectedUnitId(parseInt(String(data.game_state.active_fight_unit), 10));
+            setMode("attackPreview");
+            setAttackPreview(null);
+            if (blinkingUnits.blinkTimer) {
+              clearInterval(blinkingUnits.blinkTimer);
+            }
+            setBlinkingUnits({ unitIds: [], blinkTimer: null, attackerId: null });
           }
           // Handle fight phase completion (ATTACK_LEFT = 0, activation_ended)
           else if (data.game_state?.phase === "fight" && data.result?.activation_ended) {
@@ -5977,6 +6102,247 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setMode("select");
   }, [executeAction]);
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // CONSOLIDATION PAR-FIGURINE (V11 12.08, miroir pile-in). active_fight_unit posée
+  // par activate_unit → pas d'unitId dans les actions de plan. Sélection préalable
+  // (engaging/objective) via consolidation_select_target / consolidation_select_objective.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /** Applique une réponse consolidation_model_move (plan_state) : voile + pool fig + état cascade. */
+  const applyConsolidationPlanState = useCallback((result: Record<string, unknown>) => {
+    const eligibleModels = ((result.eligible_models ?? []) as unknown[]).map((m) => String(m));
+    const poolArr = (result.pool ?? []) as Array<[number, number]>;
+    const maskLoopsRaw = result.footprint_mask_loops;
+    const unplaced = ((result.unplaced ?? []) as unknown[]).map((m) => String(m));
+    const canValidate = result.can_validate === true;
+    const selectedModel = result.selected_model != null ? String(result.selected_model) : null;
+    const perModelValid = (result.per_model_valid ?? {}) as Record<string, boolean>;
+    const coherencyOk = result.coherency_ok === true;
+    const unitEngaged = result.unit_engaged === true;
+    const keptEngagements = result.kept_engagements === true;
+    const engagedWithAllSelected = result.engaged_with_all_selected === true;
+    const withinObjectiveRange = result.within_objective_range === true;
+    const engagedModels = ((result.engaged_models ?? []) as unknown[]).map((m) => String(m));
+    const consolidationMode =
+      result.consolidation_mode != null ? String(result.consolidation_mode) : null;
+    const engagingCandidates = ((result.engaging_candidates ?? []) as unknown[]).map((m) => String(m));
+    const objectiveCandidates = ((result.objective_candidates ?? []) as unknown[]).map((m) =>
+      String(m)
+    );
+    const consolidationTargets = ((result.consolidation_targets ?? []) as unknown[]).map((m) =>
+      String(m)
+    );
+    const awaitingTargetSelection = result.awaiting_target_selection === true;
+    const awaitingObjectiveSelection = result.awaiting_objective_selection === true;
+    setConsolidationMovePlan((prev) => {
+      const base = prev ?? {
+        unitId: parseInt(String(result.unitId), 10),
+        models: Object.fromEntries(
+          Object.entries((result.provisional ?? {}) as Record<string, [number, number]>).map(
+            ([m, p]) => [m, { col: Number(p[0]), row: Number(p[1]) }]
+          )
+        ),
+        eligibleModels: [],
+        unplaced: [],
+        activeModelId: null,
+        canValidate: false,
+        perModelValid: {} as Record<string, boolean>,
+        coherencyOk: false,
+        unitEngaged: false,
+        keptEngagements: false,
+        engagedWithAllSelected: false,
+        withinObjectiveRange: false,
+        engagedModels: [] as string[],
+        consolidationMode: null as string | null,
+        engagingCandidates: [] as string[],
+        objectiveCandidates: [] as string[],
+        consolidationTargets: [] as string[],
+        awaitingTargetSelection: false,
+        awaitingObjectiveSelection: false,
+      };
+      const active =
+        selectedModel != null && eligibleModels.includes(selectedModel)
+          ? selectedModel
+          : base.activeModelId && eligibleModels.includes(base.activeModelId)
+            ? base.activeModelId
+            : null;
+      const pool = new Set<string>();
+      if (active != null && active === selectedModel) {
+        for (const [c, r] of poolArr) pool.add(`${Number(c)},${Number(r)}`);
+      }
+      consolidationModelPoolRef.current = pool;
+      consolidationModelMaskLoopsRef.current =
+        active != null && active === selectedModel && Array.isArray(maskLoopsRaw)
+          ? (maskLoopsRaw as number[][])
+          : null;
+      return {
+        ...base,
+        eligibleModels,
+        unplaced,
+        canValidate,
+        activeModelId: active,
+        perModelValid,
+        coherencyOk,
+        unitEngaged,
+        keptEngagements,
+        engagedWithAllSelected,
+        withinObjectiveRange,
+        engagedModels,
+        consolidationMode,
+        engagingCandidates,
+        objectiveCandidates,
+        consolidationTargets,
+        awaitingTargetSelection,
+        awaitingObjectiveSelection,
+      };
+    });
+  }, []);
+
+  /** Lecture pure : recalcule l'état du plan de consolidation depuis le backend. */
+  const refreshConsolidationPlanState = useCallback(
+    async (
+      models: Record<string, { col: number; row: number }>,
+      selectedModel: string | null = null
+    ) => {
+      const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row]);
+      const action: Record<string, unknown> = { action: "consolidation_plan_state", plan };
+      if (selectedModel != null) action.selected_model = selectedModel;
+      const result = await postEngineQuery(action);
+      if (!result) throw new Error("consolidation_plan_state: réponse vide");
+      applyConsolidationPlanState(result);
+    },
+    [postEngineQuery, applyConsolidationPlanState]
+  );
+
+  /** Engaging : toggle d'un ennemi candidat (≤3") avant le move (consolidation_select_target). */
+  const handleConsolidationSelectTarget = useCallback(
+    async (targetId: number | string) => {
+      const plan = consolidationMovePlanRef.current;
+      if (!plan) return;
+      const tid = String(targetId);
+      if (!plan.engagingCandidates.includes(tid)) return;
+      const planArr = Object.entries(plan.models).map(([mid, p]) => [mid, p.col, p.row]);
+      const result = await postEngineQuery({
+        action: "consolidation_select_target",
+        targetId: tid,
+        plan: planArr,
+        selected_model: plan.activeModelId,
+      });
+      if (!result) throw new Error("consolidation_select_target: réponse vide");
+      applyConsolidationPlanState(result);
+    },
+    [postEngineQuery, applyConsolidationPlanState]
+  );
+
+  /** Objective : single-select d'un objectif candidat (consolidation_select_objective). */
+  const handleConsolidationSelectObjective = useCallback(
+    async (objectiveId: number | string) => {
+      const plan = consolidationMovePlanRef.current;
+      if (!plan) return;
+      const oid = String(objectiveId);
+      if (!plan.objectiveCandidates.includes(oid)) return;
+      const planArr = Object.entries(plan.models).map(([mid, p]) => [mid, p.col, p.row]);
+      const result = await postEngineQuery({
+        action: "consolidation_select_objective",
+        objectiveId: oid,
+        plan: planArr,
+        selected_model: plan.activeModelId,
+      });
+      if (!result) throw new Error("consolidation_select_objective: réponse vide");
+      applyConsolidationPlanState(result);
+    },
+    [postEngineQuery, applyConsolidationPlanState]
+  );
+
+  /** Clic sur une fig éligible : la rend active + demande SON pool au backend. */
+  const handleSelectConsolidationModel = useCallback(
+    (modelId: string) => {
+      const plan = consolidationMovePlanRef.current;
+      if (!plan?.eligibleModels.includes(modelId)) return;
+      consolidationModelPoolRef.current = new Set();
+      consolidationModelMaskLoopsRef.current = null;
+      setConsolidationMovePlan((prev) => (prev ? { ...prev, activeModelId: modelId } : prev));
+      void refreshConsolidationPlanState(plan.models, modelId);
+    },
+    [refreshConsolidationPlanState]
+  );
+
+  /** Pose la fig active à (col,row) (dans son pool) → MAJ plan + re-plan_state. */
+  const handleMoveConsolidationModel = useCallback(
+    (modelId: string, col: number, row: number) => {
+      if (!consolidationModelPoolRef.current.has(`${col},${row}`)) return;
+      consolidationModelPoolRef.current = new Set();
+      consolidationModelMaskLoopsRef.current = null;
+      setConsolidationMovePlan((prev) => {
+        if (!prev) return prev;
+        const models = { ...prev.models, [modelId]: { col, row } };
+        void refreshConsolidationPlanState(models, null);
+        return { ...prev, models, activeModelId: null };
+      });
+    },
+    [refreshConsolidationPlanState]
+  );
+
+  /** Clic sur une fig DÉJÀ POSÉE : la retire du plan pour la repositionner. */
+  const handleUnplaceConsolidationModel = useCallback(
+    (modelId: string) => {
+      setConsolidationMovePlan((prev) => {
+        if (!prev?.models[modelId]) return prev;
+        const models = { ...prev.models };
+        delete models[modelId];
+        void refreshConsolidationPlanState(models, modelId);
+        return { ...prev, models, activeModelId: modelId };
+      });
+    },
+    [refreshConsolidationPlanState]
+  );
+
+  /** Bouton Valider la consolidation : commit atomique (commit_consolidation_plan). */
+  const handleCommitConsolidationPlan = useCallback(async () => {
+    const plan = consolidationMovePlanRef.current;
+    if (!plan?.canValidate) return;
+    const planArr = Object.entries(plan.models).map(([mid, p]) => [mid, p.col, p.row]);
+    try {
+      await executeAction({ action: "commit_consolidation_plan", plan: planArr });
+      consolidationModelPoolRef.current = new Set();
+      consolidationModelMaskLoopsRef.current = null;
+      setConsolidationMovePlan(null);
+      setSelectedUnitId(null);
+      setMode("select");
+    } catch (e) {
+      console.error("[CONSOLIDATION] commit FAILED", e);
+      setError(`Consolidation failed: ${formatApiConnectionError(e)}`);
+    }
+  }, [executeAction]);
+
+  /** Bouton Annuler : renonce à consolider l'unité active (skip), nettoie le plan local. */
+  const handleCancelConsolidationModelMove = useCallback(async () => {
+    consolidationModelPoolRef.current = new Set();
+    consolidationModelMaskLoopsRef.current = null;
+    setConsolidationMovePlan(null);
+    try {
+      await executeAction({ action: "skip" });
+    } catch (e) {
+      console.error("Cancel consolidation model move (skip) failed:", e);
+    }
+    setSelectedUnitId(null);
+    setMode("select");
+  }, [executeAction]);
+
+  /** Bouton « Terminer la consolidation » : marque le groupe traité (end_consolidation). */
+  const handleEndConsolidation = useCallback(async () => {
+    consolidationModelPoolRef.current = new Set();
+    consolidationModelMaskLoopsRef.current = null;
+    setConsolidationMovePlan(null);
+    try {
+      await executeAction({ action: "end_consolidation" });
+    } catch (e) {
+      console.error("End consolidation failed:", e);
+    }
+    setSelectedUnitId(null);
+    setMode("select");
+  }, [executeAction]);
+
   const handleStartTargetPreview = useCallback(
     async (shooterId: number | string, targetId: number | string) => {
       const numericShooterId = typeof shooterId === "number" ? shooterId : parseInt(shooterId, 10);
@@ -6427,6 +6793,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onCancelPileInModelMove: async () => {},
       onSetPileInFocus: (_mode: "defensive" | "offensive") => {},
       onPileInFocusTargetClick: async () => {},
+      consolidationMovePlan: null,
+      consolidationModelPoolRef,
+      consolidationModelMaskLoopsRef,
+      consolidationNewFoes: [] as string[],
+      onSelectConsolidationModel: () => {},
+      onMoveConsolidationModel: () => {},
+      onUnplaceConsolidationModel: () => {},
+      onCommitConsolidationPlan: async () => {},
+      onCancelConsolidationModelMove: async () => {},
+      onEndConsolidation: async () => {},
+      onConsolidationSelectTarget: async () => {},
+      onConsolidationSelectObjective: async () => {},
       onSetAdvanceMode: async () => {},
       onTakeToSkies: async () => {},
       onStationary: async () => {},
@@ -6610,6 +6988,19 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onCancelPileInModelMove: handleCancelPileInModelMove,
     onSetPileInFocus: handleSetPileInFocus,
     onPileInFocusTargetClick: handlePileInFocusTargetClick,
+    // Consolidation par-figurine (V11 12.08, miroir pile-in)
+    consolidationMovePlan,
+    consolidationModelPoolRef,
+    consolidationModelMaskLoopsRef,
+    consolidationNewFoes,
+    onSelectConsolidationModel: handleSelectConsolidationModel,
+    onMoveConsolidationModel: handleMoveConsolidationModel,
+    onUnplaceConsolidationModel: handleUnplaceConsolidationModel,
+    onCommitConsolidationPlan: handleCommitConsolidationPlan,
+    onCancelConsolidationModelMove: handleCancelConsolidationModelMove,
+    onEndConsolidation: handleEndConsolidation,
+    onConsolidationSelectTarget: handleConsolidationSelectTarget,
+    onConsolidationSelectObjective: handleConsolidationSelectObjective,
     onSetAdvanceMode: handleSetAdvanceMode,
     onTakeToSkies: handleTakeToSkies,
     onStationary: handleStationary,

@@ -1065,103 +1065,6 @@ def _fight_unit_positions_for_observation_builder(game_state: Dict[str, Any]) ->
     return positions
 
 
-def _fight_resolve_objective_marker_center_hex(objective: Dict[str, Any]) -> Optional[Tuple[int, int]]:
-    """
-    Hex « marqueur » d'un objectif : centre déclaré (disque / config) ou médiode des ``hexes``
-    (liste explicite sans ``center``). Les autres hexes de ``hexes`` sont la zone de contrôle ;
-    la consolidation objectif se mesure vers ce marqueur, pas vers toute la zone.
-    """
-    center_raw = objective.get("center")
-    if center_raw is not None:
-        if isinstance(center_raw, (list, tuple)) and len(center_raw) >= 2:
-            c, r = normalize_coordinates(center_raw[0], center_raw[1])
-            return (int(c), int(r))
-        if isinstance(center_raw, dict):
-            c = require_key(center_raw, "col")
-            r = require_key(center_raw, "row")
-            nc, nr = normalize_coordinates(c, r)
-            return (int(nc), int(nr))
-    hexes = objective.get("hexes")
-    if not isinstance(hexes, (list, tuple)) or not hexes:
-        return None
-    coords: List[Tuple[int, int]] = []
-    for h in hexes:
-        if isinstance(h, (list, tuple)) and len(h) >= 2:
-            c, r = normalize_coordinates(h[0], h[1])
-            coords.append((int(c), int(r)))
-        elif isinstance(h, dict):
-            c = require_key(h, "col")
-            r = require_key(h, "row")
-            nc, nr = normalize_coordinates(c, r)
-            coords.append((int(nc), int(nr)))
-    if not coords:
-        return None
-    best: Optional[Tuple[int, int]] = None
-    best_sum: Optional[int] = None
-    for cand in coords:
-        s = 0
-        for o in coords:
-            s += calculate_hex_distance(cand[0], cand[1], o[0], o[1])
-        if best_sum is None or s < best_sum:
-            best_sum = s
-            best = cand
-    return best
-
-
-def _fight_closest_objective_marker_snapshot(
-    start_fp: Set[Tuple[int, int]],
-    marker_points: List[Tuple[int, int]],
-) -> Tuple[int, List[Tuple[int, int]]]:
-    """Distance minimale empreinte → hex marqueur, et liste des marqueurs à cette distance."""
-    from engine.hex_utils import min_distance_between_sets
-
-    if not marker_points:
-        raise ValueError("_fight_closest_objective_marker_snapshot: marker_points must be non-empty")
-    d_min: Optional[int] = None
-    closest: List[Tuple[int, int]] = []
-    for mc, mr in marker_points:
-        d = min_distance_between_sets(start_fp, {(mc, mr)})
-        if d_min is None or d < d_min:
-            d_min = d
-            closest = [(mc, mr)]
-        elif d == d_min and (mc, mr) not in closest:
-            closest.append((mc, mr))
-    assert d_min is not None
-    return int(d_min), closest
-
-
-def _fight_new_fp_strictly_closer_to_objective_marker_tier(
-    new_fp: Set[Tuple[int, int]],
-    d_min: int,
-    closest_markers: List[Tuple[int, int]],
-    *,
-    closer_shell_union: Optional[Set[Tuple[int, int]]] = None,
-    _perf_strict_eval_acc: Optional[List[float]] = None,
-) -> bool:
-    """Même idée que ``_fight_pile_in_new_fp_strictly_closer_to_closest_tier`` : empreinte plus proche du marqueur.
-
-    Optimisation équivalente au test par dilatation : ``new_fp`` est strictement plus proche d'un marqueur
-    du palier ssi sa distance minimale au palier est <= ``d_min - 1``.
-    """
-    if d_min <= 0:
-        return False
-    if closer_shell_union is not None:
-        return bool(new_fp & closer_shell_union)
-    from engine.hex_utils import min_distance_between_sets
-
-    marker_set = set(closest_markers)
-    if not marker_set:
-        raise ValueError(
-            "_fight_new_fp_strictly_closer_to_objective_marker_tier: closest_markers must be non-empty"
-        )
-    _td0 = 0.0
-    if _perf_strict_eval_acc is not None:
-        _td0 = time.perf_counter()
-    d = min_distance_between_sets(new_fp, marker_set, max_distance=d_min - 1)
-    if _perf_strict_eval_acc is not None:
-        _perf_strict_eval_acc[0] += time.perf_counter() - _td0
-    return d <= (d_min - 1)
-
 
 def _fight_bfs_reachable_anchors_consolidation(
     game_state: Dict[str, Any],
@@ -1435,24 +1338,29 @@ def _fight_plan_consolidation_destinations(
     if _fight_consolidation_unit_engaged_with_any_enemy(game_state, unit):
         return None
 
-    objectives = game_state.get("objectives")
-    if not isinstance(objectives, (list, tuple)) or not objectives:
-        return None
-    marker_points: List[Tuple[int, int]] = []
-    seen_markers: Set[Tuple[int, int]] = set()
-    for obj in objectives:
-        if not isinstance(obj, dict):
-            continue
-        pt = _fight_resolve_objective_marker_center_hex(obj)
-        if pt is not None and pt not in seen_markers:
-            seen_markers.add(pt)
-            marker_points.append(pt)
-    if not marker_points:
+    # Objectif (12.08 Objective Consolidation) : viser la ZONE DU TERRAIN (14.02 « within that
+    # terrain area »), PAS un marqueur central. Distance = empreinte → partie la plus proche de la
+    # zone (14.01). « within range si possible, sinon plus proche » → on minimise la distance
+    # empreinte→zone ; un anchor dont l'empreinte recouvre la zone a une distance 0 (within range)
+    # et sort donc naturellement comme meilleur. IA et PvP appliquent ainsi la même règle.
+    zone_sets = _fight_v11_objective_hex_sets(game_state)
+    if not zone_sets:
         return None
 
     start_fp_obj = compute_candidate_footprint(start_col, start_row, unit, game_state)
-    start_d_obj, closest_markers = _fight_closest_objective_marker_snapshot(start_fp_obj, marker_points)
+    zone_dists = [
+        (oid, hexes, min_distance_between_sets(start_fp_obj, hexes)) for oid, hexes in zone_sets
+    ]
+    start_d_obj = min(d for _, _, d in zone_dists)
     if start_d_obj == 0:
+        return None  # déjà within range (≥1 figurine dans une zone) → rien à gagner
+
+    # Palier = hexes des objectifs les plus proches (ex aequo réunis), comme pour les ennemis.
+    target_zone_hexes: Set[Tuple[int, int]] = set()
+    for oid, hexes, d in zone_dists:
+        if d == start_d_obj:
+            target_zone_hexes |= hexes
+    if not target_zone_hexes:
         return None
 
     _ensure_consolidation_bfs(start_fp_obj)
@@ -1460,18 +1368,12 @@ def _fight_plan_consolidation_destinations(
     _obj_pf = _cons_pf
     _obj_uid = unit_id_str
     _t_obj_filt0 = time.perf_counter() if _obj_pf else None
-    strict_closer_calls_n = 0
-    marker_set_obj = set(closest_markers)
-    if not marker_set_obj:
-        raise ValueError(
-            "_fight_plan_consolidation_destinations: closest_markers must be non-empty"
-        )
-    # Pre-compute distance map from markers (single BFS, bounded at start_d_obj-1 steps).
-    # This replaces both the shell check and the per-anchor min_distance_between_sets call.
+    # Carte de distance BFS depuis la zone (bornée à start_d_obj-1 pas) — remplace le calcul
+    # par-anchor de min_distance_between_sets. d=0 sur les hexes de la zone (within range).
     _OBJ_INF = 10 ** 9
-    _obj_dist_map: Dict[Tuple[int, int], int] = {h: 0 for h in marker_set_obj}
+    _obj_dist_map: Dict[Tuple[int, int], int] = {h: 0 for h in target_zone_hexes}
     _t_distmap0 = time.perf_counter() if _obj_pf else None
-    _obj_frontier: List[Tuple[int, int]] = list(marker_set_obj)
+    _obj_frontier: List[Tuple[int, int]] = list(target_zone_hexes)
     for _mdist in range(1, start_d_obj):
         _obj_next: List[Tuple[int, int]] = []
         for _c, _r in _obj_frontier:
@@ -1493,7 +1395,6 @@ def _fight_plan_consolidation_destinations(
                 f"{anchor!r} (BFS fp_by_anchor inconsistency)"
             )
         fp = fp_by_anchor[anchor]
-        strict_closer_calls_n += 1
         d_tier = min((_obj_dist_map.get(h, _OBJ_INF) for h in fp), default=_OBJ_INF)
         if d_tier >= start_d_obj:
             continue
@@ -1503,24 +1404,18 @@ def _fight_plan_consolidation_destinations(
         loop_s = max(0.0, filter_s - dist_map_build_s)
         append_perf_timing_line(
             f"FIGHT_CONSOLIDATION_OBJ_ANCHOR_FILTER unitId={_obj_uid!r} start_d_obj={start_d_obj} "
-            f"visited_n={len(visited)} strict_closer_calls_n={strict_closer_calls_n} "
-            f"dist_map_build_s={dist_map_build_s:.6f} loop_s={loop_s:.6f} filter_s={filter_s:.6f}"
+            f"visited_n={len(visited)} dist_map_build_s={dist_map_build_s:.6f} "
+            f"loop_s={loop_s:.6f} filter_s={filter_s:.6f}"
         )
     if not dist_by_anchor_obj:
         return None
+    # Meilleur palier : distance minimale à la zone. d=0 = within range (recouvre la zone) → priorité
+    # naturelle. Plus de préférence « marqueur ».
     best_o = min(d for _, d in dist_by_anchor_obj)
     tier_o = [a for a, d in dist_by_anchor_obj if d == best_o]
-    on_marker: List[Tuple[int, int]] = []
-    for anchor in tier_o:
-        fp = fp_by_anchor[anchor]
-        for mc, mr in closest_markers:
-            if (mc, mr) in fp:
-                on_marker.append(anchor)
-                break
-    final_cands_obj = on_marker if on_marker else tier_o
-    if len(final_cands_obj) == 1 and final_cands_obj[0] == start_pos:
+    if len(tier_o) == 1 and tier_o[0] == start_pos:
         return None
-    return ("objective", final_cands_obj, visited, None)
+    return ("objective", tier_o, visited, None)
 
 
 def _fight_opposing_enemies_exist(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
@@ -5969,6 +5864,749 @@ def _fight_v11_pile_in_present(
     }
 
 
+# =====================================================================
+# === V11 FIGHT PHASE — CONSOLIDATION par-figurine (12.08) ============
+# =====================================================================
+# Moteur GÉNÉRIQUE paramétré (plan §4) : une seule copie du cœur de mouvement,
+# pilotée par tier_kind ∈ {enemy, zone}, lock_base_contact (Ongoing) et un AFTER
+# par mode. NE TOUCHE PAS au pile-in (rebranché plus tard, factorisation A).
+
+
+def _fight_v11_consolidation_engaging_candidates(
+    game_state: Dict[str, Any], unit: Dict[str, Any]
+) -> List[str]:
+    """Engaging (12.08) : ids des unités ennemies à ≤ consolidation_trigger_range (3") — sélectionnables."""
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    trig = int(require_key(game_rules, "consolidation_trigger_range"))
+    return _fight_v11_enemies_within_range(game_state, unit, trig)
+
+
+def _fight_v11_consolidation_objective_candidates(
+    game_state: Dict[str, Any], unit: Dict[str, Any]
+) -> List[Any]:
+    """Objective (12.08) : ids des objectifs à ≤ consolidation_trigger_range (3") — sélectionnables."""
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    trig = int(require_key(game_rules, "consolidation_trigger_range"))
+    return _fight_v11_objectives_within_range(game_state, unit, trig)
+
+
+def _fight_v11_consolidation_objective_zone(
+    game_state: Dict[str, Any], objective_id: Any
+) -> Set[Tuple[int, int]]:
+    """Set d'hexes de la zone de contrôle d'un objectif (par id). ``raise`` si introuvable."""
+    for oid, hexes in _fight_v11_objective_hex_sets(game_state):
+        if oid == objective_id:
+            return hexes
+    raise ValueError(f"_fight_v11_consolidation_objective_zone: objectif {objective_id!r} sans hexes")
+
+
+def _fight_v11_consolidation_targets(
+    game_state: Dict[str, Any], unit: Dict[str, Any]
+) -> Tuple[Optional[str], Any]:
+    """``(mode, tier)`` du move de consolidation (12.08), cascade + sélection joueur.
+
+    - ``ongoing``   → tier = ids de **toutes** les unités ennemies engagées (imposé) ;
+    - ``engaging``  → tier = ids ennemis **sélectionnés par le joueur** (état
+      ``consolidation_engaging_selection``), filtrés sur les candidats à ≤3". Tier vide =
+      sélection en attente (move encore impossible) ;
+    - ``objective`` → tier = **set d'hexes** de la zone de l'objectif sélectionné
+      (``consolidation_objective_selection``), auto si 1 seul candidat. ``None`` = sélection
+      en attente ;
+    - ``(None, None)`` → aucune branche applicable (pas de consolidation possible).
+
+    ``tier_kind`` est implicite : ``zone`` pour objective, ``enemy`` sinon.
+    """
+    mode = fight_v11_consolidation_mode(game_state, unit)
+    if mode is None:
+        return (None, None)
+    uid = str(require_key(unit, "id"))
+    if mode == "ongoing":
+        tier = _fight_units_engaged_with(game_state, unit)
+        if not tier:
+            raise ValueError(
+                f"_fight_v11_consolidation_targets: mode ongoing mais unité {uid} non engagée"
+            )
+        return ("ongoing", tier)
+    if mode == "engaging":
+        candidates = set(_fight_v11_consolidation_engaging_candidates(game_state, unit))
+        sel = game_state.get("consolidation_engaging_selection", {}).get(uid, [])
+        tier = [str(e) for e in sel if str(e) in candidates]
+        return ("engaging", tier)
+    if mode == "objective":
+        cands = _fight_v11_consolidation_objective_candidates(game_state, unit)
+        if len(cands) == 1:
+            chosen: Any = cands[0]
+        else:
+            chosen = game_state.get("consolidation_objective_selection", {}).get(uid)
+            if chosen not in cands:
+                chosen = None
+        if chosen is None:
+            return ("objective", None)
+        return ("objective", _fight_v11_consolidation_objective_zone(game_state, chosen))
+    raise ValueError(f"_fight_v11_consolidation_targets: mode inattendu {mode!r}")
+
+
+def _fight_consolidation_build_model_pool(
+    game_state: Dict[str, Any],
+    model_id: str,
+    *,
+    tier_kind: str,
+    tier: Any,
+    lock_base_contact: bool,
+    provisional_plan: Optional[Dict[str, Tuple[int, int]]] = None,
+) -> Dict[str, List[List[int]]]:
+    """Pool de destinations PAR-FIGURINE pour la CONSOLIDATION (12.08), moteur générique.
+
+    Paramètres :
+      - ``tier_kind`` ∈ {"enemy","zone"} : nature du palier WHILE ;
+      - ``tier`` : pour "enemy" = ids du **palier ennemi le plus proche** (closest tier) ;
+        pour "zone" = set d'hexes de la zone de l'objectif sélectionné ;
+      - ``lock_base_contact`` : Ongoing — une figurine en base-contact ennemi NE BOUGE PAS (12.08).
+
+    WHILE MOVING (12.08) :
+      - enemy (Ongoing/Engaging) : empreinte finale STRICTEMENT plus proche du palier le plus
+        proche qu'au départ (engaged si possible) — même cœur que le pile-in ;
+      - zone (Objective) : empreinte WITHIN RANGE de la zone (empreinte ∩ zone) si possible,
+        SINON strictement plus proche de la zone.
+
+    Retour ``{"closer":[...], "engaged":[...]}`` (engaged ⊆ closer ; enemy : ≤ EZ d'un ennemi du
+    palier ; zone : empreinte ∩ zone). Lecture pure (réutilise les primitives charge/empreinte).
+    """
+    from collections import deque
+    from engine.hex_utils import min_distance_between_sets
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from .shared_utils import get_engagement_zone
+    from .charge_handlers import (
+        _charge_prepare_footprint_offsets,
+        _candidate_footprint_charge,
+        _charge_synthetic_charger_cache_entry,
+    )
+
+    if tier_kind not in ("enemy", "zone"):
+        raise ValueError(f"_fight_consolidation_build_model_pool: tier_kind invalide {tier_kind!r}")
+    models_cache = require_key(game_state, "models_cache")
+    model = models_cache.get(str(model_id))
+    if model is None:
+        raise KeyError(f"_fight_consolidation_build_model_pool: model {model_id} not in models_cache")
+    squad_id = str(model["squad_id"])
+    unit = get_unit_by_id(game_state, squad_id)
+    empty: Dict[str, List[List[int]]] = {"closer": [], "engaged": []}
+    if not unit:
+        return empty
+
+    # Ongoing : verrou base-contact (12.08 WHILE) — figurine collée à un ennemi = figée.
+    if lock_base_contact and _fight_model_in_base_contact(game_state, model):
+        return empty
+
+    ez = int(get_engagement_zone(game_state))
+    budget = 3 * int(require_key(game_state, "inches_to_subhex"))
+    board_cols = int(require_key(game_state, "board_cols"))
+    board_rows = int(require_key(game_state, "board_rows"))
+    wall_hexes = game_state.get("wall_hexes", set())
+    player = int(model["player"])
+    units_cache = require_key(game_state, "units_cache")
+
+    closest = {str(t) for t in tier} if tier_kind == "enemy" else set()
+    zone_set: Set[Tuple[int, int]] = set(tier) if tier_kind == "zone" else set()
+    target_entries: List[Dict[str, Any]] = []
+    target_fps: List[Set[Tuple[int, int]]] = []
+    enemy_occupied: Set[Tuple[int, int]] = set()
+    other_occupied: Set[Tuple[int, int]] = set()
+    for eid, entry in units_cache.items():
+        occ = entry.get("occupied_hexes")
+        cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
+        if int(entry["player"]) != player:
+            enemy_occupied |= cells
+            if tier_kind == "enemy" and str(eid) in closest:
+                target_entries.append(entry)
+                target_fps.append(cells)
+        elif str(eid) != squad_id:
+            other_occupied |= cells
+    if tier_kind == "enemy" and not target_entries:
+        return empty
+    if tier_kind == "zone" and not zone_set:
+        return empty
+
+    fp_offset_pair = _charge_prepare_footprint_offsets(unit, game_state)
+
+    # Coéquipières : collision (le plan provisoire override les figs déjà posées).
+    same_squad_occupied: Set[Tuple[int, int]] = set()
+    squad_models = require_key(game_state, "squad_models")
+    for mid in require_key(squad_models, squad_id):
+        if str(mid) == str(model_id):
+            continue
+        if provisional_plan and str(mid) in provisional_plan:
+            pc, pr = provisional_plan[str(mid)]
+            sib_fp = _candidate_footprint_charge(int(pc), int(pr), unit, game_state, fp_offset_pair)
+        else:
+            sib = models_cache.get(str(mid))
+            if sib is None:
+                continue
+            sib_fp = _candidate_footprint_charge(
+                int(sib["col"]), int(sib["row"]), unit, game_state, fp_offset_pair
+            )
+        same_squad_occupied |= sib_fp
+
+    # 03.01 : traverse les amies, PAS les ennemies ni les murs ; FIN sur aucune fig ni mur.
+    path_blocked = set(wall_hexes) | enemy_occupied
+    end_blocked = path_blocked | other_occupied | same_squad_occupied
+
+    start_col, start_row = int(model["col"]), int(model["row"])
+    start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_offset_pair)
+    if tier_kind == "enemy":
+        start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
+    else:
+        start_min = min_distance_between_sets(start_fp, zone_set)
+
+    visited: Set[Tuple[int, int]] = {(start_col, start_row)}
+    reachable: List[Tuple[int, int]] = []
+    queue: deque = deque([(start_col, start_row, 0)])
+    while queue:
+        c, r, d = queue.popleft()
+        if d >= budget:
+            continue
+        for nc, nr in get_hex_neighbors(c, r):
+            if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                continue
+            cell = (nc, nr)
+            if cell in visited or cell in path_blocked:
+                continue
+            visited.add(cell)
+            queue.append((nc, nr, d + 1))
+            reachable.append(cell)
+
+    closer: List[List[int]] = []
+    engaged: List[List[int]] = []
+    for cc, rr in reachable:
+        cand_fp = _candidate_footprint_charge(cc, rr, unit, game_state, fp_offset_pair)
+        if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
+            continue
+        if cand_fp & end_blocked:
+            continue
+        if tier_kind == "enemy":
+            d_min = min(
+                min_distance_between_sets(cand_fp, tfp, max_distance=start_min) for tfp in target_fps
+            )
+            if d_min >= start_min:
+                continue  # WHILE : strictement plus proche du palier le plus proche
+            closer.append([cc, rr])
+            synth = _charge_synthetic_charger_cache_entry(game_state, unit, cc, rr, cand_fp)
+            if any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
+                engaged.append([cc, rr])
+        else:  # zone (Objective)
+            if cand_fp & zone_set:
+                # within range = empreinte DANS la zone du terrain (14.02)
+                closer.append([cc, rr])
+                engaged.append([cc, rr])
+            else:
+                d_min = min_distance_between_sets(cand_fp, zone_set, max_distance=start_min)
+                if d_min < start_min:  # « closer if not » (pas within mais se rapproche)
+                    closer.append([cc, rr])
+
+    return {"closer": closer, "engaged": engaged}
+
+
+def _fight_consolidation_preview_plan(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    plan: List[Tuple[str, int, int]],
+    *,
+    mode: str,
+    tier_kind: str,
+    tier: Any,
+    closest_tier_ids: List[str],
+    engaged_before_ids: List[str],
+    lock_base_contact: bool,
+) -> Dict[str, Any]:
+    """Dry-run d'un plan de consolidation par-figurine (12.08 WHILE/AFTER + cohésion 03.03).
+
+    AFTER par mode :
+      - ongoing   : chaque engagement de départ conservé (niveau unité, miroir pile-in) ;
+      - engaging  : unité engagée avec **toutes** les unités ennemies sélectionnées (tier) ;
+      - objective : unité within range de l'objectif (≥1 figurine dans la zone).
+
+    ⚠️ ``can_validate=False`` si la cible (tous les ciblés / la zone) est inatteignable : le
+    « closer if not » du WHILE ne valide pas le move (move optionnel → on ne bouge pas). Lecture pure.
+    """
+    from engine.hex_utils import min_distance_between_sets
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from .shared_utils import (
+        get_engagement_zone,
+        get_coherency_subhex,
+        get_cohesion_max_subhex,
+        get_min_neighbors,
+    )
+    from .charge_handlers import _charge_prepare_footprint_offsets, _candidate_footprint_charge
+
+    unit = get_unit_by_id(game_state, str(squad_id))
+    empty = {
+        "per_model": {},
+        "coherency_ok": False,
+        "unit_engaged": False,
+        "kept_engagements": False,
+        "engaged_with_all_selected": False,
+        "within_objective_range": False,
+        "can_validate": False,
+    }
+    if not unit:
+        return empty
+    models_cache = require_key(game_state, "models_cache")
+    norm = [(str(m), int(c), int(r)) for m, c, r in plan]
+    n = len(norm)
+    if n == 0:
+        return empty
+
+    # 1) Légalité par-fig : dans son pool ``closer`` (autres figs = positions provisoires) ou immobile.
+    pos_by_model = {mid: (c, r) for mid, c, r in norm}
+    per_model: Dict[str, bool] = {}
+    for mid, c, r in norm:
+        prov = {m2: pos_by_model[m2] for m2 in pos_by_model if m2 != mid}
+        m = models_cache.get(mid)
+        orig = (int(m["col"]), int(m["row"])) if m else None
+        if orig is not None and (c, r) == orig:
+            per_model[mid] = True
+            continue
+        pool = _fight_consolidation_build_model_pool(
+            game_state, mid, tier_kind=tier_kind, tier=tier,
+            lock_base_contact=lock_base_contact, provisional_plan=prov,
+        )["closer"]
+        per_model[mid] = [c, r] in pool
+
+    # 2) Cohésion 03.03 (empreinte-à-empreinte, mêmes 2 puces que le move).
+    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
+    fps = [_candidate_footprint_charge(c, r, unit, game_state, fp_pair) for _, c, r in norm]
+    coh = get_coherency_subhex(game_state)
+    coh_max = get_cohesion_max_subhex(game_state)
+    min_nb = get_min_neighbors(game_state)
+    coherency_ok = True
+    if n > 1:
+        neigh = [0] * n
+        too_far = [False] * n
+        for i in range(n):
+            for j in range(i + 1, n):
+                d = min_distance_between_sets(fps[i], fps[j], max_distance=coh_max)
+                if d <= coh:
+                    neigh[i] += 1
+                    neigh[j] += 1
+                if d > coh_max:
+                    too_far[i] = True
+                    too_far[j] = True
+        for i in range(n):
+            if neigh[i] < min_nb or too_far[i]:
+                coherency_ok = False
+                break
+
+    # 3) AFTER (12.08) au niveau unité, selon le mode.
+    union_fp: Set[Tuple[int, int]] = set()
+    for f in fps:
+        union_fp |= f
+    anchor_c, anchor_r = norm[0][1], norm[0][2]
+    synth_unit = _fight_synth_cache_entry_at_footprint(unit, game_state, anchor_c, anchor_r, union_fp)
+    ez = int(get_engagement_zone(game_state))
+    units_cache = require_key(game_state, "units_cache")
+    player = int(require_key(unit, "player"))
+
+    unit_engaged = any(
+        int(ce["player"]) != player and unit_entries_within_engagement_zone(synth_unit, ce, ez)
+        for eid, ce in units_cache.items()
+        if str(eid) != str(squad_id)
+    )
+
+    kept_engagements = True
+    engaged_with_all_selected = True
+    within_objective_range = False
+    after_ok = False
+    if mode == "ongoing":
+        for eid in engaged_before_ids:
+            ce = units_cache.get(str(eid))
+            if ce is None:
+                continue
+            if not unit_entries_within_engagement_zone(synth_unit, ce, ez):
+                kept_engagements = False
+                break
+        after_ok = kept_engagements
+    elif mode == "engaging":
+        selected = [str(e) for e in tier]
+        engaged_with_all_selected = bool(selected)
+        for eid in selected:
+            ce = units_cache.get(eid)
+            if ce is None or not unit_entries_within_engagement_zone(synth_unit, ce, ez):
+                engaged_with_all_selected = False
+                break
+        after_ok = engaged_with_all_selected
+    elif mode == "objective":
+        zone_set: Set[Tuple[int, int]] = set(tier) if tier else set()
+        within_objective_range = bool(zone_set) and bool(union_fp & zone_set)
+        after_ok = within_objective_range
+    else:
+        raise ValueError(f"_fight_consolidation_preview_plan: mode inattendu {mode!r}")
+
+    can_validate = bool(all(per_model.values()) and coherency_ok and after_ok)
+    return {
+        "per_model": per_model,
+        "coherency_ok": coherency_ok,
+        "unit_engaged": unit_engaged,
+        "kept_engagements": kept_engagements,
+        "engaged_with_all_selected": engaged_with_all_selected,
+        "within_objective_range": within_objective_range,
+        "can_validate": can_validate,
+    }
+
+
+def _fight_consolidation_model_plan_state(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    provisional_plan: Optional[Dict[str, Tuple[int, int]]] = None,
+    selected_model: Optional[str] = None,
+) -> Dict[str, Any]:
+    """État du plan de consolidation par-figurine exposé au front (miroir du pile-in par-figurine).
+
+    Détermine ``(mode, tier)`` via ``_fight_v11_consolidation_targets``. En Engaging sans sélection
+    de cibles, ou en Objective sans objectif choisi (>1 candidat), renvoie un état
+    ``awaiting_*_selection`` exposant les candidats cliquables (le move reste bloqué).
+    """
+    from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from .shared_utils import get_engagement_zone
+    from .charge_handlers import (
+        _charge_prepare_footprint_offsets,
+        _candidate_footprint_charge,
+        _charge_synthetic_charger_cache_entry,
+    )
+
+    squad_id = str(require_key(unit, "id"))
+    models_cache = require_key(game_state, "models_cache")
+    units_cache = require_key(game_state, "units_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive = [str(m) for m in require_key(squad_models, squad_id) if str(m) in models_cache]
+    prov: Dict[str, Tuple[int, int]] = {
+        str(m): (int(c), int(r)) for m, (c, r) in (provisional_plan or {}).items()
+    }
+    origin = {m: (int(models_cache[m]["col"]), int(models_cache[m]["row"])) for m in alive}
+
+    mode, tier = _fight_v11_consolidation_targets(game_state, unit)
+    engaging_candidates = (
+        _fight_v11_consolidation_engaging_candidates(game_state, unit) if mode == "engaging" else []
+    )
+    objective_candidates = (
+        _fight_v11_consolidation_objective_candidates(game_state, unit) if mode == "objective" else []
+    )
+    base = {
+        "phase": "fight",
+        "fight_subphase": "consolidate",
+        "consolidation_model_move": True,
+        "consolidation_mode": mode,
+        "unitId": squad_id,
+        "active_fight_unit": squad_id,
+        "origin_models": {m: [c, r] for m, (c, r) in origin.items()},
+        "provisional": {m: [c, r] for m, (c, r) in prov.items()},
+        "selected_model": str(selected_model) if selected_model is not None else None,
+        "engaging_candidates": [str(e) for e in engaging_candidates],
+        "objective_candidates": [str(o) for o in objective_candidates],
+        "waiting_for_player": True,
+        "action": "wait",
+    }
+
+    # Sélection préalable requise (Engaging : ≥1 cible ; Objective : 1 objectif si >1 candidat).
+    if mode is None:
+        return {**base, "awaiting_target_selection": False, "eligible_models": [],
+                "pool": [], "footprint_mask_loops": [], "can_validate": False}
+    if mode == "engaging" and not tier:
+        return {**base, "awaiting_target_selection": True, "eligible_models": [],
+                "pool": [], "footprint_mask_loops": [], "can_validate": False}
+    if mode == "objective" and tier is None:
+        return {**base, "awaiting_objective_selection": True, "eligible_models": [],
+                "pool": [], "footprint_mask_loops": [], "can_validate": False}
+
+    tier_kind = "zone" if mode == "objective" else "enemy"
+    lock_base_contact = mode == "ongoing"
+    if tier_kind == "enemy":
+        closest_tier = _fight_pile_in_closest_tier_ids(game_state, unit, list(tier))
+    else:
+        closest_tier = []
+
+    unplaced = [m for m in alive if m not in prov]
+    eligible: List[str] = []
+    for m in unplaced:
+        if _fight_consolidation_build_model_pool(
+            game_state, m, tier_kind=tier_kind, tier=tier,
+            lock_base_contact=lock_base_contact, provisional_plan=prov,
+        )["closer"]:
+            eligible.append(m)
+
+    pool: List[List[int]] = []
+    mask_loops: List[List[List[float]]] = []
+    if selected_model is not None and str(selected_model) in alive:
+        sel = str(selected_model)
+        sel_prov = {k: v for k, v in prov.items() if k != sel}
+        pool = _fight_consolidation_build_model_pool(
+            game_state, sel, tier_kind=tier_kind, tier=tier,
+            lock_base_contact=lock_base_contact, provisional_plan=sel_prov,
+        )["closer"]
+        if pool:
+            fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
+            fp_zone: Set[Tuple[int, int]] = set()
+            for cc, rr in pool:
+                fp_zone |= _candidate_footprint_charge(int(cc), int(rr), unit, game_state, fp_pair)
+            loops = compute_move_preview_mask_loops_world(fp_zone, game_state)
+            if loops:
+                mask_loops = [[[float(x), float(y)] for (x, y) in loop] for loop in loops]
+
+    full_plan: List[Tuple[str, int, int]] = [
+        (m, prov[m][0], prov[m][1]) if m in prov else (m, origin[m][0], origin[m][1]) for m in alive
+    ]
+    engaged_before = _fight_units_engaged_with(game_state, unit)
+    prev = _fight_consolidation_preview_plan(
+        game_state, squad_id, full_plan, mode=mode, tier_kind=tier_kind, tier=tier,
+        closest_tier_ids=closest_tier, engaged_before_ids=engaged_before,
+        lock_base_contact=lock_base_contact,
+    )
+
+    # Voile vert UI : figs « en position » (≤ EZ d'un ennemi du palier, ou dans la zone objectif).
+    ez = int(get_engagement_zone(game_state))
+    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
+    engaged_models: List[str] = []
+    if tier_kind == "enemy":
+        target_entries = [units_cache[t] for t in closest_tier if t in units_cache]
+        for m, c, r in full_plan:
+            fp = _candidate_footprint_charge(int(c), int(r), unit, game_state, fp_pair)
+            synth = _charge_synthetic_charger_cache_entry(game_state, unit, int(c), int(r), fp)
+            if any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
+                engaged_models.append(m)
+    else:
+        zone_set: Set[Tuple[int, int]] = set(tier)
+        for m, c, r in full_plan:
+            fp = _candidate_footprint_charge(int(c), int(r), unit, game_state, fp_pair)
+            if fp & zone_set:
+                engaged_models.append(m)
+
+    return {
+        **base,
+        "awaiting_target_selection": False,
+        "awaiting_objective_selection": False,
+        "engaged_models": engaged_models,
+        "consolidation_targets": [str(t) for t in closest_tier] if tier_kind == "enemy" else [],
+        "eligible_models": eligible,
+        "pool": pool,
+        "footprint_mask_loops": mask_loops,
+        "unplaced": unplaced,
+        "can_validate": prev["can_validate"],
+        "per_model_valid": prev["per_model"],
+        "coherency_ok": prev["coherency_ok"],
+        "unit_engaged": prev["unit_engaged"],
+        "kept_engagements": prev["kept_engagements"],
+        "engaged_with_all_selected": prev["engaged_with_all_selected"],
+        "within_objective_range": prev["within_objective_range"],
+    }
+
+
+def _fight_consolidation_commit_plan(
+    game_state: Dict[str, Any], unit: Dict[str, Any], plan: List[Tuple[str, int, int]]
+) -> None:
+    """Pose le plan de consolidation par-figurine (``commit_move`` type ``consolidation``) + resync l'ancre."""
+    from .shared_utils import commit_move, set_unit_coordinates
+
+    commit_move(plan, game_state, "consolidation")
+    entry = require_key(game_state, "units_cache").get(str(require_key(unit, "id")))
+    if entry is not None:
+        set_unit_coordinates(unit, int(entry["col"]), int(entry["row"]))
+
+
+def _fight_v11_clear_consolidation_preview(game_state: Dict[str, Any]) -> None:
+    """Purge l'aperçu de consolidation ET les **deux** sélections (engaging + objective) — sinon
+    un objectif/une cible choisi reste collé au changement d'unité active / fin de conso."""
+    game_state.pop("consolidation_engaging_selection", None)
+    game_state.pop("consolidation_objective_selection", None)
+
+
+# --- Engaging « New Foes to Face » (12.08 AFTER, §8.C) : résolution CIBLÉE ---------------------
+# Au commit engaging, les ennemis engagés avec U non encore « selected to fight » doivent combattre
+# (12.08). Sélecteur = ADVERSAIRE de U, sur un pool EXPLICITE restreint à ces unités (PAS
+# fight_v11_advance_selection, qui relancerait l'alternance 12.04 entière — cf. §8.C). La liste est
+# GELÉE au commit ; chaque New Foe résout un NORMAL fight via le flux d'allocation manuel existant.
+# Invariants : I1 (U consolide 1×, consolidation_done), I2 (New Foe combat 1×, units_selected_to_fight),
+# I3 (pas de double bascule), I4 (joueur actif finit ses consos avant l'adversaire — grouped_next),
+# I5 (un New Foe devient consolidable côté adverse — fight_v11_is_consolidation_eligible le ramasse).
+
+
+def _fight_v11_consolidation_new_foes_remaining(game_state: Dict[str, Any]) -> List[str]:
+    """New Foes (liste gelée) encore vivants ET non encore « selected to fight »."""
+    pending = game_state.get("consolidation_new_foes_pending")
+    if not pending:
+        return []
+    selected = {str(x) for x in game_state.get("units_selected_to_fight", set())}
+    out: List[str] = []
+    for nf in pending:
+        nf = str(nf)
+        if nf in selected or not is_unit_alive(nf, game_state):
+            continue
+        out.append(nf)
+    return out
+
+
+def _fight_v11_consolidation_clear_new_foes(game_state: Dict[str, Any]) -> None:
+    game_state.pop("consolidation_new_foes_pending", None)
+    game_state.pop("consolidation_new_foes_selector", None)
+    game_state.pop("consolidation_new_foes_for_unit", None)
+
+
+def _fight_v11_consolidation_new_foes_state(game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Payload d'attente présentant les New Foes restants au sélecteur (adversaire). ``None`` quand
+    la liste est épuisée (→ purge des clés et reprise de la consolidation par l'appelant)."""
+    remaining = _fight_v11_consolidation_new_foes_remaining(game_state)
+    if not remaining:
+        _fight_v11_consolidation_clear_new_foes(game_state)
+        return None
+    selector = int(
+        game_state.get("consolidation_new_foes_selector", 3 - int(require_key(game_state, "current_player")))
+    )
+    for_unit = game_state.get("consolidation_new_foes_for_unit")
+    game_state["fight_eligible_units"] = list(remaining)
+    active = game_state.get("active_fight_unit")
+    active = str(active) if active is not None else None
+    if active is not None and active in remaining:
+        u = get_unit_by_id(game_state, active)
+        valid = _fight_build_valid_target_pool(game_state, u) if u else []
+        game_state["valid_fight_targets"] = valid
+        return {
+            "phase": "fight", "fight_subphase": "consolidate",
+            "consolidation_new_foes": list(remaining),
+            "consolidation_new_foes_for_unit": str(for_unit) if for_unit is not None else None,
+            "fight_selector": selector,
+            "fight_eligible_units": list(remaining),
+            "active_fight_unit": active, "valid_targets": valid,
+            "waiting_for_player": True, "action": "wait",
+        }
+    game_state["active_fight_unit"] = None
+    game_state["valid_fight_targets"] = []
+    return {
+        "phase": "fight", "fight_subphase": "consolidate",
+        "consolidation_new_foes": list(remaining),
+        "consolidation_new_foes_for_unit": str(for_unit) if for_unit is not None else None,
+        "fight_selector": selector,
+        "fight_eligible_units": list(remaining),
+        "active_fight_unit": None, "valid_targets": [],
+        "waiting_for_player": True, "action": "wait",
+        "unitId": "SYSTEM",
+    }
+
+
+def _fight_v11_consolidation_resolve_new_foes(
+    game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """Au commit engaging : gèle les New Foes (ennemis engagés non sélectionnés) et présente le
+    premier choix au sélecteur (adversaire). ``None`` si aucun New Foe (reprise immédiate)."""
+    new_foes = fight_v11_engaging_triggered_unit_ids(game_state, unit)
+    if not new_foes:
+        return None
+    game_state["consolidation_new_foes_pending"] = [str(x) for x in new_foes]
+    game_state["consolidation_new_foes_for_unit"] = str(require_key(unit, "id"))
+    game_state["consolidation_new_foes_selector"] = 3 - int(require_key(game_state, "current_player"))
+    game_state["active_fight_unit"] = None
+    _fight_v11_log(
+        game_state,
+        f"CONSOLIDATE engaging : New Foes to Face = {list(new_foes)} "
+        f"(sélecteur P{game_state['consolidation_new_foes_selector']}, in-place)",
+    )
+    return _fight_v11_consolidation_new_foes_state(game_state)
+
+
+def _fight_v11_consolidation_new_foes_step(
+    game_state: Dict[str, Any],
+    action: Dict[str, Any],
+    config: Dict[str, Any],
+    remaining: List[str],
+) -> Tuple[bool, Dict[str, Any]]:
+    """Résout une action sur un New Foe (attaquant) — NORMAL fight via le flux manuel existant.
+    Sélecteur = adversaire, pool = ``remaining`` (restreint). Miroir de la résolution du dispatch
+    FIGHT, sans relance de l'alternance 12.04."""
+    atype = action.get("action")
+    uid = action.get("unitId")
+    uid = str(uid) if uid is not None else None
+    active = game_state.get("active_fight_unit")
+    active = str(active) if active is not None else None
+
+    # L'adversaire choisit l'ordre : sélection d'un New Foe à faire combattre.
+    if atype == "activate_unit":
+        if uid is not None and uid in remaining:
+            game_state["active_fight_unit"] = uid
+            _fight_v11_log(game_state, f"NEW FOE {uid} ACTIVÉ (sélecteur adverse)")
+        return _fight_v11_manual_state(game_state)
+
+    if active is None or active not in remaining:
+        return _fight_v11_manual_state(game_state)
+    u = get_unit_by_id(game_state, active)
+    if u is None:
+        raise KeyError(f"New Foe {active} missing from game_state['units']")
+
+    # Déclarations par-arme/figurine (calque du tir), puis validation.
+    if atype in ("squad_fight_assign", "squad_fight_assign_weapon"):
+        _fight_ensure_activation_started(game_state, active)
+        target_id = str(require_key(action, "targetId"))
+        if atype == "squad_fight_assign":
+            model_id = str(require_key(action, "modelId"))
+            if "weaponIndex" in action:
+                m = require_key(game_state, "models_cache").get(model_id)
+                if m is not None:
+                    m["selectedCcWeaponIndex"] = int(action["weaponIndex"])
+            squad_declare_fight_model(game_state, active, model_id, target_id)
+        else:
+            squad_declare_fight_weapon(game_state, active, int(require_key(action, "weaponIndex")), target_id)
+        return _fight_v11_manual_state(game_state)
+
+    if atype == "squad_fight_validate":
+        from .shared_utils import init_pending_intents
+        init_pending_intents(game_state)
+        intents = game_state["pending_squad_fight_intents"].get(active, [])
+        if not intents:
+            _fight_v11_log(game_state, f"NEW FOE validate {active} : aucune declaration -> ignore")
+            return _fight_v11_manual_state(game_state)
+        target_id = str(intents[0]["target_unit_id"])
+        target_unit = get_unit_by_id(game_state, target_id)
+        defender_human = target_unit is not None and not _is_ai_controlled_fight_unit(game_state, target_unit)
+        if not defender_human:
+            raise RuntimeError(
+                f"NEW FOE validate {active} : flux de declaration manuelle non supporte pour defenseur IA"
+            )
+        game_state["units_selected_to_fight"].add(active)
+        game_state.setdefault("units_fought", set()).add(active)
+        game_state["active_fight_unit"] = None
+        alloc_result = build_manual_fight_allocation(game_state, active)
+        if alloc_result.get("waiting_for_player"):
+            return True, alloc_result
+        return _fight_v11_manual_state(game_state)
+
+    # Clic direct sur une cible → résolution + allocation (defenseur humain) ou auto (IA).
+    if atype in ("fight", "left_click"):
+        valid = _fight_build_valid_target_pool(game_state, u)
+        if not valid:
+            # Aucun ennemi à frapper (cas limite) : le New Foe est tout de même « selected to fight ».
+            game_state["units_selected_to_fight"].add(active)
+            game_state.setdefault("units_fought", set()).add(active)
+            game_state["active_fight_unit"] = None
+            _fight_v11_log(game_state, f"NEW FOE {active} : aucune cible valide (sélectionné sans attaque)")
+            return _fight_v11_manual_state(game_state)
+        game_state["units_selected_to_fight"].add(active)
+        game_state.setdefault("units_fought", set()).add(active)
+        pref = str(action["targetId"]) if "targetId" in action else None
+        target_id = pref if (pref is not None and pref in valid) else _ai_select_fight_target(game_state, active, valid)
+        target_unit = get_unit_by_id(game_state, target_id)
+        defender_human = target_unit is not None and not _is_ai_controlled_fight_unit(game_state, target_unit)
+        game_state["active_fight_unit"] = None
+        _fight_v11_log(game_state, f"NEW FOE {active} -> cible {target_id} (clic={pref}) defenseur_humain={defender_human}")
+        if defender_human:
+            squad_fight_unit_activation_start(game_state, active)
+            squad_declare_fight(game_state, active, target_id)
+            alloc_result = build_manual_fight_allocation(game_state, active)
+            if alloc_result.get("waiting_for_player"):
+                return True, alloc_result
+        else:
+            _fight_v11_resolve_attacks(game_state, u, config, preferred_target_id=target_id)
+        return _fight_v11_manual_state(game_state)
+
+    return _fight_v11_manual_state(game_state)
+
+
 def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """État actionnable courant pour le joueur humain (PvP). Avance les transitions de sous-phase."""
     for _ in range(64):
@@ -6053,15 +6691,35 @@ def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str,
                           "active_fight_unit": None, "valid_targets": [],
                           "waiting_for_player": True, "action": "wait"}
         if sub == "consolidate":
+            # New Foes to Face en cours (12.08 engaging AFTER) : tant qu'il en reste, on les
+            # présente à l'adversaire AVANT de reprendre la consolidation (résolution immédiate, §8.C).
+            if "consolidation_new_foes_pending" in game_state:
+                nf_state = _fight_v11_consolidation_new_foes_state(game_state)
+                if nf_state is not None:
+                    return True, nf_state
             nxt = fight_v11_grouped_next(game_state, "consolidate")
             if nxt is None:
                 return True, _fight_v11_phase_complete(game_state)
-            # UI consolidation non câblée → auto-skip du groupe (move OPTIONNEL), on avance.
+            # Présentation PARESSEUSE (miroir pile_in) : pool cliquable, aucune unité active.
+            # Le joueur choisit l'unité à consolider (activate_unit) ou termine (end_consolidation).
+            # Les sélections (engaging/objective) sont gérées au niveau de l'unité activée et ne
+            # sont PAS purgées ici (sinon un refresh perdrait la sélection en cours).
             player, eligible = nxt
-            for u in eligible:
-                game_state["consolidation_done"].add(u)
-            _fight_v11_log(game_state, f"CONSOLIDATE P{player} auto-skip (UI non câblée): {list(eligible)}")
-            continue
+            done = {str(x) for x in game_state.get("consolidation_done", set())}
+            pool = [str(u) for u in eligible if str(u) not in done]
+            game_state["fight_eligible_units"] = pool
+            game_state["active_fight_unit"] = None
+            _fight_v11_log(
+                game_state,
+                f"CONSOLIDATE P{player} : unités éligibles = {pool} (sélection libre)",
+            )
+            return True, {
+                "phase": "fight", "fight_subphase": "consolidate",
+                "fight_eligible_units": pool,
+                "active_fight_unit": None,
+                "waiting_for_player": True, "action": "wait",
+                "unitId": "SYSTEM",
+            }
         return True, _fight_v11_phase_complete(game_state)
     raise RuntimeError("_fight_v11_manual_state did not converge")
 
@@ -6366,6 +7024,33 @@ def _fight_v11_manual_step(
             f"step={game_state.get('fight_step')} fought={sorted(game_state.get('units_fought', set()))}"
         )
 
+        if skip:
+            # « Passer » une unité en étape fight = clic droit (right_click → skip, calculé
+            # plus haut). GARDÉ (encart 12 « you have to fight with all units that can ») :
+            # autorisé UNIQUEMENT si l'unité active n'a AUCUNE cible valide. Sinon elle DOIT
+            # combattre → skip refusé. Sans cible, elle est « selected to fight » sans attaque
+            # (12.04) : elle sort du pool ET devient éligible à la consolidation (12.08).
+            if active is not None and active in pool:
+                u = get_unit_by_id(game_state, active)
+                if u is None:
+                    raise KeyError(f"Fight skip unit {active} missing from game_state['units']")
+                valid = _fight_build_valid_target_pool(game_state, u)
+                if valid:
+                    _fight_v11_log(
+                        game_state,
+                        f"FIGHT skip REFUSÉ pour {active} : cibles valides {valid} "
+                        f"(obligation de combattre, encart 12)",
+                    )
+                    return _fight_v11_manual_state(game_state)
+                game_state["units_selected_to_fight"].add(active)
+                game_state.setdefault("units_fought", set()).add(active)
+                game_state["active_fight_unit"] = None
+                _fight_v11_log(
+                    game_state,
+                    f"FIGHT unit {active} → passée (aucune cible valide, sélectionnée sans attaque)",
+                )
+            return _fight_v11_manual_state(game_state)
+
         # ÉTAPE 1 — le joueur choisit librement une de SES unités éligibles (12.04).
         if atype == "activate_unit":
             if uid is not None and uid in pool:
@@ -6473,10 +7158,165 @@ def _fight_v11_manual_step(
         return _fight_v11_manual_state(game_state)
 
     if sub == "consolidate":
+        # New Foes to Face (12.08 engaging AFTER, §8.C) : pool restreint à l'adversaire, prioritaire
+        # sur la suite de la consolidation. PAS l'alternance 12.04.
+        if "consolidation_new_foes_pending" in game_state:
+            remaining = _fight_v11_consolidation_new_foes_remaining(game_state)
+            if remaining:
+                return _fight_v11_consolidation_new_foes_step(game_state, action, config, remaining)
+            _fight_v11_consolidation_clear_new_foes(game_state)
+
         nxt = fight_v11_grouped_next(game_state, "consolidate")
-        if nxt is not None and uid in nxt[1]:
-            game_state["consolidation_done"].add(uid)  # move UI (3 modes) câblée au Bloc front
-            _fight_v11_log(game_state, f"CONSOLIDATE unit {uid} → SKIP (UI move non câblée, V1)")
+        eligible = nxt[1] if nxt else []
+
+        if atype == "end_consolidation":
+            # « Terminer la consolidation » : marque tout le groupe actif comme traité.
+            for e in eligible:
+                game_state["consolidation_done"].add(str(e))
+            game_state["active_fight_unit"] = None
+            _fight_v11_clear_consolidation_preview(game_state)
+            _fight_v11_log(
+                game_state,
+                f"CONSOLIDATE → fin demandée par le joueur (groupe {list(eligible)} marqué traité)",
+            )
+            return _fight_v11_manual_state(game_state)
+
+        active = game_state.get("active_fight_unit")
+        act_uid = str(active) if active is not None else None
+
+        def _prov_from_action() -> Dict[str, Tuple[int, int]]:
+            prov: Dict[str, Tuple[int, int]] = {}
+            for e in (action.get("plan") or []):
+                prov[str(e[0])] = (int(e[1]), int(e[2]))
+            return prov
+
+        if skip:
+            # Le joueur renonce à consolider l'unité active → traitée sans déplacement.
+            if act_uid is not None and act_uid in eligible:
+                game_state["consolidation_done"].add(act_uid)
+                game_state["active_fight_unit"] = None
+                _fight_v11_log(game_state, f"CONSOLIDATE unit {act_uid} → SKIP (joueur)")
+            _fight_v11_clear_consolidation_preview(game_state)
+            return _fight_v11_manual_state(game_state)
+
+        if atype == "activate_unit" and uid in eligible:
+            # Sélection d'une unité à consolider → repart d'une sélection vierge + plan par-figurine.
+            u = get_unit_by_id(game_state, uid)
+            if u is None:
+                raise KeyError(f"Consolidation unit {uid} missing from game_state['units']")
+            game_state["active_fight_unit"] = uid
+            _fight_v11_clear_consolidation_preview(game_state)
+            done = {str(x) for x in game_state.get("consolidation_done", set())}
+            game_state["fight_eligible_units"] = [e for e in eligible if str(e) not in done]
+            state = _fight_consolidation_model_plan_state(game_state, u)
+            _fight_v11_log(
+                game_state,
+                f"CONSOLIDATE : unit {uid} sélectionnée (mode={state.get('consolidation_mode')})",
+            )
+            return True, state
+
+        # Actions portant sur l'unité active.
+        if act_uid is None or act_uid not in eligible:
+            return _fight_v11_manual_state(game_state)
+        u = get_unit_by_id(game_state, act_uid)
+        if u is None:
+            raise KeyError(f"Consolidation unit {act_uid} missing from game_state['units']")
+
+        if atype == "consolidation_select_target":
+            # Engaging : toggle d'un ennemi candidat (≤3") dans la sélection préalable au move.
+            target = action.get("targetId")
+            if target is None:
+                return False, {"error": "consolidation_select_target requires targetId", "action": action}
+            tid = str(target)
+            candidates = {str(c) for c in _fight_v11_consolidation_engaging_candidates(game_state, u)}
+            if tid in candidates:
+                sel_map = game_state.setdefault("consolidation_engaging_selection", {})
+                cur = {str(x) for x in sel_map.get(act_uid, [])}
+                if tid in cur:
+                    cur.discard(tid)
+                else:
+                    cur.add(tid)
+                sel_map[act_uid] = sorted(cur)
+                _fight_v11_log(game_state, f"CONSOLIDATE engaging : sélection {act_uid} = {sel_map[act_uid]}")
+            else:
+                _fight_v11_log(game_state, f"CONSOLIDATE engaging : cible {tid} hors candidats {candidates}")
+            sel = action.get("selected_model")
+            return True, _fight_consolidation_model_plan_state(
+                game_state, u, _prov_from_action(), str(sel) if sel is not None else None
+            )
+
+        if atype == "consolidation_select_objective":
+            # Objective : single-select de l'objectif (si >1 candidat).
+            oid = action.get("objectiveId")
+            if oid is None:
+                return False, {"error": "consolidation_select_objective requires objectiveId", "action": action}
+            candidates = _fight_v11_consolidation_objective_candidates(game_state, u)
+            match = next((c for c in candidates if str(c) == str(oid)), None)
+            if match is not None:
+                game_state.setdefault("consolidation_objective_selection", {})[act_uid] = match
+                _fight_v11_log(game_state, f"CONSOLIDATE objective : {act_uid} vise objectif {match}")
+            else:
+                _fight_v11_log(game_state, f"CONSOLIDATE objective : objectif {oid} hors candidats {candidates}")
+            sel = action.get("selected_model")
+            return True, _fight_consolidation_model_plan_state(
+                game_state, u, _prov_from_action(), str(sel) if sel is not None else None
+            )
+
+        if atype == "consolidation_plan_state":
+            sel = action.get("selected_model")
+            return True, _fight_consolidation_model_plan_state(
+                game_state, u, _prov_from_action(), str(sel) if sel is not None else None
+            )
+
+        if atype == "commit_consolidation_plan":
+            mode, tier = _fight_v11_consolidation_targets(game_state, u)
+            # Move bloqué tant que la sélection préalable n'est pas faite.
+            blocked = (
+                mode is None
+                or (mode == "engaging" and not tier)
+                or (mode == "objective" and tier is None)
+            )
+            if blocked:
+                _fight_v11_log(game_state, f"CONSOLIDATE unit {act_uid} → commit bloqué (sélection requise, mode={mode})")
+                return True, _fight_consolidation_model_plan_state(game_state, u, _prov_from_action(), None)
+            prov = _prov_from_action()
+            models_cache = require_key(game_state, "models_cache")
+            squad_models = require_key(game_state, "squad_models")
+            alive = [str(m) for m in require_key(squad_models, act_uid) if str(m) in models_cache]
+            origin = {m: (int(models_cache[m]["col"]), int(models_cache[m]["row"])) for m in alive}
+            full_plan: List[Tuple[str, int, int]] = [
+                (m, prov[m][0], prov[m][1]) if m in prov else (m, origin[m][0], origin[m][1])
+                for m in alive
+            ]
+            tier_kind = "zone" if mode == "objective" else "enemy"
+            lock_base_contact = mode == "ongoing"
+            closest = _fight_pile_in_closest_tier_ids(game_state, u, list(tier)) if tier_kind == "enemy" else []
+            engaged_before = _fight_units_engaged_with(game_state, u)
+            prev = _fight_consolidation_preview_plan(
+                game_state, act_uid, full_plan, mode=mode, tier_kind=tier_kind, tier=tier,
+                closest_tier_ids=closest, engaged_before_ids=engaged_before,
+                lock_base_contact=lock_base_contact,
+            )
+            if not prev["can_validate"]:
+                _fight_v11_log(game_state, f"CONSOLIDATE unit {act_uid} → plan invalide {prev}")
+                return True, _fight_consolidation_model_plan_state(game_state, u, prov, None)
+            _fight_consolidation_commit_plan(game_state, u, full_plan)
+            game_state["consolidation_done"].add(act_uid)
+            game_state["active_fight_unit"] = None
+            _fight_v11_log(
+                game_state,
+                f"CONSOLIDATE unit {act_uid} → commit par-figurine (mode={mode}, {len(full_plan)} figs)",
+            )
+            # Engaging « New Foes to Face » (12.08 AFTER / §8.C) : résolution CIBLÉE in-place.
+            new_foes_result: Optional[Dict[str, Any]] = None
+            if mode == "engaging":
+                new_foes_result = _fight_v11_consolidation_resolve_new_foes(game_state, u, config)
+            _fight_v11_clear_consolidation_preview(game_state)
+            if new_foes_result is not None and new_foes_result.get("waiting_for_player"):
+                return True, new_foes_result
+            return _fight_v11_manual_state(game_state)
+
+        # Autre action en consolidate → ré-afficher l'état courant.
         return _fight_v11_manual_state(game_state)
 
     return _fight_v11_manual_state(game_state)

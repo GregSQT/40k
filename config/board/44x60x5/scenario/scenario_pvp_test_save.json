@@ -1,7 +1,6 @@
 {
   "primary_objectives": ["objectives_control"],
   "wall_ref": "walls-mc1.json",
-  "objectives_ref": "objectives-none.json",
   "terrain_ref": "terrain-mc1.json",
   "units": [
     { "id": 2, "unit_type": "LibrarianTerminator",                 "player": 1, "col": 155, "row": 47 },

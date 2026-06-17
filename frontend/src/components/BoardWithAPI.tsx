@@ -3039,6 +3039,29 @@ export const BoardWithAPI: React.FC = () => {
               )?.player;
             })()}
             onEndPileIn={isGameOver ? undefined : apiProps.onEndPileIn}
+            showFightAtk={
+              apiProps.gameState?.phase === "fight" &&
+              apiProps.gameState?.fight_subphase !== "pile_in" &&
+              (apiProps.gameState?.fight_eligible_units?.length ?? 0) > 0 &&
+              apiProps.mode === "select" &&
+              !apiProps.gameState?.active_fight_unit
+            }
+            fightAtkPlayer={(() => {
+              const eligible = apiProps.gameState?.fight_eligible_units;
+              if (!eligible || eligible.length === 0) return undefined;
+              return apiProps.gameState?.units?.find(
+                (u) => String(u.id) === String(eligible[0])
+              )?.player;
+            })()}
+            onFightAtk={
+              isGameOver
+                ? undefined
+                : () => {
+                    const eligible = apiProps.gameState?.fight_eligible_units;
+                    if (!eligible || eligible.length === 0) return;
+                    apiProps.onSelectUnit(Number(eligible[0]));
+                  }
+            }
             maxTurns={(() => {
               if (!gameConfig?.game_rules?.max_turns) {
                 throw new Error(
@@ -3531,6 +3554,177 @@ export const BoardWithAPI: React.FC = () => {
                 </span>
               )}
             </div>
+          </div>
+        )}
+
+      {/* Barre d'action CONSOLIDATION par-figurine (V11 12.08, miroir pile-in). Cascade 3 modes :
+          Engaging = sélection de cibles d'abord ; Objective = sélection d'objectif si >1 candidat ;
+          Ongoing = direct. Cancel + Valider (commit) + Terminer la consolidation. */}
+      {apiProps.gameState?.phase === "fight" &&
+        apiProps.mode === "consolidationModelMove" &&
+        apiProps.consolidationMovePlan != null && (
+          <div
+            className="squad-action-bar"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              background: "#1f2937",
+              border: "1px solid #555",
+              borderRadius: "8px",
+              padding: 8,
+              marginTop: -6,
+              marginBottom: 2,
+            }}
+          >
+            <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isGameOver) apiProps.onCancelConsolidationModelMove?.();
+                }}
+                style={{
+                  border: "1px solid rgba(0,0,0,0.35)",
+                  borderRadius: 6,
+                  background: "#6b7280",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  padding: "8px 14px",
+                  width: 110,
+                  textAlign: "center",
+                }}
+              >
+                Cancel
+              </button>
+              <span style={{ color: "#cbd5e1", fontSize: 13, fontWeight: 700 }}>
+                {apiProps.consolidationMovePlan.consolidationMode === "ongoing"
+                  ? "Ongoing"
+                  : apiProps.consolidationMovePlan.consolidationMode === "engaging"
+                    ? "Engaging"
+                    : apiProps.consolidationMovePlan.consolidationMode === "objective"
+                      ? "Objective"
+                      : "—"}
+              </span>
+              {/* Engaging : invite à sélectionner ≥1 ennemi (clic sur l'unité ennemie ≤3"). */}
+              {apiProps.consolidationMovePlan.consolidationMode === "engaging" &&
+                apiProps.consolidationMovePlan.awaitingTargetSelection && (
+                  <span style={{ color: "#fca5a5", fontSize: 13, fontWeight: 600 }}>
+                    Sélectionne au moins une unité ennemie à engager (clic).
+                  </span>
+                )}
+              {/* Objective : boutons de sélection de l'objectif si >1 candidat. */}
+              {apiProps.consolidationMovePlan.consolidationMode === "objective" &&
+                apiProps.consolidationMovePlan.awaitingObjectiveSelection &&
+                apiProps.consolidationMovePlan.objectiveCandidates.map((oid) => (
+                  <button
+                    key={oid}
+                    type="button"
+                    onClick={() => {
+                      if (!isGameOver) apiProps.onConsolidationSelectObjective?.(oid);
+                    }}
+                    style={{
+                      border: "1px solid rgba(0,0,0,0.35)",
+                      borderRadius: 6,
+                      background: "#0ea5e9",
+                      color: "#fff",
+                      cursor: "pointer",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      padding: "6px 12px",
+                    }}
+                  >
+                    Objectif {String(oid)}
+                  </button>
+                ))}
+              {(() => {
+                const canValidate = apiProps.consolidationMovePlan?.canValidate === true;
+                return (
+                  <button
+                    type="button"
+                    className="pile-in-validate"
+                    disabled={!canValidate}
+                    onClick={() => {
+                      if (!isGameOver && canValidate) apiProps.onCommitConsolidationPlan?.();
+                    }}
+                    style={{
+                      border: "1px solid rgba(0,0,0,0.35)",
+                      borderRadius: 6,
+                      cursor: canValidate ? "pointer" : "not-allowed",
+                      fontSize: 14,
+                      fontWeight: 700,
+                      padding: "8px 14px",
+                      width: 140,
+                      textAlign: "center",
+                    }}
+                  >
+                    Validate
+                  </button>
+                );
+              })()}
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isGameOver) apiProps.onEndConsolidation?.();
+                }}
+                style={{
+                  border: "1px solid rgba(0,0,0,0.35)",
+                  borderRadius: 6,
+                  background: "#374151",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  padding: "6px 12px",
+                  marginLeft: 8,
+                }}
+              >
+                Terminer la consolidation
+              </button>
+            </div>
+          </div>
+        )}
+
+      {/* Présentation paresseuse consolidate (sélection libre de l'unité à consolider) : bouton
+          « Terminer la consolidation » quand aucune unité n'est active (miroir end_pile_in). */}
+      {apiProps.gameState?.phase === "fight" &&
+        apiProps.gameState?.fight_subphase === "consolidate" &&
+        apiProps.mode === "select" &&
+        (apiProps.gameState?.fight_eligible_units?.length ?? 0) > 0 && (
+          <div
+            className="squad-action-bar"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              background: "#1f2937",
+              border: "1px solid #555",
+              borderRadius: "8px",
+              padding: 8,
+              marginTop: -6,
+              marginBottom: 2,
+            }}
+          >
+            <span style={{ color: "#cbd5e1", fontSize: 13, fontWeight: 700, marginRight: 8 }}>
+              Consolidation — choisis une unité ou termine.
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                if (!isGameOver) apiProps.onEndConsolidation?.();
+              }}
+              style={{
+                border: "1px solid rgba(0,0,0,0.35)",
+                borderRadius: 6,
+                background: "#374151",
+                color: "#fff",
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: 700,
+                padding: "6px 12px",
+              }}
+            >
+              Terminer la consolidation
+            </button>
           </div>
         )}
 
@@ -4498,6 +4692,22 @@ export const BoardWithAPI: React.FC = () => {
             onMovePileInModel={isGameOver ? () => {} : apiProps.onMovePileInModel}
             onUnplacePileInModel={isGameOver ? () => {} : apiProps.onUnplacePileInModel}
             onCancelPileInModelMove={isGameOver ? async () => {} : apiProps.onCancelPileInModelMove}
+            consolidationMovePlan={apiProps.consolidationMovePlan}
+            consolidationModelPoolRef={apiProps.consolidationModelPoolRef}
+            consolidationModelMaskLoopsRef={apiProps.consolidationModelMaskLoopsRef}
+            consolidationNewFoes={apiProps.consolidationNewFoes}
+            onSelectConsolidationModel={isGameOver ? () => {} : apiProps.onSelectConsolidationModel}
+            onMoveConsolidationModel={isGameOver ? () => {} : apiProps.onMoveConsolidationModel}
+            onUnplaceConsolidationModel={isGameOver ? () => {} : apiProps.onUnplaceConsolidationModel}
+            onCancelConsolidationModelMove={
+              isGameOver ? async () => {} : apiProps.onCancelConsolidationModelMove
+            }
+            onConsolidationSelectTarget={
+              isGameOver ? async () => {} : apiProps.onConsolidationSelectTarget
+            }
+            onConsolidationSelectObjective={
+              isGameOver ? async () => {} : apiProps.onConsolidationSelectObjective
+            }
             squadShootPlan={apiProps.squadShootPlan}
             onStartSquadModelShoot={isGameOver ? async () => {} : apiProps.onStartSquadModelShoot}
             onSelectModelForShoot={isGameOver ? async () => {} : apiProps.onSelectModelForShoot}

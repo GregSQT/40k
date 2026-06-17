@@ -509,6 +509,39 @@ type BoardProps = {
   onUnplacePileInModel?: (modelId: string) => void;
   onCommitPileInPlan?: () => void | Promise<void>;
   onCancelPileInModelMove?: () => void | Promise<void>;
+  /** Consolidation par-figurine (V11 12.08, miroir pile-in, cascade 3 modes). */
+  consolidationMovePlan?: {
+    unitId: number;
+    models: Record<string, { col: number; row: number }>;
+    eligibleModels: string[];
+    unplaced: string[];
+    activeModelId: string | null;
+    canValidate: boolean;
+    perModelValid: Record<string, boolean>;
+    coherencyOk: boolean;
+    unitEngaged: boolean;
+    keptEngagements: boolean;
+    engagedWithAllSelected: boolean;
+    withinObjectiveRange: boolean;
+    engagedModels: string[];
+    consolidationMode: string | null;
+    engagingCandidates: string[];
+    objectiveCandidates: string[];
+    consolidationTargets: string[];
+    awaitingTargetSelection: boolean;
+    awaitingObjectiveSelection: boolean;
+  } | null;
+  consolidationModelPoolRef?: React.RefObject<Set<string>>;
+  consolidationModelMaskLoopsRef?: React.RefObject<number[][] | null>;
+  consolidationNewFoes?: string[];
+  onSelectConsolidationModel?: (modelId: string) => void;
+  onMoveConsolidationModel?: (modelId: string, col: number, row: number) => void;
+  onUnplaceConsolidationModel?: (modelId: string) => void;
+  onCommitConsolidationPlan?: () => void | Promise<void>;
+  onCancelConsolidationModelMove?: () => void | Promise<void>;
+  onEndConsolidation?: () => void | Promise<void>;
+  onConsolidationSelectTarget?: (targetId: number | string) => void | Promise<void>;
+  onConsolidationSelectObjective?: (objectiveId: number | string) => void | Promise<void>;
   /** Tir par-figurine (PvP manuel). */
   squadShootPlan?: {
     unitId: number;
@@ -884,6 +917,15 @@ export default function Board({
   onMovePileInModel,
   onUnplacePileInModel,
   onCancelPileInModelMove,
+  consolidationMovePlan = null,
+  consolidationModelPoolRef,
+  consolidationModelMaskLoopsRef,
+  onSelectConsolidationModel,
+  onMoveConsolidationModel,
+  onUnplaceConsolidationModel,
+  onCancelConsolidationModelMove,
+  onConsolidationSelectTarget,
+  onConsolidationSelectObjective,
   squadShootPlan = null,
   onStartSquadModelShoot,
   onSelectModelForShoot,
@@ -1172,6 +1214,19 @@ export default function Board({
     onCancelPileInModelMove,
     onPileInFocusTargetClick,
   };
+  /** Callbacks consolidation par-figurine — ref à jour (miroir pile-in). */
+  const consolidationModelCallbacksRef = useRef({
+    onMoveConsolidationModel,
+    onCancelConsolidationModelMove,
+    onConsolidationSelectTarget,
+    onConsolidationSelectObjective,
+  });
+  consolidationModelCallbacksRef.current = {
+    onMoveConsolidationModel,
+    onCancelConsolidationModelMove,
+    onConsolidationSelectTarget,
+    onConsolidationSelectObjective,
+  };
   /** Plan provisoire toujours a jour pour les handlers d'event stables (sans relancer le draw). */
   const squadMovePlanRef = useRef(squadMovePlan);
   squadMovePlanRef.current = squadMovePlan;
@@ -1182,20 +1237,40 @@ export default function Board({
   // fig dans un pool). On route le plan/pool/mask/callbacks du mode charge-like actif, puis on expose
   // une vue "squad-shaped" + des alias ``effectivePerModel*`` pour réutiliser ces handlers PIXI.
   // ──────────────────────────────────────────────────────────────────────────
-  /** Modes « charge-like » : pose/dé-pose d'une fig dans un pool (charge OU pile-in). */
+  /** Modes « charge-like » : pose/dé-pose d'une fig dans un pool (charge / pile-in / consolidation). */
   const isPileInModelMove = mode === "pileInModelMove";
-  const perModelChargeLike = mode === "chargeModelMove" || isPileInModelMove;
+  const isConsolidationModelMove = mode === "consolidationModelMove";
+  const perModelChargeLike =
+    mode === "chargeModelMove" || isPileInModelMove || isConsolidationModelMove;
   /** Plan source brut du mode charge-like actif. */
-  const activeChargeLikePlan = isPileInModelMove ? pileInMovePlan : chargeMovePlan;
+  const activeChargeLikePlan = isPileInModelMove
+    ? pileInMovePlan
+    : isConsolidationModelMove
+      ? consolidationMovePlan
+      : chargeMovePlan;
   /** Pool de la fig active du mode charge-like actif. */
-  const activeChargeLikePoolRef = isPileInModelMove ? pileInModelPoolRef : chargeModelPoolRef;
+  const activeChargeLikePoolRef = isPileInModelMove
+    ? pileInModelPoolRef
+    : isConsolidationModelMove
+      ? consolidationModelPoolRef
+      : chargeModelPoolRef;
   /** Mask loops de la zone de landing du mode charge-like actif. */
   const activeChargeLikeMaskLoopsRef = isPileInModelMove
     ? pileInModelMaskLoopsRef
-    : chargeModelMaskLoopsRef;
+    : isConsolidationModelMove
+      ? consolidationModelMaskLoopsRef
+      : chargeModelMaskLoopsRef;
   /** Callbacks select/unplace du mode charge-like actif (le move/cancel passent par les refs). */
-  const activeChargeLikeSelect = isPileInModelMove ? onSelectPileInModel : onSelectChargeModel;
-  const activeChargeLikeUnplace = isPileInModelMove ? onUnplacePileInModel : onUnplaceChargeModel;
+  const activeChargeLikeSelect = isPileInModelMove
+    ? onSelectPileInModel
+    : isConsolidationModelMove
+      ? onSelectConsolidationModel
+      : onSelectChargeModel;
+  const activeChargeLikeUnplace = isPileInModelMove
+    ? onUnplacePileInModel
+    : isConsolidationModelMove
+      ? onUnplaceConsolidationModel
+      : onUnplaceChargeModel;
 
   /** Vue squad-shaped du plan charge-like : figs posées = plan, non posées = position d'origine. */
   const perModelPlanView = useMemo(() => {
@@ -3769,6 +3844,26 @@ export default function Board({
             return;
           }
         }
+        // Consolidation Engaging : clic sur un ennemi candidat (≤3") → (dé)sélection de cible AVANT le move.
+        if (
+          isConsolidationModelMove &&
+          (consolidationMovePlan?.engagingCandidates?.length ?? 0) > 0
+        ) {
+          const uc = gameState?.units_cache as
+            | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+            | undefined;
+          const hitFoe = (consolidationMovePlan?.engagingCandidates ?? []).find((tid) => {
+            const byModel = uc?.[String(tid)]?.occupied_hexes_by_model;
+            if (!byModel) return false;
+            return Object.values(byModel).some(
+              ([oc, orr]) => cubeDistance(clickCube, offsetToCube(oc, orr)) <= HEX_HIT_TOLERANCE
+            );
+          });
+          if (hitFoe != null) {
+            void consolidationModelCallbacksRef.current.onConsolidationSelectTarget?.(hitFoe);
+            return;
+          }
+        }
         const active = plan.activeModelId;
         const poolRef = activeChargeLikePoolRef?.current;
         // 0) Clic sur une fig DÉJÀ POSÉE → la dé-poser (réajustement / cohésion).
@@ -3800,6 +3895,8 @@ export default function Board({
         if (active && ok) {
           if (isPileInModelMove) {
             pileInModelCallbacksRef.current.onMovePileInModel?.(active, placeC, placeR);
+          } else if (isConsolidationModelMove) {
+            consolidationModelCallbacksRef.current.onMoveConsolidationModel?.(active, placeC, placeR);
           } else {
             chargeModelCallbacksRef.current.onMoveModelInChargePlan?.(active, placeC, placeR);
           }
@@ -3832,6 +3929,8 @@ export default function Board({
     chargeFocusActive,
     chargePreviewTargetIds,
     pileInMovePlan?.pileInTargets,
+    isConsolidationModelMove,
+    consolidationMovePlan?.engagingCandidates,
     gameState?.units_cache,
   ]);
 
@@ -6160,6 +6259,12 @@ export default function Board({
       onCancelPileInModelMove: () => {
         void pileInModelCallbacksRef.current.onCancelPileInModelMove?.();
       },
+      onMoveConsolidationModel: (modelId: string, col: number, row: number) => {
+        consolidationModelCallbacksRef.current.onMoveConsolidationModel?.(modelId, col, row);
+      },
+      onCancelConsolidationModelMove: () => {
+        void consolidationModelCallbacksRef.current.onCancelConsolidationModelMove?.();
+      },
     });
 
     // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Listen for advance button click
@@ -6747,7 +6852,14 @@ export default function Board({
         resolution: number | "auto";
       };
       objective_hexes: [number, number][];
-      objective_zones?: Array<{ id: string; hexes: [number, number][] }>;
+      objective_zones?: Array<{
+        id: string;
+        hexes: Array<[number, number] | { col: number; row: number }>;
+        shape?: string;
+        vertices?: [number, number][];
+        top_left?: [number, number];
+        bottom_right?: [number, number];
+      }>;
       wall_hexes: [number, number][];
       walls?: Array<{
         start: { col: number; row: number };
@@ -6763,10 +6875,16 @@ export default function Board({
         bottom_right?: [number, number];
       }>;
     }
+    // Objectifs = terrains "objective": true : la géométrie (polygone + vertices) vient de
+    // boardConfig.objective_zones (endpoint board) et doit être PRÉFÉRÉE pour le rendu — sinon la
+    // forme est perdue et la zone retombe sur un cercle englobant. objectivesOverride (runtime
+    // gameState.objectives = {name, hexes} sans shape) ne sert qu'en repli (ex. replay sans board).
     const effectiveObjectiveZones =
-      objectivesOverride && objectivesOverride.length > 0
-        ? objectivesOverride.map((obj) => ({ id: obj.name, hexes: obj.hexes }))
-        : boardConfig.objective_zones;
+      boardConfig.objective_zones && boardConfig.objective_zones.length > 0
+        ? boardConfig.objective_zones
+        : objectivesOverride && objectivesOverride.length > 0
+          ? objectivesOverride.map((obj) => ({ id: obj.name, hexes: obj.hexes }))
+          : boardConfig.objective_zones;
 
     const boardConfigWithOverrides: BoardConfigForDrawBoard = {
       ...boardConfig,

@@ -2259,6 +2259,20 @@ export const drawBoard = (
               smoothZone.beginFill(zoneCenterColor, centerAlpha);
               smoothZone.drawRect(rx, ry, rw, rh);
               smoothZone.endFill();
+            } else if (
+              zone.shape === "polygon" &&
+              Array.isArray(zone.vertices) &&
+              zone.vertices.length >= 3
+            ) {
+              // Objectif = terrain "objective": true : on dessine le CONTOUR du polygone du terrain
+              // (pas un cercle, pas de remplissage plein qui inonderait le fond du terrain). La
+              // couleur du contour indique le contrôle. L'objectif coïncide avec la zone (14.02).
+              const pts = zone.vertices.map(([c, r]) => toPixel(c, r));
+              smoothZone.lineStyle(ringWidth, zoneRingColor, ringAlpha);
+              smoothZone.moveTo(pts[0]![0], pts[0]![1]);
+              for (let i = 1; i < pts.length; i++) smoothZone.lineTo(pts[i]![0], pts[i]![1]);
+              smoothZone.closePath();
+              smoothZone.lineStyle(0);
             } else {
               smoothZone.lineStyle(ringWidth, zoneRingColor, ringAlpha);
               smoothZone.drawCircle(mec.cx, mec.cy, outerR);
@@ -2273,20 +2287,25 @@ export const drawBoard = (
         }
       }
 
-      for (const [oc, or_] of baseObjectives) {
-        const ox = oc * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const oy =
-          or_ * HEX_VERT_SPACING + ((oc % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
-        const hexKey = `${oc},${or_}`;
-        const controller = objectiveControl[hexKey];
-        let objColor = OBJECTIVE_NEUTRAL_COLOR;
-        if (controller === 1) objColor = OBJECTIVE_P0_COLOR;
-        else if (controller === 2) objColor = OBJECTIVE_P1_COLOR;
-        const objDot = new PIXI.Graphics();
-        beginObjectiveFill(objDot, objectiveTexture, objColor, objectiveHexFillAlpha);
-        objDot.drawCircle(ox, oy, HEX_RADIUS);
-        objDot.endFill();
-        baseHexContainer.addChild(objDot);
+      // Pastilles per-hex : UNIQUEMENT en rendu non lissé (legacy). Avec le contour lissé
+      // (défaut), la zone objectif est déjà dessinée par sa forme réelle (polygone du terrain) →
+      // ne pas recouvrir la zone d'un tapis de cercles.
+      if (!objectiveSmoothContour) {
+        for (const [oc, or_] of baseObjectives) {
+          const ox = oc * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const oy =
+            or_ * HEX_VERT_SPACING + ((oc % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+          const hexKey = `${oc},${or_}`;
+          const controller = objectiveControl[hexKey];
+          let objColor = OBJECTIVE_NEUTRAL_COLOR;
+          if (controller === 1) objColor = OBJECTIVE_P0_COLOR;
+          else if (controller === 2) objColor = OBJECTIVE_P1_COLOR;
+          const objDot = new PIXI.Graphics();
+          beginObjectiveFill(objDot, objectiveTexture, objColor, objectiveHexFillAlpha);
+          objDot.drawCircle(ox, oy, HEX_RADIUS);
+          objDot.endFill();
+          baseHexContainer.addChild(objDot);
+        }
       }
     }
 

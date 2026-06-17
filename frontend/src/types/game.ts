@@ -11,7 +11,9 @@ export type GameMode =
   | "chargePreview"
   | "advancePreview"
   | "pileInPreview"
-  | "consolidationPreview";
+  | "pileInModelMove"
+  | "consolidationPreview"
+  | "consolidationModelMove";
 // V11 (PDF 12) : sous-phases fight = pile_in -> fight -> consolidate.
 export type FightSubPhase = "pile_in" | "fight" | "consolidate" | null;
 

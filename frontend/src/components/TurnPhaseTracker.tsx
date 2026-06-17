@@ -46,6 +46,9 @@ interface TurnPhaseTrackerProps {
   showPileIn?: boolean; // Affiche le bouton « Pile-in » (sous-phase pile_in en cours)
   pileInPlayer?: number; // Joueur (1/2) qui doit faire le pile-in → couleur du bouton
   onEndPileIn?: () => void; // Termine la sous-phase pile-in et passe à la suivante
+  showFightAtk?: boolean; // Affiche le bouton « ATK » (sous-phase d'attaque fight, hors pile_in)
+  fightAtkPlayer?: number; // Joueur (1/2) qui doit faire attaquer une unité → libellé + couleur
+  onFightAtk?: () => void; // Active la 1ère unité éligible du joueur concerné
   /** Titre de l'étape tutoriel en cours (Rounds / Tours / Phases) pour halos. */
   tutorialStepTitle?: string | null;
   /** Callback pour rapporter les rects viewport des zones à mettre en halo. */
@@ -70,6 +73,9 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
   showPileIn,
   pileInPlayer,
   onEndPileIn,
+  showFightAtk,
+  fightAtkPlayer,
+  onFightAtk,
   tutorialStepTitle,
   onTutorialRects,
   onTutorialPopupAnchor,
@@ -578,6 +584,15 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
               >
                 Pile-in
                 <span aria-hidden="true">→</span>
+              </button>
+            )}
+            {showFightAtk && onFightAtk && (
+              <button
+                type="button"
+                className={`pile-in-end-btn ${(fightAtkPlayer ?? current_player) === 2 ? "pile-in-end-btn--p2" : "pile-in-end-btn--p1"}`}
+                onClick={() => onFightAtk()}
+              >
+                P{fightAtkPlayer ?? current_player} ATK
               </button>
             )}
           </div>

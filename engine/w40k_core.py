@@ -273,17 +273,9 @@ class W40KEngine(gym.Env):
                 else:
                     scenario_wall_hexes = board_config["wall_hexes"] if "wall_hexes" in board_config else []
 
-            # Determine objectives: use scenario if provided, otherwise use board config
-            # New format: grouped objectives with id, name, hexes
-            if scenario_result.get("objectives") is not None:
-                scenario_objectives = scenario_result["objectives"]
-            else:
-                # Use board config (legacy flat list or new grouped format)
-                if "default" in board_config:
-                    d = board_config["default"]
-                    scenario_objectives = d["objectives"] if "objectives" in d else (d["objective_hexes"] if "objective_hexes" in d else [])
-                else:
-                    scenario_objectives = board_config["objectives"] if "objectives" in board_config else (board_config["objective_hexes"] if "objective_hexes" in board_config else [])
+            # Objectifs : source UNIQUE = terrains "objective": true, déjà résolus par le
+            # loader de scénario en {id, hexes}. Aucun fallback board config (système legacy supprimé).
+            scenario_objectives = require_key(scenario_result, "objectives")
 
             # Store scenario terrain for game_state initialization
             self._scenario_wall_hexes = scenario_wall_hexes
@@ -565,7 +557,7 @@ class W40KEngine(gym.Env):
             # Polygon terrain areas (obscuring/cover, rules 13.08-13.10), rasterized to hexes
             "terrain_areas": getattr(self, "_scenario_terrain_areas", None) or [],
             # Objectives: grouped structure with id, name, hexes (for objective control calculation)
-            "objectives": self._scenario_objectives if self._scenario_objectives is not None else ((self.config["board"]["default"]["objectives"] if "objectives" in self.config["board"]["default"] else []) if "default" in self.config["board"] else (self.config["board"]["objectives"] if "objectives" in self.config["board"] else [])),
+            "objectives": self._scenario_objectives,
             "tutorial_fight_no_death_unit_ids": getattr(
                 self, "_tutorial_fight_no_death_unit_ids", None
             ),
@@ -5586,15 +5578,8 @@ class W40KEngine(gym.Env):
         from engine.phase_handlers import shooting_handlers
         shooting_handlers.clear_target_pool_cache()
 
-        # Determine objectives: use scenario if provided, otherwise use board config
-        if scenario_result.get("objectives") is not None:
-            self._scenario_objectives = scenario_result["objectives"]
-        else:
-            if "default" in board_config:
-                d = board_config["default"]
-                self._scenario_objectives = d["objectives"] if "objectives" in d else (d["objective_hexes"] if "objective_hexes" in d else [])
-            else:
-                self._scenario_objectives = board_config["objectives"] if "objectives" in board_config else (board_config["objective_hexes"] if "objective_hexes" in board_config else [])
+        # Objectifs : source UNIQUE = terrains "objective": true (résolus en {id, hexes}).
+        self._scenario_objectives = require_key(scenario_result, "objectives")
 
         self.config["deployment_type"] = scenario_deployment_type
         self.config["deployment_type_by_player"] = scenario_deployment_type_by_player

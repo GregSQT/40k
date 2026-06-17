@@ -2861,7 +2861,6 @@ def get_board_config():
         project_root = Path(__file__).resolve().parent.parent
         board_dir = project_root / "config" / board_subdir
         wall_ref = board_spec.get("wall_ref")
-        objectives_ref = board_spec.get("objectives_ref")
         terrain_ref = board_spec.get("terrain_ref")
 
         scenario_file_raw = request.args.get("scenario_file")
@@ -2899,18 +2898,13 @@ def get_board_config():
                     raise ValueError("scenario wall_ref must be filename only")
                 wall_ref = wall_ref_candidate
 
-            has_objectives = "objectives" in scenario_data
-            has_objectives_ref = "objectives_ref" in scenario_data
-            if has_objectives and has_objectives_ref:
-                raise ValueError("scenario cannot define both objectives and objectives_ref")
-            if has_objectives_ref:
-                objectives_ref_raw = scenario_data.get("objectives_ref")
-                if not isinstance(objectives_ref_raw, str) or not objectives_ref_raw.strip():
-                    raise ValueError("scenario objectives_ref must be a non-empty string")
-                objectives_ref_candidate = objectives_ref_raw.strip()
-                if "/" in objectives_ref_candidate or "\\" in objectives_ref_candidate:
-                    raise ValueError("scenario objectives_ref must be filename only")
-                objectives_ref = objectives_ref_candidate
+            # Objectifs legacy (objectives / objectives_ref) supprimés : erreur explicite.
+            for legacy_key in ("objectives", "objectives_ref", "objective_hexes"):
+                if legacy_key in scenario_data:
+                    raise ValueError(
+                        f"scenario uses removed objective key '{legacy_key}'; "
+                        f"objectives are sourced from terrain areas flagged \"objective\": true"
+                    )
 
             if "terrain_ref" in scenario_data:
                 terrain_ref_raw = scenario_data.get("terrain_ref")
@@ -2956,37 +2950,16 @@ def get_board_config():
             else:
                 raise ValueError(f"Wall file {wall_path} must contain 'walls' or 'wall_hexes'")
 
-        objectives = []
-        if scenario_file and isinstance(scenario_data, dict) and "objectives" in scenario_data:
-            scenario_objectives = scenario_data.get("objectives")
-            if not isinstance(scenario_objectives, list):
-                raise ValueError("scenario objectives must be a list")
-            objectives = scenario_objectives
-        elif objectives_ref and objectives_ref.endswith(".json"):
-            obj_path = board_dir / "objectives" / objectives_ref
-            if not obj_path.exists():
-                raise FileNotFoundError(f"Referenced objectives file not found: {obj_path}")
-            with open(obj_path, "r", encoding="utf-8-sig") as f:
-                obj_data = json.load(f)
-            if "objectives" not in obj_data:
-                raise ValueError(f"Objectives file {obj_path} must contain 'objectives'")
-            objectives = obj_data["objectives"]
         from engine.hex_utils import expand_objectives_to_hex_list as _expand_objectives
         board_cols = int(require_key(board_spec, "cols"))
         board_rows = int(require_key(board_spec, "rows"))
-        objectives = _expand_objectives(
-            objectives,
-            cols=board_cols,
-            rows=board_rows,
-            path_hint=f"board objectives ({board_subdir})",
-        )
 
         merged = dict(board_spec)
         merged["wall_hexes"] = wall_hexes
         if wall_segments_raw:
             merged["walls"] = wall_segments_raw
         def _zone_entry(o: dict) -> dict:
-            entry: dict = {"id": str(o["id"]), "hexes": o["hexes"]}
+            entry: dict = {"id": str(o["id"]), "name": str(o.get("name", o["id"])), "hexes": o["hexes"]}
             if "shape" in o:
                 entry["shape"] = o["shape"]
             if "vertices" in o:
@@ -3000,7 +2973,8 @@ def get_board_config():
             if "obscuring" in o:
                 entry["obscuring"] = o["obscuring"]
             return entry
-        merged["objective_zones"] = [_zone_entry(o) for o in objectives]
+        # Objectifs = terrains "objective": true (source unique). Rempli après chargement terrain.
+        merged["objective_zones"] = []
 
         # Terrain décoratif (ruines) : shapes dessinées en périmètre, NON bloquantes
         # (jamais expandées dans wall_hexes). Canal distinct des murs et des objectifs.
@@ -3021,6 +2995,8 @@ def get_board_config():
                 path_hint=f"board terrain ({board_subdir})",
             )
             terrain_zones = [_zone_entry(t) for t in terrain_features]
+            # Source UNIQUE des objectifs côté rendu : terrains flaggés "objective": true.
+            merged["objective_zones"] = [z for z in terrain_zones if z.get("objective")]
             terrain_icons = terrain_data.get("icons", [])
             for gi, g in enumerate(terrain_data.get("walls", [])):
                 if not isinstance(g, dict):

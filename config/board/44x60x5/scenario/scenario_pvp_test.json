@@ -1,7 +1,6 @@
 {
   "primary_objectives": ["objectives_control"],
   "wall_ref": "walls-mc1.json",
-  "objectives_ref": "objectives-none.json",
   "terrain_ref": "terrain-mc1.json",
   "units": [
     { "id": 2, "unit_type": "LibrarianTerminator",                 "player": 1, "col": 155, "row": 47 },
@@ -9,7 +8,7 @@
     { "id": 4, "unit_type": "ApothecaryBiologis",                  "player": 1, "col": 164, "row": 198 },
     { "id": 5, "unit_type": "DreadnoughtBallistus",                "player": 1, "col": 180, "row": 10 },
     { "id": 10003, "unit_type": "DreadnoughtBallistus",                "player": 1, "col": 72, "row": 8 },
-    { "id": 10001, "unit_type": "FenrisianWolf",                "player": 1, "col": 68, "row": 188 },
+    { "id": 10001, "unit_type": "FenrisianWolf",                "player": 1, "col": 36, "row": 161 },
     { "id": 10002, "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer", "player": 1, "col": 63, "row": 65 },
     {
       "id": 6, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 107, "row": 166,
@@ -57,13 +56,13 @@
       ]
     },
     {
-      "id": 8, "unit_type": "Terminator", "player": 1, "col": 45, "row": 142,
+      "id": 8, "unit_type": "Terminator", "player": 1, "col": 65, "row": 142,
       "models": [
-        { "col": 45, "row": 142 },
-        { "col": 55, "row": 142 },
-        { "col": 40, "row": 150 },
-        { "col": 50, "row": 150 },      
-        { "col": 60, "row": 150, "unit_type": "TerminatorCyclone" }
+        { "col": 65, "row": 142 },
+        { "col": 75, "row": 142 },
+        { "col": 75, "row": 156 },
+        { "col": 60, "row": 150 },      
+        { "col": 70, "row": 150, "unit_type": "TerminatorCyclone" }
       ]
     },
     {
@@ -86,7 +85,7 @@
     { "id": 106, "unit_type": "RipperSwarm",          "player": 2, "col": 8,   "row": 200 },
     { "id": 107, "unit_type": "VonRyanLeaper",        "player": 2, "col": 36,  "row": 53 },
     { "id": 108, "unit_type": "VonRyanLeaper",        "player": 2, "col": 25,  "row": 132 },
-    { "id": 109, "unit_type": "VonRyanLeaper",        "player": 2, "col": 87,  "row": 147 },
+    { "id": 109, "unit_type": "Termagant",        "player": 2, "col": 79,  "row": 148 },
     {
       "id": 110, "unit_type": "Barbgaunt", "player": 2, "col": 44, "row": 46,
       "models": [
