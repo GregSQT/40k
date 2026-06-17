@@ -3536,24 +3536,27 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 action: "activate_unit",
                 unitId: numericUnitId.toString(),
               });
-              // Flux manuel par arme/figurine : initialise le plan local. Figs lues
-              // depuis le cache (occupied_hexes_by_model) pour éviter la dép. à
-              // readSquadModelPositions (déclaré plus bas → TDZ/lint).
+              // Flux manuel par arme/figurine : initialise le plan local UNIQUEMENT en étape FIGHT.
+              // En pile_in / consolidate (move par-figurine), ne PAS poser squadFightPlan — sinon le
+              // handler capture fight intercepterait les clics de pose. Figs lues depuis le cache.
               const gsModels = (latestGameStateRef.current ?? gameState) as {
+                fight_subphase?: string | null;
                 units_cache?: Record<string, { occupied_hexes_by_model?: Record<string, unknown> }>;
               };
-              const fightModels = Object.keys(
-                gsModels.units_cache?.[String(numericUnitId)]?.occupied_hexes_by_model ?? {}
-              );
-              setSquadFightPlan({
-                unitId: numericUnitId,
-                models: fightModels,
-                targets: {},
-                declarations: [],
-                activeModelId: null,
-                activeWeaponIndex: null,
-                canValidate: false,
-              });
+              if (gsModels.fight_subphase === "fight") {
+                const fightModels = Object.keys(
+                  gsModels.units_cache?.[String(numericUnitId)]?.occupied_hexes_by_model ?? {}
+                );
+                setSquadFightPlan({
+                  unitId: numericUnitId,
+                  models: fightModels,
+                  targets: {},
+                  declarations: [],
+                  activeModelId: null,
+                  activeWeaponIndex: null,
+                  canValidate: false,
+                });
+              }
             } finally {
               activationInProgressRef.current = false;
               setActivationPendingUnitId(null);

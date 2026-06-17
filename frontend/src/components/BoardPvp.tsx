@@ -4160,6 +4160,10 @@ export default function Board({
   // résolution immédiate legacy.
   useEffect(() => {
     if (phase !== "fight") return;
+    // Réservé à l'étape FIGHT (attribution par-arme). En move par-figurine (pile-in / consolidation),
+    // ``activate_unit`` pose aussi ``squadFightPlan`` ; sans cette garde ce handler capture
+    // intercepterait (stopImmediatePropagation) les clics de pose/sélection par-figurine.
+    if (mode === "pileInModelMove" || mode === "consolidationModelMove") return;
     if (measureMode.kind !== "off") return;
     if (!boardConfig) return;
     const canvas = canvasContainerRef.current?.querySelector("canvas");
@@ -4309,6 +4313,30 @@ export default function Board({
         const prev = lastFightEnemyClickRef.current;
         if (prev && String(prev.targetId) === String(enemy) && now - prev.time < 400) {
           lastFightEnemyClickRef.current = null;
+          // [ENG-DIAG TEMP] diagnostic divergence engagement front/back. A RETIRER.
+          {
+            const enemyByModel = squadFootprintHexKeysFromModelCenters(
+              enemyEntry?.occupied_hexes_by_model,
+              enemyUnit ?? undefined
+            );
+            const aFp = squadFootprintHexKeysFromModelCenters(
+              activeEntry?.occupied_hexes_by_model,
+              activeUnit ?? undefined
+            );
+            const dist =
+              aFp && enemyFp ? minHexDistanceBetweenFootprintKeySets(aFp, enemyFp, steps) : null;
+            console.log("[ENG-DIAG TEMP] front double-clic", {
+              attacker: plan.unitId,
+              target: enemy,
+              steps,
+              dist,
+              usedEnemyFallback: !enemyByModel,
+              aFp: aFp ? [...aFp] : null,
+              enemyFp: enemyFp ? [...enemyFp] : null,
+              activeOccByModel: activeEntry?.occupied_hexes_by_model,
+              enemyOccByModel: enemyEntry?.occupied_hexes_by_model,
+            });
+          }
           // double-clic : toute l'unité → au moins une fig doit être engagée.
           if (isEngaged(activeEntry?.occupied_hexes_by_model)) {
             void cbs.onAssignFightWeapon?.(enemy);
@@ -4331,6 +4359,7 @@ export default function Board({
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
   }, [
     phase,
+    mode,
     measureMode.kind,
     boardConfig,
     gameState?.units_cache,

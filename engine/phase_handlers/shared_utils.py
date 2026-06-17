@@ -4104,6 +4104,30 @@ def declare_attack_weapon(
         intents.append(intent)
         created.append(intent)
     if not created:
+        # [ENG-DIAG TEMP] diagnostic divergence engagement front/back (fight). A RETIRER.
+        try:
+            from engine.spatial_relations import get_engagement_zone
+            from engine.hex_utils import min_distance_between_sets
+            _uc = require_key(game_state, "units_cache")
+            _tgt = _uc.get(str(target_squad_id), {})
+            _tgt_fp = _tgt.get("occupied_hexes") or {(_tgt.get("col"), _tgt.get("row"))}
+            _ez = get_engagement_zone(game_state)
+            _atk_pos = {
+                mid: (models_cache[mid].get("col"), models_cache[mid].get("row"))
+                for mid in squad_models.get(attacker_squad_id, []) if mid in models_cache
+            }
+            _dist = {
+                mid: min_distance_between_sets({pos}, _tgt_fp)
+                for mid, pos in _atk_pos.items()
+            }
+            print(
+                f"[ENG-DIAG TEMP] phase={ctx.phase_label} atk={attacker_squad_id} tgt={target_squad_id} "
+                f"widx={widx} ez={_ez} atk_pos={_atk_pos} tgt_occ_hexes={sorted(_tgt_fp)} "
+                f"min_dist_par_fig={_dist}",
+                flush=True,
+            )
+        except Exception as _e:  # diagnostic seulement, ne doit pas masquer l'erreur reelle
+            print(f"[ENG-DIAG TEMP] echec collecte diag: {_e!r}", flush=True)
         raise ValueError(
             f"Aucune figurine de {attacker_squad_id!r} ne peut viser l arme {widx} "
             f"sur {target_squad_id!r} ({ctx.phase_label}: hors portee/engagement ou pas de LoS)"

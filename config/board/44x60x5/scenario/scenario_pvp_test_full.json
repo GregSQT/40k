@@ -8,7 +8,7 @@
     { "id": 4, "unit_type": "ApothecaryBiologis",                  "player": 1, "col": 164, "row": 198 },
     { "id": 5, "unit_type": "DreadnoughtBallistus",                "player": 1, "col": 180, "row": 10 },
     { "id": 10003, "unit_type": "DreadnoughtBallistus",                "player": 1, "col": 72, "row": 8 },
-    { "id": 10001, "unit_type": "FenrisianWolf",                "player": 1, "col": 40, "row": 161 },
+    { "id": 10001, "unit_type": "FenrisianWolf",                "player": 1, "col": 36, "row": 161 },
     { "id": 10002, "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer", "player": 1, "col": 63, "row": 65 },
     {
       "id": 6, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 107, "row": 166,
@@ -31,15 +31,17 @@
       ]
     },
     {
-      "id": 7, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 130, "row": 25,
+      "id": 7, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 124, "row": 20,
       "models": [
-        { "col": 130, "row": 25 },
+        { "col": 124, "row": 20 },
+        { "col": 130, "row": 25, "unit_type": "CaptainPowerWeaponBolter" },
         { "col": 136, "row": 20, "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer" },
         { "col": 142, "row": 20 },
         { "col": 127, "row": 14 },
         { "col": 133, "row": 14 },
         { "col": 139, "row": 14 },
-        { "col": 147, "row": 14, "unit_type": "CaptainPowerWeaponBolter" },
+        { "col": 145, "row": 14 },
+        { "col": 124, "row": 8 },
         { "col": 130, "row": 8 },
         { "col": 136, "row": 8 },
         { "col": 142, "row": 8 }
