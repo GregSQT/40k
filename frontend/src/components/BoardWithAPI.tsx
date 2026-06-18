@@ -3034,9 +3034,8 @@ export const BoardWithAPI: React.FC = () => {
             pileInPlayer={(() => {
               const eligible = apiProps.gameState?.fight_eligible_units;
               if (!eligible || eligible.length === 0) return undefined;
-              return apiProps.gameState?.units?.find(
-                (u) => String(u.id) === String(eligible[0])
-              )?.player;
+              return apiProps.gameState?.units?.find((u) => String(u.id) === String(eligible[0]))
+                ?.player;
             })()}
             onEndPileIn={isGameOver ? undefined : apiProps.onEndPileIn}
             showFightAtk={
@@ -3049,9 +3048,8 @@ export const BoardWithAPI: React.FC = () => {
             fightAtkPlayer={(() => {
               const eligible = apiProps.gameState?.fight_eligible_units;
               if (!eligible || eligible.length === 0) return undefined;
-              return apiProps.gameState?.units?.find(
-                (u) => String(u.id) === String(eligible[0])
-              )?.player;
+              return apiProps.gameState?.units?.find((u) => String(u.id) === String(eligible[0]))
+                ?.player;
             })()}
             onFightAtk={
               isGameOver
@@ -3577,7 +3575,9 @@ export const BoardWithAPI: React.FC = () => {
               marginBottom: 2,
             }}
           >
-            <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div
+              style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+            >
               <button
                 type="button"
                 onClick={() => {
@@ -3602,7 +3602,7 @@ export const BoardWithAPI: React.FC = () => {
                 style={{ color: "#cbd5e1", fontSize: 13, fontWeight: 700, cursor: "help" }}
                 title={[
                   "CONSOLIDATION MOVE 12.08",
-                  "Distance max : 3\"",
+                  'Distance max : 3"',
                   "Éligible : phase de Fight et unité ayant été éligible à combattre cette phase.",
                   "Effet : l'unité bouge comme décrit dans Moving (03).",
                   "",
@@ -3736,7 +3736,9 @@ export const BoardWithAPI: React.FC = () => {
                 if (cm.awaitingTargetSelection || cm.awaitingObjectiveSelection) return null;
                 const reasons: string[] = [];
                 if (Object.values(cm.perModelValid ?? {}).some((v) => v === false))
-                  reasons.push("une ou plusieurs figurines ne finissent pas plus près de la cible la plus proche");
+                  reasons.push(
+                    "une ou plusieurs figurines ne finissent pas plus près de la cible la plus proche"
+                  );
                 if (cm.coherencyOk === false)
                   reasons.push("l'unité n'est pas en cohésion d'unité (03.03)");
                 if (cm.consolidationMode === "engaging" && cm.engagedWithAllSelected === false)
@@ -4192,8 +4194,8 @@ export const BoardWithAPI: React.FC = () => {
               padding: "6px 10px",
             }}
           >
-            {Object.keys(apiProps.squadFightPlan.targets).length}/
-            {apiProps.fightAssignableCount} figs assignées
+            {Object.keys(apiProps.squadFightPlan.targets).length}/{apiProps.fightAssignableCount}{" "}
+            figs assignées
           </span>
           <button
             type="button"
@@ -4771,11 +4773,15 @@ export const BoardWithAPI: React.FC = () => {
             onUnplaceChargeModel={isGameOver ? () => {} : apiProps.onUnplaceChargeModel}
             onCancelChargeModelMove={isGameOver ? async () => {} : apiProps.onCancelChargeModelMove}
             chargeFocusActive={apiProps.chargeFocusActive}
-            onChargeFocusTargetClick={isGameOver ? async () => {} : apiProps.onChargeFocusTargetClick}
+            onChargeFocusTargetClick={
+              isGameOver ? async () => {} : apiProps.onChargeFocusTargetClick
+            }
             pileInMovePlan={apiProps.pileInMovePlan}
             pileInFocusActive={apiProps.pileInFocusActive}
             pileInFocusTargetId={apiProps.pileInFocusTargetId}
-            onPileInFocusTargetClick={isGameOver ? async () => {} : apiProps.onPileInFocusTargetClick}
+            onPileInFocusTargetClick={
+              isGameOver ? async () => {} : apiProps.onPileInFocusTargetClick
+            }
             pileInModelPoolRef={apiProps.pileInModelPoolRef}
             pileInModelMaskLoopsRef={apiProps.pileInModelMaskLoopsRef}
             onSelectPileInModel={isGameOver ? () => {} : apiProps.onSelectPileInModel}
@@ -4788,7 +4794,9 @@ export const BoardWithAPI: React.FC = () => {
             consolidationNewFoes={apiProps.consolidationNewFoes}
             onSelectConsolidationModel={isGameOver ? () => {} : apiProps.onSelectConsolidationModel}
             onMoveConsolidationModel={isGameOver ? () => {} : apiProps.onMoveConsolidationModel}
-            onUnplaceConsolidationModel={isGameOver ? () => {} : apiProps.onUnplaceConsolidationModel}
+            onUnplaceConsolidationModel={
+              isGameOver ? () => {} : apiProps.onUnplaceConsolidationModel
+            }
             onCancelConsolidationModelMove={
               isGameOver ? async () => {} : apiProps.onCancelConsolidationModelMove
             }

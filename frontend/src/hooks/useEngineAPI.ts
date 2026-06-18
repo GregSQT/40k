@@ -654,7 +654,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const consolidationNewFoesRef = useRef<string[]>([]);
   consolidationNewFoesRef.current = consolidationNewFoes;
   /** Mode Focus consolidation (Défensif / Offensif) ; null = aucun (miroir pile-in). */
-  const [consolidationFocusMode, setConsolidationFocusMode] = useState<null | "defensive" | "offensive">(null);
+  const [consolidationFocusMode, setConsolidationFocusMode] = useState<
+    null | "defensive" | "offensive"
+  >(null);
   const consolidationFocusModeRef = useRef<null | "defensive" | "offensive">(null);
   consolidationFocusModeRef.current = consolidationFocusMode;
   /**
@@ -1243,12 +1245,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           typeof weaponHiddenTooFarByUnitId !== "object" ||
           Array.isArray(weaponHiddenTooFarByUnitId)
         ) {
-          throw new Error("squad_select_weapon: hidden_too_far_by_unit_id absent/invalid in response");
+          throw new Error(
+            "squad_select_weapon: hidden_too_far_by_unit_id absent/invalid in response"
+          );
         }
         const hiddenTooFarByUnitId: Record<string, boolean> = {};
         for (const [tid, tooFar] of Object.entries(weaponHiddenTooFarByUnitId)) {
           if (typeof tooFar !== "boolean") {
-            throw new Error(`squad_select_weapon: hidden_too_far_by_unit_id.${tid} must be boolean`);
+            throw new Error(
+              `squad_select_weapon: hidden_too_far_by_unit_id.${tid} must be boolean`
+            );
           }
           hiddenTooFarByUnitId[tid] = tooFar;
         }
@@ -2062,7 +2068,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             if (phase === "shoot") {
               const rawTooFar = data.result.hidden_too_far_by_unit_id;
               if (!rawTooFar || typeof rawTooFar !== "object" || Array.isArray(rawTooFar)) {
-                throw new Error("shoot blinking response missing required hidden_too_far_by_unit_id");
+                throw new Error(
+                  "shoot blinking response missing required hidden_too_far_by_unit_id"
+                );
               }
               hiddenTooFarByUnitId = {};
               for (const [unitId, tooFar] of Object.entries(rawTooFar as Record<string, unknown>)) {
@@ -2624,7 +2632,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           // Fight phase : CONSOLIDATION PAR-FIGURINE (V11 12.08, miroir pile-in). La réponse
           // d'activate_unit / des refresh porte ``consolidation_model_move:true`` → on entre/maintient
           // le mode et on applique le plan_state (cascade ongoing/engaging/objective).
-          else if (data.game_state?.phase === "fight" && data.result?.consolidation_model_move === true) {
+          else if (
+            data.game_state?.phase === "fight" &&
+            data.result?.consolidation_model_move === true
+          ) {
             const uid = parseInt(
               String(data.result.unitId ?? data.game_state.active_fight_unit),
               10
@@ -4275,12 +4286,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
       const rawTooFar = result.hidden_too_far_by_unit_id;
       if (!rawTooFar || typeof rawTooFar !== "object" || Array.isArray(rawTooFar)) {
-        throw new Error("squad_shoot select_model: hidden_too_far_by_unit_id absent/invalid in response");
+        throw new Error(
+          "squad_shoot select_model: hidden_too_far_by_unit_id absent/invalid in response"
+        );
       }
       const hiddenTooFarByUnitId: Record<string, boolean> = {};
       for (const [tid, tooFar] of Object.entries(rawTooFar as Record<string, unknown>)) {
         if (typeof tooFar !== "boolean") {
-          throw new Error(`squad_shoot select_model: hidden_too_far_by_unit_id.${tid} must be boolean`);
+          throw new Error(
+            `squad_shoot select_model: hidden_too_far_by_unit_id.${tid} must be boolean`
+          );
         }
         hiddenTooFarByUnitId[tid] = tooFar;
       }
@@ -4339,12 +4354,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
       const rawTooFar = result.hidden_too_far_by_unit_id;
       if (!rawTooFar || typeof rawTooFar !== "object" || Array.isArray(rawTooFar)) {
-        throw new Error("squad_shoot_los_overview: hidden_too_far_by_unit_id absent/invalid in response");
+        throw new Error(
+          "squad_shoot_los_overview: hidden_too_far_by_unit_id absent/invalid in response"
+        );
       }
       const hiddenTooFarByUnitId: Record<string, boolean> = {};
       for (const [tid, tooFar] of Object.entries(rawTooFar as Record<string, unknown>)) {
         if (typeof tooFar !== "boolean") {
-          throw new Error(`squad_shoot_los_overview: hidden_too_far_by_unit_id.${tid} must be boolean`);
+          throw new Error(
+            `squad_shoot_los_overview: hidden_too_far_by_unit_id.${tid} must be boolean`
+          );
         }
         hiddenTooFarByUnitId[tid] = tooFar;
       }
@@ -4724,7 +4743,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
           : prev
       );
-      console.log(`[SQUAD-FIGHT] assign model=${modelId} → ${targetUnitId} (${decls.length} intents)`);
+      console.log(
+        `[SQUAD-FIGHT] assign model=${modelId} → ${targetUnitId} (${decls.length} intents)`
+      );
     },
     [executeAction]
   );
@@ -4745,7 +4766,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           targetId: String(targetUnitId),
         });
       } catch (e) {
-        console.error(`[SQUAD-FIGHT] assign weapon=${weaponIndex} target=${targetUnitId} FAILED`, e);
+        console.error(
+          `[SQUAD-FIGHT] assign weapon=${weaponIndex} target=${targetUnitId} FAILED`,
+          e
+        );
         setError(`Cible refusée: ${formatApiConnectionError(e)}`);
         return;
       }
@@ -4766,7 +4790,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
           : prev
       );
-      console.log(`[SQUAD-FIGHT] assign weapon=${weaponIndex} → ${targetUnitId} (${decls.length} intents)`);
+      console.log(
+        `[SQUAD-FIGHT] assign weapon=${weaponIndex} → ${targetUnitId} (${decls.length} intents)`
+      );
     },
     [executeAction]
   );
@@ -6138,7 +6164,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const engagedModels = ((result.engaged_models ?? []) as unknown[]).map((m) => String(m));
     const consolidationMode =
       result.consolidation_mode != null ? String(result.consolidation_mode) : null;
-    const engagingCandidates = ((result.engaging_candidates ?? []) as unknown[]).map((m) => String(m));
+    const engagingCandidates = ((result.engaging_candidates ?? []) as unknown[]).map((m) =>
+      String(m)
+    );
     const objectiveCandidates = ((result.objective_candidates ?? []) as unknown[]).map((m) =>
       String(m)
     );

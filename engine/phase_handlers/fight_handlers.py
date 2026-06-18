@@ -7391,6 +7391,8 @@ def _fight_v11_manual_step(
             if blocked:
                 _fight_v11_log(game_state, f"CONSOLIDATE unit {act_uid} → commit bloqué (sélection requise, mode={mode})")
                 return True, _fight_consolidation_model_plan_state(game_state, u, _prov_from_action(), None)
+            # Invariant post-guard : mode/tier sont renseignés (None ⇒ blocked, déjà retourné).
+            assert mode is not None and tier is not None
             prov = _prov_from_action()
             models_cache = require_key(game_state, "models_cache")
             squad_models = require_key(game_state, "squad_models")

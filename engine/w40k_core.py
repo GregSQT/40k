@@ -373,10 +373,13 @@ class W40KEngine(gym.Env):
                 else:
                     self.training_config = None
 
-            # Scenario provided via config (API path) - use if present, else fall back to board config
+            # Scenario provided via config (API path). Objectifs : source unique = terrains
+            # "objective": true, déjà résolus en {id, name, hexes} par le loader et passés via
+            # 'scenario_objectives'. Absent du config = aucun objectif fourni → liste vide (état
+            # métier valide, pas un fallback masquant : zéro terrain objectif = zéro objectif).
             self._scenario_wall_hexes = self.config.get("scenario_wall_hexes")
             self._scenario_wall_ref = self.config.get("scenario_wall_ref")
-            self._scenario_objectives = self.config.get("scenario_objectives")
+            self._scenario_objectives = self.config.get("scenario_objectives") or []
             self._scenario_terrain_areas = self.config.get("scenario_terrain_areas")
             self._scenario_primary_objective = self.config.get("primary_objective")
             self._tutorial_fight_no_death_unit_ids = self.config.get(

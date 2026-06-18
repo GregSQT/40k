@@ -47,12 +47,14 @@ def _minimal_config() -> Dict[str, Any]:
                 "hex_radius": 1.0,
                 "margin": 0.0,
                 "wall_hexes": [],
-                "objectives": [
-                    {"id": "test_obj_1", "name": "Alpha", "hexes": [[5, 5]]}
-                ],
                 "inches_to_subhex": 1,
             }
         },
+        # Objectifs : source unique = terrains "objective": true, résolus en {id, name, hexes}
+        # et passés au moteur via 'scenario_objectives' (canal config, ex-board.objectives supprimé).
+        "scenario_objectives": [
+            {"id": "test_obj_1", "name": "Alpha", "hexes": [[5, 5]]}
+        ],
         "game_rules": build_game_rules(
             engagement_zone=1,
             max_base_size_hex=35,

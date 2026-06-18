@@ -150,7 +150,9 @@ function parseBackendMoveLosPreviewPayload(
   const hiddenTooFarByUnitId: Record<string, boolean> = {};
   for (const [unitId, tooFar] of Object.entries(tooFarRaw as Record<string, unknown>)) {
     if (typeof tooFar !== "boolean") {
-      throw new Error(`preview_shoot_from_position hidden_too_far_by_unit_id.${unitId} must be boolean`);
+      throw new Error(
+        `preview_shoot_from_position hidden_too_far_by_unit_id.${unitId} must be boolean`
+      );
     }
     hiddenTooFarByUnitId[unitId] = tooFar;
   }
@@ -356,7 +358,8 @@ type Mode =
   | "advancePreview"
   | "pileInPreview"
   | "pileInModelMove"
-  | "consolidationPreview";
+  | "consolidationPreview"
+  | "consolidationModelMove";
 
 /** État du mode mesure (règle dans la barre). */
 export type MeasureModeState =
@@ -1368,7 +1371,10 @@ export default function Board({
     const result = new Set<string>();
     if (phase !== "fight" || !squadFightPlan) return result;
     const uc = gameState?.units_cache as
-      | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]>; player?: number }>
+      | Record<
+          string,
+          { occupied_hexes_by_model?: Record<string, [number, number]>; player?: number }
+        >
       | undefined;
     if (!uc) return result;
     const activeEntry = uc[String(squadFightPlan.unitId)];
@@ -1380,7 +1386,8 @@ export default function Board({
     )?.config?.game_rules;
     const cfgRules = gameConfig?.game_rules as { engagement_zone?: number } | undefined;
     const engRules = gsRules?.engagement_zone ?? cfgRules?.engagement_zone ?? 1;
-    const i2sRaw = (boardConfig as unknown as { inches_to_subhex?: number } | null)?.inches_to_subhex;
+    const i2sRaw = (boardConfig as unknown as { inches_to_subhex?: number } | null)
+      ?.inches_to_subhex;
     const i2s = typeof i2sRaw === "number" ? i2sRaw : 10;
     const steps = engRules * i2s;
     const enemyFps: Array<Set<string>> = [];
@@ -3896,7 +3903,11 @@ export default function Board({
           if (isPileInModelMove) {
             pileInModelCallbacksRef.current.onMovePileInModel?.(active, placeC, placeR);
           } else if (isConsolidationModelMove) {
-            consolidationModelCallbacksRef.current.onMoveConsolidationModel?.(active, placeC, placeR);
+            consolidationModelCallbacksRef.current.onMoveConsolidationModel?.(
+              active,
+              placeC,
+              placeR
+            );
           } else {
             chargeModelCallbacksRef.current.onMoveModelInChargePlan?.(active, placeC, placeR);
           }
@@ -4303,7 +4314,9 @@ export default function Board({
               enemyUnit
             ) ?? unitFootprintHexKeys(enemyUnit))
           : null;
-        const isEngaged = (attackerByModel: Record<string, [number, number]> | undefined): boolean => {
+        const isEngaged = (
+          attackerByModel: Record<string, [number, number]> | undefined
+        ): boolean => {
           if (!enemyFp || !activeUnit) return false;
           const aFp = squadFootprintHexKeysFromModelCenters(attackerByModel, activeUnit);
           if (!aFp) return false;
@@ -4313,30 +4326,6 @@ export default function Board({
         const prev = lastFightEnemyClickRef.current;
         if (prev && String(prev.targetId) === String(enemy) && now - prev.time < 400) {
           lastFightEnemyClickRef.current = null;
-          // [ENG-DIAG TEMP] diagnostic divergence engagement front/back. A RETIRER.
-          {
-            const enemyByModel = squadFootprintHexKeysFromModelCenters(
-              enemyEntry?.occupied_hexes_by_model,
-              enemyUnit ?? undefined
-            );
-            const aFp = squadFootprintHexKeysFromModelCenters(
-              activeEntry?.occupied_hexes_by_model,
-              activeUnit ?? undefined
-            );
-            const dist =
-              aFp && enemyFp ? minHexDistanceBetweenFootprintKeySets(aFp, enemyFp, steps) : null;
-            console.log("[ENG-DIAG TEMP] front double-clic", {
-              attacker: plan.unitId,
-              target: enemy,
-              steps,
-              dist,
-              usedEnemyFallback: !enemyByModel,
-              aFp: aFp ? [...aFp] : null,
-              enemyFp: enemyFp ? [...enemyFp] : null,
-              activeOccByModel: activeEntry?.occupied_hexes_by_model,
-              enemyOccByModel: enemyEntry?.occupied_hexes_by_model,
-            });
-          }
           // double-clic : toute l'unité → au moins une fig doit être engagée.
           if (isEngaged(activeEntry?.occupied_hexes_by_model)) {
             void cbs.onAssignFightWeapon?.(enemy);
@@ -4644,7 +4633,8 @@ export default function Board({
           for (const mid of pileInMovePlan.engagedModels) {
             // Position posée (plan) si présente, sinon position d'origine (figs non bougées engagées).
             const placed = pileInMovePlan.models[mid];
-            const pos = placed ?? (pByModel?.[mid] ? { col: pByModel[mid][0], row: pByModel[mid][1] } : null);
+            const pos =
+              placed ?? (pByModel?.[mid] ? { col: pByModel[mid][0], row: pByModel[mid][1] } : null);
             if (!pos) continue;
             const [cx, cy] = hexCenter(pos.col, pos.row);
             overlay.beginFill(GREEN, 0.45);
