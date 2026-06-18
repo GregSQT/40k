@@ -2364,36 +2364,128 @@ def get_min_neighbors(game_state: Dict[str, Any]) -> int:
     return int(require_key(game_rules, "squad_min_neighbors"))
 
 
-def _positions_in_coherency(
-    positions: List[Tuple[int, int]], game_state: Dict[str, Any]
-) -> bool:
-    """Coherency (03.03) sur une liste de positions (centre-a-centre, horizontal).
+def coherency_violation_flags(
+    models: List[Dict[str, Any]], game_state: Dict[str, Any]
+) -> List[bool]:
+    """SOURCE UNIQUE de la coherency par-figurine (03.03). flags[i] = True si la fig i viole la
+    coherency (1re puce : < min_neighbors voisin a <= model ; 2e puce : etalement). Partagee par
+    le commit (_positions_in_coherency) ET le voile rouge per_model des handlers move/charge/fight.
 
-    Source de verite unique pour validate_squad_coherency et _validate_plan_coherency.
-    Pour chaque fig, les DEUX puces doivent tenir :
-      - 1re puce : >= min_neighbors autres figs a <= unit_model_cohesion_range.
-      - 2e puce  : aucune autre fig a > unit_global_cohesion_range.
-    Unite <= 1 fig : coherente d'office (la regle ne contraint que les unites > 1 fig).
+    Chaque fig : dict col/row/BASE_SHAPE/BASE_SIZE/orientation. Mode lu dans
+    game_rules.cohesion_distance_mode :
+      - 'euclidean' : distance euclidienne centre-a-centre (geometrie de rendu) — coincide avec le
+        visuel (halos). 2" bord-a-bord, etalement = cercle de rayon 9"/2 sur le barycentre.
+      - 'footprint' : distance hex empreinte-a-empreinte (min_distance_between_sets) ; etalement =
+        aucune paire > 9".
+    Unite <= 1 fig : jamais en violation.
     """
-    n = len(positions)
+    n = len(models)
     if n <= 1:
-        return True
+        return [False] * n
     coh = get_coherency_subhex(game_state)
     coh_max = get_cohesion_max_subhex(game_state)
     min_neighbors = get_min_neighbors(game_state)
-    for i, (ci, ri) in enumerate(positions):
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    mode = require_key(game_rules, "cohesion_distance_mode")
+    if mode == "euclidean":
+        return _coherency_flags_euclidean(models, coh, coh_max, min_neighbors)
+    if mode == "footprint":
+        return _coherency_flags_footprint(models, game_state, coh, coh_max, min_neighbors)
+    raise ValueError(
+        f"Invalid game_rules.cohesion_distance_mode: {mode!r} (expected 'euclidean' or 'footprint')"
+    )
+
+
+def _positions_in_coherency(
+    models: List[Dict[str, Any]], game_state: Dict[str, Any]
+) -> bool:
+    """Coherency d'ensemble (03.03) : True si AUCUNE fig n'est en violation. Delegue a
+    coherency_violation_flags (source unique). Unite <= 1 fig : coherente d'office."""
+    return not any(coherency_violation_flags(models, game_state))
+
+
+def _coherency_flags_euclidean(
+    models: List[Dict[str, Any]], coh: int, coh_max: int, min_neighbors: int
+) -> List[bool]:
+    """Flags par-fig en distance EUCLIDIENNE centre-a-centre, reproduisant la geometrie de rendu
+    (hexCenter, hex_radius=1) pour coincider avec les halos a l'ecran.
+      - 1re puce : >= min_neighbors voisin bord-a-bord (<= coh, soit 2" entre bords de base).
+      - 2e puce  : chaque fig dans le cercle de rayon coh_max/2 centre sur le barycentre (<= 9").
+    """
+    from math import hypot
+    sqrt3 = 3.0 ** 0.5
+    n = len(models)
+
+    def cart(m: Dict[str, Any]) -> Tuple[float, float]:
+        c, r = int(m["col"]), int(m["row"])
+        return (c * 1.5, r * sqrt3 + (c % 2) * sqrt3 / 2.0)
+
+    def base_radius(m: Dict[str, Any]) -> float:
+        s = int(m["BASE_SIZE"])
+        return s * 1.5 / 2.0 if s > 1 else 0.7
+
+    pts = [cart(m) for m in models]
+    radii = [base_radius(m) for m in models]
+    model_range = coh * sqrt3              # 2" en unites de rendu (hex_radius=1)
+    global_radius = coh_max * sqrt3 / 2.0  # cercle d'etalement (Ø = 9")
+    # Centre du cercle = milieu des 2 figs les plus eloignees (diametre d'etalement), pas le barycentre.
+    bx, by = pts[0]
+    max_d2 = -1.0
+    for i in range(n):
+        for j in range(i + 1, n):
+            dx = pts[i][0] - pts[j][0]
+            dy = pts[i][1] - pts[j][1]
+            d2 = dx * dx + dy * dy
+            if d2 > max_d2:
+                max_d2 = d2
+                bx = (pts[i][0] + pts[j][0]) / 2.0
+                by = (pts[i][1] + pts[j][1]) / 2.0
+    flags = [False] * n
+    for i in range(n):
+        # 2e puce : hors du cercle global — mesure depuis le bord de base (hex le plus proche).
+        if hypot(pts[i][0] - bx, pts[i][1] - by) - radii[i] > global_radius:
+            flags[i] = True
+            continue
+        # 1re puce : pas assez de voisins bord-a-bord <= model.
         neighbors = 0
-        for j, (cj, rj) in enumerate(positions):
+        for j in range(n):
             if i == j:
                 continue
-            d = calculate_hex_distance(ci, ri, cj, rj)
-            if d > coh_max:
-                return False  # 2e puce violee : ecart > 9"
-            if d <= coh:
+            d = hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]) - radii[i] - radii[j]
+            if d <= model_range:
                 neighbors += 1
         if neighbors < min_neighbors:
-            return False  # 1re puce violee : pas assez de voisins a <= 2"
-    return True
+            flags[i] = True
+    return flags
+
+
+def _coherency_flags_footprint(
+    models: List[Dict[str, Any]],
+    game_state: Dict[str, Any],
+    coh: int,
+    coh_max: int,
+    min_neighbors: int,
+) -> List[bool]:
+    """Flags par-fig en distance HEX empreinte-a-empreinte (« closest part of base », 01.04) via
+    min_distance_between_sets. 2e puce : au moins une autre fig a > coh_max."""
+    from engine.hex_utils import min_distance_between_sets
+    n = len(models)
+    footprints = [
+        _compute_unit_occupied_hexes(int(m["col"]), int(m["row"]), m, game_state)
+        for m in models
+    ]
+    neighbor_count = [0] * n
+    too_far = [False] * n
+    for i in range(n):
+        for j in range(i + 1, n):
+            d = min_distance_between_sets(footprints[i], footprints[j], max_distance=coh_max)
+            if d <= coh:
+                neighbor_count[i] += 1
+                neighbor_count[j] += 1
+            if d > coh_max:
+                too_far[i] = True
+                too_far[j] = True
+    return [neighbor_count[i] < min_neighbors or too_far[i] for i in range(n)]
 
 
 def is_base_to_base(col_a: int, row_a: int, col_b: int, row_b: int) -> bool:
@@ -2493,8 +2585,7 @@ def validate_squad_coherency(game_state: Dict[str, Any], squad_id: str) -> bool:
     squad_models = require_key(game_state, "squad_models")
     model_ids = squad_models.get(squad_id, [])  # get allowed
     alive = [models_cache[m] for m in model_ids if m in models_cache]
-    positions = [(int(m["col"]), int(m["row"])) for m in alive]
-    return _positions_in_coherency(positions, game_state)
+    return _positions_in_coherency(alive, game_state)
 
 
 def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -> None:
@@ -2820,10 +2911,16 @@ def _validate_plan_coherency(
 ) -> bool:
     """Verifie la coherency d un plan (positions hypothetiques, sans toucher caches).
 
-    Memes regles que validate_squad_coherency (deleguees a _positions_in_coherency).
+    Empreinte de chaque fig recalculee a sa position hypothetique (base/orientation
+    lues dans models_cache). Memes regles que validate_squad_coherency (deleguees a
+    _positions_in_coherency).
     """
-    positions = list(plan_positions.values())
-    return _positions_in_coherency(positions, game_state)
+    models_cache = require_key(game_state, "models_cache")
+    models = [
+        {**models_cache[mid], "col": int(col), "row": int(row)}
+        for mid, (col, row) in plan_positions.items()
+    ]
+    return _positions_in_coherency(models, game_state)
 
 
 def validate_move_plan(

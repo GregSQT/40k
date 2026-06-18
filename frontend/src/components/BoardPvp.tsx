@@ -188,6 +188,88 @@ function poolEdgeSig(pool: unknown): string {
 }
 
 /**
+ * Halos de cohésion d'escouade (move/advance/charge/pile-in/consolidation, par-figurine au survol).
+ * Tout est calculé en EUCLIDIEN (distance pixel entre centres) pour que les verdicts (couleurs)
+ * coïncident exactement avec les cercles dessinés.
+ *  - Halo model autour de la SEULE figurine active : rayon = base + ``unit_model_cohesion_range`` ;
+ *    blanc par défaut, VERT dès qu'une autre fig touche/pénètre ce cercle (bord-à-bord ≤ portée model).
+ *  - Grand cercle centré barycentre, rayon = ``unit_global_cohesion_range`` / 2 (Ø = écart max autorisé) ;
+ *    vert clair si toutes les figs tiennent dans le cercle, ROUGE dès qu'une fig en sort.
+ * Conversion pouces→pixels : 1 pouce = inches_to_subhex pas, 1 pas ≈ ``√3 · hex_radius``.
+ */
+function drawCohesionHalos(
+  overlay: PIXI.Graphics,
+  p: {
+    positions: Array<{ mid: string; col: number; row: number }>;
+    activeModelId: string | null;
+    baseSize: number;
+    hexRadius: number;
+    margin: number;
+    inchesToSubhex: number;
+    modelCohesionInches: number;
+    globalCohesionInches: number;
+  }
+): void {
+  const n = p.positions.length;
+  if (n < 2) return;
+
+  const HEX_WIDTH = 1.5 * p.hexRadius;
+  const HEX_HEIGHT = Math.sqrt(3) * p.hexRadius;
+  const pxPerStep = HEX_HEIGHT;
+  const hexCenter = (c: number, r: number): [number, number] => [
+    c * HEX_WIDTH + HEX_WIDTH / 2 + p.margin,
+    r * HEX_HEIGHT + ((c % 2) * HEX_HEIGHT) / 2 + HEX_HEIGHT / 2 + p.margin,
+  ];
+
+  const baseRadiusPx =
+    p.baseSize > 1 ? (p.baseSize * 1.5 * p.hexRadius) / 2 : p.hexRadius * 0.7;
+  const modelRangePx = p.modelCohesionInches * p.inchesToSubhex * pxPerStep;
+  const globalRadiusPx = (p.globalCohesionInches * p.inchesToSubhex * pxPerStep) / 2; // Ø = écart max
+  const WHITE = 0xffffff;
+  const GREEN = 0x22c55e;
+  const LIGHT_GREEN = 0x86efac;
+  const RED = 0xef4444;
+  const lineW = Math.max(1.5, HEX_HEIGHT * 0.18);
+
+  // Centres pixel ; centre du cercle = milieu des 2 figs les plus éloignées (diamètre d'étalement).
+  const centers = p.positions.map((m) => hexCenter(m.col, m.row));
+  let bx = centers[0][0],
+    by = centers[0][1];
+  let maxD2 = -1;
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const dx = centers[i][0] - centers[j][0];
+      const dy = centers[i][1] - centers[j][1];
+      const d2 = dx * dx + dy * dy;
+      if (d2 > maxD2) {
+        maxD2 = d2;
+        bx = (centers[i][0] + centers[j][0]) / 2;
+        by = (centers[i][1] + centers[j][1]) / 2;
+      }
+    }
+  }
+
+  // Grand cercle (2e puce) : vert clair si toutes les figs tiennent dans le cercle, rouge sinon.
+  // Mesure depuis le bord de base (hex le plus proche), pas le centre — cohérent avec la 1re puce.
+  const globalOk = centers.every(
+    ([x, y]) => Math.hypot(x - bx, y - by) - baseRadiusPx <= globalRadiusPx
+  );
+  overlay.lineStyle(lineW, globalOk ? LIGHT_GREEN : RED, 0.9);
+  overlay.drawCircle(bx, by, globalRadiusPx);
+
+  // Halo model : autour de la fig active, vert si une autre fig touche/pénètre le cercle (bord-à-bord).
+  const activeIdx = p.positions.findIndex((m) => m.mid === p.activeModelId);
+  if (activeIdx < 0) return;
+  const [acx, acy] = centers[activeIdx];
+  const haloRadiusPx = baseRadiusPx + modelRangePx;
+  const cohesionOk = centers.some(
+    ([x, y], j) => j !== activeIdx && Math.hypot(x - acx, y - acy) <= haloRadiusPx + baseRadiusPx
+  );
+  overlay.lineStyle(lineW, cohesionOk ? GREEN : WHITE, 0.95);
+  overlay.drawCircle(acx, acy, haloRadiusPx);
+}
+
+/**
  * Même liste que le sync ref / ``moveDestinationAnchorsFromState`` (valid_move_destinations_pool ou preview_hexes).
  * Si présente : le draw n’ajoute pas ``move_preview_footprint_zone`` dans ``availableCells`` (évite le double rendu « nid d’abeille »).
  */
@@ -1076,6 +1158,8 @@ export default function Board({
   const manualAllocOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Slice G : overlay voile violet des figs éligibles en chargeModelMove (préservé au redraw). */
   const chargeModelVeilOverlayRef = useRef<PIXI.Graphics | null>(null);
+  /** Halos de cohésion (charge/pile-in/consolidation) redessinés au survol — suivent la fig active. */
+  const cohesionHaloOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Ligne départ → pointeur + libellé distance hex (preview move) */
   const movePreviewGuideLineRef = useRef<PIXI.Graphics | null>(null);
   const hoverMoveOrientationStepRef = useRef<number | null>(null);
@@ -4707,6 +4791,24 @@ export default function Board({
     const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
     const MARGIN_H = boardConfig.margin;
 
+    // Cohésion d'escouade pour les halos (mêmes valeurs config que le moteur / squadModelMove).
+    const inchesToSubhex =
+      (boardConfig as unknown as { inches_to_subhex?: number }).inches_to_subhex ?? 10;
+    const cohesionRules = gameConfig?.game_rules as
+      | { unit_model_cohesion_range?: number; unit_global_cohesion_range?: number }
+      | undefined;
+    if (
+      typeof cohesionRules?.unit_model_cohesion_range !== "number" ||
+      typeof cohesionRules?.unit_global_cohesion_range !== "number"
+    ) {
+      throw new Error(
+        "Missing config: game_rules.unit_model_cohesion_range / unit_global_cohesion_range"
+      );
+    }
+    const modelCohesionInches = cohesionRules.unit_model_cohesion_range;
+    const globalCohesionInches = cohesionRules.unit_global_cohesion_range;
+    const haloBaseSize = resolveBaseSizeForUnitDisplay(charger);
+
     const hxX = (col: number) => col * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H;
     const hxY = (col: number, row: number) =>
       row * HEX_HEIGHT_H + ((col % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H;
@@ -4803,6 +4905,14 @@ export default function Board({
     container.visible = false;
     hoverSpriteRef.current = container;
 
+    // Overlay dédié des halos de cohésion (suivent la fig active au survol).
+    const haloOverlay = new PIXI.Graphics();
+    haloOverlay.zIndex = 2650;
+    haloOverlay.eventMode = "none";
+    haloOverlay.visible = !hideIndicators;
+    app.stage.addChild(haloOverlay);
+    cohesionHaloOverlayRef.current = haloOverlay;
+
     const onMouseMove = (ev: MouseEvent) => {
       // Guard activeModelId (state via ref synchrone) + pool (ref synchrone) : couvre la race
       // pose-faite / render-pas-encore-arrivé, comme le ghost move.
@@ -4813,6 +4923,7 @@ export default function Board({
         if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
           hoverSpriteRef.current.visible = false;
         }
+        if (!haloOverlay.destroyed) haloOverlay.clear();
         hoveredHexRef.current = null;
         return;
       }
@@ -4828,6 +4939,27 @@ export default function Board({
         sprite.visible = true;
       }
       hoveredHexRef.current = { col: best.col, row: best.row };
+
+      // Halos de cohésion : fig active à la position survolée, autres figs à leur position (posée ou origine).
+      const plan = effectivePerModelPlanRef.current;
+      if (plan && !haloOverlay.destroyed) {
+        haloOverlay.clear();
+        const positions = Object.entries(plan.models).map(([mid, pos]) => ({
+          mid,
+          col: mid === plan.activeModelId ? best.col : pos.col,
+          row: mid === plan.activeModelId ? best.row : pos.row,
+        }));
+        drawCohesionHalos(haloOverlay, {
+          positions,
+          activeModelId: plan.activeModelId,
+          baseSize: haloBaseSize,
+          hexRadius: HEX_RADIUS_H,
+          margin: MARGIN_H,
+          inchesToSubhex,
+          modelCohesionInches,
+          globalCohesionInches,
+        });
+      }
     };
 
     canvas.addEventListener("mousemove", onMouseMove);
@@ -4837,6 +4969,12 @@ export default function Board({
       if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
         hoverSpriteRef.current.visible = false;
       }
+      if (!haloOverlay.destroyed) {
+        haloOverlay.clear();
+        app.stage.removeChild(haloOverlay);
+        haloOverlay.destroy();
+      }
+      if (cohesionHaloOverlayRef.current === haloOverlay) cohesionHaloOverlayRef.current = null;
       hoveredHexRef.current = null;
     };
   }, [
@@ -4846,6 +4984,8 @@ export default function Board({
     // → nouvelle identité → l'effet re-tourne et construit le ghost avec le pool désormais rempli.
     activeChargeLikePlan,
     boardConfig,
+    gameConfig,
+    hideIndicators,
     units,
     gameState?.units_cache,
     activeChargeLikePoolRef,
@@ -5129,30 +5269,27 @@ export default function Board({
 
     const inchesToSubhex =
       (boardConfig as unknown as { inches_to_subhex?: number }).inches_to_subhex ?? 10;
-    const coherencyDist = 2 * inchesToSubhex;
-    const baseSize = resolveBaseSizeForUnitDisplay(squadUnit);
-    const baseShape = typeof squadUnit.BASE_SHAPE === "string" ? squadUnit.BASE_SHAPE : "round";
-    const veilRadius = baseSize > 1 ? (baseSize * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
-
-    function hexDist(c1: number, r1: number, c2: number, r2: number): number {
-      const z1 = r1 - Math.floor(c1 / 2),
-        y1 = -c1 - z1;
-      const z2 = r2 - Math.floor(c2 / 2),
-        y2 = -c2 - z2;
-      return Math.max(Math.abs(c1 - c2), Math.abs(y1 - y2), Math.abs(z1 - z2));
-    }
-
-    function minFootprintDist(fpA: Array<[number, number]>, fpB: Array<[number, number]>): number {
-      let best = Infinity;
-      for (const [ac, ar] of fpA) {
-        for (const [bc, br] of fpB) {
-          const d = hexDist(ac, ar, bc, br);
-          if (d < best) best = d;
-          if (best === 0) return 0;
+    const cohesionRules = gameConfig?.game_rules as
+      | {
+          unit_model_cohesion_range?: number;
+          unit_global_cohesion_range?: number;
+          squad_min_neighbors?: number;
         }
-      }
-      return best;
+      | undefined;
+    if (
+      typeof cohesionRules?.unit_model_cohesion_range !== "number" ||
+      typeof cohesionRules?.unit_global_cohesion_range !== "number" ||
+      typeof cohesionRules?.squad_min_neighbors !== "number"
+    ) {
+      throw new Error(
+        "Missing config: game_rules.unit_model_cohesion_range / unit_global_cohesion_range / squad_min_neighbors"
+      );
     }
+    const modelCohesionInches = cohesionRules.unit_model_cohesion_range;
+    const globalCohesionInches = cohesionRules.unit_global_cohesion_range;
+    const minNeighbors = cohesionRules.squad_min_neighbors;
+    const baseSize = resolveBaseSizeForUnitDisplay(squadUnit);
+    const veilRadius = baseSize > 1 ? (baseSize * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
 
     function drawHoverVeil(hoverCol: number, hoverRow: number): void {
       veilOverlay.clear();
@@ -5169,51 +5306,59 @@ export default function Board({
           : ([plan.models[mid].col, plan.models[mid].row] as [number, number])
       );
 
-      // Footprints
-      const footprints = positions.map(([c, r]) => {
-        const fp = computeOccupiedHexes(c, r, baseShape, baseSize);
-        return [...fp] as Array<[number, number]>;
+      // Halos de cohésion (halo fig active blanc→vert + grand cercle réactif).
+      drawCohesionHalos(veilOverlay, {
+        positions: mids.map((mid, i) => ({ mid, col: positions[i][0], row: positions[i][1] })),
+        activeModelId: plan.activeModelId,
+        baseSize,
+        hexRadius: HEX_RADIUS_H,
+        margin: MARGIN_H,
+        inchesToSubhex,
+        modelCohesionInches,
+        globalCohesionInches,
       });
 
-      // Graphe d'adjacence (cohésion empreinte-à-empreinte)
-      const adj: boolean[][] = Array.from({ length: n }, () => new Array(n).fill(false));
+      // Voile rouge par-fig, EUCLIDIEN (cohérent avec les cercles dessinés) : une fig est fautive si
+      // elle a < minNeighbors voisin à ≤ model (1re puce, bord-à-bord) OU sort du cercle global (2e puce).
+      const pxPerStep = HEX_HEIGHT_H;
+      const modelRangePx = modelCohesionInches * inchesToSubhex * pxPerStep;
+      const globalRadiusPx = (globalCohesionInches * inchesToSubhex * pxPerStep) / 2;
+      const neighborMaxPx = modelRangePx + 2 * veilRadius; // bord-à-bord euclidien ≤ portée model
+      const centers = positions.map(([col, row]) => ({
+        x: col * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H,
+        y: row * HEX_HEIGHT_H + ((col % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H,
+      }));
+      // Centre du cercle global = milieu des 2 figs les plus éloignées (diamètre d'étalement).
+      let bx = centers[0].x,
+        by = centers[0].y;
+      let maxD2 = -1;
       for (let i = 0; i < n; i++) {
         for (let j = i + 1; j < n; j++) {
-          if (minFootprintDist(footprints[i], footprints[j]) <= coherencyDist) {
-            adj[i][j] = adj[j][i] = true;
+          const dx = centers[i].x - centers[j].x;
+          const dy = centers[i].y - centers[j].y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 > maxD2) {
+            maxD2 = d2;
+            bx = (centers[i].x + centers[j].x) / 2;
+            by = (centers[i].y + centers[j].y) / 2;
           }
         }
       }
-
-      // Composantes connexes
-      const comp = new Array(n).fill(-1);
-      let numComp = 0;
-      for (let s = 0; s < n; s++) {
-        if (comp[s] !== -1) continue;
-        const stack = [s];
-        comp[s] = numComp;
-        while (stack.length) {
-          const k = stack.pop()!;
-          for (let nb = 0; nb < n; nb++) {
-            if (adj[k][nb] && comp[nb] === -1) {
-              comp[nb] = numComp;
-              stack.push(nb);
-            }
-          }
-        }
-        numComp++;
-      }
-      const compSize: Record<number, number> = {};
-      for (const c of comp) compSize[c] = (compSize[c] ?? 0) + 1;
-
       for (let i = 0; i < n; i++) {
-        if (compSize[comp[i]] * 2 > n) continue; // majorité → valide
-        const [col, row] = positions[i]; // positions[i] est déjà hoverCol/hoverRow pour la fig active
-        const cx = col * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H;
-        const cy =
-          row * HEX_HEIGHT_H + ((col % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H;
+        let neighbors = 0;
+        for (let j = 0; j < n; j++) {
+          if (i === j) continue;
+          if (
+            Math.hypot(centers[i].x - centers[j].x, centers[i].y - centers[j].y) <= neighborMaxPx
+          ) {
+            neighbors++;
+          }
+        }
+        const outOfGlobal =
+          Math.hypot(centers[i].x - bx, centers[i].y - by) - veilRadius > globalRadiusPx;
+        if (neighbors >= minNeighbors && !outOfGlobal) continue; // fig cohérente
         veilOverlay.beginFill(0xff0000, 0.45);
-        veilOverlay.drawCircle(cx, cy, veilRadius);
+        veilOverlay.drawCircle(centers[i].x, centers[i].y, veilRadius);
         veilOverlay.endFill();
       }
     }

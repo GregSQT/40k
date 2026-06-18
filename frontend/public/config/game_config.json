@@ -13,6 +13,7 @@
     "unit_model_cohesion_range": 2,
     "unit_global_cohesion_range": 9,
     "squad_min_neighbors": 1,
+    "cohesion_distance_mode": "euclidean",
     "detection_range": 15,
     "advance_distance_range": 6,
     "avg_charge_roll": 7,

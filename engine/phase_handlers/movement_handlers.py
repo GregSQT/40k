@@ -33,6 +33,7 @@ from .shared_utils import (
     get_engagement_zone, get_max_base_size_hex,
     get_squad_move_budget, validate_move_plan, _validate_plan_coherency, commit_move,
     get_coherency_subhex, get_cohesion_max_subhex, get_min_neighbors,
+    coherency_violation_flags,
     _compute_unit_occupied_hexes, _squad_is_in_enemy_er,
     roll_advance_for_squad,
 )
@@ -2445,17 +2446,10 @@ def movement_preview_move_plan(
         # (``_movement_engagement_violates``, même géométrie que le pathfinding → IA == PvP).
         # On désactive le check legacy centre-à-centre de ``validate_move_plan``.
         c_individual["forbid_enemy_er"] = False
-    # Cohesion 03.03 appliquee PAR FIG (les 2 puces de la regle), identique a
-    # validate_squad_coherency cote commit. Voile rouge sur une fig si :
-    #   - 1re puce : moins de min_neighbors autres figs a <= unit_model_cohesion_range, OU
-    #   - 2e puce  : au moins une autre fig a > unit_global_cohesion_range.
-    #
-    # La distance utilisée est l'empreinte-à-empreinte (pas centre-à-centre) pour les
-    # unités avec une grande base : deux figs dont les empreintes se touchent à ≤2" sont
-    # en cohésion même si leurs centres sont à >2".
+    # Cohesion 03.03 par fig : deleguee a coherency_violation_flags (source UNIQUE partagee avec le
+    # commit), qui respecte game_rules.cohesion_distance_mode (euclidean | footprint).
     positions: List[Tuple[int, int]] = [(int(nc), int(nr)) for _, nc, nr in plan]
     n = len(positions)
-    coherency_dist = get_coherency_subhex(game_state)
 
     # Calcul des empreintes par fig
     from engine.hex_utils import precompute_footprint_offsets as _pfo
@@ -2474,25 +2468,11 @@ def movement_preview_move_plan(
             offs = _off_even if (col & 1) == 0 else _off_odd
             footprints.append({(col + dc, row + dr) for dc, dr in offs})
 
-    coh_max = get_cohesion_max_subhex(game_state)
-    min_neighbors = get_min_neighbors(game_state)
-    neighbor_count = [0] * n
-    too_far = [False] * n
-    for i in range(n):
-        for j in range(i + 1, n):
-            d = min_distance_between_sets(footprints[i], footprints[j], max_distance=coh_max)
-            if d <= coherency_dist:
-                neighbor_count[i] += 1
-                neighbor_count[j] += 1
-            if d > coh_max:
-                too_far[i] = True
-                too_far[j] = True
-
-    # cohesion_red[i] : 1re puce (voisins < min_neighbors) OU 2e puce (une fig a > 9").
-    cohesion_red = (
-        [neighbor_count[i] < min_neighbors or too_far[i] for i in range(n)]
-        if n > 1 else [False] * n
-    )
+    _mc_coh = require_key(game_state, "models_cache")
+    cohesion_models = [
+        {**_mc_coh[str(mid)], "col": int(nc), "row": int(nr)} for mid, nc, nr in plan
+    ]
+    cohesion_red = coherency_violation_flags(cohesion_models, game_state)
 
     wall_hexes_set = game_state.get("wall_hexes", set())
     other_occ_set: Set[Tuple[int, int]] = set()
