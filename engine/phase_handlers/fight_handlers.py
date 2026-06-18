@@ -2878,7 +2878,8 @@ def _model_can_fight_target(
         return False
     ez = get_engagement_zone(game_state)
     synth = _synth_model_entry(
-        game_state, str(attacker_squad_id), int(attacker_model["col"]), int(attacker_model["row"])
+        game_state, str(attacker_squad_id), attacker_model,
+        int(attacker_model["col"]), int(attacker_model["row"])
     )
     return unit_entries_within_engagement_zone(synth, target_entry, ez)
 

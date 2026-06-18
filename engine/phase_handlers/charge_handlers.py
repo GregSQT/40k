@@ -34,6 +34,7 @@ from .shared_utils import (
     get_source_unit_rule_display_name_for_effect as shared_get_source_unit_rule_display_name_for_effect,
     build_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
     is_placement_valid_with_clearance, candidate_overlaps_any_unit,
+    _synth_model_entry,
 )
 
 CHARGE_IMPACT_TRIGGER_THRESHOLD = 4
@@ -1758,7 +1759,7 @@ def charge_build_model_destinations_pool(
         )
         if d_min >= start_min:
             continue  # WHILE MOVING : doit finir plus proche d'au moins une cible
-        synth = _charge_synthetic_charger_cache_entry(game_state, unit, cc, rr, cand_fp)
+        synth = _synth_model_entry(game_state, squad_id, model, cc, rr)
         if any(unit_entries_within_engagement_zone(synth, ne, ez) for ne in nontarget_entries):
             continue  # AFTER MOVING : aucun engagement avec un ennemi non déclaré
         closer.append([cc, rr])
@@ -2172,9 +2173,8 @@ def _compute_plan_context(
         _sib = models_cache.get(str(_mid))
         if _sib is None:
             continue
-        _fp = _charge_model_footprint(game_state, _sib, int(_c), int(_r))
         placed_synths.append(
-            (str(_mid), _charge_synthetic_charger_cache_entry(game_state, unit, int(_c), int(_r), _fp))
+            (str(_mid), _synth_model_entry(game_state, str(unit["id"]), _sib, int(_c), int(_r)))
         )
     target_entries = [
         units_cache.get(str(t)) for t in target_ids if units_cache.get(str(t)) is not None
@@ -4478,8 +4478,8 @@ def charge_autoplace_plan(
     def _fp_min_to_targets(fp: Set[Tuple[int, int]]) -> int:
         return min(min_distance_between_sets(fp, tfp) for tfp in all_target_fps)
 
-    def _engages_nontarget(c: int, r: int, fp: Set[Tuple[int, int]]) -> bool:
-        synth = _charge_synthetic_charger_cache_entry(game_state, unit, int(c), int(r), fp)
+    def _engages_nontarget(mid: str, c: int, r: int) -> bool:
+        synth = _synth_model_entry(game_state, str(squad_id), models_cache[mid], int(c), int(r))
         return any(unit_entries_within_engagement_zone(synth, ne, ez) for ne in nontarget_entries)
 
     # --- Slots : bande d'engagement de TOUTES les cibles déclarées, par taille de socle distincte. ---
@@ -4555,23 +4555,19 @@ def charge_autoplace_plan(
     # cible/non-cible par EZ ; tester un slot = intersecter son empreinte (early-exit). La branche
     # euclidienne (socle rond simple, EZ>1) de unit_entries_within_engagement_zone est conservée à
     # l'identique (appel original via le synth) pour ne rien dégrader sur ce cas.
-    _charger_shape = require_key(units_cache, str(require_key(unit, "id")))["BASE_SHAPE"]
-
-    def _entry_engage_struct(entry: Dict[str, Any]) -> Tuple[str, Any]:
+    # La décision euclid/fp dépend de la base du CHARGEUR, variable par groupe de base (un leader
+    # attaché a sa propre base) → ``charger_shape`` est paramétré et les structs sont recalculés par
+    # groupe avec la base du modèle représentatif. Le synth euclidien utilise ``_synth_model_entry``
+    # (base modèle), source unique partagée avec le halo et la phase fight.
+    def _entry_engage_struct(entry: Dict[str, Any], charger_shape: str) -> Tuple[str, Any]:
         euclid = (
-            ez > 1 and _charger_shape == "round" and entry["BASE_SHAPE"] == "round"
+            ez > 1 and charger_shape == "round" and entry["BASE_SHAPE"] == "round"
             and not _entry_is_multi_figure(entry)
         )
         if euclid:
             return ("euclid", entry)
         e_fp = set(entry.get("occupied_hexes") or {(int(entry["col"]), int(entry["row"]))})
         return ("fp", dilate_hex_set_unbounded(e_fp, ez))
-
-    target_eng = {t: _entry_engage_struct(target_entry_by_id[t]) for t in present_target_ids}
-    nontarget_eng = [_entry_engage_struct(ne) for ne in nontarget_entries]
-    _need_synth = any(s[0] == "euclid" for s in target_eng.values()) or any(
-        s[0] == "euclid" for s in nontarget_eng
-    )
 
     def _fp_engages(fp_set: Set[Tuple[int, int]], struct: Tuple[str, Any], synth: Any) -> bool:
         if struct[0] == "fp":
@@ -4584,6 +4580,14 @@ def charge_autoplace_plan(
 
     for bkey, mids in by_base.items():
         rep = models_cache[mids[0]]
+        charger_shape = rep["BASE_SHAPE"]
+        target_eng = {
+            t: _entry_engage_struct(target_entry_by_id[t], charger_shape) for t in present_target_ids
+        }
+        nontarget_eng = [_entry_engage_struct(ne, charger_shape) for ne in nontarget_entries]
+        need_synth = any(s[0] == "euclid" for s in target_eng.values()) or any(
+            s[0] == "euclid" for s in nontarget_eng
+        )
         margin = ez + fp_radius_by_base[bkey] + 2
         near_cells = sorted(cell for cell, d in dist_to_t.items() if d <= margin)
         idxs: List[int] = []
@@ -4593,8 +4597,8 @@ def charge_autoplace_plan(
                 continue
             fps = set(fp)
             synth = (
-                _charge_synthetic_charger_cache_entry(game_state, unit, c, r, fp)
-                if _need_synth else None
+                _synth_model_entry(game_state, str(squad_id), rep, c, r)
+                if need_synth else None
             )
             eng = frozenset(
                 t for t in present_target_ids if _fp_engages(fps, target_eng[t], synth)
@@ -4840,7 +4844,7 @@ def charge_autoplace_plan(
                 continue
             if _fp_min_to_targets(set(soc.fp)) >= sm:
                 continue  # WHILE : strictement plus proche
-            if _engages_nontarget(pos[0], pos[1], set(soc.fp)):
+            if _engages_nontarget(mid, pos[0], pos[1]):
                 continue  # n'engage aucun ennemi non déclaré
             chosen = pos
             break

@@ -3392,23 +3392,29 @@ def _squad_model_positions(game_state: Dict[str, Any], squad_id: str) -> List[Tu
 
 
 def _synth_model_entry(
-    game_state: Dict[str, Any], squad_id: str, col: int, row: int
+    game_state: Dict[str, Any],
+    squad_id: str,
+    model_entry: Dict[str, Any],
+    col: int,
+    row: int,
 ) -> Dict[str, Any]:
-    """Entree units_cache synthetique pour UNE figurine du squad placee en (col,row).
+    """Entree units_cache synthetique pour UNE figurine placee en (col,row).
 
-    Reutilise la geometrie de base du squad (BASE_SHAPE/BASE_SIZE/orientation) pour
-    tester l engagement bord-a-bord (unit_entries_within_engagement_zone) sur une
-    position candidate, sans muter le cache. Entree complete (orientation + player
-    inclus) pour rester valide quelle que soit la branche de la primitive."""
+    SOURCE UNIQUE de l engagement par-figurine (charge, fight, pile-in, conso) :
+    la geometrie de base provient du MODELE (``model_entry``), pas du squad — seul
+    choix correct pour une unite a bases mixtes (perso attache a plus grande base).
+    Le ``player`` est herite du squad (le modele ne le porte pas forcement). Entree
+    complete (orientation incluse) pour rester valide quelle que soit la branche de
+    ``unit_entries_within_engagement_zone``."""
     from engine.hex_utils import compute_occupied_hexes
-    entry = game_state.get("units_cache", {}).get(str(squad_id), {})  # get allowed
-    shape = require_key(entry, "BASE_SHAPE")
-    size = require_key(entry, "BASE_SIZE")
-    orient = int(require_key(entry, "orientation"))
+    squad_entry = game_state.get("units_cache", {}).get(str(squad_id), {})  # get allowed
+    shape = require_key(model_entry, "BASE_SHAPE")
+    size = require_key(model_entry, "BASE_SIZE")
+    orient = int(model_entry.get("orientation", 0))  # get allowed
     fp = compute_occupied_hexes(int(col), int(row), shape, size, orient)
     return {
         "id": f"_synth_{squad_id}",
-        "player": int(entry.get("player", -1)),  # get allowed
+        "player": int(squad_entry.get("player", -1)),  # get allowed
         "col": int(col),
         "row": int(row),
         "occupied_hexes": set(fp),
@@ -3476,6 +3482,7 @@ def _hex_legal_for_charge(
     row: int,
     game_state: Dict[str, Any],
     squad_id: str,
+    model_entry: Dict[str, Any],
     target_squad_ids: List[str],
 ) -> bool:
     """Cellule valide pour le placement d une figurine en cours de charge :
@@ -3505,7 +3512,7 @@ def _hex_legal_for_charge(
     from engine.spatial_relations import unit_entries_within_engagement_zone
     our_player = int(units_cache.get(str(squad_id), {}).get("player", -1))  # get allowed
     ez = get_engagement_zone(game_state)
-    synth = _synth_model_entry(game_state, str(squad_id), col, row)
+    synth = _synth_model_entry(game_state, str(squad_id), model_entry, col, row)
     targets = {str(t) for t in target_squad_ids}
     for esid in _enemy_squad_ids(game_state, our_player):
         if esid in targets:
@@ -3574,7 +3581,7 @@ def charge_build_valid_plan(
                 d_orig = calculate_hex_distance(orig_col, orig_row, nc, nr)
                 if d_orig > budget:
                     continue
-                if not _hex_legal_for_charge(nc, nr, game_state, squad_id, target_squad_ids):
+                if not _hex_legal_for_charge(nc, nr, game_state, squad_id, m, target_squad_ids):
                     continue
                 b2b_candidates.append((d_orig, nc, nr))
         picked: Optional[Tuple[int, int]] = None
@@ -3600,7 +3607,7 @@ def charge_build_valid_plan(
                         nr = orig_row + d_row
                         if (nc, nr) in occupied_after:
                             continue
-                        if not _hex_legal_for_charge(nc, nr, game_state, squad_id, target_squad_ids):
+                        if not _hex_legal_for_charge(nc, nr, game_state, squad_id, m, target_squad_ids):
                             continue
                         cand_d = calculate_hex_distance(nc, nr, tc, tr)
                         if cand_d >= orig_dist_to_tgt:
@@ -3625,7 +3632,7 @@ def charge_build_valid_plan(
         te for te in (units_cache.get(str(t)) for t in target_squad_ids) if te is not None
     ]
     for mid, nc, nr in plan:
-        synth = _synth_model_entry(game_state, str(squad_id), nc, nr)
+        synth = _synth_model_entry(game_state, str(squad_id), models_cache[mid], nc, nr)
         if not any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
             return None
 
@@ -5897,7 +5904,7 @@ def fight_pile_in_plan(
     ]
     in_er = False
     for mid, c, r in plan:
-        synth = _synth_model_entry(game_state, str(squad_id), c, r)
+        synth = _synth_model_entry(game_state, str(squad_id), models_cache[mid], c, r)
         if any(unit_entries_within_engagement_zone(synth, ee, ez) for ee in enemy_entries):
             in_er = True
             break
@@ -5945,7 +5952,7 @@ def get_fighting_models(game_state: Dict[str, Any], squad_id: str) -> List[str]:
         m = models_cache[mid]
         pos = (int(m["col"]), int(m["row"]))
         positions[mid] = pos
-        synth = _synth_model_entry(game_state, str(squad_id), pos[0], pos[1])
+        synth = _synth_model_entry(game_state, str(squad_id), m, pos[0], pos[1])
         in_er[mid] = any(
             unit_entries_within_engagement_zone(synth, ee, ez) for ee in enemy_entries
         )
@@ -6305,11 +6312,11 @@ def squad_consolidate_plan(
     in_er = any(
         any(
             unit_entries_within_engagement_zone(
-                _synth_model_entry(game_state, str(squad_id), c, r), ee, ez
+                _synth_model_entry(game_state, str(squad_id), models_cache[mid], c, r), ee, ez
             )
             for ee in enemy_entries
         )
-        for _, c, r in plan
+        for mid, c, r in plan
     )
     if not in_er:
         return None
