@@ -1890,8 +1890,8 @@ export const drawBoard = (
     if (!boardConfig.colors.objective) {
       throw new Error("Missing required configuration value: boardConfig.colors.objective");
     }
-    const OBJECTIVE_P0_COLOR = parseColor(boardConfig.colors.player_1);
-    const OBJECTIVE_P1_COLOR = parseColor(boardConfig.colors.player_2);
+    const OBJECTIVE_P1_COLOR = parseColor(boardConfig.colors.player_1);
+    const OBJECTIVE_P2_COLOR = parseColor(boardConfig.colors.player_2);
     const OBJECTIVE_NEUTRAL_COLOR = parseColor(boardConfig.colors.objective);
 
     // Compute all objective hexes - use ONLY hexes from config, no expansion
@@ -2064,7 +2064,29 @@ export const drawBoard = (
         const terrainLineWidth = Math.max(1.5, HEX_RADIUS * 0.3);
         for (const zone of boardConfig.terrain_zones) {
           const g = new PIXI.Graphics();
-          const zoneColor = zone.objective ? terrainObjectiveColor : terrainColor;
+          let zoneColor: number;
+          if (zone.objective) {
+            // Terrain objectif : remplit/contour à la couleur du joueur qui contrôle la zone
+            // (sinon jaune neutre). Contrôleur déduit du 1er hex de la zone (tous partagent
+            // le même contrôleur), comme le contour lissé plus bas.
+            const firstHex = (zone.hexes || [])[0];
+            const sampleHexKey =
+              firstHex === undefined
+                ? null
+                : Array.isArray(firstHex)
+                  ? `${firstHex[0]},${firstHex[1]}`
+                  : `${firstHex.col},${firstHex.row}`;
+            const zoneController =
+              sampleHexKey != null ? (objectiveControl[sampleHexKey] ?? null) : null;
+            zoneColor =
+              zoneController === 1
+                ? OBJECTIVE_P1_COLOR
+                : zoneController === 2
+                  ? OBJECTIVE_P2_COLOR
+                  : terrainObjectiveColor;
+          } else {
+            zoneColor = terrainColor;
+          }
           // Obscuring terrain (rule 13.10) gets a denser fill to read as blocking cover.
           const fillAlpha = zone.obscuring ? 0.18 : 0.1;
           if (zone.shape === "rect" && zone.top_left && zone.bottom_right) {
@@ -2214,15 +2236,15 @@ export const drawBoard = (
               sampleHexKey != null ? (objectiveControl[sampleHexKey] ?? null) : null;
             const zoneRingColor =
               zoneController === 1
-                ? OBJECTIVE_P0_COLOR
+                ? OBJECTIVE_P1_COLOR
                 : zoneController === 2
-                  ? OBJECTIVE_P1_COLOR
+                  ? OBJECTIVE_P2_COLOR
                   : ringColorParsed;
             const zoneCenterColor =
               zoneController === 1
-                ? OBJECTIVE_P0_COLOR
+                ? OBJECTIVE_P1_COLOR
                 : zoneController === 2
-                  ? OBJECTIVE_P1_COLOR
+                  ? OBJECTIVE_P2_COLOR
                   : centerColorParsed;
 
             const smoothZone = new PIXI.Graphics();
@@ -2302,8 +2324,8 @@ export const drawBoard = (
           const hexKey = `${oc},${or_}`;
           const controller = objectiveControl[hexKey];
           let objColor = OBJECTIVE_NEUTRAL_COLOR;
-          if (controller === 1) objColor = OBJECTIVE_P0_COLOR;
-          else if (controller === 2) objColor = OBJECTIVE_P1_COLOR;
+          if (controller === 1) objColor = OBJECTIVE_P1_COLOR;
+          else if (controller === 2) objColor = OBJECTIVE_P2_COLOR;
           const objDot = new PIXI.Graphics();
           beginObjectiveFill(objDot, objectiveTexture, objColor, objectiveHexFillAlpha);
           objDot.drawCircle(ox, oy, HEX_RADIUS);
