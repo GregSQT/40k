@@ -1195,7 +1195,7 @@ def initialize_engine(scenario_file: Optional[str] = None):
             from config_loader import get_config_loader as _gcl
             _cfg = _gcl().load_config("config", force_reload=False)
             board_path = _cfg.get("defaults", {}).get("test_board", "x5")
-            scenario_file = os.path.join("config", BOARD_PATH_MAP[board_path], "scenario", "scenario_pvp_test.json")
+            scenario_file = os.path.join("config", BOARD_PATH_MAP[board_path], "scenario", "scenario_pvp.json")
         elif not isinstance(scenario_file, str):
             raise ValueError(f"scenario_file must be a string if provided (got {type(scenario_file).__name__})")
 

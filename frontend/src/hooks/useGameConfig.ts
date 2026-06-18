@@ -205,7 +205,7 @@ export const useGameConfig = (_boardConfigName: string = "default"): ExtendedGam
         const urlParams = new URLSearchParams(window.location.search);
         const mode = urlParams.get("mode");
         const isTestMode = mode === "pvp_test" || mode === "pve_test";
-        const DEFAULT_TEST_BOARD = "x5";
+        const DEFAULT_TEST_BOARD = "x5_44x60";
         const boardParam = isTestMode ? (urlParams.get("board") ?? DEFAULT_TEST_BOARD) : null;
         const scenarioName =
           mode === "pve_test" ? "scenario_pve_test.json" : "scenario_pvp_test.json";
@@ -220,7 +220,7 @@ export const useGameConfig = (_boardConfigName: string = "default"): ExtendedGam
           endless_duty: "config/scenario_endless_duty.json",
           pve: "config/scenario_pve.json",
         };
-        let scenarioFile = (mode && scenarioMap[mode]) || "config/scenario_pvp.json";
+        let scenarioFile = (mode && scenarioMap[mode]) || "config/board/44x60x5/scenario/scenario_pvp.json";
         if (isTestMode && boardParam && boardDirMap[boardParam]) {
           scenarioFile = `config/${boardDirMap[boardParam]}/scenario/${scenarioName}`;
         }

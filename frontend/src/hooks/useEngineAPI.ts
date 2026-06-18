@@ -987,7 +987,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           requestPayload.scenario_file = "config/scenario_pve.json";
         }
         if (isPvPTestMode || isPvETestMode) {
-          const boardParam = new URLSearchParams(window.location.search).get("board") ?? "x5";
+          const boardParam = new URLSearchParams(window.location.search).get("board") ?? "x5_44x60";
           requestPayload.board_path = boardParam;
         }
 
