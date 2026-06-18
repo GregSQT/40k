@@ -5273,21 +5273,18 @@ export default function Board({
       | {
           unit_model_cohesion_range?: number;
           unit_global_cohesion_range?: number;
-          squad_min_neighbors?: number;
         }
       | undefined;
     if (
       typeof cohesionRules?.unit_model_cohesion_range !== "number" ||
-      typeof cohesionRules?.unit_global_cohesion_range !== "number" ||
-      typeof cohesionRules?.squad_min_neighbors !== "number"
+      typeof cohesionRules?.unit_global_cohesion_range !== "number"
     ) {
       throw new Error(
-        "Missing config: game_rules.unit_model_cohesion_range / unit_global_cohesion_range / squad_min_neighbors"
+        "Missing config: game_rules.unit_model_cohesion_range / unit_global_cohesion_range"
       );
     }
     const modelCohesionInches = cohesionRules.unit_model_cohesion_range;
     const globalCohesionInches = cohesionRules.unit_global_cohesion_range;
-    const minNeighbors = cohesionRules.squad_min_neighbors;
     const baseSize = resolveBaseSizeForUnitDisplay(squadUnit);
     const veilRadius = baseSize > 1 ? (baseSize * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
 
@@ -5344,19 +5341,36 @@ export default function Board({
           }
         }
       }
-      for (let i = 0; i < n; i++) {
-        let neighbors = 0;
-        for (let j = 0; j < n; j++) {
-          if (i === j) continue;
-          if (
-            Math.hypot(centers[i].x - centers[j].x, centers[i].y - centers[j].y) <= neighborMaxPx
-          ) {
-            neighbors++;
+      // 1re puce : CONNEXITÉ — graphe d'adjacence (paires ≤ model bord-à-bord) + composantes connexes.
+      // Une fig hors du composant majoritaire (rupture de chaîne) est en violation.
+      const comp = new Array<number>(n).fill(-1);
+      let numComp = 0;
+      for (let s = 0; s < n; s++) {
+        if (comp[s] !== -1) continue;
+        const stack = [s];
+        comp[s] = numComp;
+        while (stack.length) {
+          const k = stack.pop()!;
+          for (let nb = 0; nb < n; nb++) {
+            if (
+              comp[nb] === -1 &&
+              k !== nb &&
+              Math.hypot(centers[k].x - centers[nb].x, centers[k].y - centers[nb].y) <= neighborMaxPx
+            ) {
+              comp[nb] = numComp;
+              stack.push(nb);
+            }
           }
         }
+        numComp++;
+      }
+      const compSize: Record<number, number> = {};
+      for (const c of comp) compSize[c] = (compSize[c] ?? 0) + 1;
+      for (let i = 0; i < n; i++) {
+        const minority = compSize[comp[i]] * 2 <= n; // 1re puce : composant minoritaire
         const outOfGlobal =
-          Math.hypot(centers[i].x - bx, centers[i].y - by) - veilRadius > globalRadiusPx;
-        if (neighbors >= minNeighbors && !outOfGlobal) continue; // fig cohérente
+          Math.hypot(centers[i].x - bx, centers[i].y - by) - veilRadius > globalRadiusPx; // 2e puce
+        if (!minority && !outOfGlobal) continue; // fig cohérente
         veilOverlay.beginFill(0xff0000, 0.45);
         veilOverlay.drawCircle(centers[i].x, centers[i].y, veilRadius);
         veilOverlay.endFill();
@@ -5629,14 +5643,16 @@ export default function Board({
         sprite.visible = true;
       }
       hoveredHexRef.current = { col: best.col, row: best.row };
-      // Le preview de tir suit le ghost : recalcul depuis l'hex destination survolé.
-      triggerShootPreview(best.col, best.row);
-      // Badge "caché" : recalcul backend (debouncé) du statut de la fig active à l'hex survolé.
-      triggerHiddenPreview(best.col, best.row);
-      // Voile rouge hover : recalcul côté client à chaque changement d'hex (pas de backend).
+      // Recalculs qui ne dépendent QUE de l'hex destination : seulement quand l'hex snappé change
+      // (pas à chaque pixel). Le ghost, lui, suit le curseur en continu ci-dessus.
       const vKey = `${best.col},${best.row}`;
       if (vKey !== lastValidityHexKey) {
         lastValidityHexKey = vKey;
+        // Le preview de tir suit le ghost.
+        triggerShootPreview(best.col, best.row);
+        // Badge "caché" : recalcul backend (debouncé).
+        triggerHiddenPreview(best.col, best.row);
+        // Voile rouge hover : recalcul côté client.
         drawHoverVeil(best.col, best.row);
       }
     };
@@ -8144,7 +8160,11 @@ export default function Board({
         });
 
         // squad.md brique 3 : voile rouge sur les figs invalides (hex interdit OU hors cohesion).
-        if (isSquadGhost && modelValidFlags.some((ok) => !ok)) {
+        // Pendant le preview move (fig active en cours), ce voile backend (dry-run, figé) est masqué :
+        // drawHoverVeil recalcule la cohésion EN TEMPS RÉEL au survol et fait foi.
+        const suppressBackendVeil =
+          mode === "squadModelMove" && !!effectivePerModelPlan?.activeModelId;
+        if (isSquadGhost && !suppressBackendVeil && modelValidFlags.some((ok) => !ok)) {
           const veil = new PIXI.Graphics();
           const veilDisplayBase = resolveBaseSizeForUnitDisplay(unit);
           const veilRadius =

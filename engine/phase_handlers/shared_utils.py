@@ -2440,21 +2440,40 @@ def _coherency_flags_euclidean(
                 max_d2 = d2
                 bx = (pts[i][0] + pts[j][0]) / 2.0
                 by = (pts[i][1] + pts[j][1]) / 2.0
-    flags = [False] * n
+    # 1re puce : CONNEXITE. Graphe d'adjacence (paires a <= model bord-a-bord), puis composantes
+    # connexes. L'unite doit former une seule chaine : les figs hors du composant majoritaire sont
+    # en violation (rupture de chaine), meme si chacune a un voisin dans son sous-groupe.
+    adj = [[False] * n for _ in range(n)]
     for i in range(n):
-        # 2e puce : hors du cercle global — mesure depuis le bord de base (hex le plus proche).
-        if hypot(pts[i][0] - bx, pts[i][1] - by) - radii[i] > global_radius:
-            flags[i] = True
-            continue
-        # 1re puce : pas assez de voisins bord-a-bord <= model.
-        neighbors = 0
-        for j in range(n):
-            if i == j:
-                continue
+        for j in range(i + 1, n):
             d = hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]) - radii[i] - radii[j]
             if d <= model_range:
-                neighbors += 1
-        if neighbors < min_neighbors:
+                adj[i][j] = adj[j][i] = True
+    comp = [-1] * n
+    num_comp = 0
+    for s in range(n):
+        if comp[s] != -1:
+            continue
+        stack = [s]
+        comp[s] = num_comp
+        while stack:
+            k = stack.pop()
+            for nb in range(n):
+                if adj[k][nb] and comp[nb] == -1:
+                    comp[nb] = num_comp
+                    stack.append(nb)
+        num_comp += 1
+    comp_size: Dict[int, int] = {}
+    for c in comp:
+        comp_size[c] = comp_size.get(c, 0) + 1
+    flags = [False] * n
+    for i in range(n):
+        # 1re puce : composant minoritaire (rupture de chaine) = violation.
+        if comp_size[comp[i]] * 2 <= n:
+            flags[i] = True
+            continue
+        # 2e puce : hors du cercle d'etalement — mesure depuis le bord de base (hex le plus proche).
+        if hypot(pts[i][0] - bx, pts[i][1] - by) - radii[i] > global_radius:
             flags[i] = True
     return flags
 
