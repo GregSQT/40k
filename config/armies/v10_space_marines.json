@@ -1,4 +1,7 @@
 {
+  "faction": "spaceMarine",
+  "display_name": "V10 Space Marines",
+  "description": "Roster V10 Space Marines (format scénario) — squads + characters attachés.",
   "primary_objectives": ["objectives_control"],
   "deployment_zone": "mc1",
   "deployment_type": "active",

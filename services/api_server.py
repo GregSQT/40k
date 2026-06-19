@@ -2514,11 +2514,15 @@ def _load_army_file(army_file: str) -> Dict[str, Any]:
         if not isinstance(unit, dict):
             raise TypeError(f"Army file {army_file} units[{idx}] must be an object")
         unit_type = require_key(unit, "unit_type")
-        count = require_key(unit, "count")
         if not isinstance(unit_type, str) or not unit_type.strip():
             raise ValueError(f"Army file {army_file} units[{idx}].unit_type must be a non-empty string")
-        if not isinstance(count, int) or count <= 0:
-            raise ValueError(f"Army file {army_file} units[{idx}].count must be a positive integer")
+        # "count" : format army (effectif). Optionnel ici pour accepter aussi le
+        # format scénario (units positionnées avec "models"/"col"/"row"). Validé
+        # seulement s'il est présent. La construction reste count-based pour l'instant.
+        if "count" in unit:
+            count = unit["count"]
+            if not isinstance(count, int) or count <= 0:
+                raise ValueError(f"Army file {army_file} units[{idx}].count must be a positive integer")
     return army_cfg
 
 

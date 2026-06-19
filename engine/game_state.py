@@ -3,7 +3,7 @@
 game_state.py - Game state initialization and management
 """
 
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Set
 import copy
 import json
 import math
@@ -493,6 +493,48 @@ class GameStateManager:
                     if (c, r) in used:
                         return False
                 return True
+
+            # Attached units (règle 19) : un character déclaré séparément avec
+            # "attached_squad": <id squad> n'est qu'une écriture plus lisible. On le
+            # fusionne ici comme figurine du squad cible (équivalent à l'avoir
+            # déclaré dans "models"). En jeu l'unité attachée n'existe pas à part :
+            # déploiement, valeur, PV, ciblage sont gérés comme avant.
+            units_by_id_raw = {str(u["id"]): u for u in basic_units if "id" in u}
+            folded_ids: Set[str] = set()
+            for u in basic_units:
+                if "attached_squad" not in u:
+                    continue
+                target_id = str(u["attached_squad"])
+                if target_id == str(u.get("id")):
+                    raise ValueError(f"Unit {u.get('id')}: 'attached_squad' cannot reference itself")
+                if target_id not in units_by_id_raw:
+                    raise ValueError(
+                        f"Unit {u.get('id')}: 'attached_squad' references unknown unit '{target_id}'"
+                    )
+                target = units_by_id_raw[target_id]
+                if str(target.get("player")) != str(u.get("player")):
+                    raise ValueError(
+                        f"Unit {u.get('id')}: 'attached_squad' target '{target_id}' "
+                        f"belongs to a different player"
+                    )
+                # Figurine du character injectée dans le squad (override unit_type).
+                char_model: Dict[str, Any] = {"unit_type": u["unit_type"]}
+                if "col" in u:
+                    char_model["col"] = u["col"]
+                if "row" in u:
+                    char_model["row"] = u["row"]
+                # Le squad doit exposer "models" ; sinon le créer depuis son ancre.
+                if "models" not in target:
+                    base_model: Dict[str, Any] = {}
+                    if "col" in target:
+                        base_model["col"] = target["col"]
+                    if "row" in target:
+                        base_model["row"] = target["row"]
+                    target["models"] = [base_model]
+                target["models"].append(char_model)
+                folded_ids.add(str(u["id"]))
+            if folded_ids:
+                basic_units = [u for u in basic_units if str(u.get("id")) not in folded_ids]
 
             enhanced_units = []
             for unit_data in basic_units:

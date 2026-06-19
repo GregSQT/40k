@@ -1,4 +1,7 @@
 {
+  "faction": "tyranid",
+  "display_name": "V10 Tyranids",
+  "description": "Roster V10 Tyranids (format scénario) — squads multi-figurines.",
   "primary_objectives": ["objectives_control"],
   "deployment_zone": "mc1",
   "deployment_type": "active",
