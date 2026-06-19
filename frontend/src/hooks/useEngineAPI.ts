@@ -482,6 +482,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     | "pileInModelMove"
     | "consolidationPreview"
     | "consolidationModelMove"
+    | "deploymentMove"
   >("select");
   const [movePreview, setMovePreview] = useState<{
     unitId: number;
@@ -514,6 +515,28 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Ref miroir de squadMovePlan pour accès synchrone dans les callbacks. */
   const squadMovePlanRef = useRef<typeof squadMovePlan>(null);
   squadMovePlanRef.current = squadMovePlan;
+  /**
+   * Déploiement par escouade (mode PvP "active") — plan provisoire NON committé.
+   * ``models`` : positions provisoires par figurine (model_id -> {col,row}).
+   * ``placed`` : false tant que le 1er drop (deploy_generate_formation) n'a pas eu lieu.
+   * ``perModelValid`` : voile rouge (hors zone / mur / overlap / hors cohésion).
+   * ``canValidate`` : toutes les figs valides + cohésion OK (bouton Valider actif).
+   */
+  const [deployPlan, setDeployPlan] = useState<{
+    unitId: number;
+    models: Record<string, { col: number; row: number }>;
+    originModels: Record<string, { col: number; row: number }>;
+    activeModelId: string | null;
+    perModelValid: Record<string, boolean>;
+    coherencyOk: boolean;
+    canValidate: boolean;
+    placed: boolean;
+  } | null>(null);
+  /** Ref miroir de deployPlan pour accès synchrone dans les callbacks. */
+  const deployPlanRef = useRef<typeof deployPlan>(null);
+  deployPlanRef.current = deployPlan;
+  /** Pool de la zone de déploiement (tous les hexes "col,row") du déployeur courant. */
+  const deployPoolRef = useRef<Set<string>>(new Set());
   /**
    * Unité dont le move en cours est un Fall Back (badge fui en preview). État STABLE,
    * découplé de squadMovePlan (qui churne et effacerait le badge entre deux rendus).
@@ -3473,6 +3496,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     ]
   );
 
+  // Forward ref vers handleStartDeploySquad (défini plus bas) pour router les clics de panneau
+  // en phase deployment "active" sans réordonner les useCallback.
+  const startDeploySquadRef = useRef<((unitId: number | string) => void) | null>(null);
+
   // Event handlers aligned with backend
   const handleSelectUnit = useCallback(
     async (unitId: number | string | null) => {
@@ -3480,6 +3507,29 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // sélection/activation tant que les mortal wounds ne sont pas attribuées.
       if (manualAllocationRef.current && unitId !== null) return;
       const numericUnitId = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      console.log("[DEPLOY-DBG] handleSelectUnit", numericUnitId, {
+        phase: gameState?.phase,
+        depType: gameState?.deployment_type,
+        mode,
+        hasStartRef: !!startDeploySquadRef.current,
+      });
+
+      // Déploiement par escouade (PvP "active") : un clic sur une escouade déployable entre en
+      // mode déploiement provisoire. En mode deploymentMove, ignorer les clics (gérés par PIXI).
+      if (gameState && gameState.phase === "deployment" && gameState.deployment_type === "active") {
+        if (mode === "deploymentMove") return;
+        if (numericUnitId !== null) {
+          const ds = gameState.deployment_state;
+          const deployer = ds?.current_deployer;
+          const deployable =
+            deployer != null ? (ds?.deployable_units?.[String(deployer)] ?? []) : [];
+          const isDeployable = deployable.some((id) => String(id) === String(numericUnitId));
+          if (isDeployable) {
+            startDeploySquadRef.current?.(numericUnitId);
+          }
+          return;
+        }
+      }
 
       // Block unit selection when in advancePreview, chargeTargetSelect or chargePreview mode
       // (but allow deselection with null)
@@ -4953,6 +5003,216 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     },
     [executeAction, gameState]
   );
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Déploiement par escouade (PvP, deployment_type "active") — plan provisoire par-figurine.
+  // Réutilise la machinerie per-fig du move : drop initial (formation compacte backend),
+  // puis squad move / fig move libre dans la zone, validation rouge/vert par figurine.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /** Construit le Set "col,row" de la zone de déploiement du déployeur courant. */
+  const buildDeployPool = useCallback((): Set<string> => {
+    const ds = gameState?.deployment_state;
+    if (!ds) {
+      throw new Error("[DEPLOY] deployment_state absent du game_state");
+    }
+    const deployer = ds.current_deployer;
+    const poolRaw = ds.deployment_pools?.[String(deployer)];
+    if (!poolRaw || !Array.isArray(poolRaw)) {
+      throw new Error(`[DEPLOY] deployment_pools manquant pour le déployeur ${deployer}`);
+    }
+    const set = new Set<string>();
+    for (const entry of poolRaw) {
+      if (Array.isArray(entry)) {
+        set.add(`${entry[0]},${entry[1]}`);
+      } else if (entry && typeof entry === "object" && "col" in entry && "row" in entry) {
+        set.add(`${(entry as { col: number }).col},${(entry as { row: number }).row}`);
+      }
+    }
+    return set;
+  }, [gameState?.deployment_state]);
+
+  /** Dry-run du plan de déploiement → maj voile rouge / cohésion / can_validate. */
+  const refreshDeployPlanValidity = useCallback(
+    async (unitId: number, models: Record<string, { col: number; row: number }>) => {
+      const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row]);
+      let result: Record<string, unknown> | null = null;
+      try {
+        result = await postEngineQuery({
+          action: "deploy_preview",
+          unitId: String(unitId),
+          plan,
+        });
+      } catch (err) {
+        console.error(`[DEPLOY] preview ERROR unit=${unitId}`, err, { plan });
+        return;
+      }
+      const perModelValid = (result?.per_model ?? {}) as Record<string, boolean>;
+      const coherencyOk = result?.coherency_ok === true;
+      const canValidate = result?.can_validate === true;
+      setDeployPlan((prev) =>
+        prev && prev.unitId === unitId
+          ? { ...prev, perModelValid, coherencyOk, canValidate }
+          : prev
+      );
+    },
+    [postEngineQuery]
+  );
+
+  /** Clic sur une escouade du panneau → entre en mode déploiement (pas encore posée). */
+  const handleStartDeploySquad = useCallback(
+    (unitId: number | string) => {
+      const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      deployPoolRef.current = buildDeployPool();
+      console.log("[DEPLOY-DBG] start squad", uid, "→ mode deploymentMove, poolSize=", deployPoolRef.current.size);
+      setDeployPlan({
+        unitId: uid,
+        models: {},
+        originModels: {},
+        activeModelId: null,
+        perModelValid: {},
+        coherencyOk: true,
+        canValidate: false,
+        placed: false,
+      });
+      setMode("deploymentMove");
+      setSelectedUnitId(uid);
+    },
+    [buildDeployPool]
+  );
+  startDeploySquadRef.current = handleStartDeploySquad;
+
+  /** 1er clic dans la zone → génère une formation compacte (backend) et remplit le plan. */
+  const handleDeployDropSquad = useCallback(
+    async (col: number, row: number) => {
+      const plan = deployPlanRef.current;
+      if (!plan) {
+        console.warn("[DEPLOY] drop ABORT (pas de plan)");
+        return;
+      }
+      let result: Record<string, unknown> | null = null;
+      try {
+        result = await postEngineQuery({
+          action: "deploy_generate_formation",
+          unitId: String(plan.unitId),
+          destCol: col,
+          destRow: row,
+        });
+      } catch (err) {
+        console.error(`[DEPLOY] generate_formation ERROR unit=${plan.unitId}`, err, { col, row });
+        return;
+      }
+      const rawPlan = result?.plan as Array<[string | number, number, number]> | undefined;
+      console.log("[DEPLOY-DBG] drop résultat backend:", {
+        success: result?.success,
+        can_validate: result?.can_validate,
+        plan_len: Array.isArray(rawPlan) ? rawPlan.length : "ABSENT",
+        rawPlan,
+        per_model: result?.per_model,
+      });
+      if (!rawPlan || !Array.isArray(rawPlan)) {
+        throw new Error("[DEPLOY] deploy_generate_formation: plan absent dans la réponse");
+      }
+      const models: Record<string, { col: number; row: number }> = {};
+      for (const [mid, c, r] of rawPlan) {
+        models[String(mid)] = { col: c, row: r };
+      }
+      console.log("[DEPLOY-DBG] deployPlan.models construit:", models, "nb=", Object.keys(models).length);
+      const perModelValid = (result?.per_model ?? {}) as Record<string, boolean>;
+      const coherencyOk = result?.coherency_ok === true;
+      const canValidate = result?.can_validate === true;
+      setDeployPlan((prev) =>
+        prev && prev.unitId === plan.unitId
+          ? {
+              ...prev,
+              models,
+              originModels: { ...models },
+              perModelValid,
+              coherencyOk,
+              canValidate,
+              placed: true,
+              activeModelId: null,
+            }
+          : prev
+      );
+    },
+    [postEngineQuery]
+  );
+
+  /** Sélectionne une figurine à repositionner (pool = toute la zone, pas de BFS backend). */
+  const handleSelectDeployModel = useCallback((modelId: string) => {
+    setDeployPlan((prev) => (prev ? { ...prev, activeModelId: modelId } : prev));
+  }, []);
+
+  /** Pose la figurine active à (col,row) dans le plan + refresh validité (deploy_preview). */
+  const handleMoveDeployModelInPlan = useCallback(
+    (modelId: string, col: number, row: number) => {
+      setDeployPlan((prev) => {
+        if (!prev) return prev;
+        const models = { ...prev.models, [modelId]: { col, row } };
+        void refreshDeployPlanValidity(prev.unitId, models);
+        return { ...prev, models, activeModelId: null };
+      });
+    },
+    [refreshDeployPlanValidity]
+  );
+
+  /** Déplace toute l'escouade (translation rigide) : delta = (col,row) - ancre (1re fig). */
+  const handleSquadMoveDeploy = useCallback(
+    (col: number, row: number) => {
+      setDeployPlan((prev) => {
+        if (!prev) return prev;
+        const entries = Object.entries(prev.models);
+        if (entries.length === 0) return prev;
+        const [, anchor] = entries[0];
+        const dCol = col - anchor.col;
+        const dRow = row - anchor.row;
+        const models: Record<string, { col: number; row: number }> = {};
+        for (const [mid, p] of entries) {
+          models[mid] = { col: p.col + dCol, row: p.row + dRow };
+        }
+        void refreshDeployPlanValidity(prev.unitId, models);
+        return { ...prev, models, activeModelId: null };
+      });
+    },
+    [refreshDeployPlanValidity]
+  );
+
+  /** Bouton Valider : commit du plan de déploiement (deploy_commit) puis joueur suivant. */
+  const handleCommitDeploy = useCallback(async () => {
+    const plan = deployPlanRef.current;
+    if (!plan) {
+      console.warn("[DEPLOY] commit ABORT (pas de plan)");
+      return;
+    }
+    if (!plan.canValidate) {
+      console.warn("[DEPLOY] commit ABORT (canValidate=false, il reste du rouge)");
+      return;
+    }
+    const planArr = Object.entries(plan.models).map(([mid, p]) => [mid, p.col, p.row]);
+    try {
+      await executeAction({
+        action: "deploy_commit",
+        unitId: String(plan.unitId),
+        plan: planArr,
+      });
+      deployPoolRef.current = new Set();
+      setDeployPlan(null);
+      setMode("select");
+      setSelectedUnitId(null);
+    } catch (e) {
+      console.error("[DEPLOY] commit FAILED", e);
+      setError(`Deploy failed: ${formatApiConnectionError(e)}`);
+    }
+  }, [executeAction]);
+
+  /** Annule le mode déploiement (aucune écriture backend). */
+  const handleCancelDeploy = useCallback(() => {
+    deployPoolRef.current = new Set();
+    setDeployPlan(null);
+    setMode("select");
+    setSelectedUnitId(null);
+  }, []);
 
   const listArmies = useCallback(async (): Promise<ArmyListItem[]> => {
     const response = await fetch(`${API_BASE}/armies`);
@@ -6841,6 +7101,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onResetModelInPlan: () => {},
       onCommitSquadMovePlan: async () => {},
       onCancelSquadMove: () => {},
+      // Déploiement par escouade (PvP "active")
+      deployPlan: null,
+      deployPoolRef,
+      onStartDeploySquad: () => {},
+      onDeployDropSquad: async () => {},
+      onSelectDeployModel: () => {},
+      onMoveDeployModelInPlan: () => {},
+      onSquadMoveDeploy: () => {},
+      onCommitDeploy: async () => {},
+      onCancelDeploy: () => {},
       chargeMovePlan: null,
       chargeFocusActive: false,
       chargeModelPoolRef,
@@ -7038,6 +7308,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onResetModelInPlan: handleResetModelInPlan,
     onCommitSquadMovePlan: handleCommitSquadMovePlan,
     onCancelSquadMove: handleCancelSquadMove,
+    // Déploiement par escouade (PvP "active")
+    deployPlan,
+    deployPoolRef,
+    onStartDeploySquad: handleStartDeploySquad,
+    onDeployDropSquad: handleDeployDropSquad,
+    onSelectDeployModel: handleSelectDeployModel,
+    onMoveDeployModelInPlan: handleMoveDeployModelInPlan,
+    onSquadMoveDeploy: handleSquadMoveDeploy,
+    onCommitDeploy: handleCommitDeploy,
+    onCancelDeploy: handleCancelDeploy,
     // Charge par-figurine (V11 11.04, Slice G)
     chargeMovePlan,
     chargeFocusActive,

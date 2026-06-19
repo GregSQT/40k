@@ -992,6 +992,10 @@ body {
   border-radius: var(--radius-lg);
   padding: var(--spacing-sm);
   margin-bottom: var(--spacing-sm);
+  /* Borne la hauteur : la liste 1-ligne-par-escouade peut être longue (≈17 lignes)
+     et pousserait/tronquerait le board. Scroll interne au lieu de grandir. */
+  max-height: 40vh;
+  overflow-y: auto;
 }
 
 .deployment-panel--dual {

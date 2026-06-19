@@ -441,7 +441,8 @@ type Mode =
   | "pileInPreview"
   | "pileInModelMove"
   | "consolidationPreview"
-  | "consolidationModelMove";
+  | "consolidationModelMove"
+  | "deploymentMove";
 
 /** État du mode mesure (règle dans la barre). */
 export type MeasureModeState =
@@ -533,6 +534,26 @@ type BoardProps = {
   onResetModelInPlan?: (modelId: string) => void;
   onCommitSquadMovePlan?: () => void | Promise<void>;
   onCancelSquadMove?: () => void;
+  /** Déploiement par escouade (PvP "active") — plan provisoire par-figurine. */
+  deployPlan?: {
+    unitId: number;
+    models: Record<string, { col: number; row: number }>;
+    originModels: Record<string, { col: number; row: number }>;
+    activeModelId: string | null;
+    perModelValid: Record<string, boolean>;
+    coherencyOk: boolean;
+    canValidate: boolean;
+    placed: boolean;
+  } | null;
+  /** Pool de la zone de déploiement (Set "col,row") du déployeur courant. */
+  deployPoolRef?: React.RefObject<Set<string>>;
+  onStartDeploySquad?: (unitId: number | string) => void;
+  onDeployDropSquad?: (col: number, row: number) => void | Promise<void>;
+  onSelectDeployModel?: (modelId: string) => void;
+  onMoveDeployModelInPlan?: (modelId: string, col: number, row: number) => void;
+  onSquadMoveDeploy?: (col: number, row: number) => void;
+  onCommitDeploy?: () => void | Promise<void>;
+  onCancelDeploy?: () => void;
   /** Charge par-figurine (V11 11.04, Slice G) — plan provisoire des figs posées. */
   chargeMovePlan?: {
     unitId: number;
@@ -983,6 +1004,12 @@ export default function Board({
   onResetModelInPlan,
   onCommitSquadMovePlan,
   onCancelSquadMove,
+  deployPlan = null,
+  deployPoolRef,
+  onDeployDropSquad,
+  onSelectDeployModel,
+  onMoveDeployModelInPlan,
+  onSquadMoveDeploy,
   chargeMovePlan = null,
   chargeModelPoolRef,
   chargeModelMaskLoopsRef,
@@ -1318,6 +1345,20 @@ export default function Board({
   const squadMovePlanRef = useRef(squadMovePlan);
   squadMovePlanRef.current = squadMovePlan;
 
+  /** Callbacks de déploiement par escouade — ref toujours à jour pour les handlers d'event stables. */
+  const deployCallbacksRef = useRef({
+    onDeployDropSquad,
+    onSelectDeployModel,
+    onMoveDeployModelInPlan,
+    onSquadMoveDeploy,
+  });
+  deployCallbacksRef.current = {
+    onDeployDropSquad,
+    onSelectDeployModel,
+    onMoveDeployModelInPlan,
+    onSquadMoveDeploy,
+  };
+
   // ──────────────────────────────────────────────────────────────────────────
   // Slice G : la machinerie per-modèle (hover/pool/pose/sélection) est partagée entre le move
   // (squadModelMove) et les modes « charge-like » (charge + pile-in : pose/dé-pose/sélection d'une
@@ -1388,14 +1429,37 @@ export default function Board({
     };
   }, [perModelChargeLike, activeChargeLikePlan, gameState?.units_cache]);
 
-  /** true si on est dans un mode plan par-figurine (move OU charge OU pile-in). */
-  const isPerModelMove = mode === "squadModelMove" || perModelChargeLike;
-  /** Plan per-modèle actif (squad ou charge-like) — même forme pour la machinerie partagée. */
-  const effectivePerModelPlan = perModelChargeLike ? perModelPlanView : squadMovePlan;
-  /** Ref de pool de la fig active (squad BFS ou charge-like eligible). */
-  const effectivePerModelPoolRef = perModelChargeLike
-    ? (activeChargeLikePoolRef ?? null)
-    : (squadMoveModelPoolRef ?? null);
+  /** Mode déploiement par escouade (PvP "active") : même machinerie per-fig que le move. */
+  const isDeploymentMove = mode === "deploymentMove";
+  /** Vue squad-shaped du plan de déploiement (ajoute wouldFlee:false pour la forme partagée). */
+  const deployPlanView = useMemo(() => {
+    if (!isDeploymentMove || !deployPlan) return null;
+    return {
+      unitId: deployPlan.unitId,
+      models: deployPlan.models,
+      originModels: deployPlan.originModels,
+      activeModelId: deployPlan.activeModelId,
+      perModelValid: deployPlan.perModelValid,
+      coherencyOk: deployPlan.coherencyOk,
+      canValidate: deployPlan.canValidate,
+      wouldFlee: false,
+    };
+  }, [isDeploymentMove, deployPlan]);
+
+  /** true si on est dans un mode plan par-figurine (move OU charge OU pile-in OU déploiement). */
+  const isPerModelMove = mode === "squadModelMove" || perModelChargeLike || isDeploymentMove;
+  /** Plan per-modèle actif (squad ou charge-like ou déploiement) — même forme partagée. */
+  const effectivePerModelPlan = isDeploymentMove
+    ? deployPlanView
+    : perModelChargeLike
+      ? perModelPlanView
+      : squadMovePlan;
+  /** Ref de pool de la fig active (squad BFS, charge-like eligible, ou zone de déploiement). */
+  const effectivePerModelPoolRef = isDeploymentMove
+    ? (deployPoolRef ?? null)
+    : perModelChargeLike
+      ? (activeChargeLikePoolRef ?? null)
+      : (squadMoveModelPoolRef ?? null);
   const effectivePerModelPlanRef = useRef(effectivePerModelPlan);
   effectivePerModelPlanRef.current = effectivePerModelPlan;
 
@@ -3899,6 +3963,45 @@ export default function Board({
           foundModelId = mid;
         }
       }
+      if (isDeploymentMove) {
+        const dplan = deployPlan;
+        if (!dplan) return;
+        const pool = deployPoolRef?.current;
+        const inPool = pool?.has(`${col},${row}`) ?? false;
+        console.log("[DEPLOY-DBG] click board:", {
+          col,
+          row,
+          placed: dplan.placed,
+          activeModelId: dplan.activeModelId,
+          inPool,
+          poolSize: pool?.size ?? 0,
+          foundModelId,
+          modelsCount: Object.keys(dplan.models).length,
+        });
+        // 1) Escouade pas encore posée : 1er clic dans la zone → formation compacte (backend).
+        if (!dplan.placed) {
+          if (inPool) {
+            void deployCallbacksRef.current.onDeployDropSquad?.(col, row);
+          }
+          return;
+        }
+        // 2) Fig active sélectionnée + clic dans la zone → pose la fig active à cet hex.
+        if (dplan.activeModelId && inPool) {
+          deployCallbacksRef.current.onMoveDeployModelInPlan?.(dplan.activeModelId, col, row);
+          return;
+        }
+        // 3) Clic sur une figurine de l'escouade → la sélectionne pour repositionnement.
+        if (foundModelId) {
+          if (foundModelId === dplan.activeModelId) return;
+          deployCallbacksRef.current.onSelectDeployModel?.(foundModelId);
+          return;
+        }
+        // 4) Aucune fig active + clic dans la zone hors figs → squad move (translation rigide).
+        if (!dplan.activeModelId && inPool) {
+          deployCallbacksRef.current.onSquadMoveDeploy?.(col, row);
+        }
+        return;
+      }
       if (perModelChargeLike) {
         // Mode Focus : un clic sur une cible déclarée déclenche l'auto-placement (pas la pose de fig).
         // Hit-test sur les positions par-figurine de la cible (occupied_hexes_by_model, source unique).
@@ -4027,6 +4130,9 @@ export default function Board({
     isConsolidationModelMove,
     consolidationMovePlan?.engagingCandidates,
     gameState?.units_cache,
+    isDeploymentMove,
+    deployPlan,
+    deployPoolRef?.current,
   ]);
 
   // TIR par-figurine (PvP manuel) : phase shoot. Entrée sur escouade OWN multi-fig →
@@ -6535,26 +6641,9 @@ export default function Board({
         ? undefined
         : units.find((u) => String(u.id) === String(selectedUnitId));
 
-    if (phase === "deployment" && deploymentState) {
-      const deployer = deploymentState.current_deployer ?? current_player;
-      const pool =
-        deploymentState.deployment_pools[String(deployer)] ||
-        deploymentState.deployment_pools[
-          deployer as unknown as keyof typeof deploymentState.deployment_pools
-        ];
-      if (pool) {
-        pool.forEach((hex) => {
-          if (Array.isArray(hex)) {
-            availableCells.push({ col: Number(hex[0]), row: Number(hex[1]) });
-          } else if (hex && typeof hex === "object" && "col" in hex && "row" in hex) {
-            availableCells.push({
-              col: Number((hex as { col: number }).col),
-              row: Number((hex as { row: number }).row),
-            });
-          }
-        });
-      }
-    }
+    // Déploiement : la zone est affichée par le polygon rempli (drawBoard, deployment_zones du
+    // terrain). On ne surligne plus le pool hex-par-hex ici (doublon visuel). Le drop reste validé
+    // par deployPoolRef (clic) et deployment_pools (ghost), indépendamment de availableCells.
 
     // Surbrillance du pool de la figurine active : move (BFS) OU charge (eligible) par-figurine.
     if (
@@ -7816,9 +7905,29 @@ export default function Board({
           enginePhaseForPools === "shoot" &&
           (unit.HP_CUR ?? 0) <= 0;
 
+        // Déploiement par escouade : l'escouade en cours de placement n'est pas (encore) dans
+        // units_cache. On la rend depuis le plan provisoire (deployPlanView) dès qu'elle est posée.
+        const isDeployGhost =
+          isDeploymentMove &&
+          !!effectivePerModelPlan &&
+          String(effectivePerModelPlan.unitId) === unitIdStr &&
+          Object.keys(effectivePerModelPlan.models).length > 0;
+
         // units_cache is the single source of truth for living units.
         // Keep only the hazardous-death ghost and shoot-phase dead ghosts visible.
-        if (!isPresentInUnitsCache && !isHazardousDeathGhost && !isDeadGhost) {
+        if (!isPresentInUnitsCache && !isHazardousDeathGhost && !isDeadGhost && !isDeployGhost) {
+          continue;
+        }
+
+        // Déploiement : une escouade non encore déployée a son ancre + toutes ses
+        // figurines à la sentinelle (-1,-1). Sans ce garde, ses N figurines sont
+        // dessinées empilées à l'origine (≈ 1 blob/escouade). On ne la rend QUE
+        // si c'est l'escouade en cours de placement (deploy ghost).
+        if (
+          enginePhaseForPools === "deployment" &&
+          (Number(unit.col) < 0 || Number(unit.row) < 0) &&
+          !isDeployGhost
+        ) {
           continue;
         }
 
@@ -7844,15 +7953,26 @@ export default function Board({
         let modelPositions: Array<[number, number]>;
         let modelValidFlags: boolean[];
         let modelIds: string[];
-        if (occupiedHexesByModel) {
+        if (isDeployGhost && !occupiedHexesByModel) {
+          // Escouade en déploiement non présente dans units_cache : positions = plan provisoire.
+          const entries = Object.entries(effectivePerModelPlan!.models);
+          modelIds = entries.map(([mid]) => mid);
+          modelPositions = entries.map(([, p]) => [p.col, p.row] as [number, number]);
+          modelValidFlags = entries.map(
+            ([mid]) => effectivePerModelPlan!.perModelValid[mid] !== false
+          );
+        } else if (occupiedHexesByModel) {
           const entries = Object.entries(occupiedHexesByModel) as Array<[string, [number, number]]>;
           modelIds = entries.map(([mid]) => mid);
           modelPositions = entries.map(([mid, pos]) => {
-            const planPos = isSquadGhost ? effectivePerModelPlan!.models[mid] : undefined;
+            const planPos =
+              isSquadGhost || isDeployGhost ? effectivePerModelPlan!.models[mid] : undefined;
             return planPos ? ([planPos.col, planPos.row] as [number, number]) : pos;
           });
           modelValidFlags = entries.map(([mid]) =>
-            isSquadGhost ? effectivePerModelPlan!.perModelValid[mid] !== false : true
+            isSquadGhost || isDeployGhost
+              ? effectivePerModelPlan!.perModelValid[mid] !== false
+              : true
           );
         } else {
           modelIds = [String(unit.id)];
@@ -7864,6 +7984,16 @@ export default function Board({
           mCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN,
           mRow * HEX_VERT_SPACING + ((mCol % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN,
         ]);
+        if (isDeployGhost || (isDeploymentMove && isSquadGhost)) {
+          console.log("[DEPLOY-DBG] rendu unit", unitIdStr, {
+            isDeployGhost,
+            isSquadGhost,
+            occupiedKeys: occupiedHexesByModel ? Object.keys(occupiedHexesByModel).length : "ABSENT",
+            planKeys: effectivePerModelPlan ? Object.keys(effectivePerModelPlan.models).length : "no-plan",
+            modelPositionsCount: modelPositions.length,
+            modelPositions,
+          });
+        }
         const modelMetas: Array<ModelVisualMeta | null> = modelMetasByModel
           ? modelIds.map((mid) => modelMetasByModel[mid] ?? null)
           : [];
@@ -8809,7 +8939,13 @@ export default function Board({
     let dragPointerUp: ((e: PointerEvent) => void) | null = null;
     let dragPointerLeave: (() => void) | null = null;
 
-    if (phase === "deployment" && selectedUnitId !== null) {
+    // Le drag de déploiement mono-socle (deploy_unit) ne sert plus en mode "active" :
+    // le déploiement par escouade (deploymentMove) gère le placement par-figurine.
+    if (
+      phase === "deployment" &&
+      selectedUnitId !== null &&
+      gameState.deployment_type !== "active"
+    ) {
       const canvas = app.view as HTMLCanvasElement;
 
       if (!dragOverlayRef.current) {

@@ -2146,6 +2146,18 @@ def execute_action():
             },
         })
 
+    # Read-only: génération de formation compacte de déploiement (drop initial d'escouade).
+    if action.get("action") == "deploy_generate_formation":
+        from engine.phase_handlers import deployment_handlers as _dh_gen
+        ok, res = _dh_gen.deployment_generate_formation_action(engine.game_state, action)
+        return api_json_response({"success": bool(ok), "result": res})
+
+    # Read-only: dry-run d'un plan de déploiement par-figurine (rouge/vert + cohésion).
+    if action.get("action") == "deploy_preview":
+        from engine.phase_handlers import deployment_handlers as _dh_prev
+        ok, res = _dh_prev.deployment_preview_action(engine.game_state, action)
+        return api_json_response({"success": bool(ok), "result": res})
+
     # Read-only preview: valid shoot targets from hypothetical position (move/advance phase preview)
     if action.get("action") == "preview_shoot_from_position":
         unit_id = action.get("unitId")
@@ -2980,6 +2992,7 @@ def get_board_config():
         # (jamais expandées dans wall_hexes). Canal distinct des murs et des objectifs.
         terrain_zones: list = []
         terrain_icons: list = []
+        deployment_zones_cfg: list = []
         if terrain_ref and terrain_ref.endswith(".json"):
             terrain_path = board_dir / "terrain" / terrain_ref
             if not terrain_path.exists():
@@ -2998,6 +3011,7 @@ def get_board_config():
             # Source UNIQUE des objectifs côté rendu : terrains flaggés "objective": true.
             merged["objective_zones"] = [z for z in terrain_zones if z.get("objective")]
             terrain_icons = terrain_data.get("icons", [])
+            deployment_zones_cfg = terrain_data.get("deployment_zones", [])
             for gi, g in enumerate(terrain_data.get("walls", [])):
                 if not isinstance(g, dict):
                     continue
@@ -3015,6 +3029,7 @@ def get_board_config():
                 merged["walls"] = wall_segments_raw
         merged["terrain_zones"] = terrain_zones
         merged["terrain_icons"] = terrain_icons
+        merged["deployment_zones"] = deployment_zones_cfg
         return jsonify({"success": True, "config": merged})
     except FileNotFoundError as e:
         return jsonify({

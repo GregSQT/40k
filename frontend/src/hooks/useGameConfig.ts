@@ -86,6 +86,13 @@ interface BoardConfig {
   };
   objective_zones?: ObjectiveZone[];
   terrain_zones?: ObjectiveZone[];
+  deployment_zones?: Array<{
+    id: string;
+    name?: string;
+    shape?: string;
+    vertices?: [number, number][];
+    objective?: boolean;
+  }>;
   terrain_icons?: Array<{
     id: number | string;
     name: string;

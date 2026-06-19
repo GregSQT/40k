@@ -778,6 +778,13 @@ interface BoardConfig {
     objective?: boolean;
     obscuring?: boolean;
   }>;
+  deployment_zones?: Array<{
+    id: string;
+    name?: string;
+    shape?: string;
+    vertices?: [number, number][];
+    objective?: boolean;
+  }>;
   terrain_icons?: Array<{
     id: number | string;
     name: string;
@@ -2140,6 +2147,43 @@ export const drawBoard = (
           } else {
             continue;
           }
+          baseHexContainer.addChild(g);
+        }
+      }
+
+      // Zones de déploiement : polygone rempli par joueur (id "1" → P1 bleu, id "2" → P2 rouge).
+      if (Array.isArray(boardConfig.deployment_zones)) {
+        const toPixelD = (c: number, r: number): [number, number] => [
+          c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN,
+          r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN,
+        ];
+        const dzLineWidth = Math.max(1.5, HEX_RADIUS * 0.3);
+        for (const zone of boardConfig.deployment_zones) {
+          if (
+            zone.shape !== "polygon" ||
+            !Array.isArray(zone.vertices) ||
+            zone.vertices.length < 3
+          ) {
+            continue;
+          }
+          let dzColor: number;
+          if (zone.id === "1") {
+            dzColor = OBJECTIVE_P1_COLOR;
+          } else if (zone.id === "2") {
+            dzColor = OBJECTIVE_P2_COLOR;
+          } else {
+            continue;
+          }
+          const pts = zone.vertices.map(([c, r]) => toPixelD(c, r));
+          const g = new PIXI.Graphics();
+          g.beginFill(dzColor, 0.15);
+          g.lineStyle(dzLineWidth, dzColor, 0.6);
+          g.moveTo(pts[0]![0], pts[0]![1]);
+          for (let i = 1; i < pts.length; i++) {
+            g.lineTo(pts[i]![0], pts[i]![1]);
+          }
+          g.closePath();
+          g.endFill();
           baseHexContainer.addChild(g);
         }
       }

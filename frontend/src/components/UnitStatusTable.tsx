@@ -11,7 +11,7 @@ import {
 } from "react";
 import unitRules from "../../../config/unit_rules.json";
 import weaponRules from "../../../config/weapon_rules.json";
-import type { Unit, UnitId } from "../types/game";
+import type { DeploymentState, Unit, UnitId } from "../types/game";
 import TooltipWrapper from "./TooltipWrapper";
 
 const UNIT_RULE_DESCRIPTIONS: Record<string, string> = {
@@ -109,6 +109,12 @@ interface UnitStatusTableProps {
   tutorialReportP2UnitRowRects?: boolean;
   /** Preview plateau : forcer cette unité et ses armes à être visibles tant que l'illustration est affichée. */
   detailPreviewUnitId?: UnitId | null;
+  /** Phase courante : en "deployment" + deployment_type "active", on filtre les unités déployables. */
+  phase?: string;
+  /** État de déploiement : pour ne montrer que les unités encore déployables du déployeur courant. */
+  deploymentState?: DeploymentState | null;
+  /** Type de déploiement : le filtrage par escouade ne s'applique qu'en mode "active". */
+  deploymentType?: "random" | "fixed" | "active";
 }
 
 interface UnitRowProps {
@@ -1183,6 +1189,9 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     onP2UnitRowRects,
     tutorialReportP2UnitRowRects = false,
     detailPreviewUnitId = null,
+    phase,
+    deploymentState = null,
+    deploymentType,
   }) => {
     const nameHeaderRef = useRef<HTMLTableCellElement>(null);
     const mHeaderRef = useRef<HTMLTableCellElement>(null);
@@ -1347,7 +1356,16 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
 
     // Filter units for this player and exclude dead units ; preview plateau : unité ciblée en tête de liste
     const playerUnits = useMemo(() => {
-      const filtered = units.filter((unit) => unit.player === player && unit.HP_CUR > 0);
+      let filtered = units.filter((unit) => unit.player === player && unit.HP_CUR > 0);
+      // Déploiement par escouade (PvP "active") : ne montrer que les unités encore déployables
+      // du déployeur courant. Les autres tables (autre joueur) restent vides.
+      if (phase === "deployment" && deploymentType === "active" && deploymentState) {
+        const deployer = deploymentState.current_deployer;
+        const deployableIds = new Set(
+          (deploymentState.deployable_units?.[String(deployer)] ?? []).map((id) => String(id))
+        );
+        filtered = filtered.filter((unit) => deployableIds.has(String(unit.id)));
+      }
       if (detailPreviewUnitId === null) {
         return filtered;
       }
@@ -1358,7 +1376,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
       const previewUnit = filtered[previewIndex];
       const rest = filtered.filter((_, i) => i !== previewIndex);
       return [previewUnit, ...rest];
-    }, [units, player, detailPreviewUnitId]);
+    }, [units, player, detailPreviewUnitId, phase, deploymentType, deploymentState]);
 
     useEffect(() => {
       const targetUnitInThisTable =

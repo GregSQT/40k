@@ -48,5 +48,9 @@
     { "id": 3, "name": "SkullRound", "path": "frontend/public/icons/Terrain/SkullRound.png", "center": [110, 150], "size": 80, "alpha": 0.7 },
     { "id": 4, "name": "SkullSquare1", "path": "frontend/public/icons/Terrain/SkullSquare.png", "center": [191, 56], "size": 80, "alpha": 0.7 },
     { "id": 5, "name": "SkullSquare2", "path": "frontend/public/icons/Terrain/SkullSquare.png", "center": [32, 242], "size": 80, "alpha": 0.7 }
+  ],
+  "deployment_zones": [
+    { "id": "1", "name": "Deployment zone defender", "shape": "polygon", "vertices": [[0,300],[220,150],[220,300]], "objective": false },
+    { "id": "2", "name": "Deployment zone attacker", "shape": "polygon", "vertices": [[0,150],[220,0],[0,0]], "objective": false }
   ]
 }

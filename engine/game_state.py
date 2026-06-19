@@ -242,6 +242,7 @@ class GameStateManager:
             resolved_scenario_walls = None
             resolved_scenario_objectives = None
             resolved_terrain_areas = None
+            resolved_deployment_zones = None
             if isinstance(scenario_data, dict):
                 has_wall_hexes = "wall_hexes" in scenario_data
                 has_wall_ref = "wall_ref" in scenario_data
@@ -263,6 +264,9 @@ class GameStateManager:
                     if terrain_walls:
                         resolved_scenario_walls = list(resolved_scenario_walls or []) + terrain_walls
                     resolved_terrain_areas = self._load_terrain_areas_from_ref(
+                        scenario_data["terrain_ref"], scenario_file
+                    )
+                    resolved_deployment_zones = self._load_deployment_zones_from_ref(
                         scenario_data["terrain_ref"], scenario_file
                     )
 
@@ -287,11 +291,13 @@ class GameStateManager:
                     or has_deployment_type_p2
                 )
                 if has_deployment_zone or has_any_deployment_type:
-                    if not has_deployment_zone:
+                    if not has_deployment_zone and resolved_deployment_zones is None:
                         raise KeyError(
-                            f"Scenario file {scenario_file} requires 'deployment_zone' when deployment type is configured"
+                            f"Scenario file {scenario_file} requires 'deployment_zone' (or a 'deployment_zones' "
+                            f"section in its terrain_ref) when deployment type is configured"
                         )
-                    deployment_zone = require_key(scenario_data, "deployment_zone")
+                    if has_deployment_zone:
+                        deployment_zone = require_key(scenario_data, "deployment_zone")
                     if has_deployment_type:
                         deployment_type = require_key(scenario_data, "deployment_type")
                     else:
@@ -345,8 +351,40 @@ class GameStateManager:
                 return True
 
             deploy_pools = {}
-            if deployment_zone:
-                # Le nom de zone est validé par l'existence du fichier ci-dessous
+            if resolved_deployment_zones is not None:
+                # Source unique : section 'deployment_zones' du terrain (polygones par joueur).
+                # id "1" → joueur 1, id "2" → joueur 2.
+                zones_by_player: Dict[int, set] = {}
+                for zi, zone in enumerate(resolved_deployment_zones):
+                    hint = f"terrain deployment_zones[{zi}]"
+                    zid = require_key(zone, "id")
+                    try:
+                        player_id = int(zid)
+                    except (TypeError, ValueError):
+                        raise ValueError(f"{hint}: 'id' must be a player number (1 or 2), got {zid!r}")
+                    if player_id not in (1, 2):
+                        raise ValueError(f"{hint}: 'id' must be 1 or 2, got {player_id}")
+                    if player_id in zones_by_player:
+                        raise ValueError(f"{hint}: duplicate deployment zone for player {player_id}")
+                    if zone.get("shape") != "polygon":
+                        raise ValueError(f"{hint}: deployment zone must have shape 'polygon'")
+                    vertices = require_key(zone, "vertices")
+                    if not isinstance(vertices, list) or len(vertices) < 3:
+                        raise ValueError(f"{hint}: 'vertices' must be a list of >= 3 [col,row] points")
+                    poly = [[int(v[0]), int(v[1])] for v in vertices]
+                    zones_by_player[player_id] = {
+                        (int(c), int(r))
+                        for c, r in polygon_to_hex_list(poly, board_cols, board_rows)
+                        if _is_valid_deploy_hex(c, r)
+                    }
+                if set(zones_by_player.keys()) != {1, 2}:
+                    raise KeyError(
+                        f"Terrain deployment_zones must define exactly players 1 and 2, "
+                        f"got {sorted(zones_by_player.keys())}"
+                    )
+                deploy_pools = {1: zones_by_player[1], 2: zones_by_player[2]}
+            elif deployment_zone:
+                # Voie legacy : nom de zone validé par l'existence du fichier ci-dessous
                 # (config/deployment/<board>/<zone>.json) — pas de whitelist figée.
                 project_root = os.path.dirname(os.path.dirname(__file__))
                 board_size_dir = f"{board_cols}x{board_rows}"
@@ -418,18 +456,18 @@ class GameStateManager:
                     1: _build_deploy_pool(deployment_data["p1"]),
                     2: _build_deploy_pool(deployment_data["p2"]),
                 }
-                if any(
-                    deployment_type_by_player[player_id] in ("random", "active")
-                    for player_id in (1, 2)
-                ):
-                    if not wall_hex_set:
-                        raise KeyError(
-                            f"Scenario file {scenario_file} missing required 'wall_hexes' for random/active deployment"
-                        )
-                    deploy_pools = {
-                        1: deploy_pools[1] - wall_hex_set,
-                        2: deploy_pools[2] - wall_hex_set,
-                    }
+            if deploy_pools and any(
+                deployment_type_by_player[player_id] in ("random", "active")
+                for player_id in (1, 2)
+            ):
+                if not wall_hex_set:
+                    raise KeyError(
+                        f"Scenario file {scenario_file} missing required 'wall_hexes' for random/active deployment"
+                    )
+                deploy_pools = {
+                    1: deploy_pools[1] - wall_hex_set,
+                    2: deploy_pools[2] - wall_hex_set,
+                }
             used_hexes = set()
             _ish = int(require_key(board_spec, "inches_to_subhex"))
             is_micro_board = _ish > 1
@@ -641,9 +679,19 @@ class GameStateManager:
                             raise TypeError(
                                 f"Unit {unit_data.get('id')}: models[{idx}] must be dict, got {type(spec).__name__}"
                             )
-                        m_col = int(require_key(spec, "col"))
-                        m_row = int(require_key(spec, "row"))
-                        m_norm_col, m_norm_row = normalize_coordinates(m_col, m_row)
+                        # Mode active : l'escouade n'est pas encore déployée. On
+                        # conserve la composition (nombre de figurines + unit_type
+                        # par figurine) mais on ne place pas les figurines : ancre
+                        # et toutes les figurines à la sentinelle (-1,-1) pour
+                        # respecter l'invariant ancre==models[0] (build_units_cache).
+                        # Les positions réelles sont générées au déploiement
+                        # (formation compacte) puis ajustées via squad/fig move.
+                        if player_deployment_type == "active":
+                            m_norm_col, m_norm_row = -1, -1
+                        else:
+                            m_col = int(require_key(spec, "col"))
+                            m_row = int(require_key(spec, "row"))
+                            m_norm_col, m_norm_row = normalize_coordinates(m_col, m_row)
                         m_spec: Dict[str, Any] = {"col": m_norm_col, "row": m_norm_row}
                         model_unit_type = spec.get("unit_type")
                         if model_unit_type is not None:
@@ -1311,6 +1359,21 @@ class GameStateManager:
             hint = f"Terrain file {terrain_path} walls[{gi}]"
             result.extend(expand_wall_group_to_hex_list(g, path_hint=hint))
         return result
+
+    def _load_deployment_zones_from_ref(self, terrain_ref: str, scenario_file: str) -> Optional[List[Dict[str, Any]]]:
+        """Load the 'deployment_zones' section of a terrain file, or None if absent.
+
+        Returns the raw list of zone dicts ({id, name, shape:"polygon", vertices, ...}). The geometry
+        is rasterized to per-player deploy pools later (needs board cols/rows). Returns None when the
+        terrain has no 'deployment_zones' key — those scenarios fall back to config/deployment/ (legacy).
+        """
+        terrain_data, terrain_path = self._read_terrain_file(terrain_ref, scenario_file)
+        if "deployment_zones" not in terrain_data:
+            return None
+        zones = terrain_data["deployment_zones"]
+        if not isinstance(zones, list) or not zones:
+            raise ValueError(f"Terrain file {terrain_path}: 'deployment_zones' must be a non-empty list")
+        return zones
 
     def _load_terrain_areas_from_ref(self, terrain_ref: str, scenario_file: str) -> List[Dict[str, Any]]:
         """Load polygon terrain areas from the 'terrain' section of a terrain file referenced by terrain_ref.

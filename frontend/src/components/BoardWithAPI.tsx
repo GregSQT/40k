@@ -2676,45 +2676,10 @@ export const BoardWithAPI: React.FC = () => {
           const deployableUnits = deployableIdsRaw
             .map((id) => apiProps.gameState!.units.find((u) => String(u.id) === String(id)))
             .filter((u): u is Unit => Boolean(u));
-          const getDeploymentGroupKey = (unit: Unit): string => {
-            const displayName = unit.DISPLAY_NAME || unit.name || unit.type || unit.unitType;
-            if (!displayName) {
-              throw new Error(`Deployment unit ${unit.id} missing display name`);
-            }
-            const marker = " (";
-            const markerIndex = displayName.indexOf(marker);
-            if (markerIndex > 0 && displayName.endsWith(")")) {
-              return displayName.slice(0, markerIndex).trim();
-            }
-            return displayName.trim();
-          };
-          const deployableByType: Record<string, Unit[]> = {};
-          deployableUnits.forEach((unit) => {
-            const typeKey = getDeploymentGroupKey(unit);
-            if (!deployableByType[typeKey]) {
-              deployableByType[typeKey] = [];
-            }
-            deployableByType[typeKey].push(unit);
-          });
-          Object.values(deployableByType).forEach((unitsOfType) => {
-            unitsOfType.sort((a, b) => {
-              if (typeof a.VALUE !== "number" || typeof b.VALUE !== "number") {
-                throw new Error(
-                  `Deployment sorting requires numeric VALUE (units ${a.id}=${String(a.VALUE)}, ${b.id}=${String(b.VALUE)})`
-                );
-              }
-              if (b.VALUE !== a.VALUE) {
-                return b.VALUE - a.VALUE;
-              }
-              const aName = a.DISPLAY_NAME || a.name || a.type || a.unitType;
-              if (!aName)
-                throw new Error(`Unit missing all name fields (DISPLAY_NAME/name/type/unitType)`);
-              const bName = b.DISPLAY_NAME || b.name || b.type || b.unitType;
-              if (!bName)
-                throw new Error(`Unit missing all name fields (DISPLAY_NAME/name/type/unitType)`);
-              return aName.localeCompare(bName);
-            });
-          });
+          // 1 ligne par escouade, triée par unit ID (pas de regroupement par type).
+          const deployableSorted = [...deployableUnits].sort(
+            (a, b) => Number(a.id) - Number(b.id)
+          );
           const isCurrentDeployer = player === currentDeployer;
           const isCollapsed = deploymentRosterCollapsed[player];
           const deployedUnitIds = deploymentState.deployed_units.map((id) => String(id));
@@ -2787,104 +2752,140 @@ export const BoardWithAPI: React.FC = () => {
 
               {!isCollapsed && (
                 <div className="deployment-panel__type-list">
-                  {Object.keys(deployableByType).length === 0 && (
+                  {deployableSorted.length === 0 && (
                     <div className="deployment-panel__empty">Aucune unite deployable restante</div>
                   )}
-                  {Object.entries(deployableByType).map(([typeKey, unitsOfType]) => (
-                    <div
-                      key={`deploy-type-${player}-${typeKey}`}
-                      className={`deployment-panel__type-group deployment-panel__type-group--player${player}`}
-                    >
-                      <div className="deployment-panel__type-label">{typeKey} :</div>
-                      <div className="deployment-panel__type-icons">
-                        {unitsOfType.map((unit) => {
-                          const isSelected = apiProps.selectedUnitId === unit.id;
-                          const displayName = unit.DISPLAY_NAME || unit.name || typeKey;
-                          const tooltipText = `${displayName} - ID ${unit.id}${isCurrentDeployer ? "" : " (inactive this turn)"}`;
-                          return (
-                            <button
-                              type="button"
-                              className="deployment-panel__unit-icon"
-                              key={`deploy-unit-${player}-${unit.id}`}
-                              onMouseEnter={(e) => {
-                                setDeploymentTooltip({
-                                  visible: true,
-                                  text: tooltipText,
-                                  x: e.clientX,
-                                  y: e.clientY,
-                                });
-                              }}
-                              onMouseMove={(e) => {
-                                setDeploymentTooltip((prev) => ({
-                                  visible: true,
-                                  text: prev?.text ?? tooltipText,
-                                  x: e.clientX,
-                                  y: e.clientY,
-                                }));
-                              }}
-                              onMouseLeave={() => {
-                                setDeploymentTooltip(null);
-                              }}
-                              onClick={() => {
-                                if (!canInteractDeployment) {
-                                  return;
-                                }
-                                apiProps.onSelectUnit(unit.id);
-                                setClickedUnitId(null);
-                              }}
-                              aria-disabled={!canInteractDeployment}
-                              tabIndex={canInteractDeployment ? 0 : -1}
+                  {/* 1 ligne par escouade, triée par unit ID. */}
+                  {deployableSorted.map((unit) => {
+                    const isSelected = apiProps.selectedUnitId === unit.id;
+                    const displayName =
+                      unit.DISPLAY_NAME || unit.name || unit.type || unit.unitType || String(unit.id);
+                    // Nombre de figurines = clés de occupied_hexes_by_model (source du board,
+                    // toujours présente même pour une escouade non déployée à (-1,-1)).
+                    const ucEntry = (
+                      apiProps.gameState!.units_cache as
+                        | Record<
+                            string,
+                            {
+                              occupied_hexes_by_model?: Record<string, unknown>;
+                              models_meta_by_model?: Record<string, { ICON?: string }>;
+                            }
+                          >
+                        | undefined
+                    )?.[String(unit.id)];
+                    const figModelIds = ucEntry?.occupied_hexes_by_model
+                      ? Object.keys(ucEntry.occupied_hexes_by_model)
+                      : [String(unit.id)];
+                    const figCount = figModelIds.length;
+                    // Icône par figurine : models_meta_by_model n'est exposé que pour
+                    // les escouades hétérogènes ; sinon repli métier sur l'icône d'unité.
+                    const iconForModel = (modelId: string): string =>
+                      ucEntry?.models_meta_by_model?.[modelId]?.ICON ?? unit.ICON;
+                    const tooltipText = `${displayName} - ID ${unit.id} - ${figCount} fig.${isCurrentDeployer ? "" : " (inactive this turn)"}`;
+                    return (
+                      <button
+                        type="button"
+                        className={`deployment-panel__unit-row deployment-panel__unit-row--player${player}`}
+                        key={`deploy-unit-${player}-${unit.id}`}
+                        onMouseEnter={(e) => {
+                          setDeploymentTooltip({
+                            visible: true,
+                            text: tooltipText,
+                            x: e.clientX,
+                            y: e.clientY,
+                          });
+                        }}
+                        onMouseMove={(e) => {
+                          setDeploymentTooltip((prev) => ({
+                            visible: true,
+                            text: prev?.text ?? tooltipText,
+                            x: e.clientX,
+                            y: e.clientY,
+                          }));
+                        }}
+                        onMouseLeave={() => {
+                          setDeploymentTooltip(null);
+                        }}
+                        onClick={() => {
+                          console.log("[DEPLOY-DBG] panneau click unit", unit.id, {
+                            canInteractDeployment,
+                            isCurrentDeployer,
+                            phase: apiProps.gameState?.phase,
+                            depType: apiProps.gameState?.deployment_type,
+                          });
+                          if (!canInteractDeployment) {
+                            return;
+                          }
+                          apiProps.onSelectUnit(unit.id);
+                          setClickedUnitId(null);
+                        }}
+                        aria-disabled={!canInteractDeployment}
+                        tabIndex={canInteractDeployment ? 0 : -1}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          width: "100%",
+                          minHeight: "32px",
+                          borderRadius: "6px",
+                          border: isSelected
+                            ? "2px solid #7CFF7C"
+                            : `1px solid ${getIconBorderColor(player)}`,
+                          background: isSelected
+                            ? "rgba(124, 255, 124, 0.2)"
+                            : "rgba(0, 0, 0, 0.35)",
+                          color: "white",
+                          cursor: canInteractDeployment ? "pointer" : "not-allowed",
+                          opacity: canInteractDeployment ? 1 : 0.55,
+                          padding: "4px 8px",
+                          textAlign: "left",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            alignItems: "center",
+                            gap: "2px",
+                            flex: "0 1 auto",
+                            minWidth: 0,
+                          }}
+                        >
+                          {figModelIds.map((figModelId) => (
+                            <img
+                              key={`deploy-fig-${player}-${unit.id}-${figModelId}`}
+                              src={iconForModel(figModelId)}
+                              alt={displayName}
                               style={{
-                                width: "42px",
-                                height: "42px",
-                                borderRadius: "6px",
-                                border: isSelected
-                                  ? "2px solid #7CFF7C"
-                                  : `1px solid ${getIconBorderColor(player)}`,
-                                background: isSelected
-                                  ? "rgba(124, 255, 124, 0.2)"
-                                  : "rgba(0, 0, 0, 0.35)",
-                                color: "white",
-                                cursor: canInteractDeployment ? "pointer" : "not-allowed",
-                                opacity: canInteractDeployment ? 1 : 0.55,
-                                padding: "0",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                overflow: "hidden",
-                                position: "relative",
+                                width: "36px",
+                                height: "36px",
+                                objectFit: "contain",
+                                pointerEvents: "none",
+                                flex: "0 0 auto",
                               }}
-                            >
-                              <img
-                                src={unit.ICON}
-                                alt={displayName}
-                                style={{
-                                  width: "100%",
-                                  height: "100%",
-                                  objectFit: "contain",
-                                  pointerEvents: "none",
-                                }}
-                              />
-                              <span
-                                style={{
-                                  position: "absolute",
-                                  right: "2px",
-                                  bottom: "1px",
-                                  fontSize: "9px",
-                                  lineHeight: "1",
-                                  background: "rgba(0, 0, 0, 0.65)",
-                                  padding: "1px 2px",
-                                  borderRadius: "3px",
-                                }}
-                              >
-                                {unit.id}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
+                            />
+                          ))}
+                        </div>
+                        <span style={{ flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {displayName}
+                        </span>
+                        <span style={{ fontSize: "11px", opacity: 0.85, flex: "0 0 auto" }}>
+                          {figCount} fig.
+                        </span>
+                        <span
+                          style={{
+                            fontSize: "10px",
+                            background: "rgba(0, 0, 0, 0.65)",
+                            padding: "1px 4px",
+                            borderRadius: "3px",
+                            flex: "0 0 auto",
+                          }}
+                        >
+                          #{unit.id}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -4101,6 +4102,64 @@ export const BoardWithAPI: React.FC = () => {
             </div>
           </div>
         )}
+      {apiProps.gameState?.phase === "deployment" && apiProps.mode === "deploymentMove" && (
+        <div
+          className="squad-action-bar"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            background: "#1f2937",
+            border: "1px solid #555",
+            borderRadius: "8px",
+            padding: 8,
+            marginTop: -6,
+            marginBottom: 2,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              if (!isGameOver) apiProps.onCancelDeploy?.();
+            }}
+            style={{
+              border: "1px solid rgba(0,0,0,0.35)",
+              borderRadius: 6,
+              background: "#6b7280",
+              color: "#fff",
+              cursor: "pointer",
+              fontSize: 14,
+              fontWeight: 700,
+              padding: "8px 14px",
+              width: 110,
+              textAlign: "center",
+            }}
+          >
+            Annuler
+          </button>
+          <button
+            type="button"
+            disabled={!apiProps.deployPlan?.canValidate}
+            onClick={() => {
+              if (!isGameOver) apiProps.onCommitDeploy?.();
+            }}
+            style={{
+              border: "1px solid rgba(0,0,0,0.35)",
+              borderRadius: 6,
+              background: apiProps.deployPlan?.canValidate ? "#16a34a" : "#052e16",
+              color: apiProps.deployPlan?.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
+              cursor: apiProps.deployPlan?.canValidate ? "pointer" : "not-allowed",
+              fontSize: 14,
+              fontWeight: 700,
+              padding: "8px 14px",
+              width: 110,
+              textAlign: "center",
+            }}
+          >
+            Valider
+          </button>
+        </div>
+      )}
       {apiProps.mode === "squadModelShoot" && apiProps.squadShootPlan && (
         <div
           className="squad-action-bar"
@@ -4534,6 +4593,9 @@ export const BoardWithAPI: React.FC = () => {
           detailPreviewUnitId={
             illustrationPreviewUnit?.player === 1 ? illustrationPreviewUnit.id : null
           }
+          phase={apiProps.gameState?.phase}
+          deploymentType={apiProps.gameState?.deployment_type}
+          deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
         />
       </ErrorBoundary>
 
@@ -4555,6 +4617,9 @@ export const BoardWithAPI: React.FC = () => {
           detailPreviewUnitId={
             illustrationPreviewUnit?.player === 2 ? illustrationPreviewUnit.id : null
           }
+          phase={apiProps.gameState?.phase}
+          deploymentType={apiProps.gameState?.deployment_type}
+          deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
         />
       </ErrorBoundary>
     </RightColumnTutorialSpotlight>
@@ -4764,6 +4829,12 @@ export const BoardWithAPI: React.FC = () => {
             onResetModelInPlan={isGameOver ? () => {} : apiProps.onResetModelInPlan}
             onCommitSquadMovePlan={isGameOver ? async () => {} : apiProps.onCommitSquadMovePlan}
             onCancelSquadMove={isGameOver ? () => {} : apiProps.onCancelSquadMove}
+            deployPlan={apiProps.deployPlan}
+            deployPoolRef={apiProps.deployPoolRef}
+            onDeployDropSquad={isGameOver ? async () => {} : apiProps.onDeployDropSquad}
+            onSelectDeployModel={isGameOver ? () => {} : apiProps.onSelectDeployModel}
+            onMoveDeployModelInPlan={isGameOver ? () => {} : apiProps.onMoveDeployModelInPlan}
+            onSquadMoveDeploy={isGameOver ? () => {} : apiProps.onSquadMoveDeploy}
             chargeMovePlan={apiProps.chargeMovePlan}
             chargeModelPoolRef={apiProps.chargeModelPoolRef}
             chargeModelDistancesRef={apiProps.chargeModelDistancesRef}
