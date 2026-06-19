@@ -960,6 +960,52 @@ function destroyAndFilterOrphanHpBlinkContainers(
   return kept;
 }
 
+/** Lit une couleur hex (#rrggbb) depuis une variable CSS de :root et la convertit en number PIXI.
+ *  Pas de fallback : variable absente/invalide → erreur explicite. */
+function cssColorToNumber(variableName: string): number {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(variableName).trim();
+  if (value === "") {
+    throw new Error(`CSS variable ${variableName} not found or empty`);
+  }
+  const parsed = parseInt(value.replace("#", ""), 16);
+  if (Number.isNaN(parsed)) {
+    throw new Error(`CSS variable ${variableName} is not a hex color: ${value}`);
+  }
+  return parsed;
+}
+
+interface TargetRingCtx {
+  units: Unit[];
+  unitsCache?: Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>;
+  hexCenter: (c: number, r: number) => [number, number];
+  hexRadius: number;
+  lineW: number;
+}
+
+/** Dessine un anneau (contour) autour de chaque figurine d'une unité cible (occupied_hexes_by_model).
+ *  Source unique partagée par les cibles blink (tir/charge/fight), pile-in et consolidation. */
+function drawUnitTargetRing(
+  overlay: PIXI.Graphics,
+  uid: number | string,
+  color: number,
+  ctx: TargetRingCtx,
+  fillAlpha?: number
+): void {
+  const tu = ctx.units.find((u) => String(u.id) === String(uid));
+  if (!tu) return;
+  const tBase = resolveBaseSizeForUnitDisplay(tu);
+  const tR = tBase > 1 ? (tBase * 1.5 * ctx.hexRadius) / 2 : ctx.hexRadius * 0.7;
+  const tByModel = ctx.unitsCache?.[String(uid)]?.occupied_hexes_by_model;
+  if (!tByModel) return;
+  for (const [c, r] of Object.values(tByModel)) {
+    const [cx, cy] = ctx.hexCenter(c, r);
+    overlay.lineStyle(Math.max(3, ctx.lineW), color, 1);
+    if (fillAlpha != null) overlay.beginFill(color, fillAlpha);
+    overlay.drawCircle(cx, cy, tR + 3);
+    if (fillAlpha != null) overlay.endFill();
+  }
+}
+
 export default function Board({
   units,
   selectedUnitId,
@@ -1193,6 +1239,7 @@ export default function Board({
   const manualAllocOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Slice G : overlay voile violet des figs éligibles en chargeModelMove (préservé au redraw). */
   const chargeModelVeilOverlayRef = useRef<PIXI.Graphics | null>(null);
+  const blinkTargetRingOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Halos de cohésion (charge/pile-in/consolidation) redessinés au survol — suivent la fig active. */
   const cohesionHaloOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Ligne départ → pointeur + libellé distance hex (preview move) */
@@ -4802,23 +4849,19 @@ export default function Board({
         }
       };
       // Mode Focus : pas de voile rouge/vert ; un CERCLE violet (contour) entoure les cibles focusables.
-      const drawTargetRing = (uid: number | string, color: number) => {
-        const tu = units.find((u) => String(u.id) === String(uid));
-        if (!tu) return;
-        const tBase = resolveBaseSizeForUnitDisplay(tu);
-        const tR = tBase > 1 ? (tBase * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
-        const tByModel = ucTargets?.[String(uid)]?.occupied_hexes_by_model;
-        if (!tByModel) return;
-        for (const [c, r] of Object.values(tByModel)) {
-          const [cx, cy] = hexCenter(c, r);
-          overlay.lineStyle(Math.max(3, lineW), color, 1);
-          overlay.drawCircle(cx, cy, tR + 3);
-        }
+      const ringCtx: TargetRingCtx = {
+        units,
+        unitsCache: ucTargets,
+        hexCenter,
+        hexRadius: HEX_RADIUS_H,
+        lineW,
       };
+      const drawTargetRing = (uid: number | string, color: number, fillAlpha?: number) =>
+        drawUnitTargetRing(overlay, uid, color, ringCtx, fillAlpha);
       if (!isPileInModelMove && chargeMovePlan) {
         if (chargeFocusActive) {
-          const VIOLET = 0x8a2be2;
-          for (const uid of chargePreviewTargetIds ?? []) drawTargetRing(uid, VIOLET);
+          const YELLOW = cssColorToNumber("--icon-blink-target-ring");
+          for (const uid of chargePreviewTargetIds ?? []) drawTargetRing(uid, YELLOW, 0.35);
         } else {
           for (const uid of chargeMovePlan.unsatisfiedTargets) drawTargetVeil(uid, RED);
           for (const uid of chargeMovePlan.satisfiedTargets) drawTargetVeil(uid, GREEN);
@@ -4839,13 +4882,14 @@ export default function Board({
           }
         }
       }
-      // Pile-in : Focus → cercle violet (contour) sur les cibles ; voile VERT sur les figs en mesure
-      // de frapper (≤ EZ d'une cible). Le voile vert s'affiche que le Focus soit actif ou non.
+      // Pile-in : cible potentielle → anneau jaune (contour) ; cible sélectionnée (Focus) → anneau
+      // jaune + voile jaune. Voile VERT sur les figs en mesure de frapper (≤ EZ d'une cible),
+      // affiché que le Focus soit actif ou non.
       if (isPileInModelMove && pileInMovePlan) {
-        const VIOLET = 0x8a2be2;
-        const FOCUS = 0xffd700; // cible mémorisée → anneau or
+        const YELLOW = cssColorToNumber("--icon-blink-target-ring");
         for (const uid of pileInMovePlan.pileInTargets) {
-          drawTargetRing(uid, String(uid) === String(pileInFocusTargetId) ? FOCUS : VIOLET);
+          const selected = String(uid) === String(pileInFocusTargetId);
+          drawTargetRing(uid, YELLOW, selected ? 0.35 : undefined);
         }
         const pu = units.find((u) => String(u.id) === String(pileInMovePlan.unitId));
         const pByModel = ucTargets?.[String(pileInMovePlan.unitId)]?.occupied_hexes_by_model;
@@ -4868,7 +4912,7 @@ export default function Board({
       }
       // Consolidation engaging : cercle JAUNE (contour) autour des unités cibles potentielles (≤3").
       if (isConsolidationModelMove && consolidationMovePlan?.consolidationMode === "engaging") {
-        const YELLOW = 0xffd700;
+        const YELLOW = cssColorToNumber("--icon-blink-target-ring");
         for (const uid of consolidationMovePlan.engagingCandidates) drawTargetRing(uid, YELLOW);
       }
     }
@@ -4896,6 +4940,73 @@ export default function Board({
     pileInFocusTargetId,
     isConsolidationModelMove,
     consolidationMovePlan,
+  ]);
+
+  // Anneau jaune autour des figurines cibles potentielles (HP clignotant) en phases tir / charge /
+  // fight. Mêmes cibles que le blink HP (effectiveBlinkingUnitsWithMovePreview) et même jaune que
+  // pile-in / consolidation (centralisé dans App.css → --icon-blink-target-ring). Overlay PIXI dédié
+  // sur app.stage, redessiné quand la liste des cibles change.
+  useEffect(() => {
+    const app = appRef.current;
+    if (!app) return;
+    const overlay = new PIXI.Graphics();
+    overlay.zIndex = 2700;
+    overlay.eventMode = "none";
+    app.stage.addChild(overlay);
+    blinkTargetRingOverlayRef.current = overlay;
+    overlay.visible = !hideIndicators;
+    overlay.clear();
+    const ringPhase = phase === "shoot" || phase === "charge" || phase === "fight";
+    if (ringPhase && effectiveBlinkingUnitsWithMovePreview.length > 0 && boardConfig) {
+      const HEX_RADIUS_H = boardConfig.hex_radius;
+      const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
+      const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
+      const MARGIN_H = boardConfig.margin;
+      const ringCtx: TargetRingCtx = {
+        units,
+        unitsCache: (
+          gameState as unknown as {
+            units_cache?: Record<
+              string,
+              { occupied_hexes_by_model?: Record<string, [number, number]> }
+            >;
+          }
+        )?.units_cache,
+        hexCenter: (c, r) => [
+          c * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H,
+          r * HEX_HEIGHT_H + ((c % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H,
+        ],
+        hexRadius: HEX_RADIUS_H,
+        lineW: Math.max(1.5, HEX_RADIUS_H * 0.5),
+      };
+      const YELLOW = cssColorToNumber("--icon-blink-target-ring");
+      for (const uid of effectiveBlinkingUnitsWithMovePreview) {
+        drawUnitTargetRing(overlay, uid, YELLOW, ringCtx);
+      }
+      // Fight : les cibles déjà sélectionnées (déclarations) ont en plus un voile jaune.
+      if (phase === "fight" && squadFightPlan) {
+        const selectedIds = new Set(
+          squadFightPlan.declarations.map((d) => String(d.target_unit_id))
+        );
+        for (const uid of selectedIds) drawUnitTargetRing(overlay, uid, YELLOW, ringCtx, 0.35);
+      }
+    }
+    return () => {
+      if (!overlay.destroyed) {
+        overlay.clear();
+        app.stage.removeChild(overlay);
+        overlay.destroy();
+      }
+      if (blinkTargetRingOverlayRef.current === overlay) blinkTargetRingOverlayRef.current = null;
+    };
+  }, [
+    phase,
+    effectiveBlinkingUnitsWithMovePreview,
+    squadFightPlan,
+    boardConfig,
+    units,
+    gameState,
+    hideIndicators,
   ]);
 
   // Ghost per-figurine (charge model move) : calque exact du ghost move per-fig — le fantôme de la
@@ -7704,6 +7815,7 @@ export default function Board({
       const savedMeasureGuideLine = measureGuideLineRef.current;
       const savedManualAllocOverlay = manualAllocOverlayRef.current;
       const savedChargeVeilOverlay = chargeModelVeilOverlayRef.current;
+      const savedBlinkRingOverlay = blinkTargetRingOverlayRef.current;
       if (savedStatic?.parent) app.stage.removeChild(savedStatic);
       if (savedWalls?.parent) app.stage.removeChild(savedWalls);
       if (savedUi?.parent) app.stage.removeChild(savedUi);
@@ -7717,6 +7829,7 @@ export default function Board({
       if (savedMeasureGuideLine?.parent) app.stage.removeChild(savedMeasureGuideLine);
       if (savedManualAllocOverlay?.parent) app.stage.removeChild(savedManualAllocOverlay);
       if (savedChargeVeilOverlay?.parent) app.stage.removeChild(savedChargeVeilOverlay);
+      if (savedBlinkRingOverlay?.parent) app.stage.removeChild(savedBlinkRingOverlay);
       if (
         canReuseExistingHighlightsThroughDestroy &&
         highlightsLayerRef.current?.parent === app.stage
@@ -7793,6 +7906,10 @@ export default function Board({
       if (savedChargeVeilOverlay && !savedChargeVeilOverlay.destroyed) {
         savedChargeVeilOverlay.zIndex = 2700;
         app.stage.addChild(savedChargeVeilOverlay);
+      }
+      if (savedBlinkRingOverlay && !savedBlinkRingOverlay.destroyed) {
+        savedBlinkRingOverlay.zIndex = 2700;
+        app.stage.addChild(savedBlinkRingOverlay);
       }
 
       // Nettoyer pastilles cible / jet de charge seulement quand on reconstruit les unités.

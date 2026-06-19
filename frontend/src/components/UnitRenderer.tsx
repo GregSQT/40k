@@ -1272,17 +1272,20 @@ export class UnitRenderer {
    */
   private renderChargeTargetVeil(iconZIndex: number): void {
     const { unit, centerX, centerY, mode, HEX_RADIUS, UNIT_CIRCLE_RADIUS_RATIO } = this.props;
-    if (mode !== "chargeTargetSelect") return;
+    // chargeTargetSelect : voile jaune (contour + remplissage). chargePreview : on garde seulement
+    // le cercle jaune (contour) sur les cibles déclarées jusqu'à la validation de la charge.
+    if (mode !== "chargeTargetSelect" && mode !== "chargePreview") return;
+    const withFill = mode === "chargeTargetSelect";
     const ids = this.props.chargePreviewTargetIds;
     if (!ids || ids.length === 0) return;
     const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
     if (!ids.some((id) => id === unitIdNum)) return;
 
-    const VIOLET = 0x8a2be2;
+    const YELLOW = this.getCSSColor("--icon-blink-target-ring");
     const nrBase = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
     const veil = new PIXI.Graphics();
-    veil.beginFill(VIOLET, 0.45);
-    veil.lineStyle(3, VIOLET, 0.95);
+    if (withFill) veil.beginFill(YELLOW, 0.45);
+    veil.lineStyle(3, YELLOW, 0.95);
     if (nrBase) {
       if (nrBase.kind === "oval") {
         veil.drawEllipse(centerX, centerY, nrBase.outerRx, nrBase.outerRy);
@@ -1299,7 +1302,7 @@ export class UnitRenderer {
         : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
       veil.drawCircle(centerX, centerY, radius);
     }
-    veil.endFill();
+    if (withFill) veil.endFill();
     veil.zIndex = iconZIndex + 60; // au-dessus de l'icône
     veil.eventMode = "none";
     this.target.addChild(veil);
