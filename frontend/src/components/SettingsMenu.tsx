@@ -1,6 +1,6 @@
 // frontend/src/components/SettingsMenu.tsx
 import type React from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface SettingsMenuProps {
   isOpen: boolean;
@@ -130,6 +130,73 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   deployIconBaseSizeBounded = true,
   onToggleDeployIconBaseSizeBounded,
 }) => {
+  // Snapshot des réglages à l'ouverture du menu, pour pouvoir annuler les
+  // changements (appliqués en live) en restaurant les valeurs initiales.
+  type SettingsSnapshot = {
+    showAdvanceWarning: boolean;
+    showDebug: boolean;
+    showDebugLoS: boolean;
+    autoSelectWeapon: boolean;
+    hpBarPerModel: boolean;
+    fitBoardToScreen: boolean;
+    statusBadgePerModel: boolean;
+    retreatAlertEnabled: boolean;
+    modeGuidesActivated: boolean;
+    battleShockTestEnabled: boolean;
+    deployIconBaseSizeBounded: boolean;
+  };
+  const latest: SettingsSnapshot = {
+    showAdvanceWarning,
+    showDebug,
+    showDebugLoS,
+    autoSelectWeapon,
+    hpBarPerModel,
+    fitBoardToScreen,
+    statusBadgePerModel,
+    retreatAlertEnabled,
+    modeGuidesActivated,
+    battleShockTestEnabled,
+    deployIconBaseSizeBounded,
+  };
+  const latestRef = useRef(latest);
+  latestRef.current = latest;
+  const snapshotRef = useRef<SettingsSnapshot | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      snapshotRef.current = { ...latestRef.current };
+    }
+  }, [isOpen]);
+
+  const handleCancel = () => {
+    const s = snapshotRef.current;
+    if (s) {
+      if (showAdvanceWarning !== s.showAdvanceWarning)
+        onToggleAdvanceWarning(s.showAdvanceWarning);
+      if (showDebug !== s.showDebug) onToggleDebug(s.showDebug);
+      if (showDebugLoS !== s.showDebugLoS) onToggleDebugLoS(s.showDebugLoS);
+      if (autoSelectWeapon !== s.autoSelectWeapon) onToggleAutoSelectWeapon(s.autoSelectWeapon);
+      if (onToggleHpBarPerModel && hpBarPerModel !== s.hpBarPerModel)
+        onToggleHpBarPerModel(s.hpBarPerModel);
+      if (onToggleFitBoardToScreen && fitBoardToScreen !== s.fitBoardToScreen)
+        onToggleFitBoardToScreen(s.fitBoardToScreen);
+      if (onToggleStatusBadgePerModel && statusBadgePerModel !== s.statusBadgePerModel)
+        onToggleStatusBadgePerModel(s.statusBadgePerModel);
+      if (onToggleRetreatAlert && retreatAlertEnabled !== s.retreatAlertEnabled)
+        onToggleRetreatAlert(s.retreatAlertEnabled);
+      if (onToggleModeGuidesActivated && modeGuidesActivated !== s.modeGuidesActivated)
+        onToggleModeGuidesActivated(s.modeGuidesActivated);
+      if (onToggleBattleShockTest && battleShockTestEnabled !== s.battleShockTestEnabled)
+        onToggleBattleShockTest(s.battleShockTestEnabled);
+      if (
+        onToggleDeployIconBaseSizeBounded &&
+        deployIconBaseSizeBounded !== s.deployIconBaseSizeBounded
+      )
+        onToggleDeployIconBaseSizeBounded(s.deployIconBaseSizeBounded);
+    }
+    onClose();
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -324,21 +391,38 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
           >
             Se déconnecter
           </button>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              padding: "8px 16px",
-              backgroundColor: "#3b82f6",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
-              fontSize: "16px",
-            }}
-          >
-            Fermer
-          </button>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button
+              type="button"
+              onClick={handleCancel}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#4b5563",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontSize: "16px",
+              }}
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#3b82f6",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontSize: "16px",
+              }}
+            >
+              Fermer
+            </button>
+          </div>
         </div>
       </div>
     </div>
