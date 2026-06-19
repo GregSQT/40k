@@ -779,6 +779,7 @@ type BoardProps = {
   autoSelectWeapon?: boolean;
   hpBarPerModel?: boolean; // true → barre HP par figurine ; false → une barre par escouade (hors characters)
   statusBadgePerModel?: boolean; // true → badge de statut (caché/fui/choc) par figurine ; false → un seul badge si toute l'escouade a le statut
+  fitBoardToScreen?: boolean; // true → board réduit pour tenir entièrement dans la hauteur de l'écran ; false → pleine taille, la page scrolle
   /** Mode mesure (règle) : armed → 1er clic pose l’ancre ; clic droit = jonction ; 2e clic termine la ligne → armed. Sortie : bouton règle uniquement. */
   measureMode?: MeasureModeState;
   onMeasureHexCommit?: (col: number, row: number) => void;
@@ -793,6 +794,9 @@ const HEX_STEPS_PER_INCH_DISPLAY = 10;
 /** Au-dessus de tout le reste du stage (unités 2000, drag 9000, UI / popups ~10000). */
 const MEASURE_GUIDE_LINE_Z_INDEX = 15000;
 const BOARD_ZOOM_DEFAULT = 1;
+// Marge verticale (px) réservée autour du board en mode « adapter à l'écran » — alignée sur le
+// ``calc(100vh - 40px)`` du viewport scrollable.
+const BOARD_FIT_VERTICAL_MARGIN = 40;
 const BOARD_ZOOM_MIN = 0.5;
 const BOARD_ZOOM_MAX = 2.5;
 const BOARD_ZOOM_SLIDER_STEP = 0.05;
@@ -1119,6 +1123,7 @@ export default function Board({
   autoSelectWeapon,
   hpBarPerModel,
   statusBadgePerModel,
+  fitBoardToScreen = false,
   measureMode = { kind: "off" },
   onMeasureHexCommit,
   onMeasureJunctionCommit,
@@ -1632,9 +1637,33 @@ export default function Board({
   } | null>(null);
   const [isBoardPanning, setIsBoardPanning] = useState(false);
 
+  // Mode « adapter à l'écran » : facteur de réduction (≤ 1) pour que le board tienne entièrement dans
+  // la hauteur dispo. Vaut 1 quand le mode est OFF → toute la mécanique ci-dessous redevient identique.
+  const [fitScale, setFitScale] = useState(1);
+  useEffect(() => {
+    if (!fitBoardToScreen || !boardViewportSize) {
+      setFitScale(1);
+      return;
+    }
+    const compute = () => {
+      const available = window.innerHeight - BOARD_FIT_VERTICAL_MARGIN;
+      const s = available / boardViewportSize.height;
+      setFitScale(s < 1 ? s : 1);
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, [fitBoardToScreen, boardViewportSize]);
+
+  // Échelle réellement appliquée au board = réduction « fit » × zoom manuel. Le zoom manuel multiplie
+  // toujours par-dessus le fit. ``fitScale === 1`` → ``effectiveScale === boardZoom`` (comportement initial).
+  const effectiveScale = fitScale * boardZoom;
   const zoomPercent = Math.round(boardZoom * 100);
-  const scaledBoardWidth = boardViewportSize ? boardViewportSize.width * boardZoom : undefined;
-  const scaledBoardHeight = boardViewportSize ? boardViewportSize.height * boardZoom : undefined;
+  // Empreinte « de base » sur la page = board fit-réduit (zoom exclu) ; le zoom scrolle dans cette fenêtre.
+  const fitBoardWidth = boardViewportSize ? boardViewportSize.width * fitScale : undefined;
+  const fitBoardHeight = boardViewportSize ? boardViewportSize.height * fitScale : undefined;
+  const scaledBoardWidth = boardViewportSize ? boardViewportSize.width * effectiveScale : undefined;
+  const scaledBoardHeight = boardViewportSize ? boardViewportSize.height * effectiveScale : undefined;
 
   const applyBoardZoom = useCallback(
     (resolveZoom: (currentZoom: number) => number, anchorClient?: { x: number; y: number }) => {
@@ -9603,11 +9632,13 @@ export default function Board({
           onPointerUp={handleBoardPanEnd}
           onPointerCancel={handleBoardPanEnd}
           style={{
-            width: boardViewportSize ? `${boardViewportSize.width}px` : undefined,
-            height: boardViewportSize ? `${boardViewportSize.height}px` : undefined,
+            width: fitBoardWidth ? `${fitBoardWidth}px` : undefined,
+            height: fitBoardHeight ? `${fitBoardHeight}px` : undefined,
             maxWidth: "100%",
-            maxHeight: "calc(100vh - 40px)",
-            overflow: "auto",
+            // Au zoom par défaut : aucune limite de hauteur → board affiché en entier, c'est la page
+            // qui scrolle. La limite (viewport fixe + scroll interne pour le pan) n'a de sens qu'au zoom > 1.
+            maxHeight: boardZoom > BOARD_ZOOM_DEFAULT ? "calc(100vh - 40px)" : undefined,
+            overflow: boardZoom > BOARD_ZOOM_DEFAULT ? "auto" : "visible",
             lineHeight: 0,
             scrollbarGutter: "stable",
             cursor:
@@ -9619,8 +9650,8 @@ export default function Board({
               position: "relative",
               width: scaledBoardWidth ? `${scaledBoardWidth}px` : undefined,
               height: scaledBoardHeight ? `${scaledBoardHeight}px` : undefined,
-              minWidth: boardViewportSize ? `${boardViewportSize.width}px` : undefined,
-              minHeight: boardViewportSize ? `${boardViewportSize.height}px` : undefined,
+              minWidth: fitBoardWidth ? `${fitBoardWidth}px` : undefined,
+              minHeight: fitBoardHeight ? `${fitBoardHeight}px` : undefined,
             }}
           >
             <div
@@ -9630,7 +9661,7 @@ export default function Board({
                 display: "inline-block",
                 lineHeight: 0,
                 overflow: "visible",
-                transform: `scale(${boardZoom})`,
+                transform: `scale(${effectiveScale})`,
                 transformOrigin: "top left",
                 /* ``progress`` : activité en cours sans le curseur sablier système (``wait``). */
                 cursor:

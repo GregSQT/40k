@@ -2128,12 +2128,14 @@ export const BoardWithAPI: React.FC = () => {
     const showDebugLoSStr = localStorage.getItem("showDebugLoS");
     const autoSelectWeaponStr = localStorage.getItem("autoSelectWeapon");
     const hpBarPerModelStr = localStorage.getItem("hpBarPerModel");
+    const fitBoardToScreenStr = localStorage.getItem("fitBoardToScreen");
     // Migration one-shot : ancienne clé "hiddenBadgePerModel" → "statusBadgePerModel" (générique).
     const statusBadgePerModelStr =
       localStorage.getItem("statusBadgePerModel") ?? localStorage.getItem("hiddenBadgePerModel");
     const retreatAlertEnabledStr = localStorage.getItem(RETREAT_ALERT_STORAGE_KEY);
     const battleShockTestEnabledStr = localStorage.getItem("battleShockTestEnabled");
     const modeGuidesActivatedStr = localStorage.getItem(MODE_GUIDES_ACTIVATED_STORAGE_KEY);
+    const deployIconBaseSizeBoundedStr = localStorage.getItem("deployIconBaseSizeBounded");
     const pveGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVE_STORAGE_KEY) === "true";
     const pvpGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVP_STORAGE_KEY) === "true";
     const guidesSeenAtLeastOnce = pveGuideSeen || pvpGuideSeen;
@@ -2145,6 +2147,7 @@ export const BoardWithAPI: React.FC = () => {
       autoSelectWeapon:
         canUseAutoWeaponSelection && (autoSelectWeaponStr ? JSON.parse(autoSelectWeaponStr) : true),
       hpBarPerModel: hpBarPerModelStr ? JSON.parse(hpBarPerModelStr) : false,
+      fitBoardToScreen: fitBoardToScreenStr ? JSON.parse(fitBoardToScreenStr) : false,
       statusBadgePerModel: statusBadgePerModelStr ? JSON.parse(statusBadgePerModelStr) : false,
       retreatAlertEnabled: retreatAlertEnabledStr ? JSON.parse(retreatAlertEnabledStr) : true,
       battleShockTestEnabled: battleShockTestEnabledStr
@@ -2154,6 +2157,9 @@ export const BoardWithAPI: React.FC = () => {
         modeGuidesActivatedStr != null
           ? JSON.parse(modeGuidesActivatedStr)
           : !guidesSeenAtLeastOnce,
+      deployIconBaseSizeBounded: deployIconBaseSizeBoundedStr
+        ? JSON.parse(deployIconBaseSizeBoundedStr)
+        : true,
     };
   });
 
@@ -2198,9 +2204,19 @@ export const BoardWithAPI: React.FC = () => {
     localStorage.setItem("hpBarPerModel", JSON.stringify(value));
   };
 
+  const handleToggleFitBoardToScreen = (value: boolean) => {
+    setSettings((prev) => ({ ...prev, fitBoardToScreen: value }));
+    localStorage.setItem("fitBoardToScreen", JSON.stringify(value));
+  };
+
   const handleToggleStatusBadgePerModel = (value: boolean) => {
     setSettings((prev) => ({ ...prev, statusBadgePerModel: value }));
     localStorage.setItem("statusBadgePerModel", JSON.stringify(value));
+  };
+
+  const handleToggleDeployIconBaseSizeBounded = (value: boolean) => {
+    setSettings((prev) => ({ ...prev, deployIconBaseSizeBounded: value }));
+    localStorage.setItem("deployIconBaseSizeBounded", JSON.stringify(value));
   };
 
   const handleToggleRetreatAlert = (value: boolean) => {
@@ -2787,7 +2803,10 @@ export const BoardWithAPI: React.FC = () => {
                             string,
                             {
                               occupied_hexes_by_model?: Record<string, unknown>;
-                              models_meta_by_model?: Record<string, { ICON?: string }>;
+                              models_meta_by_model?: Record<
+                                string,
+                                { ICON?: string; BASE_SIZE?: number | [number, number] }
+                              >;
                             }
                           >
                         | undefined
@@ -2800,6 +2819,18 @@ export const BoardWithAPI: React.FC = () => {
                     // les escouades hétérogènes ; sinon repli métier sur l'icône d'unité.
                     const iconForModel = (modelId: string): string =>
                       ucEntry?.models_meta_by_model?.[modelId]?.ICON ?? unit.ICON;
+                    // Taille d'icône = vraie taille du socle (BASE_SIZE = rayon mm).
+                    // Référence : socle 32mm (BASE_SIZE 16) -> 36px. Bornes 24..60px.
+                    const iconPxForModel = (modelId: string): number => {
+                      const baseSize = resolveBaseSizeForUnitDisplay({
+                        BASE_SIZE:
+                          ucEntry?.models_meta_by_model?.[modelId]?.BASE_SIZE ?? unit.BASE_SIZE,
+                      });
+                      const px = Math.round((36 * baseSize) / 16);
+                      return settings.deployIconBaseSizeBounded
+                        ? Math.max(24, Math.min(60, px))
+                        : px;
+                    };
                     const tooltipText = `${displayName} - ID ${unit.id} - ${figCount} fig.${isCurrentDeployer ? "" : " (inactive this turn)"}`;
                     return (
                       <button
@@ -2864,20 +2895,23 @@ export const BoardWithAPI: React.FC = () => {
                             minWidth: 0,
                           }}
                         >
-                          {figModelIds.map((figModelId) => (
+                          {figModelIds.map((figModelId) => {
+                            const figPx = iconPxForModel(figModelId);
+                            return (
                             <img
                               key={`deploy-fig-${player}-${unit.id}-${figModelId}`}
                               src={iconForModel(figModelId)}
                               alt={displayName}
                               style={{
-                                width: "36px",
-                                height: "36px",
+                                width: `${figPx}px`,
+                                height: `${figPx}px`,
                                 objectFit: "contain",
                                 pointerEvents: "none",
                                 flex: "0 0 auto",
                               }}
                             />
-                          ))}
+                            );
+                          })}
                         </div>
                         <span style={{ flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {displayName}
@@ -4989,6 +5023,7 @@ export const BoardWithAPI: React.FC = () => {
             autoSelectWeapon={settings.autoSelectWeapon}
             hpBarPerModel={settings.hpBarPerModel}
             statusBadgePerModel={settings.statusBadgePerModel}
+            fitBoardToScreen={settings.fitBoardToScreen}
             deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
             objectivesOverride={objectivesOverride}
             measureMode={measureMode}
@@ -6130,6 +6165,8 @@ export const BoardWithAPI: React.FC = () => {
         onToggleAutoSelectWeapon={handleToggleAutoSelectWeapon}
         hpBarPerModel={settings.hpBarPerModel}
         onToggleHpBarPerModel={handleToggleHpBarPerModel}
+        fitBoardToScreen={settings.fitBoardToScreen}
+        onToggleFitBoardToScreen={handleToggleFitBoardToScreen}
         statusBadgePerModel={settings.statusBadgePerModel}
         onToggleStatusBadgePerModel={handleToggleStatusBadgePerModel}
         retreatAlertEnabled={settings.retreatAlertEnabled}
@@ -6138,6 +6175,8 @@ export const BoardWithAPI: React.FC = () => {
         onToggleBattleShockTest={handleToggleBattleShockTest}
         modeGuidesActivated={settings.modeGuidesActivated}
         onToggleModeGuidesActivated={handleToggleModeGuidesActivated}
+        deployIconBaseSizeBounded={settings.deployIconBaseSizeBounded}
+        onToggleDeployIconBaseSizeBounded={handleToggleDeployIconBaseSizeBounded}
       />
     </TutorialProvider>
   );
