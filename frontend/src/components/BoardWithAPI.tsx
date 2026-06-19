@@ -54,6 +54,18 @@ import TutorialOverlay from "./TutorialOverlay";
 import UnitStatusBadges from "./UnitStatusBadges";
 import { UnitStatusTable } from "./UnitStatusTable";
 
+/** En-tête de colonne du roster picker (Faction / Roster / Description). */
+const pickerColHeaderStyle: React.CSSProperties = {
+  fontWeight: 700,
+  fontSize: "12px",
+  opacity: 0.85,
+  marginBottom: "6px",
+  paddingBottom: "3px",
+  borderBottom: "1px solid rgba(255,255,255,0.25)",
+  textTransform: "uppercase",
+  letterSpacing: "0.5px",
+};
+
 /** "WolfGuardTerminator" → "Wolf Guard Terminator" (camelCase → mots espacés). */
 function prettifyUnitType(t: string | null): string {
   if (!t) return "";
@@ -3188,7 +3200,7 @@ export const BoardWithAPI: React.FC = () => {
                 style={{
                   border: "1px solid rgba(0,0,0,0.35)",
                   borderRadius: 6,
-                  background: "#6b7280",
+                  background: "var(--ui-gray-cancel)",
                   color: "#fff",
                   cursor: "pointer",
                   fontSize: 14,
@@ -3309,7 +3321,7 @@ export const BoardWithAPI: React.FC = () => {
                 style={{
                   border: "1px solid rgba(0,0,0,0.35)",
                   borderRadius: 6,
-                  background: "#6b7280",
+                  background: "var(--ui-gray-cancel)",
                   color: "#fff",
                   cursor: "pointer",
                   fontSize: 14,
@@ -3493,7 +3505,7 @@ export const BoardWithAPI: React.FC = () => {
                 style={{
                   border: "1px solid rgba(0,0,0,0.35)",
                   borderRadius: 6,
-                  background: "#6b7280",
+                  background: "var(--ui-gray-cancel)",
                   color: "#fff",
                   cursor: "pointer",
                   fontSize: 14,
@@ -3671,7 +3683,7 @@ export const BoardWithAPI: React.FC = () => {
                 style={{
                   border: "1px solid rgba(0,0,0,0.35)",
                   borderRadius: 6,
-                  background: "#6b7280",
+                  background: "var(--ui-gray-cancel)",
                   color: "#fff",
                   cursor: "pointer",
                   fontSize: 14,
@@ -4001,7 +4013,7 @@ export const BoardWithAPI: React.FC = () => {
                 style={{
                   border: "1px solid rgba(0,0,0,0.35)",
                   borderRadius: 6,
-                  background: "#6b7280",
+                  background: "var(--ui-gray-cancel)",
                   color: "#fff",
                   cursor: "pointer",
                   fontSize: 14,
@@ -4024,7 +4036,7 @@ export const BoardWithAPI: React.FC = () => {
                   style={{
                     border: "1px solid rgba(0,0,0,0.35)",
                     borderRadius: 6,
-                    background: apiProps.squadMovePlan.canValidate ? "#16a34a" : "#052e16",
+                    background: apiProps.squadMovePlan.canValidate ? "var(--ui-green-validate)" : "var(--ui-green-validate-off)",
                     color: apiProps.squadMovePlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
                     cursor: apiProps.squadMovePlan.canValidate ? "pointer" : "not-allowed",
                     fontSize: 14,
@@ -4147,10 +4159,10 @@ export const BoardWithAPI: React.FC = () => {
                     {label}
                   </button>
                 );
-                const green = { relief: "#16a34a", dark: "#052e16" };
+                const green = { relief: "var(--ui-green-validate)", dark: "var(--ui-green-validate-off)" };
                 const orange = { relief: "#ea580c", dark: "#431407" };
                 const yellow = { relief: "#ca8a04", dark: "#422006" };
-                const grey = { relief: "#6b7280", dark: "#1f2937" };
+                const grey = { relief: "var(--ui-gray-cancel)", dark: "#1f2937" };
                 // Advancé → Move grisé (verrouillé). Sinon engagé → grisé, libre → sélectionné.
                 const moveState: "selected" | "relief" | "disabled" =
                   engaged || advanced ? "disabled" : "selected";
@@ -4209,7 +4221,7 @@ export const BoardWithAPI: React.FC = () => {
             style={{
               border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
-              background: "#6b7280",
+              background: "var(--ui-gray-cancel)",
               color: "#fff",
               cursor: "pointer",
               fontSize: 14,
@@ -4230,7 +4242,7 @@ export const BoardWithAPI: React.FC = () => {
             style={{
               border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
-              background: apiProps.deployPlan?.canValidate ? "#16a34a" : "#052e16",
+              background: apiProps.deployPlan?.canValidate ? "var(--ui-green-validate)" : "var(--ui-green-validate-off)",
               color: apiProps.deployPlan?.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
               cursor: apiProps.deployPlan?.canValidate ? "pointer" : "not-allowed",
               fontSize: 14,
@@ -4280,7 +4292,7 @@ export const BoardWithAPI: React.FC = () => {
             style={{
               border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
-              background: "#6b7280",
+              background: "var(--ui-gray-cancel)",
               color: "#fff",
               cursor: "pointer",
               fontSize: 14,
@@ -4299,7 +4311,7 @@ export const BoardWithAPI: React.FC = () => {
             style={{
               border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
-              background: apiProps.squadShootPlan.canValidate ? "#16a34a" : "#052e16",
+              background: apiProps.squadShootPlan.canValidate ? "var(--ui-green-validate)" : "var(--ui-green-validate-off)",
               color: apiProps.squadShootPlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
               cursor: apiProps.squadShootPlan.canValidate ? "pointer" : "not-allowed",
               fontSize: 14,
@@ -4348,7 +4360,7 @@ export const BoardWithAPI: React.FC = () => {
             style={{
               border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
-              background: "#6b7280",
+              background: "var(--ui-gray-cancel)",
               color: "#fff",
               cursor: "pointer",
               fontSize: 14,
@@ -4367,7 +4379,7 @@ export const BoardWithAPI: React.FC = () => {
             style={{
               border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
-              background: apiProps.squadFightPlan.canValidate ? "#16a34a" : "#052e16",
+              background: apiProps.squadFightPlan.canValidate ? "var(--ui-green-validate)" : "var(--ui-green-validate-off)",
               color: apiProps.squadFightPlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
               cursor: apiProps.squadFightPlan.canValidate ? "pointer" : "not-allowed",
               fontSize: 14,
@@ -4473,6 +4485,9 @@ export const BoardWithAPI: React.FC = () => {
             {!rosterPickerLoading && !rosterPickerError && (
               <div className="deployment-panel__picker-content">
                 <div className="deployment-panel__picker-factions">
+                  <div className="deployment-panel__picker-col-header" style={pickerColHeaderStyle}>
+                    Faction
+                  </div>
                   {rosterPickerFactions.map((faction) => (
                     <button
                       type="button"
@@ -4488,6 +4503,9 @@ export const BoardWithAPI: React.FC = () => {
                   ))}
                 </div>
                 <div className="deployment-panel__picker-list">
+                  <div className="deployment-panel__picker-col-header" style={pickerColHeaderStyle}>
+                    Roster
+                  </div>
                   {filteredRosterPickerArmies.map((army) => (
                     <button
                       type="button"
@@ -4506,7 +4524,12 @@ export const BoardWithAPI: React.FC = () => {
                   )}
                 </div>
                 <div className="deployment-panel__picker-tooltip">
-                  {rosterPickerHoveredDescription || "Survolez une armee pour voir sa description"}
+                  <div className="deployment-panel__picker-col-header" style={pickerColHeaderStyle}>
+                    Description
+                  </div>
+                  <div style={{ whiteSpace: "pre-wrap" }}>
+                    {rosterPickerHoveredDescription || "Survolez une armee pour voir sa description"}
+                  </div>
                 </div>
               </div>
             )}

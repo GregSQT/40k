@@ -193,7 +193,7 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
             style={{
               border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
-              background: "#6b7280",
+              background: "var(--ui-gray-cancel)",
               color: "#fff",
               cursor: "pointer",
               fontSize: 13,
@@ -210,7 +210,7 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
             style={{
               border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
-              background: canValidate ? "#16a34a" : "#052e16",
+              background: canValidate ? "var(--ui-green-validate)" : "var(--ui-green-validate-off)",
               color: canValidate ? "#fff" : "rgba(229,231,235,0.5)",
               cursor: canValidate ? "pointer" : "not-allowed",
               fontSize: 13,

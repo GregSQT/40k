@@ -52,17 +52,18 @@ const CollapsibleSection: React.FC<{ title: string; children: React.ReactNode }>
     });
   };
   return (
-    <div style={{ marginBottom: "12px", border: "1px solid #374151", borderRadius: "6px" }}>
+    <div style={{ marginBottom: "12px", border: "1px solid #4caf50", borderRadius: "6px" }}>
       <button
         type="button"
         onClick={toggle}
+        className="settings-category-header"
         style={{
           width: "100%",
           display: "flex",
           alignItems: "center",
           gap: "10px",
-          backgroundColor: "#111827",
-          color: "#e5e7eb",
+          backgroundColor: "var(--settings-category-bg)",
+          color: "var(--tooltip-text-color)",
           border: "none",
           borderRadius: "6px",
           padding: "10px 12px",
@@ -87,7 +88,7 @@ const ToggleRow: React.FC<{
   description: string;
 }> = ({ checked, onChange, label, description }) => (
   <div style={{ marginBottom: "16px" }}>
-    <label style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}>
+    <label style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "var(--tooltip-text-color)" }}>
       <input
         type="checkbox"
         checked={checked}
@@ -96,7 +97,7 @@ const ToggleRow: React.FC<{
       />
       <span>{label}</span>
     </label>
-    <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
+    <p style={{ color: "var(--tooltip-text-color)", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
       {description}
     </p>
   </div>
@@ -236,26 +237,32 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
         style={{
           position: "relative",
           zIndex: 1,
-          backgroundColor: "#1f2937",
-          borderRadius: "8px",
+          backgroundColor: "rgba(20, 20, 20, 0.98)",
+          borderRadius: "6px",
           padding: "24px",
           width: "600px",
           maxWidth: "90vw",
           maxHeight: "85vh",
           display: "flex",
           flexDirection: "column",
-          border: "2px solid #4b5563",
+          border: "2px solid #4caf50",
+          boxShadow: "0 4px 12px rgba(0, 0, 0, 0.5)",
         }}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
       >
         <h2
           style={{
-            color: "white",
+            color: "var(--tooltip-text-color)",
             marginTop: 0,
             marginBottom: "20px",
             fontSize: "24px",
             flexShrink: 0,
+            backgroundColor: "var(--settings-title-bg)",
+            textTransform: "uppercase",
+            letterSpacing: "0.5px",
+            padding: "6px 10px",
+            borderRadius: "4px",
           }}
         >
           ⚙️ Paramètres
@@ -344,7 +351,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                     style={{
                       display: "block",
                       cursor: "pointer",
-                      color: "#e5e7eb",
+                      color: "var(--tooltip-text-color)",
                       marginBottom: "6px",
                     }}
                   >
@@ -354,7 +361,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                       onChange={(e) => onSetBoardDisplayMode(e.target.value as BoardDisplayMode)}
                       style={{
                         backgroundColor: "#111827",
-                        color: "#e5e7eb",
+                        color: "var(--tooltip-text-color)",
                         border: "1px solid #4b5563",
                         borderRadius: "4px",
                         padding: "4px 8px",
@@ -366,7 +373,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                       <option value="window">Fenêtre navigable (molette/scroll)</option>
                     </select>
                   </label>
-                  <p style={{ color: "#9ca3af", fontSize: "14px", marginTop: "4px" }}>
+                  <p style={{ color: "var(--tooltip-text-color)", fontSize: "14px", marginTop: "4px" }}>
                     Taille réelle : plateau à sa taille, la page défile. Adapté : plateau réduit pour
                     tenir entièrement dans l'écran. Fenêtre : plateau à sa taille dans une fenêtre
                     limitée à l'écran, navigable à la molette ou à la barre de défilement.
@@ -425,7 +432,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
               onClick={handleCancel}
               style={{
                 padding: "8px 16px",
-                backgroundColor: "#4b5563",
+                backgroundColor: "var(--ui-gray-cancel)",
                 color: "white",
                 border: "none",
                 borderRadius: "4px",
@@ -440,7 +447,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
               onClick={onClose}
               style={{
                 padding: "8px 16px",
-                backgroundColor: "#3b82f6",
+                backgroundColor: "var(--ui-green-validate)",
                 color: "white",
                 border: "none",
                 borderRadius: "4px",

@@ -140,6 +140,20 @@
   --tooltip-border-radius: 6px;
   --tooltip-text-color: #b6f7c9;
   --tooltip-font-family: "Arial", sans-serif;
+
+  /* UI green theme tokens (bordures, boutons, halo, fonds menu Paramètres) */
+  --ui-green-border: #4caf50;
+  --ui-green-validate: #22c55e;
+  --ui-green-validate-off: #14532d;
+  --ui-gray-cancel: #6b7280;
+  --settings-title-bg: #14532d;
+  --settings-category-bg: #0c3d1e;
+  --btn-glow-shadow:
+    0 0 0 2px #86efac,
+    0 0 10px 3px rgba(134, 239, 172, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.3),
+    0 2px 4px rgba(0, 0, 0, 0.35);
   --tooltip-font-size: 11px;
   --tooltip-font-weight: 400;
   --tooltip-line-height: 1.4;
@@ -901,12 +915,15 @@ body {
 .pile-in-end-btn:focus,
 .pile-in-end-btn:active {
   outline: none;
-  box-shadow:
-    0 0 0 2px #86efac,
-    0 0 10px 3px rgba(134, 239, 172, 0.85),
-    inset 0 1px 0 rgba(255, 255, 255, 0.22),
-    inset 0 -3px 6px rgba(0, 0, 0, 0.3),
-    0 2px 4px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--btn-glow-shadow);
+}
+
+/* Halo vert clair brillant à la sélection des catégories du menu Paramètres
+   (identique aux boutons pile-in/squad-action-bar actifs). */
+.settings-category-header:focus,
+.settings-category-header:active {
+  outline: none;
+  box-shadow: var(--btn-glow-shadow);
 }
 
 /* Phase button colors */
@@ -1098,13 +1115,14 @@ body {
 
 .deployment-panel__picker {
   width: min(760px, 90vw);
-  background: #111827;
-  border: 1px solid #374151;
-  border-radius: 8px;
+  background: rgba(20, 20, 20, 0.98);
+  border: 2px solid var(--ui-green-border);
+  border-radius: 6px;
   padding: 12px;
-  color: #e5e7eb;
+  color: var(--tooltip-text-color);
   position: relative;
   z-index: 1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 .deployment-panel__picker--draggable {
@@ -1122,6 +1140,12 @@ body {
   font-size: 15px;
   font-weight: 700;
   margin-bottom: 10px;
+  color: #fff;
+  background: rgba(76, 175, 80, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 4px 8px;
+  border-radius: 4px;
 }
 
 .deployment-panel__picker-title--draggable {
@@ -1160,7 +1184,7 @@ body {
 .deployment-panel__picker-factions {
   max-height: 240px;
   overflow-y: auto;
-  border: 1px solid #374151;
+  border: 1px solid var(--ui-green-border);
   border-radius: 6px;
   padding: 6px;
   display: flex;
@@ -1171,7 +1195,7 @@ body {
 .deployment-panel__picker-list {
   max-height: 240px;
   overflow-y: auto;
-  border: 1px solid #374151;
+  border: 1px solid var(--ui-green-border);
   border-radius: 6px;
   padding: 6px;
   display: flex;
@@ -1184,18 +1208,19 @@ body {
 }
 
 .deployment-panel__picker-item {
-  background: #1f2937;
-  border: 1px solid #374151;
-  color: #e5e7eb;
+  background: rgba(20, 20, 20, 0.6);
+  border: 1px solid #333;
+  color: var(--tooltip-text-color);
   border-radius: 4px;
   padding: 6px 8px;
   text-align: left;
   font-size: 13px;
   cursor: pointer;
+  transition: background 0.15s;
 }
 
 .deployment-panel__picker-item:hover {
-  background: #374151;
+  background: rgba(76, 175, 80, 0.15);
 }
 
 .deployment-panel__picker-tooltip {
@@ -1221,8 +1246,9 @@ body {
 }
 
 .deployment-panel__picker-item--active {
-  border-color: #7cbbff;
-  box-shadow: 0 0 0 1px rgba(124, 187, 255, 0.4);
+  border-color: #86efac;
+  outline: none;
+  box-shadow: var(--btn-glow-shadow);
 }
 
 .rule-choice-group {
@@ -3523,7 +3549,7 @@ textarea:focus {
 }
 .pile-in-validate,
 .charge-validate {
-  background: #16a34a;
+  background: var(--ui-green-validate);
   color: #fff;
 }
 .pile-in-validate:disabled,

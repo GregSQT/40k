@@ -494,47 +494,7 @@ class GameStateManager:
                         return False
                 return True
 
-            # Attached units (règle 19) : un character déclaré séparément avec
-            # "attached_squad": <id squad> n'est qu'une écriture plus lisible. On le
-            # fusionne ici comme figurine du squad cible (équivalent à l'avoir
-            # déclaré dans "models"). En jeu l'unité attachée n'existe pas à part :
-            # déploiement, valeur, PV, ciblage sont gérés comme avant.
-            units_by_id_raw = {str(u["id"]): u for u in basic_units if "id" in u}
-            folded_ids: Set[str] = set()
-            for u in basic_units:
-                if "attached_squad" not in u:
-                    continue
-                target_id = str(u["attached_squad"])
-                if target_id == str(u.get("id")):
-                    raise ValueError(f"Unit {u.get('id')}: 'attached_squad' cannot reference itself")
-                if target_id not in units_by_id_raw:
-                    raise ValueError(
-                        f"Unit {u.get('id')}: 'attached_squad' references unknown unit '{target_id}'"
-                    )
-                target = units_by_id_raw[target_id]
-                if str(target.get("player")) != str(u.get("player")):
-                    raise ValueError(
-                        f"Unit {u.get('id')}: 'attached_squad' target '{target_id}' "
-                        f"belongs to a different player"
-                    )
-                # Figurine du character injectée dans le squad (override unit_type).
-                char_model: Dict[str, Any] = {"unit_type": u["unit_type"]}
-                if "col" in u:
-                    char_model["col"] = u["col"]
-                if "row" in u:
-                    char_model["row"] = u["row"]
-                # Le squad doit exposer "models" ; sinon le créer depuis son ancre.
-                if "models" not in target:
-                    base_model: Dict[str, Any] = {}
-                    if "col" in target:
-                        base_model["col"] = target["col"]
-                    if "row" in target:
-                        base_model["row"] = target["row"]
-                    target["models"] = [base_model]
-                target["models"].append(char_model)
-                folded_ids.add(str(u["id"]))
-            if folded_ids:
-                basic_units = [u for u in basic_units if str(u.get("id")) not in folded_ids]
+            basic_units = self._fold_attached_characters(basic_units)
 
             enhanced_units = []
             for unit_data in basic_units:
@@ -612,191 +572,10 @@ class GameStateManager:
                             )
                     used_hexes.update(fp)
 
-                required_fields = ["id", "player"]
-                for field in required_fields:
-                    if field not in unit_data:
-                        raise KeyError(f"Unit missing required field '{field}': {unit_data}")
-                
-                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract RNG_WEAPONS and CC_WEAPONS
-                rng_weapons = copy.deepcopy(require_key(full_unit_data, "RNG_WEAPONS"))
-                cc_weapons = copy.deepcopy(require_key(full_unit_data, "CC_WEAPONS"))
-                
-                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Initialize selected weapon indices
-                selected_rng_weapon_index = 0 if rng_weapons else None
-                selected_cc_weapon_index = 0 if cc_weapons else None
-                
-                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract SHOOT_LEFT and ATTACK_LEFT from selected weapons
-                shoot_left = 0
-                if rng_weapons and selected_rng_weapon_index is not None:
-                    selected_weapon = rng_weapons[selected_rng_weapon_index]
-                    if isinstance(selected_weapon, dict):
-                        shoot_left = resolve_dice_value(
-                            require_key(selected_weapon, "NB"),
-                            "scenario_init_shoot_left",
-                        )
-                    else:
-                        raise TypeError(f"Unit {unit_type}: RNG_WEAPONS[{selected_rng_weapon_index}] is {type(selected_weapon).__name__}, expected dict. Value: {selected_weapon}")
-                
-                attack_left = 0
-                if cc_weapons and selected_cc_weapon_index is not None:
-                    selected_weapon = cc_weapons[selected_cc_weapon_index]
-                    if isinstance(selected_weapon, dict):
-                        attack_left = resolve_dice_value(
-                            require_key(selected_weapon, "NB"),
-                            "scenario_init_attack_left",
-                        )
-                    else:
-                        raise TypeError(f"Unit {unit_type}: CC_WEAPONS[{selected_cc_weapon_index}] is {type(selected_weapon).__name__}, expected dict. Value: {selected_weapon}")
-                
-                if "orientation" in unit_data:
-                    orientation_u = int(require_key(unit_data, "orientation"))
-                elif "orientation" in full_unit_data:
-                    orientation_u = int(require_key(full_unit_data, "orientation"))
-                else:
-                    orientation_u = 0
-
-                enhanced_unit = {
-                    "id": str(unit_data["id"]),
-                    "player": unit_player,
-                    "unitType": unit_type,
-                    "DISPLAY_NAME": require_key(full_unit_data, "DISPLAY_NAME"),
-                    "col": normalize_coordinates(chosen_col, chosen_row)[0],
-                    "row": normalize_coordinates(chosen_col, chosen_row)[1],
-                    "HP_CUR": full_unit_data["HP_MAX"],
-                    "HP_MAX": full_unit_data["HP_MAX"],
-                    "MOVE": full_unit_data["MOVE"],
-                    "T": full_unit_data["T"],
-                    "ARMOR_SAVE": full_unit_data["ARMOR_SAVE"],
-                    "INVUL_SAVE": full_unit_data["INVUL_SAVE"],
-                    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Multiple weapons system
-                    "RNG_WEAPONS": rng_weapons,
-                    "CC_WEAPONS": cc_weapons,
-                    "selectedRngWeaponIndex": selected_rng_weapon_index,
-                    "selectedCcWeaponIndex": selected_cc_weapon_index,
-                    "LD": full_unit_data["LD"],
-                    "OC": full_unit_data["OC"],
-                    "VALUE": full_unit_data["VALUE"],
-                    "ICON": full_unit_data["ICON"],
-                    "ICON_SCALE": full_unit_data["ICON_SCALE"],
-                    "ILLUSTRATION_RATIO": require_key(full_unit_data, "ILLUSTRATION_RATIO"),
-                    "BASE_SHAPE": require_key(full_unit_data, "BASE_SHAPE"),
-                    "BASE_SIZE": (
-                        ([max(1, round(s * self._get_inches_to_subhex() / 10)) for s in require_key(full_unit_data, "BASE_SIZE")]
-                         if isinstance(require_key(full_unit_data, "BASE_SIZE"), list)
-                         else max(1, round(require_key(full_unit_data, "BASE_SIZE") * self._get_inches_to_subhex() / 10)))
-                        if self._get_inches_to_subhex() > 1 else 1
-                    ),
-                    "orientation": orientation_u,
-                    "UNIT_RULES": copy.deepcopy(require_key(full_unit_data, "UNIT_RULES")),
-                    "UNIT_KEYWORDS": copy.deepcopy(require_key(full_unit_data, "UNIT_KEYWORDS")),
-                    # Attached units (rule 19.01): empty list for non-leader units (valid business case).
-                    "CAN_LEAD": copy.deepcopy(full_unit_data["CAN_LEAD"] if "CAN_LEAD" in full_unit_data else []),
-                    "SHOOT_LEFT": shoot_left,
-                    "ATTACK_LEFT": attack_left,
-
-                    # Terrain visibility (rules 13.08-13.09): hideable derived from keywords, hidden is runtime state
-                    "hideable": compute_hideable(require_key(full_unit_data, "UNIT_KEYWORDS")),
-                    "hidden": False,
-                    "hidden_models": [],
-
-                    # Battle-shock state (règle 01.07) — reset au début de la command phase du joueur
-                    "battle_shocked": False,
-                }
-
-                # PR4 4c : pass-through champ optionnel "models" (multi-fig squad)
-                # Format option B (cf. squad_audit.md §8) : liste de {col, row[, unit_type]}
-                # Si absent → backward compat (auto-build 1 fig in _build_models_for_unit)
-                # Si unit_type présent dans un spec → stats overrides pour ce modèle spécifique
-                if "models" in unit_data:
-                    raw_models = unit_data["models"]
-                    if not isinstance(raw_models, list) or not raw_models:
-                        raise ValueError(
-                            f"Unit {unit_data.get('id')}: 'models' must be a non-empty list"
-                        )
-                    normalized_models: List[Dict[str, Any]] = []
-                    total_hp_cur = 0
-                    total_value = 0
-                    for idx, spec in enumerate(raw_models):
-                        if not isinstance(spec, dict):
-                            raise TypeError(
-                                f"Unit {unit_data.get('id')}: models[{idx}] must be dict, got {type(spec).__name__}"
-                            )
-                        # Mode active : l'escouade n'est pas encore déployée. On
-                        # conserve la composition (nombre de figurines + unit_type
-                        # par figurine) mais on ne place pas les figurines : ancre
-                        # et toutes les figurines à la sentinelle (-1,-1) pour
-                        # respecter l'invariant ancre==models[0] (build_units_cache).
-                        # Les positions réelles sont générées au déploiement
-                        # (formation compacte) puis ajustées via squad/fig move.
-                        if player_deployment_type == "active":
-                            m_norm_col, m_norm_row = -1, -1
-                        else:
-                            m_col = int(require_key(spec, "col"))
-                            m_row = int(require_key(spec, "row"))
-                            m_norm_col, m_norm_row = normalize_coordinates(m_col, m_row)
-                        m_spec: Dict[str, Any] = {"col": m_norm_col, "row": m_norm_row}
-                        model_unit_type = spec.get("unit_type")
-                        if model_unit_type is not None:
-                            # Load stats for this specific model's unit_type
-                            try:
-                                m_data = unit_registry.get_unit_data(model_unit_type)
-                            except Exception as e:
-                                raise ValueError(
-                                    f"Unit {unit_data.get('id')} models[{idx}]: "
-                                    f"unknown unit_type '{model_unit_type}': {e}"
-                                )
-                            m_rng = copy.deepcopy(require_key(m_data, "RNG_WEAPONS"))
-                            m_cc = copy.deepcopy(require_key(m_data, "CC_WEAPONS"))
-                            _ish_local = self._get_inches_to_subhex()
-                            if _ish_local != 1:
-                                for w in m_rng:
-                                    if "RNG" in w:
-                                        w["RNG"] = int(w["RNG"]) * _ish_local
-                                for w in m_cc:
-                                    if "RNG" in w:
-                                        w["RNG"] = int(w["RNG"]) * _ish_local
-                            # BASE_SIZE : même transformation subhex que l'unité parente
-                            # (cf. enhanced_unit ci-dessus) pour un affichage cohérent.
-                            _m_base_raw = require_key(m_data, "BASE_SIZE")
-                            if _ish_local > 1:
-                                _m_base_size = (
-                                    [max(1, round(s * _ish_local / 10)) for s in _m_base_raw]
-                                    if isinstance(_m_base_raw, list)
-                                    else max(1, round(_m_base_raw * _ish_local / 10))
-                                )
-                            else:
-                                _m_base_size = 1
-                            m_spec.update({
-                                "unit_type": model_unit_type,
-                                "DISPLAY_NAME": require_key(m_data, "DISPLAY_NAME"),
-                                "ICON": require_key(m_data, "ICON"),
-                                "ICON_SCALE": require_key(m_data, "ICON_SCALE"),
-                                "BASE_SHAPE": require_key(m_data, "BASE_SHAPE"),
-                                "BASE_SIZE": _m_base_size,
-                                "HP_MAX": int(require_key(m_data, "HP_MAX")),
-                                "T": int(require_key(m_data, "T")),
-                                "ARMOR_SAVE": int(require_key(m_data, "ARMOR_SAVE")),
-                                "INVUL_SAVE": int(require_key(m_data, "INVUL_SAVE")),
-                                "OC": int(require_key(m_data, "OC")),
-                                "VALUE": int(require_key(m_data, "VALUE")),
-                                "UNIT_RULES": copy.deepcopy(require_key(m_data, "UNIT_RULES")),
-                                "RNG_WEAPONS": m_rng,
-                                "CC_WEAPONS": m_cc,
-                                "selectedRngWeaponIndex": 0 if m_rng else None,
-                                "selectedCcWeaponIndex": 0 if m_cc else None,
-                            })
-                            total_hp_cur += int(require_key(m_data, "HP_MAX"))
-                            total_value += int(require_key(m_data, "VALUE"))
-                        else:
-                            total_hp_cur += int(full_unit_data["HP_MAX"])
-                            total_value += int(full_unit_data["VALUE"])
-                        normalized_models.append(m_spec)
-                    enhanced_unit["models"] = normalized_models
-                    enhanced_unit["HP_CUR"] = total_hp_cur
-                    if total_value != int(full_unit_data["VALUE"]) * len(normalized_models):
-                        # Mixed squad: override VALUE with sum of per-model values
-                        enhanced_unit["VALUE"] = total_value
-
+                enhanced_unit = self._build_enhanced_unit(
+                    unit_data, full_unit_data, unit_type, unit_player,
+                    player_deployment_type, chosen_col, chosen_row, unit_registry,
+                )
                 enhanced_units.append(enhanced_unit)
 
             # Extract optional terrain data from scenario
@@ -865,6 +644,260 @@ class GameStateManager:
                 "roster_info": scenario_roster_info,
                 "tutorial_fight_no_death_unit_ids": scenario_tutorial_fight_no_death_unit_ids,
             }
+
+    def _fold_attached_characters(self, basic_units: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Fusionne les characters ``attached_squad`` comme figurines de leur squad.
+
+        Règle 19 : un character déclaré séparément avec ``"attached_squad": <id>``
+        n'est qu'une écriture plus lisible. On l'injecte dans le tableau ``models``
+        du squad cible (override ``unit_type``) puis on le retire des unités : en jeu
+        l'unité attachée n'existe pas à part (déploiement/valeur/PV/ciblage comme avant).
+        Mutation en place de ``basic_units`` (déjà un deepcopy du scénario), renvoie la
+        liste filtrée. Source unique réutilisée par le chargement et ``change_roster``.
+        """
+        units_by_id_raw = {str(u["id"]): u for u in basic_units if "id" in u}
+        folded_ids: Set[str] = set()
+        for u in basic_units:
+            if "attached_squad" not in u:
+                continue
+            target_id = str(u["attached_squad"])
+            if target_id == str(u.get("id")):
+                raise ValueError(f"Unit {u.get('id')}: 'attached_squad' cannot reference itself")
+            if target_id not in units_by_id_raw:
+                raise ValueError(
+                    f"Unit {u.get('id')}: 'attached_squad' references unknown unit '{target_id}'"
+                )
+            target = units_by_id_raw[target_id]
+            if str(target.get("player")) != str(u.get("player")):
+                raise ValueError(
+                    f"Unit {u.get('id')}: 'attached_squad' target '{target_id}' "
+                    f"belongs to a different player"
+                )
+            # Figurine du character injectée dans le squad (override unit_type).
+            char_model: Dict[str, Any] = {"unit_type": u["unit_type"]}
+            if "col" in u:
+                char_model["col"] = u["col"]
+            if "row" in u:
+                char_model["row"] = u["row"]
+            # Le squad doit exposer "models" ; sinon le créer depuis son ancre.
+            if "models" not in target:
+                base_model: Dict[str, Any] = {}
+                if "col" in target:
+                    base_model["col"] = target["col"]
+                if "row" in target:
+                    base_model["row"] = target["row"]
+                target["models"] = [base_model]
+            target["models"].append(char_model)
+            folded_ids.add(str(u["id"]))
+        if folded_ids:
+            basic_units = [u for u in basic_units if str(u.get("id")) not in folded_ids]
+        return basic_units
+
+    def _build_enhanced_unit(
+        self,
+        unit_data: Dict[str, Any],
+        full_unit_data: Dict[str, Any],
+        unit_type: str,
+        unit_player: Any,
+        player_deployment_type: str,
+        chosen_col: int,
+        chosen_row: int,
+        unit_registry: Any,
+    ) -> Dict[str, Any]:
+        """Construit une unité moteur enrichie depuis sa déclaration brute.
+
+        Indépendant de la géométrie du board (murs/pools) : la position est fournie
+        (``chosen_col``/``chosen_row``, sentinelle ``-1,-1`` en déploiement actif).
+        Normalise le champ optionnel ``models`` (squad multi-figurines, override
+        ``unit_type`` par figurine, sommes HP/VALUE). Source unique réutilisée par
+        ``load_units_from_scenario`` ET par le changement de roster (``change_roster``).
+        """
+        required_fields = ["id", "player"]
+        for field in required_fields:
+            if field not in unit_data:
+                raise KeyError(f"Unit missing required field '{field}': {unit_data}")
+
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract RNG_WEAPONS and CC_WEAPONS
+        rng_weapons = copy.deepcopy(require_key(full_unit_data, "RNG_WEAPONS"))
+        cc_weapons = copy.deepcopy(require_key(full_unit_data, "CC_WEAPONS"))
+
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Initialize selected weapon indices
+        selected_rng_weapon_index = 0 if rng_weapons else None
+        selected_cc_weapon_index = 0 if cc_weapons else None
+
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract SHOOT_LEFT and ATTACK_LEFT from selected weapons
+        shoot_left = 0
+        if rng_weapons and selected_rng_weapon_index is not None:
+            selected_weapon = rng_weapons[selected_rng_weapon_index]
+            if isinstance(selected_weapon, dict):
+                shoot_left = resolve_dice_value(
+                    require_key(selected_weapon, "NB"),
+                    "scenario_init_shoot_left",
+                )
+            else:
+                raise TypeError(f"Unit {unit_type}: RNG_WEAPONS[{selected_rng_weapon_index}] is {type(selected_weapon).__name__}, expected dict. Value: {selected_weapon}")
+
+        attack_left = 0
+        if cc_weapons and selected_cc_weapon_index is not None:
+            selected_weapon = cc_weapons[selected_cc_weapon_index]
+            if isinstance(selected_weapon, dict):
+                attack_left = resolve_dice_value(
+                    require_key(selected_weapon, "NB"),
+                    "scenario_init_attack_left",
+                )
+            else:
+                raise TypeError(f"Unit {unit_type}: CC_WEAPONS[{selected_cc_weapon_index}] is {type(selected_weapon).__name__}, expected dict. Value: {selected_weapon}")
+
+        if "orientation" in unit_data:
+            orientation_u = int(require_key(unit_data, "orientation"))
+        elif "orientation" in full_unit_data:
+            orientation_u = int(require_key(full_unit_data, "orientation"))
+        else:
+            orientation_u = 0
+
+        enhanced_unit = {
+            "id": str(unit_data["id"]),
+            "player": unit_player,
+            "unitType": unit_type,
+            "DISPLAY_NAME": require_key(full_unit_data, "DISPLAY_NAME"),
+            "col": normalize_coordinates(chosen_col, chosen_row)[0],
+            "row": normalize_coordinates(chosen_col, chosen_row)[1],
+            "HP_CUR": full_unit_data["HP_MAX"],
+            "HP_MAX": full_unit_data["HP_MAX"],
+            "MOVE": full_unit_data["MOVE"],
+            "T": full_unit_data["T"],
+            "ARMOR_SAVE": full_unit_data["ARMOR_SAVE"],
+            "INVUL_SAVE": full_unit_data["INVUL_SAVE"],
+            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Multiple weapons system
+            "RNG_WEAPONS": rng_weapons,
+            "CC_WEAPONS": cc_weapons,
+            "selectedRngWeaponIndex": selected_rng_weapon_index,
+            "selectedCcWeaponIndex": selected_cc_weapon_index,
+            "LD": full_unit_data["LD"],
+            "OC": full_unit_data["OC"],
+            "VALUE": full_unit_data["VALUE"],
+            "ICON": full_unit_data["ICON"],
+            "ICON_SCALE": full_unit_data["ICON_SCALE"],
+            "ILLUSTRATION_RATIO": require_key(full_unit_data, "ILLUSTRATION_RATIO"),
+            "BASE_SHAPE": require_key(full_unit_data, "BASE_SHAPE"),
+            "BASE_SIZE": (
+                ([max(1, round(s * self._get_inches_to_subhex() / 10)) for s in require_key(full_unit_data, "BASE_SIZE")]
+                 if isinstance(require_key(full_unit_data, "BASE_SIZE"), list)
+                 else max(1, round(require_key(full_unit_data, "BASE_SIZE") * self._get_inches_to_subhex() / 10)))
+                if self._get_inches_to_subhex() > 1 else 1
+            ),
+            "orientation": orientation_u,
+            "UNIT_RULES": copy.deepcopy(require_key(full_unit_data, "UNIT_RULES")),
+            "UNIT_KEYWORDS": copy.deepcopy(require_key(full_unit_data, "UNIT_KEYWORDS")),
+            # Attached units (rule 19.01): empty list for non-leader units (valid business case).
+            "CAN_LEAD": copy.deepcopy(full_unit_data["CAN_LEAD"] if "CAN_LEAD" in full_unit_data else []),
+            "SHOOT_LEFT": shoot_left,
+            "ATTACK_LEFT": attack_left,
+
+            # Terrain visibility (rules 13.08-13.09): hideable derived from keywords, hidden is runtime state
+            "hideable": compute_hideable(require_key(full_unit_data, "UNIT_KEYWORDS")),
+            "hidden": False,
+            "hidden_models": [],
+
+            # Battle-shock state (règle 01.07) — reset au début de la command phase du joueur
+            "battle_shocked": False,
+        }
+
+        # PR4 4c : pass-through champ optionnel "models" (multi-fig squad)
+        # Format option B (cf. squad_audit.md §8) : liste de {col, row[, unit_type]}
+        # Si absent → backward compat (auto-build 1 fig in _build_models_for_unit)
+        # Si unit_type présent dans un spec → stats overrides pour ce modèle spécifique
+        if "models" in unit_data:
+            raw_models = unit_data["models"]
+            if not isinstance(raw_models, list) or not raw_models:
+                raise ValueError(
+                    f"Unit {unit_data.get('id')}: 'models' must be a non-empty list"
+                )
+            normalized_models: List[Dict[str, Any]] = []
+            total_hp_cur = 0
+            total_value = 0
+            for idx, spec in enumerate(raw_models):
+                if not isinstance(spec, dict):
+                    raise TypeError(
+                        f"Unit {unit_data.get('id')}: models[{idx}] must be dict, got {type(spec).__name__}"
+                    )
+                # Mode active : l'escouade n'est pas encore déployée. On
+                # conserve la composition (nombre de figurines + unit_type
+                # par figurine) mais on ne place pas les figurines : ancre
+                # et toutes les figurines à la sentinelle (-1,-1) pour
+                # respecter l'invariant ancre==models[0] (build_units_cache).
+                # Les positions réelles sont générées au déploiement
+                # (formation compacte) puis ajustées via squad/fig move.
+                if player_deployment_type == "active":
+                    m_norm_col, m_norm_row = -1, -1
+                else:
+                    m_col = int(require_key(spec, "col"))
+                    m_row = int(require_key(spec, "row"))
+                    m_norm_col, m_norm_row = normalize_coordinates(m_col, m_row)
+                m_spec: Dict[str, Any] = {"col": m_norm_col, "row": m_norm_row}
+                model_unit_type = spec.get("unit_type")
+                if model_unit_type is not None:
+                    # Load stats for this specific model's unit_type
+                    try:
+                        m_data = unit_registry.get_unit_data(model_unit_type)
+                    except Exception as e:
+                        raise ValueError(
+                            f"Unit {unit_data.get('id')} models[{idx}]: "
+                            f"unknown unit_type '{model_unit_type}': {e}"
+                        )
+                    m_rng = copy.deepcopy(require_key(m_data, "RNG_WEAPONS"))
+                    m_cc = copy.deepcopy(require_key(m_data, "CC_WEAPONS"))
+                    _ish_local = self._get_inches_to_subhex()
+                    if _ish_local != 1:
+                        for w in m_rng:
+                            if "RNG" in w:
+                                w["RNG"] = int(w["RNG"]) * _ish_local
+                        for w in m_cc:
+                            if "RNG" in w:
+                                w["RNG"] = int(w["RNG"]) * _ish_local
+                    # BASE_SIZE : même transformation subhex que l'unité parente
+                    # (cf. enhanced_unit ci-dessus) pour un affichage cohérent.
+                    _m_base_raw = require_key(m_data, "BASE_SIZE")
+                    if _ish_local > 1:
+                        _m_base_size = (
+                            [max(1, round(s * _ish_local / 10)) for s in _m_base_raw]
+                            if isinstance(_m_base_raw, list)
+                            else max(1, round(_m_base_raw * _ish_local / 10))
+                        )
+                    else:
+                        _m_base_size = 1
+                    m_spec.update({
+                        "unit_type": model_unit_type,
+                        "DISPLAY_NAME": require_key(m_data, "DISPLAY_NAME"),
+                        "ICON": require_key(m_data, "ICON"),
+                        "ICON_SCALE": require_key(m_data, "ICON_SCALE"),
+                        "BASE_SHAPE": require_key(m_data, "BASE_SHAPE"),
+                        "BASE_SIZE": _m_base_size,
+                        "HP_MAX": int(require_key(m_data, "HP_MAX")),
+                        "T": int(require_key(m_data, "T")),
+                        "ARMOR_SAVE": int(require_key(m_data, "ARMOR_SAVE")),
+                        "INVUL_SAVE": int(require_key(m_data, "INVUL_SAVE")),
+                        "OC": int(require_key(m_data, "OC")),
+                        "VALUE": int(require_key(m_data, "VALUE")),
+                        "UNIT_RULES": copy.deepcopy(require_key(m_data, "UNIT_RULES")),
+                        "RNG_WEAPONS": m_rng,
+                        "CC_WEAPONS": m_cc,
+                        "selectedRngWeaponIndex": 0 if m_rng else None,
+                        "selectedCcWeaponIndex": 0 if m_cc else None,
+                    })
+                    total_hp_cur += int(require_key(m_data, "HP_MAX"))
+                    total_value += int(require_key(m_data, "VALUE"))
+                else:
+                    total_hp_cur += int(full_unit_data["HP_MAX"])
+                    total_value += int(full_unit_data["VALUE"])
+                normalized_models.append(m_spec)
+            enhanced_unit["models"] = normalized_models
+            enhanced_unit["HP_CUR"] = total_hp_cur
+            if total_value != int(full_unit_data["VALUE"]) * len(normalized_models):
+                # Mixed squad: override VALUE with sum of per-model values
+                enhanced_unit["VALUE"] = total_value
+
+        return enhanced_unit
 
     def _load_units_from_roster_refs(
         self,

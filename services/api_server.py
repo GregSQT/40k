@@ -2652,6 +2652,45 @@ def _build_units_from_army_config(
     return built_units, next_unit_id
 
 
+def _build_units_from_scenario_army(
+    engine_instance: W40KEngine,
+    army_cfg: Dict[str, Any],
+    player: int,
+    next_unit_id: int,
+) -> Tuple[list[Dict[str, Any]], int]:
+    """Build full engine units for one player from a SCENARIO-format army file
+    (units positionnées avec ``models`` / ``attached_squad``).
+
+    Réutilise les briques du moteur (``_fold_attached_characters`` +
+    ``_build_enhanced_unit``) : même normalisation des ``models`` et même fusion des
+    characters attachés qu'au chargement d'une partie — aucune logique dupliquée.
+    Déploiement actif : positions sentinelles ``-1,-1`` (le joueur place ensuite).
+    Les unités sont réaffectées au joueur cible et renumérotées (l'appelant compacte).
+    """
+    if not hasattr(engine_instance, "unit_registry") or engine_instance.unit_registry is None:
+        raise ValueError("engine.unit_registry is required to build units from scenario army")
+    from engine.game_state import GameStateManager
+    from config_loader import get_config_loader
+
+    reg = engine_instance.unit_registry
+    manager = GameStateManager(
+        {"board": get_config_loader().get_board_config(), "controlled_player": int(player)},
+        reg,
+    )
+    basic_units = manager._fold_attached_characters(copy.deepcopy(require_key(army_cfg, "units")))
+    built_units: list[Dict[str, Any]] = []
+    for unit_def in basic_units:
+        unit_type = require_key(unit_def, "unit_type")
+        full_unit_data = reg.get_unit_data(unit_type)
+        enhanced = manager._build_enhanced_unit(
+            unit_def, full_unit_data, unit_type, int(player), "active", -1, -1, reg
+        )
+        enhanced["id"] = str(next_unit_id)
+        next_unit_id += 1
+        built_units.append(enhanced)
+    return built_units, next_unit_id
+
+
 def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """Replace active deployer's undeployed roster with selected army file."""
     game_state = require_key(engine_instance.__dict__, "game_state")
@@ -2696,7 +2735,15 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
 
     all_unit_ids = [int(str(require_key(unit, "id"))) for unit in require_key(game_state, "units")]
     next_unit_id = (max(all_unit_ids) + 1) if all_unit_ids else 1
-    new_units, _ = _build_units_from_army_config(army_cfg, target_deployer, next_unit_id, engine_instance)
+    # Deux formats supportés : army (unit_type + count, unités mono-fig) et scénario
+    # (units positionnées avec models/attached_squad, squads multi-fig). Détection par
+    # absence de "count" sur toutes les units.
+    army_units = require_key(army_cfg, "units")
+    is_scenario_format = all("count" not in u for u in army_units)
+    if is_scenario_format:
+        new_units, _ = _build_units_from_scenario_army(engine_instance, army_cfg, target_deployer, next_unit_id)
+    else:
+        new_units, _ = _build_units_from_army_config(army_cfg, target_deployer, next_unit_id, engine_instance)
 
     # Replace only current deployer's units, then compact IDs to prevent unbounded growth.
     other_units = [u for u in require_key(game_state, "units") if int(require_key(u, "player")) != target_deployer]

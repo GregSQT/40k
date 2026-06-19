@@ -1,7 +1,7 @@
 {
   "faction": "tyranid",
   "display_name": "V10 Tyranids",
-  "description": "Roster V10 Tyranids (format scénario) — squads multi-figurines.",
+  "description": "Roster V10 Tyranids (format scénario)\n• Winged Tyranid Prime\n• Neurotyrant\n• Psychophage\n• Screamer-Killer\n• 2× Ripper Swarm\n• 2× Von Ryan's Leaper\n• Squad Barbgaunt (5)\n• Squad Termagant (20)\n• Squad Barbgaunt (7)",
   "primary_objectives": ["objectives_control"],
   "deployment_zone": "mc1",
   "deployment_type": "active",
