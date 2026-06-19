@@ -1583,6 +1583,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           interface ActionLogEntry {
             message?: string;
             shootDetails?: Array<Record<string, unknown>>;
+            moveDetails?: Array<Record<string, unknown>>;
             [key: string]: unknown;
           }
           const actionLogsBatch = dedupeActionLogBatch(data.action_logs as ActionLogEntry[]);
@@ -1633,6 +1634,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   targetUnitType: logEntry.targetUnitType,
                   // Pass through shootDetails for direct use by getEventTypeClass color logic
                   shootDetails: logEntry.shootDetails,
+                  moveDetails: logEntry.moveDetails,
+                  action_name: logEntry.action_name,
                   result: logEntry.result,
                   timestamp: new Date(),
                 },

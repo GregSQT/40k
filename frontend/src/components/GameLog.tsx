@@ -520,7 +520,8 @@ export const GameLog: React.FC<GameLogProps> = ({
                   className={`game-log-entry ${getEventTypeClass(event)} ${waitClass} ${objectiveControlClass}`}
                 >
                   <div className="game-log-entry__single-line">
-                    {event.shootDetails && event.shootDetails.length > 0 && (
+                    {((event.shootDetails && event.shootDetails.length > 0) ||
+                      (event.moveDetails && event.moveDetails.length > 0)) && (
                       <button
                         type="button"
                         className="game-log-entry__expand-btn"
@@ -627,6 +628,31 @@ export const GameLog: React.FC<GameLogProps> = ({
                               )}
                             </>
                           );
+                        })()}
+                      </div>
+                    )}
+                  {expandedEntries.has(event.id) &&
+                    event.moveDetails &&
+                    event.moveDetails.length > 0 && (
+                      <div className="game-log-entry__shot-details">
+                        {(() => {
+                          const verb =
+                            event.action_name === "ADVANCED"
+                              ? "ADVANCED"
+                              : event.action_name === "FLED"
+                                ? "FLED"
+                                : "MOVED";
+                          return event.moveDetails!.map((m) => {
+                            const [squadId, modelIdx] = m.modelId.split("#");
+                            return (
+                              <div
+                                key={m.modelId}
+                                className="game-log-entry__shot-detail-row"
+                              >
+                                {`Unit ${squadId} # Model ${modelIdx} ${verb} from (${m.fromCol},${m.fromRow}) to (${m.toCol},${m.toRow})`}
+                              </div>
+                            );
+                          });
                         })()}
                       </div>
                     )}

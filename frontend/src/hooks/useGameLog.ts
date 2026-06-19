@@ -97,6 +97,7 @@ export function useGameLog(currentTurn?: number) {
         weaponName: logData.weaponName,
         targetUnitType: logData.targetUnitType,
         shootDetails,
+        moveDetails: logData.moveDetails,
       });
     };
 

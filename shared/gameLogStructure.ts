@@ -62,6 +62,7 @@ export interface BaseLogEntry {
   startHex?: string;
   endHex?: string;
   shootDetails?: ShootDetail[];
+  moveDetails?: MoveDetail[];
   weaponName?: string; // MULTIPLE_WEAPONS_IMPLEMENTATION.md
 }
 
@@ -97,6 +98,18 @@ export interface ShootDetail {
   targetUnitType?: string;
   targetCol?: number;
   targetRow?: number;
+}
+
+/**
+ * Move detail structure : deplacement par-figurine d'une escouade (move/charge/pile-in/conso).
+ * Affiche en expand/collapse le depart -> arrivee de chaque figurine vivante.
+ */
+export interface MoveDetail {
+  modelId: string;
+  fromCol: number;
+  fromRow: number;
+  toCol: number;
+  toRow: number;
 }
 
 /**

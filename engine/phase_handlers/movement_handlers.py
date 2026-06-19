@@ -2607,6 +2607,19 @@ def movement_commit_move_plan_handler(
         move_type = "advance"
     else:
         move_type = "fall_back" if was_engaged else "normal"
+
+    # Snapshot par-figurine + ancre AVANT le commit, pour le log de mouvement
+    # (moveDetails : depart -> arrivee de chaque figurine, expand/collapse cote GameLog).
+    _uc_before = game_state.get("units_cache", {}).get(str(squad_id))  # get allowed
+    if _uc_before is None:  # get allowed
+        raise KeyError(f"units_cache missing squad {squad_id} before move commit")
+    orig_anchor_col = int(_uc_before["col"])
+    orig_anchor_row = int(_uc_before["row"])
+    models_before = {
+        mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"]))
+        for mid in alive
+    }
+
     commit_move(plan, game_state, move_type)
 
     unit = get_unit_by_id(game_state, squad_id)
@@ -2617,6 +2630,64 @@ def movement_commit_move_plan_handler(
     entry = game_state.get("units_cache", {}).get(str(squad_id))  # get allowed
     if entry is not None:  # get allowed
         set_unit_coordinates(unit, int(entry["col"]), int(entry["row"]))
+
+    # Log de mouvement par-figurine (modele de la charge, sans roll sauf advance).
+    # Ligne unite = message ancre ; detail expand/collapse = moveDetails par figurine.
+    dest_anchor_col, dest_anchor_row = require_unit_position(unit, game_state)
+    move_details = []
+    for mid, nc, nr in plan:
+        _fc, _fr = models_before[mid]
+        move_details.append(
+            {
+                "modelId": mid,
+                "fromCol": _fc,
+                "fromRow": _fr,
+                "toCol": int(nc),
+                "toRow": int(nr),
+            }
+        )
+    if move_type == "advance":
+        action_name = "ADVANCED"
+        was_flee = False
+        movement_message = (
+            f"Unit {unit['id']} ADVANCED from ({orig_anchor_col},{orig_anchor_row}) "
+            f"to ({dest_anchor_col},{dest_anchor_row}) [Advance:{_adv_roll}]"
+        )
+    elif move_type == "fall_back":
+        action_name = "FLED"
+        was_flee = True
+        movement_message = (
+            f"Unit {unit['id']} FLED from ({orig_anchor_col},{orig_anchor_row}) "
+            f"to ({dest_anchor_col},{dest_anchor_row})"
+        )
+    else:
+        action_name = "MOVE"
+        was_flee = False
+        movement_message = (
+            f"Unit {unit['id']} MOVED from ({orig_anchor_col},{orig_anchor_row}) "
+            f"to ({dest_anchor_col},{dest_anchor_row})"
+        )
+    append_action_log(
+        game_state,
+        {
+            "type": "move",
+            "message": movement_message,
+            "turn": game_state["current_turn"] if "current_turn" in game_state else 1,
+            "phase": "move",
+            "unitId": unit["id"],
+            "player": unit["player"],
+            "fromCol": orig_anchor_col,
+            "fromRow": orig_anchor_row,
+            "toCol": dest_anchor_col,
+            "toRow": dest_anchor_row,
+            "was_flee": was_flee,
+            "timestamp": "server_time",
+            "action_name": action_name,
+            "reward": 0.0,
+            "is_ai_action": unit["player"] == 2,
+            "moveDetails": move_details,
+        },
+    )
 
     _invalidate_all_destination_pools_after_movement(game_state)
     movement_clear_preview(game_state)
