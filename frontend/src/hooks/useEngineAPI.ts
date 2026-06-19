@@ -3507,12 +3507,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // sélection/activation tant que les mortal wounds ne sont pas attribuées.
       if (manualAllocationRef.current && unitId !== null) return;
       const numericUnitId = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
-      console.log("[DEPLOY-DBG] handleSelectUnit", numericUnitId, {
-        phase: gameState?.phase,
-        depType: gameState?.deployment_type,
-        mode,
-        hasStartRef: !!startDeploySquadRef.current,
-      });
 
       // Déploiement par escouade (PvP "active") : un clic sur une escouade déployable entre en
       // mode déploiement provisoire. En mode deploymentMove, ignorer les clics (gérés par PIXI).
@@ -5064,7 +5058,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     (unitId: number | string) => {
       const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
       deployPoolRef.current = buildDeployPool();
-      console.log("[DEPLOY-DBG] start squad", uid, "→ mode deploymentMove, poolSize=", deployPoolRef.current.size);
       setDeployPlan({
         unitId: uid,
         models: {},
@@ -5103,13 +5096,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return;
       }
       const rawPlan = result?.plan as Array<[string | number, number, number]> | undefined;
-      console.log("[DEPLOY-DBG] drop résultat backend:", {
-        success: result?.success,
-        can_validate: result?.can_validate,
-        plan_len: Array.isArray(rawPlan) ? rawPlan.length : "ABSENT",
-        rawPlan,
-        per_model: result?.per_model,
-      });
       if (!rawPlan || !Array.isArray(rawPlan)) {
         throw new Error("[DEPLOY] deploy_generate_formation: plan absent dans la réponse");
       }
@@ -5117,7 +5103,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       for (const [mid, c, r] of rawPlan) {
         models[String(mid)] = { col: c, row: r };
       }
-      console.log("[DEPLOY-DBG] deployPlan.models construit:", models, "nb=", Object.keys(models).length);
       const perModelValid = (result?.per_model ?? {}) as Record<string, boolean>;
       const coherencyOk = result?.coherency_ok === true;
       const canValidate = result?.can_validate === true;

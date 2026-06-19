@@ -2807,12 +2807,6 @@ export const BoardWithAPI: React.FC = () => {
                           setDeploymentTooltip(null);
                         }}
                         onClick={() => {
-                          console.log("[DEPLOY-DBG] panneau click unit", unit.id, {
-                            canInteractDeployment,
-                            isCurrentDeployer,
-                            phase: apiProps.gameState?.phase,
-                            depType: apiProps.gameState?.deployment_type,
-                          });
                           if (!canInteractDeployment) {
                             return;
                           }

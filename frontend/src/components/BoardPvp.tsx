@@ -3968,16 +3968,6 @@ export default function Board({
         if (!dplan) return;
         const pool = deployPoolRef?.current;
         const inPool = pool?.has(`${col},${row}`) ?? false;
-        console.log("[DEPLOY-DBG] click board:", {
-          col,
-          row,
-          placed: dplan.placed,
-          activeModelId: dplan.activeModelId,
-          inPool,
-          poolSize: pool?.size ?? 0,
-          foundModelId,
-          modelsCount: Object.keys(dplan.models).length,
-        });
         // 1) Escouade pas encore posée : 1er clic dans la zone → formation compacte (backend).
         if (!dplan.placed) {
           if (inPool) {
@@ -7400,7 +7390,19 @@ export default function Board({
             .map((d) => `${d.model_id}.${d.weapon_index}>${d.target_unit_id}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}`;
+      // Déploiement par escouade (PvP "active") : même logique que squadPlanFp — sans les positions
+      // du plan dans l'empreinte, le drop/repositionnement ne re-render pas (ghost jamais dessiné).
+      const deployPlanFp = deployPlan
+        ? `${deployPlan.unitId}:${deployPlan.activeModelId ?? ""}:${deployPlan.placed ? 1 : 0}:` +
+          Object.entries(deployPlan.models)
+            .map(([m, p]) => `${m}@${p.col},${p.row}`)
+            .join(",") +
+          ":" +
+          Object.entries(deployPlan.perModelValid)
+            .map(([m, v]) => `${m}=${v ? 1 : 0}`)
+            .join(",")
+        : "";
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}#dplan:${deployPlanFp}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -7984,16 +7986,6 @@ export default function Board({
           mCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN,
           mRow * HEX_VERT_SPACING + ((mCol % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN,
         ]);
-        if (isDeployGhost || (isDeploymentMove && isSquadGhost)) {
-          console.log("[DEPLOY-DBG] rendu unit", unitIdStr, {
-            isDeployGhost,
-            isSquadGhost,
-            occupiedKeys: occupiedHexesByModel ? Object.keys(occupiedHexesByModel).length : "ABSENT",
-            planKeys: effectivePerModelPlan ? Object.keys(effectivePerModelPlan.models).length : "no-plan",
-            modelPositionsCount: modelPositions.length,
-            modelPositions,
-          });
-        }
         const modelMetas: Array<ModelVisualMeta | null> = modelMetasByModel
           ? modelIds.map((mid) => modelMetasByModel[mid] ?? null)
           : [];
