@@ -1577,22 +1577,21 @@ def _ai_select_charge_target_pve(game_state: Dict[str, Any], unit: Dict[str, Any
 
 
 def _charge_obstacle_socles(game_state: Dict[str, Any], exclude_unit_id: str) -> List[Any]:
-    """Socles des unités obstacles (``units_cache`` hors squad chargeur), construits UNE fois.
+    """Socles obstacles PAR FIGURINE (``models_cache`` hors squad chargeur), construits UNE fois.
+
+    Un socle par figurine (pas par unité) : pour une paire ronde↔ronde, ``footprints_overlap``
+    ignore ``fp`` et ne teste que centre + base ; un socle unique à l'ancre laisserait donc les
+    autres figs de l'escouade sans collision. On émet une figurine = un socle via
+    ``_charge_model_socle`` (base propre à chaque fig, comme les ``sibling_socles``).
 
     Perf : évite de reconstruire les socles voisins à chaque cellule candidate dans les BFS de pool.
     """
-    from engine.hex_utils import Socle
-
-    units_cache = require_key(game_state, "units_cache")
+    models_cache = require_key(game_state, "models_cache")
     out: List[Any] = []
-    for uid, entry in units_cache.items():
-        if str(uid) == str(exclude_unit_id):
+    for entry in models_cache.values():
+        if str(entry["squad_id"]) == str(exclude_unit_id):
             continue
-        occ = entry.get("occupied_hexes")
-        col = int(entry["col"])
-        row = int(entry["row"])
-        fp = set(occ) if occ else {(col, row)}
-        out.append(Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"], col=col, row=row, fp=fp))
+        out.append(_charge_model_socle(game_state, entry, int(entry["col"]), int(entry["row"])))
     return out
 
 
