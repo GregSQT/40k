@@ -2368,6 +2368,16 @@ textarea:focus {
   background: rgba(139, 69, 19, 0.4); /* Marron pour advance */
 }
 
+.game-log-entry--pile-in {
+  border-left-color: #9a3412; /* Marron-rouge - pile-in (fight phase move) */
+  background: rgba(154, 52, 18, 0.4);
+}
+
+.game-log-entry--consolidation {
+  border-left-color: #d97706; /* Amber - consolidation (fight phase move) */
+  background: rgba(217, 119, 6, 0.4);
+}
+
 /* Shooting Action Color Coding - BLUE palette */
 .game-log-entry--shoot {
   border-left-color: #2563eb; /* Default blue for shooting */

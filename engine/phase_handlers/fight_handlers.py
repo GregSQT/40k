@@ -7071,9 +7071,45 @@ def _fight_v11_manual_step(
             if not prev["can_validate"]:
                 _fight_v11_log(game_state, f"PILE IN unit {act_uid} → plan invalide {prev}")
                 return True, _fight_pile_in_model_plan_state(game_state, u, prov, None)
+            _uc_before = require_key(game_state, "units_cache")[act_uid]
+            _from_col, _from_row = int(_uc_before["col"]), int(_uc_before["row"])
             _fight_pile_in_commit_plan(game_state, u, full_plan)
             game_state["pile_in_done"].add(act_uid)
             _fight_v11_clear_pile_in_preview(game_state)
+            # Log par-figurine (mode fin type charge, sans roll) : ligne unite + moveDetails.
+            _uc_after = require_key(game_state, "units_cache")[act_uid]
+            _to_col, _to_row = int(_uc_after["col"]), int(_uc_after["row"])
+            _move_details = [
+                {
+                    "modelId": m,
+                    "fromCol": origin[m][0],
+                    "fromRow": origin[m][1],
+                    "toCol": int(nc),
+                    "toRow": int(nr),
+                }
+                for m, nc, nr in full_plan
+            ]
+            append_action_log(
+                game_state,
+                {
+                    "type": "pile_in",
+                    "message": (
+                        f"Unit {u['id']} PILED IN from ({_from_col},{_from_row}) "
+                        f"to ({_to_col},{_to_row})"
+                    ),
+                    "turn": game_state["current_turn"] if "current_turn" in game_state else 1,
+                    "phase": "fight",
+                    "unitId": u["id"],
+                    "player": u["player"],
+                    "fromCol": _from_col,
+                    "fromRow": _from_row,
+                    "toCol": _to_col,
+                    "toRow": _to_row,
+                    "timestamp": "server_time",
+                    "is_ai_action": u["player"] == 2,
+                    "moveDetails": _move_details,
+                },
+            )
             _fight_v11_log(
                 game_state, f"PILE IN unit {act_uid} → commit par-figurine ({len(full_plan)} figs)"
             )
@@ -7415,9 +7451,45 @@ def _fight_v11_manual_step(
             if not prev["can_validate"]:
                 _fight_v11_log(game_state, f"CONSOLIDATE unit {act_uid} → plan invalide {prev}")
                 return True, _fight_consolidation_model_plan_state(game_state, u, prov, None)
+            _uc_before = require_key(game_state, "units_cache")[act_uid]
+            _from_col, _from_row = int(_uc_before["col"]), int(_uc_before["row"])
             _fight_consolidation_commit_plan(game_state, u, full_plan)
             game_state["consolidation_done"].add(act_uid)
             game_state["active_fight_unit"] = None
+            # Log par-figurine (mode fin type charge, sans roll) : ligne unite + moveDetails.
+            _uc_after = require_key(game_state, "units_cache")[act_uid]
+            _to_col, _to_row = int(_uc_after["col"]), int(_uc_after["row"])
+            _move_details = [
+                {
+                    "modelId": m,
+                    "fromCol": origin[m][0],
+                    "fromRow": origin[m][1],
+                    "toCol": int(nc),
+                    "toRow": int(nr),
+                }
+                for m, nc, nr in full_plan
+            ]
+            append_action_log(
+                game_state,
+                {
+                    "type": "consolidation",
+                    "message": (
+                        f"Unit {u['id']} CONSOLIDATED from ({_from_col},{_from_row}) "
+                        f"to ({_to_col},{_to_row})"
+                    ),
+                    "turn": game_state["current_turn"] if "current_turn" in game_state else 1,
+                    "phase": "fight",
+                    "unitId": u["id"],
+                    "player": u["player"],
+                    "fromCol": _from_col,
+                    "fromRow": _from_row,
+                    "toCol": _to_col,
+                    "toRow": _to_row,
+                    "timestamp": "server_time",
+                    "is_ai_action": u["player"] == 2,
+                    "moveDetails": _move_details,
+                },
+            )
             _fight_v11_log(
                 game_state,
                 f"CONSOLIDATE unit {act_uid} → commit par-figurine (mode={mode}, {len(full_plan)} figs)",

@@ -46,6 +46,8 @@ export interface BaseLogEntry {
     | "phase_change"
     | "move_cancel"
     | "charge_cancel"
+    | "pile_in"
+    | "consolidation"
     | "advance"
     | "roll_info"
     | "battle_shock"
@@ -394,6 +396,10 @@ export function getEventIcon(type: string): string {
       return "✕"; // X for cancellation
     case "charge_cancel":
       return "✕"; // X for cancellation
+    case "pile_in":
+      return "↪"; // Short move toward enemy (fight phase)
+    case "consolidation":
+      return "↩"; // Short repositioning move (fight phase)
     case "advance":
       return "⇒"; // Double arrow for advance
     case "roll_info":
@@ -439,6 +445,10 @@ export function getEventTypeClass(event: BaseLogEntry | TrainingLogEntry): strin
       return "game-log-entry--shoot-failed"; // Light blue - failed during hit or wound rolls
     case "charge":
       return "game-log-entry--charge";
+    case "pile_in":
+      return "game-log-entry--pile-in";
+    case "consolidation":
+      return "game-log-entry--consolidation";
     case "charge_impact": {
       const message = event.message || "";
       const damageMatch = message.match(/Dmg:(\d+)HP/i);

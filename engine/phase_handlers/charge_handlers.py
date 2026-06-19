@@ -4993,6 +4993,12 @@ def charge_commit_move_plan_handler(
 
     orig_col, orig_row = require_unit_position(unit, game_state)
 
+    # Snapshot par-figurine AVANT le commit (moveDetails : depart -> arrivee de chaque fig).
+    models_before = {
+        mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"]))
+        for mid in alive
+    }
+
     from .shared_utils import commit_move, set_unit_coordinates
     from .movement_handlers import _invalidate_all_destination_pools_after_movement
 
@@ -5012,6 +5018,18 @@ def charge_commit_move_plan_handler(
         f"Unit {unit['id']} ({orig_col}, {orig_row}) CHARGED Units {target_ids} "
         f"from ({orig_col}, {orig_row}) to ({dest_col}, {dest_row}) [Roll:{charge_roll}]"
     )
+    move_details = []
+    for mid, nc, nr in plan:
+        _fc, _fr = models_before[mid]
+        move_details.append(
+            {
+                "modelId": mid,
+                "fromCol": _fc,
+                "fromRow": _fr,
+                "toCol": int(nc),
+                "toRow": int(nr),
+            }
+        )
     append_action_log(
         game_state,
         {
@@ -5029,6 +5047,7 @@ def charge_commit_move_plan_handler(
             "charge_roll": charge_roll,
             "timestamp": "server_time",
             "is_ai_action": unit["player"] == 1,
+            "moveDetails": move_details,
         },
     )
     add_console_log(game_state, charge_message)

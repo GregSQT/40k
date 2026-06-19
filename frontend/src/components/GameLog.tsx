@@ -638,11 +638,17 @@ export const GameLog: React.FC<GameLogProps> = ({
                       <div className="game-log-entry__shot-details">
                         {(() => {
                           const verb =
-                            event.action_name === "ADVANCED"
-                              ? "ADVANCED"
-                              : event.action_name === "FLED"
-                                ? "FLED"
-                                : "MOVED";
+                            event.type === "charge"
+                              ? "CHARGED"
+                              : event.type === "pile_in"
+                                ? "PILED IN"
+                                : event.type === "consolidation"
+                                  ? "CONSOLIDATED"
+                                  : event.action_name === "ADVANCED"
+                                    ? "ADVANCED"
+                                    : event.action_name === "FLED"
+                                      ? "FLED"
+                                      : "MOVED";
                           return event.moveDetails!.map((m) => {
                             const [squadId, modelIdx] = m.modelId.split("#");
                             return (
