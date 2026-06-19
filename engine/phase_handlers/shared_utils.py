@@ -3114,18 +3114,17 @@ def roll_hazard_for_unit(unit_id: str, game_state: Dict[str, Any], auto_resolve:
     rolls = [random.randint(1, 6) for _ in range(alive_count)]
     fails = sum(1 for r in rolls if r <= 2)
     total_wounds = fails * wounds_per_fail
-    if total_wounds > 0:
-        # 06.02 : attribution figurine par figurine via destroy_model (retrait propre),
-        # PAS l'agrégat units_cache qui ne retirait aucune figurine sur du multi-fig.
-        allocate_mortal_wounds(game_state, str(unit_id), total_wounds, auto_resolve)
-
     col = int(unit.get("col", -1))
     row = int(unit.get("row", -1))
     msg = (
         f"Unit {unit_id}({col},{row}) [HAZARD] roll (Desperate Escape): {alive_count} rolls "
         f"- {fails} fail(s) - {total_wounds} mortal wound(s)"
     )
-    append_action_log(game_state, {
+    # Détails par-figurine (06.02) : remplis pendant l'attribution, comme shootDetails au tir.
+    # La ligne de log est émise À LA FIN de l'allocation (calquée sur le tir), pas au roll :
+    # on diffère le payload dans game_state["hazard_pending_log"] tant que l'allocation court.
+    details: List[Dict[str, Any]] = []
+    log_payload = {
         "type": "hazard",
         "message": msg,
         "turn": require_key(game_state, "turn"),
@@ -3133,8 +3132,27 @@ def roll_hazard_for_unit(unit_id: str, game_state: Dict[str, Any], auto_resolve:
         "unitId": int(unit_id),
         "player": int(unit.get("player", -1)),
         "result": f"{total_wounds} MW",
-    })
+        "hazardDetails": details,
+    }
+    if total_wounds <= 0:
+        append_action_log(game_state, log_payload)  # rien à allouer : émission immédiate
+        return total_wounds
+    # 06.02 : attribution figurine par figurine via destroy_model (retrait propre),
+    # PAS l'agrégat units_cache qui ne retirait aucune figurine sur du multi-fig.
+    game_state["hazard_pending_log"] = log_payload
+    allocate_mortal_wounds(game_state, str(unit_id), total_wounds, auto_resolve, details)
+    if game_state.get("pending_hazard_allocation") is None:
+        _finalize_hazard_log(game_state)  # auto/forcé : terminé sans clic → émission
     return total_wounds
+
+
+def _finalize_hazard_log(game_state: Dict[str, Any]) -> None:
+    """Émet la ligne de log hazard différée, une fois l'attribution des MW terminée
+    (calquée sur le tir : la ligne n'apparaît qu'avec ses détails complets). No-op si
+    aucun payload en attente."""
+    payload = game_state.pop("hazard_pending_log", None)
+    if payload is not None:
+        append_action_log(game_state, payload)
 
 
 def select_eligible_models(game_state: Dict[str, Any], squad_id: str) -> List[str]:
@@ -3170,7 +3188,8 @@ def select_eligible_models(game_state: Dict[str, Any], squad_id: str) -> List[st
 
 
 def allocate_mortal_wounds(
-    game_state: Dict[str, Any], squad_id: str, n_wounds: int, auto_resolve: bool
+    game_state: Dict[str, Any], squad_id: str, n_wounds: int, auto_resolve: bool,
+    details_sink: List[Dict[str, Any]],
 ) -> int:
     """Attribue ``n_wounds`` mortal wounds à une unité (séquence 06.02), une par une.
 
@@ -3183,6 +3202,9 @@ def allocate_mortal_wounds(
     Chaque MW retire 1 HP à la figurine choisie ; la figurine n'est retirée du jeu
     (``destroy_model`` reason='hazard') qu'à ``HP_CUR == 0``. On s'arrête si l'unité
     est détruite avant d'avoir attribué toutes les MW (06.02 : « until … destroyed »).
+
+    ``details_sink`` reçoit 1 record ``{modelId, col, row, died}`` par MW appliquée
+    (col/row capturés AVANT destroy) — alimente ``hazardDetails`` du log, comme le tir.
 
     Retourne le nombre de mortal wounds réellement attribués avant un éventuel pending.
     """
@@ -3209,10 +3231,15 @@ def allocate_mortal_wounds(
             }
             return applied
         new_hp = int(models_cache[target]["HP_CUR"]) - 1
+        col = models_cache[target].get("col")  # get allowed
+        row = models_cache[target].get("row")  # get allowed
         if new_hp <= 0:
             destroy_model(game_state, target, reason="hazard")
+            died = True
         else:
             update_model_hp(game_state, target, new_hp)
+            died = False
+        details_sink.append({"modelId": str(target), "col": col, "row": row, "died": died})
         applied += 1
         remaining -= 1
     return applied
@@ -3270,17 +3297,25 @@ def apply_hazard_allocate_model(game_state: Dict[str, Any], model_id: str) -> No
     if len(eligibles) < 2:
         raise ValueError("apply_hazard_allocate_model: aucun choix en attente (allocation forcée)")
     remaining = int(pending["wounds_remaining"])
+    sink = require_key(game_state, "hazard_pending_log")["hazardDetails"]
+    col = models_cache[mid].get("col")  # get allowed
+    row = models_cache[mid].get("row")  # get allowed
     new_hp = int(models_cache[mid]["HP_CUR"]) - 1
     if new_hp <= 0:
         destroy_model(game_state, mid, reason="hazard")
+        died = True
     else:
         update_model_hp(game_state, mid, new_hp)
+        died = False
+    sink.append({"modelId": mid, "col": col, "row": row, "died": died})
     remaining -= 1
     # Wound courante consommée : on efface le pending puis on poursuit la séquence
     # (auto pour les figs forcées ; re-pose un pending si un nouveau choix apparaît).
     del game_state["pending_hazard_allocation"]
     if remaining > 0:
-        allocate_mortal_wounds(game_state, sid, remaining, auto_resolve=False)
+        allocate_mortal_wounds(game_state, sid, remaining, auto_resolve=False, details_sink=sink)
+    if game_state.get("pending_hazard_allocation") is None:
+        _finalize_hazard_log(game_state)  # attribution terminée → émission de la ligne
 
 
 def is_unit_at_half_strength(unit_id: str, game_state: Dict[str, Any]) -> bool:

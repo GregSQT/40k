@@ -1584,6 +1584,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             message?: string;
             shootDetails?: Array<Record<string, unknown>>;
             moveDetails?: Array<Record<string, unknown>>;
+            hazardDetails?: Array<Record<string, unknown>>;
             [key: string]: unknown;
           }
           const actionLogsBatch = dedupeActionLogBatch(data.action_logs as ActionLogEntry[]);
@@ -1635,6 +1636,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   // Pass through shootDetails for direct use by getEventTypeClass color logic
                   shootDetails: logEntry.shootDetails,
                   moveDetails: logEntry.moveDetails,
+                  hazardDetails: logEntry.hazardDetails,
                   action_name: logEntry.action_name,
                   result: logEntry.result,
                   timestamp: new Date(),
@@ -7930,6 +7932,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               devastating_wounds_applied?: boolean;
               weaponName?: string;
               shootDetails?: Array<Record<string, unknown>>;
+              hazardDetails?: Array<Record<string, unknown>>;
               action_name?: string;
               reward?: number;
               is_ai_action?: boolean;
@@ -7981,6 +7984,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                     weaponName: logEntry.weaponName, // MULTIPLE_WEAPONS_IMPLEMENTATION.md
                     targetUnitType: logEntry.targetUnitType,
                     shootDetails: logEntry.shootDetails,
+                    hazardDetails: logEntry.hazardDetails,
                     result: logEntry.result,
                     action_name: logEntry.action_name,
                     reward: logEntry.reward,
@@ -8279,6 +8283,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   devastating_wounds_applied?: boolean;
                   weaponName?: string;
                   shootDetails?: Array<Record<string, unknown>>;
+                  hazardDetails?: Array<Record<string, unknown>>;
                   action_name?: string;
                   reward?: number;
                   is_ai_action?: boolean;
@@ -8330,6 +8335,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                         weaponName: logEntry.weaponName, // MULTIPLE_WEAPONS_IMPLEMENTATION.md
                         targetUnitType: logEntry.targetUnitType,
                         shootDetails: logEntry.shootDetails,
+                        hazardDetails: logEntry.hazardDetails,
                         result: logEntry.result,
                         action_name: logEntry.action_name,
                         reward: logEntry.reward,

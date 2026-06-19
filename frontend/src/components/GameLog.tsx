@@ -311,7 +311,7 @@ export const GameLog: React.FC<GameLogProps> = ({
     setRuleDescription(
       descriptions,
       "HAZARD",
-      "Roll one D6: on a 1-2, the model suffers 1 (or 3 if it is a MONSTER or VEHICLE) Mortal Wound.",
+      "Roll one D6 for each model in the unit: on a 1-2, the unit suffers 1 (or 3 if it is a MONSTER or VEHICLE) Mortal Wound.",
       false
     );
 
@@ -521,7 +521,8 @@ export const GameLog: React.FC<GameLogProps> = ({
                 >
                   <div className="game-log-entry__single-line">
                     {((event.shootDetails && event.shootDetails.length > 0) ||
-                      (event.moveDetails && event.moveDetails.length > 0)) && (
+                      (event.moveDetails && event.moveDetails.length > 0) ||
+                      (event.hazardDetails && event.hazardDetails.length > 0)) && (
                       <button
                         type="button"
                         className="game-log-entry__expand-btn"
@@ -650,6 +651,29 @@ export const GameLog: React.FC<GameLogProps> = ({
                                 className="game-log-entry__shot-detail-row"
                               >
                                 {`Unit ${squadId} # Model ${modelIdx} ${verb} from (${m.fromCol},${m.fromRow}) to (${m.toCol},${m.toRow})`}
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                    )}
+                  {expandedEntries.has(event.id) &&
+                    event.hazardDetails &&
+                    event.hazardDetails.length > 0 && (
+                      <div className="game-log-entry__shot-details">
+                        {(() => {
+                          const all = event.hazardDetails!;
+                          const seen = new Map<string, number>();
+                          return all.map((h, i) => {
+                            const [squadId, modelIdx] = h.modelId.split("#");
+                            const occ = (seen.get(h.modelId) ?? 0) + 1;
+                            seen.set(h.modelId, occ);
+                            return (
+                              <div
+                                key={`${h.modelId}#mw${occ}`}
+                                className="game-log-entry__shot-detail-row"
+                              >
+                                {`${i + 1}/${all.length} | Unit ${squadId} # Model ${modelIdx} - 1 MW at (${h.col},${h.row})${h.died ? " 💀" : ""}`}
                               </div>
                             );
                           });

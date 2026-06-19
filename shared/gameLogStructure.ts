@@ -63,6 +63,7 @@ export interface BaseLogEntry {
   endHex?: string;
   shootDetails?: ShootDetail[];
   moveDetails?: MoveDetail[];
+  hazardDetails?: HazardDetail[];
   weaponName?: string; // MULTIPLE_WEAPONS_IMPLEMENTATION.md
 }
 
@@ -110,6 +111,17 @@ export interface MoveDetail {
   fromRow: number;
   toCol: number;
   toRow: number;
+}
+
+/**
+ * Hazard detail structure : attribution par-figurine des mortal wounds d'un Desperate
+ * Escape (06.02). Affiche en expand/collapse quelle fig a encaissé chaque MW.
+ */
+export interface HazardDetail {
+  modelId: string;
+  col: number;
+  row: number;
+  died: boolean;
 }
 
 /**
