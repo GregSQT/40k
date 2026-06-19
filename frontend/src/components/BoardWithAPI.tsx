@@ -4556,7 +4556,8 @@ export const BoardWithAPI: React.FC = () => {
         </div>
       )}
 
-      {/* Game Log Component */}
+      {/* Game Log Component — masqué en PvP pendant la phase de déploiement */}
+      {!(gameMode === "pvp" && apiProps.gameState?.phase === "deployment") && (
       <ErrorBoundary fallback={<div>Failed to load game log</div>}>
         <div className="game-log-with-illustration">
           {displayedIllustrationUnit ? (
@@ -4587,6 +4588,7 @@ export const BoardWithAPI: React.FC = () => {
           </div>
         </div>
       </ErrorBoundary>
+      )}
 
       <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
         <UnitStatusTablePlayer1WithTutorial
