@@ -28,6 +28,7 @@ import { drawMoveStatusBadge, type MoveStatusKind } from "../utils/moveStatusBad
 import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 import {
   getHpBarWidthBase,
+  getIconDiameterRatio,
   getNonRoundBasePixelLayout,
   getNonRoundIconRadius,
   getSquareCornerRadiusPx,
@@ -1092,8 +1093,6 @@ export class UnitRenderer {
       unitsAttacked,
     } = this.props;
 
-    const unitIconScale = unit.ICON_SCALE || ICON_SCALE;
-
     if (unit.ICON) {
       try {
         // Use red border icon for Player 2 units
@@ -1106,15 +1105,9 @@ export class UnitRenderer {
           isPreview ? { resourceOptions: { crossorigin: "anonymous" } } : undefined
         );
 
-        const displayIcon = resolveBaseSizeForUnitDisplay(unit);
-        const baseSizeIcon = displayIcon > 1 ? displayIcon : undefined;
         const nonRoundIconR = getNonRoundIconRadius(unit, HEX_RADIUS);
-        const iconDiameter =
-          nonRoundIconR != null
-            ? nonRoundIconR * 2
-            : baseSizeIcon
-              ? baseSizeIcon * 1.5 * HEX_RADIUS
-              : HEX_RADIUS * unitIconScale;
+        // Source unique : ratio partagé (cf. getIconDiameterRatio), × HEX_RADIUS.
+        const iconDiameter = getIconDiameterRatio(unit, ICON_SCALE) * HEX_RADIUS;
 
         const sprite = new PIXI.Sprite(texture);
         sprite.anchor.set(0.5);

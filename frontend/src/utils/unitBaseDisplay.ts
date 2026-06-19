@@ -137,3 +137,21 @@ export function getNonRoundIconRadius(unit: Unit, HEX_RADIUS: number): number | 
   const nr = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
   return nr ? nr.iconRadius : null;
 }
+
+/**
+ * Ratio diamètre d'icône / HEX_RADIUS (source unique du dimensionnement d'icône).
+ * Le diamètre pixel = ce ratio × HEX_RADIUS. Permet de reproduire à l'identique la
+ * taille du board ailleurs (ex. panneau de déploiement) en remplaçant HEX_RADIUS par
+ * une constante de calibrage. ``iconScaleFallback`` = ICON_SCALE global si l'unité n'en a pas.
+ */
+export function getIconDiameterRatio(unit: Unit, iconScaleFallback: number): number {
+  const nonRoundIconR = getNonRoundIconRadius(unit, 1);
+  if (nonRoundIconR != null) {
+    return nonRoundIconR * 2;
+  }
+  const displayIcon = resolveBaseSizeForUnitDisplay(unit);
+  if (displayIcon > 1) {
+    return displayIcon * 1.5;
+  }
+  return unit.ICON_SCALE || iconScaleFallback;
+}

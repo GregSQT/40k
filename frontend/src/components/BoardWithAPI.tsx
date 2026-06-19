@@ -42,6 +42,7 @@ import { useGameLog } from "../hooks/useGameLog";
 import type { GamePhase, GameState, PlayerId, TargetPreview, Unit } from "../types";
 import type { DeploymentState } from "../types/game";
 import { resolveBaseSizeForUnitDisplay } from "../utils/hexFootprint";
+import { getIconDiameterRatio } from "../utils/unitBaseDisplay";
 import BoardPvp, { type MeasureModeState } from "./BoardPvp";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
@@ -2805,7 +2806,12 @@ export const BoardWithAPI: React.FC = () => {
                               occupied_hexes_by_model?: Record<string, unknown>;
                               models_meta_by_model?: Record<
                                 string,
-                                { ICON?: string; BASE_SIZE?: number | [number, number] }
+                                {
+                                  ICON?: string;
+                                  BASE_SIZE?: number | [number, number];
+                                  BASE_SHAPE?: string;
+                                  ICON_SCALE?: number;
+                                }
                               >;
                             }
                           >
@@ -2819,14 +2825,21 @@ export const BoardWithAPI: React.FC = () => {
                     // les escouades hétérogènes ; sinon repli métier sur l'icône d'unité.
                     const iconForModel = (modelId: string): string =>
                       ucEntry?.models_meta_by_model?.[modelId]?.ICON ?? unit.ICON;
-                    // Taille d'icône = vraie taille du socle (BASE_SIZE = rayon mm).
-                    // Référence : socle 32mm (BASE_SIZE 16) -> 36px. Bornes 24..60px.
+                    // Taille d'icône = même ratio que le board (source unique
+                    // getIconDiameterRatio), avec un HEX_RADIUS fictif de calibrage tel que
+                    // l'infanterie standard ≈ 36px. Bornes optionnelles 24..60px.
+                    const DEPLOY_ICON_HEX_RADIUS = 3;
+                    const ICON_SCALE_GLOBAL = 1.2; // = board_config.display.icon_scale
                     const iconPxForModel = (modelId: string): number => {
-                      const baseSize = resolveBaseSizeForUnitDisplay({
-                        BASE_SIZE:
-                          ucEntry?.models_meta_by_model?.[modelId]?.BASE_SIZE ?? unit.BASE_SIZE,
-                      });
-                      const px = Math.round((36 * baseSize) / 16);
+                      const meta = ucEntry?.models_meta_by_model?.[modelId];
+                      const figUnit = {
+                        BASE_SIZE: meta?.BASE_SIZE ?? unit.BASE_SIZE,
+                        BASE_SHAPE: meta?.BASE_SHAPE ?? unit.BASE_SHAPE,
+                        ICON_SCALE: meta?.ICON_SCALE ?? unit.ICON_SCALE,
+                      } as Unit;
+                      const px = Math.round(
+                        getIconDiameterRatio(figUnit, ICON_SCALE_GLOBAL) * DEPLOY_ICON_HEX_RADIUS
+                      );
                       return settings.deployIconBaseSizeBounded
                         ? Math.max(24, Math.min(60, px))
                         : px;

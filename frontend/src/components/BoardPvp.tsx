@@ -9652,6 +9652,10 @@ export default function Board({
               height: scaledBoardHeight ? `${scaledBoardHeight}px` : undefined,
               minWidth: fitBoardWidth ? `${fitBoardWidth}px` : undefined,
               minHeight: fitBoardHeight ? `${fitBoardHeight}px` : undefined,
+              // ``transform: scale()`` rétrécit le board visuellement mais lui laisse son empreinte
+              // pleine taille dans le layout → le bas de l'emplacement d'origine resterait visible (fond
+              // sombre). En mode fit (fitScale < 1) on clippe cette empreinte à la taille réduite.
+              overflow: fitScale < 1 ? "hidden" : undefined,
             }}
           >
             <div
