@@ -1,0 +1,64 @@
+{
+  "primary_objectives": ["objectives_control"],
+  "deployment_zone": "mc1",
+  "deployment_type": "active",
+  "wall_ref": "walls-mc1.json",
+  "terrain_ref": "terrain-mc1.json",
+  "units": [
+    { "id": 101, "unit_type": "WingedTyranidPrime", "player": 2, "col": 95,  "row": 130 },
+    { "id": 102, "unit_type": "Neurotyrant",         "player": 2, "col": 87,  "row": 197 },
+    { "id": 103, "unit_type": "Psychophage",          "player": 2, "col": 18,  "row": 54 },
+    { "id": 104, "unit_type": "ScreamerKiller",       "player": 2, "col": 145,  "row": 90 },
+    { "id": 105, "unit_type": "RipperSwarm",          "player": 2, "col": 20,   "row": 160 },
+    { "id": 106, "unit_type": "RipperSwarm",          "player": 2, "col": 8,   "row": 200 },
+    { "id": 107, "unit_type": "VonRyanLeaper",        "player": 2, "col": 36,  "row": 53 },
+    { "id": 108, "unit_type": "VonRyanLeaper",        "player": 2, "col": 25,  "row": 132 },
+    {
+      "id": 110, "unit_type": "Barbgaunt", "player": 2, "col": 44, "row": 46,
+      "models": [
+        { "col": 44, "row": 46 },
+        { "col": 50, "row": 46 },
+        { "col": 56, "row": 46 },
+        { "col": 62, "row": 46 },
+        { "col": 38, "row": 46 }
+      ]
+    },
+    {
+      "id": 112, "unit_type": "Termagant", "player": 2, "col": 83, "row": 98,
+      "models": [
+        { "col": 83, "row": 98 },
+        { "col": 83, "row": 104 },
+        { "col": 83, "row": 110 },
+        { "col": 83, "row": 116 },
+        { "col": 89, "row": 98 },
+        { "col": 89, "row": 104 },
+        { "col": 89, "row": 110 },
+        { "col": 89, "row": 116 },
+        { "col": 95, "row": 98 },
+        { "col": 95, "row": 104 },
+        { "col": 95, "row": 110 },
+        { "col": 95, "row": 116 },
+        { "col": 101, "row": 98 },
+        { "col": 101, "row": 104 },
+        { "col": 101, "row": 110 },
+        { "col": 101, "row": 116 },
+        { "col": 107, "row": 98 },
+        { "col": 107, "row": 104 },
+        { "col": 107, "row": 110 },
+        { "col": 107, "row": 116 }
+      ]
+    },
+    {
+      "id": 116, "unit_type": "Barbgaunt", "player": 2, "col": 110, "row": 3,
+      "models": [
+        { "col": 110, "row": 3 },
+        { "col": 110, "row": 8 },
+        { "col": 110, "row": 13 },
+        { "col": 110, "row": 18 },
+        { "col": 110, "row": 23 },
+        { "col": 110, "row": 28 },
+        { "col": 110, "row": 33 }
+      ]
+    }
+  ]
+}
