@@ -29,7 +29,9 @@ export class HellblasterSergeant extends TroopRangeElite {
   static CC_WEAPONS = getWeapons(HellblasterSergeant.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [];
+  static UNIT_RULES = [
+    { ruleId: "sergeant", displayName: "Sergeant" },
+  ];
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [

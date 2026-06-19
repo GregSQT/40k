@@ -681,6 +681,9 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
             "ICON_SCALE": unit.get("ICON_SCALE"),
             "BASE_SHAPE": unit.get("BASE_SHAPE"),
             "BASE_SIZE": unit.get("BASE_SIZE"),
+            # role de la figurine (leader/support/sergeant/special_weapon/None) :
+            # exposé au frontend pour le tri d'affichage du menu de déploiement.
+            "role": _derive_model_role(require_key(unit, "UNIT_RULES")),
         }
         models_meta = {
             mid: {
@@ -689,6 +692,7 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
                 "ICON_SCALE": models_cache[mid]["ICON_SCALE"],
                 "BASE_SHAPE": models_cache[mid]["BASE_SHAPE"],
                 "BASE_SIZE": models_cache[mid]["BASE_SIZE"],
+                "role": models_cache[mid]["role"],
             }
             for mid in squad_models.get(unit_id, [])  # get allowed
             if mid in models_cache

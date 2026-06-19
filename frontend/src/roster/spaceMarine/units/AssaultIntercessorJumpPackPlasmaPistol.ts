@@ -23,7 +23,9 @@ export class AssaultIntercessorJumpPackPlasmaPistol extends TroopMeleeTroop {
   static CC_WEAPONS = getWeapons(AssaultIntercessorJumpPackPlasmaPistol.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "charge_impact", displayName: "Hammer of wrath" }];
+  static UNIT_RULES = [
+    { ruleId: "special_weapon", displayName: "Special Weapon" },
+    { ruleId: "charge_impact", displayName: "Hammer of wrath" }];
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
   static RULES_STATUS = { charge_impact: 2 };
 

@@ -8062,6 +8062,12 @@ export default function Board({
           (isSquadGhost && mode === "squadModelMove") || (isDeployGhost && isDeploymentMove)
             ? modelIds.map((mid) => movePreviewHiddenModelIds.has(String(mid)))
             : modelIds.map((mid) => hiddenModelIds.has(String(mid)));
+        // Ghost par-figurine : la fig en cours de placement (active) est rendue atténuée
+        // à sa position d'origine pendant le move/déploiement par figurine.
+        const modelGhost: boolean[] =
+          (isSquadGhost || isDeployGhost) && effectivePerModelPlan?.activeModelId
+            ? modelIds.map((mid) => mid === effectivePerModelPlan.activeModelId)
+            : [];
         const [anchorCenterX, anchorCenterY] = modelCenters[0];
 
         // Skip units that are being previewed elsewhere
@@ -8200,6 +8206,7 @@ export default function Board({
           modelMetas,
           modelHps,
           modelHidden: isMoveOriginGhost ? [] : modelHidden,
+          modelGhost,
           hpBarPerModel,
           statusBadgePerModel,
           app,

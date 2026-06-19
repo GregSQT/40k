@@ -25,6 +25,7 @@ export class GreyHunterPackLeader extends TroopMeleeElite {
 
   // UNIT RULES
   static UNIT_RULES = [
+    { ruleId: "sergeant", displayName: "Pack Leader" },
     {
       ruleId: "cunning_hunters",
       displayName: "Cunning Hunters",

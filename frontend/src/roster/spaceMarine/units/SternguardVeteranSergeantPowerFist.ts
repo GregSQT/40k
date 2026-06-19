@@ -23,6 +23,8 @@ export class SternguardVeteranSergeantPowerFist extends TroopMeleeElite {
   static CC_WEAPON_CODES = ["close_combat_weapon"];
   static CC_WEAPONS = getWeapons(SternguardVeteranSergeantPowerFist.CC_WEAPON_CODES);
 
+
+
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
     { keywordId: "infantry" },

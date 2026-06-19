@@ -22,6 +22,10 @@ export class BladeguardVeteranSergeant extends TroopMeleeTroop {
   static CC_WEAPON_CODES = ["master_crafted_power_weapon"];
   static CC_WEAPONS = getWeapons(BladeguardVeteranSergeant.CC_WEAPON_CODES);
 
+  // UNIT RULES
+  static UNIT_RULES = [
+    { ruleId: "sergeant", displayName: "Sergeant" },
+  ];
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
     { keywordId: "infantry" },

@@ -27,7 +27,10 @@ export class AssaultIntercessorJumpPackSergeantPowerFistHandFlamer extends Troop
   );
 
   // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "charge_impact", displayName: "Hammer of wrath" }];
+  static UNIT_RULES = [
+    { ruleId: "sergeant", displayName: "Sergeant" },
+    { ruleId: "charge_impact", displayName: "Hammer of wrath" },
+  ];
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
   static RULES_STATUS = { charge_impact: 2 };
 

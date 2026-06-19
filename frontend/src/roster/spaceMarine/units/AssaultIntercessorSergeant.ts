@@ -24,6 +24,7 @@ export class AssaultIntercessorSergeant extends TroopMeleeElite {
 
   // UNIT RULES
   static UNIT_RULES = [
+    { ruleId: "sergeant", displayName: "Sergeant" },
     {
       ruleId: "targeted_intercession",
       displayName: "Targeted Intercession",

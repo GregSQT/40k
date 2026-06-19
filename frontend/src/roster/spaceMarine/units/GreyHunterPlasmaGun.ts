@@ -25,6 +25,7 @@ export class GreyHunterPlasmaGun extends TroopRangeElite {
 
   // UNIT RULES
   static UNIT_RULES = [
+    { ruleId: "special_weapon", displayName: "Special Weapon" },
     {
       ruleId: "cunning_hunters",
       displayName: "Cunning Hunters",

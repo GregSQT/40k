@@ -24,6 +24,7 @@ export class BloodClawPackLeader extends TroopMeleeTroop {
 
   // UNIT RULES
   static UNIT_RULES = [
+    { ruleId: "sergeant", displayName: "Pack Leader" },
     {
       ruleId: "charge_after_advance",
       displayName: "Berserk Charge",

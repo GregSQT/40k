@@ -23,6 +23,11 @@ export class HeavyIntercessorHeavyBolter extends EliteRangeTroop {
   static CC_WEAPON_CODES = ["close_combat_weapon"];
   static CC_WEAPONS = getWeapons(HeavyIntercessorHeavyBolter.CC_WEAPON_CODES);
 
+  // UNIT RULES
+  static UNIT_RULES = [
+    { ruleId: "special_weapon", displayName: "Special Weapon" },
+  ];
+  
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
     { keywordId: "infantry" },

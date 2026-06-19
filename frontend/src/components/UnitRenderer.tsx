@@ -136,6 +136,13 @@ interface UnitRendererProps {
    */
   modelHidden?: boolean[];
   /**
+   * Flag "ghost" par figurine, aligné index-pour-index avec modelCenters.
+   * true → cette figurine est rendue en ghost (cercle + icône atténués) à sa
+   * position d'origine, pendant qu'elle est en cours de déplacement (move/déploiement
+   * par figurine). Les autres figs restent pleines.
+   */
+  modelGhost?: boolean[];
+  /**
    * true → une barre HP par figurine. false (défaut) → une barre agrégée par
    * escouade (figs non-character uniquement) ; les characters gardent leur barre.
    */
@@ -572,7 +579,9 @@ export class UnitRenderer {
       this.props.centerX = mx;
       this.props.centerY = my;
       const meta = modelMetas?.[i];
-      this.props.unit = meta ? ({ ...originalUnit, ...meta } as Unit) : originalUnit;
+      const figGhost = this.props.modelGhost?.[i] === true;
+      const figUnit = meta ? ({ ...originalUnit, ...meta } as Unit) : originalUnit;
+      this.props.unit = figGhost ? ({ ...figUnit, isGhost: true } as Unit) : figUnit;
       // Échelle d'icône recalculée par figurine (dépend de BASE_SIZE / ICON_SCALE).
       const figDisplayBase = resolveBaseSizeForUnitDisplay(this.props.unit);
       const figBaseSize = figDisplayBase > 1 ? figDisplayBase : undefined;

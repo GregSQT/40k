@@ -23,6 +23,11 @@ export class ThunderWolfCavalryPlasma extends EliteMeleeElite {
   static CC_WEAPON_CODES = ["wolf_guard_weapon", "teeth_and_claws"];
   static CC_WEAPONS = getWeapons(ThunderWolfCavalryPlasma.CC_WEAPON_CODES);
 
+  // UNIT RULES
+  static UNIT_RULES = [
+    { ruleId: "special_weapon", displayName: "Special Weapon" },
+  ];
+  
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
     { keywordId: "mounted" },

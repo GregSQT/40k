@@ -23,6 +23,11 @@ export class IntercessorSergeant extends TroopMeleeElite {
   static CC_WEAPON_CODES = ["intercessor_sergeant_power_fist"];
   static CC_WEAPONS = getWeapons(IntercessorSergeant.CC_WEAPON_CODES);
 
+// UNIT RULES
+  static UNIT_RULES = [
+    { ruleId: "sergeant", displayName: "Sergeant" },
+  ];
+
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
     { keywordId: "infantry" },

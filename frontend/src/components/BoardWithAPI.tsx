@@ -2817,15 +2817,33 @@ export const BoardWithAPI: React.FC = () => {
                                   BASE_SIZE?: number | [number, number];
                                   BASE_SHAPE?: string;
                                   ICON_SCALE?: number;
+                                  role?: string | null;
                                 }
                               >;
                             }
                           >
                         | undefined
                     )?.[String(unit.id)];
-                    const figModelIds = ucEntry?.occupied_hexes_by_model
-                      ? Object.keys(ucEntry.occupied_hexes_by_model)
-                      : [String(unit.id)];
+                    // Ordre d'affichage gauche→droite : leader → support → sergeant
+                    // → special_weapon → figurine de base. role par figurine exposé
+                    // par le backend dans models_meta_by_model.
+                    const DEPLOY_ROLE_ORDER: Record<string, number> = {
+                      leader: 0,
+                      support: 1,
+                      sergeant: 2,
+                      special_weapon: 3,
+                    };
+                    const roleRank = (modelId: string): number => {
+                      const role = ucEntry?.models_meta_by_model?.[modelId]?.role;
+                      return role != null && role in DEPLOY_ROLE_ORDER
+                        ? DEPLOY_ROLE_ORDER[role]
+                        : 4;
+                    };
+                    const figModelIds = (
+                      ucEntry?.occupied_hexes_by_model
+                        ? Object.keys(ucEntry.occupied_hexes_by_model)
+                        : [String(unit.id)]
+                    ).sort((a, b) => roleRank(a) - roleRank(b));
                     const figCount = figModelIds.length;
                     // Icône par figurine : models_meta_by_model n'est exposé que pour
                     // les escouades hétérogènes ; sinon repli métier sur l'icône d'unité.
