@@ -2495,18 +2495,25 @@ export default function Board({
           orientation,
         },
       };
-    } else if (mode === "squadModelMove" && squadMovePlan) {
-      const unitId = squadMovePlan.unitId;
+    } else if ((mode === "squadModelMove" || isDeploymentMove) && effectivePerModelPlan) {
+      const planForHidden = effectivePerModelPlan;
+      const unitId = planForHidden.unitId;
       const occupied = (
         gameState?.units_cache as
           | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
           | undefined
       )?.[String(unitId)]?.occupied_hexes_by_model;
-      if (occupied) {
+      // Déploiement : escouade provisoire absente de ``units_cache`` → base = positions du plan.
+      const baseEntries: Array<[string, [number, number]]> = occupied
+        ? Object.entries(occupied)
+        : Object.entries(planForHidden.models).map(
+            ([m, p]) => [m, [p.col, p.row]] as [string, [number, number]]
+          );
+      if (baseEntries.length > 0) {
         // Position finale par fig : provisoire (plan) si présente, sinon position actuelle.
         const modelPositions: Record<string, [number, number]> = {};
-        for (const [mid, pos] of Object.entries(occupied)) {
-          const planPos = squadMovePlan.models[mid];
+        for (const [mid, pos] of baseEntries) {
+          const planPos = planForHidden.models[mid];
           modelPositions[mid] = planPos ? [planPos.col, planPos.row] : pos;
         }
         req = {
@@ -2562,7 +2569,7 @@ export default function Board({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [phase, mode, movePreview, squadMovePlan, gameState?.units_cache]);
+  }, [phase, mode, isDeploymentMove, movePreview, effectivePerModelPlan, gameState?.units_cache]);
 
   // Prévisualisation LoS (move) : uniquement depuis onMouseMove = position de l’icône, pas l’hex sous le curseur
   useEffect(() => {
@@ -2571,7 +2578,7 @@ export default function Board({
     // En mode plan par-figurine (move OU charge), un effet dédié gère le preview ; ce gros effet de
     // preview LoS au survol NE doit PAS tourner (coûteux par mouvement + inutile pour la charge,
     // dont la pose se fait au clic sur l'hex).
-    if (mode === "squadModelMove" || mode === "chargeModelMove") return;
+    if (mode === "squadModelMove" || mode === "chargeModelMove" || isDeploymentMove) return;
 
     const HEX_RADIUS_H = boardConfig.hex_radius;
     const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
@@ -3426,6 +3433,7 @@ export default function Board({
     phase,
     effectivePhase,
     mode,
+    isDeploymentMove,
     movePreview,
     selectedUnitId,
     units,
@@ -5091,7 +5099,9 @@ export default function Board({
   // entrée sans selection), couper TOUT le preview (fantome curseur + LoS + ligne guide + tooltip).
   // Le preview (ghost + LoS) n'existe QUE pendant qu'une fig est en cours de placement.
   useEffect(() => {
-    if (mode !== "squadModelMove") return;
+    if (mode !== "squadModelMove" && !isDeploymentMove) return;
+    // Déploiement : même machinerie per-fig (alias déploiement-aware, = refs squad en mode move).
+    const squadMovePlan = effectivePerModelPlan;
     if (squadMovePlan?.activeModelId) return; // une fig active → preview autorisé
     if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
       hoverSpriteRef.current.visible = false;
@@ -5164,8 +5174,10 @@ export default function Board({
     };
   }, [
     mode,
-    squadMovePlan?.activeModelId,
-    squadMovePlan?.unitId,
+    isDeploymentMove,
+    effectivePerModelPlan,
+    effectivePerModelPlan?.activeModelId,
+    effectivePerModelPlan?.unitId,
     units,
     unitsBoardLayoutKey,
     gameState?.turn,
@@ -5176,8 +5188,14 @@ export default function Board({
   // click handler (shouldConfirmAtIcon). Complètement indépendant de active_movement_unit.
   // S'active uniquement quand mode === "squadModelMove" && activeModelId est set.
   useEffect(() => {
-    if (mode !== "squadModelMove") return;
+    if (mode !== "squadModelMove" && !isDeploymentMove) return;
     if (!boardConfig) return;
+    // Déploiement PvP "active" : réutilise la même machinerie per-fig que le move (ghost curseur,
+    // cohésion, voile, LoS, badge caché). Les alias ``effectivePerModel*`` valent les refs squad en
+    // mode move (zéro régression) et basculent sur le plan/pool de déploiement en ``deploymentMove``.
+    const squadMovePlan = effectivePerModelPlan;
+    const squadMovePlanRef = effectivePerModelPlanRef;
+    const squadMoveModelPoolRef = effectivePerModelPoolRef;
     const activeModelId = squadMovePlan?.activeModelId ?? null;
     if (!activeModelId) return; // l'effet "cut preview" au-dessus gère le cas !activeModelId
 
@@ -5619,13 +5637,20 @@ export default function Board({
           | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
           | undefined
       )?.[String(squadUnit.id)]?.occupied_hexes_by_model;
-      if (!occ) return null;
+      // Déploiement : l'escouade provisoire n'est pas dans ``units_cache`` → base = positions du plan.
+      const planModels = squadMovePlanRef.current?.models;
+      const baseEntries: Array<[string, [number, number]]> = occ
+        ? Object.entries(occ)
+        : planModels
+          ? Object.entries(planModels).map(([m, p]) => [m, [p.col, p.row]] as [string, [number, number]])
+          : [];
+      if (baseEntries.length === 0) return null;
       const mp: Record<string, [number, number]> = {};
-      for (const [mid, pos] of Object.entries(occ)) {
+      for (const [mid, pos] of baseEntries) {
         if (mid === activeModelId) {
           mp[mid] = [col, row];
         } else {
-          const planPos = squadMovePlanRef.current?.models?.[mid];
+          const planPos = planModels?.[mid];
           mp[mid] = planPos ? [planPos.col, planPos.row] : pos;
         }
       }
@@ -5777,9 +5802,11 @@ export default function Board({
     };
   }, [
     mode,
-    squadMovePlan?.activeModelId,
-    squadMovePlan?.unitId,
-    squadMovePlan?.models,
+    isDeploymentMove,
+    effectivePerModelPlan,
+    effectivePerModelPlan?.activeModelId,
+    effectivePerModelPlan?.unitId,
+    effectivePerModelPlan?.models,
     boardConfig,
     gameConfig,
     units,
@@ -5788,7 +5815,7 @@ export default function Board({
     gameState?.turn,
     gameState?.episode_steps,
     gameState?.units_cache,
-    squadMoveModelPoolRef?.current,
+    effectivePerModelPoolRef,
     hideIndicators,
   ]);
 
@@ -7997,7 +8024,7 @@ export default function Board({
         // les positions provisoires (movePreviewHiddenModelIds) ; sinon le badge resterait figé sur la
         // position actuelle (unit.hidden_models) et n'apparaîtrait jamais au survol.
         const modelHidden: boolean[] =
-          isSquadGhost && mode === "squadModelMove"
+          (isSquadGhost && mode === "squadModelMove") || (isDeployGhost && isDeploymentMove)
             ? modelIds.map((mid) => movePreviewHiddenModelIds.has(String(mid)))
             : modelIds.map((mid) => hiddenModelIds.has(String(mid)));
         const [anchorCenterX, anchorCenterY] = modelCenters[0];

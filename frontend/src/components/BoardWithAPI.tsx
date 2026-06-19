@@ -1675,6 +1675,25 @@ export const BoardWithAPI: React.FC = () => {
     1: false,
     2: false,
   });
+  // À chaque changement de déployeur courant : déplier le roster actif, replier l'autre.
+  // Pattern « previous value » (React) — réinitialise pendant le rendu, sans effet ni double rendu.
+  // Le toggle manuel reste prioritaire jusqu'au prochain changement de déployeur.
+  const [lastDeployer, setLastDeployer] = useState<PlayerId | null>(null);
+  const currentDeployerForCollapse =
+    apiProps.gameState?.phase === "deployment" &&
+    apiProps.gameState?.deployment_type === "active" &&
+    apiProps.gameState?.deployment_state
+      ? (Number(apiProps.gameState.deployment_state.current_deployer) as PlayerId)
+      : null;
+  if (currentDeployerForCollapse !== lastDeployer) {
+    setLastDeployer(currentDeployerForCollapse);
+    if (currentDeployerForCollapse !== null) {
+      setDeploymentRosterCollapsed({
+        1: currentDeployerForCollapse !== 1,
+        2: currentDeployerForCollapse !== 2,
+      });
+    }
+  }
   const [deploymentTooltip, setDeploymentTooltip] = useState<{
     visible: boolean;
     text: string;

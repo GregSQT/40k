@@ -2569,7 +2569,10 @@ export const drawBoard = (
       // ``availableCells`` contient les mêmes hexes → les redessiner ici en disques rayon-hex crée la
       // couche festonnée parallèle (la vraie cause du « toujours pareil »). On la supprime ici.
       const cellsForHighlight =
-        moveOrAdvanceNoAnchors || mode === "chargeModelMove" || isPerFigChargeLikeMove
+        moveOrAdvanceNoAnchors ||
+        mode === "chargeModelMove" ||
+        mode === "deploymentMove" ||
+        isPerFigChargeLikeMove
           ? []
           : availableCells;
       drawGroup(cellsForHighlight, availableCellsDrawColor, 0.4, false, availableCellCircleR);
