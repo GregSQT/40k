@@ -1,6 +1,7 @@
 // frontend/src/components/SettingsMenu.tsx
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
+import type { BoardDisplayMode } from "./BoardPvp";
 
 interface SettingsMenuProps {
   isOpen: boolean;
@@ -18,8 +19,8 @@ interface SettingsMenuProps {
   onToggleAutoSelectWeapon: (value: boolean) => void;
   hpBarPerModel?: boolean;
   onToggleHpBarPerModel?: (value: boolean) => void;
-  fitBoardToScreen?: boolean;
-  onToggleFitBoardToScreen?: (value: boolean) => void;
+  boardDisplayMode?: BoardDisplayMode;
+  onSetBoardDisplayMode?: (value: BoardDisplayMode) => void;
   statusBadgePerModel?: boolean;
   onToggleStatusBadgePerModel?: (value: boolean) => void;
   retreatAlertEnabled?: boolean;
@@ -117,8 +118,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   onToggleAutoSelectWeapon,
   hpBarPerModel = false,
   onToggleHpBarPerModel,
-  fitBoardToScreen = false,
-  onToggleFitBoardToScreen,
+  boardDisplayMode = "full",
+  onSetBoardDisplayMode,
   statusBadgePerModel = false,
   onToggleStatusBadgePerModel,
   retreatAlertEnabled = true,
@@ -138,7 +139,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     showDebugLoS: boolean;
     autoSelectWeapon: boolean;
     hpBarPerModel: boolean;
-    fitBoardToScreen: boolean;
+    boardDisplayMode: BoardDisplayMode;
     statusBadgePerModel: boolean;
     retreatAlertEnabled: boolean;
     modeGuidesActivated: boolean;
@@ -151,7 +152,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     showDebugLoS,
     autoSelectWeapon,
     hpBarPerModel,
-    fitBoardToScreen,
+    boardDisplayMode,
     statusBadgePerModel,
     retreatAlertEnabled,
     modeGuidesActivated,
@@ -178,8 +179,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
       if (autoSelectWeapon !== s.autoSelectWeapon) onToggleAutoSelectWeapon(s.autoSelectWeapon);
       if (onToggleHpBarPerModel && hpBarPerModel !== s.hpBarPerModel)
         onToggleHpBarPerModel(s.hpBarPerModel);
-      if (onToggleFitBoardToScreen && fitBoardToScreen !== s.fitBoardToScreen)
-        onToggleFitBoardToScreen(s.fitBoardToScreen);
+      if (onSetBoardDisplayMode && boardDisplayMode !== s.boardDisplayMode)
+        onSetBoardDisplayMode(s.boardDisplayMode);
       if (onToggleStatusBadgePerModel && statusBadgePerModel !== s.statusBadgePerModel)
         onToggleStatusBadgePerModel(s.statusBadgePerModel);
       if (onToggleRetreatAlert && retreatAlertEnabled !== s.retreatAlertEnabled)
@@ -318,7 +319,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
 
           {(onToggleHpBarPerModel ||
             onToggleStatusBadgePerModel ||
-            onToggleFitBoardToScreen ||
+            onSetBoardDisplayMode ||
             onToggleDeployIconBaseSizeBounded) && (
             <CollapsibleSection title="Display">
               {onToggleHpBarPerModel && (
@@ -337,13 +338,40 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                   description="Activé : un badge (caché, fui, choc) sur chaque figurine concernée. Désactivé : un seul badge sur l'escouade (uniquement si toutes les figurines ont le statut)."
                 />
               )}
-              {onToggleFitBoardToScreen && (
-                <ToggleRow
-                  checked={fitBoardToScreen}
-                  onChange={onToggleFitBoardToScreen}
-                  label="Adapter le plateau à l'écran"
-                  description="Activé : le plateau est réduit pour être affiché en entier dans la hauteur de l'écran. Désactivé : le plateau est affiché à sa taille réelle et la page défile."
-                />
+              {onSetBoardDisplayMode && (
+                <div style={{ marginBottom: "16px" }}>
+                  <label
+                    style={{
+                      display: "block",
+                      cursor: "pointer",
+                      color: "#e5e7eb",
+                      marginBottom: "6px",
+                    }}
+                  >
+                    <span style={{ marginRight: "12px" }}>Affichage du plateau</span>
+                    <select
+                      value={boardDisplayMode}
+                      onChange={(e) => onSetBoardDisplayMode(e.target.value as BoardDisplayMode)}
+                      style={{
+                        backgroundColor: "#111827",
+                        color: "#e5e7eb",
+                        border: "1px solid #4b5563",
+                        borderRadius: "4px",
+                        padding: "4px 8px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <option value="full">Taille réelle (la page défile)</option>
+                      <option value="fit">Adapté à l'écran</option>
+                      <option value="window">Fenêtre navigable (molette/scroll)</option>
+                    </select>
+                  </label>
+                  <p style={{ color: "#9ca3af", fontSize: "14px", marginTop: "4px" }}>
+                    Taille réelle : plateau à sa taille, la page défile. Adapté : plateau réduit pour
+                    tenir entièrement dans l'écran. Fenêtre : plateau à sa taille dans une fenêtre
+                    limitée à l'écran, navigable à la molette ou à la barre de défilement.
+                  </p>
+                </div>
               )}
               {onToggleDeployIconBaseSizeBounded && (
                 <ToggleRow

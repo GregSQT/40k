@@ -43,7 +43,7 @@ import type { GamePhase, GameState, PlayerId, TargetPreview, Unit } from "../typ
 import type { DeploymentState } from "../types/game";
 import { resolveBaseSizeForUnitDisplay } from "../utils/hexFootprint";
 import { getIconDiameterRatio } from "../utils/unitBaseDisplay";
-import BoardPvp, { type MeasureModeState } from "./BoardPvp";
+import BoardPvp, { type BoardDisplayMode, type MeasureModeState } from "./BoardPvp";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
 import { SettingsMenu } from "./SettingsMenu";
@@ -2129,7 +2129,9 @@ export const BoardWithAPI: React.FC = () => {
     const showDebugLoSStr = localStorage.getItem("showDebugLoS");
     const autoSelectWeaponStr = localStorage.getItem("autoSelectWeapon");
     const hpBarPerModelStr = localStorage.getItem("hpBarPerModel");
-    const fitBoardToScreenStr = localStorage.getItem("fitBoardToScreen");
+    // Mode d'affichage du board. Migration de l'ancien booléen "fitBoardToScreen" : true → "fit".
+    const boardDisplayModeStr = localStorage.getItem("boardDisplayMode");
+    const legacyFitBoardToScreenStr = localStorage.getItem("fitBoardToScreen");
     // Migration one-shot : ancienne clé "hiddenBadgePerModel" → "statusBadgePerModel" (générique).
     const statusBadgePerModelStr =
       localStorage.getItem("statusBadgePerModel") ?? localStorage.getItem("hiddenBadgePerModel");
@@ -2148,7 +2150,11 @@ export const BoardWithAPI: React.FC = () => {
       autoSelectWeapon:
         canUseAutoWeaponSelection && (autoSelectWeaponStr ? JSON.parse(autoSelectWeaponStr) : true),
       hpBarPerModel: hpBarPerModelStr ? JSON.parse(hpBarPerModelStr) : false,
-      fitBoardToScreen: fitBoardToScreenStr ? JSON.parse(fitBoardToScreenStr) : false,
+      boardDisplayMode: (boardDisplayModeStr
+        ? JSON.parse(boardDisplayModeStr)
+        : legacyFitBoardToScreenStr && JSON.parse(legacyFitBoardToScreenStr)
+          ? "fit"
+          : "full") as BoardDisplayMode,
       statusBadgePerModel: statusBadgePerModelStr ? JSON.parse(statusBadgePerModelStr) : false,
       retreatAlertEnabled: retreatAlertEnabledStr ? JSON.parse(retreatAlertEnabledStr) : true,
       battleShockTestEnabled: battleShockTestEnabledStr
@@ -2205,9 +2211,9 @@ export const BoardWithAPI: React.FC = () => {
     localStorage.setItem("hpBarPerModel", JSON.stringify(value));
   };
 
-  const handleToggleFitBoardToScreen = (value: boolean) => {
-    setSettings((prev) => ({ ...prev, fitBoardToScreen: value }));
-    localStorage.setItem("fitBoardToScreen", JSON.stringify(value));
+  const handleSetBoardDisplayMode = (value: BoardDisplayMode) => {
+    setSettings((prev) => ({ ...prev, boardDisplayMode: value }));
+    localStorage.setItem("boardDisplayMode", JSON.stringify(value));
   };
 
   const handleToggleStatusBadgePerModel = (value: boolean) => {
@@ -5036,7 +5042,7 @@ export const BoardWithAPI: React.FC = () => {
             autoSelectWeapon={settings.autoSelectWeapon}
             hpBarPerModel={settings.hpBarPerModel}
             statusBadgePerModel={settings.statusBadgePerModel}
-            fitBoardToScreen={settings.fitBoardToScreen}
+            boardDisplayMode={settings.boardDisplayMode}
             deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
             objectivesOverride={objectivesOverride}
             measureMode={measureMode}
@@ -6178,8 +6184,8 @@ export const BoardWithAPI: React.FC = () => {
         onToggleAutoSelectWeapon={handleToggleAutoSelectWeapon}
         hpBarPerModel={settings.hpBarPerModel}
         onToggleHpBarPerModel={handleToggleHpBarPerModel}
-        fitBoardToScreen={settings.fitBoardToScreen}
-        onToggleFitBoardToScreen={handleToggleFitBoardToScreen}
+        boardDisplayMode={settings.boardDisplayMode}
+        onSetBoardDisplayMode={handleSetBoardDisplayMode}
         statusBadgePerModel={settings.statusBadgePerModel}
         onToggleStatusBadgePerModel={handleToggleStatusBadgePerModel}
         retreatAlertEnabled={settings.retreatAlertEnabled}

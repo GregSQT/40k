@@ -779,7 +779,7 @@ type BoardProps = {
   autoSelectWeapon?: boolean;
   hpBarPerModel?: boolean; // true → barre HP par figurine ; false → une barre par escouade (hors characters)
   statusBadgePerModel?: boolean; // true → badge de statut (caché/fui/choc) par figurine ; false → un seul badge si toute l'escouade a le statut
-  fitBoardToScreen?: boolean; // true → board réduit pour tenir entièrement dans la hauteur de l'écran ; false → pleine taille, la page scrolle
+  boardDisplayMode?: BoardDisplayMode; // "full" → pleine taille, la page scrolle ; "fit" → réduit pour tenir dans l'écran ; "window" → taille réelle dans une fenêtre limitée à l'écran, navigable (molette/scroll)
   /** Mode mesure (règle) : armed → 1er clic pose l’ancre ; clic droit = jonction ; 2e clic termine la ligne → armed. Sortie : bouton règle uniquement. */
   measureMode?: MeasureModeState;
   onMeasureHexCommit?: (col: number, row: number) => void;
@@ -797,6 +797,9 @@ const BOARD_ZOOM_DEFAULT = 1;
 // Marge verticale (px) réservée autour du board en mode « adapter à l'écran » — alignée sur le
 // ``calc(100vh - 40px)`` du viewport scrollable.
 const BOARD_FIT_VERTICAL_MARGIN = 40;
+// Mode d'affichage du board : "full" → pleine taille, la page scrolle ; "fit" → réduit pour tenir
+// entièrement dans l'écran ; "window" → taille réelle dans une fenêtre limitée à l'écran, navigable.
+export type BoardDisplayMode = "full" | "fit" | "window";
 const BOARD_ZOOM_MIN = 0.5;
 const BOARD_ZOOM_MAX = 2.5;
 const BOARD_ZOOM_SLIDER_STEP = 0.05;
@@ -1123,7 +1126,7 @@ export default function Board({
   autoSelectWeapon,
   hpBarPerModel,
   statusBadgePerModel,
-  fitBoardToScreen = false,
+  boardDisplayMode = "full",
   measureMode = { kind: "off" },
   onMeasureHexCommit,
   onMeasureJunctionCommit,
@@ -1641,7 +1644,7 @@ export default function Board({
   // la hauteur dispo. Vaut 1 quand le mode est OFF → toute la mécanique ci-dessous redevient identique.
   const [fitScale, setFitScale] = useState(1);
   useEffect(() => {
-    if (!fitBoardToScreen || !boardViewportSize) {
+    if (boardDisplayMode !== "fit" || !boardViewportSize) {
       setFitScale(1);
       return;
     }
@@ -1653,11 +1656,14 @@ export default function Board({
     compute();
     window.addEventListener("resize", compute);
     return () => window.removeEventListener("resize", compute);
-  }, [fitBoardToScreen, boardViewportSize]);
+  }, [boardDisplayMode, boardViewportSize]);
 
   // Échelle réellement appliquée au board = réduction « fit » × zoom manuel. Le zoom manuel multiplie
   // toujours par-dessus le fit. ``fitScale === 1`` → ``effectiveScale === boardZoom`` (comportement initial).
   const effectiveScale = fitScale * boardZoom;
+  // Board enfermé dans une fenêtre scrollable limitée à l'écran : mode "window" (taille réelle
+  // navigable) ou dès qu'on zoome au-delà de 1 (le pan a besoin d'un viewport fixe).
+  const isWindowedBoard = boardDisplayMode === "window" || boardZoom > BOARD_ZOOM_DEFAULT;
   const zoomPercent = Math.round(boardZoom * 100);
   // Empreinte « de base » sur la page = board fit-réduit (zoom exclu) ; le zoom scrolle dans cette fenêtre.
   const fitBoardWidth = boardViewportSize ? boardViewportSize.width * fitScale : undefined;
@@ -9635,10 +9641,11 @@ export default function Board({
             width: fitBoardWidth ? `${fitBoardWidth}px` : undefined,
             height: fitBoardHeight ? `${fitBoardHeight}px` : undefined,
             maxWidth: "100%",
-            // Au zoom par défaut : aucune limite de hauteur → board affiché en entier, c'est la page
-            // qui scrolle. La limite (viewport fixe + scroll interne pour le pan) n'a de sens qu'au zoom > 1.
-            maxHeight: boardZoom > BOARD_ZOOM_DEFAULT ? "calc(100vh - 40px)" : undefined,
-            overflow: boardZoom > BOARD_ZOOM_DEFAULT ? "auto" : "visible",
+            // Fenêtre limitée à l'écran avec scroll interne (molette/scrollbar/pan) dans 2 cas : mode
+            // "window" (board à taille réelle, navigable) ou dès qu'on zoome (> 1). Sinon (full/fit à
+            // zoom 1) : aucune limite → board affiché en entier, c'est la page qui scrolle.
+            maxHeight: isWindowedBoard ? "calc(100vh - 40px)" : undefined,
+            overflow: isWindowedBoard ? "auto" : "visible",
             lineHeight: 0,
             scrollbarGutter: "stable",
             cursor:
