@@ -4782,9 +4782,9 @@ export default function Board({
       const modelR = baseSz > 1 ? (baseSz * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
       const ringR = modelR * 1.25;
       const lineW = Math.max(1.5, HEX_RADIUS_H * 0.5);
-      // Charge : figs activables de l'unité active → voile vert (App.css). Pile-in/consolidation
-      // (phase fight) conservent le voile violet.
-      const ACTIVE_VEIL = phase === "charge" ? cssColorToNumber("--veil-green") : 0xa855f7;
+      // Charge et consolidation : figs activables de l'unité active → voile vert (App.css).
+      // (Le pile-in est traité à part plus bas : voile gris, pas de voile vert/violet.)
+      const ACTIVE_VEIL = cssColorToNumber("--veil-green");
       const byModel = (
         gameState as unknown as {
           units_cache?: Record<
@@ -4941,7 +4941,6 @@ export default function Board({
       if (chargeModelVeilOverlayRef.current === overlay) chargeModelVeilOverlayRef.current = null;
     };
   }, [
-    phase,
     perModelChargeLike,
     isPileInModelMove,
     activeChargeLikePlan,
