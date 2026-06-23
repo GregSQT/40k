@@ -1973,9 +1973,13 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     # PISTOL rule: Initialize _shooting_with_pistol to None for eligibility check
     # This ensures each unit starts with no PISTOL category restriction
     unit["_shooting_with_pistol"] = None
-    
+
+    _ep = game_state.get("episode_number", "?")
+    _tn = game_state.get("turn", "?")
+    _uid = str(unit["id"])
+
     # unit alive? (units_cache is source of truth)
-    if not is_unit_alive(str(unit["id"]), game_state):
+    if not is_unit_alive(_uid, game_state):
         return False
         
     # unit.player === current_player?
@@ -1992,9 +1996,14 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     if "units_fled" not in game_state:
         raise KeyError("game_state missing required 'units_fled' field")
     unit_id_str = str(unit["id"])
+    _has_advanced = unit_id_str in game_state.get("units_advanced", set())
+    _has_moved = unit_id_str in game_state.get("units_moved", set())
+    _has_fled = unit_id_str in game_state["units_fled"]
+    print(f"[SHOOT ELIG] E{_ep} T{_tn} unit={_uid} moved={_has_moved} advanced={_has_advanced} fled={_has_fled}")
     if unit_id_str in game_state["units_fled"] and not _unit_has_rule(unit, "shoot_after_flee"):
+        print(f"[SHOOT ELIG] E{_ep} T{_tn} unit={_uid} -> NOT ELIGIBLE (fled)")
         return False
-    
+
     # STEP 1: ELIGIBILITY CHECK
     # Check if unit is adjacent to enemy (melee range)
     is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
@@ -2017,8 +2026,10 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
         usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
         # weapon_available_pool NOT empty? -> CAN_SHOOT = true, else false
         can_shoot = len(usable_weapons) > 0
+        print(f"[SHOOT ELIG] E{_ep} T{_tn} unit={_uid} adjacent=True usable_weapons={len(usable_weapons)}/{len(weapon_available_pool)} can_shoot={can_shoot}")
         # If CAN_SHOOT = false -> ❌ Skip (no valid actions)
         if not can_shoot:
+            print(f"[SHOOT ELIG] E{_ep} T{_tn} unit={_uid} -> NOT ELIGIBLE (adjacent, no usable weapon)")
             return False
         unit["_can_shoot"] = can_shoot
         unit["_can_advance"] = can_advance
@@ -2033,6 +2044,7 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
         has_positive_rng = any(require_key(w, "RNG") > 0 for w in rng_weapons)
         unit["_can_advance"] = can_advance
         unit["_can_shoot"] = has_positive_rng
+        print(f"[SHOOT ELIG] E{_ep} T{_tn} unit={_uid} adjacent=False rng_weapons={len(rng_weapons)} can_shoot={has_positive_rng} (eligible via advance)")
         return True
 
 

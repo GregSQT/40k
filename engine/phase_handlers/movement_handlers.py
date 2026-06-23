@@ -1000,31 +1000,16 @@ def _attempt_movement_to_destination(
         ez_blk = get_engagement_zone(game_state)
         mover_player_int = int(require_key(unit, "player"))
         mover_id_str = str(require_key(unit, "id"))
-        mover_shape = unit["BASE_SHAPE"]
-        mover_bs_i = unit["BASE_SIZE"]
-        if ez_blk > 1 and mover_shape == "round":
-            req_blk = engagement_minimum_clearance_norm(ez_blk)
-            _dest_mover_xy = _hex_center(dest_col_int, dest_row_int)
+        if ez_blk >= 1:
             for eid, cache_entry in units_cache.items():
                 if str(eid) == mover_id_str:
                     continue
                 if int(require_key(cache_entry, "player")) == mover_player_int:
                     continue
-                if cache_entry["BASE_SHAPE"] != "round":
-                    continue
-                e_bs_i = cache_entry["BASE_SIZE"]
-                e_col = require_key(cache_entry, "col")
-                e_row = require_key(cache_entry, "row")
-                gap = euclidean_edge_clearance_round_round(
-                    dest_col_int,
-                    dest_row_int,
-                    mover_bs_i,
-                    e_col,
-                    e_row,
-                    e_bs_i,
-                    mover_center_xy=_dest_mover_xy,
-                )
-                if gap <= req_blk + 1e-6:
+                enemy_fp = cache_entry.get("occupied_hexes")
+                if not enemy_fp:
+                    enemy_fp = {(require_key(cache_entry, "col"), require_key(cache_entry, "row"))}
+                if min_distance_between_sets(candidate_fp, enemy_fp, max_distance=ez_blk) <= ez_blk:
                     blocking_eid = str(eid)
                     break
         return False, {
@@ -1281,21 +1266,10 @@ def _compute_mover_ez_forbidden_mask(
         [(0, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0)], dtype=np.int64
     )
 
-    req = engagement_minimum_clearance_norm(ez)
-    mover_is_round = (mover_shape == "round")
-
-    cs = np.arange(board_cols, dtype=np.float64)[:, None]
-    rs = np.arange(board_rows, dtype=np.float64)[None, :]
-    hex_width = 1.5
-    hex_height = float(np.sqrt(3.0))
-    xs = cs * hex_width + hex_width / 2.0
-    parity_shift = ((np.arange(board_cols, dtype=np.int64) & 1).astype(np.float64))[:, None]
-    ys = rs * hex_height + parity_shift * (hex_height / 2.0) + hex_height / 2.0
-
+    # Métrique d'engagement unifiée : empreinte hex uniquement (jamais euclidien).
     eng_bad = np.zeros((board_cols, board_rows), dtype=bool)
     enemy_list = enemy_items if enemy_items is not None else []
 
-    mover_r_norm = round_base_radius_norm(mover_bs_i) if mover_is_round else 0.0
     hex_mixed_mask = np.zeros((board_cols, board_rows), dtype=bool)
     has_hex_mixed = False
     for _, ce in enemy_list:
@@ -1309,25 +1283,16 @@ def _compute_mover_ez_forbidden_mask(
         model_positions = list(by_model.values()) if by_model else [
             (int(require_key(ce, "col")), int(require_key(ce, "row")))
         ]
-        if mover_is_round and e_shape == "round":
-            e_r_norm = round_base_radius_norm(e_bs)
-            for e_col, e_row in model_positions:
-                ex, ey = _hex_center(e_col, e_row)
-                dx = xs - float(ex)
-                dy = ys - float(ey)
-                d = np.hypot(dx, dy)
-                eng_bad |= (d - mover_r_norm - e_r_norm) <= (req + 1e-6)
-        else:
-            e_orient = int(require_key(ce, "orientation"))
-            e_off_even, e_off_odd = precompute_footprint_offsets(e_shape, e_bs, e_orient)
-            for e_col, e_row in model_positions:
-                e_off = e_off_even if (e_col & 1) == 0 else e_off_odd
-                for dc, dr in e_off:
-                    fc = e_col + int(dc)
-                    fr = e_row + int(dr)
-                    if 0 <= fc < board_cols and 0 <= fr < board_rows:
-                        hex_mixed_mask[fc, fr] = True
-            has_hex_mixed = True
+        e_orient = int(require_key(ce, "orientation"))
+        e_off_even, e_off_odd = precompute_footprint_offsets(e_shape, e_bs, e_orient)
+        for e_col, e_row in model_positions:
+            e_off = e_off_even if (e_col & 1) == 0 else e_off_odd
+            for dc, dr in e_off:
+                fc = e_col + int(dc)
+                fr = e_row + int(dr)
+                if 0 <= fc < board_cols and 0 <= fr < board_rows:
+                    hex_mixed_mask[fc, fr] = True
+        has_hex_mixed = True
 
     if has_hex_mixed:
         # Dilatation hex (cube-distance) de rayon ``ez`` par propagation itérative par parité,

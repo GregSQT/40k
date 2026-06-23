@@ -87,6 +87,8 @@
   /* Anneau jaune des cibles potentielles (HP clignotant) en tir/charge/fight,
      ET des cibles pile-in / consolidation. Couleur unique centralisée ici. */
   --icon-blink-target-ring: #ffd700;
+  /* Voile vert des figurines activables de l'unité active (premier mouvement de charge). */
+  --veil-green: #22c55e;
 
   /* Explosion icon (deprecated - use target icon) */
   --icon-explosion-color: #ff6600;

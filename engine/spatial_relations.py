@@ -128,29 +128,8 @@ def unit_entries_within_engagement_zone(
     engagement_zone: int,
 ) -> bool:
     """Return True when two unit cache entries are within the shared engagement contract."""
-    first_shape = first_entry["BASE_SHAPE"]
-    second_shape = second_entry["BASE_SHAPE"]
-    # Euclidean round-base check is only meaningful on micro-grid boards (engagement_zone > 1)
-    # AND only valid for single round bases: a multi-figure squad must use the footprint
-    # metric (nearest figure), else it collapses to one circle on its anchor.
-    if (
-        engagement_zone > 1
-        and first_shape == "round"
-        and second_shape == "round"
-        and not _entry_is_multi_figure(first_entry)
-        and not _entry_is_multi_figure(second_entry)
-    ):
-        req = engagement_minimum_clearance_norm(engagement_zone)
-        gap = euclidean_edge_clearance_round_round(
-            require_key(first_entry, "col"),
-            require_key(first_entry, "row"),
-            _cache_entry_round_base_size(first_entry),
-            require_key(second_entry, "col"),
-            require_key(second_entry, "row"),
-            _cache_entry_round_base_size(second_entry),
-        )
-        return gap <= req + 1e-6
-
+    # Métrique d'engagement unifiée : distance d'empreinte (hex), jamais euclidien.
+    # Identique à la légalité de placement move (move_anchor_violates_engagement_clearance).
     first_fp = _cache_entry_footprint(first_entry)
     second_fp = _cache_entry_footprint(second_entry)
     return min_distance_between_sets(
@@ -210,13 +189,8 @@ def move_anchor_violates_engagement_clearance(
                 return True
         return False
 
-    req = engagement_minimum_clearance_norm(engagement_zone_ez)
-    mover_shape = mover["BASE_SHAPE"]
-    mover_bs_i = mover["BASE_SIZE"]
-    mover_center_xy_rr: Optional[Tuple[float, float]] = None
-    if mover_shape == "round":
-        mover_center_xy_rr = _hex_center(center_col, center_row)
-
+    # Métrique d'engagement unifiée : distance d'empreinte (hex), jamais euclidien.
+    # Aligné avec l'éligibilité tir (unit_entries_within_engagement_zone).
     if enemy_cache_items is not None:
         enemy_iter: Any = enemy_cache_items
     else:
@@ -227,38 +201,16 @@ def move_anchor_violates_engagement_clearance(
         )
 
     for _, cache_entry in enemy_iter:
-        e_shape = cache_entry["BASE_SHAPE"]
-        e_bs_i = cache_entry["BASE_SIZE"]
-
-        if mover_shape == "round" and e_shape == "round":
-            by_model = cache_entry.get("occupied_hexes_by_model")
-            if by_model:
-                model_positions: Any = by_model.values()
-            else:
-                model_positions = ((require_key(cache_entry, "col"), require_key(cache_entry, "row")),)
-            for e_col, e_row in model_positions:
-                gap = euclidean_edge_clearance_round_round(
-                    center_col,
-                    center_row,
-                    mover_bs_i,
-                    e_col,
-                    e_row,
-                    e_bs_i,
-                    mover_center_xy=mover_center_xy_rr,
-                )
-                if gap <= req + 1e-6:
-                    return True
-        else:
-            enemy_fp = cache_entry.get("occupied_hexes")
-            if not enemy_fp:
-                ec = require_key(cache_entry, "col")
-                er = require_key(cache_entry, "row")
-                enemy_fp = {(ec, er)}
-            if (
-                min_distance_between_sets(
-                    candidate_fp, enemy_fp, max_distance=engagement_zone_ez
-                )
-                <= engagement_zone_ez
-            ):
-                return True
+        enemy_fp = cache_entry.get("occupied_hexes")
+        if not enemy_fp:
+            ec = require_key(cache_entry, "col")
+            er = require_key(cache_entry, "row")
+            enemy_fp = {(ec, er)}
+        if (
+            min_distance_between_sets(
+                candidate_fp, enemy_fp, max_distance=engagement_zone_ez
+            )
+            <= engagement_zone_ez
+        ):
+            return True
     return False

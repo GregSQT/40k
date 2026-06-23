@@ -4782,7 +4782,9 @@ export default function Board({
       const modelR = baseSz > 1 ? (baseSz * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
       const ringR = modelR * 1.25;
       const lineW = Math.max(1.5, HEX_RADIUS_H * 0.5);
-      const VIOLET = 0xa855f7;
+      // Charge : figs activables de l'unité active → voile vert (App.css). Pile-in/consolidation
+      // (phase fight) conservent le voile violet.
+      const ACTIVE_VEIL = phase === "charge" ? cssColorToNumber("--veil-green") : 0xa855f7;
       const byModel = (
         gameState as unknown as {
           units_cache?: Record<
@@ -4794,12 +4796,24 @@ export default function Board({
       const eligibleIds = new Set(activeChargeLikePlan.eligibleModels);
       if (byModel) {
         for (const [mid, pos] of Object.entries(byModel)) {
-          if (!eligibleIds.has(mid)) continue;
           if (activeChargeLikePlan.models[mid]) continue; // déjà posée → traitée comme ghost déplacé
+          const isEligible = eligibleIds.has(mid);
           const [cx, cy] = hexCenter(pos[0], pos[1]);
           const isActive = mid === activeChargeLikePlan.activeModelId;
-          overlay.lineStyle(lineW, VIOLET, 1);
-          overlay.beginFill(VIOLET, isActive ? 0.7 : 0.45);
+          if (isPileInModelMove) {
+            // Pile-in : pas de voile/cercle violet (le cercle vert d'activation suffit pour les figs
+            // activables). Voile gris sur les figs de l'unité active qui ne peuvent pas encore pile-in.
+            if (!isEligible) {
+              overlay.lineStyle(0);
+              overlay.beginFill(0x444444, 0.5);
+              overlay.drawCircle(cx, cy, ringR);
+              overlay.endFill();
+            }
+            continue;
+          }
+          if (!isEligible) continue;
+          overlay.lineStyle(lineW, ACTIVE_VEIL, 1);
+          overlay.beginFill(ACTIVE_VEIL, isActive ? 0.7 : 0.45);
           overlay.drawCircle(cx, cy, ringR);
           overlay.endFill();
         }
@@ -4859,12 +4873,14 @@ export default function Board({
       const drawTargetRing = (uid: number | string, color: number, fillAlpha?: number) =>
         drawUnitTargetRing(overlay, uid, color, ringCtx, fillAlpha);
       if (!isPileInModelMove && chargeMovePlan) {
+        const YELLOW = cssColorToNumber("--icon-blink-target-ring");
         if (chargeFocusActive) {
-          const YELLOW = cssColorToNumber("--icon-blink-target-ring");
           for (const uid of chargePreviewTargetIds ?? []) drawTargetRing(uid, YELLOW, 0.35);
         } else {
           for (const uid of chargeMovePlan.unsatisfiedTargets) drawTargetVeil(uid, RED);
           for (const uid of chargeMovePlan.satisfiedTargets) drawTargetVeil(uid, GREEN);
+          // Les cibles désignées gardent leur cercle jaune par-dessus le voile rouge/vert.
+          for (const uid of chargePreviewTargetIds ?? []) drawTargetRing(uid, YELLOW);
         }
         // Voile VERT sur les figs POSÉES engagées (≤ EZ d'une cible) → en mesure de frapper.
         const cu = units.find((u) => String(u.id) === String(chargeMovePlan.unitId));
@@ -4925,6 +4941,7 @@ export default function Board({
       if (chargeModelVeilOverlayRef.current === overlay) chargeModelVeilOverlayRef.current = null;
     };
   }, [
+    phase,
     perModelChargeLike,
     isPileInModelMove,
     activeChargeLikePlan,
