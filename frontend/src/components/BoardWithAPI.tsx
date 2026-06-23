@@ -4684,6 +4684,7 @@ export const BoardWithAPI: React.FC = () => {
       </ErrorBoundary>
       )}
 
+      <div className="unit-status-tables__scroll">
       <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
         <UnitStatusTablePlayer1WithTutorial
           units={apiProps.gameState?.units ?? []}
@@ -4731,6 +4732,7 @@ export const BoardWithAPI: React.FC = () => {
           deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
         />
       </ErrorBoundary>
+      </div>
     </RightColumnTutorialSpotlight>
   );
 

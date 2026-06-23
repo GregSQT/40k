@@ -342,10 +342,23 @@ body {
   max-width: 900px;
   margin-left: var(--spacing-lg);
   margin-top: 60px; /* Push tables below navigation buttons */
-  height: auto; /* Allow natural height for dynamic log calculation */
-  max-height: none; /* Remove height constraint */
-  overflow-y: visible; /* Remove scrolling constraint */
+  /* Collé en haut, plafonné à la hauteur de la fenêtre : le board scrolle, ce panneau reste en place. */
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  max-height: calc(100vh - 60px); /* 60px = margin-top, pour ne jamais dépasser le bas de la fenêtre */
+  overflow: hidden;
   padding-right: var(--spacing-xs);
+}
+
+/* Conteneur scrollable des 2 UnitStatusTable : seul ce contenu défile à la molette quand il dépasse. */
+.unit-status-tables__scroll {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 @media (max-width: 900px) {
@@ -2713,21 +2726,21 @@ textarea:focus {
 }
 
 /* Custom scrollbar for right column */
-.unit-status-tables::-webkit-scrollbar {
+.unit-status-tables__scroll::-webkit-scrollbar {
   width: 6px;
 }
 
-.unit-status-tables::-webkit-scrollbar-track {
+.unit-status-tables__scroll::-webkit-scrollbar-track {
   background: #333;
   border-radius: 3px;
 }
 
-.unit-status-tables::-webkit-scrollbar-thumb {
+.unit-status-tables__scroll::-webkit-scrollbar-thumb {
   background: #555;
   border-radius: 3px;
 }
 
-.unit-status-tables::-webkit-scrollbar-thumb:hover {
+.unit-status-tables__scroll::-webkit-scrollbar-thumb:hover {
   background: #666;
 }
 
