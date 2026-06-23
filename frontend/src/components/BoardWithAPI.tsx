@@ -1,6 +1,7 @@
 // frontend/src/components/BoardWithAPI.tsx
 import type React from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import leaderEvolutionConfig from "../../../config/endless_duty/leader_evolution.json";
 import meleeEvolutionConfig from "../../../config/endless_duty/melee_evolution.json";
@@ -1733,6 +1734,9 @@ export const BoardWithAPI: React.FC = () => {
   const [ruleChoicePopupPosition, setRuleChoicePopupPosition] = useState({ x: 140, y: 120 });
   const [isDraggingRuleChoicePopup, setIsDraggingRuleChoicePopup] = useState(false);
   const ruleChoiceDragOffsetRef = useRef({ x: 0, y: 0 });
+  const [rosterPickerPosition, setRosterPickerPosition] = useState({ x: 140, y: 80 });
+  const [isDraggingRosterPicker, setIsDraggingRosterPicker] = useState(false);
+  const rosterPickerDragOffsetRef = useRef({ x: 0, y: 0 });
   const [showGameOverPopup, setShowGameOverPopup] = useState(false);
   const [isEndlessDutyModalOpen, setIsEndlessDutyModalOpen] = useState(false);
   const [endlessDutyFormError, setEndlessDutyFormError] = useState<string | null>(null);
@@ -2069,6 +2073,27 @@ export const BoardWithAPI: React.FC = () => {
       window.removeEventListener("mouseup", onMouseUp);
     };
   }, [isDraggingRuleChoicePopup]);
+
+  useEffect(() => {
+    if (!isDraggingRosterPicker) {
+      return;
+    }
+    const onMouseMove = (event: MouseEvent) => {
+      setRosterPickerPosition({
+        x: event.clientX - rosterPickerDragOffsetRef.current.x,
+        y: event.clientY - rosterPickerDragOffsetRef.current.y,
+      });
+    };
+    const onMouseUp = () => {
+      setIsDraggingRosterPicker(false);
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [isDraggingRosterPicker]);
 
   useEffect(() => {
     if (isGameOver) {
@@ -3040,6 +3065,18 @@ export const BoardWithAPI: React.FC = () => {
     };
     setIsDraggingRuleChoicePopup(true);
   };
+  const onRosterPickerTitleMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
+    rosterPickerDragOffsetRef.current = {
+      x: event.clientX - rosterPickerPosition.x,
+      y: event.clientY - rosterPickerPosition.y,
+    };
+    setIsDraggingRosterPicker(true);
+  };
+  const rosterPickerAboveStart =
+    gameMode === "pvp" &&
+    apiProps.gameState?.phase === "deployment" &&
+    apiProps.gameState?.deployment_type === "active" &&
+    !testDeploymentStarted;
   const highlightedRuleChoiceUnitId = (() => {
     if (ruleChoiceFocusedUnitId === null) {
       return null;
@@ -4464,18 +4501,44 @@ export const BoardWithAPI: React.FC = () => {
           </div>
         </div>
       )}
-      {rosterPickerPlayer !== null && (
-        <div className="deployment-panel__picker-backdrop">
-          <button
-            type="button"
-            className="deployment-panel__picker-dismiss"
-            aria-label="Close roster picker"
-            onClick={closeRosterPicker}
-          />
-          <div className="deployment-panel__picker">
-            <div className="deployment-panel__picker-title">
-              Change roster - Player {rosterPickerPlayer}
-            </div>
+      {rosterPickerPlayer !== null &&
+        createPortal(
+          <div
+            className={`deployment-panel__picker-backdrop${
+              rosterPickerAboveStart ? " deployment-panel__picker-backdrop--above-start" : ""
+            }`}
+          >
+          {!rosterPickerAboveStart && (
+            <button
+              type="button"
+              className="deployment-panel__picker-dismiss"
+              aria-label="Close roster picker"
+              onClick={closeRosterPicker}
+            />
+          )}
+          <div
+            className={`deployment-panel__picker${
+              rosterPickerAboveStart ? " deployment-panel__picker--draggable" : ""
+            }`}
+            style={
+              rosterPickerAboveStart
+                ? { left: `${rosterPickerPosition.x}px`, top: `${rosterPickerPosition.y}px` }
+                : undefined
+            }
+          >
+            {rosterPickerAboveStart ? (
+              <button
+                type="button"
+                className="deployment-panel__picker-title deployment-panel__picker-title--draggable"
+                onMouseDown={onRosterPickerTitleMouseDown}
+              >
+                {`Change roster - Player ${rosterPickerPlayer}${isDraggingRosterPicker ? " (drag...)" : ""}`}
+              </button>
+            ) : (
+              <div className="deployment-panel__picker-title">
+                Change roster - Player {rosterPickerPlayer}
+              </div>
+            )}
             {rosterPickerLoading && (
               <div className="deployment-panel__picker-loading">Loading armies...</div>
             )}
@@ -4543,8 +4606,9 @@ export const BoardWithAPI: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
       {activeRuleChoicePrompt && (
         <div className="rule-choice-overlay">
           <div

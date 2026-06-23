@@ -1116,6 +1116,17 @@ body {
   justify-content: center;
 }
 
+.deployment-panel__picker-backdrop--above-start {
+  background: transparent;
+  align-items: flex-start;
+  padding-top: 4vh;
+  pointer-events: none;
+}
+
+.deployment-panel__picker-backdrop--above-start .deployment-panel__picker {
+  pointer-events: auto;
+}
+
 .rule-choice-overlay {
   position: fixed;
   inset: 0;
@@ -1175,6 +1186,13 @@ body {
   padding: 0;
   cursor: move;
   user-select: none;
+}
+
+.deployment-panel__picker-title--draggable:focus,
+.deployment-panel__picker-title--draggable:focus-visible {
+  outline: none;
+  box-shadow: var(--btn-glow-shadow);
+  border-radius: 4px;
 }
 
 .deployment-panel__picker-loading {
@@ -1239,6 +1257,11 @@ body {
 
 .deployment-panel__picker-item:hover {
   background: rgba(76, 175, 80, 0.15);
+}
+
+.deployment-panel__picker-item:focus,
+.deployment-panel__picker-item:focus-visible {
+  outline: none;
 }
 
 .deployment-panel__picker-tooltip {
@@ -1353,6 +1376,12 @@ body {
 
 .deployment-panel__picker-close:hover {
   background: #4b5563;
+}
+
+.deployment-panel__picker-close:focus,
+.deployment-panel__picker-close:focus-visible {
+  outline: none;
+  box-shadow: var(--btn-glow-shadow);
 }
 
 .deployment-panel__type-group {
