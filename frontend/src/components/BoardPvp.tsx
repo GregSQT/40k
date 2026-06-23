@@ -7935,7 +7935,12 @@ export default function Board({
         const staleTargetMarkers = savedUi.children.filter(
           (child: PIXI.DisplayObject) =>
             typeof child.name === "string" &&
-            (child.name.startsWith("target-indicator-") || child.name.startsWith("charge-badge-"))
+            (child.name.startsWith("target-indicator-") ||
+              child.name.startsWith("charge-badge-") ||
+              child.name.startsWith("hidden-badge-") ||
+              child.name.startsWith("fled-badge-") ||
+              child.name.startsWith("move-status-") ||
+              child.name.startsWith("battle-shocked-"))
         );
         staleTargetMarkers.forEach((child: PIXI.DisplayObject) => {
           savedUi.removeChild(child);
