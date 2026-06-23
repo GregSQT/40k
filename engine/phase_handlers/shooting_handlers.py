@@ -1459,15 +1459,15 @@ def preview_shoot_valid_targets_from_position(
         cached_preview = _move_los_preview_cache.get(preview_cache_key)
         if cached_preview is not None:
             _preview_perf_after_cache = time.perf_counter()
-            print(
-                "[MOVE_LOS_PREVIEW_PERF] "
-                f"unit={unit_id_str} dest=({dest_col},{dest_row}) "
-                f"total_ms={(_preview_perf_after_cache - _preview_perf_t0) * 1000:.1f} "
-                f"cache_hit=1 "
-                f"cache_lookup_ms={(_preview_perf_after_cache - _preview_perf_cache_t0) * 1000:.1f} "
-                f"valid_targets={cached_preview['valid_targets']}",
-                flush=True,
-            )
+            # print(
+            #     "[MOVE_LOS_PREVIEW_PERF] "
+            #     f"unit={unit_id_str} dest=({dest_col},{dest_row}) "
+            #     f"total_ms={(_preview_perf_after_cache - _preview_perf_t0) * 1000:.1f} "
+            #     f"cache_hit=1 "
+            #     f"cache_lookup_ms={(_preview_perf_after_cache - _preview_perf_cache_t0) * 1000:.1f} "
+            #     f"valid_targets={cached_preview['valid_targets']}",
+            #     flush=True,
+            # )
             return copy.deepcopy(cached_preview)
 
     _preview_perf_deepcopy_t0 = time.perf_counter()
@@ -1555,20 +1555,20 @@ def preview_shoot_valid_targets_from_position(
     _preview_perf_cover_t0 = time.perf_counter()
     cover_by_unit_id = build_cover_by_unit_id_for_valid_targets(gs, u, valid_targets)
     _preview_perf_after_cover = time.perf_counter()
-    print(
-        "[MOVE_LOS_PREVIEW_PERF] "
-        f"unit={unit_id_str} dest=({dest_col},{dest_row}) "
-        f"total_ms={(_preview_perf_after_cover - _preview_perf_t0) * 1000:.1f} "
-        f"deepcopy_ms={(_preview_perf_after_deepcopy - _preview_perf_deepcopy_t0) * 1000:.1f} "
-        f"los_cache_ms={(_preview_perf_after_los - _preview_perf_los_t0) * 1000:.1f} "
-        f"enemy_precheck_ms={(_preview_perf_after_enemy_precheck - _preview_perf_enemy_precheck_t0) * 1000:.1f} "
-        f"weapon_availability_ms={(_preview_perf_after_weapon_availability - _preview_perf_weapon_availability_t0) * 1000:.1f} "
-        f"valid_pool_ms={(_preview_perf_after_pool - _preview_perf_pool_t0) * 1000:.1f} "
-        f"cells_ms={(_preview_perf_after_cells - _preview_perf_cells_t0) * 1000:.1f} "
-        f"cover_ms={(_preview_perf_after_cover - _preview_perf_cover_t0) * 1000:.1f} "
-        f"valid_targets={valid_targets}",
-        flush=True,
-    )
+    # print(
+    #     "[MOVE_LOS_PREVIEW_PERF] "
+    #     f"unit={unit_id_str} dest=({dest_col},{dest_row}) "
+    #     f"total_ms={(_preview_perf_after_cover - _preview_perf_t0) * 1000:.1f} "
+    #     f"deepcopy_ms={(_preview_perf_after_deepcopy - _preview_perf_deepcopy_t0) * 1000:.1f} "
+    #     f"los_cache_ms={(_preview_perf_after_los - _preview_perf_los_t0) * 1000:.1f} "
+    #     f"enemy_precheck_ms={(_preview_perf_after_enemy_precheck - _preview_perf_enemy_precheck_t0) * 1000:.1f} "
+    #     f"weapon_availability_ms={(_preview_perf_after_weapon_availability - _preview_perf_weapon_availability_t0) * 1000:.1f} "
+    #     f"valid_pool_ms={(_preview_perf_after_pool - _preview_perf_pool_t0) * 1000:.1f} "
+    #     f"cells_ms={(_preview_perf_after_cells - _preview_perf_cells_t0) * 1000:.1f} "
+    #     f"cover_ms={(_preview_perf_after_cover - _preview_perf_cover_t0) * 1000:.1f} "
+    #     f"valid_targets={valid_targets}",
+    #     flush=True,
+    # )
 
     result_payload = {
         "valid_targets": valid_targets,
