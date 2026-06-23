@@ -14,31 +14,29 @@ A PC application that runs a complete game of Warhammer 40,000 on a digital hex-
 **What it is not:**
 - Not an action/RTS reinterpretation (no real-time combat, no lore rewrite)
 - Not a replacement for miniatures, painting, or the physical product
-- Not a substitute for the tabletop experience — it removes friction, not the game
+- Not a substitute for the tabletop experience — ease the "play" feeling for beginners, but not the tabletop experience
 
 The application targets the moments *around* the table: testing a list, learning a faction, training for an event, or playing when no physical setup is available.
 
 ## 2. Gameplay Features
 
-The engine is built as discrete rules handlers — one module per phase (movement, shooting, charge, fight) — totalling tens of thousands of lines of rules code. Selected implemented features:
+The application guides the player through every phase of the game, handling the measuring, rule-checking, and dice-rolling so the player can focus on tactics. The whole turn structure — Command, Movement, Shooting, Charge, Fight — is played in its official order.
 
-**Full phase sequence.** Command → Movement → Shooting → Charge → Fight, with strict sequential unit activation and eligibility-driven phase transitions, matching the official turn structure.
+**Datasheets at a click.** Every unit's full profile, weapons, and abilities are one click away. No rulebook, no card shuffling.
 
-**Automatic movement zones.** Legal movement is computed by a multi-hex breadth-first search that accounts for terrain (walls, dense obstacles, occupied hexes), vertical movement (the *Fly* keyword), and enemy engagement zones (2"). Normal move, Advance (+D6"), and Fall Back are all distinguished, with their respective downstream restrictions enforced.
+**Movement preview.** When a unit is selected, the application shows exactly where it can go — all reachable squares at a glance, already accounting for terrain, models in the way, units that can fly, and enemy engagement ranges. Normal moves, Advances, Fall Backs, desperate escaptes each show their own legal area, with the consequences (no shooting after a Fall Back, etc.) applied automatically.
 
-**Dynamic line of sight.** LoS is computed per hex against dense walls and obscuring terrain polygons, cached, and recalculated after every move and every casualty. The interface previews valid targets and a visibility ratio *before* the player commits a position.
+**Line-of-sight preview.** Before committing a move, the player sees which enemies a given position can actually see and shoot, updated live as the unit moves. Cover is shown the same way, so the player knows the real odds before deciding.
 
-**Cover.** The engine detects hideable units (Infantry / Beast / Swarm), applies cover from obscuring terrain or partially-blocked LoS as a −1 to hit, and respects the *Ignores Cover* weapon rule.
+**Weapon and target selection by menu.** Units can carry several weapons; the player picks the weapon and the target from a clear menu, choosing only from legal targets. No measuring tape, no ambiguity about what is in range.
 
-**Menu-based weapon and target selection.** Units carry multiple weapon slots (up to three ranged, two melee); the player selects weapon and target through the interface from a validated target pool. AI selections are pre-filled the same way.
+**Automatic dice resolution, player keeps the decisions.** Hits, wounds, and saves are rolled and totalled instantly. The defending player then chooses how to allocate the casualties across their models — exactly as on the tabletop. Weapon special rules (Rapid Fire, Melta, Blast, Pistol, Assault, rerolls, and so on) are applied for the player automatically.
 
-**Automated shooting resolution with defender allocation.** Attacks resolve number-of-shots → hit → wound → save → damage automatically, and the **defending player allocates casualties** model by model — preserving the decision structure of the tabletop. Weapon special rules are implemented through a centralised registry: Rapid Fire, Melta, Blast, Pistol, Assault, Combi, and to-hit / damage rerolls.
+**Charge and combat.** Charges, pile-in, and the fight itself follow the official sequence — the player declares the charge and makes the choices, the application handles the distances and the rolls.
 
-**Charge phase.** 2D6 charge distance, mandatory engagement, BFS pathing with declared Fly, collision detection, pile-in, and Charge-impact resolution.
+**Faithful to the rules.** Around 100 unit datasheets across several factions, some 50 weapons, terrain, cover, and objectives are all modelled on the current edition. Distances on screen map directly to tabletop inches.
 
-**Rules fidelity.** The rules data — ~200 unit datasheets across multiple factions (Space Marines, Tyranids, Aeldari, Chaos, Custodes), ~50 weapons, terrain, objectives, unit coherency — is treated as the single source of truth. The hex board scales dynamically (inch-to-subhex at 1/5/10 resolution) so distances map exactly to tabletop measurements.
-
-The design principle is consistent: **automate the arithmetic, never the decisions.**
+The design principle is consistent: **the application does the arithmetic; the player makes every decision.**
 
 > **Note on the board model.** The battlefield uses a fine hexagonal grid rather than free measurement, a deliberate engineering choice that bounds the state space for reinforcement-learning training. The resolution is calibrated at **1 inch = 5 hexes**, keeping positional error well below one inch so that ranges, charges, and engagement distances remain faithful to tabletop measurement while staying tractable for the AI.
 
@@ -50,7 +48,7 @@ The design principle is consistent: **automate the arithmetic, never the decisio
 
 **Reduced game length.** A full game runs in roughly **one hour** versus **three to four** physically, because measurement, range-checking, and dice handling are automated. More games played means more rules learned and more reasons to stay engaged.
 
-**New-player acquisition.** The engine enforces the rules, so newcomers learn correctly without an experienced opponent or a rulebook in hand — lowering the single largest barrier to entry and creating a funnel toward the physical product.
+**New-player acquisition.** The engine enforces the rules, so newcomers learn correctly by playing, no by reading the rules or asking someone else. This lowers the single largest barrier to entry and creating a funnel toward the physical product.
 
 The net effect: more games played per player, faster rules mastery, and de-risked miniature purchases — supporting physical sales rather than cannibalising them.
 
@@ -66,6 +64,6 @@ Some rules remain in progress — notably the full current-edition Fight-phase r
 
 ## 5. Proposal
 
-The project is technically viable and can continue independently. An official collaboration would be mutually beneficial: Games Workshop gains a controlled, rules-accurate digital tool that drives engagement and miniature sales; the project gains official sanction, access to authoritative rules data, and legitimacy with the player base.
+The project is technically viable and ready to move on with various other game modes. An official collaboration would be mutually beneficial: Games Workshop gains a controlled, rules-accurate digital tool that drives new comers engagement and miniature sales; the project gains official sanction, access to authoritative rules data, and legitimacy with the player base.
 
 We are open to discussing a licensing arrangement covering use of the Warhammer 40,000 intellectual property and rules content, and would welcome an initial conversation to explore terms.
