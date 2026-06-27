@@ -39,24 +39,13 @@ function HiddenIcon() {
   );
 }
 
-/** 🌀 sur fond noir — battle-shock (01.07), identique au logo sous la figurine. */
+/** Chevron rouge vers le bas sur fond jaune — battle-shock (01.07). */
 function BattleShockIcon() {
   return (
-    <span
-      className="unit-status-badge__svg unit-status-badge__svg--battle-shock"
-      aria-hidden="true"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        borderRadius: "50%",
-        background: "#000000",
-        boxSizing: "border-box",
-        lineHeight: 1,
-      }}
-    >
-      🌀
-    </span>
+    <svg className="unit-status-badge__svg" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" fill="#f4c81f" stroke="#991b1b" strokeWidth="1.5" />
+      <polyline points="5.5,9.5 12,15.5 18.5,9.5" fill="none" stroke="#991b1b" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 

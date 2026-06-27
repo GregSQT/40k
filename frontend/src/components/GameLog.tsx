@@ -535,7 +535,21 @@ export const GameLog: React.FC<GameLogProps> = ({
                       </button>
                     )}
                     <span className={`game-log-entry__icon game-log-entry__icon--${event.type}`}>
-                      {getEventIcon(event.type)}
+                      {event.type === "battle_shock" ? (
+                        event.result === "SUCCESS" ? (
+                          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                            <circle cx="12" cy="12" r="10" fill="#bbf7d0" stroke="#166534" strokeWidth="1.5" />
+                            <polyline points="6,14.5 12,8.5 18,14.5" fill="none" stroke="#166534" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                            <circle cx="12" cy="12" r="10" fill="#f4c81f" stroke="#991b1b" strokeWidth="1.5" />
+                            <polyline points="6,9.5 12,15.5 18,9.5" fill="none" stroke="#991b1b" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )
+                      ) : (
+                        getEventIcon(event.type)
+                      )}
                     </span>
                     {useStepNumbers && (
                       <span className="game-log-entry__turn">

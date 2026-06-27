@@ -24,7 +24,7 @@ import {
   resolveBaseSizeForUnitDisplay,
 } from "../utils/hexFootprint";
 import { drawHiddenEyeBadge } from "../utils/hiddenBadgeDraw";
-import { drawMoveStatusBadge, type MoveStatusKind } from "../utils/moveStatusBadgeDraw";
+import { drawMoveStatusBadge, drawBattleShockBadge, type MoveStatusKind } from "../utils/moveStatusBadgeDraw";
 import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 import {
   getHpBarWidthBase,
@@ -2609,22 +2609,13 @@ export class UnitRenderer {
 
     if (!unit.battle_shocked) return;
 
-    // Centre-bas d'une figurine : fond noir + emoji 🌀.
     const drawAt = (posX: number, posY: number, emojiSize: number, name: string): void => {
-      const bg = new PIXI.Graphics();
-      bg.beginFill(0x000000, 0.9);
-      bg.drawCircle(posX, posY, emojiSize * 0.55);
-      bg.endFill();
-      bg.name = `${name}-bg`;
-      bg.zIndex = 10001;
-      targetContainer.addChild(bg);
-
-      const text = new PIXI.Text("🌀", { fontSize: emojiSize, align: "center", fill: 0xffffff });
-      text.anchor.set(0.5, 0.5);
-      text.position.set(posX, posY);
-      text.name = name;
-      text.zIndex = 10002;
-      targetContainer.addChild(text);
+      const r = emojiSize * 0.55;
+      const g = new PIXI.Graphics();
+      drawBattleShockBadge(g, posX, posY, r);
+      g.name = name;
+      g.zIndex = 10001;
+      targetContainer.addChild(g);
     };
 
     // Rayon vertical de la base d'UNE figurine (même base pour toutes les figs de l'unité),
