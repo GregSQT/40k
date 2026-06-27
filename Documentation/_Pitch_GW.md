@@ -14,7 +14,7 @@ A PC application that runs a complete game of Warhammer 40,000 on a digital hex-
 **What it is not:**
 - Not an action/RTS reinterpretation (no real-time combat, no lore rewrite)
 - Not a replacement for miniatures, painting, or the physical product
-- Not a substitute for the tabletop experience — ease the "play" feeling for beginners, but not the tabletop experience
+- Not a substitute for the tabletop experience — it removes friction, not the game
 
 The application targets the moments *around* the table: testing a list, learning a faction, training for an event, or playing when no physical setup is available.
 
@@ -64,6 +64,6 @@ Some rules remain in progress — notably the full current-edition Fight-phase r
 
 ## 5. Proposal
 
-The project is technically viable and ready to move on with various other game modes. An official collaboration would be mutually beneficial: Games Workshop gains a controlled, rules-accurate digital tool that drives new comers engagement and miniature sales; the project gains official sanction, access to authoritative rules data, and legitimacy with the player base.
+The project is fully functional and actively expanding — additional game modes, deeper faction coverage, and campaign content are already in progress. An official collaboration would be mutually beneficial: Games Workshop gains a controlled, rules-accurate digital tool that drives new comers engagement and miniature sales; the project gains official sanction, access to authoritative rules data, and legitimacy with the player base.
 
 We are open to discussing a licensing arrangement covering use of the Warhammer 40,000 intellectual property and rules content, and would welcome an initial conversation to explore terms.
