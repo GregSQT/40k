@@ -539,6 +539,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   deployPlanRef.current = deployPlan;
   /** Pool de la zone de déploiement (tous les hexes "col,row") du déployeur courant. */
   const deployPoolRef = useRef<Set<string>>(new Set());
+  /** Pool per-fig FILTRÉ (zone − murs − empreintes autres figs/unités) de la fig active, depuis
+   *  deploy_model_destinations. Miroir de squadMoveModelPoolRef (move). */
+  const deployModelPoolRef = useRef<Set<string>>(new Set());
   /**
    * Unité dont le move en cours est un Fall Back (badge fui en preview). État STABLE,
    * découplé de squadMovePlan (qui churne et effacerait le badge entre deux rendus).
@@ -5132,13 +5135,39 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [postEngineQuery]
   );
 
-  /** Sélectionne une figurine à repositionner (pool = toute la zone, pas de BFS backend).
+  /** Sélectionne une figurine à repositionner : récupère son pool FILTRÉ (deploy_model_destinations)
+   *  → le ghost ne snappe que sur des hex valides (hors mur/empreinte). Miroir handleSelectModelForMove.
    *  Sortir du suivi squad : la sélection fig prime sur le suivi du bloc. */
-  const handleSelectDeployModel = useCallback((modelId: string) => {
-    setDeployPlan((prev) =>
-      prev ? { ...prev, activeModelId: modelId, following: false } : prev
-    );
-  }, []);
+  const handleSelectDeployModel = useCallback(
+    async (modelId: string) => {
+      const currentPlan = deployPlanRef.current;
+      const provisionalPlan: Record<string, [number, number]> = {};
+      if (currentPlan) {
+        for (const [mid, pos] of Object.entries(currentPlan.models)) {
+          if (mid !== modelId) {
+            provisionalPlan[mid] = [pos.col, pos.row];
+          }
+        }
+      }
+      const result = await postEngineQuery({
+        action: "deploy_model_destinations",
+        model_id: modelId,
+        provisional_plan: provisionalPlan,
+      });
+      if (!result?.destinations) {
+        throw new Error("deploy_model_destinations: destinations absent in response");
+      }
+      const set = new Set<string>();
+      for (const [c, r] of result.destinations as Array<[number, number]>) {
+        set.add(`${c},${r}`);
+      }
+      deployModelPoolRef.current = set;
+      setDeployPlan((prev) =>
+        prev ? { ...prev, activeModelId: modelId, following: false } : prev
+      );
+    },
+    [postEngineQuery]
+  );
 
   /** Double-clic sur l'escouade posée → active le suivi du bloc (squad move). */
   const handleStartSquadFollowDeploy = useCallback(() => {
@@ -5150,9 +5179,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setDeployPlan((prev) => (prev ? { ...prev, following: false } : prev));
   }, []);
 
-  /** Pose la figurine active à (col,row) dans le plan + refresh validité (deploy_preview). */
+  /** Pose la figurine active à (col,row) dans le plan + refresh validité (deploy_preview).
+   *  Fig posée → vide le pool per-fig (sort du preview de cette fig), comme le move. */
   const handleMoveDeployModelInPlan = useCallback(
     (modelId: string, col: number, row: number) => {
+      deployModelPoolRef.current = new Set();
       setDeployPlan((prev) => {
         if (!prev) return prev;
         const models = { ...prev.models, [modelId]: { col, row } };
@@ -7112,6 +7143,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // Déploiement par escouade (PvP "active")
       deployPlan: null,
       deployPoolRef,
+      deployModelPoolRef,
       onStartDeploySquad: () => {},
       onDeployDropSquad: async () => {},
       onSelectDeployModel: () => {},
@@ -7321,6 +7353,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     // Déploiement par escouade (PvP "active")
     deployPlan,
     deployPoolRef,
+    deployModelPoolRef,
     onStartDeploySquad: handleStartDeploySquad,
     onDeployDropSquad: handleDeployDropSquad,
     onSelectDeployModel: handleSelectDeployModel,

@@ -547,6 +547,7 @@ type BoardProps = {
   } | null;
   /** Pool de la zone de déploiement (Set "col,row") du déployeur courant. */
   deployPoolRef?: React.RefObject<Set<string>>;
+  deployModelPoolRef?: React.RefObject<Set<string>>;
   onStartDeploySquad?: (unitId: number | string) => void;
   onDeployDropSquad?: (col: number, row: number) => void | Promise<void>;
   onSelectDeployModel?: (modelId: string) => void;
@@ -1061,6 +1062,7 @@ export default function Board({
   onCancelSquadMove,
   deployPlan = null,
   deployPoolRef,
+  deployModelPoolRef,
   onDeployDropSquad,
   onSelectDeployModel,
   onMoveDeployModelInPlan,
@@ -1522,7 +1524,8 @@ export default function Board({
       : squadMovePlan;
   /** Ref de pool de la fig active (squad BFS, charge-like eligible, ou zone de déploiement). */
   const effectivePerModelPoolRef = isDeploymentMove
-    ? (deployPoolRef ?? null)
+    ? // Fig active → pool FILTRÉ (deploy_model_destinations) ; sinon zone brute (squad/drop).
+      (deployPlan?.activeModelId ? (deployModelPoolRef ?? null) : (deployPoolRef ?? null))
     : perModelChargeLike
       ? (activeChargeLikePoolRef ?? null)
       : (squadMoveModelPoolRef ?? null);

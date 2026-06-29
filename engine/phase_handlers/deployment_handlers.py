@@ -257,6 +257,71 @@ def generate_compact_formation(
     return placed
 
 
+def deployment_build_model_destinations_pool(
+    game_state: Dict[str, Any],
+    model_id: str,
+    provisional_plan: Optional[Dict[str, Tuple[int, int]]] = None,
+) -> Dict[str, Any]:
+    """Pool des ancres VALIDES pour UNE figurine en déploiement (miroir per-fig du move,
+    sans BFS/portée : toute la zone est candidate).
+
+    Une ancre est retenue si l'empreinte de la figurine y tient : dans la zone, hors plateau
+    exclu, hors mur, hors empreinte des AUTRES unités déployées (amies/ennemies) et des AUTRES
+    figurines de l'escouade (positions provisoires via ``provisional_plan``). La cohésion n'est
+    PAS filtrée (comme le move) → poser hors-cohésion reste possible (voile rouge au preview).
+
+    Retourne {"destinations": [[col, row], ...]}. Lecture pure.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    model = models_cache.get(str(model_id))  # get allowed
+    if model is None:
+        raise KeyError(
+            f"deployment_build_model_destinations_pool: model {model_id} not in models_cache"
+        )
+    squad_id = str(require_key(model, "squad_id"))
+    player = int(require_key(model, "player"))
+    pool_set = _deploy_pool_set(game_state, player)
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    wall_hexes = game_state.get("wall_hexes", set())  # get allowed
+    other_occ = _deployed_occupied_positions(game_state, squad_id)
+
+    # Empreintes des AUTRES figs de l'escouade (collision intra-squad). provisional_plan override
+    # les positions des figs déjà repositionnées dans le plan UI.
+    squad_models = game_state.get("squad_models", {})  # get allowed
+    same_squad_occupied: Set[Tuple[int, int]] = set()
+    for mid in squad_models.get(squad_id, []):  # get allowed
+        if str(mid) == str(model_id):
+            continue
+        sibling = models_cache.get(str(mid))  # get allowed
+        if sibling is None:
+            continue
+        if provisional_plan and str(mid) in provisional_plan:
+            sc, sr = provisional_plan[str(mid)]
+        else:
+            sc, sr = int(sibling["col"]), int(sibling["row"])
+        same_squad_occupied.update(_model_footprint(game_state, sibling, int(sc), int(sr)))
+
+    blocked = set(wall_hexes) | other_occ | same_squad_occupied
+    destinations: List[Tuple[int, int]] = []
+    for (cc, rr) in pool_set:
+        fp = _model_footprint(game_state, model, int(cc), int(rr))
+        ok = True
+        for (fcol, frow) in fp:
+            if fcol < 0 or fcol >= board_cols or frow < 0 or frow >= board_rows:
+                ok = False
+                break
+            if (fcol, frow) not in pool_set:
+                ok = False
+                break
+            if (fcol, frow) in blocked:
+                ok = False
+                break
+        if ok:
+            destinations.append((int(cc), int(rr)))
+    return {"destinations": destinations}
+
+
 def deployment_preview_plan(
     game_state: Dict[str, Any], squad_id: str, plan: List[Tuple[str, int, int]]
 ) -> Dict[str, Any]:

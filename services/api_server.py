@@ -2123,6 +2123,35 @@ def execute_action():
             },
         })
 
+    # Read-only: pool des ancres valides pour UNE figurine en déploiement (per-fig, zone filtrée).
+    if action.get("action") == "deploy_model_destinations":
+        model_id = action.get("model_id")
+        if model_id is None:
+            return jsonify({
+                "success": False,
+                "error": "deploy_model_destinations requires model_id",
+            }), 400
+        from engine.phase_handlers import deployment_handlers as _dh_model
+        _raw_plan_dep = action.get("provisional_plan")
+        _provisional_plan_dep: Optional[Dict[str, Tuple[int, int]]] = None
+        if isinstance(_raw_plan_dep, dict):
+            _provisional_plan_dep = {
+                str(k): (int(v[0]), int(v[1]))
+                for k, v in _raw_plan_dep.items()
+                if isinstance(v, (list, tuple)) and len(v) == 2
+            }
+        _dep_pool = _dh_model.deployment_build_model_destinations_pool(
+            engine.game_state, str(model_id), provisional_plan=_provisional_plan_dep
+        )
+        return api_json_response({
+            "success": True,
+            "result": {
+                "action": "deploy_model_destinations",
+                "model_id": str(model_id),
+                "destinations": [[int(c), int(r)] for c, r in _dep_pool["destinations"]],
+            },
+        })
+
     # Read-only: dry-run d'un plan provisoire par-figurine (rouge/vert + cohesion + can_validate).
     if action.get("action") == "preview_move_plan":
         squad_id = action.get("unitId")
