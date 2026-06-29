@@ -205,8 +205,11 @@ def generate_compact_formation(
 
     def _legal_socle(model: Dict[str, Any], c: int, r: int) -> Optional["Socle"]:
         """Place légale = empreinte dans la zone (hors mur / hors unités déployées) ET
-        dégagement EUCLIDIEN avec les figs déjà posées — MÊME test que le preview
-        (``footprints_overlap``), sinon la formation générée serait flaggée rouge."""
+        à 1 hex de marge des figs déjà posées (empreinte + anneau de voisins).
+
+        NB : la marge est propre à la GÉNÉRATION (formation aérée). La règle de validité
+        (``footprints_overlap``, preview/commit) tolère le contact — non modifiée — pour
+        ne pas flagger en rouge un ajustement manuel où les socles se touchent."""
         fp = _model_footprint(game_state, model, c, r)
         for cc, rr in fp:
             if cc < 0 or cc >= board_cols or rr < 0 or rr >= board_rows:
@@ -222,8 +225,15 @@ def generate_compact_formation(
             base_size=require_key(model, "BASE_SIZE"),
             col=int(c), row=int(r), fp=fp,
         )
+        # Marge de 1 hex : la candidate ne doit ni chevaucher ni TOUCHER une fig déjà posée.
+        # On bloque l'empreinte de chaque socle posé + son anneau de voisins.
         for s in placed_socles:
-            if footprints_overlap(cand, s):
+            s_fp = s.fp or set()
+            blocked: Set[Tuple[int, int]] = set(s_fp)
+            for cc, rr in s_fp:
+                for nb in get_neighbors(cc, rr):
+                    blocked.add(nb)
+            if any(cell in blocked for cell in fp):
                 return None
         return cand
 
@@ -363,25 +373,20 @@ def deployment_preview_action(
     }
 
 
-def deployment_commit_plan(
+def _apply_deploy_plan(
     game_state: Dict[str, Any], action: Dict[str, Any]
 ) -> Tuple[bool, Dict[str, Any]]:
-    """Valide (bouton Valider) puis commit le déploiement d'une escouade.
+    """Tronc commun commit/recommit : résout l'unité, valide le plan (placement +
+    cohésion via ``deployment_preview_plan``) et écrit les positions des figurines.
 
-    ``plan`` doit couvrir TOUTES les figurines vivantes de l'escouade.
+    NE TOUCHE PAS ``deployable_units`` / ``deployed_units`` ni l'alternance des
+    déployeurs : la gestion de l'état de progression appartient aux appelants.
+
+    Retourne (True, {}) si le plan a été appliqué, sinon (False, erreur).
     """
     squad_id = str(require_key(action, "unitId"))
     deployment_state = require_key(game_state, "deployment_state")
     current_deployer = int(require_key(deployment_state, "current_deployer"))
-
-    deployable_units = require_key(deployment_state, "deployable_units")
-    deployable_list = deployable_units.get(
-        current_deployer, deployable_units.get(str(current_deployer))
-    )
-    if deployable_list is None:
-        raise KeyError(f"deployable_units missing player {current_deployer}")
-    if squad_id not in [str(uid) for uid in deployable_list]:
-        return False, {"error": "unit_not_deployable", "unitId": squad_id}
 
     unit = get_unit_by_id(squad_id, game_state)
     if not unit:
@@ -418,6 +423,33 @@ def deployment_commit_plan(
     if entry is not None:
         set_unit_coordinates(unit, int(entry["col"]), int(entry["row"]))
     rebuild_choice_timing_index(game_state)
+    return True, {}
+
+
+def deployment_commit_plan(
+    game_state: Dict[str, Any], action: Dict[str, Any]
+) -> Tuple[bool, Dict[str, Any]]:
+    """Valide (bouton Valider) puis commit le déploiement d'une escouade.
+
+    ``plan`` doit couvrir TOUTES les figurines vivantes de l'escouade.
+    """
+    squad_id = str(require_key(action, "unitId"))
+    deployment_state = require_key(game_state, "deployment_state")
+    current_deployer = int(require_key(deployment_state, "current_deployer"))
+
+    deployable_units = require_key(deployment_state, "deployable_units")
+    deployable_list = deployable_units.get(
+        current_deployer, deployable_units.get(str(current_deployer))
+    )
+    if deployable_list is None:
+        raise KeyError(f"deployable_units missing player {current_deployer}")
+    if squad_id not in [str(uid) for uid in deployable_list]:
+        return False, {"error": "unit_not_deployable", "unitId": squad_id}
+
+    ok, err = _apply_deploy_plan(game_state, action)
+    if not ok:
+        return False, err
+
     _mark_deployed(deployment_state, squad_id, current_deployer)
 
     next_deployer = _resolve_next_deployer_after_success(deployment_state, current_deployer)
@@ -436,6 +468,28 @@ def deployment_commit_plan(
         game_state["current_player"] = 1
         result.update({"phase_complete": True, "next_phase": "command"})
     return True, result
+
+
+def deployment_recommit_plan(
+    game_state: Dict[str, Any], action: Dict[str, Any]
+) -> Tuple[bool, Dict[str, Any]]:
+    """Repositionne une escouade DÉJÀ déployée pendant la phase de déploiement.
+
+    Revalide le plan (zone + collisions + cohésion via ``_apply_deploy_plan``) et
+    réécrit les positions, SANS toucher ``deployable_units`` / ``deployed_units``
+    ni l'alternance : l'unité reste déployée et le joueur garde la main.
+    """
+    squad_id = str(require_key(action, "unitId"))
+    deployment_state = require_key(game_state, "deployment_state")
+    deployed_units = require_key(deployment_state, "deployed_units")
+    if squad_id not in {str(u) for u in deployed_units}:
+        return False, {"error": "unit_not_deployed", "unitId": squad_id}
+
+    ok, err = _apply_deploy_plan(game_state, action)
+    if not ok:
+        return False, err
+
+    return True, {"action": "deploy_recommit", "unitId": squad_id}
 
 
 def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
@@ -459,6 +513,8 @@ def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]
         return deployment_preview_action(game_state, action)
     if action_type == "deploy_commit":
         return deployment_commit_plan(game_state, action)
+    if action_type == "deploy_recommit":
+        return deployment_recommit_plan(game_state, action)
     if action_type != "deploy_unit":
         return False, {"error": "invalid_deployment_action", "action": action_type}
 

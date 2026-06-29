@@ -531,6 +531,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     coherencyOk: boolean;
     canValidate: boolean;
     placed: boolean;
+    /** Squad move : le bloc suit le curseur (double-clic l'active, clic le pose). */
+    following: boolean;
   } | null>(null);
   /** Ref miroir de deployPlan pour accès synchrone dans les callbacks. */
   const deployPlanRef = useRef<typeof deployPlan>(null);
@@ -5072,6 +5074,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         coherencyOk: true,
         canValidate: false,
         placed: false,
+        following: false,
       });
       setMode("deploymentMove");
       setSelectedUnitId(uid);
@@ -5129,9 +5132,22 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [postEngineQuery]
   );
 
-  /** Sélectionne une figurine à repositionner (pool = toute la zone, pas de BFS backend). */
+  /** Sélectionne une figurine à repositionner (pool = toute la zone, pas de BFS backend).
+   *  Sortir du suivi squad : la sélection fig prime sur le suivi du bloc. */
   const handleSelectDeployModel = useCallback((modelId: string) => {
-    setDeployPlan((prev) => (prev ? { ...prev, activeModelId: modelId } : prev));
+    setDeployPlan((prev) =>
+      prev ? { ...prev, activeModelId: modelId, following: false } : prev
+    );
+  }, []);
+
+  /** Double-clic sur l'escouade posée → active le suivi du bloc (squad move). */
+  const handleStartSquadFollowDeploy = useCallback(() => {
+    setDeployPlan((prev) => (prev?.placed ? { ...prev, following: true, activeModelId: null } : prev));
+  }, []);
+
+  /** Clic → pose le bloc : fige le plan à la position suivie, sort du suivi. */
+  const handleFreezeSquadDeploy = useCallback(() => {
+    setDeployPlan((prev) => (prev ? { ...prev, following: false } : prev));
   }, []);
 
   /** Pose la figurine active à (col,row) dans le plan + refresh validité (deploy_preview). */
@@ -5147,16 +5163,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [refreshDeployPlanValidity]
   );
 
-  /** Déplace toute l'escouade (translation rigide) : delta = (col,row) - ancre (1re fig). */
+  /** Suivi du bloc (mode following) : translation rigide pour amener la 1re fig sous le curseur
+   *  (delta = (col,row) - ancre). Appelé au mousemove. Le rendu du plan (figs + voile rouge) suit. */
   const handleSquadMoveDeploy = useCallback(
     (col: number, row: number) => {
       setDeployPlan((prev) => {
-        if (!prev) return prev;
+        if (!prev?.following) return prev;
         const entries = Object.entries(prev.models);
         if (entries.length === 0) return prev;
         const [, anchor] = entries[0];
         const dCol = col - anchor.col;
         const dRow = row - anchor.row;
+        if (dCol === 0 && dRow === 0) return prev;
         const models: Record<string, { col: number; row: number }> = {};
         for (const [mid, p] of entries) {
           models[mid] = { col: p.col + dCol, row: p.row + dRow };
@@ -7099,6 +7117,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onSelectDeployModel: () => {},
       onMoveDeployModelInPlan: () => {},
       onSquadMoveDeploy: () => {},
+      onStartSquadFollowDeploy: () => {},
+      onFreezeSquadDeploy: () => {},
       onCommitDeploy: async () => {},
       onCancelDeploy: () => {},
       chargeMovePlan: null,
@@ -7306,6 +7326,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onSelectDeployModel: handleSelectDeployModel,
     onMoveDeployModelInPlan: handleMoveDeployModelInPlan,
     onSquadMoveDeploy: handleSquadMoveDeploy,
+    onStartSquadFollowDeploy: handleStartSquadFollowDeploy,
+    onFreezeSquadDeploy: handleFreezeSquadDeploy,
     onCommitDeploy: handleCommitDeploy,
     onCancelDeploy: handleCancelDeploy,
     // Charge par-figurine (V11 11.04, Slice G)

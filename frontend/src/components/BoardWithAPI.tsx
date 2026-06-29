@@ -5010,6 +5010,8 @@ export const BoardWithAPI: React.FC = () => {
             onSelectDeployModel={isGameOver ? () => {} : apiProps.onSelectDeployModel}
             onMoveDeployModelInPlan={isGameOver ? () => {} : apiProps.onMoveDeployModelInPlan}
             onSquadMoveDeploy={isGameOver ? () => {} : apiProps.onSquadMoveDeploy}
+            onStartSquadFollowDeploy={isGameOver ? () => {} : apiProps.onStartSquadFollowDeploy}
+            onFreezeSquadDeploy={isGameOver ? () => {} : apiProps.onFreezeSquadDeploy}
             chargeMovePlan={apiProps.chargeMovePlan}
             chargeModelPoolRef={apiProps.chargeModelPoolRef}
             chargeModelDistancesRef={apiProps.chargeModelDistancesRef}

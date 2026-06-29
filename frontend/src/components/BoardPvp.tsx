@@ -552,6 +552,8 @@ type BoardProps = {
   onSelectDeployModel?: (modelId: string) => void;
   onMoveDeployModelInPlan?: (modelId: string, col: number, row: number) => void;
   onSquadMoveDeploy?: (col: number, row: number) => void;
+  onStartSquadFollowDeploy?: () => void;
+  onFreezeSquadDeploy?: () => void;
   onCommitDeploy?: () => void | Promise<void>;
   onCancelDeploy?: () => void;
   /** Charge par-figurine (V11 11.04, Slice G) — plan provisoire des figs posées. */
@@ -1063,6 +1065,8 @@ export default function Board({
   onSelectDeployModel,
   onMoveDeployModelInPlan,
   onSquadMoveDeploy,
+  onStartSquadFollowDeploy,
+  onFreezeSquadDeploy,
   chargeMovePlan = null,
   chargeModelPoolRef,
   chargeModelMaskLoopsRef,
@@ -1253,6 +1257,9 @@ export default function Board({
   const lastUnitClickRef = useRef<{ unitId: number | string; ts: number } | null>(null);
   /** Timestamp du dernier dispatch de boardUnitDoubleClick depuis onEntryPointerDown — pour supprimer le dblclick natif redondant */
   const dblClickFromEntryRef = useRef<number>(0);
+  /** Déploiement : timestamp du dernier clic, pour ignorer le 2e clic d'un double-clic (qui sert à
+   *  activer le suivi squad) et éviter une pose/sélection fig parasite. */
+  const lastDeployClickTimeRef = useRef<number>(0);
   /** Dernier clientX/clientY pendant la mesure — pour redessiner après un setState (ex. jonction) sans attendre mousemove. */
   const measurePointerClientRef = useRef<{ clientX: number; clientY: number } | null>(null);
   /** Toujours à jour : permet aux handlers (effet stable) de lire l’état courant sans redémonter l’effet à chaque jonction. */
@@ -1406,12 +1413,16 @@ export default function Board({
     onSelectDeployModel,
     onMoveDeployModelInPlan,
     onSquadMoveDeploy,
+    onStartSquadFollowDeploy,
+    onFreezeSquadDeploy,
   });
   deployCallbacksRef.current = {
     onDeployDropSquad,
     onSelectDeployModel,
     onMoveDeployModelInPlan,
     onSquadMoveDeploy,
+    onStartSquadFollowDeploy,
+    onFreezeSquadDeploy,
   };
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -3632,7 +3643,7 @@ export default function Board({
   // We use the browser's dblclick (OS-level click cadence) rather than PIXI's
   // e.detail, which resets to 1 across React re-renders that recreate unitCircle.
   useEffect(() => {
-    if (phase !== "move") return;
+    if (phase !== "move" && phase !== "deployment") return;
     if (!boardConfig) return;
     const canvas = canvasContainerRef.current?.querySelector("canvas");
     if (!canvas) return;
@@ -3641,6 +3652,15 @@ export default function Board({
 
     const onDoubleClick = (e: MouseEvent) => {
       if (e.button !== 0) return;
+      // Déploiement : double-clic sur une escouade posée (plan provisoire) → active le suivi du
+      // bloc (squad move). Pas de recherche units_cache (l'escouade n'y est pas avant le commit).
+      if (phase === "deployment") {
+        if (mode === "deploymentMove" && deployPlan?.placed) {
+          e.preventDefault();
+          deployCallbacksRef.current.onStartSquadFollowDeploy?.();
+        }
+        return;
+      }
       // Supprime le dblclick natif si onEntryPointerDown l'a déjà géré (< 500ms),
       // pour éviter de déclencher handleStartMovePreview en double.
       if (performance.now() - dblClickFromEntryRef.current < 500) {
@@ -3746,7 +3766,51 @@ export default function Board({
 
     canvas.addEventListener("dblclick", onDoubleClick);
     return () => canvas.removeEventListener("dblclick", onDoubleClick);
-  }, [phase, mode, selectedUnitId, boardConfig, gameState?.units_cache, current_player]);
+  }, [
+    phase,
+    mode,
+    selectedUnitId,
+    boardConfig,
+    gameState?.units_cache,
+    current_player,
+    deployPlan?.placed,
+  ]);
+
+  // Déploiement — suivi du bloc (mode following) : le bloc entier suit le curseur en continu.
+  // On translate le plan (1re fig sous le curseur) à chaque changement d'hex ; le rendu du plan
+  // (figs + voile rouge) suit. Réutilise handleSquadMoveDeploy (translation existante). Pas de LoS.
+  useEffect(() => {
+    if (!isDeploymentMove) return;
+    if (!deployPlan?.following || deployPlan.activeModelId) return;
+    if (!boardConfig) return;
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!canvas) return;
+    const app = appRef.current;
+    if (!app) return;
+    let lastKey = "";
+    const onMove = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
+      const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
+      const px = (e.clientX - rect.left) * scaleX;
+      const py = (e.clientY - rect.top) * scaleY;
+      const { col, row } = pixelToHex(
+        px,
+        py,
+        boardConfig.hex_radius,
+        boardConfig.margin,
+        boardConfig.cols,
+        boardConfig.rows
+      );
+      if (col < 0 || col >= boardConfig.cols || row < 0 || row >= boardConfig.rows) return;
+      const key = `${col},${row}`;
+      if (key === lastKey) return;
+      lastKey = key;
+      deployCallbacksRef.current.onSquadMoveDeploy?.(col, row);
+    };
+    canvas.addEventListener("mousemove", onMove);
+    return () => canvas.removeEventListener("mousemove", onMove);
+  }, [isDeploymentMove, deployPlan?.following, deployPlan?.activeModelId, boardConfig]);
 
   // squad.md brique 3 : ENTREE single-clic. En phase move + mode select, un clic gauche sur
   // une fig OWN entre en mode plan par-figurine + selectionne cette fig. Capture-phase +
@@ -4065,20 +4129,28 @@ export default function Board({
           }
           return;
         }
-        // 2) Fig active sélectionnée + clic dans la zone → pose la fig active à cet hex.
+        // Ignorer le 2e clic d'un double-clic (le double-clic active le suivi via onDoubleClick) :
+        // sinon il poserait/sélectionnerait une figurine parasitement.
+        const nowClick = performance.now();
+        const isDoubleClickSecond = nowClick - lastDeployClickTimeRef.current < 350;
+        lastDeployClickTimeRef.current = nowClick;
+        if (isDoubleClickSecond) return;
+        // 2) Mode suivi squad (le bloc suit le curseur) : tout clic pose le bloc (freeze),
+        //    miroir du move (clic = pose). Prioritaire sur la sélection fig.
+        if (dplan.following) {
+          deployCallbacksRef.current.onFreezeSquadDeploy?.();
+          return;
+        }
+        // 3) Fig active sélectionnée + clic dans la zone → pose la fig active à cet hex.
         if (dplan.activeModelId && inPool) {
           deployCallbacksRef.current.onMoveDeployModelInPlan?.(dplan.activeModelId, col, row);
           return;
         }
-        // 3) Clic sur une figurine de l'escouade → la sélectionne pour repositionnement.
+        // 4) Clic sur une figurine de l'escouade → la sélectionne pour repositionnement (per-fig).
         if (foundModelId) {
           if (foundModelId === dplan.activeModelId) return;
           deployCallbacksRef.current.onSelectDeployModel?.(foundModelId);
           return;
-        }
-        // 4) Aucune fig active + clic dans la zone hors figs → squad move (translation rigide).
-        if (!dplan.activeModelId && inPool) {
-          deployCallbacksRef.current.onSquadMoveDeploy?.(col, row);
         }
         return;
       }
