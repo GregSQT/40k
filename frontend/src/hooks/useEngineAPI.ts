@@ -542,6 +542,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Pool per-fig FILTRÉ (zone − murs − empreintes autres figs/unités) de la fig active, depuis
    *  deploy_model_destinations. Miroir de squadMoveModelPoolRef (move). */
   const deployModelPoolRef = useRef<Set<string>>(new Set());
+  /** Session de sélection per-fig déploiement (miroir squadMoveSessionRef) : une sélection async
+   *  (deploy_model_destinations) résolue après un changement de contexte (suivi squad, autre fig)
+   *  est annulée — évite qu'elle écrase l'état (ex : double-clic qui active le suivi). */
+  const deploySelectSessionRef = useRef<number>(0);
   /**
    * Unité dont le move en cours est un Fall Back (badge fui en preview). État STABLE,
    * découplé de squadMovePlan (qui churne et effacerait le badge entre deux rendus).
@@ -5140,6 +5144,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
    *  Sortir du suivi squad : la sélection fig prime sur le suivi du bloc. */
   const handleSelectDeployModel = useCallback(
     async (modelId: string) => {
+      deploySelectSessionRef.current += 1;
+      const sessionAtCall = deploySelectSessionRef.current;
       const currentPlan = deployPlanRef.current;
       const provisionalPlan: Record<string, [number, number]> = {};
       if (currentPlan) {
@@ -5154,6 +5160,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         model_id: modelId,
         provisional_plan: provisionalPlan,
       });
+      // Contexte changé pendant l'attente (suivi squad activé, autre fig sélectionnée) → annuler.
+      if (deploySelectSessionRef.current !== sessionAtCall) return;
       if (!result?.destinations) {
         throw new Error("deploy_model_destinations: destinations absent in response");
       }
@@ -5169,8 +5177,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [postEngineQuery]
   );
 
-  /** Double-clic sur l'escouade posée → active le suivi du bloc (squad move). */
+  /** Double-clic sur l'escouade posée → active le suivi du bloc (squad move). Invalide toute
+   *  sélection per-fig async en cours (sinon elle basculerait en single-fig après coup). */
   const handleStartSquadFollowDeploy = useCallback(() => {
+    deploySelectSessionRef.current += 1;
     setDeployPlan((prev) => (prev?.placed ? { ...prev, following: true, activeModelId: null } : prev));
   }, []);
 
