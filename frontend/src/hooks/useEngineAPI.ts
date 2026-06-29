@@ -542,6 +542,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Pool per-fig FILTRÉ (zone − murs − empreintes autres figs/unités) de la fig active, depuis
    *  deploy_model_destinations. Miroir de squadMoveModelPoolRef (move). */
   const deployModelPoolRef = useRef<Set<string>>(new Set());
+  /** Pool d'ancres du BLOC (suivi squad) : positions où toutes les empreintes du bloc translaté
+   *  restent dans la zone, depuis deploy_squad_destinations. Le suivi snappe l'ancre dessus. */
+  const deploySquadPoolRef = useRef<Set<string>>(new Set());
   /** Session de sélection per-fig déploiement (miroir squadMoveSessionRef) : une sélection async
    *  (deploy_model_destinations) résolue après un changement de contexte (suivi squad, autre fig)
    *  est annulée — évite qu'elle écrase l'état (ex : double-clic qui active le suivi). */
@@ -5177,12 +5180,28 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [postEngineQuery]
   );
 
-  /** Double-clic sur l'escouade posée → active le suivi du bloc (squad move). Invalide toute
-   *  sélection per-fig async en cours (sinon elle basculerait en single-fig après coup). */
-  const handleStartSquadFollowDeploy = useCallback(() => {
+  /** Double-clic sur l'escouade posée → active le suivi du bloc (squad move). Récupère d'abord le
+   *  pool d'ancres où TOUTES les empreintes du bloc restent dans la zone (deploy_squad_destinations),
+   *  sur lequel le suivi snappe l'ancre. Invalide toute sélection per-fig async en cours. */
+  const handleStartSquadFollowDeploy = useCallback(async () => {
     deploySelectSessionRef.current += 1;
+    const plan = deployPlanRef.current;
+    if (!plan?.placed) return;
+    const planArr = Object.entries(plan.models).map(([mid, p]) => [mid, p.col, p.row]);
+    const result = await postEngineQuery({
+      action: "deploy_squad_destinations",
+      plan: planArr,
+    });
+    if (!result?.destinations) {
+      throw new Error("deploy_squad_destinations: destinations absent in response");
+    }
+    const set = new Set<string>();
+    for (const [c, r] of result.destinations as Array<[number, number]>) {
+      set.add(`${c},${r}`);
+    }
+    deploySquadPoolRef.current = set;
     setDeployPlan((prev) => (prev?.placed ? { ...prev, following: true, activeModelId: null } : prev));
-  }, []);
+  }, [postEngineQuery]);
 
   /** Clic → pose le bloc : fige le plan à la position suivie, sort du suivi. */
   const handleFreezeSquadDeploy = useCallback(() => {
@@ -7154,6 +7173,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       deployPlan: null,
       deployPoolRef,
       deployModelPoolRef,
+      deploySquadPoolRef,
       onStartDeploySquad: () => {},
       onDeployDropSquad: async () => {},
       onSelectDeployModel: () => {},
@@ -7364,6 +7384,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     deployPlan,
     deployPoolRef,
     deployModelPoolRef,
+    deploySquadPoolRef,
     onStartDeploySquad: handleStartDeploySquad,
     onDeployDropSquad: handleDeployDropSquad,
     onSelectDeployModel: handleSelectDeployModel,

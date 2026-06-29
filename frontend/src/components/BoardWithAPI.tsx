@@ -5007,6 +5007,7 @@ export const BoardWithAPI: React.FC = () => {
             deployPlan={apiProps.deployPlan}
             deployPoolRef={apiProps.deployPoolRef}
             deployModelPoolRef={apiProps.deployModelPoolRef}
+            deploySquadPoolRef={apiProps.deploySquadPoolRef}
             onDeployDropSquad={isGameOver ? async () => {} : apiProps.onDeployDropSquad}
             onSelectDeployModel={isGameOver ? () => {} : apiProps.onSelectDeployModel}
             onMoveDeployModelInPlan={isGameOver ? () => {} : apiProps.onMoveDeployModelInPlan}

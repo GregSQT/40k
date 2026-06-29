@@ -2152,6 +2152,31 @@ def execute_action():
             },
         })
 
+    # Read-only: pool des ancres où le BLOC garde toutes ses empreintes dans la zone (suivi squad).
+    if action.get("action") == "deploy_squad_destinations":
+        _raw_squad_plan = action.get("plan")
+        if not isinstance(_raw_squad_plan, list):
+            return jsonify({
+                "success": False,
+                "error": "deploy_squad_destinations requires plan",
+            }), 400
+        from engine.phase_handlers import deployment_handlers as _dh_squad
+        _squad_plan = [
+            (str(e[0]), int(e[1]), int(e[2]))
+            for e in _raw_squad_plan
+            if isinstance(e, (list, tuple)) and len(e) == 3
+        ]
+        _squad_pool = _dh_squad.deployment_build_squad_destinations_pool(
+            engine.game_state, _squad_plan
+        )
+        return api_json_response({
+            "success": True,
+            "result": {
+                "action": "deploy_squad_destinations",
+                "destinations": [[int(c), int(r)] for c, r in _squad_pool["destinations"]],
+            },
+        })
+
     # Read-only: dry-run d'un plan provisoire par-figurine (rouge/vert + cohesion + can_validate).
     if action.get("action") == "preview_move_plan":
         squad_id = action.get("unitId")

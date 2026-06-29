@@ -322,6 +322,62 @@ def deployment_build_model_destinations_pool(
     return {"destinations": destinations}
 
 
+def deployment_build_squad_destinations_pool(
+    game_state: Dict[str, Any],
+    plan: List[Tuple[str, int, int]],
+) -> Dict[str, Any]:
+    """Pool des positions de l'ANCRE (1re fig du plan) où le BLOC, translaté RIGIDEMENT, garde
+    TOUTES ses empreintes dans la zone de déploiement (suivi squad : snap de l'ancre comme le move,
+    étendu aux empreintes — aucune ne sort de la zone).
+
+    ``plan`` : [(model_id, col, row), ...] positions provisoires de toutes les figs. La translation
+    rigide passe par les coords cube (pas de bug de parité). Empreinte combinée calculée UNE fois
+    en offsets relatifs à l'ancre, puis testée par candidate. Lecture pure.
+
+    Retourne {"destinations": [[col, row], ...]}.
+    """
+    from engine.hex_utils import offset_to_cube, cube_to_offset
+
+    if not plan:
+        return {"destinations": []}
+    models_cache = require_key(game_state, "models_cache")
+    ref_mid, ref_col, ref_row = plan[0]
+    ref_model = models_cache.get(str(ref_mid))  # get allowed
+    if ref_model is None:
+        raise KeyError(
+            f"deployment_build_squad_destinations_pool: model {ref_mid} not in models_cache"
+        )
+    player = int(require_key(ref_model, "player"))
+    pool_set = _deploy_pool_set(game_state, player)
+
+    # Empreinte combinée (absolue) du bloc aux positions provisoires.
+    combined: Set[Tuple[int, int]] = set()
+    for mid, c, r in plan:
+        m = models_cache.get(str(mid))  # get allowed
+        if m is None:
+            continue
+        combined.update(_model_footprint(game_state, m, int(c), int(r)))
+
+    # Offsets cube relatifs à l'ancre-réf : invariants par translation rigide du bloc.
+    rx, ry, rz = offset_to_cube(int(ref_col), int(ref_row))
+    offsets: List[Tuple[int, int, int]] = []
+    for (cc, rr) in combined:
+        x, y, z = offset_to_cube(int(cc), int(rr))
+        offsets.append((x - rx, y - ry, z - rz))
+
+    destinations: List[Tuple[int, int]] = []
+    for (cc, rr) in pool_set:
+        bx, by, bz = offset_to_cube(int(cc), int(rr))
+        ok = True
+        for (ox, oy, oz) in offsets:
+            if cube_to_offset(bx + ox, by + oy, bz + oz) not in pool_set:
+                ok = False
+                break
+        if ok:
+            destinations.append((int(cc), int(rr)))
+    return {"destinations": destinations}
+
+
 def deployment_preview_plan(
     game_state: Dict[str, Any], squad_id: str, plan: List[Tuple[str, int, int]]
 ) -> Dict[str, Any]:

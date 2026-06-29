@@ -548,6 +548,7 @@ type BoardProps = {
   /** Pool de la zone de déploiement (Set "col,row") du déployeur courant. */
   deployPoolRef?: React.RefObject<Set<string>>;
   deployModelPoolRef?: React.RefObject<Set<string>>;
+  deploySquadPoolRef?: React.RefObject<Set<string>>;
   onStartDeploySquad?: (unitId: number | string) => void;
   onDeployDropSquad?: (col: number, row: number) => void | Promise<void>;
   onSelectDeployModel?: (modelId: string) => void;
@@ -1063,6 +1064,7 @@ export default function Board({
   deployPlan = null,
   deployPoolRef,
   deployModelPoolRef,
+  deploySquadPoolRef,
   onDeployDropSquad,
   onSelectDeployModel,
   onMoveDeployModelInPlan,
@@ -3806,14 +3808,44 @@ export default function Board({
         boardConfig.rows
       );
       if (col < 0 || col >= boardConfig.cols || row < 0 || row >= boardConfig.rows) return;
-      const key = `${col},${row}`;
+      // Snap de l'ancre sur le pool d'ancres valides (toutes les empreintes du bloc ⊆ zone),
+      // comme le move snappe sur son pool. Hors zone → ancre figée sur le plus proche valide.
+      const pool = deploySquadPoolRef?.current;
+      if (!pool || pool.size === 0) return;
+      let tCol = col;
+      let tRow = row;
+      if (!pool.has(`${col},${row}`)) {
+        const cur = offsetToCube(col, row);
+        let bestD = Infinity;
+        let best: [number, number] | null = null;
+        for (const k of pool) {
+          const sep = k.indexOf(",");
+          const pc = Number(k.slice(0, sep));
+          const pr = Number(k.slice(sep + 1));
+          const d = cubeDistance(cur, offsetToCube(pc, pr));
+          if (d < bestD) {
+            bestD = d;
+            best = [pc, pr];
+          }
+        }
+        if (!best) return;
+        tCol = best[0];
+        tRow = best[1];
+      }
+      const key = `${tCol},${tRow}`;
       if (key === lastKey) return;
       lastKey = key;
-      deployCallbacksRef.current.onSquadMoveDeploy?.(col, row);
+      deployCallbacksRef.current.onSquadMoveDeploy?.(tCol, tRow);
     };
     canvas.addEventListener("mousemove", onMove);
     return () => canvas.removeEventListener("mousemove", onMove);
-  }, [isDeploymentMove, deployPlan?.following, deployPlan?.activeModelId, boardConfig]);
+  }, [
+    isDeploymentMove,
+    deployPlan?.following,
+    deployPlan?.activeModelId,
+    boardConfig,
+    deploySquadPoolRef?.current,
+  ]);
 
   // squad.md brique 3 : ENTREE single-clic. En phase move + mode select, un clic gauche sur
   // une fig OWN entre en mode plan par-figurine + selectionne cette fig. Capture-phase +
