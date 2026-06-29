@@ -302,24 +302,37 @@ def deployment_build_model_destinations_pool(
             sc, sr = int(sibling["col"]), int(sibling["row"])
         same_squad_occupied.update(_model_footprint(game_state, sibling, int(sc), int(sr)))
 
+    import time as _time
+    from engine.hex_utils import offset_to_cube
+    _t0 = _time.perf_counter()
+    if not pool_set:
+        return {"destinations": [], "_debug_ms": 0, "_zone_size": 0}
     blocked = set(wall_hexes) | other_occ | same_squad_occupied
+    # Empreinte de la fig en offsets CUBE, calculée UNE fois à une réf (invariante par translation
+    # rigide). Évite |zone| appels à _model_footprint (géométrie lourde). pool/blocked en cube →
+    # test d'appartenance direct, sans cube_to_offset dans la boucle. Board bounds redondant (zone ⊆ board).
+    ref_c, ref_r = next(iter(pool_set))
+    rcx, rcy, rcz = offset_to_cube(int(ref_c), int(ref_r))
+    fp_offsets: List[Tuple[int, int, int]] = []
+    for (fc, fr) in _model_footprint(game_state, model, int(ref_c), int(ref_r)):
+        fx, fy, fz = offset_to_cube(int(fc), int(fr))
+        fp_offsets.append((fx - rcx, fy - rcy, fz - rcz))
+    pool_cube = {offset_to_cube(int(c), int(r)) for (c, r) in pool_set}
+    blocked_cube = {offset_to_cube(int(c), int(r)) for (c, r) in blocked}
     destinations: List[Tuple[int, int]] = []
     for (cc, rr) in pool_set:
-        fp = _model_footprint(game_state, model, int(cc), int(rr))
+        bx, by, bz = offset_to_cube(int(cc), int(rr))
         ok = True
-        for (fcol, frow) in fp:
-            if fcol < 0 or fcol >= board_cols or frow < 0 or frow >= board_rows:
-                ok = False
-                break
-            if (fcol, frow) not in pool_set:
-                ok = False
-                break
-            if (fcol, frow) in blocked:
+        for (ox, oy, oz) in fp_offsets:
+            cell = (bx + ox, by + oy, bz + oz)
+            if cell not in pool_cube or cell in blocked_cube:
                 ok = False
                 break
         if ok:
             destinations.append((int(cc), int(rr)))
-    return {"destinations": destinations}
+    _ms = round((_time.perf_counter() - _t0) * 1000)
+    print(f"[PERF deploy_model_destinations] zone={len(pool_set)} pool={len(destinations)} ms={_ms}", flush=True)
+    return {"destinations": destinations, "_debug_ms": _ms, "_zone_size": len(pool_set)}
 
 
 def deployment_build_squad_destinations_pool(
@@ -336,7 +349,7 @@ def deployment_build_squad_destinations_pool(
 
     Retourne {"destinations": [[col, row], ...]}.
     """
-    from engine.hex_utils import offset_to_cube, cube_to_offset
+    from engine.hex_utils import offset_to_cube
 
     if not plan:
         return {"destinations": []}
@@ -365,17 +378,23 @@ def deployment_build_squad_destinations_pool(
         x, y, z = offset_to_cube(int(cc), int(rr))
         offsets.append((x - rx, y - ry, z - rz))
 
+    import time as _time
+    _t0 = _time.perf_counter()
+    # pool en CUBE → test d'appartenance direct, sans cube_to_offset dans la boucle interne.
+    pool_cube = {offset_to_cube(int(c), int(r)) for (c, r) in pool_set}
     destinations: List[Tuple[int, int]] = []
     for (cc, rr) in pool_set:
         bx, by, bz = offset_to_cube(int(cc), int(rr))
         ok = True
         for (ox, oy, oz) in offsets:
-            if cube_to_offset(bx + ox, by + oy, bz + oz) not in pool_set:
+            if (bx + ox, by + oy, bz + oz) not in pool_cube:
                 ok = False
                 break
         if ok:
             destinations.append((int(cc), int(rr)))
-    return {"destinations": destinations}
+    _ms = round((_time.perf_counter() - _t0) * 1000)
+    print(f"[PERF deploy_squad_destinations] zone={len(pool_set)} combined={len(offsets)} pool={len(destinations)} ms={_ms}", flush=True)
+    return {"destinations": destinations, "_debug_ms": _ms, "_zone_size": len(pool_set)}
 
 
 def deployment_preview_plan(
