@@ -5121,6 +5121,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       for (const [mid, c, r] of rawPlan) {
         models[String(mid)] = { col: c, row: r };
       }
+      const _posKeys = rawPlan.map(([, c, r]) => `${c},${r}`);
+      console.warn("[DBG drop]", {
+        count: rawPlan.length,
+        empilées_au_centre: _posKeys.length !== new Set(_posKeys).size,
+        positions: rawPlan,
+      });
       const perModelValid = (result?.per_model ?? {}) as Record<string, boolean>;
       const coherencyOk = result?.coherency_ok === true;
       const canValidate = result?.can_validate === true;
