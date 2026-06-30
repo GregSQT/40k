@@ -3929,6 +3929,71 @@ def _attacker_model_can_reach_squad(
     return False
 
 
+def _shoot_engagement_blocks_target(
+    game_state: Dict[str, Any],
+    attacker_squad_id: str,
+    target_squad_id: str,
+    weapon_is_pistol: bool,
+) -> bool:
+    """Regles de ciblage tir 40K manquantes au chemin per-figurine (portee+LoS seuls).
+
+    Replique EXACTEMENT _is_valid_shooting_target (chemin legacy/RL) :
+      - 04.02 : la cible doit etre Unengaged -> interdit si elle est dans l'EZ
+        d'une unite alliee au tireur (_friendly_engagement_blocks_ranged_shot).
+      - 10.06 : si le tireur est engage, il ne peut tirer qu'avec une arme PISTOL,
+        et seulement sur l'unite avec laquelle il est engage.
+    Returns True si le tir est INTERDIT par ces regles.
+    """
+    from engine.phase_handlers.shooting_handlers import (
+        _friendly_engagement_blocks_ranged_shot,
+        _is_adjacent_to_enemy_within_cc_range,
+    )
+    from engine.spatial_relations import (
+        get_engagement_zone,
+        unit_entries_within_engagement_zone,
+    )
+
+    units_cache = require_key(game_state, "units_cache")
+    sid = str(attacker_squad_id)
+    tid = str(target_squad_id)
+    shooter_entry = units_cache.get(sid)
+    target_entry = units_cache.get(tid)
+    if shooter_entry is None or target_entry is None:
+        return False
+
+    ez = get_engagement_zone(game_state)
+    enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(
+        shooter_entry, target_entry, ez
+    )
+    shooter_unit = get_unit_by_id(game_state, sid)
+    if shooter_unit is None:
+        return False
+    shooter_is_engaged = _is_adjacent_to_enemy_within_cc_range(game_state, shooter_unit)
+
+    # 10.06 : tireur engage -> PISTOL uniquement, et seulement la cible engagee.
+    if shooter_is_engaged:
+        if not weapon_is_pistol:
+            return True
+        if not enemy_adjacent_to_shooter:
+            return True
+    elif enemy_adjacent_to_shooter and not weapon_is_pistol:
+        return True
+
+    # 04.02 : cible engagee avec une unite alliee au tireur -> Unengaged viole.
+    shooter_player_int = int(shooter_entry["player"])
+    if _friendly_engagement_blocks_ranged_shot(
+        game_state,
+        sid,
+        shooter_player_int,
+        target_entry,
+        tid,
+        enemy_adjacent_to_shooter,
+        units_cache,
+    ):
+        return True
+    return False
+
+
 def _model_can_shoot_target(
     game_state: Dict[str, Any], attacker_model: Dict[str, Any], target_squad_id: str
 ) -> bool:
@@ -3958,9 +4023,20 @@ def _model_can_shoot_target(
     if range_subhex <= 0:
         return False
     # Import lazy : shooting_handlers importe shared_utils (eviter le cycle).
+    from engine.phase_handlers.shooting_handlers import _weapon_has_pistol_rule
+
     ac = int(attacker_model["col"])
     ar = int(attacker_model["row"])
-    return _attacker_model_can_reach_squad(game_state, ac, ar, target_squad_id, range_subhex)
+    if not _attacker_model_can_reach_squad(game_state, ac, ar, target_squad_id, range_subhex):
+        return False
+    if _shoot_engagement_blocks_target(
+        game_state,
+        str(attacker_model["squad_id"]),
+        target_squad_id,
+        _weapon_has_pistol_rule(weapon),
+    ):
+        return False
+    return True
 
 
 def squad_declare_shoot(
@@ -4358,9 +4434,20 @@ def _model_can_shoot_target_with_weapon(
     range_subhex = int(weapon["RNG"])
     if range_subhex <= 0:
         return False
+    from engine.phase_handlers.shooting_handlers import _weapon_has_pistol_rule
+
     ac = int(attacker_model["col"])
     ar = int(attacker_model["row"])
-    return _attacker_model_can_reach_squad(game_state, ac, ar, target_squad_id, range_subhex)
+    if not _attacker_model_can_reach_squad(game_state, ac, ar, target_squad_id, range_subhex):
+        return False
+    if _shoot_engagement_blocks_target(
+        game_state,
+        str(attacker_model["squad_id"]),
+        target_squad_id,
+        _weapon_has_pistol_rule(weapon),
+    ):
+        return False
+    return True
 
 
 # Contexte de declaration TIR : portee + LoS. Defini ici car il reference les deux
