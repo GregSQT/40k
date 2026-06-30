@@ -29,6 +29,8 @@ interface SettingsMenuProps {
   onToggleModeGuidesActivated?: (value: boolean) => void;
   battleShockTestEnabled?: boolean;
   onToggleBattleShockTest?: (value: boolean) => void;
+  deployShootLoS?: boolean;
+  onToggleDeployShootLoS?: (value: boolean) => void;
   deployIconBaseSizeBounded?: boolean;
   onToggleDeployIconBaseSizeBounded?: (value: boolean) => void;
 }
@@ -129,6 +131,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   onToggleModeGuidesActivated,
   battleShockTestEnabled = false,
   onToggleBattleShockTest,
+  deployShootLoS = false,
+  onToggleDeployShootLoS,
   deployIconBaseSizeBounded = true,
   onToggleDeployIconBaseSizeBounded,
 }) => {
@@ -145,6 +149,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     retreatAlertEnabled: boolean;
     modeGuidesActivated: boolean;
     battleShockTestEnabled: boolean;
+    deployShootLoS: boolean;
     deployIconBaseSizeBounded: boolean;
   };
   const latest: SettingsSnapshot = {
@@ -158,6 +163,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     retreatAlertEnabled,
     modeGuidesActivated,
     battleShockTestEnabled,
+    deployShootLoS,
     deployIconBaseSizeBounded,
   };
   const latestRef = useRef(latest);
@@ -190,6 +196,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
         onToggleModeGuidesActivated(s.modeGuidesActivated);
       if (onToggleBattleShockTest && battleShockTestEnabled !== s.battleShockTestEnabled)
         onToggleBattleShockTest(s.battleShockTestEnabled);
+      if (onToggleDeployShootLoS && deployShootLoS !== s.deployShootLoS)
+        onToggleDeployShootLoS(s.deployShootLoS);
       if (
         onToggleDeployIconBaseSizeBounded &&
         deployIconBaseSizeBounded !== s.deployIconBaseSizeBounded
@@ -386,6 +394,14 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                   onChange={onToggleDeployIconBaseSizeBounded}
                   label="Bornes taille icônes (déploiement)"
                   description="Activé : les icônes du panneau de déploiement sont bornées (24–60px) pour préserver la mise en page. Désactivé : affiche la taille réelle du socle de chaque figurine."
+                />
+              )}
+              {onToggleDeployShootLoS && (
+                <ToggleRow
+                  checked={deployShootLoS}
+                  onChange={onToggleDeployShootLoS}
+                  label="LoS de tir au déploiement"
+                  description="Activé : affiche la ligne de vue de tir de la figurine survolée pendant le déploiement (utile pour anticiper d'où on peut être ciblé). ⚠️ Impact sur les performances : recalcul de LoS à chaque survol → peut ralentir le déplacement des figurines. Désactivé par défaut."
                 />
               )}
             </CollapsibleSection>

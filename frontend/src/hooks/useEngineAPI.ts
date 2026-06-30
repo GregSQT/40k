@@ -5121,12 +5121,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       for (const [mid, c, r] of rawPlan) {
         models[String(mid)] = { col: c, row: r };
       }
-      const _posKeys = rawPlan.map(([, c, r]) => `${c},${r}`);
-      console.warn("[DBG drop]", {
-        count: rawPlan.length,
-        empilées_au_centre: _posKeys.length !== new Set(_posKeys).size,
-        positions: rawPlan,
-      });
       const perModelValid = (result?.per_model ?? {}) as Record<string, boolean>;
       const coherencyOk = result?.coherency_ok === true;
       const canValidate = result?.can_validate === true;
@@ -5164,17 +5158,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           }
         }
       }
-      const _t0 = performance.now();
       const result = await postEngineQuery({
         action: "deploy_model_destinations",
         model_id: modelId,
         provisional_plan: provisionalPlan,
-      });
-      console.warn("[PERF deploy_model_destinations]", {
-        fetch_ms: Math.round(performance.now() - _t0),
-        backend_ms: result?._debug_ms,
-        zone_size: result?._zone_size,
-        pool_size: Array.isArray(result?.destinations) ? result.destinations.length : 0,
       });
       // Contexte changé pendant l'attente (suivi squad activé, autre fig sélectionnée) → annuler.
       if (deploySelectSessionRef.current !== sessionAtCall) return;
@@ -5201,16 +5188,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const plan = deployPlanRef.current;
     if (!plan?.placed) return;
     const planArr = Object.entries(plan.models).map(([mid, p]) => [mid, p.col, p.row]);
-    const _t0 = performance.now();
     const result = await postEngineQuery({
       action: "deploy_squad_destinations",
       plan: planArr,
-    });
-    console.warn("[PERF deploy_squad_destinations]", {
-      fetch_ms: Math.round(performance.now() - _t0),
-      backend_ms: result?._debug_ms,
-      zone_size: result?._zone_size,
-      pool_size: Array.isArray(result?.destinations) ? result.destinations.length : 0,
     });
     if (!result?.destinations) {
       throw new Error("deploy_squad_destinations: destinations absent in response");

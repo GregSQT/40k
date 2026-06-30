@@ -464,6 +464,8 @@ type BoardProps = {
   eligibleUnitIds: number[];
   showHexCoordinates?: boolean;
   showLosDebugOverlay?: boolean;
+  /** Option : afficher la LoS de tir au survol pendant le déploiement (défaut OFF — impact perf). */
+  deployShootLoS?: boolean;
   onUnitIllustrationPreviewChange?: (unitId: UnitId | null) => void;
   onUnitDisplaySelectChange?: (unitId: UnitId | null) => void;
   shootingActivationQueue?: Unit[];
@@ -1017,6 +1019,7 @@ export default function Board({
   eligibleUnitIds,
   showHexCoordinates = false,
   showLosDebugOverlay = false,
+  deployShootLoS = false,
   onUnitIllustrationPreviewChange,
   onUnitDisplaySelectChange,
   shootingActivationQueue,
@@ -5524,13 +5527,26 @@ export default function Board({
     const hxY = (col: number, row: number) =>
       row * HEX_HEIGHT_H + ((col % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H;
 
-    // Snapshot pixel positions du pool BFS au moment de la création de l'effet.
+    // Snapshot pixel positions du pool + grille spatiale (buckets) pour le « plus proche valide »
+    // en O(1) amorti — sinon le scan O(n) du pool (>10k en déploiement) lague le mousemove.
+    const DEST_BUCKET_PX = 96;
     const destPixels: { x: number; y: number; col: number; row: number }[] = [];
+    const destBuckets = new Map<string, { x: number; y: number; col: number; row: number }[]>();
     for (const k of pool) {
       const sep = k.indexOf(",");
       const c = Number(k.substring(0, sep));
       const r = Number(k.substring(sep + 1));
-      destPixels.push({ x: hxX(c), y: hxY(c, r), col: c, row: r });
+      const x = hxX(c);
+      const y = hxY(c, r);
+      const dp = { x, y, col: c, row: r };
+      destPixels.push(dp);
+      const bkey = `${Math.floor(x / DEST_BUCKET_PX)},${Math.floor(y / DEST_BUCKET_PX)}`;
+      let arr = destBuckets.get(bkey);
+      if (!arr) {
+        arr = [];
+        destBuckets.set(bkey, arr);
+      }
+      arr.push(dp);
     }
 
     const nearestDest = (px: number, py: number) => {
@@ -5547,14 +5563,37 @@ export default function Board({
       if (pool.has(`${hc},${hr}`)) {
         return { x: hxX(hc), y: hxY(hc, hr), col: hc, row: hr };
       }
-      // Hors pool (mur / autre fig / hors zone) → plus proche hex valide par scan (cas rare).
+      // Hors pool (mur / autre fig / hors zone) → plus proche hex valide via la grille spatiale :
+      // on n'explore que le bucket du curseur + anneaux croissants, pas tout le pool.
+      const bx = Math.floor(px / DEST_BUCKET_PX);
+      const by = Math.floor(py / DEST_BUCKET_PX);
       let best = destPixels[0]!;
       let bestD = Infinity;
-      for (const dp of destPixels) {
-        const d = (dp.x - px) * (dp.x - px) + (dp.y - py) * (dp.y - py);
-        if (d < bestD) {
-          bestD = d;
-          best = dp;
+      const tryBand = (band: number) => {
+        for (let dbx = bx - band; dbx <= bx + band; dbx++) {
+          for (let dby = by - band; dby <= by + band; dby++) {
+            const list = destBuckets.get(`${dbx},${dby}`);
+            if (!list) continue;
+            for (const dp of list) {
+              const d = (dp.x - px) * (dp.x - px) + (dp.y - py) * (dp.y - py);
+              if (d < bestD) {
+                bestD = d;
+                best = dp;
+              }
+            }
+          }
+        }
+      };
+      tryBand(1);
+      if (bestD === Infinity) tryBand(4);
+      if (bestD === Infinity) tryBand(12);
+      if (bestD === Infinity) {
+        for (const dp of destPixels) {
+          const d = (dp.x - px) * (dp.x - px) + (dp.y - py) * (dp.y - py);
+          if (d < bestD) {
+            bestD = d;
+            best = dp;
+          }
         }
       }
       return best;
@@ -5674,7 +5713,9 @@ export default function Board({
     };
     const shootRange =
       squadUnit.RNG_WEAPONS && squadUnit.RNG_WEAPONS.length > 0 ? getMaxRangedRange(squadUnit) : 0;
-    const hasRangedPreview = shootRange > 0;
+    // En déploiement, la LoS de tir au survol est désactivée par défaut (calcul lourd, inutile au
+    // placement) — activable via l'option deployShootLoS. Hors déploiement : comportement inchangé.
+    const hasRangedPreview = shootRange > 0 && (!isDeploymentMove || deployShootLoS);
 
     let shootPreviewActive = true;
     let visualLosFrame: number | null = null;
@@ -6128,6 +6169,7 @@ export default function Board({
     gameState?.units_cache,
     effectivePerModelPoolRef,
     hideIndicators,
+    deployShootLoS,
   ]);
 
   // Mode mesure : clic gauche = ancre ou fin de ligne (puis armed) ; clic droit = jonction — prioritaire sur les unités.

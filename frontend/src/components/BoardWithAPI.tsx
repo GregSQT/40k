@@ -2176,6 +2176,7 @@ export const BoardWithAPI: React.FC = () => {
     const battleShockTestEnabledStr = localStorage.getItem("battleShockTestEnabled");
     const modeGuidesActivatedStr = localStorage.getItem(MODE_GUIDES_ACTIVATED_STORAGE_KEY);
     const deployIconBaseSizeBoundedStr = localStorage.getItem("deployIconBaseSizeBounded");
+    const deployShootLoSStr = localStorage.getItem("deployShootLoS");
     const pveGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVE_STORAGE_KEY) === "true";
     const pvpGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVP_STORAGE_KEY) === "true";
     const guidesSeenAtLeastOnce = pveGuideSeen || pvpGuideSeen;
@@ -2204,6 +2205,7 @@ export const BoardWithAPI: React.FC = () => {
       deployIconBaseSizeBounded: deployIconBaseSizeBoundedStr
         ? JSON.parse(deployIconBaseSizeBoundedStr)
         : true,
+      deployShootLoS: deployShootLoSStr ? JSON.parse(deployShootLoSStr) : false,
     };
   });
 
@@ -2228,6 +2230,11 @@ export const BoardWithAPI: React.FC = () => {
   const handleToggleBattleShockTest = (value: boolean) => {
     setSettings((prev) => ({ ...prev, battleShockTestEnabled: value }));
     localStorage.setItem("battleShockTestEnabled", JSON.stringify(value));
+  };
+
+  const handleToggleDeployShootLoS = (value: boolean) => {
+    setSettings((prev) => ({ ...prev, deployShootLoS: value }));
+    localStorage.setItem("deployShootLoS", JSON.stringify(value));
   };
 
   const handleToggleDebugLoS = (value: boolean) => {
@@ -4936,6 +4943,7 @@ export const BoardWithAPI: React.FC = () => {
             ruleChoiceHighlightedUnitId={highlightedRuleChoiceUnitId}
             showHexCoordinates={settings.showDebug}
             showLosDebugOverlay={settings.showDebugLoS}
+            deployShootLoS={settings.deployShootLoS}
             onUnitIllustrationPreviewChange={setIllustrationPreviewUnitId}
             onUnitDisplaySelectChange={setDisplaySelectedUnitId}
             eligibleUnitIds={apiProps.eligibleUnitIds}
@@ -6303,6 +6311,8 @@ export const BoardWithAPI: React.FC = () => {
         onToggleRetreatAlert={handleToggleRetreatAlert}
         battleShockTestEnabled={settings.battleShockTestEnabled}
         onToggleBattleShockTest={handleToggleBattleShockTest}
+        deployShootLoS={settings.deployShootLoS}
+        onToggleDeployShootLoS={handleToggleDeployShootLoS}
         modeGuidesActivated={settings.modeGuidesActivated}
         onToggleModeGuidesActivated={handleToggleModeGuidesActivated}
         deployIconBaseSizeBounded={settings.deployIconBaseSizeBounded}

@@ -302,11 +302,9 @@ def deployment_build_model_destinations_pool(
             sc, sr = int(sibling["col"]), int(sibling["row"])
         same_squad_occupied.update(_model_footprint(game_state, sibling, int(sc), int(sr)))
 
-    import time as _time
     from engine.hex_utils import offset_to_cube
-    _t0 = _time.perf_counter()
     if not pool_set:
-        return {"destinations": [], "_debug_ms": 0, "_zone_size": 0}
+        return {"destinations": []}
     blocked = set(wall_hexes) | other_occ | same_squad_occupied
     # Empreinte de la fig en offsets CUBE, calculée UNE fois à une réf (invariante par translation
     # rigide). Évite |zone| appels à _model_footprint (géométrie lourde). pool/blocked en cube →
@@ -330,9 +328,7 @@ def deployment_build_model_destinations_pool(
                 break
         if ok:
             destinations.append((int(cc), int(rr)))
-    _ms = round((_time.perf_counter() - _t0) * 1000)
-    print(f"[PERF deploy_model_destinations] zone={len(pool_set)} pool={len(destinations)} ms={_ms}", flush=True)
-    return {"destinations": destinations, "_debug_ms": _ms, "_zone_size": len(pool_set)}
+    return {"destinations": destinations}
 
 
 def deployment_build_squad_destinations_pool(
@@ -378,8 +374,6 @@ def deployment_build_squad_destinations_pool(
         x, y, z = offset_to_cube(int(cc), int(rr))
         offsets.append((x - rx, y - ry, z - rz))
 
-    import time as _time
-    _t0 = _time.perf_counter()
     # pool en CUBE → test d'appartenance direct, sans cube_to_offset dans la boucle interne.
     pool_cube = {offset_to_cube(int(c), int(r)) for (c, r) in pool_set}
     destinations: List[Tuple[int, int]] = []
@@ -392,9 +386,7 @@ def deployment_build_squad_destinations_pool(
                 break
         if ok:
             destinations.append((int(cc), int(rr)))
-    _ms = round((_time.perf_counter() - _t0) * 1000)
-    print(f"[PERF deploy_squad_destinations] zone={len(pool_set)} combined={len(offsets)} pool={len(destinations)} ms={_ms}", flush=True)
-    return {"destinations": destinations, "_debug_ms": _ms, "_zone_size": len(pool_set)}
+    return {"destinations": destinations}
 
 
 def deployment_preview_plan(

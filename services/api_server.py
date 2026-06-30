@@ -2149,8 +2149,6 @@ def execute_action():
                 "action": "deploy_model_destinations",
                 "model_id": str(model_id),
                 "destinations": [[int(c), int(r)] for c, r in _dep_pool["destinations"]],
-                "_debug_ms": _dep_pool.get("_debug_ms"),
-                "_zone_size": _dep_pool.get("_zone_size"),
             },
         })
 
@@ -2176,8 +2174,6 @@ def execute_action():
             "result": {
                 "action": "deploy_squad_destinations",
                 "destinations": [[int(c), int(r)] for c, r in _squad_pool["destinations"]],
-                "_debug_ms": _squad_pool.get("_debug_ms"),
-                "_zone_size": _squad_pool.get("_zone_size"),
             },
         })
 
