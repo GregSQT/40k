@@ -1575,6 +1575,17 @@ export const BoardWithAPI: React.FC = () => {
   });
   const gameLog = useGameLog(apiProps.gameState?.currentTurn ?? 1);
 
+  // Desperate Escape : on mémorise l'instant d'ouverture du popup hazard pour ignorer le
+  // clic-fond (qui l'annule) pendant ~400 ms. Sinon, sur un DOUBLE-clic d'activation, le 1er
+  // clic ouvre le popup et le 2e tombe sur le fond et le referme aussitôt → l'utilisateur croit
+  // que le popup ne se déclenche pas en double-clic.
+  const hazardPopupOpenedAtRef = useRef<number>(0);
+  useEffect(() => {
+    if (apiProps.hazardWarningPopup) {
+      hazardPopupOpenedAtRef.current = performance.now();
+    }
+  }, [apiProps.hazardWarningPopup]);
+
   // Detect game mode from URL
   const location = useLocation();
   const navigate = useNavigate();
@@ -6201,7 +6212,11 @@ export const BoardWithAPI: React.FC = () => {
             justifyContent: "center",
             zIndex: 12000,
           }}
-          onClick={() => apiProps.onCancelHazardWarning()}
+          onClick={() => {
+            // Ignore le 2e clic d'un double-clic d'activation (fenêtre courte après ouverture).
+            if (performance.now() - hazardPopupOpenedAtRef.current < 400) return;
+            apiProps.onCancelHazardWarning();
+          }}
           onKeyDown={() => apiProps.onCancelHazardWarning()}
         >
           <div
