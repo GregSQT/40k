@@ -50,7 +50,7 @@ function BattleShockIcon() {
 }
 
 /** Double chevron droit blanc sur fond orange — avance (09.06). */
-function AdvancedIcon() {
+export function AdvancedIcon() {
   return (
     <svg className="unit-status-badge__svg" viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="12" r="10" fill="#ea580c" stroke="#7c2d12" strokeWidth="1.5" />
@@ -75,7 +75,7 @@ function AdvancedIcon() {
 }
 
 /** Chevron droit simple blanc sur fond vert — mouvement (09.05). */
-function MovedIcon() {
+export function MovedIcon() {
   return (
     <svg className="unit-status-badge__svg" viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="12" r="10" fill="#3fa32a" stroke="#1f5214" strokeWidth="1.5" />
@@ -92,7 +92,7 @@ function MovedIcon() {
 }
 
 /** Double chevron droit blanc sur fond violet — charge / Fights First (11.04). */
-function ChargedIcon() {
+export function ChargedIcon() {
   return (
     <svg className="unit-status-badge__svg" viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="12" r="10" fill="#7c3aed" stroke="#3b1a78" strokeWidth="1.5" />

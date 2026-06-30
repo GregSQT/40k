@@ -9,6 +9,7 @@ import {
   getEventIcon,
   getEventTypeClass,
 } from "../../../shared/gameLogStructure.ts";
+import { AdvancedIcon, ChargedIcon, MovedIcon } from "./UnitStatusBadges";
 
 const RULE_TOKEN_REGEX = /\[([^\]]+)\]/g;
 
@@ -547,6 +548,12 @@ export const GameLog: React.FC<GameLogProps> = ({
                             <polyline points="6,9.5 12,15.5 18,9.5" fill="none" stroke="#991b1b" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
                           </svg>
                         )
+                      ) : event.type === "advance" || event.action_name === "ADVANCED" ? (
+                        <AdvancedIcon />
+                      ) : event.type === "move" ? (
+                        <MovedIcon />
+                      ) : event.type === "charge" ? (
+                        <ChargedIcon />
                       ) : (
                         getEventIcon(event.type)
                       )}

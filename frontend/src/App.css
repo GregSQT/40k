@@ -2160,10 +2160,9 @@ textarea:focus {
 
 /* Icon squares with colored backgrounds - Uses centralized CSS variables */
 .game-log-entry__icon--move {
-  background: rgba(var(--icon-move-bg-rgb), var(--icon-square-bg-alpha-gamelog));
-  border: var(--icon-square-border-width) px solid
-    rgba(var(--icon-move-bg-rgb), var(--icon-square-border-alpha-gamelog));
-  border-radius: var(--icon-square-border-radius) px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 
 .game-log-entry__icon--reactive_move {
@@ -2213,10 +2212,9 @@ textarea:focus {
 }
 
 .game-log-entry__icon--charge {
-  background: rgba(var(--icon-charge-bg-rgb), var(--icon-square-bg-alpha-gamelog));
-  border: var(--icon-square-border-width) px solid
-    rgba(var(--icon-charge-bg-rgb), var(--icon-square-border-alpha-gamelog));
-  border-radius: var(--icon-square-border-radius) px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 
 .game-log-entry__icon--charge_impact {
@@ -2274,10 +2272,9 @@ textarea:focus {
 }
 
 .game-log-entry__icon--advance {
-  background: rgba(139, 69, 19, var(--icon-square-bg-alpha-gamelog)); /* Brown for advance */
-  border: var(--icon-square-border-width) px solid
-    rgba(139, 69, 19, var(--icon-square-border-alpha-gamelog));
-  border-radius: var(--icon-square-border-radius) px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 
 .game-log-entry__turn {
