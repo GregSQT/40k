@@ -147,7 +147,10 @@ function ManualOrderPicker({
   onSubmit: (order: number[]) => void;
 }) {
   // L'état est réinitialisé par remount (key sur le call-site) à chaque nouvelle requête.
+  // Mortal wounds (hazard) : mêmes contraintes d'ordre que le tir (06.02 ≡ 05.03) → ordre
+  // mappé sur "shoot" ; seul l'affichage change (pas d'arme, pas de save).
   const kind: "shoot" | "fight" = request.kind === "fight" ? "fight" : "shoot";
+  const isMortal = request.damage_type === "mortal";
   // Ordre complet pré-rempli (contrainte + préférence mémorisée) ; réordonnable par DnD.
   const [orderedGroups, setOrderedGroups] = useState<ManualOrderGroup[]>(() =>
     defaultManualOrder(request.groups, kind, true)
@@ -204,7 +207,7 @@ function ManualOrderPicker({
   return (
     <div
       className="weapon-dropdown"
-      style={{ position: "absolute", left: `${pos.x}px`, top: `${pos.y}px` }}
+      style={{ position: "fixed", left: `${pos.x}px`, top: `${pos.y}px`, zIndex: 100000 }}
     >
       <button type="button" className="weapon-dropdown-handle" onMouseDown={onDragStart}>
         ⠿ ORDRE D'ALLOCATION — Unité {request.target_unit_id}
@@ -212,16 +215,21 @@ function ManualOrderPicker({
       </button>
       <div className="weapon-dropdown-subtitle">
         <div className="alloc-saves">
-          {request.wounds_to_save} save{request.wounds_to_save > 1 ? "s" : ""}
-          <span className="alloc-stats">
-            {" "}
-            · PA {request.weapon_ap} · Dég {request.weapon_damage}
-          </span>
+          {request.wounds_to_save} {isMortal ? "mortal wound" : "save"}
+          {request.wounds_to_save > 1 ? "s" : ""}
+          {!isMortal && (
+            <span className="alloc-stats">
+              {" "}
+              · PA {request.weapon_ap} · Dég {request.weapon_damage}
+            </span>
+          )}
         </div>
         <div className="alloc-weapons">
-          {weaponNames.map((n) => (
-            <div key={n}>{n}</div>
-          ))}
+          {isMortal ? (
+            <div>Mortal Wounds</div>
+          ) : (
+            weaponNames.map((n) => <div key={n}>{n}</div>)
+          )}
         </div>
       </div>
       <table className="weapon-table">
@@ -230,8 +238,8 @@ function ManualOrderPicker({
             <th>#</th>
             <th>Unit</th>
             <th>W</th>
-            <th>Sv</th>
-            <th>Inv</th>
+            {!isMortal && <th>Sv</th>}
+            {!isMortal && <th>Inv</th>}
             <th>Nb</th>
             <th>Type</th>
           </tr>
@@ -258,8 +266,8 @@ function ManualOrderPicker({
                 <td>⠿ {i + 1}</td>
                 <td>{prettifyUnitType(g.unit_type) || (g.is_character ? "CHARACTER" : "Figs")}</td>
                 <td>{g.W}</td>
-                <td>{g.Sv}+</td>
-                <td>{g.InSv < 7 ? `${g.InSv}+` : "-"}</td>
+                {!isMortal && <td>{g.Sv}+</td>}
+                {!isMortal && <td>{g.InSv < 7 ? `${g.InSv}+` : "-"}</td>}
                 <td>{g.model_ids.length}</td>
                 <td>
                   {g.is_character ? "CHAR " : ""}

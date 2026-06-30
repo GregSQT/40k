@@ -66,6 +66,12 @@ class ManualAllocCtx:
     emit_unit_death_log: bool = False
     on_target_damaged: Optional[Callable[[Dict[str, Any], str], None]] = None
     on_unit_destroyed: Optional[Callable[[Dict[str, Any], str], None]] = None
+    # Mode mortal wounds (hazard 06.03) : pas d arme, pas de save, degat fixe, log dedie.
+    mortal: bool = False
+    # Resolution d une blessure du pool (defaut tir : _resolve_one_manual_wound).
+    resolve_wound_fn: Optional[Callable[..., None]] = None
+    # Emission des logs en fin d allocation (defaut tir : _emit_squad_shoot_log par groupe).
+    finalize_log_fn: Optional[Callable[..., None]] = None
 
 
 SHOOT_CTX = ManualAllocCtx(
@@ -3137,12 +3143,17 @@ def roll_hazard_for_unit(unit_id: str, game_state: Dict[str, Any], auto_resolve:
     if total_wounds <= 0:
         append_action_log(game_state, log_payload)  # rien à allouer : émission immédiate
         return total_wounds
-    # 06.02 : attribution figurine par figurine via destroy_model (retrait propre),
-    # PAS l'agrégat units_cache qui ne retirait aucune figurine sur du multi-fig.
-    game_state["hazard_pending_log"] = log_payload
-    allocate_mortal_wounds(game_state, str(unit_id), total_wounds, auto_resolve, details)
-    if game_state.get("pending_hazard_allocation") is None:
-        _finalize_hazard_log(game_state)  # auto/forcé : terminé sans clic → émission
+    if auto_resolve:
+        # IA / gym : attribution 06.02 deterministe, sans prompt. Retrait figurine par
+        # figurine via destroy_model (PAS l'agregat units_cache qui ne retirait rien en multi-fig).
+        game_state["hazard_pending_log"] = log_payload
+        allocate_mortal_wounds(game_state, str(unit_id), total_wounds, auto_resolve, details)
+        _finalize_hazard_log(game_state)  # auto : termine sans clic → emission immediate
+        return total_wounds
+    # Defenseur humain : allocation manuelle des pertes (groupes 05.03 + declaration d'ordre +
+    # choix de figurine), calquee sur le tir. log_payload est emis a la FIN de l'allocation,
+    # complete de ses hazardDetails (cf. build_manual_hazard_allocation).
+    build_manual_hazard_allocation(game_state, str(unit_id), total_wounds, log_payload)
     return total_wounds
 
 
@@ -3191,13 +3202,14 @@ def allocate_mortal_wounds(
     game_state: Dict[str, Any], squad_id: str, n_wounds: int, auto_resolve: bool,
     details_sink: List[Dict[str, Any]],
 ) -> int:
-    """Attribue ``n_wounds`` mortal wounds à une unité (séquence 06.02), une par une.
+    """Attribue ``n_wounds`` mortal wounds à une unité (séquence 06.02), une par une, en
+    mode AUTO uniquement (IA / gym). Le défenseur humain passe par
+    ``build_manual_hazard_allocation`` (allocation manuelle des pertes calquée sur le tir).
 
-    - ``auto_resolve=True`` (IA / gym, pas de prompt possible) : choix déterministe
-      ``eligibles[0]`` quand plusieurs figs sont également éligibles.
-    - ``auto_resolve=False`` (joueur humain) : si un choix existe (>= 2 figs également
-      éligibles), l'allocation est SUSPENDUE — on pose ``pending_hazard_allocation`` et
-      on rend la main (le clic figurine reprendra via ``apply_hazard_allocate_model``).
+    - ``auto_resolve=True`` : choix déterministe ``eligibles[0]`` quand plusieurs figs sont
+      également éligibles.
+    - ``auto_resolve=False`` : non supporté ici → erreur explicite (root cause : appeler
+      ``build_manual_hazard_allocation``).
 
     Chaque MW retire 1 HP à la figurine choisie ; la figurine n'est retirée du jeu
     (``destroy_model`` reason='hazard') qu'à ``HP_CUR == 0``. On s'arrête si l'unité
@@ -3206,7 +3218,7 @@ def allocate_mortal_wounds(
     ``details_sink`` reçoit 1 record ``{modelId, col, row, died}`` par MW appliquée
     (col/row capturés AVANT destroy) — alimente ``hazardDetails`` du log, comme le tir.
 
-    Retourne le nombre de mortal wounds réellement attribués avant un éventuel pending.
+    Retourne le nombre de mortal wounds réellement attribués.
     """
     models_cache = require_key(game_state, "models_cache")
     sid = str(squad_id)
@@ -3216,20 +3228,12 @@ def allocate_mortal_wounds(
         eligibles = select_eligible_models(game_state, sid)
         if not eligibles:
             break  # unité détruite : plus rien à blesser
-        if len(eligibles) == 1 or auto_resolve:
-            target = eligibles[0]
-        else:
-            # Choix joueur humain : suspendre l'allocation, poser le prompt.
-            unit = get_unit_by_id(game_state, sid)
-            if unit is None:
-                raise KeyError(f"allocate_mortal_wounds: unit {sid} not found")
-            game_state["pending_hazard_allocation"] = {
-                "squad_id": sid,
-                "controlling_player": int(require_key(unit, "player")),
-                "wounds_remaining": remaining,
-                "resume": "move_activation",
-            }
-            return applied
+        if not auto_resolve:
+            raise ValueError(
+                "allocate_mortal_wounds: chemin humain non supporté ici "
+                "(utiliser build_manual_hazard_allocation pour le défenseur humain)"
+            )
+        target = eligibles[0]
         new_hp = int(models_cache[target]["HP_CUR"]) - 1
         col = models_cache[target].get("col")  # get allowed
         row = models_cache[target].get("row")  # get allowed
@@ -3243,79 +3247,6 @@ def allocate_mortal_wounds(
         applied += 1
         remaining -= 1
     return applied
-
-
-def hazard_allocation_waiting_payload(game_state: Dict[str, Any]) -> Dict[str, Any]:
-    """Payload waiting d'une attribution de mortal wounds (hazard) en cours.
-
-    Read-only : reconstruit les figurines choisissables (séquence 06.02 courante) +
-    ``wounds_remaining``. Utilisé par le garde-fou et après chaque clic. Suppose un
-    ``pending_hazard_allocation`` présent (sinon lève). Forme calquée sur l'allocation
-    manuelle du tir (``choices: [{model_id, col, row, HP_CUR, HP_MAX}]``)."""
-    pending = require_key(game_state, "pending_hazard_allocation")
-    models_cache = require_key(game_state, "models_cache")
-    sid = str(pending["squad_id"])
-    eligibles = select_eligible_models(game_state, sid)
-    choices = [
-        {
-            "model_id": mid,
-            "col": models_cache[mid].get("col"),  # get allowed
-            "row": models_cache[mid].get("row"),  # get allowed
-            "HP_CUR": int(models_cache[mid]["HP_CUR"]),
-            "HP_MAX": int(models_cache[mid]["HP_MAX"]),
-        }
-        for mid in eligibles
-    ]
-    return {
-        "action": "squad_hazard_manual_alloc",
-        "waiting_for_player": True,
-        "phase": "move",
-        "allocation": {
-            "squad_id": sid,
-            "controlling_player": int(pending["controlling_player"]),
-            "choices": choices,
-            "wounds_remaining": int(pending["wounds_remaining"]),
-        },
-    }
-
-
-def apply_hazard_allocate_model(game_state: Dict[str, Any], model_id: str) -> None:
-    """Applique 1 mortal wound à la figurine choisie par le joueur (clic), puis poursuit
-    la séquence 06.02 : figs forcées en auto, nouveau prompt si un nouveau choix apparaît.
-
-    Suppose un ``pending_hazard_allocation`` présent. Lève si la figurine n'est pas
-    éligible à l'étape courante, ou si aucun choix n'était réellement en attente."""
-    pending = require_key(game_state, "pending_hazard_allocation")
-    models_cache = require_key(game_state, "models_cache")
-    sid = str(pending["squad_id"])
-    mid = str(model_id)
-    eligibles = select_eligible_models(game_state, sid)
-    if mid not in eligibles:
-        raise ValueError(
-            f"apply_hazard_allocate_model: model {mid} non éligible (éligibles={eligibles})"
-        )
-    if len(eligibles) < 2:
-        raise ValueError("apply_hazard_allocate_model: aucun choix en attente (allocation forcée)")
-    remaining = int(pending["wounds_remaining"])
-    sink = require_key(game_state, "hazard_pending_log")["hazardDetails"]
-    col = models_cache[mid].get("col")  # get allowed
-    row = models_cache[mid].get("row")  # get allowed
-    new_hp = int(models_cache[mid]["HP_CUR"]) - 1
-    if new_hp <= 0:
-        destroy_model(game_state, mid, reason="hazard")
-        died = True
-    else:
-        update_model_hp(game_state, mid, new_hp)
-        died = False
-    sink.append({"modelId": mid, "col": col, "row": row, "died": died})
-    remaining -= 1
-    # Wound courante consommée : on efface le pending puis on poursuit la séquence
-    # (auto pour les figs forcées ; re-pose un pending si un nouveau choix apparaît).
-    del game_state["pending_hazard_allocation"]
-    if remaining > 0:
-        allocate_mortal_wounds(game_state, sid, remaining, auto_resolve=False, details_sink=sink)
-    if game_state.get("pending_hazard_allocation") is None:
-        _finalize_hazard_log(game_state)  # attribution terminée → émission de la ligne
 
 
 def is_unit_at_half_strength(unit_id: str, game_state: Dict[str, Any]) -> bool:
@@ -5227,22 +5158,27 @@ def _declare_order_payload(
     } for g in live_groups]
     alloc = require_key(game_state, ctx.alloc_key)
     attacker_unit_id = str(alloc["attacker_squad_id"])
-    wg = alloc["weapon_groups"][batch["weapon_group_idx"]]
+    order_request: Dict[str, Any] = {
+        "attacker_unit_id": attacker_unit_id,
+        "target_unit_id": batch["target_sid"],
+        "defender_player": batch["defender_player"],
+        "wounds_to_save": len(batch["pool"]),
+        "groups": groups,
+    }
+    if ctx.mortal:
+        # Mortal wounds (hazard) : pas d arme, pas de save (armure ET invul ignorees, 10e).
+        order_request["damage_type"] = "mortal"
+    else:
+        wg = alloc["weapon_groups"][batch["weapon_group_idx"]]
+        order_request["weapon_name"] = wg["weapon_name"]
+        order_request["weapon_names"] = wg.get("weapon_names", [wg["weapon_name"]])
+        order_request["weapon_ap"] = int(wg["ap"])
+        order_request["weapon_damage"] = wg["dmg_raw"]
     return {
         "action": ctx.declare_order_action,
         "waiting_for_player": True,
         "phase": ctx.phase_label,
-        "order_request": {
-            "attacker_unit_id": attacker_unit_id,
-            "target_unit_id": batch["target_sid"],
-            "defender_player": batch["defender_player"],
-            "weapon_name": wg["weapon_name"],
-            "weapon_names": wg.get("weapon_names", [wg["weapon_name"]]),
-            "weapon_ap": int(wg["ap"]),
-            "weapon_damage": wg["dmg_raw"],
-            "wounds_to_save": len(batch["pool"]),
-            "groups": groups,
-        },
+        "order_request": order_request,
     }
 
 
@@ -5472,8 +5408,11 @@ def _finalize_manual_allocation(game_state: Dict[str, Any], ctx: ManualAllocCtx)
     alloc = require_key(game_state, ctx.alloc_key)
     models_cache = require_key(game_state, "models_cache")
     summary = alloc["summary"]
-    for g in alloc["weapon_groups"]:
-        _emit_squad_shoot_log(game_state, g, ctx)
+    if ctx.finalize_log_fn is not None:
+        ctx.finalize_log_fn(game_state, alloc, ctx)
+    else:
+        for g in alloc["weapon_groups"]:
+            _emit_squad_shoot_log(game_state, g, ctx)
     targets_meta = summary.get("targets_meta", {})  # get allowed
     summary["squads_wiped"] = [
         sid for sid in targets_meta
@@ -5552,7 +5491,7 @@ def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> 
                     batch["current_model_id"] = wounded[0]  # regle : finir une fig entamee
                 else:
                     return _manual_waiting_payload(game_state, batch, alive_grp, ctx)  # choix libre
-            _resolve_one_manual_wound(game_state, alloc, batch, ctx)
+            (ctx.resolve_wound_fn or _resolve_one_manual_wound)(game_state, alloc, batch, ctx)
         if not advanced_batch:
             break
     return _finalize_manual_allocation(game_state, ctx)
@@ -5683,6 +5622,105 @@ def _build_manual_allocation(
 def build_manual_shoot_allocation(game_state: Dict[str, Any], attacker_squad_id: str) -> Dict[str, Any]:
     """Allocation manuelle des pertes au TIR (defenseur humain). Cf. _build_manual_allocation."""
     return _build_manual_allocation(game_state, attacker_squad_id, SHOOT_CTX, _manual_roll_intent)
+
+
+def _resolve_one_hazard_wound(
+    game_state: Dict[str, Any], alloc: Dict[str, Any], batch: Dict[str, Any], ctx: ManualAllocCtx
+) -> None:
+    """Resout 1 mortal wound (hazard 06.03) sur batch["current_model_id"].
+
+    Mortal wound : AUCUNE sauvegarde (armure ET invulnerable ignorees, 10e) et 1 point de
+    degat. destroy_model (reason='hazard') si HP<=0, sinon update_model_hp. Remplit
+    ``alloc["hazard_details"]`` (forme {modelId,col,row,died}) pour le log differe. Remet
+    current_model_id a None si la fig meurt (declenche un nouveau choix)."""
+    models_cache = require_key(game_state, "models_cache")
+    summary = alloc["summary"]
+    cur = batch["current_model_id"]
+    m = models_cache[cur]
+    col = m.get("col")  # get allowed
+    row = m.get("row")  # get allowed
+    hp_before = int(m["HP_CUR"])
+    new_hp = hp_before - 1
+    destroyed = new_hp <= 0
+    summary["failed_saves"] += 1
+    summary["damage_total"] += 1
+    if destroyed:
+        destroy_model(game_state, cur, reason="hazard")
+        summary["models_killed"] += 1
+    else:
+        update_model_hp(game_state, cur, new_hp)
+    alloc["hazard_details"].append(
+        {"modelId": str(cur), "col": col, "row": row, "died": destroyed}
+    )
+    batch["pool_index"] += 1
+    if destroyed:
+        batch["current_model_id"] = None
+
+
+def _finalize_hazard_alloc_log(
+    game_state: Dict[str, Any], alloc: Dict[str, Any], ctx: ManualAllocCtx
+) -> None:
+    """Emet la ligne de log hazard differee, completee de ses hazardDetails, en fin
+    d allocation manuelle (calquee sur le tir : log emis avec ses details complets)."""
+    payload = alloc["hazard_log_payload"]
+    payload["hazardDetails"] = alloc["hazard_details"]
+    append_action_log(game_state, payload)
+
+
+HAZARD_CTX = ManualAllocCtx(
+    alloc_key="pending_hazard_allocation",
+    declare_order_action="squad_hazard_declare_order",
+    manual_alloc_action="squad_hazard_manual_alloc",
+    phase_label="move",
+    log_type="hazard",
+    log_verb="HAZARD",
+    attacks_left_attr="",  # non utilise (pas d intents/armes)
+    intents_key="",         # non utilise (pas d intents/armes)
+    mortal=True,
+    resolve_wound_fn=_resolve_one_hazard_wound,
+    finalize_log_fn=_finalize_hazard_alloc_log,
+)
+
+
+def build_manual_hazard_allocation(
+    game_state: Dict[str, Any], squad_id: str, n_wounds: int, log_payload: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Allocation manuelle des mortal wounds d un Desperate Escape (hazard 06.03), defenseur
+    humain. Reutilise la couche allocation des pertes du tir (groupes 05.03, declaration
+    d ordre, choix de figurine, regle 06.02) mais SANS save et a degat fixe (cf. HAZARD_CTX).
+
+    Construit l etat d allocation (un seul lot ; la "cible" = l unite elle-meme ; pool de
+    n_wounds), persiste ``log_payload`` pour emission differee a la fin, puis rend la main au
+    joueur (declaration d ordre ou choix de fig) ou termine directement (figs forcees)."""
+    sid = str(squad_id)
+    units_cache = require_key(game_state, "units_cache")
+    uc = require_key(units_cache, sid)
+    defender_player = int(require_key(uc, "player"))
+    summary: Dict[str, Any] = {
+        "attacks_made": 0, "hits": 0, "wounds": int(n_wounds), "failed_saves": 0,
+        "damage_total": 0, "models_killed": 0, "events": [],
+        "targets_meta": {sid: {"player": defender_player}},
+    }
+    batch = {
+        "target_sid": sid,
+        "weapon_group_idx": None,
+        "defender_player": defender_player,
+        "alloc_groups": None,
+        "declared_order": None, "current_group_index": 0,
+        "current_model_id": None,
+        # Items minimaux : "rec" present pour _mark_manual_overkill_wasted (overkill MW perdues).
+        "pool": [{"rec": {}} for _ in range(int(n_wounds))], "pool_index": 0,
+    }
+    game_state[HAZARD_CTX.alloc_key] = {
+        "attacker_squad_id": sid,
+        "weapon_groups": [],
+        "batches": [batch],
+        "current_batch_index": 0,
+        "summary": summary,
+        "hazard_details": [],
+        "hazard_log_payload": log_payload,
+    }
+    return _manual_allocation_step(game_state, HAZARD_CTX)
 
 
 def apply_manual_shoot_declare_order(game_state: Dict[str, Any], order: List[Any], ctx: ManualAllocCtx) -> Dict[str, Any]:

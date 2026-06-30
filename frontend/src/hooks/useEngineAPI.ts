@@ -413,16 +413,18 @@ export interface ManualOrderGroup {
 }
 
 export interface ManualOrderRequest {
-  /** "shoot" = ordre d'allocation du tir (défaut) ; "fight" = du combat. */
-  kind?: "shoot" | "fight";
+  /** "shoot" = ordre d'allocation du tir (défaut) ; "fight" = du combat ; "hazard" = mortal wounds Desperate Escape. */
+  kind?: "shoot" | "fight" | "hazard";
   attacker_unit_id: string;
   target_unit_id: string;
   defender_player: number;
-  weapon_name: string;
+  /** "mortal" = mortal wounds (hazard) : pas d'arme, pas de save → colonnes Sv/Inv masquées. */
+  damage_type?: "mortal";
+  weapon_name?: string;
   /** Noms distincts des armes de profil identique fusionnées dans ce lot (04.03). */
   weapon_names?: string[];
-  weapon_ap: number;
-  weapon_damage: number | string;
+  weapon_ap?: number;
+  weapon_damage?: number | string;
   wounds_to_save: number;
   groups: ManualOrderGroup[];
 }
@@ -1756,14 +1758,20 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           // le backend attend l'ordre avant l'allocation fig par fig.
           if (
             (data.result?.action === "squad_shoot_declare_order" ||
-              data.result?.action === "squad_fight_declare_order") &&
+              data.result?.action === "squad_fight_declare_order" ||
+              data.result?.action === "squad_hazard_declare_order") &&
             data.result?.waiting_for_player === true &&
             data.result?.order_request
           ) {
-            const isFightOrder = data.result.action === "squad_fight_declare_order";
+            const orderKind =
+              data.result.action === "squad_fight_declare_order"
+                ? "fight"
+                : data.result.action === "squad_hazard_declare_order"
+                  ? "hazard"
+                  : "shoot";
             setManualOrderRequest({
               ...(data.result.order_request as ManualOrderRequest),
-              kind: isFightOrder ? "fight" : "shoot",
+              kind: orderKind,
             });
             if (manualAllocationRef.current !== null) setManualAllocation(null);
             setGameState((p) => {
@@ -1782,14 +1790,20 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           // le même payload tant que l'allocation n'est pas terminée → l'état se ré-arme.
           if (
             (data.result?.action === "squad_shoot_manual_alloc" ||
-              data.result?.action === "squad_fight_manual_alloc") &&
+              data.result?.action === "squad_fight_manual_alloc" ||
+              data.result?.action === "squad_hazard_manual_alloc") &&
             data.result?.waiting_for_player === true &&
             data.result?.allocation
           ) {
-            const isFightAlloc = data.result.action === "squad_fight_manual_alloc";
+            const allocKind =
+              data.result.action === "squad_fight_manual_alloc"
+                ? "fight"
+                : data.result.action === "squad_hazard_manual_alloc"
+                  ? "hazard"
+                  : "shoot";
             setManualAllocation({
               ...(data.result.allocation as ManualAllocation),
-              kind: isFightAlloc ? "fight" : "shoot",
+              kind: allocKind,
             });
             if (manualOrderRequestRef.current !== null) setManualOrderRequest(null);
             setGameState((p) => {
@@ -1812,38 +1826,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               setHazardWarningPopup(hp);
               hazardWarningPopupRef.current = hp; // synchro immédiate pour le gate post-await
             }
-            setGameState((p) => {
-              const merged = mergeGameStatePreservingOmittedObjectives(
-                p,
-                data.game_state as APIGameState
-              );
-              latestGameStateRef.current = merged;
-              return merged;
-            });
-            return;
-          }
-
-          // Desperate Escape : attribution manuelle des mortal wounds (06.02). Même rendu que
-          // l'allocation du tir (anneaux + clic figurine) via le flag kind:"hazard".
-          if (
-            data.result?.action === "squad_hazard_manual_alloc" &&
-            data.result?.waiting_for_player === true &&
-            data.result?.allocation
-          ) {
-            const ha = data.result.allocation as {
-              squad_id: string;
-              controlling_player: number;
-              choices: ManualAllocation["choices"];
-              wounds_remaining: number;
-            };
-            setManualAllocation({
-              kind: "hazard",
-              attacker_unit_id: String(ha.squad_id),
-              target_unit_id: String(ha.squad_id),
-              defender_player: ha.controlling_player,
-              choices: ha.choices,
-              wounds_remaining: ha.wounds_remaining,
-            });
             setGameState((p) => {
               const merged = mergeGameStatePreservingOmittedObjectives(
                 p,
@@ -4945,7 +4927,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (!req) return;
       try {
         await executeAction({
-          action: req.kind === "fight" ? "squad_fight_declare_order" : "squad_shoot_declare_order",
+          action:
+            req.kind === "fight"
+              ? "squad_fight_declare_order"
+              : req.kind === "hazard"
+                ? "squad_hazard_declare_order"
+                : "squad_shoot_declare_order",
           unitId: String(req.attacker_unit_id),
           order,
         });
