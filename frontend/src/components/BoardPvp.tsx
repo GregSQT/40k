@@ -1264,6 +1264,9 @@ export default function Board({
   /** Déploiement : timestamp du dernier clic, pour ignorer le 2e clic d'un double-clic (qui sert à
    *  activer le suivi squad) et éviter une pose/sélection fig parasite. */
   const lastDeployClickTimeRef = useRef<number>(0);
+  /** Déploiement : sélection per-fig DIFFÉRÉE (désambiguïsation simple/double clic). Un double-clic
+   *  annule ce timer avant qu'il ne sélectionne → pas de flash de LoS per-fig. */
+  const deploySelectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Dernier clientX/clientY pendant la mesure — pour redessiner après un setState (ex. jonction) sans attendre mousemove. */
   const measurePointerClientRef = useRef<{ clientX: number; clientY: number } | null>(null);
   /** Toujours à jour : permet aux handlers (effet stable) de lire l’état courant sans redémonter l’effet à chaque jonction. */
@@ -3662,6 +3665,11 @@ export default function Board({
       if (phase === "deployment") {
         if (mode === "deploymentMove" && deployPlan?.placed) {
           e.preventDefault();
+          // Préempte la sélection per-fig différée du 1er clic → pas de flash de LoS.
+          if (deploySelectTimerRef.current !== null) {
+            clearTimeout(deploySelectTimerRef.current);
+            deploySelectTimerRef.current = null;
+          }
           deployCallbacksRef.current.onStartSquadFollowDeploy?.();
         }
         return;
@@ -4181,10 +4189,16 @@ export default function Board({
           deployCallbacksRef.current.onMoveDeployModelInPlan?.(dplan.activeModelId, col, row);
           return;
         }
-        // 4) Clic sur une figurine de l'escouade → la sélectionne pour repositionnement (per-fig).
+        // 4) Clic sur une figurine de l'escouade → sélection per-fig DIFFÉRÉE : on attend ~220 ms
+        //    qu'un éventuel double-clic (squad mode) la préempte, sinon pas de flash de LoS per-fig.
         if (foundModelId) {
           if (foundModelId === dplan.activeModelId) return;
-          deployCallbacksRef.current.onSelectDeployModel?.(foundModelId);
+          const midToSelect = foundModelId;
+          if (deploySelectTimerRef.current !== null) clearTimeout(deploySelectTimerRef.current);
+          deploySelectTimerRef.current = setTimeout(() => {
+            deploySelectTimerRef.current = null;
+            deployCallbacksRef.current.onSelectDeployModel?.(midToSelect);
+          }, 220);
           return;
         }
         return;
@@ -5195,6 +5209,20 @@ export default function Board({
       destPixels.push({ x: hxX(c), y: hxY(c, r), col: c, row: r });
     }
     const nearestDest = (px: number, py: number) => {
+      // Cas fréquent : curseur sur un hex valide → snap direct O(1) via Set.has, sans scanner le
+      // pool (qui peut faire >10k hex en déploiement → lag du mousemove sinon).
+      const { col: hc, row: hr } = pixelToHex(
+        px,
+        py,
+        boardConfig.hex_radius,
+        boardConfig.margin,
+        boardConfig.cols,
+        boardConfig.rows
+      );
+      if (pool.has(`${hc},${hr}`)) {
+        return { x: hxX(hc), y: hxY(hc, hr), col: hc, row: hr };
+      }
+      // Hors pool (mur / autre fig / hors zone) → plus proche hex valide par scan (cas rare).
       let best = destPixels[0]!;
       let bestD = Infinity;
       for (const dp of destPixels) {
@@ -5506,6 +5534,20 @@ export default function Board({
     }
 
     const nearestDest = (px: number, py: number) => {
+      // Cas fréquent : curseur sur un hex valide → snap direct O(1) via Set.has, sans scanner le
+      // pool (qui peut faire >10k hex en déploiement → lag du mousemove sinon).
+      const { col: hc, row: hr } = pixelToHex(
+        px,
+        py,
+        boardConfig.hex_radius,
+        boardConfig.margin,
+        boardConfig.cols,
+        boardConfig.rows
+      );
+      if (pool.has(`${hc},${hr}`)) {
+        return { x: hxX(hc), y: hxY(hc, hr), col: hc, row: hr };
+      }
+      // Hors pool (mur / autre fig / hors zone) → plus proche hex valide par scan (cas rare).
       let best = destPixels[0]!;
       let bestD = Infinity;
       for (const dp of destPixels) {
