@@ -2891,8 +2891,11 @@ export const BoardWithAPI: React.FC = () => {
                     const figCount = figModelIds.length;
                     // Icône par figurine : models_meta_by_model n'est exposé que pour
                     // les escouades hétérogènes ; sinon repli métier sur l'icône d'unité.
-                    const iconForModel = (modelId: string): string =>
-                      ucEntry?.models_meta_by_model?.[modelId]?.ICON ?? unit.ICON;
+                    const iconForModel = (modelId: string): string => {
+                      const baseIcon =
+                        ucEntry?.models_meta_by_model?.[modelId]?.ICON ?? unit.ICON;
+                      return player === 2 ? baseIcon.replace(".webp", "_red.webp") : baseIcon;
+                    };
                     // Taille d'icône = même ratio que le board (source unique
                     // getIconDiameterRatio), avec un HEX_RADIUS fictif de calibrage tel que
                     // l'infanterie standard ≈ 36px. Bornes optionnelles 24..60px.
