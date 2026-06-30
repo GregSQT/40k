@@ -225,11 +225,7 @@ function ManualOrderPicker({
           )}
         </div>
         <div className="alloc-weapons">
-          {isMortal ? (
-            <div>Mortal Wounds</div>
-          ) : (
-            weaponNames.map((n) => <div key={n}>{n}</div>)
-          )}
+          {isMortal ? <div>Mortal Wounds</div> : weaponNames.map((n) => <div key={n}>{n}</div>)}
         </div>
       </div>
       <table className="weapon-table">
@@ -2782,9 +2778,7 @@ export const BoardWithAPI: React.FC = () => {
             .map((id) => apiProps.gameState!.units.find((u) => String(u.id) === String(id)))
             .filter((u): u is Unit => Boolean(u));
           // 1 ligne par escouade, triée par unit ID (pas de regroupement par type).
-          const deployableSorted = [...deployableUnits].sort(
-            (a, b) => Number(a.id) - Number(b.id)
-          );
+          const deployableSorted = [...deployableUnits].sort((a, b) => Number(a.id) - Number(b.id));
           const isCurrentDeployer = player === currentDeployer;
           const isCollapsed = deploymentRosterCollapsed[player];
           const deployedUnitIds = deploymentState.deployed_units.map((id) => String(id));
@@ -2864,7 +2858,11 @@ export const BoardWithAPI: React.FC = () => {
                   {deployableSorted.map((unit) => {
                     const isSelected = apiProps.selectedUnitId === unit.id;
                     const displayName =
-                      unit.DISPLAY_NAME || unit.name || unit.type || unit.unitType || String(unit.id);
+                      unit.DISPLAY_NAME ||
+                      unit.name ||
+                      unit.type ||
+                      unit.unitType ||
+                      String(unit.id);
                     // Nombre de figurines = clés de occupied_hexes_by_model (source du board,
                     // toujours présente même pour une escouade non déployée à (-1,-1)).
                     const ucEntry = (
@@ -2911,8 +2909,7 @@ export const BoardWithAPI: React.FC = () => {
                     // Icône par figurine : models_meta_by_model n'est exposé que pour
                     // les escouades hétérogènes ; sinon repli métier sur l'icône d'unité.
                     const iconForModel = (modelId: string): string => {
-                      const baseIcon =
-                        ucEntry?.models_meta_by_model?.[modelId]?.ICON ?? unit.ICON;
+                      const baseIcon = ucEntry?.models_meta_by_model?.[modelId]?.ICON ?? unit.ICON;
                       return player === 2 ? baseIcon.replace(".webp", "_red.webp") : baseIcon;
                     };
                     // Taille d'icône = même ratio que le board (source unique
@@ -3001,22 +2998,29 @@ export const BoardWithAPI: React.FC = () => {
                           {figModelIds.map((figModelId) => {
                             const figPx = iconPxForModel(figModelId);
                             return (
-                            <img
-                              key={`deploy-fig-${player}-${unit.id}-${figModelId}`}
-                              src={iconForModel(figModelId)}
-                              alt={displayName}
-                              style={{
-                                width: `${figPx}px`,
-                                height: `${figPx}px`,
-                                objectFit: "contain",
-                                pointerEvents: "none",
-                                flex: "0 0 auto",
-                              }}
-                            />
+                              <img
+                                key={`deploy-fig-${player}-${unit.id}-${figModelId}`}
+                                src={iconForModel(figModelId)}
+                                alt={displayName}
+                                style={{
+                                  width: `${figPx}px`,
+                                  height: `${figPx}px`,
+                                  objectFit: "contain",
+                                  pointerEvents: "none",
+                                  flex: "0 0 auto",
+                                }}
+                              />
                             );
                           })}
                         </div>
-                        <span style={{ flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <span
+                          style={{
+                            flex: "1 1 auto",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
                           {displayName}
                         </span>
                         <span style={{ fontSize: "11px", opacity: 0.85, flex: "0 0 auto" }}>
@@ -4102,7 +4106,9 @@ export const BoardWithAPI: React.FC = () => {
                   style={{
                     border: "1px solid rgba(0,0,0,0.35)",
                     borderRadius: 6,
-                    background: apiProps.squadMovePlan.canValidate ? "var(--ui-green-validate)" : "var(--ui-green-validate-off)",
+                    background: apiProps.squadMovePlan.canValidate
+                      ? "var(--ui-green-validate)"
+                      : "var(--ui-green-validate-off)",
                     color: apiProps.squadMovePlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
                     cursor: apiProps.squadMovePlan.canValidate ? "pointer" : "not-allowed",
                     fontSize: 14,
@@ -4225,7 +4231,10 @@ export const BoardWithAPI: React.FC = () => {
                     {label}
                   </button>
                 );
-                const green = { relief: "var(--ui-green-validate)", dark: "var(--ui-green-validate-off)" };
+                const green = {
+                  relief: "var(--ui-green-validate)",
+                  dark: "var(--ui-green-validate-off)",
+                };
                 const orange = { relief: "#ea580c", dark: "#431407" };
                 const yellow = { relief: "#ca8a04", dark: "#422006" };
                 const grey = { relief: "var(--ui-gray-cancel)", dark: "#1f2937" };
@@ -4308,7 +4317,9 @@ export const BoardWithAPI: React.FC = () => {
             style={{
               border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
-              background: apiProps.deployPlan?.canValidate ? "var(--ui-green-validate)" : "var(--ui-green-validate-off)",
+              background: apiProps.deployPlan?.canValidate
+                ? "var(--ui-green-validate)"
+                : "var(--ui-green-validate-off)",
               color: apiProps.deployPlan?.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
               cursor: apiProps.deployPlan?.canValidate ? "pointer" : "not-allowed",
               fontSize: 14,
@@ -4377,7 +4388,9 @@ export const BoardWithAPI: React.FC = () => {
             style={{
               border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
-              background: apiProps.squadShootPlan.canValidate ? "var(--ui-green-validate)" : "var(--ui-green-validate-off)",
+              background: apiProps.squadShootPlan.canValidate
+                ? "var(--ui-green-validate)"
+                : "var(--ui-green-validate-off)",
               color: apiProps.squadShootPlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
               cursor: apiProps.squadShootPlan.canValidate ? "pointer" : "not-allowed",
               fontSize: 14,
@@ -4445,7 +4458,9 @@ export const BoardWithAPI: React.FC = () => {
             style={{
               border: "1px solid rgba(0,0,0,0.35)",
               borderRadius: 6,
-              background: apiProps.squadFightPlan.canValidate ? "var(--ui-green-validate)" : "var(--ui-green-validate-off)",
+              background: apiProps.squadFightPlan.canValidate
+                ? "var(--ui-green-validate)"
+                : "var(--ui-green-validate-off)",
               color: apiProps.squadFightPlan.canValidate ? "#fff" : "rgba(229,231,235,0.5)",
               cursor: apiProps.squadFightPlan.canValidate ? "pointer" : "not-allowed",
               fontSize: 14,
@@ -4537,104 +4552,114 @@ export const BoardWithAPI: React.FC = () => {
               rosterPickerAboveStart ? " deployment-panel__picker-backdrop--above-start" : ""
             }`}
           >
-          {!rosterPickerAboveStart && (
-            <button
-              type="button"
-              className="deployment-panel__picker-dismiss"
-              aria-label="Close roster picker"
-              onClick={closeRosterPicker}
-            />
-          )}
-          <div
-            className={`deployment-panel__picker${
-              rosterPickerAboveStart ? " deployment-panel__picker--draggable" : ""
-            }`}
-            style={
-              rosterPickerAboveStart
-                ? { left: `${rosterPickerPosition.x}px`, top: `${rosterPickerPosition.y}px` }
-                : undefined
-            }
-          >
-            {rosterPickerAboveStart ? (
+            {!rosterPickerAboveStart && (
               <button
                 type="button"
-                className="deployment-panel__picker-title deployment-panel__picker-title--draggable"
-                onMouseDown={onRosterPickerTitleMouseDown}
-              >
-                {`Change roster - Player ${rosterPickerPlayer}${isDraggingRosterPicker ? " (drag...)" : ""}`}
-              </button>
-            ) : (
-              <div className="deployment-panel__picker-title">
-                Change roster - Player {rosterPickerPlayer}
-              </div>
-            )}
-            {rosterPickerLoading && (
-              <div className="deployment-panel__picker-loading">Loading armies...</div>
-            )}
-            {rosterPickerError && (
-              <div className="deployment-panel__picker-error">{rosterPickerError}</div>
-            )}
-            {!rosterPickerLoading && !rosterPickerError && (
-              <div className="deployment-panel__picker-content">
-                <div className="deployment-panel__picker-factions">
-                  <div className="deployment-panel__picker-col-header" style={pickerColHeaderStyle}>
-                    Faction
-                  </div>
-                  {rosterPickerFactions.map((faction) => (
-                    <button
-                      type="button"
-                      key={faction}
-                      className={`deployment-panel__picker-item ${effectiveRosterPickerFaction === faction ? "deployment-panel__picker-item--active" : ""}`}
-                      onClick={() => {
-                        setRosterPickerSelectedFaction(faction);
-                        setRosterPickerHoveredDescription("");
-                      }}
-                    >
-                      {rosterPickerFactionDisplayNameById[faction]}
-                    </button>
-                  ))}
-                </div>
-                <div className="deployment-panel__picker-list">
-                  <div className="deployment-panel__picker-col-header" style={pickerColHeaderStyle}>
-                    Roster
-                  </div>
-                  {filteredRosterPickerArmies.map((army) => (
-                    <button
-                      type="button"
-                      key={army.file}
-                      className="deployment-panel__picker-item"
-                      onMouseEnter={() => setRosterPickerHoveredDescription(army.description)}
-                      onClick={() => handleSelectRoster(army.file)}
-                    >
-                      {army.display_name}
-                    </button>
-                  ))}
-                  {filteredRosterPickerArmies.length === 0 && (
-                    <div className="deployment-panel__picker-loading">
-                      Aucun roster pour cette faction.
-                    </div>
-                  )}
-                </div>
-                <div className="deployment-panel__picker-tooltip">
-                  <div className="deployment-panel__picker-col-header" style={pickerColHeaderStyle}>
-                    Description
-                  </div>
-                  <div style={{ whiteSpace: "pre-wrap" }}>
-                    {rosterPickerHoveredDescription || "Survolez une armee pour voir sa description"}
-                  </div>
-                </div>
-              </div>
-            )}
-            <div className="deployment-panel__picker-actions">
-              <button
-                type="button"
-                className="deployment-panel__picker-close"
+                className="deployment-panel__picker-dismiss"
+                aria-label="Close roster picker"
                 onClick={closeRosterPicker}
-              >
-                Close
-              </button>
+              />
+            )}
+            <div
+              className={`deployment-panel__picker${
+                rosterPickerAboveStart ? " deployment-panel__picker--draggable" : ""
+              }`}
+              style={
+                rosterPickerAboveStart
+                  ? { left: `${rosterPickerPosition.x}px`, top: `${rosterPickerPosition.y}px` }
+                  : undefined
+              }
+            >
+              {rosterPickerAboveStart ? (
+                <button
+                  type="button"
+                  className="deployment-panel__picker-title deployment-panel__picker-title--draggable"
+                  onMouseDown={onRosterPickerTitleMouseDown}
+                >
+                  {`Change roster - Player ${rosterPickerPlayer}${isDraggingRosterPicker ? " (drag...)" : ""}`}
+                </button>
+              ) : (
+                <div className="deployment-panel__picker-title">
+                  Change roster - Player {rosterPickerPlayer}
+                </div>
+              )}
+              {rosterPickerLoading && (
+                <div className="deployment-panel__picker-loading">Loading armies...</div>
+              )}
+              {rosterPickerError && (
+                <div className="deployment-panel__picker-error">{rosterPickerError}</div>
+              )}
+              {!rosterPickerLoading && !rosterPickerError && (
+                <div className="deployment-panel__picker-content">
+                  <div className="deployment-panel__picker-factions">
+                    <div
+                      className="deployment-panel__picker-col-header"
+                      style={pickerColHeaderStyle}
+                    >
+                      Faction
+                    </div>
+                    {rosterPickerFactions.map((faction) => (
+                      <button
+                        type="button"
+                        key={faction}
+                        className={`deployment-panel__picker-item ${effectiveRosterPickerFaction === faction ? "deployment-panel__picker-item--active" : ""}`}
+                        onClick={() => {
+                          setRosterPickerSelectedFaction(faction);
+                          setRosterPickerHoveredDescription("");
+                        }}
+                      >
+                        {rosterPickerFactionDisplayNameById[faction]}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="deployment-panel__picker-list">
+                    <div
+                      className="deployment-panel__picker-col-header"
+                      style={pickerColHeaderStyle}
+                    >
+                      Roster
+                    </div>
+                    {filteredRosterPickerArmies.map((army) => (
+                      <button
+                        type="button"
+                        key={army.file}
+                        className="deployment-panel__picker-item"
+                        onMouseEnter={() => setRosterPickerHoveredDescription(army.description)}
+                        onClick={() => handleSelectRoster(army.file)}
+                      >
+                        {army.display_name}
+                      </button>
+                    ))}
+                    {filteredRosterPickerArmies.length === 0 && (
+                      <div className="deployment-panel__picker-loading">
+                        Aucun roster pour cette faction.
+                      </div>
+                    )}
+                  </div>
+                  <div className="deployment-panel__picker-tooltip">
+                    <div
+                      className="deployment-panel__picker-col-header"
+                      style={pickerColHeaderStyle}
+                    >
+                      Description
+                    </div>
+                    <div style={{ whiteSpace: "pre-wrap" }}>
+                      {rosterPickerHoveredDescription ||
+                        "Survolez une armee pour voir sa description"}
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div className="deployment-panel__picker-actions">
+                <button
+                  type="button"
+                  className="deployment-panel__picker-close"
+                  onClick={closeRosterPicker}
+                >
+                  Close
+                </button>
+              </div>
             </div>
-          </div>
           </div>,
           document.body
         )}
@@ -4745,86 +4770,86 @@ export const BoardWithAPI: React.FC = () => {
 
       {/* Game Log Component — masqué en PvP pendant la phase de déploiement */}
       {!(gameMode === "pvp" && apiProps.gameState?.phase === "deployment") && (
-      <ErrorBoundary fallback={<div>Failed to load game log</div>}>
-        <div className="game-log-with-illustration">
-          {displayedIllustrationUnit ? (
-            renderUnitIllustrationPreview(
-              displayedIllustrationUnit,
-              showDisplayedIllustrationUnit,
-              displayedIllustrationFadeMs
-            )
-          ) : (
-            <aside className="unit-illustration-preview" aria-label="Endless Duty illustration">
-              <img
-                className="unit-illustration-preview__image"
-                src={DEFAULT_UNIT_ILLUSTRATION_SRC}
-                alt="Endless Duty illustration"
-                style={{
-                  opacity: showDefaultIllustration ? 1 : 0,
-                  transition: `opacity ${DEFAULT_UNIT_ILLUSTRATION_FADE_MS}ms ease`,
-                }}
+        <ErrorBoundary fallback={<div>Failed to load game log</div>}>
+          <div className="game-log-with-illustration">
+            {displayedIllustrationUnit ? (
+              renderUnitIllustrationPreview(
+                displayedIllustrationUnit,
+                showDisplayedIllustrationUnit,
+                displayedIllustrationFadeMs
+              )
+            ) : (
+              <aside className="unit-illustration-preview" aria-label="Endless Duty illustration">
+                <img
+                  className="unit-illustration-preview__image"
+                  src={DEFAULT_UNIT_ILLUSTRATION_SRC}
+                  alt="Endless Duty illustration"
+                  style={{
+                    opacity: showDefaultIllustration ? 1 : 0,
+                    transition: `opacity ${DEFAULT_UNIT_ILLUSTRATION_FADE_MS}ms ease`,
+                  }}
+                />
+              </aside>
+            )}
+            <div className="game-log-with-illustration__log">
+              <GameLogWithTutorialSpotlight
+                events={gameLog.events}
+                currentTurn={apiProps.gameState?.currentTurn ?? 1}
+                debugMode={settings.showDebug}
               />
-            </aside>
-          )}
-          <div className="game-log-with-illustration__log">
-            <GameLogWithTutorialSpotlight
-              events={gameLog.events}
-              currentTurn={apiProps.gameState?.currentTurn ?? 1}
-              debugMode={settings.showDebug}
-            />
+            </div>
           </div>
-        </div>
-      </ErrorBoundary>
+        </ErrorBoundary>
       )}
 
       <div className="unit-status-tables__scroll">
-      <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
-        <UnitStatusTablePlayer1WithTutorial
-          units={apiProps.gameState?.units ?? []}
-          player={1}
-          playerTypes={apiProps.gameState?.player_types}
-          selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
-          guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
-          clickedUnitId={clickedUnitId}
-          onSelectUnit={(unitId) => {
-            apiProps.onSelectUnit(unitId);
-            setClickedUnitId(null);
-          }}
-          gameMode={gameMode}
-          victoryPoints={getVictoryPointsForPlayer(1)}
-          onCollapseChange={setPlayer1Collapsed}
-          detailPreviewUnitId={
-            illustrationPreviewUnit?.player === 1 ? illustrationPreviewUnit.id : null
-          }
-          phase={apiProps.gameState?.phase}
-          deploymentType={apiProps.gameState?.deployment_type}
-          deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
-        />
-      </ErrorBoundary>
+        <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
+          <UnitStatusTablePlayer1WithTutorial
+            units={apiProps.gameState?.units ?? []}
+            player={1}
+            playerTypes={apiProps.gameState?.player_types}
+            selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
+            guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
+            clickedUnitId={clickedUnitId}
+            onSelectUnit={(unitId) => {
+              apiProps.onSelectUnit(unitId);
+              setClickedUnitId(null);
+            }}
+            gameMode={gameMode}
+            victoryPoints={getVictoryPointsForPlayer(1)}
+            onCollapseChange={setPlayer1Collapsed}
+            detailPreviewUnitId={
+              illustrationPreviewUnit?.player === 1 ? illustrationPreviewUnit.id : null
+            }
+            phase={apiProps.gameState?.phase}
+            deploymentType={apiProps.gameState?.deployment_type}
+            deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
+          />
+        </ErrorBoundary>
 
-      <ErrorBoundary fallback={<div>Failed to load player 2 status</div>}>
-        <UnitStatusTablePlayer2WithTutorial
-          units={apiProps.gameState?.units ?? []}
-          player={2}
-          playerTypes={apiProps.gameState?.player_types}
-          selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
-          guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
-          clickedUnitId={clickedUnitId}
-          onSelectUnit={(unitId) => {
-            apiProps.onSelectUnit(unitId);
-            setClickedUnitId(null);
-          }}
-          gameMode={gameMode}
-          victoryPoints={getVictoryPointsForPlayer(2)}
-          onCollapseChange={setPlayer2Collapsed}
-          detailPreviewUnitId={
-            illustrationPreviewUnit?.player === 2 ? illustrationPreviewUnit.id : null
-          }
-          phase={apiProps.gameState?.phase}
-          deploymentType={apiProps.gameState?.deployment_type}
-          deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
-        />
-      </ErrorBoundary>
+        <ErrorBoundary fallback={<div>Failed to load player 2 status</div>}>
+          <UnitStatusTablePlayer2WithTutorial
+            units={apiProps.gameState?.units ?? []}
+            player={2}
+            playerTypes={apiProps.gameState?.player_types}
+            selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
+            guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
+            clickedUnitId={clickedUnitId}
+            onSelectUnit={(unitId) => {
+              apiProps.onSelectUnit(unitId);
+              setClickedUnitId(null);
+            }}
+            gameMode={gameMode}
+            victoryPoints={getVictoryPointsForPlayer(2)}
+            onCollapseChange={setPlayer2Collapsed}
+            detailPreviewUnitId={
+              illustrationPreviewUnit?.player === 2 ? illustrationPreviewUnit.id : null
+            }
+            phase={apiProps.gameState?.phase}
+            deploymentType={apiProps.gameState?.deployment_type}
+            deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
+          />
+        </ErrorBoundary>
       </div>
     </RightColumnTutorialSpotlight>
   );

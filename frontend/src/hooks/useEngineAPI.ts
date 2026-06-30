@@ -4843,7 +4843,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Bouton Valider : résout les attaques déclarées (squad_fight_validate → allocation des pertes). */
   const handleCommitSquadFight = useCallback(async () => {
     const plan = squadFightPlanRef.current;
-    if (!plan || !plan.canValidate) return;
+    if (!plan?.canValidate) return;
     try {
       await executeAction({ action: "squad_fight_validate", unitId: String(plan.unitId) });
     } catch (e) {
@@ -5049,9 +5049,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const coherencyOk = result?.coherency_ok === true;
       const canValidate = result?.can_validate === true;
       setDeployPlan((prev) =>
-        prev && prev.unitId === unitId
-          ? { ...prev, perModelValid, coherencyOk, canValidate }
-          : prev
+        prev && prev.unitId === unitId ? { ...prev, perModelValid, coherencyOk, canValidate } : prev
       );
     },
     [postEngineQuery]
@@ -5187,7 +5185,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       set.add(`${c},${r}`);
     }
     deploySquadPoolRef.current = set;
-    setDeployPlan((prev) => (prev?.placed ? { ...prev, following: true, activeModelId: null } : prev));
+    setDeployPlan((prev) =>
+      prev?.placed ? { ...prev, following: true, activeModelId: null } : prev
+    );
   }, [postEngineQuery]);
 
   /** Clic → pose le bloc : fige le plan à la position suivie, sort du suivi. */

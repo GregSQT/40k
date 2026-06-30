@@ -6001,7 +6001,7 @@ def _fight_v11_consolidation_targets(
         return ("ongoing", tier)
     if mode == "engaging":
         candidates = set(_fight_v11_consolidation_engaging_candidates(game_state, unit))
-        sel = game_state.get("consolidation_engaging_selection", {}).get(uid, [])
+        sel = game_state.get("consolidation_engaging_selection", {}).get(uid, [])  # fallback allowed — aucune sélection engaging pour cette unité = tier vide (métier)
         tier = [str(e) for e in sel if str(e) in candidates]
         return ("engaging", tier)
     if mode == "objective":
@@ -6009,7 +6009,7 @@ def _fight_v11_consolidation_targets(
         if len(cands) == 1:
             chosen: Any = cands[0]
         else:
-            chosen = game_state.get("consolidation_objective_selection", {}).get(uid)
+            chosen = game_state.get("consolidation_objective_selection", {}).get(uid)  # fallback allowed — aucune sélection objective pour cette unité = None (métier)
             if chosen not in cands:
                 chosen = None
         if chosen is None:
@@ -6644,7 +6644,7 @@ def _fight_v11_consolidation_new_foes_step(
     if atype == "squad_fight_validate":
         from .shared_utils import init_pending_intents
         init_pending_intents(game_state)
-        intents = game_state["pending_squad_fight_intents"].get(active, [])
+        intents = game_state["pending_squad_fight_intents"].get(active, [])  # fallback allowed — unité sans déclaration d'intent = liste vide (métier)
         if not intents:
             _fight_v11_log(game_state, f"NEW FOE validate {active} : aucune declaration -> ignore")
             return _fight_v11_manual_state(game_state)
@@ -6745,7 +6745,7 @@ def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str,
                 fight_decls = [
                     {"model_id": i["model_id"], "weapon_index": i["weapon_index"],
                      "target_unit_id": i["target_unit_id"]}
-                    for i in game_state.get("pending_squad_fight_intents", {}).get(active, [])
+                    for i in game_state.get("pending_squad_fight_intents", {}).get(active, [])  # fallback allowed — unité sans déclaration d'intent = liste vide (métier)
                 ]
                 _fight_v11_log(
                     game_state,
@@ -7221,7 +7221,7 @@ def _fight_v11_manual_step(
                 raise KeyError(f"Fight unit {sel} missing from game_state['units']")
             from .shared_utils import init_pending_intents
             init_pending_intents(game_state)
-            intents = game_state["pending_squad_fight_intents"].get(sel, [])
+            intents = game_state["pending_squad_fight_intents"].get(sel, [])  # fallback allowed — unité sans déclaration d'intent = liste vide (métier)
             if not intents:
                 _fight_v11_log(game_state, f"FIGHT validate {sel} : aucune declaration -> ignore")
                 return _fight_v11_manual_state(game_state)
@@ -7374,7 +7374,7 @@ def _fight_v11_manual_step(
             candidates = {str(c) for c in _fight_v11_consolidation_engaging_candidates(game_state, u)}
             if tid in candidates:
                 sel_map = game_state.setdefault("consolidation_engaging_selection", {})
-                cur = {str(x) for x in sel_map.get(act_uid, [])}
+                cur = {str(x) for x in sel_map.get(act_uid, [])}  # fallback allowed — unité sans sélection préalable = ensemble vide (métier)
                 if tid in cur:
                     cur.discard(tid)
                 else:

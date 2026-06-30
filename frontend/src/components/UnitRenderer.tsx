@@ -24,7 +24,11 @@ import {
   resolveBaseSizeForUnitDisplay,
 } from "../utils/hexFootprint";
 import { drawHiddenEyeBadge } from "../utils/hiddenBadgeDraw";
-import { drawMoveStatusBadge, drawBattleShockBadge, type MoveStatusKind } from "../utils/moveStatusBadgeDraw";
+import {
+  drawBattleShockBadge,
+  drawMoveStatusBadge,
+  type MoveStatusKind,
+} from "../utils/moveStatusBadgeDraw";
 import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 import {
   getHpBarWidthBase,
@@ -597,7 +601,12 @@ export class UnitRenderer {
         // Barre HP propre de la figurine : pour toutes les figs en mode
         // hpBarPerModel, et TOUJOURS pour un character (les deux modes).
         const mh = modelHps?.[i];
-        if (mh && multiModel && !squadBlinkActive && (this.props.hpBarPerModel || mh.is_character)) {
+        if (
+          mh &&
+          multiModel &&
+          !squadBlinkActive &&
+          (this.props.hpBarPerModel || mh.is_character)
+        ) {
           this.drawStaticHpBar(mh.HP_CUR, mh.HP_MAX, figIconScale);
         }
       }
@@ -2428,8 +2437,7 @@ export class UnitRenderer {
       this.props.gameState?.active_charge_unit ||
       this.props.selectedUnitId;
     if (!attackerId) return null;
-    const attackerIdNum =
-      typeof attackerId === "string" ? parseInt(attackerId, 10) : attackerId;
+    const attackerIdNum = typeof attackerId === "string" ? parseInt(attackerId, 10) : attackerId;
     return (
       this.props.units.find((u) => {
         const idNum = typeof u.id === "string" ? parseInt(u.id, 10) : u.id;

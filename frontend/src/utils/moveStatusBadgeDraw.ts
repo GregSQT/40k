@@ -10,12 +10,7 @@ import type * as PIXI from "pixi.js-legacy";
 export type MoveStatusKind = "move" | "advance" | "charge" | "fallback" | "stationary";
 
 /** Chevron rouge pointant vers le bas sur fond jaune — unité démoralisée (battle-shock). */
-export function drawBattleShockBadge(
-  g: PIXI.Graphics,
-  cx: number,
-  cy: number,
-  r: number
-): void {
+export function drawBattleShockBadge(g: PIXI.Graphics, cx: number, cy: number, r: number): void {
   const bw = Math.max(1, r * 0.15);
   g.lineStyle(bw, 0x991b1b, 1);
   g.beginFill(0xf4c81f, 1);

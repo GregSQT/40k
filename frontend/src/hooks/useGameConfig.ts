@@ -227,7 +227,8 @@ export const useGameConfig = (_boardConfigName: string = "default"): ExtendedGam
           endless_duty: "config/scenario_endless_duty.json",
           pve: "config/scenario_pve.json",
         };
-        let scenarioFile = (mode && scenarioMap[mode]) || "config/board/44x60x5/scenario/scenario_pvp.json";
+        let scenarioFile =
+          (mode && scenarioMap[mode]) || "config/board/44x60x5/scenario/scenario_pvp.json";
         if (isTestMode && boardParam && boardDirMap[boardParam]) {
           scenarioFile = `config/${boardDirMap[boardParam]}/scenario/${scenarioName}`;
         }

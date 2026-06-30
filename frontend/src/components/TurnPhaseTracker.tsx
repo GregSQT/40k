@@ -598,11 +598,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
               </button>
             )}
             {showFightAtk && onSkipFight && (
-              <button
-                type="button"
-                className="pile-in-end-btn"
-                onClick={() => onSkipFight()}
-              >
+              <button type="button" className="pile-in-end-btn" onClick={() => onSkipFight()}>
                 Skip
                 <span aria-hidden="true">→</span>
               </button>

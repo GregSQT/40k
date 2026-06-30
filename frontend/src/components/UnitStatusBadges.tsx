@@ -44,7 +44,14 @@ function BattleShockIcon() {
   return (
     <svg className="unit-status-badge__svg" viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="12" r="10" fill="#f4c81f" stroke="#991b1b" strokeWidth="1.5" />
-      <polyline points="5.5,9.5 12,15.5 18.5,9.5" fill="none" stroke="#991b1b" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" />
+      <polyline
+        points="5.5,9.5 12,15.5 18.5,9.5"
+        fill="none"
+        stroke="#991b1b"
+        strokeWidth="2.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

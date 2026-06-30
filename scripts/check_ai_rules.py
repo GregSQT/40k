@@ -308,14 +308,17 @@ def check_coordinate_normalization(path: Path, text: str) -> List[RuleViolation]
     lines = text.splitlines()
 
     # Patterns: support both double and single quotes
+    # Opérateurs de COMPARAISON uniquement (==, !=, <, >, <=, >=) — jamais l'affectation `=`,
+    # qui n'est pas une comparaison (ex: model["col"] = u["col"] lors d'une construction).
+    cmp_op = r"(?:[<>!=]=|[<>])"
     patterns = [
-        (re.compile(r'\[["\']col["\']\]\s*[=!<>]+\s*\w+\[["\']col["\']\]'),
+        (re.compile(r'\[["\']col["\']\]\s*' + cmp_op + r'\s*\w+\[["\']col["\']\]'),
          "Direct col comparison without normalization. Use get_unit_coordinates() or normalize_coordinates()"),
-        (re.compile(r'\[["\']row["\']\]\s*[=!<>]+\s*\w+\[["\']row["\']\]'),
+        (re.compile(r'\[["\']row["\']\]\s*' + cmp_op + r'\s*\w+\[["\']row["\']\]'),
          "Direct row comparison without normalization. Use get_unit_coordinates() or normalize_coordinates()"),
-        (re.compile(r'\w+\[["\']col["\']\]\s*[=!<>]+\s*\w+\[["\']col["\']\]'),
+        (re.compile(r'\w+\[["\']col["\']\]\s*' + cmp_op + r'\s*\w+\[["\']col["\']\]'),
          "Direct col comparison without normalization. Use get_unit_coordinates() or normalize_coordinates()"),
-        (re.compile(r'\w+\[["\']row["\']\]\s*[=!<>]+\s*\w+\[["\']row["\']\]'),
+        (re.compile(r'\w+\[["\']row["\']\]\s*' + cmp_op + r'\s*\w+\[["\']row["\']\]'),
          "Direct row comparison without normalization. Use get_unit_coordinates() or normalize_coordinates()"),
     ]
 
@@ -406,6 +409,7 @@ def check_forbidden_terms(path: Path, text: str) -> List[RuleViolation]:
         "do not use fallback", "do not use workaround", "do not use magic",
         "ne pas utiliser", "avoid fallback", "avoid workaround", "éviter",
         "pas de fallback", "pas de workaround",
+        "aucun fallback", "pas un fallback", "sans fallback",
     ]
 
     for idx, line in enumerate(text.splitlines(), start=1):

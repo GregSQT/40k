@@ -90,7 +90,14 @@ const ToggleRow: React.FC<{
   description: string;
 }> = ({ checked, onChange, label, description }) => (
   <div style={{ marginBottom: "16px" }}>
-    <label style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "var(--tooltip-text-color)" }}>
+    <label
+      style={{
+        display: "flex",
+        alignItems: "center",
+        cursor: "pointer",
+        color: "var(--tooltip-text-color)",
+      }}
+    >
       <input
         type="checkbox"
         checked={checked}
@@ -99,7 +106,14 @@ const ToggleRow: React.FC<{
       />
       <span>{label}</span>
     </label>
-    <p style={{ color: "var(--tooltip-text-color)", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
+    <p
+      style={{
+        color: "var(--tooltip-text-color)",
+        fontSize: "14px",
+        marginLeft: "30px",
+        marginTop: "4px",
+      }}
+    >
       {description}
     </p>
   </div>
@@ -179,8 +193,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   const handleCancel = () => {
     const s = snapshotRef.current;
     if (s) {
-      if (showAdvanceWarning !== s.showAdvanceWarning)
-        onToggleAdvanceWarning(s.showAdvanceWarning);
+      if (showAdvanceWarning !== s.showAdvanceWarning) onToggleAdvanceWarning(s.showAdvanceWarning);
       if (showDebug !== s.showDebug) onToggleDebug(s.showDebug);
       if (showDebugLoS !== s.showDebugLoS) onToggleDebugLoS(s.showDebugLoS);
       if (autoSelectWeapon !== s.autoSelectWeapon) onToggleAutoSelectWeapon(s.autoSelectWeapon);
@@ -381,10 +394,16 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                       <option value="window">Fenêtre navigable (molette/scroll)</option>
                     </select>
                   </label>
-                  <p style={{ color: "var(--tooltip-text-color)", fontSize: "14px", marginTop: "4px" }}>
-                    Taille réelle : plateau à sa taille, la page défile. Adapté : plateau réduit pour
-                    tenir entièrement dans l'écran. Fenêtre : plateau à sa taille dans une fenêtre
-                    limitée à l'écran, navigable à la molette ou à la barre de défilement.
+                  <p
+                    style={{
+                      color: "var(--tooltip-text-color)",
+                      fontSize: "14px",
+                      marginTop: "4px",
+                    }}
+                  >
+                    Taille réelle : plateau à sa taille, la page défile. Adapté : plateau réduit
+                    pour tenir entièrement dans l'écran. Fenêtre : plateau à sa taille dans une
+                    fenêtre limitée à l'écran, navigable à la molette ou à la barre de défilement.
                   </p>
                 </div>
               )}

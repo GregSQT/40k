@@ -90,7 +90,7 @@ def test_move_clearance_round_round_rejects_exact_engagement_boundary(monkeypatc
     ) is True
 
 
-def test_round_round_engagement_uses_euclidean_clearance_not_hex_footprints(monkeypatch) -> None:
+def test_round_round_engagement_uses_hex_footprint_not_euclidean_clearance(monkeypatch) -> None:
     first_entry = {
         "col": 20,
         "row": 10,
@@ -110,13 +110,19 @@ def test_round_round_engagement_uses_euclidean_clearance_not_hex_footprints(monk
         "occupied_hexes": {(10, 10)},
     }
 
+    # Métrique unifiée = distance d'empreinte hex (jamais euclidien) : le clearance
+    # euclidien, même monkeypatché à une valeur hors zone, doit être ignoré.
     monkeypatch.setattr(
         "engine.spatial_relations.euclidean_edge_clearance_round_round",
         lambda *args, **kwargs: 15.000002,
     )
 
+    # Empreintes distantes de 10 hex exactement.
     assert unit_entries_within_engagement_zone(
         first_entry, second_entry, engagement_zone=10
+    ) is True
+    assert unit_entries_within_engagement_zone(
+        first_entry, second_entry, engagement_zone=9
     ) is False
 
 

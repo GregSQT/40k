@@ -221,8 +221,7 @@ function drawCohesionHalos(
     r * HEX_HEIGHT + ((c % 2) * HEX_HEIGHT) / 2 + HEX_HEIGHT / 2 + p.margin,
   ];
 
-  const baseRadiusPx =
-    p.baseSize > 1 ? (p.baseSize * 1.5 * p.hexRadius) / 2 : p.hexRadius * 0.7;
+  const baseRadiusPx = p.baseSize > 1 ? (p.baseSize * 1.5 * p.hexRadius) / 2 : p.hexRadius * 0.7;
   const modelRangePx = p.modelCohesionInches * p.inchesToSubhex * pxPerStep;
   const globalRadiusPx = (p.globalCohesionInches * p.inchesToSubhex * pxPerStep) / 2; // Ø = écart max
   const WHITE = 0xffffff;
@@ -546,6 +545,7 @@ type BoardProps = {
     coherencyOk: boolean;
     canValidate: boolean;
     placed: boolean;
+    following: boolean;
   } | null;
   /** Pool de la zone de déploiement (Set "col,row") du déployeur courant. */
   deployPoolRef?: React.RefObject<Set<string>>;
@@ -1533,7 +1533,9 @@ export default function Board({
   /** Ref de pool de la fig active (squad BFS, charge-like eligible, ou zone de déploiement). */
   const effectivePerModelPoolRef = isDeploymentMove
     ? // Fig active → pool FILTRÉ (deploy_model_destinations) ; sinon zone brute (squad/drop).
-      (deployPlan?.activeModelId ? (deployModelPoolRef ?? null) : (deployPoolRef ?? null))
+      deployPlan?.activeModelId
+      ? (deployModelPoolRef ?? null)
+      : (deployPoolRef ?? null)
     : perModelChargeLike
       ? (activeChargeLikePoolRef ?? null)
       : (squadMoveModelPoolRef ?? null);
@@ -1738,7 +1740,9 @@ export default function Board({
   const fitBoardWidth = boardViewportSize ? boardViewportSize.width * fitScale : undefined;
   const fitBoardHeight = boardViewportSize ? boardViewportSize.height * fitScale : undefined;
   const scaledBoardWidth = boardViewportSize ? boardViewportSize.width * effectiveScale : undefined;
-  const scaledBoardHeight = boardViewportSize ? boardViewportSize.height * effectiveScale : undefined;
+  const scaledBoardHeight = boardViewportSize
+    ? boardViewportSize.height * effectiveScale
+    : undefined;
 
   const applyBoardZoom = useCallback(
     (resolveZoom: (currentZoom: number) => number, anchorClient?: { x: number; y: number }) => {
@@ -4187,9 +4191,21 @@ export default function Board({
           deployCallbacksRef.current.onFreezeSquadDeploy?.();
           return;
         }
-        // 3) Fig active sélectionnée + clic dans la zone → pose la fig active à cet hex.
-        if (dplan.activeModelId && inPool) {
-          deployCallbacksRef.current.onMoveDeployModelInPlan?.(dplan.activeModelId, col, row);
+        // 3) Fig active sélectionnée → pose à l'ancre SNAPPÉE du ghost (hoveredHexRef), validée
+        //    contre le pool filtré empreinte-aware (deployModelPoolRef) — miroir exact de la preview
+        //    et du move per-fig (shouldConfirmAtIcon). On n'utilise PAS l'hex brut sous le curseur :
+        //    quand le curseur déborde sur une voisine, le ghost a déjà snappé sur l'ancre valide
+        //    adjacente ; poser à l'hex brut chevaucherait (l'empreinte y mord la voisine).
+        if (dplan.activeModelId) {
+          const snapped = hoveredHexRef.current;
+          const modelPool = deployModelPoolRef?.current;
+          if (snapped && modelPool?.has(`${snapped.col},${snapped.row}`)) {
+            deployCallbacksRef.current.onMoveDeployModelInPlan?.(
+              dplan.activeModelId,
+              snapped.col,
+              snapped.row
+            );
+          }
           return;
         }
         // 4) Clic sur une figurine de l'escouade → sélection per-fig DIFFÉRÉE : on attend ~220 ms
@@ -4337,6 +4353,7 @@ export default function Board({
     isDeploymentMove,
     deployPlan,
     deployPoolRef?.current,
+    deployModelPoolRef?.current,
   ]);
 
   // TIR par-figurine (PvP manuel) : phase shoot. Entrée sur escouade OWN multi-fig →
@@ -5821,7 +5838,8 @@ export default function Board({
             if (
               comp[nb] === -1 &&
               k !== nb &&
-              Math.hypot(centers[k].x - centers[nb].x, centers[k].y - centers[nb].y) <= neighborMaxPx
+              Math.hypot(centers[k].x - centers[nb].x, centers[k].y - centers[nb].y) <=
+                neighborMaxPx
             ) {
               comp[nb] = numComp;
               stack.push(nb);
@@ -5994,7 +6012,9 @@ export default function Board({
       const baseEntries: Array<[string, [number, number]]> = occ
         ? Object.entries(occ)
         : planModels
-          ? Object.entries(planModels).map(([m, p]) => [m, [p.col, p.row]] as [string, [number, number]])
+          ? Object.entries(planModels).map(
+              ([m, p]) => [m, [p.col, p.row]] as [string, [number, number]]
+            )
           : [];
       if (baseEntries.length === 0) return null;
       const mp: Record<string, [number, number]> = {};

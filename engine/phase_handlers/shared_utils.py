@@ -2475,7 +2475,7 @@ def _coherency_flags_euclidean(
         num_comp += 1
     comp_size: Dict[int, int] = {}
     for c in comp:
-        comp_size[c] = comp_size.get(c, 0) + 1
+        comp_size[c] = comp_size.get(c, 0) + 1  # fallback allowed — compteur d'accumulation (0 = valeur initiale, pas un masquage)
     flags = [False] * n
     for i in range(n):
         # 1re puce : composant minoritaire (rupture de chaine) = violation.
@@ -4202,12 +4202,12 @@ def declare_attack_weapon(
             from engine.spatial_relations import get_engagement_zone
             from engine.hex_utils import min_distance_between_sets
             _uc = require_key(game_state, "units_cache")
-            _tgt = _uc.get(str(target_squad_id), {})
+            _tgt = _uc.get(str(target_squad_id), {})  # fallback allowed — bloc diagnostic temporaire (A RETIRER)
             _tgt_fp = _tgt.get("occupied_hexes") or {(_tgt.get("col"), _tgt.get("row"))}
             _ez = get_engagement_zone(game_state)
             _atk_pos = {
                 mid: (models_cache[mid].get("col"), models_cache[mid].get("row"))
-                for mid in squad_models.get(attacker_squad_id, []) if mid in models_cache
+                for mid in squad_models.get(attacker_squad_id, []) if mid in models_cache  # fallback allowed — bloc diagnostic temporaire (A RETIRER)
             }
             _dist = {
                 mid: min_distance_between_sets({pos}, _tgt_fp)
