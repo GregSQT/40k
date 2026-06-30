@@ -172,6 +172,18 @@
         { "col": 110, "row": 28 },
         { "col": 110, "row": 33 }
       ]
+    },
+    {
+      "id": 117, "unit_type": "Termagant", "player": 2, "col": 80, "row": 190,
+      "models": [
+        { "col": 80, "row": 190 },
+        { "col": 96, "row": 190 },
+        { "col": 112, "row": 190 },
+        { "col": 128, "row": 190 },
+        { "col": 144, "row": 190 },
+        { "col": 160, "row": 190 },
+        { "col": 176, "row": 190 }
+      ]
     }
   ]
 }
