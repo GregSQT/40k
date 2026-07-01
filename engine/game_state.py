@@ -102,13 +102,8 @@ class GameStateManager:
         unit_rules = copy.deepcopy(config["UNIT_RULES"]) if "UNIT_RULES" in config else []
         unit_keywords = copy.deepcopy(require_key(config, "UNIT_KEYWORDS"))
 
-        scale = self._get_inches_to_subhex()
-        if scale != 1:
-            for w in rng_weapons:
-                w["RNG"] = int(require_key(w, "RNG")) * scale
-            for w in cc_weapons:
-                if "RNG" in w:
-                    w["RNG"] = int(w["RNG"]) * scale
+        # Scaling (MOVE, RNG, BASE_SIZE) : autorité unique = _build_enhanced_unit, qui produit
+        # TOUTES les units (loader + change_roster + reload). create_unit ne voit que du déjà-scalé.
 
         if "orientation" in config:
             orientation_init = int(require_key(config, "orientation"))
@@ -133,7 +128,7 @@ class GameStateManager:
             # UPPERCASE STATS (AI_TURN.md requirement) - NO DEFAULTS
             "HP_CUR": config["HP_CUR"],
             "HP_MAX": config["HP_MAX"],
-            "MOVE": config["MOVE"] * scale,
+            "MOVE": config["MOVE"],
             "T": config["T"],
             "ARMOR_SAVE": config["ARMOR_SAVE"],
             "INVUL_SAVE": config["INVUL_SAVE"],
@@ -721,6 +716,16 @@ class GameStateManager:
         rng_weapons = copy.deepcopy(require_key(full_unit_data, "RNG_WEAPONS"))
         cc_weapons = copy.deepcopy(require_key(full_unit_data, "CC_WEAPONS"))
 
+        # Autorité UNIQUE de scaling (subhexes) : MOVE + portées d'armes, comme BASE_SIZE plus bas.
+        # Toutes les units passent par ici (loader, change_roster, reload) → scaling garanti une fois.
+        scale = self._get_inches_to_subhex()
+        if scale != 1:
+            for w in rng_weapons:
+                w["RNG"] = int(require_key(w, "RNG")) * scale
+            for w in cc_weapons:
+                if "RNG" in w:
+                    w["RNG"] = int(w["RNG"]) * scale
+
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Initialize selected weapon indices
         selected_rng_weapon_index = 0 if rng_weapons else None
         selected_cc_weapon_index = 0 if cc_weapons else None
@@ -764,7 +769,7 @@ class GameStateManager:
             "row": normalize_coordinates(chosen_col, chosen_row)[1],
             "HP_CUR": full_unit_data["HP_MAX"],
             "HP_MAX": full_unit_data["HP_MAX"],
-            "MOVE": full_unit_data["MOVE"],
+            "MOVE": full_unit_data["MOVE"] * scale,
             "T": full_unit_data["T"],
             "ARMOR_SAVE": full_unit_data["ARMOR_SAVE"],
             "INVUL_SAVE": full_unit_data["INVUL_SAVE"],
