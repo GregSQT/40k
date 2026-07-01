@@ -815,6 +815,8 @@ export interface DrawBoardOptions {
   coverTargets?: Set<string>;
   phase?: "move" | "shoot" | "charge" | "fight";
   interactionPhase?: "deployment" | "command" | "move" | "shoot" | "charge" | "fight";
+  /** Zones de déploiement colorées : n'afficher que pendant la phase de déploiement (défaut true). */
+  showDeploymentZones?: boolean;
   selectedUnitId?: number | null;
   mode?: string;
   showHexCoordinates?: boolean;
@@ -1865,6 +1867,7 @@ export const drawBoard = (
       advanceCells = [], // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4
       phase = "move",
       interactionPhase = phase,
+      showDeploymentZones = true,
       selectedUnitId = null,
       mode = "select",
       showHexCoordinates: _showHexCoordinates = false,
@@ -2152,7 +2155,7 @@ export const drawBoard = (
       }
 
       // Zones de déploiement : polygone rempli par joueur (id "1" → P1 bleu, id "2" → P2 rouge).
-      if (Array.isArray(boardConfig.deployment_zones)) {
+      if (showDeploymentZones && Array.isArray(boardConfig.deployment_zones)) {
         const toPixelD = (c: number, r: number): [number, number] => [
           c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN,
           r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN,

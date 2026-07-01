@@ -7814,7 +7814,7 @@ export default function Board({
     const zonesKey = (boardConfigWithOverrides.objective_zones ?? [])
       .map((z) => `${z.id}:${(z as { shape?: string }).shape ?? "hexes"}`)
       .join(",");
-    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}|oc:${objControlKey}|oz:${zonesKey}`;
+    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}|oc:${objControlKey}|oz:${zonesKey}|dep:${phase === "deployment" ? 1 : 0}`;
     const canReuseStatic =
       staticBoardConfigKeyRef.current === bcKey && staticBoardRef.current !== null;
 
@@ -7966,6 +7966,7 @@ export default function Board({
        * alors que ``phase`` était déjà mappée en ``move`` → ``interactionPhase === "move"`` était faux,
        * pas de couche disques, et ``drawGroup(availableCells)`` avec toute l’empreinte = nid d’abeille. */
       interactionPhase: effectivePhase,
+      showDeploymentZones: phase === "deployment",
       selectedUnitId,
       mode,
       showHexCoordinates,
