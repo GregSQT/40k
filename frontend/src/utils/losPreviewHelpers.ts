@@ -1,4 +1,4 @@
-import { resolveBaseSizeForUnitDisplay } from "./hexFootprint";
+import { computeOccupiedHexes, resolveBaseSizeForUnitDisplay } from "./hexFootprint";
 import { computeVisibleHexes, type VisibleHex } from "./wasmLos";
 
 /** Même cube-odd-r que ``BoardPvp.hexDistOff`` (empreinte / scan). */
@@ -37,6 +37,10 @@ export interface BuildLosPreviewFromSourceParams {
   boardRows: number;
   wallHexes: Array<[number, number]> | undefined;
   wallHexesOverride?: WallHexOverrideForLos[];
+  /** Obscuring terrain areas (rule 13.10). One entry = one area; hexes in subhex board coords. */
+  obscuringZones?: Array<{ hexes: Array<[number, number]> }>;
+  /** All terrain areas (obscuring or not) — a visible hex inside one is drawn as cover. */
+  terrainZones?: Array<{ hexes: Array<[number, number]> }>;
   maxRange: number;
   losVisibilityMinRatio: number;
 }
@@ -63,6 +67,22 @@ function stableBoolRecordJson(m: Record<string, boolean>): string {
 
 function stableWallHexKey(wallHexes: Array<[number, number]>): string {
   return wallHexes
+    .map(([c, r]) => `${c},${r}`)
+    .sort()
+    .join(";");
+}
+
+/** Memo signature of the static obscuring layout (areaId:col,row per hex). */
+function stableObscuringKey(obscuringHexes: Array<[number, number, number]>): string {
+  return obscuringHexes
+    .map(([c, r, a]) => `${a}:${c},${r}`)
+    .sort()
+    .join(";");
+}
+
+/** Memo signature of the static terrain-area hexes (col,row). */
+function stableTerrainKey(terrainHexes: Array<[number, number]>): string {
+  return terrainHexes
     .map(([c, r]) => `${c},${r}`)
     .sort()
     .join(";");
@@ -159,6 +179,31 @@ export function buildLosPreviewFromSource(
     params.wallHexes,
     params.wallHexesOverride
   );
+  // Flatten obscuring areas into [col,row,areaId] triplets (areaId = zone index + 1, >= 1).
+  const obscuringHexes: Array<[number, number, number]> = [];
+  if (params.obscuringZones) {
+    for (let z = 0; z < params.obscuringZones.length; z++) {
+      const areaId = z + 1;
+      for (const [c, r] of params.obscuringZones[z].hexes) {
+        obscuringHexes.push([c, r, areaId]);
+      }
+    }
+  }
+  // Flatten all terrain areas into [col,row] pairs (cover classification).
+  const terrainHexes: Array<[number, number]> = [];
+  if (params.terrainZones) {
+    for (const zone of params.terrainZones) {
+      for (const [c, r] of zone.hexes) {
+        terrainHexes.push([c, r]);
+      }
+    }
+  }
+  // Shooter footprint at the hypothetical position — obscuring areas it occupies never block (13.10).
+  const shooterSize = resolveBaseSizeForUnitDisplay(params.source.unit);
+  const shooterFootprint: Array<[number, number]> =
+    shooterSize > 1
+      ? computeOccupiedHexes(params.source.fromCol, params.source.fromRow, "round", shooterSize)
+      : [[params.source.fromCol, params.source.fromRow]];
   const visibleHexes = computeVisibleHexes(
     params.source.fromCol,
     params.source.fromRow,
@@ -166,6 +211,9 @@ export function buildLosPreviewFromSource(
     params.boardCols,
     params.boardRows,
     effectiveWallHexes,
+    obscuringHexes,
+    terrainHexes,
+    shooterFootprint,
     params.losVisibilityMinRatio
   );
   const losPreview = buildShootingLosPreviewFromVisibleHexes(
@@ -181,6 +229,8 @@ export function buildLosPreviewFromSource(
     params.boardCols,
     params.boardRows,
     stableWallHexKey(effectiveWallHexes),
+    stableObscuringKey(obscuringHexes),
+    stableTerrainKey(terrainHexes),
     [...losPreview.blinkIds].sort((a, b) => a - b).join(","),
     stableBoolRecordJson(losPreview.coverByUnitId),
   ].join("|");

@@ -1012,6 +1012,16 @@ function drawUnitTargetRing(
   }
 }
 
+/**
+ * Zone hexes are served as [col,row] tuples (like wall_hexes) though typed as {col,row};
+ * normalize both forms (same as BoardWithAPI objective normalization). Module-scope → stable ref.
+ */
+function normalizeZoneHex(h: unknown): [number, number] {
+  return Array.isArray(h)
+    ? [h[0] as number, h[1] as number]
+    : [(h as { col: number }).col, (h as { row: number }).row];
+}
+
 export default function Board({
   units,
   selectedUnitId,
@@ -1301,6 +1311,21 @@ export default function Board({
     if (!ds || ds === 1) return _rawBoardConfig;
     return { ..._rawBoardConfig, hex_radius: _rawBoardConfig.hex_radius * ds };
   })();
+  // LoS cone terrain data (rule 13.10), extracted once from the static board terrain_zones (subhex,
+  // same grid as wall_hexes). obscuring → sight-line blockers ; all zones → cover classification.
+  // Absent terrain_zones → [] (cone falls back to walls-only, no silent masking of a real error).
+  const losObscuringZones = useMemo<Array<{ hexes: Array<[number, number]> }>>(() => {
+    const zones = boardConfig?.terrain_zones;
+    if (!zones) return [];
+    return zones
+      .filter((z) => z.obscuring === true)
+      .map((z) => ({ hexes: z.hexes.map(normalizeZoneHex) }));
+  }, [boardConfig?.terrain_zones]);
+  const losTerrainZones = useMemo<Array<{ hexes: Array<[number, number]> }>>(() => {
+    const zones = boardConfig?.terrain_zones;
+    if (!zones) return [];
+    return zones.map((z) => ({ hexes: z.hexes.map(normalizeZoneHex) }));
+  }, [boardConfig?.terrain_zones]);
   // ✅ STABLE CALLBACK REFS - Don't change on every render
   const stableCallbacks = useRef<{
     onSelectUnit: (id: number | string | null) => void;
@@ -2521,6 +2546,8 @@ export default function Board({
         boardRows: boardConfig.rows,
         wallHexes: boardConfig.wall_hexes,
         wallHexesOverride,
+        obscuringZones: losObscuringZones,
+        terrainZones: losTerrainZones,
         maxRange: range,
         losVisibilityMinRatio: losMin,
       });
@@ -2542,6 +2569,8 @@ export default function Board({
     boardConfig,
     gameConfig,
     wallHexesOverride,
+    losObscuringZones,
+    losTerrainZones,
     shootAdvanceLosAnchorKey,
     units,
     shootAdvanceLosAnchor?.col,
@@ -3291,6 +3320,8 @@ export default function Board({
           boardRows: BOARD_ROWS_H,
           wallHexes: boardConfig.wall_hexes,
           wallHexesOverride,
+          obscuringZones: losObscuringZones,
+          terrainZones: losTerrainZones,
           maxRange: pending.range,
           losVisibilityMinRatio: gameConfig.game_rules?.los_visibility_min_ratio ?? 0,
         });
@@ -3554,6 +3585,8 @@ export default function Board({
     getAdvanceDestinations,
     availableCellsOverride,
     wallHexesOverride,
+    losObscuringZones,
+    losTerrainZones,
     footprintZoneRef?.current,
     resolvedMoveDestPoolRef.current?.has,
     effectivePerModelPlan?.activeModelId,
@@ -5890,6 +5923,8 @@ export default function Board({
           boardRows: boardConfig.rows,
           wallHexes: boardConfig.wall_hexes,
           wallHexesOverride,
+          obscuringZones: losObscuringZones,
+          terrainZones: losTerrainZones,
           maxRange: shootRange,
           losVisibilityMinRatio: gameConfig.game_rules?.los_visibility_min_ratio ?? 0,
         });
@@ -6183,6 +6218,8 @@ export default function Board({
     gameConfig,
     units,
     wallHexesOverride,
+    losObscuringZones,
+    losTerrainZones,
     unitsBoardLayoutKey,
     gameState?.turn,
     gameState?.episode_steps,
@@ -7367,6 +7404,8 @@ export default function Board({
           boardRows: BOARD_ROWS,
           wallHexes: boardConfig.wall_hexes,
           wallHexesOverride,
+          obscuringZones: losObscuringZones,
+          terrainZones: losTerrainZones,
           maxRange: range,
           losVisibilityMinRatio,
         });
@@ -9508,6 +9547,8 @@ export default function Board({
     unitsFled,
     unitsMoved,
     wallHexesOverride,
+    losObscuringZones,
+    losTerrainZones,
     blinkVersion,
     deploymentState,
     replayActionIndex,

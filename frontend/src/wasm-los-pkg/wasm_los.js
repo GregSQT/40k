@@ -21,24 +21,41 @@ export function compute_los_single(from_col, from_row, to_col, to_row, wall_data
 /**
  * Compute visible hexes from a shooter position within a given range.
  * Returns a flat array: [col0, row0, state0, col1, row1, state1, ...]
- * state: 1 = visible. Cover is determined by the frontend via footprint ratio.
+ * state: 1 = clear (open), 2 = cover (hex inside a terrain area).
+ *
+ * Faithful mirror of `_update_unit_los_preview_data` (shooting_handlers.py): anchor→hex sight
+ * line, blocked by walls or by obscuring areas that neither the shooter nor the destination hex
+ * occupies (rule 13.10). MUST be resynced if that backend function changes.
+ * - `obscuring_data`: flat triplets [col,row,areaId,...] (areaId >= 1) for every obscuring hex.
+ * - `terrain_data`: flat pairs [col,row,...] for every hex inside any terrain area (cover).
+ * - `shooter_footprint`: flat pairs [col,row,...] of the shooter's occupied hexes; areas it
+ *   touches are excluded from blocking (a shooter inside/at the edge of its own terrain still sees out).
  * @param {number} shooter_col
  * @param {number} shooter_row
  * @param {number} max_range
  * @param {number} board_cols
  * @param {number} board_rows
  * @param {Int32Array} wall_data
+ * @param {Int32Array} obscuring_data
+ * @param {Int32Array} terrain_data
+ * @param {Int32Array} shooter_footprint
  * @param {number} _los_visibility_min_ratio
  * @param {number} _cover_ratio
  * @returns {Int32Array}
  */
-export function compute_visible_hexes(shooter_col, shooter_row, max_range, board_cols, board_rows, wall_data, _los_visibility_min_ratio, _cover_ratio) {
+export function compute_visible_hexes(shooter_col, shooter_row, max_range, board_cols, board_rows, wall_data, obscuring_data, terrain_data, shooter_footprint, _los_visibility_min_ratio, _cover_ratio) {
     const ptr0 = passArray32ToWasm0(wall_data, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.compute_visible_hexes(shooter_col, shooter_row, max_range, board_cols, board_rows, ptr0, len0, _los_visibility_min_ratio, _cover_ratio);
-    var v2 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
+    const ptr1 = passArray32ToWasm0(obscuring_data, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray32ToWasm0(terrain_data, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray32ToWasm0(shooter_footprint, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_visible_hexes(shooter_col, shooter_row, max_range, board_cols, board_rows, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, _los_visibility_min_ratio, _cover_ratio);
+    var v5 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
-    return v2;
+    return v5;
 }
 
 /**

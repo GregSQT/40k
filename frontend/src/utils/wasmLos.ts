@@ -46,6 +46,55 @@ function getWallData(wallHexes: Array<[number, number]> | number[][]): Int32Arra
   return flat;
 }
 
+let cachedObscuringData: Int32Array | null = null;
+let cachedObscuringKey = "";
+
+/** Flatten obscuring hexes (each carrying its areaId >= 1) into [col,row,areaId,...] for WASM. Static → cached. */
+function getObscuringData(obscuringHexes: Array<[number, number, number]>): Int32Array {
+  const key = obscuringHexes.length.toString();
+  if (cachedObscuringData && cachedObscuringKey === key) {
+    return cachedObscuringData;
+  }
+  const flat = new Int32Array(obscuringHexes.length * 3);
+  for (let i = 0; i < obscuringHexes.length; i++) {
+    flat[i * 3] = obscuringHexes[i][0];
+    flat[i * 3 + 1] = obscuringHexes[i][1];
+    flat[i * 3 + 2] = obscuringHexes[i][2];
+  }
+  cachedObscuringData = flat;
+  cachedObscuringKey = key;
+  return flat;
+}
+
+let cachedTerrainData: Int32Array | null = null;
+let cachedTerrainKey = "";
+
+/** Flatten all terrain-area hexes into [col,row,...] (cover classification). Static → cached. */
+function getTerrainData(terrainHexes: Array<[number, number]>): Int32Array {
+  const key = terrainHexes.length.toString();
+  if (cachedTerrainData && cachedTerrainKey === key) {
+    return cachedTerrainData;
+  }
+  const flat = new Int32Array(terrainHexes.length * 2);
+  for (let i = 0; i < terrainHexes.length; i++) {
+    flat[i * 2] = terrainHexes[i][0];
+    flat[i * 2 + 1] = terrainHexes[i][1];
+  }
+  cachedTerrainData = flat;
+  cachedTerrainKey = key;
+  return flat;
+}
+
+/** Flatten [col,row] pairs (shooter footprint) — small & position-dependent, no cache. */
+function flattenPairs(pairs: Array<[number, number]>): Int32Array {
+  const flat = new Int32Array(pairs.length * 2);
+  for (let i = 0; i < pairs.length; i++) {
+    flat[i * 2] = pairs[i][0];
+    flat[i * 2 + 1] = pairs[i][1];
+  }
+  return flat;
+}
+
 export function computeVisibleHexes(
   shooterCol: number,
   shooterRow: number,
@@ -53,12 +102,18 @@ export function computeVisibleHexes(
   boardCols: number,
   boardRows: number,
   wallHexes: Array<[number, number]> | number[][],
+  obscuringHexes: Array<[number, number, number]>,
+  terrainHexes: Array<[number, number]>,
+  shooterFootprint: Array<[number, number]>,
   losVisibilityMinRatio: number
 ): VisibleHex[] {
   if (!wasmReady) {
     throw new Error("WASM not initialized — call ensureWasmLoaded() first");
   }
   const wallData = getWallData(wallHexes);
+  const obscuringData = getObscuringData(obscuringHexes);
+  const terrainData = getTerrainData(terrainHexes);
+  const footprintData = flattenPairs(shooterFootprint);
   const raw = compute_visible_hexes(
     shooterCol,
     shooterRow,
@@ -66,6 +121,9 @@ export function computeVisibleHexes(
     boardCols,
     boardRows,
     wallData,
+    obscuringData,
+    terrainData,
+    footprintData,
     losVisibilityMinRatio,
     1.0
   );

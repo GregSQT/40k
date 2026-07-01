@@ -220,3 +220,5 @@ frontend/src/roster/pdf/
 .aider*
 .claude/settings.local.json
 .claude/worktrees/
+
+frontend/wasm-los/target/
