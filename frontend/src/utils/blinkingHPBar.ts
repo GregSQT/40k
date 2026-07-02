@@ -145,6 +145,12 @@ export interface BlinkingHPBarConfig {
   /** Cadre % / bouclier en HTML (net) — obligatoire côté BoardPvp en jeu. */
   onBlinkProbHtml?: (payload: BlinkProbHtmlPayload) => void;
   /**
+   * Affiche le % de blessure dans le cadre. false → label vide (le cadre, l'œil "N figs"
+   * et le bouclier couvert restent affichés), et `calculateWoundProbability` n'est pas exécuté.
+   * Sans effet en phase charge (le label = jet 2D6 via chargeMinRollOverlay).
+   */
+  showProbability?: boolean;
+  /**
    * HP affiché dans les tranches (clignotant). Si absent, `unit.HP_CUR` (ou HP_MAX).
    * Permet la prévisu targetPreview (currentBlinkStep) et le suivi après dégâts réels.
    */
@@ -361,6 +367,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     onBlinkProbHtml,
     sliceHpCur: sliceHpCurFromConfig,
     modelId,
+    showProbability = false,
   } = config;
 
   // Normalize unit.id to number
@@ -405,7 +412,17 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     const weaponMatches = existingContainer.weaponSignature === weaponSignature;
     if (attackerMatches && weaponMatches) {
       existingContainer.zIndex = HP_BLINK_STAGE_Z_INDEX;
-      updateProbabilityDisplay(existingContainer, attacker, unit, phase, inCover, onBlinkProbHtml);
+      if (onBlinkProbHtml) {
+        updateProbabilityDisplay(
+          existingContainer,
+          attacker,
+          unit,
+          phase,
+          inCover,
+          onBlinkProbHtml,
+          showProbability
+        );
+      }
       refreshBlinkingHpBarSlices(
         existingContainer,
         unit,
@@ -556,39 +573,46 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   app.ticker.add(blinkTicker);
   hpContainer.blinkTicker = blinkTicker;
 
-  // Calculate and display probability (sauf phase charge avec overlay jet 2D6)
-  let displayProbability = 0;
-  if (attacker && !chargeMinRollOverlay) {
-    displayProbability = calculateWoundProbability(attacker, unit, phase, inCover);
+  // Cadre HTML (œil "N figs" + bouclier couvert) : conservé tant qu'un handler existe.
+  // Le % de blessure (label) n'est calculé/affiché que si showProbability ; sinon label vide
+  // → calculateWoundProbability n'est jamais exécuté (perf), mais le cadre reste.
+  if (onBlinkProbHtml) {
+    // Calculate probability only when the % is shown (charge garde son jet 2D6).
+    const wantProbability = !chargeMinRollOverlay && showProbability;
+    let displayProbability = 0;
+    if (attacker && wantProbability) {
+      displayProbability = calculateWoundProbability(attacker, unit, phase, inCover);
+    }
+
+    const probLabel =
+      chargeMinRollOverlay?.primaryText ?? (wantProbability ? `${Math.round(displayProbability * 100)}%` : "");
+
+    const scale = Math.max(1, finalBarHeight / 7);
+    const hasCoverIcon = phase === "shoot" && inCover;
+
+    const tooltipFontPx = readCssTooltipFontSizePx();
+    const tooltipPad = readCssTooltipPaddingPx();
+    const estimatedTextHeight = Math.ceil(tooltipFontPx * 1.25);
+    const cellHeight = estimatedTextHeight + (tooltipPad.padY + 1) * 2;
+    const squareY = finalBarY - cellHeight - 4 * scale;
+    const barCenterX = finalBarX + finalBarWidth * 0.5;
+    const screenPos = pixiStagePointToClientScreen(app, barCenterX, squareY);
+
+    const probabilityHelpText =
+      chargeMinRollOverlay?.tooltipText ?? DEFAULT_BLINK_PROBABILITY_HELP_TEXT;
+
+    onBlinkProbHtml({
+      action: "show",
+      unitId: unitIdNum,
+      left: screenPos.x,
+      top: screenPos.y,
+      stageX: barCenterX,
+      stageY: squareY,
+      label: probLabel,
+      showCoverShield: hasCoverIcon,
+      probabilityHelpText,
+    });
   }
-
-  const probLabel = chargeMinRollOverlay?.primaryText ?? `${Math.round(displayProbability * 100)}%`;
-
-  const scale = Math.max(1, finalBarHeight / 7);
-  const hasCoverIcon = phase === "shoot" && inCover;
-
-  const tooltipFontPx = readCssTooltipFontSizePx();
-  const tooltipPad = readCssTooltipPaddingPx();
-  const estimatedTextHeight = Math.ceil(tooltipFontPx * 1.25);
-  const cellHeight = estimatedTextHeight + (tooltipPad.padY + 1) * 2;
-  const squareY = finalBarY - cellHeight - 4 * scale;
-  const barCenterX = finalBarX + finalBarWidth * 0.5;
-  const screenPos = pixiStagePointToClientScreen(app, barCenterX, squareY);
-
-  const probabilityHelpText =
-    chargeMinRollOverlay?.tooltipText ?? DEFAULT_BLINK_PROBABILITY_HELP_TEXT;
-
-  onBlinkProbHtml?.({
-    action: "show",
-    unitId: unitIdNum,
-    left: screenPos.x,
-    top: screenPos.y,
-    stageX: barCenterX,
-    stageY: squareY,
-    label: probLabel,
-    showCoverShield: hasCoverIcon,
-    probabilityHelpText,
-  });
 
   // Cleanup function
   const cleanup = () => {
@@ -633,17 +657,20 @@ export function updateProbabilityDisplay(
   target: Unit,
   phase: "shoot" | "fight" | "charge",
   inCover: boolean = false,
-  onBlinkProbHtml?: (payload: BlinkProbHtmlPayload) => void
+  onBlinkProbHtml?: (payload: BlinkProbHtmlPayload) => void,
+  showProbability: boolean = false
 ): void {
-  const displayProbability = attacker
-    ? calculateWoundProbability(attacker, target, phase, inCover)
-    : 0;
+  // % masqué → label vide (le cadre / couvert restent), et pas de calcul de probabilité.
+  const label =
+    showProbability && attacker
+      ? `${Math.round(calculateWoundProbability(attacker, target, phase, inCover) * 100)}%`
+      : "";
   const unitIdNum = typeof target.id === "string" ? parseInt(target.id, 10) : target.id;
   const showCoverShield = phase === "shoot" && inCover;
   onBlinkProbHtml?.({
     action: "updateLabel",
     unitId: unitIdNum,
-    label: `${Math.round(displayProbability * 100)}%`,
+    label,
     showCoverShield,
     probabilityHelpText: DEFAULT_BLINK_PROBABILITY_HELP_TEXT,
   });

@@ -151,6 +151,8 @@ interface UnitRendererProps {
    * escouade (figs non-character uniquement) ; les characters gardent leur barre.
    */
   hpBarPerModel?: boolean;
+  /** true → affiche le % de blessure au-dessus des cibles blink ; false → masqué (le jet 2D6 de charge reste affiché). */
+  showWoundProbability?: boolean;
   /**
    * Option générique badges de statut (caché / fui / battle-shock).
    * true → un badge sur chaque figurine concernée (caché suit modelHidden ; fui et
@@ -1887,6 +1889,11 @@ export class UnitRenderer {
             )
           : null;
 
+      // Cadre HTML (œil "N figs" + bouclier couvert) toujours transmis ; seul le % de
+      // blessure (label) est piloté par l'option. Le jet 2D6 de charge reste inconditionnel.
+      const blinkProbHandler = this.props.onBlinkProbHtml;
+      const showProbability = !!this.props.showWoundProbability;
+
       // Escouade multi-figurines : HP_CUR = total escouade, HP_MAX = PV par-figurine.
       // On raisonne donc en PV PAR FIGURINE (jamais le total) pour que le clignotement
       // de dégâts touche bien les cases dessinées (HP_MAX).
@@ -1932,7 +1939,8 @@ export class UnitRenderer {
             sliceWidth: finalBarWidth / mh.HP_MAX,
             getCSSColor: this.getCSSColor.bind(this),
             chargeMinRollOverlay,
-            onBlinkProbHtml: mi === anchorIdx ? this.props.onBlinkProbHtml : undefined,
+            onBlinkProbHtml: mi === anchorIdx ? blinkProbHandler : undefined,
+            showProbability,
             sliceHpCur: mh.HP_CUR,
             modelId: mi,
           });
@@ -1956,13 +1964,15 @@ export class UnitRenderer {
           sliceWidth,
           getCSSColor: this.getCSSColor.bind(this),
           chargeMinRollOverlay,
-          onBlinkProbHtml: this.props.onBlinkProbHtml,
+          onBlinkProbHtml: blinkProbHandler,
+          showProbability,
           sliceHpCur,
         });
       }
 
       // If targetPreview has overallProbability, update the display (pas en phase charge : affichage jet 2D6)
       if (
+        showProbability &&
         blinkPhase !== "charge" &&
         isTargetPreviewed &&
         targetPreview &&
