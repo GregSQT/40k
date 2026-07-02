@@ -214,14 +214,14 @@ class TestLoSVisibility:
 
 class TestLoSState:
     def test_clear(self):
-        v, can_see = compute_los_state(0, 0, 5, 5, set(), 0.05)
+        v, can_see = compute_los_state(0, 0, 5, 5, set())
         assert can_see is True
         assert v == 1.0
 
     def test_blocked(self):
         line = hex_line(0, 0, 5, 0)
         wall = {line[2]}
-        v, can_see = compute_los_state(0, 0, 5, 0, wall, 0.05)
+        v, can_see = compute_los_state(0, 0, 5, 0, wall)
         assert can_see is False
         assert v == 0.0
 

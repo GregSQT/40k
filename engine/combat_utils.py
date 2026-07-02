@@ -291,6 +291,123 @@ def calculate_hex_distance(col1: int, row1: int, col2: int, row2: int) -> int:
         return max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
 
 
+# ----------------------------------------------------------------------------
+# Sélecteur de métrique de portée (point de bascule unique hex ↔ euclidien)
+# Voir Documentation/Distance management.md, Étapes 1-2.
+# ----------------------------------------------------------------------------
+
+VALID_DISTANCE_METRICS = ("hex", "euclidean")
+DISTANCE_METRIC_RULES = ("ranged", "move", "charge", "engagement", "overlap")
+
+
+def get_distance_metric(rule: str, game_config: Dict[str, Any]) -> str:
+    """Métrique de distance à appliquer à une règle (``ranged``/``move``/…).
+
+    Lit ``game_config["distance_metric"][rule]``. Aucune valeur par défaut :
+    section/clé/valeur manquante ou invalide → erreur explicite (CLAUDE.md).
+    """
+    if rule not in DISTANCE_METRIC_RULES:
+        raise ValueError(f"Unknown distance rule {rule!r}, expected one of {DISTANCE_METRIC_RULES}")
+    if "distance_metric" not in game_config:
+        raise KeyError("Missing 'distance_metric' section in game_config.json")
+    metrics = game_config["distance_metric"]
+    if rule not in metrics:
+        raise KeyError(f"Missing distance_metric['{rule}'] in game_config.json")
+    metric = metrics[rule]
+    if metric not in VALID_DISTANCE_METRICS:
+        raise ValueError(
+            f"Invalid distance_metric['{rule}'] = {metric!r}, expected one of {VALID_DISTANCE_METRICS}"
+        )
+    return metric
+
+
+def socle_from_cache_entry(entry: Dict[str, Any]) -> Any:
+    """Construit un ``Socle`` (engine.hex_utils) depuis une entrée ``units_cache``.
+
+    L'entrée porte BASE_SHAPE/BASE_SIZE/col/row/occupied_hexes/occupied_hexes_by_model
+    (cf build_units_cache). ``model_centers`` = centres par-figurine → distance bord-à-bord
+    ronde correcte vers une escouade multi-figurines.
+    """
+    from engine.hex_utils import Socle
+    by_model = entry.get("occupied_hexes_by_model")
+    model_centers = (
+        [(int(c), int(r)) for (c, r) in by_model.values()]
+        if isinstance(by_model, dict) and by_model
+        else None
+    )
+    return Socle(
+        entry["BASE_SHAPE"],
+        entry["BASE_SIZE"],
+        entry["col"],
+        entry["row"],
+        entry["occupied_hexes"],
+        model_centers,
+    )
+
+
+def ranged_edge_distance(a: Any, b: Any, metric: str, max_distance: int = 0) -> float:
+    """Distance de portée bord-à-bord, exprimée en **subhexes** (comparable direct à RNG).
+
+    Point de conversion unique subhex↔norme : le facteur ``ENGAGEMENT_NORM_HEX_WIDTH``
+    (= 1,5) vit ICI et nulle part ailleurs. Tous les call-sites tir comparent le résultat
+    à une portée en subhexes (``dist > RNG``), sans jamais manipuler le 1,5.
+
+    ``a``, ``b`` : ``Socle`` (engine.hex_utils).
+    - ``metric == "hex"``       : ``min_distance_between_sets(fp)`` (déjà en subhexes ;
+      comportement actuel). ``max_distance`` : prune passé tel quel.
+    - ``metric == "euclidean"`` : ``euclidean_edge_distance(a, b)`` [unités-norme] ÷ 1,5
+      → subhexes (règle 01.04, bord-à-bord).
+    """
+    from engine.hex_utils import (
+        min_distance_between_sets,
+        euclidean_edge_distance,
+        ENGAGEMENT_NORM_HEX_WIDTH,
+    )
+    if metric == "hex":
+        if a.fp is None or b.fp is None:
+            raise ValueError("ranged_edge_distance(hex): empreintes (fp) requises")
+        return min_distance_between_sets(a.fp, b.fp, max_distance=max_distance)
+    if metric == "euclidean":
+        return euclidean_edge_distance(a, b) / ENGAGEMENT_NORM_HEX_WIDTH
+    raise ValueError(f"Invalid metric {metric!r}, expected one of {VALID_DISTANCE_METRICS}")
+
+
+def ranged_in_range(a: Any, b: Any, rng_subhex: int, metric: str) -> bool:
+    """Cible à portée de tir (bool) — délègue à ``ranged_edge_distance`` (subhexes)."""
+    return ranged_edge_distance(a, b, metric, max_distance=rng_subhex) <= rng_subhex
+
+
+def ranged_edge_distance_to_cell(shooter: Any, anchor_col: int, anchor_row: int,
+                                 col: int, row: int, metric: str) -> float:
+    """Distance de portée tireur→**cellule** (subhexes), pour l'overlay de portée (base→point).
+
+    Cas particulier de ``ranged_edge_distance`` où la cible est une case (pas un socle).
+    Le facteur subhex↔norme (1,5) et le choix de métrique vivent ICI.
+
+    - ``metric == "hex"``       : distance hex ancre→cellule (comportement historique overlay).
+    - ``metric == "euclidean"`` : bord du socle tireur → centre de la cellule, ÷ 1,5 (règle 01.04).
+      Rond : centre-à-cellule − rayon. Non-rond : min sur les cellules du socle.
+    """
+    if metric == "hex":
+        return float(calculate_hex_distance(anchor_col, anchor_row, col, row))
+    if metric == "euclidean":
+        import math
+        from engine.hex_utils import _hex_center, round_base_radius_norm, ENGAGEMENT_NORM_HEX_WIDTH
+        cxb, cyb = _hex_center(col, row)
+        if shooter.shape == "round":
+            cxa, cya = _hex_center(shooter.col, shooter.row)
+            edge = math.hypot(cxb - cxa, cyb - cya) - round_base_radius_norm(shooter.base_size)
+        else:
+            if shooter.fp is None:
+                raise ValueError("ranged_edge_distance_to_cell(euclidean, non-rond): fp requis")
+            edge = min(
+                math.hypot(cxb - _hex_center(c, r)[0], cyb - _hex_center(c, r)[1])
+                for c, r in shooter.fp
+            )
+        return (edge if edge > 0.0 else 0.0) / ENGAGEMENT_NORM_HEX_WIDTH
+    raise ValueError(f"Invalid metric {metric!r}, expected one of {VALID_DISTANCE_METRICS}")
+
+
 def calculate_pathfinding_distance(col1: int, row1: int, col2: int, row2: int,
                                     game_state: Dict[str, Any],
                                     max_search_distance: int = 50) -> int:

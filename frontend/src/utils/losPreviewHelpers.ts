@@ -1,4 +1,10 @@
-import { computeOccupiedHexes, resolveBaseSizeForUnitDisplay } from "./hexFootprint";
+import {
+  computeOccupiedHexes,
+  euclideanEdgeDistanceToCellSubhex,
+  resolveBaseSizeForUnitDisplay,
+  squadFootprintHexKeysFromModelCenters,
+  unitFootprintHexKeys,
+} from "./hexFootprint";
 import { computeVisibleHexes, type VisibleHex } from "./wasmLos";
 
 /** Même cube-odd-r que ``BoardPvp.hexDistOff`` (empreinte / scan). */
@@ -17,8 +23,29 @@ export interface MinimalUnitForLos {
   player: number;
   col: number;
   row: number;
+  BASE_SHAPE?: "round" | "oval" | "square";
   /** Aligné sur ``Unit.BASE_SIZE`` (nombre ou tuple rare). */
   BASE_SIZE?: number | [number, number];
+}
+
+/** Map unitId → positions par-figurine (miroir ``units_cache.occupied_hexes_by_model``). */
+export type UnitsCacheModelCenters = Record<
+  string,
+  Record<string, [number, number]> | undefined
+>;
+
+/** Extrait les positions par-figurine de toutes les unités depuis ``gameState.units_cache``. */
+export function unitsCacheModelCenters(unitsCache: unknown): UnitsCacheModelCenters | undefined {
+  const uc = unitsCache as
+    | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+    | null
+    | undefined;
+  if (!uc) return undefined;
+  const out: UnitsCacheModelCenters = {};
+  for (const [uid, entry] of Object.entries(uc)) {
+    out[uid] = entry?.occupied_hexes_by_model;
+  }
+  return out;
 }
 
 export interface WallHexOverrideForLos {
@@ -42,7 +69,22 @@ export interface BuildLosPreviewFromSourceParams {
   /** All terrain areas (obscuring or not) — a visible hex inside one is drawn as cover. */
   terrainZones?: Array<{ hexes: Array<[number, number]> }>;
   maxRange: number;
-  losVisibilityMinRatio: number;
+  /** Métrique de portée (sélecteur backend). Défaut "hex" = comportement historique. */
+  distanceMetric?: "hex" | "euclidean";
+  /** Positions par-figurine du TIREUR (``occupied_hexes_by_model``) — à fournir quand la
+   * source est à la position courante de l'unité : empreinte = union des socles de toutes
+   * les figurines (miroir backend ``_resolve_unit_anchor_and_footprint``). Absent →
+   * socle unique recalculé à fromCol/fromRow (position hypothétique de survol). */
+  shooterModelCenters?: Record<string, [number, number]>;
+  /** Positions par-figurine par unité — blink cible par modèle (règle 06.01). */
+  unitsCacheByModel?: UnitsCacheModelCenters;
+}
+
+/** Extrait la métrique de portée tir depuis le game_config brut (défaut "hex"). */
+export function rangedPreviewMetric(gameConfig: unknown): "hex" | "euclidean" {
+  const dm = (gameConfig as { distance_metric?: { ranged?: string } } | null | undefined)
+    ?.distance_metric?.ranged;
+  return dm === "euclidean" ? "euclidean" : "hex";
 }
 
 export interface LosPreviewFromSource {
@@ -114,7 +156,7 @@ export function buildShootingLosPreviewFromVisibleHexes(
   visibleHexes: VisibleHex[],
   units: MinimalUnitForLos[],
   shooterPlayer: number,
-  losVisibilityMinRatio: number
+  unitsCacheByModel?: UnitsCacheModelCenters
 ): {
   clearCells: Array<{ col: number; row: number }>;
   terrainCoverCells: Array<{ col: number; row: number }>;
@@ -141,20 +183,26 @@ export function buildShootingLosPreviewFromVisibleHexes(
 
   for (const u of units) {
     if (u.player === shooterPlayer) continue;
-    const uBaseResolved = resolveBaseSizeForUnitDisplay(u);
-    const uBaseSize = uBaseResolved > 1 ? uBaseResolved : 0;
-    const scanR = uBaseSize > 0 ? Math.ceil(uBaseSize / 2) : 0;
-    let totalHexes = 0;
-    let visibleCount = 0;
-    for (let dc = -scanR; dc <= scanR; dc++) {
-      for (let dr = -scanR; dr <= scanR; dr++) {
-        if (hexDistOff(u.col, u.row, u.col + dc, u.row + dr) > scanR) continue;
-        totalHexes++;
-        if (visibleHexKeySet.has(`${u.col + dc},${u.row + dr}`)) visibleCount++;
+    // Règle 06.01 (binaire par modèle) : l'unité blinke si >= 1 figurine a >= 1 cellule de
+    // son socle visible. Positions par-figurine = units_cache.occupied_hexes_by_model ; sans
+    // découpage par figurine (mono-figurine / cache absent), socle unique à l'ancre.
+    const byModel = unitsCacheByModel?.[String(u.id)];
+    const modelFootprints: Array<Set<string>> = [];
+    if (byModel) {
+      for (const [mid, pos] of Object.entries(byModel)) {
+        const fp = squadFootprintHexKeysFromModelCenters({ [mid]: pos }, u);
+        if (fp) modelFootprints.push(fp);
       }
     }
-    const ratio = totalHexes > 0 ? visibleCount / totalHexes : 0;
-    const isVisible = ratio >= losVisibilityMinRatio;
+    if (modelFootprints.length === 0) {
+      modelFootprints.push(unitFootprintHexKeys(u));
+    }
+    const isVisible = modelFootprints.some((fp) => {
+      for (const k of fp) {
+        if (visibleHexKeySet.has(k)) return true;
+      }
+      return false;
+    });
     if (!isVisible) continue;
     const uid = typeof u.id === "string" ? parseInt(u.id, 10) : u.id;
     blinkIds.push(uid);
@@ -198,34 +246,76 @@ export function buildLosPreviewFromSource(
       }
     }
   }
-  // Shooter footprint at the hypothetical position — obscuring areas it occupies never block (13.10).
+  // Empreinte tireur — obscuring areas it occupies never block (13.10). Position courante :
+  // union des socles par-figurine du cache moteur (miroir backend). Position hypothétique :
+  // socle unique recalculé à fromCol/fromRow.
   const shooterSize = resolveBaseSizeForUnitDisplay(params.source.unit);
-  const shooterFootprint: Array<[number, number]> =
-    shooterSize > 1
+  const centers = params.shooterModelCenters;
+  const cacheFpKeys =
+    centers && Object.keys(centers).length > 0
+      ? squadFootprintHexKeysFromModelCenters(centers, params.source.unit)
+      : null;
+  const shooterFootprint: Array<[number, number]> = cacheFpKeys
+    ? Array.from(cacheFpKeys).map((k) => {
+        const [c, r] = k.split(",").map(Number);
+        return [c, r] as [number, number];
+      })
+    : shooterSize > 1
       ? computeOccupiedHexes(params.source.fromCol, params.source.fromRow, "round", shooterSize)
       : [[params.source.fromCol, params.source.fromRow]];
-  const visibleHexes = computeVisibleHexes(
+  // Portée : "hex" = gate hex du WASM (historique) ; "euclidean" = on élargit le scan WASM
+  // (padding = étendue hex de l'empreinte + 1) puis on filtre par distance bord-à-bord
+  // euclidienne exacte (miroir backend ranged_edge_distance_to_cell). Le WASM reste un pur
+  // calculateur de LoS.
+  const metric = params.distanceMetric ?? "hex";
+  const footprintPad =
+    shooterFootprint.reduce(
+      (m, [c, r]) => Math.max(m, hexDistOff(params.source.fromCol, params.source.fromRow, c, r)),
+      0
+    ) + 1;
+  const scanRange = metric === "euclidean" ? params.maxRange + footprintPad : params.maxRange;
+  const visibleHexesRaw = computeVisibleHexes(
     params.source.fromCol,
     params.source.fromRow,
-    params.maxRange,
+    scanRange,
     params.boardCols,
     params.boardRows,
     effectiveWallHexes,
     obscuringHexes,
     terrainHexes,
-    shooterFootprint,
-    params.losVisibilityMinRatio
+    shooterFootprint
   );
+  const visibleHexes =
+    metric === "euclidean"
+      ? visibleHexesRaw.filter(
+          (h) =>
+            euclideanEdgeDistanceToCellSubhex(
+              params.source.fromCol,
+              params.source.fromRow,
+              shooterSize,
+              h.col,
+              h.row
+            ) <= params.maxRange
+        )
+      : visibleHexesRaw;
   const losPreview = buildShootingLosPreviewFromVisibleHexes(
     visibleHexes,
     params.units,
     params.source.unit.player,
-    params.losVisibilityMinRatio
+    params.unitsCacheByModel
   );
+  const shooterCentersKey = centers
+    ? Object.entries(centers)
+        .map(([mid, [c, r]]) => `${mid}:${c},${r}`)
+        .sort()
+        .join(";")
+    : "";
   const key = [
     params.source.fromCol,
     params.source.fromRow,
     params.maxRange,
+    metric,
+    shooterCentersKey,
     params.boardCols,
     params.boardRows,
     stableWallHexKey(effectiveWallHexes),

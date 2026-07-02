@@ -27,7 +27,6 @@ def _base_config() -> Dict[str, Any]:
         "game_rules": {
             "engagement_zone": 1,
             "max_base_size_hex": 35,
-            "los_visibility_min_ratio": 0.0,
             "cover_ratio": 0.0,
         },
         "charge": {

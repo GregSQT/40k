@@ -166,19 +166,12 @@ def test_geometry_and_los_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(points) == 9
     assert an.line_passes_through_hex((0.0, 0.0), (100.0, 0.0), 0, 0) is True
 
-    an._los_thresholds_cache = None
-
     class _Cfg:
-        @staticmethod
-        def get_game_config():
-            return {"game_rules": {"los_visibility_min_ratio": 0.4, "cover_ratio": 0.2}}
-
         @staticmethod
         def get_board_size():
             return (4, 3)
 
     monkeypatch.setattr("config_loader.get_config_loader", lambda: _Cfg())
-    assert an._get_los_thresholds() == 0.4
     walls = an._get_los_wall_hexes(set())
     assert (1, 2) in walls and (3, 2) in walls
 

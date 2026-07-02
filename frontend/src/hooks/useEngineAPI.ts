@@ -181,6 +181,7 @@ export interface APIGameState {
     los_preview_attack_cells?: Array<{ col: number; row: number }>;
     los_preview_cover_cells?: Array<{ col: number; row: number }>;
     los_preview_ratio_by_hex?: Record<string, number>;
+    visible_cells_by_target?: Record<string, Array<[number, number]>>;
     selected_target_id?: string;
     // Règle 13.09 Hidden / battle-shock (exposé moteur)
     hideable?: boolean;
@@ -3250,6 +3251,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         los_preview_attack_cells: unit.los_preview_attack_cells,
         los_preview_cover_cells: unit.los_preview_cover_cells,
         los_preview_ratio_by_hex: unit.los_preview_ratio_by_hex,
+        visible_cells_by_target: unit.visible_cells_by_target,
         currentShootNb: unit._current_shoot_nb,
         currentFightNb: unit._current_fight_nb,
         available_weapons: unit.available_weapons,

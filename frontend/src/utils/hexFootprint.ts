@@ -63,6 +63,26 @@ function footprintRound(centerCol: number, centerRow: number, diameter: number):
   return result;
 }
 
+/**
+ * Distance de portée tireur→cellule en **subhexes**, bord-à-bord euclidien.
+ * Miroir exact de engine/combat_utils.ranged_edge_distance_to_cell (branche euclidean, socle rond) :
+ * bord du socle tireur → centre de la cellule, ÷ FOOTPRINT_SIZE_SCALE (= 1.5, = ENGAGEMENT_NORM_HEX_WIDTH backend).
+ */
+export function euclideanEdgeDistanceToCellSubhex(
+  shooterCol: number,
+  shooterRow: number,
+  shooterBaseSize: number,
+  col: number,
+  row: number
+): number {
+  const [cxa, cya] = hexCenter(shooterCol, shooterRow);
+  const [cxb, cyb] = hexCenter(col, row);
+  const bs = shooterBaseSize < 1 ? 1 : shooterBaseSize;
+  const radius = (bs / 2) * FOOTPRINT_SIZE_SCALE;
+  const edge = Math.hypot(cxb - cxa, cyb - cya) - radius;
+  return (edge > 0 ? edge : 0) / FOOTPRINT_SIZE_SCALE;
+}
+
 export type HexCoord = [number, number];
 
 /**

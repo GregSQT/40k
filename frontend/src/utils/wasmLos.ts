@@ -104,8 +104,7 @@ export function computeVisibleHexes(
   wallHexes: Array<[number, number]> | number[][],
   obscuringHexes: Array<[number, number, number]>,
   terrainHexes: Array<[number, number]>,
-  shooterFootprint: Array<[number, number]>,
-  losVisibilityMinRatio: number
+  shooterFootprint: Array<[number, number]>
 ): VisibleHex[] {
   if (!wasmReady) {
     throw new Error("WASM not initialized — call ensureWasmLoaded() first");
@@ -123,9 +122,7 @@ export function computeVisibleHexes(
     wallData,
     obscuringData,
     terrainData,
-    footprintData,
-    losVisibilityMinRatio,
-    1.0
+    footprintData
   );
   const results: VisibleHex[] = [];
   for (let i = 0; i < raw.length; i += 3) {
@@ -143,15 +140,11 @@ export function computeLosSingle(
   fromRow: number,
   toCol: number,
   toRow: number,
-  wallHexes: Array<[number, number]> | number[][],
-  losVisibilityMinRatio: number
+  wallHexes: Array<[number, number]> | number[][]
 ): 0 | 1 | 2 {
   if (!wasmReady) {
     throw new Error("WASM not initialized — call ensureWasmLoaded() first");
   }
   const wallData = getWallData(wallHexes);
-  return compute_los_single(fromCol, fromRow, toCol, toRow, wallData, losVisibilityMinRatio, 1.0) as
-    | 0
-    | 1
-    | 2;
+  return compute_los_single(fromCol, fromRow, toCol, toRow, wallData) as 0 | 1 | 2;
 }

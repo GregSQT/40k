@@ -866,7 +866,6 @@ def compute_los_state(
     to_col: int,
     to_row: int,
     wall_set: Set[Tuple[int, int]],
-    los_visibility_min_ratio: float,
 ) -> Tuple[float, bool]:
     """Compute (visibility_ratio, can_see) for a single-hex pair.
 
@@ -874,18 +873,18 @@ def compute_los_state(
     and _has_los_from_topology (observation_builder) without needing the
     n×n topology matrix.
 
+    Binary visibility (rule 06.01): can_see = ratio > 0 (no threshold).
+
     Args:
         from_col, from_row: Shooter position.
         to_col, to_row: Target position.
         wall_set: Set of (col, row) wall hexes.
-        los_visibility_min_ratio: P threshold (§7.2) — from game_rules.
 
     Returns:
         (visibility_ratio, can_see)
     """
     v = compute_los_visibility(from_col, from_row, to_col, to_row, wall_set)
-    can_see = v >= los_visibility_min_ratio
-    return v, can_see
+    return v, v > 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -1399,18 +1398,25 @@ _OVERLAP_TOL: float = 1e-6
 
 
 class Socle(NamedTuple):
-    """Socle d'une figurine pour les tests de chevauchement.
+    """Socle d'une figurine (ou empreinte d'une escouade) pour les tests de distance.
 
     ``fp`` (empreinte = cellules occupées) n'est nécessaire que pour la méthode
-    empreinte (toute paire impliquant une base non ronde). Pour une paire ronde↔ronde,
-    le test est purement géométrique (centre + base_size) et ``fp`` peut rester None.
-    ``base_size`` : diamètre (round/square) ou [major, minor] (oval).
+    empreinte (toute paire impliquant une base non ronde). Pour une paire ronde↔ronde
+    MONO-figurine, le test est purement géométrique (centre + base_size) et ``fp`` peut
+    rester None. ``base_size`` : diamètre (round/square) ou [major, minor] (oval).
+
+    ``model_centers`` : centres (col,row) de CHAQUE figurine vivante de l'escouade
+    (source : ``occupied_hexes_by_model``). Requis pour mesurer une distance bord-à-bord
+    ronde correcte vers une escouade multi-figurines : sans lui, le raccourci round↔round
+    mesurerait jusqu'à la seule figurine-ancre (règle 01.04 : point le plus proche des
+    socles). ``None`` ou liste à 1 élément → mono-figurine, comportement historique.
     """
     shape: str
     base_size: "int | list[int]"
     col: int
     row: int
     fp: Optional[Set[Tuple[int, int]]] = None
+    model_centers: Optional[List[Tuple[int, int]]] = None
 
 
 def bounding_radius_norm(shape: str, base_size: "int | list[int]") -> float:
@@ -1452,6 +1458,58 @@ def footprints_overlap(a: Socle, b: Socle) -> bool:
     if a.fp is None or b.fp is None:
         raise ValueError("footprints_overlap: empreinte (fp) requise pour une paire non ronde")
     return bool(a.fp & b.fp)
+
+
+def euclidean_edge_distance(a: Socle, b: Socle) -> float:
+    """Distance euclidienne **bord-à-bord** entre deux socles, en unités ``_hex_center``.
+
+    Équivalent euclidien de ``min_distance_between_sets`` (règle 01.04 : on mesure au
+    point le plus proche des socles). Même dispatch que ``footprints_overlap``, mais
+    renvoie la distance au lieu d'un booléen de chevauchement.
+
+    - Paire ronde↔ronde : clearance euclidien continu (exact), O(1), via
+      ``euclidean_edge_clearance_round_round``. Borné à 0 (socles tangents/chevauchants).
+    - Toute paire impliquant une base non ronde : min euclidien entre les **centres des
+      cellules occupées** (``a.fp`` / ``b.fp`` requis). 0 si les empreintes se chevauchent.
+      Approximation suffisante pour la portée (longue distance) ; un proxy continu
+      (capsule/OBB) ne serait requis que pour des règles courte-distance.
+
+    ÉCHELLE : résultat en unités ``_hex_center`` (1 subhex = ``_FOOTPRINT_SIZE_SCALE`` = 1,5).
+    Pour comparer à une portée en subhexes, l'appelant convertit le seuil :
+    ``distance <= rng_subhex * ENGAGEMENT_NORM_HEX_WIDTH``.
+    """
+    if a.shape == "round" and b.shape == "round":
+        # Règle 01.04 : distance au point le plus proche des socles. Pour une escouade
+        # multi-figurines, on prend le min du clearance bord-à-bord sur chaque paire de
+        # figurines (centres réels), pas seulement l'ancre. Mono-figurine → une seule paire
+        # = comportement historique.
+        centers_a = a.model_centers if a.model_centers else [(a.col, a.row)]
+        centers_b = b.model_centers if b.model_centers else [(b.col, b.row)]
+        base_a = cast(float, a.base_size)
+        base_b = cast(float, b.base_size)
+        best = math.inf
+        for ca, ra in centers_a:
+            for cb, rb in centers_b:
+                gap = euclidean_edge_clearance_round_round(ca, ra, base_a, cb, rb, base_b)
+                if gap < best:
+                    best = gap
+                    if best <= 0.0:
+                        return 0.0
+        return best if best > 0.0 else 0.0
+    # Au moins une base non ronde : min euclidien entre centres de cellules occupées.
+    if a.fp is None or b.fp is None:
+        raise ValueError("euclidean_edge_distance: empreinte (fp) requise pour une paire non ronde")
+    if a.fp & b.fp:
+        return 0.0
+    centers_b = [_hex_center(c, r) for c, r in b.fp]
+    best = math.inf
+    for ca, ra in a.fp:
+        cxa, cya = _hex_center(ca, ra)
+        for cxb, cyb in centers_b:
+            d = math.hypot(cxb - cxa, cyb - cya)
+            if d < best:
+                best = d
+    return best
 
 
 def _point_in_polygon(px: float, py: float, poly: Sequence[Tuple[float, float]]) -> bool:

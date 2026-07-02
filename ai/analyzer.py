@@ -41,8 +41,6 @@ def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: A
     return total
 
 
-# Cache for LoS thresholds (loaded from game_config, same as engine)
-_los_thresholds_cache: Optional[float] = None
 _inches_to_subhex_analyzer_cache: Optional[int] = None
 _engagement_zone_analyzer_cache: Optional[int] = None
 
@@ -534,19 +532,6 @@ def get_hex_points(center_x: float, center_y: float, radius: float = 21.0) -> Li
     return points
 
 
-def _get_los_thresholds() -> float:
-    """Load los_visibility_min_ratio from game_config (same as engine)."""
-    global _los_thresholds_cache
-    if _los_thresholds_cache is not None:
-        return _los_thresholds_cache
-    from config_loader import get_config_loader
-    game_config = get_config_loader().get_game_config()
-    game_rules = require_key(game_config, "game_rules")
-    los_visibility_min_ratio = float(require_key(game_rules, "los_visibility_min_ratio"))
-    _los_thresholds_cache = los_visibility_min_ratio
-    return _los_thresholds_cache
-
-
 def _get_los_wall_hexes(wall_hexes: Set[Tuple[int, int]]) -> Set[Tuple[int, int]]:
     """
     Augment wall_hexes with board boundary hexes (bottom_row for odd cols).
@@ -565,15 +550,14 @@ def _get_los_wall_hexes(wall_hexes: Set[Tuple[int, int]]) -> Set[Tuple[int, int]
 def has_line_of_sight(shooter_col: int, shooter_row: int, target_col: int, target_row: int, wall_hexes: Set[Tuple[int, int]]) -> bool:
     """
     Check line of sight using the same algorithm as the game engine.
-    
+
     Algorithm (matches shooting_handlers._get_los_visibility_state):
     1. Augment wall_hexes with board boundary (bottom_row for odd cols)
     2. Compute visibility ratio via hex line trace
-    3. can_see = visibility_ratio >= los_visibility_min_ratio (from game_config)
+    3. can_see = visibility_ratio > 0 (rule 06.01 — binary, no threshold)
     """
     from engine.hex_utils import compute_los_state
 
-    los_visibility_min_ratio = _get_los_thresholds()
     effective_walls = _get_los_wall_hexes(wall_hexes)
 
     try:
@@ -588,7 +572,6 @@ def has_line_of_sight(shooter_col: int, shooter_row: int, target_col: int, targe
             target_col_int,
             target_row_int,
             effective_walls,
-            los_visibility_min_ratio,
         )
         return can_see
 

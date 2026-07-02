@@ -83,7 +83,7 @@ qui rend le projet de l'utilisateur faisable.
 |---------|-------|----------|----------|-------|
 | engine/observation_builder.py | 682-695 | calcul move_distance | Hex cube | Observation : distance parcourue |
 | engine/phase_handlers/movement_handlers.py | 120-170 | `_build_objective_distance_cache()` | Pathfinding | Cache distances objectifs |
-| engine/ai/analyzer_phases/move_handler.py | 358-380 | calcul fly_distance | Hex cube | Move fly : distance droite |
+| ai/analyzer_phases/move_handler.py | 358-380 | calcul fly_distance | Hex cube | Move fly : distance droite |
 
 ## 7. BACKEND — Charge (charge phase)
 
@@ -92,8 +92,8 @@ qui rend le projet de l'utilisateur faisable.
 | engine/phase_handlers/charge_handlers.py | 565-630 | `_charge_bfs_max_distance()` | Pathfinding BFS | Distance max traversable |
 | engine/phase_handlers/charge_handlers.py | ~630-670 | `_charge_skip_hex_lb_prune_round_round_engagement()` | **Euclidienne** round-round | Prune hexes trop loin |
 | engine/phase_handlers/charge_handlers.py | 2398-2480 | `charge_build_valid_targets()` | Pathfinding ≤ charge_distance | Cibles valides |
-| engine/ai/analyzer_phases/charge_handler.py | 75-110 | calcul charge_distance | Hex cube | IA : distance charge déclarée |
-| engine/ai/game_replay_logger.py | 169-200 | distance_needed | Hex cube | Log : distance min requise |
+| ai/analyzer_phases/charge_handler.py | 75-110 | calcul charge_distance | Hex cube | IA : distance charge déclarée |
+| ai/game_replay_logger.py | 169-200 | distance_needed | Hex cube | Log : distance min requise |
 
 ## 8. BACKEND — Tir (shooting phase)
 
@@ -101,11 +101,12 @@ qui rend le projet de l'utilisateur faisable.
 |---------|-------|----------|----------|-------|
 | engine/phase_handlers/shooting_handlers.py | 620-660 | vérif `weapon_range` | Hex cube | Cible à portée arme |
 | engine/phase_handlers/shooting_handlers.py | 800-840 | distance footprint↔footprint | `min_distance_between_sets()` | Empreintes ≤ RNG |
+| engine/phase_handlers/shooting_handlers.py | 424-470 (dont ~479-483) | `_build_weapon_availability_enemy_precheck()` | **split** : `hex_distance()` centre (gym) / `min_distance_between_sets()` footprint (PvP) | Précheck portée arme (source de `row["distance"]` en 620-660) — brancher les DEUX branches |
 | engine/phase_handlers/shooting_handlers.py | 3150-3970 | distances shooter→target | Hex cube | Distance de tir (plusieurs points) |
 | engine/phase_handlers/shooting_handlers.py | 4293-4310 | cible la plus proche | Hex cube | IA : sélection cible |
-| engine/ai/analyzer_phases/shoot_handler.py | 406-610 | distances shooter→target | Hex cube | IA tir : validité/visée |
-| engine/ai/target_selector.py | 198-210 | distance ally→target | Hex cube | IA : sélection cible |
-| engine/engine/ai/weapon_selector.py | 383-400 | distance unit→target | Hex cube | IA arme : cible à portée |
+| ai/analyzer_phases/shoot_handler.py | 406-610 | distances shooter→target | Hex cube | IA tir : validité/visée |
+| ai/target_selector.py | 198-210 | distance ally→target | Hex cube | IA : sélection cible |
+| engine/ai/weapon_selector.py | 383-400 | distance unit→target | Hex cube | IA arme : cible à portée |
 
 ## 9. BACKEND — Combat rapproché (fight phase)
 
@@ -246,13 +247,28 @@ délicat à cause des murs).
 ### Décisions actées
 - **Zone d'engagement (EZ)** : NON touchée pour l'instant → reste hex partout
   (sections 4). On ne migre que la *portée* de tir, move et charge.
-- **IA** : retrain prévu de toute façon → l'impact sur observations/récompenses
-  (section 10) est ignoré pendant la migration.
+- **IA (observations / récompenses)** : retrain prévu de toute façon → l'impact
+  sur observations/récompenses (section 10) est ignoré pendant la migration →
+  reste hex.
+- **IA (sélection de cible / arme)** : la mesure de *portée* côté IA suit la règle
+  de la phase, pas le retrain. **Ranged → euclidien**, **melee → hex**.
+  Concrètement : `engine/ai/weapon_selector.py` ligne 383 (branche RNG) et
+  `ai/target_selector.py` basculent en euclidien avec le tir ; la branche melee
+  (`select_best_melee_weapon`) et `macro_intents.py` (distance stratégique)
+  restent hex.
 - **Positions** : les unités restent posées sur les centres d'hexagones. L'hex
   reste le système de coordonnées et d'occupation ; l'euclidien est une couche
   de calcul de portée par-dessus.
 - **Move / charge** : distance max en euclidien via un **champ de distance
-  géodésique any-angle** (contourne les murs) ; overlap alliés/ennemis reste hex.
+  géodésique any-angle** ; overlap alliés/ennemis reste hex. La charge suit le
+  move (règle 11.04 : la charge *est* un move) — **même champ géodésique, seul
+  le budget change** (2D6 au lieu de M).
+- **Algorithme géodésique acté** : **lazy Theta\* en flood** (propagation d'un
+  champ de distance où un nœud hérite la distance de son ancêtre s'il y a ligne
+  de vue dégagée), **adossé au LoS WASM existant** pour le test de visibilité /
+  la règle de coin. Choix retenu vs fast marching (erreur de discrétisation) et
+  visibility graph (exact mais O(n²) + pas de champ) : meilleur compromis
+  fidélité / perf / **sync front-back gratuite** (même LoS des deux côtés).
 - **Tir** : portée droite en euclidien (pas de pathfinding).
 
 ### Périmètre — ce qui bascule vs ce qui reste
@@ -269,7 +285,8 @@ délicat à cause des murs).
 ### Étape 0 — Inventaire figé des call-sites (aucune modif de code)
 But : transformer les tables de cet audit en liste exhaustive et vérifiée des
 appels à basculer. Sortie = une checklist par fichier.
-- **Tir** : shooting_handlers.py (620-660, 800-840, 3150-3970, 4293-4310),
+- **Tir** : shooting_handlers.py (424-470 **dont branche gym ~479-483**, 620-660,
+  800-840, 3150-3970, 4293-4310),
   analyzer_phases/shoot_handler.py, target_selector.py, weapon_selector.py ;
   frontend gameHelpers.ts (`isUnitInRange`), probabilityCalculator.ts,
   blinkingHPBar.ts, weaponHelpers.ts.
@@ -281,32 +298,88 @@ appels à basculer. Sortie = une checklist par fichier.
 - **Checkpoint** : valider la liste avant tout code.
 
 ### Étape 1 — Point de bascule unique (backend)
-Fichier : [combat_utils.py](engine/combat_utils.py)
-- Ajouter `calculate_euclidean_distance(a, b)` à côté de `calculate_hex_distance`.
-- Introduire un **sélecteur de métrique par règle** (ex. lecture d'une clé de
-  config `distance_metric` : `{ ranged: "euclidean", move: "euclidean",
-  charge: "euclidean", engagement: "hex", overlap: "hex" }`).
-- Aucune bascule effective encore : par défaut tout reste `hex`. On vérifie juste
-  que le sélecteur est branché et testable.
-- **Checkpoint** : comportement identique à aujourd'hui (métriques encore hex).
+Fichiers : [hex_utils.py](engine/hex_utils.py), [combat_utils.py](engine/combat_utils.py)
+- **Primitive géométrique bord-à-bord** dans `hex_utils.py` : `euclidean_edge_distance(a, b)`
+  (entrées typées `Socle`). Rond↔rond → réutilise `euclidean_edge_clearance_round_round`
+  (O(1)). Non-rond (oval/square) → min euclidien entre centres de cellules occupées,
+  réutilisant le prune de `min_distance_between_sets`. Retourne un `float` en unités-norme
+  `_hex_center`, sans arrondi. **Aucun centre-à-centre** : `calculate_euclidean_distance`
+  centre-à-centre abandonnée (règle 01.04 = mesure bord-à-bord au point le plus proche).
+  Note : le proxy cellules pour le non-rond est suffisant pour la portée (longue distance,
+  erreur ~0,1") ; un proxy continu (capsule/OBB) ne deviendrait nécessaire que si l'euclidien
+  gagnait un jour les règles courte-distance (engagement/overlap) — exclu par ce plan.
+- **Sélecteur de métrique par règle** dans `combat_utils.py` :
+  `get_distance_metric(rule, game_config)` lit `game_config["distance_metric"][rule]`,
+  **erreur explicite** si section/clé/valeur manquante ou invalide (aucun fallback).
+- **Fonction de portée unifiée** (le vrai point de bascule, à distinguer de la primitive) :
+  `ranged_in_range(a, b, rng_subhex, metric)`. `hex` → `min_distance_between_sets(fp) <= rng_subhex`
+  (actuel) ; `euclidean` → `euclidean_edge_distance(a, b) <= rng_subhex × 1.5`. La conversion
+  `× 1.5` vit **ici seulement**, jamais dispersée aux call-sites.
+- `distance_metric` ajouté à `game_config.json`, **tout à `"hex"`** par défaut.
+- Aucun call-site rerouté : par défaut tout reste `hex`. On vérifie juste que la primitive,
+  le sélecteur et la fonction de portée sont branchés et testables.
+- **Checkpoint** : comportement identique à aujourd'hui (`--step` + PvP inchangés).
 
 ### Étape 2 — Migration TIR (risque faible)
-- Remplacer les appels directs `calculate_hex_distance` de portée d'arme par le
-  sélecteur (métrique `ranged`).
+**Portée mesurée bord-à-bord** (base-à-base au point le plus proche, règle 01.04),
+**pas centre-à-centre.**
+- **Scale acté** : `subhex → unités-norme = × 1.5` (`_FOOTPRINT_SIZE_SCALE` /
+  `ENGAGEMENT_NORM_HEX_WIDTH`), la MÊME conversion que l'EZ
+  (`engagement_minimum_clearance_norm`) et l'overlap — c'est ce qui garde
+  portée = EZ = overlap = rendu frontend cohérents. **Pas √3** (√3 = pas hex réel,
+  mais la convention maison est 1.5 = largeur horizontale, alignée sur le rendu).
+  RNG est déjà en subhexes (RNG_pouces × `inches_to_subhex`, scalé au chargement
+  dans `game_state.py`). Comparaison : `euclidean_edge_distance <= rng_subhex × 1.5`.
+- **Router TOUS les call-sites de portée tir** via la fonction de portée unifiée
+  `ranged_in_range` (sélecteur `ranged`), y compris les deux mesures footprint hex
+  existantes : `min_distance_between_sets` en 800-840 **ET**
+  `_build_weapon_availability_enemy_precheck` en 424-470 (source de
+  `row["distance"]` lu en 620-660). Ne PAS en migrer une sans l'autre → sinon
+  incohérence « arme disponible / cible refusée ».
+- **Branche gym/non-gym** (`shooting_handlers.py` ~479-483) : le précheck mesure
+  aujourd'hui centre-à-centre hex en gym (`_hex_dist`) et footprint hex en PvP.
+  **Supprimer la branche gym** → le gym passe aussi par `ranged_in_range` (gratuit
+  en perf : le rond↔rond est O(1)). Sinon training et PvP divergent encore plus.
+- **`row["distance"]` int → float** : vérifier qu'aucun consommateur ne le traite
+  comme entier (affichage/logs). La sélection « cible la plus proche » (4293-4310)
+  **trie** par cette distance → migrer le tri **dans le même lot** que le seuil,
+  jamais séparément.
 - Passer la config `ranged: "euclidean"`.
-- Frontend : miroir dans gameHelpers/probabilityCalculator/blinkingHPBar.
+- Frontend : miroir dans gameHelpers/probabilityCalculator/blinkingHPBar/
+  weaponHelpers (même formule bord-à-bord, **même facteur `× 1.5`**, même absence
+  d'arrondi que le backend).
 - **Checkpoint** : une cible à portée en diagonale doit être atteignable en
-  euclidien là où l'hex la refusait (et inversement). Valider PvP + replay.
+  euclidien là où l'hex la refusait (et inversement) ; les deux checks (précheck
+  620-660 et 800-840) restent cohérents. Valider PvP + replay.
 
 ### Étape 3 — Champ de distance géodésique any-angle (move/charge)
 Nouvelle fonction backend (à côté du BFS existant, pas en remplacement direct).
-- Propagation d'une distance euclidienne qui contourne les murs (Dijkstra à
-  relaxation any-angle, type Theta\* en flood, ou fast marching).
-- **Gestion explicite des coins de murs** (grazing) : interdire de "raser" un
-  angle si les deux hexes adjacents au coin sont des murs.
-- Sortie = pour chaque hex candidate, sa distance géodésique au point de départ.
-- **Checkpoint** : sur une carte sans mur, la zone atteignable est un disque ;
-  avec un mur, elle le contourne proprement (pas de traversée d'angle).
+
+**Algorithme retenu : lazy Theta\* en flood.**
+- Propagation type Dijkstra sur le graphe hex, mais à chaque relaxation on tente
+  de rattacher le nœud courant non pas à son voisin immédiat mais à l'**ancêtre
+  du voisin** si la **ligne de vue est dégagée** entre eux → le coût cumulé est
+  une **vraie distance euclidienne** (chemins à angle libre), pas une somme de
+  pas hex à 60°.
+- **Réutiliser le LoS WASM existant** (`wasm_los` / `hasLineOfSight`) comme test
+  de visibilité ET comme source unique de la **règle de coin de mur** → garantit
+  que backend et frontend appliquent exactement la même géométrie (résout le
+  point de sync front-back). Ne PAS réimplémenter une règle de coin ad hoc.
+- **Coins de murs (grazing)** : la règle de blocage est celle du LoS (un rayon
+  qui passe par le point de contact de deux murs est bloqué) — à valider comme
+  cohérente avec l'intuition « on ne se faufile pas entre deux murs jointifs ».
+- Sortie = pour chaque hex candidate, sa distance géodésique au point de départ
+  (un **champ** complet en une passe, pas une requête point-à-point).
+
+**Spike de dé-risquage (à faire AVANT de brancher move/charge) :**
+- Implémenter le champ sur une carte de test isolée (aucun branchement moteur).
+- **Mesurer l'erreur aux coins** : distance produite vs plus court chemin vrai
+  (visibility graph de référence) sur quelques configs concaves. Lazy Theta\*
+  est quasi-optimal, pas exact → vérifier que la sur-estimation reste
+  négligeable à l'échelle du jeu (< ~0.1").
+- **Checkpoint** : sur une carte sans mur, la zone atteignable est un disque
+  parfait ; avec un mur, elle le contourne proprement (pas de traversée d'angle) ;
+  l'erreur mesurée aux coins est sous le seuil.
 
 ### Étape 4 — Migration MOVE
 - Brancher le champ géodésique sur `movement_handlers.py` (budget = MOVE).

@@ -741,6 +741,7 @@ class ObservationBuilder:
         Uses precomputed los_topology when available (legacy boards).
         Falls back to on-demand hex line trace (Board ×10) via hex_utils.
         Returns False for out-of-bounds coordinates.
+        Binary visibility (rule 06.01): visible = ratio > 0 (no threshold).
         """
         board_cols = game_state["board_cols"]
         board_rows = game_state["board_rows"]
@@ -753,10 +754,6 @@ class ObservationBuilder:
             and 0 <= to_row < board_rows
         ):
             return False
-        config = require_key(game_state, "config")
-        game_rules = require_key(config, "game_rules")
-        los_visibility_min_ratio = float(require_key(game_rules, "los_visibility_min_ratio"))
-
         los_topology = game_state.get("los_topology")
         if los_topology is not None:
             from_idx = from_row * board_cols + from_col
@@ -771,7 +768,7 @@ class ObservationBuilder:
             visibility_ratio = compute_los_visibility(
                 from_col, from_row, to_col, to_row, wall_set,
             )
-        return visibility_ratio >= los_visibility_min_ratio
+        return visibility_ratio > 0.0
 
     def _build_los_cache_for_observation(
         self,

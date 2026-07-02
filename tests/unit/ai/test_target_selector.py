@@ -70,7 +70,21 @@ def test_calculate_army_threat_requires_friendly_value(monkeypatch: pytest.Monke
     monkeypatch.setattr(tsmod, "expected_dice_value", lambda expr, ctx: 2.0)
     monkeypatch.setattr(tsmod, "require_unit_position", lambda unit, gs: (1, 1))
     monkeypatch.setattr(tsmod, "calculate_hex_distance", lambda a, b, c, d: 1)
-    game_state = {"current_player": 1, "units": [{"id": "F1", "player": 1}]}
+    # units_cache requis depuis la migration euclidienne (socle de distance bord-à-bord).
+    # Entrée minimale pour la cible ; le garde VALEUR sur l'unité amie F1 lève avant que
+    # son propre socle soit construit.
+    _cache_entry = {
+        "BASE_SHAPE": "round",
+        "BASE_SIZE": 1,
+        "col": 1,
+        "row": 1,
+        "occupied_hexes": {(1, 1)},
+    }
+    game_state = {
+        "current_player": 1,
+        "units": [{"id": "F1", "player": 1}],
+        "units_cache": {"T": dict(_cache_entry), "F1": dict(_cache_entry)},
+    }
     target = {"id": "T", "RNG_WEAPONS": [{"DMG": "1"}], "CC_WEAPONS": []}
     with pytest.raises(KeyError, match=r"VALUE"):
         selector._calculate_army_threat(target, game_state)

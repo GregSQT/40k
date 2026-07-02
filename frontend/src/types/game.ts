@@ -165,6 +165,9 @@ export interface Unit {
   los_preview_attack_cells?: Array<{ col: number; row: number }>;
   los_preview_cover_cells?: Array<{ col: number; row: number }>;
   los_preview_ratio_by_hex?: Record<string, number>;
+  /** Cellules visibles par cible ciblable (backend, règle 06.01/13.10) — peintes par-dessus
+   * le cône WASM pour garantir la cohérence blink↔visuel. Clé = id cible, valeur = [[col,row],…]. */
+  visible_cells_by_target?: Record<string, Array<[number, number]>>;
   currentShootNb?: number;
   currentFightNb?: number;
   hasChargedThisTurn?: boolean;

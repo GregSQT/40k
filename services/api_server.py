@@ -647,6 +647,36 @@ def _sync_units_hp_from_cache(serializable_state: Dict[str, Any], game_state: Di
         unit["HP_CUR"] = require_key(cache_entry, "HP_CUR")
 
 
+def _attach_shoot_visible_cells(serializable_state: Dict[str, Any], game_state: Dict[str, Any]) -> None:
+    """Attache les cellules visibles par cible (règle 06.01/13.10) sur le tireur actif.
+
+    Consommé par la preview frontend pour peindre les cases visibles des cibles ciblables
+    par-dessus le cône WASM → cohérence blink↔visuel (une cible qui blinke a toujours ses
+    cases peintes). Tireur de phase de tir fixe → calcul une fois par action, borné aux
+    seules cibles valides (pas de scan plateau). Miroir du champ move-preview
+    ``visible_cells_by_target``.
+    """
+    active_id = game_state.get("active_shooting_unit")
+    if active_id is None:
+        return
+    active_id_str = str(active_id)
+    from engine.phase_handlers.shooting_handlers import (
+        build_visible_cells_by_target,
+        _get_unit_by_id,
+    )
+    shooter = _get_unit_by_id(game_state, active_id_str)
+    if shooter is None:
+        return
+    valid_targets = shooter.get("valid_target_pool")
+    if not isinstance(valid_targets, list) or not valid_targets:
+        return
+    vis_by_target = build_visible_cells_by_target(game_state, shooter, valid_targets)
+    for unit in require_key(serializable_state, "units"):
+        if str(require_key(unit, "id")) == active_id_str:
+            unit["visible_cells_by_target"] = vis_by_target
+            break
+
+
 def _build_player_types(is_ai_enabled: bool, mode_code: str) -> Dict[str, str]:
     """
     Build player type mapping for frontend orchestration.
@@ -2241,6 +2271,7 @@ def execute_action():
                 "los_preview_ratio_by_hex": preview_payload["los_preview_ratio_by_hex"],
                 "cover_by_unit_id": preview_payload["cover_by_unit_id"],
                 "hidden_too_far_by_unit_id": preview_payload["hidden_too_far_by_unit_id"],
+                "visible_cells_by_target": preview_payload["visible_cells_by_target"],
             },
         })
 
@@ -2309,6 +2340,7 @@ def execute_action():
     )
     _sync_units_hp_from_cache(serializable_state, engine.game_state)
     _attach_player_types(serializable_state, engine)
+    _attach_shoot_visible_cells(serializable_state, engine.game_state)
     _ser_t1 = time.perf_counter() if _api_perf else None
 
     # WEAPON_SELECTION: Copy available_weapons from result to active unit in game_state

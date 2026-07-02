@@ -369,20 +369,29 @@ def recompute_cache_for_new_units_in_range(game_state: Dict[str, Any]):
     for unit in active_units:
         unit_id = str(unit["id"])
         unit_col, unit_row = require_unit_position(unit, game_state)
-        
+
+        from engine.combat_utils import ranged_edge_distance, get_distance_metric, socle_from_cache_entry
+        from config_loader import get_config_loader
+        _metric = get_distance_metric("ranged", get_config_loader().get_game_config())
+        _uc = require_key(game_state, "units_cache")
+        _unit_socle = socle_from_cache_entry(_uc[unit_id])
+
         rng_weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
-        
+
         for weapon_index, weapon in enumerate(rng_weapons):
             weapon_range = require_key(weapon, "RNG")
-            
+
             for target in enemy_units:
                 target_id = str(target["id"])
                 target_col, target_row = require_unit_position(target, game_state)
-                
-                # Check if target is in range
-                distance = calculate_hex_distance(unit_col, unit_row, target_col, target_row)
-                
-                if distance <= perception_radius and distance <= weapon_range:
+
+                # Perception = distance stratégique (reste HEX centre) ; portée = bord-à-bord (sélecteur).
+                perception_distance = calculate_hex_distance(unit_col, unit_row, target_col, target_row)
+                ranged_distance = ranged_edge_distance(
+                    _unit_socle, socle_from_cache_entry(_uc[target_id]), _metric
+                )
+
+                if perception_distance <= perception_radius and ranged_distance <= weapon_range:
                     hp_cur = require_hp_from_cache(target_id, game_state)
                     
                     # Check if already cached

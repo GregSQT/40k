@@ -4,7 +4,6 @@
     "max_steps_per_turn": 500,
     "max_steps_per_turn_detail": "nb units (50) * nb actions per turn (7) = 350 + marge",
     "turn_limit_penalty": -1,
-    "los_visibility_min_ratio": 0.05,
     "los_debug_show_ratio": false,
     "los_debug_show_ratio_rule": "When true, shooting preview overlays visibility ratio percentages on evaluated hexes.",
     "engagement_zone": 2,
@@ -34,6 +33,14 @@
   "charge": {
     "charge_max_distance": 12,
     "select_target_before_roll": false
+  },
+  "distance_metric": {
+    "distance_metric_detail": "Metrique de portee par regle (hex|euclidean). Point de bascule unique — voir Documentation/Distance management.md. Defaut tout hex = comportement historique.",
+    "ranged": "euclidean",
+    "move": "hex",
+    "charge": "hex",
+    "engagement": "hex",
+    "overlap": "hex"
   },
   "gameplay": {
     "phase_order": ["move", "shoot", "charge", "fight"],

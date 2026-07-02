@@ -70,7 +70,7 @@ def _make_game_state(units: List[Dict[str, Any]]) -> Dict[str, Any]:
             "game_rules": build_game_rules(
                 engagement_zone=1,
                 max_base_size_hex=35,
-                los_visibility_min_ratio=0.0,
+                
                 cover_ratio=0.0,
             ),
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},

@@ -35,7 +35,7 @@ from _config_helpers import build_game_rules, build_move_rules
 
 def _base_config() -> Dict[str, Any]:
     return {
-        "game_rules": build_game_rules(engagement_zone=1, max_base_size_hex=35, los_visibility_min_ratio=0.0, cover_ratio=0.0),
+        "game_rules": build_game_rules(engagement_zone=1, max_base_size_hex=35, cover_ratio=0.0),
         "move": build_move_rules(),
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
     }

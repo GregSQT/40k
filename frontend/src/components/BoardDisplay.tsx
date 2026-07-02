@@ -856,7 +856,6 @@ export interface DrawBoardOptions {
   cachedWalls?: PIXI.Container | null;
   losDebugShowRatio?: boolean;
   losDebugRatioByHex?: Record<string, number>;
-  losDebugVisibilityMinRatio?: number;
   /** Halo violet (grand plateau) : centre sur la cible de charge, rayon ~ engagement_zone en pas hex. */
   chargeEngagementHalo?: {
     centerCol: number;
@@ -1882,7 +1881,6 @@ export const drawBoard = (
       selectedUnitAnchor,
       losDebugShowRatio: _losDebugShowRatio = false,
       losDebugRatioByHex: _losDebugRatioByHex = {},
-      losDebugVisibilityMinRatio: _losDebugVisibilityMinRatio = 0,
       chargeEngagementHalo,
       fightEngagementRing,
       fightEngagementZone,

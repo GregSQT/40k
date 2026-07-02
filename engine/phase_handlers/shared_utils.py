@@ -1034,10 +1034,27 @@ def update_units_cache_position(game_state: Dict[str, Any], unit_id: str, col: i
     }
     new_occupied = _compute_unit_occupied_hexes(norm_col, norm_row, unit_stub, game_state)
     _update_occupation_map(game_state, unit_id, entry, new_occupied)
-    
+
     entry["col"] = norm_col
     entry["row"] = norm_row
     entry["occupied_hexes"] = new_occupied
+
+    # Mono-figurine : la fig unique EST à l'ancre → resync sa position (occupied_hexes_by_model
+    # + models_cache) pour rester cohérent après un déplacement d'ancre. Sans ça, model_centers
+    # (lu par socle_from_cache_entry pour la distance bord-à-bord) resterait à l'ancienne
+    # position (ex. tireur déplacé virtuellement en preview → cibles hors portée vues à tort).
+    # Multi-figurine : ne PAS toucher les figs survivantes (sémantique « resync ancre seule » ;
+    # les déplacements rigides passent par translate_squad_to_destination / _recompute).
+    squad_models = game_state.get("squad_models")
+    if isinstance(squad_models, dict):
+        model_ids = squad_models.get(unit_id)
+        if isinstance(model_ids, (list, tuple)) and len(model_ids) == 1:
+            mid = model_ids[0]
+            entry["occupied_hexes_by_model"] = {mid: (norm_col, norm_row)}
+            models_cache = game_state.get("models_cache")
+            if isinstance(models_cache, dict) and mid in models_cache:
+                models_cache[mid]["col"] = norm_col
+                models_cache[mid]["row"] = norm_row
 
     if game_state.get("debug_mode", False):
         episode = game_state.get("episode_number", "?")
@@ -3755,6 +3772,10 @@ def commit_move(
     if first is None:
         raise KeyError(f"commit_move: anchor model {plan[0][0]} not in models_cache")
     squad_id = str(first["squad_id"])
+    # Ancienne ancre AVANT déplacement (pour l'invalidation LoS géométrique par position).
+    _old_entry = require_key(game_state, "units_cache").get(squad_id)
+    _old_col = _old_entry.get("col") if isinstance(_old_entry, dict) else None
+    _old_row = _old_entry.get("row") if isinstance(_old_entry, dict) else None
     for mid, nc, nr in plan:
         update_model_position(game_state, mid, nc, nr)
     if move_type == "advance":
@@ -3763,6 +3784,16 @@ def commit_move(
         game_state.setdefault("units_fled", set()).add(squad_id)
     elif move_type == "charge":
         game_state.setdefault("units_charged", set()).add(squad_id)
+    # Invalidation LoS obligatoire après tout déplacement de figurines : sans elle,
+    # build_unit_los_cache saute le rebuild (unit["_los_cache_version"] == _unit_move_version)
+    # et réutilise un los_cache calculé à l'ANCIENNE position → cibles fausses en phase de tir
+    # (miroir du move standard, movement_handlers._invalidate + bump). Le bump invalide aussi
+    # _unit_los_pair_cache et _target_pool_cache (tous deux clés par _unit_move_version).
+    from engine.phase_handlers.shooting_handlers import _invalidate_los_cache_for_moved_unit
+    _invalidate_los_cache_for_moved_unit(
+        game_state, squad_id, old_col=_old_col, old_row=_old_row
+    )
+    game_state["_unit_move_version"] += 1
 
 
 # ============================================================================
@@ -3856,32 +3887,34 @@ def squad_shooting_unit_activation_start(
 
 def _attacker_model_can_reach_squad(
     game_state: Dict[str, Any],
+    attacker_model: Dict[str, Any],
     ac: int,
     ar: int,
     target_squad_id: str,
     range_subhex: int,
 ) -> bool:
-    """Eligibilite LoS per-fig, alignee sur le chemin non-squad (empreinte + ratio).
+    """Eligibilite portee + LoS per-fig, alignee sur le chemin canonique (valid_target_pool_build).
 
-    Pour CHAQUE figurine cible vivante : si son centre est a portee (<= range_subhex)
-    ET si son empreinte est visible depuis (ac, ar) au sens du ratio de couverture
-    (_compute_target_visibility_from_hexes : ratio >= los_visibility_min_ratio), la
-    cible est atteignable. Renvoie True des qu'une figurine satisfait les deux.
+    Pour CHAQUE figurine cible vivante : si son socle est a portee bord-a-bord
+    (<= range_subhex) ET si >= 1 cellule de son empreinte est visible depuis
+    l'empreinte du socle tireur (regle 06.01, visibilite binaire par modele — pas de
+    seuil de ratio), la cible est atteignable. Renvoie True des qu'une figurine satisfait
+    les deux.
 
-    Difference voulue avec le non-squad : origine = centre de la figurine tireuse
-    (per-fig) et empreinte evaluee PAR figurine cible (pas l'union de l'escouade) —
-    sinon une grosse base partiellement masquee par un mur etait grisee a tort car
-    seul son centre etait teste. Reutilise la primitive de ratio (seuils 0.05/0.95)
-    et son cache _hex_los_state_cache. Sur board ×1 (base_size 1), l'empreinte se
-    reduit au centre : comportement identique a l'ancien test.
+    Alignement (regles 01.04 + 06.01) : origine = empreinte COMPLETE du socle de la
+    figurine tireuse (pas son seul centre) et distance mesuree bord-a-bord socle↔socle
+    via ``ranged_edge_distance`` (pas centre-a-centre). Sans cet alignement, une grosse
+    base dont le centre est masque par un terrain (mais dont un bord voit la cible) etait
+    grisee a tort en phase de tir alors que le move-preview l'affichait ciblable. Empreinte
+    evaluee PAR figurine cible (pas l'union de l'escouade). Board ×1 (base_size 1) :
+    socle = 1 hex → distance et LoS identiques a l'ancien test centre.
     """
     # Obscuring-aware LoS (single source of truth): the firing model (single hex at ac,ar) must see
-    # at least los_visibility_min_ratio of a target model's footprint, with dense walls AND obscuring
+    # >= 1 cell of a target model's footprint (rule 06.01, binary), with dense walls AND obscuring
     # terrain blocking (rule 13.10). Routed through the same primitive as the non-squad path so the
     # squad target pool can never include a target the model cannot actually see.
     from engine.phase_handlers.shooting_handlers import _compute_visibility_with_obscuring
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
-    min_ratio = float(game_rules.get("los_visibility_min_ratio", 0.0))
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     units_cache = require_key(game_state, "units_cache")
@@ -3911,20 +3944,37 @@ def _attacker_model_can_reach_squad(
         if not _any_within:
             return False
     shooter_anchor = (ac, ar)
-    shooter_hexes = [shooter_anchor]
+    # Portee + LoS alignees sur valid_target_pool_build : origine = empreinte COMPLETE du
+    # socle tireur (regle 06.01) et distance bord-a-bord socle↔socle (regle 01.04), pas
+    # centre-a-centre. Board ×1 (base_size 1) → socle = 1 hex, comportement centre inchange.
+    from engine.hex_utils import Socle
+    from engine.combat_utils import ranged_edge_distance
+    from engine.phase_handlers.shooting_handlers import _ranged_distance_metric
+    metric = _ranged_distance_metric()
+    shooter_hexes = list(_compute_unit_occupied_hexes(ac, ar, attacker_model, game_state))
+    shooter_socle = Socle(
+        attacker_model["BASE_SHAPE"], attacker_model["BASE_SIZE"], ac, ar,
+        set(shooter_hexes), [(ac, ar)],
+    )
     for mid in target_mids:
         tm = models_cache.get(mid)
         if tm is None:
             continue
         tc = int(tm["col"])
         tr = int(tm["row"])
-        if calculate_hex_distance(ac, ar, tc, tr) > range_subhex:
-            continue
         footprint = list(_compute_unit_occupied_hexes(tc, tr, base_unit, game_state))
+        target_socle = Socle(
+            base_unit["BASE_SHAPE"], base_unit["BASE_SIZE"], tc, tr,
+            set(footprint), [(tc, tr)],
+        )
+        if ranged_edge_distance(
+            shooter_socle, target_socle, metric, max_distance=range_subhex
+        ) > range_subhex:
+            continue
         visible, total, _ = _compute_visibility_with_obscuring(
             game_state, shooter_anchor, shooter_hexes, (tc, tr), footprint
         )
-        if total > 0 and (visible / total) >= min_ratio:
+        if visible > 0:
             return True
     return False
 
@@ -4027,7 +4077,7 @@ def _model_can_shoot_target(
 
     ac = int(attacker_model["col"])
     ar = int(attacker_model["row"])
-    if not _attacker_model_can_reach_squad(game_state, ac, ar, target_squad_id, range_subhex):
+    if not _attacker_model_can_reach_squad(game_state, attacker_model, ac, ar, target_squad_id, range_subhex):
         return False
     if _shoot_engagement_blocks_target(
         game_state,
@@ -4438,7 +4488,7 @@ def _model_can_shoot_target_with_weapon(
 
     ac = int(attacker_model["col"])
     ar = int(attacker_model["row"])
-    if not _attacker_model_can_reach_squad(game_state, ac, ar, target_squad_id, range_subhex):
+    if not _attacker_model_can_reach_squad(game_state, attacker_model, ac, ar, target_squad_id, range_subhex):
         return False
     if _shoot_engagement_blocks_target(
         game_state,

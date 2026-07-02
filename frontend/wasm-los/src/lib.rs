@@ -138,13 +138,75 @@ fn has_los_fast(
     true
 }
 
+/// Projected (odd-q) center of a hex — mirror of engine.hex_utils._hex_projected.
+#[inline]
+fn hex_projected(c: i32, r: i32) -> (f64, f64) {
+    let hex_vert = (3.0_f64).sqrt();
+    let hx = c as f64 * 1.5;
+    let hy = r as f64 * hex_vert + ((c & 1) as f64) * hex_vert / 2.0;
+    (hx, hy)
+}
+
+/// Mirror of engine.shooting_handlers._shooter_lateral_vantage_hexes: up to 2 shooter-footprint
+/// hexes at the perpendicular extremes of the anchor→target axis (lateral "peek" vantage points,
+/// LoS from any part of the model). Empty when the footprint collapses to the anchor (single hex).
+fn lateral_vantage_hexes(
+    anchor_col: i32, anchor_row: i32,
+    footprint: &[i32],
+    target_col: i32, target_row: i32,
+) -> Vec<(i32, i32)> {
+    if footprint.len() / 2 <= 1 {
+        return Vec::new();
+    }
+    let (ax, ay) = hex_projected(anchor_col, anchor_row);
+    let (tx, ty) = hex_projected(target_col, target_row);
+    let (dx, dy) = (tx - ax, ty - ay);
+    if dx == 0.0 && dy == 0.0 {
+        return Vec::new();
+    }
+    let (perp_x, perp_y) = (-dy, dx); // 90° rotation of the anchor→target axis
+    let mut best_pos: Option<(i32, i32)> = None;
+    let mut best_neg: Option<(i32, i32)> = None;
+    let mut max_d = f64::NEG_INFINITY;
+    let mut min_d = f64::INFINITY;
+    let mut i = 0;
+    while i + 1 < footprint.len() {
+        let (hc, hr) = (footprint[i], footprint[i + 1]);
+        let (hx, hy) = hex_projected(hc, hr);
+        let d = (hx - ax) * perp_x + (hy - ay) * perp_y;
+        if d > max_d {
+            max_d = d;
+            best_pos = Some((hc, hr));
+        }
+        if d < min_d {
+            min_d = d;
+            best_neg = Some((hc, hr));
+        }
+        i += 2;
+    }
+    let anchor = (anchor_col, anchor_row);
+    let mut out: Vec<(i32, i32)> = Vec::new();
+    if let Some(bp) = best_pos {
+        if bp != anchor {
+            out.push(bp);
+        }
+    }
+    if let Some(bn) = best_neg {
+        if bn != anchor && Some(bn) != best_pos {
+            out.push(bn);
+        }
+    }
+    out
+}
+
 /// Compute visible hexes from a shooter position within a given range.
 /// Returns a flat array: [col0, row0, state0, col1, row1, state1, ...]
 /// state: 1 = clear (open), 2 = cover (hex inside a terrain area).
 ///
-/// Faithful mirror of `_update_unit_los_preview_data` (shooting_handlers.py): anchor→hex sight
-/// line, blocked by walls or by obscuring areas that neither the shooter nor the destination hex
-/// occupies (rule 13.10). MUST be resynced if that backend function changes.
+/// Faithful mirror of `_update_unit_los_preview_data` / `_los_hex_visible` (shooting_handlers.py):
+/// anchor + lateral-vantage → hex sight line (LoS from any part of the model, peek de coin),
+/// blocked by walls or by obscuring areas that neither the shooter nor the destination hex occupies
+/// (rule 13.10). MUST be resynced if that backend primitive changes.
 /// - `obscuring_data`: flat triplets [col,row,areaId,...] (areaId >= 1) for every obscuring hex.
 /// - `terrain_data`: flat pairs [col,row,...] for every hex inside any terrain area (cover).
 /// - `shooter_footprint`: flat pairs [col,row,...] of the shooter's occupied hexes; areas it
@@ -160,8 +222,6 @@ pub fn compute_visible_hexes(
     obscuring_data: &[i32],
     terrain_data: &[i32],
     shooter_footprint: &[i32],
-    _los_visibility_min_ratio: f64,
-    _cover_ratio: f64,
 ) -> Vec<i32> {
     let wall_grid = build_wall_grid(wall_data, board_cols, board_rows);
     let grid_len = wall_grid.len();
@@ -217,11 +277,22 @@ pub fn compute_visible_hexes(
             }
             let idx = wall_grid_idx(col, row, board_rows);
             let dest_area = if idx < obscuring_grid.len() { obscuring_grid[idx] } else { 0 };
-            if has_los_fast(
+            // Anchor first; lateral vantage points (peek de coin) only as a 2nd chance when the
+            // anchor is blocked — mirror of engine _los_hex_visible / _compute_visibility_with_obscuring.
+            let mut vis = has_los_fast(
                 shooter_col, shooter_row, col, row,
                 &wall_grid, &obscuring_grid, dest_area,
                 board_rows, grid_len,
-            ) {
+            );
+            if !vis {
+                for (lc, lr) in lateral_vantage_hexes(shooter_col, shooter_row, shooter_footprint, col, row) {
+                    if has_los_fast(lc, lr, col, row, &wall_grid, &obscuring_grid, dest_area, board_rows, grid_len) {
+                        vis = true;
+                        break;
+                    }
+                }
+            }
+            if vis {
                 let state = if idx < terrain_grid.len() && terrain_grid[idx] { 2 } else { 1 };
                 result.push(col);
                 result.push(row);
@@ -239,8 +310,6 @@ pub fn compute_los_single(
     from_col: i32, from_row: i32,
     to_col: i32, to_row: i32,
     wall_data: &[i32],
-    _los_visibility_min_ratio: f64,
-    _cover_ratio: f64,
 ) -> i32 {
     let board_cols = wall_data.iter().step_by(2).copied().max().unwrap_or(0) + 1;
     let board_rows = wall_data.iter().skip(1).step_by(2).copied().max().unwrap_or(0) + 1;

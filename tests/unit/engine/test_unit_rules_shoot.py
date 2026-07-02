@@ -104,7 +104,6 @@ def _make_gs(units: List[Dict[str, Any]], obj_hex=(5, 5)) -> Dict[str, Any]:
                 "engagement_zone": 1,
                 "max_base_size_hex": 35,
                 "cover_ratio": 0.0,
-                "los_visibility_min_ratio": 0.0,
             },
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },

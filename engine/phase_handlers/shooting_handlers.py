@@ -421,6 +421,37 @@ def _set_combi_weapon_choice(game_state: Dict[str, Any], unit: Dict[str, Any], w
     )
 
 
+def _socle_from_entry(entry: Dict[str, Any]):
+    """Construit un ``Socle`` (hex_utils) depuis une entrée units_cache.
+
+    L'entrée porte BASE_SHAPE/BASE_SIZE/col/row/occupied_hexes/occupied_hexes_by_model
+    (cf build_units_cache). ``model_centers`` = centres par-figurine → distance bord-à-bord
+    ronde correcte vers une escouade multi-figurines (règle 01.04).
+    """
+    from engine.hex_utils import Socle
+    by_model = entry.get("occupied_hexes_by_model")
+    model_centers = (
+        [(int(c), int(r)) for (c, r) in by_model.values()]
+        if isinstance(by_model, dict) and by_model
+        else None
+    )
+    return Socle(
+        entry["BASE_SHAPE"],
+        entry["BASE_SIZE"],
+        entry["col"],
+        entry["row"],
+        entry["occupied_hexes"],
+        model_centers,
+    )
+
+
+def _ranged_distance_metric() -> str:
+    """Métrique de portée tir (``hex``|``euclidean``) — sélecteur unique, source game_config.json."""
+    from config_loader import get_config_loader
+    from engine.combat_utils import get_distance_metric
+    return get_distance_metric("ranged", get_config_loader().get_game_config())
+
+
 def _build_weapon_availability_enemy_precheck(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -430,11 +461,10 @@ def _build_weapon_availability_enemy_precheck(
     Une passe par ennemi (distance max RNG, blocage allié/mêlée, clé los_cache) pour
     weapon_availability_check : évite de répéter min_distance / boucle alliés pour chaque arme.
     """
-    from engine.hex_utils import min_distance_between_sets as _mds_wpn, hex_distance as _hex_dist
     from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
+    from engine.combat_utils import ranged_edge_distance
 
-    _cfg = require_key(game_state, "config")
-    _gym = bool(game_state.get("gym_training_mode") or _cfg.get("gym_training_mode"))
+    _ranged_metric = _ranged_distance_metric()
 
     max_rng = 0
     for w in rng_weapons:
@@ -454,7 +484,7 @@ def _build_weapon_availability_enemy_precheck(
     _ue = units_cache.get(_uid_str)
     if _ue is None:
         raise KeyError(f"Unit {_uid_str} not in units_cache (dead or absent)")
-    _u_fp = _ue.get("occupied_hexes", {(unit_col, unit_row)})
+    _shooter_socle = _socle_from_entry(_ue)
     shooter_id_str = _uid_str
     shooter_player_int = require_present(int(unit["player"]) if unit["player"] is not None else None, "unit['player']")
     melee_range = get_engagement_zone(game_state)
@@ -476,11 +506,9 @@ def _build_weapon_availability_enemy_precheck(
                 if not _los_map[_enemy_id_str]:
                     continue
 
-            if _gym:
-                d = _hex_dist(unit_col, unit_row, cache_entry["col"], cache_entry["row"])
-            else:
-                _e_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-                d = _mds_wpn(_u_fp, _e_fp, max_distance=max_rng)
+            d = ranged_edge_distance(
+                _shooter_socle, _socle_from_entry(cache_entry), _ranged_metric, max_distance=max_rng
+            )
             if d > max_rng:
                 continue
 
@@ -812,21 +840,26 @@ def _get_available_weapons_for_selection(
             })
             continue
         
-        from engine.hex_utils import min_distance_between_sets as _mds_wpn2
+        from engine.combat_utils import ranged_edge_distance
+        from engine.hex_utils import Socle
+        _metric2 = _ranged_distance_metric()
         units_cache = require_key(game_state, "units_cache")
         unit_player = int(unit["player"]) if unit["player"] is not None else None
         unit_col, unit_row = require_unit_position(unit, game_state)
         _uid2 = str(unit["id"])
         _ue2 = units_cache.get(_uid2)
-        _u_fp2 = _ue2.get("occupied_hexes", {(unit_col, unit_row)}) if _ue2 else {(unit_col, unit_row)}
+        _shooter_socle2 = _socle_from_entry(_ue2) if _ue2 else Socle(
+            unit["BASE_SHAPE"], unit["BASE_SIZE"], unit_col, unit_row, {(unit_col, unit_row)}
+        )
         for enemy_id, cache_entry in units_cache.items():
             enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
             if enemy_player != unit_player:
                 enemy = get_unit_by_id(game_state, enemy_id)
                 if enemy is None:
                     raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
-                _e_fp2 = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-                distance = _mds_wpn2(_u_fp2, _e_fp2, max_distance=weapon_range)
+                distance = ranged_edge_distance(
+                    _shooter_socle2, _socle_from_entry(cache_entry), _metric2, max_distance=weapon_range
+                )
                 if distance > weapon_range:
                     continue
                 
@@ -1433,6 +1466,7 @@ def preview_shoot_valid_targets_from_position(
         "los_preview_ratio_by_hex": {},
         "cover_by_unit_id": {},
         "hidden_too_far_by_unit_id": {},
+        "visible_cells_by_target": {},
     }
 
     unit_id_str = str(unit_id)
@@ -1554,6 +1588,7 @@ def preview_shoot_valid_targets_from_position(
 
     _preview_perf_cover_t0 = time.perf_counter()
     cover_by_unit_id = build_cover_by_unit_id_for_valid_targets(gs, u, valid_targets)
+    visible_cells_by_target = build_visible_cells_by_target(gs, u, valid_targets)
     _preview_perf_after_cover = time.perf_counter()
     # print(
     #     "[MOVE_LOS_PREVIEW_PERF] "
@@ -1577,6 +1612,7 @@ def preview_shoot_valid_targets_from_position(
         "los_preview_ratio_by_hex": require_key(u, "los_preview_ratio_by_hex"),
         "cover_by_unit_id": cover_by_unit_id,
         "hidden_too_far_by_unit_id": build_hidden_too_far_by_unit_id(gs, u),
+        "visible_cells_by_target": visible_cells_by_target,
     }
     if preview_cache_key is not None:
         if len(_move_los_preview_cache) >= _cache_size_limit:
@@ -1599,6 +1635,29 @@ def build_cover_by_unit_id_for_valid_targets(
             raise KeyError(f"Target {target_id_str} is in valid_target_pool but missing from los_cover_cache")
         cover_by_unit_id[target_id_str] = bool(los_cover_cache[target_id_str])
     return cover_by_unit_id
+
+
+def build_visible_cells_by_target(
+    game_state: Dict[str, Any],
+    shooter: Dict[str, Any],
+    valid_targets: List[str],
+) -> Dict[str, List[List[int]]]:
+    """Cellules de l'empreinte réellement vues, par cible valide (règle 06.01/13.10 par-figurine).
+
+    Source unique = ``compute_unit_los`` (le même calcul que le blink). Le frontend peint ces
+    cases par-dessus le cône WASM : une cible qui blinke a donc toujours ses cases visibles
+    peintes, avec l'exclusion obscuring correcte par-figurine — supprime la divergence
+    « unité ciblable hors du cône ». Coût borné aux seules cibles valides (pas de scan plateau).
+    """
+    out: Dict[str, List[List[int]]] = {}
+    for target_id in valid_targets:
+        target_id_str = str(target_id)
+        target_unit = _get_unit_by_id(game_state, target_id_str)
+        if target_unit is None:
+            continue
+        los = compute_unit_los(game_state, shooter, target_unit)
+        out[target_id_str] = [[int(c), int(r)] for c, r in los["visible_cells"]]
+    return out
 
 
 def build_hidden_too_far_by_unit_id(
@@ -2553,14 +2612,18 @@ def valid_target_pool_build(
         precomputed_enemy_precheck: même liste que ``_build_weapon_availability_enemy_precheck`` pour
             réutiliser distance + ``friendly_blocks`` + drapeaux LoS (évite BFS / boucle alliés
             redondants pour les cibles couvertes). Les cibles avec LoS mais hors portée max du
-            précheck sont encore traitées via ``min_distance_between_sets`` borné par la portée max
-            des armes **utilisables** (cohérent avec le test de portée).
+            précheck sont encore traitées via ``ranged_edge_distance`` (sélecteur de métrique) borné
+            par la portée max des armes **utilisables** (cohérent avec le test de portée).
     
     Returns:
         List of enemy unit IDs that can be targeted (valid_target_pool)
     """
     current_player = unit["player"]
-    
+
+    from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
+    from engine.hex_utils import Socle
+    _ranged_metric_pool = _ranged_distance_metric()
+
     # Perform weapon_availability_check(arg1, arg2, arg3) -> Build weapon_available_pool
     if precomputed_weapon_available_pool is not None:
         weapon_available_pool = precomputed_weapon_available_pool
@@ -2636,7 +2699,6 @@ def valid_target_pool_build(
         }
 
     from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
-    from engine.hex_utils import min_distance_between_sets
 
     melee_range = get_engagement_zone(game_state)
     max_usable_rng = 0
@@ -2655,6 +2717,16 @@ def valid_target_pool_build(
     # For each target_id in targets_with_los.keys():
     units_cache = require_key(game_state, "units_cache")
     unit_col, unit_row = require_unit_position(unit, game_state)
+    import os as _os_losdbg
+    if _os_losdbg.environ.get("W40K_LOS_DEBUG"):
+        print(
+            f"[LOS_DEBUG] valid_target_pool_build shooter={unit_id_normalized} "
+            f"pos=({unit_col},{unit_row}) metric={_ranged_metric_pool} "
+            f"adv={advance_status} adj={adjacent_status} max_usable_rng={max_usable_rng} "
+            f"los_true={sorted(targets_with_los.keys())} "
+            f"los_cache_size={len(unit.get('los_cache', {}))}",
+            flush=True,
+        )
     for target_id_str in targets_with_los.keys():
         # Get enemy unit by ID
         enemy = _get_unit_by_id(game_state, target_id_str)
@@ -2726,7 +2798,7 @@ def valid_target_pool_build(
 
         row_opt = precheck_by_id.get(target_id_str) if precheck_by_id else None
         if row_opt is not None:
-            distance_to_enemy = int(row_opt["distance"])
+            distance_to_enemy = float(row_opt["distance"])  # euclidien = float : ne pas tronquer
             enemy_adjacent_to_shooter = bool(row_opt["enemy_engaged_with_shooter"])
             if not enemy_adjacent_to_shooter and bool(row_opt.get("friendly_blocks")):
                 continue
@@ -2735,8 +2807,11 @@ def valid_target_pool_build(
             # Distance tireur/cible §3.3 : borner la recherche par la portée max des armes utilisables,
             # pas par melee_range seul — sinon la distance renvoyée peut être tronquée et fausser le test de portée.
             _md_cap = max_usable_rng if max_usable_rng > 0 else 0
-            distance_to_enemy = min_distance_between_sets(
-                shooter_fp, enemy_fp, max_distance=_md_cap
+            _shooter_socle_pool = socle_from_cache_entry(unit_entry) if unit_entry else Socle(
+                unit["BASE_SHAPE"], unit["BASE_SIZE"], unit_col, unit_row, shooter_fp
+            )
+            distance_to_enemy = ranged_edge_distance(
+                _shooter_socle_pool, socle_from_cache_entry(enemy_entry), _ranged_metric_pool, max_distance=_md_cap
             )
             enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(
                 unit_entry, enemy_entry, melee_range
@@ -2832,7 +2907,15 @@ def valid_target_pool_build(
                 if distance <= weapon_range:
                     unit_within_range = True
                     break
-        
+
+        if _os_losdbg.environ.get("W40K_LOS_DEBUG"):
+            print(
+                f"[LOS_DEBUG]   enemy={enemy_id_normalized} dist={round(float(distance), 2)} "
+                f"in_range={unit_within_range} adj={enemy_adjacent_to_shooter} "
+                f"from_precheck={row_opt is not None}",
+                flush=True,
+            )
+
         # ALL conditions met -> ✅ Add unit to valid_target_pool
         # CRITICAL: Convert ID to string for consistent comparison (target_id is passed as str)
         # Note: Friendly units are already filtered out at line 949-960 above
@@ -3522,11 +3605,8 @@ def _get_los_visibility_state(
 
     Uses precomputed los_topology when available (legacy boards with .npz).
     Falls back to on-demand hex line trace (Board ×10) via hex_utils.
+    Binary visibility (rule 06.01): can_see = ratio > 0 (no threshold).
     """
-    config = require_key(game_state, "config")
-    game_rules = require_key(config, "game_rules")
-    los_visibility_min_ratio = float(require_key(game_rules, "los_visibility_min_ratio"))
-
     board_cols = game_state.get("board_cols")
     board_rows = game_state.get("board_rows")
     if not (
@@ -3554,8 +3634,7 @@ def _get_los_visibility_state(
         from engine.hex_utils import compute_los_state, build_wall_set
         wall_set = _get_wall_set(game_state)
         _result = compute_los_state(
-            start_col, start_row, end_col, end_row,
-            wall_set, los_visibility_min_ratio,
+            start_col, start_row, end_col, end_row, wall_set,
         )
         if _state_cache is None:
             _state_cache = {}
@@ -3563,7 +3642,7 @@ def _get_los_visibility_state(
         _state_cache[((start_col, start_row), (end_col, end_row))] = _result
         return _result
 
-    can_see = visibility_ratio >= los_visibility_min_ratio
+    can_see = visibility_ratio > 0.0
     return visibility_ratio, can_see
 
 
@@ -3657,6 +3736,62 @@ def _shooter_lateral_vantage_hexes(
     return out
 
 
+def _los_line_segment_clear(
+    src_col: int, src_row: int, tgt_col: int, tgt_row: int,
+    wall_set: Set[Tuple[int, int]],
+    obscuring_by_hex: Dict[Tuple[int, int], str],
+    excluded_areas: "Set[str] | frozenset",
+) -> bool:
+    """Ligne de visée hex dégagée entre deux hexes (cube-lerp ``hex_line``).
+
+    Bloquée par un mur, ou par une case obscuring dont l'area n'est pas dans ``excluded_areas``
+    (rule 13.10 : les areas occupées par le tireur ou la cible ne bloquent pas). PRIMITIVE DE
+    TRACÉ UNIQUE partagée par le ciblage (unit→unit) et la preview (shooter→cellule), et mirroir
+    du WASM ``has_los_fast``. Toute évolution de la règle de blocage se fait ICI, une seule fois.
+    """
+    from engine.hex_utils import hex_line
+    for c, r in hex_line(int(src_col), int(src_row), int(tgt_col), int(tgt_row))[1:-1]:
+        if (c, r) in wall_set:
+            return False
+        area = obscuring_by_hex.get((c, r))
+        if area is not None and area not in excluded_areas:
+            return False
+    return True
+
+
+def _los_hex_visible(
+    shooter_anchor: Tuple[int, int],
+    shooter_hexes: List[Tuple[int, int]],
+    tgt_col: int, tgt_row: int,
+    wall_set: Set[Tuple[int, int]],
+    obscuring_by_hex: Dict[Tuple[int, int], str],
+    excluded_areas: "Set[str] | frozenset",
+) -> bool:
+    """True si la case cible est vue depuis l'ancre OU un vantage latéral du tireur.
+
+    « LoS depuis n'importe quelle partie du socle » (peek de coin) : l'ancre d'abord, les extrêmes
+    perpendiculaires du socle en 2ᵉ chance (calculés seulement si l'ancre est bloquée). L'axe des
+    perpendiculaires est TOUJOURS la case visée elle-même (peek par-cellule) — pas l'ancre de
+    l'unité cible : sinon, pour une cible étalée (swarm), un latéral fixe « regarde au coin » et
+    voit des cases dans une direction différente (faux positif). PRIMITIVE PARTAGÉE ciblage +
+    preview + mirroir WASM : LoS identique par construction.
+    """
+    if _los_line_segment_clear(shooter_anchor[0], shooter_anchor[1], tgt_col, tgt_row,
+                               wall_set, obscuring_by_hex, excluded_areas):
+        return True
+    for sc, sr in _shooter_lateral_vantage_hexes(shooter_anchor, shooter_hexes, (tgt_col, tgt_row)):
+        if _los_line_segment_clear(sc, sr, tgt_col, tgt_row, wall_set, obscuring_by_hex, excluded_areas):
+            import os as _os_losdbg2
+            if _os_losdbg2.environ.get("W40K_LOS_DEBUG"):
+                print(
+                    f"[LOS_DEBUG] LATERAL-PEEK visible: anchor={shooter_anchor} "
+                    f"lateral=({sc},{sr}) target=({tgt_col},{tgt_row})",
+                    flush=True,
+                )
+            return True
+    return False
+
+
 def _compute_visibility_with_obscuring(
     game_state: Dict[str, Any],
     shooter_anchor: Tuple[int, int],
@@ -3674,8 +3809,6 @@ def _compute_visibility_with_obscuring(
     (excluding areas one or both units are within).
     Returns (visible_hexes, total_hexes, visible_hex_set).
     """
-    from engine.hex_utils import hex_line
-
     wall_set = _get_wall_set(game_state)
     obscuring_by_hex = _get_obscuring_hex_to_area(game_state)
 
@@ -3693,23 +3826,11 @@ def _compute_visibility_with_obscuring(
             excluded_areas.add(area)
 
     anchor = (int(shooter_anchor[0]), int(shooter_anchor[1]))
-    laterals = _shooter_lateral_vantage_hexes(anchor, shooter_hexes, target_anchor)
-    source_points: List[Tuple[int, int]] = [anchor, *laterals]
-
-    def _line_clear(sc: int, sr: int, tc: int, tr: int) -> bool:
-        for c, r in hex_line(sc, sr, int(tc), int(tr))[1:-1]:
-            if (c, r) in wall_set:
-                return False
-            area = obscuring_by_hex.get((c, r))
-            if area is not None and area not in excluded_areas:
-                return False
-        return True
-
     visible = 0
     visible_hex_set: Set[Tuple[int, int]] = set()
     for tc, tr in target_hexes:
-        # Anchor first; lateral vantage points only as a 2nd chance when the anchor is blocked.
-        if any(_line_clear(sp[0], sp[1], tc, tr) for sp in source_points):
+        if _los_hex_visible(anchor, shooter_hexes, tc, tr, wall_set, obscuring_by_hex,
+                            excluded_areas):
             visible += 1
             visible_hex_set.add((int(tc), int(tr)))
     return visible, len(target_hexes), visible_hex_set
@@ -3754,8 +3875,10 @@ def compute_unit_los(
 ) -> Dict[str, Any]:
     """Single source of truth for unit→unit Line of Sight (obscuring-aware).
 
-    Returns {can_see, fully_visible, cover, visible, total}:
-    - can_see: at least ``los_visibility_min_ratio`` of the target footprint is reachable.
+    Returns {can_see, fully_visible, cover, visible, total, visible_cells}:
+    - can_see: >= 1 target model has >= 1 base cell reachable (rule 06.01 — binary,
+      per-model; no visibility ratio threshold).
+    - visible_cells: sorted list of (col,row) of the target footprint hexes actually seen.
     - fully_visible: every target footprint hex is reachable (no intervening terrain).
     - cover (rule 13.08, unit-level): can_see AND ((target hideable AND within a terrain area)
       OR not fully_visible).
@@ -3792,8 +3915,6 @@ def _compute_unit_los_uncached(
     target: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Uncached core of compute_unit_los() — see that function for semantics."""
-    game_rules = require_key(require_key(game_state, "config"), "game_rules")
-    min_ratio = float(game_rules.get("los_visibility_min_ratio", 0.0))
     gym_training = bool(
         game_state.get("gym_training_mode", False)
         or require_key(game_state, "config").get("gym_training_mode", False)
@@ -3802,15 +3923,55 @@ def _compute_unit_los_uncached(
     shooter_anchor, shooter_hexes = _resolve_unit_anchor_and_footprint(
         game_state, shooter, gym_training=gym_training
     )
-    target_anchor, target_hexes = _resolve_unit_anchor_and_footprint(
-        game_state, target, gym_training=gym_training
-    )
 
-    visible, total, visible_hex_set = _compute_visibility_with_obscuring(
-        game_state, shooter_anchor, shooter_hexes, target_anchor, target_hexes
-    )
-    ratio = (visible / total) if total else 0.0
-    can_see = ratio >= min_ratio
+    # Règles 06.01 + 13.10 : visibilité binaire évaluée PAR MODÈLE cible. Un modèle est
+    # visible si >= 1 cellule de son socle a une ligne dégagée ; l'unité est visible si
+    # >= 1 modèle l'est. Chaque test exclut les areas obscuring du tireur et celles que
+    # CE modèle occupe (exclusion par paire de modèles, pas l'union de l'escouade).
+    target_model_footprints: List[List[Tuple[int, int]]] = []
+    target_id = target.get("id")
+    if not gym_training and target_id is not None:
+        model_ids = require_key(game_state, "squad_models").get(str(target_id))
+        if model_ids:
+            from engine.hex_utils import compute_occupied_hexes
+            models_cache = require_key(game_state, "models_cache")
+            base_shape = require_key(target, "BASE_SHAPE")
+            base_size = require_key(target, "BASE_SIZE")
+            orientation = require_key(target, "orientation")
+            for mid in model_ids:
+                m = models_cache.get(mid)
+                if m is None:
+                    raise KeyError(f"Model {mid} missing from models_cache")
+                if int(require_key(m, "HP_CUR")) <= 0:
+                    continue
+                target_model_footprints.append([
+                    (int(hx[0]), int(hx[1]))
+                    for hx in compute_occupied_hexes(
+                        int(m["col"]), int(m["row"]), base_shape, base_size, orientation
+                    )
+                ])
+    if not target_model_footprints:
+        # Pas de découpage par modèle (gym : empreinte réduite à l'ancre ; dict
+        # coordonnées-seules : pas de squad) → l'empreinte entière vaut un modèle.
+        _target_anchor, target_hexes = _resolve_unit_anchor_and_footprint(
+            game_state, target, gym_training=gym_training
+        )
+        target_model_footprints.append([(int(c), int(r)) for c, r in target_hexes])
+
+    visible = 0
+    total = 0
+    visible_models = 0
+    visible_hex_set: Set[Tuple[int, int]] = set()
+    for model_hexes in target_model_footprints:
+        v, t, vset = _compute_visibility_with_obscuring(
+            game_state, shooter_anchor, shooter_hexes, model_hexes[0], model_hexes
+        )
+        visible += v
+        total += t
+        visible_hex_set |= vset
+        if v > 0:
+            visible_models += 1
+    can_see = visible_models > 0
     fully_visible = total > 0 and visible == total
 
     from engine.terrain_utils import model_within_terrain
@@ -3855,6 +4016,11 @@ def _compute_unit_los_uncached(
         "cover": cover,
         "visible": visible,
         "total": total,
+        # Cellules de l'empreinte cible réellement vues (règle 06.01/13.10 par-figurine).
+        # Consommé par la preview frontend pour peindre les cases visibles des cibles ciblables
+        # par-dessus le cône WASM → cohérence blink↔visuel garantie (une cible qui blinke a
+        # toujours ses cases peintes, mêmes exclusions obscuring que le ciblage).
+        "visible_cells": sorted(visible_hex_set),
     }
 
 
@@ -3914,8 +4080,6 @@ def _update_unit_los_preview_data(
             f"board_cols={type(board_cols).__name__}, board_rows={type(board_rows).__name__}"
         )
 
-    from engine.hex_utils import hex_line
-
     shooter_col, shooter_row = require_unit_position(unit, game_state)
 
     # Obscuring-aware hex preview (shooter anchor → each in-range hex). Blockers = dense walls +
@@ -3945,6 +4109,13 @@ def _update_unit_los_preview_data(
             terrain_hex_set.add((int(_h[0]), int(_h[1])))
 
     sc, sr = int(shooter_col), int(shooter_row)
+    from engine.hex_utils import Socle
+    from engine.combat_utils import ranged_edge_distance_to_cell
+    _preview_metric = _ranged_distance_metric()
+    _preview_socle = Socle(
+        unit["BASE_SHAPE"], unit["BASE_SIZE"], sc, sr,
+        {(int(c), int(r)) for c, r in _shooter_hexes},
+    )
     attack_cells: List[Dict[str, int]] = []
     cover_cells: List[Dict[str, int]] = []
     ratio_by_hex: Dict[str, float] = {}
@@ -3953,21 +4124,17 @@ def _update_unit_los_preview_data(
         for row in range(board_rows):
             if row == board_rows - 1 and (col % 2) == 1:
                 continue
-            distance = _calculate_hex_distance(sc, sr, col, row)
+            distance = ranged_edge_distance_to_cell(_preview_socle, sc, sr, col, row, _preview_metric)
             if distance <= 0 or distance > max_range:
                 continue
             hex_area = obscuring_by_hex.get((col, row))
-            blocked = False
-            for c, r in hex_line(sc, sr, int(col), int(row))[1:-1]:
-                if (c, r) in wall_set:
-                    blocked = True
-                    break
-                area = obscuring_by_hex.get((c, r))
-                if area is not None and area != hex_area:
-                    blocked = True
-                    break
-            ratio_by_hex[f"{col},{row}"] = 0.0 if blocked else 1.0
-            if blocked:
+            _excluded_areas = frozenset((hex_area,)) if hex_area is not None else frozenset()
+            # Même primitive que le ciblage → ancre + vantages latéraux (peek de coin).
+            visible = _los_hex_visible(
+                (sc, sr), _shooter_hexes, col, row, wall_set, obscuring_by_hex, _excluded_areas
+            )
+            ratio_by_hex[f"{col},{row}"] = 1.0 if visible else 0.0
+            if not visible:
                 continue
             if (col, row) in terrain_hex_set:
                 cover_cells.append({"col": int(col), "row": int(row)})

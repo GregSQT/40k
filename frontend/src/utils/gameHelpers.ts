@@ -140,8 +140,7 @@ function lineIntersectsWall(
 export function hasLineOfSight(
   fromUnit: Unit | Position,
   toUnit: Unit | Position,
-  wallHexes: [number, number][],
-  losVisibilityMinRatio: number
+  wallHexes: [number, number][]
 ): { canSee: boolean; visibilityRatio: number } {
   const fromPos = "col" in fromUnit ? { col: fromUnit.col, row: fromUnit.row } : fromUnit;
   const toPos = "col" in toUnit ? { col: toUnit.col, row: toUnit.row } : toUnit;
@@ -193,17 +192,9 @@ export function hasLineOfSight(
     }
   }
 
-  if (
-    typeof losVisibilityMinRatio !== "number" ||
-    Number.isNaN(losVisibilityMinRatio) ||
-    losVisibilityMinRatio <= 0 ||
-    losVisibilityMinRatio > 1
-  ) {
-    throw new Error(`Invalid losVisibilityMinRatio: ${losVisibilityMinRatio}`);
-  }
-
+  // Règle 06.01 : visibilité binaire — un seul rayon dégagé suffit (pas de seuil).
   const visibilityRatio = clearSightLines / totalSightLines;
-  const canSee = visibilityRatio >= losVisibilityMinRatio;
+  const canSee = visibilityRatio > 0;
   return { canSee, visibilityRatio };
 }
 

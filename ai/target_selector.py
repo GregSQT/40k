@@ -186,16 +186,22 @@ class TargetSelector:
         if not friendly_units:
             return 0.0
 
+        from engine.combat_utils import ranged_edge_distance, get_distance_metric, socle_from_cache_entry
+        from config_loader import get_config_loader
+        _metric = get_distance_metric("ranged", get_config_loader().get_game_config())
+        _uc = require_key(game_state, "units_cache")
+        _target_socle = socle_from_cache_entry(_uc[str(target["id"])])
+
         total_threat = 0.0
         for friendly in friendly_units:
             # AI_TURN.md COMPLIANCE: Direct field access
             if "VALUE" not in friendly:
                 raise KeyError(f"Friendly unit missing required 'VALUE' field: {friendly}")
 
-            # Distance check (position from cache)
-            friendly_col, friendly_row = require_unit_position(friendly, game_state)
-            target_col, target_row = require_unit_position(target, game_state)
-            distance = calculate_hex_distance(friendly_col, friendly_row, target_col, target_row)
+            # Distance de portée bord-à-bord via sélecteur (cf Documentation/Distance management.md)
+            distance = ranged_edge_distance(
+                socle_from_cache_entry(_uc[str(friendly["id"])]), _target_socle, _metric
+            )
 
             # Threat only if in range
             if distance <= max_rng_range:

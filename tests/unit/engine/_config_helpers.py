@@ -24,7 +24,7 @@ def build_game_rules(**overrides: Any) -> Dict[str, Any]:
     """``game_rules`` réels (toutes les clés requises par le moteur) + overrides de test.
 
     Les overrides servent à neutraliser les valeurs sensibles aux tests
-    (ex: cover_ratio=0.0, los_visibility_min_ratio=0.0, engagement_zone=1).
+    (ex: cover_ratio=0.0, engagement_zone=1).
     """
     rules = _real_game_rules()
     rules.update(overrides)

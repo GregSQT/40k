@@ -47,7 +47,12 @@ import {
 import type { HexUnionMaskLayout } from "../utils/hexUnionBoundaryPolygon";
 import { drawHiddenEyeBadge } from "../utils/hiddenBadgeDraw";
 import { mountLosPolarClippedByVisibleUnion } from "../utils/losPolarMaskedByVisibleUnion";
-import { buildLosPreviewFromSource, hexDistOff } from "../utils/losPreviewHelpers";
+import {
+  buildLosPreviewFromSource,
+  hexDistOff,
+  rangedPreviewMetric,
+  unitsCacheModelCenters,
+} from "../utils/losPreviewHelpers";
 import { syncMoveDestinationPoolRefs } from "../utils/movePoolRefsSync";
 import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
 import { pointInAnyMaskLoop } from "../utils/pointInPolygon";
@@ -92,6 +97,8 @@ interface BackendMoveLosPreviewPayload {
   coverCells: BackendLosPreviewCell[];
   coverByUnitId: Record<string, boolean>;
   hiddenTooFarByUnitId: Record<string, boolean>;
+  /** Cases visibles des cibles ciblables (backend, règle 06.01/13.10), aplaties+dédupliquées. */
+  visibleTargetCells: BackendLosPreviewCell[];
   key: string;
 }
 
@@ -156,6 +163,24 @@ function parseBackendMoveLosPreviewPayload(
     }
     hiddenTooFarByUnitId[unitId] = tooFar;
   }
+  const visibleByTargetRaw = result.visible_cells_by_target;
+  const visibleTargetCells: BackendLosPreviewCell[] = [];
+  if (visibleByTargetRaw && typeof visibleByTargetRaw === "object" && !Array.isArray(visibleByTargetRaw)) {
+    const seen = new Set<string>();
+    for (const cells of Object.values(visibleByTargetRaw as Record<string, unknown>)) {
+      if (!Array.isArray(cells)) continue;
+      for (const cell of cells) {
+        if (!Array.isArray(cell) || cell.length < 2) continue;
+        const c = Number(cell[0]);
+        const r = Number(cell[1]);
+        if (!Number.isFinite(c) || !Number.isFinite(r)) continue;
+        const k = `${c},${r}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        visibleTargetCells.push({ col: c, row: r });
+      }
+    }
+  }
   return {
     blinkIds,
     clearCells: parseBackendLosPreviewCells(
@@ -168,6 +193,7 @@ function parseBackendMoveLosPreviewPayload(
     ),
     coverByUnitId,
     hiddenTooFarByUnitId,
+    visibleTargetCells,
     key,
   };
 }
@@ -178,6 +204,28 @@ function parseRequiredUnitId(raw: unknown, context: string): number {
     throw new Error(`${context} must be a numeric unit id, got ${String(raw)}`);
   }
   return parsed;
+}
+
+/** Aplatit ``visible_cells_by_target`` (backend, règle 06.01/13.10) en liste {col,row}, dédupliquée.
+ * Optionnellement filtrée aux cibles ciblables (ids). Ces cases sont peintes par-dessus le cône
+ * WASM pour garantir la cohérence blink↔visuel (une cible qui blinke a toujours ses cases peintes). */
+function flattenVisibleCellsByTarget(
+  byTarget: Record<string, Array<[number, number]>> | undefined,
+  onlyTargetIds?: Set<string>
+): Array<{ col: number; row: number }> {
+  if (!byTarget) return [];
+  const seen = new Set<string>();
+  const out: Array<{ col: number; row: number }> = [];
+  for (const [tid, cells] of Object.entries(byTarget)) {
+    if (onlyTargetIds && !onlyTargetIds.has(String(tid))) continue;
+    for (const [c, r] of cells) {
+      const k = `${c},${r}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({ col: c, row: r });
+    }
+  }
+  return out;
 }
 
 /** Signature courte d’un pool (longueur + premier + dernier) pour dépendances sans ``JSON.stringify`` massif. */
@@ -2532,13 +2580,8 @@ export default function Board({
     const range = getMaxRangedRange(source.unit);
     if (range <= 0) return empty;
 
-    const gameRules = gameConfig.game_rules;
-    if (!gameRules) throw new Error("LOS preview: game_rules absent in gameConfig");
-    if (gameRules.los_visibility_min_ratio == null)
-      throw new Error("LOS preview: los_visibility_min_ratio absent in game_rules");
-    const losMin = gameRules.los_visibility_min_ratio;
-
     try {
+      const ucByModel = unitsCacheModelCenters(gameState?.units_cache);
       const losPreview = buildLosPreviewFromSource({
         source,
         units,
@@ -2549,7 +2592,12 @@ export default function Board({
         obscuringZones: losObscuringZones,
         terrainZones: losTerrainZones,
         maxRange: range,
-        losVisibilityMinRatio: losMin,
+        distanceMetric: rangedPreviewMetric(gameConfig),
+        unitsCacheByModel: ucByModel,
+        shooterModelCenters:
+          source.fromCol === source.unit.col && source.fromRow === source.unit.row
+            ? ucByModel?.[String(source.unit.id)]
+            : undefined,
       });
       const blinkIds = losPreview.blinkIds;
       const coverByUnitId = losPreview.coverByUnitId;
@@ -3282,6 +3330,10 @@ export default function Board({
     let losBackendRequestInFlight = false;
     const LOS_MOUSEMOVE_DEBOUNCE_MS = 25;
     const LOS_INITIAL_PREVIEW_DEBOUNCE_MS = 0;
+    // Cases visibles des cibles ciblables renvoyées par le backend (async) pour la position
+    // survolée courante. Peintes par-dessus le cône WASM → cohérence blink↔visuel. Rafraîchies
+    // par processBackendLosRequest, qui redéclenche ensuite le dessin visuel.
+    let movePreviewVisibleTargetCells: Array<{ col: number; row: number }> = [];
 
     const scheduleVisualLosForHex = (
       col: number,
@@ -3309,6 +3361,7 @@ export default function Board({
           hoverOverlayRef.current = root;
         }
         const overlay = hoverOverlayRef.current;
+        const ucByModel = unitsCacheModelCenters(gameState?.units_cache);
         const visualPreview = buildLosPreviewFromSource({
           source: {
             unit: pending.selectedUnit,
@@ -3323,7 +3376,12 @@ export default function Board({
           obscuringZones: losObscuringZones,
           terrainZones: losTerrainZones,
           maxRange: pending.range,
-          losVisibilityMinRatio: gameConfig.game_rules?.los_visibility_min_ratio ?? 0,
+          distanceMetric: rangedPreviewMetric(gameConfig),
+          unitsCacheByModel: ucByModel,
+          shooterModelCenters:
+            pending.col === pending.selectedUnit.col && pending.row === pending.selectedUnit.row
+              ? ucByModel?.[String(pending.selectedUnit.id)]
+              : undefined,
         });
         const losUnionLayout: HexUnionMaskLayout = {
           HEX_HORIZ_SPACING: HEX_WIDTH_H,
@@ -3333,7 +3391,11 @@ export default function Board({
           MARGIN: MARGIN_H,
           gridHexRadius: HEX_RADIUS_H,
         };
-        const allVisualLosCells = [...visualPreview.terrainCoverCells, ...visualPreview.clearCells];
+        const allVisualLosCells = [
+          ...visualPreview.terrainCoverCells,
+          ...visualPreview.clearCells,
+          ...movePreviewVisibleTargetCells,
+        ];
         mountLosPolarClippedByVisibleUnion(
           overlay,
           allVisualLosCells,
@@ -3465,6 +3527,16 @@ export default function Board({
         setMovePreviewLosBlinkIds(losPreview.blinkIds);
         setMovePreviewLosCoverById(losPreview.coverByUnitId);
         setMovePreviewLosTooFarById(losPreview.hiddenTooFarByUnitId);
+        // Cases visibles des cibles (backend) pour cette position → redessine le cône WASM
+        // en les incluant (cohérence blink↔visuel). Le cône a déjà été tracé au survol sans
+        // elles ; ce 2e passage les ajoute une fois la réponse backend arrivée.
+        movePreviewVisibleTargetCells = losPreview.visibleTargetCells;
+        if (selectedUnit) {
+          const visRange = getMaxRangedRange(selectedUnit);
+          if (visRange > 0 && selectedUnit.RNG_WEAPONS?.length) {
+            scheduleVisualLosForHex(col, row, selectedUnit, visRange);
+          }
+        }
       } catch (error) {
         if (!losEffectActive) return;
         setMovePreviewLosBlinkIds([]);
@@ -3493,6 +3565,9 @@ export default function Board({
             ? movePreview.unitId
             : selectedUnitId;
       const selectedUnit = units.find((u) => String(u.id) === String(sourceUnitId));
+      // Nouveau hex survolé → on repart sans les cases cibles de l'hex précédent (le backend
+      // les recalculera pour cette position et redessinera). Évite un flash de cases périmées.
+      movePreviewVisibleTargetCells = [];
       if (selectedUnit) {
         const range = getMaxRangedRange(selectedUnit);
         if (range > 0 && selectedUnit.RNG_WEAPONS?.length) {
@@ -5916,6 +5991,7 @@ export default function Board({
         if (!pending || !shootPreviewActive || !isWasmReady()) return;
         if (!boardConfig || !gameConfig) return;
         const overlay = ensureLosOverlay();
+        const ucByModel = unitsCacheModelCenters(gameState?.units_cache);
         const visualPreview = buildLosPreviewFromSource({
           source: { unit: squadUnit, fromCol: pending.col, fromRow: pending.row },
           units,
@@ -5926,9 +6002,22 @@ export default function Board({
           obscuringZones: losObscuringZones,
           terrainZones: losTerrainZones,
           maxRange: shootRange,
-          losVisibilityMinRatio: gameConfig.game_rules?.los_visibility_min_ratio ?? 0,
+          distanceMetric: rangedPreviewMetric(gameConfig),
+          unitsCacheByModel: ucByModel,
+          shooterModelCenters:
+            pending.col === squadUnit.col && pending.row === squadUnit.row
+              ? ucByModel?.[String(squadUnit.id)]
+              : undefined,
         });
-        const allVisualLosCells = [...visualPreview.terrainCoverCells, ...visualPreview.clearCells];
+        // Cases visibles des cibles ciblables (backend) peintes par-dessus le cône WASM :
+        // garantit qu'une unité qui blinke a toujours ses cases visibles affichées, même si le
+        // cône générique ne les atteint pas (exclusion obscuring par-figurine, règle 13.10).
+        const targetCells = flattenVisibleCellsByTarget(squadUnit.visible_cells_by_target);
+        const allVisualLosCells = [
+          ...visualPreview.terrainCoverCells,
+          ...visualPreview.clearCells,
+          ...targetCells,
+        ];
         mountLosPolarClippedByVisibleUnion(
           overlay,
           allVisualLosCells,
@@ -5990,6 +6079,11 @@ export default function Board({
           movePreviewBackendLosCacheRef.current.set(cacheKey, losPreview);
         }
         if (!shootPreviewActive) return;
+        // Anti-clignotement périmé : ne peindre que si cette réponse correspond encore à la case
+        // courante du ghost. Une réponse en vol pour une case déjà quittée est ignorée (la case
+        // courante est re-fetchée via le finally). Sans ça, le blink d'une case en portée persiste
+        // sur une case hors portée où l'on valide → cible fantôme au tir.
+        if (`${pending.col},${pending.row}` !== lastShootPreviewHexKey) return;
         setMovePreviewLosBlinkIds(losPreview.blinkIds);
         setMovePreviewLosCoverById(losPreview.coverByUnitId);
         setMovePreviewLosTooFarById(losPreview.hiddenTooFarByUnitId);
@@ -6022,6 +6116,26 @@ export default function Board({
       if (key === lastShootPreviewHexKey) return;
       lastShootPreviewHexKey = key;
       drawVisualCone(col, row);
+      // Le clignotement doit refléter la case courante, jamais une case déjà quittée.
+      // Cache par-case (keyé col,row) : hit → application immédiate (pas de flicker sur les cases
+      // déjà visitées) ; miss → on efface le blink périmé tout de suite, puis fetch.
+      const cacheKey = [
+        squadUnitIdStr,
+        `${col},${row}`,
+        unitsBoardLayoutKey,
+        String(gameState?.turn ?? ""),
+        String(gameState?.episode_steps ?? ""),
+      ].join("|");
+      const cached = movePreviewBackendLosCacheRef.current.get(cacheKey);
+      if (cached) {
+        setMovePreviewLosBlinkIds(cached.blinkIds);
+        setMovePreviewLosCoverById(cached.coverByUnitId);
+        setMovePreviewLosTooFarById(cached.hiddenTooFarByUnitId);
+      } else {
+        setMovePreviewLosBlinkIds([]);
+        setMovePreviewLosCoverById({});
+        setMovePreviewLosTooFarById({});
+      }
       scheduleShootBackend(col, row);
     };
 
@@ -6773,12 +6887,6 @@ export default function Board({
     if (!gameRules) {
       throw new Error("Missing required configuration value: gameConfig.game_rules");
     }
-    if (typeof gameRules.los_visibility_min_ratio !== "number") {
-      throw new Error(
-        "Missing required configuration value: gameConfig.game_rules.los_visibility_min_ratio"
-      );
-    }
-    const losVisibilityMinRatio = gameRules.los_visibility_min_ratio;
 
     // ✅ NOW SAFE TO ASSIGN WITH TYPE ASSERTIONS
     const ICON_SCALE = displayConfig.icon_scale!;
@@ -7397,6 +7505,7 @@ export default function Board({
       const backendTargetSet = shootPreviewBackendIds;
 
       if (isWasmReady()) {
+        const ucByModel = unitsCacheModelCenters(gameState?.units_cache);
         const losPreview = buildLosPreviewFromSource({
           source,
           units,
@@ -7407,7 +7516,12 @@ export default function Board({
           obscuringZones: losObscuringZones,
           terrainZones: losTerrainZones,
           maxRange: range,
-          losVisibilityMinRatio,
+          distanceMetric: rangedPreviewMetric(gameConfig),
+          unitsCacheByModel: ucByModel,
+          shooterModelCenters:
+            source.fromCol === source.unit.col && source.fromRow === source.unit.row
+              ? ucByModel?.[String(source.unit.id)]
+              : undefined,
         });
         if (enforceBackendTargetsOnly) {
           // Même cône LoS terrain que le survol move (WASM + pastilles clair/couvert), sans corridor hex tireur→cible.
@@ -7419,6 +7533,20 @@ export default function Board({
             losVisibilityRatioByHex.set(key, 0.5);
           }
           for (const cell of losPreview.clearCells) {
+            const key = `${cell.col},${cell.row}`;
+            if (!attackCellSet.has(key)) {
+              attackCellSet.add(key);
+              attackCells.push(cell);
+              losVisibilityRatioByHex.set(key, 1.0);
+            }
+          }
+          // Cases visibles des cibles ciblables (backend, règle 06.01/13.10) peintes par-dessus
+          // le cône WASM → une unité qui blinke a toujours ses cases visibles affichées, même si
+          // le cône générique ne les atteint pas (exclusion obscuring par-figurine).
+          for (const cell of flattenVisibleCellsByTarget(
+            source.unit.visible_cells_by_target,
+            backendTargetSet ?? undefined
+          )) {
             const key = `${cell.col},${cell.row}`;
             if (!attackCellSet.has(key)) {
               attackCellSet.add(key);
@@ -8039,7 +8167,6 @@ export default function Board({
       cachedWalls: canReuseStatic ? staticWallsRef.current : null,
       losDebugShowRatio: showLosDebugOverlay && phase === "shoot" && shootingPreviewSource !== null,
       losDebugRatioByHex: Object.fromEntries(losVisibilityRatioByHex),
-      losDebugVisibilityMinRatio: losVisibilityMinRatio,
       chargeEngagementHalo,
       fightEngagementRing,
       fightEngagementZone,
