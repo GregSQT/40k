@@ -3,14 +3,33 @@ shoot_handler.py — gestion des actions SHOT, WAIT, SKIP, ADVANCED dans parse_s
 """
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from shared.data_validation import require_key
-from engine.combat_utils import calculate_hex_distance
+from engine.combat_utils import calculate_hex_distance, ranged_edge_distance, get_distance_metric
 
 if TYPE_CHECKING:
     from ai.analyzer_state import AnalyzerState
     from ai.analyzer_config import AnalyzerConfig
+
+
+def _analyzer_ranged_metric(config: "AnalyzerConfig") -> str:
+    """Métrique de portée tir (hex|euclidean) — même sélecteur unique que le moteur."""
+    return get_distance_metric("ranged", config.config_loader.get_game_config())
+
+
+def _analyzer_socle(config: "AnalyzerConfig", unit_type: str, col: int, row: int) -> Any:
+    """Socle d'une unité à une position, empreinte reconstruite depuis le registry.
+
+    Portée tir euclidienne bord-à-bord (règle 01.04) : l'analyzer mesure comme le
+    moteur en rebâtissant l'empreinte à partir de BASE_SHAPE/BASE_SIZE.
+    """
+    from engine.hex_utils import Socle, compute_occupied_hexes
+    data = config.unit_registry.get_unit_data(unit_type)
+    shape = require_key(data, "BASE_SHAPE")
+    size = require_key(data, "BASE_SIZE")
+    fp = compute_occupied_hexes(int(col), int(row), shape, size)
+    return Socle(shape, size, int(col), int(row), fp)
 
 
 def handle_shoot(
@@ -430,10 +449,17 @@ def handle_shoot(
                 stats['shoot_invalid'][player]['adjacent_non_pistol'] += 1
                 if stats['first_error_lines']['shoot_invalid'][player] is None:
                     stats['first_error_lines']['shoot_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
-        if weapon_range is not None and distance > weapon_range:
-            stats['shoot_invalid'][player]['out_of_range'] += 1
-            if stats['first_error_lines']['shoot_invalid'][player] is None:
-                stats['first_error_lines']['shoot_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
+        if weapon_range is not None:
+            # Portée mesurée bord-à-bord via le sélecteur `ranged` (le `distance` hex
+            # ci-dessus reste pour les tests d'adjacence == 1, pas pour la portée).
+            _shoot_metric = _analyzer_ranged_metric(config)
+            target_unit_type = require_key(state.unit_types, target_id)
+            _shooter_socle = _analyzer_socle(config, shooter_unit_type, shooter_col, shooter_row)
+            _target_socle = _analyzer_socle(config, target_unit_type, target_pos[0], target_pos[1])
+            if ranged_edge_distance(_shooter_socle, _target_socle, _shoot_metric) > weapon_range:
+                stats['shoot_invalid'][player]['out_of_range'] += 1
+                if stats['first_error_lines']['shoot_invalid'][player] is None:
+                    stats['first_error_lines']['shoot_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
 
     # Track shots after advance
     if shooter_id in state.units_advanced:
@@ -586,6 +612,8 @@ def handle_wait(
 
             valid_targets = []
             enemy_player_int = int(enemy_player) if enemy_player is not None else None
+            _wait_metric = _analyzer_ranged_metric(config)
+            _wait_socle = _analyzer_socle(config, wait_unit_type, wait_col, wait_row)
             for uid, p in state.unit_player.items():
                 p_int = int(p) if p is not None else None
                 if p_int == enemy_player_int and uid in state.unit_positions:
@@ -598,11 +626,15 @@ def handle_wait(
                     distance = calculate_hex_distance(wait_col, wait_row, enemy_pos[0], enemy_pos[1])
                     if not has_line_of_sight(wait_col, wait_row, enemy_pos[0], enemy_pos[1], state.wall_hexes):
                         continue
+                    enemy_unit_type = require_key(state.unit_types, uid)
+                    _enemy_socle = _analyzer_socle(config, enemy_unit_type, enemy_pos[0], enemy_pos[1])
+                    _wait_ranged_edge = ranged_edge_distance(_wait_socle, _enemy_socle, _wait_metric)
                     can_reach = False
                     for weapon in ranged_weapons:
                         weapon_range = require_key(weapon, 'range')
                         is_pistol = require_key(weapon, 'is_pistol')
-                        if distance > weapon_range:
+                        # Portée bord-à-bord (sélecteur `ranged`) ; `distance` hex reste pour == 1.
+                        if _wait_ranged_edge > weapon_range:
                             continue
                         if distance == 1 and not is_pistol:
                             continue

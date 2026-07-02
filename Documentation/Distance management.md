@@ -355,6 +355,23 @@ Fichiers : [hex_utils.py](engine/hex_utils.py), [combat_utils.py](engine/combat_
 ### Étape 3 — Champ de distance géodésique any-angle (move/charge)
 Nouvelle fonction backend (à côté du BFS existant, pas en remplacement direct).
 
+> ⚠️ **RÈGLE CRITIQUE — « aucune partie du socle ne dépasse M » (Règle 03 Moving).**
+> Aujourd'hui (BFS hex) le move est une **translation rigide** : à chaque pas toute
+> l'empreinte se décale du même vecteur, donc **tout point du socle parcourt la même
+> distance que l'ancre**. Mesurer le centre = mesurer n'importe quel point → la règle
+> est respectée trivialement (aucun pivot possible), et les murs/angles sont gérés car
+> `_placement_bad` re-teste l'empreinte entière contre les murs à chaque position.
+>
+> **Ce n'est plus vrai en euclidien any-angle.** Dès qu'un chemin **courbe** (typiquement
+> en serrant un angle de mur), le **bord extérieur du socle parcourt un arc plus long que
+> l'ancre**. Si le budget reste mesuré sur l'ancre/centre, on **sous-facture les moves
+> collés aux angles** (la fig gagne ~½ diamètre à chaque coin) → violation directe de la
+> règle 03.
+>
+> **À faire à l'Étape 3/4/5 :** le budget géodésique doit être testé sur le **point le
+> plus éloigné du socle**, pas sur son centre. C'est le point de vigilance n°1 pour les
+> mouvements autour des coins de murs.
+
 **Algorithme retenu : lazy Theta\* en flood.**
 - Propagation type Dijkstra sur le graphe hex, mais à chaque relaxation on tente
   de rattacher le nœud courant non pas à son voisin immédiat mais à l'**ancêtre
@@ -380,6 +397,21 @@ Nouvelle fonction backend (à côté du BFS existant, pas en remplacement direct
 - **Checkpoint** : sur une carte sans mur, la zone atteignable est un disque
   parfait ; avec un mur, elle le contourne proprement (pas de traversée d'angle) ;
   l'erreur mesurée aux coins est sous le seuil.
+
+**Résultat du spike (FAIT — `spikes/geodesic_field_spike.py`) :**
+- Champ lazy Theta\* validé : sans mur = disque euclidien exact (erreur 0.000) ;
+  avec mur = contournement propre. **Aucune triche** : `champ ≥ ref` sur toutes
+  les cibles → le champ ne traverse jamais un mur.
+- Erreur vs visibility graph exact (sommets décalés vers l'extérieur) mesurée sur
+  4 configs concaves (L, U/poche, couloir/chicane, angle serré) : **pire cas =
+  0.86 subhex** (chicane à double contournement) = 0.17" sur ×5, 0.09" sur ×10.
+- **Seuil exprimé en SUBHEX** (via `inches_to_subhex`), pas en pouces absolus :
+  les positions sont quantifiées au subhex, donc < 1 subhex = sous la résolution
+  de la grille sur tous les boards. 0.86 < 1 → OK. Marge à surveiller : des
+  cartes à nombreux coins successifs cumulent l'erreur et pourraient l'approcher.
+- **[3] budget sur le point le plus éloigné du socle : NON couvert par le spike**
+  (champ mesuré depuis le centre) → à traiter au branchement moteur (Étapes 4/5),
+  cf. la RÈGLE CRITIQUE en tête d'Étape 3. Point de vigilance n°1 aux coins.
 
 ### Étape 4 — Migration MOVE
 - Brancher le champ géodésique sur `movement_handlers.py` (budget = MOVE).

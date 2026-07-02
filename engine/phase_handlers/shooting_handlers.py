@@ -15,7 +15,6 @@ from engine.combat_utils import (
     resolve_dice_value,
     expected_dice_value,
     set_unit_coordinates,
-    calculate_hex_distance as _calculate_hex_distance,
 )
 from shared.data_validation import require_key, require_present
 from engine.action_log_utils import append_action_log
@@ -3224,13 +3223,23 @@ def shooting_build_valid_target_pool(
             filtered_targets.append(target_id)
     
     # Use filtered targets for priority calculation
+    # Portée tir en euclidien bord-à-bord (sélecteur `ranged`) : la distance de
+    # tie-break de priorité suit la même métrique que le gate de portée.
+    from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
+    _ranged_metric_prio = _ranged_distance_metric()
+    _units_cache_prio = require_key(game_state, "units_cache")
+    _shooter_socle_prio = socle_from_cache_entry(_units_cache_prio[unit_id_str])
     for target_id in filtered_targets:
         target = _get_unit_by_id(game_state, target_id)
         if not target:
             target_priorities.append((target_id, (999, 0, 999)))
             continue
 
-        distance = _calculate_hex_distance(*require_unit_position(unit, game_state), *require_unit_position(target, game_state))
+        distance = ranged_edge_distance(
+            _shooter_socle_prio,
+            socle_from_cache_entry(_units_cache_prio[str(target["id"])]),
+            _ranged_metric_prio,
+        )
 
         # Direct UPPERCASE field access - no defaults
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of RNG_* fields
@@ -4454,23 +4463,31 @@ def _select_move_after_shooting_destination_for_ai(
     if not enemies:
         return destinations[0]
 
-    unit_col, unit_row = require_unit_position(unit, game_state)
+    # Portée/positionnement post-tir en euclidien bord-à-bord (sélecteur `ranged`).
+    from engine.combat_utils import (
+        ranged_edge_distance,
+        ranged_edge_distance_to_cell,
+        socle_from_cache_entry,
+    )
+    metric = _ranged_distance_metric()
+    unit_socle = socle_from_cache_entry(units_cache[str(unit["id"])])
     nearest_enemy_id = min(
         enemies,
-        key=lambda enemy_id: _calculate_hex_distance(
-            unit_col,
-            unit_row,
-            *require_unit_position(enemy_id, game_state),
+        key=lambda enemy_id: ranged_edge_distance(
+            unit_socle, socle_from_cache_entry(units_cache[str(enemy_id)]), metric
         ),
     )
+    nearest_enemy_socle = socle_from_cache_entry(units_cache[str(nearest_enemy_id)])
     nearest_enemy_col, nearest_enemy_row = require_unit_position(nearest_enemy_id, game_state)
     return min(
         destinations,
-        key=lambda destination: _calculate_hex_distance(
-            int(destination[0]),
-            int(destination[1]),
+        key=lambda destination: ranged_edge_distance_to_cell(
+            nearest_enemy_socle,
             nearest_enemy_col,
             nearest_enemy_row,
+            int(destination[0]),
+            int(destination[1]),
+            metric,
         ),
     )
 
@@ -5877,14 +5894,17 @@ def _attack_sequence_rng(
         pool = shooting_build_valid_target_pool(game_state, attacker_id)
         target_id_str = str(target["id"])
         if pool:
-            unit_by_id = require_key(game_state, "unit_by_id")
-            def _dist(uid: str) -> int:
-                if uid not in unit_by_id:
-                    raise KeyError(f"_attack_sequence_rng: unit {uid} not in unit_by_id")
-                u = unit_by_id[uid]
-                return _calculate_hex_distance(
-                    int(require_key(attacker, "col")), int(require_key(attacker, "row")),
-                    int(require_key(u, "col")), int(require_key(u, "row")),
+            # « Cible la plus proche » = mesure bord-à-bord (règle 01.04), euclidienne
+            # via le sélecteur `ranged` — cohérent avec le gate de portée tir.
+            from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
+            _ctp_metric = _ranged_distance_metric()
+            _ctp_cache = require_key(game_state, "units_cache")
+            _attacker_socle = socle_from_cache_entry(_ctp_cache[attacker_id])
+            def _dist(uid: str) -> float:
+                if uid not in _ctp_cache:
+                    raise KeyError(f"_attack_sequence_rng: unit {uid} not in units_cache")
+                return ranged_edge_distance(
+                    _attacker_socle, socle_from_cache_entry(_ctp_cache[uid]), _ctp_metric
                 )
             closest_id = min(pool, key=_dist)
             if closest_id == target_id_str:
