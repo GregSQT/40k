@@ -2153,6 +2153,54 @@ def execute_action():
             },
         })
 
+    # Read-only: pools de déplacement de TOUTES les figs NON POSÉES d'une escouade, en un seul appel
+    # (tranche 2 move-preview persistant). Évite N round-trips move_model_destinations. Chaque pool est
+    # calculé avec le même provisional_plan (figs déjà posées bloquent les autres).
+    if action.get("action") == "move_squad_unplaced_destinations":
+        squad_id = action.get("unitId")
+        if squad_id is None:
+            return jsonify({
+                "success": False,
+                "error": "move_squad_unplaced_destinations requires unitId",
+            }), 400
+        from engine.phase_handlers import movement_handlers as _mh_squad
+        _raw_plan_sq = action.get("provisional_plan")
+        _provisional_plan_sq: Optional[Dict[str, Tuple[int, int]]] = None
+        if isinstance(_raw_plan_sq, dict):
+            _provisional_plan_sq = {
+                str(k): (int(v[0]), int(v[1]))
+                for k, v in _raw_plan_sq.items()
+                if isinstance(v, (list, tuple)) and len(v) == 2
+            }
+        _placed_ids = set(_provisional_plan_sq.keys()) if _provisional_plan_sq else set()
+        _squad_models = require_key(engine.game_state, "squad_models")
+        _models_cache = require_key(engine.game_state, "models_cache")
+        _squad_mids = _squad_models.get(str(squad_id))
+        if _squad_mids is None:
+            return jsonify({
+                "success": False,
+                "error": f"move_squad_unplaced_destinations: unknown squad {squad_id}",
+            }), 400
+        _pools: Dict[str, list] = {}
+        for _mid in _squad_mids:
+            _mid_str = str(_mid)
+            if _mid_str in _placed_ids:
+                continue
+            if _mid_str not in _models_cache:
+                continue  # fig morte
+            _pool = _mh_squad.movement_build_model_destinations_pool(
+                engine.game_state, _mid_str, provisional_plan=_provisional_plan_sq
+            )
+            _pools[_mid_str] = [[int(c), int(r)] for c, r in _pool["destinations"]]
+        return api_json_response({
+            "success": True,
+            "result": {
+                "action": "move_squad_unplaced_destinations",
+                "unitId": str(squad_id),
+                "pools": _pools,
+            },
+        })
+
     # Read-only: pool des ancres valides pour UNE figurine en déploiement (per-fig, zone filtrée).
     if action.get("action") == "deploy_model_destinations":
         model_id = action.get("model_id")

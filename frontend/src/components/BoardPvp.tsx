@@ -1615,6 +1615,12 @@ export default function Board({
   const effectivePerModelPlanRef = useRef(effectivePerModelPlan);
   effectivePerModelPlanRef.current = effectivePerModelPlan;
 
+  /** Tranche 2 : union des pools de déplacement des figs NON POSÉES de l'escouade (move-preview
+   *  persistant après pose). Peuplée via l'endpoint batch move_squad_unplaced_destinations et rendue
+   *  comme voile violet quand aucune fig n'est active. La version force le redraw du plateau. */
+  const squadUnplacedUnionPoolRef = useRef<Set<string>>(new Set());
+  const [squadUnplacedUnionVersion, setSquadUnplacedUnionVersion] = useState(0);
+
   /** Callbacks tir par-figurine — ref toujours a jour pour les handlers d'event stables. */
   const squadShootCallbacksRef = useRef({
     onStartSquadModelShoot,
@@ -5531,17 +5537,26 @@ export default function Board({
     if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
       hoverSpriteRef.current.visible = false;
     }
-    if (hoverOverlayRef.current && !hoverOverlayRef.current.destroyed) {
-      hoverOverlayRef.current.visible = false;
-    }
     if (movePreviewGuideLineRef.current && !movePreviewGuideLineRef.current.destroyed) {
       movePreviewGuideLineRef.current.clear();
       movePreviewGuideLineRef.current.visible = false;
     }
     losHexRef.current = null;
+    setMovePreviewDistanceTooltip(null);
+    // Tranche 1 : si des figs sont posées dans le plan (non validé), on NE coupe PAS la LoS-preview.
+    // L'effet dédié « LoS-preview persistante après pose » ci-dessous garde le cône + blink + cases
+    // vues depuis la position de CHAQUE fig posée jusqu'au clic Validate. Sans fig posée (repos /
+    // entrée sans sélection) → on coupe toute la LoS comme avant.
+    const hasPlacedToPersist =
+      !!squadMovePlan &&
+      !!squadMovePlan.models &&
+      Object.keys(squadMovePlan.models).length > 0;
+    if (hasPlacedToPersist) return;
+    if (hoverOverlayRef.current && !hoverOverlayRef.current.destroyed) {
+      hoverOverlayRef.current.visible = false;
+    }
     setMovePreviewLosBlinkIds([]);
     setMovePreviewLosCoverById({});
-    setMovePreviewDistanceTooltip(null);
 
     // Baseline œil "trop loin" au repos (aucune fig active) : recalculée depuis la position ACTUELLE
     // de l'unité, pour que le badge persiste tant que l'unité est active — pas seulement au survol.
@@ -5607,6 +5622,235 @@ export default function Board({
     unitsBoardLayoutKey,
     gameState?.turn,
     gameState?.episode_steps,
+  ]);
+
+  // Tranche 1 — LoS-preview PERSISTANTE après pose (jusqu'au clic Validate). Quand aucune fig n'est
+  // active mais que des figs sont posées dans le plan (non validé), on garde la LoS depuis la position
+  // de CHAQUE fig posée : cône WASM (par-fig, socle) + cases réellement vues + blink, en UNION multi-fig.
+  // Statique (dessiné une fois par changement de plan, pas par frame → aucun coût de rendu continu).
+  // Les positions posées ont été survolées juste avant le drop → preview backend déjà en cache (hit,
+  // zéro latence). L'effet « cut preview » ci-dessus délègue à celui-ci quand des figs sont posées.
+  useEffect(() => {
+    if (mode !== "squadModelMove" && !isDeploymentMove) return;
+    if (!boardConfig || !gameConfig) return;
+    const app = appRef.current;
+    if (!app) return;
+    const plan = effectivePerModelPlan;
+    if (!plan || plan.activeModelId) return; // fig active → l'effet ghost gère le preview au survol
+    const placed = plan.models ? Object.entries(plan.models) : [];
+    if (placed.length === 0) return; // rien de posé → repos géré par l'effet cut ci-dessus
+    const squadUnit = units.find((u) => String(u.id) === String(plan.unitId));
+    if (!squadUnit) return;
+    const shootRange =
+      squadUnit.RNG_WEAPONS && squadUnit.RNG_WEAPONS.length > 0 ? getMaxRangedRange(squadUnit) : 0;
+    if (shootRange <= 0) return;
+
+    const HEX_RADIUS_H = boardConfig.hex_radius;
+    const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
+    const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
+    const losUnionLayout: HexUnionMaskLayout = {
+      HEX_HORIZ_SPACING: HEX_WIDTH_H,
+      HEX_WIDTH: HEX_WIDTH_H,
+      HEX_HEIGHT: HEX_HEIGHT_H,
+      HEX_VERT_SPACING: HEX_HEIGHT_H,
+      MARGIN: boardConfig.margin,
+      gridHexRadius: HEX_RADIUS_H,
+    };
+    const LOS_PREVIEW_CLEAR_HEX = 0x4f8bff;
+    const LOS_PREVIEW_COVER_HEX = 0x9ec5ff;
+
+    if (!hoverOverlayRef.current || hoverOverlayRef.current.destroyed) {
+      const root = new PIXI.Container();
+      root.name = "los-hover-polar-masked";
+      root.eventMode = "none";
+      root.zIndex = 40;
+      app.stage.addChild(root);
+      hoverOverlayRef.current = root;
+    }
+    const overlay = hoverOverlayRef.current;
+
+    let cancelled = false;
+    const ucByModel = unitsCacheModelCenters(gameState?.units_cache);
+    const metric = rangedPreviewMetric(gameConfig);
+
+    void (async () => {
+      try {
+        const clearCells: Array<{ col: number; row: number }> = [];
+        const coverCells: Array<{ col: number; row: number }> = [];
+        const targetCells: Array<{ col: number; row: number }> = [];
+        const blinkSet = new Set<number>();
+        const coverById: Record<string, boolean> = {};
+        for (const [, pos] of placed) {
+          if (cancelled) return;
+          // Cône WASM par-fig depuis la position posée (socle recalculé à fromCol/fromRow).
+          const conePreview = buildLosPreviewFromSource({
+            source: { unit: squadUnit, fromCol: pos.col, fromRow: pos.row },
+            units,
+            boardCols: boardConfig.cols,
+            boardRows: boardConfig.rows,
+            wallHexes: boardConfig.wall_hexes,
+            wallHexesOverride,
+            obscuringZones: losObscuringZones,
+            terrainZones: losTerrainZones,
+            maxRange: shootRange,
+            distanceMetric: metric,
+            unitsCacheByModel: ucByModel,
+            shooterModelCenters: undefined,
+          });
+          clearCells.push(...conePreview.clearCells);
+          coverCells.push(...conePreview.terrainCoverCells);
+          // Blink + cases vues règlementaires (backend) à cette position (cache hit attendu).
+          const cacheKey = [
+            String(squadUnit.id),
+            `${pos.col},${pos.row}`,
+            unitsBoardLayoutKey,
+            String(gameState?.turn ?? ""),
+            String(gameState?.episode_steps ?? ""),
+          ].join("|");
+          let losPreview = movePreviewBackendLosCacheRef.current.get(cacheKey);
+          if (!losPreview) {
+            const response = await fetch("/api/game/action", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "preview_shoot_from_position",
+                unitId: String(squadUnit.id),
+                destCol: pos.col,
+                destRow: pos.row,
+                advancePosition: false,
+                includeLosCells: false,
+              }),
+            });
+            if (!response.ok) {
+              throw new Error(`preview_shoot_from_position failed with HTTP ${response.status}`);
+            }
+            const data = await response.json();
+            if (data?.success !== true) {
+              throw new Error("preview_shoot_from_position returned success=false");
+            }
+            losPreview = parseBackendMoveLosPreviewPayload(data.result, cacheKey);
+            movePreviewBackendLosCacheRef.current.set(cacheKey, losPreview);
+          }
+          for (const id of losPreview.blinkIds) blinkSet.add(id);
+          for (const [uid, inCover] of Object.entries(losPreview.coverByUnitId)) {
+            coverById[uid] = inCover;
+          }
+          targetCells.push(...losPreview.visibleTargetCells);
+        }
+        if (cancelled) return;
+        const allVisualLosCells = [...coverCells, ...clearCells, ...targetCells];
+        mountLosPolarClippedByVisibleUnion(
+          overlay,
+          allVisualLosCells,
+          coverCells,
+          losUnionLayout,
+          LOS_PREVIEW_CLEAR_HEX,
+          0.4,
+          LOS_PREVIEW_COVER_HEX,
+          0.4,
+          app.renderer
+        );
+        overlay.visible = true;
+        setMovePreviewLosBlinkIds([...blinkSet]);
+        setMovePreviewLosCoverById(coverById);
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Persist placed-model LoS preview failed:", error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (hoverOverlayRef.current && !hoverOverlayRef.current.destroyed) {
+        hoverOverlayRef.current.visible = false;
+      }
+      setMovePreviewLosBlinkIds([]);
+      setMovePreviewLosCoverById({});
+    };
+  }, [
+    mode,
+    isDeploymentMove,
+    boardConfig,
+    gameConfig,
+    effectivePerModelPlan,
+    effectivePerModelPlan?.activeModelId,
+    effectivePerModelPlan?.models,
+    units,
+    wallHexesOverride,
+    losObscuringZones,
+    losTerrainZones,
+    unitsBoardLayoutKey,
+    gameState?.turn,
+    gameState?.episode_steps,
+    gameState?.units_cache,
+  ]);
+
+  // Tranche 2 — move-preview PERSISTANTE après pose : union des pools de déplacement de TOUTES les
+  // figs NON POSÉES de l'escouade, quand aucune fig n'est active (post-pose ou repos). Un seul appel
+  // batch (move_squad_unplaced_destinations) au lieu de N. Se recalcule à chaque pose (plan.models
+  // change → les figs posées bloquent les autres). Le voile violet se vide au fur et à mesure des
+  // poses et disparaît quand tout est posé. Fig active → cet effet se retire (pool de la fig active).
+  useEffect(() => {
+    if (mode !== "squadModelMove") return;
+    const plan = squadMovePlan;
+    if (!plan) return;
+    if (plan.activeModelId) return;
+    let cancelled = false;
+    const provisionalPlan: Record<string, [number, number]> = {};
+    for (const [mid, p] of Object.entries(plan.models ?? {})) {
+      provisionalPlan[mid] = [p.col, p.row];
+    }
+    void (async () => {
+      try {
+        const response = await fetch("/api/game/action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "move_squad_unplaced_destinations",
+            unitId: String(plan.unitId),
+            provisional_plan: provisionalPlan,
+          }),
+        });
+        if (!response.ok) {
+          throw new Error(`move_squad_unplaced_destinations failed with HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        if (data?.success !== true) {
+          throw new Error("move_squad_unplaced_destinations returned success=false");
+        }
+        const pools = data.result?.pools;
+        if (!pools || typeof pools !== "object" || Array.isArray(pools)) {
+          throw new Error("move_squad_unplaced_destinations: pools missing/invalid");
+        }
+        const union = new Set<string>();
+        for (const cells of Object.values(pools as Record<string, Array<[number, number]>>)) {
+          if (!Array.isArray(cells)) continue;
+          for (const cell of cells) {
+            if (!Array.isArray(cell) || cell.length < 2) continue;
+            union.add(`${cell[0]},${cell[1]}`);
+          }
+        }
+        if (cancelled) return;
+        squadUnplacedUnionPoolRef.current = union;
+        setSquadUnplacedUnionVersion((v) => v + 1);
+      } catch (error) {
+        if (cancelled) return;
+        squadUnplacedUnionPoolRef.current = new Set();
+        setSquadUnplacedUnionVersion((v) => v + 1);
+        console.error("Squad unplaced union pool fetch failed:", error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      squadUnplacedUnionPoolRef.current = new Set();
+      setSquadUnplacedUnionVersion((v) => v + 1);
+    };
+  }, [
+    mode,
+    squadMovePlan,
+    squadMovePlan?.activeModelId,
+    squadMovePlan?.models,
+    squadMovePlan?.unitId,
   ]);
 
   // Ghost per-figurine (squad move plan) : ghost suit le curseur, hoveredHexRef mis à jour pour le
@@ -6012,7 +6256,18 @@ export default function Board({
         // Cases visibles des cibles ciblables (backend) peintes par-dessus le cône WASM :
         // garantit qu'une unité qui blinke a toujours ses cases visibles affichées, même si le
         // cône générique ne les atteint pas (exclusion obscuring par-figurine, règle 13.10).
-        const targetCells = flattenVisibleCellsByTarget(squadUnit.visible_cells_by_target);
+        // Source = preview backend À LA CASE SURVOLÉE (cache par-case), pas la valeur périmée
+        // stockée sur l'unité (squadUnit.visible_cells_by_target reflète la position réelle, pas
+        // le ghost). Cache miss → repeinturage déclenché par runShootBackend à la réponse.
+        const coneCacheKey = [
+          squadUnitIdStr,
+          `${pending.col},${pending.row}`,
+          unitsBoardLayoutKey,
+          String(gameState?.turn ?? ""),
+          String(gameState?.episode_steps ?? ""),
+        ].join("|");
+        const conePreview = movePreviewBackendLosCacheRef.current.get(coneCacheKey);
+        const targetCells = conePreview ? conePreview.visibleTargetCells : [];
         const allVisualLosCells = [
           ...visualPreview.terrainCoverCells,
           ...visualPreview.clearCells,
@@ -6087,6 +6342,10 @@ export default function Board({
         setMovePreviewLosBlinkIds(losPreview.blinkIds);
         setMovePreviewLosCoverById(losPreview.coverByUnitId);
         setMovePreviewLosTooFarById(losPreview.hiddenTooFarByUnitId);
+        // Cône déjà peint au survol (cache miss → sans cases cibles). La réponse backend est
+        // maintenant en cache par-case : repeindre pour afficher les cases réellement vues des
+        // cibles (règle 06.01/13.10) par-dessus le cône WASM.
+        drawVisualCone(pending.col, pending.row);
       } catch (error) {
         if (!shootPreviewActive) return;
         setMovePreviewLosBlinkIds([]);
@@ -8139,8 +8398,11 @@ export default function Board({
       showHexCoordinates,
       objectiveControl,
       moveDestPoolRef:
-        mode === "squadModelMove" && squadMovePlan?.activeModelId && squadMoveModelPoolRef
-          ? squadMoveModelPoolRef
+        mode === "squadModelMove"
+          ? // Fig active → pool BFS de la fig ; sinon (post-pose/repos) → union des figs non posées.
+            squadMovePlan?.activeModelId && squadMoveModelPoolRef
+            ? squadMoveModelPoolRef
+            : squadUnplacedUnionPoolRef
           : resolvedMoveDestPoolRef,
       footprintZonePoolRef: footprintZoneRef,
       moveDestinationAnchorsFromState,
@@ -9740,6 +10002,7 @@ export default function Board({
     effectivePerModelPlan,
     chargeModelPoolRef,
     pileInModelPoolRef,
+    squadUnplacedUnionVersion,
   ]);
 
   // Handle weapon selection
