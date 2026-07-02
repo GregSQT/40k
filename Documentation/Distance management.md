@@ -244,6 +244,23 @@ délicat à cause des murs).
 
 ## 19. Plan de migration hex → euclidien
 
+### État d'avancement (2026-07-02)
+- **Étape 0 — Inventaire** : ✅ FAIT (le présent document).
+- **Étape 1 — Point de bascule unique (backend)** : ✅ FAIT. `euclidean_edge_distance`
+  (hex_utils), `get_distance_metric` + `ranged_in_range` (combat_utils), section
+  `distance_metric` dans game_config.json (tout `hex` par défaut).
+- **Étape 2 — Migration TIR** : ✅ FAIT côté code (backend routé via
+  `_ranged_distance_metric`, `ranged: "euclidean"`, miroir frontend
+  `euclideanEdgeDistanceToCellSubhex` + `losPreviewHelpers`). ⚠️ Validation
+  runtime PvP + replay non re-confirmée dans la dernière session.
+- **Étape 3 — Spike champ géodésique** : ✅ FAIT et validé (voir « Résultat du
+  spike » plus bas). Prototype isolé `spikes/geodesic_field_spike.py`, AUCUN
+  branchement moteur.
+- **Étape 4 — Migration MOVE** : ⬜ À FAIRE (prochaine). Traiter ici le point
+  [3] budget sur le point le plus éloigné du socle.
+- **Étape 5 — Migration CHARGE** : ⬜ À FAIRE.
+- **Étape 6 — Cohérence & nettoyage** : ⬜ À FAIRE.
+
 ### Décisions actées
 - **Zone d'engagement (EZ)** : NON touchée pour l'instant → reste hex partout
   (sections 4). On ne migre que la *portée* de tir, move et charge.
