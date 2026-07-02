@@ -4405,15 +4405,17 @@ def squad_shoot_los_overview(
 ) -> Dict[str, Any]:
     """Agrege les cibles tirables de TOUTE l escouade (double-click frontend).
 
-    Pour chaque fig vivante de l escouade, reutilise squad_model_valid_targets
-    (meme eligibilite que le blink mono-fig : arme selectionnee + LoS + portee),
-    puis compte par ennemi le nombre N de figs qui peuvent le cibler. Read-only :
-    n ecrit rien dans game_state.
+    Ne compte QUE les figs encore "libres" : une fig reste libre tant qu il lui
+    reste au moins UNE arme non declaree (pending_squad_shoot_intents). Une fig dont
+    toutes les armes ont ete affectees sort du decompte ET de la visibilite (blink).
+    Pour chaque fig libre, une cible est vue si >= 1 de ses armes libres peut l atteindre
+    (portee + LoS, per-arme). Read-only : n ecrit rien dans game_state.
 
     Returns:
-        valid_targets    : union des squad_id ennemis vises par >= 1 fig
-        count_by_unit_id : {squad_id ennemi: N figs qui peuvent le cibler}
-        squad_alive_count: M = nb de figs vivantes de l escouade attaquante
+        valid_targets    : union des squad_id ennemis vises par >= 1 fig LIBRE
+        count_by_unit_id : {squad_id ennemi: N figs LIBRES qui peuvent le cibler}
+        squad_alive_count: nb de figs vivantes de l escouade attaquante
+        squad_free_count : M = nb de figs LIBRES (denominateur du compteur N/M)
     """
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
@@ -4421,16 +4423,37 @@ def squad_shoot_los_overview(
     if mids is None:
         raise ValueError(f"Squad {attacker_squad_id!r} absent de squad_models")
     alive = [mid for mid in mids if mid in models_cache]
+
+    # Armes deja declarees par figurine : {model_id: {weapon_index, ...}}.
+    intents = game_state.get("pending_squad_shoot_intents", {}).get(attacker_squad_id, [])  # get allowed
+    declared_by_model: Dict[str, set] = {}
+    for it in intents:
+        declared_by_model.setdefault(str(it["model_id"]), set()).add(int(it["weapon_index"]))
+
+    attacker_player = int(models_cache[alive[0]]["player"]) if alive else None
+    enemy_sids = _enemy_squad_ids(game_state, attacker_player) if attacker_player is not None else []
+
     count: Dict[str, int] = {}
+    free_count = 0
     for mid in alive:
-        for sid in squad_model_valid_targets(game_state, attacker_squad_id, mid):
-            if sid not in count:
-                count[sid] = 0
-            count[sid] += 1
+        m = models_cache[mid]
+        weapons = m.get("RNG_WEAPONS", [])  # get allowed
+        declared_w = declared_by_model.get(mid, set())  # get allowed
+        free_weapons = [w for w in range(len(weapons)) if w not in declared_w]
+        if not free_weapons:
+            continue  # fig entierement affectee → hors blink et hors decompte
+        free_count += 1
+        for sid in enemy_sids:
+            if any(
+                _model_can_shoot_target_with_weapon(game_state, m, sid, w)
+                for w in free_weapons
+            ):
+                count[sid] = count.get(sid, 0) + 1  # get allowed
     return {
         "valid_targets": list(count.keys()),
         "count_by_unit_id": count,
         "squad_alive_count": len(alive),
+        "squad_free_count": free_count,
     }
 
 

@@ -4437,6 +4437,7 @@ class W40KEngine(gym.Env):
                 "valid_targets": overview["valid_targets"],
                 "count_by_unit_id": overview["count_by_unit_id"],
                 "squad_alive_count": overview["squad_alive_count"],
+                "squad_free_count": overview["squad_free_count"],
                 "cover_by_unit_id": _squad_cover_by_unit_id(overview["valid_targets"]),
                 "hidden_too_far_by_unit_id": _squad_hidden_too_far(),
             }  # get allowed

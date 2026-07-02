@@ -4423,9 +4423,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
         losCountByUnitId[tid] = n;
       }
-      const aliveRaw = result.squad_alive_count;
-      if (typeof aliveRaw !== "number") {
-        throw new Error("squad_shoot_los_overview: squad_alive_count absent/invalid in response");
+      // Dénominateur du compteur N/M = figs LIBRES (pas encore toutes affectées),
+      // pas les figs vivantes : une fig ayant tiré toutes ses armes sort du décompte.
+      const freeRaw = result.squad_free_count;
+      if (typeof freeRaw !== "number") {
+        throw new Error("squad_shoot_los_overview: squad_free_count absent/invalid in response");
       }
       const validTargets = (result.valid_targets as string[]).map((id) => parseInt(id, 10));
       setBlinkingUnits((prev) => {
@@ -4438,12 +4440,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           coverByUnitId,
           hiddenTooFarByUnitId,
           losCountByUnitId,
-          squadAliveCount: aliveRaw,
+          squadAliveCount: freeRaw,
           losOverviewUnitId: unitId,
         };
       });
       console.log(
-        `[SQUAD-SHOOT] los_overview unit=${unitId} targets=[${validTargets.join(",")}] alive=${aliveRaw}`
+        `[SQUAD-SHOOT] los_overview unit=${unitId} targets=[${validTargets.join(",")}] free=${freeRaw}`
       );
     },
     [postEngineQuery]
@@ -4532,11 +4534,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         weapon_index: number;
         target_unit_id: string;
       }>;
-      // Fig assignée → vide le blink et déselectionne.
-      setBlinkingUnits((prev) => {
-        if (prev.blinkTimer) clearInterval(prev.blinkTimer);
-        return { unitIds: [], blinkTimer: null, attackerId: null };
-      });
+      // Fig assignée : on NE vide PAS le blink — il persiste jusqu'au Validate/Cancel.
+      // L'overview (rappelé plus bas) recalcule le blink + le compteur sur les figs LIBRES.
       const isMono = plan.models.length === 1;
       setSquadShootPlan((prev) =>
         prev
@@ -4555,11 +4554,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (isMono) {
         await selectShootModelForUnit(plan.unitId, modelId);
       }
+      // Rafraîchit le blink + compteur N/M sur les figs encore libres (source finale du blink).
+      await handleSquadShootLosOverview(plan.unitId);
       console.log(
         `[SQUAD-SHOOT] assign model=${modelId} → target=${targetUnitId} (${decls.length} intents)`
       );
     },
-    [executeAction, selectShootModelForUnit]
+    [executeAction, selectShootModelForUnit, handleSquadShootLosOverview]
   );
 
   /** Double-clic sur une unité ennemie : toutes les figs ayant l'arme active + LoS tirent dessus
@@ -4595,10 +4596,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         weapon_index: number;
         target_unit_id: string;
       }>;
-      setBlinkingUnits((prev) => {
-        if (prev.blinkTimer) clearInterval(prev.blinkTimer);
-        return { unitIds: [], blinkTimer: null, attackerId: null };
-      });
+      // Blink NON vidé : il persiste jusqu'au Validate/Cancel ; l'overview le recalcule
+      // ci-dessous sur les figs encore libres.
       setSquadShootPlan((prev) =>
         prev
           ? {
@@ -4610,11 +4609,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
           : prev
       );
+      await handleSquadShootLosOverview(plan.unitId);
       console.log(
         `[SQUAD-SHOOT][weapon] terminé weapon=${weaponIndex} → ${targetUnitId} (${decls.length} intents)`
       );
     },
-    [executeAction]
+    [executeAction, handleSquadShootLosOverview]
   );
 
   /** Clic droit sur une fig assignée : retire toutes ses armes (squad_shoot_unassign). */
