@@ -149,6 +149,11 @@ export interface BlinkingHPBarConfig {
    * Permet la prévisu targetPreview (currentBlinkStep) et le suivi après dégâts réels.
    */
   sliceHpCur?: number;
+  /**
+   * Index de figurine (mode barre HP par-figurine) : distingue plusieurs barres blink
+   * d'une même escouade (même unitId). Absent = barre unique squad (comportement d'origine).
+   */
+  modelId?: number;
 }
 
 /** Géométrie + métadonnées pour repeindre les tranches HP sans recréer le conteneur. */
@@ -165,6 +170,8 @@ export interface BlinkHpSliceLayout {
 
 export interface HPBlinkContainer extends PIXI.Container {
   unitId?: number;
+  /** Index figurine (mode par-fig) ; null/undefined = barre squad unique. */
+  modelId?: number | null;
   attackerId?: number | null;
   weaponSignature?: string | null;
   cleanupBlink?: () => void;
@@ -353,10 +360,12 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     chargeMinRollOverlay,
     onBlinkProbHtml,
     sliceHpCur: sliceHpCurFromConfig,
+    modelId,
   } = config;
 
   // Normalize unit.id to number
   const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
+  const modelIdKey = modelId ?? null;
 
   const attackerIdNum = attacker
     ? typeof attacker.id === "string"
@@ -386,7 +395,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     if (!container.unitId) return false;
     const containerUnitIdNum =
       typeof container.unitId === "string" ? parseInt(container.unitId, 10) : container.unitId;
-    return containerUnitIdNum === unitIdNum;
+    return containerUnitIdNum === unitIdNum && (container.modelId ?? null) === modelIdKey;
   }) as HPBlinkContainer | undefined;
 
   // If container exists and matches attacker/weapon, reuse it and update probability
@@ -433,6 +442,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   hpContainer.eventMode = "none";
   hpContainer.interactiveChildren = false;
   hpContainer.unitId = unitIdNum;
+  hpContainer.modelId = modelIdKey;
   hpContainer.attackerId = attackerIdNum;
   hpContainer.weaponSignature = weaponSignature;
 

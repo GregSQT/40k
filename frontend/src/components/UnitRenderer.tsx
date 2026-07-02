@@ -1887,24 +1887,79 @@ export class UnitRenderer {
             )
           : null;
 
-      createBlinkingHPBar({
-        unit,
-        attacker,
-        phase: blinkPhase,
-        inCover: getEffectiveTargetInCover(attacker),
-        onTooltip: this.props.onUnitTooltip,
-        app: this.props.app,
-        centerX: this.props.centerX,
-        finalBarX,
-        finalBarY,
-        finalBarWidth,
-        finalBarHeight,
-        sliceWidth,
-        getCSSColor: this.getCSSColor.bind(this),
-        chargeMinRollOverlay,
-        onBlinkProbHtml: this.props.onBlinkProbHtml,
-        sliceHpCur: displayHP,
-      });
+      // Escouade multi-figurines : HP_CUR = total escouade, HP_MAX = PV par-figurine.
+      // On raisonne donc en PV PAR FIGURINE (jamais le total) pour que le clignotement
+      // de dégâts touche bien les cases dessinées (HP_MAX).
+      const modelCentersLocal = this.props.modelCenters;
+      const modelHpsLocal = this.props.modelHps;
+      const isSquad = Array.isArray(modelCentersLocal) && modelCentersLocal.length > 1;
+
+      if (
+        this.props.hpBarPerModel &&
+        isSquad &&
+        Array.isArray(modelHpsLocal) &&
+        modelHpsLocal.length === modelCentersLocal!.length
+      ) {
+        // ===== Option ON : une barre blink PAR FIGURINE, au-dessus de chaque icône =====
+        // Seule la première figurine vivante porte le cadre % (un seul par escouade).
+        let anchorIdx = -1;
+        for (let mi = 0; mi < modelHpsLocal.length; mi++) {
+          const mh = modelHpsLocal[mi];
+          if (mh && mh.HP_CUR > 0) {
+            anchorIdx = mi;
+            break;
+          }
+        }
+        for (let mi = 0; mi < modelCentersLocal!.length; mi++) {
+          const mh = modelHpsLocal[mi];
+          if (!mh || mh.HP_CUR <= 0) continue;
+          const [mCx, mCy] = modelCentersLocal![mi];
+          const figBarX = mCx - finalBarWidth / 2;
+          const figBarY = mCy - tokenTop - HP_BAR_HEIGHT - 1 - (finalBarHeight - HP_BAR_HEIGHT);
+          const figUnit = { ...unit, HP_MAX: mh.HP_MAX, HP_CUR: mh.HP_CUR } as Unit;
+          createBlinkingHPBar({
+            unit: figUnit,
+            attacker,
+            phase: blinkPhase,
+            inCover: getEffectiveTargetInCover(attacker),
+            onTooltip: this.props.onUnitTooltip,
+            app: this.props.app,
+            centerX: mCx,
+            finalBarX: figBarX,
+            finalBarY: figBarY,
+            finalBarWidth,
+            finalBarHeight,
+            sliceWidth: finalBarWidth / mh.HP_MAX,
+            getCSSColor: this.getCSSColor.bind(this),
+            chargeMinRollOverlay,
+            onBlinkProbHtml: mi === anchorIdx ? this.props.onBlinkProbHtml : undefined,
+            sliceHpCur: mh.HP_CUR,
+            modelId: mi,
+          });
+        }
+      } else {
+        // ===== Option OFF (ou mono-figurine) : une seule barre escouade =====
+        // Escouade : vie affichée = PV d'une figurine (HP_MAX par-fig), pas le total.
+        const sliceHpCur = isSquad ? unit.HP_MAX : displayHP;
+        createBlinkingHPBar({
+          unit,
+          attacker,
+          phase: blinkPhase,
+          inCover: getEffectiveTargetInCover(attacker),
+          onTooltip: this.props.onUnitTooltip,
+          app: this.props.app,
+          centerX: this.props.centerX,
+          finalBarX,
+          finalBarY,
+          finalBarWidth,
+          finalBarHeight,
+          sliceWidth,
+          getCSSColor: this.getCSSColor.bind(this),
+          chargeMinRollOverlay,
+          onBlinkProbHtml: this.props.onBlinkProbHtml,
+          sliceHpCur,
+        });
+      }
 
       // If targetPreview has overallProbability, update the display (pas en phase charge : affichage jet 2D6)
       if (
