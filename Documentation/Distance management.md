@@ -221,6 +221,8 @@ par-dessus les coordonnées hex.
    hex ailleurs, on crée des contradictions (unité « engagée » côté move mais
    pas côté tir). → L'EZ doit basculer en euclidien **partout en même temps**,
    pas seulement dans le move.
+   → **Acté à l'Étape 7 (2026-07-03)** : l'EZ passe euclidienne dans les 4 phases
+   simultanément, via un point de bascule unique (`get_distance_metric("engagement")`).
 
 3. **IA / observations / récompenses.**
    Toute la section 10 (observation_builder, reward_calculator) mesure en hex.
@@ -244,7 +246,7 @@ délicat à cause des murs).
 
 ## 19. Plan de migration hex → euclidien
 
-### État d'avancement (2026-07-02)
+### État d'avancement (2026-07-03)
 - **Étape 0 — Inventaire** : ✅ FAIT (le présent document).
 - **Étape 1 — Point de bascule unique (backend)** : ✅ FAIT. `euclidean_edge_distance`
   (hex_utils), `get_distance_metric` + `ranged_in_range` (combat_utils), section
@@ -256,14 +258,24 @@ délicat à cause des murs).
 - **Étape 3 — Spike champ géodésique** : ✅ FAIT et validé (voir « Résultat du
   spike » plus bas). Prototype isolé `spikes/geodesic_field_spike.py`, AUCUN
   branchement moteur.
-- **Étape 4 — Migration MOVE** : ⬜ À FAIRE (prochaine). Traiter ici le point
-  [3] budget sur le point le plus éloigné du socle.
+- **Étape 4 — Migration MOVE** : ✅ FAIT (backend + PvP interactif), périmètre précis
+  ci-dessous. Le point [3] budget-socle est résolu par l'**option A (Minkowski)**.
+  RESTE (tranche 4b) : anchor pool multi-hex, fly, socles non-ronds, miroir replay TS.
+  Détail complet dans la section « Étape 4 » plus bas.
 - **Étape 5 — Migration CHARGE** : ⬜ À FAIRE.
 - **Étape 6 — Cohérence & nettoyage** : ⬜ À FAIRE.
+- **Étape 7 — Migration EZ euclidienne** : ⬜ À FAIRE. **Décision révisée le 2026-07-03**
+  (l'EZ ne reste PLUS hex — voir « Décisions actées » et la section « Étape 7 »).
 
 ### Décisions actées
-- **Zone d'engagement (EZ)** : NON touchée pour l'instant → reste hex partout
-  (sections 4). On ne migre que la *portée* de tir, move et charge.
+- **Zone d'engagement (EZ)** : ~~NON touchée → reste hex partout~~ **DÉCISION RÉVISÉE
+  (2026-07-03) → l'EZ bascule en EUCLIDIEN partout** (move, tir, charge, fight). Voir
+  Étape 7. Motif : l'EZ est un concept UNIQUE consommé par 4 phases ; la garder hex
+  pendant que move/charge passent euclidien recrée exactement l'incohérence inter-phase
+  que le §18 (point de vigilance 2) anticipait (« engagé » côté move mais pas côté tir).
+  Une seule métrique = une seule vérité, + fidélité au rayon d'engagement circulaire réel
+  (l'hexagone d'EZ n'est qu'une approximation en escalier). **L'overlap/collision de socles
+  reste hex** (couche d'occupation, orthogonale à l'EJ — cf. §22-24).
 - **IA (observations / récompenses)** : retrain prévu de toute façon → l'impact
   sur observations/récompenses (section 10) est ignoré pendant la migration →
   reste hex.
@@ -293,10 +305,9 @@ délicat à cause des murs).
 | Reste HEX (intouché) | Bascule EUCLIDIEN |
 |----------------------|-------------------|
 | Overlap / collision de socles (§5, §15) | Portée d'arme / tir (§8, §14) |
-| Zone d'engagement (§4) | Distance max de move / advance (§6) |
-| Adjacence & voisins (§3, §13) | Distance max de charge (§7) |
-| Observations / récompenses IA (§10) | — |
-| LoS (déjà euclidien §17) | — |
+| Adjacence & voisins (§3, §13) | Distance max de move / advance (§6) |
+| Observations / récompenses IA (§10) | Distance max de charge (§7) |
+| LoS (déjà euclidien §17) | **Zone d'engagement / EZ (§4) — Étape 7** (révision 2026-07-03) |
 | Empreintes physiques (déjà euclidien §11) | — |
 
 ### Étape 0 — Inventaire figé des call-sites (aucune modif de code)
@@ -362,12 +373,19 @@ Fichiers : [hex_utils.py](engine/hex_utils.py), [combat_utils.py](engine/combat_
   **trie** par cette distance → migrer le tri **dans le même lot** que le seuil,
   jamais séparément.
 - Passer la config `ranged: "euclidean"`.
+- **Call-sites IA ranged à migrer dans le même lot** (décisions actées : "Ranged → euclidien") :
+  - `ai/target_selector.py` (198-210) — distance ally→target branche ranged
+  - `engine/ai/weapon_selector.py` (383-400) — branche RNG (`select_best_ranged_weapon`)
+  - `ai/analyzer_phases/shoot_handler.py` (406-610) — distances tir IA
+  Ces trois fichiers doivent basculer **avec** le tir, pas séparément. Ne pas les oublier
+  sous prétexte qu'ils sont dans `ai/` : la mesure de portée IA doit matcher la règle PvP.
 - Frontend : miroir dans gameHelpers/probabilityCalculator/blinkingHPBar/
   weaponHelpers (même formule bord-à-bord, **même facteur `× 1.5`**, même absence
   d'arrondi que le backend).
 - **Checkpoint** : une cible à portée en diagonale doit être atteignable en
   euclidien là où l'hex la refusait (et inversement) ; les deux checks (précheck
-  620-660 et 800-840) restent cohérents. Valider PvP + replay.
+  620-660 et 800-840) restent cohérents ; les 3 fichiers IA produisent les mêmes
+  distances que le moteur PvP. Valider PvP + replay.
 
 ### Étape 3 — Champ de distance géodésique any-angle (move/charge)
 Nouvelle fonction backend (à côté du BFS existant, pas en remplacement direct).
@@ -430,27 +448,208 @@ Nouvelle fonction backend (à côté du BFS existant, pas en remplacement direct
   (champ mesuré depuis le centre) → à traiter au branchement moteur (Étapes 4/5),
   cf. la RÈGLE CRITIQUE en tête d'Étape 3. Point de vigilance n°1 aux coins.
 
-### Étape 4 — Migration MOVE
-- Brancher le champ géodésique sur `movement_handlers.py` (budget = MOVE).
-- Overlap alliés inchangé (hex).
-- Frontend : `getValidMovePositions` + BFS move de BoardReplay utilisent le
-  nouveau champ (ou son miroir TS).
-- **Checkpoint** : empreinte de déplacement ronde ; pas de chevauchement possible
-  avec une fig alliée ; murs respectés. Valider PvP.
+### Étape 4 — Migration MOVE ✅ (état réel 2026-07-03)
+
+**Budget-socle (point [3]) — OPTION A retenue (Minkowski).** En translation rigide,
+tout point du socle parcourt la MÊME distance que le centre. Le vrai problème n'est pas
+« le bord parcourt un arc plus long » mais que le centre d'un socle de rayon r ne peut pas
+raser un coin (il reste à ≥ r). Solution : donner au test de segment une **clearance = rayon
+du socle** (`round_base_radius_norm(base_size)`), i.e. gonfler les obstacles de r. Le champ
+mesure alors le centre, et sa longueur borne exactement la distance de tout point du socle
+(règle 03). Effet de jeu **assumé** : un socle rond ne peut plus se faufiler dans un passage
+plus étroit que lui (plus strict que l'hex, plus correct physiquement). Décision utilisateur : A.
+
+**4.0 — Primitive moteur (`engine/hex_utils.py`).**
+- `geodesic_field(start, board_cols, board_rows, obstacles, budget, clearance)` : lazy Theta\*
+  en flood porté du spike sur la géométrie moteur réelle (`_hex_center`, voisins `get_neighbors`).
+  Résultat en unités-norme (1 subhex = `ENGAGEMENT_NORM_HEX_WIDTH` = 1,5). Sur-estime (quasi-optimal)
+  → ne triche jamais (validé identique à un brute-force visibility sur scénarios concaves).
+- `segment_clear` / `_segment_clear_indexed` : test capsule segment↔obstacles avec `clearance`.
+  À `clearance=0` = LoS-ray (tangence coin convexe permise) ; `>0` = disque de rayon clearance.
+- **Perf (critique)** : index spatial d'obstacles (buckets, obstacles inscrits dans 9 buckets →
+  marge absorbée), parcours **DDA (Amanatides-Woo)** ne visitant que les buckets traversés, +
+  **rejet rapide centre→segment** avant le test capsule. Cas réel mesuré : **1.12 s → 0.10 s** par
+  champ (board ×10, ~3500 obstacles, socle base 6, budget 60 subhex).
+
+**4.1 — Branchement (`movement_handlers.py`, `config/game_config.json`).**
+- Résolveur `_move_distance_metric(game_state)` : **PvP/replay → `distance_metric["move"]`**
+  (= `euclidean`), **gym → `distance_metric["move_gym"]`** (= `hex` par défaut, 1 paramètre pour
+  basculer le training). Erreurs explicites, aucun fallback.
+- Branche euclidienne dans **`movement_build_valid_destinations_pool`** (pool d'ancre, ground) —
+  gate socle **rond mono-hex** (`base_size == 1`) : ne se déclenche donc PAS sur board ×N (bases
+  multi-subhex) → ce pool reste hex en pratique (voir 4b).
+- Branche euclidienne dans **`movement_build_model_destinations_pool`** (pool par-figurine, **c'est
+  lui que le PvP interactif utilise**) — gate socle **rond, toute taille** ; la reachability est
+  calculée sur le CENTRE avec clearance = rayon socle, l'empreinte multi-hex est expansée séparément
+  comme le BFS hex. **C'est cette branche qui rend le move euclidien visible en PvP.**
+- Obstacles du champ = murs + (ennemis / amis / bande-EZ **selon les toggles** `config["move"]`,
+  identique au BFS hex). `can_move_through_friendly_model=true` → les sœurs ne sont PAS obstacles →
+  le champ est **indépendant du plan provisoire** → cacheable.
+- **Cache** `_move_model_field_cache` (clé `(model_id, start, budget)`), vidé au phase start et
+  après chaque commit réel (pas par les poses provisoires) → chaque champ calculé 1×/phase, poses
+  suivantes instantanées. **Exclu de la sérialisation API** (`_GAME_STATE_EXCLUDE_KEYS`) — sinon le
+  cache (dicts de milliers de cellules) gonfle chaque réponse (bug observé : previews à >1 s).
+- `distance_metric` : `move: "euclidean"`, ajout `move_gym: "hex"`.
+
+**Frontend (état).**
+- **PvP = backend-driven** : la preview de move consomme `valid_move_destinations_pool` /
+  le pool par-figurine (commentaire BoardPvp « use backend-computed destinations ») → euclidien
+  déjà live, **aucun portage TS nécessaire pour le PvP**.
+- `getValidMovePositions` (gameHelpers) : **aucun appelant prod** → rien à migrer.
+- **Perf « apparition preview » single-fig** : mesurée côté moteur (< 0.16 s partout) ; le lag
+  résiduel au 1er affichage est le **rendu PIXI de l'overlay LoS masqué** (`los-hover-polar-masked`,
+  BoardPvp), **pré-existant, hors périmètre distance** → investigation frontend séparée si besoin.
+
+**RESTE — tranche 4b (⬜) :**
+- Pool d'ancre `movement_build_valid_destinations_pool` en multi-hex (`ez>1`, base>1 → chemin
+  vectorisé NumPy `_build_multi_hex_vectorized`) : encore hex.
+- FLY : encore hex. Socles **non-ronds** (oval/square) : encore hex.
+- Miroir **replay** : `BoardReplay.tsx` recalcule move/advance en hex localement → portage TS du
+  champ (cosmétique, parties passées).
+- **Checkpoint (fait pour le périmètre livré)** : disque qui contourne les murs, passage étroit
+  fermé (clearance), pas d'overlap allié possible (filtre hex conservé), PvP fluide.
 
 ### Étape 5 — Migration CHARGE
-- Brancher le champ géodésique sur `charge_handlers.py`
-  (`_charge_bfs_max_distance`, `charge_build_valid_targets`).
-- Overlap et contact ennemi inchangés (hex).
-- Frontend : `charge_dest_distances`, `chargeMaxDistance`, BFS charge replay.
-- **Checkpoint** : distance de charge ronde, contournement des murs, contact
-  ennemi toujours validé en hex. Valider PvP.
+
+**Deux checks distincts à ne pas confondre (règles 11.02 / 11.04) :**
+- **Éligibilité à la déclaration (11.02)** : "within 12" of one or more enemy units" →
+  mesure euclidienne bord-à-bord (01.04), ligne droite, **pas géodésique**. À garder
+  comme check rapide O(1) séparé.
+- **Budget du charge move (11.04)** : maximum distance = jet 2D6 → chemin géodésique
+  (cumul de segments, règle 03.01). `_charge_bfs_max_distance` → `geodesic_field`
+  avec même infrastructure que l'Étape 4 (`_move_model_field_cache`), budget
+  `2D6 × inches_to_subhex` au lieu de `M × inches_to_subhex`.
+
+**Call-sites backend :**
+- `charge_handlers.py` (565-630) : `_charge_bfs_max_distance` → `geodesic_field`
+  (réutiliser l'infrastructure de l'Étape 4, budget différent).
+- `charge_handlers.py` (2398-2480) : `charge_build_valid_targets` — distinguer
+  le check 12" euclidien (déclaration) du budget géodésique (move).
+- `charge_handlers.py` (~630-670) : `_charge_skip_hex_lb_prune_round_round_engagement`
+  — **vérifier son statut** : l'audit §7 indique qu'il utilise déjà "Euclidienne
+  round-round" comme prune. Si c'est le cas, ne pas retoucher ; documenter
+  explicitement qu'il est déjà compatible euclidien.
+
+**Call-sites IA charge à migrer dans le même lot** :
+- `ai/analyzer_phases/charge_handler.py` (75-110) — distance charge déclarée (hex cube
+  actuellement) → euclidien bord-à-bord pour le check 12", géodésique pour le budget.
+- `ai/game_replay_logger.py` (169-200) — `distance_needed` en hex cube → à aligner
+  sur la nouvelle métrique pour que les logs restent exploitables.
+
+**Frontend :**
+- `useEngineAPI.ts` (`charge_dest_distances`) et `BoardPvp.tsx` (`chargeMaxDistance`) :
+  backend-driven comme le move → aucun portage TS nécessaire pour le PvP.
+- `BoardReplay.tsx` BFS charge → portage TS du champ géodésique (cosmétique, replay).
+
+**Overlap et contact ennemi :** inchangés (hex).
+
+**Checkpoint** : distance de charge en disque euclidien, contournement propre des murs,
+contact ennemi validé en hex ; check 12" (déclaration) et budget (move) testés
+séparément sur un cas coin-de-mur ; logs IA cohérents. Valider PvP.
 
 ### Étape 6 — Cohérence & nettoyage
 - Vérifier qu'aucun call-site de portée tir/move/charge n'appelle encore
   directement `calculate_hex_distance` (grep de contrôle).
 - Documenter la clé de config `distance_metric` (valeurs et effet par règle).
 - Retrain IA (hors périmètre migration, mais à planifier juste après).
+
+**Dette hex intentionnelle — ce qui reste hex PAR CHOIX après les Étapes 1-7 :**
+
+| Règle | Raison du maintien hex |
+|-------|------------------------|
+| FLY (21) | Déféré tranche 4b — cas simple, à traiter en priorité après Étape 7 |
+| Pile-in / consolidation (12.03 / 12.08) | Budget 3" max, erreur ~10% jugée négligeable |
+| Fall-back move (09.07) | Non planifié — ajouter à une Étape 8 |
+| Cohérence inter-modèles (03.03) | Non planifié — ajouter à une Étape 8 |
+| Socles non-ronds (oval/square) move | Déféré tranche 4b — proxy cellules utilisé |
+| Pool d'ancre multi-hex (`ez>1`) | Déféré tranche 4b — vectorisé NumPy, plus complexe |
+| Observations / récompenses IA (§10) | Retrain prévu de toute façon → ignoré pendant migration |
+| Replay TS (BoardReplay.tsx) | Cosmétique, parties passées — faible priorité |
+
+Tout ce qui n'est pas dans ce tableau et utilise encore hex après Étape 7 = **bug non documenté**.
+
+### Étape 7 — Migration EZ euclidienne (⬜, décision 2026-07-03)
+
+**But** : la zone d'engagement (EZ) passe euclidienne dans les **4 phases simultanément**
+(move, tir, charge, fight), via un point de bascule unique. L'overlap/collision de socles
+**reste hex** (couche d'occupation, orthogonale). Les observations/récompenses IA **restent
+hex** (§10, retrain de toute façon prévu).
+
+**Règle euclidienne unique.** Un socle mover en `(c,r)` est « en EZ » d'un ennemi ⇔
+`euclidean_edge_distance(socle_mover, socle_ennemi) ≤ engagement_zone_subhex × ENGAGEMENT_NORM_HEX_WIDTH`
+(= `engagement_minimum_clearance_norm(ez)`, DÉJÀ euclidien dans hex_utils.py:1378). Les briques
+existent : `euclidean_edge_distance` / `euclidean_edge_clearance_round_round` (rond↔rond O(1)),
+`engagement_minimum_clearance_norm`. **Le docstring de `move_anchor_violates_engagement_clearance`
+(spatial_relations.py:165) vise déjà cette sémantique** — l'implémentation réelle est restée hex.
+
+**Constat de départ (vérifié, ne pas re-supposer).** Aujourd'hui l'EZ est **hex partout** :
+- `ez > 1` (board ×N) : `_compute_mover_ez_forbidden_mask` (movement_handlers.py:1186) fait une
+  **dilatation hex cube-distance de rayon `ez`** des empreintes ennemies puis dilate par l'empreinte
+  du mover (ligne 1277 « empreinte hex uniquement, jamais euclidien » — le docstring de la fonction
+  est TROMPEUR, il annonce de l'euclidien non implémenté).
+- `ez ≤ 1` (legacy) : cache `enemy_adjacent_hexes` (1-anneau hex, `build_enemy_adjacent_hexes`,
+  shared_utils.py:1307).
+
+**Point de bascule unique.** `get_distance_metric("engagement", game_config)` existe déjà
+(`DISTANCE_METRIC_RULES` inclut `"engagement"`, config à `"hex"`). Étape 7 = router tous les
+call-sites EZ via une fonction unifiée (type `in_engagement_zone(a, b, ez, metric)`) et passer
+`engagement: "euclidean"`.
+
+**Call-sites EZ à router (§4 de l'audit) :**
+- `spatial_relations.py` : `enemy_footprint_distances` (41-66), `unit_entries_within_engagement_zone` /
+  `unit_within_engagement_zone_footprints` (125-163), `move_anchor_violates_engagement_clearance` (165-210).
+- `movement_handlers.py` : `_enemy_items_within_move_engagement_horizon` / `_movement_engagement_violates`
+  (171-355), `_is_in_enemy_engagement_zone` (1123-1150), **`_compute_mover_ez_forbidden_mask` (1186)**,
+  et le legacy `enemy_adjacent_hexes`.
+- `shooting_handlers.py` : `_friendly_engagement_blocks_ranged_shot` (2051-2150),
+  `_is_adjacent_to_enemy_within_cc_range` (5084-5115).
+- `charge_handlers.py` : `_charge_unit_within_engagement_zone` (2993-3010).
+- `fight_handlers.py` : `_fight_footprint_in_engagement_with_any_enemy` (973-1000).
+- `shared_utils.py` : `build_enemy_adjacent_hexes` & co. (1307-1440) — remplacer/doubler par
+  l'équivalent euclidien pour le cache d'EZ.
+
+**Tranches proposées (checkpoint à chacune) :**
+
+> ⚠️ **ORDRE RÉVISÉ** — `spatial_relations` doit être migré en **7.1** (pas en 7.5) car c'est
+> la fondation commune consommée par les trois handlers (movement, charge, fight). Si elle est
+> migrée en dernier, chaque handler doit porter sa propre logique EZ → risque de divergence entre
+> couches et duplication. En la migrant en premier, les tranches 7.2–7.5 héritent de l'EZ via
+> `spatial_relations` sans re-implémenter. `build_enemy_adjacent_hexes` (shared_utils, cross-phase)
+> appartient à 7.0, pas à la tranche MOVE.
+
+- **7.0** — Point de bascule : fonction unifiée `in_engagement_zone` (+ champ « forbidden EZ »
+  euclidien vectorisé pour le move, réutilisant l'approche distance-field/DDA de l'Étape 4 pour la
+  perf). **`build_enemy_adjacent_hexes` & co. (shared_utils.py:1307-1440) câblés ici** — cache
+  cross-phase, pas spécifique au move. `engagement: "hex"` par défaut → comportement identique.
+  Checkpoint : `--step` + PvP inchangés.
+- **7.1 — spatial_relations** (fondation commune) : `enemy_footprint_distances` (41-66),
+  `unit_entries_within_engagement_zone` / `unit_within_engagement_zone_footprints` (125-163),
+  `move_anchor_violates_engagement_clearance` (165-210 — aligner l'implémentation sur son
+  docstring). Checkpoint : `--step` inchangé (config encore hex).
+- **7.2 — MOVE** : `_compute_mover_ez_forbidden_mask` + `_enemy_items_within_move_engagement_horizon`
+  / `_movement_engagement_violates` (171-355) + `_is_in_enemy_engagement_zone` (1123-1150).
+  Checkpoint : le « trou » d'EZ dans le disque de move devient un anneau rond (config encore hex
+  → pas de changement visible, mais structure prête) ; IA == PvP.
+- **7.3 — TIR** : `_friendly_engagement_blocks_ranged_shot` (2051-2150),
+  `_is_adjacent_to_enemy_within_cc_range` (5084-5115). ⚠️ Vérifier également le check
+  d'éligibilité **Close-Quarters Shooting (règle 10.06)** — conditionné à "Engaged" donc
+  dépendant de l'EZ — et s'assurer qu'il passe par une des fonctions `spatial_relations`
+  déjà câblées (sinon call-site manquant à ajouter ici).
+- **7.4 — CHARGE** : `_charge_unit_within_engagement_zone` (2993-3010) (+ cohérence avec Étape 5).
+- **7.5 — FIGHT** : `_fight_footprint_in_engagement_with_any_enemy` (973-1000).
+- **7.6** — Config `engagement: "euclidean"`, miroir frontend (anneau d'engagement preview :
+  `getFightEngagementRingBoardPixels` etc. déjà en unités-norme — ⚠️ la divergence visuelle
+  frontend/moteur pré-7.6 est **assumée** : l'anneau affiché est euclidien pendant que le moteur
+  est encore hex ; ne pas confondre avec un bug), **retrain IA**.
+
+**Vigilances Étape 7 :**
+- **États dérivés de l'EZ** : éligibilité fight, `flee`/fall-back, tir-si-engagé, Desperate Escape,
+  battle-shock — l'EZ euclidienne change la détection d'« engagé » → valider qu'aucune de ces règles
+  ne casse (ni resté-engagé fantôme, ni désengagement indu).
+- **Overlap reste hex** : ne toucher AUCUN call-site d'overlap (§5, §15).
+- **Perf** : le masque « forbidden EZ » sur tout le board doit être vectorisé/efficace (disque
+  euclidien autour des socles ennemis), pas un test O(cellules × ennemis) naïf.
+- **Sync front/back** : l'anneau d'EZ affiché doit matcher la géométrie moteur (même `× 1.5`).
 
 ### Risques & points ouverts
 - **Coins de murs** : principale source de bugs → tester en priorité.
@@ -461,3 +660,150 @@ Nouvelle fonction backend (à côté du BFS existant, pas en remplacement direct
   d'affichage. Prévoir un mode de vérification croisée.
 - **EZ hex + portée euclidienne** : cohabitation assumée pour l'instant ; à
   re-challenger si des incohérences de bord apparaissent (engagé vs à portée).
+
+---
+
+## 21. Mise à niveau — ratés des Étapes 1-4 (2026-07-03)
+
+> Les Étapes 1 à 4 sont considérées comme terminées. Ce paragraphe liste ce qui
+> **aurait dû être fait** dans ces étapes mais ne l'a pas été. À traiter avant
+> d'entamer l'Étape 5, sous peine de dettes cachées qui s'accumulent.
+
+### 21.1 — Étape 2 (TIR) : 3 fichiers IA non migrés
+
+Les décisions actées stipulent "Ranged → euclidien" pour la sélection de cible IA.
+Ces trois fichiers ont été listés dans l'inventaire §8 mais absents du corps de
+l'Étape 2 et donc **non migrés** :
+
+| Fichier | Ligne | Ce qui reste hex |
+|---------|-------|-----------------|
+| `engine/ai/weapon_selector.py` | 383-400 | `select_best_ranged_weapon` : distance unit→target |
+| `ai/target_selector.py` | 198-210 | distance ally→target branche ranged |
+| `ai/analyzer_phases/shoot_handler.py` | 406-610 | distances tir IA (validité/visée) |
+
+**Impact concret** : l'IA évalue la portée de ses armes en hex pendant que le moteur
+PvP l'évalue en euclidien. Une cible refusée côté moteur peut être jugée à portée
+côté IA (ou inversement), entraînant des décisions incohérentes et des logs d'analyse
+inexploitables.
+
+**Action requise avant Étape 5** : migrer ces trois fichiers en euclidien bord-à-bord
+via `ranged_in_range` (même sélecteur `ranged` que le moteur), vérifier cohérence
+avec shooting_handlers.py sur quelques scénarios `--step`.
+
+### 21.2 — Étape 4 (MOVE) tranche 4b : dette non planifiée
+
+La tranche 4b est listée comme "RESTE (⬜)" sans plan ni priorité. Or elle contient
+des cas non négligeables :
+
+| Item | Risque si ignoré |
+|------|-----------------|
+| **FLY encore hex** | Cas le plus simple à migrer (ligne droite, pas de pathfinding) mais laissé en hex. Les unités volantes ont un avantage hex artificiel sur les unités au sol en euclidien → asymétrie de règle visible en PvP. |
+| **Pool d'ancre multi-hex (`ez>1`, `base>1`)** | Le pool d'ancre utilisé par le **gym** reste hex alors que le pool par-figurine (PvP) est euclidien → gym et PvP calculent des zones de move différentes, rendant l'entraînement sur des mouvements proches de murs non transférable au PvP. |
+| **Socles non-ronds (oval/square)** | Moins urgent (peu d'unités concernées), mais le proxy cellules sous-estime la clearance aux angles. |
+| **Miroir replay (BoardReplay.tsx)** | Cosmétique uniquement — les replays d'anciennes parties montrent des zones hex. Faible priorité, mais déroutant pour le debug. |
+
+**Action requise avant Étape 5** : au minimum, migrer **FLY** (trivial — une ligne
+droite euclidienne, pas de champ géodésique) et documenter le pool d'ancre gym comme
+dette explicite avec un flag de config dédié (`move_anchor_gym: "hex"`), sinon
+l'écart gym/PvP grossit à chaque étape suivante.
+
+---
+
+## 20. Audit règles vs implémentation — points ouverts (2026-07-03)
+
+Résultat d'une relecture exhaustive des PDFs de règles (01 Core concepts, 03 Moving,
+11 Charge phase, 12 Fights phase) croisée avec ce document. Les points CORRECT
+confirment des décisions bien fondées ; les points LACUNE sont des dettes à documenter
+ou des bugs potentiels.
+
+### 20.1 — Facteur × 1.5 : convention interne, PAS remplaceable par `inches_to_subhex`
+
+La pipeline de conversion est à **deux étapes distinctes** :
+
+```
+pouces  ×  inches_to_subhex (ex. 10)  →  subhexes  ×  ENGAGEMENT_NORM_HEX_WIDTH (1.5)  →  unités _hex_center
+```
+
+- **`inches_to_subhex`** (board_config.json) = facteur d'échelle du plateau, variable
+  (ex. 10 pour le board 44×60×10). Convertit des pouces en subhexes. **Ne pas remplacer.**
+- **`ENGAGEMENT_NORM_HEX_WIDTH = 1.5`** = pas horizontal entre centres de colonnes dans le
+  repère `_hex_center` (`hex_width = 1.5 × hex_radius`), fixé par la géométrie flat-top.
+  Défini dans `hex_utils.py:1344`.
+
+**Pourquoi 1.5 et non √3 ?** La distance euclidienne entre deux centres de cases
+adjacentes est √3 ≈ 1.732 (valeur `hex_height`). Mais le pas horizontal de colonne à
+colonne est 1.5 (`hex_width`). Toutes les primitives du moteur
+(`_FOOTPRINT_SIZE_SCALE`, `round_base_radius_norm`, `engagement_minimum_clearance_norm`,
+`geodesic_field`) utilisent 1.5 → le système est **cohérent en interne**. C'est une
+convention délibérée alignée sur le rendu frontend, non une erreur.
+**À ne pas "corriger"** ; à documenter comme convention maison (pas √3).
+
+### 20.2 — CORRECT : mesure bord-à-bord (règle 01.04)
+
+Règle 01.04 : *"measure to or from the **closest part of that model's base**"*.
+L'abandon du centre-à-centre est **obligatoire**. `euclidean_edge_distance` est
+la bonne primitive.
+
+### 20.3 — CORRECT : EZ = 2" euclidien (règle 03.04)
+
+Règle 03.04 : *"within 2" horizontally and 5" vertically"*, mesuré depuis la partie la
+plus proche du socle (01.04). L'EZ est un disque euclidien de 2" bord-à-bord. La
+décision d'Étape 7 (EZ euclidienne partout simultanément) est **architecturalement
+obligatoire**, pas juste souhaitable.
+
+### 20.4 — CORRECT : budget de move = cumul de segments (règle 03.01)
+
+Règle 03.01 : *"Measure from the **same point on its base** at the start and end of
+that move, and **add that distance** to any other distance it has moved."* La distance
+est un cumul de longueurs de segments (path length), pas un déplacement net centre→centre.
+Le champ géodésique = longueur minimale du chemin = bonne primitive.
+
+### 20.5 — CORRECT : Minkowski clearance = rayon du socle (règle 03.01)
+
+Règle 03.01 : *"It can be moved through any space its base can fit through."*
+Gonfler les obstacles du rayon du socle (option A) est la traduction exacte de
+cette contrainte physique.
+
+### 20.6 — LACUNE : FLY devrait être PLUS SIMPLE à migrer que ground
+
+Tranche 4b laisse FLY en hex. Or une unité FLY ignore le terrain pour ses mouvements
+(règles 21) — pas de pathfinding, distance = ligne droite euclidienne bord-à-bord.
+C'est le cas le **plus simple** à migrer, pas le plus complexe. À migrer avant les
+socles non-ronds et le pool d'ancre multi-hex.
+
+### 20.7 — LACUNE : Pile-in (12.03) et consolidation (12.08) restent en hex
+
+Ces deux move types appellent *"Your unit moves as described in Moving (03)"* — mêmes
+règles de distance que le move normal → devraient être euclidiens. À 3" max, l'erreur
+hex vs euclidien est ~10-15% dans les diagonales. Déféré intentionnellement pour
+l'instant ; à acter comme dette technique explicite plutôt que de l'ignorer.
+
+### 20.8 — LACUNE : Deux checks distincts dans la charge (11.02 vs 11.04)
+
+- **Check d'éligibilité à la déclaration (11.02)** : *"It is not within 12" of one or
+  more enemy units"* → mesure euclidienne bord-à-bord (01.04), ligne droite.
+- **Budget du charge move (11.04)** : distance max = jet 2D6, mesurée selon 03.01
+  (cumul de segments) → géodésique.
+
+Ces deux checks ont des **métriques différentes**. Cas concret où elles divergent :
+unité à 11" en euclidien mais à 13" en géodésique (couloir de murs) → éligible à
+déclarer une charge, mais charge ratée à l'exécution. C'est règle-correct (charge
+ratée légitime), mais le code doit distinguer les deux checks, pas les fusionner dans
+`charge_build_valid_targets`. À vérifier à l'Étape 5.
+
+### 20.9 — LACUNE : Cohérence (03.03) non mentionnée dans le plan
+
+Règle 03.03 : *"Within 2" horizontally [...] of at least one other model in that unit"*
+— mesure bord-à-bord euclidienne (01.04). La cohérence est actuellement en hex.
+L'erreur à 2" est ~10% dans les diagonales. Non bloquant, mais à acter comme dette.
+
+### 20.10 — LACUNE : Fall-back move (09.07) absent du plan
+
+Move type soumis aux mêmes règles de distance (03.01). Non mentionné dans le plan de
+migration. Même logique que le normal move — à ajouter à l'Étape 5 ou 6.
+
+### 20.11 — LACUNE : Docstring trompeur de `move_anchor_violates_engagement_clearance`
+
+`spatial_relations.py:165` — le docstring annonce de l'euclidien ; l'implémentation
+réelle est hex (§4 de l'audit, ligne 537). Risque de maintenance : un développeur peut
+croire la fonction déjà migrée. Corriger le docstring à l'Étape 7.0 (avant le code).
