@@ -37,7 +37,8 @@
   "distance_metric": {
     "distance_metric_detail": "Metrique de portee par regle (hex|euclidean). Point de bascule unique — voir Documentation/Distance management.md. Defaut tout hex = comportement historique.",
     "ranged": "euclidean",
-    "move": "hex",
+    "move": "euclidean",
+    "move_gym": "hex",
     "charge": "hex",
     "engagement": "hex",
     "overlap": "hex"

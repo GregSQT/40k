@@ -8,6 +8,7 @@ Coordinate system: offset odd-q
 All functions are O(1) per call unless documented otherwise.
 """
 
+import heapq
 import math
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple, cast
 
@@ -1542,6 +1543,286 @@ def _point_segment_dist_sq(
         t = 1.0
     qx, qy = ax + t * dx, ay + t * dy
     return (px - qx) ** 2 + (py - qy) ** 2
+
+
+# ---------------------------------------------------------------------------
+# Champ de distance géodésique any-angle (lazy Theta* en flood) — Étape 4.0.
+#
+# Porté du spike `spikes/geodesic_field_spike.py` sur la VRAIE géométrie moteur :
+#   - centres via `_hex_center` (pas hex_width/hex_height locaux) ;
+#   - voisins via `get_neighbors` (odd-q autoritaire, = listes inline du BFS move).
+# Résultat en unités `_hex_center` (1 subhex = ENGAGEMENT_NORM_HEX_WIDTH = 1,5).
+#
+# Deux généralisations vs le spike :
+#   - `clearance` : le test de visibilité devient un test de CAPSULE (segment épaissi
+#     du rayon de socle). À `clearance=0` → LoS-ray (tangence à un coin convexe permise,
+#     comme le spike, pour serrer un angle isolé) ; à `clearance>0` → un disque de rayon
+#     `clearance` ne peut passer à moins de `clearance` d'un mur (règle 03 : mesurer le
+#     point le plus éloigné du socle revient à mesurer le CENTRE avec obstacles gonflés,
+#     puisqu'en translation tout point du socle parcourt la distance du centre).
+#   - `obstacles` : ensemble générique de cellules bloquantes (murs, et selon les toggles
+#     de traversée : ennemis / amis / bande d'EZ) — pas seulement les murs.
+#
+# LIMITE ASSUMÉE (héritée du spike, à traiter au branchement 4.1/4.2) : la règle
+# « deux murs jointifs bloquent le passage par leur coin partagé » (grazing) n'est
+# pas gérée ici en `clearance=0`. À `clearance>0` elle l'est de fait (le socle ne
+# tient pas dans l'interstice).
+# ---------------------------------------------------------------------------
+
+_SEG_TOL: float = 1e-9
+_HEX_CIRCUMRADIUS: float = 1.0  # centre→sommet dans le repère `_hex_center`
+# Décalages des 6 sommets flat-top (précalculés une fois : évite 6 cos/sin par test d'obstacle).
+_HEX_CORNER_OFFSETS: Tuple[Tuple[float, float], ...] = tuple(
+    (_HEX_CIRCUMRADIUS * math.cos(math.radians(60 * k)),
+     _HEX_CIRCUMRADIUS * math.sin(math.radians(60 * k)))
+    for k in range(6)
+)
+
+
+def _hex_corners_at(cx: float, cy: float) -> List[Tuple[float, float]]:
+    """6 sommets d'une cellule flat-top centrée en (cx, cy) (circumradius 1)."""
+    return [(cx + ox, cy + oy) for ox, oy in _HEX_CORNER_OFFSETS]
+
+
+def _obstacle_bucket_size(clearance: float) -> float:
+    """Taille de bucket de l'index spatial d'obstacles (unités ``_hex_center``)."""
+    return max(2.0, _HEX_CIRCUMRADIUS + (clearance if clearance > 0.0 else 0.0))
+
+
+def _build_obstacle_index(
+    obstacles: Set[Tuple[int, int]], bucket_size: float
+) -> Dict[Tuple[int, int], List[Tuple[float, float]]]:
+    """Index spatial : bucket (grille pixel) → centres des obstacles. Chaque obstacle est inscrit
+    dans SON bucket ET ses 8 voisins (la marge circumradius+clearance ≤ bucket_size est ainsi
+    absorbée à la construction). Un segment n'a donc qu'à visiter les buckets qu'il TRAVERSE
+    (DDA), sans balayage latéral par segment. Centres précalculés une fois."""
+    idx: Dict[Tuple[int, int], List[Tuple[float, float]]] = {}
+    for (wc, wr) in obstacles:
+        ocx, ocy = _hex_center(wc, wr)
+        bgx, bgy = int(ocx // bucket_size), int(ocy // bucket_size)
+        for gx in range(bgx - 1, bgx + 2):
+            for gy in range(bgy - 1, bgy + 2):
+                idx.setdefault((gx, gy), []).append((ocx, ocy))
+    return idx
+
+
+def _segment_clear_indexed(
+    ax: float, ay: float, bx: float, by: float,
+    bucket_size: float, idx: Dict[Tuple[int, int], List[Tuple[float, float]]], clearance: float,
+) -> bool:
+    """``segment_clear`` sur index pré-bâti : DDA (Amanatides-Woo) le long du segment — ne visite
+    que les buckets réellement traversés (chacun une fois). La marge est déjà dans l'index."""
+    if not idx:
+        return True
+    gx, gy = int(ax // bucket_size), int(ay // bucket_size)
+    gxe, gye = int(bx // bucket_size), int(by // bucket_size)
+    # Rejet rapide : l'hexagone tient dans le disque circumradius autour de son centre ; si ce
+    # centre est plus loin que circumradius+clearance du segment, aucun contact possible → on
+    # évite `_hex_corners_at` (alloc) + le test capsule (12 arêtes) pour la plupart des obstacles.
+    _reach = _HEX_CIRCUMRADIUS + (clearance if clearance > 0.0 else 0.0) + _SEG_TOL
+    _reach_sq = _reach * _reach
+
+    def _hit(bgx: int, bgy: int) -> bool:
+        bucket = idx.get((bgx, bgy))
+        if bucket:
+            for (ocx, ocy) in bucket:
+                if _point_segment_dist_sq(ocx, ocy, ax, ay, bx, by) > _reach_sq:
+                    continue
+                if _segment_hits_hex(ax, ay, bx, by, _hex_corners_at(ocx, ocy), ocx, ocy, clearance):
+                    return True
+        return False
+
+    if _hit(gx, gy):
+        return False
+    if gx == gxe and gy == gye:
+        return True
+    dx, dy = bx - ax, by - ay
+    step_x = 1 if dx > 0 else -1
+    step_y = 1 if dy > 0 else -1
+    t_delta_x = bucket_size / abs(dx) if dx != 0 else math.inf
+    t_delta_y = bucket_size / abs(dy) if dy != 0 else math.inf
+    if dx > 0:
+        t_max_x = ((gx + 1) * bucket_size - ax) / dx
+    elif dx < 0:
+        t_max_x = (gx * bucket_size - ax) / dx
+    else:
+        t_max_x = math.inf
+    if dy > 0:
+        t_max_y = ((gy + 1) * bucket_size - ay) / dy
+    elif dy < 0:
+        t_max_y = (gy * bucket_size - ay) / dy
+    else:
+        t_max_y = math.inf
+    while True:
+        if t_max_x < t_max_y:
+            if t_max_x > 1.0:
+                break
+            gx += step_x
+            t_max_x += t_delta_x
+        else:
+            if t_max_y > 1.0:
+                break
+            gy += step_y
+            t_max_y += t_delta_y
+        if _hit(gx, gy):
+            return False
+        if gx == gxe and gy == gye:
+            break
+    return True
+
+
+def _segment_crosses_hex_interior(
+    ax: float, ay: float, bx: float, by: float,
+    corners: Sequence[Tuple[float, float]], cx: float, cy: float,
+) -> bool:
+    """True si [A,B] traverse l'INTÉRIEUR de la cellule (longueur d'intersection > 0).
+
+    Cyrus-Beck sur l'hexagone convexe. La simple tangence à un sommet/arête ne bloque
+    PAS (on peut serrer l'angle convexe d'un mur isolé = plus court chemin). Identique
+    au `_segment_hits_hex` du spike.
+    """
+    dx, dy = bx - ax, by - ay
+    t_enter, t_exit = 0.0, 1.0
+    for i in range(6):
+        x1, y1 = corners[i]
+        x2, y2 = corners[(i + 1) % 6]
+        ex, ey = x2 - x1, y2 - y1
+        nx, ny = ey, -ex  # normale de l'arête
+        if (nx * (cx - x1) + ny * (cy - y1)) > 0:  # oriente vers l'extérieur
+            nx, ny = -nx, -ny
+        denom = nx * dx + ny * dy
+        num = nx * (ax - x1) + ny * (ay - y1)
+        if abs(denom) < 1e-12:
+            if num > 1e-12:
+                return False  # parallèle et hors du demi-plan
+            continue
+        t = -num / denom
+        if denom < 0:
+            t_enter = max(t_enter, t)
+        else:
+            t_exit = min(t_exit, t)
+        if t_enter > t_exit:
+            return False
+    return (t_exit - t_enter) > _SEG_TOL
+
+
+def _seg_seg_dist_sq(
+    ax: float, ay: float, bx: float, by: float,
+    cx: float, cy: float, dx: float, dy: float,
+) -> float:
+    """Distance au carré minimale entre les segments [A,B] et [C,D] (0 s'ils se coupent)."""
+    r0x, r0y = bx - ax, by - ay
+    s0x, s0y = dx - cx, dy - cy
+    denom = r0x * s0y - r0y * s0x
+    if abs(denom) > 1e-12:  # non parallèles : test d'intersection propre
+        t = ((cx - ax) * s0y - (cy - ay) * s0x) / denom
+        u = ((cx - ax) * r0y - (cy - ay) * r0x) / denom
+        if -1e-12 <= t <= 1.0 + 1e-12 and -1e-12 <= u <= 1.0 + 1e-12:
+            return 0.0
+    return min(
+        _point_segment_dist_sq(cx, cy, ax, ay, bx, by),
+        _point_segment_dist_sq(dx, dy, ax, ay, bx, by),
+        _point_segment_dist_sq(ax, ay, cx, cy, dx, dy),
+        _point_segment_dist_sq(bx, by, cx, cy, dx, dy),
+    )
+
+
+def _segment_hits_hex(
+    ax: float, ay: float, bx: float, by: float,
+    corners: Sequence[Tuple[float, float]], cx: float, cy: float, clearance: float,
+) -> bool:
+    """True si le segment [A,B] épaissi de `clearance` heurte la cellule.
+
+    `clearance <= 0` : intérieur strict (LoS-ray). `clearance > 0` : capsule — bloqué
+    si la distance segment↔hexagone est < clearance.
+    """
+    if clearance <= _SEG_TOL:
+        return _segment_crosses_hex_interior(ax, ay, bx, by, corners, cx, cy)
+    if _segment_crosses_hex_interior(ax, ay, bx, by, corners, cx, cy):
+        return True
+    thr_sq = (clearance - _SEG_TOL) ** 2
+    for i in range(6):
+        x1, y1 = corners[i]
+        x2, y2 = corners[(i + 1) % 6]
+        if _seg_seg_dist_sq(ax, ay, bx, by, x1, y1, x2, y2) < thr_sq:
+            return True
+    return False
+
+
+def segment_clear(
+    ax: float, ay: float, bx: float, by: float,
+    obstacles: Set[Tuple[int, int]], clearance: float = 0.0,
+) -> bool:
+    """True si aucune cellule bloquante ne coupe le segment [A,B] (épaissi de `clearance`).
+
+    `obstacles` : cellules (col,row) bloquantes (murs + ennemis/amis/EZ selon toggles).
+    Bâtit un index spatial à la volée ; pour des appels répétés (le champ), préférer
+    `_build_obstacle_index` + `_segment_clear_indexed` (index bâti une seule fois).
+    """
+    if not obstacles:
+        return True
+    bs = _obstacle_bucket_size(clearance)
+    return _segment_clear_indexed(ax, ay, bx, by, bs, _build_obstacle_index(obstacles, bs), clearance)
+
+
+def geodesic_field(
+    start: Tuple[int, int],
+    board_cols: int,
+    board_rows: int,
+    obstacles: Set[Tuple[int, int]],
+    budget: float,
+    clearance: float = 0.0,
+) -> Dict[Tuple[int, int], float]:
+    """Distance géodésique any-angle de `start` à chaque cellule atteignable dans `budget`.
+
+    Lazy Theta* en flood (Dijkstra + rattachement d'un nœud à l'ANCÊTRE de son voisin si
+    la ligne de vue est dégagée → coût = vraie distance euclidienne, chemins à angle libre).
+
+    - `board_cols`/`board_rows` : bornes du plateau (une cellule est libre si dans les bornes
+      et pas dans `obstacles` — pas de set plein board à matérialiser).
+    - `obstacles` : cellules bloquantes (voir `segment_clear`).
+    - `budget` : distance max en unités `_hex_center` (= MOVE_subhex × ENGAGEMENT_NORM_HEX_WIDTH).
+    - `clearance` : rayon de socle (règle 03). 0 = robot-point.
+
+    Retourne {cellule: distance}. Une seule passe (champ complet), pas point-à-point.
+    Sur-estime légèrement (lazy Theta* quasi-optimal) → ne triche jamais vs la règle 03.
+    """
+    if start in obstacles:
+        raise ValueError(f"geodesic_field: start {start} est un obstacle")
+    bs = _obstacle_bucket_size(clearance)
+    idx = _build_obstacle_index(obstacles, bs)
+    g: Dict[Tuple[int, int], float] = {start: 0.0}
+    parent: Dict[Tuple[int, int], Tuple[int, int]] = {start: start}
+    pq: List[Tuple[float, Tuple[int, int]]] = [(0.0, start)]
+    closed: Set[Tuple[int, int]] = set()
+
+    while pq:
+        d, cur = heapq.heappop(pq)
+        if cur in closed:
+            continue
+        closed.add(cur)
+        cx, cy = _hex_center(*cur)
+        par = parent[cur]
+        px, py = _hex_center(*par)
+        g_par, g_cur = g[par], g[cur]
+        for nb in get_neighbors(*cur):
+            nc, nr = nb
+            if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                continue
+            if nb in obstacles or nb in closed:
+                continue
+            nx, ny = _hex_center(nc, nr)
+            # Rattachement à l'ancêtre si LoS dégagé (cœur de Theta*).
+            if _segment_clear_indexed(px, py, nx, ny, bs, idx, clearance):
+                anchor, axr, ayr, base = par, px, py, g_par
+            else:
+                anchor, axr, ayr, base = cur, cx, cy, g_cur
+            cand = base + math.hypot(nx - axr, ny - ayr)
+            if cand <= budget + _SEG_TOL and cand < g.get(nb, math.inf):
+                g[nb] = cand
+                parent[nb] = anchor
+                heapq.heappush(pq, (cand, nb))
+    return g
 
 
 def disc_overlaps_polygon(

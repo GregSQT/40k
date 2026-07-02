@@ -39,9 +39,12 @@ from .shared_utils import (
 )
 from engine.hex_utils import (
     _hex_center,
+    ENGAGEMENT_NORM_HEX_WIDTH,
     engagement_minimum_clearance_norm,
     euclidean_edge_clearance_round_round,
+    geodesic_field,
     min_distance_between_sets,
+    round_base_radius_norm,
 )
 from engine.hex_union_boundary_polygon import (
     compute_move_preview_mask_loops_world,
@@ -333,6 +336,11 @@ def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any])
         game_state["valid_charge_destinations_pool"] = []
     if "_charge_dest_bfs_cache" in game_state:
         game_state["_charge_dest_bfs_cache"] = {}
+    # Champ géodésique de move par-figurine (Étape 4.1) : vidé au phase start et après chaque
+    # commit réel. Les poses provisoires du move-preview N'appellent PAS cette fonction → le champ
+    # (indépendant des sœurs quand thru_friendly) survit aux poses et n'est calculé qu'une fois.
+    if "_move_model_field_cache" in game_state:
+        game_state["_move_model_field_cache"] = {}
     if "_charge_closest_hex_cache" in game_state:
         game_state["_charge_closest_hex_cache"] = {}
     if "_has_valid_charge_cache" in game_state:
@@ -1599,6 +1607,31 @@ def _get_move_traversal_rules(game_state: Dict[str, Any]) -> Tuple[bool, bool, b
     )
 
 
+def _move_distance_metric(game_state: Dict[str, Any]) -> str:
+    """Métrique de distance du MOVE (``hex``|``euclidean``) — sélecteur unique.
+
+    Contexte : PvP/replay lisent ``distance_metric["move"]`` ; le training gym lit
+    ``distance_metric["move_gym"]`` (le paramètre unique qui bascule le training, défaut
+    ``hex`` pour la perf). Aucun défaut caché : section/clé/valeur invalide → erreur explicite.
+    """
+    from config_loader import get_config_loader
+    from engine.combat_utils import VALID_DISTANCE_METRICS
+
+    game_config = get_config_loader().get_game_config()
+    if "distance_metric" not in game_config:
+        raise KeyError("Missing 'distance_metric' section in game_config.json")
+    metrics = game_config["distance_metric"]
+    key = "move_gym" if game_state.get("gym_training_mode") else "move"
+    if key not in metrics:
+        raise KeyError(f"Missing distance_metric['{key}'] in game_config.json")
+    metric = metrics[key]
+    if metric not in VALID_DISTANCE_METRICS:
+        raise ValueError(
+            f"Invalid distance_metric['{key}'] = {metric!r}, expected one of {VALID_DISTANCE_METRICS}"
+        )
+    return metric
+
+
 @profile_move_pool_build
 def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str, read_only: bool = False) -> List[Tuple[int, int]]:
     """
@@ -1948,6 +1981,15 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     base_size = unit["BASE_SIZE"]
     is_single_hex = (ez <= 1 or base_size == 1)
 
+    # Étape 4.1 : champ géodésique euclidien (any-angle) LIMITÉ au socle rond mono-hex
+    # (base_size == 1), ground. Multi-hex / non-rond / fly restent sur le BFS hex → Étape 4b.
+    # PvP/replay lisent ``move`` (euclidean) ; gym lit ``move_gym`` (défaut hex).
+    _use_euclidean_move = (
+        _move_distance_metric(game_state) == "euclidean"
+        and base_size == 1
+        and unit["BASE_SHAPE"] == "round"
+    )
+
     # Grille dense O(1) : même sémantique que ``dict`` (case visitée ou non pour ce BFS).
     _n_cells = board_cols * board_rows
     _vis = bytearray(_n_cells)
@@ -1974,7 +2016,29 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     _friendly_occ = (_occupied - _enemy_occ) if _check_friendly else frozenset()
 
     _m_bfs_start = _perf_clock.perf_counter() if _pt else None
-    if is_single_hex:
+    if is_single_hex and _use_euclidean_move:
+        # Champ géodésique any-angle. Obstacles = murs + (ennemis/amis/bande-EZ selon toggles) ;
+        # option A (Minkowski) : clearance = rayon du socle → le trajet du centre borne la
+        # distance de TOUT point du socle (règle 03). Overlap/EZ de destination restent hex.
+        _obstacles: Set[Tuple[int, int]] = set(_walls)
+        if _check_enemy:
+            _obstacles |= _enemy_occ
+        if _check_friendly:
+            _obstacles |= _friendly_occ
+        if _check_ez:
+            _obstacles |= _enemy_adj
+        _obstacles.discard(start_pos)  # on est déjà sur la case de départ
+        _budget_norm = move_range * ENGAGEMENT_NORM_HEX_WIDTH
+        _clearance = round_base_radius_norm(base_size)
+        _field = geodesic_field(start_pos, _bcols, _brows, _obstacles, _budget_norm, _clearance)
+        visited_n = len(_field)
+        for _cell in _field:
+            # Destination jamais sur case occupée (03.01) ni dans l'EZ ennemie (unengaged 09.05),
+            # quels que soient les toggles de traversée — identique au BFS hex.
+            if _cell == start_pos or _cell in _occupied or _cell in _enemy_adj:
+                continue
+            valid_destinations.append(_cell)
+    elif is_single_hex:
         while queue:
             (cc, cr), cd = queue.popleft()
             if cd >= move_range:
@@ -2258,35 +2322,93 @@ def movement_build_model_destinations_pool(
         else frozenset()
     )
 
-    visited: Set[Tuple[int, int]] = {start_pos}
-    reachable: List[Tuple[int, int]] = []
-    queue: deque = deque([(start_col, start_row, 0)])
-    while queue:
-        c, r, d = queue.popleft()
-        if d >= budget:
-            continue
-        for nc, nr in get_hex_neighbors(c, r):
-            if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+    # Étape 4.1 — miroir par-figurine (PvP interactif) : champ géodésique euclidien pour socle
+    # ROND (toute taille), ground. La reachability est calculée sur le CENTRE avec clearance =
+    # rayon socle (option A) ; l'empreinte multi-hex est expansée séparément plus bas, comme le
+    # BFS hex. Mêmes obstacles de traversée. Non-rond / fly restent sur le BFS hex (Étape 4b).
+    _mm_base = require_key(model, "BASE_SIZE")
+    _mm_use_euclidean = (
+        _move_distance_metric(game_state) == "euclidean"
+        and require_key(model, "BASE_SHAPE") == "round"
+        and not has_fly
+    )
+    # Instrumentation perf (coût nul si W40K_PERF_TIMING désactivé) — cf. MODEL_POOL_BUILD au return.
+    from engine.perf_timing import perf_timing_enabled
+    import time as _mm_clock
+    _mm_pt = perf_timing_enabled(game_state)
+    _mm_t0 = _mm_clock.perf_counter() if _mm_pt else None
+    _mm_field_s = 0.0
+    _mm_cache_hit = False
+    _mm_cells_n = 0
+    _mm_obstacles_n = 0
+    if _mm_use_euclidean:
+        # Cache du CHAMP (sans les filtres de destination) : valide tant que les obstacles ne
+        # changent pas. Les sœurs ne sont des obstacles que si NON thru_friendly → cache seulement
+        # sûr quand thru_friendly (sinon le champ dépend du plan provisoire, recalcul obligatoire).
+        _mm_can_cache = thru_friendly
+        _mm_field = None
+        if _mm_can_cache:
+            _mm_cache = game_state.setdefault("_move_model_field_cache", {})
+            _mm_key = (str(model_id), start_col, start_row, int(budget))
+            _mm_field = _mm_cache.get(_mm_key)
+        _mm_cache_hit = _mm_field is not None
+        if _mm_field is None:
+            _mm_obstacles: Set[Tuple[int, int]] = set(wall_hexes)
+            if not (desperate_escape or thru_enemy):
+                _mm_obstacles |= enemy_occupied
+            if not thru_friendly:
+                _mm_obstacles |= _friendly_traverse
+            if not (desperate_escape or thru_ez):
+                _mm_obstacles |= ez_anchor_forbidden
+            _mm_obstacles.discard(start_pos)  # on est déjà sur la case de départ
+            _mm_obstacles_n = len(_mm_obstacles)
+            _mm_fb = _mm_clock.perf_counter() if _mm_pt else None
+            _mm_field = geodesic_field(
+                start_pos, board_cols, board_rows, _mm_obstacles,
+                budget * ENGAGEMENT_NORM_HEX_WIDTH, round_base_radius_norm(_mm_base),
+            )
+            if _mm_pt and _mm_fb is not None:
+                _mm_field_s = _mm_clock.perf_counter() - _mm_fb
+            if _mm_can_cache:
+                _mm_cache[_mm_key] = _mm_field
+        _mm_cells_n = len(_mm_field)
+        # Filtres de destination appliqués À CHAQUE appel (dépendent du plan provisoire via
+        # dest_blocked=same_squad) : jamais sur case occupée/mur ni dans l'EZ — identique au BFS hex.
+        reachable: List[Tuple[int, int]] = [
+            cell
+            for cell in _mm_field
+            if cell != start_pos and cell not in dest_blocked and cell not in ez_anchor_forbidden
+        ]
+    else:
+        visited: Set[Tuple[int, int]] = {start_pos}
+        reachable = []
+        queue: deque = deque([(start_col, start_row, 0)])
+        while queue:
+            c, r, d = queue.popleft()
+            if d >= budget:
                 continue
-            cell = (nc, nr)
-            if cell in visited:
-                continue
-            if not has_fly:
-                if cell in wall_hexes:
+            for nc, nr in get_hex_neighbors(c, r):
+                if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
                     continue
-                if not (desperate_escape or thru_enemy) and cell in enemy_occupied:
+                cell = (nc, nr)
+                if cell in visited:
                     continue
-                if not thru_friendly and cell in _friendly_traverse:
+                if not has_fly:
+                    if cell in wall_hexes:
+                        continue
+                    if not (desperate_escape or thru_enemy) and cell in enemy_occupied:
+                        continue
+                    if not thru_friendly and cell in _friendly_traverse:
+                        continue
+                    if not (desperate_escape or thru_ez) and cell in ez_anchor_forbidden:
+                        continue
+                visited.add(cell)
+                queue.append((nc, nr, d + 1))
+                # Validite destination : murs + toutes figs occupant la cellule + engagement ennemi
+                # (ez_anchor_forbidden = EZ au niveau ancre).
+                if cell in dest_blocked or cell in ez_anchor_forbidden:
                     continue
-                if not (desperate_escape or thru_ez) and cell in ez_anchor_forbidden:
-                    continue
-            visited.add(cell)
-            queue.append((nc, nr, d + 1))
-            # Validite destination : murs + toutes figs occupant la cellule + engagement ennemi
-            # (ez_anchor_forbidden = EZ au niveau ancre).
-            if cell in dest_blocked or cell in ez_anchor_forbidden:
-                continue
-            reachable.append(cell)
+                reachable.append(cell)
 
     # Empêche le DÉPÔT sur un chevauchement de socle avec une coéquipière (au lieu de le
     # détecter après coup via le voile rouge) : on retire du pool les destinations où le socle
@@ -2374,6 +2496,15 @@ def movement_build_model_destinations_pool(
     _sync_move_preview_mask_loops(game_state, footprint_zone)
     mask_loops = game_state.get("move_preview_footprint_mask_loops", [])  # get allowed
     game_state["move_preview_footprint_mask_loops"] = _prev_loops  # get allowed
+
+    if _mm_pt and _mm_t0 is not None:
+        from engine.perf_timing import append_perf_timing_line
+        append_perf_timing_line(
+            f"MODEL_POOL_BUILD model={model_id} metric={'euclidean' if _mm_use_euclidean else 'hex'} "
+            f"cache_hit={_mm_cache_hit} field_build_s={_mm_field_s:.6f} total_s={_mm_clock.perf_counter() - _mm_t0:.6f} "
+            f"field_cells={_mm_cells_n} reachable={len(reachable)} obstacles={_mm_obstacles_n} "
+            f"base={_mm_base} budget={budget} fly={has_fly}"
+        )
 
     return {"destinations": reachable, "footprint_mask_loops": mask_loops}
 

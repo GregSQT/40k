@@ -146,7 +146,12 @@ _PERF_PROFILE_WRITE_ERROR_LOGGED = False
 _PERF_FILE_HANDLE: Optional[Any] = None
 _PERF_FILE_PATH: Optional[str] = None
 _PERF_WRITE_COUNT: int = 0
-_PERF_FLUSH_INTERVAL: int = 500
+# Flush tous les N writes. Défaut 500 (perf training). Surchargeable via env pour le debug
+# interactif (ex. ``W40K_PERF_TIMING_FLUSH_EVERY=1`` → chaque ligne visible immédiatement).
+try:
+    _PERF_FLUSH_INTERVAL: int = max(1, int(os.environ.get("W40K_PERF_TIMING_FLUSH_EVERY", "500")))
+except ValueError:
+    _PERF_FLUSH_INTERVAL = 500
 
 F = TypeVar("F", bound=Callable[..., Any])
 

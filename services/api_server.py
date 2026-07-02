@@ -332,6 +332,10 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
     "_cache_instance_id",
     "_charge_dest_bfs_cache",
     "_charge_fp_offset_pair_cache",
+    # Cache du champ géodésique de move par-figurine (Étape 4.1) : dicts volumineux à clés tuples,
+    # jamais consommés par l'UI (le front reçoit ``destinations``). Exclusion obligatoire, sinon
+    # sérialisé dans chaque réponse → payload énorme + serialize lent.
+    "_move_model_field_cache",
     # Sous-ensemble dérivé des ancres pour contour UI ; le front n’utilise pas ce champ (preview = pool + footprint_zone).
     "move_preview_border",
     # Moteur / RL / debug — pas consommés par l’UI web (réduit serialize + jsonify sur chaque POST /action).
@@ -2181,6 +2185,9 @@ def execute_action():
                 "success": False,
                 "error": f"move_squad_unplaced_destinations: unknown squad {squad_id}",
             }), 400
+        from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+        _sq_pt = perf_timing_enabled(engine.game_state)
+        _sq_t0 = time.perf_counter() if _sq_pt else None
         _pools: Dict[str, list] = {}
         for _mid in _squad_mids:
             _mid_str = str(_mid)
@@ -2192,6 +2199,11 @@ def execute_action():
                 engine.game_state, _mid_str, provisional_plan=_provisional_plan_sq
             )
             _pools[_mid_str] = [[int(c), int(r)] for c, r in _pool["destinations"]]
+        if _sq_pt and _sq_t0 is not None:
+            append_perf_timing_line(
+                f"SQUAD_UNPLACED_POOLS unit={squad_id} models_computed={len(_pools)} "
+                f"placed={len(_placed_ids)} total_s={time.perf_counter() - _sq_t0:.6f}"
+            )
         return api_json_response({
             "success": True,
             "result": {
