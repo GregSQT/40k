@@ -4400,6 +4400,28 @@ def squad_model_valid_targets(
     return valid
 
 
+def _weapon_range_subhex(weapon: Any) -> int:
+    """Portee (subhex) d une arme, 0 si absente/invalide (arme non tirable)."""
+    if not isinstance(weapon, dict) or "RNG" not in weapon:
+        return 0
+    try:
+        return int(weapon["RNG"])
+    except (TypeError, ValueError):
+        return 0
+
+
+def _weapon_group_key(weapons: List[Any], widx: int) -> str:
+    """Cle de l arme PHYSIQUE d un profil (regroupe les profils exclusifs).
+
+    Deux profils d une meme arme (ex. Cyclone Frag/Krak) partagent leur ``COMBI_WEAPON`` :
+    en tirer un consomme l arme entiere. Sans ``COMBI_WEAPON``, chaque index est une arme
+    distincte (split fire possible).
+    """
+    wp = weapons[widx]
+    key = wp.get("COMBI_WEAPON") if isinstance(wp, dict) else None
+    return str(key) if key else f"__solo_{widx}"
+
+
 def squad_shoot_los_overview(
     game_state: Dict[str, Any], attacker_squad_id: str
 ) -> Dict[str, Any]:
@@ -4435,20 +4457,41 @@ def squad_shoot_los_overview(
 
     count: Dict[str, int] = {}
     free_count = 0
+    _dbg = []  # [DEBUG LOS-OVERVIEW] a retirer
     for mid in alive:
         m = models_cache[mid]
         weapons = m.get("RNG_WEAPONS", [])  # get allowed
         declared_w = declared_by_model.get(mid, set())  # get allowed
-        free_weapons = [w for w in range(len(weapons)) if w not in declared_w]
+        # Une arme est consommee des qu UN de ses profils exclusifs (COMBI_WEAPON) est
+        # declare : on groupe donc par arme physique, pas par profil.
+        consumed_groups = {_weapon_group_key(weapons, w) for w in declared_w}
+        free_weapons = [
+            w for w in range(len(weapons))
+            if _weapon_group_key(weapons, w) not in consumed_groups
+        ]
+        # [DEBUG LOS-OVERVIEW] a retirer : armes totales / declarees / libres par fig
+        _dbg.append(
+            f"{mid}: total={[str(w.get('display_name', '?')) for w in weapons]} "
+            f"combi={[(w.get('COMBI_WEAPON') if isinstance(w, dict) else None) for w in weapons]} "
+            f"declared={sorted(declared_w)} free={free_weapons}"
+        )
         if not free_weapons:
             continue  # fig entierement affectee → hors blink et hors decompte
         free_count += 1
+        # Perf : la LoS (raycasting) ne depend PAS de l arme, seule la portee varie et
+        # reach est monotone en portee. On teste donc une SEULE fois par ennemi, avec
+        # l arme libre de plus longue portee (la plus permissive) — 1 calcul LoS/paire au
+        # lieu d un par arme. (Approx : cas engagement + pistol plus courte non couvert.)
+        widx_max = max(free_weapons, key=lambda w: _weapon_range_subhex(weapons[w]))
         for sid in enemy_sids:
-            if any(
-                _model_can_shoot_target_with_weapon(game_state, m, sid, w)
-                for w in free_weapons
-            ):
+            if _model_can_shoot_target_with_weapon(game_state, m, sid, widx_max):
                 count[sid] = count.get(sid, 0) + 1  # get allowed
+    # [DEBUG LOS-OVERVIEW] a retirer
+    print(
+        f"[LOS-OVERVIEW] squad={attacker_squad_id} free={free_count}/{len(alive)} "
+        f"count={count}\n  " + "\n  ".join(_dbg),
+        flush=True,
+    )
     return {
         "valid_targets": list(count.keys()),
         "count_by_unit_id": count,

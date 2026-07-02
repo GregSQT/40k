@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from "react-dom";
 import { TUTORIAL_STEP_TITLES_INTERCESSOR_HALO, useTutorial } from "../contexts/TutorialContext";
 import { useGameConfig } from "../hooks/useGameConfig";
+import { useSingleDoubleClick } from "../hooks/useSingleDoubleClick";
 import type {
   FightSubPhase,
   GameState,
@@ -1656,7 +1657,11 @@ export default function Board({
   const onAllocateModelRef = useRef(onAllocateModel);
   onAllocateModelRef.current = onAllocateModel;
   // Persiste entre les re-renders (contrairement à une variable locale dans useEffect).
-  const lastEnemyClickRef = useRef<{ targetId: number | string; time: number } | null>(null);
+  // Clic-cible tir : simple/double mutualisés (le simple est différé pour ne pas partir
+  // avant un double → évite le doublon d'assign + los_overview coûteux).
+  const triggerEnemyShootClick = useSingleDoubleClick(250);
+  const triggerEnemyShootClickRef = useRef(triggerEnemyShootClick);
+  triggerEnemyShootClickRef.current = triggerEnemyShootClick;
   const lastOwnFigClickRef = useRef<{ modelId: string; time: number } | null>(null);
   /** Combat par-figurine : callbacks + plan + dernier clic ennemi, refs à jour pour le handler stable. */
   const squadFightCallbacksRef = useRef({
@@ -4653,28 +4658,29 @@ export default function Board({
       const enemy = findEnemyUnit(col, row);
       if (enemy != null) {
         e.stopImmediatePropagation();
-        // Double-clic : auto-assign toutes les figs avec LoS valide sur cette cible.
-        const now = e.timeStamp;
-        const prev = lastEnemyClickRef.current;
-        if (prev && String(prev.targetId) === String(enemy) && now - prev.time < 400) {
-          lastEnemyClickRef.current = null;
-          void cbs.onAutoAssignAllModels?.(enemy);
-          return;
-        }
-        lastEnemyClickRef.current = { targetId: enemy, time: now };
-        // Clic simple : assigne la fig active si valide.
-        // Si blinkingUnits est vide (valid_targets pas encore chargés), on laisse passer — le backend valide.
-        if (plan.activeModelId) {
-          const validTargets = stableBlinkingUnitsRef.current;
-          const isValid =
-            !validTargets || validTargets.length === 0
-              ? true
-              : validTargets.includes(Number(enemy));
-          if (isValid) {
-            void cbs.onAssignShootTarget?.(enemy);
+        // Simple/double mutualisés : le simple est différé pour ne PAS partir avant un
+        // éventuel double (sinon 2 assign + 2 los_overview coûteux). Les callbacks lisent
+        // les refs à l'exécution (état à jour même après le délai).
+        triggerEnemyShootClickRef.current(
+          enemy,
+          () => {
+            // Clic simple : assigne la fig active si valide.
+            // blinkingUnits vide (valid_targets pas encore chargés) → on laisse passer, backend valide.
+            const cbsNow = squadShootCallbacksRef.current;
+            const planNow = squadShootPlanRef.current;
+            if (!planNow?.activeModelId) return;
+            const validTargets = stableBlinkingUnitsRef.current;
+            const isValid =
+              !validTargets || validTargets.length === 0
+                ? true
+                : validTargets.includes(Number(enemy));
+            if (isValid) void cbsNow.onAssignShootTarget?.(enemy);
+          },
+          () => {
+            // Double-clic : auto-assign toutes les figs avec LoS valide sur cette cible.
+            void squadShootCallbacksRef.current.onAutoAssignAllModels?.(enemy);
           }
-        }
-        // sinon : aucune fig active → clic ignoré.
+        );
       }
     };
 
