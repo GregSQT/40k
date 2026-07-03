@@ -260,7 +260,10 @@ délicat à cause des murs).
   branchement moteur.
 - **Étape 4 — Migration MOVE** : ✅ FAIT (backend + PvP interactif), périmètre précis
   ci-dessous. Le point [3] budget-socle est résolu par l'**option A (Minkowski)**.
-  RESTE (tranche 4b) : anchor pool multi-hex, fly, socles non-ronds, miroir replay TS.
+  **Tranche 4b traitée (2026-07-03)** : FLY (model pool + pool d'ancre squad), ground
+  multi-hex du pool d'ancre (preview escouade), socles **non-ronds** (oval/square) dans les
+  deux pools via empreinte discrète orientée. RESTE : miroir replay TS, branches legacy
+  single-hex du pool d'ancre (X1 / `base_size==1`), gym (`move_gym=hex` par choix).
   Détail complet dans la section « Étape 4 » plus bas.
 - **Étape 5 — Migration CHARGE** : ⬜ À FAIRE.
 - **Étape 6 — Cohérence & nettoyage** : ⬜ À FAIRE.
@@ -292,6 +295,30 @@ délicat à cause des murs).
   géodésique any-angle** ; overlap alliés/ennemis reste hex. La charge suit le
   move (règle 11.04 : la charge *est* un move) — **même champ géodésique, seul
   le budget change** (2D6 au lieu de M).
+- **Métrique centre-à-centre vs bord-à-bord (2026-07-03, invariant vérifié)** : le
+  **budget de déplacement** (move/charge) se mesure **centre-à-centre** (règle 03.01 :
+  same-point-to-same-point ; en translation rigide = déplacement du centre) → seul
+  `geodesic_field` (depuis le centre de l'ancre) le calcule. Toute distance **figurine ↔
+  autre chose** (figurine, terrain, objectif) se mesure **bord-à-bord** (règle 01.04 :
+  point le plus proche du socle) → `euclidean_edge_distance` / `ranged_edge_distance`.
+  Invariant vérifié sur tout le code : `geodesic_field` = uniquement budget de move ;
+  `euclidean_edge_distance` = uniquement portée/adjacence, jamais un budget de déplacement.
+  ⚠️ Ne PAS mesurer un budget de move en bord-à-bord (donnerait ~1 diamètre de trop).
+- **FLY (Règles 21.03) → euclidien (2026-07-03)** : FLY ignore murs/figurines → pas de
+  pathfinding → le champ géodésique dégénère en **disque euclidien centre-à-centre** (obstacles
+  vides). Fait dans le **model pool par-fig** (obstacles `set()`) ET dans le **pool d'ancre
+  squad** (disque vectorisé NumPy centre-à-centre, gaté metric euclidean). Reste cube-distance
+  en gym (`move_gym=hex`) et sur la branche single-hex legacy du pool d'ancre.
+- **Socles non-ronds (oval/square) → euclidien (2026-07-03, Option 2 retenue)** : `geodesic_field`
+  ne prend qu'une clearance scalaire (disque rond). Deux voies évaluées — (1) disque circonscrit
+  (simple mais **perd l'orientation** → régression vs hex), (2) **inflation discrète de l'empreinte
+  orientée** (obstacles dilatés par les offsets `off_even/off_odd`, puis `geodesic_field`
+  clearance=0). **Option 2 retenue** : garde l'orientation, même fidélité que le hex + trajet
+  any-angle. Appliquée aux **deux pools** (`_euclidean_move_field` unifie rond=clearance continue /
+  non-rond=empreinte discrète). Le rond garde la clearance continue (option A Minkowski).
+- **`base_size==1` legacy — PARKÉ (2026-07-03)** : suppression envisagée puis écartée. `base_size==1`
+  est atteignable (curriculum X1 `inches_to_subhex=1`, et petites bases retombant à 1 sur ×5) →
+  supprimer = abandonner le support X1. Non tranché → laissé en l'état, à re-challenger si X1 meurt.
 - **Algorithme géodésique acté** : **lazy Theta\* en flood** (propagation d'un
   champ de distance où un nœud hérite la distance de son ancêtre s'il y a ligne
   de vue dégagée), **adossé au LoS WASM existant** pour le test de visibilité /
@@ -500,14 +527,30 @@ plus étroit que lui (plus strict que l'hex, plus correct physiquement). Décisi
   résiduel au 1er affichage est le **rendu PIXI de l'overlay LoS masqué** (`los-hover-polar-masked`,
   BoardPvp), **pré-existant, hors périmètre distance** → investigation frontend séparée si besoin.
 
+**Tranche 4b — FAIT (2026-07-03) :**
+- **FLY → euclidien** : model pool par-fig (obstacles `set()` → disque centre-à-centre) ET pool
+  d'ancre squad (`_build_multi_hex_vectorized` : disque euclidien vectorisé si metric euclidean,
+  cube-distance sinon). Voir « Décisions actées ».
+- **Pool d'ancre ground multi-hex → euclidien** (preview escouade) : `movement_build_valid_destinations_pool`
+  route le ground multi-hex vers `_euclidean_ground_anchor_multihex` (miroir du model pool : mêmes
+  obstacles, mêmes 2 régimes EZ) quand metric euclidean. Le gym (`move_gym=hex`) garde le vectorisé hex.
+- **Socles non-ronds (oval/square) → euclidien** dans les deux pools via **empreinte discrète orientée**
+  (Option 2). `_euclidean_move_field` unifie rond (clearance continue) / non-rond (inflation empreinte,
+  clearance=0). Fix `is_single_hex` du model pool (base_size liste = oval → multi-hex, empreinte expansée).
+- Helpers ajoutés : `_inflate_obstacles_by_footprint`, `_euclidean_move_field`,
+  `_euclidean_ground_anchor_multihex` (movement_handlers.py).
+- **Perf à surveiller** : le pool d'ancre n'a PAS de cache de champ (le model pool si) → recalcul
+  `geodesic_field` à chaque activation d'escouade ; et le chemin **éligibilité** (`read_only=True`)
+  déclenche désormais un geodesic en PvP.
+
 **RESTE — tranche 4b (⬜) :**
-- Pool d'ancre `movement_build_valid_destinations_pool` en multi-hex (`ez>1`, base>1 → chemin
-  vectorisé NumPy `_build_multi_hex_vectorized`) : encore hex.
-- FLY : encore hex. Socles **non-ronds** (oval/square) : encore hex.
 - Miroir **replay** : `BoardReplay.tsx` recalcule move/advance en hex localement → portage TS du
   champ (cosmétique, parties passées).
+- Branches **single-hex legacy du pool d'ancre** (`ez<=1` X1 / `base_size==1`) : FLY encore
+  cube-distance, ground encore hex — liées à la dette `base_size==1` parkée.
 - **Checkpoint (fait pour le périmètre livré)** : disque qui contourne les murs, passage étroit
-  fermé (clearance), pas d'overlap allié possible (filtre hex conservé), PvP fluide.
+  fermé (clearance), pas d'overlap allié possible (filtre hex conservé), PvP fluide, squad rond/oval
+  euclidien == par-fig.
 
 ### Étape 5 — Migration CHARGE
 
@@ -557,12 +600,14 @@ séparément sur un cas coin-de-mur ; logs IA cohérents. Valider PvP.
 
 | Règle | Raison du maintien hex |
 |-------|------------------------|
-| FLY (21) | Déféré tranche 4b — cas simple, à traiter en priorité après Étape 7 |
+| ~~FLY (21)~~ | ✅ Migré euclidien (2026-07-03, tranche 4b) — sauf branche single-hex legacy pool d'ancre |
 | Pile-in / consolidation (12.03 / 12.08) | Budget 3" max, erreur ~10% jugée négligeable |
 | Fall-back move (09.07) | Non planifié — ajouter à une Étape 8 |
 | Cohérence inter-modèles (03.03) | Non planifié — ajouter à une Étape 8 |
-| Socles non-ronds (oval/square) move | Déféré tranche 4b — proxy cellules utilisé |
-| Pool d'ancre multi-hex (`ez>1`) | Déféré tranche 4b — vectorisé NumPy, plus complexe |
+| ~~Socles non-ronds (oval/square) move~~ | ✅ Migré euclidien (2026-07-03, Option 2 empreinte discrète) |
+| ~~Pool d'ancre multi-hex (`ez>1`)~~ | ✅ Migré euclidien ground (2026-07-03) — sauf single-hex legacy `base_size==1`/X1 |
+| Gym (`move_gym=hex`) | Choix : training reste hex (perf) — 1 param (`distance_metric.move_gym`) pour basculer |
+| `base_size==1` / X1 (`inches_to_subhex=1`) legacy | Parké — suppression = abandon support X1 (curriculum) ; non tranché |
 | Observations / récompenses IA (§10) | Retrain prévu de toute façon → ignoré pendant migration |
 | Replay TS (BoardReplay.tsx) | Cosmétique, parties passées — faible priorité |
 
@@ -669,43 +714,37 @@ call-sites EZ via une fonction unifiée (type `in_engagement_zone(a, b, ez, metr
 > **aurait dû être fait** dans ces étapes mais ne l'a pas été. À traiter avant
 > d'entamer l'Étape 5, sous peine de dettes cachées qui s'accumulent.
 
-### 21.1 — Étape 2 (TIR) : 3 fichiers IA non migrés
+### 21.1 — Étape 2 (TIR) : ✅ DÉJÀ FAIT (vérifié 2026-07-03)
 
-Les décisions actées stipulent "Ranged → euclidien" pour la sélection de cible IA.
-Ces trois fichiers ont été listés dans l'inventaire §8 mais absents du corps de
-l'Étape 2 et donc **non migrés** :
+Vérification exhaustive des 3 fichiers après rédaction initiale de ce §21 :
 
-| Fichier | Ligne | Ce qui reste hex |
-|---------|-------|-----------------|
-| `engine/ai/weapon_selector.py` | 383-400 | `select_best_ranged_weapon` : distance unit→target |
-| `ai/target_selector.py` | 198-210 | distance ally→target branche ranged |
-| `ai/analyzer_phases/shoot_handler.py` | 406-610 | distances tir IA (validité/visée) |
+| Fichier | Call-site | État |
+|---------|-----------|------|
+| `ai/target_selector.py` | :202 `ranged_edge_distance(..., metric="ranged")` | ✅ migré |
+| `engine/ai/weapon_selector.py` | :390 `ranged_edge_distance(..., metric="ranged")` | ✅ migré |
+| `ai/analyzer_phases/shoot_handler.py` | :459 + :631 `ranged_edge_distance(..., metric="ranged")` | ✅ migré |
 
-**Impact concret** : l'IA évalue la portée de ses armes en hex pendant que le moteur
-PvP l'évalue en euclidien. Une cible refusée côté moteur peut être jugée à portée
-côté IA (ou inversement), entraînant des décisions incohérentes et des logs d'analyse
-inexploitables.
+Les `calculate_hex_distance` restants dans ces fichiers ne sont **pas** de la portée :
+- `shoot_handler.py` :425/:491/:626 → test d'adjacence == 1 (pistolet), légitimement hex
+- `weapon_selector.py` :389 → `perception_distance` (distance stratégique, reste hex par décision actée §18)
+- `shoot_handler.py` :825 → distance d'advance FLY, relève de §21.2(A), pas du tir
 
-**Action requise avant Étape 5** : migrer ces trois fichiers en euclidien bord-à-bord
-via `ranged_in_range` (même sélecteur `ranged` que le moteur), vérifier cohérence
-avec shooting_handlers.py sur quelques scénarios `--step`.
+**§21.1 soldé. Aucune action requise.**
 
-### 21.2 — Étape 4 (MOVE) tranche 4b : dette non planifiée
+### 21.2 — Étape 4 (MOVE) tranche 4b : ✅ TRAITÉE (2026-07-03)
 
-La tranche 4b est listée comme "RESTE (⬜)" sans plan ni priorité. Or elle contient
-des cas non négligeables :
+| Item | État |
+|------|------|
+| **FLY** | ✅ Euclidien : model pool par-fig (disque centre-à-centre, obstacles vides) + pool d'ancre squad (disque vectorisé euclidien si metric euclidean). Reste cube-distance sur la branche single-hex legacy du pool d'ancre. |
+| **Pool d'ancre multi-hex ground** | ✅ Euclidien (`_euclidean_ground_anchor_multihex`, miroir du model pool). Gym/PvP : la bascule passe par `distance_metric.move` vs `move_gym` (pas de flag `move_anchor_gym` séparé — le sélecteur `_move_distance_metric` suffit). |
+| **Socles non-ronds (oval/square)** | ✅ Euclidien via **empreinte discrète orientée** (Option 2), dans les deux pools. Plus de proxy cellules — l'orientation est conservée. |
+| **Miroir replay (BoardReplay.tsx)** | ⬜ Reste hex (cosmétique, parties passées). |
 
-| Item | Risque si ignoré |
-|------|-----------------|
-| **FLY encore hex** | Cas le plus simple à migrer (ligne droite, pas de pathfinding) mais laissé en hex. Les unités volantes ont un avantage hex artificiel sur les unités au sol en euclidien → asymétrie de règle visible en PvP. |
-| **Pool d'ancre multi-hex (`ez>1`, `base>1`)** | Le pool d'ancre utilisé par le **gym** reste hex alors que le pool par-figurine (PvP) est euclidien → gym et PvP calculent des zones de move différentes, rendant l'entraînement sur des mouvements proches de murs non transférable au PvP. |
-| **Socles non-ronds (oval/square)** | Moins urgent (peu d'unités concernées), mais le proxy cellules sous-estime la clearance aux angles. |
-| **Miroir replay (BoardReplay.tsx)** | Cosmétique uniquement — les replays d'anciennes parties montrent des zones hex. Faible priorité, mais déroutant pour le debug. |
+**Décision `base_size==1`** : la suppression du legacy `base_size==1` (proposée en marge)
+est **parkée** — atteignable via curriculum X1 (`inches_to_subhex=1`) et petites bases sur ×5 ;
+supprimer = abandonner le support X1. Voir « Décisions actées ».
 
-**Action requise avant Étape 5** : au minimum, migrer **FLY** (trivial — une ligne
-droite euclidienne, pas de champ géodésique) et documenter le pool d'ancre gym comme
-dette explicite avec un flag de config dédié (`move_anchor_gym: "hex"`), sinon
-l'écart gym/PvP grossit à chaque étape suivante.
+**§21.2 soldé** (hors replay TS + branches single-hex legacy). Prêt pour l'Étape 5.
 
 ---
 
@@ -764,12 +803,13 @@ Règle 03.01 : *"It can be moved through any space its base can fit through."*
 Gonfler les obstacles du rayon du socle (option A) est la traduction exacte de
 cette contrainte physique.
 
-### 20.6 — LACUNE : FLY devrait être PLUS SIMPLE à migrer que ground
+### 20.6 — ✅ RÉSOLU (2026-07-03) : FLY migré euclidien
 
-Tranche 4b laisse FLY en hex. Or une unité FLY ignore le terrain pour ses mouvements
-(règles 21) — pas de pathfinding, distance = ligne droite euclidienne bord-à-bord.
-C'est le cas le **plus simple** à migrer, pas le plus complexe. À migrer avant les
-socles non-ronds et le pool d'ancre multi-hex.
+FLY ignore le terrain (règles 21) → pas de pathfinding → **disque euclidien centre-à-centre**
+(champ géodésique à obstacles vides). Fait dans model pool + pool d'ancre squad.
+⚠️ **Correction de terminologie** : le budget de move FLY est **centre-à-centre** (règle 03.01,
+same-point), PAS bord-à-bord comme l'écrivait la rédaction initiale — le bord-à-bord (01.04) est
+réservé aux distances figurine↔autre chose (portée/adjacence). Voir « Décisions actées ».
 
 ### 20.7 — LACUNE : Pile-in (12.03) et consolidation (12.08) restent en hex
 

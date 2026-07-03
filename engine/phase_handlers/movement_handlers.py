@@ -39,6 +39,7 @@ from .shared_utils import (
 )
 from engine.hex_utils import (
     _hex_center,
+    _SEG_TOL,
     ENGAGEMENT_NORM_HEX_WIDTH,
     engagement_minimum_clearance_norm,
     euclidean_edge_clearance_round_round,
@@ -1489,17 +1490,36 @@ def _build_multi_hex_vectorized(
         eng_bad = np.zeros((board_cols, board_rows), dtype=bool)
 
     if fly:
-        # FLY: reachable = hex disk (no traversal obstacles). Direct cube-distance computation.
-        cols_arr = np.arange(board_cols, dtype=np.int64)[:, None]
-        rows_arr = np.arange(board_rows, dtype=np.int64)[None, :]
-        x_c = cols_arr
-        z_c = rows_arr - (cols_arr - (cols_arr & 1)) // 2
-        y_c = -x_c - z_c
-        sx_c = np.int64(start_col)
-        sz_c = np.int64(start_row) - (np.int64(start_col) - (np.int64(start_col) & 1)) // 2
-        sy_c = -sx_c - sz_c
-        cube_d = np.maximum(np.abs(x_c - sx_c), np.maximum(np.abs(y_c - sy_c), np.abs(z_c - sz_c)))
-        reach = cube_d <= np.int64(move_range)
+        # FLY: reachable = disque (aucun obstacle de traversée : FLY ignore murs/figs, Règles 21.03).
+        if _move_distance_metric(game_state) == "euclidean":
+            # Disque euclidien CENTRE-À-CENTRE (règle 03.01), budget × 1.5 — IDENTIQUE au model pool
+            # par-fig (geodesic_field sans obstacle) → preview escouade == commit. Repère _hex_center
+            # (hex_width = 1.5, hex_height = √3), sans arrondi.
+            _hw = ENGAGEMENT_NORM_HEX_WIDTH
+            _hh = 3.0 ** 0.5
+            _cols_i = np.arange(board_cols, dtype=np.int64)[:, None]
+            _cx = _cols_i.astype(np.float64) * _hw + _hw / 2.0
+            _cy = (
+                np.arange(board_rows, dtype=np.float64)[None, :] * _hh
+                + (_cols_i & 1).astype(np.float64) * (_hh / 2.0)
+                + _hh / 2.0
+            )
+            _sx = start_col * _hw + _hw / 2.0
+            _sy = start_row * _hh + (start_col & 1) * (_hh / 2.0) + _hh / 2.0
+            _dist = np.hypot(_cx - _sx, _cy - _sy)
+            reach = _dist <= (move_range * _hw + _SEG_TOL)
+        else:
+            # hex (gym / move_gym) : disque cube-distance (comportement historique).
+            cols_arr = np.arange(board_cols, dtype=np.int64)[:, None]
+            rows_arr = np.arange(board_rows, dtype=np.int64)[None, :]
+            x_c = cols_arr
+            z_c = rows_arr - (cols_arr - (cols_arr & 1)) // 2
+            y_c = -x_c - z_c
+            sx_c = np.int64(start_col)
+            sz_c = np.int64(start_row) - (np.int64(start_col) - (np.int64(start_col) & 1)) // 2
+            sy_c = -sx_c - sz_c
+            cube_d = np.maximum(np.abs(x_c - sx_c), np.maximum(np.abs(y_c - sy_c), np.abs(z_c - sz_c)))
+            reach = cube_d <= np.int64(move_range)
         valid_mask = reach & ~bad_dest & ~eng_bad
     else:
         # EZ traversable selon toggle ; toujours exclue de la destination (unengaged 09.05).
@@ -1630,6 +1650,143 @@ def _move_distance_metric(game_state: Dict[str, Any]) -> str:
             f"Invalid distance_metric['{key}'] = {metric!r}, expected one of {VALID_DISTANCE_METRICS}"
         )
     return metric
+
+
+def _inflate_obstacles_by_footprint(
+    obstacles: Set[Tuple[int, int]],
+    off_even: Tuple[Tuple[int, int], ...],
+    off_odd: Tuple[Tuple[int, int], ...],
+) -> Set[Tuple[int, int]]:
+    """Minkowski discret : cellules-ancre dont l'empreinte toucherait un obstacle.
+
+    Une ancre ``A`` est bloquée ssi ``A + off`` ∈ ``obstacles`` pour un ``off`` de son
+    empreinte (``off_even`` si colonne paire, ``off_odd`` si impaire). Équivalent à la
+    dilatation ``_placement_bad`` du chemin hex vectorisé, mais sous forme de set pour
+    ``geodesic_field`` (clearance=0) : un socle non-rond est représenté par son empreinte
+    discrète ORIENTÉE (garde l'orientation, contrairement à un disque circonscrit).
+    """
+    inflated: Set[Tuple[int, int]] = set()
+    for _oc, _orr in obstacles:
+        for _dc, _dr in off_even:
+            _ac, _ar = _oc - _dc, _orr - _dr
+            if (_ac & 1) == 0:
+                inflated.add((_ac, _ar))
+        for _dc, _dr in off_odd:
+            _ac, _ar = _oc - _dc, _orr - _dr
+            if (_ac & 1) == 1:
+                inflated.add((_ac, _ar))
+    return inflated
+
+
+def _euclidean_move_field(
+    start_pos: Tuple[int, int],
+    base_shape: str,
+    base_size: Any,
+    off_even: Tuple[Tuple[int, int], ...],
+    off_odd: Tuple[Tuple[int, int], ...],
+    obstacles_traverse: Set[Tuple[int, int]],
+    board_cols: int,
+    board_rows: int,
+    budget_norm: float,
+) -> Dict[Tuple[int, int], float]:
+    """Champ géodésique euclidien du CENTRE de l'ancre (règle 03.01), budget en unités-norme.
+
+    - Socle **rond** : clearance continue = rayon du socle (option A Minkowski), obstacles bruts.
+    - Socle **non-rond** (oval/square) : clearance=0 + obstacles dilatés par l'empreinte discrète
+      orientée (``_inflate_obstacles_by_footprint``) → garde l'orientation.
+    Round et non-round partagent la MÊME primitive → pool d'ancre (preview) et model pool (commit)
+    restent cohérents pour toutes les formes.
+    """
+    if base_shape == "round":
+        return geodesic_field(
+            start_pos, board_cols, board_rows, obstacles_traverse,
+            budget_norm, round_base_radius_norm(base_size),
+        )
+    _inflated = _inflate_obstacles_by_footprint(obstacles_traverse, off_even, off_odd)
+    _inflated.discard(start_pos)  # start jamais obstacle (geodesic_field lèverait sinon)
+    return geodesic_field(start_pos, board_cols, board_rows, _inflated, budget_norm, 0.0)
+
+
+def _euclidean_ground_anchor_multihex(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    start_col: int,
+    start_row: int,
+    start_pos: Tuple[int, int],
+    move_range: int,
+    base_shape: str,
+    base_size: Any,
+    off_even: Tuple[Tuple[int, int], ...],
+    off_odd: Tuple[Tuple[int, int], ...],
+    board_cols: int,
+    board_rows: int,
+    walls: Set[Tuple[int, int]],
+    occupied: Set[Tuple[int, int]],
+    enemy_occupied: Set[Tuple[int, int]],
+    enemy_adjacent_hexes: Set[Tuple[int, int]],
+    enemy_items: Optional[List[Tuple[Any, Any]]],
+    ez: int,
+    thru_ez: bool,
+    thru_enemy: bool,
+    thru_friendly: bool,
+) -> Tuple[List[Tuple[int, int]], Set[Tuple[int, int]], int]:
+    """Pool d'ancre GROUND euclidien multi-hex (preview escouade), miroir du model pool par-fig.
+
+    Champ géodésique du centre de l'ancre (round: clearance continue ; non-round: empreinte
+    discrète), puis filtre de destination sur l'empreinte COMPLÈTE (murs/occupé/EZ), identique
+    au model pool → preview == commit. L'EZ suit les deux régimes existants :
+    ``ez > 1`` testée sur l'ancre (le masque intègre déjà l'empreinte du mover) ;
+    ``ez <= 1`` (legacy) dilatée par l'empreinte via ``enemy_adjacent_hexes``.
+    """
+    import numpy as np
+    if ez > 1:
+        _ez_mask = _compute_mover_ez_forbidden_mask(
+            game_state, unit, enemy_items, ez, board_cols, board_rows
+        )
+        _ec, _er = np.where(_ez_mask)
+        ez_forbidden: Set[Tuple[int, int]] = {(int(c), int(r)) for c, r in zip(_ec, _er)}
+        dest_blocked_fp = walls | occupied           # EZ testée sur l'ancre (ci-dessous)
+        ez_anchor_check = ez_forbidden
+    else:
+        ez_forbidden = enemy_adjacent_hexes
+        dest_blocked_fp = walls | occupied | enemy_adjacent_hexes  # EZ dilatée par l'empreinte
+        ez_anchor_check = set()
+
+    obstacles_tr: Set[Tuple[int, int]] = set(walls)
+    if not thru_enemy:
+        obstacles_tr |= enemy_occupied
+    if not thru_friendly:
+        obstacles_tr |= (occupied - enemy_occupied)
+    if not thru_ez:
+        obstacles_tr |= ez_forbidden
+    obstacles_tr.discard(start_pos)
+
+    field = _euclidean_move_field(
+        start_pos, base_shape, base_size, off_even, off_odd,
+        obstacles_tr, board_cols, board_rows, move_range * ENGAGEMENT_NORM_HEX_WIDTH,
+    )
+
+    valid_destinations: List[Tuple[int, int]] = []
+    footprint_zone: Set[Tuple[int, int]] = set()
+    for _ac, _ar in field:
+        if (_ac, _ar) == start_pos or (_ac, _ar) in ez_anchor_check:
+            continue
+        offs = off_even if (_ac & 1) == 0 else off_odd
+        if any(
+            not (0 <= _ac + _dc < board_cols and 0 <= _ar + _dr < board_rows)
+            for _dc, _dr in offs
+        ):
+            continue
+        if any((_ac + _dc, _ar + _dr) in dest_blocked_fp for _dc, _dr in offs):
+            continue
+        valid_destinations.append((_ac, _ar))
+        for _dc, _dr in offs:
+            footprint_zone.add((_ac + _dc, _ar + _dr))
+    _s_offs = off_even if (start_col & 1) == 0 else off_odd
+    for _dc, _dr in _s_offs:
+        footprint_zone.add((start_col + _dc, start_row + _dr))
+    footprint_zone -= walls
+    return valid_destinations, footprint_zone, len(field)
 
 
 @profile_move_pool_build
@@ -2088,28 +2245,39 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             orientation = 0
         _off_even, _off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
 
-        # Chemin unique vectorisé NumPy, sémantiquement équivalent au BFS Python hexagonal.
-        # Gère toutes les formes de socles (mover et ennemis) et toutes les valeurs de ``ez``.
-        valid_destinations, footprint_zone, visited_n = _build_multi_hex_vectorized(
-            game_state=game_state,
-            unit=unit,
-            start_col=start_col,
-            start_row=start_row,
-            move_range=move_range,
-            off_even=_off_even,
-            off_odd=_off_odd,
-            board_cols=_bcols,
-            board_rows=_brows,
-            walls_set=_walls,
-            enemy_occupied_set=_enemy_occ,
-            occupied_set=_occupied,
-            enemy_adjacent_hexes=_enemy_adj,
-            enemy_items=_enemy_items_for_engagement_ez,
-            ez=ez,
-            thru_ez=_thru_ez,
-            thru_enemy=_thru_enemy,
-            thru_friendly=_thru_friendly,
-        )
+        if _move_distance_metric(game_state) == "euclidean":
+            # Ground multi-hex euclidien (preview escouade) — miroir du model pool par-fig
+            # (round: clearance continue ; non-round: empreinte discrète). Le gym (move_gym=hex)
+            # garde le chemin vectorisé hex ci-dessous.
+            valid_destinations, footprint_zone, visited_n = _euclidean_ground_anchor_multihex(
+                game_state, unit, start_col, start_row, start_pos, move_range,
+                base_shape, base_size, _off_even, _off_odd,
+                _bcols, _brows, _walls, _occupied, _enemy_occ, _enemy_adj,
+                _enemy_items_for_engagement_ez, ez, _thru_ez, _thru_enemy, _thru_friendly,
+            )
+        else:
+            # Chemin unique vectorisé NumPy, sémantiquement équivalent au BFS Python hexagonal.
+            # Gère toutes les formes de socles (mover et ennemis) et toutes les valeurs de ``ez``.
+            valid_destinations, footprint_zone, visited_n = _build_multi_hex_vectorized(
+                game_state=game_state,
+                unit=unit,
+                start_col=start_col,
+                start_row=start_row,
+                move_range=move_range,
+                off_even=_off_even,
+                off_odd=_off_odd,
+                board_cols=_bcols,
+                board_rows=_brows,
+                walls_set=_walls,
+                enemy_occupied_set=_enemy_occ,
+                occupied_set=_occupied,
+                enemy_adjacent_hexes=_enemy_adj,
+                enemy_items=_enemy_items_for_engagement_ez,
+                ez=ez,
+                thru_ez=_thru_ez,
+                thru_enemy=_thru_enemy,
+                thru_friendly=_thru_friendly,
+            )
 
     _m_bfs_end = _perf_clock.perf_counter() if _pt else None
 
@@ -2322,16 +2490,15 @@ def movement_build_model_destinations_pool(
         else frozenset()
     )
 
-    # Étape 4.1 — miroir par-figurine (PvP interactif) : champ géodésique euclidien pour socle
-    # ROND (toute taille), ground. La reachability est calculée sur le CENTRE avec clearance =
-    # rayon socle (option A) ; l'empreinte multi-hex est expansée séparément plus bas, comme le
-    # BFS hex. Mêmes obstacles de traversée. Non-rond / fly restent sur le BFS hex (Étape 4b).
+    # Étape 4.1 — miroir par-figurine (PvP interactif) : champ géodésique euclidien du CENTRE de
+    # l'ancre (règle 03.01), toutes formes. Rond → clearance continue = rayon socle (option A) ;
+    # non-rond → empreinte discrète orientée (cf. _euclidean_move_field). L'empreinte multi-hex est
+    # expansée + re-filtrée séparément plus bas. Mêmes obstacles de traversée que le BFS hex.
+    # FLY (Règles 21.03) : euclidien aussi, mais champ SANS obstacle (ignore murs/figs) → le champ
+    # géodésique dégénère en disque euclidien centre-à-centre (ligne droite, règle 03.01).
     _mm_base = require_key(model, "BASE_SIZE")
-    _mm_use_euclidean = (
-        _move_distance_metric(game_state) == "euclidean"
-        and require_key(model, "BASE_SHAPE") == "round"
-        and not has_fly
-    )
+    _mm_shape = require_key(model, "BASE_SHAPE")
+    _mm_use_euclidean = _move_distance_metric(game_state) == "euclidean"
     # Instrumentation perf (coût nul si W40K_PERF_TIMING désactivé) — cf. MODEL_POOL_BUILD au return.
     from engine.perf_timing import perf_timing_enabled
     import time as _mm_clock
@@ -2345,7 +2512,8 @@ def movement_build_model_destinations_pool(
         # Cache du CHAMP (sans les filtres de destination) : valide tant que les obstacles ne
         # changent pas. Les sœurs ne sont des obstacles que si NON thru_friendly → cache seulement
         # sûr quand thru_friendly (sinon le champ dépend du plan provisoire, recalcul obligatoire).
-        _mm_can_cache = thru_friendly
+        # FLY : le champ n'a aucun obstacle → indépendant du plan provisoire → toujours cacheable.
+        _mm_can_cache = thru_friendly or has_fly
         _mm_field = None
         if _mm_can_cache:
             _mm_cache = game_state.setdefault("_move_model_field_cache", {})
@@ -2353,19 +2521,32 @@ def movement_build_model_destinations_pool(
             _mm_field = _mm_cache.get(_mm_key)
         _mm_cache_hit = _mm_field is not None
         if _mm_field is None:
-            _mm_obstacles: Set[Tuple[int, int]] = set(wall_hexes)
-            if not (desperate_escape or thru_enemy):
-                _mm_obstacles |= enemy_occupied
-            if not thru_friendly:
-                _mm_obstacles |= _friendly_traverse
-            if not (desperate_escape or thru_ez):
-                _mm_obstacles |= ez_anchor_forbidden
+            if has_fly:
+                # FLY ignore murs/figurines en traversée → aucun obstacle. Les filtres de
+                # destination (occupé / EZ ennemie) restent appliqués plus bas, comme le BFS hex.
+                _mm_obstacles: Set[Tuple[int, int]] = set()
+            else:
+                _mm_obstacles = set(wall_hexes)
+                if not (desperate_escape or thru_enemy):
+                    _mm_obstacles |= enemy_occupied
+                if not thru_friendly:
+                    _mm_obstacles |= _friendly_traverse
+                if not (desperate_escape or thru_ez):
+                    _mm_obstacles |= ez_anchor_forbidden
             _mm_obstacles.discard(start_pos)  # on est déjà sur la case de départ
             _mm_obstacles_n = len(_mm_obstacles)
+            if _mm_shape == "round":
+                _mm_off_even_f: Tuple[Tuple[int, int], ...] = ()
+                _mm_off_odd_f: Tuple[Tuple[int, int], ...] = ()
+            else:
+                from engine.hex_utils import precompute_footprint_offsets
+                _mm_off_even_f, _mm_off_odd_f = precompute_footprint_offsets(
+                    _mm_shape, _mm_base, int(unit.get("orientation", 0)),  # get allowed
+                )
             _mm_fb = _mm_clock.perf_counter() if _mm_pt else None
-            _mm_field = geodesic_field(
-                start_pos, board_cols, board_rows, _mm_obstacles,
-                budget * ENGAGEMENT_NORM_HEX_WIDTH, round_base_radius_norm(_mm_base),
+            _mm_field = _euclidean_move_field(
+                start_pos, _mm_shape, _mm_base, _mm_off_even_f, _mm_off_odd_f,
+                _mm_obstacles, board_cols, board_rows, budget * ENGAGEMENT_NORM_HEX_WIDTH,
             )
             if _mm_pt and _mm_fb is not None:
                 _mm_field_s = _mm_clock.perf_counter() - _mm_fb
@@ -2456,7 +2637,11 @@ def movement_build_model_destinations_pool(
     base_size = unit["BASE_SIZE"]
     base_shape = unit["BASE_SHAPE"]
     orientation = unit.get("orientation", 0)  # get allowed
-    is_single_hex = (base_size == 1 or not isinstance(base_size, int) or base_size <= 1)  # get allowed
+    # Non-rond (oval/square) → toujours multi-hex (base_size liste) : sans le garde de forme,
+    # ``not isinstance(base_size, int)`` le classait à tort en single-hex → empreinte non expansée.
+    is_single_hex = base_shape == "round" and (
+        base_size == 1 or not isinstance(base_size, int) or base_size <= 1
+    )  # get allowed
     if is_single_hex:
         footprint_zone: Set[Tuple[int, int]] = set(reachable)
         footprint_zone.add(start_pos)
