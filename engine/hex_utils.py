@@ -1815,8 +1815,14 @@ def geodesic_field(
             # Rattachement à l'ancêtre si LoS dégagé (cœur de Theta*).
             if _segment_clear_indexed(px, py, nx, ny, bs, idx, clearance):
                 anchor, axr, ayr, base = par, px, py, g_par
-            else:
+            elif clearance <= _SEG_TOL or _segment_clear_indexed(cx, cy, nx, ny, bs, idx, clearance):
+                # Raccourci ancêtre bloqué → pas adjacent cur→nb, testé à la CAPSULE : à
+                # `clearance>0` un socle ne peut ni transiter ni se centrer sur `nb` s'il
+                # chevauche un mur (couvre goulot + corner-cutting). Court-circuit à
+                # `clearance<=0` : le gate est prouvé no-op (oval/point/gym-hex) → zéro surcoût.
                 anchor, axr, ayr, base = cur, cx, cy, g_cur
+            else:
+                continue  # nb inatteignable via cur (mur trop proche) ; re-proposé par un autre voisin
             cand = base + math.hypot(nx - axr, ny - ayr)
             if cand <= budget + _SEG_TOL and cand < g.get(nb, math.inf):
                 g[nb] = cand
