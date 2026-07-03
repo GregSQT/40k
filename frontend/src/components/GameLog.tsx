@@ -9,7 +9,7 @@ import {
   getEventIcon,
   getEventTypeClass,
 } from "../../../shared/gameLogStructure.ts";
-import { AdvancedIcon, ChargedIcon, MovedIcon } from "./UnitStatusBadges";
+import { AdvancedIcon, ChargedIcon, FellBackIcon, MovedIcon } from "./UnitStatusBadges";
 
 const RULE_TOKEN_REGEX = /\[([^\]]+)\]/g;
 
@@ -191,6 +191,10 @@ interface GameLogProps {
   useStepNumbers?: boolean;
   currentTurn?: number;
   debugMode?: boolean;
+  /** Game Log : afficher les coordonnées (col,row) des unités dans les lignes tir/combat. */
+  logShowCoords?: boolean;
+  /** Game Log : afficher le type d'unité dans les lignes tir/combat. */
+  logShowType?: boolean;
   /** Tutoriel 2-1 : rapporter le rect de la dernière ligne (la plus récente) pour halo. */
   onLastEntryRect?: (rect: GameLogLastEntryRect | null) => void;
   /** Tutoriel 2-1 : rapporter le rect du titre (header) du Game Log pour halo. */
@@ -204,6 +208,8 @@ export const GameLog: React.FC<GameLogProps> = ({
   availableHeight: _availableHeight = 152,
   useStepNumbers = false,
   debugMode = false,
+  logShowCoords = false,
+  logShowType = true,
   onLastEntryRect,
   onHeaderRect,
   onTopTwoEntriesRects,
@@ -308,6 +314,38 @@ export const GameLog: React.FC<GameLogProps> = ({
 
     return descriptions;
   }, []);
+
+  // Game Log : masque type et/ou coords dans les labels "Unit <id> <type> (col,row)"
+  // (tir/combat) selon les 2 options. Le backend émet toujours type + coords.
+  const transformUnitLabels = React.useCallback(
+    (message: string | undefined, entryType?: string): string | undefined => {
+      if (typeof message !== "string" || (logShowCoords && logShowType)) {
+        return message;
+      }
+      let out = message;
+      // TYPE off : retirer le type injecté par le backend juste après "Unit <id>".
+      // Le point d'ancrage à droite dépend de la forme de la ligne.
+      if (!logShowType) {
+        if (entryType === "shoot" || entryType === "combat" || entryType === "charge") {
+          // "Unit <id> <type> (col,row) ..." → type avant les coords accolées.
+          out = out.replace(/(Unit \d+) [^()]+?(?= \(\d+, ?\d+\))/g, "$1");
+        } else if (entryType === "move") {
+          // "Unit <id> <type> MOVED/ADVANCED/FLED ..." → type avant le verbe.
+          out = out.replace(/(Unit \d+) .+?(?= (?:MOVED|ADVANCED|FLED)\b)/g, "$1");
+        }
+      }
+      // COORDS off : retire les groupes de coordonnées (et les trajets "from ... to ...").
+      // Sûr pour toutes les lignes : un groupe (\d+,\d+) est distinctif (dés/compteurs n'ont pas de virgule).
+      if (!logShowCoords) {
+        out = out
+          .replace(/ from \(\d+, ?\d+\) to \(\d+, ?\d+\)/g, "")
+          .replace(/ to \(\d+, ?\d+\)/g, "")
+          .replace(/ ?\(\d+, ?\d+\)/g, "");
+      }
+      return out;
+    },
+    [logShowCoords, logShowType]
+  );
 
   const renderMessageWithRuleDescriptions = React.useCallback(
     (message: string | undefined, ruleHintByLabel?: Record<string, string>): React.ReactNode => {
@@ -568,6 +606,8 @@ export const GameLog: React.FC<GameLogProps> = ({
                         )
                       ) : event.type === "advance" || event.action_name === "ADVANCED" ? (
                         <AdvancedIcon />
+                      ) : event.action_name === "FLED" ? (
+                        <FellBackIcon />
                       ) : event.type === "move" ? (
                         <MovedIcon />
                       ) : event.type === "charge" || event.type === "charge_fail" ? (
@@ -592,7 +632,10 @@ export const GameLog: React.FC<GameLogProps> = ({
                       </span>
                     )}
                     <span className="game-log-entry__message">
-                      {renderMessageWithRuleDescriptions(event.message, event.ruleHintByLabel)}
+                      {renderMessageWithRuleDescriptions(
+                        transformUnitLabels(event.message, event.type),
+                        event.ruleHintByLabel
+                      )}
                     </span>
                     {/* NEW: Debug mode reward display for AI actions */}
                     {debugMode && event.is_ai_action && event.reward !== undefined && (

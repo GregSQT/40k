@@ -2194,6 +2194,8 @@ export const BoardWithAPI: React.FC = () => {
     const modeGuidesActivatedStr = localStorage.getItem(MODE_GUIDES_ACTIVATED_STORAGE_KEY);
     const deployIconBaseSizeBoundedStr = localStorage.getItem("deployIconBaseSizeBounded");
     const deployShootLoSStr = localStorage.getItem("deployShootLoS");
+    const logShowCoordsStr = localStorage.getItem("logShowCoords");
+    const logShowTypeStr = localStorage.getItem("logShowType");
     const pveGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVE_STORAGE_KEY) === "true";
     const pvpGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVP_STORAGE_KEY) === "true";
     const guidesSeenAtLeastOnce = pveGuideSeen || pvpGuideSeen;
@@ -2225,6 +2227,8 @@ export const BoardWithAPI: React.FC = () => {
         ? JSON.parse(deployIconBaseSizeBoundedStr)
         : true,
       deployShootLoS: deployShootLoSStr ? JSON.parse(deployShootLoSStr) : false,
+      logShowCoords: logShowCoordsStr ? JSON.parse(logShowCoordsStr) : false,
+      logShowType: logShowTypeStr ? JSON.parse(logShowTypeStr) : true,
     };
   });
 
@@ -2292,6 +2296,16 @@ export const BoardWithAPI: React.FC = () => {
   const handleToggleStatusBadgePerModel = (value: boolean) => {
     setSettings((prev) => ({ ...prev, statusBadgePerModel: value }));
     localStorage.setItem("statusBadgePerModel", JSON.stringify(value));
+  };
+
+  const handleToggleLogShowCoords = (value: boolean) => {
+    setSettings((prev) => ({ ...prev, logShowCoords: value }));
+    localStorage.setItem("logShowCoords", JSON.stringify(value));
+  };
+
+  const handleToggleLogShowType = (value: boolean) => {
+    setSettings((prev) => ({ ...prev, logShowType: value }));
+    localStorage.setItem("logShowType", JSON.stringify(value));
   };
 
   const handleToggleDeployIconBaseSizeBounded = (value: boolean) => {
@@ -4810,6 +4824,8 @@ export const BoardWithAPI: React.FC = () => {
                 events={gameLog.events}
                 currentTurn={apiProps.gameState?.currentTurn ?? 1}
                 debugMode={settings.showDebug}
+                logShowCoords={settings.logShowCoords}
+                logShowType={settings.logShowType}
               />
             </div>
           </div>
@@ -6388,6 +6404,10 @@ export const BoardWithAPI: React.FC = () => {
         onToggleModeGuidesActivated={handleToggleModeGuidesActivated}
         deployIconBaseSizeBounded={settings.deployIconBaseSizeBounded}
         onToggleDeployIconBaseSizeBounded={handleToggleDeployIconBaseSizeBounded}
+        logShowCoords={settings.logShowCoords}
+        onToggleLogShowCoords={handleToggleLogShowCoords}
+        logShowType={settings.logShowType}
+        onToggleLogShowType={handleToggleLogShowType}
       />
     </TutorialProvider>
   );

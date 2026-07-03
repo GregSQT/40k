@@ -37,6 +37,10 @@ interface SettingsMenuProps {
   onToggleDeployShootLoS?: (value: boolean) => void;
   deployIconBaseSizeBounded?: boolean;
   onToggleDeployIconBaseSizeBounded?: (value: boolean) => void;
+  logShowCoords?: boolean;
+  onToggleLogShowCoords?: (value: boolean) => void;
+  logShowType?: boolean;
+  onToggleLogShowType?: (value: boolean) => void;
 }
 
 /**
@@ -157,6 +161,10 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   onToggleDeployShootLoS,
   deployIconBaseSizeBounded = true,
   onToggleDeployIconBaseSizeBounded,
+  logShowCoords = false,
+  onToggleLogShowCoords,
+  logShowType = true,
+  onToggleLogShowType,
 }) => {
   // Snapshot des réglages à l'ouverture du menu, pour pouvoir annuler les
   // changements (appliqués en live) en restaurant les valeurs initiales.
@@ -175,6 +183,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     battleShockTestEnabled: boolean;
     deployShootLoS: boolean;
     deployIconBaseSizeBounded: boolean;
+    logShowCoords: boolean;
+    logShowType: boolean;
   };
   const latest: SettingsSnapshot = {
     showAdvanceWarning,
@@ -191,6 +201,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     battleShockTestEnabled,
     deployShootLoS,
     deployIconBaseSizeBounded,
+    logShowCoords,
+    logShowType,
   };
   const latestRef = useRef(latest);
   latestRef.current = latest;
@@ -232,6 +244,10 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
         deployIconBaseSizeBounded !== s.deployIconBaseSizeBounded
       )
         onToggleDeployIconBaseSizeBounded(s.deployIconBaseSizeBounded);
+      if (onToggleLogShowCoords && logShowCoords !== s.logShowCoords)
+        onToggleLogShowCoords(s.logShowCoords);
+      if (onToggleLogShowType && logShowType !== s.logShowType)
+        onToggleLogShowType(s.logShowType);
     }
     onClose();
   };
@@ -346,6 +362,22 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                 onChange={onToggleBattleShockTest}
                 label="Bouton test Battle-shock"
                 description="Affiche un bouton dans la barre de move pour forcer un battle-shock roll (01.07) sur l'unité active — sert à tester le Desperate Escape (09.07)."
+              />
+            )}
+            {onToggleLogShowCoords && (
+              <ToggleRow
+                checked={logShowCoords}
+                onChange={onToggleLogShowCoords}
+                label="Coordonnées dans le Combat log"
+                description="Affiche les coordonnées (col,row) des unités dans les lignes de tir/combat du Game Log."
+              />
+            )}
+            {onToggleLogShowType && (
+              <ToggleRow
+                checked={logShowType}
+                onChange={onToggleLogShowType}
+                label="Type d'unité dans le Combat log"
+                description="Affiche le type (ex. Intercessor) des unités dans les lignes de tir/combat du Game Log."
               />
             )}
           </CollapsibleSection>

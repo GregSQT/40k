@@ -124,7 +124,7 @@ export function ChargedIcon() {
 }
 
 /** Chevron gauche simple blanc sur fond jaune — repli / fall-back (09.07). */
-function FellBackIcon() {
+export function FellBackIcon() {
   return (
     <svg className="unit-status-badge__svg" viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="12" r="10" fill="#f4c81f" stroke="#8a6d00" strokeWidth="1.5" />

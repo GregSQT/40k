@@ -5197,8 +5197,9 @@ def charge_commit_move_plan_handler(
 
     current_turn = game_state["current_turn"] if "current_turn" in game_state else 1
     target_col, target_row = require_unit_position(target_id, game_state)
+    _ut_seg = f" {unit['unitType']}" if unit.get("unitType") else ""
     charge_message = (
-        f"Unit {unit['id']} ({orig_col}, {orig_row}) CHARGED Units {target_ids} "
+        f"Unit {unit['id']}{_ut_seg} ({orig_col}, {orig_row}) CHARGED Units {target_ids} "
         f"from ({orig_col}, {orig_row}) to ({dest_col}, {dest_row}) [Roll:{charge_roll}]"
     )
     move_details = []
@@ -5484,9 +5485,12 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             )
         charge_rule_marker = f" [{source_rule_display_name}]"
         charge_ability_display_name = source_rule_display_name
+    _ut_seg = f" {unit['unitType']}" if unit.get("unitType") else ""
+    _tt_unit = next((u for u in game_state["units"] if str(u["id"]) == str(target_id)), None)
+    _tt_seg = f" {_tt_unit['unitType']}" if _tt_unit and _tt_unit.get("unitType") else ""
     charge_message = (
-        f"Unit {unit['id']} ({orig_col}, {orig_row}) CHARGED{charge_rule_marker} "
-        f"Unit {target_id} ({target_col}, {target_row}) from ({orig_col}, {orig_row}) "
+        f"Unit {unit['id']}{_ut_seg} ({orig_col}, {orig_row}) CHARGED{charge_rule_marker} "
+        f"Unit {target_id}{_tt_seg} ({target_col}, {target_row}) from ({orig_col}, {orig_row}) "
         f"to ({dest_col}, {dest_row}) [Roll:{charge_roll}]"
     )
 

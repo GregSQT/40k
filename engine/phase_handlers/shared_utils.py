@@ -3139,8 +3139,9 @@ def roll_hazard_for_unit(unit_id: str, game_state: Dict[str, Any], auto_resolve:
     total_wounds = fails * wounds_per_fail
     col = int(unit.get("col", -1))
     row = int(unit.get("row", -1))
+    _ut_seg = f" {unit['unitType']}" if unit.get("unitType") else ""
     msg = (
-        f"Unit {unit_id}({col},{row}) [HAZARD] roll (Desperate Escape): {alive_count} rolls "
+        f"Unit {unit_id}{_ut_seg}({col},{row}) [HAZARD] roll (Desperate Escape): {alive_count} rolls "
         f"- {fails} fail(s) - {total_wounds} mortal wound(s)"
     )
     # Détails par-figurine (06.02) : remplis pendant l'attribution, comme shootDetails au tir.
@@ -4837,6 +4838,8 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
     tgt_uc = game_state.get("units_cache", {}).get(target_sid_g, {})  # get allowed
     tgt_unit = next((u for u in game_state["units"] if str(u["id"]) == target_sid_g), None)
     tgt_unit_type_g = tgt_unit.get("unitType") if tgt_unit else None
+    atk_unit = next((u for u in game_state["units"] if str(u["id"]) == attacker_squad_id_str), None)
+    atk_unit_type_g = atk_unit.get("unitType") if atk_unit else None
     ac = int(sq_uc.get("col", 0))  # get allowed
     ar = int(sq_uc.get("row", 0))  # get allowed
     tc = int(tgt_uc.get("col", 0))  # get allowed
@@ -4854,9 +4857,13 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         f"{hit_part} Wound:{g['display_wth']}+ Save:{g['display_save_th']}+ - "
         f"HP lost:{g['damage']} Killed:{g['kills']}"
     )
+    # Label toujours enrichi : type + coords. Le frontend masque type et/ou coords
+    # selon les 2 options du Game Log (regex sur "Unit <id> <type> (col,row)").
+    atk_type_seg = f" {atk_unit_type_g}" if atk_unit_type_g else ""
+    tgt_type_seg = f" {tgt_unit_type_g}" if tgt_unit_type_g else ""
     msg = (
-        f"Unit {attacker_squad_id_str}({ac},{ar}) {ctx.log_verb}"
-        f" at Unit {target_sid_g}({tc},{tr}){weapon_suffix}"
+        f"Unit {attacker_squad_id_str}{atk_type_seg} ({ac},{ar}) {ctx.log_verb}"
+        f" at Unit {target_sid_g}{tgt_type_seg} ({tc},{tr}){weapon_suffix}"
         f" - {attack_log}"
     )
     append_action_log(game_state, {

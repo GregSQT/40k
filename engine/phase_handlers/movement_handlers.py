@@ -2873,25 +2873,26 @@ def movement_commit_move_plan_handler(
                 "toRow": int(nr),
             }
         )
+    _ut_seg = f" {unit['unitType']}" if unit.get("unitType") else ""
     if move_type == "advance":
         action_name = "ADVANCED"
         was_flee = False
         movement_message = (
-            f"Unit {unit['id']} ADVANCED from ({orig_anchor_col},{orig_anchor_row}) "
+            f"Unit {unit['id']}{_ut_seg} ADVANCED from ({orig_anchor_col},{orig_anchor_row}) "
             f"to ({dest_anchor_col},{dest_anchor_row}) [Advance:{_adv_roll}]"
         )
     elif move_type == "fall_back":
         action_name = "FLED"
         was_flee = True
         movement_message = (
-            f"Unit {unit['id']} FLED from ({orig_anchor_col},{orig_anchor_row}) "
+            f"Unit {unit['id']}{_ut_seg} FLED from ({orig_anchor_col},{orig_anchor_row}) "
             f"to ({dest_anchor_col},{dest_anchor_row})"
         )
     else:
         action_name = "MOVE"
         was_flee = False
         movement_message = (
-            f"Unit {unit['id']} MOVED from ({orig_anchor_col},{orig_anchor_row}) "
+            f"Unit {unit['id']}{_ut_seg} MOVED from ({orig_anchor_col},{orig_anchor_row}) "
             f"to ({dest_anchor_col},{dest_anchor_row})"
         )
     append_action_log(
@@ -3279,20 +3280,21 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     action_name = "FLEE" if was_adjacent else "MOVE"
     
     is_fly_move = _fly_traversal_active(game_state, unit, unit_id)
+    _ut_seg = f" {unit['unitType']}" if unit.get("unitType") else ""
     if was_adjacent:
         if is_fly_move:
             movement_message = (
-                f"Unit {unit['id']} FLED [FLY] from ({orig_col},{orig_row}) to ({dest_col},{dest_row})"
+                f"Unit {unit['id']}{_ut_seg} FLED [FLY] from ({orig_col},{orig_row}) to ({dest_col},{dest_row})"
             )
         else:
             movement_message = (
-                f"Unit {unit['id']} FLED from ({orig_col},{orig_row}) to ({dest_col},{dest_row})"
+                f"Unit {unit['id']}{_ut_seg} FLED from ({orig_col},{orig_row}) to ({dest_col},{dest_row})"
             )
     else:
         movement_message = (
-            f"Unit {unit['id']} MOVED [FLY] from ({orig_col},{orig_row}) to ({dest_col},{dest_row})"
+            f"Unit {unit['id']}{_ut_seg} MOVED [FLY] from ({orig_col},{orig_row}) to ({dest_col},{dest_row})"
             if is_fly_move
-            else f"Unit {unit['id']} MOVED from ({orig_col},{orig_row}) to ({dest_col},{dest_row})"
+            else f"Unit {unit['id']}{_ut_seg} MOVED from ({orig_col},{orig_row}) to ({dest_col},{dest_row})"
         )
 
     append_action_log(
