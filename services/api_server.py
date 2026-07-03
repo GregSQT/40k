@@ -332,6 +332,9 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
     "_cache_instance_id",
     "_charge_dest_bfs_cache",
     "_charge_fp_offset_pair_cache",
+    # Cache du champ géodésique de charge par-figurine (Étape 5.A), même motif que le move ci-dessous :
+    # dicts volumineux à clés tuples, jamais consommés par l'UI → exclusion obligatoire.
+    "_charge_model_field_cache",
     # Cache du champ géodésique de move par-figurine (Étape 4.1) : dicts volumineux à clés tuples,
     # jamais consommés par l'UI (le front reçoit ``destinations``). Exclusion obligatoire, sinon
     # sérialisé dans chaque réponse → payload énorme + serialize lent.

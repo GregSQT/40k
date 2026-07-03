@@ -562,6 +562,31 @@ def _charge_pool_must_socle_a_socle_if_possible(
     return within_1 if within_1 else list(valid_pool)
 
 
+def _charge_distance_metric(game_state: Dict[str, Any]) -> str:
+    """Métrique de distance de la CHARGE (``hex``|``euclidean``) — sélecteur unique.
+
+    Miroir de ``_move_distance_metric`` (la charge EST un move, règle 11.04) : PvP/replay lisent
+    ``distance_metric["charge"]`` ; le training gym lit ``distance_metric["charge_gym"]`` (défaut
+    ``hex`` pour la perf training). Aucun défaut caché : section/clé/valeur invalide → erreur explicite.
+    """
+    from config_loader import get_config_loader
+    from engine.combat_utils import VALID_DISTANCE_METRICS
+
+    game_config = get_config_loader().get_game_config()
+    if "distance_metric" not in game_config:
+        raise KeyError("Missing 'distance_metric' section in game_config.json")
+    metrics = game_config["distance_metric"]
+    key = "charge_gym" if game_state.get("gym_training_mode") else "charge"
+    if key not in metrics:
+        raise KeyError(f"Missing distance_metric['{key}'] in game_config.json")
+    metric = metrics[key]
+    if metric not in VALID_DISTANCE_METRICS:
+        raise ValueError(
+            f"Invalid distance_metric['{key}'] = {metric!r}, expected one of {VALID_DISTANCE_METRICS}"
+        )
+    return metric
+
+
 def _charge_bfs_max_distance(
     game_state: Dict[str, Any],
     unit_id: str,
@@ -1020,6 +1045,7 @@ def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["_charge_fp_offset_pair_cache"] = {}
     game_state["_has_valid_charge_cache"] = {}
     game_state["_charge_reach_disk_cache"] = {}
+    game_state["_charge_model_field_cache"] = {}  # Étape 5.A : cache champ géodésique euclidien par-fig
     game_state["preview_hexes"] = []
     game_state["active_charge_unit"] = None
     game_state["charge_roll_values"] = {}  # Store 2d6 rolls per unit
@@ -1915,6 +1941,45 @@ def _compute_plan_context(
                 reach.append(cell)
         return reach, dist
 
+    # Étape 5.A — reachability EUCLIDIENNE par-figurine (zone violette). La charge EST un move
+    # (11.04) → même champ géodésique any-angle que l'Étape 4 (``_euclidean_move_field``) : disque
+    # centre-à-centre au budget ``roll × NORM`` contournant les murs (sol) / disque droit (FLY, obstacles
+    # vides). Même contrat que ``_bfs_reach`` : renvoie ``(reach, dist)``, ``dist`` en sous-hex. Cache de
+    # champ par-figurine clé ``(model, start, budget, fly, move_version)`` → 1 géodésique/fig/phase,
+    # re-previews instantanés (mêmes obstacles que le sol : murs + ennemis, la charge traverse les amies).
+    _cm_use_eucl = (_charge_distance_metric(game_state) == "euclidean")
+    _cm_field_cache = game_state.setdefault("_charge_model_field_cache", {})
+    _cm_mv = game_state["_unit_move_version"]
+
+    def _euclidean_reach(
+        m: str, sib: Dict[str, Any], start_col: int, start_row: int, blocked: Set[Tuple[int, int]]
+    ) -> Tuple[List[Tuple[int, int]], Dict[Tuple[int, int], int]]:
+        from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH, precompute_footprint_offsets
+        from engine.phase_handlers.geodesic_move import _euclidean_move_field
+        start = (start_col, start_row)
+        _key = (str(m), start_col, start_row, int(budget), bool(fly_active), _cm_mv)
+        field = _cm_field_cache.get(_key)
+        if field is None:
+            shape = sib["BASE_SHAPE"]
+            size = sib["BASE_SIZE"]
+            if shape == "round":
+                oe: Tuple[Tuple[int, int], ...] = ()
+                oo: Tuple[Tuple[int, int], ...] = ()
+            else:
+                oe, oo = precompute_footprint_offsets(shape, size, int(sib.get("orientation", 0)))
+            obst = set(blocked)
+            obst.discard(start)
+            field = _euclidean_move_field(
+                start, shape, size, oe, oo, obst,
+                board_cols, board_rows, int(budget) * ENGAGEMENT_NORM_HEX_WIDTH,
+            )
+            _cm_field_cache[_key] = field
+        _norm = ENGAGEMENT_NORM_HEX_WIDTH
+        reach = [c for c in field if c != start]
+        dist = {c: int(round(field[c] / _norm)) for c in field}
+        dist[start] = 0
+        return reach, dist
+
     # Marge (sous-hex) autour des unités où l'on lance le check d'engagement PRÉCIS : couvre l'écart
     # entre distance d'empreinte (hex) et clairance euclidienne (socles ronds). Au-delà = jamais engagé.
     _ENG_MARGIN = within_1_zone
@@ -1966,9 +2031,14 @@ def _compute_plan_context(
                     other_origins |= origin_fp[m2]
             other_origins_by_model[m] = other_origins
             _tb = time.perf_counter() if _perf else None
-            reach_by_model[m], dist_by_model[m] = _bfs_reach(
-                sc, sr, set() if fly_active else path_blocked
-            )
+            if _cm_use_eucl:
+                reach_by_model[m], dist_by_model[m] = _euclidean_reach(
+                    m, sib, sc, sr, set() if fly_active else path_blocked
+                )
+            else:
+                reach_by_model[m], dist_by_model[m] = _bfs_reach(
+                    sc, sr, set() if fly_active else path_blocked
+                )
             if _perf and _tb is not None:
                 _acc_bfs += time.perf_counter() - _tb
         tgt_union: Set[Tuple[int, int]] = set()
@@ -2918,6 +2988,25 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
     CHARGE_MAX_DISTANCE = require_key(require_key(game_state["config"], "charge"), "charge_max_distance")
 
+    # Étape 5 — pré-gate d'éligibilité 11.02.1 (« within 12" of one or more enemy units »).
+    # En euclidien : distance bord-à-bord **en LIGNE DROITE** (pas de pathfinding/géodésique), O(ennemis).
+    # Fly-agnostique (un fly déclaré en cours de phase ne change pas une mesure en ligne droite) et sans
+    # le coût géodésique qui plombait l'init de phase. Le pathfinding ne gouverne que l'aboutissement du
+    # charge move (post-jet, 11.04), jamais l'éligibilité à déclarer. Le -2" fly (21.03) borne le move,
+    # pas ce gate. Gym/hex : comportement pathfinding historique inchangé (branche ci-dessous).
+    if _charge_distance_metric(game_state) == "euclidean":
+        from engine.combat_utils import ranged_in_range, socle_from_cache_entry
+        units_cache = require_key(game_state, "units_cache")
+        _charger_socle = socle_from_cache_entry(require_key(units_cache, str(unit["id"])))
+        _unit_player = int(unit["player"])
+        _elig = any(
+            ranged_in_range(_charger_socle, socle_from_cache_entry(e), int(CHARGE_MAX_DISTANCE), "euclidean")
+            for _eid, e in units_cache.items()
+            if int(e["player"]) != _unit_player
+        )
+        _hvt_cache[_hvt_key] = _elig
+        return _elig
+
     # Fast precheck: skip BFS if all enemies are beyond max reachable distance.
     # La distance de charge se mesure **bord à bord** (fig la plus proche → fig ennemie la plus proche),
     # PAS centre à centre : un gros socle (ex. Dreadnought) a son centre loin alors que son bord est à
@@ -3398,6 +3487,100 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         if charge_range == CHARGE_MAX_DISTANCE_SUBHEX and not early_exit_if_valid and tid_arg is None and _multi_declared is None:
             cache[cache_key] = (list(valid_destinations), pos_dist_engage)
         return valid_destinations
+
+    # Étape 5.2 — CHARGE euclidienne SOL (miroir de la branche FLY ci-dessus). La charge EST un move
+    # (règle 11.04) → même champ géodésique any-angle que l'Étape 4 (``_euclidean_move_field``), seul
+    # le budget change. Budget = ``charge_range × NORM`` centre-à-centre (règle 03.01), **SANS** le
+    # ``extra`` hex de ``bfs_max_distance`` : l'euclidien encapsule le décalage ancre↔bord d'empreinte
+    # via la clearance socle (rond) / l'empreinte gonflée (non-rond) + le test d'engagement
+    # empreinte→ennemi ; l'ajouter double-compterait → sur-portée (triche). Obstacles de traversée =
+    # murs + toutes cases occupées (comme le step-BFS sol). Validation par-cellule identique au hex/FLY.
+    # Préfiltre ``near_enemy`` (comme le BFS hex) : une destination de charge valide est forcément en EZ
+    # d'un ennemi → on restreint les checks empreinte+engagement aux cellules proches d'un ennemi (sinon
+    # des dizaines de milliers de cellules de champ sur ×10). Perf : pas de cache de champ ici (cf. Étape 4).
+    if _charge_distance_metric(game_state) == "euclidean":
+        from engine.hex_utils import (
+            ENGAGEMENT_NORM_HEX_WIDTH as _EU_NORM,
+            precompute_footprint_offsets as _eu_pfo,
+            dilate_hex_set_unbounded as _eu_dilate,
+        )
+        from engine.phase_handlers.geodesic_move import _euclidean_move_field as _eu_field_fn
+
+        _eu_shape = unit["BASE_SHAPE"]
+        _eu_base = unit["BASE_SIZE"]
+        if _eu_shape == "round":
+            _eu_off_e: Tuple[Tuple[int, int], ...] = ()
+            _eu_off_o: Tuple[Tuple[int, int], ...] = ()
+        else:
+            _eu_off_e, _eu_off_o = _eu_pfo(_eu_shape, _eu_base, int(unit.get("orientation", 0)))
+
+        _eu_obstacles: Set[Tuple[int, int]] = set(_bfs_wall_hexes) | set(occupied_positions)
+        _eu_obstacles.discard(start_pos)
+        _eu_field = _eu_field_fn(
+            start_pos, _eu_shape, _eu_base, _eu_off_e, _eu_off_o,
+            _eu_obstacles, _bfs_board_cols, _bfs_board_rows, float(charge_range) * _EU_NORM,
+        )
+
+        # Ancres candidates = cellules du champ proches d'un ennemi (seuil = EZ + rayons, cf. _charge_enemy_prox).
+        _eu_near: Set[Tuple[int, int]] = set()
+        for (_ene_id, _ce_near), (_pec, _per, _peth) in zip(indexed_enemy_engagement, _charge_enemy_prox):
+            _ce_occ = _ce_near.get("occupied_hexes") or {(_pec, _per)}
+            _eu_near.update(_eu_dilate({(int(c), int(r)) for c, r in _ce_occ}, _peth))
+
+        valid_destinations = []
+        _eu_short = False
+        for (nc, nr), _eu_d in _eu_field.items():
+            if _eu_short:
+                break
+            neighbor_pos = (nc, nr)
+            if neighbor_pos not in _eu_near:
+                continue
+            if neighbor_pos == start_pos:
+                continue
+            candidate_fp = _candidate_footprint_charge(nc, nr, unit, game_state, fp_offset_pair)
+            if any(not (0 <= x < _bfs_board_cols and 0 <= y < _bfs_board_rows) for (x, y) in candidate_fp):
+                continue
+            if (_bfs_wall_hexes and (candidate_fp & _bfs_wall_hexes)) or (
+                occupied_positions and (candidate_fp & occupied_positions)
+            ):
+                continue
+            synth = _charge_synthetic_charger_cache_entry(game_state, unit, nc, nr, candidate_fp)
+            is_adjacent_to_enemy = False
+            hex_overlaps_enemy = False
+            _cur_engaging: Optional[Set[str]] = set() if _track_engages else None
+            for _eid, enemy_entry in indexed_enemy_engagement:
+                ec, er = int(enemy_entry["col"]), int(enemy_entry["row"])
+                enemy_fp = enemy_entry.get("occupied_hexes", {(ec, er)})
+                if candidate_fp & enemy_fp:
+                    hex_overlaps_enemy = True
+                    break
+                if unit_entries_within_engagement_zone(synth, enemy_entry, engagement_zone):
+                    is_adjacent_to_enemy = True
+                    if _cur_engaging is not None:
+                        _cur_engaging.add(str(_eid))
+                    if tid_arg:
+                        break
+            if is_adjacent_to_enemy and not hex_overlaps_enemy:
+                valid_destinations.append(neighbor_pos)
+                if _track_engages and _cur_engaging is not None:
+                    pos_dist_engage[neighbor_pos] = (_eu_d / _EU_NORM, frozenset(_cur_engaging))
+                if early_exit_if_valid:
+                    _eu_short = True
+                    break
+        if _multi_declared is not None:
+            valid_destinations = [
+                p for p in valid_destinations
+                if pos_dist_engage.get(p, (0, frozenset()))[1] == _multi_declared
+            ]
+        game_state["valid_charge_destinations_pool"] = valid_destinations
+        # Distance par ancre (sous-hex) = valeur du champ géodésique / NORM (centre-à-centre réel).
+        game_state["valid_charge_dest_distances"] = {
+            p: pos_dist_engage[p][0] for p in valid_destinations if p in pos_dist_engage
+        }
+        if charge_range == CHARGE_MAX_DISTANCE_SUBHEX and not early_exit_if_valid and tid_arg is None and _multi_declared is None:
+            cache[cache_key] = (list(valid_destinations), pos_dist_engage)
+        return valid_destinations
+
     # Bounding box of footprint offsets for fast OOB detection (even/odd column variants)
     _fp_bbox_e: Optional[Tuple[int, int, int, int]] = None
     _fp_bbox_o: Optional[Tuple[int, int, int, int]] = None

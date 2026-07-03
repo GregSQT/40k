@@ -570,7 +570,7 @@ export const GameLog: React.FC<GameLogProps> = ({
                         <AdvancedIcon />
                       ) : event.type === "move" ? (
                         <MovedIcon />
-                      ) : event.type === "charge" ? (
+                      ) : event.type === "charge" || event.type === "charge_fail" ? (
                         <ChargedIcon />
                       ) : (
                         getEventIcon(event.type)

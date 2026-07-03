@@ -39,7 +39,8 @@
     "ranged": "euclidean",
     "move": "euclidean",
     "move_gym": "hex",
-    "charge": "hex",
+    "charge": "euclidean",
+    "charge_gym": "hex",
     "engagement": "hex",
     "overlap": "hex"
   },
