@@ -1536,8 +1536,18 @@ def preview_shoot_valid_targets_from_position(
             # )
             return copy.deepcopy(cached_preview)
 
+    # Preview read-only : ``config`` et ``weapon_damage_table`` sont des données statiques
+    # écrites uniquement à l'init du jeu (w40k_core), jamais durant une action. On les partage
+    # PAR RÉFÉRENCE via le memo de deepcopy (elles pèsent ~50% du coût) au lieu de les copier ;
+    # le reste de game_state est deepcopié normalement (cross-références préservées).
+    _preview_share_memo: Dict[int, Any] = {}
+    for _shared_key in ("config", "weapon_damage_table"):
+        _shared_val = game_state.get(_shared_key)
+        if _shared_val is not None:
+            _preview_share_memo[id(_shared_val)] = _shared_val
+
     _preview_perf_deepcopy_t0 = time.perf_counter()
-    gs = copy.deepcopy(game_state)
+    gs = copy.deepcopy(game_state, _preview_share_memo)
     _preview_perf_after_deepcopy = time.perf_counter()
     if "weapon_rule" not in gs:
         gs["weapon_rule"] = 1
