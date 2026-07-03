@@ -265,8 +265,9 @@ délicat à cause des murs).
   deux pools via empreinte discrète orientée. RESTE : miroir replay TS, branches legacy
   single-hex du pool d'ancre (X1 / `base_size==1`), gym (`move_gym=hex` par choix).
   Détail complet dans la section « Étape 4 » plus bas.
-- **Étape 5 — Migration CHARGE** : ✅ FAIT (backend + PvP interactif), validé runtime « ça me semble bien »
-  (2026-07-03). Périmètre précis dans la section « Étape 5 » plus bas. Points clés : module partagé
+- **Étape 5 — Migration CHARGE** : ✅ FAIT et **entièrement soldée (2026-07-04)** — les 3 cas de
+  validation restants sont couverts (multi-cibles V11 runtime OK, take-to-the-skies §20.12, coins de
+  murs via 4.0-bis). Périmètre précis dans la section « Étape 5 » plus bas. Points clés : module partagé
   `geodesic_move.py` ; **deux** systèmes de reachability migrés (pool d'éligibilité/cibles ET
   `_compute_plan_context._bfs_reach` = la zone violette visible) ; pré-gate 12" euclidien **ligne droite**
   (pas géodésique) ; IA analyzer/replay restent hex (runs gym-hex). RESTE : miroir replay TS, unification
@@ -650,9 +651,11 @@ la métrique suit le run analysé.
   Approximation mineure, orthogonale au disque de reachability euclidien.
 - Miroir **replay** TS ; branches legacy single-hex (`base_size==1`/X1) ; gym (`charge_gym=hex`, par choix).
 
-**Checkpoint (fait) :** init de phase rapide, activation rapide, zone violette euclidienne (contourne
-les murs au sol, disque droit en vol). Validé runtime PvP. NON re-testé exhaustivement : coins de murs
-multiples, multi-cibles V11, charge FLY déclarée.
+**Checkpoint (SOLDÉ 2026-07-04) :** init de phase rapide, activation rapide, zone violette euclidienne
+(contourne les murs au sol, disque droit en vol). Validé runtime PvP. Les 3 cas « NON re-testés » ont
+été couverts : coins de murs multiples (fix grazing 4.0-bis), **multi-cibles V11 (validé runtime PvP
+2026-07-04)**, charge FLY déclarée / take-to-the-skies (vérifié code §20.12, −2" + traversée complets).
+**Étape 5 entièrement close.**
 
 ### Étape 6 — Cohérence & nettoyage
 - Vérifier qu'aucun call-site de portée tir/move/charge n'appelle encore
@@ -921,3 +924,27 @@ migration. Même logique que le normal move — à ajouter à l'Étape 5 ou 6.
 `spatial_relations.py:165` — le docstring annonce de l'euclidien ; l'implémentation
 réelle est hex (§4 de l'audit, ligne 537). Risque de maintenance : un développeur peut
 croire la fonction déjà migrée. Corriger le docstring à l'Étape 7.0 (avant le code).
+**Mise à jour (2026-07-04)** : le docstring réel est désormais neutre
+(`"...C/clearance engagement contract"`, `spatial_relations.py:176`) — plus de mention
+euclidienne trompeuse. Implémentation toujours hex. Micro-tâche du 7.0 déjà partiellement
+faite ; reste à aligner l'implémentation sur la sémantique euclidienne à l'Étape 7.1.
+
+### 20.12 — ✅ CORRECT (vérifié 2026-07-04) : Take to the skies en CHARGE (21.03) complet
+
+Règle 21.03 : une unité FLYING peut déclarer `take to the skies` avant un charge move →
+`−2"` sur la distance max **et** traversée libre (murs + figurines + ignore vertical).
+Vérification exhaustive du code (charge) :
+- **−2"** : `_charge_budget_subhex` (charge_handlers.py:90) = `jet × inches_to_subhex − 2×inches_to_subhex`
+  si vol déclaré. **Source unique** des 5 sites de calcul de distance de charge (pool euclidien,
+  cibles, BFS) → le malus se propage dans le budget du champ géodésique euclidien. Aucun site oublié.
+- **Traversée** : `_charge_fly_active` (charge_handlers.py:65) = source unique des 4 BFS/champs ;
+  vol actif → obstacles vides (disque droit), sinon obstacles normaux.
+- **Vertical** : N/A (grille hex 2D horizontale, vertical non modélisé).
+- **Optionnel/cohérent** : sans déclaration → 2D6 plein + pas de traversée ; avec → −2" + traversée
+  (les deux gouvernés par la même déclaration `units_took_to_skies_charge`, set dédié charge).
+- **IA** ne déclare jamais (charge IA inchangée, pas de régression training).
+- **Éligibilité généreuse** (`for_eligibility=True`) : propose la charge si atteignable par les airs
+  avant déclaration — règle-correct (le pré-gate est le 12" ligne droite ; charge ratée légitime 11.04).
+
+**Aucune action requise.** Point rattaché à l'Étape 5 (charge FLY déclarée = un des cas « NON re-testés
+exhaustivement » du checkpoint Étape 5, désormais couvert côté code).
