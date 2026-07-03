@@ -1264,11 +1264,23 @@ def preview_hidden_models_from_model_positions(
     }
 
 
-def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
+def build_unit_los_cache(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    *,
+    max_target_range: Optional[int] = None,
+) -> None:
     """
     AI_TURN.md: Calculate LoS cache for a specific unit.
     Uses units_cache and has_line_of_sight_coords() for performance.
-    
+
+    max_target_range: si fourni (> 0), les ennemis dont la distance bord-à-bord dépasse
+        cette portée sont EXCLUS du calcul de LoS (aucun `compute_unit_los`). Utilisé par le
+        move-LoS-preview : un ennemi hors portée max d'arme ne peut jamais être une cible valide,
+        donc calculer sa LoS (coûteuse, par-figurine + obscuring) est inutile. Même métrique et
+        même seuil que `_build_weapon_availability_enemy_precheck` → cibles valides identiques.
+        Le pool tolère un ennemi absent de `los_cache` (traité comme sans LoS).
+
     Returns: void (updates unit["los_cache"])
     """
     unit = _get_unit_by_id(game_state, unit_id)
@@ -1310,6 +1322,17 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
     los_map: Dict[str, bool] = {}
     cover_map: Dict[str, bool] = {}
 
+    # Move-LoS-preview : filtre de portée. Prépare le socle tireur + la métrique une seule fois ;
+    # les ennemis au-delà de max_target_range sont ignorés (voir docstring).
+    _range_cull = isinstance(max_target_range, int) and max_target_range > 0
+    if _range_cull:
+        from engine.combat_utils import ranged_edge_distance
+        _cull_metric = _ranged_distance_metric()
+        _cull_shooter_entry = units_cache.get(unit_id)
+        if _cull_shooter_entry is None:
+            raise KeyError(f"Unit {unit_id} not in units_cache (dead or absent)")
+        _cull_shooter_socle = _socle_from_entry(_cull_shooter_entry)
+
     # Calculate LoS for each enemy in units_cache (only alive enemies — dead must not appear in pool).
     # All visibility/cover is delegated to compute_unit_los() — the single source of truth.
     for target_id, target_data in units_cache.items():
@@ -1319,6 +1342,16 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
         # CRITICAL: Exclude dead units so they never appear in los_cache → valid_target_pool
         if not is_unit_alive(str(target_id), game_state):
             continue
+        # Range cull (preview) : ennemi hors portée max d'arme → jamais une cible valide.
+        if _range_cull:
+            _d = ranged_edge_distance(
+                _cull_shooter_socle,
+                _socle_from_entry(target_data),
+                _cull_metric,
+                max_distance=max_target_range,
+            )
+            if _d > max_target_range:
+                continue
         target_unit = _get_unit_by_id(game_state, str(target_id))
         if target_unit is None:
             continue
@@ -1544,8 +1577,19 @@ def preview_shoot_valid_targets_from_position(
     else:
         adjacent_status = 1 if _is_adjacent_to_enemy_within_cc_range(gs, u) else 0
 
+    # Portée max d'arme du tireur : au-delà, un ennemi ne peut jamais être ciblé → on évite
+    # de calculer sa LoS (poste dominant du preview). Même métrique que le pool de cibles.
+    _preview_max_rng = 0
+    for _w in require_key(u, "RNG_WEAPONS"):
+        _r = require_key(_w, "RNG")
+        if _r > _preview_max_rng:
+            _preview_max_rng = _r
+
     _preview_perf_los_t0 = time.perf_counter()
-    build_unit_los_cache(gs, unit_id_str)
+    build_unit_los_cache(
+        gs, unit_id_str,
+        max_target_range=_preview_max_rng if _preview_max_rng > 0 else None,
+    )
     _preview_perf_after_los = time.perf_counter()
     _preview_perf_enemy_precheck_t0 = time.perf_counter()
     preview_enemy_precheck = _build_weapon_availability_enemy_precheck(
