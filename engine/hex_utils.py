@@ -1563,10 +1563,14 @@ def _point_segment_dist_sq(
 #   - `obstacles` : ensemble générique de cellules bloquantes (murs, et selon les toggles
 #     de traversée : ennemis / amis / bande d'EZ) — pas seulement les murs.
 #
-# LIMITE ASSUMÉE (héritée du spike, à traiter au branchement 4.1/4.2) : la règle
-# « deux murs jointifs bloquent le passage par leur coin partagé » (grazing) n'est
-# pas gérée ici en `clearance=0`. À `clearance>0` elle l'est de fait (le socle ne
-# tient pas dans l'interstice).
+# GRAZING / SQUEEZE (2026-07-04) : à `clearance=0` la règle « deux murs jointifs bloquent
+# le passage par leur coin partagé » n'est PAS gérée (LoS-ray, tangence permise) — assumé
+# pour le point/oval (l'oval est géré en amont par dilatation d'empreinte). À `clearance>0`
+# elle EST gérée, mais PAS « de fait » : le rattachement (plus bas) teste le pas adjacent
+# `cur→nb` à la capsule et écarte `nb` si le socle y chevaucherait un mur → un socle rond ne
+# peut ni traverser ni se centrer sur un goulot plus étroit que son diamètre. Sans ce test,
+# le flood cellule-par-cellule se faufilait partout (la clearance ne bornait que le raccourci
+# any-angle). Cf. « 4.0-bis » de Documentation/Distance management.md.
 # ---------------------------------------------------------------------------
 
 _SEG_TOL: float = 1e-9

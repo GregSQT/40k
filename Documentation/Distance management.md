@@ -503,6 +503,28 @@ plus étroit que lui (plus strict que l'hex, plus correct physiquement). Décisi
   **rejet rapide centre→segment** avant le test capsule. Cas réel mesuré : **1.12 s → 0.10 s** par
   champ (board ×10, ~3500 obstacles, socle base 6, budget 60 subhex).
 
+**4.0-bis — Correctif grazing / squeeze de socle rond (2026-07-04).** Bug découvert en validant
+« coins de murs multiples » (Étape 5) : la `clearance` n'était appliquée qu'au **raccourci any-angle**
+(rattachement Theta\* à l'ancêtre). Le **pas adjacent** `cur→nb` (emprunté quand le raccourci LoS
+échoue) était accepté **inconditionnellement**, sans test capsule → le flood se propageait cellule
+par cellule à travers n'importe quel goulot ouvert. Conséquence : un socle rond de rayon r **passait
+un goulot plus étroit que son diamètre** (le champ atteignait `nb` même si le socle y chevauche un
+mur), contredisant l'effet « assumé » ci-dessus (Option A) et le commentaire *LIMITE ASSUMÉE* de
+`geodesic_field` (« à `clearance>0` la grazing est gérée de fait »), qui était **inexact**.
+Asymétrie : l'oval, lui, était déjà correct (obstacles dilatés par l'empreinte → cellules-ancre du
+chemin bloquées). **Fix** (`geodesic_field`, branche `else` du rattachement) : quand le raccourci
+ancêtre est bloqué, tester le pas adjacent `cur→nb` à la **capsule** ; si le socle y chevaucherait un
+mur → `continue` (nb inatteignable via cur, re-proposé par un autre voisin). Un seul test couvre à la
+fois le gate d'entrée de cellule (goulot) et le corner-cutting du pas adjacent, en réutilisant
+`_segment_clear_indexed`. **Court-circuit `clearance<=0`** → no-op prouvé (oval/point/gym-hex), zéro
+surcoût. Validé (moteur, déterministe, `scratchpad/validate_fix.py`) : `clearance=0` **strictement
+identique** avant/après ; `clearance>0` ne fait que **retirer** des cellules (0 ajoutée = aucune
+nouvelle sur-portée), 0 sur-blocage en terrain dégagé ; seuil rond = passe ssi goulot ≥ diamètre ;
+FLY no-op (obstacles vides). Perf : rond **+24 %** (~15 ms/appel 220×300, absolu OK tour-par-tour),
+`clearance=0` surcoût nul. Test visuel PvP OK (2026-07-04). Partagé **move + charge rond** (principe
+miroir). Le commentaire *LIMITE ASSUMÉE* de [hex_utils.py] reste à réécrire (désormais garanti par le
+gate de pas adjacent, plus « de fait »).
+
 **4.1 — Branchement (`movement_handlers.py`, `config/game_config.json`).**
 - Résolveur `_move_distance_metric(game_state)` : **PvP/replay → `distance_metric["move"]`**
   (= `euclidean`), **gym → `distance_metric["move_gym"]`** (= `hex` par défaut, 1 paramètre pour
