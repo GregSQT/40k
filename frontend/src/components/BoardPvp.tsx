@@ -833,6 +833,7 @@ type BoardProps = {
   replayActionIndex?: number; // For replay mode: detect rollback and reset objective control
   autoSelectWeapon?: boolean;
   hpBarPerModel?: boolean; // true → barre HP par figurine ; false → une barre par escouade (hors characters)
+  hpBarBlinkEnlarged?: boolean; // true → grossit ×1.5 la barre HP des cibles blink / preview ; false → taille normale
   showWoundProbability?: boolean; // true → affiche le % de blessure au-dessus des cibles blink ; false → masqué
   statusBadgePerModel?: boolean; // true → badge de statut (caché/fui/choc) par figurine ; false → un seul badge si toute l'escouade a le statut
   boardDisplayMode?: BoardDisplayMode; // "full" → pleine taille, la page scrolle ; "fit" → réduit pour tenir dans l'écran ; "window" → taille réelle dans une fenêtre limitée à l'écran, navigable (molette/scroll)
@@ -1242,6 +1243,7 @@ export default function Board({
   replayActionIndex,
   autoSelectWeapon,
   hpBarPerModel,
+  hpBarBlinkEnlarged,
   showWoundProbability,
   statusBadgePerModel,
   boardDisplayMode = "full",
@@ -5235,7 +5237,8 @@ export default function Board({
     blinkTargetRingOverlayRef.current = overlay;
     overlay.visible = !hideIndicators;
     overlay.clear();
-    const ringPhase = phase === "shoot" || phase === "charge" || phase === "fight";
+    const ringPhase =
+      phase === "shoot" || phase === "charge" || phase === "fight" || phase === "move";
     if (ringPhase && effectiveBlinkingUnitsWithMovePreview.length > 0 && boardConfig) {
       const HEX_RADIUS_H = boardConfig.hex_radius;
       const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
@@ -8236,7 +8239,7 @@ export default function Board({
             .map(([m, v]) => `${m}=${v ? 1 : 0}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#swp:${showWoundProbability ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}#dplan:${deployPlanFp}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hpbe:${hpBarBlinkEnlarged ? 1 : 0}#swp:${showWoundProbability ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}#dplan:${deployPlanFp}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -8994,6 +8997,7 @@ export default function Board({
           modelHidden: isMoveOriginGhost ? [] : modelHidden,
           modelGhost,
           hpBarPerModel,
+          hpBarBlinkEnlarged,
           showWoundProbability,
           statusBadgePerModel,
           app,
@@ -9899,6 +9903,7 @@ export default function Board({
     attackPreview,
     autoSelectWeapon,
     hpBarPerModel,
+    hpBarBlinkEnlarged,
     showWoundProbability,
     statusBadgePerModel,
     hideIndicators,

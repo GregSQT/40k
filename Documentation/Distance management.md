@@ -265,7 +265,12 @@ délicat à cause des murs).
   deux pools via empreinte discrète orientée. RESTE : miroir replay TS, branches legacy
   single-hex du pool d'ancre (X1 / `base_size==1`), gym (`move_gym=hex` par choix).
   Détail complet dans la section « Étape 4 » plus bas.
-- **Étape 5 — Migration CHARGE** : ⬜ À FAIRE.
+- **Étape 5 — Migration CHARGE** : ✅ FAIT (backend + PvP interactif), validé runtime « ça me semble bien »
+  (2026-07-03). Périmètre précis dans la section « Étape 5 » plus bas. Points clés : module partagé
+  `geodesic_move.py` ; **deux** systèmes de reachability migrés (pool d'éligibilité/cibles ET
+  `_compute_plan_context._bfs_reach` = la zone violette visible) ; pré-gate 12" euclidien **ligne droite**
+  (pas géodésique) ; IA analyzer/replay restent hex (runs gym-hex). RESTE : miroir replay TS, unification
+  du cache de champ entre pool et plan-context (C), branches legacy single-hex.
 - **Étape 6 — Cohérence & nettoyage** : ⬜ À FAIRE.
 - **Étape 7 — Migration EZ euclidienne** : ⬜ À FAIRE. **Décision révisée le 2026-07-03**
   (l'EZ ne reste PLUS hex — voir « Décisions actées » et la section « Étape 7 »).
@@ -552,43 +557,80 @@ plus étroit que lui (plus strict que l'hex, plus correct physiquement). Décisi
   fermé (clearance), pas d'overlap allié possible (filtre hex conservé), PvP fluide, squad rond/oval
   euclidien == par-fig.
 
-### Étape 5 — Migration CHARGE
+### Étape 5 — Migration CHARGE ✅ (état réel 2026-07-03)
 
-**Deux checks distincts à ne pas confondre (règles 11.02 / 11.04) :**
-- **Éligibilité à la déclaration (11.02)** : "within 12" of one or more enemy units" →
-  mesure euclidienne bord-à-bord (01.04), ligne droite, **pas géodésique**. À garder
-  comme check rapide O(1) séparé.
-- **Budget du charge move (11.04)** : maximum distance = jet 2D6 → chemin géodésique
-  (cumul de segments, règle 03.01). `_charge_bfs_max_distance` → `geodesic_field`
-  avec même infrastructure que l'Étape 4 (`_move_model_field_cache`), budget
-  `2D6 × inches_to_subhex` au lieu de `M × inches_to_subhex`.
+> ⚠️ **DÉCOUVERTE MAJEURE (ne pas re-rater) : la charge a DEUX systèmes de reachability
+> distincts.** Le premier essai a migré le mauvais et n'a rien changé à l'affichage tout en
+> plombant la perf. Les deux ont été migrés :
+> 1. **`charge_build_valid_destinations_pool`** (pool d'ancre) → sert l'**éligibilité** (init
+>    de phase, via `_has_valid_charge_target`) + la **liste de cibles** à l'activation
+>    (`charge_build_valid_targets`).
+> 2. **`_compute_plan_context._bfs_reach`** (BFS hex par-figurine) → sert la **zone violette
+>    interactive dessinée à l'écran** (region_by_base, ~92 % du coût preview). **C'est lui
+>    que voit le joueur.** Le pool (1) ne dessine RIEN d'interactif.
 
-**Call-sites backend :**
-- `charge_handlers.py` (565-630) : `_charge_bfs_max_distance` → `geodesic_field`
-  (réutiliser l'infrastructure de l'Étape 4, budget différent).
-- `charge_handlers.py` (2398-2480) : `charge_build_valid_targets` — distinguer
-  le check 12" euclidien (déclaration) du budget géodésique (move).
-- `charge_handlers.py` (~630-670) : `_charge_skip_hex_lb_prune_round_round_engagement`
-  — **vérifier son statut** : l'audit §7 indique qu'il utilise déjà "Euclidienne
-  round-round" comme prune. Si c'est le cas, ne pas retoucher ; documenter
-  explicitement qu'il est déjà compatible euclidien.
+**Ordre réel (code PvP = règles 11.02, vérifié).** Le jet 2D6 a lieu **à l'activation**
+(`charge` action, `charge_handlers.py:2580`), **AVANT** la désignation des cibles. Les cibles
+sont ensuite bornées par la **distance jetée** (11.04 « within the maximum distance »), **pas
+par 12"**. Le 12" n'est QUE le pré-gate d'éligibilité à déclarer (11.02.1). En gym (RL) le jet
+est fait à la sélection (MDP inchangé).
 
-**Call-sites IA charge à migrer dans le même lot** :
-- `ai/analyzer_phases/charge_handler.py` (75-110) — distance charge déclarée (hex cube
-  actuellement) → euclidien bord-à-bord pour le check 12", géodésique pour le budget.
-- `ai/game_replay_logger.py` (169-200) — `distance_needed` en hex cube → à aligner
-  sur la nouvelle métrique pour que les logs restent exploitables.
+**5.0 — Module partagé (`engine/phase_handlers/geodesic_move.py`).** `_euclidean_move_field` +
+`_inflate_obstacles_by_footprint` extraits de `movement_handlers.py` (géométrie pure, deps =
+hex_utils seul). Le **cache** de champ N'EST PAS mutualisé : les obstacles diffèrent (move =
+murs+ennemis+amies+EZ ; charge = murs+ennemis seuls, traverse les amies, ignore l'EZ) → un
+cache partagé clé `(model,start,budget)` collisionnerait entre phases. Chaque phase garde son
+cache local ; seul le CALCUL est partagé.
 
-**Frontend :**
-- `useEngineAPI.ts` (`charge_dest_distances`) et `BoardPvp.tsx` (`chargeMaxDistance`) :
-  backend-driven comme le move → aucun portage TS nécessaire pour le PvP.
-- `BoardReplay.tsx` BFS charge → portage TS du champ géodésique (cosmétique, replay).
+**5.1 — Sélecteur (`_charge_distance_metric`).** PvP/replay → `distance_metric["charge"]`
+(= `euclidean`), gym → `distance_metric["charge_gym"]` (= `hex`). Miroir de `_move_distance_metric`.
+
+**5.2 — Pool euclidien (`charge_build_valid_destinations_pool`).** Branche euclidienne calquée
+sur la branche FLY (itère les cellules du champ, rejoue la validation placement/overlap/engagement).
+Budget = **`charge_range × NORM`** centre-à-centre (règle 03.01), **SANS** le `extra` hex de
+`bfs_max_distance` (l'euclidien encapsule le décalage ancre↔bord via la clearance socle + le test
+d'engagement empreinte→ennemi ; l'ajouter = sur-portée = triche). FLY = disque droit (déjà en place,
+obstacles vides). **Préfiltre `near_enemy`** (une destination valide est forcément en EZ d'un ennemi)
+→ évite les checks sur les dizaines de milliers de cellules du champ.
+
+**5.3 — Pré-gate d'éligibilité 12" (`_has_valid_charge_target`).** = `ranged_in_range(..., "euclidean")`
+bord-à-bord **EN LIGNE DROITE**, O(ennemis), **PAS de pathfinding/géodésique**. Raison actée : un
+joueur peut donner `fly` à une unité en cours de phase → une mesure en ligne droite est fly-agnostique,
+correcte (11.02.1 « within 12" »), et supprime le coût géodésique qui plombait l'init de phase. Le
+pathfinding ne gouverne QUE l'aboutissement du move (post-jet, 11.04), jamais l'éligibilité. Gym/hex :
+comportement pathfinding historique inchangé (gaté sur la métrique).
+
+**5.A — Zone violette euclidienne (`_compute_plan_context._bfs_reach` → `_euclidean_reach`).** Champ
+géodésique euclidien par-figurine (budget `roll_subhex × NORM`, disque droit FLY), même contrat
+`(reach, dist)` que le BFS hex. **Cache de champ** `_charge_model_field_cache` clé
+`(model, start, budget, fly, move_version)` → 1 géodésique/fig/phase, re-previews instantanés. Vidé au
+start de phase (`charge_phase_start`), exclu de la sérialisation API (`_GAME_STATE_EXCLUDE_KEYS`).
+
+**`_charge_skip_hex_lb_prune_round_round_engagement` (~630-670) :** confirmé **déjà compatible
+euclidien** (désactive la prune hex pour round↔round) — non retouché.
+
+**5.4 — IA analyzer / replay : restent HEX (décision révisée).** `ai/analyzer_phases/charge_handler.py`
+et `ai/game_replay_logger.py` traitent le pipeline **gym/training/replay**, où la charge est **hex**
+(`charge_gym`). Les migrer en euclidien mesurerait de l'euclidien sur des runs hex = incohérence
+métrique. Le §5.4 initial (« migrer en euclidien ») était **faux** → ces deux fichiers restent hex,
+la métrique suit le run analysé.
+
+**Frontend :** PvP backend-driven (pool + plan-context) → aucun portage TS. `BoardReplay.tsx` BFS charge
+→ reste hex (cosmétique, replay).
 
 **Overlap et contact ennemi :** inchangés (hex).
 
-**Checkpoint** : distance de charge en disque euclidien, contournement propre des murs,
-contact ennemi validé en hex ; check 12" (déclaration) et budget (move) testés
-séparément sur un cas coin-de-mur ; logs IA cohérents. Valider PvP.
+**RESTE (⬜) :**
+- **C (unification cache)** : `charge_build_valid_targets` relance un `geodesic_field` par activation
+  (pool d'ancre) au lieu de réutiliser le cache par-figurine du plan-context. Atténué par le préfiltre
+  `near_enemy`, mais un géodésique par activation subsiste. À unifier si la perf activation redevient un souci.
+- **`dist_tgt` / `_dist_field`** (plan-context, filtre « must end closer to target » 11.04) : reste hex.
+  Approximation mineure, orthogonale au disque de reachability euclidien.
+- Miroir **replay** TS ; branches legacy single-hex (`base_size==1`/X1) ; gym (`charge_gym=hex`, par choix).
+
+**Checkpoint (fait) :** init de phase rapide, activation rapide, zone violette euclidienne (contourne
+les murs au sol, disque droit en vol). Validé runtime PvP. NON re-testé exhaustivement : coins de murs
+multiples, multi-cibles V11, charge FLY déclarée.
 
 ### Étape 6 — Cohérence & nettoyage
 - Vérifier qu'aucun call-site de portée tir/move/charge n'appelle encore
@@ -606,6 +648,9 @@ séparément sur un cas coin-de-mur ; logs IA cohérents. Valider PvP.
 | Cohérence inter-modèles (03.03) | Non planifié — ajouter à une Étape 8 |
 | ~~Socles non-ronds (oval/square) move~~ | ✅ Migré euclidien (2026-07-03, Option 2 empreinte discrète) |
 | ~~Pool d'ancre multi-hex (`ez>1`)~~ | ✅ Migré euclidien ground (2026-07-03) — sauf single-hex legacy `base_size==1`/X1 |
+| ~~Charge (11.04) + éligibilité 12" (11.02)~~ | ✅ Migré euclidien (2026-07-03, Étape 5) — voir « Étape 5 » |
+| IA analyzer/replay charge (`ai/analyzer_phases/charge_handler.py`, `ai/game_replay_logger.py`) | Restent hex : traitent des runs gym-hex → la métrique suit le run (décision Étape 5.4) |
+| `dist_tgt` plan-context charge (filtre « closer to target » 11.04) | Reste hex, approximation mineure orthogonale au disque de reachability |
 | Gym (`move_gym=hex`) | Choix : training reste hex (perf) — 1 param (`distance_metric.move_gym`) pour basculer |
 | `base_size==1` / X1 (`inches_to_subhex=1`) legacy | Parké — suppression = abandon support X1 (curriculum) ; non tranché |
 | Observations / récompenses IA (§10) | Retrain prévu de toute façon → ignoré pendant migration |
@@ -830,6 +875,13 @@ unité à 11" en euclidien mais à 13" en géodésique (couloir de murs) → él
 déclarer une charge, mais charge ratée à l'exécution. C'est règle-correct (charge
 ratée légitime), mais le code doit distinguer les deux checks, pas les fusionner dans
 `charge_build_valid_targets`. À vérifier à l'Étape 5.
+
+✅ **RÉSOLU (Étape 5, 2026-07-03).** Pré-gate d'éligibilité (`_has_valid_charge_target`) =
+euclidien **ligne droite** (`ranged_in_range`, O(ennemis)), séparé du budget géodésique (pool
+`charge_build_valid_destinations_pool` au jet). Précision de l'ordre : le jet a lieu à
+l'activation AVANT la désignation des cibles ; les cibles sont bornées par **le jet**, pas par
+12". Le 12" n'est que le pré-gate d'éligibilité. Décision : le pré-gate reste **ligne droite**
+(pas géodésique) car un `fly` peut être accordé en cours de phase → mesure fly-agnostique.
 
 ### 20.9 — LACUNE : Cohérence (03.03) non mentionnée dans le plan
 

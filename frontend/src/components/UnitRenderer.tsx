@@ -151,6 +151,8 @@ interface UnitRendererProps {
    * escouade (figs non-character uniquement) ; les characters gardent leur barre.
    */
   hpBarPerModel?: boolean;
+  /** true → grossit ×1.5 la barre HP des cibles blink / target preview. false (défaut) → taille normale. */
+  hpBarBlinkEnlarged?: boolean;
   /** true → affiche le % de blessure au-dessus des cibles blink ; false → masqué (le jet 2D6 de charge reste affiché). */
   showWoundProbability?: boolean;
   /**
@@ -1762,8 +1764,9 @@ export class UnitRenderer {
 
     // Use either individual target preview OR multi-unit blinking
     const shouldShowBlinkingHP = isTargetPreviewed || shouldBlink;
-    const finalBarWidth = shouldShowBlinkingHP ? HP_BAR_WIDTH * 1.5 : HP_BAR_WIDTH;
-    const finalBarHeight = shouldShowBlinkingHP ? HP_BAR_HEIGHT * 1.5 : HP_BAR_HEIGHT;
+    const blinkEnlargeFactor = this.props.hpBarBlinkEnlarged ? 1.5 : 1;
+    const finalBarWidth = shouldShowBlinkingHP ? HP_BAR_WIDTH * blinkEnlargeFactor : HP_BAR_WIDTH;
+    const finalBarHeight = shouldShowBlinkingHP ? HP_BAR_HEIGHT * blinkEnlargeFactor : HP_BAR_HEIGHT;
     const finalBarX = shouldShowBlinkingHP ? centerX - finalBarWidth / 2 : barX;
     const finalBarY = shouldShowBlinkingHP ? barY - (finalBarHeight - HP_BAR_HEIGHT) : barY;
 

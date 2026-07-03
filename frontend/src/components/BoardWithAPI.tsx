@@ -2181,6 +2181,7 @@ export const BoardWithAPI: React.FC = () => {
     const showDebugLoSStr = localStorage.getItem("showDebugLoS");
     const autoSelectWeaponStr = localStorage.getItem("autoSelectWeapon");
     const hpBarPerModelStr = localStorage.getItem("hpBarPerModel");
+    const hpBarBlinkEnlargedStr = localStorage.getItem("hpBarBlinkEnlarged");
     const showWoundProbabilityStr = localStorage.getItem("showWoundProbability");
     // Mode d'affichage du board. Migration de l'ancien booléen "fitBoardToScreen" : true → "fit".
     const boardDisplayModeStr = localStorage.getItem("boardDisplayMode");
@@ -2204,6 +2205,7 @@ export const BoardWithAPI: React.FC = () => {
       autoSelectWeapon:
         canUseAutoWeaponSelection && (autoSelectWeaponStr ? JSON.parse(autoSelectWeaponStr) : true),
       hpBarPerModel: hpBarPerModelStr ? JSON.parse(hpBarPerModelStr) : false,
+      hpBarBlinkEnlarged: hpBarBlinkEnlargedStr ? JSON.parse(hpBarBlinkEnlargedStr) : false,
       showWoundProbability: showWoundProbabilityStr ? JSON.parse(showWoundProbabilityStr) : false,
       boardDisplayMode: (boardDisplayModeStr
         ? JSON.parse(boardDisplayModeStr)
@@ -2270,6 +2272,11 @@ export const BoardWithAPI: React.FC = () => {
   const handleToggleHpBarPerModel = (value: boolean) => {
     setSettings((prev) => ({ ...prev, hpBarPerModel: value }));
     localStorage.setItem("hpBarPerModel", JSON.stringify(value));
+  };
+
+  const handleToggleHpBarBlinkEnlarged = (value: boolean) => {
+    setSettings((prev) => ({ ...prev, hpBarBlinkEnlarged: value }));
+    localStorage.setItem("hpBarBlinkEnlarged", JSON.stringify(value));
   };
 
   const handleToggleShowWoundProbability = (value: boolean) => {
@@ -5214,6 +5221,7 @@ export const BoardWithAPI: React.FC = () => {
             showAdvanceWarningPopup={false}
             autoSelectWeapon={settings.autoSelectWeapon}
             hpBarPerModel={settings.hpBarPerModel}
+            hpBarBlinkEnlarged={settings.hpBarBlinkEnlarged}
             showWoundProbability={settings.showWoundProbability}
             statusBadgePerModel={settings.statusBadgePerModel}
             boardDisplayMode={settings.boardDisplayMode}
@@ -6362,6 +6370,8 @@ export const BoardWithAPI: React.FC = () => {
         onToggleAutoSelectWeapon={handleToggleAutoSelectWeapon}
         hpBarPerModel={settings.hpBarPerModel}
         onToggleHpBarPerModel={handleToggleHpBarPerModel}
+        hpBarBlinkEnlarged={settings.hpBarBlinkEnlarged}
+        onToggleHpBarBlinkEnlarged={handleToggleHpBarBlinkEnlarged}
         showWoundProbability={settings.showWoundProbability}
         onToggleShowWoundProbability={handleToggleShowWoundProbability}
         boardDisplayMode={settings.boardDisplayMode}

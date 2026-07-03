@@ -19,6 +19,8 @@ interface SettingsMenuProps {
   onToggleAutoSelectWeapon: (value: boolean) => void;
   hpBarPerModel?: boolean;
   onToggleHpBarPerModel?: (value: boolean) => void;
+  hpBarBlinkEnlarged?: boolean;
+  onToggleHpBarBlinkEnlarged?: (value: boolean) => void;
   showWoundProbability?: boolean;
   onToggleShowWoundProbability?: (value: boolean) => void;
   boardDisplayMode?: BoardDisplayMode;
@@ -137,6 +139,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   onToggleAutoSelectWeapon,
   hpBarPerModel = false,
   onToggleHpBarPerModel,
+  hpBarBlinkEnlarged = false,
+  onToggleHpBarBlinkEnlarged,
   showWoundProbability = false,
   onToggleShowWoundProbability,
   boardDisplayMode = "full",
@@ -162,6 +166,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     showDebugLoS: boolean;
     autoSelectWeapon: boolean;
     hpBarPerModel: boolean;
+    hpBarBlinkEnlarged: boolean;
     showWoundProbability: boolean;
     boardDisplayMode: BoardDisplayMode;
     statusBadgePerModel: boolean;
@@ -177,6 +182,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     showDebugLoS,
     autoSelectWeapon,
     hpBarPerModel,
+    hpBarBlinkEnlarged,
     showWoundProbability,
     boardDisplayMode,
     statusBadgePerModel,
@@ -205,6 +211,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
       if (autoSelectWeapon !== s.autoSelectWeapon) onToggleAutoSelectWeapon(s.autoSelectWeapon);
       if (onToggleHpBarPerModel && hpBarPerModel !== s.hpBarPerModel)
         onToggleHpBarPerModel(s.hpBarPerModel);
+      if (onToggleHpBarBlinkEnlarged && hpBarBlinkEnlarged !== s.hpBarBlinkEnlarged)
+        onToggleHpBarBlinkEnlarged(s.hpBarBlinkEnlarged);
       if (onToggleShowWoundProbability && showWoundProbability !== s.showWoundProbability)
         onToggleShowWoundProbability(s.showWoundProbability);
       if (onSetBoardDisplayMode && boardDisplayMode !== s.boardDisplayMode)
@@ -354,6 +362,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
           )}
 
           {(onToggleHpBarPerModel ||
+            onToggleHpBarBlinkEnlarged ||
             onToggleShowWoundProbability ||
             onToggleStatusBadgePerModel ||
             onSetBoardDisplayMode ||
@@ -365,6 +374,14 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                   onChange={onToggleHpBarPerModel}
                   label="Barre HP par figurine"
                   description="Activé : une barre de vie sur chaque figurine. Désactivé : une seule barre par escouade (hors personnages). Les personnages affichent toujours leurs PV réels."
+                />
+              )}
+              {onToggleHpBarBlinkEnlarged && (
+                <ToggleRow
+                  checked={hpBarBlinkEnlarged}
+                  onChange={onToggleHpBarBlinkEnlarged}
+                  label="Grossir barre HP des cibles"
+                  description="Activé : la barre de vie des cibles blink / prévisualisées est agrandie (×1.5). Désactivé : taille normale."
                 />
               )}
               {onToggleShowWoundProbability && (
