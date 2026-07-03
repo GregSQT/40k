@@ -1109,7 +1109,7 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def compute_unit_hidden_models(
+def compute_models_in_obscuring_terrain(
     unit: Dict[str, Any],
     by_model: Dict[Any, Any],
     game_state: Dict[str, Any],
@@ -1167,7 +1167,7 @@ def compute_hidden_statuses(game_state: Dict[str, Any]) -> None:
             unit["hidden_models"] = []
             continue
         by_model = require_key(units_cache[str(unit_id)], "occupied_hexes_by_model")
-        hidden_model_ids = compute_unit_hidden_models(unit, by_model, game_state, terrain_areas)
+        hidden_model_ids = compute_models_in_obscuring_terrain(unit, by_model, game_state, terrain_areas)
         unit["hidden_models"] = hidden_model_ids
         unit["hidden"] = len(hidden_model_ids) == len(by_model) and len(by_model) > 0
 
@@ -1182,7 +1182,7 @@ def preview_hidden_models_from_position(
     """Read-only : statut "caché" (rule 13.09) de chaque figurine SI l'escouade était déplacée à
     (dest_col, dest_row) avec ``orientation``. Reproduit le chemin du move réel
     (``translate_squad_to_destination`` : translation offset rigide des figs ; l'orientation est
-    appliquée à l'unité avant recalcul du footprint) puis réutilise ``compute_unit_hidden_models``
+    appliquée à l'unité avant recalcul du footprint) puis réutilise ``compute_models_in_obscuring_terrain``
     → résultat identique au recalcul effectué après le drop, sans muter ``game_state`` ni deepcopy.
 
     Retourne ``{"hidden_models": [...], "hidden": bool}``.
@@ -1217,7 +1217,7 @@ def preview_hidden_models_from_position(
     }
     # Le move applique unit['orientation'] = orientation avant de recalculer le footprint.
     unit_for_footprint = unit if orientation is None else {**unit, "orientation": int(orientation)}
-    hidden_model_ids = compute_unit_hidden_models(
+    hidden_model_ids = compute_models_in_obscuring_terrain(
         unit_for_footprint, moved_by_model, game_state, terrain_areas
     )
     return {
@@ -1235,7 +1235,7 @@ def preview_hidden_models_from_model_positions(
     """Read-only : statut "caché" (rule 13.09) de chaque figurine SI elles étaient aux positions
     EXPLICITES données (``model_positions`` : map model_id -> [col, row]). Pour le déplacement
     figurine-par-figurine (squadModelMove), où chaque fig a sa propre position provisoire (pas une
-    translation rigide). Réutilise ``compute_unit_hidden_models`` → identique au recalcul après pose.
+    translation rigide). Réutilise ``compute_models_in_obscuring_terrain`` → identique au recalcul après pose.
 
     Retourne ``{"hidden_models": [...], "hidden": bool}``.
     """
@@ -1255,7 +1255,7 @@ def preview_hidden_models_from_model_positions(
         str(mid): (int(pos[0]), int(pos[1])) for mid, pos in model_positions.items()
     }
     unit_for_footprint = unit if orientation is None else {**unit, "orientation": int(orientation)}
-    hidden_model_ids = compute_unit_hidden_models(
+    hidden_model_ids = compute_models_in_obscuring_terrain(
         unit_for_footprint, by_model, game_state, terrain_areas
     )
     return {
@@ -3938,6 +3938,13 @@ def _compute_unit_los_uncached(
     # >= 1 modèle l'est. Chaque test exclut les areas obscuring du tireur et celles que
     # CE modèle occupe (exclusion par paire de modèles, pas l'union de l'escouade).
     target_model_footprints: List[List[Tuple[int, int]]] = []
+    # Centre (col,row) de chaque figurine vivante, aligné index-à-index sur target_model_footprints ;
+    # None pour le repli non-découpé (gym / dict coordonnées-seules). Sert au test terrain par-figurine
+    # du couvert (règle 13.08 (a)).
+    target_model_centers: List[Optional[Tuple[int, int]]] = []
+    cover_base_shape: Any = None
+    cover_base_size: Any = None
+    cover_orientation: Any = None
     target_id = target.get("id")
     if not gym_training and target_id is not None:
         model_ids = require_key(game_state, "squad_models").get(str(target_id))
@@ -3947,6 +3954,9 @@ def _compute_unit_los_uncached(
             base_shape = require_key(target, "BASE_SHAPE")
             base_size = require_key(target, "BASE_SIZE")
             orientation = require_key(target, "orientation")
+            cover_base_shape = base_shape
+            cover_base_size = base_size
+            cover_orientation = orientation
             for mid in model_ids:
                 m = models_cache.get(mid)
                 if m is None:
@@ -3959,6 +3969,7 @@ def _compute_unit_los_uncached(
                         int(m["col"]), int(m["row"]), base_shape, base_size, orientation
                     )
                 ])
+                target_model_centers.append((int(m["col"]), int(m["row"])))
     if not target_model_footprints:
         # Pas de découpage par modèle (gym : empreinte réduite à l'ancre ; dict
         # coordonnées-seules : pas de squad) → l'empreinte entière vaut un modèle.
@@ -3966,11 +3977,15 @@ def _compute_unit_los_uncached(
             game_state, target, gym_training=gym_training
         )
         target_model_footprints.append([(int(c), int(r)) for c, r in target_hexes])
+        target_model_centers.append(None)
 
     visible = 0
     total = 0
     visible_models = 0
     visible_hex_set: Set[Tuple[int, int]] = set()
+    # Visibilité intégrale par figurine (index aligné sur target_model_footprints) : True si tout le
+    # socle de CETTE figurine est vu par le tireur. Base du test (b) par-figurine du couvert (13.08).
+    model_full_vis: List[bool] = []
     for model_hexes in target_model_footprints:
         v, t, vset = _compute_visibility_with_obscuring(
             game_state, shooter_anchor, shooter_hexes, model_hexes[0], model_hexes
@@ -3980,44 +3995,40 @@ def _compute_unit_los_uncached(
         visible_hex_set |= vset
         if v > 0:
             visible_models += 1
+        model_full_vis.append(t > 0 and v == t)
     can_see = visible_models > 0
     fully_visible = total > 0 and visible == total
 
+    # Couvert (règle 13.08) évalué PAR FIGURINE : l'unité a le couvert si CHAQUE figurine vivante
+    # remplit au moins une condition :
+    #   (a) INFANTRY/BEASTS/SWARM et dans un terrain area (test terrain pur, indépendant du tireur),
+    #   (b) pas entièrement visible par le tireur (socle partiellement masqué, ou figurine invisible).
+    # Une seule figurine entièrement visible ET hors terrain area annule le couvert de toute l'unité.
     from engine.terrain_utils import model_within_terrain
-    from engine.hex_utils import compute_occupied_hexes
     terrain_areas = require_key(game_state, "terrain_areas")
-    cond_terrain = False
-
-    if can_see and target.get("hideable"):
-        target_id = str(require_key(target, "id"))
-        squad_models_map = require_key(game_state, "squad_models")
-        models_cache = require_key(game_state, "models_cache")
-        model_ids = squad_models_map.get(target_id)
-        if not model_ids:
-            raise ValueError(f"Target unit {target_id} has no models in squad_models")
-        base_shape = require_key(target, "BASE_SHAPE")
-        base_size = require_key(target, "BASE_SIZE")
-        orientation = require_key(target, "orientation")
-        all_visible_in_terrain = True
-        for mid in model_ids:
-            m = models_cache.get(mid)
-            if m is None:
-                raise KeyError(f"Model {mid} missing from models_cache")
-            if int(require_key(m, "HP_CUR")) <= 0:
+    target_hideable = bool(target.get("hideable"))
+    cover = False
+    if can_see:
+        all_models_covered = True
+        for idx in range(len(target_model_footprints)):
+            # (b) : figurine pas entièrement visible → couverte, condition remplie.
+            if not model_full_vis[idx]:
                 continue
-            model_hexes = list(compute_occupied_hexes(
-                int(m["col"]), int(m["row"]), base_shape, base_size, orientation
-            ))
-            if any((int(hx[0]), int(hx[1])) in visible_hex_set for hx in model_hexes):
-                if not model_within_terrain(
-                    int(m["col"]), int(m["row"]), base_shape, base_size, orientation,
+            # Figurine entièrement visible → doit remplir (a), sinon l'unité perd le couvert.
+            center = target_model_centers[idx]
+            cond_a = (
+                target_hideable
+                and center is not None
+                and model_within_terrain(
+                    center[0], center[1],
+                    cover_base_shape, cover_base_size, cover_orientation,
                     terrain_areas, obscuring_only=False,
-                ):
-                    all_visible_in_terrain = False
-                    break
-        cond_terrain = all_visible_in_terrain
-
-    cover = bool(can_see and (cond_terrain or not fully_visible))
+                )
+            )
+            if not cond_a:
+                all_models_covered = False
+                break
+        cover = all_models_covered
 
     return {
         "can_see": can_see,

@@ -1847,7 +1847,8 @@ export class UnitRenderer {
       // movePreview ou move+select (survol destination) → dégâts tir comme phase shoot
       const blinkPhase: "shoot" | "fight" | "charge" =
         this.props.mode === "movePreview" ||
-        (this.props.phase === "move" && this.props.mode === "select")
+        (this.props.phase === "move" &&
+          (this.props.mode === "select" || this.props.mode === "squadModelMove"))
           ? "shoot"
           : (this.props.phase as "shoot" | "fight" | "charge");
 
@@ -2327,7 +2328,9 @@ export class UnitRenderer {
     }
     const movePhaseLosHover =
       this.props.phase === "move" &&
-      (this.props.mode === "select" || this.props.mode === "movePreview") &&
+      (this.props.mode === "select" ||
+        this.props.mode === "movePreview" ||
+        this.props.mode === "squadModelMove") &&
       this.props.movePreviewShootingTargetInCoverByUnitId !== undefined;
     if (this.props.phase !== "shoot" && this.props.mode !== "movePreview" && !movePhaseLosHover) {
       return false;
@@ -2342,6 +2345,7 @@ export class UnitRenderer {
     if (
       (this.props.mode === "movePreview" ||
         this.props.mode === "select" ||
+        this.props.mode === "squadModelMove" ||
         this.props.mode === "attackPreview" ||
         this.props.mode === "squadModelShoot") &&
       this.props.movePreviewShootingTargetInCoverByUnitId

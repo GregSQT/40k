@@ -9050,7 +9050,10 @@ export default function Board({
           blinkVersion,
           shootingTargetInCover: coverTargets.has(String(unit.id)),
           movePreviewShootingTargetInCoverByUnitId: (() => {
-            if (phase === "move" && (mode === "select" || mode === "movePreview")) {
+            if (
+              phase === "move" &&
+              (mode === "select" || mode === "movePreview" || mode === "squadModelMove")
+            ) {
               return movePreviewLosCoverById;
             }
             if (
@@ -10459,9 +10462,6 @@ export default function Board({
                       >
                         {losText}
                       </span>
-                      <span data-blink-prob-sep="1" style={{ opacity: 0.5 }}>
-                        |
-                      </span>
                     </>
                   ) : null}
                   {data.label ? <span data-blink-prob-label="1">{data.label}</span> : null}
@@ -10577,6 +10577,9 @@ export default function Board({
           canValidate={squadShootPlan?.canValidate ?? false}
           onCancel={onCancelSquadShoot}
           onFire={onCommitSquadShoot}
+          inchesToSubhex={
+            (boardConfig as unknown as { inches_to_subhex?: number } | null)?.inches_to_subhex ?? 1
+          }
         />
       )}
     </div>

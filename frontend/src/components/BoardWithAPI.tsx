@@ -1674,6 +1674,9 @@ export const BoardWithAPI: React.FC = () => {
 
   // Get board configuration for line of sight calculations
   const { gameConfig, boardConfig } = useGameConfig();
+  // MOVE/portées sont stockés ×inches_to_subhex par le moteur : facteur pour reconvertir en pouces à l'affichage.
+  const inchesToSubhex =
+    (boardConfig as unknown as { inches_to_subhex?: number } | null)?.inches_to_subhex ?? 1;
 
   // Track clicked (but not selected) units for blue highlighting
   const [clickedUnitId, setClickedUnitId] = useState<number | null>(null);
@@ -4837,6 +4840,7 @@ export const BoardWithAPI: React.FC = () => {
           <UnitStatusTablePlayer1WithTutorial
             units={apiProps.gameState?.units ?? []}
             player={1}
+            inchesToSubhex={inchesToSubhex}
             playerTypes={apiProps.gameState?.player_types}
             selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
             guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
@@ -4861,6 +4865,7 @@ export const BoardWithAPI: React.FC = () => {
           <UnitStatusTablePlayer2WithTutorial
             units={apiProps.gameState?.units ?? []}
             player={2}
+            inchesToSubhex={inchesToSubhex}
             playerTypes={apiProps.gameState?.player_types}
             selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
             guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}

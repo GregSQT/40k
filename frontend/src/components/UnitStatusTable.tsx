@@ -45,6 +45,8 @@ interface UnitStatusTableProps {
   onSelectUnit: (unitId: UnitId) => void;
   gameMode?: "pvp" | "pvp_test" | "pve" | "training" | "tutorial" | "endless_duty";
   isReplay?: boolean;
+  /** Facteur subhex du board : MOVE/portées sont stockés ×inches_to_subhex, on les reconvertit en pouces pour l'affichage. */
+  inchesToSubhex?: number;
   victoryPoints?: number;
   onCollapseChange?: (collapsed: boolean) => void;
   /** En mode tutoriel : forcer la table dépliée pour voir les colonnes. */
@@ -187,6 +189,8 @@ interface UnitRowProps {
   isDetailPreviewHighlight?: boolean;
   /** Joueur de ce tableau (couleur de l’encadrement preview = bandeau titre). */
   tablePlayer: 1 | 2;
+  /** Facteur subhex pour reconvertir MOVE/portées en pouces à l'affichage. */
+  inchesToSubhex: number;
 }
 
 function unionRect(
@@ -222,6 +226,7 @@ const UnitRow = memo<UnitRowProps>(
     tableHeaderRowRef,
     isDetailPreviewHighlight = false,
     tablePlayer,
+    inchesToSubhex,
   }) => {
     const nameCellRef = useRef<HTMLTableCellElement>(null);
     const mCellRef = useRef<HTMLTableCellElement>(null);
@@ -601,7 +606,7 @@ const UnitRow = memo<UnitRowProps>(
                   fontSize: "12px",
                 }}
               >
-                {unit.MOVE}
+                {unit.MOVE / inchesToSubhex}
               </td>
 
               {/* T (Toughness) */}
@@ -873,7 +878,7 @@ const UnitRow = memo<UnitRowProps>(
                           className="unit-status-cell"
                           style={{ textAlign: "center", padding: "4px 8px", fontSize: "12px" }}
                         >
-                          {weapon.RNG ? `${weapon.RNG}"` : "/"}
+                          {weapon.RNG ? `${weapon.RNG / inchesToSubhex}"` : "/"}
                         </td>
                         <td
                           className="unit-status-cell"
@@ -1176,6 +1181,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     onSelectUnit,
     gameMode = "pvp",
     isReplay = false,
+    inchesToSubhex = 1,
     victoryPoints,
     onCollapseChange,
     tutorialForceTableExpanded = false,
@@ -1742,6 +1748,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                   tableHeaderRowRef={tableHeaderRowRef}
                   isDetailPreviewHighlight={isDetailPreviewUnit}
                   tablePlayer={player}
+                  inchesToSubhex={inchesToSubhex}
                 />
               );
             })}

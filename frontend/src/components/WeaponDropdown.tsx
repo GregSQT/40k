@@ -20,6 +20,8 @@ interface WeaponDropdownProps {
   canValidate?: boolean;
   onCancel?: () => void | Promise<void>;
   onFire?: () => void | Promise<void>;
+  /** Facteur subhex du board : les portées sont stockées ×inches_to_subhex, reconverties en pouces à l'affichage. */
+  inchesToSubhex?: number;
 }
 
 export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
@@ -32,6 +34,7 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
   canValidate = false,
   onCancel,
   onFire,
+  inchesToSubhex = 1,
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x: position.x, y: position.y });
@@ -167,7 +170,7 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
                     ))}
                   </TooltipWrapper>
                 </td>
-                <td>{weapon.RNG ? `${weapon.RNG}"` : "-"}</td>
+                <td>{weapon.RNG ? `${weapon.RNG / inchesToSubhex}"` : "-"}</td>
                 <td>{weapon.NB}</td>
                 <td>{weapon.ATK}+</td>
                 <td>{weapon.STR}</td>
