@@ -585,7 +585,8 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     }
 
     const probLabel =
-      chargeMinRollOverlay?.primaryText ?? (wantProbability ? `${Math.round(displayProbability * 100)}%` : "");
+      chargeMinRollOverlay?.primaryText ??
+      (wantProbability ? `${Math.round(displayProbability * 100)}%` : "");
 
     const scale = Math.max(1, finalBarHeight / 7);
     const hasCoverIcon = phase === "shoot" && inCover;

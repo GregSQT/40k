@@ -61,7 +61,6 @@ import {
   getNonRoundBasePixelLayout,
   getNonRoundIconRadius,
   getSquareCornerRadiusPx,
-  getUnitTokenTopExtentY,
 } from "../utils/unitBaseDisplay";
 import { ensureWasmLoaded, isWasmReady } from "../utils/wasmLos";
 import { getMaxRangedRange } from "../utils/weaponHelpers";
@@ -166,7 +165,11 @@ function parseBackendMoveLosPreviewPayload(
   }
   const visibleByTargetRaw = result.visible_cells_by_target;
   const visibleTargetCells: BackendLosPreviewCell[] = [];
-  if (visibleByTargetRaw && typeof visibleByTargetRaw === "object" && !Array.isArray(visibleByTargetRaw)) {
+  if (
+    visibleByTargetRaw &&
+    typeof visibleByTargetRaw === "object" &&
+    !Array.isArray(visibleByTargetRaw)
+  ) {
     const seen = new Set<string>();
     for (const cells of Object.values(visibleByTargetRaw as Record<string, unknown>)) {
       if (!Array.isArray(cells)) continue;
@@ -5559,9 +5562,7 @@ export default function Board({
     // vues depuis la position de CHAQUE fig posée jusqu'au clic Validate. Sans fig posée (repos /
     // entrée sans sélection) → on coupe toute la LoS comme avant.
     const hasPlacedToPersist =
-      !!squadMovePlan &&
-      !!squadMovePlan.models &&
-      Object.keys(squadMovePlan.models).length > 0;
+      !!squadMovePlan && !!squadMovePlan.models && Object.keys(squadMovePlan.models).length > 0;
     if (hasPlacedToPersist) return;
     if (hoverOverlayRef.current && !hoverOverlayRef.current.destroyed) {
       hoverOverlayRef.current.visible = false;

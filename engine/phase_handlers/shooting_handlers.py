@@ -1324,14 +1324,12 @@ def build_unit_los_cache(
 
     # Move-LoS-preview : filtre de portée. Prépare le socle tireur + la métrique une seule fois ;
     # les ennemis au-delà de max_target_range sont ignorés (voir docstring).
-    _range_cull = isinstance(max_target_range, int) and max_target_range > 0
-    if _range_cull:
-        from engine.combat_utils import ranged_edge_distance
-        _cull_metric = _ranged_distance_metric()
+    _cull_ctx: Optional[Tuple[Any, str, int]] = None
+    if isinstance(max_target_range, int) and max_target_range > 0:
         _cull_shooter_entry = units_cache.get(unit_id)
         if _cull_shooter_entry is None:
             raise KeyError(f"Unit {unit_id} not in units_cache (dead or absent)")
-        _cull_shooter_socle = _socle_from_entry(_cull_shooter_entry)
+        _cull_ctx = (_socle_from_entry(_cull_shooter_entry), _ranged_distance_metric(), max_target_range)
 
     # Calculate LoS for each enemy in units_cache (only alive enemies — dead must not appear in pool).
     # All visibility/cover is delegated to compute_unit_los() — the single source of truth.
@@ -1343,14 +1341,16 @@ def build_unit_los_cache(
         if not is_unit_alive(str(target_id), game_state):
             continue
         # Range cull (preview) : ennemi hors portée max d'arme → jamais une cible valide.
-        if _range_cull:
+        if _cull_ctx is not None:
+            from engine.combat_utils import ranged_edge_distance
+            _cull_shooter_socle, _cull_metric, _cull_max = _cull_ctx
             _d = ranged_edge_distance(
                 _cull_shooter_socle,
                 _socle_from_entry(target_data),
                 _cull_metric,
-                max_distance=max_target_range,
+                max_distance=_cull_max,
             )
-            if _d > max_target_range:
+            if _d > _cull_max:
                 continue
         target_unit = _get_unit_by_id(game_state, str(target_id))
         if target_unit is None:
@@ -2777,7 +2777,7 @@ def valid_target_pool_build(
             f"pos=({unit_col},{unit_row}) metric={_ranged_metric_pool} "
             f"adv={advance_status} adj={adjacent_status} max_usable_rng={max_usable_rng} "
             f"los_true={sorted(targets_with_los.keys())} "
-            f"los_cache_size={len(unit.get('los_cache', {}))}",
+            f"los_cache_size={len(unit.get('los_cache', {}))}",  # get allowed
             flush=True,
         )
     for target_id_str in targets_with_los.keys():

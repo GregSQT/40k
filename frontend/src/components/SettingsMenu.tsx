@@ -246,8 +246,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
         onToggleDeployIconBaseSizeBounded(s.deployIconBaseSizeBounded);
       if (onToggleLogShowCoords && logShowCoords !== s.logShowCoords)
         onToggleLogShowCoords(s.logShowCoords);
-      if (onToggleLogShowType && logShowType !== s.logShowType)
-        onToggleLogShowType(s.logShowType);
+      if (onToggleLogShowType && logShowType !== s.logShowType) onToggleLogShowType(s.logShowType);
     }
     onClose();
   };

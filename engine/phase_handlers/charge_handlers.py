@@ -1901,7 +1901,7 @@ def _compute_plan_context(
                 oe: Tuple[Tuple[int, int], ...] = ()
                 oo: Tuple[Tuple[int, int], ...] = ()
             else:
-                oe, oo = precompute_footprint_offsets(shape, size, int(sib.get("orientation", 0)))
+                oe, oo = precompute_footprint_offsets(shape, size, int(require_key(sib, "orientation")))
             obst = set(blocked)
             obst.discard(start)
             field = _euclidean_move_field(
@@ -3313,7 +3313,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     # Only built when the result will be stored in cache (activation BFS, no specific target).
     _track_engages = ((tid_arg is None and charge_range == CHARGE_MAX_DISTANCE_SUBHEX and not early_exit_if_valid)
                       or _multi_declared is not None)
-    pos_dist_engage: Dict[Tuple[int, int], Tuple[int, FrozenSet[str]]] = {} if _track_engages else {}
+    pos_dist_engage: Dict[Tuple[int, int], Tuple[float, FrozenSet[str]]] = {} if _track_engages else {}
 
     # Precompute for O(1) bounds check before footprint computation
     _bfs_board_cols = int(require_key(game_state, "board_cols"))
@@ -3416,7 +3416,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             _eu_off_e: Tuple[Tuple[int, int], ...] = ()
             _eu_off_o: Tuple[Tuple[int, int], ...] = ()
         else:
-            _eu_off_e, _eu_off_o = _eu_pfo(_eu_shape, _eu_base, int(unit.get("orientation", 0)))
+            _eu_off_e, _eu_off_o = _eu_pfo(_eu_shape, _eu_base, int(require_key(unit, "orientation")))
 
         _eu_obstacles: Set[Tuple[int, int]] = set(_bfs_wall_hexes) | set(occupied_positions)
         _eu_obstacles.discard(start_pos)

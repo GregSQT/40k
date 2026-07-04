@@ -29,10 +29,7 @@ export interface MinimalUnitForLos {
 }
 
 /** Map unitId → positions par-figurine (miroir ``units_cache.occupied_hexes_by_model``). */
-export type UnitsCacheModelCenters = Record<
-  string,
-  Record<string, [number, number]> | undefined
->;
+export type UnitsCacheModelCenters = Record<string, Record<string, [number, number]> | undefined>;
 
 /** Extrait les positions par-figurine de toutes les unités depuis ``gameState.units_cache``. */
 export function unitsCacheModelCenters(unitsCache: unknown): UnitsCacheModelCenters | undefined {

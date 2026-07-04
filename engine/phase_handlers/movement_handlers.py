@@ -1260,7 +1260,7 @@ def _euclidean_mover_ez_forbidden_mask(
             for ec, er in model_positions:
                 _stamp_disc(eng_bad, int(ec), int(er), ez_norm + r_m + r_e)
         else:
-            e_orient = int(ce.get("orientation", 0) or 0)
+            e_orient = int(require_key(ce, "orientation"))
             e_off_even, e_off_odd = precompute_footprint_offsets(e_shape, e_bs, e_orient)
             for ec, er in model_positions:
                 e_off = e_off_even if (int(ec) & 1) == 0 else e_off_odd
@@ -2575,11 +2575,11 @@ def movement_build_model_destinations_pool(
         # sûr quand thru_friendly (sinon le champ dépend du plan provisoire, recalcul obligatoire).
         # FLY : le champ n'a aucun obstacle → indépendant du plan provisoire → toujours cacheable.
         _mm_can_cache = thru_friendly or has_fly
-        _mm_field = None
-        if _mm_can_cache:
-            _mm_cache = game_state.setdefault("_move_model_field_cache", {})
-            _mm_key = (str(model_id), start_col, start_row, int(budget))
-            _mm_field = _mm_cache.get(_mm_key)
+        _mm_cache: Dict[Tuple[str, int, int, int], Dict[Tuple[int, int], float]] = game_state.setdefault(
+            "_move_model_field_cache", {}
+        )
+        _mm_key: Tuple[str, int, int, int] = (str(model_id), start_col, start_row, int(budget))
+        _mm_field = _mm_cache.get(_mm_key) if _mm_can_cache else None
         _mm_cache_hit = _mm_field is not None
         if _mm_field is None:
             if has_fly:
@@ -2611,7 +2611,7 @@ def movement_build_model_destinations_pool(
             )
             if _mm_pt and _mm_fb is not None:
                 _mm_field_s = _mm_clock.perf_counter() - _mm_fb
-            if _mm_can_cache:
+            if _mm_cache is not None and _mm_key is not None:
                 _mm_cache[_mm_key] = _mm_field
         _mm_cells_n = len(_mm_field)
         # Filtres de destination appliqués À CHAQUE appel (dépendent du plan provisoire via

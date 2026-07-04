@@ -1766,7 +1766,9 @@ export class UnitRenderer {
     const shouldShowBlinkingHP = isTargetPreviewed || shouldBlink;
     const blinkEnlargeFactor = this.props.hpBarBlinkEnlarged ? 1.5 : 1;
     const finalBarWidth = shouldShowBlinkingHP ? HP_BAR_WIDTH * blinkEnlargeFactor : HP_BAR_WIDTH;
-    const finalBarHeight = shouldShowBlinkingHP ? HP_BAR_HEIGHT * blinkEnlargeFactor : HP_BAR_HEIGHT;
+    const finalBarHeight = shouldShowBlinkingHP
+      ? HP_BAR_HEIGHT * blinkEnlargeFactor
+      : HP_BAR_HEIGHT;
     const finalBarX = shouldShowBlinkingHP ? centerX - finalBarWidth / 2 : barX;
     const finalBarY = shouldShowBlinkingHP ? barY - (finalBarHeight - HP_BAR_HEIGHT) : barY;
 
