@@ -847,9 +847,9 @@ def _get_available_weapons_for_selection(
         unit_col, unit_row = require_unit_position(unit, game_state)
         _uid2 = str(unit["id"])
         _ue2 = units_cache.get(_uid2)
-        _shooter_socle2 = _socle_from_entry(_ue2) if _ue2 else Socle(
-            unit["BASE_SHAPE"], unit["BASE_SIZE"], unit_col, unit_row, {(unit_col, unit_row)}
-        )
+        if _ue2 is None:
+            raise KeyError(f"Shooter {_uid2} not in units_cache")
+        _shooter_socle2 = _socle_from_entry(_ue2)
         for enemy_id, cache_entry in units_cache.items():
             enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
             if enemy_player != unit_player:
@@ -1725,7 +1725,8 @@ def build_hidden_too_far_by_unit_id(
     géométriquement". Source unique pour les deux moteurs de résolution (mono-unité et squad) :
     read-only, relatif au tireur actif. Réutilise ``unit['los_cache']`` (build_unit_los_cache).
     """
-    from engine.hex_utils import min_distance_between_sets
+    from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
+    _ranged_metric = _ranged_distance_metric()
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
     detection_range_subhex = (
         float(require_key(game_rules, "detection_range"))
@@ -1741,12 +1742,10 @@ def build_hidden_too_far_by_unit_id(
     units_cache = require_key(game_state, "units_cache")
     shooter_id = str(require_key(shooter, "id"))
     shooter_player = int(require_key(shooter, "player"))
-    shooter_col, shooter_row = require_unit_position(shooter, game_state)
     shooter_entry = units_cache.get(shooter_id)
-    shooter_fp = (
-        shooter_entry.get("occupied_hexes", {(shooter_col, shooter_row)})
-        if shooter_entry else {(shooter_col, shooter_row)}
-    )
+    if shooter_entry is None:
+        raise KeyError(f"Shooter {shooter_id} not in units_cache")
+    _shooter_socle = socle_from_cache_entry(shooter_entry)
     result: Dict[str, bool] = {}
     for target_id, has_los in los_cache.items():
         if not has_los:
@@ -1764,10 +1763,9 @@ def build_hidden_too_far_by_unit_id(
         enemy_entry = units_cache.get(target_id_str)
         if enemy_entry is None:
             continue
-        enemy_fp = enemy_entry.get(
-            "occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])}
+        distance = ranged_edge_distance(
+            _shooter_socle, socle_from_cache_entry(enemy_entry), _ranged_metric, max_distance=max_rng
         )
-        distance = min_distance_between_sets(shooter_fp, enemy_fp)
         if distance > max_rng:
             continue  # hors portée : pas "à portée mais trop loin"
         if distance > detection_range_subhex:
@@ -2846,7 +2844,9 @@ def valid_target_pool_build(
             raise KeyError(f"Enemy {target_id_str} not in units_cache (dead or absent)")
 
         unit_entry = units_cache.get(unit_id_normalized)
-        shooter_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+        if unit_entry is None:
+            raise KeyError(f"Shooter {unit_id_normalized} not in units_cache")
+        shooter_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)})
         enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
 
         row_opt = precheck_by_id.get(target_id_str) if precheck_by_id else None
@@ -2860,9 +2860,7 @@ def valid_target_pool_build(
             # Distance tireur/cible §3.3 : borner la recherche par la portée max des armes utilisables,
             # pas par melee_range seul — sinon la distance renvoyée peut être tronquée et fausser le test de portée.
             _md_cap = max_usable_rng if max_usable_rng > 0 else 0
-            _shooter_socle_pool = socle_from_cache_entry(unit_entry) if unit_entry else Socle(
-                unit["BASE_SHAPE"], unit["BASE_SIZE"], unit_col, unit_row, shooter_fp
-            )
+            _shooter_socle_pool = socle_from_cache_entry(unit_entry)
             distance_to_enemy = ranged_edge_distance(
                 _shooter_socle_pool, socle_from_cache_entry(enemy_entry), _ranged_metric_pool, max_distance=_md_cap
             )

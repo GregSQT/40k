@@ -1418,6 +1418,7 @@ class Socle(NamedTuple):
     row: int
     fp: Optional[Set[Tuple[int, int]]] = None
     model_centers: Optional[List[Tuple[int, int]]] = None
+    orientation: int = 0
 
 
 def bounding_radius_norm(shape: str, base_size: "int | list[int]") -> float:
@@ -1461,6 +1462,105 @@ def footprints_overlap(a: Socle, b: Socle) -> bool:
     return bool(a.fp & b.fp)
 
 
+# Échantillonnage du contour d'un socle oval en polygone convexe pour la distance
+# bord-à-bord continue. 32 sommets : l'erreur d'inscription max (corde vs arc) est
+# < 0,5 % du demi-grand axe — négligeable devant la précision de portée requise.
+_OVAL_EDGE_SAMPLES: int = 32
+
+
+def _socle_edge_primitives(s: Socle) -> List[Tuple]:
+    """Primitives géométriques continues (repère ``_hex_center``) d'un socle, une par figurine.
+
+    Retourne une liste de primitives : ``('c', cx, cy, r)`` pour un socle rond (cercle
+    analytique), ``('p', [(x, y), ...])`` pour oval/carré (polygone convexe orienté).
+    ``model_centers`` (escouade multi-figurines) → une primitive par figurine ; sinon une
+    seule primitive à l'ancre ``(col, row)``. L'orientation (oval/carré) vient de ``s.orientation``.
+    """
+    centers = s.model_centers if s.model_centers else [(s.col, s.row)]
+    prims: List[Tuple] = []
+    if s.shape == "round":
+        r = round_base_radius_norm(cast(float, s.base_size))
+        for c, rr in centers:
+            cx, cy = _hex_center(int(c), int(rr))
+            prims.append(("c", cx, cy, r))
+        return prims
+    ang = s.orientation * math.pi / 3.0
+    cos_a, sin_a = math.cos(ang), math.sin(ang)
+    if s.shape == "oval":
+        size = cast(list, s.base_size)
+        aa = (size[0] / 2.0) * _FOOTPRINT_SIZE_SCALE
+        bb = (size[1] / 2.0) * _FOOTPRINT_SIZE_SCALE
+        local = [
+            (aa * math.cos(2.0 * math.pi * k / _OVAL_EDGE_SAMPLES),
+             bb * math.sin(2.0 * math.pi * k / _OVAL_EDGE_SAMPLES))
+            for k in range(_OVAL_EDGE_SAMPLES)
+        ]
+    elif s.shape == "square":
+        half = (cast(float, s.base_size) / 2.0) * _FOOTPRINT_SIZE_SCALE
+        local = [(-half, -half), (half, -half), (half, half), (-half, half)]
+    else:
+        raise ValueError(f"euclidean_edge_distance: forme de socle inconnue {s.shape!r}")
+    for c, rr in centers:
+        cx, cy = _hex_center(int(c), int(rr))
+        prims.append(("p", [
+            (cx + lx * cos_a - ly * sin_a, cy + lx * sin_a + ly * cos_a)
+            for lx, ly in local
+        ]))
+    return prims
+
+
+def _circle_poly_edge_dist(cx: float, cy: float, r: float, poly: List[Tuple[float, float]]) -> float:
+    """Distance bord-à-bord entre un cercle (centre, rayon) et un polygone convexe. 0 si chevauchement."""
+    if _point_in_polygon(cx, cy, poly):
+        return 0.0
+    best = math.inf
+    n = len(poly)
+    for i in range(n):
+        ax, ay = poly[i]
+        bx, by = poly[(i + 1) % n]
+        d2 = _point_segment_dist_sq(cx, cy, ax, ay, bx, by)
+        if d2 < best:
+            best = d2
+    d = math.sqrt(best) - r
+    return d if d > 0.0 else 0.0
+
+
+def _poly_poly_edge_dist(pa: List[Tuple[float, float]], pb: List[Tuple[float, float]]) -> float:
+    """Distance bord-à-bord entre deux polygones convexes. 0 si containment ou arêtes sécantes."""
+    for x, y in pa:
+        if _point_in_polygon(x, y, pb):
+            return 0.0
+    for x, y in pb:
+        if _point_in_polygon(x, y, pa):
+            return 0.0
+    best = math.inf
+    na, nb = len(pa), len(pb)
+    for i in range(na):
+        ax, ay = pa[i]
+        bx, by = pa[(i + 1) % na]
+        for j in range(nb):
+            cx, cy = pb[j]
+            dx, dy = pb[(j + 1) % nb]
+            d2 = _seg_seg_dist_sq(ax, ay, bx, by, cx, cy, dx, dy)
+            if d2 < best:
+                best = d2
+                if best <= 0.0:
+                    return 0.0
+    return math.sqrt(best)
+
+
+def _primitive_edge_dist(pa: Tuple, pb: Tuple) -> float:
+    """Distance bord-à-bord entre deux primitives (``'c'`` cercle / ``'p'`` polygone)."""
+    if pa[0] == "c" and pb[0] == "c":
+        gap = math.hypot(pb[1] - pa[1], pb[2] - pa[2]) - pa[3] - pb[3]
+        return gap if gap > 0.0 else 0.0
+    if pa[0] == "c":
+        return _circle_poly_edge_dist(pa[1], pa[2], pa[3], pb[1])
+    if pb[0] == "c":
+        return _circle_poly_edge_dist(pb[1], pb[2], pb[3], pa[1])
+    return _poly_poly_edge_dist(pa[1], pb[1])
+
+
 def euclidean_edge_distance(a: Socle, b: Socle) -> float:
     """Distance euclidienne **bord-à-bord** entre deux socles, en unités ``_hex_center``.
 
@@ -1470,10 +1570,10 @@ def euclidean_edge_distance(a: Socle, b: Socle) -> float:
 
     - Paire ronde↔ronde : clearance euclidien continu (exact), O(1), via
       ``euclidean_edge_clearance_round_round``. Borné à 0 (socles tangents/chevauchants).
-    - Toute paire impliquant une base non ronde : min euclidien entre les **centres des
-      cellules occupées** (``a.fp`` / ``b.fp`` requis). 0 si les empreintes se chevauchent.
-      Approximation suffisante pour la portée (longue distance) ; un proxy continu
-      (capsule/OBB) ne serait requis que pour des règles courte-distance.
+    - Toute paire impliquant une base non ronde : distance bord-à-bord **continue** entre les
+      contours géométriques réels (cercle analytique / polygone convexe oval ou carré orienté),
+      via ``_socle_edge_primitives`` — plus l'approximation centre-de-cellule. Escouade
+      multi-figurines : min sur chaque paire de figurines. 0 si les socles se chevauchent.
 
     ÉCHELLE : résultat en unités ``_hex_center`` (1 subhex = ``_FOOTPRINT_SIZE_SCALE`` = 1,5).
     Pour comparer à une portée en subhexes, l'appelant convertit le seuil :
@@ -1497,20 +1597,18 @@ def euclidean_edge_distance(a: Socle, b: Socle) -> float:
                     if best <= 0.0:
                         return 0.0
         return best if best > 0.0 else 0.0
-    # Au moins une base non ronde : min euclidien entre centres de cellules occupées.
-    if a.fp is None or b.fp is None:
-        raise ValueError("euclidean_edge_distance: empreinte (fp) requise pour une paire non ronde")
-    if a.fp & b.fp:
-        return 0.0
-    centers_b = [_hex_center(c, r) for c, r in b.fp]
+    # Au moins une base non ronde : distance bord-à-bord continue entre contours géométriques.
+    prims_a = _socle_edge_primitives(a)
+    prims_b = _socle_edge_primitives(b)
     best = math.inf
-    for ca, ra in a.fp:
-        cxa, cya = _hex_center(ca, ra)
-        for cxb, cyb in centers_b:
-            d = math.hypot(cxb - cxa, cyb - cya)
+    for pa in prims_a:
+        for pb in prims_b:
+            d = _primitive_edge_dist(pa, pb)
             if d < best:
                 best = d
-    return best
+                if best <= 0.0:
+                    return 0.0
+    return best if best > 0.0 else 0.0
 
 
 def _point_in_polygon(px: float, py: float, poly: Sequence[Tuple[float, float]]) -> bool:
