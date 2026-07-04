@@ -7,6 +7,7 @@ from engine.hex_utils import (
     compute_occupied_hexes,
     engagement_minimum_clearance_norm,
     euclidean_edge_clearance_round_round,
+    euclidean_edge_distance,
     min_distance_between_sets,
 )
 from shared.data_validation import require_key
@@ -36,33 +37,6 @@ def get_engagement_zone_from_config(config: Dict[str, Any]) -> int:
     """engagement_zone déjà converti au chargement (cf. get_engagement_zone)."""
     game_rules = require_key(config, "game_rules")
     return int(require_key(game_rules, "engagement_zone"))
-
-
-def enemy_footprint_distances(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    max_distance: Optional[int],
-) -> List[Tuple[Any, int]]:
-    """Return footprint distances from unit to enemy units using the B/engagement metric."""
-    unit_col, unit_row = _require_unit_position_from_cache(game_state, unit)
-    units_cache = require_key(game_state, "units_cache")
-    unit_id_str = str(unit["id"])
-    unit_entry = units_cache.get(unit_id_str)
-    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
-
-    unit_player = int(unit["player"]) if unit["player"] is not None else None
-    distances: List[Tuple[Any, int]] = []
-    for enemy_id, cache_entry in units_cache.items():
-        enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
-        if enemy_player == unit_player:
-            continue
-        enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-        if max_distance is None:
-            distance = min_distance_between_sets(unit_fp, enemy_fp)
-        else:
-            distance = min_distance_between_sets(unit_fp, enemy_fp, max_distance=max_distance)
-        distances.append((enemy_id, distance))
-    return distances
 
 
 def _cache_entry_footprint(cache_entry: Dict[str, Any]) -> Set[Tuple[int, int]]:
@@ -122,19 +96,70 @@ def _entry_is_multi_figure(cache_entry: Dict[str, Any]) -> bool:
     return len(occ) > single_count
 
 
+def engagement_distance_metric(game_state: Optional[Dict[str, Any]] = None) -> str:
+    """Métrique de la zone d'engagement (``hex``|``euclidean``) — sélecteur UNIQUE (Étape 7).
+
+    L'EZ est un concept unique consommé par 4 phases (move, tir, charge, fight) → une seule
+    clé ``distance_metric["engagement"]``, pas de split gym (contrairement à move/charge : le
+    retrain IA est prévu à la bascule 7.6, cf. Distance management.md). Lue depuis le config-loader
+    global (``game_state`` non requis) → la primitive canonique ``unit_entries_within_engagement_zone``
+    peut résoudre la métrique sans toucher ses ~60 call-sites. Aucun défaut caché : section/clé/valeur
+    invalide → erreur explicite (CLAUDE.md).
+    """
+    from config_loader import get_config_loader
+    from engine.combat_utils import get_distance_metric
+
+    return get_distance_metric("engagement", get_config_loader().get_game_config())
+
+
+def entries_in_engagement_zone(
+    first_entry: Dict[str, Any],
+    second_entry: Dict[str, Any],
+    engagement_zone: int,
+    metric: str,
+) -> bool:
+    """Point de bascule pairwise de l'EZ (règle 03.04, bord-à-bord). Deux socles sont en zone
+    d'engagement mutuelle ssi leur distance bord-à-bord ≤ ``engagement_zone`` :
+
+    - ``metric == "hex"``       : ``min_distance_between_sets`` d'empreintes ≤ ez (comportement
+      historique, byte-identique à l'ancien ``unit_entries_within_engagement_zone``).
+    - ``metric == "euclidean"`` : ``euclidean_edge_distance`` ≤ ``engagement_minimum_clearance_norm``
+      (= ez × 1,5). Miroir de ``ranged_in_range`` — l'EZ est une portée de ``ez`` subhexes bord-à-bord.
+
+    Conversion ×1,5 confinée à ``engagement_minimum_clearance_norm``, jamais dispersée.
+    """
+    if metric == "hex":
+        first_fp = _cache_entry_footprint(first_entry)
+        second_fp = _cache_entry_footprint(second_entry)
+        return min_distance_between_sets(
+            first_fp, second_fp, max_distance=engagement_zone
+        ) <= engagement_zone
+    if metric == "euclidean":
+        from engine.combat_utils import socle_from_cache_entry
+        a = socle_from_cache_entry(first_entry)
+        b = socle_from_cache_entry(second_entry)
+        return euclidean_edge_distance(a, b) <= engagement_minimum_clearance_norm(engagement_zone)
+    raise ValueError(f"Invalid engagement metric {metric!r}, expected 'hex' or 'euclidean'")
+
+
 def unit_entries_within_engagement_zone(
     first_entry: Dict[str, Any],
     second_entry: Dict[str, Any],
     engagement_zone: int,
+    metric: Optional[str] = None,
 ) -> bool:
-    """Return True when two unit cache entries are within the shared engagement contract."""
-    # Métrique d'engagement unifiée : distance d'empreinte (hex), jamais euclidien.
-    # Identique à la légalité de placement move (move_anchor_violates_engagement_clearance).
-    first_fp = _cache_entry_footprint(first_entry)
-    second_fp = _cache_entry_footprint(second_entry)
-    return min_distance_between_sets(
-        first_fp, second_fp, max_distance=engagement_zone
-    ) <= engagement_zone
+    """Return True when two unit cache entries are within the shared engagement contract.
+
+    Primitive canonique EZ (règle 03.04, bord-à-bord). ``metric`` :
+    - ``None`` (défaut) → résolue via ``engagement_distance_metric`` (config-loader global) : tous
+      les call-sites GAMEPLAY basculent automatiquement à la config 7.6, sans changement de signature.
+    - explicite (``"hex"``) → épinglé, pour les call-sites qui doivent rester hex indépendamment de
+      la config (observations/récompenses IA, §10 — retrain hors périmètre migration).
+    Config ``engagement:"hex"`` (défaut actuel) → comportement byte-identique à l'historique.
+    """
+    if metric is None:
+        metric = engagement_distance_metric()
+    return entries_in_engagement_zone(first_entry, second_entry, engagement_zone, metric)
 
 
 def unit_within_engagement_zone_footprints(
@@ -189,8 +214,17 @@ def move_anchor_violates_engagement_clearance(
                 return True
         return False
 
-    # Métrique d'engagement unifiée : distance d'empreinte (hex), jamais euclidien.
-    # Aligné avec l'éligibilité tir (unit_entries_within_engagement_zone).
+    # Métrique d'engagement unifiée (Étape 7.1) : routée via le switch pairwise. Config hex
+    # (défaut) → distance d'empreinte, byte-identique à l'historique. Le mover candidat est
+    # synthétisé en entrée-cache (empreinte candidate + socle du mover) pour alimenter le switch.
+    metric = engagement_distance_metric()
+    mover_entry = {
+        "BASE_SHAPE": require_key(mover, "BASE_SHAPE"),
+        "BASE_SIZE": require_key(mover, "BASE_SIZE"),
+        "col": center_col,
+        "row": center_row,
+        "occupied_hexes": candidate_fp,
+    }
     if enemy_cache_items is not None:
         enemy_iter: Any = enemy_cache_items
     else:
@@ -201,16 +235,6 @@ def move_anchor_violates_engagement_clearance(
         )
 
     for _, cache_entry in enemy_iter:
-        enemy_fp = cache_entry.get("occupied_hexes")
-        if not enemy_fp:
-            ec = require_key(cache_entry, "col")
-            er = require_key(cache_entry, "row")
-            enemy_fp = {(ec, er)}
-        if (
-            min_distance_between_sets(
-                candidate_fp, enemy_fp, max_distance=engagement_zone_ez
-            )
-            <= engagement_zone_ez
-        ):
+        if entries_in_engagement_zone(mover_entry, cache_entry, engagement_zone_ez, metric):
             return True
     return False

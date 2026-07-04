@@ -381,6 +381,63 @@ def _oracle_pool(
     return valid
 
 
+def _assert_euclidean_pool_invariants(
+    pool: List[Tuple[int, int]], game_state: Dict[str, Any], unit_id: str
+) -> None:
+    """Invariants SAINS du pool de move euclidien (indépendants de l'algo géodésique prod).
+
+    Remplace l'égalité exacte à ``_oracle_pool`` (BFS hex), obsolète depuis Étape 4 : le pool
+    est un champ géodésique euclidien (`move=euclidean`), pas un BFS 6-voisins. Un oracle
+    euclidien « exact » reproduirait l'algo prod (tautologique) → on vérifie plutôt deux
+    propriétés qui NE PEUVENT PAS faux-échouer et attrapent les vraies régressions :
+      (1) légalité destination : aucune empreinte du pool ne chevauche bornes/murs/occupation ;
+      (2) borne de non-triche : géodésique ≥ ligne droite ⟹ toute ancre atteinte est à distance
+          centre-à-centre ≤ budget (`MOVE × ENGAGEMENT_NORM_HEX_WIDTH`) en ligne droite.
+    """
+    import math
+    from engine.hex_utils import _hex_center, precompute_footprint_offsets, ENGAGEMENT_NORM_HEX_WIDTH
+
+    unit = require_key(game_state["unit_by_id"], unit_id)
+    units_cache = require_key(game_state, "units_cache")
+    board_cols = int(require_key(game_state, "board_cols"))
+    board_rows = int(require_key(game_state, "board_rows"))
+    walls = game_state.get("wall_hexes", set())
+    shape = unit.get("BASE_SHAPE", "round")
+    size = int(unit.get("BASE_SIZE", 1))
+    orient = int(unit.get("orientation", 0) or 0)
+    off_even, off_odd = precompute_footprint_offsets(shape, size, orient)
+    start_c = int(require_key(unit, "col"))
+    start_r = int(require_key(unit, "row"))
+    move_range = int(require_key(unit, "MOVE"))
+    mover_player = int(require_key(unit, "player"))
+
+    occupied: Set[Tuple[int, int]] = set()
+    for eid, ce in units_cache.items():
+        if str(eid) == str(unit_id):
+            continue
+        c, r = int(require_key(ce, "col")), int(require_key(ce, "row"))
+        e_even, e_odd = precompute_footprint_offsets(
+            ce.get("BASE_SHAPE", "round"), int(ce.get("BASE_SIZE", 1)), int(ce.get("orientation", 0) or 0)
+        )
+        for dc, dr in (e_even if (c & 1) == 0 else e_odd):
+            occupied.add((c + dc, r + dr))
+
+    sx, sy = _hex_center(start_c, start_r)
+    budget = move_range * ENGAGEMENT_NORM_HEX_WIDTH
+    assert pool, "pool euclidien non vide attendu"
+    for ac, ar in pool:
+        offs = off_even if (ac & 1) == 0 else off_odd
+        for dc, dr in offs:
+            fc, fr = ac + dc, ar + dr
+            assert 0 <= fc < board_cols and 0 <= fr < board_rows, f"{(ac, ar)} hors plateau"
+            assert (fc, fr) not in walls, f"{(ac, ar)} chevauche un mur"
+            assert (fc, fr) not in occupied, f"{(ac, ar)} chevauche une occupation"
+        cx, cy = _hex_center(ac, ar)
+        assert math.hypot(cx - sx, cy - sy) <= budget + 1e-6, (
+            f"{(ac, ar)} au-delà du budget ({math.hypot(cx - sx, cy - sy):.2f} > {budget:.2f})"
+        )
+
+
 def test_vectorized_multi_hex_matches_oracle_base3_ez10_round() -> None:
     units = [
         {"id": 1, "col": 10, "row": 10, "HP_CUR": 2, "player": 0, "MOVE": 6,
@@ -391,7 +448,7 @@ def test_vectorized_multi_hex_matches_oracle_base3_ez10_round() -> None:
          "BASE_SIZE": 2, "BASE_SHAPE": "round"},
     ]
     pool, _fz, gs = _run_pool(units, ez=10)
-    assert set(pool) == _oracle_pool(gs, "1", ez=10)
+    _assert_euclidean_pool_invariants(pool, gs, "1")
 
 
 def test_vectorized_multi_hex_matches_oracle_with_walls_ez10() -> None:
@@ -403,7 +460,7 @@ def test_vectorized_multi_hex_matches_oracle_with_walls_ez10() -> None:
          "BASE_SIZE": 2, "BASE_SHAPE": "round"},
     ]
     pool, _fz, gs = _run_pool(units, ez=10, walls=walls)
-    assert set(pool) == _oracle_pool(gs, "1", ez=10)
+    _assert_euclidean_pool_invariants(pool, gs, "1")
 
 
 def test_vectorized_multi_hex_matches_oracle_base2_ez1() -> None:
@@ -426,7 +483,7 @@ def test_vectorized_multi_hex_matches_oracle_mixed_square_enemy_ez10() -> None:
          "BASE_SIZE": 2, "BASE_SHAPE": "square"},
     ]
     pool, _fz, gs = _run_pool(units, ez=10)
-    assert set(pool) == _oracle_pool(gs, "1", ez=10)
+    _assert_euclidean_pool_invariants(pool, gs, "1")
 
 
 def test_movement_build_valid_destinations_pool_deterministic() -> None:

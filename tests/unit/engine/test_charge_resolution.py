@@ -87,19 +87,28 @@ class TestChargeResolution:
         assert _has_valid_charge_target(gs, units[0]) is False
 
     def test_wall_column_blocks_charge_path(self):
-        """charge_wall_block : colonne de murs entre charger et cible → non éligible.
+        """charge_wall_block : colonne de murs entre chargeur (5,10) et cible (10,10).
 
-        Charger en (5,10), ennemi en (10,10), mur sur toute la colonne 7.
-        Sans mur : éligible. Avec mur : aucun chemin BFS → non éligible.
+        Étape 5.3 — l'éligibilité 12" (11.02.1) dépend de la métrique :
+        - euclidien (PvP, défaut) : pré-gate **ligne droite** → le mur NE bloque PAS l'éligibilité
+          (il bloque le charge move post-jet, 11.04, pas la déclaration) ;
+        - gym/hex : éligibilité via **BFS pathfinding** → le mur bloque le chemin (contournement
+          au-delà de la portée de charge) → non éligible.
         """
         units = [_unit(1, 1, 5, 10), _unit(2, 2, 10, 10)]
         wall_col = {(7, r) for r in range(0, 21)}
 
-        gs_no_wall = _make_game_state(units)
-        gs_walled = _make_game_state(units, wall_hexes=wall_col)
+        # Euclidien (PvP, défaut) : ligne droite, mur non bloquant pour l'éligibilité.
+        assert _has_valid_charge_target(_make_game_state(units), units[0]) is True
+        assert _has_valid_charge_target(
+            _make_game_state(units, wall_hexes=wall_col), units[0]
+        ) is True, "euclidien : éligibilité ligne droite, mur non bloquant"
 
-        assert _has_valid_charge_target(gs_no_wall, units[0]) is True, "sans mur doit être éligible"
-        assert _has_valid_charge_target(gs_walled, units[0]) is False, "mur complet doit bloquer la charge"
+        # Gym/hex : BFS pathfinding, mur complet bloque le chemin dans la portée de charge.
+        gs_nw = _make_game_state(units); gs_nw["gym_training_mode"] = True
+        gs_w = _make_game_state(units, wall_hexes=wall_col); gs_w["gym_training_mode"] = True
+        assert _has_valid_charge_target(gs_nw, units[0]) is True, "gym/hex sans mur : éligible"
+        assert _has_valid_charge_target(gs_w, units[0]) is False, "gym/hex mur complet : bloque la charge"
 
     def test_two_enemies_only_one_in_range(self):
         """charge_two_enemies : deux ennemis, seul celui à portée génère une destination valide.

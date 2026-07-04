@@ -948,3 +948,22 @@ Vérification exhaustive du code (charge) :
 
 **Aucune action requise.** Point rattaché à l'Étape 5 (charge FLY déclarée = un des cas « NON re-testés
 exhaustivement » du checkpoint Étape 5, désormais couvert côté code).
+
+### 20.13 — LACUNE : `detection_range` (15", unités cachées 13.09) — gate euclidien / affichage hex
+
+La portée de détection des unités cachées (`detection_range` = 15" dans `game_config.json`) est
+comparée à **deux distances de métriques différentes selon le chemin de code** :
+
+- **Gate autoritaire (pool de cibles réel)** — `shooting_handlers.py:2977` : compare `distance_to_enemy`,
+  calculée par `ranged_edge_distance` avec la métrique `ranged` = **euclidien** (Étape 2). C'est ce qui
+  décide réellement si une unité cachée est ciblable. **Correct** : la détection est une portée de tir →
+  suit la métrique `ranged`.
+- **Affichage frontend (œil rouge « caché trop loin »)** — `build_hidden_too_far_by_unit_id`
+  (`shooting_handlers.py:1770`) : utilise `min_distance_between_sets` = distance **hex** (cube), pas la
+  métrique configurée. **Incohérent** : aux abords des 15", l'indicateur visuel peut diverger du gate
+  (cible affichée « trop loin » mais ciblable, ou l'inverse).
+
+**Action** : router le helper d'affichage via la même mesure que le gate (`ranged_edge_distance` +
+métrique `ranged`) pour supprimer la divergence. `detection_range` (comme RNG) doit être comparé
+bord-à-bord euclidien × 1.5, jamais en hex. À traiter avec l'Étape 6 (cohérence & nettoyage) ou dès
+qu'un écart d'affichage est constaté en jeu.

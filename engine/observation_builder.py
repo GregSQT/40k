@@ -1465,8 +1465,10 @@ class ObservationBuilder:
             obs[base + 5] = 1.0  # slot_mask (alive)
             # is_locked_by_friendly_er : l escouade ennemie est dans l ER (bord-a-bord)
             # d au moins une escouade alliee.
+            # metric="hex" ÉPINGLÉ : feature d'observation IA (§10) — reste hex même après la
+            # bascule EZ euclidienne 7.6 (retrain hors périmètre migration, décision actée).
             is_locked = any(
-                unit_entries_within_engagement_zone(e_entry, ae, ez) for ae in ally_entries
+                unit_entries_within_engagement_zone(e_entry, ae, ez, metric="hex") for ae in ally_entries
             )
             obs[base + 6] = 1.0 if is_locked else 0.0
             # value_over_ttk = VALUE_cible / TTK, normalise (cap a 1.0)

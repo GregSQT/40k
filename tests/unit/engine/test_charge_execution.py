@@ -200,28 +200,35 @@ class TestChargePhaseStart:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestHasValidChargeTarget:
+    # Depuis Étape 5, la branche BFS/pool de _has_valid_charge_target n'existe plus que pour
+    # le gym/hex (distance_metric["charge_gym"]="hex"). En PvP/euclidien, l'éligibilité est un
+    # pré-gate 12" ligne droite (ranged_in_range), sans pool ni BFS. Ces 3 tests ciblent la
+    # branche BFS → forcer gym_training_mode pour l'exercer réellement (cf. test_charge_eligibility
+    # pour la couverture euclidienne).
     def test_nonempty_bfs_returns_true(self, monkeypatch):
-        """charge_target_yes : BFS trouve au moins une destination → True."""
+        """charge_target_yes (gym/hex) : BFS trouve au moins une destination → True."""
         monkeypatch.setattr(
             "engine.phase_handlers.charge_handlers.charge_build_valid_destinations_pool",
             lambda gs, uid, roll, **kwargs: [(5, 11)],
         )
         units = [_unit(1, 1, 5, 10), _unit(2, 2, 8, 10)]
         gs = _make_gs(units)
+        gs["gym_training_mode"] = True
         assert _has_valid_charge_target(gs, units[0]) is True
 
     def test_empty_bfs_returns_false(self, monkeypatch):
-        """charge_target_no : BFS vide → False."""
+        """charge_target_no (gym/hex) : ennemi à portée mais BFS vide → False."""
         monkeypatch.setattr(
             "engine.phase_handlers.charge_handlers.charge_build_valid_destinations_pool",
             lambda gs, uid, roll, **kwargs: [],
         )
-        units = [_unit(1, 1, 5, 10), _unit(2, 2, 50, 50)]
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 8, 10)]
         gs = _make_gs(units)
+        gs["gym_training_mode"] = True
         assert _has_valid_charge_target(gs, units[0]) is False
 
     def test_bfs_exception_returns_false(self, monkeypatch):
-        """charge_target_err : exception dans BFS → False (résilience)."""
+        """charge_target_err (gym/hex) : exception dans BFS → False (résilience)."""
         def raise_err(*args, **kwargs):
             raise RuntimeError("BFS failure")
 
@@ -231,6 +238,7 @@ class TestHasValidChargeTarget:
         )
         units = [_unit(1, 1, 5, 10), _unit(2, 2, 8, 10)]
         gs = _make_gs(units)
+        gs["gym_training_mode"] = True
         assert _has_valid_charge_target(gs, units[0]) is False
 
 

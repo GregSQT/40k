@@ -346,16 +346,6 @@ def _remove_dead_unit_from_fight_pools(game_state: Dict[str, Any], unit_id: str)
     _fight_maybe_lazy_rebuild_alternating_pools(game_state)
 
 
-def _fight_enemy_footprint_distances(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-) -> List[Tuple[Any, int]]:
-    """Return fight footprint distances to enemy units using the B/engagement metric."""
-    from engine.spatial_relations import enemy_footprint_distances
-
-    return enemy_footprint_distances(game_state, unit, max_distance=None)
-
-
 def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
     Check if unit is adjacent to at least one enemy within engagement zone.
