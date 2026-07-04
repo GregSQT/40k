@@ -4355,6 +4355,271 @@ def declare_attack_weapon(
     return created
 
 
+def _intent_weapon_code(
+    models_cache: Dict[str, Any], intent: Dict[str, Any], weapons_key: str
+) -> Optional[str]:
+    """Code de l arme referencee par un intent, via l index LOCAL de la figurine."""
+    m = models_cache.get(str(intent.get("model_id")))
+    if m is None:
+        return None
+    weapons = m.get(weapons_key, [])  # get allowed
+    widx = int(intent.get("weapon_index", -1))
+    if 0 <= widx < len(weapons) and isinstance(weapons[widx], dict):
+        return weapons[widx].get("code")
+    return None
+
+
+def _declare_qty_candidates(
+    game_state: Dict[str, Any], ctx: DeclareAttackCtx,
+    attacker_squad_id: str, weapon_code: str, target_squad_id: str,
+) -> tuple:
+    """(`remaining`, `candidates` tries) pour une declaration quantifiee (code, cible).
+
+    - `remaining` : declarations de l escouade PRIVEES de la ligne (weapon_code, cible)
+      — semantique SET : editer une ligne libere d abord ses propres figurines.
+    - `candidates` : [(dist, model_id, local_idx)] tries (plus proche puis id) des figs
+      portant `weapon_code`, dont l arme physique est libre vis-a-vis de `remaining`
+      (_weapon_group_key), eligibles a la cible (ctx.can_target_with_weapon).
+
+    Brique partagee entre declare_attack_weapon_qty, weapon_qty_max (borne du champ count)
+    et — a terme — la melee. Ne mute PAS game_state."""
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    current = game_state[ctx.intents_key][attacker_squad_id]
+    remaining = [
+        i for i in current
+        if not (str(i.get("target_unit_id")) == str(target_squad_id)
+                and _intent_weapon_code(models_cache, i, ctx.weapons_key) == weapon_code)
+    ]
+    consumed: Dict[str, set] = {}
+    for i in remaining:
+        mid = str(i["model_id"]); m = models_cache.get(mid)
+        if m is None:
+            continue
+        w = m.get(ctx.weapons_key, [])  # get allowed
+        consumed.setdefault(mid, set()).add(_weapon_group_key(w, int(i["weapon_index"])))
+
+    from engine.hex_utils import min_distance_between_sets
+    tgt_uc = require_key(game_state, "units_cache")[str(target_squad_id)]
+    tgt_fp = tgt_uc.get("occupied_hexes") or {(tgt_uc["col"], tgt_uc["row"])}
+
+    candidates: List[tuple] = []
+    for mid in squad_models.get(attacker_squad_id, []):  # get allowed
+        m = models_cache.get(mid)
+        if m is None:
+            continue
+        weapons = m.get(ctx.weapons_key, [])  # get allowed
+        local_idx = next(
+            (k for k, w in enumerate(weapons)
+             if isinstance(w, dict) and w.get("code") == weapon_code),
+            None,
+        )
+        if local_idx is None:
+            continue
+        if _weapon_group_key(weapons, local_idx) in consumed.get(str(mid), set()):
+            continue
+        if not ctx.can_target_with_weapon(game_state, m, attacker_squad_id, target_squad_id, local_idx):
+            continue
+        dist = min_distance_between_sets({(int(m["col"]), int(m["row"]))}, tgt_fp)
+        candidates.append((dist, str(mid), local_idx))
+    candidates.sort(key=lambda c: (c[0], c[1]))  # deterministe : plus proche, puis model_id
+    return remaining, candidates
+
+
+def declare_attack_weapon_qty(
+    game_state: Dict[str, Any], ctx: DeclareAttackCtx,
+    attacker_squad_id: str, weapon_code: str, count: int, target_squad_id: str,
+) -> List[Dict[str, Any]]:
+    """Attribue `count` attaques de l arme `weapon_code` (identite stable) sur la cible.
+
+    Successeur par IDENTITE + QUANTITE de declare_attack_weapon (index escouade unique,
+    incorrect en escouade heterogene). Moteur generique parametre par ctx : reutilisable
+    au tir ET en melee.
+
+    Semantique SET (idempotente) par couple (weapon_code, cible) : retire d abord toute
+    declaration existante de ce couple puis en (re)cree `count`. Editer le nombre d une
+    "ligne" d attribution = re-appeler avec le nouveau count.
+
+    Selection : parmi les figurines portant `weapon_code` dont l arme physique est encore
+    LIBRE (profils exclusifs regroupes par _weapon_group_key) et pouvant viser la cible
+    (ctx.can_target_with_weapon), les `count` plus proches (tri deterministe dist puis id).
+    1 intent par-figurine avec l index LOCAL. Erreur explicite si count > figs eligibles
+    (aucune troncature silencieuse). Validation AVANT toute mutation."""
+    init_pending_intents(game_state)
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    if attacker_squad_id not in game_state[ctx.intents_key]:
+        raise RuntimeError(
+            f"declare_attack_weapon_qty ({ctx.phase_label}) called before activation start "
+            f"for squad {attacker_squad_id!r}"
+        )
+    if int(count) <= 0:
+        raise ValueError(f"count doit etre > 0, recu {count} ({ctx.phase_label})")
+    if target_squad_id not in squad_models or not any(
+        mid in models_cache for mid in squad_models.get(target_squad_id, [])  # get allowed
+    ):
+        raise ValueError(f"Target squad {target_squad_id!r} not alive ({ctx.phase_label})")
+
+    remaining, candidates = _declare_qty_candidates(
+        game_state, ctx, attacker_squad_id, weapon_code, target_squad_id
+    )
+    if len(candidates) < int(count):
+        raise ValueError(
+            f"count={count} > figurines eligibles ({len(candidates)}) pour arme "
+            f"'{weapon_code}' sur {target_squad_id!r} ({ctx.phase_label})"
+        )
+    current: List[Dict[str, Any]] = game_state[ctx.intents_key][attacker_squad_id]
+    target_size = sum(
+        1 for mid in squad_models.get(target_squad_id, []) if mid in models_cache  # get allowed
+    )
+    created: List[Dict[str, Any]] = []
+    for _dist, mid, local_idx in candidates[:int(count)]:
+        weapons = models_cache[mid][ctx.weapons_key]
+        created.append({
+            "model_id": mid,
+            "weapon_index": local_idx,
+            "target_unit_id": target_squad_id,
+            "target_squad_size_at_declaration": target_size,
+            "n_attacks_resolved": _resolve_intent_nb(
+                weapons, local_idx, f"{ctx.phase_label}_qty_NB_{mid}_{local_idx}"),
+        })
+    current[:] = remaining + created  # commit APRES validation (pas de mutation si erreur)
+    return created
+
+
+def weapon_qty_max(
+    game_state: Dict[str, Any], ctx: DeclareAttackCtx,
+    attacker_squad_id: str, weapon_code: str, target_squad_id: str,
+) -> int:
+    """Nombre de figurines pouvant tirer/frapper `weapon_code` sur la cible.
+
+    Borne du champ count d une ligne d attribution. La ligne (code, cible) editee compte
+    ses PROPRES figurines comme libres (semantique SET). Retourne 0 si activation non
+    demarree ou cible non vivante. Ne mute pas game_state."""
+    init_pending_intents(game_state)
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    if attacker_squad_id not in game_state[ctx.intents_key]:
+        return 0
+    if target_squad_id not in squad_models or not any(
+        mid in models_cache for mid in squad_models.get(target_squad_id, [])  # get allowed
+    ):
+        return 0
+    _remaining, candidates = _declare_qty_candidates(
+        game_state, ctx, attacker_squad_id, weapon_code, target_squad_id
+    )
+    return len(candidates)
+
+
+def undeclare_attack_weapon_qty(
+    game_state: Dict[str, Any], ctx: DeclareAttackCtx,
+    attacker_squad_id: str, weapon_code: str, target_squad_id: str,
+) -> int:
+    """Retire la ligne (weapon_code, cible) — bouton "-" d une ligne d attribution.
+
+    Returns le nombre d intents retires. Generique (tir OU melee via ctx)."""
+    init_pending_intents(game_state)
+    models_cache = require_key(game_state, "models_cache")
+    intents = game_state[ctx.intents_key].get(attacker_squad_id)  # get allowed
+    if not intents:
+        return 0
+    before = len(intents)
+    intents[:] = [
+        i for i in intents
+        if not (str(i.get("target_unit_id")) == str(target_squad_id)
+                and _intent_weapon_code(models_cache, i, ctx.weapons_key) == weapon_code)
+    ]
+    return before - len(intents)
+
+
+def eligible_models_for_weapon(
+    game_state: Dict[str, Any], ctx: DeclareAttackCtx,
+    attacker_squad_id: str, weapon_code: str, target_squad_id: str,
+) -> List[Dict[str, Any]]:
+    """Figurines pouvant tirer/frapper `weapon_code` sur la cible (voile vert).
+
+    `models` = candidats de _declare_qty_candidates (portant l arme, groupe libre, portee+LoS),
+    la ligne (code, cible) comptant ses propres figs comme disponibles. `assigned` marque
+    celles deja declarees sur (code, cible). Read-only, generique ctx."""
+    init_pending_intents(game_state)
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    if attacker_squad_id not in game_state[ctx.intents_key]:
+        return []
+    if target_squad_id not in squad_models or not any(
+        mid in models_cache for mid in squad_models.get(target_squad_id, [])  # get allowed
+    ):
+        return []
+    _remaining, candidates = _declare_qty_candidates(
+        game_state, ctx, attacker_squad_id, weapon_code, target_squad_id
+    )
+    assigned = {
+        str(i["model_id"])
+        for i in game_state[ctx.intents_key][attacker_squad_id]
+        if str(i.get("target_unit_id")) == str(target_squad_id)
+        and _intent_weapon_code(models_cache, i, ctx.weapons_key) == weapon_code
+    }
+    return [{"model_id": mid, "assigned": mid in assigned} for (_d, mid, _idx) in candidates]
+
+
+def toggle_attack_model_weapon(
+    game_state: Dict[str, Any], ctx: DeclareAttackCtx,
+    attacker_squad_id: str, model_id: str, weapon_code: str, target_squad_id: str,
+) -> str:
+    """Toggle l intent d UNE figurine precise pour (code, cible) — clic sur fig verte.
+
+    Retire si deja declaree (re-clic), sinon ajoute (si eligible + groupe libre).
+    Returns 'added' ou 'removed'. Generique ctx."""
+    init_pending_intents(game_state)
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    if attacker_squad_id not in game_state[ctx.intents_key]:
+        raise RuntimeError(
+            f"toggle_attack_model_weapon ({ctx.phase_label}) called before activation start "
+            f"for squad {attacker_squad_id!r}"
+        )
+    m = models_cache.get(str(model_id))
+    if m is None:
+        raise ValueError(f"Model {model_id!r} absent de models_cache ({ctx.phase_label})")
+    weapons = m.get(ctx.weapons_key, [])  # get allowed
+    local_idx = next(
+        (k for k, w in enumerate(weapons) if isinstance(w, dict) and w.get("code") == weapon_code),
+        None,
+    )
+    if local_idx is None:
+        raise ValueError(f"Model {model_id!r} ne porte pas l arme {weapon_code!r}")
+    intents: List[Dict[str, Any]] = game_state[ctx.intents_key][attacker_squad_id]
+    existing = [
+        i for i in intents
+        if str(i["model_id"]) == str(model_id)
+        and str(i.get("target_unit_id")) == str(target_squad_id)
+        and int(i["weapon_index"]) == local_idx
+    ]
+    if existing:
+        intents[:] = [i for i in intents if i not in existing]
+        return "removed"
+    _remaining, candidates = _declare_qty_candidates(
+        game_state, ctx, attacker_squad_id, weapon_code, target_squad_id
+    )
+    if str(model_id) not in {mid for (_d, mid, _i) in candidates}:
+        raise ValueError(
+            f"Fig {model_id!r} non eligible pour {weapon_code!r} sur {target_squad_id!r} "
+            f"(hors portee/LoS ou arme physique deja engagee)"
+        )
+    target_size = sum(
+        1 for mid in squad_models.get(target_squad_id, []) if mid in models_cache  # get allowed
+    )
+    intents.append({
+        "model_id": str(model_id),
+        "weapon_index": local_idx,
+        "target_unit_id": target_squad_id,
+        "target_squad_size_at_declaration": target_size,
+        "n_attacks_resolved": _resolve_intent_nb(
+            weapons, local_idx, f"{ctx.phase_label}_toggle_NB_{model_id}_{local_idx}"),
+    })
+    return "added"
+
+
 def squad_declare_shoot_model(
     game_state: Dict[str, Any],
     attacker_squad_id: str,
@@ -4595,6 +4860,137 @@ def squad_declare_shoot_weapon(
     return declare_attack_weapon(
         game_state, SHOOT_DECLARE_CTX, attacker_squad_id, weapon_index, target_squad_id
     )
+
+
+def squad_declare_shoot_weapon_qty(
+    game_state: Dict[str, Any], attacker_squad_id: str,
+    weapon_code: str, count: int, target_squad_id: str,
+) -> List[Dict[str, Any]]:
+    """Assigne `count` tirs de l arme `weapon_code` (identite) a la cible.
+
+    Wrapper fin de declare_attack_weapon_qty via SHOOT_DECLARE_CTX (portee + LoS).
+    """
+    return declare_attack_weapon_qty(
+        game_state, SHOOT_DECLARE_CTX, attacker_squad_id, weapon_code, count, target_squad_id
+    )
+
+
+def squad_shoot_weapon_qty_max(
+    game_state: Dict[str, Any], attacker_squad_id: str, weapon_code: str, target_squad_id: str
+) -> int:
+    """Borne du champ count au TIR — figs pouvant tirer `weapon_code` sur la cible."""
+    return weapon_qty_max(game_state, SHOOT_DECLARE_CTX, attacker_squad_id, weapon_code, target_squad_id)
+
+
+def squad_undeclare_shoot_weapon_qty(
+    game_state: Dict[str, Any], attacker_squad_id: str, weapon_code: str, target_squad_id: str
+) -> int:
+    """Retire la ligne (weapon_code, cible) au TIR — bouton "-"."""
+    return undeclare_attack_weapon_qty(game_state, SHOOT_DECLARE_CTX, attacker_squad_id, weapon_code, target_squad_id)
+
+
+def squad_shoot_weapons_for_target(
+    game_state: Dict[str, Any], attacker_squad_id: str, target_squad_id: str
+) -> List[Dict[str, Any]]:
+    """Menu cible-d abord au TIR — armes pouvant viser la cible avec (m, x). Cf. weapons_for_target."""
+    return weapons_for_target(game_state, SHOOT_DECLARE_CTX, attacker_squad_id, target_squad_id)
+
+
+def squad_shoot_eligible_models(
+    game_state: Dict[str, Any], attacker_squad_id: str, weapon_code: str, target_squad_id: str
+) -> List[Dict[str, Any]]:
+    """Voile vert au TIR — figs pouvant tirer `weapon_code` sur la cible (+ assigned)."""
+    return eligible_models_for_weapon(game_state, SHOOT_DECLARE_CTX, attacker_squad_id, weapon_code, target_squad_id)
+
+
+def squad_shoot_toggle_model_weapon(
+    game_state: Dict[str, Any], attacker_squad_id: str, model_id: str, weapon_code: str, target_squad_id: str
+) -> str:
+    """Clic sur fig verte au TIR — toggle l attribution de cette fig pour (code, cible)."""
+    return toggle_attack_model_weapon(game_state, SHOOT_DECLARE_CTX, attacker_squad_id, model_id, weapon_code, target_squad_id)
+
+
+def _union_weapons(
+    game_state: Dict[str, Any], weapons_key: str, squad_id: str
+) -> List[Dict[str, Any]]:
+    """Union DISTINCTE (par `code`) des armes `weapons_key` portees par les figurines.
+
+    Chaque entree = un profil selectionnable (Storm Bolter, Cyclone Frag/Krak, arme de
+    perso attache...) — `unit[weapons_key]` ne porte que l arme du type d escouade de base
+    et masquerait les armes par-figurine. Copie superficielle avec `shot` par defaut a 0
+    (attendu par weapon_availability_check ; l usage reel est suivi via les intents). Ordre
+    stable = premiere occurrence. Echoue si une arme n a pas de `code` (invariant identite)."""
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    seen: set = set()
+    ordered: List[Dict[str, Any]] = []
+    for mid in squad_models.get(squad_id, []):  # get allowed
+        m = models_cache.get(mid)
+        if m is None:
+            continue
+        for w in m.get(weapons_key, []):  # get allowed
+            if not isinstance(w, dict):
+                continue
+            code = w.get("code")
+            if code is None:
+                raise ValueError(
+                    f"Squad {squad_id} model {mid}: arme '{w.get('display_name')}' sans 'code' "
+                    f"— identite requise pour le menu union / declaration quantifiee"
+                )
+            if code in seen:
+                continue
+            seen.add(code)
+            # Type/nom de la figurine porteuse : distingue deux profils homonymes aux
+            # stats differentes (ex. Storm Bolter BS3+ Terminator vs BS2+ Captain).
+            ordered.append({
+                **w,
+                "shot": w.get("shot", 0),
+                "carrier_type": m.get("unitType"),  # get allowed
+                "carrier_name": m.get("DISPLAY_NAME"),  # get allowed
+            })
+    return ordered
+
+
+def squad_union_weapons(
+    game_state: Dict[str, Any], squad_id: str
+) -> List[Dict[str, Any]]:
+    """Union des armes RNG par-figurine (source du menu tir). Cf. _union_weapons."""
+    return _union_weapons(game_state, "RNG_WEAPONS", squad_id)
+
+
+def weapons_for_target(
+    game_state: Dict[str, Any], ctx: DeclareAttackCtx,
+    attacker_squad_id: str, target_squad_id: str,
+) -> List[Dict[str, Any]]:
+    """Armes de l escouade pouvant viser la cible, pour le menu CIBLE-D ABORD.
+
+    Ne retient que les profils dont AU MOINS une figurine peut atteindre la cible.
+    Chaque entree : `code`, `weapon` (affichage nom/rules/portee), `m` (borne du champ
+    count = weapon_qty_max), `x` (nb deja attribue au couple (code, cible)).
+    Generique ctx (tir OU melee). Read-only."""
+    init_pending_intents(game_state)
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    if attacker_squad_id not in game_state[ctx.intents_key]:
+        return []
+    if target_squad_id not in squad_models or not any(
+        mid in models_cache for mid in squad_models.get(target_squad_id, [])  # get allowed
+    ):
+        return []
+    intents = game_state[ctx.intents_key][attacker_squad_id]
+    result: List[Dict[str, Any]] = []
+    for w in _union_weapons(game_state, ctx.weapons_key, attacker_squad_id):
+        code = w["code"]
+        m = weapon_qty_max(game_state, ctx, attacker_squad_id, code, target_squad_id)
+        if m <= 0:
+            continue
+        x = sum(
+            1 for i in intents
+            if str(i.get("target_unit_id")) == str(target_squad_id)
+            and _intent_weapon_code(models_cache, i, ctx.weapons_key) == code
+        )
+        result.append({"code": code, "weapon": w, "m": m, "x": x})
+    return result
 
 
 def squad_undeclare_shoot_weapon(

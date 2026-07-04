@@ -612,6 +612,7 @@ type BoardProps = {
     declarations: Array<{ model_id: string; weapon_index: number; target_unit_id: string }>;
     activeModelId: string | null;
     activeWeaponIndex: number | null;
+    activeWeaponCode: string | null;
     canValidate: boolean;
   } | null;
   onStartSquadModelShoot?: (
@@ -1214,6 +1215,7 @@ export default function Board({
   const manualAllocOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Slice G : overlay voile violet des figs éligibles en chargeModelMove (préservé au redraw). */
   const chargeModelVeilOverlayRef = useRef<PIXI.Graphics | null>(null);
+  const shootSubgroupOverlayRef = useRef<PIXI.Graphics | null>(null);
   const blinkTargetRingOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Halos de cohésion (charge/pile-in/consolidation) redessinés au survol — suivent la fig active. */
   const cohesionHaloOverlayRef = useRef<PIXI.Graphics | null>(null);
@@ -1565,6 +1567,15 @@ export default function Board({
   const triggerEnemyShootClick = useSingleDoubleClick(250);
   const triggerEnemyShootClickRef = useRef(triggerEnemyShootClick);
   triggerEnemyShootClickRef.current = triggerEnemyShootClick;
+  // Ref vers openWeaponsForTarget (défini plus bas) pour usage dans le handler pointer (flux cible-d'abord).
+  const openWeaponsForTargetRef = useRef<
+    (targetId: string, position?: { x: number; y: number }) => Promise<void>
+  >(async () => {});
+  // Refs vers les actions clic-fig (définies plus bas) — évite un TDZ dans le handler pointer.
+  const toggleShootFigRef = useRef<(modelId: string) => Promise<void>>(async () => {});
+  const setShootWeaponQtyRef = useRef<(code: string, count: number, targetId: string) => Promise<void>>(
+    async () => {}
+  );
   const lastOwnFigClickRef = useRef<{ modelId: string; time: number } | null>(null);
   /** Combat par-figurine : callbacks + plan + dernier clic ennemi, refs à jour pour le handler stable. */
   const squadFightCallbacksRef = useRef({
@@ -1679,11 +1690,24 @@ export default function Board({
   // const [currentFightTarget, setCurrentFightTarget] = useState<number | null>(null);
   // const [selectedFightTarget, setSelectedFightTarget] = useState<number | null>(null);
 
-  // Weapon selection menu state
+  // Weapon selection menu state.
+  // Flux CIBLE-D'ABORD : quand `targetId` est défini, le menu liste les armes pouvant
+  // viser cette cible (`targetWeapons`, chacune avec m=max et x=courant), avec compteur.
   const [weaponSelectionMenu, setWeaponSelectionMenu] = useState<{
     unitId: number;
     position: { x: number; y: number };
+    /** Cibles cliquées (ordre) : chacune ajoute une ligne sous chaque profil éligible. */
+    openTargets: string[];
+    /** weapons_for_target par cible : profils éligibles avec m (max) et x (courant). */
+    targetData: Record<string, Array<{ code: string; weapon: Weapon; m: number; x: number }>>;
+    /** Sous-groupe actif (ligne cliquée) : profil + cible → voile jaune (cible) + vert (figs). */
+    activeWeaponCode?: string;
+    activeTargetId?: string;
+    /** Figs de l'unité active éligibles au sous-groupe actif (voile vert), avec assigned. */
+    greenModels?: Array<{ model_id: string; assigned: boolean }>;
   } | null>(null);
+  const weaponSelectionMenuRef = useRef(weaponSelectionMenu);
+  weaponSelectionMenuRef.current = weaponSelectionMenu;
   const prevActiveShootingUnitRef = useRef<string | number | null>(null);
   const [hexCoordTooltip, setHexCoordTooltip] = useState<{
     visible: boolean;
@@ -2236,13 +2260,16 @@ export default function Board({
         HEX_HEIGHT / 2 +
         MARGIN;
 
-      setWeaponSelectionMenu({
+      setWeaponSelectionMenu((prev) => ({
         unitId,
         position: {
           x: rect.left + centerX + HEX_RADIUS * 0.6,
           y: rect.top + centerY - HEX_RADIUS * 0.6,
         },
-      });
+        // Conserve les cibles ouvertes si on ré-ouvre le menu de la même unité.
+        openTargets: prev && prev.unitId === unitId ? prev.openTargets : [],
+        targetData: prev && prev.unitId === unitId ? prev.targetData : {},
+      }));
       window.dispatchEvent(new CustomEvent("weaponMenuOpened", { detail: { unitId } }));
     };
 
@@ -4543,6 +4570,26 @@ export default function Board({
         e.stopImmediatePropagation();
         const now = e.timeStamp;
         const prevOwn = lastOwnFigClickRef.current;
+        // Fig VERTE (éligible au sous-groupe actif) : simple = toggle son tir, double = Max.
+        const menuNow = weaponSelectionMenuRef.current;
+        const isGreen =
+          !!menuNow?.activeWeaponCode &&
+          !!menuNow.activeTargetId &&
+          (menuNow.greenModels ?? []).some((g) => String(g.model_id) === String(own.mid));
+        if (isGreen && menuNow) {
+          const code = menuNow.activeWeaponCode!;
+          const tid = menuNow.activeTargetId!;
+          if (prevOwn && String(prevOwn.modelId) === String(own.mid) && now - prevOwn.time < 400) {
+            lastOwnFigClickRef.current = null;
+            const m =
+              menuNow.targetData[tid]?.find((x) => x.code === code)?.m ?? 0; // Max = toutes les vertes
+            if (m > 0) void setShootWeaponQtyRef.current(code, m, tid);
+            return;
+          }
+          lastOwnFigClickRef.current = { modelId: own.mid, time: now };
+          void toggleShootFigRef.current(own.mid);
+          return;
+        }
         if (prevOwn && String(prevOwn.modelId) === String(own.mid) && now - prevOwn.time < 400) {
           lastOwnFigClickRef.current = null;
           void cbs.onSquadShootLosOverview?.(Number(plan.unitId));
@@ -4557,33 +4604,12 @@ export default function Board({
         }
         return;
       }
-      // 2) clic sur une unité ennemie → bloque le legacy (en mode tir) et assigne si une fig est active.
+      // 2) clic sur une unité ennemie → flux CIBLE-D'ABORD : ouvre le menu des armes
+      // pouvant viser cette cible (compteurs x/m). L'attribution se fait dans le menu.
       const enemy = findEnemyUnit(col, row);
       if (enemy != null) {
         e.stopImmediatePropagation();
-        // Simple/double mutualisés : le simple est différé pour ne PAS partir avant un
-        // éventuel double (sinon 2 assign + 2 los_overview coûteux). Les callbacks lisent
-        // les refs à l'exécution (état à jour même après le délai).
-        triggerEnemyShootClickRef.current(
-          enemy,
-          () => {
-            // Clic simple : assigne la fig active si valide.
-            // blinkingUnits vide (valid_targets pas encore chargés) → on laisse passer, backend valide.
-            const cbsNow = squadShootCallbacksRef.current;
-            const planNow = squadShootPlanRef.current;
-            if (!planNow?.activeModelId) return;
-            const validTargets = stableBlinkingUnitsRef.current;
-            const isValid =
-              !validTargets || validTargets.length === 0
-                ? true
-                : validTargets.includes(Number(enemy));
-            if (isValid) void cbsNow.onAssignShootTarget?.(enemy);
-          },
-          () => {
-            // Double-clic : auto-assign toutes les figs avec LoS valide sur cette cible.
-            void squadShootCallbacksRef.current.onAutoAssignAllModels?.(enemy);
-          }
-        );
+        void openWeaponsForTargetRef.current(String(enemy), { x: e.clientX + 12, y: e.clientY });
       }
     };
 
@@ -4916,6 +4942,92 @@ export default function Board({
       if (manualAllocOverlayRef.current === overlay) manualAllocOverlayRef.current = null;
     };
   }, [manualAllocation, boardConfig, units, gameState, hideIndicators]);
+
+  // Flux tir CIBLE-D'ABORD : sous-groupe actif (profil × cible) → voile JAUNE sur la cible
+  // active + voile VERT sur les figs de l'unité active éligibles (portée+LoS). Overlay PIXI dédié.
+  useEffect(() => {
+    const app = appRef.current;
+    if (!app) return;
+    const overlay = new PIXI.Graphics();
+    overlay.zIndex = 2705; // au-dessus du voile move (2600) et de l'anneau alloc (2700)
+    overlay.eventMode = "none";
+    app.stage.addChild(overlay);
+    shootSubgroupOverlayRef.current = overlay;
+    overlay.visible = !hideIndicators;
+    overlay.clear();
+    const menu = weaponSelectionMenu;
+    console.log(`[RETICLE] draw run — activeTargetId=${menu?.activeTargetId ?? "∅"} green=${menu?.greenModels?.length ?? 0}`);
+    if (menu?.activeTargetId && boardConfig) {
+      const HEX_RADIUS_H = boardConfig.hex_radius;
+      const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
+      const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
+      const MARGIN_H = boardConfig.margin;
+      const uc = (
+        gameState as unknown as {
+          units_cache?: Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>;
+        }
+      )?.units_cache;
+      const centerOf = (pos: [number, number]): [number, number] => [
+        pos[0] * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H,
+        pos[1] * HEX_HEIGHT_H + ((pos[0] % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H,
+      ];
+      // 1. Voile JAUNE léger + RÉTICULE de visée (crosshair) sur chaque fig de la cible active.
+      const tgt = units.find((u) => String(u.id) === String(menu.activeTargetId));
+      const tgtByModel = uc?.[String(menu.activeTargetId)]?.occupied_hexes_by_model;
+      if (tgt && tgtByModel) {
+        const tR = resolveBaseSizeForUnitDisplay(tgt) > 1
+          ? (resolveBaseSizeForUnitDisplay(tgt) * 1.5 * HEX_RADIUS_H) / 2
+          : HEX_RADIUS_H * 0.7;
+        const rr = tR * 1.15; // rayon du réticule
+        const tickIn = rr * 0.75; // les traits cardinaux chevauchent le cercle
+        const tickOut = rr * 1.35;
+        const reticleW = Math.max(3, HEX_RADIUS_H * 0.38);
+        for (const pos of Object.values(tgtByModel)) {
+          const [cx, cy] = centerOf(pos);
+          // voile jaune léger (confirmation de sélection)
+          overlay.lineStyle(0);
+          overlay.beginFill(0xf5c518, 0.22);
+          overlay.drawCircle(cx, cy, tR);
+          overlay.endFill();
+          // réticule rouge par-dessus l'icône (cercle + 4 traits cardinaux)
+          overlay.lineStyle(reticleW, 0xff2b2b, 1);
+          overlay.drawCircle(cx, cy, rr);
+          overlay.moveTo(cx, cy - tickIn); overlay.lineTo(cx, cy - tickOut);
+          overlay.moveTo(cx, cy + tickIn); overlay.lineTo(cx, cy + tickOut);
+          overlay.moveTo(cx - tickIn, cy); overlay.lineTo(cx - tickOut, cy);
+          overlay.moveTo(cx + tickIn, cy); overlay.lineTo(cx + tickOut, cy);
+        }
+      }
+      // 2. Voile VERT sur les figs éligibles de l'unité active (assigned = plus opaque).
+      const atk = units.find((u) => String(u.id) === String(menu.unitId));
+      const atkByModel = uc?.[String(menu.unitId)]?.occupied_hexes_by_model;
+      if (atk && atkByModel) {
+        const aR = resolveBaseSizeForUnitDisplay(atk) > 1
+          ? (resolveBaseSizeForUnitDisplay(atk) * 1.5 * HEX_RADIUS_H) / 2
+          : HEX_RADIUS_H * 0.7;
+        const assignedIds = new Set(
+          (menu.greenModels ?? []).filter((g) => g.assigned).map((g) => String(g.model_id))
+        );
+        for (const g of menu.greenModels ?? []) {
+          const pos = atkByModel[g.model_id];
+          if (!pos) continue;
+          const [cx, cy] = centerOf(pos);
+          overlay.lineStyle(Math.max(1.5, HEX_RADIUS_H * 0.4), 0x2ecc40, 0.95);
+          overlay.beginFill(0x2ecc40, assignedIds.has(String(g.model_id)) ? 0.5 : 0.18);
+          overlay.drawCircle(cx, cy, aR);
+          overlay.endFill();
+        }
+      }
+    }
+    return () => {
+      if (!overlay.destroyed) {
+        overlay.clear();
+        app.stage.removeChild(overlay);
+        overlay.destroy();
+      }
+      if (shootSubgroupOverlayRef.current === overlay) shootSubgroupOverlayRef.current = null;
+    };
+  }, [weaponSelectionMenu, boardConfig, units, gameState, hideIndicators]);
 
   // Slice G : voile violet sur les figurines ÉLIGIBLES du chargeur en chargeModelMove (phase
   // courante). La fig active a un anneau plus marqué ; sa zone de landing est dessinée ailleurs.
@@ -9920,32 +10032,199 @@ export default function Board({
     squadUnplacedUnionVersion,
   ]);
 
+  // weapons_for_target pour UNE cible (profils éligibles + m/x). Read-only backend.
+  const fetchWeaponsForTarget = async (
+    unitId: number,
+    targetId: string
+  ): Promise<Array<{ code: string; weapon: Weapon; m: number; x: number }>> => {
+    const res = await fetch(`/api/game/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "squad_shoot_weapons_for_target",
+        unitId: String(unitId),
+        targetId,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error ?? "weapons_for_target rejected");
+    return (data.result?.weapons ?? []) as Array<{ code: string; weapon: Weapon; m: number; x: number }>;
+  };
+
+  // Clic sur un ennemi : AJOUTE une ligne-cible (sous chaque profil éligible). Menu permanent.
+  const addTargetForShoot = async (targetId: string) => {
+    const plan = squadShootPlanRef.current;
+    if (!plan) return;
+    try {
+      const weapons = await fetchWeaponsForTarget(plan.unitId, targetId);
+      setWeaponSelectionMenu((prev) =>
+        prev
+          ? {
+              ...prev,
+              openTargets: prev.openTargets.includes(targetId)
+                ? prev.openTargets
+                : [...prev.openTargets, targetId],
+              targetData: { ...prev.targetData, [targetId]: weapons },
+              // La cible cliquée devient active : ses lignes 0/n s'affichent (voile jaune).
+              // On repart sans profil actif (pas de voile vert tant qu'on n'a pas choisi une ligne).
+              activeTargetId: targetId,
+              activeWeaponCode: undefined,
+              greenModels: [],
+            }
+          : prev
+      );
+    } catch (e) {
+      console.error("🔴 addTargetForShoot error:", e);
+    }
+  };
+  openWeaponsForTargetRef.current = addTargetForShoot;
+
+  // Figs éligibles (voile vert) pour un sous-groupe (profil, cible).
+  const fetchEligibleModels = async (
+    unitId: number,
+    code: string,
+    targetId: string
+  ): Promise<Array<{ model_id: string; assigned: boolean }>> => {
+    const res = await fetch(`/api/game/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "squad_shoot_eligible_models",
+        unitId: String(unitId),
+        weaponCode: code,
+        targetId,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error ?? "eligible_models rejected");
+    return (data.result?.models ?? []) as Array<{ model_id: string; assigned: boolean }>;
+  };
+
+  // Rafraîchit m/x de toutes les cibles ouvertes + le voile vert du sous-groupe actif.
+  const refreshShootState = async () => {
+    const menu = weaponSelectionMenuRef.current;
+    const plan = squadShootPlanRef.current;
+    if (!menu || !plan) return;
+    try {
+      const entries = await Promise.all(
+        menu.openTargets.map(async (t) => [t, await fetchWeaponsForTarget(plan.unitId, t)] as const)
+      );
+      const targetData: Record<string, Array<{ code: string; weapon: Weapon; m: number; x: number }>> = {};
+      for (const [t, w] of entries) targetData[t] = w;
+      let greenModels = menu.greenModels;
+      if (menu.activeWeaponCode && menu.activeTargetId) {
+        greenModels = await fetchEligibleModels(plan.unitId, menu.activeWeaponCode, menu.activeTargetId);
+      }
+      setWeaponSelectionMenu((prev) => (prev ? { ...prev, targetData, greenModels } : prev));
+    } catch (e) {
+      console.error("🔴 refreshShootState error:", e);
+    }
+  };
+
+  // Clic sur une ligne (profil × cible) → sous-groupe actif : voile jaune (cible) + vert (figs).
+  const activateShootSubgroup = async (code: string, targetId: string) => {
+    const plan = squadShootPlanRef.current;
+    if (!plan) return;
+    try {
+      const greenModels = await fetchEligibleModels(plan.unitId, code, targetId);
+      setWeaponSelectionMenu((prev) =>
+        prev ? { ...prev, activeWeaponCode: code, activeTargetId: targetId, greenModels } : prev
+      );
+    } catch (e) {
+      console.error("🔴 activateShootSubgroup error:", e);
+    }
+  };
+
+  // Clic sur une fig verte → toggle son tir pour le sous-groupe actif.
+  const toggleShootFig = async (modelId: string) => {
+    const menu = weaponSelectionMenuRef.current;
+    const plan = squadShootPlanRef.current;
+    if (!menu?.activeWeaponCode || !menu.activeTargetId || !plan) return;
+    try {
+      const res = await fetch(`/api/game/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "squad_shoot_toggle_model_weapon",
+          unitId: String(plan.unitId),
+          modelId,
+          weaponCode: menu.activeWeaponCode,
+          targetId: menu.activeTargetId,
+        }),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error(b.reason ?? b.error ?? `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error ?? "toggle rejected");
+      await refreshShootState();
+      window.dispatchEvent(
+        new CustomEvent("squadShootDeclarationsUpdated", {
+          detail: { gameState: data.game_state, declarations: data.result?.declarations ?? [] },
+        })
+      );
+    } catch (e) {
+      console.error("🔴 toggleShootFig error:", e);
+    }
+  };
+  toggleShootFigRef.current = toggleShootFig;
+
+  // -/+/Max/valeur d'une ligne : fixe le nombre de tirs du profil `code` sur la cible.
+  const setShootWeaponQty = async (code: string, count: number, targetId: string) => {
+    const plan = squadShootPlanRef.current;
+    if (!plan) return;
+    const action = count <= 0 ? "squad_shoot_unassign_weapon_qty" : "squad_shoot_assign_weapon_qty";
+    const body: Record<string, unknown> = {
+      action,
+      unitId: String(plan.unitId),
+      weaponCode: code,
+      targetId,
+    };
+    if (count > 0) body.count = count;
+    try {
+      const res = await fetch(`/api/game/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error(b.reason ?? b.error ?? `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error ?? "qty rejected");
+      // Rafraîchit compteurs x/m + voile vert.
+      await refreshShootState();
+      // Propage les déclarations (voile + validation) au plan via événement.
+      window.dispatchEvent(
+        new CustomEvent("squadShootDeclarationsUpdated", {
+          detail: {
+            gameState: data.game_state,
+            declarations: data.result?.declarations ?? [],
+          },
+        })
+      );
+    } catch (e) {
+      console.error("🔴 set qty error:", e);
+    }
+  };
+  setShootWeaponQtyRef.current = setShootWeaponQty;
+
   // Handle weapon selection
   const handleSelectWeapon = async (weaponIndex: number) => {
     if (!weaponSelectionMenu) return;
 
     const unit = units.find((u) => u.id === weaponSelectionMenu.unitId);
-    const weapon = unit?.RNG_WEAPONS?.[weaponIndex];
-    const weaponDisplayName = weapon?.display_name ?? undefined;
-
-    // Arme combinée : si un AUTRE profil de la même combi est déjà déclaré, on le
-    // désassigne d'abord pour basculer sur le profil cliqué (une combi ne tire qu'un profil).
-    const clickedCombi = weapon?.COMBI_WEAPON;
-    if (
-      clickedCombi &&
-      unit?.RNG_WEAPONS &&
-      squadShootPlan &&
-      String(squadShootPlan.unitId) === String(weaponSelectionMenu.unitId)
-    ) {
-      const siblingDecl = squadShootPlan.declarations.find(
-        (d) =>
-          d.weapon_index !== weaponIndex &&
-          unit.RNG_WEAPONS?.[d.weapon_index]?.COMBI_WEAPON === clickedCombi
-      );
-      if (siblingDecl) {
-        await onUnassignShootWeapon?.(siblingDecl.weapon_index);
-      }
-    }
+    // Le menu est l'UNION des armes par-figurine : l'arme se lit dans available_weapons
+    // (l'index n'indexe plus unit.RNG_WEAPONS, liste du type d'escouade de base).
+    const selWeapon = unit?.available_weapons?.find((w) => w.index === weaponIndex)?.weapon;
+    const weaponDisplayName = selWeapon?.display_name ?? undefined;
+    const weaponCode = selWeapon?.code;
+    // NB : l'exclusivité de profil (Frag/Krak) est désormais garantie côté backend
+    // (déclaration quantifiée par groupe) — plus de désassignation de profil frère ici.
 
     try {
       const API_BASE = "/api";
@@ -9973,6 +10252,7 @@ export default function Board({
           detail: {
             gameState: data.game_state,
             weaponDisplayName,
+            weaponCode,
             availableWeapons: data.result?.available_weapons,
             weaponIndex,
             validTargets: data.result?.valid_targets,
@@ -10474,6 +10754,17 @@ export default function Board({
           canValidate={squadShootPlan?.canValidate ?? false}
           onCancel={onCancelSquadShoot}
           onFire={onCommitSquadShoot}
+          openTargets={weaponSelectionMenu.openTargets}
+          targetData={weaponSelectionMenu.targetData}
+          targetLabel={(tid) => {
+            const u = units.find((x) => String(x.id) === String(tid));
+            const type = (u as unknown as { unit_type?: string })?.unit_type ?? u?.name ?? "";
+            return `#${tid}${type ? ` ${type}` : ""}`;
+          }}
+          onSetQty={(code, count, tid) => void setShootWeaponQty(code, count, tid)}
+          activeCode={weaponSelectionMenu.activeWeaponCode}
+          activeTargetId={weaponSelectionMenu.activeTargetId}
+          onActivateSubgroup={(code, tid) => void activateShootSubgroup(code, tid)}
           inchesToSubhex={
             (boardConfig as unknown as { inches_to_subhex?: number } | null)?.inches_to_subhex ?? 1
           }

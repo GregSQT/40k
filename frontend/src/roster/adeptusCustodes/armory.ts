@@ -155,7 +155,7 @@ export function getWeapons(codeNames: string[]): Weapon[] {
           `Available weapons: ${availableWeapons}`
       );
     }
-    weapons.push(weapon);
+    weapons.push({ ...weapon, code: codeName }); // injecte l'identite stable (cf. Weapon.code)
   }
   return weapons;
 }

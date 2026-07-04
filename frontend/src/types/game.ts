@@ -53,6 +53,7 @@ export interface PrimaryObjectiveRule {
 }
 
 export interface Weapon {
+  code?: string; // identite stable du profil, injectee par getWeapons (ex. cyclone_missile_launcher_krak)
   display_name: string;
   COMBI_WEAPON?: string;
   RNG?: number;

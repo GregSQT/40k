@@ -170,8 +170,9 @@ class ArmoryParser:
                     f"from {armory_path}: {str(e)}"
                 ) from e
             
+            weapon['code'] = weapon_code   # identite stable du profil (ex. cyclone_missile_launcher_krak)
             weapons[weapon_code] = weapon
-        
+
         return weapons
     
     def get_armory(self, faction: str) -> Dict[str, Dict[str, Any]]:
