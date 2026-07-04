@@ -1329,21 +1329,6 @@ class W40KEngine(gym.Env):
         # Safety: count step() calls per episode to truncate runaways (e.g. stuck in eval)
         self._episode_step_calls = getattr(self, '_episode_step_calls', 0) + 1
 
-        # Rule 14.02: objective control is determined at the END of each phase and turn.
-        # step() is the single chokepoint every action passes through; a change of phase/turn
-        # since the previous step marks a boundary just crossed (positions unchanged in between),
-        # so we (re)evaluate control now, driven by game_config['objective_control_check'].
-        _oc_phase = self.game_state.get("phase")
-        _oc_turn = self.game_state.get("turn")
-        _oc_last_phase = getattr(self, "_oc_last_phase", None)
-        _oc_last_turn = getattr(self, "_oc_last_turn", None)
-        if _oc_last_phase is not None and (_oc_phase != _oc_last_phase or _oc_turn != _oc_last_turn):
-            self.state_manager.run_objective_control_checkpoint(
-                self.game_state, _oc_last_phase, _oc_phase, turn_changed=(_oc_turn != _oc_last_turn)
-            )
-        self._oc_last_phase = _oc_phase
-        self._oc_last_turn = _oc_turn
-
         # CRITICAL: Check turn limit BEFORE processing any action
         _tc = getattr(self, "training_config", None)
         if _tc is not None:

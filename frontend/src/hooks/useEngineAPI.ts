@@ -315,11 +315,28 @@ function recordMovePreviewMaskLoopsTransportFromIncoming(inc: Record<string, unk
   }
 }
 
+/**
+ * ``objective_controllers`` (contrôleur d'objectif par id, Rule 14.02) est l'état autoritaire
+ * backend qui colore les terrains. Certaines réponses allégées (move preview, etc.) l'omettent ;
+ * comme pour ``objectives``, on conserve la dernière valeur connue et on la réinjecte quand une
+ * réponse ne la porte pas — sinon ``gameState.objective_controllers`` redevient ``undefined`` et
+ * les terrains perdent la couleur du contrôleur.
+ */
+let _lastObjectiveControllers: unknown = undefined;
+function preserveObjectiveControllers(inc: Record<string, unknown>): void {
+  if (inc.objective_controllers !== undefined) {
+    _lastObjectiveControllers = inc.objective_controllers;
+  } else if (_lastObjectiveControllers !== undefined) {
+    inc.objective_controllers = _lastObjectiveControllers;
+  }
+}
+
 function hydrateApiGameStateMovePreviewTransport(gs: APIGameState | null): APIGameState | null {
   if (gs == null) return null;
   const inc = gs as unknown as Record<string, unknown>;
   restoreMovePreviewMaskLoopsIfUnchanged(inc);
   recordMovePreviewMaskLoopsTransportFromIncoming(inc);
+  preserveObjectiveControllers(inc);
   return gs;
 }
 
@@ -335,10 +352,13 @@ export function mergeGameStatePreservingOmittedObjectives(
   restoreMovePreviewMaskLoopsIfUnchanged(inc);
   if (prev !== null && prev.objectives !== undefined && incoming.objectives === undefined) {
     const out = { ...incoming, objectives: prev.objectives };
-    recordMovePreviewMaskLoopsTransportFromIncoming(out as unknown as Record<string, unknown>);
+    const outRec = out as unknown as Record<string, unknown>;
+    recordMovePreviewMaskLoopsTransportFromIncoming(outRec);
+    preserveObjectiveControllers(outRec);
     return out;
   }
   recordMovePreviewMaskLoopsTransportFromIncoming(inc);
+  preserveObjectiveControllers(inc);
   return incoming;
 }
 
@@ -7088,6 +7108,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       victory_points: gameState.victory_points,
       primary_objective: gameState.primary_objective,
       objectives: gameState.objectives,
+      // Contrôleur d'objectif par id (Rule 14.02) — colore les terrains dans BoardDisplay.
+      objective_controllers: (
+        gameState as { objective_controllers?: Record<string, number | null> }
+      ).objective_controllers,
       game_over: gameState.game_over,
       winner: gameState.winner,
       pending_rule_choice_queue: gameState.pending_rule_choice_queue,

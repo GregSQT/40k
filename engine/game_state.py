@@ -1600,6 +1600,62 @@ class GameStateManager:
     # OBJECTIVE CONTROL SYSTEM
     # ============================================================================
 
+    def _sum_objective_control_oc(
+        self, game_state: Dict[str, Any], hex_set: Set[Tuple[int, int]]
+    ) -> Tuple[int, int]:
+        """
+        Rule 14.02: return ``(player_1_oc, player_2_oc)`` summed over every MODEL within the
+        terrain area.
+
+        A model counts when ANY hex of its base footprint overlaps ``hex_set`` (the model is
+        within range while any part of its base is inside the terrain area); each such model
+        contributes its unit's OC characteristic (OC is per-model). Dead models
+        (``HP_CUR <= 0``) and units with OC 0 are ignored.
+        """
+        from engine.hex_utils import compute_occupied_hexes
+
+        units_cache = require_key(game_state, "units_cache")
+        models_cache = require_key(game_state, "models_cache")
+        squad_models = require_key(game_state, "squad_models")
+        unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+
+        player_1_oc = 0
+        player_2_oc = 0
+        for unit_id in units_cache:
+            unit = unit_by_id.get(str(unit_id))
+            if not unit:
+                raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+            oc = require_key(unit, "OC")
+            if oc <= 0:
+                continue
+            unit_player = int(require_key(unit, "player"))
+            if unit_player not in (1, 2):
+                raise ValueError(f"Unexpected unit player id: {unit_player}")
+            orientation = int(units_cache[unit_id].get("orientation", 0))
+            model_ids = require_key(squad_models, unit_id)
+            models_in_area = 0
+            for mid in model_ids:
+                model = models_cache.get(mid)
+                if model is None:
+                    continue
+                if int(model.get("HP_CUR", 1)) <= 0:
+                    continue
+                footprint = compute_occupied_hexes(
+                    int(model["col"]),
+                    int(model["row"]),
+                    model["BASE_SHAPE"],
+                    model["BASE_SIZE"],
+                    orientation,
+                )
+                if not footprint.isdisjoint(hex_set):
+                    models_in_area += 1
+            if models_in_area:
+                if unit_player == 1:
+                    player_1_oc += oc * models_in_area
+                else:
+                    player_2_oc += oc * models_in_area
+        return player_1_oc, player_2_oc
+
     def calculate_objective_control(self, game_state: Dict[str, Any]) -> Dict[int, Dict[str, Any]]:
         """
         Calculate objective control for each objective with configured control method.
@@ -1665,30 +1721,12 @@ class GameStateManager:
             obj_hexes = objective["hexes"]
             obj_id_key = str(obj_id)
 
-            # Convert hex list to set of tuples for fast lookup
-            hex_set = set(tuple(h) for h in obj_hexes)
+            # Convert hex list to a set of normalized coordinates for fast lookup
+            # (must match the normalized model positions compared in _sum_objective_control_oc).
+            hex_set = {normalize_coordinates(h[0], h[1]) for h in obj_hexes}
 
-            # Calculate OC per player
-            player_1_oc = 0
-            player_2_oc = 0
-
-            units_cache = require_key(game_state, "units_cache")
-            unit_by_id = {str(u["id"]): u for u in game_state["units"]}
-            for unit_id, entry in units_cache.items():
-                unit = unit_by_id.get(str(unit_id))
-                if not unit:
-                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
-
-                unit_pos = normalize_coordinates(entry["col"], entry["row"])
-                if unit_pos in hex_set:
-                    oc = require_key(unit, "OC")
-                    unit_player = require_key(unit, "player")
-                    if unit_player == 1:
-                        player_1_oc += oc
-                    elif unit_player == 2:
-                        player_2_oc += oc
-                    else:
-                        raise ValueError(f"Unexpected unit player id: {unit_player}")
+            # Rule 14.02: sum OC of all models whose footprint centre is within the area.
+            player_1_oc, player_2_oc = self._sum_objective_control_oc(game_state, hex_set)
 
             # Get current controller from persistent state; explicit init when first seeing this objective
             if obj_id_key not in game_state["objective_controllers"]:
@@ -1780,7 +1818,11 @@ class GameStateManager:
             fire = fire or _match("turn", "end")
         if not fire:
             return
-        if not game_state.get("objectives"):
+        if not (
+            game_state.get("objectives")
+            and game_state.get("primary_objective") is not None
+            and game_state.get("units_cache")
+        ):
             return
         self.calculate_objective_control(game_state)
 
@@ -1813,9 +1855,6 @@ class GameStateManager:
         if tie_behavior != "no_control":
             raise ValueError(f"Unsupported primary objective tie_behavior: {tie_behavior}")
 
-        units_cache = require_key(game_state, "units_cache")
-        unit_by_id = {str(u["id"]): u for u in game_state["units"]}
-
         counts = {1: 0, 2: 0}
 
         for objective in objectives:
@@ -1823,24 +1862,8 @@ class GameStateManager:
             obj_id_key = str(obj_id)
             obj_hexes = require_key(objective, "hexes")
             hex_set = {normalize_coordinates(h[0], h[1]) for h in obj_hexes}
-            player_1_oc = 0
-            player_2_oc = 0
-
-            for unit_id, entry in units_cache.items():
-                unit = unit_by_id.get(str(unit_id))
-                if not unit:
-                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
-                unit_pos = normalize_coordinates(entry["col"], entry["row"])
-                if unit_pos in hex_set:
-                    oc = require_key(unit, "OC")
-                    unit_player = require_key(entry, "player")
-                    unit_player_int = int(unit_player)
-                    if unit_player_int == 1:
-                        player_1_oc += oc
-                    elif unit_player_int == 2:
-                        player_2_oc += oc
-                    else:
-                        raise ValueError(f"Unexpected unit player id: {unit_player}")
+            # Rule 14.02: sum OC of all models whose footprint centre is within the area.
+            player_1_oc, player_2_oc = self._sum_objective_control_oc(game_state, hex_set)
 
             if obj_id_key not in objective_controllers:
                 objective_controllers[obj_id_key] = None

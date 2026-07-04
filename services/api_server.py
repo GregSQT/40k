@@ -572,6 +572,23 @@ def _game_state_for_json(
     from engine.phase_handlers.shooting_handlers import compute_hidden_statuses
     compute_hidden_statuses(engine_instance.game_state)
 
+    # Objective control (Rule 14.02): control is determined at the END of each phase and turn,
+    # not continuously. Detect a phase/turn boundary by comparing to the last serialized state;
+    # only when a boundary was just crossed do we (re)evaluate the persistent
+    # ``objective_controllers`` (driven by game_config['objective_control_check']). At battle
+    # start no boundary has yet been crossed → no objective is controlled (neutral), per 14.02.
+    _oc_gs = engine_instance.game_state
+    _oc_phase = _oc_gs.get("phase")
+    _oc_turn = _oc_gs.get("turn")
+    _oc_last_phase = getattr(engine_instance, "_oc_display_last_phase", None)
+    _oc_last_turn = getattr(engine_instance, "_oc_display_last_turn", None)
+    if _oc_last_phase is not None and (_oc_phase != _oc_last_phase or _oc_turn != _oc_last_turn):
+        engine_instance.state_manager.run_objective_control_checkpoint(
+            _oc_gs, _oc_last_phase, _oc_phase, turn_changed=(_oc_turn != _oc_last_turn)
+        )
+    engine_instance._oc_display_last_phase = _oc_phase
+    engine_instance._oc_display_last_turn = _oc_turn
+
     had_engine_mask_loops = bool(engine_instance.game_state.get("move_preview_footprint_mask_loops"))
     gs = {
         k: v for k, v in engine_instance.game_state.items()
@@ -1287,6 +1304,7 @@ def initialize_engine(scenario_file: Optional[str] = None):
         config = {
             "board": board_config,
             "game_rules": require_key(game_config, "game_rules"),
+            "objective_control_check": require_key(game_config, "objective_control_check"),
             "move": require_key(game_config, "move"),
             "charge": require_key(game_config, "charge"),
             "units": scenario_units,
@@ -1460,6 +1478,7 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
         config = {
             "board": board_config,
             "game_rules": require_key(game_config, "game_rules"),
+            "objective_control_check": require_key(game_config, "objective_control_check"),
             "move": require_key(game_config, "move"),
             "charge": require_key(game_config, "charge"),
             "units": scenario_units,

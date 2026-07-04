@@ -1,4 +1,15 @@
 {
+  "objective_control_check": {
+    "description": "Rule 14.02: objective control is determined at the end of each phase and turn. Each point is a (phase, moment) boundary at which objective_controllers is re-evaluated. moment='end' fires when that phase finishes (== start of next phase); phase='turn', moment='end' fires when the turn advances.",
+    "points": [
+      { "phase": "command", "moment": "end" },
+      { "phase": "move", "moment": "end" },
+      { "phase": "shoot", "moment": "end" },
+      { "phase": "charge", "moment": "end" },
+      { "phase": "fight", "moment": "end" },
+      { "phase": "turn", "moment": "end" }
+    ]
+  },
   "game_rules": {
     "max_turns": 5,
     "max_steps_per_turn": 500,
