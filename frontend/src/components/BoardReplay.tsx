@@ -555,7 +555,7 @@ export const BoardReplay: React.FC = () => {
       throw new Error("primary_objective.control.control_method is required for victory points");
     }
 
-    if (!["sticky", "occupy"].includes(primaryObjectiveConfig.control.control_method)) {
+    if (!["secured", "default"].includes(primaryObjectiveConfig.control.control_method)) {
       throw new Error(
         `Unsupported control_method: ${primaryObjectiveConfig.control.control_method}`
       );
@@ -679,12 +679,12 @@ export const BoardReplay: React.FC = () => {
           }
         }
         const prevController = objectiveControllers[objective.name] ?? null;
-        let newController = controlMethod === "sticky" ? prevController : null;
+        let newController = controlMethod === "secured" ? prevController : null;
         if (p1Oc > p2Oc) {
           newController = 1;
         } else if (p2Oc > p1Oc) {
           newController = 2;
-        } else if (controlMethod === "sticky" && prevController === null) {
+        } else if (controlMethod === "secured" && prevController === null) {
           if (primaryObjectiveConfig.control.tie_behavior === "no_control") {
             newController = null;
           } else {
@@ -692,7 +692,7 @@ export const BoardReplay: React.FC = () => {
               `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`
             );
           }
-        } else if (controlMethod === "occupy") {
+        } else if (controlMethod === "default") {
           if (primaryObjectiveConfig.control.tie_behavior !== "no_control") {
             throw new Error(
               `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`
@@ -866,10 +866,10 @@ export const BoardReplay: React.FC = () => {
           }
         }
         const prev = controllers[obj.name] ?? null;
-        let newController = controlMethod === "sticky" ? prev : null;
+        let newController = controlMethod === "secured" ? prev : null;
         if (p1_oc > p2_oc) newController = 1;
         else if (p2_oc > p1_oc) newController = 2;
-        else if (controlMethod === "sticky" && prev === null && tieBehavior === "no_control")
+        else if (controlMethod === "secured" && prev === null && tieBehavior === "no_control")
           newController = null;
         controllers[obj.name] = newController;
       }
@@ -1182,7 +1182,7 @@ export const BoardReplay: React.FC = () => {
           `Unsupported objective control method: ${primaryObjectiveConfig.control.method}`
         );
       }
-      if (!["sticky", "occupy"].includes(primaryObjectiveConfig.control.control_method)) {
+      if (!["secured", "default"].includes(primaryObjectiveConfig.control.control_method)) {
         throw new Error(
           `Unsupported control_method: ${primaryObjectiveConfig.control.control_method}`
         );
@@ -1228,13 +1228,13 @@ export const BoardReplay: React.FC = () => {
         }
         const prevController = objectiveControllers[obj.name] ?? null;
         let newController =
-          primaryObjectiveConfig.control.control_method === "sticky" ? prevController : null;
+          primaryObjectiveConfig.control.control_method === "secured" ? prevController : null;
         if (p1_oc > p2_oc) {
           newController = 1;
         } else if (p2_oc > p1_oc) {
           newController = 2;
         } else if (
-          primaryObjectiveConfig.control.control_method === "sticky" &&
+          primaryObjectiveConfig.control.control_method === "secured" &&
           prevController === null
         ) {
           if (primaryObjectiveConfig.control.tie_behavior === "no_control") {
@@ -1244,7 +1244,7 @@ export const BoardReplay: React.FC = () => {
               `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`
             );
           }
-        } else if (primaryObjectiveConfig.control.control_method === "occupy") {
+        } else if (primaryObjectiveConfig.control.control_method === "default") {
           if (primaryObjectiveConfig.control.tie_behavior !== "no_control") {
             throw new Error(
               `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`

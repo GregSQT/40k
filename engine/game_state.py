@@ -1607,9 +1607,9 @@ class GameStateManager:
         Win condition: Control more objectives than opponent at end of turn 5.
         Control rules:
         - To CAPTURE an objective: Your OC sum must be > opponent's OC sum
-        - control_method == "sticky": keep control until opponent captures
-        - control_method == "occupy": control only if currently occupied with greater OC
-        - Equal OC = current controller keeps control (sticky) or stays neutral (occupy)
+        - control_method == "secured" (Rule 14.03): keep control until opponent captures
+        - control_method == "default" (Rule 14.02): control only while holding strictly greater OC
+        - Equal OC = current controller keeps control (secured) or stays neutral (default)
 
         Returns:
             Dict[objective_id, {
@@ -1641,7 +1641,7 @@ class GameStateManager:
             if method != "oc_sum_greater":
                 raise ValueError(f"Unsupported primary objective control method: {method}")
             current_control_method = require_key(control_cfg, "control_method")
-            if current_control_method not in ("sticky", "occupy"):
+            if current_control_method not in ("secured", "default"):
                 raise ValueError(f"Unsupported control_method: {current_control_method}")
             tie_behavior = require_key(control_cfg, "tie_behavior")
             if tie_behavior != "no_control":
@@ -1695,7 +1695,7 @@ class GameStateManager:
                 game_state["objective_controllers"][obj_id_key] = None
             current_controller = game_state["objective_controllers"][obj_id_key]
 
-            if control_method == "sticky":
+            if control_method == "secured":
                 # Determine new controller with PERSISTENT control rules
                 new_controller = current_controller  # Default: keep current control
 
@@ -1707,7 +1707,7 @@ class GameStateManager:
                     new_controller = 2
                 # If equal OC: current controller keeps control (no change)
                 # This includes 0-0 case where objective stays in its current state
-            elif control_method == "occupy":
+            elif control_method == "default":
                 new_controller = None
                 if player_1_oc > player_2_oc:
                     new_controller = 1
@@ -1746,6 +1746,44 @@ class GameStateManager:
 
         return counts
 
+    def run_objective_control_checkpoint(
+        self,
+        game_state: Dict[str, Any],
+        old_phase: Optional[str],
+        new_phase: Optional[str],
+        turn_changed: bool,
+    ) -> None:
+        """
+        Rule 14.02: objective control is determined at the END of each phase and turn.
+
+        A phase boundary ``old_phase`` -> ``new_phase`` is simultaneously the END of
+        ``old_phase`` and the START of ``new_phase`` (no game state changes in between).
+        ``game_config.json['objective_control_check']['points']`` lists the (phase, moment)
+        points at which control must be (re)evaluated; when one matches this boundary we
+        call ``calculate_objective_control``, which refreshes the persistent
+        ``objective_controllers`` used for both display and scoring.
+
+        No-op when the config section is absent or lists no matching point.
+        """
+        check_cfg = self.config.get("objective_control_check")
+        if not check_cfg:
+            return
+        points = check_cfg.get("points", [])
+        if not points:
+            return
+
+        def _match(phase: Optional[str], moment: str) -> bool:
+            return any(p.get("phase") == phase and p.get("moment") == moment for p in points)
+
+        fire = _match(old_phase, "end") or _match(new_phase, "start")
+        if turn_changed:
+            fire = fire or _match("turn", "end")
+        if not fire:
+            return
+        if not game_state.get("objectives"):
+            return
+        self.calculate_objective_control(game_state)
+
     def _calculate_primary_objective_control_counts(
         self,
         game_state: Dict[str, Any],
@@ -1770,7 +1808,7 @@ class GameStateManager:
 
         if method != "oc_sum_greater":
             raise ValueError(f"Unsupported primary objective control method: {method}")
-        if control_method not in ("sticky", "occupy"):
+        if control_method not in ("secured", "default"):
             raise ValueError(f"Unsupported control_method: {control_method}")
         if tie_behavior != "no_control":
             raise ValueError(f"Unsupported primary objective tie_behavior: {tie_behavior}")
@@ -1807,14 +1845,14 @@ class GameStateManager:
             if obj_id_key not in objective_controllers:
                 objective_controllers[obj_id_key] = None
             current_controller = objective_controllers[obj_id_key]
-            if control_method == "sticky":
+            if control_method == "secured":
                 new_controller = current_controller
                 if player_1_oc > player_2_oc:
                     new_controller = 1
                 elif player_2_oc > player_1_oc:
                     new_controller = 2
-                # If equal OC: current controller keeps control (sticky)
-            elif control_method == "occupy":
+                # If equal OC: current controller keeps control (secured)
+            elif control_method == "default":
                 new_controller = None
                 if player_1_oc > player_2_oc:
                     new_controller = 1

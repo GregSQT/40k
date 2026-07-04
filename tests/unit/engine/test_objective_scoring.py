@@ -35,7 +35,7 @@ def _primary_objective(
     default_phase: str = "command",
     round5_phase: str = "fight",
     conditions: Optional[List[Dict]] = None,
-    control_method: str = "sticky",
+    control_method: str = "secured",
 ) -> Dict[str, Any]:
     if conditions is None:
         conditions = [

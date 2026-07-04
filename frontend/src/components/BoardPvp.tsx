@@ -376,108 +376,6 @@ interface ReplayRules {
   primary_objective: PrimaryObjectiveRule | PrimaryObjectiveRule[] | null;
 }
 
-// Calculate objective control with PERSISTENT control rules
-// Once a player controls an objective, they keep it until opponent gets strictly higher OC
-// Returns a map of "col,row" -> controller (0, 1, or null for contested/uncontrolled)
-function calculateObjectiveControl(
-  units: Unit[],
-  objectives: Array<{ name: string; hexes: Array<{ col: number; row: number }> }> | undefined,
-  flatObjectiveHexes: [number, number][] | undefined,
-  currentControllers: ObjectiveControllers, // Persistent control state
-  usePersistentState: boolean = true, // If false, recalculate control based only on current state
-  tieBehavior?: string,
-  controlMethod?: string
-): { controlMap: { [hexKey: string]: number | null }; updatedControllers: ObjectiveControllers } {
-  const controlMap: { [hexKey: string]: number | null } = {};
-  const shouldUseSticky = usePersistentState && controlMethod === "sticky";
-  const updatedControllers: ObjectiveControllers = shouldUseSticky ? { ...currentControllers } : {};
-
-  // Build a map of hex -> objective for grouped objectives
-  const hexToObjective = new Map<string, string>();
-
-  if (objectives && objectives.length > 0) {
-    // Grouped format: [{name, hexes: [{col, row}]}]
-    for (const obj of objectives) {
-      for (const hex of obj.hexes) {
-        hexToObjective.set(`${hex.col},${hex.row}`, obj.name);
-      }
-    }
-  } else if (flatObjectiveHexes && flatObjectiveHexes.length > 0) {
-    // Flat format: [[col, row], ...]
-    for (const [col, row] of flatObjectiveHexes) {
-      hexToObjective.set(`${col},${row}`, "unnamed");
-    }
-  }
-
-  // Group hexes by objective name to calculate control per objective
-  const objectiveGroups = new Map<string, Array<{ col: number; row: number }>>();
-  for (const [hexKey, objName] of hexToObjective.entries()) {
-    const [col, row] = hexKey.split(",").map(Number);
-    if (!objectiveGroups.has(objName)) {
-      objectiveGroups.set(objName, []);
-    }
-    objectiveGroups.get(objName)!.push({ col, row });
-  }
-
-  // Calculate control for each objective group
-  for (const [objName, hexes] of objectiveGroups.entries()) {
-    // Build hex set for this objective
-    const hexSet = new Set(hexes.map((h) => `${h.col},${h.row}`));
-
-    // Count OC per player for units on this objective's hexes
-    let p1_oc = 0;
-    let p2_oc = 0;
-
-    for (const unit of units) {
-      if (unit.HP_CUR <= 0) continue; // Dead units don't control
-
-      const unitHex = `${unit.col},${unit.row}`;
-      if (hexSet.has(unitHex)) {
-        const oc = unit.OC ?? 1; // Default OC=1 if not specified
-        if (unit.player === 1) {
-          p1_oc += oc;
-        } else {
-          p2_oc += oc;
-        }
-      }
-    }
-
-    // Get current controller from persistent state (only if using sticky control)
-    const currentController = shouldUseSticky ? (currentControllers[objName] ?? null) : null;
-
-    // Determine new controller with PERSISTENT control rules (or instant calculation if not using persistent state)
-    let newController: number | null = shouldUseSticky ? currentController : null; // Default: keep current if sticky, otherwise null
-
-    if (p1_oc > p2_oc) {
-      // P1 has more OC - P1 captures/keeps
-      newController = 1;
-    } else if (p2_oc > p1_oc) {
-      // P2 has more OC - P2 captures/keeps
-      newController = 2;
-    } else if (!shouldUseSticky) {
-      // If equal OC and not using persistent state: no control
-      newController = null;
-    } else if (currentController === null) {
-      if (tieBehavior === "no_control") {
-        newController = null;
-      } else {
-        throw new Error(`Unsupported objective tie behavior: ${tieBehavior}`);
-      }
-    }
-    // If equal OC and using persistent state with existing controller: keep control
-
-    // Update persistent state
-    updatedControllers[objName] = newController;
-
-    // Assign control to all hexes in this objective
-    for (const hex of hexes) {
-      controlMap[`${hex.col},${hex.row}`] = newController;
-    }
-  }
-
-  return { controlMap, updatedControllers };
-}
-
 type Mode =
   | "select"
   | "movePreview"
@@ -8031,8 +7929,6 @@ export default function Board({
     }
 
     const replayRules = (gameState as { rules?: ReplayRules } | null)?.rules;
-    let tieBehavior: string | undefined;
-    let controlMethod: string | undefined;
     let objectiveControlStartTurn: number | undefined;
     if (replayActionIndex !== undefined && !replayRules) {
       throw new Error("Replay rules missing: objective control cannot be computed");
@@ -8074,7 +7970,7 @@ export default function Board({
           `Unsupported objective control method: ${primaryObjectiveConfig.control.method}`
         );
       }
-      if (!["sticky", "occupy"].includes(primaryObjectiveConfig.control.control_method)) {
+      if (!["secured", "default"].includes(primaryObjectiveConfig.control.control_method)) {
         throw new Error(
           `Unsupported control_method: ${primaryObjectiveConfig.control.control_method}`
         );
@@ -8084,8 +7980,6 @@ export default function Board({
           `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`
         );
       }
-      tieBehavior = primaryObjectiveConfig.control.tie_behavior;
-      controlMethod = primaryObjectiveConfig.control.control_method;
       objectiveControlStartTurn = primaryObjectiveConfig.scoring.start_turn;
     }
     if (replayActionIndex === undefined) {
@@ -8131,7 +8025,7 @@ export default function Board({
           `Unsupported objective control method: ${primaryObjectiveConfig.control.method}`
         );
       }
-      if (!["sticky", "occupy"].includes(primaryObjectiveConfig.control.control_method)) {
+      if (!["secured", "default"].includes(primaryObjectiveConfig.control.control_method)) {
         throw new Error(
           `Unsupported control_method: ${primaryObjectiveConfig.control.control_method}`
         );
@@ -8141,36 +8035,38 @@ export default function Board({
           `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`
         );
       }
-      tieBehavior = primaryObjectiveConfig.control.tie_behavior;
-      controlMethod = primaryObjectiveConfig.control.control_method;
       objectiveControlStartTurn = primaryObjectiveConfig.scoring.start_turn;
     }
     if (objectiveControlStartTurn === undefined || objectiveControlStartTurn === null) {
       throw new Error("objective control start_turn is missing");
     }
+    // Objective control (terrain colouring) follows the authoritative backend state
+    // game_state.objective_controllers (Rule 14.02), keyed by objective id and refreshed by
+    // the engine at each configured phase/turn boundary (game_config.objective_control_check).
+    // We map it onto the objective hexes from the STATIC board config (objective_zones), which
+    // is always present — unlike game_state.objectives, which the API omits on post-action
+    // responses (that omission is exactly what used to blank the terrain colours).
     let objectiveControl: { [hexKey: string]: number | null } = {};
-    if (currentTurn >= objectiveControlStartTurn) {
-      const { controlMap, updatedControllers } = calculateObjectiveControl(
-        units,
-        objectivesOverride,
-        effectiveObjectiveHexes,
-        objectiveControllersRef.current,
-        true,
-        tieBehavior,
-        controlMethod
-      );
-      objectiveControl = controlMap;
-      // Update persistent state only when objective control is active.
-      objectiveControllersRef.current = updatedControllers;
-    } else if (objectivesOverride && objectivesOverride.length > 0) {
-      for (const obj of objectivesOverride) {
-        for (const hex of obj.hexes) {
-          objectiveControl[`${hex.col},${hex.row}`] = null;
-        }
-      }
-    } else {
-      for (const [col, row] of effectiveObjectiveHexes) {
-        objectiveControl[`${col},${row}`] = null;
+    const backendObjectiveControllers =
+      (
+        gameState as unknown as {
+          objective_controllers?: Record<string, number | null>;
+        } | null
+      )?.objective_controllers ?? {};
+    const objectiveZonesForControl =
+      (
+        boardConfig as unknown as {
+          objective_zones?: Array<{
+            id: string | number;
+            hexes: Array<[number, number] | { col: number; row: number }>;
+          }>;
+        } | null
+      )?.objective_zones ?? [];
+    for (const zone of objectiveZonesForControl) {
+      const controller = backendObjectiveControllers[String(zone.id)] ?? null;
+      for (const hex of zone.hexes) {
+        const key = Array.isArray(hex) ? `${hex[0]},${hex[1]}` : `${hex.col},${hex.row}`;
+        objectiveControl[key] = controller;
       }
     }
 

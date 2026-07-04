@@ -74,7 +74,7 @@ def _make_gs_with_objectives(controller: int | None = None) -> Dict[str, Any]:
             "id": "obj1",
             "control": {
                 "method": "oc_sum_greater",
-                "control_method": "sticky",
+                "control_method": "secured",
                 "tie_behavior": "no_control",
             },
             "scoring": {"start_turn": 1, "max_points_per_turn": 5, "rules": []},
@@ -195,7 +195,7 @@ class TestCountControlledObjectives:
         assert counts[1] == 0 and counts[2] == 0
 
     def test_player1_controller_counts_correctly(self) -> None:
-        """sm_obj_p1 : objectif sticky déjà contrôlé par p1 → counts[1]=1."""
+        """sm_obj_p1 : objectif secured déjà contrôlé par p1 → counts[1]=1."""
         gs = _make_gs_with_objectives(controller=1)
         counts = _sm().count_controlled_objectives(gs)
         assert counts[1] == 1
