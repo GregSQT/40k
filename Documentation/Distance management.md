@@ -272,9 +272,22 @@ délicat à cause des murs).
   `_compute_plan_context._bfs_reach` = la zone violette visible) ; pré-gate 12" euclidien **ligne droite**
   (pas géodésique) ; IA analyzer/replay restent hex (runs gym-hex). RESTE : miroir replay TS, unification
   du cache de champ entre pool et plan-context (C), branches legacy single-hex.
-- **Étape 6 — Cohérence & nettoyage** : ⬜ À FAIRE.
-- **Étape 7 — Migration EZ euclidienne** : ⬜ À FAIRE. **Décision révisée le 2026-07-03**
-  (l'EZ ne reste PLUS hex — voir « Décisions actées » et la section « Étape 7 »).
+- **Étape 6 — Cohérence & nettoyage** : 🟧 EN COURS (2026-07-04). Nettoyage tests obsolètes fait
+  (5 migrés euclidien Étapes 4/5 + 2 fonctions orphelines supprimées : `_fight_enemy_footprint_distances`,
+  `enemy_footprint_distances`). Orphelins restants repérés (0 caller, à supprimer) : `_is_hex_adjacent_to_enemy`
+  et `_compute_charge_preview_zone` (charge_handlers). Reste : grep de contrôle `calculate_hex_distance`,
+  doc clé `distance_metric`.
+- **Étape 7 — Migration EZ euclidienne** : ✅ FAIT (2026-07-04). EZ euclidienne active dans les 4 phases
+  (`distance_metric["engagement"]="euclidean"`). Détail : point de bascule `engagement_distance_metric` +
+  `entries_in_engagement_zone` (7.0/7.1) ; primitive `unit_entries_within_engagement_zone` routée par défaut
+  (observation §10 épinglée hex) ; masque move euclidien vectorisé `_euclidean_mover_ez_forbidden_mask`
+  (7.2, correctness 4/4 vs `euclidean_edge_distance`) ; tir/charge/fight déjà auto-routés via la primitive
+  (7.3-7.5) + fix bypass `charge_autoplace_plan._entry_engage_struct` + re-validation EZ advance ;
+  frontend déjà euclidien (anneaux ×1.5, rien à faire). Backend hex byte-identique jusqu'au flip, suite
+  tests/ 100% (fight_v11 pinnés hex via conftest scopé, 2 tests spatial hex pinnés `metric="hex"`).
+  **Validation runtime PvP : OK (2026-07-04, « ça semble bon »).** RESTE : RETRAIN IA (pas de split gym
+  → training passe euclidien). Dette assumée : `build_enemy_adjacent_hexes` reste hex pour `ez<=1`
+  (legacy X1). Décision différée : métrique EZ de l'analyzer (hex vs suit-le-run).
 
 ### Décisions actées
 - **Zone d'engagement (EZ)** : ~~NON touchée → reste hex partout~~ **DÉCISION RÉVISÉE
@@ -658,10 +671,30 @@ la métrique suit le run analysé.
 **Étape 5 entièrement close.**
 
 ### Étape 6 — Cohérence & nettoyage
-- Vérifier qu'aucun call-site de portée tir/move/charge n'appelle encore
-  directement `calculate_hex_distance` (grep de contrôle).
-- Documenter la clé de config `distance_metric` (valeurs et effet par règle).
-- Retrain IA (hors périmètre migration, mais à planifier juste après).
+- ✅ **Grep de contrôle fait (2026-07-04)** : aucun call-site de portée/budget tir/move/charge/EZ n'appelle
+  `calculate_hex_distance`. Les occurrences restantes (~77) sont toutes de la dette hex assumée (tableau
+  ci-dessous) : observations/reward (§10), prune `_enemy_items_within_move_engagement_horizon` (superset),
+  ranking RL `_select_strategic_destination`, adjacence/contact, consolidation/pile-in (§20.7).
+- ✅ **Orphelins supprimés (2026-07-04)** : `_fight_enemy_footprint_distances` + `enemy_footprint_distances`
+  (Étape 6 nettoyage tests) ; `_is_hex_adjacent_to_enemy` + `_compute_charge_preview_zone` (charge_handlers).
+- ✅ **Clé `distance_metric` documentée** (ci-dessous).
+- ⬜ Retrain IA (hors périmètre migration, à planifier juste après).
+
+**Clé de config `distance_metric` (`config/game_config.json`)** — sélecteur unique par règle, lu via
+`get_distance_metric(rule, game_config)` (erreur explicite si clé/valeur manquante, aucun fallback) :
+
+| Clé | Valeur actuelle | Effet |
+|-----|-----------------|-------|
+| `ranged` | `euclidean` | Portée de tir bord-à-bord (`ranged_edge_distance`/`ranged_in_range`, ÷1.5) |
+| `move` | `euclidean` | Budget de move PvP/replay (champ géodésique any-angle) |
+| `move_gym` | `hex` | Budget de move en training gym (1 param pour basculer le training) |
+| `charge` | `euclidean` | Budget de charge PvP/replay (géodésique + pré-gate 12" ligne droite) |
+| `charge_gym` | `hex` | Budget de charge en training gym |
+| `engagement` | `euclidean` | Zone d'engagement 4 phases (`engagement_distance_metric`/`entries_in_engagement_zone`, disque ×1.5) — **pas de split gym**, retrain requis |
+| `overlap` | `hex` | Collision de socles (couche d'occupation, ne bascule jamais) |
+
+`hex` = distance d'empreinte / cube ; `euclidean` = bord-à-bord `_hex_center` (facteur ×1.5
+`ENGAGEMENT_NORM_HEX_WIDTH`, confiné aux primitives). Un `_gym` absent = pas de split (suit la clé de base).
 
 **Dette hex intentionnelle — ce qui reste hex PAR CHOIX après les Étapes 1-7 :**
 

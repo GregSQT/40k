@@ -110,8 +110,10 @@ def test_round_round_engagement_uses_hex_footprint_not_euclidean_clearance(monke
         "occupied_hexes": {(10, 10)},
     }
 
-    # Métrique unifiée = distance d'empreinte hex (jamais euclidien) : le clearance
-    # euclidien, même monkeypatché à une valeur hors zone, doit être ignoré.
+    # Chemin HEX explicite (metric="hex", encore vivant : observations §10, legacy ez<=1) : la
+    # distance d'empreinte hex est utilisée, le clearance euclidien — même monkeypatché à une valeur
+    # hors zone — doit être ignoré. (En prod, engagement="euclidean" depuis 7.6 ; couverture euclidienne
+    # dans test_move_clearance_round_round_uses_euclidean_gap.)
     monkeypatch.setattr(
         "engine.spatial_relations.euclidean_edge_clearance_round_round",
         lambda *args, **kwargs: 15.000002,
@@ -119,14 +121,21 @@ def test_round_round_engagement_uses_hex_footprint_not_euclidean_clearance(monke
 
     # Empreintes distantes de 10 hex exactement.
     assert unit_entries_within_engagement_zone(
-        first_entry, second_entry, engagement_zone=10
+        first_entry, second_entry, engagement_zone=10, metric="hex"
     ) is True
     assert unit_entries_within_engagement_zone(
-        first_entry, second_entry, engagement_zone=9
+        first_entry, second_entry, engagement_zone=9, metric="hex"
     ) is False
 
 
-def test_move_clearance_non_round_uses_hex_footprint_distance() -> None:
+def test_move_clearance_non_round_uses_hex_footprint_distance(monkeypatch) -> None:
+    # Chemin HEX explicite : move_anchor_violates lit engagement_distance_metric() (euclidien en prod
+    # depuis 7.6) → on épingle hex pour valider la branche empreinte non-ronde. En euclidien, la même
+    # config donnerait cell-min (~3.46 norm > 3.0 = ez×1.5 → False), couvert ailleurs.
+    monkeypatch.setattr(
+        "engine.spatial_relations.engagement_distance_metric",
+        lambda *args, **kwargs: "hex",
+    )
     mover = {"id": "u1", "player": 1, "BASE_SHAPE": "oval", "BASE_SIZE": 2}
     enemy_entry = {
         "col": 0,

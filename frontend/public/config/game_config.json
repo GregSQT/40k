@@ -41,7 +41,7 @@
     "move_gym": "hex",
     "charge": "euclidean",
     "charge_gym": "hex",
-    "engagement": "hex",
+    "engagement": "euclidean",
     "overlap": "hex"
   },
   "gameplay": {

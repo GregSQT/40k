@@ -7,7 +7,8 @@ References: AI_TURN.md Section 🏃 MOVEMENT PHASE LOGIC
 ZERO TOLERANCE for state storage or wrapper patterns
 """
 
-from typing import Dict, List, Tuple, Set, Optional, Any
+from typing import Dict, List, Tuple, Set, Optional, Any, cast
+import math
 import numpy as np
 from collections import deque, OrderedDict
 from .generic_handlers import end_activation, _log_with_context
@@ -1185,6 +1186,113 @@ def finalize_flee_marking(game_state: Dict[str, Any], squad_id: str, was_engaged
     return "flee" if was_engaged else "move"
 
 
+def _euclidean_mover_ez_forbidden_mask(
+    unit: Dict[str, Any],
+    enemy_items: Optional[List[Tuple[Any, Any]]],
+    ez: int,
+    board_cols: int,
+    board_rows: int,
+) -> "np.ndarray":
+    """Masque EZ euclidien (Étape 7.2) — miroir vectorisé de ``entries_in_engagement_zone(euclidean)``.
+
+    ``eng_bad[c, r]`` ⇔ placer l'ANCRE du mover en ``(c, r)`` met son socle à un écart bord-à-bord
+    euclidien ≤ ``engagement_minimum_clearance_norm(ez)`` (= ez × 1,5) d'un socle ennemi.
+    Sémantique identique à ``euclidean_edge_distance`` : paire ronde↔ronde = clearance continu
+    exact (centre + rayon) ; sinon = min entre centres de cellules occupées. Vectorisé par disque
+    NumPy borné en bbox par source (pas O(cellules × ennemis)).
+    """
+    from engine.hex_utils import (
+        engagement_minimum_clearance_norm,
+        round_base_radius_norm,
+        precompute_footprint_offsets,
+    )
+
+    ez_norm = engagement_minimum_clearance_norm(ez)
+    eng_bad = np.zeros((board_cols, board_rows), dtype=bool)
+    enemy_list = enemy_items if enemy_items is not None else []
+    if not enemy_list or ez_norm <= 0:
+        return eng_bad
+
+    # Grille des centres de cellules (repère _hex_center), vectorisée.
+    _hw = 1.5
+    _hh = math.sqrt(3.0)
+    _cols = np.arange(board_cols, dtype=np.float64)
+    _rows = np.arange(board_rows, dtype=np.float64)
+    grid_x = (_cols * _hw + _hw / 2.0)[:, None] + np.zeros((1, board_rows))
+    grid_y = _rows[None, :] * _hh + ((_cols[:, None].astype(np.int64) & 1) * _hh) / 2.0 + _hh / 2.0
+
+    def _stamp_disc(dst: "np.ndarray", sc: int, sr: int, reach: float) -> None:
+        if reach <= 0:
+            return
+        ex = sc * _hw + _hw / 2.0
+        ey = sr * _hh + ((sc & 1) * _hh) / 2.0 + _hh / 2.0
+        dcol = int(reach / _hw) + 1
+        drow = int(reach / _hh) + 1
+        c0, c1 = max(0, sc - dcol), min(board_cols, sc + dcol + 1)
+        r0, r1 = max(0, sr - drow), min(board_rows, sr + drow + 1)
+        if c0 >= c1 or r0 >= r1:
+            return
+        dx = grid_x[c0:c1, r0:r1] - ex
+        dy = grid_y[c0:c1, r0:r1] - ey
+        dst[c0:c1, r0:r1] |= (dx * dx + dy * dy) <= (reach * reach + 1e-9)
+
+    mover_shape = unit["BASE_SHAPE"]
+    mover_bs = unit["BASE_SIZE"]
+    mover_round = mover_shape == "round"
+    r_m = round_base_radius_norm(cast(float, mover_bs)) if mover_round else 0.0
+
+    # Dispatch identique à euclidean_edge_distance : round↔round (les DEUX ronds) = clearance
+    # continu exact (centre + rayons) ; toute paire impliquant un non-rond = min entre centres de
+    # cellules d'empreinte (les deux socles en cellules). On accumule les cellules ennemies des
+    # paires « cell-min » ; les paires round-round exactes tamponnent directement un disque.
+    cell_sources: List[Tuple[int, int]] = []
+    for _, ce in enemy_list:
+        e_shape = require_key(ce, "BASE_SHAPE")
+        e_bs = _require_footprint_base_size(
+            e_shape, require_key(ce, "BASE_SIZE"), f"units_cache enemy {ce.get('id', '?')}"
+        )
+        by_model = ce.get("occupied_hexes_by_model")
+        model_positions = list(by_model.values()) if by_model else [
+            (int(require_key(ce, "col")), int(require_key(ce, "row")))
+        ]
+        if mover_round and e_shape == "round":
+            r_e = round_base_radius_norm(cast(float, e_bs))
+            for ec, er in model_positions:
+                _stamp_disc(eng_bad, int(ec), int(er), ez_norm + r_m + r_e)
+        else:
+            e_orient = int(ce.get("orientation", 0) or 0)
+            e_off_even, e_off_odd = precompute_footprint_offsets(e_shape, e_bs, e_orient)
+            for ec, er in model_positions:
+                e_off = e_off_even if (int(ec) & 1) == 0 else e_off_odd
+                for dc, dr in e_off:
+                    cell_sources.append((int(ec) + int(dc), int(er) + int(dr)))
+
+    if cell_sources:
+        # Cellules-mover interdites (centre à ≤ ez_norm d'une cellule ennemie), puis dilatation par
+        # l'empreinte du mover : ancre interdite ssi une de ses cellules l'est (min cellule↔cellule).
+        cell_forbidden = np.zeros((board_cols, board_rows), dtype=bool)
+        for sc, sr in cell_sources:
+            _stamp_disc(cell_forbidden, sc, sr, ez_norm)
+        mover_orient = int(require_key(unit, "orientation")) if "orientation" in unit else 0
+        off_even, off_odd = precompute_footprint_offsets(mover_shape, mover_bs, mover_orient)
+        col_even = (np.arange(board_cols, dtype=np.int64) & 1) == 0
+        col_parity = np.broadcast_to(col_even[:, None], (board_cols, board_rows)).copy()
+        for offs, use_even in ((off_even, True), (off_odd, False)):
+            acc = np.zeros((board_cols, board_rows), dtype=bool)
+            for dc, dr in offs:
+                dc, dr = int(dc), int(dr)
+                c_src_lo, c_src_hi = max(0, dc), board_cols - max(0, -dc)
+                r_src_lo, r_src_hi = max(0, dr), board_rows - max(0, -dr)
+                if c_src_lo >= c_src_hi or r_src_lo >= r_src_hi:
+                    continue
+                acc[c_src_lo - dc:c_src_hi - dc, r_src_lo - dr:r_src_hi - dr] |= cell_forbidden[
+                    c_src_lo:c_src_hi, r_src_lo:r_src_hi
+                ]
+            eng_bad |= acc & (col_parity if use_even else ~col_parity)
+
+    return eng_bad
+
+
 def _compute_mover_ez_forbidden_mask(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -1208,7 +1316,14 @@ def _compute_mover_ez_forbidden_mask(
 
     ``eng_bad[c, r] == True`` ⇔ placer l'ANCRE du mover en ``(c, r)`` viole l'EZ (empreinte du
     mover déjà prise en compte). À tester au niveau ancre, ne PAS re-dilater par l'empreinte.
+
+    Métrique (Étape 7) : ``engagement:"euclidean"`` → disque euclidien vectorisé
+    (``_euclidean_mover_ez_forbidden_mask``) ; ``"hex"`` (défaut) → dilatation hex ci-dessous.
     """
+    from engine.spatial_relations import engagement_distance_metric
+    if engagement_distance_metric() == "euclidean":
+        return _euclidean_mover_ez_forbidden_mask(unit, enemy_items, ez, board_cols, board_rows)
+
     from engine.hex_utils import (
         engagement_minimum_clearance_norm,
         round_base_radius_norm,

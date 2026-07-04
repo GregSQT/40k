@@ -352,71 +352,6 @@ def _charge_closest_charger_hex_to_target(
     return (best_h, best_d)
 
 
-def _compute_charge_preview_zone(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    target: Dict[str, Any],
-    charge_roll: int,
-) -> Tuple[Set[Tuple[int, int]], Tuple[int, int]]:
-    """
-    Zone violette cible-centrée (spec utilisateur) :
-
-    - Hexes adjacents aux hex extérieurs de l'empreinte **cible** jusqu'à
-      ``diamètre(empreinte chargeur) + engagement_zone`` pas (exclut l'empreinte cible).
-    - Filtrée par la distance hex depuis **l'hex chargeur le plus proche de la cible**,
-      qui doit rester ≤ ``charge_roll``.
-
-    Renvoie ``(zone_hexes, closest_charger_hex_to_target)``.
-    """
-    from engine.hex_utils import dilate_hex_set_unbounded, hex_distance
-    from .shared_utils import get_engagement_zone
-
-    units_cache = require_key(game_state, "units_cache")
-    uid = str(unit["id"])
-    tid = str(target["id"])
-    ue = units_cache.get(uid)
-    te = units_cache.get(tid)
-    if not ue or not te:
-        return (set(), (0, 0))
-
-    charger_fp = set(ue.get("occupied_hexes") or {(int(ue["col"]), int(ue["row"]))})
-    target_fp = set(te.get("occupied_hexes") or {(int(te["col"]), int(te["row"]))})
-
-    closest_ch, _ = _charge_closest_charger_hex_to_target(charger_fp, target_fp)
-
-    engagement_zone = get_engagement_zone(game_state)
-    diameter = _charge_base_diameter(unit)
-    max_ring = max(1, diameter + engagement_zone)
-
-    # Zone extérieure autour de la cible : [1 .. max_ring] hexes depuis la cible.
-    outer_with_target = dilate_hex_set_unbounded(target_fp, max_ring)
-    target_zone = outer_with_target - target_fp
-
-    # Disque autour de l'hex chargeur le plus proche : distance ≤ charge_roll.
-    if charge_roll <= 0:
-        return (set(), closest_ch)
-    charger_disk = dilate_hex_set_unbounded({closest_ch}, int(charge_roll))
-
-    # Bornes plateau
-    _bc = game_state.get("board_cols")
-    _br = game_state.get("board_rows")
-    board_cols = int(_bc) if isinstance(_bc, int) and not isinstance(_bc, bool) else 0
-    board_rows = int(_br) if isinstance(_br, int) and not isinstance(_br, bool) else 0
-
-    zone: Set[Tuple[int, int]] = set()
-    for h in target_zone & charger_disk:
-        c, r = int(h[0]), int(h[1])
-        if board_cols > 0 and (c < 0 or c >= board_cols):
-            continue
-        if board_rows > 0 and (r < 0 or r >= board_rows):
-            continue
-        # Confirme la contrainte de portée charge (sécurité, dilate est exact).
-        if hex_distance(closest_ch[0], closest_ch[1], c, r) > int(charge_roll):
-            continue
-        zone.add((c, r))
-    return (zone, closest_ch)
-
-
 def _build_charge_anchors_in_zone(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -3082,8 +3017,7 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
 def _charge_unit_within_engagement_zone(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
     True si l'unité est dans la **zone d'engagement** (≥1 ennemi), au sens ``spatial_relations`` :
-    ``unit_within_engagement_zone_footprints`` — **pas** l'adjacence hex discrète (voir
-    ``_is_hex_adjacent_to_enemy`` pour le voisinage à 6 côtés).
+    ``unit_within_engagement_zone_footprints`` — **pas** l'adjacence hex discrète (contact base-à-base).
 
     Aligné sur la phase move (bord à bord / empreintes). Utilisé pour l'éligibilité charge
     et la revalidation au choix de cible.
@@ -3095,36 +3029,6 @@ def _charge_unit_within_engagement_zone(game_state: Dict[str, Any], unit: Dict[s
     return unit_within_engagement_zone_footprints(
         game_state, unit, engagement_zone=cc_range, max_distance=cc_range
     )
-
-
-def _is_hex_adjacent_to_enemy(game_state: Dict[str, Any], col: int, row: int, player: int,
-                               enemy_adjacent_hexes: Optional[Set[Tuple[int, int]]] = None) -> bool:
-    """
-    AI_TURN.md adjacency restriction implementation.
-
-    Check if hex position is adjacent to any enemy unit.
-
-    CRITICAL FIX: Use proper hexagonal adjacency, not Chebyshev distance.
-    Hexagonal grids require checking if enemy position is in the list of 6 neighbors.
-
-    PERFORMANCE: If enemy_adjacent_hexes set is provided, uses O(1) set lookup
-    instead of O(n) iteration through all units.
-    """
-    # PERFORMANCE: Use pre-computed set if available (5-10x speedup)
-    if enemy_adjacent_hexes is not None:
-        return (col, row) in enemy_adjacent_hexes
-
-    # Calcul dynamique si aucun cache n'est fourni (comportement historique)
-    hex_neighbors = set(get_hex_neighbors(col, row))
-
-    units_cache = require_key(game_state, "units_cache")
-    for enemy_id, enemy_entry in units_cache.items():
-        if enemy_entry["player"] != player:
-            enemy_pos = (enemy_entry["col"], enemy_entry["row"])
-            # Check if enemy is in our 6 neighbors (true hex adjacency)
-            if enemy_pos in hex_neighbors:
-                return True
-    return False
 
 
 def _find_adjacent_enemy_at_destination(game_state: Dict[str, Any], col: int, row: int, player: int) -> Optional[str]:
@@ -4741,7 +4645,15 @@ def charge_autoplace_plan(
     # attaché a sa propre base) → ``charger_shape`` est paramétré et les structs sont recalculés par
     # groupe avec la base du modèle représentatif. Le synth euclidien utilise ``_synth_model_entry``
     # (base modèle), source unique partagée avec le halo et la phase fight.
+    from engine.spatial_relations import engagement_distance_metric
+    _eng_metric = engagement_distance_metric()
+
     def _entry_engage_struct(entry: Dict[str, Any], charger_shape: str) -> Tuple[str, Any]:
+        # Étape 7.4 : en euclidien, router TOUTES les paires via la primitive (round-round exact +
+        # cell-min sinon) → cohérent avec move/fight. La dilatation hex ci-dessous n'est valide qu'en
+        # métrique hex ; l'utiliser sous config euclidienne créerait une incohérence inter-phase.
+        if _eng_metric == "euclidean":
+            return ("euclid", entry)
         euclid = (
             ez > 1 and charger_shape == "round" and entry["BASE_SHAPE"] == "round"
             and not _entry_is_multi_figure(entry)

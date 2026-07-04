@@ -5572,18 +5572,27 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         if (dest_col, dest_row) not in valid_destinations:
             return False, {"error": "invalid_advance_destination", "destination": (dest_col, dest_row)}
 
-        from engine.hex_utils import min_distance_between_sets
         from .shared_utils import get_engagement_zone, compute_candidate_footprint
+        from engine.spatial_relations import entries_in_engagement_zone, engagement_distance_metric
         engagement_zone = get_engagement_zone(game_state)
+        # Étape 7.3 : re-validation EZ de la destination d'advance via le switch unifié (même
+        # métrique que le masque du pool → pas de divergence pool/re-check à la bascule 7.6).
+        _eng_metric = engagement_distance_metric()
         unit_player_int = int(require_key(unit, "player"))
         units_cache = require_key(game_state, "units_cache")
         candidate_fp = compute_candidate_footprint(dest_col, dest_row, unit, game_state)
+        _adv_mover_entry = {
+            "BASE_SHAPE": require_key(unit, "BASE_SHAPE"),
+            "BASE_SIZE": require_key(unit, "BASE_SIZE"),
+            "col": dest_col,
+            "row": dest_row,
+            "occupied_hexes": candidate_fp,
+        }
         for enemy_id, cache_entry in units_cache.items():
             enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
             if enemy_player == unit_player_int:
                 continue
-            enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-            if min_distance_between_sets(candidate_fp, enemy_fp, max_distance=engagement_zone) <= engagement_zone:
+            if entries_in_engagement_zone(_adv_mover_entry, cache_entry, engagement_zone, _eng_metric):
                 return False, {
                     "error": "advance_destination_adjacent_to_enemy",
                     "enemy_id": enemy_id,
