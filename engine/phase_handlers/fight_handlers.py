@@ -59,6 +59,16 @@ from .shared_utils import (
     DeclareAttackCtx,
     declare_attack_model,
     declare_attack_weapon,
+    declare_attack_weapon_qty,
+    weapon_qty_max,
+    undeclare_attack_weapon_qty,
+    weapons_for_target,
+    eligible_models_for_weapon,
+    toggle_attack_model_weapon,
+    models_status_for_target,
+    models_weapons_for_squad,
+    _union_weapons,
+    _enemy_squad_ids,
     _synth_model_entry,
 )
 
@@ -2932,6 +2942,130 @@ def squad_declare_fight_weapon(
     return declare_attack_weapon(
         game_state, FIGHT_DECLARE_CTX, attacker_squad_id, weapon_index, target_squad_id
     )
+
+
+# ---------------------------------------------------------------------------
+# Wrappers COMBAT cible-d abord par arme/quantite/figurine.
+# Jumeaux exacts des squad_shoot_* (shared_utils.py) via FIGHT_DECLARE_CTX.
+# Aucune logique nouvelle : engagement au lieu de portee/LoS, porte par le CTX.
+# ---------------------------------------------------------------------------
+
+def squad_declare_fight_weapon_qty(
+    game_state: Dict[str, Any], attacker_squad_id: str,
+    weapon_code: str, count: int, target_squad_id: str,
+    only_model_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Assigne `count` attaques de l arme CC `weapon_code` (identite) a la cible.
+
+    `only_model_id` (optionnel) : attribution restreinte a CETTE figurine (menu par-fig).
+    Wrapper fin de declare_attack_weapon_qty via FIGHT_DECLARE_CTX (engagement).
+    """
+    return declare_attack_weapon_qty(
+        game_state, FIGHT_DECLARE_CTX, attacker_squad_id, weapon_code, count, target_squad_id,
+        only_model_id,
+    )
+
+
+def squad_fight_weapon_qty_max(
+    game_state: Dict[str, Any], attacker_squad_id: str, weapon_code: str, target_squad_id: str,
+    only_model_id: Optional[str] = None,
+) -> int:
+    """Borne du champ count au COMBAT — figs pouvant combattre `weapon_code` sur la cible."""
+    return weapon_qty_max(game_state, FIGHT_DECLARE_CTX, attacker_squad_id, weapon_code, target_squad_id, only_model_id)
+
+
+def squad_undeclare_fight_weapon_qty(
+    game_state: Dict[str, Any], attacker_squad_id: str, weapon_code: str, target_squad_id: str,
+    only_model_id: Optional[str] = None,
+) -> int:
+    """Retire la ligne (weapon_code, cible) au COMBAT — bouton "-"."""
+    return undeclare_attack_weapon_qty(game_state, FIGHT_DECLARE_CTX, attacker_squad_id, weapon_code, target_squad_id, only_model_id)
+
+
+def squad_fight_weapons_for_target(
+    game_state: Dict[str, Any], attacker_squad_id: str, target_squad_id: str,
+    only_model_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Menu cible-d abord au COMBAT — armes pouvant viser la cible avec (m, x). Cf. weapons_for_target."""
+    return weapons_for_target(game_state, FIGHT_DECLARE_CTX, attacker_squad_id, target_squad_id, only_model_id)
+
+
+def squad_fight_eligible_models(
+    game_state: Dict[str, Any], attacker_squad_id: str, weapon_code: str, target_squad_id: str
+) -> List[Dict[str, Any]]:
+    """Voile vert au COMBAT — figs pouvant combattre `weapon_code` sur la cible (+ assigned)."""
+    return eligible_models_for_weapon(game_state, FIGHT_DECLARE_CTX, attacker_squad_id, weapon_code, target_squad_id)
+
+
+def squad_fight_toggle_model_weapon(
+    game_state: Dict[str, Any], attacker_squad_id: str, model_id: str, weapon_code: str, target_squad_id: str
+) -> str:
+    """Clic sur fig verte au COMBAT — toggle l attribution de cette fig pour (code, cible)."""
+    return toggle_attack_model_weapon(game_state, FIGHT_DECLARE_CTX, attacker_squad_id, model_id, weapon_code, target_squad_id)
+
+
+def squad_fight_models_status(
+    game_state: Dict[str, Any], attacker_squad_id: str, target_squad_id: str
+) -> List[Dict[str, Any]]:
+    """Voiles vert/gris au COMBAT — état de chaque fig vis-à-vis de la cible (+ ses armes)."""
+    return models_status_for_target(game_state, FIGHT_DECLARE_CTX, attacker_squad_id, target_squad_id)
+
+
+def squad_fight_models_weapons(
+    game_state: Dict[str, Any], attacker_squad_id: str
+) -> List[Dict[str, Any]]:
+    """Armes CC par figurine au COMBAT (indépendant de la cible) — encart jaune au clic-fig."""
+    return models_weapons_for_squad(game_state, FIGHT_DECLARE_CTX, attacker_squad_id)
+
+
+def squad_union_cc_weapons(
+    game_state: Dict[str, Any], squad_id: str
+) -> List[Dict[str, Any]]:
+    """Union des armes CC par-figurine (source du menu combat). Cf. _union_weapons."""
+    return _union_weapons(game_state, "CC_WEAPONS", squad_id)
+
+
+def squad_fight_menu_weapons(
+    game_state: Dict[str, Any], attacker_squad_id: str
+) -> List[Dict[str, Any]]:
+    """Profils CC de l escouade pour le menu combat, avec `can_use` correct (par-figurine).
+
+    usable = AU MOINS une figurine portant le profil est engagee avec AU MOINS une unite
+    ennemie (calcule par-fig via _model_can_fight_target_with_weapon). Pas de portee/LoS ni
+    d exclusion Pistol : la melee n a pas la restriction 10.06 (jumeau simplifie de
+    squad_shoot_menu_weapons)."""
+    from .shared_utils import init_pending_intents, require_key as _require_key
+    models_cache = _require_key(game_state, "models_cache")
+    squad_models = _require_key(game_state, "squad_models")
+    init_pending_intents(game_state)
+
+    mids = squad_models.get(attacker_squad_id, [])  # get allowed
+    player = int(models_cache[mids[0]]["player"]) if mids and mids[0] in models_cache else None
+    enemy_sids = _enemy_squad_ids(game_state, player) if player is not None else []
+
+    result: List[Dict[str, Any]] = []
+    for idx, w in enumerate(_union_weapons(game_state, "CC_WEAPONS", attacker_squad_id)):
+        code = w["code"]
+        usable = False
+        for mid in mids:
+            m = models_cache.get(mid)
+            if m is None:
+                continue
+            weapons = m.get("CC_WEAPONS", [])  # get allowed
+            local_idx = next(
+                (i for i, ww in enumerate(weapons) if isinstance(ww, dict) and ww.get("code") == code),
+                None,
+            )
+            if local_idx is None:
+                continue
+            if any(
+                _model_can_fight_target_with_weapon(game_state, m, attacker_squad_id, sid, local_idx)
+                for sid in enemy_sids
+            ):
+                usable = True
+                break
+        result.append({"index": idx, "weapon": w, "can_use": usable, "reason": None})
+    return result
 
 
 def _fight_ensure_activation_started(game_state: Dict[str, Any], squad_id: str) -> None:

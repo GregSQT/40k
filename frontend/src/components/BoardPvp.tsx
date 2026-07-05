@@ -641,6 +641,9 @@ type BoardProps = {
   onSelectModelForFight?: (modelId: string) => void;
   onAssignFightTarget?: (targetUnitId: number | string) => void | Promise<void>;
   onAssignFightWeapon?: (targetUnitId: number | string) => void | Promise<void>;
+  /** Flux cible-d'abord combat : Valider/Annuler du menu d'armes (jumeaux tir). */
+  onCommitSquadFight?: () => void | Promise<void>;
+  onCancelSquadFight?: () => void | Promise<void>;
   /** Remonte le nombre de figs ASSIGNABLES (engagées) de l'unité active → décompte barre. */
   onReportFightAssignable?: (count: number) => void;
   /** Allocation manuelle des pertes au tir (defenseur humain) : figs choisissables. */
@@ -1079,6 +1082,8 @@ export default function Board({
   onSelectModelForFight,
   onAssignFightTarget,
   onAssignFightWeapon,
+  onCommitSquadFight,
+  onCancelSquadFight,
   onReportFightAssignable,
   manualAllocation = null,
   onAllocateModel,
@@ -1587,7 +1592,6 @@ export default function Board({
   };
   const squadFightPlanRef = useRef(squadFightPlan);
   squadFightPlanRef.current = squadFightPlan;
-  const lastFightEnemyClickRef = useRef<{ targetId: number | string; time: number } | null>(null);
 
   /** Combat : figs de l'unité active engagées avec >=1 ennemi (règle 04.02). Les autres
    * sont grisées + non sélectionnables à l'attribution. Même métrique que le contour rouge. */
@@ -2246,7 +2250,9 @@ export default function Board({
     const weaponClickHandler = (e: Event) => {
       const { unitId } = (e as CustomEvent<{ unitId: number }>).detail;
       const unit = units.find((u) => u.id === unitId);
-      if (!unit?.RNG_WEAPONS || unit.RNG_WEAPONS.length === 0) return;
+      // Combat (mêlée) : unité sans arme à distance possible → ne pas exiger RNG_WEAPONS.
+      // Le tir gate déjà en amont sur ≥1 arme utilisable avant de dispatcher.
+      if (!unit) return;
 
       // Calculate position near the icon (top-right of unit)
       const canvas = canvasContainerRef.current?.querySelector("canvas");
@@ -2294,18 +2300,25 @@ export default function Board({
     const unitId = weaponSelectionMenu?.unitId;
     if (unitId == null || weaponSelectionMenu?.figWeapons) return;
     let cancelled = false;
+    const P = phase === "fight" ? "fight" : "shoot";
     (async () => {
       try {
         const [wRes, mRes] = await Promise.all([
           fetch(`/api/game/action`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "squad_shoot_models_weapons", unitId: String(unitId) }),
+            body: JSON.stringify({
+              action: `squad_${P}_models_weapons`,
+              unitId: String(unitId),
+            }),
           }),
           fetch(`/api/game/action`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "squad_shoot_menu_weapons", unitId: String(unitId) }),
+            body: JSON.stringify({
+              action: `squad_${P}_menu_weapons`,
+              unitId: String(unitId),
+            }),
           }),
         ]);
         if (!wRes.ok || !mRes.ok) throw new Error("HTTP error");
@@ -2334,7 +2347,7 @@ export default function Board({
     return () => {
       cancelled = true;
     };
-  }, [weaponSelectionMenu?.unitId, weaponSelectionMenu?.figWeapons]);
+  }, [weaponSelectionMenu?.unitId, weaponSelectionMenu?.figWeapons, phase]);
 
   // Auto-open weapon menu when a multi-weapon unit becomes the active shooting unit
   useEffect(() => {
@@ -2361,12 +2374,31 @@ export default function Board({
     window.dispatchEvent(new CustomEvent("boardWeaponSelectionClick", { detail: { unitId } }));
   }, [gameState?.active_shooting_unit, phase, units]);
 
-  // Flux squad : fermer le menu d'armes quand l'activation se termine (Validate/Cancel → sortie du mode).
+  // Combat (jumeau du tir ci-dessus) : ouvre le MÊME menu cible-d'abord dès qu'une unité fight
+  // est activée (étape FIGHT). Le plan fight est posé par useEngineAPI sur activate_unit.
+  const prevFightMenuUnitRef = useRef<number | null>(null);
   useEffect(() => {
-    if (mode !== "squadModelShoot") {
+    if (phase !== "fight" || fightSubPhase !== "fight" || !squadFightPlan) {
+      prevFightMenuUnitRef.current = null;
+      return;
+    }
+    if (squadFightPlan.unitId === prevFightMenuUnitRef.current) return;
+    prevFightMenuUnitRef.current = squadFightPlan.unitId;
+    window.dispatchEvent(
+      new CustomEvent("boardWeaponSelectionClick", { detail: { unitId: squadFightPlan.unitId } })
+    );
+  }, [phase, fightSubPhase, squadFightPlan]);
+
+  // Flux squad : fermer le menu d'armes quand l'activation se termine (Validate/Cancel → sortie du mode).
+  // Combat : le menu reste tant qu'un plan fight actif existe ; sa disparition (commit/cancel →
+  // squadFightPlan=null) referme le menu via cet effet.
+  useEffect(() => {
+    const fightMenuActive =
+      phase === "fight" && fightSubPhase === "fight" && squadFightPlan != null;
+    if (mode !== "squadModelShoot" && !fightMenuActive) {
       setWeaponSelectionMenu(null);
     }
-  }, [mode]);
+  }, [mode, phase, fightSubPhase, squadFightPlan]);
 
   // Tutoriel : halo autour de l'Intercessor quand la popup "Phase de mouvement" est affichée
   const tutorial = useTutorial();
@@ -4813,58 +4845,17 @@ export default function Board({
       // Clic sur une AUTRE unité amie → laisser passer (switch d'activation via onSelectUnit).
       if (own) return;
 
-      // 2) Clic sur un ennemi → simple = fig active ; double = toute l'unité (par arme).
+      // 2) Clic sur un ennemi → flux CIBLE-D'ABORD (jumeau EXACT du tir) : ouvre le menu des
+      // profils de mêlée pouvant frapper cette cible (compteurs x/m). L'attribution se fait
+      // dans le menu via les boutons −/x/+/Max (squad_fight_assign_weapon_qty). Le filtre
+      // d'engagement (règle 04.02) est appliqué côté backend (weapons_for_target vide si non
+      // engagé) — mêmes garanties que le tir. Les callbacks legacy onAssignFightTarget/
+      // onAssignFightWeapon restent définis (fallback index-based) mais ne sont plus appelés ici.
       const enemy = findEnemyUnit(col, row, activePlayer);
       if (enemy != null) {
         e.stopImmediatePropagation();
-        // Filtre engagement (règle 04.02) : ne rien envoyer si l'ennemi n'est pas engagé.
-        // Mêmes calculs que le contour rouge des cibles (squadFootprint + min distance EZ).
-        const uc = getUnitsCache();
-        const activeEntry = uc?.[String(plan.unitId)];
-        const activeUnit = units.find((u) => String(u.id) === String(plan.unitId));
-        const enemyEntry = uc?.[String(enemy)];
-        const enemyUnit = units.find((u) => String(u.id) === String(enemy));
-        const gsRules = (
-          gameState as { config?: { game_rules?: { engagement_zone?: number } } } | null | undefined
-        )?.config?.game_rules;
-        const cfgRules = gameConfig?.game_rules as { engagement_zone?: number } | undefined;
-        const engRules = gsRules?.engagement_zone ?? cfgRules?.engagement_zone ?? 1;
-        const i2sRaw = (boardConfig as unknown as { inches_to_subhex?: number }).inches_to_subhex;
-        const i2s = typeof i2sRaw === "number" ? i2sRaw : 10;
-        const steps = engRules * i2s;
-        const enemyFp = enemyUnit
-          ? (squadFootprintHexKeysFromModelCenters(
-              enemyEntry?.occupied_hexes_by_model,
-              enemyUnit
-            ) ?? unitFootprintHexKeys(enemyUnit))
-          : null;
-        const isEngaged = (
-          attackerByModel: Record<string, [number, number]> | undefined
-        ): boolean => {
-          if (!enemyFp || !activeUnit) return false;
-          const aFp = squadFootprintHexKeysFromModelCenters(attackerByModel, activeUnit);
-          if (!aFp) return false;
-          return minHexDistanceBetweenFootprintKeySets(aFp, enemyFp, steps) <= steps;
-        };
-        const now = e.timeStamp;
-        const prev = lastFightEnemyClickRef.current;
-        if (prev && String(prev.targetId) === String(enemy) && now - prev.time < 400) {
-          lastFightEnemyClickRef.current = null;
-          // double-clic : toute l'unité → au moins une fig doit être engagée.
-          if (isEngaged(activeEntry?.occupied_hexes_by_model)) {
-            void cbs.onAssignFightWeapon?.(enemy);
-          }
-          return;
-        }
-        lastFightEnemyClickRef.current = { targetId: enemy, time: now };
-        if (plan.activeModelId) {
-          // simple clic : la FIGURINE sélectionnée doit être engagée (règle 04.02).
-          const figPos = activeEntry?.occupied_hexes_by_model?.[plan.activeModelId];
-          if (figPos && isEngaged({ [plan.activeModelId]: figPos })) {
-            void cbs.onAssignFightTarget?.(enemy);
-          }
-        }
-        // sinon : ennemi non engagé / aucune fig sélectionnée → clic ignoré.
+        void openWeaponsForTargetRef.current(String(enemy), { x: e.clientX + 12, y: e.clientY });
+        return;
       }
     };
 
@@ -4877,7 +4868,6 @@ export default function Board({
     boardConfig,
     gameState?.units_cache,
     gameState,
-    gameConfig,
     units,
   ]);
 
@@ -10168,7 +10158,8 @@ export default function Board({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        action: "squad_shoot_weapons_for_target",
+        // Miroir tir/combat : même flux cible-d'abord, action pilotée par la phase.
+        action: `squad_${phase === "fight" ? "fight" : "shoot"}_weapons_for_target`,
         unitId: String(unitId),
         targetId,
         // Fig sélectionnée : m/x scopés sur elle (les boutons n'affectent qu'elle).
@@ -10188,7 +10179,8 @@ export default function Board({
 
   // Clic sur un ennemi : AJOUTE une ligne-cible (sous chaque profil éligible). Menu permanent.
   const addTargetForShoot = async (targetId: string) => {
-    const plan = squadShootPlanRef.current;
+    const plan =
+      phase === "fight" ? squadFightPlanRef.current : squadShootPlanRef.current;
     if (!plan) return;
     // Une fig déjà sélectionnée reste sélectionnée : lui attribuer une cible ne la
     // désélectionne pas — m/x de la nouvelle cible restent scopés sur elle.
@@ -10231,7 +10223,7 @@ export default function Board({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        action: "squad_shoot_models_status",
+        action: `squad_${phase === "fight" ? "fight" : "shoot"}_models_status`,
         unitId: String(unitId),
         targetId,
       }),
@@ -10250,7 +10242,8 @@ export default function Board({
   // Rafraîchit m/x de toutes les cibles ouvertes + les voiles vert/gris de la cible active.
   const refreshShootState = async () => {
     const menu = weaponSelectionMenuRef.current;
-    const plan = squadShootPlanRef.current;
+    const plan =
+      phase === "fight" ? squadFightPlanRef.current : squadShootPlanRef.current;
     if (!menu || !plan) return;
     try {
       // Cible active + fig sélectionnée → m/x scopés sur la fig ; sinon vue escouade.
@@ -10273,7 +10266,10 @@ export default function Board({
       const menuRes = await fetch(`/api/game/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "squad_shoot_menu_weapons", unitId: String(plan.unitId) }),
+        body: JSON.stringify({
+          action: `squad_${phase === "fight" ? "fight" : "shoot"}_menu_weapons`,
+          unitId: String(plan.unitId),
+        }),
       });
       const menuData = menuRes.ok ? await menuRes.json() : null;
       const menuWeapons = menuData?.success
@@ -10294,7 +10290,8 @@ export default function Board({
       prev ? { ...prev, selectedFig: modelId, selectedWeaponCode: undefined } : prev
     );
     const menu = weaponSelectionMenuRef.current;
-    const plan = squadShootPlanRef.current;
+    const plan =
+      phase === "fight" ? squadFightPlanRef.current : squadShootPlanRef.current;
     if (!menu || !plan || !menu.activeTargetId) return;
     const tid = menu.activeTargetId;
     void fetchWeaponsForTarget(plan.unitId, tid, modelId).then((weapons) => {
@@ -10315,10 +10312,12 @@ export default function Board({
 
   // -/+/Max/valeur d'une ligne : fixe le nombre de tirs du profil `code` sur la cible.
   const setShootWeaponQty = async (code: string, count: number, targetId: string) => {
-    const plan = squadShootPlanRef.current;
+    const P = phase === "fight" ? "fight" : "shoot";
+    const plan = phase === "fight" ? squadFightPlanRef.current : squadShootPlanRef.current;
     if (!plan) return;
     const fig = weaponSelectionMenuRef.current?.selectedFig;
-    const action = count <= 0 ? "squad_shoot_unassign_weapon_qty" : "squad_shoot_assign_weapon_qty";
+    const action =
+      count <= 0 ? `squad_${P}_unassign_weapon_qty` : `squad_${P}_assign_weapon_qty`;
     const body: Record<string, unknown> = {
       action,
       unitId: String(plan.unitId),
@@ -10343,13 +10342,17 @@ export default function Board({
       // Rafraîchit compteurs x/m + voile vert.
       await refreshShootState();
       // Propage les déclarations (voile + validation) au plan via événement.
+      // Miroir tir/combat : le combat émet vers son propre listener (setSquadFightPlan).
       window.dispatchEvent(
-        new CustomEvent("squadShootDeclarationsUpdated", {
-          detail: {
-            gameState: data.game_state,
-            declarations: data.result?.declarations ?? [],
-          },
-        })
+        new CustomEvent(
+          phase === "fight" ? "squadFightDeclarationsUpdated" : "squadShootDeclarationsUpdated",
+          {
+            detail: {
+              gameState: data.game_state,
+              declarations: data.result?.declarations ?? [],
+            },
+          }
+        )
       );
     } catch (e) {
       console.error("🔴 set qty error:", e);
@@ -10416,16 +10419,30 @@ export default function Board({
   };
 
   // Build weapon options
+  // Menu cible-d'abord partagé tir/combat : actif en COMBAT quand un plan fight de la
+  // MÊME unité est en cours (étape FIGHT). Pilote les actions du menu (Valider/Annuler,
+  // source de couleur d'arme, plan des déclarations).
+  const isFightMenu =
+    phase === "fight" &&
+    fightSubPhase === "fight" &&
+    squadFightPlan != null &&
+    weaponSelectionMenu != null &&
+    String(weaponSelectionMenu.unitId) === String(squadFightPlan.unitId);
+
   const weaponOptions: WeaponOption[] = weaponSelectionMenu
     ? (() => {
         const unit = units.find((u) => u.id === weaponSelectionMenu.unitId);
-        if (!unit?.RNG_WEAPONS) return [];
+        if (!unit) return [];
+        // Combat mêlée : la source de couleur est CC_WEAPONS (les index du menu fight
+        // indexent CC_WEAPONS) ; pas d'exigence de RNG_WEAPONS (unités sans arme à distance).
+        if (!isFightMenu && !unit.RNG_WEAPONS) return [];
 
-        const rngWeapons = unit.RNG_WEAPONS;
+        const rngWeapons = isFightMenu ? (unit.CC_WEAPONS ?? []) : unit.RNG_WEAPONS;
+        const activePlan = isFightMenu ? squadFightPlan : squadShootPlan;
         // Indices d'armes déjà assignés (une cible désignée).
         const assignedWeapons = new Set<number>(
-          squadShootPlan && String(squadShootPlan.unitId) === String(weaponSelectionMenu.unitId)
-            ? squadShootPlan.declarations.map((d) => d.weapon_index)
+          activePlan && String(activePlan.unitId) === String(weaponSelectionMenu.unitId)
+            ? activePlan.declarations.map((d) => d.weapon_index)
             : []
         );
         // assigned = grisé (visuel) si ce profil exact a une cible déclarée.
@@ -10458,7 +10475,7 @@ export default function Board({
           });
         }
         // Fallback : available_weapons pas encore patchée (ex. squad entre squad_shoot_activate et réponse).
-        return unit.RNG_WEAPONS.map((w, idx) => {
+        return rngWeapons.map((w, idx) => {
           const flags = weaponFlags(idx);
           return {
             index: idx,
@@ -10896,11 +10913,15 @@ export default function Board({
           position={weaponSelectionMenu.position}
           onSelectWeapon={handleSelectWeapon}
           onClose={() => setWeaponSelectionMenu(null)}
-          persistent={mode === "squadModelShoot"}
-          showActions={mode === "squadModelShoot" && !!squadShootPlan}
-          canValidate={squadShootPlan?.canValidate ?? false}
-          onCancel={onCancelSquadShoot}
-          onFire={onCommitSquadShoot}
+          persistent={mode === "squadModelShoot" || isFightMenu}
+          showActions={(mode === "squadModelShoot" && !!squadShootPlan) || isFightMenu}
+          canValidate={
+            isFightMenu
+              ? (squadFightPlan?.canValidate ?? false)
+              : (squadShootPlan?.canValidate ?? false)
+          }
+          onCancel={isFightMenu ? onCancelSquadFight : onCancelSquadShoot}
+          onFire={isFightMenu ? onCommitSquadFight : onCommitSquadShoot}
           openTargets={weaponSelectionMenu.openTargets}
           targetData={weaponSelectionMenu.targetData}
           targetLabel={(tid) => {

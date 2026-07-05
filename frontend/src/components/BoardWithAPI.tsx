@@ -5160,6 +5160,8 @@ export const BoardWithAPI: React.FC = () => {
             onSelectModelForFight={isGameOver ? () => {} : apiProps.onSelectModelForFight}
             onAssignFightTarget={isGameOver ? async () => {} : apiProps.onAssignFightTarget}
             onAssignFightWeapon={isGameOver ? async () => {} : apiProps.onAssignFightWeapon}
+            onCommitSquadFight={isGameOver ? async () => {} : apiProps.onCommitSquadFight}
+            onCancelSquadFight={isGameOver ? async () => {} : apiProps.onCancelSquadFight}
             onReportFightAssignable={apiProps.onReportFightAssignable}
             manualAllocation={apiProps.manualAllocation}
             onAllocateModel={isGameOver ? async () => {} : apiProps.onAllocateModel}

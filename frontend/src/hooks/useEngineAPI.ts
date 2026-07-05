@@ -1435,13 +1435,36 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (plan) void handleSquadShootLosOverviewRef.current(plan.unitId);
     };
 
+    // Jumeau combat : BoardPvp attribue via qty (squad_fight_assign_weapon_qty) et pousse
+    // les déclarations mises à jour → met à jour squadFightPlan (voile + bouton Valider).
+    const fightDeclarationsHandler = (e: Event) => {
+      const detail = (
+        e as CustomEvent<{
+          declarations?: Array<{ model_id: string; weapon_index: number; target_unit_id: string }>;
+        }>
+      ).detail;
+      const decls = detail?.declarations ?? [];
+      setSquadFightPlan((prev) =>
+        prev
+          ? {
+              ...prev,
+              declarations: decls,
+              targets: deriveShootTargets(decls),
+              canValidate: decls.length > 0,
+            }
+          : prev
+      );
+    };
+
     window.addEventListener("weaponSelected", weaponSelectedHandler);
     window.addEventListener("weaponSelectError", weaponSelectErrorHandler);
     window.addEventListener("squadShootDeclarationsUpdated", shootDeclarationsHandler);
+    window.addEventListener("squadFightDeclarationsUpdated", fightDeclarationsHandler);
     return () => {
       window.removeEventListener("weaponSelected", weaponSelectedHandler);
       window.removeEventListener("weaponSelectError", weaponSelectErrorHandler);
       window.removeEventListener("squadShootDeclarationsUpdated", shootDeclarationsHandler);
+      window.removeEventListener("squadFightDeclarationsUpdated", fightDeclarationsHandler);
     };
   }, [targetPreview, blinkingUnits.blinkTimer]);
 
