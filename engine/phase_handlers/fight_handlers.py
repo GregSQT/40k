@@ -7116,6 +7116,127 @@ def _fight_v11_manual_step(
             return _fight_v11_manual_state(game_state)
         return True, manual_allocation_waiting_payload(game_state, FIGHT_CTX)
 
+    # Combat cible-d abord par arme/quantite/figurine (jumeau du tir). Traite ICI, dans la
+    # machine V11, et NON dans w40k_core : le garde-fou d allocation ci-dessus s applique donc
+    # automatiquement (ces actions ne sont atteintes que hors allocation en cours). Lectures =
+    # return immediat ; mutations = declaration puis etat manuel V11 rafraichi.
+    if atype in (
+        "squad_fight_menu_weapons", "squad_fight_weapons_for_target",
+        "squad_fight_models_status", "squad_fight_models_weapons",
+        "squad_fight_eligible_models", "squad_fight_weapon_qty_max",
+        "squad_fight_assign_weapon_qty", "squad_fight_unassign_weapon_qty",
+        "squad_fight_toggle_model_weapon",
+    ):
+        squad_id = str(require_key(action, "unitId"))
+        # Idempotent : garantit pending_squad_fight_intents[squad_id] pour les lectures/menus.
+        _fight_ensure_activation_started(game_state, squad_id)
+
+        if atype == "squad_fight_menu_weapons":
+            return True, {
+                "action": atype, "unitId": squad_id,
+                "weapons": squad_fight_menu_weapons(game_state, squad_id),
+            }
+
+        if atype == "squad_fight_weapons_for_target":
+            target_id = action.get("targetId")
+            if target_id is None:
+                return False, {"error": "missing_targetId"}
+            model_id = action.get("modelId")  # optionnel : menu par-fig (m/x scopes)
+            return True, {
+                "action": atype, "unitId": squad_id, "targetId": str(target_id),
+                "weapons": squad_fight_weapons_for_target(
+                    game_state, squad_id, str(target_id),
+                    None if model_id is None else str(model_id),
+                ),
+            }
+
+        if atype == "squad_fight_models_weapons":
+            return True, {
+                "action": atype, "unitId": squad_id,
+                "models": squad_fight_models_weapons(game_state, squad_id),
+            }
+
+        if atype == "squad_fight_models_status":
+            target_id = action.get("targetId")
+            if target_id is None:
+                return False, {"error": "missing_targetId"}
+            return True, {
+                "action": atype, "unitId": squad_id, "targetId": str(target_id),
+                "models": squad_fight_models_status(game_state, squad_id, str(target_id)),
+            }
+
+        if atype == "squad_fight_eligible_models":
+            weapon_code = action.get("weaponCode")
+            target_id = action.get("targetId")
+            if weapon_code is None or target_id is None:
+                return False, {"error": "missing_weaponCode_or_targetId"}
+            return True, {
+                "action": atype, "unitId": squad_id, "weaponCode": str(weapon_code),
+                "targetId": str(target_id),
+                "models": squad_fight_eligible_models(game_state, squad_id, str(weapon_code), str(target_id)),
+            }
+
+        if atype == "squad_fight_weapon_qty_max":
+            weapon_code = action.get("weaponCode")
+            target_id = action.get("targetId")
+            if weapon_code is None or target_id is None:
+                return False, {"error": "missing_weaponCode_or_targetId"}
+            model_id = action.get("modelId")  # optionnel : borne par-fig
+            return True, {
+                "action": atype, "unitId": squad_id, "weaponCode": str(weapon_code),
+                "targetId": str(target_id),
+                "qty_max": squad_fight_weapon_qty_max(
+                    game_state, squad_id, str(weapon_code), str(target_id),
+                    None if model_id is None else str(model_id),
+                ),
+            }
+
+        if atype == "squad_fight_assign_weapon_qty":
+            weapon_code = action.get("weaponCode")
+            count_raw = action.get("count")
+            if weapon_code is None or count_raw is None:
+                return False, {"error": "missing_weaponCode_or_count"}
+            try:
+                count = int(count_raw)
+            except (TypeError, ValueError):
+                return False, {"error": "invalid_count_type"}
+            target_id = str(require_key(action, "targetId"))
+            model_id = action.get("modelId")  # optionnel : attribution par-fig
+            try:
+                squad_declare_fight_weapon_qty(
+                    game_state, squad_id, str(weapon_code), count, target_id,
+                    None if model_id is None else str(model_id),
+                )
+            except ValueError as e:
+                return False, {"error": "cannot_fight", "reason": str(e)}
+            return _fight_v11_manual_state(game_state)
+
+        if atype == "squad_fight_unassign_weapon_qty":
+            weapon_code = action.get("weaponCode")
+            target_id = action.get("targetId")
+            if weapon_code is None or target_id is None:
+                return False, {"error": "missing_weaponCode_or_targetId"}
+            model_id = action.get("modelId")  # optionnel : retrait par-fig
+            squad_undeclare_fight_weapon_qty(
+                game_state, squad_id, str(weapon_code), str(target_id),
+                None if model_id is None else str(model_id),
+            )
+            return _fight_v11_manual_state(game_state)
+
+        # squad_fight_toggle_model_weapon
+        model_id = action.get("modelId")
+        weapon_code = action.get("weaponCode")
+        target_id = action.get("targetId")
+        if model_id is None or weapon_code is None or target_id is None:
+            return False, {"error": "missing_modelId_weaponCode_or_targetId"}
+        try:
+            squad_fight_toggle_model_weapon(
+                game_state, squad_id, str(model_id), str(weapon_code), str(target_id)
+            )
+        except ValueError as e:
+            return False, {"error": "cannot_fight", "reason": str(e)}
+        return _fight_v11_manual_state(game_state)
+
     if sub == "pile_in":
         nxt = fight_v11_grouped_next(game_state, "pile_in")
         eligible = nxt[1] if nxt else []

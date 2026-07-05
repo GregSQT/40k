@@ -5321,156 +5321,13 @@ class W40KEngine(gym.Env):
         success, result = command_handlers.execute_action(self.game_state, current_unit, action, self.config)
         return success, result
     
-    def _process_squad_manual_fight(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        """Combat PvP humain cible-d abord par arme/quantite/figurine (jumeau du tir).
-
-        Actions cible-d abord (calque de _process_squad_manual_shoot) manipulant
-        pending_squad_fight_intents de l unite fight active :
-          - lecture seule : squad_fight_menu_weapons, squad_fight_weapons_for_target,
-            squad_fight_models_status, squad_fight_models_weapons, squad_fight_eligible_models,
-            squad_fight_weapon_qty_max.
-          - declaration : squad_fight_assign_weapon_qty, squad_fight_unassign_weapon_qty,
-            squad_fight_toggle_model_weapon → renvoient l etat manuel V11 rafraichi (le pile-in,
-            l ordre d activation, la validation et l allocation restent geres par execute_action).
-
-        Eligibilite = engagement (portee par FIGHT_DECLARE_CTX), pas de portee/LoS.
-        """
-        from engine.phase_handlers.fight_handlers import (
-            _fight_ensure_activation_started,
-            _fight_v11_manual_state,
-            squad_fight_menu_weapons,
-            squad_fight_weapons_for_target,
-            squad_fight_models_status,
-            squad_fight_models_weapons,
-            squad_fight_eligible_models,
-            squad_fight_weapon_qty_max,
-            squad_declare_fight_weapon_qty,
-            squad_undeclare_fight_weapon_qty,
-            squad_fight_toggle_model_weapon,
-        )
-
-        name = action.get("action")
-        squad_id = str(require_key(action, "unitId"))
-        # Idempotent : garantit pending_squad_fight_intents[squad_id] pour les lectures/menus.
-        _fight_ensure_activation_started(self.game_state, squad_id)
-
-        if name == "squad_fight_menu_weapons":
-            weapons = squad_fight_menu_weapons(self.game_state, squad_id)
-            return True, {"action": name, "unitId": squad_id, "weapons": weapons}
-
-        if name == "squad_fight_weapons_for_target":
-            target_id = action.get("targetId")
-            if target_id is None:
-                return False, {"error": "missing_targetId"}
-            model_id = action.get("modelId")  # optionnel : menu par-fig (m/x scopes)
-            weapons = squad_fight_weapons_for_target(
-                self.game_state, squad_id, str(target_id),
-                None if model_id is None else str(model_id),
-            )
-            return True, {
-                "action": name, "unitId": squad_id, "targetId": str(target_id), "weapons": weapons,
-            }
-
-        if name == "squad_fight_models_weapons":
-            models = squad_fight_models_weapons(self.game_state, squad_id)
-            return True, {"action": name, "unitId": squad_id, "models": models}
-
-        if name == "squad_fight_models_status":
-            target_id = action.get("targetId")
-            if target_id is None:
-                return False, {"error": "missing_targetId"}
-            models = squad_fight_models_status(self.game_state, squad_id, str(target_id))
-            return True, {
-                "action": name, "unitId": squad_id, "targetId": str(target_id), "models": models,
-            }
-
-        if name == "squad_fight_eligible_models":
-            weapon_code = action.get("weaponCode")
-            target_id = action.get("targetId")
-            if weapon_code is None or target_id is None:
-                return False, {"error": "missing_weaponCode_or_targetId"}
-            models = squad_fight_eligible_models(self.game_state, squad_id, str(weapon_code), str(target_id))
-            return True, {
-                "action": name, "unitId": squad_id, "weaponCode": str(weapon_code),
-                "targetId": str(target_id), "models": models,
-            }
-
-        if name == "squad_fight_weapon_qty_max":
-            weapon_code = action.get("weaponCode")
-            target_id = action.get("targetId")
-            if weapon_code is None or target_id is None:
-                return False, {"error": "missing_weaponCode_or_targetId"}
-            model_id = action.get("modelId")  # optionnel : borne par-fig
-            qty_max = squad_fight_weapon_qty_max(
-                self.game_state, squad_id, str(weapon_code), str(target_id),
-                None if model_id is None else str(model_id),
-            )
-            return True, {
-                "action": name, "unitId": squad_id, "weaponCode": str(weapon_code),
-                "targetId": str(target_id), "qty_max": qty_max,
-            }
-
-        if name == "squad_fight_assign_weapon_qty":
-            weapon_code = action.get("weaponCode")
-            count_raw = action.get("count")
-            if weapon_code is None or count_raw is None:
-                return False, {"error": "missing_weaponCode_or_count"}
-            try:
-                count = int(count_raw)
-            except (TypeError, ValueError):
-                return False, {"error": "invalid_count_type"}
-            target_id = str(require_key(action, "targetId"))
-            model_id = action.get("modelId")  # optionnel : attribution par-fig
-            try:
-                squad_declare_fight_weapon_qty(
-                    self.game_state, squad_id, str(weapon_code), count, target_id,
-                    None if model_id is None else str(model_id),
-                )
-            except ValueError as e:
-                return False, {"error": "cannot_fight", "reason": str(e)}
-            return _fight_v11_manual_state(self.game_state)
-
-        if name == "squad_fight_unassign_weapon_qty":
-            weapon_code = action.get("weaponCode")
-            target_id = action.get("targetId")
-            if weapon_code is None or target_id is None:
-                return False, {"error": "missing_weaponCode_or_targetId"}
-            model_id = action.get("modelId")  # optionnel : retrait par-fig
-            squad_undeclare_fight_weapon_qty(
-                self.game_state, squad_id, str(weapon_code), str(target_id),
-                None if model_id is None else str(model_id),
-            )
-            return _fight_v11_manual_state(self.game_state)
-
-        if name == "squad_fight_toggle_model_weapon":
-            model_id = action.get("modelId")
-            weapon_code = action.get("weaponCode")
-            target_id = action.get("targetId")
-            if model_id is None or weapon_code is None or target_id is None:
-                return False, {"error": "missing_modelId_weaponCode_or_targetId"}
-            try:
-                squad_fight_toggle_model_weapon(
-                    self.game_state, squad_id, str(model_id), str(weapon_code), str(target_id)
-                )
-            except ValueError as e:
-                return False, {"error": "cannot_fight", "reason": str(e)}
-            return _fight_v11_manual_state(self.game_state)
-
-        return False, {"error": "unknown_squad_fight_action", "action": name}
-
     def _process_fight_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        """AI_TURN.md EXACT: Pure delegation - handler manages complete fight phase."""
-        # Combat PvP humain cible-d abord par figurine : pipeline squad (symetrie tir).
-        # Le pile-in, l ordre d activation, la validation et l allocation restent geres
-        # par le state-machine V11 dans fight_handlers.execute_action (non interceptes ici).
-        if action.get("action") in (
-            "squad_fight_menu_weapons", "squad_fight_weapons_for_target",
-            "squad_fight_models_status", "squad_fight_models_weapons",
-            "squad_fight_eligible_models", "squad_fight_weapon_qty_max",
-            "squad_fight_assign_weapon_qty", "squad_fight_unassign_weapon_qty",
-            "squad_fight_toggle_model_weapon",
-        ):
-            return self._process_squad_manual_fight(action)
+        """AI_TURN.md EXACT: Pure delegation - handler manages complete fight phase.
+
+        Y compris le combat PvP humain cible-d abord par arme/quantite/figurine : ces
+        actions squad_fight_* sont traitees DANS la machine V11 (_fight_v11_manual_step),
+        pas ici — le garde-fou d allocation les protege donc automatiquement.
+        """
         # Get current unit for handler
         unit_id = action.get("unitId")
         current_unit = None
@@ -5484,7 +5341,7 @@ class W40KEngine(gym.Env):
             return success, result
         else:
             return True, handler_response
-    
+
     # ============================================================================
     # PHASE INITIALIZATION - KEEP THESE (Handler delegation)
     # ============================================================================
