@@ -413,8 +413,19 @@ class TestModelsStatus:
         gs = self._gs()
         # 1#0 tire son unique arme (storm) → épuisée → grise.
         squad_shoot_toggle_model_weapon(gs, "1", "1#0", "storm_bolter", "2")
-        status = {s["model_id"]: s["can_shoot"] for s in squad_shoot_models_status(gs, "1", "2")}
-        assert status["1#0"] is False  # plus d'arme libre → gris
-        assert status["1#1"] is True  # l'autre storm reste vert
-        # Le cyclone reste vert (Frag OU Krak encore libres).
-        assert status["1#2"] is True
+        st = {s["model_id"]: s for s in squad_shoot_models_status(gs, "1", "2")}
+        assert st["1#0"]["can_shoot"] is False and st["1#0"]["exhausted"] is True  # épuisée → gris
+        assert st["1#1"]["can_shoot"] is True and st["1#1"]["exhausted"] is False  # l'autre storm reste vert
+        # Le cyclone : Frag attribué mais Krak partage le groupe → épuisé aussi.
+        squad_shoot_toggle_model_weapon(gs, "1", "1#2", FRAG_CODE, "2")
+        st2 = {s["model_id"]: s for s in squad_shoot_models_status(gs, "1", "2")}
+        assert st2["1#2"]["exhausted"] is True  # Frag/Krak = 1 arme physique → épuisée
+
+    def test_can_shoot_false_but_not_exhausted_when_out_of_range(self):
+        # Cible hors portée d'une fig non épuisée → can_shoot False MAIS exhausted False (= "rien").
+        atk = _unit(1, 1, [_m(5, 5, [STORM])], [STORM])
+        far = _unit(2, 2, [_m(5, 90, [STORM])], [STORM])  # hors portée storm (24)
+        gs = _make_gs([atk, far])
+        _activate(gs, "1")
+        s = squad_shoot_models_status(gs, "1", "2")[0]
+        assert s["can_shoot"] is False and s["exhausted"] is False

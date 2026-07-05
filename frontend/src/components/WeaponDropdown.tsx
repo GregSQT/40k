@@ -37,6 +37,8 @@ interface WeaponDropdownProps {
   highlightedCodes?: string[];
   /** Nombre total d'armes de chaque type dans l'escouade (m du compteur n/m). */
   weaponTotals?: Record<string, number>;
+  /** Si défini (fig sélectionnée) : n'affiche que ces codes d'armes (celles de la fig). */
+  restrictToCodes?: string[];
 }
 
 /** Palette stable des sous-groupes (profil × cible) — couleur de la ligne (voile PIXI en 5c-3). */
@@ -64,6 +66,7 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
   onWeaponRowClick,
   highlightedCodes,
   weaponTotals,
+  restrictToCodes,
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x: position.x, y: position.y });
@@ -162,9 +165,12 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
                 </tr>
               </thead>
               <tbody>
-                {/* Masque les armes non utilisables (par-fig) : hors portée/LoS, ou exclusion
-                    Pistol/non-Pistol au niveau unité (10.06). Calculé côté backend. */}
-                {weapons.filter((wo) => wo.canUse).map((wo) => {
+                {/* Masque les armes non utilisables (par-fig : hors portée/LoS, exclusion Pistol
+                    10.06). Si une fig est sélectionnée : n'affiche que ses armes (restrictToCodes). */}
+                {weapons
+                  .filter((wo) => wo.canUse)
+                  .filter((wo) => !restrictToCodes || restrictToCodes.includes(wo.weapon.code ?? ""))
+                  .map((wo) => {
                   const w = wo.weapon;
                   const code = w.code ?? "";
                   const carrier = (w as { carrier_name?: string }).carrier_name;

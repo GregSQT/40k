@@ -1572,7 +1572,7 @@ export default function Board({
     (targetId: string, position?: { x: number; y: number }) => Promise<void>
   >(async () => {});
   // Ref vers selectShootFig (défini plus bas) — évite un TDZ dans le handler pointer.
-  const selectShootFigRef = useRef<(modelId: string) => void>(() => {});
+  const selectShootFigRef = useRef<(modelId: string | undefined) => void>(() => {});
   const lastOwnFigClickRef = useRef<{ modelId: string; time: number } | null>(null);
   /** Combat par-figurine : callbacks + plan + dernier clic ennemi, refs à jour pour le handler stable. */
   const squadFightCallbacksRef = useRef({
@@ -1700,7 +1700,7 @@ export default function Board({
     /** Cible sélectionnée (réticule + voiles vert/gris des figs de l'unité active). */
     activeTargetId?: string;
     /** État de chaque fig vis-à-vis de la cible : can_shoot (vert/gris) + ses armes. */
-    modelsStatus?: Array<{ model_id: string; can_shoot: boolean; weapon_codes: string[] }>;
+    modelsStatus?: Array<{ model_id: string; can_shoot: boolean; exhausted: boolean; weapon_codes: string[] }>;
     /** Armes par figurine (indépendant de la cible) — encart/contour jaune dès le clic-fig. */
     figWeapons?: Record<string, string[]>;
     /** Profils du menu avec can_use (par-fig + exclusion Pistol) — rechargé à chaque attribution. */
@@ -4621,13 +4621,19 @@ export default function Board({
         e.stopImmediatePropagation();
         const now = e.timeStamp;
         const prevOwn = lastOwnFigClickRef.current;
-        // Menu tir ouvert : clic sur une fig = la SÉLECTIONNER (contour jaune + ses armes en
-        // encart jaune) ET rafraîchir ses cibles potentielles (blink). Attribution dans le menu.
+        // Menu tir ouvert : clic sur une fig = bascule de sélection.
+        //  - re-clic sur la fig déjà sélectionnée → désélectionne + cibles de l'ESCOUADE (los_overview) ;
+        //  - clic sur une autre fig → la sélectionne (fond jaune + menu = ses armes) + cibles de LA FIG.
         const menuNow = weaponSelectionMenuRef.current;
         if (menuNow) {
           lastOwnFigClickRef.current = { modelId: own.mid, time: now };
-          selectShootFigRef.current(own.mid);
-          void cbs.onSelectModelForShoot?.(own.mid); // met à jour le blink des cibles de la fig
+          if (menuNow.selectedFig === own.mid) {
+            selectShootFigRef.current(undefined);
+            void cbs.onSquadShootLosOverview?.(Number(plan.unitId)); // cibles escouade
+          } else {
+            selectShootFigRef.current(own.mid);
+            void cbs.onSelectModelForShoot?.(own.mid); // cibles de la fig (surlignage jaune)
+          }
           return;
         }
         if (prevOwn && String(prevOwn.modelId) === String(own.mid) && now - prevOwn.time < 400) {
@@ -4650,6 +4656,14 @@ export default function Board({
       if (enemy != null) {
         e.stopImmediatePropagation();
         void openWeaponsForTargetRef.current(String(enemy), { x: e.clientX + 12, y: e.clientY });
+        return;
+      }
+      // 3) clic sur le board vide (ni fig, ni ennemi) alors qu'une fig est sélectionnée →
+      // désélection : menu complet + retour aux cibles de l'escouade. (Les clics sur le menu
+      // ne passent pas ici : e.target !== canvas.)
+      if (weaponSelectionMenuRef.current?.selectedFig) {
+        selectShootFigRef.current(undefined);
+        void cbs.onSquadShootLosOverview?.(Number(plan.unitId));
       }
     };
 
@@ -5046,32 +5060,47 @@ export default function Board({
           overlay.moveTo(cx + tickIn, cy); overlay.lineTo(cx + tickOut, cy);
         }
       }
-      // 2. REMPLISSAGE vert/gris (si cible active) + CONTOUR jaune (correspondance arme↔fig).
+      // 2. FONDS des figs de l'unité active :
+      //  - fig sélectionnée → JAUNE plein ;
+      //  - sinon (cible active, aucune fig sélectionnée) → VERT (peut viser la cible) /
+      //    GRIS (épuisée) / rien (peut tirer ailleurs) ;
+      //  - contour jaune sur les figs portant l'arme sélectionnée (exploration inverse).
       const atk = units.find((u) => String(u.id) === String(menu.unitId));
       const atkByModel = uc?.[String(menu.unitId)]?.occupied_hexes_by_model;
       if (atk && atkByModel) {
         const aR = resolveBaseSizeForUnitDisplay(atk) > 1
           ? (resolveBaseSizeForUnitDisplay(atk) * 1.5 * HEX_RADIUS_H) / 2
           : HEX_RADIUS_H * 0.7;
-        const canShootByMid = new Map(
-          (menu.modelsStatus ?? []).map((s) => [String(s.model_id), s.can_shoot])
+        const statusByMid = new Map(
+          (menu.modelsStatus ?? []).map((s) => [String(s.model_id), s])
         );
         const figWeapons = menu.figWeapons ?? {};
-        const highlight = (mid: string): boolean =>
-          (!!menu.selectedFig && menu.selectedFig === mid) ||
-          (!!menu.selectedWeaponCode && (figWeapons[mid] ?? []).includes(menu.selectedWeaponCode));
         for (const [mid, pos] of Object.entries(atkByModel)) {
           const [cx, cy] = centerOf(pos);
-          // remplissage vert/gris uniquement si une cible est sélectionnée.
-          if (menu.activeTargetId && canShootByMid.has(mid)) {
-            const can = canShootByMid.get(mid);
+          if (menu.selectedFig === mid) {
             overlay.lineStyle(0);
-            overlay.beginFill(can ? 0x2ecc40 : 0x777777, can ? 0.32 : 0.42);
+            overlay.beginFill(0xf5c518, 0.55); // fond jaune plein : fig sélectionnée
             overlay.drawCircle(cx, cy, aR);
             overlay.endFill();
-          }
-          // contour jaune (correspondance arme↔fig) par-dessus, même sans cible.
-          if (highlight(mid)) {
+          } else if (!menu.selectedFig && menu.activeTargetId && statusByMid.has(mid)) {
+            const s = statusByMid.get(mid)!;
+            if (s.exhausted) {
+              overlay.lineStyle(0);
+              overlay.beginFill(0x777777, 0.42); // gris : épuisée
+              overlay.drawCircle(cx, cy, aR);
+              overlay.endFill();
+            } else if (s.can_shoot) {
+              overlay.lineStyle(0);
+              overlay.beginFill(0x2ecc40, 0.32); // vert : peut viser la cible
+              overlay.drawCircle(cx, cy, aR);
+              overlay.endFill();
+            }
+            // sinon : rien (peut tirer, mais pas sur cette cible)
+          } else if (
+            !menu.selectedFig &&
+            menu.selectedWeaponCode &&
+            (figWeapons[mid] ?? []).includes(menu.selectedWeaponCode)
+          ) {
             overlay.lineStyle(Math.max(2.5, HEX_RADIUS_H * 0.34), 0xf5c518, 1);
             overlay.drawCircle(cx, cy, aR * 1.08);
           }
@@ -10113,7 +10142,8 @@ export default function Board({
   // weapons_for_target pour UNE cible (profils éligibles + m/x). Read-only backend.
   const fetchWeaponsForTarget = async (
     unitId: number,
-    targetId: string
+    targetId: string,
+    modelId?: string
   ): Promise<Array<{ code: string; weapon: Weapon; m: number; x: number }>> => {
     const res = await fetch(`/api/game/action`, {
       method: "POST",
@@ -10122,6 +10152,8 @@ export default function Board({
         action: "squad_shoot_weapons_for_target",
         unitId: String(unitId),
         targetId,
+        // Fig sélectionnée : m/x scopés sur elle (les boutons n'affectent qu'elle).
+        ...(modelId ? { modelId } : {}),
       }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -10165,7 +10197,7 @@ export default function Board({
   const fetchModelsStatus = async (
     unitId: number,
     targetId: string
-  ): Promise<Array<{ model_id: string; can_shoot: boolean; weapon_codes: string[] }>> => {
+  ): Promise<Array<{ model_id: string; can_shoot: boolean; exhausted: boolean; weapon_codes: string[] }>> => {
     const res = await fetch(`/api/game/action`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -10181,6 +10213,7 @@ export default function Board({
     return (data.result?.models ?? []) as Array<{
       model_id: string;
       can_shoot: boolean;
+      exhausted: boolean;
       weapon_codes: string[];
     }>;
   };
@@ -10191,8 +10224,12 @@ export default function Board({
     const plan = squadShootPlanRef.current;
     if (!menu || !plan) return;
     try {
+      // Cible active + fig sélectionnée → m/x scopés sur la fig ; sinon vue escouade.
       const entries = await Promise.all(
-        menu.openTargets.map(async (t) => [t, await fetchWeaponsForTarget(plan.unitId, t)] as const)
+        menu.openTargets.map(async (t) => {
+          const scoped = menu.selectedFig && t === menu.activeTargetId ? menu.selectedFig : undefined;
+          return [t, await fetchWeaponsForTarget(plan.unitId, t, scoped)] as const;
+        })
       );
       const targetData: Record<string, Array<{ code: string; weapon: Weapon; m: number; x: number }>> = {};
       for (const [t, w] of entries) targetData[t] = w;
@@ -10214,55 +10251,27 @@ export default function Board({
     }
   };
 
-  // Clic sur une fig de l'unité active → la sélectionne (contour jaune + ses armes en jaune).
-  const selectShootFig = (modelId: string) => {
+  // Sélectionne (fond jaune + menu = ses armes) ou désélectionne (undefined) une fig.
+  // Recharge la cible active : m/x scopés sur la fig (sélection) ou vue escouade (désélection).
+  const selectShootFig = (modelId: string | undefined) => {
     setWeaponSelectionMenu((prev) =>
       prev ? { ...prev, selectedFig: modelId, selectedWeaponCode: undefined } : prev
     );
+    const menu = weaponSelectionMenuRef.current;
+    const plan = squadShootPlanRef.current;
+    if (!menu || !plan || !menu.activeTargetId) return;
+    const tid = menu.activeTargetId;
+    void fetchWeaponsForTarget(plan.unitId, tid, modelId).then((weapons) => {
+      setWeaponSelectionMenu((prev) =>
+        prev ? { ...prev, targetData: { ...prev.targetData, [tid]: weapons } } : prev
+      );
+    });
   };
   selectShootFigRef.current = selectShootFig;
 
-  // Clic sur une ligne d'ARME dans le menu :
-  //  - si une fig est sélectionnée ET porte cette arme → attribue CETTE fig (toggle) ;
-  //  - sinon → sélectionne l'arme (contour jaune sur les figs qui la portent).
+  // Clic sur une ligne d'ARME dans le menu : sélectionne l'arme (contour jaune sur les
+  // figs qui la portent). L'attribution des tirs se fait via les boutons −/x/+/Max.
   const onWeaponRowClick = async (code: string) => {
-    const menu = weaponSelectionMenuRef.current;
-    const plan = squadShootPlanRef.current;
-    if (!menu || !plan) return;
-    const fig = menu.selectedFig;
-    const figCodes = (menu.figWeapons ?? {})[fig ?? ""] ?? [];
-    if (fig && menu.activeTargetId && figCodes.includes(code)) {
-      // Attribution précise : cette fig tire cette arme sur la cible active (toggle).
-      try {
-        const res = await fetch(`/api/game/action`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "squad_shoot_toggle_model_weapon",
-            unitId: String(plan.unitId),
-            modelId: fig,
-            weaponCode: code,
-            targetId: menu.activeTargetId,
-          }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data.success) {
-          // Ex. arme hors portée/LoS de la cible → refus backend : feedback discret, pas de crash.
-          console.warn(`[SQUAD-SHOOT] fig ${fig} ne peut pas tirer ${code} sur ${menu.activeTargetId}: ${data.reason ?? data.error ?? res.status}`);
-          return;
-        }
-        await refreshShootState();
-        window.dispatchEvent(
-          new CustomEvent("squadShootDeclarationsUpdated", {
-            detail: { gameState: data.game_state, declarations: data.result?.declarations ?? [] },
-          })
-        );
-      } catch (e) {
-        console.error("🔴 toggle (fig+arme) error:", e);
-      }
-      return;
-    }
-    // Exploration : sélectionne l'arme (surligne les figs qui la portent).
     setWeaponSelectionMenu((prev) =>
       prev ? { ...prev, selectedWeaponCode: code, selectedFig: undefined } : prev
     );
@@ -10272,12 +10281,15 @@ export default function Board({
   const setShootWeaponQty = async (code: string, count: number, targetId: string) => {
     const plan = squadShootPlanRef.current;
     if (!plan) return;
+    const fig = weaponSelectionMenuRef.current?.selectedFig;
     const action = count <= 0 ? "squad_shoot_unassign_weapon_qty" : "squad_shoot_assign_weapon_qty";
     const body: Record<string, unknown> = {
       action,
       unitId: String(plan.unitId),
       weaponCode: code,
       targetId,
+      // Fig sélectionnée : l'attribution ne concerne QUE cette figurine.
+      ...(fig ? { modelId: fig } : {}),
     };
     if (count > 0) body.count = count;
     try {
@@ -10872,6 +10884,15 @@ export default function Board({
               for (const c of codes) totals[c] = (totals[c] ?? 0) + 1;
             return totals;
           })()}
+          restrictToCodes={
+            weaponSelectionMenu.selectedFig
+              ? (weaponSelectionMenu.modelsStatus?.find(
+                  (s) => s.model_id === weaponSelectionMenu.selectedFig
+                )?.weapon_codes ??
+                  (weaponSelectionMenu.figWeapons ?? {})[weaponSelectionMenu.selectedFig] ??
+                  [])
+              : undefined
+          }
           inchesToSubhex={
             (boardConfig as unknown as { inches_to_subhex?: number } | null)?.inches_to_subhex ?? 1
           }

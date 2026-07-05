@@ -4516,9 +4516,11 @@ class W40KEngine(gym.Env):
             except (TypeError, ValueError):
                 return False, {"error": "invalid_count_type"}
             target_id = str(require_key(action, "targetId"))
+            model_id = action.get("modelId")  # optionnel : attribution par-fig
             try:
                 created = squad_declare_shoot_weapon_qty(
-                    self.game_state, squad_id, str(weapon_code), count, target_id
+                    self.game_state, squad_id, str(weapon_code), count, target_id,
+                    None if model_id is None else str(model_id),
                 )
             except ValueError as e:
                 return False, {"error": "cannot_shoot", "reason": str(e)}
@@ -4538,7 +4540,11 @@ class W40KEngine(gym.Env):
             target_id = action.get("targetId")
             if target_id is None:
                 return False, {"error": "missing_targetId"}
-            weapons = squad_shoot_weapons_for_target(self.game_state, squad_id, str(target_id))
+            model_id = action.get("modelId")  # optionnel : menu par-fig (m/x scopes)
+            weapons = squad_shoot_weapons_for_target(
+                self.game_state, squad_id, str(target_id),
+                None if model_id is None else str(model_id),
+            )
             return True, {
                 "action": name, "unitId": squad_id, "targetId": str(target_id),
                 "weapons": weapons,
@@ -4596,8 +4602,10 @@ class W40KEngine(gym.Env):
             target_id = action.get("targetId")
             if weapon_code is None or target_id is None:
                 return False, {"error": "missing_weaponCode_or_targetId"}
+            model_id = action.get("modelId")  # optionnel : borne par-fig
             qty_max = squad_shoot_weapon_qty_max(
-                self.game_state, squad_id, str(weapon_code), str(target_id)
+                self.game_state, squad_id, str(weapon_code), str(target_id),
+                None if model_id is None else str(model_id),
             )
             return True, {
                 "action": name, "unitId": squad_id, "weaponCode": str(weapon_code),
@@ -4609,8 +4617,10 @@ class W40KEngine(gym.Env):
             target_id = action.get("targetId")
             if weapon_code is None or target_id is None:
                 return False, {"error": "missing_weaponCode_or_targetId"}
+            model_id = action.get("modelId")  # optionnel : retrait par-fig
             removed = squad_undeclare_shoot_weapon_qty(
-                self.game_state, squad_id, str(weapon_code), str(target_id)
+                self.game_state, squad_id, str(weapon_code), str(target_id),
+                None if model_id is None else str(model_id),
             )
             return True, {
                 "action": name, "unitId": squad_id, "weaponCode": str(weapon_code),
