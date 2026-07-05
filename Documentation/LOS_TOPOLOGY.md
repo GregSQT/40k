@@ -1,5 +1,7 @@
 # LoS Topology (précalcul)
 
+> **⚠️ MàJ 2026-07 (vérifié code)** : `los_topology` n'est plus consommé que sur les *legacy boards* (`observation_builder.py`, `shooting_handlers.py`). Le builder `scripts/los_topology_builder.py` décrit ci-dessous est **absent** du repo et le modèle de couvert a été refondu (`cover_ratio` supprimé). Doc à traiter comme historique partiel.
+
 Ce document décrit le système de topologie LoS précalculée pour l’optimisation des vérifications de ligne de vue.
 
 ---

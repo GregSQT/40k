@@ -32,7 +32,7 @@ from .shared_utils import (
     build_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
     is_placement_valid_with_clearance,
     _compute_unit_occupied_hexes,
-    _roll_squad_shot_sequence, wound_threshold, save_threshold,
+    wound_threshold, save_threshold,
 )
 
 # ============================================================================

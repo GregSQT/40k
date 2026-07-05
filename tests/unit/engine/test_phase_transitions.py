@@ -17,7 +17,6 @@ from engine.phase_handlers.shooting_handlers import (
 )
 from engine.phase_handlers.fight_handlers import (
     fight_phase_start,
-    _execute_fight_attack_sequence,
 )
 from engine.phase_handlers.shared_utils import (
     build_units_cache,
@@ -294,41 +293,3 @@ class TestFightTransition:
         assert "active_alternating_activation_pool" in gs
         assert "non_active_alternating_activation_pool" in gs
 
-    def test_fight_attack_kills_weak_target(self, monkeypatch):
-        """fight_trans_kill : combat contre cible faible → cible tuée."""
-        attacker = _unit(1, 1, 5, 10)
-        attacker["CC_WEAPONS"] = [_cc_weapon(atk=3, str_=8, ap=-3, dmg=10)]
-        attacker["selectedCcWeaponIndex"] = 0
-        target = _unit(2, 2, 6, 10, hp=1)
-        gs = _make_fight_gs([attacker, target])
-        # Garantit hit + wound + save échoue
-        rolls = iter([5, 5, 1])
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        _execute_fight_attack_sequence(gs, attacker, "2")
-        assert not is_unit_alive("2", gs)
-
-    def test_fight_attack_miss_preserves_hp(self, monkeypatch):
-        """fight_trans_miss : touche ratée → HP cible inchangé."""
-        attacker = _unit(1, 1, 5, 10)
-        attacker["CC_WEAPONS"] = [_cc_weapon(atk=3, str_=4, ap=0, dmg=2)]
-        attacker["selectedCcWeaponIndex"] = 0
-        target = _unit(2, 2, 6, 10, hp=5)
-        gs = _make_fight_gs([attacker, target])
-        initial_hp = get_hp_from_cache("2", gs)
-        # Force miss: roll below ATK=3
-        monkeypatch.setattr("random.randint", lambda a, b: 1)
-        _execute_fight_attack_sequence(gs, attacker, "2")
-        assert get_hp_from_cache("2", gs) == initial_hp
-
-    def test_fight_attack_hit_decrements_hp(self, monkeypatch):
-        """fight_trans_dmg : séquence complète hit+wound+save fail → HP décrémenté."""
-        attacker = _unit(1, 1, 5, 10)
-        attacker["CC_WEAPONS"] = [_cc_weapon(atk=3, str_=4, ap=0, dmg=2)]
-        attacker["selectedCcWeaponIndex"] = 0
-        target = _unit(2, 2, 6, 10, hp=5)
-        gs = _make_fight_gs([attacker, target])
-        # hit=5 (≥3, hit), wound=4 (==T, wound 4+), save=2 (fail 3+)
-        rolls = iter([5, 4, 2])
-        monkeypatch.setattr("random.randint", lambda a, b: next(rolls))
-        _execute_fight_attack_sequence(gs, attacker, "2")
-        assert get_hp_from_cache("2", gs) == 3  # 5 - 2 damage

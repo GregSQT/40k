@@ -4861,15 +4861,7 @@ export default function Board({
 
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
-  }, [
-    phase,
-    mode,
-    measureMode.kind,
-    boardConfig,
-    gameState?.units_cache,
-    gameState,
-    units,
-  ]);
+  }, [phase, mode, measureMode.kind, boardConfig, gameState?.units_cache, gameState, units]);
 
   // Allocation manuelle des pertes en COMBAT (PvP) : l'effet de tir ci-dessus est gaté
   // sur phase==="shoot" et ne couvre donc pas le fight. Ce handler dédié (phase fight,
@@ -10179,8 +10171,7 @@ export default function Board({
 
   // Clic sur un ennemi : AJOUTE une ligne-cible (sous chaque profil éligible). Menu permanent.
   const addTargetForShoot = async (targetId: string) => {
-    const plan =
-      phase === "fight" ? squadFightPlanRef.current : squadShootPlanRef.current;
+    const plan = phase === "fight" ? squadFightPlanRef.current : squadShootPlanRef.current;
     if (!plan) return;
     // Une fig déjà sélectionnée reste sélectionnée : lui attribuer une cible ne la
     // désélectionne pas — m/x de la nouvelle cible restent scopés sur elle.
@@ -10242,8 +10233,7 @@ export default function Board({
   // Rafraîchit m/x de toutes les cibles ouvertes + les voiles vert/gris de la cible active.
   const refreshShootState = async () => {
     const menu = weaponSelectionMenuRef.current;
-    const plan =
-      phase === "fight" ? squadFightPlanRef.current : squadShootPlanRef.current;
+    const plan = phase === "fight" ? squadFightPlanRef.current : squadShootPlanRef.current;
     if (!menu || !plan) return;
     try {
       // Cible active + fig sélectionnée → m/x scopés sur la fig ; sinon vue escouade.
@@ -10290,8 +10280,7 @@ export default function Board({
       prev ? { ...prev, selectedFig: modelId, selectedWeaponCode: undefined } : prev
     );
     const menu = weaponSelectionMenuRef.current;
-    const plan =
-      phase === "fight" ? squadFightPlanRef.current : squadShootPlanRef.current;
+    const plan = phase === "fight" ? squadFightPlanRef.current : squadShootPlanRef.current;
     if (!menu || !plan || !menu.activeTargetId) return;
     const tid = menu.activeTargetId;
     void fetchWeaponsForTarget(plan.unitId, tid, modelId).then((weapons) => {
@@ -10316,8 +10305,7 @@ export default function Board({
     const plan = phase === "fight" ? squadFightPlanRef.current : squadShootPlanRef.current;
     if (!plan) return;
     const fig = weaponSelectionMenuRef.current?.selectedFig;
-    const action =
-      count <= 0 ? `squad_${P}_unassign_weapon_qty` : `squad_${P}_assign_weapon_qty`;
+    const action = count <= 0 ? `squad_${P}_unassign_weapon_qty` : `squad_${P}_assign_weapon_qty`;
     const body: Record<string, unknown> = {
       action,
       unitId: String(plan.unitId),

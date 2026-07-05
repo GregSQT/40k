@@ -4,6 +4,7 @@
 > **📍 File Location**: Save as `Documentation/AI_OBSERVATION.md`
 > **Status**: ✅ CANONICAL REFERENCE (March 2026)
 > **Version**: 2.6 - Strategic pool scalars (spec) + Rule-Aware Observation System
+> **⚠️ MàJ 2026-07** : la taille d'observation en vigueur dans le code est **357 floats** (`engine/observation_builder.py` impose `PHASE2_OBS_SIZE = 357`, macro rule-aware `obs[346:357]`). Les mentions de 355 dans ce doc correspondent à l'ancienne config legacy (`..._avant_X10.json`).
 
 ---
 

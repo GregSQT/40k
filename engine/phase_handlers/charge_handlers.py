@@ -15,7 +15,7 @@ from .generic_handlers import end_activation
 from shared.data_validation import require_key, require_present
 from engine.action_log_utils import append_action_log
 from engine.hex_utils import hex_distance as _hex_distance
-from engine.game_utils import add_console_log, safe_print, add_debug_file_log, _write_diagnostic_to_debug_log
+from engine.game_utils import add_console_log, safe_print, add_debug_file_log
 from engine.combat_utils import (
     normalize_coordinates,
     get_unit_by_id,
@@ -138,18 +138,17 @@ def _charge_prepare_footprint_offsets(
     if ez <= 1 or bs == 1:
         cache[uid] = None
         return None
-    try:
-        from engine.hex_utils import precompute_footprint_offsets
+    # Cas métier « pas d'offsets » déjà traité au-dessus (ez <= 1 ou base 1). Ici le calcul
+    # doit aboutir : aucune capture d'exception (BASE_SHAPE/orientation manquants ou erreur de
+    # calcul = bug → laisser remonter, pas de fallback None masquant).
+    from engine.hex_utils import precompute_footprint_offsets
 
-        shape = unit["BASE_SHAPE"]
-        orient = int(require_key(unit, "orientation"))
-        off_e, off_o = precompute_footprint_offsets(shape, bs, orient)
-        out: FootprintOffsetPair = (off_e, off_o)
-        cache[uid] = out
-        return out
-    except Exception:
-        cache[uid] = None
-        return None
+    shape = require_key(unit, "BASE_SHAPE")
+    orient = int(require_key(unit, "orientation"))
+    off_e, off_o = precompute_footprint_offsets(shape, bs, orient)
+    out: FootprintOffsetPair = (off_e, off_o)
+    cache[uid] = out
+    return out
 
 
 def _candidate_footprint_charge(
@@ -184,12 +183,11 @@ def _charge_offsets_for_base(
     if ez <= 1 or base_size == 1:
         cache[key] = None
         return None
-    try:
-        from engine.hex_utils import precompute_footprint_offsets
-        off_e, off_o = precompute_footprint_offsets(shape, cast("int | list[int]", base_size), int(orientation))
-        out: FootprintOffsetPair = (off_e, off_o)
-    except Exception:
-        out = None
+    # Cas métier « pas d'offsets » déjà traité au-dessus (ez <= 1 ou base 1). Ici le calcul doit
+    # aboutir : aucune capture d'exception (erreur de calcul = bug → remonter, pas de fallback None).
+    from engine.hex_utils import precompute_footprint_offsets
+    off_e, off_o = precompute_footprint_offsets(shape, cast("int | list[int]", base_size), int(orientation))
+    out: FootprintOffsetPair = (off_e, off_o)
     cache[key] = out
     return out
 
@@ -2441,11 +2439,9 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str, max_dis
     valid_targets = []
 
     # Build all hexes reachable via BFS within max charge distance (jet en roll-first, sinon 12").
-    try:
-        reachable_hexes = charge_build_valid_destinations_pool(game_state, unit_id, effective_max)
-    except Exception as e:
-        add_console_log(game_state, f"ERROR: BFS failed for unit {unit_id}: {str(e)}")
-        return []
+    # Aucune capture d'exception : un échec BFS est un bug (root cause), pas « pas de cible » —
+    # laisser remonter explicitement (pas de fallback masquant qui renverrait []).
+    reachable_hexes = charge_build_valid_destinations_pool(game_state, unit_id, effective_max)
 
     if not reachable_hexes:
         _bvt_cache[_bvt_key] = []
@@ -2972,25 +2968,15 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
         _hvt_cache[_hvt_key] = False
         return False
 
-    try:
-        # BFS with early exit: any hex in charge_build_valid_destinations_pool already satisfies
-        # engagement + placement rules (same as the old nested loop).
-        valid_any = charge_build_valid_destinations_pool(
-            game_state, unit["id"], CHARGE_MAX_DISTANCE,
-            full_occupied_positions=full_occupied_positions,
-            early_exit_if_valid=True,
-        )
-    except Exception as e:
-        import traceback
-        _write_diagnostic_to_debug_log(f"[HVT BFS EXCEPTION] unit={_uid} error={e!r}\n{traceback.format_exc()}")
-        add_console_log(game_state, f"ERROR: BFS failed for unit {unit['id']}: {str(e)}")
-        if _perf and _t_hvt0 is not None:
-            append_perf_timing_line(
-                f"CHARGE_HAS_VALID_TARGET episode={_ep} turn={_turn} unit_id={_uid} "
-                f"bfs_pool_s={time.perf_counter() - _t_hvt0:.6f} nested_loop_s=0.000000 "
-                f"reachable_n=0 enemy_n=0 outcome=bfs_error"
-            )
-        return False
+    # BFS with early exit: any hex in charge_build_valid_destinations_pool already satisfies
+    # engagement + placement rules (same as the old nested loop). Aucune capture d'exception :
+    # un échec BFS est un bug (root cause), pas un « pas de cible » — laisser l'erreur remonter
+    # explicitement (pas de fallback anti-erreur ni de valeur par défaut masquante).
+    valid_any = charge_build_valid_destinations_pool(
+        game_state, unit["id"], CHARGE_MAX_DISTANCE,
+        full_occupied_positions=full_occupied_positions,
+        early_exit_if_valid=True,
+    )
 
     _t_after_bfs_pool = time.perf_counter() if _perf else None
 

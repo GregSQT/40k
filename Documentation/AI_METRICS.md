@@ -4,6 +4,7 @@
 > **📍 Purpose**: Deep dive into metrics-driven training optimization for W40K tactical AI
 >
 > **Status**: January 2025 - Expert optimization guide (Updated: Corrected metric namespaces to match actual code)
+> **⚠️ MàJ 2026-07** : namespaces (`bot_eval/`, `0_critical/`, `vs_random/greedy/defensive/combined`) confirmés dans `ai/metrics_tracker.py`. Le code évalue désormais **7 bots** (`metrics_tracker.py`) alors que ce doc n'en décrit que 3 — le reste du contenu reste exact.
 >
 > **Companion Document**: [AI_TRAINING.md](AI_TRAINING.md) - Configuration and setup
 >

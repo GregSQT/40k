@@ -1,0 +1,17 @@
+{
+  "_comment": "Validation convergence melee (FIGHT_RESOLVER_CONVERGENCE.md 7.2) : cible = unite ATTACHEE heterogene. Bodyguard Intercessor (T4/Sv3/Inv7) + CaptainTerminator attache (T5/Sv2/Inv4, role leader). Verifie wound vs plus haute T bodyguard=T4 (19.02) et save par figurine allouee. Positions espacees (grandes bases Terminator) : la validation par intent injecte n'exige pas l'engagement geometrique.",
+  "primary_objectives": ["objectives_control"],
+  "wall_ref": "walls-none.json",
+  "units": [
+    { "id": 1, "unit_type": "AssaultIntercessor", "player": 1, "col": 4, "row": 10 },
+    { "id": 101, "unit_type": "Intercessor", "player": 2, "col": 12, "row": 10 },
+    {
+      "id": 102,
+      "unit_type": "CaptainTerminatorRelicWeaponBolter",
+      "player": 2,
+      "attached_squad": 101,
+      "col": 20,
+      "row": 4
+    }
+  ]
+}

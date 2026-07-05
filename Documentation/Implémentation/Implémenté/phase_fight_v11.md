@@ -1,6 +1,6 @@
 # Plan de migration — Phase Fight V10 → V11 (révisé + durci)
 
-> **Statut** : plan révisé après revue expert (code + PDF relus) puis durci (4 points), implémentation non démarrée.
+> **Statut** : ✅ IMPLÉMENTÉ (2026-07, vérifié code). La phase Fight V11 est entièrement codée dans `engine/phase_handlers/fight_handlers.py` (`is_fights_first`, `fight_v11_is_overrun_eligible`, `pile_in_target_range`, cascade 3 modes de conso). Le texte ci-dessous est le plan d'origine conservé comme référence de conception ; le header « non démarrée » d'origine est périmé.
 > Ce fichier est le **plan de référence** ; il intègre les corrections de la revue (ex-`phase_fight_v11_v2.md`, désormais redondant)
 > et les 4 durcissements : pool de consolidation dynamique (décision #9), critères de validation par bloc explicites,
 > portée objectif à chiffrer (PDF 14), périmètre exact de la vérification « Fights Last ».

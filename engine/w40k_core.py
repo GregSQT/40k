@@ -4336,7 +4336,6 @@ class W40KEngine(gym.Env):
             squad_union_weapons,
             squad_weapon_valid_targets,
             squad_lock_shoot,
-            resolve_squad_shoot,
             build_manual_shoot_allocation,
             apply_manual_shoot_allocation,
             apply_manual_shoot_declare_order,
@@ -4664,8 +4663,15 @@ class W40KEngine(gym.Env):
                 if alloc_result.get("waiting_for_player"):
                     return True, alloc_result
                 return True, self._finish_manual_shoot_after_allocation(squad_id, alloc_result)
-            # Defenseur IA : allocation auto (chemin inchange).
-            shoot_result = resolve_squad_shoot(self.game_state, squad_id)
+            # Defenseur IA : convergence §8 -> moteur d allocation par-figurine
+            # (groupes 05.03/05.04, T bodyguard 19.02, save par-fig). auto_decider headless.
+            _shoot_alloc = build_manual_shoot_allocation(self.game_state, squad_id)
+            if not _shoot_alloc.get("done"):
+                raise RuntimeError(
+                    f"squad_shoot_validate: allocation tir non terminee en auto pour squad "
+                    f"{squad_id} (defenseur non-IA ?) — action={_shoot_alloc.get('action')}"
+                )
+            shoot_result = _shoot_alloc["shoot_result"]
             end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
             if self.game_state.get("active_shooting_unit") == squad_id:
                 del self.game_state["active_shooting_unit"]
@@ -4725,11 +4731,10 @@ class W40KEngine(gym.Env):
             squad_shooting_unit_activation_start,
             squad_declare_shoot,
             squad_lock_shoot,
-            resolve_squad_shoot,
+            build_manual_shoot_allocation,
             squad_fight_unit_activation_start,
             fight_pile_in_plan,
             squad_declare_fight,
-            resolve_squad_fight,
             squad_consolidate_plan,
             commit_move,
             charge_build_valid_plan,
@@ -4901,7 +4906,16 @@ class W40KEngine(gym.Env):
             squad_shooting_unit_activation_start(self.game_state, squad_id)
             squad_declare_shoot(self.game_state, squad_id, target_squad_id, eligible_slots)
             squad_lock_shoot(self.game_state, squad_id)
-            shoot_result = resolve_squad_shoot(self.game_state, squad_id)
+            # Convergence §8 : resolution tir via le moteur d allocation par-figurine
+            # (groupes 05.03/05.04, T bodyguard 19.02, save par-fig). Defenseur IA garanti
+            # en gym/auto -> auto_decider headless -> resolution complete (done).
+            _shoot_alloc = build_manual_shoot_allocation(self.game_state, squad_id)
+            if not _shoot_alloc.get("done"):
+                raise RuntimeError(
+                    f"squad_shoot: allocation tir non terminee en auto pour squad {squad_id} "
+                    f"(defenseur non-IA ?) — action={_shoot_alloc.get('action')}"
+                )
+            shoot_result = _shoot_alloc["shoot_result"]
 
             unit = get_unit_by_id(squad_id, self.game_state)
             if unit is None:
@@ -4979,7 +4993,17 @@ class W40KEngine(gym.Env):
 
             squad_fight_unit_activation_start(self.game_state, squad_id)
             squad_declare_fight(self.game_state, squad_id, best_target_id)
-            fight_result = resolve_squad_fight(self.game_state, squad_id)
+            # Convergence §9.4b-1 : resolution combat via le moteur d allocation par-figurine
+            # (groupes 05.03/05.04, T bodyguard 19.02, save par-fig allouee). Defenseur IA
+            # garanti en training -> auto_decider headless -> resolution complete (done).
+            from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
+            _fight_alloc = build_manual_fight_allocation(self.game_state, squad_id)
+            if not _fight_alloc.get("done"):
+                raise RuntimeError(
+                    f"squad_fight: allocation combat non terminee en auto pour squad {squad_id} "
+                    f"(defenseur non-IA ?) — action={_fight_alloc.get('action')}"
+                )
+            fight_result = _fight_alloc["shoot_result"]
 
             consolidation = squad_consolidate_plan(self.game_state, squad_id)
             if consolidation is not None:

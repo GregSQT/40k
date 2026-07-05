@@ -1,5 +1,7 @@
 # Self-Play PPO V3: version definitive (progressive, stable, mesurable)
 
+> **⚠️ MàJ 2026-07 (vérifié code)** : implémenté partiellement dans `ai/training_utils.py` + `ai/env_wrappers.py` (`SelfPlayWrapper`) — ratio progressif (`self_play_ratio_start/end`), snapshot unique + refresh (`snapshot_model_path`, `snapshot_refresh_episodes`), bot floor via ratio. Le **pool multi-snapshots** et les **stages/gating go-no-go** complets de cette spec V3 ne sont pas tous en place.
+
 ## Objectif
 
 Definir une strategie self-play **definitive** pour PPO qui maximise la probabilite de bons resultats d'entrainement sur ce projet:

@@ -174,7 +174,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
 
 **Purpose**: Configure PPO training parameters for AI agents.
 
-**Example**: `/config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/SpaceMarine_Infantry_Troop_RangedSwarm_training_config.json`
+**Example**: `/config/agents/CoreAgent/CoreAgent_training_config.json` (rewards : `/config/agents/CoreAgent/CoreAgent_rewards_config.json`)
 
 ### Key Fields
 
@@ -192,9 +192,9 @@ See training config files for complete field list.
 
 ## Scenario Files
 
-**Location**: `/config/scenarios/{scenario_name}.json`
+**Location**: `/config/scenario_{scenario_name}.json` (racine de `config/`, ex. `config/scenario_pvp_squad5.json`, `config/scenario_endless_duty.json`)
 
-**Purpose**: Define game scenarios with unit placements, objectives, and terrain.
+**Purpose**: Define game scenarios with unit placements, objectives, and terrain. Les scénarios référencent les rosters via `agent_roster_ref` / `opponent_roster_ref`.
 
 **Status**: To be documented
 

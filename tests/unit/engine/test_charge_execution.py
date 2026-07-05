@@ -227,8 +227,9 @@ class TestHasValidChargeTarget:
         gs["gym_training_mode"] = True
         assert _has_valid_charge_target(gs, units[0]) is False
 
-    def test_bfs_exception_returns_false(self, monkeypatch):
-        """charge_target_err (gym/hex) : exception dans BFS → False (résilience)."""
+    def test_bfs_exception_propagates(self, monkeypatch):
+        """charge_target_err (gym/hex) : exception dans BFS → propagée (root cause explicite,
+        pas de fallback masquant qui renverrait False)."""
         def raise_err(*args, **kwargs):
             raise RuntimeError("BFS failure")
 
@@ -239,7 +240,8 @@ class TestHasValidChargeTarget:
         units = [_unit(1, 1, 5, 10), _unit(2, 2, 8, 10)]
         gs = _make_gs(units)
         gs["gym_training_mode"] = True
-        assert _has_valid_charge_target(gs, units[0]) is False
+        with pytest.raises(RuntimeError, match="BFS failure"):
+            _has_valid_charge_target(gs, units[0])
 
 
 # ─────────────────────────────────────────────────────────────────────────────

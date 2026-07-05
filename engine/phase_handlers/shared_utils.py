@@ -72,6 +72,25 @@ class ManualAllocCtx:
     resolve_wound_fn: Optional[Callable[..., None]] = None
     # Emission des logs en fin d allocation (defaut tir : _emit_squad_shoot_log par groupe).
     finalize_log_fn: Optional[Callable[..., None]] = None
+    # Decideur auto (defenseur non-humain) : si fourni et renvoie True pour la cible du lot,
+    # le moteur tranche lui-meme l ordre des groupes (05.04) et le choix de figurine au lieu
+    # de rendre la main (headless). None = toujours manuel (comportement tir historique).
+    auto_decider: Optional[Callable[[Dict[str, Any], str], bool]] = None
+
+
+def _target_defender_is_ai(game_state: Dict[str, Any], target_sid: str) -> bool:
+    """Decideur auto generique du moteur d allocation : True si le proprietaire de la
+    cible est controle par l IA -> le moteur tranche ordre + choix de figurine sans rendre
+    la main (headless). Aucun repli silencieux : cible ou player_types manquant = bug -> erreur."""
+    player_types = require_key(game_state, "player_types")
+    units_cache = require_key(game_state, "units_cache")
+    sid = str(target_sid)
+    if sid not in units_cache:
+        raise KeyError(f"_target_defender_is_ai: cible {sid!r} absente de units_cache")
+    player = str(require_key(units_cache[sid], "player"))
+    if player not in player_types:
+        raise KeyError(f"_target_defender_is_ai: player {player!r} absent de player_types")
+    return player_types[player] == "ai"
 
 
 SHOOT_CTX = ManualAllocCtx(
@@ -83,6 +102,7 @@ SHOOT_CTX = ManualAllocCtx(
     log_verb="SHOT",
     attacks_left_attr="SHOOT_LEFT",
     intents_key="pending_squad_shoot_intents",
+    auto_decider=_target_defender_is_ai,
 )
 
 
@@ -5337,52 +5357,6 @@ def _select_allocation_model(
     return min(enumerate(alive), key=_key)[1]
 
 
-def _allocate_damage_to_squad(
-    game_state: Dict[str, Any], target_squad_id: str, damage: int,
-    dist_cache: Optional[Dict[str, int]] = None,
-) -> Optional[Dict[str, Any]]:
-    """Applique `damage` HP a une figurine vivante du squad selon allocation prioritaire.
-
-    Selection de la figurine deleguee a `_select_allocation_model` (point unique de
-    variation : heuristique aujourd hui ; choix humain en A3 ; agent RL en B).
-    `dist_cache` (optionnel) = distances pre-calculees fig->ennemi le plus proche,
-    evite de les recalculer a chaque allocation d une meme salve.
-    Damage excess (> HP_CUR du modele) perdu — pas de carry-over.
-    Si le modele est tue → destroy_model(reason='combat').
-    Sinon → update_model_hp.
-
-    Returns {model_id, damage_dealt, destroyed} ou None si pas de cible vivante.
-    """
-    models_cache = require_key(game_state, "models_cache")
-    squad_models = require_key(game_state, "squad_models")
-    alive = [m for m in squad_models.get(target_squad_id, []) if m in models_cache]  # get allowed
-    if not alive:
-        return None
-    target_mid = _select_allocation_model(game_state, target_squad_id, alive, dist_cache)
-    m = models_cache[target_mid]
-    hp_before = int(m["HP_CUR"])
-    target_points_per_hp = float(require_key(m, "points_per_hp"))
-    target_player = int(require_key(m, "player"))
-    target_unit_type = m.get("unitType")
-    target_col = m.get("col")
-    target_row = m.get("row")
-    damage_dealt = min(int(damage), hp_before)
-    new_hp = hp_before - damage_dealt
-    destroyed = False
-    if new_hp <= 0:
-        destroy_model(game_state, target_mid, reason="combat")
-        destroyed = True
-    else:
-        update_model_hp(game_state, target_mid, new_hp)
-    return {
-        "model_id": target_mid, "damage_dealt": damage_dealt, "destroyed": destroyed,
-        "points_per_hp": target_points_per_hp, "target_player": target_player,
-        "unitType": target_unit_type,
-        "col": target_col,
-        "row": target_row,
-    }
-
-
 def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: ManualAllocCtx) -> None:
     """Emet 1 action_log de tir pour un groupe (arme, cible).
 
@@ -5447,71 +5421,6 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
     })
 
 
-def _roll_squad_shot_sequence(
-    n_attacks: int, bs: int, wth: int, save_th: int,
-    dmg_raw: Any, attacker_mid: str,
-) -> Dict[str, Any]:
-    """Resout les jets (hit/wound/save/dmg) de `n_attacks` attaques contre une cible
-    homogene aux seuils figes (bs, wth, save_th).
-
-    Brique RNG partagee entre l allocation auto (resolve_squad_shoot) et l allocation
-    manuelle (defenseur humain). Ordre de tirage : hit -> wound -> save -> dmg par
-    attaque, identique a l implementation inline d origine (iso-RNG).
-
-    Ne mute aucun etat de jeu : retourne les records d affichage + le pool de degats
-    a allouer. L allocation (mutation des figurines) est faite par l appelant.
-
-    Returns {
-      "shot_records": [...],            # 1 record par attaque (pour shootDetails)
-      "pending_damages": [{dmg, rec}],  # saves rates avec degats > 0, dans l ordre
-      "counts": {attacks, hits, wounds, failed_saves},
-    }
-    """
-    import random
-    shot_records: List[Dict[str, Any]] = []
-    pending_damages: List[Dict[str, Any]] = []
-    attacks = 0
-    hits = 0
-    wounds = 0
-    failed_saves = 0
-    for _ in range(n_attacks):
-        attacks += 1
-        # 1. Hit roll
-        hit_roll = random.randint(1, 6)
-        if hit_roll == 1 or hit_roll < bs:
-            shot_records.append({"attackRoll": hit_roll, "hitResult": "MISS", "hitTarget": bs})
-            continue
-        hits += 1
-        # 2. Wound roll
-        wound_roll = random.randint(1, 6)
-        if wound_roll == 1 or wound_roll < wth:
-            shot_records.append({"attackRoll": hit_roll, "hitResult": "HIT", "hitTarget": bs, "strengthRoll": wound_roll, "strengthResult": "FAILED", "woundTarget": wth})
-            continue
-        wounds += 1
-        # 3. Save roll
-        save_roll = random.randint(1, 6)
-        if save_roll != 1 and save_roll >= save_th:
-            shot_records.append({"attackRoll": hit_roll, "hitResult": "HIT", "hitTarget": bs, "strengthRoll": wound_roll, "strengthResult": "SUCCESS", "woundTarget": wth, "saveRoll": save_roll, "saveTarget": save_th, "saveSuccess": True, "damageDealt": 0})
-            continue  # save reussi
-        failed_saves += 1
-        # 4. Damage roll (applique a l allocation)
-        try:
-            dmg = resolve_dice_value(cast(DiceValue, dmg_raw), f"squad_shoot_dmg_{attacker_mid}")
-        except Exception:
-            dmg = int(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1
-        # Record cree dans l ordre ; damageDealt/targetDied completes a l allocation (mutation).
-        rec = {"attackRoll": hit_roll, "hitResult": "HIT", "hitTarget": bs, "strengthRoll": wound_roll, "strengthResult": "SUCCESS", "woundTarget": wth, "saveRoll": save_roll, "saveTarget": save_th, "saveSuccess": False, "damageDealt": 0}
-        shot_records.append(rec)
-        if dmg <= 0:
-            continue
-        pending_damages.append({"dmg": dmg, "rec": rec})
-    return {
-        "shot_records": shot_records,
-        "pending_damages": pending_damages,
-        "counts": {"attacks": attacks, "hits": hits, "wounds": wounds, "failed_saves": failed_saves},
-    }
-
-
 def _cover_worsened_bs(
     game_state: Dict[str, Any], attacker: Dict[str, Any], target_sid: str, bs: int,
 ) -> Tuple[int, bool]:
@@ -5540,307 +5449,28 @@ def _cover_worsened_bs(
     return min(bs + 1, 6), True
 
 
-def _resolve_shoot_intent_pass1(
-    game_state: Dict[str, Any], intent: Dict[str, Any],
-    targets_meta: Dict[str, Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
-    """Setup + jets (PASSE 1) d un intent de tir, sans allouer les degats.
-
-    Partage entre l allocation auto (resolve_squad_shoot) et l allocation manuelle
-    (defenseur humain) : selection arme, n_attacks (+BLAST), seuils figes sur la 1ere
-    fig vivante, puis jets via _roll_squad_shot_sequence (ordre RNG inchange).
-
-    Peuple `targets_meta` (effet de bord partage, au meme moment que l original :
-    apres validation de la cible, avant la selection d arme). Retourne None si l intent
-    est a ignorer (fig attaquante morte, cible wipe, arme invalide, n_attacks<=0).
-
-    Returns {attacker_mid, attacker, target_sid, weapon_name, bs, display_wth,
-             display_save_th, shot_records, pending_damages, counts} ou None.
-    """
-    models_cache = require_key(game_state, "models_cache")
-    attacker_mid = intent["model_id"]
-    attacker = models_cache.get(attacker_mid)
-    if attacker is None:
-        return None  # fig morte mid-resolution
-    target_sid = str(intent["target_unit_id"])
-    if target_sid not in game_state.get("squad_models", {}):  # get allowed
-        return None  # cible deja wipe
-    if target_sid not in targets_meta:
-        _tgt_uc = require_key(game_state, "units_cache")[target_sid]
-        _tgt_sc = require_key(game_state, "squad_cache")[target_sid]
-        targets_meta[target_sid] = {
-            "value": float(require_key(_tgt_uc, "VALUE")),
-            "model_count_at_start": int(require_key(_tgt_sc, "model_count_at_start")),
-            "player": int(require_key(_tgt_uc, "player")),
-        }
-    weapon_index = int(intent.get("weapon_index", 0))  # get allowed
-    weapons = attacker.get("RNG_WEAPONS", [])  # get allowed
-    if not (0 <= weapon_index < len(weapons)):
-        return None
-    weapon = weapons[weapon_index]
-    if not isinstance(weapon, dict):
-        return None
-    # F3 fix (audit) : lire n_attacks_resolved depuis l intent (resolu a la
-    # declaration). Re-roll de NB si absent (compat legacy intents).
-    if "n_attacks_resolved" in intent:
-        n_attacks = int(intent["n_attacks_resolved"])
-    else:
-        nb_raw = weapon.get("NB", 1)
-        try:
-            n_attacks = resolve_dice_value(nb_raw, f"squad_shoot_attacks_{attacker_mid}")
-        except Exception:
-            n_attacks = int(nb_raw) if isinstance(nb_raw, (int, float)) else 1
-    if _has_blast_keyword(weapon):
-        tgt_size = int(intent.get("target_squad_size_at_declaration", 0))  # get allowed
-        n_attacks += tgt_size // 5
-    if n_attacks <= 0:
-        return None
-    # Convention moteur (cf. shooting_handlers.py:3010-3011, 6683, 6748) :
-    # weapon["ATK"] = seuil hit (BS/WS), weapon["STR"] = force, weapon["AP"] = AP modifier
-    bs_base = int(weapon.get("ATK", weapon.get("BS", 4)))
-    bs, cover = _cover_worsened_bs(game_state, attacker, target_sid, bs_base)
-    strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))
-    ap = int(weapon.get("AP", 0))  # get allowed
-    dmg_raw = weapon.get("DMG", 1)
-    wound_th_lookup: Dict[int, int] = {}  # cache wound threshold by T
-
-    # Pré-calcul des seuils pour l'affichage (Hit/Wound/Save)
-    _pre_alive = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
-    display_wth = 0
-    display_save_th = 0
-    if _pre_alive:
-        _pre_tgt = models_cache[_pre_alive[0]]
-        display_wth = wound_threshold(strength, int(_pre_tgt["T"]))
-        display_save_th = save_threshold(int(_pre_tgt["ARMOR_SAVE"]), int(_pre_tgt.get("INVUL_SAVE", 7)), ap)
-
-    # Seuils figes sur la 1ere fig vivante au debut de la salve (homogene : invariant
-    # par fig ; hetereogene/persos = etape ulterieure avec groupes d allocation).
-    _alive0 = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
-    wth = 0
-    save_th = 0
-    if _alive0 and attacker_mid in models_cache:
-        first_alive = models_cache[_alive0[0]]
-        t_target = int(first_alive["T"])
-        wth = wound_th_lookup.get(t_target)
-        if wth is None:
-            wth = wound_threshold(strength, t_target)
-            wound_th_lookup[t_target] = wth
-        sv = int(first_alive["ARMOR_SAVE"])
-        invul = int(first_alive.get("INVUL_SAVE", 7))
-        save_th = save_threshold(sv, invul, ap)
-        n_attacks_pass1 = int(n_attacks)
-    else:
-        n_attacks_pass1 = 0  # cible deja wipe (ou attaquant absent) -> aucun tir resolu
-
-    # PASSE 1 (jets) : brique RNG partagee (cf. _roll_squad_shot_sequence).
-    _roll = _roll_squad_shot_sequence(n_attacks_pass1, bs, wth, save_th, dmg_raw, attacker_mid)
-    weapon_name = weapon.get("display_name", weapon.get("NAME", weapon.get("name", "")))
-    return {
-        "attacker_mid": attacker_mid,
-        "attacker": attacker,
-        "target_sid": target_sid,
-        "weapon_name": weapon_name,
-        "bs": bs,
-        "bs_base": bs_base,
-        "cover": cover,
-        "display_wth": display_wth,
-        "display_save_th": display_save_th,
-        "shot_records": _roll["shot_records"],
-        "pending_damages": _roll["pending_damages"],
-        "counts": _roll["counts"],
-    }
-
-
-def resolve_squad_shoot(
-    game_state: Dict[str, Any], attacker_squad_id: str
-) -> Dict[str, Any]:
-    """Resout toutes les declarations de pending_squad_shoot_intents[attacker_squad_id].
-
-    Sequence par attaque :
-      1. Hit roll (1D6 vs BS de l attaquant)
-      2. Wound roll (table S vs T)
-      3. Save roll (best of Sv+AP vs Invul)
-      4. Damage : allocation prioritaire, excess perdu
-
-    BLAST bonus : si l arme a keyword BLAST, +1 attaque par tranche de 5 figs
-    dans la taille cible AU MOMENT DE LA DECLARATION (capture dans l intent).
-
-    Fig attaquante morte mid-resolution : ses attaques restantes (et celles
-    declarees mais non encore resolues) sont annulees — l intent est skip si
-    le modele attaquant n existe plus dans models_cache.
-    Fig cible morte mid-resolution : pas de carry-over, allocation_prioritaire
-    sur prochaine vivante de la cible.
-
-    Nettoie pending_squad_shoot_intents[attacker_squad_id] en fin (succes OU echec).
-
-    Returns un summary dict pour log/debug.
-    """
-    init_pending_intents(game_state)
-    models_cache = require_key(game_state, "models_cache")
-    intents = list(game_state["pending_squad_shoot_intents"].get(attacker_squad_id, []))  # get allowed
-    summary: Dict[str, Any] = {
-        "attacks_made": 0,
-        "hits": 0,
-        "wounds": 0,
-        "failed_saves": 0,
-        "damage_total": 0,
-        "models_killed": 0,
-        "events": [],
-    }
-    targets_meta: Dict[str, Dict[str, Any]] = {}
-    # Accumulation par (weapon_name, target_sid) pour émettre 1 log par arme par escouade
-    weapon_groups: Dict[tuple, Dict[str, Any]] = {}
-    # Cache distances fig->ennemi par cible (A2a) : positions fixes pendant la salve.
-    dist_cache_by_target: Dict[str, Dict[str, int]] = {}
-    for intent in intents:
-        p1 = _resolve_shoot_intent_pass1(game_state, intent, targets_meta)
-        if p1 is None:
-            continue
-        attacker_mid = p1["attacker_mid"]
-        attacker = p1["attacker"]
-        target_sid = p1["target_sid"]
-        intent_shot_records = p1["shot_records"]
-        pending_damages = p1["pending_damages"]
-        _counts = p1["counts"]
-        summary["attacks_made"] += _counts["attacks"]
-        summary["hits"] += _counts["hits"]
-        summary["wounds"] += _counts["wounds"]
-        summary["failed_saves"] += _counts["failed_saves"]
-        intent_attacks = _counts["attacks"]
-        intent_damage = 0
-        intent_kills = 0
-        killed_model_ids: List[str] = []
-
-        # PASSE 2 (application) : alloue chaque paquet de degats fig par fig (deterministe,
-        # aucun RNG). Excess perdu par figurine ; tirs restants perdus si cible wipe.
-        # Distances fig->ennemi pre-calculees une fois par cible (positions fixes ici).
-        _dist_cache = None
-        if pending_damages:
-            if target_sid not in dist_cache_by_target:
-                dist_cache_by_target[target_sid] = _precompute_nearest_enemy_dist(game_state, target_sid)
-            _dist_cache = dist_cache_by_target[target_sid]
-        for pd in pending_damages:
-            target_alive = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
-            if not target_alive:
-                break  # overkill : tirs restants sans cible -> perdus
-            res = _allocate_damage_to_squad(game_state, target_sid, pd["dmg"], _dist_cache)
-            if res is None:
-                break
-            summary["damage_total"] += int(res["damage_dealt"])
-            intent_damage += int(res["damage_dealt"])
-            if res["destroyed"]:
-                summary["models_killed"] += 1
-                intent_kills += 1
-                killed_model_ids.append(str(res["model_id"]))
-            summary["events"].append({
-                "attacker": attacker_mid, "target": res["model_id"],
-                "target_squad_id": target_sid,
-                "target_player": int(res["target_player"]),
-                "points_per_hp": float(res["points_per_hp"]),
-                "damage": int(res["damage_dealt"]), "destroyed": bool(res["destroyed"]),
-            })
-            pd["rec"]["damageDealt"] = int(res["damage_dealt"])
-            pd["rec"]["targetDied"] = bool(res["destroyed"])
-            pd["rec"]["targetUnitType"] = res.get("unitType")
-            pd["rec"]["targetCol"] = res.get("col")
-            pd["rec"]["targetRow"] = res.get("row")
-        # Overkill reel : si l escouade cible est ENTIEREMENT detruite par cette salve,
-        # les tirs au-dela du dernier kill n avaient plus de cible -> marques wasted.
-        # (Si une figurine survit, aucun tir n est wasted : tout a ete tire sur la cible.)
-        target_still_alive = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
-        if not target_still_alive:
-            last_kill_pos = -1
-            for _i, _r in enumerate(intent_shot_records):
-                if _r.get("targetDied"):
-                    last_kill_pos = _i
-            for _r in intent_shot_records[last_kill_pos + 1:]:
-                _r["wasted"] = True
-        # Apres toutes les attaques de cet intent, decrement SHOOT_LEFT du modele attaquant
-        if attacker_mid in models_cache:
-            sl = int(models_cache[attacker_mid].get("SHOOT_LEFT", 0))  # get allowed
-            models_cache[attacker_mid]["SHOOT_LEFT"] = max(0, sl - 1)
-
-        # Accumulation par groupe (weapon, target) — log émis après la boucle
-        if intent_attacks > 0:
-            weapon_name = p1["weapon_name"]
-            group_key = (weapon_name, target_sid)
-            if group_key not in weapon_groups:
-                weapon_groups[group_key] = {
-                    "attacker_squad_id": str(attacker.get("squad_id", attacker_mid)),
-                    "weapon_name": weapon_name,
-                    "target_sid": target_sid,
-                    "bs": p1["bs"],
-                    "bs_base": p1["bs_base"],
-                    "cover": p1["cover"],
-                    "display_wth": p1["display_wth"],
-                    "display_save_th": p1["display_save_th"],
-                    "player": int(attacker.get("player", 0)),  # get allowed
-                    "attacks": 0,
-                    "damage": 0,
-                    "kills": 0,
-                    "killed_model_ids": [],
-                    "shots": [],
-                }
-            g = weapon_groups[group_key]
-            g["attacks"] += intent_attacks
-            g["damage"] += intent_damage
-            g["kills"] += intent_kills
-            g["killed_model_ids"].extend(killed_model_ids)
-            g["shots"].extend(intent_shot_records)
-
-    # Emit 1 log par groupe (weapon, target) pour toute l'escouade
-    for g in weapon_groups.values():
-        _emit_squad_shoot_log(game_state, g, SHOOT_CTX)
-
-    # Meta cibles + escouades wipe (pour reward shaping proportionnel)
-    summary["targets_meta"] = targets_meta
-    summary["squads_wiped"] = [
-        sid for sid in targets_meta
-        if not [m for m in game_state["squad_models"].get(sid, []) if m in models_cache]  # get allowed
-    ]
-    # Nettoyage atomique
-    clear_pending_shoot_intent(game_state, attacker_squad_id)
-    return summary
-
-
-# ============================================================================
-# SQUAD SHOOT — allocation MANUELLE des pertes (defenseur humain) — 100% regles
-# ============================================================================
-# Resolveur INDEPENDANT du chemin auto (resolve_squad_shoot reste inchange, iso-RNG
-# de l IA preserve). Conforme aux regles 40k 05.03 / 05.04 :
-#   - jet de blessure vs T MAJORITAIRE de la cible (la plus haute si egalite) ;
-#   - sauvegarde comparee au seuil de la fig REELLEMENT allouee (Sv/InSv + AP arme),
-#     donc le save_roll est tire en amont mais COMPARE a l allocation ;
-#   - degats tires UNIQUEMENT si la save echoue, appliques a la fig allouee ;
-#   - groupes d allocation (1 par CHARACTER, 1 par triplet W/Sv/InSv) + ordre declare
-#     par le defenseur ; CHARACTER inattaquable tant qu un non-CHARACTER vit.
-# Consequence assumee : la sequence de tirages differe de resolve_squad_shoot (saves
-# non pre-decidees, degats differes) -> plus d egalite manuel==auto, meme en homogene.
-
-
 def _is_character_role(role: Optional[str]) -> bool:
     """CHARACTER au sens allocation 40k = role support/leader (cf. ROLE_TIER)."""
     return role in ("support", "leader")
 
 
-def _target_majority_toughness(game_state: Dict[str, Any], target_sid: str) -> int:
-    """T majoritaire des figs vivantes de la cible (la plus haute en cas d egalite).
+def _target_highest_bodyguard_toughness(game_state: Dict[str, Any], target_sid: str) -> int:
+    """T utilisee pour le jet de blessure contre l unite cible (regle 19.02).
 
-    Regle 40k : le jet de blessure utilise la Endurance de la majorite des figurines
-    de l unite ciblee. Leve si la cible n a aucune figurine vivante."""
+    Regle V11 (19.02 Attacking attached units) : si l unite contient une ou plusieurs
+    figurines bodyguard, utiliser la PLUS HAUTE T des bodyguards (jamais celle du
+    leader/support, meme si l attaque lui est ensuite allouee). Si l unite ne contient
+    que des figurines leader/support, utiliser la plus haute T de celles-ci.
+    Bodyguard = figurine non-CHARACTER au sens allocation (cf. _is_character_role).
+    Leve si la cible n a aucune figurine vivante."""
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     alive = [m for m in squad_models.get(target_sid, []) if m in models_cache]  # get allowed
     if not alive:
-        raise ValueError(f"Cible {target_sid} sans figurine vivante pour T majoritaire")
-    counts: Dict[int, int] = {}
-    for m in alive:
-        t = int(models_cache[m]["T"])
-        if t not in counts:
-            counts[t] = 0
-        counts[t] += 1
-    max_count = max(counts.values())
-    return max(t for t, c in counts.items() if c == max_count)
+        raise ValueError(f"Cible {target_sid} sans figurine vivante pour T (19.02)")
+    bodyguard = [m for m in alive if not _is_character_role(models_cache[m].get("role"))]
+    pool = bodyguard if bodyguard else alive
+    return max(int(models_cache[m]["T"]) for m in pool)
 
 
 def _build_alloc_groups(game_state: Dict[str, Any], target_sid: str) -> List[Dict[str, Any]]:
@@ -6006,8 +5636,8 @@ def _manual_roll_intent(
     alive0 = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
     if not alive0:
         return None
-    # Conforme : seuil de blessure vs T MAJORITAIRE (depend de l arme via strength).
-    wth = wound_threshold(strength, _target_majority_toughness(game_state, target_sid))
+    # Conforme 19.02 : seuil de blessure vs plus haute T bodyguard (depend de l arme via strength).
+    wth = wound_threshold(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
     first_alive = models_cache[alive0[0]]
     display_wth = wth
     display_save_th = save_threshold(int(first_alive["ARMOR_SAVE"]), int(first_alive.get("INVUL_SAVE", 7)), ap)
@@ -6172,6 +5802,31 @@ def _mark_manual_overkill_wasted(batch: Dict[str, Any]) -> None:
     batch["pool_index"] = len(batch["pool"])
 
 
+def _auto_declared_order(
+    game_state: Dict[str, Any], live_groups: List[Dict[str, Any]]
+) -> List[int]:
+    """Ordre d allocation automatique (defenseur non-humain), conforme 05.04 :
+       1. groupes non-CHARACTER avec une figurine blessee ;
+       2. groupes non-CHARACTER sains ;
+       3. groupes CHARACTER blesses ;
+       4. groupes CHARACTER sains.
+    Sous-ordre deterministe par group_id. Reproduit l intention defensive de
+    _select_allocation_model (characters exposes en dernier, blesses finis d abord)."""
+    models_cache = require_key(game_state, "models_cache")
+
+    def _wounded(g: Dict[str, Any]) -> bool:
+        return any(
+            m in models_cache and int(models_cache[m]["HP_CUR"]) < int(models_cache[m]["HP_MAX"])
+            for m in g["model_ids"]
+        )
+
+    def _rank(g: Dict[str, Any]) -> tuple:
+        # character en dernier ; a categorie egale, blesse avant sain ; puis group_id.
+        return (bool(g["is_character"]), not _wounded(g), int(g["group_id"]))
+
+    return [g["group_id"] for g in sorted(live_groups, key=_rank)]
+
+
 def _finalize_manual_allocation(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> Dict[str, Any]:
     """Emet les logs (apres allocation complete) + nettoie l etat. Retourne le summary."""
     alloc = require_key(game_state, ctx.alloc_key)
@@ -6233,9 +5888,14 @@ def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> 
         if batch["declared_order"] is None:
             live_groups = [g for g in batch["alloc_groups"] if _group_alive(game_state, g)]
             if len(live_groups) >= 2:
-                return _declare_order_payload(game_state, batch, live_groups, ctx)
-            batch["declared_order"] = [g["group_id"] for g in live_groups]  # ordre implicite
-            batch["current_group_index"] = 0
+                if ctx.auto_decider is not None and ctx.auto_decider(game_state, batch["target_sid"]):
+                    batch["declared_order"] = _auto_declared_order(game_state, live_groups)
+                    batch["current_group_index"] = 0
+                else:
+                    return _declare_order_payload(game_state, batch, live_groups, ctx)
+            else:
+                batch["declared_order"] = [g["group_id"] for g in live_groups]  # ordre implicite
+                batch["current_group_index"] = 0
         # 3. Allocation groupe par groupe (du lot).
         advanced_batch = False
         while True:
@@ -6258,6 +5918,9 @@ def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> 
                 ]
                 if wounded:
                     batch["current_model_id"] = wounded[0]  # regle : finir une fig entamee
+                elif ctx.auto_decider is not None and ctx.auto_decider(game_state, batch["target_sid"]):
+                    batch["current_model_id"] = _select_allocation_model(
+                        game_state, batch["target_sid"], alive_grp)
                 else:
                     return _manual_waiting_payload(game_state, batch, alive_grp, ctx)  # choix libre
             (ctx.resolve_wound_fn or _resolve_one_manual_wound)(game_state, alloc, batch, ctx)
@@ -7049,122 +6712,6 @@ def squad_declare_fight(
             "n_attacks_resolved": n_attacks_resolved,
         })
     return intents
-
-
-def resolve_squad_fight(
-    game_state: Dict[str, Any], attacker_squad_id: str
-) -> Dict[str, Any]:
-    """Resolution melee (Hit→Wound→Save→Damage). Meme structure que resolve_squad_shoot.
-
-    Differences :
-      - Lit CC_WEAPONS au lieu de RNG_WEAPONS.
-      - Pas de BLAST en melee.
-      - Decremente ATTACK_LEFT au lieu de SHOOT_LEFT.
-    """
-    init_pending_intents(game_state)
-    models_cache = require_key(game_state, "models_cache")
-    intents = list(game_state["pending_squad_fight_intents"].get(attacker_squad_id, []))  # get allowed
-    summary: Dict[str, Any] = {
-        "attacks_made": 0, "hits": 0, "wounds": 0,
-        "failed_saves": 0, "damage_total": 0, "models_killed": 0, "events": [],
-    }
-    targets_meta: Dict[str, Dict[str, Any]] = {}
-    import random
-    for intent in intents:
-        attacker_mid = intent["model_id"]
-        attacker = models_cache.get(attacker_mid)
-        if attacker is None:
-            continue
-        target_sid = str(intent["target_unit_id"])
-        if target_sid not in game_state.get("squad_models", {}):  # get allowed
-            continue
-        if target_sid not in targets_meta:
-            _tgt_uc = require_key(game_state, "units_cache")[target_sid]
-            _tgt_sc = require_key(game_state, "squad_cache")[target_sid]
-            targets_meta[target_sid] = {
-                "value": float(require_key(_tgt_uc, "VALUE")),
-                "model_count_at_start": int(require_key(_tgt_sc, "model_count_at_start")),
-                "player": int(require_key(_tgt_uc, "player")),
-            }
-        weapon_index = int(intent.get("weapon_index", 0))  # get allowed
-        weapons = attacker.get("CC_WEAPONS", [])  # get allowed
-        if not (0 <= weapon_index < len(weapons)):
-            continue
-        weapon = weapons[weapon_index]
-        if not isinstance(weapon, dict):
-            continue
-        # F3 fix (audit) : lire n_attacks_resolved depuis l intent.
-        if "n_attacks_resolved" in intent:
-            n_attacks = int(intent["n_attacks_resolved"])
-        else:
-            nb_raw = weapon.get("NB", 1)
-            try:
-                n_attacks = resolve_dice_value(nb_raw, f"squad_fight_attacks_{attacker_mid}")
-            except Exception:
-                n_attacks = int(nb_raw) if isinstance(nb_raw, (int, float)) else 1
-        if n_attacks <= 0:
-            continue
-        ws = int(weapon.get("ATK", weapon.get("WS", 4)))
-        strength = int(weapon.get("STR", weapon.get("S", attacker.get("T", 4))))
-        ap = int(weapon.get("AP", 0))  # get allowed
-        dmg_raw = weapon.get("DMG", 1)
-        wound_th_lookup: Dict[int, int] = {}
-        for _ in range(int(n_attacks)):
-            if attacker_mid not in models_cache:
-                break
-            target_alive = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
-            if not target_alive:
-                break
-            summary["attacks_made"] += 1
-            hit_roll = random.randint(1, 6)
-            if hit_roll == 1 or hit_roll < ws:
-                continue
-            summary["hits"] += 1
-            first_alive = models_cache[target_alive[0]]
-            t_target = int(first_alive["T"])
-            wth = wound_th_lookup.get(t_target)
-            if wth is None:
-                wth = wound_threshold(strength, t_target); wound_th_lookup[t_target] = wth
-            wound_roll = random.randint(1, 6)
-            if wound_roll == 1 or wound_roll < wth:
-                continue
-            summary["wounds"] += 1
-            sv = int(first_alive["ARMOR_SAVE"])
-            invul = int(first_alive.get("INVUL_SAVE", 7))
-            save_th = save_threshold(sv, invul, ap)
-            save_roll = random.randint(1, 6)
-            if save_roll != 1 and save_roll >= save_th:
-                continue
-            summary["failed_saves"] += 1
-            try:
-                dmg = resolve_dice_value(cast(DiceValue, dmg_raw), f"squad_fight_dmg_{attacker_mid}")
-            except Exception:
-                dmg = int(dmg_raw) if isinstance(dmg_raw, (int, float)) else 1
-            if dmg <= 0:
-                continue
-            res = _allocate_damage_to_squad(game_state, target_sid, dmg)
-            if res is None:
-                break
-            summary["damage_total"] += int(res["damage_dealt"])
-            if res["destroyed"]:
-                summary["models_killed"] += 1
-            summary["events"].append({
-                "attacker": attacker_mid, "target": res["model_id"],
-                "target_squad_id": target_sid,
-                "target_player": int(res["target_player"]),
-                "points_per_hp": float(res["points_per_hp"]),
-                "damage": int(res["damage_dealt"]), "destroyed": bool(res["destroyed"]),
-            })
-        if attacker_mid in models_cache:
-            al = int(models_cache[attacker_mid].get("ATTACK_LEFT", 0))  # get allowed
-            models_cache[attacker_mid]["ATTACK_LEFT"] = max(0, al - int(n_attacks))
-    summary["targets_meta"] = targets_meta
-    summary["squads_wiped"] = [
-        sid for sid in targets_meta
-        if not [m for m in game_state["squad_models"].get(sid, []) if m in models_cache]  # get allowed
-    ]
-    clear_pending_fight_intent(game_state, attacker_squad_id)
-    return summary
 
 
 def squad_consolidate_plan(
