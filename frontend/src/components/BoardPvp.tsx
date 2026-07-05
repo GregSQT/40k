@@ -1571,11 +1571,8 @@ export default function Board({
   const openWeaponsForTargetRef = useRef<
     (targetId: string, position?: { x: number; y: number }) => Promise<void>
   >(async () => {});
-  // Refs vers les actions clic-fig (définies plus bas) — évite un TDZ dans le handler pointer.
-  const toggleShootFigRef = useRef<(modelId: string) => Promise<void>>(async () => {});
-  const setShootWeaponQtyRef = useRef<(code: string, count: number, targetId: string) => Promise<void>>(
-    async () => {}
-  );
+  // Ref vers selectShootFig (défini plus bas) — évite un TDZ dans le handler pointer.
+  const selectShootFigRef = useRef<(modelId: string) => void>(() => {});
   const lastOwnFigClickRef = useRef<{ modelId: string; time: number } | null>(null);
   /** Combat par-figurine : callbacks + plan + dernier clic ennemi, refs à jour pour le handler stable. */
   const squadFightCallbacksRef = useRef({
@@ -1700,11 +1697,18 @@ export default function Board({
     openTargets: string[];
     /** weapons_for_target par cible : profils éligibles avec m (max) et x (courant). */
     targetData: Record<string, Array<{ code: string; weapon: Weapon; m: number; x: number }>>;
-    /** Sous-groupe actif (ligne cliquée) : profil + cible → voile jaune (cible) + vert (figs). */
-    activeWeaponCode?: string;
+    /** Cible sélectionnée (réticule + voiles vert/gris des figs de l'unité active). */
     activeTargetId?: string;
-    /** Figs de l'unité active éligibles au sous-groupe actif (voile vert), avec assigned. */
-    greenModels?: Array<{ model_id: string; assigned: boolean }>;
+    /** État de chaque fig vis-à-vis de la cible : can_shoot (vert/gris) + ses armes. */
+    modelsStatus?: Array<{ model_id: string; can_shoot: boolean; weapon_codes: string[] }>;
+    /** Armes par figurine (indépendant de la cible) — encart/contour jaune dès le clic-fig. */
+    figWeapons?: Record<string, string[]>;
+    /** Profils du menu avec can_use (par-fig + exclusion Pistol) — rechargé à chaque attribution. */
+    menuWeapons?: Array<{ index: number; weapon: Weapon; can_use: boolean; reason?: string }>;
+    /** Fig sélectionnée (contour jaune + ses armes en encart jaune dans le menu). */
+    selectedFig?: string;
+    /** Arme sélectionnée dans le menu (contour jaune sur les figs qui la portent). */
+    selectedWeaponCode?: string;
   } | null>(null);
   const weaponSelectionMenuRef = useRef(weaponSelectionMenu);
   weaponSelectionMenuRef.current = weaponSelectionMenu;
@@ -2260,16 +2264,17 @@ export default function Board({
         HEX_HEIGHT / 2 +
         MARGIN;
 
-      setWeaponSelectionMenu((prev) => ({
-        unitId,
-        position: {
-          x: rect.left + centerX + HEX_RADIUS * 0.6,
-          y: rect.top + centerY - HEX_RADIUS * 0.6,
-        },
-        // Conserve les cibles ouvertes si on ré-ouvre le menu de la même unité.
-        openTargets: prev && prev.unitId === unitId ? prev.openTargets : [],
-        targetData: prev && prev.unitId === unitId ? prev.targetData : {},
-      }));
+      const position = {
+        x: rect.left + centerX + HEX_RADIUS * 0.6,
+        y: rect.top + centerY - HEX_RADIUS * 0.6,
+      };
+      // Même unité : on préserve TOUT l'état (cible active, voiles, sélections) et on
+      // repositionne seulement. Sinon (nouvelle unité) : menu neuf.
+      setWeaponSelectionMenu((prev) =>
+        prev && prev.unitId === unitId
+          ? { ...prev, position }
+          : { unitId, position, openTargets: [], targetData: {} }
+      );
       window.dispatchEvent(new CustomEvent("weaponMenuOpened", { detail: { unitId } }));
     };
 
@@ -2278,6 +2283,50 @@ export default function Board({
       window.removeEventListener("boardWeaponSelectionClick", weaponClickHandler);
     };
   }, [units, boardConfig]);
+
+  // Charge armes par figurine + profils du menu (can_use) dès que le menu s'ouvre.
+  useEffect(() => {
+    const unitId = weaponSelectionMenu?.unitId;
+    if (unitId == null || weaponSelectionMenu?.figWeapons) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [wRes, mRes] = await Promise.all([
+          fetch(`/api/game/action`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "squad_shoot_models_weapons", unitId: String(unitId) }),
+          }),
+          fetch(`/api/game/action`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "squad_shoot_menu_weapons", unitId: String(unitId) }),
+          }),
+        ]);
+        if (!wRes.ok || !mRes.ok) throw new Error("HTTP error");
+        const wData = await wRes.json();
+        const mData = await mRes.json();
+        if (!wData.success || !mData.success || cancelled) return;
+        const figWeapons: Record<string, string[]> = {};
+        for (const m of (wData.result?.models ?? []) as Array<{ model_id: string; weapon_codes: string[] }>)
+          figWeapons[m.model_id] = m.weapon_codes;
+        const menuWeapons = (mData.result?.weapons ?? []) as Array<{
+          index: number;
+          weapon: Weapon;
+          can_use: boolean;
+          reason?: string;
+        }>;
+        setWeaponSelectionMenu((prev) =>
+          prev && prev.unitId === unitId ? { ...prev, figWeapons, menuWeapons } : prev
+        );
+      } catch (e) {
+        console.error("🔴 menu/models_weapons error:", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [weaponSelectionMenu?.unitId, weaponSelectionMenu?.figWeapons]);
 
   // Auto-open weapon menu when a multi-weapon unit becomes the active shooting unit
   useEffect(() => {
@@ -2296,8 +2345,10 @@ export default function Board({
     const unit = units.find((u) => u.id === unitId);
     if (!unit) return;
 
+    // Flux cible-d'abord : le menu doit s'ouvrir dès ≥1 arme utilisable (même mono-profil,
+    // ex. escouade toute en Storm Bolter) — sinon addTargetForShoot ne peut rien ouvrir.
     const usableWeapons = unit.available_weapons?.filter((w) => (w.can_use ?? w.canUse) === true);
-    if (!usableWeapons || usableWeapons.length <= 1) return;
+    if (!usableWeapons || usableWeapons.length < 1) return;
 
     window.dispatchEvent(new CustomEvent("boardWeaponSelectionClick", { detail: { unitId } }));
   }, [gameState?.active_shooting_unit, phase, units]);
@@ -4570,24 +4621,13 @@ export default function Board({
         e.stopImmediatePropagation();
         const now = e.timeStamp;
         const prevOwn = lastOwnFigClickRef.current;
-        // Fig VERTE (éligible au sous-groupe actif) : simple = toggle son tir, double = Max.
+        // Menu tir ouvert : clic sur une fig = la SÉLECTIONNER (contour jaune + ses armes en
+        // encart jaune) ET rafraîchir ses cibles potentielles (blink). Attribution dans le menu.
         const menuNow = weaponSelectionMenuRef.current;
-        const isGreen =
-          !!menuNow?.activeWeaponCode &&
-          !!menuNow.activeTargetId &&
-          (menuNow.greenModels ?? []).some((g) => String(g.model_id) === String(own.mid));
-        if (isGreen && menuNow) {
-          const code = menuNow.activeWeaponCode!;
-          const tid = menuNow.activeTargetId!;
-          if (prevOwn && String(prevOwn.modelId) === String(own.mid) && now - prevOwn.time < 400) {
-            lastOwnFigClickRef.current = null;
-            const m =
-              menuNow.targetData[tid]?.find((x) => x.code === code)?.m ?? 0; // Max = toutes les vertes
-            if (m > 0) void setShootWeaponQtyRef.current(code, m, tid);
-            return;
-          }
+        if (menuNow) {
           lastOwnFigClickRef.current = { modelId: own.mid, time: now };
-          void toggleShootFigRef.current(own.mid);
+          selectShootFigRef.current(own.mid);
+          void cbs.onSelectModelForShoot?.(own.mid); // met à jour le blink des cibles de la fig
           return;
         }
         if (prevOwn && String(prevOwn.modelId) === String(own.mid) && now - prevOwn.time < 400) {
@@ -4948,16 +4988,20 @@ export default function Board({
   useEffect(() => {
     const app = appRef.current;
     if (!app) return;
-    const overlay = new PIXI.Graphics();
-    overlay.zIndex = 2705; // au-dessus du voile move (2600) et de l'anneau alloc (2700)
-    overlay.eventMode = "none";
-    app.stage.addChild(overlay);
-    shootSubgroupOverlayRef.current = overlay;
+    // Overlay PERSISTANT : créé une seule fois puis vidé/redessiné. Le détruire/recréer à
+    // chaque render (deps gameState/units) faisait clignoter le réticule et stressait le GPU.
+    let overlay = shootSubgroupOverlayRef.current;
+    if (!overlay || overlay.destroyed) {
+      overlay = new PIXI.Graphics();
+      overlay.zIndex = 2705; // au-dessus du voile move (2600) et de l'anneau alloc (2700)
+      overlay.eventMode = "none";
+      app.stage.addChild(overlay);
+      shootSubgroupOverlayRef.current = overlay;
+    }
     overlay.visible = !hideIndicators;
     overlay.clear();
     const menu = weaponSelectionMenu;
-    console.log(`[RETICLE] draw run — activeTargetId=${menu?.activeTargetId ?? "∅"} green=${menu?.greenModels?.length ?? 0}`);
-    if (menu?.activeTargetId && boardConfig) {
+    if (menu && boardConfig && (menu.activeTargetId || menu.selectedFig || menu.selectedWeaponCode)) {
       const HEX_RADIUS_H = boardConfig.hex_radius;
       const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
       const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
@@ -4971,9 +5015,13 @@ export default function Board({
         pos[0] * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H,
         pos[1] * HEX_HEIGHT_H + ((pos[0] % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H,
       ];
-      // 1. Voile JAUNE léger + RÉTICULE de visée (crosshair) sur chaque fig de la cible active.
-      const tgt = units.find((u) => String(u.id) === String(menu.activeTargetId));
-      const tgtByModel = uc?.[String(menu.activeTargetId)]?.occupied_hexes_by_model;
+      // 1. Voile JAUNE léger + RÉTICULE de visée (crosshair) — seulement si une cible est active.
+      const tgt = menu.activeTargetId
+        ? units.find((u) => String(u.id) === String(menu.activeTargetId))
+        : undefined;
+      const tgtByModel = menu.activeTargetId
+        ? uc?.[String(menu.activeTargetId)]?.occupied_hexes_by_model
+        : undefined;
       if (tgt && tgtByModel) {
         const tR = resolveBaseSizeForUnitDisplay(tgt) > 1
           ? (resolveBaseSizeForUnitDisplay(tgt) * 1.5 * HEX_RADIUS_H) / 2
@@ -4998,36 +5046,60 @@ export default function Board({
           overlay.moveTo(cx + tickIn, cy); overlay.lineTo(cx + tickOut, cy);
         }
       }
-      // 2. Voile VERT sur les figs éligibles de l'unité active (assigned = plus opaque).
+      // 2. REMPLISSAGE vert/gris (si cible active) + CONTOUR jaune (correspondance arme↔fig).
       const atk = units.find((u) => String(u.id) === String(menu.unitId));
       const atkByModel = uc?.[String(menu.unitId)]?.occupied_hexes_by_model;
       if (atk && atkByModel) {
         const aR = resolveBaseSizeForUnitDisplay(atk) > 1
           ? (resolveBaseSizeForUnitDisplay(atk) * 1.5 * HEX_RADIUS_H) / 2
           : HEX_RADIUS_H * 0.7;
-        const assignedIds = new Set(
-          (menu.greenModels ?? []).filter((g) => g.assigned).map((g) => String(g.model_id))
+        const canShootByMid = new Map(
+          (menu.modelsStatus ?? []).map((s) => [String(s.model_id), s.can_shoot])
         );
-        for (const g of menu.greenModels ?? []) {
-          const pos = atkByModel[g.model_id];
-          if (!pos) continue;
+        const figWeapons = menu.figWeapons ?? {};
+        const highlight = (mid: string): boolean =>
+          (!!menu.selectedFig && menu.selectedFig === mid) ||
+          (!!menu.selectedWeaponCode && (figWeapons[mid] ?? []).includes(menu.selectedWeaponCode));
+        for (const [mid, pos] of Object.entries(atkByModel)) {
           const [cx, cy] = centerOf(pos);
-          overlay.lineStyle(Math.max(1.5, HEX_RADIUS_H * 0.4), 0x2ecc40, 0.95);
-          overlay.beginFill(0x2ecc40, assignedIds.has(String(g.model_id)) ? 0.5 : 0.18);
-          overlay.drawCircle(cx, cy, aR);
-          overlay.endFill();
+          // remplissage vert/gris uniquement si une cible est sélectionnée.
+          if (menu.activeTargetId && canShootByMid.has(mid)) {
+            const can = canShootByMid.get(mid);
+            overlay.lineStyle(0);
+            overlay.beginFill(can ? 0x2ecc40 : 0x777777, can ? 0.32 : 0.42);
+            overlay.drawCircle(cx, cy, aR);
+            overlay.endFill();
+          }
+          // contour jaune (correspondance arme↔fig) par-dessus, même sans cible.
+          if (highlight(mid)) {
+            overlay.lineStyle(Math.max(2.5, HEX_RADIUS_H * 0.34), 0xf5c518, 1);
+            overlay.drawCircle(cx, cy, aR * 1.08);
+          }
         }
       }
     }
-    return () => {
-      if (!overlay.destroyed) {
-        overlay.clear();
-        app.stage.removeChild(overlay);
-        overlay.destroy();
-      }
-      if (shootSubgroupOverlayRef.current === overlay) shootSubgroupOverlayRef.current = null;
-    };
+    // Rendu on-demand : dessiner dans le Graphics ne suffit pas, il faut forcer un repaint
+    // (sinon l'overlay n'apparaît qu'au rendu suivant → réticule "en retard d'un cran").
+    try {
+      app.render();
+    } catch {
+      /* contexte non prêt : ignoré, le prochain rendu rattrapera */
+    }
+    // Pas de destruction ici : l'overlay est réutilisé d'un render à l'autre (voir cleanup au démontage).
   }, [weaponSelectionMenu, boardConfig, units, gameState, hideIndicators]);
+
+  // Détruit l'overlay tir uniquement au démontage du composant.
+  useEffect(
+    () => () => {
+      const o = shootSubgroupOverlayRef.current;
+      if (o && !o.destroyed) {
+        o.clear();
+        o.destroy();
+      }
+      shootSubgroupOverlayRef.current = null;
+    },
+    []
+  );
 
   // Slice G : voile violet sur les figurines ÉLIGIBLES du chargeur en chargeModelMove (phase
   // courante). La fig active a un anneau plus marqué ; sa zone de landing est dessinée ailleurs.
@@ -8248,7 +8320,7 @@ export default function Board({
             .map(([m, v]) => `${m}=${v ? 1 : 0}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hpbe:${hpBarBlinkEnlarged ? 1 : 0}#swp:${showWoundProbability ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}#dplan:${deployPlanFp}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hpbe:${hpBarBlinkEnlarged ? 1 : 0}#swp:${showWoundProbability ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}#dplan:${deployPlanFp}#elig:${[...eligibleUnitIds].sort((a, b) => a - b).join(",")}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -8492,6 +8564,7 @@ export default function Board({
       const savedManualAllocOverlay = manualAllocOverlayRef.current;
       const savedChargeVeilOverlay = chargeModelVeilOverlayRef.current;
       const savedBlinkRingOverlay = blinkTargetRingOverlayRef.current;
+      const savedShootOverlay = shootSubgroupOverlayRef.current;
       if (savedStatic?.parent) app.stage.removeChild(savedStatic);
       if (savedWalls?.parent) app.stage.removeChild(savedWalls);
       if (savedUi?.parent) app.stage.removeChild(savedUi);
@@ -8506,6 +8579,7 @@ export default function Board({
       if (savedManualAllocOverlay?.parent) app.stage.removeChild(savedManualAllocOverlay);
       if (savedChargeVeilOverlay?.parent) app.stage.removeChild(savedChargeVeilOverlay);
       if (savedBlinkRingOverlay?.parent) app.stage.removeChild(savedBlinkRingOverlay);
+      if (savedShootOverlay?.parent) app.stage.removeChild(savedShootOverlay);
       if (
         canReuseExistingHighlightsThroughDestroy &&
         highlightsLayerRef.current?.parent === app.stage
@@ -8586,6 +8660,10 @@ export default function Board({
       if (savedBlinkRingOverlay && !savedBlinkRingOverlay.destroyed) {
         savedBlinkRingOverlay.zIndex = 2700;
         app.stage.addChild(savedBlinkRingOverlay);
+      }
+      if (savedShootOverlay && !savedShootOverlay.destroyed) {
+        savedShootOverlay.zIndex = 2705;
+        app.stage.addChild(savedShootOverlay);
       }
 
       // Nettoyer pastilles cible / jet de charge seulement quand on reconstruit les unités.
@@ -10057,7 +10135,10 @@ export default function Board({
     const plan = squadShootPlanRef.current;
     if (!plan) return;
     try {
-      const weapons = await fetchWeaponsForTarget(plan.unitId, targetId);
+      const [weapons, modelsStatus] = await Promise.all([
+        fetchWeaponsForTarget(plan.unitId, targetId),
+        fetchModelsStatus(plan.unitId, targetId),
+      ]);
       setWeaponSelectionMenu((prev) =>
         prev
           ? {
@@ -10066,11 +10147,11 @@ export default function Board({
                 ? prev.openTargets
                 : [...prev.openTargets, targetId],
               targetData: { ...prev.targetData, [targetId]: weapons },
-              // La cible cliquée devient active : ses lignes 0/n s'affichent (voile jaune).
-              // On repart sans profil actif (pas de voile vert tant qu'on n'a pas choisi une ligne).
+              // La cible cliquée devient active : réticule + voiles vert/gris des figs.
               activeTargetId: targetId,
-              activeWeaponCode: undefined,
-              greenModels: [],
+              modelsStatus,
+              selectedFig: undefined,
+              selectedWeaponCode: undefined,
             }
           : prev
       );
@@ -10080,29 +10161,31 @@ export default function Board({
   };
   openWeaponsForTargetRef.current = addTargetForShoot;
 
-  // Figs éligibles (voile vert) pour un sous-groupe (profil, cible).
-  const fetchEligibleModels = async (
+  // État vert/gris (+ armes) de chaque fig de l'unité vis-à-vis de la cible.
+  const fetchModelsStatus = async (
     unitId: number,
-    code: string,
     targetId: string
-  ): Promise<Array<{ model_id: string; assigned: boolean }>> => {
+  ): Promise<Array<{ model_id: string; can_shoot: boolean; weapon_codes: string[] }>> => {
     const res = await fetch(`/api/game/action`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        action: "squad_shoot_eligible_models",
+        action: "squad_shoot_models_status",
         unitId: String(unitId),
-        weaponCode: code,
         targetId,
       }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    if (!data.success) throw new Error(data.error ?? "eligible_models rejected");
-    return (data.result?.models ?? []) as Array<{ model_id: string; assigned: boolean }>;
+    if (!data.success) throw new Error(data.error ?? "models_status rejected");
+    return (data.result?.models ?? []) as Array<{
+      model_id: string;
+      can_shoot: boolean;
+      weapon_codes: string[];
+    }>;
   };
 
-  // Rafraîchit m/x de toutes les cibles ouvertes + le voile vert du sous-groupe actif.
+  // Rafraîchit m/x de toutes les cibles ouvertes + les voiles vert/gris de la cible active.
   const refreshShootState = async () => {
     const menu = weaponSelectionMenuRef.current;
     const plan = squadShootPlanRef.current;
@@ -10113,64 +10196,77 @@ export default function Board({
       );
       const targetData: Record<string, Array<{ code: string; weapon: Weapon; m: number; x: number }>> = {};
       for (const [t, w] of entries) targetData[t] = w;
-      let greenModels = menu.greenModels;
-      if (menu.activeWeaponCode && menu.activeTargetId) {
-        greenModels = await fetchEligibleModels(plan.unitId, menu.activeWeaponCode, menu.activeTargetId);
-      }
-      setWeaponSelectionMenu((prev) => (prev ? { ...prev, targetData, greenModels } : prev));
+      let modelsStatus = menu.modelsStatus;
+      if (menu.activeTargetId) modelsStatus = await fetchModelsStatus(plan.unitId, menu.activeTargetId);
+      // Recharge les profils du menu (can_use) → exclusion Pistol/non-Pistol en temps réel.
+      const menuRes = await fetch(`/api/game/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "squad_shoot_menu_weapons", unitId: String(plan.unitId) }),
+      });
+      const menuData = menuRes.ok ? await menuRes.json() : null;
+      const menuWeapons = menuData?.success
+        ? (menuData.result?.weapons as typeof menu.menuWeapons)
+        : menu.menuWeapons;
+      setWeaponSelectionMenu((prev) => (prev ? { ...prev, targetData, modelsStatus, menuWeapons } : prev));
     } catch (e) {
       console.error("🔴 refreshShootState error:", e);
     }
   };
 
-  // Clic sur une ligne (profil × cible) → sous-groupe actif : voile jaune (cible) + vert (figs).
-  const activateShootSubgroup = async (code: string, targetId: string) => {
-    const plan = squadShootPlanRef.current;
-    if (!plan) return;
-    try {
-      const greenModels = await fetchEligibleModels(plan.unitId, code, targetId);
-      setWeaponSelectionMenu((prev) =>
-        prev ? { ...prev, activeWeaponCode: code, activeTargetId: targetId, greenModels } : prev
-      );
-    } catch (e) {
-      console.error("🔴 activateShootSubgroup error:", e);
-    }
+  // Clic sur une fig de l'unité active → la sélectionne (contour jaune + ses armes en jaune).
+  const selectShootFig = (modelId: string) => {
+    setWeaponSelectionMenu((prev) =>
+      prev ? { ...prev, selectedFig: modelId, selectedWeaponCode: undefined } : prev
+    );
   };
+  selectShootFigRef.current = selectShootFig;
 
-  // Clic sur une fig verte → toggle son tir pour le sous-groupe actif.
-  const toggleShootFig = async (modelId: string) => {
+  // Clic sur une ligne d'ARME dans le menu :
+  //  - si une fig est sélectionnée ET porte cette arme → attribue CETTE fig (toggle) ;
+  //  - sinon → sélectionne l'arme (contour jaune sur les figs qui la portent).
+  const onWeaponRowClick = async (code: string) => {
     const menu = weaponSelectionMenuRef.current;
     const plan = squadShootPlanRef.current;
-    if (!menu?.activeWeaponCode || !menu.activeTargetId || !plan) return;
-    try {
-      const res = await fetch(`/api/game/action`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "squad_shoot_toggle_model_weapon",
-          unitId: String(plan.unitId),
-          modelId,
-          weaponCode: menu.activeWeaponCode,
-          targetId: menu.activeTargetId,
-        }),
-      });
-      if (!res.ok) {
-        const b = await res.json().catch(() => ({}));
-        throw new Error(b.reason ?? b.error ?? `HTTP ${res.status}`);
+    if (!menu || !plan) return;
+    const fig = menu.selectedFig;
+    const figCodes = (menu.figWeapons ?? {})[fig ?? ""] ?? [];
+    if (fig && menu.activeTargetId && figCodes.includes(code)) {
+      // Attribution précise : cette fig tire cette arme sur la cible active (toggle).
+      try {
+        const res = await fetch(`/api/game/action`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "squad_shoot_toggle_model_weapon",
+            unitId: String(plan.unitId),
+            modelId: fig,
+            weaponCode: code,
+            targetId: menu.activeTargetId,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+          // Ex. arme hors portée/LoS de la cible → refus backend : feedback discret, pas de crash.
+          console.warn(`[SQUAD-SHOOT] fig ${fig} ne peut pas tirer ${code} sur ${menu.activeTargetId}: ${data.reason ?? data.error ?? res.status}`);
+          return;
+        }
+        await refreshShootState();
+        window.dispatchEvent(
+          new CustomEvent("squadShootDeclarationsUpdated", {
+            detail: { gameState: data.game_state, declarations: data.result?.declarations ?? [] },
+          })
+        );
+      } catch (e) {
+        console.error("🔴 toggle (fig+arme) error:", e);
       }
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error ?? "toggle rejected");
-      await refreshShootState();
-      window.dispatchEvent(
-        new CustomEvent("squadShootDeclarationsUpdated", {
-          detail: { gameState: data.game_state, declarations: data.result?.declarations ?? [] },
-        })
-      );
-    } catch (e) {
-      console.error("🔴 toggleShootFig error:", e);
+      return;
     }
+    // Exploration : sélectionne l'arme (surligne les figs qui la portent).
+    setWeaponSelectionMenu((prev) =>
+      prev ? { ...prev, selectedWeaponCode: code, selectedFig: undefined } : prev
+    );
   };
-  toggleShootFigRef.current = toggleShootFig;
 
   // -/+/Max/valeur d'une ligne : fixe le nombre de tirs du profil `code` sur la cible.
   const setShootWeaponQty = async (code: string, count: number, targetId: string) => {
@@ -10211,7 +10307,6 @@ export default function Board({
       console.error("🔴 set qty error:", e);
     }
   };
-  setShootWeaponQtyRef.current = setShootWeaponQty;
 
   // Handle weapon selection
   const handleSelectWeapon = async (weaponIndex: number) => {
@@ -10291,11 +10386,13 @@ export default function Board({
           return { assigned: assignedWeapons.has(idx), locked: false };
         };
 
-        const availableWeapons = unit.available_weapons;
+        // Menu tir : profils rechargés en temps réel (can_use par-fig + exclusion Pistol) ;
+        // fallback sur unit.available_weapons tant que menuWeapons n'est pas chargé.
+        const availableWeapons = weaponSelectionMenu.menuWeapons ?? unit.available_weapons;
 
         if (availableWeapons && availableWeapons.length > 0) {
           return availableWeapons.map((w) => {
-            const canUse = w.can_use ?? w.canUse;
+            const canUse = (w as { can_use?: boolean; canUse?: boolean }).can_use ?? (w as { canUse?: boolean }).canUse;
             if (canUse == null)
               throw new Error(`Weapon ${w.index} of unit ${unit.id} missing can_use`);
             const flags = weaponFlags(w.index);
@@ -10762,9 +10859,19 @@ export default function Board({
             return `#${tid}${type ? ` ${type}` : ""}`;
           }}
           onSetQty={(code, count, tid) => void setShootWeaponQty(code, count, tid)}
-          activeCode={weaponSelectionMenu.activeWeaponCode}
           activeTargetId={weaponSelectionMenu.activeTargetId}
-          onActivateSubgroup={(code, tid) => void activateShootSubgroup(code, tid)}
+          onWeaponRowClick={(code) => void onWeaponRowClick(code)}
+          highlightedCodes={
+            weaponSelectionMenu.selectedWeaponCode
+              ? [weaponSelectionMenu.selectedWeaponCode]
+              : ((weaponSelectionMenu.figWeapons ?? {})[weaponSelectionMenu.selectedFig ?? ""] ?? [])
+          }
+          weaponTotals={(() => {
+            const totals: Record<string, number> = {};
+            for (const codes of Object.values(weaponSelectionMenu.figWeapons ?? {}))
+              for (const c of codes) totals[c] = (totals[c] ?? 0) + 1;
+            return totals;
+          })()}
           inchesToSubhex={
             (boardConfig as unknown as { inches_to_subhex?: number } | null)?.inches_to_subhex ?? 1
           }

@@ -4562,6 +4562,72 @@ def eligible_models_for_weapon(
     return [{"model_id": mid, "assigned": mid in assigned} for (_d, mid, _idx) in candidates]
 
 
+def models_weapons_for_squad(
+    game_state: Dict[str, Any], ctx: DeclareAttackCtx, attacker_squad_id: str
+) -> List[Dict[str, Any]]:
+    """Par figurine vivante : les codes de ses armes (indépendant de toute cible).
+
+    Sert au surlignage arme<->fig (encart jaune) dès qu'on clique une fig, même sans cible."""
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    out: List[Dict[str, Any]] = []
+    for mid in squad_models.get(attacker_squad_id, []):  # get allowed
+        m = models_cache.get(mid)
+        if m is None:
+            continue
+        weapons = m.get(ctx.weapons_key, [])  # get allowed
+        codes = [w["code"] for w in weapons if isinstance(w, dict) and w.get("code")]
+        out.append({"model_id": str(mid), "weapon_codes": codes})
+    return out
+
+
+def models_status_for_target(
+    game_state: Dict[str, Any], ctx: DeclareAttackCtx,
+    attacker_squad_id: str, target_squad_id: str,
+) -> List[Dict[str, Any]]:
+    """Par figurine vivante de l escouade : peut-elle encore tirer/frapper la cible + ses armes.
+
+    - `can_shoot` (VERT si vrai, GRIS sinon) : ∃ arme physique LIBRE (groupe non deja engage
+      par une declaration de cette fig) portee par la fig et pouvant viser la cible (portee+LoS).
+    - `weapon_codes` : codes des armes portees (pour le surlignage croise arme <-> fig).
+    Read-only, generique ctx."""
+    init_pending_intents(game_state)
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    if attacker_squad_id not in game_state[ctx.intents_key]:
+        return []
+    intents = game_state[ctx.intents_key][attacker_squad_id]
+    consumed_by_model: Dict[str, set] = {}
+    for i in intents:
+        mid = str(i["model_id"]); m = models_cache.get(mid)
+        if m is None:
+            continue
+        w = m.get(ctx.weapons_key, [])  # get allowed
+        consumed_by_model.setdefault(mid, set()).add(_weapon_group_key(w, int(i["weapon_index"])))
+    alive_target = target_squad_id in squad_models and any(
+        mid in models_cache for mid in squad_models.get(target_squad_id, [])  # get allowed
+    )
+    result: List[Dict[str, Any]] = []
+    for mid in squad_models.get(attacker_squad_id, []):  # get allowed
+        m = models_cache.get(mid)
+        if m is None:
+            continue
+        weapons = m.get(ctx.weapons_key, [])  # get allowed
+        codes = [w["code"] for w in weapons if isinstance(w, dict) and w.get("code")]
+        can = False
+        if alive_target:
+            for idx, wp in enumerate(weapons):
+                if not isinstance(wp, dict):
+                    continue
+                if _weapon_group_key(weapons, idx) in consumed_by_model.get(str(mid), set()):
+                    continue  # arme physique deja engagee par cette fig
+                if ctx.can_target_with_weapon(game_state, m, attacker_squad_id, target_squad_id, idx):
+                    can = True
+                    break
+        result.append({"model_id": str(mid), "can_shoot": can, "weapon_codes": codes})
+    return result
+
+
 def toggle_attack_model_weapon(
     game_state: Dict[str, Any], ctx: DeclareAttackCtx,
     attacker_squad_id: str, model_id: str, weapon_code: str, target_squad_id: str,
@@ -4652,6 +4718,7 @@ def squad_model_valid_targets(
     if m is None:
         raise ValueError(f"Model {attacker_model_id!r} not alive (absent de models_cache)")
     attacker_player = int(m["player"])
+    weapons = m.get("RNG_WEAPONS", [])  # get allowed
     valid: List[str] = []
     for sid, mids in squad_models.items():
         if sid == attacker_squad_id:
@@ -4661,7 +4728,14 @@ def squad_model_valid_targets(
             continue  # escouade morte
         if int(models_cache[first]["player"]) == attacker_player:
             continue  # allie
-        if _model_can_shoot_target(game_state, m, sid):
+        # Cible valide si AU MOINS UNE arme de la fig peut la viser (portee + LoS +
+        # engagement/Pistol) — et non la seule arme selectionnee : sinon une unite engagee
+        # avec pistolet ne verrait pas sa cible engagee (arme selectionnee non-Pistol).
+        if any(
+            _model_can_shoot_target_with_weapon(game_state, m, sid, idx)
+            for idx in range(len(weapons))
+            if isinstance(weapons[idx], dict)
+        ):
             valid.append(sid)
     return valid
 
@@ -4721,9 +4795,19 @@ def squad_shoot_los_overview(
     attacker_player = int(models_cache[alive[0]]["player"]) if alive else None
     enemy_sids = _enemy_squad_ids(game_state, attacker_player) if attacker_player is not None else []
 
+    # Engagement au niveau escouade (regle 10.06) : si l escouade est engagee, ses figs
+    # ne peuvent tirer QU avec une arme Pistol (portee plus courte, donc PAS widx_max).
+    from engine.phase_handlers.shooting_handlers import (
+        _weapon_has_pistol_rule,
+        _is_adjacent_to_enemy_within_cc_range,
+    )
+    shooter_unit = get_unit_by_id(game_state, attacker_squad_id)
+    squad_engaged = shooter_unit is not None and _is_adjacent_to_enemy_within_cc_range(
+        game_state, shooter_unit
+    )
+
     count: Dict[str, int] = {}
     free_count = 0
-    _dbg = []  # [DEBUG LOS-OVERVIEW] a retirer
     for mid in alive:
         m = models_cache[mid]
         weapons = m.get("RNG_WEAPONS", [])  # get allowed
@@ -4735,29 +4819,22 @@ def squad_shoot_los_overview(
             w for w in range(len(weapons))
             if _weapon_group_key(weapons, w) not in consumed_groups
         ]
-        # [DEBUG LOS-OVERVIEW] a retirer : armes totales / declarees / libres par fig
-        _dbg.append(
-            f"{mid}: total={[str(w.get('display_name', '?')) for w in weapons]} "
-            f"combi={[(w.get('COMBI_WEAPON') if isinstance(w, dict) else None) for w in weapons]} "
-            f"declared={sorted(declared_w)} free={free_weapons}"
-        )
         if not free_weapons:
             continue  # fig entierement affectee → hors blink et hors decompte
         free_count += 1
-        # Perf : la LoS (raycasting) ne depend PAS de l arme, seule la portee varie et
-        # reach est monotone en portee. On teste donc une SEULE fois par ennemi, avec
-        # l arme libre de plus longue portee (la plus permissive) — 1 calcul LoS/paire au
-        # lieu d un par arme. (Approx : cas engagement + pistol plus courte non couvert.)
-        widx_max = max(free_weapons, key=lambda w: _weapon_range_subhex(weapons[w]))
+        # Arme de test : engagee → un Pistol libre (seul autorise) ; sinon → plus longue
+        # portee. La LoS (raycasting) ne depend pas de l arme et reach est monotone en
+        # portee, d ou 1 seul test/ennemi (l arme la plus permissive du cas).
+        if squad_engaged:
+            pistol_free = [w for w in free_weapons if _weapon_has_pistol_rule(weapons[w])]
+            if not pistol_free:
+                continue  # engagee sans pistolet → ne peut rien viser au tir
+            test_widx = pistol_free[0]
+        else:
+            test_widx = max(free_weapons, key=lambda w: _weapon_range_subhex(weapons[w]))
         for sid in enemy_sids:
-            if _model_can_shoot_target_with_weapon(game_state, m, sid, widx_max):
+            if _model_can_shoot_target_with_weapon(game_state, m, sid, test_widx):
                 count[sid] = count.get(sid, 0) + 1  # get allowed
-    # [DEBUG LOS-OVERVIEW] a retirer
-    print(
-        f"[LOS-OVERVIEW] squad={attacker_squad_id} free={free_count}/{len(alive)} "
-        f"count={count}\n  " + "\n  ".join(_dbg),
-        flush=True,
-    )
     return {
         "valid_targets": list(count.keys()),
         "count_by_unit_id": count,
@@ -4910,6 +4987,20 @@ def squad_shoot_toggle_model_weapon(
     return toggle_attack_model_weapon(game_state, SHOOT_DECLARE_CTX, attacker_squad_id, model_id, weapon_code, target_squad_id)
 
 
+def squad_shoot_models_status(
+    game_state: Dict[str, Any], attacker_squad_id: str, target_squad_id: str
+) -> List[Dict[str, Any]]:
+    """Voiles vert/gris au TIR — état de chaque fig vis-à-vis de la cible (+ ses armes)."""
+    return models_status_for_target(game_state, SHOOT_DECLARE_CTX, attacker_squad_id, target_squad_id)
+
+
+def squad_shoot_models_weapons(
+    game_state: Dict[str, Any], attacker_squad_id: str
+) -> List[Dict[str, Any]]:
+    """Armes par figurine au TIR (indépendant de la cible) — pour l'encart jaune au clic-fig."""
+    return models_weapons_for_squad(game_state, SHOOT_DECLARE_CTX, attacker_squad_id)
+
+
 def _union_weapons(
     game_state: Dict[str, Any], weapons_key: str, squad_id: str
 ) -> List[Dict[str, Any]]:
@@ -4956,6 +5047,72 @@ def squad_union_weapons(
 ) -> List[Dict[str, Any]]:
     """Union des armes RNG par-figurine (source du menu tir). Cf. _union_weapons."""
     return _union_weapons(game_state, "RNG_WEAPONS", squad_id)
+
+
+def squad_shoot_menu_weapons(
+    game_state: Dict[str, Any], attacker_squad_id: str
+) -> List[Dict[str, Any]]:
+    """Profils de l escouade pour le menu tir, avec `can_use` correct (par-figurine).
+
+    - usable = AU MOINS une figurine portant le profil peut tirer sur AU MOINS un ennemi
+      (portee + LoS + engagement, calcule par-fig — pas depuis l ancre escouade). Le pistolet
+      est donc utilisable engage OU non (arme de tir normale + exception 10.06).
+    - Exclusion 10.06 au niveau unite : si un Pistol est deja declare, les non-Pistol ne sont
+      plus selectionnables ; si un non-Pistol est declare, les Pistol ne le sont plus."""
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    init_pending_intents(game_state)
+    from engine.phase_handlers.shooting_handlers import _weapon_has_pistol_rule
+
+    # Type d arme deja engage par l unite (Pistol vs non-Pistol) — via les declarations.
+    intents = game_state["pending_squad_shoot_intents"].get(attacker_squad_id, [])  # get allowed
+    declared_pistol = False
+    declared_nonpistol = False
+    for it in intents:
+        m = models_cache.get(str(it["model_id"]))
+        if m is None:
+            continue
+        ws = m.get("RNG_WEAPONS", [])  # get allowed
+        wi = int(it["weapon_index"])
+        if 0 <= wi < len(ws) and isinstance(ws[wi], dict):
+            if _weapon_has_pistol_rule(ws[wi]):
+                declared_pistol = True
+            else:
+                declared_nonpistol = True
+
+    mids = squad_models.get(attacker_squad_id, [])  # get allowed
+    player = int(models_cache[mids[0]]["player"]) if mids and mids[0] in models_cache else None
+    enemy_sids = _enemy_squad_ids(game_state, player) if player is not None else []
+
+    result: List[Dict[str, Any]] = []
+    for idx, w in enumerate(_union_weapons(game_state, "RNG_WEAPONS", attacker_squad_id)):
+        code = w["code"]
+        is_pistol = _weapon_has_pistol_rule(w)
+        usable = False
+        for mid in mids:
+            m = models_cache.get(mid)
+            if m is None:
+                continue
+            weapons = m.get("RNG_WEAPONS", [])  # get allowed
+            local_idx = next(
+                (i for i, ww in enumerate(weapons) if isinstance(ww, dict) and ww.get("code") == code),
+                None,
+            )
+            if local_idx is None:
+                continue
+            if any(
+                _model_can_shoot_target_with_weapon(game_state, m, sid, local_idx)
+                for sid in enemy_sids
+            ):
+                usable = True
+                break
+        # Exclusion Pistol / non-Pistol au niveau unite (10.06).
+        if declared_pistol and not is_pistol:
+            usable = False
+        if declared_nonpistol and is_pistol:
+            usable = False
+        result.append({"index": idx, "weapon": w, "can_use": usable, "reason": None})
+    return result
 
 
 def weapons_for_target(

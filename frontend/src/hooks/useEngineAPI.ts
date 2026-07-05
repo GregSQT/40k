@@ -4538,9 +4538,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (initialModelId) {
         await selectShootModelForUnit(uid, initialModelId);
       }
+      // Surlignage des cibles au niveau ESCOUADE dès l'activation : n'importe quelle
+      // figurine pouvant tirer compte (ex. unité engagée → seules les figs avec pistolet,
+      // pas forcément la fig auto-sélectionnée). Écrase le blink per-fig ci-dessus.
+      await handleSquadShootLosOverview(uid);
       squadShootActivatingRef.current = false;
     },
-    [readSquadModelPositions, executeAction, selectShootModelForUnit]
+    [readSquadModelPositions, executeAction, selectShootModelForUnit, handleSquadShootLosOverview]
   );
 
   /** Sélectionne une fig (clic en mode actif) : délègue au coeur via l unité du plan. */
@@ -4747,18 +4751,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleCommitSquadShoot = useCallback(async () => {
     const plan = squadShootPlanRef.current;
     if (!plan) return;
-    console.log(
-      `[SQUAD-SHOOT] commit? unit=${plan.unitId} canValidate=${plan.canValidate} decls=${plan.declarations.length}`
-    );
     if (!plan.canValidate) {
       console.warn("[SQUAD-SHOOT] commit ABORT (aucune cible assignée)");
       return;
     }
     try {
-      const r = await executeAction({ action: "squad_shoot_validate", unitId: String(plan.unitId) });
-      console.log(
-        `[SQUAD-SHOOT] validate résultat waiting_for_player=${r?.result?.waiting_for_player} action=${r?.result?.action}`
-      );
+      await executeAction({ action: "squad_shoot_validate", unitId: String(plan.unitId) });
     } catch (e) {
       console.error("[SQUAD-SHOOT] validate FAILED", e);
       setError(`Squad shoot failed: ${formatApiConnectionError(e)}`);
@@ -4772,7 +4770,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setSquadShootPlan(null);
     setMode("select");
     setSelectedUnitId(null);
-    console.log(`[SQUAD-SHOOT] commit unit=${plan.unitId}`);
   }, [executeAction]);
 
   /** Annule le tir : nettoie l état backend (pending + active), garde l unité dans le pool. */

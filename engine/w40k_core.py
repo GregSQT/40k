@@ -4328,8 +4328,11 @@ class W40KEngine(gym.Env):
             squad_undeclare_shoot_weapon,
             squad_undeclare_shoot_weapon_qty,
             squad_shoot_weapons_for_target,
+            squad_shoot_menu_weapons,
             squad_shoot_eligible_models,
             squad_shoot_toggle_model_weapon,
+            squad_shoot_models_status,
+            squad_shoot_models_weapons,
             squad_union_weapons,
             squad_weapon_valid_targets,
             squad_lock_shoot,
@@ -4353,21 +4356,10 @@ class W40KEngine(gym.Env):
         squad_id = str(require_key(action, "unitId"))
 
         def _squad_available_weapons(unit: Dict[str, Any]) -> List[Dict[str, Any]]:
-            """available_weapons pour le frontend : UNION des armes par-figurine.
-
-            unit['RNG_WEAPONS'] ne porte que l'arme du type d'escouade de base et
-            masquerait les profils par-figurine (Cyclone Frag/Krak, arme de perso
-            attache). On sonde weapon_availability_check sur l'union (meme logique de
-            regles) ; l'eligibilite fine par-figurine est retranchee a la declaration."""
-            weapon_rule = self.game_state.get("weapon_rule", 1)
-            adjacent = _is_adjacent_to_enemy_within_cc_range(self.game_state, unit)
-            union = squad_union_weapons(self.game_state, str(unit["id"]))
-            probe = {**unit, "RNG_WEAPONS": union}
-            pool = weapon_availability_check(self.game_state, probe, weapon_rule, 0, 1 if adjacent else 0)
-            return [
-                {"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")}
-                for w in pool
-            ]
+            """available_weapons pour le menu : union des armes par-figurine, avec `can_use`
+            calcule PAR-FIGURINE (≥1 fig peut tirer sur ≥1 ennemi) + exclusion Pistol/non-Pistol
+            au niveau unite (10.06). Cf. squad_shoot_menu_weapons."""
+            return squad_shoot_menu_weapons(self.game_state, str(unit["id"]))
 
         def _squad_cover_by_unit_id(valid_targets: List[str]) -> Dict[str, bool]:
             """Cover geometrique par cible valide (brique LoS partagee, single source of truth).
@@ -4536,6 +4528,11 @@ class W40KEngine(gym.Env):
                 "declarations": list(self.game_state["pending_squad_shoot_intents"].get(squad_id, [])),  # get allowed
             }
 
+        if name == "squad_shoot_menu_weapons":
+            # Read-only : profils du menu avec can_use par-fig + exclusion Pistol/non-Pistol.
+            weapons = squad_shoot_menu_weapons(self.game_state, squad_id)
+            return True, {"action": name, "unitId": squad_id, "weapons": weapons}
+
         if name == "squad_shoot_weapons_for_target":
             # Read-only : menu cible-d abord — armes pouvant viser la cible + (m, x).
             target_id = action.get("targetId")
@@ -4545,6 +4542,21 @@ class W40KEngine(gym.Env):
             return True, {
                 "action": name, "unitId": squad_id, "targetId": str(target_id),
                 "weapons": weapons,
+            }
+
+        if name == "squad_shoot_models_weapons":
+            # Read-only : armes par figurine (indépendant de la cible) — encart jaune au clic-fig.
+            models = squad_shoot_models_weapons(self.game_state, squad_id)
+            return True, {"action": name, "unitId": squad_id, "models": models}
+
+        if name == "squad_shoot_models_status":
+            # Read-only : voiles vert/gris — état de chaque fig de l'unité vis-à-vis de la cible.
+            target_id = action.get("targetId")
+            if target_id is None:
+                return False, {"error": "missing_targetId"}
+            models = squad_shoot_models_status(self.game_state, squad_id, str(target_id))
+            return True, {
+                "action": name, "unitId": squad_id, "targetId": str(target_id), "models": models,
             }
 
         if name == "squad_shoot_eligible_models":
@@ -4629,28 +4641,19 @@ class W40KEngine(gym.Env):
             return True, {"action": name, "unitId": squad_id, "cancelled": True}
 
         if name == "squad_shoot_validate":
-            _pending_dbg = self.game_state.get("pending_squad_shoot_intents", {}).get(squad_id, [])
-            print(f"[SHOOT-VALIDATE] squad={squad_id} intents={len(_pending_dbg)} "
-                  f"pool_avant={self.game_state.get('shoot_activation_pool')}", flush=True)
             squad_lock_shoot(self.game_state, squad_id)
             unit = get_unit_by_id(squad_id, self.game_state)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable pour resolution tir manuel")
             attacker_player = int(require_key(unit, "player"))
             defender_player = 2 if attacker_player == 1 else 1
-            print(f"[SHOOT-VALIDATE] squad={squad_id} defender_player={defender_player} "
-                  f"defender_human={self._is_player_human(defender_player)}", flush=True)
             if self._is_player_human(defender_player):
                 # Allocation manuelle des pertes par le defenseur (regle 05.04) :
                 # jets resolus, application differee, end_activation reporte a la fin.
                 alloc_result = build_manual_shoot_allocation(self.game_state, squad_id)
-                print(f"[SHOOT-VALIDATE] squad={squad_id} manual_alloc waiting_for_player="
-                      f"{alloc_result.get('waiting_for_player')} keys={list(alloc_result.keys())}", flush=True)
                 if alloc_result.get("waiting_for_player"):
                     return True, alloc_result
-                fin = self._finish_manual_shoot_after_allocation(squad_id, alloc_result)
-                print(f"[SHOOT-VALIDATE] squad={squad_id} pool_apres={self.game_state.get('shoot_activation_pool')}", flush=True)
-                return True, fin
+                return True, self._finish_manual_shoot_after_allocation(squad_id, alloc_result)
             # Defenseur IA : allocation auto (chemin inchange).
             shoot_result = resolve_squad_shoot(self.game_state, squad_id)
             end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
@@ -5170,6 +5173,8 @@ class W40KEngine(gym.Env):
             "squad_shoot_assign_weapon_qty", "squad_shoot_unassign_weapon_qty",
             "squad_shoot_weapon_qty_max", "squad_shoot_weapons_for_target",
             "squad_shoot_eligible_models", "squad_shoot_toggle_model_weapon",
+            "squad_shoot_models_status", "squad_shoot_models_weapons",
+            "squad_shoot_menu_weapons",
         ):
             return self._process_squad_manual_shoot(action)
         # Pure delegation - handler manages initialization, player progression, everything

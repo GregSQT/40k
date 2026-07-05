@@ -36,6 +36,7 @@ from engine.phase_handlers.shared_utils import (
     squad_shoot_weapons_for_target,
     squad_shoot_eligible_models,
     squad_shoot_toggle_model_weapon,
+    squad_shoot_models_status,
     squad_undeclare_shoot_weapon_qty,
     squad_union_weapons,
     _weapon_group_key,
@@ -388,3 +389,32 @@ class TestEligibleModelsAndToggle:
         # même fig en Krak → arme physique déjà engagée → inéligible.
         with pytest.raises(ValueError):
             squad_shoot_toggle_model_weapon(gs, "1", "1#2", KRAK_CODE, "2")
+
+
+class TestModelsStatus:
+    def _gs(self):
+        atk = _unit(
+            1, 1,
+            [_m(5, 5, [STORM]), _m(5, 6, [STORM]), _m(6, 5, [FRAG, KRAK]), _m(6, 6, [FRAG, KRAK])],
+            [STORM],
+        )
+        gs = _make_gs([atk, _unit(2, 2, [_m(5, 15, [STORM])], [STORM])])
+        _activate(gs, "1")
+        return gs
+
+    def test_all_green_and_weapon_codes(self):
+        gs = self._gs()
+        status = {s["model_id"]: s for s in squad_shoot_models_status(gs, "1", "2")}
+        assert all(status[m]["can_shoot"] for m in status)  # toutes à portée/LoS
+        assert status["1#0"]["weapon_codes"] == ["storm_bolter"]
+        assert set(status["1#2"]["weapon_codes"]) == {FRAG_CODE, KRAK_CODE}
+
+    def test_fig_becomes_grey_when_exhausted(self):
+        gs = self._gs()
+        # 1#0 tire son unique arme (storm) → épuisée → grise.
+        squad_shoot_toggle_model_weapon(gs, "1", "1#0", "storm_bolter", "2")
+        status = {s["model_id"]: s["can_shoot"] for s in squad_shoot_models_status(gs, "1", "2")}
+        assert status["1#0"] is False  # plus d'arme libre → gris
+        assert status["1#1"] is True  # l'autre storm reste vert
+        # Le cyclone reste vert (Frag OU Krak encore libres).
+        assert status["1#2"] is True

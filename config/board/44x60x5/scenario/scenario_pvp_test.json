@@ -48,11 +48,11 @@
       ]
     },
     {
-      "id": 1003, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 197, "row": 39,
+      "id": 1003, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 163, "row": 58,
       "models": [
-        { "col": 197, "row": 39 },
-        { "col": 201, "row": 43 },
-        { "col": 191, "row": 45 }
+        { "col": 163, "row": 58 },
+        { "col": 176, "row": 57 },
+        { "col": 184, "row": 51 }
       ]
     },
     {

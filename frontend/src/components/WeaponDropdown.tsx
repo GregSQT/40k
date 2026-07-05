@@ -30,11 +30,13 @@ interface WeaponDropdownProps {
   targetLabel?: (targetId: string) => string;
   /** Fixe le nombre de tirs (x) du profil `code` sur la cible `targetId`. */
   onSetQty?: (code: string, count: number, targetId: string) => void;
-  /** Sous-groupe actif (ligne surlignée → voile jaune/vert sur le plateau). */
-  activeCode?: string;
   activeTargetId?: string;
-  /** Clic sur une sous-ligne → active ce sous-groupe (profil × cible). */
-  onActivateSubgroup?: (code: string, targetId: string) => void;
+  /** Clic sur la ligne d'un profil (nom d'arme) → sélection d'arme ou attribution fig+arme. */
+  onWeaponRowClick?: (code: string) => void;
+  /** Codes à surligner en jaune (arme sélectionnée ou armes de la fig sélectionnée). */
+  highlightedCodes?: string[];
+  /** Nombre total d'armes de chaque type dans l'escouade (m du compteur n/m). */
+  weaponTotals?: Record<string, number>;
 }
 
 /** Palette stable des sous-groupes (profil × cible) — couleur de la ligne (voile PIXI en 5c-3). */
@@ -58,9 +60,10 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
   targetData,
   targetLabel,
   onSetQty,
-  activeCode,
   activeTargetId,
-  onActivateSubgroup,
+  onWeaponRowClick,
+  highlightedCodes,
+  weaponTotals,
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x: position.x, y: position.y });
@@ -159,7 +162,9 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
                 </tr>
               </thead>
               <tbody>
-                {weapons.map((wo) => {
+                {/* Masque les armes non utilisables (par-fig) : hors portée/LoS, ou exclusion
+                    Pistol/non-Pistol au niveau unité (10.06). Calculé côté backend. */}
+                {weapons.filter((wo) => wo.canUse).map((wo) => {
                   const w = wo.weapon;
                   const code = w.code ?? "";
                   const carrier = (w as { carrier_name?: string }).carrier_name;
@@ -173,11 +178,24 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
                     // Lignes affectables (x=0) uniquement pour la cible active ; les tirs
                     // déjà affectés (x>0) restent visibles pour toutes les cibles.
                     .filter((ln) => ln.x > 0 || ln.tid === activeTargetId);
+                  const highlighted = (highlightedCodes ?? []).includes(code);
+                  // n = armes de ce type déjà affectées (Σ x sur les cibles) ; m = total de ce type.
+                  const nAssigned = openTargets.reduce(
+                    (acc, t) => acc + ((targetData[t] ?? []).find((e) => e.code === code)?.x ?? 0),
+                    0
+                  );
+                  const mTotal = weaponTotals?.[code] ?? 0;
                   return (
                     <Fragment key={code || w.display_name}>
                       <tr
+                        onClick={() => onWeaponRowClick?.(code)}
                         style={{
                           backgroundColor: "rgba(20,83,45,0.55)", // vert foncé : ligne de profil
+                          cursor: "pointer",
+                          // encart jaune : arme sélectionnée / armes de la fig sélectionnée.
+                          ...(highlighted
+                            ? { outline: "2px solid #f5c518", backgroundColor: "rgba(245,197,24,0.15)" }
+                            : {}),
                           ...(blocked ? { opacity: 0.35 } : {}),
                         }}
                       >
@@ -201,6 +219,9 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
                               </span>
                             </span>
                           ))}
+                          <span style={{ marginLeft: 8, fontWeight: 700, opacity: 0.85 }}>
+                            {nAssigned}/{mTotal}
+                          </span>
                         </td>
                         <td>{w.RNG ? `${w.RNG / inchesToSubhex}"` : "-"}</td>
                         <td>{w.NB}</td>
@@ -213,10 +234,8 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
                         return (
                         <tr
                           key={`${code}:${ln.tid}`}
-                          onClick={() => onActivateSubgroup?.(code, ln.tid)}
-                          // Attribuée (x>0) : grisée. Le sous-groupe actif est signalé par les
-                          // voiles jaune/vert sur le plateau (pas de surbrillance dans le menu).
-                          style={{ cursor: "pointer", ...(ln.x > 0 ? { opacity: 0.5 } : {}) }}
+                          // Attribuée (x>0) : grisée. L'attribution se fait via −/+/Max.
+                          style={ln.x > 0 ? { opacity: 0.5 } : undefined}
                         >
                           <td colSpan={7} style={{ paddingLeft: 18 }}>
                             <span
