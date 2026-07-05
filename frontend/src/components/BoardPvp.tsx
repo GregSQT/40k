@@ -10166,9 +10166,12 @@ export default function Board({
   const addTargetForShoot = async (targetId: string) => {
     const plan = squadShootPlanRef.current;
     if (!plan) return;
+    // Une fig déjà sélectionnée reste sélectionnée : lui attribuer une cible ne la
+    // désélectionne pas — m/x de la nouvelle cible restent scopés sur elle.
+    const keepFig = weaponSelectionMenuRef.current?.selectedFig;
     try {
       const [weapons, modelsStatus] = await Promise.all([
-        fetchWeaponsForTarget(plan.unitId, targetId),
+        fetchWeaponsForTarget(plan.unitId, targetId, keepFig),
         fetchModelsStatus(plan.unitId, targetId),
       ]);
       setWeaponSelectionMenu((prev) =>
@@ -10182,7 +10185,7 @@ export default function Board({
               // La cible cliquée devient active : réticule + voiles vert/gris des figs.
               activeTargetId: targetId,
               modelsStatus,
-              selectedFig: undefined,
+              selectedFig: keepFig,
               selectedWeaponCode: undefined,
             }
           : prev

@@ -198,9 +198,9 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
                         style={{
                           backgroundColor: "rgba(20,83,45,0.55)", // vert foncé : ligne de profil
                           cursor: "pointer",
-                          // encart jaune : arme sélectionnée / armes de la fig sélectionnée.
+                          // arme sélectionnée / armes de la fig sélectionnée : halo vert habituel.
                           ...(highlighted
-                            ? { outline: "2px solid #f5c518", backgroundColor: "rgba(245,197,24,0.15)" }
+                            ? { boxShadow: "0 0 0 2px #86efac, 0 0 10px 3px rgba(134,239,172,0.85)" }
                             : {}),
                           ...(blocked ? { opacity: 0.35 } : {}),
                         }}
