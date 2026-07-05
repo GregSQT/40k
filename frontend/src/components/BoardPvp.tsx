@@ -15,6 +15,7 @@ import type {
   TargetPreview,
   Unit,
   UnitId,
+  Weapon,
   WeaponOption,
 } from "../types/game";
 import {
@@ -1072,7 +1073,6 @@ export default function Board({
   onAssignShootTarget,
   onAutoAssignAllModels,
   onUnassignShootModel,
-  onUnassignShootWeapon,
   onCommitSquadShoot,
   onCancelSquadShoot,
   squadFightPlan = null,
@@ -1700,7 +1700,12 @@ export default function Board({
     /** Cible sélectionnée (réticule + voiles vert/gris des figs de l'unité active). */
     activeTargetId?: string;
     /** État de chaque fig vis-à-vis de la cible : can_shoot (vert/gris) + ses armes. */
-    modelsStatus?: Array<{ model_id: string; can_shoot: boolean; exhausted: boolean; weapon_codes: string[] }>;
+    modelsStatus?: Array<{
+      model_id: string;
+      can_shoot: boolean;
+      exhausted: boolean;
+      weapon_codes: string[];
+    }>;
     /** Armes par figurine (indépendant de la cible) — encart/contour jaune dès le clic-fig. */
     figWeapons?: Record<string, string[]>;
     /** Profils du menu avec can_use (par-fig + exclusion Pistol) — rechargé à chaque attribution. */
@@ -2308,7 +2313,10 @@ export default function Board({
         const mData = await mRes.json();
         if (!wData.success || !mData.success || cancelled) return;
         const figWeapons: Record<string, string[]> = {};
-        for (const m of (wData.result?.models ?? []) as Array<{ model_id: string; weapon_codes: string[] }>)
+        for (const m of (wData.result?.models ?? []) as Array<{
+          model_id: string;
+          weapon_codes: string[];
+        }>)
           figWeapons[m.model_id] = m.weapon_codes;
         const menuWeapons = (mData.result?.weapons ?? []) as Array<{
           index: number;
@@ -5015,14 +5023,21 @@ export default function Board({
     overlay.visible = !hideIndicators;
     overlay.clear();
     const menu = weaponSelectionMenu;
-    if (menu && boardConfig && (menu.activeTargetId || menu.selectedFig || menu.selectedWeaponCode)) {
+    if (
+      menu &&
+      boardConfig &&
+      (menu.activeTargetId || menu.selectedFig || menu.selectedWeaponCode)
+    ) {
       const HEX_RADIUS_H = boardConfig.hex_radius;
       const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
       const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
       const MARGIN_H = boardConfig.margin;
       const uc = (
         gameState as unknown as {
-          units_cache?: Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>;
+          units_cache?: Record<
+            string,
+            { occupied_hexes_by_model?: Record<string, [number, number]> }
+          >;
         }
       )?.units_cache;
       const centerOf = (pos: [number, number]): [number, number] => [
@@ -5037,9 +5052,10 @@ export default function Board({
         ? uc?.[String(menu.activeTargetId)]?.occupied_hexes_by_model
         : undefined;
       if (tgt && tgtByModel) {
-        const tR = resolveBaseSizeForUnitDisplay(tgt) > 1
-          ? (resolveBaseSizeForUnitDisplay(tgt) * 1.5 * HEX_RADIUS_H) / 2
-          : HEX_RADIUS_H * 0.7;
+        const tR =
+          resolveBaseSizeForUnitDisplay(tgt) > 1
+            ? (resolveBaseSizeForUnitDisplay(tgt) * 1.5 * HEX_RADIUS_H) / 2
+            : HEX_RADIUS_H * 0.7;
         const rr = tR * 1.15; // rayon du réticule
         const tickIn = rr * 0.75; // les traits cardinaux chevauchent le cercle
         const tickOut = rr * 1.35;
@@ -5054,10 +5070,14 @@ export default function Board({
           // réticule rouge par-dessus l'icône (cercle + 4 traits cardinaux)
           overlay.lineStyle(reticleW, 0xff2b2b, 1);
           overlay.drawCircle(cx, cy, rr);
-          overlay.moveTo(cx, cy - tickIn); overlay.lineTo(cx, cy - tickOut);
-          overlay.moveTo(cx, cy + tickIn); overlay.lineTo(cx, cy + tickOut);
-          overlay.moveTo(cx - tickIn, cy); overlay.lineTo(cx - tickOut, cy);
-          overlay.moveTo(cx + tickIn, cy); overlay.lineTo(cx + tickOut, cy);
+          overlay.moveTo(cx, cy - tickIn);
+          overlay.lineTo(cx, cy - tickOut);
+          overlay.moveTo(cx, cy + tickIn);
+          overlay.lineTo(cx, cy + tickOut);
+          overlay.moveTo(cx - tickIn, cy);
+          overlay.lineTo(cx - tickOut, cy);
+          overlay.moveTo(cx + tickIn, cy);
+          overlay.lineTo(cx + tickOut, cy);
         }
       }
       // 2. FONDS des figs de l'unité active :
@@ -5068,12 +5088,11 @@ export default function Board({
       const atk = units.find((u) => String(u.id) === String(menu.unitId));
       const atkByModel = uc?.[String(menu.unitId)]?.occupied_hexes_by_model;
       if (atk && atkByModel) {
-        const aR = resolveBaseSizeForUnitDisplay(atk) > 1
-          ? (resolveBaseSizeForUnitDisplay(atk) * 1.5 * HEX_RADIUS_H) / 2
-          : HEX_RADIUS_H * 0.7;
-        const statusByMid = new Map(
-          (menu.modelsStatus ?? []).map((s) => [String(s.model_id), s])
-        );
+        const aR =
+          resolveBaseSizeForUnitDisplay(atk) > 1
+            ? (resolveBaseSizeForUnitDisplay(atk) * 1.5 * HEX_RADIUS_H) / 2
+            : HEX_RADIUS_H * 0.7;
+        const statusByMid = new Map((menu.modelsStatus ?? []).map((s) => [String(s.model_id), s]));
         const figWeapons = menu.figWeapons ?? {};
         for (const [mid, pos] of Object.entries(atkByModel)) {
           const [cx, cy] = centerOf(pos);
@@ -10159,7 +10178,12 @@ export default function Board({
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     if (!data.success) throw new Error(data.error ?? "weapons_for_target rejected");
-    return (data.result?.weapons ?? []) as Array<{ code: string; weapon: Weapon; m: number; x: number }>;
+    return (data.result?.weapons ?? []) as Array<{
+      code: string;
+      weapon: Weapon;
+      m: number;
+      x: number;
+    }>;
   };
 
   // Clic sur un ennemi : AJOUTE une ligne-cible (sous chaque profil éligible). Menu permanent.
@@ -10200,7 +10224,9 @@ export default function Board({
   const fetchModelsStatus = async (
     unitId: number,
     targetId: string
-  ): Promise<Array<{ model_id: string; can_shoot: boolean; exhausted: boolean; weapon_codes: string[] }>> => {
+  ): Promise<
+    Array<{ model_id: string; can_shoot: boolean; exhausted: boolean; weapon_codes: string[] }>
+  > => {
     const res = await fetch(`/api/game/action`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -10230,14 +10256,19 @@ export default function Board({
       // Cible active + fig sélectionnée → m/x scopés sur la fig ; sinon vue escouade.
       const entries = await Promise.all(
         menu.openTargets.map(async (t) => {
-          const scoped = menu.selectedFig && t === menu.activeTargetId ? menu.selectedFig : undefined;
+          const scoped =
+            menu.selectedFig && t === menu.activeTargetId ? menu.selectedFig : undefined;
           return [t, await fetchWeaponsForTarget(plan.unitId, t, scoped)] as const;
         })
       );
-      const targetData: Record<string, Array<{ code: string; weapon: Weapon; m: number; x: number }>> = {};
+      const targetData: Record<
+        string,
+        Array<{ code: string; weapon: Weapon; m: number; x: number }>
+      > = {};
       for (const [t, w] of entries) targetData[t] = w;
       let modelsStatus = menu.modelsStatus;
-      if (menu.activeTargetId) modelsStatus = await fetchModelsStatus(plan.unitId, menu.activeTargetId);
+      if (menu.activeTargetId)
+        modelsStatus = await fetchModelsStatus(plan.unitId, menu.activeTargetId);
       // Recharge les profils du menu (can_use) → exclusion Pistol/non-Pistol en temps réel.
       const menuRes = await fetch(`/api/game/action`, {
         method: "POST",
@@ -10248,7 +10279,9 @@ export default function Board({
       const menuWeapons = menuData?.success
         ? (menuData.result?.weapons as typeof menu.menuWeapons)
         : menu.menuWeapons;
-      setWeaponSelectionMenu((prev) => (prev ? { ...prev, targetData, modelsStatus, menuWeapons } : prev));
+      setWeaponSelectionMenu((prev) =>
+        prev ? { ...prev, targetData, modelsStatus, menuWeapons } : prev
+      );
     } catch (e) {
       console.error("🔴 refreshShootState error:", e);
     }
@@ -10407,7 +10440,9 @@ export default function Board({
 
         if (availableWeapons && availableWeapons.length > 0) {
           return availableWeapons.map((w) => {
-            const canUse = (w as { can_use?: boolean; canUse?: boolean }).can_use ?? (w as { canUse?: boolean }).canUse;
+            const canUse =
+              (w as { can_use?: boolean; canUse?: boolean }).can_use ??
+              (w as { canUse?: boolean }).canUse;
             if (canUse == null)
               throw new Error(`Weapon ${w.index} of unit ${unit.id} missing can_use`);
             const flags = weaponFlags(w.index);
@@ -10879,7 +10914,7 @@ export default function Board({
           highlightedCodes={
             weaponSelectionMenu.selectedWeaponCode
               ? [weaponSelectionMenu.selectedWeaponCode]
-              : ((weaponSelectionMenu.figWeapons ?? {})[weaponSelectionMenu.selectedFig ?? ""] ?? [])
+              : (weaponSelectionMenu.figWeapons?.[weaponSelectionMenu.selectedFig ?? ""] ?? [])
           }
           weaponTotals={(() => {
             const totals: Record<string, number> = {};
@@ -10892,8 +10927,8 @@ export default function Board({
               ? (weaponSelectionMenu.modelsStatus?.find(
                   (s) => s.model_id === weaponSelectionMenu.selectedFig
                 )?.weapon_codes ??
-                  (weaponSelectionMenu.figWeapons ?? {})[weaponSelectionMenu.selectedFig] ??
-                  [])
+                weaponSelectionMenu.figWeapons?.[weaponSelectionMenu.selectedFig] ??
+                [])
               : undefined
           }
           inchesToSubhex={

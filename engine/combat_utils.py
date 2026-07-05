@@ -342,7 +342,7 @@ def socle_from_cache_entry(entry: Dict[str, Any]) -> Any:
         entry["row"],
         entry["occupied_hexes"],
         model_centers,
-        int(entry.get("orientation", 0)),
+        int(entry.get("orientation", 0)),  # fallback allowed — entrees synthetiques (mover candidat, synth model) sans orientation = facing 0
     )
 
 

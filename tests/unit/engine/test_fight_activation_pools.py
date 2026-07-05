@@ -303,12 +303,13 @@ class TestMultiHexFightInvariants:
         assert "2" in targets, "large square-base enemy must be in fight target pool via footprint distance"
 
     def test_small_square_base_not_in_ez(self):
-        """fight_target_pool_footprint_square : petits socles carrés (BASE_SIZE=1) aux mêmes positions → hors EZ.
+        """fight_target_pool_footprint_square : petits socles carrés (BASE_SIZE=1) → hors EZ.
 
-        min_distance(fp(5,10), fp(16,10)) = 11 > engagement_zone(10) → hors EZ.
+        Métrique euclidean (config engagement) : edge(socle(5,10), socle(17,10)) = 16.5
+        > engagement_minimum_clearance_norm(10) = 15.0 → hors EZ.
         """
         unit_a = {**_unit(1, 1, 5, 10), "BASE_SIZE": 1, "BASE_SHAPE": "square"}
-        unit_b = {**_unit(2, 2, 16, 10), "BASE_SIZE": 1, "BASE_SHAPE": "square"}
+        unit_b = {**_unit(2, 2, 17, 10), "BASE_SIZE": 1, "BASE_SHAPE": "square"}
         gs = _make_game_state([unit_a, unit_b], current_player=1)
         targets = _fight_build_valid_target_pool(gs, unit_a)
         assert "2" not in targets, "small square-base enemy at distance 11 must not be in fight target pool"

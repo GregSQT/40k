@@ -1631,7 +1631,7 @@ class GameStateManager:
             unit_player = int(require_key(unit, "player"))
             if unit_player not in (1, 2):
                 raise ValueError(f"Unexpected unit player id: {unit_player}")
-            orientation = int(units_cache[unit_id].get("orientation", 0))
+            orientation = int(require_key(units_cache[unit_id], "orientation"))
             model_ids = require_key(squad_models, unit_id)
             models_in_area = 0
             for mid in model_ids:
@@ -1806,7 +1806,7 @@ class GameStateManager:
         check_cfg = self.config.get("objective_control_check")
         if not check_cfg:
             return
-        points = check_cfg.get("points", [])
+        points = check_cfg.get("points", [])  # fallback allowed — config optionnelle, absence = no-op (cf. docstring)
         if not points:
             return
 

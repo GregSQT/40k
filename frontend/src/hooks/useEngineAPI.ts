@@ -322,7 +322,7 @@ function recordMovePreviewMaskLoopsTransportFromIncoming(inc: Record<string, unk
  * réponse ne la porte pas — sinon ``gameState.objective_controllers`` redevient ``undefined`` et
  * les terrains perdent la couleur du contrôleur.
  */
-let _lastObjectiveControllers: unknown = undefined;
+let _lastObjectiveControllers: unknown;
 function preserveObjectiveControllers(inc: Record<string, unknown>): void {
   if (inc.objective_controllers !== undefined) {
     _lastObjectiveControllers = inc.objective_controllers;
@@ -1286,7 +1286,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         // ne marcherait plus et il faudrait double-cliquer. La fig reste active après le choix d'arme.
         setSquadShootPlan((prev) =>
           prev
-            ? { ...prev, activeWeaponIndex: selectedWeaponIndex, activeWeaponCode: selectedWeaponCode ?? null }
+            ? {
+                ...prev,
+                activeWeaponIndex: selectedWeaponIndex,
+                activeWeaponCode: selectedWeaponCode ?? null,
+              }
             : prev
         );
         const blinkIds = Array.isArray(weaponValidTargets)
@@ -1411,14 +1415,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
     // Flux cible-d'abord : BoardPvp attribue via qty et pousse les déclarations mises à jour.
     const shootDeclarationsHandler = (e: Event) => {
-      const detail = (e as CustomEvent<{
-        declarations?: Array<{ model_id: string; weapon_index: number; target_unit_id: string }>;
-      }>).detail;
+      const detail = (
+        e as CustomEvent<{
+          declarations?: Array<{ model_id: string; weapon_index: number; target_unit_id: string }>;
+        }>
+      ).detail;
       const decls = detail?.declarations ?? [];
       const plan = squadShootPlanRef.current;
       setSquadShootPlan((prev) =>
         prev
-          ? { ...prev, declarations: decls, targets: deriveShootTargets(decls), canValidate: decls.length > 0 }
+          ? {
+              ...prev,
+              declarations: decls,
+              targets: deriveShootTargets(decls),
+              canValidate: decls.length > 0,
+            }
           : prev
       );
       if (plan) void handleSquadShootLosOverviewRef.current(plan.unitId);
@@ -4404,7 +4415,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setSquadShootPlan((prev) =>
         prev && prev.unitId === unitId ? { ...prev, activeModelId: modelId } : prev
       );
-      console.log(`[SQUAD-SHOOT] select model=${modelId} validTargets=[${validTargets.join(",")}]`);
     },
     [postEngineQuery]
   );
@@ -4489,9 +4499,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           losOverviewUnitId: unitId,
         };
       });
-      console.log(
-        `[SQUAD-SHOOT] los_overview unit=${unitId} targets=[${validTargets.join(",")}] free=${freeRaw}`
-      );
     },
     [postEngineQuery]
   );
@@ -4534,7 +4541,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       });
       setMode("squadModelShoot");
       setSelectedUnitId(uid);
-      console.log(`[SQUAD-SHOOT] start unit=${uid} models=${models.length}`);
       if (initialModelId) {
         await selectShootModelForUnit(uid, initialModelId);
       }
@@ -4578,7 +4584,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return;
       }
       if (!result || result.success === false) {
-        console.log(`[SQUAD-SHOOT] qty weapon=${weaponCode} rejeté par backend`);
         return;
       }
       const decls = (result.result?.declarations ?? []) as Array<{
@@ -4598,9 +4603,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           : prev
       );
       await handleSquadShootLosOverview(plan.unitId);
-      console.log(
-        `[SQUAD-SHOOT] qty +1 weapon=${weaponCode} → target=${targetUnitId} (${decls.length} intents)`
-      );
     },
     [executeAction, handleSquadShootLosOverview]
   );
@@ -4612,7 +4614,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const plan = squadShootPlanRef.current;
       if (!plan?.activeWeaponCode) return;
       const weaponCode = plan.activeWeaponCode;
-      console.log(`[SQUAD-SHOOT][weapon] START target=${targetUnitId} weapon=${weaponCode}`);
       let result: Awaited<ReturnType<typeof executeAction>>;
       try {
         const maxRes = await executeAction({
@@ -4623,7 +4624,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         });
         const qtyMax = Number(maxRes?.result?.qty_max ?? 0);
         if (qtyMax <= 0) {
-          console.log(`[SQUAD-SHOOT][weapon] weapon=${weaponCode} aucune fig éligible`);
           return;
         }
         result = await executeAction({
@@ -4642,7 +4642,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return;
       }
       if (!result || result.success === false) {
-        console.log(`[SQUAD-SHOOT][weapon] weapon=${weaponCode} rejeté par backend`);
         return;
       }
       const decls = (result.result?.declarations ?? []) as Array<{
@@ -4664,9 +4663,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           : prev
       );
       await handleSquadShootLosOverview(plan.unitId);
-      console.log(
-        `[SQUAD-SHOOT][weapon] terminé weapon=${weaponIndex} → ${targetUnitId} (${decls.length} intents)`
-      );
     },
     [executeAction, handleSquadShootLosOverview]
   );
@@ -4703,7 +4699,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
           : prev
       );
-      console.log(`[SQUAD-SHOOT] unassign model=${modelId} (${decls.length} intents restants)`);
     },
     [executeAction]
   );
@@ -4740,9 +4735,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
           : prev
       );
-      console.log(
-        `[SQUAD-SHOOT] unassign weapon=${weaponIndex} (${decls.length} intents restants)`
-      );
     },
     [executeAction]
   );
@@ -4752,7 +4744,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const plan = squadShootPlanRef.current;
     if (!plan) return;
     if (!plan.canValidate) {
-      console.warn("[SQUAD-SHOOT] commit ABORT (aucune cible assignée)");
       return;
     }
     try {
@@ -4790,7 +4781,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setSquadShootPlan(null);
     setMode("select");
     setSelectedUnitId(null);
-    console.log("[SQUAD-SHOOT] cancel");
   }, [executeAction]);
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -4841,9 +4831,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
           : prev
       );
-      console.log(
-        `[SQUAD-FIGHT] assign model=${modelId} → ${targetUnitId} (${decls.length} intents)`
-      );
     },
     [executeAction]
   );
@@ -4888,9 +4875,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
           : prev
       );
-      console.log(
-        `[SQUAD-FIGHT] assign weapon=${weaponIndex} → ${targetUnitId} (${decls.length} intents)`
-      );
     },
     [executeAction]
   );
@@ -4907,14 +4891,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       return;
     }
     setSquadFightPlan(null);
-    console.log(`[SQUAD-FIGHT] commit unit=${plan.unitId}`);
   }, [executeAction]);
 
   /** Annule l'attribution en cours (plan local). Les déclarations pending backend seront
    *  écrasées à la prochaine activation/assignation (declare_attack_* remplace par arme/fig). */
   const handleCancelSquadFight = useCallback(async () => {
     setSquadFightPlan(null);
-    console.log("[SQUAD-FIGHT] cancel");
   }, []);
 
   /** Allocation manuelle des pertes : le défenseur a cliqué la figurine qui encaisse. */
