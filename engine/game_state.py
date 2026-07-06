@@ -24,6 +24,39 @@ _walls_json_mtime_ns: Dict[str, int] = {}
 _HIDEABLE_KEYWORDS = ("infantry", "beast", "swarm")
 
 
+# Mots-clés autorisant une figurine à finir un move sur une surface hors rez-de-chaussée
+# (règle 13.06). Étend _HIDEABLE_KEYWORDS (infantry/beast/swarm) avec fly/monster : même
+# convention de lecture (keywordId, lower/strip) que compute_hideable, donc aligné sur la donnée.
+_FLOOR_CAPABLE_KEYWORDS = _HIDEABLE_KEYWORDS + ("fly", "monster")
+
+
+def unit_can_occupy_upper_floor(unit_keywords: Any) -> bool:
+    """True si l'unité peut être posée/finir un move sur un étage (niveau >= 1), règle 13.06.
+
+    Condition mot-clé : INFANTRY / BEASTS / SWARM / FLY / MONSTER. Les autres unités ne
+    peuvent PAS finir en hauteur (elles restent au rez-de-chaussée). Le rez-de-chaussée
+    (niveau 0) est autorisé pour toute unité : ne pas appeler ce gate pour le niveau 0.
+    """
+    if not isinstance(unit_keywords, list):
+        raise TypeError(f"UNIT_KEYWORDS must be a list, got {type(unit_keywords).__name__}")
+    for kw in unit_keywords:
+        if not isinstance(kw, dict):
+            raise TypeError(f"UNIT_KEYWORDS entries must be dicts, got {kw!r}")
+        if str(require_key(kw, "keywordId")).strip().lower() in _FLOOR_CAPABLE_KEYWORDS:
+            return True
+    return False
+
+
+def _validate_level(level: Any, unit_id: Any) -> int:
+    """Validate a vertical level (étages). 0 = ground (default business case), >= 0 int.
+
+    No silent coercion: a non-int or negative level is an explicit config error, not a fallback.
+    """
+    if isinstance(level, bool) or not isinstance(level, int) or level < 0:
+        raise ValueError(f"Unit {unit_id!r}: 'level' must be an int >= 0 (0 = ground), got {level!r}")
+    return level
+
+
 def compute_hideable(unit_keywords: Any) -> bool:
     """True if the unit has an INFANTRY/BEASTS/SWARM keyword (eligible for cover/hidden)."""
     if not isinstance(unit_keywords, list):
@@ -124,6 +157,9 @@ class GameStateManager:
             # Position
             "col": normalize_coordinates(config["col"], config["row"])[0],
             "row": normalize_coordinates(config["col"], config["row"])[1],
+            # Niveau vertical (étages, format B). 0 = rez-de-chaussée (cas métier par défaut :
+            # unité au sol), >=1 = étage d'une ruine. Ancre unité = niveau de models[0].
+            "level": _validate_level(config.get("level", 0), config["id"]),
             
             # UPPERCASE STATS (AI_TURN.md requirement) - NO DEFAULTS
             "HP_CUR": config["HP_CUR"],
@@ -767,6 +803,8 @@ class GameStateManager:
             "DISPLAY_NAME": require_key(full_unit_data, "DISPLAY_NAME"),
             "col": normalize_coordinates(chosen_col, chosen_row)[0],
             "row": normalize_coordinates(chosen_col, chosen_row)[1],
+            # Niveau vertical (étages, format B). 0 = rez-de-chaussée (défaut métier).
+            "level": _validate_level(full_unit_data.get("level", 0), str(unit_data["id"])),
             "HP_CUR": full_unit_data["HP_MAX"],
             "HP_MAX": full_unit_data["HP_MAX"],
             "MOVE": full_unit_data["MOVE"] * scale,
@@ -1484,8 +1522,48 @@ class GameStateManager:
                 "objective": bool(area.get("objective", False)),
                 "polygon_vertices": poly,
                 "hexes": polygon_to_hex_list(poly, cols, rows),
+                "floors": self._parse_terrain_floors(area, area_id, hint, cols, rows),
             })
         return areas
+
+    def _parse_terrain_floors(
+        self, area: Dict[str, Any], area_id: Any, hint: str, cols: int, rows: int
+    ) -> List[Dict[str, Any]]:
+        """Parse the optional 'floors' sub-list of a terrain area (multi-level ruins, format B).
+
+        Absence of 'floors' = ground-level-only terrain (valid business case, not an error) -> [].
+        When present, each floor is strictly validated and rasterized:
+          {level:int>=1, height_inches:float>0, polygon_vertices:[[col,row]], hexes:[[col,row]]}.
+        `level`/`height_inches` back the rules thresholds (3" Solid/Plunging, 5" vertical).
+        """
+        raw_floors = area.get("floors")
+        if raw_floors is None:
+            return []
+        if not isinstance(raw_floors, list):
+            raise ValueError(f"{hint} ('{area_id}'): 'floors' must be a list, got {raw_floors!r}")
+        floors: List[Dict[str, Any]] = []
+        for fi, floor in enumerate(raw_floors):
+            fhint = f"{hint} ('{area_id}') floors[{fi}]"
+            if not isinstance(floor, dict):
+                raise ValueError(f"{fhint}: must be an object, got {type(floor).__name__}")
+            level = require_key(floor, "level")
+            if not isinstance(level, int) or isinstance(level, bool) or level < 1:
+                raise ValueError(f"{fhint}: 'level' must be an int >= 1 (0 = ground), got {level!r}")
+            height = require_key(floor, "height_inches")
+            if not isinstance(height, (int, float)) or isinstance(height, bool) or height <= 0:
+                raise ValueError(f"{fhint}: 'height_inches' must be a number > 0, got {height!r}")
+            fvertices = require_key(floor, "vertices")
+            if not isinstance(fvertices, list) or len(fvertices) < 3:
+                raise ValueError(f"{fhint}: 'vertices' must be a list of >= 3 points, got {fvertices!r}")
+            fpoly = [[int(v[0]), int(v[1])] for v in fvertices]
+            floors.append({
+                "level": level,
+                "height_inches": float(height),
+                "polygon_vertices": fpoly,
+                "hexes": polygon_to_hex_list(fpoly, cols, rows),
+            })
+        floors.sort(key=lambda f: f["level"])
+        return floors
 
     def _resolve_shared_config_path(
         self,

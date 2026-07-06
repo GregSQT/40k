@@ -48,7 +48,7 @@ from engine.hex_utils import (
     min_distance_between_sets,
     round_base_radius_norm,
 )
-from engine.phase_handlers.geodesic_move import _euclidean_move_field
+from engine.phase_handlers.geodesic_move import _euclidean_move_field, reachable_multilevel_field
 from engine.hex_union_boundary_polygon import (
     compute_move_preview_mask_loops_world,
     _board_hex_radius_margin,
@@ -1851,6 +1851,120 @@ def _euclidean_ground_anchor_multihex(
 
 
 @profile_move_pool_build
+def _multilevel_floor_destinations(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    start_pos: Tuple[int, int],
+    move_range: float,
+    ground_obstacles: Set[Tuple[int, int]],
+    base_shape: str,
+    base_size: Any,
+    off_even: Tuple[Tuple[int, int], ...],
+    off_odd: Tuple[Tuple[int, int], ...],
+    fly_active: bool,
+) -> Dict[int, List[Tuple[int, int]]]:
+    """Destinations de move sur les ÉTAGES (niveaux >= 1), via ``reachable_multilevel_field``.
+
+    Adaptateur du chantier 3c (step 1) : connecte le champ multi-niveaux (validé) à la sémantique
+    réelle du move — budget (``move_range`` subhex → norme), floors du terrain, obstacles par niveau
+    (2b), flags mot-clé (§2.2), et validation de fin de move sur étage (13.06). Le niveau 0 (sol) N'EST
+    PAS produit ici : il reste la liste 2D existante (source unique inchangée) — on n'utilise que les
+    cellules de niveau >= 1 du champ.
+
+    Retour : ``{level>=1: [(col,row), ...]}`` (niveaux sans destination omis). ``{}`` si aucun étage
+    déclaré (garantie no-op / non-régression) ou si l'unité ne peut pas finir en hauteur (§13.06).
+
+    Limitations documentées (V1) : hauteur GLOBALE par niveau (lève si incohérente entre ruines) ;
+    l'engagement/EZ ennemie EN HAUTEUR à la destination n'est pas encore modélisé (aucun ennemi à
+    l'étage aujourd'hui) — à traiter avec la LoS/engagement 3D.
+    """
+    from engine.terrain_utils import floor_hexes_at_level, validate_floor_placement
+    from engine.game_state import unit_can_occupy_upper_floor
+
+    terrain_areas = game_state.get("terrain_areas", [])  # get allowed (peut être vide)
+    present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})
+    if not present:
+        return {}  # aucun étage → no-op (non-régression du mouvement 2D)
+    if not unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS")):
+        return {}  # unité incapable de finir en hauteur (§13.06) → reste au sol
+
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    walls = game_state.get("wall_hexes", set())  # get allowed
+    inches_to_subhex = int(require_key(game_state, "inches_to_subhex"))
+    unit_id_str = str(require_key(unit, "id"))
+
+    floor_hexes_by_level = {lv: floor_hexes_at_level(terrain_areas, lv) for lv in present}
+    height_by_level: Dict[int, float] = {0: 0.0}
+    for a in terrain_areas:
+        for fl in a.get("floors", []):
+            lv = int(fl["level"])
+            hn = float(fl["height_inches"]) * inches_to_subhex * ENGAGEMENT_NORM_HEX_WIDTH
+            if lv in height_by_level and abs(height_by_level[lv] - hn) > 1e-6:
+                raise ValueError(
+                    f"_multilevel_floor_destinations: niveau {lv} avec hauteurs incohérentes entre "
+                    f"ruines ({height_by_level[lv]:.3f} vs {hn:.3f}) — hauteur globale par niveau non supportée"
+                )
+            height_by_level[lv] = hn
+
+    # PRÉ-CHECK de portée (perf) : borne basse pour finir sur un étage L = distance directe
+    # (murs ignorés) start→cellule + montée height[L]. Si AUCUN étage n'a une cellule dans le
+    # budget, aucune destination d'étage possible → retour immédiat SANS lancer de champ (évite le
+    # coût du pathfinding pour la majorité des unités, loin de toute ruine).
+    from engine.hex_utils import _hex_center as _hc
+    _budget_norm = move_range * ENGAGEMENT_NORM_HEX_WIDTH
+    _sx, _sy = _hc(start_pos[0], start_pos[1])
+    _reachable_any = False
+    for _lv, _fh in floor_hexes_by_level.items():
+        _vc = height_by_level[_lv]
+        for _c, _r in _fh:
+            _hx, _hy = _hc(_c, _r)
+            if math.hypot(_hx - _sx, _hy - _sy) + _vc <= _budget_norm + 1e-6:
+                _reachable_any = True
+                break
+        if _reachable_any:
+            break
+    if not _reachable_any:
+        return {}
+
+    from engine.hex_utils import get_neighbors as _neighbors
+    walls_set = set(walls)
+    obstacles_by_level: Dict[int, Set[Tuple[int, int]]] = {0: set(ground_obstacles)}
+    occupied_by_level: Dict[int, Set[Tuple[int, int]]] = {}
+    for lv, fh in floor_hexes_by_level.items():
+        figs_lv = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str, level=lv)
+        occupied_by_level[lv] = figs_lv
+        # Anneau : voisins HORS-étage des cellules d'étage → confine le champ à l'empreinte sans
+        # matérialiser tout le plateau. PERF : O(périmètre) au lieu de O(board_cols×board_rows) — sur
+        # un board 220×300 le complément faisait indexer 66 000 obstacles par relance de geodesic_field.
+        ring = {nb for cell in fh for nb in _neighbors(cell[0], cell[1]) if nb not in fh}
+        obstacles_by_level[lv] = ring | walls_set | figs_lv
+
+    field = reachable_multilevel_field(
+        start_pos, 0, base_shape, base_size, off_even, off_odd,
+        board_cols, board_rows, obstacles_by_level, floor_hexes_by_level, height_by_level,
+        move_range * ENGAGEMENT_NORM_HEX_WIDTH, allow_vertical=True, ignore_vertical_cost=fly_active,
+    )
+
+    unit_stub = {
+        "id": unit_id_str,
+        "UNIT_KEYWORDS": require_key(unit, "UNIT_KEYWORDS"),
+        "BASE_SHAPE": base_shape,
+        "BASE_SIZE": base_size,
+        "orientation": int(require_key(unit, "orientation")) if "orientation" in unit else 0,
+    }
+    result: Dict[int, List[Tuple[int, int]]] = {lv: [] for lv in present}
+    for (c, r, lv), _d in field.items():
+        if lv == 0:
+            continue  # le sol reste la liste 2D existante (source unique)
+        if (c, r) in walls or (c, r) in occupied_by_level.get(lv, set()):
+            continue  # destination jamais sur mur ni sur case occupée du niveau (03.01)
+        ok, _reason = validate_floor_placement(unit_stub, c, r, lv, terrain_areas)
+        if ok:
+            result[lv].append((c, r))
+    return {lv: cells for lv, cells in result.items() if cells}
+
+
 def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str, read_only: bool = False) -> List[Tuple[int, int]]:
     """
     Build valid movement destinations using BFS pathfinding.
@@ -1908,10 +2022,16 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     enemy_adjacent_hexes = game_state[cache_key]
 
     unit_id_str = str(unit["id"])
-    occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
+    # Collision niveau-consciente : les figs d'un AUTRE niveau que le mover ne bloquent pas (étages
+    # différents ne se chevauchent pas). Niveau du mover = niveau de l'unité (ancre). Tout au niveau 0
+    # aujourd'hui → filtre par 0 == comportement historique (zéro régression).
+    _mover_level = int(unit.get("level", 0))  # get allowed
+    occupied_positions = build_occupied_positions_set(
+        game_state, exclude_unit_id=unit_id_str, level=_mover_level
+    )
     current_player_int = int(current_player)
     enemy_occupied = build_enemy_occupied_positions_set(
-        game_state, current_player=current_player_int
+        game_state, current_player=current_player_int, level=_mover_level
     )
     units_cache = require_key(game_state, "units_cache")
     ez = get_engagement_zone(game_state)
@@ -2376,6 +2496,20 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         return valid_destinations
 
     game_state["valid_move_destinations_pool"] = valid_destinations
+    # --- Multi-niveaux (étages, chantier 3c step 1 — cible forme B : dict par niveau) ---
+    # Le sol (niveau 0) reste EXACTEMENT la liste 2D ci-dessus (source unique inchangée). On ajoute
+    # les destinations d'étage (niveaux >= 1) dans un dict séparé. ``valid_move_destinations_pool``
+    # (liste) sert de MIROIR TRANSITOIRE = pool[0] → le front actuel ne change pas tant qu'il n'est pas
+    # migré vers le dict ``_by_level``. Sans étage déclaré, l'adaptateur renvoie {} (no-op, zéro régression).
+    # (Chemin FLY : retourne plus haut ; ``_fly_active`` est donc False ici. Fly+étages = étape ultérieure.)
+    _floor_dest = _multilevel_floor_destinations(
+        game_state, unit, start_pos, move_range,
+        (set(wall_hexes_set) | occupied_positions) - {start_pos},
+        unit["BASE_SHAPE"], base_size, _off_even, _off_odd, _fly_active,
+    )
+    _pool_by_level: Dict[int, List[Tuple[int, int]]] = {0: valid_destinations}
+    _pool_by_level.update(_floor_dest)
+    game_state["valid_move_destinations_pool_by_level"] = _pool_by_level
     game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
 
     if is_single_hex:
@@ -2788,9 +2922,19 @@ def movement_preview_move_plan(
         # (``_movement_engagement_violates``, même géométrie que le pathfinding → IA == PvP).
         # On désactive le check legacy centre-à-centre de ``validate_move_plan``.
         c_individual["forbid_enemy_er"] = False
+    # Normalisation niveau (étages) : entrée 3-uplet ou 4-uplet ; niveau absent (None) = « garder le
+    # niveau courant » de la figurine (models_cache). ``norm`` = liste de (mid, col, row, level_effectif).
+    _mc_norm = require_key(game_state, "models_cache")
+    norm: List[Tuple[str, int, int, int]] = []
+    for e in plan:
+        _mid = str(e[0])
+        _lvl_raw = int(e[3]) if len(e) >= 4 and e[3] is not None else None
+        _lvl_eff = _lvl_raw if _lvl_raw is not None else int(require_key(_mc_norm[_mid], "level"))
+        norm.append((_mid, int(e[1]), int(e[2]), _lvl_eff))
+
     # Cohesion 03.03 par fig : deleguee a coherency_violation_flags (source UNIQUE partagee avec le
     # commit), qui respecte game_rules.cohesion_distance_mode (euclidean | footprint).
-    positions: List[Tuple[int, int]] = [(int(nc), int(nr)) for _, nc, nr in plan]
+    positions: List[Tuple[int, int]] = [(nc, nr) for _, nc, nr, _lv in norm]
     n = len(positions)
 
     # Calcul des empreintes par fig
@@ -2812,19 +2956,20 @@ def movement_preview_move_plan(
 
     _mc_coh = require_key(game_state, "models_cache")
     cohesion_models = [
-        {**_mc_coh[str(mid)], "col": int(nc), "row": int(nr)} for mid, nc, nr in plan
+        {**_mc_coh[str(mid)], "col": nc, "row": nr} for mid, nc, nr, _lv in norm
     ]
     cohesion_red = coherency_violation_flags(cohesion_models, game_state)
 
+    from engine.terrain_utils import validate_floor_placement
     wall_hexes_set = game_state.get("wall_hexes", set())
-    other_occ_set: Set[Tuple[int, int]] = set()
-    for sid, entry in units_cache.items():
-        if str(sid) == str(squad_id):
-            continue
-        occ = entry.get("occupied_hexes")
-        if occ:
-            for cell in occ:
-                other_occ_set.add((int(cell[0]), int(cell[1])))
+    terrain_areas = require_key(game_state, "terrain_areas")
+    unit_keywords = require_key(unit_obj, "UNIT_KEYWORDS") if unit_obj else []
+    # Occupation des autres escouades PAR NIVEAU (figs à des étages différents ne se gênent pas ;
+    # murs verticaux prolongés gérés par wall_hexes, cf. stage.md). Calcul unique par niveau du plan.
+    other_occ_by_level: Dict[int, Set[Tuple[int, int]]] = {
+        lv: build_occupied_positions_set(game_state, exclude_unit_id=str(squad_id), level=lv)
+        for lv in {lv for _, _, _, lv in norm}
+    }
 
     # Collision intra-escouade : clearance EUCLIDIENNE par-figurine (≠ intersection de
     # footprints hex, qui sous-estime le disque et laisse passer un chevauchement de socle
@@ -2834,7 +2979,7 @@ def movement_preview_move_plan(
     from engine.hex_utils import Socle, footprints_overlap
     _models_cache_intra = require_key(game_state, "models_cache")
     intra_socles: List["Socle"] = []
-    for (mid, nc, nr), fp_par in zip(plan, footprints):
+    for (mid, nc, nr, _lv), fp_par in zip(norm, footprints):
         m = require_key(_models_cache_intra, str(mid))
         m_shape = require_key(m, "BASE_SHAPE")
         m_base = require_key(m, "BASE_SIZE")
@@ -2850,19 +2995,35 @@ def movement_preview_move_plan(
             Socle(shape=m_shape, base_size=m_base, col=int(nc), row=int(nr), fp=m_fp)
         )
 
+    levels = [lv for _, _, _, lv in norm]
     per_model: Dict[str, bool] = {}
-    for idx, (mid, nc, nr) in enumerate(plan):
+    for idx, (mid, nc, nr, lv) in enumerate(norm):
         base_valid = validate_move_plan(
             [(str(mid), int(nc), int(nr))], game_state, c_individual
         )
         fp = footprints[idx]
         fp_wall = bool(wall_hexes_set and fp & wall_hexes_set)
-        fp_other = bool(other_occ_set and fp & other_occ_set)
+        _other_lv = other_occ_by_level.get(lv, set())
+        fp_other = bool(_other_lv and fp & _other_lv)
+        # Collision intra-escouade uniquement entre figs AU MÊME NIVEAU (étages différents = pas de gêne).
         fp_intra = any(
             footprints_overlap(intra_socles[idx], intra_socles[j])
             for j in range(n)
-            if j != idx
+            if j != idx and levels[j] == lv
         )
+        # Pose sur étage (niveau >= 1) : règle 13.06 (mot-clé + empreinte entièrement sur l'étage).
+        floor_bad = False
+        if lv >= 1:
+            _fok, _ = validate_floor_placement(
+                {
+                    "id": squad_id, "UNIT_KEYWORDS": unit_keywords,
+                    "BASE_SHAPE": require_key(_mc_norm[str(mid)], "BASE_SHAPE"),
+                    "BASE_SIZE": require_key(_mc_norm[str(mid)], "BASE_SIZE"),
+                    "orientation": int(_mc_norm[str(mid)].get("orientation", 0)),
+                },
+                int(nc), int(nr), lv, terrain_areas,
+            )
+            floor_bad = not _fok
         # Board ×N : voile rouge si l'empreinte de la fig viole l'EZ ennemie (formule euclidienne
         # par-mover, identique au pathfinding). ez <= 1 : déjà couvert par validate_move_plan.
         ez_violation = (
@@ -2875,8 +3036,30 @@ def movement_preview_move_plan(
         )
         per_model[str(mid)] = bool(
             base_valid and not fp_wall and not fp_other and not fp_intra
-            and not cohesion_red[idx] and not ez_violation
+            and not cohesion_red[idx] and not ez_violation and not floor_bad
         )
+        # [DIAG MOVE — TEMPORAIRE] à retirer : niveau du mover + flag(s) au voile rouge.
+        _cur_lv = int(require_key(_mc_norm[str(mid)], "level"))
+        _mover_pl = int(require_key(unit_obj, "player")) if unit_obj else -1
+        print(f"[DIAG MOVE] mid={mid} pos=({nc},{nr}) plan_lv={lv} cur_lv={_cur_lv} player={_mover_pl} "
+              f"valid={per_model[str(mid)]} | base_valid={base_valid} wall={fp_wall} "
+              f"other(lvl{lv})={fp_other} intra={fp_intra} cohesion={cohesion_red[idx]} "
+              f"ez={ez_violation} floor_bad={floor_bad}", flush=True)
+
+    # [DIAG MOVE — TEMPORAIRE] : ennemis vus par le mover, avec leur niveau (pour corréler ez).
+    if unit_obj is not None:
+        _mp = int(require_key(unit_obj, "player"))
+        _mc_diag = require_key(game_state, "models_cache")
+        _sm_diag = require_key(game_state, "squad_models")
+        for _euid, _ee in units_cache.items():
+            if int(require_key(_ee, "player")) == _mp:
+                continue
+            _elvls = sorted({
+                int(require_key(_mc_diag[_m], "level"))
+                for _m in _sm_diag.get(str(_euid), []) if _m in _mc_diag
+            })
+            print(f"[DIAG MOVE] enemy={_euid} anchor=({_ee.get('col')},{_ee.get('row')}) "
+                  f"model_levels={_elvls}", flush=True)
 
     coherency_ok = not any(cohesion_red)
     all_valid = len(per_model) > 0 and all(per_model.values())
@@ -2909,18 +3092,23 @@ def movement_commit_move_plan_handler(
     raw_plan = action["plan"]
     if not isinstance(raw_plan, list) or not raw_plan:
         return False, {"error": "empty_move_plan", "unitId": squad_id}
-    plan: List[Tuple[str, int, int]] = []
+    # Entrées 3 (sol / niveau courant) ou 4 (avec niveau de destination, étages). Le niveau None
+    # = « garder le niveau courant » (move horizontal d'une fig déjà à l'étage).
+    plan: List[Tuple[str, int, int, Optional[int]]] = []
     for entry in raw_plan:
-        if not (isinstance(entry, (list, tuple)) and len(entry) == 3):
+        if not (isinstance(entry, (list, tuple)) and len(entry) in (3, 4)):
             raise ValueError(
-                f"commit_move_plan: plan entry must be [model_id, col, row], got {entry!r}"
+                f"commit_move_plan: plan entry must be [model_id, col, row(, level)], got {entry!r}"
             )
-        plan.append((str(entry[0]), int(entry[1]), int(entry[2])))
+        lvl = int(entry[3]) if len(entry) == 4 else None
+        if lvl is not None and lvl < 0:
+            raise ValueError(f"commit_move_plan: level must be >= 0, got {entry!r}")
+        plan.append((str(entry[0]), int(entry[1]), int(entry[2]), lvl))
 
     squad_models = require_key(game_state, "squad_models")
     models_cache = require_key(game_state, "models_cache")
     alive = {m for m in squad_models.get(str(squad_id), []) if m in models_cache}  # get allowed
-    plan_ids = {mid for mid, _, _ in plan}  # get allowed
+    plan_ids = {mid for mid, _, _, _ in plan}  # get allowed
     if plan_ids != alive:
         return False, {
             "error": "plan_models_mismatch",
@@ -2972,12 +3160,14 @@ def movement_commit_move_plan_handler(
     entry = game_state.get("units_cache", {}).get(str(squad_id))  # get allowed
     if entry is not None:  # get allowed
         set_unit_coordinates(unit, int(entry["col"]), int(entry["row"]))
+        # Sync niveau de l'ancre (étages) vers la liste units (API), miroir de la sync col/row.
+        unit["level"] = int(require_key(entry, "level"))
 
     # Log de mouvement par-figurine (modele de la charge, sans roll sauf advance).
     # Ligne unite = message ancre ; detail expand/collapse = moveDetails par figurine.
     dest_anchor_col, dest_anchor_row = require_unit_position(unit, game_state)
     move_details = []
-    for mid, nc, nr in plan:
+    for mid, nc, nr, _lv in plan:
         _fc, _fr = models_before[mid]
         move_details.append(
             {

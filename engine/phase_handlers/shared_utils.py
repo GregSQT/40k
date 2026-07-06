@@ -286,9 +286,33 @@ def _compute_unit_occupied_hexes(
     return compute_occupied_hexes(col, row, base_shape, base_size, orientation)
 
 
+def _occupied_hexes_at_level(
+    game_state: Dict[str, Any], level: int, skip: "Any",
+) -> Set[Tuple[int, int]]:
+    """Empreintes par-figurine des unités vivantes situées AU NIVEAU ``level`` (étages).
+
+    ``skip(uid, entry) -> bool`` filtre les unités (exclusion / camp). Source par-figurine
+    (``models_cache`` + niveau) car ``occupied_hexes`` du units_cache est l'union tous niveaux.
+    """
+    units_cache = require_key(game_state, "units_cache")
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    occupied: Set[Tuple[int, int]] = set()
+    for uid, entry in units_cache.items():
+        if skip(uid, entry):
+            continue
+        for mid in squad_models.get(str(uid), []):  # get allowed
+            m = models_cache.get(mid)
+            if m is None or int(require_key(m, "level")) != level:
+                continue
+            occupied |= compute_candidate_footprint(int(m["col"]), int(m["row"]), m, game_state)
+    return occupied
+
+
 def build_occupied_positions_set(
     game_state: Dict[str, Any],
     exclude_unit_id: Optional[str] = None,
+    level: Optional[int] = None,
 ) -> Set[Tuple[int, int]]:
     """Build set of all cells occupied by living units (full footprints).
 
@@ -298,10 +322,17 @@ def build_occupied_positions_set(
     Args:
         game_state: Game state with units_cache
         exclude_unit_id: Optional unit to exclude (e.g. the moving unit)
+        level: None = toutes figs confondues (comportement historique). Un entier restreint
+            aux figurines de ce niveau (mouvement vertical : deux figs à des étages différents
+            ne se gênent pas — murs verticaux prolongés gérés séparément, cf. stage.md).
 
     Returns:
         Set of (col, row) cells occupied by other units
     """
+    if level is not None:
+        return _occupied_hexes_at_level(
+            game_state, level, skip=lambda uid, entry: uid == exclude_unit_id
+        )
     units_cache = require_key(game_state, "units_cache")
     occupied: Set[Tuple[int, int]] = set()
     for uid, entry in units_cache.items():
@@ -319,10 +350,19 @@ def build_enemy_occupied_positions_set(
     game_state: Dict[str, Any],
     *,
     current_player: int,
+    level: Optional[int] = None,
 ) -> Set[Tuple[int, int]]:
-    """Cells occupied by opposing players' units (full footprints)."""
-    units_cache = require_key(game_state, "units_cache")
+    """Cells occupied by opposing players' units (full footprints).
+
+    ``level`` : None = tous niveaux (historique) ; un entier restreint au niveau donné.
+    """
     current_player_int = int(current_player)
+    if level is not None:
+        return _occupied_hexes_at_level(
+            game_state, level,
+            skip=lambda uid, entry: int(require_key(entry, "player")) == current_player_int,
+        )
+    units_cache = require_key(game_state, "units_cache")
     occupied: Set[Tuple[int, int]] = set()
     for uid, entry in units_cache.items():
         player_raw = require_key(entry, "player")
@@ -524,13 +564,17 @@ def _build_models_for_unit(
     selected_rng = unit.get("selectedRngWeaponIndex")
     selected_cc = unit.get("selectedCcWeaponIndex")
 
+    # Niveau vertical de l'unité (ancre). Chaque figurine hérite du niveau de l'unité
+    # sauf override explicite spec["level"] (escouade répartie sur plusieurs étages, §2.5).
+    unit_level = int(unit.get("level", 0))
+
     explicit_models = unit.get("models")
     if isinstance(explicit_models, list) and len(explicit_models) > 0:
         # Multi-figurine squad with explicit positions.
         model_specs = explicit_models
     else:
         # Backward compat: single-figurine squad derived from unit fields.
-        model_specs = [{"col": unit_col, "row": unit_row, "HP_CUR": unit_hp_cur}]
+        model_specs = [{"col": unit_col, "row": unit_row, "HP_CUR": unit_hp_cur, "level": unit_level}]
 
     model_count_at_start = len(model_specs)
     # points_per_hp — homogeneous case (all models share unit HP_MAX). For
@@ -560,6 +604,7 @@ def _build_models_for_unit(
             "role": spec_role,
             "col": spec_col,
             "row": spec_row,
+            "level": int(spec.get("level", unit_level)),
             "DISPLAY_NAME": spec.get("DISPLAY_NAME", unit.get("DISPLAY_NAME")),
             "ICON": spec.get("ICON", unit.get("ICON")),
             "ICON_SCALE": spec.get("ICON_SCALE", unit.get("ICON_SCALE")),
@@ -654,6 +699,10 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
         units_cache[unit_id] = {
             "col": col,
             "row": row,
+            # Niveau vertical de l'ancre (étages, format B). 0 = sol (défaut métier).
+            # occupied_hexes/occupation_map restent 2D à ce stade : la gestion des
+            # collisions par niveau relève du chantier occupation & placement.
+            "level": int(unit.get("level", 0)),
             "HP_CUR": hp_cur,
             "player": player,
             # VALUE (points) : source de verite reward, requis par resolve_squad_shoot
@@ -2780,13 +2829,18 @@ def _recompute_squad_anchor(game_state: Dict[str, Any], squad_id: str) -> Option
 
 
 def update_model_position(
-    game_state: Dict[str, Any], model_id: str, col: int, row: int
+    game_state: Dict[str, Any], model_id: str, col: int, row: int,
+    level: Optional[int] = None,
 ) -> None:
     """Met a jour la position d une figurine et propage a units_cache si ancre.
 
     Pour les escouades mono-figurine, met aussi a jour units_cache directement.
     Pour les multi-figurines (futures tranches), n update units_cache que si la
     figurine est l ancre courante (index minimum vivant).
+
+    ``level`` (étages) : si fourni, écrit ``model["level"]``. None = ne touche PAS
+    le niveau (déplacement horizontal pur). Le niveau de l'ancre est ensuite
+    resynchronisé sur ``units_cache[squad]["level"]`` (invariant unité = ancre).
     """
     require_key(game_state, "models_cache")
     model = game_state["models_cache"].get(model_id)
@@ -2795,6 +2849,10 @@ def update_model_position(
     norm_col, norm_row = normalize_coordinates(int(col), int(row))
     model["col"] = norm_col
     model["row"] = norm_row
+    if level is not None:
+        if isinstance(level, bool) or not isinstance(level, int) or level < 0:
+            raise ValueError(f"update_model_position: level must be an int >= 0, got {level!r}")
+        model["level"] = level
 
     squad_id = str(model["squad_id"])
     # PR4 4e-i : sync occupied_hexes_by_model
@@ -2815,6 +2873,15 @@ def update_model_position(
             or int(units_entry.get("row", -1)) != anchor_row
         ):
             update_units_cache_position(game_state, squad_id, anchor_col, anchor_row)
+    # Sync du niveau de l'ancre (fig vivante d'index min) vers units_cache[squad]["level"] :
+    # invariant "niveau de l'unité = niveau de l'ancre", cohérent avec la sync col/row ci-dessus.
+    units_entry_lvl = game_state.get("units_cache", {}).get(squad_id)  # get allowed
+    if units_entry_lvl is not None:
+        for mid in game_state.get("squad_models", {}).get(squad_id, []):  # get allowed
+            anchor_model = game_state["models_cache"].get(mid)
+            if anchor_model is not None:
+                units_entry_lvl["level"] = int(require_key(anchor_model, "level"))
+                break
     _recompute_squad_cache(game_state, squad_id)
 
 
@@ -3027,17 +3094,20 @@ def validate_move_plan(
         cache_key = f"enemy_adjacent_hexes_player_{player}"
         enemy_er_zone = require_key(game_state, cache_key)
 
-    # Cellules occupees par les AUTRES escouades (collisions interdites).
-    other_occupied: Set[Tuple[int, int]] = set()
+    # Cellules occupees par les AUTRES escouades, PAR NIVEAU (étages) : une fig ne collisionne qu'avec
+    # les figs d'un autre squad AU MÊME NIVEAU (deux figs à des étages différents ne se chevauchent pas).
+    # Tout au niveau 0 aujourd'hui → identique au comportement historique (union = niveau 0).
+    other_occupied_by_level: Dict[int, Set[Tuple[int, int]]] = {}
     if not c["allow_collisions"]:
-        units_cache = game_state.get("units_cache", {})  # get allowed
-        for sid, entry in units_cache.items():
-            if str(sid) == squad_id:
-                continue
-            occ = entry.get("occupied_hexes")
-            if occ:
-                for cell in occ:
-                    other_occupied.add((int(cell[0]), int(cell[1])))
+        plan_levels: Set[int] = set()
+        for _pmid, _, _ in plan:
+            _pm = models_cache.get(_pmid)
+            if _pm is not None:
+                plan_levels.add(int(_pm.get("level", 0)))  # get allowed
+        for _lv in plan_levels:
+            other_occupied_by_level[_lv] = build_occupied_positions_set(
+                game_state, exclude_unit_id=squad_id, level=_lv
+            )
 
     # Budget per-model depuis position d origine actuelle.
     origin_positions: Dict[str, Tuple[int, int]] = {}
@@ -3055,8 +3125,11 @@ def validate_move_plan(
         cell = (nc, nr)
         if not c["allow_walls"] and wall_hexes and cell in wall_hexes:
             return False
-        if not c["allow_collisions"] and cell in other_occupied:
-            return False
+        if not c["allow_collisions"]:
+            _fm = models_cache.get(mid)
+            _flv = int(_fm.get("level", 0)) if _fm is not None else 0  # get allowed
+            if cell in other_occupied_by_level.get(_flv, set()):
+                return False
         if c["forbid_enemy_er"] and enemy_er_zone and cell in enemy_er_zone:
             return False
         if cell in new_cells:
@@ -3769,13 +3842,18 @@ def charge_build_valid_plan(
 
 
 def commit_move(
-    plan: List[Tuple[str, int, int]],
+    plan: "List[Tuple[str, int, int]] | List[Tuple[str, int, int, int]]",
     game_state: Dict[str, Any],
     move_type: str,
 ) -> None:
     """Applique le plan complet en une passe et positionne les flags post-move.
 
     Pre-condition: plan validé via validate_move_plan (ce helper ne re-valide pas).
+
+    Entrées de plan : ``(mid, col, row)`` OU ``(mid, col, row, level)`` (étages). Un 4ᵉ élément
+    fixe le niveau de destination ; **son absence signifie « garder le niveau courant »**
+    (``level=None`` → ``update_model_position`` ne touche pas au niveau) — jamais un reset à 0,
+    sinon une fig déjà à l'étage serait remise au sol par un move horizontal.
     Flags:
         "advance"   → units_advanced.add(squad_id)
         "fall_back" → units_fled.add(squad_id)
@@ -3797,8 +3875,10 @@ def commit_move(
     _old_entry = require_key(game_state, "units_cache").get(squad_id)
     _old_col = _old_entry.get("col") if isinstance(_old_entry, dict) else None
     _old_row = _old_entry.get("row") if isinstance(_old_entry, dict) else None
-    for mid, nc, nr in plan:
-        update_model_position(game_state, mid, nc, nr)
+    for entry in plan:
+        mid, nc, nr = str(entry[0]), int(entry[1]), int(entry[2])
+        lvl = int(entry[3]) if len(entry) >= 4 and entry[3] is not None else None
+        update_model_position(game_state, mid, nc, nr, level=lvl)
     if move_type == "advance":
         game_state.setdefault("units_advanced", set()).add(squad_id)
     elif move_type == "fall_back":

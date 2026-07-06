@@ -1564,10 +1564,17 @@ export const BoardWithAPI: React.FC = () => {
   const [pauseAIForTutorial, setPauseAIForTutorial] = useState(false);
   /** Synchrone avec shouldPauseAI du TutorialProvider (évite course : phase charge avant pause state). */
   const tutorialPauseAiSyncRef = useRef(false);
+  // Étages (multi-niveaux) : niveau d'affichage courant, remonté ici (au-dessus de useEngineAPI)
+  // pour que le déploiement/move à l'étage puisse lire le niveau ciblé. Le bouton d'étage vit dans
+  // BoardPvp (props ci-dessous). Ref synchronisée = lecture stable dans les callbacks du hook.
+  const [currentLevel, setCurrentLevel] = useState(0);
+  const currentLevelRef = useRef(0);
+  currentLevelRef.current = currentLevel;
   const apiProps = useEngineAPI({
     getTutorialShootOptionsRef,
     stopAiAfterPhaseChangeRef,
     onStopAfterPhaseChange: () => setPauseAIForTutorial(true),
+    currentLevelRef,
   });
   const gameLog = useGameLog(apiProps.gameState?.currentTurn ?? 1);
 
@@ -5028,6 +5035,8 @@ export const BoardWithAPI: React.FC = () => {
         <BoardColumnWithTutorial boardRows={boardConfig?.rows ?? 21}>
           <BoardPvpWithTutorialAdvance
             units={apiProps.units}
+            currentLevel={currentLevel}
+            onCurrentLevelChange={setCurrentLevel}
             selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId}
             ruleChoiceHighlightedUnitId={highlightedRuleChoiceUnitId}
             showHexCoordinates={settings.showDebug}

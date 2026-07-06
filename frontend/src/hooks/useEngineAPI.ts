@@ -457,6 +457,9 @@ export interface UseEngineAPIOptions {
   stopAiAfterPhaseChangeRef?: MutableRefObject<boolean>;
   /** Appelé immédiatement quand on break pour changement de phase ; permet de mettre pauseAI à true avant que le useEffect ne re-déclenche l'IA. */
   onStopAfterPhaseChange?: () => void;
+  /** Étage courant (multi-niveaux) : niveau de destination pour le déploiement/move à l'étage.
+   *  Ref (pas valeur) pour rester stable dans les callbacks. 0 = sol → plans 3-uplets inchangés. */
+  currentLevelRef?: MutableRefObject<number>;
 }
 
 /** Props blink passées au plateau : même forme en chargement et en jeu pour stabiliser l’inférence d’union (BoardWithAPI). */
@@ -484,6 +487,7 @@ const deriveShootTargets = (
 export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const stopAiAfterPhaseChangeRef = options?.stopAiAfterPhaseChangeRef;
   const onStopAfterPhaseChange = options?.onStopAfterPhaseChange;
+  const currentLevelRef = options?.currentLevelRef;
   const [gameState, setGameState] = useState<APIGameState | null>(null);
   const [endlessDutyState, setEndlessDutyState] = useState<EndlessDutyState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -547,8 +551,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
    */
   const [deployPlan, setDeployPlan] = useState<{
     unitId: number;
-    models: Record<string, { col: number; row: number }>;
-    originModels: Record<string, { col: number; row: number }>;
+    /** ``level`` (étages) : niveau de vue CAPTURÉ AU DROP de la fig (pas au commit) — sinon
+     *  changer d'étage entre la pose et Valider perdait le niveau (tout committé au sol). */
+    models: Record<string, { col: number; row: number; level?: number }>;
+    originModels: Record<string, { col: number; row: number; level?: number }>;
     activeModelId: string | null;
     perModelValid: Record<string, boolean>;
     coherencyOk: boolean;
@@ -5095,8 +5101,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   /** Dry-run du plan de déploiement → maj voile rouge / cohésion / can_validate. */
   const refreshDeployPlanValidity = useCallback(
-    async (unitId: number, models: Record<string, { col: number; row: number }>) => {
-      const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row]);
+    async (unitId: number, models: Record<string, { col: number; row: number; level?: number }>) => {
+      // Étages : niveau PAR FIGURINE, capturé au drop (models[mid].level) — PAS le niveau de vue
+      // au moment du refresh (sinon changer d'étage entre la pose et la validation perd le niveau).
+      // 0 = sol → 3-uplet inchangé ; >= 1 → 4-uplet [mid,col,row,level] (voile rouge 13.06).
+      const plan = Object.entries(models).map(([mid, p]) =>
+        (p.level ?? 0) >= 1 ? [mid, p.col, p.row, p.level] : [mid, p.col, p.row]
+      );
       let result: Record<string, unknown> | null = null;
       try {
         result = await postEngineQuery({
@@ -5165,9 +5176,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (!rawPlan || !Array.isArray(rawPlan)) {
         throw new Error("[DEPLOY] deploy_generate_formation: plan absent dans la réponse");
       }
-      const models: Record<string, { col: number; row: number }> = {};
+      // Étages : niveau de vue capturé AU DROP de la formation (par fig, comme le drop individuel).
+      const dropLevel = currentLevelRef?.current ?? 0;
+      const models: Record<string, { col: number; row: number; level?: number }> = {};
       for (const [mid, c, r] of rawPlan) {
-        models[String(mid)] = { col: c, row: r };
+        models[String(mid)] = { col: c, row: r, level: dropLevel };
       }
       const perModelValid = (result?.per_model ?? {}) as Record<string, boolean>;
       const coherencyOk = result?.coherency_ok === true;
@@ -5187,7 +5200,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           : prev
       );
     },
-    [postEngineQuery]
+    [postEngineQuery, currentLevelRef]
   );
 
   /** Sélectionne une figurine à repositionner : récupère son pool FILTRÉ (deploy_model_destinations)
@@ -5198,11 +5211,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       deploySelectSessionRef.current += 1;
       const sessionAtCall = deploySelectSessionRef.current;
       const currentPlan = deployPlanRef.current;
-      const provisionalPlan: Record<string, [number, number]> = {};
+      // (col,row,level) par sœur : le niveau capturé au drop voyage jusqu'au pool → une sœur à
+      // l'étage n'est plus re-dérivée au sol (et ne bloque plus une fig au sol). Collision inter-étage.
+      const provisionalPlan: Record<string, [number, number, number]> = {};
       if (currentPlan) {
         for (const [mid, pos] of Object.entries(currentPlan.models)) {
           if (mid !== modelId) {
-            provisionalPlan[mid] = [pos.col, pos.row];
+            provisionalPlan[mid] = [pos.col, pos.row, pos.level ?? 0];
           }
         }
       }
@@ -5210,6 +5225,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         action: "deploy_model_destinations",
         model_id: modelId,
         provisional_plan: provisionalPlan,
+        // Étages : niveau de vue courant → pool niveau-conscient (une fig à l'étage ne bloque
+        // plus une destination au sol sous elle, et réciproquement).
+        level: currentLevelRef?.current ?? 0,
       });
       // Contexte changé pendant l'attente (suivi squad activé, autre fig sélectionnée) → annuler.
       if (deploySelectSessionRef.current !== sessionAtCall) return;
@@ -5225,7 +5243,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         prev ? { ...prev, activeModelId: modelId, following: false } : prev
       );
     },
-    [postEngineQuery]
+    [postEngineQuery, currentLevelRef]
   );
 
   /** Double-clic sur l'escouade posée → active le suivi du bloc (squad move). Récupère d'abord le
@@ -5263,14 +5281,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleMoveDeployModelInPlan = useCallback(
     (modelId: string, col: number, row: number) => {
       deployModelPoolRef.current = new Set();
+      // Étages : le niveau de la fig est CAPTURÉ ICI (vue au moment du drop) et voyage dans le
+      // plan — il survit aux changements d'étage ultérieurs (le commit ne relit pas la vue).
+      const level = currentLevelRef?.current ?? 0;
       setDeployPlan((prev) => {
         if (!prev) return prev;
-        const models = { ...prev.models, [modelId]: { col, row } };
+        const models = { ...prev.models, [modelId]: { col, row, level } };
         void refreshDeployPlanValidity(prev.unitId, models);
         return { ...prev, models, activeModelId: null };
       });
     },
-    [refreshDeployPlanValidity]
+    [refreshDeployPlanValidity, currentLevelRef]
   );
 
   /** Suivi du bloc (mode following) : translation rigide pour amener la 1re fig sous le curseur
@@ -5285,9 +5306,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         const dCol = col - anchor.col;
         const dRow = row - anchor.row;
         if (dCol === 0 && dRow === 0) return prev;
-        const models: Record<string, { col: number; row: number }> = {};
+        const models: Record<string, { col: number; row: number; level?: number }> = {};
         for (const [mid, p] of entries) {
-          models[mid] = { col: p.col + dCol, row: p.row + dRow };
+          // Niveau par fig préservé à la translation (le backend re-dérive l'effectif par position).
+          models[mid] = { col: p.col + dCol, row: p.row + dRow, level: p.level };
         }
         void refreshDeployPlanValidity(prev.unitId, models);
         return { ...prev, models, activeModelId: null };
@@ -5307,7 +5329,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       console.warn("[DEPLOY] commit ABORT (canValidate=false, il reste du rouge)");
       return;
     }
-    const planArr = Object.entries(plan.models).map(([mid, p]) => [mid, p.col, p.row]);
+    // Étages : niveau PAR FIGURINE capturé au drop (plan.models[mid].level) — pas la vue au
+    // moment du Valider (sinon changer d'étage avant de valider committait tout au sol).
+    const planArr = Object.entries(plan.models).map(([mid, p]) =>
+      (p.level ?? 0) >= 1 ? [mid, p.col, p.row, p.level] : [mid, p.col, p.row]
+    );
     try {
       await executeAction({
         action: "deploy_commit",

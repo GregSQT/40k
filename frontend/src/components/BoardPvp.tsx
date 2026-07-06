@@ -489,8 +489,9 @@ type BoardProps = {
   /** Déploiement par escouade (PvP "active") — plan provisoire par-figurine. */
   deployPlan?: {
     unitId: number;
-    models: Record<string, { col: number; row: number }>;
-    originModels: Record<string, { col: number; row: number }>;
+    /** ``level`` (étages) : niveau de vue capturé au drop de la fig (voir useEngineAPI). */
+    models: Record<string, { col: number; row: number; level?: number }>;
+    originModels: Record<string, { col: number; row: number; level?: number }>;
     activeModelId: string | null;
     perModelValid: Record<string, boolean>;
     coherencyOk: boolean;
@@ -511,6 +512,10 @@ type BoardProps = {
   onFreezeSquadDeploy?: () => void;
   onCommitDeploy?: () => void | Promise<void>;
   onCancelDeploy?: () => void;
+  /** Étage courant (multi-niveaux), remonté depuis BoardWithAPI. Optionnel : fallback état interne
+   *  pour les autres call sites (BoardReplay, tutorial) où le déploiement à l'étage n'est pas piloté. */
+  currentLevel?: number;
+  onCurrentLevelChange?: (level: number) => void;
   /** Charge par-figurine (V11 11.04, Slice G) — plan provisoire des figs posées. */
   chargeMovePlan?: {
     unitId: number;
@@ -981,6 +986,8 @@ function normalizeZoneHex(h: unknown): [number, number] {
 
 export default function Board({
   units,
+  currentLevel: currentLevelProp,
+  onCurrentLevelChange,
   selectedUnitId,
   ruleChoiceHighlightedUnitId = null,
   eligibleUnitIds,
@@ -1731,6 +1738,95 @@ export default function Board({
   } | null>(null);
   const [boardZoom, setBoardZoom] = useState(BOARD_ZOOM_DEFAULT);
   const [zoomControlsOpen, setZoomControlsOpen] = useState(false);
+  // Étages (multi-niveaux) : niveau d'affichage courant (0 = rez-de-chaussée). Piloté par le parent
+  // (BoardWithAPI) quand fourni, sinon état interne (BoardReplay / tutorial). Le nombre d'étages vient
+  // des ``floors`` du terrain (source unique). Sans étage → maxFloorLevel = 0, bouton masqué.
+  const [internalLevel, setInternalLevel] = useState(0);
+  const currentLevel = currentLevelProp ?? internalLevel;
+  const setCurrentLevel = useCallback(
+    (level: number) => {
+      if (onCurrentLevelChange) onCurrentLevelChange(level);
+      else setInternalLevel(level);
+    },
+    [onCurrentLevelChange]
+  );
+  const maxFloorLevel = useMemo(() => {
+    const zones = boardConfig?.terrain_zones;
+    if (!Array.isArray(zones)) return 0;
+    let max = 0;
+    for (const z of zones) {
+      const floors = (z as { floors?: Array<{ level?: number }> }).floors;
+      if (Array.isArray(floors)) {
+        for (const f of floors) {
+          if (typeof f?.level === "number" && f.level > max) max = f.level;
+        }
+      }
+    }
+    return max;
+  }, [boardConfig?.terrain_zones]);
+  // Hexes de chaque étage indexés "col,row" → dérivation LIVE du niveau d'une fig pendant le drag
+  // (move/déploiement) avant validation. Approximation par hex-ancre (le commit reste autoritaire).
+  const floorHexKeysByLevel = useMemo(() => {
+    const m = new Map<number, Set<string>>();
+    const zones = boardConfig?.terrain_zones;
+    if (!Array.isArray(zones)) return m;
+    for (const z of zones) {
+      const floors = (z as { floors?: Array<{ level?: number; hexes?: unknown[] }> }).floors;
+      if (!Array.isArray(floors)) continue;
+      for (const f of floors) {
+        if (typeof f?.level !== "number" || !Array.isArray(f.hexes)) continue;
+        let set = m.get(f.level);
+        if (!set) {
+          set = new Set<string>();
+          m.set(f.level, set);
+        }
+        for (const h of f.hexes) {
+          const [c, r] = normalizeZoneHex(h);
+          set.add(`${c},${r}`);
+        }
+      }
+    }
+    return m;
+  }, [boardConfig?.terrain_zones]);
+  // Union des hexes de TOUS les planchers (tous niveaux) → une fig n'est concernée par le masquage
+  // mono-niveau que si son empreinte chevauche au moins un plancher (fig « liée à une structure à
+  // étages »). Une fig en terrain découvert n'est jamais ghostée en changeant d'étage.
+  const allFloorHexKeys = useMemo(() => {
+    const u = new Set<string>();
+    for (const set of floorHexKeysByLevel.values()) for (const k of set) u.add(k);
+    return u;
+  }, [floorHexKeysByLevel]);
+  // Clamp : si le niveau courant dépasse le max (ex. changement de board), redescendre au sol.
+  useEffect(() => {
+    if (currentLevel > maxFloorLevel) setCurrentLevel(0);
+  }, [currentLevel, maxFloorLevel, setCurrentLevel]);
+  // Niveaux d'étage occupés par ≥1 figurine → empreinte blanchie (idée initiale stage.md).
+  // Source PAR-FIGURINE (level_by_model) : une escouade dont SEULE une fig non-ancre est à l'étage
+  // doit blanchir cet étage (l'ancre peut rester au sol). Fallback niveau d'unité/ancre.
+  const occupiedFloorLevels = useMemo(() => {
+    const s = new Set<number>();
+    const uc = (gameState?.units_cache ?? {}) as Record<
+      string,
+      { level?: number; level_by_model?: Record<string, number> }
+    >;
+    for (const entry of Object.values(uc)) {
+      if (entry.level_by_model) {
+        for (const lv of Object.values(entry.level_by_model)) {
+          if (typeof lv === "number" && lv >= 1) s.add(lv);
+        }
+      }
+      if (typeof entry.level === "number" && entry.level >= 1) s.add(entry.level);
+    }
+    for (const u of units) {
+      const lv = (u as { level?: number }).level;
+      if (typeof lv === "number" && lv >= 1) s.add(lv);
+    }
+    return s;
+  }, [gameState, units]);
+  // Clé STABLE PAR VALEUR pour les deps de l'effet de dessin : dépendre du Set (nouvelle réf à
+  // chaque render) relancerait l'effet en boucle et casserait la sélection (clic down/up sur des
+  // objets PIXI recréés). Une string identique par valeur est Object.is-stable.
+  const occupiedFloorLevelsKey = [...occupiedFloorLevels].sort((a, b) => a - b).join(".");
   const [boardViewportSize, setBoardViewportSize] = useState<{
     width: number;
     height: number;
@@ -8354,7 +8450,7 @@ export default function Board({
             .map(([m, v]) => `${m}=${v ? 1 : 0}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hpbe:${hpBarBlinkEnlarged ? 1 : 0}#swp:${showWoundProbability ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}#dplan:${deployPlanFp}#elig:${[...eligibleUnitIds].sort((a, b) => a - b).join(",")}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hpbe:${hpBarBlinkEnlarged ? 1 : 0}#swp:${showWoundProbability ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}#dplan:${deployPlanFp}#elig:${[...eligibleUnitIds].sort((a, b) => a - b).join(",")}#lvl:${currentLevel}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -8366,7 +8462,7 @@ export default function Board({
     const zonesKey = (boardConfigWithOverrides.objective_zones ?? [])
       .map((z) => `${z.id}:${(z as { shape?: string }).shape ?? "hexes"}`)
       .join(",");
-    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}|oc:${objControlKey}|oz:${zonesKey}|dep:${phase === "deployment" ? 1 : 0}`;
+    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}|oc:${objControlKey}|oz:${zonesKey}|dep:${phase === "deployment" ? 1 : 0}|lvl:${currentLevel}|ofl:${[...occupiedFloorLevels].sort((a, b) => a - b).join(".")}`;
     const canReuseStatic =
       staticBoardConfigKeyRef.current === bcKey && staticBoardRef.current !== null;
 
@@ -8523,6 +8619,8 @@ export default function Board({
       mode,
       showHexCoordinates,
       objectiveControl,
+      currentLevel,
+      occupiedFloorLevels,
       moveDestPoolRef:
         mode === "squadModelMove"
           ? // Fig active → pool BFS de la fig ; sinon (post-pose/repos) → union des figs non posées.
@@ -8913,11 +9011,16 @@ export default function Board({
                 string,
                 { HP_CUR: number; HP_MAX: number; is_character: boolean }
               >;
+              level?: number;
+              level_by_model?: Record<string, number>;
             }
           | undefined;
         const occupiedHexesByModel = cacheEntry?.occupied_hexes_by_model;
         const modelMetasByModel = cacheEntry?.models_meta_by_model;
         const modelHpsByModel = cacheEntry?.models_hp_by_model;
+        // Niveau (étages) par figurine : source cache (level_by_model), fallback niveau d'ancre / unité.
+        const levelByModel = cacheEntry?.level_by_model;
+        const unitLevel = cacheEntry?.level ?? (unit as { level?: number }).level ?? 0;
         // squad.md brique 3 : pour l'escouade en mode plan, afficher les figs aux positions
         // PROVISOIRES (ghost) + flag de validite par fig (voile rouge sur les invalides).
         const isSquadGhost =
@@ -8961,6 +9064,63 @@ export default function Board({
         const modelMetas: Array<ModelVisualMeta | null> = modelMetasByModel
           ? modelIds.map((mid) => modelMetasByModel[mid] ?? null)
           : [];
+        // Niveau d'étage par figurine (aligné sur modelCenters) → badge coloré.
+        // Pendant un drag (move/déploiement preview) : niveau LIVE dérivé de la position provisoire
+        // (étage courant si la fig est sur ce plancher, sinon sol) → mise à jour sans attendre le
+        // commit. Hors preview : niveau committé (level_by_model, autoritaire).
+        const isPreviewLevels = isSquadGhost || isDeployGhost;
+        const unitBaseShape = (unit as { BASE_SHAPE?: "round" | "oval" | "square" }).BASE_SHAPE;
+        const unitBaseSize = (unit as { BASE_SIZE?: number | [number, number] }).BASE_SIZE;
+        const modelLevels: number[] = modelIds.map((mid, idx) => {
+          if (isPreviewLevels) {
+            // Niveau LIVE aligné sur le backend (resolve_model_floor_level) : niveau DEMANDÉ = celui
+            // capturé au drop de la fig dans le plan (models[mid].level), fallback vue courante ;
+            // effectif = ce niveau si l'empreinte ENTIÈRE tient sur son plancher (13.06), sinon sol.
+            // Évite un badge de drag qui ment (montre 1) puis disparaît au commit (réel 0).
+            const planLevel = (
+              effectivePerModelPlan?.models[mid] as { level?: number } | undefined
+            )?.level;
+            const reqLevel = planLevel ?? currentLevel;
+            const reqFloorSet = reqLevel >= 1 ? floorHexKeysByLevel.get(reqLevel) : undefined;
+            if (reqLevel >= 1 && reqFloorSet) {
+              const [pc, pr] = modelPositions[idx];
+              const meta = modelMetas[idx];
+              const fpKeys = unitFootprintHexKeys({
+                col: pc,
+                row: pr,
+                BASE_SHAPE: meta?.BASE_SHAPE ?? unitBaseShape,
+                BASE_SIZE: meta?.BASE_SIZE ?? unitBaseSize,
+              });
+              let allOnFloor = fpKeys.size > 0;
+              for (const k of fpKeys) {
+                if (!reqFloorSet.has(k)) {
+                  allOnFloor = false;
+                  break;
+                }
+              }
+              if (allOnFloor) return reqLevel;
+            }
+            return 0;
+          }
+          return levelByModel?.[mid] ?? unitLevel;
+        });
+        // Vue mono-niveau : une fig est ghostée UNIQUEMENT si (a) elle n'est pas au niveau affiché ET
+        // (b) son empreinte chevauche au moins un plancher (fig liée à une structure à étages). Une fig
+        // en terrain découvert reste affichée normalement quel que soit l'étage sélectionné.
+        const modelLevelGhost: boolean[] = modelLevels.map((lv, idx) => {
+          if (lv === currentLevel) return false;
+          if (allFloorHexKeys.size === 0) return false;
+          const [pc, pr] = modelPositions[idx];
+          const meta = modelMetas[idx];
+          const fpKeys = unitFootprintHexKeys({
+            col: pc,
+            row: pr,
+            BASE_SHAPE: meta?.BASE_SHAPE ?? unitBaseShape,
+            BASE_SIZE: meta?.BASE_SIZE ?? unitBaseSize,
+          });
+          for (const k of fpKeys) if (allFloorHexKeys.has(k)) return true;
+          return false;
+        });
         const modelHps: Array<{ HP_CUR: number; HP_MAX: number; is_character: boolean } | null> =
           modelHpsByModel ? modelIds.map((mid) => modelHpsByModel[mid] ?? null) : [];
         // Rule 13.09 : flag "caché" par figurine (aligné sur modelCenters) pour le mode badge par-fig.
@@ -9115,6 +9275,8 @@ export default function Board({
           modelCenters,
           modelMetas,
           modelHps,
+          modelLevels,
+          modelLevelGhost,
           modelHidden: isMoveOriginGhost ? [] : modelHidden,
           modelGhost,
           hpBarPerModel,
@@ -9508,6 +9670,43 @@ export default function Board({
           const previewHiddenSquad =
             previewModelHidden.length > 0 && previewModelHidden.every(Boolean);
 
+          // Niveau d'étage LIVE du ghost de destination (bug #2) : translation hex rigide de chaque
+          // fig vers la destination, puis empreinte ENTIÈRE sur le plancher courant (aligné backend /
+          // dérivation #1). Commit autoritaire. Sans ces flags, le fantôme collé à la souris n'avait
+          // jamais de badge d'étage ni d'atténuation mono-niveau.
+          const previewFloorSet =
+            currentLevel >= 1 ? floorHexKeysByLevel.get(currentLevel) : undefined;
+          const previewDeltaCol = movePreview.destCol - previewUnit.col;
+          const previewDeltaRow = movePreview.destRow - previewUnit.row;
+          const previewUnitBaseShape = (
+            previewUnit as { BASE_SHAPE?: "round" | "oval" | "square" }
+          ).BASE_SHAPE;
+          const previewUnitBaseSize = (previewUnit as { BASE_SIZE?: number | [number, number] })
+            .BASE_SIZE;
+          const previewModelLevels: number[] = previewModelPositions.map(([mCol, mRow], idx) => {
+            if (currentLevel >= 1 && previewFloorSet) {
+              const meta = previewModelMetas[idx];
+              const fpKeys = unitFootprintHexKeys({
+                col: mCol + previewDeltaCol,
+                row: mRow + previewDeltaRow,
+                BASE_SHAPE: meta?.BASE_SHAPE ?? previewUnitBaseShape,
+                BASE_SIZE: meta?.BASE_SIZE ?? previewUnitBaseSize,
+              });
+              let allOnFloor = fpKeys.size > 0;
+              for (const k of fpKeys) {
+                if (!previewFloorSet.has(k)) {
+                  allOnFloor = false;
+                  break;
+                }
+              }
+              if (allOnFloor) return currentLevel;
+            }
+            return 0;
+          });
+          const previewModelLevelGhost: boolean[] = previewModelLevels.map(
+            (lv) => lv !== currentLevel
+          );
+
           renderUnit({
             hideIndicators,
             unit: { ...previewUnit, hidden: previewHiddenSquad },
@@ -9515,6 +9714,8 @@ export default function Board({
             centerY,
             modelCenters: previewModelCenters,
             modelMetas: previewModelMetas,
+            modelLevels: previewModelLevels,
+            modelLevelGhost: previewModelLevelGhost,
             modelHidden: previewModelHidden,
             statusBadgePerModel,
             app,
@@ -10011,6 +10212,8 @@ export default function Board({
     };
   }, [
     // Essential dependencies - all values used in the effect
+    currentLevel,
+    occupiedFloorLevelsKey,
     selectedUnitId,
     ruleChoiceHighlightedUnitId,
     mode,
@@ -10511,6 +10714,76 @@ export default function Board({
               gap: 6,
             }}
           >
+            {maxFloorLevel >= 1 && (
+              <button
+                type="button"
+                aria-label={`Étage affiché : niveau ${currentLevel}. Cliquer pour changer d'étage.`}
+                title={`Niveau ${currentLevel} / ${maxFloorLevel}`}
+                onClick={() =>
+                  setCurrentLevel(currentLevel >= maxFloorLevel ? 0 : currentLevel + 1)
+                }
+                style={{
+                  position: "relative",
+                  border: "1px solid rgba(255,255,255,0.28)",
+                  borderRadius: 6,
+                  background: "rgba(17,24,39,0.88)",
+                  color: "#e5e7eb",
+                  cursor: "pointer",
+                  outline: "none",
+                  fontSize: 18,
+                  height: 32,
+                  width: 32,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                }}
+              >
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke={
+                    currentLevel === 0
+                      ? "#e5e7eb"
+                      : currentLevel === 1
+                        ? "#22c55e"
+                        : currentLevel === 2
+                          ? "#f59e0b"
+                          : "#ef4444"
+                  }
+                  strokeWidth="1.8"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M12 3 3 8l9 5 9-5-9-5Z" />
+                  <path d="M3 12l9 5 9-5" />
+                  <path d="M3 16l9 5 9-5" />
+                </svg>
+                <span
+                  style={{
+                    position: "absolute",
+                    right: 1,
+                    bottom: 0,
+                    fontSize: 10,
+                    fontWeight: 800,
+                    lineHeight: 1,
+                    color:
+                      currentLevel === 0
+                        ? "#e5e7eb"
+                        : currentLevel === 1
+                          ? "#22c55e"
+                          : currentLevel === 2
+                            ? "#f59e0b"
+                            : "#ef4444",
+                    textShadow: "0 0 2px rgba(0,0,0,0.9)",
+                  }}
+                >
+                  {currentLevel}
+                </span>
+              </button>
+            )}
             {boardZoom !== BOARD_ZOOM_DEFAULT && (
               <span
                 aria-live="polite"
@@ -10541,6 +10814,7 @@ export default function Board({
                 background: "rgba(17,24,39,0.88)",
                 color: "#e5e7eb",
                 cursor: "pointer",
+                outline: "none",
                 fontSize: 18,
                 height: 32,
                 width: 32,

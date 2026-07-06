@@ -358,20 +358,225 @@ le modèle + LoS 3D est le vrai chantier.
 > ✅ **Préalable technique levé** : le spike pathfinding 3D (§4.3) confirme la faisabilité sur l'archi
 > actuelle. Le RL n'est plus un go/no-go (§5.7). Les chantiers ci-dessous peuvent démarrer.
 
-1. **Modèle d'état multi-niveau** : champ `level` + étages dans `terrain_areas` + propagation
-   `units_cache`/`occupation_map` + payload API/types TS + canal `level` dans l'obs RL (§5.7).
+1. **Modèle d'état multi-niveau** — ⏳ **EN COURS** :
+   - ✅ Parsing `floors` (format B) dans `_load_terrain_areas_from_ref` + `_parse_terrain_floors`
+     ([game_state.py](file:///home/greg/40k/engine/game_state.py)) — validation stricte, `floors` absent → `[]`.
+   - ✅ Champ `level` sur l'unité (`create_unit` + `_build_enhanced_unit`), helper `_validate_level` (0 = sol).
+   - ✅ Propagation `level` dans `units_cache` + `models_cache` (ancre + par-figurine)
+     ([shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)).
+   - ✅ Exposition payload API (`_UNITS_CACHE_FRONTEND_KEYS` + `level_by_model`) + types TS
+     (`Unit.level`, `units_cache.level`/`level_by_model`) — tsc vert, chargement scénario réel vert.
+   - ⏸️ **Différé** : `occupation_map`/`occupied_hexes` restent 2D (collisions par niveau → chantier 2) ;
+     canal `level` dans l'obs RL (§5.7) → au retrain, quand les mécaniques multi-niveaux existeront.
    *Prérequis de tout le reste. Aucun impact visuel.*
-2. **Occupation & placement** : validation "poser sur un étage" (§13.06 + décision §5.1), footprint vs
-   polygone d'étage, collisions/placement par niveau (§5.5 : `build_occupied_positions_set`, masques).
-3. **Mouvement vertical** : un champ géodésique **par niveau** chaîné aux hexes de transition, coût
-   vertical, restrictions mot-clé, FLY (y compris disque euclidien).
+2. **Occupation & placement** — ⏳ **EN COURS** :
+   - ✅ **2a Validation "poser sur un étage"** (§13.06, décision §5.1 = 100% dedans par défaut) :
+     - `unit_can_occupy_upper_floor(keywords)` — gate mot-clé INFANTRY/BEASTS/SWARM/FLY/MONSTER
+       ([game_state.py](file:///home/greg/40k/engine/game_state.py)).
+     - `floor_hexes_at_level(terrain_areas, level)` + `footprint_within_floor(...)` (0 débordement)
+       + validateur composé `validate_floor_placement(unit, col, row, level, terrain_areas) -> (ok, reason)`
+       ([terrain_utils.py](file:///home/greg/40k/engine/terrain_utils.py)). Tous testés (conditions cumulatives 13.06).
+       Note : "stable" (13.06) non chiffré → non modélisé (surface d'étage supposée plane).
+     - Prêt à câbler dans le déploiement (poser à l'étage) et la fin de move (valider l'atterrissage).
+   - ⏸️ **2b Collisions/placement par niveau** (§5.5 : `build_occupied_positions_set`, masques) : **différé**.
+     Raison : le filtrage par niveau n'a de sens qu'avec des figs réellement à des niveaux différents
+     (aujourd'hui tout est au niveau 0 → no-op) ; un param `level` non consommé serait du code spéculatif.
+   - 🧱 **Décision — murs verticaux prolongés** : les murs d'une ruine montent sur toute la hauteur.
+     Les mêmes `wall_hexes` (2D) s'appliquent donc à **tous les niveaux** : on ne peut jamais *finir* sur
+     un hex de mur, quel que soit l'étage (cohérent §13.06 : l'infanterie *traverse* les murs de ruine
+     en mouvement mais ne s'y *arrête* pas). Pas de format « murs par niveau ». Nuance LoS pour plus tard :
+     au-dessus de 3", la vue passe par les ouvertures (§13.11) → chantier LoS 3D, pas le déploiement.
+   - ✅ **2c Déploiement à l'étage** (câblage `level` dans le pipeline de déploiement) — FAIT & testé :
+     1. plan `(mid,c,r)` → `(mid,c,r,level)` — `_parse_plan` accepte 3 ou 4 (front compatible)
+        ([deployment_handlers.py](file:///home/greg/40k/engine/phase_handlers/deployment_handlers.py)).
+     2. `deployment_preview_plan` niveau-conscient : `out_of_bounds`/`out_of_zone`/`on_wall` restent **2D
+        inchangés** (horizontal + murs verticaux prolongés) ; `on_other`/`intra` filtrés au **même niveau** ;
+        + `validate_floor_placement` pour level≥1.
+     3. `_deployed_occupied_positions(…, level)` filtré par niveau (branche `level=None` = comportement historique).
+     4. commit : `update_model_position(…, level)` persiste `model["level"]` → ancre `units_cache["level"]`
+        → `unit["level"]` ([shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)).
+     5. API : parsing squad-plan tolère 3/4-uplets (plus de drop silencieux) ([api_server.py](file:///home/greg/40k/services/api_server.py)).
+     **Test bout-en-bout (6 cas)** : infantry sur étage→vert, vehicle→rouge (mot-clé), hors-empreinte→rouge
+     (débordement), sol 3-uplet→vert (non-régression), collision niveau-consciente (même (col,row) : sol→rouge,
+     étage→vert), commit persistant level=1 sur models_cache/units_cache/units. Suite complète verte.
+   - ⏸️ **2b Collisions par niveau hors déploiement** (move/charge/fight via `build_occupied_positions_set`) :
+     reste au chantier 3 (mouvement vertical), même principe additif que `_deployed_occupied_positions`.
+3. **Mouvement vertical** — ⏳ **EN COURS** :
+   - ✅ **3a Champ multi-niveaux (cœur algo)** : `reachable_multilevel_field`
+     ([geodesic_move.py](file:///home/greg/40k/engine/phase_handlers/geodesic_move.py)) — Dijkstra sur
+     nœuds `(col,row,level)`, chaque niveau développé par le VRAI champ any-angle `_euclidean_move_field`,
+     niveaux consécutifs reliés par `_build_level_transitions` (approche horizontale + vertical cumulé, §13.06).
+     Gère montée **N niveaux empilés**, descente, seuil vertical. Testé (pile 3 niveaux : coût L2 = borne
+     basse exacte). **Isolé, non câblé dans `movement_handlers` → zéro régression 2D.** Note perf : champ
+     relancé par entrée de transition (single-source), optim multi-source possible plus tard.
+   - ✅ **3b Restrictions mot-clé** (§2.2) : deux flags sur `reachable_multilevel_field` —
+     `allow_vertical` (False = MOBILE/VEHICLE et tout ce qui n'a pas INFANTRY/BEASTS/SWARM/FLY/MONSTER,
+     via `unit_can_occupy_upper_floor` → aucune transition, reste au sol) et `ignore_vertical_cost`
+     (FLY « take to the skies » §21.03 → montée/descente à coût horizontal seul). Testés (FLY monte à
+     coût horizontal ; sans capacité → aucun étage). **Simplification documentée** : le modèle de niveaux
+     ne distingue pas escalade extérieure/intérieure ni sections <2" → la nuance « VEHICLE gravit >2"
+     par l'extérieur sans y finir » n'est pas représentée (hors périmètre).
+   - ✅ **2b Occupation niveau-consciente** : `build_occupied_positions_set(…, level)` +
+     `build_enemy_occupied_positions_set(…, level)` + helper `_occupied_hexes_at_level`
+     ([shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)). Param additif
+     `level=None` = chemin historique **byte-identique** (tous les appelants actuels inchangés → zéro
+     régression) ; un entier filtre par niveau (figs à des étages différents ne se gênent pas). Testé.
+   - ⏸️ **3c Câblage `movement_handlers`** — **CADRÉ, pas encore codé**. Le producteur
+     `movement_build_valid_destinations_pool` (~500 l., chemins fly/sol vectorisés numpy + géodésique)
+     renvoie un pool **plat `List[(col,row)]` sans niveau**. Changement transversal (back producteur +
+     preview + **frontend** qui dessine + commit qui déballe), non vérifiable bout-en-bout sans UI +
+     scénario à étages → **étape délibérée**, idéalement avec le chantier 6 (UI).
+
+     **DÉCISION — forme du pool = B (dict par niveau)**, cible long terme. Rationale : `level` est déjà
+     dimension première partout (units_cache/models_cache/occupation/champ) ; le pool doit suivre, le sol
+     n'étant pas un cas spécial mais `pool[0]`. Une seule structure, une seule logique (évite la dette
+     d'un traitement sol≠étages, cf. principe move/déploiement miroir). Écarté : C (side-channel = dette
+     permanente sol/étages) ; A (triplets = re-filtrage front + casse tout unpack `(col,row)`).
+     ```
+     valid_move_destinations_pool = { 0: [(c,r),…], 1: [(c,r),…], … }   # cible B
+     ```
+     **Décisions liées** :
+     - Transport commit : l'action de move ajoute `destLevel` (optionnel, défaut 0) — sans quoi (10,10)@sol
+       et (10,10)@étage sont indistinguables au commit.
+     - Filtrage preview : le back envoie **tous** les niveaux ; le front dessine `pool[niveau_courant]`
+       (vue mono-niveau, bouton d'étage).
+
+     **PLAN DE MIGRATION SÛR (2 temps, zéro rupture)** :
+     1. Introduire le dict `{level:[…]}` + exposer une **clé miroir transitoire**
+        `valid_move_destinations_pool = pool[0]` → le front actuel ne casse pas. **✅ FAIT.**
+     2. Migrer les consommateurs front un par un, puis **retirer le miroir** (dette transitoire tracée). ⏸️
+
+     **Steps d'implémentation :**
+     1. ✅ **Adaptateur** `_multilevel_floor_destinations`
+        ([movement_handlers.py](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)) →
+        `reachable_multilevel_field` + obstacles par niveau (**2b**) + budget réel (`move_range`) + floors
+        (`floor_hexes_at_level`) + flags mot-clé (`unit_can_occupy_upper_floor`, FLY) + validation fin de
+        move (`validate_floor_placement`). Testé isolément (étages 1&2 atteignables, vehicle→{}, no-op sans floors).
+     - ⚡ **Perf (critique)** : la 1ʳᵉ version (single-source relancé par entrée de transition + complément
+       du plancher `all_cells - fh`) était O(périmètre × O(board)) → **>24 s/sélection** sur board 220×300.
+       Corrigé en 3 temps : (a) **anneau** au lieu du complément (obstacles O(périmètre)) ; (b)
+       `geodesic_field_multi_source` + `reachable_multilevel_field` en **Dijkstra par-niveau multi-source**
+       (1 passe/niveau au lieu d'1 par entrée) ; (c) **pré-check de portée** (retour `{}` immédiat si aucun
+       étage à portée). Résultat : unité loin d'une ruine **0.8 ms**, étage moyen ~100 ms, gros étage
+       (1271 hex) ~400 ms. Correctness préservée (coûts optimaux inchangés dans les tests).
+     2. ✅ **Pool forme B + miroir** intégré dans `movement_build_valid_destinations_pool` (point sol) :
+        `game_state["valid_move_destinations_pool_by_level"] = {0: sol, 1:[…], 2:[…]}`,
+        `valid_move_destinations_pool` = miroir = pool[0]. **Testé end-to-end** (avec étages : sol=399/L1=81/L2=25 ;
+        sans étage : `{0: liste}`, pool 2D **byte-identique** → zéro régression). Garde no-floors = retour `{}`
+        de l'adaptateur avant tout accès → sûr.
+     3. ✅ validation fin de move sur étage (`validate_floor_placement`) — intégrée dans l'adaptateur.
+     4. ✅ **Commit du niveau (destLevel)** : plan de move `(mid,c,r)`→`(mid,c,r,level)` sur tout le chemin —
+        `commit_move` (niveau absent = **garder le niveau courant**, pas de reset sol), `_parse` du
+        `movement_commit_move_plan_handler`, `movement_preview_move_plan` **niveau-conscient** (other_occ par
+        niveau + `validate_floor_placement` + collision intra même niveau), sync `unit["level"]`, et API
+        `preview_move_plan` (préserve le niveau, plus de troncature à 3). Testé (commit persiste/conserve/reset
+        le niveau ; preview move étage valide, vehicle refusé).
+     - ✅ **Scénario de test à étages** : `config/board/44x60x5/{terrain/terrain-floors-test.json,
+       scenario/scenario_floors_test.json}` — ruine centrale avec `floors` L1(3")/L2(6"), chargé & rasterisé
+       (L1=1200, L2=400 hexes) via le vrai loader. Débloque la validation front + réelle.
+     - ⏸️ **RESTE** : (a) chemin **FLY** du producteur (retourne avant le point sol — fly+étages à part) ;
+       (b) `validate_move_plan` **niveau-aveugle** : un move à l'étage AU-DESSUS d'une case occupée au sol
+       est encore bloqué par ce validateur 2D (+ règles d'engagement vertical 2"/5" §2.5 non modélisées) —
+       chunk à part ; le cas courant (sol libre sous la destination) marche ;
+       (c) **frontend** (chantier 6) : consommer `_by_level`, bouton d'étage, dessiner `pool[niveau_courant]`,
+       envoyer `destLevel`, retirer le miroir.
 4. **Distances 3D / engagement / cohésion / objectifs** : composante verticale dans les mesures
    (portée d'arme, charge, §5.7) ; règle 2" horiz + 5" vert sur les masques `eng_bad`, adjacence,
    éligibilité fight, coherency ; contrôle d'objectif par appartenance à la terrain area (§2.9) ou
    cylindre 3"/5" pour un pion. Charge/pile-in/consolidation héritent du moteur vertical (§2.8).
 5. **LoS 3D** : Solid ≤3", Plunging +1 BS (avec branche TOWERING), extension `hex_los_cache`,
    parité WASM (Rust + rebuild).
-6. **Rendu/UI** : empreinte d'étage (blanc si occupé), bouton feuilles empilées + niveau courant,
-   vue mono-niveau + ghost (nouveau flag, pas `modelGhost`).
+6. **Rendu/UI (frontend)** — ⏳ **EN COURS** (visuel : à valider en lançant l'app) :
+   - ✅ **6a Données + bouton d'étage** : floors exposés au front (`_zone_entry` rasterise les `floors`
+     → `boardConfig.terrain_zones[].floors`, type `TerrainFloor` dans
+     [useGameConfig.ts](file:///home/greg/40k/frontend/src/hooks/useGameConfig.ts)) ; état `currentLevel`
+     + `maxFloorLevel` (dérivé des floors) + **bouton feuilles empilées** (🗂 + n° niveau en bas-droite,
+     cycle les niveaux) à côté de la loupe, masqué si aucun étage ([BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx)). tsc vert.
+   - ✅ **6b Empreinte d'étage** dans `drawBoard` ([BoardDisplay.tsx](file:///home/greg/40k/frontend/src/components/BoardDisplay.tsx)) :
+     tracé polygone de chaque plancher (couleur terrain, **blanc si le niveau est occupé** par ≥1 fig).
+     Vue mono-niveau (sol → tous les étages en indicateur ; à un étage → planchers de ce niveau).
+     `currentLevel` + `occupiedFloorLevels` threadés via `DrawBoardOptions` + clé de cache statique `bcKey`
+     + deps de l'effet de dessin ([BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx)) →
+     redessine au clic du bouton. tsc vert, backend suite verte. **À valider visuellement.**
+   - ⏸️ **6c Vue mono-niveau + ghost** : filtrer les figs par niveau (via `level_by_model` déjà exposé),
+     ghost pour les figs d'un autre niveau qui débordent (nouveau flag, pas `modelGhost`).
+   - ⏳ **6c-deploy Déploiement à l'étage** — **constat archi + décision A** :
+     La logique de déploiement (`deploy_preview` + `deploy_commit`) vit dans `useEngineAPI`, appelé dans
+     **BoardWithAPI** — donc **au-dessus** de `BoardPvp` où `currentLevel` a été mis. L'état du bouton
+     d'étage est sous la logique qui en a besoin. De plus **preview ET commit** doivent envoyer le niveau
+     (sinon le voile rouge valide au sol pendant que le commit pose à l'étage → placement d'étage illégal
+     non détecté, §13.06 contournée).
+     **DÉCISION = Option A — ✅ FAIT (tsc vert, à valider visuellement)** :
+     `currentLevel` remonté dans `BoardWithAPI` (état + `currentLevelRef` synchronisée) →
+     passé à `useEngineAPI` (option `currentLevelRef`) ET à `BoardPvp` (props `currentLevel` +
+     `onCurrentLevelChange`, avec **fallback état interne** → `BoardReplay`/tutorial intacts).
+     `deploy_preview` **et** `deploy_commit` envoient le plan `[mid,col,row,level]` quand niveau ≥ 1
+     (sinon 3-uplet inchangé). Chaîne complète : bouton d'étage → preview valide §13.06 → commit persiste
+     le niveau → `unit.level` → `occupiedFloorLevels` → empreinte **blanchie**.
+   - ✅ **Niveau EFFECTIF par figurine** (`resolve_model_floor_level`, [terrain_utils.py](file:///home/greg/40k/engine/terrain_utils.py)) :
+     `currentLevel` est un HINT de vue. Le niveau réel d'une fig = `currentLevel` **si son empreinte tient
+     sur le plancher de ce niveau**, sinon **sol (0)**. Appliqué dans `deployment_preview_plan` ET le commit
+     `_apply_deploy_plan`. Corrige le bug : une **escouade mixte** déployée en vue étage (1 fig sur le plancher
+     + autres au sol) ne rejette plus les figs de sol au voile rouge — elles redeviennent 'sol'. (À rappliquer
+     au **move** quand 6d enverra `destLevel`.)
+   - ✅ **Badge étage** : par-figurine, haut-gauche de l'icône, **numéro seul blanc sur rond noir**
+     (niveau backend-autoritaire `level_by_model`/`level`). Même rayon que les badges du bas
+     (`statusBadgeRadius`). Squad **réparti** (figs à niveaux différents) → **toutes** les figs affichent
+     leur niveau (y compris 0) ; sinon seulement les figs à l'étage (≥1). `modelLevels` threadé
+     BoardPvp → `renderUnit` → `UnitRenderer.renderFloorBadge`
+     ([UnitRenderer.tsx](file:///home/greg/40k/frontend/src/components/UnitRenderer.tsx)).
+   - ✅ **Empreinte colorée par niveau** (palette badge : 1 vert, 2 orange, 3 rouge ; 0 = terrain) :
+     vue étage L → voile + contour couleur(L) ; vue sol → pas de voile, contour = couleur du **1er étage
+     occupé** (le plus bas), sinon terrain ([BoardDisplay.tsx](file:///home/greg/40k/frontend/src/components/BoardDisplay.tsx)).
+     Occupation par-fig (`occupiedFloorLevels` ← `level_by_model`, et non `unit.level` ancre).
+   - ✅ **Voile au-dessus des previews** : le voile (vue étage ≥1) est dessiné dans `highlightContainer`
+     (zIndex 5000 + `sortableChildren`), à chaque draw → passe **par-dessus les zones de preview tir/move**
+     (zIndex 0 dans ce conteneur), sous les unités. Contour sol reste dans `baseHexContainer`.
+   - ✅ **Badge dynamique au drag** : pendant un move/déploiement preview, le niveau du badge est dérivé
+     LIVE de la position provisoire (`floorHexKeysByLevel`, approx. hex-ancre ; commit backend autoritaire).
+   - ✅ **Collision niveau-consciente (move)** : deux corrections —
+     (a) `movement_build_valid_destinations_pool` filtre `build_occupied_positions_set`/`build_enemy_...`
+     par le niveau du mover ;
+     (b) **`validate_move_plan`** (appelée par le preview de move via `base_valid`) construisait `other_occupied`
+     en **union tous niveaux** → c'était LE bug résiduel : une fig à l'étage était bloquée par une fig d'un
+     autre squad au sol au même (col,row). Corrigé : `other_occupied_by_level` par niveau, check contre le
+     niveau courant de chaque fig ([shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)).
+     Testé (A niv1 → hex libre malgré B niv0 ; A niv0 → bloqué par B niv0). Tout au niveau 0 = inchangé.
+   - ✅ **Vue mono-niveau (ghost)** : les figs qui ne sont pas au niveau d'affichage courant sont
+     **atténuées** (fade). Flag `modelLevelGhost` (distinct de `modelGhost`, même rendu atténué),
+     `modelLevels[i] !== currentLevel` ([UnitRenderer.tsx](file:///home/greg/40k/frontend/src/components/UnitRenderer.tsx)).
+   - 💡 **Remarque (à faire) — couleur du mur dense support d'étage** : changer la couleur du mur dense
+     d'une ruine **qui porte des étages** (pour le distinguer visuellement). Front-only : dans `drawBoard`,
+     recolorer les `wall_hexes`/segments appartenant à une ruine dont l'entrée `terrain` a des `floors`
+     (mapper mur→ruine par appartenance à l'empreinte, ou tagger les murs porteurs dans le JSON terrain).
+   - ⏸️ Reste **engagement/EZ inter-niveaux** : `enemy_adjacent_hexes` (EZ) reste 2D (une fig ennemie à
+     l'étage crée encore une EZ au sol) — à traiter avec la LoS/engagement 3D (règles 2"/5" §2.5).
+   - ⏸️ **6c Vue mono-niveau + ghost** : n'afficher que les figs du niveau courant, ghost pour celles d'un
+     autre niveau qui débordent (via `level_by_model` déjà exposé ; nouveau flag, pas `modelGhost`).
+   - ⏸️ **6d Move preview par niveau** : consommer `valid_move_destinations_pool_by_level`, dessiner
+     `pool[currentLevel]`, envoyer `destLevel` dans l'action de move (back déjà prêt).
+
+   ### 🐞 BUGS OUVERTS (en cours de diagnostic) — l'utilisateur les voit encore malgré les fixes
+   1. **Collision encore inter-niveaux au MOVE** d'une unité déployée à l'étage (une fig à l'étage est
+      bloquée par une fig au sol au même hex). Déjà rendus niveau-conscients : `movement_build_valid_destinations_pool`
+      (obstacles filtrés par `unit.level`) ET `validate_move_plan` (`other_occupied_by_level`,
+      [shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)). Un test unitaire de
+      `validate_move_plan` PASSE (niv1 ne collisionne pas niv0). → Donc soit le move ne passe pas par ces
+      checks, soit **l'unité déployée est en réalité au niveau 0**.
+   2. **Badge de niveau pas dynamique au drag** (et « pas toujours affiché »). Le fantôme collé à la souris
+      est rendu par un `renderUnit` SÉPARÉ ([BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx)
+      ~ligne 9624, « Ghost de destination ») qui ne reçoit PAS `modelLevels`/`modelLevelGhost` — contrairement
+      au `renderUnit` principal (~9221). À câbler (dériver le niveau live via `floorHexKeysByLevel`).
+
+   **HYPOTHÈSE PRIORITAIRE (#1)** : l'unité déployée est persistée au **niveau 0** (`resolve_model_floor_level`
+   la remet au sol car son empreinte ne tient pas ENTIÈREMENT sur le plancher, §5.1 règle 100%). Ça
+   expliquerait TOUT d'un coup : collisions même niveau 0, pas de badge, pas de ghost.
+
+   **DIAGNOSTIC EN PLACE** : log TEMPORAIRE `[DIAG DEPLOY-COMMIT]` dans `_apply_deploy_plan`
+   ([deployment_handlers.py](file:///home/greg/40k/engine/phase_handlers/deployment_handlers.py)) — affiche
+   dans le terminal API à chaque déploiement : `requested_level`, `effective` (niveau dérivé), `floorN_hexes`,
+   `footprint_in_floor`. → Si `effective=0` : hypothèse confirmée (fig au sol, empreinte hors plancher) ;
+   décision à prendre : agrandir le plancher de test, ou assouplir la règle (centre + X% au lieu de 100%,
+   cf. §5.1). **Retirer ce log + `[DIAG ÉTAGES]`/`[DIAG DEPLOY]` (front) une fois résolu.**
 
 Chantiers 1→5 sont backend (moteur + règles), 6 est frontend. 1 doit précéder tous les autres.

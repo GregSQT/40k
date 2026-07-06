@@ -32,19 +32,24 @@ interface NavigationProps {
 /** Logo règle (assets : `frontend/public/icons/Action_Logo/Ruler.png`). */
 function RulerMenuIcon({ active }: { active: boolean }) {
   return (
-    <img
-      src="/icons/Action_Logo/Ruler.png"
-      alt=""
-      width={20}
-      height={20}
-      draggable={false}
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
       aria-hidden
-      style={{
-        display: "block",
-        opacity: active ? 1 : 0.78,
-        objectFit: "contain",
-      }}
-    />
+      style={{ display: "block", opacity: active ? 1 : 0.78 }}
+    >
+      <title>Mesure</title>
+      <g transform="rotate(-45 12 12)">
+        <rect x="2" y="9" width="20" height="6" rx="1" />
+        <path d="M6 9v3M10 9v2M14 9v3M18 9v2" strokeWidth="1.4" />
+      </g>
+    </svg>
   );
 }
 
@@ -382,7 +387,8 @@ const Navigation: React.FC<NavigationProps> = ({
                   background: "transparent",
                   border: "none",
                   cursor: "pointer",
-                  color: hideIndicatorsActive ? "#93c5fd" : "#9ca3af",
+                  outline: "none",
+                  color: hideIndicatorsActive ? "#22c55e" : "#9ca3af",
                   padding: "4px",
                 }}
               >
@@ -411,7 +417,8 @@ const Navigation: React.FC<NavigationProps> = ({
                   background: "transparent",
                   border: "none",
                   cursor: "pointer",
-                  color: measureModeActive ? "#93c5fd" : "#9ca3af",
+                  outline: "none",
+                  color: measureModeActive ? "#22c55e" : "#9ca3af",
                   padding: "4px",
                 }}
               >
@@ -428,6 +435,7 @@ const Navigation: React.FC<NavigationProps> = ({
                 background: "transparent",
                 border: "none",
                 cursor: "pointer",
+                outline: "none",
                 fontSize: "20px",
                 color: "#9ca3af",
                 padding: "4px",

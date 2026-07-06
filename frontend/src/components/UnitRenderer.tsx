@@ -147,6 +147,18 @@ interface UnitRendererProps {
    */
   modelGhost?: boolean[];
   /**
+   * Niveau d'étage (multi-niveaux) par figurine, aligné index-pour-index avec modelCenters.
+   * >= 1 → badge flèche ↑N (haut-gauche de l'icône) matérialisant que la fig est sur un étage.
+   * 0 / absent → aucun badge (au sol).
+   */
+  modelLevels?: number[];
+  /**
+   * Ghost "mono-niveau" par figurine : true → la fig n'est PAS au niveau d'affichage courant, donc
+   * rendue atténuée (fade) pour ne montrer nettement que les figs du niveau sélectionné. Distinct de
+   * ``modelGhost`` (ghost move/déploiement) mais partage le même rendu atténué.
+   */
+  modelLevelGhost?: boolean[];
+  /**
    * true → une barre HP par figurine. false (défaut) → une barre agrégée par
    * escouade (figs non-character uniquement) ; les characters gardent leur barre.
    */
@@ -522,6 +534,7 @@ export class UnitRenderer {
             `fled-badge-${unitIdNum}`,
             `move-status-${unitIdNum}`,
             `battle-shocked-${unitIdNum}`,
+            `floor-badge-${unitIdNum}`,
           ];
           uiElementsContainer.children
             .filter(
@@ -587,20 +600,32 @@ export class UnitRenderer {
       this.props.centerX = mx;
       this.props.centerY = my;
       const meta = modelMetas?.[i];
-      const figGhost = this.props.modelGhost?.[i] === true;
+      // Ghost si : move/déploiement (modelGhost) OU pas au niveau d'affichage courant (modelLevelGhost).
+      // On DISTINGUE les deux : le ghost de NIVEAU (fig à un autre étage que la vue) est rendu en
+      // GRIS franc (voile gris demandé), le ghost de move garde la teinte move (bleu/teal).
+      const figModelGhost = this.props.modelGhost?.[i] === true;
+      const figLevelGhost = this.props.modelLevelGhost?.[i] === true;
+      const figGhost = figModelGhost || figLevelGhost;
       const figUnit = meta ? ({ ...originalUnit, ...meta } as Unit) : originalUnit;
-      this.props.unit = figGhost ? ({ ...figUnit, isGhost: true } as Unit) : figUnit;
+      this.props.unit = figGhost
+        ? ({ ...figUnit, isGhost: true, isLevelGhost: figLevelGhost && !figModelGhost } as Unit)
+        : figUnit;
       // Échelle d'icône recalculée par figurine (dépend de BASE_SIZE / ICON_SCALE).
       const figDisplayBase = resolveBaseSizeForUnitDisplay(this.props.unit);
       const figBaseSize = figDisplayBase > 1 ? figDisplayBase : undefined;
       const figIconScale = figBaseSize
         ? (figBaseSize * HEX_HORIZ_SPACING) / this.props.HEX_RADIUS
         : this.props.unit.ICON_SCALE || this.props.ICON_SCALE;
-      this.renderUnitCircle(iconZIndex);
-      this.renderUnitIcon(iconZIndex);
-      if (!this.props.hideIndicators) {
+      // Fig à un étage NON affiché (ghost de niveau) : z-index abaissé sous TOUTE la plage des figs
+      // du niveau affiché (100..~249) → les figs du palier sélectionné passent toujours au-dessus.
+      const figZIndex = figLevelGhost ? iconZIndex - 1000 : iconZIndex;
+      this.renderUnitCircle(figZIndex);
+      this.renderUnitIcon(figZIndex);
+      // Fig à un étage NON affiché (ghost de niveau) : icône grise SEULE, aucun logo/indicateur autour
+      // (cercle d'éligibilité, veil de charge, HP par-fig, id debug) — demande utilisateur.
+      if (!this.props.hideIndicators && !figLevelGhost) {
         this.renderChargeTargetVeil(iconZIndex);
-        this.renderGreenActivationCircle(isEligible, figIconScale);
+        this.renderGreenActivationCircle(isEligible && !figGhost, figIconScale);
         this.renderUnitIdDebug(iconZIndex);
         // Barre HP propre de la figurine : pour toutes les figs en mode
         // hpBarPerModel, et TOUJOURS pour un character (les deux modes).
@@ -617,10 +642,34 @@ export class UnitRenderer {
     });
     this.props.unit = originalUnit;
 
-    // Squad-level UI anchored at first model center
-    this.props.centerX = modelCenters[0][0];
-    this.props.centerY = modelCenters[0][1];
-    if (!this.props.hideIndicators) {
+    // Vue mono-niveau : les figs off-niveau (ghost de niveau) ne portent AUCUN badge (hidden,
+    // battle-shock, move-status, HP, étage, etc.). Comme tous les badges par-fig itèrent
+    // ``this.props.modelCenters`` + tableaux alignés, on FILTRE ces figs une fois ici (au lieu de
+    // patcher chaque fonction), puis on restaure. Si TOUTES les figs sont off-niveau → aucun badge.
+    const levelGhostArr = this.props.modelLevelGhost;
+    const hasLevelGhost = Array.isArray(levelGhostArr) && levelGhostArr.some(Boolean);
+    const savedCenters = this.props.modelCenters;
+    const savedMetas = this.props.modelMetas;
+    const savedHps = this.props.modelHps;
+    const savedHidden = this.props.modelHidden;
+    const savedLevels = this.props.modelLevels;
+    const savedLevelGhost = this.props.modelLevelGhost;
+    if (hasLevelGhost && savedCenters) {
+      const keep = (i: number): boolean => levelGhostArr![i] !== true;
+      const filt = <T,>(arr: T[] | undefined): T[] | undefined =>
+        arr ? arr.filter((_, i) => keep(i)) : arr;
+      this.props.modelCenters = savedCenters.filter((_, i) => keep(i));
+      this.props.modelMetas = filt(savedMetas);
+      this.props.modelHps = filt(savedHps);
+      this.props.modelHidden = filt(savedHidden);
+      this.props.modelLevels = filt(savedLevels);
+      this.props.modelLevelGhost = filt(savedLevelGhost);
+    }
+    const badgeCenters = this.props.modelCenters ?? modelCenters;
+    // Squad-level UI anchored at first NON-ghost model center (aucun si tout est off-niveau).
+    if (!this.props.hideIndicators && badgeCenters.length > 0) {
+      this.props.centerX = badgeCenters[0][0];
+      this.props.centerY = badgeCenters[0][1];
       this.renderHPBar(unitIconScale);
       this.renderShootingCounter(unitIconScale);
       this.renderTargetIndicator(iconZIndex);
@@ -632,6 +681,23 @@ export class UnitRenderer {
       this.renderHiddenBadge(unitIconScale);
       this.renderMoveStatusBadge(unitIconScale);
       this.renderBattleShockedIndicator();
+    }
+    // Restaure les tableaux par-fig d'origine.
+    this.props.modelCenters = savedCenters;
+    this.props.modelMetas = savedMetas;
+    this.props.modelHps = savedHps;
+    this.props.modelHidden = savedHidden;
+    this.props.modelLevels = savedLevels;
+    this.props.modelLevelGhost = savedLevelGhost;
+
+    // Badge d'étage : rendu APRÈS restauration, sur les tableaux COMPLETS. Il doit voir tous les
+    // niveaux pour décider "squad répartie" (split → chaque fig, y compris niveau 0, porte son badge)
+    // et applique lui-même le skip des figs off-niveau (modelLevelGhost). Sans ça, filtrer les figs
+    // niveau 1 avant lui faisait croire à une squad homogène niveau 0 → badge "0" perdu.
+    if (!this.props.hideIndicators && savedCenters && savedCenters.length > 0) {
+      this.props.centerX = savedCenters[0][0];
+      this.props.centerY = savedCenters[0][1];
+      this.renderFloorBadge(unitIconScale);
     }
 
     this.props.centerX = originalCenterX;
@@ -814,7 +880,14 @@ export class UnitRenderer {
     let finalSocleFill = socleFill;
     let finalBorderColor = borderColor;
     let circleAlpha = 1.0;
-    if (unitWithFlags.isGhost) {
+    if ((unitWithFlags as { isLevelGhost?: boolean }).isLevelGhost) {
+      // Ghost de NIVEAU (fig à un autre étage que la vue) : voile GRIS franc, contour fin neutre
+      // (on annule le contour de sélection épais → la fig off-niveau ne doit pas paraître active).
+      finalSocleFill = 0x888888;
+      finalBorderColor = 0x555555;
+      borderWidth = DEFAULT_BORDER_WIDTH;
+      circleAlpha = 0.35;
+    } else if (unitWithFlags.isGhost) {
       // Ghost uses move-preview icon palette, but darker.
       finalSocleFill = this.getCSSColor("--icon-move-bg-color");
       finalBorderColor = this.getCSSColor("--icon-move-color");
@@ -1173,7 +1246,11 @@ export class UnitRenderer {
         const unitWithFlags = unit as UnitWithFlags;
 
         // Ghost unit rendering (for replay move visualization)
-        if (unitWithFlags.isGhost) {
+        if ((unitWithFlags as { isLevelGhost?: boolean }).isLevelGhost) {
+          // Ghost de NIVEAU : icône grise franche (voile gris demandé).
+          sprite.alpha = 0.3;
+          sprite.tint = 0x888888;
+        } else if (unitWithFlags.isGhost) {
           sprite.alpha = 0.42;
           sprite.tint = this.getCSSColor("--icon-move-color");
         }
@@ -2303,6 +2380,72 @@ export class UnitRenderer {
     if (this.getEffectiveTargetInCover(attacker)) {
       drawBadgeAt(centerX, centerY, `hidden-badge-${unitIdNum}`);
     }
+  }
+
+  /**
+   * Badge ÉTAGE (multi-niveaux) : flèche ↑N en HAUT-GAUCHE de l'icône, pour chaque figurine dont
+   * le niveau (backend-autoritaire, ``modelLevels``) est >= 1. Même rayon FIXE que les badges du bas
+   * (``statusBadgeRadius``). Position miroir du badge bas-gauche (offset vers le haut au lieu du bas).
+   */
+  private renderFloorBadge(unitIconScale: number): void {
+    const { unit, centerX, centerY, app, HEX_RADIUS, uiElementsContainer } = this.props;
+    const targetContainer = uiElementsContainer || app.stage;
+    const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
+    const prefix = `floor-badge-${unitIdNum}`;
+
+    if (uiElementsContainer) {
+      const existing = uiElementsContainer.children.filter(
+        (c: PIXI.DisplayObject) =>
+          typeof c.name === "string" && (c.name === prefix || c.name.startsWith(`${prefix}-`))
+      );
+      existing.forEach((c: PIXI.DisplayObject) => {
+        uiElementsContainer.removeChild(c);
+        if ("destroy" in c && typeof c.destroy === "function") c.destroy();
+      });
+    }
+
+    const levels = this.props.modelLevels;
+    if (!levels) return;
+    const centers = this.props.modelCenters ?? [[centerX, centerY]];
+    const r = statusBadgeRadius(HEX_RADIUS);
+    const scaledOffset = ((HEX_RADIUS * unitIconScale) / 2) * 0.8;
+    // Squad réparti sur PLUSIEURS niveaux → afficher le niveau de CHAQUE fig (y compris 0) pour lever
+    // l'ambiguïté. Sinon (niveaux homogènes) → badge seulement pour les figs à l'étage (>= 1).
+    const distinct = new Set(levels.filter((v): v is number => typeof v === "number"));
+    const split = distinct.size > 1;
+
+    const levelGhost = this.props.modelLevelGhost;
+    centers.forEach(([cx, cy], i) => {
+      const lv = levels[i] ?? 0;
+      if (!split && lv < 1) return;
+      // Fig à un étage non affiché (ghost de niveau) : pas de badge d'étage (logo autour caché).
+      if (levelGhost?.[i] === true) return;
+      const bx = cx - scaledOffset; // haut-gauche
+      const by = cy - scaledOffset;
+      // Couleur par niveau : 0 blanc, 1 vert, 2 orange, 3+ rouge (sur rond noir pour le contraste).
+      const lvColor =
+        lv >= 3 ? 0xef4444 : lv === 2 ? 0xf59e0b : lv === 1 ? 0x22c55e : 0xffffff;
+      const g = new PIXI.Graphics();
+      g.beginFill(0x000000, 0.85);
+      g.lineStyle(Math.max(1, r * 0.14), lvColor, 0.95);
+      g.drawCircle(bx, by, r);
+      g.endFill();
+      g.name = `${prefix}-${i}`;
+      g.zIndex = 10001;
+      const label = new PIXI.Text(
+        String(lv),
+        new PIXI.TextStyle({
+          fontFamily: "Arial",
+          fontSize: r * 1.3,
+          fontWeight: "700",
+          fill: lvColor,
+        })
+      );
+      label.anchor.set(0.5);
+      label.position.set(bx, by);
+      g.addChild(label);
+      targetContainer.addChild(g);
+    });
   }
 
   /** Tireur actif (source de l'œil couvert/trop-loin), résolu comme dans render(). */

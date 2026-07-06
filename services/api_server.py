@@ -363,7 +363,7 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
 })
 
 
-_UNITS_CACHE_FRONTEND_KEYS = ("col", "row", "HP_CUR", "player", "orientation", "occupied_hexes_by_model", "models_meta_by_model")
+_UNITS_CACHE_FRONTEND_KEYS = ("col", "row", "level", "HP_CUR", "player", "orientation", "occupied_hexes_by_model", "models_meta_by_model")
 
 # Clés moteur internes par unité / par arme, non consommées par l'UI web (le grep frontend est vide).
 # Filtrées de la réponse JSON (allège chaque POST /action : roster complet × armes), conservées côté moteur.
@@ -613,6 +613,13 @@ def _game_state_for_json(
                     }
                     for mid in mids
                     if mid in models_cache
+                }
+                # Niveau vertical par figurine (étages) : requis pour le rendu mono-niveau
+                # + ghost (une escouade peut être répartie sur plusieurs étages, §2.5).
+                slim["level_by_model"] = {
+                    mid: int(models_cache[mid]["level"])
+                    for mid in mids
+                    if mid in models_cache and "level" in models_cache[mid]
                 }
             trimmed_cache[uid] = slim
         gs["units_cache"] = trimmed_cache
@@ -2251,15 +2258,21 @@ def execute_action():
             }), 400
         from engine.phase_handlers import deployment_handlers as _dh_model
         _raw_plan_dep = action.get("provisional_plan")
-        _provisional_plan_dep: Optional[Dict[str, Tuple[int, int]]] = None
+        _provisional_plan_dep: Optional[Dict[str, Tuple[int, ...]]] = None
         if isinstance(_raw_plan_dep, dict):
+            # (col,row) ou (col,row,level) : le niveau par sœur évite qu'une fig d'étage soit
+            # re-dérivée au sol et bloque une fig au sol (collision inter-étage).
             _provisional_plan_dep = {
-                str(k): (int(v[0]), int(v[1]))
+                str(k): (tuple(int(x) for x in v))
                 for k, v in _raw_plan_dep.items()
-                if isinstance(v, (list, tuple)) and len(v) == 2
+                if isinstance(v, (list, tuple)) and len(v) in (2, 3)
             }
+        # Étages : niveau de VUE courant (optionnel, défaut 0 = sol) → pool niveau-conscient.
+        _dep_level_raw = action.get("level")
+        _dep_level = int(_dep_level_raw) if _dep_level_raw is not None else 0
         _dep_pool = _dh_model.deployment_build_model_destinations_pool(
-            engine.game_state, str(model_id), provisional_plan=_provisional_plan_dep
+            engine.game_state, str(model_id), provisional_plan=_provisional_plan_dep,
+            level=_dep_level,
         )
         return api_json_response({
             "success": True,
@@ -2279,10 +2292,13 @@ def execute_action():
                 "error": "deploy_squad_destinations requires plan",
             }), 400
         from engine.phase_handlers import deployment_handlers as _dh_squad
+        # Pool de suivi squad = translation rigide HORIZONTALE : on ne garde que (mid, col, row).
+        # Tolère les entrées 3 (sol) ou 4 (avec niveau) — le niveau n'intervient pas ici, mais on
+        # ne DROPPE pas silencieusement une entrée à 4 éléments (sinon empreinte combinée tronquée).
         _squad_plan = [
             (str(e[0]), int(e[1]), int(e[2]))
             for e in _raw_squad_plan
-            if isinstance(e, (list, tuple)) and len(e) == 3
+            if isinstance(e, (list, tuple)) and len(e) in (3, 4)
         ]
         _squad_pool = _dh_squad.deployment_build_squad_destinations_pool(
             engine.game_state, _squad_plan
@@ -2304,7 +2320,12 @@ def execute_action():
                 "success": False,
                 "error": "preview_move_plan requires unitId and plan (list of [model_id, col, row])",
             }), 400
-        parsed_plan = [(str(e[0]), int(e[1]), int(e[2])) for e in plan]
+        # Préserver le niveau (étages) : entrée 3 (sol/niveau courant) ou 4 (avec niveau) — ne PAS
+        # tronquer à 3, sinon le preview d'un move à l'étage perdrait le niveau ciblé.
+        parsed_plan = [
+            (str(e[0]), int(e[1]), int(e[2])) + ((int(e[3]),) if len(e) >= 4 else ())
+            for e in plan
+        ]
         from engine.phase_handlers import movement_handlers as _mh_plan
         preview = _mh_plan.movement_preview_move_plan(
             engine.game_state, str(squad_id), parsed_plan
@@ -3209,6 +3230,19 @@ def get_board_config():
                 entry["objective"] = o["objective"]
             if "obscuring" in o:
                 entry["obscuring"] = o["obscuring"]
+            # Étages (format B) : exposés au front avec chaque plancher rasterisé (empreinte + hexes).
+            if isinstance(o.get("floors"), list) and o["floors"]:
+                from engine.hex_utils import polygon_to_hex_list as _p2h
+                floors_out = []
+                for _f in o["floors"]:
+                    _poly = [[int(v[0]), int(v[1])] for v in _f["vertices"]]
+                    floors_out.append({
+                        "level": int(_f["level"]),
+                        "height_inches": float(_f["height_inches"]),
+                        "vertices": _poly,
+                        "hexes": _p2h(_poly, board_cols, board_rows),
+                    })
+                entry["floors"] = floors_out
             return entry
         # Objectifs = terrains "objective": true (source unique). Rempli après chargement terrain.
         merged["objective_zones"] = []

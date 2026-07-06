@@ -1933,6 +1933,66 @@ def geodesic_field(
     return g
 
 
+def geodesic_field_multi_source(
+    starts: Dict[Tuple[int, int], float],
+    board_cols: int,
+    board_rows: int,
+    obstacles: Set[Tuple[int, int]],
+    budget: float,
+    clearance: float = 0.0,
+) -> Dict[Tuple[int, int], float]:
+    """Variante MULTI-SOURCE de ``geodesic_field`` : plusieurs départs, chacun avec sa distance
+    initiale ``starts[cell]``. Une seule passe couvre toutes les sources (Dijkstra classique à
+    fronts multiples) → évite de relancer un champ single-source par source (perf : O(1) passe au
+    lieu de O(sources) passes). Utilisé pour le mouvement multi-niveaux (entrées d'étage seedées
+    en bloc). ``budget`` borne la distance TOTALE (init + trajet). Sources dans ``obstacles`` ignorées.
+
+    Retourne ``{cellule: distance_totale}`` — chaque source est sa propre ancre (any-angle depuis elle).
+    """
+    bs = _obstacle_bucket_size(clearance)
+    idx = _build_obstacle_index(obstacles, bs)
+    g: Dict[Tuple[int, int], float] = {}
+    parent: Dict[Tuple[int, int], Tuple[int, int]] = {}
+    pq: List[Tuple[float, Tuple[int, int]]] = []
+    for s, d0 in starts.items():
+        if s in obstacles or d0 > budget + _SEG_TOL:
+            continue
+        if d0 < g.get(s, math.inf):
+            g[s] = d0
+            parent[s] = s
+            heapq.heappush(pq, (d0, s))
+    closed: Set[Tuple[int, int]] = set()
+
+    while pq:
+        d, cur = heapq.heappop(pq)
+        if cur in closed:
+            continue
+        closed.add(cur)
+        cx, cy = _hex_center(*cur)
+        par = parent[cur]
+        px, py = _hex_center(*par)
+        g_par, g_cur = g[par], g[cur]
+        for nb in get_neighbors(*cur):
+            nc, nr = nb
+            if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                continue
+            if nb in obstacles or nb in closed:
+                continue
+            nx, ny = _hex_center(nc, nr)
+            if _segment_clear_indexed(px, py, nx, ny, bs, idx, clearance):
+                anchor, axr, ayr, base = par, px, py, g_par
+            elif clearance <= _SEG_TOL or _segment_clear_indexed(cx, cy, nx, ny, bs, idx, clearance):
+                anchor, axr, ayr, base = cur, cx, cy, g_cur
+            else:
+                continue
+            cand = base + math.hypot(nx - axr, ny - ayr)
+            if cand <= budget + _SEG_TOL and cand < g.get(nb, math.inf):
+                g[nb] = cand
+                parent[nb] = anchor
+                heapq.heappush(pq, (cand, nb))
+    return g
+
+
 def disc_overlaps_polygon(
     cx: float, cy: float, r: float, poly: Sequence[Tuple[float, float]]
 ) -> bool:

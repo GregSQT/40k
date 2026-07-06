@@ -202,6 +202,8 @@ export function computeDrawBoardPartialRedrawFingerprint(
     chargeEngagementHalo,
     fightEngagementRing,
     fightEngagementZone,
+    currentLevel = 0,
+    occupiedFloorLevels,
   } = options || {};
 
   const useAdvanceMovePoolLikeMove = mode === "advancePreview";
@@ -321,6 +323,12 @@ export function computeDrawBoardPartialRedrawFingerprint(
     chargeEngagementHalo: chargeEngagementHalo ?? null,
     fightEngagementRing: fightEngagementRing ?? null,
     fightEngagementZone: fightEngagementZone ?? null,
+    // Étages : le voile/contour d'étage dépend du niveau affiché et des niveaux occupés → sans ça
+    // dans la clé, changer d'étage réutilise les highlights et le voile ne se redessine pas.
+    currentLevel,
+    floorVeilKey: occupiedFloorLevels
+      ? [...occupiedFloorLevels].sort((a, b) => a - b).join(".")
+      : "",
   };
 
   const structuralKey = JSON.stringify(structuralPayload);
@@ -821,6 +829,10 @@ export interface DrawBoardOptions {
   mode?: string;
   showHexCoordinates?: boolean;
   objectiveControl?: ObjectiveControlMap;
+  /** Étage d'affichage courant (multi-niveaux). 0 = sol. Défaut 0. */
+  currentLevel?: number;
+  /** Niveaux d'étage OCCUPÉS par ≥1 figurine → empreinte blanchie (idée initiale stage.md). */
+  occupiedFloorLevels?: Set<number>;
   moveDestPoolRef?: React.RefObject<Set<string>>;
   /**
    * ``move_preview_footprint_zone`` : chaque sous-hex couvert par la preview — union d’hex **sans lacunes**
@@ -1871,6 +1883,8 @@ export const drawBoard = (
       mode = "select",
       showHexCoordinates: _showHexCoordinates = false,
       objectiveControl = {},
+      currentLevel = 0,
+      occupiedFloorLevels,
       moveDestPoolRef,
       footprintZonePoolRef,
       moveDestinationAnchorsFromState,
@@ -2149,6 +2163,42 @@ export const drawBoard = (
             continue;
           }
           baseHexContainer.addChild(g);
+        }
+        // Étages (multi-niveaux) : empreinte de chaque plancher. Vue mono-niveau — au sol
+        // (currentLevel 0) tous les étages en indicateur ; à un étage, seul son plancher.
+        // Couleur par niveau : 1 vert, 2 orange, 3+ rouge. À l'étage → voile + contour de cette
+        // couleur. Au sol → PAS de voile ; contour = couleur du 1er étage occupé (le plus bas),
+        // sinon couleur terrain.
+        // AU SOL (currentLevel 0) : contour seul des empreintes (pas de voile), couleur = 1er étage
+        // occupé (le plus bas), sinon terrain. Le voile des vues étage (≥1) est dessiné plus bas dans
+        // highlightContainer (au-dessus des previews tir/move).
+        if (currentLevel === 0) {
+          // Contour PAR-PLANCHER : couleur du niveau du plancher SI ce niveau est occupé (1 vert,
+          // 2 orange, 3+ rouge), sinon couleur terrain. Un étage occupé ressort donc en vert au sol.
+          const contourColorFor = (lv: number): number =>
+            !(occupiedFloorLevels?.has(lv) ?? false)
+              ? terrainColor
+              : lv >= 3
+                ? 0xef4444
+                : lv === 2
+                  ? 0xf59e0b
+                  : 0x22c55e;
+          for (const zone of boardConfig.terrain_zones) {
+            const floors = (
+              zone as { floors?: Array<{ level: number; vertices: [number, number][] }> }
+            ).floors;
+            if (!Array.isArray(floors)) continue;
+            for (const floor of floors) {
+              if (!Array.isArray(floor.vertices) || floor.vertices.length < 3) continue;
+              const pts = floor.vertices.map(([c, r]) => toPixelT(c, r));
+              const gf = new PIXI.Graphics();
+              gf.lineStyle(terrainLineWidth, contourColorFor(floor.level), 0.85);
+              gf.moveTo(pts[0]![0], pts[0]![1]);
+              for (let i = 1; i < pts.length; i++) gf.lineTo(pts[i]![0], pts[i]![1]);
+              gf.closePath();
+              baseHexContainer.addChild(gf);
+            }
+          }
         }
       }
 
@@ -2981,6 +3031,40 @@ export const drawBoard = (
 
       app.stage.addChild(wallsContainer);
       wallsResult = wallsContainer;
+    }
+
+    // Voile d'étage (vue niveau >= 1) AU-DESSUS des previews tir/move : dessiné à CHAQUE draw dans
+    // highlightContainer (reconstruit à chaque fois), zIndex élevé + sortableChildren → passe
+    // par-dessus les zones de preview (zIndex 0 dans ce conteneur). Couleur : 1 vert, 2 orange, 3+ rouge.
+    if (currentLevel >= 1 && Array.isArray(boardConfig.terrain_zones)) {
+      highlightContainer.sortableChildren = true;
+      const veilColor = currentLevel >= 3 ? 0xef4444 : currentLevel === 2 ? 0xf59e0b : 0x22c55e;
+      const veilLineWidth = Math.max(1.5, HEX_RADIUS * 0.3);
+      const toPxVeil = (c: number, r: number): [number, number] => [
+        c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN,
+        r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN,
+      ];
+      for (const zone of boardConfig.terrain_zones) {
+        const floors = (
+          zone as { floors?: Array<{ level: number; vertices: [number, number][] }> }
+        ).floors;
+        if (!Array.isArray(floors)) continue;
+        for (const floor of floors) {
+          if (floor.level !== currentLevel) continue;
+          if (!Array.isArray(floor.vertices) || floor.vertices.length < 3) continue;
+          const pts = floor.vertices.map(([c, r]) => toPxVeil(c, r));
+          const gf = new PIXI.Graphics();
+          gf.zIndex = 5000;
+          gf.eventMode = "none";
+          gf.beginFill(veilColor, 0.18);
+          gf.lineStyle(veilLineWidth, veilColor, 1);
+          gf.moveTo(pts[0]![0], pts[0]![1]);
+          for (let i = 1; i < pts.length; i++) gf.lineTo(pts[i]![0], pts[i]![1]);
+          gf.closePath();
+          gf.endFill();
+          highlightContainer.addChild(gf);
+        }
+      }
     }
 
     return { baseHexContainer, wallsContainer: wallsResult, highlightContainer };

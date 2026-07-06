@@ -73,6 +73,112 @@ def hexes_in_obscuring_terrain(
     return False
 
 
+def floor_hexes_at_level(terrain_areas: List[Dict[str, Any]], level: int) -> Set[Tuple[int, int]]:
+    """Union des hexes de tous les étages (``floors``) au niveau donné (format B, >= 1).
+
+    Le niveau 0 (rez-de-chaussée) n'a pas d'entrée ``floors`` : c'est la terrain area
+    elle-même / le sol. Appeler cette fonction avec level 0 est une erreur d'usage.
+    """
+    if level < 1:
+        raise ValueError(f"floor_hexes_at_level: level must be >= 1 (0 = ground), got {level}")
+    hexes: Set[Tuple[int, int]] = set()
+    for area in terrain_areas:
+        for floor in area.get("floors", []):
+            if int(require_key(floor, "level")) == level:
+                hexes.update((int(h[0]), int(h[1])) for h in require_key(floor, "hexes"))
+    return hexes
+
+
+def footprint_within_floor(
+    col: int,
+    row: int,
+    base_shape: str,
+    base_size: "int | list[int]",
+    orientation: int,
+    floor_hexes: Set[Tuple[int, int]],
+) -> bool:
+    """True si le socle tient ENTIÈREMENT sur l'étage (règle 13.06 : aucun débordement du bord).
+
+    Convention hex : tous les hexes de l'empreinte du socle doivent appartenir à ``floor_hexes``
+    (union des hexes de l'étage). 100% dedans = règle officielle (décision §5.1, défaut).
+    ``floor_hexes`` vide → aucun étage à ce niveau → False (pas de surface où tenir).
+
+    N.B. la règle exige aussi une position « stable » (13.06), non chiffrée dans les règles et
+    non modélisable en hex plan : non représentée ici (surface d'étage supposée plane).
+    """
+    if not floor_hexes:
+        return False
+    from engine.hex_utils import compute_occupied_hexes
+    fp = {
+        (int(c), int(r))
+        for c, r in compute_occupied_hexes(int(col), int(row), base_shape, base_size, int(orientation))
+    }
+    if not fp:
+        raise ValueError(f"footprint_within_floor: empreinte vide pour socle ({base_shape},{base_size})")
+    return fp <= floor_hexes
+
+
+def resolve_model_floor_level(
+    col: int,
+    row: int,
+    base_shape: str,
+    base_size: "int | list[int]",
+    orientation: int,
+    requested_level: int,
+    terrain_areas: List[Dict[str, Any]],
+) -> int:
+    """Niveau EFFECTIF d'une figurine posée à ``(col, row)``.
+
+    ``requested_level`` (= étage courant de la vue) est un HINT : la fig est réellement sur cet étage
+    seulement si son empreinte tient entièrement sur un plancher de ce niveau (13.06). Sinon elle est
+    au **sol (0)** — une fig hors empreinte d'étage n'est pas 'illégale', elle est simplement au sol.
+    Permet un déploiement/move d'escouade MIXTE (certaines figs sur l'étage, d'autres au sol) sans que
+    les figs de sol soient rejetées parce que la vue est sur l'étage. La légalité mot-clé (§13.06) reste
+    contrôlée par ``validate_floor_placement`` pour les figs effectivement sur l'étage.
+    """
+    if requested_level is None or requested_level < 1:
+        return 0
+    fh = floor_hexes_at_level(terrain_areas, requested_level)
+    if fh and footprint_within_floor(col, row, base_shape, base_size, orientation, fh):
+        return requested_level
+    return 0
+
+
+def validate_floor_placement(
+    unit: Dict[str, Any],
+    col: int,
+    row: int,
+    level: int,
+    terrain_areas: List[Dict[str, Any]],
+) -> Tuple[bool, str]:
+    """Valide qu'une figurine peut finir un move / être posée à ``(col, row, level)`` (règle 13.06).
+
+    - Niveau 0 (rez-de-chaussée) : toujours autorisé (aucune contrainte d'étage).
+    - Niveau >= 1 : exige les DEUX conditions de 13.06 :
+        (a) mot-clé INFANTRY / BEASTS / SWARM / FLY / MONSTER ;
+        (b) empreinte du socle ENTIÈREMENT sur un étage de ce niveau (aucun débordement).
+
+    Retourne ``(ok, reason)`` — ``reason`` vide si ok, sinon motif explicite du refus (pour
+    remonter une erreur claire côté move/déploiement, jamais un placement silencieusement corrigé).
+    """
+    if level < 0:
+        raise ValueError(f"validate_floor_placement: level must be >= 0, got {level}")
+    if level == 0:
+        return (True, "")
+    from engine.game_state import unit_can_occupy_upper_floor
+    if not unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS")):
+        return (False, f"unit {unit.get('id')!r} lacks INFANTRY/BEASTS/SWARM/FLY/MONSTER (13.06) for level {level}")
+    floor_hexes = floor_hexes_at_level(terrain_areas, level)
+    if not floor_hexes:
+        return (False, f"no floor declared at level {level}")
+    orientation = int(require_key(unit, "orientation")) if "orientation" in unit else 0
+    if not footprint_within_floor(
+        col, row, require_key(unit, "BASE_SHAPE"), require_key(unit, "BASE_SIZE"), orientation, floor_hexes
+    ):
+        return (False, f"footprint at ({col},{row}) overhangs the level {level} floor edge (13.06)")
+    return (True, "")
+
+
 def model_within_terrain(
     col: int,
     row: int,

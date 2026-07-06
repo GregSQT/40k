@@ -123,6 +123,8 @@ export interface Unit {
   player: PlayerId;
   col: number;
   row: number;
+  /** Niveau vertical (étages). 0 = rez-de-chaussée (défaut). Voir Documentation/Implémentation/stage.md. */
+  level?: number;
   color?: number;
 
   // Engine UPPERCASE fields (AI_TURN.md compliance)
@@ -300,7 +302,17 @@ export interface GameState {
   non_active_alternating_activation_pool?: string[];
   units_cache?: Record<
     string,
-    { col: number; row: number; HP_CUR: number; player: number; orientation?: number }
+    {
+      col: number;
+      row: number;
+      /** Niveau vertical de l'ancre (étages). 0 = sol. */
+      level?: number;
+      HP_CUR: number;
+      player: number;
+      orientation?: number;
+      /** Niveau vertical par figurine (escouade répartie sur plusieurs étages, §2.5). */
+      level_by_model?: Record<string, number>;
+    }
   >;
 
   // Frontend specific

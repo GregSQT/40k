@@ -3550,7 +3550,9 @@ def _fight_pile_in_build_model_pool(
         _charge_prepare_footprint_offsets,
         _candidate_footprint_charge,
         _charge_synthetic_charger_cache_entry,
+        _charge_model_socle,
     )
+    from engine.hex_utils import footprints_overlap, Socle
 
     models_cache = require_key(game_state, "models_cache")
     model = models_cache.get(str(model_id))
@@ -3574,7 +3576,10 @@ def _fight_pile_in_build_model_pool(
     target_entries: List[Dict[str, Any]] = []
     target_fps: List[Set[Tuple[int, int]]] = []
     enemy_occupied: Set[Tuple[int, int]] = set()
-    other_occupied: Set[Tuple[int, int]] = set()
+    # Bloqueurs (ennemis + autres unités amies) → collision par TEST EUCLIDIEN officiel
+    # (footprints_overlap), un socle PAR FIGURINE à sa base RÉELLE (miroir consolidation). Le test
+    # par cellules (cand_fp & occupied) sous-estimait le disque et rejetait des socles tangents.
+    blocker_socles: List[Any] = []
     for eid, entry in units_cache.items():
         occ = entry.get("occupied_hexes")
         cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
@@ -3583,38 +3588,42 @@ def _fight_pile_in_build_model_pool(
             if str(eid) in closest:
                 target_entries.append(entry)
                 target_fps.append(cells)
-        elif str(eid) != squad_id:
-            other_occupied |= cells
+        if str(eid) == squad_id:
+            continue  # coéquipières traitées à part (positions provisoires)
+        by_model = entry.get("occupied_hexes_by_model")
+        if by_model:
+            for mc, mr in by_model.values():
+                blocker_socles.append(Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
+                    col=int(mc), row=int(mr), fp={(int(mc), int(mr))}))
+        else:
+            blocker_socles.append(Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
+                col=int(entry["col"]), row=int(entry["row"]), fp=cells))
     if not target_entries:
         return empty
 
     fp_offset_pair = _charge_prepare_footprint_offsets(unit, game_state)
 
-    # Coéquipières : collision (le plan provisoire override les figs déjà posées).
-    same_squad_occupied: Set[Tuple[int, int]] = set()
+    # Coéquipières : collision euclidienne, un socle à la base PROPRE de chaque fig
+    # (_charge_model_socle) — un Captain terminator (base large) attaché à des terminators n'est
+    # plus sous-estimé. Le plan provisoire override les figs déjà posées.
+    sib_socles: List[Any] = []
     squad_models = require_key(game_state, "squad_models")
     for mid in require_key(squad_models, squad_id):
         if str(mid) == str(model_id):
             continue
+        sib = models_cache.get(str(mid))
+        if sib is None:
+            continue
         if provisional_plan and str(mid) in provisional_plan:
             pc, pr = provisional_plan[str(mid)]
-            sib_fp = _candidate_footprint_charge(int(pc), int(pr), unit, game_state, fp_offset_pair)
         else:
-            sib = models_cache.get(str(mid))
-            if sib is None:
-                continue
-            sib_fp = _candidate_footprint_charge(
-                int(sib["col"]), int(sib["row"]), unit, game_state, fp_offset_pair
-            )
-        same_squad_occupied |= sib_fp
+            pc, pr = int(sib["col"]), int(sib["row"])
+        sib_socles.append(_charge_model_socle(game_state, sib, int(pc), int(pr)))
 
     # 03.01 : une figurine se déplace À TRAVERS les figs amies, mais PAS à travers les ennemies
-    # (ni les murs). Donc le CHEMIN ne bloque que murs + ennemis ; les amis (coéquipières + autres
-    # unités amies) ne bloquent pas le passage.
-    path_blocked = set(wall_hexes) | enemy_occupied
-    # 03 « Ending a move » : aucune fig ne peut FINIR sur une autre fig → l'empreinte finale ne doit
-    # chevaucher aucune autre fig (amie ou ennemie) ni un mur.
-    end_blocked = path_blocked | other_occupied | same_squad_occupied
+    # (ni les murs). Donc le CHEMIN ne bloque que murs + ennemis ; les amis ne bloquent pas le passage.
+    wall_set = set(wall_hexes)
+    path_blocked = wall_set | enemy_occupied
 
     start_col, start_row = int(model["col"]), int(model["row"])
     start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_offset_pair)
@@ -3644,7 +3653,13 @@ def _fight_pile_in_build_model_pool(
         cand_fp = _candidate_footprint_charge(cc, rr, unit, game_state, fp_offset_pair)
         if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
             continue
-        if cand_fp & end_blocked:
+        # 03 « Ending a move » : mur discret, chevauchement fig euclidien à la base réelle du mover.
+        if cand_fp & wall_set:
+            continue
+        cand_socle = _charge_model_socle(game_state, model, int(cc), int(rr))
+        if any(footprints_overlap(cand_socle, b) for b in blocker_socles):
+            continue
+        if any(footprints_overlap(cand_socle, b) for b in sib_socles):
             continue
         d_min = min(
             min_distance_between_sets(cand_fp, tfp, max_distance=start_min) for tfp in target_fps

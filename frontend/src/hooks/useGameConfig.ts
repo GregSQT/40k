@@ -40,6 +40,14 @@ interface DisplayConfig {
   objective_zone_center_alpha?: number;
 }
 
+/** Étage d'une ruine (format B, multi-niveaux). Empreinte propre rasterisée. */
+interface TerrainFloor {
+  level: number;
+  height_inches: number;
+  vertices: [number, number][];
+  hexes: Array<[number, number]> | Array<{ col: number; row: number }>;
+}
+
 interface ObjectiveZone {
   id: string;
   hexes: Array<{ col: number; row: number }>;
@@ -49,6 +57,8 @@ interface ObjectiveZone {
   bottom_right?: [number, number];
   objective?: boolean;
   obscuring?: boolean;
+  /** Étages (ruines multi-niveaux). Absent = terrain plain-pied. */
+  floors?: TerrainFloor[];
 }
 
 interface Wall {
