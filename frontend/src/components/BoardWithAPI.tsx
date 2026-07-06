@@ -2197,6 +2197,7 @@ export const BoardWithAPI: React.FC = () => {
     const modeGuidesActivatedStr = localStorage.getItem(MODE_GUIDES_ACTIVATED_STORAGE_KEY);
     const deployIconBaseSizeBoundedStr = localStorage.getItem("deployIconBaseSizeBounded");
     const deployShootLoSStr = localStorage.getItem("deployShootLoS");
+    const shootPoolFastModeStr = localStorage.getItem("shootPoolFastMode");
     const logShowCoordsStr = localStorage.getItem("logShowCoords");
     const logShowTypeStr = localStorage.getItem("logShowType");
     const pveGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVE_STORAGE_KEY) === "true";
@@ -2207,6 +2208,7 @@ export const BoardWithAPI: React.FC = () => {
         canUseAdvanceWarning && (showAdvanceWarningStr ? JSON.parse(showAdvanceWarningStr) : true),
       showDebug: showDebugStr ? JSON.parse(showDebugStr) : false,
       showDebugLoS: showDebugLoSStr ? JSON.parse(showDebugLoSStr) : false,
+      shootPoolFastMode: shootPoolFastModeStr ? JSON.parse(shootPoolFastModeStr) : false,
       autoSelectWeapon:
         canUseAutoWeaponSelection && (autoSelectWeaponStr ? JSON.parse(autoSelectWeaponStr) : true),
       hpBarPerModel: hpBarPerModelStr ? JSON.parse(hpBarPerModelStr) : false,
@@ -2266,6 +2268,11 @@ export const BoardWithAPI: React.FC = () => {
   const handleToggleDebugLoS = (value: boolean) => {
     setSettings((prev) => ({ ...prev, showDebugLoS: value }));
     localStorage.setItem("showDebugLoS", JSON.stringify(value));
+  };
+
+  const handleToggleShootPoolFastMode = (value: boolean) => {
+    setSettings((prev) => ({ ...prev, shootPoolFastMode: value }));
+    localStorage.setItem("shootPoolFastMode", JSON.stringify(value));
   };
 
   const handleToggleAutoSelectWeapon = (value: boolean) => {
@@ -6388,6 +6395,8 @@ export const BoardWithAPI: React.FC = () => {
         onToggleDebug={handleToggleDebug}
         showDebugLoS={settings.showDebugLoS}
         onToggleDebugLoS={handleToggleDebugLoS}
+        shootPoolFastMode={settings.shootPoolFastMode}
+        onToggleShootPoolFastMode={handleToggleShootPoolFastMode}
         autoSelectWeapon={settings.autoSelectWeapon}
         canToggleAutoSelectWeapon={canUseAutoWeaponSelection}
         onToggleAutoSelectWeapon={handleToggleAutoSelectWeapon}

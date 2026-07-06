@@ -10,7 +10,7 @@
     { "id": 10003, "unit_type": "DreadnoughtBallistus",                                   "player": 1, "col": 72,   "row": 8 },
     { "id": 10001, "unit_type": "FenrisianWolf",                                          "player": 1, "col": 40,   "row": 161 },
     { "id": 10002, "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",  "player": 1, "col": 63,   "row": 65 },
-    { "id": 10005, "unit_type": "DreadnoughtBallistus",                                   "player": 1, "col": 180,  "row": 230 },
+    { "id": 10005, "unit_type": "DreadnoughtBallistus",                                   "player": 1, "col": 175,  "row": 230 },
 
     {
       "id": 6, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 107, "row": 166,

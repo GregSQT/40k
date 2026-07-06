@@ -361,19 +361,6 @@ def _can_unit_shoot_after_advance_with_weapon(unit: Dict[str, Any], weapon: Dict
     return _unit_has_rule(unit, "shoot_after_advance")
 
 
-def _can_unit_advance_in_shoot_phase(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
-    """
-    Return True only when unit can still advance in current shooting activation.
-
-    Strict requirement: _can_advance must be initialized during activation start.
-    """
-    if "_can_advance" not in unit:
-        raise KeyError(f"Unit missing required '_can_advance' field: unit_id={unit.get('id')}")
-    if "id" not in unit:
-        raise KeyError(f"Unit missing required 'id' field: {unit}")
-    has_advanced = str(unit["id"]) in require_key(game_state, "units_advanced")
-    has_shot = _unit_has_shot_with_any_weapon(unit)
-    return bool(unit["_can_advance"]) and not has_advanced and not has_shot
 
 
 def _get_combi_weapon_key(weapon: Dict[str, Any]) -> Optional[str]:
@@ -2143,9 +2130,10 @@ def _unit_has_firable_target(game_state: Dict[str, Any], unit: Dict[str, Any],
 
 def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any], current_player: int) -> bool:
     """
-    ADVANCE_IMPLEMENTATION: Updated to support Advance action.
-    Unit is eligible for shooting phase if it CAN_SHOOT OR CAN_ADVANCE.
-    CAN_ADVANCE = alive AND correct player AND not fled AND not in melee.
+    Éligibilité au pool de tir (règles 10.04-10.07). L'unité est éligible si, dans son état
+    courant (engagée / ayant avancé / normale), elle possède au moins une arme réellement
+    tirable ET au moins une cible ennemie à portée de cette arme avec LoS.
+    L'Advance n'est PAS une action de la phase de tir : elle se joue en phase de mouvement.
     """
     # PISTOL rule: Initialize _shooting_with_pistol to None for eligibility check
     # This ensures each unit starts with no PISTOL category restriction
@@ -2198,8 +2186,15 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
         unit["_can_shoot"] = False
         return False
 
-    # Éligible seulement s'il existe au moins une cible ennemie à portée de l'arme tirable la plus
-    # longue, avec LoS (INDIRECT FIRE non implémenté → LoS toujours requise).
+    # Option debug (défaut = pool exact). Si le test cible+LoS est désactivé, l'unité est éligible
+    # dès qu'elle a une arme tirable ; la présence réelle d'une cible est résolue à l'activation
+    # (transition move→shoot plus rapide, mais cercle vert possible sans cible visible).
+    if not game_state.get("shoot_pool_require_los_target", True):
+        unit["_can_shoot"] = True
+        return True
+
+    # Pool exact : éligible seulement s'il existe au moins une cible ennemie à portée de l'arme
+    # tirable la plus longue, avec LoS (INDIRECT FIRE non implémenté → LoS toujours requise).
     max_firable_range = max(require_key(w, "RNG") for w in firable_weapons)
     can_shoot = _unit_has_firable_target(game_state, unit, is_adjacent, max_firable_range)
     unit["_can_shoot"] = can_shoot
@@ -4996,12 +4991,12 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
     
     # STRICT AI_TURN: shoot/advance must ALWAYS follow activation start
     # No shooting/advance allowed for a different unit while one is active
-    if action_type in ["shoot", "advance", "move_after_shooting"]:
+    if action_type in ["shoot", "move_after_shooting"]:
         unit_id_str = str(unit_id)
         active_unit_id = str(active_shooting_unit) if active_shooting_unit is not None else None
         if active_unit_id and active_unit_id != unit_id_str:
             raise ValueError(
-                f"shoot/advance/move_after_shooting called for non-active unit: "
+                f"shoot/move_after_shooting called for non-active unit: "
                 f"active_shooting_unit={active_unit_id} unit_id={unit_id_str}"
             )
         if not unit.get("_shoot_activation_started", False):
@@ -5014,7 +5009,6 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
                 if activation_result.get("error"):
                     return False, activation_result
                 if (activation_result.get("empty_target_pool")
-                        or activation_result.get("action") == "empty_target_advance_available"
                         or activation_result.get("skip_reason")):
                     return True, activation_result
     
@@ -5048,10 +5042,6 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
             f"shoot reached in execute_action — squad path expected. "
             f"unit_id={unit_id_str} episode={game_state.get('episode_number')} turn={game_state.get('turn')}"
         )
-
-    elif action_type == "advance":
-        # ADVANCE_IMPLEMENTATION: Handle advance action during shooting phase
-        return _handle_advance_action(game_state, unit, action, config)
 
     elif action_type == "move_after_shooting":
         return _handle_move_after_shooting_action(game_state, unit, action, config)
@@ -5340,562 +5330,6 @@ def _get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[s
 # ADVANCE_IMPLEMENTATION: Advance action handler
 # ============================================================================
 
-def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-    """
-    ADVANCE_IMPLEMENTATION: Handle advance action during shooting phase.
-
-    Board ×10 (Documentation/TODO/Boardx10-final.md §9.0): roll D6 (affichage 1–6 inch équivalent),
-    budget de déplacement en sous-hex = jet × ``inches_to_subhex`` (ex. ×10 → 10–60).
-    Pathfinding identique à la phase move via ``movement_build_valid_destinations_pool`` (MOVE temporaire).
-    After advance: cannot shoot (unless Assault weapon), cannot charge.
-    Unit is only marked as "advanced" if it actually moved to a different hex.
-    """
-    import random
-    from engine.combat_utils import get_hex_neighbors, is_hex_adjacent_to_enemy
-    from engine.phase_handlers.movement_handlers import (
-        movement_build_valid_destinations_pool,
-        _select_strategic_destination,
-    )
-    from .shared_utils import build_enemy_adjacent_hexes
-    
-    unit_id = unit["id"]
-    orig_col, orig_row = require_unit_position(unit, game_state)
-    is_gym_training = bool(config.get("gym_training_mode", False))
-    is_pve_ai = bool(config.get("pve_mode", False)) and int(unit["player"]) == 2
-    unit_id_str = str(unit_id)
-
-    # Hard invariant: at most one ADVANCE per unit in shooting phase.
-    if unit_id_str in require_key(game_state, "units_advanced"):
-        success, result = _handle_shooting_end_activation(
-            game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
-        )
-        result["advance_rejected"] = True
-        result["skip_reason"] = "cannot_advance_twice_in_shoot_phase"
-        return success, result
-    
-    # CRITICAL: Cannot advance if unit has already shot -> SKIP (unit cannot act)
-    has_shot = _unit_has_shot_with_any_weapon(unit)
-    if has_shot:
-        if game_state.get("debug_mode", False):
-            from engine.game_utils import add_debug_file_log
-            episode = game_state.get("episode_number", "?")
-            turn = game_state.get("turn", "?")
-            unit_id_str = str(unit["id"])
-            rng_weapons = require_key(unit, "RNG_WEAPONS")
-            shot_flags = [weapon.get("shot") for weapon in rng_weapons]
-            activation_started = unit.get("_shoot_activation_started", False)
-            add_debug_file_log(
-                game_state,
-                f"[ADVANCE SKIP] E{episode} T{turn} Unit {unit_id_str} "
-                f"reason=cannot_advance_after_shooting activation_started={activation_started} "
-                f"weapon_shot_flags={shot_flags}"
-            )
-        success, result = _handle_shooting_end_activation(
-            game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
-        )
-        result["advance_rejected"] = True
-        result["skip_reason"] = "cannot_advance_after_shooting"
-        return success, result
-
-    # Re-evaluate adjacency on current board state right before advance execution.
-    # Reactive moves may have changed engagement after activation start.
-    unit_is_adjacent_now = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
-    unit["_can_advance"] = not unit_is_adjacent_now
-    if unit_is_adjacent_now:
-        if game_state.get("debug_mode", False):
-            from engine.game_utils import add_debug_file_log
-            episode = game_state.get("episode_number", "?")
-            turn = game_state.get("turn", "?")
-            unit_id_str = str(unit["id"])
-            unit_player_int = int(unit["player"]) if unit["player"] is not None else None
-            neighbors = set(get_hex_neighbors(orig_col, orig_row))
-            units_cache = require_key(game_state, "units_cache")
-            adjacent_enemies = []
-            for enemy_id, cache_entry in units_cache.items():
-                enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
-                if enemy_player != unit_player_int:
-                    enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
-                    if (enemy_col, enemy_row) in neighbors:
-                        adjacent_enemies.append(f"{enemy_id}@({enemy_col},{enemy_row})")
-            add_debug_file_log(
-                game_state,
-                f"[ADVANCE DEBUG] E{episode} T{turn} _handle_advance_action: "
-                f"Unit {unit_id_str} at ({orig_col},{orig_row}) advance blocked "
-                f"(adjacent_enemies={adjacent_enemies}, dynamic_recheck=True)"
-            )
-        success, result = _handle_shooting_end_activation(
-            game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
-        )
-        result["advance_rejected"] = True
-        result["skip_reason"] = "cannot_advance_adjacent_to_enemy"
-        return success, result
-
-    if game_state.get("debug_mode", False):
-        from engine.game_utils import add_debug_file_log
-        episode = game_state.get("episode_number", "?")
-        turn = game_state.get("turn", "?")
-        unit_id_str = str(unit["id"])
-        unit_player_int = int(unit["player"]) if unit["player"] is not None else None
-        neighbors = set(get_hex_neighbors(orig_col, orig_row))
-        units_cache = require_key(game_state, "units_cache")
-        adjacent_enemies = []
-        for enemy_id, cache_entry in units_cache.items():
-            enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
-            if enemy_player != unit_player_int:
-                enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
-                if (enemy_col, enemy_row) in neighbors:
-                    adjacent_enemies.append(f"{enemy_id}@({enemy_col},{enemy_row})")
-        if adjacent_enemies:
-            add_debug_file_log(
-                game_state,
-                f"[ADVANCE DEBUG] E{episode} T{turn} _handle_advance_action: "
-                f"Unit {unit_id_str} at ({orig_col},{orig_row}) advance allowed "
-                f"while adjacent_enemies={adjacent_enemies}"
-            )
-    
-    scale = int(require_key(game_state, "inches_to_subhex"))
-    gr = require_key(config, "game_rules")
-    advance_cap_subhex = require_key(gr, "advance_distance_range")
-    remainder = advance_cap_subhex % scale
-    if remainder != 0:
-        raise ValueError(
-            f"advance_distance_range ({advance_cap_subhex} sub-hex) must be divisible by "
-            f"inches_to_subhex ({scale}) so advance dice maps to GW inches (Boardx10-final §9.0); "
-            f"remainder={remainder}"
-        )
-    advance_dice_max = advance_cap_subhex // scale
-    if advance_dice_max < 1:
-        raise ValueError(
-            f"Invalid advance dice max derived from config: advance_dice_max={advance_dice_max} "
-            f"(advance_cap_subhex={advance_cap_subhex}, scale={scale})"
-        )
-
-    # ``unit["advance_range"]`` stores the D6 face (1..advance_dice_max) for display and multi-step selection
-    if "advance_range" in unit and unit["advance_range"] is not None:
-        advance_roll = int(unit["advance_range"])
-    else:
-        advance_roll = random.randint(1, advance_dice_max)
-        unit["advance_range"] = advance_roll
-
-    advance_move_budget = advance_roll * scale
-
-    from engine.perf_timing import perf_timing_enabled, append_perf_timing_line
-    _adv_pt = perf_timing_enabled(game_state)
-    _t_adv0 = time.perf_counter() if _adv_pt else None
-
-    # Build valid destinations using BFS (same as movement phase)
-    original_move = unit["MOVE"]
-    unit["MOVE"] = advance_move_budget
-
-    # Use movement pathfinding to get valid destinations
-    # "_valid_destinations" is injected by the first (no-dest) call to avoid a second BFS
-    if "_valid_destinations" in action:
-        valid_destinations = action["_valid_destinations"]
-    else:
-        valid_destinations = movement_build_valid_destinations_pool(game_state, unit_id)
-
-    # Restore original MOVE
-    unit["MOVE"] = original_move
-    _t_adv_pool = time.perf_counter() if _adv_pt else None
-
-    # Check if destination provided in action
-    dest_col = action.get("destCol")
-    dest_row = action.get("destRow")
-
-    if dest_col is not None and dest_row is not None:
-        # CRITICAL: Convert coordinates to int for consistent tuple comparison
-        dest_col, dest_row = int(dest_col), int(dest_row)
-        
-        if game_state.get("debug_mode", False):
-            from engine.game_utils import add_debug_file_log
-            episode = game_state.get("episode_number", "?")
-            turn = game_state.get("turn", "?")
-            unit_id_str = str(unit["id"])
-            units_cache = require_key(game_state, "units_cache")
-            occupants = []
-            for check_id, check_entry in units_cache.items():
-                check_col, check_row = check_entry["col"], check_entry["row"]
-                if check_col == dest_col and check_row == dest_row:
-                    check_hp = get_hp_from_cache(str(check_id), game_state)
-                    occupants.append(f"{check_id}@({check_col},{check_row}) HP={check_hp}")
-            add_debug_file_log(
-                game_state,
-                f"[ADVANCE DEBUG] E{episode} T{turn} _handle_advance_action: "
-                f"Unit {unit_id_str} dest=({dest_col},{dest_row}) "
-                f"valid_destinations={len(valid_destinations)} occupants={occupants}"
-            )
-        
-        # Destination provided - validate and execute
-        if (dest_col, dest_row) not in valid_destinations:
-            return False, {"error": "invalid_advance_destination", "destination": (dest_col, dest_row)}
-
-        from .shared_utils import get_engagement_zone, compute_candidate_footprint
-        from engine.spatial_relations import entries_in_engagement_zone, engagement_distance_metric
-        engagement_zone = get_engagement_zone(game_state)
-        # Étape 7.3 : re-validation EZ de la destination d'advance via le switch unifié (même
-        # métrique que le masque du pool → pas de divergence pool/re-check à la bascule 7.6).
-        _eng_metric = engagement_distance_metric()
-        unit_player_int = int(require_key(unit, "player"))
-        units_cache = require_key(game_state, "units_cache")
-        candidate_fp = compute_candidate_footprint(dest_col, dest_row, unit, game_state)
-        _adv_mover_entry = {
-            "BASE_SHAPE": require_key(unit, "BASE_SHAPE"),
-            "BASE_SIZE": require_key(unit, "BASE_SIZE"),
-            "col": dest_col,
-            "row": dest_row,
-            "occupied_hexes": candidate_fp,
-        }
-        for enemy_id, cache_entry in units_cache.items():
-            enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
-            if enemy_player == unit_player_int:
-                continue
-            if entries_in_engagement_zone(_adv_mover_entry, cache_entry, engagement_zone, _eng_metric):
-                return False, {
-                    "error": "advance_destination_adjacent_to_enemy",
-                    "enemy_id": enemy_id,
-                    "destination": (dest_col, dest_row),
-                }
-        _t_adv_dest_check = time.perf_counter() if _adv_pt else None
-
-        # CRITICAL: Final occupation check IMMEDIATELY before position assignment
-        dest_col_int, dest_row_int = int(dest_col), int(dest_row)
-
-        episode = game_state.get("episode_number", "?")
-        turn = game_state.get("turn", "?")
-        phase = game_state.get("phase", "shoot")
-        from engine.game_utils import conditional_debug_print
-        conditional_debug_print(game_state, f"[OCCUPATION CHECK] E{episode} T{turn} {phase}: Unit {unit['id']} checking advance destination ({dest_col_int},{dest_row_int})")
-
-        unit_id_str = str(unit["id"])
-        candidate_fp = compute_candidate_footprint(dest_col_int, dest_row_int, unit, game_state)
-        if not is_placement_valid_with_clearance(
-            game_state, candidate_fp,
-            shape=unit["BASE_SHAPE"], base_size=unit["BASE_SIZE"],
-            col=dest_col_int, row=dest_row_int, exclude_unit_id=unit_id_str,
-        ):
-            if "console_logs" not in game_state:
-                game_state["console_logs"] = []
-            log_msg = f"[ADVANCE COLLISION PREVENTED] E{episode} T{turn} {phase}: Unit {unit['id']} cannot advance to ({dest_col_int},{dest_row_int}) - footprint blocked"
-            from engine.game_utils import add_console_log, add_debug_log
-            from engine.game_utils import safe_print
-            add_console_log(game_state, log_msg)
-            safe_print(game_state, log_msg)
-            return False, {
-                "error": "advance_destination_occupied",
-                "destination": (dest_col, dest_row)
-            }
-        
-        conditional_debug_print(game_state, f"[OCCUPATION CHECK] E{episode} T{turn} {phase}: Unit {unit['id']} advance destination ({dest_col_int},{dest_row_int}) is FREE - proceeding with advance")
-        _t_adv_occ_check = time.perf_counter() if _adv_pt else None
-
-        # Execute advance movement
-        if "console_logs" not in game_state:
-            game_state["console_logs"] = []
-        log_message = f"[POSITION CHANGE] E{episode} T{turn} {phase} Unit {unit['id']}: ({orig_col},{orig_row})→({dest_col},{dest_row}) via ADVANCE"
-        from engine.game_utils import add_console_log, add_debug_log
-        from engine.game_utils import safe_print
-        add_console_log(game_state, log_message)
-        safe_print(game_state, log_message)
-
-        from engine.game_utils import conditional_debug_print
-        dest_col_int, dest_row_int = normalize_coordinates(dest_col, dest_row)
-        conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: Setting col={dest_col_int} row={dest_row_int}")
-        from engine.combat_utils import set_unit_coordinates
-        set_unit_coordinates(unit, dest_col_int, dest_row_int)
-        conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: col set to {unit['col']}")
-        conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
-
-        # Capture old footprint before cache update (for multi-hex adjacency delta)
-        adv_uid_str = str(unit["id"])
-        adv_old_entry = require_key(game_state, "units_cache").get(adv_uid_str)
-        adv_old_occupied = adv_old_entry.get("occupied_hexes") if adv_old_entry else None
-
-        update_units_cache_position(game_state, adv_uid_str, dest_col_int, dest_row_int)
-
-        adv_new_entry = require_key(game_state, "units_cache").get(adv_uid_str)
-        adv_new_occupied = adv_new_entry.get("occupied_hexes") if adv_new_entry else None
-        _t_adv_pos_update = time.perf_counter() if _adv_pt else None
-
-        moved_unit_player = int(require_key(unit, "player"))
-        update_enemy_adjacent_caches_after_unit_move(
-            game_state,
-            moved_unit_player=moved_unit_player,
-            old_col=orig_col,
-            old_row=orig_row,
-            new_col=dest_col_int,
-            new_row=dest_row_int,
-            old_occupied=adv_old_occupied,
-            new_occupied=adv_new_occupied,
-        )
-        _t_adv_adj_cache = time.perf_counter() if _adv_pt else None
-
-        # Check if unit actually moved (for cache invalidation and logging)
-        actually_moved = (orig_col != dest_col) or (orig_row != dest_row)
-
-        if actually_moved:
-            _invalidate_los_cache_for_moved_unit(game_state, unit["id"], old_col=orig_col, old_row=orig_row)
-            game_state["_unit_move_version"] += 1
-            build_unit_los_cache(game_state, unit["id"])
-            _t_adv_los = time.perf_counter() if _adv_pt else None
-
-            from .movement_handlers import _invalidate_all_destination_pools_after_movement
-            _invalidate_all_destination_pools_after_movement(game_state)
-
-            maybe_resolve_reactive_move(
-                game_state=game_state,
-                moved_unit_id=str(unit["id"]),
-                from_col=orig_col,
-                from_row=orig_row,
-                to_col=dest_col_int,
-                to_row=dest_row_int,
-                move_kind="advance",
-                move_cause="normal",
-            )
-            _t_adv_reactive = time.perf_counter() if _adv_pt else None
-
-            if _adv_pt and _t_adv0 is not None:
-                _ep = game_state.get("episode_number", "?")
-                _tu = game_state.get("turn", "?")
-                _uid = str(unit["id"])
-                _t_adv_pool_v        = require_present(_t_adv_pool, "_t_adv_pool")
-                _t_adv_dest_check_v  = require_present(_t_adv_dest_check, "_t_adv_dest_check")
-                _t_adv_occ_check_v   = require_present(_t_adv_occ_check, "_t_adv_occ_check")
-                _t_adv_pos_update_v  = require_present(_t_adv_pos_update, "_t_adv_pos_update")
-                _t_adv_adj_cache_v   = require_present(_t_adv_adj_cache, "_t_adv_adj_cache")
-                _t_adv_los_v         = require_present(_t_adv_los, "_t_adv_los")
-                _t_adv_reactive_v    = require_present(_t_adv_reactive, "_t_adv_reactive")
-                _pool_s  = (_t_adv_pool_v        - _t_adv0)              if _t_adv_pool_v        else 0.0
-                _dchk_s  = (_t_adv_dest_check_v  - _t_adv_pool_v)        if _t_adv_dest_check_v  else 0.0
-                _ochk_s  = (_t_adv_occ_check_v   - _t_adv_dest_check_v)  if _t_adv_occ_check_v   else 0.0
-                _pos_s   = (_t_adv_pos_update_v  - _t_adv_occ_check_v)   if _t_adv_pos_update_v  else 0.0
-                _adj_s   = (_t_adv_adj_cache_v   - _t_adv_pos_update_v)  if _t_adv_adj_cache_v   else 0.0
-                _los_s   = (_t_adv_los_v         - _t_adv_adj_cache_v)   if _t_adv_los_v         else 0.0
-                _react_s = (_t_adv_reactive_v    - _t_adv_los_v)         if _t_adv_reactive_v    else 0.0
-                _total_s = _t_adv_reactive_v - _t_adv0
-                append_perf_timing_line(
-                    f"ADVANCE_TIMING episode={_ep} turn={_tu} unitId={_uid!r} "
-                    f"pool_s={_pool_s:.6f} dest_check_s={_dchk_s:.6f} occ_check_s={_ochk_s:.6f} "
-                    f"pos_update_s={_pos_s:.6f} adj_cache_s={_adj_s:.6f} "
-                    f"los_cache_s={_los_s:.6f} reactive_s={_react_s:.6f} total_s={_total_s:.6f}"
-                )
-        
-        # CRITICAL FIX: Mark unit as advanced REGARDLESS of whether it moved
-        # Units must be marked as advanced even if they stay in place (for ASSAULT weapon rule)
-        # AI_TURN.md ligne 666: Log: end_activation(ACTION, 1, ADVANCE, SHOOTING, 0)
-        # This marks units_advanced (ligne 665 describes what this does)
-        # arg5=0 means NOT_REMOVED (do not remove from pool, do not end activation)
-        # We track the advance but continue to shooting, so we don't use the return value
-        # CRITICAL: Call end_activation directly (not _handle_shooting_end_activation) because:
-        # 1. arg5=0 means NOT_REMOVED - we don't want to clear activation state
-        # 2. We don't want to trigger phase_complete check
-        # 3. This is just a tracking/logging call, not an actual activation end
-        from engine.phase_handlers.generic_handlers import end_activation
-        end_activation(game_state, unit, ACTION, 1, ADVANCE, NOT_REMOVED, 0)
-        
-        # Log the advance action
-        if "action_logs" not in game_state:
-            game_state["action_logs"] = []
-
-        append_action_log(
-            game_state,
-            {
-                "type": "advance",
-                "message": f"Unit {unit_id} ({orig_col}, {orig_row}) ADVANCED to ({dest_col}, {dest_row}) (Roll: {advance_roll})",
-                "turn": game_state.get("turn", 1),
-                "phase": "shoot",
-                "unitId": unit_id,
-                "player": unit["player"],
-                "fromCol": orig_col,
-                "fromRow": orig_row,
-                "toCol": dest_col,
-                "toRow": dest_row,
-                "advance_range": advance_roll,
-                "advance_max_subhex": advance_move_budget,
-                "advance_strategy": action.get("advance_strategy"),
-                "actually_moved": actually_moved,
-                "timestamp": "server_time",
-            },
-        )
-        
-        # Clean up advance state AFTER logging
-        if "advance_range" in unit:
-            del unit["advance_range"]
-        
-        # AI_TURN.md STEP 4: ADVANCE_ACTION post-advance logic (lines 666-679)
-        # Continue only if unit actually moved
-        if not actually_moved:
-            # In gym/PvE automatic mode, staying on same hex must close activation to avoid deadlock loops.
-            if is_gym_training or is_pve_ai:
-                success, result = _handle_shooting_end_activation(
-                    game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
-                )
-                result["advance_rejected"] = True
-                result["skip_reason"] = "no_effective_advance_movement"
-                return success, result
-            # Unit did not advance -> Go back to STEP 3: ACTION_SELECTION
-            return True, {
-                "waiting_for_player": True,
-                "action": "advance_cancelled",
-                "unitId": unit_id
-            }
-        
-        # Clear valid_target_pool
-        if "valid_target_pool" in unit:
-            del unit["valid_target_pool"]
-        
-        # Update capabilities
-        # CAN_ADVANCE = false (unit has advanced, cannot advance again)
-        unit["_can_advance"] = False
-        
-        # CRITICAL: Call weapon_availability_check FIRST to get usable weapons
-        # Then rebuild valid_target_pool using those usable weapons
-        weapon_rule = require_key(game_state, "weapon_rule")
-        weapon_available_pool = weapon_availability_check(
-            game_state, unit, weapon_rule, advance_status=1, adjacent_status=0
-        )
-        usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
-        
-        # CRITICAL: Rebuild valid_target_pool using shooting_build_valid_target_pool for consistency
-        # This wrapper automatically determines context (advance_status=1 after advance, adjacent_status=0)
-        # and handles cache correctly
-        valid_target_pool = shooting_build_valid_target_pool(game_state, unit_id)
-        unit["valid_target_pool"] = valid_target_pool
-        # CAN_SHOOT = (weapon_available_pool NOT empty)
-        can_shoot = len(usable_weapons) > 0
-        unit["_can_shoot"] = can_shoot
-        
-        # Pre-select first available weapon
-        if usable_weapons:
-            first_weapon = usable_weapons[0]
-            unit["selectedRngWeaponIndex"] = first_weapon["index"]
-            selected_weapon = require_key(first_weapon, "weapon")
-            nb_roll = resolve_dice_value(require_key(selected_weapon, "NB"), "shooting_nb_post_advance")
-            unit["SHOOT_LEFT"] = nb_roll
-            unit["_current_shoot_nb"] = nb_roll
-            _append_shoot_nb_roll_info_log(game_state, unit, selected_weapon, nb_roll)
-        else:
-            unit["SHOOT_LEFT"] = 0
-        
-        # valid_target_pool NOT empty AND CAN_SHOOT = true?
-        if valid_target_pool and can_shoot:
-            # YES -> SHOOTING ACTIONS AVAILABLE (post-advance) -> Go to STEP 5: ADVANCED_SHOOTING_ACTION_SELECTION
-            # Mark unit as currently active (required for frontend to show weapon icon)
-            game_state["active_shooting_unit"] = unit_id
-            available_weapons = [
-                {"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")}
-                for w in weapon_available_pool
-            ]
-            # Return advance action so it gets logged as its own step
-            cover_by_unit_id = build_cover_by_unit_id_for_valid_targets(game_state, unit, valid_target_pool)
-            return True, {
-                "action": "advance",
-                "unitId": unit_id,
-                "fromCol": orig_col,
-                "fromRow": orig_row,
-                "toCol": dest_col,
-                "toRow": dest_row,
-                "advance_range": advance_roll,
-                "advance_max_subhex": advance_move_budget,
-                "advance_strategy": action.get("advance_strategy"),
-                "actually_moved": actually_moved,
-                "blinking_units": valid_target_pool,
-                "start_blinking": True,
-                "waiting_for_player": True,
-                "available_weapons": available_weapons,
-                "cover_by_unit_id": cover_by_unit_id,
-                "hidden_too_far_by_unit_id": build_hidden_too_far_by_unit_id(game_state, unit),
-            }
-        else:
-            # NO -> Unit advanced but no valid targets -> end_activation(ACTION, 1, ADVANCE, SHOOTING, 1)
-            # arg3="ADVANCE", arg4="SHOOTING", arg5=1 (remove from pool)
-            success, result = _handle_shooting_end_activation(game_state, unit, ACTION, 1, ADVANCE, SHOOTING, 1, action_type="advance")
-            result.update({
-                "fromCol": orig_col,
-                "fromRow": orig_row,
-                "toCol": dest_col,
-                "toRow": dest_row,
-                "advance_range": advance_roll,
-                "advance_max_subhex": advance_move_budget,
-                "advance_strategy": action.get("advance_strategy"),
-                "actually_moved": actually_moved
-            })
-            return success, result
-    else:
-        # No destination - return valid destinations for player/AI to choose
-        # For AI, auto-select best destination
-        movable_destinations = [d for d in valid_destinations if int(d[0]) != int(orig_col) or int(d[1]) != int(orig_row)]
-
-        # AI_TURN.md §STEP4: valid_advance_destinations must exclude enemy-adjacent hexes
-        # Filter BEFORE auto-select to prevent advance_destination_adjacent_to_enemy loop
-        from .shared_utils import get_engagement_zone
-        from engine.hex_utils import dilate_hex_set_unbounded, precompute_footprint_offsets
-        _ez = get_engagement_zone(game_state)
-        _units_cache = require_key(game_state, "units_cache")
-        _unit_player = int(unit["player"]) if unit["player"] is not None else None
-        _forbidden_zone: set = set()
-        for _ce in _units_cache.values():
-            if int(_ce.get("player", _unit_player)) != _unit_player:
-                _enemy_fp = _ce.get("occupied_hexes", {(_ce["col"], _ce["row"])})
-                _forbidden_zone.update(dilate_hex_set_unbounded(_enemy_fp, _ez))
-        if _forbidden_zone:
-            _base_shape = unit["BASE_SHAPE"]
-            _base_size = unit["BASE_SIZE"]
-            _orientation = int(require_key(unit, "orientation")) if "orientation" in unit else 0
-            if _ez <= 1 or _base_size == 1:
-                movable_destinations = [
-                    d for d in movable_destinations
-                    if (d[0], d[1]) not in _forbidden_zone
-                ]
-            else:
-                _off_even, _off_odd = precompute_footprint_offsets(_base_shape, _base_size, _orientation)
-                movable_destinations = [
-                    d for d in movable_destinations
-                    if not any(
-                        (d[0] + dc, d[1] + dr) in _forbidden_zone
-                        for dc, dr in (_off_even if d[0] % 2 == 0 else _off_odd)
-                    )
-                ]
-
-        if (is_gym_training or is_pve_ai) and movable_destinations:
-            # Auto-select destination using the strategy carried by the action dict (default: aggressive)
-            strategy_id = require_key(action, "advance_strategy")
-            action["_valid_destinations"] = valid_destinations
-            remaining = list(movable_destinations)
-            while remaining:
-                best_dest = _select_strategic_destination(strategy_id, remaining, unit, game_state)
-                action["destCol"] = best_dest[0]
-                action["destRow"] = best_dest[1]
-                result = _handle_advance_action(game_state, unit, action, config)
-                if result[0] or result[1].get("error") not in ("advance_destination_adjacent_to_enemy", "advance_destination_occupied"):
-                    action.pop("_valid_destinations", None)
-                    return result
-                remaining.remove(best_dest)
-            action.pop("_valid_destinations", None)
-        
-        # CRITICAL FIX: If no valid destinations in gym training, end activation to prevent infinite loop
-        if (is_gym_training or is_pve_ai) and not movable_destinations:
-            # No valid destinations - SKIP (cannot advance)
-            success, result = _handle_shooting_end_activation(
-                game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
-            )
-            result["advance_rejected"] = True
-            result["skip_reason"] = "no_valid_advance_destinations"
-            return success, result
-        
-        # Human player - return destinations for UI
-        # ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Use advance_destinations and advance_roll names
-        # to match frontend expectations in useEngineAPI.ts (lines ~330-340)
-        return True, {
-            "waiting_for_player": True,
-            "action": "advance_select_destination",
-            "unitId": unit_id,
-            "advance_roll": advance_roll,
-            # Même valeur que advance_roll (face D6) — alias pour clients qui lisent advance_range
-            "advance_range": advance_roll,
-            "advance_max_subhex": advance_move_budget,
-            "advance_destinations": [{"col": (norm_coords := normalize_coordinates(d[0], d[1]))[0], "row": norm_coords[1]} for d in valid_destinations],
-            "highlight_color": "orange"
-        }
 
 
 def _attack_sequence_rng(

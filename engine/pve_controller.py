@@ -162,10 +162,10 @@ class PvEController:
         else:
             predicted_action = micro_prediction
 
-        # Tutoriel étape 2 : pour chaque unité P2, même script qu'avant (advance en shoot,
-        # charge en charge, mouvement agressif en move) tant que cette unité n'a pas encore
-        # été comptée dans le tracking. (Anciennement : un seul advance/charge global pour
-        # tout P2 → la 2e Hormagaunt ne recevait plus le forçage.)
+        # Tutoriel étape 2 : pour chaque unité P2, même script qu'avant (charge en charge,
+        # mouvement agressif en move) tant que cette unité n'a pas encore été comptée dans le
+        # tracking. (Anciennement : un seul advance/charge global pour tout P2 → la 2e
+        # Hormagaunt ne recevait plus le forçage.)
         scenario_file = getattr(engine, "_current_scenario_file", "") or ""
         if (
             "tutorial" in scenario_file
@@ -179,12 +179,6 @@ class PvEController:
                     action_mask[0]
                 ):
                     predicted_action = 0
-            elif current_phase == "shoot":
-                units_advanced = require_key(game_state, "units_advanced")
-                if selected_str not in units_advanced and len(action_mask) > 12 and bool(
-                    action_mask[12]
-                ):
-                    predicted_action = 12
             elif current_phase == "charge":
                 units_charged = require_key(game_state, "units_charged")
                 if selected_str not in units_charged and len(action_mask) > 9 and bool(

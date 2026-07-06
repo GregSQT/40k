@@ -1577,6 +1577,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         if (_movePreviewMaskLoopsTransport.clientHash.length > 0) {
           body.move_preview_mask_loops_client_hash = _movePreviewMaskLoopsTransport.clientHash;
         }
+        // Option debug (menu) : mode pool de tir. fast = résolution cible à l'activation.
+        const _shootPoolFastRaw = localStorage.getItem("shootPoolFastMode");
+        body.shoot_pool_require_los = !(_shootPoolFastRaw ? JSON.parse(_shootPoolFastRaw) : false);
         const requestBody = JSON.stringify(body);
         const response = await fetch(`${API_BASE}/game/action`, {
           method: "POST",

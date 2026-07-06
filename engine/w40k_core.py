@@ -3170,9 +3170,6 @@ class W40KEngine(gym.Env):
                 # Skip logging for system actions and intermediate actions
                 skip_logging_action_types = [
                     "advance_phase",  # System action
-                    "advance_select_destination",  # Intermediate action
-                    "empty_target_advance_available",  # Intermediate action
-                    "advance_cancelled",  # Intermediate action
                     "waiting_for_movement_choice",  # Intermediate action
                     "waiting_for_rule_choice",  # Intermediate action
                     "select_rule_choice",  # Meta action (not in step.log contract)

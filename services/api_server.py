@@ -2095,6 +2095,12 @@ def execute_action():
         return jsonify({"success": False, "error": "No JSON data provided"}), 400
     mask_loops_client_hash = _extract_mask_loops_client_hash_from_request_data(data)
 
+    # Option debug (menu) : mode pool de tir. True = pool exact (test cible+LoS au build),
+    # False = transition rapide (cible résolue à l'activation). Posé avant traitement pour
+    # être pris en compte dès la transition move→shoot déclenchée par cette action.
+    if "shoot_pool_require_los" in data:
+        engine.game_state["shoot_pool_require_los_target"] = bool(data["shoot_pool_require_los"])
+
     # Convert frontend hex click to engine semantic action format
     if "col" in data and "row" in data and "selectedUnitId" in data:
         action = {

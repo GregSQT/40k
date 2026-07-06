@@ -14,6 +14,8 @@ interface SettingsMenuProps {
   onToggleDebug: (value: boolean) => void;
   showDebugLoS: boolean;
   onToggleDebugLoS: (value: boolean) => void;
+  shootPoolFastMode?: boolean;
+  onToggleShootPoolFastMode?: (value: boolean) => void;
   autoSelectWeapon: boolean;
   canToggleAutoSelectWeapon: boolean;
   onToggleAutoSelectWeapon: (value: boolean) => void;
@@ -138,6 +140,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   onToggleDebug,
   showDebugLoS,
   onToggleDebugLoS,
+  shootPoolFastMode = false,
+  onToggleShootPoolFastMode,
   autoSelectWeapon,
   canToggleAutoSelectWeapon,
   onToggleAutoSelectWeapon,
@@ -172,6 +176,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     showAdvanceWarning: boolean;
     showDebug: boolean;
     showDebugLoS: boolean;
+    shootPoolFastMode: boolean;
     autoSelectWeapon: boolean;
     hpBarPerModel: boolean;
     hpBarBlinkEnlarged: boolean;
@@ -190,6 +195,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     showAdvanceWarning,
     showDebug,
     showDebugLoS,
+    shootPoolFastMode,
     autoSelectWeapon,
     hpBarPerModel,
     hpBarBlinkEnlarged,
@@ -220,6 +226,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
       if (showAdvanceWarning !== s.showAdvanceWarning) onToggleAdvanceWarning(s.showAdvanceWarning);
       if (showDebug !== s.showDebug) onToggleDebug(s.showDebug);
       if (showDebugLoS !== s.showDebugLoS) onToggleDebugLoS(s.showDebugLoS);
+      if (onToggleShootPoolFastMode && shootPoolFastMode !== s.shootPoolFastMode)
+        onToggleShootPoolFastMode(s.shootPoolFastMode);
       if (autoSelectWeapon !== s.autoSelectWeapon) onToggleAutoSelectWeapon(s.autoSelectWeapon);
       if (onToggleHpBarPerModel && hpBarPerModel !== s.hpBarPerModel)
         onToggleHpBarPerModel(s.hpBarPerModel);
@@ -355,6 +363,14 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
               label="Debug LoS"
               description="Affiche le ratio de visibilité LoS (%) en phase de tir."
             />
+            {onToggleShootPoolFastMode && (
+              <ToggleRow
+                checked={shootPoolFastMode}
+                onChange={onToggleShootPoolFastMode}
+                label="Pool tir : transition rapide"
+                description="Désactivé (défaut) : le pool de tir vérifie qu'une unité a une cible à portée + LoS avant de la rendre activable (pas de cercle vert inutile). Activé : saute ce test au démarrage de la phase (transition move→tir plus rapide), la présence de cible est résolue à l'activation — une unité sans cible visible peut apparaître activable puis passer son tour."
+              />
+            )}
             {onToggleBattleShockTest && (
               <ToggleRow
                 checked={battleShockTestEnabled}
