@@ -2061,22 +2061,6 @@ def _should_auto_activate_next_shooting_unit(
         return False
     return _is_ai_controlled_shooting_unit(game_state, next_unit, config)
 
-def _unit_target_has_los(game_state: Dict[str, Any], shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
-    """LoS shooter→target, en réutilisant le los_cache (unité puis global) avant calcul direct.
-    Même stratégie de cache que _is_valid_shooting_target."""
-    target_id_str = str(target["id"])
-    if "los_cache" in shooter and shooter["los_cache"] and target_id_str in shooter["los_cache"]:
-        return bool(shooter["los_cache"][target_id_str])
-    if "los_cache" in game_state and game_state["los_cache"]:
-        cache_key = (str(shooter["id"]), target_id_str)
-        if cache_key in game_state["los_cache"]:
-            return bool(game_state["los_cache"][cache_key])
-        has_los = _has_line_of_sight(game_state, shooter, target)
-        game_state["los_cache"][cache_key] = has_los
-        return has_los
-    return _has_line_of_sight(game_state, shooter, target)
-
-
 def _unit_has_firable_target(game_state: Dict[str, Any], unit: Dict[str, Any],
                              is_adjacent: bool, max_range: int) -> bool:
     """
@@ -2123,7 +2107,7 @@ def _unit_has_firable_target(game_state: Dict[str, Any], unit: Dict[str, Any],
             enemy_adjacent_to_shooter, units_cache,
         ):
             continue
-        if _unit_target_has_los(game_state, unit, enemy):
+        if _unit_can_see_any(game_state, unit, enemy):
             return True
     return False
 
@@ -2186,10 +2170,11 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
         unit["_can_shoot"] = False
         return False
 
-    # Option debug (défaut = pool exact). Si le test cible+LoS est désactivé, l'unité est éligible
-    # dès qu'elle a une arme tirable ; la présence réelle d'une cible est résolue à l'activation
-    # (transition move→shoot plus rapide, mais cercle vert possible sans cible visible).
-    if not game_state.get("shoot_pool_require_los_target", True):
+    # Option debug (défaut = transition rapide). Si le test cible+LoS est désactivé, l'unité est
+    # éligible dès qu'elle a une arme tirable ; la présence réelle d'une cible est résolue à
+    # l'activation (transition move→shoot rapide, mais cercle vert possible sans cible visible).
+    # Le pool exact (test LoS au build) coûte ~1.5s/transition et s'active via le menu debug.
+    if not game_state.get("shoot_pool_require_los_target", False):
         unit["_can_shoot"] = True
         return True
 
@@ -3933,29 +3918,21 @@ def compute_unit_los(
     return _compute_unit_los_uncached(game_state, shooter, target)
 
 
-def _compute_unit_los_uncached(
+def _resolve_target_models_for_los(
     game_state: Dict[str, Any],
-    shooter: Dict[str, Any],
     target: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Uncached core of compute_unit_los() — see that function for semantics."""
-    gym_training = bool(
-        game_state.get("gym_training_mode", False)
-        or require_key(game_state, "config").get("gym_training_mode", False)
-    )
+    gym_training: bool,
+) -> Tuple[List[List[Tuple[int, int]]], List[Optional[Tuple[int, int]]], Any, Any, Any]:
+    """Empreintes par figurine vivante de la cible (+ centres et socle pour le couvert).
 
-    shooter_anchor, shooter_hexes = _resolve_unit_anchor_and_footprint(
-        game_state, shooter, gym_training=gym_training
-    )
+    Source unique partagée par ``_compute_unit_los_uncached`` (LoS complète) et
+    ``_unit_can_see_any`` (éligibilité), pour garantir une géométrie cible identique.
 
-    # Règles 06.01 + 13.10 : visibilité binaire évaluée PAR MODÈLE cible. Un modèle est
-    # visible si >= 1 cellule de son socle a une ligne dégagée ; l'unité est visible si
-    # >= 1 modèle l'est. Chaque test exclut les areas obscuring du tireur et celles que
-    # CE modèle occupe (exclusion par paire de modèles, pas l'union de l'escouade).
+    Retourne (target_model_footprints, target_model_centers, cover_base_shape,
+    cover_base_size, cover_orientation). ``target_model_centers`` est aligné index-à-index
+    sur les footprints ; None pour le repli non-découpé (gym / dict coordonnées-seules).
+    """
     target_model_footprints: List[List[Tuple[int, int]]] = []
-    # Centre (col,row) de chaque figurine vivante, aligné index-à-index sur target_model_footprints ;
-    # None pour le repli non-découpé (gym / dict coordonnées-seules). Sert au test terrain par-figurine
-    # du couvert (règle 13.08 (a)).
     target_model_centers: List[Optional[Tuple[int, int]]] = []
     cover_base_shape: Any = None
     cover_base_size: Any = None
@@ -3993,6 +3970,68 @@ def _compute_unit_los_uncached(
         )
         target_model_footprints.append([(int(c), int(r)) for c, r in target_hexes])
         target_model_centers.append(None)
+    return (
+        target_model_footprints,
+        target_model_centers,
+        cover_base_shape,
+        cover_base_size,
+        cover_orientation,
+    )
+
+
+def _unit_can_see_any(game_state: Dict[str, Any], shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
+    """True dès qu'AU MOINS une figurine cible est vue par le tireur (règle 06.01, ``can_see``).
+
+    Variante allégée de ``compute_unit_los`` réservée à l'ÉLIGIBILITÉ du pool de tir :
+    early-exit à la première figurine visible, sans calcul de couvert ni écriture du cache
+    par-paire (celui-ci attend le résultat complet, produit à l'activation via ``compute_unit_los``).
+    Même géométrie tireur/cible que la LoS complète → aucun faux négatif.
+    """
+    gym_training = bool(
+        game_state.get("gym_training_mode", False)
+        or require_key(game_state, "config").get("gym_training_mode", False)
+    )
+    shooter_anchor, shooter_hexes = _resolve_unit_anchor_and_footprint(
+        game_state, shooter, gym_training=gym_training
+    )
+    target_model_footprints, _centers, _bshape, _bsize, _borient = _resolve_target_models_for_los(
+        game_state, target, gym_training
+    )
+    for model_hexes in target_model_footprints:
+        v, _t, _vset = _compute_visibility_with_obscuring(
+            game_state, shooter_anchor, shooter_hexes, model_hexes[0], model_hexes
+        )
+        if v > 0:
+            return True
+    return False
+
+
+def _compute_unit_los_uncached(
+    game_state: Dict[str, Any],
+    shooter: Dict[str, Any],
+    target: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Uncached core of compute_unit_los() — see that function for semantics."""
+    gym_training = bool(
+        game_state.get("gym_training_mode", False)
+        or require_key(game_state, "config").get("gym_training_mode", False)
+    )
+
+    shooter_anchor, shooter_hexes = _resolve_unit_anchor_and_footprint(
+        game_state, shooter, gym_training=gym_training
+    )
+
+    # Règles 06.01 + 13.10 : visibilité binaire évaluée PAR MODÈLE cible. Un modèle est
+    # visible si >= 1 cellule de son socle a une ligne dégagée ; l'unité est visible si
+    # >= 1 modèle l'est. Chaque test exclut les areas obscuring du tireur et celles que
+    # CE modèle occupe (exclusion par paire de modèles, pas l'union de l'escouade).
+    (
+        target_model_footprints,
+        target_model_centers,
+        cover_base_shape,
+        cover_base_size,
+        cover_orientation,
+    ) = _resolve_target_models_for_los(game_state, target, gym_training)
 
     visible = 0
     total = 0

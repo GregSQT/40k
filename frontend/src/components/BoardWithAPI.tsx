@@ -2208,7 +2208,7 @@ export const BoardWithAPI: React.FC = () => {
         canUseAdvanceWarning && (showAdvanceWarningStr ? JSON.parse(showAdvanceWarningStr) : true),
       showDebug: showDebugStr ? JSON.parse(showDebugStr) : false,
       showDebugLoS: showDebugLoSStr ? JSON.parse(showDebugLoSStr) : false,
-      shootPoolFastMode: shootPoolFastModeStr ? JSON.parse(shootPoolFastModeStr) : false,
+      shootPoolFastMode: shootPoolFastModeStr ? JSON.parse(shootPoolFastModeStr) : true,
       autoSelectWeapon:
         canUseAutoWeaponSelection && (autoSelectWeaponStr ? JSON.parse(autoSelectWeaponStr) : true),
       hpBarPerModel: hpBarPerModelStr ? JSON.parse(hpBarPerModelStr) : false,

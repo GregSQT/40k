@@ -105,6 +105,52 @@ encart SOLID (aucune partie de la fig à travers une portion fermée ≤3" du so
 > dessus, 0% de débordement). Décision requise : coller aux règles (100% dedans) ou assumer une
 > tolérance de jeu numérique. Le reste du document est écrit pour supporter les deux (seuil paramétrable).
 
+### 2.7 Mesure des distances — **3D par défaut** (`01 Core concepts.pdf` §01.04)
+- Toute distance se mesure **socle à socle, partie la plus proche**, en **ligne droite** — donc en **3D**
+  entre étages, sauf règle explicitement "horizontale". Le socle **fait partie de la figurine** pour
+  toutes les règles (§01.02). Les figs **FRAME** (sans socle, `17 Monsters and vehicles.pdf` §17.02)
+  mesurent depuis le **point le plus proche de la coque** (donc engagement possible en hauteur via le
+  haut d'un tank) et restent toujours verticales ("upright").
+- **Portée d'arme** (`02 Datasheets.pdf` §02.04 + `04 Making attacks.pdf` §04.02) : vérifiée **par
+  figurine porteuse**, en distance 3D — la hauteur consomme de la portée.
+- **Exceptions "horizontales" explicites** (la composante verticale est ignorée) : arrivées de réserves
+  et aptitudes de setup → **>8" horizontalement** des ennemis (`20 Strategic reserves.pdf` §20.04 ingress,
+  `24 Core abilities.pdf` §24.09 Deep Strike, §24.20 Infiltrators, §24.31-32 Scouts).
+
+### 2.8 Un seul moteur de mouvement vertical pour toutes les phases
+Charge (`11 Charge phase.pdf` §11.04), pile-in (`12 Fights pahse.pdf` §12.03), overrun (§12.06) et
+consolidation (§12.08) sont tous définis comme des moves "**as described in Moving (03)**" — les règles
+verticales §13.06 (coût cumulé, ½", restrictions mot-clé) s'appliquent donc **uniformément** ; seules
+changent la distance max (2D6 / 3") et les contraintes de fin de move (engaged/closer, mesurées en 3D).
+Conséquences : une charge vers un étage doit couvrir la montée avec le 2D6 et finir en engagement
+2"/5" ; un pile-in/consolidation de 3" ne franchit un étage que si la distance verticale tient dans les 3".
+
+### 2.9 Contrôle d'objectifs et verticalité
+- **Terrain objective** (`14 Objectives.pdf` §14.01-14.02) : "within range" = être **dans la terrain
+  area** (empreinte au sol) — une fig à **n'importe quel étage** de la ruine-objectif compte son OC.
+  Pas de mesure de distance : test d'appartenance à la zone.
+- **Objectif-pion hors terrain area** (`25 Rules appendix.pdf`) : cylindre **≤3" horizontal ET ≤5"
+  vertical** du marqueur — une fig au 1er étage (<5") peut contrôler un objectif au sol.
+- **Actions** (`16 Actions.pdf` §16.01) : éligibilité "within a terrain area" indépendante de l'étage ;
+  pile-in/consolidation (même verticaux) n'interrompent pas une action.
+
+### 2.10 Cas particuliers vérifiés (balayage complet des 25 PDFs)
+- **AIRCRAFT** (`23 Aircraft.pdf`) : verticalité entièrement **abstraite** — réserves obligatoires,
+  ingress moves uniquement, **Plunging Fire sans effet** (§23.03), ignorés pour pile-in/consolidation/surge
+  par les unités sans FLY, mêlée FLY-only. Aucune altitude chiffrée.
+- **Hover** (`24 Core abilities.pdf` §24.17) : pas de −2" en "take to the skies".
+- **Super-Heavy Walker** (§24.35) : traverse horizontalement les sections ≤**4"** de haut ;
+  option de traversée du dense (jet D6, 1 = battle-shock).
+- **Indirect Fire** (`10 Shooting phase.pdf` §10.07) : seule voie de tir **sans LoS** (cible à couvert,
+  malus) — pertinent contre une unité masquée par un étage.
+- **Transports** (`18 Transports.pdf` §18.02/18.04) : embarquement ≤3" (3D) ; débarquement = set up
+  "wholly within 3"/6"" — finir sur un étage bas n'est pas interdit par le texte.
+- **Surge move** (`21 Flying and surging.pdf` §21.01-02) : "closest enemy" mesuré en 3D, coût vertical
+  hérité de Moving (03). Take to the skies non applicable au surge.
+- Sans règle verticale propre (vérifié) : 05 Attack sequence, 07 Battle round, 08 Command phase,
+  15 Stratagems, 19 Attached units. Le glossaire étendu (ground level, stable…) n'existe pas dans la
+  doc locale (renvoi de l'appendix vers l'app officielle).
+
 ---
 
 ## 3. État actuel du code (fondations existantes)
@@ -196,14 +242,25 @@ le modèle + LoS 3D est le vrai chantier.
   ([game_state.py:117-172](file:///home/greg/40k/engine/game_state.py)),
   puis le propager dans `units_cache` / `models_cache` ([shared_utils.py:557-582, 654-672](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)),
   et jusqu'au **frontend** (payload API + types TS Unit) — aujourd'hui aucune notion de niveau côté front.
-- ⚠️ **Impact RL** : `level` change l'espace d'observation (obs builder, `action_decoder.py`) →
-  risque d'**invalider les modèles PPO existants**. À chiffrer avant de lancer le chantier.
+- **Impact RL (non bloquant)** : `level` change l'espace d'observation (obs builder, `action_decoder.py`).
+  Le RL étant HS et destiné au retrain, aucune rétro-compat à préserver → prévoir simplement le canal
+  `level` dans l'obs dès la conception (cf. §5.7).
 - `occupation_map` : clé `(col,row)` → `(col,row,level)` (`shared_utils.py:610`). Deux figs peuvent
   occuper le même `(col,row)` à des niveaux différents.
-- Définir les **étages** comme donnée de décor : étendre `terrain_areas`
-  ([terrain_utils.py:4-8](file:///home/greg/40k/engine/terrain_utils.py)) avec, par étage,
-  `{level:int, height_inches:float, polygon_vertices:[[col,row]], hexes:[[col,row]]}` rattachés à une ruine.
-  `height_inches` sert aux seuils règles (3" Solid/Plunging, 5" vertical).
+- **Définition de l'empreinte d'étage — SOURCE = fichier terrain du board**
+  (`config/board/<board>/terrain/terrain-*.json`, tableau `terrain[]`), là où sont déjà déclarées les
+  ruines (empreinte au sol = `vertices` en subhex + `walls[]`). Ex. actuel :
+  `{ "id": "ruin_center_OK", "shape": "polygon", "vertices": [[85,120],...], "objective": true }`.
+  **Format retenu = B (étages rattachés à la ruine parente)** : sous-tableau `floors` dans l'entrée ruine :
+  ```json
+  { "id": "ruin_center_OK", "vertices": [[85,120],[135,120],[135,180],[85,180]], "objective": true,
+    "floors": [ { "level": 1, "height_inches": 3, "vertices": [[...]] } ] }
+  ```
+  Le lien empreinte-au-sol ↔ étages est conservé (nécessaire pour LoS Solid ≤3", blanchiment/ghost par
+  ruine). `height_inches` sert aux seuils règles (3" Solid/Plunging, 5" vertical).
+- Ce format JSON est parsé côté moteur dans `terrain_areas`
+  ([terrain_utils.py:4-8](file:///home/greg/40k/engine/terrain_utils.py)) — à étendre pour porter `floors`
+  par étage `{level, height_inches, vertices, hexes}`. **À figer en premier dans le chantier 1.**
 
 ### 4.2 Occupation d'un étage (poser une fig)
 - Règle officielle (§13.06) : empreinte de la fig **entièrement** incluse dans le polygone de l'étage
@@ -215,11 +272,25 @@ le modèle + LoS 3D est le vrai chantier.
   diverger silencieusement des règles (cf. mémoire `feedback_mirror_move_phase`).
 
 ### 4.3 Mouvement vertical
+
+> ✅ **Spike de faisabilité validé** (POC isolé, réutilisant le vrai `geodesic_field`) :
+> l'archi "un champ géodésique par niveau + chaînage aux hexes de transition, coût vertical cumulé"
+> **fonctionne sans réécrire la primitive de pathfinding**. Option A (transitions implicites au
+> périmètre) retenue. Deux enseignements du spike à respecter en implémentation :
+> 1. **Facturer le pas d'approche horizontal** vers le mur : coût d'entrée sur un hex de bord `t` =
+>    `field0[g] + dist_horiz(g,t) + coût_vertical` — oublier le segment `g→t` crée une fuite d'un hex
+>    (bug attrapé au 1er run du spike).
+> 2. `geodesic_field` est **single-source** (g=0 sur un seul start) → le chaînage multi-entrées coûte
+>    **N relances** (N = hexes de périmètre atteignables). Sur board ×10 avec grandes ruines, à surveiller ;
+>    optimisation prod = variante **multi-source** (Dijkstra avec `g` initial par entrée), modif locale
+>    de la primitive, pas une refonte.
+
 - `geodesic_field` ([hex_utils.py:1870](file:///home/greg/40k/engine/hex_utils.py)) est **strictement
   planaire** : le raccourci Lazy Theta* (rattachement à l'ancêtre via segment clear) suppose un plan
-  continu — injecter une arête inter-niveaux dans le champ **casse cette hypothèse**. Architecture cible :
-  **un champ géodésique par niveau**, chaînés aux **hexes de transition** (bord commun de deux polygones
-  d'étage), coût au raccord = distance verticale mesurée (`|height(level_a) − height(level_b)|`),
+  continu — injecter une arête inter-niveaux dans le champ **casse cette hypothèse**. Architecture cible
+  (validée par le spike) : **un champ géodésique par niveau**, chaînés aux **hexes de transition**
+  (périmètre de l'étage supérieur, approché depuis les hexes de sol adjacents), coût au raccord =
+  approche horizontale `+` distance verticale mesurée (`|height(level_a) − height(level_b)|`),
   **cumulée** au budget (§13.06), + contrainte ≤ ½" horiz. du décor pendant l'ascension.
 - Le disque FLY ([movement_handlers.py:1608-1639](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py))
   est un calcul NumPy planaire séparé — à traiter aussi.
@@ -268,25 +339,36 @@ le modèle + LoS 3D est le vrai chantier.
    [shared_utils.py:289](file:///home/greg/40k/engine/phase_handlers/shared_utils.py),
    `_inflate_obstacles_by_footprint` [geodesic_move.py:14](file:///home/greg/40k/engine/phase_handlers/geodesic_move.py)),
    engagement/cohésion/fight (masques `eng_bad`, adjacence `spatial_relations`, éligibilité fight),
-   déploiement, contrôle d'**objectifs** (une fig à l'étage au-dessus d'un objectif le contrôle-t-elle ?),
-   hidden/cover (`model_within_terrain` 2D) — tout est 2D aujourd'hui, sans niveau une fig à l'étage
-   bloquerait/serait bloquée par le sol sous elle.
-6. **Impact RL** : `level` dans l'espace d'observation/action (obs builder, `action_decoder.py`) →
-   risque d'**invalider les modèles PPO existants**. Potentiellement le coût le plus lourd du projet.
+   déploiement, contrôle d'**objectifs** (règle tranchée en §2.9 : appartenance à la terrain area, ou
+   cylindre 3"/5" pour un pion — à implémenter par niveau), hidden/cover (`model_within_terrain` 2D) —
+   tout est 2D aujourd'hui, sans niveau une fig à l'étage bloquerait/serait bloquée par le sol sous elle.
+6. **Mesures 3D** (§2.7) : portée d'arme, distance de charge, "closest enemy" (surge) se mesurent en
+   **3D socle-à-socle** — toutes les distances du moteur (`ranged_edge_distance`, budgets de charge,
+   seuils) sont aujourd'hui 2D. Ajouter la composante verticale (`height_inches` des niveaux) aux
+   calculs de distance, sauf exceptions horizontales explicites (réserves/Deep Strike >8" horiz).
+7. **RL (non bloquant)** : le RL est actuellement HS et sera **retrain de toute façon** → pas de contrainte
+   de rétro-compat. `level` s'intègre au futur espace d'observation/action (obs builder,
+   `action_decoder.py`) **dès sa conception**. Ce n'est plus un go/no-go, juste une exigence de design
+   du chantier 1 (prévoir le canal `level` dans l'obs).
 
 ---
 
 ## 6. Découpage en chantiers (ordre suggéré)
 
+> ✅ **Préalable technique levé** : le spike pathfinding 3D (§4.3) confirme la faisabilité sur l'archi
+> actuelle. Le RL n'est plus un go/no-go (§5.7). Les chantiers ci-dessous peuvent démarrer.
+
 1. **Modèle d'état multi-niveau** : champ `level` + étages dans `terrain_areas` + propagation
-   `units_cache`/`occupation_map` + payload API/types TS. *Prérequis de tout le reste. Aucun impact
-   visuel. Risque : espace d'observation RL (§5.6) — à chiffrer avant de commencer.*
+   `units_cache`/`occupation_map` + payload API/types TS + canal `level` dans l'obs RL (§5.7).
+   *Prérequis de tout le reste. Aucun impact visuel.*
 2. **Occupation & placement** : validation "poser sur un étage" (§13.06 + décision §5.1), footprint vs
    polygone d'étage, collisions/placement par niveau (§5.5 : `build_occupied_positions_set`, masques).
 3. **Mouvement vertical** : un champ géodésique **par niveau** chaîné aux hexes de transition, coût
    vertical, restrictions mot-clé, FLY (y compris disque euclidien).
-4. **Engagement / cohésion / objectifs 3D** : règle 2" horiz + 5" vert sur les masques `eng_bad`,
-   adjacence, éligibilité fight, coherency ; statut d'une fig à l'étage sur le contrôle d'objectif.
+4. **Distances 3D / engagement / cohésion / objectifs** : composante verticale dans les mesures
+   (portée d'arme, charge, §5.7) ; règle 2" horiz + 5" vert sur les masques `eng_bad`, adjacence,
+   éligibilité fight, coherency ; contrôle d'objectif par appartenance à la terrain area (§2.9) ou
+   cylindre 3"/5" pour un pion. Charge/pile-in/consolidation héritent du moteur vertical (§2.8).
 5. **LoS 3D** : Solid ≤3", Plunging +1 BS (avec branche TOWERING), extension `hex_los_cache`,
    parité WASM (Rust + rebuild).
 6. **Rendu/UI** : empreinte d'étage (blanc si occupé), bouton feuilles empilées + niveau courant,

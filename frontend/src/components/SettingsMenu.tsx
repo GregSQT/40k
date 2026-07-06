@@ -368,7 +368,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                 checked={shootPoolFastMode}
                 onChange={onToggleShootPoolFastMode}
                 label="Pool tir : transition rapide"
-                description="Désactivé (défaut) : le pool de tir vérifie qu'une unité a une cible à portée + LoS avant de la rendre activable (pas de cercle vert inutile). Activé : saute ce test au démarrage de la phase (transition move→tir plus rapide), la présence de cible est résolue à l'activation — une unité sans cible visible peut apparaître activable puis passer son tour."
+                description="Activé (défaut) : saute le test cible+LoS au démarrage de la phase de tir (transition move→tir rapide) ; la présence de cible est résolue à l'activation — une unité sans cible visible peut apparaître activable puis passer son tour. Désactivé : pool exact (vérifie cible à portée + LoS avant de rendre activable, pas de cercle vert inutile) mais coûte ~1,5 s par transition."
               />
             )}
             {onToggleBattleShockTest && (
