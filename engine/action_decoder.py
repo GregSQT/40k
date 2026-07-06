@@ -296,17 +296,6 @@ class ActionDecoder:
                     if num_targets > 0:
                         for i in range(min(5, num_targets)):
                             mask[4 + i] = True
-                can_advance = require_key(active_unit, "_can_advance")
-                if not isinstance(can_advance, bool):
-                    raise TypeError(
-                        f"active_unit['_can_advance'] must be bool "
-                        f"(got {type(can_advance).__name__})"
-                    )
-                if can_advance:
-                    units_advanced = require_key(game_state, "units_advanced")
-                    unit_id_str = str(active_unit["id"])
-                    if unit_id_str not in units_advanced:
-                        mask[12] = mask[13] = mask[14] = mask[15] = True
             mask[11] = True
         elif current_phase == "charge":
             active_unit = eligible_units[0] if eligible_units else None
@@ -347,7 +336,7 @@ class ActionDecoder:
         if phase == "move":
             return [0, 1, 2, 3, 11]  # Move directions + wait
         elif phase == "shoot":
-            return [4, 5, 6, 7, 8, 11, 12, 13, 14, 15]  # Target slots 0-4 + wait + 4 advance strategies
+            return [4, 5, 6, 7, 8, 11]  # Target slots 0-4 + wait (advance se joue en phase de mouvement)
         elif phase == "charge":
             return [9, 11]  # Charge + wait
         elif phase == "fight":
@@ -753,16 +742,7 @@ class ActionDecoder:
                     
             elif action_int == 11:  # WAIT - agent chooses not to shoot
                 return {"action": "wait", "unitId": selected_unit_id}
-            
-            elif action_int in [12, 13, 14, 15]:  # ADVANCE with strategy choice
-                # 12=aggressive (0), 13=objective (3), 14=defensive (2), 15=tactical (1)
-                _advance_strategy_map = {12: 0, 13: 3, 14: 2, 15: 1}
-                return {
-                    "action": "advance",
-                    "unitId": selected_unit_id,
-                    "advance_strategy": _advance_strategy_map[action_int],
-                }
-                
+
         elif current_phase == "charge":
             active_charge_unit = game_state.get("active_charge_unit")
             

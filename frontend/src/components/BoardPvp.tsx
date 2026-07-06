@@ -5076,6 +5076,11 @@ export default function Board({
             : HEX_RADIUS_H * 0.7;
         const statusByMid = new Map((menu.modelsStatus ?? []).map((s) => [String(s.model_id), s]));
         const figWeapons = menu.figWeapons ?? {};
+        console.log("🟩 overlay redraw voiles", {
+          activeTargetId: menu.activeTargetId,
+          selectedFig: menu.selectedFig,
+          modelsStatus: menu.modelsStatus,
+        });
         for (const [mid, pos] of Object.entries(atkByModel)) {
           const [cx, cy] = centerOf(pos);
           if (menu.selectedFig === mid) {
@@ -5083,8 +5088,9 @@ export default function Board({
             overlay.beginFill(0xf5c518, 0.55); // fond jaune plein : fig sélectionnée
             overlay.drawCircle(cx, cy, aR);
             overlay.endFill();
-          } else if (!menu.selectedFig && menu.activeTargetId && statusByMid.has(mid)) {
+          } else if (menu.activeTargetId && statusByMid.has(mid)) {
             const s = statusByMid.get(mid)!;
+            console.log("🟨 voile fig", { mid, exhausted: s.exhausted, can_shoot: s.can_shoot });
             if (s.exhausted) {
               overlay.lineStyle(0);
               overlay.beginFill(0x777777, 0.42); // gris : épuisée
@@ -5095,8 +5101,12 @@ export default function Board({
               overlay.beginFill(0x2ecc40, 0.32); // vert : peut viser la cible
               overlay.drawCircle(cx, cy, aR);
               overlay.endFill();
+            } else {
+              overlay.lineStyle(0);
+              overlay.beginFill(0xff4136, 0.32); // rouge : a des attaques mais ne peut pas viser cette cible
+              overlay.drawCircle(cx, cy, aR);
+              overlay.endFill();
             }
-            // sinon : rien (peut tirer, mais pas sur cette cible)
           } else if (
             !menu.selectedFig &&
             menu.selectedWeaponCode &&
@@ -10181,6 +10191,7 @@ export default function Board({
         fetchWeaponsForTarget(plan.unitId, targetId, keepFig),
         fetchModelsStatus(plan.unitId, targetId),
       ]);
+      console.log("🟦 addTargetForShoot", { unitId: plan.unitId, targetId, keepFig, modelsStatus });
       setWeaponSelectionMenu((prev) =>
         prev
           ? {
