@@ -3007,15 +3007,16 @@ export const drawBoard = (
         wallsContainer.addChild(g);
       });
 
-      // Murs AU-DESSUS des contours d'étage (zIndex 10) mais SOUS les previews/voile (highlight 120).
-      wallsContainer.zIndex = 20;
+      // Murs AU-DESSUS du highlightContainer (120) : voile d'étage (vue niveau >=1) et previews
+      // tir/move passent SOUS les murs. Toujours SOUS les figs (2000) et la ligne de mesure.
+      wallsContainer.zIndex = 130;
       app.stage.addChild(wallsContainer);
       wallsResult = wallsContainer;
     }
 
     // Contour d'étage AU SOL (currentLevel 0) : conteneur dédié dynamique (reconstruit à chaque draw)
     // → changement de niveau instantané (plus de rebuild statique) et couleur d'occupation live.
-    // zIndex 10 : au-dessus des hexes (0), SOUS les murs (20) et les previews/voile (highlight 120).
+    // zIndex 10 : au-dessus des hexes (0), SOUS les previews/voile (highlight 120) et les murs (130).
     // Couleur PAR-DÉCOR : couleur terrain par défaut, mais si CE décor a un étage occupé (≥1), tous
     // ses contours prennent la couleur du plus bas niveau occupé (1 vert, 2 orange, 3+ rouge) — aucun
     // impact sur les autres décors.

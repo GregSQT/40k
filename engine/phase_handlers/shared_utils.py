@@ -566,7 +566,7 @@ def _build_models_for_unit(
 
     # Niveau vertical de l'unité (ancre). Chaque figurine hérite du niveau de l'unité
     # sauf override explicite spec["level"] (escouade répartie sur plusieurs étages, §2.5).
-    unit_level = int(unit.get("level", 0))
+    unit_level = int(require_key(unit, "level"))
 
     explicit_models = unit.get("models")
     if isinstance(explicit_models, list) and len(explicit_models) > 0:
@@ -702,7 +702,7 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
             # Niveau vertical de l'ancre (étages, format B). 0 = sol (défaut métier).
             # occupied_hexes/occupation_map restent 2D à ce stade : la gestion des
             # collisions par niveau relève du chantier occupation & placement.
-            "level": int(unit.get("level", 0)),
+            "level": int(require_key(unit, "level")),
             "HP_CUR": hp_cur,
             "player": player,
             # VALUE (points) : source de verite reward, requis par resolve_squad_shoot
@@ -1151,8 +1151,8 @@ def assert_los_pair_cache_consistent(game_state: Dict[str, Any]) -> int:
     Itère ``unit_by_id`` (dicts porteurs d'``id``, tels que passés à compute_unit_los en jeu réel) —
     PAS ``units_cache`` (dont les entrées ont ``id=None`` → cache bypassé)."""
     from engine.phase_handlers.shooting_handlers import compute_unit_los, _compute_unit_los_uncached
-    units = game_state.get("unit_by_id", {})
-    live = game_state.get("units_cache", {})
+    units = require_key(game_state, "unit_by_id")
+    live = require_key(game_state, "units_cache")
     checked = 0
     for s in units.values():
         for t in units.values():
@@ -3001,7 +3001,7 @@ def update_model_position(
     # Choke-point LoS (a′) : écriture per-figurine → invalide les paires du squad, même si
     # l'ancre n'a pas bougé (pile-in par-figurine). En batch (commit_move), dédup avec l'appel
     # déjà émis par update_units_cache_position ci-dessus (1re old_pos conservée).
-    _ue_los = game_state.get("units_cache", {}).get(squad_id)
+    _ue_los = require_key(game_state, "units_cache").get(squad_id)
     if _ue_los is not None:
         _touch_unit_los(game_state, squad_id, _ue_los.get("col"), _ue_los.get("row"))
 
@@ -3213,6 +3213,16 @@ def validate_move_plan(
     squad_id = str(first_model["squad_id"])
     player = int(first_model["player"])
 
+    def _target_level(entry: Tuple[Any, ...]) -> int:
+        """Niveau (étages) VISÉ par la fig dans ce plan : 4e élément si fourni (destination
+        verticale), sinon niveau committé (models_cache). Ne PAS déduire du models_cache quand
+        le plan spécifie un niveau cible — sinon un move vers l'étage est validé contre
+        l'occupation du sol (bug superposition inter-niveaux)."""
+        if len(entry) >= 4 and entry[3] is not None:
+            return int(entry[3])
+        m = models_cache.get(entry[0])
+        return int(require_key(m, "level")) if m is not None else 0
+
     enemy_er_zone: Optional[Set[Tuple[int, int]]] = None
     if c["forbid_enemy_er"]:
         cache_key = f"enemy_adjacent_hexes_player_{player}"
@@ -3223,12 +3233,7 @@ def validate_move_plan(
     # Tout au niveau 0 aujourd'hui → identique au comportement historique (union = niveau 0).
     other_occupied_by_level: Dict[int, Set[Tuple[int, int]]] = {}
     if not c["allow_collisions"]:
-        plan_levels: Set[int] = set()
-        for _pmid, _, _ in plan:
-            _pm = models_cache.get(_pmid)
-            if _pm is not None:
-                plan_levels.add(int(_pm.get("level", 0)))  # get allowed
-        for _lv in plan_levels:
+        for _lv in {_target_level(entry) for entry in plan}:
             other_occupied_by_level[_lv] = build_occupied_positions_set(
                 game_state, exclude_unit_id=squad_id, level=_lv
             )
@@ -3236,23 +3241,23 @@ def validate_move_plan(
     # Budget per-model depuis position d origine actuelle.
     origin_positions: Dict[str, Tuple[int, int]] = {}
     if c["budget_per_model"] is not None:
-        for mid, _, _ in plan:
+        for entry in plan:
+            mid = entry[0]
             m = models_cache.get(mid)
             if m is None:
                 return False
             origin_positions[mid] = (int(m["col"]), int(m["row"]))
 
     new_cells: Set[Tuple[int, int]] = set()
-    for mid, nc, nr in plan:
+    for entry in plan:
+        mid, nc, nr = entry[0], int(entry[1]), int(entry[2])
         if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
             return False
         cell = (nc, nr)
         if not c["allow_walls"] and wall_hexes and cell in wall_hexes:
             return False
         if not c["allow_collisions"]:
-            _fm = models_cache.get(mid)
-            _flv = int(_fm.get("level", 0)) if _fm is not None else 0  # get allowed
-            if cell in other_occupied_by_level.get(_flv, set()):
+            if cell in other_occupied_by_level.get(_target_level(entry), set()):
                 return False
         if c["forbid_enemy_er"] and enemy_er_zone and cell in enemy_er_zone:
             return False
@@ -3265,7 +3270,7 @@ def validate_move_plan(
                 return False
 
     if c["require_coherency"]:
-        plan_positions = {mid: (nc, nr) for mid, nc, nr in plan}
+        plan_positions = {entry[0]: (int(entry[1]), int(entry[2])) for entry in plan}
         if not _validate_plan_coherency(plan_positions, game_state):
             return False
 

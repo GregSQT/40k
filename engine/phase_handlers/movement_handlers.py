@@ -1878,7 +1878,7 @@ def _multilevel_floor_destinations(
     from engine.game_state import unit_can_occupy_upper_floor
 
     terrain_areas = game_state.get("terrain_areas", [])  # get allowed (peut être vide)
-    present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})
+    present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})  # get allowed (aire sans étage)
     if not present:
         return {}  # aucun étage → no-op (non-régression du mouvement 2D)
     if not unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS")):
@@ -1893,7 +1893,7 @@ def _multilevel_floor_destinations(
     floor_hexes_by_level = {lv: floor_hexes_at_level(terrain_areas, lv) for lv in present}
     height_by_level: Dict[int, float] = {0: 0.0}
     for a in terrain_areas:
-        for fl in a.get("floors", []):
+        for fl in a.get("floors", []):  # get allowed (aire sans étage)
             lv = int(fl["level"])
             hn = float(fl["height_inches"]) * inches_to_subhex * ENGAGEMENT_NORM_HEX_WIDTH
             if lv in height_by_level and abs(height_by_level[lv] - hn) > 1e-6:
@@ -2995,7 +2995,7 @@ def movement_preview_move_plan(
     per_model: Dict[str, bool] = {}
     for idx, (mid, nc, nr, lv) in enumerate(norm):
         base_valid = validate_move_plan(
-            [(str(mid), int(nc), int(nr))], game_state, c_individual
+            [(str(mid), int(nc), int(nr), lv)], game_state, c_individual
         )
         fp = footprints[idx]
         fp_wall = bool(wall_hexes_set and fp & wall_hexes_set)
@@ -3015,7 +3015,7 @@ def movement_preview_move_plan(
                     "id": squad_id, "UNIT_KEYWORDS": unit_keywords,
                     "BASE_SHAPE": require_key(_mc_norm[str(mid)], "BASE_SHAPE"),
                     "BASE_SIZE": require_key(_mc_norm[str(mid)], "BASE_SIZE"),
-                    "orientation": int(_mc_norm[str(mid)].get("orientation", 0)),
+                    "orientation": int(_mc_norm[str(mid)].get("orientation", 0)),  # get allowed (défaut 0 = face nord)
                 },
                 int(nc), int(nr), lv, terrain_areas,
             )

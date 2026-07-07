@@ -50,7 +50,7 @@ def unit_can_occupy_upper_floor(unit_keywords: Any) -> bool:
 def _validate_level(level: Any, unit_id: Any) -> int:
     """Validate a vertical level (étages). 0 = ground (default business case), >= 0 int.
 
-    No silent coercion: a non-int or negative level is an explicit config error, not a fallback.
+    No silent coercion: a non-int or negative level is an explicit config error.
     """
     if isinstance(level, bool) or not isinstance(level, int) or level < 0:
         raise ValueError(f"Unit {unit_id!r}: 'level' must be an int >= 0 (0 = ground), got {level!r}")
@@ -159,7 +159,7 @@ class GameStateManager:
             "row": normalize_coordinates(config["col"], config["row"])[1],
             # Niveau vertical (étages, format B). 0 = rez-de-chaussée (cas métier par défaut :
             # unité au sol), >=1 = étage d'une ruine. Ancre unité = niveau de models[0].
-            "level": _validate_level(config.get("level", 0), config["id"]),
+            "level": _validate_level(config.get("level", 0), config["id"]),  # get allowed (champ optionnel : scénarios sans étages)
             
             # UPPERCASE STATS (AI_TURN.md requirement) - NO DEFAULTS
             "HP_CUR": config["HP_CUR"],
@@ -804,7 +804,7 @@ class GameStateManager:
             "col": normalize_coordinates(chosen_col, chosen_row)[0],
             "row": normalize_coordinates(chosen_col, chosen_row)[1],
             # Niveau vertical (étages, format B). 0 = rez-de-chaussée (défaut métier).
-            "level": _validate_level(full_unit_data.get("level", 0), str(unit_data["id"])),
+            "level": _validate_level(full_unit_data.get("level", 0), str(unit_data["id"])),  # get allowed (champ optionnel : scénarios sans étages)
             "HP_CUR": full_unit_data["HP_MAX"],
             "HP_MAX": full_unit_data["HP_MAX"],
             "MOVE": full_unit_data["MOVE"] * scale,

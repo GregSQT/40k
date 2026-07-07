@@ -83,7 +83,7 @@ def floor_hexes_at_level(terrain_areas: List[Dict[str, Any]], level: int) -> Set
         raise ValueError(f"floor_hexes_at_level: level must be >= 1 (0 = ground), got {level}")
     hexes: Set[Tuple[int, int]] = set()
     for area in terrain_areas:
-        for floor in area.get("floors", []):
+        for floor in area.get("floors", []):  # get allowed (aire sans étage = sol seul)
             if int(require_key(floor, "level")) == level:
                 hexes.update((int(h[0]), int(h[1])) for h in require_key(floor, "hexes"))
     return hexes

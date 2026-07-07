@@ -1214,7 +1214,7 @@ export default function Board({
   /** Dernier conteneur ``highlights`` — réutilisé si l’empreinte structure est inchangée (patch move preview ou skip drawBoard). */
   const highlightsLayerRef = useRef<PIXI.Container | null>(null);
   /** Conteneur des contours d'étage au sol — cycle de vie calqué sur highlights (préservé quand on
-   *  réutilise les highlights, sinon reconstruit par drawBoard). zIndex 10 : sous les murs (20). */
+   *  réutilise les highlights, sinon reconstruit par drawBoard). zIndex 10 : sous les murs (130). */
   const floorContourLayerRef = useRef<PIXI.Container | null>(null);
   const lastHighlightsStructuralKeyRef = useRef<string>("");
   const lastMovePolygonCacheKeyRef = useRef<string>("");
@@ -8818,8 +8818,9 @@ export default function Board({
       if (savedWalls) {
         // zIndex forcé ici (et pas seulement à la création) : le conteneur des murs est réutilisé
         // (staticWallsRef) ; sans ça un mur créé avant l'ajout du zIndex resterait à 0 et repasserait
-        // SOUS les contours d'étage (10).
-        savedWalls.zIndex = 20;
+        // SOUS les contours d'étage. 130 : AU-DESSUS du highlightContainer (120) qui porte le voile
+        // d'étage (vue niveau >=1) et les previews tir/move, mais SOUS les figs (2000).
+        savedWalls.zIndex = 130;
         app.stage.addChild(savedWalls);
       }
       if (savedHighlightsThroughDestroy) app.stage.addChild(savedHighlightsThroughDestroy);

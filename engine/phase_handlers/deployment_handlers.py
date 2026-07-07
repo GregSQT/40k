@@ -722,7 +722,7 @@ def _apply_deploy_plan(
         _m = require_key(_models_cache, str(mid))
         _bs = require_key(_m, "BASE_SHAPE")
         _bz = require_key(_m, "BASE_SIZE")
-        _ori = int(_m.get("orientation", 0))
+        _ori = int(_m.get("orientation", 0))  # get allowed (défaut 0 = face nord)
         _eff = resolve_model_floor_level(c, r, _bs, _bz, _ori, level, _terrain_areas)
         update_model_position(game_state, mid, c, r, level=_eff)
 
