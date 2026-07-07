@@ -34,6 +34,7 @@ export class Terminator extends EliteMeleeElite {
   static ICON = "/icons/TerminatorPowerFist.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 16; // Size of the base
+  static MODEL_HEIGHT = 2.5;  // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 2.0; // Size of the icon
   static ILLUSTRATION_RATIO = 99; // Illustration size ratio in percent
 

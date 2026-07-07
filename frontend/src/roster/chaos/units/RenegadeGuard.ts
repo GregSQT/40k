@@ -34,6 +34,7 @@ export class RenegadeGuard extends SwarmRangeSwarm {
   static ICON = "/icons/RenegadeGuard.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 10; // Size of the base
+  static MODEL_HEIGHT = 2.5;  // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 1.5; // Size of the icon
   static ILLUSTRATION_RATIO = 100; // Illustration size ratio in percent
 

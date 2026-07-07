@@ -34,6 +34,7 @@ export class Carnifex extends EliteMeleeElite {
   static BASE_SHAPE = "oval"; // Shape of the base
   /** Diamètres sur la grille micro-hex (engine/hex_utils ``compute_occupied_hexes``), pas des mm. */
   static BASE_SIZE = [41, 27];
+  static MODEL_HEIGHT = 4;  // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 2.6; // Size of the icon
   static ILLUSTRATION_RATIO = 130; // Illustration size ratio in percent
 

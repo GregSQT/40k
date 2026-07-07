@@ -27,6 +27,7 @@ export class RangeIntercessorGravis extends EliteRangeTroop {
   static ICON = HeavyIntercessor.ICON;
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = HeavyIntercessor.BASE_SIZE; // Size of the base
+  static MODEL_HEIGHT = HeavyIntercessor.MODEL_HEIGHT;  // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = HeavyIntercessor.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

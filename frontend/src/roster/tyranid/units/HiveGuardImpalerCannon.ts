@@ -33,6 +33,7 @@ export class HiveGuardImpalerCannon extends TroopRangeElite {
   static ICON = "/icons/HiveGuardImpalerCannon.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 20; // Size of the base
+  static MODEL_HEIGHT = 2.5;  // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 2.0; // Size of the icon
   static ILLUSTRATION_RATIO = 100; // Illustration size ratio in percent
 

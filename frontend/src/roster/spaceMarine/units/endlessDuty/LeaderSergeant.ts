@@ -48,6 +48,7 @@ export class LeaderSergeant extends LeaderEliteMeleeElite {
   static ICON = "/icons/IntercessorSergeant.webp";
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = IntercessorSergeant.BASE_SIZE; // Size of the base
+  static MODEL_HEIGHT = IntercessorSergeant.MODEL_HEIGHT;  // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = IntercessorSergeant.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

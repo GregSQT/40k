@@ -36,6 +36,7 @@ export class Intercessor extends TroopRangeSwarm {
   static ICON = "/icons/Intercessor.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 13; // Size of the base
+  static MODEL_HEIGHT = 2.5;  // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 1.7; // Scale of the icon
   static ILLUSTRATION_RATIO = 95; // Illustration size ratio in percent
 

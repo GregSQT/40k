@@ -474,12 +474,15 @@ le modèle + LoS 3D est le vrai chantier.
      - ✅ **Scénario de test à étages** : `config/board/44x60x5/{terrain/terrain-floors-test.json,
        scenario/scenario_floors_test.json}` — ruine centrale avec `floors` L1(3")/L2(6"), chargé & rasterisé
        (L1=1200, L2=400 hexes) via le vrai loader. Débloque la validation front + réelle.
+     - ✅ **(b) `validate_move_plan` niveau-conscient** : lit le **niveau cible** dans le plan (4ᵉ élément)
+       au lieu du niveau committé (`models_cache`) — un move à l'étage au-dessus d'une case occupée au sol
+       n'est plus bloqué. Le call-site preview passe le niveau effectif. Le pool par-figurine
+       `movement_build_model_destinations_pool` est passé niveau-conscient (cf. 6d).
      - ⏸️ **RESTE** : (a) chemin **FLY** du producteur (retourne avant le point sol — fly+étages à part) ;
-       (b) `validate_move_plan` **niveau-aveugle** : un move à l'étage AU-DESSUS d'une case occupée au sol
-       est encore bloqué par ce validateur 2D (+ règles d'engagement vertical 2"/5" §2.5 non modélisées) —
-       chunk à part ; le cas courant (sol libre sous la destination) marche ;
-       (c) **frontend** (chantier 6) : consommer `_by_level`, bouton d'étage, dessiner `pool[niveau_courant]`,
-       envoyer `destLevel`, retirer le miroir.
+       (b) règles d'**engagement vertical 2"/5"** (§2.5) toujours non modélisées (chantier 4) ;
+       (c) pool **squad** (`movement_build_valid_destinations_pool`, suivi de bloc) et retrait du miroir
+       transitoire `valid_move_destinations_pool` — le move **par-figurine** est complet (6d), le suivi rigide
+       reste à migrer sur `_by_level`.
 4. **Distances 3D / engagement / cohésion / objectifs** : composante verticale dans les mesures
    (portée d'arme, charge, §5.7) ; règle 2" horiz + 5" vert sur les masques `eng_bad`, adjacence,
    éligibilité fight, coherency ; contrôle d'objectif par appartenance à la terrain area (§2.9) ou
@@ -601,6 +604,15 @@ le modèle + LoS 3D est le vrai chantier.
       + `validate_move_plan` (`other_occupied_by_level`, [shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)).
    2. **Badge de niveau dynamique au drag** — **réglé** : le ghost de destination reçoit désormais
       `modelLevels`/`modelLevelGhost` dérivés live ([BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx)).
+   3. **Superposition inter-niveaux au MOVE par-figurine** — **réglé** : le pool par-fig, l'API, le preview,
+      le commit et le front sont niveau-conscients de bout en bout (cf. 6d). Deux figs peuvent finir au même
+      `(col,row)` à des niveaux différents.
+   4. **« Figs niveau 1 aussi au niveau 0 »** — **réglé** : root cause = le niveau n'était ni capturé au drop,
+      ni persisté, ni publié dans le cycle du move (`level_by_model` jamais écrit côté backend). Câblage complet
+      + publication `level_by_model` à chaque recompute.
+   5. **Voile rouge sur débordement partiel d'étage (move)** — **réglé** : une fig posée en partie sur l'étage
+      n'est plus rejetée, elle est ramenée au niveau 0 (niveau effectif `resolve_model_floor_level` dans preview
+      + commit).
 
    **Logs de diagnostic** : tous les logs temporaires `[DIAG ...]` (FORMATION, POOL, SQUAD-POOL, PREVIEW,
    DEPLOY-COMMIT dans [deployment_handlers.py](file:///home/greg/40k/engine/phase_handlers/deployment_handlers.py) ;

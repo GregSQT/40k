@@ -39,6 +39,7 @@ export class Neurogaunt extends SwarmMeleeSwarm {
   static ICON = "/icons/Neurogaunt.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 10; // Size of the base
+  static MODEL_HEIGHT = 2.5;  // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 1.2; // Size of the icon
   static ILLUSTRATION_RATIO = 80; // Illustration size ratio in percent
 
