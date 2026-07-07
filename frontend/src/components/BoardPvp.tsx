@@ -6069,9 +6069,10 @@ export default function Board({
     if (!plan) return;
     if (plan.activeModelId) return;
     let cancelled = false;
-    const provisionalPlan: Record<string, [number, number]> = {};
+    // (col,row,level) par sœur + niveau de vue → pools niveau-conscients (superposition inter-étage).
+    const provisionalPlan: Record<string, [number, number, number]> = {};
     for (const [mid, p] of Object.entries(plan.models ?? {})) {
-      provisionalPlan[mid] = [p.col, p.row];
+      provisionalPlan[mid] = [p.col, p.row, p.level ?? 0];
     }
     void (async () => {
       try {
@@ -6082,6 +6083,7 @@ export default function Board({
             action: "move_squad_unplaced_destinations",
             unitId: String(plan.unitId),
             provisional_plan: provisionalPlan,
+            level: currentLevel,
           }),
         });
         if (!response.ok) {
@@ -6124,6 +6126,7 @@ export default function Board({
     squadMovePlan?.activeModelId,
     squadMovePlan?.models,
     squadMovePlan?.unitId,
+    currentLevel,
   ]);
 
   // Ghost per-figurine (squad move plan) : ghost suit le curseur, hoveredHexRef mis à jour pour le

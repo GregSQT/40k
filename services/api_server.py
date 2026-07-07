@@ -2170,15 +2170,20 @@ def execute_action():
             }), 400
         from engine.phase_handlers import movement_handlers as _mh_model
         _raw_plan = action.get("provisional_plan")
-        _provisional_plan: Optional[Dict[str, Tuple[int, int]]] = None
+        _provisional_plan: Optional[Dict[str, Tuple[int, ...]]] = None
         if isinstance(_raw_plan, dict):
+            # (col,row) ou (col,row,level) : le niveau par sœur évite qu'une fig d'étage soit
+            # re-dérivée au sol et bloque une fig au sol (superposition inter-étage), comme le déploiement.
             _provisional_plan = {
-                str(k): (int(v[0]), int(v[1]))
+                str(k): tuple(int(x) for x in v)
                 for k, v in _raw_plan.items()
-                if isinstance(v, (list, tuple)) and len(v) == 2
+                if isinstance(v, (list, tuple)) and len(v) in (2, 3)
             }
+        # Étages : niveau de VUE courant (optionnel, défaut 0 = sol) → pool niveau-conscient.
+        _mv_level_raw = action.get("level")
+        _mv_level = int(_mv_level_raw) if _mv_level_raw is not None else 0
         _model_pool = _mh_model.movement_build_model_destinations_pool(
-            engine.game_state, str(model_id), provisional_plan=_provisional_plan
+            engine.game_state, str(model_id), provisional_plan=_provisional_plan, level=_mv_level
         )
         return api_json_response({
             "success": True,
@@ -2204,13 +2209,17 @@ def execute_action():
             }), 400
         from engine.phase_handlers import movement_handlers as _mh_squad
         _raw_plan_sq = action.get("provisional_plan")
-        _provisional_plan_sq: Optional[Dict[str, Tuple[int, int]]] = None
+        _provisional_plan_sq: Optional[Dict[str, Tuple[int, ...]]] = None
         if isinstance(_raw_plan_sq, dict):
+            # (col,row) ou (col,row,level) : niveau par sœur (superposition inter-étage), cf. déploiement.
             _provisional_plan_sq = {
-                str(k): (int(v[0]), int(v[1]))
+                str(k): tuple(int(x) for x in v)
                 for k, v in _raw_plan_sq.items()
-                if isinstance(v, (list, tuple)) and len(v) == 2
+                if isinstance(v, (list, tuple)) and len(v) in (2, 3)
             }
+        # Étages : niveau de VUE courant (optionnel, défaut 0 = sol) → pools niveau-conscients.
+        _sq_level_raw = action.get("level")
+        _sq_level = int(_sq_level_raw) if _sq_level_raw is not None else 0
         _placed_ids = set(_provisional_plan_sq.keys()) if _provisional_plan_sq else set()
         _squad_models = require_key(engine.game_state, "squad_models")
         _models_cache = require_key(engine.game_state, "models_cache")
@@ -2231,7 +2240,7 @@ def execute_action():
             if _mid_str not in _models_cache:
                 continue  # fig morte
             _pool = _mh_squad.movement_build_model_destinations_pool(
-                engine.game_state, _mid_str, provisional_plan=_provisional_plan_sq
+                engine.game_state, _mid_str, provisional_plan=_provisional_plan_sq, level=_sq_level
             )
             _pools[_mid_str] = [[int(c), int(r)] for c, r in _pool["destinations"]]
         if _sq_pt and _sq_t0 is not None:

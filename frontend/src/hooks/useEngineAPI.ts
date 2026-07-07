@@ -4047,17 +4047,27 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   /** Positions par-figurine actuelles d'une escouade (depuis units_cache.occupied_hexes_by_model). */
   const readSquadModelPositions = useCallback(
-    (unitId: number | string): Record<string, { col: number; row: number }> => {
+    (unitId: number | string): Record<string, { col: number; row: number; level: number }> => {
       const entry = (
         gameState?.units_cache as
-          | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+          | Record<
+              string,
+              {
+                occupied_hexes_by_model?: Record<string, [number, number]>;
+                level_by_model?: Record<string, number>;
+                level?: number;
+              }
+            >
           | undefined
       )?.[String(unitId)];
       const byModel = entry?.occupied_hexes_by_model;
-      const out: Record<string, { col: number; row: number }> = {};
+      // Niveau (étages) committé par fig : source level_by_model, fallback niveau d'ancre / 0.
+      const levelByModel = entry?.level_by_model;
+      const unitLevel = entry?.level ?? 0;
+      const out: Record<string, { col: number; row: number; level: number }> = {};
       if (byModel) {
         for (const [mid, pos] of Object.entries(byModel)) {
-          out[mid] = { col: pos[0], row: pos[1] };
+          out[mid] = { col: pos[0], row: pos[1], level: levelByModel?.[mid] ?? unitLevel };
         }
       }
       return out;
@@ -4067,8 +4077,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   /** Dry-run du plan provisoire → maj voile rouge / cohesion / can_validate. */
   const refreshSquadMovePlanValidity = useCallback(
-    async (unitId: number, models: Record<string, { col: number; row: number }>) => {
-      const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row]);
+    async (
+      unitId: number,
+      models: Record<string, { col: number; row: number; level?: number }>
+    ) => {
+      // (mid,col,row,level) : le niveau capturé au drop voyage jusqu'au preview → occupation testée
+      // au bon niveau (superposition inter-étage) et validate_floor_placement (13.06).
+      const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row, p.level ?? 0]);
       let result: Record<string, unknown> | null = null;
       try {
         result = await postEngineQuery({
@@ -4150,11 +4165,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     async (modelId: string) => {
       const sessionAtCall = squadMoveSessionRef.current;
       const currentPlan = squadMovePlanRef.current;
-      const provisionalPlan: Record<string, [number, number]> = {};
+      // (col,row,level) par sœur : le niveau capturé au drop voyage jusqu'au pool → une sœur à
+      // l'étage n'est plus re-dérivée au sol (et ne bloque plus une fig au sol). Superposition inter-étage.
+      const provisionalPlan: Record<string, [number, number, number]> = {};
       if (currentPlan) {
         for (const [mid, pos] of Object.entries(currentPlan.models)) {
           if (mid !== modelId) {
-            provisionalPlan[mid] = [pos.col, pos.row];
+            provisionalPlan[mid] = [pos.col, pos.row, pos.level ?? 0];
           }
         }
       }
@@ -4162,6 +4179,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         action: "move_model_destinations",
         model_id: modelId,
         provisional_plan: provisionalPlan,
+        // Étages : niveau de vue courant → pool niveau-conscient (une fig à l'étage ne bloque
+        // plus une destination au sol sous elle, et réciproquement).
+        level: currentLevelRef?.current ?? 0,
       });
       if (squadMoveSessionRef.current !== sessionAtCall) return;
       if (!result?.destinations) {
@@ -4179,7 +4199,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         : null;
       setSquadMovePlan((prev) => (prev ? { ...prev, activeModelId: modelId } : prev));
     },
-    [postEngineQuery]
+    [postEngineQuery, currentLevelRef]
   );
 
   /** Pose la figurine active a (col,row) dans le plan provisoire + refresh validite. */
@@ -4190,12 +4210,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       squadMoveModelMaskLoopsRef.current = null;
       setSquadMovePlan((prev) => {
         if (!prev) return prev;
-        const models = { ...prev.models, [modelId]: { col, row } };
+        // Niveau (étages) capturé au drop = niveau de vue courant. Sans ça la fig posée à l'étage
+        // reste enregistrée au sol → elle bloque/est bloquée au niveau 0 (superposition impossible).
+        const models = {
+          ...prev.models,
+          [modelId]: { col, row, level: currentLevelRef?.current ?? 0 },
+        };
         void refreshSquadMovePlanValidity(prev.unitId, models);
         return { ...prev, models, activeModelId: null };
       });
     },
-    [refreshSquadMovePlanValidity]
+    [refreshSquadMovePlanValidity, currentLevelRef]
   );
 
   /** Clic droit sur la fig active : annule SON deplacement → retour position de debut de phase. */
@@ -4264,7 +4289,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       console.warn("[SQUAD-MOVE] commit ABORT (canValidate=false, il reste du rouge)");
       return;
     }
-    const plan = Object.entries(squadMovePlan.models).map(([mid, p]) => [mid, p.col, p.row]);
+    // (mid,col,row,level) : le niveau committé par fig est persisté par commit_move_plan
+    // (update_model_position écrit model["level"]) → la fig posée à l'étage n'est plus au sol.
+    const plan = Object.entries(squadMovePlan.models).map(([mid, p]) => [
+      mid,
+      p.col,
+      p.row,
+      p.level ?? 0,
+    ]);
     try {
       await executeAction({
         action: "commit_move_plan",

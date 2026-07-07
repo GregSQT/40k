@@ -2551,7 +2551,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 def movement_build_model_destinations_pool(
     game_state: Dict[str, Any],
     model_id: str,
-    provisional_plan: Optional[Dict[str, Tuple[int, int]]] = None,
+    provisional_plan: Optional[Dict[str, Tuple[int, ...]]] = None,
+    level: int = 0,
 ) -> Dict[str, Any]:
     """BFS des hexes atteignables pour UNE figurine (move par-figurine, squad.md).
 
@@ -2602,37 +2603,65 @@ def movement_build_model_destinations_pool(
     player = int(model["player"])
     cache_key = f"enemy_adjacent_hexes_player_{player}"
     enemy_adjacent_hexes = require_key(game_state, cache_key)
-    enemy_occupied = build_enemy_occupied_positions_set(game_state, current_player=player)
+    # --- Occupation PAR NIVEAU (étages) : sol (0) + niveau de VUE (si >=1). Deux figs à des étages
+    # différents ne se gênent pas ; murs = verticaux prolongés (bloquent la destination à TOUS niveaux).
+    # Tout au niveau 0 aujourd'hui → identique au comportement 2D historique (non-régression). ---
+    view_level = int(level or 0)
+    terrain_areas = require_key(game_state, "terrain_areas")
+    from engine.terrain_utils import floor_hexes_at_level, resolve_model_floor_level
+    floor_hexes_view: Set[Tuple[int, int]] = (
+        floor_hexes_at_level(terrain_areas, view_level) if view_level >= 1 else set()
+    )
+    _levels_of_interest: Set[int] = {0} | ({view_level} if view_level >= 1 else set())
 
-    # Cellules occupees par les AUTRES escouades (collision destination interdite).
-    other_occupied: Set[Tuple[int, int]] = set()
-    for sid, entry in game_state.get("units_cache", {}).items():  # get allowed
-        if str(sid) == squad_id:  # get allowed
-            continue
-        occ = entry.get("occupied_hexes")
-        if occ:
-            for cell in occ:
-                other_occupied.add((int(cell[0]), int(cell[1])))
+    # Ennemis au niveau de VUE (traversal + EZ ancre). Le mover se déplace au niveau de vue.
+    enemy_occupied = build_enemy_occupied_positions_set(
+        game_state, current_player=player, level=view_level
+    )
 
-    # Cellules occupees par les AUTRES figs du meme squad (collision intra-squad interdite).
-    # provisional_plan override les positions sibling déjà déplacées dans le plan UI.
-    same_squad_occupied: Set[Tuple[int, int]] = set()
+    # Autres escouades, par niveau (empreinte par-figurine à ce niveau).
+    other_occ_by_level: Dict[int, Set[Tuple[int, int]]] = {
+        lv: build_occupied_positions_set(game_state, exclude_unit_id=squad_id, level=lv)
+        for lv in _levels_of_interest
+    }
+
+    # Sœurs (même squad) par niveau EFFECTIF : niveau demandé = 3e élément du plan provisoire si présent
+    # (sinon niveau committé), effectif dérivé par l'empreinte sur le plancher (resolve_model_floor_level).
+    # provisional_plan override positions/niveaux des figs déjà déplacées dans le plan UI.
     _models_cache = require_key(game_state, "models_cache")
     _squad_models = game_state.get("squad_models", {})  # get allowed
+    same_squad_occ_by_level: Dict[int, Set[Tuple[int, int]]] = {}
+    sibling_states: List[Tuple[Dict[str, Any], int, int, int]] = []  # (model, col, row, eff_level)
     for mid in _squad_models.get(squad_id, []):  # get allowed
         if str(mid) == str(model_id):  # get allowed
             continue
+        sibling = _models_cache.get(str(mid))
+        if sibling is None:
+            continue
         if provisional_plan and str(mid) in provisional_plan:
-            prov_col, prov_row = provisional_plan[str(mid)]
-            sibling_fp = _compute_unit_occupied_hexes(prov_col, prov_row, unit, game_state)
+            _pv = provisional_plan[str(mid)]
+            sc, sr = int(_pv[0]), int(_pv[1])
+            sib_req = int(_pv[2]) if len(_pv) >= 3 else int(sibling.get("level", 0))  # get allowed
         else:
-            sibling = _models_cache.get(str(mid))
-            if sibling is None:
-                continue
-            sibling_fp = _compute_unit_occupied_hexes(
-                int(sibling["col"]), int(sibling["row"]), unit, game_state
-            )
-        same_squad_occupied.update(sibling_fp)
+            sc, sr = int(sibling["col"]), int(sibling["row"])
+            sib_req = int(sibling.get("level", 0))  # get allowed
+        sib_eff = resolve_model_floor_level(
+            sc, sr, require_key(sibling, "BASE_SHAPE"), require_key(sibling, "BASE_SIZE"),
+            int(sibling.get("orientation", 0)), sib_req, terrain_areas,  # get allowed
+        )
+        same_squad_occ_by_level.setdefault(sib_eff, set()).update(
+            _compute_unit_occupied_hexes(sc, sr, unit, game_state)
+        )
+        sibling_states.append((sibling, sc, sr, sib_eff))
+
+    # Occupation totale (autres squads + sœurs) par niveau — filtre de destination par niveau EFFECTIF.
+    fig_occ_by_level: Dict[int, Set[Tuple[int, int]]] = {}
+    for lv in _levels_of_interest | set(same_squad_occ_by_level.keys()):
+        fig_occ_by_level[lv] = other_occ_by_level.get(lv, set()) | same_squad_occ_by_level.get(lv, set())
+
+    # Obstacles de TRAVERSAL (figs au niveau de vue) : une fig d'un autre étage ne barre pas le chemin.
+    other_occupied = other_occ_by_level.get(view_level, set())
+    same_squad_occupied = same_squad_occ_by_level.get(view_level, set())
 
     # Take to the skies (Règles 21.03) : traversée FLY active seulement si vol déclaré (phase move,
     # humain) — sinon BFS sol. Pilote le reachable par-figurine ET, via lui, la validation au commit.
@@ -2667,10 +2696,10 @@ def movement_build_model_destinations_pool(
         ez_anchor_forbidden: Set[Tuple[int, int]] = {
             (int(c), int(r)) for c, r in zip(_ez_cols, _ez_rows)
         }
-        dest_blocked = wall_hexes | other_occupied | same_squad_occupied
+        dest_blocked = wall_hexes  # figs filtrées par niveau EFFECTIF au post-traitement (superposition inter-étage)
     else:
         ez_anchor_forbidden = enemy_adjacent_hexes
-        dest_blocked = wall_hexes | other_occupied | same_squad_occupied | enemy_adjacent_hexes
+        dest_blocked = wall_hexes  # idem : occupation des figs traitée par niveau plus bas
 
     # Traversée selon toggles config["move"]. Desperate Escape (09.07) traverse les figs ennemies
     # quoi qu'il arrive. La destination (dest_blocked + ez_anchor_forbidden) reste inchangée :
@@ -2782,49 +2811,7 @@ def movement_build_model_destinations_pool(
                     continue
                 reachable.append(cell)
 
-    # Empêche le DÉPÔT sur un chevauchement de socle avec une coéquipière (au lieu de le
-    # détecter après coup via le voile rouge) : on retire du pool les destinations où le socle
-    # du mover chevaucherait une fig sœur, en clearance euclidienne par base RÉELLE — même
-    # primitive (footprints_overlap) que movement_preview_move_plan → pool et voile cohérents.
-    # Tangence (gap≈0) tolérée. dest_blocked (footprint hex) sous-estime le disque et laissait
-    # passer ~16% de recouvrement à 5 sous-hex ; ce filtre le supprime à la source.
-    from engine.hex_utils import Socle, footprints_overlap
-    _mover_shape = require_key(model, "BASE_SHAPE")
-    _mover_base = require_key(model, "BASE_SIZE")
-    _mover_orient = int(unit.get("orientation", 0))  # get allowed
-    _sibling_socles: List[Socle] = []
-    for _sid_m in _squad_models.get(squad_id, []):  # get allowed
-        if str(_sid_m) == str(model_id):  # get allowed
-            continue
-        _sib = models_cache.get(str(_sid_m))  # get allowed
-        if _sib is None:
-            continue
-        if provisional_plan and str(_sid_m) in provisional_plan:
-            _sc, _sr = int(provisional_plan[str(_sid_m)][0]), int(provisional_plan[str(_sid_m)][1])
-        else:
-            _sc, _sr = int(_sib["col"]), int(_sib["row"])
-        _s_shape = require_key(_sib, "BASE_SHAPE")
-        _s_base = require_key(_sib, "BASE_SIZE")
-        _s_fp = None if _s_shape == "round" else compute_candidate_footprint(
-            _sc, _sr,
-            {"BASE_SHAPE": _s_shape, "BASE_SIZE": _s_base, "orientation": _mover_orient},
-            game_state,
-        )
-        _sibling_socles.append(Socle(shape=_s_shape, base_size=_s_base, col=_sc, row=_sr, fp=_s_fp))
-    if _sibling_socles:
-        _intra_filtered: List[Tuple[int, int]] = []
-        for _dc, _dr in reachable:
-            _m_fp = None if _mover_shape == "round" else compute_candidate_footprint(
-                _dc, _dr,
-                {"BASE_SHAPE": _mover_shape, "BASE_SIZE": _mover_base, "orientation": _mover_orient},
-                game_state,
-            )
-            _m_socle = Socle(shape=_mover_shape, base_size=_mover_base, col=_dc, row=_dr, fp=_m_fp)
-            if not any(footprints_overlap(_m_socle, _s) for _s in _sibling_socles):
-                _intra_filtered.append((_dc, _dr))
-        reachable = _intra_filtered
-
-    # Footprint zone per-fig : destinations ∪ start, expandées selon BASE_SIZE.
+    # Empreinte du mover (offsets pré-calculés) : sert au filtre destination par niveau ET à la zone.
     base_size = unit["BASE_SIZE"]
     base_shape = unit["BASE_SHAPE"]
     orientation = unit.get("orientation", 0)  # get allowed
@@ -2834,34 +2821,89 @@ def movement_build_model_destinations_pool(
         base_size == 1 or not isinstance(base_size, int) or base_size <= 1
     )  # get allowed
     if is_single_hex:
+        _off_even: Tuple[Tuple[int, int], ...] = ((0, 0),)
+        _off_odd: Tuple[Tuple[int, int], ...] = ((0, 0),)
+    else:
+        from engine.hex_utils import precompute_footprint_offsets
+        _off_even, _off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
+
+    def _mover_cells(ac: int, ar: int) -> List[Tuple[int, int]]:
+        offs = _off_even if (ac & 1) == 0 else _off_odd
+        return [(ac + dc, ar + dr) for dc, dr in offs]
+
+    def _eff_level(cells: List[Tuple[int, int]]) -> int:
+        # Niveau EFFECTIF de la candidate : étage vue si l'empreinte tient ENTIÈREMENT sur le plancher
+        # (13.06, même dérivation que resolve_model_floor_level), sinon sol (0).
+        if view_level >= 1 and floor_hexes_view and all(c in floor_hexes_view for c in cells):
+            return view_level
+        return 0
+
+    # Filtre destination PAR NIVEAU EFFECTIF : empreinte dans le plateau, hors murs (tous niveaux),
+    # hors occupation des figs DE CE NIVEAU. Une fig d'un autre étage ne bloque pas (superposition).
+    # Le BFS ne borne que le hex central → l'empreinte complète est revérifiée ici.
+    _reachable_lvl: List[Tuple[int, int]] = []
+    eff_by_dest: Dict[Tuple[int, int], int] = {}
+    for ac, ar in reachable:
+        cells = _mover_cells(ac, ar)
+        if any(not (0 <= c < board_cols and 0 <= r < board_rows) for c, r in cells):
+            continue
+        if any(c in wall_hexes for c in cells):
+            continue
+        eff = _eff_level(cells)
+        if any(c in fig_occ_by_level.get(eff, set()) for c in cells):
+            continue
+        _reachable_lvl.append((ac, ar))
+        eff_by_dest[(ac, ar)] = eff
+    reachable = _reachable_lvl
+
+    # Empêche le DÉPÔT sur un chevauchement de socle avec une coéquipière AU MÊME NIVEAU EFFECTIF
+    # (au lieu de le détecter après coup via le voile rouge). Clearance euclidienne par base RÉELLE —
+    # même primitive (footprints_overlap) que movement_preview_move_plan → pool et voile cohérents.
+    # Tangence (gap≈0) tolérée. Sœurs d'un autre étage : pas de gêne.
+    from engine.hex_utils import Socle, footprints_overlap
+    _mover_shape = require_key(model, "BASE_SHAPE")
+    _mover_base = require_key(model, "BASE_SIZE")
+    _mover_orient = int(unit.get("orientation", 0))  # get allowed
+    sibling_socles_by_level: Dict[int, List[Socle]] = {}
+    for _sib, _sc, _sr, _sib_eff in sibling_states:
+        _s_shape = require_key(_sib, "BASE_SHAPE")
+        _s_base = require_key(_sib, "BASE_SIZE")
+        _s_fp = None if _s_shape == "round" else compute_candidate_footprint(
+            _sc, _sr,
+            {"BASE_SHAPE": _s_shape, "BASE_SIZE": _s_base, "orientation": _mover_orient},
+            game_state,
+        )
+        sibling_socles_by_level.setdefault(_sib_eff, []).append(
+            Socle(shape=_s_shape, base_size=_s_base, col=_sc, row=_sr, fp=_s_fp)
+        )
+    if sibling_socles_by_level:
+        _intra_filtered: List[Tuple[int, int]] = []
+        for _dc, _dr in reachable:
+            _same_level = sibling_socles_by_level.get(eff_by_dest[(_dc, _dr)], [])
+            if not _same_level:
+                _intra_filtered.append((_dc, _dr))
+                continue
+            _m_fp = None if _mover_shape == "round" else compute_candidate_footprint(
+                _dc, _dr,
+                {"BASE_SHAPE": _mover_shape, "BASE_SIZE": _mover_base, "orientation": _mover_orient},
+                game_state,
+            )
+            _m_socle = Socle(shape=_mover_shape, base_size=_mover_base, col=_dc, row=_dr, fp=_m_fp)
+            if not any(footprints_overlap(_m_socle, _s) for _s in _same_level):
+                _intra_filtered.append((_dc, _dr))
+        reachable = _intra_filtered
+
+    # Footprint zone per-fig : destinations (déjà validées) ∪ start, expandées selon BASE_SIZE.
+    if is_single_hex:
         footprint_zone: Set[Tuple[int, int]] = set(reachable)
         footprint_zone.add(start_pos)
     else:
-        from engine.hex_utils import precompute_footprint_offsets
-        off_even, off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
-        # Fix fonctionnel : exclure les destinations dont l'empreinte complète
-        # chevauche dest_blocked (murs, figs alliées, figs ennemies, engagement).
-        # Le BFS ne vérifie que le hex central ; ici on vérifie chaque cellule de l'empreinte.
-        valid_reachable: List[Tuple[int, int]] = []
-        for ac, ar in reachable:
-            offs = off_even if (ac & 1) == 0 else off_odd
-            # Empreinte complète dans le plateau : le BFS ne borne que le centre,
-            # une cellule d'empreinte hors board n'est dans aucun set bloquant.
-            if any(
-                not (0 <= ac + dc < board_cols and 0 <= ar + dr < board_rows)
-                for dc, dr in offs
-            ):
-                continue
-            if not any((ac + dc, ar + dr) in dest_blocked for dc, dr in offs):
-                valid_reachable.append((ac, ar))
-        reachable = valid_reachable
-        # Footprint zone depuis les destinations valides uniquement.
         footprint_zone = set()
         for ac, ar in reachable:
-            offs = off_even if (ac & 1) == 0 else off_odd
+            offs = _off_even if (ac & 1) == 0 else _off_odd
             for dc, dr in offs:
                 footprint_zone.add((ac + dc, ar + dr))
-        s_offs = off_even if (start_col & 1) == 0 else off_odd
+        s_offs = _off_even if (start_col & 1) == 0 else _off_odd
         for dc, dr in s_offs:
             footprint_zone.add((start_col + dc, start_row + dr))
         # Fix visuel : l'expansion du start peut déborder sur des murs adjacents.
@@ -2919,13 +2961,23 @@ def movement_preview_move_plan(
         # On désactive le check legacy centre-à-centre de ``validate_move_plan``.
         c_individual["forbid_enemy_er"] = False
     # Normalisation niveau (étages) : entrée 3-uplet ou 4-uplet ; niveau absent (None) = « garder le
-    # niveau courant » de la figurine (models_cache). ``norm`` = liste de (mid, col, row, level_effectif).
+    # niveau courant » de la figurine (models_cache). ``norm`` = liste de (mid, col, row, level_EFFECTIF).
+    # Niveau EFFECTIF (13.06) : le niveau demandé (vue) n'est retenu que si l'empreinte tient ENTIÈREMENT
+    # sur le plancher ; sinon la fig est au SOL (0). PAS de voile rouge pour un débordement partiel : on
+    # la ramène simplement au niveau 0 (cohérent avec le pool de destinations et le déploiement).
+    from engine.terrain_utils import resolve_model_floor_level
     _mc_norm = require_key(game_state, "models_cache")
+    terrain_areas = require_key(game_state, "terrain_areas")
     norm: List[Tuple[str, int, int, int]] = []
     for e in plan:
         _mid = str(e[0])
-        _lvl_raw = int(e[3]) if len(e) >= 4 and e[3] is not None else None
-        _lvl_eff = _lvl_raw if _lvl_raw is not None else int(require_key(_mc_norm[_mid], "level"))
+        _m_norm = _mc_norm[_mid]
+        _lvl_req = int(e[3]) if len(e) >= 4 and e[3] is not None else int(require_key(_m_norm, "level"))
+        _lvl_eff = resolve_model_floor_level(
+            int(e[1]), int(e[2]),
+            require_key(_m_norm, "BASE_SHAPE"), require_key(_m_norm, "BASE_SIZE"),
+            int(_m_norm.get("orientation", 0)), _lvl_req, terrain_areas,  # get allowed (défaut 0 = face nord)
+        )
         norm.append((_mid, int(e[1]), int(e[2]), _lvl_eff))
 
     # Cohesion 03.03 par fig : deleguee a coherency_violation_flags (source UNIQUE partagee avec le
@@ -2956,10 +3008,7 @@ def movement_preview_move_plan(
     ]
     cohesion_red = coherency_violation_flags(cohesion_models, game_state)
 
-    from engine.terrain_utils import validate_floor_placement
     wall_hexes_set = game_state.get("wall_hexes", set())
-    terrain_areas = require_key(game_state, "terrain_areas")
-    unit_keywords = require_key(unit_obj, "UNIT_KEYWORDS") if unit_obj else []
     # Occupation des autres escouades PAR NIVEAU (figs à des étages différents ne se gênent pas ;
     # murs verticaux prolongés gérés par wall_hexes, cf. stage.md). Calcul unique par niveau du plan.
     other_occ_by_level: Dict[int, Set[Tuple[int, int]]] = {
@@ -3007,19 +3056,9 @@ def movement_preview_move_plan(
             for j in range(n)
             if j != idx and levels[j] == lv
         )
-        # Pose sur étage (niveau >= 1) : règle 13.06 (mot-clé + empreinte entièrement sur l'étage).
-        floor_bad = False
-        if lv >= 1:
-            _fok, _ = validate_floor_placement(
-                {
-                    "id": squad_id, "UNIT_KEYWORDS": unit_keywords,
-                    "BASE_SHAPE": require_key(_mc_norm[str(mid)], "BASE_SHAPE"),
-                    "BASE_SIZE": require_key(_mc_norm[str(mid)], "BASE_SIZE"),
-                    "orientation": int(_mc_norm[str(mid)].get("orientation", 0)),  # get allowed (défaut 0 = face nord)
-                },
-                int(nc), int(nr), lv, terrain_areas,
-            )
-            floor_bad = not _fok
+        # Niveau (étages) : plus de voile rouge « débordement » — ``lv`` est déjà le niveau EFFECTIF
+        # (resolve_model_floor_level ci-dessus a ramené au sol toute fig dont l'empreinte déborde du
+        # plancher). Une fig « en partie sur l'étage » est donc simplement traitée au niveau 0.
         # Board ×N : voile rouge si l'empreinte de la fig viole l'EZ ennemie (formule euclidienne
         # par-mover, identique au pathfinding). ez <= 1 : déjà couvert par validate_move_plan.
         ez_violation = (
@@ -3032,7 +3071,7 @@ def movement_preview_move_plan(
         )
         per_model[str(mid)] = bool(
             base_valid and not fp_wall and not fp_other and not fp_intra
-            and not cohesion_red[idx] and not ez_violation and not floor_bad
+            and not cohesion_red[idx] and not ez_violation
         )
 
     coherency_ok = not any(cohesion_red)
@@ -3123,6 +3162,24 @@ def movement_commit_move_plan_handler(
         mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"]))
         for mid in alive
     }
+
+    # Persiste le niveau EFFECTIF (13.06) : le niveau demandé (vue) n'est retenu que si l'empreinte
+    # tient ENTIÈREMENT sur le plancher ; sinon la fig est committée au SOL (0). Miroir du preview et
+    # du déploiement — jamais un étage « à moitié » persisté. None (move horizontal) → niveau inchangé.
+    from engine.terrain_utils import resolve_model_floor_level as _rmfl_commit
+    _ta_commit = require_key(game_state, "terrain_areas")
+    _resolved_plan: List[Tuple[str, int, int, Optional[int]]] = []
+    for _mid_c, _nc_c, _nr_c, _lv_c in plan:
+        if _lv_c is None:
+            _resolved_plan.append((_mid_c, _nc_c, _nr_c, None))
+            continue
+        _m_c = models_cache[_mid_c]
+        _eff_c = _rmfl_commit(
+            _nc_c, _nr_c, require_key(_m_c, "BASE_SHAPE"), require_key(_m_c, "BASE_SIZE"),
+            int(_m_c.get("orientation", 0)), int(_lv_c), _ta_commit,  # get allowed (défaut 0 = face nord)
+        )
+        _resolved_plan.append((_mid_c, _nc_c, _nr_c, _eff_c))
+    plan = _resolved_plan
 
     commit_move(plan, game_state, move_type)
 

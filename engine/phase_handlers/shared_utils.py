@@ -746,6 +746,12 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
             for mid in squad_models.get(unit_id, [])  # get allowed
             if mid in models_cache
         }
+        # Niveau (étages) par-figurine, exposé au frontend (rendu + init plan de move).
+        units_cache[unit_id]["level_by_model"] = {
+            mid: int(require_key(models_cache[mid], "level"))
+            for mid in squad_models.get(unit_id, [])  # get allowed
+            if mid in models_cache
+        }
         # Per-model visual meta (icône + échelle + forme/taille de base) : exposé
         # au frontend uniquement pour les escouades hétérogènes (au moins une
         # figurine dont le profil visuel diffère de l'unité parente, ex.
@@ -2851,6 +2857,9 @@ def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -
     old_occupied = entry.get("occupied_hexes", set())
     new_occupied: Set[Tuple[int, int]] = set()
     new_by_model: Dict[str, Tuple[int, int]] = {}
+    # Niveau (étages) par-figurine : publié vers le frontend (rendu + init du plan de move par-fig).
+    # Sans ça une fig à l'étage remonte au niveau d'ancre → traitée au sol → superposition cassée.
+    new_level_by_model: Dict[str, int] = {}
     for mid in squad_models.get(squad_id, []):  # get allowed
         m = models_cache.get(mid)
         if m is None:
@@ -2858,10 +2867,12 @@ def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -
         m_col = int(m["col"])
         m_row = int(m["row"])
         new_by_model[mid] = (m_col, m_row)
+        new_level_by_model[mid] = int(require_key(m, "level"))
         fp = _compute_unit_occupied_hexes(m_col, m_row, unit_stub, game_state)
         new_occupied.update(fp)
     entry["occupied_hexes"] = new_occupied
     entry["occupied_hexes_by_model"] = new_by_model
+    entry["level_by_model"] = new_level_by_model
     # Sync occupation_map (retire cellules disparues, ajoute nouvelles)
     occ_map = game_state.get("occupation_map")
     if occ_map is not None:
