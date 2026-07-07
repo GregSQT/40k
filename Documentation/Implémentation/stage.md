@@ -151,6 +151,20 @@ Conséquences : une charge vers un étage doit couvrir la montée avec le 2D6 et
   15 Stratagems, 19 Attached units. Le glossaire étendu (ground level, stable…) n'existe pas dans la
   doc locale (renvoi de l'appendix vers l'app officielle).
 
+### 2.11 Hauteur de figurine / garde au sol sous un étage — `03 Moving.pdf` §03.01 + encart SOLID §13.06
+- `03 Moving.pdf` §03.01 "ENDING A MOVE" : une figurine ne peut pas finir son move "on another model or
+  **partway through a surface of a terrain feature (e.g. a wall or ceiling)**". → une fig **plus haute que
+  le plancher qui la surplombe** ne peut pas finir sous ce plancher : partout où son empreinte au sol est
+  sous l'empreinte de l'étage, son sommet traverserait le plafond.
+- Renfort — encart **SOLID** de §13.06 : "a model cannot end a move such that any part of it is through any
+  enclosed part of that terrain feature that is 3" or less from ground level (…) protruding elements of
+  models cannot be used to circumvent the visibility restrictions."
+- ⚠️ **La hauteur réelle des figs n'est jamais chiffrée** dans les 25 PDFs (géométrie physique du modèle,
+  comme la True LoS) → aucune valeur "règle" à importer ; c'est une donnée à ajouter au moteur.
+- **Contrainte moteur = conditionnelle, pas absolue** : empreinte-sol interdite sous empreinte-étage
+  **seulement si** `hauteur_fig > height_inches` du plancher au-dessus. Une fig plus courte que le plancher
+  passe dessous librement (les règles ne l'interdisent pas).
+
 ---
 
 ## 3. État actuel du code (fondations existantes)
@@ -401,6 +415,17 @@ le modèle + LoS 3D est le vrai chantier.
      étage→vert), commit persistant level=1 sur models_cache/units_cache/units. Suite complète verte.
    - ⏸️ **2b Collisions par niveau hors déploiement** (move/charge/fight via `build_occupied_positions_set`) :
      reste au chantier 3 (mouvement vertical), même principe additif que `_deployed_occupied_positions`.
+   - ⏳ **2d Garde au sol sous un étage** (§2.11) — **champ front ajouté, reste backend + test** :
+     - ✅ Champ `static MODEL_HEIGHT` (inches) sur **les 158 fichiers roster** (`frontend/src/roster/**`),
+       juste après `BASE_SIZE`, avec commentaire `IMPORTANT: temporary indicative value`. **Valeurs
+       indicatives temporaires** dérivées de `BASE_SIZE` : `≤20 → 2.5` (passe sous un étage 3"),
+       `>20 → 4` (bloqué) ; ovale `[a,b]` → seuil sur `max` ; référence `Autre.BASE_SIZE` →
+       `Autre.MODEL_HEIGHT` (miroir). tsc vert. **À affiner par figurine** (la hauteur réelle n'est pas
+       une fonction stricte du socle, §2.11).
+     - ⏸️ **RESTE** : propager `MODEL_HEIGHT` au **backend** (payload API → `units_cache`/`models_cache`)
+       puis brancher le test de clearance dans `validate_floor_placement` / la fin de move : interdire une
+       empreinte-sol chevauchant l'empreinte d'un étage **si** `MODEL_HEIGHT > height_inches` du plancher
+       au-dessus (contrainte conditionnelle, §2.11).
 3. **Mouvement vertical** — ⏳ **EN COURS** :
    - ✅ **3a Champ multi-niveaux (cœur algo)** : `reachable_multilevel_field`
      ([geodesic_move.py](file:///home/greg/40k/engine/phase_handlers/geodesic_move.py)) — Dijkstra sur
