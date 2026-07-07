@@ -384,7 +384,7 @@ class TestBuildOccupationMap:
     """Tests for sparse cell→unit_id map."""
 
     def _make_entry(self, col, row, shape="round", size=1):
-        return {"col": col, "row": row, "BASE_SHAPE": shape, "BASE_SIZE": size}
+        return {"col": col, "row": row, "BASE_SHAPE": shape, "BASE_SIZE": size, "MODEL_HEIGHT": 2.5}
 
     def _get_fp(self, entry):
         return compute_occupied_hexes(

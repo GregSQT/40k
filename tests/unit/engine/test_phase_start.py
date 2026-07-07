@@ -23,6 +23,7 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
         "VALUE": 100,
         "OC": 1,
         "BASE_SIZE": 1,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
@@ -38,7 +39,7 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
 
 def _base_config() -> Dict[str, Any]:
     return {
-        "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+        "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
     }
 
@@ -220,14 +221,14 @@ class TestShootingPhaseStart:
         shooting_phase_start(gs)
         assert "shoot_activation_pool" in gs
 
-    def test_no_rng_weapons_can_advance(self):
-        """shoot_start_advance : unité sans RNG_WEAPONS toujours éligible (can_advance=True)."""
-        # Unité joueur 1 sans armes → peut avancer → dans le pool
+    def test_no_rng_weapons_not_in_shoot_pool(self):
+        """Refonte advance→move (afae93e9) : une unité sans RNG_WEAPONS n'a plus de raison d'être
+        dans le pool de TIR (advance se joue désormais en phase move). Le pool = unités avec cibles
+        de tir valides (_has_valid_shooting_targets), donc une unité sans armes en est exclue."""
         units = [_unit(1, 1, 5, 10), _unit(2, 2, 20, 10)]
         gs = _make_shooting_state(units)
         shooting_phase_start(gs)
-        # L'unité joueur 1 est non-adjacente et peut avancer → dans le pool
-        assert "1" in gs["shoot_activation_pool"]
+        assert "1" not in gs["shoot_activation_pool"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

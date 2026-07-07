@@ -30,6 +30,7 @@ def _unit(uid: int, player: int, col: int, row: int, move: int = 3, fly: bool = 
         "RNG_WEAPONS": [],
         "CC_WEAPONS": [],
         "BASE_SIZE": 1,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "UNIT_KEYWORDS": keywords,
         "UNIT_RULES": [],
@@ -44,7 +45,7 @@ def _make_game_state(
 ) -> Dict[str, Any]:
     gs: Dict[str, Any] = {
         "config": {
-            "game_rules": {"engagement_zone": engagement_zone, "max_base_size_hex": 35},
+            "game_rules": {"engagement_zone": engagement_zone, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "move": build_move_rules(),
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },

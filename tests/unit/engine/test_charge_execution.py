@@ -36,6 +36,7 @@ def _unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
         "RNG_WEAPONS": [],
         "CC_WEAPONS": [],
         "BASE_SIZE": 1,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
@@ -46,6 +47,7 @@ def _config() -> Dict[str, Any]:
     return {
         "game_rules": {
             "engagement_zone": 1,
+            "engagement_zone_vertical": 5,
             "max_base_size_hex": 35,
         },
         "charge": {

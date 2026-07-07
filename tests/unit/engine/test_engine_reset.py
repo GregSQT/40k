@@ -60,6 +60,7 @@ def _unit_cfg(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
         "ILLUSTRATION_RATIO": 1.0,
         "BASE_SHAPE": "round",
         "BASE_SIZE": 1,
+        "MODEL_HEIGHT": 2.5,
     }
 
 
@@ -88,6 +89,7 @@ def _minimal_config_with_units() -> Dict[str, Any]:
         },
         "game_rules": {
             "engagement_zone": 1,
+            "engagement_zone_vertical": 5,
             "max_base_size_hex": 35,
         },
         "charge": {

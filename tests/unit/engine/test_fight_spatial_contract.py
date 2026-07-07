@@ -33,7 +33,7 @@ def test_fight_a_contact_helper_uses_hex_contact_only() -> None:
 def test_fight_a_contact_helper_does_not_treat_engagement_range_as_contact() -> None:
     unit = _unit()
     game_state = {
-        "config": {"game_rules": {"engagement_zone": 2}},
+        "config": {"game_rules": {"engagement_zone": 2, "engagement_zone_vertical": 5}},
         "units_cache": {
             "u1": {"col": 0, "row": 0, "player": 1, "occupied_hexes": {(0, 0)}},
             "enemy_in_engagement": {"col": 0, "row": 2, "player": 2, "occupied_hexes": {(0, 2)}},
@@ -46,12 +46,12 @@ def test_fight_a_contact_helper_does_not_treat_engagement_range_as_contact() -> 
 def test_fight_b_engagement_pool_uses_full_footprint_distance() -> None:
     unit = _unit()
     game_state = {
-        "config": {"game_rules": {"engagement_zone": 2}},
+        "config": {"game_rules": {"engagement_zone": 2, "engagement_zone_vertical": 5}},
         "units_cache": {
-            "u1": {"col": 0, "row": 0, "player": 1, "occupied_hexes": {(0, 0)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0},
-            "enemy_in_engagement": {"col": 0, "row": 2, "player": 2, "occupied_hexes": {(0, 2)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0},
-            "enemy_out_of_engagement": {"col": 0, "row": 3, "player": 2, "occupied_hexes": {(0, 3)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0},
-            "ally": {"col": 0, "row": 1, "player": 1, "occupied_hexes": {(0, 1)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0},
+            "u1": {"col": 0, "row": 0, "player": 1, "occupied_hexes": {(0, 0)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0},
+            "enemy_in_engagement": {"col": 0, "row": 2, "player": 2, "occupied_hexes": {(0, 2)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0},
+            "enemy_out_of_engagement": {"col": 0, "row": 3, "player": 2, "occupied_hexes": {(0, 3)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0},
+            "ally": {"col": 0, "row": 1, "player": 1, "occupied_hexes": {(0, 1)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0},
         },
     }
 
@@ -62,11 +62,11 @@ def test_fight_b_engagement_pool_uses_full_footprint_distance() -> None:
 def test_shared_b_engagement_helper_supports_full_and_bounded_distance() -> None:
     unit = _unit()
     game_state = {
-        "config": {"game_rules": {"engagement_zone": 2}},
+        "config": {"game_rules": {"engagement_zone": 2, "engagement_zone_vertical": 5}},
         "units_cache": {
-            "u1": {"col": 0, "row": 0, "player": 1, "occupied_hexes": {(0, 0)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0},
-            "enemy_in_engagement": {"col": 0, "row": 2, "player": 2, "occupied_hexes": {(0, 2)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0},
-            "enemy_out_of_engagement": {"col": 0, "row": 3, "player": 2, "occupied_hexes": {(0, 3)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0},
+            "u1": {"col": 0, "row": 0, "player": 1, "occupied_hexes": {(0, 0)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0},
+            "enemy_in_engagement": {"col": 0, "row": 2, "player": 2, "occupied_hexes": {(0, 2)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0},
+            "enemy_out_of_engagement": {"col": 0, "row": 3, "player": 2, "occupied_hexes": {(0, 3)}, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "orientation": 0},
         },
     }
 

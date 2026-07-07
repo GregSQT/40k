@@ -18,6 +18,8 @@
     "los_debug_show_ratio": false,
     "los_debug_show_ratio_rule": "When true, shooting preview overlays visibility ratio percentages on evaluated hexes.",
     "engagement_zone": 2,
+    "engagement_zone_vertical": 5,
+    "engagement_zone_vertical_detail": "Seuil vertical (POUCES) de l'engagement 3D (regle 03.04 = 5 vertical). NON scale en subhex (compare aux height_inches en pouces) — ne PAS ajouter a la liste de scaling w40k_core.",
     "pile_in_target_range": 5,
     "consolidation_trigger_range": 3,
     "unit_model_cohesion_range": 2,

@@ -23,6 +23,7 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
         "VALUE": 100,
         "OC": 1,
         "BASE_SIZE": 1,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
@@ -45,7 +46,7 @@ def _unit_with_reactive(uid: int, player: int, col: int, row: int) -> Dict[str, 
 def _make_game_state(units: List[Dict[str, Any]], current_player: int = 1) -> Dict[str, Any]:
     gs: Dict[str, Any] = {
         "config": {
-            "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+            "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },
         "board_cols": 25,
@@ -60,6 +61,7 @@ def _make_game_state(units: List[Dict[str, Any]], current_player: int = 1) -> Di
         "action_logs": [],
         "action_log_seq": 0,
         "turn": 1,
+        "_unit_move_version": 0,
         # Reactive move required fields
         "reaction_window_active": False,
         "units_reacted_this_enemy_turn": set(),

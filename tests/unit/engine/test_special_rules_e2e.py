@@ -48,6 +48,7 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 5) -> Dict[str, A
         "VALUE": 100,
         "OC": 1,
         "BASE_SIZE": 1,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],

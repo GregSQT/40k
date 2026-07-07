@@ -176,6 +176,7 @@ def test_tactical_bot_movement_position_helpers(monkeypatch: pytest.MonkeyPatch)
         "config": {
             "game_rules": {
                 "engagement_zone": 1,
+                "engagement_zone_vertical": 5,
                 "max_base_size_hex": 35,
                 "cover_ratio": 0.3,
                 "avg_charge_roll": 7,

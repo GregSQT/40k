@@ -51,6 +51,7 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
         "VALUE": 100,
         "OC": 1,
         "BASE_SIZE": 1,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
@@ -205,8 +206,11 @@ class TestShootingTransition:
         assert gs["phase"] == "shoot"
 
     def test_shoot_pool_contains_current_player_unit(self):
-        """shoot_trans_pool : shoot pool contient l'unité du joueur courant."""
+        """shoot_trans_pool : le pool de tir contient une unité TIREUSE du joueur courant.
+        (Post-refonte advance→move : pool = unités avec cibles de tir valides, cf. _has_valid_shooting_targets.)"""
         shooter = _unit(1, 1, 5, 10)
+        shooter["RNG_WEAPONS"] = [_rng_weapon()]
+        shooter["selectedRngWeaponIndex"] = 0
         target = _unit(2, 2, 20, 10)
         gs = _make_shoot_gs([shooter, target])
         shooting_phase_start(gs)

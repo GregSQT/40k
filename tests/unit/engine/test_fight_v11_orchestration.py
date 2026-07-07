@@ -33,15 +33,15 @@ def _make_gs(
         uid = str(u["id"])
         norm_units.append({
             "id": uid, "player": u["player"], "col": u["col"], "row": u["row"],
-            "BASE_SIZE": 1, "BASE_SHAPE": "round", "orientation": 0, "HP_CUR": 1,
+            "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round", "orientation": 0, "HP_CUR": 1,
         })
         units_cache[uid] = {
             "col": u["col"], "row": u["row"], "player": u["player"],
-            "BASE_SIZE": 1, "BASE_SHAPE": "round", "orientation": 0, "HP_CUR": 1,
+            "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round", "orientation": 0, "HP_CUR": 1,
         }
     return {
         "inches_to_subhex": 1, "board_cols": 40, "board_rows": 40,
-        "config": {"game_rules": {"engagement_zone": 1, "consolidation_trigger_range": 3}},
+        "config": {"game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "consolidation_trigger_range": 3}},
         "units": norm_units, "units_cache": units_cache, "wall_hexes": set(),
         "current_player": current_player,
         "units_charged": set(units_charged or []),

@@ -37,6 +37,7 @@ def _unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
         "RNG_WEAPONS": [],
         "CC_WEAPONS": [],
         "BASE_SIZE": 1,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
@@ -45,7 +46,7 @@ def _unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
 
 def _base_config() -> Dict[str, Any]:
     return {
-        "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+        "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
     }
 
@@ -298,45 +299,45 @@ class TestConvertGymActionShoot:
         mask[12] = mask[13] = mask[14] = mask[15] = True
         return mask
 
-    def test_advance_slot_12_returns_aggressive(self):
-        """conv_shoot_adv12 : slot 12 → advance avec strategy 0 (aggressive)."""
+    # Refonte de l'espace d'action (commit afae93e9) : advance est déplacé en phase MOVE et
+    # décodé via build_squad_action_mask (squad_mask_26). L'ancien schéma advance-en-slots 12-15
+    # de la phase TIR n'existe plus → ces slots retournent désormais "invalid" en shoot. Les tests
+    # ci-dessous verrouillent cette suppression (garde-fou anti-régression du confinement à move).
+    def test_advance_slot_12_invalid_in_shoot(self):
+        """slot 12 (ancien advance) → invalid en shoot (advance déplacé en move)."""
         d = _make_decoder()
         gs = self._make_gs_can_advance()
         mask = self._make_advance_mask()
         eligible = [gs["units"][0]]
         result = d.convert_gym_action(12, gs, action_mask=mask, eligible_units=eligible)
-        assert result["action"] == "advance"
-        assert result["advance_strategy"] == 0
+        assert result["action"] == "invalid"
 
-    def test_advance_slot_13_returns_objective(self):
-        """conv_shoot_adv13 : slot 13 → advance avec strategy 3 (objective)."""
+    def test_advance_slot_13_invalid_in_shoot(self):
+        """slot 13 (ancien advance) → invalid en shoot (advance déplacé en move)."""
         d = _make_decoder()
         gs = self._make_gs_can_advance()
         mask = self._make_advance_mask()
         eligible = [gs["units"][0]]
         result = d.convert_gym_action(13, gs, action_mask=mask, eligible_units=eligible)
-        assert result["action"] == "advance"
-        assert result["advance_strategy"] == 3
+        assert result["action"] == "invalid"
 
-    def test_advance_slot_14_returns_defensive(self):
-        """conv_shoot_adv14 : slot 14 → advance avec strategy 2 (defensive)."""
+    def test_advance_slot_14_invalid_in_shoot(self):
+        """slot 14 (ancien advance) → invalid en shoot (advance déplacé en move)."""
         d = _make_decoder()
         gs = self._make_gs_can_advance()
         mask = self._make_advance_mask()
         eligible = [gs["units"][0]]
         result = d.convert_gym_action(14, gs, action_mask=mask, eligible_units=eligible)
-        assert result["action"] == "advance"
-        assert result["advance_strategy"] == 2
+        assert result["action"] == "invalid"
 
-    def test_advance_slot_15_returns_tactical(self):
-        """conv_shoot_adv15 : slot 15 → advance avec strategy 1 (tactical)."""
+    def test_advance_slot_15_invalid_in_shoot(self):
+        """slot 15 (ancien advance) → invalid en shoot (advance déplacé en move)."""
         d = _make_decoder()
         gs = self._make_gs_can_advance()
         mask = self._make_advance_mask()
         eligible = [gs["units"][0]]
         result = d.convert_gym_action(15, gs, action_mask=mask, eligible_units=eligible)
-        assert result["action"] == "advance"
-        assert result["advance_strategy"] == 1
+        assert result["action"] == "invalid"
 
     def test_advance_slots_all_masked_when_cannot_advance(self):
         """mask_shoot_no_adv : _can_advance=False → mask[12..15]=False."""
@@ -347,8 +348,9 @@ class TestConvertGymActionShoot:
         for slot in [12, 13, 14, 15]:
             assert bool(mask[slot]) is False, f"mask[{slot}] should be False when cannot advance"
 
-    def test_advance_slots_all_masked_when_can_advance(self):
-        """mask_shoot_adv : _can_advance=True + not advanced → mask[12..15]=True."""
+    def test_advance_slots_masked_in_shoot_even_when_can_advance(self):
+        """Advance déplacé en phase move (afae93e9) : les slots 12-15 de l'ancien schéma restent
+        masqués en shoot même si _can_advance=True (plus décodables en phase tir)."""
         d = _make_decoder()
         gs = self._make_gs_can_advance()
         gs["shoot_activation_pool"] = ["1"]
@@ -356,7 +358,7 @@ class TestConvertGymActionShoot:
         mask = d.get_action_mask(gs)
         assert len(mask) == 31
         for slot in [12, 13, 14, 15]:
-            assert bool(mask[slot]) is True, f"mask[{slot}] should be True when can advance"
+            assert bool(mask[slot]) is False, f"legacy advance slot {slot} retiré en shoot (advance→move)"
 
     def test_advance_slots_masked_when_already_advanced(self):
         """mask_shoot_adv_done : unité déjà avancée → mask[12..15]=False."""

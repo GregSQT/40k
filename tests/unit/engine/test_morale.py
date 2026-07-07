@@ -62,7 +62,7 @@ class TestMoraleNotImplemented:
             "UNIT_RULES": [], "UNIT_KEYWORDS": [],
             "LD": 7, "OC": 1, "VALUE": 100, "ICON": "t",
             "ICON_SCALE": 1.0, "ILLUSTRATION_RATIO": 1.0,
-            "BASE_SHAPE": "round", "BASE_SIZE": 1,
+            "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5,
         }
         unit = sm.create_unit(unit_cfg)
         # LD est bien stocké comme valeur entière, pas consommé par une logique

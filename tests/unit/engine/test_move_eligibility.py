@@ -25,6 +25,7 @@ def _board_config() -> Dict[str, Any]:
     return {
         "game_rules": {
             "engagement_zone": 10,
+            "engagement_zone_vertical": 5,
             "max_base_size_hex": 35,
         },
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
@@ -56,6 +57,7 @@ def _unit(uid: int, player: int, col: int, row: int, move: int = 6, fly: bool = 
         "RNG_WEAPONS": [],
         "CC_WEAPONS": [],
         "BASE_SIZE": 3,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "UNIT_KEYWORDS": keywords,
         "UNIT_RULES": [],
@@ -273,7 +275,7 @@ class TestMultiHexFootprintInvariants:
     def test_footprint_overlap_invalid_placement(self):
         """footprint_overlap : placement invalide si l'empreinte candidate chevauche l'empreinte occupée."""
         gs = self._board_gs()
-        stub = {"BASE_SIZE": 3, "BASE_SHAPE": "round"}
+        stub = {"BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"}
         # Footprints at (5,10) and (6,10) share 4 hexes: (5,9),(5,10),(6,10),(6,11)
         occupied = compute_candidate_footprint(5, 10, stub, gs)
         candidate_near = compute_candidate_footprint(6, 10, stub, gs)
@@ -282,7 +284,7 @@ class TestMultiHexFootprintInvariants:
     def test_footprint_no_overlap_valid_placement(self):
         """footprint_no_overlap : placement valide si l'empreinte candidate ne chevauche aucune cellule occupée."""
         gs = self._board_gs()
-        stub = {"BASE_SIZE": 3, "BASE_SHAPE": "round"}
+        stub = {"BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"}
         occupied = compute_candidate_footprint(5, 10, stub, gs)
         candidate_far = compute_candidate_footprint(20, 10, stub, gs)
         assert is_footprint_placement_valid(candidate_far, gs, occupied)
@@ -290,7 +292,7 @@ class TestMultiHexFootprintInvariants:
     def test_footprint_clearance_off_board_invalid(self):
         """footprint_clearance : empreinte multi-hex sortant du bord du plateau → placement invalide."""
         gs = self._board_gs()
-        stub = {"BASE_SIZE": 3, "BASE_SHAPE": "round"}
+        stub = {"BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"}
         # Footprint at (0,0) includes hexes at negative coordinates
         fp_corner = compute_candidate_footprint(0, 0, stub, gs)
         neg_hexes = {(c, r) for c, r in fp_corner if c < 0 or r < 0}

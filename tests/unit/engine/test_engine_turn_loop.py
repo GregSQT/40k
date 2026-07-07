@@ -30,7 +30,7 @@ def _minimal_gs(
 ) -> Dict[str, Any]:
     gs: Dict[str, Any] = {
         "config": {
-            "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+            "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },
         "board_cols": 25,
@@ -169,6 +169,7 @@ def _unit_entry(uid: int, player: int, hp: int = 3, value: int = 100) -> Dict[st
         "VALUE": value,
         "OC": 1,
         "BASE_SIZE": 1,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
@@ -192,7 +193,7 @@ def _make_gs_for_winner(
     turn_limit_reached: bool = True,
 ) -> Dict[str, Any]:
     config = {
-        "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+        "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
     }
     units = []
@@ -229,7 +230,7 @@ class TestDetermineWinner:
 
     def _mgr(self) -> GameStateManager:
         return GameStateManager(config={
-            "game_rules": {"engagement_zone": 1},
+            "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         })
 
@@ -272,7 +273,7 @@ class TestDetermineWinnerWithMethod:
 
     def _mgr(self) -> GameStateManager:
         return GameStateManager(config={
-            "game_rules": {"engagement_zone": 1},
+            "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         })
 
@@ -411,7 +412,7 @@ class TestDetermineWinnerZeroUnits:
 
     def _mgr(self) -> GameStateManager:
         return GameStateManager(config={
-            "game_rules": {"engagement_zone": 1},
+            "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         })
 

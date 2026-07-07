@@ -76,6 +76,7 @@ def test_calculate_army_threat_requires_friendly_value(monkeypatch: pytest.Monke
     _cache_entry = {
         "BASE_SHAPE": "round",
         "BASE_SIZE": 1,
+        "MODEL_HEIGHT": 2.5,
         "col": 1,
         "row": 1,
         "occupied_hexes": {(1, 1)},

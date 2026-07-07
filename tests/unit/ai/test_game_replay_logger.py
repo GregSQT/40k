@@ -214,6 +214,7 @@ def test_capture_initial_state_and_save_replay(tmp_path, monkeypatch: pytest.Mon
                 "CC_RNG": 1,
                 "BASE_SHAPE": "round",
                 "BASE_SIZE": 1,
+                "MODEL_HEIGHT": 2.5,
             }
         ]
     )

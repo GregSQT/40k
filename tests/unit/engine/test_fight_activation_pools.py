@@ -15,7 +15,7 @@ from engine.phase_handlers.shared_utils import build_units_cache
 
 def _board_config() -> Dict[str, Any]:
     return {
-        "game_rules": {"engagement_zone": 10, "max_base_size_hex": 35},
+        "game_rules": {"engagement_zone": 10, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
     }
 
@@ -38,6 +38,7 @@ def _unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
         "RNG_WEAPONS": [],
         "CC_WEAPONS": [],
         "BASE_SIZE": 3,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
@@ -274,8 +275,8 @@ class TestMultiHexFightInvariants:
         euclidean_edge_clearance(5,10, 35,10, r=18.75, r=18.75) = 45 - 37.5 = 7.5 ≤ req(15.0).
         _fight_build_valid_target_pool doit inclure l'ennemi.
         """
-        unit_a = {**_unit(1, 1, 5, 10), "BASE_SIZE": 25}
-        unit_b = {**_unit(2, 2, 35, 10), "BASE_SIZE": 25}
+        unit_a = {**_unit(1, 1, 5, 10), "BASE_SIZE": 25, "MODEL_HEIGHT": 2.5}
+        unit_b = {**_unit(2, 2, 35, 10), "BASE_SIZE": 25, "MODEL_HEIGHT": 2.5}
         gs = _make_game_state([unit_a, unit_b], current_player=1)
         targets = _fight_build_valid_target_pool(gs, unit_a)
         assert "2" in targets, "large-base enemy must be in fight target pool when edge-to-edge gap ≤ req"
@@ -296,8 +297,8 @@ class TestMultiHexFightInvariants:
 
         min_distance(fp(5,10), fp(16,10)) = 7 ≤ engagement_zone(10) → en EZ.
         """
-        unit_a = {**_unit(1, 1, 5, 10), "BASE_SIZE": 5, "BASE_SHAPE": "square"}
-        unit_b = {**_unit(2, 2, 16, 10), "BASE_SIZE": 5, "BASE_SHAPE": "square"}
+        unit_a = {**_unit(1, 1, 5, 10), "BASE_SIZE": 5, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "square"}
+        unit_b = {**_unit(2, 2, 16, 10), "BASE_SIZE": 5, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "square"}
         gs = _make_game_state([unit_a, unit_b], current_player=1)
         targets = _fight_build_valid_target_pool(gs, unit_a)
         assert "2" in targets, "large square-base enemy must be in fight target pool via footprint distance"
@@ -308,8 +309,8 @@ class TestMultiHexFightInvariants:
         Métrique euclidean (config engagement) : edge(socle(5,10), socle(17,10)) = 16.5
         > engagement_minimum_clearance_norm(10) = 15.0 → hors EZ.
         """
-        unit_a = {**_unit(1, 1, 5, 10), "BASE_SIZE": 1, "BASE_SHAPE": "square"}
-        unit_b = {**_unit(2, 2, 17, 10), "BASE_SIZE": 1, "BASE_SHAPE": "square"}
+        unit_a = {**_unit(1, 1, 5, 10), "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "square"}
+        unit_b = {**_unit(2, 2, 17, 10), "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "square"}
         gs = _make_game_state([unit_a, unit_b], current_player=1)
         targets = _fight_build_valid_target_pool(gs, unit_a)
         assert "2" not in targets, "small square-base enemy at distance 11 must not be in fight target pool"

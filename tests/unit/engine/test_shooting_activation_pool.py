@@ -12,7 +12,7 @@ from engine.phase_handlers.shared_utils import build_units_cache
 
 def _board_config() -> Dict[str, Any]:
     return {
-        "game_rules": {"engagement_zone": 10, "max_base_size_hex": 35},
+        "game_rules": {"engagement_zone": 10, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
     }
 
@@ -33,6 +33,7 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 2) -> Dict[str, A
         "SHOOT_LEFT": 1,
         "ATTACK_LEFT": 1,
         "BASE_SIZE": 3,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
@@ -191,8 +192,8 @@ class TestMultiHexShootingInvariants:
         euclidean_edge_clearance(5,10, 30,10, r=18.75, r=18.75) = 45 - 37.5 = 7.5 ≤ req(15.0).
         """
         units = [
-            {**_unit(1, 1, 5, 10), "BASE_SIZE": 25},
-            {**_unit(2, 2, 30, 10), "BASE_SIZE": 25},
+            {**_unit(1, 1, 5, 10), "BASE_SIZE": 25, "MODEL_HEIGHT": 2.5},
+            {**_unit(2, 2, 30, 10), "BASE_SIZE": 25, "MODEL_HEIGHT": 2.5},
         ]
         gs = _make_game_state(units, current_player=1)
         shooting_build_activation_pool(gs)

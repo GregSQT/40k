@@ -695,15 +695,185 @@ le modèle + LoS 3D est le vrai chantier.
        **ignorée** dans l'engagement. Charger vers une cible à l'étage n'a donc pas de sens tant que l'engagement
        n'est pas 3D.
 
-   ### ⏳ RESTE À FAIRE (mis à jour)
+   ### 🎯 ENGAGEMENT 3D — CONCEPTION OPTIMALE (CENTRALISÉE) — chantier 4
 
-   1. **Engagement 3D** (chantier 4) : rendre `entries_in_engagement_zone` niveau-conscient (même niveau
-      atteignable, règle 2" horiz / 5" vert §2.5). **Prérequis** des destinations de charge en hauteur et de
-      l'EZ inter-niveaux (`enemy_adjacent_hexes` reste 2D).
-   2. **Champ climb-aware dans la charge** (destinations d'étage) — une fois l'engagement 3D en place.
-   3. **Clairance hauteur** sur pool **squad move + IA** (`movement_build_valid_destinations_pool`) et **voile
-      rouge** (`movement_preview_move_plan`) — l'utilisateur a validé le périmètre « tout le mouvement », seul
-      le move par-fig + la charge sont faits à ce stade.
+   > **Décision (2026-07-07)** : centralisation immédiate dans la primitive partagée `spatial_relations`,
+   > pas de gate local à la charge. Rationale : `entries_in_engagement_zone` est la **source unique**
+   > d'engagement pour ~80 call-sites (shooting/fight/charge/move/observations RL) — un gate dupliqué
+   > par phase serait de la dette permanente (cf. principe move/déploiement miroir). Le 3D doit vivre
+   > à l'endroit unique où l'engagement est décidé.
+
+   **Constat de code (vérifié, ne rien assumer)** :
+   - Primitive `entries_in_engagement_zone(first, second, engagement_zone, metric)`
+     ([spatial_relations.py:115](file:///home/greg/40k/engine/spatial_relations.py#L115)) — deux métriques :
+     - `hex` : `min_distance_between_sets` d'empreintes union ([hex_utils.py:101](file:///home/greg/40k/engine/hex_utils.py#L101)).
+       **Épinglée** RL/observations (`metric="hex"`), unités **jamais multi-niveaux** dans ce chemin.
+     - `euclidean` : `euclidean_edge_distance(socle_a, socle_b) ≤ engagement_minimum_clearance_norm(ez)`
+       (= ez×1,5, [hex_utils.py:1378](file:///home/greg/40k/engine/hex_utils.py#L1378)). **Métrique GAMEPLAY**
+       (config 7.6) — c'est celle de la charge.
+   - `socle_from_cache_entry` ([combat_utils.py:324](file:///home/greg/40k/engine/combat_utils.py#L324)) construit
+     un `Socle` portant **`model_centers` par-figurine** (`occupied_hexes_by_model`) → la granularité par-fig
+     existe déjà côté euclidean ; il ne manque que la **hauteur par centre**.
+   - Wrappers additifs : `unit_entries_within_engagement_zone` (:145), `unit_within_engagement_zone_footprints`
+     (:165), `move_anchor_violates_engagement_clearance` (:190) — tous délèguent à la primitive.
+   - **Unités** : horizontal = **subhex** (positions col/row board ×`inches_to_subhex`) ; hauteur `height_inches`
+     = **pouces**. Le gate vertical se fait **en pouces** (hauteur↔hauteur, pas de conversion croisée).
+
+   **Règle** — `03 Moving.pdf` §03.04 (déjà §2.5) : engagement range = ≤2" horiz **ET** ≤5" vert.
+   Coherency §03.03 = 5" vert aussi. Le 5" vertical est **fixe** (indépendant du seuil horizontal, qui varie
+   selon le contrat : engagement 2", contact charge `within_1` 1", melee…). → le vertical **doit être un
+   paramètre séparé**, jamais dérivé de `engagement_zone`.
+
+   **Implémentation optimale (3 briques, additive → zéro régression)** :
+
+   1. ✅ **FAIT — Fondation data — `floor_height_by_model` (pouces) au build cache.** Helper
+      `floor_height_at(terrain_areas, col, row, level)` ([terrain_utils.py](file:///home/greg/40k/engine/terrain_utils.py))
+      (sol=0.0, résolution PAR POSITION, `ValueError` si fig level≥1 hors plancher — pas de fallback) ;
+      publié aux DEUX points du cache : build initial `build_units_cache` + `_recompute_squad_occupied_hexes`
+      ([shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)). Backend-only, aucun
+      consommateur → no-op. Testé (helper + bout-en-bout sol/étage, non-régression suite `units_cache` verte).
+      Détail conception ci-dessous. À côté de `level_by_model`
+      ([shared_utils.py:750](file:///home/greg/40k/engine/phase_handlers/shared_utils.py#L750) + recompute
+      `:2862`), publier la hauteur du **plancher** sous chaque fig : `height_inches` du floor de son `level`
+      sous le décor où elle se trouve (sol = 0"). **Résolution par position** (`terrain_areas` + `level_by_model`),
+      PAS un mapping global level→hauteur : deux ruines peuvent différer au même `level` (§4.1). La **borne
+      haute** de l'intervalle vient de `MODEL_HEIGHT` déjà présent dans `units_cache` (§6e) — pas de champ
+      supplémentaire. Aucun consommateur encore → **no-op testable seul**.
+
+   2. ✅ **FAIT — Gate vertical DANS la primitive.** Config `engagement_zone_vertical: 5` (POUCES, non scalé —
+      absent de la liste [w40k_core.py:401](file:///home/greg/40k/engine/w40k_core.py#L401)) + getter
+      `get_engagement_zone_vertical`. `MODEL_HEIGHT` publié dans l'entry `units_cache` (borne haute).
+      `entries_in_engagement_zone(..., vertical_zone_inches=None)` + helpers `_vertical_classes` /
+      `_entries_in_engagement_zone_3d` (3D par-paire à intervalles, euclidean only, erreur explicite si
+      hex+vertical ou données verticales manquantes) ; param propagé aux 3 wrappers. **Testé** (gate
+      proche→engagé/loin→non, dégénérescence sol=2D, erreur hex+vertical ; 73 échecs de suites **pré-existants**,
+      `level` manquant sur vieux stubs, hors diff). Détail conception ci-dessous.
+
+   2bis. **Détail conception — paramètre `vertical_zone_inches` (défaut `None`).**
+      `entries_in_engagement_zone(first, second, engagement_zone, metric, vertical_zone_inches=None)` :
+      - `None` → **chemin actuel exact** (agrégat union / socle multi-centres), **byte-identique**. Les ~80
+        call-sites qui ne passent rien restent 2D → **zéro régression**.
+      - non-`None` → mode **3D par-paire de figurines** (fidèle à §03.04, qui est par-fig) :
+        ∃ (fig_a, fig_b) avec **séparation d'intervalles verticaux** `max(0, max(loA,loB) − min(hiA,hiB)) ≤
+        vertical_zone_inches` **ET** distance horizontale ≤ seuil, où `[lo,hi] = [floor_height, floor_height +
+        MODEL_HEIGHT]` (§01.04 « partie la plus proche », pas plancher-à-plancher). Le gate vertical **filtre
+        les paires en amont** ; le test horizontal reste **inchangé** (réutilise `euclidean_edge_distance` sur
+        les centres du `Socle`). Court-circuit : si un côté n'a pas `floor_height_by_model` ou si tout est au
+        sol des deux côtés → **une seule classe** → équivalent exact au test agrégé 2D actuel.
+      - **Cible = métrique `euclidean` uniquement** (gameplay ; `model_centers` déjà par-fig). `hex` reste 2D
+        (RL/obs mono-niveau, jamais concerné) → pas de reconstruction d'empreinte hex par-fig, pas de coût RL.
+      - **Perf** : les préfiltres hex-distance existants des call-sites (ex. charge `:788`, `:3563`) sont
+        conservés ; le gate vertical est un check scalaire O(1) par paire, Na×Nb petits (figs/unité).
+      - Propagation additive du paramètre dans les 3 wrappers (défaut `None` partout).
+
+   3. **Migration des call-sites (incrémentale, primitive déjà centralisée).** Seuls les call-sites qui
+      doivent devenir 3D passent `vertical_zone_inches=5"` : **engagement/charge d'abord**. Les autres
+      (shooting cover, coherency, fight adjacency…) restent `None` → inchangés, migrés quand une fig y sera
+      réellement multi-niveaux. La source unique existe déjà : pas de re-centralisation ultérieure.
+      - ✅ **Infra synth vertical FAITE** : `_charge_synthetic_charger_cache_entry(..., level=None)`
+        ([charge_handlers.py](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py)) — `level=None`
+        → entrée 2D **byte-identique** ; un entier pose les données verticales (classe unique à l'ancre,
+        `floor_height_by_model`/`occupied_hexes_by_model` au singleton `_CHARGE_SYNTH_ANCHOR_MID`). **Testé
+        en isolation** : cible étage 3" → engageable 3D & 2D ; cible étage 8" → **refusée en 3D** (sep 5,5">5)
+        alors que le 2D l'acceptait à tort (union projetée au sol). **Aucun call-site câblé** → zéro
+        changement de comportement charge.
+      - ✅ **AUDIT DES CALL-SITES (2026-07-07)** — 19 appels effectifs d'engagement dans `charge_handlers`
+        (le reste = docstrings/imports). **Enseignement clé** : aucun n'est à laisser 2D définitivement (tous
+        sont des tests d'engagement réels) ; les préfiltres hex-distance sont **séparés** et restent valides
+        en 3D (le gate vertical ne fait que **restreindre**, jamais élargir → pas de faux négatif).
+        **16 « 3D direct »** (synth/vraie entry via primitive) : L413, L477 (anchors), L1742/1745/1747
+        (model pool), L2219/2226 (plan ctx UI), L4485 (preview), L4387, L4635 (non-cibles AFTER MOVING),
+        L873 (eligibility), L2569 (valid targets), L3527/3704 (destinations sol), L2552, L3095 (départ,
+        vraies entries). **2 « 3D COMPLEXE » — ✅ FAITS** : `_eng` (`_compute_plan_context`) — branche
+        euclidienne via primitive 3D (`synth_base` reçoit les données verticales à l'ancre à la mutation) +
+        branche empreinte-dilatée gardée par un **gate vertical par-ennemi** (`entry_vertically_reachable`
+        [spatial_relations.py](file:///home/greg/40k/engine/spatial_relations.py), précalculé `tgt_vreach`/
+        `ntgt_vreach`) ; `_fp_engages` (`charge_autoplace_plan`) — en config **euclidean** (gameplay)
+        `_entry_engage_struct` renvoie toujours `("euclid", entry)` → primitive 3D directe ; la branche
+        empreinte `("fp", …)` n'existe qu'en métrique **hex** (RL/obs, mono-niveau) → **reste 2D** (assumé).
+        Testé `entry_vertically_reachable` (ennemi 3"→True, 8"→False) ; dégénérescence sol structurelle.
+        **1 différé** L3431 (FLY, §707).
+      - ✅ **VALIDATION D'INTÉGRATION 3a (2026-07-07)** — script **pérennisé**
+        [scripts/charge3d_integration_test.py](file:///home/greg/40k/scripts/charge3d_integration_test.py)
+        (lancer : `source .venv/bin/activate && python3 scripts/charge3d_integration_test.py`) sur le VRAI
+        `scenario_floors_test` (env W40KEngine réel, floors rasterisés L1=1200/L2=400 hexes, roster réel) :
+        `MODEL_HEIGHT` propagé (cible 4.0 / chargeur 2.5), `floor_height_by_model` = {sol 0.0, L1 3.0, L2 6.0}
+        via les vrais floors, et le gate d'engagement 3D **bascule exactement au gap vertical réel** (cible L2,
+        gap 3.5" : vz=3→refus, vz=4→engagé). Confirme la chaîne roster→units_cache→primitive 3D avec données
+        réelles. **C'est le SEUL moyen de non-régression du gameplay 3D d'étages** (le RL est HS → pas de test
+        pytest gameplay ; à relancer après tout changement backend de 3b).
+      - 🎯 **DÉCOUPE 3a / 3b** :
+        - ✅ **3a — cible/ennemi surélevé engagé DEPUIS LE SOL — FAIT & VALIDÉ** : les 2 constructeurs de synth
+          portent le niveau (`_charge_synthetic_charger_cache_entry(..., level)` + `_synth_model_entry(..., level)`
+          [shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)) ; helper
+          `_charge_vertical_zone` ; **18 call-sites d'engagement câblés** (16 directs + les 2 complexes
+          `_eng`/`_fp_engages` avec gate vertical par-ennemi `entry_vertically_reachable`)
+          ([charge_handlers.py](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py)). `synth level=0`
+          partout (chargeur au sol). **Seul L3431 (FLY) reste 2D** (différé §707). Validé bout-en-bout par le
+          script d'intégration ci-dessus + non-régression sol/no-floor structurelle.
+        - ⏳ **3b — le chargeur MONTE** (ancres `level ≥ 1`) : **RESTE À FAIRE**. Nécessite
+          `reachable_multilevel_field` (champ climb, déjà écrit, utilisé par le move par-fig §6e) branché dans la
+          production des destinations de charge, `synth level = niveau de la destination` (plus 0), le
+          **passage de `cand_floor` réel** (plus `0.0` hardcodé) aux gates verticaux de `_eng`/`_fp_engages`,
+          **+ front** (rendu destinations par niveau, miroir move §6d/6e). Validation = app + `scenario_floors_test`.
+
+   **✅ Décisions figées (2026-07-07)** :
+   - **Seuils verticaux = 5" pour les DEUX contrats** : engagement range (§03.04, conforme) ET contact
+     `within_1` de la charge. Le `within_1` est un resserrement **horizontal** (1" au lieu de 2",
+     [charge_handlers.py:449](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py#L449)) ; les
+     règles ne lui donnent **aucun** vertical propre → on aligne sur les 5" de l'engagement range, **pas de
+     règle maison**. → **une seule valeur verticale = 5"**, configurée dans `config/game_config.json`
+     (nouvelle clé, pendant vertical de `engagement_zone: 2`).
+   - **Mesure verticale = INTERVALLE, pas plancher-à-plancher** : chaque fig est modélisée comme le segment
+     vertical `[plancher, plancher + MODEL_HEIGHT]` (`MODEL_HEIGHT` déjà dans `units_cache`, §6e). L'écart
+     vertical = séparation entre les deux intervalles `max(0, max(loA,loB) − min(hiA,hiB))` → conforme au
+     « partie la plus proche » §01.04, **sans donnée nouvelle**. Rejette l'approximation plancher-à-plancher
+     (qui surestimait l'écart : fig 2,5" au sol vs base 3" = **0,5"** réel, pas 3"). Approximation résiduelle
+     **inévitable** : la fig est traitée comme colonne pleine (silhouette réelle non chiffrée dans les PDF,
+     §2.11, même statut que la True LoS).
+   - Le mode 3D est **lié à la métrique `euclidean`** (config active `game_config.json:55`). Une bascule
+     config `engagement:"hex"` rendrait le gate vertical inopérant (hex reste 2D) → re-travail hex requis.
+
+   **Débouché charge** (une fois 1→3 en place) : brancher `vertical_zone_inches` dans les tests d'engagement
+   de la charge, **retirer le garde-fou** « PAS de destinations en hauteur » ([charge_handlers.py:690](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py))
+   et brancher `reachable_multilevel_field` ([geodesic_move.py](file:///home/greg/40k/engine/phase_handlers/geodesic_move.py))
+   pour produire les ancres d'étage (le champ climb-aware existe déjà, cf. 3a/6e). L'EZ inter-niveaux
+   (`enemy_adjacent_hexes`, 2D) suit la même bascule.
+
+   ### ⏳ RESTE À FAIRE (mis à jour 2026-07-07)
+
+   1. ✅ **Engagement 3D (chantier 4) — FAIT & VALIDÉ** : étapes 1 (fondation `floor_height_by_model` +
+      `MODEL_HEIGHT` dans `units_cache`), 2 (primitive `entries_in_engagement_zone(..., vertical_zone_inches)`
+      + config `engagement_zone_vertical: 5` + getter + wrappers), 3a (18 call-sites charge câblés, FLY différé).
+      Validé sur le vrai scénario ([scripts/charge3d_integration_test.py](file:///home/greg/40k/scripts/charge3d_integration_test.py)).
+      Non-régression pytest **entièrement rétablie** (`python3 -m pytest tests/` → **1152 passed, 2 skipped, 0 failed** ;
+      dette de stubs `level`/`MODEL_HEIGHT`/`engagement_zone_vertical`/`_unit_move_version` + 7 tests obsolètes
+      de la refonte advance→move réparés au passage).
+   2. ⏳ **3b — Champ climb-aware dans la charge** (destinations d'étage, chargeur qui MONTE) — **PROCHAINE ÉTAPE**.
+      Brancher `reachable_multilevel_field` ([geodesic_move.py](file:///home/greg/40k/engine/phase_handlers/geodesic_move.py))
+      dans la production des destinations de charge + `synth level = niveau destination` + `cand_floor` réel dans
+      `_eng`/`_fp_engages` + **front** (rendu par niveau, miroir move §6d/6e). Validation = app + `scenario_floors_test`.
+   3. **Clairance hauteur — reste du mouvement** (voile rouge + pool squad/IA) — *plan détaillé, à faire d'un
+      seul bloc* : le move **par-figurine** et la **charge** enforcent déjà la clairance ; restent les deux
+      dernières surfaces du mouvement. À traiter ensemble (même helper, même piège, périmètre « tout le
+      mouvement » déjà validé) pour ne pas laisser un état incohérent (voile rouge corrigé mais IA qui planifie
+      encore des trajets impossibles).
+      - **3.1 Voile rouge** `movement_preview_move_plan`
+        ([movement_handlers.py](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)) : calculer une
+        fois `_low_clear = low_clearance_ground_hexes(terrain_areas, MODEL_HEIGHT_de_l_unité)` puis, dans la boucle
+        par-modèle, ajouter la clairance à la détection d'obstacle **uniquement pour une figurine au sol**
+        (`lv == 0`) — étendre le test `fp_wall` (actuellement `fp & wall_hexes_set`) avec `fp & _low_clear`, sans
+        toucher `wall_hexes_set`. Une fig **à l'étage** (`lv >= 1`) n'est jamais bloquée par la clairance (elle est
+        sur le plancher, pas dessous).
+      - **3.2 Pool squad/IA** `movement_build_valid_destinations_pool`
+        ([movement_handlers.py](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)) : même injection
+        `set(wall_hexes) | _low_clear` dans les obstacles **AU SOL** du pathfinding (miroir exact de ce qui est fait
+        pour le move par-fig aux obstacles ground, `_mm_obstacles` / `_ground_obs`), branche non-fly. La branche FLY
+        (`_fly_walls`) reste inchangée (vol non concerné).
+      - **Piège (identique move par-fig)** : ne JAMAIS unir `_low_clear` à `wall_hexes` global ni aux obstacles
+        d'étage — ces hexes SONT le plancher, praticable **en surface**. L'injection est strictement ground-only.
+      - **Validation** : suite complète + `--step` + replay ; vérifier qu'une fig haute (`MODEL_HEIGHT > height_inches`)
+        voit du rouge / est exclue du pool sous un étage bas, et qu'une fig basse (tangence `==`) passe.
    4. **FLY + étages** (move et charge) : toujours traité en planaire (différé).
    5. **Métrique hex + étages** : le climb-aware est euclidien seulement (les floors sont euclidiens).
    6. Pool **squad** move (suivi de bloc) : retrait du miroir transitoire `valid_move_destinations_pool` →

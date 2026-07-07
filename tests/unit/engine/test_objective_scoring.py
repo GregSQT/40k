@@ -22,7 +22,7 @@ from engine.combat_utils import normalize_coordinates
 
 def _make_manager() -> GameStateManager:
     config = {
-        "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+        "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
     }
     return GameStateManager(config, unit_registry=None)
@@ -72,6 +72,7 @@ def _unit(uid: int, player: int, col: int, row: int, oc: int = 1) -> Dict[str, A
         "HP_MAX": 3,
         "VALUE": 100,
         "BASE_SIZE": 1,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "OC": oc,
         "MOVE": 6,
@@ -110,7 +111,7 @@ def _make_gs(
         "wall_hexes": set(),
         "turn_limit_reached": False,
         "config": {
-            "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+            "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },
     }

@@ -54,6 +54,7 @@ def _attacker(uid: int, col: int, row: int, rules: Optional[List[Dict]] = None, 
         "HP_MAX": 4,
         "VALUE": 100,
         "BASE_SIZE": 1,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": rules or [],
@@ -83,6 +84,7 @@ def _target(uid: int, col: int, row: int, t: int = 4, save: int = 4) -> Dict[str
         "HP_MAX": 4,
         "VALUE": 100,
         "BASE_SIZE": 1,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
@@ -102,6 +104,7 @@ def _make_gs(units: List[Dict[str, Any]], obj_hex=(5, 5)) -> Dict[str, Any]:
         "config": {
             "game_rules": {
                 "engagement_zone": 1,
+                "engagement_zone_vertical": 5,
                 "max_base_size_hex": 35,
                 "cover_ratio": 0.0,
             },

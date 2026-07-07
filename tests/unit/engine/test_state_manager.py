@@ -28,7 +28,7 @@ _FULL_UNIT_CFG: Dict[str, Any] = {
     "UNIT_RULES": [], "UNIT_KEYWORDS": [],
     "LD": 7, "OC": 1, "VALUE": 100, "ICON": "t",
     "ICON_SCALE": 1.0, "ILLUSTRATION_RATIO": 1.0,
-    "BASE_SHAPE": "round", "BASE_SIZE": 1,
+    "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5,
 }
 
 
@@ -42,7 +42,7 @@ def _raw_unit(uid: int, player: int, value: int = 100) -> Dict[str, Any]:
             "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
             "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
             "RNG_WEAPONS": [], "CC_WEAPONS": [], "UNIT_RULES": [],
-            "BASE_SHAPE": "round", "BASE_SIZE": 1}
+            "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5}
 
 
 def _make_gs(p1_vp: int, p2_vp: int,
@@ -54,7 +54,7 @@ def _make_gs(p1_vp: int, p2_vp: int,
         "victory_points": {1: p1_vp, 2: p2_vp},
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
-        "config": {"game_rules": {"engagement_zone": 1}},
+        "config": {"game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5}},
     }
     build_units_cache(gs)
     return gs
@@ -68,7 +68,7 @@ def _make_gs_with_objectives(controller: int | None = None) -> Dict[str, Any]:
         "victory_points": {1: 0, 2: 0},
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
-        "config": {"game_rules": {"engagement_zone": 1}},
+        "config": {"game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5}},
         "objectives": [{"id": "obj1", "hexes": [[99, 99]]}],  # hexes inoccupés
         "primary_objective": {
             "id": "obj1",

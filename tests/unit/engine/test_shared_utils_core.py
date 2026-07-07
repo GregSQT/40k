@@ -33,10 +33,11 @@ def test_build_units_cache_normalizes_coordinates_hp_and_player() -> None:
                 "player": "1",
                 "BASE_SHAPE": "round",
                 "BASE_SIZE": 1,
+                "MODEL_HEIGHT": 2.5,
             }
         ],
         "config": {
-            "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+            "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },
     }
@@ -95,12 +96,13 @@ def test_require_unit_position_raises_when_unit_absent_from_cache() -> None:
 def test_update_units_cache_position_updates_existing_entry_with_normalization() -> None:
     game_state = {
         "units_cache": {
-            "u1": {"col": 1, "row": 2, "HP_CUR": 3, "player": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1},
+            "u1": {"col": 1, "row": 2, "HP_CUR": 3, "player": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5},
         },
         "config": {
-            "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+            "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },
+        "_unit_move_version": 0,
     }
 
     update_units_cache_position(game_state, "u1", cast(int, "6.0"), cast(int, 8.0))
@@ -121,9 +123,9 @@ def test_update_units_cache_position_is_noop_when_unit_absent() -> None:
 
 def test_update_units_cache_unit_updates_existing_entry() -> None:
     game_state = {"units_cache": {
-        "u9": {"col": 1, "row": 1, "HP_CUR": 10, "player": 2, "BASE_SHAPE": "round", "BASE_SIZE": 1},
+        "u9": {"col": 1, "row": 1, "HP_CUR": 10, "player": 2, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5},
     }, "config": {
-        "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+        "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
     }}
 

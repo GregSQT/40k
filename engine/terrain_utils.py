@@ -89,6 +89,35 @@ def floor_hexes_at_level(terrain_areas: List[Dict[str, Any]], level: int) -> Set
     return hexes
 
 
+def floor_height_at(
+    terrain_areas: List[Dict[str, Any]],
+    col: int,
+    row: int,
+    level: int,
+) -> float:
+    """Hauteur (pouces) du plancher sous une figurine à ``(col, row, level)``.
+
+    Rez-de-chaussée (``level`` <= 0) = ``0.0`` (retour immédiat, cas courant, aucune itération).
+    Niveau >= 1 : ``height_inches`` du floor (format B) contenant la case ``(col, row)`` à ce niveau.
+    La résolution est PAR POSITION (pas un mapping global niveau->hauteur) : deux ruines peuvent
+    avoir un floor au même ``level`` avec des ``height_inches`` differents (cf. stage.md §4.1).
+    Aucun fallback : une figurine marquee ``level >= 1`` dont la case n'appartient a aucun floor de
+    ce niveau est une incoherence d'etat -> ``ValueError`` explicite (CLAUDE.md, pas de masquage)."""
+    if int(level) <= 0:
+        return 0.0
+    cell = (int(col), int(row))
+    for area in terrain_areas:
+        for floor in area.get("floors", []):  # get allowed (aire sans etage = sol seul)
+            if int(require_key(floor, "level")) == int(level):
+                floor_hexes = {(int(h[0]), int(h[1])) for h in require_key(floor, "hexes")}
+                if cell in floor_hexes:
+                    return float(require_key(floor, "height_inches"))
+    raise ValueError(
+        f"floor_height_at: no floor at level {level} contains cell ({col}, {row}) "
+        f"(figurine marquee a l'etage mais hors empreinte de plancher)"
+    )
+
+
 def low_clearance_ground_hexes(
     terrain_areas: List[Dict[str, Any]],
     model_height: float,

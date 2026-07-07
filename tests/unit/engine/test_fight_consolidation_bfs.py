@@ -36,6 +36,7 @@ def _gs_single_hex(
         "col": unit_col,
         "row": unit_row,
         "BASE_SIZE": 1,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "orientation": 0,
     }
@@ -48,7 +49,7 @@ def _gs_single_hex(
         "inches_to_subhex": scale,
         "board_cols": board_cols,
         "board_rows": board_rows,
-        "config": {"game_rules": {"engagement_zone": 1}},
+        "config": {"game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5}},
         "units_cache": units_cache,
         "wall_hexes": wall_hexes or set(),
     }
@@ -129,6 +130,7 @@ class TestConsolidationBfsPlacementMaskMultiHex:
             "col": unit_col,
             "row": unit_row,
             "BASE_SIZE": 3,
+            "MODEL_HEIGHT": 2.5,
             "BASE_SHAPE": "round",
             "orientation": 0,
         }
@@ -149,6 +151,7 @@ class TestConsolidationBfsPlacementMaskMultiHex:
             "config": {
                 "game_rules": {
                     "engagement_zone": 10,
+                    "engagement_zone_vertical": 5,
                     "max_base_size_hex": 35,
                 },
                 "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},

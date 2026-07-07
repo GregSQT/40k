@@ -71,6 +71,7 @@ def _unit(
         "SHOOT_LEFT": 1,
         "ATTACK_LEFT": 1,
         "BASE_SIZE": 1,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
@@ -85,7 +86,7 @@ def _unit(
 def _make_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
     gs: Dict[str, Any] = {
         "config": {
-            "game_rules": {**_GAME_RULES, "engagement_zone": 2, "max_base_size_hex": 35},
+            "game_rules": {**_GAME_RULES, "engagement_zone": 2, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },
         "board_cols": 40,

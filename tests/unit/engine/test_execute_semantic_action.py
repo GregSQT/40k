@@ -26,6 +26,7 @@ def _base_config() -> Dict[str, Any]:
     return {
         "game_rules": {
             "engagement_zone": 1,
+            "engagement_zone_vertical": 5,
             "max_base_size_hex": 35,
             "cover_ratio": 0.0,
         },
@@ -50,6 +51,7 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
         "VALUE": 100,
         "OC": 1,
         "BASE_SIZE": 1,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],

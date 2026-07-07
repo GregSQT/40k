@@ -27,7 +27,7 @@ def _cmd_unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
             "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
             "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
             "RNG_WEAPONS": [], "CC_WEAPONS": [], "UNIT_RULES": [],
-            "BASE_SHAPE": "round", "BASE_SIZE": 1}
+            "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5}
 
 
 def _make_cmd_gs() -> Dict[str, Any]:
@@ -39,7 +39,7 @@ def _make_cmd_gs() -> Dict[str, Any]:
         "game_over": False,
         "turn_limit_reached": False,
         "config": {
-            "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+            "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },
         "units": units,
@@ -70,7 +70,7 @@ def _unit_cfg(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
             "UNIT_RULES": [], "UNIT_KEYWORDS": [],
             "LD": 7, "OC": 1, "VALUE": 100, "ICON": "t",
             "ICON_SCALE": 1.0, "ILLUSTRATION_RATIO": 1.0,
-            "BASE_SHAPE": "round", "BASE_SIZE": 1}
+            "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5}
 
 
 def _minimal_config() -> Dict[str, Any]:
@@ -82,7 +82,7 @@ def _minimal_config() -> Dict[str, Any]:
                                "objectives": [{"id": "obj1", "name": "Alpha",
                                                "hexes": [[5, 5]]}],
                                "inches_to_subhex": 1}},
-        "game_rules": {"engagement_zone": 1, "max_base_size_hex": 35},
+        "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
         "charge": {"charge_max_distance": 12},
         "pve_mode": False,
         "observation_params": obs,

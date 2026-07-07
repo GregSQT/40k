@@ -38,13 +38,14 @@ def test_move_clearance_legacy_uses_enemy_adjacent_hexes_membership() -> None:
 
 
 def test_move_clearance_round_round_uses_euclidean_gap() -> None:
-    mover = {"id": "u1", "player": 1, "BASE_SHAPE": "round", "BASE_SIZE": 2}
+    mover = {"id": "u1", "player": 1, "BASE_SHAPE": "round", "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5}
     enemy_entry = {
         "col": 10,
         "row": 10,
         "player": 2,
         "BASE_SHAPE": "round",
         "BASE_SIZE": 2,
+        "MODEL_HEIGHT": 2.5,
         "occupied_hexes": {(10, 10)},
     }
 
@@ -62,13 +63,14 @@ def test_move_clearance_round_round_uses_euclidean_gap() -> None:
 
 
 def test_move_clearance_round_round_rejects_exact_engagement_boundary(monkeypatch) -> None:
-    mover = {"id": "u1", "player": 1, "BASE_SHAPE": "round", "BASE_SIZE": 2}
+    mover = {"id": "u1", "player": 1, "BASE_SHAPE": "round", "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5}
     enemy_entry = {
         "col": 10,
         "row": 10,
         "player": 2,
         "BASE_SHAPE": "round",
         "BASE_SIZE": 2,
+        "MODEL_HEIGHT": 2.5,
         "occupied_hexes": {(10, 10)},
     }
 
@@ -97,6 +99,7 @@ def test_round_round_engagement_uses_hex_footprint_not_euclidean_clearance(monke
         "player": 1,
         "BASE_SHAPE": "round",
         "BASE_SIZE": 2,
+        "MODEL_HEIGHT": 2.5,
         "orientation": 0,
         "occupied_hexes": {(20, 10)},
     }
@@ -106,6 +109,7 @@ def test_round_round_engagement_uses_hex_footprint_not_euclidean_clearance(monke
         "player": 2,
         "BASE_SHAPE": "round",
         "BASE_SIZE": 2,
+        "MODEL_HEIGHT": 2.5,
         "orientation": 0,
         "occupied_hexes": {(10, 10)},
     }
@@ -136,13 +140,14 @@ def test_move_clearance_non_round_uses_hex_footprint_distance(monkeypatch) -> No
         "engine.spatial_relations.engagement_distance_metric",
         lambda *args, **kwargs: "hex",
     )
-    mover = {"id": "u1", "player": 1, "BASE_SHAPE": "oval", "BASE_SIZE": 2}
+    mover = {"id": "u1", "player": 1, "BASE_SHAPE": "oval", "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5}
     enemy_entry = {
         "col": 0,
         "row": 2,
         "player": 2,
         "BASE_SHAPE": "oval",
         "BASE_SIZE": 2,
+        "MODEL_HEIGHT": 2.5,
         "occupied_hexes": {(0, 2)},
     }
 

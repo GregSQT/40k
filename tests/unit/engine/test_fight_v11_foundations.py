@@ -46,6 +46,7 @@ def _make_gs(
             "col": u["col"],
             "row": u["row"],
             "BASE_SIZE": 1,
+            "MODEL_HEIGHT": 2.5,
             "BASE_SHAPE": "round",
             "orientation": 0,
             "HP_CUR": u.get("HP_CUR", 1),
@@ -57,6 +58,7 @@ def _make_gs(
             "row": u["row"],
             "player": u["player"],
             "BASE_SIZE": 1,
+            "MODEL_HEIGHT": 2.5,
             "BASE_SHAPE": "round",
             "orientation": 0,
             "HP_CUR": u.get("HP_CUR", 1),
@@ -67,6 +69,7 @@ def _make_gs(
         "board_rows": board_rows,
         "config": {"game_rules": {
             "engagement_zone": 1,
+            "engagement_zone_vertical": 5,
             "pile_in_target_range": 5,
             "consolidation_trigger_range": 3,
         }},

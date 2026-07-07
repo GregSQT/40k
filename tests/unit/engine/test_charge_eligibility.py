@@ -14,6 +14,7 @@ def _board_config() -> Dict[str, Any]:
     return {
         "game_rules": {
             "engagement_zone": 10,
+            "engagement_zone_vertical": 5,
             "max_base_size_hex": 35,
         },
         "charge": {
@@ -41,6 +42,7 @@ def _unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
         "RNG_WEAPONS": [],
         "CC_WEAPONS": [],
         "BASE_SIZE": 3,
+        "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
         "MOVE": 6,
         "UNIT_RULES": [],
@@ -234,8 +236,8 @@ class TestMultiHexChargeInvariants:
             "engine.phase_handlers.charge_handlers._has_valid_charge_target",
             lambda gs, unit, occupied=None: True,
         )
-        unit_large = {**_unit(1, 1, 5, 10), "BASE_SIZE": 25}
-        enemy_large = {**_unit(2, 2, 30, 10), "BASE_SIZE": 25}
+        unit_large = {**_unit(1, 1, 5, 10), "BASE_SIZE": 25, "MODEL_HEIGHT": 2.5}
+        enemy_large = {**_unit(2, 2, 30, 10), "BASE_SIZE": 25, "MODEL_HEIGHT": 2.5}
         gs = _make_game_state([unit_large, enemy_large], current_player=1)
         result = get_eligible_units(gs)
         assert "1" not in result, "unit in EZ via large footprint must not be charge-eligible"

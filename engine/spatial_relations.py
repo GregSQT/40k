@@ -39,6 +39,17 @@ def get_engagement_zone_from_config(config: Dict[str, Any]) -> int:
     return int(require_key(game_rules, "engagement_zone"))
 
 
+def get_engagement_zone_vertical(game_state: Dict[str, Any]) -> float:
+    """Seuil vertical d'engagement 3D en POUCES (règle 03.04 = 5" vertical).
+
+    Contrairement à ``engagement_zone`` (horizontal, scalé ×inches_to_subhex au chargement),
+    ce seuil reste en pouces : il se compare aux ``height_inches`` des étages (mêmes unités),
+    donc NON scalé (absent de la liste de conversion de w40k_core). Aucun défaut caché."""
+    config = require_key(game_state, "config")
+    game_rules = require_key(config, "game_rules")
+    return float(require_key(game_rules, "engagement_zone_vertical"))
+
+
 def _cache_entry_footprint(cache_entry: Dict[str, Any]) -> Set[Tuple[int, int]]:
     """Return a unit cache entry footprint, using its anchor only when no footprint is stored."""
     footprint = cache_entry.get("occupied_hexes")
@@ -117,6 +128,7 @@ def entries_in_engagement_zone(
     second_entry: Dict[str, Any],
     engagement_zone: int,
     metric: str,
+    vertical_zone_inches: Optional[float] = None,
 ) -> bool:
     """Point de bascule pairwise de l'EZ (règle 03.04, bord-à-bord). Deux socles sont en zone
     d'engagement mutuelle ssi leur distance bord-à-bord ≤ ``engagement_zone`` :
@@ -127,7 +139,25 @@ def entries_in_engagement_zone(
       (= ez × 1,5). Miroir de ``ranged_in_range`` — l'EZ est une portée de ``ez`` subhexes bord-à-bord.
 
     Conversion ×1,5 confinée à ``engagement_minimum_clearance_norm``, jamais dispersée.
+
+    ``vertical_zone_inches`` (défaut ``None``) — engagement 3D (règle 03.04 = 2" horiz ET 5" vert,
+    stage.md chantier 4) :
+    - ``None`` → chemin 2D historique **inchangé** (agrégat), byte-identique. Les call-sites qui ne
+      passent rien restent 2D → zéro régression.
+    - valeur (pouces) → gate vertical **par paire de figurines** (§03.04 est par-modèle) : ∃ (fig_a,
+      fig_b) dont les intervalles verticaux ``[plancher, plancher+MODEL_HEIGHT]`` sont séparés de
+      ``≤ vertical_zone_inches`` (§01.04 « partie la plus proche », pas plancher-à-plancher) ET dont
+      la distance horizontale ≤ seuil. Métrique **euclidean uniquement** (gameplay ; ``model_centers``
+      déjà par-fig). Tout au sol des deux côtés → une seule classe verticale → résultat identique au 2D.
     """
+    if vertical_zone_inches is not None:
+        if metric != "euclidean":
+            raise ValueError(
+                f"vertical engagement gate (3D) supporté uniquement en métrique 'euclidean', reçu {metric!r}"
+            )
+        return _entries_in_engagement_zone_3d(
+            first_entry, second_entry, engagement_zone, float(vertical_zone_inches)
+        )
     if metric == "hex":
         first_fp = _cache_entry_footprint(first_entry)
         second_fp = _cache_entry_footprint(second_entry)
@@ -142,11 +172,92 @@ def entries_in_engagement_zone(
     raise ValueError(f"Invalid engagement metric {metric!r}, expected 'hex' or 'euclidean'")
 
 
+def _vertical_classes(
+    entry: Dict[str, Any],
+) -> Tuple[Dict[float, List[Tuple[int, int]]], float]:
+    """Regroupe les centres par-figurine d'une entrée-cache par hauteur de PLANCHER, + MODEL_HEIGHT.
+
+    Retour : ``({floor_height: [(col,row), …]}, model_height)``. Source : ``occupied_hexes_by_model``
+    (centres) + ``floor_height_by_model`` (plancher par fig, chantier 4 étape 1) + ``MODEL_HEIGHT``
+    (borne haute). Aucune de ces clés absente n'est tolérée en mode 3D : erreur explicite (câblage
+    incomplet), pas de fallback silencieux (CLAUDE.md)."""
+    by_model = entry.get("occupied_hexes_by_model")
+    floor_h = entry.get("floor_height_by_model")
+    if not by_model or floor_h is None or "MODEL_HEIGHT" not in entry:
+        raise ValueError(
+            "engagement 3D demandé mais entrée-cache sans données verticales "
+            "(occupied_hexes_by_model / floor_height_by_model / MODEL_HEIGHT) — câblage incomplet"
+        )
+    classes: Dict[float, List[Tuple[int, int]]] = {}
+    for mid, (col, row) in by_model.items():
+        h = float(require_key(floor_h, mid))
+        classes.setdefault(h, []).append((int(col), int(row)))
+    return classes, float(entry["MODEL_HEIGHT"])
+
+
+def entry_vertically_reachable(
+    cand_floor_inches: float,
+    cand_model_height: float,
+    entry: Dict[str, Any],
+    vertical_zone_inches: float,
+) -> bool:
+    """True si ≥1 figurine de ``entry`` est à **portée verticale** d'un candidat mono-niveau.
+
+    Le candidat occupe l'intervalle vertical ``[cand_floor, cand_floor + cand_model_height]`` ; on teste
+    la séparation d'intervalles (§01.04, même formule que ``_entries_in_engagement_zone_3d``) contre
+    **chaque classe de hauteur** de ``entry``. Sert aux chemins d'engagement qui court-circuitent la
+    primitive par un test d'empreinte 2D (masque dilaté) : le gate vertical y est appliqué en amont,
+    par-ennemi, tandis que le test horizontal reste l'intersection de sets. Approximation assumée : le
+    couplage horizontal/vertical par-figurine n'est pas exact (union horizontale + gate vertical global),
+    mais conservateur et bien plus correct que le 2D pur (rejette un ennemi hors des 5" verticaux)."""
+    classes, entry_height = _vertical_classes(entry)
+    lo_c, hi_c = cand_floor_inches, cand_floor_inches + cand_model_height
+    for floor_e in classes:
+        lo_e, hi_e = floor_e, floor_e + entry_height
+        if max(0.0, max(lo_c, lo_e) - min(hi_c, hi_e)) <= vertical_zone_inches:
+            return True
+    return False
+
+
+def _entries_in_engagement_zone_3d(
+    first_entry: Dict[str, Any],
+    second_entry: Dict[str, Any],
+    engagement_zone: int,
+    vertical_zone_inches: float,
+) -> bool:
+    """Engagement 3D euclidien par paire de figurines (cf. ``entries_in_engagement_zone``).
+
+    Pour chaque paire de classes verticales (hauteur de plancher) des deux unités, on applique
+    d'abord le **gate vertical** (séparation des intervalles ``[plancher, plancher+MODEL_HEIGHT]``),
+    puis — seulement si la paire passe — le **test horizontal** euclidien inchangé sur le sous-socle
+    restreint aux centres de cette classe (réutilise ``euclidean_edge_distance``)."""
+    from engine.combat_utils import socle_from_cache_entry
+
+    a_classes, a_height = _vertical_classes(first_entry)
+    b_classes, b_height = _vertical_classes(second_entry)
+    threshold = engagement_minimum_clearance_norm(engagement_zone)
+    base_a = socle_from_cache_entry(first_entry)
+    base_b = socle_from_cache_entry(second_entry)
+    for floor_a, centers_a in a_classes.items():
+        lo_a, hi_a = floor_a, floor_a + a_height
+        for floor_b, centers_b in b_classes.items():
+            lo_b, hi_b = floor_b, floor_b + b_height
+            vertical_gap = max(0.0, max(lo_a, lo_b) - min(hi_a, hi_b))
+            if vertical_gap > vertical_zone_inches:
+                continue
+            socle_a = base_a._replace(model_centers=centers_a)
+            socle_b = base_b._replace(model_centers=centers_b)
+            if euclidean_edge_distance(socle_a, socle_b) <= threshold:
+                return True
+    return False
+
+
 def unit_entries_within_engagement_zone(
     first_entry: Dict[str, Any],
     second_entry: Dict[str, Any],
     engagement_zone: int,
     metric: Optional[str] = None,
+    vertical_zone_inches: Optional[float] = None,
 ) -> bool:
     """Return True when two unit cache entries are within the shared engagement contract.
 
@@ -159,7 +270,9 @@ def unit_entries_within_engagement_zone(
     """
     if metric is None:
         metric = engagement_distance_metric()
-    return entries_in_engagement_zone(first_entry, second_entry, engagement_zone, metric)
+    return entries_in_engagement_zone(
+        first_entry, second_entry, engagement_zone, metric, vertical_zone_inches
+    )
 
 
 def unit_within_engagement_zone_footprints(
@@ -167,6 +280,7 @@ def unit_within_engagement_zone_footprints(
     unit: Dict[str, Any],
     engagement_zone: int,
     max_distance: Optional[int],
+    vertical_zone_inches: Optional[float] = None,
 ) -> bool:
     """Return True when unit is within B/engagement range of at least one enemy footprint."""
     units_cache = require_key(game_state, "units_cache")
@@ -182,7 +296,9 @@ def unit_within_engagement_zone_footprints(
         enemy_player = int(require_key(cache_entry, "player"))
         if enemy_player == unit_player:
             continue
-        if unit_entries_within_engagement_zone(unit_entry, cache_entry, engagement_zone):
+        if unit_entries_within_engagement_zone(
+            unit_entry, cache_entry, engagement_zone, vertical_zone_inches=vertical_zone_inches
+        ):
             return True
     return False
 
@@ -198,6 +314,7 @@ def move_anchor_violates_engagement_clearance(
     *,
     enemy_cache_items: Optional[List[Tuple[Any, Any]]],
     engagement_zone_ez: int,
+    vertical_zone_inches: Optional[float] = None,
 ) -> bool:
     """Return True when a move anchor violates the C/clearance engagement contract."""
     mover_id = str(require_key(mover, "id"))
@@ -235,6 +352,8 @@ def move_anchor_violates_engagement_clearance(
         )
 
     for _, cache_entry in enemy_iter:
-        if entries_in_engagement_zone(mover_entry, cache_entry, engagement_zone_ez, metric):
+        if entries_in_engagement_zone(
+            mover_entry, cache_entry, engagement_zone_ez, metric, vertical_zone_inches
+        ):
             return True
     return False

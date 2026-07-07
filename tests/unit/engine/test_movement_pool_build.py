@@ -22,6 +22,7 @@ def _board_config() -> Dict[str, Any]:
     return {
         "game_rules": {
             "engagement_zone": 10,
+            "engagement_zone_vertical": 5,
             "max_base_size_hex": 35,
         },
         "move": build_move_rules(),
@@ -60,6 +61,7 @@ def test_movement_engagement_violates_enemy_cache_items_matches_full_scan() -> N
             "player": 0,
             "MOVE": 6,
             "BASE_SIZE": 1,
+            "MODEL_HEIGHT": 2.5,
             "BASE_SHAPE": "round",
         },
         {
@@ -69,6 +71,7 @@ def test_movement_engagement_violates_enemy_cache_items_matches_full_scan() -> N
             "HP_CUR": 2,
             "player": 1,
             "BASE_SIZE": 1,
+            "MODEL_HEIGHT": 2.5,
             "BASE_SHAPE": "round",
         },
     ]]
@@ -162,6 +165,7 @@ def test_pruned_enemy_horizon_matches_full_scan_with_far_dummy_enemy() -> None:
             "player": 0,
             "MOVE": 6,
             "BASE_SIZE": 1,
+            "MODEL_HEIGHT": 2.5,
             "BASE_SHAPE": "round",
         },
         {
@@ -171,6 +175,7 @@ def test_pruned_enemy_horizon_matches_full_scan_with_far_dummy_enemy() -> None:
             "HP_CUR": 2,
             "player": 1,
             "BASE_SIZE": 1,
+            "MODEL_HEIGHT": 2.5,
             "BASE_SHAPE": "round",
         },
         {
@@ -180,6 +185,7 @@ def test_pruned_enemy_horizon_matches_full_scan_with_far_dummy_enemy() -> None:
             "HP_CUR": 2,
             "player": 1,
             "BASE_SIZE": 1,
+            "MODEL_HEIGHT": 2.5,
             "BASE_SHAPE": "round",
         },
     ]]
@@ -257,7 +263,7 @@ def _run_pool(
     """Appelle ``movement_build_valid_destinations_pool`` (chemin unique vectorisé NumPy)."""
     units = [_fill(u) for u in units]
     config = {
-        "game_rules": {"engagement_zone": ez, "max_base_size_hex": 35},
+        "game_rules": {"engagement_zone": ez, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
         "move": build_move_rules(),
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
     }
@@ -441,11 +447,11 @@ def _assert_euclidean_pool_invariants(
 def test_vectorized_multi_hex_matches_oracle_base3_ez10_round() -> None:
     units = [
         {"id": 1, "col": 10, "row": 10, "HP_CUR": 2, "player": 0, "MOVE": 6,
-         "BASE_SIZE": 3, "BASE_SHAPE": "round"},
+         "BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
         {"id": 2, "col": 22, "row": 10, "HP_CUR": 2, "player": 1,
-         "BASE_SIZE": 3, "BASE_SHAPE": "round"},
+         "BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
         {"id": 3, "col": 18, "row": 18, "HP_CUR": 2, "player": 1,
-         "BASE_SIZE": 2, "BASE_SHAPE": "round"},
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
     ]
     pool, _fz, gs = _run_pool(units, ez=10)
     _assert_euclidean_pool_invariants(pool, gs, "1")
@@ -455,9 +461,9 @@ def test_vectorized_multi_hex_matches_oracle_with_walls_ez10() -> None:
     walls = {(c, 12) for c in range(8, 14)} | {(14, r) for r in range(8, 14)}
     units = [
         {"id": 1, "col": 10, "row": 10, "HP_CUR": 2, "player": 0, "MOVE": 5,
-         "BASE_SIZE": 2, "BASE_SHAPE": "round"},
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
         {"id": 2, "col": 25, "row": 25, "HP_CUR": 2, "player": 1,
-         "BASE_SIZE": 2, "BASE_SHAPE": "round"},
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
     ]
     pool, _fz, gs = _run_pool(units, ez=10, walls=walls)
     _assert_euclidean_pool_invariants(pool, gs, "1")
@@ -466,9 +472,9 @@ def test_vectorized_multi_hex_matches_oracle_with_walls_ez10() -> None:
 def test_vectorized_multi_hex_matches_oracle_base2_ez1() -> None:
     units = [
         {"id": 1, "col": 5, "row": 5, "HP_CUR": 2, "player": 0, "MOVE": 4,
-         "BASE_SIZE": 2, "BASE_SHAPE": "round"},
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
         {"id": 2, "col": 10, "row": 5, "HP_CUR": 2, "player": 1,
-         "BASE_SIZE": 2, "BASE_SHAPE": "round"},
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
     ]
     pool, _fz, gs = _run_pool(units, ez=1, board_cols=20, board_rows=20)
     assert set(pool) == _oracle_pool(gs, "1", ez=1)
@@ -478,9 +484,9 @@ def test_vectorized_multi_hex_matches_oracle_mixed_square_enemy_ez10() -> None:
     """Ennemi carré → branche dilatation hex. Doit coïncider avec l'oracle sémantique."""
     units = [
         {"id": 1, "col": 10, "row": 10, "HP_CUR": 2, "player": 0, "MOVE": 5,
-         "BASE_SIZE": 2, "BASE_SHAPE": "round"},
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"},
         {"id": 2, "col": 20, "row": 10, "HP_CUR": 2, "player": 1,
-         "BASE_SIZE": 2, "BASE_SHAPE": "square"},
+         "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "square"},
     ]
     pool, _fz, gs = _run_pool(units, ez=10)
     _assert_euclidean_pool_invariants(pool, gs, "1")
@@ -497,6 +503,7 @@ def test_movement_build_valid_destinations_pool_deterministic() -> None:
             "player": 0,
             "MOVE": 4,
             "BASE_SIZE": 1,
+            "MODEL_HEIGHT": 2.5,
             "BASE_SHAPE": "round",
         },
         {
@@ -506,12 +513,13 @@ def test_movement_build_valid_destinations_pool_deterministic() -> None:
             "HP_CUR": 2,
             "player": 1,
             "BASE_SIZE": 1,
+            "MODEL_HEIGHT": 2.5,
             "BASE_SHAPE": "round",
         },
     ]]
     game_state: Dict[str, Any] = {
         "config": {
-            "game_rules": {"engagement_zone": 1},
+            "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5},
             "move": build_move_rules(),
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },

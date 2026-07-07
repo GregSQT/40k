@@ -73,6 +73,7 @@ def test_log_episode_start_writes_units_and_metadata(tmp_path: Path) -> None:
             "DISPLAY_NAME": "Alpha",
             "BASE_SHAPE": "round",
             "BASE_SIZE": 1,
+            "MODEL_HEIGHT": 2.5,
         }
     ]
     logger.log_episode_start(

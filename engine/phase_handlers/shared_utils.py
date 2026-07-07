@@ -566,7 +566,10 @@ def _build_models_for_unit(
 
     # Niveau vertical de l'unité (ancre). Chaque figurine hérite du niveau de l'unité
     # sauf override explicite spec["level"] (escouade répartie sur plusieurs étages, §2.5).
-    unit_level = int(require_key(unit, "level"))
+    # 'level' optionnel = sol (0), aligné sur create_unit (game_state.py `config.get("level", 0)`,
+    # défaut métier « scénarios sans étages »). Pas un masquage d'erreur : la validation (int >= 0)
+    # est faite en amont par _validate_level dans create_unit ; ici on lit une unité déjà construite.
+    unit_level = int(unit.get("level", 0))  # get allowed (champ optionnel, défaut sol)
 
     explicit_models = unit.get("models")
     if isinstance(explicit_models, list) and len(explicit_models) > 0:
@@ -699,10 +702,11 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
         units_cache[unit_id] = {
             "col": col,
             "row": row,
-            # Niveau vertical de l'ancre (étages, format B). 0 = sol (défaut métier).
-            # occupied_hexes/occupation_map restent 2D à ce stade : la gestion des
-            # collisions par niveau relève du chantier occupation & placement.
-            "level": int(require_key(unit, "level")),
+            # Niveau vertical de l'ancre (étages, format B). 0 = sol (défaut métier),
+            # 'level' optionnel aligné sur create_unit (get + défaut sol). occupied_hexes/
+            # occupation_map restent 2D à ce stade : la gestion des collisions par niveau
+            # relève du chantier occupation & placement.
+            "level": int(unit.get("level", 0)),  # get allowed (champ optionnel, défaut sol)
             "HP_CUR": hp_cur,
             "player": player,
             # VALUE (points) : source de verite reward, requis par resolve_squad_shoot
@@ -752,6 +756,29 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
             for mid in squad_models.get(unit_id, [])  # get allowed
             if mid in models_cache
         }
+        # Hauteur (pouces) du plancher sous chaque figurine — fondation de l'engagement 3D
+        # (borne basse de l'intervalle vertical [plancher, plancher+MODEL_HEIGHT], stage.md §4/chantier 4).
+        # Sol = 0.0 ; étage = height_inches du floor sous la fig (résolu par position). Aucun consommateur
+        # encore (backend-only) → no-op tant que tout est au niveau 0.
+        from engine.terrain_utils import floor_height_at
+        _terrain_areas = game_state.get("terrain_areas", [])  # get allowed (board sans terrain)
+        units_cache[unit_id]["floor_height_by_model"] = {
+            mid: floor_height_at(
+                _terrain_areas,
+                int(models_cache[mid]["col"]),
+                int(models_cache[mid]["row"]),
+                int(require_key(models_cache[mid], "level")),
+            )
+            for mid in squad_models.get(unit_id, [])  # get allowed
+            if mid in models_cache
+        }
+        # MODEL_HEIGHT (pouces) = borne HAUTE de l'intervalle vertical [plancher, plancher+MODEL_HEIGHT]
+        # de l'engagement 3D (§01.04 « partie la plus proche »). Présent sur toute vraie unité (roster,
+        # via create_unit) ; absent des stubs de test purement 2D → la clé n'est alors pas posée et le
+        # mode 3D dégénère proprement (le gate vertical n'est activé que par un call-site passant
+        # vertical_zone_inches, sur de vraies unités).
+        if "MODEL_HEIGHT" in unit:
+            units_cache[unit_id]["MODEL_HEIGHT"] = float(unit["MODEL_HEIGHT"])
         # Per-model visual meta (icône + échelle + forme/taille de base) : exposé
         # au frontend uniquement pour les escouades hétérogènes (au moins une
         # figurine dont le profil visuel diffère de l'unité parente, ex.
@@ -2860,19 +2887,26 @@ def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -
     # Niveau (étages) par-figurine : publié vers le frontend (rendu + init du plan de move par-fig).
     # Sans ça une fig à l'étage remonte au niveau d'ancre → traitée au sol → superposition cassée.
     new_level_by_model: Dict[str, int] = {}
+    # Hauteur (pouces) du plancher sous chaque fig — fondation engagement 3D (cf. build_units_cache).
+    new_floor_height_by_model: Dict[str, float] = {}
+    from engine.terrain_utils import floor_height_at
+    _terrain_areas = game_state.get("terrain_areas", [])  # get allowed (board sans terrain)
     for mid in squad_models.get(squad_id, []):  # get allowed
         m = models_cache.get(mid)
         if m is None:
             continue
         m_col = int(m["col"])
         m_row = int(m["row"])
+        m_level = int(require_key(m, "level"))
         new_by_model[mid] = (m_col, m_row)
-        new_level_by_model[mid] = int(require_key(m, "level"))
+        new_level_by_model[mid] = m_level
+        new_floor_height_by_model[mid] = floor_height_at(_terrain_areas, m_col, m_row, m_level)
         fp = _compute_unit_occupied_hexes(m_col, m_row, unit_stub, game_state)
         new_occupied.update(fp)
     entry["occupied_hexes"] = new_occupied
     entry["occupied_hexes_by_model"] = new_by_model
     entry["level_by_model"] = new_level_by_model
+    entry["floor_height_by_model"] = new_floor_height_by_model
     # Sync occupation_map (retire cellules disparues, ajoute nouvelles)
     occ_map = game_state.get("occupation_map")
     if occ_map is not None:
@@ -3734,6 +3768,7 @@ def _synth_model_entry(
     model_entry: Dict[str, Any],
     col: int,
     row: int,
+    level: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Entree units_cache synthetique pour UNE figurine placee en (col,row).
 
@@ -3742,14 +3777,19 @@ def _synth_model_entry(
     choix correct pour une unite a bases mixtes (perso attache a plus grande base).
     Le ``player`` est herite du squad (le modele ne le porte pas forcement). Entree
     complete (orientation incluse) pour rester valide quelle que soit la branche de
-    ``unit_entries_within_engagement_zone``."""
+    ``unit_entries_within_engagement_zone``.
+
+    ``level`` (defaut ``None``) — engagement 3D (chantier 4). ``None`` → entree 2D
+    **inchangee** (byte-identique). Un entier = niveau de la figurine placee : on pose
+    alors les donnees verticales (fig unique a (col,row), hauteur = plancher du niveau ;
+    ``MODEL_HEIGHT`` herite de l entree squad = borne haute de l intervalle vertical)."""
     from engine.hex_utils import compute_occupied_hexes
     squad_entry = game_state.get("units_cache", {}).get(str(squad_id), {})  # get allowed
     shape = require_key(model_entry, "BASE_SHAPE")
     size = require_key(model_entry, "BASE_SIZE")
     orient = int(model_entry.get("orientation", 0))  # get allowed
     fp = compute_occupied_hexes(int(col), int(row), shape, size, orient)
-    return {
+    synth: Dict[str, Any] = {
         "id": f"_synth_{squad_id}",
         "player": int(squad_entry.get("player", -1)),  # get allowed
         "col": int(col),
@@ -3759,6 +3799,17 @@ def _synth_model_entry(
         "BASE_SIZE": size,
         "orientation": orient,
     }
+    if level is not None:
+        from engine.terrain_utils import floor_height_at
+        anchor = (int(col), int(row))
+        synth["occupied_hexes_by_model"] = {"_synth_model": anchor}
+        synth["floor_height_by_model"] = {
+            "_synth_model": floor_height_at(
+                game_state.get("terrain_areas", []), int(col), int(row), int(level)
+            )
+        }
+        synth["MODEL_HEIGHT"] = float(require_key(squad_entry, "MODEL_HEIGHT"))
+    return synth
 
 
 CHARGE_THRESHOLD_INCHES = 12
