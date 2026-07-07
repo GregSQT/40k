@@ -619,4 +619,69 @@ le modèle + LoS 3D est le vrai chantier.
    MOVE dans [movement_handlers.py](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)) ont été
    **retirés**. Le calcul `resolve_model_floor_level` (niveau effectif) reste utilisé par le commit.
 
+   ### ✅ AJOUTS RÉCENTS — coût de montée, hauteur de modèle, charge niveau-consciente (2026-07-07)
+
+   - **6e Coût de montée §13.06 dans le pool move par-figurine** (`movement_build_model_destinations_pool`,
+     [movement_handlers.py](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)) : le pool
+     par-fig était **planaire** (le champ 2D atteignait « gratuitement » les cases d'étage — bug). Désormais,
+     en vue étage (`view_level ≥ 1`, métrique euclidienne, hors FLY) :
+     - les cases dont l'empreinte tient sur le plancher (placement en hauteur) proviennent du champ
+       **climb-aware** `reachable_multilevel_field` (montée/descente soustraite du budget) via le helper
+       `_model_climb_reachable_floor_cells` → plus de montée gratuite ; unité non-montante → aucune case d'étage.
+     - les cases **sol** dont le socle chevauche l'empreinte de l'étage en vue sont **retirées** (le preview
+       s'arrête au bord du bâtiment). Test **euclidien disque↔polygone** sur `floor["polygon_vertices"]`
+       (aligné pixel-pour-pixel sur le contour rendu et la précision fig↔fig ronde) ; non-rond → empreinte hex.
+     - `destinations` porte le **niveau réel par case** `[col,row,level]` (API `move_model_destinations`) ;
+       le front stocke `Map "c,r"→level` et **pose la fig au niveau de la destination** (plus `currentLevel`
+       aveugle) — `handleMoveModelInPlan` ([useEngineAPI.ts](file:///home/greg/40k/frontend/src/hooks/useEngineAPI.ts)),
+       erreur explicite si case hors pool (aucun fallback).
+     - **Refetch au changement de niveau** : une fig **active** refetch son pool au nouveau niveau (effet sur
+       `currentLevel`, `activeModelId` lu via ref, [BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx))
+       — sinon le pool restait figé au niveau de sélection.
+
+   - **Hauteur de modèle / clairance sous étage (§13.06 maison)** :
+     - `MODEL_HEIGHT` (pouces) acheminé du roster jusqu'au moteur : déjà extrait par `UnitRegistry`, désormais
+       recopié par le **builder central `create_unit`** (+ `_build_enhanced_unit` et build army API)
+       ([game_state.py](file:///home/greg/40k/engine/game_state.py), [api_server.py](file:///home/greg/40k/services/api_server.py))
+       → `units_cache`. (Root cause d'un 500 : `create_unit` re-whitelistait et **droppait** le champ.)
+     - Helper `low_clearance_ground_hexes(terrain_areas, model_height)`
+       ([terrain_utils.py](file:///home/greg/40k/engine/terrain_utils.py)) : union des hexes d'étages dont
+       `height_inches < MODEL_HEIGHT`. Injecté dans les **obstacles AU SOL** uniquement (jamais `wall_hexes`
+       partagé — ces hexes SONT le plancher, praticable en surface ; vol non concerné). Une fig trop haute ne
+       peut ni traverser ni s'arrêter sous un étage bas.
+     - **Appliqué** : move **par-figurine** (champ euclidien + niveau 0 du champ climb) et **charge** (cf. ci-dessous).
+       **RESTE** : pool **squad** `movement_build_valid_destinations_pool` (= pathfinding **IA**) et **voile rouge**
+       `movement_preview_move_plan` — même injection ground-only/non-fly à faire (piège : plancher = hexes
+       clairance → la surface d'étage doit rester walkable, ne pas polluer `wall_hexes` global).
+
+   - **Charge niveau-consciente** (`_compute_plan_context` + `charge_model_plan_state`,
+     [charge_handlers.py](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py)) :
+     - Clairance hauteur injectée dans `path_blocked` (sol ; vol via `set()` non concerné).
+     - `level` propagé (dispatch → `charge_model_plan_state`) ; post-filtre `_charge_pool_clip_under_floor`
+       retire du pool les ancres dont le socle chevauche l'empreinte de l'étage en vue (miroir exact du clip
+       move). Appliqué **hors cache mémoïsé** → changement de niveau = clip recalculé sans invalider `ctx`.
+     - Front : `charge_plan_state` envoie `level` ; refetch de la fig de charge active au changement de niveau
+       (fusionné avec le refetch move dans le même effet `currentLevel`).
+     - ⚠️ **PAS de destinations de charge EN HAUTEUR** : une charge doit finir **engagée** avec une cible
+       déclarée, or l'**engagement est purement 2D** — `entries_in_engagement_zone`
+       ([spatial_relations.py](file:///home/greg/40k/engine/spatial_relations.py)) ne compare que les empreintes
+       (col/row/occupied_hexes), **sans `level`** ; `occupied_hexes` du units_cache est l'**union tous niveaux**.
+       Les unités PEUVENT être en hauteur (champ `level`, `_occupied_hexes_at_level`), mais la verticalité est
+       **ignorée** dans l'engagement. Charger vers une cible à l'étage n'a donc pas de sens tant que l'engagement
+       n'est pas 3D.
+
+   ### ⏳ RESTE À FAIRE (mis à jour)
+
+   1. **Engagement 3D** (chantier 4) : rendre `entries_in_engagement_zone` niveau-conscient (même niveau
+      atteignable, règle 2" horiz / 5" vert §2.5). **Prérequis** des destinations de charge en hauteur et de
+      l'EZ inter-niveaux (`enemy_adjacent_hexes` reste 2D).
+   2. **Champ climb-aware dans la charge** (destinations d'étage) — une fois l'engagement 3D en place.
+   3. **Clairance hauteur** sur pool **squad move + IA** (`movement_build_valid_destinations_pool`) et **voile
+      rouge** (`movement_preview_move_plan`) — l'utilisateur a validé le périmètre « tout le mouvement », seul
+      le move par-fig + la charge sont faits à ce stade.
+   4. **FLY + étages** (move et charge) : toujours traité en planaire (différé).
+   5. **Métrique hex + étages** : le climb-aware est euclidien seulement (les floors sont euclidiens).
+   6. Pool **squad** move (suivi de bloc) : retrait du miroir transitoire `valid_move_destinations_pool` →
+      migration sur `_by_level`.
+
 Chantiers 1→5 sont backend (moteur + règles), 6 est frontend. 1 doit précéder tous les autres.

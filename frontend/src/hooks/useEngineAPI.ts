@@ -6140,13 +6140,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         action: "charge_plan_state",
         unitId: String(unitId),
         plan,
+        // Étages : niveau de vue courant → clip du pool de charge sous l'empreinte de l'étage (miroir move).
+        level: currentLevelRef?.current ?? 0,
       };
       if (selectedModel != null) action.selected_model = selectedModel;
       const result = await postEngineQuery(action);
       if (!result) throw new Error("charge_plan_state: réponse vide");
       applyChargePlanState(result, selectedModel);
     },
-    [postEngineQuery, applyChargePlanState]
+    [postEngineQuery, applyChargePlanState, currentLevelRef]
   );
 
   /** Bouton Take to the sky (unités FLY) : (dé)clare le vol (-2" + traversée, Règles 21.03).

@@ -1314,8 +1314,10 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         for entry in (action.get("plan") or []):
             prov[str(entry[0])] = (int(entry[1]), int(entry[2]))
         sel = action.get("selected_model")
+        _lvl = action.get("level")
         state = charge_model_plan_state(
-            game_state, unit_id, prov, selected_model=(str(sel) if sel is not None else None)
+            game_state, unit_id, prov, selected_model=(str(sel) if sel is not None else None),
+            level=int(_lvl) if _lvl is not None else 0,
         )
         return True, {"action": "charge_plan_state", "unitId": unit_id, **state}
 
@@ -1844,6 +1846,13 @@ def _compute_plan_context(
     # ennemis seulement. Les coéquipières (posées ou à l'origine) ne bloquent que la position FINALE
     # (``cand_fp & blocked_static`` posées + check ``others`` origines dans ``_qualifying``).
     path_blocked = set(wall_hexes) | enemy_occupied
+    # Clairance verticale (§13.06 maison) : hexes de sol infranchissables par ce modèle (trop haut pour
+    # passer sous un étage bas) → obstacle AU SOL uniquement. Miroir du move. Le vol (reach appelé avec
+    # ``set()``) n'est pas concerné.
+    from engine.terrain_utils import low_clearance_ground_hexes
+    path_blocked |= low_clearance_ground_hexes(
+        game_state.get("terrain_areas", []), float(require_key(unit, "MODEL_HEIGHT"))
+    )
     # Take to the skies (21.03) : vol actif → la reachability BFS et le champ de distance ignorent
     # tout (traversée libre) ; le placement final (``cand_fp & blocked_static``, collision ``others``)
     # reste interdit d'overlap.
@@ -2220,11 +2229,56 @@ def _compute_plan_context(
     }
 
 
+def _charge_pool_clip_under_floor(
+    game_state: Dict[str, Any],
+    model_id: str,
+    view_level: int,
+    pool: List[List[int]],
+) -> List[List[int]]:
+    """Retire du pool de charge (sol) les ancres dont le socle de la figurine chevauche l'empreinte de
+    l'étage ``view_level``. Rond : euclidien disque↔polygone sur ``floor["polygon_vertices"]`` (aligné
+    rendu) ; non-rond : empreinte hex ∩ hexes de l'étage. Miroir exact du clip move (§13.06)."""
+    from engine.terrain_utils import floor_hexes_at_level
+    from engine.hex_utils import (
+        _hex_center, round_base_radius_norm, disc_overlaps_polygon, compute_occupied_hexes,
+    )
+    models_cache = require_key(game_state, "models_cache")
+    model = models_cache.get(str(model_id))
+    if model is None:
+        return pool
+    terrain_areas = game_state.get("terrain_areas", [])
+    polys = [
+        [_hex_center(int(v[0]), int(v[1])) for v in require_key(floor, "polygon_vertices")]
+        for area in terrain_areas
+        for floor in area.get("floors", [])  # get allowed (aire sans étage)
+        if int(require_key(floor, "level")) == view_level
+    ]
+    if not polys:
+        return pool
+    shape = require_key(model, "BASE_SHAPE")
+    base = require_key(model, "BASE_SIZE")
+    orientation = int(model.get("orientation", 0))  # get allowed
+    floor_hexes = floor_hexes_at_level(terrain_areas, view_level)
+    out: List[List[int]] = []
+    for c, r in pool:
+        if shape == "round":
+            cx, cy = _hex_center(int(c), int(r))
+            rad = round_base_radius_norm(base)
+            if any(disc_overlaps_polygon(cx, cy, rad, poly) for poly in polys):
+                continue
+        else:
+            if set(compute_occupied_hexes(int(c), int(r), shape, base, orientation)) & floor_hexes:
+                continue
+        out.append([c, r])
+    return out
+
+
 def charge_model_plan_state(
     game_state: Dict[str, Any],
     unit_id: str,
     provisional_plan: Dict[str, Tuple[int, int]],
     selected_model: Optional[str] = None,
+    level: int = 0,
 ) -> Dict[str, Any]:
     """Orchestration UI du mouvement de charge par-figurine (V11, 3 phases 11.04). Lecture pure
     (hormis l'écriture du cache mémo).
@@ -2326,6 +2380,11 @@ def charge_model_plan_state(
         if selected_model is not None and str(selected_model) in reach_by_model
         else []
     )
+    # Vue sur un étage : le pool de charge AU SOL ne doit pas recouvrir le dessous du bâtiment (miroir
+    # move §13.06). On retire les ancres dont le socle de la fig sélectionnée chevauche l'empreinte de
+    # l'étage. pool_distances / footprint_mask_loops dérivent de ``pool`` → filtrés automatiquement.
+    if int(level) >= 1 and pool and selected_model is not None:
+        pool = _charge_pool_clip_under_floor(game_state, str(selected_model), int(level), pool)
     # Distance de mouvement (sous-hex) de la fig sélectionnée vers chaque ancre du pool : profondeur
     # BFS = path réel au sol (détours murs/figs), distance directe en vol. Source du tooltip charge
     # par-figurine (au lieu de la ligne droite qui sous-estime les détours).
@@ -4986,8 +5045,10 @@ def charge_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, action
         for entry in (action.get("plan") or []):
             prov[str(entry[0])] = (int(entry[1]), int(entry[2]))
         sel = action.get("selected_model")
+        _lvl = action.get("level")
         state = charge_model_plan_state(
-            game_state, unit_id, prov, selected_model=(str(sel) if sel is not None else None)
+            game_state, unit_id, prov, selected_model=(str(sel) if sel is not None else None),
+            level=int(_lvl) if _lvl is not None else 0,
         )
         return True, {
             "action": "charge_fly_mode_set",

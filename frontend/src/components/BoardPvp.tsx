@@ -1767,6 +1767,21 @@ export default function Board({
     },
     [onCurrentLevelChange]
   );
+  // Fig active (move OU charge) : le pool est fetché avec level=currentLevel À LA SÉLECTION seulement.
+  // Changer de niveau ensuite doit recalculer SON pool au nouveau niveau. On lit activeModelId via ref
+  // (pas de re-fire à la sélection, closure jamais périmée) et on ne dépend QUE de currentLevel.
+  const chargePlanForLevelRef = useRef(chargeMovePlan);
+  chargePlanForLevelRef.current = chargeMovePlan;
+  const onSelectChargeModelForLevelRef = useRef(onSelectChargeModel);
+  onSelectChargeModelForLevelRef.current = onSelectChargeModel;
+  useEffect(() => {
+    const moveActive = squadMovePlanRef.current?.activeModelId;
+    if (moveActive) void squadMoveCallbacksRef.current.onSelectModelForMove?.(moveActive);
+    const chargeActive = chargePlanForLevelRef.current?.activeModelId;
+    if (chargeActive) void onSelectChargeModelForLevelRef.current?.(chargeActive);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentLevel]);
+
   const maxFloorLevel = useMemo(() => {
     const zones = boardConfig?.terrain_zones;
     if (!Array.isArray(zones)) return 0;
