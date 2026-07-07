@@ -936,9 +936,10 @@ def _fight_apply_pile_in_move(
         old_occupied=old_occupied,
         new_occupied=new_occupied,
     )
-    from .shooting_handlers import _invalidate_los_cache_for_moved_unit
-
-    _invalidate_los_cache_for_moved_unit(game_state, unit["id"], old_col=orig_col, old_row=orig_row)
+    # LoS : invalidation ciblée + bump émis par translate_squad_to_destination →
+    # update_units_cache_position → _touch_unit_los (choke-point a′). CORRIGE LE TROU
+    # fight-translate : ce chemin ne bumpait JAMAIS _unit_move_version auparavant → pair-cache
+    # périmé en observation/reward RL jusqu'au 1er move du tour suivant.
 
 
 def _fight_clear_consolidation_state(game_state: Dict[str, Any]) -> None:

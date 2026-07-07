@@ -2802,7 +2802,9 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     _t_inv0 = time.perf_counter() if _perf else None
     _invalidate_all_destination_pools_after_movement(game_state)
     _t_inv1 = time.perf_counter() if _perf else None
-    game_state["_unit_move_version"] += 1
+    # LoS bump centralisé via translate_squad_to_destination → _touch_unit_los (choke-point a′).
+    # CORRIGE LE TROU charge-translate : l'invalidation ciblée du pair-cache manquait (OBSOLETE),
+    # seul le bump global existait.
 
     if _perf and _t_atd0 is not None and _t_valid0 is not None and _t_valid1 is not None and _t_occ0 is not None and _t_occ1 is not None and _t_upd0 is not None and _t_upd1 is not None and _t_adj0 is not None and _t_adj1 is not None and _t_inv0 is not None and _t_inv1 is not None:
         append_perf_timing_line(
@@ -5091,7 +5093,7 @@ def charge_commit_move_plan_handler(
     dest_col, dest_row = require_unit_position(unit, game_state)
 
     _invalidate_all_destination_pools_after_movement(game_state)
-    game_state["_unit_move_version"] += 1
+    # LoS bump déjà émis par commit_move (batch) — plus de double bump ici (D1).
 
     current_turn = game_state["current_turn"] if "current_turn" in game_state else 1
     target_col, target_row = require_unit_position(target_id, game_state)

@@ -1064,6 +1064,117 @@ def require_unit_position(
     return pos
 
 
+# ============================================================================
+# LoS invalidation choke-point (a′) — LoS_unique_source_of_truth.md §4.1bis (D1–D4)
+# ============================================================================
+# _touch_unit_los est LE point unique d'invalidation LoS, déclenché par toute écriture de
+# position (update_model_position per-figurine + update_units_cache_position anchre).
+#   - pair-cache (_unit_los_pair_cache) : dict pur {(s,t): result}, invalidé ciblé (D3)
+#   - los_cache + hex_los_cache : délégués à _invalidate_los_cache_for_moved_unit
+#   - _unit_move_version : bump centralisé (sert _target_pool_cache / _los_cache_version /
+#     enemy_pos_hash — D3)
+# Batch (D1) : commit_move encadre ses N écritures pour n'émettre qu'UNE invalidation par unité
+# + UN bump. Réentrant : seul l'ouvreur externe committe.
+
+
+def _invalidate_pair_cache_for_unit(game_state: Dict[str, Any], unit_id: str) -> None:
+    """Supprime du pair-cache LoS toutes les entrées où unit_id est tireur ou cible."""
+    holder = game_state.get("_unit_los_pair_cache")
+    if not holder:
+        return
+    uid = str(unit_id)
+    for key in [k for k in holder if str(k[0]) == uid or str(k[1]) == uid]:
+        del holder[key]
+
+
+def _apply_los_invalidation(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    old_col: Optional[int],
+    old_row: Optional[int],
+) -> None:
+    """Invalidation LoS immédiate (hors batch) : los_cache + hex_los_cache + pair-cache + bump."""
+    from engine.phase_handlers.shooting_handlers import _invalidate_los_cache_for_moved_unit
+    _invalidate_los_cache_for_moved_unit(game_state, unit_id, old_col=old_col, old_row=old_row)
+    _invalidate_pair_cache_for_unit(game_state, unit_id)
+    game_state["_unit_move_version"] += 1
+
+
+def _touch_unit_los(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    old_col: Optional[int] = None,
+    old_row: Optional[int] = None,
+) -> None:
+    """Choke-point unique : à appeler après toute écriture de position d'une unité.
+
+    Hors batch : invalide immédiatement (los_cache + hex_los_cache + pair-cache) + bump version.
+    En batch : accumule l'unité (1re old_pos conservée) ; l'invalidation groupée a lieu à la
+    fermeture (_los_end_batch)."""
+    uid = str(unit_id)
+    batch = game_state.get("_los_batch")
+    if batch is not None:
+        if uid not in batch:
+            batch[uid] = (old_col, old_row)
+        return
+    _apply_los_invalidation(game_state, uid, old_col, old_row)
+
+
+def _los_begin_batch(game_state: Dict[str, Any]) -> bool:
+    """Ouvre un batch d'invalidation LoS. Retourne True si CE caller en est propriétaire
+    (batch réentrant : un batch déjà ouvert n'est pas rouvert → seul l'ouvreur externe committe)."""
+    if game_state.get("_los_batch") is None:
+        game_state["_los_batch"] = {}
+        return True
+    return False
+
+
+def _los_end_batch(game_state: Dict[str, Any], owned: bool) -> None:
+    """Ferme le batch : une invalidation ciblée par unité touchée + un seul bump global."""
+    if not owned:
+        return
+    batch = game_state.pop("_los_batch", None)
+    if not batch:
+        return
+    from engine.phase_handlers.shooting_handlers import _invalidate_los_cache_for_moved_unit
+    for uid, (oc, orow) in batch.items():
+        _invalidate_los_cache_for_moved_unit(game_state, uid, old_col=oc, old_row=orow)
+        _invalidate_pair_cache_for_unit(game_state, uid)
+    game_state["_unit_move_version"] += 1
+
+
+def assert_los_pair_cache_consistent(game_state: Dict[str, Any]) -> int:
+    """Garde-fou debug (§6) : compare le pair-cache (valeur servie par compute_unit_los) au recalcul
+    source de vérité (_compute_unit_los_uncached), pour toutes les paires inter-camps. Zéro divergence
+    tolérée. Retourne le nb de paires vérifiées.
+
+    Itère ``unit_by_id`` (dicts porteurs d'``id``, tels que passés à compute_unit_los en jeu réel) —
+    PAS ``units_cache`` (dont les entrées ont ``id=None`` → cache bypassé)."""
+    from engine.phase_handlers.shooting_handlers import compute_unit_los, _compute_unit_los_uncached
+    units = game_state.get("unit_by_id", {})
+    live = game_state.get("units_cache", {})
+    checked = 0
+    for s in units.values():
+        for t in units.values():
+            if s.get("id") is None or t.get("id") is None:
+                continue
+            if s["player"] == t["player"]:
+                continue
+            # Ignore les unités absentes du units_cache (mortes / dernière figurine retirée) :
+            # non résolvables, hors périmètre LoS.
+            if str(s["id"]) not in live or str(t["id"]) not in live:
+                continue
+            cached = compute_unit_los(game_state, s, t)
+            fresh = _compute_unit_los_uncached(game_state, s, t)
+            checked += 1
+            if cached != fresh:
+                raise AssertionError(
+                    f"LoS pair-cache stale: ({s['id']}->{t['id']}) "
+                    f"ver={game_state['_unit_move_version']} cached={cached} fresh={fresh}"
+                )
+    return checked
+
+
 def update_units_cache_position(game_state: Dict[str, Any], unit_id: str, col: int, row: int) -> None:
     """
     Update only the position of a unit in units_cache.
@@ -1136,6 +1247,10 @@ def update_units_cache_position(game_state: Dict[str, Any], unit_id: str, col: i
             f"[UNITS_CACHE POSITION_UPDATE] E{episode} T{turn} {phase} unit_id={unit_id} "
             f"old=({old_col},{old_row}) new=({norm_col},{norm_row}) caller={caller}"
         )
+
+    # Choke-point LoS (a′) : toute écriture d'ancre invalide les caches LoS de l'unité.
+    # Couvre translate_squad_to_destination, reactive move, move_after_shooting, deployment.
+    _touch_unit_los(game_state, unit_id, old_col, old_row)
 
 
 def get_hp_from_cache(unit_id: str, game_state: Dict[str, Any]) -> Optional[int]:
@@ -2883,6 +2998,12 @@ def update_model_position(
                 units_entry_lvl["level"] = int(require_key(anchor_model, "level"))
                 break
     _recompute_squad_cache(game_state, squad_id)
+    # Choke-point LoS (a′) : écriture per-figurine → invalide les paires du squad, même si
+    # l'ancre n'a pas bougé (pile-in par-figurine). En batch (commit_move), dédup avec l'appel
+    # déjà émis par update_units_cache_position ci-dessus (1re old_pos conservée).
+    _ue_los = game_state.get("units_cache", {}).get(squad_id)
+    if _ue_los is not None:
+        _touch_unit_los(game_state, squad_id, _ue_los.get("col"), _ue_los.get("row"))
 
 
 def update_model_hp(game_state: Dict[str, Any], model_id: str, new_hp_cur: int) -> None:
@@ -2952,6 +3073,9 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
             oh_by_model.pop(model_id, None)
     # F2 fix (audit) : recalcule occupied_hexes apres retrait de la fig
     _recompute_squad_occupied_hexes(game_state, squad_id)
+    # Choke-point LoS (constat 5) : la mort d'une figurine réduit le footprint du squad →
+    # invalider ses paires. Id-based, valable même si l'ancre ne bouge pas / squad supprimé.
+    _touch_unit_los(game_state, squad_id, old_col, old_row)
 
     from engine.game_utils import add_debug_file_log
     episode = game_state.get("episode_number", "?")
@@ -3871,30 +3995,22 @@ def commit_move(
     if first is None:
         raise KeyError(f"commit_move: anchor model {plan[0][0]} not in models_cache")
     squad_id = str(first["squad_id"])
-    # Ancienne ancre AVANT déplacement (pour l'invalidation LoS géométrique par position).
-    _old_entry = require_key(game_state, "units_cache").get(squad_id)
-    _old_col = _old_entry.get("col") if isinstance(_old_entry, dict) else None
-    _old_row = _old_entry.get("row") if isinstance(_old_entry, dict) else None
-    for entry in plan:
-        mid, nc, nr = str(entry[0]), int(entry[1]), int(entry[2])
-        lvl = int(entry[3]) if len(entry) >= 4 and entry[3] is not None else None
-        update_model_position(game_state, mid, nc, nr, level=lvl)
-    if move_type == "advance":
-        game_state.setdefault("units_advanced", set()).add(squad_id)
-    elif move_type == "fall_back":
-        game_state.setdefault("units_fled", set()).add(squad_id)
-    elif move_type == "charge":
-        game_state.setdefault("units_charged", set()).add(squad_id)
-    # Invalidation LoS obligatoire après tout déplacement de figurines : sans elle,
-    # build_unit_los_cache saute le rebuild (unit["_los_cache_version"] == _unit_move_version)
-    # et réutilise un los_cache calculé à l'ANCIENNE position → cibles fausses en phase de tir
-    # (miroir du move standard, movement_handlers._invalidate + bump). Le bump invalide aussi
-    # _unit_los_pair_cache et _target_pool_cache (tous deux clés par _unit_move_version).
-    from engine.phase_handlers.shooting_handlers import _invalidate_los_cache_for_moved_unit
-    _invalidate_los_cache_for_moved_unit(
-        game_state, squad_id, old_col=_old_col, old_row=_old_row
-    )
-    game_state["_unit_move_version"] += 1
+    # Choke-point LoS (D1) : un seul batch pour tout le plan → 1 invalidation ciblée par unité
+    # + 1 bump, émis par _touch_unit_los depuis update_model_position / update_units_cache_position.
+    _los_owned = _los_begin_batch(game_state)
+    try:
+        for entry in plan:
+            mid, nc, nr = str(entry[0]), int(entry[1]), int(entry[2])
+            lvl = int(entry[3]) if len(entry) >= 4 and entry[3] is not None else None
+            update_model_position(game_state, mid, nc, nr, level=lvl)
+        if move_type == "advance":
+            game_state.setdefault("units_advanced", set()).add(squad_id)
+        elif move_type == "fall_back":
+            game_state.setdefault("units_fled", set()).add(squad_id)
+        elif move_type == "charge":
+            game_state.setdefault("units_charged", set()).add(squad_id)
+    finally:
+        _los_end_batch(game_state, _los_owned)
 
 
 # ============================================================================

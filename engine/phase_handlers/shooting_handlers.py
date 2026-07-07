@@ -3896,24 +3896,28 @@ def compute_unit_los(
     enforces one consistent visibility everywhere.
 
     Per-pair cache: visibility is static for a fixed board layout + unit positions, so results are
-    cached by (shooter_id, target_id) and invalidated whenever any unit moves (via the global
+    cached by (shooter_id, target_id) in ``_unit_los_pair_cache`` (dict pur, persistant) and
+    invalidated **de façon ciblée** par ``_touch_unit_los`` (shared_utils) à chaque mouvement / perte
+    de figurine : seules les entrées de l'unité concernée sont supprimées (plus de jet global sur
     ``_unit_move_version``). Coordinate-only dicts (e.g. deployment exposure) have no id and bypass
     the cache. This keeps the per-step observation cost and the eligibility sweep cheap.
     """
     sid = shooter.get("id")
     tid = target.get("id")
     if sid is not None and tid is not None:
-        ver = game_state["_unit_move_version"]
+        # D3 : pair-cache = dict pur {(s,t): result}, persistant (plus jeté sur _unit_move_version).
+        # Invalidation ciblée par _touch_unit_los au choke-point (shared_utils) à chaque mouvement /
+        # perte de figurine → seules les paires de l'unité concernée sont supprimées.
         holder = game_state.get("_unit_los_pair_cache")
-        if holder is None or holder[0] != ver:
-            holder = (ver, {})
+        if holder is None:
+            holder = {}
             game_state["_unit_los_pair_cache"] = holder
         key = (str(sid), str(tid))
-        cached = holder[1].get(key)
+        cached = holder.get(key)
         if cached is not None:
             return cached
         result = _compute_unit_los_uncached(game_state, shooter, target)
-        holder[1][key] = result
+        holder[key] = result
         return result
     return _compute_unit_los_uncached(game_state, shooter, target)
 
@@ -4593,8 +4597,8 @@ def _apply_move_after_shooting(
         old_occupied=old_occupied,
         new_occupied=new_occupied,
     )
-    _invalidate_los_cache_for_moved_unit(game_state, unit_id_str, old_col=orig_col, old_row=orig_row)
-    game_state["_unit_move_version"] += 1
+    # LoS : invalidation ciblée + bump émis par update_units_cache_position (ci-dessus, dest) →
+    # _touch_unit_los (choke-point a′). build_unit_los_cache reconstruit le los_cache local ensuite.
     build_unit_los_cache(game_state, unit_id_str)
     _invalidate_all_destination_pools_after_movement(game_state)
     maybe_resolve_reactive_move(

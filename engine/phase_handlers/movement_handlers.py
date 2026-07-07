@@ -1096,12 +1096,8 @@ def _attempt_movement_to_destination(
     # units_fled est un sous-ensemble de units_moved.
     flee_action = finalize_flee_marking(game_state, unit_id_str, was_adjacent)
 
-    # Invalidate LoS cache when unit moves
-    # When a unit moves, all LoS calculations involving that unit are now invalid
-    # This prevents "shoot through wall" bugs caused by stale cache
-    from .shooting_handlers import _invalidate_los_cache_for_moved_unit
-    _invalidate_los_cache_for_moved_unit(game_state, unit["id"], old_col=orig_col, old_row=orig_row)
-    game_state["_unit_move_version"] += 1
+    # LoS : invalidation ciblée + bump désormais centralisés dans translate_squad_to_destination
+    # → update_units_cache_position → _touch_unit_los (choke-point a′). Plus de bump manuel ici.
 
     _mct5 = _mct.perf_counter() if _mct_pt else None
     if _mct_pt and _mct0 is not None and _mct1 is not None and _mct2_pre is not None and _mct2 is not None and _mct3 is not None and _mct4 is not None and _mct5 is not None:
