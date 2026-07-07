@@ -3038,28 +3038,6 @@ def movement_preview_move_plan(
             base_valid and not fp_wall and not fp_other and not fp_intra
             and not cohesion_red[idx] and not ez_violation and not floor_bad
         )
-        # [DIAG MOVE — TEMPORAIRE] à retirer : niveau du mover + flag(s) au voile rouge.
-        _cur_lv = int(require_key(_mc_norm[str(mid)], "level"))
-        _mover_pl = int(require_key(unit_obj, "player")) if unit_obj else -1
-        print(f"[DIAG MOVE] mid={mid} pos=({nc},{nr}) plan_lv={lv} cur_lv={_cur_lv} player={_mover_pl} "
-              f"valid={per_model[str(mid)]} | base_valid={base_valid} wall={fp_wall} "
-              f"other(lvl{lv})={fp_other} intra={fp_intra} cohesion={cohesion_red[idx]} "
-              f"ez={ez_violation} floor_bad={floor_bad}", flush=True)
-
-    # [DIAG MOVE — TEMPORAIRE] : ennemis vus par le mover, avec leur niveau (pour corréler ez).
-    if unit_obj is not None:
-        _mp = int(require_key(unit_obj, "player"))
-        _mc_diag = require_key(game_state, "models_cache")
-        _sm_diag = require_key(game_state, "squad_models")
-        for _euid, _ee in units_cache.items():
-            if int(require_key(_ee, "player")) == _mp:
-                continue
-            _elvls = sorted({
-                int(require_key(_mc_diag[_m], "level"))
-                for _m in _sm_diag.get(str(_euid), []) if _m in _mc_diag
-            })
-            print(f"[DIAG MOVE] enemy={_euid} anchor=({_ee.get('col')},{_ee.get('row')}) "
-                  f"model_levels={_elvls}", flush=True)
 
     coherency_ok = not any(cohesion_red)
     all_valid = len(per_model) > 0 and all(per_model.values())

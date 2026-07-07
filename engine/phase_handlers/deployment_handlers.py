@@ -274,9 +274,6 @@ def generate_compact_formation(
                 queue.append((nc, nr))
     for j in range(idx, len(model_ids)):
         placed.append((model_ids[j], int(center_col), int(center_row)))
-    # [DIAG FORMATION — TEMPORAIRE] : positions générées + occupation sol (level=0) évitée.
-    print(f"[DIAG FORMATION] squad={squad_id} center=({center_col},{center_row}) "
-          f"other_occ(lvl0)={len(other_occ)} placed={[(m, c, r) for m, c, r in placed]}", flush=True)
     return placed
 
 
@@ -400,12 +397,6 @@ def deployment_build_model_destinations_pool(
         destinations.append((int(cc), int(rr)))
         eff_by_dest[(int(cc), int(rr))] = eff
 
-    # [DIAG POOL — TEMPORAIRE] à retirer : niveau vue + tailles des sets bloquants par niveau.
-    print(f"[DIAG POOL] model={model_id} view_level={level} floor_hexes={len(floor_hexes)} "
-          f"occ_by_level={{ {', '.join(f'{lv}:{len(occ_by_level[lv])}' for lv in occ_by_level)} }} "
-          f"same_squad_by_level={{ {', '.join(f'{lv}:{len(s)}' for lv, s in same_squad_by_level.items())} }} "
-          f"-> {len(destinations)} destinations", flush=True)
-
     # Miroir EXACT du move (movement_build_model_destinations_pool) : le blocage par cases hex
     # ci-dessus sous-estime le disque (~16% de recouvrement à 5 sous-hex passe entre les cases).
     # On retire du pool les ancres où le socle de la fig chevaucherait une sœur AU MÊME NIVEAU
@@ -498,9 +489,6 @@ def deployment_build_squad_destinations_pool(
                 break
         if ok:
             destinations.append((int(cc), int(rr)))
-    # [DIAG SQUAD-POOL — TEMPORAIRE] : pool de drag du bloc (zone seule, aucune occupation).
-    print(f"[DIAG SQUAD-POOL] plan_size={len(plan)} zone={len(pool_set)} -> {len(destinations)} destinations "
-          f"(aucun filtre d'occupation/niveau ici)", flush=True)
     return {"destinations": destinations}
 
 
@@ -618,12 +606,6 @@ def deployment_preview_plan(
             not out_of_bounds and not out_of_zone and not on_wall
             and not on_other and not intra and not cohesion_red[idx] and not floor_bad
         )
-        # [DIAG PREVIEW — TEMPORAIRE] à retirer : niveau effectif + flag(s) qui mettent la fig au voile rouge.
-        print(f"[DIAG PREVIEW] mid={mid} pos=({nc},{nr}) eff_level={lv} valid={per_model[str(mid)]} "
-              f"| oob={out_of_bounds} out_zone={out_of_zone} wall={on_wall} "
-              f"on_other(lvl{lv})={on_other} intra={intra} cohesion={cohesion_red[idx]} floor_bad={floor_bad}",
-              flush=True)
-
     coherency_ok = not any(cohesion_red)
     all_valid = n > 0 and all(per_model.values())
     return {
@@ -742,12 +724,6 @@ def _apply_deploy_plan(
         _bz = require_key(_m, "BASE_SIZE")
         _ori = int(_m.get("orientation", 0))
         _eff = resolve_model_floor_level(c, r, _bs, _bz, _ori, level, _terrain_areas)
-        # [DIAG ÉTAGES — TEMPORAIRE] à retirer.
-        from engine.terrain_utils import floor_hexes_at_level, footprint_within_floor
-        _fh = floor_hexes_at_level(_terrain_areas, level) if (level and level >= 1) else set()
-        print(f"[DIAG DEPLOY-COMMIT] mid={mid} pos=({c},{r}) base=({_bs},{_bz}) requested_level={level} "
-              f"-> effective={_eff} | floor{level}_hexes={len(_fh)} "
-              f"footprint_in_floor={footprint_within_floor(c, r, _bs, _bz, _ori, _fh) if _fh else 'n/a'}", flush=True)
         update_model_position(game_state, mid, c, r, level=_eff)
 
     # Sync ancre de la liste units sur l'ancre recalculée dans units_cache (col/row + niveau).

@@ -493,11 +493,11 @@ le modèle + LoS 3D est le vrai chantier.
      + `maxFloorLevel` (dérivé des floors) + **bouton feuilles empilées** (🗂 + n° niveau en bas-droite,
      cycle les niveaux) à côté de la loupe, masqué si aucun étage ([BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx)). tsc vert.
    - ✅ **6b Empreinte d'étage** dans `drawBoard` ([BoardDisplay.tsx](file:///home/greg/40k/frontend/src/components/BoardDisplay.tsx)) :
-     tracé polygone de chaque plancher (couleur terrain, **blanc si le niveau est occupé** par ≥1 fig).
-     Vue mono-niveau (sol → tous les étages en indicateur ; à un étage → planchers de ce niveau).
-     `currentLevel` + `occupiedFloorLevels` threadés via `DrawBoardOptions` + clé de cache statique `bcKey`
-     + deps de l'effet de dessin ([BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx)) →
-     redessine au clic du bouton. tsc vert, backend suite verte. **À valider visuellement.**
+     tracé polygone de plancher, `currentLevel` threadé via `DrawBoardOptions` + deps de l'effet de dessin
+     ([BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx)) → redessine au clic du bouton.
+     ⚠️ **Voir la refonte plus bas** (« Contour au sol : conteneur dédié dynamique + couleur PAR-DÉCOR ») :
+     le contour blanc/statique décrit ici a été remplacé par un conteneur dynamique, une couleur par-décor
+     et un z-order murs-au-dessus. tsc vert, backend suite verte.
    - ⏸️ **6c Vue mono-niveau + ghost** : filtrer les figs par niveau (via `level_by_model` déjà exposé),
      ghost pour les figs d'un autre niveau qui débordent (nouveau flag, pas `modelGhost`).
    - ⏳ **6c-deploy Déploiement à l'étage** — **constat archi + décision A** :
@@ -526,12 +526,30 @@ le modèle + LoS 3D est le vrai chantier.
      BoardPvp → `renderUnit` → `UnitRenderer.renderFloorBadge`
      ([UnitRenderer.tsx](file:///home/greg/40k/frontend/src/components/UnitRenderer.tsx)).
    - ✅ **Empreinte colorée par niveau** (palette badge : 1 vert, 2 orange, 3 rouge ; 0 = terrain) :
-     vue étage L → voile + contour couleur(L) ; vue sol → pas de voile, contour = couleur du **1er étage
-     occupé** (le plus bas), sinon terrain ([BoardDisplay.tsx](file:///home/greg/40k/frontend/src/components/BoardDisplay.tsx)).
-     Occupation par-fig (`occupiedFloorLevels` ← `level_by_model`, et non `unit.level` ancre).
+     vue étage L → voile + contour couleur(L) ([BoardDisplay.tsx](file:///home/greg/40k/frontend/src/components/BoardDisplay.tsx)).
+   - ✅ **Contour au sol : conteneur dédié dynamique + couleur PAR-DÉCOR** (refonte) :
+     - Le contour au sol n'est **plus** dessiné dans le plateau statique (`baseHexContainer`) mais dans un
+       **conteneur dédié `floorContours`** reconstruit à **chaque** draw. `lvl`/`ofl` retirés de la clé de
+       cache statique `bcKey` → changer de niveau **ne reconstruit plus** le plateau (fini l'apparition
+       progressive au retour niveau 1→0) et la couleur d'occupation est **live**.
+     - **Vue sol** : on ne trace que la **forme du 1er étage** (`floor.level === 1`) de chaque décor. La
+       forme du décor au sol reste assurée par le contour de zone statique (inchangé).
+     - **Couleur par-décor** : terrain par défaut ; **vert/orange/rouge** (plus bas niveau occupé) **si ce
+       décor précis a un étage occupé** — aucun impact sur les autres décors. Occupation localisée
+       PAR-FIGURINE : centre par-modèle (`occupied_hexes_by_model`) situé dans le plancher de SON niveau
+       (`level_by_model`), agrégé en `occupiedZoneLevels` (clés `zoneId@@level`), threadé via
+       `DrawBoardOptions` + `occupiedZoneLevelsKey` dans les deps et le fingerprint highlights.
+     - Trait épaissi : `lineStyle(Math.max(2.5, HEX_RADIUS*0.5), color, 0.85)`.
+   - ✅ **Z-order des couches** (`app.stage.sortableChildren`) :
+     `base(0)` < `floorContours(10)` < **murs(20)** < previews/voile (`highlightContainer` 120) < unités(2000).
+     Les **murs passent au-dessus des contours d'étage**. `wallsContainer.zIndex = 20` est (re)forcé à
+     **chaque réattache** dans [BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx) —
+     sinon, le conteneur des murs étant réutilisé (`staticWallsRef`), un mur créé avant l'ajout du zIndex
+     (ex. HMR) resterait à 0 et repasserait sous les contours. Le conteneur `floorContours` a son cycle de
+     vie calqué sur les highlights (préservé au reuse, sinon reconstruit par `drawBoard`).
    - ✅ **Voile au-dessus des previews** : le voile (vue étage ≥1) est dessiné dans `highlightContainer`
      (zIndex 5000 + `sortableChildren`), à chaque draw → passe **par-dessus les zones de preview tir/move**
-     (zIndex 0 dans ce conteneur), sous les unités. Contour sol reste dans `baseHexContainer`.
+     (zIndex 0 dans ce conteneur), sous les unités.
    - ✅ **Badge dynamique au drag** : pendant un move/déploiement preview, le niveau du badge est dérivé
      LIVE de la position provisoire (`floorHexKeysByLevel`, approx. hex-ancre ; commit backend autoritaire).
    - ✅ **Collision niveau-consciente (move)** : deux corrections —
@@ -556,27 +574,16 @@ le modèle + LoS 3D est le vrai chantier.
    - ⏸️ **6d Move preview par niveau** : consommer `valid_move_destinations_pool_by_level`, dessiner
      `pool[currentLevel]`, envoyer `destLevel` dans l'action de move (back déjà prêt).
 
-   ### 🐞 BUGS OUVERTS (en cours de diagnostic) — l'utilisateur les voit encore malgré les fixes
-   1. **Collision encore inter-niveaux au MOVE** d'une unité déployée à l'étage (une fig à l'étage est
-      bloquée par une fig au sol au même hex). Déjà rendus niveau-conscients : `movement_build_valid_destinations_pool`
-      (obstacles filtrés par `unit.level`) ET `validate_move_plan` (`other_occupied_by_level`,
-      [shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)). Un test unitaire de
-      `validate_move_plan` PASSE (niv1 ne collisionne pas niv0). → Donc soit le move ne passe pas par ces
-      checks, soit **l'unité déployée est en réalité au niveau 0**.
-   2. **Badge de niveau pas dynamique au drag** (et « pas toujours affiché »). Le fantôme collé à la souris
-      est rendu par un `renderUnit` SÉPARÉ ([BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx)
-      ~ligne 9624, « Ghost de destination ») qui ne reçoit PAS `modelLevels`/`modelLevelGhost` — contrairement
-      au `renderUnit` principal (~9221). À câbler (dériver le niveau live via `floorHexKeysByLevel`).
+   ### ✅ BUGS RÉSOLUS (confirmés par l'utilisateur)
+   1. **Collision inter-niveaux au MOVE** (une fig à l'étage bloquée par une fig au sol au même hex) — **réglé**.
+      Checks niveau-conscients : `movement_build_valid_destinations_pool` (obstacles filtrés par `unit.level`)
+      + `validate_move_plan` (`other_occupied_by_level`, [shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)).
+   2. **Badge de niveau dynamique au drag** — **réglé** : le ghost de destination reçoit désormais
+      `modelLevels`/`modelLevelGhost` dérivés live ([BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx)).
 
-   **HYPOTHÈSE PRIORITAIRE (#1)** : l'unité déployée est persistée au **niveau 0** (`resolve_model_floor_level`
-   la remet au sol car son empreinte ne tient pas ENTIÈREMENT sur le plancher, §5.1 règle 100%). Ça
-   expliquerait TOUT d'un coup : collisions même niveau 0, pas de badge, pas de ghost.
-
-   **DIAGNOSTIC EN PLACE** : log TEMPORAIRE `[DIAG DEPLOY-COMMIT]` dans `_apply_deploy_plan`
-   ([deployment_handlers.py](file:///home/greg/40k/engine/phase_handlers/deployment_handlers.py)) — affiche
-   dans le terminal API à chaque déploiement : `requested_level`, `effective` (niveau dérivé), `floorN_hexes`,
-   `footprint_in_floor`. → Si `effective=0` : hypothèse confirmée (fig au sol, empreinte hors plancher) ;
-   décision à prendre : agrandir le plancher de test, ou assouplir la règle (centre + X% au lieu de 100%,
-   cf. §5.1). **Retirer ce log + `[DIAG ÉTAGES]`/`[DIAG DEPLOY]` (front) une fois résolu.**
+   **Logs de diagnostic** : tous les logs temporaires `[DIAG ...]` (FORMATION, POOL, SQUAD-POOL, PREVIEW,
+   DEPLOY-COMMIT dans [deployment_handlers.py](file:///home/greg/40k/engine/phase_handlers/deployment_handlers.py) ;
+   MOVE dans [movement_handlers.py](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)) ont été
+   **retirés**. Le calcul `resolve_model_floor_level` (niveau effectif) reste utilisé par le commit.
 
 Chantiers 1→5 sont backend (moteur + règles), 6 est frontend. 1 doit précéder tous les autres.

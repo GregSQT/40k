@@ -208,19 +208,59 @@ Deux options :
   sinon N bumps par plan ; (ii) **preview** : passer `commit=False` à l'appel @1556 (perf seule — deepcopy prouvée,
   constat 4) ; (iii) **destroy_model** : appel d'invalidation explicite requis **quelle que soit** l'option (coût égal).
 
+### 4.1bis Décisions de conception figées (D1–D4)
+
+**Fil conducteur** : un unique helper `_touch_unit_los(game_state, unit_id)` porte **toute** la logique
+(invalidation ciblée du pair-cache + `version++` + batch + futur warm). Les deux points bas
+(`update_model_position`, `update_units_cache_position`) ne font **que l'appeler**. Tout le reste du
+refactor = suppression des `version++`/invalidations dispersés.
+
+**D1 — Batch-guard : dirty-set dans `game_state`.**
+`_touch_unit_los` : si un batch est ouvert (`game_state.get("_los_batch") is not None`) → **accumule**
+`unit_id` dans le set, rien d'autre ; sinon → invalidation ciblée + `version++` **immédiats**.
+`commit_move` [shared_utils.py:3780](../../engine/phase_handlers/shared_utils.py#L3780) ouvre le batch
+avant sa boucle `update_model_position`, le ferme après → **1 seule** invalidation par unité + **1 seul**
+`version++` pour tout le plan (remplace l'invalidate+bump explicite @3823-3826). Les chemins translate
+(1 seul appel `update_units_cache_position`) n'ouvrent pas de batch → touch immédiat unique. La
+déduplication par `set` rend inoffensif le double-touch (`update_model_position` rappelle
+`update_units_cache_position` quand l'ancre bouge). Pas de compteur de profondeur.
+
+**D2 — `commit: bool` : NON introduit en étape 2.**
+Le move-LoS-preview [shooting_handlers.py:1556](../../engine/phase_handlers/shooting_handlers.py#L1556)
+opère sur une **deepcopy** (constat 4) → invalider/bumper sur la copie est **sans effet** sur le vrai
+`game_state`. Distinguer `commit` n'apporte **rien à la correction**. Le flag ne sert qu'à éviter le coût
+du **réchauffage** → repoussé en étape 4, renommé `warm=False`, uniquement pour skip le recompute.
+**Conséquence : zéro changement de signature en étape 2, aucun appelant à toucher pour le flag.**
+
+**D3 — Version vs pair-cache : découplage.**
+`_unit_los_pair_cache` passe de `(ver, dict)` à un **dict pur** `{(s,t): result}`. `_touch_unit_los` en
+supprime les entrées `(s,t)` où `s == unit_id` ou `t == unit_id` (même logique que
+[`_invalidate_los_cache_for_moved_unit`](../../engine/phase_handlers/shooting_handlers.py#L1870), étendue
+au pair-cache). Dans `compute_unit_los` @3906-3918 : retirer le bloc `holder=(ver,{})` → lecture/écriture
+directe dans le dict. Le `version++` **centralisé** (dans `_touch_unit_los`) subsiste pour les **3 autres**
+consommateurs qui en dépendent réellement, **inchangés** : `_target_pool_cache`, `_los_cache_version`
+[shooting_handlers.py:1365](../../engine/phase_handlers/shooting_handlers.py#L1365), `enemy_pos_hash`
+[shooting_handlers.py:3050](../../engine/phase_handlers/shooting_handlers.py#L3050).
+
+**D4 — Réchauffage : étape 4 séparée, flag off par défaut.**
+Étapes 2-3 : pair-cache **lazy** (recalcul au prochain besoin) → correction complète sans réchauffage.
+Étape 4 : recalcul `(U→ennemis)` post-commit derrière `warm` (off par défaut), **synchrone d'abord**
+(simple) ; différé seulement si une mesure montre un allongement HTTP gênant. Découple correction
+(obligatoire) et perf (optionnelle).
+
 ### 4.2 Invalidation ciblée du pair-cache
 
-Rendre `_unit_los_pair_cache` **persistant** (ne plus le jeter sur `version++`) et supprimer
-seulement les entrées `(s, t)` où `s == moved` ou `t == moved`, dans le choke-point — exactement
-comme le fait déjà [`_invalidate_los_cache_for_moved_unit`](../../engine/phase_handlers/shooting_handlers.py#L1870)
-pour `los_cache`. Étendre cette fonction (ou le choke-point) au pair-cache.
+Concrétise **D3**. `_unit_los_pair_cache` devient **persistant** (dict pur, plus jeté sur `version++`) ;
+seules les entrées `(s, t)` où `s == moved` ou `t == moved` sont supprimées, par `_touch_unit_los` — en
+réutilisant la logique de [`_invalidate_los_cache_for_moved_unit`](../../engine/phase_handlers/shooting_handlers.py#L1870)
+(qui traite déjà `los_cache`), étendue au pair-cache.
 
-### 4.3 Réchauffage incrémental (optionnel, activable)
+### 4.3 Réchauffage incrémental (optionnel, activable — flag `warm`, off par défaut)
 
-Après le commit d'un déplacement d'unité `U` :
+Après le commit d'un déplacement d'unité `U` (voir **D4**) :
 - recalculer `compute_unit_los(U, ennemi)` pour chaque ennemi (ce qui repeuple le pair-cache) ;
-- ne le faire que hors preview, et idéalement en tâche différée pour ne pas rallonger la réponse
-  HTTP du déplacement (mais le joueur est en train de sélectionner l'unité suivante → temps mort).
+- ne le faire que si `warm` est activé et hors preview ; synchrone d'abord, différé seulement si mesure
+  montre un allongement HTTP gênant (le joueur sélectionne l'unité suivante → temps mort).
 
 Résultat attendu : à `shooting_build_activation_pool`, toutes les paires sont chaudes →
 `los_clear_and_pool_s` s'effondre même en pool exact.
@@ -230,14 +270,15 @@ Résultat attendu : à `shooting_build_activation_pool`, toutes les paires sont 
 1. **Audit de couverture** : ✅ **FAIT** (§3bis). Liste close. Résultat : 4 trous (reactive,
    charge-translate, **fight-translate pile-in/consolidation**, destroy_model), preview = deepcopy
    (hors sujet correction), ingress/réserves/disembark inexistant.
-2. **Choke-point** : ✅ **tranché = (a′) per-model** (§4.1). Accrocher invalidation + bump + hook de réchauffage
-   dans `update_model_position` **et** `update_units_cache_position`, avec garde de batch (pas de N bumps par plan)
-   et paramètre `commit: bool`. Router tous les points de §3/§3bis, ajouter l'appel explicite pour `destroy_model`,
-   puis **supprimer** les `version++` / invalidations dispersés (dont le double bump charge-plan @3826/@5094) au
-   profit du point unique.
-3. **Pair-cache ciblé** : rendre `_unit_los_pair_cache` persistant + invalidation ciblée dans le
-   choke-point. Retirer le jet-sur-version de `compute_unit_los`.
-4. **Réchauffage** : brancher le recalcul `(U → ennemis)` post-commit (hors preview).
+2. **Choke-point** : ✅ **tranché = (a′) per-model** (§4.1) + décisions **D1–D4** (§4.1bis). Créer le helper
+   `_touch_unit_los`, l'appeler depuis `update_model_position` **et** `update_units_cache_position`, ajouter le
+   batch-guard dans `commit_move` (D1), ajouter l'appel explicite dans `destroy_model`. **Pas** de `commit: bool`
+   (D2). Router tous les points de §3/§3bis puis **supprimer** les `version++` / invalidations dispersés (dont le
+   double bump charge-plan @3826/@5094) au profit du helper unique.
+3. **Pair-cache ciblé** : appliquer **D3** — `_unit_los_pair_cache` en dict pur persistant, invalidation ciblée
+   dans `_touch_unit_los`, retrait du bloc versionné `holder=(ver,{})` de `compute_unit_los` (@3906-3918).
+4. **Réchauffage** : appliquer **D4** — brancher le recalcul `(U → ennemis)` post-commit derrière `warm` (off par
+   défaut, hors preview).
 5. **Bascule défaut** : une fois validé, envisager de repasser le pool de tir en **mode exact par
    défaut** (voir `shoot_pool_require_los_target`), le coût de transition étant désormais amorti.
 
@@ -245,8 +286,8 @@ Résultat attendu : à `shooting_build_activation_pool`, toutes les paires sont 
 
 - **Risque n°1 — LoS périmée** : si un seul chemin de déplacement contourne le choke-point, le
   pair-cache ciblé garde une entrée fausse → « tir à travers un mur ». C'est **le** risque. Mitigation :
-  option (a) au point le plus bas + audit §5.1 exhaustif + assertion optionnelle en mode debug
-  comparant pair-cache ciblé vs recalcul direct.
+  `_touch_unit_los` accroché aux deux points bas (a′, D1) + audit §3bis exhaustif + assertion optionnelle
+  en mode debug comparant pair-cache ciblé vs recalcul direct (`assert_los_pair_cache_consistent`, §6).
 - **Test de non-régression obligatoire — harness scripté** (le projet n'a pas de pytest : validation
   par script + `--step` + replay). Deux pièces :
 
