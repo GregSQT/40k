@@ -517,8 +517,8 @@ le modèle + LoS 3D est le vrai chantier.
      `currentLevel` est un HINT de vue. Le niveau réel d'une fig = `currentLevel` **si son empreinte tient
      sur le plancher de ce niveau**, sinon **sol (0)**. Appliqué dans `deployment_preview_plan` ET le commit
      `_apply_deploy_plan`. Corrige le bug : une **escouade mixte** déployée en vue étage (1 fig sur le plancher
-     + autres au sol) ne rejette plus les figs de sol au voile rouge — elles redeviennent 'sol'. (À rappliquer
-     au **move** quand 6d enverra `destLevel`.)
+     + autres au sol) ne rejette plus les figs de sol au voile rouge — elles redeviennent 'sol'.
+     **✅ Rappliqué au MOVE** (preview `movement_preview_move_plan` + commit `commit_move_plan`, cf. 6d).
    - ✅ **Badge étage** : par-figurine, haut-gauche de l'icône, **numéro seul blanc sur rond noir**
      (niveau backend-autoritaire `level_by_model`/`level`). Même rayon que les badges du bas
      (`statusBadgeRadius`). Squad **réparti** (figs à niveaux différents) → **toutes** les figs affichent
@@ -541,9 +541,10 @@ le modèle + LoS 3D est le vrai chantier.
        `DrawBoardOptions` + `occupiedZoneLevelsKey` dans les deps et le fingerprint highlights.
      - Trait épaissi : `lineStyle(Math.max(2.5, HEX_RADIUS*0.5), color, 0.85)`.
    - ✅ **Z-order des couches** (`app.stage.sortableChildren`) :
-     `base(0)` < `floorContours(10)` < **murs(20)** < previews/voile (`highlightContainer` 120) < unités(2000).
-     Les **murs passent au-dessus des contours d'étage**. `wallsContainer.zIndex = 20` est (re)forcé à
-     **chaque réattache** dans [BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx) —
+     `base(0)` < `floorContours(10)` < previews/voile (`highlightContainer` 120) < **murs(130)** < unités(2000).
+     Les **murs passent au-dessus du voile/contour d'étage ET des previews tir/move** (choix utilisateur :
+     previews < voile < murs), tout en restant sous les figs et la ligne de mesure. `wallsContainer.zIndex = 130`
+     est (re)forcé à **chaque réattache** dans [BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx) —
      sinon, le conteneur des murs étant réutilisé (`staticWallsRef`), un mur créé avant l'ajout du zIndex
      (ex. HMR) resterait à 0 et repasserait sous les contours. Le conteneur `floorContours` a son cycle de
      vie calqué sur les highlights (préservé au reuse, sinon reconstruit par `drawBoard`).
@@ -571,8 +572,28 @@ le modèle + LoS 3D est le vrai chantier.
      l'étage crée encore une EZ au sol) — à traiter avec la LoS/engagement 3D (règles 2"/5" §2.5).
    - ⏸️ **6c Vue mono-niveau + ghost** : n'afficher que les figs du niveau courant, ghost pour celles d'un
      autre niveau qui débordent (via `level_by_model` déjà exposé ; nouveau flag, pas `modelGhost`).
-   - ⏸️ **6d Move preview par niveau** : consommer `valid_move_destinations_pool_by_level`, dessiner
-     `pool[currentLevel]`, envoyer `destLevel` dans l'action de move (back déjà prêt).
+   - ✅ **6d Move par-figurine niveau-conscient (COMPLET)** — miroir exact du déploiement, bout-en-bout :
+     - **Pool** `movement_build_model_destinations_pool(…, level)` : occupation des autres escouades ET des
+       sœurs calculée **par niveau** (sol + niveau de vue), niveau **effectif** de chaque destination dérivé
+       de l'empreinte sur le plancher, filtre socle intra-escouade au **même niveau effectif**. Murs bloquants
+       à tous niveaux. Tout au niveau 0 → comportement 2D historique (non-régression)
+       ([movement_handlers.py](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)).
+     - **API** `move_model_destinations` + `move_squad_unplaced_destinations` : acceptent `level` (vue) et un
+       `provisional_plan` en `(col,row,level)` ([api_server.py](file:///home/greg/40k/services/api_server.py)).
+     - **Front** : le plan de move porte `level` **de bout en bout** — `readSquadModelPositions` lit
+       `level_by_model` (init), le **drop** capture `currentLevel` (`handleMoveModelInPlan`), preview
+       (`refreshSquadMovePlanValidity`), pool (`handleSelectModelForMove` + batch `move_squad_unplaced_destinations`)
+       et commit (`handleCommitSquadMovePlan`) envoient `(mid,col,row,level)`
+       ([useEngineAPI.ts](file:///home/greg/40k/frontend/src/hooks/useEngineAPI.ts), [BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx)).
+     - **Publication `level_by_model`** : `_recompute_squad_occupied_hexes` (appelé à chaque mutation de position)
+       et le build initial de `units_cache` publient désormais `level_by_model` depuis `models_cache[mid]["level"]`.
+       Sans ça le niveau par-figurine ne remontait jamais au front (rendu + init du plan retombaient au niveau
+       d'ancre → tout traité niveau 0) ([shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)).
+     - **Niveau EFFECTIF au move** (§13.06, appliqué comme au déploiement) : preview (`movement_preview_move_plan`)
+       ET commit (`commit_move_plan`) résolvent le niveau via `resolve_model_floor_level`. Une fig dont
+       l'empreinte **déborde partiellement** du plancher n'est **plus en voile rouge** — elle est simplement
+       ramenée au **sol (0)** (preview) et committée au sol (persist). `validate_floor_placement`/`floor_bad`
+       du preview supprimé (le niveau effectif encode déjà l'appartenance au plancher).
 
    ### ✅ BUGS RÉSOLUS (confirmés par l'utilisateur)
    1. **Collision inter-niveaux au MOVE** (une fig à l'étage bloquée par une fig au sol au même hex) — **réglé**.
