@@ -2190,7 +2190,7 @@ def execute_action():
             "result": {
                 "action": "move_model_destinations",
                 "model_id": str(model_id),
-                "destinations": [[int(c), int(r)] for c, r in _model_pool["destinations"]],
+                "destinations": [[int(c), int(r), int(lv)] for c, r, lv in _model_pool["destinations"]],
                 "footprint_mask_loops": _compact_mask_loops_for_api_json(
                     _model_pool["footprint_mask_loops"]
                 ),
@@ -2242,7 +2242,7 @@ def execute_action():
             _pool = _mh_squad.movement_build_model_destinations_pool(
                 engine.game_state, _mid_str, provisional_plan=_provisional_plan_sq, level=_sq_level
             )
-            _pools[_mid_str] = [[int(c), int(r)] for c, r in _pool["destinations"]]
+            _pools[_mid_str] = [[int(c), int(r)] for c, r, _lv in _pool["destinations"]]
         if _sq_pt and _sq_t0 is not None:
             append_perf_timing_line(
                 f"SQUAD_UNPLACED_POOLS unit={squad_id} models_computed={len(_pools)} "
@@ -2834,6 +2834,7 @@ def _build_units_from_army_config(
                     "HP_CUR": require_key(unit_data, "HP_MAX"),
                     "HP_MAX": require_key(unit_data, "HP_MAX"),
                     "MOVE": require_key(unit_data, "MOVE"),
+                    "MODEL_HEIGHT": float(require_key(unit_data, "MODEL_HEIGHT")),
                     "T": require_key(unit_data, "T"),
                     "ARMOR_SAVE": require_key(unit_data, "ARMOR_SAVE"),
                     "INVUL_SAVE": require_key(unit_data, "INVUL_SAVE"),

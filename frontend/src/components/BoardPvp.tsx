@@ -942,6 +942,20 @@ function cssColorToNumber(variableName: string): number {
   return parsed;
 }
 
+/** Lit un nombre depuis une variable CSS de :root.
+ *  Pas de fallback : variable absente/invalide → erreur explicite. */
+function cssNumber(variableName: string): number {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(variableName).trim();
+  if (value === "") {
+    throw new Error(`CSS variable ${variableName} not found or empty`);
+  }
+  const parsed = parseFloat(value);
+  if (Number.isNaN(parsed)) {
+    throw new Error(`CSS variable ${variableName} is not a number: ${value}`);
+  }
+  return parsed;
+}
+
 interface TargetRingCtx {
   units: Unit[];
   unitsCache?: Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>;
@@ -3581,9 +3595,9 @@ export default function Board({
           visualPreview.terrainCoverCells,
           losUnionLayout,
           LOS_PREVIEW_CLEAR_HEX,
-          0.4,
+          cssNumber("--los-preview-alpha"),
           LOS_PREVIEW_COVER_HEX,
-          0.4,
+          cssNumber("--los-preview-alpha"),
           app.renderer
         );
         overlay.visible = true;
@@ -3692,9 +3706,9 @@ export default function Board({
             losPreview.coverCells,
             losUnionLayout,
             LOS_PREVIEW_CLEAR_HEX,
-            0.4,
+            cssNumber("--los-preview-alpha"),
             LOS_PREVIEW_COVER_HEX,
-            0.4,
+            cssNumber("--los-preview-alpha"),
             app.renderer
           );
           overlay.visible = true;
@@ -6018,9 +6032,9 @@ export default function Board({
           coverCells,
           losUnionLayout,
           LOS_PREVIEW_CLEAR_HEX,
-          0.4,
+          cssNumber("--los-preview-alpha"),
           LOS_PREVIEW_COVER_HEX,
-          0.4,
+          cssNumber("--los-preview-alpha"),
           app.renderer
         );
         overlay.visible = true;
@@ -6555,9 +6569,9 @@ export default function Board({
           visualPreview.terrainCoverCells,
           losUnionLayout,
           LOS_PREVIEW_CLEAR_HEX,
-          0.4,
+          cssNumber("--los-preview-alpha"),
           LOS_PREVIEW_COVER_HEX,
-          0.4,
+          cssNumber("--los-preview-alpha"),
           app.renderer
         );
         overlay.visible = true;

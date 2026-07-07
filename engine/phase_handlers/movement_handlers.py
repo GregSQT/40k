@@ -1847,35 +1847,6 @@ def _euclidean_ground_anchor_multihex(
 
 
 @profile_move_pool_build
-def _multilevel_floor_and_height(
-    game_state: Dict[str, Any],
-    terrain_areas: List[Dict[str, Any]],
-) -> Tuple[List[int], Dict[int, Set[Tuple[int, int]]], Dict[int, float]]:
-    """Étages présents + hexes de plancher par niveau + hauteur (unités-norme) par niveau.
-
-    Source UNIQUE de la géométrie verticale partagée entre le pool squad
-    (``_multilevel_floor_destinations``) et le pool par-figurine
-    (``movement_build_model_destinations_pool``) : garantit un coût de montée §13.06 identique.
-    Hauteur GLOBALE par niveau (lève si incohérente entre ruines).
-    """
-    from engine.terrain_utils import floor_hexes_at_level
-    present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})  # get allowed (aire sans étage)
-    floor_hexes_by_level = {lv: floor_hexes_at_level(terrain_areas, lv) for lv in present}
-    inches_to_subhex = int(require_key(game_state, "inches_to_subhex"))
-    height_by_level: Dict[int, float] = {0: 0.0}
-    for a in terrain_areas:
-        for fl in a.get("floors", []):  # get allowed (aire sans étage)
-            lv = int(fl["level"])
-            hn = float(fl["height_inches"]) * inches_to_subhex * ENGAGEMENT_NORM_HEX_WIDTH
-            if lv in height_by_level and abs(height_by_level[lv] - hn) > 1e-6:
-                raise ValueError(
-                    f"_multilevel_floor_and_height: niveau {lv} avec hauteurs incohérentes entre "
-                    f"ruines ({height_by_level[lv]:.3f} vs {hn:.3f}) — hauteur globale par niveau non supportée"
-                )
-            height_by_level[lv] = hn
-    return present, floor_hexes_by_level, height_by_level
-
-
 def _multilevel_floor_destinations(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -1903,11 +1874,11 @@ def _multilevel_floor_destinations(
     l'engagement/EZ ennemie EN HAUTEUR à la destination n'est pas encore modélisé (aucun ennemi à
     l'étage aujourd'hui) — à traiter avec la LoS/engagement 3D.
     """
-    from engine.terrain_utils import validate_floor_placement
+    from engine.terrain_utils import floor_hexes_at_level, validate_floor_placement
     from engine.game_state import unit_can_occupy_upper_floor
 
     terrain_areas = game_state.get("terrain_areas", [])  # get allowed (peut être vide)
-    present, floor_hexes_by_level, height_by_level = _multilevel_floor_and_height(game_state, terrain_areas)
+    present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})  # get allowed (aire sans étage)
     if not present:
         return {}  # aucun étage → no-op (non-régression du mouvement 2D)
     if not unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS")):
@@ -1916,7 +1887,21 @@ def _multilevel_floor_destinations(
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
     walls = game_state.get("wall_hexes", set())  # get allowed
+    inches_to_subhex = int(require_key(game_state, "inches_to_subhex"))
     unit_id_str = str(require_key(unit, "id"))
+
+    floor_hexes_by_level = {lv: floor_hexes_at_level(terrain_areas, lv) for lv in present}
+    height_by_level: Dict[int, float] = {0: 0.0}
+    for a in terrain_areas:
+        for fl in a.get("floors", []):  # get allowed (aire sans étage)
+            lv = int(fl["level"])
+            hn = float(fl["height_inches"]) * inches_to_subhex * ENGAGEMENT_NORM_HEX_WIDTH
+            if lv in height_by_level and abs(height_by_level[lv] - hn) > 1e-6:
+                raise ValueError(
+                    f"_multilevel_floor_destinations: niveau {lv} avec hauteurs incohérentes entre "
+                    f"ruines ({height_by_level[lv]:.3f} vs {hn:.3f}) — hauteur globale par niveau non supportée"
+                )
+            height_by_level[lv] = hn
 
     # PRÉ-CHECK de portée (perf) : borne basse pour finir sur un étage L = distance directe
     # (murs ignorés) start→cellule + montée height[L]. Si AUCUN étage n'a une cellule dans le
@@ -2563,6 +2548,89 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     return valid_destinations
 
 
+def _model_climb_reachable_floor_cells(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    squad_id: str,
+    model: Dict[str, Any],
+    start_pos: Tuple[int, int],
+    budget: int,
+    view_level: int,
+    ground_obstacles: Set[Tuple[int, int]],
+    terrain_areas: List[Dict[str, Any]],
+) -> List[Tuple[int, int]]:
+    """Cases de l'étage ``view_level`` réellement atteignables par la figurine avec le coût de
+    montée/descente §13.06 (champ géodésique multi-niveaux). Empreinte entière sur le plancher, hors
+    mur et hors figurine de l'étage. Retour : liste de (col, row) (vide si aucune atteignable).
+
+    Source UNIQUE du coût vertical : ``reachable_multilevel_field`` — même moteur que le pool squad
+    ``_multilevel_floor_destinations``. À n'appeler que pour une unité capable de finir en hauteur, en
+    métrique euclidienne et hors FLY (garanti par l'appelant).
+    """
+    from engine.terrain_utils import floor_hexes_at_level, validate_floor_placement
+    from engine.hex_utils import get_neighbors, precompute_footprint_offsets
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    walls = set(game_state.get("wall_hexes", set()))  # get allowed
+    inches_to_subhex = int(require_key(game_state, "inches_to_subhex"))
+
+    present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})  # get allowed
+    floor_hexes_by_level = {lv: floor_hexes_at_level(terrain_areas, lv) for lv in present}
+    height_by_level: Dict[int, float] = {0: 0.0}
+    for a in terrain_areas:
+        for fl in a.get("floors", []):  # get allowed
+            lv = int(fl["level"])
+            hn = float(fl["height_inches"]) * inches_to_subhex * ENGAGEMENT_NORM_HEX_WIDTH
+            if lv in height_by_level and abs(height_by_level[lv] - hn) > 1e-6:
+                raise ValueError(
+                    f"_model_climb_reachable_floor_cells: niveau {lv} avec hauteurs incohérentes entre "
+                    f"ruines ({height_by_level[lv]:.3f} vs {hn:.3f}) — hauteur globale par niveau non supportée"
+                )
+            height_by_level[lv] = hn
+
+    obstacles_by_level: Dict[int, Set[Tuple[int, int]]] = {0: set(ground_obstacles)}
+    occupied_by_level: Dict[int, Set[Tuple[int, int]]] = {}
+    for lv, fh in floor_hexes_by_level.items():
+        figs = build_occupied_positions_set(game_state, exclude_unit_id=squad_id, level=lv)
+        occupied_by_level[lv] = figs
+        ring = {nb for cell in fh for nb in get_neighbors(cell[0], cell[1]) if nb not in fh}
+        obstacles_by_level[lv] = ring | walls | figs
+
+    shape = require_key(model, "BASE_SHAPE")
+    base = require_key(model, "BASE_SIZE")
+    orientation = int(unit.get("orientation", 0))  # get allowed
+    if shape == "round":
+        off_even: Tuple[Tuple[int, int], ...] = ()
+        off_odd: Tuple[Tuple[int, int], ...] = ()
+    else:
+        off_even, off_odd = precompute_footprint_offsets(shape, base, orientation)
+
+    field = reachable_multilevel_field(
+        start_pos, 0, shape, base, off_even, off_odd,
+        board_cols, board_rows, obstacles_by_level, floor_hexes_by_level, height_by_level,
+        budget * ENGAGEMENT_NORM_HEX_WIDTH, allow_vertical=True, ignore_vertical_cost=False,
+    )
+
+    stub = {
+        "id": squad_id,
+        "UNIT_KEYWORDS": require_key(unit, "UNIT_KEYWORDS"),
+        "BASE_SHAPE": shape,
+        "BASE_SIZE": base,
+        "orientation": orientation,
+    }
+    occ_view = occupied_by_level.get(view_level, set())
+    out: List[Tuple[int, int]] = []
+    for (c, r, lv), _d in field.items():
+        if lv != view_level or (c, r) == start_pos:
+            continue
+        if (c, r) in walls or (c, r) in occ_view:
+            continue
+        ok, _ = validate_floor_placement(stub, c, r, lv, terrain_areas)
+        if ok:
+            out.append((c, r))
+    return out
+
+
 def movement_build_model_destinations_pool(
     game_state: Dict[str, Any],
     model_id: str,
@@ -2623,6 +2691,11 @@ def movement_build_model_destinations_pool(
     # Tout au niveau 0 aujourd'hui → identique au comportement 2D historique (non-régression). ---
     view_level = int(level or 0)
     terrain_areas = require_key(game_state, "terrain_areas")
+    # Clairance verticale (§13.06 maison) : hexes de sol infranchissables par ce modèle (trop haut pour
+    # passer sous un étage bas). Injecté dans les obstacles AU SOL uniquement (jamais dans wall_hexes
+    # partagé : ces hexes SONT le plancher de l'étage, praticable en surface). Vide si assez petit / FLY.
+    from engine.terrain_utils import low_clearance_ground_hexes
+    _low_clear = low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
     from engine.terrain_utils import floor_hexes_at_level, resolve_model_floor_level
     floor_hexes_view: Set[Tuple[int, int]] = (
         floor_hexes_at_level(terrain_areas, view_level) if view_level >= 1 else set()
@@ -2734,18 +2807,6 @@ def movement_build_model_destinations_pool(
     _mm_base = require_key(model, "BASE_SIZE")
     _mm_shape = require_key(model, "BASE_SHAPE")
     _mm_use_euclidean = _move_distance_metric(game_state) == "euclidean"
-    # Mouvement vertical (§13.06) : si la VUE est sur un étage (view_level >= 1), que l'unité peut y
-    # finir son move (INFANTRY/BEASTS/SWARM/FLY/MONSTER) et que la métrique est euclidienne, on remplace
-    # le champ PLANAIRE par le champ géodésique MULTI-NIVEAUX (coût de montée soustrait du budget). FLY
-    # traité en planaire pour l'instant (fly+étages différé, cf. movement_build_valid_destinations_pool).
-    from engine.game_state import unit_can_occupy_upper_floor as _unit_can_occupy_upper_floor
-    _multi_active = (
-        _mm_use_euclidean
-        and view_level >= 1
-        and not has_fly
-        and bool(floor_hexes_view)
-        and _unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS"))
-    )
     # Instrumentation perf (coût nul si W40K_PERF_TIMING désactivé) — cf. MODEL_POOL_BUILD au return.
     from engine.perf_timing import perf_timing_enabled
     import time as _mm_clock
@@ -2755,93 +2816,7 @@ def movement_build_model_destinations_pool(
     _mm_cache_hit = False
     _mm_cells_n = 0
     _mm_obstacles_n = 0
-    if _multi_active:
-        # --- Champ géodésique MULTI-NIVEAUX (§13.06) : source unique = reachable_multilevel_field,
-        # identique au pool squad _multilevel_floor_destinations. On ne retient que les destinations
-        # FINISSANT au niveau de vue (le sol reste servi par la vue niveau 0). Le coût de montée/
-        # descente est soustrait du budget → le disque n'est plus identique au niveau 0. ---
-        from engine.terrain_utils import validate_floor_placement as _ml_vfp
-        from engine.hex_utils import get_neighbors as _ml_neighbors
-        _ml_present, _ml_fh_by_lv, _ml_h_by_lv = _multilevel_floor_and_height(game_state, terrain_areas)
-        _ml_walls = set(wall_hexes)
-        # Obstacles de traversée par niveau : sol = mêmes obstacles que le champ planaire (non-régression
-        # au sol) ; étages = anneau hors-plancher + murs + figs de l'étage (confinement à l'empreinte).
-        _ml_g_obs = set(wall_hexes)
-        if not (desperate_escape or thru_enemy):
-            _ml_g_obs |= enemy_occupied
-        if not thru_friendly:
-            _ml_g_obs |= _friendly_traverse
-        if not (desperate_escape or thru_ez):
-            _ml_g_obs |= ez_anchor_forbidden
-        _ml_g_obs.discard(start_pos)
-        _ml_obst_by_lv: Dict[int, Set[Tuple[int, int]]] = {0: _ml_g_obs}
-        _ml_occ_by_lv: Dict[int, Set[Tuple[int, int]]] = {}
-        for _ml_lv, _ml_fh in _ml_fh_by_lv.items():
-            _ml_figs = build_occupied_positions_set(game_state, exclude_unit_id=squad_id, level=_ml_lv)
-            _ml_occ_by_lv[_ml_lv] = _ml_figs
-            _ml_ring = {nb for cell in _ml_fh for nb in _ml_neighbors(cell[0], cell[1]) if nb not in _ml_fh}
-            _ml_obst_by_lv[_ml_lv] = _ml_ring | _ml_walls | _ml_figs
-        # Empreinte orientée du mover (mêmes offsets que le champ planaire).
-        if _mm_shape == "round":
-            _ml_off_even: Tuple[Tuple[int, int], ...] = ()
-            _ml_off_odd: Tuple[Tuple[int, int], ...] = ()
-        else:
-            from engine.hex_utils import precompute_footprint_offsets as _ml_pfo
-            _ml_off_even, _ml_off_odd = _ml_pfo(_mm_shape, _mm_base, int(unit.get("orientation", 0)))  # get allowed
-        # Cache : même règle que le planaire — sûr seulement si thru_friendly (sinon dépend du plan
-        # provisoire des sœurs, obstacles variables).
-        _ml_cache: Dict[Any, Dict[Tuple[int, int, int], float]] = game_state.setdefault(
-            "_move_model_ml_field_cache", {}
-        )
-        _ml_key = (str(model_id), start_col, start_row, int(budget), int(view_level))
-        _ml_field3d = _ml_cache.get(_ml_key) if thru_friendly else None
-        if _ml_field3d is None:
-            _ml_field3d = reachable_multilevel_field(
-                start_pos, 0, _mm_shape, _mm_base, _ml_off_even, _ml_off_odd,
-                board_cols, board_rows, _ml_obst_by_lv, _ml_fh_by_lv, _ml_h_by_lv,
-                budget * ENGAGEMENT_NORM_HEX_WIDTH, allow_vertical=True, ignore_vertical_cost=False,
-            )
-            if thru_friendly:
-                _ml_cache[_ml_key] = _ml_field3d
-        # Destinations finissant au niveau de vue (hors mur, hors fig du niveau, placement §13.06 valide).
-        _ml_stub = {
-            "id": squad_id,
-            "UNIT_KEYWORDS": require_key(unit, "UNIT_KEYWORDS"),
-            "BASE_SHAPE": _mm_shape,
-            "BASE_SIZE": _mm_base,
-            "orientation": int(unit.get("orientation", 0)),  # get allowed
-        }
-        _ml_occ_view = _ml_occ_by_lv.get(view_level, set())
-        reachable = []
-        eff_by_dest: Dict[Tuple[int, int], int] = {}
-        _dbg_at_view = _dbg_rej_wall = _dbg_rej_occ = _dbg_rej_vfp = 0
-        for (_ml_c, _ml_r, _ml_cell_lv), _ml_d in _ml_field3d.items():
-            if _ml_cell_lv != view_level:
-                continue
-            _dbg_at_view += 1
-            if (_ml_c, _ml_r) == start_pos:
-                continue
-            if (_ml_c, _ml_r) in _ml_walls:
-                _dbg_rej_wall += 1
-                continue
-            if (_ml_c, _ml_r) in _ml_occ_view:
-                _dbg_rej_occ += 1
-                continue
-            _ml_ok, _ = _ml_vfp(_ml_stub, _ml_c, _ml_r, _ml_cell_lv, terrain_areas)
-            if _ml_ok:
-                reachable.append((_ml_c, _ml_r))
-                eff_by_dest[(_ml_c, _ml_r)] = _ml_cell_lv
-            else:
-                _dbg_rej_vfp += 1
-        import sys as _dbg_sys
-        print(
-            f"[ML_MOVE] model={model_id} view_level={view_level} budget={budget} base={_mm_base} "
-            f"shape={_mm_shape} floor_hexes_view={len(floor_hexes_view)} field_total={len(_ml_field3d)} "
-            f"at_view={_dbg_at_view} rej_wall={_dbg_rej_wall} rej_occ={_dbg_rej_occ} rej_vfp={_dbg_rej_vfp} "
-            f"reachable={len(reachable)}",
-            file=_dbg_sys.stderr, flush=True,
-        )
-    elif _mm_use_euclidean:
+    if _mm_use_euclidean:
         # Cache du CHAMP (sans les filtres de destination) : valide tant que les obstacles ne
         # changent pas. Les sœurs ne sont des obstacles que si NON thru_friendly → cache seulement
         # sûr quand thru_friendly (sinon le champ dépend du plan provisoire, recalcul obligatoire).
@@ -2859,7 +2834,7 @@ def movement_build_model_destinations_pool(
                 # destination (occupé / EZ ennemie) restent appliqués plus bas, comme le BFS hex.
                 _mm_obstacles: Set[Tuple[int, int]] = set()
             else:
-                _mm_obstacles = set(wall_hexes)
+                _mm_obstacles = set(wall_hexes) | _low_clear
                 if not (desperate_escape or thru_enemy):
                     _mm_obstacles |= enemy_occupied
                 if not thru_friendly:
@@ -2954,21 +2929,79 @@ def movement_build_model_destinations_pool(
     # Filtre destination PAR NIVEAU EFFECTIF : empreinte dans le plateau, hors murs (tous niveaux),
     # hors occupation des figs DE CE NIVEAU. Une fig d'un autre étage ne bloque pas (superposition).
     # Le BFS ne borne que le hex central → l'empreinte complète est revérifiée ici.
-    if not _multi_active:
-        _reachable_lvl: List[Tuple[int, int]] = []
-        eff_by_dest: Dict[Tuple[int, int], int] = {}
-        for ac, ar in reachable:
-            cells = _mover_cells(ac, ar)
-            if any(not (0 <= c < board_cols and 0 <= r < board_rows) for c, r in cells):
-                continue
-            if any(c in wall_hexes for c in cells):
-                continue
-            eff = _eff_level(cells)
-            if any(c in fig_occ_by_level.get(eff, set()) for c in cells):
-                continue
-            _reachable_lvl.append((ac, ar))
-            eff_by_dest[(ac, ar)] = eff
-        reachable = _reachable_lvl
+    _reachable_lvl: List[Tuple[int, int]] = []
+    eff_by_dest: Dict[Tuple[int, int], int] = {}
+    for ac, ar in reachable:
+        cells = _mover_cells(ac, ar)
+        if any(not (0 <= c < board_cols and 0 <= r < board_rows) for c, r in cells):
+            continue
+        if any(c in wall_hexes for c in cells):
+            continue
+        eff = _eff_level(cells)
+        if any(c in fig_occ_by_level.get(eff, set()) for c in cells):
+            continue
+        _reachable_lvl.append((ac, ar))
+        eff_by_dest[(ac, ar)] = eff
+    reachable = _reachable_lvl
+
+    # --- Multi-niveaux (§13.06) : correction des placements EN HAUTEUR ---------------------------------
+    # Le champ planaire ci-dessus tague « étage » (eff == view_level) toute case dont l'empreinte tient
+    # sur le plancher, MAIS sans coût de montée et sans vérifier la capacité mot-clé. On corrige :
+    #   - unité NON-montante → ces cases sont RETIRÉES (le preview s'arrête au bord de l'empreinte) ;
+    #   - unité montante     → elles sont REMPLACÉES par le sous-ensemble réellement atteignable avec le
+    #     coût de montée/descente (champ géodésique multi-niveaux, source unique reachable_multilevel_field).
+    # Les cases au SOL (eff 0) sont conservées telles quelles. FLY et métrique hex : hors périmètre
+    # (fly+étages différé, floors euclidiens) → inchangé.
+    if view_level >= 1 and _mm_use_euclidean and not has_fly and floor_hexes_view:
+        from engine.game_state import unit_can_occupy_upper_floor
+        _can_climb = unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS"))
+        # Sol : on RETIRE toute case dont le SOCLE chevauche l'empreinte de l'étage en vue — à ce niveau
+        # de vue la zone du bâtiment appartient à l'étage ; un move au sol qui y entre est un move de
+        # niveau 0 (visible en vue niveau 0). Le preview s'arrête donc au bord de l'empreinte. Test EUCLIDIEN
+        # disque↔polygone (rond) sur ``floor["vertices"]`` — aligné pixel-pour-pixel sur le contour d'étage
+        # rendu et sur la précision fig↔fig ronde (cf. model_within_terrain) ; non-rond → empreinte hex.
+        from engine.hex_utils import _hex_center as _hc, round_base_radius_norm, disc_overlaps_polygon
+        _floor_polys = [
+            [_hc(int(v[0]), int(v[1])) for v in require_key(floor, "polygon_vertices")]
+            for area in terrain_areas
+            for floor in area.get("floors", [])  # get allowed
+            if int(require_key(floor, "level")) == view_level
+        ]
+
+        def _socle_overlaps_floor(_c: int, _r: int) -> bool:
+            if base_shape == "round":
+                _cx, _cy = _hc(int(_c), int(_r))
+                _rad = round_base_radius_norm(base_size)
+                return any(disc_overlaps_polygon(_cx, _cy, _rad, _poly) for _poly in _floor_polys)
+            return any(c in floor_hexes_view for c in _mover_cells(_c, _r))
+
+        _ground_dests = [
+            _d for _d in reachable
+            if eff_by_dest[_d] == 0 and not _socle_overlaps_floor(_d[0], _d[1])
+        ]
+        _floor_dests: List[Tuple[int, int]] = []
+        if _can_climb:
+            _ground_obs = set(wall_hexes) | _low_clear
+            if not (desperate_escape or thru_enemy):
+                _ground_obs |= enemy_occupied
+            if not thru_friendly:
+                _ground_obs |= _friendly_traverse
+            if not (desperate_escape or thru_ez):
+                _ground_obs |= ez_anchor_forbidden
+            _ground_obs.discard(start_pos)
+            _floor_dests = _model_climb_reachable_floor_cells(
+                game_state, unit, squad_id, model, start_pos, budget, view_level,
+                _ground_obs, terrain_areas,
+            )
+        reachable = _ground_dests + _floor_dests
+        _floor_set = set(_floor_dests)
+        eff_by_dest = {_d: (view_level if _d in _floor_set else 0) for _d in reachable}
+        import sys as _lvl_dbg
+        print(
+            f"[MODEL_POOL_LVL] model={model_id} view_level={view_level} can_climb={_can_climb} "
+            f"n_ground={len(_ground_dests)} n_floor={len(_floor_dests)}",
+            file=_lvl_dbg.stderr, flush=True,
+        )
 
     # Empêche le DÉPÔT sur un chevauchement de socle avec une coéquipière AU MÊME NIVEAU EFFECTIF
     # (au lieu de le détecter après coup via le voile rouge). Clearance euclidienne par base RÉELLE —
@@ -3038,7 +3071,10 @@ def movement_build_model_destinations_pool(
             f"base={_mm_base} budget={budget} fly={has_fly}"
         )
 
-    return {"destinations": reachable, "footprint_mask_loops": mask_loops}
+    # Chaque destination porte son niveau EFFECTIF (0 = sol, view_level = étage) → le front pose la fig
+    # au bon niveau au lieu de forcer la vue courante (§13.06 : sol et étage sont des placements distincts).
+    destinations_with_level = [[c, r, eff_by_dest[(c, r)]] for (c, r) in reachable]
+    return {"destinations": destinations_with_level, "footprint_mask_loops": mask_loops}
 
 
 def movement_preview_move_plan(

@@ -184,6 +184,9 @@ class GameStateManager:
             "ILLUSTRATION_RATIO": require_key(config, "ILLUSTRATION_RATIO"),
             "BASE_SHAPE": require_key(config, "BASE_SHAPE"),
             "BASE_SIZE": require_key(config, "BASE_SIZE"),
+            # Hauteur modèle (pouces) : clairance sous les étages (§13.06 maison). Fournie par
+            # _build_enhanced_unit (autorité) / build army API → recopiée ici (builder central).
+            "MODEL_HEIGHT": float(require_key(config, "MODEL_HEIGHT")),
             "orientation": orientation_init,
             "UNIT_RULES": unit_rules,
             "UNIT_KEYWORDS": unit_keywords,
@@ -823,6 +826,9 @@ class GameStateManager:
             "ICON_SCALE": full_unit_data["ICON_SCALE"],
             "ILLUSTRATION_RATIO": require_key(full_unit_data, "ILLUSTRATION_RATIO"),
             "BASE_SHAPE": require_key(full_unit_data, "BASE_SHAPE"),
+            # Hauteur du modèle (pouces) : clairance sous les étages (§13.06 maison) — comparée telle
+            # quelle à ``height_inches`` des floors (même unité), sans scaling subhex.
+            "MODEL_HEIGHT": float(require_key(full_unit_data, "MODEL_HEIGHT")),
             "BASE_SIZE": (
                 ([max(1, round(s * self._get_inches_to_subhex() / 10)) for s in require_key(full_unit_data, "BASE_SIZE")]
                  if isinstance(require_key(full_unit_data, "BASE_SIZE"), list)

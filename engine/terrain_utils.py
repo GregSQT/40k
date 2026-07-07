@@ -89,6 +89,26 @@ def floor_hexes_at_level(terrain_areas: List[Dict[str, Any]], level: int) -> Set
     return hexes
 
 
+def low_clearance_ground_hexes(
+    terrain_areas: List[Dict[str, Any]],
+    model_height: float,
+) -> Set[Tuple[int, int]]:
+    """Hexes du SOL (niveau 0) infranchissables par un modèle de hauteur ``model_height`` (pouces).
+
+    Union des hexes des étages dont la hauteur libre ``height_inches`` est STRICTEMENT inférieure à
+    ``model_height`` : un modèle plus haut que la clairance ne peut ni traverser ni s'arrêter sous cet
+    étage (même unité pouce que ``height_inches``, pas de scaling). Tangence (égalité) autorisée.
+    Retourne un set vide si aucun étage n'est trop bas. À unir aux murs pour le pathfinding AU SOL
+    uniquement (la surface de l'étage, elle, reste praticable)."""
+    blocked: Set[Tuple[int, int]] = set()
+    mh = float(model_height)
+    for area in terrain_areas:
+        for floor in area.get("floors", []):  # get allowed (aire sans étage)
+            if float(require_key(floor, "height_inches")) < mh:
+                blocked.update((int(h[0]), int(h[1])) for h in require_key(floor, "hexes"))
+    return blocked
+
+
 def footprint_within_floor(
     col: int,
     row: int,

@@ -590,6 +590,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   }, [mode]);
   /** Pool BFS (hexes atteignables) de la figurine en cours de repositionnement. */
   const squadMoveModelPoolRef = useRef<Set<string>>(new Set());
+  /** Niveau EFFECTIF (§13.06) par case du pool actif ("c,r" → 0 sol / view_level étage). La pose de la
+   *  fig utilise ce niveau au lieu de la vue courante : une case au sol reste au sol même en vue étage. */
+  const squadMoveModelLevelByKeyRef = useRef<Map<string, number>>(new Map());
   /** Incrémenté à chaque nouvelle session squad move. Invalide les callbacks onSelectModelForMove obsolètes. */
   const squadMoveSessionRef = useRef(0);
   /** Mask loops per-fig (polygone lissé) reçus de move_model_destinations. */
@@ -4187,12 +4190,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (!result?.destinations) {
         throw new Error("move_model_destinations: destinations absent in response");
       }
-      const dests = result.destinations as Array<[number, number]>;
+      // Chaque destination = [col, row, level] : le niveau réel (0 sol / view_level étage) est mémorisé
+      // par case pour que la pose se fasse au bon niveau (§13.06), pas à la vue courante.
+      const dests = result.destinations as Array<[number, number, number]>;
       const set = new Set<string>();
-      for (const [c, r] of dests) {
-        set.add(`${c},${r}`);
+      const levelByKey = new Map<string, number>();
+      for (const [c, r, lv] of dests) {
+        const key = `${c},${r}`;
+        set.add(key);
+        levelByKey.set(key, lv);
       }
       squadMoveModelPoolRef.current = set;
+      squadMoveModelLevelByKeyRef.current = levelByKey;
       const rawLoops = result?.footprint_mask_loops;
       squadMoveModelMaskLoopsRef.current = Array.isArray(rawLoops)
         ? (rawLoops as number[][])
@@ -4205,22 +4214,30 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Pose la figurine active a (col,row) dans le plan provisoire + refresh validite. */
   const handleMoveModelInPlan = useCallback(
     (modelId: string, col: number, row: number) => {
+      // Niveau de pose = niveau EFFECTIF de la case dans le pool (§13.06), pas la vue courante : une
+      // case au sol reste au sol même si la vue est sur l'étage. La destination provient TOUJOURS du
+      // pool → clé présente ; sinon incohérence pool/pose = erreur explicite (pas de fallback masquant).
+      const placedLevel = squadMoveModelLevelByKeyRef.current.get(`${col},${row}`);
+      if (placedLevel === undefined) {
+        throw new Error(
+          `handleMoveModelInPlan: destination (${col},${row}) absente du pool niveau-conscient`
+        );
+      }
       // Fig posee → on la deselectionne (vide le pool + loops, sort du preview de cette fig).
       squadMoveModelPoolRef.current = new Set();
+      squadMoveModelLevelByKeyRef.current = new Map();
       squadMoveModelMaskLoopsRef.current = null;
       setSquadMovePlan((prev) => {
         if (!prev) return prev;
-        // Niveau (étages) capturé au drop = niveau de vue courant. Sans ça la fig posée à l'étage
-        // reste enregistrée au sol → elle bloque/est bloquée au niveau 0 (superposition impossible).
         const models = {
           ...prev.models,
-          [modelId]: { col, row, level: currentLevelRef?.current ?? 0 },
+          [modelId]: { col, row, level: placedLevel },
         };
         void refreshSquadMovePlanValidity(prev.unitId, models);
         return { ...prev, models, activeModelId: null };
       });
     },
-    [refreshSquadMovePlanValidity, currentLevelRef]
+    [refreshSquadMovePlanValidity]
   );
 
   /** Clic droit sur la fig active : annule SON deplacement → retour position de debut de phase. */

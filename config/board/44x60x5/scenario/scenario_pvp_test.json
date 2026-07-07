@@ -10,7 +10,7 @@
     { "id": 10003, "unit_type": "DreadnoughtBallistus",                                   "player": 1, "col": 72,   "row": 8 },
     { "id": 10001, "unit_type": "FenrisianWolf",                                          "player": 1, "col": 40,   "row": 161 },
     { "id": 10002, "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",  "player": 1, "col": 63,   "row": 65 },
-    { "id": 10005, "unit_type": "DreadnoughtBallistus",                                   "player": 1, "col": 175,  "row": 230 },
+    { "id": 10005, "unit_type": "DreadnoughtBallistus",                                   "player": 1, "col": 190,  "row": 242 },
 
     {
       "id": 6, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 107, "row": 166,
@@ -76,8 +76,17 @@
         { "col": 120, "row": 140, "unit_type": "CaptainTerminatorRelicWeaponBolter" }
       ]
     },
+    {
+      "id": 10, "unit_type": "Intercessor", "player": 1, "col": 170, "row": 240,
+      "models": [
+        { "col": 170, "row": 240 },
+        { "col": 170, "row": 250 },
+        { "col": 170, "row": 260 },
+        { "col": 170, "row": 270 }
+      ]
+    },
 
-    { "id": 101, "unit_type": "WingedTyranidPrime",   "player": 2, "col": 95,   "row": 130 },
+    { "id": 101, "unit_type": "WingedTyranidPrime",   "player": 2, "col": 133,   "row": 115 },
     { "id": 102, "unit_type": "Neurotyrant",          "player": 2, "col": 87,   "row": 197 },
     { "id": 103, "unit_type": "Psychophage",          "player": 1, "col": 41,   "row": 74 },
     { "id": 104, "unit_type": "ScreamerKiller",       "player": 2, "col": 204,  "row": 96 },
@@ -86,6 +95,7 @@
     { "id": 107, "unit_type": "VonRyanLeaper",        "player": 2, "col": 36,   "row": 53 },
     { "id": 108, "unit_type": "VonRyanLeaper",        "player": 2, "col": 25,   "row": 132 },
     { "id": 109, "unit_type": "Termagant",            "player": 2, "col": 79,   "row": 148 },
+    { "id": 118, "unit_type": "Termagant",            "player": 2, "col": 171,   "row": 76 },
     {
       "id": 110, "unit_type": "Barbgaunt", "player": 2, "col": 44, "row": 46,
       "models": [
