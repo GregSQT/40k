@@ -1213,6 +1213,9 @@ export default function Board({
   const staticBoardConfigKeyRef = useRef<string>("");
   /** Dernier conteneur ``highlights`` — réutilisé si l’empreinte structure est inchangée (patch move preview ou skip drawBoard). */
   const highlightsLayerRef = useRef<PIXI.Container | null>(null);
+  /** Conteneur des contours d'étage au sol — cycle de vie calqué sur highlights (préservé quand on
+   *  réutilise les highlights, sinon reconstruit par drawBoard). zIndex 10 : sous les murs (20). */
+  const floorContourLayerRef = useRef<PIXI.Container | null>(null);
   const lastHighlightsStructuralKeyRef = useRef<string>("");
   const lastMovePolygonCacheKeyRef = useRef<string>("");
   const unitsLayerRef = useRef<PIXI.Container | null>(null);
@@ -1827,6 +1830,52 @@ export default function Board({
   // chaque render) relancerait l'effet en boucle et casserait la sélection (clic down/up sur des
   // objets PIXI recréés). Une string identique par valeur est Object.is-stable.
   const occupiedFloorLevelsKey = [...occupiedFloorLevels].sort((a, b) => a - b).join(".");
+  // Occupation PAR-DÉCOR : clés `${zoneId}@@${level}` des planchers ≥1 réellement occupés. On localise
+  // chaque figurine (centre par-modèle) dans le plancher de SON niveau → seul le décor concerné passe
+  // en couleur au sol, sans impacter les autres décors.
+  // Table hex→décor par niveau (≥1) : ne dépend QUE de la géométrie des décors → mémoïsée à part pour
+  // ne pas la reconstruire à chaque changement de gameState.
+  const hexZoneByLevel = useMemo(() => {
+    const m = new Map<string, string>();
+    const zones = boardConfig?.terrain_zones;
+    if (!Array.isArray(zones)) return m;
+    for (const z of zones) {
+      const zid = (z as { id?: string }).id;
+      const floors = (z as { floors?: Array<{ level?: number; hexes?: unknown[] }> }).floors;
+      if (typeof zid !== "string" || !Array.isArray(floors)) continue;
+      for (const f of floors) {
+        if (typeof f?.level !== "number" || f.level < 1 || !Array.isArray(f.hexes)) continue;
+        for (const h of f.hexes) {
+          const [c, r] = normalizeZoneHex(h);
+          m.set(`${f.level}|${c},${r}`, zid);
+        }
+      }
+    }
+    return m;
+  }, [boardConfig?.terrain_zones]);
+  const occupiedZoneLevels = useMemo(() => {
+    const s = new Set<string>();
+    const uc = (gameState?.units_cache ?? {}) as Record<
+      string,
+      {
+        level?: number;
+        level_by_model?: Record<string, number>;
+        occupied_hexes_by_model?: Record<string, [number, number]>;
+      }
+    >;
+    for (const entry of Object.values(uc)) {
+      const byModel = entry.occupied_hexes_by_model;
+      if (!byModel) continue;
+      for (const [mid, pos] of Object.entries(byModel)) {
+        const lv = entry.level_by_model?.[mid] ?? entry.level;
+        if (typeof lv !== "number" || lv < 1 || !Array.isArray(pos)) continue;
+        const zid = hexZoneByLevel.get(`${lv}|${pos[0]},${pos[1]}`);
+        if (zid) s.add(`${zid}@@${lv}`);
+      }
+    }
+    return s;
+  }, [hexZoneByLevel, gameState]);
+  const occupiedZoneLevelsKey = [...occupiedZoneLevels].sort().join(".");
   const [boardViewportSize, setBoardViewportSize] = useState<{
     width: number;
     height: number;
@@ -8462,7 +8511,10 @@ export default function Board({
     const zonesKey = (boardConfigWithOverrides.objective_zones ?? [])
       .map((z) => `${z.id}:${(z as { shape?: string }).shape ?? "hexes"}`)
       .join(",");
-    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}|oc:${objControlKey}|oz:${zonesKey}|dep:${phase === "deployment" ? 1 : 0}|lvl:${currentLevel}|ofl:${[...occupiedFloorLevels].sort((a, b) => a - b).join(".")}`;
+    // lvl/ofl ne font PLUS partie de la clé : les contours d'étage (dépendants du niveau et de
+    // l'occupation) sont désormais dessinés dynamiquement dans highlightContainer, plus dans le
+    // plateau statique. Changer de niveau ne reconstruit donc plus le plateau (contours instantanés).
+    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}|oc:${objControlKey}|oz:${zonesKey}|dep:${phase === "deployment" ? 1 : 0}`;
     const canReuseStatic =
       staticBoardConfigKeyRef.current === bcKey && staticBoardRef.current !== null;
 
@@ -8621,6 +8673,7 @@ export default function Board({
       objectiveControl,
       currentLevel,
       occupiedFloorLevels,
+      occupiedZoneLevels,
       moveDestPoolRef:
         mode === "squadModelMove"
           ? // Fig active → pool BFS de la fig ; sinon (post-pose/repos) → union des figs non posées.
@@ -8676,6 +8729,7 @@ export default function Board({
       (fingerprintMatchMove || partialFp.movePolygonCacheKey !== null);
 
     let savedHighlightsThroughDestroy: PIXI.Container | null = null;
+    let savedFloorContourThroughDestroy: PIXI.Container | null = null;
 
     if (app.stage) {
       // Detach persistent containers before removeChildren so they survive.
@@ -8718,6 +8772,11 @@ export default function Board({
       ) {
         savedHighlightsThroughDestroy = highlightsLayerRef.current;
         app.stage.removeChild(savedHighlightsThroughDestroy);
+        // Contours d'étage : même cycle de vie que les highlights (drawBoard n'est pas rappelé ici).
+        if (floorContourLayerRef.current?.parent === app.stage) {
+          savedFloorContourThroughDestroy = floorContourLayerRef.current;
+          app.stage.removeChild(savedFloorContourThroughDestroy);
+        }
       } else {
         detachMovePreviewLayerCacheFromStage();
       }
@@ -8733,6 +8792,7 @@ export default function Board({
       app.stage.removeChildren();
       for (const child of toDestroy) {
         if (child === savedHighlightsThroughDestroy) continue;
+        if (child === savedFloorContourThroughDestroy) continue;
         if (child.destroy) {
           child.destroy({ children: true, texture: false, baseTexture: false });
         }
@@ -8751,7 +8811,17 @@ export default function Board({
 
       // Re-attach persistent containers in correct z-order
       if (savedStatic) app.stage.addChild(savedStatic);
-      if (savedWalls) app.stage.addChild(savedWalls);
+      if (savedFloorContourThroughDestroy) {
+        savedFloorContourThroughDestroy.zIndex = 10;
+        app.stage.addChild(savedFloorContourThroughDestroy);
+      }
+      if (savedWalls) {
+        // zIndex forcé ici (et pas seulement à la création) : le conteneur des murs est réutilisé
+        // (staticWallsRef) ; sans ça un mur créé avant l'ajout du zIndex resterait à 0 et repasserait
+        // SOUS les contours d'étage (10).
+        savedWalls.zIndex = 20;
+        app.stage.addChild(savedWalls);
+      }
       if (savedHighlightsThroughDestroy) app.stage.addChild(savedHighlightsThroughDestroy);
       if (savedUi) {
         // Indicateurs persistants (logos d'action, badges hidden/move-status/battle-shock) :
@@ -8835,6 +8905,7 @@ export default function Board({
         lastMovePolygonCacheKeyRef.current = partialFp.movePolygonCacheKey ?? "";
       }
       highlightsLayerRef.current = savedHighlightsThroughDestroy;
+      floorContourLayerRef.current = savedFloorContourThroughDestroy;
     } else {
       drawResult = drawBoard(
         app,
@@ -8845,6 +8916,7 @@ export default function Board({
         lastHighlightsStructuralKeyRef.current = partialFp.structuralKey;
         lastMovePolygonCacheKeyRef.current = partialFp.movePolygonCacheKey ?? "";
         highlightsLayerRef.current = drawResult.highlightContainer;
+        floorContourLayerRef.current = drawResult.floorContourContainer;
       }
     }
 
@@ -10214,6 +10286,7 @@ export default function Board({
     // Essential dependencies - all values used in the effect
     currentLevel,
     occupiedFloorLevelsKey,
+    occupiedZoneLevelsKey,
     selectedUnitId,
     ruleChoiceHighlightedUnitId,
     mode,

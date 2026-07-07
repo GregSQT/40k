@@ -204,6 +204,7 @@ export function computeDrawBoardPartialRedrawFingerprint(
     fightEngagementZone,
     currentLevel = 0,
     occupiedFloorLevels,
+    occupiedZoneLevels,
   } = options || {};
 
   const useAdvanceMovePoolLikeMove = mode === "advancePreview";
@@ -329,6 +330,9 @@ export function computeDrawBoardPartialRedrawFingerprint(
     floorVeilKey: occupiedFloorLevels
       ? [...occupiedFloorLevels].sort((a, b) => a - b).join(".")
       : "",
+    // Contour au sol coloré par-décor : dépend de quel décor a un étage occupé → sans ça dans la clé,
+    // un déplacement inter-décors au même niveau ne redessine pas le contour.
+    occupiedZoneKey: occupiedZoneLevels ? [...occupiedZoneLevels].sort().join(".") : "",
   };
 
   const structuralKey = JSON.stringify(structuralPayload);
@@ -833,6 +837,9 @@ export interface DrawBoardOptions {
   currentLevel?: number;
   /** Niveaux d'étage OCCUPÉS par ≥1 figurine → empreinte blanchie (idée initiale stage.md). */
   occupiedFloorLevels?: Set<number>;
+  /** Occupation PAR-DÉCOR : clés `${zoneId}@@${level}` des planchers (niveau ≥1) occupés. Sert à
+   *  colorer AU SOL le contour d'un décor donné (vert/orange/rouge) sans impacter les autres décors. */
+  occupiedZoneLevels?: Set<string>;
   moveDestPoolRef?: React.RefObject<Set<string>>;
   /**
    * ``move_preview_footprint_zone`` : chaque sous-hex couvert par la preview — union d’hex **sans lacunes**
@@ -900,6 +907,9 @@ export interface DrawBoardResult {
   wallsContainer: PIXI.Container | null;
   /** Conteneur ``name === "highlights"`` (hitArea, surbrillances, move preview, etc.). */
   highlightContainer: PIXI.Container;
+  /** Contours d'étage au sol (currentLevel 0). Conteneur dédié dynamique, zIndex bas (sous les murs
+   *  et les previews) → les murs passent par-dessus les contours sans masquer les previews. */
+  floorContourContainer: PIXI.Container | null;
 }
 
 type PixelPt = [number, number];
@@ -1884,7 +1894,7 @@ export const drawBoard = (
       showHexCoordinates: _showHexCoordinates = false,
       objectiveControl = {},
       currentLevel = 0,
-      occupiedFloorLevels,
+      occupiedZoneLevels,
       moveDestPoolRef,
       footprintZonePoolRef,
       moveDestinationAnchorsFromState,
@@ -2164,42 +2174,10 @@ export const drawBoard = (
           }
           baseHexContainer.addChild(g);
         }
-        // Étages (multi-niveaux) : empreinte de chaque plancher. Vue mono-niveau — au sol
-        // (currentLevel 0) tous les étages en indicateur ; à un étage, seul son plancher.
-        // Couleur par niveau : 1 vert, 2 orange, 3+ rouge. À l'étage → voile + contour de cette
-        // couleur. Au sol → PAS de voile ; contour = couleur du 1er étage occupé (le plus bas),
-        // sinon couleur terrain.
-        // AU SOL (currentLevel 0) : contour seul des empreintes (pas de voile), couleur = 1er étage
-        // occupé (le plus bas), sinon terrain. Le voile des vues étage (≥1) est dessiné plus bas dans
-        // highlightContainer (au-dessus des previews tir/move).
-        if (currentLevel === 0) {
-          // Contour PAR-PLANCHER : couleur du niveau du plancher SI ce niveau est occupé (1 vert,
-          // 2 orange, 3+ rouge), sinon couleur terrain. Un étage occupé ressort donc en vert au sol.
-          const contourColorFor = (lv: number): number =>
-            !(occupiedFloorLevels?.has(lv) ?? false)
-              ? terrainColor
-              : lv >= 3
-                ? 0xef4444
-                : lv === 2
-                  ? 0xf59e0b
-                  : 0x22c55e;
-          for (const zone of boardConfig.terrain_zones) {
-            const floors = (
-              zone as { floors?: Array<{ level: number; vertices: [number, number][] }> }
-            ).floors;
-            if (!Array.isArray(floors)) continue;
-            for (const floor of floors) {
-              if (!Array.isArray(floor.vertices) || floor.vertices.length < 3) continue;
-              const pts = floor.vertices.map(([c, r]) => toPixelT(c, r));
-              const gf = new PIXI.Graphics();
-              gf.lineStyle(terrainLineWidth, contourColorFor(floor.level), 0.85);
-              gf.moveTo(pts[0]![0], pts[0]![1]);
-              for (let i = 1; i < pts.length; i++) gf.lineTo(pts[i]![0], pts[i]![1]);
-              gf.closePath();
-              baseHexContainer.addChild(gf);
-            }
-          }
-        }
+        // Étages (multi-niveaux) : le contour au sol (currentLevel 0) et le voile d'étage (≥1) sont
+        // dessinés dynamiquement plus bas dans highlightContainer (reconstruit à chaque draw), afin
+        // que le changement de niveau et l'occupation (couleur) soient live sans reconstruire le
+        // plateau statique.
       }
 
       // Zones de déploiement : polygone rempli par joueur (id "1" → P1 bleu, id "2" → P2 rouge).
@@ -3029,8 +3007,74 @@ export const drawBoard = (
         wallsContainer.addChild(g);
       });
 
+      // Murs AU-DESSUS des contours d'étage (zIndex 10) mais SOUS les previews/voile (highlight 120).
+      wallsContainer.zIndex = 20;
       app.stage.addChild(wallsContainer);
       wallsResult = wallsContainer;
+    }
+
+    // Contour d'étage AU SOL (currentLevel 0) : conteneur dédié dynamique (reconstruit à chaque draw)
+    // → changement de niveau instantané (plus de rebuild statique) et couleur d'occupation live.
+    // zIndex 10 : au-dessus des hexes (0), SOUS les murs (20) et les previews/voile (highlight 120).
+    // Couleur PAR-DÉCOR : couleur terrain par défaut, mais si CE décor a un étage occupé (≥1), tous
+    // ses contours prennent la couleur du plus bas niveau occupé (1 vert, 2 orange, 3+ rouge) — aucun
+    // impact sur les autres décors.
+    let floorContourResult: PIXI.Container | null = null;
+    if (currentLevel === 0 && Array.isArray(boardConfig.terrain_zones)) {
+      const floorContourContainer = new PIXI.Container();
+      floorContourContainer.name = "floorContours";
+      floorContourContainer.zIndex = 10;
+      floorContourContainer.eventMode = "none";
+      const terrainColorCss = getComputedStyle(document.documentElement)
+        .getPropertyValue("--terrain-color")
+        .trim();
+      const terrainColor = parseInt(terrainColorCss.replace("#", ""), 16);
+      const terrainLineWidth = Math.max(2.5, HEX_RADIUS * 0.5);
+      const toPxFloor = (c: number, r: number): [number, number] => [
+        c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN,
+        r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN,
+      ];
+      const zoneContourColor = (zoneId: string): number => {
+        let lowest: number | null = null;
+        if (occupiedZoneLevels) {
+          for (const key of occupiedZoneLevels) {
+            const sep = key.lastIndexOf("@@");
+            if (sep < 0 || key.slice(0, sep) !== zoneId) continue;
+            const lv = parseInt(key.slice(sep + 2), 10);
+            if (lv >= 1 && (lowest === null || lv < lowest)) lowest = lv;
+          }
+        }
+        return lowest === null
+          ? terrainColor
+          : lowest >= 3
+            ? 0xef4444
+            : lowest === 2
+              ? 0xf59e0b
+              : 0x22c55e;
+      };
+      for (const zone of boardConfig.terrain_zones) {
+        const floors = (
+          zone as { floors?: Array<{ level: number; vertices: [number, number][] }> }
+        ).floors;
+        if (!Array.isArray(floors)) continue;
+        const color = zoneContourColor(zone.id);
+        for (const floor of floors) {
+          // Au sol : on n'affiche QUE la forme du 1er étage (level 1). La forme du décor au sol reste
+          // dessinée par le contour de zone statique (inchangé).
+          if (floor.level !== 1) continue;
+          if (!Array.isArray(floor.vertices) || floor.vertices.length < 3) continue;
+          const pts = floor.vertices.map(([c, r]) => toPxFloor(c, r));
+          const gf = new PIXI.Graphics();
+          gf.eventMode = "none";
+          gf.lineStyle(terrainLineWidth, color, 0.85);
+          gf.moveTo(pts[0]![0], pts[0]![1]);
+          for (let i = 1; i < pts.length; i++) gf.lineTo(pts[i]![0], pts[i]![1]);
+          gf.closePath();
+          floorContourContainer.addChild(gf);
+        }
+      }
+      app.stage.addChild(floorContourContainer);
+      floorContourResult = floorContourContainer;
     }
 
     // Voile d'étage (vue niveau >= 1) AU-DESSUS des previews tir/move : dessiné à CHAQUE draw dans
@@ -3067,7 +3111,12 @@ export const drawBoard = (
       }
     }
 
-    return { baseHexContainer, wallsContainer: wallsResult, highlightContainer };
+    return {
+      baseHexContainer,
+      wallsContainer: wallsResult,
+      highlightContainer,
+      floorContourContainer: floorContourResult,
+    };
   } catch (error) {
     console.error("❌ Error drawing board:", error);
     throw error;
