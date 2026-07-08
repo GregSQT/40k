@@ -1957,9 +1957,10 @@ def _multilevel_floor_destinations(
     Retour : ``{level>=1: [(col,row), ...]}`` (niveaux sans destination omis). ``{}`` si aucun étage
     déclaré (garantie no-op / non-régression) ou si l'unité ne peut pas finir en hauteur (§13.06).
 
-    Limitations documentées (V1) : hauteur GLOBALE par niveau (lève si incohérente entre ruines) ;
-    l'engagement/EZ ennemie EN HAUTEUR à la destination n'est pas encore modélisé (aucun ennemi à
-    l'étage aujourd'hui) — à traiter avec la LoS/engagement 3D.
+    Limitations documentées (V1) : hauteur GLOBALE par niveau (lève si incohérente entre ruines).
+    L'EZ ennemie à la destination est filtrée EN AVAL par l'appelant, avec le même contrat 2D que le
+    sol (mirror move phase) ; le gate vertical 5" (03.04) reste un manque transverse sol+étages, non
+    modélisé ici (chantier engagement 3D dédié).
     """
     from engine.terrain_utils import floor_hexes_at_level, footprint_within_floor
     from engine.game_state import unit_can_occupy_upper_floor
@@ -2605,6 +2606,37 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         precomputed_ground_field=_ground_field,
         precomputed_ground_obstacles=_ground_obstacles_tr,
     )
+    # EZ ennemie à la destination sur étage : MÊME contrat que le sol (mirror move phase, 09.05).
+    # Sans ce filtre, une case d'étage dans l'EZ d'un ennemi n'était jamais rejetée (l'adaptateur
+    # ne testait que murs / occupation-niveau / empreinte-sur-plancher). On réutilise à l'identique
+    # les objets d'engagement du sol (`ez`, `units_cache`, `enemy_adjacent_hexes`,
+    # `_enemy_items_for_engagement_ez`) → aucune divergence de géométrie avec le niveau 0.
+    if _floor_dest:
+        _floor_dest = {
+            lv: cells
+            for lv, cells in (
+                (
+                    lv,
+                    [
+                        (c, r)
+                        for (c, r) in cells
+                        if not _movement_engagement_violates(
+                            game_state,
+                            unit,
+                            c,
+                            r,
+                            compute_candidate_footprint(c, r, unit, game_state),
+                            units_cache,
+                            enemy_adjacent_hexes if ez <= 1 else None,
+                            enemy_cache_items=_enemy_items_for_engagement_ez,
+                            engagement_zone_ez=ez,
+                        )
+                    ],
+                )
+                for lv, cells in _floor_dest.items()
+            )
+            if cells
+        }
     _m_floor_end = _perf_clock.perf_counter() if _pt else None
     _pool_by_level: Dict[int, List[Tuple[int, int]]] = {0: valid_destinations}
     _pool_by_level.update(_floor_dest)
@@ -3097,6 +3129,10 @@ def movement_build_model_destinations_pool(
                 game_state, unit, squad_id, model, start_pos, budget, view_level,
                 _ground_obs, terrain_areas,
             )
+        # EZ ennemie à la DESTINATION d'étage : même contrat que le sol (jamais finir dans l'EZ, 09.05).
+        # _model_climb_reachable_floor_cells ne valide que murs/occupation/plancher ; on réapplique ici
+        # le masque EZ (calculé au niveau ancre, inclut déjà les ennemis en hauteur) — mirror move phase.
+        _floor_dests = [_d for _d in _floor_dests if _d not in ez_anchor_forbidden]
         reachable = _ground_dests + _floor_dests
         _floor_set = set(_floor_dests)
         eff_by_dest = {_d: (view_level if _d in _floor_set else 0) for _d in reachable}
