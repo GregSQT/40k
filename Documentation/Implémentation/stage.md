@@ -687,13 +687,11 @@ le modèle + LoS 3D est le vrai chantier.
        move). Appliqué **hors cache mémoïsé** → changement de niveau = clip recalculé sans invalider `ctx`.
      - Front : `charge_plan_state` envoie `level` ; refetch de la fig de charge active au changement de niveau
        (fusionné avec le refetch move dans le même effet `currentLevel`).
-     - ⚠️ **PAS de destinations de charge EN HAUTEUR** : une charge doit finir **engagée** avec une cible
-       déclarée, or l'**engagement est purement 2D** — `entries_in_engagement_zone`
-       ([spatial_relations.py](file:///home/greg/40k/engine/spatial_relations.py)) ne compare que les empreintes
-       (col/row/occupied_hexes), **sans `level`** ; `occupied_hexes` du units_cache est l'**union tous niveaux**.
-       Les unités PEUVENT être en hauteur (champ `level`, `_occupied_hexes_at_level`), mais la verticalité est
-       **ignorée** dans l'engagement. Charger vers une cible à l'étage n'a donc pas de sens tant que l'engagement
-       n'est pas 3D.
+     - ⚠️ ~~**PAS de destinations de charge EN HAUTEUR**~~ **[RÉSOLU — chantier 4 + 3b, 2026-07-08]** : constat
+       historique (pré-engagement 3D) conservé pour mémoire. À l'époque l'engagement était **purement 2D**
+       (`entries_in_engagement_zone` sans `level`), donc charger vers une cible à l'étage n'avait pas de sens.
+       **Désormais** : l'engagement est 3D (`vertical_zone_inches`, chantier 4) ET le chargeur peut MONTER (3b) →
+       destinations d'étage produites, engagées en 3D. Voir la section « ENGAGEMENT 3D — chantier 4 » ci-dessous.
 
    ### 🎯 ENGAGEMENT 3D — CONCEPTION OPTIMALE (CENTRALISÉE) — chantier 4
 
@@ -811,7 +809,7 @@ le modèle + LoS 3D est le vrai chantier.
           ([charge_handlers.py](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py)). `synth level=0`
           partout (chargeur au sol). **Seul L3431 (FLY) reste 2D** (différé §707). Validé bout-en-bout par le
           script d'intégration ci-dessus + non-régression sol/no-floor structurelle.
-        - ✅ **3b — le chargeur MONTE (ancres `level ≥ 1`) — FAIT & VALIDÉ (2026-07-07)** :
+        - ✅ **3b — le chargeur MONTE (ancres `level ≥ 1`) — FAIT & VALIDÉ (2026-07-08)** :
           - **Helper climb charge** `_charge_model_climb_reachable_floor_cells`
             ([charge_handlers.py](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py)) : miroir
             EXACT du move `_model_climb_reachable_floor_cells` (source unique `reachable_multilevel_field`),
@@ -866,12 +864,84 @@ le modèle + LoS 3D est le vrai chantier.
               préserve le niveau par-fig (posée = niveau du plan, non posée = `level_by_model` committé).
           - **Non-bug clarifié** : « une charge niveau 0 atteint une cible niveau 1 » est **conforme** (§03.04
             engagement = 2" horiz ET 5" vert ; cible à 3" d'étage = <5" au-dessus du sol → engageable au sol).
-          - **Limites assumées** : collision sibling cross-niveau au sol traitée en 2D (conservateur) ; « closer »
-            d'une ancre d'étage mesuré horizontalement (`dist_tgt`, cohérent avec le sol). **FLY en hauteur
-            toujours différé** (§707, L3431 reste 2D).
-          - Validé : [scripts/charge3d_integration_test.py](file:///home/greg/40k/scripts/charge3d_integration_test.py)
-            étendu (chargeur montant → 52 ancres d'étage `level≥1` dans le pool, gate climb §13.06) + pytest
-            **1152 passed / 0 failed**. **RESTE** : validation visuelle app (`ap`) sur `scenario_floors_test`.
+          - **Limites assumées** : « closer » d'une ancre d'étage mesuré horizontalement (`dist_tgt`, cohérent
+            avec le sol) ; traversée BFS sol ne distingue pas un ennemi surélevé (bloque toujours en 2D — nuance
+            « passer sous une fig d'étage » non modélisée). **FLY en hauteur toujours différé** (§707, L3431 reste 2D).
+          - **Validé bout-en-bout dans l'app (2026-07-08)** : déclaration de charge sur cible à l'étage, sélection
+            de la fig chargeuse, pool d'étage affiché en vue mono-niveau, pose et commit de la fig à l'étage
+            (engagée, voile vert). Collision cross-niveau et niveau de rendu corrigés (cf. « Bugs 3b résolus »).
+          - Non-régression : [scripts/charge3d_integration_test.py](file:///home/greg/40k/scripts/charge3d_integration_test.py)
+            étendu (chargeur montant → ancres d'étage `level≥1` dans le pool, gate climb §13.06) + pytest
+            **1152 passed / 0 failed** + tsc vert.
+
+   ### 🎯 MÊLÉE 3D — pile-in & consolidation niveau-conscients (chantier 4, ⏳ RESTE À FAIRE)
+
+   > **Constat de code vérifié (2026-07-08, ne rien assumer)** : `engine/phase_handlers/fight_handlers.py`
+   > contient **0 occurrence de `level`** → pile-in ET consolidation sont **100 % 2D**. Signatures
+   > `provisional_plan: Dict[str, Tuple[int, int]]` (sans niveau) ; pools BFS planaires ; engagement testé
+   > **sans** `vertical_zone_inches` ; collision `footprints_overlap` sans niveau ; front `pileInMovePlan` /
+   > `consolidationMovePlan` en `models: {col,row}` sans `level`.
+
+   **Règles (lues — `12 Fights pahse.pdf`)** :
+   - **Pile-in §12.03** : move **3"** « as described in Moving (03) » → règles verticales §13.06 s'appliquent
+     (montée soustraite des 3", fin sur étage gated `INFANTRY/BEASTS/SWARM/FLY/MONSTER` + anti-débord).
+     WHILE : figs en **base-contact** ennemi ne bougent pas ; chaque fig déplacée finit **plus proche** de la
+     cible la plus proche, **engagée** si possible. AFTER : unité engagée ; chaque fig **déjà engagée** au
+     départ le reste (engagement = 3D, 2" horiz + 5" vert §03.04).
+   - **Consolidation §12.08** : move **3"** idem, 3 modes — **Ongoing** (engagé : plus proche + base-contact
+     lock), **Engaging** (≤3" ennemi : plus proche/engagé), **Objective** (≤3" objectif : **within range** de
+     l'objectif si possible, sinon plus proche). §2.9 : « within range » d'un objectif-**terrain area** =
+     appartenance à la zone (empreinte ∩ zone, **indépendant du niveau** → une fig à l'étage de la ruine-objectif
+     contrôle) ; objectif-**pion** = cylindre ≤3" horiz **ET** ≤5" vert.
+
+   **Enseignement clé** : pile-in/consolidation sont le **jumeau structurel de la charge** — mêmes primitives
+   importées (`_charge_prepare_footprint_offsets`, `_candidate_footprint_charge`,
+   `_charge_synthetic_charger_cache_entry`, `_charge_model_socle`, `unit_entries_within_engagement_zone`,
+   `footprints_overlap`). **Toute l'infra 3D est DÉJÀ écrite et réutilisable telle quelle** (chantier 4 + 3b) :
+   primitive engagement 3D (`vertical_zone_inches`), helper `_charge_vertical_zone`, champ climb
+   `_charge_model_climb_reachable_floor_cells` (**budget paramétrable** → passer `3×inches_to_subhex`),
+   synth au niveau réel (`level=`), collision niveau-consciente (`_charge_obstacle_socles(..., level)`), clip
+   sol-only, affichage mono-niveau, `commit_move` 4-uplet. → **tâche PLUS PETITE que 3b** (aucune infra à créer,
+   uniquement du câblage miroir).
+
+   **Implémentation optimale (miroir 3a/3b, additive → zéro régression 2D)** :
+
+   1. **Pool par-figurine — étage** (`_fight_pile_in_build_model_pool` L3525 + `_fight_consolidation_build_model_pool`
+      L4546, [fight_handlers.py](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py)) : en vue étage
+      (`view_level ≥ 1`, euclidean, hors FLY, unité montante), ajouter les cases d'étage via
+      `_charge_model_climb_reachable_floor_cells(..., budget_subhex=3×ish, view_level, ground_obs, terrain_areas)`
+      (coût de montée §13.06 soustrait des 3") ; classer chaque case par la **primitive 3D directe** (synth
+      `_charge_synthetic_charger_cache_entry(..., level=view_level)` + `unit_entries_within_engagement_zone(...,
+      vertical_zone_inches=_charge_vertical_zone(game_state))`). **Consolidation Objective (zone)** : la case
+      d'étage est « within range » si son **empreinte ∩ zone** (déjà level-agnostic → OK pour terrain area
+      §2.9) ; objectif-pion = ajouter le gate cylindre 5" vertical (réutiliser le seuil vertical). Pool → `[col,row,level]`.
+   2. **Collision niveau-consciente** : filtrer `blocker_socles` et `sib_socles` par niveau (une fig d'étage ne
+      bloque pas une destination au sol — même correctif que le bug #1 charge). Réutiliser
+      `_charge_obstacle_socles(..., level)` ou filtrer sur `entry["level"]` / le niveau du plan des sœurs.
+   3. **Base-contact lock (§12.03 / Ongoing §12.08)** : « models in base-contact cannot move » — la base-contact
+      est un contact **physique** (adjacence 2D à distance ~0). À un étage, une fig d'étage en base-contact avec
+      un ennemi **du même niveau** reste bloquée ; niveau différent = pas de contact. → gate à évaluer en 3D
+      (même intervalle `[plancher, plancher+MODEL_HEIGHT]`), pas en 2D pur.
+   4. **Plan state** (`_fight_pile_in_model_plan_state` L3822 + `_fight_consolidation_model_plan_state` L4868) :
+      param `view_level` (miroir `charge_model_plan_state`), pool `[col,row,level]`, **affichage mono-niveau**
+      (`[a for a in pool if a[2]==level]`), `pool_distances`/mask loops dérivés (sol = BFS, étage = climb).
+      Mémo (s'il existe) += `view_level`.
+   5. **Preview + commit** (`_fight_pile_in_preview_plan` L3707 + équivalents consolidation + handlers de commit) :
+      `norm` 4-uplet, synth/légalité au niveau réel (reachability **climb** pour une ancre d'étage, pas BFS 2D),
+      `provisional_plan` porte le niveau (collision + AFTER-engagement 3D des figs posées à l'étage),
+      `commit_move(plan, "pile_in"|"consolidation")` gère déjà le 4-uplet.
+   6. **Front** (miroir charge, machinerie `perModelChargeLike` DÉJÀ partagée dans
+      [BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx)) : `pileInMovePlan` /
+      `consolidationMovePlan` en `models:{col,row,level?}`, Map niveau par ancre (miroir
+      `chargeModelLevelByKeyRef`), pose au niveau réel, dispatch/refresh/commit envoient le niveau. `perModelPlanView`
+      **préserve déjà** le niveau (lit `activeChargeLikePlan.models[mid].level`) → deviendra correct dès que les
+      plans pile-in/conso portent `level`. **À ajouter** : étendre l'effet de refetch au changement de niveau
+      (BoardPvp, aujourd'hui seulement `move`/`charge`) aux modes pile-in/consolidation actifs.
+   7. **FLY en hauteur : différé** (§707, cohérent avec la charge L3431).
+
+   **Validation** : script d'intégration dédié (miroir `charge3d_integration_test.py` : fig montant en pile-in/
+   conso → ancres d'étage + gate climb 3") + `python3 -m pytest tests/` (1152/0) + app sur `scenario_floors_test`.
+   **Non-régression** : tout au sol / vue 0 / non-montant / hex / FLY → chemins vides → **byte-identique 2D**.
 
    **✅ Décisions figées (2026-07-07)** :
    - **Seuils verticaux = 5" pour les DEUX contrats** : engagement range (§03.04, conforme) ET contact
@@ -896,7 +966,7 @@ le modèle + LoS 3D est le vrai chantier.
    pour produire les ancres d'étage (le champ climb-aware existe déjà, cf. 3a/6e). L'EZ inter-niveaux
    (`enemy_adjacent_hexes`, 2D) suit la même bascule.
 
-   ### ⏳ RESTE À FAIRE (mis à jour 2026-07-07)
+   ### ⏳ RESTE À FAIRE (mis à jour 2026-07-08)
 
    1. ✅ **Engagement 3D (chantier 4) — FAIT & VALIDÉ** : étapes 1 (fondation `floor_height_by_model` +
       `MODEL_HEIGHT` dans `units_cache`), 2 (primitive `entries_in_engagement_zone(..., vertical_zone_inches)`
@@ -905,13 +975,21 @@ le modèle + LoS 3D est le vrai chantier.
       Non-régression pytest **entièrement rétablie** (`python3 -m pytest tests/` → **1152 passed, 2 skipped, 0 failed** ;
       dette de stubs `level`/`MODEL_HEIGHT`/`engagement_zone_vertical`/`_unit_move_version` + 7 tests obsolètes
       de la refonte advance→move réparés au passage).
-   2. ✅ **3b — Champ climb-aware dans la charge (chargeur qui MONTE) — FAIT & VALIDÉ (2026-07-07)** :
+   2. ✅ **3b — Champ climb-aware dans la charge (chargeur qui MONTE) — FAIT & VALIDÉ EN APP (2026-07-08)** :
       helper climb charge (`reachable_multilevel_field`, budget = jet, coût §13.06), `_compute_plan_context`
       niveau-conscient (reach étage par-fig + `floor_region_by_base` via primitive 3D, phase inclut l'étage),
-      pool `[col,row,level]`, clip sol-only, preview/commit/`_charge_model_pos_is_closer` niveau (reachability
-      climb pour une ancre d'étage), `provisional_plan` porté, front (Map niveau + pose/commit niveau). Détail
-      complet + pièges dans la section chantier 4 ci-dessus. Validé : `scripts/charge3d_integration_test.py`
-      étendu (52 ancres d'étage) + pytest **1152 passed / 0 failed**. **RESTE** : validation visuelle app.
+      pool `[col,row,level]`, clip sol-only, affichage **mono-niveau**, preview/commit/`_charge_model_pos_is_closer`
+      niveau (reachability climb pour une ancre d'étage), **collision cross-niveau** (obstacles/siblings filtrés
+      par niveau), `provisional_plan` porté, front (Map niveau + pose/commit niveau + `perModelPlanView` préserve
+      le niveau par-fig). Détail complet + pièges + bugs résolus dans la section chantier 4 ci-dessus. Validé
+      bout-en-bout **dans l'app** (charge d'une fig vers l'étage : pool → pose → commit engagé) +
+      `scripts/charge3d_integration_test.py` étendu + pytest **1152 passed / 0 failed** + tsc vert.
+   2bis. ⏳ **Mêlée 3D — pile-in (§12.03) & consolidation (§12.08) niveau-conscients** — **RESTE À FAIRE**.
+      `fight_handlers.py` est **100 % 2D** (0 occurrence de `level`). Jumeau structurel de la charge : toute
+      l'infra 3D (primitive engagement, champ climb à budget paramétrable, synth/collision niveau, clip,
+      mono-niveau) est **déjà écrite et réutilisable** → câblage miroir 3a/3b avec **budget = 3"** (au lieu du
+      2D6), + mode Objective de la consolidation (within-range = appartenance à la zone, level-agnostic §2.9) +
+      base-contact lock évalué en 3D. Découpe détaillée : section « MÊLÉE 3D » du chantier 4 ci-dessus.
    3. **Clairance hauteur — reste du mouvement** (voile rouge + pool squad/IA) — *plan détaillé, à faire d'un
       seul bloc* : le move **par-figurine** et la **charge** enforcent déjà la clairance ; restent les deux
       dernières surfaces du mouvement. À traiter ensemble (même helper, même piège, périmètre « tout le
