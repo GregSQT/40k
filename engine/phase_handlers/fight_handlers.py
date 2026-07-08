@@ -3522,19 +3522,46 @@ def _fight_v11_auto_step(game_state: Dict[str, Any], config: Dict[str, Any]) -> 
     raise RuntimeError("_fight_v11_auto_step did not converge")
 
 
+def _fight_fig_effective_level(entry: Dict[str, Any], model_id: str) -> int:
+    """Niveau EFFECTIF (étage) d'une figurine d'une unité, lu dans le cache unité.
+
+    ``level_by_model`` (source par-figurine, §2.5) prime ; repli sur le niveau d'unité. Sert au
+    filtrage des collisions par étage en pile-in/consolidation (superposition inter-étage, §13.06).
+    """
+    lbm = entry.get("level_by_model")
+    if lbm and model_id in lbm:
+        return int(lbm[model_id])
+    return int(entry.get("level", 0))
+
+
+def _fight_model_climb_reachable_floor_cells(*args: Any, **kwargs: Any) -> List[Tuple[int, int]]:
+    """Wrapper lazy vers le reachable d'étage de la phase move (source unique du coût vertical).
+
+    Import différé pour éviter tout cycle au chargement du module (movement_handlers ↔ fight_handlers).
+    """
+    from engine.phase_handlers.movement_handlers import _model_climb_reachable_floor_cells
+    return _model_climb_reachable_floor_cells(*args, **kwargs)
+
+
 def _fight_pile_in_build_model_pool(
     game_state: Dict[str, Any],
     model_id: str,
     closest_tier_ids: List[str],
-    provisional_plan: Optional[Dict[str, Tuple[int, int]]] = None,
+    provisional_plan: Optional[Dict[str, Tuple[int, ...]]] = None,
+    view_level: int = 0,
 ) -> Dict[str, List[List[int]]]:
     """Pool de destinations PAR-FIGURINE pour le pile-in (12.03, move par-figurine).
 
     BFS d'UNE figurine du squad dans le budget fixe de 3" (× ``inches_to_subhex``), sans
     traverser murs ni figs (ennemies, alliées, coéquipières). ``provisional_plan``
-    ({model_id: (col, row)}) remplace les positions des coéquipières déjà posées dans le plan UI
-    (recompute temps réel). ``closest_tier_ids`` = unité(s) ennemie(s) la/les plus proche(s) de
-    l'ESCOUADE (palier WHILE commun à toutes les figs, cf. ``pile_in_move_destinations_12_03``).
+    ({model_id: (col, row[, level])}) remplace les positions des coéquipières déjà posées dans le
+    plan UI (recompute temps réel). ``closest_tier_ids`` = unité(s) ennemie(s) la/les plus proche(s)
+    de l'ESCOUADE (palier WHILE commun à toutes les figs, cf. ``pile_in_move_destinations_12_03``).
+
+    ``view_level`` (étages, §13.06) : niveau de VUE UI. 0 = plan sol (comportement historique
+    inchangé). >= 1 = destinations sur le plancher de ce niveau, atteignables avec le coût vertical
+    (source unique move : ``reachable_multilevel_field`` via ``_model_climb_reachable_floor_cells``),
+    seedé au niveau EFFECTIF courant du mover → une fig déjà en hauteur reste sur son étage.
 
     WHILE MOVING (12.03) : chaque destination doit finir l'empreinte du socle **strictement plus
     proche** du palier le plus proche qu'à son départ. Les contraintes AFTER au niveau unité
@@ -3554,6 +3581,7 @@ def _fight_pile_in_build_model_pool(
         _charge_model_socle,
     )
     from engine.hex_utils import footprints_overlap, Socle
+    from engine.terrain_utils import resolve_model_floor_level
 
     models_cache = require_key(game_state, "models_cache")
     model = models_cache.get(str(model_id))
@@ -3572,6 +3600,9 @@ def _fight_pile_in_build_model_pool(
     wall_hexes = game_state.get("wall_hexes", set())
     player = int(model["player"])
     units_cache = require_key(game_state, "units_cache")
+    terrain_areas = game_state.get("terrain_areas", [])
+    _orient = int(unit.get("orientation", 0))
+    _view_level = int(view_level or 0)
 
     closest = {str(t) for t in closest_tier_ids}
     target_entries: List[Dict[str, Any]] = []
@@ -3580,7 +3611,9 @@ def _fight_pile_in_build_model_pool(
     # Bloqueurs (ennemis + autres unités amies) → collision par TEST EUCLIDIEN officiel
     # (footprints_overlap), un socle PAR FIGURINE à sa base RÉELLE (miroir consolidation). Le test
     # par cellules (cand_fp & occupied) sous-estimait le disque et rejetait des socles tangents.
-    blocker_socles: List[Any] = []
+    # Chaque socle est étiqueté de son niveau EFFECTIF : une fig d'un autre étage ne gêne pas
+    # (superposition inter-étage, §13.06, miroir move par-figurine).
+    blocker_socles: List[Tuple[int, Any]] = []
     for eid, entry in units_cache.items():
         occ = entry.get("occupied_hexes")
         cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
@@ -3593,12 +3626,14 @@ def _fight_pile_in_build_model_pool(
             continue  # coéquipières traitées à part (positions provisoires)
         by_model = entry.get("occupied_hexes_by_model")
         if by_model:
-            for mc, mr in by_model.values():
-                blocker_socles.append(Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
-                    col=int(mc), row=int(mr), fp={(int(mc), int(mr))}))
+            for _bmid, (mc, mr) in by_model.items():
+                blocker_socles.append((_fight_fig_effective_level(entry, str(_bmid)),
+                    Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
+                          col=int(mc), row=int(mr), fp={(int(mc), int(mr))})))
         else:
-            blocker_socles.append(Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
-                col=int(entry["col"]), row=int(entry["row"]), fp=cells))
+            blocker_socles.append((int(entry.get("level", 0)),
+                Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
+                      col=int(entry["col"]), row=int(entry["row"]), fp=cells)))
     if not target_entries:
         return empty
 
@@ -3606,8 +3641,8 @@ def _fight_pile_in_build_model_pool(
 
     # Coéquipières : collision euclidienne, un socle à la base PROPRE de chaque fig
     # (_charge_model_socle) — un Captain terminator (base large) attaché à des terminators n'est
-    # plus sous-estimé. Le plan provisoire override les figs déjà posées.
-    sib_socles: List[Any] = []
+    # plus sous-estimé. Le plan provisoire override les figs déjà posées (col,row[,level]).
+    sib_socles: List[Tuple[int, Any]] = []
     squad_models = require_key(game_state, "squad_models")
     for mid in require_key(squad_models, squad_id):
         if str(mid) == str(model_id):
@@ -3616,37 +3651,72 @@ def _fight_pile_in_build_model_pool(
         if sib is None:
             continue
         if provisional_plan and str(mid) in provisional_plan:
-            pc, pr = provisional_plan[str(mid)]
+            _pv = provisional_plan[str(mid)]
+            pc, pr = int(_pv[0]), int(_pv[1])
+            _sib_req = int(_pv[2]) if len(_pv) >= 3 else int(sib.get("level", 0))
         else:
             pc, pr = int(sib["col"]), int(sib["row"])
-        sib_socles.append(_charge_model_socle(game_state, sib, int(pc), int(pr)))
+            _sib_req = int(sib.get("level", 0))
+        _sib_eff = resolve_model_floor_level(
+            pc, pr, sib["BASE_SHAPE"], sib["BASE_SIZE"], _orient, _sib_req, terrain_areas
+        )
+        sib_socles.append((_sib_eff, _charge_model_socle(game_state, sib, int(pc), int(pr))))
 
-    # 03.01 : une figurine se déplace À TRAVERS les figs amies, mais PAS à travers les ennemies
-    # (ni les murs). Donc le CHEMIN ne bloque que murs + ennemis ; les amis ne bloquent pas le passage.
     wall_set = set(wall_hexes)
-    path_blocked = wall_set | enemy_occupied
-
     start_col, start_row = int(model["col"]), int(model["row"])
     start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_offset_pair)
     start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
 
-    # BFS centre-à-centre ≤ budget : ne traverse ni mur ni fig ENNEMIE (les amies sont traversables).
-    visited: Set[Tuple[int, int]] = {(start_col, start_row)}
-    reachable: List[Tuple[int, int]] = []
-    queue: deque = deque([(start_col, start_row, 0)])
-    while queue:
-        c, r, d = queue.popleft()
-        if d >= budget:
-            continue
-        for nc, nr in get_hex_neighbors(c, r):
-            if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+    # --- Candidats (col,row) selon le niveau de VUE (§13.06) ------------------------------------
+    # view_level 0 : BFS sol historique (traverse figs amies, pas murs/ennemis). view_level >= 1 :
+    # cases du plancher atteignables avec le coût vertical, seedées au niveau effectif du mover
+    # (source unique move : reachable_multilevel_field). Niveau EFFECTIF de destination = view_level.
+    if _view_level >= 1:
+        present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})
+        if _view_level not in present:
+            return empty
+        from engine.game_state import unit_can_occupy_upper_floor
+        if not unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS")):
+            return empty  # §13.06 : ne peut pas finir en hauteur
+        start_eff = resolve_model_floor_level(
+            start_col, start_row, model["BASE_SHAPE"], model["BASE_SIZE"], _orient,
+            int(model.get("level", 0)), terrain_areas
+        )
+        _ground_obs = set(wall_set) | enemy_occupied | build_occupied_positions_set(
+            game_state, exclude_unit_id=squad_id, level=0
+        )
+        _ground_obs.discard((start_col, start_row))
+        reachable = _fight_model_climb_reachable_floor_cells(
+            game_state, unit, squad_id, model, (start_col, start_row), budget, _view_level,
+            _ground_obs, terrain_areas, start_level=start_eff,
+        )
+        dest_eff = _view_level
+        skip_wall_blocker = True  # murs/occupation d'étage déjà validés par le helper multi-niveaux
+    else:
+        # 03.01 : traverse figs amies, PAS ennemies ni murs (chemin = cellules).
+        path_blocked = wall_set | enemy_occupied
+        visited: Set[Tuple[int, int]] = {(start_col, start_row)}
+        reachable = []
+        queue: deque = deque([(start_col, start_row, 0)])
+        while queue:
+            c, r, d = queue.popleft()
+            if d >= budget:
                 continue
-            cell = (nc, nr)
-            if cell in visited or cell in path_blocked:
-                continue
-            visited.add(cell)
-            queue.append((nc, nr, d + 1))
-            reachable.append(cell)
+            for nc, nr in get_hex_neighbors(c, r):
+                if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                    continue
+                cell = (nc, nr)
+                if cell in visited or cell in path_blocked:
+                    continue
+                visited.add(cell)
+                queue.append((nc, nr, d + 1))
+                reachable.append(cell)
+        dest_eff = 0
+        skip_wall_blocker = False
+
+    # Bloqueurs/coéquipières au niveau EFFECTIF de destination uniquement (superposition inter-étage).
+    _blockers_lvl = [s for lv, s in blocker_socles if lv == dest_eff]
+    _sibs_lvl = [s for lv, s in sib_socles if lv == dest_eff]
 
     closer: List[List[int]] = []
     engaged: List[List[int]] = []
@@ -3654,13 +3724,12 @@ def _fight_pile_in_build_model_pool(
         cand_fp = _candidate_footprint_charge(cc, rr, unit, game_state, fp_offset_pair)
         if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
             continue
-        # 03 « Ending a move » : mur discret, chevauchement fig euclidien à la base réelle du mover.
-        if cand_fp & wall_set:
-            continue
+        if not skip_wall_blocker and (cand_fp & wall_set):
+            continue  # 03 « Ending a move » : mur discret (déjà exclu sur étage)
         cand_socle = _charge_model_socle(game_state, model, int(cc), int(rr))
-        if any(footprints_overlap(cand_socle, b) for b in blocker_socles):
+        if any(footprints_overlap(cand_socle, b) for b in _blockers_lvl):
             continue
-        if any(footprints_overlap(cand_socle, b) for b in sib_socles):
+        if any(footprints_overlap(cand_socle, b) for b in _sibs_lvl):
             continue
         d_min = min(
             min_distance_between_sets(cand_fp, tfp, max_distance=start_min) for tfp in target_fps
@@ -3707,15 +3776,17 @@ def _fight_pile_in_closest_tier_ids(
 def _fight_pile_in_preview_plan(
     game_state: Dict[str, Any],
     squad_id: str,
-    plan: List[Tuple[str, int, int]],
+    plan: List[Tuple[str, ...]],
     closest_tier_ids: List[str],
     engaged_before_ids: List[str],
 ) -> Dict[str, Any]:
     """Dry-run d'un plan pile-in par-figurine (12.03 WHILE/AFTER + cohésion 03.03). Lecture pure.
 
-    ``plan`` couvre TOUTES les figs vivantes. Légalité par-fig = appartenance au pool ``closer``
-    (ou figurine laissée à sa position d'origine). On ajoute la cohésion d'unité et les contraintes
-    AFTER au niveau unité : l'escouade finit engagée et chaque engagement de départ est conservé.
+    ``plan`` couvre TOUTES les figs vivantes, entrées ``(mid, col, row[, level])`` (le 4ᵉ élément =
+    niveau d'étage de destination ; absent → niveau courant de la fig). Légalité par-fig =
+    appartenance au pool ``closer`` calculé AU NIVEAU planifié de la fig (ou figurine laissée à sa
+    position d'origine). On ajoute la cohésion d'unité et les contraintes AFTER au niveau unité :
+    l'escouade finit engagée et chaque engagement de départ est conservé.
 
     Retour : {per_model, coherency_ok, unit_engaged, kept_engagements, can_validate}.
     """
@@ -3740,15 +3811,23 @@ def _fight_pile_in_preview_plan(
     if not unit:
         return empty
     models_cache = require_key(game_state, "models_cache")
-    norm = [(str(m), int(c), int(r)) for m, c, r in plan]
+
+    def _plan_level(entry: Tuple[str, ...]) -> int:
+        if len(entry) >= 4 and entry[3] is not None:
+            return int(entry[3])
+        m = models_cache.get(str(entry[0]))
+        return int(m.get("level", 0)) if m else 0
+
+    norm = [(str(e[0]), int(e[1]), int(e[2]), _plan_level(e)) for e in plan]
     n = len(norm)
     if n == 0:
         return empty
 
-    # 1) Légalité par-fig : dans son pool ``closer`` (autres figs = positions provisoires) ou immobile.
-    pos_by_model = {mid: (c, r) for mid, c, r in norm}
+    # 1) Légalité par-fig : dans son pool ``closer`` au NIVEAU planifié (autres figs = positions
+    # provisoires (col,row,level)) ou immobile.
+    pos_by_model = {mid: (c, r, lv) for mid, c, r, lv in norm}
     per_model: Dict[str, bool] = {}
-    for mid, c, r in norm:
+    for mid, c, r, lv in norm:
         prov = {m2: pos_by_model[m2] for m2 in pos_by_model if m2 != mid}
         m = models_cache.get(mid)
         orig = (int(m["col"]), int(m["row"])) if m else None
@@ -3756,13 +3835,13 @@ def _fight_pile_in_preview_plan(
             per_model[mid] = True
             continue
         pool = _fight_pile_in_build_model_pool(
-            game_state, mid, closest_tier_ids, provisional_plan=prov
+            game_state, mid, closest_tier_ids, provisional_plan=prov, view_level=lv
         )["closer"]
         per_model[mid] = [c, r] in pool
 
     # 2) Cohésion 03.03 (empreinte-à-empreinte, mêmes 2 puces que le move).
     fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
-    fps = [_candidate_footprint_charge(c, r, unit, game_state, fp_pair) for _, c, r in norm]
+    fps = [_candidate_footprint_charge(c, r, unit, game_state, fp_pair) for _, c, r, _ in norm]
     coh = get_coherency_subhex(game_state)
     coh_max = get_cohesion_max_subhex(game_state)
     min_nb = get_min_neighbors(game_state)
@@ -3822,14 +3901,17 @@ def _fight_pile_in_preview_plan(
 def _fight_pile_in_model_plan_state(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
-    provisional_plan: Optional[Dict[str, Tuple[int, int]]] = None,
+    provisional_plan: Optional[Dict[str, Tuple[int, ...]]] = None,
     selected_model: Optional[str] = None,
+    view_level: int = 0,
 ) -> Dict[str, Any]:
     """État du plan pile-in par-figurine exposé au front (miroir simplifié de ``charge_model_plan_state``).
 
     Une seule « phase » (pas de within_1/engaged/closer) : chaque fig peut se déplacer ≤3" en finissant
-    plus proche du palier ennemi le plus proche. ``provisional_plan`` = figs déjà posées ; les autres
-    restent à leur position d'origine. ``selected_model`` non-None → calcule SON pool + empreinte lissée.
+    plus proche du palier ennemi le plus proche. ``provisional_plan`` = figs déjà posées (col,row[,level]) ;
+    les autres restent à leur position/niveau d'origine. ``selected_model`` non-None → calcule SON pool +
+    empreinte lissée. ``view_level`` (étages, §13.06) = niveau de VUE UI ; le pool proposé et le niveau de
+    destination des figs posées suivent ce niveau (miroir move par-figurine).
     """
     from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
     from engine.spatial_relations import unit_entries_within_engagement_zone
@@ -3845,10 +3927,15 @@ def _fight_pile_in_model_plan_state(
     units_cache = require_key(game_state, "units_cache")
     squad_models = require_key(game_state, "squad_models")
     alive = [str(m) for m in require_key(squad_models, squad_id) if str(m) in models_cache]
-    prov: Dict[str, Tuple[int, int]] = {
-        str(m): (int(c), int(r)) for m, (c, r) in (provisional_plan or {}).items()
+    _vl = int(view_level or 0)
+    prov: Dict[str, Tuple[int, int, int]] = {
+        str(m): (int(v[0]), int(v[1]), int(v[2]) if len(v) >= 3 and v[2] is not None else _vl)
+        for m, v in (provisional_plan or {}).items()
     }
-    origin = {m: (int(models_cache[m]["col"]), int(models_cache[m]["row"])) for m in alive}
+    origin = {
+        m: (int(models_cache[m]["col"]), int(models_cache[m]["row"]), int(models_cache[m].get("level", 0)))
+        for m in alive
+    }
 
     targets = _fight_v11_pile_in_targets(game_state, unit)
     closest_tier = _fight_pile_in_closest_tier_ids(game_state, unit, targets) if targets else []
@@ -3856,7 +3943,9 @@ def _fight_pile_in_model_plan_state(
     unplaced = [m for m in alive if m not in prov]
     eligible: List[str] = []
     for m in unplaced:
-        if _fight_pile_in_build_model_pool(game_state, m, closest_tier, provisional_plan=prov)["closer"]:
+        if _fight_pile_in_build_model_pool(
+            game_state, m, closest_tier, provisional_plan=prov, view_level=_vl
+        )["closer"]:
             eligible.append(m)
 
     pool: List[List[int]] = []
@@ -3864,7 +3953,9 @@ def _fight_pile_in_model_plan_state(
     if selected_model is not None and str(selected_model) in alive:
         sel = str(selected_model)
         sel_prov = {k: v for k, v in prov.items() if k != sel}
-        pool = _fight_pile_in_build_model_pool(game_state, sel, closest_tier, provisional_plan=sel_prov)["closer"]
+        pool = _fight_pile_in_build_model_pool(
+            game_state, sel, closest_tier, provisional_plan=sel_prov, view_level=_vl
+        )["closer"]
         if pool:
             fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
             fp_zone: Set[Tuple[int, int]] = set()
@@ -3874,8 +3965,9 @@ def _fight_pile_in_model_plan_state(
             if loops:
                 mask_loops = [[[float(x), float(y)] for (x, y) in loop] for loop in loops]
 
-    full_plan: List[Tuple[str, int, int]] = [
-        (m, prov[m][0], prov[m][1]) if m in prov else (m, origin[m][0], origin[m][1]) for m in alive
+    full_plan: List[Tuple[str, int, int, int]] = [
+        (m, prov[m][0], prov[m][1], prov[m][2]) if m in prov
+        else (m, origin[m][0], origin[m][1], origin[m][2]) for m in alive
     ]
     engaged_before = _fight_units_engaged_with(game_state, unit)
     prev = _fight_pile_in_preview_plan(game_state, squad_id, full_plan, closest_tier, engaged_before)
@@ -3886,7 +3978,7 @@ def _fight_pile_in_model_plan_state(
     fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
     target_entries = [units_cache[t] for t in targets if t in units_cache]
     engaged_models: List[str] = []
-    for m, c, r in full_plan:
+    for m, c, r, _lv in full_plan:
         fp = _candidate_footprint_charge(int(c), int(r), unit, game_state, fp_pair)
         synth = _charge_synthetic_charger_cache_entry(game_state, unit, int(c), int(r), fp)
         if any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
@@ -3900,8 +3992,9 @@ def _fight_pile_in_model_plan_state(
         "pile_in_targets": [str(t) for t in targets],
         "unitId": squad_id,
         "active_fight_unit": squad_id,
-        "origin_models": {m: [c, r] for m, (c, r) in origin.items()},
-        "provisional": {m: [c, r] for m, (c, r) in prov.items()},
+        "current_level": _vl,
+        "origin_models": {m: [c, r] for m, (c, r, _l) in origin.items()},
+        "provisional": {m: [c, r] for m, (c, r, _l) in prov.items()},
         "eligible_models": eligible,
         "selected_model": str(selected_model) if selected_model is not None else None,
         "pool": pool,
@@ -4550,7 +4643,8 @@ def _fight_consolidation_build_model_pool(
     tier_kind: str,
     tier: Any,
     lock_base_contact: bool,
-    provisional_plan: Optional[Dict[str, Tuple[int, int]]] = None,
+    provisional_plan: Optional[Dict[str, Tuple[int, ...]]] = None,
+    view_level: int = 0,
 ) -> Dict[str, List[List[int]]]:
     """Pool de destinations PAR-FIGURINE pour la CONSOLIDATION (12.08), moteur générique.
 
@@ -4558,7 +4652,10 @@ def _fight_consolidation_build_model_pool(
       - ``tier_kind`` ∈ {"enemy","zone"} : nature du palier WHILE ;
       - ``tier`` : pour "enemy" = ids du **palier ennemi le plus proche** (closest tier) ;
         pour "zone" = set d'hexes de la zone de l'objectif sélectionné ;
-      - ``lock_base_contact`` : Ongoing — une figurine en base-contact ennemi NE BOUGE PAS (12.08).
+      - ``lock_base_contact`` : Ongoing — une figurine en base-contact ennemi NE BOUGE PAS (12.08) ;
+      - ``view_level`` (étages, §13.06) : niveau de VUE UI. 0 = plan sol (historique). >= 1 = plancher
+        de ce niveau, atteignable avec le coût vertical (source unique move), seedé au niveau EFFECTIF
+        courant du mover → une fig déjà en hauteur reste sur son étage (miroir pile-in / move).
 
     WHILE MOVING (12.08) :
       - enemy (Ongoing/Engaging) : empreinte finale STRICTEMENT plus proche du palier le plus
@@ -4580,6 +4677,7 @@ def _fight_consolidation_build_model_pool(
         _charge_model_socle,
     )
     from engine.hex_utils import footprints_overlap, Socle
+    from engine.terrain_utils import resolve_model_floor_level
 
     if tier_kind not in ("enemy", "zone"):
         raise ValueError(f"_fight_consolidation_build_model_pool: tier_kind invalide {tier_kind!r}")
@@ -4604,6 +4702,9 @@ def _fight_consolidation_build_model_pool(
     wall_hexes = game_state.get("wall_hexes", set())
     player = int(model["player"])
     units_cache = require_key(game_state, "units_cache")
+    terrain_areas = game_state.get("terrain_areas", [])
+    _orient = int(unit.get("orientation", 0))
+    _view_level = int(view_level or 0)
 
     closest = {str(t) for t in tier} if tier_kind == "enemy" else set()
     zone_set: Set[Tuple[int, int]] = set(tier) if tier_kind == "zone" else set()
@@ -4611,9 +4712,9 @@ def _fight_consolidation_build_model_pool(
     target_fps: List[Set[Tuple[int, int]]] = []
     enemy_occupied: Set[Tuple[int, int]] = set()
     # Bloqueurs (ennemis + autres unités amies) → collision par TEST EUCLIDIEN officiel
-    # (footprints_overlap), comme les autoplaces. Le test par cellules (cand_fp & occupied) rejetait
-    # à tort des socles ronds TANGENTS (socle-à-socle légal) → Validate bloqué après Focus off.
-    blocker_socles: List[Any] = []
+    # (footprints_overlap), comme les autoplaces. Chaque socle étiqueté de son niveau EFFECTIF :
+    # une fig d'un autre étage ne gêne pas (superposition inter-étage, §13.06, miroir pile-in).
+    blocker_socles: List[Tuple[int, Any]] = []
     for eid, entry in units_cache.items():
         occ = entry.get("occupied_hexes")
         cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
@@ -4626,12 +4727,14 @@ def _fight_consolidation_build_model_pool(
             continue  # coéquipières traitées à part (positions provisoires)
         by_model = entry.get("occupied_hexes_by_model")
         if by_model:
-            for mc, mr in by_model.values():
-                blocker_socles.append(Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
-                    col=int(mc), row=int(mr), fp={(int(mc), int(mr))}))
+            for _bmid, (mc, mr) in by_model.items():
+                blocker_socles.append((_fight_fig_effective_level(entry, str(_bmid)),
+                    Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
+                          col=int(mc), row=int(mr), fp={(int(mc), int(mr))})))
         else:
-            blocker_socles.append(Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
-                col=int(entry["col"]), row=int(entry["row"]), fp=cells))
+            blocker_socles.append((int(entry.get("level", 0)),
+                Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
+                      col=int(entry["col"]), row=int(entry["row"]), fp=cells)))
     if tier_kind == "enemy" and not target_entries:
         return empty
     if tier_kind == "zone" and not zone_set:
@@ -4639,8 +4742,8 @@ def _fight_consolidation_build_model_pool(
 
     fp_offset_pair = _charge_prepare_footprint_offsets(unit, game_state)
 
-    # Coéquipières (collision euclidienne) : le plan provisoire override les figs déjà posées.
-    sib_socles: List[Any] = []
+    # Coéquipières (collision euclidienne) : le plan provisoire override les figs déjà posées (col,row[,level]).
+    sib_socles: List[Tuple[int, Any]] = []
     squad_models = require_key(game_state, "squad_models")
     for mid in require_key(squad_models, squad_id):
         if str(mid) == str(model_id):
@@ -4649,15 +4752,18 @@ def _fight_consolidation_build_model_pool(
         if sib is None:
             continue
         if provisional_plan and str(mid) in provisional_plan:
-            pc, pr = provisional_plan[str(mid)]
+            _pv = provisional_plan[str(mid)]
+            pc, pr = int(_pv[0]), int(_pv[1])
+            _sib_req = int(_pv[2]) if len(_pv) >= 3 else int(sib.get("level", 0))
         else:
             pc, pr = int(sib["col"]), int(sib["row"])
-        sib_socles.append(_charge_model_socle(game_state, sib, int(pc), int(pr)))
+            _sib_req = int(sib.get("level", 0))
+        _sib_eff = resolve_model_floor_level(
+            pc, pr, sib["BASE_SHAPE"], sib["BASE_SIZE"], _orient, _sib_req, terrain_areas
+        )
+        sib_socles.append((_sib_eff, _charge_model_socle(game_state, sib, int(pc), int(pr))))
 
-    # 03.01 : traverse les amies, PAS les ennemies ni les murs (traversée BFS = cellules).
     wall_set = set(wall_hexes)
-    path_blocked = wall_set | enemy_occupied
-
     start_col, start_row = int(model["col"]), int(model["row"])
     start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_offset_pair)
     if tier_kind == "enemy":
@@ -4665,22 +4771,52 @@ def _fight_consolidation_build_model_pool(
     else:
         start_min = min_distance_between_sets(start_fp, zone_set)
 
-    visited: Set[Tuple[int, int]] = {(start_col, start_row)}
-    reachable: List[Tuple[int, int]] = []
-    queue: deque = deque([(start_col, start_row, 0)])
-    while queue:
-        c, r, d = queue.popleft()
-        if d >= budget:
-            continue
-        for nc, nr in get_hex_neighbors(c, r):
-            if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+    # --- Candidats (col,row) selon le niveau de VUE (§13.06), miroir pile-in ---------------------
+    if _view_level >= 1:
+        present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})
+        if _view_level not in present:
+            return empty
+        from engine.game_state import unit_can_occupy_upper_floor
+        if not unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS")):
+            return empty
+        start_eff = resolve_model_floor_level(
+            start_col, start_row, model["BASE_SHAPE"], model["BASE_SIZE"], _orient,
+            int(model.get("level", 0)), terrain_areas
+        )
+        _ground_obs = set(wall_set) | enemy_occupied | build_occupied_positions_set(
+            game_state, exclude_unit_id=squad_id, level=0
+        )
+        _ground_obs.discard((start_col, start_row))
+        reachable = _fight_model_climb_reachable_floor_cells(
+            game_state, unit, squad_id, model, (start_col, start_row), budget, _view_level,
+            _ground_obs, terrain_areas, start_level=start_eff,
+        )
+        dest_eff = _view_level
+        skip_wall_blocker = True
+    else:
+        # 03.01 : traverse les amies, PAS les ennemies ni les murs (traversée BFS = cellules).
+        path_blocked = wall_set | enemy_occupied
+        visited: Set[Tuple[int, int]] = {(start_col, start_row)}
+        reachable = []
+        queue: deque = deque([(start_col, start_row, 0)])
+        while queue:
+            c, r, d = queue.popleft()
+            if d >= budget:
                 continue
-            cell = (nc, nr)
-            if cell in visited or cell in path_blocked:
-                continue
-            visited.add(cell)
-            queue.append((nc, nr, d + 1))
-            reachable.append(cell)
+            for nc, nr in get_hex_neighbors(c, r):
+                if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                    continue
+                cell = (nc, nr)
+                if cell in visited or cell in path_blocked:
+                    continue
+                visited.add(cell)
+                queue.append((nc, nr, d + 1))
+                reachable.append(cell)
+        dest_eff = 0
+        skip_wall_blocker = False
+
+    _blockers_lvl = [s for lv, s in blocker_socles if lv == dest_eff]
+    _sibs_lvl = [s for lv, s in sib_socles if lv == dest_eff]
 
     closer: List[List[int]] = []
     engaged: List[List[int]] = []
@@ -4688,13 +4824,13 @@ def _fight_consolidation_build_model_pool(
         cand_fp = _candidate_footprint_charge(cc, rr, unit, game_state, fp_offset_pair)
         if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
             continue
-        if cand_fp & wall_set:
-            continue  # finir sur un mur interdit (cellules)
+        if not skip_wall_blocker and (cand_fp & wall_set):
+            continue  # finir sur un mur interdit (déjà exclu sur étage)
         cand_socle = _charge_model_socle(game_state, model, int(cc), int(rr))
-        if any(footprints_overlap(cand_socle, b) for b in blocker_socles):
-            continue  # chevauchement ennemi / autre unité amie (euclidien officiel, tangence OK)
-        if any(footprints_overlap(cand_socle, b) for b in sib_socles):
-            continue  # chevauchement coéquipière (idem)
+        if any(footprints_overlap(cand_socle, b) for b in _blockers_lvl):
+            continue  # chevauchement ennemi / autre unité amie AU MÊME ÉTAGE (euclidien, tangence OK)
+        if any(footprints_overlap(cand_socle, b) for b in _sibs_lvl):
+            continue  # chevauchement coéquipière au même étage (idem)
         if tier_kind == "enemy":
             d_min = min(
                 min_distance_between_sets(cand_fp, tfp, max_distance=start_min) for tfp in target_fps
@@ -4721,7 +4857,7 @@ def _fight_consolidation_build_model_pool(
 def _fight_consolidation_preview_plan(
     game_state: Dict[str, Any],
     squad_id: str,
-    plan: List[Tuple[str, int, int]],
+    plan: List[Tuple[str, ...]],
     *,
     mode: str,
     tier_kind: str,
@@ -4763,15 +4899,23 @@ def _fight_consolidation_preview_plan(
     if not unit:
         return empty
     models_cache = require_key(game_state, "models_cache")
-    norm = [(str(m), int(c), int(r)) for m, c, r in plan]
+
+    def _plan_level(entry: Tuple[str, ...]) -> int:
+        if len(entry) >= 4 and entry[3] is not None:
+            return int(entry[3])
+        m = models_cache.get(str(entry[0]))
+        return int(m.get("level", 0)) if m else 0
+
+    norm = [(str(e[0]), int(e[1]), int(e[2]), _plan_level(e)) for e in plan]
     n = len(norm)
     if n == 0:
         return empty
 
-    # 1) Légalité par-fig : dans son pool ``closer`` (autres figs = positions provisoires) ou immobile.
-    pos_by_model = {mid: (c, r) for mid, c, r in norm}
+    # 1) Légalité par-fig : dans son pool ``closer`` au NIVEAU planifié (autres figs = positions
+    # provisoires (col,row,level)) ou immobile.
+    pos_by_model = {mid: (c, r, lv) for mid, c, r, lv in norm}
     per_model: Dict[str, bool] = {}
-    for mid, c, r in norm:
+    for mid, c, r, lv in norm:
         prov = {m2: pos_by_model[m2] for m2 in pos_by_model if m2 != mid}
         m = models_cache.get(mid)
         orig = (int(m["col"]), int(m["row"])) if m else None
@@ -4780,13 +4924,13 @@ def _fight_consolidation_preview_plan(
             continue
         pool = _fight_consolidation_build_model_pool(
             game_state, mid, tier_kind=tier_kind, tier=tier,
-            lock_base_contact=lock_base_contact, provisional_plan=prov,
+            lock_base_contact=lock_base_contact, provisional_plan=prov, view_level=lv,
         )["closer"]
         per_model[mid] = [c, r] in pool
 
     # 2) Cohésion 03.03 (empreinte-à-empreinte, mêmes 2 puces que le move).
     fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
-    fps = [_candidate_footprint_charge(c, r, unit, game_state, fp_pair) for _, c, r in norm]
+    fps = [_candidate_footprint_charge(c, r, unit, game_state, fp_pair) for _, c, r, _ in norm]
     coh = get_coherency_subhex(game_state)
     coh_max = get_cohesion_max_subhex(game_state)
     min_nb = get_min_neighbors(game_state)
@@ -4868,8 +5012,9 @@ def _fight_consolidation_preview_plan(
 def _fight_consolidation_model_plan_state(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
-    provisional_plan: Optional[Dict[str, Tuple[int, int]]] = None,
+    provisional_plan: Optional[Dict[str, Tuple[int, ...]]] = None,
     selected_model: Optional[str] = None,
+    view_level: int = 0,
 ) -> Dict[str, Any]:
     """État du plan de consolidation par-figurine exposé au front (miroir du pile-in par-figurine).
 
@@ -4891,10 +5036,15 @@ def _fight_consolidation_model_plan_state(
     units_cache = require_key(game_state, "units_cache")
     squad_models = require_key(game_state, "squad_models")
     alive = [str(m) for m in require_key(squad_models, squad_id) if str(m) in models_cache]
-    prov: Dict[str, Tuple[int, int]] = {
-        str(m): (int(c), int(r)) for m, (c, r) in (provisional_plan or {}).items()
+    _vl = int(view_level or 0)
+    prov: Dict[str, Tuple[int, int, int]] = {
+        str(m): (int(v[0]), int(v[1]), int(v[2]) if len(v) >= 3 and v[2] is not None else _vl)
+        for m, v in (provisional_plan or {}).items()
     }
-    origin = {m: (int(models_cache[m]["col"]), int(models_cache[m]["row"])) for m in alive}
+    origin = {
+        m: (int(models_cache[m]["col"]), int(models_cache[m]["row"]), int(models_cache[m].get("level", 0)))
+        for m in alive
+    }
 
     mode, tier = _fight_v11_consolidation_targets(game_state, unit)
     engaging_candidates = (
@@ -4910,8 +5060,9 @@ def _fight_consolidation_model_plan_state(
         "consolidation_mode": mode,
         "unitId": squad_id,
         "active_fight_unit": squad_id,
-        "origin_models": {m: [c, r] for m, (c, r) in origin.items()},
-        "provisional": {m: [c, r] for m, (c, r) in prov.items()},
+        "current_level": _vl,
+        "origin_models": {m: [c, r] for m, (c, r, _l) in origin.items()},
+        "provisional": {m: [c, r] for m, (c, r, _l) in prov.items()},
         "selected_model": str(selected_model) if selected_model is not None else None,
         "engaging_candidates": [str(e) for e in engaging_candidates],
         "objective_candidates": [str(o) for o in objective_candidates],
@@ -4942,7 +5093,7 @@ def _fight_consolidation_model_plan_state(
     for m in unplaced:
         if _fight_consolidation_build_model_pool(
             game_state, m, tier_kind=tier_kind, tier=tier,
-            lock_base_contact=lock_base_contact, provisional_plan=prov,
+            lock_base_contact=lock_base_contact, provisional_plan=prov, view_level=_vl,
         )["closer"]:
             eligible.append(m)
 
@@ -4953,7 +5104,7 @@ def _fight_consolidation_model_plan_state(
         sel_prov = {k: v for k, v in prov.items() if k != sel}
         pool = _fight_consolidation_build_model_pool(
             game_state, sel, tier_kind=tier_kind, tier=tier,
-            lock_base_contact=lock_base_contact, provisional_plan=sel_prov,
+            lock_base_contact=lock_base_contact, provisional_plan=sel_prov, view_level=_vl,
         )["closer"]
         if pool:
             fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
@@ -4964,8 +5115,9 @@ def _fight_consolidation_model_plan_state(
             if loops:
                 mask_loops = [[[float(x), float(y)] for (x, y) in loop] for loop in loops]
 
-    full_plan: List[Tuple[str, int, int]] = [
-        (m, prov[m][0], prov[m][1]) if m in prov else (m, origin[m][0], origin[m][1]) for m in alive
+    full_plan: List[Tuple[str, int, int, int]] = [
+        (m, prov[m][0], prov[m][1], prov[m][2]) if m in prov
+        else (m, origin[m][0], origin[m][1], origin[m][2]) for m in alive
     ]
     engaged_before = _fight_units_engaged_with(game_state, unit)
     prev = _fight_consolidation_preview_plan(
@@ -4980,14 +5132,14 @@ def _fight_consolidation_model_plan_state(
     engaged_models: List[str] = []
     if tier_kind == "enemy":
         target_entries = [units_cache[t] for t in closest_tier if t in units_cache]
-        for m, c, r in full_plan:
+        for m, c, r, _lv in full_plan:
             fp = _candidate_footprint_charge(int(c), int(r), unit, game_state, fp_pair)
             synth = _charge_synthetic_charger_cache_entry(game_state, unit, int(c), int(r), fp)
             if any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
                 engaged_models.append(m)
     else:
         zone_set: Set[Tuple[int, int]] = set(tier)
-        for m, c, r in full_plan:
+        for m, c, r, _lv in full_plan:
             fp = _candidate_footprint_charge(int(c), int(r), unit, game_state, fp_pair)
             if fp & zone_set:
                 engaged_models.append(m)
@@ -5668,10 +5820,15 @@ def _fight_v11_manual_step(
         active = game_state.get("active_fight_unit")
         act_uid = str(active) if active is not None else None
 
-        def _prov_from_action() -> Dict[str, Tuple[int, int]]:
-            prov: Dict[str, Tuple[int, int]] = {}
+        _view_level = int(action.get("level") or 0)
+
+        def _prov_from_action() -> Dict[str, Tuple[int, int, int]]:
+            # (col,row) ou (col,row,level) : le niveau d'étage capturé au drop de chaque fig (frontend)
+            # est conservé → une fig posée sur un étage y reste (§13.06, miroir move par-figurine).
+            prov: Dict[str, Tuple[int, int, int]] = {}
             for e in (action.get("plan") or []):
-                prov[str(e[0])] = (int(e[1]), int(e[2]))
+                lvl = int(e[3]) if len(e) >= 4 and e[3] is not None else _view_level
+                prov[str(e[0])] = (int(e[1]), int(e[2]), lvl)
             return prov
 
         if skip:
@@ -5691,7 +5848,8 @@ def _fight_v11_manual_step(
                 raise KeyError(f"Pile-in unit {act_uid} missing from game_state['units']")
             sel = action.get("selected_model")
             return True, _fight_pile_in_model_plan_state(
-                game_state, u, _prov_from_action(), str(sel) if sel is not None else None
+                game_state, u, _prov_from_action(), str(sel) if sel is not None else None,
+                view_level=_view_level,
             )
 
         if atype == "pile_in_autoplace":
@@ -5716,9 +5874,14 @@ def _fight_v11_manual_step(
             models_cache = require_key(game_state, "models_cache")
             squad_models = require_key(game_state, "squad_models")
             alive = [str(m) for m in require_key(squad_models, act_uid) if str(m) in models_cache]
-            origin = {m: (int(models_cache[m]["col"]), int(models_cache[m]["row"])) for m in alive}
-            full_plan: List[Tuple[str, int, int]] = [
-                (m, prov[m][0], prov[m][1]) if m in prov else (m, origin[m][0], origin[m][1])
+            origin = {
+                m: (int(models_cache[m]["col"]), int(models_cache[m]["row"]),
+                    int(models_cache[m].get("level", 0)))
+                for m in alive
+            }
+            full_plan: List[Tuple[str, int, int, int]] = [
+                (m, prov[m][0], prov[m][1], prov[m][2]) if m in prov
+                else (m, origin[m][0], origin[m][1], origin[m][2])
                 for m in alive
             ]
             targets = _fight_v11_pile_in_targets(game_state, u)
@@ -5727,7 +5890,9 @@ def _fight_v11_manual_step(
             prev = _fight_pile_in_preview_plan(game_state, act_uid, full_plan, closest, engaged_before)
             if not prev["can_validate"]:
                 _fight_v11_log(game_state, f"PILE IN unit {act_uid} → plan invalide {prev}")
-                return True, _fight_pile_in_model_plan_state(game_state, u, prov, None)
+                return True, _fight_pile_in_model_plan_state(
+                    game_state, u, prov, None, view_level=_view_level
+                )
             _uc_before = require_key(game_state, "units_cache")[act_uid]
             _from_col, _from_row = int(_uc_before["col"]), int(_uc_before["row"])
             _fight_pile_in_commit_plan(game_state, u, full_plan)
@@ -5743,8 +5908,9 @@ def _fight_v11_manual_step(
                     "fromRow": origin[m][1],
                     "toCol": int(nc),
                     "toRow": int(nr),
+                    "toLevel": int(nlv),
                 }
-                for m, nc, nr in full_plan
+                for m, nc, nr, nlv in full_plan
             ]
             append_action_log(
                 game_state,
@@ -5780,7 +5946,9 @@ def _fight_v11_manual_step(
             game_state["active_fight_unit"] = uid
             done = {str(x) for x in game_state.get("pile_in_done", set())}
             game_state["fight_eligible_units"] = [e for e in eligible if str(e) not in done]
-            state = _fight_pile_in_model_plan_state(game_state, u)
+            state = _fight_pile_in_model_plan_state(
+                game_state, u, view_level=int(u.get("level", 0))
+            )
             _fight_v11_log(
                 game_state,
                 f"PILE IN : unit {uid} sélectionnée (par-figurine, "
@@ -5972,10 +6140,15 @@ def _fight_v11_manual_step(
         active = game_state.get("active_fight_unit")
         act_uid = str(active) if active is not None else None
 
-        def _prov_from_action() -> Dict[str, Tuple[int, int]]:
-            prov: Dict[str, Tuple[int, int]] = {}
+        _view_level = int(action.get("level") or 0)
+
+        def _prov_from_action() -> Dict[str, Tuple[int, int, int]]:
+            # (col,row) ou (col,row,level) : niveau d'étage capturé au drop de chaque fig (frontend)
+            # conservé → une fig posée sur un étage y reste (§13.06, miroir move par-figurine).
+            prov: Dict[str, Tuple[int, int, int]] = {}
             for e in (action.get("plan") or []):
-                prov[str(e[0])] = (int(e[1]), int(e[2]))
+                lvl = int(e[3]) if len(e) >= 4 and e[3] is not None else _view_level
+                prov[str(e[0])] = (int(e[1]), int(e[2]), lvl)
             return prov
 
         if skip:
@@ -6008,7 +6181,9 @@ def _fight_v11_manual_step(
             _fight_v11_clear_consolidation_preview(game_state)
             done = {str(x) for x in game_state.get("consolidation_done", set())}
             game_state["fight_eligible_units"] = [e for e in eligible if str(e) not in done]
-            state = _fight_consolidation_model_plan_state(game_state, u)
+            state = _fight_consolidation_model_plan_state(
+                game_state, u, view_level=int(u.get("level", 0))
+            )
             _fight_v11_log(
                 game_state,
                 f"CONSOLIDATE : unit {uid} sélectionnée (mode={state.get('consolidation_mode')})",
@@ -6042,7 +6217,8 @@ def _fight_v11_manual_step(
                 _fight_v11_log(game_state, f"CONSOLIDATE engaging : cible {tid} hors candidats {candidates}")
             sel = action.get("selected_model")
             return True, _fight_consolidation_model_plan_state(
-                game_state, u, _prov_from_action(), str(sel) if sel is not None else None
+                game_state, u, _prov_from_action(), str(sel) if sel is not None else None,
+                view_level=_view_level,
             )
 
         if atype == "consolidation_select_objective":
@@ -6059,13 +6235,15 @@ def _fight_v11_manual_step(
                 _fight_v11_log(game_state, f"CONSOLIDATE objective : objectif {oid} hors candidats {candidates}")
             sel = action.get("selected_model")
             return True, _fight_consolidation_model_plan_state(
-                game_state, u, _prov_from_action(), str(sel) if sel is not None else None
+                game_state, u, _prov_from_action(), str(sel) if sel is not None else None,
+                view_level=_view_level,
             )
 
         if atype == "consolidation_plan_state":
             sel = action.get("selected_model")
             return True, _fight_consolidation_model_plan_state(
-                game_state, u, _prov_from_action(), str(sel) if sel is not None else None
+                game_state, u, _prov_from_action(), str(sel) if sel is not None else None,
+                view_level=_view_level,
             )
 
         if atype == "consolidate_autoplace":
@@ -6084,16 +6262,23 @@ def _fight_v11_manual_step(
             )
             if blocked:
                 _fight_v11_log(game_state, f"CONSOLIDATE unit {act_uid} → commit bloqué (sélection requise, mode={mode})")
-                return True, _fight_consolidation_model_plan_state(game_state, u, _prov_from_action(), None)
+                return True, _fight_consolidation_model_plan_state(
+                    game_state, u, _prov_from_action(), None, view_level=_view_level
+                )
             # Invariant post-guard : mode/tier sont renseignés (None ⇒ blocked, déjà retourné).
             assert mode is not None and tier is not None
             prov = _prov_from_action()
             models_cache = require_key(game_state, "models_cache")
             squad_models = require_key(game_state, "squad_models")
             alive = [str(m) for m in require_key(squad_models, act_uid) if str(m) in models_cache]
-            origin = {m: (int(models_cache[m]["col"]), int(models_cache[m]["row"])) for m in alive}
-            full_plan: List[Tuple[str, int, int]] = [
-                (m, prov[m][0], prov[m][1]) if m in prov else (m, origin[m][0], origin[m][1])
+            origin = {
+                m: (int(models_cache[m]["col"]), int(models_cache[m]["row"]),
+                    int(models_cache[m].get("level", 0)))
+                for m in alive
+            }
+            full_plan: List[Tuple[str, int, int, int]] = [
+                (m, prov[m][0], prov[m][1], prov[m][2]) if m in prov
+                else (m, origin[m][0], origin[m][1], origin[m][2])
                 for m in alive
             ]
             tier_kind = "zone" if mode == "objective" else "enemy"
@@ -6107,7 +6292,9 @@ def _fight_v11_manual_step(
             )
             if not prev["can_validate"]:
                 _fight_v11_log(game_state, f"CONSOLIDATE unit {act_uid} → plan invalide {prev}")
-                return True, _fight_consolidation_model_plan_state(game_state, u, prov, None)
+                return True, _fight_consolidation_model_plan_state(
+                    game_state, u, prov, None, view_level=_view_level
+                )
             _uc_before = require_key(game_state, "units_cache")[act_uid]
             _from_col, _from_row = int(_uc_before["col"]), int(_uc_before["row"])
             _fight_consolidation_commit_plan(game_state, u, full_plan)
@@ -6123,8 +6310,9 @@ def _fight_v11_manual_step(
                     "fromRow": origin[m][1],
                     "toCol": int(nc),
                     "toRow": int(nr),
+                    "toLevel": int(nlv),
                 }
-                for m, nc, nr in full_plan
+                for m, nc, nr, nlv in full_plan
             ]
             append_action_log(
                 game_state,

@@ -656,7 +656,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
    */
   const [pileInMovePlan, setPileInMovePlan] = useState<{
     unitId: number;
-    models: Record<string, { col: number; row: number }>;
+    models: Record<string, { col: number; row: number; level?: number }>;
     eligibleModels: string[];
     unplaced: string[];
     activeModelId: string | null;
@@ -692,7 +692,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   // ──────────────────────────────────────────────────────────────────────────
   const [consolidationMovePlan, setConsolidationMovePlan] = useState<{
     unitId: number;
-    models: Record<string, { col: number; row: number }>;
+    models: Record<string, { col: number; row: number; level?: number }>;
     eligibleModels: string[];
     unplaced: string[];
     activeModelId: string | null;
@@ -6648,17 +6648,20 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Lecture pure : recalcule l'état du plan pile-in depuis le backend (active_fight_unit). */
   const refreshPileInPlanState = useCallback(
     async (
-      models: Record<string, { col: number; row: number }>,
+      models: Record<string, { col: number; row: number; level?: number }>,
       selectedModel: string | null = null
     ) => {
-      const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row]);
-      const action: Record<string, unknown> = { action: "pile_in_plan_state", plan };
+      // Étages (§13.06, miroir move) : niveau de VUE courant envoyé au backend + niveau par-fig
+      // (niveau de pose conservé, sinon niveau de vue courant).
+      const lvl = currentLevelRef?.current ?? 0;
+      const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row, p.level ?? lvl]);
+      const action: Record<string, unknown> = { action: "pile_in_plan_state", plan, level: lvl };
       if (selectedModel != null) action.selected_model = selectedModel;
       const result = await postEngineQuery(action);
       if (!result) throw new Error("pile_in_plan_state: réponse vide");
       applyPileInPlanState(result);
     },
-    [postEngineQuery, applyPileInPlanState]
+    [postEngineQuery, applyPileInPlanState, currentLevelRef]
   );
 
   /** Lance pile_in_autoplace pour (cible, mode) et charge le plan optimal dans le plan provisoire,
@@ -6667,17 +6670,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     async (targetId: string, mode: "defensive" | "offensive") => {
       const result = await postEngineQuery({ action: "pile_in_autoplace", targetId, mode });
       if (!result) throw new Error("pile_in_autoplace: réponse vide");
-      const planArr = (result.plan ?? []) as Array<[string, number, number]>;
-      const models: Record<string, { col: number; row: number }> = {};
-      for (const [mid, c, r] of planArr) {
-        models[String(mid)] = { col: Number(c), row: Number(r) };
+      const planArr = (result.plan ?? []) as Array<[string, number, number, number?]>;
+      const lvl = currentLevelRef?.current ?? 0;
+      const models: Record<string, { col: number; row: number; level?: number }> = {};
+      for (const [mid, c, r, l] of planArr) {
+        models[String(mid)] = { col: Number(c), row: Number(r), level: l != null ? Number(l) : lvl };
       }
       pileInModelPoolRef.current = new Set();
       pileInModelMaskLoopsRef.current = null;
       setPileInMovePlan((prev) => (prev ? { ...prev, models, activeModelId: null } : prev));
       await refreshPileInPlanState(models, null);
     },
-    [postEngineQuery, refreshPileInPlanState]
+    [postEngineQuery, refreshPileInPlanState, currentLevelRef]
   );
 
   /** Boutons Focus pile-in (Défensif / Offensif) : (dé)active le mode (re-clic même mode = off).
@@ -6726,15 +6730,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (!pileInModelPoolRef.current.has(`${col},${row}`)) return;
       pileInModelPoolRef.current = new Set();
       pileInModelMaskLoopsRef.current = null;
+      const dropLevel = currentLevelRef?.current ?? 0;
       setPileInMovePlan((prev) => {
         if (!prev) return prev;
-        const models = { ...prev.models, [modelId]: { col, row } };
+        const models = { ...prev.models, [modelId]: { col, row, level: dropLevel } };
         // Pose → fig désélectionnée ; refresh sans selected (juste le voile des figs restantes).
         void refreshPileInPlanState(models, null);
         return { ...prev, models, activeModelId: null };
       });
     },
-    [refreshPileInPlanState]
+    [refreshPileInPlanState, currentLevelRef]
   );
 
   /** Clic sur une fig DÉJÀ POSÉE : la retire du plan (redevient éligible) pour la repositionner. */
@@ -6755,9 +6760,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleCommitPileInPlan = useCallback(async () => {
     const plan = pileInMovePlanRef.current;
     if (!plan?.canValidate) return;
-    const planArr = Object.entries(plan.models).map(([mid, p]) => [mid, p.col, p.row]);
+    const lvl = currentLevelRef?.current ?? 0;
+    const planArr = Object.entries(plan.models).map(
+      ([mid, p]) => [mid, p.col, p.row, p.level ?? lvl]
+    );
     try {
-      await executeAction({ action: "commit_pile_in_plan", plan: planArr });
+      await executeAction({ action: "commit_pile_in_plan", plan: planArr, level: lvl });
       pileInModelPoolRef.current = new Set();
       pileInModelMaskLoopsRef.current = null;
       setPileInFocusMode(null);
@@ -6769,7 +6777,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       console.error("[PILE-IN] commit FAILED", e);
       setError(`Pile-in failed: ${formatApiConnectionError(e)}`);
     }
-  }, [executeAction]);
+  }, [executeAction, currentLevelRef]);
 
   /** Bouton Annuler : renonce à piler l'unité active (skip, la consomme), nettoie le plan local. */
   const handleCancelPileInModelMove = useCallback(async () => {
@@ -6888,17 +6896,19 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Lecture pure : recalcule l'état du plan de consolidation depuis le backend. */
   const refreshConsolidationPlanState = useCallback(
     async (
-      models: Record<string, { col: number; row: number }>,
+      models: Record<string, { col: number; row: number; level?: number }>,
       selectedModel: string | null = null
     ) => {
-      const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row]);
-      const action: Record<string, unknown> = { action: "consolidation_plan_state", plan };
+      // Étages (§13.06, miroir move) : niveau de VUE courant + niveau par-fig (pose conservée).
+      const lvl = currentLevelRef?.current ?? 0;
+      const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row, p.level ?? lvl]);
+      const action: Record<string, unknown> = { action: "consolidation_plan_state", plan, level: lvl };
       if (selectedModel != null) action.selected_model = selectedModel;
       const result = await postEngineQuery(action);
       if (!result) throw new Error("consolidation_plan_state: réponse vide");
       applyConsolidationPlanState(result);
     },
-    [postEngineQuery, applyConsolidationPlanState]
+    [postEngineQuery, applyConsolidationPlanState, currentLevelRef]
   );
 
   /** Lance consolidate_autoplace (12.08) pour le mode courant et charge le plan optimal dans le plan
@@ -6908,17 +6918,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     async (mode: "defensive" | "offensive") => {
       const result = await postEngineQuery({ action: "consolidate_autoplace", mode });
       if (!result) throw new Error("consolidate_autoplace: réponse vide");
-      const planArr = (result.plan ?? []) as Array<[string, number, number]>;
-      const models: Record<string, { col: number; row: number }> = {};
-      for (const [mid, c, r] of planArr) {
-        models[String(mid)] = { col: Number(c), row: Number(r) };
+      const planArr = (result.plan ?? []) as Array<[string, number, number, number?]>;
+      const lvl = currentLevelRef?.current ?? 0;
+      const models: Record<string, { col: number; row: number; level?: number }> = {};
+      for (const [mid, c, r, l] of planArr) {
+        models[String(mid)] = { col: Number(c), row: Number(r), level: l != null ? Number(l) : lvl };
       }
       consolidationModelPoolRef.current = new Set();
       consolidationModelMaskLoopsRef.current = null;
       setConsolidationMovePlan((prev) => (prev ? { ...prev, models, activeModelId: null } : prev));
       await refreshConsolidationPlanState(models, null);
     },
-    [postEngineQuery, refreshConsolidationPlanState]
+    [postEngineQuery, refreshConsolidationPlanState, currentLevelRef]
   );
 
   /** Boutons Focus consolidation (Défensif / Offensif) : (dé)active le mode (re-clic même mode = off).
@@ -6939,17 +6950,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (!plan) return;
       const tid = String(targetId);
       if (!plan.engagingCandidates.includes(tid)) return;
-      const planArr = Object.entries(plan.models).map(([mid, p]) => [mid, p.col, p.row]);
+      const lvl = currentLevelRef?.current ?? 0;
+      const planArr = Object.entries(plan.models).map(
+        ([mid, p]) => [mid, p.col, p.row, p.level ?? lvl]
+      );
       const result = await postEngineQuery({
         action: "consolidation_select_target",
         targetId: tid,
         plan: planArr,
         selected_model: plan.activeModelId,
+        level: lvl,
       });
       if (!result) throw new Error("consolidation_select_target: réponse vide");
       applyConsolidationPlanState(result);
     },
-    [postEngineQuery, applyConsolidationPlanState]
+    [postEngineQuery, applyConsolidationPlanState, currentLevelRef]
   );
 
   /** Objective : single-select d'un objectif candidat (consolidation_select_objective). */
@@ -6959,17 +6974,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (!plan) return;
       const oid = String(objectiveId);
       if (!plan.objectiveCandidates.includes(oid)) return;
-      const planArr = Object.entries(plan.models).map(([mid, p]) => [mid, p.col, p.row]);
+      const lvl = currentLevelRef?.current ?? 0;
+      const planArr = Object.entries(plan.models).map(
+        ([mid, p]) => [mid, p.col, p.row, p.level ?? lvl]
+      );
       const result = await postEngineQuery({
         action: "consolidation_select_objective",
         objectiveId: oid,
         plan: planArr,
         selected_model: plan.activeModelId,
+        level: lvl,
       });
       if (!result) throw new Error("consolidation_select_objective: réponse vide");
       applyConsolidationPlanState(result);
     },
-    [postEngineQuery, applyConsolidationPlanState]
+    [postEngineQuery, applyConsolidationPlanState, currentLevelRef]
   );
 
   /** Clic sur une fig éligible : la rend active + demande SON pool au backend. */
@@ -6991,14 +7010,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (!consolidationModelPoolRef.current.has(`${col},${row}`)) return;
       consolidationModelPoolRef.current = new Set();
       consolidationModelMaskLoopsRef.current = null;
+      const dropLevel = currentLevelRef?.current ?? 0;
       setConsolidationMovePlan((prev) => {
         if (!prev) return prev;
-        const models = { ...prev.models, [modelId]: { col, row } };
+        const models = { ...prev.models, [modelId]: { col, row, level: dropLevel } };
         void refreshConsolidationPlanState(models, null);
         return { ...prev, models, activeModelId: null };
       });
     },
-    [refreshConsolidationPlanState]
+    [refreshConsolidationPlanState, currentLevelRef]
   );
 
   /** Clic sur une fig DÉJÀ POSÉE : la retire du plan pour la repositionner. */
@@ -7019,9 +7039,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleCommitConsolidationPlan = useCallback(async () => {
     const plan = consolidationMovePlanRef.current;
     if (!plan?.canValidate) return;
-    const planArr = Object.entries(plan.models).map(([mid, p]) => [mid, p.col, p.row]);
+    const lvl = currentLevelRef?.current ?? 0;
+    const planArr = Object.entries(plan.models).map(
+      ([mid, p]) => [mid, p.col, p.row, p.level ?? lvl]
+    );
     try {
-      await executeAction({ action: "commit_consolidation_plan", plan: planArr });
+      await executeAction({ action: "commit_consolidation_plan", plan: planArr, level: lvl });
       consolidationModelPoolRef.current = new Set();
       consolidationModelMaskLoopsRef.current = null;
       setConsolidationFocusMode(null);
@@ -7032,7 +7055,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       console.error("[CONSOLIDATION] commit FAILED", e);
       setError(`Consolidation failed: ${formatApiConnectionError(e)}`);
     }
-  }, [executeAction]);
+  }, [executeAction, currentLevelRef]);
 
   /** Bouton Annuler : annule le plan de consolidation en cours SANS consommer l'unité — elle
    * redevient sélectionnable (cancel_consolidation côté moteur), nettoie le plan local. */

@@ -2694,6 +2694,7 @@ def _model_climb_reachable_floor_cells(
     view_level: int,
     ground_obstacles: Set[Tuple[int, int]],
     terrain_areas: List[Dict[str, Any]],
+    start_level: int = 0,
 ) -> List[Tuple[int, int]]:
     """Cases de l'étage ``view_level`` réellement atteignables par la figurine avec le coût de
     montée/descente §13.06 (champ géodésique multi-niveaux). Empreinte entière sur le plancher, hors
@@ -2702,6 +2703,10 @@ def _model_climb_reachable_floor_cells(
     Source UNIQUE du coût vertical : ``reachable_multilevel_field`` — même moteur que le pool squad
     ``_multilevel_floor_destinations``. À n'appeler que pour une unité capable de finir en hauteur, en
     métrique euclidienne et hors FLY (garanti par l'appelant).
+
+    ``start_level`` : niveau EFFECTIF de départ du mover (défaut 0 = sol, comportement move
+    par-figurine inchangé). Le pile-in/consolidation (phase fight) passe le niveau courant du mover
+    déjà en hauteur → il reste sur son étage sans repayer la montée (pas de reset au sol).
     """
     from engine.terrain_utils import floor_hexes_at_level, validate_floor_placement
     from engine.hex_utils import get_neighbors, precompute_footprint_offsets
@@ -2742,7 +2747,7 @@ def _model_climb_reachable_floor_cells(
         off_even, off_odd = precompute_footprint_offsets(shape, base, orientation)
 
     field = reachable_multilevel_field(
-        start_pos, 0, shape, base, off_even, off_odd,
+        start_pos, start_level, shape, base, off_even, off_odd,
         board_cols, board_rows, obstacles_by_level, floor_hexes_by_level, height_by_level,
         budget * ENGAGEMENT_NORM_HEX_WIDTH, allow_vertical=True, ignore_vertical_cost=False,
     )

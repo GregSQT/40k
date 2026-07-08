@@ -1049,12 +1049,49 @@ le modèle + LoS 3D est le vrai chantier.
       le niveau par-fig). Détail complet + pièges + bugs résolus dans la section chantier 4 ci-dessus. Validé
       bout-en-bout **dans l'app** (charge d'une fig vers l'étage : pool → pose → commit engagé) +
       `scripts/charge3d_integration_test.py` étendu + pytest **1152 passed / 0 failed** + tsc vert.
-   2bis. ⏳ **Mêlée 3D — pile-in (§12.03) & consolidation (§12.08) niveau-conscients** — **RESTE À FAIRE**.
-      `fight_handlers.py` est **100 % 2D** (0 occurrence de `level`). Jumeau structurel de la charge : toute
-      l'infra 3D (primitive engagement, champ climb à budget paramétrable, synth/collision niveau, clip,
-      mono-niveau) est **déjà écrite et réutilisable** → câblage miroir 3a/3b avec **budget = 3"** (au lieu du
-      2D6), + mode Objective de la consolidation (within-range = appartenance à la zone, level-agnostic §2.9) +
-      base-contact lock évalué en 3D. Découpe détaillée : section « MÊLÉE 3D » du chantier 4 ci-dessus.
+   2bis. ✅ **Mêlée 3D — pile-in (§12.03) & consolidation (§12.08) niveau-conscients : FLUX MANUEL PvP FAIT
+      (2026-07-08, compile Python + import + `tsc` verts, NON validé runtime)**. Miroir move complet (option A) :
+      une fig déjà en hauteur peut **rester** sur son étage ET **changer** de niveau dans le budget 3".
+
+      **Fait — backend** ([fight_handlers.py](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py)) :
+      - Pools par-figurine `_fight_pile_in_build_model_pool` / `_fight_consolidation_build_model_pool` : nouveau
+        param `view_level`. `view_level == 0` = BFS sol historique **inchangé** (zéro régression). `view_level >= 1` =
+        cases du plancher atteignables avec le coût vertical, via `reachable_multilevel_field`, **seedé au niveau
+        EFFECTIF courant du mover** (≠ move par-fig qui seed toujours au sol → une fig en hauteur ne repaie pas la
+        montée). Bloqueurs/coéquipières filtrés par **niveau effectif de destination** (superposition inter-étage).
+      - Réutilisation directe du reachable d'étage de move : ajout d'un `start_level=0` optionnel rétro-compatible à
+        [`_model_climb_reachable_floor_cells`](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)
+        (aucune régression move) + wrapper lazy `_fight_model_climb_reachable_floor_cells` (évite le cycle d'import).
+        Helper `_fight_fig_effective_level` (lit `level_by_model`, repli niveau d'unité).
+      - Plans en **4-tuples `(mid,col,row,level)`** : preview (`_fight_pile_in_preview_plan` /
+        `_fight_consolidation_preview_plan` testent la légalité par-fig **au niveau planifié**), `model_plan_state`
+        (param `view_level` ; `provisional`/`origin`/`full_plan` portent le niveau ; `current_level` exposé au front),
+        dispatch (`_prov_from_action` capture `e[3]` + `action.level` ; commit construit des 4-tuples ; `moveDetails`
+        porte `toLevel`), commit via `commit_move` (gère déjà le 4ᵉ élément ; `level=None` = garder niveau).
+      - Activation d'unité : `view_level` initial = niveau de l'unité (1er rendu correct).
+
+      **Fait — frontend** ([useEngineAPI.ts](file:///home/greg/40k/frontend/src/hooks/useEngineAPI.ts) +
+      [BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx)) :
+      - Miroir move : les 6 flux pile-in/conso (`*_plan_state`, `select_target/objective`, `commit_*`, autoplace)
+        envoient `action.level = currentLevel` + un niveau par-fig (pose = niveau de vue au drop) ; state `models`
+        typé `{col,row,level?}`.
+      - Re-fetch du pool de la fig active au **changement d'étage** (effet `currentLevel` étendu à pile-in/conso,
+        miroir move/charge). Bouton d'étage **non gaté par phase** (`maxFloorLevel >= 1`) → dispo en fight. Le rendu
+        par-fig lit déjà `plan.models[mid].level`.
+
+      **Conformité 40k** (PDF 12 relu) : 12.03/12.08 = « moves as described in Moving (03) » → mouvement vertical
+      dans les 3" autorisé, ce que le miroir applique. Contrainte WHILE « strictement plus proche » restée
+      **horizontale** (cohérente avec tout le moteur ; gate vertical 5" = manque transverse déjà documenté).
+
+      **RESTE À FAIRE (2bis) :**
+      - **Validation runtime PvP** (impossible headless) : tester unité 119 (niveau 1) sur un scénario à planchers —
+        sélection fig → bouton étage → pool sur le plancher → pose → commit → fig rendue au bon niveau ; idem conso.
+      - **IA auto pile-in** ([`_fight_v11_auto_pile_in`](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py)
+        → `_fight_build_pile_in_valid_destinations` + `_fight_apply_pile_in_move`, **move rigide par ancre**) : encore
+        **2D** → une unité IA niveau 1 descend. Moteur distinct (translate rigide de l'escouade), **non porté**.
+      - **Autoplace ILP Focus** (`pile_in_autoplace_plan` / `consolidate_autoplace_plan`) : génération de slots **au
+        sol** → à niveau ≥1 le preview (désormais level-aware) **REJETTE** le plan (pas de commit silencieux faux,
+        mais bouton Focus inopérant en hauteur). Portage multi-niveaux de la génération de slots = chantier dédié.
    3. **Clairance hauteur — reste du mouvement** (voile rouge + pool squad/IA) — *plan détaillé, à faire d'un
       seul bloc* : le move **par-figurine** et la **charge** enforcent déjà la clairance ; restent les deux
       dernières surfaces du mouvement. À traiter ensemble (même helper, même piège, périmètre « tout le

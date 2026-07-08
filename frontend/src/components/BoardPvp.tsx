@@ -1826,12 +1826,25 @@ export default function Board({
   chargePlanForLevelRef.current = chargeMovePlan;
   const onSelectChargeModelForLevelRef = useRef(onSelectChargeModel);
   onSelectChargeModelForLevelRef.current = onSelectChargeModel;
+  // Pile-in / consolidation (miroir move/charge) : re-tirer le pool de la fig active au changement d'étage.
+  const pileInPlanForLevelRef = useRef(pileInMovePlan);
+  pileInPlanForLevelRef.current = pileInMovePlan;
+  const onSelectPileInModelForLevelRef = useRef(onSelectPileInModel);
+  onSelectPileInModelForLevelRef.current = onSelectPileInModel;
+  const consoPlanForLevelRef = useRef(consolidationMovePlan);
+  consoPlanForLevelRef.current = consolidationMovePlan;
+  const onSelectConsoModelForLevelRef = useRef(onSelectConsolidationModel);
+  onSelectConsoModelForLevelRef.current = onSelectConsolidationModel;
   // biome-ignore lint/correctness/useExhaustiveDependencies: currentLevel est un déclencheur volontaire — au changement d'étage, on re-tire la sélection active pour rafraîchir les pools niveau-conscients ; le reste passe par des refs exprès.
   useEffect(() => {
     const moveActive = squadMovePlanRef.current?.activeModelId;
     if (moveActive) void squadMoveCallbacksRef.current.onSelectModelForMove?.(moveActive);
     const chargeActive = chargePlanForLevelRef.current?.activeModelId;
     if (chargeActive) void onSelectChargeModelForLevelRef.current?.(chargeActive);
+    const pileInActive = pileInPlanForLevelRef.current?.activeModelId;
+    if (pileInActive) void onSelectPileInModelForLevelRef.current?.(pileInActive);
+    const consoActive = consoPlanForLevelRef.current?.activeModelId;
+    if (consoActive) void onSelectConsoModelForLevelRef.current?.(consoActive);
   }, [currentLevel]);
 
   const maxFloorLevel = useMemo(() => {
