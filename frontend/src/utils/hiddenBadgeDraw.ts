@@ -7,6 +7,28 @@
  */
 import type * as PIXI from "pixi.js-legacy";
 
+/**
+ * Fond circulaire du badge numérique de detection range (15" ou 12").
+ * Dessine uniquement l'anneau + disque fond — le texte est ajouté par l'appelant
+ * (UnitRenderer) qui dispose d'un import PIXI runtime pour `new PIXI.Text`.
+ */
+export function drawDetectionNumberBadgeBackground(
+  g: PIXI.Graphics,
+  badgeX: number,
+  badgeY: number,
+  r: number
+): void {
+  g.lineStyle(0);
+  g.beginFill(0x000000, 1);
+  g.drawCircle(badgeX, badgeY, r + 1);
+  g.endFill();
+  g.beginFill(0x000000, 0.9);
+  g.lineStyle(1, 0xb0b0b0, 1);
+  g.drawCircle(badgeX, badgeY, r);
+  g.endFill();
+  g.lineStyle(0);
+}
+
 export function drawHiddenEyeBadge(
   g: PIXI.Graphics,
   badgeX: number,

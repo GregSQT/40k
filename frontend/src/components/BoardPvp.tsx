@@ -98,6 +98,7 @@ interface BackendMoveLosPreviewPayload {
   coverCells: BackendLosPreviewCell[];
   coverByUnitId: Record<string, boolean>;
   hiddenTooFarByUnitId: Record<string, boolean>;
+  hiddenDetectionInfoByUnitId: Record<string, { detection_inches: 15 | 12; too_far: boolean }>;
   /** Cases visibles des cibles ciblables (backend, règle 06.01/13.10), aplaties+dédupliquées. */
   visibleTargetCells: BackendLosPreviewCell[];
   key: string;
@@ -164,6 +165,30 @@ function parseBackendMoveLosPreviewPayload(
     }
     hiddenTooFarByUnitId[unitId] = tooFar;
   }
+  const detInfoRaw = result.hidden_detection_info_by_unit_id;
+  if (!detInfoRaw || typeof detInfoRaw !== "object" || Array.isArray(detInfoRaw)) {
+    throw new Error("preview_shoot_from_position hidden_detection_info_by_unit_id must be an object");
+  }
+  const hiddenDetectionInfoByUnitId: Record<string, { detection_inches: 15 | 12; too_far: boolean }> = {};
+  for (const [unitId, info] of Object.entries(detInfoRaw as Record<string, unknown>)) {
+    if (!info || typeof info !== "object" || Array.isArray(info)) {
+      throw new Error(
+        `preview_shoot_from_position hidden_detection_info_by_unit_id.${unitId} must be an object`
+      );
+    }
+    const { detection_inches, too_far } = info as Record<string, unknown>;
+    if (detection_inches !== 15 && detection_inches !== 12) {
+      throw new Error(
+        `preview_shoot_from_position hidden_detection_info_by_unit_id.${unitId}.detection_inches must be 12 or 15`
+      );
+    }
+    if (typeof too_far !== "boolean") {
+      throw new Error(
+        `preview_shoot_from_position hidden_detection_info_by_unit_id.${unitId}.too_far must be boolean`
+      );
+    }
+    hiddenDetectionInfoByUnitId[unitId] = { detection_inches, too_far };
+  }
   const visibleByTargetRaw = result.visible_cells_by_target;
   const visibleTargetCells: BackendLosPreviewCell[] = [];
   if (
@@ -198,6 +223,7 @@ function parseBackendMoveLosPreviewPayload(
     ),
     coverByUnitId,
     hiddenTooFarByUnitId,
+    hiddenDetectionInfoByUnitId,
     visibleTargetCells,
     key,
   };
@@ -443,6 +469,8 @@ type BoardProps = {
   blinkingCoverByUnitId?: Record<string, boolean>;
   /** Parallèle au cover : cibles cachées hors detection range pendant le blink de tir → œil rouge. */
   blinkingHiddenTooFarByUnitId?: Record<string, boolean>;
+  /** Detection range effective (15" / 12" GtG) par ennemi caché pendant le blink de tir → badge numérique. */
+  blinkingHiddenDetectionInfoByUnitId?: Record<string, { detection_inches: 15 | 12; too_far: boolean }>;
   blinkingLosCountByUnitId?: Record<string, number>;
   blinkingSquadAliveCount?: number;
   blinkingLosOverviewUnitId?: number | null;
@@ -1032,6 +1060,7 @@ export default function Board({
   blinkingAttackerId,
   blinkingCoverByUnitId,
   blinkingHiddenTooFarByUnitId,
+  blinkingHiddenDetectionInfoByUnitId,
   blinkingLosCountByUnitId,
   blinkingSquadAliveCount,
   blinkingLosOverviewUnitId,
@@ -2291,6 +2320,10 @@ export default function Board({
   const [movePreviewLosTooFarById, setMovePreviewLosTooFarById] = useState<Record<string, boolean>>(
     {}
   );
+  /** Detection range effective (15" / 12" GtG) par ennemi caché en move preview → badge numérique. */
+  const [movePreviewLosDetectionInfoById, setMovePreviewLosDetectionInfoById] = useState<Record<string, { detection_inches: 15 | 12; too_far: boolean }>>(
+    {}
+  );
   /**
    * Rule 13.09 : model_ids "cachés" à la destination du move preview, calculés PAR LE BACKEND
    * (action preview_hidden_from_position → même fonction compute_unit_hidden_models qu'au drop).
@@ -2337,6 +2370,14 @@ export default function Board({
   const blinkingHiddenTooFarByUnitIdKey = useMemo(
     () => stableBoolRecordJson(blinkingHiddenTooFarByUnitId ?? {}),
     [blinkingHiddenTooFarByUnitId]
+  );
+  const movePreviewLosDetectionInfoKey = useMemo(
+    () => JSON.stringify(movePreviewLosDetectionInfoById),
+    [movePreviewLosDetectionInfoById]
+  );
+  const blinkingHiddenDetectionInfoKey = useMemo(
+    () => JSON.stringify(blinkingHiddenDetectionInfoByUnitId ?? {}),
+    [blinkingHiddenDetectionInfoByUnitId]
   );
 
   const chargePreviewOverlayKey = useMemo(
@@ -2881,6 +2922,7 @@ export default function Board({
     setMovePreviewLosBlinkIds([]);
     setMovePreviewLosCoverById({});
     setMovePreviewLosTooFarById({});
+    setMovePreviewLosDetectionInfoById({});
     movePreviewBackendLosCacheRef.current.clear();
   }, [phase, mode, gameState?.active_movement_unit]);
 
@@ -3013,6 +3055,7 @@ export default function Board({
       setMovePreviewLosBlinkIds([]);
       setMovePreviewLosCoverById({});
       setMovePreviewLosTooFarById({});
+      setMovePreviewLosDetectionInfoById({});
       if (hoverOverlayRef.current) hoverOverlayRef.current.visible = false;
       setShootAdvanceLosAnchor(null);
     };
@@ -3658,6 +3701,7 @@ export default function Board({
           setMovePreviewLosBlinkIds([]);
           setMovePreviewLosCoverById({});
           setMovePreviewLosTooFarById({});
+          setMovePreviewLosDetectionInfoById({});
           return;
         }
         const range = getMaxRangedRange(selectedUnit);
@@ -3665,6 +3709,7 @@ export default function Board({
           setMovePreviewLosBlinkIds([]);
           setMovePreviewLosCoverById({});
           setMovePreviewLosTooFarById({});
+          setMovePreviewLosDetectionInfoById({});
           return;
         }
 
@@ -3750,6 +3795,7 @@ export default function Board({
         setMovePreviewLosBlinkIds(losPreview.blinkIds);
         setMovePreviewLosCoverById(losPreview.coverByUnitId);
         setMovePreviewLosTooFarById(losPreview.hiddenTooFarByUnitId);
+        setMovePreviewLosDetectionInfoById(losPreview.hiddenDetectionInfoByUnitId);
         // Cases visibles des cibles (backend) pour cette position → redessine le cône WASM
         // en les incluant (cohérence blink↔visuel). Le cône a déjà été tracé au survol sans
         // elles ; ce 2e passage les ajoute une fois la réponse backend arrivée.
@@ -3765,6 +3811,7 @@ export default function Board({
         setMovePreviewLosBlinkIds([]);
         setMovePreviewLosCoverById({});
         setMovePreviewLosTooFarById({});
+        setMovePreviewLosDetectionInfoById({});
         console.error("Move preview backend LoS failed:", error);
       } finally {
         losBackendRequestInFlight = false;
@@ -3779,6 +3826,7 @@ export default function Board({
         setMovePreviewLosBlinkIds([]);
         setMovePreviewLosCoverById({});
         setMovePreviewLosTooFarById({});
+        setMovePreviewLosDetectionInfoById({});
         return;
       }
       const sourceUnitId =
@@ -5882,6 +5930,7 @@ export default function Board({
       restUnit?.RNG_WEAPONS && restUnit.RNG_WEAPONS.length > 0 ? getMaxRangedRange(restUnit) : 0;
     if (!restUnit || restRange <= 0) {
       setMovePreviewLosTooFarById({});
+      setMovePreviewLosDetectionInfoById({});
       return;
     }
     let cancelled = false;
@@ -5920,9 +5969,11 @@ export default function Board({
         }
         if (cancelled) return;
         setMovePreviewLosTooFarById(losPreview.hiddenTooFarByUnitId);
+        setMovePreviewLosDetectionInfoById(losPreview.hiddenDetectionInfoByUnitId);
       } catch (error) {
         if (cancelled) return;
         setMovePreviewLosTooFarById({});
+        setMovePreviewLosDetectionInfoById({});
         console.error("Move rest baseline too-far failed:", error);
       }
     })();
@@ -6662,6 +6713,7 @@ export default function Board({
         setMovePreviewLosBlinkIds(losPreview.blinkIds);
         setMovePreviewLosCoverById(losPreview.coverByUnitId);
         setMovePreviewLosTooFarById(losPreview.hiddenTooFarByUnitId);
+        setMovePreviewLosDetectionInfoById(losPreview.hiddenDetectionInfoByUnitId);
         // Cône déjà peint au survol (cache miss → sans cases cibles). La réponse backend est
         // maintenant en cache par-case : repeindre pour afficher les cases réellement vues des
         // cibles (règle 06.01/13.10) par-dessus le cône WASM.
@@ -6671,6 +6723,7 @@ export default function Board({
         setMovePreviewLosBlinkIds([]);
         setMovePreviewLosCoverById({});
         setMovePreviewLosTooFarById({});
+        setMovePreviewLosDetectionInfoById({});
         console.error("Squad per-fig shoot preview backend LoS failed:", error);
       } finally {
         shootBackendInFlight = false;
@@ -6710,10 +6763,12 @@ export default function Board({
         setMovePreviewLosBlinkIds(cached.blinkIds);
         setMovePreviewLosCoverById(cached.coverByUnitId);
         setMovePreviewLosTooFarById(cached.hiddenTooFarByUnitId);
+        setMovePreviewLosDetectionInfoById(cached.hiddenDetectionInfoByUnitId);
       } else {
         setMovePreviewLosBlinkIds([]);
         setMovePreviewLosCoverById({});
         setMovePreviewLosTooFarById({});
+        setMovePreviewLosDetectionInfoById({});
       }
       scheduleShootBackend(col, row);
     };
@@ -6899,6 +6954,7 @@ export default function Board({
       setMovePreviewLosBlinkIds([]);
       setMovePreviewLosCoverById({});
       setMovePreviewLosTooFarById({});
+      setMovePreviewLosDetectionInfoById({});
     };
   }, [
     mode,
@@ -8546,7 +8602,7 @@ export default function Board({
             .map(([m, v]) => `${m}=${v ? 1 : 0}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hpbe:${hpBarBlinkEnlarged ? 1 : 0}#swp:${showWoundProbability ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}#dplan:${deployPlanFp}#elig:${[...eligibleUnitIds].sort((a, b) => a - b).join(",")}#lvl:${currentLevel}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#mdi:${movePreviewLosDetectionInfoKey}#bdi:${blinkingHiddenDetectionInfoKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hpbe:${hpBarBlinkEnlarged ? 1 : 0}#swp:${showWoundProbability ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}#dplan:${deployPlanFp}#elig:${[...eligibleUnitIds].sort((a, b) => a - b).join(",")}#lvl:${currentLevel}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -9490,6 +9546,25 @@ export default function Board({
             }
             return undefined;
           })(),
+          movePreviewHiddenDetectionInfoByUnitId: (() => {
+            if (
+              phase === "move" &&
+              (mode === "select" || mode === "movePreview" || mode === "squadModelMove")
+            ) {
+              return movePreviewLosDetectionInfoById;
+            }
+            if (
+              phase === "shoot" &&
+              (mode === "select" ||
+                mode === "attackPreview" ||
+                mode === "movePreview" ||
+                mode === "squadModelShoot") &&
+              blinkingHiddenDetectionInfoByUnitId !== undefined
+            ) {
+              return blinkingHiddenDetectionInfoByUnitId;
+            }
+            return undefined;
+          })(),
           // Pass shooting indicators
           shootingTargetId,
           shootingUnitId,
@@ -10412,6 +10487,8 @@ export default function Board({
     movePreviewLosTooFarKey,
     blinkingCoverByUnitIdKey,
     blinkingHiddenTooFarByUnitIdKey,
+    movePreviewLosDetectionInfoKey,
+    blinkingHiddenDetectionInfoKey,
     shootPreviewWasmLos.key,
     shootAdvanceLosAnchorKey,
     handleUnitIconHoverChange,
@@ -10427,6 +10504,7 @@ export default function Board({
     shootAdvanceLosAnchor,
     movePreviewLosCoverById,
     movePreviewLosTooFarById,
+    movePreviewLosDetectionInfoById,
     resolvedMoveDestPoolRef.current,
     resolvedMoveDestPoolRef,
     gameState?.unitsAdvanced,
@@ -10448,6 +10526,7 @@ export default function Board({
     footprintZoneRef,
     blinkingCoverByUnitId,
     blinkingHiddenTooFarByUnitId,
+    blinkingHiddenDetectionInfoByUnitId,
     blinkingLosOverviewUnitId,
     objectiveControlOverride,
     squadMovePlan,

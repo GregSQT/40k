@@ -185,6 +185,14 @@ export interface Unit {
   battle_shocked?: boolean;
 }
 
+/** Detection range effective d'une unité cachée vis-à-vis du tireur actif (règle 13.09 + 13.5). */
+export interface HiddenDetectionInfo {
+  /** 15 normalement, 12 si TOUTES les figs sont gone to ground (règle 13.5). */
+  detection_inches: 15 | 12;
+  /** True si le tireur est hors detection range → unité non ciblable. */
+  too_far: boolean;
+}
+
 export interface SingleShotState {
   isActive: boolean;
   shooterId: UnitId;

@@ -3,6 +3,7 @@ import * as PIXI from "pixi.js-legacy";
 import type {
   FightSubPhase,
   GameState,
+  HiddenDetectionInfo,
   PlayerId,
   TargetPreview,
   Unit,
@@ -23,7 +24,7 @@ import {
   minHexDistanceBetweenUnitFootprintsLive,
   resolveBaseSizeForUnitDisplay,
 } from "../utils/hexFootprint";
-import { drawHiddenEyeBadge } from "../utils/hiddenBadgeDraw";
+import { drawDetectionNumberBadgeBackground, drawHiddenEyeBadge } from "../utils/hiddenBadgeDraw";
 import {
   drawBattleShockBadge,
   drawMoveStatusBadge,
@@ -198,6 +199,8 @@ interface UnitRendererProps {
   hiddenTooFar?: boolean;
   /** Per-unit "trop loin" from LoS hover/blink; overrides hiddenTooFar when set. Parallèle au cover. */
   movePreviewHiddenTooFarByUnitId?: Record<string, boolean>;
+  /** Detection range effective (15"|12" GtG) par ennemi caché — badge numérique en contexte per-tireur. */
+  movePreviewHiddenDetectionInfoByUnitId?: Record<string, HiddenDetectionInfo>;
 
   // Shooting target (for replay mode explosion icon)
   shootingTargetId?: number | null;
@@ -2352,27 +2355,67 @@ export class UnitRenderer {
       g.zIndex = 10001;
       targetContainer.addChild(g);
     };
+    const drawNumberAt = (
+      cx: number,
+      cy: number,
+      name: string,
+      inches: 15 | 12,
+      numColor: number
+    ): void => {
+      const badgeX = cx - scaledOffset;
+      const badgeY = cy + scaledOffset;
+      const g = new PIXI.Graphics();
+      drawDetectionNumberBadgeBackground(g, badgeX, badgeY, r);
+      const label = new PIXI.Text(String(inches), {
+        fontSize: Math.max(7, Math.round(r * 1.1)),
+        fontWeight: "700",
+        fill: numColor,
+        align: "center",
+        stroke: 0x000000,
+        strokeThickness: Math.max(1, r * 0.18),
+      });
+      label.anchor.set(0.5, 0.5);
+      label.position.set(badgeX, badgeY);
+      g.addChild(label);
+      g.name = name;
+      g.zIndex = 10001;
+      targetContainer.addChild(g);
+    };
+
+    const attacker = this.getActiveAttacker();
+    const detectionInfo = this.getEffectiveDetectionInfo(attacker);
 
     if (this.props.statusBadgePerModel) {
       // Per-figure mode (rule 13.09) — one badge on each hidden figure (follows modelHidden).
-      // Couleur relative au tireur actif : rouge si l'unité est cachée hors detection range
-      // ("trop loin"), gris sinon (statut caché/couvert). Trop-loin = par unité → toutes ses figs.
       const centers = this.props.modelCenters;
       const flags = this.props.modelHidden;
       if (!centers || !flags) return;
-      const eyeColor = this.getEffectiveTargetTooFar(this.getActiveAttacker())
-        ? EYE_COLOR_TOO_FAR
-        : undefined;
-      centers.forEach(([cx, cy], i) => {
-        if (flags[i]) drawBadgeAt(cx, cy, `hidden-badge-${unitIdNum}-${i}`, eyeColor);
-      });
+      if (detectionInfo) {
+        // En contexte per-tireur : badge numérique (hidden⟹cover implicite).
+        const numColor = detectionInfo.too_far ? EYE_COLOR_TOO_FAR : 0xc8c8c8;
+        centers.forEach(([cx, cy], i) => {
+          if (flags[i]) {
+            drawNumberAt(cx, cy, `hidden-badge-${unitIdNum}-${i}`, detectionInfo.detection_inches, numColor);
+          }
+        });
+      } else {
+        // Hors contexte per-tireur : œil rouge (trop loin) ou gris (caché persistant).
+        const eyeColor = this.getEffectiveTargetTooFar(attacker) ? EYE_COLOR_TOO_FAR : undefined;
+        centers.forEach(([cx, cy], i) => {
+          if (flags[i]) drawBadgeAt(cx, cy, `hidden-badge-${unitIdNum}-${i}`, eyeColor);
+        });
+      }
       return;
     }
 
-    // Squad mode — œil relatif au tireur actif : rouge si l'ennemi est caché au-delà de la
-    // detection range ("trop loin"), gris s'il est en couvert (ajusté arme). Mutuellement exclusifs
-    // (le backend ne met une unité que dans un seul des deux maps). Sinon aucun badge.
-    const attacker = this.getActiveAttacker();
+    // Squad mode.
+    if (detectionInfo) {
+      // En contexte per-tireur + unité cachée → badge numérique (hidden⟹cover implicite).
+      const numColor = detectionInfo.too_far ? EYE_COLOR_TOO_FAR : 0xc8c8c8;
+      drawNumberAt(centerX, centerY, `hidden-badge-${unitIdNum}`, detectionInfo.detection_inches, numColor);
+      return;
+    }
+    // Hors contexte per-tireur : œil rouge (trop loin) ou gris (couvert/caché persistant).
     if (this.getEffectiveTargetTooFar(attacker)) {
       drawBadgeAt(centerX, centerY, `hidden-badge-${unitIdNum}`, EYE_COLOR_TOO_FAR);
       return;
@@ -2534,6 +2577,30 @@ export class UnitRenderer {
       }
     }
     return this.props.hiddenTooFar === true;
+  }
+
+  /** Detection range effective de cette unité-cible vis-à-vis du tireur actif.
+   * Retourne l'info si en contexte per-tireur (phase tir ou move preview), sinon null.
+   * Indépendant de IGNORES_COVER : la detection range est une règle 13.09, pas une règle couvert. */
+  private getEffectiveDetectionInfo(attacker: Unit | null): HiddenDetectionInfo | null {
+    if (!attacker) return null;
+    const movePhaseLosHover =
+      this.props.phase === "move" &&
+      (this.props.mode === "select" ||
+        this.props.mode === "movePreview" ||
+        this.props.mode === "squadModelMove") &&
+      this.props.movePreviewHiddenDetectionInfoByUnitId !== undefined;
+    if (this.props.phase !== "shoot" && this.props.mode !== "movePreview" && !movePhaseLosHover) {
+      return null;
+    }
+    if (this.props.movePreviewHiddenDetectionInfoByUnitId) {
+      const key = String(this.props.unit.id);
+      const map = this.props.movePreviewHiddenDetectionInfoByUnitId;
+      if (Object.hasOwn(map, key)) {
+        return map[key];
+      }
+    }
+    return null;
   }
 
   /**

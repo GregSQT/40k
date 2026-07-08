@@ -3,7 +3,7 @@ import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAuthSession } from "../auth/authStorage";
 import type { GameMode, PlayerId, Unit } from "../types";
-import type { DiceValue, Weapon } from "../types/game";
+import type { DiceValue, HiddenDetectionInfo, Weapon } from "../types/game";
 import {
   CROSS_ACTION_LOG_SUPPRESS_MS,
   dedupeActionLogBatch,
@@ -468,6 +468,7 @@ export type UseEngineAPIBlinkBoardProps = {
   blinkingAttackerId: number | null;
   blinkingCoverByUnitId: Record<string, boolean> | undefined;
   blinkingHiddenTooFarByUnitId: Record<string, boolean> | undefined;
+  blinkingHiddenDetectionInfoByUnitId: Record<string, HiddenDetectionInfo> | undefined;
   blinkingLosCountByUnitId: Record<string, number> | undefined;
   blinkingSquadAliveCount: number | undefined;
   blinkingLosOverviewUnitId: number | null;
@@ -914,6 +915,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     attackerId?: number | null;
     coverByUnitId?: Record<string, boolean>;
     hiddenTooFarByUnitId?: Record<string, boolean>;
+    hiddenDetectionInfoByUnitId?: Record<string, HiddenDetectionInfo>;
     // Mode "vue escouade" (double-clic sur une fig) : N figs qui voient chaque
     // ennemi + M figs vivantes. Absents = mode mono-fig classique.
     losCountByUnitId?: Record<string, number>;
@@ -963,6 +965,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const ruleChoicePreviousSelectedUnitIdRef = useRef<number | null>(null);
   /** Bloque les doubles clics d’activation (move / tir / fight) pendant la requête API. */
   const activationInProgressRef = useRef(false);
+  /**
+   * Verrou « sortie de phase move ». Posé dès que le client émet une action qui quitte move
+   * (``end_phase`` / ``advance_phase`` depuis move) ou reçoit ``pending_shooting_phase_init``.
+   * Pendant ce trou, le backend est déjà passé en shoot mais le client affiche encore move :
+   * sans ce verrou, un clic figurine (onEntryPointerDown → ensureActivatedNoHazard) enverrait un
+   * ``activate_unit`` move au moteur shoot → RuntimeError. Libéré quand une réponse applique
+   * ``phase !== "move"`` (fin du trou, jusqu'au render shoot) OU sur erreur (anti-deadlock).
+   */
+  const moveExitPendingRef = useRef(false);
   /**
    * Une seule requête ``fight`` à la fois : clics rapides sur la cible envoyaient plusieurs POST
    * en parallèle ; la N+1 peut recevoir ``no_attacks_remaining`` (ATTACK_LEFT déjà à 0) alors que
@@ -1281,6 +1292,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         validTargets?: Array<string | number>;
         coverByUnitId?: Record<string, boolean>;
         hiddenTooFarByUnitId?: Record<string, boolean>;
+        hiddenDetectionInfoByUnitId?: Record<string, HiddenDetectionInfo>;
         isSquadMode?: boolean;
       }
       const {
@@ -1291,6 +1303,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         validTargets: weaponValidTargets,
         coverByUnitId: weaponCoverByUnitId,
         hiddenTooFarByUnitId: weaponHiddenTooFarByUnitId,
+        hiddenDetectionInfoByUnitId: weaponHiddenDetectionInfoByUnitId,
         isSquadMode: weaponIsSquadMode,
       } = (e as CustomEvent<WeaponSelectedEventDetail>).detail;
 
@@ -1342,6 +1355,35 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           }
           hiddenTooFarByUnitId[tid] = tooFar;
         }
+        if (
+          !weaponHiddenDetectionInfoByUnitId ||
+          typeof weaponHiddenDetectionInfoByUnitId !== "object" ||
+          Array.isArray(weaponHiddenDetectionInfoByUnitId)
+        ) {
+          throw new Error(
+            "squad_select_weapon: hidden_detection_info_by_unit_id absent/invalid in response"
+          );
+        }
+        const hiddenDetectionInfoByUnitId: Record<string, HiddenDetectionInfo> = {};
+        for (const [tid, info] of Object.entries(weaponHiddenDetectionInfoByUnitId)) {
+          if (!info || typeof info !== "object" || Array.isArray(info)) {
+            throw new Error(
+              `squad_select_weapon: hidden_detection_info_by_unit_id.${tid} must be an object`
+            );
+          }
+          const { detection_inches, too_far } = info as Record<string, unknown>;
+          if (detection_inches !== 15 && detection_inches !== 12) {
+            throw new Error(
+              `squad_select_weapon: hidden_detection_info_by_unit_id.${tid}.detection_inches must be 12 or 15`
+            );
+          }
+          if (typeof too_far !== "boolean") {
+            throw new Error(
+              `squad_select_weapon: hidden_detection_info_by_unit_id.${tid}.too_far must be boolean`
+            );
+          }
+          hiddenDetectionInfoByUnitId[tid] = { detection_inches, too_far };
+        }
         setBlinkingUnits((prev) => {
           if (prev.blinkTimer) clearInterval(prev.blinkTimer);
           const timer = blinkIds.length ? window.setInterval(() => {}, 500) : null;
@@ -1351,6 +1393,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             attackerId: squadShootPlanRef.current?.unitId ?? null,
             coverByUnitId,
             hiddenTooFarByUnitId,
+            hiddenDetectionInfoByUnitId,
           };
         });
       }
@@ -1513,6 +1556,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     }
   }, [gameState?.phase, targetPreview?.blinkTimer, clearChargePoolRefs]);
 
+  // Libération du verrou « sortie de move » après commit du render : dès que la phase affichée
+  // n'est plus move, onEntryPointerDown est démonté → plus aucun clic figurine ne peut émettre un
+  // activate_unit move. Libérer ici (post-commit) ferme le trou sans micro-fenêtre résiduelle.
+  useEffect(() => {
+    if (gameState?.phase && gameState.phase !== "move") {
+      moveExitPendingRef.current = false;
+    }
+  }, [gameState?.phase]);
+
   useEffect(() => {
     latestGameStateRef.current = gameState;
   }, [gameState]);
@@ -1584,6 +1636,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             ? String(action.unitId)
             : undefined,
       };
+
+      // Sortie de phase move : le backend bascule shoot immédiatement mais le client reste en move
+      // le temps du round-trip. On verrouille les activations move dès l'envoi pour fermer le trou.
+      const isMoveExitAction =
+        gameState.phase === "move" &&
+        (action.action === "end_phase" || action.action === "advance_phase");
+      if (isMoveExitAction) {
+        moveExitPendingRef.current = true;
+      }
 
       try {
         const requestId = Date.now();
@@ -1963,7 +2024,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           }
 
           // Last move emptied move pool: PvP defers shooting init to a second request — chain it.
+          // Le backend a déjà quitté move : verrouiller les activations move jusqu'au render shoot.
           if (data.result?.pending_shooting_phase_init === true) {
+            moveExitPendingRef.current = true;
             setTimeout(() => {
               void executeAction({ action: "advance_phase", from: "move" });
             }, 0);
@@ -2201,6 +2264,35 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 hiddenTooFarByUnitId[unitId] = tooFar;
               }
             }
+            let hiddenDetectionInfoByUnitId: Record<string, HiddenDetectionInfo> | undefined;
+            if (phase === "shoot") {
+              const rawDetInfo = data.result.hidden_detection_info_by_unit_id;
+              if (!rawDetInfo || typeof rawDetInfo !== "object" || Array.isArray(rawDetInfo)) {
+                throw new Error(
+                  "shoot blinking response missing required hidden_detection_info_by_unit_id"
+                );
+              }
+              hiddenDetectionInfoByUnitId = {};
+              for (const [unitId, info] of Object.entries(rawDetInfo as Record<string, unknown>)) {
+                if (!info || typeof info !== "object" || Array.isArray(info)) {
+                  throw new Error(
+                    `shoot blinking response hidden_detection_info_by_unit_id.${unitId} must be an object`
+                  );
+                }
+                const { detection_inches, too_far } = info as Record<string, unknown>;
+                if (detection_inches !== 15 && detection_inches !== 12) {
+                  throw new Error(
+                    `shoot blinking response hidden_detection_info_by_unit_id.${unitId}.detection_inches must be 12 or 15`
+                  );
+                }
+                if (typeof too_far !== "boolean") {
+                  throw new Error(
+                    `shoot blinking response hidden_detection_info_by_unit_id.${unitId}.too_far must be boolean`
+                  );
+                }
+                hiddenDetectionInfoByUnitId[unitId] = { detection_inches, too_far };
+              }
+            }
             const coverKey = JSON.stringify(
               Object.entries(coverByUnitId ?? {}).sort(([a], [b]) => a.localeCompare(b))
             );
@@ -2261,6 +2353,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 attackerId: newAttackerId,
                 coverByUnitId,
                 hiddenTooFarByUnitId,
+                hiddenDetectionInfoByUnitId,
               });
               setBlinkVersion((prev) => prev + 1);
             }
@@ -3143,6 +3236,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           });
         }
         console.error("Action error:", err);
+        // Anti-deadlock : si l'action qui quittait move a échoué, la phase ne basculera pas →
+        // le useEffect de libération ne se déclenchera jamais. On libère ici.
+        if (isMoveExitAction) {
+          moveExitPendingRef.current = false;
+        }
         setError(formatApiConnectionError(err));
         return undefined;
       }
@@ -3765,6 +3863,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           if (activationInProgressRef.current) {
             return;
           }
+          // Sortie de move en vol : backend déjà en shoot → ne pas activer une unité en move.
+          if (moveExitPendingRef.current) {
+            return;
+          }
           activationInProgressRef.current = true;
           setSelectedUnitId(numericUnitId);
           setActivationPendingUnitId(numericUnitId);
@@ -3940,6 +4042,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const ensureActivatedNoHazard = useCallback(
     async (unitId: number | string): Promise<boolean> => {
       const sid = String(typeof unitId === "string" ? parseInt(unitId, 10) : unitId);
+      // Sortie de move en vol : le backend est déjà en shoot, ne pas émettre d'activate_unit move.
+      if (moveExitPendingRef.current) return false;
       if (String(latestGameStateRef.current?.active_movement_unit) !== sid) {
         await executeAction({ action: "activate_unit", unitId: sid });
       }
@@ -4486,6 +4590,32 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
         hiddenTooFarByUnitId[tid] = tooFar;
       }
+      const rawDetInfo = result.hidden_detection_info_by_unit_id;
+      if (!rawDetInfo || typeof rawDetInfo !== "object" || Array.isArray(rawDetInfo)) {
+        throw new Error(
+          "squad_shoot select_model: hidden_detection_info_by_unit_id absent/invalid in response"
+        );
+      }
+      const hiddenDetectionInfoByUnitId: Record<string, HiddenDetectionInfo> = {};
+      for (const [tid, info] of Object.entries(rawDetInfo as Record<string, unknown>)) {
+        if (!info || typeof info !== "object" || Array.isArray(info)) {
+          throw new Error(
+            `squad_shoot select_model: hidden_detection_info_by_unit_id.${tid} must be an object`
+          );
+        }
+        const { detection_inches, too_far } = info as Record<string, unknown>;
+        if (detection_inches !== 15 && detection_inches !== 12) {
+          throw new Error(
+            `squad_shoot select_model: hidden_detection_info_by_unit_id.${tid}.detection_inches must be 12 or 15`
+          );
+        }
+        if (typeof too_far !== "boolean") {
+          throw new Error(
+            `squad_shoot select_model: hidden_detection_info_by_unit_id.${tid}.too_far must be boolean`
+          );
+        }
+        hiddenDetectionInfoByUnitId[tid] = { detection_inches, too_far };
+      }
       const validTargets = (result.valid_targets as string[]).map((id) => parseInt(id, 10));
       setBlinkingUnits((prev) => {
         if (prev.blinkTimer) clearInterval(prev.blinkTimer);
@@ -4496,6 +4626,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           attackerId: unitId,
           coverByUnitId,
           hiddenTooFarByUnitId,
+          hiddenDetectionInfoByUnitId,
         };
       });
       setSquadShootPlan((prev) =>
@@ -4553,6 +4684,32 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
         hiddenTooFarByUnitId[tid] = tooFar;
       }
+      const rawDetInfo = result.hidden_detection_info_by_unit_id;
+      if (!rawDetInfo || typeof rawDetInfo !== "object" || Array.isArray(rawDetInfo)) {
+        throw new Error(
+          "squad_shoot_los_overview: hidden_detection_info_by_unit_id absent/invalid in response"
+        );
+      }
+      const hiddenDetectionInfoByUnitId: Record<string, HiddenDetectionInfo> = {};
+      for (const [tid, info] of Object.entries(rawDetInfo as Record<string, unknown>)) {
+        if (!info || typeof info !== "object" || Array.isArray(info)) {
+          throw new Error(
+            `squad_shoot_los_overview: hidden_detection_info_by_unit_id.${tid} must be an object`
+          );
+        }
+        const { detection_inches, too_far } = info as Record<string, unknown>;
+        if (detection_inches !== 15 && detection_inches !== 12) {
+          throw new Error(
+            `squad_shoot_los_overview: hidden_detection_info_by_unit_id.${tid}.detection_inches must be 12 or 15`
+          );
+        }
+        if (typeof too_far !== "boolean") {
+          throw new Error(
+            `squad_shoot_los_overview: hidden_detection_info_by_unit_id.${tid}.too_far must be boolean`
+          );
+        }
+        hiddenDetectionInfoByUnitId[tid] = { detection_inches, too_far };
+      }
       const rawCount = result.count_by_unit_id;
       if (!rawCount || typeof rawCount !== "object" || Array.isArray(rawCount)) {
         throw new Error("squad_shoot_los_overview: count_by_unit_id absent/invalid in response");
@@ -4580,6 +4737,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           attackerId: unitId,
           coverByUnitId,
           hiddenTooFarByUnitId,
+          hiddenDetectionInfoByUnitId,
           losCountByUnitId,
           squadAliveCount: freeRaw,
           losOverviewUnitId: unitId,
@@ -7287,6 +7445,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       blinkingAttackerId: null,
       blinkingCoverByUnitId: undefined,
       blinkingHiddenTooFarByUnitId: undefined,
+      blinkingHiddenDetectionInfoByUnitId: undefined,
       blinkingLosCountByUnitId: undefined,
       blinkingSquadAliveCount: undefined,
       blinkingLosOverviewUnitId: null,
@@ -7495,6 +7654,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     blinkingAttackerId: blinkingUnits.attackerId ?? null,
     blinkingCoverByUnitId: blinkingUnits.coverByUnitId,
     blinkingHiddenTooFarByUnitId: blinkingUnits.hiddenTooFarByUnitId,
+    blinkingHiddenDetectionInfoByUnitId: blinkingUnits.hiddenDetectionInfoByUnitId,
     blinkingLosCountByUnitId: blinkingUnits.losCountByUnitId,
     blinkingSquadAliveCount: blinkingUnits.squadAliveCount,
     blinkingLosOverviewUnitId: blinkingUnits.losOverviewUnitId ?? null,

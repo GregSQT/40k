@@ -4358,6 +4358,7 @@ class W40KEngine(gym.Env):
             build_unit_los_cache,
             build_cover_by_unit_id_for_valid_targets,
             build_hidden_too_far_by_unit_id,
+            build_hidden_detection_info_by_unit_id,
         )
 
         name = action.get("action")
@@ -4387,6 +4388,14 @@ class W40KEngine(gym.Env):
             unit_obj = get_unit_by_id(squad_id, self.game_state)
             assert unit_obj is not None, f"unit {squad_id} not found in game_state"
             return build_hidden_too_far_by_unit_id(self.game_state, unit_obj)
+
+        def _squad_hidden_detection_info() -> Dict[str, Dict[str, Any]]:
+            """Detection range effective (15" / 12" GtG) + too_far par ennemi caché, pour le badge
+            numérique frontend. Même brique LoS partagée (build_unit_los_cache idempotent)."""
+            build_unit_los_cache(self.game_state, squad_id)
+            unit_obj = get_unit_by_id(squad_id, self.game_state)
+            assert unit_obj is not None, f"unit {squad_id} not found in game_state"
+            return build_hidden_detection_info_by_unit_id(self.game_state, unit_obj)
 
         if name == "squad_shoot_activate":
             squad_shooting_unit_activation_start(self.game_state, squad_id)
@@ -4429,6 +4438,7 @@ class W40KEngine(gym.Env):
                 "available_weapons": available_weapons, "valid_targets": valid_targets,
                 "cover_by_unit_id": _squad_cover_by_unit_id(valid_targets),
                 "hidden_too_far_by_unit_id": _squad_hidden_too_far(),
+                "hidden_detection_info_by_unit_id": _squad_hidden_detection_info(),
             }
 
         if name == "squad_shoot_select_model":
@@ -4440,6 +4450,7 @@ class W40KEngine(gym.Env):
                 "valid_targets": valid_targets,
                 "cover_by_unit_id": _squad_cover_by_unit_id(valid_targets),
                 "hidden_too_far_by_unit_id": _squad_hidden_too_far(),
+                "hidden_detection_info_by_unit_id": _squad_hidden_detection_info(),
             }  # get allowed
 
         if name == "squad_shoot_los_overview":
@@ -4454,6 +4465,7 @@ class W40KEngine(gym.Env):
                 "squad_free_count": overview["squad_free_count"],
                 "cover_by_unit_id": _squad_cover_by_unit_id(overview["valid_targets"]),
                 "hidden_too_far_by_unit_id": _squad_hidden_too_far(),
+                "hidden_detection_info_by_unit_id": _squad_hidden_detection_info(),
             }  # get allowed
 
         if name == "squad_shoot_assign":
@@ -4491,6 +4503,7 @@ class W40KEngine(gym.Env):
                 "valid_targets": valid_targets,
                 "cover_by_unit_id": _squad_cover_by_unit_id(valid_targets),
                 "hidden_too_far_by_unit_id": _squad_hidden_too_far(),
+                "hidden_detection_info_by_unit_id": _squad_hidden_detection_info(),
             }
 
         if name == "squad_shoot_assign_weapon":

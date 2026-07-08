@@ -164,7 +164,7 @@ export default function UnitStatusBadges({
   if (hidden) {
     badges.push({
       key: "hidden",
-      text: 'Caché — Visible que par les ennemis à portée de détection (15").',
+      text: 'Caché — Visible que par les ennemis à portée de détection (15") ; à couvert : −1 BS.',
       icon: <HiddenIcon />,
     });
   }

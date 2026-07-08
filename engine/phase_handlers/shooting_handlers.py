@@ -1485,6 +1485,7 @@ def preview_shoot_valid_targets_from_position(
         "los_preview_ratio_by_hex": {},
         "cover_by_unit_id": {},
         "hidden_too_far_by_unit_id": {},
+        "hidden_detection_info_by_unit_id": {},
         "visible_cells_by_target": {},
     }
 
@@ -1652,6 +1653,7 @@ def preview_shoot_valid_targets_from_position(
         "los_preview_ratio_by_hex": require_key(u, "los_preview_ratio_by_hex"),
         "cover_by_unit_id": cover_by_unit_id,
         "hidden_too_far_by_unit_id": build_hidden_too_far_by_unit_id(gs, u),
+        "hidden_detection_info_by_unit_id": build_hidden_detection_info_by_unit_id(gs, u),
         "visible_cells_by_target": visible_cells_by_target,
     }
     if preview_cache_key is not None:
@@ -1759,6 +1761,109 @@ def build_hidden_too_far_by_unit_id(
         # pour les figurines masquées par un terrain Solid intervenant).
         if hidden_enemy_out_of_detection(game_state, shooter, enemy, detection_range_subhex):
             result[target_id_str] = True
+    return result
+
+
+def _all_enemy_models_gone_to_ground(
+    game_state: Dict[str, Any],
+    shooter_anchor: Tuple[int, int],
+    shooter_hexes: List[Tuple[int, int]],
+    enemy: Dict[str, Any],
+    dense_wall_set: Set[Tuple[int, int]],
+    gym_training: bool,
+) -> bool:
+    """True si TOUTES les figurines vivantes de l'ennemi sont "gone to ground" vis-à-vis du tireur.
+
+    Une figurine est GtG quand son empreinte n'est pas entièrement visible à cause d'un terrain
+    Solid intervenant (règle 13.5, _model_footprint_not_fully_visible_due_to_solid). Utilisé pour
+    déterminer si la detection range affichée est 12" (toutes GtG) ou 15" (au moins une non-GtG).
+    """
+    if not dense_wall_set:
+        return False
+    footprints, _centers, _bshape, _bsize, _borient = _resolve_target_models_for_los(
+        game_state, enemy, gym_training
+    )
+    if not footprints:
+        return False
+    for model_hexes in footprints:
+        if not _model_footprint_not_fully_visible_due_to_solid(
+            game_state, shooter_anchor, shooter_hexes, model_hexes, dense_wall_set
+        ):
+            return False
+    return True
+
+
+def build_hidden_detection_info_by_unit_id(
+    game_state: Dict[str, Any],
+    shooter: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    """Detection range effective et statut "trop loin" par ennemi caché, relatifs au tireur actif.
+
+    Retourne pour chaque ennemi caché en LoS + à portée d'arme :
+      {"detection_inches": 15 | 12, "too_far": bool}
+    detection_inches = 12 si TOUTES les figurines vivantes sont "gone to ground" (règle 13.5),
+    sinon 15. too_far = cohérent avec build_hidden_too_far_by_unit_id (appelle
+    hidden_enemy_out_of_detection). Rétro-compat : build_hidden_too_far_by_unit_id reste inchangé.
+    """
+    from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
+    _ranged_metric = _ranged_distance_metric()
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    detection_range_subhex = (
+        float(require_key(game_rules, "detection_range"))
+        * int(require_key(game_state, "inches_to_subhex"))
+    )
+    base_inches = int(require_key(game_rules, "detection_range"))
+    rng_weapons = require_key(shooter, "RNG_WEAPONS")
+    max_rng = max((require_key(w, "RNG") for w in rng_weapons), default=0)
+    if max_rng <= 0:
+        return {}
+    los_cache = shooter.get("los_cache")
+    if not los_cache:
+        return {}
+    units_cache = require_key(game_state, "units_cache")
+    shooter_id = str(require_key(shooter, "id"))
+    shooter_player = int(require_key(shooter, "player"))
+    shooter_entry = units_cache.get(shooter_id)
+    if shooter_entry is None:
+        raise KeyError(f"Shooter {shooter_id} not in units_cache")
+    _shooter_socle = socle_from_cache_entry(shooter_entry)
+    gym_training = bool(
+        game_state.get("gym_training_mode", False)
+        or require_key(game_state, "config").get("gym_training_mode", False)
+    )
+    shooter_anchor, shooter_hexes = _resolve_unit_anchor_and_footprint(
+        game_state, shooter, gym_training=gym_training
+    )
+    dense_wall_set = _get_dense_wall_set(game_state)
+    gtg_penalty_inches = 3
+    result: Dict[str, Dict[str, Any]] = {}
+    for target_id, has_los in los_cache.items():
+        if not has_los:
+            continue
+        target_id_str = str(target_id)
+        if target_id_str == shooter_id:
+            continue
+        enemy = _get_unit_by_id(game_state, target_id_str)
+        if enemy is None or not is_unit_alive(target_id_str, game_state):
+            continue
+        if int(require_key(enemy, "player")) == shooter_player:
+            continue
+        if not bool(enemy.get("hidden")):
+            continue
+        enemy_entry = units_cache.get(target_id_str)
+        if enemy_entry is None:
+            continue
+        distance = ranged_edge_distance(
+            _shooter_socle, socle_from_cache_entry(enemy_entry), _ranged_metric, max_distance=max_rng
+        )
+        if distance > max_rng:
+            continue
+        all_gtg = _all_enemy_models_gone_to_ground(
+            game_state, shooter_anchor, shooter_hexes, enemy, dense_wall_set, gym_training
+        )
+        detection_inches = base_inches - gtg_penalty_inches if all_gtg else base_inches
+        too_far = hidden_enemy_out_of_detection(game_state, shooter, enemy, detection_range_subhex)
+        result[target_id_str] = {"detection_inches": detection_inches, "too_far": too_far}
     return result
 
 

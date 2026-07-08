@@ -11,6 +11,7 @@
     { "id": 10001, "unit_type": "FenrisianWolf",                                          "player": 1, "col": 40,   "row": 161 },
     { "id": 10002, "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",  "player": 1, "col": 63,   "row": 65 },
     { "id": 10005, "unit_type": "DreadnoughtBallistus",                                   "player": 1, "col": 190,  "row": 242 },
+    { "id": 10006, "unit_type": "DreadnoughtBallistus",                                   "player": 1, "col": 100,  "row": 252 },
 
     {
       "id": 6, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 107, "row": 166,
@@ -164,13 +165,11 @@
       ]
     },
     {
-      "id": 115, "unit_type": "Barbgaunt", "player": 2, "col": 10, "row": 240,
+      "id": 115, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 33, "row": 235,
       "models": [
-        { "col": 10, "row": 240 },
-        { "col": 16, "row": 240 },
-        { "col": 22, "row": 240 },
-        { "col": 28, "row": 240 },
-        { "col": 34, "row": 240 }
+        { "col": 33, "row": 235 },
+        { "col": 22, "row": 245 },
+        { "col": 23, "row": 255 }
       ]
     },
     {
