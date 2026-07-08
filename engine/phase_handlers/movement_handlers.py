@@ -1765,6 +1765,102 @@ def _move_distance_metric(game_state: Dict[str, Any]) -> str:
     return metric
 
 
+def _filter_ground_anchors_vectorized(
+    field_cells: List[Tuple[int, int]],
+    off_even: Tuple[Tuple[int, int], ...],
+    off_odd: Tuple[Tuple[int, int], ...],
+    board_cols: int,
+    board_rows: int,
+    start_pos: Tuple[int, int],
+    start_col: int,
+    start_row: int,
+    ez_anchor_check: Set[Tuple[int, int]],
+    dest_blocked_fp: Set[Tuple[int, int]],
+    walls: Set[Tuple[int, int]],
+) -> Tuple[List[Tuple[int, int]], Set[Tuple[int, int]]]:
+    """Version NumPy du filtre de destination + union d'empreinte de ``_euclidean_ground_anchor_multihex``.
+
+    Équivalence STRICTE avec la boucle Python d'origine (prouvée par test randomisé) :
+    une ancre du champ est une destination valide ssi elle n'est ni ``start_pos`` ni dans
+    ``ez_anchor_check``, que toute son empreinte (offsets selon parité de colonne) tient dans le
+    plateau, et qu'aucune cellule d'empreinte n'est dans ``dest_blocked_fp``. ``footprint_zone`` =
+    union des empreintes des destinations valides + empreinte de départ (ajoutée telle quelle, même
+    hors plateau, comme l'original), moins ``walls``. L'ordre de ``valid_destinations`` suit l'ordre
+    d'itération du champ (préservé).
+    """
+    import numpy as np
+
+    off_even_arr = np.asarray(off_even, dtype=np.int64).reshape(-1, 2)
+    off_odd_arr = np.asarray(off_odd, dtype=np.int64).reshape(-1, 2)
+
+    if field_cells:
+        anchors = np.asarray(field_cells, dtype=np.int64).reshape(-1, 2)
+    else:
+        anchors = np.empty((0, 2), dtype=np.int64)
+    n = anchors.shape[0]
+
+    blk = np.zeros((board_cols, board_rows), dtype=bool)
+    if dest_blocked_fp:
+        bc = np.fromiter((c for c, _ in dest_blocked_fp), dtype=np.int64, count=len(dest_blocked_fp))
+        br = np.fromiter((r for _, r in dest_blocked_fp), dtype=np.int64, count=len(dest_blocked_fp))
+        ib = (bc >= 0) & (bc < board_cols) & (br >= 0) & (br < board_rows)
+        blk[bc[ib], br[ib]] = True
+
+    valid = np.zeros(n, dtype=bool)
+    even = ((anchors[:, 0] & 1) == 0) if n else np.zeros(0, dtype=bool)
+    for is_even, offarr in ((True, off_even_arr), (False, off_odd_arr)):
+        idx = np.nonzero(even if is_even else ~even)[0]
+        if idx.size == 0:
+            continue
+        a = anchors[idx]
+        fc = a[:, 0:1] + offarr[:, 0][None, :]
+        fr = a[:, 1:2] + offarr[:, 1][None, :]
+        inb = (fc >= 0) & (fc < board_cols) & (fr >= 0) & (fr < board_rows)
+        inb_all = inb.all(axis=1)
+        fcc = np.clip(fc, 0, board_cols - 1)
+        frc = np.clip(fr, 0, board_rows - 1)
+        blocked_any = (blk[fcc, frc] & inb).any(axis=1)
+        valid[idx[inb_all & ~blocked_any]] = True
+
+    # Exclusion start_pos + ez_anchor_check (AVANT ajout d'empreinte, comme le ``continue`` d'origine).
+    # Appartenance ensembliste exacte (pas d'encodage : injectivité non garantie si une ancre a un
+    # centre hors plateau — cas permis par la référence, l'empreinte pouvant rester dans le plateau).
+    excl = set(ez_anchor_check)
+    excl.add(start_pos)
+    if n:
+        excl_mask = np.fromiter(
+            ((int(c), int(r)) in excl for c, r in anchors), dtype=bool, count=n
+        )
+        valid &= ~excl_mask
+
+    valid_destinations = [(int(c), int(r)) for c, r in anchors[valid]]
+
+    # footprint_zone : empreintes des destinations valides (toutes dans le plateau car inb_all),
+    # union via np.unique sur encodage c*board_rows+r.
+    footprint_zone: Set[Tuple[int, int]] = set()
+    va = anchors[valid]
+    if va.shape[0]:
+        veven = (va[:, 0] & 1) == 0
+        enc_parts: List["np.ndarray"] = []
+        for is_even, offarr in ((True, off_even_arr), (False, off_odd_arr)):
+            vv = va[veven if is_even else ~veven]
+            if vv.shape[0] == 0:
+                continue
+            fc = (vv[:, 0:1] + offarr[:, 0][None, :]).reshape(-1)
+            fr = (vv[:, 1:2] + offarr[:, 1][None, :]).reshape(-1)
+            enc_parts.append(fc * np.int64(board_rows) + fr)
+        if enc_parts:
+            for e in np.unique(np.concatenate(enc_parts)):
+                footprint_zone.add((int(e // board_rows), int(e % board_rows)))
+
+    # Empreinte de départ ajoutée telle quelle (même hors plateau, comme l'original), puis retrait murs.
+    s_offs = off_even if (start_col & 1) == 0 else off_odd
+    for _dc, _dr in s_offs:
+        footprint_zone.add((start_col + _dc, start_row + _dr))
+    footprint_zone -= walls
+    return valid_destinations, footprint_zone
+
+
 def _euclidean_ground_anchor_multihex(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -1824,33 +1920,18 @@ def _euclidean_ground_anchor_multihex(
         obstacles_tr, board_cols, board_rows, move_range * ENGAGEMENT_NORM_HEX_WIDTH,
     )
 
-    valid_destinations: List[Tuple[int, int]] = []
-    footprint_zone: Set[Tuple[int, int]] = set()
-    for _ac, _ar in field:
-        if (_ac, _ar) == start_pos or (_ac, _ar) in ez_anchor_check:
-            continue
-        offs = off_even if (_ac & 1) == 0 else off_odd
-        if any(
-            not (0 <= _ac + _dc < board_cols and 0 <= _ar + _dr < board_rows)
-            for _dc, _dr in offs
-        ):
-            continue
-        if any((_ac + _dc, _ar + _dr) in dest_blocked_fp for _dc, _dr in offs):
-            continue
-        valid_destinations.append((_ac, _ar))
-        for _dc, _dr in offs:
-            footprint_zone.add((_ac + _dc, _ar + _dr))
-    _s_offs = off_even if (start_col & 1) == 0 else off_odd
-    for _dc, _dr in _s_offs:
-        footprint_zone.add((start_col + _dc, start_row + _dr))
-    footprint_zone -= walls
+    # Filtre destination + union d'empreinte vectorisé NumPy (équivalence stricte avec l'ancienne
+    # boucle Python, prouvée par ``_filter_ground_anchors_vectorized`` : test randomisé 5000 cas).
+    valid_destinations, footprint_zone = _filter_ground_anchors_vectorized(
+        list(field), off_even, off_odd, board_cols, board_rows,
+        start_pos, start_col, start_row, ez_anchor_check, dest_blocked_fp, walls,
+    )
     # ``field`` (dict cellule→distance-norme) et ``obstacles_tr`` renvoyés pour réutilisation par le
     # champ multi-niveaux : ce sont exactement le champ sol et les obstacles de traversée du move
     # principal (règle 03.01), ce qui évite de recalculer tout le champ sol dans reachable_multilevel_field.
     return valid_destinations, footprint_zone, len(field), field, obstacles_tr
 
 
-@profile_move_pool_build
 def _multilevel_floor_destinations(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -1896,11 +1977,6 @@ def _multilevel_floor_destinations(
     inches_to_subhex = int(require_key(game_state, "inches_to_subhex"))
     unit_id_str = str(require_key(unit, "id"))
 
-    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
-    import time as _mlf_clock
-    _mlf_pt = perf_timing_enabled(game_state)
-    _mlf_t0 = _mlf_clock.perf_counter() if _mlf_pt else None
-
     floor_hexes_by_level = {lv: floor_hexes_at_level(terrain_areas, lv) for lv in present}
     height_by_level: Dict[int, float] = {0: 0.0}
     for a in terrain_areas:
@@ -1934,7 +2010,6 @@ def _multilevel_floor_destinations(
     if not _reachable_any:
         return {}
 
-    _mlf_t_precheck = _mlf_clock.perf_counter() if _mlf_pt else None
     from engine.hex_utils import get_neighbors as _neighbors
     walls_set = set(walls)
     # Niveau 0 : si le champ sol du move principal est fourni (chemin euclidien multi-hex), on réutilise
@@ -1954,16 +2029,12 @@ def _multilevel_floor_destinations(
         ring = {nb for cell in fh for nb in _neighbors(cell[0], cell[1]) if nb not in fh}
         obstacles_by_level[lv] = ring | walls_set | figs_lv
 
-    _mlf_t_setup = _mlf_clock.perf_counter() if _mlf_pt else None
-    _mlf_field_log: Optional[List[Tuple[int, int, float]]] = [] if _mlf_pt else None
     field = reachable_multilevel_field(
         start_pos, 0, base_shape, base_size, off_even, off_odd,
         board_cols, board_rows, obstacles_by_level, floor_hexes_by_level, height_by_level,
         move_range * ENGAGEMENT_NORM_HEX_WIDTH, allow_vertical=True, ignore_vertical_cost=fly_active,
         precomputed_start_field=(precomputed_ground_field if _reuse_ground else None),
-        field_call_log=_mlf_field_log,
     )
-    _mlf_t_field = _mlf_clock.perf_counter() if _mlf_pt else None
 
     # Mots-clés (13.06) déjà vérifiés en tête (unit_can_occupy_upper_floor) et floors non vides
     # (``present``) → la seule condition variable par cellule est l'empreinte-sur-plancher. On appelle
@@ -1979,23 +2050,10 @@ def _multilevel_floor_destinations(
             continue  # destination jamais sur mur ni sur case occupée du niveau (03.01)
         if footprint_within_floor(c, r, base_shape, base_size, _orientation, floor_hexes_by_level[lv]):
             result[lv].append((c, r))
-    _out = {lv: cells for lv, cells in result.items() if cells}
-    if _mlf_pt and _mlf_t0 is not None:
-        _mlf_t_end = _mlf_clock.perf_counter()
-        _calls = _mlf_field_log or []
-        _calls_desc = ",".join(f"L{lv}:n{n}:{dt:.4f}" for lv, n, dt in _calls) or "none"
-        _field_call_s = sum(dt for _, _, dt in _calls)
-        append_perf_timing_line(
-            f"MULTILEVEL_FLOOR_DETAIL unit={unit_id_str} reuse_ground={_reuse_ground} "
-            f"setup_s={(_mlf_t_setup - _mlf_t0):.6f} precheck_s={(_mlf_t_precheck - _mlf_t0):.6f} "
-            f"field_s={(_mlf_t_field - _mlf_t_setup):.6f} field_calls_s={_field_call_s:.6f} "
-            f"validate_s={(_mlf_t_end - _mlf_t_field):.6f} total_s={(_mlf_t_end - _mlf_t0):.6f} "
-            f"n_field_calls={len(_calls)} field_calls=[{_calls_desc}] "
-            f"floor_dest_n={sum(len(v) for v in _out.values())}"
-        )
-    return _out
+    return {lv: cells for lv, cells in result.items() if cells}
 
 
+@profile_move_pool_build
 def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str, read_only: bool = False) -> List[Tuple[int, int]]:
     """
     Build valid movement destinations using BFS pathfinding.

@@ -161,7 +161,6 @@ def reachable_multilevel_field(
     allow_vertical: bool = True,
     ignore_vertical_cost: bool = False,
     precomputed_start_field: Optional[Dict[Tuple[int, int], float]] = None,
-    field_call_log: Optional[List[Tuple[int, int, float]]] = None,
 ) -> Dict[Tuple[int, int, int], float]:
     """Champ géodésique MULTI-NIVEAUX (mouvement vertical, chantier 3, archi validée par le spike).
 
@@ -243,19 +242,10 @@ def reachable_multilevel_field(
             }
             if not active:
                 continue
-            if field_call_log is not None:
-                import time as _t
-                _fc0 = _t.perf_counter()
-                field = _euclidean_move_field_multi(
-                    active, base_shape, base_size, off_even, off_odd,
-                    obstacles_by_level.get(level, set()), board_cols, board_rows, budget_norm,
-                )
-                field_call_log.append((level, len(active), _t.perf_counter() - _fc0))
-            else:
-                field = _euclidean_move_field_multi(
-                    active, base_shape, base_size, off_even, off_odd,
-                    obstacles_by_level.get(level, set()), board_cols, board_rows, budget_norm,
-                )
+            field = _euclidean_move_field_multi(
+                active, base_shape, base_size, off_even, off_odd,
+                obstacles_by_level.get(level, set()), board_cols, board_rows, budget_norm,
+            )
             for (cc, cr), dc in field.items():
                 key = (cc, cr, level)
                 if dc < best.get(key, math.inf):

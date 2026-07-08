@@ -1709,15 +1709,24 @@ def _obstacle_bucket_size(clearance: float) -> float:
 
 
 def _build_obstacle_index(
-    obstacles: Set[Tuple[int, int]], bucket_size: float
+    obstacles: Set[Tuple[int, int]], bucket_size: float,
+    center: Optional[Tuple[float, float]] = None, reach_sq: Optional[float] = None,
 ) -> Dict[Tuple[int, int], List[Tuple[float, float]]]:
     """Index spatial : bucket (grille pixel) → centres des obstacles. Chaque obstacle est inscrit
     dans SON bucket ET ses 8 voisins (la marge circumradius+clearance ≤ bucket_size est ainsi
     absorbée à la construction). Un segment n'a donc qu'à visiter les buckets qu'il TRAVERSE
-    (DDA), sans balayage latéral par segment. Centres précalculés une fois."""
+    (DDA), sans balayage latéral par segment. Centres précalculés une fois.
+
+    ``center``/``reach_sq`` (optionnels) : élagage à la source — un obstacle dont le centre est
+    au-delà de ``reach_sq`` du départ ne peut affecter aucune cellule atteignable (voir
+    ``geodesic_field``), il est donc omis de l'index. Sans ces params : aucun élagage (comportement
+    d'origine, utilisé par le multi-source)."""
     idx: Dict[Tuple[int, int], List[Tuple[float, float]]] = {}
+    _cx, _cy = center if center is not None else (0.0, 0.0)
     for (wc, wr) in obstacles:
         ocx, ocy = _hex_center(wc, wr)
+        if reach_sq is not None and (ocx - _cx) * (ocx - _cx) + (ocy - _cy) * (ocy - _cy) > reach_sq:
+            continue
         bgx, bgy = int(ocx // bucket_size), int(ocy // bucket_size)
         for gx in range(bgx - 1, bgx + 2):
             for gy in range(bgy - 1, bgy + 2):
@@ -1909,7 +1918,15 @@ def geodesic_field(
     if start in obstacles:
         raise ValueError(f"geodesic_field: start {start} est un obstacle")
     bs = _obstacle_bucket_size(clearance)
-    idx = _build_obstacle_index(obstacles, bs)
+    # Élagage lossless : un obstacle dont le centre est au-delà de ``budget + clearance + 4·circumradius``
+    # du départ ne peut bloquer aucun segment testé. Preuve : tout point d'un segment (ancre→voisin) est
+    # à ≤ budget + pas_hex du départ (norme convexe, max aux extrémités ; ancre/voisin atteignables donc
+    # à ≤ budget euclidien ≤ budget géodésique) ; un mur bloque à ≤ clearance + circumradius de ce point.
+    # 4·circumradius couvre pas_hex (≤ 2·circ) + extent mur (circ) + marge. Retire les murs hors zone
+    # atteignable → index plus petit, résultat identique.
+    _gf_sx, _gf_sy = _hex_center(*start)
+    _gf_reach = budget + (clearance if clearance > 0.0 else 0.0) + 4.0 * _HEX_CIRCUMRADIUS
+    idx = _build_obstacle_index(obstacles, bs, center=(_gf_sx, _gf_sy), reach_sq=_gf_reach * _gf_reach)
     g: Dict[Tuple[int, int], float] = {start: 0.0}
     parent: Dict[Tuple[int, int], Tuple[int, int]] = {start: start}
     pq: List[Tuple[float, Tuple[int, int]]] = [(0.0, start)]
