@@ -103,6 +103,79 @@ def main() -> int:
     print(f"cible L2 : vz={gap - 0.5}(sous gap)->{r_below}  vz={gap + 0.5}(sur gap)->{r_above}")
     assert (not r_below) and r_above, "le gate vertical doit basculer exactement au gap réel"
 
+    # ------------------------------------------------------------------------------------------------
+    # 3) 3b — LE CHARGEUR MONTE : le champ climb produit des destinations d'étage (coût de montée §13.06
+    #    soustrait du jet) et le pool charge_model_plan_state porte le niveau par ancre.
+    # ------------------------------------------------------------------------------------------------
+    from engine.game_state import unit_can_occupy_upper_floor
+    from engine.hex_utils import get_neighbors
+    from engine.phase_handlers.charge_handlers import (
+        _charge_model_climb_reachable_floor_cells, charge_model_plan_state,
+    )
+    from engine.terrain_utils import low_clearance_ground_hexes
+
+    # Chargeur montant : première unité p1 capable de finir en hauteur (INFANTRY/BEASTS/SWARM/FLY/MONSTER).
+    climber = next(
+        ((uid, u) for uid, u in p1 if unit_can_occupy_upper_floor(u["UNIT_KEYWORDS"])), None
+    )
+    if climber is None:
+        print("\n3b : aucune unité p1 montante dans ce roster — sous-test climb sauté (non bloquant).")
+        print("\nOK — engagement 3D charge validé sur le VRAI scénario à étages (données roster + floors réels).")
+        return 0
+    clb_uid, clb_u = climber
+    clb_mid = gs["squad_models"][clb_uid][0]
+    clb_model = gs["models_cache"][clb_mid]
+
+    # Cible sur L1 (c1) ; chargeur au SOL sur un hex adjacent au pied de la ruine (hors plancher, hors mur).
+    place(tgt_mid, c1[0], c1[1], 1)
+    walls = set(gs.get("wall_hexes", set()))
+    fh1_set = set(fh1)
+    ground_start = next(
+        (nb for cell in fh1 for nb in get_neighbors(cell[0], cell[1])
+         if nb not in fh1_set and nb not in walls
+         and 0 <= nb[0] < gs["board_cols"] and 0 <= nb[1] < gs["board_rows"]),
+        None,
+    )
+    if ground_start is None:
+        raise RuntimeError("3b : pas d'hex de sol adjacent au plancher L1")
+    place(clb_mid, ground_start[0], ground_start[1], 0)
+
+    ish = int(gs["inches_to_subhex"])
+    budget = 12 * ish  # gros jet de charge (2D6 max) en sous-hex
+    ta = gs["terrain_areas"]
+    ground_obs = set(walls) | low_clearance_ground_hexes(ta, float(clb_u["MODEL_HEIGHT"]))
+    # (les ennemis ne bloquent pas ici : on teste la montée pure)
+    fcells = _charge_model_climb_reachable_floor_cells(
+        gs, clb_u, clb_uid, clb_model, (ground_start[0], ground_start[1]), budget, 1, ground_obs, ta,
+    )
+    print(f"3b climb : chargeur={clb_u.get('unit_type')} depart_sol={ground_start} "
+          f"budget_subhex={budget} -> {len(fcells)} cases L1 atteignables")
+    assert fcells, "3b : le chargeur montant doit atteindre au moins une case de l'étage L1"
+    assert all(isinstance(d, int) and d >= 0 for d in fcells.values()), "3b : distances climb invalides"
+
+    # Budget serré : monter coûte au moins la hauteur de l'étage (3") -> budget < 3" => aucune case L1.
+    tiny = max(0, (2 * ish) - 1)  # ~2" < 3" de montée
+    fcells_tiny = _charge_model_climb_reachable_floor_cells(
+        gs, clb_u, clb_uid, clb_model, (ground_start[0], ground_start[1]), tiny, 1, ground_obs, ta,
+    )
+    print(f"3b climb : budget serré {tiny} sous-hex (<3\" de montée) -> {len(fcells_tiny)} cases L1")
+    assert not fcells_tiny, "3b : sous le coût de montée §13.06, aucune case d'étage ne doit être atteignable"
+
+    # Pool bout-en-bout : déclaration de charge injectée -> charge_model_plan_state en vue L1 renvoie des
+    # ancres [col,row,level>=1] (le chargeur peut finir engagé EN HAUTEUR avec la cible surélevée).
+    # Le chemin 3D d'étage est euclidean-only (métrique GAMEPLAY) ; l'env de test est en gym (metric hex,
+    # 2D par design RL) -> on bascule en mode PvP (distance_metric['charge'] = euclidean) pour ce sous-test.
+    gs["gym_training_mode"] = False
+    gs.setdefault("charge_target_selections", {})[clb_uid] = [tgt_uid]
+    gs.setdefault("charge_roll_values", {})[clb_uid] = 12
+    state = charge_model_plan_state(gs, clb_uid, {}, selected_model=clb_mid, level=1)
+    floor_anchors = [a for a in state["pool"] if len(a) >= 3 and int(a[2]) >= 1]
+    print(f"3b pool : phase={state['current_phase']} pool_total={len(state['pool'])} "
+          f"ancres_etage={len(floor_anchors)}")
+    assert floor_anchors, "3b : charge_model_plan_state (vue L1) doit produire des ancres d'étage level>=1"
+    assert all(len(a) == 3 for a in state["pool"]), "3b : chaque ancre du pool doit porter [col,row,level]"
+
+    print("\nOK 3b — le chargeur MONTE : destinations d'étage (coût §13.06) + pool niveau-conscient validés.")
     print("\nOK — engagement 3D charge validé sur le VRAI scénario à étages (données roster + floors réels).")
     return 0
 

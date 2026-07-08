@@ -811,11 +811,67 @@ le modèle + LoS 3D est le vrai chantier.
           ([charge_handlers.py](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py)). `synth level=0`
           partout (chargeur au sol). **Seul L3431 (FLY) reste 2D** (différé §707). Validé bout-en-bout par le
           script d'intégration ci-dessus + non-régression sol/no-floor structurelle.
-        - ⏳ **3b — le chargeur MONTE** (ancres `level ≥ 1`) : **RESTE À FAIRE**. Nécessite
-          `reachable_multilevel_field` (champ climb, déjà écrit, utilisé par le move par-fig §6e) branché dans la
-          production des destinations de charge, `synth level = niveau de la destination` (plus 0), le
-          **passage de `cand_floor` réel** (plus `0.0` hardcodé) aux gates verticaux de `_eng`/`_fp_engages`,
-          **+ front** (rendu destinations par niveau, miroir move §6d/6e). Validation = app + `scenario_floors_test`.
+        - ✅ **3b — le chargeur MONTE (ancres `level ≥ 1`) — FAIT & VALIDÉ (2026-07-07)** :
+          - **Helper climb charge** `_charge_model_climb_reachable_floor_cells`
+            ([charge_handlers.py](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py)) : miroir
+            EXACT du move `_model_climb_reachable_floor_cells` (source unique `reachable_multilevel_field`),
+            **budget = jet de charge sous-hex**, coût de montée §13.06 soustrait, obstacles sol = murs+ennemis+
+            clairance (amies traversables). Retour `{(col,row): dist_subhex}`. Testé : 667 cases L1 avec gros
+            budget, **0 case sous le coût de montée** (budget < 3" → aucune ancre d'étage → §13.06 confirmé).
+          - **`_compute_plan_context` niveau-conscient** : nouveau param `view_level`. En vue étage (≥1,
+            euclidean, hors FLY, `can_classify`), reach d'étage **PAR-FIGURINE** (start-dépendant, comme le
+            move par-fig) via le helper climb ; classification `floor_region_by_base` par la **primitive 3D
+            directe** (`_synth_model_entry(..., level=view_level)` → `cand_floor` = hauteur réelle du plancher,
+            plus le `0.0` hardcodé). Les cases d'étage **participent à la détermination de phase** (union
+            sol+étage dans `_qual`). Structures `floor_*` ajoutées au ctx. Sig mémo `charge_model_plan_state`
+            += `view_level` (recalcul au clic d'étage, rare). **Additif** : tout au sol / vue 0 / non-montant /
+            hex / FLY → structures vides → sortie **byte-identique 2D** (non-régression pytest 1152 verte).
+          - **`_charge_qualifying`** émet désormais `[col,row,level]` (sol `level 0` inchangé + étage `view_level`).
+            **`_charge_pool_clip_under_floor`** ne clippe QUE le sol (`level 0`) ; les ancres d'étage passent.
+            `pool_distances`/`footprint_mask_loops` : sol = champ géodésique, étage = `floor_dist`/`floor_region`.
+          - **Preview/commit niveau** : `charge_preview_move_plan` (`norm` 4-uplet, synth au niveau réel),
+            `_charge_model_pos_is_closer` (nouveau `dest_level` : **reachability climb** au lieu du BFS 2D quand
+            l'ancre est à l'étage — sinon le coût vertical serait ignoré), `charge_commit_move_plan_handler`
+            (accepte `[mid,col,row(,level)]`, propagé à `commit_move` qui gère déjà le 4-uplet). `provisional_plan`
+            porte le niveau (satisfaction/engagement 3D des figs POSÉES à l'étage). Les 2 parseurs de dispatch
+            (`charge_plan_state`, `charge_fly_mode_set`) construisent `prov` avec niveau.
+          - **Front** (miroir move §6d/6e) : `chargeModelLevelByKeyRef` (Map `"c,r"→level`), plan
+            `models:{col,row,level?}`, `applyChargePlanState` lit le niveau par ancre, `handleMoveModelInChargePlan`
+            pose au niveau réel (erreur si case hors pool, aucun fallback), `refreshChargePlanState`/
+            `handleCommitChargePlan` envoient le niveau. Refetch de la fig active au changement de niveau **déjà
+            en place** (effet `currentLevel` → `onSelectChargeModel`) → recalcule les destinations d'étage
+            ([useEngineAPI.ts](file:///home/greg/40k/frontend/src/hooks/useEngineAPI.ts), tsc vert).
+          - **Piège majeur généralisé** : en 3a `_eng` passait `cand_floor=0.0` hardcodé (`tgt_vreach`/`ntgt_vreach`
+            + `synth_base.floor_height_by_model`) — le chargeur au sol. En 3b la branche SOL garde ce chemin
+            (byte-identique) ; l'ÉTAGE ne passe **pas** par `_eng`/masques (candidat multi-niveau) mais par la
+            **primitive 3D directe** avec synth au niveau réel → `cand_floor` correct sans toucher au fast-path sol.
+          - **Piège métrique** : le chemin 3D d'étage est **euclidean-only** (métrique gameplay `charge`) ; l'env
+            de training (`charge_gym`) est `hex` (RL 2D) → le sous-test pool bascule `gym_training_mode=False`
+            pour exercer le vrai chemin PvP. Le champ climb lui-même est euclidien par nature.
+          - **`charge_build_model_destinations_pool` (L1619) est du CODE MORT** (zéro appelant prod/test) — le
+            pool interactif du front passe par `charge_model_plan_state` → `_compute_plan_context`.
+          - **Affichage mono-niveau (clarté)** : `charge_model_plan_state` ne renvoie au front QUE les ancres
+            du **niveau de vue** courant (`pool = [a for a in pool if a[2] == level]`). Une charge finissant
+            AU SOL en engageant une cible surélevée (3a, engagement 3D ≤5" vertical §03.04) reste **légale**
+            et s'affiche au niveau 0 ; ses ancres sol ne polluent plus la vue étage. La phase/éligibilité
+            restent calculées sur TOUS les niveaux (ctx). Ébauche de 6c (vue mono-niveau complète différée).
+          - **Bugs 3b résolus (2026-07-08)** :
+            - **Collision cross-niveau** (une fig d'étage bloquait une destination de charge au SOL au même
+              (col,row)) → `_charge_obstacle_socles(..., level)` filtre les obstacles par niveau ; siblings
+              posés groupés par niveau (`placed_sibling_socles_by_level`) ; boucles région sol/étage +
+              `_charge_model_pos_is_closer` (`dest_level`) + `charge_preview_move_plan` (niveau dans `prov`)
+              utilisent le niveau du candidat. Deux figs à niveaux distincts ne se chevauchent plus.
+            - **Fig chargée au sol affichée à l'étage** → `perModelPlanView.models` (BoardPvp) **strippait le
+              niveau** → le rendu (`modelLevels`) retombait sur le niveau de VUE. Corrigé : la vue du plan
+              préserve le niveau par-fig (posée = niveau du plan, non posée = `level_by_model` committé).
+          - **Non-bug clarifié** : « une charge niveau 0 atteint une cible niveau 1 » est **conforme** (§03.04
+            engagement = 2" horiz ET 5" vert ; cible à 3" d'étage = <5" au-dessus du sol → engageable au sol).
+          - **Limites assumées** : collision sibling cross-niveau au sol traitée en 2D (conservateur) ; « closer »
+            d'une ancre d'étage mesuré horizontalement (`dist_tgt`, cohérent avec le sol). **FLY en hauteur
+            toujours différé** (§707, L3431 reste 2D).
+          - Validé : [scripts/charge3d_integration_test.py](file:///home/greg/40k/scripts/charge3d_integration_test.py)
+            étendu (chargeur montant → 52 ancres d'étage `level≥1` dans le pool, gate climb §13.06) + pytest
+            **1152 passed / 0 failed**. **RESTE** : validation visuelle app (`ap`) sur `scenario_floors_test`.
 
    **✅ Décisions figées (2026-07-07)** :
    - **Seuils verticaux = 5" pour les DEUX contrats** : engagement range (§03.04, conforme) ET contact
@@ -849,10 +905,13 @@ le modèle + LoS 3D est le vrai chantier.
       Non-régression pytest **entièrement rétablie** (`python3 -m pytest tests/` → **1152 passed, 2 skipped, 0 failed** ;
       dette de stubs `level`/`MODEL_HEIGHT`/`engagement_zone_vertical`/`_unit_move_version` + 7 tests obsolètes
       de la refonte advance→move réparés au passage).
-   2. ⏳ **3b — Champ climb-aware dans la charge** (destinations d'étage, chargeur qui MONTE) — **PROCHAINE ÉTAPE**.
-      Brancher `reachable_multilevel_field` ([geodesic_move.py](file:///home/greg/40k/engine/phase_handlers/geodesic_move.py))
-      dans la production des destinations de charge + `synth level = niveau destination` + `cand_floor` réel dans
-      `_eng`/`_fp_engages` + **front** (rendu par niveau, miroir move §6d/6e). Validation = app + `scenario_floors_test`.
+   2. ✅ **3b — Champ climb-aware dans la charge (chargeur qui MONTE) — FAIT & VALIDÉ (2026-07-07)** :
+      helper climb charge (`reachable_multilevel_field`, budget = jet, coût §13.06), `_compute_plan_context`
+      niveau-conscient (reach étage par-fig + `floor_region_by_base` via primitive 3D, phase inclut l'étage),
+      pool `[col,row,level]`, clip sol-only, preview/commit/`_charge_model_pos_is_closer` niveau (reachability
+      climb pour une ancre d'étage), `provisional_plan` porté, front (Map niveau + pose/commit niveau). Détail
+      complet + pièges dans la section chantier 4 ci-dessus. Validé : `scripts/charge3d_integration_test.py`
+      étendu (52 ancres d'étage) + pytest **1152 passed / 0 failed**. **RESTE** : validation visuelle app.
    3. **Clairance hauteur — reste du mouvement** (voile rouge + pool squad/IA) — *plan détaillé, à faire d'un
       seul bloc* : le move **par-figurine** et la **charge** enforcent déjà la clairance ; restent les deux
       dernières surfaces du mouvement. À traiter ensemble (même helper, même piège, périmètre « tout le

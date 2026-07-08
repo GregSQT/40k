@@ -81,8 +81,7 @@
       "models": [
         { "col": 170, "row": 240 },
         { "col": 170, "row": 250 },
-        { "col": 170, "row": 260 },
-        { "col": 170, "row": 270 }
+        { "col": 170, "row": 260 }
       ]
     },
 
@@ -96,6 +95,7 @@
     { "id": 108, "unit_type": "VonRyanLeaper",        "player": 2, "col": 25,   "row": 132 },
     { "id": 109, "unit_type": "Termagant",            "player": 2, "col": 79,   "row": 148 },
     { "id": 118, "unit_type": "Termagant",            "player": 2, "col": 171,   "row": 76 },
+    { "id": 119, "unit_type": "Termagant",            "player": 2, "col": 167,   "row": 218,  "level": 1 },
     {
       "id": 110, "unit_type": "Barbgaunt", "player": 2, "col": 44, "row": 46,
       "models": [

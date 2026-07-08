@@ -807,7 +807,7 @@ class GameStateManager:
             "col": normalize_coordinates(chosen_col, chosen_row)[0],
             "row": normalize_coordinates(chosen_col, chosen_row)[1],
             # Niveau vertical (étages, format B). 0 = rez-de-chaussée (défaut métier).
-            "level": _validate_level(full_unit_data.get("level", 0), str(unit_data["id"])),  # get allowed (champ optionnel : scénarios sans étages)
+            "level": _validate_level(unit_data.get("level", full_unit_data.get("level", 0)), str(unit_data["id"])),  # get allowed (champ optionnel : scénarios sans étages). Source = déclaration scénario (unit_data), comme orientation.
             "HP_CUR": full_unit_data["HP_MAX"],
             "HP_MAX": full_unit_data["HP_MAX"],
             "MOVE": full_unit_data["MOVE"] * scale,

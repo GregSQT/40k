@@ -606,7 +606,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
    */
   const [chargeMovePlan, setChargeMovePlan] = useState<{
     unitId: number;
-    models: Record<string, { col: number; row: number }>;
+    /** ``level`` (étages, 3b) : niveau de pose par fig (0 sol / >=1 étage), capturé au drop depuis le
+     * pool niveau-conscient et propagé au preview + commit (miroir move par-fig §6d/6e). */
+    models: Record<string, { col: number; row: number; level?: number }>;
     /** Figs non posées pouvant agir dans la phase courante (voile violet). Pool calculé à la demande. */
     eligibleModels: string[];
     unplaced: string[];
@@ -634,6 +636,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [chargeFocusMode, setChargeFocusMode] = useState<null | "offensive" | "defensive">(null);
   /** Pool (hexes "col,row") de la fig active = eligible[activeModelId]. */
   const chargeModelPoolRef = useRef<Set<string>>(new Set());
+  /** Niveau (étages, 3b) par ancre "col,row" du pool de charge de la fig active → pose au niveau réel
+   * de la destination (0 sol / >=1 étage), miroir de ``squadMoveModelLevelByKeyRef`` du move par-fig. */
+  const chargeModelLevelByKeyRef = useRef<Map<string, number>>(new Map());
   /** Distance de mouvement (sous-hex) de la fig active vers chaque ancre de son pool "col,row" →
    * path réel au sol, distance directe en vol. Source du tooltip de charge par-figurine. */
   // A SUPPRIMER : feature distance charge par-figurine jamais fonctionnelle (lecteur inatteignable, supprimé côté BoardPvp).
@@ -6061,7 +6066,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const applyChargePlanState = useCallback(
     (result: Record<string, unknown>, selectedModel: string | null) => {
       const eligibleModels = ((result.eligible_models ?? []) as unknown[]).map((m) => String(m));
-      const poolArr = (result.pool ?? []) as Array<[number, number]>;
+      // 3b : chaque ancre porte son niveau [col,row,level] (0 sol / >=1 étage). Tolère l'ancien 2-uplet.
+      const poolArr = (result.pool ?? []) as Array<[number, number, number?]>;
       const poolDistArr = (result.pool_distances ?? []) as Array<[number, number, number]>;
       const maskLoopsRaw = result.footprint_mask_loops;
       const unplaced = ((result.unplaced ?? []) as unknown[]).map((m) => String(m));
@@ -6090,10 +6096,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               ? prev.activeModelId
               : null;
         const pool = new Set<string>();
+        // 3b : niveau de pose par ancre "col,row" (0 sol / >=1 étage) → la fig se pose au niveau réel
+        // de la destination (miroir move par-fig), pas à la vue courante aveugle.
+        const levelByKey = new Map<string, number>();
         // A SUPPRIMER : distMap alimente chargeModelDistancesRef (feature charge par-fig morte).
         const distMap = new Map<string, number>();
         if (active != null && active === selectedModel) {
-          for (const [c, r] of poolArr) pool.add(`${Number(c)},${Number(r)}`);
+          for (const [c, r, lv] of poolArr) {
+            const key = `${Number(c)},${Number(r)}`;
+            pool.add(key);
+            levelByKey.set(key, Number(lv ?? 0));
+          }
           for (const e of poolDistArr) {
             if (Array.isArray(e) && e.length >= 3) {
               distMap.set(`${Number(e[0])},${Number(e[1])}`, Number(e[2]));
@@ -6101,6 +6114,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           }
         }
         chargeModelPoolRef.current = pool;
+        chargeModelLevelByKeyRef.current = levelByKey;
         chargeModelDistancesRef.current = distMap;
         // Mask loops valides uniquement pour la fig active sélectionnée (le backend ne les calcule
         // que pour son pool). Sinon null → pas de rendu lissé fantôme d'une autre fig.
@@ -6132,10 +6146,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const refreshChargePlanState = useCallback(
     async (
       unitId: number,
-      models: Record<string, { col: number; row: number }>,
+      models: Record<string, { col: number; row: number; level?: number }>,
       selectedModel: string | null = null
     ) => {
-      const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row]);
+      // 3b : le niveau de pose par fig voyage jusqu'au backend (satisfaction/engagement 3D des figs
+      // posées à l'étage). Sol (level 0) → 3-uplet historique ; étage → 4-uplet.
+      const plan = Object.entries(models).map(([mid, p]) =>
+        (p.level ?? 0) >= 1 ? [mid, p.col, p.row, p.level] : [mid, p.col, p.row]
+      );
       const action: Record<string, unknown> = {
         action: "charge_plan_state",
         unitId: String(unitId),
@@ -6302,11 +6320,20 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleMoveModelInChargePlan = useCallback(
     (modelId: string, col: number, row: number) => {
       if (!chargeModelPoolRef.current.has(`${col},${row}`)) return;
+      // 3b : niveau de pose = niveau EFFECTIF de la case dans le pool (§13.06), pas la vue courante.
+      // La destination vient TOUJOURS du pool → clé présente ; sinon incohérence = erreur explicite.
+      const placedLevel = chargeModelLevelByKeyRef.current.get(`${col},${row}`);
+      if (placedLevel === undefined) {
+        throw new Error(
+          `handleMoveModelInChargePlan: destination (${col},${row}) absente du pool niveau-conscient`
+        );
+      }
       chargeModelPoolRef.current = new Set();
+      chargeModelLevelByKeyRef.current = new Map();
       chargeModelMaskLoopsRef.current = null;
       setChargeMovePlan((prev) => {
         if (!prev) return prev;
-        const models = { ...prev.models, [modelId]: { col, row } };
+        const models = { ...prev.models, [modelId]: { col, row, level: placedLevel } };
         // Pose → fig désélectionnée ; refresh sans selected (juste le voile des figs restantes).
         void refreshChargePlanState(prev.unitId, models, null);
         return { ...prev, models, activeModelId: null };
@@ -6334,7 +6361,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleCommitChargePlan = useCallback(async () => {
     const plan = chargeMovePlanRef.current;
     if (!plan?.canValidate) return;
-    const planArr = Object.entries(plan.models).map(([mid, p]) => [mid, p.col, p.row]);
+    // 3b : le niveau de pose par fig est committé (une fig peut finir à l'étage). Sol → 3-uplet.
+    const planArr = Object.entries(plan.models).map(([mid, p]) =>
+      (p.level ?? 0) >= 1 ? [mid, p.col, p.row, p.level] : [mid, p.col, p.row]
+    );
     try {
       await executeAction({
         action: "commit_charge_plan",

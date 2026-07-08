@@ -1345,9 +1345,11 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
 
     elif action_type == "charge_plan_state":
         # V11 PvP (lecture pure) : phase courante + pools éligibles par fig pour le plan provisoire.
-        prov: Dict[str, Tuple[int, int]] = {}
+        prov: Dict[str, Tuple[int, ...]] = {}
         for entry in (action.get("plan") or []):
-            prov[str(entry[0])] = (int(entry[1]), int(entry[2]))
+            # 3b : le plan porte un niveau optionnel par fig ([mid,col,row] ou [mid,col,row,level]).
+            _lv_e = int(entry[3]) if len(entry) >= 4 and entry[3] is not None else 0
+            prov[str(entry[0])] = (int(entry[1]), int(entry[2]), _lv_e)
         sel = action.get("selected_model")
         _lvl = action.get("level")
         state = charge_model_plan_state(
@@ -1572,7 +1574,9 @@ def _ai_select_charge_target_pve(game_state: Dict[str, Any], unit: Dict[str, Any
     return best_target
 
 
-def _charge_obstacle_socles(game_state: Dict[str, Any], exclude_unit_id: str) -> List[Any]:
+def _charge_obstacle_socles(
+    game_state: Dict[str, Any], exclude_unit_id: str, level: Optional[int] = None
+) -> List[Any]:
     """Socles obstacles PAR FIGURINE (``models_cache`` hors squad chargeur), construits UNE fois.
 
     Un socle par figurine (pas par unité) : pour une paire ronde↔ronde, ``footprints_overlap``
@@ -1580,12 +1584,18 @@ def _charge_obstacle_socles(game_state: Dict[str, Any], exclude_unit_id: str) ->
     autres figs de l'escouade sans collision. On émet une figurine = un socle via
     ``_charge_model_socle`` (base propre à chaque fig, comme les ``sibling_socles``).
 
+    ``level`` (étages, 3b) : si fourni, ne retient que les figs à CE niveau. Deux figs à des niveaux
+    différents ne se chevauchent PAS physiquement (l'une au-dessus de l'autre) → une destination de
+    charge au sol (level 0) ne doit pas être bloquée par une fig à l'étage, et réciproquement.
+
     Perf : évite de reconstruire les socles voisins à chaque cellule candidate dans les BFS de pool.
     """
     models_cache = require_key(game_state, "models_cache")
     out: List[Any] = []
     for entry in models_cache.values():
         if str(entry["squad_id"]) == str(exclude_unit_id):
+            continue
+        if level is not None and int(entry.get("level", 0)) != int(level):  # get allowed (sol par défaut)
             continue
         out.append(_charge_model_socle(game_state, entry, int(entry["col"]), int(entry["row"])))
     return out
@@ -1775,32 +1785,142 @@ def _charge_qualifying(
     base_of_model: Dict[str, Any],
     model_id: str,
     key: str,
+    floor_reach_by_model: Optional[Dict[str, List[Tuple[int, int]]]] = None,
+    floor_region_by_base: Optional[Dict[Any, Dict[Tuple[int, int], Dict[str, Any]]]] = None,
+    view_level: int = 0,
 ) -> List[List[int]]:
-    """Hexes de ``model_id`` qualifiant ``key`` (within_1 / engaged / closer) : reach ∩ region,
+    """Ancres de ``model_id`` qualifiant ``key`` (within_1 / engaged / closer) : reach ∩ region,
     plus proche que son départ, sans chevaucher une coéquipière encore à l'origine. Lit uniquement
-    les structures du contexte mémoïsé (aucun calcul lourd) → utilisable sur cache hit."""
+    les structures du contexte mémoïsé (aucun calcul lourd) → utilisable sur cache hit.
+
+    Retour : ``[col, row, level]`` par ancre. Le SOL (``level=0``, reach/region historiques) est
+    inchangé ; l'ÉTAGE (``view_level >= 1``, structures ``floor_*`` — 3b, chargeur qui MONTE) est
+    ajouté de façon additive : ``None``/vide → sortie byte-identique au 2D."""
     out: List[List[int]] = []
-    reach = reach_by_model.get(model_id)
-    if not reach:
-        return out
     start_min = start_min_by_model.get(model_id)
     if start_min is None:
         return out
     others = other_origins_by_model.get(model_id, set())
-    reg_m = region_by_base.get(base_of_model.get(model_id), {})  # get allowed
-    for h in reach:
-        rg = reg_m.get(h)
-        if rg is None:
+    bk = base_of_model.get(model_id)  # get allowed
+
+    def _emit(reach: Optional[List[Tuple[int, int]]],
+              reg_m: Dict[Tuple[int, int], Dict[str, Any]], lvl: int) -> None:
+        if not reach:
+            return
+        for h in reach:
+            rg = reg_m.get(h)
+            if rg is None:
+                continue
+            if rg["d_min"] >= start_min:
+                continue
+            if others and (rg["fp"] & others):
+                continue
+            if key == "within_1" and not rg["within_1"]:
+                continue
+            if key == "engaged" and not rg["engaged"]:
+                continue
+            out.append([h[0], h[1], lvl])
+
+    _emit(reach_by_model.get(model_id), region_by_base.get(bk, {}), 0)
+    if floor_reach_by_model is not None and floor_region_by_base is not None and view_level >= 1:
+        _emit(floor_reach_by_model.get(model_id), floor_region_by_base.get(bk, {}), view_level)
+    return out
+
+
+def _charge_model_climb_reachable_floor_cells(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    squad_id: str,
+    model: Dict[str, Any],
+    start_pos: Tuple[int, int],
+    budget_subhex: int,
+    view_level: int,
+    ground_obstacles: Set[Tuple[int, int]],
+    terrain_areas: List[Dict[str, Any]],
+) -> Dict[Tuple[int, int], int]:
+    """Cases de l'étage ``view_level`` réellement atteignables par la figurine de charge, coût de
+    montée/descente §13.06 **soustrait du budget** (jet 2D6 en sous-hex). Empreinte entière sur le
+    plancher, hors mur et hors figurine de l'étage.
+
+    Miroir EXACT de ``movement_handlers._model_climb_reachable_floor_cells`` (source unique du coût
+    vertical : ``reachable_multilevel_field``) ; seule différence = le budget est le jet de charge et
+    les obstacles au sol sont ceux de la charge (murs + ennemis + clairance ; les amies sont
+    traversables → jamais dans ``ground_obstacles``). À n'appeler qu'en euclidien, hors FLY, pour une
+    unité capable de finir en hauteur (garanti par l'appelant).
+
+    Retour : ``{(col, row): distance_subhex}`` (distance = coût géodésique montée incluse), vide si
+    aucune case atteignable."""
+    from engine.terrain_utils import floor_hexes_at_level, validate_floor_placement
+    from engine.hex_utils import (
+        get_neighbors, precompute_footprint_offsets, ENGAGEMENT_NORM_HEX_WIDTH,
+    )
+    from engine.phase_handlers.geodesic_move import reachable_multilevel_field
+    from engine.phase_handlers.shared_utils import build_occupied_positions_set
+    from engine.game_state import unit_can_occupy_upper_floor
+
+    if not unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS")):
+        return {}
+    board_cols = int(require_key(game_state, "board_cols"))
+    board_rows = int(require_key(game_state, "board_rows"))
+    walls = set(game_state.get("wall_hexes", set()))  # get allowed
+    inches_to_subhex = int(require_key(game_state, "inches_to_subhex"))
+
+    present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})  # get allowed
+    if view_level not in present:
+        return {}
+    floor_hexes_by_level = {lv: floor_hexes_at_level(terrain_areas, lv) for lv in present}
+    height_by_level: Dict[int, float] = {0: 0.0}
+    for a in terrain_areas:
+        for fl in a.get("floors", []):  # get allowed
+            lv = int(fl["level"])
+            hn = float(fl["height_inches"]) * inches_to_subhex * ENGAGEMENT_NORM_HEX_WIDTH
+            if lv in height_by_level and abs(height_by_level[lv] - hn) > 1e-6:
+                raise ValueError(
+                    f"_charge_model_climb_reachable_floor_cells: niveau {lv} avec hauteurs incohérentes "
+                    f"entre ruines ({height_by_level[lv]:.3f} vs {hn:.3f}) — non supporté"
+                )
+            height_by_level[lv] = hn
+
+    obstacles_by_level: Dict[int, Set[Tuple[int, int]]] = {0: set(ground_obstacles)}
+    occupied_by_level: Dict[int, Set[Tuple[int, int]]] = {}
+    for lv, fh in floor_hexes_by_level.items():
+        figs = build_occupied_positions_set(game_state, exclude_unit_id=squad_id, level=lv)
+        occupied_by_level[lv] = figs
+        ring = {nb for cell in fh for nb in get_neighbors(cell[0], cell[1]) if nb not in fh}
+        obstacles_by_level[lv] = ring | walls | figs
+
+    shape = require_key(model, "BASE_SHAPE")
+    base = require_key(model, "BASE_SIZE")
+    orientation = int(unit.get("orientation", 0))  # get allowed
+    if shape == "round":
+        off_even: Tuple[Tuple[int, int], ...] = ()
+        off_odd: Tuple[Tuple[int, int], ...] = ()
+    else:
+        off_even, off_odd = precompute_footprint_offsets(shape, base, orientation)
+
+    field = reachable_multilevel_field(
+        (int(start_pos[0]), int(start_pos[1])), 0, shape, base, off_even, off_odd,
+        board_cols, board_rows, obstacles_by_level, floor_hexes_by_level, height_by_level,
+        int(budget_subhex) * ENGAGEMENT_NORM_HEX_WIDTH, allow_vertical=True, ignore_vertical_cost=False,
+    )
+
+    stub = {
+        "id": squad_id,
+        "UNIT_KEYWORDS": require_key(unit, "UNIT_KEYWORDS"),
+        "BASE_SHAPE": shape,
+        "BASE_SIZE": base,
+        "orientation": orientation,
+    }
+    occ_view = occupied_by_level.get(view_level, set())
+    out: Dict[Tuple[int, int], int] = {}
+    for (c, r, lv), dist_norm in field.items():
+        if lv != view_level or (c, r) == (int(start_pos[0]), int(start_pos[1])):
             continue
-        if rg["d_min"] >= start_min:
+        if (c, r) in walls or (c, r) in occ_view:
             continue
-        if others and (rg["fp"] & others):
-            continue
-        if key == "within_1" and not rg["within_1"]:
-            continue
-        if key == "engaged" and not rg["engaged"]:
-            continue
-        out.append([h[0], h[1]])
+        ok, _ = validate_floor_placement(stub, c, r, lv, terrain_areas)
+        if ok:
+            out[(c, r)] = int(round(dist_norm / ENGAGEMENT_NORM_HEX_WIDTH))
     return out
 
 
@@ -1808,11 +1928,12 @@ def _compute_plan_context(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
     unit_id: str,
-    provisional_plan: Dict[str, Tuple[int, int]],
+    provisional_plan: Dict[str, Tuple[int, ...]],
     target_ids: List[Any],
     roll_subhex: int,
     fly_active: bool,
     _perf: bool,
+    view_level: int = 0,
 ) -> Dict[str, Any]:
     """Calcul lourd PLAN-dépendant (indépendant de ``selected_model``) → mis en cache.
 
@@ -1869,12 +1990,17 @@ def _compute_plan_context(
 
     # Coéquipières PAR-FIGURINE (chaque fig a sa base) : posées (plan) = bloquage stable ; non posées
     # = bloquage à l'origine (la fig mobile retire le sien dans _qualifying).
-    placed_sibling_socles: List[Any] = []
-    for _mid, (_pc, _pr) in provisional_plan.items():
+    # Groupées PAR NIVEAU (3b) : une coéquipière posée à l'étage ne bloque pas une destination au sol
+    # au même (col,row), et réciproquement (figs à niveaux distincts = pas de chevauchement physique).
+    placed_sibling_socles_by_level: Dict[int, List[Any]] = {}
+    for _mid, _pp in provisional_plan.items():
         _sib = models_cache.get(str(_mid))
         if _sib is None:
             continue
-        placed_sibling_socles.append(_charge_model_socle(game_state, _sib, int(_pc), int(_pr)))
+        _plvl = int(_pp[2]) if len(_pp) >= 3 else 0
+        placed_sibling_socles_by_level.setdefault(_plvl, []).append(
+            _charge_model_socle(game_state, _sib, int(_pp[0]), int(_pp[1]))
+        )
     origin_fp: Dict[str, Set[Tuple[int, int]]] = {}
     for m in unplaced:
         sib = models_cache.get(str(m))
@@ -2076,7 +2202,10 @@ def _compute_plan_context(
     region_by_base: Dict[Tuple[Any, Any, int], Dict[Tuple[int, int], Dict[str, Any]]] = {}
     _tr = time.perf_counter() if _perf else None
     if can_classify:
-        obstacle_socles = _charge_obstacle_socles(game_state, unit_id)
+        # Obstacles (autres unités) AU SOL (level 0) pour la classification des ancres sol : une fig
+        # ennemie/amie à l'étage ne bloque pas une destination de charge au sol (3b, cross-niveau).
+        obstacle_socles = _charge_obstacle_socles(game_state, unit_id, level=0)
+        placed_sibling_socles = placed_sibling_socles_by_level.get(0, [])
         _walls = set(wall_hexes)
         synth_base = dict(require_key(units_cache, str(require_key(unit, "id"))))
         synth_base.pop("occupied_hexes_by_model", None)
@@ -2202,13 +2331,89 @@ def _compute_plan_context(
     if _perf and _tr is not None:
         _acc_region += time.perf_counter() - _tr
 
+    # --- Destinations d'ÉTAGE (§13.06 — 3b, chargeur qui MONTE) : additif, seulement en vue étage ------
+    # Le champ climb-aware (``reachable_multilevel_field``, coût de montée soustrait du jet 2D6) produit
+    # les ancres ``level >= 1`` PAR-FIGURINE (start-dépendant, comme le move par-fig §6e). La
+    # classification passe par la primitive 3D directe (synth au niveau RÉEL de la destination →
+    # ``cand_floor`` = hauteur du plancher, plus le ``0.0`` hardcodé de la branche sol). Tout au sol /
+    # vue niveau 0 / unité non-montante / métrique hex / FLY → structures vides → sortie byte-identique 2D.
+    floor_reach_by_model: Dict[str, List[Tuple[int, int]]] = {}
+    floor_dist_by_model: Dict[str, Dict[Tuple[int, int], int]] = {}
+    floor_region_by_base: Dict[Tuple[Any, Any, int], Dict[Tuple[int, int], Dict[str, Any]]] = {}
+    if int(view_level) >= 1 and _cm_use_eucl and not fly_active and can_classify:
+        from engine.terrain_utils import low_clearance_ground_hexes
+        terrain_areas = game_state.get("terrain_areas", [])  # get allowed
+        _ground_obs = (
+            set(wall_hexes) | enemy_occupied
+            | low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
+        )
+        for m in unplaced:
+            sib = models_cache.get(str(m))
+            if sib is None:
+                continue
+            fdist = _charge_model_climb_reachable_floor_cells(
+                game_state, unit, str(unit_id), sib,
+                (int(sib["col"]), int(sib["row"])), int(budget), int(view_level),
+                _ground_obs, terrain_areas,
+            )
+            if fdist:
+                floor_reach_by_model[m] = list(fdist.keys())
+                floor_dist_by_model[m] = fdist
+        # Classification PAR BASE des cellules d'étage (union des reach de la base). ``d_min`` reste la
+        # distance HORIZONTALE à la cible (dist_tgt, cohérente avec le « closer » 2D du sol) ; le gate
+        # vertical est porté par la primitive 3D via le synth au niveau réel.
+        if floor_reach_by_model:
+            # Collision niveau-conscient (3b) : à l'étage, seuls les obstacles/coéquipières DU MÊME
+            # niveau bloquent (une fig au sol ne gêne pas une destination d'étage).
+            _obstacle_socles_floor = _charge_obstacle_socles(game_state, unit_id, level=int(view_level))
+            _placed_siblings_floor = placed_sibling_socles_by_level.get(int(view_level), [])
+            floor_cells_by_base: Dict[Tuple[Any, Any, int], Set[Tuple[int, int]]] = {}
+            rep_by_base: Dict[Tuple[Any, Any, int], Dict[str, Any]] = {}
+            for m, cells in floor_reach_by_model.items():
+                bk = base_of_model.get(m)
+                if bk is None:
+                    continue
+                floor_cells_by_base.setdefault(bk, set()).update(cells)
+                rep_by_base.setdefault(bk, models_cache[str(m)])
+            for bk, cells in floor_cells_by_base.items():
+                rep_model = rep_by_base[bk]
+                reg_f: Dict[Tuple[int, int], Dict[str, Any]] = {}
+                for (cc, rr) in cells:
+                    cand_socle = _charge_model_socle(game_state, rep_model, cc, rr)
+                    cand_fp = cand_socle.fp
+                    if _charge_model_placement_overlaps(
+                        cand_socle, _obstacle_socles_floor, _placed_siblings_floor, set(wall_hexes)
+                    ):
+                        continue
+                    synth = _synth_model_entry(
+                        game_state, str(unit_id), rep_model, cc, rr, level=int(view_level)
+                    )
+                    # AFTER MOVING : aucun engagement avec un ennemi NON déclaré (3D).
+                    if any(
+                        unit_entries_within_engagement_zone(synth, ne, ez, vertical_zone_inches=_vz)
+                        for ne in nontarget_entries
+                    ):
+                        continue
+                    d_min = min((dist_tgt.get(h, INF) for h in cand_fp), default=INF)
+                    engaged_f = any(
+                        unit_entries_within_engagement_zone(synth, te, ez, vertical_zone_inches=_vz)
+                        for te in target_entries
+                    )
+                    within1_f = any(
+                        unit_entries_within_engagement_zone(synth, te, within_1_zone, vertical_zone_inches=_vz)
+                        for te in target_entries
+                    )
+                    reg_f[(cc, rr)] = {"fp": cand_fp, "d_min": d_min, "within_1": within1_f, "engaged": engaged_f}
+                floor_region_by_base[bk] = reg_f
+
     def _qual(m: str, k: str) -> List[List[int]]:
         return _charge_qualifying(
             reach_by_model, start_min_by_model, other_origins_by_model,
             region_by_base, base_of_model, m, k,
+            floor_reach_by_model, floor_region_by_base, int(view_level),
         )
 
-    # Phase courante = la plus serrée réalisable par une fig non posée.
+    # Phase courante = la plus serrée réalisable par une fig non posée (sol OU étage).
     has_within1 = any(_qual(m, "within_1") for m in reach_by_model)
     if has_within1:
         phase, key = 1, "within_1"
@@ -2224,7 +2429,11 @@ def _compute_plan_context(
     coherency_ok = True
     missing_targets: List[str] = []
     if not unplaced and alive:
-        full_plan = [(str(m), int(provisional_plan[m][0]), int(provisional_plan[m][1])) for m in alive]
+        full_plan = [
+            (str(m), int(provisional_plan[m][0]), int(provisional_plan[m][1]),
+             int(provisional_plan[m][2]) if len(provisional_plan[m]) >= 3 else 0)
+            for m in alive
+        ]
         _prev = charge_preview_move_plan(game_state, str(unit_id), full_plan, target_ids)
         can_validate = _prev["can_validate"]
         preview_per_model = _prev["per_model"]
@@ -2235,12 +2444,14 @@ def _compute_plan_context(
     # ≤EZ d'elle (03.04, engagement au niveau unité). violet = satisfaite, rouge = pas.
     vz = _charge_vertical_zone(game_state)  # engagement 3D (§03.04) — cible en hauteur
     placed_synths: List[Tuple[str, Dict[str, Any]]] = []
-    for _mid, (_c, _r) in provisional_plan.items():
+    for _mid, _pp in provisional_plan.items():
         _sib = models_cache.get(str(_mid))
         if _sib is None:
             continue
+        # 3b : la fig posée peut être à l'étage → synth au niveau RÉEL du plan (satisfaction 3D).
+        _plvl = int(_pp[2]) if len(_pp) >= 3 else 0
         placed_synths.append(
-            (str(_mid), _synth_model_entry(game_state, str(unit["id"]), _sib, int(_c), int(_r), level=0))
+            (str(_mid), _synth_model_entry(game_state, str(unit["id"]), _sib, int(_pp[0]), int(_pp[1]), level=_plvl))
         )
     target_entries = [
         units_cache.get(str(t)) for t in target_ids if units_cache.get(str(t)) is not None
@@ -2269,6 +2480,10 @@ def _compute_plan_context(
         "start_min_by_model": start_min_by_model,
         "other_origins_by_model": other_origins_by_model,
         "region_by_base": region_by_base,
+        "floor_reach_by_model": floor_reach_by_model,
+        "floor_dist_by_model": floor_dist_by_model,
+        "floor_region_by_base": floor_region_by_base,
+        "view_level": int(view_level),
         "base_of_model": base_of_model,
         "key": key,
         "phase": phase,
@@ -2316,16 +2531,23 @@ def _charge_pool_clip_under_floor(
     orientation = int(model.get("orientation", 0))  # get allowed
     floor_hexes = floor_hexes_at_level(terrain_areas, view_level)
     out: List[List[int]] = []
-    for c, r in pool:
+    for entry in pool:
+        c, r = int(entry[0]), int(entry[1])
+        lv = int(entry[2]) if len(entry) >= 3 else 0
+        # 3b : les ancres d'ÉTAGE (level>=1) sont sur le plancher → jamais clippées (le clip ne vise que
+        # le SOL qui déborderait sous le bâtiment). Passe-plat en préservant le niveau.
+        if lv >= 1:
+            out.append([c, r, lv])
+            continue
         if shape == "round":
-            cx, cy = _hex_center(int(c), int(r))
+            cx, cy = _hex_center(c, r)
             rad = round_base_radius_norm(base)
             if any(disc_overlaps_polygon(cx, cy, rad, poly) for poly in polys):
                 continue
         else:
-            if set(compute_occupied_hexes(int(c), int(r), shape, base, orientation)) & floor_hexes:
+            if set(compute_occupied_hexes(c, r, shape, base, orientation)) & floor_hexes:
                 continue
-        out.append([c, r])
+        out.append([c, r, lv])
     return out
 
 
@@ -2389,6 +2611,8 @@ def charge_model_plan_state(
     # Mémoïsation (Tâche 1) : signature capturant TOUT ce qui influe sur le ctx. ``_unit_move_version``
     # est incrémenté à chaque commit move/charge → invalidation auto au moindre déplacement. La sig est
     # comparée par égalité (pas de hash requis) ; en cas de doute on invalide plutôt que servir obsolète.
+    # ``int(level)`` (niveau de VUE) est dans la sig : le ctx est désormais niveau-conscient (destinations
+    # d'étage 3b) → un changement d'étage recalcule le ctx (rare : clic sur le bouton d'étage).
     sig = (
         str(unit_id),
         tuple(sorted(provisional_plan.items())),
@@ -2396,6 +2620,7 @@ def charge_model_plan_state(
         bool(fly_active),
         _charge_roll,
         tuple(sorted(map(str, target_ids))),
+        int(level),
     )
     _cache = game_state.get("_charge_plan_state_cache")
     if _cache is not None and _cache.get("sig") == sig:
@@ -2403,7 +2628,8 @@ def charge_model_plan_state(
         _cache_hit = 1
     else:
         ctx = _compute_plan_context(
-            game_state, unit, unit_id, provisional_plan, target_ids, roll_subhex, fly_active, _perf
+            game_state, unit, unit_id, provisional_plan, target_ids, roll_subhex, fly_active, _perf,
+            view_level=int(level),
         )
         game_state["_charge_plan_state_cache"] = {"sig": sig, "ctx": ctx}
         _cache_hit = 0
@@ -2413,6 +2639,9 @@ def charge_model_plan_state(
     start_min_by_model = ctx["start_min_by_model"]
     other_origins_by_model = ctx["other_origins_by_model"]
     region_by_base = ctx["region_by_base"]
+    floor_reach_by_model = ctx["floor_reach_by_model"]
+    floor_dist_by_model = ctx["floor_dist_by_model"]
+    floor_region_by_base = ctx["floor_region_by_base"]
     base_of_model = ctx["base_of_model"]
     key = ctx["key"]
     phase = ctx["phase"]
@@ -2428,32 +2657,43 @@ def charge_model_plan_state(
 
     # Partie SÉLECTION-dépendante (cheap) : pool de la fig sélectionnée (zone violette).
     _tsel = time.perf_counter() if _perf else None
+    # Pool = ancres [col, row, level] (sol level 0 + étage level>=1, 3b). Additif : sans étage → level 0.
     pool: List[List[int]] = (
         _charge_qualifying(
             reach_by_model, start_min_by_model, other_origins_by_model,
             region_by_base, base_of_model, str(selected_model), key,
+            floor_reach_by_model, floor_region_by_base, int(level),
         )
         if selected_model is not None and str(selected_model) in reach_by_model
         else []
     )
     # Vue sur un étage : le pool de charge AU SOL ne doit pas recouvrir le dessous du bâtiment (miroir
-    # move §13.06). On retire les ancres dont le socle de la fig sélectionnée chevauche l'empreinte de
-    # l'étage. pool_distances / footprint_mask_loops dérivent de ``pool`` → filtrés automatiquement.
+    # move §13.06). Le clip ne retire QUE les ancres sol (level 0) sous l'empreinte ; les ancres d'étage
+    # (level>=1, 3b) sont conservées. pool_distances / footprint_mask_loops dérivent de ``pool``.
     if int(level) >= 1 and pool and selected_model is not None:
         pool = _charge_pool_clip_under_floor(game_state, str(selected_model), int(level), pool)
-    # Distance de mouvement (sous-hex) de la fig sélectionnée vers chaque ancre du pool : profondeur
-    # BFS = path réel au sol (détours murs/figs), distance directe en vol. Source du tooltip charge
-    # par-figurine (au lieu de la ligne droite qui sous-estime les détours).
+    # Vue MONO-NIVEAU (clarté, ébauche de 6c) : n'AFFICHER que les ancres du niveau de VUE courant. Une
+    # charge qui finit au SOL en engageant une cible surélevée (3a, §03.04 : engagement 3D ≤5" vertical)
+    # est LÉGALE, mais ses ancres sol n'ont de sens qu'en vue sol → elles s'affichent au niveau 0, pas
+    # mélangées à l'étage. La phase/éligibilité (ctx) restent calculées sur TOUS les niveaux (inchangé).
+    pool = [a for a in pool if int(a[2]) == int(level)]
+    # Distance de mouvement (sous-hex) de la fig sélectionnée vers chaque ancre : sol = profondeur du
+    # champ géodésique (détours murs/figs) ; étage = coût climb (montée §13.06 incluse, floor_dist).
     _sel_dist = (
         (dist_by_model[str(selected_model)] if str(selected_model) in dist_by_model else {})
         if selected_model is not None
         else {}
     )
-    pool_distances: List[List[int]] = [
-        [int(c), int(r), int(_sel_dist[(int(c), int(r))])]
-        for (c, r) in pool
-        if (int(c), int(r)) in _sel_dist
-    ]
+    _sel_fdist = (
+        (floor_dist_by_model[str(selected_model)] if str(selected_model) in floor_dist_by_model else {})
+        if selected_model is not None
+        else {}
+    )
+    pool_distances: List[List[int]] = []
+    for c, r, lv in pool:
+        _d = _sel_fdist.get((int(c), int(r))) if int(lv) >= 1 else _sel_dist.get((int(c), int(r)))
+        if _d is not None:
+            pool_distances.append([int(c), int(r), int(_d)])
 
     # Empreinte lissée de la zone de landing (même rendu que le move per-fig) : union des empreintes
     # (region[ancre]["fp"]) des ancres du pool → boucles monde via le helper move. Calculé seulement
@@ -2462,10 +2702,12 @@ def charge_model_plan_state(
     footprint_mask_loops: List[List[List[float]]] = []
     if pool:
         from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
-        _sel_region = region_by_base.get(base_of_model.get(str(selected_model)), {}) if selected_model is not None else {}  # get allowed
+        _bk_sel = base_of_model.get(str(selected_model)) if selected_model is not None else None
+        _sel_region = region_by_base.get(_bk_sel, {})  # get allowed
+        _sel_fregion = floor_region_by_base.get(_bk_sel, {})  # get allowed
         fp_zone: Set[Tuple[int, int]] = set()
-        for _c, _r in pool:
-            rg = _sel_region.get((int(_c), int(_r)))
+        for _c, _r, _lv in pool:
+            rg = (_sel_fregion if int(_lv) >= 1 else _sel_region).get((int(_c), int(_r)))
             if rg is not None:
                 fp_zone |= rg["fp"]
         loops = compute_move_preview_mask_loops_world(fp_zone, game_state)
@@ -4322,12 +4564,16 @@ def _charge_model_pos_is_closer(
     dest_r: int,
     target_ids: List[str],
     roll_subhex: int,
-    provisional_plan: Dict[str, Tuple[int, int]],
+    provisional_plan: Dict[str, Tuple[int, ...]],
+    dest_level: int = 0,
 ) -> bool:
-    """Légalité d'UNE position (c,r) pour la fig ``model_id`` (membre "closer" du pool Slice E), sans
-    construire le pool complet : BFS reachability avec early-exit sur ``dest`` + classification du
-    seul hex final. Mêmes contraintes que ``charge_build_model_destinations_pool`` (budget, pas de
-    traversée mur/fig, finit plus proche, n'engage aucun non-cible)."""
+    """Légalité d'UNE position (c,r,level) pour la fig ``model_id`` (membre "closer" du pool), sans
+    construire le pool complet : reachability avec early-exit sur ``dest`` + classification du seul
+    hex final. Mêmes contraintes que le pool (budget, pas de traversée mur/fig, finit plus proche,
+    n'engage aucun non-cible).
+
+    3b : ``dest_level >= 1`` → reachability par le champ climb (coût de montée §13.06 soustrait du jet)
+    au lieu du BFS 2D (qui ignorerait le coût vertical) ; synth au niveau réel (engagement 3D)."""
     from collections import deque
     from engine.hex_utils import min_distance_between_sets
     from engine.spatial_relations import unit_entries_within_engagement_zone
@@ -4367,6 +4613,8 @@ def _charge_model_pos_is_closer(
 
     # Géométrie PAR-FIGURINE : la fig mobile et chaque coéquipière utilisent LEUR propre base
     # (models_cache), pas celle de l'unité (cf. personnage attaché à plus grande base).
+    # 3b : collision niveau-consciente — seules les coéquipières AU MÊME niveau que la destination
+    # bloquent (une sœur à l'étage ne gêne pas une fin de charge au sol, et réciproquement).
     sibling_socles: List[Any] = []
     squad_models = require_key(game_state, "squad_models")
     for mid in require_key(squad_models, squad_id):
@@ -4376,9 +4624,14 @@ def _charge_model_pos_is_closer(
         if sib is None:
             continue
         if provisional_plan and str(mid) in provisional_plan:
-            pc, pr = provisional_plan[str(mid)]
+            _pp = provisional_plan[str(mid)]
+            pc, pr = int(_pp[0]), int(_pp[1])
+            sib_lvl = int(_pp[2]) if len(_pp) >= 3 else 0
         else:
             pc, pr = int(sib["col"]), int(sib["row"])
+            sib_lvl = int(sib.get("level", 0))  # get allowed (sol par défaut)
+        if sib_lvl != int(dest_level):
+            continue
         sibling_socles.append(_charge_model_socle(game_state, sib, int(pc), int(pr)))
     # 03.01 : déplacement À TRAVERS les figs amies autorisé, PAS à travers les ennemies ni les murs.
     path_blocked = set(wall_hexes) | enemy_occupied
@@ -4392,8 +4645,24 @@ def _charge_model_pos_is_closer(
     start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
     dest = (int(dest_c), int(dest_r))
 
-    # Reachability BFS (centre-à-centre, traverse les amies, pas mur/ennemi sauf vol actif), early-exit dest.
-    if dest != (start_col, start_row):
+    if int(dest_level) >= 1:
+        # 3b : destination À L'ÉTAGE → reachability par le champ climb (coût de montée §13.06 imputé au
+        # jet 2D6), pas le BFS 2D qui ignorerait le vertical. La fig doit apparaître dans les cases
+        # d'étage atteignables. Obstacles sol = murs + ennemis + clairance (amies traversables).
+        from engine.terrain_utils import low_clearance_ground_hexes
+        _terrain_areas = game_state.get("terrain_areas", [])  # get allowed
+        _ground_obs = (
+            set(wall_hexes) | enemy_occupied
+            | low_clearance_ground_hexes(_terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
+        )
+        _fcells = _charge_model_climb_reachable_floor_cells(
+            game_state, unit, squad_id, model, (start_col, start_row), int(budget),
+            int(dest_level), _ground_obs, _terrain_areas,
+        )
+        if dest not in _fcells:
+            return False
+    elif dest != (start_col, start_row):
+        # Reachability BFS 2D (centre-à-centre, traverse les amies, pas mur/ennemi sauf vol actif), early-exit dest.
         visited: Set[Tuple[int, int]] = {(start_col, start_row)}
         queue: deque = deque([(start_col, start_row, 0)])
         found = False
@@ -4419,13 +4688,14 @@ def _charge_model_pos_is_closer(
     cand_fp = cand_socle.fp
     if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
         return False
-    obstacle_socles = _charge_obstacle_socles(game_state, squad_id)
+    obstacle_socles = _charge_obstacle_socles(game_state, squad_id, level=int(dest_level))
     if _charge_model_placement_overlaps(cand_socle, obstacle_socles, sibling_socles, set(wall_hexes)):
         return False
     d_min = min(min_distance_between_sets(cand_fp, tfp, max_distance=start_min) for tfp in target_fps)
     if d_min >= start_min:
         return False
-    synth = _charge_synthetic_charger_cache_entry(game_state, unit, dest[0], dest[1], cand_fp, level=0)  # 3a sol
+    # 3b : synth au niveau RÉEL de la destination (engagement 3D en montant ; sol = level 0, comme 3a).
+    synth = _charge_synthetic_charger_cache_entry(game_state, unit, dest[0], dest[1], cand_fp, level=int(dest_level))
     _vz = _charge_vertical_zone(game_state)
     if any(unit_entries_within_engagement_zone(synth, ne, ez, vertical_zone_inches=_vz) for ne in nontarget_entries):
         return False
@@ -4465,7 +4735,12 @@ def charge_preview_move_plan(
     }
     if not unit:
         return empty
-    norm = [(str(m), int(c), int(r)) for m, c, r in plan]
+    # 3b : entrée [mid,col,row] (sol) OU [mid,col,row,level]. Le niveau conditionne la reachability
+    # (champ climb, coût de montée §13.06) et l'engagement 3D du synth au niveau réel de la destination.
+    norm = [
+        (str(e[0]), int(e[1]), int(e[2]), int(e[3]) if len(e) >= 4 and e[3] is not None else 0)
+        for e in plan
+    ]
     n = len(norm)
     if n == 0:
         return empty
@@ -4477,19 +4752,21 @@ def charge_preview_move_plan(
 
     # 1) Légalité per-fig = appartenance au pool Slice E (budget + traversée + closer + no-non-cible),
     #    les autres figs du plan servant de positions provisoires (collision intra-squad).
-    pos_by_model = {mid: (c, r) for mid, c, r in norm}
+    # 3b : le niveau par-fig voyage dans prov → collision niveau-consciente dans _charge_model_pos_is_closer.
+    pos_by_model = {mid: (c, r, lv) for mid, c, r, lv in norm}
     per_model: Dict[str, bool] = {}
-    for mid, c, r in norm:
+    for mid, c, r, lv in norm:
         prov = {m2: pos_by_model[m2] for m2 in pos_by_model if m2 != mid}
-        # Check ciblé d'une seule position (BFS early-exit) au lieu de construire tout le pool.
+        # Check ciblé d'une seule position (early-exit) au lieu de construire tout le pool.
         per_model[mid] = _charge_model_pos_is_closer(
-            game_state, unit, mid, c, r, target_ids, roll_subhex, provisional_plan=prov
+            game_state, unit, mid, c, r, target_ids, roll_subhex, provisional_plan=prov,
+            dest_level=lv,
         )
 
     # 2) Cohésion (identique au move : 1re puce voisins < min, 2e puce une fig à > coh_max).
     #    Empreintes PAR-FIGURINE (chaque fig a sa base).
     _mc_cohesion = require_key(game_state, "models_cache")
-    fps = [_charge_model_footprint(game_state, _mc_cohesion[str(mid)], c, r) for mid, c, r in norm]
+    fps = [_charge_model_footprint(game_state, _mc_cohesion[str(mid)], c, r) for mid, c, r, _lv in norm]
     coh = get_coherency_subhex(game_state)
     coh_max = get_cohesion_max_subhex(game_state)
     min_nb = get_min_neighbors(game_state)
@@ -4524,8 +4801,9 @@ def charge_preview_move_plan(
             missing.append(tid)
             continue
         engaged = False
-        for idx, (mid, c, r) in enumerate(norm):
-            synth = _charge_synthetic_charger_cache_entry(game_state, unit, c, r, fps[idx], level=0)  # 3a sol
+        for idx, (mid, c, r, lv) in enumerate(norm):
+            # 3b : synth au niveau RÉEL de la fig (sol ou étage) → engagement 3D correct en montant.
+            synth = _charge_synthetic_charger_cache_entry(game_state, unit, c, r, fps[idx], level=lv)
             if unit_entries_within_engagement_zone(synth, tentry, ez, vertical_zone_inches=_vz):
                 engaged = True
                 break
@@ -5110,9 +5388,11 @@ def charge_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, action
 
     # Cibles déjà déclarées → le toggle recompute le plan par-figurine au nouveau budget/traversée.
     if "charge_target_selections" in game_state and uid in game_state["charge_target_selections"]:
-        prov: Dict[str, Tuple[int, int]] = {}
+        prov: Dict[str, Tuple[int, ...]] = {}
         for entry in (action.get("plan") or []):
-            prov[str(entry[0])] = (int(entry[1]), int(entry[2]))
+            # 3b : le plan porte un niveau optionnel par fig ([mid,col,row] ou [mid,col,row,level]).
+            _lv_e = int(entry[3]) if len(entry) >= 4 and entry[3] is not None else 0
+            prov[str(entry[0])] = (int(entry[1]), int(entry[2]), _lv_e)
         sel = action.get("selected_model")
         _lvl = action.get("level")
         state = charge_model_plan_state(
@@ -5161,13 +5441,16 @@ def charge_commit_move_plan_handler(
     raw_plan = action["plan"]
     if not isinstance(raw_plan, list) or not raw_plan:
         return False, {"error": "empty_charge_plan", "unitId": unit_id}
-    plan: List[Tuple[str, int, int]] = []
+    # 3b : entrée [mid,col,row] (sol) OU [mid,col,row,level] (chargeur qui monte). Le niveau est propagé
+    # jusqu'à ``commit_move`` (qui gère déjà le 4-uplet) et au preview de validation.
+    plan: List[Tuple[str, int, int, int]] = []
     for entry in raw_plan:
-        if not (isinstance(entry, (list, tuple)) and len(entry) == 3):
+        if not (isinstance(entry, (list, tuple)) and len(entry) in (3, 4)):
             raise ValueError(
-                f"commit_charge_plan: plan entry must be [model_id, col, row], got {entry!r}"
+                f"commit_charge_plan: plan entry must be [model_id, col, row(, level)], got {entry!r}"
             )
-        plan.append((str(entry[0]), int(entry[1]), int(entry[2])))
+        _lv = int(entry[3]) if len(entry) >= 4 and entry[3] is not None else 0
+        plan.append((str(entry[0]), int(entry[1]), int(entry[2]), _lv))
 
     unit = get_unit_by_id(game_state, unit_id)
     if not unit:
@@ -5185,7 +5468,7 @@ def charge_commit_move_plan_handler(
     squad_models = require_key(game_state, "squad_models")
     models_cache = require_key(game_state, "models_cache")
     alive = {m for m in require_key(squad_models, str(unit_id)) if m in models_cache}
-    plan_ids = {mid for mid, _, _ in plan}
+    plan_ids = {mid for mid, *_ in plan}
     if plan_ids != alive:
         return False, {
             "error": "plan_models_mismatch",
@@ -5233,7 +5516,7 @@ def charge_commit_move_plan_handler(
         f"from ({orig_col}, {orig_row}) to ({dest_col}, {dest_row}) [Roll:{charge_roll}]"
     )
     move_details = []
-    for mid, nc, nr in plan:
+    for mid, nc, nr, *_lv in plan:
         _fc, _fr = models_before[mid]
         move_details.append(
             {

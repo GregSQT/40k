@@ -1490,18 +1490,33 @@ export default function Board({
   const perModelPlanView = useMemo(() => {
     if (!perModelChargeLike || !activeChargeLikePlan) return null;
     const uid = activeChargeLikePlan.unitId;
-    const occupied = (
+    const cacheEntry = (
       gameState?.units_cache as
-        | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+        | Record<
+            string,
+            {
+              occupied_hexes_by_model?: Record<string, [number, number]>;
+              level_by_model?: Record<string, number>;
+            }
+          >
         | undefined
-    )?.[String(uid)]?.occupied_hexes_by_model;
+    )?.[String(uid)];
+    const occupied = cacheEntry?.occupied_hexes_by_model;
     if (!occupied) return null;
-    const models: Record<string, { col: number; row: number }> = {};
+    // 3b : le niveau PAR-FIGURINE doit être préservé dans la vue du plan (posée = niveau de pose du
+    // plan, non posée = niveau committé level_by_model). Sans ça le badge/niveau de rendu retombe sur
+    // le niveau de VUE courant (bug : fig chargée au sol affichée à l'étage quand on regarde l'étage).
+    const levelByModel = cacheEntry?.level_by_model;
+    const models: Record<string, { col: number; row: number; level?: number }> = {};
     const originModels: Record<string, { col: number; row: number }> = {};
     for (const [mid, pos] of Object.entries(occupied)) {
       originModels[mid] = { col: pos[0], row: pos[1] };
-      const placed = activeChargeLikePlan.models[mid];
-      models[mid] = placed ? { col: placed.col, row: placed.row } : { col: pos[0], row: pos[1] };
+      const placed = activeChargeLikePlan.models[mid] as
+        | { col: number; row: number; level?: number }
+        | undefined;
+      models[mid] = placed
+        ? { col: placed.col, row: placed.row, level: placed.level ?? 0 }
+        : { col: pos[0], row: pos[1], level: levelByModel?.[mid] ?? 0 };
     }
     return {
       unitId: uid,
