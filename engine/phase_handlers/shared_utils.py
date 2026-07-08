@@ -4215,18 +4215,17 @@ def _attacker_model_can_reach_squad(
     if target_squad_id_str not in squad_models:
         raise KeyError(f"_attacker_model_can_reach_squad: unit {target_squad_id} not in squad_models")
     target_mids = squad_models[target_squad_id_str]
-    if _target_unit and bool(_target_unit.get("hidden")):
-        detection_range_subhex = (
-            float(game_rules.get("detection_range", 15))
-            * int(require_key(game_state, "inches_to_subhex"))
-        )
-        _any_within = any(
-            calculate_hex_distance(ac, ar, int(tm["col"]), int(tm["row"])) <= detection_range_subhex
-            for mid in target_mids
-            if (tm := models_cache.get(mid)) is not None
-        )
-        if not _any_within:
-            return False
+    # Rule 13.09 + 13.5 (Gone to Ground) : detection évaluée PAR FIGURINE dans la boucle ci-dessous.
+    target_hidden = bool(_target_unit.get("hidden")) if _target_unit else False
+    base_detection_subhex = (
+        float(game_rules.get("detection_range", 15))
+        * int(require_key(game_state, "inches_to_subhex"))
+    ) if target_hidden else 0.0
+    detection_penalty = 3 * int(require_key(game_state, "inches_to_subhex"))
+    from engine.phase_handlers.shooting_handlers import (
+        _get_dense_wall_set, _model_footprint_not_fully_visible_due_to_solid,
+    )
+    dense_wall_set = _get_dense_wall_set(game_state) if target_hidden else set()
     shooter_anchor = (ac, ar)
     # Portee + LoS alignees sur valid_target_pool_build : origine = empreinte COMPLETE du
     # socle tireur (regle 06.01) et distance bord-a-bord socle↔socle (regle 01.04), pas
@@ -4251,10 +4250,23 @@ def _attacker_model_can_reach_squad(
             base_unit["BASE_SHAPE"], base_unit["BASE_SIZE"], tc, tr,
             set(footprint), [(tc, tr)],
         )
-        if ranged_edge_distance(
+        edge = ranged_edge_distance(
             shooter_socle, target_socle, metric, max_distance=range_subhex
-        ) > range_subhex:
+        )
+        if edge > range_subhex:
             continue
+        if target_hidden:
+            # Cette figurine ne rend la cible atteignable que si elle est dans SA detection range :
+            # base, ou base−3" si elle est "gone to ground" (masquée par un terrain Solid intervenant
+            # pour ce tireur, rule 13.5). Le test LoS dense n'est fait que dans la bande utile.
+            eff_detection = base_detection_subhex
+            if base_detection_subhex - detection_penalty < edge <= base_detection_subhex:
+                if dense_wall_set and _model_footprint_not_fully_visible_due_to_solid(
+                    game_state, shooter_anchor, shooter_hexes, footprint, dense_wall_set
+                ):
+                    eff_detection = base_detection_subhex - detection_penalty
+            if edge > eff_detection:
+                continue
         visible, total, _ = _compute_visibility_with_obscuring(
             game_state, shooter_anchor, shooter_hexes, (tc, tr), footprint
         )

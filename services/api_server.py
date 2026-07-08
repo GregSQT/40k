@@ -1285,6 +1285,7 @@ def initialize_engine(scenario_file: Optional[str] = None):
         scenario_primary_objective_ids = scenario_result.get("primary_objectives")
         scenario_primary_objective_id = scenario_result.get("primary_objective")
         scenario_wall_hexes = scenario_result.get("wall_hexes")
+        scenario_dense_wall_hexes = scenario_result.get("dense_wall_hexes")
         scenario_wall_ref = scenario_result.get("wall_ref")
         scenario_objectives = scenario_result.get("objectives")
         scenario_deployment_type = scenario_result.get("deployment_type")
@@ -1317,6 +1318,7 @@ def initialize_engine(scenario_file: Optional[str] = None):
             "units": scenario_units,
             "primary_objective": primary_objective_config,
             "scenario_wall_hexes": scenario_wall_hexes,
+            "scenario_dense_wall_hexes": scenario_dense_wall_hexes,
             "scenario_wall_ref": scenario_wall_ref,
             "scenario_objectives": scenario_objectives,
             "scenario_terrain_areas": scenario_result.get("terrain_areas"),
@@ -1459,6 +1461,7 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
         scenario_primary_objective_ids = scenario_result.get("primary_objectives")
         scenario_primary_objective_id = scenario_result.get("primary_objective")
         scenario_wall_hexes = scenario_result.get("wall_hexes")
+        scenario_dense_wall_hexes = scenario_result.get("dense_wall_hexes")
         scenario_wall_ref = scenario_result.get("wall_ref")
         scenario_objectives = scenario_result.get("objectives")
         scenario_deployment_type = scenario_result.get("deployment_type")
@@ -1491,6 +1494,7 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
             "units": scenario_units,
             "primary_objective": primary_objective_config,
             "scenario_wall_hexes": scenario_wall_hexes,
+            "scenario_dense_wall_hexes": scenario_dense_wall_hexes,
             "scenario_wall_ref": scenario_wall_ref,
             "scenario_objectives": scenario_objectives,
             "scenario_terrain_areas": scenario_result.get("terrain_areas"),

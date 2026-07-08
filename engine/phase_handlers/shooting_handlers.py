@@ -1755,7 +1755,9 @@ def build_hidden_too_far_by_unit_id(
         )
         if distance > max_rng:
             continue  # hors portée : pas "à portée mais trop loin"
-        if distance > detection_range_subhex:
+        # Rule 13.09 + 13.5 : "trop loin" = hors detection per-figurine (avec −3" gone to ground
+        # pour les figurines masquées par un terrain Solid intervenant).
+        if hidden_enemy_out_of_detection(game_state, shooter, enemy, detection_range_subhex):
             result[target_id_str] = True
     return result
 
@@ -2920,7 +2922,11 @@ def valid_target_pool_build(
         # Note: Friendly units are already filtered out at line 949-960 above
         if unit_within_range:
             # Rule 13.09: a hidden enemy can only be targeted by a shooter within detection range.
-            if bool(enemy.get("hidden")) and distance > detection_range_subhex:
+            # Rule 13.5 (Gone to Ground): detection −3" par figurine non entièrement visible à cause
+            # d'un terrain Solid intervenant (évalué per-figurine dans hidden_enemy_out_of_detection).
+            if bool(enemy.get("hidden")) and hidden_enemy_out_of_detection(
+                game_state, unit, enemy, detection_range_subhex
+            ):
                 if game_state.get("debug_mode", False):
                     from engine.game_utils import add_debug_file_log
                     add_debug_file_log(
@@ -3666,6 +3672,20 @@ def _get_wall_set(game_state: Dict[str, Any]) -> Set[Tuple[int, int]]:
     return ws
 
 
+def _get_dense_wall_set(game_state: Dict[str, Any]) -> Set[Tuple[int, int]]:
+    """Return cached dense (Solid, rule 13.11) wall_set, building it on first call.
+
+    Sous-ensemble de _get_wall_set limité aux murs de terrains dense. Sert la règle 13.5
+    (Gone to Ground). Vide si le plateau n'a pas de murs typés dense."""
+    cached = game_state.get("_dense_wall_set_cache")
+    if cached is not None:
+        return cached
+    from engine.hex_utils import build_dense_wall_set
+    ws = build_dense_wall_set(game_state)
+    game_state["_dense_wall_set_cache"] = ws
+    return ws
+
+
 def _get_obscuring_area_sets(game_state: Dict[str, Any]) -> List[Tuple[str, Set[Tuple[int, int]]]]:
     """Return [(area_id, hex_set), ...] for every obscuring terrain area, cached per game_state."""
     cached = game_state.get("_obscuring_area_sets_cache")
@@ -3807,6 +3827,9 @@ def _compute_visibility_with_obscuring(
     shooter_hexes: List[Tuple[int, int]],
     target_anchor: Tuple[int, int],
     target_hexes: List[Tuple[int, int]],
+    *,
+    wall_set: Optional[Set[Tuple[int, int]]] = None,
+    obscuring_by_hex: Optional[Dict[Tuple[int, int], str]] = None,
 ) -> Tuple[int, int, Set[Tuple[int, int]]]:
     """Count target footprint hexes reachable by a clear hex-line from the shooter.
 
@@ -3816,10 +3839,16 @@ def _compute_visibility_with_obscuring(
     evaluated as a 2nd chance only when the anchor line is blocked. A line is blocked by a dense
     wall (always) or by an obscuring terrain area that neither the shooter nor the target occupies
     (excluding areas one or both units are within).
+
+    ``wall_set`` / ``obscuring_by_hex`` overrides (défaut = sets complets du plateau) : servent la
+    règle 13.5 (Gone to Ground), en restreignant le test aux murs Solid/dense et en désactivant les
+    obscuring areas (passer ``{}``) pour isoler "not fully visible due to intervening Solid terrain".
     Returns (visible_hexes, total_hexes, visible_hex_set).
     """
-    wall_set = _get_wall_set(game_state)
-    obscuring_by_hex = _get_obscuring_hex_to_area(game_state)
+    wall_set = _get_wall_set(game_state) if wall_set is None else wall_set
+    obscuring_by_hex = (
+        _get_obscuring_hex_to_area(game_state) if obscuring_by_hex is None else obscuring_by_hex
+    )
 
     # Areas the shooter or target occupies are excluded as blockers (rule 13.10). Resolved via the
     # hex→area map (cheap lookups) instead of unioning every obscuring area's hexes on every pair —
@@ -4008,6 +4037,90 @@ def _unit_can_see_any(game_state: Dict[str, Any], shooter: Dict[str, Any], targe
         if v > 0:
             return True
     return False
+
+
+def _model_footprint_not_fully_visible_due_to_solid(
+    game_state: Dict[str, Any],
+    shooter_anchor: Tuple[int, int],
+    shooter_hexes: List[Tuple[int, int]],
+    target_model_hexes: List[Tuple[int, int]],
+    dense_wall_set: Set[Tuple[int, int]],
+) -> bool:
+    """Règle 13.5, condition 2, PAR FIGURINE : cette figurine cible n'est pas entièrement visible
+    pour le tireur à cause d'un terrain Solid (dense) intervenant.
+
+    Teste la visibilité de l'empreinte de CETTE figurine en n'utilisant QUE le set de murs dense et
+    en DÉSACTIVANT les obscuring areas (obscuring_by_hex={}), pour que seul un terrain Solid — pas
+    une obscuring area (13.10) — puisse rendre la figurine "gone to ground". True si >=1 case du
+    socle est masquée par un mur dense."""
+    v, t, _vset = _compute_visibility_with_obscuring(
+        game_state, shooter_anchor, shooter_hexes, target_model_hexes[0], target_model_hexes,
+        wall_set=dense_wall_set, obscuring_by_hex={},
+    )
+    return t > 0 and v < t
+
+
+def hidden_enemy_out_of_detection(
+    game_state: Dict[str, Any],
+    shooter: Dict[str, Any],
+    enemy: Dict[str, Any],
+    base_detection_subhex: float,
+) -> bool:
+    """Règle 13.09 + 13.5, évaluées PAR FIGURINE. True → l'ennemi hidden est hors de la detection de
+    ``shooter`` (à exclure du pool de cibles).
+
+    L'unité est détectable dès qu'AU MOINS une figurine cachée est à portée de SA propre detection
+    range : ``base``, ou ``base − 3"`` si cette figurine n'est pas entièrement visible pour le
+    tireur à cause d'un terrain Solid intervenant ("gone to ground", rule 13.5). Distance bord-à-bord
+    socle↔socle par figurine (métrique de tir), cohérente avec valid_target_pool_build. ``shooter``
+    peut être un dict unité (id) ou un dict coordonnées-seules ({col,row})."""
+    from engine.hex_utils import Socle
+    from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
+    penalty = 3 * int(require_key(game_state, "inches_to_subhex"))
+    dense_wall_set = _get_dense_wall_set(game_state)
+    metric = _ranged_distance_metric()
+    gym_training = bool(
+        game_state.get("gym_training_mode", False)
+        or require_key(game_state, "config").get("gym_training_mode", False)
+    )
+    shooter_anchor, shooter_hexes = _resolve_unit_anchor_and_footprint(
+        game_state, shooter, gym_training=gym_training
+    )
+    units_cache = require_key(game_state, "units_cache")
+    if "id" in shooter:
+        shooter_socle = socle_from_cache_entry(units_cache[str(shooter["id"])])
+    else:
+        shooter_socle = Socle(
+            "round", 1, shooter_anchor[0], shooter_anchor[1], set(shooter_hexes), [shooter_anchor]
+        )
+    footprints, centers, bshape, bsize, borient = _resolve_target_models_for_los(
+        game_state, enemy, gym_training
+    )
+    _bshape = bshape if bshape is not None else "round"
+    _bsize = bsize if bsize is not None else 1
+    _borient = int(borient) if borient is not None else 0
+    for i, model_hexes in enumerate(footprints):
+        center = centers[i] if centers[i] is not None else model_hexes[0]
+        model_socle = Socle(
+            _bshape, _bsize, center[0], center[1], set(model_hexes), [center], _borient
+        )
+        dist = ranged_edge_distance(
+            shooter_socle, model_socle, metric, max_distance=int(base_detection_subhex)
+        )
+        if dist <= base_detection_subhex - penalty:
+            return False  # figurine dans la detection réduite → détectable quoi qu'il arrive
+        if dist > base_detection_subhex:
+            continue  # hors detection même sans GtG
+        # Bande ]base−3"; base] : le GtG peut faire basculer CETTE figurine hors detection.
+        if not (
+            dense_wall_set
+            and _model_footprint_not_fully_visible_due_to_solid(
+                game_state, shooter_anchor, shooter_hexes, model_hexes, dense_wall_set
+            )
+        ):
+            return False  # pas gone to ground → détectable à base
+        # gone to ground → detection = base−3" < dist → cette figurine ne détecte pas
+    return True
 
 
 def _compute_unit_los_uncached(

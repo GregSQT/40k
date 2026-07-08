@@ -86,6 +86,17 @@ modèles** (ennemis, MONSTER/VEHICLE inclus) et **toutes les catégories de terr
 - **Hidden** — §13.09 : terrain area contenant du dense + unité **n'ayant pas tiré ce tour ni le
   précédent** → visible seulement à ≤ **15"** (detection range). Très pertinent pour la LoS en ruines.
 
+  > **Décision de conception (voulue, pas un bug de conformité) :** le texte §13.09 exige une area
+  > contenant un terrain **dense** ; le moteur teste à la place l'appartenance à une area
+  > **obscuring** (`compute_models_in_obscuring_terrain` → `model_within_terrain(obscuring_only=True)`).
+  > Le flag `obscuring` est **posé manuellement** par le concepteur de terrain sur chaque area
+  > (`config/board/{board}/terrain/terrain-*.json`, champ `"obscuring": true`) — il n'existe volontairement
+  > **aucun marqueur dense/light au niveau de l'area** (seuls les `walls` sont typés `light`/`dense`,
+  > pour le blocage de LoS / Solid §13.11). L'`obscuring` manuel **fait donc foi** pour Hidden : une area
+  > marquée obscuring accorde Hidden, par choix. Conséquence assumée : le moteur ne distingue pas une
+  > area obscuring dense d'une light-only pour Hidden (c'est au concepteur de ne flaguer `obscuring` que
+  > les areas qui doivent cacher).
+
 ### 2.5 Multi-niveaux : cohésion & engagement (verticalité déjà chiffrée)
 - Coherency — `03 Moving.pdf` §03.03 : **deux conditions simultanées** pour chaque fig :
   (a) ≤ **2" horiz. et 5" vert.** d'au moins **une** autre fig, ET (b) ≤ **9" horiz. et 5" vert.**
@@ -912,16 +923,22 @@ le modèle + LoS 3D est le vrai chantier.
       `_charge_model_climb_reachable_floor_cells(..., budget_subhex=3×ish, view_level, ground_obs, terrain_areas)`
       (coût de montée §13.06 soustrait des 3") ; classer chaque case par la **primitive 3D directe** (synth
       `_charge_synthetic_charger_cache_entry(..., level=view_level)` + `unit_entries_within_engagement_zone(...,
-      vertical_zone_inches=_charge_vertical_zone(game_state))`). **Consolidation Objective (zone)** : la case
-      d'étage est « within range » si son **empreinte ∩ zone** (déjà level-agnostic → OK pour terrain area
-      §2.9) ; objectif-pion = ajouter le gate cylindre 5" vertical (réutiliser le seuil vertical). Pool → `[col,row,level]`.
+      vertical_zone_inches=_charge_vertical_zone(game_state))`). **Consolidation Objective (tier "zone")** :
+      « within range » = **empreinte ∩ zone d'hexes** de l'objectif (`objective["hexes"]`, `_is_unit_on_objective`
+      L144 / viser la zone terrain L1342) — test **déjà level-agnostic** (une fig à l'étage de la ruine-objectif
+      contrôle, §2.9/§14.02) → **AUCUN gate vertical à ajouter**, seul le **mouvement** vers l'étage a besoin du
+      champ climb. (Les objectifs sont des **zones d'hexes** dans le moteur, pas des pions-cylindres : le cylindre
+      5" vertical §2.9 ne vaudrait que si un modèle marqueur/cylindre était introduit — hors périmètre.)
+      Pool → `[col,row,level]`.
    2. **Collision niveau-consciente** : filtrer `blocker_socles` et `sib_socles` par niveau (une fig d'étage ne
       bloque pas une destination au sol — même correctif que le bug #1 charge). Réutiliser
       `_charge_obstacle_socles(..., level)` ou filtrer sur `entry["level"]` / le niveau du plan des sœurs.
-   3. **Base-contact lock (§12.03 / Ongoing §12.08)** : « models in base-contact cannot move » — la base-contact
-      est un contact **physique** (adjacence 2D à distance ~0). À un étage, une fig d'étage en base-contact avec
-      un ennemi **du même niveau** reste bloquée ; niveau différent = pas de contact. → gate à évaluer en 3D
-      (même intervalle `[plancher, plancher+MODEL_HEIGHT]`), pas en 2D pur.
+   3. **Base-contact lock (§12.03 / Ongoing §12.08)** : « models in base-contact cannot move ». **Vérifié** :
+      `_fight_model_in_base_contact` ([L3934](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py#L3934))
+      teste le contact en **2D pur** (`euclidean_edge_clearance_round_round` sur col/row, sans niveau) → une fig
+      au sol et une fig d'étage aux mêmes (col,row) seraient à tort « en contact ». Le contact est physique : à
+      évaluer en **3D** (même intervalle `[plancher, plancher+MODEL_HEIGHT]` que l'engagement) — même niveau =
+      contact possible, niveaux différents = jamais. **Seul vrai travail de conception** (le reste est du câblage miroir).
    4. **Plan state** (`_fight_pile_in_model_plan_state` L3822 + `_fight_consolidation_model_plan_state` L4868) :
       param `view_level` (miroir `charge_model_plan_state`), pool `[col,row,level]`, **affichage mono-niveau**
       (`[a for a in pool if a[2]==level]`), `pool_distances`/mask loops dérivés (sol = BFS, étage = climb).
@@ -938,6 +955,54 @@ le modèle + LoS 3D est le vrai chantier.
       plans pile-in/conso portent `level`. **À ajouter** : étendre l'effet de refetch au changement de niveau
       (BoardPvp, aujourd'hui seulement `move`/`charge`) aux modes pile-in/consolidation actifs.
    7. **FLY en hauteur : différé** (§707, cohérent avec la charge L3431).
+   8. **DEUX MOTEURS de pile-in (vérifié 2026-07-08) — cadrer la migration en conséquence.** Le pile-in a **deux
+      moteurs de destinations à granularités distinctes** (patron identique au move : pool squad rigide RL/IA vs
+      pool par-figurine PvP). Ils ne tournent **jamais en même temps** — le choix dépend du mode (auto vs PvP
+      interactif) et du moment (normal vs overrun) :
+      - **Moteur B — par-figurine (interactif PvP)** : `_fight_pile_in_build_model_pool`
+        ([L3525](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py#L3525)) → `_fight_pile_in_model_plan_state`
+        (L3758) + commit. **C'est le seul que couvrent les points 1-7 ci-dessus.**
+      - **Moteur A — unité/rigide (auto/IA/gym)** : `pile_in_move_destinations_12_03`
+        ([L2727](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py#L2727)) → `_ai_select_pile_in_destination`
+        → `_fight_apply_pile_in_move` (L883). Utilisé par : le pile-in **normal auto** (`_fight_v11_auto_pile_in`),
+        la **présentation squad-level** (`_fight_v11_pile_in_present` L4444), et **surtout le pile-in d'OVERRUN**
+        (`_fight_v11_auto_overrun_pile_in` L3450) — lequel est auto-résolu **même en PvP** (dispatch interactif
+        [L5915](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py#L5915), pas seulement auto/gym L3504,
+        car il n'y a pas d'UI par-fig pour la pile-in additionnelle §12.06).
+      - **Conséquence 3D** : migrer B → couvre le pile-in **PvP interactif normal**. L'**overrun** ET tout le pile-in
+        **auto/IA** roulent sur A (voie **RL/hex 2D**) → **différer** comme le pool squad du move, **ou** migrer A
+        explicitement (`pile_in_move_destinations_12_03` + apply). Tant que A n'est pas 3D, un **overrun ne peut pas
+        finir en hauteur, même en PvP**. **Décision à prendre** (A différé vs migré) — pas un sous-cas gratuit de B.
+      - **Consolidation = structure DIFFÉRENTE du pile-in (vérifié)** : (a) son auto **skippe entièrement**
+        (`_fight_v11_auto_consolidate` [L3465](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py#L3465),
+        consolidation optionnelle §12) → **aucun moteur A/RL**. (b) Son autoplace Focus `consolidate_autoplace_plan`
+        ([L4368](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py#L4368)) **ne calcule rien** : c'est un
+        **routeur** vers des autoplaces existants dont l'AFTER coïncide avec le mode (docstring L4373) — `ongoing` →
+        `pile_in_autoplace_plan` (L3970, AFTER « chaque fig garde ses engagements »), `engaging` →
+        **`charge_autoplace_plan`** (budget 3", couverture dure « toutes les cibles »), `objective` → **non supporté**
+        (L4416). → À migrer pour la conso 3D : **le pool par-fig** `_fight_consolidation_build_model_pool` (points 1-7),
+        et le 3D de ses délégués (`pile_in_autoplace_plan`, `charge_autoplace_plan`) est **mutualisé** avec la migration
+        pile-in/charge (pas de code autoplace propre à dupliquer).
+      - **`pile_in_autoplace_plan` (L3970)** est un **maximiseur autonome** (ILP, réutilise les primitives charge
+        `_charge_model_socle`/`_charge_synthetic_charger_cache_entry`), **distinct** des moteurs A et B → 3ᵉ chemin
+        pile-in à migrer si l'on veut un autoplace pile-in qui monte.
+      - **POURQUOI cette asymétrie pile-in vs conso (rationale, dicté par les règles)** : **pile-in et charge sont
+        les deux contrats de mouvement-avec-engagement PRIMITIFS ; la consolidation est un COMPOSITE** qui les
+        réutilise → elle a structurellement moins de machinerie propre. Trois causes concrètes :
+        (1) **consolidation optionnelle** (§12 encart « you don't have to pile in or consolidate ») + politique auto
+        qui **skippe** la conso mais fait **toujours** le pile-in → moteur A pour pile-in, pas pour conso ;
+        (2) l'**overrun (§12.06) est une pile-in additionnelle**, pas une conso → le moteur A du pile-in sert double
+        (normal + overrun), la conso n'a aucun consommateur auto ;
+        (3) les **3 modes de conso SONT des contrats existants** — Ongoing ≡ AFTER pile-in, Engaging ≡ AFTER charge,
+        Objective ≡ appartenance à une zone (pas d'engagement) → l'autoplace conso **délègue** au lieu de dupliquer ;
+        le pile-in étant le contrat de **base**, son autoplace est autonome. **Symétrique** : les deux ont un pool
+        par-figurine interactif PvP (`_fight_*_build_model_pool`), car les deux ont besoin d'une UI de pose par-fig.
+
+   **Limites assumées (miroir charge 3b)** : « closest tier » (`_fight_pile_in_closest_tier_ids` L3678) et
+   « closer » mesurés en distance **horizontale** d'empreinte (`min_distance_between_sets`, 2D) — une cible
+   directement au-dessus (2D≈0, mais 5"+ vertical) serait vue « très proche » ; cohérent avec le « closer »
+   horizontal déjà admis pour la charge. Le **gate d'engagement**, lui, est bien 3D. À ré-évaluer seulement si
+   une mesure de distance 3D globale est adoptée (roadmap item 4).
 
    **Validation** : script d'intégration dédié (miroir `charge3d_integration_test.py` : fig montant en pile-in/
    conso → ancres d'étage + gate climb 3") + `python3 -m pytest tests/` (1152/0) + app sur `scenario_floors_test`.

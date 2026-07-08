@@ -279,6 +279,9 @@ class W40KEngine(gym.Env):
 
             # Store scenario terrain for game_state initialization
             self._scenario_wall_hexes = scenario_wall_hexes
+            # Sous-ensemble Solid/dense (rule 13.5 Gone to Ground). None si absent (jamais
+            # de fallback vers wall_hexes complet : un mur non typé n'est pas Solid-prouvable).
+            self._scenario_dense_wall_hexes = scenario_result.get("dense_wall_hexes")
             self._scenario_wall_ref = scenario_result.get("wall_ref")
             self._scenario_objectives = scenario_objectives
             self._scenario_terrain_areas = scenario_result.get("terrain_areas")
@@ -378,6 +381,7 @@ class W40KEngine(gym.Env):
             # 'scenario_objectives'. Absent du config = aucun objectif fourni → liste vide (état
             # métier valide, pas un fallback masquant : zéro terrain objectif = zéro objectif).
             self._scenario_wall_hexes = self.config.get("scenario_wall_hexes")
+            self._scenario_dense_wall_hexes = self.config.get("scenario_dense_wall_hexes")
             self._scenario_wall_ref = self.config.get("scenario_wall_ref")
             self._scenario_objectives = self.config.get("scenario_objectives") or []
             self._scenario_terrain_areas = self.config.get("scenario_terrain_areas")
@@ -464,6 +468,11 @@ class W40KEngine(gym.Env):
             set(map(tuple, self._scenario_wall_hexes))
             if self._scenario_wall_hexes is not None
             else set(map(tuple, _fallback_walls))
+        )
+        # Set Solid/dense (rule 13.5) : uniquement les murs de terrains dense. Les murs de bord
+        # de plateau ajoutés ci-dessous ne sont PAS des terrains Solid → hors de ce set.
+        base_dense_wall_hexes = (
+            set(map(tuple, getattr(self, "_scenario_dense_wall_hexes", None) or []))
         )
         bottom_row = board_rows - 1
         for col in range(board_cols):
@@ -557,6 +566,8 @@ class W40KEngine(gym.Env):
             "max_range": max_range,
             # Use scenario terrain if loaded, otherwise use board config
             "wall_hexes": base_wall_hexes,
+            # Murs de terrains Solid/dense (rule 13.5 Gone to Ground) — sous-ensemble de wall_hexes
+            "dense_wall_hexes": base_dense_wall_hexes,
             # Polygon terrain areas (obscuring/cover, rules 13.08-13.10), rasterized to hexes
             "terrain_areas": getattr(self, "_scenario_terrain_areas", None) or [],
             # Objectives: grouped structure with id, name, hexes (for objective control calculation)
@@ -574,6 +585,7 @@ class W40KEngine(gym.Env):
             self.game_state,
         )
         self.game_state.pop("_wall_set_cache", None)
+        self.game_state.pop("_dense_wall_set_cache", None)
         self.game_state.pop("_obscuring_area_sets_cache", None)
         self.game_state.pop("_obscuring_hex_to_area_cache", None)
         self.game_state.pop("_unit_los_pair_cache", None)
@@ -5745,6 +5757,17 @@ class W40KEngine(gym.Env):
             normalized_wall_hexes.add((wall_col, wall_row))
         self._scenario_wall_hexes = sorted(normalized_wall_hexes)
 
+        # Murs Solid/dense (rule 13.5). None si absent → set vide (jamais de fallback wall_hexes).
+        normalized_dense_wall_hexes = set()
+        for raw_wall in (scenario_result.get("dense_wall_hexes") or []):
+            if not isinstance(raw_wall, (list, tuple)) or len(raw_wall) != 2:
+                raise ValueError(
+                    f"Invalid dense wall hex format in scenario reload '{scenario_file}': {raw_wall!r}"
+                )
+            wall_col, wall_row = normalize_coordinates(raw_wall[0], raw_wall[1])
+            normalized_dense_wall_hexes.add((wall_col, wall_row))
+        self._scenario_dense_wall_hexes = sorted(normalized_dense_wall_hexes)
+
         # Scenarios MUST use wall_ref (config/board/{cols}x{rows}/walls-XX.json). No inline wall_hexes.
         scenario_wall_ref = scenario_result.get("wall_ref")
         self._scenario_wall_ref = scenario_wall_ref
@@ -5806,6 +5829,7 @@ class W40KEngine(gym.Env):
         # Update wall_hexes and objectives in game_state if present
         if "wall_hexes" in self.game_state:
             self.game_state["wall_hexes"] = set(normalized_wall_hexes)
+        self.game_state["dense_wall_hexes"] = set(normalized_dense_wall_hexes)
         if "objectives" in self.game_state:
             self.game_state["objectives"] = self._scenario_objectives
         if "primary_objective" in self.game_state:
@@ -5817,6 +5841,7 @@ class W40KEngine(gym.Env):
         self.game_state.pop("_obscuring_hex_to_area_cache", None)
         self.game_state.pop("_unit_los_pair_cache", None)
         self.game_state.pop("_wall_set_cache", None)
+        self.game_state.pop("_dense_wall_set_cache", None)
         self.game_state.pop("_hex_los_state_cache", None)
         self.game_state["tutorial_fight_no_death_unit_ids"] = (
             self._tutorial_fight_no_death_unit_ids

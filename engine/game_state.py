@@ -274,6 +274,7 @@ class GameStateManager:
             deployment_type = "fixed"
             deployment_type_by_player: Dict[int, str] = {1: "fixed", 2: "fixed"}
             resolved_scenario_walls = None
+            resolved_scenario_dense_walls = None
             resolved_scenario_objectives = None
             resolved_terrain_areas = None
             resolved_deployment_zones = None
@@ -291,12 +292,24 @@ class GameStateManager:
                         require_key(scenario_data, "wall_ref"),
                         scenario_file
                     )
+                    resolved_scenario_dense_walls = self._load_shared_walls_from_ref(
+                        require_key(scenario_data, "wall_ref"),
+                        scenario_file,
+                        only_type="dense",
+                    )
                 if "terrain_ref" in scenario_data:
                     terrain_walls = self._load_terrain_walls_from_ref(
                         scenario_data["terrain_ref"], scenario_file
                     )
+                    terrain_dense_walls = self._load_terrain_walls_from_ref(
+                        scenario_data["terrain_ref"], scenario_file, only_type="dense"
+                    )
                     if terrain_walls:
                         resolved_scenario_walls = list(resolved_scenario_walls or []) + terrain_walls
+                    if terrain_dense_walls:
+                        resolved_scenario_dense_walls = (
+                            list(resolved_scenario_dense_walls or []) + terrain_dense_walls
+                        )
                     resolved_terrain_areas = self._load_terrain_areas_from_ref(
                         scenario_data["terrain_ref"], scenario_file
                     )
@@ -615,6 +628,7 @@ class GameStateManager:
             # Extract optional terrain data from scenario
             # If present in scenario, use it; otherwise return None for board config selection
             scenario_walls = resolved_scenario_walls
+            scenario_dense_walls = resolved_scenario_dense_walls
             scenario_objectives = resolved_scenario_objectives
             scenario_primary_objective = None
             scenario_wall_ref = (
@@ -666,6 +680,7 @@ class GameStateManager:
             return {
                 "units": enhanced_units,
                 "wall_hexes": scenario_walls,
+                "dense_wall_hexes": scenario_dense_walls,
                 "terrain_areas": resolved_terrain_areas or [],
                 "wall_ref": scenario_wall_ref,
                 "objectives": scenario_objectives,
@@ -1399,8 +1414,14 @@ class GameStateManager:
             )
         return filtered
 
-    def _load_shared_walls_from_ref(self, wall_ref: Any, scenario_file: str) -> List[List[int]]:
-        """Load shared wall_hexes file referenced by scenario wall_ref."""
+    def _load_shared_walls_from_ref(
+        self, wall_ref: Any, scenario_file: str, only_type: Optional[str] = None
+    ) -> List[List[int]]:
+        """Load shared wall_hexes file referenced by scenario wall_ref.
+
+        ``only_type`` (ex: "dense") restreint aux groupes de murs typés — set Solid/dense (rule
+        13.5). La forme brute ``wall_hexes`` (hexes pré-rasterisés, sans ``type``) n'est pas
+        classifiable → renvoie [] quand only_type est demandé (pas de fallback)."""
         if isinstance(wall_ref, str) and wall_ref.strip() == "random":
             scenario_parent = Path(scenario_file).parent
             if scenario_parent.name != "scenario":
@@ -1415,7 +1436,7 @@ class GameStateManager:
             import random as _random
             wall_ref = _random.choice(candidates).stem
         wall_path = self._resolve_shared_config_path("_walls", wall_ref, scenario_file, "wall_ref")
-        cache_key = str(wall_path)
+        cache_key = str(wall_path) if only_type is None else f"{wall_path}::{only_type}"
         if cache_key in _walls_json_cache and cache_key in _walls_json_mtime_ns:
             if wall_path.exists():
                 try:
@@ -1441,12 +1462,19 @@ class GameStateManager:
             for gi, g in enumerate(walls):
                 if not isinstance(g, dict):
                     raise ValueError(f"Shared walls file {wall_path}: wall group must be dict")
+                if only_type is not None and g.get("type") != only_type:
+                    continue
                 hint = f"Shared walls file {wall_path} group[{gi}]"
                 expanded = expand_wall_group_to_hex_list(g, path_hint=hint)
                 result.extend(expanded)
             _walls_json_cache[cache_key] = copy.deepcopy(result)
             _walls_json_mtime_ns[cache_key] = wall_path.stat().st_mtime_ns
             return result
+        # Forme brute wall_hexes : hexes déjà rasterisés, sans champ 'type' → non classifiable.
+        if only_type is not None:
+            _walls_json_cache[cache_key] = []
+            _walls_json_mtime_ns[cache_key] = wall_path.stat().st_mtime_ns
+            return []
         wall_hexes = require_key(wall_data, "wall_hexes")
         if not isinstance(wall_hexes, list):
             raise ValueError(f"Shared walls file {wall_path} field 'wall_hexes' must be list")
@@ -1473,12 +1501,19 @@ class GameStateManager:
             raise ValueError(f"Invalid JSON in terrain file {terrain_path}: {e}")
         return terrain_data, terrain_path
 
-    def _load_terrain_walls_from_ref(self, terrain_ref: str, scenario_file: str) -> List[List[int]]:
-        """Load wall hexes from the 'walls' section of a terrain file referenced by terrain_ref."""
+    def _load_terrain_walls_from_ref(
+        self, terrain_ref: str, scenario_file: str, only_type: Optional[str] = None
+    ) -> List[List[int]]:
+        """Load wall hexes from the 'walls' section of a terrain file referenced by terrain_ref.
+
+        ``only_type`` (ex: "dense") restreint aux groupes de murs de ce type (champ ``type`` du
+        groupe) — sert à construire le set Solid/dense de la règle 13.5. None = tous les murs."""
         terrain_data, terrain_path = self._read_terrain_file(terrain_ref, scenario_file)
         result: List[List[int]] = []
         for gi, g in enumerate(terrain_data.get("walls", [])):  # get allowed
             if not isinstance(g, dict):
+                continue
+            if only_type is not None and g.get("type") != only_type:
                 continue
             hint = f"Terrain file {terrain_path} walls[{gi}]"
             result.extend(expand_wall_group_to_hex_list(g, path_hint=hint))
