@@ -10,7 +10,7 @@ ZERO TOLERANCE for state storage or wrapper patterns
 import os
 import time
 from collections import deque
-from typing import Dict, List, Tuple, Set, Optional, Any, FrozenSet, cast
+from typing import Dict, List, Tuple, Set, Optional, Any, FrozenSet, Sequence, Mapping, cast
 from .generic_handlers import end_activation
 from shared.data_validation import require_key, require_present
 from engine.action_log_utils import append_action_log
@@ -35,6 +35,7 @@ from .shared_utils import (
     build_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
     is_placement_valid_with_clearance, candidate_overlaps_any_unit,
     _synth_model_entry,
+    MovePlan,
 )
 
 CHARGE_IMPACT_TRIGGER_THRESHOLD = 4
@@ -277,7 +278,7 @@ def _charge_synthetic_charger_cache_entry(
         base["occupied_hexes_by_model"] = {_CHARGE_SYNTH_ANCHOR_MID: anchor}
         base["floor_height_by_model"] = {
             _CHARGE_SYNTH_ANCHOR_MID: floor_height_at(
-                game_state.get("terrain_areas", []), int(anchor_col), int(anchor_row), int(level)
+                game_state.get("terrain_areas", []), int(anchor_col), int(anchor_row), int(level)  # get allowed (board sans terrain)
             )
         }
     return base
@@ -1821,9 +1822,9 @@ def _charge_qualifying(
                 continue
             out.append([h[0], h[1], lvl])
 
-    _emit(reach_by_model.get(model_id), region_by_base.get(bk, {}), 0)
+    _emit(reach_by_model.get(model_id), region_by_base.get(bk, {}), 0)  # get allowed (base sans région = vide)
     if floor_reach_by_model is not None and floor_region_by_base is not None and view_level >= 1:
-        _emit(floor_reach_by_model.get(model_id), floor_region_by_base.get(bk, {}), view_level)
+        _emit(floor_reach_by_model.get(model_id), floor_region_by_base.get(bk, {}), view_level)  # get allowed (base sans région = vide)
     return out
 
 
@@ -1928,7 +1929,7 @@ def _compute_plan_context(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
     unit_id: str,
-    provisional_plan: Dict[str, Tuple[int, ...]],
+    provisional_plan: Mapping[str, Sequence[int]],
     target_ids: List[Any],
     roll_subhex: int,
     fly_active: bool,
@@ -2201,11 +2202,14 @@ def _compute_plan_context(
 
     region_by_base: Dict[Tuple[Any, Any, int], Dict[Tuple[int, int], Dict[str, Any]]] = {}
     _tr = time.perf_counter() if _perf else None
+    # Gate vertical de charge (getter pur) — hissé hors des blocs conditionnels : utilisé aussi bien
+    # dans la classification (``if can_classify``) que dans la branche étages (``view_level>=1``).
+    _vz = _charge_vertical_zone(game_state)
     if can_classify:
         # Obstacles (autres unités) AU SOL (level 0) pour la classification des ancres sol : une fig
         # ennemie/amie à l'étage ne bloque pas une destination de charge au sol (3b, cross-niveau).
         obstacle_socles = _charge_obstacle_socles(game_state, unit_id, level=0)
-        placed_sibling_socles = placed_sibling_socles_by_level.get(0, [])
+        placed_sibling_socles = placed_sibling_socles_by_level.get(0, [])  # get allowed (niveau sans sœur posée = vide)
         _walls = set(wall_hexes)
         synth_base = dict(require_key(units_cache, str(require_key(unit, "id"))))
         synth_base.pop("occupied_hexes_by_model", None)
@@ -2262,7 +2266,6 @@ def _compute_plan_context(
         # Engagement 3D (§03.04) — la branche empreinte court-circuite la primitive : le gate vertical
         # est précalculé PAR-ENNEMI (candidat chargeur au sol en 3a → cand_floor=0), cf.
         # entry_vertically_reachable. La branche euclidienne, elle, passe par la primitive 3D.
-        _vz = _charge_vertical_zone(game_state)
         _cand_mh = float(require_key(synth_base, "MODEL_HEIGHT"))
         tgt_vreach = [entry_vertically_reachable(0.0, _cand_mh, te, _vz) for te in target_entries]
         ntgt_vreach = [entry_vertically_reachable(0.0, _cand_mh, ne, _vz) for ne in nontarget_entries]
@@ -2366,7 +2369,7 @@ def _compute_plan_context(
             # Collision niveau-conscient (3b) : à l'étage, seuls les obstacles/coéquipières DU MÊME
             # niveau bloquent (une fig au sol ne gêne pas une destination d'étage).
             _obstacle_socles_floor = _charge_obstacle_socles(game_state, unit_id, level=int(view_level))
-            _placed_siblings_floor = placed_sibling_socles_by_level.get(int(view_level), [])
+            _placed_siblings_floor = placed_sibling_socles_by_level.get(int(view_level), [])  # get allowed (niveau sans sœur posée = vide)
             floor_cells_by_base: Dict[Tuple[Any, Any, int], Set[Tuple[int, int]]] = {}
             rep_by_base: Dict[Tuple[Any, Any, int], Dict[str, Any]] = {}
             for m, cells in floor_reach_by_model.items():
@@ -2517,7 +2520,7 @@ def _charge_pool_clip_under_floor(
     model = models_cache.get(str(model_id))
     if model is None:
         return pool
-    terrain_areas = game_state.get("terrain_areas", [])
+    terrain_areas = game_state.get("terrain_areas", [])  # get allowed (board sans terrain)
     polys = [
         [_hex_center(int(v[0]), int(v[1])) for v in require_key(floor, "polygon_vertices")]
         for area in terrain_areas
@@ -2554,7 +2557,7 @@ def _charge_pool_clip_under_floor(
 def charge_model_plan_state(
     game_state: Dict[str, Any],
     unit_id: str,
-    provisional_plan: Dict[str, Tuple[int, int]],
+    provisional_plan: Mapping[str, Sequence[int]],
     selected_model: Optional[str] = None,
     level: int = 0,
 ) -> Dict[str, Any]:
@@ -4703,7 +4706,7 @@ def _charge_model_pos_is_closer(
 
 
 def charge_preview_move_plan(
-    game_state: Dict[str, Any], squad_id: str, plan: List[Tuple[str, int, int]], target_ids: List[str]
+    game_state: Dict[str, Any], squad_id: str, plan: MovePlan, target_ids: List[str]
 ) -> Dict[str, Any]:
     """Dry-run d'un plan de charge par-figurine (11.04 WHILE/AFTER MOVING). Lecture pure.
 
@@ -5449,8 +5452,9 @@ def charge_commit_move_plan_handler(
             raise ValueError(
                 f"commit_charge_plan: plan entry must be [model_id, col, row(, level)], got {entry!r}"
             )
-        _lv = int(entry[3]) if len(entry) >= 4 and entry[3] is not None else 0
-        plan.append((str(entry[0]), int(entry[1]), int(entry[2]), _lv))
+        _e = cast("Sequence[Any]", entry)  # longueur variable (3 ou 4), lue par index
+        _lv = int(_e[3]) if len(_e) >= 4 and _e[3] is not None else 0
+        plan.append((str(_e[0]), int(_e[1]), int(_e[2]), _lv))
 
     unit = get_unit_by_id(game_state, unit_id)
     if not unit:

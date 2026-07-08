@@ -280,7 +280,7 @@ class W40KEngine(gym.Env):
             # Store scenario terrain for game_state initialization
             self._scenario_wall_hexes = scenario_wall_hexes
             # Sous-ensemble Solid/dense (rule 13.5 Gone to Ground). None si absent (jamais
-            # de fallback vers wall_hexes complet : un mur non typé n'est pas Solid-prouvable).
+            # de repli vers wall_hexes complet : un mur non typé n'est pas Solid-prouvable).
             self._scenario_dense_wall_hexes = scenario_result.get("dense_wall_hexes")
             self._scenario_wall_ref = scenario_result.get("wall_ref")
             self._scenario_objectives = scenario_objectives
@@ -5770,7 +5770,7 @@ class W40KEngine(gym.Env):
             normalized_wall_hexes.add((wall_col, wall_row))
         self._scenario_wall_hexes = sorted(normalized_wall_hexes)
 
-        # Murs Solid/dense (rule 13.5). None si absent → set vide (jamais de fallback wall_hexes).
+        # Murs Solid/dense (rule 13.5). None si absent → set vide (jamais de repli wall_hexes).
         normalized_dense_wall_hexes = set()
         for raw_wall in (scenario_result.get("dense_wall_hexes") or []):
             if not isinstance(raw_wall, (list, tuple)) or len(raw_wall) != 2:

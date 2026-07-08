@@ -1421,7 +1421,7 @@ class GameStateManager:
 
         ``only_type`` (ex: "dense") restreint aux groupes de murs typés — set Solid/dense (rule
         13.5). La forme brute ``wall_hexes`` (hexes pré-rasterisés, sans ``type``) n'est pas
-        classifiable → renvoie [] quand only_type est demandé (pas de fallback)."""
+        classifiable → renvoie [] quand only_type est demandé (pas de repli)."""
         if isinstance(wall_ref, str) and wall_ref.strip() == "random":
             scenario_parent = Path(scenario_file).parent
             if scenario_parent.name != "scenario":

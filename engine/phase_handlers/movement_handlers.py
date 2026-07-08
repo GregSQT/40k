@@ -37,6 +37,7 @@ from .shared_utils import (
     coherency_violation_flags,
     _compute_unit_occupied_hexes, _squad_is_in_enemy_er,
     roll_advance_for_squad,
+    MovePlan,
 )
 from engine.hex_utils import (
     _hex_center,
@@ -1786,7 +1787,7 @@ def _euclidean_ground_anchor_multihex(
     thru_ez: bool,
     thru_enemy: bool,
     thru_friendly: bool,
-) -> Tuple[List[Tuple[int, int]], Set[Tuple[int, int]], int]:
+) -> Tuple[List[Tuple[int, int]], Set[Tuple[int, int]], int, Dict[Tuple[int, int], float], Set[Tuple[int, int]]]:
     """Pool d'ancre GROUND euclidien multi-hex (preview escouade), miroir du model pool par-fig.
 
     Champ géodésique du centre de l'ancre (round: clearance continue ; non-round: empreinte
@@ -1843,7 +1844,10 @@ def _euclidean_ground_anchor_multihex(
     for _dc, _dr in _s_offs:
         footprint_zone.add((start_col + _dc, start_row + _dr))
     footprint_zone -= walls
-    return valid_destinations, footprint_zone, len(field)
+    # ``field`` (dict cellule→distance-norme) et ``obstacles_tr`` renvoyés pour réutilisation par le
+    # champ multi-niveaux : ce sont exactement le champ sol et les obstacles de traversée du move
+    # principal (règle 03.01), ce qui évite de recalculer tout le champ sol dans reachable_multilevel_field.
+    return valid_destinations, footprint_zone, len(field), field, obstacles_tr
 
 
 @profile_move_pool_build
@@ -1858,6 +1862,8 @@ def _multilevel_floor_destinations(
     off_even: Tuple[Tuple[int, int], ...],
     off_odd: Tuple[Tuple[int, int], ...],
     fly_active: bool,
+    precomputed_ground_field: Optional[Dict[Tuple[int, int], float]] = None,
+    precomputed_ground_obstacles: Optional[Set[Tuple[int, int]]] = None,
 ) -> Dict[int, List[Tuple[int, int]]]:
     """Destinations de move sur les ÉTAGES (niveaux >= 1), via ``reachable_multilevel_field``.
 
@@ -1874,7 +1880,7 @@ def _multilevel_floor_destinations(
     l'engagement/EZ ennemie EN HAUTEUR à la destination n'est pas encore modélisé (aucun ennemi à
     l'étage aujourd'hui) — à traiter avec la LoS/engagement 3D.
     """
-    from engine.terrain_utils import floor_hexes_at_level, validate_floor_placement
+    from engine.terrain_utils import floor_hexes_at_level, footprint_within_floor
     from engine.game_state import unit_can_occupy_upper_floor
 
     terrain_areas = game_state.get("terrain_areas", [])  # get allowed (peut être vide)
@@ -1889,6 +1895,11 @@ def _multilevel_floor_destinations(
     walls = game_state.get("wall_hexes", set())  # get allowed
     inches_to_subhex = int(require_key(game_state, "inches_to_subhex"))
     unit_id_str = str(require_key(unit, "id"))
+
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+    import time as _mlf_clock
+    _mlf_pt = perf_timing_enabled(game_state)
+    _mlf_t0 = _mlf_clock.perf_counter() if _mlf_pt else None
 
     floor_hexes_by_level = {lv: floor_hexes_at_level(terrain_areas, lv) for lv in present}
     height_by_level: Dict[int, float] = {0: 0.0}
@@ -1923,9 +1934,16 @@ def _multilevel_floor_destinations(
     if not _reachable_any:
         return {}
 
+    _mlf_t_precheck = _mlf_clock.perf_counter() if _mlf_pt else None
     from engine.hex_utils import get_neighbors as _neighbors
     walls_set = set(walls)
-    obstacles_by_level: Dict[int, Set[Tuple[int, int]]] = {0: set(ground_obstacles)}
+    # Niveau 0 : si le champ sol du move principal est fourni (chemin euclidien multi-hex), on réutilise
+    # SES obstacles de traversée (règle 03.01 : murs + ennemis, ami/EZ traversables selon config) au lieu
+    # de ``ground_obstacles`` (qui durcit en bloquant les alliés). Garantit la cohérence avec le champ
+    # pré-calculé injecté dans ``reachable_multilevel_field`` (mêmes obstacles → même champ sol).
+    _reuse_ground = precomputed_ground_field is not None and precomputed_ground_obstacles is not None
+    _level0_obstacles = precomputed_ground_obstacles if _reuse_ground else set(ground_obstacles)
+    obstacles_by_level: Dict[int, Set[Tuple[int, int]]] = {0: _level0_obstacles}
     occupied_by_level: Dict[int, Set[Tuple[int, int]]] = {}
     for lv, fh in floor_hexes_by_level.items():
         figs_lv = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str, level=lv)
@@ -1936,29 +1954,46 @@ def _multilevel_floor_destinations(
         ring = {nb for cell in fh for nb in _neighbors(cell[0], cell[1]) if nb not in fh}
         obstacles_by_level[lv] = ring | walls_set | figs_lv
 
+    _mlf_t_setup = _mlf_clock.perf_counter() if _mlf_pt else None
+    _mlf_field_log: Optional[List[Tuple[int, int, float]]] = [] if _mlf_pt else None
     field = reachable_multilevel_field(
         start_pos, 0, base_shape, base_size, off_even, off_odd,
         board_cols, board_rows, obstacles_by_level, floor_hexes_by_level, height_by_level,
         move_range * ENGAGEMENT_NORM_HEX_WIDTH, allow_vertical=True, ignore_vertical_cost=fly_active,
+        precomputed_start_field=(precomputed_ground_field if _reuse_ground else None),
+        field_call_log=_mlf_field_log,
     )
+    _mlf_t_field = _mlf_clock.perf_counter() if _mlf_pt else None
 
-    unit_stub = {
-        "id": unit_id_str,
-        "UNIT_KEYWORDS": require_key(unit, "UNIT_KEYWORDS"),
-        "BASE_SHAPE": base_shape,
-        "BASE_SIZE": base_size,
-        "orientation": int(require_key(unit, "orientation")) if "orientation" in unit else 0,
-    }
+    # Mots-clés (13.06) déjà vérifiés en tête (unit_can_occupy_upper_floor) et floors non vides
+    # (``present``) → la seule condition variable par cellule est l'empreinte-sur-plancher. On appelle
+    # directement ``footprint_within_floor`` avec ``floor_hexes_by_level[lv]`` (déjà calculé) au lieu de
+    # ``validate_floor_placement`` (qui reconstruit ``floor_hexes_at_level`` + re-teste le mot-clé À CHAQUE
+    # cellule). Résultat identique ; l'occupation du niveau reste testée séparément ci-dessous.
+    _orientation = int(require_key(unit, "orientation")) if "orientation" in unit else 0
     result: Dict[int, List[Tuple[int, int]]] = {lv: [] for lv in present}
     for (c, r, lv), _d in field.items():
         if lv == 0:
             continue  # le sol reste la liste 2D existante (source unique)
         if (c, r) in walls or (c, r) in occupied_by_level.get(lv, set()):
             continue  # destination jamais sur mur ni sur case occupée du niveau (03.01)
-        ok, _reason = validate_floor_placement(unit_stub, c, r, lv, terrain_areas)
-        if ok:
+        if footprint_within_floor(c, r, base_shape, base_size, _orientation, floor_hexes_by_level[lv]):
             result[lv].append((c, r))
-    return {lv: cells for lv, cells in result.items() if cells}
+    _out = {lv: cells for lv, cells in result.items() if cells}
+    if _mlf_pt and _mlf_t0 is not None:
+        _mlf_t_end = _mlf_clock.perf_counter()
+        _calls = _mlf_field_log or []
+        _calls_desc = ",".join(f"L{lv}:n{n}:{dt:.4f}" for lv, n, dt in _calls) or "none"
+        _field_call_s = sum(dt for _, _, dt in _calls)
+        append_perf_timing_line(
+            f"MULTILEVEL_FLOOR_DETAIL unit={unit_id_str} reuse_ground={_reuse_ground} "
+            f"setup_s={(_mlf_t_setup - _mlf_t0):.6f} precheck_s={(_mlf_t_precheck - _mlf_t0):.6f} "
+            f"field_s={(_mlf_t_field - _mlf_t_setup):.6f} field_calls_s={_field_call_s:.6f} "
+            f"validate_s={(_mlf_t_end - _mlf_t_field):.6f} total_s={(_mlf_t_end - _mlf_t0):.6f} "
+            f"n_field_calls={len(_calls)} field_calls=[{_calls_desc}] "
+            f"floor_dest_n={sum(len(v) for v in _out.values())}"
+        )
+    return _out
 
 
 def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str, read_only: bool = False) -> List[Tuple[int, int]]:
@@ -2349,6 +2384,12 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     _check_ez = not _thru_ez
     _friendly_occ = (_occupied - _enemy_occ) if _check_friendly else frozenset()
 
+    # Champ sol + obstacles de traversée réutilisables par le multi-niveaux (chemin euclidien
+    # multi-hex uniquement). None sur les autres chemins → _multilevel_floor_destinations recalcule
+    # son propre champ sol (comportement inchangé).
+    _ground_field: Optional[Dict[Tuple[int, int], float]] = None
+    _ground_obstacles_tr: Optional[Set[Tuple[int, int]]] = None
+
     _m_bfs_start = _perf_clock.perf_counter() if _pt else None
     if is_single_hex and _use_euclidean_move:
         # Champ géodésique any-angle. Obstacles = murs + (ennemis/amis/bande-EZ selon toggles) ;
@@ -2426,7 +2467,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             # Ground multi-hex euclidien (preview escouade) — miroir du model pool par-fig
             # (round: clearance continue ; non-round: empreinte discrète). Le gym (move_gym=hex)
             # garde le chemin vectorisé hex ci-dessous.
-            valid_destinations, footprint_zone, visited_n = _euclidean_ground_anchor_multihex(
+            valid_destinations, footprint_zone, visited_n, _ground_field, _ground_obstacles_tr = _euclidean_ground_anchor_multihex(
                 game_state, unit, start_col, start_row, start_pos, move_range,
                 base_shape, base_size, _off_even, _off_odd,
                 _bcols, _brows, _walls, _occupied, _enemy_occ, _enemy_adj,
@@ -2498,11 +2539,15 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     # (liste) sert de MIROIR TRANSITOIRE = pool[0] → le front actuel ne change pas tant qu'il n'est pas
     # migré vers le dict ``_by_level``. Sans étage déclaré, l'adaptateur renvoie {} (no-op, zéro régression).
     # (Chemin FLY : retourne plus haut ; ``_fly_active`` est donc False ici. Fly+étages = étape ultérieure.)
+    _m_floor_start = _perf_clock.perf_counter() if _pt else None
     _floor_dest = _multilevel_floor_destinations(
         game_state, unit, start_pos, move_range,
         (set(wall_hexes_set) | occupied_positions) - {start_pos},
         unit["BASE_SHAPE"], base_size, _off_even, _off_odd, _fly_active,
+        precomputed_ground_field=_ground_field,
+        precomputed_ground_obstacles=_ground_obstacles_tr,
     )
+    _m_floor_end = _perf_clock.perf_counter() if _pt else None
     _pool_by_level: Dict[int, List[Tuple[int, int]]] = {0: valid_destinations}
     _pool_by_level.update(_floor_dest)
     game_state["valid_move_destinations_pool_by_level"] = _pool_by_level
@@ -2523,10 +2568,11 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         _post_bfs = _m_ground_done - _m_bfs_end
         _fu = _m_ground_before_sync - _m_bfs_end
         _ml = _m_ground_done - _m_ground_before_sync
+        _mlf = (_m_floor_end - _m_floor_start) if (_m_floor_start is not None and _m_floor_end is not None) else 0.0
         append_perf_timing_line(
             f"MOVE_POOL_BUILD unit={unit_id} fly=False single_hex={is_single_hex} prep_s={_m_prep_end - _m0:.6f} "
             f"bfs_s={_m_bfs_end - _m_bfs_start:.6f} post_bfs_s={_post_bfs:.6f} "
-            f"footprint_union_s={_fu:.6f} mask_loops_s={_ml:.6f} "
+            f"footprint_union_s={_fu:.6f} multilevel_floor_s={_mlf:.6f} mask_loops_s={_ml:.6f} "
             f"total_s={_m_ground_done - _m0:.6f} visited={visited_n} valid={len(valid_destinations)} "
             f"anchors_n={len(valid_destinations)} footprint_hex_n={len(footprint_zone)} "
             f"MOVE={move_range} base={base_size} fp={_fp_n}"
@@ -3078,7 +3124,7 @@ def movement_build_model_destinations_pool(
 
 
 def movement_preview_move_plan(
-    game_state: Dict[str, Any], squad_id: str, plan: List[Tuple[str, int, int]]
+    game_state: Dict[str, Any], squad_id: str, plan: MovePlan
 ) -> Dict[str, Any]:
     """Dry-run d'un plan provisoire par-figurine (move normal). Aucune ecriture.
 

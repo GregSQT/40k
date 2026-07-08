@@ -28,7 +28,7 @@ export class RangeHellblaster extends TroopRangeElite {
   static ICON = Hellblaster.ICON;
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = Hellblaster.BASE_SIZE; // Size of the base
-  static MODEL_HEIGHT = Hellblaster.MODEL_HEIGHT;  // Height of the model (inches). IMPORTANT: temporary indicative value
+  static MODEL_HEIGHT = Hellblaster.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = Hellblaster.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

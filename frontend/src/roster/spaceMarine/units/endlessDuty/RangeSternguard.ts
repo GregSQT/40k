@@ -30,7 +30,7 @@ export class RangeSternguard extends TroopRangeSwarm {
   static ICON = SternguardVeteranBoltRifle.ICON;
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = SternguardVeteranBoltRifle.BASE_SIZE; // Size of the base
-  static MODEL_HEIGHT = SternguardVeteranBoltRifle.MODEL_HEIGHT;  // Height of the model (inches). IMPORTANT: temporary indicative value
+  static MODEL_HEIGHT = SternguardVeteranBoltRifle.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = SternguardVeteranBoltRifle.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

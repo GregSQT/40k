@@ -160,6 +160,8 @@ def reachable_multilevel_field(
     budget_norm: float,
     allow_vertical: bool = True,
     ignore_vertical_cost: bool = False,
+    precomputed_start_field: Optional[Dict[Tuple[int, int], float]] = None,
+    field_call_log: Optional[List[Tuple[int, int, float]]] = None,
 ) -> Dict[Tuple[int, int, int], float]:
     """Champ géodésique MULTI-NIVEAUX (mouvement vertical, chantier 3, archi validée par le spike).
 
@@ -199,9 +201,35 @@ def reachable_multilevel_field(
 
     best: Dict[Tuple[int, int, int], float] = {}
     # Frontière de seeds par niveau : {level: {cell: dist_init}}. Départ = start_pos @ start_level.
-    seeds_by_level: Dict[int, Dict[Tuple[int, int], float]] = {
-        start_level: {(start_pos[0], start_pos[1]): 0.0}
-    }
+    if precomputed_start_field is not None:
+        # Le champ du niveau de départ est déjà calculé (move principal, mêmes obstacles/budget) :
+        # on l'injecte directement dans ``best`` et on amorce les portails, SANS relancer
+        # ``_euclidean_move_field_multi`` sur ce niveau (le poste coûteux). Les ré-expansions
+        # ultérieures de ce niveau (descente via portail) restent gérées par la boucle ci-dessous,
+        # mais sont quasi toujours élaguées car ``best`` contient déjà la distance directe (plus courte).
+        seeds_by_level: Dict[int, Dict[Tuple[int, int], float]] = {}
+        # Amorçage direct de ``best`` pour TOUTES les cellules sol atteignables (nécessaire pour élaguer
+        # les ré-expansions en descente : une case déjà atteinte en direct ne sera pas recalculée).
+        # Les cellules de ``precomputed_start_field`` sont uniques → affectation inconditionnelle.
+        for (cc, cr), dc in precomputed_start_field.items():
+            if dc <= budget_norm:
+                best[(cc, cr, start_level)] = dc
+        # Seeds de portail : n'itère que les entrées de portail du niveau de départ (≈ périmètre
+        # d'étage), pas les milliers de cellules sol. Résultat identique (mêmes portails, mêmes coûts).
+        for (plevel, pc, pr), edges in portals.items():
+            if plevel != start_level:
+                continue
+            dc = best.get((pc, pr, start_level))
+            if dc is None:
+                continue
+            for (nlevel, nc, nr, edge_cost) in edges:
+                nd = dc + edge_cost
+                if nd <= budget_norm and nd < best.get((nlevel, nc, nr), math.inf):
+                    lvl_seeds = seeds_by_level.setdefault(nlevel, {})
+                    if nd < lvl_seeds.get((nc, nr), math.inf):
+                        lvl_seeds[(nc, nr)] = nd
+    else:
+        seeds_by_level = {start_level: {(start_pos[0], start_pos[1]): 0.0}}
     # Borne de rounds : chaque round propage d'un saut de niveau ; converge en O(niveaux) (garde-fou).
     max_rounds = 2 * (len(floor_hexes_by_level) + 2) + 2
     rounds = 0
@@ -215,10 +243,19 @@ def reachable_multilevel_field(
             }
             if not active:
                 continue
-            field = _euclidean_move_field_multi(
-                active, base_shape, base_size, off_even, off_odd,
-                obstacles_by_level.get(level, set()), board_cols, board_rows, budget_norm,
-            )
+            if field_call_log is not None:
+                import time as _t
+                _fc0 = _t.perf_counter()
+                field = _euclidean_move_field_multi(
+                    active, base_shape, base_size, off_even, off_odd,
+                    obstacles_by_level.get(level, set()), board_cols, board_rows, budget_norm,
+                )
+                field_call_log.append((level, len(active), _t.perf_counter() - _fc0))
+            else:
+                field = _euclidean_move_field_multi(
+                    active, base_shape, base_size, off_even, off_odd,
+                    obstacles_by_level.get(level, set()), board_cols, board_rows, budget_norm,
+                )
             for (cc, cr), dc in field.items():
                 key = (cc, cr, level)
                 if dc < best.get(key, math.inf):

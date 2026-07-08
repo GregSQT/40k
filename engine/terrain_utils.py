@@ -101,7 +101,7 @@ def floor_height_at(
     Niveau >= 1 : ``height_inches`` du floor (format B) contenant la case ``(col, row)`` à ce niveau.
     La résolution est PAR POSITION (pas un mapping global niveau->hauteur) : deux ruines peuvent
     avoir un floor au même ``level`` avec des ``height_inches`` differents (cf. stage.md §4.1).
-    Aucun fallback : une figurine marquee ``level >= 1`` dont la case n'appartient a aucun floor de
+    Aucun repli : une figurine marquee ``level >= 1`` dont la case n'appartient a aucun floor de
     ce niveau est une incoherence d'etat -> ``ValueError`` explicite (CLAUDE.md, pas de masquage)."""
     if int(level) <= 0:
         return 0.0

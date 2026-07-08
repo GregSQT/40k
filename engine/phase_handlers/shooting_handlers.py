@@ -2186,7 +2186,7 @@ def _unit_has_firable_target(game_state: Dict[str, Any], unit: Dict[str, Any],
     shooter_entry = units_cache.get(shooter_id_str)
     shooter_col, shooter_row = require_unit_position(unit, game_state)
     shooter_fp = shooter_entry.get("occupied_hexes", {(shooter_col, shooter_row)}) if shooter_entry else {(shooter_col, shooter_row)}
-    shooter_player_int = int(unit["player"]) if unit["player"] is not None else None
+    shooter_player_int = require_present(int(unit["player"]) if unit["player"] is not None else None, "unit['player']")
     melee_range = get_engagement_zone(game_state)
 
     for enemy_id, enemy_entry in units_cache.items():
@@ -4205,7 +4205,8 @@ def hidden_enemy_out_of_detection(
     _bsize = bsize if bsize is not None else 1
     _borient = int(borient) if borient is not None else 0
     for i, model_hexes in enumerate(footprints):
-        center = centers[i] if centers[i] is not None else model_hexes[0]
+        _center_i = centers[i]  # local → narrowing fiable (pyright ne narrow pas centers[i] indexé)
+        center = _center_i if _center_i is not None else model_hexes[0]
         model_socle = Socle(
             _bshape, _bsize, center[0], center[1], set(model_hexes), [center], _borient
         )

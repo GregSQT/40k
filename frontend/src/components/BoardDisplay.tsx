@@ -3054,9 +3054,8 @@ export const drawBoard = (
               : 0x22c55e;
       };
       for (const zone of boardConfig.terrain_zones) {
-        const floors = (
-          zone as { floors?: Array<{ level: number; vertices: [number, number][] }> }
-        ).floors;
+        const floors = (zone as { floors?: Array<{ level: number; vertices: [number, number][] }> })
+          .floors;
         if (!Array.isArray(floors)) continue;
         const color = zoneContourColor(zone.id);
         for (const floor of floors) {
@@ -3090,9 +3089,8 @@ export const drawBoard = (
         r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN,
       ];
       for (const zone of boardConfig.terrain_zones) {
-        const floors = (
-          zone as { floors?: Array<{ level: number; vertices: [number, number][] }> }
-        ).floors;
+        const floors = (zone as { floors?: Array<{ level: number; vertices: [number, number][] }> })
+          .floors;
         if (!Array.isArray(floors)) continue;
         for (const floor of floors) {
           if (floor.level !== currentLevel) continue;

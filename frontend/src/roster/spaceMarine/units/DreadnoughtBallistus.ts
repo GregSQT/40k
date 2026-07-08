@@ -40,7 +40,7 @@ export class DreadnoughtBallistus extends EliteRangeElite {
   static ICON = "/icons/DreadnoughtBallistus.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 35; // Size of the base
-  static MODEL_HEIGHT = 4;  // Height of the model (inches). IMPORTANT: temporary indicative value
+  static MODEL_HEIGHT = 4; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 2.0; // Size of the icon
   static ILLUSTRATION_RATIO = 120; // Illustration size ratio in percent
 

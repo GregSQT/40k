@@ -89,6 +89,8 @@
     "WarpSpiderExarchSpinner": "aeldari/units/WarpSpiderExarchSpinner",
     "Witchseeker": "adeptusCustodes/units/Witchseeker",
     "WolfGuardTerminator": "spaceMarine/units/WolfGuardTerminator",
+    "WolfGuardTerminatorPackLeader": "spaceMarine/units/WolfGuardTerminatorPackLeader",
+    "WolfGuardTerminatorAssaultCannon": "spaceMarine/units/WolfGuardTerminatorAssaultCannon",
     "WraithguardDScythe": "aeldari/units/WraithguardDScythe",
     "WraithguardWraithcannon": "aeldari/units/WraithguardWraithcannon",
     "Zoanthrope": "tyranid/units/Zoanthrope",

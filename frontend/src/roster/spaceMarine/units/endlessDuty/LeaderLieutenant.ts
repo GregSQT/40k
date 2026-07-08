@@ -45,7 +45,7 @@ export class LeaderLieutenant extends LeaderEliteMeleeElite {
   static ICON = "/icons/LieutenantPowerFistPlasmaPistol.webp";
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = LieutenantPowerFistPlasmaPistol.BASE_SIZE; // Size of the base
-  static MODEL_HEIGHT = LieutenantPowerFistPlasmaPistol.MODEL_HEIGHT;  // Height of the model (inches). IMPORTANT: temporary indicative value
+  static MODEL_HEIGHT = LieutenantPowerFistPlasmaPistol.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = LieutenantPowerFistPlasmaPistol.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

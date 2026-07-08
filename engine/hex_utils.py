@@ -1342,7 +1342,7 @@ def build_dense_wall_set(game_state: Dict[str, Any]) -> Set[Tuple[int, int]]:
     Sous-ensemble de wall_hexes limité aux murs typés ``"dense"`` à la source. Sert la règle
     13.5 (Gone to Ground) : seul un terrain Solid intervenant peut rendre un modèle "gone to
     ground", pas une simple obscuring area. Les murs sans type (forme brute ``wall_hexes`` sans
-    classification) ne sont PAS Solid-prouvables → absents de ce set (aucun fallback : on ne
+    classification) ne sont PAS Solid-prouvables → absents de ce set (aucun repli : on ne
     déclenche GtG que derrière un terrain dense avéré)."""
     raw = game_state.get("dense_wall_hexes")
     if not raw:

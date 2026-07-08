@@ -4,7 +4,7 @@ engine/phase_handlers/shared_utils.py - Shared utility functions for phase handl
 Functions used across multiple phase handlers to avoid duplication.
 """
 
-from typing import Dict, List, Tuple, Set, Optional, Any, Union, Callable, cast, TYPE_CHECKING
+from typing import Dict, List, Tuple, Set, Optional, Any, Union, Callable, Sequence, Mapping, cast, TYPE_CHECKING
 from dataclasses import dataclass
 import copy
 import inspect
@@ -13,6 +13,14 @@ if TYPE_CHECKING:
     from engine.hex_utils import Socle
 
 from shared.data_validation import require_key
+
+# --- Type de plan de mouvement (source unique) ---------------------------------
+# Une entrée positionne UNE figurine : (model_id, col, row) OU (model_id, col, row, level).
+# Le 4e élément (niveau/étage de destination) est optionnel ; None = « garder le niveau courant ».
+# Paramètres typés en ``Sequence`` (covariant) pour accepter indifféremment les listes de
+# 3-uplets et de 4-uplets produites par les phases move/charge.
+MovePlanEntry = Union[Tuple[str, int, int], Tuple[str, int, int, Optional[int]]]
+MovePlan = Sequence[MovePlanEntry]
 from engine.action_log_utils import append_action_log
 from engine.combat_utils import (
     get_unit_coordinates,
@@ -566,7 +574,7 @@ def _build_models_for_unit(
 
     # Niveau vertical de l'unité (ancre). Chaque figurine hérite du niveau de l'unité
     # sauf override explicite spec["level"] (escouade répartie sur plusieurs étages, §2.5).
-    # 'level' optionnel = sol (0), aligné sur create_unit (game_state.py `config.get("level", 0)`,
+    # 'level' optionnel = sol (0), aligné sur create_unit (game_state.py, level défaut 0),
     # défaut métier « scénarios sans étages »). Pas un masquage d'erreur : la validation (int >= 0)
     # est faite en amont par _validate_level dans create_unit ; ici on lit une unité déjà construite.
     unit_level = int(unit.get("level", 0))  # get allowed (champ optionnel, défaut sol)
@@ -3226,7 +3234,7 @@ def _validate_plan_coherency(
 
 
 def validate_move_plan(
-    plan: List[Tuple[str, int, int]],
+    plan: MovePlan,
     game_state: Dict[str, Any],
     constraints: Optional[Dict[str, Any]] = None,
 ) -> bool:
@@ -3258,7 +3266,7 @@ def validate_move_plan(
     squad_id = str(first_model["squad_id"])
     player = int(first_model["player"])
 
-    def _target_level(entry: Tuple[Any, ...]) -> int:
+    def _target_level(entry: Sequence[Any]) -> int:
         """Niveau (étages) VISÉ par la fig dans ce plan : 4e élément si fourni (destination
         verticale), sinon niveau committé (models_cache). Ne PAS déduire du models_cache quand
         le plan spécifie un niveau cible — sinon un move vers l'étage est validé contre
@@ -3805,7 +3813,7 @@ def _synth_model_entry(
         synth["occupied_hexes_by_model"] = {"_synth_model": anchor}
         synth["floor_height_by_model"] = {
             "_synth_model": floor_height_at(
-                game_state.get("terrain_areas", []), int(col), int(row), int(level)
+                game_state.get("terrain_areas", []), int(col), int(row), int(level)  # get allowed (board sans terrain)
             )
         }
         synth["MODEL_HEIGHT"] = float(require_key(squad_entry, "MODEL_HEIGHT"))
@@ -4033,7 +4041,7 @@ def charge_build_valid_plan(
 
 
 def commit_move(
-    plan: "List[Tuple[str, int, int]] | List[Tuple[str, int, int, int]]",
+    plan: MovePlan,
     game_state: Dict[str, Any],
     move_type: str,
 ) -> None:

@@ -529,8 +529,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
    */
   const [squadMovePlan, setSquadMovePlan] = useState<{
     unitId: number;
-    /** Positions provisoires courantes (model_id -> {col,row}). */
-    models: Record<string, { col: number; row: number }>;
+    /** Positions provisoires courantes (model_id -> {col,row,level?}). */
+    models: Record<string, { col: number; row: number; level?: number }>;
     /** Positions de DEBUT de mode (pour reset par-fig clic droit + cancel escouade). */
     originModels: Record<string, { col: number; row: number }>;
     activeModelId: string | null;
@@ -1371,7 +1371,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               `squad_select_weapon: hidden_detection_info_by_unit_id.${tid} must be an object`
             );
           }
-          const { detection_inches, too_far } = info as Record<string, unknown>;
+          const { detection_inches, too_far } = info as unknown as Record<string, unknown>;
           if (detection_inches !== 15 && detection_inches !== 12) {
             throw new Error(
               `squad_select_weapon: hidden_detection_info_by_unit_id.${tid}.detection_inches must be 12 or 15`
@@ -5313,7 +5313,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   /** Dry-run du plan de déploiement → maj voile rouge / cohésion / can_validate. */
   const refreshDeployPlanValidity = useCallback(
-    async (unitId: number, models: Record<string, { col: number; row: number; level?: number }>) => {
+    async (
+      unitId: number,
+      models: Record<string, { col: number; row: number; level?: number }>
+    ) => {
       // Étages : niveau PAR FIGURINE, capturé au drop (models[mid].level) — PAS le niveau de vue
       // au moment du refresh (sinon changer d'étage entre la pose et la validation perd le niveau).
       // 0 = sol → 3-uplet inchangé ; >= 1 → 4-uplet [mid,col,row,level] (voile rouge 13.06).

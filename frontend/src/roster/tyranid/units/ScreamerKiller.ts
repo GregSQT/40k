@@ -33,7 +33,7 @@ export class ScreamerKiller extends EliteMeleeElite {
   static ICON = "/icons/ScreamerKiller.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 35; // Size of the base
-  static MODEL_HEIGHT = 4;  // Height of the model (inches). IMPORTANT: temporary indicative value
+  static MODEL_HEIGHT = 4; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 2.6; // Size of the icon
   static ILLUSTRATION_RATIO = 130; // Illustration size ratio in percent
 

@@ -34,7 +34,7 @@ export class LeaderCaptainTerminator extends LeaderEliteMeleeElite {
   static ICON = "/icons/CaptainTerminatorRelicFistCombi.webp";
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = CaptainTerminatorRelicFistCombi.BASE_SIZE; // Size of the base
-  static MODEL_HEIGHT = CaptainTerminatorRelicFistCombi.MODEL_HEIGHT;  // Height of the model (inches). IMPORTANT: temporary indicative value
+  static MODEL_HEIGHT = CaptainTerminatorRelicFistCombi.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = CaptainTerminatorRelicFistCombi.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

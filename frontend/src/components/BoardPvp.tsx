@@ -167,9 +167,14 @@ function parseBackendMoveLosPreviewPayload(
   }
   const detInfoRaw = result.hidden_detection_info_by_unit_id;
   if (!detInfoRaw || typeof detInfoRaw !== "object" || Array.isArray(detInfoRaw)) {
-    throw new Error("preview_shoot_from_position hidden_detection_info_by_unit_id must be an object");
+    throw new Error(
+      "preview_shoot_from_position hidden_detection_info_by_unit_id must be an object"
+    );
   }
-  const hiddenDetectionInfoByUnitId: Record<string, { detection_inches: 15 | 12; too_far: boolean }> = {};
+  const hiddenDetectionInfoByUnitId: Record<
+    string,
+    { detection_inches: 15 | 12; too_far: boolean }
+  > = {};
   for (const [unitId, info] of Object.entries(detInfoRaw as Record<string, unknown>)) {
     if (!info || typeof info !== "object" || Array.isArray(info)) {
       throw new Error(
@@ -470,7 +475,10 @@ type BoardProps = {
   /** Parallèle au cover : cibles cachées hors detection range pendant le blink de tir → œil rouge. */
   blinkingHiddenTooFarByUnitId?: Record<string, boolean>;
   /** Detection range effective (15" / 12" GtG) par ennemi caché pendant le blink de tir → badge numérique. */
-  blinkingHiddenDetectionInfoByUnitId?: Record<string, { detection_inches: 15 | 12; too_far: boolean }>;
+  blinkingHiddenDetectionInfoByUnitId?: Record<
+    string,
+    { detection_inches: 15 | 12; too_far: boolean }
+  >;
   blinkingLosCountByUnitId?: Record<string, number>;
   blinkingSquadAliveCount?: number;
   blinkingLosOverviewUnitId?: number | null;
@@ -494,7 +502,7 @@ type BoardProps = {
   /** Move par-figurine (squad.md brique 3) — plan provisoire non committe. */
   squadMovePlan?: {
     unitId: number;
-    models: Record<string, { col: number; row: number }>;
+    models: Record<string, { col: number; row: number; level?: number }>;
     originModels: Record<string, { col: number; row: number }>;
     activeModelId: string | null;
     perModelValid: Record<string, boolean>;
@@ -1818,12 +1826,12 @@ export default function Board({
   chargePlanForLevelRef.current = chargeMovePlan;
   const onSelectChargeModelForLevelRef = useRef(onSelectChargeModel);
   onSelectChargeModelForLevelRef.current = onSelectChargeModel;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: currentLevel est un déclencheur volontaire — au changement d'étage, on re-tire la sélection active pour rafraîchir les pools niveau-conscients ; le reste passe par des refs exprès.
   useEffect(() => {
     const moveActive = squadMovePlanRef.current?.activeModelId;
     if (moveActive) void squadMoveCallbacksRef.current.onSelectModelForMove?.(moveActive);
     const chargeActive = chargePlanForLevelRef.current?.activeModelId;
     if (chargeActive) void onSelectChargeModelForLevelRef.current?.(chargeActive);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentLevel]);
 
   const maxFloorLevel = useMemo(() => {
@@ -2321,9 +2329,9 @@ export default function Board({
     {}
   );
   /** Detection range effective (15" / 12" GtG) par ennemi caché en move preview → badge numérique. */
-  const [movePreviewLosDetectionInfoById, setMovePreviewLosDetectionInfoById] = useState<Record<string, { detection_inches: 15 | 12; too_far: boolean }>>(
-    {}
-  );
+  const [movePreviewLosDetectionInfoById, setMovePreviewLosDetectionInfoById] = useState<
+    Record<string, { detection_inches: 15 | 12; too_far: boolean }>
+  >({});
   /**
    * Rule 13.09 : model_ids "cachés" à la destination du move preview, calculés PAR LE BACKEND
    * (action preview_hidden_from_position → même fonction compute_unit_hidden_models qu'au drop).
@@ -9253,9 +9261,8 @@ export default function Board({
             // capturé au drop de la fig dans le plan (models[mid].level), fallback vue courante ;
             // effectif = ce niveau si l'empreinte ENTIÈRE tient sur son plancher (13.06), sinon sol.
             // Évite un badge de drag qui ment (montre 1) puis disparaît au commit (réel 0).
-            const planLevel = (
-              effectivePerModelPlan?.models[mid] as { level?: number } | undefined
-            )?.level;
+            const planLevel = (effectivePerModelPlan?.models[mid] as { level?: number } | undefined)
+              ?.level;
             const reqLevel = planLevel ?? currentLevel;
             const reqFloorSet = reqLevel >= 1 ? floorHexKeysByLevel.get(reqLevel) : undefined;
             if (reqLevel >= 1 && reqFloorSet) {
@@ -9873,9 +9880,8 @@ export default function Board({
             currentLevel >= 1 ? floorHexKeysByLevel.get(currentLevel) : undefined;
           const previewDeltaCol = movePreview.destCol - previewUnit.col;
           const previewDeltaRow = movePreview.destRow - previewUnit.row;
-          const previewUnitBaseShape = (
-            previewUnit as { BASE_SHAPE?: "round" | "oval" | "square" }
-          ).BASE_SHAPE;
+          const previewUnitBaseShape = (previewUnit as { BASE_SHAPE?: "round" | "oval" | "square" })
+            .BASE_SHAPE;
           const previewUnitBaseSize = (previewUnit as { BASE_SIZE?: number | [number, number] })
             .BASE_SIZE;
           const previewModelLevels: number[] = previewModelPositions.map(([mCol, mRow], idx) => {

@@ -55,7 +55,7 @@ export class TyranidWarriorRanged extends TroopRangeTroop {
   static ICON = "/icons/TyranidWarriorRanged.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 20; // Size of the base
-  static MODEL_HEIGHT = 2.5;  // Height of the model (inches). IMPORTANT: temporary indicative value
+  static MODEL_HEIGHT = 2.5; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 2.2; // Size of the icon
   static ILLUSTRATION_RATIO = 150; // Illustration size ratio in percent
 

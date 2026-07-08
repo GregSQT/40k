@@ -180,7 +180,7 @@ def _vertical_classes(
     Retour : ``({floor_height: [(col,row), …]}, model_height)``. Source : ``occupied_hexes_by_model``
     (centres) + ``floor_height_by_model`` (plancher par fig, chantier 4 étape 1) + ``MODEL_HEIGHT``
     (borne haute). Aucune de ces clés absente n'est tolérée en mode 3D : erreur explicite (câblage
-    incomplet), pas de fallback silencieux (CLAUDE.md)."""
+    incomplet), pas de repli silencieux (CLAUDE.md)."""
     by_model = entry.get("occupied_hexes_by_model")
     floor_h = entry.get("floor_height_by_model")
     if not by_model or floor_h is None or "MODEL_HEIGHT" not in entry:

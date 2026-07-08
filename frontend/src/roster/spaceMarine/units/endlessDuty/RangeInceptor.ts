@@ -27,7 +27,7 @@ export class RangeInceptor extends EliteRangeTroop {
   static ICON = InceptorBolter.ICON;
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = InceptorBolter.BASE_SIZE; // Size of the base
-  static MODEL_HEIGHT = InceptorBolter.MODEL_HEIGHT;  // Height of the model (inches). IMPORTANT: temporary indicative value
+  static MODEL_HEIGHT = InceptorBolter.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = InceptorBolter.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

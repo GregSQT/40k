@@ -2395,7 +2395,13 @@ export class UnitRenderer {
         const numColor = detectionInfo.too_far ? EYE_COLOR_TOO_FAR : 0xc8c8c8;
         centers.forEach(([cx, cy], i) => {
           if (flags[i]) {
-            drawNumberAt(cx, cy, `hidden-badge-${unitIdNum}-${i}`, detectionInfo.detection_inches, numColor);
+            drawNumberAt(
+              cx,
+              cy,
+              `hidden-badge-${unitIdNum}-${i}`,
+              detectionInfo.detection_inches,
+              numColor
+            );
           }
         });
       } else {
@@ -2412,7 +2418,13 @@ export class UnitRenderer {
     if (detectionInfo) {
       // En contexte per-tireur + unité cachée → badge numérique (hidden⟹cover implicite).
       const numColor = detectionInfo.too_far ? EYE_COLOR_TOO_FAR : 0xc8c8c8;
-      drawNumberAt(centerX, centerY, `hidden-badge-${unitIdNum}`, detectionInfo.detection_inches, numColor);
+      drawNumberAt(
+        centerX,
+        centerY,
+        `hidden-badge-${unitIdNum}`,
+        detectionInfo.detection_inches,
+        numColor
+      );
       return;
     }
     // Hors contexte per-tireur : œil rouge (trop loin) ou gris (couvert/caché persistant).
@@ -2466,8 +2478,7 @@ export class UnitRenderer {
       const bx = cx - scaledOffset; // haut-gauche
       const by = cy - scaledOffset;
       // Couleur par niveau : 0 blanc, 1 vert, 2 orange, 3+ rouge (sur rond noir pour le contraste).
-      const lvColor =
-        lv >= 3 ? 0xef4444 : lv === 2 ? 0xf59e0b : lv === 1 ? 0x22c55e : 0xffffff;
+      const lvColor = lv >= 3 ? 0xef4444 : lv === 2 ? 0xf59e0b : lv === 1 ? 0x22c55e : 0xffffff;
       const g = new PIXI.Graphics();
       g.beginFill(0x000000, 0.85);
       g.lineStyle(Math.max(1, r * 0.14), lvColor, 0.95);

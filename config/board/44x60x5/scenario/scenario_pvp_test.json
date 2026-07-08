@@ -88,7 +88,7 @@
 
     { "id": 101, "unit_type": "WingedTyranidPrime",   "player": 2, "col": 133,   "row": 115 },
     { "id": 102, "unit_type": "Neurotyrant",          "player": 2, "col": 87,   "row": 197 },
-    { "id": 103, "unit_type": "Psychophage",          "player": 1, "col": 41,   "row": 74 },
+    { "id": 103, "unit_type": "Psychophage",          "player": 2, "col": 41,   "row": 74 },
     { "id": 104, "unit_type": "ScreamerKiller",       "player": 2, "col": 204,  "row": 96 },
     { "id": 105, "unit_type": "RipperSwarm",          "player": 2, "col": 20,   "row": 160 },
     { "id": 106, "unit_type": "RipperSwarm",          "player": 2, "col": 8,    "row": 200 },

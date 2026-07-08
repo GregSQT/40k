@@ -36,7 +36,7 @@ export class Psychophage extends TroopMeleeTroop {
   static BASE_SHAPE = "oval"; // Shape of the base
   /** Diamètres sur la grille micro-hex (engine/hex_utils ``compute_occupied_hexes``), pas des mm. */
   static BASE_SIZE = [47, 36];
-  static MODEL_HEIGHT = 4;  // Height of the model (inches). IMPORTANT: temporary indicative value
+  static MODEL_HEIGHT = 4; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 2.2; // Size of the icon
   static ILLUSTRATION_RATIO = 120; // Illustration size ratio in percent
 
