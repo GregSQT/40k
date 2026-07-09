@@ -32,7 +32,7 @@ from .shared_utils import (
     unit_has_rule_effect as shared_unit_has_rule_effect,
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
     get_source_unit_rule_display_name_for_effect as shared_get_source_unit_rule_display_name_for_effect,
-    build_occupied_positions_set, enemy_footprints_at_level, compute_candidate_footprint, is_footprint_placement_valid,
+    build_occupied_positions_set, build_enemy_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
     is_placement_valid_with_clearance, candidate_overlaps_any_unit,
     _synth_model_entry,
     MovePlan,
@@ -1715,7 +1715,7 @@ def charge_build_model_destinations_pool(
     # autres unités amies) ne bloquent pas le passage. Blocage par-figurine niveau 0 : une fig ennemie à
     # l'étage ne gêne pas un chargeur au sol (03.04 engagement 3D), contrairement à l'union tous niveaux
     # du units_cache qui durcirait le sol sous une cible en hauteur.
-    path_blocked = set(wall_hexes) | enemy_footprints_at_level(game_state, player, 0)
+    path_blocked = set(wall_hexes) | build_enemy_occupied_positions_set(game_state, current_player=player, level=0)
     # 03 « Ending a move » : le non-chevauchement final (murs + unités + coéquipières) est délégué à
     # _charge_model_placement_overlaps (clearance continu rond↔rond, méthode empreinte).
     # Take to the skies (21.03) : si le vol est actif, la traversée ignore tout ; seul le placement
@@ -1986,7 +1986,8 @@ def _compute_plan_context(
                 nontarget_entries.append(entry)
     # Blocage de traversée SOL par-figurine niveau 0 (ennemis) : une fig ennemie à l'étage ne bloque
     # pas le pas d'un chargeur au sol (03.04). Sert path_blocked (BFS 2D) et les obstacles sol du climb.
-    ground_enemy_blocked = enemy_footprints_at_level(game_state, player, 0)
+    # Miroir move/fight (build_enemy_occupied_positions_set).
+    ground_enemy_blocked = build_enemy_occupied_positions_set(game_state, current_player=player, level=0)
 
     # Coéquipières PAR-FIGURINE (chaque fig a sa base) : posées (plan) = bloquage stable ; non posées
     # = bloquage à l'origine (la fig mobile retire le sien dans _qualifying).
@@ -4618,8 +4619,8 @@ def _charge_model_pos_is_closer(
     if not target_fps:
         return False
     # Blocage de traversée SOL par-figurine niveau 0 (ennemis) : une fig ennemie à l'étage ne bloque
-    # pas le pas d'un chargeur au sol (03.04) — cf. enemy_footprints_at_level.
-    ground_enemy_blocked = enemy_footprints_at_level(game_state, player, 0)
+    # pas le pas d'un chargeur au sol (03.04) — miroir move/fight (build_enemy_occupied_positions_set).
+    ground_enemy_blocked = build_enemy_occupied_positions_set(game_state, current_player=player, level=0)
 
     # Géométrie PAR-FIGURINE : la fig mobile et chaque coéquipière utilisent LEUR propre base
     # (models_cache), pas celle de l'unité (cf. personnage attaché à plus grande base).
@@ -4937,8 +4938,8 @@ def charge_autoplace_plan(
         else:
             nontarget_entries.append(entry)
     # Blocage de traversée SOL par-figurine niveau 0 (ennemis) : une fig ennemie à l'étage ne bloque
-    # pas le pas d'un chargeur au sol (03.04) — cf. enemy_footprints_at_level.
-    ground_enemy_blocked = enemy_footprints_at_level(game_state, player, 0)
+    # pas le pas d'un chargeur au sol (03.04) — miroir move/fight (build_enemy_occupied_positions_set).
+    ground_enemy_blocked = build_enemy_occupied_positions_set(game_state, current_player=player, level=0)
     present_target_ids = [t for t in target_ids if t in target_fp_by_id]
     if not present_target_ids:
         raise ValueError(f"charge_autoplace_plan: aucune cible déclarée présente pour {squad_id}")

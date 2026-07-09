@@ -1183,3 +1183,122 @@ que le hex central). Base ronde inchangée (collision par disque euclidien, `fp`
   (`unit_entries_within_engagement_zone` sans `vertical_zone_inches`) ; le « closer » est mesuré en 2D
   horizontal vers la **projection** de la cible. Correct pour une cible en hauteur (distance 3D monotone à
   hauteur constante) mais pas 3D strict (cf. §2.7).
+
+## 8. Charge phase multi-niveaux — corrections
+
+Corrections apportées au flux de **charge** PvP (11.02–11.04), en cohérence avec le move (§3.4) et le
+fight (§7). La charge utilise l'engagement 3D (`vertical_zone_inches`) déjà en place ; les corrections
+portent sur le **confinement du bord d'étage** et le **blocage de traversée par niveau**.
+
+### 8.1 Confinement euclidien du bord de niveau — base ronde (§2.6, §13.06)
+
+Le test « socle entièrement sur l'étage » était en **hex rasterisé** (`fp <= floor_hexes`) pour toutes
+les bases, ce qui tolérait qu'un disque rond **déborde d'~½ hex** le bord du plancher (le rendu montrait
+le socle dépassant dans le vide alors que le moteur validait). Corrigé par un test **euclidien continu
+disque↔polygone** pour les bases rondes, aligné pixel-pour-pixel sur le rendu.
+
+- **Primitives** ([hex_utils.py](file:///home/greg/40k/engine/hex_utils.py)) : `disc_within_polygon`
+  (centre dans le polygone **et** distance min du centre à chaque arête ≥ rayon — exact pour tout polygone
+  simple, convexe ou concave ; tangence tolérée) et `disc_within_any_polygon` (inclusion dans ≥ 1 polygone
+  d'étage ; conservateur sur une union, jamais de débordement autorisé). Pendant strict de
+  `disc_overlaps_polygon`.
+- **Source partagée** ([terrain_utils.py](file:///home/greg/40k/engine/terrain_utils.py)) :
+  `floor_polys_at_level` (polygones d'étage en repère `_hex_center`) ; `footprint_within_floor` bascule sur
+  l'euclidien pour base **ronde** quand `floor_polys` est fourni (oval/carré → méthode hex inchangée, même
+  convention hybride que `model_within_terrain`) ; `validate_floor_placement` et `resolve_model_floor_level`
+  alimentent les polygones pour base ronde. **C'est la source unique référencée par §7.2** — move, charge,
+  fight et déploiement en héritent, donc aucune divergence.
+- **Câblage boucles chaudes** : polygones précalculés **une fois par niveau** (pas par case) — pool d'étage
+  du move ([movement_handlers.py:2052](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py))
+  et pool de montée de charge
+  ([charge_handlers.py](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py),
+  `_charge_model_climb_reachable_floor_cells`), ce dernier appelant désormais `footprint_within_floor`
+  directement (hexes + polygones précalculés) au lieu de `validate_floor_placement` par case (supprime le
+  re-check mot-clé et la reconstruction des hexes), miroir du move.
+- **Optimalité** : euclidien seulement sur base ronde ; plateau sans étage → tout niveau 0 → résultat
+  identique à l'ancien (non-régression 2D) ; RL/gym non touché.
+
+### 8.2 Blocage de traversée filtré par NIVEAU — miroir move/fight (§7.4)
+
+Le cheminement de charge au sol bloquait sur `enemy_occupied` **tous niveaux** (union `occupied_hexes` du
+units_cache). Conséquence : un chargeur au sol ne pouvait pas passer ni **finir sous** l'empreinte d'une
+cible/ennemi posé **en hauteur** (niveau ≥ 1), alors que deux figs à des niveaux différents ne se gênent
+pas physiquement (§2.6, engagement 3D §2.7). Le déploiement de la conscience-niveau était **incomplet** :
+les blocker socles finaux (`_charge_obstacle_socles`) étaient déjà filtrés par niveau dans 2 des 4
+constructeurs de pool, mais la **traversée** ne l'était nulle part.
+
+- **Corrigé** : la traversée sol et les obstacles-sol du climb bloquent désormais sur les ennemis **de
+  niveau 0 uniquement**, via le helper partagé `build_enemy_occupied_positions_set(..., level=0)` (source
+  par-figurine `models_cache`, déjà utilisé par le move et le fight §7.4 — **aucun doublon**).
+- **Appliqué aux 4 constructeurs** de pool sol de charge
+  ([charge_handlers.py](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py)) :
+  `charge_build_model_destinations_pool` (pool per-figurine PvP), `_compute_plan_context` (contexte mémoïsé
+  + obstacles-sol du climb), `_charge_model_pos_is_closer` (validation d'une destination) et
+  `charge_autoplace_plan` (autoplace).
+- **Complément** : `_charge_obstacle_socles(..., level=0)` ajouté sur les 2 constructeurs où il manquait
+  (pool per-figurine + autoplace ; déjà présent dans les 2 autres) → placement final cohérent sur les
+  4 flux.
+- **Conforme aux règles (PDF vérifié)** : engagement = **2" horizontal ET 5" vertical** (`03.04`) ; finir
+  sous une cible à l'étage est légal et compte comme engagement si l'écart vertical ≤ 5", déjà géré par le
+  gate 3D `entries_in_engagement_zone`. Seuls les sets de **blocage** ont changé ; cibles (`target_fps`) et
+  interdiction d'engager un non-cible (AFTER MOVING) inchangées → aucune régression d'engagement.
+- **Effet** : un chargeur au sol peut cheminer et **finir sous** la projection d'une cible en hauteur.
+  — **✓ Validé runtime PvP.**
+
+### 8.3 Outil de test — override de la distance de charge
+
+Champ de saisie dans la barre des toggles de test (visible quand « bouton test Battle-shock » est activé
+dans les settings), à côté de « Battle-shock test » et « A chargé test ». La valeur saisie (en pouces)
+**remplace le jet 2D6** de charge — sert à tester des distances de charge déterministes (dont l'accès sous
+un étage, §8.2). Vide → jet normal.
+
+- **Front** : champ `chargeRollOverride` persisté en `localStorage`
+  ([BoardWithAPI.tsx](file:///home/greg/40k/frontend/src/components/BoardWithAPI.tsx)) ; le hook envoie
+  `charge_roll_override` (null si vide) à chaque action, même transport que `shoot_pool_require_los`
+  ([useEngineAPI.ts](file:///home/greg/40k/frontend/src/hooks/useEngineAPI.ts)).
+- **Backend** : la valeur est posée dans `game_state["charge_roll_override"]`
+  ([api_server.py](file:///home/greg/40k/services/api_server.py)) ; aux 2 sites de jet 2D6
+  (`charge_unit_execution_loop` à l'activation + `charge_target_selection_handler` en secours),
+  l'override remplace le jet quand présent — **jamais en gym** (RL non impacté)
+  ([charge_handlers.py](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py)).
+- **Usage** : la valeur est lue au moment de l'**activation** de l'unité (le jet est figé à l'activation) ;
+  renseigner le champ **avant** d'activer l'unité qui charge.
+
+## 9. Déploiement multi-niveaux — corrections (miroir move)
+
+### 9.1 Clairance verticale (§2.11)
+
+**Bug** : la clairance verticale (`low_clearance_ground_hexes` — une fig trop haute ne peut tenir **sous**
+un étage trop bas, §2.11 / §13.06) était appliquée au move (§3.4) et au pile-in (§7.4) mais **absente du
+déploiement**. Une fig `MODEL_HEIGHT` > hauteur libre d'un étage pouvait être posée au sol sous cet étage.
+
+**Corrigé** — miroir move, sur les **3 surfaces** de placement du déploiement
+([deployment_handlers.py](file:///home/greg/40k/engine/phase_handlers/deployment_handlers.py)) :
+- `deployment_build_model_destinations_pool` (pool per-figurine) : `_low_clear` ajouté au blocage du
+  **niveau 0** (`blocked_cube_by_level[0]`) — la case sous un étage bas n'est plus proposée.
+- `deployment_preview_plan` (voile rouge) : une fig au sol (`lv == 0`) dont l'empreinte touche `_low_clear`
+  est invalide (`low_clear_bad`).
+- `generate_compact_formation` (auto-formation) : `_low_clear` bloqué dans `_legal_socle` (les figs qui ne
+  rentrent pas tombent au centre, signalées rouge par le preview).
+
+La pose **en surface** d'un étage (`lv >= 1`) n'est pas concernée (gérée par `validate_floor_placement`) ;
+la clairance ne borne que le sol. `MODEL_HEIGHT` est `require_key` au chargement des unités
+([game_state.py:189](file:///home/greg/40k/engine/game_state.py)) → toujours présent. Plateau sans étage
+trop bas → `_low_clear` vide → non-régression 2D.
+
+**Décision finale — méthode HEX uniforme (« comme le move niveau 0 »)** : les tests **euclidiens de bord
+d'étage** que j'avais ajoutés (clairance `low_clearance_floor_polys` + straddle `_socle_overlaps_floor`) ont
+été **retirés**. Ils créaient un **espace** visible au bord en vue étage (`disc_overlaps_polygon` compte la
+tangence comme chevauchement, `≤ rayon` → la fig ne pouvait pas toucher le bord), alors que la méthode **hex**
+`low_clearance_ground_hexes` donne le rendu voulu : la fig **touche** l'empreinte sans la **dépasser**.
+
+Le bord et la clairance d'étage sont donc gérés **uniquement en hex**, à l'identique :
+- **Deploy** — pool / preview / `generate_compact_formation` : seul `_low_clear` (hex) borne le sol.
+- **Move** — `_socle_overlaps_floor` **retiré** du pool
+  ([movement_handlers.py](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)) : les cases sol
+  en vue ≥ 1 ne sont plus filtrées par un test euclidien de bord (`_ground_dests = eff == 0`), la clairance
+  hex `_low_clear` (déjà dans les obstacles sol, toutes vues) suffit.
+
+→ **deploy et move, vue 0 et vue 1, se comportent tous comme le move niveau 0** (touche sans dépasser, aucun
+espace). La classification *sur l'étage* (§8.1, `footprint_within_floor` euclidien = empreinte entièrement
+sur le plancher) reste inchangée. Base non-ronde : hex partout. 867 tests verts.

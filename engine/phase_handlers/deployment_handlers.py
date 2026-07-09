@@ -217,6 +217,16 @@ def generate_compact_formation(
     # Formation générée AU SOL → seules les figs déployées au niveau 0 bloquent (une fig à
     # l'étage ne bloque pas le sol sous elle). Le preview revalide ensuite par niveau effectif.
     other_occ = _deployed_occupied_positions(game_state, str(squad_id), level=0)
+    # Clairance verticale (§13.06, miroir move) : la formation est AU SOL → une fig trop haute ne peut
+    # être posée sous un étage trop bas (les restantes tombent au centre, signalées rouge par le preview).
+    terrain_areas = require_key(game_state, "terrain_areas")
+    from engine.terrain_utils import low_clearance_ground_hexes
+    unit = get_unit_by_id(str(squad_id), game_state)
+    if not unit:
+        raise KeyError(f"generate_compact_formation: unit {squad_id} missing from game_state['units']")
+    # Clairance verticale HEX (méthode move niveau 0) : une fig trop haute ne peut être posée sous un
+    # étage trop bas. Bord/clairance gérés en hex, uniforme avec le move — pas de test euclidien de bord.
+    _low_clear = low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
 
     from engine.hex_utils import Socle, footprints_overlap
 
@@ -237,6 +247,8 @@ def generate_compact_formation(
             if (cc, rr) not in pool_set:
                 return None
             if (cc, rr) in wall_hexes:
+                return None
+            if (cc, rr) in _low_clear:
                 return None
             if (cc, rr) in other_occ:
                 return None
@@ -313,10 +325,29 @@ def deployment_build_model_destinations_pool(
     wall_hexes = game_state.get("wall_hexes", set())  # get allowed
     level = int(level or 0)
     terrain_areas = require_key(game_state, "terrain_areas")
-    from engine.terrain_utils import floor_hexes_at_level
+    from engine.terrain_utils import (
+        floor_hexes_at_level, floor_polys_at_level, footprint_within_floor,
+        low_clearance_ground_hexes,
+    )
     floor_hexes: Set[Tuple[int, int]] = (
         floor_hexes_at_level(terrain_areas, level) if level >= 1 else set()
     )
+    # Base + polygones du plancher pour le niveau effectif EUCLIDIEN par case (miroir move /
+    # preview / commit = resolve_model_floor_level). Base ronde → disque↔polygone ; autre → hex.
+    _m_shape = require_key(model, "BASE_SHAPE")
+    _m_base = require_key(model, "BASE_SIZE")
+    _m_orient = int(model.get("orientation", 0))  # get allowed
+    floor_polys = (
+        floor_polys_at_level(terrain_areas, level)
+        if level >= 1 and _m_shape == "round" else None
+    )
+    # Clairance verticale (§13.06, miroir move) : hexes de SOL infranchissables par ce modèle (trop haut
+    # pour tenir sous un étage bas). Bloque uniquement le niveau 0 (une fig posée EN SURFACE de l'étage
+    # n'est pas concernée). MODEL_HEIGHT est requis au chargement des unités → toujours présent.
+    unit = get_unit_by_id(squad_id, game_state)
+    if not unit:
+        raise KeyError(f"deployment_build_model_destinations_pool: unit {squad_id} missing from game_state['units']")
+    _low_clear = low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
     # Occupation des unités déployées PAR NIVEAU effectif possible d'une candidate (sol, et étage
     # vue si >= 1) — plus d'union tous-niveaux (bug : une fig à l'étage bloquait le sol dessous).
     occ_by_level: Dict[int, Set[Tuple[int, int]]] = {
@@ -380,6 +411,9 @@ def deployment_build_model_destinations_pool(
         }
         for lv in occ_by_level
     }
+    # Clairance verticale ajoutée au blocage SOL (niveau 0) uniquement — miroir move.
+    if _low_clear:
+        blocked_cube_by_level[0] |= {offset_to_cube(int(c), int(r)) for (c, r) in _low_clear}
     destinations: List[Tuple[int, int]] = []
     eff_by_dest: Dict[Tuple[int, int], int] = {}
     for (cc, rr) in pool_set:
@@ -387,11 +421,15 @@ def deployment_build_model_destinations_pool(
         cells = [(bx + ox, by + oy, bz + oz) for (ox, oy, oz) in fp_offsets]
         if any(cell not in pool_cube or cell in wall_cube for cell in cells):
             continue
-        # Niveau effectif de la candidate : étage vue si l'empreinte tient ENTIÈREMENT sur le
-        # plancher (13.06, même dérivation que resolve_model_floor_level), sinon sol.
-        eff = level if (
-            level >= 1 and floor_cube and all(cell in floor_cube for cell in cells)
-        ) else 0
+        # Niveau effectif : étage vue si l'empreinte tient entièrement sur le plancher (euclidien §8.1),
+        # sinon sol. Le BORD / la CLAIRANCE d'étage sont gérés par le hex ``_low_clear`` (méthode move
+        # niveau 0), PAS par un test euclidien de bord — comportement uniforme deploy/move, sans espace.
+        eff = 0
+        if level >= 1 and floor_cube and any(cell in floor_cube for cell in cells):
+            if footprint_within_floor(
+                int(cc), int(rr), _m_shape, _m_base, _m_orient, floor_hexes, floor_polys
+            ):
+                eff = level
         if any(cell in blocked_cube_by_level.get(eff, blocked_cube_by_level[0]) for cell in cells):
             continue
         destinations.append((int(cc), int(rr)))
@@ -431,7 +469,9 @@ def deployment_build_model_destinations_pool(
             if not any(footprints_overlap(m_socle, s) for s in same_level_socles):
                 filtered.append((dc, dr))
         destinations = filtered
-    return {"destinations": destinations}
+    # Destinations avec niveau EFFECTIF par case (miroir move_model_destinations : [col,row,level]) →
+    # le front pose la fig au niveau réel de la case, plus au niveau de vue aveugle.
+    return {"destinations": [(dc, dr, eff_by_dest[(dc, dr)]) for (dc, dr) in destinations]}
 
 
 def deployment_build_squad_destinations_pool(
@@ -534,6 +574,11 @@ def deployment_preview_plan(
     if not unit:
         raise KeyError(f"deployment_preview_plan: unit {squad_id} missing from game_state['units']")
     unit_keywords = require_key(unit, "UNIT_KEYWORDS")
+    # Clairance verticale (§13.06, miroir move) : au SOL, une fig trop haute ne peut tenir sous un étage
+    # trop bas → voile rouge. Ne concerne que le niveau 0 (la pose EN SURFACE d'un étage passe par
+    # validate_floor_placement). MODEL_HEIGHT requis au chargement → toujours présent.
+    from engine.terrain_utils import low_clearance_ground_hexes
+    _low_clear = low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
 
     # Niveau EFFECTIF par figurine = niveau demandé (vue) SI l'empreinte tient sur ce plancher, sinon
     # sol (0). Permet une escouade MIXTE (figs sur l'étage + figs au sol) déployée depuis la vue étage :
@@ -602,16 +647,24 @@ def deployment_preview_plan(
                 int(nc), int(nr), lv, terrain_areas,
             )
             floor_bad = not floor_ok
+        # Niveau 0 : fig trop haute sous un étage trop bas (§13.06, clairance verticale) → invalide.
+        # Niveau 0 : fig trop haute sous un étage trop bas (§13.06, clairance verticale) → invalide. HEX.
+        low_clear_bad = lv == 0 and bool(_low_clear) and bool(fp & _low_clear)
         per_model[str(mid)] = bool(
             not out_of_bounds and not out_of_zone and not on_wall
             and not on_other and not intra and not cohesion_red[idx] and not floor_bad
+            and not low_clear_bad
         )
     coherency_ok = not any(cohesion_red)
     all_valid = n > 0 and all(per_model.values())
+    # Niveau EFFECTIF par figurine (§13.06, euclidien) : le front l'applique au plan pour que chaque
+    # fig affiche son vrai niveau — une fig dont l'empreinte déborde du plancher redevient sol (0),
+    # même si la vue (drop de bloc) l'avait posée au niveau de l'étage.
     return {
         "per_model": per_model,
         "coherency_ok": coherency_ok,
         "can_validate": bool(all_valid),
+        "effective_levels": {str(mid): int(lv) for mid, _nc, _nr, lv in norm},
     }
 
 
@@ -649,8 +702,12 @@ def deployment_generate_formation_action(
     entry = require_key(units_cache, squad_id)
     if int(require_key(entry, "player")) != current_deployer:
         return False, {"error": "unit_not_current_deployer", "unitId": squad_id}
+    # Niveau de VUE au drop (étages) : sert de niveau DEMANDÉ pour résoudre l'effectif par fig
+    # (§13.06). Sans lui, le preview le prendrait à 0 → toutes les figs au sol même en vue étage.
+    view_level = int(action.get("level") or 0)  # get allowed (défaut sol)
     plan = generate_compact_formation(game_state, squad_id, center_col, center_row)
-    preview = deployment_preview_plan(game_state, squad_id, plan)
+    plan_leveled = [(mid, c, r, view_level) for mid, c, r in plan]
+    preview = deployment_preview_plan(game_state, squad_id, plan_leveled)
     return True, {
         "action": "deploy_generate_formation",
         "unitId": squad_id,

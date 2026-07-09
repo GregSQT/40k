@@ -530,6 +530,8 @@ type BoardProps = {
     originModels: Record<string, { col: number; row: number; level?: number }>;
     activeModelId: string | null;
     perModelValid: Record<string, boolean>;
+    /** Niveau EFFECTIF (§13.06) par fig, résolu backend au preview → rendu du badge/ghost. */
+    effectiveLevels?: Record<string, number>;
     coherencyOk: boolean;
     canValidate: boolean;
     placed: boolean;
@@ -1575,6 +1577,7 @@ export default function Board({
       originModels: deployPlan.originModels,
       activeModelId: deployPlan.activeModelId,
       perModelValid: deployPlan.perModelValid,
+      effectiveLevels: deployPlan.effectiveLevels,
       coherencyOk: deployPlan.coherencyOk,
       canValidate: deployPlan.canValidate,
       wouldFlee: false,
@@ -1831,6 +1834,11 @@ export default function Board({
   consoPlanForLevelRef.current = consolidationMovePlan;
   const onSelectConsoModelForLevelRef = useRef(onSelectConsolidationModel);
   onSelectConsoModelForLevelRef.current = onSelectConsolidationModel;
+  // Déploiement (miroir move/charge) : re-tirer le pool de la fig active au changement d'étage.
+  const deployPlanForLevelRef = useRef(deployPlan);
+  deployPlanForLevelRef.current = deployPlan;
+  const onSelectDeployModelForLevelRef = useRef(onSelectDeployModel);
+  onSelectDeployModelForLevelRef.current = onSelectDeployModel;
   // biome-ignore lint/correctness/useExhaustiveDependencies: currentLevel est un déclencheur volontaire — au changement d'étage, on re-tire la sélection active pour rafraîchir les pools niveau-conscients ; le reste passe par des refs exprès.
   useEffect(() => {
     const moveActive = squadMovePlanRef.current?.activeModelId;
@@ -1841,6 +1849,8 @@ export default function Board({
     if (pileInActive) void onSelectPileInModelForLevelRef.current?.(pileInActive);
     const consoActive = consoPlanForLevelRef.current?.activeModelId;
     if (consoActive) void onSelectConsoModelForLevelRef.current?.(consoActive);
+    const deployActive = deployPlanForLevelRef.current?.activeModelId;
+    if (deployActive) void onSelectDeployModelForLevelRef.current?.(deployActive);
   }, [currentLevel]);
 
   const maxFloorLevel = useMemo(() => {
@@ -9150,6 +9160,23 @@ export default function Board({
     // ✅ UNIFIED UNIT RENDERING USING COMPONENT — skip if fingerprint unchanged
     if (unitsChanged) {
       unitsFingerprintRef.current = unitsFingerprint;
+      // Badges d'étage orphelins : les floor-badge-* vivent dans uiElementsContainer (persistant,
+      // survit au redraw) et ne sont purgés QUE par unité RENDUE (renderFloorBadge / unité morte).
+      // Une unité qui cesse d'être rendue (déploiement ANNULÉ, unité retirée) laisserait ses badges
+      // niveau collés au board. On les efface TOUS ici ; chaque unité rendue reconstruit les siens
+      // juste après via renderFloorBadge.
+      const uiCtn = uiElementsContainerRef.current;
+      if (uiCtn) {
+        uiCtn.children
+          .filter(
+            (c: PIXI.DisplayObject) =>
+              typeof c.name === "string" && c.name.startsWith("floor-badge-")
+          )
+          .forEach((c: PIXI.DisplayObject) => {
+            uiCtn.removeChild(c);
+            if ("destroy" in c && typeof c.destroy === "function") c.destroy();
+          });
+      }
       for (const unitRow of units) {
         const unitsCache = gameState?.units_cache as Record<string, unknown> | undefined;
         const unit = mergeUnitHpFromCache(unitRow, unitsCache);
@@ -9265,13 +9292,20 @@ export default function Board({
         const unitBaseSize = (unit as { BASE_SIZE?: number | [number, number] }).BASE_SIZE;
         const modelLevels: number[] = modelIds.map((mid, idx) => {
           if (isPreviewLevels) {
-            // Niveau LIVE aligné sur le backend (resolve_model_floor_level) : niveau DEMANDÉ = celui
-            // capturé au drop de la fig dans le plan (models[mid].level), fallback vue courante ;
-            // effectif = ce niveau si l'empreinte ENTIÈRE tient sur son plancher (13.06), sinon sol.
-            // Évite un badge de drag qui ment (montre 1) puis disparaît au commit (réel 0).
+            // Fig POSÉE dans le plan : niveau EFFECTIF §13.06 résolu EUCLIDIEN par le backend (autoritaire).
+            // Déploiement → ``effectiveLevels[mid]`` (le niveau demandé/vue peut couvrir tout un bloc dont
+            // certaines figs débordent du plancher → elles s'affichent au sol). Move/charge → pas de champ
+            // dédié, le niveau du plan EST déjà l'effectif de la case du pool (fallback ci-dessous).
+            const effLevel = (
+              effectivePerModelPlan as { effectiveLevels?: Record<string, number> } | null
+            )?.effectiveLevels?.[mid];
+            if (effLevel !== undefined) return effLevel;
             const planLevel = (effectivePerModelPlan?.models[mid] as { level?: number } | undefined)
               ?.level;
-            const reqLevel = planLevel ?? currentLevel;
+            if (planLevel !== undefined) return planLevel;
+            // Pas de niveau de plan (fantôme collé au curseur / suivi de bloc) : hint live approximatif
+            // hex sur la vue courante, en attendant la pose (le drop fixera le niveau backend réel).
+            const reqLevel = currentLevel;
             const reqFloorSet = reqLevel >= 1 ? floorHexKeysByLevel.get(reqLevel) : undefined;
             if (reqLevel >= 1 && reqFloorSet) {
               const [pc, pr] = modelPositions[idx];

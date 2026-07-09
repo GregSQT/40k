@@ -558,6 +558,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     originModels: Record<string, { col: number; row: number; level?: number }>;
     activeModelId: string | null;
     perModelValid: Record<string, boolean>;
+    /** Niveau EFFECTIF (§13.06, euclidien) par fig, résolu par le backend au preview. DISTINCT de
+     *  ``models[mid].level`` (= niveau DEMANDÉ/vue, ré-envoyé pour re-résolution). Sert au RENDU : une
+     *  fig du bloc dont l'empreinte déborde du plancher s'affiche au sol (0) même déposée en vue étage. */
+    effectiveLevels?: Record<string, number>;
     coherencyOk: boolean;
     canValidate: boolean;
     placed: boolean;
@@ -572,6 +576,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Pool per-fig FILTRÉ (zone − murs − empreintes autres figs/unités) de la fig active, depuis
    *  deploy_model_destinations. Miroir de squadMoveModelPoolRef (move). */
   const deployModelPoolRef = useRef<Set<string>>(new Set());
+  /** Niveau EFFECTIF (§13.06) par case du pool per-fig déploiement ("c,r" → 0 sol / view_level étage),
+   *  résolu EUCLIDIEN par le backend (miroir squadMoveModelLevelByKeyRef). La pose lit ce niveau réel
+   *  au lieu de la vue aveugle → une fig posée au bord d'un étage n'est plus re-dérivée au sol. */
+  const deployModelLevelByKeyRef = useRef<Map<string, number>>(new Map());
   /** Pool d'ancres du BLOC (suivi squad) : positions où toutes les empreintes du bloc translaté
    *  restent dans la zone, depuis deploy_squad_destinations. Le suivi snappe l'ancre dessus. */
   const deploySquadPoolRef = useRef<Set<string>>(new Set());
@@ -5350,8 +5358,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const perModelValid = (result?.per_model ?? {}) as Record<string, boolean>;
       const coherencyOk = result?.coherency_ok === true;
       const canValidate = result?.can_validate === true;
+      // Niveau EFFECTIF backend (§13.06 euclidien) par fig → RENDU. On NE touche PAS models[mid].level
+      // (= niveau demandé/vue) : sinon une fig retombée au sol (0) renverrait 0 et ne pourrait plus
+      // ré-monter en repositionnant le bloc (resolve_model_floor_level ignore un requested < 1).
+      const effectiveLevels = (result?.effective_levels ?? {}) as Record<string, number>;
       setDeployPlan((prev) =>
-        prev && prev.unitId === unitId ? { ...prev, perModelValid, coherencyOk, canValidate } : prev
+        prev && prev.unitId === unitId
+          ? { ...prev, perModelValid, coherencyOk, canValidate, effectiveLevels }
+          : prev
       );
     },
     [postEngineQuery]
@@ -5395,6 +5409,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           unitId: String(plan.unitId),
           destCol: col,
           destRow: row,
+          // Niveau de vue au drop → le backend résout l'effectif par fig (§13.06 euclidien).
+          level: currentLevelRef?.current ?? 0,
         });
       } catch (err) {
         console.error(`[DEPLOY] generate_formation ERROR unit=${plan.unitId}`, err, { col, row });
@@ -5413,6 +5429,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const perModelValid = (result?.per_model ?? {}) as Record<string, boolean>;
       const coherencyOk = result?.coherency_ok === true;
       const canValidate = result?.can_validate === true;
+      // Niveau EFFECTIF par fig (§13.06 euclidien) résolu par le backend au niveau de vue du drop →
+      // rendu : une fig du bloc dont l'empreinte déborde du plancher s'affiche au sol (0).
+      const effectiveLevels = (result?.effective_levels ?? {}) as Record<string, number>;
       setDeployPlan((prev) =>
         prev && prev.unitId === plan.unitId
           ? {
@@ -5420,6 +5439,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               models,
               originModels: { ...models },
               perModelValid,
+              effectiveLevels,
               coherencyOk,
               canValidate,
               placed: true,
@@ -5463,10 +5483,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         throw new Error("deploy_model_destinations: destinations absent in response");
       }
       const set = new Set<string>();
-      for (const [c, r] of result.destinations as Array<[number, number]>) {
-        set.add(`${c},${r}`);
+      const levelByKey = new Map<string, number>();
+      for (const [c, r, lv] of result.destinations as Array<[number, number, number]>) {
+        const key = `${c},${r}`;
+        set.add(key);
+        levelByKey.set(key, lv);
       }
       deployModelPoolRef.current = set;
+      deployModelLevelByKeyRef.current = levelByKey;
       setDeployPlan((prev) =>
         prev ? { ...prev, activeModelId: modelId, following: false } : prev
       );
@@ -5508,10 +5532,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
    *  Fig posée → vide le pool per-fig (sort du preview de cette fig), comme le move. */
   const handleMoveDeployModelInPlan = useCallback(
     (modelId: string, col: number, row: number) => {
+      // Niveau de pose = niveau EFFECTIF de la case dans le pool (§13.06, résolu EUCLIDIEN par le
+      // backend), PAS la vue courante : une fig posée au bord d'un étage n'est plus re-dérivée au
+      // sol (badge fantôme). La destination provient TOUJOURS du pool → clé présente ; sinon
+      // incohérence pool/pose = erreur explicite (pas de fallback masquant). Miroir handleMoveModelInPlan.
+      const level = deployModelLevelByKeyRef.current.get(`${col},${row}`);
+      if (level === undefined) {
+        throw new Error(
+          `handleMoveDeployModelInPlan: destination (${col},${row}) absente du pool niveau-conscient`
+        );
+      }
       deployModelPoolRef.current = new Set();
-      // Étages : le niveau de la fig est CAPTURÉ ICI (vue au moment du drop) et voyage dans le
-      // plan — il survit aux changements d'étage ultérieurs (le commit ne relit pas la vue).
-      const level = currentLevelRef?.current ?? 0;
+      deployModelLevelByKeyRef.current = new Map();
       setDeployPlan((prev) => {
         if (!prev) return prev;
         const models = { ...prev.models, [modelId]: { col, row, level } };
@@ -5519,7 +5551,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return { ...prev, models, activeModelId: null };
       });
     },
-    [refreshDeployPlanValidity, currentLevelRef]
+    [refreshDeployPlanValidity]
   );
 
   /** Suivi du bloc (mode following) : translation rigide pour amener la 1re fig sous le curseur

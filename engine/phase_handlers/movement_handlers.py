@@ -3104,30 +3104,10 @@ def movement_build_model_destinations_pool(
     if view_level >= 1 and _mm_use_euclidean and not has_fly and floor_hexes_view:
         from engine.game_state import unit_can_occupy_upper_floor
         _can_climb = unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS"))
-        # Sol : on RETIRE toute case dont le SOCLE chevauche l'empreinte de l'étage en vue — à ce niveau
-        # de vue la zone du bâtiment appartient à l'étage ; un move au sol qui y entre est un move de
-        # niveau 0 (visible en vue niveau 0). Le preview s'arrête donc au bord de l'empreinte. Test EUCLIDIEN
-        # disque↔polygone (rond) sur ``floor["vertices"]`` — aligné pixel-pour-pixel sur le contour d'étage
-        # rendu et sur la précision fig↔fig ronde (cf. model_within_terrain) ; non-rond → empreinte hex.
-        from engine.hex_utils import _hex_center as _hc, round_base_radius_norm, disc_overlaps_polygon
-        _floor_polys = [
-            [_hc(int(v[0]), int(v[1])) for v in require_key(floor, "polygon_vertices")]
-            for area in terrain_areas
-            for floor in area.get("floors", [])  # get allowed
-            if int(require_key(floor, "level")) == view_level
-        ]
-
-        def _socle_overlaps_floor(_c: int, _r: int) -> bool:
-            if base_shape == "round":
-                _cx, _cy = _hc(int(_c), int(_r))
-                _rad = round_base_radius_norm(base_size)
-                return any(disc_overlaps_polygon(_cx, _cy, _rad, _poly) for _poly in _floor_polys)
-            return any(c in floor_hexes_view for c in _mover_cells(_c, _r))
-
-        _ground_dests = [
-            _d for _d in reachable
-            if eff_by_dest[_d] == 0 and not _socle_overlaps_floor(_d[0], _d[1])
-        ]
+        # Sol : le BORD d'étage est géré par la clairance HEX (``_low_clear`` dans les obstacles sol),
+        # PAS par un test euclidien de bord — comportement uniforme avec la vue niveau 0 (une fig au sol
+        # peut toucher l'empreinte de l'étage sans espace). Les cases au sol = celles atteignables.
+        _ground_dests = [_d for _d in reachable if eff_by_dest[_d] == 0]
         _floor_dests: List[Tuple[int, int]] = []
         if _can_climb:
             _ground_obs = set(wall_hexes) | _low_clear

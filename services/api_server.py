@@ -2303,7 +2303,7 @@ def execute_action():
             "result": {
                 "action": "deploy_model_destinations",
                 "model_id": str(model_id),
-                "destinations": [[int(c), int(r)] for c, r in _dep_pool["destinations"]],
+                "destinations": [[int(c), int(r), int(lv)] for c, r, lv in _dep_pool["destinations"]],
             },
         })
 
