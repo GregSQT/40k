@@ -160,6 +160,30 @@ def low_clearance_ground_hexes(
     return blocked
 
 
+def low_clearance_floor_polys(
+    terrain_areas: List[Dict[str, Any]],
+    model_height: float,
+) -> List[List[Tuple[float, float]]]:
+    """Polygones (repère ``_hex_center``) des étages trop bas pour un modèle de hauteur ``model_height``.
+
+    Pendant EUCLIDIEN de ``low_clearance_ground_hexes`` (même critère ``height_inches < model_height``,
+    tangence autorisée), aligné rendu (disque d'icône ↔ polygone d'étage). Sert au SOL uniquement : un
+    socle ROND dont le disque chevaucherait l'un de ces polygones déborderait sous le bord de l'étage bas
+    (règle 13.06, clairance verticale) → placement/traversée interdits. Retourne une liste vide si aucun
+    étage n'est trop bas. Méthode disque↔polygone réservée aux bases rondes ; oval/carré = hex
+    (``low_clearance_ground_hexes``), convention hybride identique à ``footprint_within_floor``."""
+    from engine.hex_utils import _hex_center
+    mh = float(model_height)
+    polys: List[List[Tuple[float, float]]] = []
+    for area in terrain_areas:
+        for floor in area.get("floors", []):  # get allowed (aire sans étage)
+            if float(require_key(floor, "height_inches")) < mh:
+                polys.append(
+                    [_hex_center(int(v[0]), int(v[1])) for v in require_key(floor, "polygon_vertices")]
+                )
+    return polys
+
+
 def footprint_within_floor(
     col: int,
     row: int,
