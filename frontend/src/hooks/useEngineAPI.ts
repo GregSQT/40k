@@ -1655,6 +1655,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         // Option debug (menu) : mode pool de tir. fast (défaut) = résolution cible à l'activation.
         const _shootPoolFastRaw = localStorage.getItem("shootPoolFastMode");
         body.shoot_pool_require_los = !(_shootPoolFastRaw ? JSON.parse(_shootPoolFastRaw) : true);
+        // TEST (phase charge) : override manuel de la distance de charge, remplace le jet 2D6.
+        // Vide/absent → null (jet normal). Suit le même transport que shoot_pool_require_los.
+        const _chargeOverrideRaw = localStorage.getItem("chargeRollOverride");
+        const _chargeOverrideNum =
+          _chargeOverrideRaw != null && _chargeOverrideRaw !== ""
+            ? parseInt(_chargeOverrideRaw, 10)
+            : NaN;
+        body.charge_roll_override =
+          Number.isFinite(_chargeOverrideNum) && _chargeOverrideNum > 0 ? _chargeOverrideNum : null;
         const requestBody = JSON.stringify(body);
         const response = await fetch(`${API_BASE}/game/action`, {
           method: "POST",
@@ -3789,6 +3798,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               await executeAction({
                 action: "activate_unit",
                 unitId: numericUnitId.toString(),
+                // Étages (§13.06, miroir move) : niveau de VUE courant → l'activation pile-in/
+                // consolidation calcule l'éligibilité au niveau affiché, cohérent avec les refresh.
+                level: currentLevelRef?.current ?? 0,
               });
               // Flux manuel par arme/figurine : initialise le plan local UNIQUEMENT en étape FIGHT.
               // En pile_in / consolidate (move par-figurine), ne PAS poser squadFightPlan — sinon le
@@ -3918,6 +3930,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       clearFightAttackActivationUi,
       enqueueFightRequest,
       handleFightPhaseClick,
+      currentLevelRef,
     ]
   );
 
@@ -5861,41 +5874,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [executeAction]
   );
 
-  // Fight activation - sends activate_unit to activate unit and get valid targets
-  const handleActivateFight = useCallback(
-    async (fighterId: number | string) => {
-      const numericFighterId = typeof fighterId === "string" ? parseInt(fighterId, 10) : fighterId;
-
-      if (activationInProgressRef.current) {
-        return;
-      }
-      activationInProgressRef.current = true;
-      setSelectedUnitId(numericFighterId);
-      setActivationPendingUnitId(numericFighterId);
-      try {
-        await executeAction({
-          action: "activate_unit",
-          unitId: numericFighterId.toString(),
-        });
-        // Flux manuel par arme/figurine : initialise le plan local (cibles via gameState).
-        const fightModels = Object.keys(readSquadModelPositions(numericFighterId));
-        setSquadFightPlan({
-          unitId: numericFighterId,
-          models: fightModels,
-          targets: {},
-          declarations: [],
-          activeModelId: null,
-          activeWeaponIndex: null,
-          canValidate: false,
-        });
-      } finally {
-        activationInProgressRef.current = false;
-        setActivationPendingUnitId(null);
-      }
-    },
-    [executeAction, readSquadModelPositions]
-  );
-
   const handlePileInMove = useCallback(
     async (unitId: number, destCol: number, destRow: number) => {
       const isConsolidation = mode === "consolidationPreview";
@@ -7613,7 +7591,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onStartTargetPreview: () => {},
       onFightAttack: () => {},
       onFightPhaseRightClick: async () => {},
-      onActivateFight: () => {},
       onPileInMove: async () => {},
       onSkipPileIn: async () => {},
       onCharge: () => {},
@@ -7824,7 +7801,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onStartTargetPreview: handleStartTargetPreview,
     onFightAttack: handleFightAttack,
     onFightPhaseRightClick: handleRightClick,
-    onActivateFight: handleActivateFight,
     onPileInMove: handlePileInMove,
     onSkipPileIn: handleSkipPileIn,
     onEndPileIn: handleEndPileIn,

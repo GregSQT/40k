@@ -11,7 +11,7 @@ Membership is answered by testing hex appartenance against the precomputed
 ``hexes`` sets — same odd-q projection as objectives and the frontend renderer,
 so a unit "within a terrain area" matches exactly what the player sees on board.
 """
-from typing import Any, Dict, List, Set, Tuple, cast
+from typing import Any, Dict, List, Optional, Set, Tuple, cast
 
 from shared.data_validation import require_key
 
@@ -89,6 +89,28 @@ def floor_hexes_at_level(terrain_areas: List[Dict[str, Any]], level: int) -> Set
     return hexes
 
 
+def floor_polys_at_level(
+    terrain_areas: List[Dict[str, Any]], level: int
+) -> List[List[Tuple[float, float]]]:
+    """Polygones (repère ``_hex_center``) de tous les étages au niveau donné (>= 1).
+
+    Un polygone par ``floor`` à ce niveau (plusieurs ruines → plusieurs polygones). Sert au
+    confinement euclidien « socle rond entièrement sur l'étage » (13.06), pendant continu de
+    ``floor_hexes_at_level`` (méthode hex, conservée pour oval/carré). Niveau 0 = sol, pas de bord :
+    usage interdit (erreur explicite, cohérent avec ``floor_hexes_at_level``)."""
+    if level < 1:
+        raise ValueError(f"floor_polys_at_level: level must be >= 1 (0 = ground), got {level}")
+    from engine.hex_utils import _hex_center
+    polys: List[List[Tuple[float, float]]] = []
+    for area in terrain_areas:
+        for floor in area.get("floors", []):  # get allowed (aire sans étage = sol seul)
+            if int(require_key(floor, "level")) == level:
+                polys.append(
+                    [_hex_center(int(v[0]), int(v[1])) for v in require_key(floor, "polygon_vertices")]
+                )
+    return polys
+
+
 def floor_height_at(
     terrain_areas: List[Dict[str, Any]],
     col: int,
@@ -145,16 +167,25 @@ def footprint_within_floor(
     base_size: "int | list[int]",
     orientation: int,
     floor_hexes: Set[Tuple[int, int]],
+    floor_polys: Optional[List[List[Tuple[float, float]]]] = None,
 ) -> bool:
     """True si le socle tient ENTIÈREMENT sur l'étage (règle 13.06 : aucun débordement du bord).
 
-    Convention hex : tous les hexes de l'empreinte du socle doivent appartenir à ``floor_hexes``
-    (union des hexes de l'étage). 100% dedans = règle officielle (décision §5.1, défaut).
-    ``floor_hexes`` vide → aucun étage à ce niveau → False (pas de surface où tenir).
+    Base RONDE avec ``floor_polys`` fourni : test euclidien continu disque↔polygone(s)
+    (``disc_within_any_polygon``) — aligné pixel-pour-pixel sur le rendu (disque d'icône + polygone
+    d'étage), supprime le débordement d'~½ hex que la rasterisation hex tolérait. Base OVAL/CARRÉ (ou
+    ``floor_polys`` absent) : méthode empreinte hex — tous les hexes du socle doivent appartenir à
+    ``floor_hexes`` (union des hexes de l'étage). Convention hybride identique à ``model_within_terrain``
+    (round=euclidien, autres=hex). ``floor_hexes`` / ``floor_polys`` vides → False (pas de surface).
 
     N.B. la règle exige aussi une position « stable » (13.06), non chiffrée dans les règles et
-    non modélisable en hex plan : non représentée ici (surface d'étage supposée plane).
+    non modélisable ici : non représentée (surface d'étage supposée plane).
     """
+    if base_shape == "round" and floor_polys is not None:
+        from engine.hex_utils import _hex_center, round_base_radius_norm, disc_within_any_polygon
+        cx, cy = _hex_center(int(col), int(row))
+        r = round_base_radius_norm(cast(float, base_size))
+        return disc_within_any_polygon(cx, cy, r, floor_polys)
     if not floor_hexes:
         return False
     from engine.hex_utils import compute_occupied_hexes
@@ -188,7 +219,9 @@ def resolve_model_floor_level(
     if requested_level is None or requested_level < 1:
         return 0
     fh = floor_hexes_at_level(terrain_areas, requested_level)
-    if fh and footprint_within_floor(col, row, base_shape, base_size, orientation, fh):
+    # Base ronde : confinement euclidien (aucun débordement du bord) ; oval/carré : hex.
+    fpoly = floor_polys_at_level(terrain_areas, requested_level) if base_shape == "round" else None
+    if fh and footprint_within_floor(col, row, base_shape, base_size, orientation, fh, fpoly):
         return requested_level
     return 0
 
@@ -221,8 +254,11 @@ def validate_floor_placement(
     if not floor_hexes:
         return (False, f"no floor declared at level {level}")
     orientation = int(require_key(unit, "orientation")) if "orientation" in unit else 0
+    base_shape = require_key(unit, "BASE_SHAPE")
+    # Base ronde : confinement euclidien (aucun débordement du bord) ; oval/carré : hex.
+    floor_polys = floor_polys_at_level(terrain_areas, level) if base_shape == "round" else None
     if not footprint_within_floor(
-        col, row, require_key(unit, "BASE_SHAPE"), require_key(unit, "BASE_SIZE"), orientation, floor_hexes
+        col, row, base_shape, require_key(unit, "BASE_SIZE"), orientation, floor_hexes, floor_polys
     ):
         return (False, f"footprint at ({col},{row}) overhangs the level {level} floor edge (13.06)")
     return (True, "")

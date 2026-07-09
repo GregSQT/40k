@@ -20,7 +20,6 @@ export function setupBoardClickHandler(callbacks: {
   onCancelCharge?(): void;
   onCancelAdvance?(): void;
   onActivateCharge?(chargerId: UnitId): void;
-  onActivateFight?(fighterId: UnitId): void;
   onValidateCharge?(chargerId: UnitId): void;
   onMoveCharger?(chargerId: UnitId, destCol: number, destRow: number): void;
   onChargeEnemyUnit?(chargerId: UnitId, enemyUnitId: UnitId): void;

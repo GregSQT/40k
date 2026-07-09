@@ -32,7 +32,7 @@ from .shared_utils import (
     unit_has_rule_effect as shared_unit_has_rule_effect,
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
     get_source_unit_rule_display_name_for_effect as shared_get_source_unit_rule_display_name_for_effect,
-    build_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
+    build_occupied_positions_set, enemy_footprints_at_level, compute_candidate_footprint, is_footprint_placement_valid,
     is_placement_valid_with_clearance, candidate_overlaps_any_unit,
     _synth_model_entry,
     MovePlan,
@@ -1681,20 +1681,15 @@ def charge_build_model_destinations_pool(
     target_entries: List[Dict[str, Any]] = []
     target_fps: List[Set[Tuple[int, int]]] = []
     nontarget_entries: List[Dict[str, Any]] = []
-    enemy_occupied: Set[Tuple[int, int]] = set()
-    other_occupied: Set[Tuple[int, int]] = set()
     for eid, entry in units_cache.items():
-        occ = entry.get("occupied_hexes")
-        cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
         if int(entry["player"]) != player:
-            enemy_occupied |= cells
+            occ = entry.get("occupied_hexes")
+            cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
             if str(eid) in declared:
                 target_entries.append(entry)
                 target_fps.append(cells)
             else:
                 nontarget_entries.append(entry)
-        elif str(eid) != squad_id:
-            other_occupied |= cells
     if not target_entries:
         return empty
 
@@ -1716,9 +1711,11 @@ def charge_build_model_destinations_pool(
         sibling_socles.append(_charge_model_socle(game_state, sib, int(pc), int(pr)))
 
     # 03.01 : une figurine se déplace À TRAVERS les figs amies, mais PAS à travers les ennemies (ni
-    # les murs). Chemin au sol = murs + ennemis seulement ; les amis (coéquipières + autres unités
-    # amies) ne bloquent pas le passage.
-    path_blocked = set(wall_hexes) | enemy_occupied
+    # les murs). Chemin au sol = murs + ennemis AU SOL (niveau 0) seulement ; les amis (coéquipières +
+    # autres unités amies) ne bloquent pas le passage. Blocage par-figurine niveau 0 : une fig ennemie à
+    # l'étage ne gêne pas un chargeur au sol (03.04 engagement 3D), contrairement à l'union tous niveaux
+    # du units_cache qui durcirait le sol sous une cible en hauteur.
+    path_blocked = set(wall_hexes) | enemy_footprints_at_level(game_state, player, 0)
     # 03 « Ending a move » : le non-chevauchement final (murs + unités + coéquipières) est délégué à
     # _charge_model_placement_overlaps (clearance continu rond↔rond, méthode empreinte).
     # Take to the skies (21.03) : si le vol est actif, la traversée ignore tout ; seul le placement
@@ -1751,7 +1748,7 @@ def charge_build_model_destinations_pool(
     within_1: List[List[int]] = []
     engaged: List[List[int]] = []
     closer: List[List[int]] = []
-    obstacle_socles = _charge_obstacle_socles(game_state, squad_id)
+    obstacle_socles = _charge_obstacle_socles(game_state, squad_id, level=0)
     _walls = set(wall_hexes)
     for cc, rr in reachable:
         cand_socle = _charge_model_socle(game_state, model, cc, rr)
@@ -1851,7 +1848,7 @@ def _charge_model_climb_reachable_floor_cells(
 
     Retour : ``{(col, row): distance_subhex}`` (distance = coût géodésique montée incluse), vide si
     aucune case atteignable."""
-    from engine.terrain_utils import floor_hexes_at_level, validate_floor_placement
+    from engine.terrain_utils import floor_hexes_at_level, floor_polys_at_level, footprint_within_floor
     from engine.hex_utils import (
         get_neighbors, precompute_footprint_offsets, ENGAGEMENT_NORM_HEX_WIDTH,
     )
@@ -1893,7 +1890,12 @@ def _charge_model_climb_reachable_floor_cells(
     shape = require_key(model, "BASE_SHAPE")
     base = require_key(model, "BASE_SIZE")
     orientation = int(unit.get("orientation", 0))  # get allowed
-    if shape == "round":
+    shape_round = shape == "round"
+    # Base ronde : polygones d'étage précalculés une fois par niveau (confinement euclidien du bord).
+    floor_polys_by_level = (
+        {lv: floor_polys_at_level(terrain_areas, lv) for lv in present} if shape_round else {}
+    )
+    if shape_round:
         off_even: Tuple[Tuple[int, int], ...] = ()
         off_odd: Tuple[Tuple[int, int], ...] = ()
     else:
@@ -1905,13 +1907,10 @@ def _charge_model_climb_reachable_floor_cells(
         int(budget_subhex) * ENGAGEMENT_NORM_HEX_WIDTH, allow_vertical=True, ignore_vertical_cost=False,
     )
 
-    stub = {
-        "id": squad_id,
-        "UNIT_KEYWORDS": require_key(unit, "UNIT_KEYWORDS"),
-        "BASE_SHAPE": shape,
-        "BASE_SIZE": base,
-        "orientation": orientation,
-    }
+    # Mot-clé (13.06) déjà vérifié en tête (unit_can_occupy_upper_floor) → la seule condition variable
+    # par cellule est l'empreinte-sur-plancher. Appel direct à ``footprint_within_floor`` avec les hexes
+    # (et, base ronde, les polygones) déjà précalculés, plutôt que ``validate_floor_placement`` qui
+    # reconstruit floor_hexes + re-teste le mot-clé à chaque cellule (miroir du move, cf. _multilevel_floor_destinations).
     occ_view = occupied_by_level.get(view_level, set())
     out: Dict[Tuple[int, int], int] = {}
     for (c, r, lv), dist_norm in field.items():
@@ -1919,8 +1918,10 @@ def _charge_model_climb_reachable_floor_cells(
             continue
         if (c, r) in walls or (c, r) in occ_view:
             continue
-        ok, _ = validate_floor_placement(stub, c, r, lv, terrain_areas)
-        if ok:
+        if footprint_within_floor(
+            c, r, shape, base, orientation, floor_hexes_by_level[lv],
+            floor_polys_by_level.get(lv) if shape_round else None,
+        ):
             out[(c, r)] = int(round(dist_norm / ENGAGEMENT_NORM_HEX_WIDTH))
     return out
 
@@ -1974,20 +1975,18 @@ def _compute_plan_context(
     target_entries: List[Dict[str, Any]] = []
     target_fps: List[Set[Tuple[int, int]]] = []
     nontarget_entries: List[Dict[str, Any]] = []
-    enemy_occupied: Set[Tuple[int, int]] = set()
-    other_occupied: Set[Tuple[int, int]] = set()
     for eid, entry in units_cache.items():
-        occ = entry.get("occupied_hexes")
-        cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
         if int(entry["player"]) != player:
-            enemy_occupied |= cells
+            occ = entry.get("occupied_hexes")
+            cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
             if str(eid) in declared:
                 target_entries.append(entry)
                 target_fps.append(cells)
             else:
                 nontarget_entries.append(entry)
-        elif str(eid) != str(unit_id):
-            other_occupied |= cells
+    # Blocage de traversée SOL par-figurine niveau 0 (ennemis) : une fig ennemie à l'étage ne bloque
+    # pas le pas d'un chargeur au sol (03.04). Sert path_blocked (BFS 2D) et les obstacles sol du climb.
+    ground_enemy_blocked = enemy_footprints_at_level(game_state, player, 0)
 
     # Coéquipières PAR-FIGURINE (chaque fig a sa base) : posées (plan) = bloquage stable ; non posées
     # = bloquage à l'origine (la fig mobile retire le sien dans _qualifying).
@@ -2012,7 +2011,7 @@ def _compute_plan_context(
     # 03.01 : le déplacement traverse les figs AMIES, pas les ennemies ni les murs → chemin = murs +
     # ennemis seulement. Les coéquipières (posées ou à l'origine) ne bloquent que la position FINALE
     # (``cand_fp & blocked_static`` posées + check ``others`` origines dans ``_qualifying``).
-    path_blocked = set(wall_hexes) | enemy_occupied
+    path_blocked = set(wall_hexes) | ground_enemy_blocked
     # Clairance verticale (§13.06 maison) : hexes de sol infranchissables par ce modèle (trop haut pour
     # passer sous un étage bas) → obstacle AU SOL uniquement. Miroir du move. Le vol (reach appelé avec
     # ``set()``) n'est pas concerné.
@@ -2347,7 +2346,7 @@ def _compute_plan_context(
         from engine.terrain_utils import low_clearance_ground_hexes
         terrain_areas = game_state.get("terrain_areas", [])  # get allowed
         _ground_obs = (
-            set(wall_hexes) | enemy_occupied
+            set(wall_hexes) | ground_enemy_blocked
             | low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
         )
         for m in unplaced:
@@ -2923,7 +2922,12 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
     charge_roll = None
     max_distance_subhex = None
     if not is_gym:
-        if unit_id in game_state["charge_roll_values"]:
+        # TEST : override manuel de la distance de charge (posé via l'API), remplace le jet 2D6.
+        _charge_override = game_state.get("charge_roll_override")
+        if _charge_override is not None:
+            charge_roll = int(_charge_override)
+            game_state["charge_roll_values"][unit_id] = charge_roll
+        elif unit_id in game_state["charge_roll_values"]:
             charge_roll = game_state["charge_roll_values"][unit_id]
         else:
             import random
@@ -4275,7 +4279,12 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
     # Résultat en POUCES (2..12) ; scalé en sous-hex via ``inches_to_subhex`` pour rester
     # homogène avec ``charge_max_distance``, ``engagement_zone`` et les footprints.
     is_gym = game_state.get("gym_training_mode", False)
-    if not is_gym and unit_id in game_state["charge_roll_values"]:
+    # TEST : override manuel de la distance de charge (posé via l'API), remplace le jet 2D6.
+    _charge_override = None if is_gym else game_state.get("charge_roll_override")
+    if _charge_override is not None:
+        charge_roll = int(_charge_override)
+        game_state["charge_roll_values"][unit_id] = charge_roll
+    elif not is_gym and unit_id in game_state["charge_roll_values"]:
         charge_roll = game_state["charge_roll_values"][unit_id]
     else:
         import random
@@ -4598,21 +4607,19 @@ def _charge_model_pos_is_closer(
     declared = {str(t) for t in target_ids}
     target_fps: List[Set[Tuple[int, int]]] = []
     nontarget_entries: List[Dict[str, Any]] = []
-    enemy_occupied: Set[Tuple[int, int]] = set()
-    other_occupied: Set[Tuple[int, int]] = set()
     for eid, entry in units_cache.items():
-        occ = entry.get("occupied_hexes")
-        cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
         if int(entry["player"]) != player:
-            enemy_occupied |= cells
+            occ = entry.get("occupied_hexes")
+            cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
             if str(eid) in declared:
                 target_fps.append(cells)
             else:
                 nontarget_entries.append(entry)
-        elif str(eid) != squad_id:
-            other_occupied |= cells
     if not target_fps:
         return False
+    # Blocage de traversée SOL par-figurine niveau 0 (ennemis) : une fig ennemie à l'étage ne bloque
+    # pas le pas d'un chargeur au sol (03.04) — cf. enemy_footprints_at_level.
+    ground_enemy_blocked = enemy_footprints_at_level(game_state, player, 0)
 
     # Géométrie PAR-FIGURINE : la fig mobile et chaque coéquipière utilisent LEUR propre base
     # (models_cache), pas celle de l'unité (cf. personnage attaché à plus grande base).
@@ -4637,7 +4644,7 @@ def _charge_model_pos_is_closer(
             continue
         sibling_socles.append(_charge_model_socle(game_state, sib, int(pc), int(pr)))
     # 03.01 : déplacement À TRAVERS les figs amies autorisé, PAS à travers les ennemies ni les murs.
-    path_blocked = set(wall_hexes) | enemy_occupied
+    path_blocked = set(wall_hexes) | ground_enemy_blocked
     # 03 « Ending a move » : non-chevauchement final délégué à _charge_model_placement_overlaps.
     # Take to the skies (21.03) : vol actif → traversée libre ; placement final reste interdit d'overlap.
     fly_active = _charge_fly_active(game_state, unit, squad_id)
@@ -4655,7 +4662,7 @@ def _charge_model_pos_is_closer(
         from engine.terrain_utils import low_clearance_ground_hexes
         _terrain_areas = game_state.get("terrain_areas", [])  # get allowed
         _ground_obs = (
-            set(wall_hexes) | enemy_occupied
+            set(wall_hexes) | ground_enemy_blocked
             | low_clearance_ground_hexes(_terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
         )
         _fcells = _charge_model_climb_reachable_floor_cells(
@@ -4919,18 +4926,19 @@ def charge_autoplace_plan(
     target_entry_by_id: Dict[str, Dict[str, Any]] = {}
     target_fp_by_id: Dict[str, Set[Tuple[int, int]]] = {}
     nontarget_entries: List[Dict[str, Any]] = []
-    enemy_occupied: Set[Tuple[int, int]] = set()
     for eid, entry in units_cache.items():
         if int(entry["player"]) == player:
             continue
         occ = entry.get("occupied_hexes")
         cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
-        enemy_occupied |= cells
         if str(eid) in declared:
             target_entry_by_id[str(eid)] = entry
             target_fp_by_id[str(eid)] = cells
         else:
             nontarget_entries.append(entry)
+    # Blocage de traversée SOL par-figurine niveau 0 (ennemis) : une fig ennemie à l'étage ne bloque
+    # pas le pas d'un chargeur au sol (03.04) — cf. enemy_footprints_at_level.
+    ground_enemy_blocked = enemy_footprints_at_level(game_state, player, 0)
     present_target_ids = [t for t in target_ids if t in target_fp_by_id]
     if not present_target_ids:
         raise ValueError(f"charge_autoplace_plan: aucune cible déclarée présente pour {squad_id}")
@@ -4938,13 +4946,13 @@ def charge_autoplace_plan(
 
     # Conso « engaging » : l'engagement d'ennemis non sélectionnés est autorisé (New Foes, 12.08).
     # Vider la liste neutralise les 3 filtres non-cible (slots, repli, zone) en une fois. Les ennemis
-    # restent dans ``enemy_occupied`` → la traversée BFS demeure bloquée (mouvement normal, 03.01).
+    # restent dans ``ground_enemy_blocked`` → la traversée BFS demeure bloquée (mouvement normal, 03.01).
     if allow_nontarget_engagement:
         nontarget_entries = []
 
-    obstacle_socles = _charge_obstacle_socles(game_state, str(squad_id))
+    obstacle_socles = _charge_obstacle_socles(game_state, str(squad_id), level=0)
     fly_active = False if disable_fly else _charge_fly_active(game_state, unit, str(squad_id))
-    traverse_blocked = set() if fly_active else (walls | enemy_occupied)
+    traverse_blocked = set() if fly_active else (walls | ground_enemy_blocked)
 
     def _socle(mid: str, c: int, r: int) -> Any:
         return _charge_model_socle(game_state, models_cache[mid], int(c), int(r))
@@ -5507,6 +5515,9 @@ def charge_commit_move_plan_handler(
     entry = require_key(game_state, "units_cache").get(str(unit_id))
     if entry is not None:
         set_unit_coordinates(unit, int(entry["col"]), int(entry["row"]))
+        # Sync niveau de l'ancre (étages) vers la liste units, miroir du commit move (:3490) :
+        # une unité qui charge sur un étage voit son unit["level"] mis à jour (sinon périmé).
+        unit["level"] = int(require_key(entry, "level"))
     dest_col, dest_row = require_unit_position(unit, game_state)
 
     _invalidate_all_destination_pools_after_movement(game_state)

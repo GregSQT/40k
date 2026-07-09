@@ -2636,32 +2636,13 @@ def _fight_units_engaged_with(game_state: Dict[str, Any], unit: Dict[str, Any]) 
     if entry is None:
         raise ValueError(f"Unit {unit_id_str} not in units_cache; cannot compute engagement")
     unit_player = int(require_key(entry, "player"))
-    # --- LOG TEMPORAIRE JETABLE (diagnostic pile-in C exclue) ---
-    from engine.hex_utils import min_distance_between_sets as _dbg_mds
-    _a_occ = entry.get("occupied_hexes")
-    _a_bm = entry.get("occupied_hexes_by_model")
-    print(f"[PILEIN-DBG] ez={ez} A={unit_id_str} col/row=({entry.get('col')},{entry.get('row')}) "
-          f"occ={len(_a_occ) if _a_occ else 0} by_model={len(_a_bm) if _a_bm else 0}", flush=True)
     engaged: List[str] = []
     for eid, ce in units_cache.items():
         if str(eid) == unit_id_str:
             continue
         if int(require_key(ce, "player")) == unit_player:
             continue
-        res = unit_entries_within_engagement_zone(entry, ce, ez)
-        # --- LOG TEMPORAIRE JETABLE ---
-        _e_occ = ce.get("occupied_hexes")
-        _e_bm = ce.get("occupied_hexes_by_model")
-        try:
-            _af = _a_occ if _a_occ else {(entry["col"], entry["row"])}
-            _ef = _e_occ if _e_occ else {(ce["col"], ce["row"])}
-            _cube = _dbg_mds(_af, _ef)
-        except Exception as _ex:
-            _cube = f"ERR({_ex})"
-        print(f"[PILEIN-DBG]   enemy={eid} col/row=({ce.get('col')},{ce.get('row')}) "
-              f"occ={len(_e_occ) if _e_occ else 0} by_model={len(_e_bm) if _e_bm else 0} "
-              f"cube_dist={_cube} ez={ez} engaged={res}", flush=True)
-        if res:
+        if unit_entries_within_engagement_zone(entry, ce, ez):
             engaged.append(str(eid))
     return engaged
 
@@ -3607,7 +3588,13 @@ def _fight_pile_in_build_model_pool(
     closest = {str(t) for t in closest_tier_ids}
     target_entries: List[Dict[str, Any]] = []
     target_fps: List[Set[Tuple[int, int]]] = []
-    enemy_occupied: Set[Tuple[int, int]] = set()
+    from engine.terrain_utils import low_clearance_ground_hexes
+    from .shared_utils import build_enemy_occupied_positions_set
+    # Obstacles au SOL filtrés par NIVEAU (miroir move) : seuls les ennemis au niveau 0 bloquent le
+    # sol — un ennemi en hauteur ne gêne pas (superposition inter-étage §13.06). ``_low_clear`` =
+    # clairance verticale (§13.06/§2.11 : une fig trop haute ne peut finir/passer sous un plancher bas).
+    _enemy_ground = build_enemy_occupied_positions_set(game_state, current_player=player, level=0)
+    _low_clear = low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
     # Bloqueurs (ennemis + autres unités amies) → collision par TEST EUCLIDIEN officiel
     # (footprints_overlap), un socle PAR FIGURINE à sa base RÉELLE (miroir consolidation). Le test
     # par cellules (cand_fp & occupied) sous-estimait le disque et rejetait des socles tangents.
@@ -3618,7 +3605,6 @@ def _fight_pile_in_build_model_pool(
         occ = entry.get("occupied_hexes")
         cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
         if int(entry["player"]) != player:
-            enemy_occupied |= cells
             if str(eid) in closest:
                 target_entries.append(entry)
                 target_fps.append(cells)
@@ -3627,9 +3613,16 @@ def _fight_pile_in_build_model_pool(
         by_model = entry.get("occupied_hexes_by_model")
         if by_model:
             for _bmid, (mc, mr) in by_model.items():
-                blocker_socles.append((_fight_fig_effective_level(entry, str(_bmid)),
-                    Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
-                          col=int(mc), row=int(mr), fp={(int(mc), int(mr))})))
+                _bm_entry = models_cache.get(str(_bmid))
+                if _bm_entry is None:
+                    continue
+                # Empreinte COMPLÈTE par figurine (même convention que le mover/sœurs via
+                # _charge_model_socle) : sans ça, un blocker à base non-ronde n'occupait que son
+                # hex central (fp={(mc,mr)}) → superposition partielle permise (méthode empreinte).
+                blocker_socles.append((
+                    _fight_fig_effective_level(entry, str(_bmid)),
+                    _charge_model_socle(game_state, _bm_entry, int(mc), int(mr)),
+                ))
         else:
             blocker_socles.append((int(entry.get("level", 0)),
                 Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
@@ -3682,7 +3675,7 @@ def _fight_pile_in_build_model_pool(
             start_col, start_row, model["BASE_SHAPE"], model["BASE_SIZE"], _orient,
             int(model.get("level", 0)), terrain_areas
         )
-        _ground_obs = set(wall_set) | enemy_occupied | build_occupied_positions_set(
+        _ground_obs = set(wall_set) | _low_clear | _enemy_ground | build_occupied_positions_set(
             game_state, exclude_unit_id=squad_id, level=0
         )
         _ground_obs.discard((start_col, start_row))
@@ -3694,7 +3687,7 @@ def _fight_pile_in_build_model_pool(
         skip_wall_blocker = True  # murs/occupation d'étage déjà validés par le helper multi-niveaux
     else:
         # 03.01 : traverse figs amies, PAS ennemies ni murs (chemin = cellules).
-        path_blocked = wall_set | enemy_occupied
+        path_blocked = wall_set | _enemy_ground | _low_clear
         visited: Set[Tuple[int, int]] = {(start_col, start_row)}
         reachable = []
         queue: deque = deque([(start_col, start_row, 0)])
@@ -4710,7 +4703,13 @@ def _fight_consolidation_build_model_pool(
     zone_set: Set[Tuple[int, int]] = set(tier) if tier_kind == "zone" else set()
     target_entries: List[Dict[str, Any]] = []
     target_fps: List[Set[Tuple[int, int]]] = []
-    enemy_occupied: Set[Tuple[int, int]] = set()
+    from engine.terrain_utils import low_clearance_ground_hexes
+    from .shared_utils import build_enemy_occupied_positions_set
+    # Obstacles au SOL filtrés par NIVEAU (miroir move) : seuls les ennemis au niveau 0 bloquent le
+    # sol — un ennemi en hauteur ne gêne pas (superposition inter-étage §13.06). ``_low_clear`` =
+    # clairance verticale (§13.06/§2.11 : une fig trop haute ne peut finir/passer sous un plancher bas).
+    _enemy_ground = build_enemy_occupied_positions_set(game_state, current_player=player, level=0)
+    _low_clear = low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
     # Bloqueurs (ennemis + autres unités amies) → collision par TEST EUCLIDIEN officiel
     # (footprints_overlap), comme les autoplaces. Chaque socle étiqueté de son niveau EFFECTIF :
     # une fig d'un autre étage ne gêne pas (superposition inter-étage, §13.06, miroir pile-in).
@@ -4719,7 +4718,6 @@ def _fight_consolidation_build_model_pool(
         occ = entry.get("occupied_hexes")
         cells = set(occ) if occ else {(int(entry["col"]), int(entry["row"]))}
         if int(entry["player"]) != player:
-            enemy_occupied |= cells
             if tier_kind == "enemy" and str(eid) in closest:
                 target_entries.append(entry)
                 target_fps.append(cells)
@@ -4728,9 +4726,16 @@ def _fight_consolidation_build_model_pool(
         by_model = entry.get("occupied_hexes_by_model")
         if by_model:
             for _bmid, (mc, mr) in by_model.items():
-                blocker_socles.append((_fight_fig_effective_level(entry, str(_bmid)),
-                    Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
-                          col=int(mc), row=int(mr), fp={(int(mc), int(mr))})))
+                _bm_entry = models_cache.get(str(_bmid))
+                if _bm_entry is None:
+                    continue
+                # Empreinte COMPLÈTE par figurine (même convention que le mover/sœurs via
+                # _charge_model_socle) : sans ça, un blocker à base non-ronde n'occupait que son
+                # hex central (fp={(mc,mr)}) → superposition partielle permise (méthode empreinte).
+                blocker_socles.append((
+                    _fight_fig_effective_level(entry, str(_bmid)),
+                    _charge_model_socle(game_state, _bm_entry, int(mc), int(mr)),
+                ))
         else:
             blocker_socles.append((int(entry.get("level", 0)),
                 Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
@@ -4783,7 +4788,7 @@ def _fight_consolidation_build_model_pool(
             start_col, start_row, model["BASE_SHAPE"], model["BASE_SIZE"], _orient,
             int(model.get("level", 0)), terrain_areas
         )
-        _ground_obs = set(wall_set) | enemy_occupied | build_occupied_positions_set(
+        _ground_obs = set(wall_set) | _low_clear | _enemy_ground | build_occupied_positions_set(
             game_state, exclude_unit_id=squad_id, level=0
         )
         _ground_obs.discard((start_col, start_row))
@@ -4795,7 +4800,7 @@ def _fight_consolidation_build_model_pool(
         skip_wall_blocker = True
     else:
         # 03.01 : traverse les amies, PAS les ennemies ni les murs (traversée BFS = cellules).
-        path_blocked = wall_set | enemy_occupied
+        path_blocked = wall_set | _enemy_ground | _low_clear
         visited: Set[Tuple[int, int]] = {(start_col, start_row)}
         reachable = []
         queue: deque = deque([(start_col, start_row, 0)])
@@ -5947,7 +5952,7 @@ def _fight_v11_manual_step(
             done = {str(x) for x in game_state.get("pile_in_done", set())}
             game_state["fight_eligible_units"] = [e for e in eligible if str(e) not in done]
             state = _fight_pile_in_model_plan_state(
-                game_state, u, view_level=int(u.get("level", 0))
+                game_state, u, view_level=_view_level
             )
             _fight_v11_log(
                 game_state,
@@ -6182,7 +6187,7 @@ def _fight_v11_manual_step(
             done = {str(x) for x in game_state.get("consolidation_done", set())}
             game_state["fight_eligible_units"] = [e for e in eligible if str(e) not in done]
             state = _fight_consolidation_model_plan_state(
-                game_state, u, view_level=int(u.get("level", 0))
+                game_state, u, view_level=_view_level
             )
             _fight_v11_log(
                 game_state,

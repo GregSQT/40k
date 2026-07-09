@@ -317,6 +317,21 @@ def _occupied_hexes_at_level(
     return occupied
 
 
+def enemy_footprints_at_level(
+    game_state: Dict[str, Any], own_player: int, level: int
+) -> Set[Tuple[int, int]]:
+    """Empreintes par-figurine des unités ENNEMIES (``player != own_player``) situées AU niveau ``level``.
+
+    Blocage de traversée de la charge AU SOL (ou à un étage) : deux figs à des niveaux différents ne se
+    gênent pas physiquement (03.04, engagement 3D) — une fig ennemie à l'étage ne doit pas bloquer le pas
+    d'un chargeur au sol, et réciproquement. Source par-figurine (``models_cache`` + niveau) car
+    ``occupied_hexes`` du units_cache est l'union tous niveaux (durcirait à tort le sol)."""
+    return _occupied_hexes_at_level(
+        game_state, int(level),
+        skip=lambda uid, entry: int(require_key(entry, "player")) == int(own_player),
+    )
+
+
 def build_occupied_positions_set(
     game_state: Dict[str, Any],
     exclude_unit_id: Optional[str] = None,

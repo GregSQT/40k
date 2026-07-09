@@ -703,7 +703,6 @@ type BoardProps = {
   onShoot: (shooterId: number, targetId: number) => void;
   onDeployUnit?: (unitId: number | string, destCol: number, destRow: number) => void;
   onFightAttack?: (attackerId: number, targetId: number | null) => void;
-  onActivateFight?: (fighterId: number) => void;
   onPileInMove?: (unitId: number, destCol: number, destRow: number) => void;
   onSkipPileIn?: () => void;
   current_player: 1 | 2;
@@ -1155,7 +1154,6 @@ export default function Board({
   onDeployUnit,
   onFightAttack,
   onSkipFight,
-  onActivateFight,
   onPileInMove,
   onSkipPileIn,
   onCharge,
@@ -1371,7 +1369,6 @@ export default function Board({
     onDeployUnit?: (unitId: number | string, destCol: number, destRow: number) => void;
     onFightAttack?: (attackerId: number, targetId: number | null) => void;
     onSkipFight?: (unitId: number | string) => void;
-    onActivateFight?: (fighterId: number) => void;
     onCharge?: (chargerId: number, targetId: number) => void;
     onActivateCharge?: (chargerId: number) => void;
     onChargeEnemyUnit?: (chargerId: number, enemyUnitId: number) => void;
@@ -1742,7 +1739,6 @@ export default function Board({
     onDeployUnit,
     onFightAttack,
     onSkipFight,
-    onActivateFight,
     onCharge,
     onActivateCharge,
     onChargeEnemyUnit,
@@ -7707,7 +7703,6 @@ export default function Board({
       onCancelAdvance: stableCallbacks.current.onCancelAdvance,
       onDeployUnit: stableCallbacks.current.onDeployUnit,
       onActivateCharge: stableCallbacks.current.onActivateCharge,
-      onActivateFight: stableCallbacks.current.onActivateFight,
       onMoveCharger: (chargerId: number, dc: number, dr: number) => {
         clearMovePreviewLos();
         stableCallbacks.current.onMoveCharger?.(chargerId, dc, dr);

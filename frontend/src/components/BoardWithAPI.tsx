@@ -1690,6 +1690,10 @@ export const BoardWithAPI: React.FC = () => {
   /** Message du bouton « Check pile-in » : raison du blocage de la validation (null = masqué). */
   const [pileInCheckMsg, setPileInCheckMsg] = useState<string | null>(null);
   const [chargeCheckMsg, setChargeCheckMsg] = useState<string | null>(null);
+  /** TEST : override manuel de la distance de charge (remplace le jet 2D6). "" = jet normal. */
+  const [chargeRollOverride, setChargeRollOverride] = useState<string>(
+    () => localStorage.getItem("chargeRollOverride") ?? ""
+  );
   const [illustrationPreviewUnitId, setIllustrationPreviewUnitId] = useState<Unit["id"] | null>(
     null
   );
@@ -4099,6 +4103,45 @@ export const BoardWithAPI: React.FC = () => {
               </button>
             );
           })()}
+          {/* TEST : champ override de la distance de charge (remplace le jet 2D6). Vide = jet normal. */}
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              marginLeft: 8,
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 700,
+              whiteSpace: "nowrap",
+            }}
+          >
+            Charge forcée
+            <input
+              type="number"
+              min={1}
+              max={24}
+              placeholder="jet"
+              value={chargeRollOverride}
+              onChange={(e) => {
+                const v = e.target.value;
+                setChargeRollOverride(v);
+                if (v === "") localStorage.removeItem("chargeRollOverride");
+                else localStorage.setItem("chargeRollOverride", v);
+              }}
+              style={{
+                width: 56,
+                padding: "6px 8px",
+                borderRadius: 6,
+                border: "1px solid rgba(0,0,0,0.35)",
+                background: chargeRollOverride === "" ? "#374151" : "#0e7490",
+                color: "#fff",
+                fontSize: 14,
+                fontWeight: 700,
+                textAlign: "center",
+              }}
+            />
+          </label>
         </div>
       )}
       {apiProps.gameState?.phase === "move" &&
@@ -5213,7 +5256,6 @@ export const BoardWithAPI: React.FC = () => {
               // Clear target preview in engine API
             }}
             onFightAttack={isGameOver ? () => {} : apiProps.onFightAttack}
-            onActivateFight={isGameOver ? () => {} : apiProps.onActivateFight}
             onPileInMove={isGameOver ? () => {} : apiProps.onPileInMove}
             onSkipPileIn={isGameOver ? () => {} : apiProps.onSkipPileIn}
             current_player={apiProps.current_player as PlayerId}

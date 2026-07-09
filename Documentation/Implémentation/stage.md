@@ -1119,3 +1119,67 @@ le modèle + LoS 3D est le vrai chantier.
       migration sur `_by_level`.
 
 Chantiers 1→5 sont backend (moteur + règles), 6 est frontend. 1 doit précéder tous les autres.
+
+## 7. Fight phase multi-niveaux — pile-in / consolidation (corrections)
+
+Corrections apportées au flux **par-figurine** PvP (pile-in 12.03 / consolidation 12.08). Le
+pile-in et la consolidation partagent le même moteur (fonctions miroir) : chaque correction est
+appliquée aux **deux**.
+
+### 7.1 Source du niveau à l'activation — miroir move
+- **Bug** : « le premier niveau n'était pas reconnu ». L'activation lisait `unit["level"]` (niveau de
+  l'ancre, liste `units`) alors que les refresh/commit utilisaient le niveau de **vue** `currentLevel`.
+  De plus `unit["level"]` n'était **pas** resynchronisé après une charge (seul le commit move le faisait,
+  [movement_handlers.py:3490](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)).
+- **Corrigé** :
+  - Backend : l'activation pile-in/consolidation utilise `_view_level` (niveau de vue transmis par le
+    front), cohérent avec refresh/commit — [fight_handlers.py](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py)
+    (`_fight_pile_in_model_plan_state` / `_fight_consolidation_model_plan_state` via `activate_unit`).
+  - Front : `activate_unit` en phase fight envoie `level: currentLevel` —
+    [useEngineAPI.ts](file:///home/greg/40k/frontend/src/hooks/useEngineAPI.ts) (`handleSelectUnit`).
+  - Charge : `unit["level"]` resynchronisé sur l'ancre au commit charge (miroir du commit move) —
+    [charge_handlers.py](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py) (`charge_commit_move_plan_handler`).
+- **Code mort supprimé** : `handleActivateFight` / `onActivateFight` (jamais invoqué — l'activation
+  fight passe par `onSelectUnit` → `handleSelectUnit`) dans useEngineAPI, BoardPvp, BoardWithAPI, boardClickHandler.
+
+### 7.2 Placement sur étage — convention EUCLIDIENNE (§13.06)
+`footprint_within_floor` / `validate_floor_placement` / `resolve_model_floor_level`
+([terrain_utils.py](file:///home/greg/40k/engine/terrain_utils.py)) : pour une base **ronde**, le
+confinement « entièrement sur le plancher » est un test euclidien disque↔polygone
+(`disc_within_any_polygon` sur `floor_polys`), aligné pixel-pour-pixel sur le rendu et sur la charge.
+Supprime le rejet d'~½ hex de la rasterisation hex qui « coinçait » une fig ronde posée au **bord** d'un
+étage (elle apparaissait dans la zone mais était jugée « déborde » → aucune destination pile-in valide).
+
+### 7.3 Collision par-figurine — empreinte COMPLÈTE
+Les blocker socles ennemis du pool pile-in/consolidation sont construits via `_charge_model_socle`
+(empreinte réelle par figurine, même convention que le mover et les sœurs) au lieu de `fp={hex central}`
+([fight_handlers.py](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py)). Corrige la
+superposition partielle qui était permise contre une base **non-ronde** (la méthode empreinte ne testait
+que le hex central). Base ronde inchangée (collision par disque euclidien, `fp` ignoré).
+
+### 7.4 Obstacles au sol filtrés par NIVEAU + clairance verticale — miroir move
+- `enemy_occupied` tous-niveaux remplacé par les ennemis **au niveau 0** uniquement
+  (`build_enemy_occupied_positions_set(..., level=0)`) : un ennemi **en hauteur** ne bloque plus le
+  cheminement ni les destinations au sol (superposition inter-étage §13.06). Ça alignait enfin l'obstacle
+  de traversée sur les `blocker_socles`, déjà filtrés par niveau effectif.
+- Ajout de la **clairance verticale** `_low_clear = low_clearance_ground_hexes(terrain_areas, MODEL_HEIGHT)`
+  aux obstacles sol (§13.06 / §2.11 : une fig trop haute ne peut finir/passer **sous** un plancher trop
+  bas) — auparavant **absente** du pile-in (masquée par `enemy_occupied` tous-niveaux). Appliqué aux deux
+  branches (BFS sol + seed sol de la branche étage), miroir exact du move
+  ([movement_handlers.py:2986](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)).
+- **Effet** : une fig au sol peut piler/consolider vers la projection d'une cible en hauteur, **sans**
+  finir sous un plancher trop bas pour elle. — **✓ Validé runtime PvP.**
+
+### 7.5 Connu / à faire
+- **Flux pile-in unit-level (V10 / IA)** ([fight_handlers.py](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py),
+  ~`pile_in_move_destinations_12_03`) : mêmes défauts **non corrigés** (`enemy_occupied` tous-niveaux +
+  blocker `fp={hex central}`). À aligner si ce flux reste utilisé (hors flux PvP par-figurine).
+- **Pool par niveau propre** : le pile-in/consolidation calcule **toutes** les figs au `view_level`
+  global. Une escouade répartie sur plusieurs étages (§2.5) doit être pilée en **basculant la vue par
+  niveau** (paradigme mono-niveau, miroir move). Amélioration possible : calculer chaque fig à son niveau
+  effectif (`models_cache[mid]["level"]`), le `view_level` ne servant qu'à un **changement** de niveau
+  explicite. Une **auto-bascule** de la vue a été écartée (diverge de move, casse le multi-niveau).
+- **Écart 2D/3D** : l'engagement et la sélection de cibles pile-in sont mesurés en **2D pur**
+  (`unit_entries_within_engagement_zone` sans `vertical_zone_inches`) ; le « closer » est mesuré en 2D
+  horizontal vers la **projection** de la cible. Correct pour une cible en hauteur (distance 3D monotone à
+  hauteur constante) mais pas 3D strict (cf. §2.7).

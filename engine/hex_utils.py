@@ -2052,3 +2052,38 @@ def disc_overlaps_polygon(
             return True
         j = i
     return False
+
+
+def disc_within_polygon(
+    cx: float, cy: float, r: float, poly: Sequence[Tuple[float, float]]
+) -> bool:
+    """True si un disque (centre (cx,cy), rayon r) est ENTIÈREMENT inclus dans un polygone simple.
+
+    Pendant strict de ``disc_overlaps_polygon`` : ici on exige l'inclusion totale (aucun débordement
+    du bord), pour le confinement « socle rond entièrement sur l'étage » (13.06). Exact pour tout
+    polygone simple (convexe OU concave) : le disque est inclus ssi son centre est dans le polygone ET
+    la distance du centre à chaque arête est >= r (le bord n'entre alors jamais dans le disque).
+    Tangence (distance == r) tolérée = socle qui affleure le bord sans le dépasser."""
+    if len(poly) < 3:
+        raise ValueError(f"disc_within_polygon: polygone invalide ({len(poly)} sommets)")
+    if not _point_in_polygon(cx, cy, poly):
+        return False
+    r_sq = r * r
+    n = len(poly)
+    j = n - 1
+    for i in range(n):
+        if _point_segment_dist_sq(cx, cy, poly[j][0], poly[j][1], poly[i][0], poly[i][1]) < r_sq:
+            return False
+        j = i
+    return True
+
+
+def disc_within_any_polygon(
+    cx: float, cy: float, r: float, polys: Sequence[Sequence[Tuple[float, float]]]
+) -> bool:
+    """True si le disque est entièrement inclus dans AU MOINS UN des polygones.
+
+    Conservateur sur une union de polygones adjacents (un socle à cheval sur la frontière commune de
+    deux étages distincts serait rejeté) : côté sûr, jamais de débordement autorisé. En pratique un
+    étage de ruine = un seul polygone, donc exact. ``polys`` vide → False (aucune surface où tenir)."""
+    return any(disc_within_polygon(cx, cy, r, p) for p in polys)

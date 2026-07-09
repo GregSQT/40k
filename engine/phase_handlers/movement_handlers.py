@@ -1962,7 +1962,7 @@ def _multilevel_floor_destinations(
     sol (mirror move phase) ; le gate vertical 5" (03.04) reste un manque transverse sol+étages, non
     modélisé ici (chantier engagement 3D dédié).
     """
-    from engine.terrain_utils import floor_hexes_at_level, footprint_within_floor
+    from engine.terrain_utils import floor_hexes_at_level, floor_polys_at_level, footprint_within_floor
     from engine.game_state import unit_can_occupy_upper_floor
 
     terrain_areas = game_state.get("terrain_areas", [])  # get allowed (peut être vide)
@@ -1979,6 +1979,11 @@ def _multilevel_floor_destinations(
     unit_id_str = str(require_key(unit, "id"))
 
     floor_hexes_by_level = {lv: floor_hexes_at_level(terrain_areas, lv) for lv in present}
+    # Base ronde : polygones d'étage précalculés une fois par niveau (confinement euclidien du bord).
+    base_shape_round = base_shape == "round"
+    floor_polys_by_level = (
+        {lv: floor_polys_at_level(terrain_areas, lv) for lv in present} if base_shape_round else {}
+    )
     height_by_level: Dict[int, float] = {0: 0.0}
     for a in terrain_areas:
         for fl in a.get("floors", []):  # get allowed (aire sans étage)
@@ -2049,7 +2054,10 @@ def _multilevel_floor_destinations(
             continue  # le sol reste la liste 2D existante (source unique)
         if (c, r) in walls or (c, r) in occupied_by_level.get(lv, set()):
             continue  # destination jamais sur mur ni sur case occupée du niveau (03.01)
-        if footprint_within_floor(c, r, base_shape, base_size, _orientation, floor_hexes_by_level[lv]):
+        if footprint_within_floor(
+            c, r, base_shape, base_size, _orientation, floor_hexes_by_level[lv],
+            floor_polys_by_level.get(lv) if base_shape_round else None,
+        ):
             result[lv].append((c, r))
     return {lv: cells for lv, cells in result.items() if cells}
 
@@ -3141,12 +3149,6 @@ def movement_build_model_destinations_pool(
         reachable = _ground_dests + _floor_dests
         _floor_set = set(_floor_dests)
         eff_by_dest = {_d: (view_level if _d in _floor_set else 0) for _d in reachable}
-        import sys as _lvl_dbg
-        print(
-            f"[MODEL_POOL_LVL] model={model_id} view_level={view_level} can_climb={_can_climb} "
-            f"n_ground={len(_ground_dests)} n_floor={len(_floor_dests)}",
-            file=_lvl_dbg.stderr, flush=True,
-        )
 
     # Empêche le DÉPÔT sur un chevauchement de socle avec une coéquipière AU MÊME NIVEAU EFFECTIF
     # (au lieu de le détecter après coup via le voile rouge). Clearance euclidienne par base RÉELLE —

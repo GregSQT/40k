@@ -2112,6 +2112,17 @@ def execute_action():
     if "shoot_pool_require_los" in data:
         engine.game_state["shoot_pool_require_los_target"] = bool(data["shoot_pool_require_los"])
 
+    # TEST (phase charge) : override manuel de la distance de charge (remplace le jet 2D6).
+    # None/<=0 → pas d'override (jet normal). Posé avant traitement pour être pris en compte
+    # dès l'activation de charge déclenchée par cette action.
+    if "charge_roll_override" in data:
+        _cro = data["charge_roll_override"]
+        if _cro is None:
+            engine.game_state["charge_roll_override"] = None
+        else:
+            _cro_i = int(_cro)
+            engine.game_state["charge_roll_override"] = _cro_i if _cro_i > 0 else None
+
     # Convert frontend hex click to engine semantic action format
     if "col" in data and "row" in data and "selectedUnitId" in data:
         action = {
