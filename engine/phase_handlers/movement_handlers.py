@@ -2692,29 +2692,29 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     return valid_destinations
 
 
-def _model_climb_reachable_floor_cells(
+def _model_multilevel_reachable_cells(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
     squad_id: str,
     model: Dict[str, Any],
     start_pos: Tuple[int, int],
     budget: int,
-    view_level: int,
+    target_levels: Set[int],
     ground_obstacles: Set[Tuple[int, int]],
     terrain_areas: List[Dict[str, Any]],
     start_level: int = 0,
-) -> List[Tuple[int, int]]:
-    """Cases de l'étage ``view_level`` réellement atteignables par la figurine avec le coût de
-    montée/descente §13.06 (champ géodésique multi-niveaux). Empreinte entière sur le plancher, hors
-    mur et hors figurine de l'étage. Retour : liste de (col, row) (vide si aucune atteignable).
+) -> Dict[int, List[Tuple[int, int]]]:
+    """Cases réellement atteignables par la figurine avec le coût de montée/descente §13.06, pour
+    CHAQUE niveau de ``target_levels`` (0 = sol/descente inclus). Le champ géodésique multi-niveaux
+    (``reachable_multilevel_field``) est construit **une seule fois** depuis ``(start_pos, start_level)``
+    puis toutes les couches demandées en sont extraites → source unique, coût vertical facturé
+    identiquement en montée ET en descente. Retour : ``{level: [(col, row), ...]}`` (couche vide si
+    aucune case atteignable). Empreinte entière sur le plancher (niveau >= 1), hors mur et hors
+    figurine de ce niveau.
 
-    Source UNIQUE du coût vertical : ``reachable_multilevel_field`` — même moteur que le pool squad
-    ``_multilevel_floor_destinations``. À n'appeler que pour une unité capable de finir en hauteur, en
-    métrique euclidienne et hors FLY (garanti par l'appelant).
-
-    ``start_level`` : niveau EFFECTIF de départ du mover (défaut 0 = sol, comportement move
-    par-figurine inchangé). Le pile-in/consolidation (phase fight) passe le niveau courant du mover
-    déjà en hauteur → il reste sur son étage sans repayer la montée (pas de reset au sol).
+    ``start_level`` : niveau EFFECTIF de départ du mover (0 = sol). Une fig déjà en hauteur qui finit
+    au sol paie la descente ; qui reste sur son étage ne repaie pas de montée (§13.06).
+    À n'appeler que pour une unité capable de finir en hauteur, métrique euclidienne, hors FLY.
     """
     from engine.terrain_utils import floor_hexes_at_level, validate_floor_placement
     from engine.hex_utils import get_neighbors, precompute_footprint_offsets
@@ -2767,17 +2767,38 @@ def _model_climb_reachable_floor_cells(
         "BASE_SIZE": base,
         "orientation": orientation,
     }
-    occ_view = occupied_by_level.get(view_level, set())
-    out: List[Tuple[int, int]] = []
+    out: Dict[int, List[Tuple[int, int]]] = {lv: [] for lv in target_levels}
     for (c, r, lv), _d in field.items():
-        if lv != view_level or (c, r) == start_pos:
+        if lv not in out or (c, r) == start_pos:
             continue
-        if (c, r) in walls or (c, r) in occ_view:
+        if (c, r) in walls or (c, r) in occupied_by_level.get(lv, set()):
             continue
         ok, _ = validate_floor_placement(stub, c, r, lv, terrain_areas)
         if ok:
-            out.append((c, r))
+            out[lv].append((c, r))
     return out
+
+
+def _model_climb_reachable_floor_cells(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    squad_id: str,
+    model: Dict[str, Any],
+    start_pos: Tuple[int, int],
+    budget: int,
+    view_level: int,
+    ground_obstacles: Set[Tuple[int, int]],
+    terrain_areas: List[Dict[str, Any]],
+    start_level: int = 0,
+) -> List[Tuple[int, int]]:
+    """Cases de l'étage ``view_level`` atteignables (coût §13.06). Fin wrapper sur
+    ``_model_multilevel_reachable_cells`` (source unique du coût vertical) pour une seule couche —
+    conserve la signature attendue par la phase fight (pile-in) et le miroir charge.
+    """
+    return _model_multilevel_reachable_cells(
+        game_state, unit, squad_id, model, start_pos, budget, {view_level},
+        ground_obstacles, terrain_areas, start_level=start_level,
+    ).get(view_level, [])
 
 
 def movement_build_model_destinations_pool(
@@ -2848,6 +2869,12 @@ def movement_build_model_destinations_pool(
     from engine.terrain_utils import floor_hexes_at_level, resolve_model_floor_level
     floor_hexes_view: Set[Tuple[int, int]] = (
         floor_hexes_at_level(terrain_areas, view_level) if view_level >= 1 else set()
+    )
+    # Niveau EFFECTIF de DÉPART du mover (§13.06) — dérivé de son niveau COMMITTÉ (models_cache),
+    # jamais de la vue courante : la facturation de la descente doit être indépendante de l'affichage.
+    start_level_eff = resolve_model_floor_level(
+        start_col, start_row, require_key(model, "BASE_SHAPE"), require_key(model, "BASE_SIZE"),
+        int(unit.get("orientation", 0)), int(model.get("level", 0)), terrain_areas,  # get allowed
     )
     _levels_of_interest: Set[int] = {0} | ({view_level} if view_level >= 1 else set())
 
@@ -3099,17 +3126,24 @@ def movement_build_model_destinations_pool(
     #   - unité NON-montante → ces cases sont RETIRÉES (le preview s'arrête au bord de l'empreinte) ;
     #   - unité montante     → elles sont REMPLACÉES par le sous-ensemble réellement atteignable avec le
     #     coût de montée/descente (champ géodésique multi-niveaux, source unique reachable_multilevel_field).
-    # Les cases au SOL (eff 0) sont conservées telles quelles. FLY et métrique hex : hors périmètre
-    # (fly+étages différé, floors euclidiens) → inchangé.
-    if view_level >= 1 and _mm_use_euclidean and not has_fly and floor_hexes_view:
+    # Les cases au SOL (eff 0) sont conservées telles quelles SI le mover part du sol. Si le mover part
+    # d'un ÉTAGE (start_level_eff >= 1), le champ planaire sol est FAUX (descente gratuite) : le sol est
+    # alors re-dérivé du champ multi-niveaux (descente facturée, §13.06) — indépendant de la vue.
+    # FLY et métrique hex : hors périmètre (fly+étages différé, floors euclidiens) → inchangé.
+    _floor_start = start_level_eff >= 1
+    if _mm_use_euclidean and not has_fly and ((view_level >= 1 and floor_hexes_view) or _floor_start):
         from engine.game_state import unit_can_occupy_upper_floor
         _can_climb = unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS"))
-        # Sol : le BORD d'étage est géré par la clairance HEX (``_low_clear`` dans les obstacles sol),
-        # PAS par un test euclidien de bord — comportement uniforme avec la vue niveau 0 (une fig au sol
-        # peut toucher l'empreinte de l'étage sans espace). Les cases au sol = celles atteignables.
-        _ground_dests = [_d for _d in reachable if eff_by_dest[_d] == 0]
+        if _floor_start and not _can_climb:
+            # Incohérent : une fig posée en hauteur est forcément montante (13.06). Erreur explicite.
+            raise ValueError(
+                f"movement_build_model_destinations_pool: model {model_id} committé à level "
+                f"{start_level_eff} sans mot-clé INFANTRY/BEASTS/SWARM/FLY/MONSTER (13.06)"
+            )
         _floor_dests: List[Tuple[int, int]] = []
-        if _can_climb:
+        if _floor_start:
+            # Mover DÉJÀ en hauteur : sol (descente) ET étage courant sortent du MÊME champ multi-niveaux
+            # (construit une fois), seedé au niveau EFFECTIF réel du mover → coût de descente §13.06 facturé.
             _ground_obs = set(wall_hexes) | _low_clear
             if not (desperate_escape or thru_enemy):
                 _ground_obs |= enemy_occupied
@@ -3118,13 +3152,32 @@ def movement_build_model_destinations_pool(
             if not (desperate_escape or thru_ez):
                 _ground_obs |= ez_anchor_forbidden
             _ground_obs.discard(start_pos)
-            _floor_dests = _model_climb_reachable_floor_cells(
-                game_state, unit, squad_id, model, start_pos, budget, view_level,
-                _ground_obs, terrain_areas,
+            _targets: Set[int] = {0} | ({view_level} if view_level >= 1 else set())
+            _by_level = _model_multilevel_reachable_cells(
+                game_state, unit, squad_id, model, start_pos, budget, _targets,
+                _ground_obs, terrain_areas, start_level=start_level_eff,
             )
-        # EZ ennemie à la DESTINATION d'étage : même contrat que le sol (jamais finir dans l'EZ, 09.05).
-        # _model_climb_reachable_floor_cells ne valide que murs/occupation/plancher ; on réapplique ici
-        # le masque EZ (calculé au niveau ancre, inclut déjà les ennemis en hauteur) — mirror move phase.
+            _ground_dests = _by_level.get(0, [])
+            _floor_dests = _by_level.get(view_level, []) if view_level >= 1 else []
+        else:
+            # Mover au SOL, vue étage : comportement HISTORIQUE (sol libre planaire + montée facturée).
+            # Sol : le BORD d'étage est géré par la clairance HEX (``_low_clear``), pas un test euclidien.
+            _ground_dests = [_d for _d in reachable if eff_by_dest[_d] == 0]
+            if _can_climb:
+                _ground_obs = set(wall_hexes) | _low_clear
+                if not (desperate_escape or thru_enemy):
+                    _ground_obs |= enemy_occupied
+                if not thru_friendly:
+                    _ground_obs |= _friendly_traverse
+                if not (desperate_escape or thru_ez):
+                    _ground_obs |= ez_anchor_forbidden
+                _ground_obs.discard(start_pos)
+                _floor_dests = _model_climb_reachable_floor_cells(
+                    game_state, unit, squad_id, model, start_pos, budget, view_level,
+                    _ground_obs, terrain_areas,
+                )
+        # EZ ennemie à la DESTINATION (sol ET étage) : jamais finir dans l'EZ (09.05) — mirror move phase.
+        _ground_dests = [_d for _d in _ground_dests if _d not in ez_anchor_forbidden]
         _floor_dests = [_d for _d in _floor_dests if _d not in ez_anchor_forbidden]
         reachable = _ground_dests + _floor_dests
         _floor_set = set(_floor_dests)

@@ -1825,29 +1825,32 @@ def _charge_qualifying(
     return out
 
 
-def _charge_model_climb_reachable_floor_cells(
+def _charge_model_multilevel_reachable_cells(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
     squad_id: str,
     model: Dict[str, Any],
     start_pos: Tuple[int, int],
     budget_subhex: int,
-    view_level: int,
+    target_levels: Set[int],
     ground_obstacles: Set[Tuple[int, int]],
     terrain_areas: List[Dict[str, Any]],
-) -> Dict[Tuple[int, int], int]:
-    """Cases de l'étage ``view_level`` réellement atteignables par la figurine de charge, coût de
-    montée/descente §13.06 **soustrait du budget** (jet 2D6 en sous-hex). Empreinte entière sur le
-    plancher, hors mur et hors figurine de l'étage.
+    start_level: int = 0,
+) -> Dict[int, Dict[Tuple[int, int], int]]:
+    """Cases atteignables par la figurine de charge avec le coût de montée/descente §13.06 soustrait
+    du budget (jet 2D6 en sous-hex), pour CHAQUE niveau de ``target_levels`` (0 = sol/descente inclus).
+    Champ multi-niveaux (``reachable_multilevel_field``) construit **une seule fois** depuis
+    ``(start_pos, start_level)`` → source unique, coût vertical facturé en montée ET en descente.
 
-    Miroir EXACT de ``movement_handlers._model_climb_reachable_floor_cells`` (source unique du coût
-    vertical : ``reachable_multilevel_field``) ; seule différence = le budget est le jet de charge et
-    les obstacles au sol sont ceux de la charge (murs + ennemis + clairance ; les amies sont
-    traversables → jamais dans ``ground_obstacles``). À n'appeler qu'en euclidien, hors FLY, pour une
-    unité capable de finir en hauteur (garanti par l'appelant).
+    Niveau 0 (sol) : validité = champ seul (clearance socle), parité avec ``_euclidean_reach`` (les
+    ennemis/murs sont déjà dans ``ground_obstacles`` ; les amies traversables ne filtrent pas la reach).
+    Niveau >= 1 : empreinte entière sur le plancher, hors mur et hors figurine de l'étage.
 
-    Retour : ``{(col, row): distance_subhex}`` (distance = coût géodésique montée incluse), vide si
-    aucune case atteignable."""
+    ``start_level`` : niveau EFFECTIF de départ du mover (0 = sol). Une fig déjà en hauteur qui finit au
+    sol paie la descente ; qui reste sur son étage ne repaie pas de montée. À n'appeler qu'en euclidien,
+    hors FLY, pour une unité capable de finir en hauteur (garanti par l'appelant).
+
+    Retour : ``{level: {(col, row): distance_subhex}}`` (distance = coût géodésique vertical inclus)."""
     from engine.terrain_utils import floor_hexes_at_level, floor_polys_at_level, footprint_within_floor
     from engine.hex_utils import (
         get_neighbors, precompute_footprint_offsets, ENGAGEMENT_NORM_HEX_WIDTH,
@@ -1857,15 +1860,13 @@ def _charge_model_climb_reachable_floor_cells(
     from engine.game_state import unit_can_occupy_upper_floor
 
     if not unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS")):
-        return {}
+        return {lv: {} for lv in target_levels}
     board_cols = int(require_key(game_state, "board_cols"))
     board_rows = int(require_key(game_state, "board_rows"))
     walls = set(game_state.get("wall_hexes", set()))  # get allowed
     inches_to_subhex = int(require_key(game_state, "inches_to_subhex"))
 
     present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})  # get allowed
-    if view_level not in present:
-        return {}
     floor_hexes_by_level = {lv: floor_hexes_at_level(terrain_areas, lv) for lv in present}
     height_by_level: Dict[int, float] = {0: 0.0}
     for a in terrain_areas:
@@ -1902,28 +1903,52 @@ def _charge_model_climb_reachable_floor_cells(
         off_even, off_odd = precompute_footprint_offsets(shape, base, orientation)
 
     field = reachable_multilevel_field(
-        (int(start_pos[0]), int(start_pos[1])), 0, shape, base, off_even, off_odd,
+        (int(start_pos[0]), int(start_pos[1])), int(start_level), shape, base, off_even, off_odd,
         board_cols, board_rows, obstacles_by_level, floor_hexes_by_level, height_by_level,
         int(budget_subhex) * ENGAGEMENT_NORM_HEX_WIDTH, allow_vertical=True, ignore_vertical_cost=False,
     )
 
     # Mot-clé (13.06) déjà vérifié en tête (unit_can_occupy_upper_floor) → la seule condition variable
-    # par cellule est l'empreinte-sur-plancher. Appel direct à ``footprint_within_floor`` avec les hexes
-    # (et, base ronde, les polygones) déjà précalculés, plutôt que ``validate_floor_placement`` qui
-    # reconstruit floor_hexes + re-teste le mot-clé à chaque cellule (miroir du move, cf. _multilevel_floor_destinations).
-    occ_view = occupied_by_level.get(view_level, set())
-    out: Dict[Tuple[int, int], int] = {}
+    # par cellule est l'empreinte-sur-plancher (niveau >= 1). Appel direct à ``footprint_within_floor``
+    # avec les hexes/polygones précalculés (miroir du move, cf. _multilevel_floor_destinations).
+    sp = (int(start_pos[0]), int(start_pos[1]))
+    out: Dict[int, Dict[Tuple[int, int], int]] = {lv: {} for lv in target_levels}
     for (c, r, lv), dist_norm in field.items():
-        if lv != view_level or (c, r) == (int(start_pos[0]), int(start_pos[1])):
+        if lv not in out or (c, r) == sp:
             continue
-        if (c, r) in walls or (c, r) in occ_view:
+        d = int(round(dist_norm / ENGAGEMENT_NORM_HEX_WIDTH))
+        if lv == 0:
+            out[0][(c, r)] = d  # sol : champ seul (parité _euclidean_reach)
+            continue
+        if (c, r) in walls or (c, r) in occupied_by_level.get(lv, set()):
             continue
         if footprint_within_floor(
             c, r, shape, base, orientation, floor_hexes_by_level[lv],
             floor_polys_by_level.get(lv) if shape_round else None,
         ):
-            out[(c, r)] = int(round(dist_norm / ENGAGEMENT_NORM_HEX_WIDTH))
+            out[lv][(c, r)] = d
     return out
+
+
+def _charge_model_climb_reachable_floor_cells(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    squad_id: str,
+    model: Dict[str, Any],
+    start_pos: Tuple[int, int],
+    budget_subhex: int,
+    view_level: int,
+    ground_obstacles: Set[Tuple[int, int]],
+    terrain_areas: List[Dict[str, Any]],
+    start_level: int = 0,
+) -> Dict[Tuple[int, int], int]:
+    """Cases de l'étage ``view_level`` atteignables (coût §13.06). Fin wrapper sur
+    ``_charge_model_multilevel_reachable_cells`` pour une seule couche — conserve la signature attendue
+    par le producteur charge et le test d'intégration. Retour : ``{(col, row): distance_subhex}``."""
+    return _charge_model_multilevel_reachable_cells(
+        game_state, unit, squad_id, model, start_pos, budget_subhex, {view_level},
+        ground_obstacles, terrain_areas, start_level=start_level,
+    ).get(view_level, {})
 
 
 def _compute_plan_context(
@@ -2128,6 +2153,11 @@ def _compute_plan_context(
     dist_tgt: Dict[Tuple[int, int], int] = {}
     dist_ntgt: Dict[Tuple[int, int], int] = {}
     INF = int(budget) + 1
+    # Niveau EFFECTIF de départ par figurine (§13.06) — dérivé du niveau COMMITTÉ, jamais de la vue.
+    # Un chargeur DÉJÀ en hauteur qui charge vers le sol doit payer la DESCENTE (indépendant de l'affichage).
+    from engine.terrain_utils import resolve_model_floor_level as _rmfl_charge
+    _terrain_areas_ctx = game_state.get("terrain_areas", [])  # get allowed
+    start_eff_by_model: Dict[str, int] = {}
     if can_classify:
         for m in unplaced:
             sib = models_cache.get(str(m))
@@ -2139,8 +2169,24 @@ def _compute_plan_context(
                 if m2 != m:
                     other_origins |= origin_fp[m2]
             other_origins_by_model[m] = other_origins
+            _start_eff = (
+                _rmfl_charge(sc, sr, sib["BASE_SHAPE"], sib["BASE_SIZE"],
+                             int(sib.get("orientation", 0)), int(sib.get("level", 0)), _terrain_areas_ctx)  # get allowed
+                if (_cm_use_eucl and not fly_active) else 0
+            )
+            start_eff_by_model[m] = _start_eff
             _tb = time.perf_counter() if _perf else None
-            if _cm_use_eucl:
+            if _start_eff >= 1:
+                # Chargeur DÉJÀ en hauteur : reach SOL = champ multi-niveaux (level 0), descente §13.06
+                # facturée sur le jet. Mêmes obstacles sol que ``_euclidean_reach`` (path_blocked).
+                _gd = _charge_model_multilevel_reachable_cells(
+                    game_state, unit, str(unit_id), sib, (sc, sr), int(budget), {0},
+                    path_blocked, _terrain_areas_ctx, start_level=_start_eff,
+                ).get(0, {})
+                reach_by_model[m] = list(_gd.keys())
+                dist_by_model[m] = dict(_gd)
+                dist_by_model[m][(sc, sr)] = 0
+            elif _cm_use_eucl:
                 reach_by_model[m], dist_by_model[m] = _euclidean_reach(
                     m, sib, sc, sr, set() if fly_active else path_blocked
                 )
@@ -2357,7 +2403,7 @@ def _compute_plan_context(
             fdist = _charge_model_climb_reachable_floor_cells(
                 game_state, unit, str(unit_id), sib,
                 (int(sib["col"]), int(sib["row"])), int(budget), int(view_level),
-                _ground_obs, terrain_areas,
+                _ground_obs, terrain_areas, start_level=start_eff_by_model.get(m, 0),
             )
             if fdist:
                 floor_reach_by_model[m] = list(fdist.keys())

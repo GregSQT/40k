@@ -7,11 +7,13 @@
     { "id": 3, "unit_type": "LieutenantCombiWeapon",                                      "player": 1, "col": 147,  "row": 162 },
     { "id": 4, "unit_type": "ApothecaryBiologis",                                         "player": 1, "col": 169,  "row": 193 },
     { "id": 5, "unit_type": "DreadnoughtBallistus",                                       "player": 1, "col": 180,  "row": 10 },
-    { "id": 10003, "unit_type": "DreadnoughtBallistus",                                   "player": 1, "col": 72,   "row": 8 },
-    { "id": 10001, "unit_type": "FenrisianWolf",                                          "player": 1, "col": 40,   "row": 161 },
-    { "id": 10002, "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",  "player": 1, "col": 63,   "row": 65 },
-    { "id": 10005, "unit_type": "DreadnoughtBallistus",                                   "player": 1, "col": 190,  "row": 242 },
-    { "id": 10006, "unit_type": "DreadnoughtBallistus",                                   "player": 1, "col": 100,  "row": 252 },
+    { "id": 1001, "unit_type": "DreadnoughtBallistus",                                   "player": 1, "col": 72,   "row": 8 },
+    { "id": 1002, "unit_type": "FenrisianWolf",                                          "player": 1, "col": 40,   "row": 161 },
+    { "id": 1003, "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",  "player": 1, "col": 63,   "row": 65 },
+    { "id": 1004, "unit_type": "DreadnoughtBallistus",                                   "player": 1, "col": 190,  "row": 242 },
+    { "id": 1005, "unit_type": "DreadnoughtBallistus",                                   "player": 1, "col": 100,  "row": 252 },
+    { "id": 1008, "unit_type": "Intercessor",                                            "player": 1, "col": 45,  "row": 80, "level": 1 },
+
 
     {
       "id": 6, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 107, "row": 166,
@@ -24,7 +26,7 @@
       ]
     },
     {
-      "id":10004, "unit_type": "Intercessor", "player": 1, "col": 88, "row": 17,
+      "id":1006, "unit_type": "Intercessor", "player": 1, "col": 88, "row": 17,
       "models": [
         { "col": 88, "row": 17 },
         { "col": 94, "row": 17 },
@@ -49,7 +51,7 @@
       ]
     },
     {
-      "id": 1003, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 163, "row": 58,
+      "id": 1007, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 163, "row": 58,
       "models": [
         { "col": 163, "row": 58 },
         { "col": 176, "row": 57 },
@@ -88,7 +90,7 @@
 
     { "id": 101, "unit_type": "WingedTyranidPrime",   "player": 2, "col": 133,   "row": 115 },
     { "id": 102, "unit_type": "Neurotyrant",          "player": 2, "col": 87,   "row": 197 },
-    { "id": 103, "unit_type": "Psychophage",          "player": 2, "col": 41,   "row": 74 },
+    { "id": 103, "unit_type": "Psychophage",          "player": 2, "col": 14,   "row": 74 },
     { "id": 104, "unit_type": "ScreamerKiller",       "player": 2, "col": 204,  "row": 96 },
     { "id": 105, "unit_type": "RipperSwarm",          "player": 2, "col": 20,   "row": 160 },
     { "id": 106, "unit_type": "RipperSwarm",          "player": 2, "col": 8,    "row": 200 },
