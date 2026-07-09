@@ -3686,26 +3686,48 @@ def _fight_pile_in_build_model_pool(
         dest_eff = _view_level
         skip_wall_blocker = True  # murs/occupation d'étage déjà validés par le helper multi-niveaux
     else:
-        # 03.01 : traverse figs amies, PAS ennemies ni murs (chemin = cellules).
-        path_blocked = wall_set | _enemy_ground | _low_clear
-        visited: Set[Tuple[int, int]] = {(start_col, start_row)}
-        reachable = []
-        queue: deque = deque([(start_col, start_row, 0)])
-        while queue:
-            c, r, d = queue.popleft()
-            if d >= budget:
-                continue
-            for nc, nr in get_hex_neighbors(c, r):
-                if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+        # Mover DÉJÀ en hauteur descendant vers le SOL (vue 0) : reach = champ multi-niveaux niveau 0
+        # (coût de DESCENTE §13.06 facturé sur le budget). Pile-in/conso ≤ 3" ne franchit en général pas
+        # un étage, mais certaines unités ont un budget plus grand → descente facturée comme le move.
+        _start_eff = resolve_model_floor_level(
+            start_col, start_row, model["BASE_SHAPE"], model["BASE_SIZE"], _orient,
+            int(model.get("level", 0)), terrain_areas
+        )
+        if _start_eff >= 1:
+            from engine.game_state import unit_can_occupy_upper_floor
+            if not unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS")):
+                return empty  # incohérent : une fig posée en hauteur est forcément montante (13.06)
+            _ground_obs = set(wall_set) | _low_clear | _enemy_ground | build_occupied_positions_set(
+                game_state, exclude_unit_id=squad_id, level=0
+            )
+            _ground_obs.discard((start_col, start_row))
+            reachable = _fight_model_climb_reachable_floor_cells(
+                game_state, unit, squad_id, model, (start_col, start_row), budget, 0,
+                _ground_obs, terrain_areas, start_level=_start_eff,
+            )
+            dest_eff = 0
+            skip_wall_blocker = True
+        else:
+            # 03.01 : traverse figs amies, PAS ennemies ni murs (chemin = cellules). Départ sol : inchangé.
+            path_blocked = wall_set | _enemy_ground | _low_clear
+            visited: Set[Tuple[int, int]] = {(start_col, start_row)}
+            reachable = []
+            queue: deque = deque([(start_col, start_row, 0)])
+            while queue:
+                c, r, d = queue.popleft()
+                if d >= budget:
                     continue
-                cell = (nc, nr)
-                if cell in visited or cell in path_blocked:
-                    continue
-                visited.add(cell)
-                queue.append((nc, nr, d + 1))
-                reachable.append(cell)
-        dest_eff = 0
-        skip_wall_blocker = False
+                for nc, nr in get_hex_neighbors(c, r):
+                    if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                        continue
+                    cell = (nc, nr)
+                    if cell in visited or cell in path_blocked:
+                        continue
+                    visited.add(cell)
+                    queue.append((nc, nr, d + 1))
+                    reachable.append(cell)
+            dest_eff = 0
+            skip_wall_blocker = False
 
     # Bloqueurs/coéquipières au niveau EFFECTIF de destination uniquement (superposition inter-étage).
     _blockers_lvl = [s for lv, s in blocker_socles if lv == dest_eff]
@@ -4799,26 +4821,47 @@ def _fight_consolidation_build_model_pool(
         dest_eff = _view_level
         skip_wall_blocker = True
     else:
-        # 03.01 : traverse les amies, PAS les ennemies ni les murs (traversée BFS = cellules).
-        path_blocked = wall_set | _enemy_ground | _low_clear
-        visited: Set[Tuple[int, int]] = {(start_col, start_row)}
-        reachable = []
-        queue: deque = deque([(start_col, start_row, 0)])
-        while queue:
-            c, r, d = queue.popleft()
-            if d >= budget:
-                continue
-            for nc, nr in get_hex_neighbors(c, r):
-                if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+        # Mover DÉJÀ en hauteur descendant vers le SOL (vue 0) : reach = champ multi-niveaux niveau 0
+        # (coût de DESCENTE §13.06), miroir pile-in. Budget conso > 3" possible → descente facturée.
+        _start_eff = resolve_model_floor_level(
+            start_col, start_row, model["BASE_SHAPE"], model["BASE_SIZE"], _orient,
+            int(model.get("level", 0)), terrain_areas
+        )
+        if _start_eff >= 1:
+            from engine.game_state import unit_can_occupy_upper_floor
+            if not unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS")):
+                return empty  # incohérent : une fig posée en hauteur est forcément montante (13.06)
+            _ground_obs = set(wall_set) | _low_clear | _enemy_ground | build_occupied_positions_set(
+                game_state, exclude_unit_id=squad_id, level=0
+            )
+            _ground_obs.discard((start_col, start_row))
+            reachable = _fight_model_climb_reachable_floor_cells(
+                game_state, unit, squad_id, model, (start_col, start_row), budget, 0,
+                _ground_obs, terrain_areas, start_level=_start_eff,
+            )
+            dest_eff = 0
+            skip_wall_blocker = True
+        else:
+            # 03.01 : traverse les amies, PAS les ennemies ni les murs (BFS = cellules). Départ sol : inchangé.
+            path_blocked = wall_set | _enemy_ground | _low_clear
+            visited: Set[Tuple[int, int]] = {(start_col, start_row)}
+            reachable = []
+            queue: deque = deque([(start_col, start_row, 0)])
+            while queue:
+                c, r, d = queue.popleft()
+                if d >= budget:
                     continue
-                cell = (nc, nr)
-                if cell in visited or cell in path_blocked:
-                    continue
-                visited.add(cell)
-                queue.append((nc, nr, d + 1))
-                reachable.append(cell)
-        dest_eff = 0
-        skip_wall_blocker = False
+                for nc, nr in get_hex_neighbors(c, r):
+                    if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                        continue
+                    cell = (nc, nr)
+                    if cell in visited or cell in path_blocked:
+                        continue
+                    visited.add(cell)
+                    queue.append((nc, nr, d + 1))
+                    reachable.append(cell)
+            dest_eff = 0
+            skip_wall_blocker = False
 
     _blockers_lvl = [s for lv, s in blocker_socles if lv == dest_eff]
     _sibs_lvl = [s for lv, s in sib_socles if lv == dest_eff]
