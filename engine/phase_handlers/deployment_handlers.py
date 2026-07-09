@@ -222,18 +222,26 @@ def generate_compact_formation(
     # Clairance verticale (§13.06, miroir move) : la formation est AU SOL → une fig trop haute ne peut
     # être posée sous un étage trop bas (les restantes tombent au centre, signalées rouge par le preview).
     terrain_areas = require_key(game_state, "terrain_areas")
-    from engine.terrain_utils import low_clearance_ground_hexes, low_clearance_floor_polys
+    from engine.terrain_utils import low_clearance_ground_hexes
     unit = get_unit_by_id(str(squad_id), game_state)
     if not unit:
         raise KeyError(f"generate_compact_formation: unit {squad_id} missing from game_state['units']")
-    # Clairance verticale : HEX (empreinte) + euclidien disque↔polygone (base ronde). Le hex seul
-    # sous-estime le disque de ~½ hex → la formation snappait la fig "à côté" mais son socle mordait
-    # encore le bord de l'étage bas. Le disque doit être ENTIÈREMENT hors de l'étage (miroir move).
+    # Clairance verticale — miroir du pool per-fig / du move. Base ronde : le DISQUE ne doit chevaucher
+    # aucun hex _low_clear (clairance capsule stationnaire, rayon = socle). Base non-ronde : empreinte hex.
     _mh = float(require_key(unit, "MODEL_HEIGHT"))
     _low_clear = low_clearance_ground_hexes(terrain_areas, _mh)
-    _low_clear_polys = low_clearance_floor_polys(terrain_areas, _mh)
 
-    from engine.hex_utils import Socle, footprints_overlap, _hex_center, disc_overlaps_polygon, round_base_radius_norm
+    from engine.hex_utils import (
+        Socle, footprints_overlap, _hex_center, _HEX_CIRCUMRADIUS,
+        build_hex_center_index, disc_overlaps_indexed_hexes, round_base_radius_norm,
+    )
+    # Index _low_clear construit une fois (base ronde de l'unité) : clairance disque O(1) par case spirale.
+    _cf_shape = require_key(unit, "BASE_SHAPE")
+    _cf_radius = round_base_radius_norm(require_key(unit, "BASE_SIZE")) if _cf_shape == "round" else 0.0
+    _cf_bucket = _cf_radius + _HEX_CIRCUMRADIUS
+    _cf_lc_index = (
+        build_hex_center_index(_low_clear, _cf_bucket) if (_cf_shape == "round" and _low_clear) else {}
+    )
 
     placed: List[Tuple[str, int, int]] = []
     placed_socles: List["Socle"] = []
@@ -245,6 +253,7 @@ def generate_compact_formation(
         NB : la marge est propre à la GÉNÉRATION (formation aérée). La règle de validité
         (``footprints_overlap``, preview/commit) tolère le contact — non modifiée — pour
         ne pas flagger en rouge un ajustement manuel où les socles se touchent."""
+        _is_round = require_key(model, "BASE_SHAPE") == "round"
         fp = _model_footprint(game_state, model, c, r)
         for cc, rr in fp:
             if cc < 0 or cc >= board_cols or rr < 0 or rr >= board_rows:
@@ -253,16 +262,16 @@ def generate_compact_formation(
                 return None
             if (cc, rr) in wall_hexes:
                 return None
-            if (cc, rr) in _low_clear:
+            # Clairance _low_clear par empreinte hex : NON-rond seulement (le rond passe par le disque).
+            if not _is_round and (cc, rr) in _low_clear:
                 return None
             if (cc, rr) in other_occ:
                 return None
-        # Débordement euclidien du disque sous un étage trop bas (base ronde) : rejette la case tant
-        # que le socle mord le bord → la spirale continue jusqu'à une case ENTIÈREMENT hors de l'étage.
-        if _low_clear_polys and require_key(model, "BASE_SHAPE") == "round":
+        # Base ronde : clairance disque↔hexunion _low_clear (miroir move) → la spirale continue tant que
+        # le DISQUE chevauche un étage trop bas, s'arrête dès qu'il est dégagé (même distance que le move).
+        if _is_round and _cf_lc_index:
             _cx, _cy = _hex_center(int(c), int(r))
-            _rad = round_base_radius_norm(require_key(model, "BASE_SIZE"))
-            if any(disc_overlaps_polygon(_cx, _cy, _rad, _p) for _p in _low_clear_polys):
+            if disc_overlaps_indexed_hexes(_cx, _cy, _cf_radius, _cf_lc_index, _cf_bucket):
                 return None
         cand = Socle(
             shape=require_key(model, "BASE_SHAPE"),
@@ -365,7 +374,7 @@ def deployment_build_model_destinations_pool(
     terrain_areas = require_key(game_state, "terrain_areas")
     from engine.terrain_utils import (
         floor_hexes_at_level, floor_polys_at_level, footprint_within_floor,
-        low_clearance_ground_hexes, low_clearance_floor_polys,
+        low_clearance_ground_hexes,
     )
     floor_hexes: Set[Tuple[int, int]] = (
         floor_hexes_at_level(terrain_areas, level) if level >= 1 else set()
@@ -386,16 +395,20 @@ def deployment_build_model_destinations_pool(
     if not unit:
         raise KeyError(f"deployment_build_model_destinations_pool: unit {squad_id} missing from game_state['units']")
     _low_clear = low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
-    # Clairance verticale EUCLIDIENNE (miroir move : le champ géodésique garde le centre du disque à
-    # >= rayon des hexes _low_clear → le disque ne recouvre jamais l'étage bas). Le blocage HEX ci-dessus
-    # sous-estime le disque rond (~½ hex) : un socle rond au SOL peut sinon déborder sous le bord de
-    # l'étage bas. Polygones des étages trop bas (base ronde uniquement, comme footprint_within_floor).
-    _low_clear_polys = (
-        low_clearance_floor_polys(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
-        if _m_shape == "round" else []
+    # Clairance verticale — MIROIR EXACT du move. Le move n'ajoute PAS _low_clear au filtre d'empreinte :
+    # il met _low_clear dans les obstacles du champ géodésique avec clearance = RAYON du socle (round).
+    # Le socle rond « heurte » un hex _low_clear ssi son DISQUE le chevauche (clairance capsule
+    # stationnaire) — jamais l'empreinte hex (qui sur-couvre et poussait le deploy plus loin que le move).
+    # Base ronde → test disque↔hexunion _low_clear ; oval/carré → empreinte hex (comme le move non-rond).
+    from engine.hex_utils import (
+        _hex_center, _HEX_CIRCUMRADIUS, build_hex_center_index, disc_overlaps_indexed_hexes,
+        round_base_radius_norm,
     )
-    from engine.hex_utils import _hex_center, disc_overlaps_polygon, round_base_radius_norm
-    _m_radius = round_base_radius_norm(_m_base) if _m_shape == "round" else 0.0
+    _m_round = _m_shape == "round"
+    _m_radius = round_base_radius_norm(_m_base) if _m_round else 0.0
+    # Index spatial des hexes _low_clear (construit UNE fois) : clairance disque O(1) par case.
+    _lc_bucket = _m_radius + _HEX_CIRCUMRADIUS
+    _lc_index = build_hex_center_index(_low_clear, _lc_bucket) if (_m_round and _low_clear) else {}
     # Gate mot-clé §13.06 (miroir move, correction multi-niveaux) : une unité qui ne peut PAS finir en
     # hauteur (ni INFANTRY/BEASTS/SWARM/FLY/MONSTER) n'obtient jamais une candidate taguée étage — sinon
     # une grosse fig (ex. VEHICLE trop haute) serait posée en débordant sur l'empreinte de l'étage, ou au
@@ -465,8 +478,10 @@ def deployment_build_model_destinations_pool(
         }
         for lv in occ_by_level
     }
-    # Clairance verticale ajoutée au blocage SOL (niveau 0) uniquement — miroir move.
-    if _low_clear:
+    # Clairance verticale SOL (niveau 0) — miroir move. Base RONDE : PAS de blocage empreinte hex ici
+    # (le move n'en a pas), la clairance disque↔hexunion est appliquée par candidate plus bas. Base
+    # non-ronde : blocage empreinte hex (comme le move non-rond, empreinte discrète orientée).
+    if _low_clear and not _m_round:
         blocked_cube_by_level[0] |= {offset_to_cube(int(c), int(r)) for (c, r) in _low_clear}
     destinations: List[Tuple[int, int]] = []
     eff_by_dest: Dict[Tuple[int, int], int] = {}
@@ -476,8 +491,7 @@ def deployment_build_model_destinations_pool(
         if any(cell not in pool_cube or cell in wall_cube for cell in cells):
             continue
         # Niveau effectif : étage vue si l'empreinte tient entièrement sur le plancher (euclidien §8.1),
-        # sinon sol. La CLAIRANCE d'étage bas au SOL est traitée en deux temps : hex (_low_clear ci-dessous)
-        # + euclidien disque↔polygone (_low_clear_polys, base ronde) pour ne pas déborder sous le bord.
+        # sinon sol. La clairance d'étage bas au SOL est la clairance disque du move (voir plus bas).
         eff = 0
         if level >= 1 and _can_climb and floor_cube and any(cell in floor_cube for cell in cells):
             if footprint_within_floor(
@@ -486,11 +500,12 @@ def deployment_build_model_destinations_pool(
                 eff = level
         if any(cell in blocked_cube_by_level.get(eff, blocked_cube_by_level[0]) for cell in cells):
             continue
-        # Débordement euclidien sous un étage trop bas (base ronde, sol) : miroir de la clairance capsule
-        # du move (le disque ne peut chevaucher l'empreinte de l'étage bas). Ne concerne que le sol (eff 0).
-        if eff == 0 and _low_clear_polys:
+        # Clairance verticale base RONDE au SOL — MIROIR EXACT du move : le disque du socle ne doit
+        # chevaucher aucun hex _low_clear (clairance capsule stationnaire, obstacle = hexunion des étages
+        # trop bas, rayon = socle). Identique au champ géodésique du move → deploy et move au même endroit.
+        if eff == 0 and _lc_index:
             _dcx, _dcy = _hex_center(int(cc), int(rr))
-            if any(disc_overlaps_polygon(_dcx, _dcy, _m_radius, _poly) for _poly in _low_clear_polys):
+            if disc_overlaps_indexed_hexes(_dcx, _dcy, _m_radius, _lc_index, _lc_bucket):
                 continue
         destinations.append((int(cc), int(rr)))
         eff_by_dest[(int(cc), int(rr))] = eff
@@ -637,12 +652,20 @@ def deployment_preview_plan(
     # Clairance verticale (§13.06, miroir move) : au SOL, une fig trop haute ne peut tenir sous un étage
     # trop bas → voile rouge. Ne concerne que le niveau 0 (la pose EN SURFACE d'un étage passe par
     # validate_floor_placement). MODEL_HEIGHT requis au chargement → toujours présent.
-    from engine.terrain_utils import low_clearance_ground_hexes, low_clearance_floor_polys
+    from engine.terrain_utils import low_clearance_ground_hexes
     _low_clear = low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
-    # Débordement euclidien sous un étage trop bas (base ronde) : miroir du pool per-fig — le disque ne
-    # peut chevaucher l'empreinte de l'étage bas (le hex _low_clear seul sous-estime le disque de ~½ hex).
-    _low_clear_polys = low_clearance_floor_polys(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
-    from engine.hex_utils import _hex_center, disc_overlaps_polygon, round_base_radius_norm
+    # Clairance verticale — miroir du pool per-fig / du move. Base ronde : le DISQUE ne doit chevaucher
+    # aucun hex _low_clear (clairance capsule, index spatial). Base non-ronde : empreinte hex ∩ _low_clear.
+    from engine.hex_utils import (
+        _hex_center, _HEX_CIRCUMRADIUS, build_hex_center_index, disc_overlaps_indexed_hexes,
+        round_base_radius_norm,
+    )
+    _pv_shape = require_key(unit, "BASE_SHAPE")
+    _pv_radius = round_base_radius_norm(require_key(unit, "BASE_SIZE")) if _pv_shape == "round" else 0.0
+    _pv_bucket = _pv_radius + _HEX_CIRCUMRADIUS
+    _pv_lc_index = (
+        build_hex_center_index(_low_clear, _pv_bucket) if (_pv_shape == "round" and _low_clear) else {}
+    )
 
     # Niveau EFFECTIF par figurine = niveau demandé (vue) SI l'empreinte tient sur ce plancher, sinon
     # sol (0). Permet une escouade MIXTE (figs sur l'étage + figs au sol) déployée depuis la vue étage :
@@ -712,13 +735,12 @@ def deployment_preview_plan(
             )
             floor_bad = not floor_ok
         # Niveau 0 : fig trop haute sous un étage trop bas (§13.06, clairance verticale) → invalide.
-        # HEX (empreinte) + euclidien disque↔polygone (base ronde) pour capter le débordement sous le bord.
-        m = require_key(models_cache, str(mid))
-        low_clear_bad = lv == 0 and bool(_low_clear) and bool(fp & _low_clear)
-        if lv == 0 and not low_clear_bad and _low_clear_polys and require_key(m, "BASE_SHAPE") == "round":
+        # Base ronde : DISQUE↔hexunion _low_clear (miroir move, index). Non-ronde : empreinte hex.
+        if lv == 0 and _pv_lc_index:
             _cx, _cy = _hex_center(int(nc), int(nr))
-            _rad = round_base_radius_norm(require_key(m, "BASE_SIZE"))
-            low_clear_bad = any(disc_overlaps_polygon(_cx, _cy, _rad, _p) for _p in _low_clear_polys)
+            low_clear_bad = disc_overlaps_indexed_hexes(_cx, _cy, _pv_radius, _pv_lc_index, _pv_bucket)
+        else:
+            low_clear_bad = lv == 0 and bool(_low_clear) and bool(fp & _low_clear)
         per_model[str(mid)] = bool(
             not out_of_bounds and not out_of_zone and not on_wall
             and not on_other and not intra and not cohesion_red[idx] and not floor_bad

@@ -1703,6 +1703,44 @@ def _hex_corners_at(cx: float, cy: float) -> List[Tuple[float, float]]:
     return [(cx + ox, cy + oy) for ox, oy in _HEX_CORNER_OFFSETS]
 
 
+def build_hex_center_index(
+    hexes: "set[tuple[int, int]] | Sequence[Tuple[int, int]]", bucket_size: float
+) -> Dict[Tuple[int, int], List[Tuple[float, float]]]:
+    """Index spatial des centres ``_hex_center`` des ``hexes``, groupés par bucket de côté
+    ``bucket_size``. Construit UNE fois, réutilisé par ``disc_overlaps_indexed_hexes`` pour un test
+    O(1) amorti par case (au lieu de re-parcourir tout ``hexes``). ``bucket_size`` doit valoir la
+    portée de contact (``r + circumradius``) pour qu'un hexagone chevauchant soit dans le bucket de la
+    case testée ou l'un de ses 8 voisins."""
+    idx: Dict[Tuple[int, int], List[Tuple[float, float]]] = {}
+    for hc, hr in hexes:
+        cx, cy = _hex_center(int(hc), int(hr))
+        idx.setdefault((int(cx // bucket_size), int(cy // bucket_size)), []).append((cx, cy))
+    return idx
+
+
+def disc_overlaps_indexed_hexes(
+    cx: float, cy: float, r: float,
+    index: Dict[Tuple[int, int], List[Tuple[float, float]]], bucket_size: float,
+) -> bool:
+    """True si le disque ``((cx,cy), r)`` chevauche l'un des hexagones indexés par
+    ``build_hex_center_index`` (même ``bucket_size``). Pendant STATIONNAIRE de la clairance capsule du
+    champ géodésique du move (un socle rond « heurte » un hex-obstacle ssi son disque le chevauche) →
+    réplique EXACTEMENT, hors BFS, la clairance ``_low_clear`` du move. Ne teste que le bucket de la case
+    et ses 8 voisins (portée = ``r + circumradius`` = ``bucket_size``)."""
+    if not index:
+        return False
+    reach_sq = (r + _HEX_CIRCUMRADIUS) ** 2
+    gx, gy = int(cx // bucket_size), int(cy // bucket_size)
+    for bgx in (gx - 1, gx, gx + 1):
+        for bgy in (gy - 1, gy, gy + 1):
+            for (hx, hy) in index.get((bgx, bgy), ()):  # get allowed
+                if (hx - cx) ** 2 + (hy - cy) ** 2 > reach_sq:
+                    continue
+                if disc_overlaps_polygon(cx, cy, r, _hex_corners_at(hx, hy)):
+                    return True
+    return False
+
+
 def _obstacle_bucket_size(clearance: float) -> float:
     """Taille de bucket de l'index spatial d'obstacles (unités ``_hex_center``)."""
     return max(2.0, _HEX_CIRCUMRADIUS + (clearance if clearance > 0.0 else 0.0))

@@ -689,6 +689,23 @@ le modèle + LoS 3D est le vrai chantier.
        **RESTE** : pool **squad** `movement_build_valid_destinations_pool` (= pathfinding **IA**) et **voile rouge**
        `movement_preview_move_plan` — même injection ground-only/non-fly à faire (piège : plancher = hexes
        clairance → la surface d'étage doit rester walkable, ne pas polluer `wall_hexes` global).
+     - **Déploiement — clairance alignée EXACTEMENT sur le move [2026-07-09]** (`deployment_handlers.py`) :
+       appliqué aux **3 sites** — pool per-fig `deployment_build_model_destinations_pool`, voile rouge
+       `deployment_preview_plan`, drop `generate_compact_formation`.
+       - **Géométrie = celle du move, pas l'empreinte hex.** Le move n'ajoute jamais `_low_clear` au filtre
+         d'empreinte : il le met dans les obstacles du champ géodésique avec clearance = **rayon du socle**.
+         Un socle **rond** « heurte » un hex `_low_clear` **ssi son DISQUE le chevauche** (pendant
+         stationnaire de la clairance capsule `_segment_hits_hex`). Le blocage par **empreinte hex**
+         sur-couvrait le disque (~½ hex) et posait la fig **plus loin** que le move (bug « dread loin en
+         deploy / collé en move ») → retiré pour les bases rondes. Base **non-ronde** : empreinte hex
+         conservée (miroir du move non-rond, empreinte discrète orientée).
+       - Helpers `build_hex_center_index` / `disc_overlaps_indexed_hexes`
+         ([hex_utils.py](file:///home/greg/40k/engine/hex_utils.py)) : index spatial bucketé (bucket =
+         `rayon + circumradius`) construit **une fois** par appel → clairance disque O(1) par case (sans
+         l'index : 1710 hexes × ~7000 cases ⇒ ~2 s/pool = click gelé).
+       - **Gate mot-clé §13.06** dans le pool : `unit_can_occupy_upper_floor` — une unité non-montante
+         (VEHICLE, etc.) n'obtient jamais de candidate taguée étage (`eff` forcé à 0), donc la clairance sol
+         s'applique (sinon `eff=level` contournait `_low_clear`). Miroir de la correction multi-niveaux du move.
 
    - **Charge niveau-consciente** (`_compute_plan_context` + `charge_model_plan_state`,
      [charge_handlers.py](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py)) :
