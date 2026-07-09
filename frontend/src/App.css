@@ -1552,6 +1552,36 @@ body {
   border-right: 2px solid var(--color-accent);
 }
 
+/* ------------------------------------------------------------------
+   Couleurs de rôle des figurines (UnitStatusTable, vue multi-profils)
+   Appliquées sur TOUTE la ligne du profil ; les cellules héritent.
+   Rôle moteur (ROLE_TIER) : leader / support / sergeant / special_weapon / base.
+   ------------------------------------------------------------------ */
+.unit-profile-row > .unit-status-cell {
+  background-color: inherit;
+  color: inherit;
+}
+.unit-profile-row--leader {
+  background-color: #b18a2b; /* doré éclairci */
+  color: #f0f0f0;
+}
+.unit-profile-row--support {
+  background-color: #5c626b; /* argenté atténué */
+  color: #f0f0f0;
+}
+.unit-profile-row--sergeant {
+  background-color: #7d5a30; /* bronze */
+  color: #f0f0f0;
+}
+.unit-profile-row--special {
+  background-color: #8a4530; /* bronze / rouge */
+  color: #f0f0f0;
+}
+.unit-profile-row--base {
+  background-color: #2f2f2f; /* gris foncé */
+  color: #ddd;
+}
+
 /* Encadrement unité en preview (hover icône plateau + illustration) — couleurs = bandeaux Player 1 / 2 */
 .unit-status-detail-preview-wrap {
   margin-bottom: 2px;

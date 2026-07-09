@@ -39,7 +39,7 @@ export class WolfGuardTerminatorPackLeader extends EliteMeleeElite {
   static BASE_SIZE = 16; // Size of the base
   static MODEL_HEIGHT = 2.5; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 2.0; // Size of the icon
-  static ILLUSTRATION_RATIO = 100; // Illustration size ratio in percent
+  static ILLUSTRATION_RATIO = 145; // Illustration size ratio in percent
 
   constructor(name: string, startPos: [number, number]) {
     super(name, WolfGuardTerminatorPackLeader.HP_MAX, startPos);

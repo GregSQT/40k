@@ -3472,6 +3472,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         hideable: unit.hideable,
         hidden: unit.hidden,
         hidden_models: unit.hidden_models,
+        // Composition par-figurine (profils leader/sergent/spécial) : requis par l'inspection
+        // figurine dans UnitStatusTable. Absent pour les unités mono-profil.
+        models: unit.models,
       };
     });
   }, []);

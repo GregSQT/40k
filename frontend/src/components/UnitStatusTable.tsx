@@ -1,7 +1,12 @@
 // frontend/src/components/UnitStatusTable.tsx
 import {
+  type CSSProperties,
+  type Dispatch,
+  Fragment,
   memo,
+  type ReactElement,
   type RefObject,
+  type SetStateAction,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -11,7 +16,7 @@ import {
 } from "react";
 import unitRules from "../../../config/unit_rules.json";
 import weaponRules from "../../../config/weapon_rules.json";
-import type { DeploymentState, Unit, UnitId } from "../types/game";
+import type { DeploymentState, Unit, UnitId, UnitRule, Weapon } from "../types/game";
 import TooltipWrapper from "./TooltipWrapper";
 
 const UNIT_RULE_DESCRIPTIONS: Record<string, string> = {
@@ -34,6 +39,515 @@ const getWeaponRuleDisplay = (ruleId: string): { displayName: string; tooltipTex
   const tooltipText = ruleData?.description ?? ruleId;
   return { displayName, tooltipText };
 };
+
+// Rôles d'allocation (règle 19/05) → ruleIds moteur (ROLE_TIER, shared_utils). Détermine la couleur
+// du bandeau nom d'une figurine dans la vue multi-profils.
+const ROLE_RULE_IDS = ["leader", "support", "sergeant", "special_weapon"] as const;
+type ModelRole = (typeof ROLE_RULE_IDS)[number] | null;
+
+function deriveModelRole(rules: UnitRule[] | undefined): ModelRole {
+  if (!rules) return null;
+  for (const r of rules) {
+    if ((ROLE_RULE_IDS as readonly string[]).includes(r.ruleId)) {
+      return r.ruleId as ModelRole;
+    }
+  }
+  return null;
+}
+
+// Ordre d'affichage imposé des profils : Leader → Support → Sergeant → Special weapon → Base.
+const ROLE_DISPLAY_ORDER: Record<string, number> = {
+  leader: 0,
+  support: 1,
+  sergeant: 2,
+  special_weapon: 3,
+};
+function roleDisplayRank(role: ModelRole): number {
+  return role ? ROLE_DISPLAY_ORDER[role] : 4;
+}
+
+/** Suffixe de classe CSS du rôle (couleurs définies dans App.css : .unit-profile-row--<suffixe>). */
+function roleClassSuffix(role: ModelRole): string {
+  switch (role) {
+    case "leader":
+      return "leader";
+    case "support":
+      return "support";
+    case "sergeant":
+      return "sergeant";
+    case "special_weapon":
+      return "special";
+    default:
+      return "base";
+  }
+}
+
+/** Profil distinct (par unit_type) d'une escouade multi-profils. ``move``/``ld`` sont hérités de
+ * l'unité (le moteur ne les surcharge pas par figurine). */
+interface UnitProfile {
+  key: string;
+  name: string;
+  role: ModelRole;
+  move?: number;
+  t?: number;
+  sv?: number;
+  invul?: number;
+  ld?: number;
+  oc?: number;
+  value?: number;
+  hpMax?: number;
+  rng: Weapon[];
+  cc: Weapon[];
+}
+
+/** Construit un profil par unit_type distinct présent dans ``unit.models`` (ordre d'apparition).
+ * Une figurine de base (sans unit_type) retombe sur les stats/armes de l'unité parente. */
+function buildUnitProfiles(unit: Unit): UnitProfile[] {
+  const models = unit.models ?? [];
+  const byKey = new Map<string, UnitProfile>();
+  const order: string[] = [];
+  for (const m of models) {
+    const isBase = !m.unit_type;
+    const key = m.unit_type ?? "__base__";
+    if (byKey.has(key)) continue;
+    order.push(key);
+    byKey.set(key, {
+      key,
+      name:
+        (isBase ? unit.DISPLAY_NAME : m.DISPLAY_NAME) ??
+        unit.DISPLAY_NAME ??
+        unit.name ??
+        unit.type ??
+        `Unit ${unit.id}`,
+      role: deriveModelRole(isBase ? unit.UNIT_RULES : (m.UNIT_RULES ?? unit.UNIT_RULES)),
+      move: unit.MOVE,
+      t: m.T ?? unit.T,
+      sv: m.ARMOR_SAVE ?? unit.ARMOR_SAVE,
+      invul: m.INVUL_SAVE ?? unit.INVUL_SAVE,
+      ld: unit.LD,
+      oc: m.OC ?? unit.OC,
+      value: m.VALUE ?? unit.VALUE,
+      hpMax: m.HP_MAX ?? unit.HP_MAX,
+      rng: m.RNG_WEAPONS ?? unit.RNG_WEAPONS ?? [],
+      cc: m.CC_WEAPONS ?? unit.CC_WEAPONS ?? [],
+    });
+  }
+  return order
+    .map((k) => byKey.get(k) as UnitProfile)
+    .sort((a, b) => roleDisplayRank(a.role) - roleDisplayRank(b.role));
+}
+
+/** Clé de profil correspondant à un index de modèle (inspection). */
+function profileKeyForModelIndex(unit: Unit, modelIndex: number | null): string | null {
+  if (modelIndex === null) return null;
+  const m = unit.models?.[modelIndex];
+  if (!m) return null;
+  return m.unit_type ?? "__base__";
+}
+
+const PROFILE_CELL_STYLE: CSSProperties = {
+  textAlign: "center",
+  padding: "2px 6px",
+  fontSize: "11px",
+};
+
+/** Mini-table d'armes (RANGE ou MELEE) repliable, pour un profil. */
+function ProfileWeaponTable({
+  title,
+  weapons,
+  melee,
+  expanded,
+  onToggle,
+  inchesToSubhex,
+}: {
+  title: string;
+  weapons: Weapon[];
+  melee: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+  inchesToSubhex: number;
+}): ReactElement | null {
+  if (weapons.length === 0) return null;
+  // Mêmes valeurs que les tables d'armes existantes (single-profil) : fond de section + bouton.
+  const headerBg = melee ? "rgba(200, 50, 50, 0.2)" : "rgba(50, 150, 200, 0.2)";
+  const btnBg = melee ? "rgba(200, 100, 150, 0.3)" : "rgba(100, 150, 200, 0.3)";
+  const btnBorder = melee ? "rgba(200, 100, 150, 0.5)" : "rgba(100, 150, 200, 0.5)";
+  const btnColor = melee ? "#c86496" : "#6496c8";
+  const headerTh: CSSProperties = {
+    ...PROFILE_CELL_STYLE,
+    color: "#aee6ff",
+    fontWeight: "bold",
+    backgroundColor: headerBg,
+  };
+  return (
+    <table
+      style={{
+        width: "100%",
+        borderCollapse: "collapse",
+        marginTop: "3px",
+        tableLayout: "fixed",
+      }}
+    >
+      {/* Même colgroup 10 colonnes que la table principale → Rng aligné sous HP.
+          Le nom d'arme couvre expand+ID+Name (colSpan 3) ; la dernière colonne (VAL) reste vide. */}
+      <colgroup>
+        <col style={{ width: "40px" }} />
+        <col style={{ width: "40px" }} />
+        <col style={{ width: "auto" }} />
+        <col style={{ width: "70px" }} />
+        <col style={{ width: "70px" }} />
+        <col style={{ width: "70px" }} />
+        <col style={{ width: "70px" }} />
+        <col style={{ width: "70px" }} />
+        <col style={{ width: "70px" }} />
+        <col style={{ width: "70px" }} />
+      </colgroup>
+      <thead>
+        <tr
+          className="unit-status-row unit-status-row--section-header"
+          style={{ fontWeight: "bold" }}
+        >
+          <th
+            className="unit-status-cell"
+            colSpan={3}
+            style={{
+              ...PROFILE_CELL_STYLE,
+              // Zone d'indentation (56px) transparente à gauche du bouton, couleur ensuite.
+              background: `linear-gradient(to right, transparent 56px, ${headerBg} 56px)`,
+              color: "#fff",
+              textAlign: "left",
+              paddingLeft: "56px",
+            }}
+          >
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggle();
+              }}
+              style={{
+                background: btnBg,
+                border: `1px solid ${btnBorder}`,
+                color: btnColor,
+                fontSize: "12px",
+                fontWeight: "bold",
+                cursor: "pointer",
+                padding: "1px 5px",
+                minWidth: "20px",
+                borderRadius: "3px",
+                marginRight: "8px",
+                verticalAlign: "middle",
+              }}
+              aria-label={expanded ? `Collapse ${title}` : `Expand ${title}`}
+            >
+              {expanded ? "−" : "+"}
+            </button>
+            <span style={{ fontSize: "11px" }}>{title}</span>
+          </th>
+          <th className="unit-status-cell" style={headerTh}>
+            Rng
+          </th>
+          <th className="unit-status-cell" style={headerTh}>
+            A
+          </th>
+          <th className="unit-status-cell" style={headerTh}>
+            {melee ? "CC" : "BS"}
+          </th>
+          <th className="unit-status-cell" style={headerTh}>
+            S
+          </th>
+          <th className="unit-status-cell" style={headerTh}>
+            AP
+          </th>
+          <th className="unit-status-cell" style={headerTh}>
+            DMG
+          </th>
+          <th className="unit-status-cell" style={{ ...headerTh }} />
+        </tr>
+      </thead>
+      {expanded && (
+        <tbody>
+          {weapons.map((weapon, idx) => (
+            <tr
+              key={`${melee ? "cc" : "rng"}-${weapon.display_name}`}
+              className="unit-status-row unit-status-row--weapon"
+              style={{ backgroundColor: idx === 0 ? "#222" : "#2a2a2a" }}
+            >
+              <td
+                className="unit-status-cell"
+                colSpan={3}
+                style={{ ...PROFILE_CELL_STYLE, textAlign: "left", paddingLeft: "56px" }}
+              >
+                {weapon.display_name}
+                {weapon.WEAPON_RULES?.map((ruleId) => {
+                  const { displayName, tooltipText } = getWeaponRuleDisplay(ruleId);
+                  return (
+                    <span key={ruleId} className="rule-badge-wrapper">
+                      <span className="rule-badge">{displayName}</span>
+                      <span className="rule-tooltip">{tooltipText}</span>
+                    </span>
+                  );
+                })}
+              </td>
+              <td style={PROFILE_CELL_STYLE}>
+                {!melee && weapon.RNG ? `${weapon.RNG / inchesToSubhex}"` : "/"}
+              </td>
+              <td style={PROFILE_CELL_STYLE}>{weapon.NB || 0}</td>
+              <td style={PROFILE_CELL_STYLE}>{weapon.ATK ? `${weapon.ATK}+` : "-"}</td>
+              <td style={PROFILE_CELL_STYLE}>{weapon.STR || "-"}</td>
+              <td style={PROFILE_CELL_STYLE}>{weapon.AP || "-"}</td>
+              <td style={PROFILE_CELL_STYLE}>{weapon.DMG || "-"}</td>
+              <td style={PROFILE_CELL_STYLE} />
+            </tr>
+          ))}
+        </tbody>
+      )}
+    </table>
+  );
+}
+
+/** Ligne d'unité pour une escouade MULTI-PROFILS : header = nom d'unité seul, puis une
+ * sous-catégorie repliable par type de figurine (bandeau nom coloré selon le rôle). Le survol/clic
+ * d'une figurine sur le plateau (``inspectedModelIndex``) déplie l'unité + le profil correspondant. */
+function MultiProfileUnitRow({
+  unit,
+  profiles,
+  isSelected,
+  isClicked,
+  onSelect,
+  inspectedModelIndex,
+  inchesToSubhex,
+}: {
+  unit: Unit;
+  profiles: UnitProfile[];
+  isSelected: boolean;
+  isClicked: boolean;
+  onSelect: (unitId: UnitId) => void;
+  inspectedModelIndex: number | null;
+  inchesToSubhex: number;
+}): ReactElement {
+  const [unitManualOpen, setUnitManualOpen] = useState(false);
+  const [openProfiles, setOpenProfiles] = useState<Set<string>>(new Set());
+  const [openRanged, setOpenRanged] = useState<Set<string>>(new Set());
+  const [openMelee, setOpenMelee] = useState<Set<string>>(new Set());
+
+  const inspectedProfileKey = profileKeyForModelIndex(unit, inspectedModelIndex);
+  const unitName = unit.DISPLAY_NAME || unit.name || unit.type || `Unit ${unit.id}`;
+
+  // Survol/inspection : ouvre EXCLUSIVEMENT le profil visé et REFERME le précédent survolé.
+  // On SEED simplement l'état (setOpenProfiles) au lieu de forcer l'affichage → les boutons +/−
+  // restent pleinement autoritaires (peuvent replier même sous inspection).
+  const hoverSeedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const key = inspectedProfileKey;
+    const prev = hoverSeedRef.current;
+    if (prev === key) return;
+    setOpenProfiles((s) => {
+      const next = new Set(s);
+      if (prev !== null) next.delete(prev);
+      if (key !== null) next.add(key);
+      return next;
+    });
+    if (key !== null) setUnitManualOpen(true);
+    hoverSeedRef.current = key;
+  }, [inspectedProfileKey]);
+
+  // Unité sélectionnée : déplier par défaut tous les profils + leurs armes tir/mêlée (additif).
+  const profileKeysSig = profiles.map((p) => p.key).join(",");
+  useEffect(() => {
+    if (!isSelected) return;
+    const keys = profileKeysSig ? profileKeysSig.split(",") : [];
+    setUnitManualOpen(true);
+    setOpenProfiles(new Set(keys));
+    setOpenRanged(new Set(keys));
+    setOpenMelee(new Set(keys));
+  }, [isSelected, profileKeysSig]);
+
+  const unitOpen = unitManualOpen;
+
+  const toggleSet = (setter: Dispatch<SetStateAction<Set<string>>>, key: string): void => {
+    setter((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const numCell: CSSProperties = {
+    textAlign: "center",
+    padding: "4px 8px",
+    backgroundColor: "#222",
+    fontSize: "12px",
+  };
+
+  return (
+    <div style={{ marginBottom: "2px" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+        <colgroup>
+          <col style={{ width: "40px" }} />
+          <col style={{ width: "40px" }} />
+          <col style={{ width: "auto" }} />
+          <col style={{ width: "70px" }} />
+          <col style={{ width: "70px" }} />
+          <col style={{ width: "70px" }} />
+          <col style={{ width: "70px" }} />
+          <col style={{ width: "70px" }} />
+          <col style={{ width: "70px" }} />
+          <col style={{ width: "70px" }} />
+        </colgroup>
+        <tbody>
+          {/* Header d'unité : nom seul (les stats varient par figurine) */}
+          <tr
+            className={`unit-status-row ${isSelected ? "unit-status-row--selected" : ""} ${isClicked ? "unit-status-row--clicked" : ""}`}
+            onClick={() => onSelect(unit.id)}
+            style={{ cursor: "pointer" }}
+          >
+            <td
+              className="unit-status-cell unit-status-cell--expand"
+              style={{ ...numCell, textAlign: "center" }}
+            >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setUnitManualOpen((v) => !v);
+                }}
+                style={{
+                  background: "rgba(70, 130, 200, 0.2)",
+                  border: "1px solid rgba(70, 130, 200, 0.4)",
+                  color: "#4682c8",
+                  fontSize: "14px",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                  padding: "2px 6px",
+                  minWidth: "24px",
+                  minHeight: "24px",
+                  borderRadius: "3px",
+                }}
+                aria-label={unitOpen ? "Collapse unit" : "Expand unit"}
+              >
+                {unitOpen ? "−" : "+"}
+              </button>
+            </td>
+            <td
+              className="unit-status-cell unit-status-cell--number"
+              style={{ ...numCell, fontWeight: "bold", borderRight: "1px solid #333" }}
+            >
+              {unit.id}
+            </td>
+            <td
+              className="unit-status-cell unit-status-cell--type"
+              style={{ ...numCell, fontWeight: "bold", textAlign: "left" }}
+            >
+              {unitName}
+            </td>
+            <td className="unit-status-cell" style={numCell} />
+            <td className="unit-status-cell" style={numCell} />
+            <td className="unit-status-cell" style={numCell} />
+            <td className="unit-status-cell" style={numCell} />
+            <td className="unit-status-cell" style={numCell} />
+            <td className="unit-status-cell" style={numCell} />
+            <td className="unit-status-cell" style={numCell} />
+          </tr>
+
+          {/* Une ligne par type de figurine (alignée sur les colonnes), stats visibles si dépliée */}
+          {unitOpen &&
+            profiles.map((p) => {
+              const profileOpen = openProfiles.has(p.key);
+              // Couleur du rôle appliquée sur TOUTE la ligne du profil (classes CSS dans App.css).
+              const cellLayout: CSSProperties = {
+                textAlign: "center",
+                padding: "4px 8px",
+                fontSize: "12px",
+              };
+              return (
+                <Fragment key={p.key}>
+                  <tr
+                    className={`unit-status-row unit-profile-row unit-profile-row--${roleClassSuffix(p.role)}`}
+                  >
+                    <td className="unit-status-cell" style={cellLayout} />
+                    <td className="unit-status-cell" style={{ ...cellLayout, padding: "4px 2px" }}>
+                      <button
+                        type="button"
+                        onClick={() => toggleSet(setOpenProfiles, p.key)}
+                        style={{
+                          background: "rgba(0, 0, 0, 0.25)",
+                          border: "1px solid rgba(0, 0, 0, 0.4)",
+                          color: "inherit",
+                          fontSize: "13px",
+                          fontWeight: "bold",
+                          cursor: "pointer",
+                          padding: "0 5px",
+                          minWidth: "20px",
+                          borderRadius: "3px",
+                        }}
+                        aria-label={profileOpen ? "Collapse profile" : "Expand profile"}
+                      >
+                        {profileOpen ? "−" : "+"}
+                      </button>
+                    </td>
+                    <td
+                      className="unit-status-cell unit-status-cell--type"
+                      style={{ ...cellLayout, textAlign: "left", fontWeight: "bold" }}
+                    >
+                      {p.name}
+                    </td>
+                    <td className="unit-status-cell" style={cellLayout}>
+                      {profileOpen ? (p.hpMax ?? "-") : ""}
+                    </td>
+                    <td className="unit-status-cell" style={cellLayout}>
+                      {profileOpen && p.move != null ? p.move / inchesToSubhex : ""}
+                    </td>
+                    <td className="unit-status-cell" style={cellLayout}>
+                      {profileOpen ? (p.t ?? "-") : ""}
+                    </td>
+                    <td className="unit-status-cell" style={cellLayout}>
+                      {profileOpen ? (p.sv ? `${p.sv}+` : "-") : ""}
+                    </td>
+                    <td className="unit-status-cell" style={cellLayout}>
+                      {profileOpen ? (p.ld ?? "-") : ""}
+                    </td>
+                    <td className="unit-status-cell" style={cellLayout}>
+                      {profileOpen ? (p.oc ?? "-") : ""}
+                    </td>
+                    <td className="unit-status-cell" style={cellLayout}>
+                      {profileOpen ? (p.value ?? "-") : ""}
+                    </td>
+                  </tr>
+                  {profileOpen && (p.rng.length > 0 || p.cc.length > 0) && (
+                    <tr>
+                      <td colSpan={10} style={{ padding: "0 0 4px 0" }}>
+                        <ProfileWeaponTable
+                          title="RANGE WEAPON(S)"
+                          weapons={p.rng}
+                          melee={false}
+                          expanded={openRanged.has(p.key)}
+                          onToggle={() => toggleSet(setOpenRanged, p.key)}
+                          inchesToSubhex={inchesToSubhex}
+                        />
+                        <ProfileWeaponTable
+                          title="MELEE WEAPON(S)"
+                          weapons={p.cc}
+                          melee={true}
+                          expanded={openMelee.has(p.key)}
+                          onToggle={() => toggleSet(setOpenMelee, p.key)}
+                          inchesToSubhex={inchesToSubhex}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 interface UnitStatusTableProps {
   units: Unit[];
@@ -117,6 +631,9 @@ interface UnitStatusTableProps {
   deploymentState?: DeploymentState | null;
   /** Type de déploiement : le filtrage par escouade ne s'applique qu'en mode "active". */
   deploymentType?: "random" | "fixed" | "active";
+  /** Inspection par-figurine (survol/clic plateau) : profil du modèle à afficher dans sa
+   * ligne d'unité dépliée. modelId = ``<unitId>#<idx>`` ; idx indexe ``unit.models``. */
+  inspectedModel?: { unitId: string; modelId: string } | null;
 }
 
 interface UnitRowProps {
@@ -131,6 +648,8 @@ interface UnitRowProps {
   isMeleeExpanded: boolean;
   onToggleMeleeExpand: (unitId: UnitId) => void;
   showUnitRules: boolean;
+  /** Inspection : index du modèle (dans ``unit.models``) à afficher dans la ligne dépliée, ou null. */
+  inspectedModelIndex: number | null;
   /** Tutoriel : rapporter les positions viewport [colonne Name, colonne M] pour deux halos (unité ciblée, ex. Intercessor id 1). */
   reportNameMRect?:
     | ((
@@ -217,6 +736,7 @@ const UnitRow = memo<UnitRowProps>(
     isMeleeExpanded,
     onToggleMeleeExpand,
     showUnitRules,
+    inspectedModelIndex,
     reportNameMRect,
     nameHeaderRef,
     mHeaderRef,
@@ -428,6 +948,23 @@ const UnitRow = memo<UnitRowProps>(
     const unitName = unit.DISPLAY_NAME || unit.name || unit.type || `Unit ${unit.id}`;
     const unitRules = unit.UNIT_RULES || [];
 
+    // Escouade multi-profils (≥2 types de figurine distincts) : rendu dédié (header nom seul +
+    // sous-catégories repliables par type, bandeau coloré selon le rôle).
+    const profiles = buildUnitProfiles(unit);
+    if (profiles.length >= 2) {
+      return (
+        <MultiProfileUnitRow
+          unit={unit}
+          profiles={profiles}
+          isSelected={isSelected}
+          isClicked={isClicked}
+          onSelect={onSelect}
+          inspectedModelIndex={inspectedModelIndex}
+          inchesToSubhex={inchesToSubhex}
+        />
+      );
+    }
+
     const detailPreviewWrapClass = isDetailPreviewHighlight
       ? `unit-status-detail-preview-wrap${
           tablePlayer === 2 ? " unit-status-detail-preview-wrap--player2" : ""
@@ -467,7 +1004,7 @@ const UnitRow = memo<UnitRowProps>(
                     : "transparent",
               }}
             >
-              {/* Expand/Collapse Button for Unit */}
+              {/* Expand/Collapse Button for Unit (colonne de gauche) */}
               <td
                 className="unit-status-cell unit-status-cell--expand"
                 style={{ textAlign: "center", padding: "4px 8px", backgroundColor: "#222" }}
@@ -1198,6 +1735,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     phase,
     deploymentState = null,
     deploymentType,
+    inspectedModel = null,
   }) => {
     const nameHeaderRef = useRef<HTMLTableCellElement>(null);
     const mHeaderRef = useRef<HTMLTableCellElement>(null);
@@ -1236,6 +1774,19 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     const [expandedUnits, setExpandedUnits] = useState<Set<UnitId>>(new Set());
     const [expandedRanged, setExpandedRanged] = useState<Set<UnitId>>(new Set());
     const [expandedMelee, setExpandedMelee] = useState<Set<UnitId>>(new Set());
+    // Unité sélectionnée : déplier par défaut ses armes de tir + mêlée (additif, restant repliable).
+    useEffect(() => {
+      if (selectedUnitId == null) return;
+      setExpandedUnits((prev) =>
+        prev.has(selectedUnitId) ? prev : new Set(prev).add(selectedUnitId)
+      );
+      setExpandedRanged((prev) =>
+        prev.has(selectedUnitId) ? prev : new Set(prev).add(selectedUnitId)
+      );
+      setExpandedMelee((prev) =>
+        prev.has(selectedUnitId) ? prev : new Set(prev).add(selectedUnitId)
+      );
+    }, [selectedUnitId]);
     const guidedLayoutSnapshotRef = useRef<{
       isCollapsed: boolean;
       expandedUnits: Set<UnitId>;
@@ -1310,8 +1861,20 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
       units.some(
         (unit) => unit.player === player && String(unit.id) === String(detailPreviewUnitId)
       );
+    // Inspection : si la figurine survolée/épinglée appartient à une unité MULTI-PROFILS de cette
+    // table, forcer la table dépliée pour que le profil s'affiche sans clic préalable.
+    const isInspectInThisTable =
+      inspectedModel != null &&
+      units.some(
+        (unit) =>
+          unit.player === player &&
+          String(unit.id) === String(inspectedModel.unitId) &&
+          buildUnitProfiles(unit).length >= 2
+      );
     const effectiveCollapsed =
-      tutorialForceTableExpanded || isDetailPreviewInThisTable ? false : isCollapsed;
+      tutorialForceTableExpanded || isDetailPreviewInThisTable || isInspectInThisTable
+        ? false
+        : isCollapsed;
 
     useEffect(() => {
       if (tutorialForceTableExpanded && isCollapsed) {
@@ -1702,9 +2265,19 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
             playerUnits.map((unit) => {
               const isDetailPreviewUnit =
                 detailPreviewUnitId !== null && String(unit.id) === String(detailPreviewUnitId);
+              // Modèle inspecté sur CETTE unité : idx extrait du model_id ``<unitId>#<idx>``.
+              let inspectedModelIndex: number | null = null;
+              if (inspectedModel && String(inspectedModel.unitId) === String(unit.id)) {
+                const parts = inspectedModel.modelId.split("#");
+                const idx = parts.length === 2 ? Number(parts[1]) : NaN;
+                if (Number.isInteger(idx) && idx >= 0) {
+                  inspectedModelIndex = idx;
+                }
+              }
               return (
                 <UnitRow
                   key={unit.id}
+                  inspectedModelIndex={inspectedModelIndex}
                   unit={unit}
                   isSelected={selectedUnitId === unit.id}
                   isClicked={clickedUnitId === unit.id && selectedUnitId !== unit.id}

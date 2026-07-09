@@ -9498,6 +9498,7 @@ export default function Board({
           centerX: anchorCenterX,
           centerY: anchorCenterY,
           modelCenters,
+          modelIds,
           modelMetas,
           modelHps,
           modelLevels,

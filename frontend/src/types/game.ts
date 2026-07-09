@@ -113,6 +113,34 @@ export interface DeploymentState {
   deployment_complete: boolean;
 }
 
+/** Profil par-figurine d'une escouade (source backend ``enhanced_unit["models"]``).
+ * Aligné index-pour-index avec le model_id ``<unitId>#<idx>`` (idx = position dans ce tableau).
+ * Une figurine SANS override de profil (ex. troupe de base) ne porte que ``col``/``row`` :
+ * ses stats sont alors celles de l'unité parente. Une figurine spéciale (leader attaché,
+ * sergent, arme spéciale) porte son propre ``unit_type`` + stats + armes. */
+export interface UnitModel {
+  col?: number;
+  row?: number;
+  unit_type?: string;
+  DISPLAY_NAME?: string;
+  ICON?: string;
+  ICON_SCALE?: number;
+  ILLUSTRATION_RATIO?: number;
+  BASE_SHAPE?: "round" | "oval" | "square";
+  BASE_SIZE?: number | [number, number];
+  T?: number;
+  ARMOR_SAVE?: number;
+  INVUL_SAVE?: number;
+  OC?: number;
+  VALUE?: number;
+  HP_MAX?: number;
+  UNIT_RULES?: UnitRule[];
+  RNG_WEAPONS?: Weapon[];
+  CC_WEAPONS?: Weapon[];
+  selectedRngWeaponIndex?: number | null;
+  selectedCcWeaponIndex?: number | null;
+}
+
 export interface Unit {
   id: UnitId;
   NAME?: string;
@@ -177,6 +205,9 @@ export interface Unit {
   UNIT_RULES?: UnitRule[];
   UNIT_KEYWORDS?: UnitKeyword[];
   CAN_LEAD?: string[]; // Attached units (rule 19.01): bodyguard unit-name keywords a leader/support may attach to
+  /** Composition par-figurine (escouade mixte / character attaché). Absent = mono-profil.
+   * Chaque entrée d'index ``idx`` correspond au model_id ``<id>#<idx>``. */
+  models?: UnitModel[];
 
   // Terrain visibility (rules 13.08-13.09)
   hideable?: boolean; // INFANTRY/BEASTS/SWARM — eligible for cover/hidden

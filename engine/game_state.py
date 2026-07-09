@@ -935,6 +935,9 @@ class GameStateManager:
                         "DISPLAY_NAME": require_key(m_data, "DISPLAY_NAME"),
                         "ICON": require_key(m_data, "ICON"),
                         "ICON_SCALE": require_key(m_data, "ICON_SCALE"),
+                        # Ratio d'illustration propre à la figurine : l'aperçu (UnitStatusTable) doit
+                        # dimensionner l'illustration du modèle exactement comme son unité autonome.
+                        "ILLUSTRATION_RATIO": require_key(m_data, "ILLUSTRATION_RATIO"),
                         "BASE_SHAPE": require_key(m_data, "BASE_SHAPE"),
                         "BASE_SIZE": _m_base_size,
                         "HP_MAX": int(require_key(m_data, "HP_MAX")),

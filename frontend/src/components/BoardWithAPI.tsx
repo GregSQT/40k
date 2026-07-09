@@ -1687,6 +1687,34 @@ export const BoardWithAPI: React.FC = () => {
 
   // Track clicked (but not selected) units for blue highlighting
   const [clickedUnitId, setClickedUnitId] = useState<number | null>(null);
+  /** Inspection par-figurine (UnitStatusTable) : profil du modèle survolé / épinglé sur le plateau.
+   * ``hover`` = transitoire (survol figurine, toutes phases), ``pinned`` = persistant (clic en mode idle).
+   * Effectif affiché = hover ?? pinned. modelId = ``<unitId>#<idx>`` émis par UnitRenderer. */
+  const [hoverInspectModel, setHoverInspectModel] = useState<{
+    unitId: string;
+    modelId: string;
+  } | null>(null);
+  const [pinnedInspectModel, setPinnedInspectModel] = useState<{
+    unitId: string;
+    modelId: string;
+  } | null>(null);
+  useEffect(() => {
+    const onInspect = (e: Event): void => {
+      const detail = (e as CustomEvent<{ unitId: unknown; modelId: unknown; kind: string }>).detail;
+      if (!detail || typeof detail.modelId !== "string") return;
+      const entry = { unitId: String(detail.unitId), modelId: detail.modelId };
+      if (detail.kind === "hover") {
+        setHoverInspectModel(entry);
+      } else if (detail.kind === "hoverEnd") {
+        setHoverInspectModel((prev) => (prev && prev.modelId === entry.modelId ? null : prev));
+      } else if (detail.kind === "click") {
+        setPinnedInspectModel((prev) => (prev && prev.modelId === entry.modelId ? null : entry));
+      }
+    };
+    window.addEventListener("boardModelInspect", onInspect);
+    return () => window.removeEventListener("boardModelInspect", onInspect);
+  }, []);
+  const effectiveInspectModel = hoverInspectModel ?? pinnedInspectModel;
   /** Message du bouton « Check pile-in » : raison du blocage de la validation (null = masqué). */
   const [pileInCheckMsg, setPileInCheckMsg] = useState<string | null>(null);
   const [chargeCheckMsg, setChargeCheckMsg] = useState<string | null>(null);
@@ -2625,10 +2653,36 @@ export const BoardWithAPI: React.FC = () => {
   }, [apiProps.selectedUnitId]);
 
   const illustrationPreviewUnit = useMemo(() => {
+    const statusUnits = apiProps.gameState?.units;
+    if (!statusUnits) {
+      return null;
+    }
+    // Priorité inspection : figurine survolée/épinglée → illustration dérivée du unit_type du
+    // modèle (l'asset /icons/<unit_type>.png existe). On garde l'id du squad (badges/statut) et on
+    // ne surcharge que type/NAME pour que getUnitIllustrationSrc résolve l'asset de la figurine.
+    if (effectiveInspectModel) {
+      const host = statusUnits.find(
+        (unit) => String(unit.id) === String(effectiveInspectModel.unitId) && unit.HP_CUR > 0
+      );
+      if (host) {
+        const parts = effectiveInspectModel.modelId.split("#");
+        const idx = parts.length === 2 ? Number(parts[1]) : NaN;
+        const model = Number.isInteger(idx) && idx >= 0 ? host.models?.[idx] : undefined;
+        if (model?.unit_type) {
+          // Réutilise getUnitIllustrationSrc/Scale existants : on ne surcharge que le type (asset)
+          // et l'ILLUSTRATION_RATIO du modèle (seul paramètre qui pilote l'échelle).
+          return {
+            ...host,
+            NAME: undefined,
+            type: model.unit_type,
+            ILLUSTRATION_RATIO: model.ILLUSTRATION_RATIO ?? host.ILLUSTRATION_RATIO,
+          };
+        }
+      }
+    }
     const effectiveIllustrationUnitId =
       illustrationPreviewUnitId ?? displaySelectedUnitId ?? apiProps.selectedUnitId ?? null;
-    const statusUnits = apiProps.gameState?.units;
-    if (effectiveIllustrationUnitId === null || !statusUnits) {
+    if (effectiveIllustrationUnitId === null) {
       return null;
     }
     return (
@@ -2641,6 +2695,7 @@ export const BoardWithAPI: React.FC = () => {
     apiProps.selectedUnitId,
     illustrationPreviewUnitId,
     displaySelectedUnitId,
+    effectiveInspectModel,
   ]);
 
   useEffect(() => {
@@ -2675,7 +2730,9 @@ export const BoardWithAPI: React.FC = () => {
       setShowDefaultIllustration(false);
       const isReplacingDisplayedUnit =
         currentDisplayedUnit !== null &&
-        String(currentDisplayedUnit.id) !== String(illustrationPreviewUnit.id);
+        (String(currentDisplayedUnit.id) !== String(illustrationPreviewUnit.id) ||
+          getUnitIllustrationSrc(currentDisplayedUnit) !==
+            getUnitIllustrationSrc(illustrationPreviewUnit));
 
       if (isReplacingDisplayedUnit) {
         pendingIllustrationUnitRef.current = illustrationPreviewUnit;
@@ -4912,6 +4969,7 @@ export const BoardWithAPI: React.FC = () => {
             detailPreviewUnitId={
               illustrationPreviewUnit?.player === 1 ? illustrationPreviewUnit.id : null
             }
+            inspectedModel={effectiveInspectModel}
             phase={apiProps.gameState?.phase}
             deploymentType={apiProps.gameState?.deployment_type}
             deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
@@ -4937,6 +4995,7 @@ export const BoardWithAPI: React.FC = () => {
             detailPreviewUnitId={
               illustrationPreviewUnit?.player === 2 ? illustrationPreviewUnit.id : null
             }
+            inspectedModel={effectiveInspectModel}
             phase={apiProps.gameState?.phase}
             deploymentType={apiProps.gameState?.deployment_type}
             deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}

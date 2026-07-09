@@ -123,6 +123,12 @@ interface UnitRendererProps {
    */
   modelCenters?: Array<[number, number]>;
   /**
+   * model_id (``<unitId>#<idx>``) de chaque figurine, aligné index-pour-index avec modelCenters.
+   * Sert uniquement à l'inspection (survol/clic figurine → CustomEvent ``boardModelInspect``).
+   * Absent → aucune émission d'inspection (previews/ghosts). Ne modifie aucun rendu.
+   */
+  modelIds?: string[];
+  /**
    * Per-model visual overrides, aligned index-for-index with modelCenters.
    * A non-null entry replaces the unit's icon/scale/base for that figure
    * (heterogeneous squad: Sergeant / attached character). Empty array or null
@@ -313,6 +319,8 @@ export class UnitRenderer {
   private props: UnitRendererProps;
   private lastBlinkVersion: number | null = null;
   private target: PIXI.Container;
+  /** model_id de la figurine en cours de rendu dans la boucle modelCenters (inspection). */
+  private currentFigModelId: string | null = null;
 
   constructor(props: UnitRendererProps) {
     this.props = props;
@@ -342,8 +350,22 @@ export class UnitRenderer {
     return `${displayName} - ID ${unit.id}`;
   }
 
+  /** Émet un CustomEvent d'inspection par-figurine (survol/clic). ``kind`` :
+   * "hover" (entrée survol), "hoverEnd" (sortie survol), "click" (clic en mode idle). */
+  private emitModelInspect(figModelId: string, kind: "hover" | "hoverEnd" | "click"): void {
+    window.dispatchEvent(
+      new CustomEvent("boardModelInspect", {
+        detail: { unitId: this.props.unit.id, modelId: figModelId, kind },
+      })
+    );
+  }
+
   private attachTooltipHandlers(displayObject: PIXI.DisplayObject): void {
-    if (!this.props.onUnitTooltip && !this.props.onUnitIconHoverChange) {
+    // Inspection par-figurine : activée seulement pour une unité réelle (non preview) dont le
+    // model_id est fourni. Indépendante des tooltips (peut être seule à justifier les handlers).
+    const inspectFigModelId =
+      !this.props.isPreview && this.currentFigModelId ? this.currentFigModelId : null;
+    if (!this.props.onUnitTooltip && !this.props.onUnitIconHoverChange && !inspectFigModelId) {
       return;
     }
     const tooltipText = this.getUnitTooltipText();
@@ -359,6 +381,7 @@ export class UnitRenderer {
     };
     displayObject.on("pointerover", (e: PIXI.FederatedPointerEvent) => {
       this.props.onUnitIconHoverChange?.(this.props.unit.id);
+      if (inspectFigModelId) this.emitModelInspect(inspectFigModelId, "hover");
       updateTooltipPosition(e);
     });
     displayObject.on("pointermove", (e: PIXI.FederatedPointerEvent) => {
@@ -366,6 +389,7 @@ export class UnitRenderer {
     });
     const hideTooltip = (): void => {
       this.props.onUnitIconHoverChange?.(null);
+      if (inspectFigModelId) this.emitModelInspect(inspectFigModelId, "hoverEnd");
       this.props.onUnitTooltip?.({
         visible: false,
         text: tooltipText,
@@ -375,6 +399,11 @@ export class UnitRenderer {
     };
     const handlePointerDown = (e: PIXI.FederatedPointerEvent): void => {
       const { unit, selectedUnitId, current_player, isEligible, onUnitDisplaySelect } = this.props;
+      // Inspection persistante : clic gauche sur une figurine en mode idle (hors phase d'action).
+      // Émis avant l'épingle ; n'interfère pas avec elle (états distincts côté BoardWithAPI).
+      if (e.button === 0 && inspectFigModelId && this.props.mode === "select") {
+        this.emitModelInspect(inspectFigModelId, "click");
+      }
       // Display-select (épingle) seulement si : clic gauche, aucune unité en cours d'activation,
       // et l'unité cliquée n'est pas elle-même activable (sinon ce clic l'active).
       const noActiveUnit = selectedUnitId == null;
@@ -602,6 +631,8 @@ export class UnitRenderer {
     modelCenters.forEach(([mx, my], i) => {
       this.props.centerX = mx;
       this.props.centerY = my;
+      // Inspection : model_id de CETTE figurine (capté par attachTooltipHandlers via closure).
+      this.currentFigModelId = this.props.modelIds?.[i] ?? null;
       const meta = modelMetas?.[i];
       // Ghost si : move/déploiement (modelGhost) OU pas au niveau d'affichage courant (modelLevelGhost).
       // On DISTINGUE les deux : le ghost de NIVEAU (fig à un autre étage que la vue) est rendu en
@@ -644,6 +675,7 @@ export class UnitRenderer {
       }
     });
     this.props.unit = originalUnit;
+    this.currentFigModelId = null;
 
     // Vue mono-niveau : les figs off-niveau (ghost de niveau) ne portent AUCUN badge (hidden,
     // battle-shock, move-status, HP, étage, etc.). Comme tous les badges par-fig itèrent
