@@ -2,7 +2,6 @@
 import {
   type CSSProperties,
   type Dispatch,
-  Fragment,
   memo,
   type ReactElement,
   type RefObject,
@@ -151,6 +150,9 @@ const PROFILE_CELL_STYLE: CSSProperties = {
   fontSize: "11px",
 };
 
+// Halo brillant habituel (glow vert) — dérivé de --btn-glow / --btn-glow-soft (App.css), grossi.
+const HALO_GLOW = "0 0 0 3px #86efac, 0 0 20px 7px rgba(134, 239, 172, 0.9)";
+
 /** Mini-table d'armes (RANGE ou MELEE) repliable, pour un profil. */
 function ProfileWeaponTable({
   title,
@@ -169,7 +171,7 @@ function ProfileWeaponTable({
 }): ReactElement | null {
   if (weapons.length === 0) return null;
   // Mêmes valeurs que les tables d'armes existantes (single-profil) : fond de section + bouton.
-  const headerBg = melee ? "rgba(200, 50, 50, 0.2)" : "rgba(50, 150, 200, 0.2)";
+  const headerBg = melee ? "rgba(200, 50, 50, 0.2)" : "rgba(45, 110, 210, 0.32)";
   const btnBg = melee ? "rgba(200, 100, 150, 0.3)" : "rgba(100, 150, 200, 0.3)";
   const btnBorder = melee ? "rgba(200, 100, 150, 0.5)" : "rgba(100, 150, 200, 0.5)";
   const btnColor = melee ? "#c86496" : "#6496c8";
@@ -262,44 +264,57 @@ function ProfileWeaponTable({
           <th className="unit-status-cell" style={headerTh}>
             DMG
           </th>
-          <th className="unit-status-cell" style={{ ...headerTh }} />
+          <th className="unit-status-cell" style={PROFILE_CELL_STYLE} />
         </tr>
       </thead>
       {expanded && (
         <tbody>
-          {weapons.map((weapon, idx) => (
-            <tr
-              key={`${melee ? "cc" : "rng"}-${weapon.display_name}`}
-              className="unit-status-row unit-status-row--weapon"
-              style={{ backgroundColor: idx === 0 ? "#222" : "#2a2a2a" }}
-            >
-              <td
-                className="unit-status-cell"
-                colSpan={3}
-                style={{ ...PROFILE_CELL_STYLE, textAlign: "left", paddingLeft: "56px" }}
+          {weapons.map((weapon, idx) => {
+            const rowBg = idx === 0 ? "#222" : "#2a2a2a";
+            const statCell: CSSProperties = { ...PROFILE_CELL_STYLE, backgroundColor: rowBg };
+            return (
+              <tr
+                key={`${melee ? "cc" : "rng"}-${weapon.display_name}`}
+                className="unit-status-row unit-status-row--weapon"
               >
-                {weapon.display_name}
-                {weapon.WEAPON_RULES?.map((ruleId) => {
-                  const { displayName, tooltipText } = getWeaponRuleDisplay(ruleId);
-                  return (
-                    <span key={ruleId} className="rule-badge-wrapper">
-                      <span className="rule-badge">{displayName}</span>
-                      <span className="rule-tooltip">{tooltipText}</span>
-                    </span>
-                  );
-                })}
-              </td>
-              <td style={PROFILE_CELL_STYLE}>
-                {!melee && weapon.RNG ? `${weapon.RNG / inchesToSubhex}"` : "/"}
-              </td>
-              <td style={PROFILE_CELL_STYLE}>{weapon.NB || 0}</td>
-              <td style={PROFILE_CELL_STYLE}>{weapon.ATK ? `${weapon.ATK}+` : "-"}</td>
-              <td style={PROFILE_CELL_STYLE}>{weapon.STR || "-"}</td>
-              <td style={PROFILE_CELL_STYLE}>{weapon.AP || "-"}</td>
-              <td style={PROFILE_CELL_STYLE}>{weapon.DMG || "-"}</td>
-              <td style={PROFILE_CELL_STYLE} />
-            </tr>
-          ))}
+                <td
+                  className="unit-status-cell"
+                  colSpan={3}
+                  style={{
+                    ...PROFILE_CELL_STYLE,
+                    textAlign: "left",
+                    paddingLeft: "64px",
+                    // Pas de troncature ellipsis sur le nom d'arme (comme les tables single-profil).
+                    overflow: "visible",
+                    textOverflow: "clip",
+                    whiteSpace: "normal",
+                    // Fond de ligne à partir de 56px ; le nom démarre 8px après → pas collé au bord.
+                    background: `linear-gradient(to right, transparent 56px, ${rowBg} 56px)`,
+                  }}
+                >
+                  {weapon.display_name}
+                  {weapon.WEAPON_RULES?.map((ruleId) => {
+                    const { displayName, tooltipText } = getWeaponRuleDisplay(ruleId);
+                    return (
+                      <span key={ruleId} className="rule-badge-wrapper">
+                        <span className="rule-badge">{displayName}</span>
+                        <span className="rule-tooltip">{tooltipText}</span>
+                      </span>
+                    );
+                  })}
+                </td>
+                <td style={statCell}>
+                  {!melee && weapon.RNG ? `${weapon.RNG / inchesToSubhex}"` : "/"}
+                </td>
+                <td style={statCell}>{weapon.NB || 0}</td>
+                <td style={statCell}>{weapon.ATK ? `${weapon.ATK}+` : "-"}</td>
+                <td style={statCell}>{weapon.STR || "-"}</td>
+                <td style={statCell}>{weapon.AP || "-"}</td>
+                <td style={statCell}>{weapon.DMG || "-"}</td>
+                <td style={PROFILE_CELL_STYLE} />
+              </tr>
+            );
+          })}
         </tbody>
       )}
     </table>
@@ -342,12 +357,16 @@ function MultiProfileUnitRow({
     const key = inspectedProfileKey;
     const prev = hoverSeedRef.current;
     if (prev === key) return;
-    setOpenProfiles((s) => {
+    // Survol d'une fig : déplie son profil ET ses armes tir/mêlée (exclusif : referme le précédent).
+    const reseed = (s: Set<string>): Set<string> => {
       const next = new Set(s);
       if (prev !== null) next.delete(prev);
       if (key !== null) next.add(key);
       return next;
-    });
+    };
+    setOpenProfiles(reseed);
+    setOpenRanged(reseed);
+    setOpenMelee(reseed);
     if (key !== null) setUnitManualOpen(true);
     hoverSeedRef.current = key;
   }, [inspectedProfileKey]);
@@ -364,6 +383,16 @@ function MultiProfileUnitRow({
   }, [isSelected, profileKeysSig]);
 
   const unitOpen = unitManualOpen;
+
+  // Fig survolée : son type remonte en tête de la liste des profils (même principe que l'unité
+  // mono-type qui remonte en haut de la table au survol).
+  const orderedProfiles =
+    inspectedProfileKey !== null
+      ? [
+          ...profiles.filter((p) => p.key === inspectedProfileKey),
+          ...profiles.filter((p) => p.key !== inspectedProfileKey),
+        ]
+      : profiles;
 
   const toggleSet = (setter: Dispatch<SetStateAction<Set<string>>>, key: string): void => {
     setter((prev) => {
@@ -402,7 +431,7 @@ function MultiProfileUnitRow({
         <tbody>
           {/* Header d'unité : nom seul (les stats varient par figurine) */}
           <tr
-            className={`unit-status-row ${isSelected ? "unit-status-row--selected" : ""} ${isClicked ? "unit-status-row--clicked" : ""}`}
+            className={`unit-status-row ${isClicked ? "unit-status-row--clicked" : ""}`}
             onClick={() => onSelect(unit.id)}
             style={{ cursor: "pointer" }}
           >
@@ -456,7 +485,7 @@ function MultiProfileUnitRow({
 
           {/* Une ligne par type de figurine (alignée sur les colonnes), stats visibles si dépliée */}
           {unitOpen &&
-            profiles.map((p) => {
+            orderedProfiles.map((p) => {
               const profileOpen = openProfiles.has(p.key);
               // Couleur du rôle appliquée sur TOUTE la ligne du profil (classes CSS dans App.css).
               const cellLayout: CSSProperties = {
@@ -464,83 +493,121 @@ function MultiProfileUnitRow({
                 padding: "4px 8px",
                 fontSize: "12px",
               };
+              // Halo brillant habituel autour de TOUTE la fiche du type inspecté (survol d'une fig).
+              const isHalo = p.key === inspectedProfileKey;
               return (
-                <Fragment key={p.key}>
-                  <tr
-                    className={`unit-status-row unit-profile-row unit-profile-row--${roleClassSuffix(p.role)}`}
-                  >
-                    <td className="unit-status-cell" style={cellLayout} />
-                    <td className="unit-status-cell" style={{ ...cellLayout, padding: "4px 2px" }}>
-                      <button
-                        type="button"
-                        onClick={() => toggleSet(setOpenProfiles, p.key)}
-                        style={{
-                          background: "rgba(0, 0, 0, 0.25)",
-                          border: "1px solid rgba(0, 0, 0, 0.4)",
-                          color: "inherit",
-                          fontSize: "13px",
-                          fontWeight: "bold",
-                          cursor: "pointer",
-                          padding: "0 5px",
-                          minWidth: "20px",
-                          borderRadius: "3px",
-                        }}
-                        aria-label={profileOpen ? "Collapse profile" : "Expand profile"}
-                      >
-                        {profileOpen ? "−" : "+"}
-                      </button>
-                    </td>
-                    <td
-                      className="unit-status-cell unit-status-cell--type"
-                      style={{ ...cellLayout, textAlign: "left", fontWeight: "bold" }}
+                <tr key={p.key}>
+                  <td colSpan={10} style={{ padding: "0 0 3px 0" }}>
+                    <div
+                      style={{
+                        boxShadow: isHalo ? HALO_GLOW : undefined,
+                        borderRadius: "3px",
+                        // Le halo passe au-dessus des lignes voisines (fonds opaques).
+                        position: isHalo ? "relative" : undefined,
+                        zIndex: isHalo ? 5 : undefined,
+                      }}
                     >
-                      {p.name}
-                    </td>
-                    <td className="unit-status-cell" style={cellLayout}>
-                      {profileOpen ? (p.hpMax ?? "-") : ""}
-                    </td>
-                    <td className="unit-status-cell" style={cellLayout}>
-                      {profileOpen && p.move != null ? p.move / inchesToSubhex : ""}
-                    </td>
-                    <td className="unit-status-cell" style={cellLayout}>
-                      {profileOpen ? (p.t ?? "-") : ""}
-                    </td>
-                    <td className="unit-status-cell" style={cellLayout}>
-                      {profileOpen ? (p.sv ? `${p.sv}+` : "-") : ""}
-                    </td>
-                    <td className="unit-status-cell" style={cellLayout}>
-                      {profileOpen ? (p.ld ?? "-") : ""}
-                    </td>
-                    <td className="unit-status-cell" style={cellLayout}>
-                      {profileOpen ? (p.oc ?? "-") : ""}
-                    </td>
-                    <td className="unit-status-cell" style={cellLayout}>
-                      {profileOpen ? (p.value ?? "-") : ""}
-                    </td>
-                  </tr>
-                  {profileOpen && (p.rng.length > 0 || p.cc.length > 0) && (
-                    <tr>
-                      <td colSpan={10} style={{ padding: "0 0 4px 0" }}>
-                        <ProfileWeaponTable
-                          title="RANGE WEAPON(S)"
-                          weapons={p.rng}
-                          melee={false}
-                          expanded={openRanged.has(p.key)}
-                          onToggle={() => toggleSet(setOpenRanged, p.key)}
-                          inchesToSubhex={inchesToSubhex}
-                        />
-                        <ProfileWeaponTable
-                          title="MELEE WEAPON(S)"
-                          weapons={p.cc}
-                          melee={true}
-                          expanded={openMelee.has(p.key)}
-                          onToggle={() => toggleSet(setOpenMelee, p.key)}
-                          inchesToSubhex={inchesToSubhex}
-                        />
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
+                      {/* Ligne du type : même colgroup 10 colonnes → stats alignées sur l'en-tête */}
+                      <table
+                        style={{
+                          width: "100%",
+                          borderCollapse: "collapse",
+                          tableLayout: "fixed",
+                        }}
+                      >
+                        <colgroup>
+                          <col style={{ width: "40px" }} />
+                          <col style={{ width: "40px" }} />
+                          <col style={{ width: "auto" }} />
+                          <col style={{ width: "70px" }} />
+                          <col style={{ width: "70px" }} />
+                          <col style={{ width: "70px" }} />
+                          <col style={{ width: "70px" }} />
+                          <col style={{ width: "70px" }} />
+                          <col style={{ width: "70px" }} />
+                          <col style={{ width: "70px" }} />
+                        </colgroup>
+                        <tbody>
+                          <tr
+                            className={`unit-status-row unit-profile-row unit-profile-row--${roleClassSuffix(p.role)}`}
+                          >
+                            <td className="unit-status-cell" style={cellLayout} />
+                            <td
+                              className="unit-status-cell"
+                              style={{ ...cellLayout, padding: "4px 2px" }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => toggleSet(setOpenProfiles, p.key)}
+                                style={{
+                                  background: "rgba(0, 0, 0, 0.25)",
+                                  border: "1px solid rgba(0, 0, 0, 0.4)",
+                                  color: "inherit",
+                                  fontSize: "13px",
+                                  fontWeight: "bold",
+                                  cursor: "pointer",
+                                  padding: "0 5px",
+                                  minWidth: "20px",
+                                  borderRadius: "3px",
+                                }}
+                                aria-label={profileOpen ? "Collapse profile" : "Expand profile"}
+                              >
+                                {profileOpen ? "−" : "+"}
+                              </button>
+                            </td>
+                            <td
+                              className="unit-status-cell unit-status-cell--type"
+                              style={{ ...cellLayout, textAlign: "left", fontWeight: "bold" }}
+                            >
+                              {p.name}
+                            </td>
+                            <td className="unit-status-cell" style={cellLayout}>
+                              {profileOpen ? (p.hpMax ?? "-") : ""}
+                            </td>
+                            <td className="unit-status-cell" style={cellLayout}>
+                              {profileOpen && p.move != null ? p.move / inchesToSubhex : ""}
+                            </td>
+                            <td className="unit-status-cell" style={cellLayout}>
+                              {profileOpen ? (p.t ?? "-") : ""}
+                            </td>
+                            <td className="unit-status-cell" style={cellLayout}>
+                              {profileOpen ? (p.sv ? `${p.sv}+` : "-") : ""}
+                            </td>
+                            <td className="unit-status-cell" style={cellLayout}>
+                              {profileOpen ? (p.ld ?? "-") : ""}
+                            </td>
+                            <td className="unit-status-cell" style={cellLayout}>
+                              {profileOpen ? (p.oc ?? "-") : ""}
+                            </td>
+                            <td className="unit-status-cell" style={cellLayout}>
+                              {profileOpen ? (p.value ?? "-") : ""}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      {profileOpen && (p.rng.length > 0 || p.cc.length > 0) && (
+                        <>
+                          <ProfileWeaponTable
+                            title="RANGE WEAPON(S)"
+                            weapons={p.rng}
+                            melee={false}
+                            expanded={openRanged.has(p.key)}
+                            onToggle={() => toggleSet(setOpenRanged, p.key)}
+                            inchesToSubhex={inchesToSubhex}
+                          />
+                          <ProfileWeaponTable
+                            title="MELEE WEAPON(S)"
+                            weapons={p.cc}
+                            melee={true}
+                            expanded={openMelee.has(p.key)}
+                            onToggle={() => toggleSet(setOpenMelee, p.key)}
+                            inchesToSubhex={inchesToSubhex}
+                          />
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
               );
             })}
         </tbody>
@@ -971,10 +1038,20 @@ const UnitRow = memo<UnitRowProps>(
         }`
       : undefined;
 
+    const showGlow = inspectedModelIndex !== null;
     return (
       <div
-        className={detailPreviewWrapClass}
-        style={{ marginBottom: isDetailPreviewHighlight ? undefined : "2px" }}
+        // Quand le glow est actif : on abandonne le cadre bleu "detail preview" au profit du halo.
+        className={showGlow ? undefined : detailPreviewWrapClass}
+        style={{
+          marginBottom: isDetailPreviewHighlight && !showGlow ? undefined : "2px",
+          // Halo brillant habituel quand une fig de cette unité mono-type est survolée.
+          boxShadow: showGlow ? HALO_GLOW : undefined,
+          borderRadius: showGlow ? "3px" : undefined,
+          // Le halo doit passer AU-DESSUS des lignes voisines (sinon masqué par leurs fonds opaques).
+          position: showGlow ? "relative" : undefined,
+          zIndex: showGlow ? 5 : undefined,
+        }}
       >
         {/* Unit Attributes Table */}
         <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
@@ -993,16 +1070,9 @@ const UnitRow = memo<UnitRowProps>(
           <tbody>
             <tr
               ref={unitRowRef}
-              className={`unit-status-row ${isSelected ? "unit-status-row--selected" : ""} ${isClicked ? "unit-status-row--clicked" : ""}`}
+              className="unit-status-row"
               onClick={() => onSelect(unit.id)}
-              style={{
-                cursor: "pointer",
-                backgroundColor: isSelected
-                  ? "rgba(100, 150, 255, 0.15)"
-                  : isClicked
-                    ? "rgba(255, 200, 100, 0.1)"
-                    : "transparent",
-              }}
+              style={{ cursor: "pointer" }}
             >
               {/* Expand/Collapse Button for Unit (colonne de gauche) */}
               <td
