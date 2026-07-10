@@ -531,7 +531,11 @@ function MultiProfileUnitRow({
                           <tr
                             className={`unit-status-row unit-profile-row unit-profile-row--${roleClassSuffix(p.role)}`}
                           >
-                            <td className="unit-status-cell" style={cellLayout} />
+                            {/* Cellule tout à gauche : pas de couleur de rôle */}
+                            <td
+                              className="unit-status-cell"
+                              style={{ ...cellLayout, backgroundColor: "transparent" }}
+                            />
                             <td
                               className="unit-status-cell"
                               style={{ ...cellLayout, padding: "4px 2px" }}

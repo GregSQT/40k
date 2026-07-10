@@ -23,6 +23,18 @@ export class CaptainPowerWeaponBolter extends LeaderEliteMeleeElite {
   static CC_WEAPON_CODES = ["master_crafted_power_weapon_captain"];
   static CC_WEAPONS = getWeapons(CaptainPowerWeaponBolter.CC_WEAPON_CODES);
 
+  // UNIT RULES
+  static UNIT_RULES = [
+    { ruleId: "reroll_charge", displayName: "Unstoppable Valour" },
+    { ruleId: "leader", displayName: "Leader" },
+  ];
+
+  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
+  static RULES_STATUS = { reroll_charge: 2, leader: 0 };
+
+  // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
+  static CAN_LEAD = ["assault intercessor squad", "intercessor squad"];
+
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
     { keywordId: "infantry" },
