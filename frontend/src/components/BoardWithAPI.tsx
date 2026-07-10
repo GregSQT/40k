@@ -2214,6 +2214,9 @@ export const BoardWithAPI: React.FC = () => {
   const measureModeActive = measureMode.kind !== "off";
   const [hideIndicators, setHideIndicators] = useState(false);
   const handleToggleHideIndicators = useCallback(() => setHideIndicators((v) => !v), []);
+  /** Cercles de portée autour de la figurine activée (bouton cible de la barre d'outils). */
+  const [showRangeRings, setShowRangeRings] = useState(false);
+  const handleToggleRangeRings = useCallback(() => setShowRangeRings((v) => !v), []);
   const [advanceWarningDontRemind, setAdvanceWarningDontRemind] = useState(false);
 
   // Settings preferences (from localStorage)
@@ -2239,6 +2242,7 @@ export const BoardWithAPI: React.FC = () => {
     const shootPoolFastModeStr = localStorage.getItem("shootPoolFastMode");
     const logShowCoordsStr = localStorage.getItem("logShowCoords");
     const logShowTypeStr = localStorage.getItem("logShowType");
+    const dynamicCoverStatusStr = localStorage.getItem("dynamicCoverStatus");
     const pveGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVE_STORAGE_KEY) === "true";
     const pvpGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVP_STORAGE_KEY) === "true";
     const guidesSeenAtLeastOnce = pveGuideSeen || pvpGuideSeen;
@@ -2273,6 +2277,7 @@ export const BoardWithAPI: React.FC = () => {
       deployShootLoS: deployShootLoSStr ? JSON.parse(deployShootLoSStr) : false,
       logShowCoords: logShowCoordsStr ? JSON.parse(logShowCoordsStr) : false,
       logShowType: logShowTypeStr ? JSON.parse(logShowTypeStr) : true,
+      dynamicCoverStatus: dynamicCoverStatusStr ? JSON.parse(dynamicCoverStatusStr) : true,
     };
   });
 
@@ -2345,6 +2350,11 @@ export const BoardWithAPI: React.FC = () => {
   const handleToggleStatusBadgePerModel = (value: boolean) => {
     setSettings((prev) => ({ ...prev, statusBadgePerModel: value }));
     localStorage.setItem("statusBadgePerModel", JSON.stringify(value));
+  };
+
+  const handleToggleDynamicCoverStatus = (value: boolean) => {
+    setSettings((prev) => ({ ...prev, dynamicCoverStatus: value }));
+    localStorage.setItem("dynamicCoverStatus", JSON.stringify(value));
   };
 
   const handleToggleLogShowCoords = (value: boolean) => {
@@ -5130,6 +5140,8 @@ export const BoardWithAPI: React.FC = () => {
         measureModeActive={measureModeActive}
         onToggleHideIndicators={handleToggleHideIndicators}
         hideIndicatorsActive={hideIndicators}
+        onToggleRangeRings={handleToggleRangeRings}
+        rangeRingsActive={showRangeRings}
       >
         {/*
         In test deployment setup, lock gameplay interactions until Start Game! is clicked.
@@ -5147,6 +5159,7 @@ export const BoardWithAPI: React.FC = () => {
             onUnitIllustrationPreviewChange={setIllustrationPreviewUnitId}
             onUnitDisplaySelectChange={setDisplaySelectedUnitId}
             eligibleUnitIds={apiProps.eligibleUnitIds}
+            phaseInitPending={apiProps.phaseInitPending}
             mode={apiProps.mode}
             movePreview={apiProps.movePreview}
             attackPreview={apiProps.attackPreview || null}
@@ -5365,6 +5378,7 @@ export const BoardWithAPI: React.FC = () => {
             hpBarBlinkEnlarged={settings.hpBarBlinkEnlarged}
             showWoundProbability={settings.showWoundProbability}
             statusBadgePerModel={settings.statusBadgePerModel}
+            dynamicCoverStatus={settings.dynamicCoverStatus}
             boardDisplayMode={settings.boardDisplayMode}
             deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
             objectivesOverride={objectivesOverride}
@@ -5372,6 +5386,7 @@ export const BoardWithAPI: React.FC = () => {
             onMeasureHexCommit={handleMeasureHexCommit}
             onMeasureJunctionCommit={handleMeasureJunctionCommit}
             hideIndicators={hideIndicators}
+            showRangeRings={showRangeRings}
           />
           {isRosterSetupMode &&
             apiProps.gameState?.phase === "deployment" &&
@@ -6521,6 +6536,8 @@ export const BoardWithAPI: React.FC = () => {
         onSetBoardDisplayMode={handleSetBoardDisplayMode}
         statusBadgePerModel={settings.statusBadgePerModel}
         onToggleStatusBadgePerModel={handleToggleStatusBadgePerModel}
+        dynamicCoverStatus={settings.dynamicCoverStatus}
+        onToggleDynamicCoverStatus={handleToggleDynamicCoverStatus}
         retreatAlertEnabled={settings.retreatAlertEnabled}
         onToggleRetreatAlert={handleToggleRetreatAlert}
         battleShockTestEnabled={settings.battleShockTestEnabled}

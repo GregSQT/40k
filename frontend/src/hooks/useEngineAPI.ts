@@ -983,6 +983,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
    */
   const moveExitPendingRef = useRef(false);
   /**
+   * Transition de phase en vol (``end_phase`` / ``advance_phase``, y compris le second appel
+   * chaîné de ``pending_shooting_phase_init``). Pendant ce trou l'ancien état est encore affiché
+   * alors que le moteur initialise déjà la phase suivante : les activations sont refusées
+   * silencieusement (gardes ``moveExitPendingRef`` / pool obsolète). On expose l'info à l'UI pour
+   * masquer les cercles verts d'éligibilité tant que la phase n'est pas prête.
+   */
+  const [phaseInitPending, setPhaseInitPending] = useState(false);
+  /** Le chaînage ``pending_shooting_phase_init`` maintient le verrou entre les deux requêtes. */
+  const phaseInitChainedRef = useRef(false);
+  /**
    * Une seule requête ``fight`` à la fois : clics rapides sur la cible envoyaient plusieurs POST
    * en parallèle ; la N+1 peut recevoir ``no_attacks_remaining`` (ATTACK_LEFT déjà à 0) alors que
    * l’UI n’a pas encore reçu la réponse précédente.
@@ -1654,6 +1664,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         moveExitPendingRef.current = true;
       }
 
+      // Transition de phase : l'init de la phase suivante tourne côté moteur pendant le round-trip.
+      const isPhaseTransitionAction =
+        action.action === "end_phase" || action.action === "advance_phase";
+      if (isPhaseTransitionAction) {
+        phaseInitChainedRef.current = false;
+        setPhaseInitPending(true);
+      }
+
       try {
         const requestId = Date.now();
         const body: Record<string, unknown> = { ...action, requestId };
@@ -2044,6 +2062,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           // Le backend a déjà quitté move : verrouiller les activations move jusqu'au render shoot.
           if (data.result?.pending_shooting_phase_init === true) {
             moveExitPendingRef.current = true;
+            // Le verrou d'init reste posé jusqu'au retour du second appel (shooting_phase_start).
+            phaseInitChainedRef.current = true;
+            setPhaseInitPending(true);
             setTimeout(() => {
               void executeAction({ action: "advance_phase", from: "move" });
             }, 0);
@@ -3260,6 +3281,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
         setError(formatApiConnectionError(err));
         return undefined;
+      } finally {
+        // Init terminée (état final appliqué) sauf si le chaînage pending_shooting_phase_init
+        // maintient le verrou jusqu'au second appel.
+        if (isPhaseTransitionAction && !phaseInitChainedRef.current) {
+          setPhaseInitPending(false);
+        }
       }
     },
     [
@@ -7497,6 +7524,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       units: [],
       selectedUnitId: null,
       eligibleUnitIds: [],
+      phaseInitPending: true,
       mode: "select" as const,
       movePreview: null,
       attackPreview: null,
@@ -7705,6 +7733,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     units: memoizedUnits,
     selectedUnitId,
     eligibleUnitIds: getEligibleUnitIds(),
+    phaseInitPending,
     mode,
     movePreview,
     attackPreview,

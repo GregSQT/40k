@@ -1038,7 +1038,8 @@ const UnitRow = memo<UnitRowProps>(
         }`
       : undefined;
 
-    const showGlow = inspectedModelIndex !== null;
+    // Halo vert aussi bien au survol d'une fig que sur la fiche "detail preview" restée affichée.
+    const showGlow = inspectedModelIndex !== null || isDetailPreviewHighlight;
     return (
       <div
         // Quand le glow est actif : on abandonne le cadre bleu "detail preview" au profit du halo.

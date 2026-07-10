@@ -105,6 +105,15 @@ interface BackendMoveLosPreviewPayload {
 }
 
 const MOVE_PREVIEW_LOS_CACHE_MAX_ENTRIES = 256;
+/** Survol rapide : on n'interroge le backend que pour l'hex sur lequel le ghost se pose vraiment. */
+const MOVE_PREVIEW_COVER_STATUS_DEBOUNCE_MS = 25;
+/**
+ * Preview de tir per-figurine : un appel backend coûte ~300 ms à ~900 ms (build_unit_los_cache),
+ * et le serveur sérialise les requêtes — une requête partie ne peut plus être annulée. Le débounce
+ * doit donc dépasser l'intervalle entre deux hex d'un survol normal (~160-240 ms mesurés) pour
+ * n'envoyer que la destination où le curseur se pose réellement.
+ */
+const MOVE_PREVIEW_SHOOT_DEBOUNCE_MS = 180;
 
 function parseBackendLosPreviewCells(raw: unknown, fieldName: string): BackendLosPreviewCell[] {
   if (!Array.isArray(raw)) {
@@ -352,6 +361,81 @@ function drawCohesionHalos(
   overlay.drawCircle(acx, acy, haloRadiusPx);
 }
 
+/** Portées (pouces) des cercles de repère, mesurées depuis le BORD du socle de la fig activée. */
+const RANGE_RING_INCHES: readonly number[] = [2, 6, 9, 12, 15, 18, 24];
+
+/** Cycle blanc → jaune → vert clair, répété : deux cercles voisins ont toujours une couleur différente. */
+const RANGE_RING_COLOR_CYCLE: readonly number[] = [
+  0xffffff, // blanc
+  0xfacc15, // jaune
+  0x86efac, // vert clair
+];
+
+/**
+ * Cercles de portée autour de la SEULE figurine activée.
+ *
+ * Rayon = rayon du socle + portée : les rayons viennent de ``getFightEngagementRingBoardPixels``
+ * (``rOuter``), seul chemin aligné sur le moteur (``ENGAGEMENT_NORM_HEX_WIDTH`` = 1,5 unité
+ * ``_hex_center`` par sous-hex). Une portée en pouces vaut ``inches × inches_to_subhex`` sous-hex.
+ */
+function drawRangeRings(
+  overlay: PIXI.Container,
+  p: {
+    unit: {
+      col: number;
+      row: number;
+      BASE_SHAPE?: "round" | "oval" | "square";
+      BASE_SIZE?: number | [number, number];
+    };
+    hexRadius: number;
+    margin: number;
+    inchesToSubhex: number;
+  }
+): void {
+  // Réentrant : appelé à chaque déplacement du ghost pendant un preview.
+  for (const child of overlay.removeChildren()) {
+    child.destroy({ children: true });
+  }
+  const g = new PIXI.Graphics();
+  overlay.addChild(g);
+  // Pastilles noires des étiquettes : un seul Graphics, ajouté AVANT les textes → toujours dessous.
+  const badges = new PIXI.Graphics();
+  overlay.addChild(badges);
+  const lineW = Math.max(1, p.hexRadius * 0.35);
+  const fontSize = Math.max(9, p.hexRadius * 3.2);
+
+  RANGE_RING_INCHES.forEach((inches, i) => {
+    const { cx, cy, rOuter } = getFightEngagementRingBoardPixels(
+      p.unit,
+      inches * p.inchesToSubhex,
+      p.hexRadius,
+      p.margin
+    );
+    const color = RANGE_RING_COLOR_CYCLE[i % RANGE_RING_COLOR_CYCLE.length];
+    g.lineStyle(lineW, color, 0.9);
+    g.drawCircle(cx, cy, rOuter);
+
+    // Étiquette posée SUR le cercle (12 h), dans une pastille noire cerclée de la couleur du cercle.
+    const label = new PIXI.Text(String(inches), {
+      fontFamily: "Arial",
+      fontSize,
+      fontWeight: "bold",
+      fill: color,
+    });
+    label.anchor.set(0.5);
+    const lx = cx;
+    const ly = cy - rOuter;
+    label.position.set(lx, ly);
+    // Rayon mesuré sur le texte rendu : la pastille englobe `2` comme `24`.
+    const badgeR = (Math.max(label.width, label.height) / 2) * 1.35;
+    badges.lineStyle(Math.max(1, lineW * 0.5), color, 0.9);
+    badges.beginFill(0x000000, 0.85);
+    badges.drawCircle(lx, ly, badgeR);
+    badges.endFill();
+    overlay.addChild(label);
+  });
+}
+
 /**
  * Même liste que le sync ref / ``moveDestinationAnchorsFromState`` (valid_move_destinations_pool ou preview_hexes).
  * Si présente : le draw n’ajoute pas ``move_preview_footprint_zone`` dans ``availableCells`` (évite le double rendu « nid d’abeille »).
@@ -443,6 +527,8 @@ type BoardProps = {
   selectedUnitId: number | null;
   ruleChoiceHighlightedUnitId?: number | null;
   eligibleUnitIds: number[];
+  /** Transition/init de phase en vol : le moteur n'est pas prêt, on masque les cercles verts. */
+  phaseInitPending?: boolean;
   showHexCoordinates?: boolean;
   showLosDebugOverlay?: boolean;
   /** Option : afficher la LoS de tir au survol pendant le déploiement (défaut OFF — impact perf). */
@@ -784,6 +870,14 @@ type BoardProps = {
   hpBarBlinkEnlarged?: boolean; // true → grossit ×1.5 la barre HP des cibles blink / preview ; false → taille normale
   showWoundProbability?: boolean; // true → affiche le % de blessure au-dessus des cibles blink ; false → masqué
   statusBadgePerModel?: boolean; // true → badge de statut (caché/fui/choc) par figurine ; false → un seul badge si toute l'escouade a le statut
+  /**
+   * Option "Performances". true → pendant le move preview (ghost d'escouade collé à la souris), les
+   * badges couvert / caché / detection (15"–12" GtG) des ennemis sont recalculés par le backend à
+   * chaque hex survolé (un appel preview_shoot_from_position par hex neuf, mis en cache ensuite).
+   * false → ils restent figés sur le statut calculé à la position d'origine de l'unité.
+   * Le cône LoS visuel n'est jamais peint pendant le hover d'escouade, quelle que soit la valeur.
+   */
+  dynamicCoverStatus?: boolean;
   boardDisplayMode?: BoardDisplayMode; // "full" → pleine taille, la page scrolle ; "fit" → réduit pour tenir dans l'écran ; "window" → taille réelle dans une fenêtre limitée à l'écran, navigable (molette/scroll)
   /** Mode mesure (règle) : armed → 1er clic pose l’ancre ; clic droit = jonction ; 2e clic termine la ligne → armed. Sortie : bouton règle uniquement. */
   measureMode?: MeasureModeState;
@@ -792,6 +886,8 @@ type BoardProps = {
   onMeasureJunctionCommit?: (col: number, row: number) => void;
   /** true → masque tous les indicateurs autour des icônes (HP, badges, cercle vert, voiles, tooltips). Les icônes restent visibles. */
   hideIndicators?: boolean;
+  /** true → cercles de portée (2/6/9/12/15/18/24″) autour de la SEULE figurine activée. */
+  showRangeRings?: boolean;
 };
 
 /** Échelle affichage tooltip mouvement : nombre de pas hex entre centres pour 1″ (règle plateau). */
@@ -1042,6 +1138,7 @@ export default function Board({
   selectedUnitId,
   ruleChoiceHighlightedUnitId = null,
   eligibleUnitIds,
+  phaseInitPending = false,
   showHexCoordinates = false,
   showLosDebugOverlay = false,
   deployShootLoS = false,
@@ -1211,11 +1308,13 @@ export default function Board({
   hpBarBlinkEnlarged,
   showWoundProbability,
   statusBadgePerModel,
+  dynamicCoverStatus = true,
   boardDisplayMode = "full",
   measureMode = { kind: "off" },
   onMeasureHexCommit,
   onMeasureJunctionCommit,
   hideIndicators = false,
+  showRangeRings = false,
 }: BoardProps) {
   /** Aligné sur drawBoard / ``boardHexClick`` (command & déploiement → move). */
   const effectivePhase = phase === "command" || phase === "deployment" ? "move" : phase;
@@ -1285,6 +1384,11 @@ export default function Board({
   const blinkTargetRingOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Halos de cohésion (charge/pile-in/consolidation) redessinés au survol — suivent la fig active. */
   const cohesionHaloOverlayRef = useRef<PIXI.Graphics | null>(null);
+  /** Cercles de portée autour de la fig activée (préservé au redraw, comme les autres overlays). */
+  const rangeRingsOverlayRef = useRef<PIXI.Container | null>(null);
+  /** Redessine les cercles à l'hex survolé : les cercles suivent le ghost pendant un preview.
+   *  ``null`` quand aucune fig n'est activée (ou option désactivée) → les handlers n'ont rien à faire. */
+  const rangeRingsFollowRef = useRef<((col: number, row: number) => void) | null>(null);
   /** Ligne départ → pointeur + libellé distance hex (preview move) */
   const movePreviewGuideLineRef = useRef<PIXI.Graphics | null>(null);
   const hoverMoveOrientationStepRef = useRef<number | null>(null);
@@ -1320,6 +1424,19 @@ export default function Board({
   const movePreviewBackendLosCacheRef = useRef<Map<string, BackendMoveLosPreviewPayload>>(
     new Map()
   );
+  /**
+   * File de rafraîchissement des badges couvert / caché dynamiques (move preview d'escouade).
+   * En refs, pas en variables d'effet : l'effet est remonté à chaque hex (dépendance ``movePreview``),
+   * donc seul un état hors closure survit pour dédupliquer les requêtes et écarter les périmées.
+   */
+  const coverStatusInFlightRef = useRef(false);
+  const coverStatusPendingRef = useRef<{
+    unitId: string;
+    destCol: number;
+    destRow: number;
+    cacheKey: string;
+  } | null>(null);
+  const coverStatusDestKeyRef = useRef<string | null>(null);
 
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
   const { boardConfig: _boardConfigFromHook, gameConfig, loading, error } = useGameConfig();
@@ -1603,6 +1720,99 @@ export default function Board({
       : (squadMoveModelPoolRef ?? null);
   const effectivePerModelPlanRef = useRef(effectivePerModelPlan);
   effectivePerModelPlanRef.current = effectivePerModelPlan;
+
+  /**
+   * Figurine ACTIVÉE (une seule), tous flux par-figurine confondus : déploiement, move, charge,
+   * pile-in, consolidation, tir, combat. Aucune fig activée → ``null`` → aucun cercle.
+   * Position = celle posée dans le plan si elle existe, sinon la position committée (``units_cache``).
+   */
+  const rangeRingsAnchor = useMemo(() => {
+    if (!showRangeRings) return null;
+    const sources: Array<{
+      unitId: number;
+      activeModelId: string | null;
+      models?: Record<string, { col: number; row: number }>;
+    } | null> = [
+      deployPlan,
+      squadMovePlan,
+      chargeMovePlan,
+      pileInMovePlan,
+      consolidationMovePlan,
+      squadShootPlan
+        ? { unitId: squadShootPlan.unitId, activeModelId: squadShootPlan.activeModelId }
+        : null,
+      squadFightPlan
+        ? { unitId: squadFightPlan.unitId, activeModelId: squadFightPlan.activeModelId }
+        : null,
+    ];
+    const src = sources.find((s) => s?.activeModelId);
+    if (!src?.activeModelId) return null;
+
+    const unit = units.find((u) => String(u.id) === String(src.unitId));
+    if (!unit) return null;
+    const placed = src.models?.[src.activeModelId];
+    const committed = (
+      gameState?.units_cache as
+        | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+        | undefined
+    )?.[String(src.unitId)]?.occupied_hexes_by_model?.[src.activeModelId];
+    const pos = placed ?? (committed ? { col: committed[0], row: committed[1] } : null);
+    if (!pos) return null;
+    return {
+      col: pos.col,
+      row: pos.row,
+      BASE_SHAPE: unit.BASE_SHAPE,
+      BASE_SIZE: unit.BASE_SIZE,
+    };
+  }, [
+    showRangeRings,
+    deployPlan,
+    squadMovePlan,
+    chargeMovePlan,
+    pileInMovePlan,
+    consolidationMovePlan,
+    squadShootPlan,
+    squadFightPlan,
+    units,
+    gameState?.units_cache,
+  ]);
+
+  /** Overlay dédié des cercles de portée (bouton cible). Indépendant de ``hideIndicators``. */
+  useEffect(() => {
+    const app = appRef.current;
+    if (!app || !boardConfig || !rangeRingsAnchor) return;
+    const i2s = (boardConfig as unknown as { inches_to_subhex?: number }).inches_to_subhex;
+    if (typeof i2s !== "number" || !Number.isFinite(i2s) || i2s <= 0) {
+      throw new Error(
+        `boardConfig.inches_to_subhex invalide (${String(i2s)}) — cercles de portée impossibles à échelonner.`
+      );
+    }
+    const overlay = new PIXI.Container();
+    overlay.zIndex = 2640;
+    overlay.eventMode = "none";
+    app.stage.addChild(overlay);
+    rangeRingsOverlayRef.current = overlay;
+    const draw = (col: number, row: number) => {
+      if (overlay.destroyed) return;
+      drawRangeRings(overlay, {
+        unit: { ...rangeRingsAnchor, col, row },
+        hexRadius: boardConfig.hex_radius,
+        margin: boardConfig.margin,
+        inchesToSubhex: i2s,
+      });
+    };
+    draw(rangeRingsAnchor.col, rangeRingsAnchor.row);
+    // Les handlers de survol (ghost charge-like / squad move) rappellent ce draw à l'hex snappé.
+    rangeRingsFollowRef.current = draw;
+    return () => {
+      if (rangeRingsFollowRef.current === draw) rangeRingsFollowRef.current = null;
+      if (!overlay.destroyed) {
+        app.stage.removeChild(overlay);
+        overlay.destroy({ children: true });
+      }
+      if (rangeRingsOverlayRef.current === overlay) rangeRingsOverlayRef.current = null;
+    };
+  }, [rangeRingsAnchor, boardConfig]);
 
   /** Tranche 2 : union des pools de déplacement des figs NON POSÉES de l'escouade (move-preview
    *  persistant après pose). Peuplée via l'endpoint batch move_squad_unplaced_destinations et rendue
@@ -3880,10 +4090,11 @@ export default function Board({
       scheduleBackendLosRequest(delayMs);
     };
 
-    // LoS preview during squad-level movePreview hover is intentionally disabled:
-    // user only wants LoS computed when a single figurine is selected post-commit
-    // (per-fig preview flow, not group hover). Re-enabling would re-introduce the
-    // backend MOVE_LOS_PREVIEW_PERF spam on every hovered hex (300ms per call).
+    // Hover d'escouade en movePreview : la LoS visuelle (cône) reste volontairement désactivée ici,
+    // réservée au flux per-fig post-commit. Les badges couvert / caché / detection, eux, sont
+    // rafraîchis par un effet dédié piloté par movePreview.destCol/destRow (cf. « Badges couvert /
+    // caché dynamiques » plus bas) — surtout pas depuis ce handler : onStartMovePreview y déclenche
+    // un setState sur movePreview, dépendance de cet effet, dont le cleanup tuerait le debounce.
 
     if (canvas) canvas.addEventListener("mousemove", onMouseMove);
     // Restaure la visibilité du ghost si on était déjà en hover (la cleanup l'a caché sans le déplacer)
@@ -4796,10 +5007,8 @@ export default function Board({
     // figs superposées (ami au sol / ennemi à l'étage, même hex 2D) sont indésambiguïsables et l'ami
     // gagne toujours. Au TIR, le niveau conditionne aussi le ciblage réel (on ne tire pas à travers
     // les étages) — la validité de la cible reste tranchée côté moteur (blink) ; ici seul le CLIC filtre.
-    const modelOnViewLevel = (
-      entry: { level_by_model?: Record<string, number> },
-      mid: string
-    ) => (entry.level_by_model?.[mid] ?? 0) === currentLevel;
+    const modelOnViewLevel = (entry: { level_by_model?: Record<string, number> }, mid: string) =>
+      (entry.level_by_model?.[mid] ?? 0) === currentLevel;
 
     const resolveHex = (e: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
@@ -5039,10 +5248,8 @@ export default function Board({
     // superposées (ami au sol / ennemi à l'étage, même hex 2D) sont indésambiguïsables et l'ami
     // gagne toujours. L'engagement/attribution reste 2D (sans niveau) côté moteur : toutes les figs
     // engagées frappent quel que soit leur étage — seul le CLIC est filtré ici.
-    const modelOnViewLevel = (
-      entry: { level_by_model?: Record<string, number> },
-      mid: string
-    ) => (entry.level_by_model?.[mid] ?? 0) === currentLevel;
+    const modelOnViewLevel = (entry: { level_by_model?: Record<string, number> }, mid: string) =>
+      (entry.level_by_model?.[mid] ?? 0) === currentLevel;
 
     const resolveHex = (e: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
@@ -5158,7 +5365,16 @@ export default function Board({
 
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
-  }, [phase, mode, measureMode.kind, boardConfig, gameState?.units_cache, gameState, units, currentLevel]);
+  }, [
+    phase,
+    mode,
+    measureMode.kind,
+    boardConfig,
+    gameState?.units_cache,
+    gameState,
+    units,
+    currentLevel,
+  ]);
 
   // Allocation manuelle des pertes en COMBAT (PvP) : l'effet de tir ci-dessus est gaté
   // sur phase==="shoot" et ne couvre donc pas le fight. Ce handler dédié (phase fight,
@@ -5901,6 +6117,8 @@ export default function Board({
         sprite.visible = true;
       }
       hoveredHexRef.current = { col: best.col, row: best.row };
+      // Cercles de portée : suivent la fig active pendant le preview.
+      rangeRingsFollowRef.current?.(best.col, best.row);
 
       // Halos de cohésion : fig active à la position survolée, autres figs à leur position (posée ou origine).
       const plan = effectivePerModelPlanRef.current;
@@ -6046,6 +6264,134 @@ export default function Board({
     effectivePerModelPlan,
     effectivePerModelPlan?.activeModelId,
     effectivePerModelPlan?.unitId,
+    units,
+    unitsBoardLayoutKey,
+    gameState?.turn,
+    gameState?.episode_steps,
+  ]);
+
+  /**
+   * Badges couvert / caché / detection (15"–12" GtG) DYNAMIQUES pendant le move preview d'escouade
+   * — option "Performances → statut couvert / caché dynamique".
+   *
+   * Piloté par la destination du ghost (movePreview.destCol/destRow), et surtout PAS depuis le
+   * handler mousemove : celui-ci appelle onStartMovePreview, dont le setState sur ``movePreview``
+   * démonte l'effet du hover ; son cleanup (clearTimeout) tuait le debounce avant l'envoi, si bien
+   * que les badges n'étaient rafraîchis que par un mousemove supplémentaire sur le même hex.
+   *
+   * Source unique = backend (preview_shoot_from_position), identique aux autres chemins de preview.
+   * Aucun cône LoS n'est peint ici : la LoS visuelle du hover d'escouade reste désactivée.
+   */
+  useEffect(() => {
+    // Hors preview : plus aucune destination courante → une réponse encore en vol sera ignorée.
+    const previewUnit =
+      dynamicCoverStatus && phase === "move" && mode === "movePreview" && movePreview
+        ? units.find((u) => String(u.id) === String(movePreview.unitId))
+        : undefined;
+    // Sans arme de tir, aucun badge couvert/detection n'a de sens : rien à demander au backend.
+    if (!previewUnit?.RNG_WEAPONS?.length || getMaxRangedRange(previewUnit) <= 0) {
+      coverStatusDestKeyRef.current = null;
+      return;
+    }
+    if (!movePreview) {
+      throw new Error("movePreview is null while its preview unit was resolved");
+    }
+
+    const { destCol, destRow } = movePreview;
+    const cacheKey = [
+      String(previewUnit.id),
+      `${destCol},${destRow}`,
+      unitsBoardLayoutKey,
+      String(gameState?.turn ?? ""),
+      String(gameState?.episode_steps ?? ""),
+    ].join("|");
+    // Destination courante du ghost : sert à écarter les réponses périmées, y compris celles
+    // arrivées après un remontage de l'effet (les variables locales ne survivraient pas).
+    coverStatusDestKeyRef.current = cacheKey;
+
+    const applyPreview = (preview: BackendMoveLosPreviewPayload): void => {
+      setMovePreviewLosCoverById(preview.coverByUnitId);
+      setMovePreviewLosTooFarById(preview.hiddenTooFarByUnitId);
+      setMovePreviewLosDetectionInfoById(preview.hiddenDetectionInfoByUnitId);
+    };
+
+    // Hex déjà visité → application immédiate, sans latence ni appel réseau.
+    const cached = movePreviewBackendLosCacheRef.current.get(cacheKey);
+    if (cached) {
+      applyPreview(cached);
+      return;
+    }
+
+    async function drainCoverStatusQueue(): Promise<void> {
+      if (coverStatusInFlightRef.current) return;
+      coverStatusInFlightRef.current = true;
+      try {
+        // Une seule requête en vol : le backend sérialise les previews, empiler les hex traversés
+        // ferait grossir la file et réintroduirait le délai qu'on cherche à supprimer.
+        while (coverStatusPendingRef.current) {
+          const pending = coverStatusPendingRef.current;
+          coverStatusPendingRef.current = null;
+          const response = await fetch("/api/game/action", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "preview_shoot_from_position",
+              unitId: pending.unitId,
+              destCol: pending.destCol,
+              destRow: pending.destRow,
+              advancePosition: false,
+              includeLosCells: false,
+            }),
+          });
+          if (!response.ok) {
+            throw new Error(`preview_shoot_from_position failed with HTTP ${response.status}`);
+          }
+          const data = await response.json();
+          if (data?.success !== true) {
+            throw new Error("preview_shoot_from_position returned success=false");
+          }
+          const losPreview = parseBackendMoveLosPreviewPayload(data.result, pending.cacheKey);
+          if (movePreviewBackendLosCacheRef.current.size >= MOVE_PREVIEW_LOS_CACHE_MAX_ENTRIES) {
+            const oldestKey = movePreviewBackendLosCacheRef.current.keys().next().value;
+            if (typeof oldestKey !== "string") {
+              throw new Error("Move preview LoS cache oldest key is invalid");
+            }
+            movePreviewBackendLosCacheRef.current.delete(oldestKey);
+          }
+          movePreviewBackendLosCacheRef.current.set(pending.cacheKey, losPreview);
+          // Réponse périmée (le ghost a quitté cet hex) → gardée en cache, mais pas peinte.
+          if (coverStatusDestKeyRef.current === pending.cacheKey) {
+            applyPreview(losPreview);
+          }
+        }
+      } catch (error) {
+        console.error("Move preview dynamic cover/hidden status failed:", error);
+      } finally {
+        coverStatusInFlightRef.current = false;
+        // Une destination déposée pendant le catch/finally ne doit pas rester orpheline.
+        if (coverStatusPendingRef.current) void drainCoverStatusQueue();
+      }
+    }
+
+    // Debounce : un survol rapide traverse des hex intermédiaires dont on n'attend pas le statut.
+    const timer = setTimeout(() => {
+      coverStatusPendingRef.current = {
+        unitId: String(previewUnit.id),
+        destCol,
+        destRow,
+        cacheKey,
+      };
+      void drainCoverStatusQueue();
+    }, MOVE_PREVIEW_COVER_STATUS_DEBOUNCE_MS);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [
+    dynamicCoverStatus,
+    phase,
+    mode,
+    movePreview,
     units,
     unitsBoardLayoutKey,
     gameState?.turn,
@@ -6795,11 +7141,18 @@ export default function Board({
 
     const scheduleShootBackend = (col: number, row: number) => {
       pendingShootBackend = { col, row };
-      if (shootBackendTimer || shootBackendInFlight) return;
+      // Une requête est déjà en vol : son ``finally`` repartira sur la destination la plus récente.
+      if (shootBackendInFlight) return;
+      // Debounce TRAILING : chaque nouvel hex repousse l'envoi. Sans le clearTimeout, le timer armé
+      // par le PREMIER hex survolé tirait pendant que la souris bougeait encore, et la réponse
+      // (~900 ms) arrivait périmée ; la requête de l'hex final ne partait qu'après, d'où ~2 s de
+      // latence perçue. Le backend ne peut pas être interrompu (verrou d'état côté serveur) :
+      // la seule économie possible est de ne jamais envoyer les requêtes des hex traversés.
+      if (shootBackendTimer) clearTimeout(shootBackendTimer);
       shootBackendTimer = setTimeout(() => {
         shootBackendTimer = null;
         void runShootBackend();
-      }, 25);
+      }, MOVE_PREVIEW_SHOOT_DEBOUNCE_MS);
     };
 
     const triggerShootPreview = (col: number, row: number) => {
@@ -6979,6 +7332,8 @@ export default function Board({
         sprite.visible = true;
       }
       hoveredHexRef.current = { col: best.col, row: best.row };
+      // Cercles de portée : suivent la fig active pendant le preview.
+      rangeRingsFollowRef.current?.(best.col, best.row);
       // Recalculs qui ne dépendent QUE de l'hex destination : seulement quand l'hex snappé change
       // (pas à chaque pixel). Le ghost, lui, suit le curseur en continu ci-dessus.
       const vKey = `${best.col},${best.row}`;
@@ -8661,7 +9016,7 @@ export default function Board({
             .map(([m, v]) => `${m}=${v ? 1 : 0}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#mdi:${movePreviewLosDetectionInfoKey}#bdi:${blinkingHiddenDetectionInfoKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hpbe:${hpBarBlinkEnlarged ? 1 : 0}#swp:${showWoundProbability ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}#dplan:${deployPlanFp}#elig:${[...eligibleUnitIds].sort((a, b) => a - b).join(",")}#lvl:${currentLevel}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#mdi:${movePreviewLosDetectionInfoKey}#bdi:${blinkingHiddenDetectionInfoKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hpbe:${hpBarBlinkEnlarged ? 1 : 0}#swp:${showWoundProbability ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}#dplan:${deployPlanFp}#elig:${[...eligibleUnitIds].sort((a, b) => a - b).join(",")}#pip:${phaseInitPending ? 1 : 0}#lvl:${currentLevel}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -8913,6 +9268,7 @@ export default function Board({
       const savedChargeVeilOverlay = chargeModelVeilOverlayRef.current;
       const savedBlinkRingOverlay = blinkTargetRingOverlayRef.current;
       const savedShootOverlay = shootSubgroupOverlayRef.current;
+      const savedRangeRingsOverlay = rangeRingsOverlayRef.current;
       if (savedStatic?.parent) app.stage.removeChild(savedStatic);
       if (savedWalls?.parent) app.stage.removeChild(savedWalls);
       if (savedUi?.parent) app.stage.removeChild(savedUi);
@@ -8928,6 +9284,7 @@ export default function Board({
       if (savedChargeVeilOverlay?.parent) app.stage.removeChild(savedChargeVeilOverlay);
       if (savedBlinkRingOverlay?.parent) app.stage.removeChild(savedBlinkRingOverlay);
       if (savedShootOverlay?.parent) app.stage.removeChild(savedShootOverlay);
+      if (savedRangeRingsOverlay?.parent) app.stage.removeChild(savedRangeRingsOverlay);
       if (
         canReuseExistingHighlightsThroughDestroy &&
         highlightsLayerRef.current?.parent === app.stage
@@ -9029,6 +9386,10 @@ export default function Board({
       if (savedShootOverlay && !savedShootOverlay.destroyed) {
         savedShootOverlay.zIndex = 2705;
         app.stage.addChild(savedShootOverlay);
+      }
+      if (savedRangeRingsOverlay && !savedRangeRingsOverlay.destroyed) {
+        savedRangeRingsOverlay.zIndex = 2640;
+        app.stage.addChild(savedRangeRingsOverlay);
       }
 
       // Nettoyer pastilles cible / jet de charge seulement quand on reconstruit les unités.
@@ -9419,6 +9780,9 @@ export default function Board({
         }
         // Calculate queue-based eligibility during shooting phase
         const isEligibleForRenderingBase = (() => {
+          // Init de phase en vol : le moteur n'a pas fini, aucune activation n'aboutirait.
+          // Pas de cercle vert tant que la phase n'est pas prête.
+          if (phaseInitPending) return false;
           // gameState.phase is authoritative (prop `phase` can lag one frame after API response).
           if (
             enginePhaseForPools === "shoot" &&
@@ -10525,6 +10889,7 @@ export default function Board({
     chargingUnitId,
     current_player,
     eligibleUnitIds,
+    phaseInitPending,
     fightActivePlayer,
     fightSubPhase,
     fightTargetId,

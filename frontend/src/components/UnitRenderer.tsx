@@ -2418,31 +2418,39 @@ export class UnitRenderer {
     const detectionInfo = this.getEffectiveDetectionInfo(attacker);
 
     if (this.props.statusBadgePerModel) {
-      // Per-figure mode (rule 13.09) — one badge on each hidden figure (follows modelHidden).
+      // Per-figure mode (rule 13.09) — un badge sur chaque figurine cachée (suit modelHidden), et,
+      // pour les figurines non cachées, le badge de COUVERT de l'unité dès qu'il s'applique.
+      // Miroir exact du mode escouade plus bas : œil gris = couvert ou caché, œil rouge = caché
+      // hors detection range, numéro = detection range effective (15" / 12" gone to ground).
+      // Le couvert est un booléen d'UNITÉ (cover_by_unit_id) : sur une escouade de plusieurs
+      // figurines, il est répliqué sur chacune faute d'un cover_by_model_id côté moteur.
       const centers = this.props.modelCenters;
       const flags = this.props.modelHidden;
       if (!centers || !flags) return;
-      if (detectionInfo) {
-        // En contexte per-tireur : badge numérique (hidden⟹cover implicite).
-        const numColor = detectionInfo.too_far ? EYE_COLOR_TOO_FAR : 0xc8c8c8;
-        centers.forEach(([cx, cy], i) => {
-          if (flags[i]) {
+      const tooFar = this.getEffectiveTargetTooFar(attacker);
+      const inCover = this.getEffectiveTargetInCover(attacker);
+      centers.forEach(([cx, cy], i) => {
+        const name = `hidden-badge-${unitIdNum}-${i}`;
+        if (flags[i]) {
+          if (detectionInfo) {
+            // En contexte per-tireur : badge numérique (hidden⟹cover implicite).
             drawNumberAt(
               cx,
               cy,
-              `hidden-badge-${unitIdNum}-${i}`,
+              name,
               detectionInfo.detection_inches,
-              numColor
+              detectionInfo.too_far ? EYE_COLOR_TOO_FAR : 0xc8c8c8
             );
+          } else {
+            drawBadgeAt(cx, cy, name, tooFar ? EYE_COLOR_TOO_FAR : undefined);
           }
-        });
-      } else {
-        // Hors contexte per-tireur : œil rouge (trop loin) ou gris (caché persistant).
-        const eyeColor = this.getEffectiveTargetTooFar(attacker) ? EYE_COLOR_TOO_FAR : undefined;
-        centers.forEach(([cx, cy], i) => {
-          if (flags[i]) drawBadgeAt(cx, cy, `hidden-badge-${unitIdNum}-${i}`, eyeColor);
-        });
-      }
+          return;
+        }
+        // Figurine non cachée : seul le couvert peut lui valoir un badge.
+        if (inCover) {
+          drawBadgeAt(cx, cy, name);
+        }
+      });
       return;
     }
 

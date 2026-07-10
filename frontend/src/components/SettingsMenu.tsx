@@ -43,6 +43,8 @@ interface SettingsMenuProps {
   onToggleLogShowCoords?: (value: boolean) => void;
   logShowType?: boolean;
   onToggleLogShowType?: (value: boolean) => void;
+  dynamicCoverStatus?: boolean;
+  onToggleDynamicCoverStatus?: (value: boolean) => void;
 }
 
 /**
@@ -169,6 +171,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   onToggleLogShowCoords,
   logShowType = true,
   onToggleLogShowType,
+  dynamicCoverStatus = true,
+  onToggleDynamicCoverStatus,
 }) => {
   // Snapshot des réglages à l'ouverture du menu, pour pouvoir annuler les
   // changements (appliqués en live) en restaurant les valeurs initiales.
@@ -190,6 +194,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     deployIconBaseSizeBounded: boolean;
     logShowCoords: boolean;
     logShowType: boolean;
+    dynamicCoverStatus: boolean;
   };
   const latest: SettingsSnapshot = {
     showAdvanceWarning,
@@ -209,6 +214,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     deployIconBaseSizeBounded,
     logShowCoords,
     logShowType,
+    dynamicCoverStatus,
   };
   const latestRef = useRef(latest);
   latestRef.current = latest;
@@ -255,6 +261,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
       if (onToggleLogShowCoords && logShowCoords !== s.logShowCoords)
         onToggleLogShowCoords(s.logShowCoords);
       if (onToggleLogShowType && logShowType !== s.logShowType) onToggleLogShowType(s.logShowType);
+      if (onToggleDynamicCoverStatus && dynamicCoverStatus !== s.dynamicCoverStatus)
+        onToggleDynamicCoverStatus(s.dynamicCoverStatus);
     }
     onClose();
   };
@@ -363,14 +371,6 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
               label="Debug LoS"
               description="Affiche le ratio de visibilité LoS (%) en phase de tir."
             />
-            {onToggleShootPoolFastMode && (
-              <ToggleRow
-                checked={shootPoolFastMode}
-                onChange={onToggleShootPoolFastMode}
-                label="Pool tir : transition rapide"
-                description="Activé (défaut) : saute le test cible+LoS au démarrage de la phase de tir (transition move→tir rapide) ; la présence de cible est résolue à l'activation — une unité sans cible visible peut apparaître activable puis passer son tour. Désactivé : pool exact (vérifie cible à portée + LoS avant de rendre activable, pas de cercle vert inutile) mais coûte ~1,5 s par transition."
-              />
-            )}
             {onToggleBattleShockTest && (
               <ToggleRow
                 checked={battleShockTestEnabled}
@@ -502,6 +502,27 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                   onChange={onToggleDeployShootLoS}
                   label="LoS de tir au déploiement"
                   description="Activé : affiche la ligne de vue de tir de la figurine survolée pendant le déploiement (utile pour anticiper d'où on peut être ciblé). ⚠️ Impact sur les performances : recalcul de LoS à chaque survol → peut ralentir le déplacement des figurines. Désactivé par défaut."
+                />
+              )}
+            </CollapsibleSection>
+          )}
+
+          {(onToggleDynamicCoverStatus || onToggleShootPoolFastMode) && (
+            <CollapsibleSection title="Performances">
+              {onToggleDynamicCoverStatus && (
+                <ToggleRow
+                  checked={dynamicCoverStatus}
+                  onChange={onToggleDynamicCoverStatus}
+                  label="Statut couvert / caché dynamique"
+                  description="Activé : pendant la prévisualisation de mouvement, les badges couvert, caché et portée de détection (15&quot; / 12&quot;) des ennemis sont recalculés à chaque case survolée, depuis la destination du fantôme. Désactivé : ils restent figés sur le statut de la position d'origine. ⚠️ Impact sur les performances : un calcul serveur par case nouvellement survolée."
+                />
+              )}
+              {onToggleShootPoolFastMode && (
+                <ToggleRow
+                  checked={shootPoolFastMode}
+                  onChange={onToggleShootPoolFastMode}
+                  label="Pool tir : transition rapide"
+                  description="Activé (défaut) : saute le test cible+LoS au démarrage de la phase de tir (transition move→tir rapide) ; la présence de cible est résolue à l'activation — une unité sans cible visible peut apparaître activable puis passer son tour. Désactivé : pool exact (vérifie cible à portée + LoS avant de rendre activable, pas de cercle vert inutile) mais coûte ~1,5 s par transition."
                 />
               )}
             </CollapsibleSection>

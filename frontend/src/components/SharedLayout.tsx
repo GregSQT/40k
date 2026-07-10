@@ -19,6 +19,10 @@ interface SharedLayoutProps {
   onToggleHideIndicators?: () => void;
   /** true → indicateurs actuellement masqués. */
   hideIndicatorsActive?: boolean;
+  /** Bascule les cercles de portée autour de la figurine activée. */
+  onToggleRangeRings?: () => void;
+  /** true → cercles de portée actuellement affichés. */
+  rangeRingsActive?: boolean;
 }
 
 interface NavigationProps {
@@ -27,6 +31,8 @@ interface NavigationProps {
   measureModeActive?: boolean;
   onToggleHideIndicators?: () => void;
   hideIndicatorsActive?: boolean;
+  onToggleRangeRings?: () => void;
+  rangeRingsActive?: boolean;
 }
 
 /** Logo règle (assets : `frontend/public/icons/Action_Logo/Ruler.png`). */
@@ -71,6 +77,27 @@ function EyeIndicatorsIcon({ hidden }: { hidden: boolean }) {
       <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
       <circle cx="12" cy="12" r="3" />
       {hidden && <line x1="3" y1="3" x2="21" y2="21" />}
+    </svg>
+  );
+}
+
+/** Cible (cercles concentriques) : cercles de portée autour de la figurine activée. */
+function RangeRingsIcon({ active }: { active: boolean }) {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      aria-hidden
+      style={{ display: "block", opacity: active ? 1 : 0.78 }}
+    >
+      <title>Cercles de portée</title>
+      <circle cx="12" cy="12" r="9.5" />
+      <circle cx="12" cy="12" r="6" />
+      <circle cx="12" cy="12" r="2.5" />
     </svg>
   );
 }
@@ -217,6 +244,8 @@ const Navigation: React.FC<NavigationProps> = ({
   measureModeActive = false,
   onToggleHideIndicators,
   hideIndicatorsActive = false,
+  onToggleRangeRings,
+  rangeRingsActive = false,
 }) => {
   const measureRulerButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -396,6 +425,35 @@ const Navigation: React.FC<NavigationProps> = ({
               </button>
             </TooltipWrapper>
           )}
+          {onToggleRangeRings && (
+            <TooltipWrapper
+              text={
+                rangeRingsActive
+                  ? 'Masquer les cercles de portée (2", 6", 9", 12", 15", 18", 24") autour de la figurine activée.'
+                  : 'Afficher les cercles de portée (2", 6", 9", 12", 15", 18", 24") mesurés depuis le bord du socle de la figurine activée.'
+              }
+            >
+              <button
+                type="button"
+                onClick={onToggleRangeRings}
+                className="settings-button"
+                aria-pressed={rangeRingsActive}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  outline: "none",
+                  color: rangeRingsActive ? "#22c55e" : "#9ca3af",
+                  padding: "4px",
+                }}
+              >
+                <RangeRingsIcon active={rangeRingsActive} />
+              </button>
+            </TooltipWrapper>
+          )}
           {onToggleMeasureMode && (
             <TooltipWrapper
               text={
@@ -459,6 +517,8 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
   measureModeActive,
   onToggleHideIndicators,
   hideIndicatorsActive,
+  onToggleRangeRings,
+  rangeRingsActive,
 }) => {
   return (
     <div
@@ -483,6 +543,8 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
               measureModeActive={measureModeActive}
               onToggleHideIndicators={onToggleHideIndicators}
               hideIndicatorsActive={hideIndicatorsActive}
+              onToggleRangeRings={onToggleRangeRings}
+              rangeRingsActive={rangeRingsActive}
             />
             {rightColumnContent}
           </div>

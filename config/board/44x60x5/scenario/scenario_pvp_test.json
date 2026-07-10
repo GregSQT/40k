@@ -13,6 +13,8 @@
     { "id": 1004, "unit_type": "DreadnoughtBallistus",                                   "player": 1, "col": 190,  "row": 242 },
     { "id": 1005, "unit_type": "DreadnoughtBallistus",                                   "player": 1, "col": 100,  "row": 252 },
     { "id": 1008, "unit_type": "Intercessor",                                            "player": 1, "col": 45,  "row": 80, "level": 1 },
+    { "id": 1010, "unit_type": "Intercessor",                                            "player": 1, "col": 10,  "row": 275 },
+
 
 
     {
