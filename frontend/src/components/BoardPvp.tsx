@@ -108,13 +108,16 @@ const MOVE_PREVIEW_LOS_CACHE_MAX_ENTRIES = 256;
 /** Survol rapide : on n'interroge le backend que pour l'hex sur lequel le ghost se pose vraiment. */
 const MOVE_PREVIEW_COVER_STATUS_DEBOUNCE_MS = 25;
 /**
- * Preview de tir per-figurine : un appel backend coûte ~300 ms à ~900 ms (build_unit_los_cache),
- * et le serveur sérialise les requêtes — une requête partie ne peut plus être annulée. Le débounce
- * (trailing) évite d'envoyer les hex simplement traversés (~160-240 ms entre deux hex sur un survol
- * mesuré). Il reste sous cet intervalle : les badges n'étant plus effacés pendant l'attente, une
- * requête traversante coûte au pire un rafraîchissement de plus, jamais un clignotement.
+ * Preview de tir per-figurine : un appel backend coûte ~180 ms (mesuré) à ~900 ms (plateau chargé),
+ * et le serveur sérialise les requêtes sous ``_ENGINE_STATE_LOCK`` — une requête partie ne peut plus
+ * être annulée, et le POST suivant (move commit, end_phase) attend derrière elle.
+ *
+ * Le débounce (trailing) DOIT rester au-dessus de l'intervalle entre deux hex d'un survol normal
+ * (~160-240 ms mesurés) : sinon une requête part pour presque chaque hex traversé, donc il y en a
+ * presque toujours une en vol au moment du clic → la transition move → tir attend jusqu'à 900 ms.
+ * Voir Documentation/Implémentation/preview_tir_position_virtuelle.md.
  */
-const MOVE_PREVIEW_SHOOT_DEBOUNCE_MS = 120;
+const MOVE_PREVIEW_SHOOT_DEBOUNCE_MS = 180;
 
 function parseBackendLosPreviewCells(raw: unknown, fieldName: string): BackendLosPreviewCell[] {
   if (!Array.isArray(raw)) {
