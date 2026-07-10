@@ -1962,7 +1962,7 @@ export class UnitRenderer {
       const blinkPhase: "shoot" | "fight" | "charge" =
         this.props.mode === "movePreview" ||
         (this.props.phase === "move" &&
-          (this.props.mode === "select" || this.props.mode === "squadModelMove"))
+          (this.props.mode === "select" || this.props.mode === "perModelMove"))
           ? "shoot"
           : (this.props.phase as "shoot" | "fight" | "charge");
 
@@ -2569,7 +2569,7 @@ export class UnitRenderer {
       this.props.phase === "move" &&
       (this.props.mode === "select" ||
         this.props.mode === "movePreview" ||
-        this.props.mode === "squadModelMove") &&
+        this.props.mode === "perModelMove") &&
       this.props.movePreviewShootingTargetInCoverByUnitId !== undefined;
     if (this.props.phase !== "shoot" && this.props.mode !== "movePreview" && !movePhaseLosHover) {
       return false;
@@ -2584,7 +2584,7 @@ export class UnitRenderer {
     if (
       (this.props.mode === "movePreview" ||
         this.props.mode === "select" ||
-        this.props.mode === "squadModelMove" ||
+        this.props.mode === "perModelMove" ||
         this.props.mode === "attackPreview" ||
         this.props.mode === "squadModelShoot") &&
       this.props.movePreviewShootingTargetInCoverByUnitId
@@ -2608,7 +2608,7 @@ export class UnitRenderer {
       this.props.phase === "move" &&
       (this.props.mode === "select" ||
         this.props.mode === "movePreview" ||
-        this.props.mode === "squadModelMove") &&
+        this.props.mode === "perModelMove") &&
       this.props.movePreviewHiddenTooFarByUnitId !== undefined;
     if (this.props.phase !== "shoot" && this.props.mode !== "movePreview" && !movePhaseLosHover) {
       return false;
@@ -2616,7 +2616,7 @@ export class UnitRenderer {
     if (
       (this.props.mode === "movePreview" ||
         this.props.mode === "select" ||
-        this.props.mode === "squadModelMove" ||
+        this.props.mode === "perModelMove" ||
         this.props.mode === "attackPreview" ||
         this.props.mode === "squadModelShoot") &&
       this.props.movePreviewHiddenTooFarByUnitId
@@ -2639,7 +2639,7 @@ export class UnitRenderer {
       this.props.phase === "move" &&
       (this.props.mode === "select" ||
         this.props.mode === "movePreview" ||
-        this.props.mode === "squadModelMove") &&
+        this.props.mode === "perModelMove") &&
       this.props.movePreviewHiddenDetectionInfoByUnitId !== undefined;
     if (this.props.phase !== "shoot" && this.props.mode !== "movePreview" && !movePhaseLosHover) {
       return null;

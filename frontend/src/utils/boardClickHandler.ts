@@ -305,7 +305,7 @@ export function setupBoardClickHandler(callbacks: {
         activeModelId?: string | null;
       }>
     ).detail;
-    if (mode === "squadModelMove") {
+    if (mode === "perModelMove") {
       // Plan provisoire : pose la figurine active a l'hex clique (dans son pool BFS).
       if (activeModelId && callbacks.onMoveModelInPlan) {
         callbacks.onMoveModelInPlan(activeModelId, col, row);

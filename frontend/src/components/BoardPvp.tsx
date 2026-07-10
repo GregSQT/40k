@@ -499,7 +499,7 @@ interface ReplayRules {
 type Mode =
   | "select"
   | "movePreview"
-  | "squadModelMove"
+  | "perModelMove"
   | "squadModelShoot"
   | "attackPreview"
   | "targetPreview"
@@ -1395,7 +1395,7 @@ export default function Board({
   const hoverMoveOrientationStepRef = useRef<number | null>(null);
   /** Ligne mesure règle (ancre → hex sous curseur) */
   const measureGuideLineRef = useRef<PIXI.Graphics | null>(null);
-  /** Timestamp d'entrée en squadModelMove depuis movePreview — bloque onPointerDownSelect pour le clic de confirmation */
+  /** Timestamp d'entrée en perModelMove depuis movePreview — bloque onPointerDownSelect pour le clic de confirmation */
   const squadMoveEntryTimeRef = useRef<number | null>(null);
   /** Double-click détecté manuellement dans onEntryPointerDown : { unitId, ts } du dernier clic sur une unité */
   const lastUnitClickRef = useRef<{ unitId: number | string; ts: number } | null>(null);
@@ -1601,7 +1601,7 @@ export default function Board({
 
   // ──────────────────────────────────────────────────────────────────────────
   // Slice G : la machinerie per-modèle (hover/pool/pose/sélection) est partagée entre le move
-  // (squadModelMove) et les modes « charge-like » (charge + pile-in : pose/dé-pose/sélection d'une
+  // (perModelMove) et les modes « charge-like » (charge + pile-in : pose/dé-pose/sélection d'une
   // fig dans un pool). On route le plan/pool/mask/callbacks du mode charge-like actif, puis on expose
   // une vue "squad-shaped" + des alias ``effectivePerModel*`` pour réutiliser ces handlers PIXI.
   // ──────────────────────────────────────────────────────────────────────────
@@ -1703,7 +1703,7 @@ export default function Board({
   }, [isDeploymentMove, deployPlan]);
 
   /** true si on est dans un mode plan par-figurine (move OU charge OU pile-in OU déploiement). */
-  const isPerModelMove = mode === "squadModelMove" || perModelChargeLike || isDeploymentMove;
+  const isPerModelMove = mode === "perModelMove" || perModelChargeLike || isDeploymentMove;
   /** Plan per-modèle actif (squad ou charge-like ou déploiement) — même forme partagée. */
   const effectivePerModelPlan = isDeploymentMove
     ? deployPlanView
@@ -3137,7 +3137,7 @@ export default function Board({
     // the per-fig flow only, not during squad-level hover/preview.
     const useMoveLosPreview =
       phase === "move" &&
-      (mode === "select" || (mode === "squadModelMove" && squadMovePlan?.activeModelId != null));
+      (mode === "select" || (mode === "perModelMove" && squadMovePlan?.activeModelId != null));
     const mergedIds = useMoveLosPreview ? movePreviewLosBlinkIds : (stableBlinkingUnits ?? []);
     const uc = gameState?.units_cache as Record<string, unknown> | undefined;
     return filterBlinkIdsToLivingUnitsCache(mergedIds, uc, units);
@@ -3183,7 +3183,7 @@ export default function Board({
           orientation,
         },
       };
-    } else if ((mode === "squadModelMove" || isDeploymentMove) && effectivePerModelPlan) {
+    } else if ((mode === "perModelMove" || isDeploymentMove) && effectivePerModelPlan) {
       const planForHidden = effectivePerModelPlan;
       const unitId = planForHidden.unitId;
       const occupied = (
@@ -3266,7 +3266,7 @@ export default function Board({
     // En mode plan par-figurine (move OU charge), un effet dédié gère le preview ; ce gros effet de
     // preview LoS au survol NE doit PAS tourner (coûteux par mouvement + inutile pour la charge,
     // dont la pose se fait au clic sur l'hex).
-    if (mode === "squadModelMove" || mode === "chargeModelMove" || isDeploymentMove) return;
+    if (mode === "perModelMove" || mode === "chargeModelMove" || isDeploymentMove) return;
 
     const HEX_RADIUS_H = boardConfig.hex_radius;
     const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
@@ -4213,7 +4213,7 @@ export default function Board({
     };
 
     const shouldConfirmAtIcon =
-      (mode === "squadModelMove" && effectivePerModelPlan?.activeModelId != null) ||
+      (mode === "perModelMove" && effectivePerModelPlan?.activeModelId != null) ||
       (perModelChargeLike && effectivePerModelPlan?.activeModelId != null) ||
       (selectedUnitId != null &&
         ((effectivePhase === "move" && mode === "select") ||
@@ -5956,7 +5956,7 @@ export default function Board({
     const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
     const MARGIN_H = boardConfig.margin;
 
-    // Cohésion d'escouade pour les halos (mêmes valeurs config que le moteur / squadModelMove).
+    // Cohésion d'escouade pour les halos (mêmes valeurs config que le moteur / perModelMove).
     const inchesToSubhex =
       (boardConfig as unknown as { inches_to_subhex?: number }).inches_to_subhex ?? 10;
     const cohesionRules = gameConfig?.game_rules as
@@ -6176,7 +6176,7 @@ export default function Board({
   // entrée sans selection), couper TOUT le preview (fantome curseur + LoS + ligne guide + tooltip).
   // Le preview (ghost + LoS) n'existe QUE pendant qu'une fig est en cours de placement.
   useEffect(() => {
-    if (mode !== "squadModelMove" && !isDeploymentMove) return;
+    if (mode !== "perModelMove" && !isDeploymentMove) return;
     // Déploiement : même machinerie per-fig (alias déploiement-aware, = refs squad en mode move).
     const squadMovePlan = effectivePerModelPlan;
     if (squadMovePlan?.activeModelId) return; // une fig active → preview autorisé
@@ -6406,7 +6406,7 @@ export default function Board({
   // Les positions posées ont été survolées juste avant le drop → preview backend déjà en cache (hit,
   // zéro latence). L'effet « cut preview » ci-dessus délègue à celui-ci quand des figs sont posées.
   useEffect(() => {
-    if (mode !== "squadModelMove" && !isDeploymentMove) return;
+    if (mode !== "perModelMove" && !isDeploymentMove) return;
     if (!boardConfig || !gameConfig) return;
     const app = appRef.current;
     if (!app) return;
@@ -6566,7 +6566,7 @@ export default function Board({
   // change → les figs posées bloquent les autres). Le voile violet se vide au fur et à mesure des
   // poses et disparaît quand tout est posé. Fig active → cet effet se retire (pool de la fig active).
   useEffect(() => {
-    if (mode !== "squadModelMove") return;
+    if (mode !== "perModelMove") return;
     const plan = squadMovePlan;
     if (!plan) return;
     if (plan.activeModelId) return;
@@ -6633,9 +6633,9 @@ export default function Board({
 
   // Ghost per-figurine (squad move plan) : ghost suit le curseur, hoveredHexRef mis à jour pour le
   // click handler (shouldConfirmAtIcon). Complètement indépendant de active_movement_unit.
-  // S'active uniquement quand mode === "squadModelMove" && activeModelId est set.
+  // S'active uniquement quand mode === "perModelMove" && activeModelId est set.
   useEffect(() => {
-    if (mode !== "squadModelMove" && !isDeploymentMove) return;
+    if (mode !== "perModelMove" && !isDeploymentMove) return;
     if (!boardConfig) return;
     // Déploiement PvP "active" : réutilise la même machinerie per-fig que le move (ghost curseur,
     // cohésion, voile, LoS, badge caché). Les alias ``effectivePerModel*`` valent les refs squad en
@@ -6847,7 +6847,7 @@ export default function Board({
 
     // --- Preview de tir per-fig : suit le ghost (même machinerie que le survol move normal) ---
     // Cône bleu/couvert via WASM (instantané) + clignotement ennemis via backend
-    // `preview_shoot_from_position`. Tout est gated mode squadModelMove ; ne touche pas le gros effet.
+    // `preview_shoot_from_position`. Tout est gated mode perModelMove ; ne touche pas le gros effet.
     const LOS_PREVIEW_CLEAR_HEX = 0x4f8bff;
     const LOS_PREVIEW_COVER_HEX = 0x9ec5ff;
     const losUnionLayout: HexUnionMaskLayout = {
@@ -7719,9 +7719,9 @@ export default function Board({
     // Comme la charge (syncChargePoolRefs synchrone dans le handler API) : remplir les refs
     // **dans cet effet**, avant drawBoard. Un useEffect parent sur gameState s’exécute après
     // l’enfant → drawBoard lisait moveDestPoolRef vide et retombait sur les pastilles hex.
-    // En squadModelMove : resolvedMoveDestPoolRef est vidé pour ne pas parasite le rendu ;
+    // En perModelMove : resolvedMoveDestPoolRef est vidé pour ne pas parasite le rendu ;
     // drawBoardOptions utilise squadMoveModelPoolRef directement (pool per-fig toujours frais).
-    if (mode === "squadModelMove") {
+    if (mode === "perModelMove") {
       if (resolvedMoveDestPoolRef.current.size > 0) {
         resolvedMoveDestPoolRef.current.clear();
       }
@@ -8173,7 +8173,7 @@ export default function Board({
 
       // squad.md brique 3 : clic droit en mode plan par-figurine = annule le deplacement
       // de la fig ACTIVE → la replace a sa position de debut de phase (ne quitte pas le mode).
-      if (mode === "squadModelMove") {
+      if (mode === "perModelMove") {
         const activeMid = squadMovePlanRef.current?.activeModelId;
         if (activeMid) {
           squadMoveCallbacksRef.current.onResetModelInPlan?.(activeMid);
@@ -9123,7 +9123,7 @@ export default function Board({
      */
     const gsPhaseForMove = gameState?.phase;
     const moveDestinationAnchorsFromState =
-      mode !== "squadModelMove" &&
+      mode !== "perModelMove" &&
       phase !== "deployment" &&
       (effectivePhase === "move" ||
         gsPhaseForMove === "move" ||
@@ -9143,7 +9143,7 @@ export default function Board({
     /** Pile-in / consolidation : masque uniquement depuis ``footprintZonePoolRef`` (union hex → polygone lissé côté client, comme move sans ``move_preview_footprint_mask_loops``). */
     const activeFootprintMaskLoops = (() => {
       let raw: number[][] | null;
-      if (mode === "squadModelMove") {
+      if (mode === "perModelMove") {
         raw = squadMovePlan?.activeModelId ? (squadMoveModelMaskLoopsRef?.current ?? null) : null;
       } else {
         raw =
@@ -9197,7 +9197,7 @@ export default function Board({
       occupiedFloorLevels,
       occupiedZoneLevels,
       moveDestPoolRef:
-        mode === "squadModelMove"
+        mode === "perModelMove"
           ? // Fig active → pool BFS de la fig ; sinon (post-pose/repos) → union des figs non posées.
             squadMovePlan?.activeModelId && squadMoveModelPoolRef
             ? squadMoveModelPoolRef
@@ -9493,7 +9493,7 @@ export default function Board({
 
     const chargeMaxDistance = gameConfig?.charge?.charge_max_distance;
 
-    // Wrapper qui enregistre le timestamp d'entrée en squadModelMove avant de confirmer le move.
+    // Wrapper qui enregistre le timestamp d'entrée en perModelMove avant de confirmer le move.
     // Utilisé pour ignorer le select-click qui suit immédiatement la confirmation du movePreview.
     const onConfirmMoveForRender = () => {
       squadMoveEntryTimeRef.current = performance.now();
@@ -9749,11 +9749,11 @@ export default function Board({
           modelHpsByModel ? modelIds.map((mid) => modelHpsByModel[mid] ?? null) : [];
         // Rule 13.09 : flag "caché" par figurine (aligné sur modelCenters) pour le mode badge par-fig.
         const hiddenModelIds = new Set((unit.hidden_models ?? []).map((m) => String(m)));
-        // En plan fig-par-fig (squadModelMove), le statut "caché" est recalculé par le backend pour
+        // En plan fig-par-fig (perModelMove), le statut "caché" est recalculé par le backend pour
         // les positions provisoires (movePreviewHiddenModelIds) ; sinon le badge resterait figé sur la
         // position actuelle (unit.hidden_models) et n'apparaîtrait jamais au survol.
         const modelHidden: boolean[] =
-          (isSquadGhost && mode === "squadModelMove") || (isDeployGhost && isDeploymentMove)
+          (isSquadGhost && mode === "perModelMove") || (isDeployGhost && isDeploymentMove)
             ? modelIds.map((mid) => movePreviewHiddenModelIds.has(String(mid)))
             : modelIds.map((mid) => hiddenModelIds.has(String(mid)));
         // Ghost par-figurine : la fig en cours de placement (active) est rendue atténuée
@@ -9963,7 +9963,7 @@ export default function Board({
           movePreviewShootingTargetInCoverByUnitId: (() => {
             if (
               phase === "move" &&
-              (mode === "select" || mode === "movePreview" || mode === "squadModelMove")
+              (mode === "select" || mode === "movePreview" || mode === "perModelMove")
             ) {
               return movePreviewLosCoverById;
             }
@@ -9982,7 +9982,7 @@ export default function Board({
           movePreviewHiddenTooFarByUnitId: (() => {
             if (
               phase === "move" &&
-              (mode === "select" || mode === "movePreview" || mode === "squadModelMove")
+              (mode === "select" || mode === "movePreview" || mode === "perModelMove")
             ) {
               return movePreviewLosTooFarById;
             }
@@ -10001,7 +10001,7 @@ export default function Board({
           movePreviewHiddenDetectionInfoByUnitId: (() => {
             if (
               phase === "move" &&
-              (mode === "select" || mode === "movePreview" || mode === "squadModelMove")
+              (mode === "select" || mode === "movePreview" || mode === "perModelMove")
             ) {
               return movePreviewLosDetectionInfoById;
             }
@@ -10078,7 +10078,7 @@ export default function Board({
         // Pendant le preview move (fig active en cours), ce voile backend (dry-run, figé) est masqué :
         // drawHoverVeil recalcule la cohésion EN TEMPS RÉEL au survol et fait foi.
         const suppressBackendVeil =
-          mode === "squadModelMove" && !!effectivePerModelPlan?.activeModelId;
+          mode === "perModelMove" && !!effectivePerModelPlan?.activeModelId;
         if (isSquadGhost && !suppressBackendVeil && modelValidFlags.some((ok) => !ok)) {
           const veil = new PIXI.Graphics();
           const veilDisplayBase = resolveBaseSizeForUnitDisplay(unit);

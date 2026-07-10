@@ -2712,7 +2712,7 @@ class W40KEngine(gym.Env):
             "would_flee": True,
             "advance_roll": _mh._advance_roll_for(sid, self.game_state),
             # Desperate Escape : le hazard a consommé le clic qui, normalement, entre dans le plan
-            # par-figurine. Ce marqueur dit au front d'auto-entrer en squadModelMove (Fall Back)
+            # par-figurine. Ce marqueur dit au front d'auto-entrer en perModelMove (Fall Back)
             # pour les survivants, sinon l'unité reste en mode select (trou → quick-move au clic).
             "fall_back_resume": True,
         }

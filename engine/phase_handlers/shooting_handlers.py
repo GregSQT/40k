@@ -1221,7 +1221,7 @@ def preview_hidden_models_from_model_positions(
 ) -> Dict[str, Any]:
     """Read-only : statut "caché" (rule 13.09) de chaque figurine SI elles étaient aux positions
     EXPLICITES données (``model_positions`` : map model_id -> [col, row]). Pour le déplacement
-    figurine-par-figurine (squadModelMove), où chaque fig a sa propre position provisoire (pas une
+    figurine-par-figurine (perModelMove), où chaque fig a sa propre position provisoire (pas une
     translation rigide). Réutilise ``compute_models_in_obscuring_terrain`` → identique au recalcul après pose.
 
     Retourne ``{"hidden_models": [...], "hidden": bool}``.

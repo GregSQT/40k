@@ -498,7 +498,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [mode, setMode] = useState<
     | "select"
     | "movePreview"
-    | "squadModelMove"
+    | "perModelMove"
     | "squadModelShoot"
     | "attackPreview"
     | "targetPreview"
@@ -595,7 +595,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [fleePreviewUnitId, setFleePreviewUnitId] = useState<number | null>(null);
   // Le badge "fui" en preview ne vit que pendant le mode plan de move : clear à la sortie.
   useEffect(() => {
-    if (mode !== "squadModelMove") setFleePreviewUnitId(null);
+    if (mode !== "perModelMove") setFleePreviewUnitId(null);
   }, [mode]);
   /** Pool BFS (hexes atteignables) de la figurine en cours de repositionnement. */
   const squadMoveModelPoolRef = useRef<Set<string>>(new Set());
@@ -890,7 +890,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const hazardWarningPopupRef = useRef<{ unitId: number } | null>(null);
   hazardWarningPopupRef.current = hazardWarningPopup;
   // Desperate Escape : id de l'unité dont le hazard vient d'être résolu (vivante) → l'effet
-  // dédié auto-entre dans le plan Fall Back par-figurine (squadModelMove), comblant le trou
+  // dédié auto-entre dans le plan Fall Back par-figurine (perModelMove), comblant le trou
   // mode select laissé par le resume (le clic d'activation a été consommé par le popup hazard).
   const [fallBackResumeUnitId, setFallBackResumeUnitId] = useState<number | null>(null);
   // TEST/DEBUG : mode toggle « battle-shock test ». Quand actif, cliquer une unité (non activée)
@@ -3778,7 +3778,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // En mode plan par-figurine, bloquer les clics PIXI (onSelectUnit) pour éviter que
       // handleSelectUnit remette mode="select" (l'unité n'est plus dans moveActivationPool
       // après activate_unit). La sélection est gérée par onPointerDownSelect (positions provisoires).
-      if (mode === "squadModelMove" && numericUnitId !== null) {
+      if (mode === "perModelMove" && numericUnitId !== null) {
         return;
       }
       // En mode tir par-figurine, bloquer les clics sur d'autres unités pour éviter
@@ -4107,11 +4107,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     async (unitId: number | string, col: number | string, row: number | string) => {
       // Desperate Escape : allocation des mortal wounds en cours → ne pas entrer en preview.
       if (manualAllocationRef.current) return;
-      // Double-clic depuis squadModelMove : nettoyer le plan provisoire avant d'entrer en movePreview.
+      // Double-clic depuis perModelMove : nettoyer le plan provisoire avant d'entrer en movePreview.
       squadMoveSessionRef.current += 1;
       squadMoveModelPoolRef.current = new Set();
       // NE PAS nuller le plan ici : à cause de l'``await activate_unit`` plus bas, un setSquadMovePlan(null)
-      // précoce est commité dans un render AVANT setMode → frame où mode=squadModelMove mais plan=null →
+      // précoce est commité dans un render AVANT setMode → frame où mode=perModelMove mais plan=null →
       // l'escouade saute à sa position d'origine = clignotement. On nulle juste avant chaque setMode
       // ("movePreview"), batché avec, pour un switch atomique sans frame intermédiaire.
       const parsedUnitId = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
@@ -4304,7 +4304,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         // Préserver wouldFlee sur ré-init de la même unité (sinon clignotement → badge effacé).
         wouldFlee: prev?.unitId === uid ? prev.wouldFlee : false,
       }));
-      setMode("squadModelMove");
+      setMode("perModelMove");
       setSelectedUnitId(uid);
       await refreshSquadMovePlanValidity(uid, models);
     },
@@ -4589,7 +4589,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   }, []);
 
   // ──────────────────────────────────────────────────────────────────────────
-  // TIR PAR FIGURINE (PvP manuel) — calque squadModelMove, pipeline squad backend
+  // TIR PAR FIGURINE (PvP manuel) — calque perModelMove, pipeline squad backend
   // ──────────────────────────────────────────────────────────────────────────
 
   /**
@@ -5784,7 +5784,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               wouldFlee: prev?.unitId === uid ? prev.wouldFlee : false,
             }));
             setSelectedUnitId(uid);
-            setMode("squadModelMove");
+            setMode("perModelMove");
             void refreshSquadMovePlanValidity(uid, models);
           } else {
             setSelectedUnitId(null);
@@ -6259,7 +6259,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   );
 
   // ──────────────────────────────────────────────────────────────────────────
-  // CHARGE PAR FIGURINE (V11 11.04, Slice G) — calque squadModelMove, contrat backend
+  // CHARGE PAR FIGURINE (V11 11.04, Slice G) — calque perModelMove, contrat backend
   // charge_plan_state (lecture pure) + commit_charge_plan.
   // ──────────────────────────────────────────────────────────────────────────
 

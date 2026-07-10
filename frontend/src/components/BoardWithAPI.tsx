@@ -4117,7 +4117,7 @@ export const BoardWithAPI: React.FC = () => {
         )}
 
       {/* Barre d'action move : Cancel/Validate (moitié gauche) + boutons de mode (moitié droite).
-          Affichée dès l'activation (movePreview) et en plan par-figurine (squadModelMove). */}
+          Affichée dès l'activation (movePreview) et en plan par-figurine (perModelMove). */}
       {settings.battleShockTestEnabled && (
         <div
           className="squad-action-bar"

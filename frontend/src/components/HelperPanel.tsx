@@ -39,9 +39,9 @@ function buildKey(
     // Unité sélectionnée mais pas encore posée : 1er clic attendu sur le plateau.
     if (mode === "deploymentMove" && !deploymentPlaced) return "deployment.placing";
   }
-  // Unité activée en move (mode squadModelMove) mais aucune figurine encore sélectionnée :
+  // Unité activée en move (mode perModelMove) mais aucune figurine encore sélectionnée :
   // en attente du choix simple clic (figurine) / double clic (unité entière).
-  if (phase === "move" && mode === "squadModelMove" && !moveModelSelected) {
+  if (phase === "move" && mode === "perModelMove" && !moveModelSelected) {
     return "move.unit_activated";
   }
   if (phase === "fight") {
