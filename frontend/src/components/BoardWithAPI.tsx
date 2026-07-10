@@ -47,6 +47,7 @@ import { getIconDiameterRatio } from "../utils/unitBaseDisplay";
 import BoardPvp, { type BoardDisplayMode, type MeasureModeState } from "./BoardPvp";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
+import { HelperPanel } from "./HelperPanel";
 import { SettingsMenu } from "./SettingsMenu";
 import SharedLayout from "./SharedLayout";
 import TooltipWrapper from "./TooltipWrapper";
@@ -2214,6 +2215,9 @@ export const BoardWithAPI: React.FC = () => {
   const measureModeActive = measureMode.kind !== "off";
   const [hideIndicators, setHideIndicators] = useState(false);
   const handleToggleHideIndicators = useCallback(() => setHideIndicators((v) => !v), []);
+  /** Panneau d'aide contextuelle au-dessus du tracker de phase (bouton « ? »). */
+  const [showHelper, setShowHelper] = useState(false);
+  const handleToggleHelper = useCallback(() => setShowHelper((v) => !v), []);
   /** Cercles de portée autour de la figurine activée (bouton cible de la barre d'outils). */
   const [showRangeRings, setShowRangeRings] = useState(false);
   const handleToggleRangeRings = useCallback(() => setShowRangeRings((v) => !v), []);
@@ -2960,7 +2964,7 @@ export const BoardWithAPI: React.FC = () => {
                     className={`deployment-panel__change-roster deployment-panel__change-roster--player${player}`}
                     onClick={() => openRosterPicker(player)}
                   >
-                    change roster
+                    Change Roster
                   </button>
                 )}
               </div>
@@ -3299,7 +3303,19 @@ export const BoardWithAPI: React.FC = () => {
   const rightColumnContent = (
     <RightColumnTutorialSpotlight>
       {gameConfig ? (
-        <div className="turn-phase-tracker-right">
+        <>
+          {showHelper && (
+            <div className="helper-panel-right">
+              <HelperPanel
+                phase={apiProps.gameState?.phase}
+                mode={apiProps.mode}
+                fightSubphase={apiProps.gameState?.fight_subphase}
+                deploymentStarted={testDeploymentStarted}
+                deploymentPlaced={apiProps.deployPlan?.placed}
+              />
+            </div>
+          )}
+          <div className="turn-phase-tracker-right">
           <TurnPhaseTrackerWithTutorial
             currentTurn={apiProps.gameState?.currentTurn ?? 1}
             currentPhase={apiProps.gameState?.phase ?? "move"}
@@ -3354,7 +3370,8 @@ export const BoardWithAPI: React.FC = () => {
             })()}
             className=""
           />
-        </div>
+          </div>
+        </>
       ) : (
         <div className="turn-phase-tracker-right">Loading game configuration...</div>
       )}
@@ -5142,6 +5159,8 @@ export const BoardWithAPI: React.FC = () => {
         hideIndicatorsActive={hideIndicators}
         onToggleRangeRings={handleToggleRangeRings}
         rangeRingsActive={showRangeRings}
+        onToggleHelper={handleToggleHelper}
+        helperActive={showHelper}
       >
         {/*
         In test deployment setup, lock gameplay interactions until Start Game! is clicked.

@@ -23,6 +23,10 @@ interface SharedLayoutProps {
   onToggleRangeRings?: () => void;
   /** true → cercles de portée actuellement affichés. */
   rangeRingsActive?: boolean;
+  /** Bascule le panneau d'aide contextuelle au-dessus du tracker de phase. */
+  onToggleHelper?: () => void;
+  /** true → panneau d'aide actuellement affiché. */
+  helperActive?: boolean;
 }
 
 interface NavigationProps {
@@ -33,6 +37,8 @@ interface NavigationProps {
   hideIndicatorsActive?: boolean;
   onToggleRangeRings?: () => void;
   rangeRingsActive?: boolean;
+  onToggleHelper?: () => void;
+  helperActive?: boolean;
 }
 
 /** Logo règle (assets : `frontend/public/icons/Action_Logo/Ruler.png`). */
@@ -77,6 +83,32 @@ function EyeIndicatorsIcon({ hidden }: { hidden: boolean }) {
       <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
       <circle cx="12" cy="12" r="3" />
       {hidden && <line x1="3" y1="3" x2="21" y2="21" />}
+    </svg>
+  );
+}
+
+/** Point d'interrogation : panneau d'aide contextuelle. */
+function HelperIcon({ active }: { active: boolean }) {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden
+      style={{ display: "block", opacity: active ? 1 : 0.78 }}
+    >
+      <title>Aide contextuelle</title>
+      <text
+        x="12"
+        y="19"
+        textAnchor="middle"
+        fontSize="22"
+        fontWeight="bold"
+        fontFamily="sans-serif"
+      >
+        ?
+      </text>
     </svg>
   );
 }
@@ -246,6 +278,8 @@ const Navigation: React.FC<NavigationProps> = ({
   hideIndicatorsActive = false,
   onToggleRangeRings,
   rangeRingsActive = false,
+  onToggleHelper,
+  helperActive = false,
 }) => {
   const measureRulerButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -396,6 +430,35 @@ const Navigation: React.FC<NavigationProps> = ({
         >
           {(location.search.includes("mode=pvp_test") ||
             location.search.includes("mode=pve_test")) && <BoardResolutionPicker />}
+          {onToggleHelper && (
+            <TooltipWrapper
+              text={
+                helperActive
+                  ? "Masquer le panneau d'aide contextuelle."
+                  : "Afficher un panneau d'aide indiquant l'action attendue selon la phase et l'état du jeu."
+              }
+            >
+              <button
+                type="button"
+                onClick={onToggleHelper}
+                className="settings-button"
+                aria-pressed={helperActive}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  outline: "none",
+                  color: helperActive ? "#22c55e" : "#9ca3af",
+                  padding: "4px",
+                }}
+              >
+                <HelperIcon active={helperActive} />
+              </button>
+            </TooltipWrapper>
+          )}
           {onToggleHideIndicators && (
             <TooltipWrapper
               text={
@@ -519,6 +582,8 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
   hideIndicatorsActive,
   onToggleRangeRings,
   rangeRingsActive,
+  onToggleHelper,
+  helperActive,
 }) => {
   return (
     <div
@@ -545,6 +610,8 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
               hideIndicatorsActive={hideIndicatorsActive}
               onToggleRangeRings={onToggleRangeRings}
               rangeRingsActive={rangeRingsActive}
+              onToggleHelper={onToggleHelper}
+              helperActive={helperActive}
             />
             {rightColumnContent}
           </div>

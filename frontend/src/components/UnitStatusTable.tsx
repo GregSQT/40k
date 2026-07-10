@@ -1807,9 +1807,6 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     onP2UnitRowRects,
     tutorialReportP2UnitRowRects = false,
     detailPreviewUnitId = null,
-    phase,
-    deploymentState = null,
-    deploymentType,
     inspectedModel = null,
   }) => {
     const nameHeaderRef = useRef<HTMLTableCellElement>(null);
@@ -2000,16 +1997,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
 
     // Filter units for this player and exclude dead units ; preview plateau : unité ciblée en tête de liste
     const playerUnits = useMemo(() => {
-      let filtered = units.filter((unit) => unit.player === player && unit.HP_CUR > 0);
-      // Déploiement par escouade (PvP "active") : ne montrer que les unités encore déployables
-      // du déployeur courant. Les autres tables (autre joueur) restent vides.
-      if (phase === "deployment" && deploymentType === "active" && deploymentState) {
-        const deployer = deploymentState.current_deployer;
-        const deployableIds = new Set(
-          (deploymentState.deployable_units?.[String(deployer)] ?? []).map((id) => String(id))
-        );
-        filtered = filtered.filter((unit) => deployableIds.has(String(unit.id)));
-      }
+      const filtered = units.filter((unit) => unit.player === player && unit.HP_CUR > 0);
       if (detailPreviewUnitId === null) {
         return filtered;
       }
@@ -2020,7 +2008,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
       const previewUnit = filtered[previewIndex];
       const rest = filtered.filter((_, i) => i !== previewIndex);
       return [previewUnit, ...rest];
-    }, [units, player, detailPreviewUnitId, phase, deploymentType, deploymentState]);
+    }, [units, player, detailPreviewUnitId]);
 
     useEffect(() => {
       const targetUnitInThisTable =

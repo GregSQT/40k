@@ -358,7 +358,7 @@ body {
 .unit-status-tables__scroll {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-sm);
+  gap: 4px;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -877,7 +877,6 @@ body {
   background: var(--bg-secondary);
   border: 1px solid #555;
   border-radius: var(--radius-lg);
-  margin-bottom: var(--spacing-sm);
 }
 
 .turn-phase-tracker-right .flex {
@@ -890,6 +889,22 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+/* Panneau d'aide contextuelle (bouton « ? ») : même charte que le tracker de phase. */
+.helper-panel-right {
+  width: 100%;
+  background: #222;
+  border: 2px solid #22c55e;
+  border-radius: var(--radius-lg);
+}
+
+.helper-panel {
+  padding: var(--spacing-sm);
+  font-size: 13px;
+  line-height: 1.4;
+  color: #e5fbe9;
+  white-space: pre-line;
 }
 
 /* Phase buttons */
