@@ -3730,6 +3730,10 @@ def execute_squad_move(
     if plan is None:
         return False
     budget = get_squad_move_budget(squad_id, game_state, move_type, advance_roll=advance_roll)
+    # Squad move rigide : retrancher le coût de descente de la fig la plus haute (§13.06), miroir du
+    # pool PvP. No-op tant que l'unité est au sol (l'IA directionnelle 2D ne monte pas) ou vole.
+    from engine.phase_handlers.movement_handlers import squad_descent_penalty_subhex
+    budget = max(0, budget - squad_descent_penalty_subhex(game_state, squad_id))
     constraints: Dict[str, Any] = {"budget_per_model": budget}
     if extra_constraints:
         constraints.update(extra_constraints)

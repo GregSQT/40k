@@ -268,6 +268,61 @@ def _fly_traversal_active(game_state: Dict[str, Any], unit: Dict[str, Any], unit
     return str(unit_id) in game_state.get("units_took_to_skies", set())
 
 
+def squad_descent_penalty_subhex(game_state: Dict[str, Any], squad_id: str) -> int:
+    """Coût de descente (§13.06) à retrancher du budget d'un squad move RIGIDE (destination sol).
+
+    En squad move la destination est toujours le sol : une figurine partant d'un étage (niveau >= 1)
+    doit descendre. On pénalise TOUTE l'escouade du coût de descente de la figurine la plus haute
+    (max des hauteurs) — le move rigide gardant un delta unique, le pire cas dicte la limite commune,
+    afin qu'aucune fig ne gagne la distance verticale gratuitement.
+
+    Retourne 0 si :
+    - l'unité vole (``_fly_traversal_active`` : FLY + take-to-the-skies déclaré, §21.03) → pas de coût
+      vertical, aligné sur ``ignore_vertical_cost`` du champ multi-niveaux ;
+    - aucune figurine vivante n'est en hauteur (niveau >= 1) → no-op (cas courant tout-au-sol).
+
+    Unité : subhexes (comme le budget MOVE). Coût = hauteur absolue du niveau × inches_to_subhex,
+    arrondi au subhex supérieur (conservateur : ne jamais sous-facturer la descente).
+    """
+    unit = get_unit_by_id(game_state, squad_id)
+    if unit is None:
+        return 0
+    if _fly_traversal_active(game_state, unit, squad_id):
+        return 0
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    inches_to_subhex = int(require_key(game_state, "inches_to_subhex"))
+    terrain_areas = game_state.get("terrain_areas", [])  # get allowed (peut être vide)
+    # Hauteur ABSOLUE (pouces) par niveau — même source que _multilevel_floor_destinations.
+    height_inches_by_level: Dict[int, float] = {0: 0.0}
+    for a in terrain_areas:
+        for fl in a.get("floors", []):  # get allowed
+            lv = int(fl["level"])
+            hi = float(fl["height_inches"])
+            if lv in height_inches_by_level and abs(height_inches_by_level[lv] - hi) > 1e-6:
+                raise ValueError(
+                    f"squad_descent_penalty_subhex: niveau {lv} avec hauteurs incohérentes "
+                    f"({height_inches_by_level[lv]} vs {hi})"
+                )
+            height_inches_by_level[lv] = hi
+    max_cost = 0
+    for mid in squad_models.get(squad_id, []):  # get allowed
+        m = models_cache.get(mid)
+        if m is None:
+            continue
+        if int(m.get("HP_CUR", 0)) <= 0:  # get allowed
+            continue
+        lv = int(require_key(m, "level"))
+        if lv <= 0:
+            continue
+        if lv not in height_inches_by_level:
+            raise KeyError(f"squad_descent_penalty_subhex: fig {mid} niveau {lv} sans hauteur terrain")
+        cost = int(math.ceil(height_inches_by_level[lv] * inches_to_subhex))
+        if cost > max_cost:
+            max_cost = cost
+    return max_cost
+
+
 def _movement_engagement_violates(
     game_state: Dict[str, Any],
     mover: Dict[str, Any],
@@ -2209,6 +2264,25 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     # QUE si le joueur a déclaré le vol. Logique partagée via _fly_traversal_active.
     _fly_active = _fly_traversal_active(game_state, unit, unit_id)
 
+    # Squad move rigide (destination sol) : si des figs partent de l'étage, retrancher le coût de
+    # descente de la plus haute (§13.06) à TOUT le squad. No-op si fly actif ou tout au sol. Si le
+    # budget ne couvre pas la descente, le squad move est impossible → pool vide (aucune destination).
+    if not _fly_active:
+        _descent_pen = squad_descent_penalty_subhex(game_state, unit_id)
+        if _descent_pen > 0:
+            if _descent_pen >= move_range:
+                if read_only:
+                    return []
+                game_state["valid_move_destinations_pool"] = []
+                game_state["valid_move_destinations_pool_by_level"] = {0: []}
+                game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
+                game_state["move_preview_footprint_zone"] = set()
+                game_state["move_preview_border"] = []
+                if not game_state.get("gym_training_mode"):
+                    _sync_move_preview_mask_loops(game_state, set())
+                return []
+            move_range = move_range - _descent_pen
+
     # FLY units: BFS ignoring walls/occupation for traversal.
     # Only destination validation checks walls, occupation and engagement zone.
     # This replaces the O(cols×rows) scan with O(reachable) BFS.
@@ -3904,7 +3978,22 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     unit_col, unit_row = require_unit_position(unit, game_state)
     if unit_col != dest_col or unit_row != dest_row:
         return False, {"error": "position_update_failed"}
-    
+
+    # Squad move rigide = destination TOUJOURS au sol. translate_squad_to_destination ne met à jour
+    # que col/row (jamais le niveau) → resynchroniser level=0 sur toutes les figs vivantes du squad,
+    # sinon une fig partie de l'étage resterait marquée en hauteur alors qu'elle est au sol (13.06).
+    _mc_lvl = require_key(game_state, "models_cache")
+    _sq_lvl = require_key(game_state, "squad_models")
+    for _mid in _sq_lvl.get(str(unit["id"]), []):  # get allowed
+        _m = _mc_lvl.get(_mid)
+        if _m is None or int(_m.get("HP_CUR", 0)) <= 0:  # get allowed
+            continue
+        _m["level"] = 0
+    _uc_lvl = require_key(game_state, "units_cache").get(str(unit["id"]))
+    if _uc_lvl is not None:
+        _uc_lvl["level"] = 0
+    unit["level"] = 0
+
     # DEBUG: Log exact values before using unit coordinates
     from engine.game_utils import add_console_log, safe_print
     episode = game_state.get('episode_number', '?')
