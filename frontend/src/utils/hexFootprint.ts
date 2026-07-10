@@ -151,6 +151,88 @@ export function unitFootprintHexKeys(unit: {
 }
 
 /**
+ * Sommets d'un plancher (col,row sub-hex) projetés dans le repère ``hexCenter`` (R=1),
+ * miroir exact de ``engine.hex_utils._hex_center`` (même repère que le rendu du voile d'étage,
+ * ``toPixelT``, et que ``round_base_radius_norm``). À calculer une fois par plancher, puis passer
+ * à {@link roundBaseOverlapsAnyPolygon}.
+ */
+export function projectPolygonToHexCenter(
+  vertices: ReadonlyArray<readonly [number, number]>
+): Array<[number, number]> {
+  return vertices.map(([c, r]) => hexCenter(c, r));
+}
+
+/** Distance² minimale point→segment (miroir engine.hex_utils._point_segment_dist_sq). */
+function pointSegmentDistSq(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number
+): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const segSq = dx * dx + dy * dy;
+  if (segSq <= 0) return (px - ax) ** 2 + (py - ay) ** 2;
+  let t = ((px - ax) * dx + (py - ay) * dy) / segSq;
+  if (t < 0) t = 0;
+  else if (t > 1) t = 1;
+  const qx = ax + t * dx;
+  const qy = ay + t * dy;
+  return (px - qx) ** 2 + (py - qy) ** 2;
+}
+
+/** Point dans polygone (paires [x,y], repère hexCenter) — miroir engine.hex_utils._point_in_polygon. */
+function pointInPolygonPairs(
+  px: number,
+  py: number,
+  poly: ReadonlyArray<readonly [number, number]>
+): boolean {
+  let inside = false;
+  const n = poly.length;
+  for (let i = 0, j = n - 1; i < n; j = i, i++) {
+    const [xi, yi] = poly[i]!;
+    const [xj, yj] = poly[j]!;
+    const dy = yj - yi;
+    if (dy === 0) continue;
+    const intersect = yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / dy + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * True si le DISQUE d'un socle rond (centre = ``hexCenter(col,row)``, rayon
+ * ``(baseSize/2)*FOOTPRINT_SIZE_SCALE``) chevauche ou TOUCHE au moins un des ``polys`` (déjà
+ * projetés via {@link projectPolygonToHexCenter}). Miroir strict de
+ * ``engine.hex_utils.disc_overlaps_polygon`` (centre dans le polygone OU arête à distance ``<= r`` :
+ * la tangence compte comme contact). Sert à détecter qu'une fig au sol est sous l'empreinte d'un
+ * étage, avec la MÊME géométrie que le voile dessiné et que la résolution §13.06 backend.
+ */
+export function roundBaseOverlapsAnyPolygon(
+  col: number,
+  row: number,
+  baseSize: number,
+  polys: ReadonlyArray<ReadonlyArray<readonly [number, number]>>
+): boolean {
+  const [cx, cy] = hexCenter(col, row);
+  const r = (baseSize / 2) * FOOTPRINT_SIZE_SCALE;
+  const rSq = r * r;
+  for (const poly of polys) {
+    if (poly.length < 3) continue;
+    if (pointInPolygonPairs(cx, cy, poly)) return true;
+    const n = poly.length;
+    for (let i = 0, j = n - 1; i < n; j = i, i++) {
+      const [ax, ay] = poly[j]!;
+      const [bx, by] = poly[i]!;
+      if (pointSegmentDistSq(cx, cy, ax, ay, bx, by) <= rSq) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Dilate l’empreinte sur le plateau (voisins 6 — même sémantique que engine.hex_utils.dilate_hex_set_unbounded,
  * mais hexes bornés au plateau pour l’affichage).
  */

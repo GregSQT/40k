@@ -3,7 +3,7 @@ import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAuthSession } from "../auth/authStorage";
 import type { GameMode, PlayerId, Unit } from "../types";
-import type { DiceValue, HiddenDetectionInfo, Weapon } from "../types/game";
+import type { DiceValue, HiddenDetectionInfo, UnitModel, Weapon } from "../types/game";
 import {
   CROSS_ACTION_LOG_SUPPRESS_MS,
   dedupeActionLogBatch,
@@ -208,6 +208,8 @@ export interface APIGameState {
     UNIT_KEYWORDS: Array<{
       keywordId: string;
     }>;
+    // Composition par-figurine (profils leader/sergent/spécial) : source backend enhanced_unit["models"].
+    models?: UnitModel[];
   }>;
   current_player: number;
   phase: string;
@@ -6714,7 +6716,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const lvl = currentLevelRef?.current ?? 0;
       const models: Record<string, { col: number; row: number; level?: number }> = {};
       for (const [mid, c, r, l] of planArr) {
-        models[String(mid)] = { col: Number(c), row: Number(r), level: l != null ? Number(l) : lvl };
+        models[String(mid)] = {
+          col: Number(c),
+          row: Number(r),
+          level: l != null ? Number(l) : lvl,
+        };
       }
       pileInModelPoolRef.current = new Set();
       pileInModelMaskLoopsRef.current = null;
@@ -6801,9 +6807,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const plan = pileInMovePlanRef.current;
     if (!plan?.canValidate) return;
     const lvl = currentLevelRef?.current ?? 0;
-    const planArr = Object.entries(plan.models).map(
-      ([mid, p]) => [mid, p.col, p.row, p.level ?? lvl]
-    );
+    const planArr = Object.entries(plan.models).map(([mid, p]) => [
+      mid,
+      p.col,
+      p.row,
+      p.level ?? lvl,
+    ]);
     try {
       await executeAction({ action: "commit_pile_in_plan", plan: planArr, level: lvl });
       pileInModelPoolRef.current = new Set();
@@ -6942,7 +6951,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // Étages (§13.06, miroir move) : niveau de VUE courant + niveau par-fig (pose conservée).
       const lvl = currentLevelRef?.current ?? 0;
       const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row, p.level ?? lvl]);
-      const action: Record<string, unknown> = { action: "consolidation_plan_state", plan, level: lvl };
+      const action: Record<string, unknown> = {
+        action: "consolidation_plan_state",
+        plan,
+        level: lvl,
+      };
       if (selectedModel != null) action.selected_model = selectedModel;
       const result = await postEngineQuery(action);
       if (!result) throw new Error("consolidation_plan_state: réponse vide");
@@ -6962,7 +6975,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const lvl = currentLevelRef?.current ?? 0;
       const models: Record<string, { col: number; row: number; level?: number }> = {};
       for (const [mid, c, r, l] of planArr) {
-        models[String(mid)] = { col: Number(c), row: Number(r), level: l != null ? Number(l) : lvl };
+        models[String(mid)] = {
+          col: Number(c),
+          row: Number(r),
+          level: l != null ? Number(l) : lvl,
+        };
       }
       consolidationModelPoolRef.current = new Set();
       consolidationModelMaskLoopsRef.current = null;
@@ -6991,9 +7008,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const tid = String(targetId);
       if (!plan.engagingCandidates.includes(tid)) return;
       const lvl = currentLevelRef?.current ?? 0;
-      const planArr = Object.entries(plan.models).map(
-        ([mid, p]) => [mid, p.col, p.row, p.level ?? lvl]
-      );
+      const planArr = Object.entries(plan.models).map(([mid, p]) => [
+        mid,
+        p.col,
+        p.row,
+        p.level ?? lvl,
+      ]);
       const result = await postEngineQuery({
         action: "consolidation_select_target",
         targetId: tid,
@@ -7015,9 +7035,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const oid = String(objectiveId);
       if (!plan.objectiveCandidates.includes(oid)) return;
       const lvl = currentLevelRef?.current ?? 0;
-      const planArr = Object.entries(plan.models).map(
-        ([mid, p]) => [mid, p.col, p.row, p.level ?? lvl]
-      );
+      const planArr = Object.entries(plan.models).map(([mid, p]) => [
+        mid,
+        p.col,
+        p.row,
+        p.level ?? lvl,
+      ]);
       const result = await postEngineQuery({
         action: "consolidation_select_objective",
         objectiveId: oid,
@@ -7080,9 +7103,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const plan = consolidationMovePlanRef.current;
     if (!plan?.canValidate) return;
     const lvl = currentLevelRef?.current ?? 0;
-    const planArr = Object.entries(plan.models).map(
-      ([mid, p]) => [mid, p.col, p.row, p.level ?? lvl]
-    );
+    const planArr = Object.entries(plan.models).map(([mid, p]) => [
+      mid,
+      p.col,
+      p.row,
+      p.level ?? lvl,
+    ]);
     try {
       await executeAction({ action: "commit_consolidation_plan", plan: planArr, level: lvl });
       consolidationModelPoolRef.current = new Set();

@@ -32,7 +32,7 @@ function buildKey(
   fightSubphase: FightSubPhase | undefined,
   deploymentStarted: boolean,
   deploymentPlaced: boolean,
-  moveModelSelected: boolean,
+  moveModelSelected: boolean
 ): string | null {
   if (phase === "deployment") {
     if (!deploymentStarted) return "deployment.not_started";
@@ -67,7 +67,7 @@ export function HelperPanel({
     fightSubphase,
     deploymentStarted,
     deploymentPlaced,
-    moveModelSelected,
+    moveModelSelected
   );
   const entry = key === null ? undefined : TEXTS[key];
 

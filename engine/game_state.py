@@ -901,7 +901,7 @@ class GameStateManager:
                 # Niveau vertical par-figurine (§2.5, escouade répartie sur plusieurs étages).
                 # 'level' optionnel = sol (0). Sans recopie ici, build_units_cache retombe sur le
                 # niveau ancre de l'unité et perd le level déclaré par modèle dans le scénario.
-                m_level = _validate_level(spec.get("level", 0), unit_data["id"])
+                m_level = _validate_level(spec.get("level", 0), unit_data["id"])  # get allowed (champ optionnel : level absent = sol)
                 m_spec: Dict[str, Any] = {"col": m_norm_col, "row": m_norm_row, "level": m_level}
                 model_unit_type = spec.get("unit_type")
                 if model_unit_type is not None:

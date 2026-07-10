@@ -199,7 +199,7 @@ def generate_compact_formation(
     restantes sont posées sur la 1re case in-bounds ne CHEVAUCHANT PAS une sœur déjà
     posée (zone/mur/autres unités ignorés → signalées rouge par le preview, à
     repositionner) : le squad est affiché EN ENTIER près du clic, sans empilement de
-    socles (pas de fallback masquant un placement hors-règle).
+    socles (aucun placement hors-règle n'est masqué).
     """
     from collections import deque
     from engine.hex_utils import get_neighbors

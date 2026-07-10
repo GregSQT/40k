@@ -42,7 +42,9 @@ import {
   isFootprintOverlapping,
   minHexDistanceBetweenFootprintKeySets,
   pixelToHex,
+  projectPolygonToHexCenter,
   resolveBaseSizeForUnitDisplay,
+  roundBaseOverlapsAnyPolygon,
   squadFootprintHexKeysFromModelCenters,
   unitFootprintHexKeys,
 } from "../utils/hexFootprint";
@@ -2110,6 +2112,41 @@ export default function Board({
     for (const set of floorHexKeysByLevel.values()) for (const k of set) u.add(k);
     return u;
   }, [floorHexKeysByLevel]);
+  // Polygones d'étage par niveau (repère hexCenter), miroir de ``floorHexKeysByLevel`` mais géométrie
+  // CONTINUE : sert au test « socle rond sous l'empreinte » (disc↔polygone euclidien), aligné pixel
+  // pour pixel sur le voile dessiné (BoardDisplay, vertices) et sur ``resolve_model_floor_level``
+  // backend (§13.06). Les socles non-ronds gardent la méthode hex (floorHexKeysByLevel).
+  const floorPolysByLevel = useMemo(() => {
+    const m = new Map<number, Array<Array<[number, number]>>>();
+    const zones = boardConfig?.terrain_zones;
+    if (!Array.isArray(zones)) return m;
+    for (const z of zones) {
+      const floors = (
+        z as { floors?: Array<{ level?: number; vertices?: Array<[number, number]> }> }
+      ).floors;
+      if (!Array.isArray(floors)) continue;
+      for (const f of floors) {
+        if (typeof f?.level !== "number" || !Array.isArray(f.vertices) || f.vertices.length < 3)
+          continue;
+        let arr = m.get(f.level);
+        if (!arr) {
+          arr = [];
+          m.set(f.level, arr);
+        }
+        arr.push(projectPolygonToHexCenter(f.vertices));
+      }
+    }
+    return m;
+  }, [boardConfig?.terrain_zones]);
+  // Union des polygones de TOUS les planchers (tous niveaux), pendant euclidien de ``allFloorHexKeys``.
+  // Une fig « liée à une structure à étages » (socle chevauchant ≥1 plancher, quel que soit son niveau)
+  // est ghostée en vue mono-niveau si elle n'est pas au niveau affiché — bidirectionnel (vue sol ghoste
+  // les figs d'étage, vue étage ghoste les figs au sol sous l'empreinte).
+  const allFloorPolys = useMemo(() => {
+    const out: Array<Array<[number, number]>> = [];
+    for (const arr of floorPolysByLevel.values()) for (const p of arr) out.push(p);
+    return out;
+  }, [floorPolysByLevel]);
   // Clamp : si le niveau courant dépasse le max (ex. changement de board), redescendre au sol.
   useEffect(() => {
     if (currentLevel > maxFloorLevel) setCurrentLevel(0);
@@ -9728,18 +9765,30 @@ export default function Board({
           }
           return levelByModel?.[mid] ?? unitLevel;
         });
-        // Vue mono-niveau : une fig est ghostée UNIQUEMENT si (a) elle n'est pas au niveau affiché ET
-        // (b) son empreinte chevauche au moins un plancher (fig liée à une structure à étages). Une fig
-        // en terrain découvert reste affichée normalement quel que soit l'étage sélectionné.
+        // Vue mono-niveau : une fig est ghostée UNIQUEMENT si (a) elle n'est pas au niveau AFFICHÉ ET
+        // (b) son socle chevauche au moins un plancher (fig « liée à une structure à étages ») — test
+        // bidirectionnel TOUS niveaux (cf. allFloorPolys / allFloorHexKeys) : vue sol ghoste les figs
+        // d'étage, vue étage ghoste les figs au sol sous l'empreinte. Géométrie alignée sur le voile
+        // dessiné (polygone, BoardDisplay) et sur §13.06 backend (resolve_model_floor_level) : socle
+        // ROND → disque↔polygone euclidien (roundBaseOverlapsAnyPolygon, miroir disc_overlaps_polygon) ;
+        // socle non-rond → empreinte hex ∩ hexes de plancher. Fig en terrain découvert : jamais ghostée.
         const modelLevelGhost: boolean[] = modelLevels.map((lv, idx) => {
           if (lv === currentLevel) return false;
-          if (allFloorHexKeys.size === 0) return false;
           const [pc, pr] = modelPositions[idx];
           const meta = modelMetas[idx];
+          const shape = meta?.BASE_SHAPE ?? unitBaseShape;
+          if (shape === "round") {
+            if (allFloorPolys.length === 0) return false;
+            const size = resolveBaseSizeForUnitDisplay({
+              BASE_SIZE: meta?.BASE_SIZE ?? unitBaseSize,
+            });
+            return roundBaseOverlapsAnyPolygon(pc, pr, size, allFloorPolys);
+          }
+          if (allFloorHexKeys.size === 0) return false;
           const fpKeys = unitFootprintHexKeys({
             col: pc,
             row: pr,
-            BASE_SHAPE: meta?.BASE_SHAPE ?? unitBaseShape,
+            BASE_SHAPE: shape,
             BASE_SIZE: meta?.BASE_SIZE ?? unitBaseSize,
           });
           for (const k of fpKeys) if (allFloorHexKeys.has(k)) return true;

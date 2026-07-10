@@ -1948,7 +1948,7 @@ def _charge_model_climb_reachable_floor_cells(
     return _charge_model_multilevel_reachable_cells(
         game_state, unit, squad_id, model, start_pos, budget_subhex, {view_level},
         ground_obstacles, terrain_areas, start_level=start_level,
-    ).get(view_level, {})
+    ).get(view_level, {})  # get allowed (niveau inatteignable = aucune case)
 
 
 def _compute_plan_context(
@@ -2182,7 +2182,7 @@ def _compute_plan_context(
                 _gd = _charge_model_multilevel_reachable_cells(
                     game_state, unit, str(unit_id), sib, (sc, sr), int(budget), {0},
                     path_blocked, _terrain_areas_ctx, start_level=_start_eff,
-                ).get(0, {})
+                ).get(0, {})  # get allowed (niveau inatteignable = aucune case)
                 reach_by_model[m] = list(_gd.keys())
                 dist_by_model[m] = dict(_gd)
                 dist_by_model[m][(sc, sr)] = 0
@@ -2403,7 +2403,7 @@ def _compute_plan_context(
             fdist = _charge_model_climb_reachable_floor_cells(
                 game_state, unit, str(unit_id), sib,
                 (int(sib["col"]), int(sib["row"])), int(budget), int(view_level),
-                _ground_obs, terrain_areas, start_level=start_eff_by_model.get(m, 0),
+                _ground_obs, terrain_areas, start_level=start_eff_by_model.get(m, 0),  # get allowed (modèle non classé = sol)
             )
             if fdist:
                 floor_reach_by_model[m] = list(fdist.keys())

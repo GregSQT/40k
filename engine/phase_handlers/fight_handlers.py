@@ -70,6 +70,8 @@ from .shared_utils import (
     _union_weapons,
     _enemy_squad_ids,
     _synth_model_entry,
+    MovePlan,
+    MovePlanEntry,
 )
 
 _ADJACENT_EDGE_GAP_TOLERANCE_NORM = ENGAGEMENT_NORM_HEX_WIDTH
@@ -3512,7 +3514,7 @@ def _fight_fig_effective_level(entry: Dict[str, Any], model_id: str) -> int:
     lbm = entry.get("level_by_model")
     if lbm and model_id in lbm:
         return int(lbm[model_id])
-    return int(entry.get("level", 0))
+    return int(entry.get("level", 0))  # get allowed (champ optionnel : level absent = sol)
 
 
 def _fight_model_climb_reachable_floor_cells(*args: Any, **kwargs: Any) -> List[Tuple[int, int]]:
@@ -3581,8 +3583,8 @@ def _fight_pile_in_build_model_pool(
     wall_hexes = game_state.get("wall_hexes", set())
     player = int(model["player"])
     units_cache = require_key(game_state, "units_cache")
-    terrain_areas = game_state.get("terrain_areas", [])
-    _orient = int(unit.get("orientation", 0))
+    terrain_areas = game_state.get("terrain_areas", [])  # get allowed (champ optionnel : board sans terrain)
+    _orient = int(unit.get("orientation", 0))  # get allowed (champ optionnel : orientation absente = 0)
     _view_level = int(view_level or 0)
 
     closest = {str(t) for t in closest_tier_ids}
@@ -3624,7 +3626,7 @@ def _fight_pile_in_build_model_pool(
                     _charge_model_socle(game_state, _bm_entry, int(mc), int(mr)),
                 ))
         else:
-            blocker_socles.append((int(entry.get("level", 0)),
+            blocker_socles.append((int(entry.get("level", 0)),  # get allowed (champ optionnel : level absent = sol)
                 Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
                       col=int(entry["col"]), row=int(entry["row"]), fp=cells)))
     if not target_entries:
@@ -3646,10 +3648,10 @@ def _fight_pile_in_build_model_pool(
         if provisional_plan and str(mid) in provisional_plan:
             _pv = provisional_plan[str(mid)]
             pc, pr = int(_pv[0]), int(_pv[1])
-            _sib_req = int(_pv[2]) if len(_pv) >= 3 else int(sib.get("level", 0))
+            _sib_req = int(_pv[2]) if len(_pv) >= 3 else int(sib.get("level", 0))  # get allowed (champ optionnel : level absent = sol)
         else:
             pc, pr = int(sib["col"]), int(sib["row"])
-            _sib_req = int(sib.get("level", 0))
+            _sib_req = int(sib.get("level", 0))  # get allowed (champ optionnel : level absent = sol)
         _sib_eff = resolve_model_floor_level(
             pc, pr, sib["BASE_SHAPE"], sib["BASE_SIZE"], _orient, _sib_req, terrain_areas
         )
@@ -3665,7 +3667,7 @@ def _fight_pile_in_build_model_pool(
     # cases du plancher atteignables avec le coût vertical, seedées au niveau effectif du mover
     # (source unique move : reachable_multilevel_field). Niveau EFFECTIF de destination = view_level.
     if _view_level >= 1:
-        present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})
+        present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})  # get allowed (champ optionnel : area sans étage)
         if _view_level not in present:
             return empty
         from engine.game_state import unit_can_occupy_upper_floor
@@ -3673,7 +3675,7 @@ def _fight_pile_in_build_model_pool(
             return empty  # §13.06 : ne peut pas finir en hauteur
         start_eff = resolve_model_floor_level(
             start_col, start_row, model["BASE_SHAPE"], model["BASE_SIZE"], _orient,
-            int(model.get("level", 0)), terrain_areas
+            int(model.get("level", 0)), terrain_areas  # get allowed (champ optionnel : level absent = sol)
         )
         _ground_obs = set(wall_set) | _low_clear | _enemy_ground | build_occupied_positions_set(
             game_state, exclude_unit_id=squad_id, level=0
@@ -3691,7 +3693,7 @@ def _fight_pile_in_build_model_pool(
         # un étage, mais certaines unités ont un budget plus grand → descente facturée comme le move.
         _start_eff = resolve_model_floor_level(
             start_col, start_row, model["BASE_SHAPE"], model["BASE_SIZE"], _orient,
-            int(model.get("level", 0)), terrain_areas
+            int(model.get("level", 0)), terrain_areas  # get allowed (champ optionnel : level absent = sol)
         )
         if _start_eff >= 1:
             from engine.game_state import unit_can_occupy_upper_floor
@@ -3791,7 +3793,7 @@ def _fight_pile_in_closest_tier_ids(
 def _fight_pile_in_preview_plan(
     game_state: Dict[str, Any],
     squad_id: str,
-    plan: List[Tuple[str, ...]],
+    plan: MovePlan,
     closest_tier_ids: List[str],
     engaged_before_ids: List[str],
 ) -> Dict[str, Any]:
@@ -3827,11 +3829,11 @@ def _fight_pile_in_preview_plan(
         return empty
     models_cache = require_key(game_state, "models_cache")
 
-    def _plan_level(entry: Tuple[str, ...]) -> int:
+    def _plan_level(entry: MovePlanEntry) -> int:
         if len(entry) >= 4 and entry[3] is not None:
             return int(entry[3])
         m = models_cache.get(str(entry[0]))
-        return int(m.get("level", 0)) if m else 0
+        return int(m.get("level", 0)) if m else 0  # get allowed (champ optionnel : level absent = sol)
 
     norm = [(str(e[0]), int(e[1]), int(e[2]), _plan_level(e)) for e in plan]
     n = len(norm)
@@ -3948,7 +3950,7 @@ def _fight_pile_in_model_plan_state(
         for m, v in (provisional_plan or {}).items()
     }
     origin = {
-        m: (int(models_cache[m]["col"]), int(models_cache[m]["row"]), int(models_cache[m].get("level", 0)))
+        m: (int(models_cache[m]["col"]), int(models_cache[m]["row"]), int(models_cache[m].get("level", 0)))  # get allowed (champ optionnel : level absent = sol)
         for m in alive
     }
 
@@ -4028,7 +4030,7 @@ def _fight_pile_in_model_plan_state(
 
 
 def _fight_pile_in_commit_plan(
-    game_state: Dict[str, Any], unit: Dict[str, Any], plan: List[Tuple[str, int, int]]
+    game_state: Dict[str, Any], unit: Dict[str, Any], plan: MovePlan
 ) -> None:
     """Pose le plan pile-in par-figurine (``commit_move`` type ``pile_in``) + resync l'ancre de l'unité."""
     from .shared_utils import commit_move, set_unit_coordinates
@@ -4717,8 +4719,8 @@ def _fight_consolidation_build_model_pool(
     wall_hexes = game_state.get("wall_hexes", set())
     player = int(model["player"])
     units_cache = require_key(game_state, "units_cache")
-    terrain_areas = game_state.get("terrain_areas", [])
-    _orient = int(unit.get("orientation", 0))
+    terrain_areas = game_state.get("terrain_areas", [])  # get allowed (champ optionnel : board sans terrain)
+    _orient = int(unit.get("orientation", 0))  # get allowed (champ optionnel : orientation absente = 0)
     _view_level = int(view_level or 0)
 
     closest = {str(t) for t in tier} if tier_kind == "enemy" else set()
@@ -4759,7 +4761,7 @@ def _fight_consolidation_build_model_pool(
                     _charge_model_socle(game_state, _bm_entry, int(mc), int(mr)),
                 ))
         else:
-            blocker_socles.append((int(entry.get("level", 0)),
+            blocker_socles.append((int(entry.get("level", 0)),  # get allowed (champ optionnel : level absent = sol)
                 Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
                       col=int(entry["col"]), row=int(entry["row"]), fp=cells)))
     if tier_kind == "enemy" and not target_entries:
@@ -4781,10 +4783,10 @@ def _fight_consolidation_build_model_pool(
         if provisional_plan and str(mid) in provisional_plan:
             _pv = provisional_plan[str(mid)]
             pc, pr = int(_pv[0]), int(_pv[1])
-            _sib_req = int(_pv[2]) if len(_pv) >= 3 else int(sib.get("level", 0))
+            _sib_req = int(_pv[2]) if len(_pv) >= 3 else int(sib.get("level", 0))  # get allowed (champ optionnel : level absent = sol)
         else:
             pc, pr = int(sib["col"]), int(sib["row"])
-            _sib_req = int(sib.get("level", 0))
+            _sib_req = int(sib.get("level", 0))  # get allowed (champ optionnel : level absent = sol)
         _sib_eff = resolve_model_floor_level(
             pc, pr, sib["BASE_SHAPE"], sib["BASE_SIZE"], _orient, _sib_req, terrain_areas
         )
@@ -4800,7 +4802,7 @@ def _fight_consolidation_build_model_pool(
 
     # --- Candidats (col,row) selon le niveau de VUE (§13.06), miroir pile-in ---------------------
     if _view_level >= 1:
-        present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})
+        present = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})  # get allowed (champ optionnel : area sans étage)
         if _view_level not in present:
             return empty
         from engine.game_state import unit_can_occupy_upper_floor
@@ -4808,7 +4810,7 @@ def _fight_consolidation_build_model_pool(
             return empty
         start_eff = resolve_model_floor_level(
             start_col, start_row, model["BASE_SHAPE"], model["BASE_SIZE"], _orient,
-            int(model.get("level", 0)), terrain_areas
+            int(model.get("level", 0)), terrain_areas  # get allowed (champ optionnel : level absent = sol)
         )
         _ground_obs = set(wall_set) | _low_clear | _enemy_ground | build_occupied_positions_set(
             game_state, exclude_unit_id=squad_id, level=0
@@ -4825,7 +4827,7 @@ def _fight_consolidation_build_model_pool(
         # (coût de DESCENTE §13.06), miroir pile-in. Budget conso > 3" possible → descente facturée.
         _start_eff = resolve_model_floor_level(
             start_col, start_row, model["BASE_SHAPE"], model["BASE_SIZE"], _orient,
-            int(model.get("level", 0)), terrain_areas
+            int(model.get("level", 0)), terrain_areas  # get allowed (champ optionnel : level absent = sol)
         )
         if _start_eff >= 1:
             from engine.game_state import unit_can_occupy_upper_floor
@@ -4905,7 +4907,7 @@ def _fight_consolidation_build_model_pool(
 def _fight_consolidation_preview_plan(
     game_state: Dict[str, Any],
     squad_id: str,
-    plan: List[Tuple[str, ...]],
+    plan: MovePlan,
     *,
     mode: str,
     tier_kind: str,
@@ -4948,11 +4950,11 @@ def _fight_consolidation_preview_plan(
         return empty
     models_cache = require_key(game_state, "models_cache")
 
-    def _plan_level(entry: Tuple[str, ...]) -> int:
+    def _plan_level(entry: MovePlanEntry) -> int:
         if len(entry) >= 4 and entry[3] is not None:
             return int(entry[3])
         m = models_cache.get(str(entry[0]))
-        return int(m.get("level", 0)) if m else 0
+        return int(m.get("level", 0)) if m else 0  # get allowed (champ optionnel : level absent = sol)
 
     norm = [(str(e[0]), int(e[1]), int(e[2]), _plan_level(e)) for e in plan]
     n = len(norm)
@@ -5090,7 +5092,7 @@ def _fight_consolidation_model_plan_state(
         for m, v in (provisional_plan or {}).items()
     }
     origin = {
-        m: (int(models_cache[m]["col"]), int(models_cache[m]["row"]), int(models_cache[m].get("level", 0)))
+        m: (int(models_cache[m]["col"]), int(models_cache[m]["row"]), int(models_cache[m].get("level", 0)))  # get allowed (champ optionnel : level absent = sol)
         for m in alive
     }
 
@@ -5213,7 +5215,7 @@ def _fight_consolidation_model_plan_state(
 
 
 def _fight_consolidation_commit_plan(
-    game_state: Dict[str, Any], unit: Dict[str, Any], plan: List[Tuple[str, int, int]]
+    game_state: Dict[str, Any], unit: Dict[str, Any], plan: MovePlan
 ) -> None:
     """Pose le plan de consolidation par-figurine (``commit_move`` type ``consolidation``) + resync l'ancre."""
     from .shared_utils import commit_move, set_unit_coordinates
@@ -5924,7 +5926,7 @@ def _fight_v11_manual_step(
             alive = [str(m) for m in require_key(squad_models, act_uid) if str(m) in models_cache]
             origin = {
                 m: (int(models_cache[m]["col"]), int(models_cache[m]["row"]),
-                    int(models_cache[m].get("level", 0)))
+                    int(models_cache[m].get("level", 0)))  # get allowed (champ optionnel : level absent = sol)
                 for m in alive
             }
             full_plan: List[Tuple[str, int, int, int]] = [
@@ -6321,7 +6323,7 @@ def _fight_v11_manual_step(
             alive = [str(m) for m in require_key(squad_models, act_uid) if str(m) in models_cache]
             origin = {
                 m: (int(models_cache[m]["col"]), int(models_cache[m]["row"]),
-                    int(models_cache[m].get("level", 0)))
+                    int(models_cache[m].get("level", 0)))  # get allowed (champ optionnel : level absent = sol)
                 for m in alive
             }
             full_plan: List[Tuple[str, int, int, int]] = [

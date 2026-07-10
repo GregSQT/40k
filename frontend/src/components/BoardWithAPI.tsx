@@ -3088,9 +3088,7 @@ export const BoardWithAPI: React.FC = () => {
                           border: isSelected
                             ? "1px solid transparent"
                             : `1px solid ${getIconBorderColor(player)}`,
-                          background: isSelected
-                            ? "rgba(8, 40, 22, 0.92)"
-                            : "rgba(0, 0, 0, 0.35)",
+                          background: isSelected ? "rgba(8, 40, 22, 0.92)" : "rgba(0, 0, 0, 0.35)",
                           boxShadow: isSelected ? HALO_GLOW : undefined,
                           outline: "none",
                           color: "white",
@@ -3312,60 +3310,60 @@ export const BoardWithAPI: React.FC = () => {
             </div>
           )}
           <div className="turn-phase-tracker-right">
-          <TurnPhaseTrackerWithTutorial
-            currentTurn={apiProps.gameState?.currentTurn ?? 1}
-            currentPhase={apiProps.gameState?.phase ?? "move"}
-            phases={
-              apiProps.gameState?.deployment_type === "active"
-                ? ["deployment", "command", "move", "shoot", "charge", "fight"]
-                : ["command", "move", "shoot", "charge", "fight"]
-            }
-            current_player={apiProps.gameState?.current_player}
-            onEndPhaseClick={isGameOver ? undefined : apiProps.onEndPhase}
-            showPileIn={
-              apiProps.gameState?.phase === "fight" &&
-              apiProps.gameState?.fight_subphase === "pile_in"
-            }
-            pileInPlayer={(() => {
-              const eligible = apiProps.gameState?.fight_eligible_units;
-              if (!eligible || eligible.length === 0) return undefined;
-              return apiProps.gameState?.units?.find((u) => String(u.id) === String(eligible[0]))
-                ?.player;
-            })()}
-            onEndPileIn={isGameOver ? undefined : apiProps.onEndPileIn}
-            showFightAtk={
-              apiProps.gameState?.phase === "fight" &&
-              apiProps.gameState?.fight_subphase !== "pile_in" &&
-              (apiProps.gameState?.fight_eligible_units?.length ?? 0) > 0 &&
-              apiProps.mode === "select" &&
-              !apiProps.gameState?.active_fight_unit
-            }
-            fightAtkPlayer={(() => {
-              const eligible = apiProps.gameState?.fight_eligible_units;
-              if (!eligible || eligible.length === 0) return undefined;
-              return apiProps.gameState?.units?.find((u) => String(u.id) === String(eligible[0]))
-                ?.player;
-            })()}
-            onFightAtk={
-              isGameOver
-                ? undefined
-                : () => {
-                    const eligible = apiProps.gameState?.fight_eligible_units;
-                    if (!eligible || eligible.length === 0) return;
-                    apiProps.onSelectUnit(Number(eligible[0]));
-                  }
-            }
-            onSkipFight={isGameOver ? undefined : apiProps.onSkipFight}
-            maxTurns={(() => {
-              if (!gameConfig?.game_rules?.max_turns) {
-                throw new Error(
-                  `max_turns not found in game configuration. Config structure: ${JSON.stringify(Object.keys(gameConfig || {}))}. Expected: gameConfig.game_rules.max_turns`
-                );
+            <TurnPhaseTrackerWithTutorial
+              currentTurn={apiProps.gameState?.currentTurn ?? 1}
+              currentPhase={apiProps.gameState?.phase ?? "move"}
+              phases={
+                apiProps.gameState?.deployment_type === "active"
+                  ? ["deployment", "command", "move", "shoot", "charge", "fight"]
+                  : ["command", "move", "shoot", "charge", "fight"]
               }
-              return gameConfig.game_rules.max_turns;
-            })()}
-            className=""
-          />
+              current_player={apiProps.gameState?.current_player}
+              onEndPhaseClick={isGameOver ? undefined : apiProps.onEndPhase}
+              showPileIn={
+                apiProps.gameState?.phase === "fight" &&
+                apiProps.gameState?.fight_subphase === "pile_in"
+              }
+              pileInPlayer={(() => {
+                const eligible = apiProps.gameState?.fight_eligible_units;
+                if (!eligible || eligible.length === 0) return undefined;
+                return apiProps.gameState?.units?.find((u) => String(u.id) === String(eligible[0]))
+                  ?.player;
+              })()}
+              onEndPileIn={isGameOver ? undefined : apiProps.onEndPileIn}
+              showFightAtk={
+                apiProps.gameState?.phase === "fight" &&
+                apiProps.gameState?.fight_subphase !== "pile_in" &&
+                (apiProps.gameState?.fight_eligible_units?.length ?? 0) > 0 &&
+                apiProps.mode === "select" &&
+                !apiProps.gameState?.active_fight_unit
+              }
+              fightAtkPlayer={(() => {
+                const eligible = apiProps.gameState?.fight_eligible_units;
+                if (!eligible || eligible.length === 0) return undefined;
+                return apiProps.gameState?.units?.find((u) => String(u.id) === String(eligible[0]))
+                  ?.player;
+              })()}
+              onFightAtk={
+                isGameOver
+                  ? undefined
+                  : () => {
+                      const eligible = apiProps.gameState?.fight_eligible_units;
+                      if (!eligible || eligible.length === 0) return;
+                      apiProps.onSelectUnit(Number(eligible[0]));
+                    }
+              }
+              onSkipFight={isGameOver ? undefined : apiProps.onSkipFight}
+              maxTurns={(() => {
+                if (!gameConfig?.game_rules?.max_turns) {
+                  throw new Error(
+                    `max_turns not found in game configuration. Config structure: ${JSON.stringify(Object.keys(gameConfig || {}))}. Expected: gameConfig.game_rules.max_turns`
+                  );
+                }
+                return gameConfig.game_rules.max_turns;
+              })()}
+              className=""
+            />
           </div>
         </>
       ) : (

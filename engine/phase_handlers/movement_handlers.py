@@ -2078,7 +2078,11 @@ def _multilevel_floor_destinations(
     # de ``ground_obstacles`` (qui durcit en bloquant les alliés). Garantit la cohérence avec le champ
     # pré-calculé injecté dans ``reachable_multilevel_field`` (mêmes obstacles → même champ sol).
     _reuse_ground = precomputed_ground_field is not None and precomputed_ground_obstacles is not None
-    _level0_obstacles = precomputed_ground_obstacles if _reuse_ground else set(ground_obstacles)
+    _level0_obstacles = (
+        precomputed_ground_obstacles
+        if _reuse_ground and precomputed_ground_obstacles is not None
+        else set(ground_obstacles)
+    )
     obstacles_by_level: Dict[int, Set[Tuple[int, int]]] = {0: _level0_obstacles}
     occupied_by_level: Dict[int, Set[Tuple[int, int]]] = {}
     for lv, fh in floor_hexes_by_level.items():
@@ -2872,7 +2876,7 @@ def _model_climb_reachable_floor_cells(
     return _model_multilevel_reachable_cells(
         game_state, unit, squad_id, model, start_pos, budget, {view_level},
         ground_obstacles, terrain_areas, start_level=start_level,
-    ).get(view_level, [])
+    ).get(view_level, [])  # get allowed (niveau inatteignable = aucune case)
 
 
 def movement_build_model_destinations_pool(
@@ -3231,8 +3235,8 @@ def movement_build_model_destinations_pool(
                 game_state, unit, squad_id, model, start_pos, budget, _targets,
                 _ground_obs, terrain_areas, start_level=start_level_eff,
             )
-            _ground_dests = _by_level.get(0, [])
-            _floor_dests = _by_level.get(view_level, []) if view_level >= 1 else []
+            _ground_dests = _by_level.get(0, [])  # get allowed (niveau inatteignable = aucune case)
+            _floor_dests = _by_level.get(view_level, []) if view_level >= 1 else []  # get allowed (niveau inatteignable = aucune case)
         else:
             # Mover au SOL, vue étage : comportement HISTORIQUE (sol libre planaire + montée facturée).
             # Sol : le BORD d'étage est géré par la clairance HEX (``_low_clear``), pas un test euclidien.
