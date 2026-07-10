@@ -289,19 +289,36 @@ def hex_line_iter(
     n = max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
     seen: Set[Tuple[int, int]] = set()
 
+    # Chemin chaud (~1,6 M d'itérations par preview de tir) : ``_lerp`` et ``cube_to_offset`` sont
+    # inlinés et les bornes hissées hors boucle. L'EXPRESSION reste `a + (b - a) * t` avec
+    # `t = i / n` recalculé à chaque point — surtout pas une accumulation incrémentale, dont la
+    # dérive flottante changerait le départage des lignes rasantes, donc le couvert (rule 13.06).
+    ax = x1 + 1e-6
+    ay = y1 + 1e-6
+    az = z1 - 2e-6
+    bx = (x2 + 1e-6) - ax
+    by = (y2 + 1e-6) - ay
+    bz = (z2 - 2e-6) - az
+
     for i in range(n + 1):
         t = i / n if n > 0 else 0.0
-        fx = _lerp(x1 + 1e-6, x2 + 1e-6, t)
-        fy = _lerp(y1 + 1e-6, y2 + 1e-6, t)
-        fz = _lerp(z1 - 2e-6, z2 - 2e-6, t)
+        fx = ax + bx * t
+        fy = ay + by * t
+        fz = az + bz * t
 
         rx = round(fx)
         ry = round(fy)
         rz = round(fz)
 
-        dx = abs(rx - fx)
-        dy = abs(ry - fy)
-        dz = abs(rz - fz)
+        dx = rx - fx
+        if dx < 0.0:
+            dx = -dx
+        dy = ry - fy
+        if dy < 0.0:
+            dy = -dy
+        dz = rz - fz
+        if dz < 0.0:
+            dz = -dz
         if dx > dy and dx > dz:
             rx = -ry - rz
         elif dy > dz:
@@ -309,10 +326,10 @@ def hex_line_iter(
         else:
             rz = -rx - ry
 
-        c, r = cube_to_offset(rx, ry, rz)
-        if (c, r) not in seen:
-            seen.add((c, r))
-            yield (c, r)
+        cell = (rx, rz + ((rx - (rx & 1)) >> 1))
+        if cell not in seen:
+            seen.add(cell)
+            yield cell
 
 
 def hex_line(
