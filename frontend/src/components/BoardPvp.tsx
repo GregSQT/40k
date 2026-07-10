@@ -110,10 +110,11 @@ const MOVE_PREVIEW_COVER_STATUS_DEBOUNCE_MS = 25;
 /**
  * Preview de tir per-figurine : un appel backend coûte ~300 ms à ~900 ms (build_unit_los_cache),
  * et le serveur sérialise les requêtes — une requête partie ne peut plus être annulée. Le débounce
- * doit donc dépasser l'intervalle entre deux hex d'un survol normal (~160-240 ms mesurés) pour
- * n'envoyer que la destination où le curseur se pose réellement.
+ * (trailing) évite d'envoyer les hex simplement traversés (~160-240 ms entre deux hex sur un survol
+ * mesuré). Il reste sous cet intervalle : les badges n'étant plus effacés pendant l'attente, une
+ * requête traversante coûte au pire un rafraîchissement de plus, jamais un clignotement.
  */
-const MOVE_PREVIEW_SHOOT_DEBOUNCE_MS = 180;
+const MOVE_PREVIEW_SHOOT_DEBOUNCE_MS = 120;
 
 function parseBackendLosPreviewCells(raw: unknown, fieldName: string): BackendLosPreviewCell[] {
   if (!Array.isArray(raw)) {
@@ -7163,7 +7164,8 @@ export default function Board({
       drawVisualCone(col, row);
       // Le clignotement doit refléter la case courante, jamais une case déjà quittée.
       // Cache par-case (keyé col,row) : hit → application immédiate (pas de flicker sur les cases
-      // déjà visitées) ; miss → on efface le blink périmé tout de suite, puis fetch.
+      // déjà visitées) ; miss → on efface le blink périmé tout de suite, puis fetch (les badges,
+      // eux, survivent jusqu'à la réponse — voir le bloc `else`).
       const cacheKey = [
         squadUnitIdStr,
         `${col},${row}`,
@@ -7178,10 +7180,14 @@ export default function Board({
         setMovePreviewLosTooFarById(cached.hiddenTooFarByUnitId);
         setMovePreviewLosDetectionInfoById(cached.hiddenDetectionInfoByUnitId);
       } else {
+        // Le blink est effacé sur-le-champ : un blink périmé désignerait une cible qui n'est plus
+        // tirable depuis cet hex (voile rouge / grisage trompeurs au moment de valider).
         setMovePreviewLosBlinkIds([]);
-        setMovePreviewLosCoverById({});
-        setMovePreviewLosTooFarById({});
-        setMovePreviewLosDetectionInfoById({});
+        // Les badges couvert / caché / detection, EUX, sont conservés jusqu'à la réponse : ils ne
+        // pilotent que du dessin (aucun handler, aucune action moteur ne les lit). Les vider ferait
+        // disparaître le badge à chaque hex neuf, pour le faire réapparaître ~900 ms plus tard —
+        // le clignotement lu comme « badge non dynamique ». On affiche donc le statut de l'hex
+        // précédent le temps du calcul, plutôt que rien.
       }
       scheduleShootBackend(col, row);
     };

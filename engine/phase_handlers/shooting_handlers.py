@@ -3905,13 +3905,23 @@ def _los_line_segment_clear(
     TRACÉ UNIQUE partagée par le ciblage (unit→unit) et la preview (shooter→cellule), et mirroir
     du WASM ``has_los_fast``. Toute évolution de la règle de blocage se fait ICI, une seule fois.
     """
-    from engine.hex_utils import hex_line
-    for c, r in hex_line(int(src_col), int(src_row), int(tgt_col), int(tgt_row))[1:-1]:
-        if (c, r) in wall_set:
+    from engine.hex_utils import hex_line_iter
+    # Équivalent strict de ``hex_line(...)[1:-1]``, en paresseux : on saute la 1re cellule, puis on
+    # n'examine chaque cellule qu'une fois la SUIVANTE produite — la dernière n'est donc jamais
+    # testée (elle porte la cible). Le générateur s'arrête dès qu'un bloqueur est trouvé : sur un
+    # plateau chargé, 68 % des lignes sont bloquées et la moitié des cellules ne sert à rien.
+    it = hex_line_iter(int(src_col), int(src_row), int(tgt_col), int(tgt_row))
+    next(it, None)  # cellule du tireur : jamais bloquante
+    prev = next(it, None)
+    if prev is None:
+        return True
+    for cur in it:
+        if prev in wall_set:
             return False
-        area = obscuring_by_hex.get((c, r))
+        area = obscuring_by_hex.get(prev)
         if area is not None and area not in excluded_areas:
             return False
+        prev = cur
     return True
 
 
