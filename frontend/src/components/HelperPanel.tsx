@@ -13,6 +13,8 @@ interface HelperPanelProps {
   deploymentStarted?: boolean;
   /** true quand l'unité en cours de déploiement a déjà été posée sur le plateau (1er clic fait). */
   deploymentPlaced?: boolean;
+  /** true quand une figurine a été sélectionnée (simple clic) dans le plan de move par-figurine. */
+  moveModelSelected?: boolean;
 }
 
 const TEXTS = helperTexts as Record<string, string | string[]>;
@@ -30,11 +32,17 @@ function buildKey(
   fightSubphase: FightSubPhase | undefined,
   deploymentStarted: boolean,
   deploymentPlaced: boolean,
+  moveModelSelected: boolean,
 ): string | null {
   if (phase === "deployment") {
     if (!deploymentStarted) return "deployment.not_started";
     // Unité sélectionnée mais pas encore posée : 1er clic attendu sur le plateau.
     if (mode === "deploymentMove" && !deploymentPlaced) return "deployment.placing";
+  }
+  // Unité activée en move (mode squadModelMove) mais aucune figurine encore sélectionnée :
+  // en attente du choix simple clic (figurine) / double clic (unité entière).
+  if (phase === "move" && mode === "squadModelMove" && !moveModelSelected) {
+    return "move.unit_activated";
   }
   if (phase === "fight") {
     if (!fightSubphase) return null;
@@ -49,10 +57,18 @@ export function HelperPanel({
   fightSubphase,
   deploymentStarted = true,
   deploymentPlaced = false,
+  moveModelSelected = false,
 }: HelperPanelProps) {
   if (!phase || !mode) return null;
 
-  const key = buildKey(phase, mode, fightSubphase, deploymentStarted, deploymentPlaced);
+  const key = buildKey(
+    phase,
+    mode,
+    fightSubphase,
+    deploymentStarted,
+    deploymentPlaced,
+    moveModelSelected,
+  );
   const entry = key === null ? undefined : TEXTS[key];
 
   if (entry === undefined) {

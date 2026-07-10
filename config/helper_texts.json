@@ -8,15 +8,17 @@
 
   "command.select": "Phase de commandement. Cliquez sur « End Phase » pour continuer.",
 
-  "move.select": "Activez une unité en cliquant dessus.",
-  "move.movePreview": [
-    "Cliquez sur une case accessible pour déplacer l'unité.",
-    "Cliquez à nouveau sur l'unité pour annuler."
+  "move.select": "Cliquez sur une unité pour l'activer.",
+  "move.unit_activated": [
+    "Simple clic : déplacez une figurine de l'unité.",
+    "Double clic : déplacez l'ensemble de l'unité."
   ],
-  "move.squadModelMove": "Déplacez chaque figurine de l'escouade, une par une.",
+  "move.movePreview": "Déplacez l'ensemble de l'unité.",
+  
+  "move.squadModelMove": "Déplacez cette figurine de l'escouade individuellement.",
   "move.advancePreview": "Advance : le déplacement est étendu du jet de dé. Choisissez une case.",
 
-  "shoot.select": "Activez une unité pour tirer en cliquant dessus.",
+  "shoot.select": "Cliquez sur une unité pour l'activer.",
   "shoot.attackPreview": "Sélectionnez une cible.",
   "shoot.targetPreview": [
     "Confirmez le tir sur cette cible, ou sélectionnez-en une autre.",
@@ -24,7 +26,7 @@
   ],
   "shoot.squadModelShoot": "Attribuez les tirs figurine par figurine, arme par arme.",
 
-  "charge.select": "Activez une unité pour déclarer une charge en cliquant dessus.",
+  "charge.select": "Cliquez sur une unité pour l'activer et déclarer une charge.",
   "charge.chargeTargetSelect": "Sélectionnez une ou plusieurs unités ennemies à charger.",
   "charge.chargePreview": "Jet de charge effectué. Déplacez l'unité vers l'engagement.",
   "charge.chargeModelMove": [
@@ -32,15 +34,15 @@
     "La première figurine doit finir au contact d'une unité ciblée."
   ],
 
-  "fight.pile_in.select": "Sélectionnez une unité pour son mouvement d'intervention (pile-in).",
+  "fight.pile_in.select": "Cliquez sur une unité pour l'activer et effectuer son mouvement de pile-in.",
   "fight.pile_in.pileInPreview": "Choisissez la destination du pile-in : chaque figurine doit se rapprocher de l'ennemi le plus proche.",
   "fight.pile_in.pileInModelMove": "Déplacez chaque figurine du pile-in, une par une.",
 
-  "fight.fight.select": "Sélectionnez une unité éligible pour combattre.",
+  "fight.fight.select": "Cliquez sur une unité pour l'activer et combattre.",
   "fight.fight.attackPreview": "Sélectionnez une unité ennemie à attaquer.",
   "fight.fight.targetPreview": "Confirmez l'attaque sur cette cible, ou sélectionnez-en une autre.",
 
-  "fight.consolidate.select": "Sélectionnez une unité pour sa consolidation.",
+  "fight.consolidate.select": "Cliquez sur une unité pour l'activer et effectuer sa consolidation.",
   "fight.consolidate.consolidationPreview": "Choisissez la destination de consolidation.",
   "fight.consolidate.consolidationModelMove": "Déplacez chaque figurine de la consolidation, une par une."
 }

@@ -54,7 +54,7 @@ import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import TutorialOverlay from "./TutorialOverlay";
 import UnitStatusBadges from "./UnitStatusBadges";
-import { UnitStatusTable } from "./UnitStatusTable";
+import { HALO_GLOW, UnitStatusTable } from "./UnitStatusTable";
 
 /** En-tête de colonne du roster picker (Faction / Roster / Description). */
 const pickerColHeaderStyle: React.CSSProperties = {
@@ -2242,7 +2242,6 @@ export const BoardWithAPI: React.FC = () => {
     const battleShockTestEnabledStr = localStorage.getItem("battleShockTestEnabled");
     const modeGuidesActivatedStr = localStorage.getItem(MODE_GUIDES_ACTIVATED_STORAGE_KEY);
     const deployIconBaseSizeBoundedStr = localStorage.getItem("deployIconBaseSizeBounded");
-    const deployShootLoSStr = localStorage.getItem("deployShootLoS");
     const shootPoolFastModeStr = localStorage.getItem("shootPoolFastMode");
     const logShowCoordsStr = localStorage.getItem("logShowCoords");
     const logShowTypeStr = localStorage.getItem("logShowType");
@@ -2278,7 +2277,6 @@ export const BoardWithAPI: React.FC = () => {
       deployIconBaseSizeBounded: deployIconBaseSizeBoundedStr
         ? JSON.parse(deployIconBaseSizeBoundedStr)
         : true,
-      deployShootLoS: deployShootLoSStr ? JSON.parse(deployShootLoSStr) : false,
       logShowCoords: logShowCoordsStr ? JSON.parse(logShowCoordsStr) : false,
       logShowType: logShowTypeStr ? JSON.parse(logShowTypeStr) : true,
       dynamicCoverStatus: dynamicCoverStatusStr ? JSON.parse(dynamicCoverStatusStr) : true,
@@ -2306,11 +2304,6 @@ export const BoardWithAPI: React.FC = () => {
   const handleToggleBattleShockTest = (value: boolean) => {
     setSettings((prev) => ({ ...prev, battleShockTestEnabled: value }));
     localStorage.setItem("battleShockTestEnabled", JSON.stringify(value));
-  };
-
-  const handleToggleDeployShootLoS = (value: boolean) => {
-    setSettings((prev) => ({ ...prev, deployShootLoS: value }));
-    localStorage.setItem("deployShootLoS", JSON.stringify(value));
   };
 
   const handleToggleDebugLoS = (value: boolean) => {
@@ -3093,11 +3086,13 @@ export const BoardWithAPI: React.FC = () => {
                           minHeight: "32px",
                           borderRadius: "6px",
                           border: isSelected
-                            ? "2px solid #7CFF7C"
+                            ? "1px solid transparent"
                             : `1px solid ${getIconBorderColor(player)}`,
                           background: isSelected
-                            ? "rgba(124, 255, 124, 0.2)"
+                            ? "rgba(8, 40, 22, 0.92)"
                             : "rgba(0, 0, 0, 0.35)",
+                          boxShadow: isSelected ? HALO_GLOW : undefined,
+                          outline: "none",
                           color: "white",
                           cursor: canInteractDeployment ? "pointer" : "not-allowed",
                           opacity: canInteractDeployment ? 1 : 0.55,
@@ -3312,6 +3307,7 @@ export const BoardWithAPI: React.FC = () => {
                 fightSubphase={apiProps.gameState?.fight_subphase}
                 deploymentStarted={testDeploymentStarted}
                 deploymentPlaced={apiProps.deployPlan?.placed}
+                moveModelSelected={apiProps.squadMovePlan?.activeModelId != null}
               />
             </div>
           )}
@@ -3390,7 +3386,7 @@ export const BoardWithAPI: React.FC = () => {
               border: "1px solid #555",
               borderRadius: "8px",
               padding: 8,
-              marginTop: -6,
+              marginTop: 0,
               marginBottom: 2,
             }}
           >
@@ -3511,7 +3507,7 @@ export const BoardWithAPI: React.FC = () => {
               border: "1px solid #555",
               borderRadius: "8px",
               padding: 8,
-              marginTop: -6,
+              marginTop: 0,
               marginBottom: 2,
             }}
           >
@@ -3695,7 +3691,7 @@ export const BoardWithAPI: React.FC = () => {
               border: "1px solid #555",
               borderRadius: "8px",
               padding: 8,
-              marginTop: -6,
+              marginTop: 0,
               marginBottom: 2,
             }}
           >
@@ -3871,7 +3867,7 @@ export const BoardWithAPI: React.FC = () => {
               border: "1px solid #555",
               borderRadius: "8px",
               padding: 8,
-              marginTop: -6,
+              marginTop: 0,
               marginBottom: 2,
             }}
           >
@@ -4092,7 +4088,7 @@ export const BoardWithAPI: React.FC = () => {
               border: "1px solid #555",
               borderRadius: "8px",
               padding: 8,
-              marginTop: -6,
+              marginTop: 0,
               marginBottom: 2,
             }}
           >
@@ -4133,7 +4129,7 @@ export const BoardWithAPI: React.FC = () => {
             border: "1px solid #555",
             borderRadius: "8px",
             padding: 8,
-            marginTop: -6,
+            marginTop: 0,
             marginBottom: 2,
           }}
         >
@@ -4240,7 +4236,7 @@ export const BoardWithAPI: React.FC = () => {
               border: "1px solid #555",
               borderRadius: "8px",
               padding: 8,
-              marginTop: -6,
+              marginTop: 0,
               marginBottom: 2,
             }}
           >
@@ -4456,7 +4452,7 @@ export const BoardWithAPI: React.FC = () => {
             border: "1px solid #555",
             borderRadius: "8px",
             padding: 8,
-            marginTop: -6,
+            marginTop: 0,
             marginBottom: 2,
           }}
         >
@@ -4516,7 +4512,7 @@ export const BoardWithAPI: React.FC = () => {
             border: "1px solid #555",
             borderRadius: "8px",
             padding: 8,
-            marginTop: -6,
+            marginTop: 0,
             marginBottom: 2,
           }}
         >
@@ -4586,7 +4582,7 @@ export const BoardWithAPI: React.FC = () => {
             border: "1px solid #555",
             borderRadius: "8px",
             padding: 8,
-            marginTop: -6,
+            marginTop: 0,
             marginBottom: 2,
           }}
         >
@@ -5174,7 +5170,6 @@ export const BoardWithAPI: React.FC = () => {
             ruleChoiceHighlightedUnitId={highlightedRuleChoiceUnitId}
             showHexCoordinates={settings.showDebug}
             showLosDebugOverlay={settings.showDebugLoS}
-            deployShootLoS={settings.deployShootLoS}
             onUnitIllustrationPreviewChange={setIllustrationPreviewUnitId}
             onUnitDisplaySelectChange={setDisplaySelectedUnitId}
             eligibleUnitIds={apiProps.eligibleUnitIds}
@@ -6561,8 +6556,6 @@ export const BoardWithAPI: React.FC = () => {
         onToggleRetreatAlert={handleToggleRetreatAlert}
         battleShockTestEnabled={settings.battleShockTestEnabled}
         onToggleBattleShockTest={handleToggleBattleShockTest}
-        deployShootLoS={settings.deployShootLoS}
-        onToggleDeployShootLoS={handleToggleDeployShootLoS}
         modeGuidesActivated={settings.modeGuidesActivated}
         onToggleModeGuidesActivated={handleToggleModeGuidesActivated}
         deployIconBaseSizeBounded={settings.deployIconBaseSizeBounded}

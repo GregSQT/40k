@@ -535,8 +535,6 @@ type BoardProps = {
   phaseInitPending?: boolean;
   showHexCoordinates?: boolean;
   showLosDebugOverlay?: boolean;
-  /** Option : afficher la LoS de tir au survol pendant le déploiement (défaut OFF — impact perf). */
-  deployShootLoS?: boolean;
   onUnitIllustrationPreviewChange?: (unitId: UnitId | null) => void;
   onUnitDisplaySelectChange?: (unitId: UnitId | null) => void;
   shootingActivationQueue?: Unit[];
@@ -1145,7 +1143,6 @@ export default function Board({
   phaseInitPending = false,
   showHexCoordinates = false,
   showLosDebugOverlay = false,
-  deployShootLoS = false,
   onUnitIllustrationPreviewChange,
   onUnitDisplaySelectChange,
   shootingActivationQueue,
@@ -6863,9 +6860,9 @@ export default function Board({
     };
     const shootRange =
       squadUnit.RNG_WEAPONS && squadUnit.RNG_WEAPONS.length > 0 ? getMaxRangedRange(squadUnit) : 0;
-    // En déploiement, la LoS de tir au survol est désactivée par défaut (calcul lourd, inutile au
-    // placement) — activable via l'option deployShootLoS. Hors déploiement : comportement inchangé.
-    const hasRangedPreview = shootRange > 0 && (!isDeploymentMove || deployShootLoS);
+    // LoS de tir au survol : active dès qu'une figurine est en cours de déplacement (déploiement
+    // comme move phase), à condition que l'unité ait une arme de tir.
+    const hasRangedPreview = shootRange > 0;
 
     let shootPreviewActive = true;
     let visualLosFrame: number | null = null;
@@ -7399,7 +7396,6 @@ export default function Board({
     gameState?.units_cache,
     effectivePerModelPoolRef,
     hideIndicators,
-    deployShootLoS,
   ]);
 
   // Mode mesure : clic gauche = ancre ou fin de ligne (puis armed) ; clic droit = jonction — prioritaire sur les unités.

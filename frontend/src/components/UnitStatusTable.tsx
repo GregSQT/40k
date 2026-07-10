@@ -151,7 +151,7 @@ const PROFILE_CELL_STYLE: CSSProperties = {
 };
 
 // Halo brillant habituel (glow vert) — dérivé de --btn-glow / --btn-glow-soft (App.css), grossi.
-const HALO_GLOW = "0 0 0 3px #86efac, 0 0 20px 7px rgba(134, 239, 172, 0.9)";
+export const HALO_GLOW = "0 0 0 3px #86efac, 0 0 20px 7px rgba(134, 239, 172, 0.9)";
 
 /** Mini-table d'armes (RANGE ou MELEE) repliable, pour un profil. */
 function ProfileWeaponTable({
