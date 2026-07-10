@@ -2833,6 +2833,28 @@ def valid_target_pool_build(
             f"los_cache_size={len(unit.get('los_cache', {}))}",  # get allowed
             flush=True,
         )
+    # DIAG: log every alive enemy that is FILTERED OUT before the pool loop because it lacks LoS.
+    # valid_target_pool_build ne parcourt que targets_with_los : une cible sans LoS (los_cache False
+    # ou absente) est écartée silencieusement. Ce log rend cette exclusion explicite (raison = LoS).
+    if game_state.get("debug_mode", False):
+        from engine.game_utils import add_debug_file_log
+        _los_map_diag = unit.get("los_cache") or {}
+        for _enemy_id, _entry in units_cache.items():
+            _enemy_player = int(_entry["player"]) if _entry.get("player") is not None else None
+            if _enemy_player == current_player_int:
+                continue
+            _eid = str(_enemy_id)
+            if not is_unit_alive(_eid, game_state):
+                continue
+            if _eid in targets_with_los:
+                continue
+            _los_val = _los_map_diag[_eid] if _eid in _los_map_diag else "ABSENT"
+            add_debug_file_log(
+                game_state,
+                f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
+                f"Enemy {_eid}({_entry.get('col','?')},{_entry.get('row','?')}) "
+                f"EXCLUDED - no LoS (los_cache={_los_val})"
+            )
     for target_id_str in targets_with_los.keys():
         # Get enemy unit by ID
         enemy = _get_unit_by_id(game_state, target_id_str)

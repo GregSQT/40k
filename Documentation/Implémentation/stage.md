@@ -337,6 +337,10 @@ le modèle + LoS 3D est le vrai chantier.
 - Plunging Fire (§22.05) : +1 BS si cible **visible** avec ≥1 fig au sol ET (tireur sur section ≥3"
   OU tireur TOWERING avec cible ≤12"). À ajouter au calcul BS du tir.
 
+> **Plan d'implémentation détaillé** (constat de code 2026-07-10, primitive `_los_line_segment_clear`,
+> plancher-occulteur, Solid ≤3"/>3", Plunging, parité WASM, non-régression, décisions à trancher) : voir la
+> section « 🎯 TIR 3D — Ligne de vue niveau-consciente (chantier 5) » dans le chantier 6 ci-dessous.
+
 ### 4.5 Rendu
 - **Empreinte d'étage** : nouveau bloc dans `drawBoard` (à côté de `BoardDisplay.tsx:2058-2153`), tracé polygone
   copié de `:2124-2137`, couleur = `terrainColor` (contour non-occupé) / **blanc** si occupé (motif `objectiveControl` `:2080-2094`).
@@ -523,8 +527,9 @@ le modèle + LoS 3D est le vrai chantier.
    (portée d'arme, charge, §5.7) ; règle 2" horiz + 5" vert sur les masques `eng_bad`, adjacence,
    éligibilité fight, coherency ; contrôle d'objectif par appartenance à la terrain area (§2.9) ou
    cylindre 3"/5" pour un pion. Charge/pile-in/consolidation héritent du moteur vertical (§2.8).
-5. **LoS 3D** : Solid ≤3", Plunging +1 BS (avec branche TOWERING), extension `hex_los_cache`,
-   parité WASM (Rust + rebuild).
+5. **LoS 3D (tir)** : plancher-occulteur horizontal (cible sous un étage), Solid ≤3"/>3", Plunging +1 BS
+   (branche TOWERING), extension clé `hex_los_cache` au niveau, parité WASM (Rust + rebuild).
+   → **Plan détaillé** : section « 🎯 TIR 3D — Ligne de vue niveau-consciente » ci-dessous (chantier 6).
 6. **Rendu/UI (frontend)** — ⏳ **EN COURS** (visuel : à valider en lançant l'app) :
    - ✅ **6a Données + bouton d'étage** : floors exposés au front (`_zone_entry` rasterise les `floors`
      → `boardConfig.terrain_zones[].floors`, type `TerrainFloor` dans
@@ -1047,6 +1052,253 @@ le modèle + LoS 3D est le vrai chantier.
    et brancher `reachable_multilevel_field` ([geodesic_move.py](file:///home/greg/40k/engine/phase_handlers/geodesic_move.py))
    pour produire les ancres d'étage (le champ climb-aware existe déjà, cf. 3a/6e). L'EZ inter-niveaux
    (`enemy_adjacent_hexes`, 2D) suit la même bascule.
+
+   ### 🎯 TIR 3D — Ligne de vue niveau-consciente (chantier 5, ⏳ RESTE À FAIRE)
+
+   > **Constat de code vérifié (2026-07-10, ne rien assumer)** : toute la chaîne LoS est **strictement
+   > 2D**. `compute_unit_los` ([shooting_handlers.py:4036](file:///home/greg/40k/engine/phase_handlers/shooting_handlers.py#L4036))
+   > → `_compute_unit_los_uncached` (:4254) → `_compute_visibility_with_obscuring` (:3951) →
+   > `_los_hex_visible` (:3918) → **primitive de tracé unique** `_los_line_segment_clear` (:3895) : trace
+   > `hex_line` (cube-lerp) et bloque **uniquement** sur `wall_set` (murs, tous niveaux) et les cases
+   > obscuring hors areas exclues (§13.10). **Aucune** de ces fonctions ne lit `level`, `floor_height`,
+   > `MODEL_HEIGHT` ni les `floors` du terrain (grep `level|floor|height|elevation` sur la géométrie LoS =
+   > 0 hit géométrique). Le champ `level` existe (units_cache/models_cache) mais **n'entre jamais** dans le
+   > calcul de visibilité. Miroir Rust `has_los_fast` ([lib.rs:84](file:///home/greg/40k/frontend/wasm-los/src/lib.rs))
+   > = même primitive 2D.
+
+   **Conséquence des deux cas types (unité tireuse 1008 au niveau 1)** :
+   - **Cible SOUS un étage** (fig au sol, empreinte sous l'empreinte d'un plancher supérieur) : le
+     plancher est une surface **opaque** entre le tireur au-dessus et la cible en-dessous → devrait
+     bloquer (True LoS §06.01 : on ne voit pas à travers une surface solide ; la ruine est **dense/Solid**
+     §13.05/§13.11). Aujourd'hui le moteur ne modélise **que les murs verticaux** (`wall_set`) ; le
+     **plancher horizontal** n'est un obstacle ni de move ni de LoS → la cible ressort **visible à tort**.
+   - **Cible AU SOL à côté de l'empreinte de l'étage** (tireur surélevé) : la LoS est tracée en 2D pur
+     entre empreintes ; le niveau du tireur (1) et celui de la cible (0) **n'interviennent pas**. Seul le
+     `wall_set` (mur de la ruine, prolongé à tous les niveaux, cf. décision 2b §409-413) bloque — et il
+     bloque **à tous les niveaux identiquement**, sans la nuance Solid §13.11 (au-dessus de 3" la vue passe
+     par les ouvertures).
+
+   **Règles (lues — `13 Terrain.pdf`, `06 Other concepts.pdf`, `22 Other rules and abilities.pdf`)** :
+   - **VISIBILITY §06.01 (True Line of Sight)** : LoS = ligne 1 mm de n'importe quelle partie de
+     l'observateur vers n'importe quelle partie de la cible ; les modèles des deux unités sont ignorés au
+     tracé. Une **surface solide** (mur **ou plancher**) bloque par nature (on ne voit pas au travers).
+   - **SOLID §13.11** (les dense/ruines l'ont) : « Line of sight cannot be drawn across any **enclosed gap
+     in the surface** of such a terrain feature that is **3" or less from ground level**. » → **sous 3"** du
+     sol, la LoS ne traverse **aucune ouverture** (porte/fenêtre/impact) ; **au-dessus de 3"**, la LoS se
+     trace **normalement à travers les ouvertures** (exemple officiel : units A/C visibles au-dessus de 3",
+     A/B invisibles à travers la fenêtre sous 3"). Designer's Note : 3" = hauteur du 1er étage, **ajustable
+     par mission** → seuil **configurable** (cf. §2.3).
+   - **OBSCURING §13.10** : si **toute** LoS entre 2 figs traverse une obscuring area (hors celle où l'une
+     des deux se trouve), elles ne se voient pas. Une fig posée **sur** l'étage d'une ruine obscuring est
+     **dans** cette area → exclusion la concernant (déjà géré en 2D par `excluded_areas`, à conserver).
+   - **PLUNGING FIRE §22.05** : contre une cible **visible** contenant ≥1 fig **au sol**, **+1 BS** si
+     **(a)** le tireur est sur une section **≥ 3" de haut**, **OU (b)** le tireur a **TOWERING** et la
+     cible est ≤ **12"**. (Sans effet pour AIRCRAFT, §23.03.)
+
+   **Données déjà disponibles (aucune nouvelle donnée terrain/unité à créer, chantier 1 + §6e + engagement 3D)** :
+   - Par figurine dans `units_cache` : `level_by_model` (niveau), `floor_height_by_model` (**hauteur du
+     plancher sous la fig, en pouces**, résolue par position — [shared_utils.py:773](file:///home/greg/40k/engine/phase_handlers/shared_utils.py#L773)
+     + recompute :2917) et `MODEL_HEIGHT` (borne haute, :788). → chaque fig = **intervalle vertical**
+     `[floor_height, floor_height + MODEL_HEIGHT]`, **exactement** la convention de l'engagement 3D
+     (§01.04 « partie la plus proche », pas plancher-à-plancher).
+   - `floors` du terrain rasterisés : `{level, height_inches, polygon_vertices, hexes}` par étage
+     ([game_state.py:1581](file:///home/greg/40k/engine/game_state.py#L1581) `_parse_terrain_floors`) ;
+     helpers `floor_hexes_at_level` / `floor_height_at` / `floor_polys_at_level`
+     ([terrain_utils.py](file:///home/greg/40k/engine/terrain_utils.py)) déjà écrits.
+
+   **Implémentation optimale (additive → zéro régression 2D, une seule primitive, miroir WASM)** :
+
+   La règle d'or du fichier : **toute évolution du blocage se fait dans `_los_line_segment_clear`, une seule
+   fois** (docstring :3904-3906), puis répliquée dans le Rust. Le plan enrichit cette primitive et le fait
+   par-figurine (le tracé cible est déjà par-modèle, :4288), en threadant les niveaux/hauteurs source+cible.
+
+   1. **Signature niveau-consciente (additive).** Ajouter à `_los_line_segment_clear` (et à `_los_hex_visible`,
+      `_compute_visibility_with_obscuring`, la boucle :4288) les paramètres **optionnels**
+      `src_height`, `tgt_height` (hauteurs de tir/cible en pouces = `floor_height` de la fig +/− offset de
+      silhouette) et l'accès aux `floors` (via `game_state`). **`None` partout → chemin actuel byte-identique**
+      (tous les call-sites 2D — RL/obs mono-niveau — restent inchangés → zéro régression, patron exact de
+      `vertical_zone_inches` de l'engagement 3D). Le pair-cache (`_unit_los_pair_cache`, clé `(sid,tid)`) reste
+      valide (invalidé par `_touch_unit_los` à chaque move/perte — **vérifié** : `update_model_position` appelle
+      `_touch_unit_los` même quand l'ancre ne bouge pas, et un changement de niveau passe toujours par ce chemin) ;
+      **le `hex_los_cache` 2D `((col,row),(col,row))` doit intégrer les niveaux** sous peine de collision entre
+      deux paires aux mêmes (col,row) mais niveaux différents (§4.4). ⚠️ **Trois sites à migrer ensemble**
+      (vérifié 2026-07-10) : les DEUX writers de la clé — `has_line_of_sight`
+      ([combat_utils.py:538](file:///home/greg/40k/engine/combat_utils.py#L538)) **et**
+      `has_line_of_sight_coords` (`:578`) — plus l'**invalidation sélective** qui filtre les clés en supposant
+      leur forme actuelle ([shooting_handlers.py:2017-2028](file:///home/greg/40k/engine/phase_handlers/shooting_handlers.py#L2017-L2028)).
+
+   2. **Plancher-occulteur horizontal (cas « sous un étage » — le vrai trou).** Pour chaque hex du `hex_line`
+      **et les deux extrémités**, tester s'il appartient à un `floor` de niveau `L_f` / hauteur `h_f` : la LoS
+      est **bloquée** à cet hex si la sightline **franchit le plan du plancher au-dessus de CET hex**.
+      ⚠️ **Interpolation obligatoire le long du tracé** (correction de review 2026-07-10) : le test naïf
+      « `min(src_height,tgt_height) < h_f < max(...)` » bloque dès que le plan est entre les deux hauteurs
+      d'extrémité, **où que soit l'hex sur la ligne** — faux positif de blocage (ex. : tireur L2 à 6",
+      cible au sol à 20" ; un plancher 3" d'une AUTRE ruine à 1 hex du tireur → la ligne y passe encore à
+      ~5,7", au-dessus du plancher, mais le test naïf bloque). Test correct, toujours O(1) par hex :
+      la hauteur de la ligne à l'hex d'index `i` sur un tracé de `n` pas est `h(t) = src + t×(tgt−src)`
+      avec `t = i/n` (le `hex_line` est un cube-lerp, `t` est déjà la fraction du parcours) ; blocage à
+      l'hex ssi l'hex ∈ `floor_hexes_at_level(L_f)` ET `h(t)` passe du côté opposé de `h_f` par rapport à
+      la source (franchissement local du plan).
+      **Cohérence avec les intervalles** (cf. « Hauteur de tir » ci-dessous) : les extrémités sont des
+      intervalles `[lo, hi] = [floor_height, floor_height + MODEL_HEIGHT]`, pas des scalaires — True LoS
+      §06.01 = visible si **au moins une** ligne intervalle→intervalle passe. Le blocage n'est donc acquis
+      que si **toutes** les lignes franchissent le plancher à un hex couvert. Test exact avec les deux
+      droites extrêmes (`src_lo→tgt_lo` et `src_hi→tgt_hi` : à chaque `t`, les hauteurs atteignables par
+      les lignes intervalle→intervalle forment exactement l'intervalle entre ces deux droites) : calculer
+      le point de franchissement du plan `h_f` de chacune (`t* = (h_f − src)/(tgt − src)`) ; les lignes
+      intermédiaires franchissent toutes entre `t*_lo` et `t*_hi` → **bloqué ssi TOUS les hexes du tracé
+      dans l'intervalle `[min(t*_lo,t*_hi), max(t*_lo,t*_hi)]` appartiennent au plancher** (un seul hex
+      non couvert dans cette fenêtre = une ligne passe = visible). Un plancher **au niveau des deux
+      extrémités** (même étage) ne
+      bloque pas (pas de franchissement). **Source** : `floor_hexes` + `height_inches` déjà rasterisés,
+      aucun raycast 3D coûteux.
+      **Trois cas limites à spécifier (review 2026-07-10, 2ᵉ passe)** :
+      - **Intervalle à cheval sur le plan** (`lo < h_f < hi` strict) : ≥1 ligne ne franchit jamais →
+        **jamais bloqué par ce plancher**. C'est la géométrie correcte (pas un fallback) : l'état n'est
+        atteignable aujourd'hui que par les chemins sans clairance (pool squad/IA, voile rouge — RESTE À
+        FAIRE item 3) et devient impossible une fois l'item 3 câblé, mais la branche reste juste.
+      - **Égalité au plan = cas NOMINAL, résolue par le NIVEAU, jamais par comparaison de flottants.**
+        Tout tireur posé sur un étage a `src_lo == h_f` (pieds au plan), et la fig **tangente**
+        (`MODEL_HEIGHT == height_inches`) est **légale en permanence** (`low_clearance_ground_hexes` =
+        `<` strict, « tangence autorisée », vérifié) → `tgt_hi == h_f`. Aucune convention flottante
+        globale ne marche : « == compte dessous » rend le plancher transparent sous les pieds du tireur
+        (ligne pieds→cible-dessous ne « franchit » plus) ; « == compte dessus » rend visible d'en haut la
+        fig tangente sous le plancher. Règle : le côté d'une extrémité à égalité se décide
+        **physiquement par le niveau** de la fig vs le plancher testé — fig posée sur/au-dessus de ce
+        plancher (`floor_height ≥ h_f`) → côté **dessus** ; fig à un niveau inférieur sous ce plancher →
+        côté **dessous**. Déterministe, données déjà présentes (`level_by_model`/`floor_height_by_model`).
+      - **Hauteurs égales aux deux bouts d'une droite extrême** (`src == tgt`, ex. deux figs au sol — le
+        chemin emprunté à CHAQUE tir dès qu'un hex de plancher est sur le tracé) : dénominateur de `t*`
+        nul → ligne horizontale → **aucun franchissement** (deux figs au sol se voient sous un bâtiment,
+        murs à part). Garde **explicite en tête de test**, pas une division qui échoue.
+
+   3. **Solid §13.11 — nuance ≤3" / >3".** Le `wall_set` bloque aujourd'hui **inconditionnellement**. Trois
+      variantes (décision §5) :
+      - **(a) conservateur** : garder les murs pleins à tous niveaux → jamais de faux positif (« tir à
+        travers un mur »), mais **ampleur réelle requalifiée** (review 2026-07-10) : ce n'est pas juste
+        « une fenêtre haute refusée ». Un tireur posé sur l'étage d'une ruine **murée** (cas réel :
+        `ruin_center` porte des murs dense+light, vérifié dans `terrain-mc1.json`/`terrain-floors-test.json`,
+        20 murs racine typés `light`/`dense`) ne peut **jamais** tracer vers l'extérieur si le tracé 2D
+        croise un hex de mur du périmètre. Combiné à l'obscuring maintenu 2D (step 4, conforme RAW),
+        **monter n'apporte alors AUCUN avantage de visibilité** — en playtest, la verticalité se lirait
+        comme un bug (« je suis monté, je ne vois rien de plus, et je ne vois plus ce qui est sous moi »).
+        Tension directe avec l'encart §13.06 (« As well as gaining superior lines of sight… »).
+      - **(b1) seuil-only — LA variante fidèle ET la moins chère (RECOMMANDÉE, même passe que le step 2)** :
+        bloquer sur un hex de mur **ssi la hauteur interpolée de la ligne à cet hex ≤ `solid_ground_clearance`**
+        (3", configurable — Designer's Note « some missions may adjust »). C'est exactement l'exemple RAW
+        de §13.11 : au-dessus de 3", la LoS passe **à travers les ouvertures** (unités A/C du PDF), pas
+        seulement par-dessus — les murs de ruine dense sont archétypalement ajourés. **Zéro donnée terrain
+        nouvelle** (mêmes `{name, type, segments}`), même helper d'interpolation que le plancher-occulteur.
+        Faux positif résiduel : un mur réellement **plein** (sans ouvertures) devient transparent au-dessus
+        de 3" — c'est le seul cas qui justifie (b2).
+      - **(b2) donnée par-mur (backlog, pas un prérequis)** : `height_inches` ou flag `solid` sur les
+        entrées `walls` pour les murs **pleins** (blocage jusqu'au sommet, transparence au-dessus — test
+        « la ligne passe au-dessus du sommet », même interpolation). Note : (b2) seule serait MOINS fidèle
+        que (b1) pour les ruines (un mur ajouré de 6" bloquerait une ligne à 4" que la règle laisse passer
+        par la fenêtre) — (b2) complète (b1), ne la remplace pas.
+      → **Décision : implémenter (b1) avec le step 2 dans la même passe** (même helper) ; (a) conservé en
+      **kill-switch config** (revenir aux murs pleins si besoin), pas en défaut ; (b2) en backlog pour les
+      murs pleins. **Périmètre type de mur à trancher au passage** : §13.11 ne couvre que les murs
+      **dense** ; RAW, un mur `light` ne bloque pas la LoS du tout (light ne fait que rendre l'area
+      obscuring + cover §13.04/§13.08/§13.10), or le `wall_set` actuel bloque light et dense
+      indistinctement — appliquer (b1) aux deux types, ou dense seulement (light = jamais bloquant,
+      plus fidèle mais changement de comportement 2D existant → à décider explicitement).
+
+   4. **Obscuring §13.10 : inchangé.** L'exclusion par area occupée (tireur/cible) reste 2D et **correcte**
+      (une fig **sur** l'étage est dans l'area de la ruine → déjà exclue via `excluded_areas`). Rien à
+      modifier ; juste vérifier que `level_by_model` n'altère pas l'appartenance d'area (les `hexes`
+      obscuring sont 2D, une fig à l'étage a son (col,row) dans l'empreinte → inclusion préservée).
+      **Condition de validité (review 2026-07-10)** : ce raisonnement suppose `floor ⊆ empreinte de l'area
+      parente`. La fig ne peut pas déborder du **plancher** (§13.06, enforce partout), mais **rien ne
+      valide** au parsing que les `vertices` d'un étage sont inclus dans ceux de l'area
+      (`_parse_terrain_floors`, [game_state.py:1581](file:///home/greg/40k/engine/game_state.py#L1581) —
+      vérifié : aucune contrainte d'inclusion ; les données actuelles la respectent, `ruin_center` L1/L2
+      dans l'empreinte). Un étage débordant casserait silencieusement l'exclusion (fig sur le surplomb →
+      (col,row) hors `obscuring_by_hex` → la ruine bloquerait sa propre occupante) **et**
+      `floor_height_at`/le contrôle d'objectif par appartenance. → **Ajouter la validation au parsing**
+      (hexes du floor ⊆ hexes de l'area, `ValueError` explicite, pas de fallback) — l'invariant devient
+      structurel, aucun code LoS supplémentaire.
+
+   5. **Plunging Fire §22.05 (bonus BS, hors LoS pure).** Après confirmation de visibilité, **+1 BS** si la
+      cible contient ≥1 fig au sol (`level_by_model` == 0 pour ≥1 modèle cible) ET **(a)** la section du
+      tireur est ≥3" (`floor_height_by_model` du tireur ≥ `seuil_plunging`, config) **OU (b)** tireur
+      TOWERING (keyword) et cible ≤12". À brancher dans le **calcul de BS du tir**
+      (pas dans `compute_unit_los`) — la visibilité reste binaire, le bonus est un modificateur d'attaque.
+      Config `plunging_fire_height: 3` (POUCES, non scalé, pendant de `engagement_zone_vertical`).
+      **Approximations assumées (review 2026-07-10)** : le « ≤12" » de la branche TOWERING sera mesuré en
+      **2D** tant que le chantier « Distances 3D » (roadmap item 4) n'est pas fait — cohérent avec toutes
+      les autres distances du moteur, à migrer avec elles. L'exception AIRCRAFT §23.03 (vérifiée PDF :
+      « no effect on attacks made by, **or targeting**, AIRCRAFT units ») est **hors périmètre** — aucun
+      AIRCRAFT dans le moteur pour le moment ; à gater sur le keyword si des AIRCRAFT sont ajoutés.
+
+   6. **Parité WASM (Rust).** Répercuter (2) et, si retenu, (3b) dans `has_los_fast`
+      ([lib.rs:84](file:///home/greg/40k/frontend/wasm-los/src/lib.rs)) : passer les hauteurs src/tgt + les
+      `floor_hexes`/`height_inches` au module, même test d'interpolation de franchissement de plancher, **puis
+      rebuild du wasm**. Sinon le cône de preview front (WASM) diverge du ciblage back (Python) → « une cible
+      blinke mais n'est pas ciblable » (le doc §3.3 signale déjà ce risque de divergence). Le back reste la
+      source de vérité du ciblage ; le WASM ne sert que la preview.
+      ⚠️ **« Même primitive » est approximatif** (review 2026-07-10) : la sémantique obscuring du Rust
+      diffère du Python — le Rust compare l'area de chaque hex intermédiaire à `dest_area` et exige que
+      l'appelant ait **zéroté** les areas du tireur dans `obscuring_grid`, quand le Python exclut le set
+      `excluded_areas` (areas tireur **+ cible**) dans la primitive. Au portage des hauteurs, mapper cette
+      différence explicitement — ne pas copier-coller la logique Python.
+
+   **Hauteur de tir / de cible (offset de silhouette)** : par défaut, prendre l'**intervalle**
+   `[floor_height, floor_height + MODEL_HEIGHT]` des deux côtés et tester le franchissement du plan plancher
+   par les lignes intervalle→intervalle (critère exact des deux droites extrêmes, step 2). Cohérent avec
+   l'engagement 3D (§01.04) et sans donnée nouvelle. Approximation résiduelle inévitable (silhouette réelle
+   non chiffrée dans les PDF, §2.11) — même statut assumé que la True LoS et que l'engagement.
+
+   **Côté tireur PAR-FIGURINE (décision 2026-07-10 : respecter les règles au maximum).** `compute_unit_los`
+   est par paire d'unités : par-modèle côté **cible** seulement ; côté tireur = ancre + vantages latéraux,
+   avec UNE hauteur. Or une escouade **répartie sol/étage** est un cas supporté (§6d) et §06.01/§22.05 sont
+   par-modèle observateur/attaquant. Spécification retenue :
+   - **Visibilité** : la cible (unité) est visible s'il existe **≥1 figurine tireuse** qui voit ≥1 modèle
+     cible — chaque fig tireuse trace avec **sa** hauteur (`floor_height_by_model[mid]` + intervalle
+     `MODEL_HEIGHT`), depuis **son** hex (`occupied_hexes_by_model`). Escouade homogène en niveau (cas
+     ultra-majoritaire) → une seule passe, identique à l'ancre actuelle ; hétérogène → une passe par
+     **classe de niveau** (mêmes classes que `_vertical_classes` de l'engagement 3D), pas par fig.
+   - **Plunging Fire** : §22.05 est par **modèle attaquant** (« Each time a model makes a ranged attack ») —
+     le +1 BS ne s'applique qu'aux attaques des figs dont la section est ≥3". Escouade mixte sol/étage →
+     brancher sur l'**attribution par-arme/figurine** déjà en place (le BS se résout par fig porteuse),
+     jamais un +1 unité-entière.
+   - Le pair-cache reste par (sid,tid) : le résultat agrégé « ≥1 fig voit » y est stocké comme aujourd'hui.
+
+   **Non-régression** : `src_height=tgt_height=None` (tous les appels actuels) → primitive **byte-identique**
+   2D ; plateau **sans `floors`** → aucun plancher-occulteur, `wall_set` seul → identique à aujourd'hui ;
+   RL/obs (métrique mono-niveau, `hex`) non concernés. **Validation** : script d'intégration dédié (miroir
+   [scripts/charge3d_integration_test.py](file:///home/greg/40k/scripts/charge3d_integration_test.py) sur
+   `scenario_floors_test` : tireur L1 vs cible sous l'étage → **bloquée** ; vs cible au sol à côté, mur
+   dense entre les deux → **visible** si la ligne interpolée passe le mur au-dessus de `solid_ground_clearance`
+   (b1), **bloquée** avec le kill-switch (a) ; deux figs au sol de part et d'autre du bâtiment → **visibles**
+   sous le plancher (garde hauteurs égales), murs à part ; fig tangente (`MODEL_HEIGHT == height_inches`)
+   sous l'étage vs tireur au-dessus → **bloquée** (égalité résolue par niveau) ; Plunging +1 BS depuis L1,
+   +1 refusé aux figs de la même escouade restées au sol (par-arme/figurine)) + app sur `scenario_floors_test`
+   + réutilisation de
+   l'invariant `assert_los_pair_cache_consistent` (le pair-cache doit rester cohérent avec la nouvelle
+   géométrie). **Le RL étant HS**, c'est le seul filet de non-régression du gameplay 3D (comme pour charge/mêlée).
+
+   **Ordre d'implémentation suggéré** : 1 (signature + cache niveau) → **2 + 3(b1) dans la même passe**
+   (plancher-occulteur + seuil Solid sur les murs : même helper d'interpolation, ferme le cas 120 ET donne
+   le bénéfice de vue en hauteur — livrés ensemble, sinon la verticalité se joue comme un bug) →
+   **6 (parité WASM, immédiatement après)** → 5 (Plunging) ; 3(b2) (donnée mur plein) en backlog.
+   6 remonté avant 5 (review 2026-07-10) : entre 2-3 et 6 la preview front montre visibles des cibles que
+   le back refuse — fenêtre de divergence visible par l'utilisateur, à fermer au plus tôt ; Plunging (5)
+   ne touche pas le WASM (BS uniquement). Le kill-switch (a) permet de neutraliser 3(b1) en config sans
+   toucher au code si un plateau l'exige.
+
+   **Décisions à trancher (checkpoints §5)** :
+   - ~~Murs de ruine >3"~~ **TRANCHÉ (2026-07-10)** : variante **(b1) seuil-only** (blocage mur ssi hauteur
+     interpolée ≤ `solid_ground_clearance`), livrée avec le step 2 ; (a) murs pleins = kill-switch config ;
+     (b2) donnée par-mur pour murs pleins = backlog — cf. step 3.
+   - **Périmètre type de mur pour (b1)** : dense seulement (fidèle RAW — un mur `light` ne bloque pas la
+     LoS §13.04/§13.10, mais le `wall_set` 2D actuel bloque tout → changement de comportement existant)
+     vs light+dense (conservateur, aucun changement 2D). **Reste à trancher.**
+   - **Offset de silhouette** : intervalle `[h, h+MODEL_HEIGHT]` (recommandé) vs point unique (plancher).
+   - **Seuils configurables** : `solid_ground_clearance` (3", Solid) et `plunging_fire_height` (3", Plunging)
+     — deux mesures **distinctes** (§2.3 : gap « from ground level » vs section « in height »), ne pas fusionner.
+   - ~~Côté tireur mono/par-figurine~~ **TRANCHÉ (2026-07-10)** : par-figurine (classes de niveau), Plunging
+     par-arme/figurine — cf. « Côté tireur PAR-FIGURINE » ci-dessus.
 
    ### ⏳ RESTE À FAIRE (mis à jour 2026-07-08)
 

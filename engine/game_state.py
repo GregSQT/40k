@@ -898,7 +898,11 @@ class GameStateManager:
                     m_col = int(require_key(spec, "col"))
                     m_row = int(require_key(spec, "row"))
                     m_norm_col, m_norm_row = normalize_coordinates(m_col, m_row)
-                m_spec: Dict[str, Any] = {"col": m_norm_col, "row": m_norm_row}
+                # Niveau vertical par-figurine (§2.5, escouade répartie sur plusieurs étages).
+                # 'level' optionnel = sol (0). Sans recopie ici, build_units_cache retombe sur le
+                # niveau ancre de l'unité et perd le level déclaré par modèle dans le scénario.
+                m_level = _validate_level(spec.get("level", 0), unit_data["id"])
+                m_spec: Dict[str, Any] = {"col": m_norm_col, "row": m_norm_row, "level": m_level}
                 model_unit_type = spec.get("unit_type")
                 if model_unit_type is not None:
                     # Load stats for this specific model's unit_type
@@ -959,6 +963,10 @@ class GameStateManager:
                     total_value += int(full_unit_data["VALUE"])
                 normalized_models.append(m_spec)
             enhanced_unit["models"] = normalized_models
+            # Invariant §2.5 : le niveau ancre de l'unité = niveau de models[0] (cf. commentaire
+            # create_unit). Sans ça, une unité dont la 1ère figurine est déclarée en hauteur garde
+            # une ancre au sol (0) et désynchronise units_cache de l'empreinte réelle.
+            enhanced_unit["level"] = normalized_models[0]["level"]
             enhanced_unit["HP_CUR"] = total_hp_cur
             if total_value != int(full_unit_data["VALUE"]) * len(normalized_models):
                 # Mixed squad: override VALUE with sum of per-model values

@@ -4783,12 +4783,23 @@ export default function Board({
             string,
             {
               occupied_hexes_by_model?: Record<string, [number, number]>;
+              level_by_model?: Record<string, number>;
               col?: number;
               row?: number;
               player?: number;
             }
           >
         | undefined;
+
+    // Hit-testing niveau-conscient (étages, §13.06, jumeau du fight) : le board rend un étage à la
+    // fois, donc un clic ne capte QUE les figs de l'étage affiché (``currentLevel``). Sans ça, deux
+    // figs superposées (ami au sol / ennemi à l'étage, même hex 2D) sont indésambiguïsables et l'ami
+    // gagne toujours. Au TIR, le niveau conditionne aussi le ciblage réel (on ne tire pas à travers
+    // les étages) — la validité de la cible reste tranchée côté moteur (blink) ; ici seul le CLIC filtre.
+    const modelOnViewLevel = (
+      entry: { level_by_model?: Record<string, number> },
+      mid: string
+    ) => (entry.level_by_model?.[mid] ?? 0) === currentLevel;
 
     const resolveHex = (e: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
@@ -4818,6 +4829,7 @@ export default function Board({
         if (!byModel) continue;
         const nFigs = Object.keys(byModel).length;
         for (const [mid, pos] of Object.entries(byModel)) {
+          if (!modelOnViewLevel(entry, mid)) continue;
           const d = cubeDistance(clickCube, offsetToCube(pos[0], pos[1]));
           if (d <= HEX_HIT_TOLERANCE && d < bestD) {
             bestD = d;
@@ -4837,12 +4849,16 @@ export default function Board({
       for (const [uid, entry] of Object.entries(uc)) {
         if (entry.player === current_player) continue;
         const byModel = entry.occupied_hexes_by_model;
-        const positions: Array<[number, number]> = byModel
-          ? Object.values(byModel)
+        // Positions par-figurine (avec mid → filtre niveau) ; repli sur l'ancre unité (level 0)
+        // pour les entrées sans occupied_hexes_by_model.
+        const positions: Array<{ pos: [number, number]; mid: string | null }> = byModel
+          ? Object.entries(byModel).map(([mid, pos]) => ({ pos, mid }))
           : entry.col != null && entry.row != null
-            ? [[entry.col, entry.row]]
+            ? [{ pos: [entry.col, entry.row], mid: null }]
             : [];
-        for (const pos of positions) {
+        for (const { pos, mid } of positions) {
+          if (mid != null && !modelOnViewLevel(entry, mid)) continue;
+          if (mid == null && currentLevel !== 0) continue;
           const d = cubeDistance(clickCube, offsetToCube(pos[0], pos[1]));
           if (d <= HEX_HIT_TOLERANCE && d < bestD) {
             bestD = d;
@@ -4981,6 +4997,7 @@ export default function Board({
     gameState?.units_cache,
     current_player,
     eligibleUnitIds,
+    currentLevel,
   ]);
 
   // ── COMBAT par-figurine (PvP) : handler capture jumeau du tir ──────────────
@@ -5009,12 +5026,23 @@ export default function Board({
             string,
             {
               occupied_hexes_by_model?: Record<string, [number, number]>;
+              level_by_model?: Record<string, number>;
               col?: number;
               row?: number;
               player?: number;
             }
           >
         | undefined;
+
+    // Hit-testing niveau-conscient (étages, §13.06) : le board rend un étage à la fois, donc un
+    // clic ne doit capter QUE les figs de l'étage affiché (``currentLevel``). Sans ça, deux figs
+    // superposées (ami au sol / ennemi à l'étage, même hex 2D) sont indésambiguïsables et l'ami
+    // gagne toujours. L'engagement/attribution reste 2D (sans niveau) côté moteur : toutes les figs
+    // engagées frappent quel que soit leur étage — seul le CLIC est filtré ici.
+    const modelOnViewLevel = (
+      entry: { level_by_model?: Record<string, number> },
+      mid: string
+    ) => (entry.level_by_model?.[mid] ?? 0) === currentLevel;
 
     const resolveHex = (e: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
@@ -5043,6 +5071,7 @@ export default function Board({
         const byModel = entry.occupied_hexes_by_model;
         if (!byModel) continue;
         for (const [mid, pos] of Object.entries(byModel)) {
+          if (!modelOnViewLevel(entry, mid)) continue;
           const d = cubeDistance(clickCube, offsetToCube(pos[0], pos[1]));
           if (d <= HEX_HIT_TOLERANCE && d < bestD) {
             bestD = d;
@@ -5066,12 +5095,16 @@ export default function Board({
       for (const [uid, entry] of Object.entries(uc)) {
         if (entry.player === activePlayer) continue;
         const byModel = entry.occupied_hexes_by_model;
-        const positions: Array<[number, number]> = byModel
-          ? Object.values(byModel)
+        // Positions par-figurine (avec mid → filtre niveau) ; repli sur l'ancre unité (level 0)
+        // pour les entrées sans occupied_hexes_by_model.
+        const positions: Array<{ pos: [number, number]; mid: string | null }> = byModel
+          ? Object.entries(byModel).map(([mid, pos]) => ({ pos, mid }))
           : entry.col != null && entry.row != null
-            ? [[entry.col, entry.row]]
+            ? [{ pos: [entry.col, entry.row], mid: null }]
             : [];
-        for (const pos of positions) {
+        for (const { pos, mid } of positions) {
+          if (mid != null && !modelOnViewLevel(entry, mid)) continue;
+          if (mid == null && currentLevel !== 0) continue;
           const d = cubeDistance(clickCube, offsetToCube(pos[0], pos[1]));
           if (d <= HEX_HIT_TOLERANCE && d < bestD) {
             bestD = d;
@@ -5125,7 +5158,7 @@ export default function Board({
 
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
-  }, [phase, mode, measureMode.kind, boardConfig, gameState?.units_cache, gameState, units]);
+  }, [phase, mode, measureMode.kind, boardConfig, gameState?.units_cache, gameState, units, currentLevel]);
 
   // Allocation manuelle des pertes en COMBAT (PvP) : l'effet de tir ci-dessus est gaté
   // sur phase==="shoot" et ne couvre donc pas le fight. Ce handler dédié (phase fight,
