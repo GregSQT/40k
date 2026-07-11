@@ -614,7 +614,9 @@ type BoardProps = {
   /** Mask loops per-fig (polygone lissé) reçus de move_model_destinations. */
   squadMoveModelMaskLoopsRef?: React.RefObject<number[][] | null>;
   onStartSquadModelMove?: (unitId: number | string) => void | Promise<void>;
-  onSelectModelForMove?: (modelId: string) => void | Promise<void>;
+  onSelectModelForMove?: (modelId: string, orientation?: number) => void | Promise<void>;
+  /** Pivot molette fig active : recalcule son pool orienté sans re-render (préserve le fantôme). */
+  onReorientActiveModelPool?: (modelId: string, orientation: number) => void | Promise<void>;
   onMoveModelInPlan?: (modelId: string, col: number, row: number, orientation?: number) => void;
   onResetModelInPlan?: (modelId: string) => void;
   onCommitSquadMovePlan?: () => void | Promise<void>;
@@ -1194,6 +1196,7 @@ export default function Board({
   squadMoveModelMaskLoopsRef,
   onStartSquadModelMove,
   onSelectModelForMove,
+  onReorientActiveModelPool,
   onMoveModelInPlan,
   onResetModelInPlan,
   onCommitSquadMovePlan,
@@ -1539,6 +1542,7 @@ export default function Board({
   const squadMoveCallbacksRef = useRef({
     onStartSquadModelMove,
     onSelectModelForMove,
+    onReorientActiveModelPool,
     onMoveModelInPlan,
     onResetModelInPlan,
     onCommitSquadMovePlan,
@@ -1547,6 +1551,7 @@ export default function Board({
   squadMoveCallbacksRef.current = {
     onStartSquadModelMove,
     onSelectModelForMove,
+    onReorientActiveModelPool,
     onMoveModelInPlan,
     onResetModelInPlan,
     onCommitSquadMovePlan,
@@ -2237,6 +2242,10 @@ export default function Board({
     height: number;
   } | null>(null);
   const [isBoardPanning, setIsBoardPanning] = useState(false);
+  /** Bumpé après un pivot molette de la fig active : force le redraw de la zone de move preview
+   * (les mask loops vivent dans un ref muté sans re-render → sans ce version, la zone n'était
+   * rafraîchie qu'au prochain mousemove). */
+  const [perModelPivotVersion, setPerModelPivotVersion] = useState(0);
 
   // Mode « adapter à l'écran » : facteur de réduction (≤ 1) pour que le board tienne entièrement dans
   // la hauteur dispo. Vaut 1 quand le mode est OFF → toute la mécanique ci-dessous redevient identique.
@@ -2344,6 +2353,28 @@ export default function Board({
           if (baseShape) {
             baseShape.rotation = orientationStepToRadians(hoverMoveOrientationStepRef.current);
           }
+          // Recalcule le pool de la fig active avec l'empreinte ORIENTÉE (EZ ennemie 2" / collisions),
+          // sans re-render (préserve le fantôme + hoverMoveOrientationStepRef). Puis re-déclenche un
+          // mousemove synthétique à la position du curseur : re-snap du fantôme + redessin du contour
+          // de preview APRÈS le scroll, sans attendre un vrai déplacement de souris.
+          const _wheelX = e.clientX;
+          const _wheelY = e.clientY;
+          void Promise.resolve(
+            squadMoveCallbacksRef.current.onReorientActiveModelPool?.(
+              activeMid,
+              hoverMoveOrientationStepRef.current
+            )
+          ).then(() => {
+            // Redraw de la zone de move preview (mask loops dans un ref → besoin d'un re-render pour
+            // que le useMemo de dessin les relise). L'effet mousemove ne dépend PAS de ce version →
+            // il ne se ré-exécute pas → le fantôme n'est pas détruit.
+            setPerModelPivotVersion((v) => v + 1);
+            // Re-snap du fantôme + guides à la position du curseur, sans attendre un vrai mousemove.
+            const canvas = canvasContainerRef.current?.querySelector("canvas");
+            canvas?.dispatchEvent(
+              new MouseEvent("mousemove", { clientX: _wheelX, clientY: _wheelY, bubbles: true })
+            );
+          });
         } else if (onBumpPerModelOrientation) {
           // Aucune fig active (« mode squad ») : pivot de TOUTES les figs posées, via le plan.
           onBumpPerModelOrientation(delta);
@@ -11112,6 +11143,7 @@ export default function Board({
     fleePreviewUnitId,
     squadMoveModelPoolRef,
     squadMoveModelMaskLoopsRef?.current,
+    perModelPivotVersion,
     squadShootPlan,
     squadFightPlan,
     fightEngagedModelIds,

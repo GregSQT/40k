@@ -2913,6 +2913,7 @@ def movement_build_model_destinations_pool(
     model_id: str,
     provisional_plan: Optional[Dict[str, Tuple[int, ...]]] = None,
     level: int = 0,
+    orientation: Optional[int] = None,
 ) -> Dict[str, Any]:
     """BFS des hexes atteignables pour UNE figurine (move par-figurine, squad.md).
 
@@ -2946,6 +2947,13 @@ def movement_build_model_destinations_pool(
     unit = get_unit_by_id(game_state, squad_id)
     if not unit:
         return {"destinations": [], "footprint_mask_loops": []}
+
+    # Orientation du MOVER pour l'empreinte du pool : override (pivot molette EN COURS, non committé,
+    # transmis par l'UI) si fourni, sinon l'orientation committée de la figurine. Sans ça le pool
+    # (EZ ennemie 2", collisions) serait calculé sur l'orientation d'origine → une case « valide »
+    # deviendrait illégale une fois le socle pivoté.
+    _uo = int(unit.get("orientation", 0))
+    mover_orient = int(orientation) if orientation is not None else int(model.get("orientation", _uo))
 
     _adv_roll = _advance_roll_for(squad_id, game_state)
     if _adv_roll is not None:
@@ -2981,7 +2989,7 @@ def movement_build_model_destinations_pool(
     # jamais de la vue courante : la facturation de la descente doit être indépendante de l'affichage.
     start_level_eff = resolve_model_floor_level(
         start_col, start_row, require_key(model, "BASE_SHAPE"), require_key(model, "BASE_SIZE"),
-        int(unit.get("orientation", 0)), int(model.get("level", 0)), terrain_areas,  # get allowed
+        mover_orient, int(model.get("level", 0)), terrain_areas,  # get allowed (orient EN COURS du mover)
     )
     _levels_of_interest: Set[int] = {0} | ({view_level} if view_level >= 1 else set())
 
@@ -3132,7 +3140,7 @@ def movement_build_model_destinations_pool(
             else:
                 from engine.hex_utils import precompute_footprint_offsets
                 _mm_off_even_f, _mm_off_odd_f = precompute_footprint_offsets(
-                    _mm_shape, _mm_base, int(unit.get("orientation", 0)),  # get allowed
+                    _mm_shape, _mm_base, mover_orient,  # orient EN COURS du mover
                 )
             _mm_fb = _mm_clock.perf_counter() if _mm_pt else None
             _mm_field = _euclidean_move_field(
@@ -3185,7 +3193,7 @@ def movement_build_model_destinations_pool(
     # Empreinte du mover (offsets pré-calculés) : sert au filtre destination par niveau ET à la zone.
     base_size = unit["BASE_SIZE"]
     base_shape = unit["BASE_SHAPE"]
-    orientation = unit.get("orientation", 0)  # get allowed
+    orientation = mover_orient  # orient EN COURS du mover (pivot molette non committé)
     # Non-rond (oval/square) → toujours multi-hex (base_size liste) : sans le garde de forme,
     # ``not isinstance(base_size, int)`` le classait à tort en single-hex → empreinte non expansée.
     is_single_hex = base_shape == "round" and (
@@ -3297,14 +3305,16 @@ def movement_build_model_destinations_pool(
     from engine.hex_utils import Socle, footprints_overlap
     _mover_shape = require_key(model, "BASE_SHAPE")
     _mover_base = require_key(model, "BASE_SIZE")
-    _mover_orient = int(unit.get("orientation", 0))  # get allowed
+    _mover_orient = mover_orient  # orient EN COURS du mover (socle testé à chaque destination)
     sibling_socles_by_level: Dict[int, List[Socle]] = {}
     for _sib, _sc, _sr, _sib_eff in sibling_states:
         _s_shape = require_key(_sib, "BASE_SHAPE")
         _s_base = require_key(_sib, "BASE_SIZE")
+        # Empreinte du SIBLING : son orientation propre (défaut = orient unité), pas celle du mover.
+        _s_orient = int(_sib.get("orientation", _uo))  # get allowed
         _s_fp = None if _s_shape == "round" else compute_candidate_footprint(
             _sc, _sr,
-            {"BASE_SHAPE": _s_shape, "BASE_SIZE": _s_base, "orientation": _mover_orient},
+            {"BASE_SHAPE": _s_shape, "BASE_SIZE": _s_base, "orientation": _s_orient},
             game_state,
         )
         sibling_socles_by_level.setdefault(_sib_eff, []).append(

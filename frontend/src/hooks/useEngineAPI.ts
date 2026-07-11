@@ -4382,9 +4382,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     void handleStartSquadModelMove(uid);
   }, [fallBackResumeUnitId, manualAllocation, handleStartSquadModelMove]);
 
-  /** Selectionne la figurine a repositionner : recupere sa BFS (move_model_destinations). */
+  /** Selectionne la figurine a repositionner : recupere sa BFS (move_model_destinations).
+   * ``orientation`` (0..N-1, optionnel) : orientation EN COURS du socle (pivot molette non committé)
+   * → le pool tient compte de l'empreinte orientée (EZ ennemie 2" / collisions). Absente = orient
+   * committée de la fig côté moteur. */
   const handleSelectModelForMove = useCallback(
-    async (modelId: string) => {
+    async (modelId: string, orientation?: number, updatePlan = true) => {
       const sessionAtCall = squadMoveSessionRef.current;
       const currentPlan = squadMovePlanRef.current;
       // (col,row,level) par sœur : le niveau capturé au drop voyage jusqu'au pool → une sœur à
@@ -4404,6 +4407,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         // Étages : niveau de vue courant → pool niveau-conscient (une fig à l'étage ne bloque
         // plus une destination au sol sous elle, et réciproquement).
         level: currentLevelRef?.current ?? 0,
+        ...(orientation !== undefined ? { orientation } : {}),
       });
       if (squadMoveSessionRef.current !== sessionAtCall) return;
       if (!result?.destinations) {
@@ -4425,9 +4429,22 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       squadMoveModelMaskLoopsRef.current = Array.isArray(rawLoops)
         ? (rawLoops as number[][])
         : null;
-      setSquadMovePlan((prev) => (prev ? { ...prev, activeModelId: modelId } : prev));
+      // updatePlan=false (pivot molette de la fig active) : on rafraîchit UNIQUEMENT les refs de
+      // pool/contour, sans setSquadMovePlan — évite le re-render qui ferait cleanup l'effet mousemove
+      // (fantôme caché + hoverMoveOrientationStepRef reset). Le pool orienté restreint alors la pose.
+      if (updatePlan) {
+        setSquadMovePlan((prev) => (prev ? { ...prev, activeModelId: modelId } : prev));
+      }
     },
     [postEngineQuery, currentLevelRef]
+  );
+
+  /** Pivot molette de la fig active : recalcule SON pool avec l'empreinte orientée (EZ ennemie 2" /
+   * collisions), sans re-render (préserve le fantôme suiveur). */
+  const handleReorientActiveModelPool = useCallback(
+    (modelId: string, orientation: number): Promise<void> =>
+      handleSelectModelForMove(modelId, orientation, false),
+    [handleSelectModelForMove]
   );
 
   /** Pose la figurine active a (col,row) dans le plan provisoire + refresh validite. */
@@ -7647,6 +7664,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       squadMoveModelMaskLoopsRef,
       onStartSquadModelMove: async () => {},
       onSelectModelForMove: async () => {},
+      onReorientActiveModelPool: () => {},
       onMoveModelInPlan: () => {},
       onResetModelInPlan: () => {},
       onCommitSquadMovePlan: async () => {},
@@ -7860,6 +7878,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     squadMoveModelMaskLoopsRef,
     onStartSquadModelMove: handleStartSquadModelMove,
     onSelectModelForMove: handleSelectModelForMove,
+    onReorientActiveModelPool: handleReorientActiveModelPool,
     onMoveModelInPlan: handleMoveModelInPlan,
     onResetModelInPlan: handleResetModelInPlan,
     onCommitSquadMovePlan: handleCommitSquadMovePlan,

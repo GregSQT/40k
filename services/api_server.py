@@ -2197,8 +2197,13 @@ def execute_action():
         # Étages : niveau de VUE courant (optionnel, défaut 0 = sol) → pool niveau-conscient.
         _mv_level_raw = action.get("level")
         _mv_level = int(_mv_level_raw) if _mv_level_raw is not None else 0
+        # Orientation EN COURS du socle (pivot molette non committé, optionnel) → empreinte du pool
+        # calculée à l'orientation réelle (EZ ennemie 2" / collisions honorées pendant le preview).
+        _mv_orient_raw = action.get("orientation")
+        _mv_orient = int(_mv_orient_raw) if _mv_orient_raw is not None else None
         _model_pool = _mh_model.movement_build_model_destinations_pool(
-            engine.game_state, str(model_id), provisional_plan=_provisional_plan, level=_mv_level
+            engine.game_state, str(model_id), provisional_plan=_provisional_plan,
+            level=_mv_level, orientation=_mv_orient,
         )
         return api_json_response({
             "success": True,

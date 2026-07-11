@@ -5235,6 +5235,7 @@ export const BoardWithAPI: React.FC = () => {
             squadMoveModelMaskLoopsRef={apiProps.squadMoveModelMaskLoopsRef}
             onStartSquadModelMove={isGameOver ? async () => {} : apiProps.onStartSquadModelMove}
             onSelectModelForMove={isGameOver ? async () => {} : apiProps.onSelectModelForMove}
+            onReorientActiveModelPool={isGameOver ? () => {} : apiProps.onReorientActiveModelPool}
             onMoveModelInPlan={isGameOver ? () => {} : apiProps.onMoveModelInPlan}
             onResetModelInPlan={isGameOver ? () => {} : apiProps.onResetModelInPlan}
             onCommitSquadMovePlan={isGameOver ? async () => {} : apiProps.onCommitSquadMovePlan}
