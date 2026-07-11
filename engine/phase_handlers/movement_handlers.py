@@ -1117,6 +1117,22 @@ def _attempt_movement_to_destination(
             raise KeyError(f"units_cache missing moved unit {unit_id_str_cache}")
         cache_entry["orientation"] = orientation
 
+    # Squad move rigide = destination TOUJOURS au sol. Resynchroniser level=0 sur toutes les figs
+    # vivantes AVANT la translation : translate_squad_to_destination → _recompute_squad_occupied_hexes
+    # appelle floor_height_at(level), qui lèverait ValueError si une fig partie de l'étage restait
+    # marquée level>=1 alors que sa case translatée n'appartient plus à l'empreinte de l'étage (13.06).
+    _mc_lvl = require_key(game_state, "models_cache")
+    _sq_lvl = require_key(game_state, "squad_models")
+    for _mid in _sq_lvl.get(unit_id_str_cache, []):  # get allowed
+        _m = _mc_lvl.get(_mid)
+        if _m is None or int(_m.get("HP_CUR", 0)) <= 0:  # get allowed
+            continue
+        _m["level"] = 0
+    _uc_lvl = require_key(game_state, "units_cache").get(unit_id_str_cache)
+    if _uc_lvl is not None:
+        _uc_lvl["level"] = 0
+    unit["level"] = 0
+
     # Update units_cache after position change.
     # Use translate_squad_to_destination for rigid squad movement: anchor + all
     # surviving models translate by the same delta, occupied_hexes_by_model is
@@ -3983,20 +3999,9 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     if unit_col != dest_col or unit_row != dest_row:
         return False, {"error": "position_update_failed"}
 
-    # Squad move rigide = destination TOUJOURS au sol. translate_squad_to_destination ne met à jour
-    # que col/row (jamais le niveau) → resynchroniser level=0 sur toutes les figs vivantes du squad,
-    # sinon une fig partie de l'étage resterait marquée en hauteur alors qu'elle est au sol (13.06).
-    _mc_lvl = require_key(game_state, "models_cache")
-    _sq_lvl = require_key(game_state, "squad_models")
-    for _mid in _sq_lvl.get(str(unit["id"]), []):  # get allowed
-        _m = _mc_lvl.get(_mid)
-        if _m is None or int(_m.get("HP_CUR", 0)) <= 0:  # get allowed
-            continue
-        _m["level"] = 0
-    _uc_lvl = require_key(game_state, "units_cache").get(str(unit["id"]))
-    if _uc_lvl is not None:
-        _uc_lvl["level"] = 0
-    unit["level"] = 0
+    # Reset level=0 des figs du squad (move rigide au sol) : désormais fait AVANT la translation
+    # dans _attempt_movement_to_destination (sinon floor_height_at crashait sur une fig encore
+    # marquée à l'étage mais déplacée hors empreinte). Rien à refaire ici.
 
     # DEBUG: Log exact values before using unit coordinates
     from engine.game_utils import add_console_log, safe_print
