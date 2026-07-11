@@ -908,6 +908,8 @@ const HEX_STEPS_PER_INCH_DISPLAY = 10;
 /** Au-dessus de tout le reste du stage (unités 2000, drag 9000, UI / popups ~10000). */
 const MEASURE_GUIDE_LINE_Z_INDEX = 15000;
 const BOARD_ZOOM_DEFAULT = 1;
+/** Debounce (ms) du recalcul de pool orienté au pivot molette d'une figurine (fig active). */
+const PER_MODEL_PIVOT_DEBOUNCE_MS = 100;
 // Marge verticale (px) réservée autour du board en mode « adapter à l'écran » — alignée sur le
 // ``calc(100vh - 40px)`` du viewport scrollable.
 const BOARD_FIT_VERTICAL_MARGIN = 40;
@@ -2242,9 +2244,16 @@ export default function Board({
     height: number;
   } | null>(null);
   const [isBoardPanning, setIsBoardPanning] = useState(false);
-  /** Bumpé après un pivot molette de la fig active : force le redraw de la zone de move preview
-   * (les mask loops vivent dans un ref muté sans re-render → sans ce version, la zone n'était
-   * rafraîchie qu'au prochain mousemove). */
+  /** Timer de debounce du recalcul de pool au pivot molette (fig active). */
+  const perModelPivotTimerRef = useRef<number | null>(null);
+  /** Dernière position curseur (client px) captée par le mousemove du move par-figurine : permet de
+   * re-snapper le fantôme immédiatement après un rebuild (ex. pivot → pool/buckets reconstruits),
+   * sans attendre un vrai déplacement de souris. */
+  const lastPerModelPointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
+  /** Bumpé après le recalcul de pool orienté : force le redraw de la zone de move preview (le pool
+   * vit dans un ref muté en place → le useMemo de dessin doit être re-déclenché). Volontairement
+   * SÉPARÉ du plan : l'effet mousemove du fantôme dépend de plan.models mais PAS de ce version →
+   * la zone se met à jour sans détruire le fantôme suiveur. */
   const [perModelPivotVersion, setPerModelPivotVersion] = useState(0);
 
   // Mode « adapter à l'écran » : facteur de réduction (≤ 1) pour que le board tienne entièrement dans
@@ -2344,37 +2353,32 @@ export default function Board({
         e.preventDefault();
         const activeMid = squadMovePlan?.activeModelId ?? null;
         if (activeMid) {
-          // Fig active suivant la souris : on pivote le FANTÔME SUIVEUR (hover-base-shape), pas le
-          // ghost à la position d'origine. L'orientation est conservée dans hoverMoveOrientationStepRef
-          // et committée au plan à la pose (onMoveModelInPlan).
-          const current = hoverMoveOrientationStepRef.current ?? 0;
-          hoverMoveOrientationStepRef.current = wrapOrientationStep(current, delta);
+          // Fig active suivant la souris : on pivote le FANTÔME SUIVEUR (hover-base-shape) tout de
+          // suite (impératif). L'orientation en cours est la source de vérité pour la pose (lue à la
+          // pose) et pour le pool recalculé ci-dessous.
+          const newOri = wrapOrientationStep(hoverMoveOrientationStepRef.current ?? 0, delta);
+          hoverMoveOrientationStepRef.current = newOri;
           const baseShape = hoverSpriteRef.current?.getChildByName("hover-base-shape");
           if (baseShape) {
-            baseShape.rotation = orientationStepToRadians(hoverMoveOrientationStepRef.current);
+            baseShape.rotation = orientationStepToRadians(newOri);
           }
-          // Recalcule le pool de la fig active avec l'empreinte ORIENTÉE (EZ ennemie 2" / collisions),
-          // sans re-render (préserve le fantôme + hoverMoveOrientationStepRef). Puis re-déclenche un
-          // mousemove synthétique à la position du curseur : re-snap du fantôme + redessin du contour
-          // de preview APRÈS le scroll, sans attendre un vrai déplacement de souris.
-          const _wheelX = e.clientX;
-          const _wheelY = e.clientY;
-          void Promise.resolve(
-            squadMoveCallbacksRef.current.onReorientActiveModelPool?.(
-              activeMid,
-              hoverMoveOrientationStepRef.current
-            )
-          ).then(() => {
-            // Redraw de la zone de move preview (mask loops dans un ref → besoin d'un re-render pour
-            // que le useMemo de dessin les relise). L'effet mousemove ne dépend PAS de ce version →
-            // il ne se ré-exécute pas → le fantôme n'est pas détruit.
-            setPerModelPivotVersion((v) => v + 1);
-            // Re-snap du fantôme + guides à la position du curseur, sans attendre un vrai mousemove.
-            const canvas = canvasContainerRef.current?.querySelector("canvas");
-            canvas?.dispatchEvent(
-              new MouseEvent("mousemove", { clientX: _wheelX, clientY: _wheelY, bubbles: true })
-            );
-          });
+          // Debounce : après la pause de scroll, recalcule le pool avec l'empreinte ORIENTÉE (EZ
+          // ennemie 2" / collisions) et committe l'orientation au plan → la zone de move preview se
+          // redessine. Le pool est muté en place (identité conservée) → le fantôme n'est pas détruit.
+          // Un seul appel backend par pause (pas de spam), le dernier timer gagne (pas de race).
+          if (perModelPivotTimerRef.current !== null) {
+            window.clearTimeout(perModelPivotTimerRef.current);
+          }
+          perModelPivotTimerRef.current = window.setTimeout(() => {
+            perModelPivotTimerRef.current = null;
+            void Promise.resolve(
+              squadMoveCallbacksRef.current.onReorientActiveModelPool?.(activeMid, newOri)
+            ).then(() => {
+              // Pool muté en place → force le redraw de la zone (useMemo de dessin). Ce version n'est
+              // PAS dans les deps de l'effet mousemove du fantôme → celui-ci n'est pas détruit.
+              setPerModelPivotVersion((v) => v + 1);
+            });
+          }, PER_MODEL_PIVOT_DEBOUNCE_MS);
         } else if (onBumpPerModelOrientation) {
           // Aucune fig active (« mode squad ») : pivot de TOUTES les figs posées, via le plan.
           onBumpPerModelOrientation(delta);
@@ -2425,6 +2429,15 @@ export default function Board({
       viewport.removeEventListener("wheel", handleBoardWheel);
     };
   }, [handleBoardWheel]);
+
+  // Fig désélectionnée / posée : annuler un recalcul de pool en attente (sinon le timer réactiverait
+  // la fig via setSquadMovePlan(activeModelId)). Nettoie aussi au démontage.
+  useEffect(() => {
+    if (!squadMovePlan?.activeModelId && perModelPivotTimerRef.current !== null) {
+      window.clearTimeout(perModelPivotTimerRef.current);
+      perModelPivotTimerRef.current = null;
+    }
+  }, [squadMovePlan?.activeModelId]);
 
   // perModelMove : quand une figurine devient active, initialise l'orientation du fantôme suiveur
   // (hoverMoveOrientationStepRef) sur l'orientation courante de CETTE fig, et réoriente le socle du
@@ -4263,7 +4276,12 @@ export default function Board({
         movePreviewGuideLineRef.current.visible = false;
       }
       setMovePreviewDistanceTooltip(null);
-      hoverMoveOrientationStepRef.current = null;
+      // Ne PAS reset l'orientation tant qu'une figurine est en cours de placement (perModelMove) :
+      // sinon un refresh (gameState) entre deux mousemove perdrait le pivot en cours → le fantôme
+      // se reconstruirait à plat. On ne reset qu'en dehors d'un placement actif.
+      if (!effectivePerModelPlanRef.current?.activeModelId) {
+        hoverMoveOrientationStepRef.current = null;
+      }
       losHexRef.current = null;
     };
   }, [
@@ -6749,6 +6767,7 @@ export default function Board({
   // Ghost per-figurine (squad move plan) : ghost suit le curseur, hoveredHexRef mis à jour pour le
   // click handler (shouldConfirmAtIcon). Complètement indépendant de active_movement_unit.
   // S'active uniquement quand mode === "perModelMove" && activeModelId est set.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: perModelPivotVersion est un déclencheur volontaire — au pivot molette, on reconstruit le pool orienté + les buckets de snap ; le reste passe par des refs.
   useEffect(() => {
     if (mode !== "perModelMove" && !isDeploymentMove) return;
     if (!boardConfig) return;
@@ -6914,6 +6933,15 @@ export default function Board({
         baseCircle.drawCircle(0, 0, defaultIconDiam / 2);
       }
       baseCircle.endFill();
+      // Applique l'orientation EN COURS du socle (pivot molette) : sans ça, toute reconstruction du
+      // fantôme (ex. refresh backend du badge caché au mousemove) le remettrait à plat (origine).
+      const hoverOri =
+        hoverMoveOrientationStepRef.current ??
+        orientationStepForBoard(squadUnit, gameState?.units_cache);
+      if (nrHover && hoverOri !== undefined) {
+        baseCircle.rotation = orientationStepToRadians(hoverOri);
+        hoverMoveOrientationStepRef.current = hoverOri;
+      }
       container.addChild(baseCircle);
 
       if (effectiveUnit.ICON) {
@@ -7432,6 +7460,7 @@ export default function Board({
       // Guard sur activeModelId (state) ET sur la taille du pool (ref synchrone).
       // handleMoveModelInPlan vide le pool AVANT setSquadMovePlan → la race condition
       // (render pas encore arrivé, mais placement déjà fait) est couverte par la 2ème condition.
+      lastPerModelPointerRef.current = { clientX: ev.clientX, clientY: ev.clientY };
       if (!squadMovePlanRef.current?.activeModelId || !squadMoveModelPoolRef?.current?.size) {
         if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
           hoverSpriteRef.current.visible = false;
@@ -7471,6 +7500,18 @@ export default function Board({
 
     canvas.addEventListener("mousemove", onMouseMove);
 
+    // Rebuild de l'effet (ex. pivot molette → pool + buckets de snap reconstruits) : re-snappe le
+    // fantôme à la dernière position curseur connue → il réapparaît orienté et positionné sans
+    // attendre un vrai mousemove (sinon il resterait caché / snappé sur l'ancien pool).
+    if (lastPerModelPointerRef.current) {
+      onMouseMove(
+        new MouseEvent("mousemove", {
+          clientX: lastPerModelPointerRef.current.clientX,
+          clientY: lastPerModelPointerRef.current.clientY,
+        })
+      );
+    }
+
     return () => {
       canvas.removeEventListener("mousemove", onMouseMove);
       if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
@@ -7499,6 +7540,8 @@ export default function Board({
     effectivePerModelPlan?.activeModelId,
     effectivePerModelPlan?.unitId,
     effectivePerModelPlan?.models,
+    // Pivot molette : force la reconstruction des buckets de snap avec le pool orienté recalculé.
+    perModelPivotVersion,
     boardConfig,
     gameConfig,
     units,
@@ -9816,11 +9859,14 @@ export default function Board({
             (m) => (m as { orientation?: number }).orientation !== undefined
           );
         const unitOrientStep = orientationStepForBoard(unit, gameState?.units_cache);
+        const activePlanModelId = effectivePerModelPlan?.activeModelId ?? null;
         const modelOrientations: number[] | undefined =
           orientationByModel || planHasOrient
             ? modelIds.map((mid) => {
+                // Fig ACTIVE (suit la souris) : son ghost d'origine reste à l'orientation committée
+                // (seul le fantôme suiveur montre le pivot en cours) → on ignore l'orient du plan.
                 const planOri =
-                  isSquadGhost || isDeployGhost
+                  (isSquadGhost || isDeployGhost) && mid !== activePlanModelId
                     ? (effectivePerModelPlan!.models[mid] as { orientation?: number } | undefined)
                         ?.orientation
                     : undefined;

@@ -4416,8 +4416,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // Chaque destination = [col, row, level] : le niveau réel (0 sol / view_level étage) est mémorisé
       // par case pour que la pose se fasse au bon niveau (§13.06), pas à la vue courante.
       const dests = result.destinations as Array<[number, number, number]>;
-      const set = new Set<string>();
-      const levelByKey = new Map<string, number>();
+      // Mutation EN PLACE du Set de pool (même identité d'objet) : l'effet mousemove a
+      // ``effectivePerModelPoolRef.current`` (ce Set) dans ses deps → recréer un Set le ferait
+      // se ré-exécuter au prochain re-render et détruirait le fantôme suiveur. En mutant, la dep
+      // ne change pas → on peut committer l'orientation au plan (re-render → redraw de la zone)
+      // sans casser le fantôme. La Map de niveaux est mutée de même.
+      const set = squadMoveModelPoolRef.current ?? new Set<string>();
+      set.clear();
+      const levelByKey = squadMoveModelLevelByKeyRef.current ?? new Map<string, number>();
+      levelByKey.clear();
       for (const [c, r, lv] of dests) {
         const key = `${c},${r}`;
         set.add(key);
@@ -4429,18 +4436,27 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       squadMoveModelMaskLoopsRef.current = Array.isArray(rawLoops)
         ? (rawLoops as number[][])
         : null;
-      // updatePlan=false (pivot molette de la fig active) : on rafraîchit UNIQUEMENT les refs de
-      // pool/contour, sans setSquadMovePlan — évite le re-render qui ferait cleanup l'effet mousemove
-      // (fantôme caché + hoverMoveOrientationStepRef reset). Le pool orienté restreint alors la pose.
+      // updatePlan=true : committe l'orientation en cours au plan (source de vérité) ET redéclenche
+      // le rendu → la zone de move preview relit le pool muté. Le Set de pool gardant son identité,
+      // l'effet mousemove ne se ré-exécute pas → fantôme préservé.
       if (updatePlan) {
-        setSquadMovePlan((prev) => (prev ? { ...prev, activeModelId: modelId } : prev));
+        setSquadMovePlan((prev) => {
+          if (!prev) return prev;
+          const models =
+            orientation !== undefined && prev.models[modelId]
+              ? { ...prev.models, [modelId]: { ...prev.models[modelId], orientation } }
+              : prev.models;
+          return { ...prev, activeModelId: modelId, models };
+        });
       }
     },
     [postEngineQuery, currentLevelRef]
   );
 
   /** Pivot molette de la fig active : recalcule SON pool avec l'empreinte orientée (EZ ennemie 2" /
-   * collisions), sans re-render (préserve le fantôme suiveur). */
+   * collisions) en mutant les refs de pool EN PLACE, SANS toucher le plan (setSquadMovePlan
+   * ré-exécuterait l'effet mousemove du fantôme, dont les deps incluent plan.models → fantôme
+   * détruit). Le redraw de la zone est déclenché séparément côté BoardPvp (version dédiée). */
   const handleReorientActiveModelPool = useCallback(
     (modelId: string, orientation: number): Promise<void> =>
       handleSelectModelForMove(modelId, orientation, false),

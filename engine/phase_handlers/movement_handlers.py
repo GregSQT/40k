@@ -3113,10 +3113,15 @@ def movement_build_model_destinations_pool(
         # sûr quand thru_friendly (sinon le champ dépend du plan provisoire, recalcul obligatoire).
         # FLY : le champ n'a aucun obstacle → indépendant du plan provisoire → toujours cacheable.
         _mm_can_cache = thru_friendly or has_fly
-        _mm_cache: Dict[Tuple[str, int, int, int], Dict[Tuple[int, int], float]] = game_state.setdefault(
+        _mm_cache: Dict[Tuple[str, int, int, int, int], Dict[Tuple[int, int], float]] = game_state.setdefault(
             "_move_model_field_cache", {}
         )
-        _mm_key: Tuple[str, int, int, int] = (str(model_id), start_col, start_row, int(budget))
+        # L'orientation du socle fait partie de la clé : l'empreinte (donc le champ atteignable et la
+        # limite du bord de board) dépend de l'orientation. Sans elle, un pivot ré-utilisait le champ
+        # de l'orientation précédente (ex. socle vertical bloqué comme s'il était horizontal).
+        _mm_key: Tuple[str, int, int, int, int] = (
+            str(model_id), start_col, start_row, int(budget), mover_orient,
+        )
         _mm_field = _mm_cache.get(_mm_key) if _mm_can_cache else None
         _mm_cache_hit = _mm_field is not None
         if _mm_field is None:
