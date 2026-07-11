@@ -2,6 +2,7 @@
 import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAuthSession } from "../auth/authStorage";
+import { ORIENTATION_STEP_COUNT, wrapOrientationStep } from "../constants/gameConfig";
 import type { GameMode, PlayerId, Unit } from "../types";
 import type { DiceValue, HiddenDetectionInfo, UnitModel, Weapon } from "../types/game";
 import {
@@ -51,10 +52,10 @@ function validateOrientationStepValue(rawOrientation: unknown, context: string):
     typeof rawOrientation !== "number" ||
     !Number.isInteger(rawOrientation) ||
     rawOrientation < 0 ||
-    rawOrientation > 5
+    rawOrientation >= ORIENTATION_STEP_COUNT
   ) {
     throw new Error(
-      `${context}: orientation must be an integer in 0..5, got ${String(rawOrientation)}`
+      `${context}: orientation must be an integer in 0..${ORIENTATION_STEP_COUNT - 1}, got ${String(rawOrientation)}`
     );
   }
   return rawOrientation;
@@ -531,10 +532,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
    */
   const [squadMovePlan, setSquadMovePlan] = useState<{
     unitId: number;
-    /** Positions provisoires courantes (model_id -> {col,row,level?}). */
-    models: Record<string, { col: number; row: number; level?: number }>;
+    /** Positions + orientation provisoires courantes (model_id -> {col,row,level?,orientation?}).
+     * ``orientation`` (0..5, pivot socle oval/carré) : absente → orientation courante de la fig. */
+    models: Record<string, { col: number; row: number; level?: number; orientation?: number }>;
     /** Positions de DEBUT de mode (pour reset par-fig clic droit + cancel escouade). */
-    originModels: Record<string, { col: number; row: number }>;
+    originModels: Record<string, { col: number; row: number; orientation?: number }>;
     activeModelId: string | null;
     perModelValid: Record<string, boolean>;
     coherencyOk: boolean;
@@ -4177,7 +4179,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         );
         return {
           ...current,
-          orientation: (currentOrientation + delta + 6) % 6,
+          orientation: wrapOrientationStep(currentOrientation, delta),
         };
       });
     },
@@ -4212,7 +4214,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   /** Positions par-figurine actuelles d'une escouade (depuis units_cache.occupied_hexes_by_model). */
   const readSquadModelPositions = useCallback(
-    (unitId: number | string): Record<string, { col: number; row: number; level: number }> => {
+    (
+      unitId: number | string
+    ): Record<string, { col: number; row: number; level: number; orientation: number }> => {
       const entry = (
         gameState?.units_cache as
           | Record<
@@ -4220,6 +4224,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               {
                 occupied_hexes_by_model?: Record<string, [number, number]>;
                 level_by_model?: Record<string, number>;
+                orientation_by_model?: Record<string, number>;
+                orientation?: number;
                 level?: number;
               }
             >
@@ -4229,10 +4235,20 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // Niveau (étages) committé par fig : source level_by_model, fallback niveau d'ancre / 0.
       const levelByModel = entry?.level_by_model;
       const unitLevel = entry?.level ?? 0;
-      const out: Record<string, { col: number; row: number; level: number }> = {};
+      // Orientation (0..5) committée par fig : source orientation_by_model (multi-fig), fallback
+      // orientation d'unité (mono-fig / escouade homogène) puis 0.
+      const orientByModel = entry?.orientation_by_model;
+      const unitOrientation = entry?.orientation ?? 0;
+      const out: Record<string, { col: number; row: number; level: number; orientation: number }> =
+        {};
       if (byModel) {
         for (const [mid, pos] of Object.entries(byModel)) {
-          out[mid] = { col: pos[0], row: pos[1], level: levelByModel?.[mid] ?? unitLevel };
+          out[mid] = {
+            col: pos[0],
+            row: pos[1],
+            level: levelByModel?.[mid] ?? unitLevel,
+            orientation: orientByModel?.[mid] ?? unitOrientation,
+          };
         }
       }
       return out;
@@ -4244,11 +4260,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const refreshSquadMovePlanValidity = useCallback(
     async (
       unitId: number,
-      models: Record<string, { col: number; row: number; level?: number }>
+      models: Record<string, { col: number; row: number; level?: number; orientation?: number }>
     ) => {
-      // (mid,col,row,level) : le niveau capturé au drop voyage jusqu'au preview → occupation testée
-      // au bon niveau (superposition inter-étage) et validate_floor_placement (13.06).
-      const plan = Object.entries(models).map(([mid, p]) => [mid, p.col, p.row, p.level ?? 0]);
+      // (mid,col,row,level,orientation) : niveau + orientation provisoires voyagent jusqu'au preview
+      // → occupation testée au bon niveau (superposition inter-étage, 13.06) ET voile rouge reflétant
+      // le pivot socle par-fig (empreinte orientée). orientation null = inchangée côté moteur.
+      const plan = Object.entries(models).map(([mid, p]) => [
+        mid,
+        p.col,
+        p.row,
+        p.level ?? 0,
+        p.orientation ?? null,
+      ]);
       let result: Record<string, unknown> | null = null;
       try {
         result = await postEngineQuery({
@@ -4275,6 +4298,40 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       );
     },
     [postEngineQuery]
+  );
+
+  /** Molette en mode perModelMove : pivote le socle (0..5, pas de 60°). Si une figurine est
+   * active (activeModelId) → pivote CETTE fig seule (« mode fig ») ; sinon → pivote TOUTES les
+   * figs de l'escouade ensemble (« mode squad »). Met à jour le plan provisoire et re-teste le
+   * voile rouge (empreinte orientée par-fig côté moteur). */
+  const handleBumpPerModelOrientation = useCallback(
+    (delta: number) => {
+      if (!Number.isInteger(delta)) {
+        throw new Error(`Per-model orientation delta must be an integer, got ${String(delta)}`);
+      }
+      const bump = (o?: number): number => wrapOrientationStep(o ?? 0, delta);
+      setSquadMovePlan((prev) => {
+        if (!prev) return prev;
+        let models: typeof prev.models;
+        if (prev.activeModelId && prev.models[prev.activeModelId]) {
+          const cur = prev.models[prev.activeModelId];
+          models = {
+            ...prev.models,
+            [prev.activeModelId]: { ...cur, orientation: bump(cur.orientation) },
+          };
+        } else {
+          models = Object.fromEntries(
+            Object.entries(prev.models).map(([mid, p]) => [
+              mid,
+              { ...p, orientation: bump(p.orientation) },
+            ])
+          );
+        }
+        void refreshSquadMovePlanValidity(prev.unitId, models);
+        return { ...prev, models };
+      });
+    },
+    [refreshSquadMovePlanValidity]
   );
 
   /** Double-clic escouade / simple-clic fig : entre en mode plan provisoire par-figurine. */
@@ -4375,7 +4432,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   /** Pose la figurine active a (col,row) dans le plan provisoire + refresh validite. */
   const handleMoveModelInPlan = useCallback(
-    (modelId: string, col: number, row: number) => {
+    (modelId: string, col: number, row: number, orientation?: number) => {
       // Niveau de pose = niveau EFFECTIF de la case dans le pool (§13.06), pas la vue courante : une
       // case au sol reste au sol même si la vue est sur l'étage. La destination provient TOUJOURS du
       // pool → clé présente ; sinon incohérence pool/pose = erreur explicite (pas de fallback masquant).
@@ -4391,9 +4448,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       squadMoveModelMaskLoopsRef.current = null;
       setSquadMovePlan((prev) => {
         if (!prev) return prev;
+        // Orientation committée au plan : celle du pivot en cours (fantôme suiveur) si fournie,
+        // sinon l'orientation existante de la fig (préservée à travers la pose).
+        const placedOrientation = orientation ?? prev.models[modelId]?.orientation;
         const models = {
           ...prev.models,
-          [modelId]: { col, row, level: placedLevel },
+          [modelId]: { col, row, level: placedLevel, orientation: placedOrientation },
         };
         void refreshSquadMovePlanValidity(prev.unitId, models);
         return { ...prev, models, activeModelId: null };
@@ -4468,13 +4528,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       console.warn("[SQUAD-MOVE] commit ABORT (canValidate=false, il reste du rouge)");
       return;
     }
-    // (mid,col,row,level) : le niveau committé par fig est persisté par commit_move_plan
-    // (update_model_position écrit model["level"]) → la fig posée à l'étage n'est plus au sol.
+    // (mid,col,row,level,orientation) : niveau + orientation committés par fig, persistés par
+    // commit_move_plan (update_model_position écrit model["level"]/["orientation"]) → la fig posée
+    // à l'étage n'est plus au sol, et le socle pivoté conserve son orientation. null = inchangée.
     const plan = Object.entries(squadMovePlan.models).map(([mid, p]) => [
       mid,
       p.col,
       p.row,
       p.level ?? 0,
+      p.orientation ?? null,
     ]);
     try {
       await executeAction({
@@ -5762,11 +5824,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           const dy = destCube.y - anchorCube.y;
           const dz = destCube.z - anchorCube.z;
           const byModel = unitEntry?.occupied_hexes_by_model;
-          const models: Record<string, { col: number; row: number }> = {};
+          // Orientation choisie en mode squad rigide (movePreview) : appliquée IDENTIQUEMENT à
+          // toutes les figs en entrant en perModelMove (« mode squad = toutes pivotent ensemble »).
+          const squadOrientation = movePreview.orientation;
+          const models: Record<string, { col: number; row: number; orientation?: number }> = {};
           if (byModel) {
             for (const [mid, pos] of Object.entries(byModel)) {
               const fc = offsetToCube(pos[0], pos[1]);
-              models[mid] = cubeToOffset({ x: fc.x + dx, y: fc.y + dy, z: fc.z + dz });
+              models[mid] = {
+                ...cubeToOffset({ x: fc.x + dx, y: fc.y + dy, z: fc.z + dz }),
+                orientation: squadOrientation,
+              };
             }
           }
           setMovePreview(null);
@@ -7572,6 +7640,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onStartMovePreview: () => {},
       onDirectMove: () => {},
       onBumpMovePreviewOrientation: () => {},
+      onBumpPerModelOrientation: () => {},
       squadMovePlan: null,
       fleePreviewUnitId: null,
       squadMoveModelPoolRef,
@@ -7783,6 +7852,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onStartMovePreview: handleStartMovePreview,
     onDirectMove: handleDirectMove,
     onBumpMovePreviewOrientation: handleBumpMovePreviewOrientation,
+    onBumpPerModelOrientation: handleBumpPerModelOrientation,
     // Move par-figurine (squad.md brique 3)
     squadMovePlan,
     fleePreviewUnitId,

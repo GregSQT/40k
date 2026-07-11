@@ -851,6 +851,15 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     DMG: 1,
     WEAPON_RULES: [],
   },
+  crozius_arcanum: {
+    display_name: "Crozius Arcanum",
+    NB: 5,
+    ATK: 2,
+    STR: 6,
+    AP: -1,
+    DMG: 2,
+    WEAPON_RULES: ["PISTOL"],
+  },
   encarmine_blade: {
     display_name: "Encarmine Blade",
     NB: 4,

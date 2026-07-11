@@ -193,3 +193,19 @@ export const validateDynamicConfig = (boardConfig: Record<string, unknown> | nul
 
   return true;
 };
+
+/**
+ * Nombre de crans discrets d'orientation d'un socle (pivot molette oval/carré).
+ * L'angle d'un cran = 2π / ORIENTATION_STEP_COUNT. DOIT rester synchronisé avec le moteur
+ * (ORIENTATION_STEP_COUNT dans engine/hex_utils.py) — sinon l'empreinte de collision calculée
+ * côté moteur et le socle affiché divergent. Augmenter la valeur = pivot plus fin (crans plus petits).
+ */
+export const ORIENTATION_STEP_COUNT = 12;
+
+/** Angle (radians) d'un pas d'orientation de socle. */
+export const orientationStepToRadians = (step: number): number =>
+  (step * 2 * Math.PI) / ORIENTATION_STEP_COUNT;
+
+/** Incrémente un pas d'orientation avec wrap dans [0, ORIENTATION_STEP_COUNT). */
+export const wrapOrientationStep = (step: number, delta: number): number =>
+  (((step + delta) % ORIENTATION_STEP_COUNT) + ORIENTATION_STEP_COUNT) % ORIENTATION_STEP_COUNT;

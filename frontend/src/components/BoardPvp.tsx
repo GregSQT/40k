@@ -3,6 +3,11 @@
 import * as PIXI from "pixi.js-legacy";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import {
+  ORIENTATION_STEP_COUNT,
+  orientationStepToRadians,
+  wrapOrientationStep,
+} from "../constants/gameConfig";
 import { TUTORIAL_STEP_TITLES_INTERCESSOR_HALO, useTutorial } from "../contexts/TutorialContext";
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useSingleDoubleClick } from "../hooks/useSingleDoubleClick";
@@ -468,10 +473,10 @@ function validateBoardOrientationStep(rawOrientation: unknown, context: string):
     typeof rawOrientation !== "number" ||
     !Number.isInteger(rawOrientation) ||
     rawOrientation < 0 ||
-    rawOrientation > 5
+    rawOrientation >= ORIENTATION_STEP_COUNT
   ) {
     throw new Error(
-      `${context}: orientation must be an integer in 0..5, got ${String(rawOrientation)}`
+      `${context}: orientation must be an integer in 0..${ORIENTATION_STEP_COUNT - 1}, got ${String(rawOrientation)}`
     );
   }
   return rawOrientation;
@@ -589,6 +594,8 @@ type BoardProps = {
     orientation?: number
   ) => void;
   onBumpMovePreviewOrientation?: (delta: number) => void;
+  /** Molette en perModelMove : pivot socle de la fig active (ou toute l'escouade si aucune active). */
+  onBumpPerModelOrientation?: (delta: number) => void;
   /** Move par-figurine (squad.md brique 3) — plan provisoire non committe. */
   squadMovePlan?: {
     unitId: number;
@@ -608,7 +615,7 @@ type BoardProps = {
   squadMoveModelMaskLoopsRef?: React.RefObject<number[][] | null>;
   onStartSquadModelMove?: (unitId: number | string) => void | Promise<void>;
   onSelectModelForMove?: (modelId: string) => void | Promise<void>;
-  onMoveModelInPlan?: (modelId: string, col: number, row: number) => void;
+  onMoveModelInPlan?: (modelId: string, col: number, row: number, orientation?: number) => void;
   onResetModelInPlan?: (modelId: string) => void;
   onCommitSquadMovePlan?: () => void | Promise<void>;
   onCancelSquadMove?: () => void;
@@ -1180,6 +1187,7 @@ export default function Board({
   onStartMovePreview,
   onDirectMove,
   onBumpMovePreviewOrientation,
+  onBumpPerModelOrientation,
   squadMovePlan = null,
   fleePreviewUnitId = null,
   squadMoveModelPoolRef,
@@ -2321,6 +2329,27 @@ export default function Board({
         onBumpMovePreviewOrientation(delta);
         return;
       }
+      // Mode plan par-figurine : pivot du socle. Fig active → cette fig ; sinon → toute l'escouade
+      // (géré dans onBumpPerModelOrientation). Socle rond ignoré côté rendu (pivot sans effet visible).
+      if (mode === "perModelMove") {
+        e.preventDefault();
+        const activeMid = squadMovePlan?.activeModelId ?? null;
+        if (activeMid) {
+          // Fig active suivant la souris : on pivote le FANTÔME SUIVEUR (hover-base-shape), pas le
+          // ghost à la position d'origine. L'orientation est conservée dans hoverMoveOrientationStepRef
+          // et committée au plan à la pose (onMoveModelInPlan).
+          const current = hoverMoveOrientationStepRef.current ?? 0;
+          hoverMoveOrientationStepRef.current = wrapOrientationStep(current, delta);
+          const baseShape = hoverSpriteRef.current?.getChildByName("hover-base-shape");
+          if (baseShape) {
+            baseShape.rotation = orientationStepToRadians(hoverMoveOrientationStepRef.current);
+          }
+        } else if (onBumpPerModelOrientation) {
+          // Aucune fig active (« mode squad ») : pivot de TOUTES les figs posées, via le plan.
+          onBumpPerModelOrientation(delta);
+        }
+        return;
+      }
       if (
         effectivePhase === "move" &&
         mode === "select" &&
@@ -2336,10 +2365,10 @@ export default function Board({
         if (current === undefined) {
           throw new Error(`Unit ${selectedUnit.id} is missing orientation`);
         }
-        hoverMoveOrientationStepRef.current = (current + delta + 6) % 6;
+        hoverMoveOrientationStepRef.current = wrapOrientationStep(current, delta);
         const baseShape = hoverSpriteRef.current?.getChildByName("hover-base-shape");
         if (baseShape) {
-          baseShape.rotation = (hoverMoveOrientationStepRef.current * Math.PI) / 3;
+          baseShape.rotation = orientationStepToRadians(hoverMoveOrientationStepRef.current);
         }
       }
     },
@@ -2349,7 +2378,9 @@ export default function Board({
       gameState?.units_cache,
       mode,
       onBumpMovePreviewOrientation,
+      onBumpPerModelOrientation,
       selectedUnitId,
+      squadMovePlan?.activeModelId,
       units,
     ]
   );
@@ -2363,6 +2394,22 @@ export default function Board({
       viewport.removeEventListener("wheel", handleBoardWheel);
     };
   }, [handleBoardWheel]);
+
+  // perModelMove : quand une figurine devient active, initialise l'orientation du fantôme suiveur
+  // (hoverMoveOrientationStepRef) sur l'orientation courante de CETTE fig, et réoriente le socle du
+  // hover déjà construit (non reconstruit au changement de fig, l'unité ne change pas). Sans ça le
+  // pivot repartirait de 0 au lieu de l'orientation réelle de la fig sélectionnée.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: lecture ponctuelle du plan au changement de fig active
+  useEffect(() => {
+    const activeMid = squadMovePlan?.activeModelId;
+    if (mode !== "perModelMove" || !activeMid) return;
+    const ori = squadMovePlan?.models?.[activeMid]?.orientation ?? 0;
+    hoverMoveOrientationStepRef.current = ori;
+    const baseShape = hoverSpriteRef.current?.getChildByName("hover-base-shape");
+    if (baseShape) {
+      baseShape.rotation = orientationStepToRadians(ori);
+    }
+  }, [mode, squadMovePlan?.activeModelId]);
 
   useEffect(() => {
     const viewport = boardViewportRef.current;
@@ -3622,7 +3669,7 @@ export default function Board({
           hoverMoveOrientationStepRef.current ??
           orientationStepForBoard(selectedUnit, gameState?.units_cache);
         if (nrHover && hoverOrientation !== undefined) {
-          baseCircle.rotation = (hoverOrientation * Math.PI) / 3;
+          baseCircle.rotation = orientationStepToRadians(hoverOrientation);
           hoverMoveOrientationStepRef.current = hoverOrientation;
         }
         container.addChild(baseCircle);
@@ -3713,7 +3760,7 @@ export default function Board({
       container.visible = !(phase === "move" && mode === "movePreview");
       const hoverBaseShape = container.getChildByName("hover-base-shape");
       if (hoverBaseShape && hoverMoveOrientationStepRef.current !== null) {
-        hoverBaseShape.rotation = (hoverMoveOrientationStepRef.current * Math.PI) / 3;
+        hoverBaseShape.rotation = orientationStepToRadians(hoverMoveOrientationStepRef.current);
       }
       const iconCol = best.col;
       const iconRow = best.row;
@@ -8170,7 +8217,13 @@ export default function Board({
         void squadMoveCallbacksRef.current.onStartSquadModelMove?.(unitId);
       },
       onMoveModelInPlan: (modelId: string, col: number, row: number) => {
-        squadMoveCallbacksRef.current.onMoveModelInPlan?.(modelId, col, row);
+        // Orientation du pivot en cours (fantôme suiveur) → committée au plan à la pose de la fig.
+        squadMoveCallbacksRef.current.onMoveModelInPlan?.(
+          modelId,
+          col,
+          row,
+          hoverMoveOrientationStepRef.current ?? undefined
+        );
       },
       onMoveModelInChargePlan: (modelId: string, col: number, row: number) => {
         chargeModelCallbacksRef.current.onMoveModelInChargePlan?.(modelId, col, row);
@@ -9719,6 +9772,30 @@ export default function Board({
         const modelMetas: Array<ModelVisualMeta | null> = modelMetasByModel
           ? modelIds.map((mid) => modelMetasByModel[mid] ?? null)
           : [];
+        // Orientation par figurine (pivot socle par-fig), alignée sur modelIds. Priorité : plan
+        // provisoire (pivot molette en cours) → orientation_by_model committée → orientation d'unité.
+        // Passée seulement si une source par-fig existe, sinon undefined (UnitRenderer retombe sur
+        // displayOrientationStep unit-level → aucune régression pour les unités sans pivot par-fig).
+        const orientationByModel = (
+          cacheEntry as { orientation_by_model?: Record<string, number> } | undefined
+        )?.orientation_by_model;
+        const planHasOrient =
+          (isSquadGhost || isDeployGhost) &&
+          Object.values(effectivePerModelPlan!.models).some(
+            (m) => (m as { orientation?: number }).orientation !== undefined
+          );
+        const unitOrientStep = orientationStepForBoard(unit, gameState?.units_cache);
+        const modelOrientations: number[] | undefined =
+          orientationByModel || planHasOrient
+            ? modelIds.map((mid) => {
+                const planOri =
+                  isSquadGhost || isDeployGhost
+                    ? (effectivePerModelPlan!.models[mid] as { orientation?: number } | undefined)
+                        ?.orientation
+                    : undefined;
+                return planOri ?? orientationByModel?.[mid] ?? unitOrientStep ?? 0;
+              })
+            : undefined;
         // Niveau d'étage par figurine (aligné sur modelCenters) → badge coloré.
         // Pendant un drag (move/déploiement preview) : niveau LIVE dérivé de la position provisoire
         // (étage courant si la fig est sur ce plancher, sinon sol) → mise à jour sans attendre le
@@ -9951,6 +10028,7 @@ export default function Board({
           modelCenters,
           modelIds,
           modelMetas,
+          modelOrientations,
           modelHps,
           modelLevels,
           modelLevelGhost,

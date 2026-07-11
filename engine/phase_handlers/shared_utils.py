@@ -621,6 +621,10 @@ def _build_models_for_unit(
             "ICON_SCALE": spec.get("ICON_SCALE", unit.get("ICON_SCALE")),
             "BASE_SHAPE": spec.get("BASE_SHAPE", unit.get("BASE_SHAPE")),
             "BASE_SIZE": spec.get("BASE_SIZE", unit.get("BASE_SIZE")),
+            # Orientation PAR FIGURINE (0..5, pas de 60°). Source de vérité du footprint
+            # oriente par-fig (pivot molette en move). Défaut métier : héritée de l'unité
+            # (spec surchargeable dans le scénario) — pas un fallback anti-erreur.
+            "orientation": int(spec.get("orientation", unit.get("orientation", 0))),
             "HP_CUR": spec_hp_cur,
             "HP_MAX": spec_hp_max,
             "player": unit_player,
@@ -2883,12 +2887,7 @@ def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -
     squad_models = require_key(game_state, "squad_models")
     base_shape = entry["BASE_SHAPE"]
     base_size = entry["BASE_SIZE"]
-    orientation = int(entry.get("orientation", 0))  # get allowed
-    unit_stub = {
-        "BASE_SHAPE": base_shape,
-        "BASE_SIZE": base_size,
-        "orientation": orientation,
-    }
+    unit_orientation = int(entry.get("orientation", 0))  # get allowed
     old_occupied = entry.get("occupied_hexes", set())
     new_occupied: Set[Tuple[int, int]] = set()
     new_by_model: Dict[str, Tuple[int, int]] = {}
@@ -2897,6 +2896,9 @@ def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -
     new_level_by_model: Dict[str, int] = {}
     # Hauteur (pouces) du plancher sous chaque fig — fondation engagement 3D (cf. build_units_cache).
     new_floor_height_by_model: Dict[str, float] = {}
+    # Orientation (0..5) par figurine : source de vérité du footprint orienté, publiée au frontend
+    # (rendu du socle orienté + init du plan de move par-fig / pivot molette).
+    new_orientation_by_model: Dict[str, int] = {}
     from engine.terrain_utils import floor_height_at
     _terrain_areas = game_state.get("terrain_areas", [])  # get allowed (board sans terrain)
     for mid in squad_models.get(squad_id, []):  # get allowed
@@ -2906,15 +2908,25 @@ def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -
         m_col = int(m["col"])
         m_row = int(m["row"])
         m_level = int(require_key(m, "level"))
+        m_orient = int(m.get("orientation", unit_orientation))  # get allowed (défaut = orient unité)
         new_by_model[mid] = (m_col, m_row)
         new_level_by_model[mid] = m_level
         new_floor_height_by_model[mid] = floor_height_at(_terrain_areas, m_col, m_row, m_level)
-        fp = _compute_unit_occupied_hexes(m_col, m_row, unit_stub, game_state)
+        new_orientation_by_model[mid] = m_orient
+        # Empreinte PAR FIGURINE : orientation propre à la fig (défaut = orient unité pour
+        # les états antérieurs sans clé). Base = celle de l'unité (bases mixtes hors scope).
+        m_stub = {
+            "BASE_SHAPE": base_shape,
+            "BASE_SIZE": base_size,
+            "orientation": m_orient,
+        }
+        fp = _compute_unit_occupied_hexes(m_col, m_row, m_stub, game_state)
         new_occupied.update(fp)
     entry["occupied_hexes"] = new_occupied
     entry["occupied_hexes_by_model"] = new_by_model
     entry["level_by_model"] = new_level_by_model
     entry["floor_height_by_model"] = new_floor_height_by_model
+    entry["orientation_by_model"] = new_orientation_by_model
     # Sync occupation_map (retire cellules disparues, ajoute nouvelles)
     occ_map = game_state.get("occupation_map")
     if occ_map is not None:
@@ -2998,7 +3010,7 @@ def _recompute_squad_anchor(game_state: Dict[str, Any], squad_id: str) -> Option
 
 def update_model_position(
     game_state: Dict[str, Any], model_id: str, col: int, row: int,
-    level: Optional[int] = None,
+    level: Optional[int] = None, orientation: Optional[int] = None,
 ) -> None:
     """Met a jour la position d une figurine et propage a units_cache si ancre.
 
@@ -3009,6 +3021,10 @@ def update_model_position(
     ``level`` (étages) : si fourni, écrit ``model["level"]``. None = ne touche PAS
     le niveau (déplacement horizontal pur). Le niveau de l'ancre est ensuite
     resynchronisé sur ``units_cache[squad]["level"]`` (invariant unité = ancre).
+
+    ``orientation`` (pivot socle oval/carré, 0..5) : si fourni, écrit
+    ``model["orientation"]`` AVANT le recalcul d'empreinte (le footprint oriente
+    par-fig en depend). None = ne touche PAS l'orientation.
     """
     require_key(game_state, "models_cache")
     model = game_state["models_cache"].get(model_id)
@@ -3021,6 +3037,17 @@ def update_model_position(
         if isinstance(level, bool) or not isinstance(level, int) or level < 0:
             raise ValueError(f"update_model_position: level must be an int >= 0, got {level!r}")
         model["level"] = level
+    if orientation is not None:
+        from engine.hex_utils import ORIENTATION_STEP_COUNT
+        if (
+            isinstance(orientation, bool)
+            or not isinstance(orientation, int)
+            or not (0 <= orientation < ORIENTATION_STEP_COUNT)
+        ):
+            raise ValueError(
+                f"update_model_position: orientation must be an int in 0..{ORIENTATION_STEP_COUNT - 1}, got {orientation!r}"
+            )
+        model["orientation"] = orientation
 
     squad_id = str(model["squad_id"])
     # PR4 4e-i : sync occupied_hexes_by_model
@@ -4053,10 +4080,12 @@ def commit_move(
 
     Pre-condition: plan validé via validate_move_plan (ce helper ne re-valide pas).
 
-    Entrées de plan : ``(mid, col, row)`` OU ``(mid, col, row, level)`` (étages). Un 4ᵉ élément
+    Entrées de plan : ``(mid, col, row)``, ``(mid, col, row, level)`` (étages) OU
+    ``(mid, col, row, level, orientation)`` (pivot socle par-fig). Le 4ᵉ élément
     fixe le niveau de destination ; **son absence signifie « garder le niveau courant »**
     (``level=None`` → ``update_model_position`` ne touche pas au niveau) — jamais un reset à 0,
-    sinon une fig déjà à l'étage serait remise au sol par un move horizontal.
+    sinon une fig déjà à l'étage serait remise au sol par un move horizontal. Le 5ᵉ élément
+    (0..5) fixe l'orientation de la fig ; absent/None = orientation inchangée.
     Flags:
         "advance"   → units_advanced.add(squad_id)
         "fall_back" → units_fled.add(squad_id)
@@ -4081,7 +4110,8 @@ def commit_move(
         for entry in plan:
             mid, nc, nr = str(entry[0]), int(entry[1]), int(entry[2])
             lvl = int(entry[3]) if len(entry) >= 4 and entry[3] is not None else None
-            update_model_position(game_state, mid, nc, nr, level=lvl)
+            ori = int(entry[4]) if len(entry) >= 5 and entry[4] is not None else None
+            update_model_position(game_state, mid, nc, nr, level=lvl, orientation=ori)
         if move_type == "advance":
             game_state.setdefault("units_advanced", set()).add(squad_id)
         elif move_type == "fall_back":

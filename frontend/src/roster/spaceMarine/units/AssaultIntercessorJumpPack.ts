@@ -35,7 +35,7 @@ export class AssaultIntercessorJumpPack extends TroopMeleeTroop {
     { keywordId: "fly" },
     { keywordId: "imperium" },
     { keywordId: "tacticus" },
-    { keywordId: "assault intercessors with jump packs" },
+    { keywordId: "ASSAULT INTERCESSORS WITH JUMP PACKS" },
   ];
 
   static ICON = "/icons/AssaultIntercessorJumpPack.webp"; // Path relative to public folder

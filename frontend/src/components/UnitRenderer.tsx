@@ -1,5 +1,6 @@
 // frontend/src/components/UnitRenderer.tsx
 import * as PIXI from "pixi.js-legacy";
+import { ORIENTATION_STEP_COUNT, orientationStepToRadians } from "../constants/gameConfig";
 import type {
   FightSubPhase,
   GameState,
@@ -159,6 +160,12 @@ interface UnitRendererProps {
    * 0 / absent → aucun badge (au sol).
    */
   modelLevels?: number[];
+  /**
+   * Orientation (0..5, pas de 60°) par figurine, alignée index-pour-index avec modelCenters.
+   * Pivot socle oval/carré par-fig (move par-figurine). Absente pour une fig → retombe sur
+   * ``displayOrientationStep`` (orientation d'unité). Sans effet visible sur un socle rond.
+   */
+  modelOrientations?: number[];
   /**
    * Ghost "mono-niveau" par figurine : true → la fig n'est PAS au niveau d'affichage courant, donc
    * rendue atténuée (fade) pour ne montrer nettement que les figs du niveau sélectionné. Distinct de
@@ -321,6 +328,9 @@ export class UnitRenderer {
   private target: PIXI.Container;
   /** model_id de la figurine en cours de rendu dans la boucle modelCenters (inspection). */
   private currentFigModelId: string | null = null;
+  /** Orientation (0..5) de la figurine en cours de rendu (pivot socle par-fig) ; undefined =
+   * retombe sur l'orientation d'unité (this.props.displayOrientationStep). */
+  private currentFigOrientation: number | undefined = undefined;
 
   constructor(props: UnitRendererProps) {
     this.props = props;
@@ -633,6 +643,8 @@ export class UnitRenderer {
       this.props.centerY = my;
       // Inspection : model_id de CETTE figurine (capté par attachTooltipHandlers via closure).
       this.currentFigModelId = this.props.modelIds?.[i] ?? null;
+      // Orientation propre de CETTE figurine (pivot socle par-fig) ; undefined → orient d'unité.
+      this.currentFigOrientation = this.props.modelOrientations?.[i];
       const meta = modelMetas?.[i];
       // Ghost si : move/déploiement (modelGhost) OU pas au niveau d'affichage courant (modelLevelGhost).
       // On DISTINGUE les deux : le ghost de NIVEAU (fig à un autre étage que la vue) est rendu en
@@ -676,6 +688,7 @@ export class UnitRenderer {
     });
     this.props.unit = originalUnit;
     this.currentFigModelId = null;
+    this.currentFigOrientation = undefined;
 
     // Vue mono-niveau : les figs off-niveau (ghost de niveau) ne portent AUCUN badge (hidden,
     // battle-shock, move-status, HP, étage, etc.). Comme tous les badges par-fig itèrent
@@ -939,15 +952,18 @@ export class UnitRenderer {
     const displayCircle = resolveBaseSizeForUnitDisplay(unit);
     const baseSizeVal = displayCircle > 1 ? displayCircle : undefined;
     const nrBase = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
-    const displayOrientationStep = this.props.displayOrientationStep;
+    // Orientation PAR FIGURINE (pivot socle par-fig) si fournie pour la fig en cours de rendu,
+    // sinon orientation d'unité (comportement historique). currentFigOrientation est posée par la
+    // boucle modelCenters avant renderUnitCircle.
+    const displayOrientationStep = this.currentFigOrientation ?? this.props.displayOrientationStep;
     if (
       displayOrientationStep !== undefined &&
       (!Number.isInteger(displayOrientationStep) ||
         displayOrientationStep < 0 ||
-        displayOrientationStep > 5)
+        displayOrientationStep >= ORIENTATION_STEP_COUNT)
     ) {
       throw new Error(
-        `displayOrientationStep must be an integer in 0..5, got ${String(displayOrientationStep)}`
+        `displayOrientationStep must be an integer in 0..${ORIENTATION_STEP_COUNT - 1}, got ${String(displayOrientationStep)}`
       );
     }
     const circleRadius = baseSizeVal
@@ -973,7 +989,7 @@ export class UnitRenderer {
     if (nrBase && displayOrientationStep !== undefined) {
       unitCircle.pivot.set(centerX, centerY);
       unitCircle.position.set(centerX, centerY);
-      unitCircle.rotation = (displayOrientationStep * Math.PI) / 3;
+      unitCircle.rotation = orientationStepToRadians(displayOrientationStep);
     }
 
     if (isPreview) {
@@ -1444,8 +1460,10 @@ export class UnitRenderer {
       ELIGIBLE_OUTLINE_ALPHA,
       phase,
       fightSubPhase,
-      displayOrientationStep,
     } = this.props;
+    // Orientation PAR FIGURINE (pivot socle par-fig) pour la fig en cours de rendu, sinon orient
+    // d'unité — même règle que renderUnitCircle, sinon l'anneau vert ne suit pas le socle pivoté.
+    const displayOrientationStep = this.currentFigOrientation ?? this.props.displayOrientationStep;
 
     const nrEl = getNonRoundBasePixelLayout(unit, HEX_RADIUS);
     const eligibleOutline = new PIXI.Graphics();
@@ -1456,10 +1474,10 @@ export class UnitRenderer {
         displayOrientationStep !== undefined &&
         (!Number.isInteger(displayOrientationStep) ||
           displayOrientationStep < 0 ||
-          displayOrientationStep > 5)
+          displayOrientationStep >= ORIENTATION_STEP_COUNT)
       ) {
         throw new Error(
-          `displayOrientationStep must be an integer in 0..5, got ${String(displayOrientationStep)}`
+          `displayOrientationStep must be an integer in 0..${ORIENTATION_STEP_COUNT - 1}, got ${String(displayOrientationStep)}`
         );
       }
       if (nrEl.kind === "oval") {
@@ -1483,7 +1501,7 @@ export class UnitRenderer {
       if (displayOrientationStep !== undefined) {
         eligibleOutline.pivot.set(centerX, centerY);
         eligibleOutline.position.set(centerX, centerY);
-        eligibleOutline.rotation = (displayOrientationStep * Math.PI) / 3;
+        eligibleOutline.rotation = orientationStepToRadians(displayOrientationStep);
       }
     } else {
       const circleRadius = ((HEX_RADIUS * unitIconScale) / 2) * 1.1;
@@ -1536,7 +1554,7 @@ export class UnitRenderer {
         if (displayOrientationStep !== undefined) {
           chargedOutline.pivot.set(centerX, centerY);
           chargedOutline.position.set(centerX, centerY);
-          chargedOutline.rotation = (displayOrientationStep * Math.PI) / 3;
+          chargedOutline.rotation = orientationStepToRadians(displayOrientationStep);
         }
       } else {
         const circleRadius = ((HEX_RADIUS * unitIconScale) / 2) * 1.1;

@@ -47,6 +47,7 @@ from engine.hex_utils import (
     euclidean_edge_clearance_round_round,
     geodesic_field,
     min_distance_between_sets,
+    ORIENTATION_STEP_COUNT,
     round_base_radius_norm,
 )
 from engine.phase_handlers.geodesic_move import _euclidean_move_field, reachable_multilevel_field
@@ -64,9 +65,13 @@ _mask_loop_cache: "OrderedDict[Tuple[frozenset, float, float], Optional[List[Lis
 def _validate_move_orientation(raw_orientation: Any) -> int:
     """Validate a move orientation step from semantic action payload."""
     if isinstance(raw_orientation, bool) or not isinstance(raw_orientation, int):
-        raise ValueError(f"Move orientation must be an integer in 0..5, got {raw_orientation!r}")
-    if raw_orientation < 0 or raw_orientation > 5:
-        raise ValueError(f"Move orientation must be in 0..5, got {raw_orientation!r}")
+        raise ValueError(
+            f"Move orientation must be an integer in 0..{ORIENTATION_STEP_COUNT - 1}, got {raw_orientation!r}"
+        )
+    if raw_orientation < 0 or raw_orientation >= ORIENTATION_STEP_COUNT:
+        raise ValueError(
+            f"Move orientation must be in 0..{ORIENTATION_STEP_COUNT - 1}, got {raw_orientation!r}"
+        )
     return raw_orientation
 
 
@@ -1116,6 +1121,14 @@ def _attempt_movement_to_destination(
         if cache_entry is None:
             raise KeyError(f"units_cache missing moved unit {unit_id_str_cache}")
         cache_entry["orientation"] = orientation
+        # Move rigide d'unité = orientation COMMUNE → propager à CHAQUE figurine : le footprint
+        # persistant est recalculé par-fig (_recompute_squad_occupied_hexes lit model["orientation"]),
+        # sans ça le pivot de l'unité serait ignoré par l'empreinte réelle.
+        _mc_ori = require_key(game_state, "models_cache")
+        for _mid in require_key(game_state, "squad_models").get(unit_id_str_cache, []):  # get allowed
+            _m_ori = _mc_ori.get(_mid)
+            if _m_ori is not None:
+                _m_ori["orientation"] = orientation
 
     # Squad move rigide = destination TOUJOURS au sol. Resynchroniser level=0 sur toutes les figs
     # vivantes AVANT la translation : translate_squad_to_destination → _recompute_squad_occupied_hexes
@@ -3393,16 +3406,22 @@ def movement_preview_move_plan(
     _mc_norm = require_key(game_state, "models_cache")
     terrain_areas = require_key(game_state, "terrain_areas")
     norm: List[Tuple[str, int, int, int]] = []
+    # Orientation PROVISOIRE par-fig (liste parallèle à ``norm``, même index) : 5ᵉ champ du plan
+    # si fourni (pivot molette non committé), sinon l'orientation courante de la fig. Alimente le
+    # footprint orienté par-fig ci-dessous ET le niveau de plancher (resolve_model_floor_level).
+    orientations: List[int] = []
     for e in plan:
         _mid = str(e[0])
         _m_norm = _mc_norm[_mid]
+        _ori = int(e[4]) if len(e) >= 5 and e[4] is not None else int(_m_norm.get("orientation", 0))  # get allowed (défaut = orient courante fig)
         _lvl_req = int(e[3]) if len(e) >= 4 and e[3] is not None else int(require_key(_m_norm, "level"))
         _lvl_eff = resolve_model_floor_level(
             int(e[1]), int(e[2]),
             require_key(_m_norm, "BASE_SHAPE"), require_key(_m_norm, "BASE_SIZE"),
-            int(_m_norm.get("orientation", 0)), _lvl_req, terrain_areas,  # get allowed (défaut 0 = face nord)
+            _ori, _lvl_req, terrain_areas,
         )
         norm.append((_mid, int(e[1]), int(e[2]), _lvl_eff))
+        orientations.append(_ori)
 
     # Cohesion 03.03 par fig : deleguee a coherency_violation_flags (source UNIQUE partagee avec le
     # commit), qui respecte game_rules.cohesion_distance_mode (euclidean | footprint).
@@ -3415,14 +3434,15 @@ def movement_preview_move_plan(
     unit_entry = units_cache.get(str(squad_id), {})  # get allowed
     base_shape = require_key(unit_entry, "BASE_SHAPE")  # get allowed
     base_size = require_key(unit_entry, "BASE_SIZE")
-    orientation = int(unit_entry.get("orientation", 0))  # get allowed
     is_single_hex = not isinstance(base_size, int) or base_size <= 1  # get allowed
     if is_single_hex:
         footprints: List[Set[Tuple[int, int]]] = [{pos} for pos in positions]
     else:
-        _off_even, _off_odd = _pfo(base_shape, base_size, orientation)
+        # Empreinte PAR FIGURINE : offsets calculés avec l'orientation provisoire de CHAQUE fig
+        # (orientations[idx]). ``_pfo`` est mémoïsé par (shape, size, orient) → pas de surcoût.
         footprints = []
-        for col, row in positions:
+        for idx, (col, row) in enumerate(positions):
+            _off_even, _off_odd = _pfo(base_shape, base_size, orientations[idx])
             offs = _off_even if (col & 1) == 0 else _off_odd
             footprints.append({(col + dc, row + dr) for dc, dr in offs})
 
@@ -3448,20 +3468,21 @@ def movement_preview_move_plan(
     from engine.hex_utils import Socle, footprints_overlap
     _models_cache_intra = require_key(game_state, "models_cache")
     intra_socles: List["Socle"] = []
-    for (mid, nc, nr, _lv), fp_par in zip(norm, footprints):
+    for idx, ((mid, nc, nr, _lv), fp_par) in enumerate(zip(norm, footprints)):
         m = require_key(_models_cache_intra, str(mid))
         m_shape = require_key(m, "BASE_SHAPE")
         m_base = require_key(m, "BASE_SIZE")
+        _ori_fig = orientations[idx]
         if m_shape == base_shape and m_base == base_size:
             m_fp = fp_par
         else:
             m_fp = compute_candidate_footprint(
                 int(nc), int(nr),
-                {"BASE_SHAPE": m_shape, "BASE_SIZE": m_base, "orientation": orientation},
+                {"BASE_SHAPE": m_shape, "BASE_SIZE": m_base, "orientation": _ori_fig},
                 game_state,
             )
         intra_socles.append(
-            Socle(shape=m_shape, base_size=m_base, col=int(nc), row=int(nr), fp=m_fp)
+            Socle(shape=m_shape, base_size=m_base, col=int(nc), row=int(nr), fp=m_fp, orientation=_ori_fig)
         )
 
     levels = [lv for _, _, _, lv in norm]
@@ -3529,23 +3550,29 @@ def movement_commit_move_plan_handler(
     raw_plan = action["plan"]
     if not isinstance(raw_plan, list) or not raw_plan:
         return False, {"error": "empty_move_plan", "unitId": squad_id}
-    # Entrées 3 (sol / niveau courant) ou 4 (avec niveau de destination, étages). Le niveau None
-    # = « garder le niveau courant » (move horizontal d'une fig déjà à l'étage).
-    plan: List[Tuple[str, int, int, Optional[int]]] = []
+    # Entrées 3 (sol / niveau courant), 4 (avec niveau de destination, étages) ou 5 (avec
+    # orientation socle par-fig). Le niveau None = « garder le niveau courant » (move horizontal
+    # d'une fig déjà à l'étage) ; l'orientation None = orientation inchangée.
+    plan: List[Tuple[str, int, int, Optional[int], Optional[int]]] = []
     for entry in raw_plan:
-        if not (isinstance(entry, (list, tuple)) and len(entry) in (3, 4)):
+        if not (isinstance(entry, (list, tuple)) and len(entry) in (3, 4, 5)):
             raise ValueError(
-                f"commit_move_plan: plan entry must be [model_id, col, row(, level)], got {entry!r}"
+                f"commit_move_plan: plan entry must be [model_id, col, row(, level(, orientation))], got {entry!r}"
             )
-        lvl = int(entry[3]) if len(entry) == 4 else None
+        lvl = int(entry[3]) if len(entry) >= 4 and entry[3] is not None else None
         if lvl is not None and lvl < 0:
             raise ValueError(f"commit_move_plan: level must be >= 0, got {entry!r}")
-        plan.append((str(entry[0]), int(entry[1]), int(entry[2]), lvl))
+        ori = int(entry[4]) if len(entry) >= 5 and entry[4] is not None else None
+        if ori is not None and not (0 <= ori < ORIENTATION_STEP_COUNT):
+            raise ValueError(
+                f"commit_move_plan: orientation must be in 0..{ORIENTATION_STEP_COUNT - 1}, got {entry!r}"
+            )
+        plan.append((str(entry[0]), int(entry[1]), int(entry[2]), lvl, ori))
 
     squad_models = require_key(game_state, "squad_models")
     models_cache = require_key(game_state, "models_cache")
     alive = {m for m in squad_models.get(str(squad_id), []) if m in models_cache}  # get allowed
-    plan_ids = {mid for mid, _, _, _ in plan}  # get allowed
+    plan_ids = {mid for mid, *_ in plan}  # get allowed
     if plan_ids != alive:
         return False, {
             "error": "plan_models_mismatch",
@@ -3592,17 +3619,17 @@ def movement_commit_move_plan_handler(
     # du déploiement — jamais un étage « à moitié » persisté. None (move horizontal) → niveau inchangé.
     from engine.terrain_utils import resolve_model_floor_level as _rmfl_commit
     _ta_commit = require_key(game_state, "terrain_areas")
-    _resolved_plan: List[Tuple[str, int, int, Optional[int]]] = []
-    for _mid_c, _nc_c, _nr_c, _lv_c in plan:
+    _resolved_plan: List[Tuple[str, int, int, Optional[int], Optional[int]]] = []
+    for _mid_c, _nc_c, _nr_c, _lv_c, _ori_c in plan:
         if _lv_c is None:
-            _resolved_plan.append((_mid_c, _nc_c, _nr_c, None))
+            _resolved_plan.append((_mid_c, _nc_c, _nr_c, None, _ori_c))
             continue
         _m_c = models_cache[_mid_c]
         _eff_c = _rmfl_commit(
             _nc_c, _nr_c, require_key(_m_c, "BASE_SHAPE"), require_key(_m_c, "BASE_SIZE"),
             int(_m_c.get("orientation", 0)), int(_lv_c), _ta_commit,  # get allowed (défaut 0 = face nord)
         )
-        _resolved_plan.append((_mid_c, _nc_c, _nr_c, _eff_c))
+        _resolved_plan.append((_mid_c, _nc_c, _nr_c, _eff_c, _ori_c))
     plan = _resolved_plan
 
     commit_move(plan, game_state, move_type)
@@ -3622,7 +3649,7 @@ def movement_commit_move_plan_handler(
     # Ligne unite = message ancre ; detail expand/collapse = moveDetails par figurine.
     dest_anchor_col, dest_anchor_row = require_unit_position(unit, game_state)
     move_details = []
-    for mid, nc, nr, _lv in plan:
+    for mid, nc, nr, _lv, _ori in plan:
         _fc, _fr = models_before[mid]
         move_details.append(
             {

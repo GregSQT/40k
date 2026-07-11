@@ -5228,6 +5228,7 @@ export const BoardWithAPI: React.FC = () => {
             onBumpMovePreviewOrientation={
               isGameOver ? () => {} : apiProps.onBumpMovePreviewOrientation
             }
+            onBumpPerModelOrientation={isGameOver ? () => {} : apiProps.onBumpPerModelOrientation}
             squadMovePlan={apiProps.squadMovePlan}
             fleePreviewUnitId={apiProps.fleePreviewUnitId}
             squadMoveModelPoolRef={apiProps.squadMoveModelPoolRef}

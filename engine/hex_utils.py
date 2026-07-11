@@ -1086,6 +1086,12 @@ def dilate_hex_set(
 # of cells as before.
 _FOOTPRINT_SIZE_SCALE: float = 1.5
 
+# Nombre de crans discrets d'orientation d'un socle (pivot molette). L'angle d'un cran vaut
+# 2π / ORIENTATION_STEP_COUNT. DOIT rester synchronisé avec le frontend (ORIENTATION_STEP_COUNT
+# dans frontend/src/constants/gameConfig.ts) — sinon empreinte moteur et socle affiché divergent.
+ORIENTATION_STEP_COUNT: int = 12
+_ORIENTATION_STEP_RAD: float = 2.0 * math.pi / ORIENTATION_STEP_COUNT
+
 
 def _hex_center(col: int, row: int) -> Tuple[float, float]:
     """Pixel-space center of hex (col, row) in offset odd-q, flat-top layout.
@@ -1259,10 +1265,10 @@ def _footprint_oval(
     major: int, minor: int,
     orientation: int,
 ) -> Set[Tuple[int, int]]:
-    """Hex cells within an axis-aligned ellipse, optionally rotated by orientation×60°."""
+    """Hex cells within an axis-aligned ellipse, optionally rotated by orientation × (2π/ORIENTATION_STEP_COUNT)."""
     a = (major / 2.0) * _FOOTPRINT_SIZE_SCALE
     b = (minor / 2.0) * _FOOTPRINT_SIZE_SCALE
-    angle_rad = orientation * math.pi / 3.0
+    angle_rad = orientation * _ORIENTATION_STEP_RAD
     cos_a = math.cos(angle_rad)
     sin_a = math.sin(angle_rad)
     cx, cy = _hex_center(center_col, center_row)
@@ -1285,9 +1291,9 @@ def _footprint_square(
     side: int,
     orientation: int,
 ) -> Set[Tuple[int, int]]:
-    """Hex cells within a square of given side length, optionally rotated by orientation×60°."""
+    """Hex cells within a square of given side length, optionally rotated by orientation × (2π/ORIENTATION_STEP_COUNT)."""
     half = (side / 2.0) * _FOOTPRINT_SIZE_SCALE
-    angle_rad = orientation * math.pi / 3.0
+    angle_rad = orientation * _ORIENTATION_STEP_RAD
     cos_a = math.cos(angle_rad)
     sin_a = math.sin(angle_rad)
     cx, cy = _hex_center(center_col, center_row)
@@ -1541,7 +1547,7 @@ def _socle_edge_primitives(s: Socle) -> List[Tuple]:
             cx, cy = _hex_center(int(c), int(rr))
             prims.append(("c", cx, cy, r))
         return prims
-    ang = s.orientation * math.pi / 3.0
+    ang = s.orientation * _ORIENTATION_STEP_RAD
     cos_a, sin_a = math.cos(ang), math.sin(ang)
     if s.shape == "oval":
         size = cast(list, s.base_size)
