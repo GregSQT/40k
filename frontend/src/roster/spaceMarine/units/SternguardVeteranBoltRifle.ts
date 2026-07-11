@@ -29,7 +29,7 @@ export class SternguardVeteranBoltRifle extends TroopRangeSwarm {
     { keywordId: "grenades" },
     { keywordId: "imperium" },
     { keywordId: "tacticus" },
-    { keywordId: "sternguard veteran squad" },
+    { keywordId: "STERNGUARD VETERAN SQUAD" },
   ];
 
   static ICON = "/icons/SternguardVeteranBoltRifle.webp"; // Path relative to public folder

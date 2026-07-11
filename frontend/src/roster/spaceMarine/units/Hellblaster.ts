@@ -38,7 +38,7 @@ export class Hellblaster extends TroopRangeElite {
     { keywordId: "grenades" },
     { keywordId: "imperium" },
     { keywordId: "tacticus" },
-    { keywordId: "hellblaster squad" },
+    { keywordId: "HELLBLASTER SQUAD" },
   ];
 
   static ICON = "/icons/Hellblaster.webp"; // Path relative to public folder

@@ -30,7 +30,7 @@ export class BladeguardVeteranSergeant extends TroopMeleeTroop {
     { keywordId: "grenades" },
     { keywordId: "imperium" },
     { keywordId: "tacticus" },
-    { keywordId: "bladeguard veteran squad" },
+    { keywordId: "BLADEGUARD VETERAN SQUAD" },
   ];
 
   static ICON = "/icons/BladeguardVeteranSergeant.webp"; // Path relative to public folder

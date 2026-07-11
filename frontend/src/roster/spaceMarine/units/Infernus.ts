@@ -29,7 +29,7 @@ export class Infernus extends TroopRangeSwarm {
     { keywordId: "grenades" },
     { keywordId: "imperium" },
     { keywordId: "tacticus" },
-    { keywordId: "infernus squad" },
+    { keywordId: "INFERNUS SQUAD" },
   ];
 
   static ICON = "/icons/Infernus.webp"; // Path relative to public folder

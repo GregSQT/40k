@@ -30,7 +30,7 @@ export class Intercessor extends TroopRangeSwarm {
     { keywordId: "grenades" },
     { keywordId: "imperium" },
     { keywordId: "tacticus" },
-    { keywordId: "intercessor squad" },
+    { keywordId: "INTERCESSOR SQUAD" },
   ];
 
   static ICON = "/icons/Intercessor.webp"; // Path relative to public folder

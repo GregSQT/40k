@@ -49,7 +49,7 @@ export class AssaultIntercessorSergeant extends TroopMeleeElite {
     { keywordId: "grenades" },
     { keywordId: "imperium" },
     { keywordId: "tacticus" },
-    { keywordId: "assault intercessor squad" },
+    { keywordId: "ASSAULT INTERCESSOR SQUAD" },
   ];
 
   static ICON = "/icons/AssaultIntercessorSergeant.webp"; // Path relative to public folder

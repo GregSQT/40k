@@ -29,7 +29,7 @@ export class SternguardVeteranSergeantPowerFist extends TroopMeleeElite {
     { keywordId: "grenades" },
     { keywordId: "imperium" },
     { keywordId: "tacticus" },
-    { keywordId: "sternguard veteran squad" },
+    { keywordId: "STERNGUARD VETERAN SQUAD" },
   ];
 
   static ICON = "/icons/SternguardVeteranSergeantPowerFist.webp"; // Path relative to public folder

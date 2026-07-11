@@ -48,7 +48,7 @@ export class AssaultIntercessor extends TroopMeleeSwarm {
     { keywordId: "grenades" },
     { keywordId: "imperium" },
     { keywordId: "tacticus" },
-    { keywordId: "assault intercessor squad" },
+    { keywordId: "ASSAULT INTERCESSOR SQUAD" },
   ];
 
   static ICON = "/icons/AssaultIntercessor.webp"; // Path relative to public folder
