@@ -50,7 +50,7 @@ import { GameLog } from "./GameLog";
 import { HelperPanel } from "./HelperPanel";
 import { SettingsMenu } from "./SettingsMenu";
 import SharedLayout from "./SharedLayout";
-import SnapshotRewind from "./SnapshotRewind";
+import SnapshotRewind, { type SnapshotJump } from "./SnapshotRewind";
 import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import TutorialOverlay from "./TutorialOverlay";
@@ -1634,7 +1634,7 @@ export const BoardWithAPI: React.FC = () => {
   const [isModeGuideActive, setIsModeGuideActive] = useState(false);
   // Snapshots temporels (rewind / playback par phase) — PvP / PvP test uniquement.
   const isSnapshotMode = gameMode === "pvp" || gameMode === "pvp_test";
-  const [snapshotMenuTurn, setSnapshotMenuTurn] = useState<number | null>(null);
+  const [snapshotJump, setSnapshotJump] = useState<SnapshotJump | null>(null);
   const [snapshotViewActive, setSnapshotViewActive] = useState(false);
   const [snapshotPersistEnabled, setSnapshotPersistEnabled] = useState(false);
   const isAiMode = (() => {
@@ -2224,6 +2224,15 @@ export const BoardWithAPI: React.FC = () => {
   /** Panneau d'aide contextuelle au-dessus du tracker de phase (bouton « ? »). */
   const [showHelper, setShowHelper] = useState(false);
   const handleToggleHelper = useCallback(() => setShowHelper((v) => !v), []);
+
+  const [showReplay, setShowReplay] = useState(false);
+  const handleToggleReplay = useCallback(() => setShowReplay((v) => !v), []);
+
+  // Rollback non destructif (mode view) sur un tour/phase cliqué dans le tracker.
+  const snapshotJumpTo = useCallback((turn: number, phase: string | null) => {
+    setShowReplay(true);
+    setSnapshotJump((prev) => ({ turn, phase, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
   /** Cercles de portée autour de la figurine activée (bouton cible de la barre d'outils). */
   const [showRangeRings, setShowRangeRings] = useState(false);
   const handleToggleRangeRings = useCallback(() => setShowRangeRings((v) => !v), []);
@@ -3315,7 +3324,10 @@ export const BoardWithAPI: React.FC = () => {
               />
             </div>
           )}
-          <div className="turn-phase-tracker-right">
+          <div
+            className="turn-phase-tracker-right"
+            style={snapshotViewActive ? { position: "relative", zIndex: 4001 } : undefined}
+          >
             <TurnPhaseTrackerWithTutorial
               currentTurn={apiProps.gameState?.currentTurn ?? 1}
               currentPhase={apiProps.gameState?.phase ?? "move"}
@@ -3326,8 +3338,11 @@ export const BoardWithAPI: React.FC = () => {
               }
               current_player={apiProps.gameState?.current_player}
               onTurnClick={
-                isSnapshotMode && !snapshotViewActive
-                  ? (turn: number) => setSnapshotMenuTurn(turn)
+                isSnapshotMode ? (turn: number) => snapshotJumpTo(turn, null) : undefined
+              }
+              onPhaseClick={
+                isSnapshotMode
+                  ? (phase: string) => snapshotJumpTo(apiProps.gameState?.currentTurn ?? 1, phase)
                   : undefined
               }
               onEndPhaseClick={isGameOver ? undefined : apiProps.onEndPhase}
@@ -3397,12 +3412,12 @@ export const BoardWithAPI: React.FC = () => {
             />
           )}
           <SnapshotRewind
-            menuTurn={snapshotMenuTurn}
-            onCloseMenu={() => setSnapshotMenuTurn(null)}
+            jump={snapshotJump}
             fetchList={apiProps.snapshotFetchList}
             restore={apiProps.snapshotRestore}
             reloadLive={apiProps.snapshotReloadLive}
             onViewModeChange={setSnapshotViewActive}
+            replayOpen={showReplay}
           />
         </>
       )}
@@ -5192,6 +5207,8 @@ export const BoardWithAPI: React.FC = () => {
         rangeRingsActive={showRangeRings}
         onToggleHelper={handleToggleHelper}
         helperActive={showHelper}
+        onToggleReplay={isSnapshotMode ? handleToggleReplay : undefined}
+        replayActive={showReplay}
       >
         {/*
         In test deployment setup, lock gameplay interactions until Start Game! is clicked.

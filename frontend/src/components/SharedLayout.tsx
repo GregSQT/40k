@@ -27,6 +27,10 @@ interface SharedLayoutProps {
   onToggleHelper?: () => void;
   /** true → panneau d'aide actuellement affiché. */
   helperActive?: boolean;
+  /** Bascule le container de contrôle du mode replay sous le tracker de phase. */
+  onToggleReplay?: () => void;
+  /** true → container de replay actuellement affiché. */
+  replayActive?: boolean;
 }
 
 interface NavigationProps {
@@ -39,6 +43,8 @@ interface NavigationProps {
   rangeRingsActive?: boolean;
   onToggleHelper?: () => void;
   helperActive?: boolean;
+  onToggleReplay?: () => void;
+  replayActive?: boolean;
 }
 
 /** Logo règle (assets : `frontend/public/icons/Action_Logo/Ruler.png`). */
@@ -109,6 +115,28 @@ function HelperIcon({ active }: { active: boolean }) {
       >
         ?
       </text>
+    </svg>
+  );
+}
+
+/** Caméra : affiche/masque le container de contrôle du mode replay. */
+function CameraIcon({ active }: { active: boolean }) {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      style={{ display: "block", opacity: active ? 1 : 0.78 }}
+    >
+      <title>Mode replay</title>
+      <path d="M23 7l-7 5 7 5V7z" />
+      <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
     </svg>
   );
 }
@@ -280,6 +308,8 @@ const Navigation: React.FC<NavigationProps> = ({
   rangeRingsActive = false,
   onToggleHelper,
   helperActive = false,
+  onToggleReplay,
+  replayActive = false,
 }) => {
   const measureRulerButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -459,6 +489,35 @@ const Navigation: React.FC<NavigationProps> = ({
               </button>
             </TooltipWrapper>
           )}
+          {onToggleReplay && (
+            <TooltipWrapper
+              text={
+                replayActive
+                  ? "Masquer le container de contrôle du mode replay."
+                  : "Afficher le container de contrôle du mode replay sous le tracker de phase."
+              }
+            >
+              <button
+                type="button"
+                onClick={onToggleReplay}
+                className="settings-button"
+                aria-pressed={replayActive}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  outline: "none",
+                  color: replayActive ? "#22c55e" : "#9ca3af",
+                  padding: "4px",
+                }}
+              >
+                <CameraIcon active={replayActive ?? false} />
+              </button>
+            </TooltipWrapper>
+          )}
           {onToggleHideIndicators && (
             <TooltipWrapper
               text={
@@ -584,6 +643,8 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
   rangeRingsActive,
   onToggleHelper,
   helperActive,
+  onToggleReplay,
+  replayActive,
 }) => {
   return (
     <div
@@ -612,6 +673,8 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
               rangeRingsActive={rangeRingsActive}
               onToggleHelper={onToggleHelper}
               helperActive={helperActive}
+              onToggleReplay={onToggleReplay}
+              replayActive={replayActive}
             />
             {rightColumnContent}
           </div>
