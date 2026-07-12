@@ -563,7 +563,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                   checked={autoSaveEnabled}
                   onChange={onToggleAutoSave}
                   label="Sauvegarde automatique"
-                  description="Crée automatiquement une save (visible dans le menu Select du container de replay) au fil de la partie."
+                  description="Crée automatiquement une save (visible dans le menu Select du container de replay) au fil de la partie. NB : Relancez le jeu pour prendre en compte cette option."
                 />
               )}
               {onSetAutoSaveGranularity && (

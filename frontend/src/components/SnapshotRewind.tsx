@@ -28,18 +28,29 @@ export interface SaveMeta {
   kind?: string;
 }
 
-/** Nom affiché d'une save (1 ligne) : "Game start", ou tag T·Phase·#·P, note manuelle en fin. */
+/** Nom affiché d'une save (1 ligne) : "Game start", ou tag "T{tour} P{joueur} {Phase} · #{event}",
+ *  note manuelle ajoutée en fin. */
 function saveDisplayName(s: SaveMeta): string {
   if (s.kind === "game_start") return "Game start";
-  const base = `${s.label} · P${s.player}`;
-  return s.kind === "manual" && s.note ? `${base} — ${s.note}` : base;
+  const phase = s.phase ? s.phase[0].toUpperCase() + s.phase.slice(1) : "";
+  const base = `T${s.turn} P${s.player} ${phase}`;
+  // Le "#" (n° d'activation) n'est utile que pour distinguer plusieurs saves manuelles dans une phase.
+  if (s.kind === "manual") {
+    return `${base} · #${s.episode_steps}${s.note ? ` — ${s.note}` : ""}`;
+  }
+  return base;
 }
 
-/** Couleur de fond par type : manuel = vert, auto/tour = gris, auto/phase (et game start) = blanc. */
-function saveColors(kind?: string): { bg: string; fg: string } {
-  if (kind === "manual") return { bg: "#16a34a", fg: "#ffffff" };
-  if (kind === "auto_turn") return { bg: "#6b7280", fg: "#ffffff" };
-  return { bg: "#ffffff", fg: "#1f2937" };
+/** Couleur de fond par type : game start = noir, manuel = blanc, auto/tour = gris,
+ *  auto/phase = couleur de la phase (mêmes variables que les boutons du TurnPhaseTracker). */
+function saveColors(s: SaveMeta): { bg: string; fg: string } {
+  if (s.kind === "game_start") return { bg: "#000000", fg: "#ffffff" };
+  if (s.kind === "manual") return { bg: "#ffffff", fg: "#1f2937" };
+  if (s.kind === "auto_turn") return { bg: "#6b7280", fg: "#ffffff" };
+  const phase = (s.phase || "").toLowerCase();
+  const known = ["command", "move", "shoot", "charge", "fight"];
+  const bg = known.includes(phase) ? `var(--phase-${phase}-bg)` : "var(--phase-default-bg)";
+  return { bg, fg: "#ffffff" };
 }
 
 /** Requête de saut vers un tour/phase (nonce : permet de re-cliquer le même point). */
@@ -76,6 +87,10 @@ interface SnapshotRewindProps {
   loadSave: (id: string) => Promise<unknown>;
   /** false → Save bloqué tant que le répertoire de sauvegarde n'a pas été choisi. */
   canSave: boolean;
+  /** Liste les parties sauvegardées (pour Load). */
+  fetchPartyList: () => Promise<Array<{ name: string }>>;
+  /** Charge une partie sauvegardée à son game start. */
+  loadParty: (name: string) => Promise<unknown>;
 }
 
 const iconSvgProps = {
@@ -115,6 +130,18 @@ function ResumeIcon() {
   );
 }
 
+/** Resume : barre puis flèche vers la droite ( |-> ) — reprendre depuis ce point. */
+function ResumeBarIcon() {
+  return (
+    <svg {...iconSvgProps}>
+      <title>Resume</title>
+      <path d="M4 5 V19" />
+      <path d="M9 12 H19" />
+      <path d="M14 7 L19 12 L14 17" />
+    </svg>
+  );
+}
+
 /** Select : flèche → vers un trait vertical à droite. */
 function SelectIcon() {
   return (
@@ -140,6 +167,8 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
   fetchSaveList,
   loadSave,
   canSave,
+  fetchPartyList,
+  loadParty,
 }) => {
   const [list, setList] = useState<SnapshotMeta[]>([]);
   const [viewIndex, setViewIndex] = useState<number | null>(null);
@@ -151,6 +180,8 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
   const [saveMenuOpen, setSaveMenuOpen] = useState(false);
   const [savePromptOpen, setSavePromptOpen] = useState(false);
   const [saveNote, setSaveNote] = useState("");
+  const [parties, setParties] = useState<Array<{ name: string }>>([]);
+  const [loadMenuOpen, setLoadMenuOpen] = useState(false);
 
   // Indices des snapshots dont la phase a eu au moins une action (sinon, tous : pas de filtre exploitable).
   const actionIndices = useMemo(() => {
@@ -301,6 +332,41 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
     [loadSave, onViewModeChange]
   );
 
+  // Ouvre/ferme le menu Load ; recharge la liste des parties à l'ouverture.
+  const toggleLoadMenu = useCallback(async () => {
+    if (loadMenuOpen) {
+      setLoadMenuOpen(false);
+      return;
+    }
+    setError(null);
+    try {
+      setParties(await fetchPartyList());
+      setLoadMenuOpen(true);
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+    }
+  }, [loadMenuOpen, fetchPartyList]);
+
+  // Charge une partie sauvegardée (à son game start) : elle devient la partie courante.
+  const pickParty = useCallback(
+    async (name: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await loadParty(name);
+        setLoadMenuOpen(false);
+        setViewIndex(null);
+        setIsPlaying(false);
+        onViewModeChange(false);
+      } catch (e) {
+        setError(String((e as Error)?.message ?? e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [loadParty, onViewModeChange]
+  );
+
   // Rapporte le point visionné (pour tronquer le Game Log jusqu'à ce moment).
   useEffect(() => {
     onViewChange(viewIndex != null ? { snapshots: list, index: viewIndex } : null);
@@ -424,7 +490,7 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
         {/* Vitesse — CENTRE */}
         <div className="replay-speed-controls">
           <span className="replay-speed-label">Speed:</span>
-          {[0.25, 0.5, 1.0, 2.0, 4.0].map((speed) => (
+          {[0.5, 1.0, 2.0, 5.0].map((speed) => (
             <button
               type="button"
               key={speed}
@@ -487,6 +553,70 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
             Select
             <SelectIcon />
           </button>
+          {canSave && (
+            <button
+              type="button"
+              className="replay-btn replay-btn--nav"
+              title="Charger une partie sauvegardée (à son début)"
+              disabled={busy}
+              onClick={toggleLoadMenu}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                background: "#ea580c",
+                color: "#ffffff",
+              }}
+            >
+              Load
+              <ResumeIcon />
+            </button>
+          )}
+          {loadMenuOpen && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 6px)",
+                right: 0,
+                minWidth: "220px",
+                maxHeight: "260px",
+                overflowY: "auto",
+                background: "#1f2937",
+                border: "1px solid #555",
+                borderRadius: "8px",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+                zIndex: 4100,
+                padding: "6px",
+              }}
+            >
+              {parties.length === 0 ? (
+                <div style={{ color: "#9ca3af", padding: "6px 8px" }}>Aucune partie</div>
+              ) : (
+                parties.map((p) => (
+                  <button
+                    key={p.name}
+                    type="button"
+                    className="replay-btn"
+                    disabled={busy}
+                    onClick={() => pickParty(p.name)}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      height: "auto",
+                      textAlign: "left",
+                      padding: "6px 8px",
+                      marginBottom: "4px",
+                      background: "#374151",
+                      color: "#ffffff",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {p.name}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
           {saveMenuOpen && (
             <div
               style={{
@@ -507,8 +637,10 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
               {saves.length === 0 ? (
                 <div style={{ color: "#9ca3af", padding: "6px 8px" }}>Aucune save</div>
               ) : (
-                saves.map((s) => {
-                  const c = saveColors(s.kind);
+                [...saves]
+                  .sort((a, b) => b.ts.localeCompare(a.ts))
+                  .map((s) => {
+                    const c = saveColors(s);
                   return (
                     <button
                       key={s.id}
@@ -558,8 +690,8 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
             boxShadow: "0 0 10px 2px rgba(239, 68, 68, 0.75)",
           }}
         >
-          Resume Here
-          <ResumeIcon />
+          Resume
+          <ResumeBarIcon />
         </button>
 
         {/* État Live / retour au live — TOUT À DROITE */}

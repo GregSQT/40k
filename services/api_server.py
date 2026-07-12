@@ -1185,38 +1185,45 @@ _AUTOSAVE_GRANULARITY = "phase"
 _AUTOSAVE_LAST_KEY: Optional[Tuple[int, int]] = None
 
 
-def _maybe_autosave(engine_instance, kind: Optional[str] = None) -> None:
-    """Crée une save auto au début d'une nouvelle phase (ou d'un nouveau tour selon la granularité).
-
-    ``kind`` : "game_start" (état de départ), sinon dérivé de la granularité ("auto_phase"/"auto_turn")."""
+def _maybe_autosave(engine_instance, point_ts: str) -> None:
+    """Ajoute un save-point auto à la partie courante selon la granularité (dedup au tour)."""
     global _AUTOSAVE_LAST_KEY
-    if not _PERSIST_DIR_SET:
-        return
     gs = engine_instance.game_state
     key = (int(gs["turn"]), int(gs["current_player"]))
-    if kind != "game_start" and _AUTOSAVE_GRANULARITY == "turn" and key == _AUTOSAVE_LAST_KEY:
+    if _AUTOSAVE_GRANULARITY == "turn" and key == _AUTOSAVE_LAST_KEY:
         return
     _AUTOSAVE_LAST_KEY = key
-    if kind is None:
-        kind = "auto_turn" if _AUTOSAVE_GRANULARITY == "turn" else "auto_phase"
-    from datetime import datetime
-    _SAVE_STORE.save_current(
-        engine_instance, datetime.now().strftime("%Y%m%d-%H%M%S"), "", kind
-    )
+    kind = "auto_turn" if _AUTOSAVE_GRANULARITY == "turn" else "auto_phase"
+    _SAVE_STORE.add_point(engine_instance, point_ts, "", kind)
 
 
 def _capture_and_autosave(engine_instance, initial: bool = False) -> None:
     """Point unique de capture PvP : snapshot de début de phase (si nouvelle) + persistance + auto-save.
 
-    Utilisé au démarrage/reset (``initial=True`` → save "game_start") et après chaque action."""
+    ``initial=True`` (start/reset) → nouvelle PARTIE avec son save-point de départ ; sinon save-point
+    auto ajouté à la partie courante."""
+    global _AUTOSAVE_LAST_KEY
     if getattr(engine_instance, "current_mode_code", None) not in ("pvp", "pvp_test"):
         return
     if not _SNAPSHOT_STORE.maybe_capture(engine_instance):
         return
     if _SNAPSHOT_PERSIST_ENABLED:
         _persist_snapshots_to_disk()
-    if _AUTOSAVE_ENABLED:
-        _maybe_autosave(engine_instance, "game_start" if initial else None)
+    # Un répertoire défini suffit pour l'ancre game_start ; les points de phase/tour dépendent du toggle.
+    if not _PERSIST_DIR_SET:
+        return
+    from datetime import datetime
+    now = datetime.now()
+    if initial:
+        # Ancre "game_start" créée à chaque démarrage/reset dès qu'un répertoire est défini,
+        # indépendamment de la sauvegarde automatique → toujours un point de début de partie.
+        gs = engine_instance.game_state
+        _AUTOSAVE_LAST_KEY = (int(gs["turn"]), int(gs["current_player"]))
+        _SAVE_STORE.start_party(
+            engine_instance, now.strftime("%Y%m%d_%H-%M"), now.strftime("%Y%m%d-%H%M%S")
+        )
+    elif _AUTOSAVE_ENABLED:
+        _maybe_autosave(engine_instance, now.strftime("%Y%m%d-%H%M%S"))
 
 
 # --- Persistance côté serveur de la config des saves (survit au redémarrage de l'api) ----------
@@ -3341,7 +3348,7 @@ def pick_directory():
 @app.route('/api/game/save', methods=['POST'])
 @with_engine_state_lock
 def create_save():
-    """Enregistre l'état vivant courant dans un fichier plat (save manuelle). Retourne la meta créée."""
+    """Ajoute un save-point manuel à la partie courante. Retourne la meta créée."""
     global engine
     if not engine:
         return jsonify({"success": False, "error": "Engine not initialized"}), 400
@@ -3350,37 +3357,68 @@ def create_save():
     from datetime import datetime
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     note = str((request.json or {}).get("note", "")) if request.is_json else ""
-    meta = _SAVE_STORE.save_current(engine, timestamp, note)
+    meta = _SAVE_STORE.add_point(engine, timestamp, note, "manual")
     return api_json_response({"success": True, "save": meta})
 
 
 @app.route('/api/game/saves', methods=['GET'])
 @with_engine_state_lock
 def list_saves():
-    """Liste les saves manuelles (métadonnées depuis les noms de fichiers, sans charger les états)."""
-    return api_json_response({"success": True, "saves": _SAVE_STORE.list_meta()})
+    """Save-points de la PARTIE COURANTE (pour Select)."""
+    return api_json_response({"success": True, "saves": _SAVE_STORE.list_points()})
 
 
 @app.route('/api/game/save/load', methods=['POST'])
 @with_engine_state_lock
 def load_save():
-    """Charge une save : remplace l'état vivant de l'engine et repart de ce point (reset des snapshots)."""
+    """Restaure un save-point de la partie courante (Select) : remplace l'état vivant, repart de ce point."""
     global engine
     if not engine:
         return jsonify({"success": False, "error": "Engine not initialized"}), 400
     data = request.json
     if not data:
         return jsonify({"success": False, "error": "No JSON data provided"}), 400
-    save_id = str(require_key(data, "id"))
-    _SAVE_STORE.load(engine, save_id)
-    # L'historique de rewind appartenait à l'ancienne timeline : on repart propre.
+    point_id = str(require_key(data, "id"))
+    meta = _SAVE_STORE.restore_point(engine, point_id)
+    # Nouvelle timeline de rewind à partir du point chargé (capture la phase courante).
     _SNAPSHOT_STORE.reset()
+    _SNAPSHOT_STORE.maybe_capture(engine)
     if _SNAPSHOT_PERSIST_ENABLED:
         _persist_snapshots_to_disk()
     serializable_state = _game_state_for_json(engine)
     _sync_units_hp_from_cache(serializable_state, engine.game_state)
     _attach_player_types(serializable_state, engine)
-    return api_json_response({"success": True, "game_state": serializable_state})
+    return api_json_response({"success": True, "game_state": serializable_state, "save": meta})
+
+
+@app.route('/api/game/parties', methods=['GET'])
+@with_engine_state_lock
+def list_parties():
+    """Liste des parties sauvegardées (pour Load)."""
+    return api_json_response({"success": True, "parties": _SAVE_STORE.list_parties()})
+
+
+@app.route('/api/game/party/load', methods=['POST'])
+@with_engine_state_lock
+def load_party():
+    """Charge une partie sauvegardée à son game start ; elle devient la partie courante."""
+    global engine
+    if not engine:
+        return jsonify({"success": False, "error": "Engine not initialized"}), 400
+    data = request.json
+    if not data:
+        return jsonify({"success": False, "error": "No JSON data provided"}), 400
+    name = str(require_key(data, "name"))
+    meta = _SAVE_STORE.load_party_start(engine, name)
+    # Nouvelle timeline de rewind à partir du game start chargé (capture la phase courante).
+    _SNAPSHOT_STORE.reset()
+    _SNAPSHOT_STORE.maybe_capture(engine)
+    if _SNAPSHOT_PERSIST_ENABLED:
+        _persist_snapshots_to_disk()
+    serializable_state = _game_state_for_json(engine)
+    _sync_units_hp_from_cache(serializable_state, engine.game_state)
+    _attach_player_types(serializable_state, engine)
+    return api_json_response({"success": True, "game_state": serializable_state, "save": meta})
 
 
 @app.route('/api/game/save-config', methods=['GET'])
@@ -3422,7 +3460,14 @@ def set_autosave():
         and isinstance(getattr(engine, "game_state", None), dict)
         and "turn" in engine.game_state
     ):
-        _maybe_autosave(engine)
+        from datetime import datetime
+        now = datetime.now()
+        if _SAVE_STORE.current_party() is None:
+            _SAVE_STORE.start_party(
+                engine, now.strftime("%Y%m%d_%H-%M"), now.strftime("%Y%m%d-%H%M%S")
+            )
+        else:
+            _maybe_autosave(engine, now.strftime("%Y%m%d-%H%M%S"))
     return api_json_response({
         "success": True,
         "enabled": _AUTOSAVE_ENABLED,

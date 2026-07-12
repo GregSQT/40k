@@ -7728,6 +7728,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       },
       saveList: async () => [],
       saveLoad: async () => ({ success: false }),
+      fetchPartyList: async () => [],
+      loadParty: async () => ({ success: false }),
       setAutosaveConfig: async () => ({ success: false }),
       deleteSaves: async () => 0,
       pickDirectory: async () => null,
@@ -8016,6 +8018,26 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     return data;
   };
 
+  const fetchPartyList = async (): Promise<Array<{ name: string }>> => {
+    const response = await fetch(`${API_BASE}/game/parties`);
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error ?? "parties list failed");
+    return data.parties as Array<{ name: string }>;
+  };
+
+  const loadParty = async (name: string) => {
+    const response = await fetch(`${API_BASE}/game/party/load`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error ?? "party load failed");
+    setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
+    resetInteractionState();
+    return data;
+  };
+
   const setAutosaveConfig = async (enabled: boolean, granularity: "phase" | "turn") => {
     const response = await fetch(`${API_BASE}/game/autosave`, {
       method: "POST",
@@ -8086,6 +8108,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     saveGameNow,
     saveList,
     saveLoad,
+    fetchPartyList,
+    loadParty,
     setAutosaveConfig,
     deleteSaves,
     pickDirectory,

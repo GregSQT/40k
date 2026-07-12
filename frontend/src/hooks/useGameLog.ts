@@ -13,6 +13,9 @@ function sanitizeGameLogMessage(message: string): string {
 
 export function useGameLog(currentTurn?: number) {
   const [events, setEvents] = useState<GameLogEvent[]>([]);
+  // Timestamp (ms) de troncature NON destructif de l'affichage (save chargé), ou null en live.
+  // On garde tous les events ; on n'affiche que ceux antérieurs à ce timestamp.
+  const [logCutoff, setLogCutoffState] = useState<number | null>(null);
   const eventIdCounter = useRef(0);
 
   const generateEventId = useCallback((): string => {
@@ -37,9 +40,14 @@ export function useGameLog(currentTurn?: number) {
       } as GameLogEvent;
 
       setEvents((prevEvents) => [newEvent, ...prevEvents]);
+      // Un nouvel event live (postérieur au point chargé) → on repasse en affichage complet.
+      setLogCutoffState((cut) => (cut != null && newEvent.timestamp.getTime() > cut ? null : cut));
     },
     [currentTurn, generateEventId]
   );
+
+  // Fixe/retire la troncature d'affichage (timestamp ms, non destructif : les events sont conservés).
+  const setLogCutoff = useCallback((cutoffMs: number | null) => setLogCutoffState(cutoffMs), []);
 
   const getUnitDisplayName = useCallback((unit: Unit): string => {
     if (typeof unit.DISPLAY_NAME === "string" && unit.DISPLAY_NAME.trim().length > 0) {
@@ -325,6 +333,8 @@ export function useGameLog(currentTurn?: number) {
     logCombatAction,
     logUnitDeath,
     clearLog,
+    logCutoff,
+    setLogCutoff,
     addEvent, // Export for custom messages (e.g., replay viewer)
   };
 }

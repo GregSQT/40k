@@ -1580,23 +1580,74 @@ export const BoardWithAPI: React.FC = () => {
   });
   const gameLog = useGameLog(apiProps.gameState?.currentTurn ?? 1);
 
+  // Chargement d'un save-point / d'une partie : époque de reset pour réaligner les états frontend
+  // accumulés (ghosts de figs mortes) et tronquer le Game Log au moment chargé.
+  const [loadEpoch, setLoadEpoch] = useState(0);
+  const applyLoadedState = useCallback(
+    (data: { save?: { ts?: string } } | null) => {
+      // ts du save "AAAAMMJJ-HHMMSS" → timestamp ms (heure locale) : cutoff d'affichage du log.
+      const ts = data?.save?.ts;
+      if (typeof ts === "string" && ts.length >= 15) {
+        const ms = new Date(
+          Number(ts.slice(0, 4)),
+          Number(ts.slice(4, 6)) - 1,
+          Number(ts.slice(6, 8)),
+          Number(ts.slice(9, 11)),
+          Number(ts.slice(11, 13)),
+          Number(ts.slice(13, 15))
+        ).getTime();
+        gameLog.setLogCutoff(ms);
+      } else {
+        gameLog.setLogCutoff(null);
+      }
+      setLoadEpoch((e) => e + 1);
+    },
+    [gameLog]
+  );
+  const handleLoadSave = useCallback(
+    async (id: string) => {
+      const data = await apiProps.saveLoad(id);
+      applyLoadedState(data as { save?: { ts?: string } });
+      return data;
+    },
+    [apiProps.saveLoad, applyLoadedState]
+  );
+  const handleLoadParty = useCallback(
+    async (name: string) => {
+      const data = await apiProps.loadParty(name);
+      applyLoadedState(data as { save?: { ts?: string } });
+      return data;
+    },
+    [apiProps.loadParty, applyLoadedState]
+  );
+
   // Point visionné (snapshot rewind) : tronque le Game Log jusqu'à ce moment (ou null en live).
   const [snapshotViewed, setSnapshotViewed] = useState<{
     snapshots: SnapshotMeta[];
     index: number;
   } | null>(null);
   const gameLogEventsFiltered = useMemo(() => {
-    if (!snapshotViewed) return gameLog.events;
-    const { snapshots, index } = snapshotViewed;
-    const viewedTurn = snapshots[index]?.turn ?? Number.POSITIVE_INFINITY;
-    const rankOf = (turn?: number, phase?: string, player?: number) =>
-      snapshots.findIndex((s) => s.turn === turn && s.phase === phase && s.player === player);
-    return gameLog.events.filter((ev) => {
-      const r = rankOf(ev.turnNumber, ev.phase, ev.player);
-      if (r === -1) return (ev.turnNumber ?? 0) < viewedTurn;
-      return r < index;
-    });
-  }, [gameLog.events, snapshotViewed]);
+    let evts = gameLog.events;
+    // Troncature d'affichage après un chargement de save (non destructif) : on n'affiche que les
+    // events antérieurs (+1 s de tolérance, le ts du save est à la seconde) au moment chargé.
+    const cut = gameLog.logCutoff;
+    if (cut != null) {
+      evts = evts.filter((ev) => ev.timestamp.getTime() <= cut + 999);
+    }
+    // Troncature rewind (mode visionnage).
+    if (snapshotViewed) {
+      const { snapshots, index } = snapshotViewed;
+      const viewedTurn = snapshots[index]?.turn ?? Number.POSITIVE_INFINITY;
+      const rankOf = (turn?: number, phase?: string, player?: number) =>
+        snapshots.findIndex((s) => s.turn === turn && s.phase === phase && s.player === player);
+      evts = evts.filter((ev) => {
+        const r = rankOf(ev.turnNumber, ev.phase, ev.player);
+        if (r === -1) return (ev.turnNumber ?? 0) < viewedTurn;
+        return r < index;
+      });
+    }
+    return evts;
+  }, [gameLog.events, gameLog.logCutoff, snapshotViewed]);
   // Clés `turn|phase|player` des phases ayant au moins une action (pour sauter les phases vides au replay).
   const snapshotActionKeys = useMemo(() => {
     const keys = new Set<string>();
@@ -3515,8 +3566,10 @@ export const BoardWithAPI: React.FC = () => {
             actionKeys={snapshotActionKeys}
             createSave={apiProps.saveGameNow}
             fetchSaveList={apiProps.saveList}
-            loadSave={apiProps.saveLoad}
+            loadSave={handleLoadSave}
             canSave={saveDirSelected}
+            fetchPartyList={apiProps.fetchPartyList}
+            loadParty={handleLoadParty}
           />
         </>
       )}
@@ -5317,6 +5370,7 @@ export const BoardWithAPI: React.FC = () => {
         <BoardColumnWithTutorial boardRows={boardConfig?.rows ?? 21}>
           <BoardPvpWithTutorialAdvance
             units={apiProps.units}
+            loadEpoch={loadEpoch}
             currentLevel={currentLevel}
             onCurrentLevelChange={setCurrentLevel}
             selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId}

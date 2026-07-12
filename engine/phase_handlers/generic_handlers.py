@@ -108,6 +108,11 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             game_state["episode_steps"] = 0
         game_state["episode_steps"] += 1
         response["step_incremented"] = True
+
+    # Compteur d'activations d'UNITÉ (distinct d'episode_steps qui compte par action/figurine) :
+    # +1 quand une unité termine son activation (retrait d'un pool). Sert au libellé "#" des saves.
+    if arg4 in ("MOVE", "FLED", "SHOOTING", "CHARGE", "FIGHT"):
+        game_state["unit_activation_count"] = game_state.get("unit_activation_count", 0) + 1
     
     # ├── Arg3 =
     # │ ├── CASE Arg3 = MOVE -> Mark as units_moved

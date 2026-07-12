@@ -535,6 +535,8 @@ export type MeasureModeState =
 
 type BoardProps = {
   units: Unit[];
+  /** Incrémenté à chaque chargement d'un save-point/partie → réinitialise les états visuels accumulés. */
+  loadEpoch?: number;
   selectedUnitId: number | null;
   ruleChoiceHighlightedUnitId?: number | null;
   eligibleUnitIds: number[];
@@ -1148,6 +1150,7 @@ function normalizeZoneHex(h: unknown): [number, number] {
 
 export default function Board({
   units,
+  loadEpoch,
   currentLevel: currentLevelProp,
   onCurrentLevelChange,
   selectedUnitId,
@@ -3111,6 +3114,14 @@ export default function Board({
   const prevModelPosRef = useRef<
     Map<string, { pos: [number, number]; meta: ModelVisualMeta | null }>
   >(new Map());
+
+  // Chargement d'un save-point / d'une partie : réinitialiser les ghosts de figs mortes et le
+  // suivi de positions, sinon une fig ressuscitée par le load reste affichée en mort.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset uniquement sur changement d'epoch
+  useEffect(() => {
+    setDeadModelGhosts([]);
+    prevModelPosRef.current = new Map();
+  }, [loadEpoch]);
 
   // Only expose ghosts to PIXI during shoot phase — prevents false detections during
   // phase transitions from affecting unitsFingerprint / unitsChanged outside of shoot.

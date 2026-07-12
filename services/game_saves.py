@@ -1,127 +1,151 @@
-"""Saves manuelles d'une partie PvP (un fichier plat par save).
+"""Saves d'une partie PvP : 1 fichier pickle par PARTIE, contenant plusieurs save-points.
 
-Une save = capture de l'état vivant de l'engine à un instant arbitraire (typiquement une frontière
-d'activation d'unité = un « event »). Écrite en pickle sous ``logs/pvp_saves/``.
+- Une partie = un fichier ``{AAAAMMJJ_hh-mm}.pkl`` (nom fixé au save de début de partie).
+- Chaque save-point = {meta, state} : état vivant capturé + métadonnées (turn/phase/#event, note, kind).
+- ``Select`` navigue les save-points de la partie COURANTE ; ``Load`` charge une autre partie (à son
+  game start) et la rend courante.
 
-Les métadonnées (turn, player, phase, episode_steps, timestamp) sont encodées dans le NOM de fichier
-afin que le listing du menu Select se construise sans désérialiser les états.
-
-Aucun fallback masquant une erreur : un id/nom invalide lève.
+Aucun fallback masquant une erreur : un nom/id invalide lève.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import pickle
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from services.game_snapshots import apply_live_state, capture_live_state
 
-# nom : save__T{turn}_P{player}_{phase}_e{steps}__{timestamp}.pkl
-_FILENAME_RE = re.compile(
-    r"^save__T(?P<turn>\d+)_P(?P<player>\d+)_(?P<phase>[a-z]+)_e(?P<steps>\d+)__(?P<ts>\d{8}-\d{6})\.pkl$"
-)
+# Nom de fichier de partie : AAAAMMJJ_hh-mm .pkl
+_PARTY_RE = re.compile(r"^(?P<name>\d{8}_\d{2}-\d{2})\.pkl$")
 
 
-def _meta_from_match(m: "re.Match[str]", filename: str) -> Dict[str, Any]:
-    turn = int(m.group("turn"))
-    phase = m.group("phase")
-    steps = int(m.group("steps"))
-    ts = m.group("ts")
+def _party_name_from_point_ts(point_ts: str) -> str:
+    """"20260712-143052" -> "20260712_14-30" (précision minute pour le nom de partie)."""
+    date, tm = point_ts.split("-", 1)
+    return f"{date}_{tm[0:2]}-{tm[2:4]}"
+
+
+def _point_meta(gs: Dict[str, Any], point_ts: str, note: str, kind: str) -> Dict[str, Any]:
+    turn = int(gs["turn"])
+    player = int(gs["current_player"])
+    phase = str(gs["phase"])
+    steps = int(gs.get("unit_activation_count", 0))  # "#" = activations d'UNITÉ (pas episode_steps)
     label = f"T{turn} · {phase[:1].upper()}{phase[1:]} · #{steps}"
     return {
-        "id": filename,
+        "id": point_ts,
         "turn": turn,
-        "player": int(m.group("player")),
+        "player": player,
         "phase": phase,
         "episode_steps": steps,
-        "ts": ts,
+        "ts": point_ts,
         "label": label,
+        "note": note,
+        "kind": kind,
     }
 
 
 class SaveStore:
     def __init__(self, directory: str) -> None:
         self._dir = directory
+        self._current: Optional[str] = None  # nom de la partie courante
 
     def set_directory(self, directory: str) -> None:
-        """Change le répertoire des saves (les saves existantes de l'ancien dossier ne sont pas déplacées)."""
+        """Change le répertoire des parties (change de dossier → plus de partie courante)."""
         self._dir = directory
+        self._current = None
 
-    def _note_path(self, pkl_filename: str) -> str:
-        """Sidecar JSON portant la note optionnelle (le nom de fichier ne peut pas la porter)."""
-        return os.path.join(self._dir, pkl_filename[:-4] + ".json")
+    def current_party(self) -> Optional[str]:
+        return self._current
 
-    def _read_sidecar(self, pkl_filename: str) -> Dict[str, str]:
-        p = self._note_path(pkl_filename)
-        if not os.path.exists(p):
-            return {"note": "", "kind": "manual"}
-        with open(p, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return {"note": str(data.get("note", "")), "kind": str(data.get("kind", "manual"))}
+    def _path(self, name: str) -> str:
+        return os.path.join(self._dir, f"{name}.pkl")
 
-    def save_current(
-        self, engine: Any, timestamp: str, note: str = "", kind: str = "manual"
-    ) -> Dict[str, Any]:
-        """Capture l'état vivant et l'écrit dans un fichier (+ sidecar de note). Retourne la meta créée.
+    def _read_party(self, name: str) -> Dict[str, Any]:
+        with open(self._path(name), "rb") as f:
+            return pickle.load(f)
 
-        ``timestamp`` (format ``YYYYmmdd-HHMMSS``) est fourni par l'appelant (l'engine/serveur ne
-        dépend pas d'une horloge testable dans ce module). ``note`` est optionnelle."""
-        gs = engine.game_state
-        turn = int(gs["turn"])
-        player = int(gs["current_player"])
-        phase = str(gs["phase"])
-        steps = int(gs.get("episode_steps", 0))
-        filename = f"save__T{turn}_P{player}_{phase}_e{steps}__{timestamp}.pkl"
-        if not _FILENAME_RE.match(filename):
-            raise ValueError(f"métadonnées de save invalides pour le nom: {filename!r}")
+    def _write_party(self, name: str, data: Dict[str, Any]) -> None:
         os.makedirs(self._dir, exist_ok=True)
-        path = os.path.join(self._dir, filename)
-        captured = capture_live_state(engine)
-        with open(path, "wb") as f:
-            pickle.dump(captured, f)
-        with open(self._note_path(filename), "w", encoding="utf-8") as f:
-            json.dump({"note": note, "kind": kind}, f, ensure_ascii=False)
-        meta = _meta_from_match(_FILENAME_RE.match(filename), filename)
-        meta["note"] = note
-        meta["kind"] = kind
+        with open(self._path(name), "wb") as f:
+            pickle.dump(data, f)
+
+    def start_party(self, engine: Any, party_name: str, point_ts: str) -> Dict[str, Any]:
+        """Crée une nouvelle partie (fichier) avec le save-point de départ (kind game_start). Devient courante."""
+        gs = engine.game_state
+        meta = _point_meta(gs, point_ts, "", "game_start")
+        party = {"name": party_name, "points": [{"meta": meta, "state": capture_live_state(engine)}]}
+        self._write_party(party_name, party)
+        self._current = party_name
+        return {"name": party_name}
+
+    def add_point(self, engine: Any, point_ts: str, note: str = "", kind: str = "manual") -> Dict[str, Any]:
+        """Ajoute un save-point à la partie courante (en crée une à la volée si aucune n'est courante)."""
+        if self._current is None:
+            self._current = _party_name_from_point_ts(point_ts)
+        party = (
+            self._read_party(self._current)
+            if os.path.exists(self._path(self._current))
+            else {"name": self._current, "points": []}
+        )
+        meta = _point_meta(engine.game_state, point_ts, note, kind)
+        party["points"].append({"meta": meta, "state": capture_live_state(engine)})
+        self._write_party(self._current, party)
         return meta
 
-    def list_meta(self) -> List[Dict[str, Any]]:
-        """Métadonnées de toutes les saves (plus récentes d'abord), sans charger les états."""
+    def list_points(self) -> List[Dict[str, Any]]:
+        """Save-points de la partie courante (pour Select), plus récents d'abord."""
+        if self._current is None or not os.path.exists(self._path(self._current)):
+            return []
+        pts = [p["meta"] for p in self._read_party(self._current)["points"]]
+        pts.sort(key=lambda m: m["ts"], reverse=True)
+        return pts
+
+    def list_parties(self) -> List[Dict[str, Any]]:
+        """Liste des parties sauvegardées (pour Load), plus récentes d'abord."""
         if not os.path.isdir(self._dir):
             return []
-        metas: List[Dict[str, Any]] = []
+        parties: List[Dict[str, Any]] = []
         for fn in os.listdir(self._dir):
-            m = _FILENAME_RE.match(fn)
+            m = _PARTY_RE.match(fn)
             if m:
-                metas.append({**_meta_from_match(m, fn), **self._read_sidecar(fn)})
-        metas.sort(key=lambda x: x["ts"], reverse=True)
-        return metas
+                parties.append({"name": m.group("name")})
+        parties.sort(key=lambda p: p["name"], reverse=True)
+        return parties
+
+    def restore_point(self, engine: Any, point_id: str) -> Dict[str, Any]:
+        """Restaure un save-point (par id) de la partie courante."""
+        if self._current is None:
+            raise ValueError("aucune partie courante")
+        for p in self._read_party(self._current)["points"]:
+            if p["meta"]["id"] == point_id:
+                apply_live_state(engine, p["state"])
+                return p["meta"]
+        raise KeyError(f"save-point introuvable: {point_id}")
+
+    def load_party_start(self, engine: Any, name: str) -> Dict[str, Any]:
+        """Charge une partie à son game_start (ou son 1er point) et la rend courante."""
+        if not _PARTY_RE.match(f"{name}.pkl"):
+            raise ValueError(f"nom de partie invalide: {name!r}")
+        if not os.path.exists(self._path(name)):
+            raise FileNotFoundError(f"partie introuvable: {name}")
+        points = self._read_party(name)["points"]
+        if not points:
+            raise ValueError(f"partie vide: {name}")
+        start = next((p for p in points if p["meta"]["kind"] == "game_start"), points[0])
+        apply_live_state(engine, start["state"])
+        self._current = name
+        return start["meta"]
 
     def delete_all(self) -> int:
-        """Supprime toutes les saves (pickles + sidecars de note). Retourne le nombre de saves effacées."""
+        """Supprime toutes les parties. Retourne le nombre de fichiers effacés."""
         if not os.path.isdir(self._dir):
             return 0
         n = 0
         for fn in list(os.listdir(self._dir)):
-            if _FILENAME_RE.match(fn):
+            if _PARTY_RE.match(fn):
                 os.remove(os.path.join(self._dir, fn))
-                note = self._note_path(fn)
-                if os.path.exists(note):
-                    os.remove(note)
                 n += 1
+        self._current = None
         return n
-
-    def load(self, engine: Any, save_id: str) -> None:
-        """Remplace l'état vivant de l'engine par la save ``save_id`` (= nom de fichier)."""
-        if not _FILENAME_RE.match(save_id):
-            raise ValueError(f"id de save invalide: {save_id!r}")
-        path = os.path.join(self._dir, save_id)
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"save introuvable: {save_id}")
-        with open(path, "rb") as f:
-            captured = pickle.load(f)
-        apply_live_state(engine, captured)
