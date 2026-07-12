@@ -4,7 +4,7 @@
 // - Clic sur un tour / une phase dans le TurnPhaseTracker -> rollback NON destructif (mode view) sur ce point.
 // - Navigation avec les boutons du container (⏮ ⏪ ▶ ⏸ ⏹ ⏭ + vitesse) ; « Reprendre ici » bascule en reprise.
 import type React from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 export interface SnapshotMeta {
   turn: number;
@@ -35,10 +35,10 @@ interface SnapshotRewindProps {
   onViewModeChange: (active: boolean) => void;
   /** true → affiche le container de contrôle du replay sous le tracker. */
   replayOpen: boolean;
-}
-
-function formatPhase(phase: string): string {
-  return phase.charAt(0).toUpperCase() + phase.slice(1);
+  /** Notifie le point visionné (liste + index) pour tronquer le Game Log jusqu'à ce moment, ou null en live. */
+  onViewChange: (viewed: { snapshots: SnapshotMeta[]; index: number } | null) => void;
+  /** Clés `turn|phase|player` des phases où au moins une action a eu lieu (pour sauter les phases vides). */
+  actionKeys: Set<string>;
 }
 
 export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
@@ -48,6 +48,8 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
   reloadLive,
   onViewModeChange,
   replayOpen,
+  onViewChange,
+  actionKeys,
 }) => {
   const [list, setList] = useState<SnapshotMeta[]>([]);
   const [viewIndex, setViewIndex] = useState<number | null>(null);
@@ -55,6 +57,35 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+
+  // Indices des snapshots dont la phase a eu au moins une action (sinon, tous : pas de filtre exploitable).
+  const actionIndices = useMemo(() => {
+    const arr: number[] = [];
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      if (s && actionKeys.has(`${s.turn}|${s.phase}|${s.player}`)) arr.push(i);
+    }
+    return arr.length > 0 ? arr : list.map((_, i) => i);
+  }, [list, actionKeys]);
+
+  const prevActionIndex = useCallback(
+    (from: number) => {
+      let best = -1;
+      for (const i of actionIndices) {
+        if (i < from) best = i;
+        else break;
+      }
+      return best;
+    },
+    [actionIndices]
+  );
+  const nextActionIndex = useCallback(
+    (from: number) => {
+      for (const i of actionIndices) if (i > from) return i;
+      return -1;
+    },
+    [actionIndices]
+  );
 
   // Charge la liste à l'ouverture du container de replay.
   useEffect(() => {
@@ -93,25 +124,6 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
     [list, restore, onViewModeChange]
   );
 
-  const stepView = useCallback(
-    async (dir: -1 | 1) => {
-      if (viewIndex == null) return;
-      const next = viewIndex + dir;
-      if (next < 0 || next >= list.length) return;
-      const m = list[next];
-      setBusy(true);
-      try {
-        await restore(m.turn, m.player, m.phase, "view");
-        setViewIndex(next);
-      } catch (e) {
-        setError(String((e as Error)?.message ?? e));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [viewIndex, list, restore]
-  );
-
   const exitView = useCallback(async () => {
     setBusy(true);
     try {
@@ -145,16 +157,22 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
     }
   }, [viewIndex, list, restore, onViewModeChange]);
 
-  // Autoplay : enchaîne les phases tant que la lecture est active.
+  // Rapporte le point visionné (pour tronquer le Game Log jusqu'à ce moment).
+  useEffect(() => {
+    onViewChange(viewIndex != null ? { snapshots: list, index: viewIndex } : null);
+  }, [viewIndex, list, onViewChange]);
+
+  // Autoplay : enchaîne les phases avec action tant que la lecture est active.
   useEffect(() => {
     if (!isPlaying || viewIndex == null) return;
-    if (viewIndex >= list.length - 1) {
+    const next = nextActionIndex(viewIndex);
+    if (next < 0) {
       setIsPlaying(false);
       return;
     }
-    const t = setTimeout(() => stepView(1), 1000 / playbackSpeed);
+    const t = setTimeout(() => enterView(next), 1000 / playbackSpeed);
     return () => clearTimeout(t);
-  }, [isPlaying, viewIndex, playbackSpeed, list.length, stepView]);
+  }, [isPlaying, viewIndex, playbackSpeed, nextActionIndex, enterView]);
 
   // Saut vers un tour/phase (clic sur le tracker) : rollback view non destructif sur ce point.
   // biome-ignore lint/correctness/useExhaustiveDependencies: traiter chaque requête (nonce) une seule fois
@@ -203,9 +221,12 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
   // --- Container de contrôle du replay (mêmes controls que la barre replay, sous le tracker) ---
   if (!replayOpen && viewIndex == null) return null;
 
-  const m = viewIndex != null ? list[viewIndex] : undefined;
   const atLive = viewIndex == null;
   const progressPct = atLive || list.length === 0 ? 100 : ((viewIndex + 1) / list.length) * 100;
+  const firstTarget = actionIndices.length ? actionIndices[0] : -1;
+  const lastTarget = actionIndices.length ? actionIndices[actionIndices.length - 1] : -1;
+  const prevTarget = atLive ? lastTarget : prevActionIndex(viewIndex);
+  const nextTarget = atLive ? -1 : nextActionIndex(viewIndex);
 
   return (
     <div
@@ -213,43 +234,24 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
       style={{ position: "relative", zIndex: 4001 }}
     >
       <div className="replay-controls-row">
-        {/* Pas-à-pas — GAUCHE */}
-        <div className="replay-step-buttons">
-          <button
-            type="button"
-            className="replay-btn replay-btn--nav"
-            disabled={busy || list.length === 0 || (!atLive && viewIndex <= 0)}
-            onClick={() => (atLive ? enterView(list.length - 1) : stepView(-1))}
-          >
-            <span className="replay-icon replay-icon--prev">⏪</span>
-          </button>
-          <button
-            type="button"
-            className="replay-btn replay-btn--nav"
-            disabled={busy || atLive || viewIndex >= list.length - 1}
-            onClick={() => stepView(1)}
-          >
-            <span className="replay-icon replay-icon--next">⏩</span>
-          </button>
-        </div>
-
         {/* Lecture — CENTRE-GAUCHE */}
         <div className="replay-nav-buttons">
           <button
             type="button"
             className="replay-btn replay-btn--nav"
-            disabled={busy || list.length === 0}
-            onClick={() => enterView(0)}
+            title="Action précédente"
+            disabled={busy || prevTarget < 0}
+            onClick={() => enterView(prevTarget)}
           >
-            <span className="replay-icon replay-icon--start">⏮</span>
+            <span className="replay-icon replay-icon--prev">⏮</span>
           </button>
           {!isPlaying ? (
             <button
               type="button"
               className="replay-btn replay-btn--play"
-              disabled={busy || list.length === 0}
+              disabled={busy || firstTarget < 0}
               onClick={() => {
-                if (atLive) enterView(0);
+                if (atLive) enterView(firstTarget);
                 setIsPlaying(true);
               }}
             >
@@ -266,22 +268,12 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
           )}
           <button
             type="button"
-            className="replay-btn replay-btn--stop"
-            disabled={busy || atLive}
-            onClick={() => {
-              setIsPlaying(false);
-              exitView();
-            }}
-          >
-            ⏹
-          </button>
-          <button
-            type="button"
             className="replay-btn replay-btn--nav"
-            disabled={busy || list.length === 0}
-            onClick={() => enterView(list.length - 1)}
+            title="Action suivante"
+            disabled={busy || nextTarget < 0}
+            onClick={() => enterView(nextTarget)}
           >
-            <span className="replay-icon replay-icon--end">⏭</span>
+            <span className="replay-icon replay-icon--next">⏭</span>
           </button>
         </div>
 
@@ -300,18 +292,6 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
           ))}
         </div>
 
-        {/* Position — DROITE */}
-        <div className="replay-action-counter">
-          {atLive ? (
-            <>Live</>
-          ) : (
-            <>
-              {viewIndex + 1} / {list.length} — T{m?.turn} · P{m?.player} ·{" "}
-              {m ? formatPhase(m.phase) : ""}
-            </>
-          )}
-        </div>
-
         {/* Reprendre la partie au point visionné */}
         {!atLive && (
           <button
@@ -323,6 +303,41 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
             ↩ Reprendre ici
           </button>
         )}
+
+        {/* État Live / retour au live — TOUT À DROITE */}
+        <div className="replay-action-counter" style={{ marginLeft: "auto" }}>
+          {atLive ? (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+              Live
+              <span
+                style={{
+                  width: "10px",
+                  height: "10px",
+                  borderRadius: "50%",
+                  background: "#ef4444",
+                  display: "inline-block",
+                }}
+              />
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="replay-btn replay-btn--nav"
+              title="Revenir au live"
+              disabled={busy}
+              onClick={exitView}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "18px",
+                lineHeight: 1,
+              }}
+            >
+              ⟳
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Barre de progression */}

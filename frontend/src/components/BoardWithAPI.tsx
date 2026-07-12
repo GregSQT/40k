@@ -50,7 +50,7 @@ import { GameLog } from "./GameLog";
 import { HelperPanel } from "./HelperPanel";
 import { SettingsMenu } from "./SettingsMenu";
 import SharedLayout from "./SharedLayout";
-import SnapshotRewind, { type SnapshotJump } from "./SnapshotRewind";
+import SnapshotRewind, { type SnapshotJump, type SnapshotMeta } from "./SnapshotRewind";
 import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import TutorialOverlay from "./TutorialOverlay";
@@ -1579,6 +1579,34 @@ export const BoardWithAPI: React.FC = () => {
     currentLevelRef,
   });
   const gameLog = useGameLog(apiProps.gameState?.currentTurn ?? 1);
+
+  // Point visionné (snapshot rewind) : tronque le Game Log jusqu'à ce moment (ou null en live).
+  const [snapshotViewed, setSnapshotViewed] = useState<{
+    snapshots: SnapshotMeta[];
+    index: number;
+  } | null>(null);
+  const gameLogEventsFiltered = useMemo(() => {
+    if (!snapshotViewed) return gameLog.events;
+    const { snapshots, index } = snapshotViewed;
+    const viewedTurn = snapshots[index]?.turn ?? Number.POSITIVE_INFINITY;
+    const rankOf = (turn?: number, phase?: string, player?: number) =>
+      snapshots.findIndex((s) => s.turn === turn && s.phase === phase && s.player === player);
+    return gameLog.events.filter((ev) => {
+      const r = rankOf(ev.turnNumber, ev.phase, ev.player);
+      if (r === -1) return (ev.turnNumber ?? 0) < viewedTurn;
+      return r < index;
+    });
+  }, [gameLog.events, snapshotViewed]);
+  // Clés `turn|phase|player` des phases ayant au moins une action (pour sauter les phases vides au replay).
+  const snapshotActionKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const ev of gameLog.events) {
+      if (ev.turnNumber != null && ev.phase != null && ev.player != null) {
+        keys.add(`${ev.turnNumber}|${ev.phase}|${ev.player}`);
+      }
+    }
+    return keys;
+  }, [gameLog.events]);
 
   // Desperate Escape : on mémorise l'instant d'ouverture du popup hazard pour ignorer le
   // clic-fond (qui l'annule) pendant ~400 ms. Sinon, sur un DOUBLE-clic d'activation, le 1er
@@ -3418,6 +3446,8 @@ export const BoardWithAPI: React.FC = () => {
             reloadLive={apiProps.snapshotReloadLive}
             onViewModeChange={setSnapshotViewActive}
             replayOpen={showReplay}
+            onViewChange={setSnapshotViewed}
+            actionKeys={snapshotActionKeys}
           />
         </>
       )}
@@ -5011,7 +5041,7 @@ export const BoardWithAPI: React.FC = () => {
             )}
             <div className="game-log-with-illustration__log">
               <GameLogWithTutorialSpotlight
-                events={gameLog.events}
+                events={gameLogEventsFiltered}
                 currentTurn={apiProps.gameState?.currentTurn ?? 1}
                 debugMode={settings.showDebug}
                 logShowCoords={settings.logShowCoords}
