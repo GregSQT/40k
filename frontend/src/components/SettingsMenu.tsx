@@ -43,6 +43,8 @@ interface SettingsMenuProps {
   onToggleLogShowType?: (value: boolean) => void;
   dynamicCoverStatus?: boolean;
   onToggleDynamicCoverStatus?: (value: boolean) => void;
+  snapshotPersistEnabled?: boolean;
+  onToggleSnapshotPersist?: (value: boolean) => void;
 }
 
 /**
@@ -169,6 +171,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   onToggleLogShowType,
   dynamicCoverStatus = true,
   onToggleDynamicCoverStatus,
+  snapshotPersistEnabled = false,
+  onToggleSnapshotPersist,
 }) => {
   // Snapshot des réglages à l'ouverture du menu, pour pouvoir annuler les
   // changements (appliqués en live) en restaurant les valeurs initiales.
@@ -389,14 +393,24 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
             )}
           </CollapsibleSection>
 
-          {canToggleAutoSelectWeapon && (
+          {(canToggleAutoSelectWeapon || onToggleSnapshotPersist) && (
             <CollapsibleSection title="Gameplay">
-              <ToggleRow
-                checked={autoSelectWeapon}
-                onChange={onToggleAutoSelectWeapon}
-                label="Sélection automatique d'arme"
-                description="Désactiver pour choisir manuellement l'arme à utiliser pour chaque tir."
-              />
+              {canToggleAutoSelectWeapon && (
+                <ToggleRow
+                  checked={autoSelectWeapon}
+                  onChange={onToggleAutoSelectWeapon}
+                  label="Sélection automatique d'arme"
+                  description="Désactiver pour choisir manuellement l'arme à utiliser pour chaque tir."
+                />
+              )}
+              {onToggleSnapshotPersist && (
+                <ToggleRow
+                  checked={snapshotPersistEnabled}
+                  onChange={onToggleSnapshotPersist}
+                  label="Sauvegarde des snapshots sur disque"
+                  description="Conserve l'historique des phases (rewind / visionnage) sur disque pour qu'il survive à un rechargement de la partie."
+                />
+              )}
             </CollapsibleSection>
           )}
 

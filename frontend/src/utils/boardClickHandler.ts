@@ -66,6 +66,15 @@ export function setupBoardClickHandler(callbacks: {
       }>
     ).detail;
 
+    // [SEL-DEBUG] Tout clic unité qui atteint le routeur (handler PIXI attaché).
+    console.log("[SEL-DEBUG] boardUnitClick reçu:", {
+      unitId,
+      phase,
+      mode,
+      selectedUnitId,
+      clickType: clickType ?? "left",
+    });
+
     if (phase === "fight") {
       logFightClick("boardUnitClick reçu", {
         unitId,

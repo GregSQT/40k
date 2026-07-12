@@ -1550,14 +1550,41 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   // Reset mode to "select" when phase changes only (not when targetPreview blink timer clears).
   // If targetPreview?.blinkTimer is in the dependency array, clearing targetPreview when entering
   // advancePreview re-runs this effect and wipes advanceDestinations / mode — no orange preview.
+  // Réinitialise l'état d'interaction (mode, sélection, previews) SANS toucher au mode courant si
+  // une activation est en cours. Utilisé UNIQUEMENT après un restore snapshot hors-bande — car un
+  // restore vers le début de la phase COURANTE ne change pas gameState.phase et ne déclencherait
+  // pas l'effet ci-dessous. N'est PAS branché sur l'effet de phase (flux normal inchangé).
+  const resetInteractionState = useCallback(() => {
+    setTargetPreview((prev) => {
+      if (prev?.blinkTimer) clearInterval(prev.blinkTimer);
+      return null;
+    });
+    setMode("select");
+    setSelectedUnitId(null);
+    setMovePreview(null);
+    setPendingPreviewAction(null);
+    setAttackPreview(null);
+    setChargeDestinations([]);
+    setChargePreviewOverlayHexes([]);
+    setChargeReferenceHex(null);
+    clearChargePoolRefs();
+    setPendingChargeRollDisplay(null);
+    setChargePreviewTargetId(null);
+    setPileInDestinations([]);
+    setAdvanceDestinations([]);
+    setPostShootMoveDestinations([]);
+    setAdvancingUnitId(null);
+    setAdvanceRoll(null);
+    setActiveUnitEngaged(null);
+  }, [clearChargePoolRefs]);
+
+  // Effet de phase ORIGINAL (inchangé) : reset au CHANGEMENT de phase uniquement.
   useEffect(() => {
     if (gameState?.phase) {
       if (targetPreview?.blinkTimer) {
         clearInterval(targetPreview.blinkTimer);
       }
       setTargetPreview(null);
-      // Reset mode when phase changes (except if we're already in the correct mode for the phase)
-      // This ensures mode is reset after fight phase ends
       setMode("select");
       setSelectedUnitId(null);
       setMovePreview(null);
@@ -1577,6 +1604,19 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setActiveUnitEngaged(null);
     }
   }, [gameState?.phase, targetPreview?.blinkTimer, clearChargePoolRefs]);
+
+  // [SEL-DEBUG] Trace la valeur frontend de current_player / phase à chaque changement.
+  useEffect(() => {
+    console.log(
+      "[SEL-DEBUG] state:",
+      "current_player=",
+      gameState?.current_player,
+      "phase=",
+      gameState?.phase,
+      "turn=",
+      gameState?.turn
+    );
+  }, [gameState?.current_player, gameState?.phase, gameState?.turn]);
 
   // Libération du verrou « sortie de move » après commit du render : dès que la phase affichée
   // n'est plus move, onEntryPointerDown est démonté → plus aucun clic figurine ne peut émettre un
@@ -3749,6 +3789,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   // Event handlers aligned with backend
   const handleSelectUnit = useCallback(
     async (unitId: number | string | null) => {
+      // [SEL-DEBUG] Entrée du hook de sélection : joueur de l'unité vs current_player frontend.
+      {
+        const _u = gameState?.units?.find((x) => String(x.id) === String(unitId));
+        console.log("[SEL-DEBUG] handleSelectUnit:", {
+          unitId,
+          unitPlayer: _u?.player,
+          current_player: gameState?.current_player,
+          phase: gameState?.phase,
+          mode,
+        });
+      }
       // Allocation manuelle des pertes en cours (Desperate Escape) : aucun changement de
       // sélection/activation tant que les mortal wounds ne sont pas attribuées.
       if (manualAllocationRef.current && unitId !== null) return;
@@ -7667,6 +7718,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       unitsTookToSkiesCharge: [] as number[],
       phase: null,
       gameState: null,
+      snapshotFetchList: async () => ({ snapshots: [], persist_enabled: false }),
+      snapshotRestore: async () => ({ success: false }),
+      snapshotReloadLive: async () => {},
+      snapshotSetPersist: async () => false,
       onSelectUnit: () => {},
       onSkipUnit: () => {},
       onEndPhase: async () => {},
@@ -7856,6 +7911,63 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     isBlinkingActive: isBlinkingActiveMemo,
     blinkVersion,
   };
+
+  // --- Snapshots temporels (rewind / playback par phase) — PvP / PvP test ---
+  // Fonctions simples (placées après le return anticipé du hook) : pas des hooks React.
+  const snapshotFetchList = async (): Promise<{
+    snapshots: Array<{
+      turn: number;
+      player: number;
+      phase: string;
+      score: Record<string, number>;
+    }>;
+    persist_enabled: boolean;
+  }> => {
+    const response = await fetch(`${API_BASE}/game/snapshots`);
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error ?? "snapshots fetch failed");
+    return { snapshots: data.snapshots, persist_enabled: data.persist_enabled };
+  };
+
+  const snapshotRestore = async (
+    turn: number,
+    player: number,
+    phase: string,
+    restoreMode: "resume" | "view"
+  ) => {
+    const response = await fetch(`${API_BASE}/game/snapshot/restore`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ turn, player, phase, mode: restoreMode }),
+    });
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error ?? "snapshot restore failed");
+    setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
+    // Restore vers le début de la phase courante : forcer le reset (l'effet phase ne tirerait pas).
+    resetInteractionState();
+    return data;
+  };
+
+  // Recharge l'état vivant réel du moteur (sortie du mode visionnage : le moteur n'a pas été muté).
+  const snapshotReloadLive = async () => {
+    const response = await fetch(`${API_BASE}/game/state`);
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error ?? "game state reload failed");
+    setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
+    resetInteractionState();
+  };
+
+  const snapshotSetPersist = async (enabled: boolean) => {
+    const response = await fetch(`${API_BASE}/game/snapshot/persist`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error ?? "snapshot persist toggle failed");
+    return data.persist_enabled as boolean;
+  };
+
   const returnObject = {
     loading: false,
     error: null,
@@ -7880,6 +7992,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     // Expose fight_subphase for UnitRenderer click handling
     fightSubPhase: gameState.fight_subphase as "pile_in" | "fight" | "consolidate" | null,
     gameState: memoizedGameState,
+    // Snapshots temporels (rewind / playback)
+    snapshotFetchList,
+    snapshotRestore,
+    snapshotReloadLive,
+    snapshotSetPersist,
     onSelectUnit: handleSelectUnit,
     onSkipUnit: handleSkipUnit,
     onEndPhase: handleEndPhase,

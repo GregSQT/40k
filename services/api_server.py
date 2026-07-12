@@ -1166,6 +1166,12 @@ initialize_auth_db()
 engine: Optional[W40KEngine] = None
 _ENGINE_STATE_LOCK = RLock()
 
+# Snapshots temporels (rewind / playback par phase) — mode PvP / PvP test uniquement.
+from services.game_snapshots import GameSnapshotStore
+_SNAPSHOT_STORE = GameSnapshotStore()
+# Persistance disque des snapshots (option gameplay du menu). False = mémoire seule.
+_SNAPSHOT_PERSIST_ENABLED = False
+
 
 def with_engine_state_lock(fn):
     """Serialize engine/game_state access across concurrent HTTP requests."""
@@ -2057,6 +2063,11 @@ def start_game():
         command_handlers.command_phase_start(gs)
         movement_handlers.movement_phase_start(gs)
 
+    # Snapshots temporels : réinitialiser l'historique et capturer l'état de départ (PvP / PvP test).
+    _SNAPSHOT_STORE.reset()
+    if requested_mode in ("pvp", "pvp_test"):
+        _SNAPSHOT_STORE.maybe_capture(engine)
+
     # Convert game state to JSON-serializable format
     serializable_state = _game_state_for_json(engine)
     _sync_units_hp_from_cache(serializable_state, engine.game_state)
@@ -2469,6 +2480,11 @@ def execute_action():
         ed_post = handle_endless_duty_post_action(engine)
         if isinstance(result, dict):
             result["endless_duty"] = ed_post
+
+    # Snapshots temporels : capturer le début de toute nouvelle phase atteinte par cette action (PvP).
+    if success and getattr(engine, "current_mode_code", None) in ("pvp", "pvp_test"):
+        if _SNAPSHOT_STORE.maybe_capture(engine) and _SNAPSHOT_PERSIST_ENABLED:
+            _persist_snapshots_to_disk()
 
     # Convert game state to JSON-serializable format
     _ser_t0 = time.perf_counter() if _api_perf else None
@@ -3074,6 +3090,9 @@ def reset_game():
         return jsonify({"success": False, "error": "Engine not initialized"}), 400
     
     obs, info = engine.reset()
+    _SNAPSHOT_STORE.reset()
+    if getattr(engine, "current_mode_code", None) in ("pvp", "pvp_test"):
+        _SNAPSHOT_STORE.maybe_capture(engine)
     serializable_state = _game_state_for_json(engine)
     _sync_units_hp_from_cache(serializable_state, engine.game_state)
     _attach_player_types(serializable_state, engine)
@@ -3083,6 +3102,101 @@ def reset_game():
         "game_state": serializable_state,
         "message": "Game reset successfully",
     })
+
+def _snapshot_persist_path() -> str:
+    """Fichier de persistance des snapshots (pickle) sous logs/."""
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    return os.path.join(project_root, "logs", "pvp_snapshots.pkl")
+
+
+def _persist_snapshots_to_disk() -> None:
+    import pickle
+    path = _snapshot_persist_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        pickle.dump(_SNAPSHOT_STORE, f)
+
+
+def _load_snapshots_from_disk() -> bool:
+    import pickle
+    path = _snapshot_persist_path()
+    if not os.path.exists(path):
+        return False
+    with open(path, "rb") as f:
+        loaded = pickle.load(f)
+    if not isinstance(loaded, GameSnapshotStore):
+        raise TypeError(f"Fichier snapshot invalide: {type(loaded).__name__}")
+    _SNAPSHOT_STORE._snaps = loaded._snaps
+    return True
+
+
+@app.route('/api/game/snapshots', methods=['GET'])
+@with_engine_state_lock
+def list_snapshots():
+    """Liste les snapshots capturés (métadonnées : turn, player, phase, score)."""
+    return api_json_response({
+        "success": True,
+        "snapshots": _SNAPSHOT_STORE.list_meta(),
+        "persist_enabled": _SNAPSHOT_PERSIST_ENABLED,
+    })
+
+
+@app.route('/api/game/snapshot/restore', methods=['POST'])
+@with_engine_state_lock
+def restore_snapshot():
+    """Restaure un snapshot. mode='resume' remplace l'état vivant et purge l'historique postérieur ;
+    mode='view' renvoie l'état sérialisé sans toucher la partie en cours (lecture seule)."""
+    global engine
+    if not engine:
+        return jsonify({"success": False, "error": "Engine not initialized"}), 400
+    data = request.json
+    if not data:
+        return jsonify({"success": False, "error": "No JSON data provided"}), 400
+    turn = int(require_key(data, "turn"))
+    player = int(require_key(data, "player"))
+    phase = str(require_key(data, "phase"))
+    mode = str(require_key(data, "mode"))
+    if mode not in ("resume", "view"):
+        return jsonify({"success": False, "error": f"mode must be 'resume' or 'view' (got {mode!r})"}), 400
+    if not _SNAPSHOT_STORE.has(turn, player, phase):
+        return jsonify({"success": False, "error": f"snapshot introuvable: turn={turn} player={player} phase={phase}"}), 404
+
+    if mode == "view":
+        # Sérialise le snapshot sans muter la partie vivante : swap temporaire de game_state.
+        rebuilt = _SNAPSHOT_STORE.build_game_state(engine, turn, player, phase)
+        live_gs = engine.game_state
+        try:
+            engine.game_state = rebuilt
+            serializable_state = _game_state_for_json(engine)
+            _sync_units_hp_from_cache(serializable_state, engine.game_state)
+            _attach_player_types(serializable_state, engine)
+        finally:
+            engine.game_state = live_gs
+        return api_json_response({"success": True, "mode": "view", "game_state": serializable_state})
+
+    # resume : remplace l'état vivant + purge postérieur
+    _SNAPSHOT_STORE.apply_resume(engine, turn, player, phase)
+    if _SNAPSHOT_PERSIST_ENABLED:
+        _persist_snapshots_to_disk()
+    serializable_state = _game_state_for_json(engine)
+    _sync_units_hp_from_cache(serializable_state, engine.game_state)
+    _attach_player_types(serializable_state, engine)
+    return api_json_response({"success": True, "mode": "resume", "game_state": serializable_state})
+
+
+@app.route('/api/game/snapshot/persist', methods=['POST'])
+@with_engine_state_lock
+def set_snapshot_persist():
+    """Active/désactive la persistance disque des snapshots (option gameplay du menu)."""
+    global _SNAPSHOT_PERSIST_ENABLED
+    data = request.json
+    if not data or "enabled" not in data:
+        return jsonify({"success": False, "error": "missing 'enabled'"}), 400
+    _SNAPSHOT_PERSIST_ENABLED = bool(data["enabled"])
+    if _SNAPSHOT_PERSIST_ENABLED:
+        _persist_snapshots_to_disk()
+    return api_json_response({"success": True, "persist_enabled": _SNAPSHOT_PERSIST_ENABLED})
+
 
 @app.route('/api/config/tutorial/steps', methods=['GET'])
 def get_tutorial_steps():

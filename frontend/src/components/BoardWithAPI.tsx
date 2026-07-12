@@ -50,6 +50,7 @@ import { GameLog } from "./GameLog";
 import { HelperPanel } from "./HelperPanel";
 import { SettingsMenu } from "./SettingsMenu";
 import SharedLayout from "./SharedLayout";
+import SnapshotRewind from "./SnapshotRewind";
 import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import TutorialOverlay from "./TutorialOverlay";
@@ -1631,6 +1632,11 @@ export const BoardWithAPI: React.FC = () => {
         ? "pvp"
         : null;
   const [isModeGuideActive, setIsModeGuideActive] = useState(false);
+  // Snapshots temporels (rewind / playback par phase) — PvP / PvP test uniquement.
+  const isSnapshotMode = gameMode === "pvp" || gameMode === "pvp_test";
+  const [snapshotMenuTurn, setSnapshotMenuTurn] = useState<number | null>(null);
+  const [snapshotViewActive, setSnapshotViewActive] = useState(false);
+  const [snapshotPersistEnabled, setSnapshotPersistEnabled] = useState(false);
   const isAiMode = (() => {
     const playerTypes = apiProps.gameState?.player_types;
     if (!playerTypes) {
@@ -3319,6 +3325,11 @@ export const BoardWithAPI: React.FC = () => {
                   : ["command", "move", "shoot", "charge", "fight"]
               }
               current_player={apiProps.gameState?.current_player}
+              onTurnClick={
+                isSnapshotMode && !snapshotViewActive
+                  ? (turn: number) => setSnapshotMenuTurn(turn)
+                  : undefined
+              }
               onEndPhaseClick={isGameOver ? undefined : apiProps.onEndPhase}
               showPileIn={
                 apiProps.gameState?.phase === "fight" &&
@@ -3368,6 +3379,32 @@ export const BoardWithAPI: React.FC = () => {
         </>
       ) : (
         <div className="turn-phase-tracker-right">Loading game configuration...</div>
+      )}
+
+      {/* Snapshots temporels (rewind / playback par phase) — PvP / PvP test. */}
+      {isSnapshotMode && (
+        <>
+          {snapshotViewActive && (
+            // Overlay transparent : bloque toute interaction avec le board en visionnage (lecture seule).
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                zIndex: 3999,
+                background: "transparent",
+                cursor: "not-allowed",
+              }}
+            />
+          )}
+          <SnapshotRewind
+            menuTurn={snapshotMenuTurn}
+            onCloseMenu={() => setSnapshotMenuTurn(null)}
+            fetchList={apiProps.snapshotFetchList}
+            restore={apiProps.snapshotRestore}
+            reloadLive={apiProps.snapshotReloadLive}
+            onViewModeChange={setSnapshotViewActive}
+          />
+        </>
       )}
 
       {/* Barre d'action charge (V11 multi-cibles) : Cancel + Charger, même emplacement/style que
@@ -6552,6 +6589,15 @@ export const BoardWithAPI: React.FC = () => {
         onToggleStatusBadgePerModel={handleToggleStatusBadgePerModel}
         dynamicCoverStatus={settings.dynamicCoverStatus}
         onToggleDynamicCoverStatus={handleToggleDynamicCoverStatus}
+        snapshotPersistEnabled={snapshotPersistEnabled}
+        onToggleSnapshotPersist={
+          isSnapshotMode
+            ? (v: boolean) => {
+                setSnapshotPersistEnabled(v);
+                apiProps.snapshotSetPersist(v).catch(() => setSnapshotPersistEnabled(!v));
+              }
+            : undefined
+        }
         retreatAlertEnabled={settings.retreatAlertEnabled}
         onToggleRetreatAlert={handleToggleRetreatAlert}
         battleShockTestEnabled={settings.battleShockTestEnabled}
