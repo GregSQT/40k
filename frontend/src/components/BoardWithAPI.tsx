@@ -1664,7 +1664,16 @@ export const BoardWithAPI: React.FC = () => {
   const isSnapshotMode = gameMode === "pvp" || gameMode === "pvp_test";
   const [snapshotJump, setSnapshotJump] = useState<SnapshotJump | null>(null);
   const [snapshotViewActive, setSnapshotViewActive] = useState(false);
-  const [snapshotPersistEnabled, setSnapshotPersistEnabled] = useState(false);
+  const [snapshotPersistEnabled, setSnapshotPersistEnabled] = useState(
+    () => localStorage.getItem("snapshotPersistEnabled") === "true"
+  );
+  const [snapshotPersistDir, setSnapshotPersistDir] = useState(
+    () => localStorage.getItem("snapshotPersistDir") ?? "logs"
+  );
+  // Le répertoire doit être choisi avant toute save (Save bloqué tant que false).
+  const [saveDirSelected, setSaveDirSelected] = useState(
+    () => localStorage.getItem("saveDirSelected") === "true"
+  );
   const isAiMode = (() => {
     const playerTypes = apiProps.gameState?.player_types;
     if (!playerTypes) {
@@ -2253,7 +2262,7 @@ export const BoardWithAPI: React.FC = () => {
   const [showHelper, setShowHelper] = useState(false);
   const handleToggleHelper = useCallback(() => setShowHelper((v) => !v), []);
 
-  const [showReplay, setShowReplay] = useState(false);
+  const [showReplay, setShowReplay] = useState(true);
   const handleToggleReplay = useCallback(() => setShowReplay((v) => !v), []);
 
   // Rollback non destructif (mode view) sur un tour/phase cliqué dans le tracker.
@@ -2289,6 +2298,9 @@ export const BoardWithAPI: React.FC = () => {
     const logShowCoordsStr = localStorage.getItem("logShowCoords");
     const logShowTypeStr = localStorage.getItem("logShowType");
     const dynamicCoverStatusStr = localStorage.getItem("dynamicCoverStatus");
+    const replayContainerEnabledStr = localStorage.getItem("replayContainerEnabled");
+    const autoSaveEnabledStr = localStorage.getItem("autoSaveEnabled");
+    const autoSaveGranularityStr = localStorage.getItem("autoSaveGranularity");
     const pveGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVE_STORAGE_KEY) === "true";
     const pvpGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVP_STORAGE_KEY) === "true";
     const guidesSeenAtLeastOnce = pveGuideSeen || pvpGuideSeen;
@@ -2323,6 +2335,13 @@ export const BoardWithAPI: React.FC = () => {
       logShowCoords: logShowCoordsStr ? JSON.parse(logShowCoordsStr) : false,
       logShowType: logShowTypeStr ? JSON.parse(logShowTypeStr) : true,
       dynamicCoverStatus: dynamicCoverStatusStr ? JSON.parse(dynamicCoverStatusStr) : true,
+      replayContainerEnabled: replayContainerEnabledStr
+        ? JSON.parse(replayContainerEnabledStr)
+        : true,
+      autoSaveEnabled: autoSaveEnabledStr ? JSON.parse(autoSaveEnabledStr) : false,
+      autoSaveGranularity: (autoSaveGranularityStr === "turn" ? "turn" : "phase") as
+        | "phase"
+        | "turn",
     };
   });
 
@@ -2343,6 +2362,50 @@ export const BoardWithAPI: React.FC = () => {
     setSettings((prev) => ({ ...prev, showDebug: value }));
     localStorage.setItem("showDebug", JSON.stringify(value));
   };
+
+  const handleToggleReplayContainer = (value: boolean) => {
+    setSettings((prev) => ({ ...prev, replayContainerEnabled: value }));
+    localStorage.setItem("replayContainerEnabled", JSON.stringify(value));
+  };
+
+  const handleToggleAutoSave = (value: boolean) => {
+    setSettings((prev) => ({ ...prev, autoSaveEnabled: value }));
+    localStorage.setItem("autoSaveEnabled", JSON.stringify(value));
+    apiProps.setAutosaveConfig(value, settings.autoSaveGranularity).catch(console.error);
+  };
+
+  const handleSetAutoSaveGranularity = (value: "phase" | "turn") => {
+    setSettings((prev) => ({ ...prev, autoSaveGranularity: value }));
+    localStorage.setItem("autoSaveGranularity", value);
+    apiProps.setAutosaveConfig(settings.autoSaveEnabled, value).catch(console.error);
+  };
+
+  const handleDeleteSaves = useCallback(async () => {
+    await apiProps.deleteSaves();
+  }, [apiProps.deleteSaves]);
+
+  // Le serveur est la source de vérité de la config des saves (persistée dans logs/save_config.json) :
+  // au montage on LIT la config et on aligne l'UI dessus. Aucun push au montage — seuls les toggles
+  // de l'utilisateur écrivent vers le serveur (évite qu'un localStorage périmé écrase la config).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: lecture initiale au montage/entrée en PvP
+  useEffect(() => {
+    // Attendre l'API réelle : le stub (gameState null) renverrait une config toute à false et
+    // écraserait l'UI (toggles off, Save grisé) à chaque remontage.
+    if (!isSnapshotMode || apiProps.gameState == null) return;
+    apiProps
+      .fetchSaveConfig()
+      .then((cfg) => {
+        setSnapshotPersistEnabled(cfg.persist_enabled);
+        setSaveDirSelected(cfg.dir_set);
+        if (cfg.dir_set) setSnapshotPersistDir(cfg.directory);
+        setSettings((prev) => ({
+          ...prev,
+          autoSaveEnabled: cfg.autosave_enabled,
+          autoSaveGranularity: cfg.granularity,
+        }));
+      })
+      .catch(console.error);
+  }, [isSnapshotMode, apiProps.gameState == null]);
 
   const handleToggleBattleShockTest = (value: boolean) => {
     setSettings((prev) => ({ ...prev, battleShockTestEnabled: value }));
@@ -3366,10 +3429,12 @@ export const BoardWithAPI: React.FC = () => {
               }
               current_player={apiProps.gameState?.current_player}
               onTurnClick={
-                isSnapshotMode ? (turn: number) => snapshotJumpTo(turn, null) : undefined
+                isSnapshotMode && settings.replayContainerEnabled
+                  ? (turn: number) => snapshotJumpTo(turn, null)
+                  : undefined
               }
               onPhaseClick={
-                isSnapshotMode
+                isSnapshotMode && settings.replayContainerEnabled
                   ? (phase: string) => snapshotJumpTo(apiProps.gameState?.currentTurn ?? 1, phase)
                   : undefined
               }
@@ -3445,9 +3510,13 @@ export const BoardWithAPI: React.FC = () => {
             restore={apiProps.snapshotRestore}
             reloadLive={apiProps.snapshotReloadLive}
             onViewModeChange={setSnapshotViewActive}
-            replayOpen={showReplay}
+            replayOpen={showReplay && settings.replayContainerEnabled}
             onViewChange={setSnapshotViewed}
             actionKeys={snapshotActionKeys}
+            createSave={apiProps.saveGameNow}
+            fetchSaveList={apiProps.saveList}
+            loadSave={apiProps.saveLoad}
+            canSave={saveDirSelected}
           />
         </>
       )}
@@ -5237,7 +5306,9 @@ export const BoardWithAPI: React.FC = () => {
         rangeRingsActive={showRangeRings}
         onToggleHelper={handleToggleHelper}
         helperActive={showHelper}
-        onToggleReplay={isSnapshotMode ? handleToggleReplay : undefined}
+        onToggleReplay={
+          isSnapshotMode && settings.replayContainerEnabled ? handleToggleReplay : undefined
+        }
         replayActive={showReplay}
       >
         {/*
@@ -6637,11 +6708,22 @@ export const BoardWithAPI: React.FC = () => {
         dynamicCoverStatus={settings.dynamicCoverStatus}
         onToggleDynamicCoverStatus={handleToggleDynamicCoverStatus}
         snapshotPersistEnabled={snapshotPersistEnabled}
+        snapshotPersistDir={snapshotPersistDir}
+        onPickDirectory={isSnapshotMode ? apiProps.pickDirectory : undefined}
         onToggleSnapshotPersist={
           isSnapshotMode
-            ? (v: boolean) => {
+            ? (v: boolean, directory?: string) => {
                 setSnapshotPersistEnabled(v);
-                apiProps.snapshotSetPersist(v).catch(() => setSnapshotPersistEnabled(!v));
+                localStorage.setItem("snapshotPersistEnabled", JSON.stringify(v));
+                if (directory) {
+                  setSnapshotPersistDir(directory);
+                  localStorage.setItem("snapshotPersistDir", directory);
+                  setSaveDirSelected(true);
+                  localStorage.setItem("saveDirSelected", "true");
+                }
+                apiProps
+                  .snapshotSetPersist(v, directory)
+                  .catch(() => setSnapshotPersistEnabled(!v));
               }
             : undefined
         }
@@ -6657,6 +6739,13 @@ export const BoardWithAPI: React.FC = () => {
         onToggleLogShowCoords={handleToggleLogShowCoords}
         logShowType={settings.logShowType}
         onToggleLogShowType={handleToggleLogShowType}
+        replayContainerEnabled={settings.replayContainerEnabled}
+        onToggleReplayContainer={handleToggleReplayContainer}
+        autoSaveEnabled={settings.autoSaveEnabled}
+        onToggleAutoSave={handleToggleAutoSave}
+        autoSaveGranularity={settings.autoSaveGranularity}
+        onSetAutoSaveGranularity={handleSetAutoSaveGranularity}
+        onDeleteSaves={handleDeleteSaves}
       />
     </TutorialProvider>
   );

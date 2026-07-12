@@ -468,11 +468,20 @@ body {
   border: 1px solid #555;
   border-radius: var(--radius-lg);
   padding: var(--spacing-sm);
-  margin-bottom: var(--spacing-sm);
+  margin-bottom: 0;
   color: var(--text-primary);
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm);
+}
+
+/* Pas de contour bleu de focus sur les boutons du container : halo glow vert commun à la place. */
+.replay-playback-controls-container button:focus {
+  outline: none;
+}
+.replay-playback-controls-container button:focus-visible {
+  outline: none;
+  box-shadow: var(--btn-glow-shadow);
 }
 
 /* Replay Playback Controls Layout */
@@ -514,9 +523,9 @@ body {
 
 /* Replay Buttons Base */
 .replay-btn {
-  padding: 2px 7px;
+  padding: 4px 10px;
   border-radius: var(--radius-sm);
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
   border: none;
   transition: background-color var(--transition-fast);
@@ -525,7 +534,7 @@ body {
   align-items: center;
   justify-content: center;
   line-height: 1;
-  height: 20px;
+  height: 26px;
 }
 
 .replay-btn:disabled {
@@ -536,8 +545,8 @@ body {
 .replay-btn--nav {
   background: white;
   color: #1f2937;
-  font-size: 13px;
-  padding: 2px 7px;
+  font-size: 14px;
+  padding: 4px 10px;
 }
 
 .replay-btn--nav:hover:not(:disabled) {

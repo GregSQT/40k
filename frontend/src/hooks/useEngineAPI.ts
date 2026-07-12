@@ -2,6 +2,7 @@
 import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAuthSession } from "../auth/authStorage";
+import type { SaveMeta } from "../components/SnapshotRewind";
 import { ORIENTATION_STEP_COUNT, wrapOrientationStep } from "../constants/gameConfig";
 import type { GameMode, PlayerId, Unit } from "../types";
 import type { DiceValue, HiddenDetectionInfo, UnitModel, Weapon } from "../types/game";
@@ -7722,6 +7723,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       snapshotRestore: async () => ({ success: false }),
       snapshotReloadLive: async () => {},
       snapshotSetPersist: async () => false,
+      saveGameNow: async (_note = "") => {
+        throw new Error("engine not ready");
+      },
+      saveList: async () => [],
+      saveLoad: async () => ({ success: false }),
+      setAutosaveConfig: async () => ({ success: false }),
+      deleteSaves: async () => 0,
+      pickDirectory: async () => null,
+      fetchSaveConfig: async () => ({
+        persist_enabled: false,
+        directory: "",
+        dir_set: false,
+        autosave_enabled: false,
+        granularity: "phase" as const,
+      }),
       onSelectUnit: () => {},
       onSkipUnit: () => {},
       onEndPhase: async () => {},
@@ -7957,15 +7973,85 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     resetInteractionState();
   };
 
-  const snapshotSetPersist = async (enabled: boolean) => {
+  const snapshotSetPersist = async (enabled: boolean, directory?: string) => {
     const response = await fetch(`${API_BASE}/game/snapshot/persist`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled }),
+      body: JSON.stringify(directory ? { enabled, directory } : { enabled }),
     });
     const data = await response.json();
     if (!data.success) throw new Error(data.error ?? "snapshot persist toggle failed");
     return data.persist_enabled as boolean;
+  };
+
+  // --- Saves manuelles (fichier plat par save) ---
+  const saveGameNow = async (note = ""): Promise<SaveMeta> => {
+    const response = await fetch(`${API_BASE}/game/save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ note }),
+    });
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error ?? "save failed");
+    return data.save as SaveMeta;
+  };
+
+  const saveList = async (): Promise<SaveMeta[]> => {
+    const response = await fetch(`${API_BASE}/game/saves`);
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error ?? "saves list failed");
+    return data.saves as SaveMeta[];
+  };
+
+  const saveLoad = async (id: string) => {
+    const response = await fetch(`${API_BASE}/game/save/load`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error ?? "save load failed");
+    setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
+    resetInteractionState();
+    return data;
+  };
+
+  const setAutosaveConfig = async (enabled: boolean, granularity: "phase" | "turn") => {
+    const response = await fetch(`${API_BASE}/game/autosave`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled, granularity }),
+    });
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error ?? "autosave config failed");
+    return data;
+  };
+
+  const fetchSaveConfig = async (): Promise<{
+    persist_enabled: boolean;
+    directory: string;
+    dir_set: boolean;
+    autosave_enabled: boolean;
+    granularity: "phase" | "turn";
+  }> => {
+    const response = await fetch(`${API_BASE}/game/save-config`);
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error ?? "save config fetch failed");
+    return data;
+  };
+
+  const pickDirectory = async (): Promise<string | null> => {
+    const response = await fetch(`${API_BASE}/game/pick-directory`, { method: "POST" });
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error ?? "directory picker failed");
+    return (data.path as string | null) ?? null;
+  };
+
+  const deleteSaves = async (): Promise<number> => {
+    const response = await fetch(`${API_BASE}/game/saves/delete`, { method: "POST" });
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error ?? "delete saves failed");
+    return data.deleted as number;
   };
 
   const returnObject = {
@@ -7997,6 +8083,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     snapshotRestore,
     snapshotReloadLive,
     snapshotSetPersist,
+    saveGameNow,
+    saveList,
+    saveLoad,
+    setAutosaveConfig,
+    deleteSaves,
+    pickDirectory,
+    fetchSaveConfig,
     onSelectUnit: handleSelectUnit,
     onSkipUnit: handleSkipUnit,
     onEndPhase: handleEndPhase,

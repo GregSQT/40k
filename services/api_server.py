@@ -1172,6 +1172,100 @@ _SNAPSHOT_STORE = GameSnapshotStore()
 # Persistance disque des snapshots (option gameplay du menu). False = mémoire seule.
 _SNAPSHOT_PERSIST_ENABLED = False
 
+# Saves manuelles (un fichier plat par save) sous logs/pvp_saves/.
+from services.game_saves import SaveStore
+# Répertoire de persistance (snapshots + saves), configurable via le menu. Défaut : logs/.
+_PERSIST_DIR = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), "logs")
+_SAVE_STORE = SaveStore(os.path.join(_PERSIST_DIR, "pvp_saves"))
+# Le répertoire doit être explicitement choisi avant toute save (manuelle ou auto).
+_PERSIST_DIR_SET = False
+# Sauvegarde automatique : off par défaut ; granularité "phase" ou "turn".
+_AUTOSAVE_ENABLED = False
+_AUTOSAVE_GRANULARITY = "phase"
+_AUTOSAVE_LAST_KEY: Optional[Tuple[int, int]] = None
+
+
+def _maybe_autosave(engine_instance, kind: Optional[str] = None) -> None:
+    """Crée une save auto au début d'une nouvelle phase (ou d'un nouveau tour selon la granularité).
+
+    ``kind`` : "game_start" (état de départ), sinon dérivé de la granularité ("auto_phase"/"auto_turn")."""
+    global _AUTOSAVE_LAST_KEY
+    if not _PERSIST_DIR_SET:
+        return
+    gs = engine_instance.game_state
+    key = (int(gs["turn"]), int(gs["current_player"]))
+    if kind != "game_start" and _AUTOSAVE_GRANULARITY == "turn" and key == _AUTOSAVE_LAST_KEY:
+        return
+    _AUTOSAVE_LAST_KEY = key
+    if kind is None:
+        kind = "auto_turn" if _AUTOSAVE_GRANULARITY == "turn" else "auto_phase"
+    from datetime import datetime
+    _SAVE_STORE.save_current(
+        engine_instance, datetime.now().strftime("%Y%m%d-%H%M%S"), "", kind
+    )
+
+
+def _capture_and_autosave(engine_instance, initial: bool = False) -> None:
+    """Point unique de capture PvP : snapshot de début de phase (si nouvelle) + persistance + auto-save.
+
+    Utilisé au démarrage/reset (``initial=True`` → save "game_start") et après chaque action."""
+    if getattr(engine_instance, "current_mode_code", None) not in ("pvp", "pvp_test"):
+        return
+    if not _SNAPSHOT_STORE.maybe_capture(engine_instance):
+        return
+    if _SNAPSHOT_PERSIST_ENABLED:
+        _persist_snapshots_to_disk()
+    if _AUTOSAVE_ENABLED:
+        _maybe_autosave(engine_instance, "game_start" if initial else None)
+
+
+# --- Persistance côté serveur de la config des saves (survit au redémarrage de l'api) ----------
+
+def _save_config_path() -> str:
+    """Fichier de config des saves (chemin fixe, indépendant du répertoire choisi)."""
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    return os.path.join(root, "logs", "save_config.json")
+
+
+def _persist_save_config() -> None:
+    import json
+    path = _save_config_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({
+            "persist_enabled": _SNAPSHOT_PERSIST_ENABLED,
+            "directory": _PERSIST_DIR,
+            "dir_set": _PERSIST_DIR_SET,
+            "autosave_enabled": _AUTOSAVE_ENABLED,
+            "granularity": _AUTOSAVE_GRANULARITY,
+        }, f, ensure_ascii=False)
+
+
+def _load_save_config() -> None:
+    """Recharge la config des saves au démarrage de l'api (avant tout /game/start)."""
+    global _SNAPSHOT_PERSIST_ENABLED, _PERSIST_DIR, _PERSIST_DIR_SET
+    global _AUTOSAVE_ENABLED, _AUTOSAVE_GRANULARITY
+    import json
+    path = _save_config_path()
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"[save_config] fichier illisible, config par défaut: {e}")
+        return
+    _SNAPSHOT_PERSIST_ENABLED = bool(cfg.get("persist_enabled", False))
+    _PERSIST_DIR = str(cfg.get("directory", _PERSIST_DIR))
+    _PERSIST_DIR_SET = bool(cfg.get("dir_set", False))
+    _AUTOSAVE_ENABLED = bool(cfg.get("autosave_enabled", False))
+    gran = str(cfg.get("granularity", "phase"))
+    _AUTOSAVE_GRANULARITY = gran if gran in ("phase", "turn") else "phase"
+    _SAVE_STORE.set_directory(os.path.join(_PERSIST_DIR, "pvp_saves"))
+
+
+_load_save_config()
+
 
 def with_engine_state_lock(fn):
     """Serialize engine/game_state access across concurrent HTTP requests."""
@@ -2063,10 +2157,9 @@ def start_game():
         command_handlers.command_phase_start(gs)
         movement_handlers.movement_phase_start(gs)
 
-    # Snapshots temporels : réinitialiser l'historique et capturer l'état de départ (PvP / PvP test).
+    # Snapshots temporels : réinitialiser l'historique et capturer + auto-sauver l'état de départ (PvP).
     _SNAPSHOT_STORE.reset()
-    if requested_mode in ("pvp", "pvp_test"):
-        _SNAPSHOT_STORE.maybe_capture(engine)
+    _capture_and_autosave(engine, initial=True)
 
     # Convert game state to JSON-serializable format
     serializable_state = _game_state_for_json(engine)
@@ -2481,10 +2574,9 @@ def execute_action():
         if isinstance(result, dict):
             result["endless_duty"] = ed_post
 
-    # Snapshots temporels : capturer le début de toute nouvelle phase atteinte par cette action (PvP).
-    if success and getattr(engine, "current_mode_code", None) in ("pvp", "pvp_test"):
-        if _SNAPSHOT_STORE.maybe_capture(engine) and _SNAPSHOT_PERSIST_ENABLED:
-            _persist_snapshots_to_disk()
+    # Snapshots temporels : capturer + auto-sauver le début de toute nouvelle phase atteinte (PvP).
+    if success:
+        _capture_and_autosave(engine)
 
     # Convert game state to JSON-serializable format
     _ser_t0 = time.perf_counter() if _api_perf else None
@@ -3091,8 +3183,7 @@ def reset_game():
     
     obs, info = engine.reset()
     _SNAPSHOT_STORE.reset()
-    if getattr(engine, "current_mode_code", None) in ("pvp", "pvp_test"):
-        _SNAPSHOT_STORE.maybe_capture(engine)
+    _capture_and_autosave(engine, initial=True)
     serializable_state = _game_state_for_json(engine)
     _sync_units_hp_from_cache(serializable_state, engine.game_state)
     _attach_player_types(serializable_state, engine)
@@ -3104,9 +3195,8 @@ def reset_game():
     })
 
 def _snapshot_persist_path() -> str:
-    """Fichier de persistance des snapshots (pickle) sous logs/."""
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    return os.path.join(project_root, "logs", "pvp_snapshots.pkl")
+    """Fichier de persistance des snapshots (pickle) dans le répertoire de persistance configuré."""
+    return os.path.join(_PERSIST_DIR, "pvp_snapshots.pkl")
 
 
 def _persist_snapshots_to_disk() -> None:
@@ -3187,15 +3277,165 @@ def restore_snapshot():
 @app.route('/api/game/snapshot/persist', methods=['POST'])
 @with_engine_state_lock
 def set_snapshot_persist():
-    """Active/désactive la persistance disque des snapshots (option gameplay du menu)."""
-    global _SNAPSHOT_PERSIST_ENABLED
+    """Active/désactive la persistance disque des snapshots, et — optionnellement — définit le
+    répertoire de persistance (snapshots + saves)."""
+    global _SNAPSHOT_PERSIST_ENABLED, _PERSIST_DIR, _PERSIST_DIR_SET
     data = request.json
     if not data or "enabled" not in data:
         return jsonify({"success": False, "error": "missing 'enabled'"}), 400
+    directory = data.get("directory")
+    if directory:
+        directory = str(directory)
+        try:
+            os.makedirs(directory, exist_ok=True)
+        except OSError as e:
+            return jsonify({"success": False, "error": f"répertoire invalide: {e}"}), 400
+        _PERSIST_DIR = directory
+        _SAVE_STORE.set_directory(os.path.join(directory, "pvp_saves"))
+        _PERSIST_DIR_SET = True
     _SNAPSHOT_PERSIST_ENABLED = bool(data["enabled"])
     if _SNAPSHOT_PERSIST_ENABLED:
         _persist_snapshots_to_disk()
-    return api_json_response({"success": True, "persist_enabled": _SNAPSHOT_PERSIST_ENABLED})
+    _persist_save_config()
+    return api_json_response({
+        "success": True,
+        "persist_enabled": _SNAPSHOT_PERSIST_ENABLED,
+        "directory": _PERSIST_DIR,
+    })
+
+
+@app.route('/api/game/pick-directory', methods=['POST'])
+def pick_directory():
+    """Ouvre un dialogue de dossier Windows (via powershell/WSL interop) et renvoie le chemin WSL choisi.
+
+    Pas de lock engine : le dialogue est bloquant côté utilisateur, on ne veut pas geler la partie."""
+    import shutil
+    import subprocess
+    if not shutil.which("powershell.exe"):
+        return jsonify({"success": False, "error": "Sélecteur natif indisponible (powershell.exe introuvable — pas sous WSL ?)"}), 400
+    ps = (
+        "Add-Type -AssemblyName System.Windows.Forms; "
+        "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
+        "$f.Description = 'Repertoire de sauvegarde (snapshots + saves)'; "
+        "$f.ShowNewFolderButton = $true; "
+        "$o = New-Object System.Windows.Forms.Form; $o.TopMost = $true; "
+        "if ($f.ShowDialog($o) -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }"
+    )
+    try:
+        out = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-STA", "-Command", ps],
+            capture_output=True, text=True, timeout=600,
+        )
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": "Sélection annulée (délai dépassé)"}), 408
+    win_path = out.stdout.strip()
+    if not win_path:
+        return api_json_response({"success": True, "path": None})  # annulé par l'utilisateur
+    conv = subprocess.run(["wslpath", "-u", win_path], capture_output=True, text=True)
+    wsl_path = conv.stdout.strip()
+    if conv.returncode != 0 or not wsl_path:
+        return jsonify({"success": False, "error": f"conversion du chemin échouée: {win_path!r}"}), 400
+    return api_json_response({"success": True, "path": wsl_path, "windows_path": win_path})
+
+
+@app.route('/api/game/save', methods=['POST'])
+@with_engine_state_lock
+def create_save():
+    """Enregistre l'état vivant courant dans un fichier plat (save manuelle). Retourne la meta créée."""
+    global engine
+    if not engine:
+        return jsonify({"success": False, "error": "Engine not initialized"}), 400
+    if not _PERSIST_DIR_SET:
+        return jsonify({"success": False, "error": "Répertoire de sauvegarde non défini"}), 400
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    note = str((request.json or {}).get("note", "")) if request.is_json else ""
+    meta = _SAVE_STORE.save_current(engine, timestamp, note)
+    return api_json_response({"success": True, "save": meta})
+
+
+@app.route('/api/game/saves', methods=['GET'])
+@with_engine_state_lock
+def list_saves():
+    """Liste les saves manuelles (métadonnées depuis les noms de fichiers, sans charger les états)."""
+    return api_json_response({"success": True, "saves": _SAVE_STORE.list_meta()})
+
+
+@app.route('/api/game/save/load', methods=['POST'])
+@with_engine_state_lock
+def load_save():
+    """Charge une save : remplace l'état vivant de l'engine et repart de ce point (reset des snapshots)."""
+    global engine
+    if not engine:
+        return jsonify({"success": False, "error": "Engine not initialized"}), 400
+    data = request.json
+    if not data:
+        return jsonify({"success": False, "error": "No JSON data provided"}), 400
+    save_id = str(require_key(data, "id"))
+    _SAVE_STORE.load(engine, save_id)
+    # L'historique de rewind appartenait à l'ancienne timeline : on repart propre.
+    _SNAPSHOT_STORE.reset()
+    if _SNAPSHOT_PERSIST_ENABLED:
+        _persist_snapshots_to_disk()
+    serializable_state = _game_state_for_json(engine)
+    _sync_units_hp_from_cache(serializable_state, engine.game_state)
+    _attach_player_types(serializable_state, engine)
+    return api_json_response({"success": True, "game_state": serializable_state})
+
+
+@app.route('/api/game/save-config', methods=['GET'])
+def get_save_config():
+    """Config des saves côté serveur (source de vérité unique, lue par le front au montage)."""
+    return api_json_response({
+        "success": True,
+        "persist_enabled": _SNAPSHOT_PERSIST_ENABLED,
+        "directory": _PERSIST_DIR,
+        "dir_set": _PERSIST_DIR_SET,
+        "autosave_enabled": _AUTOSAVE_ENABLED,
+        "granularity": _AUTOSAVE_GRANULARITY,
+    })
+
+
+@app.route('/api/game/autosave', methods=['POST'])
+@with_engine_state_lock
+def set_autosave():
+    """Active/désactive la sauvegarde auto et sa granularité ('phase' ou 'turn')."""
+    global _AUTOSAVE_ENABLED, _AUTOSAVE_GRANULARITY, _AUTOSAVE_LAST_KEY
+    data = request.json or {}
+    was_enabled = _AUTOSAVE_ENABLED
+    _AUTOSAVE_ENABLED = bool(data.get("enabled", False))
+    gran = str(data.get("granularity", "phase"))
+    if gran not in ("phase", "turn"):
+        return jsonify({"success": False, "error": f"granularity must be 'phase' or 'turn' (got {gran!r})"}), 400
+    _AUTOSAVE_GRANULARITY = gran
+    _AUTOSAVE_LAST_KEY = None
+    _persist_save_config()
+    # Transition off→on avec une partie PvP en cours : sauver immédiatement l'état courant.
+    # Couvre le cas où la config arrive APRÈS start_game (pas de doublon : si elle était déjà on
+    # au start_game, ce n'est pas une transition ici).
+    if (
+        _AUTOSAVE_ENABLED
+        and not was_enabled
+        and _PERSIST_DIR_SET
+        and engine is not None
+        and getattr(engine, "current_mode_code", None) in ("pvp", "pvp_test")
+        and isinstance(getattr(engine, "game_state", None), dict)
+        and "turn" in engine.game_state
+    ):
+        _maybe_autosave(engine)
+    return api_json_response({
+        "success": True,
+        "enabled": _AUTOSAVE_ENABLED,
+        "granularity": _AUTOSAVE_GRANULARITY,
+    })
+
+
+@app.route('/api/game/saves/delete', methods=['POST'])
+@with_engine_state_lock
+def delete_saves():
+    """Supprime toutes les saves manuelles/auto (fichiers de logs/pvp_saves/)."""
+    deleted = _SAVE_STORE.delete_all()
+    return api_json_response({"success": True, "deleted": deleted})
 
 
 @app.route('/api/config/tutorial/steps', methods=['GET'])

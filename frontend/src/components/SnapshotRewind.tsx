@@ -13,6 +13,35 @@ export interface SnapshotMeta {
   score: Record<string, number>;
 }
 
+/** Métadonnées d'une save manuelle (renvoyées par le backend, dérivées du nom de fichier). */
+export interface SaveMeta {
+  id: string;
+  turn: number;
+  player: number;
+  phase: string;
+  episode_steps: number;
+  ts: string;
+  label: string;
+  /** Note optionnelle saisie par le joueur pour retrouver la save. */
+  note?: string;
+  /** Type de save : "manual" | "auto_phase" | "auto_turn" | "game_start". */
+  kind?: string;
+}
+
+/** Nom affiché d'une save (1 ligne) : "Game start", ou tag T·Phase·#·P, note manuelle en fin. */
+function saveDisplayName(s: SaveMeta): string {
+  if (s.kind === "game_start") return "Game start";
+  const base = `${s.label} · P${s.player}`;
+  return s.kind === "manual" && s.note ? `${base} — ${s.note}` : base;
+}
+
+/** Couleur de fond par type : manuel = vert, auto/tour = gris, auto/phase (et game start) = blanc. */
+function saveColors(kind?: string): { bg: string; fg: string } {
+  if (kind === "manual") return { bg: "#16a34a", fg: "#ffffff" };
+  if (kind === "auto_turn") return { bg: "#6b7280", fg: "#ffffff" };
+  return { bg: "#ffffff", fg: "#1f2937" };
+}
+
 /** Requête de saut vers un tour/phase (nonce : permet de re-cliquer le même point). */
 export interface SnapshotJump {
   turn: number;
@@ -39,6 +68,63 @@ interface SnapshotRewindProps {
   onViewChange: (viewed: { snapshots: SnapshotMeta[]; index: number } | null) => void;
   /** Clés `turn|phase|player` des phases où au moins une action a eu lieu (pour sauter les phases vides). */
   actionKeys: Set<string>;
+  /** Enregistre l'état vivant courant dans une save (fichier plat), avec note optionnelle. */
+  createSave: (note: string) => Promise<SaveMeta>;
+  /** Liste les saves existantes (métadonnées). */
+  fetchSaveList: () => Promise<SaveMeta[]>;
+  /** Charge une save (remplace l'état vivant et repart de ce point). */
+  loadSave: (id: string) => Promise<unknown>;
+  /** false → Save bloqué tant que le répertoire de sauvegarde n'a pas été choisi. */
+  canSave: boolean;
+}
+
+const iconSvgProps = {
+  width: 18,
+  height: 18,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.8,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+  "aria-hidden": true,
+  style: { display: "block" as const },
+};
+
+/** Save : flèche ↓ vers un trait horizontal en bas (enregistrer vers le disque). */
+function SaveIcon() {
+  return (
+    <svg {...iconSvgProps}>
+      <title>Save</title>
+      <path d="M12 3 V14" />
+      <path d="M7 9 L12 14 L17 9" />
+      <path d="M5 20 H19" />
+    </svg>
+  );
+}
+
+/** Resume : flèche ↑ vers un trait horizontal en haut (inverse de Save). */
+function ResumeIcon() {
+  return (
+    <svg {...iconSvgProps}>
+      <title>Resume</title>
+      <path d="M5 4 H19" />
+      <path d="M7 13 L12 8 L17 13" />
+      <path d="M12 8 V21" />
+    </svg>
+  );
+}
+
+/** Select : flèche → vers un trait vertical à droite. */
+function SelectIcon() {
+  return (
+    <svg {...iconSvgProps}>
+      <title>Select</title>
+      <path d="M3 12 H15" />
+      <path d="M10 7 L15 12 L10 17" />
+      <path d="M20 4 V20" />
+    </svg>
+  );
 }
 
 export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
@@ -50,6 +136,10 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
   replayOpen,
   onViewChange,
   actionKeys,
+  createSave,
+  fetchSaveList,
+  loadSave,
+  canSave,
 }) => {
   const [list, setList] = useState<SnapshotMeta[]>([]);
   const [viewIndex, setViewIndex] = useState<number | null>(null);
@@ -57,6 +147,10 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+  const [saves, setSaves] = useState<SaveMeta[]>([]);
+  const [saveMenuOpen, setSaveMenuOpen] = useState(false);
+  const [savePromptOpen, setSavePromptOpen] = useState(false);
+  const [saveNote, setSaveNote] = useState("");
 
   // Indices des snapshots dont la phase a eu au moins une action (sinon, tous : pas de filtre exploitable).
   const actionIndices = useMemo(() => {
@@ -156,6 +250,56 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
       setBusy(false);
     }
   }, [viewIndex, list, restore, onViewModeChange]);
+
+  // Enregistre l'état vivant courant dans une save, avec la note saisie (optionnelle).
+  const doSave = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await createSave(saveNote.trim());
+      setSavePromptOpen(false);
+      setSaveNote("");
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  }, [createSave, saveNote]);
+
+  // Ouvre/ferme le menu Select ; recharge la liste des saves à l'ouverture.
+  const toggleSaveMenu = useCallback(async () => {
+    if (saveMenuOpen) {
+      setSaveMenuOpen(false);
+      return;
+    }
+    setError(null);
+    try {
+      setSaves(await fetchSaveList());
+      setSaveMenuOpen(true);
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+    }
+  }, [saveMenuOpen, fetchSaveList]);
+
+  // Charge une save : remplace l'état vivant, sort du visionnage, repart de ce point.
+  const pickSave = useCallback(
+    async (id: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await loadSave(id);
+        setSaveMenuOpen(false);
+        setViewIndex(null);
+        setIsPlaying(false);
+        onViewModeChange(false);
+      } catch (e) {
+        setError(String((e as Error)?.message ?? e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [loadSave, onViewModeChange]
+  );
 
   // Rapporte le point visionné (pour tronquer le Game Log jusqu'à ce moment).
   useEffect(() => {
@@ -292,30 +436,152 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
           ))}
         </div>
 
-        {/* Reprendre la partie au point visionné */}
-        {!atLive && (
+        {/* Bloc saves — à égale distance entre les contrôles et le Live : [Save] · [Select] */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            position: "relative",
+            marginLeft: "auto",
+          }}
+        >
           <button
             type="button"
             className="replay-btn replay-btn--nav"
-            disabled={busy}
-            onClick={resumeHere}
+            title={
+              canSave
+                ? "Enregistrer l'état courant"
+                : "Choisis d'abord le répertoire de sauvegarde (menu → Sauvegarde → Sauvegarde des snapshots sur disque)"
+            }
+            disabled={busy || !canSave}
+            onClick={() => {
+              setSaveNote("");
+              setSavePromptOpen(true);
+            }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              background: "#16a34a",
+              color: "#ffffff",
+            }}
           >
-            ↩ Reprendre ici
+            Save
+            <SaveIcon />
           </button>
-        )}
+          <button
+            type="button"
+            className="replay-btn replay-btn--nav"
+            title="Charger une save"
+            disabled={busy}
+            onClick={toggleSaveMenu}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              background: "#ca8a04",
+              color: "#ffffff",
+            }}
+          >
+            Select
+            <SelectIcon />
+          </button>
+          {saveMenuOpen && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 6px)",
+                right: 0,
+                minWidth: "220px",
+                maxHeight: "260px",
+                overflowY: "auto",
+                background: "#1f2937",
+                border: "1px solid #555",
+                borderRadius: "8px",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+                zIndex: 4100,
+                padding: "6px",
+              }}
+            >
+              {saves.length === 0 ? (
+                <div style={{ color: "#9ca3af", padding: "6px 8px" }}>Aucune save</div>
+              ) : (
+                saves.map((s) => {
+                  const c = saveColors(s.kind);
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className="replay-btn"
+                      disabled={busy}
+                      onClick={() => pickSave(s.id)}
+                      title={saveDisplayName(s)}
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        height: "auto",
+                        textAlign: "left",
+                        padding: "6px 8px",
+                        marginBottom: "4px",
+                        background: c.bg,
+                        color: c.fg,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {saveDisplayName(s)}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Resume Here — entre le bloc saves et le Live, fond rouge */}
+        <button
+          type="button"
+          className="replay-btn"
+          title="Reprendre la partie au point visionné"
+          disabled={busy || atLive}
+          onClick={resumeHere}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            background: "#ef4444",
+            border: "1px solid #f87171",
+            color: "#fff",
+            fontWeight: 700,
+            boxShadow: "0 0 10px 2px rgba(239, 68, 68, 0.75)",
+          }}
+        >
+          Resume Here
+          <ResumeIcon />
+        </button>
 
         {/* État Live / retour au live — TOUT À DROITE */}
         <div className="replay-action-counter" style={{ marginLeft: "auto" }}>
           {atLive ? (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                fontSize: "18px",
+              }}
+            >
               Live
               <span
                 style={{
-                  width: "10px",
-                  height: "10px",
+                  width: "16px",
+                  height: "16px",
                   borderRadius: "50%",
-                  background: "#ef4444",
+                  background: "#ff1a1a",
                   display: "inline-block",
+                  boxShadow: "0 0 8px 2px rgba(255, 26, 26, 0.85)",
                 }}
               />
             </span>
@@ -345,6 +611,85 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
         <div className="replay-progress-fill" style={{ width: `${progressPct}%` }} />
       </div>
       {error && <div style={{ color: "#f87171", padding: "4px 8px" }}>{error}</div>}
+
+      {/* Popup : note optionnelle pour la save */}
+      {savePromptOpen && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — clic fond = fermeture
+        <div
+          role="presentation"
+          onClick={() => setSavePromptOpen(false)}
+          onKeyDown={(e) => e.key === "Escape" && setSavePromptOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 4200,
+          }}
+        >
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: panneau — stopPropagation intentionnel */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            style={{
+              background: "#1f2937",
+              border: "1px solid #555",
+              borderRadius: "8px",
+              padding: "16px",
+              minWidth: "320px",
+              color: "#fff",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+            }}
+          >
+            <h3 style={{ marginTop: 0 }}>Enregistrer la partie</h3>
+            <p style={{ color: "#9ca3af", marginTop: 0 }}>
+              Note (optionnelle) pour retrouver la save :
+            </p>
+            <input
+              type="text"
+              value={saveNote}
+              onChange={(e) => setSaveNote(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !busy) doSave();
+              }}
+              placeholder="ex: avant l'assaut sur l'objectif"
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                padding: "8px 10px",
+                borderRadius: "6px",
+                border: "1px solid #4b5563",
+                background: "#111827",
+                color: "#fff",
+              }}
+            />
+            {error && <p style={{ color: "#f87171" }}>{error}</p>}
+            <div
+              style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "14px" }}
+            >
+              <button
+                type="button"
+                className="replay-btn replay-btn--nav"
+                disabled={busy}
+                onClick={() => setSavePromptOpen(false)}
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                className="replay-btn"
+                disabled={busy}
+                onClick={doSave}
+                style={{ background: "#059669", borderColor: "#047857", color: "#fff" }}
+              >
+                Enregistrer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

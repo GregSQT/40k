@@ -44,7 +44,17 @@ interface SettingsMenuProps {
   dynamicCoverStatus?: boolean;
   onToggleDynamicCoverStatus?: (value: boolean) => void;
   snapshotPersistEnabled?: boolean;
-  onToggleSnapshotPersist?: (value: boolean) => void;
+  snapshotPersistDir?: string;
+  onToggleSnapshotPersist?: (value: boolean, directory?: string) => void;
+  /** Ouvre un explorateur natif (Windows via WSL) et renvoie le chemin choisi, ou null si annulé. */
+  onPickDirectory?: () => Promise<string | null>;
+  replayContainerEnabled?: boolean;
+  onToggleReplayContainer?: (value: boolean) => void;
+  autoSaveEnabled?: boolean;
+  onToggleAutoSave?: (value: boolean) => void;
+  autoSaveGranularity?: "phase" | "turn";
+  onSetAutoSaveGranularity?: (value: "phase" | "turn") => void;
+  onDeleteSaves?: () => Promise<void> | void;
 }
 
 /**
@@ -172,8 +182,21 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   dynamicCoverStatus = true,
   onToggleDynamicCoverStatus,
   snapshotPersistEnabled = false,
+  snapshotPersistDir = "logs",
   onToggleSnapshotPersist,
+  onPickDirectory,
+  replayContainerEnabled = true,
+  onToggleReplayContainer,
+  autoSaveEnabled = false,
+  onToggleAutoSave,
+  autoSaveGranularity = "phase",
+  onSetAutoSaveGranularity,
+  onDeleteSaves,
 }) => {
+  const [confirmingDeleteSaves, setConfirmingDeleteSaves] = useState(false);
+  const [deletedSavesMsg, setDeletedSavesMsg] = useState<string | null>(null);
+  const [persistDirPromptOpen, setPersistDirPromptOpen] = useState(false);
+  const [persistDirInput, setPersistDirInput] = useState("");
   // Snapshot des réglages à l'ouverture du menu, pour pouvoir annuler les
   // changements (appliqués en live) en restaurant les valeurs initiales.
   type SettingsSnapshot = {
@@ -194,6 +217,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     logShowCoords: boolean;
     logShowType: boolean;
     dynamicCoverStatus: boolean;
+    replayContainerEnabled: boolean;
   };
   const latest: SettingsSnapshot = {
     showAdvanceWarning,
@@ -213,6 +237,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     logShowCoords,
     logShowType,
     dynamicCoverStatus,
+    replayContainerEnabled,
   };
   const latestRef = useRef(latest);
   latestRef.current = latest;
@@ -259,6 +284,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
       if (onToggleLogShowType && logShowType !== s.logShowType) onToggleLogShowType(s.logShowType);
       if (onToggleDynamicCoverStatus && dynamicCoverStatus !== s.dynamicCoverStatus)
         onToggleDynamicCoverStatus(s.dynamicCoverStatus);
+      if (onToggleReplayContainer && replayContainerEnabled !== s.replayContainerEnabled)
+        onToggleReplayContainer(s.replayContainerEnabled);
     }
     onClose();
   };
@@ -393,23 +420,244 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
             )}
           </CollapsibleSection>
 
-          {(canToggleAutoSelectWeapon || onToggleSnapshotPersist) && (
+          {canToggleAutoSelectWeapon && (
             <CollapsibleSection title="Gameplay">
-              {canToggleAutoSelectWeapon && (
-                <ToggleRow
-                  checked={autoSelectWeapon}
-                  onChange={onToggleAutoSelectWeapon}
-                  label="Sélection automatique d'arme"
-                  description="Désactiver pour choisir manuellement l'arme à utiliser pour chaque tir."
-                />
-              )}
+              <ToggleRow
+                checked={autoSelectWeapon}
+                onChange={onToggleAutoSelectWeapon}
+                label="Sélection automatique d'arme"
+                description="Désactiver pour choisir manuellement l'arme à utiliser pour chaque tir."
+              />
+            </CollapsibleSection>
+          )}
+
+          {(onToggleAutoSave || onDeleteSaves || onToggleSnapshotPersist) && (
+            <CollapsibleSection title="Sauvegarde">
               {onToggleSnapshotPersist && (
                 <ToggleRow
                   checked={snapshotPersistEnabled}
-                  onChange={onToggleSnapshotPersist}
+                  onChange={(checked) => {
+                    if (!checked) {
+                      onToggleSnapshotPersist(false);
+                      return;
+                    }
+                    if (onPickDirectory) {
+                      onPickDirectory()
+                        .then((path) => {
+                          if (path) onToggleSnapshotPersist(true, path);
+                        })
+                        .catch(() => {
+                          // Fallback : saisie manuelle si le sélecteur natif échoue.
+                          setPersistDirInput(snapshotPersistDir);
+                          setPersistDirPromptOpen(true);
+                        });
+                    } else {
+                      setPersistDirInput(snapshotPersistDir);
+                      setPersistDirPromptOpen(true);
+                    }
+                  }}
                   label="Sauvegarde des snapshots sur disque"
-                  description="Conserve l'historique des phases (rewind / visionnage) sur disque pour qu'il survive à un rechargement de la partie."
+                  description="Conserve l'historique des phases (rewind / visionnage) et les saves sur disque pour qu'ils survivent à un rechargement. À l'activation, choisis le répertoire de destination."
                 />
+              )}
+              {persistDirPromptOpen && onToggleSnapshotPersist && (
+                // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — clic fond = fermeture
+                <div
+                  role="presentation"
+                  onClick={() => setPersistDirPromptOpen(false)}
+                  onKeyDown={(e) => e.key === "Escape" && setPersistDirPromptOpen(false)}
+                  style={{
+                    position: "fixed",
+                    inset: 0,
+                    background: "rgba(0,0,0,0.55)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    zIndex: 5000,
+                  }}
+                >
+                  {/* biome-ignore lint/a11y/noStaticElementInteractions: panneau — stopPropagation intentionnel */}
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    style={{
+                      background: "#1f2937",
+                      border: "1px solid #555",
+                      borderRadius: "8px",
+                      padding: "16px",
+                      minWidth: "360px",
+                      color: "#fff",
+                      boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+                    }}
+                  >
+                    <h3 style={{ marginTop: 0 }}>Répertoire de sauvegarde</h3>
+                    <p style={{ color: "#9ca3af", marginTop: 0 }}>
+                      Chemin (serveur) où écrire snapshots et saves :
+                    </p>
+                    <input
+                      type="text"
+                      value={persistDirInput}
+                      onChange={(e) => setPersistDirInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          onToggleSnapshotPersist(true, persistDirInput.trim() || "logs");
+                          setPersistDirPromptOpen(false);
+                        }
+                      }}
+                      placeholder="logs"
+                      style={{
+                        width: "100%",
+                        boxSizing: "border-box",
+                        padding: "8px 10px",
+                        borderRadius: "6px",
+                        border: "1px solid #4b5563",
+                        background: "#111827",
+                        color: "#fff",
+                      }}
+                    />
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "8px",
+                        justifyContent: "flex-end",
+                        marginTop: "14px",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setPersistDirPromptOpen(false)}
+                        style={{
+                          background: "#374151",
+                          border: "1px solid #4b5563",
+                          borderRadius: "4px",
+                          color: "#fff",
+                          padding: "6px 12px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Annuler
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onToggleSnapshotPersist(true, persistDirInput.trim() || "logs");
+                          setPersistDirPromptOpen(false);
+                        }}
+                        style={{
+                          background: "#059669",
+                          border: "1px solid #047857",
+                          borderRadius: "4px",
+                          color: "#fff",
+                          padding: "6px 12px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Activer
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {onToggleAutoSave && (
+                <ToggleRow
+                  checked={autoSaveEnabled}
+                  onChange={onToggleAutoSave}
+                  label="Sauvegarde automatique"
+                  description="Crée automatiquement une save (visible dans le menu Select du container de replay) au fil de la partie."
+                />
+              )}
+              {onSetAutoSaveGranularity && (
+                <div style={{ marginBottom: "16px", opacity: autoSaveEnabled ? 1 : 0.5 }}>
+                  <label
+                    style={{
+                      display: "block",
+                      cursor: autoSaveEnabled ? "pointer" : "default",
+                      color: "var(--tooltip-text-color)",
+                      marginBottom: "6px",
+                    }}
+                  >
+                    <span style={{ marginRight: "12px" }}>Fréquence</span>
+                    <select
+                      value={autoSaveGranularity}
+                      disabled={!autoSaveEnabled}
+                      onChange={(e) => onSetAutoSaveGranularity(e.target.value as "phase" | "turn")}
+                      style={{
+                        backgroundColor: "#111827",
+                        color: "var(--tooltip-text-color)",
+                        border: "1px solid #4b5563",
+                        borderRadius: "4px",
+                        padding: "4px 8px",
+                      }}
+                    >
+                      <option value="phase">À chaque début de phase</option>
+                      <option value="turn">À chaque début de tour</option>
+                    </select>
+                  </label>
+                </div>
+              )}
+              {onDeleteSaves && (
+                <div style={{ marginBottom: "8px" }}>
+                  {confirmingDeleteSaves ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ color: "var(--tooltip-text-color)" }}>
+                        Confirmer la suppression de toutes les sauvegardes ?
+                      </span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await onDeleteSaves();
+                          setConfirmingDeleteSaves(false);
+                          setDeletedSavesMsg("Sauvegardes supprimées.");
+                        }}
+                        style={{
+                          background: "#dc2626",
+                          border: "1px solid #991b1b",
+                          borderRadius: "4px",
+                          color: "#fff",
+                          padding: "4px 12px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Oui
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmingDeleteSaves(false)}
+                        style={{
+                          background: "#374151",
+                          border: "1px solid #4b5563",
+                          borderRadius: "4px",
+                          color: "#fff",
+                          padding: "4px 12px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Non
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDeletedSavesMsg(null);
+                        setConfirmingDeleteSaves(true);
+                      }}
+                      style={{
+                        background: "#dc2626",
+                        border: "1px solid #991b1b",
+                        borderRadius: "4px",
+                        color: "#fff",
+                        padding: "6px 12px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Supprimer les sauvegardes
+                    </button>
+                  )}
+                  {deletedSavesMsg && (
+                    <div style={{ color: "#9ca3af", marginTop: "6px" }}>{deletedSavesMsg}</div>
+                  )}
+                </div>
               )}
             </CollapsibleSection>
           )}
@@ -419,8 +667,17 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
             onToggleShowWoundProbability ||
             onToggleStatusBadgePerModel ||
             onSetBoardDisplayMode ||
+            onToggleReplayContainer ||
             onToggleDeployIconBaseSizeBounded) && (
             <CollapsibleSection title="Display">
+              {onToggleReplayContainer && (
+                <ToggleRow
+                  checked={replayContainerEnabled}
+                  onChange={onToggleReplayContainer}
+                  label="Container de replay"
+                  description="Activé : affiche l'icône caméra et le container de contrôle du replay (rewind / saves) sous le tracker de phase, en mode PvP."
+                />
+              )}
               {onToggleHpBarPerModel && (
                 <ToggleRow
                   checked={hpBarPerModel}

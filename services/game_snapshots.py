@@ -139,6 +139,7 @@ class GameSnapshotStore:
         engine.game_state = rebuilt
         for k, v in attrs.items():
             setattr(engine, k, v)
+        _sync_derived_engine_attrs(engine)
         self.purge_after(turn, player, phase)
 
     def purge_after(self, turn: int, player: int, phase: str) -> None:
@@ -146,3 +147,43 @@ class GameSnapshotStore:
         cutoff = _ordinal(turn, player, phase)
         for key in [k for k in self._snaps if _ordinal(*k) > cutoff]:
             del self._snaps[key]
+
+
+# --- Capture / restore d'un état vivant arbitraire (utilisé par les saves manuelles) ---------
+# Contrairement à ``maybe_capture`` (lié aux frontières de phase), ces helpers capturent/appliquent
+# l'état vivant à un instant quelconque, avec la MÊME sémantique statique/mutable.
+
+def capture_live_state(engine: Any) -> Dict[str, Any]:
+    """Capture la partie mutable de l'état vivant (game_state hors clés statiques + attrs plain de l'engine)."""
+    gs = engine.game_state
+    gs_copy = {k: copy.deepcopy(v) for k, v in gs.items() if k not in _GS_STATIC_KEYS}
+    engine_attrs: Dict[str, Any] = {}
+    for k, v in vars(engine).items():
+        if k in _ENGINE_STATIC_ATTRS:
+            continue
+        if not isinstance(v, _ENGINE_PLAIN_TYPES):
+            continue
+        engine_attrs[k] = copy.deepcopy(v)
+    return {"game_state": gs_copy, "engine_attrs": engine_attrs}
+
+
+def _sync_derived_engine_attrs(engine: Any) -> None:
+    """Re-mirror des attributs d'engine dérivés du game_state après un remplacement d'état.
+
+    ``current_mode_code`` est stocké dans game_state ET miroité en attribut d'engine (lu par
+    ``_attach_player_types`` et les gates de capture snapshot). Il est exclu de la capture (statique),
+    donc après un restore l'attribut doit être re-synchronisé depuis l'état restauré."""
+    mode = engine.game_state.get("current_mode_code")
+    if isinstance(mode, str) and mode:
+        engine.current_mode_code = mode
+
+
+def apply_live_state(engine: Any, captured: Dict[str, Any]) -> None:
+    """Remplace l'état vivant de l'engine par un état capturé (clés statiques ré-attachées depuis le live)."""
+    live = engine.game_state
+    rebuilt = {k: live[k] for k in live if k in _GS_STATIC_KEYS}
+    rebuilt.update(copy.deepcopy(captured["game_state"]))
+    engine.game_state = rebuilt
+    for k, v in copy.deepcopy(captured["engine_attrs"]).items():
+        setattr(engine, k, v)
+    _sync_derived_engine_attrs(engine)
