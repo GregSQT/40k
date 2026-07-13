@@ -894,10 +894,14 @@ function TurnPhaseTrackerWithTutorial(
 function BoardColumnWithTutorial({
   children,
   boardRows = 21,
+  previewElevated = false,
 }: {
   children: React.ReactNode;
   boardCols?: number;
   boardRows?: number;
+  /** En aperçu (view non destructif), élève le board au-dessus de l'overlay lecture seule
+   * (zIndex 3999) pour rester navigable (scroll/pan/zoom) — les actions restent no-opées côté moteur. */
+  previewElevated?: boolean;
 }): React.ReactElement {
   const ref = useRef<HTMLDivElement>(null);
   const tutorial = useTutorial();
@@ -1020,7 +1024,11 @@ function BoardColumnWithTutorial({
     tutorial?.setLeftPanelFogRects,
   ]);
   return (
-    <div ref={ref} className="board-column-overlay-anchor">
+    <div
+      ref={ref}
+      className="board-column-overlay-anchor"
+      style={previewElevated ? { position: "relative", zIndex: 4000 } : undefined}
+    >
       {children}
     </div>
   );
@@ -1605,16 +1613,27 @@ export const BoardWithAPI: React.FC = () => {
     [gameLog]
   );
   const handleLoadSave = useCallback(
-    async (id: string) => {
-      const data = await apiProps.saveLoad(id);
+    async (
+      id: string,
+      mode: "view" | "resume" = "resume",
+      divergence?: { fork: "fork" | "overwrite"; backup_name?: string }
+    ) => {
+      const data = await apiProps.saveLoad(id, mode, divergence);
+      // Divergence non tranchée : aucun commit côté moteur → ne pas réaligner les états frontend.
+      if ((data as { needs_decision?: boolean })?.needs_decision) return data;
       applyLoadedState(data as { save?: { ts?: string } });
       return data;
     },
     [apiProps.saveLoad, applyLoadedState]
   );
   const handleLoadParty = useCallback(
-    async (name: string) => {
-      const data = await apiProps.loadParty(name);
+    async (
+      name: string,
+      mode: "view" | "resume" = "resume",
+      divergence?: { fork: "fork" | "overwrite"; backup_name?: string }
+    ) => {
+      const data = await apiProps.loadParty(name, mode, divergence);
+      if ((data as { needs_decision?: boolean })?.needs_decision) return data;
       applyLoadedState(data as { save?: { ts?: string } });
       return data;
     },
@@ -1715,6 +1734,10 @@ export const BoardWithAPI: React.FC = () => {
   const isSnapshotMode = gameMode === "pvp" || gameMode === "pvp_test";
   const [snapshotJump, setSnapshotJump] = useState<SnapshotJump | null>(null);
   const [snapshotViewActive, setSnapshotViewActive] = useState(false);
+  // Aperçu (view) actif → bloque les actions côté moteur (état affiché ≠ live).
+  useEffect(() => {
+    apiProps.setViewActive(snapshotViewActive);
+  }, [snapshotViewActive, apiProps.setViewActive]);
   const [snapshotPersistEnabled, setSnapshotPersistEnabled] = useState(
     () => localStorage.getItem("snapshotPersistEnabled") === "true"
   );
@@ -5367,7 +5390,10 @@ export const BoardWithAPI: React.FC = () => {
         {/*
         In test deployment setup, lock gameplay interactions until Start Game! is clicked.
       */}
-        <BoardColumnWithTutorial boardRows={boardConfig?.rows ?? 21}>
+        <BoardColumnWithTutorial
+          boardRows={boardConfig?.rows ?? 21}
+          previewElevated={snapshotViewActive}
+        >
           <BoardPvpWithTutorialAdvance
             units={apiProps.units}
             loadEpoch={loadEpoch}

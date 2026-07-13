@@ -178,12 +178,19 @@ def _sync_derived_engine_attrs(engine: Any) -> None:
         engine.current_mode_code = mode
 
 
-def apply_live_state(engine: Any, captured: Dict[str, Any]) -> None:
-    """Remplace l'état vivant de l'engine par un état capturé (clés statiques ré-attachées depuis le live)."""
+def rebuild_game_state(engine: Any, captured: Dict[str, Any]) -> Dict[str, Any]:
+    """Reconstruit un game_state complet (clés statiques du live + mutable capturé) SANS muter l'engine.
+
+    Utilisé pour le mode 'view' (aperçu non destructif) : swap temporaire de engine.game_state."""
     live = engine.game_state
     rebuilt = {k: live[k] for k in live if k in _GS_STATIC_KEYS}
     rebuilt.update(copy.deepcopy(captured["game_state"]))
-    engine.game_state = rebuilt
+    return rebuilt
+
+
+def apply_live_state(engine: Any, captured: Dict[str, Any]) -> None:
+    """Remplace l'état vivant de l'engine par un état capturé (clés statiques ré-attachées depuis le live)."""
+    engine.game_state = rebuild_game_state(engine, captured)
     for k, v in copy.deepcopy(captured["engine_attrs"]).items():
         setattr(engine, k, v)
     _sync_derived_engine_attrs(engine)

@@ -721,6 +721,22 @@ def _build_player_types(is_ai_enabled: bool, mode_code: str) -> Dict[str, str]:
     }
 
 
+def _serialize_captured_view(engine_instance, captured_state: Dict[str, Any]) -> Dict[str, Any]:
+    """Sérialise un état capturé (save-point) SANS muter la partie vivante (aperçu view) :
+    swap temporaire de game_state, comme le mode 'view' des snapshots."""
+    from services.game_snapshots import rebuild_game_state
+    rebuilt = rebuild_game_state(engine_instance, captured_state)
+    live_gs = engine_instance.game_state
+    try:
+        engine_instance.game_state = rebuilt
+        serializable = _game_state_for_json(engine_instance)
+        _sync_units_hp_from_cache(serializable, engine_instance.game_state)
+        _attach_player_types(serializable, engine_instance)
+    finally:
+        engine_instance.game_state = live_gs
+    return serializable
+
+
 def _attach_player_types(serializable_state: Dict[str, Any], engine_instance: W40KEngine) -> None:
     """
     Ensure player_types is present in both engine.game_state and serialized response.
@@ -1173,7 +1189,7 @@ _SNAPSHOT_STORE = GameSnapshotStore()
 _SNAPSHOT_PERSIST_ENABLED = False
 
 # Saves manuelles (un fichier plat par save) sous logs/pvp_saves/.
-from services.game_saves import SaveStore
+from services.game_saves import SaveStore, progress_key_from_gs
 # Répertoire de persistance (snapshots + saves), configurable via le menu. Défaut : logs/.
 _PERSIST_DIR = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), "logs")
 _SAVE_STORE = SaveStore(os.path.join(_PERSIST_DIR, "pvp_saves"))
@@ -3271,6 +3287,15 @@ def restore_snapshot():
             engine.game_state = live_gs
         return api_json_response({"success": True, "mode": "view", "game_state": serializable_state})
 
+    # Divergence : save-points du fichier courant postérieurs au point rembobiné → fork/écrasement.
+    # Clé de progression calculée sur l'état reconstruit du snapshot, sans commit.
+    rewound_gs = _SNAPSHOT_STORE.build_game_state(engine, turn, player, phase)
+    gate = _resume_divergence_gate(
+        _SAVE_STORE.current_party(), progress_key_from_gs(rewound_gs), data
+    )
+    if gate is not None:
+        return gate
+
     # resume : remplace l'état vivant + purge postérieur
     _SNAPSHOT_STORE.apply_resume(engine, turn, player, phase)
     if _SNAPSHOT_PERSIST_ENABLED:
@@ -3368,6 +3393,27 @@ def list_saves():
     return api_json_response({"success": True, "saves": _SAVE_STORE.list_points()})
 
 
+def _resume_divergence_gate(party_name, resume_key, data):
+    """Gère la divergence au Resume : si la partie contient des save-points postérieurs au point de
+    reprise, exige une décision du joueur (fork/écrasement).
+    - Retourne None → pas de divergence (ou décision appliquée) : poursuivre le commit du resume.
+    - Retourne une réponse Flask → interrompre (popup à afficher, ou erreur de paramètre)."""
+    if not party_name or not _SAVE_STORE.has_posterior_points(party_name, resume_key):
+        return None
+    fork = data.get("fork")
+    if fork is None:
+        # Pas encore de décision : le front doit afficher le popup, aucun commit/mutation ici.
+        return api_json_response({"success": True, "needs_decision": True, "has_posterior": True})
+    if fork == "overwrite":
+        _SAVE_STORE.truncate_after(party_name, resume_key)
+        return None
+    if fork == "fork":
+        # Nom optionnel : le store le rend unique / génère un défaut → jamais d'erreur de doublon.
+        _SAVE_STORE.fork_backup(party_name, resume_key, str(data.get("backup_name") or ""))
+        return None
+    return jsonify({"success": False, "error": f"fork must be 'fork' or 'overwrite' (got {fork!r})"}), 400
+
+
 @app.route('/api/game/save/load', methods=['POST'])
 @with_engine_state_lock
 def load_save():
@@ -3379,8 +3425,21 @@ def load_save():
     if not data:
         return jsonify({"success": False, "error": "No JSON data provided"}), 400
     point_id = str(require_key(data, "id"))
+    mode = str(data.get("mode", "resume"))
+    if mode == "view":
+        p = _SAVE_STORE.point(point_id)
+        serializable_state = _serialize_captured_view(engine, p["state"])
+        return api_json_response(
+            {"success": True, "game_state": serializable_state, "save": p["meta"], "mode": "view"}
+        )
+    # Divergence : save-points postérieurs à ce point dans la partie courante → fork/écrasement.
+    gate = _resume_divergence_gate(
+        _SAVE_STORE.current_party(), _SAVE_STORE.point_progress_key(point_id), data
+    )
+    if gate is not None:
+        return gate
     meta = _SAVE_STORE.restore_point(engine, point_id)
-    # Nouvelle timeline de rewind à partir du point chargé (capture la phase courante).
+    # Commit : nouvelle timeline de rewind à partir du point chargé (capture la phase courante).
     _SNAPSHOT_STORE.reset()
     _SNAPSHOT_STORE.maybe_capture(engine)
     if _SNAPSHOT_PERSIST_ENABLED:
@@ -3388,7 +3447,9 @@ def load_save():
     serializable_state = _game_state_for_json(engine)
     _sync_units_hp_from_cache(serializable_state, engine.game_state)
     _attach_player_types(serializable_state, engine)
-    return api_json_response({"success": True, "game_state": serializable_state, "save": meta})
+    return api_json_response(
+        {"success": True, "game_state": serializable_state, "save": meta, "mode": "resume"}
+    )
 
 
 @app.route('/api/game/parties', methods=['GET'])
@@ -3409,8 +3470,21 @@ def load_party():
     if not data:
         return jsonify({"success": False, "error": "No JSON data provided"}), 400
     name = str(require_key(data, "name"))
+    mode = str(data.get("mode", "resume"))
+    if mode == "view":
+        p = _SAVE_STORE.party_start_point(name)
+        # Aperçu : la partie devient le contexte de navigation (Select liste SES points), sans commit.
+        _SAVE_STORE.set_current(name)
+        serializable_state = _serialize_captured_view(engine, p["state"])
+        return api_json_response(
+            {"success": True, "game_state": serializable_state, "save": p["meta"], "mode": "view"}
+        )
+    # Divergence : save-points postérieurs au game_start dans cette partie → fork/écrasement.
+    gate = _resume_divergence_gate(name, _SAVE_STORE.party_start_progress_key(name), data)
+    if gate is not None:
+        return gate
     meta = _SAVE_STORE.load_party_start(engine, name)
-    # Nouvelle timeline de rewind à partir du game start chargé (capture la phase courante).
+    # Commit : nouvelle timeline de rewind à partir du game start chargé (capture la phase courante).
     _SNAPSHOT_STORE.reset()
     _SNAPSHOT_STORE.maybe_capture(engine)
     if _SNAPSHOT_PERSIST_ENABLED:
@@ -3418,7 +3492,9 @@ def load_party():
     serializable_state = _game_state_for_json(engine)
     _sync_units_hp_from_cache(serializable_state, engine.game_state)
     _attach_player_types(serializable_state, engine)
-    return api_json_response({"success": True, "game_state": serializable_state, "save": meta})
+    return api_json_response(
+        {"success": True, "game_state": serializable_state, "save": meta, "mode": "resume"}
+    )
 
 
 @app.route('/api/game/save-config', methods=['GET'])

@@ -68,7 +68,8 @@ interface SnapshotRewindProps {
     turn: number,
     player: number,
     phase: string,
-    mode: "resume" | "view"
+    mode: "resume" | "view",
+    divergence?: { fork: "fork" | "overwrite"; backup_name?: string }
   ) => Promise<unknown>;
   reloadLive: () => Promise<void>;
   /** Notifie le parent de l'entrée/sortie du mode visionnage (pour bloquer les clics du board). */
@@ -83,14 +84,22 @@ interface SnapshotRewindProps {
   createSave: (note: string) => Promise<SaveMeta>;
   /** Liste les saves existantes (métadonnées). */
   fetchSaveList: () => Promise<SaveMeta[]>;
-  /** Charge une save (remplace l'état vivant et repart de ce point). */
-  loadSave: (id: string) => Promise<unknown>;
+  /** Charge une save : mode "view" = aperçu non destructif ; "resume" = commit (remplace le live). */
+  loadSave: (
+    id: string,
+    mode?: "view" | "resume",
+    divergence?: { fork: "fork" | "overwrite"; backup_name?: string }
+  ) => Promise<unknown>;
   /** false → Save bloqué tant que le répertoire de sauvegarde n'a pas été choisi. */
   canSave: boolean;
   /** Liste les parties sauvegardées (pour Load). */
   fetchPartyList: () => Promise<Array<{ name: string }>>;
-  /** Charge une partie sauvegardée à son game start. */
-  loadParty: (name: string) => Promise<unknown>;
+  /** Charge une partie : mode "view" = aperçu ; "resume" = commit à son game start. */
+  loadParty: (
+    name: string,
+    mode?: "view" | "resume",
+    divergence?: { fork: "fork" | "overwrite"; backup_name?: string }
+  ) => Promise<unknown>;
 }
 
 const iconSvgProps = {
@@ -182,6 +191,15 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
   const [saveNote, setSaveNote] = useState("");
   const [parties, setParties] = useState<Array<{ name: string }>>([]);
   const [loadMenuOpen, setLoadMenuOpen] = useState(false);
+  // Aperçu (view non destructif) d'un save-point / d'une partie ; Resume le commit. null = pas d'aperçu.
+  const [savePreview, setSavePreview] = useState<{
+    kind: "savepoint" | "party";
+    ref: string;
+  } | null>(null);
+  // Popup de divergence (Resume alors que la partie a des save-points postérieurs au point repris).
+  const [divergenceOpen, setDivergenceOpen] = useState(false);
+  const [forkChoice, setForkChoice] = useState<"fork" | "overwrite">("fork");
+  const [forkName, setForkName] = useState("");
 
   // Indices des snapshots dont la phase a eu au moins une action (sinon, tous : pas de filtre exploitable).
   const actionIndices = useMemo(() => {
@@ -239,6 +257,7 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
       try {
         await restore(m.turn, m.player, m.phase, "view");
         setViewIndex(index);
+        setSavePreview(null); // bascule sur l'aperçu snapshot
         onViewModeChange(true);
       } catch (e) {
         setError(String((e as Error)?.message ?? e));
@@ -254,6 +273,7 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
     try {
       await reloadLive();
       setViewIndex(null);
+      setSavePreview(null);
       setIsPlaying(false);
       onViewModeChange(false);
     } catch (e) {
@@ -263,24 +283,71 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
     }
   }, [reloadLive, onViewModeChange]);
 
-  // Reprend la partie au snapshot actuellement visionné (bascule replay -> reprise destructive).
+  // Commit le moment affiché (aperçu snapshot OU save-point/partie) en partie live. `divergence`
+  // (fork/écrasement) transmis au 2e appel après décision du joueur. Retourne la réponse API.
+  const doResume = useCallback(
+    async (divergence?: { fork: "fork" | "overwrite"; backup_name?: string }) => {
+      if (viewIndex != null) {
+        const m = list[viewIndex];
+        if (!m) return null;
+        return await restore(m.turn, m.player, m.phase, "resume", divergence);
+      }
+      if (savePreview) {
+        return savePreview.kind === "savepoint"
+          ? await loadSave(savePreview.ref, "resume", divergence)
+          : await loadParty(savePreview.ref, "resume", divergence);
+      }
+      return null;
+    },
+    [viewIndex, list, savePreview, restore, loadSave, loadParty]
+  );
+
+  // Sortie du mode aperçu après un commit effectif.
+  const finishResume = useCallback(() => {
+    setViewIndex(null);
+    setSavePreview(null);
+    setIsPlaying(false);
+    onViewModeChange(false);
+  }, [onViewModeChange]);
+
+  // Resume : si divergence (saves postérieures dans le fichier) → popup ; sinon commit direct.
   const resumeHere = useCallback(async () => {
-    if (viewIndex == null) return;
-    const m = list[viewIndex];
-    if (!m) return;
     setBusy(true);
     setError(null);
     try {
-      await restore(m.turn, m.player, m.phase, "resume");
-      setViewIndex(null);
-      setIsPlaying(false);
-      onViewModeChange(false);
+      const data = (await doResume()) as { needs_decision?: boolean } | null;
+      if (data?.needs_decision) {
+        setForkChoice("fork");
+        setForkName("");
+        setDivergenceOpen(true); // garde l'aperçu affiché : le joueur peut encore annuler
+        return;
+      }
+      finishResume();
     } catch (e) {
       setError(String((e as Error)?.message ?? e));
     } finally {
       setBusy(false);
     }
-  }, [viewIndex, list, restore, onViewModeChange]);
+  }, [doResume, finishResume]);
+
+  // Validation du popup : rejoue le resume avec la décision (fork+nom optionnel, ou écrasement).
+  const confirmDivergence = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await doResume(
+        forkChoice === "fork"
+          ? { fork: "fork", backup_name: forkName.trim() || undefined }
+          : { fork: "overwrite" }
+      );
+      setDivergenceOpen(false);
+      finishResume();
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  }, [doResume, forkChoice, forkName, finishResume]);
 
   // Enregistre l'état vivant courant dans une save, avec la note saisie (optionnelle).
   const doSave = useCallback(async () => {
@@ -312,17 +379,18 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
     }
   }, [saveMenuOpen, fetchSaveList]);
 
-  // Charge une save : remplace l'état vivant, sort du visionnage, repart de ce point.
+  // Aperçu (view non destructif) d'une save : affiche le moment sans muter le live ; Resume commit.
   const pickSave = useCallback(
     async (id: string) => {
       setBusy(true);
       setError(null);
       try {
-        await loadSave(id);
+        await loadSave(id, "view");
         setSaveMenuOpen(false);
         setViewIndex(null);
+        setSavePreview({ kind: "savepoint", ref: id });
         setIsPlaying(false);
-        onViewModeChange(false);
+        onViewModeChange(true);
       } catch (e) {
         setError(String((e as Error)?.message ?? e));
       } finally {
@@ -347,17 +415,18 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
     }
   }, [loadMenuOpen, fetchPartyList]);
 
-  // Charge une partie sauvegardée (à son game start) : elle devient la partie courante.
+  // Aperçu (view non destructif) d'une partie à son game start ; Resume commit.
   const pickParty = useCallback(
     async (name: string) => {
       setBusy(true);
       setError(null);
       try {
-        await loadParty(name);
+        await loadParty(name, "view");
         setLoadMenuOpen(false);
         setViewIndex(null);
+        setSavePreview({ kind: "party", ref: name });
         setIsPlaying(false);
-        onViewModeChange(false);
+        onViewModeChange(true);
       } catch (e) {
         setError(String((e as Error)?.message ?? e));
       } finally {
@@ -429,14 +498,16 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
   }, [jump?.nonce]);
 
   // --- Container de contrôle du replay (mêmes controls que la barre replay, sous le tracker) ---
-  if (!replayOpen && viewIndex == null) return null;
+  if (!replayOpen && viewIndex == null && savePreview == null) return null;
 
-  const atLive = viewIndex == null;
-  const progressPct = atLive || list.length === 0 ? 100 : ((viewIndex + 1) / list.length) * 100;
+  const atLive = viewIndex == null && savePreview == null;
+  const progressPct =
+    viewIndex == null || list.length === 0 ? 100 : ((viewIndex + 1) / list.length) * 100;
   const firstTarget = actionIndices.length ? actionIndices[0] : -1;
   const lastTarget = actionIndices.length ? actionIndices[actionIndices.length - 1] : -1;
-  const prevTarget = atLive ? lastTarget : prevActionIndex(viewIndex);
-  const nextTarget = atLive ? -1 : nextActionIndex(viewIndex);
+  // Navigation snapshot : ⏮/⏭ entrent en visionnage depuis le live OU depuis un aperçu save.
+  const prevTarget = viewIndex == null ? lastTarget : prevActionIndex(viewIndex);
+  const nextTarget = viewIndex == null ? -1 : nextActionIndex(viewIndex);
 
   return (
     <div
@@ -461,7 +532,7 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
               className="replay-btn replay-btn--play"
               disabled={busy || firstTarget < 0}
               onClick={() => {
-                if (atLive) enterView(firstTarget);
+                if (viewIndex == null) enterView(firstTarget);
                 setIsPlaying(true);
               }}
             >
@@ -641,32 +712,32 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
                   .sort((a, b) => b.ts.localeCompare(a.ts))
                   .map((s) => {
                     const c = saveColors(s);
-                  return (
-                    <button
-                      key={s.id}
-                      type="button"
-                      className="replay-btn"
-                      disabled={busy}
-                      onClick={() => pickSave(s.id)}
-                      title={saveDisplayName(s)}
-                      style={{
-                        display: "block",
-                        width: "100%",
-                        height: "auto",
-                        textAlign: "left",
-                        padding: "6px 8px",
-                        marginBottom: "4px",
-                        background: c.bg,
-                        color: c.fg,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {saveDisplayName(s)}
-                    </button>
-                  );
-                })
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        className="replay-btn"
+                        disabled={busy}
+                        onClick={() => pickSave(s.id)}
+                        title={saveDisplayName(s)}
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          height: "auto",
+                          textAlign: "left",
+                          padding: "6px 8px",
+                          marginBottom: "4px",
+                          background: c.bg,
+                          color: c.fg,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {saveDisplayName(s)}
+                      </button>
+                    );
+                  })
               )}
             </div>
           )}
@@ -817,6 +888,113 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
                 style={{ background: "#059669", borderColor: "#047857", color: "#fff" }}
               >
                 Enregistrer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {divergenceOpen && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — clic fond = fermeture
+        <div
+          role="presentation"
+          onClick={() => !busy && setDivergenceOpen(false)}
+          onKeyDown={(e) => e.key === "Escape" && !busy && setDivergenceOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 4200,
+          }}
+        >
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: panneau — stopPropagation intentionnel */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            style={{
+              background: "#1f2937",
+              border: "1px solid #555",
+              borderRadius: "8px",
+              padding: "16px",
+              minWidth: "340px",
+              color: "#fff",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+            }}
+          >
+            <h3 style={{ marginTop: 0 }}>Reprise de la partie</h3>
+            <p style={{ color: "#9ca3af", marginTop: 0 }}>
+              Cette partie contient des sauvegardes postérieures au point de reprise.
+            </p>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: 8,
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="radio"
+                name="fork-choice"
+                checked={forkChoice === "overwrite"}
+                onChange={() => setForkChoice("overwrite")}
+              />
+              <span>Écraser les sauvegardes postérieures</span>
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              <input
+                type="radio"
+                name="fork-choice"
+                checked={forkChoice === "fork"}
+                onChange={() => setForkChoice("fork")}
+              />
+              <span>Conserver la partie actuelle dans une copie</span>
+            </label>
+            {forkChoice === "fork" && (
+              <input
+                type="text"
+                value={forkName}
+                onChange={(e) => setForkName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !busy) confirmDivergence();
+                }}
+                placeholder="Nom de la copie (optionnel)"
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  marginTop: 8,
+                  padding: "8px 10px",
+                  borderRadius: "6px",
+                  border: "1px solid #4b5563",
+                  background: "#111827",
+                  color: "#fff",
+                }}
+              />
+            )}
+            {error && <p style={{ color: "#f87171" }}>{error}</p>}
+            <div
+              style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "14px" }}
+            >
+              <button
+                type="button"
+                className="replay-btn replay-btn--nav"
+                disabled={busy}
+                onClick={() => setDivergenceOpen(false)}
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                className="replay-btn"
+                disabled={busy}
+                onClick={confirmDivergence}
+                style={{ background: "#059669", borderColor: "#047857", color: "#fff" }}
+              >
+                Confirmer
               </button>
             </div>
           </div>

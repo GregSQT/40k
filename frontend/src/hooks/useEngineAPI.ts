@@ -968,6 +968,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Ref miroir pour accès synchrone dans executeAction / callbacks de clic. */
   const manualAllocationRef = useRef<ManualAllocation | null>(null);
   manualAllocationRef.current = manualAllocation;
+  // Anti double-envoi d'allocation : tant qu'une allocation est en vol, on ignore les clics
+  // suivants (sinon un 2e clic part avec des choices périmées → figurine déjà retirée → 500).
+  const allocInFlightRef = useRef(false);
   /** Déclaration de l'ordre des groupes d'allocation (cible hétérogène / CHARACTER). */
   const [manualOrderRequest, setManualOrderRequest] = useState<ManualOrderRequest | null>(null);
   const manualOrderRequestRef = useRef<ManualOrderRequest | null>(null);
@@ -1650,10 +1653,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setSelectedUnitId(null);
   }, []);
 
+  // true pendant un aperçu (view non destructif) : bloque les actions (état affiché ≠ moteur live).
+  const viewActiveRef = useRef(false);
+  const setViewActive = useCallback((active: boolean) => {
+    viewActiveRef.current = active;
+  }, []);
+
   // Execute action via API
   // biome-ignore lint/correctness/useExhaustiveDependencies: handleStartChargeModelMove and readSquadModelPositions are declared later in the file — adding them to deps would cause noInvalidUseBeforeDeclaration
   const executeAction = useCallback(
     async (action: Record<string, unknown>) => {
+      // Aperçu (Select/Load/rewind view) actif : le board affiche un état ≠ moteur live.
+      // On bloque toute action (no-op) pour éviter un désync (ex: tirer avec une fig morte du live).
+      if (viewActiveRef.current) {
+        return;
+      }
       logClientDebugConsoleNotifyIfEnabled();
       const isFightCombatClientTrace =
         action.action === "fight" ||
@@ -5348,6 +5362,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     async (modelId: string) => {
       const alloc = manualAllocationRef.current;
       if (!alloc) return;
+      // DIAGNOSTIC (temporaire) : capture les choices réelles au moment de l'envoi.
+      const choiceIds = (alloc.choices ?? []).map((c) => c.model_id);
+      console.warn("[MANUAL-ALLOC-DBG] envoi", {
+        modelId,
+        kind: alloc.kind,
+        choices: choiceIds,
+        modelInChoices: choiceIds.includes(modelId),
+        current_group_id: (alloc as { current_group_id?: unknown }).current_group_id,
+      });
+      if (allocInFlightRef.current) return; // une allocation est déjà en vol → ignorer ce clic
+      allocInFlightRef.current = true;
       try {
         if (alloc.kind === "hazard") {
           // Desperate Escape (06.02) : clic figurine pour attribuer une mortal wound du hazard.
@@ -5375,6 +5400,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       } catch (e) {
         console.error("[MANUAL-ALLOC] allocate FAILED", e);
         setError(`Allocation failed: ${formatApiConnectionError(e)}`);
+      } finally {
+        allocInFlightRef.current = false;
       }
     },
     [executeAction]
@@ -7728,6 +7755,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       },
       saveList: async () => [],
       saveLoad: async () => ({ success: false }),
+      setViewActive: () => {},
       fetchPartyList: async () => [],
       loadParty: async () => ({ success: false }),
       setAutosaveConfig: async () => ({ success: false }),
@@ -7951,15 +7979,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     turn: number,
     player: number,
     phase: string,
-    restoreMode: "resume" | "view"
+    restoreMode: "resume" | "view",
+    divergence?: { fork: "fork" | "overwrite"; backup_name?: string }
   ) => {
     const response = await fetch(`${API_BASE}/game/snapshot/restore`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ turn, player, phase, mode: restoreMode }),
+      body: JSON.stringify({ turn, player, phase, mode: restoreMode, ...(divergence ?? {}) }),
     });
     const data = await response.json();
     if (!data.success) throw new Error(data.error ?? "snapshot restore failed");
+    // Divergence non tranchée (saves postérieures dans le fichier courant) : aucun commit, le popup décide.
+    if (data.needs_decision) return data;
     setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
     // Restore vers le début de la phase courante : forcer le reset (l'effet phase ne tirerait pas).
     resetInteractionState();
@@ -8005,14 +8036,19 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     return data.saves as SaveMeta[];
   };
 
-  const saveLoad = async (id: string) => {
+  const saveLoad = async (
+    id: string,
+    mode: "view" | "resume" = "resume",
+    divergence?: { fork: "fork" | "overwrite"; backup_name?: string }
+  ) => {
     const response = await fetch(`${API_BASE}/game/save/load`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
+      body: JSON.stringify({ id, mode, ...(divergence ?? {}) }),
     });
     const data = await response.json();
     if (!data.success) throw new Error(data.error ?? "save load failed");
+    if (data.needs_decision) return data; // divergence non tranchée : pas de commit
     setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
     resetInteractionState();
     return data;
@@ -8025,14 +8061,19 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     return data.parties as Array<{ name: string }>;
   };
 
-  const loadParty = async (name: string) => {
+  const loadParty = async (
+    name: string,
+    mode: "view" | "resume" = "resume",
+    divergence?: { fork: "fork" | "overwrite"; backup_name?: string }
+  ) => {
     const response = await fetch(`${API_BASE}/game/party/load`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, mode, ...(divergence ?? {}) }),
     });
     const data = await response.json();
     if (!data.success) throw new Error(data.error ?? "party load failed");
+    if (data.needs_decision) return data; // divergence non tranchée : pas de commit
     setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
     resetInteractionState();
     return data;
@@ -8108,6 +8149,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     saveGameNow,
     saveList,
     saveLoad,
+    setViewActive,
     fetchPartyList,
     loadParty,
     setAutosaveConfig,
