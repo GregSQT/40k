@@ -18,7 +18,7 @@ import copy
 from functools import wraps
 from threading import RLock
 from datetime import date, datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
@@ -308,6 +308,10 @@ def make_json_serializable(obj, _ancestors: Optional[frozenset] = None, _path: s
 
 
 _GAME_STATE_EXCLUDE_KEYS = frozenset({
+    # Combat log : delta d'events depuis la dernière row de timeline. Inutile sur chaque POST /action
+    # (le front l'accumule en live via action_logs) ; le Game Log est reconstruit (champ top-level
+    # game_log_history) seulement aux réponses de Load / rewind du replay.
+    "log_delta",
     "los_topology", "pathfinding_topology", "wall_edge_topology",
     "wall_hexes",
     # Table statique moteur (config/weapon_damage_table.json) — le client web n’en a pas besoin ;
@@ -534,6 +538,44 @@ def _exclude_game_state_key_for_api_json(key: str) -> bool:
     if key.startswith("enemy_adjacent_counts_player_"):
         return True
     return False
+
+
+def _buffer_log_delta(engine_instance, action_logs: List[Dict[str, Any]]) -> None:
+    """Accumule les entrées de log de CETTE action dans ``game_state['log_delta']`` AVANT le vidage de
+    ``action_logs``. Ce delta (events depuis la dernière row de timeline) est drainé dans
+    ``meta['log_delta']`` à la prochaine capture de row (``make_row``) → chaque event stocké UNE fois.
+
+    Chaque entrée reçoit le ``turn`` courant si elle n'en porte pas (ex. ``roll_info``), pour que le
+    Game Log reconstruit affiche le bon numéro de tour par ligne. ``logSeq`` (posé par
+    append_action_log) donne l'ordre chronologique."""
+    if not action_logs:
+        return
+    gs = engine_instance.game_state
+    pending = gs.setdefault("log_delta", [])
+    turn = int(gs.get("turn", 1))
+    for entry in action_logs:
+        stamped = dict(entry)
+        if not stamped.get("turn"):
+            stamped["turn"] = turn
+        pending.append(stamped)
+
+
+def _reconstruct_game_log(party_name: Optional[str], up_to_key: Optional[tuple],
+                          include_pending_from=None) -> List[Dict[str, Any]]:
+    """Reconstruit le combat log d'une partie jusqu'à ``up_to_key`` (concat des ``meta['log_delta']``
+    des rows de timeline). ``include_pending_from`` (un engine) ajoute en fin le delta courant non
+    encore committé (``game_state['log_delta']``) — pour le retour live. Flush le writer async d'abord
+    pour que les rows tout juste enfilées soient bien sur disque avant lecture."""
+    if not party_name:
+        log: List[Dict[str, Any]] = []
+    else:
+        _SAVE_STORE.flush()
+        log = list(_SAVE_STORE.reconstruct_log(party_name, up_to_key))
+    if include_pending_from is not None:
+        pending = include_pending_from.game_state.get("log_delta")
+        if isinstance(pending, list):
+            log.extend(pending)
+    return log
 
 
 def _game_state_for_json(
@@ -1147,6 +1189,8 @@ def initialize_auth_db() -> None:
         connection.close()
 
 # Initialize Flask app
+import logging
+logging.getLogger('werkzeug').setLevel(logging.WARNING)
 app = Flask(__name__)
 CORS(
     app,
@@ -1193,12 +1237,58 @@ from services.game_saves import SaveStore, progress_key_from_gs
 # Répertoire de persistance (snapshots + saves), configurable via le menu. Défaut : logs/.
 _PERSIST_DIR = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), "logs")
 _SAVE_STORE = SaveStore(os.path.join(_PERSIST_DIR, "pvp_saves"))
+# Arrêt propre du process : écrit les dernières rows de timeline encore en file d'attente.
+import atexit
+atexit.register(_SAVE_STORE.flush)
 # Le répertoire doit être explicitement choisi avant toute save (manuelle ou auto).
 _PERSIST_DIR_SET = False
 # Sauvegarde automatique : off par défaut ; granularité "phase" ou "turn".
 _AUTOSAVE_ENABLED = False
 _AUTOSAVE_GRANULARITY = "phase"
 _AUTOSAVE_LAST_KEY: Optional[Tuple[int, int]] = None
+# Timeline par action : (turn, phase, unit_activation_count) de la dernière row capturée.
+# Sert à ne capturer une row QUE sur progression réelle (pas sur les clics sans effet).
+_TIMELINE_LAST_KEY: Optional[Tuple[int, str, int]] = None
+
+
+def _reset_timeline_last(engine_instance) -> None:
+    """Aligne le tracker sur l'état courant (après start/reset/Load/Resume) pour repartir proprement."""
+    global _TIMELINE_LAST_KEY
+    gs = engine_instance.game_state
+    _TIMELINE_LAST_KEY = (int(gs["turn"]), str(gs["phase"]), int(gs.get("unit_activation_count", 0)))
+
+
+def _timeline_capture(engine_instance) -> None:
+    """Capture une row de timeline (append async) à chaque PROGRESSION réelle (activation d'unité /
+    changement de phase / de tour). Gated : uniquement si enregistrement activé + répertoire défini +
+    partie courante. La copie de l'état est synchrone (sous le lock engine) ; l'écriture est async."""
+    global _TIMELINE_LAST_KEY
+    if getattr(engine_instance, "current_mode_code", None) not in ("pvp", "pvp_test"):
+        return
+    if not (_SNAPSHOT_PERSIST_ENABLED and _PERSIST_DIR_SET):
+        return
+    party = _SAVE_STORE.current_party()
+    if not party:
+        return
+    gs = engine_instance.game_state
+    key = (int(gs["turn"]), str(gs["phase"]), int(gs.get("unit_activation_count", 0)))
+    prev = _TIMELINE_LAST_KEY
+    if key == prev:
+        return  # pas de progression → pas de row
+    # Sans autosave, toute progression est une simple row "action" (playback ⏮⏭ complet mais rien dans
+    # le menu Select) ; les points "turn"/"phase" visibles ne naissent que si l'autosave est active.
+    if not _AUTOSAVE_ENABLED:
+        kind = "action"
+    elif prev is None or key[0] != prev[0]:
+        kind = "turn"
+    elif key[1] != prev[1]:
+        kind = "phase"
+    else:
+        kind = "action"
+    _TIMELINE_LAST_KEY = key
+    from datetime import datetime
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    _SAVE_STORE.enqueue_row(party, _SAVE_STORE.make_row(engine_instance, ts, kind))
 
 
 def _maybe_autosave(engine_instance, point_ts: str) -> None:
@@ -1238,8 +1328,13 @@ def _capture_and_autosave(engine_instance, initial: bool = False) -> None:
         _SAVE_STORE.start_party(
             engine_instance, now.strftime("%Y%m%d_%H-%M"), now.strftime("%Y%m%d-%H%M%S")
         )
-    elif _AUTOSAVE_ENABLED:
-        _maybe_autosave(engine_instance, now.strftime("%Y%m%d-%H%M%S"))
+        # Autosave actif → la partie est visible dès le start : on promeut le working immédiatement.
+        # Autosave inactif → il reste caché jusqu'à la 1re save manuelle (promotion différée).
+        if _AUTOSAVE_ENABLED:
+            _SAVE_STORE.promote()
+        _reset_timeline_last(engine_instance)
+    # Les rows de progression (turn/phase/action) sont posées par _timeline_capture après chaque
+    # action ; l'ancien auto-save par phase est superséd é par la timeline unifiée.
 
 
 # --- Persistance côté serveur de la config des saves (survit au redémarrage de l'api) ----------
@@ -1459,7 +1554,6 @@ def initialize_engine(scenario_file: Optional[str] = None):
         if not agent_keys:
             raise ValueError("No agents found in scenario")
         
-        print(f"DEBUG: Found {len(agent_keys)} unique agent(s) in scenario: {agent_keys}")
         
         # For PvP mode, we need configs for all agents
         # Load configs for each agent and merge them
@@ -1635,7 +1729,6 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
         if not agent_keys:
             raise ValueError("No agents found in scenario")
         
-        print(f"DEBUG: Found {len(agent_keys)} unique agent(s) in scenario: {agent_keys}")
         
         # For PvE mode, load configs for all agents by default.
         # In mono-agent mode, a forced agent key can provide shared configs
@@ -1989,7 +2082,6 @@ def start_game():
     # avec GET /api/config/board pour qu'un thread ne lise pas le board d'un autre.
     with _BOARD_ENV_LOCK:
         if requested_mode == "pvp_test":
-            print("DEBUG: Initializing engine for PvP Test mode")
             if board_path is None:
                 from config_loader import get_config_loader as _gcl
                 _cfg = _gcl().load_config("config", force_reload=False)
@@ -2005,16 +2097,13 @@ def start_game():
                 elif "W40K_BOARD_PATH" in os.environ:
                     del os.environ["W40K_BOARD_PATH"]
         elif requested_mode == "pvp":
-            print("DEBUG: Initializing engine for PvP mode")
             initialize_engine(scenario_file=scenario_file)
         elif requested_mode == "pve":
-            print("DEBUG: Initializing engine for PvE mode (copied from Test mode)")
             initialize_test_engine(
                 scenario_file=scenario_file,
                 forced_agent_key="CoreAgent",
             )
         elif requested_mode == "pve_test":
-            print("DEBUG: Initializing engine for PvE Test mode")
             if board_path is None:
                 from config_loader import get_config_loader as _gcl
                 _cfg = _gcl().load_config("config", force_reload=False)
@@ -2033,7 +2122,6 @@ def start_game():
                 elif "W40K_BOARD_PATH" in os.environ:
                     del os.environ["W40K_BOARD_PATH"]
         elif requested_mode == ED_MODE_CODE:
-            print("DEBUG: Initializing engine for Endless Duty mode")
             if scenario_file is None:
                 scenario_file = ED_SCENARIO_DEFAULT
             initialize_test_engine(
@@ -2041,7 +2129,6 @@ def start_game():
                 forced_agent_key="CoreAgent",
             )
         else:
-            print("DEBUG: Initializing engine for PvP mode")
             initialize_engine(scenario_file=scenario_file)
 
     assert engine is not None
@@ -2059,7 +2146,6 @@ def start_game():
     engine.current_mode_code = requested_mode
     engine.game_state["current_mode_code"] = requested_mode
         
-    print("DEBUG: About to call engine.reset()")
     # Reset the engine for new game
     try:
         obs, info = engine.reset()
@@ -2069,7 +2155,6 @@ def start_game():
         import traceback
         print(f"FULL TRACEBACK:\n{traceback.format_exc()}")
         raise
-    print("DEBUG: engine.reset() completed successfully")
 
     if requested_mode == ED_MODE_CODE:
         project_root = Path(abs_parent)
@@ -2597,9 +2682,15 @@ def execute_action():
         if isinstance(result, dict):
             result["endless_duty"] = ed_post
 
-    # Snapshots temporels : capturer + auto-sauver le début de toute nouvelle phase atteinte (PvP).
+    # Snapshots temporels (rewind) + timeline par action : capturés après chaque action réussie (PvP).
     if success:
+        # Empiler les events de log de CETTE action dans log_delta AVANT la capture de row. La row de
+        # fin d'activation draine log_delta ; si on empile après, elle ne contient pas l'action courante
+        # et ses events glissent dans la row suivante (visibles seulement au pas de flèche suivant),
+        # typiquement une unité multi-armes dont les derniers tirs manquent au 1er clic.
+        _buffer_log_delta(engine, engine.game_state.get("action_logs", []))
         _capture_and_autosave(engine)
+        _timeline_capture(engine)
 
     # Convert game state to JSON-serializable format
     _ser_t0 = time.perf_counter() if _api_perf else None
@@ -2623,7 +2714,7 @@ def execute_action():
                 if str(unit.get("id")) == str(active_unit_id):
                     unit["available_weapons"] = result["available_weapons"]
                     break
-    # Extract and send detailed action logs to frontend
+    # Extract and send detailed action logs to frontend (log_delta déjà empilé avant la capture de row)
     action_logs = serializable_state.get("action_logs", [])
     # CRITICAL: Always clear logs after each AI turn to prevent accumulation
     engine.game_state["action_logs"] = []
@@ -3189,10 +3280,14 @@ def get_game_state():
     serializable_state = _game_state_for_json(engine)
     _sync_units_hp_from_cache(serializable_state, engine.game_state)
     _attach_player_types(serializable_state, engine)
-    
+
     return api_json_response({
         "success": True,
         "game_state": serializable_state,
+        # Retour au live (sortie de visionnage) : Game Log complet réel = deltas committés + delta en cours.
+        "game_log_history": _reconstruct_game_log(
+            _SAVE_STORE.current_party(), None, include_pending_from=engine
+        ),
     })
 
 @app.route('/api/game/reset', methods=['POST'])
@@ -3285,7 +3380,13 @@ def restore_snapshot():
             _attach_player_types(serializable_state, engine)
         finally:
             engine.game_state = live_gs
-        return api_json_response({"success": True, "mode": "view", "game_state": serializable_state})
+        return api_json_response({
+            "success": True, "mode": "view", "game_state": serializable_state,
+            # Log du point rembobiné (rewind ⏮⏭) : deltas de la timeline jusqu'à cette phase.
+            "game_log_history": _reconstruct_game_log(
+                _SAVE_STORE.current_party(), progress_key_from_gs(rebuilt)
+            ),
+        })
 
     # Divergence : save-points du fichier courant postérieurs au point rembobiné → fork/écrasement.
     # Clé de progression calculée sur l'état reconstruit du snapshot, sans commit.
@@ -3298,12 +3399,19 @@ def restore_snapshot():
 
     # resume : remplace l'état vivant + purge postérieur
     _SNAPSHOT_STORE.apply_resume(engine, turn, player, phase)
+    _reset_timeline_last(engine)
     if _SNAPSHOT_PERSIST_ENABLED:
         _persist_snapshots_to_disk()
     serializable_state = _game_state_for_json(engine)
     _sync_units_hp_from_cache(serializable_state, engine.game_state)
     _attach_player_types(serializable_state, engine)
-    return api_json_response({"success": True, "mode": "resume", "game_state": serializable_state})
+    return api_json_response({
+        "success": True, "mode": "resume", "game_state": serializable_state,
+        # Log du point rembobiné (commit) : deltas de la timeline jusqu'à l'état restauré.
+        "game_log_history": _reconstruct_game_log(
+            _SAVE_STORE.current_party(), progress_key_from_gs(engine.game_state)
+        ),
+    })
 
 
 @app.route('/api/game/snapshot/persist', methods=['POST'])
@@ -3389,8 +3497,21 @@ def create_save():
 @app.route('/api/game/saves', methods=['GET'])
 @with_engine_state_lock
 def list_saves():
-    """Save-points de la PARTIE COURANTE (pour Select)."""
+    """Save-points de la PARTIE COURANTE (pour Select) : rows « grosses » (hors action)."""
     return api_json_response({"success": True, "saves": _SAVE_STORE.list_points()})
+
+
+@app.route('/api/game/timeline', methods=['GET'])
+@with_engine_state_lock
+def list_timeline():
+    """TOUTES les rows de la partie courante (playback ⏮▶⏭) + état de l'enregistrement.
+    ``recording_enabled`` = l'enregistrement de la timeline est actif (sinon pas de rewind → popup)."""
+    _SAVE_STORE.flush()  # rows en attente écrites avant de lister (liste à jour)
+    return api_json_response({
+        "success": True,
+        "rows": _SAVE_STORE.list_all_rows(),
+        "recording_enabled": bool(_SNAPSHOT_PERSIST_ENABLED and _PERSIST_DIR_SET),
+    })
 
 
 def _resume_divergence_gate(party_name, resume_key, data):
@@ -3398,6 +3519,9 @@ def _resume_divergence_gate(party_name, resume_key, data):
     reprise, exige une décision du joueur (fork/écrasement).
     - Retourne None → pas de divergence (ou décision appliquée) : poursuivre le commit du resume.
     - Retourne une réponse Flask → interrompre (popup à afficher, ou erreur de paramètre)."""
+    # Draine les rows de timeline en attente AVANT toute lecture/troncature, pour ne pas ré-appender
+    # après coup une row périmée (postérieure au point de reprise).
+    _SAVE_STORE.flush()
     if not party_name or not _SAVE_STORE.has_posterior_points(party_name, resume_key):
         return None
     fork = data.get("fork")
@@ -3429,9 +3553,13 @@ def load_save():
     if mode == "view":
         p = _SAVE_STORE.point(point_id)
         serializable_state = _serialize_captured_view(engine, p["state"])
-        return api_json_response(
-            {"success": True, "game_state": serializable_state, "save": p["meta"], "mode": "view"}
-        )
+        return api_json_response({
+            "success": True, "game_state": serializable_state, "save": p["meta"], "mode": "view",
+            # Log jusqu'à ce save-point (Select) : deltas de la timeline courante jusqu'à ce point.
+            "game_log_history": _reconstruct_game_log(
+                _SAVE_STORE.current_party(), _SAVE_STORE.point_progress_key(point_id)
+            ),
+        })
     # Divergence : save-points postérieurs à ce point dans la partie courante → fork/écrasement.
     gate = _resume_divergence_gate(
         _SAVE_STORE.current_party(), _SAVE_STORE.point_progress_key(point_id), data
@@ -3439,6 +3567,7 @@ def load_save():
     if gate is not None:
         return gate
     meta = _SAVE_STORE.restore_point(engine, point_id)
+    _reset_timeline_last(engine)
     # Commit : nouvelle timeline de rewind à partir du point chargé (capture la phase courante).
     _SNAPSHOT_STORE.reset()
     _SNAPSHOT_STORE.maybe_capture(engine)
@@ -3447,9 +3576,13 @@ def load_save():
     serializable_state = _game_state_for_json(engine)
     _sync_units_hp_from_cache(serializable_state, engine.game_state)
     _attach_player_types(serializable_state, engine)
-    return api_json_response(
-        {"success": True, "game_state": serializable_state, "save": meta, "mode": "resume"}
-    )
+    return api_json_response({
+        "success": True, "game_state": serializable_state, "save": meta, "mode": "resume",
+        # Log jusqu'au point chargé (commit) : deltas de la timeline courante jusqu'à ce point.
+        "game_log_history": _reconstruct_game_log(
+            _SAVE_STORE.current_party(), _SAVE_STORE.point_progress_key(point_id)
+        ),
+    })
 
 
 @app.route('/api/game/parties', methods=['GET'])
@@ -3476,14 +3609,19 @@ def load_party():
         # Aperçu : la partie devient le contexte de navigation (Select liste SES points), sans commit.
         _SAVE_STORE.set_current(name)
         serializable_state = _serialize_captured_view(engine, p["state"])
-        return api_json_response(
-            {"success": True, "game_state": serializable_state, "save": p["meta"], "mode": "view"}
-        )
+        return api_json_response({
+            "success": True, "game_state": serializable_state, "save": p["meta"], "mode": "view",
+            # Log au game_start de la partie chargée (delta de la row game_start, souvent vide).
+            "game_log_history": _reconstruct_game_log(
+                name, _SAVE_STORE.party_start_progress_key(name)
+            ),
+        })
     # Divergence : save-points postérieurs au game_start dans cette partie → fork/écrasement.
     gate = _resume_divergence_gate(name, _SAVE_STORE.party_start_progress_key(name), data)
     if gate is not None:
         return gate
     meta = _SAVE_STORE.load_party_start(engine, name)
+    _reset_timeline_last(engine)
     # Commit : nouvelle timeline de rewind à partir du game start chargé (capture la phase courante).
     _SNAPSHOT_STORE.reset()
     _SNAPSHOT_STORE.maybe_capture(engine)
@@ -3492,9 +3630,13 @@ def load_party():
     serializable_state = _game_state_for_json(engine)
     _sync_units_hp_from_cache(serializable_state, engine.game_state)
     _attach_player_types(serializable_state, engine)
-    return api_json_response(
-        {"success": True, "game_state": serializable_state, "save": meta, "mode": "resume"}
-    )
+    return api_json_response({
+        "success": True, "game_state": serializable_state, "save": meta, "mode": "resume",
+        # Log au game_start (commit de la partie chargée) : delta de la row game_start, souvent vide.
+        "game_log_history": _reconstruct_game_log(
+            name, _SAVE_STORE.party_start_progress_key(name)
+        ),
+    })
 
 
 @app.route('/api/game/save-config', methods=['GET'])
@@ -3542,7 +3684,9 @@ def set_autosave():
             _SAVE_STORE.start_party(
                 engine, now.strftime("%Y%m%d_%H-%M"), now.strftime("%Y%m%d-%H%M%S")
             )
+            _SAVE_STORE.promote()  # autosave activé → partie rendue visible immédiatement
         else:
+            _SAVE_STORE.promote()  # rend le working visible même si le dédup autosave saute le point
             _maybe_autosave(engine, now.strftime("%Y%m%d-%H%M%S"))
     return api_json_response({
         "success": True,
@@ -3888,6 +4032,7 @@ def execute_ai_turn():
             _sync_units_hp_from_cache(serializable_state, engine.game_state)
             _attach_player_types(serializable_state, engine)
             action_logs = serializable_state.get("action_logs", [])
+            _buffer_log_delta(engine, action_logs)  # delta du combat log pour la reconstruction du replay
             engine.game_state["action_logs"] = []
             serializable_state["action_logs"] = []
             return api_json_response({
@@ -3911,6 +4056,7 @@ def execute_ai_turn():
             _sync_units_hp_from_cache(serializable_state, engine.game_state)
             _attach_player_types(serializable_state, engine)
             action_logs = serializable_state.get("action_logs", [])
+            _buffer_log_delta(engine, action_logs)  # delta du combat log pour la reconstruction du replay
             engine.game_state["action_logs"] = []
             serializable_state["action_logs"] = []
             return api_json_response({
@@ -3944,7 +4090,8 @@ def execute_ai_turn():
         
     # Extract action logs for this specific AI action
     action_logs = serializable_state.get("action_logs", [])
-        
+    _buffer_log_delta(engine, action_logs)  # delta du combat log pour la reconstruction du replay
+
     # CRITICAL: Always clear logs after extracting to prevent accumulation
     engine.game_state["action_logs"] = []
     serializable_state["action_logs"] = []

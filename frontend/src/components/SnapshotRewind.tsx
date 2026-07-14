@@ -5,6 +5,7 @@
 // - Navigation avec les boutons du container (⏮ ⏪ ▶ ⏸ ⏹ ⏭ + vitesse) ; « Reprendre ici » bascule en reprise.
 import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
 export interface SnapshotMeta {
   turn: number;
@@ -24,8 +25,10 @@ export interface SaveMeta {
   label: string;
   /** Note optionnelle saisie par le joueur pour retrouver la save. */
   note?: string;
-  /** Type de save : "manual" | "auto_phase" | "auto_turn" | "game_start". */
+  /** Type de row : "game_start" | "turn" | "phase" | "action" | "manual". */
   kind?: string;
+  /** Score (VP) par joueur au moment de la row (pour le tracker). */
+  score?: Record<string, number>;
 }
 
 /** Nom affiché d'une save (1 ligne) : "Game start", ou tag "T{tour} P{joueur} {Phase} · #{event}",
@@ -63,23 +66,16 @@ export interface SnapshotJump {
 interface SnapshotRewindProps {
   /** Saut demandé (clic sur un tour/phase du tracker), ou null. */
   jump: SnapshotJump | null;
-  fetchList: () => Promise<{ snapshots: SnapshotMeta[]; persist_enabled: boolean }>;
-  restore: (
-    turn: number,
-    player: number,
-    phase: string,
-    mode: "resume" | "view",
-    divergence?: { fork: "fork" | "overwrite"; backup_name?: string }
-  ) => Promise<unknown>;
+  /** Timeline complète de la partie courante (toutes les rows) + état de l'enregistrement. */
+  fetchTimeline: () => Promise<{ rows: SaveMeta[]; recording_enabled: boolean }>;
+  /** Active l'enregistrement de la timeline (depuis le popup, sans passer par le menu). */
+  /** Active l'enregistrement (sélection du répertoire incluse). Retourne false si l'utilisateur annule. */
+  onEnableRecording: () => Promise<boolean>;
   reloadLive: () => Promise<void>;
   /** Notifie le parent de l'entrée/sortie du mode visionnage (pour bloquer les clics du board). */
   onViewModeChange: (active: boolean) => void;
   /** true → affiche le container de contrôle du replay sous le tracker. */
   replayOpen: boolean;
-  /** Notifie le point visionné (liste + index) pour tronquer le Game Log jusqu'à ce moment, ou null en live. */
-  onViewChange: (viewed: { snapshots: SnapshotMeta[]; index: number } | null) => void;
-  /** Clés `turn|phase|player` des phases où au moins une action a eu lieu (pour sauter les phases vides). */
-  actionKeys: Set<string>;
   /** Enregistre l'état vivant courant dans une save (fichier plat), avec note optionnelle. */
   createSave: (note: string) => Promise<SaveMeta>;
   /** Liste les saves existantes (métadonnées). */
@@ -100,6 +96,10 @@ interface SnapshotRewindProps {
     mode?: "view" | "resume",
     divergence?: { fork: "fork" | "overwrite"; backup_name?: string }
   ) => Promise<unknown>;
+  /** true → affiche le popup « tu vas modifier la partie » (clic board tenté pendant l'aperçu). */
+  confirmModifyOpen: boolean;
+  /** Ferme le popup de confirmation sans reprendre (Annuler ou après lancement du Resume). */
+  onCancelConfirmModify: () => void;
 }
 
 const iconSvgProps = {
@@ -165,21 +165,23 @@ function SelectIcon() {
 
 export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
   jump,
-  fetchList,
-  restore,
+  fetchTimeline,
+  onEnableRecording,
   reloadLive,
   onViewModeChange,
   replayOpen,
-  onViewChange,
-  actionKeys,
   createSave,
   fetchSaveList,
   loadSave,
   canSave,
   fetchPartyList,
   loadParty,
+  confirmModifyOpen,
+  onCancelConfirmModify,
 }) => {
-  const [list, setList] = useState<SnapshotMeta[]>([]);
+  const [list, setList] = useState<SaveMeta[]>([]);
+  // Enregistrement de la timeline inactif à l'ouverture du replay → popup pour l'activer.
+  const [recordingPromptOpen, setRecordingPromptOpen] = useState(false);
   const [viewIndex, setViewIndex] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -188,28 +190,51 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
   const [saves, setSaves] = useState<SaveMeta[]>([]);
   const [saveMenuOpen, setSaveMenuOpen] = useState(false);
   const [savePromptOpen, setSavePromptOpen] = useState(false);
+  // Popup « Enregistrer la partie » déplaçable : offset courant + drag en cours (poignée = le titre).
+  const [savePos, setSavePos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [saveDrag, setSaveDrag] = useState<{ sx: number; sy: number; bx: number; by: number } | null>(
+    null
+  );
+  // Popup d'invite : Save / Select / Load cliqués sans répertoire de sauvegarde configuré.
+  const [needsDirOpen, setNeedsDirOpen] = useState(false);
   const [saveNote, setSaveNote] = useState("");
   const [parties, setParties] = useState<Array<{ name: string }>>([]);
   const [loadMenuOpen, setLoadMenuOpen] = useState(false);
-  // Aperçu (view non destructif) d'un save-point / d'une partie ; Resume le commit. null = pas d'aperçu.
-  const [savePreview, setSavePreview] = useState<{
-    kind: "savepoint" | "party";
-    ref: string;
-  } | null>(null);
   // Popup de divergence (Resume alors que la partie a des save-points postérieurs au point repris).
   const [divergenceOpen, setDivergenceOpen] = useState(false);
   const [forkChoice, setForkChoice] = useState<"fork" | "overwrite">("fork");
   const [forkName, setForkName] = useState("");
 
-  // Indices des snapshots dont la phase a eu au moins une action (sinon, tous : pas de filtre exploitable).
-  const actionIndices = useMemo(() => {
-    const arr: number[] = [];
-    for (let i = 0; i < list.length; i++) {
-      const s = list[i];
-      if (s && actionKeys.has(`${s.turn}|${s.phase}|${s.player}`)) arr.push(i);
-    }
-    return arr.length > 0 ? arr : list.map((_, i) => i);
-  }, [list, actionKeys]);
+  // Drag du popup « Enregistrer la partie » : pendant un drag, on suit la souris au niveau window
+  // (bouger vite hors du panneau ne casse pas le suivi) et on relâche au mouseup.
+  useEffect(() => {
+    if (!saveDrag) return;
+    const move = (e: MouseEvent) =>
+      setSavePos({ x: saveDrag.bx + e.clientX - saveDrag.sx, y: saveDrag.by + e.clientY - saveDrag.sy });
+    const up = () => setSaveDrag(null);
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+  }, [saveDrag]);
+
+  // Playback ⏮⏭ : 1 flèche = 1 ACTION réelle. Les rows turn/phase/action correspondent toutes à une
+  // action (celle qui a fait progresser tour/phase/activation) et portent leurs events de log → elles
+  // sont TOUTES navigables. Sans "turn"/"phase", la 1ʳᵉ action d'un tour/d'une phase serait sautée et
+  // son log n'apparaîtrait que fusionné avec l'action suivante. game_start/manual (début de partie,
+  // saves explicites) ne sont pas des pas d'action → exclus (accessibles via Select).
+  const actionIndices = useMemo(
+    () =>
+      list
+        .map((_, i) => i)
+        .filter((i) => {
+          const k = list[i]?.kind;
+          return k === "action" || k === "phase" || k === "turn";
+        }),
+    [list]
+  );
 
   const prevActionIndex = useCallback(
     (from: number) => {
@@ -230,22 +255,25 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
     [actionIndices]
   );
 
-  // Charge la liste à l'ouverture du container de replay.
+  // Charge la timeline à l'ouverture du container de replay. Si l'enregistrement n'est pas actif,
+  // pas de timeline exploitable → on propose de l'activer via un popup (sans passer par le menu).
   useEffect(() => {
     if (!replayOpen) return;
     let cancelled = false;
     setError(null);
-    fetchList()
+    fetchTimeline()
       .then((r) => {
-        if (!cancelled) setList(r.snapshots);
+        if (cancelled) return;
+        setList(r.rows);
+        if (!r.recording_enabled) setRecordingPromptOpen(true);
       })
-      .catch((e) => {
-        if (!cancelled) setError(String(e?.message ?? e));
+      .catch((e: unknown) => {
+        if (!cancelled) setError(String((e as Error)?.message ?? e));
       });
     return () => {
       cancelled = true;
     };
-  }, [replayOpen, fetchList]);
+  }, [replayOpen, fetchTimeline]);
 
   // Entre en visionnage (non destructif) sur un index de la liste.
   const enterView = useCallback(
@@ -255,9 +283,8 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
       setBusy(true);
       setError(null);
       try {
-        await restore(m.turn, m.player, m.phase, "view");
+        await loadSave(m.id, "view");
         setViewIndex(index);
-        setSavePreview(null); // bascule sur l'aperçu snapshot
         onViewModeChange(true);
       } catch (e) {
         setError(String((e as Error)?.message ?? e));
@@ -265,7 +292,7 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
         setBusy(false);
       }
     },
-    [list, restore, onViewModeChange]
+    [list, loadSave, onViewModeChange]
   );
 
   const exitView = useCallback(async () => {
@@ -273,7 +300,6 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
     try {
       await reloadLive();
       setViewIndex(null);
-      setSavePreview(null);
       setIsPlaying(false);
       onViewModeChange(false);
     } catch (e) {
@@ -290,22 +316,16 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
       if (viewIndex != null) {
         const m = list[viewIndex];
         if (!m) return null;
-        return await restore(m.turn, m.player, m.phase, "resume", divergence);
-      }
-      if (savePreview) {
-        return savePreview.kind === "savepoint"
-          ? await loadSave(savePreview.ref, "resume", divergence)
-          : await loadParty(savePreview.ref, "resume", divergence);
+        return await loadSave(m.id, "resume", divergence);
       }
       return null;
     },
-    [viewIndex, list, savePreview, restore, loadSave, loadParty]
+    [viewIndex, list, loadSave]
   );
 
   // Sortie du mode aperçu après un commit effectif.
   const finishResume = useCallback(() => {
     setViewIndex(null);
-    setSavePreview(null);
     setIsPlaying(false);
     onViewModeChange(false);
   }, [onViewModeChange]);
@@ -379,7 +399,8 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
     }
   }, [saveMenuOpen, fetchSaveList]);
 
-  // Aperçu (view non destructif) d'une save : affiche le moment sans muter le live ; Resume commit.
+  // Aperçu (view non destructif) d'une save (row de la partie courante) : positionne le curseur de
+  // playback sur cette row (viewIndex) ; les ⏮⏭ naviguent ensuite normalement. Resume commit.
   const pickSave = useCallback(
     async (id: string) => {
       setBusy(true);
@@ -387,8 +408,10 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
       try {
         await loadSave(id, "view");
         setSaveMenuOpen(false);
-        setViewIndex(null);
-        setSavePreview({ kind: "savepoint", ref: id });
+        setViewIndex((prev) => {
+          const idx = list.findIndex((m) => m.id === id);
+          return idx >= 0 ? idx : prev;
+        });
         setIsPlaying(false);
         onViewModeChange(true);
       } catch (e) {
@@ -397,7 +420,7 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
         setBusy(false);
       }
     },
-    [loadSave, onViewModeChange]
+    [loadSave, list, onViewModeChange]
   );
 
   // Ouvre/ferme le menu Load ; recharge la liste des parties à l'ouverture.
@@ -415,7 +438,9 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
     }
   }, [loadMenuOpen, fetchPartyList]);
 
-  // Aperçu (view non destructif) d'une partie à son game start ; Resume commit.
+  // Aperçu (view non destructif) d'une AUTRE partie : on charge son game_start, puis on recharge la
+  // timeline (= rows de la partie chargée) et on place le curseur sur le game_start (index 0) → les
+  // ⏮⏭ naviguent la partie chargée. Resume commit.
   const pickParty = useCallback(
     async (name: string) => {
       setBusy(true);
@@ -423,8 +448,9 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
       try {
         await loadParty(name, "view");
         setLoadMenuOpen(false);
-        setViewIndex(null);
-        setSavePreview({ kind: "party", ref: name });
+        const r = await fetchTimeline();
+        setList(r.rows);
+        setViewIndex(r.rows.length > 0 ? 0 : null);
         setIsPlaying(false);
         onViewModeChange(true);
       } catch (e) {
@@ -433,13 +459,8 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
         setBusy(false);
       }
     },
-    [loadParty, onViewModeChange]
+    [loadParty, fetchTimeline, onViewModeChange]
   );
-
-  // Rapporte le point visionné (pour tronquer le Game Log jusqu'à ce moment).
-  useEffect(() => {
-    onViewChange(viewIndex != null ? { snapshots: list, index: viewIndex } : null);
-  }, [viewIndex, list, onViewChange]);
 
   // Autoplay : enchaîne les phases avec action tant que la lecture est active.
   useEffect(() => {
@@ -462,26 +483,27 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
       setBusy(true);
       setError(null);
       try {
-        let snaps = list;
-        if (snaps.length === 0) {
-          const r = await fetchList();
+        let rows = list;
+        if (rows.length === 0) {
+          const r = await fetchTimeline();
           if (cancelled) return;
-          snaps = r.snapshots;
-          setList(snaps);
+          rows = r.rows;
+          setList(rows);
         }
+        // 1re row de la phase/tour visé (row de début de phase, kind phase/turn/game_start).
         let idx = -1;
         if (jump.phase) {
-          idx = snaps.findIndex((s) => s.turn === jump.turn && s.phase === jump.phase);
+          idx = rows.findIndex((s) => s.turn === jump.turn && s.phase === jump.phase);
         }
-        if (idx < 0) idx = snaps.findIndex((s) => s.turn === jump.turn);
+        if (idx < 0) idx = rows.findIndex((s) => s.turn === jump.turn);
         if (idx < 0) {
           setError(
-            `Aucun snapshot pour le tour ${jump.turn}${jump.phase ? ` / ${jump.phase}` : ""}`
+            `Aucun point de timeline pour le tour ${jump.turn}${jump.phase ? ` / ${jump.phase}` : ""}`
           );
           return;
         }
-        const m = snaps[idx];
-        await restore(m.turn, m.player, m.phase, "view");
+        const m = rows[idx];
+        await loadSave(m.id, "view");
         if (cancelled) return;
         setViewIndex(idx);
         setIsPlaying(false);
@@ -498,9 +520,9 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
   }, [jump?.nonce]);
 
   // --- Container de contrôle du replay (mêmes controls que la barre replay, sous le tracker) ---
-  if (!replayOpen && viewIndex == null && savePreview == null) return null;
+  if (!replayOpen && viewIndex == null) return null;
 
-  const atLive = viewIndex == null && savePreview == null;
+  const atLive = viewIndex == null;
   const progressPct =
     viewIndex == null || list.length === 0 ? 100 : ((viewIndex + 1) / list.length) * 100;
   const firstTarget = actionIndices.length ? actionIndices[0] : -1;
@@ -586,14 +608,15 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
           <button
             type="button"
             className="replay-btn replay-btn--nav"
-            title={
-              canSave
-                ? "Enregistrer l'état courant"
-                : "Choisis d'abord le répertoire de sauvegarde (menu → Sauvegarde → Sauvegarde des snapshots sur disque)"
-            }
-            disabled={busy || !canSave}
+            title="Enregistrer l'état courant"
+            disabled={busy}
             onClick={() => {
+              if (!canSave) {
+                setNeedsDirOpen(true);
+                return;
+              }
               setSaveNote("");
+              setSavePos({ x: 0, y: 0 });
               setSavePromptOpen(true);
             }}
             style={{
@@ -612,7 +635,13 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
             className="replay-btn replay-btn--nav"
             title="Charger une save"
             disabled={busy}
-            onClick={toggleSaveMenu}
+            onClick={() => {
+              if (!canSave) {
+                setNeedsDirOpen(true);
+                return;
+              }
+              toggleSaveMenu();
+            }}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -624,25 +653,29 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
             Select
             <SelectIcon />
           </button>
-          {canSave && (
-            <button
-              type="button"
-              className="replay-btn replay-btn--nav"
-              title="Charger une partie sauvegardée (à son début)"
-              disabled={busy}
-              onClick={toggleLoadMenu}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                background: "#ea580c",
-                color: "#ffffff",
-              }}
-            >
-              Load
-              <ResumeIcon />
-            </button>
-          )}
+          <button
+            type="button"
+            className="replay-btn replay-btn--nav"
+            title="Charger une partie sauvegardée (à son début)"
+            disabled={busy}
+            onClick={() => {
+              if (!canSave) {
+                setNeedsDirOpen(true);
+                return;
+              }
+              toggleLoadMenu();
+            }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              background: "#ea580c",
+              color: "#ffffff",
+            }}
+          >
+            Load
+            <ResumeIcon />
+          </button>
           {loadMenuOpen && (
             <div
               style={{
@@ -816,12 +849,117 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
       {error && <div style={{ color: "#f87171", padding: "4px 8px" }}>{error}</div>}
 
       {/* Popup : note optionnelle pour la save */}
-      {savePromptOpen && (
+      {savePromptOpen &&
+        // Portal sur document.body : sort du stacking context du container replay pour que le
+        // z-index passe AU-DESSUS des overlays HTML du board (boucliers cover, portalés à z 150000).
+        createPortal(
+          // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — clic fond = fermeture
+          <div
+            role="presentation"
+            onClick={() => setSavePromptOpen(false)}
+            onKeyDown={(e) => e.key === "Escape" && setSavePromptOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 200000,
+          }}
+        >
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: panneau — stopPropagation intentionnel */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--tooltip-bg)",
+              border: "1px solid var(--tooltip-border-color)",
+              borderRadius: "8px",
+              padding: "16px",
+              minWidth: "320px",
+              color: "var(--tooltip-text-color)",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+              transform: `translate(${savePos.x}px, ${savePos.y}px)`,
+            }}
+          >
+            <h3
+              style={{
+                marginTop: 0,
+                backgroundColor: "var(--settings-title-bg)",
+                padding: "6px 10px",
+                borderRadius: "4px",
+                cursor: "move",
+                userSelect: "none",
+              }}
+              onMouseDown={(e) =>
+                setSaveDrag({ sx: e.clientX, sy: e.clientY, bx: savePos.x, by: savePos.y })
+              }
+            >
+              Enregistrer la partie
+            </h3>
+            <p
+              style={{
+                color: "var(--tooltip-text-color)",
+                marginTop: 0,
+                marginBottom: "6px",
+                fontStyle: "italic",
+              }}
+            >
+              Note (optionnelle) pour retrouver la save :
+            </p>
+            <input
+              type="text"
+              className="replay-note-input"
+              value={saveNote}
+              onChange={(e) => setSaveNote(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !busy) doSave();
+              }}
+              placeholder="ex: avant l'assaut sur l'objectif"
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                padding: "8px 10px",
+                borderRadius: "6px",
+                border: "1px solid #4b5563",
+                color: "#fff",
+              }}
+            />
+            {error && <p style={{ color: "#f87171" }}>{error}</p>}
+            <div
+              style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "14px" }}
+            >
+              <button
+                type="button"
+                className="replay-btn"
+                disabled={busy}
+                onClick={() => setSavePromptOpen(false)}
+                style={{ background: "var(--ui-gray-cancel)", borderColor: "transparent", color: "#fff" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="replay-btn"
+                disabled={busy}
+                onClick={doSave}
+                style={{ background: "var(--ui-green-validate)", borderColor: "transparent", color: "#fff" }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+          </div>,
+          document.body
+        )}
+
+      {needsDirOpen && (
         // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — clic fond = fermeture
         <div
           role="presentation"
-          onClick={() => setSavePromptOpen(false)}
-          onKeyDown={(e) => e.key === "Escape" && setSavePromptOpen(false)}
+          onClick={() => setNeedsDirOpen(false)}
+          onKeyDown={(e) => e.key === "Escape" && setNeedsDirOpen(false)}
           style={{
             position: "fixed",
             inset: 0,
@@ -842,52 +980,24 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
               borderRadius: "8px",
               padding: "16px",
               minWidth: "320px",
+              maxWidth: "420px",
               color: "#fff",
               boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
             }}
           >
-            <h3 style={{ marginTop: 0 }}>Enregistrer la partie</h3>
+            <h3 style={{ marginTop: 0 }}>Répertoire de sauvegarde requis</h3>
             <p style={{ color: "#9ca3af", marginTop: 0 }}>
-              Note (optionnelle) pour retrouver la save :
+              Pour utiliser Save, Select et Load, configure d'abord un répertoire de sauvegarde :
+              menu → Sauvegarde → « Sauvegarde des snapshots sur disque ». Fais-le{" "}
+              <strong>avant de jouer</strong> pour que la partie soit enregistrée dès le début.
             </p>
-            <input
-              type="text"
-              value={saveNote}
-              onChange={(e) => setSaveNote(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !busy) doSave();
-              }}
-              placeholder="ex: avant l'assaut sur l'objectif"
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                padding: "8px 10px",
-                borderRadius: "6px",
-                border: "1px solid #4b5563",
-                background: "#111827",
-                color: "#fff",
-              }}
-            />
-            {error && <p style={{ color: "#f87171" }}>{error}</p>}
-            <div
-              style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "14px" }}
-            >
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "14px" }}>
               <button
                 type="button"
                 className="replay-btn replay-btn--nav"
-                disabled={busy}
-                onClick={() => setSavePromptOpen(false)}
+                onClick={() => setNeedsDirOpen(false)}
               >
-                Annuler
-              </button>
-              <button
-                type="button"
-                className="replay-btn"
-                disabled={busy}
-                onClick={doSave}
-                style={{ background: "#059669", borderColor: "#047857", color: "#fff" }}
-              >
-                Enregistrer
+                Compris
               </button>
             </div>
           </div>
@@ -995,6 +1105,165 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
                 style={{ background: "#059669", borderColor: "#047857", color: "#fff" }}
               >
                 Confirmer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmModifyOpen && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — clic fond = fermeture
+        <div
+          role="presentation"
+          onClick={() => !busy && onCancelConfirmModify()}
+          onKeyDown={(e) => e.key === "Escape" && !busy && onCancelConfirmModify()}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 4200,
+          }}
+        >
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: panneau — stopPropagation intentionnel */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            style={{
+              background: "#1f2937",
+              border: "1px solid #555",
+              borderRadius: "8px",
+              padding: "16px",
+              minWidth: "340px",
+              color: "#fff",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+            }}
+          >
+            <h3 style={{ marginTop: 0 }}>Modifier la partie en cours ?</h3>
+            <p style={{ color: "#9ca3af", marginTop: 0 }}>
+              Tu es en visionnage (lecture seule). Pour jouer à partir de ce point, il faut reprendre
+              la partie ici — elle deviendra la partie en cours. Tu pourras ensuite rejouer ton action.
+            </p>
+            {error && <p style={{ color: "#f87171" }}>{error}</p>}
+            <div
+              style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "14px" }}
+            >
+              <button
+                type="button"
+                className="replay-btn replay-btn--nav"
+                disabled={busy}
+                onClick={() => onCancelConfirmModify()}
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                className="replay-btn"
+                disabled={busy || atLive}
+                onClick={() => {
+                  onCancelConfirmModify();
+                  resumeHere();
+                }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  background: "#ef4444",
+                  border: "1px solid #f87171",
+                  color: "#fff",
+                  fontWeight: 700,
+                }}
+              >
+                Reprendre ici
+                <ResumeBarIcon />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {recordingPromptOpen && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — clic fond = fermeture
+        <div
+          role="presentation"
+          onClick={() => !busy && setRecordingPromptOpen(false)}
+          onKeyDown={(e) => e.key === "Escape" && !busy && setRecordingPromptOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 4200,
+          }}
+        >
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: panneau — stopPropagation intentionnel */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--tooltip-bg)",
+              border: "1px solid var(--tooltip-border-color)",
+              borderRadius: "8px",
+              padding: "16px",
+              minWidth: "340px",
+              color: "var(--tooltip-text-color)",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+            }}
+          >
+            <h3
+              style={{
+                marginTop: 0,
+                backgroundColor: "var(--settings-title-bg)",
+                padding: "6px 10px",
+                borderRadius: "4px",
+              }}
+            >
+              Replay indisponible
+            </h3>
+            <p style={{ color: "var(--tooltip-text-color)", marginTop: 0 }}>
+              Le replay nécessite l'enregistrement de la partie, qui n'est pas activé.
+              <br />
+              L'activer enregistrera la timeline à partir de maintenant.
+            </p>
+            {error && <p style={{ color: "#f87171" }}>{error}</p>}
+            <div
+              style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "14px" }}
+            >
+              <button
+                type="button"
+                className="replay-btn"
+                disabled={busy}
+                onClick={() => setRecordingPromptOpen(false)}
+                style={{ background: "var(--ui-gray-cancel)", borderColor: "transparent", color: "#fff" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="replay-btn"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  setError(null);
+                  try {
+                    const enabled = await onEnableRecording();
+                    if (!enabled) return; // annulé au sélecteur de répertoire → on ne ferme pas
+                    const r = await fetchTimeline();
+                    setList(r.rows);
+                    setRecordingPromptOpen(false);
+                  } catch (e) {
+                    setError(String((e as Error)?.message ?? e));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                style={{ background: "var(--ui-green-validate)", borderColor: "transparent", color: "#fff" }}
+              >
+                Activate
               </button>
             </div>
           </div>

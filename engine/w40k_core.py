@@ -548,6 +548,7 @@ class W40KEngine(gym.Env):
             # Metrics tracking
             "action_logs": [],  # CRITICAL: For metrics collection - tracks all actions per episode
             "action_log_seq": 0,  # Monotonic stamp per append_action_log (not cleared with action_logs flush)
+            "log_delta": [],  # Combat log : events depuis la dernière row de timeline (drainé dans meta['log_delta'] à chaque capture). Reconstruit le Game Log au Load/rewind du replay (delta linéaire, pas de cumul par row)
 
             # PERFORMANCE: Hex-coordinate LoS cache (walls static within episode)
             "hex_los_cache": {},
@@ -1006,6 +1007,7 @@ class W40KEngine(gym.Env):
             "charge_range_rolls": {},
             "action_logs": [],  # CRITICAL: Reset action logs for new episode metrics
             "action_log_seq": 0,
+            "log_delta": [],  # Combat log : events depuis la dernière row de timeline (voir init du game_state)
             "gym_training_mode": self.gym_training_mode,  # ADDED: For handler access
             "debug_mode": self.debug_mode,  # ADDED: For handler access
             "console_logs": [],  # CRITICAL: Initialize console_logs for debug logging across all episodes

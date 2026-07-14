@@ -151,7 +151,7 @@
 
   /* UI green theme tokens (bordures, boutons, halo, fonds menu Paramètres) */
   --ui-green-border: #4caf50;
-  --ui-green-validate: #22c55e;
+  --ui-green-validate: #16a34a;
   --ui-green-validate-off: #14532d;
   --ui-gray-cancel: #6b7280;
   --settings-title-bg: #14532d;
@@ -480,6 +480,18 @@ body {
   outline: none;
 }
 .replay-playback-controls-container button:focus-visible {
+  outline: none;
+  box-shadow: var(--btn-glow-shadow);
+}
+
+/* Champ note du popup de save : fond noir, halo glow vert au focus (pas de contour bleu). */
+.replay-note-input {
+  background: #000;
+}
+.replay-note-input:focus {
+  outline: none;
+}
+.replay-note-input:focus-visible {
   outline: none;
   box-shadow: var(--btn-glow-shadow);
 }
@@ -1606,21 +1618,6 @@ body {
 .unit-profile-row--base {
   --role-bg: #2f2f2f; /* gris foncé */
   --role-fg: #ddd;
-}
-
-/* Encadrement unité en preview (hover icône plateau + illustration) — couleurs = bandeaux Player 1 / 2 */
-.unit-status-detail-preview-wrap {
-  margin-bottom: 2px;
-  padding: 4px;
-  border-width: 4px;
-  border-style: solid;
-  border-radius: 6px;
-  box-sizing: border-box;
-  border-color: var(--hp-bar-player1);
-}
-
-.unit-status-detail-preview-wrap--player2 {
-  border-color: var(--hp-bar-player2);
 }
 
 /* Cell styles */

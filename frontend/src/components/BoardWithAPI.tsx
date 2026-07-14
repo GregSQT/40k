@@ -50,7 +50,7 @@ import { GameLog } from "./GameLog";
 import { HelperPanel } from "./HelperPanel";
 import { SettingsMenu } from "./SettingsMenu";
 import SharedLayout from "./SharedLayout";
-import SnapshotRewind, { type SnapshotJump, type SnapshotMeta } from "./SnapshotRewind";
+import SnapshotRewind, { type SnapshotJump } from "./SnapshotRewind";
 import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import TutorialOverlay from "./TutorialOverlay";
@@ -1592,25 +1592,12 @@ export const BoardWithAPI: React.FC = () => {
   // accumulés (ghosts de figs mortes) et tronquer le Game Log au moment chargé.
   const [loadEpoch, setLoadEpoch] = useState(0);
   const applyLoadedState = useCallback(
-    (data: { save?: { ts?: string } } | null) => {
-      // ts du save "AAAAMMJJ-HHMMSS" → timestamp ms (heure locale) : cutoff d'affichage du log.
-      const ts = data?.save?.ts;
-      if (typeof ts === "string" && ts.length >= 15) {
-        const ms = new Date(
-          Number(ts.slice(0, 4)),
-          Number(ts.slice(4, 6)) - 1,
-          Number(ts.slice(6, 8)),
-          Number(ts.slice(9, 11)),
-          Number(ts.slice(11, 13)),
-          Number(ts.slice(13, 15))
-        ).getTime();
-        gameLog.setLogCutoff(ms);
-      } else {
-        gameLog.setLogCutoff(null);
-      }
+    (_data: { save?: { ts?: string } } | null) => {
+      // Le Game Log du point/partie chargé est réhydraté par useGameLog (event gameLogHydrate émis
+      // par le hook API depuis game_log_history) ; ici on ne fait que réaligner les états frontend.
       setLoadEpoch((e) => e + 1);
     },
-    [gameLog]
+    []
   );
   const handleLoadSave = useCallback(
     async (
@@ -1640,43 +1627,9 @@ export const BoardWithAPI: React.FC = () => {
     [apiProps.loadParty, applyLoadedState]
   );
 
-  // Point visionné (snapshot rewind) : tronque le Game Log jusqu'à ce moment (ou null en live).
-  const [snapshotViewed, setSnapshotViewed] = useState<{
-    snapshots: SnapshotMeta[];
-    index: number;
-  } | null>(null);
-  const gameLogEventsFiltered = useMemo(() => {
-    let evts = gameLog.events;
-    // Troncature d'affichage après un chargement de save (non destructif) : on n'affiche que les
-    // events antérieurs (+1 s de tolérance, le ts du save est à la seconde) au moment chargé.
-    const cut = gameLog.logCutoff;
-    if (cut != null) {
-      evts = evts.filter((ev) => ev.timestamp.getTime() <= cut + 999);
-    }
-    // Troncature rewind (mode visionnage).
-    if (snapshotViewed) {
-      const { snapshots, index } = snapshotViewed;
-      const viewedTurn = snapshots[index]?.turn ?? Number.POSITIVE_INFINITY;
-      const rankOf = (turn?: number, phase?: string, player?: number) =>
-        snapshots.findIndex((s) => s.turn === turn && s.phase === phase && s.player === player);
-      evts = evts.filter((ev) => {
-        const r = rankOf(ev.turnNumber, ev.phase, ev.player);
-        if (r === -1) return (ev.turnNumber ?? 0) < viewedTurn;
-        return r < index;
-      });
-    }
-    return evts;
-  }, [gameLog.events, gameLog.logCutoff, snapshotViewed]);
-  // Clés `turn|phase|player` des phases ayant au moins une action (pour sauter les phases vides au replay).
-  const snapshotActionKeys = useMemo(() => {
-    const keys = new Set<string>();
-    for (const ev of gameLog.events) {
-      if (ev.turnNumber != null && ev.phase != null && ev.player != null) {
-        keys.add(`${ev.turnNumber}|${ev.phase}|${ev.player}`);
-      }
-    }
-    return keys;
-  }, [gameLog.events]);
+  // Game Log affiché : les events du hook (réhydratés au Load/rewind depuis game_log_history, ou
+  // accumulés en live). GameLog trie lui-même par timestamp décroissant.
+  const gameLogEventsFiltered = gameLog.events;
 
   // Desperate Escape : on mémorise l'instant d'ouverture du popup hazard pour ignorer le
   // clic-fond (qui l'annule) pendant ~400 ms. Sinon, sur un DOUBLE-clic d'activation, le 1er
@@ -1734,10 +1687,17 @@ export const BoardWithAPI: React.FC = () => {
   const isSnapshotMode = gameMode === "pvp" || gameMode === "pvp_test";
   const [snapshotJump, setSnapshotJump] = useState<SnapshotJump | null>(null);
   const [snapshotViewActive, setSnapshotViewActive] = useState(false);
+  // Popup « tu vas modifier la partie » : ouvert quand un clic board est tenté pendant l'aperçu.
+  const [snapshotConfirmModify, setSnapshotConfirmModify] = useState(false);
   // Aperçu (view) actif → bloque les actions côté moteur (état affiché ≠ live).
   useEffect(() => {
     apiProps.setViewActive(snapshotViewActive);
   }, [snapshotViewActive, apiProps.setViewActive]);
+  // Tentative d'action board pendant l'aperçu → ouvre le popup de confirmation (Resume).
+  useEffect(() => {
+    apiProps.setViewActionAttemptHandler(() => setSnapshotConfirmModify(true));
+    return () => apiProps.setViewActionAttemptHandler(null);
+  }, [apiProps.setViewActionAttemptHandler]);
   const [snapshotPersistEnabled, setSnapshotPersistEnabled] = useState(
     () => localStorage.getItem("snapshotPersistEnabled") === "true"
   );
@@ -1748,6 +1708,9 @@ export const BoardWithAPI: React.FC = () => {
   const [saveDirSelected, setSaveDirSelected] = useState(
     () => localStorage.getItem("saveDirSelected") === "true"
   );
+  // Popup au lancement d'une partie PvP sans répertoire configuré : invite à en choisir un pour que
+  // l'enregistrement/replay démarre dès le game_start (sinon rien n'est enregistré).
+  const [launchDirPromptOpen, setLaunchDirPromptOpen] = useState(false);
   const isAiMode = (() => {
     const playerTypes = apiProps.gameState?.player_types;
     if (!playerTypes) {
@@ -2472,6 +2435,9 @@ export const BoardWithAPI: React.FC = () => {
         setSnapshotPersistEnabled(cfg.persist_enabled);
         setSaveDirSelected(cfg.dir_set);
         if (cfg.dir_set) setSnapshotPersistDir(cfg.directory);
+        // Répertoire obligatoire dès le start : sans répertoire, on invite à en configurer un pour
+        // que la partie soit enregistrée depuis le game_start.
+        if (!cfg.dir_set) setLaunchDirPromptOpen(true);
         setSettings((prev) => ({
           ...prev,
           autoSaveEnabled: cfg.autosave_enabled,
@@ -2480,6 +2446,26 @@ export const BoardWithAPI: React.FC = () => {
       })
       .catch(console.error);
   }, [isSnapshotMode, apiProps.gameState == null]);
+
+  // Popup de lancement : choisir un répertoire de save puis relancer la partie pour enregistrer
+  // depuis le game_start. Annulation du sélecteur natif → on laisse le popup ouvert.
+  const handleConfigureSaveDirAtLaunch = async () => {
+    try {
+      const path = await apiProps.pickDirectory();
+      if (!path) return;
+      await apiProps.snapshotSetPersist(true, path);
+      setSnapshotPersistEnabled(true);
+      setSnapshotPersistDir(path);
+      setSaveDirSelected(true);
+      localStorage.setItem("snapshotPersistEnabled", "true");
+      localStorage.setItem("snapshotPersistDir", path);
+      localStorage.setItem("saveDirSelected", "true");
+      setLaunchDirPromptOpen(false);
+      window.location.reload();
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const handleToggleBattleShockTest = (value: boolean) => {
     setSettings((prev) => ({ ...prev, battleShockTestEnabled: value }));
@@ -3565,36 +3551,95 @@ export const BoardWithAPI: React.FC = () => {
 
       {/* Snapshots temporels (rewind / playback par phase) — PvP / PvP test. */}
       {isSnapshotMode && (
-        <>
-          {snapshotViewActive && (
-            // Overlay transparent : bloque toute interaction avec le board en visionnage (lecture seule).
+        <SnapshotRewind
+          jump={snapshotJump}
+          fetchTimeline={apiProps.fetchTimeline}
+          onEnableRecording={async () => {
+            // Même flux que l'activation du toggle "Sauvegarde des snapshots sur disque" du menu :
+            // sélecteur de répertoire natif, puis persistance + coche de l'option (états UI).
+            const path = await apiProps.pickDirectory();
+            if (!path) return false;
+            setSnapshotPersistEnabled(true);
+            localStorage.setItem("snapshotPersistEnabled", "true");
+            setSnapshotPersistDir(path);
+            localStorage.setItem("snapshotPersistDir", path);
+            setSaveDirSelected(true);
+            localStorage.setItem("saveDirSelected", "true");
+            await apiProps.snapshotSetPersist(true, path);
+            return true;
+          }}
+          reloadLive={apiProps.snapshotReloadLive}
+          onViewModeChange={setSnapshotViewActive}
+          replayOpen={showReplay && settings.replayContainerEnabled}
+          createSave={apiProps.saveGameNow}
+          fetchSaveList={apiProps.saveList}
+          loadSave={handleLoadSave}
+          canSave={saveDirSelected}
+          fetchPartyList={apiProps.fetchPartyList}
+          loadParty={handleLoadParty}
+          confirmModifyOpen={snapshotConfirmModify}
+          onCancelConfirmModify={() => setSnapshotConfirmModify(false)}
+        />
+      )}
+
+      {isSnapshotMode && launchDirPromptOpen && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — clic fond = fermeture
+        <div
+          role="presentation"
+          onClick={() => setLaunchDirPromptOpen(false)}
+          onKeyDown={(e) => e.key === "Escape" && setLaunchDirPromptOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 12000,
+          }}
+        >
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: panneau — stopPropagation intentionnel */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            style={{
+              background: "#1f2937",
+              border: "1px solid #555",
+              borderRadius: "8px",
+              padding: "16px",
+              minWidth: "340px",
+              maxWidth: "440px",
+              color: "#fff",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+            }}
+          >
+            <h3 style={{ marginTop: 0 }}>Répertoire de sauvegarde</h3>
+            <p style={{ color: "#9ca3af", marginTop: 0 }}>
+              Aucun répertoire de sauvegarde n'est configuré. Choisis-en un maintenant pour que la
+              partie soit enregistrée (replay, Save, Select, Load) dès le début. Sans répertoire, la
+              partie ne sera pas enregistrée.
+            </p>
             <div
-              style={{
-                position: "fixed",
-                inset: 0,
-                zIndex: 3999,
-                background: "transparent",
-                cursor: "not-allowed",
-              }}
-            />
-          )}
-          <SnapshotRewind
-            jump={snapshotJump}
-            fetchList={apiProps.snapshotFetchList}
-            restore={apiProps.snapshotRestore}
-            reloadLive={apiProps.snapshotReloadLive}
-            onViewModeChange={setSnapshotViewActive}
-            replayOpen={showReplay && settings.replayContainerEnabled}
-            onViewChange={setSnapshotViewed}
-            actionKeys={snapshotActionKeys}
-            createSave={apiProps.saveGameNow}
-            fetchSaveList={apiProps.saveList}
-            loadSave={handleLoadSave}
-            canSave={saveDirSelected}
-            fetchPartyList={apiProps.fetchPartyList}
-            loadParty={handleLoadParty}
-          />
-        </>
+              style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "14px" }}
+            >
+              <button
+                type="button"
+                className="replay-btn replay-btn--nav"
+                onClick={() => setLaunchDirPromptOpen(false)}
+              >
+                Continuer sans enregistrer
+              </button>
+              <button
+                type="button"
+                className="replay-btn"
+                onClick={handleConfigureSaveDirAtLaunch}
+                style={{ background: "#059669", borderColor: "#047857", color: "#fff" }}
+              >
+                Choisir un répertoire
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Barre d'action charge (V11 multi-cibles) : Cancel + Charger, même emplacement/style que

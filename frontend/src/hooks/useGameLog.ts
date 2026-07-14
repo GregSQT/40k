@@ -11,11 +11,70 @@ function sanitizeGameLogMessage(message: string): string {
     .trim();
 }
 
+/**
+ * Construit l'entrée de base d'un event de Game Log (avant id/timestamp finalisés) à partir d'un
+ * payload backend. Source de vérité UNIQUE partagée par le flux live (``backendLogEvent``) et par la
+ * réhydratation du replay (``game_log_history``). Gère les alias camel/snake et la reconstruction de
+ * ``shootDetails`` depuis les champs plats (phase tir) ou depuis ``shootDetails`` (phase fight).
+ */
+function baseEntryFromLogData(logData: Record<string, unknown>): Record<string, unknown> {
+  const details = logData.shootDetails;
+  const shot =
+    Array.isArray(details) && details.length > 0
+      ? (details[0] as Record<string, unknown>)
+      : undefined;
+  const hitRoll = logData.hitRoll ?? logData.hit_roll ?? shot?.attackRoll;
+  const woundRoll = logData.woundRoll ?? logData.wound_roll ?? shot?.strengthRoll;
+  const saveRoll = logData.saveRoll ?? logData.save_roll ?? shot?.saveRoll;
+  const saveTarget = logData.saveTarget ?? logData.save_target ?? shot?.saveTarget;
+  const damage = logData.damage ?? shot?.damageDealt;
+  const targetDied = logData.target_died ?? shot?.targetDied ?? false;
+
+  let shootDetails = details;
+  if (!shootDetails && hitRoll) {
+    const saveSkipped =
+      (logData.saveSkipped ?? logData.save_skipped) === true &&
+      (logData.saveSkipReason ?? logData.save_skip_reason) === "DEVASTATING_WOUNDS";
+    // Build shootDetails from flat fields (shooting phase format)
+    shootDetails = [
+      {
+        shotNumber: 1,
+        attackRoll: hitRoll,
+        strengthRoll: woundRoll,
+        saveRoll,
+        saveTarget,
+        damageDealt: damage,
+        hitResult: hitRoll ? "HIT" : "MISS",
+        strengthResult: woundRoll ? "SUCCESS" : "FAILED",
+        saveSuccess: !saveSkipped && Number(saveRoll) >= Number(saveTarget),
+        targetDied,
+      },
+    ];
+  }
+
+  const idOf = (v: unknown): number => parseInt(String(v ?? ""), 10);
+  return {
+    type: logData.type,
+    message: logData.message, // Full detailed message from backend
+    turnNumber: logData.turn,
+    phase: logData.phase,
+    player: logData.player,
+    unitId: idOf(logData.shooterId || logData.attackerId || logData.unitId),
+    targetId: idOf(logData.targetId),
+    reward: logData.reward,
+    action_name: logData.action_name,
+    is_ai_action: logData.is_ai_action,
+    result: logData.result,
+    weaponName: logData.weaponName,
+    targetUnitType: logData.targetUnitType,
+    shootDetails,
+    moveDetails: logData.moveDetails,
+    hazardDetails: logData.hazardDetails,
+  };
+}
+
 export function useGameLog(currentTurn?: number) {
   const [events, setEvents] = useState<GameLogEvent[]>([]);
-  // Timestamp (ms) de troncature NON destructif de l'affichage (save chargé), ou null en live.
-  // On garde tous les events ; on n'affiche que ceux antérieurs à ce timestamp.
-  const [logCutoff, setLogCutoffState] = useState<number | null>(null);
   const eventIdCounter = useRef(0);
 
   const generateEventId = useCallback((): string => {
@@ -40,14 +99,45 @@ export function useGameLog(currentTurn?: number) {
       } as GameLogEvent;
 
       setEvents((prevEvents) => [newEvent, ...prevEvents]);
-      // Un nouvel event live (postérieur au point chargé) → on repasse en affichage complet.
-      setLogCutoffState((cut) => (cut != null && newEvent.timestamp.getTime() > cut ? null : cut));
     },
     [currentTurn, generateEventId]
   );
 
-  // Fixe/retire la troncature d'affichage (timestamp ms, non destructif : les events sont conservés).
-  const setLogCutoff = useCallback((cutoffMs: number | null) => setLogCutoffState(cutoffMs), []);
+  // Réhydrate le Game Log depuis l'historique complet d'une partie/point chargé (replay). Remplace
+  // intégralement les events par ceux du backend (game_log_history). L'ordre chronologique est porté
+  // par ``logSeq`` (timestamp dérivé) — GameLog trie par timestamp décroissant (plus récent en haut).
+  const hydrateFromHistory = useCallback((entries: Array<Record<string, unknown>>) => {
+    if (!Array.isArray(entries)) return;
+    eventIdCounter.current = 0;
+    const rebuilt = entries.map((entry, index) => {
+      const base = baseEntryFromLogData(entry);
+      const seq = typeof entry.logSeq === "number" ? entry.logSeq : index + 1;
+      return {
+        ...base,
+        message:
+          typeof base.message === "string"
+            ? sanitizeGameLogMessage(base.message)
+            : base.message,
+        id: `hydrate_${seq}`,
+        timestamp: new Date(seq),
+        turnNumber: typeof base.turnNumber === "number" ? base.turnNumber : 1,
+      } as GameLogEvent;
+    });
+    setEvents(rebuilt);
+  }, []);
+
+  // Réhydratation déclenchée par le hook API (Load / rewind / retour live) via un event window,
+  // même canal que ``backendLogEvent`` pour le flux live → pas de threading de props.
+  useEffect(() => {
+    const handleHydrate = (event: CustomEvent) => {
+      const entries = (event.detail?.entries ?? []) as Array<Record<string, unknown>>;
+      hydrateFromHistory(entries);
+    };
+    window.addEventListener("gameLogHydrate", handleHydrate as EventListener);
+    return () => {
+      window.removeEventListener("gameLogHydrate", handleHydrate as EventListener);
+    };
+  }, [hydrateFromHistory]);
 
   const getUnitDisplayName = useCallback((unit: Unit): string => {
     if (typeof unit.DISPLAY_NAME === "string" && unit.DISPLAY_NAME.trim().length > 0) {
@@ -65,49 +155,8 @@ export function useGameLog(currentTurn?: number) {
   // Listen for detailed backend log events
   useEffect(() => {
     const handleBackendLog = (event: CustomEvent) => {
-      const logData = event.detail;
-
-      // Use shootDetails directly if passed from fight handler,
-      // otherwise build from flat fields (shooting handler format)
-      let shootDetails = logData.shootDetails;
-      if (!shootDetails && logData.hitRoll) {
-        const saveSkipped =
-          logData.saveSkipped === true && logData.saveSkipReason === "DEVASTATING_WOUNDS";
-        // Build shootDetails from flat fields (shooting phase format)
-        shootDetails = [
-          {
-            shotNumber: 1,
-            attackRoll: logData.hitRoll,
-            strengthRoll: logData.woundRoll,
-            saveRoll: logData.saveRoll,
-            saveTarget: logData.saveTarget,
-            damageDealt: logData.damage,
-            hitResult: logData.hitRoll ? "HIT" : "MISS",
-            strengthResult: logData.woundRoll ? "SUCCESS" : "FAILED",
-            saveSuccess: !saveSkipped && logData.saveRoll >= logData.saveTarget,
-            targetDied: logData.target_died || false,
-          },
-        ];
-      }
-
-      addEvent({
-        type: logData.type,
-        message: logData.message, // Full detailed message from backend
-        turnNumber: logData.turn, // Use backend data, but addEvent will override with live turn
-        phase: logData.phase,
-        player: logData.player,
-        unitId: parseInt(logData.shooterId || logData.attackerId || logData.unitId, 10),
-        targetId: parseInt(logData.targetId, 10),
-        reward: logData.reward,
-        action_name: logData.action_name,
-        is_ai_action: logData.is_ai_action,
-        result: logData.result,
-        weaponName: logData.weaponName,
-        targetUnitType: logData.targetUnitType,
-        shootDetails,
-        moveDetails: logData.moveDetails,
-        hazardDetails: logData.hazardDetails,
-      });
+      // addEvent finalise id/timestamp et surcharge turnNumber avec le tour live courant.
+      addEvent(baseEntryFromLogData((event.detail ?? {}) as Record<string, unknown>));
     };
 
     window.addEventListener("backendLogEvent", handleBackendLog as EventListener);
@@ -333,8 +382,7 @@ export function useGameLog(currentTurn?: number) {
     logCombatAction,
     logUnitDeath,
     clearLog,
-    logCutoff,
-    setLogCutoff,
+    hydrateFromHistory,
     addEvent, // Export for custom messages (e.g., replay viewer)
   };
 }

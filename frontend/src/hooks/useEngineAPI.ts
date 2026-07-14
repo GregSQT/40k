@@ -48,6 +48,14 @@ const getMaxTurnsFromConfig = async (): Promise<number> => {
 
 const API_BASE = "/api";
 
+/** Replay : notifie useGameLog de réhydrater le Game Log avec l'historique complet renvoyé par une
+ *  réponse de Load / rewind / retour live (champ ``game_log_history``). Même canal window que le flux
+ *  live ``backendLogEvent`` → aucun threading de props entre le hook API et useGameLog. */
+function dispatchGameLogHydrate(history: unknown): void {
+  const entries = Array.isArray(history) ? history : [];
+  window.dispatchEvent(new CustomEvent("gameLogHydrate", { detail: { entries } }));
+}
+
 function validateOrientationStepValue(rawOrientation: unknown, context: string): number {
   if (
     typeof rawOrientation !== "number" ||
@@ -1658,14 +1666,22 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const setViewActive = useCallback((active: boolean) => {
     viewActiveRef.current = active;
   }, []);
+  // Handler appelé quand une action board est tentée pendant l'aperçu : ouvre le popup de confirmation
+  // (« tu vas modifier la partie en cours »). Enregistré par BoardWithAPI.
+  const viewActionAttemptRef = useRef<(() => void) | null>(null);
+  const setViewActionAttemptHandler = useCallback((fn: (() => void) | null) => {
+    viewActionAttemptRef.current = fn;
+  }, []);
 
   // Execute action via API
   // biome-ignore lint/correctness/useExhaustiveDependencies: handleStartChargeModelMove and readSquadModelPositions are declared later in the file — adding them to deps would cause noInvalidUseBeforeDeclaration
   const executeAction = useCallback(
     async (action: Record<string, unknown>) => {
       // Aperçu (Select/Load/rewind view) actif : le board affiche un état ≠ moteur live.
-      // On bloque toute action (no-op) pour éviter un désync (ex: tirer avec une fig morte du live).
+      // On bloque l'action (pas d'appel backend, sinon désync : ex tirer avec une fig morte du live)
+      // et on ouvre le popup de confirmation « tu vas modifier la partie en cours » (→ Resume).
       if (viewActiveRef.current) {
+        viewActionAttemptRef.current?.();
         return;
       }
       logClientDebugConsoleNotifyIfEnabled();
@@ -7747,6 +7763,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       phase: null,
       gameState: null,
       snapshotFetchList: async () => ({ snapshots: [], persist_enabled: false }),
+      fetchTimeline: async () => ({ rows: [], recording_enabled: false }),
       snapshotRestore: async () => ({ success: false }),
       snapshotReloadLive: async () => {},
       snapshotSetPersist: async () => false,
@@ -7756,6 +7773,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       saveList: async () => [],
       saveLoad: async () => ({ success: false }),
       setViewActive: () => {},
+      setViewActionAttemptHandler: () => {},
       fetchPartyList: async () => [],
       loadParty: async () => ({ success: false }),
       setAutosaveConfig: async () => ({ success: false }),
@@ -7975,6 +7993,28 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     return { snapshots: data.snapshots, persist_enabled: data.persist_enabled };
   };
 
+  // Timeline unifiée : toutes les rows de la partie courante (playback) + état de l'enregistrement.
+  const fetchTimeline = async (): Promise<{
+    rows: Array<{
+      id: string;
+      turn: number;
+      player: number;
+      phase: string;
+      episode_steps: number;
+      ts: string;
+      label: string;
+      note?: string;
+      kind?: string;
+      score?: Record<string, number>;
+    }>;
+    recording_enabled: boolean;
+  }> => {
+    const response = await fetch(`${API_BASE}/game/timeline`);
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error ?? "timeline fetch failed");
+    return { rows: data.rows, recording_enabled: data.recording_enabled };
+  };
+
   const snapshotRestore = async (
     turn: number,
     player: number,
@@ -7994,6 +8034,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
     // Restore vers le début de la phase courante : forcer le reset (l'effet phase ne tirerait pas).
     resetInteractionState();
+    dispatchGameLogHydrate(data.game_log_history); // replay : réhydrate le Game Log au point rembobiné
     return data;
   };
 
@@ -8004,6 +8045,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     if (!data.success) throw new Error(data.error ?? "game state reload failed");
     setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
     resetInteractionState();
+    dispatchGameLogHydrate(data.game_log_history); // retour live : réhydrate le Game Log complet réel
   };
 
   const snapshotSetPersist = async (enabled: boolean, directory?: string) => {
@@ -8051,6 +8093,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     if (data.needs_decision) return data; // divergence non tranchée : pas de commit
     setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
     resetInteractionState();
+    dispatchGameLogHydrate(data.game_log_history); // replay : réhydrate le Game Log au point chargé
     return data;
   };
 
@@ -8076,6 +8119,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     if (data.needs_decision) return data; // divergence non tranchée : pas de commit
     setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
     resetInteractionState();
+    dispatchGameLogHydrate(data.game_log_history); // replay : réhydrate le Game Log de la partie chargée
     return data;
   };
 
@@ -8143,6 +8187,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     gameState: memoizedGameState,
     // Snapshots temporels (rewind / playback)
     snapshotFetchList,
+    fetchTimeline,
     snapshotRestore,
     snapshotReloadLive,
     snapshotSetPersist,
@@ -8150,6 +8195,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     saveList,
     saveLoad,
     setViewActive,
+    setViewActionAttemptHandler,
     fetchPartyList,
     loadParty,
     setAutosaveConfig,

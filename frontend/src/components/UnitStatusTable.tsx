@@ -777,8 +777,6 @@ interface UnitRowProps {
   tableHeaderRowRef?: RefObject<HTMLTableRowElement | null>;
   /** Preview plateau : encadrer la ligne principale + sections armes lorsque l’illustration détail est affichée. */
   isDetailPreviewHighlight?: boolean;
-  /** Joueur de ce tableau (couleur de l’encadrement preview = bandeau titre). */
-  tablePlayer: 1 | 2;
   /** Facteur subhex pour reconvertir MOVE/portées en pouces à l'affichage. */
   inchesToSubhex: number;
 }
@@ -816,7 +814,6 @@ const UnitRow = memo<UnitRowProps>(
     reportUnitAttributesRect,
     tableHeaderRowRef,
     isDetailPreviewHighlight = false,
-    tablePlayer,
     inchesToSubhex,
   }) => {
     const nameCellRef = useRef<HTMLTableCellElement>(null);
@@ -1036,20 +1033,12 @@ const UnitRow = memo<UnitRowProps>(
       );
     }
 
-    const detailPreviewWrapClass = isDetailPreviewHighlight
-      ? `unit-status-detail-preview-wrap${
-          tablePlayer === 2 ? " unit-status-detail-preview-wrap--player2" : ""
-        }`
-      : undefined;
-
     // Halo vert aussi bien au survol d'une fig que sur la fiche "detail preview" restée affichée.
     const showGlow = inspectedModelIndex !== null || isDetailPreviewHighlight;
     return (
       <div
-        // Quand le glow est actif : on abandonne le cadre bleu "detail preview" au profit du halo.
-        className={showGlow ? undefined : detailPreviewWrapClass}
         style={{
-          marginBottom: isDetailPreviewHighlight && !showGlow ? undefined : "2px",
+          marginBottom: "2px",
           // Halo brillant habituel quand une fig de cette unité mono-type est survolée.
           boxShadow: showGlow ? HALO_GLOW : undefined,
           borderRadius: showGlow ? "3px" : undefined,
@@ -2383,7 +2372,6 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                   }
                   tableHeaderRowRef={tableHeaderRowRef}
                   isDetailPreviewHighlight={isDetailPreviewUnit}
-                  tablePlayer={player}
                   inchesToSubhex={inchesToSubhex}
                 />
               );
