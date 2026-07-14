@@ -4435,13 +4435,21 @@ def _target_model_visible_cells(
     LoS 3D : ``z_target``/``occ_target`` = sommet vertical + dalle occultante de CE modèle cible.
     Combinés PAR figurine tireuse à ses propres ``z_s``/``occ_s`` (portés par le 5-tuple). Sol↔sol
     (z None des deux côtés, aucune dalle) → tracé 2D inchangé."""
+    # ``floor_occ`` (dalles occultantes combinées tireur+cible) ne dépend que de la figurine tireuse
+    # et de la cible — PAS de la case visée. Précalculé une fois par figurine tireuse, hors de la
+    # boucle des cases (sinon reconstruction inutile à chaque case, y compris une liste vide pour les
+    # unités au sol dont z n'est pas None). Chaque entrée : (anchor, footprint, wall_eff, z_s, floor_occ).
+    prepared: List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]], Optional[float], Any]] = []
+    for s_anchor, s_footprint, s_wall, z_s, occ_s in shooter_models:
+        if (z_s is not None) and (z_target is not None):
+            occs = [o for o in (occ_s, occ_target) if o is not None]
+            floor_occ = occs or None
+        else:
+            floor_occ = None
+        prepared.append((s_anchor, s_footprint, s_wall, z_s, floor_occ))
     vset: Set[Tuple[int, int]] = set()
     for tc, tr in target_model_hexes:
-        for s_anchor, s_footprint, s_wall, z_s, occ_s in shooter_models:
-            floor_occ = None
-            if (z_s is not None) and (z_target is not None):
-                occs = [o for o in (occ_s, occ_target) if o is not None]
-                floor_occ = occs or None
+        for s_anchor, s_footprint, s_wall, z_s, floor_occ in prepared:
             if _los_hex_visible(
                 s_anchor, s_footprint, tc, tr, s_wall, obscuring_by_hex, excluded_areas,
                 floor_occluders=floor_occ, z_start=z_s, z_end=z_target,
