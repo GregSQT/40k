@@ -1485,6 +1485,23 @@ export default function Board({
     if (!zones) return [];
     return zones.map((z) => ({ hexes: z.hexes.map(normalizeZoneHex) }));
   }, [boardConfig?.terrain_zones]);
+  // Floors (délimitations d'étage) individuels avec leurs hexes, tous décors confondus → sert à
+  // retirer les murs bordant le floor précis qu'une fig occupe (granularité floor pour le cône vert).
+  const losTerrainFloors = useMemo<Array<{ level: number; hexes: Array<[number, number]> }>>(() => {
+    const zones = boardConfig?.terrain_zones;
+    if (!zones) return [];
+    const out: Array<{ level: number; hexes: Array<[number, number]> }> = [];
+    for (const z of zones) {
+      const floors = (z as { floors?: Array<{ level?: number; hexes?: Array<[number, number]> }> })
+        .floors;
+      if (!Array.isArray(floors)) continue;
+      for (const f of floors) {
+        if (typeof f?.level !== "number" || !Array.isArray(f.hexes)) continue;
+        out.push({ level: f.level, hexes: f.hexes.map(normalizeZoneHex) });
+      }
+    }
+    return out;
+  }, [boardConfig?.terrain_zones]);
   // ✅ STABLE CALLBACK REFS - Don't change on every render
   const stableCallbacks = useRef<{
     onSelectUnit: (id: number | string | null) => void;
@@ -3236,6 +3253,7 @@ export default function Board({
         wallHexesOverride,
         obscuringZones: losObscuringZones,
         terrainZones: losTerrainZones,
+        terrainFloors: losTerrainFloors,
         maxRange: range,
         distanceMetric: rangedPreviewMetric(gameConfig),
         unitsCacheByModel: ucByModel,
@@ -4023,6 +4041,7 @@ export default function Board({
           wallHexesOverride,
           obscuringZones: losObscuringZones,
           terrainZones: losTerrainZones,
+          terrainFloors: losTerrainFloors,
           maxRange: pending.range,
           distanceMetric: rangedPreviewMetric(gameConfig),
           unitsCacheByModel: ucByModel,
@@ -6618,6 +6637,7 @@ export default function Board({
             wallHexesOverride,
             obscuringZones: losObscuringZones,
             terrainZones: losTerrainZones,
+            terrainFloors: losTerrainFloors,
             maxRange: shootRange,
             distanceMetric: metric,
             unitsCacheByModel: ucByModel,
@@ -7186,6 +7206,7 @@ export default function Board({
           wallHexesOverride,
           obscuringZones: losObscuringZones,
           terrainZones: losTerrainZones,
+          terrainFloors: losTerrainFloors,
           maxRange: shootRange,
           distanceMetric: rangedPreviewMetric(gameConfig),
           unitsCacheByModel: ucByModel,
@@ -8629,6 +8650,8 @@ export default function Board({
     // Attack cells: Different colors for different line of sight conditions
     const attackCells: { col: number; row: number }[] = []; // Blue preview cells
     const coverCells: { col: number; row: number }[] = []; // Orange = targets in cover
+    // Cases vues EN PLUS par une fig sur l'étage AFFICHÉ (murs de sa ruine ignorés) → peintes en VERT.
+    const elevatedCells: { col: number; row: number }[] = [];
     const losVisibilityRatioByHex: Map<string, number> = new Map();
     const blockedTargets: Set<string> = new Set(); // Track targets with no line of sight (no hex shown)
     const coverTargets: Set<string> = new Set(); // Track targets in cover
@@ -8742,6 +8765,9 @@ export default function Board({
 
       if (isWasmReady()) {
         const ucByModel = unitsCacheModelCenters(gameState?.units_cache);
+        const ucLevels = unitsCacheModelLevels(gameState?.units_cache);
+        const atCurrentPos =
+          source.fromCol === source.unit.col && source.fromRow === source.unit.row;
         const losPreview = buildLosPreviewFromSource({
           source,
           units,
@@ -8751,14 +8777,25 @@ export default function Board({
           wallHexesOverride,
           obscuringZones: losObscuringZones,
           terrainZones: losTerrainZones,
+          terrainFloors: losTerrainFloors,
           maxRange: range,
           distanceMetric: rangedPreviewMetric(gameConfig),
           unitsCacheByModel: ucByModel,
-          shooterModelCenters:
-            source.fromCol === source.unit.col && source.fromRow === source.unit.row
-              ? ucByModel?.[String(source.unit.id)]
-              : undefined,
+          shooterModelCenters: atCurrentPos ? ucByModel?.[String(source.unit.id)] : undefined,
+          shooterModelLevels: atCurrentPos ? ucLevels?.[String(source.unit.id)] : undefined,
+          viewLevel: currentLevel,
         });
+        // Overlay VERT : cases vues EN PLUS par les figs sur l'étage AFFICHÉ (murs de leur ruine
+        // ignorés). Ne pas re-peindre une case déjà bleue/couvert.
+        const pushElevated = (): void => {
+          for (const cell of losPreview.elevatedCells) {
+            const key = `${cell.col},${cell.row}`;
+            if (attackCellSet.has(key)) continue;
+            attackCellSet.add(key);
+            elevatedCells.push(cell);
+            losVisibilityRatioByHex.set(key, 1.0);
+          }
+        };
         if (enforceBackendTargetsOnly) {
           // Même cône LoS terrain que le survol move (WASM + pastilles clair/couvert), sans corridor hex tireur→cible.
           const coverKeyDedupe = new Set<string>();
@@ -8797,6 +8834,7 @@ export default function Board({
               }
             }
           }
+          pushElevated();
           return;
         }
         const coverKeyDedupe = new Set<string>();
@@ -8819,6 +8857,7 @@ export default function Board({
             coverTargets.add(id);
           }
         }
+        pushElevated();
       }
     };
 
@@ -9360,6 +9399,7 @@ export default function Board({
       availableCells: effectiveAvailableCells,
       attackCells,
       coverCells,
+      elevatedCells,
       chargeCells,
       // advancePreview : même ancres que move (game_state) — pas de doublon empreinte hex-par-hex
       advanceCells: [],

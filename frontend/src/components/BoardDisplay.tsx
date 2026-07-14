@@ -184,6 +184,7 @@ export function computeDrawBoardPartialRedrawFingerprint(
     availableCells = [],
     attackCells = [],
     coverCells = [],
+    elevatedCells = [],
     chargeCells = [],
     advanceCells = [],
     phase = "move",
@@ -306,6 +307,7 @@ export function computeDrawBoardPartialRedrawFingerprint(
     digestAvail: clickableAvailDigest,
     digestAtk: digestHighlightCellList(attackCells),
     digestCov: digestHighlightCellList(coverCells),
+    digestElev: digestHighlightCellList(elevatedCells),
     digestChg: digestChargeCellList(chargeCells),
     digestAdv: digestHighlightCellList(advanceCells),
     clickableBranchExcluded,
@@ -821,6 +823,8 @@ export interface DrawBoardOptions {
   availableCells?: HighlightCell[];
   attackCells?: HighlightCell[];
   coverCells?: HighlightCell[];
+  /** Cases vues EN PLUS par une fig sur l'étage AFFICHÉ (murs de sa ruine ignorés) → peintes en VERT. */
+  elevatedCells?: HighlightCell[];
   chargeCells?: HighlightCell[];
   advanceCells?: HighlightCell[]; // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Orange hexes
   blockedTargets?: Set<string>;
@@ -1884,6 +1888,7 @@ export const drawBoard = (
       availableCells = [],
       attackCells = [],
       coverCells = [],
+      elevatedCells = [],
       chargeCells = [],
       advanceCells = [], // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4
       phase = "move",
@@ -2637,6 +2642,36 @@ export const drawBoard = (
         highlightContainer.addChild(losRoot);
       } else {
         drawGroup(attackCells, ATTACK_COLOR, 0.4, false);
+      }
+      // Overlay VERT : cases vues EN PLUS par une fig sur l'étage AFFICHÉ (murs de sa ruine ignorés).
+      // Même rendu lissé que le cône bleu (union polaire) ET même couleur/transparence que le voile
+      // d'étage (currentLevel) : vert 0x22c55e au niveau 1, orange/rouge aux niveaux 2/3+, alpha 0.18.
+      if (useShootingPreviewPalette && elevatedCells.length > 0) {
+        const elevColor =
+          currentLevel >= 3 ? 0xef4444 : currentLevel === 2 ? 0xf59e0b : 0x22c55e;
+        const elevLayout: HexUnionMaskLayout = {
+          HEX_HORIZ_SPACING,
+          HEX_WIDTH,
+          HEX_HEIGHT,
+          HEX_VERT_SPACING,
+          MARGIN,
+          gridHexRadius: HEX_RADIUS,
+        };
+        const elevRoot = new PIXI.Container();
+        elevRoot.name = "los-preview-elevated-hex-union";
+        elevRoot.eventMode = "none";
+        mountLosPolarClippedByVisibleUnion(
+          elevRoot,
+          elevatedCells,
+          [],
+          elevLayout,
+          elevColor,
+          0.18,
+          elevColor,
+          0.18,
+          app.renderer
+        );
+        highlightContainer.addChild(elevRoot);
       }
     }
     if (

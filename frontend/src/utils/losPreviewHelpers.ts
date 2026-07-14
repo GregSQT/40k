@@ -95,6 +95,13 @@ export interface BuildLosPreviewFromSourceParams {
    * PAR figurine : une fig au sol reste bloquée par un mur, une fig de la même escouade sur l'étage
    * voit par-dessus les murs de sa ruine. Absent → cône au niveau unité (ancre). */
   shooterModelLevels?: Record<string, number>;
+  /** Niveau (étage) actuellement AFFICHÉ (currentLevel). Si >= 1, les cases vues EN PLUS par les
+   * figs sur cet étage (murs de leur ruine ignorés) sont renvoyées dans ``elevatedCells`` (vert).
+   * Au niveau 0 (défaut), aucun overlay : cône normal, murs bloquent. */
+  viewLevel?: number;
+  /** Floors (délimitations d'étage) individuels avec leurs hexes, par niveau — pour retirer les
+   * murs bordant le floor précis qu'une fig occupe (granularité floor, pas terrain area sol). */
+  terrainFloors?: Array<{ level: number; hexes: Array<[number, number]> }>;
   /** Positions par-figurine par unité — blink cible par modèle (règle 06.01). */
   unitsCacheByModel?: UnitsCacheModelCenters;
 }
@@ -114,6 +121,9 @@ export interface LosPreviewFromSource {
   blinkIds: number[];
   coverByUnitId: Record<string, boolean>;
   effectiveWallHexes: Array<[number, number]>;
+  /** Cases vues EN PLUS grâce aux figs sur l'étage AFFICHÉ (murs de leur ruine ignorés), à peindre
+   * en VERT. Vide au niveau 0 ou si aucune fig sur l'étage affiché. */
+  elevatedCells: Array<{ col: number; row: number }>;
   key: string;
 }
 
@@ -246,20 +256,25 @@ function hexNeighborsOddQ(col: number, row: number): Array<[number, number]> {
   return offsets.map(([dc, dr]) => [col + dc, row + dr] as [number, number]);
 }
 
-/** Retire de ``walls`` les murs situés dans l'empreinte des terrain area(s) intersectant le socle
- * tireur, ou adjacents à elles. Miroir de backend _walls_around_occupied_area (option A). */
-function removeWallsAroundOccupiedArea(
+/** Retire de ``walls`` les murs bordant la délimitation du FLOOR (au niveau ``level``) que le socle
+ * tireur occupe. Granularité floor (pas terrain area sol) : une même area peut porter 2 floors au même
+ * niveau (décors A/B) → une fig sur A n'ignore que les murs de A. Halo de voisins (les murs bordent le
+ * floor, souvent juste à l'extérieur du rasterisé), scoppé au floor → aucun mur d'un autre décor.
+ * Miroir backend _walls_around_occupied_floor. */
+function removeWallsAroundOccupiedFloor(
   walls: Array<[number, number]>,
   shooterFootprint: Array<[number, number]>,
-  terrainZones: Array<{ hexes: Array<[number, number]> }> | undefined
+  terrainFloors: Array<{ level: number; hexes: Array<[number, number]> }> | undefined,
+  level: number
 ): Array<[number, number]> {
-  if (!terrainZones || terrainZones.length === 0) return walls;
+  if (!terrainFloors || terrainFloors.length === 0) return walls;
   const footprintKeys = new Set(shooterFootprint.map(([c, r]) => `${c},${r}`));
   const occupied = new Set<string>();
-  for (const zone of terrainZones) {
-    const zoneKeys = zone.hexes.map(([c, r]) => `${c},${r}`);
-    if (zoneKeys.some((k) => footprintKeys.has(k))) {
-      for (const k of zoneKeys) occupied.add(k);
+  for (const floor of terrainFloors) {
+    if (floor.level !== level) continue;
+    const floorKeys = floor.hexes.map(([c, r]) => `${c},${r}`);
+    if (floorKeys.some((k) => footprintKeys.has(k))) {
+      for (const k of floorKeys) occupied.add(k);
     }
   }
   if (occupied.size === 0) return walls;
@@ -316,44 +331,6 @@ export function buildLosPreviewFromSource(
     : shooterSize > 1
       ? computeOccupiedHexes(params.source.fromCol, params.source.fromRow, "round", shooterSize)
       : [[params.source.fromCol, params.source.fromRow]];
-  // Cône PAR figurine (règle 06.01) : chaque groupe = (empreinte, murs effectifs). Les figs au sol
-  // partagent baseWallHexes ; une fig sur un étage (niveau >= 1) retire les murs de SA ruine (miroir
-  // backend _walls_around_occupied_area). Une case est visible si AU MOINS une figurine la voit →
-  // union des cônes. Ainsi une fig au sol reste bloquée par un mur qu'une coéquipière sur l'étage
-  // ne subit plus, et le cône reflète bien la LoS des figurines élevées.
-  type ShooterConeGroup = { footprint: Array<[number, number]>; walls: Array<[number, number]> };
-  const shooterGroups: ShooterConeGroup[] = [];
-  const modelLevels = params.shooterModelLevels;
-  if (centers && modelLevels && Object.keys(centers).length > 0) {
-    const groundFootprint: Array<[number, number]> = [];
-    for (const [mid, center] of Object.entries(centers)) {
-      const fpKeys = squadFootprintHexKeysFromModelCenters({ [mid]: center }, params.source.unit);
-      const modelFp: Array<[number, number]> = fpKeys
-        ? Array.from(fpKeys).map((k) => {
-            const [c, r] = k.split(",").map(Number);
-            return [c, r] as [number, number];
-          })
-        : [center];
-      if ((modelLevels[mid] ?? 0) >= 1) {
-        shooterGroups.push({
-          footprint: modelFp,
-          walls: removeWallsAroundOccupiedArea(baseWallHexes, modelFp, params.terrainZones),
-        });
-      } else {
-        groundFootprint.push(...modelFp);
-      }
-    }
-    if (groundFootprint.length > 0) {
-      shooterGroups.push({ footprint: groundFootprint, walls: baseWallHexes });
-    }
-  } else {
-    // Position hypothétique (survol) ou pas de niveaux par-figurine → cône au niveau unité (ancre).
-    const wallsUnit =
-      (params.source.unit.level ?? 0) >= 1
-        ? removeWallsAroundOccupiedArea(baseWallHexes, shooterFootprint, params.terrainZones)
-        : baseWallHexes;
-    shooterGroups.push({ footprint: shooterFootprint, walls: wallsUnit });
-  }
   // Portée : "hex" = gate hex du WASM (historique) ; "euclidean" = on élargit le scan WASM
   // (padding = étendue hex de l'empreinte + 1) puis on filtre par distance bord-à-bord
   // euclidienne exacte (miroir backend ranged_edge_distance_to_cell). Le WASM reste un pur
@@ -365,38 +342,79 @@ export function buildLosPreviewFromSource(
       0
     ) + 1;
   const scanRange = metric === "euclidean" ? params.maxRange + footprintPad : params.maxRange;
-  // Union des cônes par groupe. L'état d'une case (clear=1 / cover=2) ne dépend que du terrain, pas
-  // du tireur → dédup par (col,row) sans conflit d'état.
-  const rawByKey = new Map<string, VisibleHex>();
-  for (const group of shooterGroups) {
-    const groupRaw = computeVisibleHexes(
+  const inMaxRange = (h: { col: number; row: number }): boolean =>
+    metric !== "euclidean" ||
+    euclideanEdgeDistanceToCellSubhex(
       params.source.fromCol,
       params.source.fromRow,
-      scanRange,
-      params.boardCols,
-      params.boardRows,
-      group.walls,
-      obscuringHexes,
-      terrainHexes,
-      group.footprint
-    );
-    for (const h of groupRaw) rawByKey.set(`${h.col},${h.row}`, h);
-  }
-  const visibleHexesRaw = Array.from(rawByKey.values());
+      shooterSize,
+      h.col,
+      h.row
+    ) <= params.maxRange;
+  // Cône « au sol » (BASE, bleu) : TOUS les murs bloquent, empreinte complète de l'unité. C'est le
+  // cône normal, indépendant du niveau affiché.
   const effectiveWallHexes = baseWallHexes;
+  const visibleHexesRaw = computeVisibleHexes(
+    params.source.fromCol,
+    params.source.fromRow,
+    scanRange,
+    params.boardCols,
+    params.boardRows,
+    effectiveWallHexes,
+    obscuringHexes,
+    terrainHexes,
+    shooterFootprint
+  );
+  // Overlay VERT « vue par l'étage » : UNIQUEMENT si le niveau AFFICHÉ (viewLevel) >= 1. Pour chaque
+  // figurine SUR cet étage (niveau == viewLevel), on retire les murs de sa ruine et on garde les
+  // cases vues EN PLUS de la base (celles que la vue au sol ne voit pas). « quand une fig est
+  // dessus » = niveau de la fig == niveau affiché. Au niveau 0, aucun mur ignoré → aucun vert.
+  const viewLevel = params.viewLevel ?? 0;
+  const modelLevels = params.shooterModelLevels;
+  const elevatedCells: Array<{ col: number; row: number }> = [];
+  if (viewLevel >= 1 && centers && modelLevels) {
+    const baseKeys = new Set(visibleHexesRaw.map((h) => `${h.col},${h.row}`));
+    const elevByKey = new Map<string, VisibleHex>();
+    for (const [mid, center] of Object.entries(centers)) {
+      if ((modelLevels[mid] ?? 0) !== viewLevel) continue;
+      const fpKeys = squadFootprintHexKeysFromModelCenters({ [mid]: center }, params.source.unit);
+      const modelFp: Array<[number, number]> = fpKeys
+        ? Array.from(fpKeys).map((k) => {
+            const [c, r] = k.split(",").map(Number);
+            return [c, r] as [number, number];
+          })
+        : [center];
+      const walls = removeWallsAroundOccupiedFloor(
+        baseWallHexes,
+        modelFp,
+        params.terrainFloors,
+        viewLevel
+      );
+      // Origine du scan = la FIGURINE elle-même (center), pas l'ancre de l'unité : le rayon LoS
+      // principal du WASM part de (shooterCol,shooterRow) → le cône vert rayonne bien depuis la fig
+      // sur l'étage, et non depuis le socle d'ancre au sol.
+      const raw = computeVisibleHexes(
+        center[0],
+        center[1],
+        scanRange,
+        params.boardCols,
+        params.boardRows,
+        walls,
+        obscuringHexes,
+        terrainHexes,
+        modelFp
+      );
+      for (const h of raw) {
+        const k = `${h.col},${h.row}`;
+        if (!baseKeys.has(k)) elevByKey.set(k, h);
+      }
+    }
+    for (const h of elevByKey.values()) {
+      if (inMaxRange(h)) elevatedCells.push({ col: h.col, row: h.row });
+    }
+  }
   const visibleHexes =
-    metric === "euclidean"
-      ? visibleHexesRaw.filter(
-          (h) =>
-            euclideanEdgeDistanceToCellSubhex(
-              params.source.fromCol,
-              params.source.fromRow,
-              shooterSize,
-              h.col,
-              h.row
-            ) <= params.maxRange
-        )
-      : visibleHexesRaw;
+    metric === "euclidean" ? visibleHexesRaw.filter(inMaxRange) : visibleHexesRaw;
   const losPreview = buildShootingLosPreviewFromVisibleHexes(
     visibleHexes,
     params.units,
@@ -409,12 +427,15 @@ export function buildLosPreviewFromSource(
         .sort()
         .join(";")
     : "";
-  // Signature des murs effectifs par groupe (varie avec les niveaux par-figurine) → re-mémoïse le
-  // cône si un niveau change sans que la position bouge.
-  const groupsWallKey = shooterGroups
-    .map((g) => stableWallHexKey(g.walls))
-    .sort()
-    .join("~");
+  // Signature des niveaux par-figurine + niveau affiché → re-mémoïse quand l'overlay vert change
+  // (un niveau change, ou on change d'étage affiché) sans que la position bouge.
+  const levelsKey =
+    modelLevels && centers
+      ? Object.keys(centers)
+          .sort()
+          .map((mid) => `${mid}:${modelLevels[mid] ?? 0}`)
+          .join(";")
+      : "";
   const key = [
     params.source.fromCol,
     params.source.fromRow,
@@ -423,9 +444,12 @@ export function buildLosPreviewFromSource(
     shooterCentersKey,
     params.boardCols,
     params.boardRows,
-    groupsWallKey,
+    stableWallHexKey(effectiveWallHexes),
     stableObscuringKey(obscuringHexes),
     stableTerrainKey(terrainHexes),
+    `v${viewLevel}`,
+    levelsKey,
+    elevatedCells.length,
     [...losPreview.blinkIds].sort((a, b) => a - b).join(","),
     stableBoolRecordJson(losPreview.coverByUnitId),
   ].join("|");
@@ -437,6 +461,7 @@ export function buildLosPreviewFromSource(
     blinkIds: losPreview.blinkIds,
     coverByUnitId: losPreview.coverByUnitId,
     effectiveWallHexes,
+    elevatedCells,
     key,
   };
 }

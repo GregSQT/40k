@@ -1862,7 +1862,7 @@ def build_hidden_detection_info_by_unit_id(
             continue
         all_gtg = _all_enemy_models_gone_to_ground(
             game_state, shooter_anchor, shooter_hexes, enemy, dense_wall_set, gym_training,
-            _walls_around_occupied_area(game_state, shooter, shooter_hexes),
+            _walls_around_occupied_floor(game_state, shooter, shooter_hexes),
         )
         detection_inches = base_inches - gtg_penalty_inches if all_gtg else base_inches
         too_far = hidden_enemy_out_of_detection(game_state, shooter, enemy, detection_range_subhex)
@@ -3791,19 +3791,22 @@ def _get_los_visibility_state(
     return visibility_ratio, can_see
 
 
-def _walls_around_occupied_area(
+def _walls_around_occupied_floor(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
     shooter_hexes: List[Tuple[int, int]],
 ) -> Set[Tuple[int, int]]:
-    """wall_hexes autour de la (des) terrain area(s) occupée(s) par un tireur sur étage.
+    """wall_hexes autour de la délimitation du FLOOR (étage) occupé par un tireur sur étage.
 
-    Un tireur au niveau >= 1 voit par-dessus les murs de la ruine sur laquelle il se tient : on
-    retire de son wall_set les murs situés dans l'empreinte de l'area occupée OU adjacents à elle
-    (voisins hex). Seuls les murs de CETTE area sont ignorés — ceux des autres ruines bloquent
-    toujours. Set vide si le tireur est au sol (niveau 0), hors de toute area, ou sans mur : aucun
-    mur ignoré. Le niveau est optionnel (défaut 0 = sol), aligné sur unit.get("level", 0)."""
-    if int(unit.get("level", 0) or 0) < 1:
+    Un tireur au niveau L >= 1 voit par-dessus les murs qui bordent SON étage. La granularité est le
+    ``floor`` (délimitation d'un niveau), PAS la terrain area sol : une même area peut porter plusieurs
+    floors au même niveau (décors A/B distincts) → une fig sur le floor A ne doit ignorer que les murs
+    de A, pas de B. On prend le(s) floor(s) au niveau L dont l'empreinte contient le socle tireur, puis
+    on retire les murs situés dans ce floor OU adjacents (les murs bordent le floor, souvent juste à
+    l'extérieur du rasterisé). Halo scoppé au floor → aucun mur d'un autre décor (vérifié). Set vide si
+    tireur au sol (niveau 0), hors de tout floor, ou sans mur."""
+    level = int(unit.get("level", 0) or 0)
+    if level < 1:
         return set()
     wall_set = _get_wall_set(game_state)
     if not wall_set:
@@ -3818,9 +3821,12 @@ def _walls_around_occupied_area(
     shooter_cells = {(int(c), int(r)) for c, r in shooter_hexes}
     occupied: Set[Tuple[int, int]] = set()
     for area in require_key(game_state, "terrain_areas"):
-        area_hexes = {(int(h[0]), int(h[1])) for h in require_key(area, "hexes")}
-        if shooter_cells & area_hexes:
-            occupied |= area_hexes
+        for floor in area.get("floors", []):  # get allowed (area sans étage)
+            if int(require_key(floor, "level")) != level:
+                continue
+            floor_hexes = {(int(h[0]), int(h[1])) for h in require_key(floor, "hexes")}
+            if shooter_cells & floor_hexes:
+                occupied |= floor_hexes
     result: Set[Tuple[int, int]] = set()
     if occupied:
         from engine.hex_utils import get_neighbors
@@ -4260,7 +4266,7 @@ def _resolve_shooter_models_with_walls(
                 m_level = int(require_key(m, "level"))
                 # Set de murs ignorés PAR figurine (∅ si niveau 0). Cache par model id préfixé
                 # "m:" pour ne pas entrer en collision avec le cache par unité.
-                ignored = _walls_around_occupied_area(
+                ignored = _walls_around_occupied_floor(
                     game_state, {"id": f"m:{mid}", "level": m_level}, footprint
                 )
                 wall_eff = base_wall_set - ignored if ignored else base_wall_set
@@ -4271,7 +4277,7 @@ def _resolve_shooter_models_with_walls(
             game_state, shooter, gym_training=gym_training
         )
         footprint = [(int(c), int(r)) for c, r in footprint]
-        ignored = _walls_around_occupied_area(game_state, shooter, footprint)
+        ignored = _walls_around_occupied_floor(game_state, shooter, footprint)
         wall_eff = base_wall_set - ignored if ignored else base_wall_set
         shooter_models.append(((int(anchor[0]), int(anchor[1])), footprint, wall_eff))
         shooter_hexes_all.extend(footprint)
@@ -4426,7 +4432,7 @@ def hidden_enemy_out_of_detection(
             dense_wall_set
             and _model_footprint_not_fully_visible_due_to_solid(
                 game_state, shooter_anchor, shooter_hexes, model_hexes, dense_wall_set,
-                _walls_around_occupied_area(game_state, shooter, shooter_hexes),
+                _walls_around_occupied_floor(game_state, shooter, shooter_hexes),
             )
         ):
             return False  # pas gone to ground → détectable à base
@@ -4606,9 +4612,10 @@ def _update_unit_los_preview_data(
     _shooter_anchor, _shooter_hexes = _resolve_unit_anchor_and_footprint(
         game_state, unit, gym_training=gym_training
     )
-    wall_set = _get_wall_set(game_state) - _walls_around_occupied_area(
-        game_state, unit, _shooter_hexes
-    )
+    # Cône de preview « au sol » : tous les murs bloquent (niveau unité). L'overlay VERT « vue par
+    # l'étage » (murs de la ruine occupée ignorés pour les figs de l'étage AFFICHÉ) est calculé
+    # côté frontend, car il dépend du niveau affiché (currentLevel) que le backend ne connaît pas.
+    wall_set = _get_wall_set(game_state)
     shooter_set = {(int(c), int(r)) for c, r in _shooter_hexes}
     obscuring_by_hex: Dict[Tuple[int, int], str] = {}
     for _area_id, _hex_set in _get_obscuring_area_sets(game_state):
