@@ -1771,6 +1771,7 @@ def _all_enemy_models_gone_to_ground(
     enemy: Dict[str, Any],
     dense_wall_set: Set[Tuple[int, int]],
     gym_training: bool,
+    ignored_wall_hexes: Optional[Set[Tuple[int, int]]] = None,
 ) -> bool:
     """True si TOUTES les figurines vivantes de l'ennemi sont "gone to ground" vis-à-vis du tireur.
 
@@ -1787,7 +1788,8 @@ def _all_enemy_models_gone_to_ground(
         return False
     for model_hexes in footprints:
         if not _model_footprint_not_fully_visible_due_to_solid(
-            game_state, shooter_anchor, shooter_hexes, model_hexes, dense_wall_set
+            game_state, shooter_anchor, shooter_hexes, model_hexes, dense_wall_set,
+            ignored_wall_hexes,
         ):
             return False
     return True
@@ -1859,7 +1861,8 @@ def build_hidden_detection_info_by_unit_id(
         if distance > max_rng:
             continue
         all_gtg = _all_enemy_models_gone_to_ground(
-            game_state, shooter_anchor, shooter_hexes, enemy, dense_wall_set, gym_training
+            game_state, shooter_anchor, shooter_hexes, enemy, dense_wall_set, gym_training,
+            _walls_around_occupied_area(game_state, shooter, shooter_hexes),
         )
         detection_inches = base_inches - gtg_penalty_inches if all_gtg else base_inches
         too_far = hidden_enemy_out_of_detection(game_state, shooter, enemy, detection_range_subhex)
@@ -3788,6 +3791,48 @@ def _get_los_visibility_state(
     return visibility_ratio, can_see
 
 
+def _walls_around_occupied_area(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    shooter_hexes: List[Tuple[int, int]],
+) -> Set[Tuple[int, int]]:
+    """wall_hexes autour de la (des) terrain area(s) occupée(s) par un tireur sur étage.
+
+    Un tireur au niveau >= 1 voit par-dessus les murs de la ruine sur laquelle il se tient : on
+    retire de son wall_set les murs situés dans l'empreinte de l'area occupée OU adjacents à elle
+    (voisins hex). Seuls les murs de CETTE area sont ignorés — ceux des autres ruines bloquent
+    toujours. Set vide si le tireur est au sol (niveau 0), hors de toute area, ou sans mur : aucun
+    mur ignoré. Le niveau est optionnel (défaut 0 = sol), aligné sur unit.get("level", 0)."""
+    if int(unit.get("level", 0) or 0) < 1:
+        return set()
+    wall_set = _get_wall_set(game_state)
+    if not wall_set:
+        return set()
+    uid = unit.get("id")
+    version = game_state.get("_unit_move_version")
+    if uid is not None:
+        cache = game_state.setdefault("_elevated_ignored_walls_cache", {})
+        hit = cache.get(str(uid))
+        if hit is not None and hit[0] == version:
+            return hit[1]
+    shooter_cells = {(int(c), int(r)) for c, r in shooter_hexes}
+    occupied: Set[Tuple[int, int]] = set()
+    for area in require_key(game_state, "terrain_areas"):
+        area_hexes = {(int(h[0]), int(h[1])) for h in require_key(area, "hexes")}
+        if shooter_cells & area_hexes:
+            occupied |= area_hexes
+    result: Set[Tuple[int, int]] = set()
+    if occupied:
+        from engine.hex_utils import get_neighbors
+        halo = set(occupied)
+        for c, r in occupied:
+            halo.update(get_neighbors(c, r))
+        result = wall_set & halo
+    if uid is not None:
+        cache[str(uid)] = (version, result)
+    return result
+
+
 def _get_wall_set(game_state: Dict[str, Any]) -> Set[Tuple[int, int]]:
     """Return cached wall_set from game_state, building it on first call."""
     cached = game_state.get("_wall_set_cache")
@@ -3967,6 +4012,7 @@ def _compute_visibility_with_obscuring(
     *,
     wall_set: Optional[Set[Tuple[int, int]]] = None,
     obscuring_by_hex: Optional[Dict[Tuple[int, int], str]] = None,
+    ignored_wall_hexes: Optional[Set[Tuple[int, int]]] = None,
 ) -> Tuple[int, int, Set[Tuple[int, int]]]:
     """Count target footprint hexes reachable by a clear hex-line from the shooter.
 
@@ -3986,6 +4032,11 @@ def _compute_visibility_with_obscuring(
     obscuring_by_hex = (
         _get_obscuring_hex_to_area(game_state) if obscuring_by_hex is None else obscuring_by_hex
     )
+    # Tireur sur un étage (niveau >= 1) : il voit par-dessus les murs de la ruine qu'il occupe →
+    # ces murs (dense ou non) ne bloquent plus sa LoS. Seuls ces murs-là sont retirés ; les murs
+    # des autres ruines et les obscuring areas continuent de bloquer normalement.
+    if ignored_wall_hexes:
+        wall_set = wall_set - ignored_wall_hexes
 
     # Areas the shooter or target occupies are excluded as blockers (rule 13.10). Resolved via the
     # hex→area map (cheap lookups) instead of unioning every obscuring area's hexes on every pair —
@@ -4149,29 +4200,147 @@ def _resolve_target_models_for_los(
     )
 
 
+def _resolve_shooter_models_with_walls(
+    game_state: Dict[str, Any],
+    shooter: Dict[str, Any],
+    gym_training: bool,
+) -> Tuple[List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]]]], List[Tuple[int, int]]]:
+    """Décompose le TIREUR par figurine vivante pour la LoS (règle 06.01, tracée PAR figurine).
+
+    Retourne (shooter_models, shooter_hexes_all) où chaque shooter_model est
+    (anchor, footprint, wall_set_effectif) : le wall_set effectif de CETTE figurine est le mur du
+    plateau MOINS les murs de la ruine qu'elle occupe si elle est sur un étage (niveau >= 1) —
+    sinon le mur complet. Ainsi une figurine au sol reste bloquée par un mur même si une figurine
+    de la même escouade, sur l'étage, ne l'est plus. ``shooter_hexes_all`` = union des empreintes
+    (sert au calcul des obscuring areas occupées par le tireur, règle 13.10, inchangé au niveau
+    unité). Repli non-découpé (gym / dict coordonnées-seules) : une seule figurine = l'unité, niveau
+    ``unit["level"]``.
+
+    Résultat mémoïsé par (shooter_id, _unit_move_version) : les empreintes/niveaux des figurines
+    tireuses ne dépendent que du tireur et sont recalculées à l'identique pour chaque cible pendant
+    la construction du los_cache. Le cache est invalidé au moindre mouvement (version). Les tireurs
+    sans id (gym / coord-only) ne sont pas cachés.
+    """
+    shooter_id = shooter.get("id")
+    version = game_state.get("_unit_move_version")
+    cache_key = None
+    if not gym_training and shooter_id is not None:
+        cache_key = str(shooter_id)
+        holder = game_state.get("_shooter_los_models_cache")
+        if holder is None:
+            holder = {}
+            game_state["_shooter_los_models_cache"] = holder
+        hit = holder.get(cache_key)
+        if hit is not None and hit[0] == version:
+            return hit[1], hit[2]
+    base_wall_set = _get_wall_set(game_state)
+    shooter_models: List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]]]] = []
+    shooter_hexes_all: List[Tuple[int, int]] = []
+    if not gym_training and shooter_id is not None:
+        model_ids = require_key(game_state, "squad_models").get(str(shooter_id))
+        if model_ids:
+            from engine.hex_utils import compute_occupied_hexes
+            models_cache = require_key(game_state, "models_cache")
+            base_shape = require_key(shooter, "BASE_SHAPE")
+            base_size = require_key(shooter, "BASE_SIZE")
+            orientation = require_key(shooter, "orientation")
+            for mid in model_ids:
+                m = models_cache.get(mid)
+                if m is None:
+                    raise KeyError(f"Model {mid} missing from models_cache")
+                if int(require_key(m, "HP_CUR")) <= 0:
+                    continue
+                anchor = (int(m["col"]), int(m["row"]))
+                footprint = [
+                    (int(hx[0]), int(hx[1]))
+                    for hx in compute_occupied_hexes(
+                        anchor[0], anchor[1], base_shape, base_size, orientation
+                    )
+                ]
+                m_level = int(require_key(m, "level"))
+                # Set de murs ignorés PAR figurine (∅ si niveau 0). Cache par model id préfixé
+                # "m:" pour ne pas entrer en collision avec le cache par unité.
+                ignored = _walls_around_occupied_area(
+                    game_state, {"id": f"m:{mid}", "level": m_level}, footprint
+                )
+                wall_eff = base_wall_set - ignored if ignored else base_wall_set
+                shooter_models.append((anchor, footprint, wall_eff))
+                shooter_hexes_all.extend(footprint)
+    if not shooter_models:
+        anchor, footprint = _resolve_unit_anchor_and_footprint(
+            game_state, shooter, gym_training=gym_training
+        )
+        footprint = [(int(c), int(r)) for c, r in footprint]
+        ignored = _walls_around_occupied_area(game_state, shooter, footprint)
+        wall_eff = base_wall_set - ignored if ignored else base_wall_set
+        shooter_models.append(((int(anchor[0]), int(anchor[1])), footprint, wall_eff))
+        shooter_hexes_all.extend(footprint)
+    if cache_key is not None:
+        game_state["_shooter_los_models_cache"][cache_key] = (
+            version, shooter_models, shooter_hexes_all
+        )
+    return shooter_models, shooter_hexes_all
+
+
+def _target_model_visible_cells(
+    shooter_models: List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]]]],
+    target_model_hexes: List[Tuple[int, int]],
+    obscuring_by_hex: Dict[Tuple[int, int], str],
+    excluded_areas: Set[str],
+) -> Set[Tuple[int, int]]:
+    """Cases du socle cible vues depuis AU MOINS une figurine tireuse (règle 06.01, binaire).
+
+    Chaque figurine tireuse utilise son propre wall_set effectif (murs ignorés si elle est sur un
+    étage). Une case cible est vue dès qu'une figurine tireuse a une ligne dégagée vers elle."""
+    vset: Set[Tuple[int, int]] = set()
+    for tc, tr in target_model_hexes:
+        for s_anchor, s_footprint, s_wall in shooter_models:
+            if _los_hex_visible(
+                s_anchor, s_footprint, tc, tr, s_wall, obscuring_by_hex, excluded_areas
+            ):
+                vset.add((int(tc), int(tr)))
+                break
+    return vset
+
+
+def _excluded_obscuring_areas(
+    obscuring_by_hex: Dict[Tuple[int, int], str],
+    *hex_groups: List[Tuple[int, int]],
+) -> Set[str]:
+    """Obscuring areas occupées par au moins une case des groupes fournis (règle 13.10 : une area
+    occupée par le tireur ou la cible ne bloque pas)."""
+    excluded: Set[str] = set()
+    for group in hex_groups:
+        for c, r in group:
+            area = obscuring_by_hex.get((int(c), int(r)))
+            if area is not None:
+                excluded.add(area)
+    return excluded
+
+
 def _unit_can_see_any(game_state: Dict[str, Any], shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
     """True dès qu'AU MOINS une figurine cible est vue par le tireur (règle 06.01, ``can_see``).
 
     Variante allégée de ``compute_unit_los`` réservée à l'ÉLIGIBILITÉ du pool de tir :
     early-exit à la première figurine visible, sans calcul de couvert ni écriture du cache
     par-paire (celui-ci attend le résultat complet, produit à l'activation via ``compute_unit_los``).
-    Même géométrie tireur/cible que la LoS complète → aucun faux négatif.
+    Même géométrie tireur/cible que la LoS complète (PAR figurine tireuse) → aucun faux négatif.
     """
     gym_training = bool(
         game_state.get("gym_training_mode", False)
         or require_key(game_state, "config").get("gym_training_mode", False)
     )
-    shooter_anchor, shooter_hexes = _resolve_unit_anchor_and_footprint(
-        game_state, shooter, gym_training=gym_training
+    shooter_models, shooter_hexes_all = _resolve_shooter_models_with_walls(
+        game_state, shooter, gym_training
     )
     target_model_footprints, _centers, _bshape, _bsize, _borient = _resolve_target_models_for_los(
         game_state, target, gym_training
     )
+    obscuring_by_hex = _get_obscuring_hex_to_area(game_state)
+    excluded_base = _excluded_obscuring_areas(obscuring_by_hex, shooter_hexes_all)
     for model_hexes in target_model_footprints:
-        v, _t, _vset = _compute_visibility_with_obscuring(
-            game_state, shooter_anchor, shooter_hexes, model_hexes[0], model_hexes
-        )
-        if v > 0:
+        excluded = excluded_base | _excluded_obscuring_areas(obscuring_by_hex, model_hexes)
+        if _target_model_visible_cells(shooter_models, model_hexes, obscuring_by_hex, excluded):
             return True
     return False
 
@@ -4182,6 +4351,7 @@ def _model_footprint_not_fully_visible_due_to_solid(
     shooter_hexes: List[Tuple[int, int]],
     target_model_hexes: List[Tuple[int, int]],
     dense_wall_set: Set[Tuple[int, int]],
+    ignored_wall_hexes: Optional[Set[Tuple[int, int]]] = None,
 ) -> bool:
     """Règle 13.5, condition 2, PAR FIGURINE : cette figurine cible n'est pas entièrement visible
     pour le tireur à cause d'un terrain Solid (dense) intervenant.
@@ -4189,10 +4359,12 @@ def _model_footprint_not_fully_visible_due_to_solid(
     Teste la visibilité de l'empreinte de CETTE figurine en n'utilisant QUE le set de murs dense et
     en DÉSACTIVANT les obscuring areas (obscuring_by_hex={}), pour que seul un terrain Solid — pas
     une obscuring area (13.10) — puisse rendre la figurine "gone to ground". True si >=1 case du
-    socle est masquée par un mur dense."""
+    socle est masquée par un mur dense. ``ignored_wall_hexes`` (murs de la ruine occupée par un
+    tireur élevé) sont retirés → ces murs-là ne déclenchent jamais gone to ground."""
     v, t, _vset = _compute_visibility_with_obscuring(
         game_state, shooter_anchor, shooter_hexes, target_model_hexes[0], target_model_hexes,
         wall_set=dense_wall_set, obscuring_by_hex={},
+        ignored_wall_hexes=ignored_wall_hexes,
     )
     return t > 0 and v < t
 
@@ -4253,7 +4425,8 @@ def hidden_enemy_out_of_detection(
         if not (
             dense_wall_set
             and _model_footprint_not_fully_visible_due_to_solid(
-                game_state, shooter_anchor, shooter_hexes, model_hexes, dense_wall_set
+                game_state, shooter_anchor, shooter_hexes, model_hexes, dense_wall_set,
+                _walls_around_occupied_area(game_state, shooter, shooter_hexes),
             )
         ):
             return False  # pas gone to ground → détectable à base
@@ -4272,14 +4445,17 @@ def _compute_unit_los_uncached(
         or require_key(game_state, "config").get("gym_training_mode", False)
     )
 
-    shooter_anchor, shooter_hexes = _resolve_unit_anchor_and_footprint(
-        game_state, shooter, gym_training=gym_training
+    # Règle 06.01 : la LoS est tracée PAR figurine tireuse. Chaque figurine tireuse a son propre
+    # wall_set effectif (murs de sa ruine ignorés si elle est sur un étage) → une figurine au sol
+    # reste bloquée par un mur même si une figurine de la même escouade, sur l'étage, ne l'est plus.
+    shooter_models, shooter_hexes_all = _resolve_shooter_models_with_walls(
+        game_state, shooter, gym_training
     )
 
     # Règles 06.01 + 13.10 : visibilité binaire évaluée PAR MODÈLE cible. Un modèle est
-    # visible si >= 1 cellule de son socle a une ligne dégagée ; l'unité est visible si
-    # >= 1 modèle l'est. Chaque test exclut les areas obscuring du tireur et celles que
-    # CE modèle occupe (exclusion par paire de modèles, pas l'union de l'escouade).
+    # visible si >= 1 cellule de son socle a une ligne dégagée depuis >= 1 figurine tireuse ;
+    # l'unité est visible si >= 1 modèle l'est. Chaque test exclut les areas obscuring du tireur
+    # (union de l'escouade) et celles que CE modèle cible occupe.
     (
         target_model_footprints,
         target_model_centers,
@@ -4287,6 +4463,9 @@ def _compute_unit_los_uncached(
         cover_base_size,
         cover_orientation,
     ) = _resolve_target_models_for_los(game_state, target, gym_training)
+
+    obscuring_by_hex = _get_obscuring_hex_to_area(game_state)
+    excluded_base = _excluded_obscuring_areas(obscuring_by_hex, shooter_hexes_all)
 
     visible = 0
     total = 0
@@ -4296,9 +4475,12 @@ def _compute_unit_los_uncached(
     # socle de CETTE figurine est vu par le tireur. Base du test (b) par-figurine du couvert (13.08).
     model_full_vis: List[bool] = []
     for model_hexes in target_model_footprints:
-        v, t, vset = _compute_visibility_with_obscuring(
-            game_state, shooter_anchor, shooter_hexes, model_hexes[0], model_hexes
+        excluded = excluded_base | _excluded_obscuring_areas(obscuring_by_hex, model_hexes)
+        vset = _target_model_visible_cells(
+            shooter_models, model_hexes, obscuring_by_hex, excluded
         )
+        v = len(vset)
+        t = len(model_hexes)
         visible += v
         total += t
         visible_hex_set |= vset
@@ -4424,7 +4606,9 @@ def _update_unit_los_preview_data(
     _shooter_anchor, _shooter_hexes = _resolve_unit_anchor_and_footprint(
         game_state, unit, gym_training=gym_training
     )
-    wall_set = _get_wall_set(game_state)
+    wall_set = _get_wall_set(game_state) - _walls_around_occupied_area(
+        game_state, unit, _shooter_hexes
+    )
     shooter_set = {(int(c), int(r)) for c, r in _shooter_hexes}
     obscuring_by_hex: Dict[Tuple[int, int], str] = {}
     for _area_id, _hex_set in _get_obscuring_area_sets(game_state):

@@ -714,6 +714,15 @@ export class UnitRenderer {
       this.props.modelLevelGhost = filt(savedLevelGhost);
     }
     const badgeCenters = this.props.modelCenters ?? modelCenters;
+    // Cible qui clignote (pool de tir/charge/fight, ou prévisualisée) : sa barre HP blink et son
+    // indicateur de cible doivent rester visibles quel que soit l'étage AFFICHÉ — c'est un repère de
+    // ciblage, pas un badge d'unité. Sinon une cible entièrement à l'étage (toutes figs level-ghost)
+    // disparaît du blink quand on regarde le sol.
+    const isBlinkTargetUnit =
+      (Array.isArray(this.props.blinkingUnits) &&
+        this.props.blinkingUnits.some((id) => String(id) === String(this.props.unit.id))) ||
+      ((this.props.mode === "targetPreview" || this.props.mode === "attackPreview") &&
+        this.props.targetPreview?.targetId === this.props.unit.id);
     // Squad-level UI anchored at first NON-ghost model center (aucun si tout est off-niveau).
     if (!this.props.hideIndicators && badgeCenters.length > 0) {
       this.props.centerX = badgeCenters[0][0];
@@ -729,6 +738,22 @@ export class UnitRenderer {
       this.renderHiddenBadge(unitIconScale);
       this.renderMoveStatusBadge(unitIconScale);
       this.renderBattleShockedIndicator();
+    } else if (
+      !this.props.hideIndicators &&
+      isBlinkTargetUnit &&
+      savedCenters &&
+      savedCenters.length > 0
+    ) {
+      // Toutes les figs off-niveau MAIS l'unité est une cible qui blinke : on rend uniquement la
+      // barre HP blink + l'indicateur de cible, sur les empreintes COMPLÈTES (position réelle des
+      // figs). Les autres badges restent masqués (cohérent avec la vue mono-niveau).
+      this.props.modelCenters = savedCenters;
+      this.props.modelMetas = savedMetas;
+      this.props.modelHps = savedHps;
+      this.props.centerX = savedCenters[0][0];
+      this.props.centerY = savedCenters[0][1];
+      this.renderHPBar(unitIconScale);
+      this.renderTargetIndicator(iconZIndex);
     }
     // Restaure les tableaux par-fig d'origine.
     this.props.modelCenters = savedCenters;

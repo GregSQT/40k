@@ -3795,15 +3795,15 @@ def _fight_pile_in_preview_plan(
     squad_id: str,
     plan: MovePlan,
     closest_tier_ids: List[str],
-    engaged_before_ids: List[str],
 ) -> Dict[str, Any]:
     """Dry-run d'un plan pile-in par-figurine (12.03 WHILE/AFTER + cohésion 03.03). Lecture pure.
 
     ``plan`` couvre TOUTES les figs vivantes, entrées ``(mid, col, row[, level])`` (le 4ᵉ élément =
     niveau d'étage de destination ; absent → niveau courant de la fig). Légalité par-fig =
     appartenance au pool ``closer`` calculé AU NIVEAU planifié de la fig (ou figurine laissée à sa
-    position d'origine). On ajoute la cohésion d'unité et les contraintes AFTER au niveau unité :
-    l'escouade finit engagée et chaque engagement de départ est conservé.
+    position d'origine). On ajoute la cohésion d'unité et les contraintes AFTER : l'escouade finit
+    engagée (niveau unité) et chaque figurine engagée au départ reste engagée avec la même unité
+    ennemie (par-figurine).
 
     Retour : {per_model, coherency_ok, unit_engaged, kept_engagements, can_validate}.
     """
@@ -3815,7 +3815,11 @@ def _fight_pile_in_preview_plan(
         get_cohesion_max_subhex,
         get_min_neighbors,
     )
-    from .charge_handlers import _charge_prepare_footprint_offsets, _candidate_footprint_charge
+    from .charge_handlers import (
+        _charge_prepare_footprint_offsets,
+        _candidate_footprint_charge,
+        _charge_synthetic_charger_cache_entry,
+    )
 
     unit = get_unit_by_id(game_state, str(squad_id))
     empty = {
@@ -3880,7 +3884,9 @@ def _fight_pile_in_preview_plan(
                 coherency_ok = False
                 break
 
-    # 3) AFTER (12.03) au niveau unité : empreinte union engagée + engagements de départ conservés.
+    # 3) AFTER (12.03) : escouade engagée (niveau unité, « Your unit must be engaged ») +
+    # engagements de départ conservés PAR FIGURINE (« each model that started this move engaged
+    # with an enemy unit must still be engaged with that enemy unit »).
     union_fp: Set[Tuple[int, int]] = set()
     for f in fps:
         union_fp |= f
@@ -3894,13 +3900,30 @@ def _fight_pile_in_preview_plan(
         for eid, ce in units_cache.items()
         if str(eid) != str(squad_id)
     )
+    enemy_entries = [
+        (str(eid), ce)
+        for eid, ce in units_cache.items()
+        if str(eid) != str(squad_id) and int(ce["player"]) != player
+    ]
     kept_engagements = True
-    for eid in engaged_before_ids:
-        ce = units_cache.get(str(eid))
-        if ce is None:
+    for i, (mid, c, r, _lv) in enumerate(norm):
+        m = models_cache.get(mid)
+        if m is None:
             continue
-        if not unit_entries_within_engagement_zone(synth_unit, ce, ez):
-            kept_engagements = False
+        start_fp_i = _candidate_footprint_charge(
+            int(m["col"]), int(m["row"]), unit, game_state, fp_pair
+        )
+        synth_start = _charge_synthetic_charger_cache_entry(
+            game_state, unit, int(m["col"]), int(m["row"]), start_fp_i
+        )
+        synth_end = _charge_synthetic_charger_cache_entry(game_state, unit, c, r, fps[i])
+        for _eid, ce in enemy_entries:
+            if unit_entries_within_engagement_zone(
+                synth_start, ce, ez
+            ) and not unit_entries_within_engagement_zone(synth_end, ce, ez):
+                kept_engagements = False
+                break
+        if not kept_engagements:
             break
 
     can_validate = bool(
@@ -3986,8 +4009,7 @@ def _fight_pile_in_model_plan_state(
         (m, prov[m][0], prov[m][1], prov[m][2]) if m in prov
         else (m, origin[m][0], origin[m][1], origin[m][2]) for m in alive
     ]
-    engaged_before = _fight_units_engaged_with(game_state, unit)
-    prev = _fight_pile_in_preview_plan(game_state, squad_id, full_plan, closest_tier, engaged_before)
+    prev = _fight_pile_in_preview_plan(game_state, squad_id, full_plan, closest_tier)
 
     # Figs (posées ou à l'origine) dont l'empreinte finit à ≤ EZ d'une cible pile-in → voile vert UI
     # (en mesure de frapper). Cibles exposées au front pour le cercle violet + hit-test du Focus.
@@ -4913,13 +4935,12 @@ def _fight_consolidation_preview_plan(
     tier_kind: str,
     tier: Any,
     closest_tier_ids: List[str],
-    engaged_before_ids: List[str],
     lock_base_contact: bool,
 ) -> Dict[str, Any]:
     """Dry-run d'un plan de consolidation par-figurine (12.08 WHILE/AFTER + cohésion 03.03).
 
     AFTER par mode :
-      - ongoing   : chaque engagement de départ conservé (niveau unité, miroir pile-in) ;
+      - ongoing   : chaque figurine engagée au départ reste engagée avec la même unité (par-figurine) ;
       - engaging  : unité engagée avec **toutes** les unités ennemies sélectionnées (tier) ;
       - objective : unité within range de l'objectif (≥1 figurine dans la zone).
 
@@ -4934,7 +4955,11 @@ def _fight_consolidation_preview_plan(
         get_cohesion_max_subhex,
         get_min_neighbors,
     )
-    from .charge_handlers import _charge_prepare_footprint_offsets, _candidate_footprint_charge
+    from .charge_handlers import (
+        _charge_prepare_footprint_offsets,
+        _candidate_footprint_charge,
+        _charge_synthetic_charger_cache_entry,
+    )
 
     unit = get_unit_by_id(game_state, str(squad_id))
     empty = {
@@ -5023,12 +5048,33 @@ def _fight_consolidation_preview_plan(
     within_objective_range = False
     after_ok = False
     if mode == "ongoing":
-        for eid in engaged_before_ids:
-            ce = units_cache.get(str(eid))
-            if ce is None:
+        # 12.08 AFTER (Ongoing) PAR FIGURINE : chaque figurine engagée AU DÉPART avec une unité
+        # ennemie doit rester engagée avec CETTE unité après le move (pas au niveau unité).
+        enemy_entries = [
+            (str(eid), ce)
+            for eid, ce in units_cache.items()
+            if str(eid) != str(squad_id) and int(ce["player"]) != player
+        ]
+        for i, (mid, c, r, _lv) in enumerate(norm):
+            m = models_cache.get(mid)
+            if m is None:
                 continue
-            if not unit_entries_within_engagement_zone(synth_unit, ce, ez):
-                kept_engagements = False
+            start_fp_i = _candidate_footprint_charge(
+                int(m["col"]), int(m["row"]), unit, game_state, fp_pair
+            )
+            synth_start = _charge_synthetic_charger_cache_entry(
+                game_state, unit, int(m["col"]), int(m["row"]), start_fp_i
+            )
+            synth_end = _charge_synthetic_charger_cache_entry(
+                game_state, unit, c, r, fps[i]
+            )
+            for _eid, ce in enemy_entries:
+                if unit_entries_within_engagement_zone(
+                    synth_start, ce, ez
+                ) and not unit_entries_within_engagement_zone(synth_end, ce, ez):
+                    kept_engagements = False
+                    break
+            if not kept_engagements:
                 break
         after_ok = kept_engagements
     elif mode == "engaging":
@@ -5169,10 +5215,9 @@ def _fight_consolidation_model_plan_state(
         (m, prov[m][0], prov[m][1], prov[m][2]) if m in prov
         else (m, origin[m][0], origin[m][1], origin[m][2]) for m in alive
     ]
-    engaged_before = _fight_units_engaged_with(game_state, unit)
     prev = _fight_consolidation_preview_plan(
         game_state, squad_id, full_plan, mode=mode, tier_kind=tier_kind, tier=tier,
-        closest_tier_ids=closest_tier, engaged_before_ids=engaged_before,
+        closest_tier_ids=closest_tier,
         lock_base_contact=lock_base_contact,
     )
 
@@ -5936,8 +5981,7 @@ def _fight_v11_manual_step(
             ]
             targets = _fight_v11_pile_in_targets(game_state, u)
             closest = _fight_pile_in_closest_tier_ids(game_state, u, targets) if targets else []
-            engaged_before = _fight_units_engaged_with(game_state, u)
-            prev = _fight_pile_in_preview_plan(game_state, act_uid, full_plan, closest, engaged_before)
+            prev = _fight_pile_in_preview_plan(game_state, act_uid, full_plan, closest)
             if not prev["can_validate"]:
                 _fight_v11_log(game_state, f"PILE IN unit {act_uid} → plan invalide {prev}")
                 return True, _fight_pile_in_model_plan_state(
@@ -6334,10 +6378,9 @@ def _fight_v11_manual_step(
             tier_kind = "zone" if mode == "objective" else "enemy"
             lock_base_contact = mode == "ongoing"
             closest = _fight_pile_in_closest_tier_ids(game_state, u, list(tier)) if tier_kind == "enemy" else []
-            engaged_before = _fight_units_engaged_with(game_state, u)
             prev = _fight_consolidation_preview_plan(
                 game_state, act_uid, full_plan, mode=mode, tier_kind=tier_kind, tier=tier,
-                closest_tier_ids=closest, engaged_before_ids=engaged_before,
+                closest_tier_ids=closest,
                 lock_base_contact=lock_base_contact,
             )
             if not prev["can_validate"]:

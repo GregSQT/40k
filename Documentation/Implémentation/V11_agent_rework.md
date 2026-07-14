@@ -232,6 +232,30 @@ Vérifié par lecture concordante :
 5. **Miroir PvP strict** : la phase A ne modifie AUCUNE règle de jeu ; les fixes moteur (R4, R6)
    doivent être neutres pour le flux PvP manuel (mémoire projet : le flux gym copie le flux
    PvP, jamais le durcir/diverger). Seuils/conversions via `inches_to_subhex`.
+6. **Prochain agent : 2 rosters seulement** (décision utilisateur 2026-07-14). Le nouvel agent
+   ne s'entraîne que sur 2 rosters différents — spécialisation assumée, pas de généralisation
+   multi-rosters. Câblage vérifié dans le code, AUCUNE modif moteur nécessaire :
+   - la résolution passe par `agent_roster_ref`/`opponent_roster_ref` du scénario
+     ([game_state.py:1026-1057](../../engine/game_state.py#L1026-L1057)) ; trois formes supportées : `"training_random"` (tirage
+     dans `config/agents/<agent_key>/rosters/<scale>/training/agent_training_roster*.json`),
+     ref explicite `"training/<fichier>.json"`, ou **liste de refs** → `rng.choice`
+     ([game_state.py:1176-1186](../../engine/game_state.py#L1176-L1186)) ;
+   - **voie retenue** : dossier `config/agents/<NouvelAgent>/rosters/<scale>/training/` ne
+     contenant QUE les 2 fichiers (pattern `agent_training_roster*.json` obligatoire, clé
+     interne `roster_id` requise) + `"agent_roster_ref": "training_random"` dans les scénarios
+     → tirage 50/50 par épisode ;
+   - `config/agents/_p2_rosters/` est PARTAGÉ entre agents (151 fichiers en 150pts) : si les
+     2 rosters incluent l'adversaire, restreindre `opponent_roster_ref` (ref explicite ou
+     liste) — sinon P2 continue de tirer dans toute la banque ;
+   - désactiver `roster_pool_schedule` dans la training config
+     ([game_state.py:1322-1393](../../engine/game_state.py#L1322-L1393)) : le filtre progressif swarm/troop/elite peut vider un
+     pool de 2 fichiers → `FileNotFoundError` ;
+   - `agent_roster_seed` (clé scénario) fige le tirage si un scénario doit être déterministe ;
+   - conséquences training attendues : convergence plus rapide (distribution d'observations
+     quasi stationnaire), holdouts multi-rosters non pertinents comme critère ; risque
+     principal = un roster qui domine le gradient → **suivre le win-rate PAR roster**
+     (`roster_info`/`agent_roster_id` déjà loggé par épisode,
+     [step_logger.py:188-194](../../ai/step_logger.py#L188-L194)), jamais l'agrégé seul (critère T6.3 à lire par-roster).
 
 ## 5. Tranches d'implémentation
 

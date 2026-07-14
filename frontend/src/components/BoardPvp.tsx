@@ -61,6 +61,7 @@ import {
   hexDistOff,
   rangedPreviewMetric,
   unitsCacheModelCenters,
+  unitsCacheModelLevels,
 } from "../utils/losPreviewHelpers";
 import { syncMoveDestinationPoolRefs } from "../utils/movePoolRefsSync";
 import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
@@ -3223,6 +3224,9 @@ export default function Board({
 
     try {
       const ucByModel = unitsCacheModelCenters(gameState?.units_cache);
+      const ucLevels = unitsCacheModelLevels(gameState?.units_cache);
+      const atCurrentPos =
+        source.fromCol === source.unit.col && source.fromRow === source.unit.row;
       const losPreview = buildLosPreviewFromSource({
         source,
         units,
@@ -3235,10 +3239,8 @@ export default function Board({
         maxRange: range,
         distanceMetric: rangedPreviewMetric(gameConfig),
         unitsCacheByModel: ucByModel,
-        shooterModelCenters:
-          source.fromCol === source.unit.col && source.fromRow === source.unit.row
-            ? ucByModel?.[String(source.unit.id)]
-            : undefined,
+        shooterModelCenters: atCurrentPos ? ucByModel?.[String(source.unit.id)] : undefined,
+        shooterModelLevels: atCurrentPos ? ucLevels?.[String(source.unit.id)] : undefined,
       });
       const blinkIds = losPreview.blinkIds;
       const coverByUnitId = losPreview.coverByUnitId;
@@ -4005,6 +4007,9 @@ export default function Board({
         }
         const overlay = hoverOverlayRef.current;
         const ucByModel = unitsCacheModelCenters(gameState?.units_cache);
+        const ucLevels = unitsCacheModelLevels(gameState?.units_cache);
+        const atCurrentPos =
+          pending.col === pending.selectedUnit.col && pending.row === pending.selectedUnit.row;
         const visualPreview = buildLosPreviewFromSource({
           source: {
             unit: pending.selectedUnit,
@@ -4021,10 +4026,12 @@ export default function Board({
           maxRange: pending.range,
           distanceMetric: rangedPreviewMetric(gameConfig),
           unitsCacheByModel: ucByModel,
-          shooterModelCenters:
-            pending.col === pending.selectedUnit.col && pending.row === pending.selectedUnit.row
-              ? ucByModel?.[String(pending.selectedUnit.id)]
-              : undefined,
+          shooterModelCenters: atCurrentPos
+            ? ucByModel?.[String(pending.selectedUnit.id)]
+            : undefined,
+          shooterModelLevels: atCurrentPos
+            ? ucLevels?.[String(pending.selectedUnit.id)]
+            : undefined,
         });
         const losUnionLayout: HexUnionMaskLayout = {
           HEX_HORIZ_SPACING: HEX_WIDTH_H,
@@ -7168,6 +7175,8 @@ export default function Board({
         if (!boardConfig || !gameConfig) return;
         const overlay = ensureLosOverlay();
         const ucByModel = unitsCacheModelCenters(gameState?.units_cache);
+        const ucLevels = unitsCacheModelLevels(gameState?.units_cache);
+        const atCurrentPos = pending.col === squadUnit.col && pending.row === squadUnit.row;
         const visualPreview = buildLosPreviewFromSource({
           source: { unit: squadUnit, fromCol: pending.col, fromRow: pending.row },
           units,
@@ -7180,10 +7189,8 @@ export default function Board({
           maxRange: shootRange,
           distanceMetric: rangedPreviewMetric(gameConfig),
           unitsCacheByModel: ucByModel,
-          shooterModelCenters:
-            pending.col === squadUnit.col && pending.row === squadUnit.row
-              ? ucByModel?.[String(squadUnit.id)]
-              : undefined,
+          shooterModelCenters: atCurrentPos ? ucByModel?.[String(squadUnit.id)] : undefined,
+          shooterModelLevels: atCurrentPos ? ucLevels?.[String(squadUnit.id)] : undefined,
         });
         // Cases visibles des cibles ciblables (backend) peintes par-dessus le cône WASM :
         // garantit qu'une unité qui blinke a toujours ses cases visibles affichées, même si le

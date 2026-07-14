@@ -4266,6 +4266,7 @@ def _attacker_model_can_reach_squad(
     detection_penalty = 3 * int(require_key(game_state, "inches_to_subhex"))
     from engine.phase_handlers.shooting_handlers import (
         _get_dense_wall_set, _model_footprint_not_fully_visible_due_to_solid,
+        _walls_around_occupied_area,
     )
     dense_wall_set = _get_dense_wall_set(game_state) if target_hidden else set()
     shooter_anchor = (ac, ar)
@@ -4277,6 +4278,7 @@ def _attacker_model_can_reach_squad(
     from engine.phase_handlers.shooting_handlers import _ranged_distance_metric
     metric = _ranged_distance_metric()
     shooter_hexes = list(_compute_unit_occupied_hexes(ac, ar, attacker_model, game_state))
+    ignored_wall_hexes = _walls_around_occupied_area(game_state, attacker_model, shooter_hexes)
     shooter_socle = Socle(
         attacker_model["BASE_SHAPE"], attacker_model["BASE_SIZE"], ac, ar,
         set(shooter_hexes), [(ac, ar)],
@@ -4304,13 +4306,15 @@ def _attacker_model_can_reach_squad(
             eff_detection = base_detection_subhex
             if base_detection_subhex - detection_penalty < edge <= base_detection_subhex:
                 if dense_wall_set and _model_footprint_not_fully_visible_due_to_solid(
-                    game_state, shooter_anchor, shooter_hexes, footprint, dense_wall_set
+                    game_state, shooter_anchor, shooter_hexes, footprint, dense_wall_set,
+                    ignored_wall_hexes,
                 ):
                     eff_detection = base_detection_subhex - detection_penalty
             if edge > eff_detection:
                 continue
         visible, total, _ = _compute_visibility_with_obscuring(
-            game_state, shooter_anchor, shooter_hexes, (tc, tr), footprint
+            game_state, shooter_anchor, shooter_hexes, (tc, tr), footprint,
+            ignored_wall_hexes=ignored_wall_hexes,
         )
         if visible > 0:
             return True
