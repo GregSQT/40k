@@ -1781,7 +1781,7 @@ def _all_enemy_models_gone_to_ground(
     """
     if not dense_wall_set:
         return False
-    footprints, _centers, _bshape, _bsize, _borient = _resolve_target_models_for_los(
+    footprints, _centers, _bshape, _bsize, _borient, _levels = _resolve_target_models_for_los(
         game_state, enemy, gym_training
     )
     if not footprints:
@@ -3839,6 +3839,65 @@ def _walls_around_occupied_floor(
     return result
 
 
+def _floor_footprint_and_height(
+    game_state: Dict[str, Any],
+    level: int,
+    footprint: List[Tuple[int, int]],
+) -> "Optional[Tuple[Set[Tuple[int, int]], float]]":
+    """Empreinte hex du plancher occupé + sa hauteur (pouces), pour la LoS 3D plancher-occulteur.
+
+    Renvoie ``(E, H)`` où ``E`` = union des hexes du/des floor(s) au niveau ``level`` dont l'empreinte
+    contient le socle ``footprint`` (MÊME sélection que ``_walls_around_occupied_floor``, qui calcule
+    déjà la variable ``occupied``), et ``H`` = ``height_inches`` (hauteur du dessus de la dalle).
+    ``None`` si ``level < 1`` (figurine au sol : aucune dalle occultante).
+
+    Deux floors au même niveau contenant le socle avec des ``height_inches`` DIFFÉRENTS = état
+    incohérent → ``ValueError`` explicite (pas de repli silencieux, CLAUDE.md). Cas normal : un seul
+    floor → ``(hexes, height)``.
+    """
+    if int(level) < 1:
+        return None
+    cells = {(int(c), int(r)) for c, r in footprint}
+    occupied: Set[Tuple[int, int]] = set()
+    height: Optional[float] = None
+    for area in require_key(game_state, "terrain_areas"):
+        for floor in area.get("floors", []):  # get allowed (aire sans étage = sol seul)
+            if int(require_key(floor, "level")) != int(level):
+                continue
+            floor_hexes = {(int(h[0]), int(h[1])) for h in require_key(floor, "hexes")}
+            if not (cells & floor_hexes):
+                continue
+            h = float(require_key(floor, "height_inches"))
+            if height is None:
+                height = h
+            elif height != h:
+                raise ValueError(
+                    f"_floor_footprint_and_height: socle sur deux floors de niveau {level} avec des "
+                    f"height_inches différents ({height} vs {h}) — état incohérent"
+                )
+            occupied |= floor_hexes
+    if not occupied or height is None:
+        return None
+    return occupied, height
+
+
+def _fig_z_and_occluder(
+    game_state: Dict[str, Any],
+    level: int,
+    footprint: List[Tuple[int, int]],
+    model_height: float,
+) -> "Tuple[float, Optional[Tuple[Set[Tuple[int, int]], float]]]":
+    """Sommet vertical d'une figurine (pouces) + sa dalle-plancher occultante, pour la LoS 3D.
+
+    ``z`` = hauteur du plancher sous la figurine (``height_inches`` du floor à ``level``, ou 0 au sol)
+    + ``model_height`` (sommet du modèle, §01.04 « partie la plus proche/haute »). ``occ`` = dalle
+    occultante ``(E, H)`` de son étage (``None`` si au sol). Unité : pouces (même échelle que
+    ``height_inches`` / ``MODEL_HEIGHT``, jamais convertie en subhex — cf. engagement 3D)."""
+    occ = _floor_footprint_and_height(game_state, level, footprint)
+    floor_h = occ[1] if occ is not None else 0.0
+    return floor_h + float(model_height), occ
+
+
 def _get_wall_set(game_state: Dict[str, Any]) -> Set[Tuple[int, int]]:
     """Return cached wall_set from game_state, building it on first call."""
     cached = game_state.get("_wall_set_cache")
@@ -3948,6 +4007,10 @@ def _los_line_segment_clear(
     wall_set: Set[Tuple[int, int]],
     obscuring_by_hex: Dict[Tuple[int, int], str],
     excluded_areas: "Set[str] | frozenset",
+    *,
+    floor_occluders: "Optional[List[Tuple[Set[Tuple[int, int]], float]]]" = None,
+    z_start: Optional[float] = None,
+    z_end: Optional[float] = None,
 ) -> bool:
     """Ligne de visée hex dégagée entre deux hexes (cube-lerp ``hex_line``).
 
@@ -3955,24 +4018,55 @@ def _los_line_segment_clear(
     (rule 13.10 : les areas occupées par le tireur ou la cible ne bloquent pas). PRIMITIVE DE
     TRACÉ UNIQUE partagée par le ciblage (unit→unit) et la preview (shooter→cellule), et mirroir
     du WASM ``has_los_fast``. Toute évolution de la règle de blocage se fait ICI, une seule fois.
+
+    LoS 3D plancher-occulteur (``floor_occluders`` non vide) : en plus des blocages 2D, une case
+    intermédiaire appartenant à l'empreinte ``E`` d'une dalle-plancher bloque si la hauteur
+    interpolée du tracé ``h(t) = z_start + (z_end - z_start) * t`` est STRICTEMENT sous le dessus de
+    la dalle ``H`` (tangence légale, cohérent avec ``low_clearance``). ``z_start``/``z_end`` requis
+    dans ce mode. Sol↔sol (``floor_occluders`` vide/None) → chemin 2D historique, byte-identique.
     """
     from engine.hex_utils import hex_line_iter
-    # Équivalent strict de ``hex_line(...)[1:-1]``, en paresseux : on saute la 1re cellule, puis on
-    # n'examine chaque cellule qu'une fois la SUIVANTE produite — la dernière n'est donc jamais
-    # testée (elle porte la cible). Le générateur s'arrête dès qu'un bloqueur est trouvé : sur un
-    # plateau chargé, 68 % des lignes sont bloquées et la moitié des cellules ne sert à rien.
-    it = hex_line_iter(int(src_col), int(src_row), int(tgt_col), int(tgt_row))
-    next(it, None)  # cellule du tireur : jamais bloquante
-    prev = next(it, None)
-    if prev is None:
+    if not floor_occluders:
+        # Chemin chaud 2D INCHANGÉ (byte-identique). Équivalent strict de ``hex_line(...)[1:-1]``, en
+        # paresseux : on saute la 1re cellule, puis on n'examine chaque cellule qu'une fois la
+        # SUIVANTE produite — la dernière n'est donc jamais testée (elle porte la cible). Le
+        # générateur s'arrête dès qu'un bloqueur est trouvé : sur un plateau chargé, 68 % des lignes
+        # sont bloquées et la moitié des cellules ne sert à rien.
+        it = hex_line_iter(int(src_col), int(src_row), int(tgt_col), int(tgt_row))
+        next(it, None)  # cellule du tireur : jamais bloquante
+        prev = next(it, None)
+        if prev is None:
+            return True
+        for cur in it:
+            if prev in wall_set:
+                return False
+            area = obscuring_by_hex.get(prev)
+            if area is not None and area not in excluded_areas:
+                return False
+            prev = cur
         return True
-    for cur in it:
-        if prev in wall_set:
+    # Chemin 3D : mêmes blocages 2D + test plancher-occulteur par-case via la hauteur interpolée.
+    if z_start is None or z_end is None:
+        raise ValueError("_los_line_segment_clear: floor_occluders fourni sans z_start/z_end")
+    from engine.hex_utils import hex_line_iter_t
+    dz = z_end - z_start
+    it3 = hex_line_iter_t(int(src_col), int(src_row), int(tgt_col), int(tgt_row))
+    next(it3, None)  # cellule du tireur
+    prev3 = next(it3, None)
+    if prev3 is None:
+        return True
+    for cur3 in it3:
+        pcell, pt = prev3
+        if pcell in wall_set:
             return False
-        area = obscuring_by_hex.get(prev)
+        area = obscuring_by_hex.get(pcell)
         if area is not None and area not in excluded_areas:
             return False
-        prev = cur
+        h = z_start + dz * pt
+        for e_hexes, e_height in floor_occluders:
+            if h < e_height and pcell in e_hexes:
+                return False
+        prev3 = cur3
     return True
 
 
@@ -3983,6 +4077,10 @@ def _los_hex_visible(
     wall_set: Set[Tuple[int, int]],
     obscuring_by_hex: Dict[Tuple[int, int], str],
     excluded_areas: "Set[str] | frozenset",
+    *,
+    floor_occluders: "Optional[List[Tuple[Set[Tuple[int, int]], float]]]" = None,
+    z_start: Optional[float] = None,
+    z_end: Optional[float] = None,
 ) -> bool:
     """True si la case cible est vue depuis l'ancre OU un vantage latéral du tireur.
 
@@ -3992,12 +4090,16 @@ def _los_hex_visible(
     l'unité cible : sinon, pour une cible étalée (swarm), un latéral fixe « regarde au coin » et
     voit des cases dans une direction différente (faux positif). PRIMITIVE PARTAGÉE ciblage +
     preview + mirroir WASM : LoS identique par construction.
-    """
+
+    LoS 3D : ``floor_occluders``/``z_start``/``z_end`` propagés tels quels aux tracés ancre ET
+    latéraux (même ``z_start`` = sommet du tireur pour tous ses vantages, cf. plan)."""
     if _los_line_segment_clear(shooter_anchor[0], shooter_anchor[1], tgt_col, tgt_row,
-                               wall_set, obscuring_by_hex, excluded_areas):
+                               wall_set, obscuring_by_hex, excluded_areas,
+                               floor_occluders=floor_occluders, z_start=z_start, z_end=z_end):
         return True
     for sc, sr in _shooter_lateral_vantage_hexes(shooter_anchor, shooter_hexes, (tgt_col, tgt_row)):
-        if _los_line_segment_clear(sc, sr, tgt_col, tgt_row, wall_set, obscuring_by_hex, excluded_areas):
+        if _los_line_segment_clear(sc, sr, tgt_col, tgt_row, wall_set, obscuring_by_hex, excluded_areas,
+                                   floor_occluders=floor_occluders, z_start=z_start, z_end=z_end):
             import os as _os_losdbg2
             if _os_losdbg2.environ.get("W40K_LOS_DEBUG"):
                 print(
@@ -4019,6 +4121,9 @@ def _compute_visibility_with_obscuring(
     wall_set: Optional[Set[Tuple[int, int]]] = None,
     obscuring_by_hex: Optional[Dict[Tuple[int, int], str]] = None,
     ignored_wall_hexes: Optional[Set[Tuple[int, int]]] = None,
+    floor_occluders: "Optional[List[Tuple[Set[Tuple[int, int]], float]]]" = None,
+    z_start: Optional[float] = None,
+    z_end: Optional[float] = None,
 ) -> Tuple[int, int, Set[Tuple[int, int]]]:
     """Count target footprint hexes reachable by a clear hex-line from the shooter.
 
@@ -4032,6 +4137,10 @@ def _compute_visibility_with_obscuring(
     ``wall_set`` / ``obscuring_by_hex`` overrides (défaut = sets complets du plateau) : servent la
     règle 13.5 (Gone to Ground), en restreignant le test aux murs Solid/dense et en désactivant les
     obscuring areas (passer ``{}``) pour isoler "not fully visible due to intervening Solid terrain".
+
+    ``floor_occluders``/``z_start``/``z_end`` (LoS 3D plancher-occulteur, propagés à ``_los_hex_visible``) :
+    dalles ``[(E, H), …]`` des étages du tireur et/ou de la cible + sommets verticaux (pouces). Vide/None
+    (sol↔sol) → tracé 2D inchangé. ``z_end`` = sommet du MODÈLE cible (constant sur tout son socle).
     Returns (visible_hexes, total_hexes, visible_hex_set).
     """
     wall_set = _get_wall_set(game_state) if wall_set is None else wall_set
@@ -4062,7 +4171,8 @@ def _compute_visibility_with_obscuring(
     visible_hex_set: Set[Tuple[int, int]] = set()
     for tc, tr in target_hexes:
         if _los_hex_visible(anchor, shooter_hexes, tc, tr, wall_set, obscuring_by_hex,
-                            excluded_areas):
+                            excluded_areas, floor_occluders=floor_occluders,
+                            z_start=z_start, z_end=z_end):
             visible += 1
             visible_hex_set.add((int(tc), int(tr)))
     return visible, len(target_hexes), visible_hex_set
@@ -4149,18 +4259,21 @@ def _resolve_target_models_for_los(
     game_state: Dict[str, Any],
     target: Dict[str, Any],
     gym_training: bool,
-) -> Tuple[List[List[Tuple[int, int]]], List[Optional[Tuple[int, int]]], Any, Any, Any]:
-    """Empreintes par figurine vivante de la cible (+ centres et socle pour le couvert).
+) -> Tuple[List[List[Tuple[int, int]]], List[Optional[Tuple[int, int]]], Any, Any, Any, List[int]]:
+    """Empreintes par figurine vivante de la cible (+ centres, socle couvert et NIVEAUX).
 
     Source unique partagée par ``_compute_unit_los_uncached`` (LoS complète) et
     ``_unit_can_see_any`` (éligibilité), pour garantir une géométrie cible identique.
 
     Retourne (target_model_footprints, target_model_centers, cover_base_shape,
-    cover_base_size, cover_orientation). ``target_model_centers`` est aligné index-à-index
-    sur les footprints ; None pour le repli non-découpé (gym / dict coordonnées-seules).
+    cover_base_size, cover_orientation, target_model_levels). ``target_model_centers`` et
+    ``target_model_levels`` sont alignés index-à-index sur les footprints (niveau utilisé par la
+    LoS 3D pour la dalle occultante côté cible). None/0 pour le repli non-découpé (gym / dict
+    coordonnées-seules).
     """
     target_model_footprints: List[List[Tuple[int, int]]] = []
     target_model_centers: List[Optional[Tuple[int, int]]] = []
+    target_model_levels: List[int] = []
     cover_base_shape: Any = None
     cover_base_size: Any = None
     cover_orientation: Any = None
@@ -4189,6 +4302,7 @@ def _resolve_target_models_for_los(
                     )
                 ])
                 target_model_centers.append((int(m["col"]), int(m["row"])))
+                target_model_levels.append(int(require_key(m, "level")))
     if not target_model_footprints:
         # Pas de découpage par modèle (gym : empreinte réduite à l'ancre ; dict
         # coordonnées-seules : pas de squad) → l'empreinte entière vaut un modèle.
@@ -4197,12 +4311,14 @@ def _resolve_target_models_for_los(
         )
         target_model_footprints.append([(int(c), int(r)) for c, r in target_hexes])
         target_model_centers.append(None)
+        target_model_levels.append(int(target.get("level", 0)))  # get allowed (défaut sol)
     return (
         target_model_footprints,
         target_model_centers,
         cover_base_shape,
         cover_base_size,
         cover_orientation,
+        target_model_levels,
     )
 
 
@@ -4210,11 +4326,11 @@ def _resolve_shooter_models_with_walls(
     game_state: Dict[str, Any],
     shooter: Dict[str, Any],
     gym_training: bool,
-) -> Tuple[List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]]]], List[Tuple[int, int]]]:
+) -> Tuple[List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]], Optional[float], Any]], List[Tuple[int, int]]]:
     """Décompose le TIREUR par figurine vivante pour la LoS (règle 06.01, tracée PAR figurine).
 
     Retourne (shooter_models, shooter_hexes_all) où chaque shooter_model est
-    (anchor, footprint, wall_set_effectif) : le wall_set effectif de CETTE figurine est le mur du
+    (anchor, footprint, wall_set_effectif, z_s, occ_s) : le wall_set effectif de CETTE figurine est le mur du
     plateau MOINS les murs de la ruine qu'elle occupe si elle est sur un étage (niveau >= 1) —
     sinon le mur complet. Ainsi une figurine au sol reste bloquée par un mur même si une figurine
     de la même escouade, sur l'étage, ne l'est plus. ``shooter_hexes_all`` = union des empreintes
@@ -4240,7 +4356,11 @@ def _resolve_shooter_models_with_walls(
         if hit is not None and hit[0] == version:
             return hit[1], hit[2]
     base_wall_set = _get_wall_set(game_state)
-    shooter_models: List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]]]] = []
+    # MODEL_HEIGHT du tireur (pouces) : présent sur toute vraie unité roster. Absent des stubs 2D
+    # (gym) → z_s = None → LoS 3D désactivée pour ce tireur (tracé 2D). Requis pour interpoler la
+    # hauteur même quand le tireur est au sol mais la cible à l'étage (z_s = 0 + MODEL_HEIGHT).
+    shooter_mh = float(shooter["MODEL_HEIGHT"]) if "MODEL_HEIGHT" in shooter else None
+    shooter_models: List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]], Optional[float], Any]] = []
     shooter_hexes_all: List[Tuple[int, int]] = []
     if not gym_training and shooter_id is not None:
         model_ids = require_key(game_state, "squad_models").get(str(shooter_id))
@@ -4270,16 +4390,26 @@ def _resolve_shooter_models_with_walls(
                     game_state, {"id": f"m:{mid}", "level": m_level}, footprint
                 )
                 wall_eff = base_wall_set - ignored if ignored else base_wall_set
-                shooter_models.append((anchor, footprint, wall_eff))
+                # LoS 3D : sommet vertical + dalle occultante PAR figurine tireuse (None si mh absent).
+                if shooter_mh is None:
+                    z_s, occ_s = None, None
+                else:
+                    z_s, occ_s = _fig_z_and_occluder(game_state, m_level, footprint, shooter_mh)
+                shooter_models.append((anchor, footprint, wall_eff, z_s, occ_s))
                 shooter_hexes_all.extend(footprint)
     if not shooter_models:
         anchor, footprint = _resolve_unit_anchor_and_footprint(
             game_state, shooter, gym_training=gym_training
         )
         footprint = [(int(c), int(r)) for c, r in footprint]
+        s_level = int(shooter.get("level", 0))  # get allowed (champ optionnel, défaut sol)
         ignored = _walls_around_occupied_floor(game_state, shooter, footprint)
         wall_eff = base_wall_set - ignored if ignored else base_wall_set
-        shooter_models.append(((int(anchor[0]), int(anchor[1])), footprint, wall_eff))
+        if shooter_mh is None:
+            z_s, occ_s = None, None
+        else:
+            z_s, occ_s = _fig_z_and_occluder(game_state, s_level, footprint, shooter_mh)
+        shooter_models.append(((int(anchor[0]), int(anchor[1])), footprint, wall_eff, z_s, occ_s))
         shooter_hexes_all.extend(footprint)
     if cache_key is not None:
         game_state["_shooter_los_models_cache"][cache_key] = (
@@ -4289,20 +4419,32 @@ def _resolve_shooter_models_with_walls(
 
 
 def _target_model_visible_cells(
-    shooter_models: List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]]]],
+    shooter_models: List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]], Optional[float], Any]],
     target_model_hexes: List[Tuple[int, int]],
     obscuring_by_hex: Dict[Tuple[int, int], str],
     excluded_areas: Set[str],
+    *,
+    z_target: Optional[float] = None,
+    occ_target: "Optional[Tuple[Set[Tuple[int, int]], float]]" = None,
 ) -> Set[Tuple[int, int]]:
     """Cases du socle cible vues depuis AU MOINS une figurine tireuse (règle 06.01, binaire).
 
     Chaque figurine tireuse utilise son propre wall_set effectif (murs ignorés si elle est sur un
-    étage). Une case cible est vue dès qu'une figurine tireuse a une ligne dégagée vers elle."""
+    étage). Une case cible est vue dès qu'une figurine tireuse a une ligne dégagée vers elle.
+
+    LoS 3D : ``z_target``/``occ_target`` = sommet vertical + dalle occultante de CE modèle cible.
+    Combinés PAR figurine tireuse à ses propres ``z_s``/``occ_s`` (portés par le 5-tuple). Sol↔sol
+    (z None des deux côtés, aucune dalle) → tracé 2D inchangé."""
     vset: Set[Tuple[int, int]] = set()
     for tc, tr in target_model_hexes:
-        for s_anchor, s_footprint, s_wall in shooter_models:
+        for s_anchor, s_footprint, s_wall, z_s, occ_s in shooter_models:
+            floor_occ = None
+            if (z_s is not None) and (z_target is not None):
+                occs = [o for o in (occ_s, occ_target) if o is not None]
+                floor_occ = occs or None
             if _los_hex_visible(
-                s_anchor, s_footprint, tc, tr, s_wall, obscuring_by_hex, excluded_areas
+                s_anchor, s_footprint, tc, tr, s_wall, obscuring_by_hex, excluded_areas,
+                floor_occluders=floor_occ, z_start=z_s, z_end=z_target,
             ):
                 vset.add((int(tc), int(tr)))
                 break
@@ -4339,14 +4481,25 @@ def _unit_can_see_any(game_state: Dict[str, Any], shooter: Dict[str, Any], targe
     shooter_models, shooter_hexes_all = _resolve_shooter_models_with_walls(
         game_state, shooter, gym_training
     )
-    target_model_footprints, _centers, _bshape, _bsize, _borient = _resolve_target_models_for_los(
-        game_state, target, gym_training
-    )
+    (
+        target_model_footprints, _centers, _bshape, _bsize, _borient, target_model_levels
+    ) = _resolve_target_models_for_los(game_state, target, gym_training)
     obscuring_by_hex = _get_obscuring_hex_to_area(game_state)
     excluded_base = _excluded_obscuring_areas(obscuring_by_hex, shooter_hexes_all)
-    for model_hexes in target_model_footprints:
+    # LoS 3D : MODEL_HEIGHT cible (None sur stubs 2D → z_t None → tracé 2D).
+    target_mh = float(target["MODEL_HEIGHT"]) if "MODEL_HEIGHT" in target else None
+    for idx, model_hexes in enumerate(target_model_footprints):
         excluded = excluded_base | _excluded_obscuring_areas(obscuring_by_hex, model_hexes)
-        if _target_model_visible_cells(shooter_models, model_hexes, obscuring_by_hex, excluded):
+        if target_mh is None:
+            z_t, occ_t = None, None
+        else:
+            z_t, occ_t = _fig_z_and_occluder(
+                game_state, target_model_levels[idx], model_hexes, target_mh
+            )
+        if _target_model_visible_cells(
+            shooter_models, model_hexes, obscuring_by_hex, excluded,
+            z_target=z_t, occ_target=occ_t,
+        ):
             return True
     return False
 
@@ -4408,7 +4561,7 @@ def hidden_enemy_out_of_detection(
         shooter_socle = Socle(
             "round", 1, shooter_anchor[0], shooter_anchor[1], set(shooter_hexes), [shooter_anchor]
         )
-    footprints, centers, bshape, bsize, borient = _resolve_target_models_for_los(
+    footprints, centers, bshape, bsize, borient, _levels = _resolve_target_models_for_los(
         game_state, enemy, gym_training
     )
     _bshape = bshape if bshape is not None else "round"
@@ -4468,10 +4621,13 @@ def _compute_unit_los_uncached(
         cover_base_shape,
         cover_base_size,
         cover_orientation,
+        target_model_levels,
     ) = _resolve_target_models_for_los(game_state, target, gym_training)
 
     obscuring_by_hex = _get_obscuring_hex_to_area(game_state)
     excluded_base = _excluded_obscuring_areas(obscuring_by_hex, shooter_hexes_all)
+    # LoS 3D : MODEL_HEIGHT cible (None sur stubs 2D → z_t None → tracé 2D inchangé).
+    target_mh = float(target["MODEL_HEIGHT"]) if "MODEL_HEIGHT" in target else None
 
     visible = 0
     total = 0
@@ -4480,10 +4636,17 @@ def _compute_unit_los_uncached(
     # Visibilité intégrale par figurine (index aligné sur target_model_footprints) : True si tout le
     # socle de CETTE figurine est vu par le tireur. Base du test (b) par-figurine du couvert (13.08).
     model_full_vis: List[bool] = []
-    for model_hexes in target_model_footprints:
+    for idx, model_hexes in enumerate(target_model_footprints):
         excluded = excluded_base | _excluded_obscuring_areas(obscuring_by_hex, model_hexes)
+        if target_mh is None:
+            z_t, occ_t = None, None
+        else:
+            z_t, occ_t = _fig_z_and_occluder(
+                game_state, target_model_levels[idx], model_hexes, target_mh
+            )
         vset = _target_model_visible_cells(
-            shooter_models, model_hexes, obscuring_by_hex, excluded
+            shooter_models, model_hexes, obscuring_by_hex, excluded,
+            z_target=z_t, occ_target=occ_t,
         )
         v = len(vset)
         t = len(model_hexes)

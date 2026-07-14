@@ -1,0 +1,10 @@
+{
+  "primary_objectives": ["objectives_control"],
+  "wall_ref": "walls-mc1.json",
+  "terrain_ref": "terrain-floors-test.json",
+  "units": [
+    { "id": 9001, "unit_type": "Intercessor", "player": 1, "col": 110, "row": 140, "level": 1 },
+    { "id": 9002, "unit_type": "Termagant",   "player": 2, "col": 110, "row": 172 },
+    { "id": 9003, "unit_type": "Termagant",   "player": 2, "col": 110, "row": 200 }
+  ]
+}

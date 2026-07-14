@@ -4283,12 +4283,28 @@ def _attacker_model_can_reach_squad(
         attacker_model["BASE_SHAPE"], attacker_model["BASE_SIZE"], ac, ar,
         set(shooter_hexes), [(ac, ar)],
     )
+    # LoS 3D plancher-occulteur : sommet vertical + dalle occultante du tireur, hoistés (constants
+    # sur toutes les cibles). Actif dès qu'un côté est à l'étage (level >= 1) ; sol↔sol → occluders
+    # vides → tracé 2D inchangé (non-régression). MODEL_HEIGHT requis sur toute vraie unité roster ;
+    # fetch seulement si le tireur est à l'étage (fetch paresseux sinon, quand une CIBLE élevée
+    # active la 3D — le tireur reste alors au sol : z = 0 + MODEL_HEIGHT, sans dalle).
+    from engine.phase_handlers.shooting_handlers import _fig_z_and_occluder
+    shooter_level = int(attacker_model.get("level", 0))  # get allowed (champ optionnel, défaut sol)
+    shooter_squad_id = str(require_key(attacker_model, "squad_id"))
+    shooter_z: Optional[float] = None
+    shooter_occ = None
+    if shooter_level >= 1:
+        _s_mh = float(require_key(units_cache[shooter_squad_id], "MODEL_HEIGHT"))
+        shooter_z, shooter_occ = _fig_z_and_occluder(
+            game_state, shooter_level, shooter_hexes, _s_mh
+        )
     for mid in target_mids:
         tm = models_cache.get(mid)
         if tm is None:
             continue
         tc = int(tm["col"])
         tr = int(tm["row"])
+        target_level = int(tm.get("level", 0))  # get allowed (champ optionnel, défaut sol)
         footprint = list(_compute_unit_occupied_hexes(tc, tr, base_unit, game_state))
         target_socle = Socle(
             base_unit["BASE_SHAPE"], base_unit["BASE_SIZE"], tc, tr,
@@ -4312,9 +4328,25 @@ def _attacker_model_can_reach_squad(
                     eff_detection = base_detection_subhex - detection_penalty
             if edge > eff_detection:
                 continue
+        # LoS 3D : dalles occultantes du tireur et/ou de cette cible + sommets verticaux (pouces).
+        # Actif seulement si un côté est à l'étage ; sinon floor_occ=None → tracé 2D inchangé.
+        floor_occ = None
+        z_start = None
+        z_end = None
+        if shooter_level >= 1 or target_level >= 1:
+            if shooter_z is None:
+                # Tireur au sol, cible élevée : z tireur = 0 (sol) + MODEL_HEIGHT, sans dalle.
+                shooter_z = float(require_key(units_cache[shooter_squad_id], "MODEL_HEIGHT"))
+            z_start = shooter_z
+            _t_mh = float(require_key(base_unit, "MODEL_HEIGHT"))
+            z_end, target_occ = _fig_z_and_occluder(
+                game_state, target_level, footprint, _t_mh
+            )
+            floor_occ = [o for o in (shooter_occ, target_occ) if o is not None] or None
         visible, total, _ = _compute_visibility_with_obscuring(
             game_state, shooter_anchor, shooter_hexes, (tc, tr), footprint,
             ignored_wall_hexes=ignored_wall_hexes,
+            floor_occluders=floor_occ, z_start=z_start, z_end=z_end,
         )
         if visible > 0:
             return True

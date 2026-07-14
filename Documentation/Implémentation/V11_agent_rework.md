@@ -1,7 +1,12 @@
 # V11 — Rétablissement de l'entraînement de l'agent (agent rework)
 
 Date d'audit : 2026-07-14. Tous les faits ci-dessous ont été vérifiés dans le code actuel
-(lecture + exécution de smoke tests). Chaque rupture est accompagnée de sa reproduction exacte.
+(lecture + exécution de smoke tests), puis contre-vérifiés par une review indépendante
+(2026-07-14 soir). Chaque rupture est accompagnée de sa reproduction exacte.
+
+**Convention d'ancrage** : l'ancre de référence est le NOM DE FONCTION ; les numéros de ligne
+sont indicatifs (constaté pendant l'audit : fight_handlers.py a bougé de ~45 lignes en une
+journée). Toujours re-localiser par grep du nom avant d'éditer.
 
 ## 1. Objectif
 
@@ -11,10 +16,16 @@ allocation des pertes par-figurine), en trois phases :
 
 - **Phase A (obligatoire)** : remise en route — le pipeline tourne de bout en bout sans erreur,
   à interface agent constante (action 41 / obs 108).
+- **Phase A' (obligatoire, décision utilisateur 2026-07-14)** : entraîner l'agent sur TOUTES les
+  règles implémentées — (P1) porter dans le chemin vif les règles restées dans le code mort puis
+  supprimer le code mort, (P2-P3) donner à l'agent chaque décision que les règles laissent au
+  joueur (mécanisme générique de décision), (P4-P5) observation de support + validation par
+  tranche. Périmètre strict : règles DÉJÀ implémentées — aucune feature absente du moteur.
+  Détail en section 8.
 - **Phase B (obligatoire)** : mise à niveau de l'observation — l'agent perçoit les niveaux
   (élévation) et les coûts associés.
-- **Phase C (optionnelle, hors scope initial)** : nouveaux points de décision (montée d'étage,
-  choix de cible en mêlée). À ne PAS entamer sans validation utilisateur.
+- **Phase C (optionnelle, hors scope initial)** : nouveaux points de décision au-delà de la
+  Phase A' (ex. montée d'étage). À ne PAS entamer sans validation utilisateur.
 
 **Interdits absolus** (CLAUDE.md) : aucun fallback/workaround/valeur par défaut pour masquer une
 erreur ; ne jamais modifier `config/users.db` ni `ai/models/**/*.zip` ; les règles de jeu se
@@ -40,7 +51,8 @@ vérifient dans `Documentation/40k_rules/` avant toute décision règles.
   Layout **purement 2D** (col/row) : aucune feature de niveau/élévation.
 - Rewards : `RewardCalculator` ([reward_calculator.py:23](../../engine/reward_calculator.py#L23)) piloté par
   `CoreAgent_rewards_config.json` (squad_shaping, base_actions, situational_modifiers,
-  zone_intent_shaping), aucune clé par défaut. OK à interface constante.
+  zone_intent_shaping) — pas de valeurs par défaut, à une nuance près :
+  `situational_modifiers` est optionnel dans une branche (~L782). OK à interface constante.
 - Le moteur distingue déjà training et PvP : `gym_training_mode` (auto-résolution des prompts,
   `_is_player_human` renvoie False — [w40k_core.py:2201-2206](../../engine/w40k_core.py#L2201-L2206)) et `pve_mode` (adversaire géré
   par wrapper externe en training, `pve_mode=False`, [w40k_core.py:226-229](../../engine/w40k_core.py#L226-L229)).
@@ -76,7 +88,8 @@ Cause : `_list_available_board_refs` ([train.py:586-591](../../ai/train.py#L586-
 ### R3 — Banque de scénarios d'entraînement incompatible avec le contrat scénario actuel
 La banque vit dans `config/agents/CoreAgent/scenarios/` — **61 JSONs** : training/ 30 +
 training/training_benchmark/ 4, holdout_regular/ 10, holdout_hard/ 10 + holdout_hard/matchups/ 7
-(attention : ne pas compter les sous-dossiers comme des fichiers) + rosters
+(dans des sous-sous-dossiers `matchups/run_*/` ; attention : ne pas compter les dossiers comme
+des fichiers) + rosters
 `config/agents/_p2_rosters/`. Il existe aussi `scenarios/training_save/` (30 JSONs de plus) —
 statuer en T4 : migrer ou archiver. Le contrat moteur a changé
 (commit `540d0674` "terrain OK") — cinq incompatibilités indépendantes, toutes vérifiées par
@@ -101,6 +114,16 @@ exécution ou lecture :
   contient que `mc1.json` — le `deployment_zone: "hammer"` de toute la banque est introuvable.
 - **(e) Niveaux** : les scénarios d'entraînement n'ont pas de `terrain_ref`, donc aucun étage —
   l'agent ne s'entraînerait jamais sur la feature niveaux même une fois le reste réparé.
+- **(f) La training config ELLE-MÊME est cassée** (raté des deux premiers audits) : dans les
+  5 phases de `CoreAgent_training_config.json`, `scenario_sampling.train_wall_ref_weights` =
+  `walls-11/21/31.json` (0.3 chacun, inexistants) et `eval_objectives_refs` =
+  `objectives-51.json` (le dossier `objectives/` n'existe plus). Après le fix R2,
+  `_expand_random_ref_weights` lèvera « unknown refs for board walls » ([train.py:623-628](../../ai/train.py#L623-L628)).
+- **(g) Chemin d'éval holdout cassé dans `ai/bot_evaluation.py`** :
+  `_materialize_eval_scenario_refs` ÉMET `objectives_ref` (L75, clé rejetée par le moteur) et
+  les `eval_wall_refs`/`eval_objectives_refs` pointent les mêmes fichiers inexistants.
+  Consommé par les callbacks d'éval de train.py (~L3231/3340), l'éval finale (~4185) —
+  cassera même après T3/T4 si seul train.py est migré.
 
 ### R4 — Allocation des pertes : gym non reconnu comme "défenseur IA" (BLOQUANT runtime)
 **Repro** (moteur nu, gym_training_mode=True, scénario board valide) : première action
@@ -112,17 +135,22 @@ lisent UNIQUEMENT `game_state["player_types"]` ; en training self-play `pve_mode
 humain. Il y a en réalité **QUATRE prédicats divergents** :
 - `W40KEngine._is_player_human` — consciente de `gym_training_mode` (L2201-2206) ;
 - `_target_defender_is_ai` ([shared_utils.py:89-101](../../engine/phase_handlers/shared_utils.py#L89-L101)) — player_types only, `auto_decider` de SHOOT_CTX ;
-- `_is_ai_controlled_fight_unit` ([fight_handlers.py:97-105](../../engine/phase_handlers/fight_handlers.py#L97-L105)) — player_types only ; utilisée par
-  `_fight_auto_defender` → `auto_decider` de **FIGHT_CTX** ([fight_handlers.py:5670-5684](../../engine/phase_handlers/fight_handlers.py#L5670-L5684)) et par
-  les décisions `defender_human` du flux fight (L5380, L5405, L6106, L6140) ;
-- `_is_ai_controlled_shooting_unit` ([shooting_handlers.py:2147-2155](../../engine/phase_handlers/shooting_handlers.py#L2147-L2155)) — player_types only, pilote
+- `_is_ai_controlled_fight_unit` (fight_handlers, def ~L97) — player_types only ; utilisée par
+  `_fight_auto_defender` (def ~L5705) → `auto_decider` de **FIGHT_CTX** (~L5715-5728) et par
+  les 4 décisions `defender_human` du flux fight (~L5425, L5450, L6150, L6184) ;
+- `_is_ai_controlled_shooting_unit` (shooting_handlers, def ~L2144) — player_types only, pilote
   l'auto-activation `active_shooting_unit` (cf. ⚠️ ci-dessous : ne PAS la rendre vraie en gym).
+**La mêlée crashe de la même façon que le tir** (vérifié par lecture) : `squad_fight` →
+`build_manual_fight_allocation` non `done` → `RuntimeError "squad_fight: allocation combat non
+terminee en auto"` ([w40k_core.py:5026-5031](../../engine/w40k_core.py#L5026-L5031)), garde jumelle dans fight_handlers
+(~L3352-3357). Le gate `is_gym_training` de la consolidation (~L1552) ne couvre PAS
+l'allocation.
 **Fix vérifié par simulation côté tir uniquement** (monkeypatch : `_target_defender_is_ai`
 renvoie True si `game_state["gym_training_mode"]`) : le tir s'auto-résout ensuite correctement.
 ⚠️ Le smoke test « moteur nu jusqu'au tour 5 » ne prouve PAS le chemin d'allocation fight :
-seule `_target_defender_is_ai` était patchée. Soit les mêlées n'ont pas produit de pertes à
-allouer, soit le chemin auto gym (gardé par `is_gym_training`, [fight_handlers.py:1552](../../engine/phase_handlers/fight_handlers.py#L1552)) l'a
-contourné — à couvrir explicitement en T1 (scénario de smoke avec pertes en mêlée).
+seule `_target_defender_is_ai` était patchée — la seule explication cohérente est qu'aucune
+blessure de mêlée n'a été réussie pendant le smoke. À couvrir explicitement en T1 (scénario de
+smoke avec pertes en mêlée garanties).
 ⚠️ Ne PAS "fixer" en mettant `player_types` à `"ai"` : cela active l'auto-activation tir
 (`active_shooting_unit`, [shooting_handlers.py:1082-1086](../../engine/phase_handlers/shooting_handlers.py#L1082-L1086)) qui reste alors périmé après
 l'activation et fait exploser le décodeur (`active_shooting_unit X is not in
@@ -134,12 +162,17 @@ shoot_activation_pool`, [action_decoder.py:418-423](../../engine/action_decoder.
 **advance direction 5** → `ValueError: convert_squad_action: advance_roll manquant`
 ([action_decoder.py:885](../../engine/action_decoder.py#L885)).
 - `ai/evaluation_bots.py:36` : `WAIT_ACTION = 11` (actuel : **18**) ; usages de `12` comme action
-  spéciale (actuel : fall back dir 0) ; slots de tir supposés 4-8 (actuel : **19-23**).
+  spéciale (actuel : fall back dir 0) ; slots de tir supposés 4-8 (actuel : **19-23**) ;
+  `DEPLOYMENT_ACTIONS = [4..8]` réutilisé comme slots de TIR (L86) ; moves supposés 0-3
+  (`0 in valid_actions` L135, `[0, 1, 2, 3, WAIT_ACTION]` L179) au lieu de 0-5.
 - `ai/env_wrappers.py` : littéraux `11` périmés en L436 (`step(11)`), L796 (`action == 11`),
   L900 (`bot_action == 11`) ; plages shoot 4-8 codées en dur L793, L871, L898. Le fichier
   **mélange déjà les deux espaces** : les branches "Pool empty -> advance phase via WAIT"
   retournent, elles, `18` (valeur correcte) — L556, L854 (BotControlledEnv) et L1172, L1188
   (SelfPlayWrapper). C'est la preuve d'une migration partielle, pas un layout cohérent.
+- `ai/game_replay_logger.py:774-828` (raté des deux premiers audits) : layout encore PLUS
+  ancien à 8 actions (`action % 8`, moves 0-3, shoot=4, charge=5, wait=6, fight=7) — les
+  replays de training décoderaient n'importe quoi ; à migrer ou à condamner explicitement.
 - Les actions de déploiement 4-8 sont, elles, TOUJOURS valides ([action_decoder.py:160-175](../../engine/action_decoder.py#L160-L175)).
 - L'incohérence est documentée dans la config elle-même : `justification` dit
   "action_space_size=31 (16 micro + 15 macro)" alors que le champ vaut 41 (26 micro + 15 macro)
@@ -154,15 +187,22 @@ list` ([charge_handlers.py:3627-3628](../../engine/phase_handlers/charge_handler
 6 lignes plus bas (`_e_bs_int = max(_e_bs) if isinstance(_e_bs, (list, tuple)) ...`, L3634-3635).
 Chemin atteignable en PvP via `_has_valid_charge_target` (L3390) → à corriger indépendamment du
 training. Les rosters d'entraînement Tyranids peuvent contenir ces unités.
+**DEUXIÈME occurrence du même pattern** : `_charge_reverse_goal_bfs_for_eligibility`
+([charge_handlers.py:825-826](../../engine/phase_handlers/charge_handlers.py#L825-L826)), même asymétrie avec l'ennemi (L832-833), calcul fait AVANT le
+garde `BASE_SHAPE == "round"`. Nuance vérifiée : la fonction est DÉSACTIVÉE sur boards scalés
+(appelée seulement si `inches_to_subhex <= 1`, ~L3693-3697 ; notre board = 5) → site
+inatteignable en pratique sur 44x60x5. Le fix T1 couvre quand même LES DEUX sites (défense en
+profondeur) ; seul le premier (L3627) crashe réellement.
 
 ### R7 — Fin d'épisode au tour limite : masque vide sans terminaison (moteur nu)
 **Repro** (moteur nu, sans wrapper, scénario fight, R4 simulé) : au dernier tour, phase fight
 du joueur 2, tous les pools vides, aucun état fight pendant → masque entièrement vide,
 `terminated=False`. MaskablePPO crashe sur masque vide.
-Analyse statique concordante : `_fight_phase_complete` ([fight_handlers.py:1862-1877](../../engine/phase_handlers/fight_handlers.py#L1862-L1877)) et
-`_advance_to_next_player` ([w40k_core.py:5439-5445](../../engine/w40k_core.py#L5439-L5445)) posent bien `game_over` — mais uniquement
-**au sein d'un `step()`**. Masque vide = plus aucun step légal = la complétion de phase n'est
-jamais déclenchée. C'est cohérent avec le fix moteur proposé en T5.2.
+Analyse statique concordante : SEULE `_fight_phase_complete` (fight_handlers, def ~L1867,
+appelée ~L1488/1904/2408) pose `game_over` en vif — et uniquement **au sein d'un `step()`**.
+Masque vide = plus aucun step légal = la complétion de phase n'est jamais déclenchée.
+⚠️ `_advance_to_next_player` (w40k_core ~L5427) est du CODE MORT en production (aucun appelant
+hors `test_engine_turn_loop.py`, vérifié par grep) — ne PAS s'appuyer dessus pour le fix.
 Nuance config : la limite de tours existe en deux endroits — `max_turns` (game_config.json L14)
 et `max_turns_per_episode` (training config) ; clarifier en T5 lequel fait foi en moteur nu.
 Dans la pile réelle, ce cas est censé être absorbé par le "WAIT forcé" du wrapper
@@ -244,13 +284,22 @@ Vérifié par lecture concordante :
      contenant QUE les 2 fichiers (pattern `agent_training_roster*.json` obligatoire, clé
      interne `roster_id` requise) + `"agent_roster_ref": "training_random"` dans les scénarios
      → tirage 50/50 par épisode ;
-   - `config/agents/_p2_rosters/` est PARTAGÉ entre agents (151 fichiers en 150pts) : si les
-     2 rosters incluent l'adversaire, restreindre `opponent_roster_ref` (ref explicite ou
-     liste) — sinon P2 continue de tirer dans toute la banque ;
+   - `config/agents/_p2_rosters/` est PARTAGÉ entre agents (pool de tirage
+     `150pts/training/` = 151 fichiers ; le dossier 150pts en contient bien plus, holdouts
+     inclus) : si les 2 rosters incluent l'adversaire, restreindre `opponent_roster_ref`
+     (ref explicite ou liste) — sinon P2 continue de tirer dans toute la banque ;
    - désactiver `roster_pool_schedule` dans la training config
-     ([game_state.py:1322-1393](../../engine/game_state.py#L1322-L1393)) : le filtre progressif swarm/troop/elite peut vider un
-     pool de 2 fichiers → `FileNotFoundError` ;
-   - `agent_roster_seed` (clé scénario) fige le tirage si un scénario doit être déterministe ;
+     (`_filter_training_roster_candidates`, game_state ~L1322-1393) : le filtre progressif
+     swarm/troop/elite peut vider un pool de 2 fichiers → `ValueError
+     "roster_pool_schedule produced zero eligible training rosters"` (~L1422-1426).
+     Si le schedule reste actif : le nommage doit matcher `(elite|swarm|troop)_(\d+)$`
+     sinon écart SILENCIEUX du fichier ;
+   - contraintes fichiers : suffixes `_kpis`/`_matchups` exclus du tirage, composition non
+     vide. ⚠️ L'unicité des `roster_id` internes n'est PAS vérifiée au tirage (contrôlée
+     seulement sur un chemin marginal) : deux fichiers au même roster_id passent en silence
+     et fausseraient le suivi win-rate par-roster — vérifier à la main les 2 fichiers ;
+   - `agent_roster_seed` (clé scénario) fige le tirage AGENT seulement — il ne fige PAS le
+     tirage opponent (seed non transmis, `random_seed=None`) ;
    - conséquences training attendues : convergence plus rapide (distribution d'observations
      quasi stationnaire), holdouts multi-rosters non pertinents comme critère ; risque
      principal = un roster qui domine le gradient → **suivre le win-rate PAR roster**
@@ -262,19 +311,25 @@ Vérifié par lecture concordante :
 Chaque tranche se termine par sa validation (section 6) AVANT de passer à la suivante.
 
 ### T1 — Fixes moteur neutres (R4, R6)
-1. **R6** : dans [charge_handlers.py:3627-3628](../../engine/phase_handlers/charge_handlers.py#L3627-L3628), normaliser `_mover_bs` en miroir exact du
-   traitement ennemi (L3634-3635) : `_mover_bs_int = max(_mover_bs) if isinstance(_mover_bs,
-   (list, tuple)) else int(_mover_bs)`.
+1. **R6** : normaliser `_mover_bs` en miroir exact du traitement ennemi
+   (`_mover_bs_int = max(_mover_bs) if isinstance(_mover_bs, (list, tuple)) else
+   int(_mover_bs)`) dans les DEUX sites : `charge_build_valid_destinations_pool`
+   (~L3627-3628) ET `_charge_reverse_goal_bfs_for_eligibility` (~L825-826).
 2. **R4** : introduire un prédicat unique (proposé : `is_programmatic_defender(game_state,
    target_sid)` dans shared_utils) : renvoie True si `game_state.get("gym_training_mode")` est
    True, sinon comportement actuel (player_types, erreurs explicites conservées). Sites à
    brancher — inventaire vérifié :
-   - `SHOOT_CTX.auto_decider = _target_defender_is_ai` ([shared_utils.py:113](../../engine/phase_handlers/shared_utils.py#L113)), consommé par
-     `_manual_allocation_step` (L6208, L6238) ;
-   - `FIGHT_CTX.auto_decider = _fight_auto_defender` ([fight_handlers.py:5683](../../engine/phase_handlers/fight_handlers.py#L5683)) et les checks
-     `defender_human` du flux fight (L5380, L5405, L6106, L6140) ;
-   - `HAZARD_CTX` ([shared_utils.py:6419-6431](../../engine/phase_handlers/shared_utils.py#L6419-L6431)) n'a **PAS** d'`auto_decider` — tracer pendant
-     T1 comment l'allocation hazard décide humain-vs-auto avant de conclure ;
+   - `SHOOT_CTX.auto_decider = _target_defender_is_ai` (shared_utils ~L113), consommé par
+     `_manual_allocation_step` (~L6212, L6242) ;
+   - `FIGHT_CTX.auto_decider = _fight_auto_defender` (fight_handlers ~L5728), les checks
+     `defender_human` du flux fight (~L5425, L5450, L6150, L6184), ET les deux gardes
+     `RuntimeError "allocation ... non terminee en auto"` (`squad_shoot`/`squad_fight` dans
+     w40k_core + garde jumelle fight_handlers ~L3352-3357) qui doivent cesser de crasher une
+     fois le prédicat branché ;
+   - `HAZARD_CTX` (shared_utils ~L6423-6437) n'a pas d'`auto_decider` : le hazard est DÉJÀ
+     gym-aware au call-site (`auto_resolve = gym_training_mode`, [w40k_core.py:2634](../../engine/w40k_core.py#L2634)) sans lire
+     player_types — rien à faire en gym ; corollaire à vérifier : en PvE, un défenseur IA
+     passerait par l'allocation hazard MANUELLE ;
    - chemins `squad_shoot_validate` ([w40k_core.py:4685](../../engine/w40k_core.py#L4685)) et prompts rule-choice
      ([w40k_core.py:2527](../../engine/w40k_core.py#L2527)) — déjà sur `_is_player_human`, vérifier qu'ils basculent sur le
      prédicat unique sans changement de comportement PvP.
@@ -282,8 +337,8 @@ Chaque tranche se termine par sa validation (section 6) AVANT de passer à la su
    (auto-activation) sur la bascule gym (cf. ⚠️ R4).
    Ajouter au smoke test T1 un scénario garantissant des **pertes en mêlée** (le chemin
    FIGHT_CTX n'a jamais été exercé en gym, cf. R4).
-3. Vérification de non-régression PvP : `python3 -m pytest tests/ -x -q` (suite existante, 867
-   tests évoqués dans la mémoire projet) + une partie PvP manuelle rapide côté utilisateur.
+3. Vérification de non-régression PvP : `python3 -m pytest tests/ -x -q` (suite existante,
+   1152 tests collectés au 2026-07-14) + une partie PvP manuelle rapide côté utilisateur.
 
 ### T2 — Migration wrappers + bots vers l'espace squad (R5)
 1. Ajouter dans [macro_intents.py](../../engine/macro_intents.py) les constantes nommées manquantes (WAIT=18, bases des
@@ -296,12 +351,25 @@ Chaque tranche se termine par sa validation (section 6) AVANT de passer à la su
    "fight"=25, les moves par direction 0-5/6-11/12-17. Les bots choisissent des actions dans le
    masque : tout choix hors masque = erreur explicite (comportement existant à préserver).
 3. `SelfPlayWrapper` : mêmes corrections (WAIT forcé, détection "pool empty").
-4. Auditer `ai/train.py` et `ai/bot_evaluation.py` pour les mêmes littéraux périmés.
+4. Auditer `ai/train.py`, `ai/bot_evaluation.py` ET `ai/game_replay_logger.py` (layout 8
+   actions, L774-828) pour les mêmes littéraux périmés — y compris les dicts de poids
+   `{4: 0.50, ...}` d'evaluation_bots (6 occurrences) et les `return 10/4`.
 
 ### T3 — Chemins board + config training (R1, R2)
 1. **R2** : remplacer la reconstruction `{cols}x{rows}` de `_list_available_board_refs`
-   ([train.py:586-591](../../ai/train.py#L586-L591)) par `config_loader.get_board_dir()`. Greper `ai/` et `scripts/` pour
-   d'autres reconstructions du même motif et les traiter pareil.
+   ([train.py:586-591](../../ai/train.py#L586-L591)) par `config_loader.get_board_dir()`. Même motif déjà repéré ailleurs :
+   `ai/analyzer.py:224` (et `analyzer_avant_refactor.py:224`) reconstruisent
+   `config/board/{cols}x{rows}/objectives`. Greper `ai/` et `scripts/` pour le solde.
+1bis. **train.py émet encore `objectives_ref`** : `_load_scenario_objectives_ref`
+   ([train.py:562-577](../../ai/train.py#L562-L577)) et le sampler `train_objectives_ref_weights` (~L873, L887-893)
+   expansent des refs `objectives-*.json` — clé que le moteur REJETTE (game_state:320-329).
+   Cette branche doit être supprimée/migrée vers les terrains (T4), sinon le tirage de
+   scénarios de train.py casse après migration.
+1ter. **Migrer la training config et le chemin d'éval** (R3-f/R3-g) : purger
+   `train_wall_ref_weights`/`eval_wall_refs`/`eval_objectives_refs` des refs inexistantes
+   dans les 5 phases de `CoreAgent_training_config.json`, et migrer
+   `_materialize_eval_scenario_refs` (bot_evaluation.py:59-98, émission d'`objectives_ref`)
+   vers le contrat terrain — les callbacks d'éval train.py en dépendent.
 2. **R1** : décision de config (pas de code) : soit ajouter une phase `default` pointant vers la
    config x1 courante dans `CoreAgent_training_config.json`, soit rendre `--training-config`
    obligatoire (erreur explicite listant les phases disponibles). Recommandé : la seconde (pas
@@ -320,6 +388,9 @@ Chaque tranche se termine par sa validation (section 6) AVANT de passer à la su
    dériver des terrains existants (`terrain-mc1.json`, `terrain-floors-test.json`) et des
    anciennes refs objectives/walls de la banque. Phase A : terrains PLATS uniquement (pas
    d'étages) — les étages arrivent en Phase B (cf. R8/LoS 3D).
+   ⚠️ Piège vérifié : un terrain SANS aucune area `"objective": true` donne une liste
+   d'objectifs VIDE en silence (game_state ~L376-381) — le script de migration doit valider
+   ≥ 1 objectif par terrain produit.
 3. Migrer les **61 scénarios** de la banque (training 30 + training_benchmark 4,
    holdout_regular 10, holdout_hard 10 + matchups 7) : supprimer `objectives_ref`, remplacer
    `deployment_zone`/`wall_ref` par `terrain_ref` (+ `wall_ref` réel encore supporté) +
@@ -340,9 +411,11 @@ Chaque tranche se termine par sa validation (section 6) AVANT de passer à la su
 1. Rejouer le smoke test pile complète (annexe A) après T1+T2 : 10 épisodes aléatoires masqués
    doivent se terminer (`terminated=True`, winner déterminé), zéro masque vide, zéro exception.
 2. Si le deadlock R7 persiste : corriger côté moteur la complétion de phase fight au dernier
-   tour (la transition `_advance_to_next_player` [w40k_core.py:5427](../../engine/w40k_core.py#L5427) / `_fight_phase_complete`
-   fight_handlers.py:1790 doit aboutir à `terminated` sans action supplémentaire). Interdit de
-   résoudre par injection d'action côté wrapper.
+   tour, via le SEUL chemin vif : `_fight_phase_complete` (fight_handlers, def ~1867) doit
+   aboutir à `terminated` sans exiger une action supplémentaire quand le pool est vide.
+   `_advance_to_next_player` (w40k_core ~5427) est mort en production (cf. R7) — ne pas s'en
+   servir ; statuer sur sa suppression. Interdit de résoudre par injection d'action côté
+   wrapper.
 3. Étendre le smoke test aux scénarios migrés (T4), sièges p1/p2/random, et à un scénario
    contenant Carnifex/Psychophage (validation R6).
 
@@ -358,13 +431,13 @@ Chaque tranche se termine par sa validation (section 6) AVANT de passer à la su
    (mort → suppression à valider utilisateur) ; marquer les configs snapshot obs 355 comme
    archives.
 
-### Phase B (après T6 validé) — Observation niveaux
+### Phase B (après T6 ET Phase A' — section 8 — validés) — Observation niveaux
 Spec à figer à ce moment-là, principes déjà actés :
 - Ajouter aux 7 features par-figurine un `level` normalisé (source : champ `level` de la
-  figurine, game_state.py:54) et aux 9 features par slot ennemi le niveau de l'ancre ; exposer
-  aussi un signal de coût de descente pour l'activation courante
+  figurine, posé game_state.py ~L162) et aux 9 features par slot ennemi le niveau de l'ancre ;
+  exposer aussi un signal de coût de descente pour l'activation courante
   (`squad_descent_penalty_subhex`, movement_handlers.py:276). Toute modif de layout change
-  `obs_size` (config + `SQUAD_*` [observation_builder.py:1232-1251](../../engine/observation_builder.py#L1232-L1251)) → nouveau modèle from
+  `obs_size` (config + constantes `SQUAD_*` observation_builder ~L1245-1251) → nouveau modèle from
   scratch, mettre à jour la `justification` en même temps.
 - Terrains d'entraînement à étages : SEULEMENT après vérification de l'état du chantier LoS 3D
   (spatial_relations.py:186-189 "câblage incomplet") — sinon l'agent apprendrait sur un tir
@@ -376,7 +449,7 @@ Spec à figer à ce moment-là, principes déjà actés :
 | Tranche | Critère (tous vérifiables par commande) |
 |---|---|
 | T1 | Suite de tests verte ; smoke test moteur nu (annexe A) passe la phase shoot, la phase charge avec Carnifex ET une phase fight avec pertes allouées (chemin FIGHT_CTX) sans exception |
-| T2 | Zéro littéral d'action dans ai/ : `grep -nE "(step\(1[18]\)|WAIT_ACTION|== *1[128]\b|\[4, *5, *6, *7, *8\]|return 18)" ai/*.py` ne retourne que des usages de constantes nommées (le grep initial `step\(11\)\|WAIT_ACTION *= *11` ratait `action == 11`, les plages `[4,5,6,7,8]`, le `12` de GreedyBot et les `return 18` en dur) ; smoke test pile complète avance au-delà du premier WAIT forcé |
+| T2 | Zéro littéral d'action dans ai/. Le grep n'est qu'une HEURISTIQUE (3 versions successives ont toutes eu des trous : `== 11`, `X in valid_actions`, listes, `return 10/12/18`, dicts de poids `{4: 0.50,...}`, `action % 8`, sous-dossiers, + faux positifs légitimes dans train.py) — le critère réel est un AUDIT MANUEL exhaustif des 4 fichiers `evaluation_bots.py`, `env_wrappers.py`, `bot_evaluation.py`, `game_replay_logger.py` : chaque comparaison/émission d'entier d'action passe par une constante de macro_intents. Grep de contrôle : `grep -rnE "(step\([0-9]+\)|WAIT_ACTION|==\s*[0-9]+\b|\b[0-9]+ in valid_actions|return 1[028]\b|% 8)" ai/` avec revue de chaque hit. Smoke test pile complète avance au-delà du premier WAIT forcé |
 | T3 | `train.py --step --training-config x1_debug` dépasse la résolution walls/objectives sans FileNotFoundError |
 | T4 | Les 61 scénarios se chargent (`W40KEngine(scenario_file=...)` + reset, script de balayage) ; zéro clé legacy ; sort de training_save/ statué |
 | T5 | 10 épisodes aléatoires masqués terminés sur ≥3 scénarios × sièges p1/p2 ; zéro masque vide |
@@ -399,3 +472,177 @@ Résultats d'audit (2026-07-14) : moteur nu OK jusqu'au tour 5 avec fixes R4 sim
 R7 en fin de partie) ; pile complète bloquée immédiatement par R5 (`step(11)`).
 Réserve : seul le décideur tir était patché — le chemin d'allocation de pertes en mêlée
 (FIGHT_CTX) n'a pas été prouvé par ce smoke test (cf. R4/T1).
+
+## 8. Phase A' — Toutes les règles implémentées dans le training (P1-P5)
+
+Décision utilisateur (2026-07-14) : l'agent doit s'entraîner sur TOUTES les règles déjà
+implémentées, et chaque fois que les règles laissent un choix au joueur, c'est l'agent qui
+choisit. Périmètre strict : règles présentes dans le moteur — on n'entraîne sur AUCUNE feature
+absente (stratagèmes, CP, FNP, transports, etc. restent hors scope). Prérequis : Phase A
+(T1-T6) validée.
+
+### 8.1 Constat d'architecture (audit 2026-07-14, vérifié par lecture)
+
+Il existe DEUX moteurs de résolution d'attaque :
+- **Chemin vif** (PvP ET gym) : résolution squad — `_manual_roll_intent`
+  ([shared_utils.py:5905-5993](../../engine/phase_handlers/shared_utils.py#L5905-L5993)) + `_resolve_one_manual_wound` (L6038-6114).
+- **Code mort** : `_attack_sequence_rng` (shooting_handlers, ~L5820-6003) — zéro site
+  d'appel vif (utilisé seulement par des tests via monkeypatch) ; les branches `execute_action`
+  qui y menaient lèvent des RuntimeError « squad ... expected » (shoot ~L5510-5529,
+  activate_unit ~L5519-5523, select_weapon ~L5534-5538 « squad_select_weapon expected »,
+  left_click ~L5589-5593, invalid ~L5627-5631) ; état orphelin `_rapid_fire_*` dans
+  w40k_core (~L1055-1061, L2055-2061) et sites shooting_handlers associés (~L230, L947-953,
+  L2500-2506, L4912-4925, L5689-5696). NB : w40k_core ~L3561 est un simple champ de LOG
+  `rapid_fire_bonus_shot`, pas de l'état — le grep `_rapid_fire_` ne l'attrape pas.
+- `WeaponRulesApplier.apply_rules` est un placeholder pass-through ([rules.py:279-327](../../engine/weapons/rules.py#L279-L327)) :
+  les règles d'armes sont validées/parsées mais PAS appliquées par ce système.
+
+Conséquence : toute règle implémentée uniquement dans `_attack_sequence_rng` est inactive
+partout (gym ET PvP).
+
+### 8.2 P1 — Parité de résolution : réimplémentation depuis les PDFs, puis suppression du mort
+
+⚠️ **Le code mort N'EST PAS une spec à porter** — vérifié contre les PDFs du projet (24 Core
+abilities lu) : il implémente une AUTRE édition des règles. Il ne sert que d'indice de point
+d'insertion. Chaque règle se réimplémente depuis le PDF du projet.
+
+Règles à implémenter dans le chemin vif (absentes du vif, présentes dans le mort sous forme
+non conforme) — descriptions = PDF projet :
+
+| Règle (PDF projet) | Indice mort | Point d'insertion vif |
+|---|---|---|
+| HEAVY (24.16) : +1 to hit si unité unengaged ET pas posée sur la table ce tour ET aucun modèle bougé de plus de 3" ce tour — PAS « remained stationary » | ~:5869-5880 | `_manual_roll_intent` (seuil de touche) |
+| HAZARDOUS (24.15) : après que l'unité a résolu TOUTES ses attaques, un hazard roll (06.03) PAR ARME hazardous sélectionnée — pas un jet par attaque. NB : `roll_hazard_for_unit` (vif, shared_utils ~3410, câblé au move via w40k_core ~2635) implémente déjà 06.03 → réutiliser | ~:5887, :5916 | fin d'activation tir/fight |
+| IGNORES_COVER : 17 armes la déclarent, la feature est OBSERVÉE, mais `_cover_worsened_bs` (shared_utils ~5745) ne la vérifie jamais — le malus de couvert est infligé À TORT à ces armes (gym ET PvP ; le commentaire w40k_core ~4380 « appliqué côté frontend » est faux pour la résolution backend) | — (jamais implémentée) | `_cover_worsened_bs` (bypass si arme IGNORES_COVER) |
+| DEVASTATING_WOUNDS (24.10) : critical wound → la séquence de CETTE attaque s'arrête, la cible subit D blessures mortelles APRÈS les dégâts normaux, max 1 figurine endommagée par critical wound — PAS « save sauté » (le mort n'est pas conforme non plus) | ~:5970-5980 | `_resolve_one_manual_wound` + moteur MW |
+| RAPID_FIRE : attaques bonus à mi-portée (conforme PDF) | état w40k_core ~:1055-1061 | `_manual_roll_intent` (calcul NB à la déclaration, comme Blast) |
+| closest_target_penetration (règle projet unit_rules.json) : AP+1 sur la cible éligible la plus proche | ~:5836-5840 | `_manual_roll_intent` (AP effectif) |
+| reroll_1_towound au TIR | ~:5935-5940 | `_manual_roll_intent` — déjà vif en fight (`_manual_roll_fight_intent`) : asymétrie tir/fight à combler |
+| reroll_towound_target_on_objective au TIR | ~:5945-5957 | idem |
+
+Méthode : une règle = une tranche (PDF relu AVANT implémentation + test unitaire dédié).
+⚠️ Le chemin squad est partagé PvP/gym : chaque implémentation corrige AUSSI le PvP — c'est
+voulu (conformité accrue partout), à annoncer à l'utilisateur (équilibre de jeu modifié).
+
+Cas particulier : **`reroll_charge`** est déclaré dans `config/unit_rules.json` mais
+n'existe NULLE PART dans le code (grep zéro, ni vif ni mort). À statuer : implémenter
+(charge_handlers, reroll du 2D6) ou retirer de la config.
+
+Déjà vifs (rien à porter) : charge_impact (règle d'unité D6 4+ → 1 MW, `_apply_charge_impact`
+~L4551), charge/shoot_after_advance/flee, move_after_shooting, reactive_move,
+**Desperate Escape (09.07)**, les 4 rerolls de fight, Blast, Pistol (10.06), couvert 13.08
+(mécanique conforme PDF SAUF le cas IGNORES_COVER ci-dessus), obscuring, invuln, allocation
+05.03/05.04, T du bodyguard 19.02.
+NB : `closest_target_penetration` apparaît aussi comme feature d'OBSERVATION
+(observation_builder) — actuellement observée sans effet en résolution.
+
+**Périmètre à statuer (utilisateur)** : ~10 règles d'armes sont déclarées dans les armories ET
+observées (observation_builder ~65-92) mais appliquées NULLE PART (ni vif ni mort) : TORRENT,
+TWIN_LINKED, SUSTAINED_HITS, LETHAL_HITS, MELTA, ANTI_*, INDIRECT_FIRE, EXTRA_ATTACKS,
+PSYCHIC. Elles sont hors périmètre A' (« règles présentes dans le moteur ») — MAIS
+IGNORES_COVER fait exception (intégrée au tableau P1 ci-dessus) car son absence rend FAUSSE
+une règle implémentée (le couvert). Pour les autres : soit les implémenter (extension de
+périmètre à valider), soit retirer leurs canaux d'observation (bruit pur pour PPO), jamais
+le statu quo silencieux.
+
+Suppression du code mort (fin de P1) : `_attack_sequence_rng` (~5820-6003), les branches
+`squad path expected` (shoot, left_click, select_weapon, invalid — cf. 8.1), l'état
+`_rapid_fire_*` de w40k_core (~1055-1061, 2055-2061) ET ses sites shooting_handlers
+(~L230, 947-953, 2500-2506, 4912-4925, 5689-5696), le champ de log `rapid_fire_bonus_shot`
+(w40k_core ~3561, non attrapé par le grep), et les tests qui monkeypatchent le mort.
+Critère : grep `_attack_sequence_rng|_rapid_fire_|rapid_fire_bonus_shot` vide (hors nouvelle
+implémentation vive) + suite verte.
+
+### 8.3 P2 — Mécanisme générique « décision agent »
+
+Un seul mécanisme pour tous les choix joueur, au lieu d'actions ad hoc par décision :
+- quand le moteur atteint un point de choix joueur en gym, au lieu d'appeler une heuristique
+  `_ai_select_*`, il pousse un `pending_agent_decision` (type + liste ORDONNÉE et STABLE de
+  ≤ K candidats) ;
+- le masque expose K actions génériques `CHOICE_0..K-1` ; l'observation gagne un bloc
+  « contexte de décision » (type one-hot + features par candidat) ;
+- l'agent choisit, le moteur applique. **Miroir exact des prompts PvP `waiting_for_player`**
+  (même sémantique, consommateur différent) — conforme à la règle projet « le flux gym copie
+  le flux PvP » ;
+- les heuristiques `_ai_select_*` sont CONSERVÉES pour le bot adversaire (GreedyBot) uniquement.
+
+Impact interface : action_space 41 → 41+K (recommandé K=6, aligné sur les 6 slots figurines ;
+actions dédiées plutôt que surcharge des slots tir 19-23, pour la lisibilité du masque) ;
+obs_size change → nouveau modèle from scratch (`--new`, déjà acté). Mettre à jour la
+`justification` de la config en même temps.
+
+### 8.4 P3 — Branchement décision par décision (une tranche = une décision + validation)
+
+⚠️ Les sites à remplacer sont ceux du PIPELINE VIF gym (vérifiés par contre-review), pas les
+heuristiques `_ai_select_*` qui ne sont que des fallbacks/chemins legacy.
+
+Ordre par valeur tactique :
+0. **Prompts rule-choice** (le plus urgent — pseudo-décision aléatoire structurelle) : en gym,
+   `_select_ai_rule_choice_option` choisit par `raw_action_int % len(options)`
+   ([w40k_core.py:2494](../../engine/w40k_core.py#L2494)) — l'agent « choisit » via une action émise pour tout autre chose,
+   sans voir le prompt. À remplacer par une vraie décision P2.
+1. **Cible de mêlée** — le site vif est la boucle `get_best_enemy_score_for_unit` de
+   `squad_fight` (w40k_core ~L4999-5011), PAS `_ai_select_fight_target` (fight_handlers ~1725,
+   simple fallback quand la cible préférée est morte) ; pilote du mécanisme P2.
+2. **Cible de charge** — le site vif est la même boucle de scoring dans `convert_squad_action`
+   du décodeur (action_decoder ~L917-940), PAS `charge_handlers:1506` (chemin
+   `convert_gym_action`, hors gym mais encore vif en PvE via pve_controller — ne pas le
+   supprimer, juste ne pas le brancher).
+3. **Choix de l'unité à activer** par phase — `eligible_units[0]` a 9 occurrences dans
+   action_decoder ; les sites DÉCISIFS du flux vif sont dans `convert_squad_action`
+   (~L837, L876), les autres sont dans la construction du masque ; le plus gros gain
+   stratégique. Contrainte règles : l'ordre en fight reste borné par Fights First
+   (11.04/12.04) et les pools alternés — le choix agent se fait DANS le pool légal courant.
+4. **Allocation des pertes défenseur** — remplace `_select_allocation_model`
+   (shared_utils ~5643) ; candidats = figurines éligibles 05.03/06.02 ; inclut l'allocation
+   hazard ET l'ordre de déclaration des groupes (`declare_order`, décision défenseur 05.03,
+   aujourd'hui `_auto_declared_order`).
+5. **Pile-in / consolidation** — les sites vifs sont `fight_pile_in_plan`
+   (shared_utils ~6708) et `squad_consolidate_plan` (~7038) appelés par `squad_fight`,
+   PAS les `_ai_select_*` de fight_handlers ; candidats = top-K destinations du pool.
+   NB règles : pile-in/conso sont OPTIONNELS et la consolidation a 3 modes en cascade (dont
+   vers objectif) — l'espace de choix doit inclure « ne pas bouger ». ⚠️ Le site vif gym
+   `squad_consolidate_plan` n'implémente que le mode (1) (docstring : option (2) « vers
+   objectif » déférée) — le flux PvP (fight_handlers ~1161-1176) a la cascade complète :
+   écart gym/PvP à combler quand cette tranche s'ouvre.
+6. **Move-after-shooting** (destination — remplace
+   `_select_move_after_shooting_destination_for_ai`, shooting_handlers ~4961) et
+   **reactive_move** (accepter/décliner + destination — protocole `decline_reactive_move`
+   déjà formalisé, shared_utils ~2190).
+7. **FLY / Take to the skies** — déclaration binaire (aujourd'hui auto pour l'IA,
+   movement_handlers ~261/271).
+8. **Optionnels, à statuer utilisateur** : split-fire (en gym, l'escouade entière vise UN
+   slot ; le PvP a `squad_shoot_assign` par-figurine), choix d'arme — deux régimes distincts
+   en gym : RNG = `selectedRngWeaponIndex` pris tel quel (shared_utils ~4489), CC =
+   auto-sélection par expected damage `_auto_select_cc_weapon_for_fig` (shared_utils ~6938,
+   appel ~7016) — les deux sont des décisions joueur auto-résolues,
+   déclaration multi-cibles de charge (PvP oui, gym mono-cible), placement final de charge
+   (`charge_build_valid_plan`, shared_utils ~3955), déploiement (les actions 4-8 sont 5
+   STRATÉGIES scorées, action_decoder ~1682-1698, pas « les 5 premiers hex » — élargir ou non).
+
+Hors scope A' (reste auto, conforme règles car « un placement légal parmi d'autres ») :
+placement par-figurine du move rigide, pivot. Montée d'étage = Phase C.
+
+### 8.5 P4 — Observation de support
+
+Bloc décision (P2) + features nécessaires aux choix : LoS/couvert par slot ennemi, portée
+effective de l'arme active vs distance du slot, flags advanced/fell_back de l'unité active.
+Les niveaux/élévation restent en Phase B (scénarios plats jusque-là).
+
+### 8.6 P5 — Validation par tranche
+
+Chaque tranche P3 : suite de tests verte + smoke 10 épisodes + run court `x1_debug` +
+win-rate vs GreedyBot ≥ tranche précédente. Si l'ajout d'un point de décision DÉGRADE le
+win-rate, la décision est mal observée ou mal récompensée → corriger avant d'empiler la
+suivante. Interdits : masquer une régression en retirant silencieusement la décision.
+
+Points de vigilance :
+- l'ordre des candidats doit être déterministe et stable (sinon l'assignation de crédit PPO
+  est brouillée) ;
+- chaque décision ajoutée allonge l'épisode en steps → surveiller `episode_steps` vs la
+  normalisation `/100` de l'observation globale ;
+- les heuristiques du RewardMapper utilisées par les anciens `_ai_select_*`
+  (`get_shooting_priority_reward`) peuvent devenir du reward shaping pour guider les
+  nouvelles décisions — à statuer par tranche, jamais en silence. NB : un de ses deux
+  consommateurs, `_ai_select_shooting_target` (shooting_handlers, def ~2093), est DÉJÀ mort
+  (zéro appelant) — à inclure dans la suppression P1.

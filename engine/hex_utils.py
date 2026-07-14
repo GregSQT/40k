@@ -332,6 +332,67 @@ def hex_line_iter(
             yield cell
 
 
+def hex_line_iter_t(
+    col1: int, row1: int, col2: int, row2: int
+) -> Iterator[Tuple[Tuple[int, int], float]]:
+    """Comme :func:`hex_line_iter`, mais yield ``(cell, t)`` avec ``t = i / n`` la position
+    paramétrique de la cellule le long du tracé (0.0 au départ, 1.0 à l'arrivée).
+
+    MIROIR EXACT de :func:`hex_line_iter` : même nudge de départage, même cube-lerp
+    ``a + (b - a) * t`` recalculé à chaque point, même déduplication, même séquence. Sert la LoS 3D
+    plancher-occulteur (interpolation de hauteur ``h(t)``) sans alourdir le chemin chaud 2D de
+    :func:`hex_line_iter`. La duplication du corps est VOULUE : garder les deux boucles
+    byte-identiques est plus sûr qu'une factorisation qui ralentirait le hot path 2D.
+    """
+    if col1 == col2 and row1 == row2:
+        yield (col1, row1), 0.0
+        return
+
+    x1, y1, z1 = offset_to_cube(col1, row1)
+    x2, y2, z2 = offset_to_cube(col2, row2)
+
+    n = max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
+    seen: Set[Tuple[int, int]] = set()
+
+    ax = x1 + 1e-6
+    ay = y1 + 1e-6
+    az = z1 - 2e-6
+    bx = (x2 + 1e-6) - ax
+    by = (y2 + 1e-6) - ay
+    bz = (z2 - 2e-6) - az
+
+    for i in range(n + 1):
+        t = i / n if n > 0 else 0.0
+        fx = ax + bx * t
+        fy = ay + by * t
+        fz = az + bz * t
+
+        rx = round(fx)
+        ry = round(fy)
+        rz = round(fz)
+
+        dx = rx - fx
+        if dx < 0.0:
+            dx = -dx
+        dy = ry - fy
+        if dy < 0.0:
+            dy = -dy
+        dz = rz - fz
+        if dz < 0.0:
+            dz = -dz
+        if dx > dy and dx > dz:
+            rx = -ry - rz
+        elif dy > dz:
+            ry = -rx - rz
+        else:
+            rz = -rx - ry
+
+        cell = (rx, rz + ((rx - (rx & 1)) >> 1))
+        if cell not in seen:
+            seen.add(cell)
+            yield cell, t
+
+
 def hex_line(
     col1: int, row1: int, col2: int, row2: int
 ) -> List[Tuple[int, int]]:

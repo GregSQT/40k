@@ -112,6 +112,7 @@
     { "id": 119, "unit_type": "Termagant",            "player": 2, "col": 167,   "row": 218,  "level": 1 },
     { "id": 120, "unit_type": "Termagant",            "player": 2, "col": 53,   "row": 67 },
     { "id": 121, "unit_type": "Termagant",            "player": 2, "col": 53,   "row": 60 },
+    { "id": 122, "unit_type": "Termagant",            "player": 2, "col": 210,   "row": 35 },
 
     {
       "id": 110, "unit_type": "Barbgaunt", "player": 2, "col": 44, "row": 46,
