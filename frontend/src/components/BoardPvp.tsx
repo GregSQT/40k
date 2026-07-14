@@ -602,7 +602,7 @@ type BoardProps = {
   /** Move par-figurine (squad.md brique 3) — plan provisoire non committe. */
   squadMovePlan?: {
     unitId: number;
-    models: Record<string, { col: number; row: number; level?: number }>;
+    models: Record<string, { col: number; row: number; level?: number; orientation?: number }>;
     originModels: Record<string, { col: number; row: number }>;
     activeModelId: string | null;
     perModelValid: Record<string, boolean>;
@@ -3242,8 +3242,7 @@ export default function Board({
     try {
       const ucByModel = unitsCacheModelCenters(gameState?.units_cache);
       const ucLevels = unitsCacheModelLevels(gameState?.units_cache);
-      const atCurrentPos =
-        source.fromCol === source.unit.col && source.fromRow === source.unit.row;
+      const atCurrentPos = source.fromCol === source.unit.col && source.fromRow === source.unit.row;
       const losPreview = buildLosPreviewFromSource({
         source,
         units,
@@ -3288,6 +3287,7 @@ export default function Board({
     squadShootPlan?.activeModelId,
     squadShootPlan?.unitId,
     gameState?.units_cache,
+    losTerrainFloors,
   ]);
 
   const effectiveBlinkingUnitsWithMovePreview = useMemo(() => {
@@ -4359,6 +4359,7 @@ export default function Board({
     resolvedMoveDestPoolRef,
     footprintMaskLoopsRef,
     onStartMovePreview,
+    losTerrainFloors,
   ]);
 
   /**
@@ -6729,6 +6730,7 @@ export default function Board({
     gameState?.turn,
     gameState?.episode_steps,
     gameState?.units_cache,
+    losTerrainFloors,
   ]);
 
   // Tranche 2 — move-preview PERSISTANTE après pose : union des pools de déplacement de TOUTES les

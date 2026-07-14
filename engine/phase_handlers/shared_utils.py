@@ -15,11 +15,16 @@ if TYPE_CHECKING:
 from shared.data_validation import require_key
 
 # --- Type de plan de mouvement (source unique) ---------------------------------
-# Une entrée positionne UNE figurine : (model_id, col, row) OU (model_id, col, row, level).
-# Le 4e élément (niveau/étage de destination) est optionnel ; None = « garder le niveau courant ».
+# Une entrée positionne UNE figurine : (model_id, col, row), (model_id, col, row, level) OU
+# (model_id, col, row, level, orientation). Le 4e élément (niveau/étage de destination) et le 5e
+# (orientation socle 0..5) sont optionnels ; None = « garder la valeur courante ».
 # Paramètres typés en ``Sequence`` (covariant) pour accepter indifféremment les listes de
-# 3-uplets et de 4-uplets produites par les phases move/charge.
-MovePlanEntry = Union[Tuple[str, int, int], Tuple[str, int, int, Optional[int]]]
+# 3-, 4- ou 5-uplets produites par les phases move/charge.
+MovePlanEntry = Union[
+    Tuple[str, int, int],
+    Tuple[str, int, int, Optional[int]],
+    Tuple[str, int, int, Optional[int], Optional[int]],
+]
 MovePlan = Sequence[MovePlanEntry]
 from engine.action_log_utils import append_action_log
 from engine.combat_utils import (
@@ -608,6 +613,9 @@ def _build_models_for_unit(
         )
         spec_hp_max = int(spec.get("HP_MAX", hp_max))
         spec_hp_cur = int(spec.get("HP_CUR", spec_hp_max))
+        # Orientation 0..5 : spec > unité > 0 (face nord). null explicite (scénario) → 0.
+        _spec_orientation_raw = spec.get("orientation", unit.get("orientation", 0))  # get allowed (champ optionnel, défaut 0 = face nord)
+        _spec_orientation = int(_spec_orientation_raw) if _spec_orientation_raw is not None else 0
         spec_role = _derive_model_role(cast(List[Dict[str, Any]], spec.get("UNIT_RULES", require_key(unit, "UNIT_RULES"))))
         models_cache[model_id] = {
             "squad_id": unit_id,
@@ -624,7 +632,7 @@ def _build_models_for_unit(
             # Orientation PAR FIGURINE (0..5, pas de 60°). Source de vérité du footprint
             # oriente par-fig (pivot molette en move). Défaut métier : héritée de l'unité
             # (spec surchargeable dans le scénario) — pas un fallback anti-erreur.
-            "orientation": int(spec.get("orientation", unit.get("orientation", 0))),
+            "orientation": _spec_orientation,
             "HP_CUR": spec_hp_cur,
             "HP_MAX": spec_hp_max,
             "player": unit_player,

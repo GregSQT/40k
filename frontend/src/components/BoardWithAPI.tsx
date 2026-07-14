@@ -1591,14 +1591,11 @@ export const BoardWithAPI: React.FC = () => {
   // Chargement d'un save-point / d'une partie : époque de reset pour réaligner les états frontend
   // accumulés (ghosts de figs mortes) et tronquer le Game Log au moment chargé.
   const [loadEpoch, setLoadEpoch] = useState(0);
-  const applyLoadedState = useCallback(
-    (_data: { save?: { ts?: string } } | null) => {
-      // Le Game Log du point/partie chargé est réhydraté par useGameLog (event gameLogHydrate émis
-      // par le hook API depuis game_log_history) ; ici on ne fait que réaligner les états frontend.
-      setLoadEpoch((e) => e + 1);
-    },
-    []
-  );
+  const applyLoadedState = useCallback((_data: { save?: { ts?: string } } | null) => {
+    // Le Game Log du point/partie chargé est réhydraté par useGameLog (event gameLogHydrate émis
+    // par le hook API depuis game_log_history) ; ici on ne fait que réaligner les états frontend.
+    setLoadEpoch((e) => e + 1);
+  }, []);
   const handleLoadSave = useCallback(
     async (
       id: string,

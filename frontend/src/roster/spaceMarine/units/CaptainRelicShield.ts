@@ -33,7 +33,16 @@ export class CaptainRelicShield extends LeaderEliteMeleeElite {
   static RULES_STATUS = { reroll_charge: 2, leader: 0 };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
-  static CAN_LEAD = ["ASSAULT INTERCESSOR SQUAD", "BLADEGUARD VETERAN SQUAD", "COMPANY HEROES", "HELLBLASTER SQUAD", "INFERNUS SQUAD", "INTERCESSOR SQUAD", "STERNGUARD VETERAN SQUAD", "TACTICAL SQUAD"];
+  static CAN_LEAD = [
+    "ASSAULT INTERCESSOR SQUAD",
+    "BLADEGUARD VETERAN SQUAD",
+    "COMPANY HEROES",
+    "HELLBLASTER SQUAD",
+    "INFERNUS SQUAD",
+    "INTERCESSOR SQUAD",
+    "STERNGUARD VETERAN SQUAD",
+    "TACTICAL SQUAD",
+  ];
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
@@ -46,9 +55,7 @@ export class CaptainRelicShield extends LeaderEliteMeleeElite {
   ];
 
   // FACTION KEYWORDS
-  static FACTION_KEYWORDS = [
-    { keywordId: "ADEPTUS ASTARTES" },
-  ];
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
 
   static ICON = "/icons/CaptainRelicShield.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

@@ -251,8 +251,22 @@ export function buildShootingLosPreviewFromVisibleHexes(
 function hexNeighborsOddQ(col: number, row: number): Array<[number, number]> {
   const odd = (col & 1) === 1;
   const offsets: Array<[number, number]> = odd
-    ? [[0, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]]
-    : [[0, -1], [1, -1], [1, 0], [0, 1], [-1, 0], [-1, -1]];
+    ? [
+        [0, -1],
+        [1, 0],
+        [1, 1],
+        [0, 1],
+        [-1, 1],
+        [-1, 0],
+      ]
+    : [
+        [0, -1],
+        [1, -1],
+        [1, 0],
+        [0, 1],
+        [-1, 0],
+        [-1, -1],
+      ];
   return offsets.map(([dc, dr]) => [col + dc, row + dr] as [number, number]);
 }
 

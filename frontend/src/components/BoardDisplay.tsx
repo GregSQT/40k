@@ -2647,8 +2647,7 @@ export const drawBoard = (
       // Même rendu lissé que le cône bleu (union polaire) ET même couleur/transparence que le voile
       // d'étage (currentLevel) : vert 0x22c55e au niveau 1, orange/rouge aux niveaux 2/3+, alpha 0.18.
       if (useShootingPreviewPalette && elevatedCells.length > 0) {
-        const elevColor =
-          currentLevel >= 3 ? 0xef4444 : currentLevel === 2 ? 0xf59e0b : 0x22c55e;
+        const elevColor = currentLevel >= 3 ? 0xef4444 : currentLevel === 2 ? 0xf59e0b : 0x22c55e;
         const elevLayout: HexUnionMaskLayout = {
           HEX_HORIZ_SPACING,
           HEX_WIDTH,

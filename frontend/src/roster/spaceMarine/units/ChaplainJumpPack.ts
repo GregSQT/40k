@@ -33,7 +33,10 @@ export class ChaplainJumpPack extends LeaderEliteMeleeElite {
   static RULES_STATUS = { reroll_charge: 2, leader: 0 };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
-  static CAN_LEAD = ["ASSAULT INTERCESSORS WITH JUMP PACKS", "VANGUARD VETERAN SQUAD WITH JUMP PACKS"];
+  static CAN_LEAD = [
+    "ASSAULT INTERCESSORS WITH JUMP PACKS",
+    "VANGUARD VETERAN SQUAD WITH JUMP PACKS",
+  ];
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
@@ -46,9 +49,7 @@ export class ChaplainJumpPack extends LeaderEliteMeleeElite {
   ];
 
   // FACTION KEYWORDS
-  static FACTION_KEYWORDS = [
-    { keywordId: "ADEPTUS ASTARTES" },
-  ];
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
 
   static ICON = "/icons/ChaplainJumpPack.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

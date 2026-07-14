@@ -115,9 +115,7 @@ export function useGameLog(currentTurn?: number) {
       return {
         ...base,
         message:
-          typeof base.message === "string"
-            ? sanitizeGameLogMessage(base.message)
-            : base.message,
+          typeof base.message === "string" ? sanitizeGameLogMessage(base.message) : base.message,
         id: `hydrate_${seq}`,
         timestamp: new Date(seq),
         turnNumber: typeof base.turnNumber === "number" ? base.turnNumber : 1,

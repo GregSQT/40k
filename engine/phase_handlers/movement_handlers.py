@@ -7,7 +7,7 @@ References: AI_TURN.md Section 🏃 MOVEMENT PHASE LOGIC
 ZERO TOLERANCE for state storage or wrapper patterns
 """
 
-from typing import Dict, List, Tuple, Set, Optional, Any, cast
+from typing import Dict, List, Tuple, Set, Optional, Any, Sequence, cast
 import math
 import numpy as np
 from collections import deque, OrderedDict
@@ -2952,7 +2952,7 @@ def movement_build_model_destinations_pool(
     # transmis par l'UI) si fourni, sinon l'orientation committée de la figurine. Sans ça le pool
     # (EZ ennemie 2", collisions) serait calculé sur l'orientation d'origine → une case « valide »
     # deviendrait illégale une fois le socle pivoté.
-    _uo = int(unit.get("orientation", 0))
+    _uo = int(unit.get("orientation", 0))  # get allowed (champ optionnel, défaut 0 = face nord)
     mover_orient = int(orientation) if orientation is not None else int(model.get("orientation", _uo))
 
     _adv_roll = _advance_roll_for(squad_id, game_state)
@@ -3574,6 +3574,7 @@ def movement_commit_move_plan_handler(
             raise ValueError(
                 f"commit_move_plan: plan entry must be [model_id, col, row(, level(, orientation))], got {entry!r}"
             )
+        entry = cast("Sequence[Any]", entry)
         lvl = int(entry[3]) if len(entry) >= 4 and entry[3] is not None else None
         if lvl is not None and lvl < 0:
             raise ValueError(f"commit_move_plan: level must be >= 0, got {entry!r}")

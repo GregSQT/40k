@@ -3805,7 +3805,7 @@ def _walls_around_occupied_floor(
     on retire les murs situés dans ce floor OU adjacents (les murs bordent le floor, souvent juste à
     l'extérieur du rasterisé). Halo scoppé au floor → aucun mur d'un autre décor (vérifié). Set vide si
     tireur au sol (niveau 0), hors de tout floor, ou sans mur."""
-    level = int(unit.get("level", 0) or 0)
+    level = int(unit.get("level", 0))  # get allowed (champ optionnel, défaut sol)
     if level < 1:
         return set()
     wall_set = _get_wall_set(game_state)
@@ -3835,6 +3835,7 @@ def _walls_around_occupied_floor(
             halo.update(get_neighbors(c, r))
         result = wall_set & halo
     if uid is not None:
+        cache = game_state.setdefault("_elevated_ignored_walls_cache", {})
         cache[str(uid)] = (version, result)
     return result
 

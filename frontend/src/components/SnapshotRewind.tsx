@@ -192,9 +192,12 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
   const [savePromptOpen, setSavePromptOpen] = useState(false);
   // Popup « Enregistrer la partie » déplaçable : offset courant + drag en cours (poignée = le titre).
   const [savePos, setSavePos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [saveDrag, setSaveDrag] = useState<{ sx: number; sy: number; bx: number; by: number } | null>(
-    null
-  );
+  const [saveDrag, setSaveDrag] = useState<{
+    sx: number;
+    sy: number;
+    bx: number;
+    by: number;
+  } | null>(null);
   // Popup d'invite : Save / Select / Load cliqués sans répertoire de sauvegarde configuré.
   const [needsDirOpen, setNeedsDirOpen] = useState(false);
   const [saveNote, setSaveNote] = useState("");
@@ -210,7 +213,10 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
   useEffect(() => {
     if (!saveDrag) return;
     const move = (e: MouseEvent) =>
-      setSavePos({ x: saveDrag.bx + e.clientX - saveDrag.sx, y: saveDrag.by + e.clientY - saveDrag.sy });
+      setSavePos({
+        x: saveDrag.bx + e.clientX - saveDrag.sx,
+        y: saveDrag.by + e.clientY - saveDrag.sy,
+      });
     const up = () => setSaveDrag(null);
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
@@ -858,98 +864,111 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
             role="presentation"
             onClick={() => setSavePromptOpen(false)}
             onKeyDown={(e) => e.key === "Escape" && setSavePromptOpen(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.55)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 200000,
-          }}
-        >
-          {/* biome-ignore lint/a11y/noStaticElementInteractions: panneau — stopPropagation intentionnel */}
-          <div
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
             style={{
-              background: "var(--tooltip-bg)",
-              border: "1px solid var(--tooltip-border-color)",
-              borderRadius: "8px",
-              padding: "16px",
-              minWidth: "320px",
-              color: "var(--tooltip-text-color)",
-              boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
-              transform: `translate(${savePos.x}px, ${savePos.y}px)`,
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.55)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 200000,
             }}
           >
-            <h3
-              style={{
-                marginTop: 0,
-                backgroundColor: "var(--settings-title-bg)",
-                padding: "6px 10px",
-                borderRadius: "4px",
-                cursor: "move",
-                userSelect: "none",
-              }}
-              onMouseDown={(e) =>
-                setSaveDrag({ sx: e.clientX, sy: e.clientY, bx: savePos.x, by: savePos.y })
-              }
-            >
-              Enregistrer la partie
-            </h3>
-            <p
-              style={{
-                color: "var(--tooltip-text-color)",
-                marginTop: 0,
-                marginBottom: "6px",
-                fontStyle: "italic",
-              }}
-            >
-              Note (optionnelle) pour retrouver la save :
-            </p>
-            <input
-              type="text"
-              className="replay-note-input"
-              value={saveNote}
-              onChange={(e) => setSaveNote(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !busy) doSave();
-              }}
-              placeholder="ex: avant l'assaut sur l'objectif"
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                padding: "8px 10px",
-                borderRadius: "6px",
-                border: "1px solid #4b5563",
-                color: "#fff",
-              }}
-            />
-            {error && <p style={{ color: "#f87171" }}>{error}</p>}
+            {/* biome-ignore lint/a11y/noStaticElementInteractions: panneau — stopPropagation intentionnel */}
             <div
-              style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "14px" }}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+              style={{
+                background: "var(--tooltip-bg)",
+                border: "1px solid var(--tooltip-border-color)",
+                borderRadius: "8px",
+                padding: "16px",
+                minWidth: "320px",
+                color: "var(--tooltip-text-color)",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+                transform: `translate(${savePos.x}px, ${savePos.y}px)`,
+              }}
             >
-              <button
-                type="button"
-                className="replay-btn"
-                disabled={busy}
-                onClick={() => setSavePromptOpen(false)}
-                style={{ background: "var(--ui-gray-cancel)", borderColor: "transparent", color: "#fff" }}
+              <h3
+                style={{
+                  marginTop: 0,
+                  backgroundColor: "var(--settings-title-bg)",
+                  padding: "6px 10px",
+                  borderRadius: "4px",
+                  cursor: "move",
+                  userSelect: "none",
+                }}
+                onMouseDown={(e) =>
+                  setSaveDrag({ sx: e.clientX, sy: e.clientY, bx: savePos.x, by: savePos.y })
+                }
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="replay-btn"
-                disabled={busy}
-                onClick={doSave}
-                style={{ background: "var(--ui-green-validate)", borderColor: "transparent", color: "#fff" }}
+                Enregistrer la partie
+              </h3>
+              <p
+                style={{
+                  color: "var(--tooltip-text-color)",
+                  marginTop: 0,
+                  marginBottom: "6px",
+                  fontStyle: "italic",
+                }}
               >
-                Save
-              </button>
+                Note (optionnelle) pour retrouver la save :
+              </p>
+              <input
+                type="text"
+                className="replay-note-input"
+                value={saveNote}
+                onChange={(e) => setSaveNote(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !busy) doSave();
+                }}
+                placeholder="ex: avant l'assaut sur l'objectif"
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  padding: "8px 10px",
+                  borderRadius: "6px",
+                  border: "1px solid #4b5563",
+                  color: "#fff",
+                }}
+              />
+              {error && <p style={{ color: "#f87171" }}>{error}</p>}
+              <div
+                style={{
+                  display: "flex",
+                  gap: "8px",
+                  justifyContent: "flex-end",
+                  marginTop: "14px",
+                }}
+              >
+                <button
+                  type="button"
+                  className="replay-btn"
+                  disabled={busy}
+                  onClick={() => setSavePromptOpen(false)}
+                  style={{
+                    background: "var(--ui-gray-cancel)",
+                    borderColor: "transparent",
+                    color: "#fff",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="replay-btn"
+                  disabled={busy}
+                  onClick={doSave}
+                  style={{
+                    background: "var(--ui-green-validate)",
+                    borderColor: "transparent",
+                    color: "#fff",
+                  }}
+                >
+                  Save
+                </button>
+              </div>
             </div>
-          </div>
           </div>,
           document.body
         )}
@@ -1143,8 +1162,9 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
           >
             <h3 style={{ marginTop: 0 }}>Modifier la partie en cours ?</h3>
             <p style={{ color: "#9ca3af", marginTop: 0 }}>
-              Tu es en visionnage (lecture seule). Pour jouer à partir de ce point, il faut reprendre
-              la partie ici — elle deviendra la partie en cours. Tu pourras ensuite rejouer ton action.
+              Tu es en visionnage (lecture seule). Pour jouer à partir de ce point, il faut
+              reprendre la partie ici — elle deviendra la partie en cours. Tu pourras ensuite
+              rejouer ton action.
             </p>
             {error && <p style={{ color: "#f87171" }}>{error}</p>}
             <div
@@ -1238,7 +1258,11 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
                 className="replay-btn"
                 disabled={busy}
                 onClick={() => setRecordingPromptOpen(false)}
-                style={{ background: "var(--ui-gray-cancel)", borderColor: "transparent", color: "#fff" }}
+                style={{
+                  background: "var(--ui-gray-cancel)",
+                  borderColor: "transparent",
+                  color: "#fff",
+                }}
               >
                 Cancel
               </button>
@@ -1261,7 +1285,11 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
                     setBusy(false);
                   }
                 }}
-                style={{ background: "var(--ui-green-validate)", borderColor: "transparent", color: "#fff" }}
+                style={{
+                  background: "var(--ui-green-validate)",
+                  borderColor: "transparent",
+                  color: "#fff",
+                }}
               >
                 Activate
               </button>
