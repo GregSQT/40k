@@ -95,14 +95,14 @@ def _get_source_unit_rule_display_name_for_effect(unit: Dict[str, Any], effect_r
 
 
 def _is_ai_controlled_fight_unit(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
-    """Return True when the unit owner is AI based on strict player_types mapping."""
-    player_types = require_key(game_state, "player_types")
-    if not isinstance(player_types, dict):
-        raise TypeError(f"game_state['player_types'] must be a dict, got {type(player_types).__name__}")
-    unit_player = str(require_key(unit, "player"))
-    if unit_player not in player_types:
-        raise KeyError(f"Missing player_types entry for player {unit_player}")
-    return player_types[unit_player] == "ai"
+    """Return True when the unit owner is programmatically controlled (auto-resolution).
+
+    Delegue a la source unique is_programmatic_owner (shared_utils) : True en gym training,
+    sinon player_types == 'ai'. Utilise par les checks defender_human du flux fight et par
+    _fight_auto_defender (FIGHT_CTX) -> allocation des pertes en melee auto-resolue en gym."""
+    from .shared_utils import is_programmatic_owner
+    unit_player = require_key(unit, "player")
+    return is_programmatic_owner(game_state, unit_player)
 
 
 def _is_fight_auto_execution_allowed(game_state: Dict[str, Any]) -> bool:

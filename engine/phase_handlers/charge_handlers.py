@@ -823,7 +823,8 @@ def _charge_reverse_goal_bfs_for_eligibility(
     # Pre-filtre hex-distance pour round-vs-round : évite d'appeler unit_entries_within_engagement_zone
     # sur des candidates clairement hors portée euclidienne. Seuil conservatif par ennemi.
     _mover_bs = unit["BASE_SIZE"]
-    _mover_r = max(1, (_mover_bs + 1) // 2)
+    _mover_bs_int = max(_mover_bs) if isinstance(_mover_bs, (list, tuple)) else int(_mover_bs)
+    _mover_r = max(1, (_mover_bs_int + 1) // 2)
     _rr_proximity: Dict[Any, int] = {}
     if unit["BASE_SHAPE"] == "round":
         for _eid, _ee in indexed_enemy_engagement:
@@ -3625,7 +3626,8 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     # Precompute per-enemy proximity thresholds: if the BFS anchor is beyond this distance
     # from all enemies, neither overlap nor engagement is possible — skip the expensive checks.
     _mover_bs = unit["BASE_SIZE"]
-    _mover_r = max(1, (_mover_bs + 1) // 2)
+    _mover_bs_int = max(_mover_bs) if isinstance(_mover_bs, (list, tuple)) else int(_mover_bs)
+    _mover_r = max(1, (_mover_bs_int + 1) // 2)
     _charge_enemy_prox: List[Tuple[int, int, int]] = []
     for _, _ce in indexed_enemy_engagement:
         _ec = int(require_key(_ce, "col"))

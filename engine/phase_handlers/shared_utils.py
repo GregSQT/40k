@@ -91,19 +91,40 @@ class ManualAllocCtx:
     auto_decider: Optional[Callable[[Dict[str, Any], str], bool]] = None
 
 
-def _target_defender_is_ai(game_state: Dict[str, Any], target_sid: str) -> bool:
-    """Decideur auto generique du moteur d allocation : True si le proprietaire de la
-    cible est controle par l IA -> le moteur tranche ordre + choix de figurine sans rendre
-    la main (headless). Aucun repli silencieux : cible ou player_types manquant = bug -> erreur."""
+def is_programmatic_owner(game_state: Dict[str, Any], player: Any) -> bool:
+    """SOURCE UNIQUE du predicat "ce joueur est pilote par la machine (auto-resolution
+    d allocation/resolution, sans rendre la main a un humain)".
+
+    True en training gym (`gym_training_mode` : self-play, player_types = human/human mais
+    aucun humain reel) ; sinon comportement historique player_types == 'ai' (PvP/PvE).
+    Aucun repli silencieux : player_types manquant hors gym = bug -> erreur explicite.
+
+    ⚠️ N est branche QUE sur les decisions d ALLOCATION/resolution (05.03/05.04, hazard
+    manuel), jamais sur les mecanismes d auto-activation type active_shooting_unit (cf. R4)."""
+    if game_state.get("gym_training_mode"):
+        return True
     player_types = require_key(game_state, "player_types")
+    p = str(player)
+    if p not in player_types:
+        raise KeyError(f"is_programmatic_owner: player {p!r} absent de player_types")
+    return player_types[p] == "ai"
+
+
+def is_programmatic_defender(game_state: Dict[str, Any], target_sid: str) -> bool:
+    """Le defenseur de la cible est-il pilote par la machine ? Resout le proprietaire de
+    la cible puis delegue a is_programmatic_owner (source unique). Cible manquante = bug."""
     units_cache = require_key(game_state, "units_cache")
     sid = str(target_sid)
     if sid not in units_cache:
-        raise KeyError(f"_target_defender_is_ai: cible {sid!r} absente de units_cache")
-    player = str(require_key(units_cache[sid], "player"))
-    if player not in player_types:
-        raise KeyError(f"_target_defender_is_ai: player {player!r} absent de player_types")
-    return player_types[player] == "ai"
+        raise KeyError(f"is_programmatic_defender: cible {sid!r} absente de units_cache")
+    player = require_key(units_cache[sid], "player")
+    return is_programmatic_owner(game_state, player)
+
+
+def _target_defender_is_ai(game_state: Dict[str, Any], target_sid: str) -> bool:
+    """Decideur auto generique du moteur d allocation tir (SHOOT_CTX). Delegue a la source
+    unique is_programmatic_defender."""
+    return is_programmatic_defender(game_state, target_sid)
 
 
 SHOOT_CTX = ManualAllocCtx(

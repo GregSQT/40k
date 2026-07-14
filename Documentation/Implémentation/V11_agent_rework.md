@@ -310,7 +310,15 @@ Vérifié par lecture concordante :
 
 Chaque tranche se termine par sa validation (section 6) AVANT de passer à la suivante.
 
-### T1 — Fixes moteur neutres (R4, R6)
+### T1 — Fixes moteur neutres (R4, R6) — ✅ FAIT (2026-07-15)
+
+Réalisé : R6 normalisé dans les 2 sites ; prédicat unique `is_programmatic_owner` /
+`is_programmatic_defender` (shared_utils), délégation de `_target_defender_is_ai` (SHOOT_CTX)
+et `_is_ai_controlled_fight_unit` (FIGHT_CTX + 4 defender_human) ; `player_types` et
+`_is_ai_controlled_shooting_unit` non touchés. Validé : 1152 passed / 2 skipped ; smoke gym
+3 seeds — charge Carnifex OK, pertes fight réellement allouées via FIGHT_CTX (kill constaté).
+Le masque vide au tour 5 (fin de fight P2) a été RE-CONSTATÉ → confirme R7, à traiter en T5.
+Reste : validation PvP manuelle rapide (non-régression) côté utilisateur.
 1. **R6** : normaliser `_mover_bs` en miroir exact du traitement ennemi
    (`_mover_bs_int = max(_mover_bs) if isinstance(_mover_bs, (list, tuple)) else
    int(_mover_bs)`) dans les DEUX sites : `charge_build_valid_destinations_pool`
