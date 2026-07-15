@@ -747,95 +747,17 @@ class GameReplayLogger:
     
     def log_action(self, action: int, reward: float, pre_action_units: list, post_action_units: list,
                    acting_unit_id: int, target_unit_id: Optional[int] = None, description: str = ""):
-        """Generic action logger that routes to specific log methods based on action type."""        
-        # Find acting unit and target unit from the unit lists
-        acting_unit = None
-        target_unit = None
-        
-        # Find acting unit in pre-action state
-        for unit in pre_action_units:
-            if unit.get('id') == acting_unit_id:
-                acting_unit = unit
-                break
-        
-        # Find target unit in pre-action state if target_unit_id provided
-        if target_unit_id is not None:
-            for unit in pre_action_units:
-                if unit.get('id') == target_unit_id:
-                    target_unit = unit
-                    break
-        
-        if not acting_unit:
-            if not self.quiet:
-                print(f"⚠️ log_action: Could not find acting unit {acting_unit_id}")
-            return
-        
-        # Determine action type and route to appropriate method
-        action_type = action % 8 if isinstance(action, int) else action
-        
-        # Route based on intended action type, not just state changes
-        if action_type in [0, 1, 2, 3]:  # Movement actions
-            acting_unit_post = None
-            for unit in post_action_units:
-                if unit.get('id') == acting_unit_id:
-                    acting_unit_post = unit
-                    break
-            
-            if not acting_unit_post:
-                raise ValueError(f"Move action requires post-action unit state for unit {acting_unit_id}")
-            
-            current_turn = self.env.controller.game_state["current_turn"]
-            self.log_move(
-                acting_unit, 
-                *get_unit_coordinates(acting_unit),
-                *get_unit_coordinates(acting_unit_post),
-                current_turn, reward, action
-            )
-                
-        elif action_type == 4:  # Shooting
-            if target_unit:
-                # Create shoot_details for logging
-                shoot_details = {"summary": {"totalShots": 1, "hits": 1, "wounds": 1, "failedSaves": 1}}
-                current_turn = self.env.controller.game_state["current_turn"]
-                self.log_shoot(acting_unit, target_unit, shoot_details, 
-                             current_turn, reward, action)
-            else:
-                if not self.quiet:
-                    print(f"⚠️ log_action: Shooting action without target")
-                    
-        elif action_type == 5:  # Charge
-            if target_unit:
-                acting_unit_post = None
-                for unit in post_action_units:
-                    if unit.get('id') == acting_unit_id:
-                        acting_unit_post = unit
-                        break
-                
-                if acting_unit_post:
-                    current_turn = self.env.controller.game_state["current_turn"]
-                    self.log_charge(
-                        acting_unit, target_unit,
-                        *get_unit_coordinates(acting_unit),
-                        *get_unit_coordinates(acting_unit_post),
-                        current_turn, reward, action
-                    )
-                    
-        elif action_type == 6:  # Wait action
-            current_turn = self.env.controller.game_state["current_turn"]
-            current_phase = self.env.controller.game_state["phase"]
-            self.log_wait(acting_unit, current_turn, current_phase, reward, action)
-                               
-        elif action_type == 7:  # Attack adjacent (Combat)
-            if target_unit:
-                # Create combat_details for logging
-                combat_details = {"summary": {"totalAttacks": 1, "hits": 1, "wounds": 1, "failedSaves": 1}}
-                current_turn = self.env.controller.game_state["current_turn"]
-                self.log_combat(acting_unit, target_unit, combat_details,
-                               current_turn, reward, action)
-        
-        else:
-            raise ValueError(f"Unknown action type: {action_type}")
-    
+        """CONDAMNÉ (T2/R5) : ce routeur s'appuyait sur l'ancien espace 8 actions
+        (`action % 8`, 0-3 move / 4 shoot / 5 charge / 6 wait / 7 combat) et lisait
+        `self.env.controller.game_state`, absent du moteur squad W40KEngine. Aucun appelant
+        vif (le logging d'action passe par ai/step_logger.py). Non câblé à l'espace squad
+        (engine/macro_intents.py) — à réécrire intégralement avant tout usage."""
+        raise NotImplementedError(
+            "GameReplayLogger.log_action est câblé sur l'ancien espace 8 actions et sur "
+            "self.env.controller (absent du moteur squad). Espace d'action courant : voir "
+            "engine/macro_intents.py. Réécrire avant réactivation."
+        )
+
 
 
 # Integration helper for enhanced logging - DROP-IN REPLACEMENT

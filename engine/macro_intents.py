@@ -19,6 +19,30 @@ MAX_OBJECTIVES = 5
 BASE_ZONE_INTENT = 26
 TOTAL_ACTION_SIZE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3  # 41
 
+# --- Named squad-action ids (single source of truth for ai/). --------------
+# Miroir EXACT de engine/phase_handlers/shared_utils.py (SQUAD_ACTION_*), qui
+# reste la source moteur. Interdit tout littéral d'action nu dans ai/ : importer
+# ces noms. Aucune valeur par défaut, aucun fallback.
+MOVE_DIR_BASE = 0
+MOVE_DIR_COUNT = 6            # normal move, directions 0-5
+ADVANCE_DIR_BASE = 6
+ADVANCE_DIR_COUNT = 6        # advance, directions 6-11
+FALL_BACK_DIR_BASE = 12
+FALL_BACK_DIR_COUNT = 6      # fall back, directions 12-17
+ACTION_WAIT = 18            # wait / end activation
+SHOOT_SLOT_BASE = 19
+SHOOT_SLOT_COUNT = 5        # shoot enemy slots 0-4 -> 19-23
+ACTION_CHARGE = 24
+ACTION_FIGHT = 25
+DEPLOY_SLOT_BASE = 4
+DEPLOY_SLOT_COUNT = 5       # deployment strategy slots 0-4 -> 4-8
+
+MOVE_DIRS = range(MOVE_DIR_BASE, MOVE_DIR_BASE + MOVE_DIR_COUNT)                    # 0-5
+ADVANCE_DIRS = range(ADVANCE_DIR_BASE, ADVANCE_DIR_BASE + ADVANCE_DIR_COUNT)        # 6-11
+FALL_BACK_DIRS = range(FALL_BACK_DIR_BASE, FALL_BACK_DIR_BASE + FALL_BACK_DIR_COUNT)  # 12-17
+SHOOT_SLOTS = range(SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT)            # 19-23
+DEPLOY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT)        # 4-8
+
 
 def get_objective_center(obj: dict) -> tuple:
     """Return (col, row) center of an objective. Uses 'center' key if present, else centroid of 'hexes'."""

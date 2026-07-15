@@ -18,6 +18,7 @@ import hashlib
 import numpy as np
 from shared.data_validation import require_key, require_present
 from engine.action_decoder import ActionValidationError
+from engine import macro_intents as mi
 
 if TYPE_CHECKING:
     from engine.w40k_core import W40KEngine
@@ -433,7 +434,7 @@ class BotControlledEnv(gym.Wrapper):
                     flush=True,
                 )
             try:
-                obs, reward, terminated, truncated, info = self.env.step(11)
+                obs, reward, terminated, truncated, info = self.env.step(mi.ACTION_WAIT)
             except RuntimeError as e:
                 err = str(e)
                 if "advance_phase failed" in err and "game_over" in err:
@@ -553,7 +554,7 @@ class BotControlledEnv(gym.Wrapper):
             self.engine.game_state
         )
         if not eligible_units:
-            return 18
+            return mi.ACTION_WAIT
         valid_actions = [i for i in range(len(action_mask)) if action_mask[i]]
         if not valid_actions:
             raise RuntimeError(
@@ -788,12 +789,12 @@ class BotControlledEnv(gym.Wrapper):
             # Track actions for diagnostics WITHOUT calling get_action_mask() (performance optimization)
             # We can infer shoot opportunities from action type instead of checking mask
             if current_phase == "shoot":
-                # Infer shoot opportunity from action type (action 4-8 are shoot actions)
+                # Infer shoot opportunity from action type (shoot slots 19-23)
                 # This avoids expensive get_action_mask() call
-                if action in [4, 5, 6, 7, 8]:  # Shoot actions (target slots 0-4)
+                if action in mi.SHOOT_SLOTS:  # Shoot actions (target slots 0-4)
                     self.ai_shoot_opportunities += 1  # If agent shot, opportunity existed
                     self.ai_shoot_actions += 1
-                elif action == 11:  # Wait action
+                elif action == mi.ACTION_WAIT:  # Wait action
                     self.ai_wait_actions += 1
 
             # Execute agent action
@@ -851,7 +852,7 @@ class BotControlledEnv(gym.Wrapper):
         action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(game_state)
         if not eligible_units:
             # Pool empty -> advance phase via WAIT/invalid action handling
-            return 18
+            return mi.ACTION_WAIT
         valid_actions = [i for i in range(len(action_mask)) if action_mask[i]]
 
         if not valid_actions:
@@ -868,7 +869,7 @@ class BotControlledEnv(gym.Wrapper):
 
         # DIAGNOSTIC: Track shoot phase opportunities
         current_phase = require_key(game_state, "phase")
-        if current_phase == "shoot" and 4 in valid_actions:
+        if current_phase == "shoot" and any(a in valid_actions for a in mi.SHOOT_SLOTS):
             self.shoot_opportunities += 1
 
         if hasattr(self.bot, 'select_action_with_state'):
@@ -895,9 +896,9 @@ class BotControlledEnv(gym.Wrapper):
 
         # DIAGNOSTIC: Track actual shoot/wait decisions in shoot phase
         if current_phase == "shoot":
-            if bot_action in [4, 5, 6, 7, 8]:  # Shoot actions (target slots 0-4)
+            if bot_action in mi.SHOOT_SLOTS:  # Shoot actions (target slots 0-4)
                 self.shoot_actions += 1
-            elif bot_action == 11:  # Wait action
+            elif bot_action == mi.ACTION_WAIT:  # Wait action
                 self.wait_actions += 1
 
         return bot_action
@@ -1169,7 +1170,7 @@ class SelfPlayWrapper(gym.Wrapper):
             action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(self.engine.game_state)
             if not eligible_units:
                 # Pool empty -> advance phase via WAIT/invalid action handling
-                return 18
+                return mi.ACTION_WAIT
             valid_actions = [i for i in range(len(action_mask)) if action_mask[i]]
             if not valid_actions:
                 # AI_IMPLEMENTATION.md: Empty masks indicate a flow/phase bug;
@@ -1185,7 +1186,7 @@ class SelfPlayWrapper(gym.Wrapper):
         action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(self.engine.game_state)
         if not eligible_units:
             # Pool empty -> advance phase via WAIT/invalid action handling
-            return 18
+            return mi.ACTION_WAIT
         obs = self.engine._build_observation()
 
         # MaskablePPO.predict() expects action_masks as keyword argument

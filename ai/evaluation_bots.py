@@ -31,9 +31,19 @@ from engine.phase_handlers.shared_utils import (
     get_unit_position, require_unit_position,
     compute_candidate_footprint,
 )
+from engine import macro_intents as mi
 
-DEPLOYMENT_ACTIONS = [4, 5, 6, 7, 8]
-WAIT_ACTION = 11
+# Espace d'action squad (source unique : engine/macro_intents.py). Aucun littéral nu.
+DEPLOYMENT_ACTIONS = list(mi.DEPLOY_SLOTS)   # 4-8 (slots de déploiement)
+WAIT_ACTION = mi.ACTION_WAIT                 # 18
+
+
+def _first_action_in(valid_actions, action_ids):
+    """Retourne la première action de action_ids présente dans valid_actions, sinon None."""
+    for a in action_ids:
+        if a in valid_actions:
+            return a
+    return None
 
 
 def _select_weighted_deployment_action(
@@ -83,11 +93,9 @@ class RandomBot:
                 return random.choice(deploy_actions)
             return random.choice(valid_actions)
         if phase == "shoot":
-            shoot_actions = [a for a in DEPLOYMENT_ACTIONS if a in valid_actions]
+            shoot_actions = [a for a in mi.SHOOT_SLOTS if a in valid_actions]
             if shoot_actions:
                 return random.choice(shoot_actions)
-            if 12 in valid_actions:
-                return 12
             if WAIT_ACTION in valid_actions:
                 return WAIT_ACTION
             return random.choice(valid_actions)
@@ -130,12 +138,13 @@ class GreedyBot:
             return random.choice(valid_actions) if valid_actions else WAIT_ACTION
 
         # Prefer shoot > move > wait
-        if 4 in valid_actions:  # Shoot
-            return 4
-        elif 0 in valid_actions:  # Move
-            return 0
-        else:
-            return valid_actions[0] if valid_actions else WAIT_ACTION
+        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
+        if shoot is not None:
+            return shoot
+        move = _first_action_in(valid_actions, mi.MOVE_DIRS)
+        if move is not None:
+            return move
+        return valid_actions[0] if valid_actions else WAIT_ACTION
 
     def select_action_with_state(self, valid_actions: List[int], game_state) -> int:
         """Phase-aware greedy policy aligned with current action-space semantics."""
@@ -151,11 +160,11 @@ class GreedyBot:
                 self._deployment_last_action = None
                 self._deployment_repeat_count = 0
             deployment_weights = {
-                4: 0.30,  # aggressive front
-                5: 0.30,  # objective pressure
-                6: 0.20,  # safe/cohesion
-                7: 0.10,  # left flank
-                8: 0.10,  # right flank
+                DEPLOYMENT_ACTIONS[0]: 0.30,  # aggressive front
+                DEPLOYMENT_ACTIONS[1]: 0.30,  # objective pressure
+                DEPLOYMENT_ACTIONS[2]: 0.20,  # safe/cohesion
+                DEPLOYMENT_ACTIONS[3]: 0.10,  # left flank
+                DEPLOYMENT_ACTIONS[4]: 0.10,  # right flank
             }
             chosen = _select_weighted_deployment_action(
                 valid_actions=valid_actions,
@@ -171,14 +180,18 @@ class GreedyBot:
                 self._deployment_repeat_count = 1
             return chosen
         if phase == "shoot":
-            for preferred in [4, 5, 6, 7, 8, 12, WAIT_ACTION]:
-                if preferred in valid_actions:
-                    return preferred
+            shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
+            if shoot is not None:
+                return shoot
+            if WAIT_ACTION in valid_actions:
+                return WAIT_ACTION
             return valid_actions[0]
         if phase == "move":
-            for preferred in [0, 1, 2, 3, WAIT_ACTION]:
-                if preferred in valid_actions:
-                    return preferred
+            move = _first_action_in(valid_actions, mi.MOVE_DIRS)
+            if move is not None:
+                return move
+            if WAIT_ACTION in valid_actions:
+                return WAIT_ACTION
             return valid_actions[0]
         if WAIT_ACTION in valid_actions and len(valid_actions) > 1:
             return valid_actions[0] if valid_actions[0] != WAIT_ACTION else valid_actions[1]
@@ -255,12 +268,12 @@ class DefensiveBot:
             return random.choice(valid_actions) if valid_actions else WAIT_ACTION
 
         # Conservative: shoot when possible, otherwise wait
-        if 4 in valid_actions:  # Shoot
-            return 4
-        elif WAIT_ACTION in valid_actions:  # Wait
+        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
+        if shoot is not None:
+            return shoot
+        if WAIT_ACTION in valid_actions:
             return WAIT_ACTION
-        else:
-            return valid_actions[0] if valid_actions else WAIT_ACTION
+        return valid_actions[0] if valid_actions else WAIT_ACTION
     
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
         if not valid_destinations:
@@ -301,11 +314,11 @@ class DefensiveBot:
                 self._deployment_last_action = None
                 self._deployment_repeat_count = 0
             deployment_weights = {
-                4: 0.20,  # aggressive front
-                5: 0.25,  # objective pressure
-                6: 0.35,  # safe/cohesion
-                7: 0.10,  # left flank
-                8: 0.10,  # right flank
+                DEPLOYMENT_ACTIONS[0]: 0.20,  # aggressive front
+                DEPLOYMENT_ACTIONS[1]: 0.25,  # objective pressure
+                DEPLOYMENT_ACTIONS[2]: 0.35,  # safe/cohesion
+                DEPLOYMENT_ACTIONS[3]: 0.10,  # left flank
+                DEPLOYMENT_ACTIONS[4]: 0.10,  # right flank
             }
             chosen = _select_weighted_deployment_action(
                 valid_actions=valid_actions,
@@ -338,21 +351,29 @@ class DefensiveBot:
         nearby_threats = self._count_nearby_threats(active_unit, game_state)
 
         if phase == "move":
-            if nearby_threats > 0 and 2 in valid_actions:
-                return 2
+            if nearby_threats > 0:
+                # Menacé : décrocher (fall back si engagé) ou repositionner.
+                retreat = _first_action_in(valid_actions, mi.FALL_BACK_DIRS)
+                if retreat is None:
+                    retreat = _first_action_in(valid_actions, mi.MOVE_DIRS)
+                if retreat is not None:
+                    return retreat
             if WAIT_ACTION in valid_actions:
                 return WAIT_ACTION
             return valid_actions[0]
 
         if phase == "shoot":
-            for preferred in [4, 5, 6, 7, 8, WAIT_ACTION]:
-                if preferred in valid_actions:
-                    return preferred
+            shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
+            if shoot is not None:
+                return shoot
+            if WAIT_ACTION in valid_actions:
+                return WAIT_ACTION
             return valid_actions[0]
 
-        if nearby_threats > 0 and 4 in valid_actions:
-            return 4
-        
+        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
+        if nearby_threats > 0 and shoot is not None:
+            return shoot
+
         if WAIT_ACTION in valid_actions:
             return WAIT_ACTION
         return valid_actions[0]
@@ -408,10 +429,12 @@ class ControlBot:
             return WAIT_ACTION
         if self.randomness > 0 and random.random() < self.randomness:
             return random.choice(valid_actions)
-        if 4 in valid_actions:
-            return 4
-        if 1 in valid_actions:
-            return 1
+        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
+        if shoot is not None:
+            return shoot
+        move = _first_action_in(valid_actions, mi.MOVE_DIRS)
+        if move is not None:
+            return move
         return valid_actions[0]
 
     def select_action_with_state(self, valid_actions: List[int], game_state) -> int:
@@ -440,12 +463,12 @@ class ControlBot:
         if phase == "charge":
             if on_objective and WAIT_ACTION in valid_actions:
                 return WAIT_ACTION
-            if 9 in valid_actions:
-                return 9
+            if mi.ACTION_CHARGE in valid_actions:
+                return mi.ACTION_CHARGE
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
         if phase == "fight":
-            if 10 in valid_actions:
-                return 10
+            if mi.ACTION_FIGHT in valid_actions:
+                return mi.ACTION_FIGHT
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         return valid_actions[0]
@@ -458,11 +481,11 @@ class ControlBot:
             self._deployment_last_action = None
             self._deployment_repeat_count = 0
         deployment_weights = {
-            4: 0.15,
-            5: 0.45,
-            6: 0.20,
-            7: 0.10,
-            8: 0.10,
+            DEPLOYMENT_ACTIONS[0]: 0.15,
+            DEPLOYMENT_ACTIONS[1]: 0.45,
+            DEPLOYMENT_ACTIONS[2]: 0.20,
+            DEPLOYMENT_ACTIONS[3]: 0.10,
+            DEPLOYMENT_ACTIONS[4]: 0.10,
         }
         chosen = _select_weighted_deployment_action(
             valid_actions=valid_actions,
@@ -489,17 +512,18 @@ class ControlBot:
         if on_objective:
             if WAIT_ACTION in valid_actions:
                 return WAIT_ACTION
-        if 3 in valid_actions:
-            return 3
-        if 0 in valid_actions:
-            return 0
+        move = _first_action_in(valid_actions, mi.MOVE_DIRS)
+        if move is not None:
+            return move
         return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
     def _shoot_action(self, valid_actions: List[int]) -> int:
         """Shoot whenever possible."""
-        for preferred in [4, 5, 6, 7, 8, WAIT_ACTION]:
-            if preferred in valid_actions:
-                return preferred
+        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
+        if shoot is not None:
+            return shoot
+        if WAIT_ACTION in valid_actions:
+            return WAIT_ACTION
         return valid_actions[0]
 
     def _find_active_unit(
@@ -596,16 +620,16 @@ def _shoot_focus_fire(
     game_state: Dict[str, Any],
     target_fn=_best_target_slot_by_hp,
 ) -> int:
-    """Pick the shoot action (4-8) for the best target, else the first available shoot slot."""
+    """Pick the shoot action (19-23) for the best target, else the first available shoot slot."""
     if active_unit is not None:
         slot = target_fn(active_unit, game_state)
         if slot is not None:
-            action = 4 + slot
+            action = mi.SHOOT_SLOT_BASE + slot
             if action in valid_actions:
                 return action
-    for a in [4, 5, 6, 7, 8]:
-        if a in valid_actions:
-            return a
+    shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
+    if shoot is not None:
+        return shoot
     return WAIT_ACTION
 
 
@@ -659,10 +683,12 @@ class AggressiveSmartBot:
             return WAIT_ACTION
         if self.randomness > 0 and random.random() < self.randomness:
             return random.choice(valid_actions)
-        if 4 in valid_actions:
-            return 4
-        if 0 in valid_actions:
-            return 0
+        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
+        if shoot is not None:
+            return shoot
+        move = _first_action_in(valid_actions, mi.MOVE_DIRS)
+        if move is not None:
+            return move
         return valid_actions[0]
 
     def select_action_with_state(self, valid_actions: List[int], game_state) -> int:
@@ -680,26 +706,24 @@ class AggressiveSmartBot:
         active = _find_active_unit_for_bot(game_state, current_player)
 
         if phase == "move":
-            if 0 in valid_actions:
-                return 0
+            move = _first_action_in(valid_actions, mi.MOVE_DIRS)
+            if move is not None:
+                return move
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         if phase == "shoot":
-            has_targets = any(a in valid_actions for a in [4, 5, 6, 7, 8])
-            if has_targets:
+            if any(a in valid_actions for a in mi.SHOOT_SLOTS):
                 return _shoot_focus_fire(valid_actions, active, game_state, _best_target_slot_by_hp)
-            if 12 in valid_actions:
-                return 12
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         if phase == "charge":
-            if 9 in valid_actions:
-                return 9
+            if mi.ACTION_CHARGE in valid_actions:
+                return mi.ACTION_CHARGE
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         if phase == "fight":
-            if 10 in valid_actions:
-                return 10
+            if mi.ACTION_FIGHT in valid_actions:
+                return mi.ACTION_FIGHT
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         return valid_actions[0]
@@ -710,7 +734,13 @@ class AggressiveSmartBot:
             self._deployment_episode_marker = episode_marker
             self._deployment_last_action = None
             self._deployment_repeat_count = 0
-        weights = {4: 0.50, 5: 0.20, 6: 0.10, 7: 0.10, 8: 0.10}
+        weights = {
+            DEPLOYMENT_ACTIONS[0]: 0.50,
+            DEPLOYMENT_ACTIONS[1]: 0.20,
+            DEPLOYMENT_ACTIONS[2]: 0.10,
+            DEPLOYMENT_ACTIONS[3]: 0.10,
+            DEPLOYMENT_ACTIONS[4]: 0.10,
+        }
         chosen = _select_weighted_deployment_action(
             valid_actions=valid_actions,
             weights_by_action=weights,
@@ -745,8 +775,9 @@ class DefensiveSmartBot:
             return WAIT_ACTION
         if self.randomness > 0 and random.random() < self.randomness:
             return random.choice(valid_actions)
-        if 4 in valid_actions:
-            return 4
+        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
+        if shoot is not None:
+            return shoot
         if WAIT_ACTION in valid_actions:
             return WAIT_ACTION
         return valid_actions[0]
@@ -766,15 +797,17 @@ class DefensiveSmartBot:
         active = _find_active_unit_for_bot(game_state, current_player)
 
         if phase == "move":
-            if 2 in valid_actions:
-                return 2
-            if 1 in valid_actions:
-                return 1
+            # Garde ses distances : décroche (fall back) sinon move normal.
+            retreat = _first_action_in(valid_actions, mi.FALL_BACK_DIRS)
+            if retreat is not None:
+                return retreat
+            move = _first_action_in(valid_actions, mi.MOVE_DIRS)
+            if move is not None:
+                return move
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         if phase == "shoot":
-            has_targets = any(a in valid_actions for a in [4, 5, 6, 7, 8])
-            if has_targets:
+            if any(a in valid_actions for a in mi.SHOOT_SLOTS):
                 return _shoot_focus_fire(valid_actions, active, game_state, _best_target_slot_by_threat)
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
@@ -782,8 +815,8 @@ class DefensiveSmartBot:
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         if phase == "fight":
-            if 10 in valid_actions:
-                return 10
+            if mi.ACTION_FIGHT in valid_actions:
+                return mi.ACTION_FIGHT
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         return valid_actions[0]
@@ -794,7 +827,13 @@ class DefensiveSmartBot:
             self._deployment_episode_marker = episode_marker
             self._deployment_last_action = None
             self._deployment_repeat_count = 0
-        weights = {4: 0.10, 5: 0.20, 6: 0.45, 7: 0.10, 8: 0.15}
+        weights = {
+            DEPLOYMENT_ACTIONS[0]: 0.10,
+            DEPLOYMENT_ACTIONS[1]: 0.20,
+            DEPLOYMENT_ACTIONS[2]: 0.45,
+            DEPLOYMENT_ACTIONS[3]: 0.10,
+            DEPLOYMENT_ACTIONS[4]: 0.15,
+        }
         chosen = _select_weighted_deployment_action(
             valid_actions=valid_actions,
             weights_by_action=weights,
@@ -833,10 +872,12 @@ class AdaptiveBot:
             return WAIT_ACTION
         if self.randomness > 0 and random.random() < self.randomness:
             return random.choice(valid_actions)
-        if 4 in valid_actions:
-            return 4
-        if 0 in valid_actions:
-            return 0
+        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
+        if shoot is not None:
+            return shoot
+        move = _first_action_in(valid_actions, mi.MOVE_DIRS)
+        if move is not None:
+            return move
         return valid_actions[0]
 
     def select_action_with_state(self, valid_actions: List[int], game_state) -> int:
@@ -862,8 +903,8 @@ class AdaptiveBot:
         if phase == "charge":
             return self._charge(valid_actions, posture)
         if phase == "fight":
-            if 10 in valid_actions:
-                return 10
+            if mi.ACTION_FIGHT in valid_actions:
+                return mi.ACTION_FIGHT
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         return valid_actions[0]
@@ -880,18 +921,29 @@ class AdaptiveBot:
 
     def _move(self, valid_actions: List[int], posture: str, turn: int) -> int:
         if posture == "early":
-            if 3 in valid_actions:
-                return 3
-            if 0 in valid_actions:
-                return 0
+            # Rush objectifs : advance pour couvrir la distance, sinon move normal.
+            adv = _first_action_in(valid_actions, mi.ADVANCE_DIRS)
+            if adv is not None:
+                return adv
+            move = _first_action_in(valid_actions, mi.MOVE_DIRS)
+            if move is not None:
+                return move
         elif posture == "winning":
-            if 2 in valid_actions:
-                return 2
-            if 3 in valid_actions:
-                return 3
+            # Défensif : garde ses distances (fall back), sinon move normal.
+            retreat = _first_action_in(valid_actions, mi.FALL_BACK_DIRS)
+            if retreat is not None:
+                return retreat
+            move = _first_action_in(valid_actions, mi.MOVE_DIRS)
+            if move is not None:
+                return move
         else:
-            if 0 in valid_actions:
-                return 0
+            # Losing : agressif, move normal puis advance.
+            move = _first_action_in(valid_actions, mi.MOVE_DIRS)
+            if move is not None:
+                return move
+            adv = _first_action_in(valid_actions, mi.ADVANCE_DIRS)
+            if adv is not None:
+                return adv
         return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
     def _shoot(
@@ -901,16 +953,13 @@ class AdaptiveBot:
         game_state: Dict[str, Any],
         posture: str,
     ) -> int:
-        has_targets = any(a in valid_actions for a in [4, 5, 6, 7, 8])
-        if has_targets:
+        if any(a in valid_actions for a in mi.SHOOT_SLOTS):
             return _shoot_focus_fire(valid_actions, active, game_state, _best_target_slot_by_hp)
-        if posture == "losing" and 12 in valid_actions:
-            return 12
         return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
     def _charge(self, valid_actions: List[int], posture: str) -> int:
-        if posture != "winning" and 9 in valid_actions:
-            return 9
+        if posture != "winning" and mi.ACTION_CHARGE in valid_actions:
+            return mi.ACTION_CHARGE
         return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
     def _deploy(self, valid_actions: List[int], game_state) -> int:
@@ -919,7 +968,13 @@ class AdaptiveBot:
             self._deployment_episode_marker = episode_marker
             self._deployment_last_action = None
             self._deployment_repeat_count = 0
-        weights = {4: 0.25, 5: 0.35, 6: 0.20, 7: 0.10, 8: 0.10}
+        weights = {
+            DEPLOYMENT_ACTIONS[0]: 0.25,
+            DEPLOYMENT_ACTIONS[1]: 0.35,
+            DEPLOYMENT_ACTIONS[2]: 0.20,
+            DEPLOYMENT_ACTIONS[3]: 0.10,
+            DEPLOYMENT_ACTIONS[4]: 0.10,
+        }
         chosen = _select_weighted_deployment_action(
             valid_actions=valid_actions,
             weights_by_action=weights,
@@ -968,7 +1023,7 @@ class TacticalBot:
             phase: Current phase ('move', 'shoot', 'charge', 'fight')
         """
         if not valid_actions:
-            return 7  # Wait
+            return WAIT_ACTION  # Wait
 
         # Random action for diversity
         if self.randomness > 0 and random.random() < self.randomness:
@@ -985,56 +1040,60 @@ class TacticalBot:
             return self._select_fight_action(valid_actions, game_state)
         else:
             # Prefer combat actions when phase is unknown
-            if 4 in valid_actions:  # Shoot
-                return 4
-            if 5 in valid_actions:  # Charge
-                return 5
-            if 6 in valid_actions:  # Fight
-                return 6
-            if 0 in valid_actions:  # Move
-                return 0
+            shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
+            if shoot is not None:  # Shoot
+                return shoot
+            if mi.ACTION_CHARGE in valid_actions:  # Charge
+                return mi.ACTION_CHARGE
+            if mi.ACTION_FIGHT in valid_actions:  # Fight
+                return mi.ACTION_FIGHT
+            move = _first_action_in(valid_actions, mi.MOVE_DIRS)
+            if move is not None:  # Move
+                return move
             return valid_actions[0]
 
     def _select_move_action(self, valid_actions: List[int], game_state: Optional[Dict]) -> int:
         """Movement phase: advance if out of range, reposition for LoS."""
         # Always prefer moving if we can improve position
-        if 0 in valid_actions:
-            return 0
-        if 7 in valid_actions:  # Wait
-            return 7
-        return valid_actions[0] if valid_actions else 7
+        move = _first_action_in(valid_actions, mi.MOVE_DIRS)
+        if move is not None:
+            return move
+        if WAIT_ACTION in valid_actions:  # Wait
+            return WAIT_ACTION
+        return valid_actions[0] if valid_actions else WAIT_ACTION
 
     def _select_shoot_action(self, valid_actions: List[int], game_state: Optional[Dict]) -> int:
         """Shooting phase: always shoot if targets available."""
-        if 4 in valid_actions:  # Shoot
-            return 4
-        if 7 in valid_actions:  # Wait/Skip
-            return 7
-        return valid_actions[0] if valid_actions else 7
+        shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
+        if shoot is not None:  # Shoot
+            return shoot
+        if WAIT_ACTION in valid_actions:  # Wait/Skip
+            return WAIT_ACTION
+        return valid_actions[0] if valid_actions else WAIT_ACTION
 
     def _select_charge_action(self, valid_actions: List[int], game_state: Dict) -> int:
         """Charge phase: charge if melee is advantageous."""
         # Check if charging is beneficial
-        if game_state and 5 in valid_actions:
+        if game_state and mi.ACTION_CHARGE in valid_actions:
             active_unit = self._get_active_unit(game_state)
             if active_unit:
                 # Charge if unit has good melee damage
                 cc_dmg = require_key(active_unit, 'CC_DMG')
                 if cc_dmg >= 2:  # Worth charging
-                    return 5
+                    return mi.ACTION_CHARGE
 
         # Skip charge if not beneficial
-        if 7 in valid_actions:
-            return 7
-        return valid_actions[0] if valid_actions else 7
+        if WAIT_ACTION in valid_actions:
+            return WAIT_ACTION
+        return valid_actions[0] if valid_actions else WAIT_ACTION
 
     def _select_fight_action(self, valid_actions: List[int], game_state: Optional[Dict]) -> int:
         """Fight phase: always fight when in melee."""
-        if 6 in valid_actions:  # Fight
-            return 6
-        if 7 in valid_actions:  # Wait
-            return 7
-        return valid_actions[0] if valid_actions else 7
+        if mi.ACTION_FIGHT in valid_actions:  # Fight
+            return mi.ACTION_FIGHT
+        if WAIT_ACTION in valid_actions:  # Wait
+            return WAIT_ACTION
+        return valid_actions[0] if valid_actions else WAIT_ACTION
 
     def select_movement_destination(self, unit: Dict, valid_destinations: List[Tuple[int, int]],
                                      game_state: Optional[Dict] = None) -> Tuple[int, int]:

@@ -2,6 +2,7 @@ import pytest
 
 import ai.evaluation_bots as eb
 from shared.data_validation import require_present
+from engine import macro_intents as mi
 from ai.evaluation_bots import (
     DEPLOYMENT_ACTIONS,
     WAIT_ACTION,
@@ -15,6 +16,16 @@ from ai.evaluation_bots import (
     TacticalBot,
     _select_weighted_deployment_action,
 )
+
+# Espace d'action squad (macro_intents) : move 0-5, advance 6-11, fall back 12-17,
+# wait 18, shoot 19-23, charge 24, fight 25, deploy 4-8.
+MOVE = mi.MOVE_DIR_BASE            # 0
+ADVANCE = mi.ADVANCE_DIR_BASE      # 6
+FALL_BACK = mi.FALL_BACK_DIR_BASE  # 12
+SHOOT = mi.SHOOT_SLOT_BASE         # 19
+SHOOT2 = mi.SHOOT_SLOT_BASE + 1    # 20
+CHARGE = mi.ACTION_CHARGE          # 24
+FIGHT = mi.ACTION_FIGHT            # 25
 
 
 def test_select_weighted_deployment_action_errors_and_antirepeat(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -49,7 +60,10 @@ def test_random_bot_phase_aware_selection(monkeypatch: pytest.MonkeyPatch) -> No
     bot = RandomBot()
     monkeypatch.setattr(eb.random, "choice", lambda seq: seq[0])
     assert bot.select_action_with_state([4, 9], {"phase": "deployment"}) == 4
-    assert bot.select_action_with_state([12, WAIT_ACTION], {"phase": "shoot"}) == 12
+    assert bot.select_action_with_state([SHOOT, WAIT_ACTION], {"phase": "shoot"}) == SHOOT
+    # No shoot slot available -> WAIT
+    assert bot.select_action_with_state([FALL_BACK, WAIT_ACTION], {"phase": "shoot"}) == WAIT_ACTION
+    # Move phase : prefer any non-wait action (here a move dir)
     assert bot.select_action_with_state([WAIT_ACTION, 3], {"phase": "move"}) == 3
     assert bot.select_action_with_state([], {"phase": "move"}) == WAIT_ACTION
 
@@ -64,8 +78,8 @@ def test_random_bot_destinations_and_targets(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_greedy_bot_select_action_and_state(monkeypatch: pytest.MonkeyPatch) -> None:
     bot = GreedyBot(randomness=0.0)
-    assert bot.select_action([4, 0]) == 4
-    assert bot.select_action([0]) == 0
+    assert bot.select_action([SHOOT, MOVE]) == SHOOT   # shoot > move
+    assert bot.select_action([MOVE]) == MOVE
     assert bot.select_action([]) == WAIT_ACTION
 
     monkeypatch.setattr(
@@ -74,8 +88,8 @@ def test_greedy_bot_select_action_and_state(monkeypatch: pytest.MonkeyPatch) -> 
         lambda **kwargs: 6,
     )
     assert bot.select_action_with_state([4, 5, 6], {"phase": "deployment", "episode_number": 1}) == 6
-    assert bot.select_action_with_state([12, WAIT_ACTION], {"phase": "shoot"}) == 12
-    assert bot.select_action_with_state([0, WAIT_ACTION], {"phase": "move"}) == 0
+    assert bot.select_action_with_state([SHOOT, WAIT_ACTION], {"phase": "shoot"}) == SHOOT
+    assert bot.select_action_with_state([MOVE, WAIT_ACTION], {"phase": "move"}) == MOVE
 
 
 def test_greedy_bot_target_selection_uses_low_hp(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -94,7 +108,7 @@ def test_greedy_bot_target_selection_uses_low_hp(monkeypatch: pytest.MonkeyPatch
 
 def test_defensive_bot_action_and_threat_count(monkeypatch: pytest.MonkeyPatch) -> None:
     bot = DefensiveBot(randomness=0.0)
-    assert bot.select_action([4, WAIT_ACTION]) == 4
+    assert bot.select_action([SHOOT, WAIT_ACTION]) == SHOOT
     assert bot.select_action([WAIT_ACTION]) == WAIT_ACTION
 
     game_state = {
@@ -110,23 +124,24 @@ def test_defensive_bot_action_and_threat_count(monkeypatch: pytest.MonkeyPatch) 
     }
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: uid in {"1", "2", "3"})
     monkeypatch.setattr(eb, "calculate_hex_distance", lambda c1, r1, c2, r2: 3 if c2 == 2 else 30)
-    # nearby_threats=1 -> move phase uses action 2 (defensive) when available
-    assert bot.select_action_with_state([0, 2, WAIT_ACTION], game_state) == 2
-    # no defensive action -> WAIT
-    assert bot.select_action_with_state([0, WAIT_ACTION], game_state) == WAIT_ACTION
+    # nearby_threats=1 -> move phase disengages via fall back when available
+    assert bot.select_action_with_state([FALL_BACK, MOVE, WAIT_ACTION], game_state) == FALL_BACK
+    # no fall back -> normal move to reposition
+    assert bot.select_action_with_state([MOVE, WAIT_ACTION], game_state) == MOVE
 
-    # shoot phase -> always shoots first target
+    # shoot phase -> always shoots first target slot
     shoot_gs = {**game_state, "phase": "shoot"}
-    assert bot.select_action_with_state([4, 5, WAIT_ACTION], shoot_gs) == 4
+    assert bot.select_action_with_state([SHOOT, SHOOT2, WAIT_ACTION], shoot_gs) == SHOOT
 
 
 def test_tactical_bot_phase_action_selection() -> None:
     bot = TacticalBot(randomness=0.0)
-    assert bot.select_action([], phase="move") == 7
-    assert bot.select_action([0, 7], phase="move") == 0
-    assert bot.select_action([4, 7], phase="shoot") == 4
-    assert bot.select_action([5, 7], phase="charge", game_state={"current_player": 0, "units": []}) == 7
-    assert bot.select_action([6, 7], phase="fight") == 6
+    assert bot.select_action([], phase="move") == WAIT_ACTION
+    assert bot.select_action([MOVE, WAIT_ACTION], phase="move") == MOVE
+    assert bot.select_action([SHOOT, WAIT_ACTION], phase="shoot") == SHOOT
+    # No living active unit -> charge skipped -> WAIT
+    assert bot.select_action([CHARGE, WAIT_ACTION], phase="charge", game_state={"current_player": 0, "units": []}) == WAIT_ACTION
+    assert bot.select_action([FIGHT, WAIT_ACTION], phase="fight") == FIGHT
 
 
 def test_tactical_bot_select_shooting_target_scoring(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -207,19 +222,19 @@ def test_control_bot_holds_objective(monkeypatch: pytest.MonkeyPatch) -> None:
         "objectives": [{"hexes": [{"col": 5, "row": 5}]}],
     }
     # On objective -> WAIT
-    assert bot.select_action_with_state([0, 1, 2, 3, WAIT_ACTION], game_state) == WAIT_ACTION
+    assert bot.select_action_with_state([MOVE, 1, 2, 3, WAIT_ACTION], game_state) == WAIT_ACTION
 
-    # Off objective -> action 3 (objective strategy)
+    # Off objective -> move toward objective (first normal move dir)
     game_state_off = {**game_state, "objectives": [{"hexes": [{"col": 10, "row": 10}]}]}
-    assert bot.select_action_with_state([0, 1, 2, 3, WAIT_ACTION], game_state_off) == 3
+    assert bot.select_action_with_state([MOVE, 1, 2, 3, WAIT_ACTION], game_state_off) == MOVE
 
-    # Shoot phase -> shoot first target
+    # Shoot phase -> shoot first target slot
     shoot_gs = {**game_state, "phase": "shoot"}
-    assert bot.select_action_with_state([4, 5, WAIT_ACTION], shoot_gs) == 4
+    assert bot.select_action_with_state([SHOOT, SHOOT2, WAIT_ACTION], shoot_gs) == SHOOT
 
     # Charge phase on objective -> WAIT
     charge_gs = {**game_state, "phase": "charge"}
-    assert bot.select_action_with_state([9, WAIT_ACTION], charge_gs) == WAIT_ACTION
+    assert bot.select_action_with_state([CHARGE, WAIT_ACTION], charge_gs) == WAIT_ACTION
 
 
 def test_aggressive_smart_bot_advance_and_charge(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -227,19 +242,19 @@ def test_aggressive_smart_bot_advance_and_charge(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: True)
     gs = {"phase": "move", "current_player": 0, "units": [{"id": "1", "player": 0}]}
 
-    # Move -> aggressive (0)
-    assert bot.select_action_with_state([0, 1, 2, WAIT_ACTION], gs) == 0
+    # Move -> first normal move dir
+    assert bot.select_action_with_state([MOVE, 1, 2, WAIT_ACTION], gs) == MOVE
 
-    # Shoot with no targets -> advance (12)
+    # Shoot with no targets -> wait
     shoot_gs = {**gs, "phase": "shoot"}
-    assert bot.select_action_with_state([12, WAIT_ACTION], shoot_gs) == 12
+    assert bot.select_action_with_state([FALL_BACK, WAIT_ACTION], shoot_gs) == WAIT_ACTION
 
     # Shoot with targets -> picks first target slot
-    assert bot.select_action_with_state([4, 5, WAIT_ACTION], shoot_gs) == 4
+    assert bot.select_action_with_state([SHOOT, SHOOT2, WAIT_ACTION], shoot_gs) == SHOOT
 
     # Charge -> always charge
     charge_gs = {**gs, "phase": "charge"}
-    assert bot.select_action_with_state([9, WAIT_ACTION], charge_gs) == 9
+    assert bot.select_action_with_state([CHARGE, WAIT_ACTION], charge_gs) == CHARGE
 
 
 def test_defensive_smart_bot_never_charges(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -247,16 +262,18 @@ def test_defensive_smart_bot_never_charges(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: True)
     gs = {"phase": "move", "current_player": 0, "units": [{"id": "1", "player": 0}]}
 
-    # Move -> defensive (2)
-    assert bot.select_action_with_state([0, 1, 2, WAIT_ACTION], gs) == 2
+    # Move -> keeps distance : fall back preferred over normal move
+    assert bot.select_action_with_state([FALL_BACK, MOVE, WAIT_ACTION], gs) == FALL_BACK
+    # No fall back -> normal move
+    assert bot.select_action_with_state([MOVE, WAIT_ACTION], gs) == MOVE
 
     # Charge -> never
     charge_gs = {**gs, "phase": "charge"}
-    assert bot.select_action_with_state([9, WAIT_ACTION], charge_gs) == WAIT_ACTION
+    assert bot.select_action_with_state([CHARGE, WAIT_ACTION], charge_gs) == WAIT_ACTION
 
-    # Shoot with no targets -> no advance, just wait
+    # Shoot with no targets -> just wait
     shoot_gs = {**gs, "phase": "shoot"}
-    assert bot.select_action_with_state([12, WAIT_ACTION], shoot_gs) == WAIT_ACTION
+    assert bot.select_action_with_state([FALL_BACK, WAIT_ACTION], shoot_gs) == WAIT_ACTION
 
 
 def test_adaptive_bot_posture(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -273,22 +290,22 @@ def test_adaptive_bot_posture(monkeypatch: pytest.MonkeyPatch) -> None:
         },
     }
 
-    # Turn 1 (early) -> objective rush (action 3)
+    # Turn 1 (early) -> objective rush : advance preferred over normal move
     gs_early = {**base_gs, "turn": 1}
-    assert bot.select_action_with_state([0, 1, 2, 3, WAIT_ACTION], gs_early) == 3
+    assert bot.select_action_with_state([ADVANCE, MOVE, WAIT_ACTION], gs_early) == ADVANCE
 
-    # Turn 3 losing (no objectives) -> aggressive (action 0)
+    # Turn 3 losing (no objectives) -> aggressive : normal move
     gs_late_losing = {**base_gs, "turn": 3}
-    assert bot.select_action_with_state([0, 1, 2, 3, WAIT_ACTION], gs_late_losing) == 0
+    assert bot.select_action_with_state([MOVE, ADVANCE, WAIT_ACTION], gs_late_losing) == MOVE
 
-    # Turn 3 winning (on objective) -> defensive (action 2)
+    # Turn 3 winning (on objective) -> defensive : fall back preferred
     gs_winning = {
         **base_gs, "turn": 3,
         "units": [{"id": "1", "player": 0, "col": 5, "row": 5}],
         "units_cache": {"1": {"col": 5, "row": 5, "player": 0}},
     }
-    assert bot.select_action_with_state([0, 1, 2, 3, WAIT_ACTION], gs_winning) == 2
+    assert bot.select_action_with_state([FALL_BACK, MOVE, WAIT_ACTION], gs_winning) == FALL_BACK
 
     # Losing charge -> charge
     charge_gs = {**base_gs, "turn": 3, "phase": "charge"}
-    assert bot.select_action_with_state([9, WAIT_ACTION], charge_gs) == 9
+    assert bot.select_action_with_state([CHARGE, WAIT_ACTION], charge_gs) == CHARGE

@@ -4,6 +4,7 @@ import pytest
 
 from ai.env_wrappers import BotControlledEnv, SelfPlayWrapper
 from engine.action_decoder import ActionValidationError
+from engine import macro_intents as mi
 
 
 class _DummyActionDecoder:
@@ -139,14 +140,15 @@ def test_get_bot_action_raises_on_empty_mask_with_eligible_units() -> None:
 
 
 def test_get_bot_action_tracks_shoot_stats_and_returns_normalized_action() -> None:
-    mask = [False] * 12
-    mask[4] = True
-    decoder = _DummyActionDecoder(mask=mask, eligible=[{"id": "u1", "player": 2}], normalized_action=4)
+    slot = mi.SHOOT_SLOT_BASE  # 19
+    mask = [False] * mi.TOTAL_ACTION_SIZE
+    mask[slot] = True
+    decoder = _DummyActionDecoder(mask=mask, eligible=[{"id": "u1", "player": 2}], normalized_action=slot)
     engine = _DummyEngine(decoder=decoder)
     engine.game_state["phase"] = "shoot"
-    wrapper = BotControlledEnv(engine, bot=_DummyBot(action=4))
+    wrapper = BotControlledEnv(engine, bot=_DummyBot(action=slot))
     action = wrapper._get_bot_action()
-    assert action == 4
+    assert action == slot
     assert wrapper.shoot_opportunities == 1
     assert wrapper.shoot_actions == 1
 

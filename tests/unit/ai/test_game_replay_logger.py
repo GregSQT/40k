@@ -125,31 +125,17 @@ def test_capture_game_state_snapshot_success_and_missing_fields() -> None:
         logger._capture_game_state_snapshot()
 
 
-def test_log_action_routes_and_unknown_action_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_log_action_is_condemned(monkeypatch: pytest.MonkeyPatch) -> None:
+    # T2/R5 : log_action est condamné (ancien espace 8 actions + self.env.controller absent).
     env = _env_stub()
     logger = GameReplayLogger(env)
     pre = [{"id": 1, "unit_type": "Intercessor", "player": 0, "col": 1, "row": 1, "alive": True}]
     post = [{"id": 1, "unit_type": "Intercessor", "player": 0, "col": 2, "row": 1, "alive": True}]
 
-    called = {"move": 0}
-    monkeypatch.setattr(
-        logger,
-        "log_move",
-        lambda *args, **kwargs: called.__setitem__("move", called["move"] + 1),
-    )
-    logger.log_action(
-        action=0,
-        reward=0.1,
-        pre_action_units=pre,
-        post_action_units=post,
-        acting_unit_id=1,
-    )
-    assert called["move"] == 1
-
-    with pytest.raises(ValueError, match=r"Unknown action type"):
+    with pytest.raises(NotImplementedError, match=r"ancien espace 8 actions"):
         logger.log_action(
-            action=cast(int, "unknown_action"),
-            reward=0.0,
+            action=0,
+            reward=0.1,
             pre_action_units=pre,
             post_action_units=post,
             acting_unit_id=1,
