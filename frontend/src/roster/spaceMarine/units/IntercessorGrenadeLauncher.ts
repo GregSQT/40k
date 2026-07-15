@@ -19,8 +19,8 @@ export class IntercessorGrenadeLauncher extends TroopRangeSwarm {
 
   // WEAPONS
   static RNG_WEAPON_CODES = [
-    "astartes_grenade_launcher_frag",
-    "astartes_grenade_launcher_krak",
+    "grenade_launcher_intercessor_frag",
+    "grenade_launcher_intercessor_krak",
     "bolt_pistol",
   ];
   static RNG_WEAPONS = getWeapons(IntercessorGrenadeLauncher.RNG_WEAPON_CODES);
@@ -32,14 +32,17 @@ export class IntercessorGrenadeLauncher extends TroopRangeSwarm {
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
-    { keywordId: "infantry" },
-    { keywordId: "battleline" },
-    { keywordId: "grenades" },
-    { keywordId: "imperium" },
-    { keywordId: "tacticus" },
+    { keywordId: "INFANTRY" },
+    { keywordId: "BATTLELINE" },
+    { keywordId: "EXPLOSIVES" },
+    { keywordId: "IMPERIUM" },
+    { keywordId: "TACTICUS" },
     { keywordId: "INTERCESSOR SQUAD" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
+  
   static ICON = "/icons/IntercessorGrenadeLauncher.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 13; // Size of the base

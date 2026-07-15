@@ -279,6 +279,9 @@ class GameStateManager:
             resolved_terrain_areas = None
             resolved_deployment_zones = None
             if isinstance(scenario_data, dict):
+                # board_ref (V11 T4) : autorise la résolution walls/terrain hors dossier 'scenario/'
+                # (banque par-agent). None = comportement PvP legacy (parent 'scenario/' requis).
+                board_ref = scenario_data.get("board_ref")
                 has_wall_hexes = "wall_hexes" in scenario_data
                 has_wall_ref = "wall_ref" in scenario_data
                 if has_wall_hexes and has_wall_ref:
@@ -290,19 +293,22 @@ class GameStateManager:
                 elif has_wall_ref:
                     resolved_scenario_walls = self._load_shared_walls_from_ref(
                         require_key(scenario_data, "wall_ref"),
-                        scenario_file
+                        scenario_file,
+                        board_ref=board_ref,
                     )
                     resolved_scenario_dense_walls = self._load_shared_walls_from_ref(
                         require_key(scenario_data, "wall_ref"),
                         scenario_file,
                         only_type="dense",
+                        board_ref=board_ref,
                     )
                 if "terrain_ref" in scenario_data:
                     terrain_walls = self._load_terrain_walls_from_ref(
-                        scenario_data["terrain_ref"], scenario_file
+                        scenario_data["terrain_ref"], scenario_file, board_ref=board_ref
                     )
                     terrain_dense_walls = self._load_terrain_walls_from_ref(
-                        scenario_data["terrain_ref"], scenario_file, only_type="dense"
+                        scenario_data["terrain_ref"], scenario_file, only_type="dense",
+                        board_ref=board_ref,
                     )
                     if terrain_walls:
                         resolved_scenario_walls = list(resolved_scenario_walls or []) + terrain_walls
@@ -311,10 +317,10 @@ class GameStateManager:
                             list(resolved_scenario_dense_walls or []) + terrain_dense_walls
                         )
                     resolved_terrain_areas = self._load_terrain_areas_from_ref(
-                        scenario_data["terrain_ref"], scenario_file
+                        scenario_data["terrain_ref"], scenario_file, board_ref=board_ref
                     )
                     resolved_deployment_zones = self._load_deployment_zones_from_ref(
-                        scenario_data["terrain_ref"], scenario_file
+                        scenario_data["terrain_ref"], scenario_file, board_ref=board_ref
                     )
 
                 # Objectifs : source UNIQUE = terrains "objective": true (14.01/14.02).
@@ -567,7 +573,10 @@ class GameStateManager:
                         base_size = max(1, round(base_size * _ish / 10))
                 player_deployment_type = deployment_type_by_player[int(unit_player)]
                 pool_set = set()
-                if deployment_zone and int(unit_player) in deploy_pools:
+                # deploy_pools est peuplé soit par les deployment_zones du terrain (voie moderne,
+                # sans nom 'deployment_zone'), soit par la voie legacy config/deployment/<board>/.
+                # Le pool suffit — ne pas exiger en plus le NOM legacy 'deployment_zone'.
+                if int(unit_player) in deploy_pools:
                     pool_set = deploy_pools[int(unit_player)]
 
                 if player_deployment_type == "random":
@@ -597,7 +606,11 @@ class GameStateManager:
                             raise KeyError(f"Unit missing required field '{field}': {unit_data}")
                     chosen_col, chosen_row = normalize_coordinates(unit_data["col"], unit_data["row"])
                     fp = _compute_deploy_footprint(chosen_col, chosen_row, base_shape, base_size)
-                    if pool_set:
+                    # Placement FIXE : ne confiner à la zone que pour la voie legacy nommée
+                    # (config/deployment/<board>/<zone>). Neutralité PvP stricte : les scénarios
+                    # à zones-terrain + placement fixe posent les unités librement (comportement
+                    # d'avant le peuplement du pool depuis le terrain) — pas de durcissement.
+                    if deployment_zone and pool_set:
                         for c, r in fp:
                             if (c, r) not in pool_set:
                                 raise ValueError(
@@ -1426,7 +1439,8 @@ class GameStateManager:
         return filtered
 
     def _load_shared_walls_from_ref(
-        self, wall_ref: Any, scenario_file: str, only_type: Optional[str] = None
+        self, wall_ref: Any, scenario_file: str, only_type: Optional[str] = None,
+        board_ref: Optional[str] = None,
     ) -> List[List[int]]:
         """Load shared wall_hexes file referenced by scenario wall_ref.
 
@@ -1434,19 +1448,13 @@ class GameStateManager:
         13.5). La forme brute ``wall_hexes`` (hexes pré-rasterisés, sans ``type``) n'est pas
         classifiable → renvoie [] quand only_type est demandé (pas de repli)."""
         if isinstance(wall_ref, str) and wall_ref.strip() == "random":
-            scenario_parent = Path(scenario_file).parent
-            if scenario_parent.name != "scenario":
-                raise ValueError(
-                    f"Scenario '{scenario_file}' must be in 'config/board/<board>/scenario/' to use random wall_ref"
-                )
-            project_root = Path(__file__).resolve().parent.parent
-            walls_dir = project_root / scenario_parent.parent / "walls"
+            walls_dir = self._resolve_board_dir(scenario_file, board_ref, "random wall_ref") / "walls"
             candidates = sorted(p for p in walls_dir.glob("walls-*.json") if p.stem != "walls-none")
             if not candidates:
                 raise FileNotFoundError(f"No walls-*.json files found in {walls_dir} for random wall_ref in scenario {scenario_file}")
             import random as _random
             wall_ref = _random.choice(candidates).stem
-        wall_path = self._resolve_shared_config_path("_walls", wall_ref, scenario_file, "wall_ref")
+        wall_path = self._resolve_shared_config_path("_walls", wall_ref, scenario_file, "wall_ref", board_ref=board_ref)
         cache_key = str(wall_path) if only_type is None else f"{wall_path}::{only_type}"
         if cache_key in _walls_json_cache and cache_key in _walls_json_mtime_ns:
             if wall_path.exists():
@@ -1493,16 +1501,11 @@ class GameStateManager:
         _walls_json_mtime_ns[cache_key] = wall_path.stat().st_mtime_ns
         return wall_hexes
 
-    def _read_terrain_file(self, terrain_ref: str, scenario_file: str) -> Tuple[Dict[str, Any], Path]:
+    def _read_terrain_file(
+        self, terrain_ref: str, scenario_file: str, board_ref: Optional[str] = None
+    ) -> Tuple[Dict[str, Any], Path]:
         """Resolve and parse the terrain JSON file referenced by terrain_ref. Returns (data, path)."""
-        scenario_parent = Path(scenario_file).parent
-        if scenario_parent.name != "scenario":
-            raise ValueError(
-                f"Scenario '{scenario_file}' must be located in a 'config/board/<board>/scenario/' directory "
-                f"to resolve terrain ref, got parent: '{scenario_parent}'"
-            )
-        project_root = Path(__file__).resolve().parent.parent
-        terrain_path = project_root / scenario_parent.parent / "terrain" / terrain_ref
+        terrain_path = self._resolve_board_dir(scenario_file, board_ref, "terrain_ref") / "terrain" / terrain_ref
         if not terrain_path.exists():
             raise FileNotFoundError(f"Terrain file not found for scenario {scenario_file}: {terrain_path}")
         try:
@@ -1513,13 +1516,14 @@ class GameStateManager:
         return terrain_data, terrain_path
 
     def _load_terrain_walls_from_ref(
-        self, terrain_ref: str, scenario_file: str, only_type: Optional[str] = None
+        self, terrain_ref: str, scenario_file: str, only_type: Optional[str] = None,
+        board_ref: Optional[str] = None,
     ) -> List[List[int]]:
         """Load wall hexes from the 'walls' section of a terrain file referenced by terrain_ref.
 
         ``only_type`` (ex: "dense") restreint aux groupes de murs de ce type (champ ``type`` du
         groupe) — sert à construire le set Solid/dense de la règle 13.5. None = tous les murs."""
-        terrain_data, terrain_path = self._read_terrain_file(terrain_ref, scenario_file)
+        terrain_data, terrain_path = self._read_terrain_file(terrain_ref, scenario_file, board_ref)
         result: List[List[int]] = []
         for gi, g in enumerate(terrain_data.get("walls", [])):  # get allowed
             if not isinstance(g, dict):
@@ -1530,14 +1534,16 @@ class GameStateManager:
             result.extend(expand_wall_group_to_hex_list(g, path_hint=hint))
         return result
 
-    def _load_deployment_zones_from_ref(self, terrain_ref: str, scenario_file: str) -> Optional[List[Dict[str, Any]]]:
+    def _load_deployment_zones_from_ref(
+        self, terrain_ref: str, scenario_file: str, board_ref: Optional[str] = None
+    ) -> Optional[List[Dict[str, Any]]]:
         """Load the 'deployment_zones' section of a terrain file, or None if absent.
 
         Returns the raw list of zone dicts ({id, name, shape:"polygon", vertices, ...}). The geometry
         is rasterized to per-player deploy pools later (needs board cols/rows). Returns None when the
         terrain has no 'deployment_zones' key — those scenarios fall back to config/deployment/ (legacy).
         """
-        terrain_data, terrain_path = self._read_terrain_file(terrain_ref, scenario_file)
+        terrain_data, terrain_path = self._read_terrain_file(terrain_ref, scenario_file, board_ref)
         if "deployment_zones" not in terrain_data:
             return None
         zones = terrain_data["deployment_zones"]
@@ -1545,7 +1551,9 @@ class GameStateManager:
             raise ValueError(f"Terrain file {terrain_path}: 'deployment_zones' must be a non-empty list")
         return zones
 
-    def _load_terrain_areas_from_ref(self, terrain_ref: str, scenario_file: str) -> List[Dict[str, Any]]:
+    def _load_terrain_areas_from_ref(
+        self, terrain_ref: str, scenario_file: str, board_ref: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """Load polygon terrain areas from the 'terrain' section of a terrain file referenced by terrain_ref.
 
         Only 'polygon' shapes are kept (lines like deployment markers are excluded). Each area is
@@ -1554,7 +1562,7 @@ class GameStateManager:
         """
         from config_loader import get_config_loader
         cols, rows = get_config_loader().get_board_size()
-        terrain_data, terrain_path = self._read_terrain_file(terrain_ref, scenario_file)
+        terrain_data, terrain_path = self._read_terrain_file(terrain_ref, scenario_file, board_ref)
         areas: List[Dict[str, Any]] = []
         for ai, area in enumerate(terrain_data.get("terrain", [])):  # get allowed
             if not isinstance(area, dict):
@@ -1617,14 +1625,54 @@ class GameStateManager:
         floors.sort(key=lambda f: f["level"])
         return floors
 
+    def _resolve_board_dir(
+        self, scenario_file: str, board_ref: Optional[str], purpose: str
+    ) -> Path:
+        """Resolve the board directory backing a scenario's shared config refs (walls/terrain).
+
+        Deux formes acceptées (V11 T4, décision de design n°4) — pas de fallback :
+          - le scénario est dans 'config/board/<board>/scenario/' → dossier board parent (PvP, inchangé) ;
+          - le scénario déclare 'board_ref' → 'config/board/<board_ref>/' (banque par-agent).
+        Absence des deux OU board_ref pointant un dossier absent = erreur explicite."""
+        project_root = Path(__file__).resolve().parent.parent
+        if board_ref is not None:
+            if not isinstance(board_ref, str) or not board_ref.strip():
+                raise ValueError(
+                    f"Scenario '{scenario_file}' has invalid 'board_ref': {board_ref!r}"
+                )
+            normalized = board_ref.strip().replace("\\", "/")
+            if (
+                normalized.startswith("/")
+                or ".." in normalized.split("/")
+                or "/" in normalized
+            ):
+                raise ValueError(
+                    f"Scenario '{scenario_file}' has unsafe 'board_ref' (board name only): {board_ref!r}"
+                )
+            board_dir = project_root / "config" / "board" / normalized
+            if not board_dir.is_dir():
+                raise FileNotFoundError(
+                    f"Scenario '{scenario_file}' board_ref '{normalized}' -> board directory not found: "
+                    f"{board_dir} (needed to resolve {purpose})"
+                )
+            return board_dir
+        scenario_parent = Path(scenario_file).parent
+        if scenario_parent.name == "scenario":
+            return project_root / scenario_parent.parent
+        raise ValueError(
+            f"Scenario '{scenario_file}' must either be located in a 'config/board/<board>/scenario/' "
+            f"directory OR declare a 'board_ref' key to resolve {purpose}, got parent: '{scenario_parent}'"
+        )
+
     def _resolve_shared_config_path(
         self,
         shared_dir_name: str,
         raw_ref: Any,
         scenario_file: str,
-        field_name: str
+        field_name: str,
+        board_ref: Optional[str] = None,
     ) -> Path:
-        """Resolve shared config path. _walls -> config/board/{cols}x{rows}/walls/, _objectives -> .../objectives/, else config/agents/<shared_dir_name>/."""
+        """Resolve shared config path. _walls -> config/board/<board>/walls/, _objectives -> .../objectives/, else config/agents/<shared_dir_name>/. Board dir via _resolve_board_dir (scenario/ parent OU board_ref)."""
         if not isinstance(raw_ref, str) or not raw_ref.strip():
             raise ValueError(
                 f"Scenario '{scenario_file}' has invalid '{field_name}': {raw_ref!r}"
@@ -1642,17 +1690,10 @@ class GameStateManager:
             normalized = f"{normalized}.json"
 
         project_root = Path(__file__).resolve().parent.parent
-        scenario_parent = Path(scenario_file).parent
-        if scenario_parent.name != "scenario":
-            raise ValueError(
-                f"Scenario '{scenario_file}' must be located in a 'config/board/<board>/scenario/' directory "
-                f"to resolve shared config refs, got parent: '{scenario_parent}'"
-            )
-        board_dir = project_root / scenario_parent.parent
         if shared_dir_name == "_walls":
-            return board_dir / "walls" / normalized
+            return self._resolve_board_dir(scenario_file, board_ref, "wall_ref") / "walls" / normalized
         if shared_dir_name == "_objectives":
-            return board_dir / "objectives" / normalized
+            return self._resolve_board_dir(scenario_file, board_ref, "objectives") / "objectives" / normalized
         return project_root / "config" / "agents" / shared_dir_name / normalized
 
     def _load_compact_roster_file(self, roster_path: Path, roster_label: str) -> Dict[str, Any]:

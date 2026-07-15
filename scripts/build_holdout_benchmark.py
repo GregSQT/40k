@@ -81,18 +81,24 @@ def _sync_regular_common_pool(agent_key: str, scale: str) -> None:
         _write_json(opponent_regular_dir / new_name, data)
 
 
+# Terrains d'entraînement plats (V11 T4) — cyclés comme la migration de la banque.
+_TRAIN_TERRAINS = ["terrain-train-01.json", "terrain-train-02.json", "terrain-train-03.json"]
+
+
 def _build_scenarios(
     agent_key: str,
     scale: str,
     split: str,
     count: int,
-    wall_ref: str,
-    objectives_ref: str,
+    board_ref: str,
+    terrains: list[str],
 ) -> None:
     if split not in {"holdout_regular", "holdout_hard"}:
         raise ValueError(f"Unsupported split: {split}")
     if count <= 0:
         raise ValueError(f"Scenario count for {split} must be > 0 (got {count})")
+    if not terrains:
+        raise ValueError("terrains list cannot be empty")
 
     scenario_dir = PROJECT_ROOT / "config" / "agents" / agent_key / "scenarios" / split
     scenario_dir.mkdir(parents=True, exist_ok=True)
@@ -106,16 +112,17 @@ def _build_scenarios(
     for idx in range(1, count + 1):
         agent_roster = agent_rosters[(idx - 1) % len(agent_rosters)]
         opponent_roster = opponent_rosters[(idx - 1) % len(opponent_rosters)]
+        # Contrat moteur V11 : objectifs + zones + murs viennent du terrain_ref ;
+        # board_ref résout le board hors dossier 'scenario/'. Zéro clé legacy.
         scenario_payload = {
-            "deployment_zone": "hammer",
             "deployment_type": "active",
             "scale": scale,
             "agent_roster_seed": None,
             "agent_roster_ref": f"{split}/{agent_roster.name}",
             "opponent_roster_ref": f"{split}/{opponent_roster.name}",
-            "wall_ref": wall_ref,
             "primary_objectives": ["objectives_control"],
-            "objectives_ref": objectives_ref,
+            "board_ref": board_ref,
+            "terrain_ref": terrains[(idx - 1) % len(terrains)],
         }
         scenario_path = scenario_dir / f"scenario_bot-{idx:02d}.json"
         _write_json(scenario_path, scenario_payload)
@@ -197,8 +204,7 @@ def main() -> None:
     parser.add_argument("--skip-scenario-build", action="store_true")
     parser.add_argument("--regular-scenario-count", type=int, default=10)
     parser.add_argument("--hard-scenario-count", type=int, default=10)
-    parser.add_argument("--fixed-wall-ref", default="walls-11.json")
-    parser.add_argument("--fixed-objectives-ref", default="objectives-51.json")
+    parser.add_argument("--board-ref", default="44x60x5", help="Board de référence (config/board/<board_ref>/)")
 
     parser.add_argument("--generate-hard-opponent-rosters", action="store_true")
     parser.add_argument("--hard-num-rosters", type=int, default=10)
@@ -242,16 +248,16 @@ def main() -> None:
             scale=args.scale,
             split="holdout_regular",
             count=int(args.regular_scenario_count),
-            wall_ref=args.fixed_wall_ref,
-            objectives_ref=args.fixed_objectives_ref,
+            board_ref=args.board_ref,
+            terrains=_TRAIN_TERRAINS,
         )
         _build_scenarios(
             agent_key=args.agent,
             scale=args.scale,
             split="holdout_hard",
             count=int(args.hard_scenario_count),
-            wall_ref=args.fixed_wall_ref,
-            objectives_ref=args.fixed_objectives_ref,
+            board_ref=args.board_ref,
+            terrains=_TRAIN_TERRAINS,
         )
         print(
             f"Scenarios generated: holdout_regular={args.regular_scenario_count}, "

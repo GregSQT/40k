@@ -4199,16 +4199,22 @@ def pile_in_autoplace_plan(
         return any(footprints_overlap(s, o) for o in others)
 
     # Socles bloquants PAR FIGURINE : ennemis + autres unités amies (rond↔rond exact par modèle).
+    # Empreinte COMPLÈTE par figurine via _charge_model_socle (miroir EXACT du pool de validation,
+    # cf. _fight_pile_in_build_model_pool ~L3626) : avec fp={(mc,mr)} (une seule case) un blocker à
+    # base NON-RONDE n'occupait que son hex central → l'autoplace posait des figs en superposition
+    # partielle que le validateur rejetait ensuite (CHEVAUCHE UN BLOQUEUR → plan invalide).
     blocker_socles: List[Any] = []
     for eid, entry in units_cache.items():
         if str(eid) == str(squad_id):
             continue
         by_model = entry.get("occupied_hexes_by_model")
         if by_model:
-            for mc, mr in by_model.values():
+            for _bmid, (mc, mr) in by_model.items():
+                _bm_entry = models_cache.get(str(_bmid))
+                if _bm_entry is None:
+                    continue
                 blocker_socles.append(
-                    Socle(shape=entry["BASE_SHAPE"], base_size=entry["BASE_SIZE"],
-                          col=int(mc), row=int(mr), fp={(int(mc), int(mr))})
+                    _charge_model_socle(game_state, _bm_entry, int(mc), int(mr))
                 )
         else:
             occ = entry.get("occupied_hexes")
@@ -4247,6 +4253,16 @@ def pile_in_autoplace_plan(
 
     def _fp_min_to_tier(fp: Set[Tuple[int, int]]) -> int:
         return min(min_distance_between_sets(fp, t) for t in tier_fps) if tier_fps else 1 << 30
+
+    # Figs mobiles déjà AU CONTACT du palier (empreinte à distance 0) : la règle pile-in exige un
+    # déplacement STRICTEMENT plus proche → elles ne peuvent pas bouger, donc elles RESTENT sur place.
+    # L'ILP les écarte (sm<=0) mais sans réserver leur case → root cause du chevauchement ILP-vs-stayer.
+    # On les réserve comme bloqueurs statiques (non-dégradant : la case est réellement occupée) pour
+    # PRÉVENIR le chevauchement à la source, avant la génération des slots ILP.
+    for mid in movable:
+        m = models_cache[mid]
+        if _fp_min_to_tier(_model_fp(mid, int(m["col"]), int(m["row"]))) <= 0:
+            static_blockers.append(_socle(mid, int(m["col"]), int(m["row"])))
 
     # --- Slots : bande d'engagement du focus, par taille de socle distincte (coût). ---
     def _base_key(m: Dict[str, Any]) -> Tuple[Any, Any]:
@@ -4447,11 +4463,19 @@ def pile_in_autoplace_plan(
 
     # Figs mobiles non posées par l'ILP : rapprochement au max (strictement plus proche, sans chevaucher).
     placed = set(provisional)
+    # Réservation des cases de DÉPART : toute fig mobile non encore bougée (candidate au repli ou
+    # susceptible de RESTER sur place) occupe son départ → une autre fig ne doit pas s'y poser.
+    # Une fig est retirée de la réservation dès qu'elle bouge effectivement (elle libère sa case).
+    # Corrige le crash « chevauchement de socles » : une fig restée au départ n'était pas un bloqueur.
+    reserved_start_socles: Dict[str, Any] = {
+        mid: _socle(mid, *starts[mid]) for mid in movable if mid not in placed
+    }
     for mid in movable:
         if mid in placed:
             continue
         sm = start_min[mid]
         best: Optional[Tuple[int, int]] = None
+        others_reserved = [s for om, s in reserved_start_socles.items() if om != mid]
         if sm > 0:
             best_score = None
             for (cc, rr), _pd in _reachable(mid).items():
@@ -4460,7 +4484,7 @@ def pile_in_autoplace_plan(
                 soc = _socle(mid, cc, rr)
                 if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in soc.fp):
                     continue
-                if _overlaps(soc, placed_socles):
+                if _overlaps(soc, placed_socles) or _overlaps(soc, others_reserved):
                     continue
                 d_tier = _fp_min_to_tier(set(soc.fp))
                 if d_tier >= sm:
@@ -4472,8 +4496,9 @@ def pile_in_autoplace_plan(
             if best is not None:
                 provisional[mid] = best
                 placed_socles.append(_socle(mid, *best))
+                reserved_start_socles.pop(mid, None)  # a bougé → libère sa case de départ
         if mid not in provisional:
-            provisional[mid] = starts[mid]  # reste à sa position (départ)
+            provisional[mid] = starts[mid]  # reste à sa position (départ, déjà réservée)
 
     # Figs figées : conservées à leur départ.
     for mid in alive:
@@ -4481,17 +4506,41 @@ def pile_in_autoplace_plan(
             m = models_cache[mid]
             provisional[mid] = (int(m["col"]), int(m["row"]))
 
-    # Garde-fou : aucun chevauchement de socles (test euclidien officiel) dans le plan produit.
-    # Erreur explicite plutôt qu'un plan illégal silencieux (le contact tangent gap≈0 reste autorisé).
-    socs = {mid: _socle(mid, *provisional[mid]) for mid in alive}
-    items = list(socs.items())
-    for i in range(len(items)):
-        for j in range(i + 1, len(items)):
-            if footprints_overlap(items[i][1], items[j][1]):
-                raise ValueError(
-                    f"pile_in_autoplace_plan: chevauchement de socles entre {items[i][0]} "
-                    f"({provisional[items[i][0]]}) et {items[j][0]} ({provisional[items[j][0]]})"
-                )
+    # Résolution des chevauchements RÉSIDUELS (ex. une fig posée par l'ILP près d'une fig restée sur
+    # place que l'ILP n'a pas pu réserver) : plutôt que planter, on ramène la fig en conflit à son
+    # ORIGINE. Justification règles : un pile-in de 0" (rester sur place) est toujours légal ; les
+    # positions d'origine sont deux à deux non-chevauchantes (état de jeu valide) → la boucle
+    # CONVERGE (au pire toutes les figs reviennent à l'origine = configuration initiale valide).
+    # On préfère ramener la fig la PLUS LOIN du focus (elle « perd » le moins d'engagement).
+    orig_pos = {mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"])) for mid in alive}
+    ids = list(alive)
+    for _iteration in range(len(ids) + 1):
+        socs = {mid: _socle(mid, *provisional[mid]) for mid in ids}
+        conflict: Optional[Tuple[str, str]] = None
+        for i in range(len(ids)):
+            for j in range(i + 1, len(ids)):
+                if footprints_overlap(socs[ids[i]], socs[ids[j]]):
+                    conflict = (ids[i], ids[j])
+                    break
+            if conflict is not None:
+                break
+        if conflict is None:
+            break
+        ma, mb = conflict
+        moved = [m for m in (ma, mb) if provisional[m] != orig_pos[m]]
+        if not moved:
+            # Deux figs à leur origine qui se chevauchent = incohérence de l'état d'entrée.
+            raise ValueError(
+                f"pile_in_autoplace_plan: chevauchement d'origines {ma}{orig_pos[ma]} / {mb}{orig_pos[mb]}"
+            )
+        # Ramène celle qui a bougé et est la plus loin du focus (perte d'engagement minimale).
+        victim = max(
+            moved,
+            key=lambda m: min_distance_between_sets(_model_fp(m, *provisional[m]), focus_fp),
+        )
+        provisional[victim] = orig_pos[victim]
+    else:
+        raise ValueError("pile_in_autoplace_plan: résolution des chevauchements non convergente")
 
     plan = [[mid, int(provisional[mid][0]), int(provisional[mid][1])] for mid in alive]
     return {"plan": plan}

@@ -35,6 +35,9 @@ export class EradicatorMultiMelta extends EliteRangeTroop {
     { keywordId: "eradicator squad" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
+  
   static ICON = "/icons/EradicatorMultiMelta.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 16; // Size of the base

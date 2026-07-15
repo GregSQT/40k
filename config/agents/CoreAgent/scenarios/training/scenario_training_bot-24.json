@@ -1,13 +1,12 @@
 {
-  "deployment_zone": "hammer",
   "deployment_type": "active",
   "scale": "150pts",
   "agent_roster_seed": null,
   "agent_roster_ref": "training_random",
   "opponent_roster_ref": "training_random",
-  "wall_ref": "random",
   "primary_objectives": [
     "objectives_control"
   ],
-  "objectives_ref": "random"
+  "board_ref": "44x60x5",
+  "terrain_ref": "terrain-train-03.json"
 }

@@ -25,14 +25,17 @@ export class Intercessor extends TroopRangeSwarm {
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
-    { keywordId: "infantry" },
-    { keywordId: "battleline" },
-    { keywordId: "grenades" },
-    { keywordId: "imperium" },
-    { keywordId: "tacticus" },
+    { keywordId: "INFANTRY" },
+    { keywordId: "BATTLELINE" },
+    { keywordId: "EXPLOSIVES" },
+    { keywordId: "IMPERIUM" },
+    { keywordId: "TACTICUS" },
     { keywordId: "INTERCESSOR SQUAD" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
+  
   static ICON = "/icons/Intercessor.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 13; // Size of the base

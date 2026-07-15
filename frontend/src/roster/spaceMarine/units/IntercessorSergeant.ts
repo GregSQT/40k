@@ -18,7 +18,7 @@ export class IntercessorSergeant extends TroopMeleeElite {
   static VALUE = 21; // Unit value (W40K points cost)
 
   // WEAPONS
-  static RNG_WEAPON_CODES = ["plasma_pistol_standard", "plasma_pistol_supercharge"];
+  static RNG_WEAPON_CODES = ["bolt_rifle", "bolt_pistol"];
   static RNG_WEAPONS = getWeapons(IntercessorSergeant.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["intercessor_sergeant_power_fist"];
   static CC_WEAPONS = getWeapons(IntercessorSergeant.CC_WEAPON_CODES);
@@ -28,14 +28,17 @@ export class IntercessorSergeant extends TroopMeleeElite {
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
-    { keywordId: "infantry" },
-    { keywordId: "battleline" },
-    { keywordId: "grenades" },
-    { keywordId: "imperium" },
-    { keywordId: "tacticus" },
+    { keywordId: "INFANTRY" },
+    { keywordId: "BATTLELINE" },
+    { keywordId: "EXPLOSIVES" },
+    { keywordId: "IMPERIUM" },
+    { keywordId: "TACTICUS" },
     { keywordId: "INTERCESSOR SQUAD" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
+  
   static ICON = "/icons/IntercessorSergeant.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 13; // Size of the base

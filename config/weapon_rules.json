@@ -29,6 +29,11 @@
     "description": "Add 1 to the weapon Attacks characteristic for every 5 models in the target unit.",
     "has_parameter": false
   },
+  "CLEAVE": {
+    "name": "Cleave",
+    "description": "Each time an attack is made with this weapon, it also hits X additional enemy models within the bearer's Engagement Range.",
+    "has_parameter": true
+  },
   "DEVASTATING_WOUNDS": {
     "name": "Devastating Wounds",
     "description": "No saving throw can be mande against a critical wound rolled with this weapon.",

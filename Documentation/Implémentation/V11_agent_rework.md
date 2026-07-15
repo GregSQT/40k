@@ -459,7 +459,38 @@ moteur. À purger en T4 (avec la migration) ou T6.
    migrée (T4) n'utilise plus `deployment_zone` nommée, ne pas y toucher ; sinon fournir les
    fichiers de zones pour `220x300` (décision en T4).
 
-### T4 — Migration de la banque de scénarios (R3)
+### T4 — Migration de la banque de scénarios (R3) — ✅ FAIT (2026-07-15)
+
+Réalisé : **resolver `board_ref`** — helper `_resolve_board_dir(scenario_file, board_ref,
+purpose)` dans game_state.py (seul fichier moteur touché) : parent `scenario/` (voie PvP
+inchangée) OU `board_ref` → `config/board/<board_ref>/` ; erreurs explicites (absence des
+deux, board inexistant, traversal), câblé dans `_resolve_shared_config_path`,
+`_load_shared_walls_from_ref` (random) et `_read_terrain_file` + call-sites. **Bug moteur
+corrigé au passage** : `pool_set` gardé derrière le NOM legacy `deployment_zone` → les zones
+issues du terrain (voie moderne) ne peuplaient pas le pool de déploiement random/fixed
+(fix neutre PvP, commenté en ~L576). **Terrains plats** `terrain-train-01/02/03.json`
+(5 objectifs, deployment_zones "1"/"2", 0 étage). **Migration** :
+`scripts/migrate_scenario_bank_v11.py` (idempotent) — 61 scénarios migrés (0 clé legacy,
+`board_ref`+`terrain_ref`), `training_save/` (30) archivé sous `_archive_pre_v11/`.
+**Outillage** : `build_holdout_benchmark.py` migré ; `scenario_manager.py` NON touché
+(chemin dormant — `config/scenario_templates.json` absent → lève à la construction ; son
+alignement 0/1 vs 1/2 traverse multi_agent_trainer = chantier séparé à valider).
+**Balayage** : `scripts/sweep_scenario_bank_v11.py` — 61/61 chargés + reset. Tests +83.
+Validé : 1245 passed / 2 skipped ; Carnifex en charge 3 seeds sans TypeError (R6).
+⚠️ Pertes de mêlée toujours non démontrables end-to-end (deadlock R7/T5 fight/pile_in tour 1,
+confirmé 3 voies) — inchangé depuis T2/T3, aucun code fight/charge touché par T4.
+
+**Contre-vérification indépendante (2026-07-15)** — T4 confirmée conforme : balayage rejoué
+(61/61 + reset, 0 clé legacy hors archive — grep indépendant), suite rejouée (1245 collectés,
+verte), sample de scénario migré inspecté (clés legacy absentes, refs présentes), 3 terrains
+inspectés (5 objectifs, dz 1/2, 0 floor), resolver relu (zéro fallback, traversal gardé),
+`users.db` propre, `charge_handlers` non touché (non-régression R6 structurelle). Réserves
+mineures : (1) les scripts `migrate_/sweep_scenario_bank_v11.py` n'ont pas de bootstrap
+`sys.path` — exécutables uniquement avec `PYTHONPATH=.` ; (2) la réserve T3 (paramètre
+`objectives_ref` mort de `_materialize_scenario_with_refs`, train.py ~L645-668) n'a PAS été
+purgée en T4 → reste pour T6.
+
+Plan d'origine (réalisé ci-dessus) :
 1. Implémenter la clé **`board_ref`** dans le résolveur (décision de design n°4) :
    `_resolve_shared_config_path`, `_load_shared_walls_from_ref` (branche "random") et
    `_read_terrain_file` ([game_state.py:1646](../../engine/game_state.py#L1646), 1437, 1496). Erreur explicite si ni parent

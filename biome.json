@@ -63,5 +63,11 @@
       "semicolons": "always",
       "arrowParentheses": "always"
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["**/roster/**/armory.ts"],
+      "formatter": { "lineWidth": 320, "expand": "never" }
+    }
+  ]
 }
