@@ -38,14 +38,15 @@ def test_get_objective_name_to_id_map_via_objectives_ref(tmp_path: Path, monkeyp
     scenario = tmp_path / "scenario_ref.json"
     scenario.write_text('{"objectives_ref":"demo"}', encoding="utf-8")
 
-    obj_dir = tmp_path / "config" / "board" / "20x20" / "objectives"
+    board_dir = tmp_path / "config" / "board" / "44x60x5"
+    obj_dir = board_dir / "objectives"
     obj_dir.mkdir(parents=True, exist_ok=True)
     (obj_dir / "demo.json").write_text('{"objectives":[{"id":2,"name":"beta"}]}', encoding="utf-8")
 
     class _Cfg:
         @staticmethod
-        def get_board_size():
-            return (20, 20)
+        def get_board_dir():
+            return board_dir
 
     monkeypatch.setattr("config_loader.get_config_loader", lambda: _Cfg())
     an._scenario_objective_name_to_id_cache.clear()

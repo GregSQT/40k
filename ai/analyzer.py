@@ -220,8 +220,7 @@ def _get_objective_name_to_id_map(scenario_name: str) -> Dict[str, int]:
         if not normalized_ref.endswith(".json"):
             normalized_ref = f"{normalized_ref}.json"
         from config_loader import get_config_loader
-        cols, rows = get_config_loader().get_board_size()
-        objectives_dir = os.path.join(project_root, "config", "board", f"{cols}x{rows}", "objectives")
+        objectives_dir = os.path.join(str(get_config_loader().get_board_dir()), "objectives")
         objectives_path = os.path.join(objectives_dir, normalized_ref)
         if not os.path.exists(objectives_path):
             raise FileNotFoundError(

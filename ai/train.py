@@ -559,22 +559,19 @@ def _load_scenario_wall_ref(scenario_path: str) -> str:
     return wall_ref_raw.strip()
 
 
-def _load_scenario_objectives_ref(scenario_path: str) -> str:
-    """Load required objectives_ref from scenario JSON."""
-    if not isinstance(scenario_path, str) or not scenario_path.strip():
-        raise ValueError(f"Invalid scenario path: {scenario_path!r}")
-    with open(scenario_path, "r", encoding="utf-8-sig") as f:
-        scenario_data = json.load(f)
-    if not isinstance(scenario_data, dict):
-        raise TypeError(
-            f"Scenario JSON must be an object for objectives_ref weighting: {scenario_path}"
-        )
-    objectives_ref_raw = require_key(scenario_data, "objectives_ref")
-    if not isinstance(objectives_ref_raw, str) or not objectives_ref_raw.strip():
+def _require_training_config_phase(config, agent_key, training_config_name) -> None:
+    """Enforce an explicit --training-config (R1): no silent 'default' alias.
+
+    Raises ValueError listing the available phases when an agent is selected but no
+    training-config phase was provided.
+    """
+    if agent_key and training_config_name is None:
+        full_cfg = config.load_agent_training_config(agent_key, None)
+        available_phases = [k for k in full_cfg.keys() if not str(k).startswith("_")]
         raise ValueError(
-            f"Scenario objectives_ref must be a non-empty string: {scenario_path}"
+            f"--training-config is required (no silent default). "
+            f"Available phases for agent '{agent_key}': {available_phases}"
         )
-    return objectives_ref_raw.strip()
 
 
 def _list_available_board_refs(ref_kind: str) -> List[str]:
@@ -582,13 +579,7 @@ def _list_available_board_refs(ref_kind: str) -> List[str]:
     if ref_kind not in {"walls", "objectives"}:
         raise ValueError(f"Unsupported ref_kind: {ref_kind}")
     config_loader = get_config_loader()
-    board_cols, board_rows = config_loader.get_board_size()
-    board_dir = os.path.join(
-        config_loader.config_dir,
-        "board",
-        f"{board_cols}x{board_rows}",
-        ref_kind,
-    )
+    board_dir = os.path.join(str(config_loader.get_board_dir()), ref_kind)
     if not os.path.isdir(board_dir):
         raise FileNotFoundError(f"Board {ref_kind} directory not found: {board_dir}")
     pattern = "walls-*.json" if ref_kind == "walls" else "objectives-*.json"
@@ -818,48 +809,6 @@ def _apply_wall_ref_weighting(
         for wall_ref, mult in multipliers.items():
             wall_ref_weights[wall_ref] = float(mult) / total_multiplier
 
-    objective_weights_raw = sampling_cfg.get("train_objectives_ref_weights")
-    objective_weights: Dict[str, float] = {"default": 1.0}
-    if objective_weights_raw is not None:
-        if not isinstance(objective_weights_raw, dict):
-            raise TypeError(
-                "scenario_sampling.train_objectives_ref_weights must be an object "
-                f"(got {type(objective_weights_raw).__name__})"
-            )
-        if len(objective_weights_raw) == 0:
-            raise ValueError("scenario_sampling.train_objectives_ref_weights cannot be empty")
-        objective_weights = {}
-        for objectives_ref, weight_raw in objective_weights_raw.items():
-            if not isinstance(objectives_ref, str) or not objectives_ref.strip():
-                raise ValueError(
-                    "scenario_sampling.train_objectives_ref_weights keys must be non-empty strings"
-                )
-            if not isinstance(weight_raw, (int, float)):
-                raise TypeError(
-                    f"Weight for objectives_ref '{objectives_ref}' must be numeric "
-                    f"(got {type(weight_raw).__name__})"
-                )
-            weight = float(weight_raw)
-            if objectives_ref.strip() == "default":
-                if weight < 0.0:
-                    raise ValueError("Weight for objectives_ref 'default' must be >= 0")
-            else:
-                if weight <= 0.0:
-                    raise ValueError(
-                        f"Weight for objectives_ref '{objectives_ref}' must be > 0"
-                    )
-            objective_weights[objectives_ref.strip()] = weight
-        if "default" not in objective_weights:
-            raise KeyError(
-                "scenario_sampling.train_objectives_ref_weights must define a 'default' weight"
-            )
-        objective_sum = sum(objective_weights.values())
-        if abs(objective_sum - 1.0) > 1e-9:
-            raise ValueError(
-                "scenario_sampling.train_objectives_ref_weights must sum to 1.0 "
-                f"(got {objective_sum:.12f})"
-            )
-
     scenario_counts: Dict[str, int] = {}
     for scenario_path in scenario_list:
         if scenario_path not in scenario_counts:
@@ -870,7 +819,6 @@ def _apply_wall_ref_weighting(
     weighted_scenario_list: List[str] = []
     for scenario_path, base_count in sorted(scenario_counts.items(), key=lambda item: item[0]):
         original_wall_ref = _load_scenario_wall_ref(scenario_path)
-        original_objectives_ref = _load_scenario_objectives_ref(scenario_path)
         units_total = base_count * per_scenario_scale
         if units_total <= 0:
             continue
@@ -884,47 +832,28 @@ def _apply_wall_ref_weighting(
         else:
             wall_weight_items = sorted(wall_ref_weights.items(), key=lambda item: item[0])
 
-        if original_objectives_ref == "random":
-            objective_weight_items = _expand_random_ref_weights(
-                configured_weights=objective_weights,
-                ref_kind="objectives",
-                config_key_name="scenario_sampling.train_objectives_ref_weights",
-            )
-        else:
-            objective_weight_items = sorted(objective_weights.items(), key=lambda item: item[0])
-
-        provisional: List[Tuple[str, str, int, float]] = []
+        provisional: List[Tuple[str, int, float]] = []
         assigned = 0
         for wall_key, wall_weight in wall_weight_items:
-            for obj_key, obj_weight in objective_weight_items:
-                combined = float(wall_weight) * float(obj_weight)
-                exact = combined * float(units_total)
-                count = int(exact)
-                assigned += count
-                provisional.append((wall_key, obj_key, count, exact - float(count)))
+            exact = float(wall_weight) * float(units_total)
+            count = int(exact)
+            assigned += count
+            provisional.append((wall_key, count, exact - float(count)))
 
         remainder = units_total - assigned
         if remainder > 0:
-            provisional.sort(key=lambda item: item[3], reverse=True)
+            provisional.sort(key=lambda item: item[2], reverse=True)
             for i in range(remainder):
-                wall_key, obj_key, count, frac = provisional[i % len(provisional)]
-                provisional[i % len(provisional)] = (wall_key, obj_key, count + 1, frac)
+                wall_key, count, frac = provisional[i % len(provisional)]
+                provisional[i % len(provisional)] = (wall_key, count + 1, frac)
 
-        for wall_key, obj_key, count, _ in provisional:
+        for wall_key, count, _ in provisional:
             if count <= 0:
                 continue
             effective_wall_ref = original_wall_ref if wall_key == "default" else wall_key
-            effective_objectives_ref = (
-                original_objectives_ref if obj_key == "default" else obj_key
-            )
             weighted_path = _materialize_scenario_with_refs(
                 scenario_path=scenario_path,
                 wall_ref=effective_wall_ref if effective_wall_ref != original_wall_ref else None,
-                objectives_ref=(
-                    effective_objectives_ref
-                    if effective_objectives_ref != original_objectives_ref
-                    else None
-                ),
             )
             weighted_scenario_list.extend([weighted_path] * count)
 
@@ -4229,8 +4158,8 @@ def start_multi_agent_orchestration(config, total_episodes: int, training_config
 def main():
     """Main training function following AI_INSTRUCTIONS.md exactly."""
     parser = argparse.ArgumentParser(description="Train W40K AI (see Documentation/AI_TURN.md and AI_IMPLEMENTATION.md)")
-    parser.add_argument("--training-config", default="default",
-                       help="Training config (default: default)")
+    parser.add_argument("--training-config", default=None,
+                       help="Training config phase name (required, no silent default; e.g. x1, x1_debug)")
     parser.add_argument("--rewards-config", default=None,
                        help="Rewards config (default: same as --agent when agent set, else 'default')")
     parser.add_argument("--new", action="store_true", 
@@ -4349,6 +4278,7 @@ def main():
         config = get_config_loader()
         if args.step and not args.agent:
             raise ValueError("--step requires --agent to read step_log_buffer_size from agent training config")
+        _require_training_config_phase(config, args.agent, args.training_config)
         step_log_buffer_size: Optional[int] = None
         if args.agent:
             tc = config.load_agent_training_config(args.agent, args.training_config)

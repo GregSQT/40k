@@ -167,25 +167,15 @@
         "4": 0.025,
         "5": 0.9
       },
-      "train_objectives_ref_weights": {
-        "default": 1.0
-      },
-      "eval_objectives_refs": [
-        "objectives-51.json"
-      ],
       "eval_objective_count_weights": {
         "5": 1.0
       },
       "train_wall_ref_weights": {
-        "walls-11.json": 0.3,
-        "walls-21.json": 0.3,
-        "walls-31.json": 0.3,
-        "default": 0.1
+        "default": 1.0
       },
       "eval_wall_refs": [
-        "walls-11.json",
-        "walls-21.json",
-        "walls-31.json"
+        "walls-33.json",
+        "walls-mc1.json"
       ],
       "train_selection_mode": "uniform_within_count",
       "eval_selection_mode": "uniform_within_count"
@@ -371,25 +361,15 @@
         "4": 0.025,
         "5": 0.9
       },
-      "train_objectives_ref_weights": {
-        "default": 1.0
-      },
-      "eval_objectives_refs": [
-        "objectives-51.json"
-      ],
       "eval_objective_count_weights": {
         "5": 1.0
       },
       "train_wall_ref_weights": {
-        "walls-11.json": 0.3,
-        "walls-21.json": 0.3,
-        "walls-31.json": 0.3,
-        "default": 0.1
+        "default": 1.0
       },
       "eval_wall_refs": [
-        "walls-11.json",
-        "walls-21.json",
-        "walls-31.json"
+        "walls-33.json",
+        "walls-mc1.json"
       ],
       "train_selection_mode": "uniform_within_count",
       "eval_selection_mode": "uniform_within_count"
@@ -574,25 +554,15 @@
         "4": 0.025,
         "5": 0.9
       },
-      "train_objectives_ref_weights": {
-        "default": 1.0
-      },
-      "eval_objectives_refs": [
-        "objectives-51.json"
-      ],
       "eval_objective_count_weights": {
         "5": 1.0
       },
       "train_wall_ref_weights": {
-        "walls-11.json": 0.3,
-        "walls-21.json": 0.3,
-        "walls-31.json": 0.3,
-        "default": 0.1
+        "default": 1.0
       },
       "eval_wall_refs": [
-        "walls-11.json",
-        "walls-21.json",
-        "walls-31.json"
+        "walls-33.json",
+        "walls-mc1.json"
       ],
       "train_selection_mode": "uniform_within_count",
       "eval_selection_mode": "uniform_within_count"
@@ -777,25 +747,15 @@
         "4": 0.025,
         "5": 0.9
       },
-      "train_objectives_ref_weights": {
-        "default": 1.0
-      },
-      "eval_objectives_refs": [
-        "objectives-51.json"
-      ],
       "eval_objective_count_weights": {
         "5": 1.0
       },
       "train_wall_ref_weights": {
-        "walls-11.json": 0.3,
-        "walls-21.json": 0.3,
-        "walls-31.json": 0.3,
-        "default": 0.1
+        "default": 1.0
       },
       "eval_wall_refs": [
-        "walls-11.json",
-        "walls-21.json",
-        "walls-31.json"
+        "walls-33.json",
+        "walls-mc1.json"
       ],
       "train_selection_mode": "uniform_within_count",
       "eval_selection_mode": "uniform_within_count"
@@ -982,25 +942,15 @@
         "4": 0.025,
         "5": 0.9
       },
-      "train_objectives_ref_weights": {
-        "default": 1.0
-      },
-      "eval_objectives_refs": [
-        "objectives-51.json"
-      ],
       "eval_objective_count_weights": {
         "5": 1.0
       },
       "train_wall_ref_weights": {
-        "walls-11.json": 0.3,
-        "walls-21.json": 0.3,
-        "walls-31.json": 0.3,
-        "default": 0.1
+        "default": 1.0
       },
       "eval_wall_refs": [
-        "walls-11.json",
-        "walls-21.json",
-        "walls-31.json"
+        "walls-33.json",
+        "walls-mc1.json"
       ],
       "train_selection_mode": "uniform_within_count",
       "eval_selection_mode": "uniform_within_count"

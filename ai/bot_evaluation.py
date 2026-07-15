@@ -56,23 +56,27 @@ def _get_eval_ref_temp_dir() -> str:
 def _materialize_eval_scenario_refs(
     scenario_path: str,
     wall_ref: str,
-    objectives_ref: str,
 ) -> str:
-    """Create temporary scenario JSON with overridden wall_ref/objectives_ref."""
+    """Create temporary scenario JSON with overridden wall_ref.
+
+    Objectives are sourced from the terrain (terrain-flagged objectives, rules
+    14.01/14.02) — the legacy per-scenario objectives_ref key is no longer emitted
+    (rejected by the engine).
+    """
     if not isinstance(wall_ref, str) or not wall_ref.strip():
         raise ValueError(f"Invalid eval wall_ref override: {wall_ref!r}")
-    if not isinstance(objectives_ref, str) or not objectives_ref.strip():
-        raise ValueError(f"Invalid eval objectives_ref override: {objectives_ref!r}")
     with open(scenario_path, "r", encoding="utf-8-sig") as f:
         scenario_data = json.load(f)
     if not isinstance(scenario_data, dict):
         raise TypeError(f"Scenario JSON must be object: {scenario_path}")
     scenario_copy = dict(scenario_data)
     scenario_copy.pop("wall_hexes", None)
+    # Legacy objectives keys are rejected by the engine (objectives now come from the
+    # terrain, rules 14.01/14.02) — never emit them in the materialized eval scenario.
+    scenario_copy.pop("objectives_ref", None)
     scenario_copy.pop("objectives", None)
     scenario_copy.pop("objective_hexes", None)
     scenario_copy["wall_ref"] = wall_ref.strip()
-    scenario_copy["objectives_ref"] = objectives_ref.strip()
 
     source_parts = tuple(os.path.abspath(scenario_path).split(os.sep))
     if "agents" not in source_parts:
@@ -95,7 +99,7 @@ def _materialize_eval_scenario_refs(
     out_dir = os.path.join(temp_root, "agents", agent_key, "scenarios", split_dir)
     os.makedirs(out_dir, exist_ok=True)
     path_hash = hashlib.sha1(
-        f"{os.path.abspath(scenario_path)}|{wall_ref}|{objectives_ref}".encode("utf-8")
+        f"{os.path.abspath(scenario_path)}|{wall_ref}".encode("utf-8")
     ).hexdigest()[:16]
     out_path = os.path.join(out_dir, f"{os.path.basename(scenario_path)[:-5]}__{path_hash}.json")
     if not os.path.exists(out_path):
@@ -901,7 +905,6 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     callback_params = require_key(training_cfg, "callback_params")
     sampling_cfg = training_cfg.get("scenario_sampling")
     eval_wall_refs: List[str] = []
-    eval_objectives_refs: List[str] = []
     eval_ref_strict = False
     if scenario_pool == "holdout":
         if not isinstance(sampling_cfg, dict):
@@ -909,7 +912,6 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 "scenario_sampling must be an object in training config for holdout evaluation"
             )
         raw_eval_wall_refs = require_key(sampling_cfg, "eval_wall_refs")
-        raw_eval_objectives_refs = require_key(sampling_cfg, "eval_objectives_refs")
         raw_eval_ref_strict = sampling_cfg.get("eval_ref_strict", True)
         if not isinstance(raw_eval_ref_strict, bool):
             raise TypeError(
@@ -921,20 +923,10 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             raise ValueError(
                 "scenario_sampling.eval_wall_refs must be a non-empty list for holdout evaluation"
             )
-        if not isinstance(raw_eval_objectives_refs, list) or len(raw_eval_objectives_refs) == 0:
-            raise ValueError(
-                "scenario_sampling.eval_objectives_refs must be a non-empty list for holdout evaluation"
-            )
         for raw_ref in raw_eval_wall_refs:
             if not isinstance(raw_ref, str) or not raw_ref.strip():
                 raise ValueError(f"Invalid wall ref in scenario_sampling.eval_wall_refs: {raw_ref!r}")
             eval_wall_refs.append(raw_ref.strip())
-        for raw_ref in raw_eval_objectives_refs:
-            if not isinstance(raw_ref, str) or not raw_ref.strip():
-                raise ValueError(
-                    f"Invalid objectives ref in scenario_sampling.eval_objectives_refs: {raw_ref!r}"
-                )
-            eval_objectives_refs.append(raw_ref.strip())
 
     use_subprocess = callback_params.get("bot_eval_use_subprocess", True)
     worker_model_device_raw = require_key(callback_params, "bot_eval_worker_device")
@@ -981,13 +973,9 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             task_scenario_file = scenario_file
             if scenario_pool == "holdout" and eval_ref_strict:
                 wall_ref = eval_wall_refs[(scenario_index + len(bot_name)) % len(eval_wall_refs)]
-                objectives_ref = eval_objectives_refs[
-                    (scenario_index * 3 + len(bot_name)) % len(eval_objectives_refs)
-                ]
                 task_scenario_file = _materialize_eval_scenario_refs(
                     scenario_path=scenario_file,
                     wall_ref=wall_ref,
-                    objectives_ref=objectives_ref,
                 )
             episodes_for_scenario = episodes_per_scenario + (1 if scenario_index < extra_episodes else 0)
             if episodes_for_scenario <= 0:

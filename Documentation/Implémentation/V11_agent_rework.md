@@ -398,7 +398,45 @@ rejouée verte, grep de contrôle passé, smoke pile complète rejoué), avec 3 
    actions, L774-828) pour les mêmes littéraux périmés — y compris les dicts de poids
    `{4: 0.50, ...}` d'evaluation_bots (6 occurrences) et les `return 10/4`.
 
-### T3 — Chemins board + config training (R1, R2)
+### T3 — Chemins board + config training (R1, R2) — ✅ FAIT (2026-07-15)
+
+Réalisé : **R2** — `_list_available_board_refs` (train.py) et `analyzer.py` résolvent via
+`config_loader.get_board_dir()` (plus aucune reconstruction `{cols}x{rows}` en ai/ ; grep ai/
++ scripts/ = seuls ces 2 sites vifs, `analyzer_avant_refactor.py` = backup jamais importé, laissé
+tel quel). **R1** — `--training-config` sans défaut silencieux : helper `_require_training_config_phase`
+lève une erreur explicite listant les phases (`['x1','x5_append','x5_new','x1_debug','x5_debug']`)
+quand un agent est sélectionné sans phase (décision recommandée du doc retenue en MODE NUIT).
+**1bis** — retrait de la dimension objectives du tirage de scénarios (`_load_scenario_objectives_ref`
+supprimée, `_apply_wall_ref_weighting` en wall-only, `_materialize_scenario_with_refs` n'émet plus
+objectives_ref via ce chemin). **1ter** — training config purgée dans les 5 phases
+(`train_wall_ref_weights` → `{"default":1.0}`, `eval_wall_refs` → walls-33/mc1 réels,
+`train_objectives_ref_weights`/`eval_objectives_refs` supprimées) ; `bot_evaluation.py`
+(`_materialize_eval_scenario_refs`) migré : n'émet plus `objectives_ref`/`objectives`/`objective_hexes`
+(objectifs = contrat terrain). Point 3 (deployment legacy `{cols}x{rows}`) : différé T4 (décision T4).
+Tests ajoutés : `tests/unit/ai/test_train_board_refs.py` (get_board_dir, expand refs inconnus/valides,
+R1 message) + `tests/unit/ai/test_bot_evaluation_eval_refs.py` (objectives_ref absent du matérialisé) +
+maj `test_analyzer_utils.py` (fake loader get_board_dir).
+Validé : **1162 passed / 2 skipped** (baseline 1152 + 10 tests T3, zéro régression) ;
+`train.py --step --training-config x1_debug` **dépasse la résolution walls/objectives** (500 entrées
+pondérées, plus de FileNotFoundError board dir) — le crash suivant = **R3-a** (scénario hors dossier
+`scenario/`) = T4, hors périmètre T3. Smoke moteur nu (Annexe A.1) + pile GreedyBot (A.2), 3 seeds ×
+scénario Psychophage/ScreamerKiller : **charge franchie sans TypeError (R6 non régressé)**, toutes
+phases atteintes, zéro exception.
+⚠️ **Pertes de mêlée non re-démontrées end-to-end** : le smoke A.1 (aléatoire non dirigé, adversaire
+passif) ne les produit pas *par conception* (réserve explicite Annexe A) ; le smoke A.2 (GreedyBot des
+2 camps) bute sur le **deadlock R7/T5 `fight/pile_in` dès le tour 1** AVANT toute résolution de
+blessure. Ce blocage est un item OUVERT (T5), indépendant de T3 (aucun code moteur touché) — la
+preuve FIGHT_CTX reste celle de T1 (committée). À re-valider après T5.
+
+**Contre-vérification indépendante (2026-07-15)** — T3 confirmée conforme : repro R1 rejouée
+(erreur explicite avec les 5 phases), repro R2/x1_debug rejouée (« 500 entries, 100 unique
+files », crash suivant = R3-a exactement), 1162 tests collectés / suite verte, config purgée
+vérifiée dans les 5 phases, aucun code moteur touché (git status). UNE réserve mineure :
+`_materialize_scenario_with_refs` (train.py ~L642-668) conserve un paramètre `objectives_ref`
+et sa branche d'émission `scenario_copy["objectives_ref"] = ...` — MORTE (l'unique appelant
+~L854 ne passe que wall_ref) mais tout futur appelant réémettrait une clé rejetée par le
+moteur. À purger en T4 (avec la migration) ou T6.
+
 1. **R2** : remplacer la reconstruction `{cols}x{rows}` de `_list_available_board_refs`
    ([train.py:586-591](../../ai/train.py#L586-L591)) par `config_loader.get_board_dir()`. Même motif déjà repéré ailleurs :
    `ai/analyzer.py:224` (et `analyzer_avant_refactor.py:224`) reconstruisent
