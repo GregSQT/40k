@@ -25,6 +25,7 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from typing import List, Optional
 
 import numpy as np
 import pytest
@@ -47,6 +48,20 @@ def _engine(scenario_file: str, seed: int):
     )
     eng.reset(seed=seed)
     return eng
+
+
+def _enter_fight_phase(eng):
+    """Entre en phase de combat par le VRAI chemin gym, pas en forçant `game_state["phase"]`.
+
+    `squad_fight` est une sélection de l'étape FIGHT (12.04) : elle suppose la machine V11
+    déroulée jusque-là (pile-in groupé 12.02 résolu, snapshot `engaged_at_fight_step_start`
+    pris). Poser `phase = "fight"` à la main laisse `fight_subphase` à None — un état que le
+    moteur n'atteint jamais en vrai, et où le commit doit lever plutôt que deviner.
+    """
+    from engine.phase_handlers import fight_handlers
+
+    res = fight_handlers.fight_phase_start(eng.game_state)
+    return eng._fight_v11_gym_after_phase_start(res)
 
 
 @pytest.fixture()
@@ -94,9 +109,11 @@ def test_charged_squad_without_target_fights_empty(melee_scenario_file):
     gs["units_charged"] = {squad_id}
     gs["units_fought"] = set()
 
-    mask = build_squad_action_mask(gs, squad_id, enemy_slot_ids=[None] * 5)
+    empty_slots: List[Optional[str]] = [None] * 5
+    mask = build_squad_action_mask(gs, squad_id, enemy_slot_ids=empty_slots)
     assert mask[ACTION_FIGHT] == 1, "12.04 : une escouade qui a chargé reste éligible au combat"
 
+    _enter_fight_phase(eng)
     ok, result = eng._process_squad_action({"action": "squad_fight", "squad_id": squad_id})
     assert ok is True
     assert result["target_squad_id"] is None
@@ -108,24 +125,37 @@ def test_commit_target_comes_from_engagement_pool(melee_scenario_file):
     """La cible retenue par le commit appartient au pool ER du flux PvP (12.05), jamais à un
     ennemi hors zone d'engagement pêché dans le mapping de slots gelé du tir."""
     from engine.game_utils import get_unit_by_id
-    from engine.phase_handlers.fight_handlers import _fight_build_valid_target_pool
+
+    from shared.data_validation import require_present
+    from engine.phase_handlers.fight_handlers import (
+        _fight_build_valid_target_pool,
+        fight_v11_current_pool,
+    )
 
     eng = _engine(melee_scenario_file, seed=1)
     gs = eng.game_state
     gs["phase"] = "fight"
     engaged = [
         sid for sid in gs["units_cache"]
-        if _fight_build_valid_target_pool(gs, get_unit_by_id(str(sid), gs))
+        if _fight_build_valid_target_pool(gs, require_present(get_unit_by_id(str(sid), gs), f"unit {sid}"))
     ]
     assert engaged, "le scénario mêlée est pré-engagé : au moins une escouade a une cible ER"
-
-    squad_id = str(engaged[0])
-    gs["current_player"] = int(gs["units_cache"][squad_id]["player"])
+    gs["current_player"] = int(gs["units_cache"][str(engaged[0])]["player"])
     gs["units_fought"] = set()
-    pool_before = set(_fight_build_valid_target_pool(gs, get_unit_by_id(squad_id, gs)))
+
+    _enter_fight_phase(eng)
+
+    # Le squad doit venir du pool de sélection 12.04 : c'est celui que le masque propose, donc
+    # le seul que le commit accepte. Le pile-in groupé est déjà résolu à ce stade, `pool_before`
+    # est donc l'ER réelle au moment de la sélection.
+    candidates = [
+        sid for sid in fight_v11_current_pool(gs)
+        if _fight_build_valid_target_pool(gs, require_present(get_unit_by_id(str(sid), gs), f"unit {sid}"))
+    ]
+    assert candidates, "au moins une escouade sélectionnable (12.04) a une cible en ER"
+    squad_id = str(candidates[0])
+    pool_before = set(_fight_build_valid_target_pool(gs, require_present(get_unit_by_id(squad_id, gs), f"unit {squad_id}")))
 
     ok, result = eng._process_squad_action({"action": "squad_fight", "squad_id": squad_id})
     assert ok is True
-    # Le pile-in du commit ne peut qu'élargir la zone d'engagement : la cible retenue est
-    # donc au moins dans le pool pré-commit, jamais hors ER.
     assert result["target_squad_id"] in pool_before

@@ -1630,7 +1630,7 @@ class GameStateManager:
     ) -> Path:
         """Resolve the board directory backing a scenario's shared config refs (walls/terrain).
 
-        Deux formes acceptées (V11 T4, décision de design n°4) — pas de fallback :
+        Deux formes acceptées (V11 T4, décision de design n°4), sans repli implicite :
           - le scénario est dans 'config/board/<board>/scenario/' → dossier board parent (PvP, inchangé) ;
           - le scénario déclare 'board_ref' → 'config/board/<board_ref>/' (banque par-agent).
         Absence des deux OU board_ref pointant un dossier absent = erreur explicite."""

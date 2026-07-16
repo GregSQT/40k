@@ -96,7 +96,8 @@ def test_materialize_scenario_with_refs_has_no_objectives_ref_param(tmp_path):
     path = _write(tmp_path, "scenario_training_bot-01.json", TERRAIN_ONLY_SCENARIO)
 
     with pytest.raises(TypeError):
-        train._materialize_scenario_with_refs(scenario_path=path, objectives_ref="objectives-51.json")
+        # Paramètre volontairement inexistant : c'est l'objet du test (l'appel doit lever).
+        train._materialize_scenario_with_refs(scenario_path=path, objectives_ref="objectives-51.json")  # type: ignore[call-arg]
 
 
 def test_materialize_scenario_with_refs_wall_override_emits_no_legacy_key(tmp_path):

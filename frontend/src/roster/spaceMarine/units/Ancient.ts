@@ -38,7 +38,7 @@ export class Ancient extends LeaderEliteMeleeElite {
     "INFERNUS SQUAD",
     "INTERCESSOR SQUAD",
     "STERNGUARD VETERAN SQUAD",
-    "TACTICAL SQUAD"
+    "TACTICAL SQUAD",
   ];
 
   // UNIT KEYWORDS
@@ -53,7 +53,7 @@ export class Ancient extends LeaderEliteMeleeElite {
 
   // FACTION KEYWORDS
   static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
-  
+
   static ICON = "/icons/Ancient.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 20; // Size of the base

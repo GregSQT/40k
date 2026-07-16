@@ -18,7 +18,11 @@ export class LandSpeeder extends EliteRangeTroop {
   static VALUE = 28; // Unit value (W40K points cost)
 
   // WEAPONS
-  static RNG_WEAPON_CODES = ["multi_melta_vehicle", "onslaught_gatling_cannon", "stormfury_missile_launcher"];
+  static RNG_WEAPON_CODES = [
+    "multi_melta_vehicle",
+    "onslaught_gatling_cannon",
+    "stormfury_missile_launcher",
+  ];
   static RNG_WEAPONS = getWeapons(LandSpeeder.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["close_combat_weapon_a4"];
   static CC_WEAPONS = getWeapons(LandSpeeder.CC_WEAPON_CODES);
@@ -33,7 +37,7 @@ export class LandSpeeder extends EliteRangeTroop {
 
   // FACTION KEYWORDS
   static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
-  
+
   static ICON = "/icons/LandSpeeder.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 16; // Size of the base

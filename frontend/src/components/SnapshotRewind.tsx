@@ -543,7 +543,11 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
   // Depuis le live, ⏮ vise l'AVANT-dernière row : la dernière est l'état courant (celui déjà à
   // l'écran), y aller ne montrerait rien. Un ⏮ depuis le live = « annule la dernière action ».
   const prevTarget =
-    viewIndex == null ? (lastTarget < 0 ? -1 : prevActionIndex(lastTarget)) : prevActionIndex(viewIndex);
+    viewIndex == null
+      ? lastTarget < 0
+        ? -1
+        : prevActionIndex(lastTarget)
+      : prevActionIndex(viewIndex);
   const nextTarget = viewIndex == null ? -1 : nextActionIndex(viewIndex);
 
   return (

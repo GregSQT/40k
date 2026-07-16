@@ -1772,6 +1772,7 @@ class W40KEngine(gym.Env):
                                 phase_init_result = charge_handlers.charge_phase_start(self.game_state)
                             elif next_phase == "fight":
                                 phase_init_result = fight_handlers.fight_phase_start(self.game_state)
+                                phase_init_result = self._fight_v11_gym_after_phase_start(phase_init_result)
                             elif next_phase == "move":
                                 phase_init_result = movement_handlers.movement_phase_start(self.game_state)
                             else:
@@ -4788,6 +4789,14 @@ class W40KEngine(gym.Env):
         "deploy_unit": "deploy_unit",
     }
 
+    # Le moteur emet un seul type "move" ; la nuance vit dans move_type (cf. move_type_map du
+    # handler squad_*_move). Mapping exhaustif : un move_type hors de ces 3 valeurs est un bug.
+    _STEP_LOG_MOVE_TYPE_MAP: Dict[str, str] = {
+        "normal": "move",
+        "advance": "advance",
+        "fall_back": "flee",
+    }
+
     # V11 T6 — traduction d'un shot_record moteur (shared_utils ~L6045 / fight_handlers ~L5727,
     # structure IDENTIQUE tir et combat) vers les champs du formateur du StepLogger.
     # camelCase moteur -> snake_case formateur. Les 11 champs sont EXIGES (presence de la cle)
@@ -4874,12 +4883,17 @@ class W40KEngine(gym.Env):
         for raw_log in action_logs[pre_action_logs_len:]:
             if not isinstance(raw_log, dict):
                 raise TypeError(f"action_logs entry must be a dict, got {type(raw_log).__name__}")
-            raw_type = raw_log.get("type")  # get allowed
+            raw_type = require_key(raw_log, "type")
             if raw_type == "move":
                 # La nuance normal/advance/fall_back vit dans move_type (miroir du legacy, qui
                 # emet toujours "move" + was_flee) : le formateur, lui, a 3 types distincts.
-                move_type = raw_log.get("move_type")  # get allowed
-                action_type = {"advance": "advance", "fall_back": "flee"}.get(move_type, "move")
+                move_type = require_key(raw_log, "move_type")
+                if move_type not in self._STEP_LOG_MOVE_TYPE_MAP:
+                    raise ValueError(
+                        f"action_log de type 'move' avec move_type inconnu: {move_type!r} — "
+                        f"attendu {sorted(self._STEP_LOG_MOVE_TYPE_MAP)}"
+                    )
+                action_type = self._STEP_LOG_MOVE_TYPE_MAP[move_type]
             else:
                 action_type = self._STEP_LOG_TYPE_MAP.get(raw_type)  # get allowed
                 if action_type is None:
@@ -4970,6 +4984,121 @@ class W40KEngine(gym.Env):
                 details[dst] = value
         return details
 
+    def _fight_v11_gym_settle(self) -> None:
+        """Deroule les etapes NON-DECISIONNELLES de la machine V11 (chemin gym uniquement).
+
+        La phase de combat (12.01-12.09) alterne trois etapes : PILE IN groupe (12.02), FIGHT
+        (12.04), CONSOLIDATE groupe (12.07). Une seule comporte une decision que l agent prenne
+        reellement : le CHOIX de l unite qui combat (12.04). Les destinations de pile-in et de
+        consolidation, elles, sont deja calculees par le moteur (`fight_pile_in_plan` /
+        `squad_consolidate_plan`) — l agent n en a jamais choisi aucune. Ce driver resout donc
+        les deux etapes groupees de bout en bout et rend la main a l agent exactement quand la
+        machine attend une selection FIGHT.
+
+        Consequence — et c est l objet du fix : le snapshot `engaged_at_fight_step_start` (12.04
+        « was engaged at the start of this step », et sa negation pour l overrun 12.06) est pris
+        par `fight_v11_enter_fight_step` APRES que TOUS les pile-in des DEUX joueurs sont
+        resolus. C est la seule datation conforme, et elle est impossible a obtenir tant que le
+        pile-in d une escouade s intercale entre deux combats.
+
+        Pile-in/consolidation sont resolus PAR-FIGURINE (`fight_pile_in_plan`,
+        `squad_consolidate_plan`) et non via les helpers par-ancre `_fight_v11_auto_pile_in` /
+        `_fight_v11_auto_consolidate` : le pile-in de reference est le par-figurine du PvP, le
+        par-ancre est condamne.
+
+        Chemin gym uniquement (`_process_squad_action`) : le PvP conduit la meme machine pas a
+        pas via `fight_handlers`, qui n est pas touche.
+
+        Ne termine PAS la phase : le gym transitionne par l action systeme `advance_phase` quand
+        le masque se vide (`fight_phase_end`), jamais par une cascade depuis une action d unite.
+        Completer ici ferait cascader `squad_fight` vers la phase suivante, et la cascade
+        REMPLACE le resultat de l action — l agent perdrait le `fight_result` (donc le reward) du
+        combat qui cloture la phase. Une fois les trois etapes drainees, le pool 12.04 est vide,
+        le masque aussi, et la route existante prend le relais.
+        """
+        from engine.phase_handlers.fight_handlers import (
+            fight_v11_advance_selection,
+            fight_v11_enter_consolidate,
+            fight_v11_enter_fight_step,
+            fight_v11_grouped_next,
+        )
+        from engine.phase_handlers.shared_utils import (
+            commit_move,
+            fight_pile_in_plan,
+            squad_consolidate_plan,
+        )
+
+        gs = self.game_state
+        phase = require_key(gs, "phase")
+        if phase != "fight":
+            raise RuntimeError(f"_fight_v11_gym_settle appele hors phase fight (phase={phase!r})")
+
+        # Chaque tour de boucle marque >=1 unite `*_done` ou franchit une etape : la borne ne
+        # peut etre atteinte que si la machine ne progresse pas -> bug, donc erreur explicite.
+        max_iterations = 4 * len(require_key(gs, "units")) + 16
+        for _ in range(max_iterations):
+            sub = require_key(gs, "fight_subphase")
+
+            if sub == "pile_in":
+                nxt = fight_v11_grouped_next(gs, "pile_in")
+                if nxt is None:
+                    fight_v11_enter_fight_step(gs)
+                    continue
+                for uid in nxt[1]:
+                    plan = fight_pile_in_plan(gs, str(uid))
+                    if plan is not None:
+                        commit_move(plan, gs, "pile_in")
+                    # 12.02 : « Each unit cannot make more than one pile-in move during this
+                    # step » — le marquage vaut aussi pour un plan vide (skip legal, 12 encart).
+                    require_key(gs, "pile_in_done").add(str(uid))
+                continue
+
+            if sub == "fight":
+                # Non-mutant du point de vue de la selection : `advance_selection` ne marque
+                # rien, il ne fait qu avancer `fight_step`/`fight_selector` (handoff 12.04).
+                if fight_v11_advance_selection(gs) is None:
+                    fight_v11_enter_consolidate(gs)
+                    continue
+                return  # une selection est possible : la main revient a l agent
+
+            if sub == "consolidate":
+                nxt = fight_v11_grouped_next(gs, "consolidate")
+                if nxt is None:
+                    return  # 12.07 drainee : pool vide -> masque vide -> `advance_phase`
+                for uid in nxt[1]:
+                    plan = squad_consolidate_plan(gs, str(uid))
+                    if plan is not None:
+                        commit_move(plan, gs, "consolidation")
+                    require_key(gs, "consolidation_done").add(str(uid))
+                continue
+
+            raise ValueError(f"fight_subphase inattendu dans le chemin gym: {sub!r}")
+
+        raise RuntimeError(
+            f"_fight_v11_gym_settle n a pas converge en {max_iterations} iterations "
+            f"(fight_subphase={gs.get('fight_subphase')!r}, "
+            f"pile_in_done={sorted(gs.get('pile_in_done', set()))}, "
+            f"units_selected_to_fight={sorted(gs.get('units_selected_to_fight', set()))})"
+        )
+
+    def _fight_v11_gym_after_phase_start(
+        self, phase_init_result: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Enchaine `_fight_v11_gym_settle` sur `fight_phase_start` (chemin gym).
+
+        Resout le PILE IN groupe (12.02) des l entree en phase, pour que la premiere action que
+        l agent voie soit deja une selection FIGHT (12.04) sur un snapshot pris au bon moment.
+
+        `fight_phase_start` peut avoir deja complete une phase vide (aucune unite engagee ni
+        ayant charge) : la machine est alors eteinte (`fight_subphase is None`) et il n y a rien
+        a derouler. `phase_init_result` est rendu tel quel : la fin de phase ne passe jamais par
+        ce driver (cf. `_fight_v11_gym_settle`).
+        """
+        if self.game_state.get("fight_subphase") is None:  # get allowed (phase vide -> machine eteinte)
+            return phase_init_result
+        self._fight_v11_gym_settle()
+        return phase_init_result
+
     def _process_squad_action(self, semantic: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """Dispatch sémantique squad vers helpers squad. Remplace _process_semantic_action."""
         from engine.action_log_utils import append_action_log
@@ -4983,9 +5112,7 @@ class W40KEngine(gym.Env):
             squad_lock_shoot,
             build_manual_shoot_allocation,
             squad_fight_unit_activation_start,
-            fight_pile_in_plan,
             squad_declare_fight,
-            squad_consolidate_plan,
             commit_move,
             charge_build_valid_plan,
             get_enemy_slot_mapping,
@@ -5345,21 +5472,26 @@ class W40KEngine(gym.Env):
 
         # ── combat ────────────────────────────────────────────────────────────
         elif action_name == "squad_fight":
-            squad_id = semantic["squad_id"]
+            squad_id = str(semantic["squad_id"])
             units_cache = require_key(self.game_state, "units_cache")
             cache_entry = units_cache.get(squad_id)
             if cache_entry is None:
                 raise KeyError(f"Squad {squad_id} absent de units_cache pour squad_fight")
-            # Pile-in AVANT la selection de cible : miroir de l ordre V11/PvP (etape
-            # groupee 12.02 puis etape FIGHT 12.04), une fig qui se rapproche peut
-            # entrer en ER et ouvrir une cible.
-            pile_in = fight_pile_in_plan(self.game_state, squad_id)
-            if pile_in is not None:
-                commit_move(pile_in, self.game_state, "pile_in")
 
-            unit = get_unit_by_id(squad_id, self.game_state)
-            if unit is None:
-                raise KeyError(f"Squad {squad_id} introuvable pour squad_fight")
+            # `squad_fight` = UNE selection de l etape FIGHT (12.04), rien d autre. Le PILE IN
+            # groupe (12.02) et la CONSOLIDATION groupee (12.07) encadrent l etape et sont
+            # resolus par `_fight_v11_gym_settle`. Cette repartition est ce qui rend l ordre de
+            # la phase conforme : 12.02 exige que TOUS les pile-in des DEUX joueurs precedent le
+            # premier combat, et 12.04 date son snapshot d eligibilite du debut de l etape FIGHT.
+            # L ancien code resolvait pile-in + fight + consolidation par escouade, en une passe,
+            # sans jamais avancer la machine V11 : l ordre etait faux ET aucun etat n etait pose.
+            sub = require_key(self.game_state, "fight_subphase")
+            if sub != "fight":
+                raise RuntimeError(
+                    f"squad_fight recu en sous-phase {sub!r} : la machine V11 n a pas ete "
+                    f"deroulee jusqu a l etape FIGHT — `_fight_v11_gym_settle` manque sur le "
+                    f"chemin d entree en phase fight"
+                )
 
             # Convergence §9.4b-1 : resolution combat via le moteur d allocation par-figurine
             # (groupes 05.03/05.04, T bodyguard 19.02, save par-fig allouee). Defenseur IA
@@ -5368,6 +5500,8 @@ class W40KEngine(gym.Env):
                 build_manual_fight_allocation,
                 _ai_select_fight_target,
                 _fight_build_valid_target_pool,
+                _fight_v11_register_selection,
+                fight_v11_current_pool,
             )
             # OVERRUN FIGHT 12.06 (pile-in additionnel de reengagement) NON implemente ici :
             # il n existe qu en modele par-ANCRE (_fight_v11_auto_overrun_pile_in), condamne par
@@ -5375,6 +5509,24 @@ class W40KEngine(gym.Env):
             # « CAN make one additional pile-in move » -> optionnel, son absence ne viole rien :
             # l escouade non engagee resout un fight « a vide » (0 attaque). A implementer en
             # par-figurine : Documentation/Implementation/A_faire/overrun.md
+
+            # Parite masque/commit : le masque gym derive du MEME pool 12.04 (action_decoder ->
+            # fight_v11_current_pool). Un squad hors pool est une rupture, pas un cas a absorber.
+            pool = fight_v11_current_pool(self.game_state)
+            if squad_id not in pool:
+                raise ValueError(
+                    f"squad_fight: squad {squad_id} hors du pool de selection 12.04 {pool} "
+                    f"(rupture masque/commit)"
+                )
+            unit = get_unit_by_id(squad_id, self.game_state)
+            if unit is None:
+                raise KeyError(f"Squad {squad_id} introuvable pour squad_fight")
+
+            # Ordre du flux PvP (`_fight_v11_auto_step`) : marquer « selected to fight » AVANT de
+            # resoudre. C est ce marquage qui interdit a une escouade de combattre deux fois dans
+            # la phase (12.04, « has not already been selected to fight this phase ») et qui ouvre
+            # son eligibilite a la consolidation (12.08, « was eligible to fight this phase »).
+            _fight_v11_register_selection(self.game_state, squad_id)
 
             # Prédicat de cible = celui du flux PvP (_fight_v11_resolve_attacks) : pool
             # d ennemis en zone d engagement (12.05), pas le mapping de slots gele du tir.
@@ -5398,14 +5550,16 @@ class W40KEngine(gym.Env):
                 )
             fight_result = _fight_alloc["shoot_result"]
 
-            consolidation = squad_consolidate_plan(self.game_state, squad_id)
-            if consolidation is not None:
-                commit_move(consolidation, self.game_state, "consolidation")
-
             unit = get_unit_by_id(squad_id, self.game_state)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable après combat")
             end_result = end_activation(self.game_state, unit, ACTION, 1, FIGHT, FIGHT, 0)
+            # `end_activation` derive son `phase_complete` des pools V10 (charging/alternating)
+            # que `fight_phase_start` V11 ne construit plus : toujours vides -> toujours True.
+            # Signal mort d un sous-systeme retire. Il etait deja inerte avant ce fix (aucun
+            # `next_phase` ne l accompagne, donc aucune cascade) ; on l ecarte pour ne pas le
+            # laisser mentir sur l etat de la phase, dont l autorite est la machine V11.
+            end_result.pop("phase_complete", None)
             result = {
                 **end_result,
                 "action": "squad_fight",
@@ -5413,6 +5567,9 @@ class W40KEngine(gym.Env):
                 "target_squad_id": best_target_id,
                 "fight_result": fight_result,
             }
+            # Draine l etape FIGHT si plus personne n est selectionnable, puis la CONSOLIDATION
+            # groupee (12.07) : le prochain masque reflete l etat reel de la machine.
+            self._fight_v11_gym_settle()
 
         else:
             return False, {"error": "unknown_squad_action", "action": action_name}
@@ -5449,6 +5606,7 @@ class W40KEngine(gym.Env):
                 phase_init_result = charge_handlers.charge_phase_start(self.game_state)
             elif next_phase == "fight":
                 phase_init_result = fight_handlers.fight_phase_start(self.game_state)
+                phase_init_result = self._fight_v11_gym_after_phase_start(phase_init_result)
             elif next_phase == "move":
                 phase_init_result = movement_handlers.movement_phase_start(self.game_state)
             started_phases.append(next_phase)

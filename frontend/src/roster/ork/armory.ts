@@ -35,7 +35,6 @@ export const ORK_ARMORY: Record<string, Weapon> = {
   shoota: { display_name: "Shoota", RNG: 18, NB: 2, ATK: 5, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["RAPID_FIRE:1"] },
   slugga: { display_name: "Slugga", RNG: 12, NB: 1, ATK: 5, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["PISTOL"] },
 
-  
   // #########################################################################################
   // #################################### Melee Weapons ######################################
   // #########################################################################################
@@ -49,8 +48,6 @@ export const ORK_ARMORY: Record<string, Weapon> = {
   two_handed_big_choppa: { display_name: "Two-Handed Big Choppa", NB: 5, ATK: 3, STR: 7, AP: -1, DMG: 2, WEAPON_RULES: ["CLEAVE:1"] },
   urty_syringe: { display_name: "'urty Syringe", NB: 1, ATK: 3, STR: 2, AP: 0, DMG: 1, WEAPON_RULES: ["ANTI_INFANTRY:1", "EXTRA_ATTACKS", "PRECISION"] },
   waaagh_staff: { display_name: "'Waaagh! Staff", NB: 3, ATK: 3, STR: 8, AP: -1, DMG: D3, WEAPON_RULES: ["PSYCHIC"] },
-
-  
 };
 
 /**

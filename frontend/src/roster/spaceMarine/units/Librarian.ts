@@ -24,9 +24,7 @@ export class Librarian extends LeaderEliteMeleeElite {
   static CC_WEAPONS = getWeapons(Librarian.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [
-    { ruleId: "leader", displayName: "Leader" },
-  ];
+  static UNIT_RULES = [{ ruleId: "leader", displayName: "Leader" }];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
   static RULES_STATUS = { reroll_charge: 2, leader: 0 };
@@ -56,7 +54,7 @@ export class Librarian extends LeaderEliteMeleeElite {
 
   // FACTION KEYWORDS
   static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
-  
+
   static ICON = "/icons/Librarian.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 20; // Size of the base

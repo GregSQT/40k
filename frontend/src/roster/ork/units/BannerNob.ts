@@ -40,7 +40,7 @@ export class BannerNob extends SwarmRangeSwarm {
     "FLASH GITZ",
     "LOOTAS",
     "NOBZ",
-    "TANKBUSTAS"
+    "TANKBUSTAS",
   ];
 
   // UNIT KEYWORDS

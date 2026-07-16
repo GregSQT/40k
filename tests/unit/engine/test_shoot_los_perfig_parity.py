@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import List, Tuple
 
 import pytest
 
@@ -31,8 +32,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 # Géométrie minimale reproduisant le faux positif observé sur le run réel : un mur plein devant
 # le tireur, troué d'une seule cellule (row 49) décalée de l'ancre (row 50). La ligne
 # ancre→cible tape le mur ; une cellule haute de l'empreinte du socle enfile le trou.
-SHOOTER_ANCHOR = (50, 50)
-TARGET_ANCHOR = (80, 50)
+SHOOTER_ANCHOR: Tuple[int, int] = (50, 50)
+TARGET_ANCHOR: Tuple[int, int] = (80, 50)
 WALL_COL = 60
 WALL_GAP_ROW = 49
 WALL_ROWS = range(40, 61)
@@ -90,7 +91,7 @@ def test_engine_sees_target_from_footprint_edge_rule_06_01(game_state, walls):
     from engine.phase_handlers.shooting_handlers import _compute_visibility_with_obscuring
 
     shooter_hexes = _footprint(game_state, SHOOTER_ANCHOR)
-    target_hexes = [TARGET_ANCHOR]
+    target_hexes: List[Tuple[int, int]] = [TARGET_ANCHOR]
 
     visible, total, _ = _compute_visibility_with_obscuring(
         game_state, SHOOTER_ANCHOR, shooter_hexes, TARGET_ANCHOR, target_hexes,

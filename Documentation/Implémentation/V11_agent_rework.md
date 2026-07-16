@@ -647,14 +647,41 @@ de T4/de code latent) :
   échouant sur l'ancien code). Détail : `Implémenté/bug_squad_fight_mask_mismatch.md`.
   ⚠️ **Impact sur le plan §9.4** : le site vif de la cible de mêlée a changé → cf. §9.4 point 1.
 
-- **T6-d — dettes constatées pendant T6-c, NON traitées (backend gelé sur décision utilisateur)**
-  - **Le gym n'entre PAS dans la machine V11** — mesuré sur un épisode complet : en phase fight,
-    l'état est invariablement `(fight_subphase='pile_in', snapshot_present=False,
-    nb_selected_to_fight=0)`. `fight_phase_start` initialise la machine, puis le pipeline squad
-    déroule le sien sans jamais l'avancer. Conséquences : `engaged_at_fight_step_start` jamais
-    posé (la branche « was engaged at the start of this step » de 12.04 est inapplicable),
-    `units_selected_to_fight` jamais rempli. **Racine des divergences masque↔commit en série** —
-    chaque nouvelle en sera une variante tant que ce n'est pas traité.
+- **T6-d — dettes constatées pendant T6-c — DÉCISION UTILISATEUR (2026-07-16) : traiter AVANT le training**
+  - **✅ RÉSOLU (2026-07-16) — Le gym n'entrait PAS dans la machine V11.** Mesuré sur épisode
+    complet : en phase fight, l'état était invariablement `(fight_subphase='pile_in',
+    snapshot_present=False, nb_selected_to_fight=0)`. `fight_phase_start` initialisait la machine,
+    puis `squad_fight` (`_process_squad_action`) déroulait le sien — pile-in + fight +
+    consolidation **par escouade, en une passe** — sans jamais avancer les états V11.
+
+    **Diagnostic — deux ruptures, pas une.** (1) *États jamais posés* :
+    `engaged_at_fight_step_start` absent (branche 12.04 « was engaged at the start of this step »
+    inapplicable), `units_selected_to_fight` vide (12.04 « has not already been selected to fight
+    this phase » **non appliqué** → une escouade engagée pouvait être re-sélectionnée dans la même
+    phase ; 12.08 « was eligible to fight this phase » dérive du même set), `pile_in_done` vide.
+    (2) *Ordre de phase faux* : 12.02 exige que TOUS les pile-in des DEUX joueurs précèdent le
+    premier combat, et 12.04 date son snapshot du début de l'étape FIGHT — impossible tant que le
+    pile-in d'une escouade s'intercale entre deux combats. Aucune pose d'état a posteriori ne
+    corrige ça : c'est la découpe de l'action qui était fausse.
+
+    **Fix — `w40k_core.py` seul, `fight_handlers` NON touché (neutralité PvP).** `squad_fight`
+    devient **UNE sélection de l'étape FIGHT (12.04)**, encadrée par `_fight_v11_gym_settle` qui
+    résout les deux étapes groupées (PILE IN 12.02 puis CONSOLIDATE 12.07) via les planificateurs
+    **par-figurine** existants (`fight_pile_in_plan` / `squad_consolidate_plan` — jamais les
+    helpers par-ancre condamnés). Aucune perte d'agence : l'agent ne choisissait déjà aucune
+    destination de pile-in/consolidation, seulement l'unité qui combat. Action space, taxonomie de
+    reward et compte de steps inchangés. Le driver **ne termine pas la phase** : le gym transitionne
+    par `advance_phase` sur masque vide, comme toutes les autres phases — compléter depuis une
+    action d'unité déclencherait la cascade, qui **remplace** le résultat de l'action et ferait
+    perdre à l'agent le `fight_result` (donc le reward) du combat clôturant la phase.
+
+    **Vérifié** : `fight_subphase` atteint `fight` puis `consolidate`, snapshot posé après les
+    pile-in, alternance des sélecteurs P1↔P2 réelle, 17 `squad_fight` (vs 6) sur le même épisode.
+    Suite 1293 verte, smoke `(A)/(B)` OK (5 kills mêlée, Carnifex charge), 18 épisodes
+    BotControlledEnv+GreedyBot (p1/p2/random × 2 seeds) sans échec. Verrou :
+    `tests/unit/engine/test_squad_fight_v11_state.py` (6 tests, tous rouges sur l'ancien code).
+    Effet de bord corrigé au passage : `end_activation(arg4=FIGHT)` dérivait `phase_complete` des
+    pools V10 que V11 ne construit plus (toujours vides → toujours `True`) ; signal mort écarté.
   - **Overrun 12.06 absent du gym** — n'existe qu'en modèle par-ancre, condamné par la décision
     « le pile-in de référence est le par-figurine du PvP » (2026-07-16). Légal (12.06 : « **can**
     make one additional pile-in move »). Spec complète : `A_faire/overrun.md`.
@@ -986,7 +1013,7 @@ Spec à figer à ce moment-là, principes déjà actés :
 | T3 | `train.py --step --training-config x1_debug` dépasse la résolution walls/objectives sans FileNotFoundError |
 | T4 | Les 61 scénarios se chargent (`W40KEngine(scenario_file=...)` + reset, script de balayage) ; zéro clé legacy ; sort de training_save/ statué |
 | T5 | 10 épisodes aléatoires masqués terminés sur ≥3 scénarios × sièges p1/p2 ; zéro masque vide |
-| T6 | Run `--new` court complet + analyzer + replay OK ; win-rate vs RandomBot en progression — ⏳ **PARTIEL, BLOQUÉ SUR DÉCISION (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép., coupé par le timeout opérateur — pas par une erreur). ✅ Suite verte (1259) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ⛔ **analyzer + replay INATTEIGNABLES** — pas un bug mais un **manque structurel (T6-c)** : `_process_squad_action` (chemin vif gym) ne contient AUCUN `log_action` → step.log n'a que des en-têtes (`Actions=0, Steps=0`), l'analyzer n'a pas de matière. Décision requise (migrer / condamner `--step` / statu quo). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (budget nominal 50 000 → bruit) ; exige la phase `x1` + `bot_evaluation` holdout, pas `x1_debug` |
+| T6 | Run `--new` court complet + analyzer + replay OK ; win-rate vs RandomBot en progression — ⏳ **PARTIEL (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép.). ✅ Suite verte (1293) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ✅ T6-c résolu : `_process_squad_action` journalise, analyzer tourne, `1.2 erreurs shooting = 0`. ✅ **T6-d résolu** : `squad_fight` = sélection FIGHT 12.04, machine V11 déroulée par `_fight_v11_gym_settle` (ordre 12.02→12.04→12.07 respecté, snapshot posé, double activation interdite). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (bruit) — mesuré AVANT T6-d, donc sur un moteur où la mêlée était fausse ; **à re-mesurer** avec phase `x1` + `bot_evaluation` holdout vs RandomBot |
 
 ## 7. Annexe A — Smoke tests de référence
 

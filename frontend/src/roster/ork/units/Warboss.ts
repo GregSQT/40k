@@ -33,11 +33,7 @@ export class Warboss extends SwarmRangeSwarm {
   static RULES_STATUS = { reroll_charge: 2, leader: 0 };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
-  static CAN_LEAD = [
-    "BOYZ",
-    "BREAKA BOYZ",
-    "NOBZ",
-  ];
+  static CAN_LEAD = ["BOYZ", "BREAKA BOYZ", "NOBZ"];
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [

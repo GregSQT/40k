@@ -9,6 +9,9 @@
     "config_loader.py",
     "main.py"
   ],
+  "extraPaths": [
+    "scripts"
+  ],
   "exclude": [
     "**/node_modules",
     "**/__pycache__",

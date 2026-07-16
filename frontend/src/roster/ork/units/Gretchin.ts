@@ -24,9 +24,7 @@ export class Gretchin extends SwarmRangeSwarm {
   static CC_WEAPONS = getWeapons(Gretchin.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [
-    { ruleId: "reroll_charge", displayName: "Unstoppable Valour" },
-  ];
+  static UNIT_RULES = [{ ruleId: "reroll_charge", displayName: "Unstoppable Valour" }];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
   static RULES_STATUS = { reroll_charge: 2 };

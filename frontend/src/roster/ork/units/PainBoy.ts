@@ -18,7 +18,7 @@ export class PainBoy extends SwarmRangeSwarm {
   static VALUE = 70; // Unit value (W40K points cost)
 
   // WEAPONS
-    static RNG_WEAPON_CODES: string[] = [];
+  static RNG_WEAPON_CODES: string[] = [];
   static CC_WEAPON_CODES = ["dok_tools", "urty_syringe"];
   static CC_WEAPONS = getWeapons(PainBoy.CC_WEAPON_CODES);
 
@@ -32,14 +32,7 @@ export class PainBoy extends SwarmRangeSwarm {
   static RULES_STATUS = { reroll_charge: 2, support: 0 };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
-  static CAN_LEAD = [
-    "BOYZ",
-    "BREAKA BOYZ",
-    "BURNA BOYZ",
-    "LOOTAS",
-    "NOBZ",
-    "TANKBUSTAS"
-  ];
+  static CAN_LEAD = ["BOYZ", "BREAKA BOYZ", "BURNA BOYZ", "LOOTAS", "NOBZ", "TANKBUSTAS"];
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [

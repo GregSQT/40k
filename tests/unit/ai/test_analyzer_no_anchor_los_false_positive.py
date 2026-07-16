@@ -84,4 +84,5 @@ def test_has_line_of_sight_raises_instead_of_silently_denying():
     import ai.analyzer as an
 
     with pytest.raises(Exception):
-        an.has_line_of_sight("pas-un-entier", 1, 2, 2, set())
+        # Type volontairement invalide : c'est l'objet du test (le typage runtime doit lever).
+        an.has_line_of_sight("pas-un-entier", 1, 2, 2, set())  # type: ignore[arg-type]
