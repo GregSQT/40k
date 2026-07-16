@@ -29,16 +29,22 @@ import tempfile
 import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from services.game_snapshots import apply_live_state, capture_live_state
+from services.game_snapshots import apply_live_state, capture_live_state, scenario_fingerprint
 
 _log = logging.getLogger(__name__)
 
-# Magic d'en-tête du format timeline (distingue de l'ancien format single-pickle).
-_MAGIC = b"W40KTL01"
+# Magic d'en-tête du format timeline. TL02 = TL01 + empreinte de scénario en meta de chaque row.
+# Les formats antérieurs (TL01, single-pickle) n'ont pas d'empreinte : leur état ne peut pas être
+# restauré sans risque de plateau incompatible → ils sont REFUSÉS explicitement (cf. _reject_legacy).
+_MAGIC = b"W40KTL02"
+_LEGACY_MAGICS = frozenset({b"W40KTL01"})
 _LEN = struct.Struct(">Q")  # préfixe de longueur : entier 64 bits big-endian
 
 # Rows exclues du menu Select (trop nombreuses) mais présentes dans le playback ⏮⏭.
 _SELECT_HIDDEN_KINDS = {"action"}
+
+# Clés de meta jamais envoyées au front (usage serveur uniquement) : combat log et empreinte plateau.
+_META_DISPLAY_HIDDEN = frozenset({"log_delta", "scenario"})
 
 # Fichier de TRAVAIL : nom réservé, unique par répertoire, réutilisé/écrasé à chaque partie tant
 # qu'aucune save manuelle (autosave OFF) → enregistre toute la timeline en continu (playback ⏮⏭)
@@ -120,6 +126,27 @@ def row_meta(gs: Dict[str, Any], row_ts: str, note: str, kind: str) -> Dict[str,
     }
 
 
+def _reject_legacy(name: str, head: bytes) -> None:
+    """Lève sur un fichier qui n'est pas au format courant (aucun fallback : une save sans empreinte
+    de scénario n'est pas restaurable sûrement)."""
+    if head in _LEGACY_MAGICS:
+        raise ValueError(
+            f"partie {name!r} au format {head.decode()} : écrite sans empreinte de scénario, donc "
+            f"illisible depuis le passage à {_MAGIC.decode()}. Supprime-la ou rejoue la partie."
+        )
+    raise ValueError(f"partie {name!r} : format de fichier inconnu (en-tête {head!r})")
+
+
+def _stamp_scenario(row: Dict[str, Any], engine: Any) -> Dict[str, Any]:
+    """Estampille la row INAUGURALE d'un fichier avec l'empreinte du plateau.
+
+    Le plateau est invariant sur toute la partie : l'empreinte est donc une propriété du FICHIER, pas
+    de la row. La calculer à chaque row coûterait un parcours de tous les murs/terrains par activation
+    d'unité (mesuré : jusqu'à ~150× le coût de la capture d'état, qui exclut justement les statiques)."""
+    row["meta"]["scenario"] = scenario_fingerprint(engine)
+    return row
+
+
 def _pack_record(row: Dict[str, Any]) -> bytes:
     """Sérialise une row en ``[len meta][meta][len state][state]``."""
     mb = pickle.dumps(row["meta"])
@@ -181,8 +208,9 @@ class SaveStore:
         out: List[Dict[str, Any]] = []
         with self._lock, open(self._path(name), "rb") as f:
             size = os.fstat(f.fileno()).st_size
-            if f.read(len(_MAGIC)) != _MAGIC:
-                return self._read_legacy(f, load_state)
+            head = f.read(len(_MAGIC))
+            if head != _MAGIC:
+                _reject_legacy(name, head)
             while True:
                 mlen = self._read_len(f, size)
                 if mlen is None:
@@ -198,29 +226,49 @@ class SaveStore:
                     out.append(meta)
         return out
 
-    @staticmethod
-    def _read_legacy(f, load_state: bool) -> List[Dict[str, Any]]:
-        """Rétrocompat : ancien format single-pickle ``{name, points:[{meta,state}]}``."""
-        f.seek(0)
-        try:
-            header = pickle.load(f)
-        except EOFError:
-            return []
-        if not (isinstance(header, dict) and "points" in header):
-            raise ValueError("format de partie inconnu (ni timeline, ni ancien format)")
-        pts = header.get("points") or []
-        return [p if load_state else p["meta"] for p in pts]
+    def _first_meta(self, name: str) -> Dict[str, Any]:
+        """Meta de la row inaugurale (celle qui porte l'empreinte du plateau). Lecture O(1) : magic +
+        1re meta, sans parcourir le fichier ni désérialiser le moindre state."""
+        _assert_safe_party_name(name)
+        if not os.path.exists(self._path(name)):
+            raise FileNotFoundError(f"partie introuvable: {name}")
+        with self._lock, open(self._path(name), "rb") as f:
+            size = os.fstat(f.fileno()).st_size
+            head = f.read(len(_MAGIC))
+            if head != _MAGIC:
+                _reject_legacy(name, head)
+            mlen = self._read_len(f, size)
+            if mlen is None:
+                raise ValueError(f"partie vide: {name}")
+            return pickle.loads(f.read(mlen))
+
+    def _assert_scenario_match(self, engine: Any, name: str) -> None:
+        """Refuse d'appliquer un état d'une partie produite sur un AUTRE plateau que l'engine vivant.
+
+        Un state ne contient que le mutable ; board/murs/terrain/objectifs sont ré-attachés depuis
+        l'engine vivant. Sans cette garde, un mismatch passerait SANS erreur : unités posées dans des
+        murs, LoS et pathfinding calculés sur une carte qui n'est pas la leur."""
+        meta = self._first_meta(name)
+        if "scenario" not in meta:
+            raise ValueError(f"partie {name!r} : row inaugurale sans empreinte de scénario (corrompue)")
+        saved = meta["scenario"]
+        live = scenario_fingerprint(engine)
+        if saved["digest"] != live["digest"]:
+            raise ValueError(
+                "plateau incompatible : cette save provient du scénario "
+                f"{saved['scenario_file']!r} (empreinte {saved['digest'][:12]}), or l'engine courant "
+                f"tourne sur {live['scenario_file']!r} (empreinte {live['digest'][:12]}). "
+                "Démarre une partie avec le bon scénario avant de charger."
+            )
 
     def _find(self, name: str, match: Callable[[Dict[str, Any]], bool]) -> Dict[str, Any]:
         """Renvoie la 1re row {meta, state} dont la meta satisfait ``match``, en ne désérialisant que
         SON state (les autres sont sautés). Lève KeyError si aucune ne matche."""
         with self._lock, open(self._path(name), "rb") as f:
             size = os.fstat(f.fileno()).st_size
-            if f.read(len(_MAGIC)) != _MAGIC:
-                for row in self._read_legacy(f, True):
-                    if match(row["meta"]):
-                        return row
-                raise KeyError("row introuvable")
+            head = f.read(len(_MAGIC))
+            if head != _MAGIC:
+                _reject_legacy(name, head)
             while True:
                 mlen = self._read_len(f, size)
                 if mlen is None:
@@ -322,7 +370,7 @@ class SaveStore:
         game_start) → pas de prolifération de fichiers tant qu'aucune save. ``party_name`` est le nom
         définitif visé à la promotion (1re save manuelle ou autosave). La partie courante devient le
         working ; il est promu plus tard via ``promote()``."""
-        row = self.make_row(engine, point_ts, "game_start", "")
+        row = _stamp_scenario(self.make_row(engine, point_ts, "game_start", ""), engine)
         with self._lock:
             self._write_all(_WORKING_NAME, [row])
             self._current = _WORKING_NAME
@@ -358,7 +406,8 @@ class SaveStore:
             self._current = _party_name_from_point_ts(point_ts)
         row = self.make_row(engine, point_ts, kind, note)
         if not os.path.exists(self._path(self._current)):
-            self._write_all(self._current, [row])
+            # Row inaugurale d'un nouveau fichier (partie sans game_start) → elle porte l'empreinte.
+            self._write_all(self._current, [_stamp_scenario(row, engine)])
         else:
             self._append(self._current, row)
         return row["meta"]
@@ -368,8 +417,15 @@ class SaveStore:
     @staticmethod
     def _display_meta(meta: Dict[str, Any]) -> Dict[str, Any]:
         """Meta allégée pour l'affichage front (Select / playback) : retire ``log_delta`` (le combat
-        log, volumineux et inutile pour lister/naviguer — il n'est reconstruit qu'au Load/rewind)."""
-        return {k: v for k, v in meta.items() if k != "log_delta"}
+        log, volumineux et inutile pour lister/naviguer — il n'est reconstruit qu'au Load/rewind) et
+        ``scenario`` (l'empreinte du plateau, contrôlée côté serveur au load, jamais lue par le front).
+
+        ``log_count`` remplace le log retiré : le playback ⏮⏭ a besoin de savoir si une row porte des
+        events SANS transporter les events eux-mêmes. Une row turn/phase sans event est une simple
+        transition (aucune unité ne bouge) → un cran de navigation qui n'annulerait rien."""
+        out = {k: v for k, v in meta.items() if k not in _META_DISPLAY_HIDDEN}
+        out["log_count"] = len(meta.get("log_delta") or [])
+        return out
 
     def list_points(self) -> List[Dict[str, Any]]:
         """Rows de la partie courante pour le menu SELECT (masque les rows ``action``), récentes d'abord."""
@@ -429,6 +485,9 @@ class SaveStore:
 
     def restore_point(self, engine: Any, point_id: str) -> Dict[str, Any]:
         """Restaure une row (par id) de la partie courante (commit destructif)."""
+        if self._current is None:
+            raise ValueError("aucune partie courante")
+        self._assert_scenario_match(engine, self._current)
         r = self.point(point_id)
         apply_live_state(engine, r["state"])
         return r["meta"]
@@ -446,6 +505,7 @@ class SaveStore:
 
     def load_party_start(self, engine: Any, name: str) -> Dict[str, Any]:
         """Charge une partie à son game_start (commit destructif) et la rend courante."""
+        self._assert_scenario_match(engine, name)
         start = self.party_start_point(name)
         apply_live_state(engine, start["state"])
         self._current = name

@@ -570,7 +570,336 @@ Plan d'origine :
 3. Étendre le smoke test aux scénarios migrés (T4), sièges p1/p2/random, et à un scénario
    contenant Carnifex/Psychophage (validation R6).
 
-### T6 — Entraînement de validation + hygiène
+### T6 — Entraînement de validation + hygiène — ⏳ EN COURS (2026-07-16)
+
+**Préalable levé** : le bloqueur résiduel laissé par T5 (« reset crashe avec
+`agent_seat_mode="p2"/"random"` — `bot-owned eligible units with empty action mask` en fight
+tour 1 ») **ne se reproduit plus**. Vérifié en miroir exact de train.py:1673-1716
+(`ActionMasker` + `BotControlledEnv` + `GreedyBot`) sur `scenario_training_bot-01` × sièges
+p1/p2/random × 2 seeds : les 6 combinaisons terminent (`terminated=True`, turn=5), zéro masque
+vide. Le fix de parité déploiement de T5 l'a manifestement couvert.
+
+**Rappel des critères de sortie (re-démontrés sur l'arbre T6)** : suite `tests/unit/` verte ;
+smoke moteur nu `scripts/smoke_t5_bare.py` → `(A) invariant/terminaison=OK | (B) mêlée+Carnifex=OK`
+avec `melee_kills_total=5` (pertes réelles via FIGHT_CTX) et `carnifex_charge_any=True` (R6).
+
+**Deux ruptures T6 vérifiées et corrigées** (aucune ne figure dans R1-R8 — ce sont des reliquats
+de T4/de code latent) :
+
+- **T6-a — `wall_ref` exigé par le sampler alors que T4 l'a supprimé (BLOQUANT, crash immédiat)**
+  **Repro** : `train.py --agent CoreAgent --scenario bot --new --training-config x1_debug --step`
+  → `ConfigurationError: Required key 'wall_ref' is missing from mapping`
+  (`_load_scenario_wall_ref`, train.py ~L556, via `_apply_wall_ref_weighting`).
+  **Cause** : `migrate_scenario_bank_v11.py` supprime délibérément `wall_ref` (docstring : « supprime
+  les clés legacy … wall_ref ») — les 61 scénarios migrés sont TERRAIN-ONLY (`board_ref` +
+  `terrain_ref`, vérifié : 61/61 sans `wall_ref`). Le contrat moteur rend `wall_ref` OPTIONNEL
+  (`wall_hexes` XOR `wall_ref`, `terrain_ref` additif — game_state.py ~L285-314). T4 a migré la
+  banque mais pas ce sampler.
+  **Fix** : `_load_scenario_wall_ref` renvoie `Optional[str]` — `None` quand la clé est ABSENTE
+  (état légitime du contrat, pas une valeur par défaut masquant une erreur) ; une clé présente
+  reste strictement validée (erreur explicite si vide/non-string). `None` traverse
+  `_apply_wall_ref_weighting` sans override (poids `"default"` = « garde les murs du scénario »,
+  ~L853) → aucun `wall_ref` injecté.
+
+- **T6-b — `--step` était un no-op SILENCIEUX (bloque analyzer + replay)**
+  **Repro** : le run affiche « 📝 Step logging enabled » puis « ✅ StepLogger connected », et
+  `step.log` reste réduit à son en-tête (7 lignes) après 20 min d'entraînement.
+  **DEUX causes indépendantes, les deux corrigées** :
+  1. *Le StepLogger n'est branché que sur la branche mono-env* (`if step_logger:
+     base_env.step_logger = step_logger`) ; les **trois** branches vectorisées construisent leurs
+     envs avec `step_logger_enabled=False`. Avec `n_envs=48` (x1_debug), `--step` ne pouvait rien
+     produire. Le code forçait déjà `n_envs=1` pour `--replay`/`--convert-steplog` (~L1326) mais
+     PAS pour `--step`. → helper unique `_resolve_n_envs_for_step_logging` (train.py ~L571) branché
+     aux **3** sites de résolution de `n_envs` (~L1354, ~L1665, ~L2129) : force l'env unique ET le
+     DIT. Factorisé volontairement — trois gardes dupliqués sont exactement le motif de migration
+     partielle qui a produit R5. ⚠️ Piège vérifié : les 3 sites impriment le MÊME message
+     « 🚀 Creating N parallel environments » — ne pas se fier au log pour identifier le site actif
+     (`--scenario bot` passe par `train_with_scenario_rotation`, site ~L2129).
+  2. *Bug latent : l'env est RECRÉÉ sans reconnecter le StepLogger* (train.py ~L2637-2651,
+     « For n_envs==1: recreate env with frozen model for self-play »). Ce second `base_env` reçoit
+     `_metrics_tracker` mais jamais `step_logger` → le run journalisait « StepLogger connected »
+     pour un env aussitôt jeté, puis s'entraînait sur un moteur MUET. Chemin exigeant `n_envs==1`
+     (config = 48) → jamais emprunté, donc jamais vu. **Révélé par le fix (1).**
+     → reconnexion en miroir de ~L2377.
+  ⚠️ `StepLogger.log_episode_start` avale toute exception (`except Exception: print("⚠️ Episode
+  start logging error")`, step_logger.py ~L254) — un step.log vide peut donc masquer une erreur.
+  Ici le diagnostic a été fait par élimination (aucun warning émis ⇒ la fonction n'était PAS
+  appelée ⇒ le moteur entraîné n'avait pas de logger).
+
+- **T6-c — `squad_fight` : le COMMIT gym divergeait du PvP (crash d'épisode) — ✅ CORRIGÉ**
+  **Repro** (déterministe) : `MELEE_SCENARIO` + actions tirées par `default_rng(seed*777+i)`,
+  seed=1 → `ValueError: squad_fight: aucune cible pour squad 3 — mask aurait dû l'empêcher`.
+  Seul seed=1 échoue (2 et 3 passent) → **un smoke vert ne prouvait pas son absence**
+  (`smoke_t5_bare.py` tire avec `seed*99991+steps`, séquence différente).
+  **Verdict contre-intuitif** : ce n'était PAS le masque. `_squad_is_in_fight` (« a chargé OU en
+  ER ») est CONFORME à 12.04 et au prédicat PvP `fight_v11_is_eligible_to_fight`, explicitement
+  « indépendant de la présence de cibles ». C'est le commit qui cherchait sa cible dans le
+  **mapping de slots gelé du TIR** (`get_enemy_slot_mapping`) scoré par menace globale, **sans
+  filtre de zone d'engagement** — donc capable de frapper hors ER (violation 12.05) et de crasher
+  quand tous les slots sont morts (chargeur dont la cible meurt avant son activation).
+  **Fix** (`w40k_core.py` SEUL, gym-only — `_process_squad_action` n'est appelé que par `step()`) :
+  le commit consomme le prédicat du flux PvP (`_fight_build_valid_target_pool` +
+  `_ai_select_fight_target`, cf. `_fight_v11_resolve_attacks`) ; pile-in avant la sélection de
+  cible (ordre V11 12.02→12.04) ; pool vide = fight « à vide » via le MÊME moteur d'allocation
+  (0 intent → summary vide, `done=True`). Garde `ValueError` supprimée : elle interdisait un cas
+  légal (12.04/12.06) déjà accepté par le PvP. **Neutralité PvP totale** (`fight_handlers` intact).
+  **Tests (+5)** : `tests/unit/engine/test_squad_fight_target_parity.py` (2 vérifiés comme
+  échouant sur l'ancien code). Détail : `Implémenté/bug_squad_fight_mask_mismatch.md`.
+  ⚠️ **Impact sur le plan §9.4** : le site vif de la cible de mêlée a changé → cf. §9.4 point 1.
+
+- **T6-d — dettes constatées pendant T6-c, NON traitées (backend gelé sur décision utilisateur)**
+  - **Le gym n'entre PAS dans la machine V11** — mesuré sur un épisode complet : en phase fight,
+    l'état est invariablement `(fight_subphase='pile_in', snapshot_present=False,
+    nb_selected_to_fight=0)`. `fight_phase_start` initialise la machine, puis le pipeline squad
+    déroule le sien sans jamais l'avancer. Conséquences : `engaged_at_fight_step_start` jamais
+    posé (la branche « was engaged at the start of this step » de 12.04 est inapplicable),
+    `units_selected_to_fight` jamais rempli. **Racine des divergences masque↔commit en série** —
+    chaque nouvelle en sera une variante tant que ce n'est pas traité.
+  - **Overrun 12.06 absent du gym** — n'existe qu'en modèle par-ancre, condamné par la décision
+    « le pile-in de référence est le par-figurine du PvP » (2026-07-16). Légal (12.06 : « **can**
+    make one additional pile-in move »). Spec complète : `A_faire/overrun.md`.
+  - **Mismatch cellules/clearance du BFS pile-in/conso** — mesuré 1102 ancres sur 72857 ; fix
+    écrit, mesuré (0/71755 après, perf 2m01→1m33), puis **REVERTÉ** : `fight_handlers` est partagé
+    et le changement n'est pas neutre PvP. Ne concerne que du code par-ancre condamné → priorité
+    basse. Détail + mesures : `A_faire/bug_pile_in_bfs_clearance_mismatch.md`.
+
+**T6.2 — métriques TensorBoard : RÉSOLU, la mémoire projet était périmée.** Inspection directe
+des `events.out.tfevents.*` (EventAccumulator) sur training neuf : `0_critical/` porte bien les
+métriques PPO — `f_loss_mean`, `g_explained_variance`, `h_clip_fraction`, `i_approx_kl`,
+`j_entropy_loss`, `m_value_loss_smooth`, **56 points chacune** ; `training_critical/` expose ses
+6 tags. Le fix `_dump_with_capture` du 2026-05-22 tient. Nuance non diagnostiquée (sans impact) :
+`train/*` et `training_critical/*` n'ont qu'1 point là où `0_critical/*` en a 56 — répartition
+entre les deux fichiers d'events (`CoreAgent/` et `x1_debug_CoreAgent_1/`).
+
+**Run T6.1 — « run court complet sans erreur » : DÉMONTRÉ sur les deux chemins.**
+- **n_envs=48** : **467/500 épisodes, zéro exception** (`win_rate_overall = 0.296` à l'ép. 467),
+  coupé par le `timeout 2400` de l'opérateur — pas par une erreur.
+- **mono-env (`--step`, après fixes T6-b)** : **475/500 épisodes, zéro exception**, step.log de
+  12 561 lignes, coupé par le `timeout 5400` de l'opérateur.
+x1_debug (500 ép.) demande > 40 min à n_envs=48 et > 90 min en mono-env — dimensionner le timeout
+en conséquence pour un run réellement complet.
+
+**T6.3 — baseline bots : NON DÉMONTRÉE (données insuffisantes, pas une régression).**
+Mesuré sur le run de 467 épisodes (adversaire = GreedyBot randomness=0.15 via BotControlledEnv) :
+- `win_rate_100ep` (glissant) ~0.33 au milieu → **0.296** à la fin ; `win_rate_overall` plat
+  autour de **0.30** (0.270 → 0.320 → 0.307 → 0.305 → 0.296 par tranches de 100).
+- `episode_reward` (moyenne 100 premiers vs 100 derniers) : **-12.53 → -8.33** (progression nette).
+Lecture honnête : le reward progresse, le win-rate stagne à ~30 % (l'agent ne bat PAS GreedyBot).
+**Mais 467 épisodes sur un budget nominal de 50 000 (`total_episodes_normal` de x1_debug) est du
+bruit** — ni preuve de succès ni preuve d'échec. Le critère « win-rate en progression / stabilité
+multi-scénarios » exige la phase `x1` réelle + `bot_evaluation` sur holdout (vs RandomBot), pas
+`x1_debug` (500 ép.). ⚠️ Ne pas conclure sur ces chiffres.
+
+### ✅ T6-c — RÉSOLU (2026-07-16) : le StepLogger n'avait jamais été migré vers le pipeline squad
+
+**Décision utilisateur : migrer (option a).** Fait. `ai/analyzer.py` tourne désormais de bout en
+bout sur un step.log produit par le pipeline squad.
+
+**Root cause réelle — pas « le step logger n'a pas été câblé », mais un CONTRAT MOTEUR VIOLÉ.**
+`end_activation(game_state, unit, arg1, ...)` (generic_handlers ~L70-101) définit :
+`arg1="ACTION"` → « *Log the action (action already logged by handlers)* » ;
+`arg1="WAIT"` → `end_activation` émet lui-même l'action_log ; `arg1="NO"` → rien.
+Or `_process_squad_action` appelait `end_activation(..., ACTION, ...)` après un move et une charge
+réussis — donc en PROMETTANT que le handler avait journalisé — alors que `execute_squad_move` et
+`charge_build_valid_plan` n'émettaient **aucun** `append_action_log` (contrairement au chemin
+legacy par-figurine, movement_handlers ~L3701/4107, charge_handlers ~L5597/5877).
+**`game_state["action_logs"]` était donc incomplet sur le chemin squad** ; le step.log vide n'en
+était qu'un symptôme.
+
+**Solution — réparer le contrat, pas dupliquer 17 sites de journalisation** :
+1. **Émission des action_logs manquants** dans `_process_squad_action` (miroir des payloads
+   legacy) : `move` (avec `move_type` portant normal/advance/fall_back), `charge`, `charge_fail`,
+   **`deploy_unit`** (cf. ci-dessous). `shoot`/`combat`/`hazard`/`wait` en émettaient déjà.
+2. **Un point d'accroche UNIQUE** : `_flush_squad_action_logs_to_step_logger` (w40k_core), appelé
+   depuis `step()` après le dispatch. Draine `action_logs[curseur:]` → `log_action`, via une table
+   `_STEP_LOG_TYPE_MAP` (type moteur → action_type du formateur) et `_build_step_log_details`
+   (camelCase moteur → snake_case formateur). No-op complet sans `--step`.
+3. **Émission PAR JET** pour `shoot`/`combat` : le moteur agrège les jets d'un groupe (arme,
+   cible) dans `shootDetails`, le formateur travaille par attaque → une ligne par jet, via
+   `_SHOT_RECORD_FIELD_MAP` (`attackRoll`→`hit_roll`, `strengthRoll`→`wound_roll`,
+   `saveSuccess`→`save_result`…). Les 11 champs sont exigés même sur un MISS (présence de la clé) :
+   `None` est correct, le formateur ne rend `Wound` que si `hit_result == "HIT"`.
+4. **État fight capturé AVANT l'action** (`_pre_action_fight_state`) : le formateur `combat`
+   exige `fight_subphase` + les 3 pools d'activation (contrat replay), et l'action les mute.
+
+⚠️ **Rayon PvP : NUL, vérifié.** `execute_squad_move` n'a qu'UN appelant (`_process_squad_action`)
+et `_process_squad_action` n'est appelé que depuis `step()`/`_build_observation` = gym.
+Le PvP (`services/api_server.py`) passe par `execute_semantic_action` → `_process_semantic_action`.
+
+**Le déploiement n'était PAS journalisé non plus** (`deployment_handlers` : grep
+`append_action_log` = 0). Conséquence mesurée et non évidente : `log_episode_start` écrit les
+unités non déployées en `(-1,-1)`, et sans log de déploiement l'analyzer n'apprenait JAMAIS leur
+position réelle → **49 fausses « collisions »** (contrôle 2.2). Émettre `deploy_unit` les a
+résolues d'un coup (49 → 0).
+
+**Bug de règle trouvé DANS l'analyzer** (faux positifs, pas un bug moteur) :
+`_track_action_phase_accuracy` (analyzer.py ~L835) attendait `"advance": "SHOOT"`. **Faux** :
+PDF projet « 09 Movement phase.pdf », règle **09.02 MOVE UNITS > Select Move Type** liste
+l'*Advance move* parmi les types de mouvement de la **phase de Mouvement** (avec Normal move,
+Fall-back move, Remain stationary). Le moteur le résout bien en phase MOVE. Corrigé en
+`"advance": "MOVE"` → **105 faux positifs supprimés**.
+
+**Résultat sur le VRAI `train.py --agent CoreAgent --scenario bot --new --training-config
+x1_debug --step`** (56 épisodes, **3452 lignes d'action**, **0 erreur avalée**) — `ai/analyzer.py`
+tourne de bout en bout et rendait **14 erreurs** ; après le traitement du faux positif LoS
+(2026-07-16) il n'en reste **2**, le seul ❌ étant l'artefact 2.6 ci-dessous :
+- ✅ 1.1 move : 0 ; ✅ 1.3 charge : 0 ; ✅ 1.4 fight : 0 ; ✅ 1.5 wrong phase : 0 ;
+  ✅ 1.6 double-activation : 0 ; ✅ 2.1 dead units : 0 ; ✅ **2.2 positions : 0** ;
+  ✅ 2.3 DMG : 0 ; ✅ 2.5 episode ending : 0 ; ✅ 2.7 core issue : 0.
+- ✅ **1.2 erreurs en phase de shooting : 0** — **TRANCHÉ ET TRAITÉ le 2026-07-16**, était 12
+  (`shoot_through_wall = 6` + `shoot_invalid.no_los = 6` = les MÊMES 6 tirs, incrémentés dans la
+  MÊME branche, shoot_handler.py ~L165). **Verdict : faux positifs de l'analyzer, aucun bug
+  moteur, backend non modifié.** Détail complet, preuve et options rejetées :
+  `A_faire/analyzer_los_ancre_vs_perfig.md`.
+  **Cause structurelle confirmée — le CONTRÔLEUR est périmé, pas le moteur** (et il n'y a
+  AUCUNE divergence training/PvP : le moteur est unique et pilote les deux) :
+  - L'analyzer n'a PAS sa propre LoS — il appelle bien `engine.hex_utils.compute_los_state`
+    (analyzer.py ~L602, docstring : « same algorithm as the game engine »). **Mais il l'appelle
+    ANCRE-À-ANCRE** : `has_line_of_sight(shooter_col, shooter_row, target_col, target_row,
+    wall_hexes)` — un point contre un point.
+  - Le moteur, lui, fait `_attacker_model_can_reach_squad` (shared_utils ~L4243) : LoS
+    **PER-FIGURINE**, origine = **empreinte COMPLÈTE du socle tireur** (« pas son seul centre »),
+    distance bord-à-bord, via `_compute_visibility_with_obscuring` (murs denses + obscurcissant,
+    13.10). **Son propre commentaire décrit exactement ce faux positif** : « une grosse base dont
+    le centre est masqué par un terrain (mais dont un bord voit la cible) était grisée à tort ».
+  - → L'analyzer refait le test centre-à-centre que le moteur a DÉLIBÉRÉMENT abandonné. Même
+    dette que R5 / le step logger / les objectifs de l'analyzer : outil resté sur le modèle
+    pré-squad « une unité = un point ».
+  - Second suspect : `except Exception: return False` (analyzer.py ~L630) — **écarté par mesure**
+    (aucune exception levée : `compute_los_state` brut rend le même `False`). Supprimé quand même
+    (CLAUDE.md). Troisième suspect « murs incomplets » écarté aussi : ligne `Walls:` complète.
+  - **Confirmé sur un tir précis** (E7 T3 P1 `Unit 4(215,155) SHOT Unit 104(116,66)`) : l'ancre
+    rend `can_see=False`, mais **3 des 19 cellules** de l'empreinte du socle (`round/6`) voient la
+    cible. Règle 06.01 (PDF lu) : « from **any part** of that model to **any part** of the model
+    being observed » → l'ancre-à-ancre est plus restrictif que la règle.
+  - **Correction (option c)** : le contrôle est SUPPRIMÉ de l'analyzer et la vérification
+    DÉPLACÉE dans `tests/unit/engine/test_shoot_los_perfig_parity.py`, où `game_state` existe.
+    Le réparer sur place était impossible : les primitives moteur exigent `game_state`
+    (empreintes, obscurcissant 13.10, LoS 3D) que step.log ne porte pas ; et logger le verdict du
+    moteur serait circulaire (le tir est déjà gaté par `_attacker_model_can_reach_squad`).
+  ⚠️ **La journalisation n'est fidèle que pour les JETS** (`Hit 6(3+) - Wound 5(5+) - Save 1(4+) -
+  Dmg:2HP` ; un MISS ne rend que `Hit 2(3+)`). **Ses COORDONNÉES sont fausses** :
+  `_emit_squad_shoot_log` (shared_utils ~L5758) loggue l'ancre d'ESCOUADE, pas la figurine qui
+  tire — dette V11 « une unité = un point » non traitée, chantier séparé.
+- ❌ 2.6 « Sample missing (2/5) : charge, fight » = artefact du run (agent frais : ne charge ni
+  ne combat jamais sur 56 épisodes), PAS un défaut.
+
+**C'est la valeur du chantier T6-c** : l'outil de validation du projet fonctionne enfin, et il a
+IMMÉDIATEMENT trouvé une divergence LoS analyzer↔moteur qu'aucun test unitaire ne voyait.
+
+**Résultat sur un step.log de moteur nu (3 épisodes, actions aléatoires)** — `157 erreurs → 52 → 3` :
+- ✅ 1.1/1.2/1.3/1.4 erreurs par phase : 0 ; ✅ 1.5 wrong phase : **0** (était 105) ;
+  ✅ 1.6 double-activation : 0 ; ✅ 2.1 dead units : 0 ; ✅ 2.2 positions incohérentes : **0**
+  (était 49) ; ✅ 2.3 DMG issues : 0 ; ✅ 2.5 episode ending : 0 ; ✅ 2.7 core issue : 0.
+- ❌ 2.6 « Sample missing (3/5) : shoot, charge, fight » = **artefact du run** (actions aléatoires
+  non dirigées : ni tir ni charge ni combat), PAS un défaut. Le scénario de mêlée garantie produit
+  bien `FOUGHT`/`FAILED CHARGE` (vérifié : 40 lignes `FOUGHT` avec détail par jet
+  « Hit 3(3+) - Wound 5(2+) - Save 2(7+) - Dmg:1HP »), et zéro erreur avalée.
+
+⚠️ **Piège vérifié** : `StepLogger.log_action` et `log_episode_start` AVALENT toute exception
+(`except Exception: print("⚠️ ... logging error")`, step_logger.py ~L254). Un champ manquant
+produit une ligne SILENCIEUSEMENT absente, pas un crash. **Contrôler `grep -c "logging error"`
+après tout changement de mapping** — c'est ainsi qu'ont été trouvés les manques `hit_roll` puis
+`deploy … position data`.
+
+Plan d'origine (résolu ci-dessus) :
+
+**Fait vérifié (statique)** : `_process_squad_action` (w40k_core.py, def ~L4750, plage ~4750-5146)
+— le chemin VIF du pipeline squad en gym — contient **ZÉRO appel à `step_logger.log_action`**
+(grep sur la plage = 0). Son docstring l'annonce : « Dispatch sémantique squad vers helpers squad.
+**Remplace `_process_semantic_action`** ». Or les **17** sites `log_action` vivent dans
+`_process_semantic_action` (def ~L2725) et ses handlers, atteignables seulement via
+`execute_semantic_action` (~L2090) et `execute_ai_turn` (~L2114) = chemins PvE/legacy.
+
+**Preuve empirique (run mono-env réel, 475 épisodes, après les fixes T6-b)** :
+- `Steps=0` sur **474/475** épisodes (`episode_step_count` n'est jamais incrémenté) ;
+- **0 ligne** correspondant à `Unit N (MOVED|SHOT|CHARGED|FOUGHT|WAITED)` sur 12 561 lignes ;
+- ~26 lignes/épisode = les seuls en-têtes (`Scenario`, `Rosters`, `Walls`, `Objectives`, `Rules`,
+  `Board`) + `EPISODE END` + `OBJECTIVE CONTROL`.
+
+⚠️ **Nuance vérifiée (à ne pas sur-simplifier)** : `log_action` n'est pas TOTALEMENT inatteignable
+depuis le gym — **3 épisodes sur 475** portent `Actions=9|9|18`. Ce sont exclusivement des
+`rule_choice` (« Unit 105 chose [AGGRESSION IMPERATIVE] »), émis par le site w40k_core ~L2416-2425
+dont le commentaire dit explicitement « select_rule_choice **bypasses normal step logger flow** ».
+C'est donc le seul `log_action` atteignable — précisément parce qu'il court-circuite le flux
+normal — et il n'incrémente pas `step_count`. **Toutes les actions de JEU (move/shoot/charge/
+fight/wait), celles à `step_increment=True` dont l'analyzer a besoin, ne sont jamais journalisées.**
+
+**Conséquence** : `ai/analyzer.py` échoue en `Missing objective control snapshot at episode end`
+(analyzer_core.py ~L250) — il construit ses snapshots de contrôle d'objectif à chaque action
+`step_inc` (~L861-907), et il n'y en a aucune. Aucun réglage de l'analyzer ne peut compenser :
+**la matière première n'est pas produite**.
+
+**Même famille que R5 et `game_replay_logger`** (condamné en T2 pour exactement ce motif : code
+resté sur l'architecture pré-squad). La migration RL de fin mai a laissé derrière elle TOUTE la
+chaîne d'observabilité, pas seulement les wrappers.
+
+**À statuer (utilisateur)** : (a) migrer `log_action` vers `_process_squad_action` (chemin partagé
+PvP/gym → impacte aussi la journalisation PvP, à cadrer) ; (b) condamner explicitement `--step`
+sur le pipeline squad, comme `game_replay_logger.log_action` (NotImplementedError), et retirer
+« analyzer + replay » du critère T6 ; (c) laisser en l'état. **Interdit : laisser `--step`
+annoncer « Step logging enabled » en ne produisant que des en-têtes.**
+Cadrage PvP si (a) : les 17 sites legacy sont tous gardés par `if self.step_logger`, et le
+logger n'est branché QUE par train.py → instrumenter `_process_squad_action` avec la même
+garde est neutre PvP par construction. Granularité : l'action squad (move dir, shoot slot,
+charge, fight, wait) — ce que l'analyzer consomme.
+
+**Décisions annexes actées (2026-07-16)** :
+1. **Modèles de validation** : les runs de validation/baseline écrivent leurs artefacts sous
+   `ai/models/_validation/<run_id>/` — JAMAIS dans `ai/models/<agent_key>/` (zips protégés,
+   CLAUDE.md). Règle permanente : plus aucun arbitrage ponctuel `--new` vs zips à chaque run.
+2. **Raccrochés au chantier (a)** (même fichier, même passe) : le 3e site `--step` encore non
+   gardé dans train.py (les 3 sites impriment le même message — ajouter au passage un
+   identifiant de site dans le log), et la ligne `OBJECTIVE CONTROL:` de step.log au format
+   `Obj<id_string>` que personne ne lit (l'aligner sur le format attendu `Obj(\d+)` du parser,
+   ou la supprimer — pas de statu quo).
+
+### Corrections T6 faites en chemin vers l'analyzer (toutes vérifiées)
+
+- **Parser d'armes — bug SILENCIEUX sur les apostrophes** (`engine/weapons/parser.py`, motif
+  `["\']([^"\']+)["\']`) : ouvrait sur `"` ou `'`, capturait tout sauf CES DEUX caractères, fermait
+  sur l'un ou l'autre. Une apostrophe DANS une chaîne à guillemets doubles cassait la lecture —
+  or les noms Orks en sont pleins. `display_name: "Dok's Tools"` → capturait **`"Dok"`** (tronqué,
+  SANS erreur) ; `"'eadbanger'"`, `"'urty Syringe"`, `"'Waaagh! Staff"` → **aucun match**, la clé
+  `display_name` n'était jamais posée et l'absence explosait ailleurs
+  (`require_key(weapon, "display_name")`, analyzer_config.py:150). **Impacte aussi le PvP.**
+  → constante `_TS_QUOTED_STRING = r'(["\'])((?:(?!\1).)*)\1'` (backréférence : fermeture sur le
+  MÊME guillemet), appliquée à `display_name`, `COMBI_WEAPON` et `WEAPON_RULES`. Strictement
+  identique pour tout nom sans apostrophe. Résultat : registre à **176 unités, 0 erreur de
+  parsing** (contre 107 erreurs).
+- **Donnée corrigée en conséquence** : `wolf_guard_weapon` déclarait `WEAPON_RULES: [""]`
+  (spaceMarine/armory.ts:142) — une chaîne VIDE que l'ancien motif (`+`, 1 car. min.) avalait
+  silencieusement. Le motif corrigé la lit fidèlement → règle vide rejetée. `[""]` → `[]` :
+  comportement inchangé (l'ancien parser produisait déjà `[]`), la donnée dit enfin ce que le code
+  comprenait. Occurrence unique dans tout le projet.
+- **`_resolve_scenario_path` (analyzer.py) résolvait vers l'ARCHIVE** : T4 a déposé la banque
+  pré-V11 sous `scenarios/_archive_pre_v11/` — donc DANS l'arbre parcouru par `os.walk` →
+  `ValueError: Ambiguous scenario path for 'scenario_training_bot-29'` (l'archivé garde ses clés
+  legacy, sa signature d'objectifs diffère du migré homonyme). → la marche élague les dossiers
+  `_archive*`. Aligné sur la convention du projet : `get_scenario_list_for_phase`
+  (training_utils.py:308) travaille sur une liste blanche explicite (training/, holdout_regular/,
+  holdout_hard/) et n'a jamais eu ce problème.
+- **`_get_objective_name_to_id_map` (analyzer.py) était resté sur le contrat LEGACY** : lisait
+  `objectives` inline / `objectives_ref` → `config/board/<board>/objectives/` (dossier supprimé).
+  T3 avait migré train.py et bot_evaluation.py, **pas analyzer.py**. → migrée vers la source
+  unique terrain (areas `"objective": true`, miroir de `resolved_scenario_objectives` de
+  game_state.py), via un nouveau `_resolve_terrain_path_for_scenario` (miroir du resolver
+  `board_ref` de T4). Nuance : les ids terrain sont des STRINGS (`rect_b_nw_OK`) alors que
+  l'analyzer indexe par int → id positionnel (1..N, ordre du fichier terrain = stable) ; seul le
+  NOM sert d'appariement, et c'est bien le `name` de l'area que le StepLogger écrit.
+  ⚠️ **Reste incohérent** (non corrigé, car sous le bloqueur T6-c) : la ligne `OBJECTIVE CONTROL:`
+  de step.log écrit `Obj<id_string>` (`Objrect_b_nw_OK`) alors que le parser attend `Obj(\d+)`
+  (analyzer_core.py ~L112) — **trois formats coexistent** (nom / `Obj`+string / `Obj`+int).
+
+**✅ Bloqueur résolu (historique) — `ai/analyzer.py` ne démarrait pas** :
+`ConfigurationError: Required key 'RNG' is missing` (`analyzer_config.py:167`) —
+`load_analyzer_config` itère TOUT `unit_registry.units`, donc 4 armes de TIR de l'armory Ork sans
+clé `RNG` bloquaient l'analyzer QUEL QUE SOIT le scénario, même sans Ork. Renseignées par
+l'utilisateur (`RNG: 24`) le 2026-07-16 : `kombi_rokkit`, `kombi_shoota`, `rokkit_launcha`,
+`rokkit_launcha_heavy`. A permis de découvrir les blocages suivants (parser d'apostrophes,
+archive T4, contrat objectifs legacy) puis le vrai mur structurel T6-c.
+
+Plan d'origine :
 1. `python3 ai/train.py --agent CoreAgent --scenario bot --new --training-config x1_debug --step`
    → run court complet sans erreur ; puis `ai/analyzer.py` sur les résultats + replay.
 2. Vérifier les métriques TensorBoard (cf. mémoire projet : métriques PPO manquantes dans
@@ -581,6 +910,59 @@ Plan d'origine :
    AI_OBSERVATION.md/AI_TRAINING.md (pipeline squad 108) ; statuer sur `ai/target_selector.py`
    (mort → suppression à valider utilisateur) ; marquer les configs snapshot obs 355 comme
    archives.
+
+**Hygiène T6.4 — état réalisé (2026-07-16)** :
+- ✅ `justification` corrigée dans les **5 phases** : `action_space_size=41 (26 micro [6 move +
+  6 advance + 6 fall back + 1 wait + 5 shoot + 1 charge + 1 fight] + 15 macro)`. Décompte vérifié
+  contre macro_intents.py.
+- ✅ **AI_OBSERVATION.md / AI_TRAINING.md** : bandeau de tête « ne décrit PAS le pipeline actif »
+  + table de correspondance (obs 108 / action 41, layout squad, routage `_build_observation` par
+  `obs_size`). Les corps de doc (355/357) sont conservés : le pipeline mono-fig reste atteignable
+  via `obs_size=357`. `obs_size: 355` de l'exemple de config AI_TRAINING.md corrigé en 108.
+- ✅ **Snapshots obs 355 marqués archives** : clé `_ARCHIVE` en tête de
+  `BEST_CoreAgent_training_config.json`, `CoreAgent_training_config_BEST_X1.json`,
+  `CoreAgent_training_config_save_avant_X10.json`. Sûr : aucun code ne les charge
+  (`load_agent_training_config` résout `<AGENT>_training_config.json`) — vérifié par grep.
+  Contenu strictement préservé (comparaison JSON parsée vs `git show HEAD:` = identique).
+- ✅ **Réserve T2 purgée** : `multi_agent_trainer.py` ~L996-1040 — monkeypatch
+  `controller.execute_gym_action` portant le dernier layout à 8 actions (`action // 8`,
+  `action % 8`). Code mort ET cassé : `W40KEngine` n'a aucun attribut `controller` (grep vide) et
+  le patch appelait 6 méthodes inexistantes (`_get_gym_eligible_units`,
+  `_convert_gym_action_to_mirror`, `_log_gym_action`…). Supprimé.
+- ✅ **Réserve T3/T4 purgée** : paramètre `objectives_ref` de `_materialize_scenario_with_refs`
+  (branche morte qui aurait émis une clé REJETÉE par le moteur — game_state ~L329). ⚠️ La purge
+  avait laissé un `NameError` latent (`hash_payload` référençait encore la variable) — attrapé par
+  le test `test_materialize_scenario_with_refs_wall_override_emits_no_legacy_key`, corrigé.
+- ✅ **Réserve T4 close** : `sweep_scenario_bank_v11.py` a désormais son bootstrap `sys.path`
+  (L19) ; `migrate_scenario_bank_v11.py` n'a **aucun import projet** → n'en a pas besoin.
+- ✅ **`ai/target_selector.py` SUPPRIMÉ** (validation utilisateur obtenue le 2026-07-16), avec son
+  test `tests/unit/ai/test_target_selector.py`. Mort confirmé par grep exhaustif avant suppression :
+  aucun importeur hors le module lui-même et son propre test (-9 tests collectés).
+- ⚠️ **Contradiction non résolue (décision produit requise)** : T6.1 impose `--new`, qui écrit
+  `ai/models/CoreAgent/model_CoreAgent.zip` — or CLAUDE.md (L51-53, L215) et la décision de design
+  n°1 interdisent d'écraser les zips protégés, et `ai/models/` est **gitignoré** (aucune
+  récupération git). Écrasement autorisé ponctuellement par l'utilisateur (2026-07-16 : « le modèle
+  est obsolète » — effectivement pré-squad, obs 355/357 incompatible avec obs 108). Voie propre à
+  acter : chemin de sortie dédié pour les runs de validation (ex. `ai/models/_validation/<run_id>/`).
+
+**Tests** :
+- **+11** — `tests/unit/ai/test_train_wall_ref_contract.py` : `_load_scenario_wall_ref`
+  (absent→None ; présent→strict ; présent-mais-invalide→erreur explicite, 5 cas paramétrés),
+  `_apply_wall_ref_weighting` sur scénario terrain-only (repro de T6-a),
+  `_materialize_scenario_with_refs` (param `objectives_ref` purgé, aucune clé legacy émise,
+  passthrough sans override).
+- **-9** — suppression de `test_target_selector.py` (module mort supprimé, cf. hygiène).
+- **+2 nets** — `tests/unit/ai/test_analyzer_utils.py` : les 2 tests encodant le contrat LEGACY
+  (`objectives` inline / `objectives_ref`) ont été MIGRÉS vers le contrat terrain — pas
+  neutralisés : c'est LE comportement testé qui a changé par décision documentée (T3/T4), seule
+  exception admise par §8. Ajout de 2 non-régressions : terrain sans area `"objective": true`
+  → erreur explicite (piège T4 « liste vide en silence ») ; l'archive `_archive_pre_v11` de T4 ne
+  masque pas un scénario vif.
+
+**Bilan suite `tests/unit/` : VERTE, 1259 collectés** (1255 baseline T5 + 11 − 9 + 2), zéro échec,
+zéro erreur. Smoke `scripts/smoke_t5_bare.py` rejoué après TOUS les fixes T6 :
+`(A) invariant/terminaison=OK | (B) mêlée+Carnifex=OK`, `melee_kills_total=5`,
+`carnifex_charge_any=True` — aucune régression moteur.
 
 ### Phase B (après T6 ET Phase A' — section 9 — validés) — Observation niveaux
 Spec à figer à ce moment-là, principes déjà actés :
@@ -604,7 +986,7 @@ Spec à figer à ce moment-là, principes déjà actés :
 | T3 | `train.py --step --training-config x1_debug` dépasse la résolution walls/objectives sans FileNotFoundError |
 | T4 | Les 61 scénarios se chargent (`W40KEngine(scenario_file=...)` + reset, script de balayage) ; zéro clé legacy ; sort de training_save/ statué |
 | T5 | 10 épisodes aléatoires masqués terminés sur ≥3 scénarios × sièges p1/p2 ; zéro masque vide |
-| T6 | Run `--new` court complet + analyzer + replay OK ; win-rate vs RandomBot en progression |
+| T6 | Run `--new` court complet + analyzer + replay OK ; win-rate vs RandomBot en progression — ⏳ **PARTIEL, BLOQUÉ SUR DÉCISION (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép., coupé par le timeout opérateur — pas par une erreur). ✅ Suite verte (1259) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ⛔ **analyzer + replay INATTEIGNABLES** — pas un bug mais un **manque structurel (T6-c)** : `_process_squad_action` (chemin vif gym) ne contient AUCUN `log_action` → step.log n'a que des en-têtes (`Actions=0, Steps=0`), l'analyzer n'a pas de matière. Décision requise (migrer / condamner `--step` / statu quo). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (budget nominal 50 000 → bruit) ; exige la phase `x1` + `bot_evaluation` holdout, pas `x1_debug` |
 
 ## 7. Annexe A — Smoke tests de référence
 
@@ -857,9 +1239,19 @@ Ordre par valeur tactique :
    `_select_ai_rule_choice_option` choisit par `raw_action_int % len(options)`
    ([w40k_core.py:2494](../../engine/w40k_core.py#L2494)) — l'agent « choisit » via une action émise pour tout autre chose,
    sans voir le prompt. À remplacer par une vraie décision P2.
-1. **Cible de mêlée** — le site vif est la boucle `get_best_enemy_score_for_unit` de
-   `squad_fight` (w40k_core ~L4999-5011), PAS `_ai_select_fight_target` (fight_handlers ~1725,
-   simple fallback quand la cible préférée est morte) ; pilote du mécanisme P2.
+1. **Cible de mêlée** — ⚠️ **MIS À JOUR le 2026-07-16 (le fix du bug `squad_fight` a déplacé ce
+   site)** : la boucle `get_best_enemy_score_for_unit` de `squad_fight` **n'existe plus** — elle
+   sélectionnait sa cible dans le mapping de slots gelé du tir, sans filtre de zone d'engagement
+   (violation 12.05) et crashait quand ce mapping était vide (cf.
+   `Implémenté/bug_squad_fight_mask_mismatch.md`). Le site vif est **désormais
+   `_ai_select_fight_target`** (fight_handlers ~L1725), que `squad_fight` consomme via
+   `_fight_build_valid_target_pool` — en miroir du flux PvP (`_fight_v11_resolve_attacks`).
+   Ce n'est donc plus un « fallback » : c'est le sélecteur vif, partagé gym/PvP.
+   ⚠️ Il porte un `except Exception: … return valid_targets[0]` (~L1781) qui masque toute erreur
+   de config/registry — vérifié : jamais déclenché sur la suite + smoke. Retrait = backend
+   partagé, arbitrage requis (cf. `A_faire/bug_pile_in_bfs_clearance_mismatch.md` §dernier).
+   La boucle `get_best_enemy_score_for_unit` reste vive pour la **cible de charge** (point 2).
+   Pilote du mécanisme P2.
 2. **Cible de charge** — le site vif est la même boucle de scoring dans `convert_squad_action`
    du décodeur (action_decoder ~L917-940), PAS `charge_handlers:1506` (chemin
    `convert_gym_action`, hors gym mais encore vif en PvE via pve_controller — ne pas le

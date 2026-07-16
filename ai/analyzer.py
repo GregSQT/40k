@@ -152,7 +152,16 @@ def _resolve_scenario_path(scenario_name: str) -> str:
     scenarios_root = os.path.join(project_root, "config", "agents")
     if os.path.exists(scenarios_root):
         matches = []
-        for root, _, files in os.walk(scenarios_root):
+        for root, dirs, files in os.walk(scenarios_root):
+            # V11 T6 : ne JAMAIS résoudre vers une archive. T4 a déposé la banque pré-V11 sous
+            # `scenarios/_archive_pre_v11/` (backup, "exclu du tirage") — donc DANS l'arbre
+            # parcouru ici. Un scénario archivé porte encore ses clés legacy (objectives_ref),
+            # sa signature d'objectifs diffère du scénario migré homonyme, et la résolution
+            # échouait en `Ambiguous scenario path`. La découverte de scénarios du training
+            # (`get_scenario_list_for_phase`, training_utils.py) n'a jamais ce problème : elle
+            # travaille sur une liste blanche explicite (training/, holdout_regular/,
+            # holdout_hard/). On aligne ce resolver : une archive ne masque pas un scénario vif.
+            dirs[:] = [d for d in dirs if not d.startswith("_archive")]
             root_parts = set(os.path.normpath(root).split(os.sep))
             if "scenarios" not in root_parts:
                 continue
@@ -194,56 +203,100 @@ def _resolve_scenario_path(scenario_name: str) -> str:
     raise FileNotFoundError(f"Scenario file not found for '{scenario_name}'")
 
 
+def _resolve_terrain_path_for_scenario(scenario_name: str, scenario_path: str, scenario_data: Dict) -> str:
+    """Resolve a scenario's terrain file, mirroring the engine resolver (game_state.py).
+
+    Contrat V11 T4 : `terrain_ref` (nom de fichier) + `board_ref` (nom du dossier board) →
+    `config/board/<board_ref>/terrain/<terrain_ref>`. `board_ref` absent = voie PvP legacy
+    (scenario sous `config/board/<board>/scenario/`) → on remonte au board parent.
+    """
+    terrain_ref = scenario_data.get("terrain_ref")
+    if not isinstance(terrain_ref, str) or not terrain_ref.strip():
+        raise ValueError(
+            f"Scenario '{scenario_name}' has no valid 'terrain_ref': {scenario_path}. "
+            "Depuis V11 T3/T4 les objectifs ont pour source UNIQUE les terrains "
+            "flaggés \"objective\": true (règles 14.01/14.02) ; les clés legacy "
+            "'objectives'/'objectives_ref'/'objective_hexes' sont rejetées par le moteur."
+        )
+    normalized_ref = terrain_ref.strip().replace("\\", "/")
+    if normalized_ref.startswith("/") or "/" in normalized_ref or "\\" in terrain_ref:
+        raise ValueError(
+            f"Scenario '{scenario_name}' terrain_ref must be a filename only, got '{terrain_ref}'"
+        )
+    if not normalized_ref.endswith(".json"):
+        normalized_ref = f"{normalized_ref}.json"
+
+    board_ref = scenario_data.get("board_ref")
+    if isinstance(board_ref, str) and board_ref.strip():
+        if "/" in board_ref or "\\" in board_ref or board_ref.strip().startswith("."):
+            raise ValueError(f"Scenario '{scenario_name}' has unsafe board_ref '{board_ref}'")
+        board_dir = os.path.join(project_root, "config", "board", board_ref.strip())
+    else:
+        # Voie legacy : .../config/board/<board>/scenario/<file>.json
+        parent = os.path.dirname(os.path.abspath(scenario_path))
+        if os.path.basename(parent) != "scenario":
+            raise ValueError(
+                f"Scenario '{scenario_name}' has no 'board_ref' and is not located in a "
+                f"'config/board/<board>/scenario/' directory: {scenario_path}"
+            )
+        board_dir = os.path.dirname(parent)
+    terrain_path = os.path.join(board_dir, "terrain", normalized_ref)
+    if not os.path.isfile(terrain_path):
+        raise FileNotFoundError(
+            f"Scenario '{scenario_name}' terrain_ref file not found: {terrain_path}"
+        )
+    return terrain_path
+
+
 def _get_objective_name_to_id_map(scenario_name: str) -> Dict[str, int]:
-    """Load objective name->id mapping from scenario file."""
+    """Build objective name->id mapping from the scenario's TERRAIN (V11 T6).
+
+    Source UNIQUE des objectifs depuis V11 T3/T4 : les areas du `terrain_ref` portant
+    `"objective": true` (règles 14.01/14.02) — miroir de `resolved_scenario_objectives`
+    (game_state.py). Avant ce fix, cette fonction lisait encore le contrat LEGACY
+    (`objectives` inline / `objectives_ref` → `config/board/<board>/objectives/`) : T3 a migré
+    train.py et bot_evaluation.py, mais pas analyzer.py — d'où
+    `ValueError: missing objectives list and valid objectives_ref` sur toute la banque migrée.
+
+    L'id retourné est un ENTIER positionnel (1..N, ordre de déclaration du terrain) : les ids
+    terrain sont des STRINGS (`rect_b_nw_OK`) alors que le contrat interne de l'analyzer indexe
+    `state.objective_hexes` par int. L'ordre du terrain est stable et déterministe (fichier),
+    donc le mapping l'est aussi. Seul le NOM sert d'appariement avec la ligne `Objectives:`
+    de step.log — c'est bien le `name` de l'area que le StepLogger écrit.
+    """
     scenario_path = _resolve_scenario_path(scenario_name)
     if scenario_path in _scenario_objective_name_to_id_cache:
         return _scenario_objective_name_to_id_cache[scenario_path]
     with open(scenario_path, "r", encoding="utf-8-sig") as f:
         scenario_data = json.load(f)
-    objectives = scenario_data.get("objectives")
-    if not isinstance(objectives, list) or not objectives:
-        objectives_ref = scenario_data.get("objectives_ref")
-        if not isinstance(objectives_ref, str) or not objectives_ref.strip():
-            raise ValueError(
-                f"Scenario '{scenario_name}' missing objectives list and valid objectives_ref: {scenario_path}"
-            )
-        normalized_ref = objectives_ref.strip().replace("\\", "/")
-        if normalized_ref.startswith("/") or normalized_ref.startswith("../") or "/../" in normalized_ref:
-            raise ValueError(
-                f"Scenario '{scenario_name}' has unsafe objectives_ref '{normalized_ref}': {scenario_path}"
-            )
-        if "/" in normalized_ref:
-            raise ValueError(
-                f"Scenario '{scenario_name}' objectives_ref must be filename only, got '{normalized_ref}'"
-            )
-        if not normalized_ref.endswith(".json"):
-            normalized_ref = f"{normalized_ref}.json"
-        from config_loader import get_config_loader
-        objectives_dir = os.path.join(str(get_config_loader().get_board_dir()), "objectives")
-        objectives_path = os.path.join(objectives_dir, normalized_ref)
-        if not os.path.exists(objectives_path):
-            raise FileNotFoundError(
-                f"Scenario '{scenario_name}' objectives_ref file not found: {objectives_path}"
-            )
-        with open(objectives_path, "r", encoding="utf-8-sig") as objectives_file:
-            objectives_data = json.load(objectives_file)
-        objectives = objectives_data.get("objectives")
-        if not isinstance(objectives, list) or not objectives:
-            raise ValueError(
-                f"Scenario '{scenario_name}' objectives_ref '{normalized_ref}' missing objectives list: "
-                f"{objectives_path}"
-            )
+
+    terrain_path = _resolve_terrain_path_for_scenario(scenario_name, scenario_path, scenario_data)
+    with open(terrain_path, "r", encoding="utf-8-sig") as terrain_file:
+        terrain_data = json.load(terrain_file)
+    areas = terrain_data.get("terrain")
+    if not isinstance(areas, list):
+        raise ValueError(f"Terrain '{terrain_path}' has no 'terrain' area list")
+
+    objective_areas = [a for a in areas if isinstance(a, dict) and a.get("objective") is True]
+    if not objective_areas:
+        # Piège documenté (V11 T4) : un terrain sans area objective donne une liste VIDE en
+        # silence côté moteur. Ici c'est une erreur explicite — un scénario d'entraînement sans
+        # objectif ne peut pas être analysé (le scoring primaire porte sur les objectifs).
+        raise ValueError(
+            f"Scenario '{scenario_name}' terrain '{os.path.basename(terrain_path)}' declares no "
+            f"area with \"objective\": true: {terrain_path}"
+        )
+
     mapping: Dict[str, int] = {}
-    for entry in objectives:
-        if "id" not in entry or "name" not in entry:
-            raise KeyError(f"Objective entry missing id or name in {scenario_path}: {entry}")
-        name = str(entry["name"]).strip()
+    for position, area in enumerate(objective_areas, start=1):
+        if "name" not in area and "id" not in area:
+            raise KeyError(f"Objective area missing both 'name' and 'id' in {terrain_path}: {area}")
+        name = str(area.get("name", area.get("id"))).strip()
         if not name:
-            raise ValueError(f"Objective entry has empty name in {scenario_path}: {entry}")
+            raise ValueError(f"Objective area has empty name in {terrain_path}: {area}")
         if name in mapping:
-            raise ValueError(f"Duplicate objective name '{name}' in {scenario_path}")
-        mapping[name] = int(entry["id"])
+            raise ValueError(f"Duplicate objective name '{name}' in {terrain_path}")
+        mapping[name] = position
     _scenario_objective_name_to_id_cache[scenario_path] = mapping
     return mapping
 
@@ -547,36 +600,41 @@ def _get_los_wall_hexes(wall_hexes: Set[Tuple[int, int]]) -> Set[Tuple[int, int]
 
 
 def has_line_of_sight(shooter_col: int, shooter_row: int, target_col: int, target_row: int, wall_hexes: Set[Tuple[int, int]]) -> bool:
-    """
-    Check line of sight using the same algorithm as the game engine.
+    """LoS ANCRE-A-ANCRE approximative — METRIQUES COMPORTEMENTALES UNIQUEMENT.
 
-    Algorithm (matches shooting_handlers._get_los_visibility_state):
-    1. Augment wall_hexes with board boundary (bottom_row for odd cols)
-    2. Compute visibility ratio via hex line trace
-    3. can_see = visibility_ratio > 0 (rule 06.01 — binary, no threshold)
+    ⚠️ NE PAS utiliser pour un controle de conformite aux regles. Ce n'est PAS le predicat du
+    moteur. La regle 06.01 exige « any part of the observing model to any part of the model
+    being observed » : la LoS est socle-a-socle PAR FIGURINE. Ici on teste un point contre un
+    point, donc strictement plus restrictif -> faux positifs (mesure sur un run reel : l'ancre
+    d'un socle round/6 ne voyait pas la cible alors que 3 des 19 cellules de son empreinte la
+    voyaient). De plus les coords du step.log sont des ancres d'ESCOUADE, pas la figurine que
+    le moteur a testee.
+
+    Le predicat du moteur est `_attacker_model_can_reach_squad` (shared_utils ~L4243) ; il exige
+    `game_state` (empreintes, terrain obscurcissant 13.10, LoS 3D) que step.log ne porte pas —
+    d'ou l'impossibilite de le reproduire ici.
+
+    Reste acceptable pour les METRIQUES de comportement de l'agent (a-t-il attendu sans vue ?
+    a-t-il vu une cible blessee ?), ou une approximation grossiere est sans consequence.
+
+    Algorithme : murs + bordure de board (bottom_row des colonnes impaires), trace de ligne hex,
+    can_see = ratio > 0 (06.01 binaire, sans seuil).
     """
     from engine.hex_utils import compute_los_state
 
     effective_walls = _get_los_wall_hexes(wall_hexes)
 
-    try:
-        shooter_col_int = int(shooter_col)
-        shooter_row_int = int(shooter_row)
-        target_col_int = int(target_col)
-        target_row_int = int(target_row)
-
-        _, can_see = compute_los_state(
-            shooter_col_int,
-            shooter_row_int,
-            target_col_int,
-            target_row_int,
-            effective_walls,
-        )
-        return can_see
-
-    except Exception:
-        # On error, deny line of sight (fail-safe, same as game engine)
-        return False
+    # Pas de `except Exception: return False` ici (CLAUDE.md : jamais de fallback masquant une
+    # erreur). Un refus de LoS silencieux sur exception est indiscernable d'un vrai « ne voit
+    # pas » : toute erreur doit remonter.
+    _, can_see = compute_los_state(
+        int(shooter_col),
+        int(shooter_row),
+        int(target_col),
+        int(target_row),
+        effective_walls,
+    )
+    return can_see
 
 
 def is_adjacent(col1: int, row1: int, col2: int, row2: int) -> bool:
@@ -779,12 +837,19 @@ def _track_action_phase_accuracy(
     line_text: str
 ) -> None:
     """Track action/phase alignment accuracy."""
+    # Phase attendue par type d'action — encode les PDF du projet (Documentation/40k_rules/),
+    # jamais le comportement du code.
+    # V11 T6 : "advance" etait attendu en SHOOT — FAUX. Regle 09.02 (« 09 Movement phase.pdf »),
+    # etape MOVE UNITS > « Select Move Type » : l'Advance move est un TYPE DE MOUVEMENT de la
+    # phase de Mouvement, au meme titre que Normal move, Fall-back move et Remain stationary.
+    # Le moteur le resout bien en phase MOVE (`squad_advance` -> branche move de
+    # _process_squad_action) : l'attente SHOOT produisait un faux positif sur CHAQUE advance.
     expected_phase_by_action = {
         "move": "MOVE",
         "move_after_shooting": "SHOOT",
         "fled": "MOVE",
         "shoot": "SHOOT",
-        "advance": "SHOOT",
+        "advance": "MOVE",
         "charge": "CHARGE",
         "fight": "FIGHT"
     }
@@ -1009,7 +1074,6 @@ def parse_step_log(filepath: str) -> Dict:
         'charge_from_adjacent': {1: 0, 2: 0},
         'advance_from_adjacent': {1: 0, 2: 0},
         'dead_unit_advancing': {1: 0, 2: 0},
-        'shoot_through_wall': {1: 0, 2: 0},
         'shoot_after_flee': {1: 0, 2: 0},
         'move_after_shooting': {1: 0, 2: 0},
         'move_after_shooting_distance_over_limit': {1: 0, 2: 0},
@@ -1049,8 +1113,10 @@ def parse_step_log(filepath: str) -> Dict:
         'damage_exceeds_hp': {1: 0, 2: 0},
         'unit_revived': {1: 0, 2: 0},
         'shoot_invalid': {
-            1: {'total': 0, 'no_los': 0, 'out_of_range': 0, 'adjacent_non_pistol': 0},
-            2: {'total': 0, 'no_los': 0, 'out_of_range': 0, 'adjacent_non_pistol': 0}
+            # 'no_los' RETIRE (2026-07-16) : cf. shoot_handler.py — LoS ancre-a-ancre contraire
+            # a 06.01, non reconstructible depuis step.log. Verification deplacee en test moteur.
+            1: {'total': 0, 'out_of_range': 0, 'adjacent_non_pistol': 0},
+            2: {'total': 0, 'out_of_range': 0, 'adjacent_non_pistol': 0}
         },
         'charge_invalid': {
             1: {'total': 0, 'distance_over_roll': 0, 'advanced': 0, 'fled': 0},
@@ -1104,7 +1170,6 @@ def parse_step_log(filepath: str) -> Dict:
             'charge_from_adjacent': {1: None, 2: None},
             'advance_from_adjacent': {1: None, 2: None},
             'dead_unit_advancing': {1: None, 2: None},
-            'shoot_through_wall': {1: None, 2: None},
             'shoot_after_flee': {1: None, 2: None},
             'move_after_shooting_distance_over_limit': {1: None, 2: None},
             'shoot_at_friendly': {1: None, 2: None},
@@ -2108,12 +2173,10 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
 
     _table_header("SHOOTING VALIDITY")
     agent_invalid_total = (
-        stats['shoot_invalid'][1]['no_los'] +
         stats['shoot_invalid'][1]['out_of_range'] +
         stats['shoot_invalid'][1]['adjacent_non_pistol']
     )
     bot_invalid_total = (
-        stats['shoot_invalid'][2]['no_los'] +
         stats['shoot_invalid'][2]['out_of_range'] +
         stats['shoot_invalid'][2]['adjacent_non_pistol']
     )
@@ -2125,11 +2188,6 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         "Invalid shots total:",
         f"{agent_invalid_total:6d} ({agent_invalid_pct:5.1f}%)",
         f"{bot_invalid_total:6d} ({bot_invalid_pct:5.1f}%)",
-    )
-    _table_row(
-        "No LoS:",
-        _fmt_count(stats['shoot_invalid'][1]['no_los']),
-        _fmt_count(stats['shoot_invalid'][2]['no_los']),
     )
     _table_row(
         "Out of range:",
@@ -2366,17 +2424,15 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("\n" + "-" * 80)
     _table_header("1.2 SHOOTING ERRORS")
     agent_shoot_invalid = (
-        stats['shoot_invalid'][1]['no_los'] +
         stats['shoot_invalid'][1]['out_of_range'] +
         stats['shoot_invalid'][1]['adjacent_non_pistol']
     )
     bot_shoot_invalid = (
-        stats['shoot_invalid'][2]['no_los'] +
         stats['shoot_invalid'][2]['out_of_range'] +
         stats['shoot_invalid'][2]['adjacent_non_pistol']
     )
     _table_row(
-        "Tirs invalides (LoS/portee/adjacent non-pistol):",
+        "Tirs invalides (portee/adjacent non-pistol):",
         _fmt_count(agent_shoot_invalid),
         _fmt_count(bot_shoot_invalid),
     )
@@ -2404,15 +2460,9 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_shoot_combi > 0 and stats['first_error_lines']['shoot_combi_profile_conflicts'][2]:
         first_err = stats['first_error_lines']['shoot_combi_profile_conflicts'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    agent_shoot_wall = stats['shoot_through_wall'][1]
-    bot_shoot_wall = stats['shoot_through_wall'][2]
-    _table_row("Shoot through wall:", _fmt_count(agent_shoot_wall), _fmt_count(bot_shoot_wall))
-    if agent_shoot_wall > 0 and stats['first_error_lines']['shoot_through_wall'][1]:
-        first_err = stats['first_error_lines']['shoot_through_wall'][1]
-        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_shoot_wall > 0 and stats['first_error_lines']['shoot_through_wall'][2]:
-        first_err = stats['first_error_lines']['shoot_through_wall'][2]
-        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    # "Shoot through wall" : ligne SUPPRIMEE avec le controle (voir shoot_handler.py) — LoS
+    # ancre-a-ancre contraire a 06.01, sur des coords d'ancre d'escouade. Verification deplacee
+    # dans tests/unit/engine/test_shoot_los_perfig_parity.py.
     phase_special_rule_usage = require_key(stats, 'special_rule_usage')
     phase_rule_to_units = require_key(stats, 'rule_to_units')
     agent_shoot_flee = stats['shoot_after_flee'][1]
@@ -3010,13 +3060,12 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         stats['reactive_move_checks']['distance_over_roll'][1] + stats['reactive_move_checks']['distance_over_roll'][2]
     )
     shoot_invalid_total = (
-        stats['shoot_invalid'][1]['no_los'] + stats['shoot_invalid'][1]['out_of_range'] + stats['shoot_invalid'][1]['adjacent_non_pistol'] +
-        stats['shoot_invalid'][2]['no_los'] + stats['shoot_invalid'][2]['out_of_range'] + stats['shoot_invalid'][2]['adjacent_non_pistol']
+        stats['shoot_invalid'][1]['out_of_range'] + stats['shoot_invalid'][1]['adjacent_non_pistol'] +
+        stats['shoot_invalid'][2]['out_of_range'] + stats['shoot_invalid'][2]['adjacent_non_pistol']
     )
     shooting_errors = (
         stats['shoot_over_rng_nb'][1] + stats['shoot_over_rng_nb'][2] +
         stats['shoot_combi_profile_conflicts'][1] + stats['shoot_combi_profile_conflicts'][2] +
-        stats['shoot_through_wall'][1] + stats['shoot_through_wall'][2] +
         stats['shoot_after_flee'][1] + stats['shoot_after_flee'][2] +
         stats['shoot_at_friendly'][1] + stats['shoot_at_friendly'][2] +
         stats['shoot_at_engaged_enemy'][1] + stats['shoot_at_engaged_enemy'][2] +
@@ -3261,8 +3310,8 @@ if __name__ == "__main__":
         
         # Calculate total errors (all error counts between MOVEMENT ERRORS and SAMPLE ACTIONS)
         shoot_invalid_total = (
-            stats['shoot_invalid'][1]['no_los'] + stats['shoot_invalid'][1]['out_of_range'] + stats['shoot_invalid'][1]['adjacent_non_pistol'] +
-            stats['shoot_invalid'][2]['no_los'] + stats['shoot_invalid'][2]['out_of_range'] + stats['shoot_invalid'][2]['adjacent_non_pistol']
+            stats['shoot_invalid'][1]['out_of_range'] + stats['shoot_invalid'][1]['adjacent_non_pistol'] +
+            stats['shoot_invalid'][2]['out_of_range'] + stats['shoot_invalid'][2]['adjacent_non_pistol']
         )
         move_errors = (
             stats['wall_collisions'][1] + stats['wall_collisions'][2] +
@@ -3278,7 +3327,6 @@ if __name__ == "__main__":
         )
         shooting_errors = (
             stats['shoot_over_rng_nb'][1] + stats['shoot_over_rng_nb'][2] +
-            stats['shoot_through_wall'][1] + stats['shoot_through_wall'][2] +
             stats['shoot_after_flee'][1] + stats['shoot_after_flee'][2] +
             stats['shoot_at_friendly'][1] + stats['shoot_at_friendly'][2] +
             stats['shoot_at_engaged_enemy'][1] + stats['shoot_at_engaged_enemy'][2] +

@@ -29,6 +29,8 @@ export interface SaveMeta {
   kind?: string;
   /** Score (VP) par joueur au moment de la row (pour le tracker). */
   score?: Record<string, number>;
+  /** Nombre d'events de combat log portés par la row (0 = simple transition, rien ne s'est passé). */
+  log_count?: number;
 }
 
 /** Nom affiché d'une save (1 ligne) : "Game start", ou tag "T{tour} P{joueur} {Phase} · #{event}",
@@ -226,18 +228,22 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
     };
   }, [saveDrag]);
 
-  // Playback ⏮⏭ : 1 flèche = 1 ACTION réelle. Les rows turn/phase/action correspondent toutes à une
-  // action (celle qui a fait progresser tour/phase/activation) et portent leurs events de log → elles
-  // sont TOUTES navigables. Sans "turn"/"phase", la 1ʳᵉ action d'un tour/d'une phase serait sautée et
-  // son log n'apparaîtrait que fusionné avec l'action suivante. game_start/manual (début de partie,
-  // saves explicites) ne sont pas des pas d'action → exclus (accessibles via Select).
+  // Playback ⏮⏭ : 1 flèche = 1 ACTION réelle. game_start/manual (début de partie, saves explicites)
+  // ne sont pas des pas d'action → exclus (accessibles via Select).
+  //
+  // Une row turn/phase n'est navigable que si elle porte des events (log_count > 0), c.-à-d. si son
+  // action a réellement fait quelque chose. Une transition de phase sans event ne modifie que la phase
+  // et les pools : le plateau est identique à la row précédente, donc s'y arrêter n'annule rien et
+  // coûte un clic à vide. On garde en revanche TOUTES les rows "action", même sans event : une action
+  // peut changer l'état sans rien écrire au log, et la sauter masquerait un vrai pas de jeu.
   const actionIndices = useMemo(
     () =>
       list
         .map((_, i) => i)
         .filter((i) => {
           const k = list[i]?.kind;
-          return k === "action" || k === "phase" || k === "turn";
+          if (k === "action") return true;
+          return (k === "phase" || k === "turn") && (list[i]?.log_count ?? 0) > 0;
         }),
     [list]
   );
@@ -534,7 +540,10 @@ export const SnapshotRewind: React.FC<SnapshotRewindProps> = ({
   const firstTarget = actionIndices.length ? actionIndices[0] : -1;
   const lastTarget = actionIndices.length ? actionIndices[actionIndices.length - 1] : -1;
   // Navigation snapshot : ⏮/⏭ entrent en visionnage depuis le live OU depuis un aperçu save.
-  const prevTarget = viewIndex == null ? lastTarget : prevActionIndex(viewIndex);
+  // Depuis le live, ⏮ vise l'AVANT-dernière row : la dernière est l'état courant (celui déjà à
+  // l'écran), y aller ne montrerait rien. Un ⏮ depuis le live = « annule la dernière action ».
+  const prevTarget =
+    viewIndex == null ? (lastTarget < 0 ? -1 : prevActionIndex(lastTarget)) : prevActionIndex(viewIndex);
   const nextTarget = viewIndex == null ? -1 : nextActionIndex(viewIndex);
 
   return (

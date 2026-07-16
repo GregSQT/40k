@@ -79,6 +79,11 @@
     "description": "The bearer can shoot with this weapon even if within Engagement Range of enemy units, but must target one of those enemy units. Cannot be shot alongside any other non-Pistol weapon (except by a Monster or Vehicle).",
     "has_parameter": false
   },
+  "PRECISION": {
+    "name": "Precision",
+    "description": "The attacks having this rule can directly target at visible CHARACTER models in the target unit.",
+    "has_parameter": false
+  },
   "PSYCHIC": {
     "name": "Psychic",
     "description": "The attack is psychic.",

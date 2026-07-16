@@ -161,14 +161,24 @@ def handle_shoot(
         if stats['first_error_lines']['shoot_at_friendly'][shooter_actual_player] is None:
             stats['first_error_lines']['shoot_at_friendly'][shooter_actual_player] = {'episode': state.current_episode_num, 'line': line.strip()}
 
-    # RULE: Shoot through wall
-    if target_pos and not has_line_of_sight(shooter_col, shooter_row, target_pos[0], target_pos[1], state.wall_hexes):
-        stats['shoot_through_wall'][player] += 1
-        if stats['first_error_lines']['shoot_through_wall'][player] is None:
-            stats['first_error_lines']['shoot_through_wall'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
-        stats['shoot_invalid'][player]['no_los'] += 1
-        if stats['first_error_lines']['shoot_invalid'][player] is None:
-            stats['first_error_lines']['shoot_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
+    # RULE: Shoot through wall — contrôle SUPPRIMÉ (2026-07-16).
+    #
+    # Il testait la LoS ANCRE-A-ANCRE (`has_line_of_sight(shooter_col, shooter_row, ...)`), alors
+    # que la règle 06.01 exige « any part of the observing model to any part of the model being
+    # observed » : la LoS est socle-à-socle, PAR FIGURINE. Pire, les coords du step.log sont les
+    # ancres d'ESCOUADE (`_emit_squad_shoot_log`, shared_utils ~L5758), pas la figurine tireuse
+    # que le moteur a réellement testée (`_attacker_model_can_reach_squad`, shared_utils L4483 /
+    # L5299) — le contrôle évaluait donc un prédicat sur des points que le moteur n'a jamais
+    # utilisés. Sur un run réel : 6 faux positifs / 9 tirs P1, zéro vraie violation.
+    #
+    # Non réparable ici : reproduire fidèlement le prédicat moteur exige `game_state`
+    # (empreintes de socles, terrain obscurcissant 13.10, LoS 3D plancher-occulteur) que
+    # step.log ne porte pas et ne portera pas. Un contrôle post-hoc sur log est structurellement
+    # incapable d'être correct.
+    #
+    # La vérification n'est pas abandonnée, elle est DEPLACEE là où `game_state` existe :
+    # tests/unit/engine/test_shoot_los_perfig_parity.py (parité ancre↔per-figurine).
+    # Le tir reste par ailleurs gaté à la source par `_attacker_model_can_reach_squad`.
 
     weapon_match = re.search(r'with \[([^\]]+)\]', action_desc)
     is_pistol = False

@@ -6,6 +6,26 @@
 > **Moteur de jeu** : voir [AI_IMPLEMENTATION.md](AI_IMPLEMENTATION.md).  
 > **Métriques détaillées et tuning ciblé** : voir [AI_METRICS.md](AI_METRICS.md) (inclut le guide de tuning rapide).
 
+> ## ⚠️ MàJ 2026-07-16 (V11 T6) — INTERFACE AGENT : LES CHIFFRES CI-DESSOUS SONT PÉRIMÉS
+>
+> Les mentions **`obs_size: 355`** (et `323`) dans ce document décrivent un layout d'observation
+> **qui n'est plus celui de l'agent**. Vérifié dans le code (2026-07-16) :
+>
+> | | Valeur en vigueur | Source de vérité |
+> |---|---|---|
+> | `obs_size` | **108** (observation squad) | `CoreAgent_training_config.json` → `observation_params` ; `engine/observation_builder.py` (`SQUAD_OBS_SIZE`) |
+> | `action_space_size` | **41** (26 micro + 15 macro) | idem ; layout dans `engine/macro_intents.py` |
+>
+> - Layout squad 108 = 16 global + 5 agrégats squad + 6 figurines × 7 + 5 slots ennemis × 9.
+> - Espace d'action 41 = 0-5 move, 6-11 advance, 12-17 fall back, 18 wait, 19-23 shoot, 24 charge,
+>   25 fight, 26-40 zone intents. **Constantes nommées obligatoires** (`engine/macro_intents.py`) :
+>   un littéral d'action dans `ai/` est un bug de revue (rupture R5).
+> - **Aucun modèle antérieur n'est réutilisable** (layout obs + stats VecNormalize) : tout run se
+>   fait avec `--new`. Les configs snapshot `obs_size: 355` sont archivées (marqueur `_ARCHIVE`).
+>
+> Détail du layout d'observation : [AI_OBSERVATION.md](AI_OBSERVATION.md) (voir son propre bandeau).
+> Source : `Documentation/Implémentation/V11_agent_rework.md` (rupture R8, hygiène T6).
+
 ---
 
 ## 📋 TABLE OF CONTENTS
@@ -703,7 +723,7 @@ Règles:
     },
 
     "observation_params": {
-      "obs_size": 355,                   // Total observation vector size (CoreAgent v2.4 rule-aware; legacy mode = 323)
+      "obs_size": 108,                   // V11 T6: observation SQUAD (16 global + 5 agg + 6 figs x 7 + 5 slots ennemis x 9). Les valeurs 355/323 de ce doc sont PÉRIMÉES.
       "perception_radius": 25,           // Fog of war radius
       "max_nearby_units": 10,            // Max units to observe
       "max_valid_targets": 5             // Max targets to track

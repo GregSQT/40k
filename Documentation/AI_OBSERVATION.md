@@ -4,7 +4,31 @@
 > **📍 File Location**: Save as `Documentation/AI_OBSERVATION.md`
 > **Status**: ✅ CANONICAL REFERENCE (March 2026)
 > **Version**: 2.6 - Strategic pool scalars (spec) + Rule-Aware Observation System
-> **⚠️ MàJ 2026-07** : la taille d'observation en vigueur dans le code est **357 floats** (`engine/observation_builder.py` impose `PHASE2_OBS_SIZE = 357`, macro rule-aware `obs[346:357]`). Les mentions de 355 dans ce doc correspondent à l'ancienne config legacy (`..._avant_X10.json`).
+
+> ## ⚠️ MàJ 2026-07-16 (V11 T6) — CE DOCUMENT NE DÉCRIT PAS LE PIPELINE ACTIF
+>
+> **Le pipeline d'observation en vigueur pour `CoreAgent` est l'observation SQUAD à 108 floats**,
+> pas les 355/357 décrits ci-dessous. Vérifié dans le code (2026-07-16) :
+>
+> - `config/agents/CoreAgent/CoreAgent_training_config.json` → `observation_params.obs_size = 108`,
+>   `action_space_size = 41` (dans les 5 phases).
+> - `engine/w40k_core.py::_build_observation` **route selon `obs_size`** : `108` →
+>   `build_squad_observation` (pipeline squad actif) ; `357` → `build_observation` (pipeline
+>   mono-figurine legacy, `PHASE2_OBS_SIZE = 357`).
+> - Layout squad 108 (`engine/observation_builder.py`, constantes `SQUAD_*`) :
+>   **16 global + 5 agrégats squad + 6 figurines top-k × 7 features + 5 slots ennemis × 9 features**
+>   = 16 + 5 + 42 + 45 = 108. Layout **purement 2D** (col/row) : **aucune feature de niveau/élévation**
+>   (l'agent subit le coût de descente §13.06 sans le percevoir — c'est l'objet de la Phase B).
+>
+> **Comment lire ce document** : tout ce qui suit décrit le pipeline mono-figurine 355/357
+> (toujours présent dans le code, atteignable via `obs_size = 357`, mais **pas** celui sur lequel
+> l'agent s'entraîne). Les configs snapshot en `obs_size = 355` (`BEST_CoreAgent_training_config.json`,
+> `CoreAgent_training_config_BEST_X1.json`, `CoreAgent_training_config_save_avant_X10.json`) sont
+> **archivées et incompatibles** avec le code actuel — elles portent un marqueur `_ARCHIVE`.
+>
+> Toute modification du layout squad change `obs_size` → modèle from scratch obligatoire (`--new`)
+> + mise à jour de la `justification` de la config. Source : `Documentation/Implémentation/V11_agent_rework.md`
+> (rupture R8, hygiène T6).
 
 ---
 

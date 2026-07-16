@@ -15,6 +15,8 @@ Aucun fallback masquant une erreur : toute clé demandée absente lève.
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
 # Ordre canonique des phases dans un tour de joueur (pour l'ordre chronologique / purge).
@@ -41,6 +43,14 @@ _ENGINE_STATIC_ATTRS = frozenset({
     "rewards_config", "rewards_config_name",
     "_current_scenario_file", "_scenario_files", "_random_scenario_mode",
     "current_mode_code",
+} | {
+    # L'engine garde, en attributs ``_scenario_X``, les données de scénario qui alimentent la clé
+    # ``game_state["X"]`` (même donnée, parfois sous une autre forme : murs bruts vs murs étendus).
+    # Quand X est déjà déclarée statique ci-dessus, son doublon d'engine l'est par construction —
+    # sinon il repasse par ``vars(engine)`` et se fait recopier à chaque capture (mesuré sur une
+    # partie réelle : 233 Ko et 37 ms par capture, soit ~90% du coût, pour du décor immuable).
+    # Dérivé de _GS_STATIC_KEYS (source de vérité unique) : ajouter une clé statique y suffit.
+    f"_scenario_{key}" for key in _GS_STATIC_KEYS
 })
 
 _ENGINE_PLAIN_TYPES = (bool, int, float, str, type(None), dict, list, set, tuple)
@@ -165,6 +175,46 @@ def capture_live_state(engine: Any) -> Dict[str, Any]:
             continue
         engine_attrs[k] = copy.deepcopy(v)
     return {"game_state": gs_copy, "engine_attrs": engine_attrs}
+
+
+# --- Empreinte de scénario : les clés statiques dont dépend l'état capturé -----------------
+# Un état capturé ne contient que le mutable ; les clés statiques sont ré-attachées depuis l'engine
+# vivant au restore. Appliquer un état sur un AUTRE plateau est silencieusement faux (unités dans des
+# murs, LoS/pathfinding calculés sur la mauvaise carte) : l'empreinte permet de le REFUSER.
+# Sources uniquement : les topologies (los/pathfinding/wall_edge) en dérivent — les empreinter serait
+# redondant et coûteux.
+_FINGERPRINT_KEYS: Tuple[str, ...] = (
+    "board_cols", "board_rows", "inches_to_subhex",
+    "wall_hexes", "dense_wall_hexes", "terrain_areas",
+    "objectives", "primary_objective",
+)
+
+
+def _normalize(value: Any) -> Any:
+    """Normalise une valeur en structure JSON à ordre déterministe (empreinte stable d'un run à
+    l'autre). Un type non prévu lève : une empreinte silencieusement approximative ne protège rien."""
+    if isinstance(value, dict):
+        return {str(k): _normalize(v) for k, v in sorted(value.items(), key=lambda kv: str(kv[0]))}
+    if isinstance(value, (set, frozenset)):
+        return sorted(json.dumps(_normalize(v), sort_keys=True) for v in value)
+    if isinstance(value, (list, tuple)):
+        return [_normalize(v) for v in value]
+    if isinstance(value, (bool, int, float, str)) or value is None:
+        return value
+    raise TypeError(f"type non empreintable dans le scénario: {type(value).__name__}")
+
+
+def scenario_fingerprint(engine: Any) -> Dict[str, Any]:
+    """Empreinte du plateau d'un engine : stockée dans la meta d'une row de save, comparée au load.
+
+    ``scenario_file`` est informatif (message d'erreur) : le chemin seul ne prouve rien, un fichier de
+    scénario modifié depuis la save produirait un digest différent — ce qui est exactement le but."""
+    gs = engine.game_state
+    payload = {k: _normalize(gs[k]) for k in _FINGERPRINT_KEYS}
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {"digest": digest, "scenario_file": getattr(engine, "_current_scenario_file", None)}
 
 
 def _sync_derived_engine_attrs(engine: Any) -> None:

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -15,43 +16,93 @@ def test_max_dice_value_valid_and_invalid() -> None:
         an.max_dice_value("D8", "ctx")
 
 
+def _write_terrain(tmp_path: Path, filename: str, areas: list) -> Path:
+    """Terrain sous config/board/44x60x5/terrain/ (contrat board_ref de V11 T4)."""
+    terrain_dir = tmp_path / "config" / "board" / "44x60x5" / "terrain"
+    terrain_dir.mkdir(parents=True, exist_ok=True)
+    path = terrain_dir / filename
+    path.write_text(json.dumps({"terrain_id": "t", "terrain": areas}), encoding="utf-8")
+    return path
+
+
 def test_resolve_scenario_path_and_objective_maps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """V11 T6 : la table nom->id vient du TERRAIN (areas "objective": true), plus du scénario.
+
+    T3/T4 ont fait des terrains la source UNIQUE des objectifs (14.01/14.02) ; les clés legacy
+    'objectives'/'objectives_ref' sont rejetées par le moteur. Ce test encode le contrat actuel
+    (il échouait avant la migration de `_get_objective_name_to_id_map`).
+    """
     monkeypatch.setattr(an, "project_root", str(tmp_path))
+    _write_terrain(tmp_path, "terrain-train-01.json", [
+        {"id": "wall_a", "name": "mur A", "hexes": []},                      # pas un objectif
+        {"id": "rect_b_nw_OK", "name": "alpha", "objective": True, "hexes": []},
+        {"id": "rect_b_ne_OK", "name": "beta", "objective": True, "hexes": []},
+    ])
     scenario = tmp_path / "scenario_test.json"
     scenario.write_text(
-        '{"objectives":[{"id":1,"name":"alpha"}],"primary_objectives":["obj1"]}',
+        '{"board_ref":"44x60x5","terrain_ref":"terrain-train-01.json","primary_objectives":["obj1"]}',
         encoding="utf-8",
     )
     assert an._resolve_scenario_path("scenario_test") == str(scenario)
 
     an._scenario_objective_name_to_id_cache.clear()
     mapping = an._get_objective_name_to_id_map("scenario_test")
-    assert mapping["alpha"] == 1
+    # Id positionnel (1..N) dans l'ordre de déclaration du terrain ; les areas non-objectif
+    # sont ignorées. Le NOM est la clé d'appariement avec la ligne "Objectives:" de step.log.
+    assert mapping == {"alpha": 1, "beta": 2}
 
     an._scenario_primary_objective_ids_cache.clear()
     primary_ids = an._get_primary_objective_ids_for_scenario("scenario_test")
     assert primary_ids == ["obj1"]
 
 
-def test_get_objective_name_to_id_map_via_objectives_ref(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_objective_name_to_id_map_legacy_scenario_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Un scénario au contrat LEGACY (objectives_ref, sans terrain_ref) -> erreur explicite.
+
+    Remplace l'ancien test `..._via_objectives_ref` : ce chemin n'existe plus (le dossier
+    config/board/<board>/objectives/ a été supprimé en T3). Pas de fallback silencieux.
+    """
     monkeypatch.setattr(an, "project_root", str(tmp_path))
     scenario = tmp_path / "scenario_ref.json"
     scenario.write_text('{"objectives_ref":"demo"}', encoding="utf-8")
 
-    board_dir = tmp_path / "config" / "board" / "44x60x5"
-    obj_dir = board_dir / "objectives"
-    obj_dir.mkdir(parents=True, exist_ok=True)
-    (obj_dir / "demo.json").write_text('{"objectives":[{"id":2,"name":"beta"}]}', encoding="utf-8")
-
-    class _Cfg:
-        @staticmethod
-        def get_board_dir():
-            return board_dir
-
-    monkeypatch.setattr("config_loader.get_config_loader", lambda: _Cfg())
     an._scenario_objective_name_to_id_cache.clear()
-    mapping = an._get_objective_name_to_id_map("scenario_ref")
-    assert mapping["beta"] == 2
+    with pytest.raises(ValueError, match=r"no valid 'terrain_ref'"):
+        an._get_objective_name_to_id_map("scenario_ref")
+
+
+def test_get_objective_name_to_id_map_terrain_without_objective_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Piège documenté (T4) : un terrain sans area "objective": true -> erreur, pas liste vide."""
+    monkeypatch.setattr(an, "project_root", str(tmp_path))
+    _write_terrain(tmp_path, "terrain-flat.json", [{"id": "wall_a", "name": "mur A", "hexes": []}])
+    scenario = tmp_path / "scenario_noobj.json"
+    scenario.write_text(
+        '{"board_ref":"44x60x5","terrain_ref":"terrain-flat.json"}', encoding="utf-8"
+    )
+
+    an._scenario_objective_name_to_id_cache.clear()
+    with pytest.raises(ValueError, match=r'declares no area with "objective": true'):
+        an._get_objective_name_to_id_map("scenario_noobj")
+
+
+def test_resolve_scenario_path_skips_archive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """V11 T6 : l'archive pré-V11 de T4 ne doit JAMAIS masquer un scénario vif.
+
+    T4 a déposé la banque pré-V11 sous `scenarios/_archive_pre_v11/`, DANS l'arbre parcouru par
+    `_resolve_scenario_path` -> `Ambiguous scenario path`. La marche élague les dossiers _archive*.
+    """
+    monkeypatch.setattr(an, "project_root", str(tmp_path))
+    live = tmp_path / "config" / "agents" / "CoreAgent" / "scenarios" / "training"
+    live.mkdir(parents=True)
+    (live / "scenario_dup.json").write_text('{"board_ref":"44x60x5"}', encoding="utf-8")
+
+    archived = tmp_path / "config" / "agents" / "CoreAgent" / "scenarios" / "_archive_pre_v11" / "training_save"
+    archived.mkdir(parents=True)
+    (archived / "scenario_dup.json").write_text('{"objectives_ref":"legacy"}', encoding="utf-8")
+
+    assert an._resolve_scenario_path("scenario_dup") == str(live / "scenario_dup.json")
 
 
 def test_calculate_primary_objective_points_and_invalid_condition() -> None:
@@ -290,3 +341,32 @@ def test_parse_step_breakdowns_new_and_old_formats(tmp_path: Path) -> None:
     assert parsed is not None
     assert parsed[0][0:3] == (1, 2, 0.1)
     assert parsed[1][5] == 0.0
+
+
+def test_advance_is_expected_in_move_phase_rule_09_02() -> None:
+    """Règle 09.02 (Documentation/40k_rules/« 09 Movement phase.pdf »).
+
+    Étape MOVE UNITS > « Select Move Type » : l'Advance move est un TYPE DE MOUVEMENT de la
+    phase de Mouvement, listé avec Remain stationary / Normal move / Fall-back move.
+    L'analyzer attendait `"advance": "SHOOT"` (V11 T6) → un faux positif « wrong phase » sur
+    CHAQUE advance (105 sur un run de 3 épisodes). Le moteur, lui, résout bien `squad_advance`
+    dans la branche move de `_process_squad_action`.
+    """
+    stats = {
+        "action_phase_accuracy": {},
+        "first_error_lines": {"action_phase_mismatch": {}},
+    }
+    # Un advance journalisé en phase MOVE est CONFORME : zéro erreur.
+    an._track_action_phase_accuracy(stats, "advance", "MOVE", 1, "line")
+    assert stats["action_phase_accuracy"]["advance"] == {"total": 1, "wrong": 0}
+
+    # Le même advance en phase SHOOT est une vraie violation.
+    an._track_action_phase_accuracy(stats, "advance", "SHOOT", 1, "line")
+    assert stats["action_phase_accuracy"]["advance"]["wrong"] == 1
+
+    # Non-régression : les autres types gardent leur phase.
+    for action_type, phase in (("move", "MOVE"), ("fled", "MOVE"), ("shoot", "SHOOT"),
+                               ("charge", "CHARGE"), ("fight", "FIGHT"),
+                               ("move_after_shooting", "SHOOT")):
+        an._track_action_phase_accuracy(stats, action_type, phase, 1, "line")
+        assert stats["action_phase_accuracy"][action_type]["wrong"] == 0, action_type

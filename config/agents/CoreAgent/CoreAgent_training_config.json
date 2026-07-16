@@ -125,7 +125,7 @@
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=31 (16 micro + 15 macro)."
+      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=41 (26 micro [6 move + 6 advance + 6 fall back + 1 wait + 5 shoot + 1 charge + 1 fight] + 15 macro [5 objectifs x 3 intents])."
     },
     "step_log_buffer_size": 200,
     "vec_normalize": {
@@ -318,7 +318,7 @@
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=31 (16 micro + 15 macro)."
+      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=41 (26 micro [6 move + 6 advance + 6 fall back + 1 wait + 5 shoot + 1 charge + 1 fight] + 15 macro [5 objectifs x 3 intents])."
     },
     "step_log_buffer_size": 200,
     "vec_normalize": {
@@ -512,7 +512,7 @@
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=31 (16 micro + 15 macro)."
+      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=41 (26 micro [6 move + 6 advance + 6 fall back + 1 wait + 5 shoot + 1 charge + 1 fight] + 15 macro [5 objectifs x 3 intents])."
     },
     "step_log_buffer_size": 200,
     "vec_normalize": {
@@ -675,7 +675,7 @@
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=31 (16 micro + 15 macro)."
+      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=41 (26 micro [6 move + 6 advance + 6 fall back + 1 wait + 5 shoot + 1 charge + 1 fight] + 15 macro [5 objectifs x 3 intents])."
     },
     "step_log_buffer_size": 200,
     "model_params": {
@@ -870,7 +870,7 @@
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=31 (16 micro + 15 macro)."
+      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=41 (26 micro [6 move + 6 advance + 6 fall back + 1 wait + 5 shoot + 1 charge + 1 fight] + 15 macro [5 objectifs x 3 intents])."
     },
     "step_log_buffer_size": 200,
     "model_params": {

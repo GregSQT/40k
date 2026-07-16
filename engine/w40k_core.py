@@ -1518,7 +1518,25 @@ class W40KEngine(gym.Env):
                 pre_unit = self._get_unit_by_id(str(unit_id))
                 if pre_unit:
                     pre_action_positions[str(unit_id)] = require_unit_position(pre_unit, self.game_state)
-        
+
+        # V11 T6 : curseur des action_logs AVANT l'action, pour ne transferer au StepLogger que
+        # les entrees produites par CETTE action (cf. _flush_squad_action_logs_to_step_logger).
+        _pre_action_logs_len = len(self.game_state.get("action_logs", []))  # get allowed
+        _pre_action_turn = require_key(self.game_state, "turn")
+        # Etat fight AVANT l'action : le formateur "combat" exige fight_subphase + les 3 pools
+        # d'activation (contrat replay), et l'action les MUTE (end_activation retire l'unite du
+        # pool). Les lire au drain donnerait l'etat d'apres — on capture donc ici.
+        _pre_action_fight_state = {
+            "fight_subphase": self.game_state.get("fight_subphase"),  # get allowed
+            "charging_activation_pool": list(self.game_state.get("charging_activation_pool", [])),  # get allowed
+            "active_alternating_activation_pool": list(
+                self.game_state.get("active_alternating_activation_pool", [])  # get allowed
+            ),
+            "non_active_alternating_activation_pool": list(
+                self.game_state.get("non_active_alternating_activation_pool", [])  # get allowed
+            ),
+        }
+
         # Process semantic action with AI_TURN.md compliance
         if self.game_state.get("debug_mode", False):
             print(
@@ -1538,6 +1556,11 @@ class W40KEngine(gym.Env):
             success, result = action_result
         else:
             success, result = True, action_result
+        # V11 T6 (T6-c) : transfere au StepLogger les action_logs produits par cette action.
+        # Point d'accroche UNIQUE du chemin squad (no-op si --step absent).
+        self._flush_squad_action_logs_to_step_logger(
+            _pre_action_logs_len, _pre_action_turn, _pre_action_fight_state
+        )
         result_action = result.get("action") if isinstance(result, dict) else None
         result_error = result.get("error") if isinstance(result, dict) else None
         result_waiting_for_player = result.get("waiting_for_player") if isinstance(result, dict) else None
@@ -4747,8 +4770,209 @@ class W40KEngine(gym.Env):
     # SQUAD PIPELINE DISPATCH
     # ============================================================================
 
+    # V11 T6 — mapping type d'action_log moteur -> action_type du formateur du StepLogger
+    # (ai/step_logger.py::_format_replay_style_message). Les noms coincident deja presque tous ;
+    # seuls "hazard"->"hazardous" et le move (dont la nuance vit dans move_type) different.
+    # Un type ABSENT de cette table est ignore volontairement : il n'a pas de formateur
+    # (pile_in, consolidation, death, battle_shock, roll_info, reactive_move_declined).
+    _STEP_LOG_TYPE_MAP: Dict[str, str] = {
+        "shoot": "shoot",
+        "combat": "combat",
+        "hazard": "hazardous",
+        "charge": "charge",
+        "charge_fail": "charge_fail",
+        "charge_impact": "charge_impact",
+        "wait": "wait",
+        "rule_choice": "rule_choice",
+        "move_after_shooting": "move_after_shooting",
+        "deploy_unit": "deploy_unit",
+    }
+
+    # V11 T6 — traduction d'un shot_record moteur (shared_utils ~L6045 / fight_handlers ~L5727,
+    # structure IDENTIQUE tir et combat) vers les champs du formateur du StepLogger.
+    # camelCase moteur -> snake_case formateur. Les 11 champs sont EXIGES (presence de la cle)
+    # par le formateur, meme sur un MISS : il ne rend `Wound` que si hit_result == "HIT" et
+    # `Save`/`Dmg` que plus loin dans la sequence — une valeur None sur un MISS est donc
+    # correcte et jamais affichee.
+    _SHOT_RECORD_FIELD_MAP: Dict[str, str] = {
+        "attackRoll": "hit_roll",
+        "hitResult": "hit_result",
+        "hitTarget": "hit_target",
+        "strengthRoll": "wound_roll",
+        "strengthResult": "wound_result",
+        "woundTarget": "wound_target",
+        "saveRoll": "save_roll",
+        "saveTarget": "save_target",
+        "damageDealt": "damage_dealt",
+    }
+
+    def _build_shot_details(
+        self, raw_log: Dict[str, Any], shot: Dict[str, Any], pre_action_turn: Any,
+        fight_state: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Details d'UN jet (tir ou combat) pour le formateur du StepLogger.
+
+        Le formateur travaille par ATTAQUE (Hit/Wound/Save/Dmg d'un jet), alors que le moteur
+        agrege les jets d'un groupe (arme, cible) dans `shootDetails`. On emet donc une ligne
+        par jet — c'est la granularite qu'attend aussi l'analyzer (`Dmg:(\\d+)HP` par attaque).
+        """
+        details: Dict[str, Any] = {
+            "current_turn": raw_log.get("turn", pre_action_turn),  # get allowed
+            "reward": 0.0,
+            "target_id": raw_log.get("targetId"),  # get allowed
+        }
+        unit_id = raw_log.get("shooterId")  # get allowed
+        s_col, s_row = raw_log.get("shooterCol"), raw_log.get("shooterRow")  # get allowed
+        if s_col is not None and s_row is not None:
+            details["unit_with_coords"] = f"{unit_id}({s_col},{s_row})"
+        t_col, t_row = raw_log.get("targetCol"), raw_log.get("targetRow")  # get allowed
+        if t_col is not None and t_row is not None:
+            details["target_coords"] = (t_col, t_row)
+        weapon_name = raw_log.get("weaponName")  # get allowed
+        if weapon_name:
+            details["weapon_name"] = weapon_name
+        # Les 11 champs par-jet : la cle DOIT exister (le formateur teste `not in details`).
+        for src, dst in self._SHOT_RECORD_FIELD_MAP.items():
+            details[dst] = shot.get(src)  # get allowed
+        # saveSuccess (bool moteur) -> save_result (le formateur teste `== "FAIL"` pour afficher
+        # les degats). Absent tant que l'allocation n'a pas complete le record.
+        save_success = shot.get("saveSuccess")  # get allowed
+        details["save_result"] = None if save_success is None else ("SAVE" if save_success else "FAIL")
+        if fight_state is not None:
+            details.update(fight_state)
+        return details
+
+    def _flush_squad_action_logs_to_step_logger(
+        self, pre_action_logs_len: int, pre_action_turn: Any,
+        pre_action_fight_state: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Transfere vers le StepLogger les action_logs produits par la derniere action squad.
+
+        V11 T6 (rupture T6-c) : le pipeline squad (`_process_squad_action`, chemin VIF du gym)
+        n'appelait AUCUN `log_action` — les 17 sites vivent dans `_process_semantic_action`
+        (chemin PvE/legacy). Resultat : step.log reduit a ses en-tetes (`Actions=0, Steps=0` sur
+        474/475 episodes d'un run reel) et `ai/analyzer.py` sans matiere, alors que CLAUDE.md
+        fait de « --step + analyzer.py + replay » la SEULE strategie de validation du training.
+
+        Plutot que de dupliquer 17 sites, on draine la source de verite deja produite par les
+        handlers : `game_state["action_logs"]`. Ne journalise que les entrees APRES le curseur,
+        donc strictement celles de l'action courante. No-op complet si le StepLogger est absent
+        ou desactive (cas PvP/production).
+        """
+        if not (self.step_logger and self.step_logger.enabled):
+            return
+        action_logs = self.game_state.get("action_logs", [])  # get allowed
+        if not isinstance(action_logs, list):
+            raise TypeError(
+                f"game_state['action_logs'] must be a list, got {type(action_logs).__name__}"
+            )
+        if pre_action_logs_len > len(action_logs):
+            raise ValueError(
+                f"action_logs cursor ({pre_action_logs_len}) cannot exceed current length "
+                f"({len(action_logs)}) — action_logs must not shrink within a step"
+            )
+        for raw_log in action_logs[pre_action_logs_len:]:
+            if not isinstance(raw_log, dict):
+                raise TypeError(f"action_logs entry must be a dict, got {type(raw_log).__name__}")
+            raw_type = raw_log.get("type")  # get allowed
+            if raw_type == "move":
+                # La nuance normal/advance/fall_back vit dans move_type (miroir du legacy, qui
+                # emet toujours "move" + was_flee) : le formateur, lui, a 3 types distincts.
+                move_type = raw_log.get("move_type")  # get allowed
+                action_type = {"advance": "advance", "fall_back": "flee"}.get(move_type, "move")
+            else:
+                action_type = self._STEP_LOG_TYPE_MAP.get(raw_type)  # get allowed
+                if action_type is None:
+                    continue  # type sans formateur -> volontairement non journalise
+
+            phase = str(raw_log.get("phase") or self.game_state.get("phase") or "unknown")  # get allowed
+            player = raw_log.get("player")  # get allowed
+
+            # Tir/combat : le moteur agrege les jets d'un groupe (arme, cible) dans shootDetails,
+            # le formateur travaille PAR JET -> une ligne par jet.
+            if action_type in ("shoot", "combat"):
+                shots = raw_log.get("shootDetails")  # get allowed
+                if not isinstance(shots, list):
+                    raise TypeError(
+                        f"action_log de type {raw_type!r} sans 'shootDetails' exploitable "
+                        f"(got {type(shots).__name__}) — contrat _emit_squad_shoot_log rompu"
+                    )
+                fight_state = pre_action_fight_state if action_type == "combat" else None
+                for shot in shots:
+                    if not isinstance(shot, dict):
+                        raise TypeError(f"shootDetails entry must be a dict, got {type(shot).__name__}")
+                    self.step_logger.log_action(
+                        unit_id=raw_log.get("shooterId"),  # get allowed
+                        action_type=action_type,
+                        phase=phase,
+                        player=player,
+                        success=True,
+                        step_increment=True,
+                        action_details=self._build_shot_details(
+                            raw_log, shot, pre_action_turn, fight_state
+                        ),
+                    )
+                continue
+
+            self.step_logger.log_action(
+                unit_id=raw_log.get("unitId"),  # get allowed
+                action_type=action_type,
+                phase=phase,
+                player=player,
+                success=True,
+                step_increment=True,
+                action_details=self._build_step_log_details(raw_log, pre_action_turn),
+            )
+
+    def _build_step_log_details(self, raw_log: Dict[str, Any], pre_action_turn: Any) -> Dict[str, Any]:
+        """Mappe un payload d'action_log moteur vers les action_details du formateur StepLogger.
+
+        Les cles du moteur (camelCase : toCol/targetCol/shootDetails) et celles du formateur
+        (snake_case : col/target_coords) divergent — cette fonction est le seul point de
+        traduction. `current_turn` est le seul champ EXIGE par `log_action` (require_key).
+        Tous les autres sont optionnels cote formateur, qui degrade proprement
+        (« (dice data incomplete) ») : une entree pauvre produit une ligne valide, jamais un crash.
+        """
+        unit_id = raw_log.get("unitId")  # get allowed
+        to_col = raw_log.get("toCol")  # get allowed
+        to_row = raw_log.get("toRow")  # get allowed
+        from_col = raw_log.get("fromCol")  # get allowed
+        from_row = raw_log.get("fromRow")  # get allowed
+        details: Dict[str, Any] = {
+            "current_turn": raw_log.get("turn", pre_action_turn),  # get allowed
+            "reward": raw_log.get("reward", 0.0),  # get allowed
+        }
+        if to_col is not None and to_row is not None:
+            details["col"] = to_col
+            details["row"] = to_row
+            details["end_pos"] = (to_col, to_row)
+            details["unit_with_coords"] = f"{unit_id}({to_col},{to_row})"
+        elif "col" in raw_log and "row" in raw_log:
+            details["col"] = raw_log["col"]
+            details["row"] = raw_log["row"]
+            details["unit_with_coords"] = f"{unit_id}({raw_log['col']},{raw_log['row']})"
+        if from_col is not None and from_row is not None:
+            details["start_pos"] = (from_col, from_row)
+        target_col = raw_log.get("targetCol")  # get allowed
+        target_row = raw_log.get("targetRow")  # get allowed
+        if target_col is not None and target_row is not None:
+            details["target_coords"] = (target_col, target_row)
+        for src, dst in (
+            ("targetId", "target_id"),
+            ("weaponName", "weapon_name"),
+            ("charge_roll", "charge_roll"),
+            ("charge_failed_reason", "charge_failed_reason"),
+            ("advance_roll", "advance_range"),
+            ("selected_rule_name", "selected_rule_name"),
+        ):
+            value = raw_log.get(src)  # get allowed
+            if value is not None:
+                details[dst] = value
+        return details
+
     def _process_squad_action(self, semantic: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """Dispatch sémantique squad vers helpers squad. Remplace _process_semantic_action."""
+        from engine.action_log_utils import append_action_log
         from engine.combat_utils import get_hex_neighbors
         from engine.phase_handlers.generic_handlers import end_activation
         from engine.phase_handlers.shared_utils import (
@@ -4817,6 +5041,41 @@ class W40KEngine(gym.Env):
         # ── deployment : logique existante inchangée ──────────────────────────
         elif action_name == "deploy_unit":
             success, result = deployment_handlers.execute_deployment_action(self.game_state, semantic)
+            # V11 T6 : `deployment_handlers` n'emet AUCUN action_log (grep = 0). Consequence
+            # mesuree : l'en-tete d'episode ecrit les unites non deployees en (-1,-1) et
+            # l'analyzer, faute de log de deploiement, n'apprend JAMAIS leur position reelle ->
+            # suivi de positions faux des le depart (49 « collisions » 2.2, faux positifs).
+            # Emis ici, apres succes, avec la position canonique (units_cache), comme le move.
+            if success:
+                _dep_unit_id = semantic.get("unitId")  # get allowed
+                if _dep_unit_id is not None:
+                    _dep_unit = get_unit_by_id(str(_dep_unit_id), self.game_state)
+                    if _dep_unit is None:
+                        raise KeyError(f"Unit {_dep_unit_id} introuvable apres deploy_unit")
+                    _dep_col, _dep_row = require_unit_position(str(_dep_unit_id), self.game_state)
+                    append_action_log(
+                        self.game_state,
+                        {
+                            "type": "deploy_unit",
+                            "message": (
+                                f"Unit {_dep_unit_id} DEPLOYED from (-1,-1) "
+                                f"to ({_dep_col},{_dep_row})"
+                            ),
+                            "turn": require_key(self.game_state, "turn"),
+                            "phase": "deployment",
+                            "unitId": _dep_unit_id,
+                            "player": require_key(_dep_unit, "player"),
+                            # (-1,-1) = convention « non deployee » de l'en-tete d'episode
+                            # (log_episode_start ecrit « Starting position (-1,-1) ») : le
+                            # formateur deploy_unit exige start_pos ET end_pos.
+                            "fromCol": -1,
+                            "fromRow": -1,
+                            "toCol": _dep_col,
+                            "toRow": _dep_row,
+                            "timestamp": "server_time",
+                            "reward": 0.0,
+                        },
+                    )
 
         # ── zone_intent : command phase ───────────────────────────────────────
         elif action_name == "zone_intent":
@@ -4876,6 +5135,11 @@ class W40KEngine(gym.Env):
                 )
             dest_col, dest_row = neighbors[direction]  # get allowed
 
+            # V11 T6 : position CANONIQUE de l'unite (units_cache) AVANT le move, capturee ici
+            # car execute_squad_move la mute. `anchor_col/row` ci-dessus vient de models_cache
+            # (1ere figurine vivante) : ce n'est PAS la meme source, et l'analyzer suit la
+            # position canonique (celle de l'en-tete d'episode et de _emit_squad_shoot_log).
+            _move_from_col, _move_from_row = require_unit_position(squad_id, self.game_state)
             if not _squad_direction_move_legal(self.game_state, squad_id, direction, move_type, advance_roll=advance_roll):
                 # Direction blocked (e.g. out of bounds, wall, ER) — action was outside mask.
                 # Treat as squad_wait: end activation without moving.
@@ -4897,6 +5161,43 @@ class W40KEngine(gym.Env):
                 if unit is None:
                     raise KeyError(f"Squad {squad_id} introuvable après déplacement")
                 tracking = "FLED" if move_type == "fall_back" else "MOVE"
+                # V11 T6 — contrat de journalisation : `end_activation(..., ACTION, ...)` signifie
+                # « action DEJA journalisee par le handler » (generic_handlers ~L72-74). Or
+                # `execute_squad_move` n'emet aucun action_log (contrairement au chemin legacy
+                # par-figurine, movement_handlers ~L3701) : le chemin squad violait ce contrat,
+                # laissant game_state["action_logs"] incomplet — d'ou un step.log sans aucune
+                # action et un analyzer sans matiere (cf. T6-c). Emission en miroir du payload
+                # legacy (meme type "move" + was_flee ; `move_type` porte la nuance
+                # normal/advance/fall_back pour le mapping vers le formateur du StepLogger).
+                # Chemin gym-only (`execute_squad_move` n'a qu'un appelant : ce site) -> zero
+                # impact PvP, qui passe par execute_semantic_action.
+                _move_to_col, _move_to_row = require_unit_position(squad_id, self.game_state)
+                append_action_log(
+                    self.game_state,
+                    {
+                        "type": "move",
+                        "message": (
+                            f"Unit {squad_id} ({_move_from_col},{_move_from_row}) MOVED "
+                            f"to ({_move_to_col},{_move_to_row})"
+                        ),
+                        "turn": require_key(self.game_state, "turn"),
+                        "phase": "move",
+                        "unitId": squad_id,
+                        "player": require_key(unit, "player"),
+                        "fromCol": _move_from_col,
+                        "fromRow": _move_from_row,
+                        "toCol": _move_to_col,
+                        "toRow": _move_to_row,
+                        "was_flee": move_type == "fall_back",
+                        "move_type": move_type,
+                        "advance_roll": advance_roll,
+                        "timestamp": "server_time",
+                        "action_name": action_name,
+                        "reward": 0.0,
+                    },
+                )
+                # Emission AVANT end_activation(ACTION) : c'est l'ordre qu'impose le contrat
+                # (« action already logged by handlers »).
                 end_result = end_activation(self.game_state, unit, ACTION, 1, tracking, MOVE, 0)
                 result = {
                     **end_result,
@@ -4964,8 +5265,40 @@ class W40KEngine(gym.Env):
             unit = get_unit_by_id(squad_id, self.game_state)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable pour squad_charge")
+            # V11 T6 : coords ancre AVANT commit (le plan deplace les figurines).
+            _sq_uc = self.game_state.get("units_cache", {}).get(str(squad_id), {})  # get allowed
+            _tgt_uc = self.game_state.get("units_cache", {}).get(str(target_squad_id), {})  # get allowed
+            _charge_from = (int(_sq_uc["col"]), int(_sq_uc["row"])) if "col" in _sq_uc else None
+            _charge_target = (int(_tgt_uc["col"]), int(_tgt_uc["row"])) if "col" in _tgt_uc else None
             if plan is None:
                 end_result = end_activation(self.game_state, unit, NO, 1, CHARGE, CHARGE, 0)
+                # V11 T6 — contrat de journalisation (cf. squad_move) : le chemin squad n'emettait
+                # aucun action_log de charge. Miroir du type legacy "charge_fail"
+                # (charge_handlers ~L3010/4425/5719). `charge_failed_reason` est le SEUL champ
+                # obligatoire du formateur qu'aucune donnee existante ne fournissait : ici l'echec
+                # est exactement « aucun plan de charge valide pour ce jet » (2D6 insuffisant ou
+                # aucune destination legale au contact — charge_build_valid_plan a renvoye None).
+                append_action_log(
+                    self.game_state,
+                    {
+                        "type": "charge_fail",
+                        "message": (
+                            f"Unit {squad_id} FAILED CHARGE at Unit {target_squad_id} "
+                            f"- Roll:{charge_roll}"
+                        ),
+                        "turn": require_key(self.game_state, "turn"),
+                        "phase": "charge",
+                        "unitId": squad_id,
+                        "player": require_key(unit, "player"),
+                        "targetId": target_squad_id,
+                        "charge_roll": charge_roll,
+                        "charge_failed_reason": "no valid charge plan for roll",
+                        "targetCol": _charge_target[0] if _charge_target else None,
+                        "targetRow": _charge_target[1] if _charge_target else None,
+                        "timestamp": "server_time",
+                        "reward": 0.0,
+                    },
+                )
                 result = {
                     **end_result,
                     "action": "squad_charge",
@@ -4977,6 +5310,30 @@ class W40KEngine(gym.Env):
             else:
                 commit_move(plan, self.game_state, "charge")
                 end_result = end_activation(self.game_state, unit, ACTION, 1, CHARGE, CHARGE, 0)
+                _dest_uc = self.game_state.get("units_cache", {}).get(str(squad_id), {})  # get allowed
+                append_action_log(
+                    self.game_state,
+                    {
+                        "type": "charge",
+                        "message": (
+                            f"Unit {squad_id} CHARGED Unit {target_squad_id} - Roll:{charge_roll}"
+                        ),
+                        "turn": require_key(self.game_state, "turn"),
+                        "phase": "charge",
+                        "unitId": squad_id,
+                        "player": require_key(unit, "player"),
+                        "targetId": target_squad_id,
+                        "charge_roll": charge_roll,
+                        "fromCol": _charge_from[0] if _charge_from else None,
+                        "fromRow": _charge_from[1] if _charge_from else None,
+                        "toCol": int(_dest_uc["col"]) if "col" in _dest_uc else None,
+                        "toRow": int(_dest_uc["row"]) if "row" in _dest_uc else None,
+                        "targetCol": _charge_target[0] if _charge_target else None,
+                        "targetRow": _charge_target[1] if _charge_target else None,
+                        "timestamp": "server_time",
+                        "reward": 0.0,
+                    },
+                )
                 result = {
                     **end_result,
                     "action": "squad_charge",
@@ -4993,36 +5350,46 @@ class W40KEngine(gym.Env):
             cache_entry = units_cache.get(squad_id)
             if cache_entry is None:
                 raise KeyError(f"Squad {squad_id} absent de units_cache pour squad_fight")
-            our_player = int(require_key(cache_entry, "player"))
-            enemy_slots = get_enemy_slot_mapping(self.game_state, our_player)
-
-            best_target_id: Optional[str] = None
-            best_score = -1.0
-            for esid in enemy_slots:
-                if esid is None or esid not in units_cache:
-                    continue
-                enemy_unit = get_unit_by_id(esid, self.game_state)
-                if enemy_unit is None:
-                    continue
-                score = get_best_enemy_score_for_unit(enemy_unit, self.game_state)
-                if score > best_score:
-                    best_score = score
-                    best_target_id = esid
-            if best_target_id is None:
-                raise ValueError(
-                    f"squad_fight: aucune cible pour squad {squad_id} — mask aurait dû l'empêcher"
-                )
-
+            # Pile-in AVANT la selection de cible : miroir de l ordre V11/PvP (etape
+            # groupee 12.02 puis etape FIGHT 12.04), une fig qui se rapproche peut
+            # entrer en ER et ouvrir une cible.
             pile_in = fight_pile_in_plan(self.game_state, squad_id)
             if pile_in is not None:
                 commit_move(pile_in, self.game_state, "pile_in")
 
-            squad_fight_unit_activation_start(self.game_state, squad_id)
-            squad_declare_fight(self.game_state, squad_id, best_target_id)
+            unit = get_unit_by_id(squad_id, self.game_state)
+            if unit is None:
+                raise KeyError(f"Squad {squad_id} introuvable pour squad_fight")
+
             # Convergence §9.4b-1 : resolution combat via le moteur d allocation par-figurine
             # (groupes 05.03/05.04, T bodyguard 19.02, save par-fig allouee). Defenseur IA
             # garanti en training -> auto_decider headless -> resolution complete (done).
-            from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
+            from engine.phase_handlers.fight_handlers import (
+                build_manual_fight_allocation,
+                _ai_select_fight_target,
+                _fight_build_valid_target_pool,
+            )
+            # OVERRUN FIGHT 12.06 (pile-in additionnel de reengagement) NON implemente ici :
+            # il n existe qu en modele par-ANCRE (_fight_v11_auto_overrun_pile_in), condamne par
+            # la decision « le pile-in de reference est le par-figurine du PvP ». 12.06 dit
+            # « CAN make one additional pile-in move » -> optionnel, son absence ne viole rien :
+            # l escouade non engagee resout un fight « a vide » (0 attaque). A implementer en
+            # par-figurine : Documentation/Implementation/A_faire/overrun.md
+
+            # Prédicat de cible = celui du flux PvP (_fight_v11_resolve_attacks) : pool
+            # d ennemis en zone d engagement (12.05), pas le mapping de slots gele du tir.
+            # Pool vide = fight « a vide » (12.04 : une unite qui a charge reste eligible
+            # meme si sa cible est morte -> overrun 12.06 sans cible). Le PvP le resout en
+            # 0 attaque ; le gym en fait autant, via le MEME moteur (0 intent declare ->
+            # summary vide, done=True). Aucun dict fabrique a la main.
+            targets = _fight_build_valid_target_pool(self.game_state, unit)
+            best_target_id = (
+                _ai_select_fight_target(self.game_state, squad_id, targets) if targets else None
+            )
+
+            squad_fight_unit_activation_start(self.game_state, squad_id)
+            if best_target_id is not None:
+                squad_declare_fight(self.game_state, squad_id, best_target_id)
             _fight_alloc = build_manual_fight_allocation(self.game_state, squad_id)
             if not _fight_alloc.get("done"):
                 raise RuntimeError(

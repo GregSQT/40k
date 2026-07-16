@@ -543,8 +543,15 @@ def _count_units_from_roster_scenario(scenario_data: Dict[str, Any], scenario_fi
     return _max_count_for_ref(str(agent_ref), "agent") + _max_count_for_ref(str(opponent_ref), "opponent")
 
 
-def _load_scenario_wall_ref(scenario_path: str) -> str:
-    """Load required wall_ref from scenario JSON."""
+def _load_scenario_wall_ref(scenario_path: str) -> Optional[str]:
+    """Load the scenario's wall_ref, or None when the scenario declares none.
+
+    The engine contract (game_state.py, resolution des murs) rend 'wall_ref' OPTIONNEL :
+    un scenario tire ses murs de 'wall_hexes', de 'wall_ref', et/ou de 'terrain_ref'
+    (additif). La banque migree en V11 T4 est terrain-only : aucun 'wall_ref'.
+    None represente donc fidelement "pas de dimension wall a ponderer" — ce n'est pas
+    une valeur par defaut masquant une erreur. Une cle presente reste strictement validee.
+    """
     if not isinstance(scenario_path, str) or not scenario_path.strip():
         raise ValueError(f"Invalid scenario path: {scenario_path!r}")
     with open(scenario_path, "r", encoding="utf-8-sig") as f:
@@ -553,10 +560,36 @@ def _load_scenario_wall_ref(scenario_path: str) -> str:
         raise TypeError(
             f"Scenario JSON must be an object for wall_ref weighting: {scenario_path}"
         )
-    wall_ref_raw = require_key(scenario_data, "wall_ref")
+    if "wall_ref" not in scenario_data:
+        return None
+    wall_ref_raw = scenario_data["wall_ref"]
     if not isinstance(wall_ref_raw, str) or not wall_ref_raw.strip():
         raise ValueError(f"Scenario wall_ref must be a non-empty string: {scenario_path}")
     return wall_ref_raw.strip()
+
+
+def _resolve_n_envs_for_step_logging(n_envs: int, log=print) -> int:
+    """Force un environnement unique quand la journalisation --step est active.
+
+    V11 T6 — root cause d'un no-op SILENCIEUX : `--step` n'a qu'un objet, journaliser les
+    actions dans step.log (consomme par `ai/analyzer.py`). Or le StepLogger n'est branche
+    QUE sur la branche mono-env (`if step_logger: base_env.step_logger = step_logger`) ;
+    les trois branches vectorisees construisent leurs envs avec `step_logger_enabled=False`.
+    Avec `n_envs > 1` (48 dans x1_debug), le run annoncait "Step logging enabled" puis
+    n'ecrivait jamais la moindre entree — step.log reduit a son en-tete.
+
+    Meme traitement que `--replay`/`--convert-steplog`, qui forcent deja un env unique :
+    on force ET on le DIT (pas de no-op silencieux, pas de promesse non tenue).
+    """
+    if step_logger is None or not getattr(step_logger, "enabled", False):
+        return n_envs
+    if n_envs > 1:
+        log(
+            f"ℹ️  Step logging (--step): using single environment "
+            f"(vectorization disabled, config n_envs={n_envs}) — "
+            f"le StepLogger n'est branche que sur le chemin mono-env."
+        )
+    return 1
 
 
 def _require_training_config_phase(config, agent_key, training_config_name) -> None:
@@ -642,15 +675,19 @@ def _expand_random_ref_weights(
 def _materialize_scenario_with_refs(
     scenario_path: str,
     wall_ref: Optional[str] = None,
-    objectives_ref: Optional[str] = None,
 ) -> str:
-    """Create a temporary scenario copy with overridden refs and return its path."""
-    if wall_ref is None and objectives_ref is None:
+    """Create a temporary scenario copy with an overridden wall_ref and return its path.
+
+    V11 T6 (hygiene) : le parametre 'objectives_ref' a ete purge. Les objectifs ont pour
+    source UNIQUE les terrains flagges "objective": true (14.01/14.02) depuis V11 T3/T4 ;
+    le moteur REJETTE les cles legacy 'objectives'/'objectives_ref'/'objective_hexes'
+    (game_state.py). La branche d'emission etait morte (appelant unique = wall_ref seul)
+    et tout futur appelant aurait produit un scenario refuse par le moteur.
+    """
+    if wall_ref is None:
         return scenario_path
-    if wall_ref is not None and (not isinstance(wall_ref, str) or not wall_ref.strip()):
+    if not isinstance(wall_ref, str) or not wall_ref.strip():
         raise ValueError(f"Invalid wall_ref override: {wall_ref!r}")
-    if objectives_ref is not None and (not isinstance(objectives_ref, str) or not objectives_ref.strip()):
-        raise ValueError(f"Invalid objectives_ref override: {objectives_ref!r}")
     with open(scenario_path, "r", encoding="utf-8-sig") as f:
         scenario_data = json.load(f)
     if not isinstance(scenario_data, dict):
@@ -659,13 +696,8 @@ def _materialize_scenario_with_refs(
         )
 
     scenario_copy = deepcopy(scenario_data)
-    if wall_ref is not None:
-        scenario_copy.pop("wall_hexes", None)
-        scenario_copy["wall_ref"] = wall_ref.strip()
-    if objectives_ref is not None:
-        scenario_copy.pop("objectives", None)
-        scenario_copy.pop("objective_hexes", None)
-        scenario_copy["objectives_ref"] = objectives_ref.strip()
+    scenario_copy.pop("wall_hexes", None)
+    scenario_copy["wall_ref"] = wall_ref.strip()
 
     temp_root = _get_wall_override_temp_dir()
     source_parts = Path(os.path.abspath(scenario_path)).parts
@@ -686,7 +718,7 @@ def _materialize_scenario_with_refs(
         )
     temp_dir = os.path.join(temp_root, "agents", agent_key, "scenarios", split_dir)
     os.makedirs(temp_dir, exist_ok=True)
-    hash_payload = f"{os.path.abspath(scenario_path)}|{wall_ref or ''}|{objectives_ref or ''}"
+    hash_payload = f"{os.path.abspath(scenario_path)}|{wall_ref}"
     path_hash = hashlib.sha1(hash_payload.encode("utf-8")).hexdigest()[:16]
     file_name = f"{Path(scenario_path).stem}__{path_hash}.json"
     out_path = os.path.join(temp_dir, file_name)
@@ -1318,6 +1350,8 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     if args.replay or args.convert_steplog:
         n_envs = 1  # Force single environment for replay generation
         print("ℹ️  Replay mode: Using single environment (vectorization disabled)")
+    else:
+        n_envs = _resolve_n_envs_for_step_logging(n_envs)
     
     base_env = None
     if n_envs > 1:
@@ -1627,7 +1661,9 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     
     # ✓ CHANGE 8: Check if vectorization is enabled in config
     n_envs = require_key(training_config, "n_envs")
-    
+
+    n_envs = _resolve_n_envs_for_step_logging(n_envs)
+
     if n_envs > 1:
         # ✓ CHANGE 8: Create vectorized environments for parallel training
         print(f"🚀 Creating {n_envs} parallel environments for accelerated training...")
@@ -2090,6 +2126,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     
     # Require n_envs for consistency with single-scenario training
     n_envs = require_key(training_config, "n_envs")
+    n_envs = _resolve_n_envs_for_step_logging(n_envs, log=chunk_log)
 
     # Raise error if required fields missing - NO FALLBACKS
     if "max_turns_per_episode" not in training_config:
@@ -2612,6 +2649,14 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             debug_mode=debug_mode
         )
         base_env._metrics_tracker = metrics_tracker
+        # V11 T6 : ce bloc RECREE l'environnement (cf. commentaire ci-dessus) et remplace le
+        # base_env construit plus haut — celui-la seul recevait le StepLogger (~L2377). Sans
+        # cette reconnexion, `--step` journalisait "StepLogger connected" pour un env aussitot
+        # jete, puis s'entrainait sur un moteur MUET : step.log reduit a son en-tete et
+        # ai/analyzer.py sans matiere. Bug latent (ce chemin exige n_envs==1, or la config
+        # vaut 48) revele par le forcage mono-env de --step. Miroir exact de la connexion ~L2377.
+        if step_logger:
+            base_env.step_logger = step_logger
         def mask_fn(env):
             return env.get_action_mask()
         masked_env = ActionMasker(base_env, mask_fn)

@@ -993,52 +993,13 @@ class MultiAgentTrainer:
                         # Force replay logger to capture data by directly calling log methods
                         current_turn = info.get('current_turn', 1)
                         
-                        # CRITICAL FIX: Enable the disabled logging line in controller
-                        actual_env = env
-                        while hasattr(actual_env, 'env'):
-                            actual_env = actual_env.env
-                        
-                        if hasattr(actual_env, 'controller'):
-                            # Get the controller's execute_gym_action method source and patch it
-                            import types
-                            controller = actual_env.controller
-                            
-                            # Create new method with logging enabled
-                            def patched_execute_gym_action(self, action: int):
-                                try:
-                                    eligible_units = self._get_gym_eligible_units()
-                                    controlled_eligible_units = [u for u in eligible_units if u["player"] == 1]
-                                    
-                                    if not controlled_eligible_units:
-                                        return self._get_gym_obs(), self._get_gym_penalty_reward(), False, False, self._get_gym_info()
-                                    
-                                    unit_idx = action // 8
-                                    action_type = action % 8
-                                except Exception as e:
-                                    raise
-                                
-                                if unit_idx >= len(controlled_eligible_units):
-                                    return self._get_gym_obs(), self._get_gym_penalty_reward(), False, False, self._get_gym_info()
-                                
-                                acting_unit = controlled_eligible_units[unit_idx]
-                                mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)
-                                
-                                success = self.execute_action(acting_unit["id"], mirror_action)
-                                reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
-                                
-                                # ENABLE LOGGING FOR EVALUATION
-                                self._log_gym_action(acting_unit, mirror_action, reward)
-                                
-                                self._mark_gym_unit_as_acted(acting_unit)
-                                self._advance_gym_phase_or_turn()
-                                terminated = self.is_game_over()
-                                
-                                return self._get_gym_obs(), reward, terminated, False, self._get_gym_info()
-                            
-                            # Replace the method and verify it worked
-                            original_method = controller.execute_gym_action
-                            controller.execute_gym_action = types.MethodType(patched_execute_gym_action, controller)
-                        
+                        # V11 T6 (hygiene) : un monkeypatch de `controller.execute_gym_action` vivait ici.
+                        # Purge — code mort ET cassé : le moteur squad (W40KEngine) n'expose aucun
+                        # attribut `controller`, et le patch appelait des méthodes inexistantes
+                        # (_get_gym_eligible_units, _convert_gym_action_to_mirror, _log_gym_action...).
+                        # Il portait le dernier layout à 8 actions (`action // 8`, `action % 8`), périmé
+                        # depuis l'espace squad 41 (cf. R5/T2, macro_intents.py).
+
                         # Now get the data
                         game_states = getattr(replay_logger, 'game_states', [])
                         combat_log_entries = getattr(replay_logger, 'combat_log_entries', [])
