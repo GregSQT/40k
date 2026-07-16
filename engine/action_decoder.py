@@ -16,7 +16,6 @@ from engine.combat_utils import calculate_hex_distance, get_unit_coordinates, ha
 from engine.phase_handlers.shared_utils import (
     is_unit_alive,
     compute_candidate_footprint,
-    build_occupied_positions_set,
     build_squad_action_mask,
     get_enemy_slot_mapping,
     charge_check_eligibility,
@@ -974,7 +973,6 @@ class ActionDecoder:
         if unit is None:
             raise KeyError(f"Unit {unit_id} missing from game_state['units']")
 
-        occupied = build_occupied_positions_set(game_state, exclude_unit_id=str(unit_id))
         raw_wall_hexes = require_key(game_state, "wall_hexes")
         n_walls = len(raw_wall_hexes)
         if self._wall_hexes_cache is not None and self._wall_hexes_cache[1] == n_walls:
@@ -1022,17 +1020,22 @@ class ActionDecoder:
         from engine.phase_handlers.shared_utils import get_engagement_zone as _get_ez
         ez = _get_ez(game_state)
 
-        obstacles = wall_hexes | occupied
-
+        # Volet DISCRET (bornes + murs + appartenance au pool) : miroir exact du commit
+        # `deployment_handlers.deploy_unit` (footprint ⊆ pool, ∉ mur, dans les bornes).
+        # Le chevauchement inter-unités N'EST PAS testé ici par cellules : le commit
+        # utilise le clearance euclidien continu (`candidate_overlaps_any_unit`) — on
+        # applique donc ce MÊME modèle en post-filtre (`_deployment_clearance_filter`),
+        # sinon le masque proposerait des hexes que `deploy_unit` rejette (deadlock
+        # `deploy_footprint_occupied`). Convention projet : le déploiement copie la phase move.
         if ez <= 1 or base_size == 1:
-            # Single-hex footprint: check pool + obstacles only
-            valid_hexes = [
+            # Single-hex footprint: pool + murs (le chevauchement passe par le clearance)
+            cell_valid = [
                 (col, row) for col, row in normalized_pool
-                if (col, row) not in wall_hexes and (col, row) not in occupied
+                if (col, row) not in wall_hexes
             ]
-            return valid_hexes
+            return self._deployment_clearance_filter(game_state, str(unit_id), unit, cell_valid)
 
-        # Multi-hex units: vectorized numpy footprint check
+        # Multi-hex units: vectorized numpy footprint check (bornes + murs + pool)
         from engine.hex_utils import precompute_footprint_offsets
         base_shape = unit["BASE_SHAPE"]
         orientation = int(unit["orientation"])
@@ -1043,8 +1046,8 @@ class ActionDecoder:
         grid_cols = board_cols + 10
         grid_rows = board_rows + 10
         obstacle_grid = np.zeros((grid_cols, grid_rows), dtype=bool)
-        if obstacles:
-            obs_arr = np.array(list(obstacles), dtype=np.int32)
+        if wall_hexes:
+            obs_arr = np.array(list(wall_hexes), dtype=np.int32)
             in_grid = (
                 (obs_arr[:, 0] >= 0) & (obs_arr[:, 0] < grid_cols) &
                 (obs_arr[:, 1] >= 0) & (obs_arr[:, 1] < grid_rows)
@@ -1068,7 +1071,79 @@ class ActionDecoder:
             no_obstacle = in_bounds & ~obstacle_grid[fc_s, fr_s]
             valid_mask[mask] = np.all(in_pool & no_obstacle, axis=1)
 
-        return [(int(c), int(r)) for c, r in pool_np[valid_mask]]
+        cell_valid = [(int(c), int(r)) for c, r in pool_np[valid_mask]]
+        return self._deployment_clearance_filter(game_state, str(unit_id), unit, cell_valid)
+
+    def _deployment_clearance_filter(
+        self,
+        game_state: Dict[str, Any],
+        unit_id: str,
+        unit: Dict[str, Any],
+        candidates: List[tuple],
+    ) -> List[tuple]:
+        """Ne garde que les hexes dont le socle ne chevauche AUCUNE unité selon le modèle
+        du commit (`candidate_overlaps_any_unit` : clearance euclidien continu rond↔rond,
+        méthode empreinte sinon). Broad-phase numpy (distance centre à centre vs rayons
+        englobants) pour ne lancer le test exact que sur les candidats proches d'une unité
+        — les autres sont trivialement valides. Miroir strict de `deploy_unit`."""
+        if not candidates:
+            return candidates
+        from engine.phase_handlers.shared_utils import candidate_overlaps_any_unit
+        from engine.hex_utils import Socle, bounding_radius_norm
+
+        units_cache = require_key(game_state, "units_cache")
+        shape = require_key(unit, "BASE_SHAPE")
+        base_size = require_key(unit, "BASE_SIZE")
+        cand_reach = bounding_radius_norm(shape, base_size)
+
+        other_centers: List[tuple] = []
+        other_reach: List[float] = []
+        for uid, entry in units_cache.items():
+            if str(uid) == str(unit_id):
+                continue
+            other_centers.append(
+                (int(require_key(entry, "col")), int(require_key(entry, "row")))
+            )
+            other_reach.append(
+                bounding_radius_norm(require_key(entry, "BASE_SHAPE"), require_key(entry, "BASE_SIZE"))
+            )
+        if not other_centers:
+            return list(candidates)
+
+        _SQRT3 = 1.7320508075688772
+
+        def _cx(cols: np.ndarray) -> np.ndarray:
+            return cols.astype(np.float64) * 1.5 + 0.75
+
+        def _cy(cols: np.ndarray, rows: np.ndarray) -> np.ndarray:
+            return (
+                rows.astype(np.float64) * _SQRT3
+                + ((cols & 1).astype(np.float64) * _SQRT3) / 2.0
+                + _SQRT3 / 2.0
+            )
+
+        oc = np.array(other_centers, dtype=np.int32)
+        ox = _cx(oc[:, 0])
+        oy = _cy(oc[:, 0], oc[:, 1])
+        orad = np.array(other_reach, dtype=np.float64)
+        gate = cand_reach + orad + 1.0  # marge broad-phase conservatrice
+
+        cand_arr = np.array(candidates, dtype=np.int32)
+        ccx = _cx(cand_arr[:, 0])
+        ccy = _cy(cand_arr[:, 0], cand_arr[:, 1])
+        dist = np.hypot(ccx[:, None] - ox[None, :], ccy[:, None] - oy[None, :])  # (N,K)
+        near_any = np.any(dist <= gate[None, :], axis=1)
+
+        valid: List[tuple] = []
+        for i, (col, row) in enumerate(candidates):
+            if not near_any[i]:
+                valid.append((col, row))
+                continue
+            fp = compute_candidate_footprint(int(col), int(row), unit, game_state)
+            cand = Socle(shape=shape, base_size=base_size, col=int(col), row=int(row), fp=fp)
+            if not candidate_overlaps_any_unit(game_state, cand, exclude_unit_id=str(unit_id)):
+                valid.append((col, row))
+        return valid
 
     def _get_enemy_reference_hexes(self, game_state: Dict[str, Any], current_deployer: int) -> List[tuple[int, int]]:
         """

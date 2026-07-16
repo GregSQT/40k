@@ -18,7 +18,7 @@ export class Warboss extends SwarmRangeSwarm {
   static VALUE = 70; // Unit value (W40K points cost)
 
   // WEAPONS
-  static RNG_WEAPON_CODES = ["kustom_shoota"];
+  static RNG_WEAPON_CODES = ["kustom_shoota_a4"];
   static RNG_WEAPONS = getWeapons(Warboss.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["kustom_choppa"];
   static CC_WEAPONS = getWeapons(Warboss.CC_WEAPON_CODES);

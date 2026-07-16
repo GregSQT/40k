@@ -519,7 +519,46 @@ Plan d'origine (réalisé ci-dessus) :
    - `scripts/rebalance_holdout_hard_scenarios.py`, `scripts/build_dynamic_rosters.py` : aucune
      clé legacy détectée, re-vérifier après migration.
 
-### T5 — Boucle complète et fin d'épisode (R7)
+### T5 — Boucle complète et fin d'épisode (R7) — ✅ FAIT (moteur nu, 2026-07-16)
+
+Réalisé (périmètre MOTEUR NU, décision utilisateur : « smoke moteur nu avec pertes en mêlée
+garanties + Carnifex en phase charge ») :
+
+- **R7 ne se manifeste PAS en moteur nu** : `W40KEngine.get_action_mask()`
+  ([w40k_core.py:5563](../../engine/w40k_core.py#L5563)) auto-avance déjà la phase fight quand ses pools sont vides
+  (boucle `fight_phase_end` tant que masque vide ET pas game_over) → l'invariant
+  `mask.any() or game_over` tient à CHAQUE step. Vérifié sur 3 scénarios `active` × 3 seeds +
+  scénario fixe pré-engagé : zéro masque vide sans terminaison, zéro exception, toutes les
+  parties se terminent (turn limit). Le fix conditionnel T5.2 sur `_fight_phase_complete`
+  n'était donc PAS requis — non touché ; `_advance_to_next_player` (mort) laissé tel quel.
+- **Vraie rupture bloquante en moteur nu = déploiement `active`, PAS R7 (nouvelle, hors R1-R8)** :
+  `ActionDecoder._get_valid_deployment_hexes` ([action_decoder.py:961](../../engine/action_decoder.py#L961)) testait le
+  chevauchement inter-unités par CELLULES (`build_occupied_positions_set`), alors que le commit
+  `deployment_handlers.deploy_unit` (~L1017) le teste par CLEARANCE euclidien CONTINU
+  (`candidate_overlaps_any_unit`, plus strict rond↔rond). Le masque proposait donc des hexes que
+  le commit rejetait (`deploy_footprint_occupied`) ; l'action restant dans le masque, elle
+  échouait en boucle → deadlock (épisode tué au garde 1000 steps ; ~2/3 des seeds sur bot-01).
+  **Fix** : `_get_valid_deployment_hexes` filtre désormais les candidats cellule-valides par le
+  MÊME modèle que le commit (nouveau `_deployment_clearance_filter` : broad-phase numpy
+  distance-centres puis `candidate_overlaps_any_unit` exact), miroir strict (règle projet « le
+  déploiement copie la phase move »). Neutre PvP (même prédicat que le commit ; volet bornes/murs/
+  pool inchangé). Seul `action_decoder.py` touché.
+- **Smoke moteur nu (`scripts/smoke_t5_bare.py`, committé, sans monkeypatch)** :
+  (A) bot-01/02/03 × seeds 1-3 → terminate + zéro masque vide ;
+  (B) scénario fixe (ScreamerKiller P1 pré-engagé vs Termagant P2 ; Carnifex P1 à portée de
+  charge d'un Termagant P2) → **pertes en mêlée réelles via FIGHT_CTX à chaque seed** (kill
+  `squad_fight` constaté) + **Carnifex éligible en phase charge sans TypeError (R6)**.
+- **Tests ajoutés (+7)** : `tests/unit/engine/test_deployment_clearance_parity.py` (4 : parité
+  masque↔commit + anti-deadlock en clustering forcé) et `tests/unit/engine/test_t5_bare_loop.py`
+  (3 : invariant `mask.any() or game_over`, pertes mêlée FIGHT_CTX, Carnifex charge R6). Suite
+  `tests/unit/` verte (baseline 1245 + 7).
+
+Reste (hors moteur nu, non couvert par cette tranche) : le smoke **pile complète** (wrapper
+`BotControlledEnv`) — cf. contre-vérif T2 : reset crashe encore avec `agent_seat_mode="p2"/"random"`
+(`bot-owned eligible units with empty action mask` en fight tour 1). Chantier wrapper/pool alterné
+distinct, à traiter avant l'entraînement réel T6 avec la config de siège de train.py.
+
+Plan d'origine :
 1. Rejouer le smoke test pile complète (annexe A) après T1+T2 : 10 épisodes aléatoires masqués
    doivent se terminer (`terminated=True`, winner déterminé), zéro masque vide, zéro exception.
 2. Si le deadlock R7 persiste : corriger côté moteur la complétion de phase fight au dernier

@@ -20,7 +20,7 @@ export class BannerNob extends SwarmRangeSwarm {
   // WEAPONS
   static RNG_WEAPON_CODES = ["shoota"];
   static RNG_WEAPONS = getWeapons(BannerNob.RNG_WEAPON_CODES);
-  static CC_WEAPON_CODES = ["choppa"];
+  static CC_WEAPON_CODES = ["choppa_a5"];
   static CC_WEAPONS = getWeapons(BannerNob.CC_WEAPON_CODES);
 
   // UNIT RULES

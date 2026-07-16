@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path as _P
+
+sys.path.insert(0, str(_P(__file__).resolve().parent.parent))  # exécutable sans PYTHONPATH
 import traceback
 from pathlib import Path
 
