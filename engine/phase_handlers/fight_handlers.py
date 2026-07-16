@@ -3122,7 +3122,13 @@ def fight_v11_engaging_triggered_unit_ids(
 
 
 def _fight_v11_log(game_state: Dict[str, Any], message: str) -> None:
-    """Log V11 fight (console_logs + terminal serveur). Trace le flux pile_in→fight→consolidate."""
+    """Log V11 fight (console_logs + terminal serveur). Trace le flux pile_in→fight→consolidate.
+
+    Écriture conditionnée à debug_mode (PvP : W40K_DEBUG=true ; training : --debug), comme
+    add_console_log. Sans ce garde, le training écrit une ligne par fight_phase_start sur stderr.
+    """
+    if not game_state.get("debug_mode", False):
+        return
     msg = f"[FIGHT V11] {message}"
     add_console_log(game_state, msg)
     # safe_print est désactivé (no-op) → écriture directe sur stderr pour visibilité terminal.

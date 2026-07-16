@@ -9259,7 +9259,19 @@ export default function Board({
     // lvl/ofl ne font PLUS partie de la clé : les contours d'étage (dépendants du niveau et de
     // l'occupation) sont désormais dessinés dynamiquement dans highlightContainer, plus dans le
     // plateau statique. Changer de niveau ne reconstruit donc plus le plateau (contours instantanés).
-    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}|oc:${objControlKey}|oz:${zonesKey}|dep:${phase === "deployment" ? 1 : 0}`;
+    // Les murs sont dessinés dans le plateau statique (cachedWalls) : sans eux dans la clé, deux
+    // boards de mêmes dimensions mais aux murs différents (replay : épisode N → N+1) réutilisent
+    // le container de murs du précédent → murs fantômes à l'écran.
+    const wallsFp = (() => {
+      const hexes = boardConfigWithOverrides.wall_hexes ?? [];
+      let h = 5381 >>> 0;
+      for (const [c, r] of hexes) {
+        h = Math.imul(33, h) ^ c;
+        h = Math.imul(33, h) ^ r;
+      }
+      return `${hexes.length}:${(h | 0) >>> 0}`;
+    })();
+    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}|oc:${objControlKey}|oz:${zonesKey}|w:${wallsFp}|dep:${phase === "deployment" ? 1 : 0}`;
     const canReuseStatic =
       staticBoardConfigKeyRef.current === bcKey && staticBoardRef.current !== null;
 

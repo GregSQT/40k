@@ -1,4 +1,4 @@
-// frontend/src/roster/spaceMarine/units/Intercessor.ts
+// frontend/src/roster/spaceMarine/units/VanguardVeteranSquadJumpPack.ts
 //
 
 import { getWeapons } from "../armory";
