@@ -1,16 +1,19 @@
 {
   "CHARGE_PHASE_START": {
-    "calls": 111,
-    "avg_s": 0.00341,
-    "sum_s": 0.38,
-    "avg_pool_s": 0.001956
+    "calls": 477,
+    "avg_s": 0.001665,
+    "sum_s": 0.79,
+    "avg_pool_s": 0.00082
   },
-  "__total_s": 0.38,
-  "__total_calls": 111,
-  "__score_ms": 3.4104,
-  "__n_episodes": 2,
+  "__total_s": 0.79,
+  "__total_calls": 477,
+  "__score_ms": 1.6652,
+  "__n_episodes": 5,
   "__episodes": [
     1,
-    2
+    2,
+    3,
+    4,
+    5
   ]
 }
