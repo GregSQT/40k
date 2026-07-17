@@ -12,6 +12,7 @@ from unittest.mock import patch, MagicMock
 import numpy as np
 import pytest
 
+from engine.phase_handlers.shared_utils import SQUAD_ACTION_WAIT
 from engine.w40k_core import W40KEngine
 
 
@@ -68,7 +69,7 @@ def _minimal_config() -> Dict[str, Any]:
         "max_nearby_units": 10,
         "max_valid_targets": 5,
         "obs_size": 50,
-        "action_space_size": 31,
+        "action_space_size": 1047,
     }
     return {
         "board": {
@@ -86,6 +87,14 @@ def _minimal_config() -> Dict[str, Any]:
             "engagement_zone": 1,
             "engagement_zone_vertical": 5,
             "max_base_size_hex": 35,
+        },
+        # Toggles de traversee requis par le pool BFS : le masque de move passe
+        # desormais par lui (refonte spatiale), la ou les dry-runs directionnels
+        # ne les lisaient pas. Valeurs reelles de config/game_config.json.
+        "move": {
+            "can_move_through_enemy_engagement_zone": True,
+            "can_move_through_enemy_model": False,
+            "can_move_through_friendly_model": True,
         },
         "charge": {
             "charge_max_distance": 12,
@@ -116,6 +125,21 @@ def _make_engine() -> W40KEngine:
         return W40KEngine(config=_minimal_config())
 
 
+def _legal_action(engine: W40KEngine) -> int:
+    """Première action autorisée par le masque — ce que fait un agent masqué (MaskablePPO).
+
+    Ces tests passaient `0` en dur, en s'appuyant sur l'ancien contrat « action hors masque →
+    dégradation silencieuse en squad_wait ». Ce repli MASQUAIT les divergences masque/exécution :
+    il est supprimé (refonte spatiale §7 T3), une action hors masque lève désormais. Et l'action 0
+    n'est plus « direction 0 » mais la cellule 0 de la grille égocentrique (coin du disque).
+
+    Masque vide : `step()` auto-avance la phase et ignore l'action → WAIT, jamais lu dans ce cas.
+    """
+    mask = engine.get_action_mask()
+    legal = np.flatnonzero(mask)
+    return int(legal[0]) if legal.size else SQUAD_ACTION_WAIT
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests — retour de step()
 # ─────────────────────────────────────────────────────────────────────────────
@@ -126,7 +150,7 @@ class TestStepReturnSignature:
         """step_tuple : step() retourne bien un tuple de 5 éléments (gym interface)."""
         engine = _make_engine()
         engine.reset()
-        result = engine.step(0)
+        result = engine.step(_legal_action(engine))
         assert isinstance(result, tuple)
         assert len(result) == 5
 
@@ -134,35 +158,35 @@ class TestStepReturnSignature:
         """step_obs_type : premier élément (obs) est un np.ndarray."""
         engine = _make_engine()
         engine.reset()
-        obs, reward, terminated, truncated, info = engine.step(0)
+        obs, reward, terminated, truncated, info = engine.step(_legal_action(engine))
         assert isinstance(obs, np.ndarray)
 
     def test_step_reward_is_float(self):
         """step_reward_type : reward est un float (ou castable)."""
         engine = _make_engine()
         engine.reset()
-        _, reward, _, _, _ = engine.step(0)
+        _, reward, _, _, _ = engine.step(_legal_action(engine))
         assert isinstance(reward, (int, float))
 
     def test_step_terminated_is_bool(self):
         """step_terminated_type : terminated est un bool."""
         engine = _make_engine()
         engine.reset()
-        _, _, terminated, _, _ = engine.step(0)
+        _, _, terminated, _, _ = engine.step(_legal_action(engine))
         assert isinstance(terminated, bool)
 
     def test_step_info_is_dict(self):
         """step_info_type : info est un dict."""
         engine = _make_engine()
         engine.reset()
-        _, _, _, _, info = engine.step(0)
+        _, _, _, _, info = engine.step(_legal_action(engine))
         assert isinstance(info, dict)
 
     def test_step_truncated_is_bool(self):
         """step_truncated_type : truncated est un bool."""
         engine = _make_engine()
         engine.reset()
-        _, _, _, truncated, _ = engine.step(0)
+        _, _, _, truncated, _ = engine.step(_legal_action(engine))
         assert isinstance(truncated, bool)
 
 
@@ -177,7 +201,7 @@ class TestStepEpisodeCounter:
         engine = _make_engine()
         engine.reset()
         steps_before = engine.game_state["episode_steps"]
-        engine.step(0)
+        engine.step(_legal_action(engine))
         assert engine.game_state["episode_steps"] >= steps_before
 
     def test_step_increments_only_on_success(self):
@@ -186,7 +210,7 @@ class TestStepEpisodeCounter:
         engine.reset()
         # Après reset, tous les pools sont vides → chaque step auto-avance la phase
         # episode_steps ne s'incrémente que sur un vrai step (action réussie via pool)
-        engine.step(0)
+        engine.step(_legal_action(engine))
         # Auto-advance ne compte pas comme step : episode_steps peut être 0
         # La valeur exacte dépend du nombre de phases auto-avancées
         # On vérifie juste que l'état est cohérent (pas d'exception)
@@ -207,7 +231,7 @@ class TestStepTurnLimit:
         engine.game_state["turn"] = 4
         engine.game_state["turn_limit_reached"] = False
 
-        _, _, terminated, _, info = engine.step(0)
+        _, _, terminated, _, info = engine.step(_legal_action(engine))
 
         assert terminated is True
         assert info.get("turn_limit_exceeded") is True
@@ -218,7 +242,7 @@ class TestStepTurnLimit:
         engine.reset()
         engine.game_state["turn"] = 4
 
-        _, _, terminated, _, info = engine.step(0)
+        _, _, terminated, _, info = engine.step(_legal_action(engine))
 
         assert terminated is True
         assert "winner" in info
@@ -229,7 +253,7 @@ class TestStepTurnLimit:
         engine.reset()
         engine.game_state["turn"] = 4
 
-        _, _, _, _, info = engine.step(0)
+        _, _, _, _, info = engine.step(_legal_action(engine))
 
         assert "win_method" in info
 
@@ -247,7 +271,7 @@ class TestStepGameOver:
         # S'assurer que turn est dans la limite
         engine.game_state["turn"] = 1
 
-        _, _, terminated, _, _ = engine.step(0)
+        _, _, terminated, _, _ = engine.step(_legal_action(engine))
 
         # Pas de game_over immédiat sauf si phase advance auto
         # On vérifie juste que game_state est cohérent
@@ -268,7 +292,12 @@ class TestStepGameOver:
         ):
             engine.game_state[pool_key] = []
 
-        _, _, _, _, info = engine.step(0)
+        # Action volontairement passée en dur, sans `_legal_action` : le masque est tout-False,
+        # donc `step()` auto-avance la phase SANS jamais décoder l'action. Passer par
+        # `_legal_action` appellerait `get_action_mask()` en amont, ce qui perturbe cet état
+        # artificiel (pools vidés à la main) et fait échouer l'advance_phase — effet de bord
+        # pré-existant de `get_action_mask`, hors périmètre de la refonte spatiale.
+        _, _, _, _, info = engine.step(SQUAD_ACTION_WAIT)
 
         # Phase advance automatique doit avoir eu lieu
         assert info.get("phase_auto_advanced") is True or engine.game_state["phase"] != "fight"

@@ -1537,6 +1537,154 @@ class ObservationBuilder:
 
         return obs
 
+    # ========================================================================
+    # T1 — GRILLE SPATIALE EGOCENTRIQUE (move_action_space_spatial_rework §6.2)
+    # ========================================================================
+
+    def build_squad_grid(self, game_state: Dict[str, Any], active_squad_id: str) -> np.ndarray:
+        """Grille egocentrique (GRID_CHANNELS, GRID_SIZE, GRID_SIZE) autour de l'escouade active.
+
+        Corrige le defaut le plus grave de l'obs squad 108-d : elle ne contenait AUCUN terrain
+        (spec §4.1), donc l'agent ne percevait pas les murs — le masque l'empechait de jouer
+        illegal, jamais de contourner, de se couvrir ou de bloquer une ligne de vue.
+
+        Canaux (spec §10.1) : murs, occupation alliee, occupation ennemie, EZ ennemie,
+        objectifs, niveau (etages).
+
+        Geometrie deleguee a `engine/spatial_grid` — source UNIQUE partagee avec le masque (T2)
+        et le decoder (T3). Layout (C,H,W) = convention CNN de sb3 (`NatureCNN`).
+
+        Rasterisation depuis les caches existants (spec §7 T1) : `wall_hexes`, `models_cache`,
+        `enemy_adjacent_hexes_player_*`. On itere le CONTENU (sparse) et non la fenetre : a
+        half_extent=60 la fenetre fait ~17 900 hexes, alors que murs+figurines+EZ en couvrent
+        une fraction.
+        """
+        from engine.spatial_grid import (
+            GRID_CHANNELS,
+            GRID_CH_ALLY,
+            GRID_CH_ENEMY,
+            GRID_CH_EZ,
+            GRID_CH_LEVEL,
+            GRID_CH_OBJECTIVE,
+            GRID_CH_WALL,
+            GRID_SIZE,
+            grid_half_extent_subhex,
+            hex_arrays_to_cells,
+        )
+
+        grid = np.zeros((GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32)
+
+        units_cache = require_key(game_state, "units_cache")
+        if active_squad_id not in units_cache:
+            return grid  # squad mort/absent -> grille vide (miroir de build_squad_observation)
+        active_entry = units_cache[active_squad_id]
+        active_player = int(active_entry["player"])
+        anchor_col, anchor_row = int(active_entry["col"]), int(active_entry["row"])
+
+        half_extent = grid_half_extent_subhex(game_state, active_squad_id)
+
+        def _paint_arrays(channel: int, cols: np.ndarray, rows: np.ndarray, value: float = 1.0) -> None:
+            """Peint un LOT d'hexes (tableaux) sur un canal. Hors grille ecarte (pas de clamp)."""
+            if cols.size == 0:
+                return
+            gx, gy, valid = hex_arrays_to_cells(cols, rows, anchor_col, anchor_row, half_extent)
+            if not valid.any():
+                return
+            np.maximum.at(grid[channel], (gy[valid], gx[valid]), np.float32(value))
+
+        def _paint(channel: int, hexes, value: float = 1.0) -> None:
+            if not hexes:
+                return
+            cols = np.fromiter((h[0] for h in hexes), dtype=np.int64, count=len(hexes))
+            rows = np.fromiter((h[1] for h in hexes), dtype=np.int64, count=len(hexes))
+            _paint_arrays(channel, cols, rows, value)
+
+        # Murs et objectifs sont STATIQUES sur la partie : on memoise leurs tableaux une fois
+        # plutot que de reconstruire ~11 500 tuples Python a chaque step. Memoisation de donnees
+        # de scenario, pas un cache masquant un recalcul necessaire.
+        static = game_state.get("_grid_static_hex_arrays")  # get allowed (construit ici au 1er appel)
+        if static is None:
+            def _to_arrays(hexes) -> Tuple[np.ndarray, np.ndarray]:
+                hexes = list(hexes)
+                if not hexes:
+                    return np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64)
+                return (
+                    np.fromiter((h[0] for h in hexes), dtype=np.int64, count=len(hexes)),
+                    np.fromiter((h[1] for h in hexes), dtype=np.int64, count=len(hexes)),
+                )
+
+            objective_hexes: List[Tuple[int, int]] = []
+            for objective in game_state.get("objectives", []):  # get allowed (scenario sans objectif)
+                # `hexes` est REQUIS : verifie sur les objectifs runtime (20/20 le portent, cles =
+                # hexes/id/name). Un `.get("hexes", [])` rendrait un objectif malforme invisible
+                # dans le canal sans que rien ne le signale.
+                for hex_entry in require_key(objective, "hexes"):
+                    if isinstance(hex_entry, (list, tuple)):
+                        objective_hexes.append((int(hex_entry[0]), int(hex_entry[1])))
+                    else:
+                        objective_hexes.append((int(hex_entry["col"]), int(hex_entry["row"])))
+
+            static = {
+                "walls": _to_arrays(game_state.get("wall_hexes", set())),  # get allowed (board sans mur)
+                "objectives": _to_arrays(objective_hexes),
+            }
+            game_state["_grid_static_hex_arrays"] = static
+
+        # --- Canal 0 : murs ---------------------------------------------------
+        _paint_arrays(GRID_CH_WALL, *static["walls"])
+
+        # --- Canaux 1/2 : occupation alliee / ennemie -------------------------
+        models_cache = require_key(game_state, "models_cache")
+        squad_models = require_key(game_state, "squad_models")
+        ally_hexes: List[Tuple[int, int]] = []
+        enemy_hexes: List[Tuple[int, int]] = []
+        for sid, entry in units_cache.items():
+            sink = ally_hexes if int(entry["player"]) == active_player else enemy_hexes
+            for mid in squad_models.get(sid, []):  # get allowed (squad sans figurine vivante)
+                model = models_cache.get(mid)
+                if model is None:
+                    continue
+                sink.append((int(model["col"]), int(model["row"])))
+        _paint(GRID_CH_ALLY, ally_hexes)
+        _paint(GRID_CH_ENEMY, enemy_hexes)
+
+        # --- Canal 3 : EZ ennemie ---------------------------------------------
+        # Meme ensemble que celui consomme par le pool BFS (source unique de la regle).
+        ez_cache_key = f"enemy_adjacent_hexes_player_{active_player}"
+        if ez_cache_key in game_state:
+            ez_hexes = game_state[ez_cache_key]
+        else:
+            # Cache construit au demarrage des phases move/shoot/charge uniquement. Hors de
+            # ces phases on appelle le MEME constructeur canonique (qui memoise) plutot que
+            # de laisser le canal vide : un canal EZ faussement nul serait une erreur muette.
+            from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes
+
+            ez_hexes = build_enemy_adjacent_hexes(game_state, active_player)
+        _paint(GRID_CH_EZ, list(ez_hexes))
+
+        # --- Canal 4 : objectifs ----------------------------------------------
+        # Sur le board x5 les objectifs sont des ZONES (~10 500 hexes), pas des points : c'est
+        # de loin le canal le plus lourd, d'ou la memoisation ci-dessus.
+        _paint_arrays(GRID_CH_OBJECTIVE, *static["objectives"])
+
+        # --- Canal 5 : niveau (etages) ----------------------------------------
+        # Vaut 0 partout tant qu'aucun etage n'est declare : le sol EST le niveau 0, ce n'est
+        # pas une absence de donnee (les etages sont un chantier en cours, spec §6.1).
+        terrain_areas = game_state.get("terrain_areas", [])  # get allowed (scenario sans terrain)
+        levels = sorted({int(fl["level"]) for a in terrain_areas for fl in a.get("floors", [])})  # get allowed
+        if levels:
+            from engine.terrain_utils import floor_hexes_at_level
+
+            max_level = float(levels[-1])
+            for level in levels:
+                _paint(
+                    GRID_CH_LEVEL,
+                    list(floor_hexes_at_level(terrain_areas, level)),
+                    value=float(level) / max_level,
+                )
+
+        return grid
+
     def build_observation_for_unit(self, game_state: Dict[str, Any], unit_id: str) -> np.ndarray:
         """
         Build observation for a specific unit without reordering activation pools.

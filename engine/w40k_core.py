@@ -657,9 +657,23 @@ class W40KEngine(gym.Env):
                 "No default value allowed."
             )
         
-        self.observation_space = gym.spaces.Box(
-            low=0.0, high=1.0, shape=(obs_size,), dtype=np.float32
-        )
+        # Pipeline squad (obs_size=108) : obs Dict {"vec", "grid"} — la grille egocentrique
+        # (perception du terrain, spec §4.1) est branchee sur la policy via MultiInputPolicy
+        # (move_action_space_spatial_rework.md T1b). Pipeline mono-fig legacy : Box inchange.
+        if obs_size == self.obs_builder.SQUAD_OBS_SIZE_TARGET:
+            from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
+
+            self.observation_space = gym.spaces.Dict({
+                "vec": gym.spaces.Box(low=0.0, high=1.0, shape=(obs_size,), dtype=np.float32),
+                "grid": gym.spaces.Box(
+                    low=0.0, high=1.0,
+                    shape=(GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32,
+                ),
+            })
+        else:
+            self.observation_space = gym.spaces.Box(
+                low=0.0, high=1.0, shape=(obs_size,), dtype=np.float32
+            )
         
         # NOTE: last_unit_positions removed - now using game_state["units_cache_prev"] for movement_direction
         
@@ -941,6 +955,24 @@ class W40KEngine(gym.Env):
             reward_configs = self._build_reward_configs_for_current_units()
             self.game_state["reward_configs"] = reward_configs
             self.game_state["rewards_configs"] = reward_configs
+
+        # ── Purges d'episode : `game_state` est le MEME objet d'un reset a l'autre et
+        # `_reload_scenario` en change le contenu. Tout ce qui est memoise par episode DOIT
+        # mourir ici, sinon il survit dans l'episode suivant sans que rien ne le signale.
+        #
+        # Grille spatiale (T1) : tableaux memoises de murs/objectifs. Sans purge, l'agent
+        # observerait le terrain de l'episode precedent (corruption silencieuse de l'obs).
+        self.game_state.pop("_grid_static_hex_arrays", None)
+        # Cartes de cellules de move (T3) : elles portent les destinations du pool de l'episode
+        # precedent. Leur tampon (ancre, phase) NE protege PAS ici — au nouvel episode l'escouade
+        # peut se redeployer sur la meme ancre en phase move, le tampon coincide, et une carte
+        # calculee sur d'AUTRES murs passerait le controle.
+        self.game_state.pop("_squad_move_cell_maps", None)
+        # Jets d'Advance pre-tires : `get_squad_action_mask_and_eligible_units` ne re-tire QUE si
+        # la cle est absente. Un jet survivant a un episode interrompu (turn limit avec une
+        # activation en cours) serait donc reutilise tel quel dans l'episode suivant, au lieu
+        # d'etre re-tire (09.06 : un jet par Advance).
+        self.game_state.pop("_squad_advance_rolls", None)
 
         # Reset episode-level metric accumulators
         self.episode_reward_accumulator = 0.0
@@ -5102,11 +5134,10 @@ class W40KEngine(gym.Env):
     def _process_squad_action(self, semantic: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """Dispatch sémantique squad vers helpers squad. Remplace _process_semantic_action."""
         from engine.action_log_utils import append_action_log
-        from engine.combat_utils import get_hex_neighbors
         from engine.phase_handlers.generic_handlers import end_activation
         from engine.phase_handlers.shared_utils import (
             execute_squad_move,
-            _squad_direction_move_legal,
+            clear_squad_move_cell_map,
             squad_shooting_unit_activation_start,
             squad_declare_shoot,
             squad_lock_shoot,
@@ -5227,67 +5258,58 @@ class W40KEngine(gym.Env):
                 raise KeyError(f"Squad {squad_id} introuvable pour squad_wait")
             if current_phase == "move":
                 self.game_state.get("_squad_advance_rolls", {}).pop(squad_id, None)  # get allowed
+                # Miroir du pop du jet : la carte de cellules est propre a cette activation.
+                clear_squad_move_cell_map(self.game_state, squad_id)
             end_result = end_activation(self.game_state, unit, WAIT, 1, tracking, pool, 0)
             result = {**end_result, "action": "squad_wait", "squad_id": squad_id}
 
         # ── mouvement : normal / advance / fall_back ──────────────────────────
         elif action_name in ("squad_normal_move", "squad_advance", "squad_fall_back"):
             squad_id = semantic["squad_id"]
-            direction = int(semantic["direction"])
             move_type_map = {
                 "squad_normal_move": "normal",  # get allowed
                 "squad_advance": "advance",
                 "squad_fall_back": "fall_back",
             }
             move_type = move_type_map[action_name]
-            advance_roll = semantic.get("advance_roll") if move_type == "advance" else None
+            # Advance : le jet est produit par le decoder (pre-tire au masque, §10.4). Son absence
+            # est une rupture de contrat, pas un cas nominal -> require_key, jamais `.get()`.
+            advance_roll = int(require_key(semantic, "advance_roll")) if move_type == "advance" else None
 
-            models_cache = require_key(self.game_state, "models_cache")
-            squad_models_list = self.game_state.get("squad_models", {}).get(squad_id, [])  # get allowed
-            anchor_col: Optional[int] = None
-            anchor_row: Optional[int] = None
-            for mid in squad_models_list:
-                m = models_cache.get(mid)
-                if m is not None:
-                    anchor_col = int(m["col"])
-                    anchor_row = int(m["row"])
-                    break
-            if anchor_col is None or anchor_row is None:
-                raise ValueError(f"Squad {squad_id} n'a aucun modèle vivant pour l'ancre de déplacement")
-
-            neighbors = get_hex_neighbors(anchor_col, anchor_row)
-            if direction >= len(neighbors):
-                raise ValueError(
-                    f"direction {direction} hors limites pour get_hex_neighbors (len={len(neighbors)})"
-                )
-            dest_col, dest_row = neighbors[direction]  # get allowed
+            # Destination issue du POOL BFS via la carte de cellules du masque (refonte spatiale
+            # §7 T3). JAMAIS reconstruite a la main : l'ancien code visait `neighbors[direction]`,
+            # donc l'hex ADJACENT — c'etait la root cause §3 (1 subhex par phase). Et sauter a
+            # « ancre + budget x direction » traverserait les murs (§4.2), puisque
+            # `validate_move_plan` ne controle que la case d'arrivee, jamais le trajet.
+            dest_col = int(require_key(semantic, "destCol"))
+            dest_row = int(require_key(semantic, "destRow"))
 
             # V11 T6 : position CANONIQUE de l'unite (units_cache) AVANT le move, capturee ici
-            # car execute_squad_move la mute. `anchor_col/row` ci-dessus vient de models_cache
-            # (1ere figurine vivante) : ce n'est PAS la meme source, et l'analyzer suit la
-            # position canonique (celle de l'en-tete d'episode et de _emit_squad_shoot_log).
+            # car execute_squad_move la mute. L'analyzer suit cette position (celle de l'en-tete
+            # d'episode et de _emit_squad_shoot_log).
             _move_from_col, _move_from_row = require_unit_position(squad_id, self.game_state)
-            if not _squad_direction_move_legal(self.game_state, squad_id, direction, move_type, advance_roll=advance_roll):
-                # Direction blocked (e.g. out of bounds, wall, ER) — action was outside mask.
-                # Treat as squad_wait: end activation without moving.
-                unit = get_unit_by_id(squad_id, self.game_state)
-                if unit is None:
-                    raise KeyError(f"Squad {squad_id} introuvable pour squad_wait (direction illégale)")
-                tracking, pool = {"normal": ("MOVE", MOVE), "advance": ("MOVE", MOVE), "fall_back": ("FLED", FLED)}.get(move_type, ("MOVE", MOVE))
-                end_result = end_activation(self.game_state, unit, WAIT, 1, tracking, pool, 0)
-                result = {**end_result, "action": "squad_wait", "squad_id": squad_id}
-            else:
-                ok = execute_squad_move(squad_id, dest_col, dest_row, move_type, self.game_state, advance_roll)
-                if not ok:
-                    raise ValueError(
-                        f"execute_squad_move a échoué : squad={squad_id} dir={direction} "
-                        f"type={move_type} dest=({dest_col},{dest_row}) — incohérence mask/exécution"
-                    )
-                self.game_state.get("_squad_advance_rolls", {}).pop(squad_id, None)  # get allowed
-                unit = get_unit_by_id(squad_id, self.game_state)
-                if unit is None:
-                    raise KeyError(f"Squad {squad_id} introuvable après déplacement")
-                tracking = "FLED" if move_type == "fall_back" else "MOVE"
+
+            # Plus de dry-run de legalite ici, et plus de degradation silencieuse en `squad_wait` :
+            # la destination VIENT du pool que le masque a lui-meme utilise (meme carte, cf.
+            # `read_squad_move_cell_map`), donc elle est legale par construction. L'ancien
+            # `_squad_direction_move_legal` + repli sur wait existait parce que le masque
+            # directionnel pouvait diverger de l'execution ; ce repli MASQUAIT ce mismatch au lieu
+            # de le signaler. Si `execute_squad_move` echoue desormais, c'est un bug d'invariant
+            # -> erreur explicite.
+            ok = execute_squad_move(squad_id, dest_col, dest_row, move_type, self.game_state, advance_roll)
+            if not ok:
+                raise ValueError(
+                    f"execute_squad_move a échoué : squad={squad_id} type={move_type} "
+                    f"dest=({dest_col},{dest_row}) depuis ({_move_from_col},{_move_from_row}) — "
+                    f"la destination vient du pool BFS du masque, elle DOIT être exécutable "
+                    f"(incohérence masque/exécution)"
+                )
+            self.game_state.get("_squad_advance_rolls", {}).pop(squad_id, None)  # get allowed
+            clear_squad_move_cell_map(self.game_state, squad_id)
+            unit = get_unit_by_id(squad_id, self.game_state)
+            if unit is None:
+                raise KeyError(f"Squad {squad_id} introuvable après déplacement")
+            tracking = "FLED" if move_type == "fall_back" else "MOVE"
                 # V11 T6 — contrat de journalisation : `end_activation(..., ACTION, ...)` signifie
                 # « action DEJA journalisee par le handler » (generic_handlers ~L72-74). Or
                 # `execute_squad_move` n'emet aucun action_log (contrairement au chemin legacy
@@ -5296,45 +5318,44 @@ class W40KEngine(gym.Env):
                 # action et un analyzer sans matiere (cf. T6-c). Emission en miroir du payload
                 # legacy (meme type "move" + was_flee ; `move_type` porte la nuance
                 # normal/advance/fall_back pour le mapping vers le formateur du StepLogger).
-                # Chemin gym-only (`execute_squad_move` n'a qu'un appelant : ce site) -> zero
-                # impact PvP, qui passe par execute_semantic_action.
-                _move_to_col, _move_to_row = require_unit_position(squad_id, self.game_state)
-                append_action_log(
-                    self.game_state,
-                    {
-                        "type": "move",
-                        "message": (
-                            f"Unit {squad_id} ({_move_from_col},{_move_from_row}) MOVED "
-                            f"to ({_move_to_col},{_move_to_row})"
-                        ),
-                        "turn": require_key(self.game_state, "turn"),
-                        "phase": "move",
-                        "unitId": squad_id,
-                        "player": require_key(unit, "player"),
-                        "fromCol": _move_from_col,
-                        "fromRow": _move_from_row,
-                        "toCol": _move_to_col,
-                        "toRow": _move_to_row,
-                        "was_flee": move_type == "fall_back",
-                        "move_type": move_type,
-                        "advance_roll": advance_roll,
-                        "timestamp": "server_time",
-                        "action_name": action_name,
-                        "reward": 0.0,
-                    },
-                )
-                # Emission AVANT end_activation(ACTION) : c'est l'ordre qu'impose le contrat
-                # (« action already logged by handlers »).
-                end_result = end_activation(self.game_state, unit, ACTION, 1, tracking, MOVE, 0)
-                result = {
-                    **end_result,
-                    "action": action_name,
-                    "squad_id": squad_id,
-                    "direction": direction,
+            # Chemin gym-only (`execute_squad_move` n'a qu'un appelant : ce site) -> zero
+            # impact PvP, qui passe par execute_semantic_action.
+            _move_to_col, _move_to_row = require_unit_position(squad_id, self.game_state)
+            append_action_log(
+                self.game_state,
+                {
+                    "type": "move",
+                    "message": (
+                        f"Unit {squad_id} ({_move_from_col},{_move_from_row}) MOVED "
+                        f"to ({_move_to_col},{_move_to_row})"
+                    ),
+                    "turn": require_key(self.game_state, "turn"),
+                    "phase": "move",
+                    "unitId": squad_id,
+                    "player": require_key(unit, "player"),
+                    "fromCol": _move_from_col,
+                    "fromRow": _move_from_row,
+                    "toCol": _move_to_col,
+                    "toRow": _move_to_row,
+                    "was_flee": move_type == "fall_back",
                     "move_type": move_type,
-                    "toCol": dest_col,
-                    "toRow": dest_row,
-                }
+                    "advance_roll": advance_roll,
+                    "timestamp": "server_time",
+                    "action_name": action_name,
+                    "reward": 0.0,
+                },
+            )
+            # Emission AVANT end_activation(ACTION) : c'est l'ordre qu'impose le contrat
+            # (« action already logged by handlers »).
+            end_result = end_activation(self.game_state, unit, ACTION, 1, tracking, MOVE, 0)
+            result = {
+                **end_result,
+                "action": action_name,
+                "squad_id": squad_id,
+                "move_type": move_type,
+                "toCol": dest_col,
+                "toRow": dest_row,
+            }
 
         # ── tir ───────────────────────────────────────────────────────────────
         elif action_name == "squad_shoot":
@@ -6100,20 +6121,34 @@ class W40KEngine(gym.Env):
         return action_mask
     
     
-    def _build_observation(self) -> np.ndarray:
+    def _build_observation(self):
         """Build observation — route selon obs_size :
-           - 357 : pipeline mono-fig legacy (build_observation)
-           - 108 : pipeline squad PR4 (build_squad_observation)
+           - 357 : pipeline mono-fig legacy (build_observation) -> np.ndarray
+           - 108 : pipeline squad (build_squad_observation) -> Dict {"vec", "grid"}
+
+        Pipeline squad : l'obs est un Dict, avec le vecteur 108-d ET la grille egocentrique
+        (perception du terrain, spec §4.1 / T1b). La geometrie de la grille est celle de
+        `engine.spatial_grid`, partagee avec le masque (T2) et le decoder (T3).
         """
         obs_size = self.obs_builder.obs_size
         is_squad_pipeline = obs_size == self.obs_builder.SQUAD_OBS_SIZE_TARGET
 
-        def _zero_obs() -> np.ndarray:
+        def _zero_obs():
+            if is_squad_pipeline:
+                from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
+
+                return {
+                    "vec": np.zeros(obs_size, dtype=np.float32),
+                    "grid": np.zeros((GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32),
+                }
             return np.zeros(obs_size, dtype=np.float32)
 
-        def _build_for_squad(squad_id: str) -> np.ndarray:  # get allowed
+        def _build_for_squad(squad_id: str):  # get allowed
             if is_squad_pipeline:
-                return self.obs_builder.build_squad_observation(self.game_state, squad_id)
+                return {
+                    "vec": self.obs_builder.build_squad_observation(self.game_state, squad_id),
+                    "grid": self.obs_builder.build_squad_grid(self.game_state, squad_id),
+                }
             return self.obs_builder.build_observation(self.game_state)
 
         if self.game_state.get("phase") == "deployment":

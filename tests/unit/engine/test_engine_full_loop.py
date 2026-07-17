@@ -22,6 +22,7 @@ import numpy as np
 import pytest
 
 from engine.reward_calculator import RewardCalculator
+from engine.phase_handlers.shared_utils import SQUAD_ACTION_WAIT
 from engine.w40k_core import W40KEngine
 
 
@@ -84,7 +85,7 @@ def _minimal_config() -> Dict[str, Any]:
         "max_nearby_units": 10,
         "max_valid_targets": 5,
         "obs_size": 50,
-        "action_space_size": 31,
+        "action_space_size": 1047,
     }
     return {
         "board": {
@@ -104,6 +105,14 @@ def _minimal_config() -> Dict[str, Any]:
             "max_base_size_hex": 35,
             "cover_ratio": 0.3,
             "avg_charge_roll": 7,
+        },
+        # Toggles de traversee requis par le pool BFS : le masque de move passe
+        # desormais par lui (refonte spatiale), la ou les dry-runs directionnels
+        # ne les lisaient pas. Valeurs reelles de config/game_config.json.
+        "move": {
+            "can_move_through_enemy_engagement_zone": True,
+            "can_move_through_enemy_model": False,
+            "can_move_through_friendly_model": True,
         },
         "charge": {
             "charge_max_distance": 12,
@@ -133,10 +142,26 @@ def _make_engine() -> W40KEngine:
         return W40KEngine(config=_minimal_config())
 
 
+def _legal_action(engine: W40KEngine) -> int:
+    """Première action autorisée par le masque — ce que fait un agent masqué (MaskablePPO).
+
+    Ces tests pilotaient la boucle avec `step(0)` en dur, en s'appuyant sur l'ancien contrat
+    « action hors masque → dégradation silencieuse en squad_wait ». Ce repli MASQUAIT les
+    divergences masque/exécution : il est supprimé (refonte spatiale §7 T3), une action hors
+    masque lève désormais. Depuis la refonte, l'action 0 n'est d'ailleurs plus « direction 0 »
+    mais la cellule 0 de la grille égocentrique, quasi jamais atteignable (coin du disque).
+
+    Masque vide = la phase n'a aucune action jouable ; `step()` l'auto-avance et l'action passée
+    est ignorée — on renvoie WAIT, jamais lu dans ce cas.
+    """
+    mask = engine.get_action_mask()
+    legal = np.flatnonzero(mask)
+    return int(legal[0]) if legal.size else SQUAD_ACTION_WAIT
+
+
 def _run_episode(engine: W40KEngine, max_iters: int = 50) -> Tuple[Dict[str, Any], int]:
     """reset() + step()×N avec terminaison garantie via force-turn après 5 steps.
 
-    Les 5 premiers steps testent la stabilité de l'engine sous actions invalides.
     Au 6e step, turn est forcé à _TURN_FORCE → step() retourne terminated=True
     via le chemin turn_limit (ligne 1260 w40k_core.py).
     """
@@ -146,7 +171,7 @@ def _run_episode(engine: W40KEngine, max_iters: int = 50) -> Tuple[Dict[str, Any
     for i in range(max_iters):
         if i == 5:
             engine.game_state["turn"] = _TURN_FORCE
-        _, _, terminated, _, info = engine.step(0)
+        _, _, terminated, _, info = engine.step(_legal_action(engine))
         last_info = info
         steps += 1
         if terminated:
@@ -168,7 +193,7 @@ class TestFullLoopTermination:
         for i in range(200):
             if i == 5:
                 engine.game_state["turn"] = _TURN_FORCE
-            _, _, terminated, _, _ = engine.step(0)
+            _, _, terminated, _, _ = engine.step(_legal_action(engine))
             if terminated:
                 break
         assert terminated is True
@@ -180,7 +205,7 @@ class TestFullLoopTermination:
         for i in range(8):
             if i == 5:
                 engine.game_state["turn"] = _TURN_FORCE
-            result = engine.step(0)
+            result = engine.step(_legal_action(engine))
             assert isinstance(result, tuple) and len(result) == 5
             if result[2]:  # terminated
                 break
@@ -258,7 +283,7 @@ class TestFullLoopMultiEpisode:
         for i in range(200):
             if i == 5:
                 engine.game_state["turn"] = _TURN_FORCE
-            _, _, terminated, _, _ = engine.step(0)
+            _, _, terminated, _, _ = engine.step(_legal_action(engine))
             if terminated:
                 break
         assert terminated is True

@@ -20,6 +20,21 @@ from engine.phase_handlers.shared_utils import (
     get_enemy_slot_mapping,
     charge_check_eligibility,
     roll_advance_for_squad,
+    # Refonte spatiale du move : action = cellule de la grille egocentrique. Constantes importees,
+    # jamais de litteral nu : le plan d'actions a change (WAIT 18 -> 1024, etc.).
+    SQUAD_ACTION_CHARGE,
+    SQUAD_ACTION_FIGHT,
+    SQUAD_ACTION_MOVE_CELL_BASE,
+    SQUAD_ACTION_MOVE_CELL_COUNT,
+    SQUAD_ACTION_SHOOT_SLOT_BASE,
+    SQUAD_ACTION_SHOOT_SLOT_COUNT,
+    SQUAD_ACTION_SIZE,
+    SQUAD_ACTION_WAIT,
+    build_squad_move_cell_map,
+    infer_squad_move_type,
+    read_squad_move_cell_map,
+    squad_advance_or_fall_back_allowed,
+    store_squad_move_cell_map,
 )
 from engine.macro_intents import (
     BASE_ZONE_INTENT,
@@ -47,13 +62,15 @@ class ActionDecoder:
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        obs_params = config["observation_params"]
-        if "action_space_size" not in obs_params:
-            raise KeyError(
-                "Config missing required 'action_space_size' in observation_params. "
-                "Must be defined in training_config.json."
-            )
-        self.total_action_size = obs_params["action_space_size"]
+        # Taille de l'action space : DERIVEE du moteur, jamais configuree. C'est le plan d'actions
+        # (`macro_intents`, miroir de `shared_utils.SQUAD_ACTION_*`) qui la determine ; la
+        # recopier dans les configs creait une 2e source de verite qui ne pouvait qu'avoir tort —
+        # une config perimee (l'ancien 41) se manifestait par un `IndexError` opaque au fond du
+        # masque. Il n'y a plus rien a synchroniser, donc plus rien a verifier.
+        # Les autres consommateurs derivaient deja la taille de `len(action_mask)`
+        # (`env_wrappers`, `pve_controller`, `w40k_core`) : ce site etait le dernier a la lire
+        # depuis la config.
+        self.total_action_size = TOTAL_ACTION_SIZE
         self._deployment_potential_los_cache: Dict[
             tuple[int, tuple[tuple[int, int], ...], tuple[tuple[int, int], ...]],
             Dict[tuple[int, int], int],
@@ -174,7 +191,9 @@ class ActionDecoder:
             return mask, eligible_units
 
         if current_phase == "command":
-            mask[18] = True
+            # SQUAD_ACTION_WAIT, jamais un litteral : il valait 18, il vaut 1024 depuis la refonte
+            # spatiale. Ecrit en dur, ce site masquait une CELLULE DE MOVE en phase command.
+            mask[SQUAD_ACTION_WAIT] = True
             free_steps = game_state["zone_intent_free_steps_remaining"]
             if free_steps > 0:
                 objectives = game_state["objectives"]
@@ -198,14 +217,32 @@ class ActionDecoder:
         enemy_slot_ids = get_enemy_slot_mapping(game_state, our_player)
 
         advance_roll: Optional[int] = None
+        move_cell_map = None
         if current_phase == "move":
             squad_advance_rolls = game_state.setdefault("_squad_advance_rolls", {})
             if squad_id not in squad_advance_rolls:
                 squad_advance_rolls[squad_id] = roll_advance_for_squad(squad_id, game_state)
             advance_roll = squad_advance_rolls[squad_id]
 
-        squad_mask_26 = build_squad_action_mask(game_state, squad_id, enemy_slot_ids, advance_roll)
-        for i, v in enumerate(squad_mask_26):
+            # Refonte spatiale : la carte cellule -> (destination, cout) est construite UNE fois
+            # ici, sert a masquer, puis est memoisee pour que `convert_squad_action` execute
+            # exactement la cellule masquee. Sans cette memoisation il faudrait un 2e BFS par step
+            # et la carte du decodage pourrait differer de celle du masque.
+            # `advance_roll` n'est pas transmis si Advance/Fall Back sont fermes : le pool retombe
+            # alors au budget normal, donc aucune cellule Advance. La regle vient de
+            # `squad_advance_or_fall_back_allowed`, la MEME que celle du masque : la reecrire ici
+            # ferait deriver les deux (pool au budget Advance que le masque refuserait, ou l'inverse).
+            move_cell_map = build_squad_move_cell_map(
+                game_state,
+                squad_id,
+                advance_roll if squad_advance_or_fall_back_allowed(game_state, squad_id) else None,
+            )
+            store_squad_move_cell_map(game_state, squad_id, move_cell_map)
+
+        squad_mask = build_squad_action_mask(
+            game_state, squad_id, enemy_slot_ids, advance_roll, move_cell_map=move_cell_map
+        )
+        for i, v in enumerate(squad_mask):
             if v:
                 mask[i] = True
 
@@ -860,11 +897,11 @@ class ActionDecoder:
                 "destRow": dest_row,
             }
 
-        # En phase command, action 18 = passer sans unité sélectionnée
-        if current_phase == "command" and action_int == 18:
+        # En phase command, WAIT = passer sans unité sélectionnée (constante, pas un littéral).
+        if current_phase == "command" and action_int == SQUAD_ACTION_WAIT:
             return {"action": "command_wait"}
 
-        # Actions squad micro (0-25)
+        # Actions squad micro (0..SQUAD_ACTION_SIZE-1)
         if eligible_units is None:
             eligible_units = self._get_eligible_units_for_current_phase(game_state)
         if not eligible_units:
@@ -874,42 +911,58 @@ class ActionDecoder:
             )
         squad_id = str(eligible_units[0]["id"])
 
-        if 0 <= action_int <= 5:
-            return {"action": "squad_normal_move", "direction": action_int, "squad_id": squad_id}
-
-        if 6 <= action_int <= 11:
-            squad_advance_rolls = game_state.get("_squad_advance_rolls", {})  # get allowed
-            advance_roll = squad_advance_rolls.get(squad_id)
-            if advance_roll is None:
+        if SQUAD_ACTION_MOVE_CELL_BASE <= action_int < (
+            SQUAD_ACTION_MOVE_CELL_BASE + SQUAD_ACTION_MOVE_CELL_COUNT
+        ):
+            # Refonte spatiale (§6.2) : l'action designe une CELLULE de la grille egocentrique.
+            # La destination vient du POOL BFS (jamais construite a la main : sauter a
+            # « ancre + budget x direction » traverserait les murs, cf. §4.2), et le type de move
+            # est DEDUIT de son cout geodesique — jamais d'une dimension d'action.
+            cell_map = read_squad_move_cell_map(game_state, squad_id)
+            cell_idx = action_int - SQUAD_ACTION_MOVE_CELL_BASE
+            if cell_idx not in cell_map:
                 raise ValueError(
-                    f"convert_squad_action: advance_roll manquant pour squad {squad_id} "
-                    "— get_squad_action_mask_and_eligible_units doit être appelé avant"
+                    f"convert_squad_action: cellule {cell_idx} injouable pour squad {squad_id} "
+                    f"— action hors masque (le masque n'autorise que les cellules du pool)"
                 )
-            return {
-                "action": "squad_advance",
-                "direction": action_int - 6,
-                "squad_id": squad_id,
-                "advance_roll": advance_roll,
-            }
+            (dest_col, dest_row), geodesic_cost = cell_map[cell_idx]
 
-        if 12 <= action_int <= 17:
-            return {
-                "action": "squad_fall_back",
-                "direction": action_int - 12,
+            move_type = infer_squad_move_type(game_state, squad_id, geodesic_cost)
+            semantic: Dict[str, Any] = {
+                "action": {
+                    "normal": "squad_normal_move",
+                    "advance": "squad_advance",
+                    "fall_back": "squad_fall_back",
+                }[move_type],
                 "squad_id": squad_id,
+                "destCol": int(dest_col),
+                "destRow": int(dest_row),
             }
+            if move_type == "advance":
+                # Jet pre-tire au masque (§10.4) : c'est celui qui a servi a construire le pool,
+                # donc le seul coherent avec la cellule choisie. Absent = contrat rompu -> erreur.
+                advance_roll = game_state.get("_squad_advance_rolls", {}).get(squad_id)  # get allowed
+                if advance_roll is None:
+                    raise ValueError(
+                        f"convert_squad_action: advance_roll manquant pour squad {squad_id} "
+                        "— get_squad_action_mask_and_eligible_units doit être appelé avant"
+                    )
+                semantic["advance_roll"] = advance_roll
+            return semantic
 
-        if action_int == 18:
+        if action_int == SQUAD_ACTION_WAIT:
             return {"action": "squad_wait", "squad_id": squad_id}
 
-        if 19 <= action_int <= 23:
+        if SQUAD_ACTION_SHOOT_SLOT_BASE <= action_int < (
+            SQUAD_ACTION_SHOOT_SLOT_BASE + SQUAD_ACTION_SHOOT_SLOT_COUNT
+        ):
             return {
                 "action": "squad_shoot",
-                "target_slot": action_int - 19,
+                "target_slot": action_int - SQUAD_ACTION_SHOOT_SLOT_BASE,
                 "squad_id": squad_id,
             }
 
-        if action_int == 24:
+        if action_int == SQUAD_ACTION_CHARGE:
             units_cache = require_key(game_state, "units_cache")
             cache_entry = units_cache.get(squad_id)
             if cache_entry is None:
@@ -941,7 +994,7 @@ class ActionDecoder:
                 "target_squad_id": best_target_id,
             }
 
-        if action_int == 25:
+        if action_int == SQUAD_ACTION_FIGHT:
             return {"action": "squad_fight", "squad_id": squad_id}
 
         raise ValueError(

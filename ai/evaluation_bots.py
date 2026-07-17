@@ -46,6 +46,84 @@ def _first_action_in(valid_actions, action_ids):
     return None
 
 
+# --- Heuristiques de destination (refonte spatiale du move, spec §T4) --------
+# En move spatial, le TYPE de move (normal/advance/fall_back) est INFERE du cout geodesique par
+# le moteur (shared_utils.infer_squad_move_type) : le bot ne choisit plus qu'une DESTINATION
+# parmi le pool BFS legal (les hexes reellement executables), via select_movement_destination.
+# Le wrapper d'eval traduit ensuite destination -> cellule -> action entiere. Choisir « la
+# premiere cellule legale » donnerait un coin arbitraire de la grille (root cause §3 transposee,
+# c'est explicitement rejete) : ces helpers donnent a chaque bot une vraie geometrie.
+#
+# Convention WAIT : renvoyer la position courante de l'unite (`require_unit_position`) signale
+# « je ne bouge pas » — le wrapper la traduit en WAIT. `start_pos` etant exclu du pool (§4.6),
+# l'ancre n'est jamais une destination legale : le signal est donc sans ambiguite.
+
+def _living_enemy_positions(unit, game_state):
+    """Ancres (col,row) des ennemis vivants de `unit`, depuis units_cache."""
+    units_cache = require_key(game_state, "units_cache")
+    positions = []
+    for enemy in require_key(game_state, "units"):
+        if enemy.get("player") == unit.get("player"):
+            continue
+        if not is_unit_alive(str(enemy["id"]), game_state):
+            continue
+        entry = units_cache.get(str(enemy["id"]))
+        if entry is not None:
+            positions.append((int(entry["col"]), int(entry["row"])))
+        else:
+            positions.append((int(enemy["col"]), int(enemy["row"])))
+    return positions
+
+
+def _dest_nearest_enemy_hexdist(dest, enemy_positions):
+    """Distance-hex de la destination a l'ancre ennemie la plus proche."""
+    return min(calculate_hex_distance(dest[0], dest[1], ec, er) for ec, er in enemy_positions)
+
+
+def _dest_toward_enemies(valid_destinations, unit, game_state):
+    """Destination minimisant la distance-hex a l'ennemi le plus proche (poussee offensive).
+
+    Distance ancre->ancre (O(1)/cellule) et non empreinte->empreinte : sur board x5 le pool
+    contient ~337 cellules jouables (jusqu'a 634), et recalculer une empreinte par candidate
+    coutait ~44 ms/decision de bot. Une distance hex suffit a une heuristique de bot.
+    """
+    enemy_pos = _living_enemy_positions(unit, game_state)
+    if not enemy_pos:
+        return valid_destinations[0]
+    return min(
+        valid_destinations,
+        key=lambda d: _dest_nearest_enemy_hexdist(d, enemy_pos),
+    )
+
+
+def _dest_away_from_enemies(valid_destinations, unit, game_state):
+    """Destination maximisant la distance-hex a l'ennemi le plus proche (repli)."""
+    enemy_pos = _living_enemy_positions(unit, game_state)
+    if not enemy_pos:
+        return valid_destinations[0]
+    return max(
+        valid_destinations,
+        key=lambda d: _dest_nearest_enemy_hexdist(d, enemy_pos),
+    )
+
+
+def _dest_toward_objective(valid_destinations, unit, game_state):
+    """Destination la plus proche du centre de l'objectif le plus proche de l'unite."""
+    objectives = game_state.get("objectives")
+    if not objectives:
+        return _dest_toward_enemies(valid_destinations, unit, game_state)
+    ucol, urow = get_unit_coordinates(unit)
+    nearest = min(
+        objectives,
+        key=lambda o: calculate_hex_distance(ucol, urow, *mi.get_objective_center(o)),
+    )
+    ocol, orow = mi.get_objective_center(nearest)
+    return min(
+        valid_destinations,
+        key=lambda d: calculate_hex_distance(d[0], d[1], ocol, orow),
+    )
+
+
 def _select_weighted_deployment_action(
     valid_actions: List[int],
     weights_by_action: Dict[int, float],
@@ -137,17 +215,16 @@ class GreedyBot:
         if self.randomness > 0 and random.random() < self.randomness:
             return random.choice(valid_actions) if valid_actions else WAIT_ACTION
 
-        # Prefer shoot > move > wait
+        # Stateless fallback (jamais utilise en move : le move passe par
+        # select_movement_destination). Prefer shoot > wait/first.
         shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
         if shoot is not None:
             return shoot
-        move = _first_action_in(valid_actions, mi.MOVE_DIRS)
-        if move is not None:
-            return move
         return valid_actions[0] if valid_actions else WAIT_ACTION
 
     def select_action_with_state(self, valid_actions: List[int], game_state) -> int:
-        """Phase-aware greedy policy aligned with current action-space semantics."""
+        """Phase-aware greedy policy. Le move est routee par le wrapper vers
+        select_movement_destination : cette methode ne traite plus la phase move."""
         if not valid_actions:
             return WAIT_ACTION
         phase = require_key(game_state, "phase")
@@ -186,18 +263,12 @@ class GreedyBot:
             if WAIT_ACTION in valid_actions:
                 return WAIT_ACTION
             return valid_actions[0]
-        if phase == "move":
-            move = _first_action_in(valid_actions, mi.MOVE_DIRS)
-            if move is not None:
-                return move
-            if WAIT_ACTION in valid_actions:
-                return WAIT_ACTION
-            return valid_actions[0]
         if WAIT_ACTION in valid_actions and len(valid_actions) > 1:
             return valid_actions[0] if valid_actions[0] != WAIT_ACTION else valid_actions[1]
         return valid_actions[0]
-    
+
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
+        """Greedy : pousse vers l'ennemi le plus proche (poussee offensive)."""
         if not valid_destinations:
             if game_state is not None:
                 return require_unit_position(unit, game_state)
@@ -207,9 +278,10 @@ class GreedyBot:
         if self.randomness > 0 and random.random() < self.randomness:
             return random.choice(valid_destinations)
 
-        # Move toward nearest enemy (simplified - just pick first destination)
-        return valid_destinations[0]
-    
+        if game_state is None:
+            return valid_destinations[0]
+        return _dest_toward_enemies(valid_destinations, unit, game_state)
+
     def select_shooting_target(self, valid_targets: List[str], game_state=None) -> str:
         """
         Greedy target selection: prioritize low HP enemies.
@@ -276,6 +348,7 @@ class DefensiveBot:
         return valid_actions[0] if valid_actions else WAIT_ACTION
     
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
+        """Defensif : s'eloigne de l'ennemi le plus proche (maintien de distance)."""
         if not valid_destinations:
             if game_state is not None:
                 return require_unit_position(unit, game_state)
@@ -285,9 +358,10 @@ class DefensiveBot:
         if self.randomness > 0 and random.random() < self.randomness:
             return random.choice(valid_destinations)
 
-        # Pick last destination (tends to move away)
-        return valid_destinations[-1]
-    
+        if game_state is None:
+            return valid_destinations[0]
+        return _dest_away_from_enemies(valid_destinations, unit, game_state)
+
     def select_shooting_target(self, valid_targets: List[str]) -> str:
         if not valid_targets:
             return ""
@@ -350,17 +424,8 @@ class DefensiveBot:
 
         nearby_threats = self._count_nearby_threats(active_unit, game_state)
 
-        if phase == "move":
-            if nearby_threats > 0:
-                # Menacé : décrocher (fall back si engagé) ou repositionner.
-                retreat = _first_action_in(valid_actions, mi.FALL_BACK_DIRS)
-                if retreat is None:
-                    retreat = _first_action_in(valid_actions, mi.MOVE_DIRS)
-                if retreat is not None:
-                    return retreat
-            if WAIT_ACTION in valid_actions:
-                return WAIT_ACTION
-            return valid_actions[0]
+        # La phase move est routee par le wrapper vers select_movement_destination (repli
+        # geometrique) : cette methode ne la traite plus.
 
         if phase == "shoot":
             shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
@@ -432,13 +497,11 @@ class ControlBot:
         shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
         if shoot is not None:
             return shoot
-        move = _first_action_in(valid_actions, mi.MOVE_DIRS)
-        if move is not None:
-            return move
         return valid_actions[0]
 
     def select_action_with_state(self, valid_actions: List[int], game_state) -> int:
-        """Objective-aware action selection across all phases."""
+        """Objective-aware action selection. Le move est routee par le wrapper vers
+        select_movement_destination : cette methode ne traite plus la phase move."""
         if not valid_actions:
             return WAIT_ACTION
         phase = require_key(game_state, "phase")
@@ -456,8 +519,6 @@ class ControlBot:
 
         on_objective = self._is_on_objective(active_unit, game_state)
 
-        if phase == "move":
-            return self._move_action(valid_actions, active_unit, game_state, on_objective)
         if phase == "shoot":
             return self._shoot_action(valid_actions)
         if phase == "charge":
@@ -501,21 +562,23 @@ class ControlBot:
             self._deployment_repeat_count = 1
         return chosen
 
-    def _move_action(
-        self,
-        valid_actions: List[int],
-        unit: Dict[str, Any],
-        game_state: Dict[str, Any],
-        on_objective: bool,
-    ) -> int:
-        """Move toward objectives; hold position if already on one."""
-        if on_objective:
-            if WAIT_ACTION in valid_actions:
-                return WAIT_ACTION
-        move = _first_action_in(valid_actions, mi.MOVE_DIRS)
-        if move is not None:
-            return move
-        return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
+    def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
+        """Vers l'objectif le plus proche ; tient sa position s'il est deja dessus.
+
+        « Tenir » = renvoyer l'hex courant (le wrapper le traduit en WAIT), `start_pos` etant
+        exclu du pool donc jamais une destination legale.
+        """
+        if not valid_destinations:
+            if game_state is not None:
+                return require_unit_position(unit, game_state)
+            return get_unit_coordinates(unit)
+        if self.randomness > 0 and random.random() < self.randomness:
+            return random.choice(valid_destinations)
+        if game_state is None:
+            return valid_destinations[0]
+        if self._is_on_objective(unit, game_state):
+            return require_unit_position(unit, game_state)
+        return _dest_toward_objective(valid_destinations, unit, game_state)
 
     def _shoot_action(self, valid_actions: List[int]) -> int:
         """Shoot whenever possible."""
@@ -686,9 +749,6 @@ class AggressiveSmartBot:
         shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
         if shoot is not None:
             return shoot
-        move = _first_action_in(valid_actions, mi.MOVE_DIRS)
-        if move is not None:
-            return move
         return valid_actions[0]
 
     def select_action_with_state(self, valid_actions: List[int], game_state) -> int:
@@ -705,11 +765,7 @@ class AggressiveSmartBot:
         current_player = require_key(game_state, "current_player")
         active = _find_active_unit_for_bot(game_state, current_player)
 
-        if phase == "move":
-            move = _first_action_in(valid_actions, mi.MOVE_DIRS)
-            if move is not None:
-                return move
-            return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
+        # La phase move est routee par le wrapper vers select_movement_destination.
 
         if phase == "shoot":
             if any(a in valid_actions for a in mi.SHOOT_SLOTS):
@@ -727,6 +783,18 @@ class AggressiveSmartBot:
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         return valid_actions[0]
+
+    def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
+        """Agressif : pousse toujours vers l'ennemi le plus proche."""
+        if not valid_destinations:
+            if game_state is not None:
+                return require_unit_position(unit, game_state)
+            return get_unit_coordinates(unit)
+        if self.randomness > 0 and random.random() < self.randomness:
+            return random.choice(valid_destinations)
+        if game_state is None:
+            return valid_destinations[0]
+        return _dest_toward_enemies(valid_destinations, unit, game_state)
 
     def _deploy(self, valid_actions: List[int], game_state) -> int:
         episode_marker = game_state.get("episode_number")
@@ -796,15 +864,7 @@ class DefensiveSmartBot:
         current_player = require_key(game_state, "current_player")
         active = _find_active_unit_for_bot(game_state, current_player)
 
-        if phase == "move":
-            # Garde ses distances : décroche (fall back) sinon move normal.
-            retreat = _first_action_in(valid_actions, mi.FALL_BACK_DIRS)
-            if retreat is not None:
-                return retreat
-            move = _first_action_in(valid_actions, mi.MOVE_DIRS)
-            if move is not None:
-                return move
-            return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
+        # La phase move est routee par le wrapper vers select_movement_destination (repli).
 
         if phase == "shoot":
             if any(a in valid_actions for a in mi.SHOOT_SLOTS):
@@ -820,6 +880,18 @@ class DefensiveSmartBot:
             return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
 
         return valid_actions[0]
+
+    def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
+        """Defensif : garde ses distances, s'eloigne de l'ennemi le plus proche."""
+        if not valid_destinations:
+            if game_state is not None:
+                return require_unit_position(unit, game_state)
+            return get_unit_coordinates(unit)
+        if self.randomness > 0 and random.random() < self.randomness:
+            return random.choice(valid_destinations)
+        if game_state is None:
+            return valid_destinations[0]
+        return _dest_away_from_enemies(valid_destinations, unit, game_state)
 
     def _deploy(self, valid_actions: List[int], game_state) -> int:
         episode_marker = game_state.get("episode_number")
@@ -875,9 +947,6 @@ class AdaptiveBot:
         shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
         if shoot is not None:
             return shoot
-        move = _first_action_in(valid_actions, mi.MOVE_DIRS)
-        if move is not None:
-            return move
         return valid_actions[0]
 
     def select_action_with_state(self, valid_actions: List[int], game_state) -> int:
@@ -896,8 +965,7 @@ class AdaptiveBot:
         turn = int(game_state.get("turn", 1))
         posture = self._evaluate_posture(game_state, current_player, turn)
 
-        if phase == "move":
-            return self._move(valid_actions, posture, turn)
+        # La phase move est routee par le wrapper vers select_movement_destination (posture).
         if phase == "shoot":
             return self._shoot(valid_actions, active, game_state, posture)
         if phase == "charge":
@@ -919,32 +987,26 @@ class AdaptiveBot:
             return "winning"
         return "losing"
 
-    def _move(self, valid_actions: List[int], posture: str, turn: int) -> int:
+    def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
+        """Destination selon la posture (le type de move est infere par le moteur) :
+        early -> rush objectif ; losing -> pousse vers l'ennemi ; winning -> garde ses distances.
+        """
+        if not valid_destinations:
+            if game_state is not None:
+                return require_unit_position(unit, game_state)
+            return get_unit_coordinates(unit)
+        if self.randomness > 0 and random.random() < self.randomness:
+            return random.choice(valid_destinations)
+        if game_state is None:
+            return valid_destinations[0]
+        current_player = require_key(game_state, "current_player")
+        turn = int(game_state.get("turn", 1))
+        posture = self._evaluate_posture(game_state, current_player, turn)
+        if posture == "winning":
+            return _dest_away_from_enemies(valid_destinations, unit, game_state)
         if posture == "early":
-            # Rush objectifs : advance pour couvrir la distance, sinon move normal.
-            adv = _first_action_in(valid_actions, mi.ADVANCE_DIRS)
-            if adv is not None:
-                return adv
-            move = _first_action_in(valid_actions, mi.MOVE_DIRS)
-            if move is not None:
-                return move
-        elif posture == "winning":
-            # Défensif : garde ses distances (fall back), sinon move normal.
-            retreat = _first_action_in(valid_actions, mi.FALL_BACK_DIRS)
-            if retreat is not None:
-                return retreat
-            move = _first_action_in(valid_actions, mi.MOVE_DIRS)
-            if move is not None:
-                return move
-        else:
-            # Losing : agressif, move normal puis advance.
-            move = _first_action_in(valid_actions, mi.MOVE_DIRS)
-            if move is not None:
-                return move
-            adv = _first_action_in(valid_actions, mi.ADVANCE_DIRS)
-            if adv is not None:
-                return adv
-        return WAIT_ACTION if WAIT_ACTION in valid_actions else valid_actions[0]
+            return _dest_toward_objective(valid_destinations, unit, game_state)
+        return _dest_toward_enemies(valid_destinations, unit, game_state)
 
     def _shoot(
         self,
@@ -1047,17 +1109,14 @@ class TacticalBot:
                 return mi.ACTION_CHARGE
             if mi.ACTION_FIGHT in valid_actions:  # Fight
                 return mi.ACTION_FIGHT
-            move = _first_action_in(valid_actions, mi.MOVE_DIRS)
-            if move is not None:  # Move
-                return move
             return valid_actions[0]
 
     def _select_move_action(self, valid_actions: List[int], game_state: Optional[Dict]) -> int:
-        """Movement phase: advance if out of range, reposition for LoS."""
-        # Always prefer moving if we can improve position
-        move = _first_action_in(valid_actions, mi.MOVE_DIRS)
-        if move is not None:
-            return move
+        """Movement phase (stateless fallback). Le move spatial passe par
+        select_movement_destination : ici on prefere agir plutot qu'attendre."""
+        non_wait = [a for a in valid_actions if a != WAIT_ACTION]
+        if non_wait:
+            return non_wait[0]
         if WAIT_ACTION in valid_actions:  # Wait
             return WAIT_ACTION
         return valid_actions[0] if valid_actions else WAIT_ACTION

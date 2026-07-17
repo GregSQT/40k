@@ -13,12 +13,12 @@
     "max_turns_per_episode": 5,
     "n_envs": 48,
     "model_params": {
-      "policy": "MlpPolicy",
+      "policy": "MultiInputPolicy",
       "learning_rate": {
         "initial": 0.002,
         "final": 0.0015
       },
-      "n_steps": 16384,
+      "n_steps": 8192,
       "batch_size": 1024,
       "n_epochs": 3,
       "gamma": 0.99,
@@ -38,7 +38,10 @@
         "net_arch": [
           320,
           320
-        ]
+        ],
+        "features_extractor_kwargs": {
+          "cnn_features": 256
+        }
       },
       "verbose": 0
     },
@@ -121,11 +124,10 @@
     },
     "observation_params": {
       "obs_size": 108,
-      "action_space_size": 41,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=41 (26 micro [6 move + 6 advance + 6 fall back + 1 wait + 5 shoot + 1 charge + 1 fight] + 15 macro [5 objectifs x 3 intents])."
+      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=108 = vecteur (16 global + 5 squad agg + 7x6 top-k figs + 9x5 enemy slots) ; la grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
     },
     "step_log_buffer_size": 200,
     "vec_normalize": {
@@ -206,12 +208,12 @@
     "max_turns_per_episode": 5,
     "n_envs": 48,
     "model_params": {
-      "policy": "MlpPolicy",
+      "policy": "MultiInputPolicy",
       "learning_rate": {
         "initial": 0.0005,
         "final": 0.0003
       },
-      "n_steps": 16384,
+      "n_steps": 8192,
       "batch_size": 1024,
       "n_epochs": 3,
       "gamma": 0.99,
@@ -231,7 +233,10 @@
         "net_arch": [
           320,
           320
-        ]
+        ],
+        "features_extractor_kwargs": {
+          "cnn_features": 256
+        }
       },
       "verbose": 0
     },
@@ -314,11 +319,10 @@
     },
     "observation_params": {
       "obs_size": 108,
-      "action_space_size": 41,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=41 (26 micro [6 move + 6 advance + 6 fall back + 1 wait + 5 shoot + 1 charge + 1 fight] + 15 macro [5 objectifs x 3 intents])."
+      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=108 = vecteur (16 global + 5 squad agg + 7x6 top-k figs + 9x5 enemy slots) ; la grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
     },
     "step_log_buffer_size": 200,
     "vec_normalize": {
@@ -400,12 +404,12 @@
     "max_turns_per_episode": 5,
     "n_envs": 48,
     "model_params": {
-      "policy": "MlpPolicy",
+      "policy": "MultiInputPolicy",
       "learning_rate": {
         "initial": 0.002,
         "final": 0.0015
       },
-      "n_steps": 16384,
+      "n_steps": 8192,
       "batch_size": 1024,
       "n_epochs": 3,
       "gamma": 0.99,
@@ -425,7 +429,10 @@
         "net_arch": [
           320,
           320
-        ]
+        ],
+        "features_extractor_kwargs": {
+          "cnn_features": 256
+        }
       },
       "verbose": 0
     },
@@ -508,11 +515,10 @@
     },
     "observation_params": {
       "obs_size": 108,
-      "action_space_size": 41,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=41 (26 micro [6 move + 6 advance + 6 fall back + 1 wait + 5 shoot + 1 charge + 1 fight] + 15 macro [5 objectifs x 3 intents])."
+      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=108 = vecteur (16 global + 5 squad agg + 7x6 top-k figs + 9x5 enemy slots) ; la grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
     },
     "step_log_buffer_size": 200,
     "vec_normalize": {
@@ -671,20 +677,19 @@
     },
     "observation_params": {
       "obs_size": 108,
-      "action_space_size": 41,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=41 (26 micro [6 move + 6 advance + 6 fall back + 1 wait + 5 shoot + 1 charge + 1 fight] + 15 macro [5 objectifs x 3 intents])."
+      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=108 = vecteur (16 global + 5 squad agg + 7x6 top-k figs + 9x5 enemy slots) ; la grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
     },
     "step_log_buffer_size": 200,
     "model_params": {
-      "policy": "MlpPolicy",
+      "policy": "MultiInputPolicy",
       "learning_rate": {
         "initial": 0.0005,
         "final": 0.0003
       },
-      "n_steps": 16384,
+      "n_steps": 8192,
       "batch_size": 1024,
       "n_epochs": 3,
       "gamma": 0.99,
@@ -704,7 +709,10 @@
         "net_arch": [
           320,
           320
-        ]
+        ],
+        "features_extractor_kwargs": {
+          "cnn_features": 256
+        }
       },
       "verbose": 0
     },
@@ -868,20 +876,19 @@
     },
     "observation_params": {
       "obs_size": 108,
-      "action_space_size": 41,
       "perception_radius": 25,
       "max_nearby_units": 12,
       "max_valid_targets": 5,
-      "justification": "PR4 squad pipeline — obs_size=108 (16 global + 5 squad agg + 7×6 top-k figs + 9×5 enemy slots), action_space_size=41 (26 micro [6 move + 6 advance + 6 fall back + 1 wait + 5 shoot + 1 charge + 1 fight] + 15 macro [5 objectifs x 3 intents])."
+      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=108 = vecteur (16 global + 5 squad agg + 7x6 top-k figs + 9x5 enemy slots) ; la grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
     },
     "step_log_buffer_size": 200,
     "model_params": {
-      "policy": "MlpPolicy",
+      "policy": "MultiInputPolicy",
       "learning_rate": {
         "initial": 0.0005,
         "final": 0.0003
       },
-      "n_steps": 16384,
+      "n_steps": 8192,
       "batch_size": 1024,
       "n_epochs": 3,
       "gamma": 0.99,
@@ -901,7 +908,10 @@
         "net_arch": [
           320,
           320
-        ]
+        ],
+        "features_extractor_kwargs": {
+          "cnn_features": 256
+        }
       },
       "verbose": 0
     },

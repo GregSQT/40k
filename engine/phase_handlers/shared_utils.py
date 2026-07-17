@@ -27,6 +27,9 @@ MovePlanEntry = Union[
 ]
 MovePlan = Sequence[MovePlanEntry]
 from engine.action_log_utils import append_action_log
+# `spatial_grid` ne depend que de `hex_utils` -> import direct sans cycle (il importe
+# `get_squad_move_budget` en local dans sa seule fonction qui en a besoin).
+from engine.spatial_grid import GRID_CELL_COUNT
 from engine.combat_utils import (
     get_unit_coordinates,
     normalize_coordinates,
@@ -3796,8 +3799,16 @@ def execute_squad_move(
     if not validate_move_plan(plan, game_state, constraints):
         return False
     commit_move(plan, game_state, move_type)
-    # Nettoyage du roll partage apres commit reussi (cf. spec).
     if move_type == "advance":
+        # §4.3 — fige le jet dans `advance_rolls`, le systeme AUTORITAIRE (miroir du writer PvP
+        # movement_handlers.py:801-809). `commit_move` ne marque QUE `units_advanced` : sans cette
+        # ligne, `_advance_roll_for` trouvait l'escouade advancee mais sans jet, renvoyait None,
+        # et tout pool reconstruit ensuite pour elle repartait silencieusement sur le budget
+        # NORMAL au lieu de M+jet. Le gym ecrivait son jet dans `_squad_advance_rolls`, que
+        # personne d'autre ne lit.
+        # `execute_squad_move` n'a qu'un appelant (chemin gym, w40k_core) -> zero impact PvP.
+        game_state.setdefault("advance_rolls", {})[str(squad_id)] = int(advance_roll)
+        # Nettoyage du roll partage apres commit reussi (cf. spec).
         game_state.pop("current_advance_roll", None)
     return True
 
@@ -7234,19 +7245,20 @@ def squad_consolidate_plan(
 # Returns np-compatible list[int] de longueur 16, valeurs ∈ {0, 1}.
 
 
-SQUAD_ACTION_SIZE = 26
-SQUAD_ACTION_MOVE_DIR_BASE = 0
-SQUAD_ACTION_MOVE_DIR_COUNT = 6
-# PR4 4e-v_a : Advance et Fall Back ont chacun 6 directions (agent decide, aucune valeur par défaut)
-SQUAD_ACTION_ADVANCE_DIR_BASE = 6
-SQUAD_ACTION_ADVANCE_DIR_COUNT = 6
-SQUAD_ACTION_FALL_BACK_DIR_BASE = 12
-SQUAD_ACTION_FALL_BACK_DIR_COUNT = 6
-SQUAD_ACTION_WAIT = 18
-SQUAD_ACTION_SHOOT_SLOT_BASE = 19
+# Refonte spatiale du move (move_action_space_spatial_rework.md §6.2) : une action de mouvement
+# ne designe plus une DIRECTION (l'ancien 0-5, qui envoyait l'escouade sur l'hex adjacent et lui
+# faisait consommer 1/25e de son budget — root cause §3) mais une CELLULE de la grille
+# egocentrique. Le TYPE de move n'est PAS une dimension d'action : il est infere du cout
+# geodesique de la cellule (§6.2), ce qui elimine le combo illegal type x cellule que
+# MaskablePPO ne saurait pas masquer (il masque chaque dimension independamment, §6.1 option D).
+SQUAD_ACTION_MOVE_CELL_BASE = 0
+SQUAD_ACTION_MOVE_CELL_COUNT = GRID_CELL_COUNT  # 32x32 = 1024
+SQUAD_ACTION_WAIT = SQUAD_ACTION_MOVE_CELL_BASE + SQUAD_ACTION_MOVE_CELL_COUNT  # 1024
+SQUAD_ACTION_SHOOT_SLOT_BASE = SQUAD_ACTION_WAIT + 1  # 1025
 SQUAD_ACTION_SHOOT_SLOT_COUNT = 5
-SQUAD_ACTION_CHARGE = 24
-SQUAD_ACTION_FIGHT = 25
+SQUAD_ACTION_CHARGE = SQUAD_ACTION_SHOOT_SLOT_BASE + SQUAD_ACTION_SHOOT_SLOT_COUNT  # 1030
+SQUAD_ACTION_FIGHT = SQUAD_ACTION_CHARGE + 1  # 1031
+SQUAD_ACTION_SIZE = SQUAD_ACTION_FIGHT + 1  # 1032
 
 
 def _squad_is_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:
@@ -7264,6 +7276,179 @@ def _squad_is_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:
     ez = get_engagement_zone(game_state)
     stub = {"id": str(squad_id), "player": int(entry.get("player", -1))}
     return unit_within_engagement_zone_footprints(game_state, stub, ez, max_distance=ez)
+
+
+def squad_advance_or_fall_back_allowed(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """Une escouade qui a deja Advance ou Fall Back ce tour ne peut plus en refaire un.
+
+    Regle unique, appelee par le masque ET par le decoder (qui decide s'il transmet le jet
+    d'Advance au constructeur du pool). L'ecrire aux deux endroits — ce qu'a fait la 1re version
+    de la refonte — cree deux verites qui peuvent deriver : le decoder batirait un pool au budget
+    Advance que le masque refuserait ensuite, ou l'inverse.
+    """
+    sid = str(squad_id)
+    return (
+        sid not in game_state.get("units_advanced", set())  # get allowed
+        and sid not in game_state.get("units_fled", set())  # get allowed
+    )
+
+
+def classify_squad_move_type(
+    in_enemy_er: bool, normal_budget: int, geodesic_cost: float
+) -> str:
+    """LA regle d'inference du type de move (spec §6.2), sous forme PURE.
+
+    - escouade engagee -> `fall_back` (Normal exige d'etre unengaged, 09.05 ; Normal et Fall Back
+      s'excluent donc mutuellement — aucun choix a faire).
+    - cout <= M        -> `normal`
+    - cout > M         -> `advance`  (09.06 : distance max = M + jet)
+
+    Le cout est la distance de CHEMIN (regle 03), pas la distance a vol d'oiseau : une cellule
+    proche mais atteignable seulement en contournant un mur peut exiger un Advance.
+
+    Pourquoi deduire plutot que laisser l'agent choisir : avec un type en dimension d'action
+    separee, MaskablePPO masquerait type et cellule INDEPENDAMMENT -> le combo `normal` + cellule
+    au-dela de M serait illegal mais non masque (le defaut qui fait rejeter l'option D en §6.1).
+    Perte nulle : un Advance vers une cellule atteignable en Normal est strictement domine (il
+    coute le tir non-ASSAULT et la charge sans rien apporter).
+
+    Forme pure VOULUE : `in_enemy_er` et `normal_budget` sont des invariants de l'escouade, pas de
+    la cellule. Le masque les resout UNE fois puis classe ses ~1000 cellules ; les resoudre par
+    cellule coutait 1,16 ms pour 270 cellules (48% du masque), via un scan de `units` et un calcul
+    d'empreintes d'engagement a chaque appel. La regle reste ecrite une seule fois : `infer_squad_
+    move_type` n'est qu'un resolveur de contexte au-dessus d'elle.
+    """
+    if in_enemy_er:
+        return "fall_back"
+    if geodesic_cost <= normal_budget:
+        return "normal"
+    return "advance"
+
+
+def infer_squad_move_type(
+    game_state: Dict[str, Any], squad_id: str, geodesic_cost: float
+) -> str:
+    """`classify_squad_move_type` avec resolution du contexte depuis `game_state`.
+
+    A n'utiliser que pour UNE cellule (decoder). En boucle, resoudre le contexte une fois et
+    appeler `classify_squad_move_type` directement.
+    """
+    return classify_squad_move_type(
+        _squad_is_in_enemy_er(game_state, squad_id),
+        get_squad_move_budget(squad_id, game_state, "normal"),
+        geodesic_cost,
+    )
+
+
+MOVE_CELL_MAP_CACHE_KEY = "_squad_move_cell_maps"
+
+
+def store_squad_move_cell_map(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    cell_map: Dict[int, Tuple[Tuple[int, int], float]],
+) -> None:
+    """Memoise la carte de cellules construite au MASQUE, pour que le decoder rejoue la meme.
+
+    Motif : le decoder doit executer EXACTEMENT la cellule que le masque a autorisee. La
+    reconstruire couterait un 2e BFS par step (~6,4 ms sur board x5) et, surtout, rouvrirait la
+    divergence masque/execution si l'etat avait bouge entre les deux. Meme motif que
+    `_squad_advance_rolls` (jet tire au masque, relu au decodage).
+
+    La carte est TAMPONNEE par (ancre, phase) : une carte periemee est un mismatch
+    masque/execution silencieux, donc `read_squad_move_cell_map` leve au lieu de l'utiliser.
+    """
+    anchor = require_unit_position(squad_id, game_state)
+    game_state.setdefault(MOVE_CELL_MAP_CACHE_KEY, {})[str(squad_id)] = {
+        "anchor": anchor,
+        "phase": str(game_state.get("phase", "")),
+        "map": cell_map,
+    }
+
+
+def read_squad_move_cell_map(
+    game_state: Dict[str, Any], squad_id: str
+) -> Dict[int, Tuple[Tuple[int, int], float]]:
+    """Relit la carte memoisee par le masque. Leve si absente ou perimee.
+
+    Aucun fallback : reconstruire ici masquerait une rupture du contrat « masque avant decodage »
+    et pourrait executer une cellule que le masque n'avait pas autorisee.
+    """
+    entry = game_state.get(MOVE_CELL_MAP_CACHE_KEY, {}).get(str(squad_id))  # get allowed
+    if entry is None:
+        raise ValueError(
+            f"read_squad_move_cell_map: aucune carte de cellules pour squad {squad_id} — "
+            f"get_squad_action_mask_and_eligible_units doit etre appele avant le decodage"
+        )
+    anchor = require_unit_position(squad_id, game_state)
+    phase = str(game_state.get("phase", ""))
+    if entry["anchor"] != anchor or entry["phase"] != phase:
+        raise ValueError(
+            f"read_squad_move_cell_map: carte perimee pour squad {squad_id} — construite en "
+            f"phase {entry['phase']!r} depuis l'ancre {entry['anchor']}, relue en phase {phase!r} "
+            f"depuis {anchor}. Executer cette carte designerait d'autres hexes que ceux masques."
+        )
+    return entry["map"]
+
+
+def clear_squad_move_cell_map(game_state: Dict[str, Any], squad_id: str) -> None:
+    """Oublie la carte d'une escouade (fin d'activation). Miroir du pop de `_squad_advance_rolls`."""
+    game_state.get(MOVE_CELL_MAP_CACHE_KEY, {}).pop(str(squad_id), None)  # get allowed
+
+
+def build_squad_move_cell_map(
+    game_state: Dict[str, Any], squad_id: str, advance_roll: Optional[int]
+) -> Dict[int, Tuple[Tuple[int, int], float]]:
+    """Cellules de move jouables -> {cell_index: ((col,row), cout_geodesique)}.
+
+    SOURCE UNIQUE du masque (T2) ET du decodage (T3) : les deux lisent ce meme dict, donc une
+    cellule masquee=1 a toujours une destination executable, et l'inverse. C'est ce qui supprime
+    la classe de bugs « mask/execution mismatch ».
+
+    Un SEUL BFS suffit (spec §7 T2) :
+      - engagee   -> pool au budget Fall Back (= M). Normal est interdit (09.05 unengaged), donc
+                     Normal et Fall Back ne coexistent jamais : rien a fusionner.
+      - unengagee -> pool au budget ADVANCE (M + jet). Le pool Normal y est INCLUS (budget
+                     superieur) ; c'est le cout geodesique conserve qui separe ensuite les deux
+                     regimes (cf. `infer_squad_move_type`). Verifie par test : classer le pool
+                     Advance par cout <= M reproduit exactement le pool construit au budget M.
+
+    `advance_roll` : jet pre-tire par le caller (§10.4 — divergence de timing vs 09.06 enterinee).
+    A None, le budget Advance est inconnu : le pool est construit au budget NORMAL, donc aucune
+    cellule Advance n'existe. C'est exactement la semantique de l'ancien masque directionnel
+    (« Si None, mask Advance fully a 0 »), pas une valeur par defaut masquant une erreur.
+    """
+    from engine.phase_handlers.movement_handlers import movement_build_valid_destinations_pool
+    from engine.spatial_grid import grid_half_extent_subhex, project_pool_to_grid
+
+    # `units_cache` absent = moteur non initialise (erreur), pas un cas metier -> require_key.
+    # En revanche un squad ABSENT du cache est legitime (mort/pas deploye) -> aucune cellule,
+    # miroir du contrat de `build_squad_action_mask` (« squad absent/mort -> mask all-zero »).
+    units_cache = require_key(game_state, "units_cache")
+    entry = units_cache.get(squad_id)
+    if entry is None:
+        return {}
+
+    if _squad_is_in_enemy_er(game_state, squad_id):
+        budget = get_squad_move_budget(squad_id, game_state, "fall_back")
+    elif advance_roll is None:
+        budget = get_squad_move_budget(squad_id, game_state, "normal")
+    else:
+        budget = get_squad_move_budget(squad_id, game_state, "advance", advance_roll=advance_roll)
+
+    # Pas de garde `budget <= 0` ici : un budget nul est un etat legitime (`max(0, MOVE - malus)`,
+    # Take to the skies 21.03) et le pool le traite deja — il renvoie simplement zero destination,
+    # donc zero cellule jouable. Ajouter une garde reviendrait a court-circuiter le moteur.
+    costs: Dict[Tuple[int, int], float] = {}
+    movement_build_valid_destinations_pool(
+        game_state, squad_id, read_only=True, move_budget_override=budget, out_costs=costs
+    )
+
+    # Ancre = units_cache, la MEME source que `require_unit_position` d'ou part le pool : grille et
+    # pool sont donc concentriques.
+    anchor_col, anchor_row = int(entry["col"]), int(entry["row"])
+    half_extent = grid_half_extent_subhex(game_state, squad_id)
+    return project_pool_to_grid(costs, anchor_col, anchor_row, half_extent)
 
 
 def _squad_direction_move_legal(
@@ -7307,12 +7492,13 @@ def build_squad_action_mask(
     squad_id: str,
     enemy_slot_ids: Optional[List[Optional[str]]] = None,
     advance_roll: Optional[int] = None,
+    move_cell_map: Optional[Dict[int, Tuple[Tuple[int, int], float]]] = None,
 ) -> List[int]:
-    """Construit le masque 26 actions pour une escouade active (PR4 4e-v_a).
+    """Construit le masque `SQUAD_ACTION_SIZE` (1032) pour une escouade active.
 
-    Decision utilisateur : agent decide direction Advance/Fall Back. Per-direction
-    dry-run validation : chaque direction est mask=1 SEULEMENT si le plan rigide
-    correspondant est valide (aucune valeur par défaut).
+    Phase move : les actions 0..1023 designent une CELLULE de la grille egocentrique, pas une
+    direction (refonte spatiale, cf. `build_squad_move_cell_map`). Une cellule est mask=1 ssi
+    elle porte une destination du pool BFS — le pool reste la seule autorite des regles.
 
     Phase courante lue depuis game_state['phase']. Si squad absent/mort, mask all-zero.
 
@@ -7320,8 +7506,14 @@ def build_squad_action_mask(
     enemy squads tries par str(sid) (PR4 4a coherence ; PR4 4d stable mapping disponible
     via get_enemy_slot_mapping).
 
-    advance_roll : pour le mask des actions Advance (6-11), caller doit fournir le
-    roll D6 partage. Si None, mask Advance fully a 0 (impossible de savoir le budget).
+    advance_roll : jet D6 pre-tire, partage avec le decoder. A None, le pool est construit au
+    budget normal, donc aucune cellule Advance n'existe (semantique de l'ancien masque
+    directionnel : « Si None, mask Advance fully a 0 »).
+
+    move_cell_map : carte deja construite par l'appelant (le decoder la construit une fois puis la
+    memoise pour le decodage, cf. `store_squad_move_cell_map`). A None, elle est construite ici —
+    ce qui evite un 2e BFS quand l'appelant l'a deja, sans obliger les appelants isoles (tests,
+    outils) a la fabriquer.
     """
     mask = [0] * SQUAD_ACTION_SIZE
     units_cache = game_state.get("units_cache", {})  # get allowed
@@ -7346,27 +7538,37 @@ def build_squad_action_mask(
             0, SQUAD_ACTION_SHOOT_SLOT_COUNT - len(enemy_sorted)
         )
 
-    # --- Move phase: directions Normal (0-5), Advance (6-11), Fall Back (12-17) ---
+    # --- Move phase: cellules de la grille egocentrique (0..1023) ---
+    # Remplace les 18 dry-runs directionnels (3 types x 6 directions), qui n'exploraient que les
+    # 6 hexes ADJACENTS a l'ancre : l'escouade ne pouvait avancer que d'1 subhex par phase, soit
+    # 1/25e de son budget sur un board x5 (root cause §3). Un seul BFS au budget Advance, projete
+    # sur la grille, expose desormais TOUT le disque atteignable.
     if phase == "move":
         if not has_moved:
-            # Normal move : interdit si in ER (locked). Per-direction dry-run.
-            if not in_er:
-                for d in range(SQUAD_ACTION_MOVE_DIR_COUNT):
-                    if _squad_direction_move_legal(game_state, squad_id, d, "normal"):
-                        mask[SQUAD_ACTION_MOVE_DIR_BASE + d] = 1
-                # Advance : per-direction validation avec roll partage.
-                # Si advance_roll=None : impossible d evaluer le budget, mask 0.
-                if advance_roll is not None and not has_advanced and not has_fled:
-                    for d in range(SQUAD_ACTION_ADVANCE_DIR_COUNT):
-                        if _squad_direction_move_legal(
-                            game_state, squad_id, d, "advance", advance_roll=advance_roll
-                        ):
-                            mask[SQUAD_ACTION_ADVANCE_DIR_BASE + d] = 1
-            # Fall Back : uniquement si in ER ennemi. Per-direction dry-run.
-            if in_er and not has_advanced and not has_fled:
-                for d in range(SQUAD_ACTION_FALL_BACK_DIR_COUNT):
-                    if _squad_direction_move_legal(game_state, squad_id, d, "fall_back"):
-                        mask[SQUAD_ACTION_FALL_BACK_DIR_BASE + d] = 1
+            # Miroir EXACT des gardes de l'ancien masque directionnel : `has_advanced`/`has_fled`
+            # fermaient Advance et Fall Back, mais PAS le Normal. Regle partagee avec le decoder.
+            advance_or_fall_back_allowed = squad_advance_or_fall_back_allowed(game_state, squad_id)
+            cell_map = (
+                move_cell_map
+                if move_cell_map is not None
+                else build_squad_move_cell_map(
+                    game_state, squad_id, advance_roll if advance_or_fall_back_allowed else None
+                )
+            )
+            # Invariants de l'escouade resolus UNE fois : les reresoudre par cellule coutait 48%
+            # du masque (scan de `units` + empreintes d'engagement a chaque appel).
+            normal_budget = get_squad_move_budget(squad_id, game_state, "normal")
+            for cell_idx, (_dest, cost) in cell_map.items():
+                # Type classe par `classify_squad_move_type`, la MEME regle que le decoder (T3)
+                # appliquera pour executer la cellule. La rejouer en ligne ici (`cost >
+                # normal_budget`) creerait une 2e implementation, donc un risque de divergence
+                # masque/execution — precisement ce que cette refonte supprime.
+                if classify_squad_move_type(in_er, normal_budget, cost) != "normal":
+                    # `fall_back` (escouade engagee) et `advance` sont fermes par has_advanced /
+                    # has_fled ; le Normal, lui, ne l'est pas (miroir exact du masque directionnel).
+                    if not advance_or_fall_back_allowed:
+                        continue
+                mask[SQUAD_ACTION_MOVE_CELL_BASE + cell_idx] = 1
         mask[SQUAD_ACTION_WAIT] = 1
 
     # --- Shoot phase: shoot slots 19-23 ---

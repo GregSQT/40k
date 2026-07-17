@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from engine.action_decoder import ActionDecoder, ActionValidationError
+from engine.macro_intents import TOTAL_ACTION_SIZE
 from engine.phase_handlers.shared_utils import build_units_cache
 
 
@@ -344,7 +345,9 @@ class TestConvertGymActionShoot:
         d = _make_decoder()
         gs = self._make_gs()  # _can_advance=False
         mask = d.get_action_mask(gs)
-        assert len(mask) == 31
+        # Taille derivee du moteur (macro_intents.TOTAL_ACTION_SIZE), plus de la config : le
+        # masque legacy n'occupe que ses indices bas, la longueur du tableau ne le concerne pas.
+        assert len(mask) == TOTAL_ACTION_SIZE
         for slot in [12, 13, 14, 15]:
             assert bool(mask[slot]) is False, f"mask[{slot}] should be False when cannot advance"
 
@@ -356,7 +359,9 @@ class TestConvertGymActionShoot:
         gs["shoot_activation_pool"] = ["1"]
         gs["active_shooting_unit"] = "1"
         mask = d.get_action_mask(gs)
-        assert len(mask) == 31
+        # Taille derivee du moteur (macro_intents.TOTAL_ACTION_SIZE), plus de la config : le
+        # masque legacy n'occupe que ses indices bas, la longueur du tableau ne le concerne pas.
+        assert len(mask) == TOTAL_ACTION_SIZE
         for slot in [12, 13, 14, 15]:
             assert bool(mask[slot]) is False, f"legacy advance slot {slot} retiré en shoot (advance→move)"
 
@@ -460,13 +465,21 @@ class TestConvertGymActionEdgeCases:
         # Pas d'unités éligibles en command → advance_phase
         assert result["action"] in ("advance_phase", "skip")
 
-    def test_action_space_size_is_31(self):
-        """conv_space_31 : l'espace d'action est de 31 (0-30) en Phase 2."""
-        d = _make_decoder()
-        assert d.total_action_size == 31
-        assert d.normalize_action_input(30, "shoot", "gym", 31) == 30
+    def test_action_space_size_is_derived_from_the_engine_not_the_config(self):
+        """La taille de l'action space vient du plan d'actions du moteur, pas de la config.
+
+        Remplace `conv_space_31`, qui verifiait que le decodeur OBEISSAIT au
+        `observation_params.action_space_size` de la config. C'etait une 2e source de verite pour
+        un fait que le moteur determine seul : elle ne pouvait qu'avoir tort (une config perimee se
+        manifestait par un `IndexError` opaque au fond du masque). La cle n'est plus lue.
+        """
+        d = _make_decoder()  # config volontairement porteuse d'un action_space_size=31 obsolete
+        assert d.total_action_size == TOTAL_ACTION_SIZE
+        assert d.normalize_action_input(
+            TOTAL_ACTION_SIZE - 1, "shoot", "gym", TOTAL_ACTION_SIZE
+        ) == TOTAL_ACTION_SIZE - 1
         with pytest.raises(ActionValidationError, match="out_of_range"):
-            d.normalize_action_input(31, "shoot", "gym", 31)
+            d.normalize_action_input(TOTAL_ACTION_SIZE, "shoot", "gym", TOTAL_ACTION_SIZE)
 
     def test_action_minus_one_raises(self):
         """conv_neg_action : action=-1 → out_of_range."""

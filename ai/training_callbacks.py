@@ -24,6 +24,7 @@ from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 import numpy as np
 import torch
+import gymnasium as gym
 from typing import Dict, Optional, Any, List, cast
 from stable_baselines3.common.callbacks import BaseCallback
 
@@ -1110,8 +1111,14 @@ class MetricsCollectionCallback(BaseCallback):
                 if hasattr(self, 'locals') and 'obs' in self.locals:
                     obs_tensor = torch.FloatTensor(self.locals['obs']).to(self.model.device)
                 else:
-                    # Create dummy observation matching env observation space
-                    dummy_obs = torch.zeros((1, require_present(self.model.observation_space.shape, "observation_space.shape")[0])).to(self.model.device)
+                    # Create dummy observation matching env observation space.
+                    # Obs Dict (pipeline squad spatial, T1b) : pas de q_net (MaskablePPO est
+                    # actor-critic, ce bloc est garde par hasattr q_net) -> on n'y entre pas ;
+                    # on evite malgre tout le .shape d'un espace Dict (qui vaut None).
+                    obs_space = self.model.observation_space
+                    if isinstance(obs_space, gym.spaces.Dict):
+                        raise RuntimeError("q_value tracking indisponible sur obs Dict")
+                    dummy_obs = torch.zeros((1, require_present(obs_space.shape, "observation_space.shape")[0])).to(self.model.device)
                     obs_tensor = dummy_obs
                 
                 with torch.no_grad():

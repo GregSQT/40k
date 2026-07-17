@@ -6,41 +6,35 @@ INTENT_DEFEND = 1
 INTENT_ATTACK = 2
 
 MAX_OBJECTIVES = 5
-# PR4 4e-v_a : squad pipeline action space (cf. squad.md §"Action space (micro)").
-# Decision utilisateur : agent decide direction Advance/Fall Back (aucune valeur par défaut).
-# 26 micro actions:
-#   0-5   : Normal move direction D (6)
-#   6-11  : Advance direction D (6)        [PR4: extension agent-decided]
-#   12-17 : Fall Back direction D (6)      [PR4: extension agent-decided]
-#   18    : wait / end activation
-#   19-23 : shoot slot 0-4 (5)
-#   24    : charge
-#   25    : fight
-BASE_ZONE_INTENT = 26
-TOTAL_ACTION_SIZE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3  # 41
+# Refonte spatiale du move (move_action_space_spatial_rework.md §6.2) : une action de mouvement
+# designe une CELLULE de la grille egocentrique 32x32, plus une direction 0-5. Le TYPE de move
+# (normal/advance/fall_back) n'est PAS une dimension d'action : il est infere du cout geodesique
+# de la cellule (cf. shared_utils.infer_squad_move_type).
+# 1032 micro actions:
+#   0-1023   : destination = cellule (gx,gy) de la grille egocentrique  [cell_index = gy*32+gx]
+#   1024     : wait / end activation
+#   1025-1029: shoot slot 0-4 (5)
+#   1030     : charge
+#   1031     : fight
+BASE_ZONE_INTENT = 1032
+TOTAL_ACTION_SIZE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3  # 1047
 
 # --- Named squad-action ids (single source of truth for ai/). --------------
-# Miroir EXACT de engine/phase_handlers/shared_utils.py (SQUAD_ACTION_*), qui
-# reste la source moteur. Interdit tout littéral d'action nu dans ai/ : importer
-# ces noms. Aucune valeur par défaut, aucun fallback.
-MOVE_DIR_BASE = 0
-MOVE_DIR_COUNT = 6            # normal move, directions 0-5
-ADVANCE_DIR_BASE = 6
-ADVANCE_DIR_COUNT = 6        # advance, directions 6-11
-FALL_BACK_DIR_BASE = 12
-FALL_BACK_DIR_COUNT = 6      # fall back, directions 12-17
-ACTION_WAIT = 18            # wait / end activation
-SHOOT_SLOT_BASE = 19
-SHOOT_SLOT_COUNT = 5        # shoot enemy slots 0-4 -> 19-23
-ACTION_CHARGE = 24
-ACTION_FIGHT = 25
+# Miroir EXACT de engine/phase_handlers/shared_utils.py (SQUAD_ACTION_*), qui reste la source
+# moteur (§4.5 : les deux DOIVENT rester synchronises — verrouille par test). Interdit tout
+# littéral d'action nu dans ai/ : importer ces noms. Aucune valeur par défaut, aucun fallback.
+MOVE_CELL_BASE = 0
+MOVE_CELL_COUNT = 1024       # 32x32, cf. engine.spatial_grid.GRID_CELL_COUNT
+ACTION_WAIT = 1024           # wait / end activation
+SHOOT_SLOT_BASE = 1025
+SHOOT_SLOT_COUNT = 5         # shoot enemy slots 0-4 -> 1025-1029
+ACTION_CHARGE = 1030
+ACTION_FIGHT = 1031
 DEPLOY_SLOT_BASE = 4
 DEPLOY_SLOT_COUNT = 5       # deployment strategy slots 0-4 -> 4-8
 
-MOVE_DIRS = range(MOVE_DIR_BASE, MOVE_DIR_BASE + MOVE_DIR_COUNT)                    # 0-5
-ADVANCE_DIRS = range(ADVANCE_DIR_BASE, ADVANCE_DIR_BASE + ADVANCE_DIR_COUNT)        # 6-11
-FALL_BACK_DIRS = range(FALL_BACK_DIR_BASE, FALL_BACK_DIR_BASE + FALL_BACK_DIR_COUNT)  # 12-17
-SHOOT_SLOTS = range(SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT)            # 19-23
+MOVE_CELLS = range(MOVE_CELL_BASE, MOVE_CELL_BASE + MOVE_CELL_COUNT)                # 0-1023
+SHOOT_SLOTS = range(SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT)            # 1025-1029
 DEPLOY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT)        # 4-8
 
 

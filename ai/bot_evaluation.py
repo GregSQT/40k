@@ -435,9 +435,32 @@ def _build_eval_obs_normalizer_for_worker(
         return None
     if not vec_model_path:
         raise RuntimeError("VecNormalize enabled but vec_model_path not provided for worker")
-    from ai.vec_normalize_utils import normalize_observation_for_inference
+    from ai.vec_normalize_utils import normalize_observation_for_inference, get_vec_normalize_path
 
-    def _normalize(obs: np.ndarray) -> np.ndarray:
+    # Obs Dict (pipeline squad spatial, refonte T4) : VecNormalize a ete entrainee avec
+    # norm_obs_keys=["vec"] (la grille reste 0/1, jamais normalisee). normalize_obs ne touche
+    # alors que la cle "vec". On charge l'objet VecNormalize une seule fois (lazy) au lieu de
+    # recharger le pkl a chaque step. Le chemin legacy (obs Box a plat) reste byte-identique.
+    _dict_vecnorm = {"obj": None}
+
+    def _dict_normalizer():
+        if _dict_vecnorm["obj"] is None:
+            import pickle
+            pkl_path = get_vec_normalize_path(vec_model_path)
+            if not os.path.exists(pkl_path):
+                raise RuntimeError(
+                    f"VecNormalize enabled but stats not found for Dict obs: {pkl_path}"
+                )
+            with open(pkl_path, "rb") as f:
+                vn = pickle.load(f)
+            vn.training = False
+            vn.norm_reward = False
+            _dict_vecnorm["obj"] = vn
+        return _dict_vecnorm["obj"]
+
+    def _normalize(obs):
+        if isinstance(obs, dict):
+            return _dict_normalizer().normalize_obs(obs)
         obs_arr = np.asarray(obs, dtype=np.float32)
         if obs_arr.ndim == 1:
             obs_arr = obs_arr.reshape(1, -1)
@@ -524,14 +547,18 @@ def _eval_worker_task(
         max_steps_per_episode = int(require_key(task, "max_steps_per_episode"))
         while not done and step_count < max_steps_per_episode:
             model_obs = _worker_obs_normalizer(obs) if _worker_obs_normalizer else obs
-            model_obs_arr = np.asarray(model_obs, dtype=np.float32)
-            if model_obs_arr.ndim == 1:
-                model_obs_arr = model_obs_arr.reshape(1, -1)
             action_masks = np.asarray(env.engine.get_action_mask(), dtype=bool)
             if action_masks.ndim == 1:
                 action_masks = action_masks.reshape(1, -1)
+            if isinstance(model_obs, dict):
+                # Obs Dict (MultiInputPolicy + CNN) : predict la gere nativement, ne pas aplatir.
+                model_input = model_obs
+            else:
+                model_input = np.asarray(model_obs, dtype=np.float32)
+                if model_input.ndim == 1:
+                    model_input = model_input.reshape(1, -1)
             action, _ = _worker_model.predict(
-                model_obs_arr,
+                model_input,
                 action_masks=action_masks,
                 deterministic=task.get("deterministic", True),
             )

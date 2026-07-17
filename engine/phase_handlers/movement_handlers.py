@@ -1541,10 +1541,18 @@ def _build_multi_hex_vectorized(
     thru_enemy: bool,
     thru_friendly: bool,
     fly: bool = False,
+    out_costs: Optional[Dict[Tuple[int, int], float]] = None,
 ) -> Tuple[List[Tuple[int, int]], Set[Tuple[int, int]], int]:
     """BFS/disk multi-hex vectorisé NumPy (``ground`` et ``fly``). Gère toutes les formes de socles.
 
     Retourne ``(valid_destinations, footprint_zone, visited_count)``.
+
+    ``out_costs`` (optionnel, refonte spatiale §7 T2) : si fourni, rempli avec
+    ``{(col, row): coût géodésique en SUBHEX (float)}`` pour chaque destination valide. Le coût est
+    la distance de **chemin** (règle 03 : la distance d'un move est celle du chemin parcouru), et
+    non la distance à vol d'oiseau : c'est lui qui détermine le type de move côté gym
+    (coût ≤ M → normal, coût > M → advance). Paramètre **purement additif** : quand il vaut
+    ``None``, cette fonction se comporte exactement comme avant (chemin PvP inchangé).
 
     Invariants de sémantique (équivalence stricte avec le BFS Python hex orig.) :
 
@@ -1566,6 +1574,11 @@ def _build_multi_hex_vectorized(
       destination), identique à l'union calculée côté BFS Python.
     """
     import numpy as np
+
+    # Champ de coût géodésique en SUBHEX, renseigné par chacune des branches ci-dessous (aucune
+    # n'a besoin d'un recalcul : elles produisent toutes déjà une distance, il suffit de la
+    # convertir dans l'unité commune).
+    _dist_arr: Optional["np.ndarray"] = None
 
     off_even_arr = np.asarray(off_even, dtype=np.int64).reshape(-1, 2)
     off_odd_arr = np.asarray(off_odd, dtype=np.int64).reshape(-1, 2)
@@ -1705,6 +1718,12 @@ def _build_multi_hex_vectorized(
             _sy = start_row * _hh + (start_col & 1) * (_hh / 2.0) + _hh / 2.0
             _dist = np.hypot(_cx - _sx, _cy - _sy)
             reach = _dist <= (move_range * _hw + _SEG_TOL)
+            if out_costs is not None:
+                # `_dist` est en unités `_hex_center` ; le budget y vaut move_range × 1.5.
+                # Ramené en subhex (unité commune de `out_costs`) par la même conversion.
+                # Sous garde : sans `out_costs` (chemin PvP) cette division allouerait un tableau
+                # board_cols×board_rows pour rien.
+                _dist_arr = _dist / ENGAGEMENT_NORM_HEX_WIDTH
         else:
             # hex (gym / move_gym) : disque cube-distance (comportement historique).
             cols_arr = np.arange(board_cols, dtype=np.int64)[:, None]
@@ -1717,6 +1736,10 @@ def _build_multi_hex_vectorized(
             sy_c = -sx_c - sz_c
             cube_d = np.maximum(np.abs(x_c - sx_c), np.maximum(np.abs(y_c - sy_c), np.abs(z_c - sz_c)))
             reach = cube_d <= np.int64(move_range)
+            if out_costs is not None:
+                # FLY ignore murs/figurines en traversée (21.03) : la distance de chemin EST la
+                # cube-distance, déjà calculée ici. Sous garde : `astype` copie tout le plateau.
+                _dist_arr = cube_d.astype(np.float64)
         valid_mask = reach & ~bad_dest & ~eng_bad
     else:
         # EZ traversable selon toggle ; toujours exclue de la destination (unengaged 09.05).
@@ -1734,6 +1757,12 @@ def _build_multi_hex_vectorized(
 
         _vis_bfs = bytearray(board_cols * board_rows)
         _vis_bfs[start_col + start_row * board_cols] = 1
+
+        # Coût géodésique (§7 T2) : le BFS le calcule déjà (`cd`) mais le jetait. Aretes de poids
+        # 1 + file FIFO -> la 1re visite d'une case EST sa distance de chemin minimale.
+        _dist_arr = np.full((board_cols, board_rows), -1.0, dtype=np.float64) if out_costs is not None else None
+        if _dist_arr is not None:
+            _dist_arr[start_col, start_row] = 0.0
 
         _nb_even_t = ((0, -1), (1, -1), (1, 0), (0, 1), (-1, 0), (-1, -1))
         _nb_odd_t  = ((0, -1), (1, 0),  (1, 1), (0, 1), (-1, 1), (-1, 0))
@@ -1757,6 +1786,8 @@ def _build_multi_hex_vectorized(
                     continue
                 _vis_bfs[_vidx] = 1
                 reach[nc, nr] = True
+                if _dist_arr is not None:
+                    _dist_arr[nc, nr] = nd
                 _bfs_queue.append((nc, nr, nd))
 
         valid_mask = reach & ~bad_dest & ~eng_bad
@@ -1766,6 +1797,11 @@ def _build_multi_hex_vectorized(
     valid_destinations: List[Tuple[int, int]] = [
         (int(c), int(r)) for c, r in zip(valid_coords_cols, valid_coords_rows)
     ]
+
+    if out_costs is not None:
+        _costs_flat = _dist_arr[valid_coords_cols, valid_coords_rows]
+        for _c, _r, _d in zip(valid_coords_cols, valid_coords_rows, _costs_flat):
+            out_costs[(int(_c), int(_r))] = float(_d)
 
     fpz_even_mask = valid_mask & col_parity_mask
     fpz_odd_mask = valid_mask & ~col_parity_mask
@@ -2151,13 +2187,33 @@ def _multilevel_floor_destinations(
 
 
 @profile_move_pool_build
-def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str, read_only: bool = False) -> List[Tuple[int, int]]:
+def movement_build_valid_destinations_pool(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    read_only: bool = False,
+    *,
+    move_budget_override: Optional[int] = None,
+    out_costs: Optional[Dict[Tuple[int, int], int]] = None,
+) -> List[Tuple[int, int]]:
     """
     Build valid movement destinations using BFS pathfinding.
 
     ``read_only=True`` : calcule et RENVOIE la liste des destinations sans écrire le moindre
     état preview dans ``game_state`` (pool / footprint_zone / span / border / mask_loops). Utilisé
     par ``get_eligible_units`` comme oracle fall-back (source unique = ce builder, zéro divergence).
+
+    Paramètres de la refonte spatiale (§7 T2/T3, §10.5) — **purement additifs** : quand les deux
+    valent ``None``, le comportement est strictement celui d'avant. Le PvP ne les passe jamais.
+
+    ``move_budget_override`` : force le budget (subhex) au lieu de le dériver de
+    ``_advance_roll_for``. Nécessaire au gym : le masque a besoin du pool au budget **Advance**
+    alors que l'escouade n'a PAS encore déclaré Advance (elle n'est donc pas dans
+    ``units_advanced``, et le builder retomberait sur le budget normal). Un seul BFS au budget
+    Advance suffit, puisque le pool Normal y est inclus (§7 T2).
+
+    ``out_costs`` : rempli avec ``{(col, row): coût géodésique en subhex}``. C'est ce coût
+    (distance de **chemin**, règle 03 — pas la distance à vol d'oiseau) qui détermine le type de
+    move côté gym : ``coût <= M`` → normal, ``coût > M`` → advance (§6.2).
 
     Uses BFS to find REACHABLE hexes, not just hexes within distance.
     This prevents movement through walls (AI_TURN.md compliance).
@@ -2184,12 +2240,27 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     if not unit:
         return []
 
-    _adv_roll = _advance_roll_for(str(unit_id), game_state)
-    if _adv_roll is not None:
-        move_range = get_squad_move_budget(str(unit_id), game_state, "advance", advance_roll=_adv_roll)
+    if move_budget_override is not None:
+        # Chemin gym uniquement (§7 T2) : budget imposé par l'appelant.
+        # `0` est ACCEPTÉ : `get_squad_move_budget` renvoie `max(0, MOVE - malus)` (Take to the
+        # skies 21.03), donc un budget nul est un état de jeu légitime, et le BFS le traite déjà
+        # sans erreur (`if cd >= move_range: continue` → pool vide). Lever ici serait incohérent
+        # avec le chemin sans override, qui pour ce même budget renvoie simplement un pool vide.
+        # Seul un budget NÉGATIF est impossible à produire par le moteur → erreur explicite.
+        if int(move_budget_override) < 0:
+            raise ValueError(
+                f"movement_build_valid_destinations_pool: move_budget_override négatif "
+                f"({move_budget_override}) pour unit {unit_id} — le moteur ne produit jamais "
+                f"un budget < 0 (get_squad_move_budget borne à max(0, ...))"
+            )
+        move_range = int(move_budget_override)
     else:
-        # Normal/fall-back via budget unique : applique aussi le malus Take to the skies (-2", Règles 21.03).
-        move_range = get_squad_move_budget(str(unit_id), game_state, "normal")
+        _adv_roll = _advance_roll_for(str(unit_id), game_state)
+        if _adv_roll is not None:
+            move_range = get_squad_move_budget(str(unit_id), game_state, "advance", advance_roll=_adv_roll)
+        else:
+            # Normal/fall-back via budget unique : applique aussi le malus Take to the skies (-2", Règles 21.03).
+            move_range = get_squad_move_budget(str(unit_id), game_state, "normal")
     # Normalize coordinates to int - raises error if invalid
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
@@ -2352,6 +2423,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             _m_bfs_start = _perf_clock.perf_counter() if _pt else None
             valid_destinations, _fly_fp_zone_vec, fly_visited_n = _build_multi_hex_vectorized(
                 fly=True,
+                out_costs=out_costs,
                 game_state=game_state,
                 unit=unit,
                 start_col=start_col,
@@ -2446,11 +2518,16 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 if nb == start_pos:
                     continue
                 fly_visited_n += 1
+                # FLY ignore murs/figurines en traversée (21.03) : la distance de chemin EST la
+                # cube-distance, que cette boucle énumère déjà via (_dx, _dy).
+                _fly_cost = float(max(abs(_dx), abs(_dy), abs(_dx + _dy)))
                 if nb in _fly_walls or nb in _fly_occupied:
                     fly_rejected_footprint += 1
                 else:
                     if _fly_ez_prox_set is not None and nb not in _fly_ez_prox_set:
                         valid_destinations.append(nb)
+                        if out_costs is not None:
+                            out_costs[nb] = _fly_cost
                     elif not _movement_engagement_violates(
                         game_state,
                         unit,
@@ -2463,6 +2540,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                         engagement_zone_ez=ez,
                     ):
                         valid_destinations.append(nb)
+                        if out_costs is not None:
+                            out_costs[nb] = _fly_cost
                     else:
                         fly_rejected_footprint += 1
         _m_bfs_end = _perf_clock.perf_counter() if _pt else None
@@ -2587,6 +2666,10 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             if _cell == start_pos or _cell in _occupied or _cell in _enemy_adj:
                 continue
             valid_destinations.append(_cell)
+            if out_costs is not None:
+                # `geodesic_field` renvoie {cellule: distance} en unités `_hex_center`, où le
+                # budget vaut move_range × 1.5 -> conversion en subhex par la même constante.
+                out_costs[_cell] = _field[_cell] / ENGAGEMENT_NORM_HEX_WIDTH
     elif is_single_hex:
         while queue:
             (cc, cr), cd = queue.popleft()
@@ -2627,6 +2710,11 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 # occupée (03.01) ni dans l'EZ ennemie (unengaged, 09.05).
                 if nb != start_pos and nb not in _occupied and nb not in _enemy_adj:
                     valid_destinations.append(nb)
+                    if out_costs is not None:
+                        # `nd` = distance de chemin en hex = en subhex (arêtes de poids 1 + file
+                        # FIFO -> 1re visite = distance minimale). Déjà calculée par ce BFS,
+                        # simplement retenue (§7 T2).
+                        out_costs[nb] = float(nd)
     else:
         # Multi-hex units: pre-compute footprint offsets ONCE, then translate
         from engine.hex_utils import precompute_footprint_offsets
@@ -2647,6 +2735,11 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 _bcols, _brows, _walls, _occupied, _enemy_occ, _enemy_adj,
                 _enemy_items_for_engagement_ez, ez, _thru_ez, _thru_enemy, _thru_friendly,
             )
+            if out_costs is not None:
+                # `_ground_field` = {cellule: distance-norme}, le champ géodésique du move (déjà
+                # renvoyé par la fonction pour le multi-niveaux) -> conversion en subhex.
+                for _dest in valid_destinations:
+                    out_costs[_dest] = _ground_field[_dest] / ENGAGEMENT_NORM_HEX_WIDTH
         else:
             # Chemin unique vectorisé NumPy, sémantiquement équivalent au BFS Python hexagonal.
             # Gère toutes les formes de socles (mover et ennemis) et toutes les valeurs de ``ez``.
@@ -2669,6 +2762,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 thru_ez=_thru_ez,
                 thru_enemy=_thru_enemy,
                 thru_friendly=_thru_friendly,
+                out_costs=out_costs,
             )
 
     _m_bfs_end = _perf_clock.perf_counter() if _pt else None
@@ -2702,6 +2796,15 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 for (c, r) in valid_destinations
                 if _lo_c <= c <= _hi_c and _lo_r <= r <= _hi_r
             ]
+
+    if out_costs is not None:
+        # Les branches remplissent `out_costs` pendant le BFS, donc AVANT le bornage rigide
+        # ci-dessus. Sans cette resynchronisation, `out_costs` porterait des destinations
+        # retirées du pool : le masque spatial les rendrait jouables et le decoder y enverrait
+        # l'escouade. Le pool reste la seule autorité — les coûts s'y alignent.
+        _kept = set(valid_destinations)
+        for _stale in [k for k in out_costs if k not in _kept]:
+            del out_costs[_stale]
 
     if read_only:
         return valid_destinations

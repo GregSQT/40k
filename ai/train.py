@@ -1275,6 +1275,61 @@ def resolve_device_mode(device_mode: Optional[str], gpu_available: bool, total_p
         return "cuda", True
     return "cpu", False
 
+
+def _is_dict_obs_space(observation_space) -> bool:
+    """True si l'obs est le Dict {"vec", "grid"} du pipeline squad spatial (T1b)."""
+    return isinstance(observation_space, gym.spaces.Dict)
+
+
+def _vec_norm_obs_keys(observation_space):
+    """Cles a normaliser par VecNormalize.
+
+    Obs Dict : normaliser UNIQUEMENT "vec" — la grille porte des canaux deja dans [0,1]
+    (occupation/murs/EZ/objectifs 0-1, niveau normalise), la normaliser detruirait sa
+    semantique et son creux (spec T1b). Obs Box : comportement historique (None = tout).
+    """
+    return ["vec"] if _is_dict_obs_space(observation_space) else None
+
+
+def _inject_spatial_extractor(policy_kwargs) -> None:
+    """Branche le CNN spatial sur `MultiInputPolicy` (obs Dict).
+
+    Un extracteur ne se declare pas en JSON (c'est une classe) : il est injecte ici. Le defaut
+    `CombinedExtractor` aplatirait la grille (6 canaux -> non reconnue comme image), d'ou
+    `SpatialCombinedExtractor` (spec §6.2 / ai/spatial_extractor.py).
+
+    `cnn_features` est un hyperparametre : il DOIT venir du JSON de l'agent
+    (`policy_kwargs.features_extractor_kwargs.cnn_features`) — sb3 transmet ces kwargs au
+    constructeur de l'extracteur. Absence = erreur explicite, jamais de valeur par defaut.
+    """
+    from ai.spatial_extractor import SpatialCombinedExtractor
+
+    fx_kwargs = require_key(policy_kwargs, "features_extractor_kwargs")
+    require_key(fx_kwargs, "cnn_features")
+    policy_kwargs["features_extractor_class"] = SpatialCombinedExtractor
+
+
+def _resolve_device_for_obs(observation_space, device_mode, gpu_available, total_params,
+                            net_arch, cache_key):
+    """(device, use_gpu, obs_size). Obs Dict -> CNN -> GPU si dispo (le benchmark MlpPolicy
+    CPU ne s'applique pas). Obs Box -> logique historique `resolve_device_mode`."""
+    if _is_dict_obs_space(observation_space):
+        mode = str(device_mode).upper() if device_mode else None
+        if mode == "CPU":
+            return "cpu", False, None
+        if mode == "GPU":
+            if not gpu_available:
+                raise ValueError("GPU mode requested but no CUDA GPU available")
+            return "cuda", True, None
+        return ("cuda", True, None) if gpu_available else ("cpu", False, None)
+    obs_size = require_present(observation_space.shape, "observation_space.shape")[0]
+    device, use_gpu = resolve_device_mode(
+        device_mode, gpu_available, total_params,
+        obs_size=obs_size, net_arch=net_arch, cache_key=cache_key,
+    )
+    return device, use_gpu, obs_size
+
+
 def create_model(config, training_config_name, rewards_config_name, new_model, append_training, args):
     """Create or load PPO model with configuration following AI_INSTRUCTIONS.md."""
     
@@ -1447,6 +1502,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
                 clip_obs=vec_norm_cfg.get("clip_obs", 10.0),
                 clip_reward=vec_norm_cfg.get("clip_reward", 10.0),
                 gamma=vec_norm_cfg.get("gamma", 0.99),
+                norm_obs_keys=_vec_norm_obs_keys(env.observation_space),
             )
             print("✅ VecNormalize: enabled (obs + reward normalization)")
 
@@ -1481,15 +1537,18 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
 
     # BENCHMARK RESULTS: CPU 311 it/s vs GPU 282 it/s (10% faster on CPU)
     # Use GPU only for very large networks (>2000 hidden units)
-    obs_size = require_present(env.observation_space.shape, "observation_space.shape")[0]
+    # Obs Dict (pipeline squad spatial) : CNN -> GPU, extracteur injecte (le benchmark MlpPolicy
+    # ne s'applique plus). Obs Box legacy : logique historique inchangee.
+    if _is_dict_obs_space(env.observation_space):
+        _inject_spatial_extractor(policy_kwargs)
     cache_key = (
         require_present(controlled_agent_key, "controlled_agent_key"),
         training_config_name,
         rewards_config_name,
     )
-    device, use_gpu = resolve_device_mode(
-        args.mode if args else None, gpu_available, total_params,
-        obs_size=obs_size, net_arch=net_arch, cache_key=cache_key
+    device, use_gpu, obs_size = _resolve_device_for_obs(
+        env.observation_space, args.mode if args else None, gpu_available, total_params,
+        net_arch=net_arch, cache_key=cache_key,
     )
 
     model_params["device"] = device
@@ -1784,6 +1843,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
                 clip_obs=vec_norm_cfg.get("clip_obs", 10.0),
                 clip_reward=vec_norm_cfg.get("clip_reward", 10.0),
                 gamma=vec_norm_cfg.get("gamma", 0.99),
+                norm_obs_keys=_vec_norm_obs_keys(env.observation_space),
             )
             print("✅ VecNormalize: enabled (obs + reward normalization)")
 
@@ -1803,15 +1863,16 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
 
     # BENCHMARK RESULTS: CPU 311 it/s vs GPU 282 it/s (10% faster on CPU)
     # Use GPU only for very large networks (>2000 hidden units)
-    obs_size = require_present(env.observation_space.shape, "observation_space.shape")[0]
+    if _is_dict_obs_space(env.observation_space):
+        _inject_spatial_extractor(policy_kwargs)
     cache_key = (
         require_present(agent_key, "agent_key"),
         training_config_name,
         rewards_config_name,
     )
-    device, use_gpu = resolve_device_mode(
-        device_mode, gpu_available, total_params,
-        obs_size=obs_size, net_arch=net_arch, cache_key=cache_key
+    device, use_gpu, obs_size = _resolve_device_for_obs(
+        env.observation_space, device_mode, gpu_available, total_params,
+        net_arch=net_arch, cache_key=cache_key,
     )
 
     model_params["device"] = device
@@ -2456,6 +2517,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 clip_obs=vec_norm_cfg.get("clip_obs", 10.0),
                 clip_reward=vec_norm_cfg.get("clip_reward", 10.0),
                 gamma=vec_norm_cfg.get("gamma", 0.99),
+                norm_obs_keys=_vec_norm_obs_keys(env.observation_space),
             )
             chunk_log("✅ VecNormalize: enabled (obs + reward normalization)")
     
@@ -2498,15 +2560,16 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     policy_kwargs = require_key(model_params, "policy_kwargs")
     net_arch = require_key(policy_kwargs, "net_arch")
     total_params = sum(net_arch) if isinstance(net_arch, list) else 512
-    obs_size = require_present(env.observation_space.shape, "observation_space.shape")[0]
+    if _is_dict_obs_space(env.observation_space):
+        _inject_spatial_extractor(policy_kwargs)
     cache_key = (
         require_present(agent_key, "agent_key"),
         training_config_name,
         rewards_config_name,
     )
-    device, use_gpu = resolve_device_mode(
-        device_mode, gpu_available, total_params,
-        obs_size=obs_size, net_arch=net_arch, cache_key=cache_key
+    device, use_gpu, obs_size = _resolve_device_for_obs(
+        env.observation_space, device_mode, gpu_available, total_params,
+        net_arch=net_arch, cache_key=cache_key,
     )
     model_params["device"] = device
 

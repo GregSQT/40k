@@ -847,6 +847,67 @@ class BotControlledEnv(gym.Wrapper):
         info["self_play_ratio_current"] = self._self_play_ratio_current
         return obs, float(cumulative_reward), terminated, truncated, info
 
+    def _select_bot_move_action(self, game_state, active_unit, valid_actions) -> int:
+        """Traduit le choix de destination du bot en action-cellule legale (phase move spatiale).
+
+        Contrat strict (cf. audit spec §7bis, le repli silencieux a ete eradique) :
+          - Le bot ne choisit QUE parmi les destinations reellement executables : celles portees
+            par les cellules a True dans le masque du moteur (via la carte memoisee). Aucun dry-run
+            maison, aucune geometrie recalculee — `spatial_grid` reste la source unique.
+          - « Rester sur place » se signale en renvoyant l'ancre courante (le bot le fait quand il
+            tient un objectif ou n'a nulle part ou aller) -> WAIT. `start_pos` etant exclu du pool
+            (§4.6), l'ancre n'est jamais une destination legale : le signal est sans ambiguite.
+          - Toute autre valeur hors des destinations legales est un bug d'invariant -> erreur
+            explicite (jamais un repli silencieux en WAIT).
+        """
+        from engine.phase_handlers.shared_utils import read_squad_move_cell_map, require_unit_position
+
+        squad_id = str(require_key(active_unit, "id"))
+        move_cells = [a for a in valid_actions if a in mi.MOVE_CELLS]
+        if not move_cells:
+            # Aucune cellule de move jouable (budget nul / totalement bloque) : seul WAIT reste,
+            # toujours arme par le masque en phase move. Etat legitime, pas une erreur.
+            return mi.ACTION_WAIT
+
+        # Carte cellule -> (destination, cout) construite ET memoisee par
+        # get_squad_action_mask_and_eligible_units (appele juste avant). On rejoue EXACTEMENT ses
+        # cellules : un cell_idx masque a True porte forcement une destination dans cette carte.
+        cell_map = read_squad_move_cell_map(game_state, squad_id)
+        dest_to_cell: dict = {}
+        valid_destinations = []
+        for cell_idx in move_cells:
+            if cell_idx not in cell_map:
+                raise RuntimeError(
+                    f"BotControlledEnv move: cellule {cell_idx} a True dans le masque mais absente "
+                    f"de la carte memoisee (squad {squad_id}). Masque et carte doivent partager la "
+                    f"meme source (build_squad_move_cell_map)."
+                )
+            dest = cell_map[cell_idx][0]
+            if dest not in dest_to_cell:
+                dest_to_cell[dest] = cell_idx
+                valid_destinations.append(dest)
+
+        if not hasattr(self.bot, "select_movement_destination"):
+            raise RuntimeError(
+                f"Bot {type(self.bot).__name__} n'implemente pas select_movement_destination, "
+                f"requis par l'action space spatial de la phase move."
+            )
+        chosen = self.bot.select_movement_destination(active_unit, valid_destinations, game_state)
+        chosen = (int(chosen[0]), int(chosen[1]))
+
+        if chosen == tuple(require_unit_position(squad_id, game_state)):
+            # Signal « je tiens ma position » -> WAIT (legal en move).
+            return mi.ACTION_WAIT
+
+        cell = dest_to_cell.get(chosen)
+        if cell is None:
+            raise RuntimeError(
+                f"Bot {type(self.bot).__name__}.select_movement_destination a renvoye {chosen}, "
+                f"hors des {len(valid_destinations)} destinations legales du pool. Un bot ne peut "
+                f"choisir que parmi les destinations masquees (aucun move maison, aucun repli WAIT)."
+            )
+        return cell
+
     def _get_bot_action(self, debug=False) -> int:
         game_state = self.engine.game_state
         action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(game_state)
@@ -872,7 +933,14 @@ class BotControlledEnv(gym.Wrapper):
         if current_phase == "shoot" and any(a in valid_actions for a in mi.SHOOT_SLOTS):
             self.shoot_opportunities += 1
 
-        if hasattr(self.bot, 'select_action_with_state'):
+        if current_phase == "move":
+            # Refonte spatiale : en move, les bits True du masque sont des CELLULES (0-1023), pas
+            # des directions. Le bot ne peut pas choisir une cellule entiere sensement (« premiere
+            # cellule legale » = coin arbitraire de la grille, root cause §3). Il choisit une
+            # DESTINATION via son heuristique (select_movement_destination), et on la traduit en
+            # cellule via la carte MEMOISEE par le moteur au masque (spatial_grid = source unique).
+            bot_choice = self._select_bot_move_action(game_state, eligible_units[0], valid_actions)
+        elif hasattr(self.bot, 'select_action_with_state'):
             bot_choice = self.bot.select_action_with_state(valid_actions, game_state)
         else:
             bot_choice = self.bot.select_action(valid_actions)

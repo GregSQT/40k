@@ -128,7 +128,7 @@ def test_get_bot_action_returns_wait_when_no_eligible_units() -> None:
     decoder = _DummyActionDecoder(mask=[False] * 12, eligible=[])
     engine = _DummyEngine(decoder=decoder)
     wrapper = BotControlledEnv(engine, bot=_DummyBot(action=4))
-    assert wrapper._get_bot_action() == 18
+    assert wrapper._get_bot_action() == mi.ACTION_WAIT
 
 
 def test_get_bot_action_raises_on_empty_mask_with_eligible_units() -> None:
@@ -162,16 +162,73 @@ def test_get_bot_action_converts_validation_error_to_runtime_error() -> None:
         normalized_action=4,
         raise_validation=True,
     )
-    wrapper = BotControlledEnv(_DummyEngine(decoder=decoder), bot=_DummyBot(action=4))
+    engine = _DummyEngine(decoder=decoder)
+    # Phase non-move : la phase move est routee vers select_movement_destination (testee a part),
+    # les autres phases passent par normalize/validate — c'est ce chemin qu'on couvre ici.
+    engine.game_state["phase"] = "charge"
+    wrapper = BotControlledEnv(engine, bot=_DummyBot(action=4))
     with pytest.raises(RuntimeError, match=r"Bot action validation failed"):
         wrapper._get_bot_action()
+
+
+class _MoveDestBot:
+    """Bot minimal pour la phase move : renvoie une destination fixe."""
+
+    def __init__(self, dest):
+        self._dest = dest
+
+    def select_movement_destination(self, unit, valid_destinations, game_state):
+        _ = (unit, valid_destinations, game_state)
+        return self._dest
+
+
+def _move_wrapper(cell_map, dest):
+    """Wrapper + game_state gréé avec une carte de cellules mémoisée (anchor (5,5), phase move)."""
+    engine = _DummyEngine()
+    engine.game_state["phase"] = "move"
+    engine.game_state["units_cache"] = {"u1": {"col": 5, "row": 5}}
+    engine.game_state["_squad_move_cell_maps"] = {
+        "u1": {"anchor": (5, 5), "phase": "move", "map": cell_map}
+    }
+    return BotControlledEnv(engine, bot=_MoveDestBot(dest)), engine.game_state
+
+
+def test_select_bot_move_action_translates_destination_to_cell() -> None:
+    # Cellules 10 -> (6,6), 20 -> (7,7). Le bot vise (7,7) -> cellule 20.
+    cell_map = {10: ((6, 6), 3.0), 20: ((7, 7), 8.0)}
+    wrapper, gs = _move_wrapper(cell_map, dest=(7, 7))
+    action = wrapper._select_bot_move_action(gs, {"id": "u1"}, [10, 20, mi.ACTION_WAIT])
+    assert action == 20
+
+
+def test_select_bot_move_action_anchor_means_wait() -> None:
+    # Le bot renvoie l'ancre (5,5) -> signal « je tiens ma position » -> WAIT.
+    cell_map = {10: ((6, 6), 3.0)}
+    wrapper, gs = _move_wrapper(cell_map, dest=(5, 5))
+    action = wrapper._select_bot_move_action(gs, {"id": "u1"}, [10, mi.ACTION_WAIT])
+    assert action == mi.ACTION_WAIT
+
+
+def test_select_bot_move_action_no_move_cell_returns_wait() -> None:
+    # Aucune cellule de move dans le masque (seul WAIT) -> WAIT, sans lire la carte.
+    wrapper, gs = _move_wrapper({10: ((6, 6), 3.0)}, dest=(6, 6))
+    action = wrapper._select_bot_move_action(gs, {"id": "u1"}, [mi.ACTION_WAIT])
+    assert action == mi.ACTION_WAIT
+
+
+def test_select_bot_move_action_illegal_destination_raises() -> None:
+    # Le bot renvoie un hex hors des destinations legales et != ancre -> erreur explicite.
+    cell_map = {10: ((6, 6), 3.0)}
+    wrapper, gs = _move_wrapper(cell_map, dest=(9, 9))
+    with pytest.raises(RuntimeError, match=r"hors des .* destinations legales"):
+        wrapper._select_bot_move_action(gs, {"id": "u1"}, [10, mi.ACTION_WAIT])
 
 
 def test_self_play_wrapper_get_frozen_model_action_fallback_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     # No eligible units -> WAIT
     decoder_no_units = _DummyActionDecoder(mask=[False] * 12, eligible=[])
     wrapper_no_units = SelfPlayWrapper(_DummyEngine(decoder=decoder_no_units))
-    assert wrapper_no_units._get_frozen_model_action() == 18
+    assert wrapper_no_units._get_frozen_model_action() == mi.ACTION_WAIT
 
     # Eligible units but no valid action -> explicit error
     decoder_empty = _DummyActionDecoder(mask=[False] * 12, eligible=[{"id": "u1", "player": 2}])
