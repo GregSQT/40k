@@ -59,7 +59,7 @@ import glob
 import shutil
 import random
 from pathlib import Path
-from typing import Dict, List, Tuple, Any, Optional, Set, cast
+from typing import Callable, Dict, List, Tuple, Any, Optional, Set, cast
 
 # Fix import paths - Add both script dir and project root
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1751,6 +1751,16 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     # Get scenario file (agent-specific or global)
     scenario_file = get_agent_scenario_file(cfg, agent_key if agent_specific_mode else None, training_config_name, scenario_override)
     print(f"✅ Using scenario: {scenario_file}")
+
+    # Meme budget par tour que le chemin rotation : setup_callbacks / train_model
+    # convertissent des episodes en timesteps sans moteur sous la main.
+    resolve_turn_step_limit(
+        [scenario_file],
+        training_config,
+        use_bots="bot" in os.path.basename(scenario_file).lower(),
+        log=print,
+    )
+
     # Load unit registry for multi-agent environment
     from ai.unit_registry import UnitRegistry
     unit_registry = UnitRegistry()
@@ -2089,6 +2099,83 @@ def _evaluate_macro_model(model, env, n_episodes, macro_player, deterministic=Tr
             _print_eval_progress(progress_state["completed"], progress_state["total"], progress_state["start_time"], label)
     return wins, losses, draws
 
+def resolve_turn_step_limit(
+    scenario_files: List[str],
+    training_config: Dict[str, Any],
+    use_bots: bool,
+    log: Callable[[str], None],
+) -> int:
+    """Budget d'actions d'un tour, derive du nombre de FIGURINES du scenario le plus
+    charge — meme formule et meme config que le garde anti-runaway du moteur
+    (compute_turn_step_limit), pour que l'estimation de timesteps et la troncature
+    runtime ne divergent jamais. Ecrit dans training_config['_turn_step_limit'] :
+    les fonctions qui convertissent des episodes en timesteps n'ont pas de moteur
+    sous la main.
+    """
+    from engine.game_state import GameStateManager
+    from config_loader import compute_turn_step_limit
+
+    # Use the scenario with the highest unit count to avoid underestimating step budget.
+    scenario_probe_players: List[int] = [1]
+    if use_bots:
+        probe_seat_mode = require_key(training_config, "agent_seat_mode")
+        if probe_seat_mode not in {"p1", "p2", "random"}:
+            raise ValueError(
+                f"training_config.agent_seat_mode must be one of 'p1', 'p2', 'random' "
+                f"(got {probe_seat_mode!r})"
+            )
+        if probe_seat_mode == "p2":
+            scenario_probe_players = [2]
+        elif probe_seat_mode == "random":
+            scenario_probe_players = [1, 2]
+
+    from ai.unit_registry import UnitRegistry
+    unit_registry = UnitRegistry()
+
+    max_units = 0
+    max_units_scenario: Optional[str] = None
+    for scenario_file in sorted(set(scenario_files)):
+        with open(scenario_file, "r", encoding="utf-8-sig") as f:
+            scenario_data = json.load(f)
+        if isinstance(scenario_data, dict) and "units" in scenario_data:
+            scenario_unit_count = len(require_key(scenario_data, "units"))
+        elif (
+            isinstance(scenario_data, dict)
+            and "agent_roster_ref" in scenario_data
+            and "opponent_roster_ref" in scenario_data
+        ):
+            scenario_unit_count = _count_units_from_roster_scenario(scenario_data, scenario_file)
+        else:
+            scenario_unit_count_candidates: List[int] = []
+            for probe_player in scenario_probe_players:
+                temp_manager = GameStateManager(
+                    {"board": {}, "controlled_player": probe_player},
+                    unit_registry
+                )
+                scenario_result = temp_manager.load_units_from_scenario(scenario_file, unit_registry)
+                scenario_unit_count_candidates.append(len(require_key(scenario_result, "units")))
+            scenario_unit_count = max(scenario_unit_count_candidates)
+        if scenario_unit_count <= 0:
+            raise ValueError(f"Scenario '{scenario_file}' resolved to zero units")
+        if scenario_unit_count > max_units:
+            max_units = scenario_unit_count
+            max_units_scenario = scenario_file
+
+    if max_units_scenario is None:
+        raise ValueError("No scenario available to compute the per-turn step budget")
+
+    game_rules = require_key(get_config_loader().get_game_config(), "game_rules")
+    max_steps = compute_turn_step_limit(game_rules, max_units)
+    training_config["_turn_step_limit"] = max_steps
+    log(
+        "📊 Auto-calculated per-turn step budget: "
+        f"{max_units} models × {require_key(game_rules, 'max_actions_per_model_per_turn')} actions "
+        f"× {require_key(game_rules, 'step_limit_margin')} margin = {max_steps} "
+        f"(max models from {os.path.basename(max_units_scenario)})"
+    )
+    return max_steps
+
+
 def train_with_scenario_rotation(config, agent_key, training_config_name, rewards_config_name,
                                  scenario_list, total_episodes,
                                  new_model=False, append_training=False, use_bots=False, debug_mode=False,
@@ -2212,78 +2299,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     n_envs = require_key(training_config, "n_envs")
     n_envs = _resolve_n_envs_for_step_logging(n_envs, log=chunk_log)
 
-    # Raise error if required fields missing - NO FALLBACKS
-
-    from engine.game_state import GameStateManager
-
-    # AUTO-CALCULATE max_steps_per_turn = max_units_across_scenarios × num_phases
-    # Use the scenario with the highest unit count to avoid underestimating step budget.
-    scenario_probe_players: List[int] = [1]
-    if use_bots:
-        probe_seat_mode = require_key(training_config, "agent_seat_mode")
-        if probe_seat_mode not in {"p1", "p2", "random"}:
-            raise ValueError(
-                f"training_config.agent_seat_mode must be one of 'p1', 'p2', 'random' "
-                f"(got {probe_seat_mode!r})"
-            )
-        if probe_seat_mode == "p2":
-            scenario_probe_players = [2]
-        elif probe_seat_mode == "random":
-            scenario_probe_players = [1, 2]
-
-    unique_scenario_files = sorted(set(scenario_list))
-    max_units = 0
-    max_units_scenario: Optional[str] = None
-    for scenario_file in unique_scenario_files:
-        with open(scenario_file, "r", encoding="utf-8-sig") as f:
-            scenario_data = json.load(f)
-        if isinstance(scenario_data, dict) and "units" in scenario_data:
-            scenario_unit_count = len(require_key(scenario_data, "units"))
-        elif (
-            isinstance(scenario_data, dict)
-            and "agent_roster_ref" in scenario_data
-            and "opponent_roster_ref" in scenario_data
-        ):
-            scenario_unit_count = _count_units_from_roster_scenario(scenario_data, scenario_file)
-        else:
-            scenario_unit_count_candidates: List[int] = []
-            for probe_player in scenario_probe_players:
-                temp_manager = GameStateManager(
-                    {"board": {}, "controlled_player": probe_player},
-                    unit_registry
-                )
-                scenario_result = temp_manager.load_units_from_scenario(scenario_file, unit_registry)
-                scenario_unit_count_candidates.append(len(require_key(scenario_result, "units")))
-            scenario_unit_count = max(scenario_unit_count_candidates)
-        if scenario_unit_count <= 0:
-            raise ValueError(f"Scenario '{scenario_file}' resolved to zero units")
-        if scenario_unit_count > max_units:
-            max_units = scenario_unit_count
-            max_units_scenario = scenario_file
-
-    if max_units_scenario is None:
-        raise ValueError("No scenario available to compute the per-turn step budget")
-
-    # Import GAME_PHASES from action_decoder - single source of truth
-    from engine.action_decoder import GAME_PHASES
-    num_phases = len(GAME_PHASES)
-
-    # Budget d'actions d'un tour, derive du nombre de FIGURINES du scenario le plus
-    # charge — meme formule et meme config que le garde anti-runaway du moteur
-    # (compute_turn_step_limit), pour que l'estimation de timesteps et la troncature
-    # runtime ne divergent jamais. Propage via training_config : les fonctions qui
-    # convertissent des episodes en timesteps n'ont pas de moteur sous la main.
-    from config_loader import compute_turn_step_limit
-    _game_rules_for_budget = require_key(get_config_loader().get_game_config(), "game_rules")
-    max_steps = compute_turn_step_limit(_game_rules_for_budget, max_units)
-    training_config["_turn_step_limit"] = max_steps
-    max_units_scenario_name = os.path.basename(max_units_scenario)
-    chunk_log(
-        "📊 Auto-calculated per-turn step budget: "
-        f"{max_units} models × {require_key(_game_rules_for_budget, 'max_actions_per_model_per_turn')} actions "
-        f"× {require_key(_game_rules_for_budget, 'step_limit_margin')} margin = {max_steps} "
-        f"(max models from {max_units_scenario_name})"
-    )
+    max_steps = resolve_turn_step_limit(scenario_list, training_config, use_bots, chunk_log)
 
     # Calculate average steps per episode for timestep conversion
     max_turns = get_max_turns()

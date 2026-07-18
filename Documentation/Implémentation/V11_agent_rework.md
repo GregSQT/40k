@@ -690,6 +690,103 @@ de T4/de code latent) :
     et le changement n'est pas neutre PvP. Ne concerne que du code par-ancre condamné → priorité
     basse. Détail + mesures : `A_faire/bug_pile_in_bfs_clearance_mismatch.md`.
 
+- **T6-e — `_turn_step_limit` absent sur le chemin single-scenario (BLOQUANT, crash immédiat) —
+  ✅ CORRIGÉ (2026-07-19)**
+  **Repro** : `train.py --agent CoreAgent --training-config x5_debug --scenario <fichier.json>
+  --new --resolution 5` → `ConfigurationError: Required key '_turn_step_limit' is missing from
+  mapping` dans `setup_callbacks` ([train.py:3096](../../ai/train.py#L3096)).
+  **Cause** (même famille que T6-a/T6-b : migration partielle d'un chemin de train.py) :
+  `training_config["_turn_step_limit"]` n'était écrit que par DEUX chemins — la rotation de
+  scénarios (`train_with_scenario_rotation`, bloc inline de calcul du budget) et MacroController
+  ([train.py:4786](../../ai/train.py#L4786), relevé sur son propre moteur). Le chemin
+  **single-scenario** (`--scenario <fichier>` → `create_multi_agent_model` → `setup_callbacks`)
+  ne l'écrivait jamais, alors que TROIS lecteurs le `require_key` :
+  [train.py:3096](../../ai/train.py#L3096), [train.py:3469](../../ai/train.py#L3469),
+  [multi_agent_trainer.py:556](../../ai/multi_agent_trainer.py#L556). Crash systématique, quel
+  que soit le scénario.
+  **Fix** : le bloc inline de la rotation est extrait en helper
+  `resolve_turn_step_limit(scenario_files, training_config, use_bots, log)`
+  ([train.py:2102](../../ai/train.py#L2102)) — MÊME formule (`compute_turn_step_limit` sur le
+  scénario au max de figurines, probe des sièges p1/p2/random si `use_bots`) — appelé par les
+  deux chemins : rotation ([train.py:2302](../../ai/train.py#L2302)) et single-scenario
+  ([train.py:1757](../../ai/train.py#L1757), `use_bots` dérivé de « bot » dans le nom du
+  scénario, miroir du choix `BotControlledEnv` ~L1830). Factorisation volontaire : deux calculs
+  dupliqués = le motif exact qui a produit R5 et T6-a. Code mort supprimé au passage dans le
+  bloc extrait (`num_phases`/import `GAME_PHASES`, calculé et jamais lu).
+
+- **T6-f — Commit de déploiement `deploy_unit` mono-ancre : `models_cache` JAMAIS écrit
+  (BLOQUANT gym, crash DIFFÉRÉ en phase move ; touche AUSSI des chemins PvP) — ❌ À FAIRE
+  (constaté 2026-07-19)**
+  **Rayon (vérifié par lecture, conséquence runtime démontrée côté gym seulement)** : le commit
+  fautif est PARTAGÉ — (a) gym via l'action decoder ; (b) auto-déploiement P2 du tutoriel
+  ([api_server.py:2255](../../services/api_server.py#L2255)) ; (c) drag mono-socle PvP encore
+  actif quand `deployment_type != "active"` (`handleDeployUnit`,
+  [useEngineAPI.ts:5512](../../frontend/src/hooks/useEngineAPI.ts#L5512), cf.
+  [BoardPvp.tsx:10875](../../frontend/src/components/BoardPvp.tsx#L10875)) et sa route
+  sémantique ([w40k_core.py:5265](../../engine/w40k_core.py#L5265)). Tous laissent les
+  figurines à `(-1,-1)`.
+  **C'est un TROISIÈME bug de déploiement, distinct** de la parité masque/commit T5
+  (`_deployment_clearance_filter` — divergence de prédicat, mono-ancre des deux côtés) et du
+  logging analyzer (§ « Le déploiement n'était PAS journalisé ») : ici c'est le COMMIT lui-même
+  qui est resté pré-V11.
+  **Repro** (déterministe, moteur nu, scénario `training_benchmark`, premier index du masque à
+  chaque step) : crash au step 7, première action de move —
+  `ValueError: execute_squad_move a échoué : squad=1 type=fall_back dest=(214,96) depuis
+  (217,154) — incohérence masque/exécution`. Indépendant du terrain (reproduit avec
+  `terrain-mc1` ET `terrain-train-01`) et du roster.
+  **Root cause (tracée sur l'état)** : après le déploiement gym, `units_cache["1"]` porte bien
+  l'ancre `(217,154)` mais les 6 figurines de `models_cache` restent à `(-1,-1)`. La branche
+  `deploy_unit` d'`execute_deployment_action`
+  ([deployment_handlers.py:953](../../engine/phase_handlers/deployment_handlers.py#L953)) commit
+  via `set_unit_coordinates` + `update_units_cache_position`
+  ([shared_utils.py:1255](../../engine/phase_handlers/shared_utils.py#L1255) — n'écrit que
+  `units_cache` + carte d'occupation, jamais `models_cache`). Le chemin PvP `deploy_commit` →
+  `_apply_deploy_plan`
+  ([deployment_handlers.py:824](../../engine/phase_handlers/deployment_handlers.py#L824)), lui,
+  écrit chaque figurine via `update_model_position` puis synchronise l'ancre.
+  **Mécanisme du crash** : le pool BFS du masque de move part de l'ancre `units_cache` (valide),
+  mais `build_rigid_plan` ([shared_utils.py:3243](../../engine/phase_handlers/shared_utils.py#L3243))
+  translate depuis `models_cache` : 6 figurines confondues en `(-1,-1)` → plan = 6 figs sur le
+  MÊME hex destination, et `validate_move_plan` rejette (budget per-model : distance 215 depuis
+  `(-1,-1)` > 60 ; collision intra-plan en second rideau). Le masque avait autorisé la cellule →
+  la garde « incohérence masque/exécution » de `_process_squad_action` lève. En vectorisé, les
+  8 workers `SubprocVecEnv` meurent (EOFError côté parent).
+  **Pourquoi invisible jusqu'ici** : T5 a validé la boucle moteur nu AVANT la migration squad
+  par-figurine du move (T6/refonte spatiale) — tant que l'exécution du move raisonnait par
+  ancre, des figurines à `(-1,-1)` ne faisaient rien crasher (elles produisaient seulement les
+  fausses collisions analyzer, cf. § logging).
+  **Solution (NON implémentée) — pattern « plan mémoisé au masque, exécuté au commit », miroir
+  EXACT de la phase move (`store_squad_move_cell_map`/`_squad_advance_rolls` : le commit exécute
+  ce que le masque a validé, jamais re-dérivé)** :
+  1. **Au masque** (gym) : pour chaque ancre candidate des 5 stratégies, générer la formation
+     (`generate_compact_formation`,
+     [deployment_handlers.py:190](../../engine/phase_handlers/deployment_handlers.py#L190) —
+     déterministe : spirale BFS) puis la valider par `deployment_preview_plan` (zone + murs
+     par-figurine + chevauchements + cohésion + §13.06). Seules les ancres au plan VERT restent
+     dans le masque ; le plan validé est mémoisé (tampon ancre+phase, comme la carte de cellules
+     du move).
+  2. **Au commit** : `deploy_unit` gym exécute le plan MÉMOISÉ via `_apply_deploy_plan`
+     ([deployment_handlers.py:824](../../engine/phase_handlers/deployment_handlers.py#L824)) —
+     qui écrit chaque figurine (`update_model_position`) et synchronise l'ancre. Aucune
+     réécriture parallèle de `models_cache`.
+  ⚠️ **Écarté après analyse — deux fausses bonnes idées** :
+  - *Filtrer le pool entier par `deployment_build_squad_destinations_pool`*
+    ([deployment_handlers.py:552](../../engine/phase_handlers/deployment_handlers.py#L552)) :
+    INSUFFISANT (ne teste que zone-fit du bloc rigide — pas les murs par-figurine, pas le
+    chevauchement d'unités déployées, pas §13.06, tous exigés par `deployment_preview_plan` →
+    le mismatch masque/commit resterait ouvert, même deadlock que T5) et SURDIMENSIONNÉ (le
+    décodeur n'expose que 5 slots-stratégies, pas ~16 000 hexes).
+  - *Committer par formation re-générée au commit sans mémoisation* : `generate_compact_formation`
+    est un helper UX qui peut rendre un plan avec figs HORS ZONE (overflow documenté « voile
+    rouge, à repositionner ») — le plan n'est PAS légal par construction, seule la validation
+    preview au moment du MASQUE donne la garantie.
+  3. Chemins PvP du rayon (tutoriel, drag non-"active") : même commit par plan validé —
+     décision d'implémentation à prendre au moment du fix (le tutoriel fournit des positions de
+     scénario mono-ancre).
+  4. Verrou de non-régression : test « après le commit de déploiement gym, TOUTES les figurines
+     vivantes de l'escouade ont une position `models_cache` ≠ `(-1,-1)` et l'ancre `units_cache`
+     est cohérente avec elles » — rouge sur le code actuel.
+
 **T6.2 — métriques TensorBoard : RÉSOLU, la mémoire projet était périmée.** Inspection directe
 des `events.out.tfevents.*` (EventAccumulator) sur training neuf : `0_critical/` porte bien les
 métriques PPO — `f_loss_mean`, `g_explained_variance`, `h_clip_fraction`, `i_approx_kl`,
