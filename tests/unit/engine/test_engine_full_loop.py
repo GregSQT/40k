@@ -30,7 +30,7 @@ from engine.w40k_core import W40KEngine
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-_MAX_TURNS = 3  # doit correspondre à training_config["max_turns_per_episode"]
+_MAX_TURNS = 3  # duree de bataille : game_rules.max_turns (source unique)
 _TURN_FORCE = _MAX_TURNS + 1  # valeur qui déclenche la terminaison
 
 
@@ -105,6 +105,11 @@ def _minimal_config() -> Dict[str, Any]:
             "max_base_size_hex": 35,
             "cover_ratio": 0.3,
             "avg_charge_roll": 7,
+            # Requis par le garde anti-runaway de step() (cf. compute_episode_step_limit).
+            # Valeurs reelles de config/game_config.json.
+            "max_turns": _MAX_TURNS,
+            "max_actions_per_model_per_turn": 7,
+            "step_limit_margin": 1.5,
         },
         # Toggles de traversee requis par le pool BFS : le masque de move passe
         # desormais par lui (refonte spatiale), la ou les dry-runs directionnels
@@ -121,7 +126,6 @@ def _minimal_config() -> Dict[str, Any]:
         "observation_params": obs_params,
         "training_config": {
             "observation_params": obs_params,
-            "max_turns_per_episode": _MAX_TURNS,
         },
         "units": [
             _unit_cfg(1, 1, 3, 3),

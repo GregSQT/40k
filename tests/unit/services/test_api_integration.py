@@ -31,6 +31,7 @@ from engine.phase_handlers.shared_utils import build_units_cache, build_enemy_ad
 def _base_config() -> Dict[str, Any]:
     return {
         "game_rules": {
+            "max_turns": 5,  # duree de bataille (regle 40k) : source unique
             "engagement_zone": 1,
             "engagement_zone_vertical": 5,
             "max_base_size_hex": 35,

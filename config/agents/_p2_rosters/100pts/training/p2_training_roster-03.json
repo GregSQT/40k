@@ -1,7 +1,0 @@
-{
-  "roster_id": "p2_training_roster-03",
-  "composition": [
-    {"unit_type": "AssaultIntercessorJumpPack", "count": 5},
-    {"unit_type": "Gargoyle", "count": 2}
-  ]
-}

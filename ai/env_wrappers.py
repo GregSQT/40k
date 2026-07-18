@@ -211,7 +211,10 @@ class BotControlledEnv(gym.Wrapper):
     ) -> tuple[Any, bool, bool, dict, float]:
         """Execute consecutive bot turns until control leaves bot player or episode ends."""
         bot_loop_count = 0
-        max_bot_iterations = require_key(require_key(self.engine.game_state["config"], "game_rules"), "max_steps_per_turn")
+        # Borne des activations consecutives du bot sur un tour : meme source que le
+        # moteur (derivee des figurines en jeu), sinon le bot serait coupe a tort des
+        # qu'une escouade nombreuse a besoin de plus d'actions que l'ancienne constante.
+        max_bot_iterations = self.engine.get_turn_step_limit()
         if debug_mode:
             print(
                 f"[TRAIN DEBUG] BotControlledEnv._run_bot_until_not_bot_turn enter env_rank={self._env_rank}",
@@ -1118,7 +1121,10 @@ class SelfPlayWrapper(gym.Wrapper):
         # Track P1 actions for diagnostic
         p1_actions_before = 0
         p1_terminal_reward = 0.0  # Capture lose penalty if P1 ends game before P0 acts
-        max_iterations = 1000  # Safety guard against infinite loops
+        # Garde anti-boucle-infinie derive de game_rules. Portee = les activations
+        # CONSECUTIVES d'un joueur avant que P0 reprenne la main : la borne naturelle est
+        # celle d'un TOUR (max_steps_per_turn * marge), pas celle d'un episode entier.
+        max_iterations = self.engine.get_turn_step_limit()
         while not (terminated or truncated) and self.engine.game_state["current_player"] == 2:
             p1_actions_before += 1
             if p1_actions_before > max_iterations:

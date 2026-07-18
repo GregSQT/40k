@@ -40,7 +40,7 @@ from engine.phase_handlers.shared_utils import (
 )
 
 # Import shared utilities FIRST (no circular dependencies)
-from engine.game_utils import get_unit_by_id
+from engine.game_utils import get_unit_by_id, turn_limit_reached, get_effective_turn_limit
 
 # Import NEW extracted modules
 from engine.observation_builder import ObservationBuilder
@@ -427,6 +427,13 @@ class W40KEngine(gym.Env):
         else:
             self.config["inches_to_subhex"] = 1
 
+        # Plafond anti-runaway de l'episode : derive PARESSEUSEMENT de game_rules au
+        # premier depassement du seuil de veille (cf. _episode_step_limit_value). Le calcul
+        # n'est pas fait ici car des harnais legitimes construisent le moteur avec un
+        # game_rules partiel ; exiger max_turns/max_steps_per_turn des la construction
+        # imposerait la config complete a des appelants qui ne jouent aucun episode.
+        self._episode_step_limit_cache: Optional[int] = None
+
         # Store training system compatibility parameters
         self.quiet = quiet
         self.unit_registry = unit_registry
@@ -560,7 +567,12 @@ class W40KEngine(gym.Env):
             # Handler access for single-agent reward config (required, no defaults)
             "reward_configs": self.rewards_config,
             "config": self.config,
-            
+
+            # Duree de bataille illimitee : seul l'Endless Duty (base sur des vagues)
+            # l'active, via services/endless_duty_runtime. Partout ailleurs la duree
+            # vient de game_rules.max_turns (cf. get_effective_turn_limit).
+            "unlimited_turns": False,
+
             # Board state - handle both config formats
             "board_cols": board_cols,
             "board_rows": board_rows,
@@ -1153,6 +1165,18 @@ class W40KEngine(gym.Env):
         # Build units_cache once after all units are initialized (single source of truth)
         build_units_cache(self.game_state)
         rebuild_choice_timing_index(self.game_state)
+
+        # Nombre de FIGURINES reellement en jeu : base des gardes anti-runaway, qui sont
+        # comptes par action et donc par figurine. Releve ici (et pas en config) pour que
+        # les plafonds suivent le roster charge — une escouade de 20 ne se borne pas comme
+        # une unite seule. Invalide le cache : le meme moteur peut etre reset sur un autre
+        # scenario, avec un nombre de figurines different.
+        self._model_count = sum(
+            len(mids) for mids in require_key(self.game_state, "squad_models").values()
+        )
+        if self._model_count <= 0:
+            raise ValueError("reset produced zero models: cannot derive runaway step limits")
+        self._episode_step_limit_cache = None
         
         # Initialize units_cache_prev for first step (Phase 2: units_cache always exists after reset)
         uc = require_key(self.game_state, "units_cache")
@@ -1359,6 +1383,47 @@ class W40KEngine(gym.Env):
         
         return observation, info    
     
+    def get_turn_step_limit(self) -> int:
+        """Plafond anti-runaway d'UN tour de joueur, pour le moteur et ses wrappers.
+
+        Derive du nombre de figurines relevé au reset (cf. compute_turn_step_limit) : les
+        wrappers doivent borner leurs boucles sur la MEME source que le moteur, sinon
+        l'un coupe des parties que l'autre juge encore valides.
+        """
+        from config_loader import compute_turn_step_limit
+        return compute_turn_step_limit(
+            require_key(self.config, "game_rules"), self._get_model_count()
+        )
+
+    def _get_model_count(self) -> int:
+        """Nombre de figurines en jeu, relevé au reset."""
+        model_count = getattr(self, "_model_count", None)
+        if model_count is None:
+            raise RuntimeError(
+                "model count unavailable: reset() must run before deriving step limits"
+            )
+        return int(model_count)
+
+    def _get_episode_step_limit(self) -> Optional[int]:
+        """Plafond anti-runaway de l'episode, derive et memoise.
+
+        Derive (et non constant) pour suivre le roster charge et le nombre de tours :
+        cf. compute_episode_step_limit. Memoise car releve une fois par reset ; le cache
+        est invalide a chaque reset, un meme moteur pouvant rejouer un autre scenario.
+        L'absence des cles de config reste une erreur explicite, jamais un defaut.
+
+        None en duree illimitee (Endless Duty) : une partie sans fin n'a pas de borne
+        d'episode. Le garde par TOUR reste actif et suffit a detecter une boucle infinie.
+        """
+        if get_effective_turn_limit(self.game_state) is None:
+            return None
+        if self._episode_step_limit_cache is None:
+            from config_loader import compute_episode_step_limit
+            self._episode_step_limit_cache = compute_episode_step_limit(
+                require_key(self.config, "game_rules"), self._get_model_count()
+            )
+        return self._episode_step_limit_cache
+
     def step(self, action: int) -> Tuple[Union[np.ndarray, Dict[str, np.ndarray]], float, bool, bool, Dict[str, Any]]:
         """
         Execute gym action with built-in step counting - gym.Env interface.
@@ -1378,31 +1443,28 @@ class W40KEngine(gym.Env):
         self._episode_step_calls = getattr(self, '_episode_step_calls', 0) + 1
 
         # CRITICAL: Check turn limit BEFORE processing any action
-        _tc = getattr(self, "training_config", None)
-        if _tc is not None:
-            max_turns = _tc.get("max_turns_per_episode")
-            if max_turns and self.game_state["turn"] > max_turns:
-                # Turn limit exceeded - return terminated episode immediately
-                # CRITICAL: Set turn_limit_reached flag in game_state for winner determination
-                self.game_state["game_over"] = True
-                self.game_state["turn_limit_reached"] = True
-                observation = self._build_observation()
-                winner, win_method = self._determine_winner_with_method()
-                
-                # CRITICAL: win_method should never be None when game is terminated
-                if win_method is None:
-                    raise ValueError(
-                        f"win_method is None but terminated=True. Winner={winner}, Turn={self.game_state.get('turn')}"
-                    )
-                
-                info = {"turn_limit_exceeded": True, "winner": winner, "win_method": win_method}
-                
-                # Log episode end if step_logger is enabled
-                if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
-                    objective_control = self.state_manager.calculate_objective_control(self.game_state)
-                    self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
-                
-                return observation, 0.0, True, False, info
+        if turn_limit_reached(self.game_state):
+            # Turn limit exceeded - return terminated episode immediately
+            # CRITICAL: Set turn_limit_reached flag in game_state for winner determination
+            self.game_state["game_over"] = True
+            self.game_state["turn_limit_reached"] = True
+            observation = self._build_observation()
+            winner, win_method = self._determine_winner_with_method()
+            
+            # CRITICAL: win_method should never be None when game is terminated
+            if win_method is None:
+                raise ValueError(
+                    f"win_method is None but terminated=True. Winner={winner}, Turn={self.game_state.get('turn')}"
+                )
+            
+            info = {"turn_limit_exceeded": True, "winner": winner, "win_method": win_method}
+            
+            # Log episode end if step_logger is enabled
+            if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
+                objective_control = self.state_manager.calculate_objective_control(self.game_state)
+                self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
+            
+            return observation, 0.0, True, False, info
 
         # Check for game termination before action
         self.game_state["game_over"] = self._check_game_over()
@@ -2033,9 +2095,12 @@ class W40KEngine(gym.Env):
         if "console_logs" in self.game_state and self.game_state["console_logs"]:
             self.game_state["console_logs"] = []
 
-        # Safety: truncate runaways (e.g. stuck in eval, phase transition bug) before bot_evaluation 1000 guard
+        # Safety: truncate runaways (e.g. stuck in eval, phase transition bug).
+        # Plafond derive de game_rules (max_steps_per_turn * marge * max_turns) : il suit
+        # la taille des rosters au lieu d'etre une constante a re-regler a chaque escouade.
         _calls = getattr(self, '_episode_step_calls', 0)
-        if not terminated and _calls > 1000:
+        _episode_limit = self._get_episode_step_limit()
+        if not terminated and _episode_limit is not None and _calls > _episode_limit:
             episode = self.game_state.get("episode_number", "?")
             turn = self.game_state.get("turn", "?")
             phase = self.game_state.get("phase", "?")
@@ -2121,7 +2186,7 @@ class W40KEngine(gym.Env):
             shoot_pool = len(require_key(self.game_state, "shoot_activation_pool"))
             charge_pool = len(require_key(self.game_state, "charge_activation_pool"))
             error_msg = (
-                f"\n ❌ ERROR: Episode exceeded 1000 steps (episode={episode}, turn={turn}, "
+                f"\n ❌ ERROR: Episode exceeded {_episode_limit} steps (episode={episode}, turn={turn}, "
                 f"phase={phase}, scenario={scenario_name}, scenario_path={current_scenario}, "
                 f"player={current_player}, fight_subphase={fight_subphase}, "
                 f"active_unit_id={active_unit_id}, active_unit_name={active_unit_name}, "
@@ -5980,13 +6045,10 @@ class W40KEngine(gym.Env):
             self.game_state["turn"] += 1
             
             # Check turn limit immediately after P1 completes turn
-            _tc = getattr(self, "training_config", None)
-            if _tc is not None:
-                max_turns = _tc.get("max_turns_per_episode")
-                if max_turns and self.game_state["turn"] > max_turns:
-                    # Turn limit reached - mark game over and stop phase progression
-                    self.game_state["game_over"] = True
-                    return
+            if turn_limit_reached(self.game_state):
+                # Turn limit reached - mark game over and stop phase progression
+                self.game_state["game_over"] = True
+                return
 
         # Reset per-enemy-turn reactive tracking on player switch.
         self.game_state["units_reacted_this_enemy_turn"] = set()
@@ -6045,13 +6107,10 @@ class W40KEngine(gym.Env):
     def _check_game_over(self) -> bool:
         """Check if game is over - turn limit reached."""
         # Check turn limit first
-        training_config = getattr(self, "training_config", None)
-        if training_config is not None:
-            max_turns = training_config.get("max_turns_per_episode")
-            if max_turns and self.game_state["turn"] > max_turns:
-                # CRITICAL: Flag turn limit reached for winner determination
-                self.game_state["turn_limit_reached"] = True
-                return True
+        if turn_limit_reached(self.game_state):
+            # CRITICAL: Flag turn limit reached for winner determination
+            self.game_state["turn_limit_reached"] = True
+            return True
         if require_key(self.game_state, "turn_limit_reached"):
             return True
         return False

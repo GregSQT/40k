@@ -11,7 +11,6 @@
     "bot_eval_show_progress": true,
     "bot_eval_use_subprocess": true,
     "bot_eval_n_workers": 6,
-    "max_turns_per_episode": 5,
     "n_envs": 48,
     "callback_params": {
       "save_best_min_episodes": 10000,

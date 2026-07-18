@@ -1,0 +1,14 @@
+{
+  "roster_id": "agent_training_roster_benchmark",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 1,
+      "models_per_unit": 5
+    },
+    {
+      "unit_type": "DreadnoughtBallistus",
+      "count": 1
+    }
+  ]
+}

@@ -27,10 +27,20 @@ def _minimal_gs(
     current_player: int = 1,
     phase: str = "fight",
     turn: int = 1,
+    max_turns: int = 5,
+    unlimited_turns: bool = False,
 ) -> Dict[str, Any]:
     gs: Dict[str, Any] = {
+        # Duree de bataille : game_rules.max_turns est la SOURCE UNIQUE (regle 40k).
+        # 'unlimited_turns' est le seul echappatoire (Endless Duty, base sur des vagues).
+        "unlimited_turns": unlimited_turns,
         "config": {
-            "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
+            "game_rules": {
+                "engagement_zone": 1,
+                "engagement_zone_vertical": 5,
+                "max_base_size_hex": 35,
+                "max_turns": max_turns,
+            },
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },
         "board_cols": 25,
@@ -88,21 +98,18 @@ class TestCheckGameOver:
         """game_over_below_limit : turn=3, max_turns=5 → False."""
         gs = _minimal_gs(turn=3)
         engine = _bare_engine(gs)
-        engine.training_config = {"max_turns_per_episode": 5}
         assert engine._check_game_over() is False
 
     def test_turn_equals_limit_not_over(self):
         """game_over_eq_limit : turn=5, max_turns=5 → False (condition strictement supérieur)."""
         gs = _minimal_gs(turn=5)
         engine = _bare_engine(gs)
-        engine.training_config = {"max_turns_per_episode": 5}
         assert engine._check_game_over() is False
 
     def test_turn_exceeds_limit_returns_true(self):
         """game_over_exceeded : turn=6 > max_turns=5 → True et turn_limit_reached mis à True."""
         gs = _minimal_gs(turn=6)
         engine = _bare_engine(gs)
-        engine.training_config = {"max_turns_per_episode": 5}
         result = engine._check_game_over()
         assert result is True
         assert gs["turn_limit_reached"] is True
@@ -148,7 +155,6 @@ class TestAdvanceToNextPlayer:
         """advance_turn_limit : p2→p1 dépasse max_turns → game_over=True."""
         gs = _minimal_gs(current_player=2, phase="fight", turn=5)
         engine = _bare_engine(gs)
-        engine.training_config = {"max_turns_per_episode": 5}
         engine._advance_to_next_player()
         # turn devient 6 > max_turns=5 → game_over
         assert gs["game_over"] is True
@@ -319,25 +325,28 @@ class TestDetermineWinnerWithMethod:
 
 class TestCheckGameOverEdgeCases:
 
-    def test_training_config_no_max_turns_key_not_over(self):
-        """game_over_no_max_key : training_config sans max_turns_per_episode → False."""
-        gs = _minimal_gs(turn=100)
+    def test_unlimited_turns_never_reaches_limit(self):
+        """game_over_unlimited : unlimited_turns=True (Endless Duty) → jamais game over par les tours."""
+        gs = _minimal_gs(turn=100, unlimited_turns=True)
         engine = _bare_engine(gs)
-        engine.training_config = {}  # pas de max_turns_per_episode
         assert engine._check_game_over() is False
+        assert gs["turn_limit_reached"] is False
 
-    def test_training_config_max_turns_zero_not_over(self):
-        """game_over_max_zero : max_turns=0 (falsy) → False (condition `if max_turns`)."""
-        gs = _minimal_gs(turn=10)
+    def test_max_turns_zero_raises(self):
+        """game_over_max_zero : max_turns=0 est invalide → erreur explicite, pas un silence.
+
+        L'ancien contrat traitait 0 comme falsy et desactivait silencieusement la limite ;
+        une duree de bataille nulle est une donnee fausse, pas un mode de jeu.
+        """
+        gs = _minimal_gs(turn=10, max_turns=0)
         engine = _bare_engine(gs)
-        engine.training_config = {"max_turns_per_episode": 0}
-        assert engine._check_game_over() is False
+        with pytest.raises(ValueError, match="max_turns"):
+            engine._check_game_over()
 
     def test_sets_turn_limit_reached_in_state(self):
         """game_over_sets_flag : _check_game_over() met turn_limit_reached=True dans game_state."""
         gs = _minimal_gs(turn=6)
         engine = _bare_engine(gs)
-        engine.training_config = {"max_turns_per_episode": 5}
         engine._check_game_over()
         assert gs["turn_limit_reached"] is True
 
@@ -391,17 +400,21 @@ class TestCheckGameOverFlagInteractions:
         gs = _minimal_gs(turn=1)
         gs["turn_limit_reached"] = True
         engine = _bare_engine(gs)
-        engine.training_config = {"max_turns_per_episode": 100}  # turn bien en dessous
         # La flag force game_over même si turn < max_turns
         assert engine._check_game_over() is True
 
-    def test_no_training_config_attribute_but_flag_false_returns_false(self):
-        """game_over_no_attr : pas d'attribut training_config + flag=False → False."""
+    def test_turn_limit_applies_without_training_config_attribute(self):
+        """game_over_no_attr : la limite ne depend plus du training_config.
+
+        Ancien contrat : sans 'training_config', aucune limite de tours ne s'appliquait —
+        une partie pouvait courir indefiniment si l'attribut manquait. Desormais la duree
+        vient de game_rules.max_turns, donc turn=50 > 5 termine la partie.
+        """
         gs = _minimal_gs(turn=50)
         engine = _bare_engine(gs)
-        # Pas de training_config → hasattr returns False → vérifie turn_limit_reached
         assert not hasattr(engine, "training_config")
-        assert engine._check_game_over() is False
+        assert engine._check_game_over() is True
+        assert gs["turn_limit_reached"] is True
 
 
 # ─────────────────────────────────────────────────────────────────────────────

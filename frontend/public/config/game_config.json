@@ -12,8 +12,10 @@
   },
   "game_rules": {
     "max_turns": 5,
-    "max_steps_per_turn": 500,
-    "max_steps_per_turn_detail": "nb units (50) * nb actions per turn (7) = 350 + marge",
+    "max_actions_per_model_per_turn": 7,
+    "max_actions_per_model_per_turn_detail": "Majorant d'actions qu'UNE figurine peut consommer en un tour. Le plafond d'un tour est derive du nombre de figurines reellement en jeu (releve au reset du moteur), pas d'une constante.",
+    "step_limit_margin": 1.5,
+    "step_limit_margin_detail": "Marge des gardes anti-runaway (detection de bug, PAS une regle de jeu).",
     "turn_limit_penalty": -1,
     "los_debug_show_ratio": false,
     "los_debug_show_ratio_rule": "When true, shooting preview overlays visibility ratio percentages on evaluated hexes.",

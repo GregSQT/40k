@@ -54,7 +54,8 @@ def _make_gs(p1_vp: int, p2_vp: int,
         "victory_points": {1: p1_vp, 2: p2_vp},
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
-        "config": {"game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5}},
+        "config": {"game_rules": {
+            "max_turns": 5, "engagement_zone": 1, "engagement_zone_vertical": 5}},
     }
     build_units_cache(gs)
     return gs
@@ -68,7 +69,8 @@ def _make_gs_with_objectives(controller: int | None = None) -> Dict[str, Any]:
         "victory_points": {1: 0, 2: 0},
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
-        "config": {"game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5}},
+        "config": {"game_rules": {
+            "max_turns": 5, "engagement_zone": 1, "engagement_zone_vertical": 5}},
         "objectives": [{"id": "obj1", "hexes": [[99, 99]]}],  # hexes inoccupés
         "primary_objective": {
             "id": "obj1",
@@ -167,12 +169,15 @@ class TestCheckGameOver:
 
     def test_false_when_turn_limit_not_reached(self) -> None:
         """sm_cgo_false : turn_limit_reached=False → False."""
-        gs = {"turn_limit_reached": False}
+        # La duree de bataille vient de game_rules.max_turns : le state doit la porter.
+        gs = {"turn_limit_reached": False, "turn": 1,
+              "config": {"game_rules": {"max_turns": 5}}}
         assert _sm().check_game_over(gs) is False
 
     def test_true_when_turn_limit_reached(self) -> None:
         """sm_cgo_true : turn_limit_reached=True → True."""
-        gs = {"turn_limit_reached": True}
+        gs = {"turn_limit_reached": True, "turn": 1,
+              "config": {"game_rules": {"max_turns": 5}}}
         assert _sm().check_game_over(gs) is True
 
 

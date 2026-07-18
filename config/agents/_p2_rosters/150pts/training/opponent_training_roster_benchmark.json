@@ -2,20 +2,25 @@
   "roster_id": "opponent_training_roster_benchmark",
   "composition": [
     {
-      "unit_type": "ScreamerKiller",
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 1,
+      "models": [
+        "AssaultIntercessorJumpPack",
+        "AssaultIntercessorJumpPack",
+        "AssaultIntercessorJumpPack",
+        "AssaultIntercessorJumpPack",
+        "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
+        "ChaplainJumpPack"
+      ]
+    },
+    {
+      "unit_type": "DreadnoughtBallistus",
       "count": 1
     },
     {
-      "unit_type": "Gargoyle",
-      "count": 1
-    },
-    {
-      "unit_type": "Genestealer",
-      "count": 1
-    },
-    {
-      "unit_type": "Intercessor",
-      "count": 1
+      "unit_type": "Termagant",
+      "count": 1,
+      "models_per_unit": 20
     }
   ]
 }

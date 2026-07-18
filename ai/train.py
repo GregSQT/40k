@@ -493,6 +493,32 @@ def _count_units_from_roster_scenario(scenario_data: Dict[str, Any], scenario_fi
     holdout_split = "holdout" if split != "training" else "training"
     project_root = Path(os.path.abspath(__file__)).parent.parent
 
+    def _roster_model_count(roster_data: Dict[str, Any]) -> int:
+        """Nombre total de FIGURINES d'un roster compact (escouades × figurines).
+
+        Le compteur dimensionné en aval (max_steps_per_turn -> max_bot_iterations dans
+        BotControlledEnv) s'incrémente par action, et les actions sont par figurine
+        (cf. generic_handlers: 'episode_steps compte par action/figurine'). Compter les
+        escouades sous-dimensionnerait la borne et déclencherait une fausse détection de
+        boucle infinie sur toute escouade multi-figurines.
+        """
+        total = 0
+        for e in roster_data["composition"]:
+            if not isinstance(e, dict):
+                continue
+            if "models_per_unit" in e and "models" in e:
+                raise ValueError(
+                    "Roster composition entry cannot define both 'models_per_unit' and 'models'"
+                )
+            if "models_per_unit" in e:
+                models_per_unit = int(e["models_per_unit"])
+            elif "models" in e:
+                models_per_unit = len(e["models"])
+            else:
+                models_per_unit = 1
+            total += int(e["count"]) * models_per_unit
+        return total
+
     def _max_count_for_ref(ref_value: str, roster_kind: str) -> int:
         """Return max unit count across all matching roster files for a given ref."""
         if isinstance(ref_value, str):
@@ -518,8 +544,7 @@ def _count_units_from_roster_scenario(scenario_data: Dict[str, Any], scenario_fi
             for rf in roster_files:
                 try:
                     rd = json.load(open(rf))
-                    count = sum(int(e["count"]) for e in rd["composition"] if isinstance(e, dict))
-                    max_count = max(max_count, count)
+                    max_count = max(max_count, _roster_model_count(rd))
                 except Exception:
                     pass
             return max_count
@@ -534,7 +559,7 @@ def _count_units_from_roster_scenario(scenario_data: Dict[str, Any], scenario_fi
                 return 0
             try:
                 rd = json.load(open(roster_path))
-                return sum(int(e["count"]) for e in rd["composition"] if isinstance(e, dict))
+                return _roster_model_count(rd)
             except Exception:
                 return 0
 
@@ -947,7 +972,7 @@ def _load_rule_checker_scenarios(project_root_path: str) -> List[str]:
 # Multi-agent orchestration imports
 from ai.scenario_manager import ScenarioManager
 from ai.multi_agent_trainer import MultiAgentTrainer
-from config_loader import get_config_loader
+from config_loader import get_config_loader, get_max_turns
 from ai.game_replay_logger import GameReplayIntegration
 import torch
 
@@ -2188,8 +2213,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     n_envs = _resolve_n_envs_for_step_logging(n_envs, log=chunk_log)
 
     # Raise error if required fields missing - NO FALLBACKS
-    if "max_turns_per_episode" not in training_config:
-        raise KeyError(f"max_turns_per_episode missing from {agent_key} training config phase {training_config_name}")
 
     from engine.game_state import GameStateManager
 
@@ -2239,23 +2262,31 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             max_units_scenario = scenario_file
 
     if max_units_scenario is None:
-        raise ValueError("No scenario available to compute max_steps_per_turn")
+        raise ValueError("No scenario available to compute the per-turn step budget")
 
     # Import GAME_PHASES from action_decoder - single source of truth
     from engine.action_decoder import GAME_PHASES
     num_phases = len(GAME_PHASES)
 
-    # Calculate max_steps_per_turn dynamically
-    max_steps = max_units * num_phases
+    # Budget d'actions d'un tour, derive du nombre de FIGURINES du scenario le plus
+    # charge — meme formule et meme config que le garde anti-runaway du moteur
+    # (compute_turn_step_limit), pour que l'estimation de timesteps et la troncature
+    # runtime ne divergent jamais. Propage via training_config : les fonctions qui
+    # convertissent des episodes en timesteps n'ont pas de moteur sous la main.
+    from config_loader import compute_turn_step_limit
+    _game_rules_for_budget = require_key(get_config_loader().get_game_config(), "game_rules")
+    max_steps = compute_turn_step_limit(_game_rules_for_budget, max_units)
+    training_config["_turn_step_limit"] = max_steps
     max_units_scenario_name = os.path.basename(max_units_scenario)
     chunk_log(
-        "📊 Auto-calculated max_steps_per_turn: "
-        f"{max_units} units × {num_phases} phases = {max_steps} "
-        f"(max units from {max_units_scenario_name})"
+        "📊 Auto-calculated per-turn step budget: "
+        f"{max_units} models × {require_key(_game_rules_for_budget, 'max_actions_per_model_per_turn')} actions "
+        f"× {require_key(_game_rules_for_budget, 'step_limit_margin')} margin = {max_steps} "
+        f"(max models from {max_units_scenario_name})"
     )
 
     # Calculate average steps per episode for timestep conversion
-    max_turns = training_config["max_turns_per_episode"]
+    max_turns = get_max_turns()
     avg_steps_per_episode = max_turns * max_steps * 0.6  # Estimate: 60% of max
     
     # Get model path
@@ -3041,16 +3072,13 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     if "total_episodes" in training_config:
         if "total_episodes" not in training_config:
             raise KeyError(f"{training_config_name} training config missing required 'total_episodes'")
-        if "max_turns_per_episode" not in training_config:
-            raise KeyError(f"{training_config_name} training config missing required 'max_turns_per_episode'")
-        config_loader = get_config_loader()
-        game_config = config_loader.get_game_config()
-        game_rules = require_key(game_config, "game_rules")
-        if "max_steps_per_turn" not in game_rules:
-            raise KeyError("game_config missing required 'game_rules.max_steps_per_turn'")
-
         max_episodes = training_config["total_episodes"]
-        max_steps_per_episode = training_config["max_turns_per_episode"] * require_key(game_rules, "max_steps_per_turn")
+        # Budget par tour derive des figurines du scenario (cf. '_turn_step_limit'), pas
+        # une constante de game_config : il doit suivre le roster comme le fait le garde
+        # anti-runaway du moteur.
+        max_steps_per_episode = get_max_turns() * require_key(
+            training_config, "_turn_step_limit"
+        )
         expected_timesteps = max_episodes * max_steps_per_episode
         
         # Use overrides for rotation mode
@@ -3420,16 +3448,9 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         elif 'total_episodes' in training_config:
             total_episodes = training_config['total_episodes']
             # Calculate timesteps based on required config values - NO DEFAULTS ALLOWED
-            if "max_turns_per_episode" not in training_config:
-                raise KeyError(f"Training config missing required 'max_turns_per_episode' field")
-            from config_loader import get_config_loader
-            config_loader = get_config_loader()
-            game_config = config_loader.get_game_config()
-            game_rules = require_key(game_config, "game_rules")
-            if "max_steps_per_turn" not in game_rules:
-                raise KeyError("game_config missing required 'game_rules.max_steps_per_turn'")
-            max_turns_per_episode = training_config["max_turns_per_episode"]
-            max_steps_per_turn = require_key(game_rules, "max_steps_per_turn")
+            max_turns_per_episode = get_max_turns()
+            # cf. '_turn_step_limit' : budget par tour derive des figurines du scenario.
+            max_steps_per_turn = require_key(training_config, "_turn_step_limit")
             
             # CRITICAL FIX: Episode count controlled by EpisodeTerminationCallback, not timesteps
             # Use 5x multiplier to ensure timestep limit never stops training early
@@ -4742,6 +4763,11 @@ def main():
                     debug_mode=args.debug,
                     device_mode=args.mode
                 ))
+
+                # MacroController n'emprunte pas la rotation de scenarios : le budget par
+                # tour est releve sur son propre moteur, deja construit et reset, pour
+                # rester la MEME valeur que celle qui tronquera les episodes.
+                training_config["_turn_step_limit"] = env.unwrapped.get_turn_step_limit()
 
                 callbacks = setup_callbacks(
                     config, model_path, training_config, args.training_config,

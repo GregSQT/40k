@@ -10,7 +10,6 @@
     "bot_eval_show_progress": true,
     "bot_eval_use_subprocess": true,
     "bot_eval_n_workers": 6,
-    "max_turns_per_episode": 5,
     "n_envs": 48,
     "model_params": {
       "policy": "MultiInputPolicy",
@@ -205,7 +204,6 @@
     "bot_eval_show_progress": true,
     "bot_eval_use_subprocess": true,
     "bot_eval_n_workers": 6,
-    "max_turns_per_episode": 5,
     "n_envs": 48,
     "model_params": {
       "policy": "MultiInputPolicy",
@@ -401,7 +399,6 @@
     "bot_eval_show_progress": true,
     "bot_eval_use_subprocess": true,
     "bot_eval_n_workers": 6,
-    "max_turns_per_episode": 5,
     "n_envs": 48,
     "model_params": {
       "policy": "MultiInputPolicy",
@@ -596,7 +593,6 @@
     "bot_eval_show_progress": true,
     "bot_eval_use_subprocess": true,
     "bot_eval_n_workers": 6,
-    "max_turns_per_episode": 5,
     "n_envs": 48,
     "callback_params": {
       "early_stopping_patience": 0,
@@ -792,7 +788,6 @@
     "bot_eval_show_progress": true,
     "bot_eval_use_subprocess": true,
     "bot_eval_n_workers": 3,
-    "max_turns_per_episode": 5,
     "n_envs": 8,
     "n_envs_normal--------------------------------": 48,
     "callback_params": {

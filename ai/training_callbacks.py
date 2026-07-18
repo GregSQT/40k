@@ -647,14 +647,26 @@ class EpisodeBasedEvalCallback(BaseCallback):
         episode_lengths = []
         wins = 0
         
+        # Garde anti-runaway : on interroge le moteur d'evaluation lui-meme plutot que de
+        # recalculer depuis la config, pour que ce plafond soit exactement celui auquel le
+        # moteur tronque. Un plafond local plus bas couperait des episodes encore valides,
+        # et le silence d'un tel arret fausserait le win-rate.
+        eval_engine = self.eval_env.unwrapped
+        if not hasattr(eval_engine, "_get_episode_step_limit"):
+            raise AttributeError(
+                f"eval_env.unwrapped ({type(eval_engine).__name__}) exposes no "
+                f"_get_episode_step_limit: cannot align the evaluation runaway guard "
+                f"with the engine's own limit."
+            )
+
         for eval_episode in range(self.n_eval_episodes):
             obs, info = self.eval_env.reset()
             episode_reward = 0
             episode_length = 0
             done = False
             final_info = None
-            
-            while not done and episode_length < 1000:  # Prevent infinite loops
+
+            while not done:
                 action, _ = self.model.predict(obs, deterministic=self.deterministic)
                 obs, reward, terminated, truncated, info = self.eval_env.step(action)
                 episode_reward += reward
@@ -662,7 +674,19 @@ class EpisodeBasedEvalCallback(BaseCallback):
                 done = terminated or truncated
                 if done:
                     final_info = info
-            
+                elif (
+                    eval_engine._get_episode_step_limit() is not None
+                    and episode_length > eval_engine._get_episode_step_limit()
+                ):
+                    # Sortir silencieusement ici produirait des metriques d'evaluation
+                    # tronquees et non signalees (final_info=None, win-rate fausse).
+                    raise RuntimeError(
+                        f"Evaluation episode exceeded {eval_engine._get_episode_step_limit()} steps without "
+                        f"terminating (eval_episode={eval_episode}). The engine truncates at "
+                        f"the same limit, so reaching it here means the episode never returned "
+                        f"terminated/truncated — engine or wrapper bug, not a long game."
+                    )
+
             episode_rewards.append(episode_reward)
             episode_lengths.append(episode_length)
 

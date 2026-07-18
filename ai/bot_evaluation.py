@@ -993,6 +993,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         n_workers = min(n_envs, len(scenario_list) * len(active_bot_names))
     n_workers = max(1, int(n_workers))
 
+    from config_loader import get_max_turns
+
     tasks: List[Dict[str, Any]] = []
     for bot_name in active_bot_names:
         for scenario_index, scenario_file in enumerate(scenario_list):
@@ -1018,7 +1020,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 "scenario_index": scenario_index,
                 "deterministic": deterministic,
                 "config_params": config_params,
-                "max_steps_per_episode": int(require_key(training_cfg, "max_turns_per_episode")) * 400,
+                "max_steps_per_episode": int(get_max_turns()) * 400,  # duree de bataille = game_rules.max_turns
             })
 
     initargs = (

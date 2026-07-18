@@ -231,7 +231,6 @@ def main() -> None:
     config_loader = get_config_loader()
     game_config = config_loader.get_game_config()
     game_rules = require_key(game_config, "game_rules")
-    default_max_steps_per_turn = require_key(game_rules, "max_steps_per_turn")
     scenario_files = args.scenario_file
     scenario_file = scenario_files[0] if len(scenario_files) == 1 else None
 
@@ -255,8 +254,12 @@ def main() -> None:
             engine=engine,
             macro_player=args.macro_player,
             macro_every_steps=args.macro_every_steps,
+            # Defaut = le budget par tour du moteur lui-meme (derive des figurines en
+            # jeu), pour que ce harnais de charge exerce la meme borne que la production.
             max_steps_per_turn=(
-                args.max_steps_per_turn if args.max_steps_per_turn is not None else default_max_steps_per_turn
+                args.max_steps_per_turn
+                if args.max_steps_per_turn is not None
+                else engine.get_turn_step_limit()
             ),
             macro_both=args.macro_both,
         )

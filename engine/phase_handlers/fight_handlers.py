@@ -1855,10 +1855,11 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
         }
     elif game_state["current_player"] == 2:
         # Player 2 complete -> Check if incrementing turn would exceed limit
-        cfg = game_state["config"] if "config" in game_state else None
-        tc = cfg["training_config"] if cfg and "training_config" in cfg else None
-        max_turns = tc["max_turns_per_episode"] if tc and "max_turns_per_episode" in tc else None
-        if max_turns and (game_state["turn"] + 1) > max_turns:
+        # Duree de bataille : game_rules.max_turns (source unique, cf. game_utils).
+        # None = Endless Duty (illimite), qui ne doit jamais finir sur la limite de tours.
+        from engine.game_utils import get_effective_turn_limit
+        max_turns = get_effective_turn_limit(game_state)
+        if max_turns is not None and (game_state["turn"] + 1) > max_turns:
             # Primary objective scoring for P2 on round 5 (fight phase)
             state_manager = GameStateManager(require_key(game_state, "config"))
             state_manager.apply_primary_objective_scoring(game_state, "fight")
@@ -3294,10 +3295,10 @@ def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             "clear_selected_unit": True, "clear_attack_preview": True,
         }
     # current_player == 2
-    cfg = game_state.get("config")
-    tc = cfg.get("training_config") if isinstance(cfg, dict) else None
-    max_turns = tc.get("max_turns_per_episode") if isinstance(tc, dict) else None
-    if max_turns and (game_state["turn"] + 1) > max_turns:
+    # Duree de bataille : game_rules.max_turns (source unique, cf. game_utils).
+    from engine.game_utils import get_effective_turn_limit
+    max_turns = get_effective_turn_limit(game_state)
+    if max_turns is not None and (game_state["turn"] + 1) > max_turns:
         state_manager = GameStateManager(require_key(game_state, "config"))
         state_manager.apply_primary_objective_scoring(game_state, "fight")
         game_state["turn_limit_reached"] = True

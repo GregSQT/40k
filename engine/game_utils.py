@@ -118,3 +118,33 @@ def conditional_debug_print(game_state: Dict[str, Any], message: str) -> None:
     """
     # DISABLED: Do not print to console, logs are written to file only
     return
+
+def get_effective_turn_limit(game_state: Dict[str, Any]) -> Optional[int]:
+    """Nombre de tours au-dela duquel la bataille s'arrete, ou None si illimitee.
+
+    SOURCE UNIQUE de la duree d'une bataille : ``game_rules.max_turns`` (regle 40k :
+    une bataille dure 5 rounds). Le training ne redefinit plus cette duree — l'ancienne
+    cle ``max_turns_per_episode`` des training configs dupliquait la meme valeur et
+    pouvait diverger silencieusement de la regle.
+
+    ``unlimited_turns`` (drapeau du game_state) exprime le seul cas metier sans limite :
+    l'Endless Duty, base sur des vagues et non sur des tours.
+    """
+    # get allowed (drapeau optionnel, defaut = bataille LIMITEE). Ce n'est pas un
+    # fallback anti-erreur : une bataille a une duree par defaut (regle 40k), et seul
+    # l'Endless Duty pose explicitement le drapeau pour s'en affranchir.
+    if game_state.get("unlimited_turns", False):
+        return None
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    max_turns = require_key(game_rules, "max_turns")
+    if not isinstance(max_turns, int) or isinstance(max_turns, bool) or max_turns <= 0:
+        raise ValueError(f"game_rules.max_turns must be a positive int, got {max_turns!r}")
+    return max_turns
+
+
+def turn_limit_reached(game_state: Dict[str, Any]) -> bool:
+    """True quand le tour courant depasse la duree de bataille (cf. get_effective_turn_limit)."""
+    limit = get_effective_turn_limit(game_state)
+    if limit is None:
+        return False
+    return int(require_key(game_state, "turn")) > limit

@@ -598,6 +598,55 @@ def get_config_loader() -> ConfigLoader:
         _config_loader = ConfigLoader(root_path=str(Path(__file__).resolve().parent))
     return _config_loader
 
+def compute_turn_step_limit(game_rules: Dict[str, Any], model_count: int) -> int:
+    """Plafond d'actions d'UN tour de joueur (garde anti-runaway).
+
+    Source unique des gardes anti-boucle-infinie. Derive du nombre de FIGURINES en jeu
+    car les actions sont comptees par figurine : un roster de 3 escouades dont une de 20
+    ne se borne pas comme 3 unites seules. Ce n'est PAS une regle de jeu, c'est le seuil
+    au-dela duquel un tour est considere comme bloque par un bug.
+    """
+    from shared.data_validation import require_key
+
+    actions_per_model = require_key(game_rules, "max_actions_per_model_per_turn")
+    margin = require_key(game_rules, "step_limit_margin")
+    if not isinstance(model_count, int) or isinstance(model_count, bool) or model_count <= 0:
+        raise ValueError(f"model_count must be a positive int, got {model_count!r}")
+    if not isinstance(actions_per_model, int) or isinstance(actions_per_model, bool) or actions_per_model <= 0:
+        raise ValueError(
+            f"game_rules.max_actions_per_model_per_turn must be a positive int, "
+            f"got {actions_per_model!r}"
+        )
+    if not isinstance(margin, (int, float)) or isinstance(margin, bool) or margin < 1.0:
+        raise ValueError(
+            f"game_rules.step_limit_margin must be a number >= 1.0, got {margin!r}"
+        )
+    return int(model_count * actions_per_model * float(margin))
+
+
+def compute_episode_step_limit(game_rules: Dict[str, Any], model_count: int) -> int:
+    # NOTE: en duree illimitee (Endless Duty), l'appelant ne doit PAS utiliser ce plafond :
+    # une partie sans fin n'a pas de borne d'episode. Le garde par TOUR reste actif et
+    # suffit a detecter une boucle infinie (cf. compute_turn_step_limit).
+    """Plafond d'actions d'UN episode complet (garde anti-runaway).
+
+    = nb_figurines * max_actions_per_model_per_turn * marge * max_turns. L'arrondi n'est
+    fait qu'ICI, sur le produit complet : composer int(plafond_de_tour) * max_turns
+    perdrait la partie decimale une fois par tour (2265 au lieu de 2268 pour 54 figurines
+    a 1.2 de marge). Voir compute_turn_step_limit pour la semantique.
+    """
+    from shared.data_validation import require_key
+
+    actions_per_model = require_key(game_rules, "max_actions_per_model_per_turn")
+    margin = require_key(game_rules, "step_limit_margin")
+    max_turns = require_key(game_rules, "max_turns")
+    if not isinstance(max_turns, int) or isinstance(max_turns, bool) or max_turns <= 0:
+        raise ValueError(f"game_rules.max_turns must be a positive int, got {max_turns!r}")
+    # Valide model_count / actions_per_model / marge via la meme porte d'entree.
+    compute_turn_step_limit(game_rules, model_count)
+    return int(model_count * actions_per_model * float(margin) * max_turns)
+
+
 def get_max_turns() -> int:
     """Convenience function to get max turns."""
     return get_config_loader().get_max_turns()

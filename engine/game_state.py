@@ -355,20 +355,7 @@ class GameStateManager:
                         deployment_type = require_key(scenario_data, "deployment_type")
                     else:
                         deployment_type = "fixed"
-                    deployment_type_p1 = (
-                        require_key(scenario_data, "deployment_type_P1")
-                        if has_deployment_type_p1
-                        else deployment_type
-                    )
-                    deployment_type_p2 = (
-                        require_key(scenario_data, "deployment_type_P2")
-                        if has_deployment_type_p2
-                        else deployment_type
-                    )
-                    deployment_type_by_player = {
-                        1: deployment_type_p1,
-                        2: deployment_type_p2,
-                    }
+                    deployment_type_by_player = self._resolve_deployment_type_by_player(scenario_data)
                 valid_deployment_types = ("random", "fixed", "active")
                 for player_id, player_deployment_type in deployment_type_by_player.items():
                     if player_deployment_type not in valid_deployment_types:
@@ -972,6 +959,12 @@ class GameStateManager:
                     total_hp_cur += int(require_key(m_data, "HP_MAX"))
                     total_value += int(require_key(m_data, "VALUE"))
                 else:
+                    # Figurine sans override : elle vaut ce que vaut une figurine de
+                    # l'unit_type de l'escouade. VALUE est posé sur TOUTE figurine (pas
+                    # seulement les override) car les consommateurs par-figurine — dont
+                    # l'affichage UnitStatusTable — lisent models[i].VALUE et ne doivent
+                    # jamais retomber sur unit["VALUE"], qui porte la valeur de l'ESCOUADE.
+                    m_spec["VALUE"] = int(full_unit_data["VALUE"])
                     total_hp_cur += int(full_unit_data["HP_MAX"])
                     total_value += int(full_unit_data["VALUE"])
                 normalized_models.append(m_spec)
@@ -981,9 +974,14 @@ class GameStateManager:
             # une ancre au sol (0) et désynchronise units_cache de l'empreinte réelle.
             enhanced_unit["level"] = normalized_models[0]["level"]
             enhanced_unit["HP_CUR"] = total_hp_cur
-            if total_value != int(full_unit_data["VALUE"]) * len(normalized_models):
-                # Mixed squad: override VALUE with sum of per-model values
-                enhanced_unit["VALUE"] = total_value
+            # VALUE d'une unité = valeur de l'ESCOUADE (somme des figurines), homogène
+            # comme hétérogène. C'est la sémantique attendue par tous les agrégats :
+            # condition de victoire (get_winner_by_value), métriques d'attrition,
+            # avantage matériel de l'observation, et les usages par-figurine qui
+            # divisent déjà par model_count_at_start (points_per_hp, reward par fig
+            # tuée). Neutre pour une unité mono-figurine (total_value == VALUE).
+            # La valeur d'UNE figurine reste portée par models[i]["VALUE"].
+            enhanced_unit["VALUE"] = total_value
 
         return enhanced_unit
 
@@ -1094,17 +1092,21 @@ class GameStateManager:
         agent_id_start = 1 if controlled_player == 1 else 101
         opponent_id_start = 101 if opponent_player == 2 else 1
 
+        roster_deployment_types = self._resolve_deployment_type_by_player(scenario_data)
+
         agent_units = self._expand_compact_roster_to_basic_units(
             roster_data=agent_roster_data,
             player=controlled_player,
             id_start=agent_id_start,
-            roster_path=str(agent_roster_path)
+            roster_path=str(agent_roster_path),
+            deployment_type=require_key(roster_deployment_types, controlled_player)
         )
         opponent_units = self._expand_compact_roster_to_basic_units(
             roster_data=opponent_roster_data,
             player=opponent_player,
             id_start=opponent_id_start,
-            roster_path=str(opponent_roster_path)
+            roster_path=str(opponent_roster_path),
+            deployment_type=require_key(roster_deployment_types, opponent_player)
         )
 
         roster_info = {
@@ -1696,6 +1698,32 @@ class GameStateManager:
             return self._resolve_board_dir(scenario_file, board_ref, "objectives") / "objectives" / normalized
         return project_root / "config" / "agents" / shared_dir_name / normalized
 
+    def _resolve_deployment_type_by_player(self, scenario_data: Dict[str, Any]) -> Dict[int, str]:
+        """Résout le type de déploiement effectif de chaque joueur.
+
+        'deployment_type' est le défaut du scénario ('fixed' si absent) ; les clés
+        'deployment_type_P1'/'deployment_type_P2' le surchargent par joueur. Source
+        unique partagée par le chargement de scénario et l'expansion des rosters
+        compacts (qui doit connaître le mode AVANT de construire les figurines).
+        """
+        base_type = (
+            require_key(scenario_data, "deployment_type")
+            if "deployment_type" in scenario_data
+            else "fixed"
+        )
+        return {
+            1: (
+                require_key(scenario_data, "deployment_type_P1")
+                if "deployment_type_P1" in scenario_data
+                else base_type
+            ),
+            2: (
+                require_key(scenario_data, "deployment_type_P2")
+                if "deployment_type_P2" in scenario_data
+                else base_type
+            ),
+        }
+
     def _load_compact_roster_file(self, roster_path: Path, roster_label: str) -> Dict[str, Any]:
         """Load and validate compact roster JSON file."""
         if not roster_path.exists():
@@ -1720,9 +1748,20 @@ class GameStateManager:
         roster_data: Dict[str, Any],
         player: int,
         id_start: int,
-        roster_path: str
+        roster_path: str,
+        deployment_type: str
     ) -> List[Dict[str, Any]]:
-        """Expand compact composition format to basic unit entries."""
+        """Expand compact composition format to basic unit entries.
+
+        Une entrée de composition décrit ``count`` escouades identiques. Le nombre de
+        figurines par escouade se déclare par l'un des deux champs OPTIONNELS et
+        MUTUELLEMENT EXCLUSIFS suivants (aucun des deux = escouade mono-figurine) :
+          - ``models_per_unit`` (int >= 1) : escouade homogène ;
+          - ``models`` (liste de unit_type) : escouade hétérogène, une entrée par
+            figurine (sergent, arme spéciale, personnage attaché — règle 19.01).
+        Les deux exigent un déploiement 'active' : un roster compact ne porte aucune
+        coordonnée, or hors 'active' _build_enhanced_unit exige col/row par figurine.
+        """
         composition = require_key(roster_data, "composition")
         if not isinstance(composition, list):
             raise ValueError(f"Roster {roster_path} field 'composition' must be list")
@@ -1744,12 +1783,62 @@ class GameStateManager:
                 raise ValueError(
                     f"Roster {roster_path} composition[{idx}].count must be positive int, got {count!r}"
                 )
+
+            has_models_per_unit = "models_per_unit" in comp_entry
+            has_models = "models" in comp_entry
+            if has_models_per_unit and has_models:
+                raise ValueError(
+                    f"Roster {roster_path} composition[{idx}] cannot define both "
+                    f"'models_per_unit' and 'models' (mutually exclusive)"
+                )
+
+            model_specs: Optional[List[Dict[str, Any]]] = None
+            if has_models_per_unit:
+                models_per_unit = comp_entry["models_per_unit"]
+                if (
+                    not isinstance(models_per_unit, int)
+                    or isinstance(models_per_unit, bool)
+                    or models_per_unit <= 0
+                ):
+                    raise ValueError(
+                        f"Roster {roster_path} composition[{idx}].models_per_unit must be "
+                        f"positive int, got {models_per_unit!r}"
+                    )
+                # Escouade homogène : pas d'override par figurine, les figurines
+                # héritent des stats de l'unit_type de l'escouade.
+                model_specs = [{} for _ in range(models_per_unit)]
+            elif has_models:
+                raw_models = comp_entry["models"]
+                if not isinstance(raw_models, list) or not raw_models:
+                    raise ValueError(
+                        f"Roster {roster_path} composition[{idx}].models must be a non-empty list "
+                        f"of unit_type strings"
+                    )
+                model_specs = []
+                for m_idx, model_type in enumerate(raw_models):
+                    if not isinstance(model_type, str) or not model_type.strip():
+                        raise ValueError(
+                            f"Roster {roster_path} composition[{idx}].models[{m_idx}] must be "
+                            f"non-empty string, got {model_type!r}"
+                        )
+                    model_specs.append({"unit_type": model_type.strip()})
+
+            if model_specs is not None and deployment_type != "active":
+                raise ValueError(
+                    f"Roster {roster_path} composition[{idx}] declares a multi-model squad but "
+                    f"player {player} deployment type is '{deployment_type}': compact rosters carry "
+                    f"no coordinates, so per-model squads require deployment type 'active'"
+                )
+
             for _ in range(count):
-                expanded_units.append({
+                unit_entry: Dict[str, Any] = {
                     "id": next_id,
                     "player": player,
                     "unit_type": unit_type.strip()
-                })
+                }
+                if model_specs is not None:
+                    unit_entry["models"] = copy.deepcopy(model_specs)
+                expanded_units.append(unit_entry)
                 next_id += 1
         return expanded_units
     
@@ -2154,11 +2243,10 @@ class GameStateManager:
         Game ends when:
         1. Turn limit reached (training config override)
         """
-        # Check training turn limit (for RL training - may differ from standard 5 turns)
-        if self.training_config is not None:
-            max_turns = self.training_config.get("max_turns_per_episode")
-            if max_turns and game_state["turn"] > max_turns:
-                return True
+        # Duree de bataille : game_rules.max_turns (source unique, cf. game_utils).
+        from engine.game_utils import turn_limit_reached
+        if turn_limit_reached(game_state):
+            return True
 
         if require_key(game_state, "turn_limit_reached"):
             return True

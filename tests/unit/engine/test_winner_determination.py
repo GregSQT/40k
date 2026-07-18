@@ -40,7 +40,8 @@ def _make_gs(p1_vp: int, p2_vp: int,
         "victory_points": {1: p1_vp, 2: p2_vp},
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
-        "config": {"game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5}},
+        "config": {"game_rules": {
+            "max_turns": 5, "engagement_zone": 1, "engagement_zone_vertical": 5}},
     }
     build_units_cache(gs)
     return gs
@@ -144,11 +145,12 @@ def _minimal_config() -> Dict[str, Any]:
                                "objectives": [{"id": "obj1", "name": "Alpha",
                                                "hexes": [[5, 5]]}],
                                "inches_to_subhex": 1}},
-        "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
+        "game_rules": {
+            "max_turns": 3, "engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
         "charge": {"charge_max_distance": 12},
         "pve_mode": False,
         "observation_params": obs,
-        "training_config": {"observation_params": obs, "max_turns_per_episode": 3},
+        "training_config": {"observation_params": obs},
         "units": [_unit_cfg(1, 1, 3, 3), _unit_cfg(2, 2, 10, 10)],
     }
 
@@ -172,7 +174,7 @@ def _make_engine() -> W40KEngine:
 class TestTurnLimitPath:
 
     def _reach_turn_limit(self, eng: W40KEngine) -> tuple:
-        """Force turn au-delà de max_turns_per_episode (3) et step."""
+        """Force turn au-dela de game_rules.max_turns (3) et step."""
         eng.reset()
         eng.game_state["turn"] = 4
         eng.game_state["turn_limit_reached"] = False

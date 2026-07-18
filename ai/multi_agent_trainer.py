@@ -548,10 +548,13 @@ class MultiAgentTrainer:
             # AI_TURN COMPLIANCE: Use episode-based training, not timesteps
             if "total_episodes" in current_training_config:
                 total_episodes = current_training_config["total_episodes"]
-                # Calculate reasonable timesteps per episode based on max_turns
-                max_turns_per_episode = current_training_config.get("max_turns_per_episode", 10)
-                max_steps_per_turn = current_training_config.get("max_steps_per_turn", 50)
-                total_timesteps = total_episodes * max_turns_per_episode * max_steps_per_turn
+                # Duree de bataille = game_rules.max_turns (source unique). Les anciens
+                # defauts caches (10 tours, 50 steps) s'appliquaient TOUJOURS : aucune de
+                # ces deux cles n'existe dans les training configs, si bien que le budget
+                # de timesteps etait calcule sur des valeurs inventees.
+                from config_loader import get_max_turns
+                turn_step_limit = require_key(current_training_config, "_turn_step_limit")
+                total_timesteps = total_episodes * get_max_turns() * turn_step_limit
             elif "total_timesteps" in current_training_config:
                 total_timesteps = current_training_config["total_timesteps"]
             else:
@@ -927,8 +930,15 @@ class MultiAgentTrainer:
             step_count = 0
             reward: float = 0.0
             current_turn: Optional[int] = None
-            debug_config = self.config.load_training_config("debug")
-            max_steps = debug_config["max_turns_per_episode"] * debug_config["max_steps_per_turn"]
+            # Garde anti-boucle : meme plafond que le moteur (derive des figurines en jeu
+            # et de game_rules.max_turns). Les cles lues ici n'existaient dans aucun
+            # training config : ce calcul aurait leve un KeyError s'il avait ete atteint.
+            max_steps = env.unwrapped._get_episode_step_limit()
+            if max_steps is None:
+                raise RuntimeError(
+                    "Episode step limit is unlimited (unlimited_turns) — Endless Duty is "
+                    "not a training scenario and cannot be evaluated with a bounded loop."
+                )
             while not done and step_count < max_steps:
                 action, _ = model.predict(obs, deterministic=True)
                 obs, reward, terminated, truncated, info = env.step(action)

@@ -87,6 +87,11 @@ def _minimal_config() -> Dict[str, Any]:
             "engagement_zone": 1,
             "engagement_zone_vertical": 5,
             "max_base_size_hex": 35,
+            # Requis par le garde anti-runaway de step() (cf. compute_episode_step_limit).
+            # Valeurs reelles de config/game_config.json.
+            "max_turns": 3,  # duree de bataille visee par ces tests
+            "max_actions_per_model_per_turn": 7,
+            "step_limit_margin": 1.5,
         },
         # Toggles de traversee requis par le pool BFS : le masque de move passe
         # desormais par lui (refonte spatiale), la ou les dry-runs directionnels
@@ -103,7 +108,6 @@ def _minimal_config() -> Dict[str, Any]:
         "observation_params": obs_params,
         "training_config": {
             "observation_params": obs_params,
-            "max_turns_per_episode": 3,
         },
         "units": [
             _unit_cfg(1, 1, 3, 3),

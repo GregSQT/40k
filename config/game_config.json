@@ -12,8 +12,10 @@
   },
   "game_rules": {
     "max_turns": 5,
-    "max_steps_per_turn": 500,
-    "max_steps_per_turn_detail": "nb units (50) * nb actions per turn (7) = 350 + marge",
+    "max_actions_per_model_per_turn": 7,
+    "max_actions_per_model_per_turn_detail": "Majorant d'actions qu'UNE figurine peut consommer en un tour (6 phases dont deployment qui ne joue qu'une fois, + marge pile-in/consolidation). Remplace l'ancien 'max_steps_per_turn' fixe a 500 : le plafond d'un tour est desormais derive du nombre de figurines REELLEMENT en jeu (releve au reset du moteur), donc il suit le roster au lieu d'etre re-regle a la main.",
+    "step_limit_margin": 1.2,
+    "step_limit_margin_detail": "Marge des gardes anti-runaway (detection de bug, PAS une regle de jeu). Plafond d'un tour = nb_figurines * max_actions_per_model_per_turn * marge ; plafond d'un episode = nb_figurines * max_actions_per_model_per_turn * marge * max_turns. Avec 54 figurines et 5 tours a 1.2 : 453 par tour, 2268 par episode. Augmenter la marge retarde d'autant la detection d'un episode reellement bloque ; si des faux positifs apparaissent, c'est max_actions_per_model_per_turn qu'il faut revoir, pas la marge.",
     "turn_limit_penalty": -1,
     "los_debug_show_ratio": false,
     "los_debug_show_ratio_rule": "When true, shooting preview overlays visibility ratio percentages on evaluated hexes.",

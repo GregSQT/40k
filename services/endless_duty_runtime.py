@@ -885,23 +885,13 @@ def _start_initial_wave_turn_context(gs: Dict[str, Any]) -> None:
 
 
 def _disable_turn_limit_for_endless_duty(engine_instance: Any, gs: Dict[str, Any]) -> None:
-    """Disable training turn cap for Endless Duty runtime."""
-    engine_training_config = require_key(engine_instance.__dict__, "training_config")
-    if not isinstance(engine_training_config, dict):
-        raise TypeError("engine.training_config must be an object for Endless Duty turn-limit override")
-    state_config = require_key(gs, "config")
-    if not isinstance(state_config, dict):
-        raise TypeError("game_state.config must be an object for Endless Duty turn-limit override")
+    """Marque la partie comme illimitee en tours (Endless Duty, base sur des vagues).
 
-    # Endless Duty is wave-based and must not terminate by max turns.
-    engine_training_config["max_turns_per_episode"] = None
-    state_training_config = state_config.get("training_config")
-    if state_training_config is not None:
-        if not isinstance(state_training_config, dict):
-            raise TypeError(
-                "game_state.config.training_config must be an object when provided for Endless Duty turn-limit override"
-            )
-        state_training_config["max_turns_per_episode"] = None
+    Drapeau dedie plutot qu'une neutralisation du training config : la duree d'une
+    bataille vient desormais de game_rules.max_turns (source unique, regle 40k), et
+    l'Endless Duty est le seul cas metier qui s'en affranchit (cf. get_effective_turn_limit).
+    """
+    gs["unlimited_turns"] = True
     gs["turn_limit_reached"] = False
 
 

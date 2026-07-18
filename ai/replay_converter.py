@@ -150,35 +150,25 @@ def generate_steplog_and_replay(config, args):
         # Store scenario file path for replay converter
         cast(Any, convert_to_replay_format)._scenario_file = temp_scenario_file
         
-        # Load training config to override max_turns for this environment
         # Test-only mode requires agent parameter
         if not args.agent:
             raise ValueError("--agent parameter required for test-only mode")
-        training_config = config.load_agent_training_config(args.agent, args.training_config)
-        if "max_turns_per_episode" not in training_config:
-            raise KeyError(f"max_turns_per_episode missing from {args.agent} training config phase {args.training_config}")
-        max_turns_override = training_config["max_turns_per_episode"]
-        print(f"🎯 Using max_turns_per_episode: {max_turns_override} from config '{args.training_config}'")
-        
-        # Temporarily override game_config max_turns for this environment
-        original_max_turns = config.get_max_turns()
-        config._cache['game_config']['game_rules']['max_turns'] = max_turns_override
-        
-        try:
-            env = W40KEngine(
-                rewards_config=args.rewards_config,
-                training_config_name=args.training_config,
-                controlled_agent=args.agent,  # Required for agent-specific rewards
-                active_agents=None,
-                scenario_file=temp_scenario_file,
-                unit_registry=unit_registry,
-                quiet=True,
-                gym_training_mode=True
-            )
-        finally:
-            # Restore original max_turns after environment creation
-            config._cache['game_config']['game_rules']['max_turns'] = original_max_turns
-        
+        # La duree de bataille vient de game_rules.max_turns (source unique). L'ancien
+        # override temporaire, qui recopiait 'max_turns_per_episode' du training config
+        # dans game_rules le temps de construire l'env, n'a plus d'objet.
+        print(f"🎯 Battle length: {config.get_max_turns()} turns (game_rules.max_turns)")
+
+        env = W40KEngine(
+            rewards_config=args.rewards_config,
+            training_config_name=args.training_config,
+            controlled_agent=args.agent,  # Required for agent-specific rewards
+            active_agents=None,
+            scenario_file=temp_scenario_file,
+            unit_registry=unit_registry,
+            quiet=True,
+            gym_training_mode=True
+        )
+
         # Connect step logger directly to W40KEngine
         env.step_logger = temp_step_logger
         model = MaskablePPO.load(model_path, env=env)
