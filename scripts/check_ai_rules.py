@@ -30,7 +30,7 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 # Directories that are not scanned by this checker.
 IGNORED_DIR_NAMES = {
@@ -120,9 +120,18 @@ def check_cache_recalculations(path: Path, text: str) -> List[RuleViolation]:
     in_phase_start = False
     phase_start_pattern = re.compile(r"def\s+(\w+_phase_start|phase_start)\s*\(")
     current_function: Optional[str] = None
+    # Pile (indentation, nom) : la fonction ENGLOBANTE d'une ligne est la plus profonde dont
+    # l'indentation est strictement inferieure. Un helper imbrique (`_to_arrays` dans
+    # `build_squad_grid`) ne doit pas masquer la methode englobante quand on classe un appel.
+    func_stack: List[Tuple[int, str]] = []
     reactive_recalc_allowed_functions = {
         "maybe_resolve_reactive_move",
         "refresh_all_positional_caches_after_reactive_move",
+        # build_squad_grid n'appelle le constructeur que dans la branche `else` de
+        # `if ez_cache_key in game_state`. Le cache EZ persiste dans game_state une fois bati
+        # (jamais supprime), donc cet appel ne se produit qu'AVANT la 1ere phase move/shoot/charge
+        # de la partie : une seule construction, puis la branche `if` reutilise. Pas de recalcul par step.
+        "build_squad_grid",
     }
     
     # Track whether we're inside a reset function
@@ -132,10 +141,15 @@ def check_cache_recalculations(path: Path, text: str) -> List[RuleViolation]:
     for idx, line in enumerate(lines, start=1):
         stripped = line.strip()
 
-        # Track current function name (top-level and class methods)
-        function_match = re.match(r"^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", line)
-        if function_match:
-            current_function = function_match.group(1)
+        # Track current function via indentation stack (gere les fonctions imbriquees).
+        if stripped:
+            line_indent = len(line) - len(line.lstrip())
+            while func_stack and func_stack[-1][0] >= line_indent:
+                func_stack.pop()
+            def_match = re.match(r"def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", stripped)
+            if def_match:
+                func_stack.append((line_indent, def_match.group(1)))
+            current_function = func_stack[-1][1] if func_stack else None
 
         # Entering phase_start: def at column 0
         if not line.startswith(" ") and not line.startswith("\t") and phase_start_pattern.search(line):

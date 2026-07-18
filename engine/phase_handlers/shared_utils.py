@@ -1644,11 +1644,10 @@ def _compute_enemy_adjacent_cache_for_player_from_units_cache(
         if entry_player == player_int:
             continue
 
-        by_model = entry.get("occupied_hexes_by_model")
-        if by_model:
-            unit_cells = set(by_model.values())
-        else:
-            unit_cells = {(int(require_key(entry, "col")), int(require_key(entry, "row")))}
+        # EZ mesurée depuis le SOCLE (03.04 « engagement range » + 01.04 « closest part of the
+        # model's base ») : dilater l'empreinte COMPLETE des figurines vivantes, pas l'ancre unique.
+        # Dilater la seule ancre sous-estime la zone dès qu'un socle couvre plusieurs hexes.
+        unit_cells = set(require_key(entry, "occupied_hexes"))
         all_enemy_occupied.update(unit_cells)
         per_unit_occupied.append(unit_cells)
 
@@ -3800,6 +3799,7 @@ def execute_squad_move(
         return False
     commit_move(plan, game_state, move_type)
     if move_type == "advance":
+        assert advance_roll is not None  # advance => roll tire ci-dessus (ligne move_type/None)
         # §4.3 — fige le jet dans `advance_rolls`, le systeme AUTORITAIRE (miroir du writer PvP
         # movement_handlers.py:801-809). `commit_move` ne marque QUE `units_advanced` : sans cette
         # ligne, `_advance_roll_for` trouvait l'escouade advancee mais sans jet, renvoyait None,
@@ -6704,17 +6704,6 @@ def squad_fight_unit_activation_start(
     game_state["pending_squad_fight_intents"][squad_id] = []
 
 
-def _squad_is_in_fight(game_state: Dict[str, Any], squad_id: str) -> bool:
-    """Une escouade est eligible au combat si :
-       - elle a charge ce tour (squad_id dans units_charged), OU
-       - au moins une figurine est dans l ER d une unite ennemie.
-    """
-    if squad_id in game_state.get("units_charged", set()):
-        return True
-    # ER bord-a-bord : au moins une figurine dans l ER d une unite ennemie.
-    return _squad_is_in_enemy_er(game_state, str(squad_id))
-
-
 def squad_fight_activation_order(
     game_state: Dict[str, Any], active_player: int
 ) -> List[Tuple[str, str]]:
@@ -6732,11 +6721,17 @@ def squad_fight_activation_order(
     Pour Fights First ability (regles speciales), `units_cache[sid].get("fights_first")`
     bool optionnel — defaut False.
     """
+    # Eligibilite = MEME source que le pool 12.04 et le commit (`fight_v11_is_eligible_to_fight`),
+    # jamais une copie locale de la regle. Ce predicat lit le snapshot `engaged_at_fight_step_start`
+    # (present pendant l etape FIGHT) : l ordre d activation n a de sens que la, comme le pool.
+    from engine.phase_handlers.fight_handlers import fight_v11_is_eligible_to_fight
+
     units_charged = game_state.get("units_charged", set())
     units_cache = game_state.get("units_cache", {})  # get allowed
     eligible: Dict[str, str] = {}
     for sid, entry in units_cache.items():
-        if not _squad_is_in_fight(game_state, str(sid)):
+        unit = get_unit_by_id(game_state, str(sid))
+        if unit is None or not fight_v11_is_eligible_to_fight(game_state, unit):
             continue
         ff = bool(entry.get("fights_first", False))
         if str(sid) in units_charged or ff:
@@ -7371,7 +7366,7 @@ def read_squad_move_cell_map(
 ) -> Dict[int, Tuple[Tuple[int, int], float]]:
     """Relit la carte memoisee par le masque. Leve si absente ou perimee.
 
-    Aucun fallback : reconstruire ici masquerait une rupture du contrat « masque avant decodage »
+    Aucun repli : reconstruire ici masquerait une rupture du contrat « masque avant decodage »
     et pourrait executer une cellule que le masque n'avait pas autorisee.
     """
     entry = game_state.get(MOVE_CELL_MAP_CACHE_KEY, {}).get(str(squad_id))  # get allowed
@@ -7527,7 +7522,6 @@ def build_squad_action_mask(
     has_fled = squad_id in game_state.get("units_fled", set())
     has_moved = squad_id in game_state.get("units_moved", set())
     has_shot = squad_id in game_state.get("units_shot", set())
-    has_fought = squad_id in game_state.get("units_fought", set())
 
     if enemy_slot_ids is None:
         enemy_sorted = sorted(
@@ -7618,12 +7612,26 @@ def build_squad_action_mask(
             mask[SQUAD_ACTION_CHARGE] = 1
         mask[SQUAD_ACTION_WAIT] = 1
 
-    # --- Fight phase: action 25 ---
+    # --- Fight phase: action FIGHT ---
     elif phase == "fight":
-        eligible = _squad_is_in_fight(game_state, squad_id)
-        if eligible and not has_fought:
+        # Parite masque/commit : le bit FIGHT reflete EXACTEMENT le pool de selection 12.04
+        # (`fight_v11_current_pool`), la MEME source que le commit (`_process_squad_action` ->
+        # squad_fight, qui verifie `squad_id in fight_v11_current_pool` sous garde
+        # `fight_subphase == "fight"`). `_squad_is_in_fight` etait une 3e copie divergente de la
+        # regle d eligibilite (engaged-now + charge, SANS le snapshot `engaged_at_fight_step_start`
+        # de 12.04) : une unite engagee au debut de l etape mais desengagee par la mort de son
+        # ennemi restait dans le pool tout en se voyant masquer FIGHT -> seul WAIT, qui ne clot pas
+        # son eligibilite -> boucle infinie. Le pool est la source unique. Le snapshot n existe que
+        # pendant la sous-phase FIGHT (poppe en fin d etape) et `fight_v11_current_pool` le lit via
+        # require_key : d ou la garde de sous-phase, comme le commit l exige — pas de `.get()` de
+        # contournement.
+        from engine.phase_handlers.fight_handlers import fight_v11_current_pool
+        if (
+            game_state.get("fight_subphase") == "fight"
+            and squad_id in fight_v11_current_pool(game_state)
+        ):
             mask[SQUAD_ACTION_FIGHT] = 1
-        if not eligible:
+        else:
             mask[SQUAD_ACTION_WAIT] = 1
 
     # --- Other phases (command/deployment) ---

@@ -1291,6 +1291,44 @@ def _vec_norm_obs_keys(observation_space):
     return ["vec"] if _is_dict_obs_space(observation_space) else None
 
 
+def _apply_vec_normalize(env, model_path_for_vn, vec_norm_cfg, new_model, n_envs, log_fn):
+    """Enveloppe `env` dans VecNormalize (charge les stats du checkpoint ou en cree de neuves).
+
+    Ne charge l'ancienne VecNormalize que si elle sera reellement reutilisee. Sur un retrain
+    from-scratch (new_model) ou un reset de curriculum, le .pkl est ecarte de toute facon ;
+    le charger planterait sur le shape check de set_venv des que l'obs space a change
+    (ex: passage Box(108) -> Dict), sans raison metier.
+
+    Retourne l'env enveloppe. Factorise les 3 sites identiques (create_model,
+    create_multi_agent_model, rotation de scenario).
+    """
+    if n_envs == 1:
+        env = DummyVecEnv([cast(Any, lambda: env)])
+    reset_vec_normalize = vec_norm_cfg.get("reset_on_curriculum", False)
+    vec_norm_loaded = (
+        load_vec_normalize(env, model_path_for_vn)
+        if not new_model and not reset_vec_normalize
+        else None
+    )
+    if vec_norm_loaded is not None:
+        env = vec_norm_loaded
+        env.training = True
+        env.norm_reward = vec_norm_cfg.get("norm_reward", True)
+        log_fn("✅ VecNormalize: loaded stats from checkpoint")
+    else:
+        env = VecNormalize(
+            cast(Any, env),
+            norm_obs=vec_norm_cfg.get("norm_obs", True),
+            norm_reward=vec_norm_cfg.get("norm_reward", True),
+            clip_obs=vec_norm_cfg.get("clip_obs", 10.0),
+            clip_reward=vec_norm_cfg.get("clip_reward", 10.0),
+            gamma=vec_norm_cfg.get("gamma", 0.99),
+            norm_obs_keys=_vec_norm_obs_keys(env.observation_space),
+        )
+        log_fn("✅ VecNormalize: enabled (obs + reward normalization)")
+    return env
+
+
 def _inject_spatial_extractor(policy_kwargs) -> None:
     """Branche le CNN spatial sur `MultiInputPolicy` (obs Dict).
 
@@ -1480,31 +1518,10 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     vec_norm_cfg = training_config.get("vec_normalize", {})  # get allowed: optional config
     vec_normalize_enabled = vec_norm_cfg.get("enabled", False)
     if vec_normalize_enabled:
-        if n_envs == 1:
-            env = DummyVecEnv([cast(Any, lambda: env)])
         model_path_for_vn = build_agent_model_path(
             config.get_models_root(), require_present(controlled_agent_key, "controlled_agent_key")
         )
-        reset_vec_normalize = vec_norm_cfg.get("reset_on_curriculum", False)
-        vec_norm_loaded = load_vec_normalize(env, model_path_for_vn)
-        if vec_norm_loaded is not None and not new_model and not reset_vec_normalize:
-            env = vec_norm_loaded
-            env.training = True
-            env.norm_reward = vec_norm_cfg.get("norm_reward", True)
-            print("✅ VecNormalize: loaded stats from checkpoint")
-        else:
-            if reset_vec_normalize and vec_norm_loaded is not None:
-                print("🔄 VecNormalize: reset requested — discarding x1 stats, starting fresh for new curriculum phase")
-            env = VecNormalize(
-                cast(Any, env),
-                norm_obs=vec_norm_cfg.get("norm_obs", True),
-                norm_reward=vec_norm_cfg.get("norm_reward", True),
-                clip_obs=vec_norm_cfg.get("clip_obs", 10.0),
-                clip_reward=vec_norm_cfg.get("clip_reward", 10.0),
-                gamma=vec_norm_cfg.get("gamma", 0.99),
-                norm_obs_keys=_vec_norm_obs_keys(env.observation_space),
-            )
-            print("✅ VecNormalize: enabled (obs + reward normalization)")
+        env = _apply_vec_normalize(env, model_path_for_vn, vec_norm_cfg, new_model, n_envs, print)
 
     # Check if action masking is available (works for both vectorized and single env)
     if n_envs == 1:
@@ -1823,29 +1840,10 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     vec_norm_cfg = training_config.get("vec_normalize", {})  # get allowed: optional config
     vec_normalize_enabled = vec_norm_cfg.get("enabled", False)
     if vec_normalize_enabled:
-        if n_envs == 1:
-            env = DummyVecEnv([cast(Any, lambda: env)])
         model_path_for_vn = build_agent_model_path(
             config.get_models_root(), require_present(agent_key, "agent_key")
         )
-        reset_vec_normalize = vec_norm_cfg.get("reset_on_curriculum", False)
-        vec_norm_loaded = load_vec_normalize(env, model_path_for_vn)
-        if vec_norm_loaded is not None and not new_model and not reset_vec_normalize:
-            env = vec_norm_loaded
-            env.training = True
-            env.norm_reward = vec_norm_cfg.get("norm_reward", True)
-            print("✅ VecNormalize: loaded stats from checkpoint")
-        else:
-            env = VecNormalize(
-                cast(Any, env),
-                norm_obs=vec_norm_cfg.get("norm_obs", True),
-                norm_reward=vec_norm_cfg.get("norm_reward", True),
-                clip_obs=vec_norm_cfg.get("clip_obs", 10.0),
-                clip_reward=vec_norm_cfg.get("clip_reward", 10.0),
-                gamma=vec_norm_cfg.get("gamma", 0.99),
-                norm_obs_keys=_vec_norm_obs_keys(env.observation_space),
-            )
-            print("✅ VecNormalize: enabled (obs + reward normalization)")
+        env = _apply_vec_normalize(env, model_path_for_vn, vec_norm_cfg, new_model, n_envs, print)
 
     # Agent-specific model path
     models_root = config.get_models_root()
@@ -2500,26 +2498,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     vec_norm_cfg = training_config.get("vec_normalize", {})  # get allowed: optional config
     vec_normalize_enabled = vec_norm_cfg.get("enabled", False)
     if vec_normalize_enabled:
-        if n_envs == 1:
-            env = DummyVecEnv([cast(Any, lambda: env)])
-        reset_vec_normalize = vec_norm_cfg.get("reset_on_curriculum", False)
-        vec_norm_loaded = load_vec_normalize(env, model_path)
-        if vec_norm_loaded is not None and not new_model and not reset_vec_normalize:
-            env = vec_norm_loaded
-            env.training = True
-            env.norm_reward = vec_norm_cfg.get("norm_reward", True)
-            chunk_log("✅ VecNormalize: loaded stats from checkpoint")
-        else:
-            env = VecNormalize(
-                cast(Any, env),
-                norm_obs=vec_norm_cfg.get("norm_obs", True),
-                norm_reward=vec_norm_cfg.get("norm_reward", True),
-                clip_obs=vec_norm_cfg.get("clip_obs", 10.0),
-                clip_reward=vec_norm_cfg.get("clip_reward", 10.0),
-                gamma=vec_norm_cfg.get("gamma", 0.99),
-                norm_obs_keys=_vec_norm_obs_keys(env.observation_space),
-            )
-            chunk_log("✅ VecNormalize: enabled (obs + reward normalization)")
+        env = _apply_vec_normalize(env, model_path, vec_norm_cfg, new_model, n_envs, chunk_log)
     
     # Create or load model
     model_params = training_config["model_params"].copy()

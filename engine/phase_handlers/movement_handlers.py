@@ -1799,6 +1799,7 @@ def _build_multi_hex_vectorized(
     ]
 
     if out_costs is not None:
+        assert _dist_arr is not None  # construit sous la meme garde `out_costs is not None`
         _costs_flat = _dist_arr[valid_coords_cols, valid_coords_rows]
         for _c, _r, _d in zip(valid_coords_cols, valid_coords_rows, _costs_flat):
             out_costs[(int(_c), int(_r))] = float(_d)
@@ -2193,7 +2194,7 @@ def movement_build_valid_destinations_pool(
     read_only: bool = False,
     *,
     move_budget_override: Optional[int] = None,
-    out_costs: Optional[Dict[Tuple[int, int], int]] = None,
+    out_costs: Optional[Dict[Tuple[int, int], float]] = None,
 ) -> List[Tuple[int, int]]:
     """
     Build valid movement destinations using BFS pathfinding.
@@ -2229,7 +2230,7 @@ def movement_build_valid_destinations_pool(
     Fly: exploration ignores walls and occupation along the path; walls, occupation and engagement
     are enforced on the destination footprint only (see fly branch below).
     """
-    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+    from engine.perf_timing import append_perf_timing_line, perf_field, perf_timing_enabled
 
     _pt = perf_timing_enabled(game_state)
     import time as _perf_clock
@@ -2807,6 +2808,29 @@ def movement_build_valid_destinations_pool(
             del out_costs[_stale]
 
     if read_only:
+        # Sortie anticipée : aucune écriture d'état, donc pas de post-BFS (empreinte, étages,
+        # mask loops) à mesurer. Le log doit malgré tout être émis ICI — c'est le chemin du
+        # masque spatial V11 (`build_squad_move_cell_map`), et sans cette ligne le pool de
+        # move reste invisible dans perf_timing.log alors qu'il est construit à chaque masque.
+        if _pt and _m0 is not None and _m_prep_end is not None and _m_bfs_start is not None and _m_bfs_end is not None:
+            _fp_n = len(_off_even) if not is_single_hex else 1
+            _ro_end = _perf_clock.perf_counter()
+            # `post_bfs_s` couvre le bornage rigide de l'enveloppe d'empreinte + la resync
+            # `out_costs` : sans lui, prep+bfs ne recouvrent pas total et le reliquat (qui scale
+            # avec la taille du pool sur socle multi-hex) resterait invisible.
+            # `out_costs` distingue les deux appelants read_only : True = masque spatial V11
+            # (`build_squad_move_cell_map`), False = test d'eligibilite (resultat jete).
+            append_perf_timing_line(
+                f"MOVE_POOL_BUILD episode={game_state.get('episode_number', '?')} "
+                f"turn={game_state.get('turn', '?')} unit={unit_id} fly=False read_only=True "
+                f"out_costs={out_costs is not None} "
+                f"single_hex={is_single_hex} prep_s={_m_prep_end - _m0:.6f} "
+                f"bfs_s={_m_bfs_end - _m_bfs_start:.6f} "
+                f"post_bfs_s={_ro_end - _m_bfs_end:.6f} "
+                f"total_s={_ro_end - _m0:.6f} visited={visited_n} "
+                f"valid={len(valid_destinations)} anchors_n={len(valid_destinations)} "
+                f"MOVE={move_range} base={perf_field(base_size)} fp={_fp_n}"
+            )
         return valid_destinations
 
     game_state["valid_move_destinations_pool"] = valid_destinations
@@ -2883,7 +2907,7 @@ def movement_build_valid_destinations_pool(
             f"footprint_union_s={_fu:.6f} multilevel_floor_s={_mlf:.6f} mask_loops_s={_ml:.6f} "
             f"total_s={_m_ground_done - _m0:.6f} visited={visited_n} valid={len(valid_destinations)} "
             f"anchors_n={len(valid_destinations)} footprint_hex_n={len(footprint_zone)} "
-            f"MOVE={move_range} base={base_size} fp={_fp_n}"
+            f"MOVE={move_range} base={perf_field(base_size)} fp={_fp_n}"
         )
 
     _log_movement_debug(game_state, "build_valid_destinations", str(unit_id), f"valid_destinations count={len(valid_destinations)}")
@@ -3468,12 +3492,12 @@ def movement_build_model_destinations_pool(
     game_state["move_preview_footprint_mask_loops"] = _prev_loops  # get allowed
 
     if _mm_pt and _mm_t0 is not None:
-        from engine.perf_timing import append_perf_timing_line
+        from engine.perf_timing import append_perf_timing_line, perf_field
         append_perf_timing_line(
             f"MODEL_POOL_BUILD model={model_id} metric={'euclidean' if _mm_use_euclidean else 'hex'} "
             f"cache_hit={_mm_cache_hit} field_build_s={_mm_field_s:.6f} total_s={_mm_clock.perf_counter() - _mm_t0:.6f} "
             f"field_cells={_mm_cells_n} reachable={len(reachable)} obstacles={_mm_obstacles_n} "
-            f"base={_mm_base} budget={budget} fly={has_fly}"
+            f"base={perf_field(_mm_base)} budget={budget} fly={has_fly}"
         )
 
     # Chaque destination porte son niveau EFFECTIF (0 = sol, view_level = étage) → le front pose la fig

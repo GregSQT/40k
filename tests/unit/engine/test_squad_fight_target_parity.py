@@ -99,14 +99,21 @@ def test_charged_squad_without_target_fights_empty(melee_scenario_file):
     squad_id = next(iter(gs["units_cache"]))
     our_player = int(gs["units_cache"][squad_id]["player"])
 
-    # État forcé : plus AUCUN ennemi vivant, mais l'escouade a chargé ce tour.
+    # État forcé : plus AUCUN ennemi vivant, mais l'escouade a chargé ce tour. On pose une étape
+    # FIGHT réelle (sous-phase + snapshot + machine de sélection) car le masque dérive désormais
+    # du pool 12.04 (`fight_v11_current_pool`), qui n'a de sens que dans la sous-phase "fight".
     for sid in [s for s, e in list(gs["units_cache"].items()) if int(e["player"]) != our_player]:
         for mid in list(gs["squad_models"].get(sid, [])):
             gs["models_cache"].pop(mid, None)
         gs["units_cache"].pop(sid, None)
     gs["phase"] = "fight"
+    gs["fight_subphase"] = "fight"
     gs["current_player"] = our_player
+    gs["fight_step"] = "fights_first"
+    gs["fight_selector"] = our_player
+    gs["engaged_at_fight_step_start"] = {}  # charge -> éligible sans engagement au snapshot
     gs["units_charged"] = {squad_id}
+    gs["units_selected_to_fight"] = set()
     gs["units_fought"] = set()
 
     empty_slots: List[Optional[str]] = [None] * 5
@@ -159,3 +166,59 @@ def test_commit_target_comes_from_engagement_pool(melee_scenario_file):
     ok, result = eng._process_squad_action({"action": "squad_fight", "squad_id": squad_id})
     assert ok is True
     assert result["target_squad_id"] in pool_before
+
+
+def test_snapshot_engaged_unit_with_dead_enemy_offers_fight_and_breaks_loop(melee_scenario_file):
+    """Régression du crash `BotControlledEnv infinite loop … phase=fight`.
+
+    Scénario exact : une escouade ENGAGÉE AU DÉBUT de l'étape FIGHT (snapshot
+    `engaged_at_fight_step_start` = True), sans avoir chargé, dont l'unique ennemi est mort
+    pendant l'étape → elle n'est plus engagée MAINTENANT. 12.04 la garde éligible (snapshot),
+    donc `fight_v11_current_pool` la contient. L'ancien masque (`_squad_is_in_fight`, engaged-now
+    + charge, sans le snapshot) n'offrait que WAIT → WAIT ne clôt pas l'éligibilité → boucle.
+
+    Le fix aligne le masque sur le pool : FIGHT est offert, le commit résout à vide (0 attaque),
+    l'unité est enregistrée `units_selected_to_fight` → elle sort du pool → la boucle se termine.
+    """
+    from engine.macro_intents import ACTION_WAIT
+    from engine.phase_handlers.shared_utils import build_squad_action_mask
+    from engine.phase_handlers.fight_handlers import fight_v11_current_pool
+
+    eng = _engine(melee_scenario_file, seed=1)
+    gs = eng.game_state
+    squad_id = next(iter(gs["units_cache"]))
+    our_player = int(gs["units_cache"][squad_id]["player"])
+
+    # Tous les ennemis meurent (modèles retirés) : l'escouade n'est plus engagée MAINTENANT.
+    for sid in [s for s, e in list(gs["units_cache"].items()) if int(e["player"]) != our_player]:
+        for mid in list(gs["squad_models"].get(sid, [])):
+            gs["models_cache"].pop(mid, None)
+        gs["units_cache"].pop(sid, None)
+
+    # Étape FIGHT réelle avec le snapshot qui la marque engagée AU DÉBUT (mais pas chargée).
+    gs["phase"] = "fight"
+    gs["fight_subphase"] = "fight"
+    gs["current_player"] = our_player
+    gs["fight_step"] = "fights_first"
+    gs["fight_selector"] = our_player
+    gs["engaged_at_fight_step_start"] = {squad_id: True}
+    gs["units_charged"] = set()
+    gs["units_selected_to_fight"] = set()
+    gs["units_fought"] = set()
+    gs["pile_in_done"] = set()          # posés par fight_v11_start ; requis par le settle post-fight
+    gs["consolidation_done"] = set()
+
+    # Le pool 12.04 la contient (via le snapshot), le masque DOIT offrir FIGHT — pas seulement WAIT.
+    assert squad_id in fight_v11_current_pool(gs)
+    slots: List[Optional[str]] = [None] * 5
+    mask = build_squad_action_mask(gs, squad_id, enemy_slot_ids=slots)
+    assert mask[ACTION_FIGHT] == 1, "12.04 : engagée au début de l'étape reste éligible (snapshot)"
+    assert mask[ACTION_WAIT] == 0, "une escouade actionnable au FIGHT ne reçoit pas WAIT"
+
+    # Commit : résolution à vide (aucun ennemi), sélection enregistrée, sortie du pool.
+    ok, result = eng._process_squad_action({"action": "squad_fight", "squad_id": squad_id})
+    assert ok is True
+    assert result["target_squad_id"] is None
+    assert result["fight_result"]["attacks_made"] == 0
+    assert squad_id in gs["units_selected_to_fight"], "l'unité est enregistrée -> clôt son éligibilité"
+    assert squad_id not in fight_v11_current_pool(gs), "hors du pool -> plus de re-sélection -> pas de boucle"

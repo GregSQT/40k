@@ -13,7 +13,7 @@ import json
 import random
 import gymnasium as gym
 import numpy as np
-from typing import Dict, List, Tuple, Set, Optional, Any
+from typing import Dict, List, Tuple, Set, Optional, Any, Union
 
 # Import shared utilities
 from shared.data_validation import require_key, require_present
@@ -929,7 +929,7 @@ class W40KEngine(gym.Env):
     # GYM INTERFACE - KEEP THESE CORE METHODS
     # ============================================================================
     
-    def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[np.ndarray, Dict[str, Any]]:
+    def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[Union[np.ndarray, Dict[str, np.ndarray]], Dict[str, Any]]:
         """Reset game state for new episode - gym.Env interface."""
 
         # Call parent reset for gym compliance
@@ -1359,7 +1359,7 @@ class W40KEngine(gym.Env):
         
         return observation, info    
     
-    def step(self, action: int) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
+    def step(self, action: int) -> Tuple[Union[np.ndarray, Dict[str, np.ndarray]], float, bool, bool, Dict[str, Any]]:
         """
         Execute gym action with built-in step counting - gym.Env interface.
         """

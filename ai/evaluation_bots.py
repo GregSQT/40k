@@ -215,7 +215,7 @@ class GreedyBot:
         if self.randomness > 0 and random.random() < self.randomness:
             return random.choice(valid_actions) if valid_actions else WAIT_ACTION
 
-        # Stateless fallback (jamais utilise en move : le move passe par
+        # Repli stateless (jamais utilise en move : le move passe par
         # select_movement_destination). Prefer shoot > wait/first.
         shoot = _first_action_in(valid_actions, mi.SHOOT_SLOTS)
         if shoot is not None:
@@ -1112,7 +1112,7 @@ class TacticalBot:
             return valid_actions[0]
 
     def _select_move_action(self, valid_actions: List[int], game_state: Optional[Dict]) -> int:
-        """Movement phase (stateless fallback). Le move spatial passe par
+        """Movement phase (repli stateless). Le move spatial passe par
         select_movement_destination : ici on prefere agir plutot qu'attendre."""
         non_wait = [a for a in valid_actions if a != WAIT_ACTION]
         if non_wait:

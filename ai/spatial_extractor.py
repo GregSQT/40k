@@ -11,7 +11,7 @@ reconnus comme images (`is_image_space` : 3D + canaux dans {1,3}). La grille a G
 elle serait donc APLATIE (6144 floats), ce qui detruit le biais inductif spatial vise par la refonte
 (spec §6.2). D'ou cet extracteur : CNN sur la grille, passthrough du vecteur, concatenation.
 
-Aucun fallback, aucune valeur par defaut masquant une erreur : la forme de la grille vient des
+Aucun repli, aucune valeur par defaut masquant une erreur : la forme de la grille vient des
 constantes de `engine.spatial_grid` (source unique), et la presence des cles est verifiee.
 """
 
@@ -57,11 +57,12 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
                 f"attendu {(GRID_CHANNELS, GRID_SIZE, GRID_SIZE)}"
             )
         vec_space = observation_space.spaces["vec"]
-        if len(vec_space.shape) != 1:
+        vec_shape = vec_space.shape
+        if vec_shape is None or len(vec_shape) != 1:
             raise ValueError(
-                f"SpatialCombinedExtractor : 'vec' doit etre 1D, recu shape {vec_space.shape}"
+                f"SpatialCombinedExtractor : 'vec' doit etre 1D, recu shape {vec_shape}"
             )
-        vec_dim = int(vec_space.shape[0])
+        vec_dim = int(vec_shape[0])
 
         super().__init__(observation_space, features_dim=cnn_features + vec_dim)
 

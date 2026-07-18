@@ -4282,4 +4282,6 @@ if __name__ == '__main__':
     else:
         print("⚠️  Engine initialization failed - will retry on first request")
     
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    # debug=False : coupe le reloader Werkzeug (restarts en boucle sous WSL2 qui
+    # réinitialisaient le moteur en pleine partie) ; les erreurs sortent déjà en JSON.
+    app.run(host='127.0.0.1', port=5001, debug=False)

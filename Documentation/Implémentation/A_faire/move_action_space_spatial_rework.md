@@ -24,7 +24,13 @@
 > (`ai/spatial_extractor.SpatialCombinedExtractor`). L'anti-pattern §4.1 (« volant précis, conducteur
 > aveugle ») est levé : l'agent perçoit enfin le terrain. Validé bout en bout (cf. §7ter).
 >
-> Reste : **T6** (retrain).
+> Reste : **T6** (retrain) — 🟢 **DÉBLOQUÉ (2026-07-18)**. Le crash fight-phase PRÉ-EXISTANT exposé par
+> le move corrigé (boucle infinie `BotControlledEnv`, unité engagée au début de l'étape FIGHT dont
+> l'ennemi est mort : éligible dans le pool mais non-jouable au masque → WAIT en boucle) est **corrigé** :
+> le masque dérive désormais du pool 12.04 (`fight_v11_current_pool`), la 3ᵉ copie divergente
+> `_squad_is_in_fight` est supprimée (cf. section **T6** « FIX APPLIQUÉ »). §9.1/9.2/9.3 validés (suite
+> verte, moves 2-69 subhex, phase move 0 erreur) ; le run `--new` passe le point de crash. Un fix
+> `ai/train.py` (garde `load_vec_normalize` sur `--new`) est livré et nécessaire.
 >
 > Écarts constatés entre la spec et le code réel pendant T1 — **la mesure fait foi, pas l'attendu** :
 > - §10.2 : `fixed_resolution` **abandonné** (impossibilité arithmétique démontrée, cf. §10.2).
@@ -36,6 +42,11 @@
 >
 > **Commit de référence des numéros de ligne : `7fc55b66`.** Les références citent fonction + ligne ;
 > en cas de dérive, la fonction fait foi.
+>
+> **MàJ 2026-07-18 (§7quater)** : gates pyright/check_ai_rules nettoyées (dont un vrai bug
+> `project_pool_to_grid` : troncature `int` du coût géodésique) ; **bug EZ ancre→empreinte corrigé**
+> (entorse 03.04 : l'EZ dilatait l'ancre au lieu du socle, sous-dimensionnée sur les rosters multi-hex) ;
+> incrémental du cache EZ **écarté** après profilage (~1,5 % du runtime, hook move à 0 %).
 
 ---
 
@@ -519,8 +530,109 @@ nativement `features_extractor_kwargs` au constructeur. `features_dim` = `cnn_fe
 - La grille couvre le budget max par construction (§10.2) : aucune troncature possible, donc pas de
   garde-fou à ajouter ici.
 
-### T6 — Réentraînement et validation (§9)
+### T6 — Réentraînement et validation (§9) — 🟢 DÉBLOQUÉ (2026-07-18, crash fight corrigé)
+
 **Un** run from scratch (`budget_normalized`, mode unique depuis §10.2), win-rate multi-scénarios.
+
+**État T6 (2026-07-18)** :
+- **§9.1 Suite unitaire** ✅ **1395 passed / 2 skipped / 0 failed / 0 error** (1397 tests, sans
+  `--ignore`), relancée après le fix fight (masque aligné sur le pool 12.04). +1 test vs baseline :
+  `test_snapshot_engaged_unit_with_dead_enemy_offers_fight_and_breaks_loop` (régression du crash).
+- **§9.2 `--step`** ✅ La root cause §3 est morte **côté runtime** : sur `x5_new --new --step`
+  (modèle frais, board ×5), 94 moves loggés, distances-hex **2 → 69 subhex** (médiane 15,5), plus
+  aucun move bloqué à 1. Le max 69 ≈ MOVE 14" × `inches_to_subhex`=5 en budget Advance. Distribution
+  étalée sur tout le disque (attendu pour une policy quasi-aléatoire). Distance calculée via
+  `calculate_hex_distance` sur les paires `MOVED from→to` de `step.log`.
+- **§9.3 analyzer** ✅ **Phase move = 0 erreur** (catégorie 1.1). Les catégories non-nulles
+  (1.2 tir 157, 1.4 fight 22, 2.1 dead-units 3) sont du **jeu aléatoire** d'un modèle non entraîné
+  (tir/fight sur unités mortes en `(0,0)`, hors portée) — path tir/combat non touché par la refonte,
+  **aucune nouvelle catégorie imputable au move**.
+- **§9.4 replay** ⏳ contrôle visuel non fait en session headless (MODE NUIT) — à faire au navigateur.
+- **§9.5 non-régression PvP** ✅ Le fix fight ne touche PAS le PvP : `build_squad_action_mask` n'a
+  qu'un appelant (chemin gym `action_decoder.py:242`) ; le PvP conduit la machine V11 directement par
+  `fight_handlers.fight_v11_*`, non modifiés. `execute_semantic_action` inchangé. Suite PvP verte.
+- **§9.6 retrain** 🟢 **DÉBLOQUÉ (2026-07-18)** — le crash fight-phase est **corrigé** (masque aligné
+  sur le pool 12.04, cf. « FIX APPLIQUÉ » ci-dessous). Le run `--new x5_new` passe le point de crash et
+  entraîne **sainement** : 70 épisodes en ~9 min, RAM plate ~29 Go, aucun crash. Débit mesuré ~14
+  steps/s (§8.5) → retrain **complet** (30000 ép., ETA ~47 h) = job multi-jours à laisser tourner en
+  fond ; win-rate multi-scénarios + catastrophic forgetting à mesurer une fois convergé.
+- **§9.7 pas de reward de move** ✅ respecté par design (aucun reward shaping de déplacement ajouté).
+
+**Fix livré (nécessaire pour `--new`, prouvé par erreur)** :
+- [`ai/train.py`](file:///home/greg/40k/ai/train.py) — `train_with_scenario_rotation` appelait
+  `load_vec_normalize` **avant** le garde `not new_model` (ligne ~2506). Sur un retrain from-scratch
+  après changement d'obs space (Box(108) → Dict), charger l'ancien `vec_normalize.pkl` planté dans
+  `set_venv` (shape check : `(108,) != None`) alors que le résultat est de toute façon jeté. Or `--new`
+  est obligatoire (obs incompatible) et supprimer le `.pkl` à la main est interdit. Le chargement est
+  désormais gardé par `not new_model and not reset_vec_normalize`. **Les deux autres sites du même
+  pattern (create_model ~1489, create_multi_agent_model ~1832) ne sont pas sur le chemin `--scenario
+  bot` et n'ont PAS été touchés (corriger au minimum)** — à traiter si un jour un `--new` passe par eux.
+
+**🔴 BLOQUEUR — boucle infinie en phase fight (root cause établie, PRÉ-EXISTANT, hors périmètre move)** :
+
+- **Symptôme** : `_run_bot_until_not_bot_turn` (`ai/env_wrappers.py`) boucle >500× en `phase=fight` puis
+  lève ; un env subprocess meurt → `EOFError` en cascade → `model.learn()` avorte. Reproduit 2/2.
+- **État capturé** (instrumentation temporaire, retirée depuis) : `eligible=[('109', 2)]`,
+  `current_player=2`, `fight_subphase=fight`, `units_fought` contient déjà `'109'`, pools alternés
+  vides, et le bot rejoue **action 1024 = `SQUAD_ACTION_WAIT`** à chaque itération.
+- **Root cause — DIVERGENCE entre deux fonctions d'éligibilité fight** :
+  - `fight_v11_is_eligible_to_fight` (pool, `fight_handlers.py:2856`, lu par
+    `_get_eligible_units_for_current_phase` → `fight_v11_current_pool`) garde 109 éligible via le
+    snapshot **`engaged_at_fight_step_start`** (109 était engagé au début de l'étape FIGHT, son ennemi
+    est mort depuis).
+  - `_squad_is_in_fight` (masque, `shared_utils.py:6707`, lu par `build_squad_action_mask:7623`) ne
+    teste que l'engagement **actuel** (ou `units_charged`) → **False** → le masque n'offre que
+    `SQUAD_ACTION_WAIT`, jamais `FIGHT`.
+  - `squad_wait` en phase fight (`w40k_core.py:5263`, `end_activation(WAIT, FIGHT)`) **n'ajoute pas**
+    109 à `units_selected_to_fight` → 109 reste éligible au tour suivant → boucle.
+- **Base règle (12 Fights phase.pdf, relu et vérifié le 2026-07-18)** — une unité **engagée au début
+  de l'étape FIGHT mais désengagée maintenant** (ennemi détruit) **RESTE éligible au combat** :
+  - **12.04** : « eligible to fight if it is within Engagement Range …, OR **it was within Engagement
+    Range at the start of this step**, or it made a Charge move this turn ». La 2ᵉ clause (snapshot
+    `engaged_at_fight_step_start`) suffit → l'unité désengagée par la mort de son ennemi est éligible.
+  - **12.06 Overrun** : « ELIGIBLE IF: Your unit **IS UNENGAGED**, or was unengaged at the start … ».
+    La **1ʳᵉ clause suffit** : désengagée maintenant → overrun autorisé. **Exemple officiel page 4** :
+    exactement ce cas (cible détruite, l'unité fait un overrun et se ré-engage via pile-in).
+  - **Conclusion** : le pool (`fight_v11_is_eligible_to_fight`, `fight_handlers.py:2856`) est
+    **CONFORME**. C'est le **MASQUE** qui était trop restrictif (3ᵉ copie divergente de la règle).
+  - *(Correction 2026-07-18 : le paragraphe précédent affirmait l'inverse — « le pool est trop
+    permissif », « aucun type de fight jouable ». C'était FAUX, contredit par 12.04 clause 2 et 12.06
+    clause 1 + l'exemple page 4. Les deux pistes de fix qui en découlaient sont **rejetées** : la
+    piste « Pool » (exclure l'unité du pool) violait 12.04/12.06 ; la piste « WAIT » (enregistrer
+    l'unité via WAIT) violait 12.08 — l'unité doit être `selected_to_fight` par un vrai FIGHT pour
+    ouvrir sa consolidation, pas par un WAIT.)*
+- **Pourquoi maintenant** : PRÉ-EXISTANT (le garde anti-boucle existe précisément pour ce cas). Avant la
+  refonte, les unités bougeaient d'1 subhex → atteignaient rarement le corps-à-corps → le cas
+  « engagé au début, ennemi tué pendant l'étape » ne survenait quasi jamais. Le move corrigé
+  **expose** le bug, il ne le crée pas. Le path tir/combat n'a pas été modifié par la refonte.
+
+**✅ FIX APPLIQUÉ (2026-07-18) — le masque dérive du pool 12.04, la 3ᵉ copie est supprimée** :
+- **Root cause exacte** : `_squad_is_in_fight` (`shared_utils.py`) était une **3ᵉ implémentation**
+  de l'éligibilité fight (engaged-now + charge, **sans** le snapshot 12.04), divergente du pool. Ses
+  **2 appelants** (le bit `ACTION_FIGHT` de `build_squad_action_mask`, et `squad_fight_activation_order`)
+  dérivent désormais de la **MÊME source que le commit** (`fight_v11_current_pool` /
+  `fight_v11_is_eligible_to_fight`, `fight_handlers.py`). Pas de clause snapshot ajoutée à une 3ᵉ copie
+  (ce serait reproduire le défaut §7bis #4) : la copie est **supprimée**.
+- **Parité masque/commit garantie** : le bit `ACTION_FIGHT` = `squad_id in fight_v11_current_pool`
+  **sous garde `fight_subphase == "fight"`** (le snapshot n'existe que pendant l'étape FIGHT, poppé en
+  fin d'étape `fight_handlers.py:3152`, et le pool le lit via `require_key` — d'où la garde, exactement
+  celle que le commit `squad_fight` impose déjà `w40k_core.py:5510`). C'est le pool que le commit
+  vérifie (`w40k_core.py:5536`) → le masque et le commit ne peuvent plus diverger.
+- **Résolution du crash** : l'unité 109 (engagée au début, ennemi mort) est dans le pool → le masque
+  offre `FIGHT` → le bot/agent le joue → `squad_fight` résout **à vide** (0 attaque, machinerie
+  12.04/12.06 déjà en place `w40k_core.py:5552-5572`, aucun overrun pile-in à implémenter) → 109 est
+  enregistrée `units_selected_to_fight` → sort du pool → **plus de boucle**.
+- **PvP strictement inchangé** : `build_squad_action_mask` n'a qu'un appelant, le chemin gym
+  (`action_decoder.py:242`). Le PvP passe directement par les `fight_v11_*` (`fight_handlers.py`),
+  non touchés.
+- **Périmètre** : `engine/phase_handlers/shared_utils.py` (masque + `squad_fight_activation_order`,
+  suppression de `_squad_is_in_fight`) + `tests/unit/engine/test_squad_fight_target_parity.py`
+  (nouveau test du scénario exact + mise à jour du test « charged » au nouveau contrat de parité).
+- **Validation** : crash reproduit (`BotControlledEnv infinite loop: 501 iterations, phase=fight`),
+  fix appliqué, run `--new` passe ce point. Test unitaire ajouté :
+  `test_snapshot_engaged_unit_with_dead_enemy_offers_fight_and_breaks_loop` (engagée au début, ennemi
+  mort → masque offre FIGHT, pas WAIT ; résolution à vide 0 attaque ; sélection enregistrée ; sortie
+  du pool). Suite complète verte.
 
 ### Fichiers impactés (récapitulatif)
 ```
@@ -595,7 +707,7 @@ cette refonte à tomber dans ce piège (terrain T1, cartes T3, jets T3).
 | T3 | ✅ | Decoder + exécution via le pool ; fallback `squad_wait` supprimé |
 | T5 | ✅ | `action_space_size` retiré (dérivé). `policy` → `MultiInputPolicy`, `n_steps` 16384 → 8192, extracteur CNN injecté (les 5 profils) |
 | **T4** | ✅ | Bots propagés au spatial : ils visent 33-85 subhex (contre 1), via `select_movement_destination` + carte mémoïsée du moteur. Obs `Dict` gérée dans l'éval. `test_evaluation_bots.py` collecte et passe |
-| T6 | ❌ | Validation + retrain |
+| T6 | 🟢 | §9.1/9.2/9.3 validés (suite verte ; moves 2-69 subhex ; phase move 0 erreur). Crash fight-phase **corrigé** (masque aligné sur le pool 12.04, `_squad_is_in_fight` supprimée) → retrain (§9.6) débloqué, le run `--new` passe le point de crash. Fix `ai/train.py` VecNormalize livré. Retrain complet + mesures §8.5 : en cours. Cf. section T6 |
 
 > ✅ **T4 débloque le retrain (T6).** Perception (T1b) ET adversaires (T4) sont corrigés : un retrain se
 > mesure désormais contre des bots qui savent se déplacer. Rappel : le win-rate de référence bouge des
@@ -667,6 +779,79 @@ Brancher la grille = passer l'obs en `Dict`. Cascade complète :
    qu'un coût géodésique n'était pas calculable ; les 4 branches l'avaient déjà.
 5. **Une suite qui « affiche 0 FAILED » peut n'avoir rien exécuté** — une erreur de collection
    interrompt pytest. Toujours lire la ligne `N passed`.
+
+## 7quater. Correctifs 2026-07-18 — pyright / check_ai_rules + bug EZ empreinte (03.04)
+
+Nettoyage des deux gates (`pyright.log` : 30 erreurs ; `check_ai_rules.log` : 7 violations) sur le code
+de la refonte. Suite complète **1395 passed / 2 skipped / 0 failed** après coup.
+
+### pyright (30 erreurs) — dont un vrai bug
+
+| Fichier | Correction |
+|---|---|
+| `ai/spatial_extractor.py` | `gym.Space.shape` est `Optional` → garde `shape is None` avant `len`/subscript (lève au lieu de subscript sur `None`) |
+| `engine/spatial_grid.py` | `np` non défini dans les annotations forward-ref → `import numpy as np` au niveau module (import local redondant retiré) |
+| `engine/observation_builder.py` | typage explicite de `static` (`Optional[Dict[str, Tuple[ndarray, ndarray]]]`) → lève l'ambiguïté ndarray/float dans `_paint_arrays` |
+| `engine/phase_handlers/movement_handlers.py` | `out_costs` retypé `Dict[…, float]` (coûts fractionnaires via `/ ENGAGEMENT_NORM_HEX_WIDTH`) ; `_dist_arr` narrowé par `assert` **sous la garde existante** `out_costs is not None` |
+| `engine/phase_handlers/shared_utils.py` | `assert advance_roll is not None` dans la branche `advance` (invariant : le roll est tiré juste avant) |
+| `engine/w40k_core.py` | retour de `reset`/`step` élargi à `Union[ndarray, Dict[str, ndarray]]` — l'obs squad est un `Dict`, plus un `ndarray` |
+| **`engine/spatial_grid.py` — `project_pool_to_grid`** | **VRAI BUG** : `int(cost)` tronquait le coût géodésique **fractionnaire** avant `classify_squad_move_type`. Un coût `M+0.4` retombait à `M` → cellule classée `normal` au lieu d'`advance`. Corrigé en `float(cost)` ; le contrat aval (`build_squad_move_cell_map`, `infer_squad_move_type`) était déjà en `float`. Set inchangé, classification corrigée |
+| tests (`test_squad_fight_target_parity`, `test_squad_grid_observation`) | listes typées `List[Optional[str]]` ; `assert cell is not None` avant unpack de `hex_to_cell` (`Optional`) |
+
+### check_ai_rules (7 violations)
+
+- **5 `forbidden_term`** : le mot « fallback » apparaissait dans des commentaires/docstrings décrivant
+  soit l'*absence* de fallback, soit un repli **métier** légitime (branche secondaire d'un bot).
+  Reformulés « repli » — le code était déjà conforme.
+- **1 `fallback_anti_error`** : `.get("hexes", [])` cité **dans un commentaire** → reformulé sans la
+  syntaxe littérale.
+- **1 `cache_recalculation`** (faux positif) : le suivi `current_function` du checker était écrasé par
+  les **fonctions imbriquées** (`_to_arrays`… dans `build_squad_grid`) → il attribuait l'appel à un
+  helper. Corrigé **dans le checker** (`scripts/check_ai_rules.py`) par une **pile d'indentation**
+  résolvant la fonction *englobante*, + `build_squad_grid` ajouté à la liste d'exemption (l'appel à
+  `build_enemy_adjacent_hexes` y est sous garde `if ez_cache_key in game_state` : le cache EZ persiste
+  une fois bâti, donc l'appel ne se produit qu'avant la 1ʳᵉ phase move/shoot/charge — une seule fois).
+
+### Bug EZ : zone d'engagement mesurée depuis l'ANCRE au lieu du SOCLE — **entorse 03.04**
+
+Découvert en creusant le faux positif `cache_recalculation`.
+`_compute_enemy_adjacent_cache_for_player_from_units_cache` dilatait `set(occupied_hexes_by_model.values())`
+= **un hex d'ancre par figurine**, alors que l'EZ doit couvrir tout le **socle**.
+
+- **Règles** (PDF lus) : **03.04** « a model's engagement range is the area within 2″ horizontally… **of
+  it** » ; **01.04** « measure to or from the **closest part of that model's base** » ; **01.02** « the
+  base is part of the model for all rules purposes ». Le schéma ENGAGEMENT (03, p.15) dessine la zone
+  autour de **tout le socle**, pas d'un point.
+- **Conséquence** : dilater l'ancre **sous-dimensionne l'EZ dès qu'un socle couvre plusieurs hexes**.
+  Tous les rosters actuels sont multi-hex → l'EZ était sous-estimée **partout** (impact réel sur la
+  légalité de move 09.05 et l'éligibilité fight/charge).
+- **Correctif** : dilater `require_key(entry, "occupied_hexes")` (union des empreintes **vivantes**,
+  resync par `_recompute_squad_occupied_hexes`). Le fallback single-anchor est supprimé (lève si absent).
+  L'EZ ne peut que **grossir** (empreinte ⊇ ancre), jamais rétrécir.
+- **Validation** : 1395 tests verts (0 cassé), spot-check PvP OK. Note : le vert ne prouve pas la
+  couverture du cas multi-hex par les tests — l'élargissement est garanti par construction.
+- **Reste ouvert** (§10) : vérifier que `get_engagement_zone` encode bien **2″** en subhex (le *montant*
+  de dilatation, orthogonal à ancre-vs-empreinte).
+
+### Décision : PAS d'incrémental sur le cache EZ
+
+Le cache EZ est recalculé **entièrement** à chaque move/mort (hooks `update_enemy_adjacent_caches_*`).
+Question posée : le remplacer par un delta incrémental (compteur de références par hex) ?
+
+**Profilé** (30 épisodes, 1853 steps, board `44x60x5`, unités multi-hex réelles) :
+
+| chemin | appels | % runtime |
+|---|---|---|
+| `_compute_enemy_adjacent_cache` (le recompute) | 1471 | **~1,5 %** |
+| └ dont `build_enemy_adjacent_hexes` (phase_start) | 1436 | — |
+| └ dont hook `after_unit_move` (cible de l'incrémental) | **0** | **0,00 %** |
+| `dilate_hex_set` (le vrai coût) | 1471 | ~1,4 % |
+
+**Verdict : non retenu.** L'incrémental optimise les **hooks** (delta par move) ; or le hook move pèse
+**0 %** ici (le coût vient des builds phase_start, que l'incrémental ne remplace pas), et tout le calcul
+EZ plafonne à ~1,5 %. Gain maximal < 1,5 % sur un chemin à 0 % → complexité (compteur de refs + delta +
+test d'équivalence) injustifiée. Réserve : scénario rush mêlée (peu de moves normaux) ; un training à
+objectifs déclencherait plus le hook move, mais le plafond ~1,5 % borne le gain.
 
 ## 8. Mesures et contraintes chiffrées
 
@@ -746,21 +931,43 @@ Coût de référence pour comparaison : `build_squad_observation` (108-d, exista
 grille (6 144 floats) coûte donc **3× moins** que le vecteur 108-d qu'elle accompagne.
 
 ### 8.4 Ce qui ne coûte PAS
-- **Le CNN** (attendu, à confirmer — §8.5) : la policy tourne sur GPU ; le débit est fixé par le
-  **moteur** (65 ms/step de calcul moteur pur, hors réseau). Passer de `MlpPolicy` à un CNN ne devrait
-  pas déplacer la durée d'un entraînement — **hypothèse non mesurée**, comme le débit réel (§8.5).
+- ~~**Le CNN**~~ **HYPOTHÈSE INFIRMÉE (2026-07-18)** : l'attendu « débit fixé par le moteur, CNN
+  neutre » est **contredit par la mesure** — débit agrégé ≈ **14 steps/s** à `n_envs=48`, très en-deçà
+  de ce qu'un moteur pur à 65 ms/step laissait espérer. Le path Dict-obs + CNN **et** la résolution
+  réelle des combats (désormais atteints) pèsent. Cf. §8.5 (la part exacte du CNN reste non isolée).
 - **Le BFS** : ~11 % d'un step ; neutre une fois les dry-runs supprimés (§8.2).
 
-### 8.5 Points non mesurés (à ne pas affirmer sans mesure)
-> ~~Surcoût de rasterisation de la grille par step (T1)~~ → **MESURÉ**, cf. §8.4bis (0,521 ms).
-- **Débit réel du training** (steps/s avec `n_envs=48`). Un calcul « 8 cœurs ÷ 65 ms » suppose un moteur
-  purement CPU-bound et parfaitement parallèle — hypothèse **non vérifiée**, et les statistiques de
-  training de l'utilisateur indiquent que `n_envs=48` sur 8 cœurs est **bénéfique** (IPC, sérialisation
-  et amortissement de l'inférence en batchs ne sont pas du CPU-bound). **Se fier aux stats réelles.**
-- Surcoût de rasterisation de la grille par step (T1).
-- Sample complexity du nouvel espace d'action.
-- Coût d'inférence + backprop du CNN sur GPU (l'affirmation « neutre » de §8.4 est un attendu, pas une
-  mesure).
+### 8.5 Mesures runtime (MÀJ 2026-07-18 — crash fight levé, retrain relancé)
+
+Une fois le crash fight corrigé, le run `--new x5_new` complète des rollouts. Mesuré sur un run borné
+(~9 min, board ×5, `n_envs=48`, GPU RTX 4060, obs `Dict` + `SpatialCombinedExtractor`) :
+
+| Mesure | Valeur | Source |
+|---|---|---|
+| **Débit training** (env-steps/s agrégé, `n_envs=48`) | **≈ 14 steps/s** | TB `time/fps` au 1ᵉʳ update SB3 (step 8160) |
+| **Cadence épisodes** | **≈ 7,6 s/ep** (70 ép. en 534 s) → ETA ~47 h pour 30000 ép. | barre de progression |
+| **RAM résidente agrégée** (main + 48 envs subprocess, 60 proc.) | **≈ 29 Go** stationnaire (init ≤ 47 Go RAM) | `ps rss` échantillonné 30 s |
+| RAM du rollout buffer (composante calculée) | **9,66 Go** (393 216 transitions × 6 144 floats) | §8.3, cohérent avec le RSS observé |
+
+**Lecture — le débit est la contrainte dimensionnante du retrain, PAS neutre (contredit §8.4)** :
+- ~14 steps/s agrégé est **très en-deçà** de l'attendu §8.4 (« débit fixé par le moteur, 65 ms/step,
+  CNN neutre » aurait laissé espérer ≫ ce chiffre à 48 envs). L'écart tient à **deux** causes que le
+  move corrigé expose : (1) le path Dict-obs + CNN sur GPU (forward masqué par step + backprop) n'est
+  **pas** gratuit ; (2) surtout, **les combats se résolvent désormais réellement** (unités qui
+  traversent le board → engagement → fight par-figurine complet) là où avant elles bougeaient d'1
+  subhex — les épisodes sont plus lourds. Un rollout de 8192 steps ≈ **10 min**.
+- **Conséquence Tâche B** : un retrain complet (30000 ép.) est un job **multi-jours** (~47 h à ce
+  débit). Il ne peut **pas** aboutir en une session ; il doit tourner en tâche de fond. La cadence est
+  stable et le run **sain** (RAM plate ~29 Go, aucun crash, épisodes qui avancent).
+- **La part exacte du CNN** (env-step vs forward vs backprop) **reste non isolée** — nécessiterait un
+  profiling dédié, non fait. Ne pas l'affirmer sans mesure.
+
+**Restent non mesurés** :
+- Sample complexity du nouvel espace d'action (nécessite un training convergé).
+- Décomposition du débit (part CNN forward/backprop vs moteur vs résolution combat).
+- Win-rate multi-scénarios et catastrophic forgetting (nécessitent le retrain complet).
+- ~~Surcoût de rasterisation de la grille par step (T1)~~ → **MESURÉ**, §8.4bis (0,521 ms).
+- ~~Débit réel `n_envs=48`, RAM~~ → **MESURÉS** ci-dessus.
 
 ---
 
@@ -842,3 +1049,7 @@ obligatoire. `ai/models/**/*.zip` ne doit jamais être modifié à la main.
     récompensé **indirectement** via ce qu'il rend accessible (tir, combat, objectifs). Ne pas ajouter
     de reward shaping de déplacement si les unités bougent peu après la refonte : diagnostiquer
     d'abord obs/masque/credit assignment.
+11. **Montant de dilatation EZ = 2″ ?** (ouvert, 2026-07-18) — le bug ancre→empreinte est corrigé
+    (§7quater), mais reste à vérifier que `get_engagement_zone(game_state)` encode bien **2″
+    horizontalement** (03.04) en subhex. Orthogonal à ancre-vs-empreinte : c'est le *montant* de
+    dilatation, pas sa source.

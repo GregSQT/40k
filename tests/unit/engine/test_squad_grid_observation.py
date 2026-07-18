@@ -176,7 +176,9 @@ def test_objective_is_painted_from_list_hexes(engine):
     # objectifs apres coup -> invalider le cache, comme le fait reset() sur un vrai scenario.
     engine.game_state.pop("_grid_static_hex_arrays", None)
     grid = _grid(engine)
-    gx, gy = hex_to_cell(22, 22, ANCHOR_COL, ANCHOR_ROW, grid_half_extent_subhex(engine.game_state, "1"))
+    cell = hex_to_cell(22, 22, ANCHOR_COL, ANCHOR_ROW, grid_half_extent_subhex(engine.game_state, "1"))
+    assert cell is not None
+    gx, gy = cell
     assert grid[GRID_CH_OBJECTIVE, gy, gx] == 1.0
 
 
@@ -185,7 +187,9 @@ def test_objective_is_painted_from_dict_hexes(engine):
     engine.game_state["objectives"] = [{"id": "obj1", "hexes": [{"col": 22, "row": 22}]}]
     engine.game_state.pop("_grid_static_hex_arrays", None)
     grid = _grid(engine)
-    gx, gy = hex_to_cell(22, 22, ANCHOR_COL, ANCHOR_ROW, grid_half_extent_subhex(engine.game_state, "1"))
+    cell = hex_to_cell(22, 22, ANCHOR_COL, ANCHOR_ROW, grid_half_extent_subhex(engine.game_state, "1"))
+    assert cell is not None
+    gx, gy = cell
     assert grid[GRID_CH_OBJECTIVE, gy, gx] == 1.0
 
 
@@ -196,7 +200,9 @@ def test_ez_channel_is_populated_from_the_engine_cache(engine):
     grid = _grid(engine)
     half = grid_half_extent_subhex(gs, "1")
     for col, row in ((21, 20), (22, 20)):
-        gx, gy = hex_to_cell(col, row, ANCHOR_COL, ANCHOR_ROW, half)
+        cell = hex_to_cell(col, row, ANCHOR_COL, ANCHOR_ROW, half)
+        assert cell is not None
+        gx, gy = cell
         assert grid[GRID_CH_EZ, gy, gx] == 1.0
 
 

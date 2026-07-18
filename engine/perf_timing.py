@@ -269,6 +269,20 @@ def focus_fire_pool_audit_enabled(game_state: Optional[Dict[str, Any]]) -> bool:
     return False
 
 
+def perf_field(value: Any) -> str:
+    """Rend une valeur pour un champ ``cle=valeur`` du log, sans espace.
+
+    Les lignes sont parsees par ``split()`` puis ``split("=", 1)`` : une valeur contenant un
+    espace casse le decoupage et decale les champs. ``BASE_SIZE`` est scalaire pour un socle
+    simple mais peut etre une liste (socle rectangulaire), auquel cas ``str([20, 30])`` produit
+    ``base=[20, 30]`` -> tokens ``base=[20,`` et ``30]``, donc un champ illisible.
+
+    Suppression des espaces uniquement : la valeur reste fidele (``[20,30]``), aucune troncature
+    ni substitution qui masquerait ce que le moteur a reellement manipule.
+    """
+    return str(value).replace(" ", "")
+
+
 def append_perf_timing_line(message: str) -> None:
     """
     Écrit une ligne dans le fichier perf (voir ``perf_timing_log_file_path``), via handle bufferisé.

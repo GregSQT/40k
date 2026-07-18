@@ -1602,7 +1602,9 @@ class ObservationBuilder:
         # Murs et objectifs sont STATIQUES sur la partie : on memoise leurs tableaux une fois
         # plutot que de reconstruire ~11 500 tuples Python a chaque step. Memoisation de donnees
         # de scenario, pas un cache masquant un recalcul necessaire.
-        static = game_state.get("_grid_static_hex_arrays")  # get allowed (construit ici au 1er appel)
+        static: Optional[Dict[str, Tuple[np.ndarray, np.ndarray]]] = game_state.get(
+            "_grid_static_hex_arrays"
+        )  # get allowed (construit ici au 1er appel)
         if static is None:
             def _to_arrays(hexes) -> Tuple[np.ndarray, np.ndarray]:
                 hexes = list(hexes)
@@ -1616,7 +1618,7 @@ class ObservationBuilder:
             objective_hexes: List[Tuple[int, int]] = []
             for objective in game_state.get("objectives", []):  # get allowed (scenario sans objectif)
                 # `hexes` est REQUIS : verifie sur les objectifs runtime (20/20 le portent, cles =
-                # hexes/id/name). Un `.get("hexes", [])` rendrait un objectif malforme invisible
+                # hexes/id/name). Un acces tolerant avec defaut liste vide rendrait un objectif malforme invisible
                 # dans le canal sans que rien ne le signale.
                 for hex_entry in require_key(objective, "hexes"):
                     if isinstance(hex_entry, (list, tuple)):

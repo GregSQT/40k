@@ -1109,22 +1109,45 @@ class ActionDecoder:
             if len(obs_arr) > 0:
                 obstacle_grid[obs_arr[:, 0], obs_arr[:, 1]] = True
 
+        # Erosion morphologique. Le calcul direct materialisait un tableau (Nk, M, 2) par unite :
+        # sur le board x5 le pool de deploiement fait ~16 000 hexes et un socle 18 pese 211
+        # offsets, soit 3,4 M positions construites puis indexees a chaque appel. On erode plutot
+        # UNE fois la grille des cellules acceptables par l'empreinte, puis on lit le resultat a
+        # l'ancre : cout M x grille au lieu de Nk x M, et ici Nk >> grille/M (mesure : x31 a x62).
+        #
+        # Equivalence stricte avec le calcul direct : `acc[p] = ET sur les offsets de
+        # ok_grid[p + off]` est exactement `np.all(in_pool & no_obstacle)` pour l'ancre p.
+        # `ok_grid` porte deja la contrainte de bornes, donc une empreinte qui deborde du plateau
+        # lit False — meme rejet que `in_bounds` cote calcul direct — et un decalage qui sort de
+        # la grille etendue laisse la case a False (`shifted` initialise a zero).
+        in_board = np.zeros_like(pool_grid)
+        in_board[:board_cols, :board_rows] = True
+        ok_grid = pool_grid & ~obstacle_grid & in_board
+
         valid_mask = np.zeros(len(pool_np), dtype=bool)
         for mask, off_arr in ((even_mask_np, off_e_np), (~even_mask_np, off_o_np)):
             if not np.any(mask):
                 continue
+            acc = np.ones_like(ok_grid)
+            for _off in off_arr:
+                dc = int(_off[0])
+                dr = int(_off[1])
+                shifted = np.zeros_like(ok_grid)
+                c_lo = max(0, dc)
+                c_hi = grid_cols - max(0, -dc)
+                r_lo = max(0, dr)
+                r_hi = grid_rows - max(0, -dr)
+                if c_lo < c_hi and r_lo < r_hi:
+                    shifted[c_lo - dc:c_hi - dc, r_lo - dr:r_hi - dr] = ok_grid[c_lo:c_hi, r_lo:r_hi]
+                acc &= shifted
+                if not acc.any():
+                    break
             anchors = pool_np[mask]  # (Nk, 2)
-            fp = anchors[:, None, :] + off_arr[None, :, :]  # (Nk, M, 2)
-            fp_c = fp[:, :, 0]
-            fp_r = fp[:, :, 1]
-            in_bounds = (fp_c >= 0) & (fp_c < board_cols) & (fp_r >= 0) & (fp_r < board_rows)
-            fc_s = np.where(in_bounds, fp_c, 0)
-            fr_s = np.where(in_bounds, fp_r, 0)
-            in_pool = in_bounds & pool_grid[fc_s, fr_s]
-            no_obstacle = in_bounds & ~obstacle_grid[fc_s, fr_s]
-            valid_mask[mask] = np.all(in_pool & no_obstacle, axis=1)
+            valid_mask[mask] = acc[anchors[:, 0], anchors[:, 1]]
 
-        cell_valid = [(int(c), int(r)) for c, r in pool_np[valid_mask]]
+        # `.tolist()` convertit le tableau en entiers Python en une passe C ; l'ancien
+        # `(int(c), int(r))` par element payait deux appels `int()` par hex retenu.
+        cell_valid = [(c, r) for c, r in pool_np[valid_mask].tolist()]
         return self._deployment_clearance_filter(game_state, str(unit_id), unit, cell_valid)
 
     def _deployment_clearance_filter(

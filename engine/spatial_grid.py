@@ -26,11 +26,13 @@ Geometrie (spec §6.2 / §10.2 / §10.9)
 - Rasterisation GEOMETRIQUE (§10.9) : les hexes sont projetes via leurs centres euclidiens
   (`_hex_center`), pas via leurs indices offset -> pas d'anisotropie de parite.
 
-Aucun fallback, aucune valeur par defaut masquant une erreur.
+Aucun repli, aucune valeur par defaut masquant une erreur.
 """
 
 import math
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
+
+import numpy as np
 
 from engine.hex_utils import _hex_center
 
@@ -153,8 +155,6 @@ def hex_arrays_to_cells(
     L'equivalence stricte avec `hex_to_cell` est verrouillee par test : c'est elle qui garantit
     que l'obs et le masque designent le meme hex.
     """
-    import numpy as np
-
     cols = np.asarray(cols, dtype=np.float64)
     rows = np.asarray(rows, dtype=np.float64)
 
@@ -203,11 +203,11 @@ def cell_from_index(idx: int) -> Tuple[int, int]:
 
 
 def project_pool_to_grid(
-    pool_costs: Mapping[Tuple[int, int], int],
+    pool_costs: Mapping[Tuple[int, int], float],
     anchor_col: int,
     anchor_row: int,
     half_extent_subhex: int,
-) -> Dict[int, Tuple[Tuple[int, int], int]]:
+) -> Dict[int, Tuple[Tuple[int, int], float]]:
     """Projette le pool BFS sur la grille -> {cell_index: ((col,row), cout_geodesique)}.
 
     `pool_costs` : {(col,row): cout geodesique} — le cout est la distance de CHEMIN du BFS
@@ -221,22 +221,56 @@ def project_pool_to_grid(
 
     Le dict renvoye est la source du masque (cles = cellules jouables) ET du decodage.
     """
-    best: Dict[int, Tuple[float, Tuple[int, int], int]] = {}
-    for (col, row), cost in pool_costs.items():
-        cell = hex_to_cell(col, row, anchor_col, anchor_row, half_extent_subhex, clamp=True)
-        if cell is None:
-            continue
-        idx = cell_index(*cell)
-        cx, cy = cell_center_px(cell[0], cell[1], anchor_col, anchor_row, half_extent_subhex)
-        hx, hy = _hex_center(col, row)
-        d2 = (hx - cx) ** 2 + (hy - cy) ** 2
+    if not pool_costs:
+        return {}
+
+    # --- Geometrie vectorisee -------------------------------------------------
+    # Le chemin scalaire appelait `hex_to_cell` + `cell_center_px` + `_hex_center` par hex du
+    # pool, soit ~150 M appels a `_hex_center` sur un run de training (29% du CPU au profil) —
+    # dont deux tiers recalculaient le centre de l'ancre et `_half_extent_px`, IDENTIQUES pour
+    # tout le pool. Ils sont hisses hors de la boucle et le reste passe en numpy.
+    #
+    # La SELECTION (fold ci-dessous) reste scalaire et sequentielle a dessein : le departage
+    # `d2 < cur_d2 - 1e-12` est une comparaison a tolerance, donc NON transitive — elle ne
+    # definit pas un ordre total. Un `argmin`/`lexsort` vectorise donnerait un autre gagnant
+    # sur les cas limites, et masque et decodage designeraient des hexes differents. On ne
+    # vectorise que ce qui est arithmetiquement exact.
+    items = list(pool_costs.items())
+    n = len(items)
+    cols = np.fromiter((cr[0] for cr, _ in items), dtype=np.float64, count=n)
+    rows = np.fromiter((cr[1] for cr, _ in items), dtype=np.float64, count=n)
+
+    # Inline de `_hex_center` — MEME formule et MEME ordre d'operations que `hex_arrays_to_cells`
+    # (donc que `_hex_center`) : `np.mod(cols, 2.0)` == `col & 1` pour col >= 0 (indices de board).
+    hex_width = 1.5
+    hex_height = HEX_STEP_PX
+    hxs = cols * hex_width + hex_width / 2.0
+    hys = rows * hex_height + (np.mod(cols, 2.0) * hex_height) / 2.0 + hex_height / 2.0
+
+    ax, ay = _hex_center(anchor_col, anchor_row)
+    w = _half_extent_px(half_extent_subhex)
+
+    # `clamp=True` : jamais None, l'hex du pool est atteignable donc dans le disque ; seul
+    # l'arrondi au bord exact peut sortir. Miroir du min/max scalaire, applique par axe.
+    gxs = np.clip(np.floor(((hxs - ax) / w + 1.0) * 0.5 * GRID_SIZE), 0, GRID_SIZE - 1).astype(np.int64)
+    gys = np.clip(np.floor(((hys - ay) / w + 1.0) * 0.5 * GRID_SIZE), 0, GRID_SIZE - 1).astype(np.int64)
+    idxs = gys * GRID_SIZE + gxs
+
+    cxs = ax + (((gxs + 0.5) / GRID_SIZE) * 2.0 - 1.0) * w
+    cys = ay + (((gys + 0.5) / GRID_SIZE) * 2.0 - 1.0) * w
+    d2s = (hxs - cxs) ** 2 + (hys - cys) ** 2
+
+    best: Dict[int, Tuple[float, Tuple[int, int], float]] = {}
+    for _i, ((col, row), cost) in enumerate(items):
+        idx = int(idxs[_i])
+        d2 = float(d2s[_i])
         current = best.get(idx)
         if current is None:
-            best[idx] = (d2, (col, row), int(cost))
+            best[idx] = (d2, (col, row), float(cost))
             continue
         cur_d2, cur_hex, _ = current
         if d2 < cur_d2 - 1e-12 or (abs(d2 - cur_d2) <= 1e-12 and (col, row) < cur_hex):
-            best[idx] = (d2, (col, row), int(cost))
+            best[idx] = (d2, (col, row), float(cost))
     return {idx: (hex_cr, cost) for idx, (_, hex_cr, cost) in best.items()}
 
 
