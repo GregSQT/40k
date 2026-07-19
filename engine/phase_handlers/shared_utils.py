@@ -3251,6 +3251,63 @@ DEFAULT_MOVE_CONSTRAINTS: Dict[str, Any] = {
 }
 
 
+def build_move_blocked_cells_by_level(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    player: int,
+    levels: "Any",
+    constraints: Dict[str, Any],
+) -> Dict[int, List[Set[Tuple[int, int]]]]:
+    """SOURCE UNIQUE du predicat de cellule d'un move — cellules INTERDITES, par niveau.
+
+    Consommee par les DEUX cotes de l'invariant « masque ⊆ executable » :
+      - `validate_move_plan`, qui teste chaque figurine d'un plan deja construit ;
+      - `erode_move_pool_by_squad_block`, qui erode le pool d'ancre par le bloc AVANT que
+        le masque ne soit publie.
+    Les deux DOIVENT lire le meme predicat : le dupliquer rouvrirait la classe de bug
+    « masque/execution » (decision de design n°2 — « Interdit de dupliquer le check »).
+
+    Contraintes couvertes (toutes des proprietes de CELLULE, donc erodables) :
+      - `allow_collisions=False` : cellules occupees par les AUTRES escouades AU MEME NIVEAU
+        (deux figs a des etages differents ne se chevauchent pas) ;
+      - `allow_walls=False` : murs (verticaux, prolonges a tous les niveaux) ;
+      - `forbid_enemy_er=True` : zone d'engagement ennemie.
+    NON couvertes ici car elles ne sont PAS des proprietes de cellule : `budget_per_model`
+    (distance depuis l'origine de CHAQUE figurine) et `require_coherency` (positions
+    relatives) — cf. `erode_move_pool_by_squad_block` pour pourquoi elles n'ont pas besoin
+    de l'etre. Les bornes du plateau ne sont pas non plus ici : chaque appelant les teste
+    avant l'appartenance (pas de set a materialiser pour tout le plateau).
+
+    Retourne, par niveau, la LISTE des sets interdits — jamais leur union : une cellule est
+    interdite ssi elle appartient a l'un d'eux. Ne PAS fusionner ici. L'union coute une copie
+    de `wall_hexes` (~1100 cellules) a chaque appel, ce qui est du pur gaspillage pour
+    `validate_move_plan`, appele avec quelques figurines (mesure : +6% par appel, et il est
+    appele en boucle serree par `apply_snap_corrections`). Le consommateur qui balaye des
+    milliers de candidates (`erode_move_pool_by_squad_block`) peut, lui, materialiser l'union
+    une fois s'il y trouve son compte — c'est SON arbitrage, pas celui du helper.
+
+    Les sets sont renvoyes PAR REFERENCE (lecture pure) : ne pas les muter.
+    """
+    wall_hexes = game_state.get("wall_hexes", set())  # get allowed
+    static_blocked: List[Set[Tuple[int, int]]] = []
+    if not constraints["allow_walls"] and wall_hexes:
+        static_blocked.append(wall_hexes)
+    if constraints["forbid_enemy_er"]:
+        enemy_er = require_key(game_state, f"enemy_adjacent_hexes_player_{int(player)}")
+        if enemy_er:
+            static_blocked.append(enemy_er)
+
+    out: Dict[int, List[Set[Tuple[int, int]]]] = {}
+    for lv in levels:
+        blocked = list(static_blocked)
+        if not constraints["allow_collisions"]:
+            blocked.append(
+                build_occupied_positions_set(game_state, exclude_unit_id=squad_id, level=int(lv))
+            )
+        out[int(lv)] = blocked
+    return out
+
+
 def build_rigid_plan(
     anchor_dest_col: int,
     anchor_dest_row: int,
@@ -3352,20 +3409,12 @@ def validate_move_plan(
         m = models_cache.get(entry[0])
         return int(require_key(m, "level")) if m is not None else 0
 
-    enemy_er_zone: Optional[Set[Tuple[int, int]]] = None
-    if c["forbid_enemy_er"]:
-        cache_key = f"enemy_adjacent_hexes_player_{player}"
-        enemy_er_zone = require_key(game_state, cache_key)
-
-    # Cellules occupees par les AUTRES escouades, PAR NIVEAU (étages) : une fig ne collisionne qu'avec
-    # les figs d'un autre squad AU MÊME NIVEAU (deux figs à des étages différents ne se chevauchent pas).
-    # Tout au niveau 0 aujourd'hui → identique au comportement historique (union = niveau 0).
-    other_occupied_by_level: Dict[int, Set[Tuple[int, int]]] = {}
-    if not c["allow_collisions"]:
-        for _lv in {_target_level(entry) for entry in plan}:
-            other_occupied_by_level[_lv] = build_occupied_positions_set(
-                game_state, exclude_unit_id=squad_id, level=_lv
-            )
+    # SOURCE UNIQUE du predicat de cellule, partagee avec l'erosion du pool de move
+    # (`erode_move_pool_by_squad_block`) : dupliquer ce check rouvrirait la classe de bug
+    # « masque/execution » que l'erosion elimine (decision de design n°2).
+    blocked_by_level = build_move_blocked_cells_by_level(
+        game_state, squad_id, player, {_target_level(entry) for entry in plan}, c
+    )
 
     # Budget per-model depuis position d origine actuelle.
     origin_positions: Dict[str, Tuple[int, int]] = {}
@@ -3383,12 +3432,7 @@ def validate_move_plan(
         if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
             return False
         cell = (nc, nr)
-        if not c["allow_walls"] and wall_hexes and cell in wall_hexes:
-            return False
-        if not c["allow_collisions"]:
-            if cell in other_occupied_by_level.get(_target_level(entry), set()):
-                return False
-        if c["forbid_enemy_er"] and enemy_er_zone and cell in enemy_er_zone:
+        if any(cell in s for s in blocked_by_level[_target_level(entry)]):
             return False
         if cell in new_cells:
             return False  # collision intra-plan (deux figs sur meme hex)
@@ -7413,6 +7457,7 @@ def erode_move_pool_by_squad_block(
     game_state: Dict[str, Any],
     squad_id: str,
     costs: Dict[Tuple[int, int], float],
+    constraints: Optional[Dict[str, Any]] = None,
 ) -> Dict[Tuple[int, int], float]:
     """V11 T6-g — Retire du pool de move les ancres dont le BLOC translaté est illégal.
 
@@ -7428,9 +7473,13 @@ def erode_move_pool_by_squad_block(
     groupés par NIVEAU : une figurine ne collisionne qu'avec les figs d'un autre squad au
     même étage — miroir exact de ``validate_move_plan``.
 
-    Prédicat de cellule = celui de ``validate_move_plan`` sous
-    ``DEFAULT_MOVE_CONSTRAINTS`` (bornes, murs, occupation des autres escouades par niveau,
-    ER ennemie), les seules contraintes érodables. Les deux autres sont INVARIANTES par
+    Prédicat de cellule : le MÊME que ``validate_move_plan``, lu depuis le helper partagé
+    ``build_move_blocked_cells_by_level`` (murs, occupation des autres escouades par niveau,
+    ER ennemie) — aucune duplication, les deux côtés de l'invariant « masque ⊆ exécutable »
+    ne peuvent pas diverger. ``constraints`` doit refléter celles que l'exécution appliquera
+    (défaut ``DEFAULT_MOVE_CONSTRAINTS``, ce que passe ``execute_squad_move`` sans
+    ``extra_constraints``) : les fournir plus permissives ici sur-filtrerait le masque.
+    Ce sont les seules contraintes érodables. Les deux autres sont INVARIANTES par
     translation rigide, donc déjà garanties par le pool d'ancre :
       - ``budget_per_model`` : ``calculate_hex_distance`` est une distance cube, donc
         invariante par translation — la distance de chaque figurine à son origine est égale
@@ -7461,19 +7510,24 @@ def erode_move_pool_by_squad_block(
 
     board_cols = int(require_key(game_state, "board_cols"))
     board_rows = int(require_key(game_state, "board_rows"))
-    wall_hexes = game_state.get("wall_hexes", set())  # get allowed
     player = int(require_key(anchor, "player"))
-    enemy_er = require_key(game_state, f"enemy_adjacent_hexes_player_{player}")
 
-    # Cellules interdites par NIVEAU, pré-agrégées : un seul test d'appartenance par figurine.
-    blocked_by_level: Dict[int, Set[Tuple[int, int]]] = {}
-    for lv in offsets_by_level:
-        blocked = set(build_occupied_positions_set(game_state, exclude_unit_id=squad_id, level=lv))
-        if wall_hexes:
-            blocked |= set(wall_hexes)
-        if enemy_er:
-            blocked |= set(enemy_er)
-        blocked_by_level[lv] = blocked
+    # Cellules interdites par NIVEAU — MEME predicat que `validate_move_plan`, via le helper
+    # partage (pas de duplication : cf. sa docstring). Pre-agregees -> un seul test
+    # d'appartenance par figurine et par candidate.
+    c = dict(DEFAULT_MOVE_CONSTRAINTS)
+    if constraints:
+        c.update(constraints)
+    blocked_sets_by_level = build_move_blocked_cells_by_level(
+        game_state, squad_id, player, set(offsets_by_level), c
+    )
+    # Ici — et SEULEMENT ici — l'union vaut sa copie : elle est payee une fois par niveau puis
+    # amortie sur |pool| x |figurines| tests (~2800 x 20). Cf. la docstring du helper : c'est
+    # l'arbitrage du consommateur, `validate_move_plan` fait l'inverse.
+    blocked_by_level: Dict[int, Set[Tuple[int, int]]] = {
+        lv: set().union(*sets) if sets else set()
+        for lv, sets in blocked_sets_by_level.items()
+    }
 
     kept: Dict[Tuple[int, int], float] = {}
     for (cc, rr), cost in costs.items():

@@ -49,13 +49,53 @@ mono-figurine : l'ancre EST le bloc, le pool est déjà exact → court-circuit.
 chemin single-scenario (T6-e, commité) ; commit de déploiement mono-ancre qui ne plaçait AUCUNE
 figurine (T6-f, +10 tests, non commité).
 
-**Suite au 2026-07-19 après T6-h/T6-g** : `9 failed, 1437 passed, 2 skipped`. Baseline vérifiée
+**Suite au 2026-07-19 après T6-h/T6-g** : `9 failed, 1440 passed, 2 skipped`. Baseline vérifiée
 par `git stash` : `9 failed, 1421 passed` — **mêmes 9 échecs préexistants** (rosters, cf. plus
-bas), +16 = les tests des deux fixes. Zéro régression.
+bas), +19 = les tests des deux fixes. Zéro régression.
 
-**Après le training** — ne PAS anticiper : **T7** (unification de la validation de déploiement,
-section 5). Le déclencheur est « le training tourne » : T7 touche le masque, donc l'espace
-d'action de l'agent, et exige une mesure avant/après impossible tant que rien ne tourne.
+**Dette de conception REMBOURSÉE (2026-07-19)** — la 1re version de l'érosion T6-g DUPLIQUAIT le
+prédicat de cellule de `validate_move_plan`, ce que la décision de design n°2 interdit
+explicitement (« Interdit de dupliquer le check ») : c'était rouvrir en petit la classe de bug
+qu'on venait de fermer. Le prédicat est désormais dans un helper unique,
+`build_move_blocked_cells_by_level` (shared_utils), lu par les DEUX côtés de l'invariant —
+`validate_move_plan` (par figurine) et `erode_move_pool_by_squad_block` (par bloc).
+`erode_move_pool_by_squad_block` prend en plus un paramètre `constraints` : l'érosion codait en
+dur `DEFAULT_MOVE_CONSTRAINTS` alors qu'`execute_squad_move` accepte des `extra_constraints`
+(divergence latente, non atteinte par le gym aujourd'hui).
+
+⚠️ **Le helper renvoie une LISTE de sets par niveau, jamais leur union — ne pas « simplifier ».**
+La 1re version fusionnait, ce qui copie `wall_hexes` (~1100 cellules) à CHAQUE appel : mesuré
++6 % sur `validate_move_plan` (1576 → 1673 µs), qui est appelé en boucle serrée par
+`apply_snap_corrections`. En rendant les composants par référence, `validate_move_plan` teste
+2-3 appartenances et retombe à 1596 µs, tandis qu'`erode_move_pool_by_squad_block` matérialise
+l'union de son côté — là elle est amortie sur |pool| × |figurines| (~2800 × 20). L'arbitrage
+appartient au consommateur, pas au helper.
+
+**Invariant MESURÉ, plus seulement raisonné** — `tests/unit/engine/test_move_mask_is_executable.py`
+(+3) déroule de vraies parties (3 seeds × 400 steps, actions masquées aléatoires) et vérifie qu'à
+chaque step de phase move, TOUTE cellule offerte par le masque produit un plan accepté par
+`validate_move_plan`, **avec le budget exact qu'`execute_squad_move` appliquerait** (type de move
+inféré du coût géodésique). ~21 700 cellules réelles par run. Cela couvre les deux contraintes
+que l'érosion ne filtre pas et qui n'étaient jusque-là que DÉMONTRÉES invariantes par translation
+cube (`budget_per_model`, `require_coherency`). **Rouge sur le code d'avant les fixes**
+(`git checkout 3886e498 -- shared_utils.py` → `ValueError: execute_squad_move a échoué : squad=103
+dest=(24,15) … incohérence masque/exécution`, sur les 3 seeds), vert après.
+
+**🔴 PROCHAIN BLOQUEUR — §10.4 : l'agent s'entraîne contre du HASARD, en silence.**
+Re-vérifié dans le code le 2026-07-19 : `update_frozen_model` ([env_wrappers.py:1272](../../ai/env_wrappers.py#L1272))
+n'a **aucun appelant** hors son propre test ; le chemin single-scenario construit
+`SelfPlayWrapper(masked_env, frozen_model=None, ...)` ([train.py:1537](../../ai/train.py#L1537), [1871](../../ai/train.py#L1871)) ;
+et à `frozen_model is None` le wrapper joue **une action valide au hasard**
+([env_wrappers.py:1242-1248](../../ai/env_wrappers.py#L1242-L1248)). Les runs de validation T6-g/T6-h et
+ArmageddonAgent ont donc tourné avec un P2 aléatoire — **rien ne le signale dans les logs**.
+Conséquence : le pipeline est prouvé fonctionnel, mais **aucun win-rate d'entraînement n'a de
+sens tant que ce n'est pas câblé**, et le critère T6 reste non évaluable. À traiter AVANT tout
+run sérieux et avant T7. (Le combined d'`--eval` reste valide : l'évaluation, elle, joue contre
+de vrais bots.)
+
+**Après ça** — ne PAS anticiper : **T7** (unification de la validation de déploiement,
+section 5). Son déclencheur « le training tourne » est désormais REMPLI, mais T7 touche le
+masque, donc l'espace d'action de l'agent, et exige une mesure avant/après — donc §10.4 d'abord.
 
 **⚠️ AVANT de lancer le premier vrai run, lire la section 10** (stratégie d'entraînement et
 d'évaluation, décision utilisateur 2026-07-19). Deux points bloquants y sont établis :
@@ -796,8 +836,11 @@ de T4/de code latent) :
   bloc extrait (`num_phases`/import `GAME_PHASES`, calculé et jamais lu).
 
 - **T6-f — Commit de déploiement `deploy_unit` mono-ancre : `models_cache` JAMAIS écrit
-  (BLOQUANT gym, crash DIFFÉRÉ en phase move ; touche AUSSI des chemins PvP) — ❌ À FAIRE
-  (constaté 2026-07-19)**
+  (BLOQUANT gym, crash DIFFÉRÉ en phase move ; touche AUSSI des chemins PvP) — ✅ FAIT
+  (2026-07-19, +10 tests `test_deployment_per_model_commit.py`)**
+  ⚠️ Cet en-tête est resté « ❌ À FAIRE » jusqu'au 2026-07-19 alors que le fix était livré et
+  testé : il contredisait §0 ET le tableau des critères. Corrigé. L'analyse ci-dessous reste
+  valable comme historique de la rupture.
   **Rayon (vérifié par lecture, conséquence runtime démontrée côté gym seulement)** : le commit
   fautif est PARTAGÉ — (a) gym via l'action decoder ; (b) auto-déploiement P2 du tutoriel
   ([api_server.py:2255](../../services/api_server.py#L2255)) ; (c) drag mono-socle PvP encore
@@ -1364,7 +1407,7 @@ Spec à figer à ce moment-là, principes déjà actés :
 | T3 | `train.py --step --training-config x1_debug` dépasse la résolution walls/objectives sans FileNotFoundError |
 | T4 | Les 61 scénarios se chargent (`W40KEngine(scenario_file=...)` + reset, script de balayage) ; zéro clé legacy ; sort de training_save/ statué |
 | T5 | 10 épisodes aléatoires masqués terminés sur ≥3 scénarios × sièges p1/p2 ; zéro masque vide |
-| T6 | Run `--new` court complet + analyzer + replay OK ; ~~win-rate vs RandomBot en progression~~ → **critère REMPLACÉ le 2026-07-19, voir section 10.6** (win-rate PAR ROSTER contre un adversaire de holdout jamais vu à l'entraînement + absence de comportement absurde en partie humaine). L'ancien critère référençait un holdout de rosters qui n'existe plus. — ⏳ **PARTIEL (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép.). ✅ Suite verte (1293) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ✅ T6-c résolu : `_process_squad_action` journalise, analyzer tourne, `1.2 erreurs shooting = 0`. ✅ **T6-d résolu** : `squad_fight` = sélection FIGHT 12.04, machine V11 déroulée par `_fight_v11_gym_settle` (ordre 12.02→12.04→12.07 respecté, snapshot posé, double activation interdite). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (bruit) — mesuré AVANT T6-d, donc sur un moteur où la mêlée était fausse ; **à re-mesurer** avec phase `x1` + `bot_evaluation` holdout vs RandomBot. ❌ **Le run est de nouveau IMPOSSIBLE depuis le 2026-07-19** : T6-f a révélé T6-g/T6-h (cf. §0) — le critère T6 ne peut pas être réévalué avant ces 2 fixes |
+| T6 | Run `--new` court complet + analyzer + replay OK ; ~~win-rate vs RandomBot en progression~~ → **critère REMPLACÉ le 2026-07-19, voir section 10.6** (win-rate PAR ROSTER contre un adversaire de holdout jamais vu à l'entraînement + absence de comportement absurde en partie humaine). L'ancien critère référençait un holdout de rosters qui n'existe plus. — ⏳ **PARTIEL (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép.). ✅ Suite verte (1293) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ✅ T6-c résolu : `_process_squad_action` journalise, analyzer tourne, `1.2 erreurs shooting = 0`. ✅ **T6-d résolu** : `squad_fight` = sélection FIGHT 12.04, machine V11 déroulée par `_fight_v11_gym_settle` (ordre 12.02→12.04→12.07 respecté, snapshot posé, double activation interdite). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (bruit) — mesuré AVANT T6-d, donc sur un moteur où la mêlée était fausse ; **à re-mesurer** avec phase `x1` + `bot_evaluation` holdout vs RandomBot. ✅ **Le run TOURNE de nouveau depuis le 2026-07-19** : T6-g et T6-h sont livrés (cf. §0), x5_debug 8 workers 10/10 ép. exit 0. ❌ **Le critère T6 reste NON évaluable**, mais pour une raison DIFFÉRENTE et désormais isolée : **§10.4** — sur le chemin single-scenario, P2 joue ALÉATOIRE (`SelfPlayWrapper(frozen_model=None)`, `update_frozen_model` sans appelant). Tout win-rate mesuré aujourd'hui est du bruit. **C'est le prochain bloqueur.** |
 | T6-f | Après le commit de déploiement, AUCUNE figurine vivante à `(-1,-1)` et ancre `units_cache` = figurine d'index minimal, sur les 3 chemins (gym, ancre imposée tutoriel, drag) — ✅ **FAIT (2026-07-19)** |
 | T6-g | Toute cellule offerte par le masque de move est exécutable : sur N épisodes aléatoires, zéro `ValueError` « incohérence masque/exécution » — et un test dédié où une escouade dont le BLOC déborde (mur / autre escouade) ne voit PAS la cellule dans son masque — ✅ **FAIT (2026-07-19)** : `test_move_pool_block_erosion.py` (+6, mur/escouade/ER sous une SŒUR, débordement plateau, non-sur-filtrage, mono-fig) ; runs x5_debug 8 workers (10/10 ép.) et mono-env x1_debug, zéro occurrence |
 | T6-h | La translation de bloc préserve les distances internes pour TOUTES les parités de `dx` (test paramétré `dx` pair ET impair) — rouge sur le code actuel — ✅ **FAIT (2026-07-19)** : `test_rigid_plan_translation.py` (+10), rouge avant le fix aux seules parités impaires ; fix étendu à `translate_squad_to_destination` (écrivain du commit) et `preview_hidden_models_after_move` |
@@ -1492,8 +1535,22 @@ replay), suite complète verte ». Les ruptures T6-c→T6-h ont imposé des verr
   committé ; déterminisme + lecture pure de `build_validated_deployment_plan` ; invalidation de
   la mémo sur tampon périmé ; équivalence de l'empreinte pré-calculée aux DEUX parités de
   colonne (l'optimisation touche du code partagé PvP).
-- **À écrire avec T6-g / T6-h** : cf. critères d'acceptation (section 6). Pour T6-h, paramétrer
+- `test_rigid_plan_translation.py` (T6-h, +10) : distances internes du bloc préservées, paramétré
   sur `dx` PAIR **et** IMPAIR — un test qui n'exerce que `dx` pair passe sur le code buggé.
+- `test_move_pool_block_erosion.py` (T6-g, +6) : mur / autre escouade / ER ennemie sous une SŒUR
+  alors que l'ANCRE est légale, débordement de plateau, absence de sur-filtrage, court-circuit
+  mono-figurine. `game_state` fabriqué — d'où le test suivant.
+- `test_move_mask_is_executable.py` (T6-g/T6-h, +3) : l'invariant « masque ⊆ exécutable » sur le
+  VRAI moteur (3 seeds × 400 steps, ~21 700 cellules par run), avec le budget exact
+  qu'`execute_squad_move` appliquerait. Couvre les deux contraintes que l'érosion ne filtre pas
+  et qui n'étaient que RAISONNÉES invariantes par translation cube (`budget_per_model`,
+  `require_coherency`).
+  ⚠️ **Contre-épreuve obligatoire pour ce genre de test** : il a d'abord été « validé » par un
+  `git stash` qui, les fixes ayant été committés entre-temps, n'annulait que le refactor — le
+  test passait donc pour une mauvaise raison. La vraie épreuve est
+  `git checkout 3886e498 -- engine/phase_handlers/shared_utils.py` : le test devient ROUGE sur
+  les 3 seeds avec l'erreur d'origine (`squad=103 dest=(24,15) … incohérence masque/exécution`).
+  Un test de non-régression qu'on n'a pas vu échouer ne garde rien.
 
 ⚠️ **La suite n'est PAS verte et ne l'était pas avant ces fixes** : 9 échecs préexistants
 (4 banque de scénarios + 5 déploiement/terrain), tous dus à des rosters manquants ou non
@@ -1735,6 +1792,50 @@ décision produit, pas un oubli.
   370 fichiers) : ils précédaient l'implémentation des escouades, donc obsolètes. Les nouveaux
   sont à créer.
 
+**✅ FAIT le 2026-07-19 — agent `ArmageddonAgent`, scale `500pts`.** Les 2 rosters existent et
+le pipeline tourne de bout en bout sur eux (training + évaluation).
+
+| Quoi | Où |
+|---|---|
+| Rosters agent (training) | `config/agents/ArmageddonAgent/rosters/500pts/training/agent_training_roster_{space_marines,orks}.json` |
+| Rosters adversaire (training) | `config/agents/_p2_rosters/500pts/training/opponent_training_roster_{space_marines,orks}.json` — le dossier `500pts` n'existait pas côté P2 |
+| Scénario d'entraînement | `config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json` — `agent_roster_ref: "training_random"` (tirage 50/50, **pas de `agent_roster_seed`** : il figerait le tirage agent), `opponent_roster_ref` = liste explicite des 2 fichiers (sinon P2 tire dans tout `_p2_rosters`) |
+| Config agent | `ArmageddonAgent_training_config.json` (copie CoreAgent, `roster_pool_schedule.enabled = false` dans les **5** phases) + `ArmageddonAgent_rewards_config.json` (clé racine renommée : le moteur indexe le fichier par nom d'agent, cf. `_build_reward_configs_for_current_units`) |
+| Holdout (rosters + scénarios) | `rosters/500pts/holdout_regular/agent_holdout_regular_roster_*.json`, `_p2_rosters/500pts/holdout_regular/opponent_holdout_regular_roster_*.json`, `scenarios/holdout_regular/scenario_bot-0{1..4}.json` (les 4 matchups) |
+
+**Vérifié** : 16 resets → les 4 matchups sortent, plus aucun `roster_pool_schedule produced zero
+eligible training rosters` ; training `x5_debug` 8 workers **10/10 épisodes, exit 0** ;
+`--eval --test-episodes 2` **exit 0**, combined 0.69 sur 5 bots (le `.zip` du modèle vérifié
+intact par md5 — jamais réécrit).
+
+⚠️ **Dette assumée (décision utilisateur 2026-07-19) : le holdout est fait par DUPLICATION des
+2 rosters de training**, ce qui **contredit §10.6** (le holdout devait porter sur l'ADVERSAIRE,
+pas sur les rosters — ici l'agent est évalué sur les armées qu'il a vues à l'entraînement).
+Retenu comme point de départ, à raffiner plus tard. La voie propre est documentée : le résolveur
+accepte une ref à **split explicite** (`training/agent_training_roster_orks.json` depuis un
+scénario holdout — cf. commentaire « cross-split evaluation P1 holdout vs P2 training »,
+`_resolve_roster_ref`), ce qui permettrait de garder les mêmes armées et de ne faire porter le
+holdout que sur `TacticalBot`.
+
+⚠️ **Les points des unités Orks sont factices** : `VALUE = 70` pour TOUTES (Boyz, Gretchin,
+Warboss, WarTrakk, BigMek…). Le total « 3290 pts » du roster Orks n'a aucun sens, et le moteur
+ne valide PAS les points (`scale` n'est qu'un nom de dossier). Déséquilibre réel à surveiller :
+**47 figurines côté Orks contre 23 côté SM**.
+
+**Bug corrigé au passage (registry d'unités)** : `LandSpeederOnslaughtGatlingCannon.ts` et
+`LandSpeederHeavyFlamer.ts` déclaraient TOUS DEUX `export class LandSpeeder`. `UnitRegistry`
+scanne les `.ts` et indexe par nom de classe → les deux s'écrasaient, `HeavyFlamer` gagnait au
+hasard de l'ordre de parcours et la variante Onslaught était **inatteignable**. Classes
+renommées (+ `NAME`, `DISPLAY_NAME`) et les deux variantes ajoutées à `config/unit_registry.json`
+ET `frontend/public/config/unit_registry.json` (159 → 161). Reste ouvert : les deux pointent vers
+`/icons/LandSpeeder.webp`, absent de `frontend/public/icons/` (cosmétique frontend).
+
+**Défaut structurel constaté (non corrigé)** : au TOUT PREMIER run d'un agent neuf, l'évaluation
+finale échoue avec `VecNormalize enabled but stats not found: <agent>/vec_normalize.pkl` — le pkl
+est écrit à la FIN du run, l'éval tourne avant. CoreAgent ne le voyait jamais (pkl hérité de mai).
+Ne se reproduit pas aux runs suivants. Si on veut le traiter : ordonnancer la sauvegarde
+VecNormalize avant l'éval finale dans `train.py`.
+
 ### 10.3 Progression d'adversaires (l'axe qui porte la robustesse)
 
 Le risque dominant pour cette démo n'est PAS la composition des armées, c'est **l'écart entre
@@ -1767,6 +1868,13 @@ point de vue de l'apprentissage.
   `create_multi_agent_model` l'ignore totalement.
 
 ### 10.4 ⚠️ Écart CODE vs PLAN à corriger avant le premier run
+
+> **Statut 2026-07-19 : TOUJOURS OUVERT, et désormais SUBI.** Les trois faits ci-dessous ont été
+> re-vérifiés dans le code ce jour (aucun n'a bougé). Ce n'est plus théorique : les runs de
+> validation de T6-g/T6-h (`x5_debug`, n_envs=8, `training_benchmark`) **et** le run de mise en
+> service d'`ArmageddonAgent` (§10.2) sont tous passés par la ligne 2 du tableau — donc **contre
+> un P2 aléatoire**. Ces runs prouvent que le PIPELINE tourne (zéro exception, épisodes
+> complets) ; ils ne prouvent RIEN sur l'apprentissage. C'est le bloqueur n°1, cf. §0.
 
 **Toute la machinerie d'adversaires (bots pondérés + opponent_mix) n'est câblée que sur le
 chemin ROTATION.** L'adversaire réel du chemin single-scenario dépend de `n_envs` et du NOM du
