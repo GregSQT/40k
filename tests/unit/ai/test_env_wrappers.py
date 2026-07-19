@@ -241,9 +241,14 @@ def test_self_play_wrapper_get_frozen_model_action_fallback_paths(monkeypatch: p
     mask[3] = True
     mask[7] = True
     decoder_valid = _DummyActionDecoder(mask=mask, eligible=[{"id": "u1", "player": 2}])
-    wrapper_valid = SelfPlayWrapper(_DummyEngine(decoder=decoder_valid))
+    wrapper_valid = SelfPlayWrapper(_DummyEngine(decoder=decoder_valid), allow_random_opponent=True)
     monkeypatch.setattr("random.choice", lambda seq: seq[-1])
     assert wrapper_valid._get_frozen_model_action() == 7
+
+    # V11 §10.4 : sans opt-in explicite, pas de repli silencieux sur du hasard.
+    wrapper_refuses = SelfPlayWrapper(_DummyEngine(decoder=decoder_valid))
+    with pytest.raises(RuntimeError, match=r"adversaire d'entrainement valide"):
+        wrapper_refuses._get_frozen_model_action()
 
 
 def test_self_play_wrapper_get_frozen_model_action_uses_frozen_model_predict() -> None:

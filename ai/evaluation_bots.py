@@ -16,7 +16,9 @@ Tier 2 — Smart bots (focus-fire, advance, charge):
   7. AdaptiveBot - Adapts posture to game state (early rush / winning hold / losing push)
 
 Legacy:
-  8. TacticalBot - Full phase awareness (unused in training/eval)
+  8. TacticalBot - Full phase awareness. V11 §10.5 : HOLDOUT d'evaluation — utilise
+     UNIQUEMENT en evaluation, jamais dans bot_training.ratios, et exclu de tout
+     signal de selection de modele. Jamais valide runtime sur le pipeline squad.
 
 All bots implement all 4 phases: MOVE, SHOOT, CHARGE, FIGHT
 """

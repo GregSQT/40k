@@ -44,10 +44,19 @@ except ImportError:
     RandomBot = GreedyBot = DefensiveBot = ControlBot = None
     AggressiveSmartBot = DefensiveSmartBot = AdaptiveBot = None
 
+# V11 §10.5 : adversaires RESERVES a l'evaluation, jamais rencontres a l'entrainement.
+# Ils sont mesures et affiches, mais exclus de TOUT signal de selection de modele
+# (combined, worst_bot, gating, score robuste) : un holdout sur lequel la selection
+# optimise n'est plus un holdout.
+HOLDOUT_BOT_NAMES = frozenset(["tactical"])
+
 ALL_BOT_NAMES = frozenset([
     "random", "greedy", "defensive", "control",
     "aggressive_smart", "defensive_smart", "adaptive",
-])
+]) | HOLDOUT_BOT_NAMES
+
+# Bots qui pilotent la selection (gating, worst_bot, score robuste). Le holdout en est exclu.
+SELECTION_BOT_NAMES = ALL_BOT_NAMES - HOLDOUT_BOT_NAMES
 
 __all__ = [
     'LearningRateScheduleCallback',
@@ -1722,7 +1731,8 @@ class BotEvaluationCallback(BaseCallback):
             return True
 
         combined_score = float(require_key(results, "combined"))
-        bot_score_keys = [k for k in results if k in ALL_BOT_NAMES]
+        # V11 §10.5 : le holdout ne pilote pas le gating.
+        bot_score_keys = [k for k in results if k in SELECTION_BOT_NAMES]
         if not bot_score_keys:
             raise ValueError("No bot scores found in results")
         worst_bot_score = min(float(results[k]) for k in bot_score_keys)
@@ -2016,7 +2026,8 @@ class BotEvaluationCallback(BaseCallback):
     @staticmethod
     def _extract_robust_worst_cases(results: Dict[str, Any]) -> Dict[str, Optional[Any]]:
         """Extract worst bot/scenario identifiers and scores from evaluation results."""
-        bot_score_keys = [k for k in results if k in ALL_BOT_NAMES]
+        # V11 §10.5 : le holdout ne pilote pas la selection du meilleur modele.
+        bot_score_keys = [k for k in results if k in SELECTION_BOT_NAMES]
         if not bot_score_keys:
             raise ValueError("No bot scores found in results")
         bot_scores = {k: float(results[k]) for k in bot_score_keys}
@@ -2146,7 +2157,8 @@ class BotEvaluationCallback(BaseCallback):
             tau_b = float(self.model_gating_min_worst_bot)
             tau_h = float(self.model_gating_min_worst_scenario_combined)
 
-            robust_bot_keys = [k for k in results if k in ALL_BOT_NAMES]
+            # V11 §10.5 : le holdout n'entre pas dans le score robuste.
+            robust_bot_keys = [k for k in results if k in SELECTION_BOT_NAMES]
             worst_bot_score = min(float(results[k]) for k in robust_bot_keys)
             penalty_bot = self.robust_penalty_bot * max(0.0, tau_b - worst_bot_score) ** 2
 

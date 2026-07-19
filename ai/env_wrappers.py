@@ -1029,15 +1029,21 @@ class SelfPlayWrapper(gym.Wrapper):
     - Naturally targets ~50% win rate as learning agent improves
     """
 
-    def __init__(self, base_env, frozen_model=None, update_frequency=500):
+    def __init__(self, base_env, frozen_model=None, update_frequency=500,
+                 allow_random_opponent: bool = False):
         """
         Args:
             base_env: W40KEngine wrapped in ActionMasker
-            frozen_model: Initial frozen model for Player 2 (optional, will use random if None)
+            frozen_model: Frozen model piloting Player 2
             update_frequency: Episodes between frozen model updates
+            allow_random_opponent: Autorise EXPLICITEMENT un P2 aleatoire quand
+                `frozen_model is None`. Reserve aux tests. V11 §10.4 : c'etait
+                auparavant le comportement par defaut et SILENCIEUX — des runs entiers
+                se sont entraines contre du hasard sans qu'aucun log ne le signale.
         """
         super().__init__(base_env)
         self.frozen_model = frozen_model
+        self.allow_random_opponent = allow_random_opponent
         self.update_frequency = update_frequency
         self.episodes_since_update = 0
         self.total_episodes = 0
@@ -1237,10 +1243,8 @@ class SelfPlayWrapper(gym.Wrapper):
     def _get_frozen_model_action(self) -> int:
         """
         Get action from frozen model for Player 2.
-        Falls back to random valid action if no frozen model available.
         """
         if self.frozen_model is None:
-            # No frozen model yet - use random valid action
             action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(self.engine.game_state)
             if not eligible_units:
                 # Pool empty -> advance phase via WAIT/invalid action handling
@@ -1252,6 +1256,16 @@ class SelfPlayWrapper(gym.Wrapper):
                 raise RuntimeError(
                     "SelfPlayWrapper encountered an empty action mask for Player 2. "
                     "Engine must advance phase/turn instead of exposing empty masks."
+                )
+            if not self.allow_random_opponent:
+                # V11 §10.4 : pas de repli silencieux sur des actions aleatoires.
+                # `update_frozen_model` n'ayant aucun appelant, ce repli restait actif
+                # du premier au dernier episode et rendait tout win-rate insignifiant.
+                raise RuntimeError(
+                    "SelfPlayWrapper: aucun frozen_model pour Player 2. Un adversaire "
+                    "aleatoire n'est pas un adversaire d'entrainement valide (V11 §10.4). "
+                    "Fournir un frozen_model, utiliser BotControlledEnv (bot_training), "
+                    "ou passer allow_random_opponent=True explicitement (tests)."
                 )
             return random.choice(valid_actions)
 

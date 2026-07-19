@@ -374,7 +374,7 @@ def _create_eval_env(
     """
     from ai.evaluation_bots import (
         RandomBot, GreedyBot, DefensiveBot, ControlBot,
-        AggressiveSmartBot, DefensiveSmartBot, AdaptiveBot,
+        AggressiveSmartBot, DefensiveSmartBot, AdaptiveBot, TacticalBot,
     )
     from ai.training_utils import setup_imports
     from ai.env_wrappers import BotControlledEnv
@@ -391,11 +391,18 @@ def _create_eval_env(
         "aggressive_smart": AggressiveSmartBot,
         "defensive_smart": DefensiveSmartBot,
         "adaptive": AdaptiveBot,
+        # V11 §10.5 : holdout d'evaluation — JAMAIS dans bot_training.ratios.
+        "tactical": TacticalBot,
     }
     if bot_type == "random":
         bot = RandomBot()
     elif bot_type in BOT_CLASSES:
-        bot = BOT_CLASSES[bot_type](randomness=randomness_config.get(bot_type, 0.15))
+        if bot_type not in randomness_config:
+            raise KeyError(
+                f"randomness_config n'a pas d'entree pour le bot '{bot_type}' — renseigner "
+                "callback_params.bot_eval_randomness (V11 §10.5 : plus de defaut 0.15 silencieux)."
+            )
+        bot = BOT_CLASSES[bot_type](randomness=randomness_config[bot_type])
     else:
         raise ValueError(f"Unknown bot_type: {bot_type!r}. Valid: random, {', '.join(BOT_CLASSES)}")
 
@@ -877,13 +884,21 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     bot_eval_cfg = _load_bot_eval_params(config, base_agent_key, training_config_name)
     eval_weights = bot_eval_cfg["weights"]
     eval_randomness = bot_eval_cfg["randomness"]
-    randomness_config = {
-        "greedy": eval_randomness.get("greedy", 0.15),
-        "defensive": eval_randomness.get("defensive", 0.15),
-        "control": eval_randomness.get("control", 0.15),
-    }
+    # V11 §10.5 : ce dict ne recopiait que greedy/defensive/control — aggressive_smart,
+    # adaptive et tactical retombaient SILENCIEUSEMENT sur 0.15 a la construction du bot,
+    # rendant leur `bot_eval_randomness` de config lettre morte. On transmet la config
+    # entiere, et l'absence d'une entree est une erreur, pas un defaut.
+    randomness_config = dict(eval_randomness)
 
     active_bot_names = tuple(eval_weights.keys())
+
+    missing_randomness = [name for name in active_bot_names if name not in randomness_config]
+    if missing_randomness:
+        raise KeyError(
+            "callback_params.bot_eval_randomness manque une entree pour les bots ponderes "
+            f"en evaluation : {sorted(missing_randomness)}. Renseigner une valeur explicite "
+            "(aucun defaut n'est applique)."
+        )
 
     if scenario_list_override is not None:
         if not isinstance(scenario_list_override, list):

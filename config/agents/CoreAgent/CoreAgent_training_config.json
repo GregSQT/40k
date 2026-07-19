@@ -87,14 +87,16 @@
         "defensive": 0.23,
         "control": 0.23,
         "aggressive_smart": 0.15,
-        "adaptive": 0.16
+        "adaptive": 0.16,
+        "tactical": 0.0
       },
       "bot_eval_randomness": {
         "greedy": 0.05,
         "defensive": 0.05,
         "control": 0.05,
         "aggressive_smart": 0.05,
-        "adaptive": 0.05
+        "adaptive": 0.05,
+        "tactical": 0.05
       }
     },
     "roster_pool_schedule": {
@@ -281,14 +283,16 @@
         "defensive": 0.23,
         "control": 0.23,
         "aggressive_smart": 0.15,
-        "adaptive": 0.16
+        "adaptive": 0.16,
+        "tactical": 0.0
       },
       "bot_eval_randomness": {
         "greedy": 0.05,
         "defensive": 0.05,
         "control": 0.05,
         "aggressive_smart": 0.05,
-        "adaptive": 0.05
+        "adaptive": 0.05,
+        "tactical": 0.05
       }
     },
     "roster_pool_schedule": {
@@ -476,14 +480,16 @@
         "defensive": 0.23,
         "control": 0.23,
         "aggressive_smart": 0.15,
-        "adaptive": 0.16
+        "adaptive": 0.16,
+        "tactical": 0.0
       },
       "bot_eval_randomness": {
         "greedy": 0.05,
         "defensive": 0.05,
         "control": 0.05,
         "aggressive_smart": 0.05,
-        "adaptive": 0.05
+        "adaptive": 0.05,
+        "tactical": 0.05
       }
     },
     "roster_pool_schedule": {
@@ -637,14 +643,16 @@
         "defensive": 0.23,
         "control": 0.23,
         "aggressive_smart": 0.15,
-        "adaptive": 0.16
+        "adaptive": 0.16,
+        "tactical": 0.0
       },
       "bot_eval_randomness": {
         "greedy": 0.05,
         "defensive": 0.05,
         "control": 0.05,
         "aggressive_smart": 0.05,
-        "adaptive": 0.05
+        "adaptive": 0.05,
+        "tactical": 0.05
       }
     },
     "roster_pool_schedule": {
@@ -835,14 +843,16 @@
         "defensive": 0.23,
         "control": 0.23,
         "aggressive_smart": 0.15,
-        "adaptive": 0.16
+        "adaptive": 0.16,
+        "tactical": 0.0
       },
       "bot_eval_randomness": {
         "greedy": 0.05,
         "defensive": 0.05,
         "control": 0.05,
         "aggressive_smart": 0.05,
-        "adaptive": 0.05
+        "adaptive": 0.05,
+        "tactical": 0.05
       }
     },
     "roster_pool_schedule": {

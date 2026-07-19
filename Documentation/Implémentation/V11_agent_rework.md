@@ -81,7 +81,72 @@ cube (`budget_per_model`, `require_coherency`). **Rouge sur le code d'avant les 
 (`git checkout 3886e498 -- shared_utils.py` → `ValueError: execute_squad_move a échoué : squad=103
 dest=(24,15) … incohérence masque/exécution`, sur les 3 seeds), vert après.
 
-**🔴 PROCHAIN BLOQUEUR — §10.4 : l'agent s'entraîne contre du HASARD, en silence.**
+**✅ §10.4 RÉSOLU (2026-07-19) — l'adversaire d'entraînement est câblé sur TOUS les chemins.**
+La construction des adversaires est désormais mutualisée dans `build_training_opponents`
+(train.py), appelée par les TROIS chemins : `train_with_scenario_rotation`,
+`create_multi_agent_model` (single-scenario) et `create_model` (générique). Sur le chemin
+single-scenario, `use_bots` vient de la CONFIG (présence de `bot_training`) et non plus du NOM
+du fichier scénario — l'heuristique `"bot" in basename` faisait tomber tout autre scénario sur
+`SelfPlayWrapper(frozen_model=None)`. Le `GreedyBot(0.15)` codé en dur est remplacé par les bots
+pondérés de `bot_training.ratios`.
+Le repli silencieux est **fermé des deux côtés** : `SelfPlayWrapper` lève désormais si
+`frozen_model is None` sans `allow_random_opponent=True` (opt-in réservé aux tests), et
+`make_training_env` refuse `use_bots=False` **avant de forker les workers** — un worker
+vectorisé ne peut pas recevoir de frozen_model, le self-play vectorisé passe par
+`BotControlledEnv` + `opponent_mix`.
+**Vérifié par un vrai run** : `x5_debug` sur `training_benchmark` affiche désormais
+`🤖 Bot training ratios: 10% Random, 20% Greedy, 20% Defensive, 20% Control, 15% Aggressive
+Smart, 15% Adaptive` + `seat mode: random`, 8 workers, exit 0. +5 tests
+(`test_training_opponent_wiring.py`) + 1 test de refus dans `test_env_wrappers.py`.
+
+**✅ §10.5 FAIT (2026-07-19) — holdout d'évaluation `TacticalBot`.** Câblé dans la factory
+d'éval (`bot_evaluation.BOT_CLASSES`), dans `ALL_BOT_NAMES` (training_callbacks — sans quoi son
+score n'était ni affiché ni loggé) et dans `bot_eval_weights`/`bot_eval_randomness` des 5 phases
+des 2 agents. Deux scalaires TensorBoard : `bot_eval/vs_tactical` et
+`0_critical/c_holdout_tactical`.
+
+⚠️ **Un holdout doit être MESURÉ mais ne doit piloter AUCUN signal de sélection** — sinon la
+sélection de modèle optimise dessus et ce n'est plus un holdout. Deux verrous, tous deux
+nécessaires (le premier seul ne suffit pas) :
+- **Poids nul** : `tactical: 0.0` dans `bot_eval_weights` (les 5 autres gardent leurs poids
+  d'origine, somme 1.0). `combined` est un critère de gating et pilote le choix du BEST.
+- **Exclusion par NOM** : `worst_bot_score`, le gating et le score robuste itèrent sur des
+  ensembles de noms de bots, pas sur les poids — un poids nul ne les protège pas, et comme
+  `TacticalBot` est le bot le plus fort il serait presque toujours le `min`, donc dominerait le
+  gate. D'où `HOLDOUT_BOT_NAMES` / `SELECTION_BOT_NAMES = ALL_BOT_NAMES - HOLDOUT_BOT_NAMES`
+  (training_callbacks), utilisé aux 3 sites de sélection ; `ALL_BOT_NAMES` reste pour
+  l'affichage et le log. `ALL_BOT_KEYS` (metrics_tracker) exclut aussi le holdout, car il
+  alimente `0_critical/b_worst_bot_score`.
+
+**Dette corrigée au passage** : `randomness_config` (bot_evaluation) ne recopiait que
+`greedy`/`defensive`/`control` — `aggressive_smart`, `adaptive` et `tactical` retombaient
+SILENCIEUSEMENT sur `randomness=0.15`, rendant leur `bot_eval_randomness` de config lettre
+morte. La config est désormais transmise entière et l'absence d'une entrée est une **erreur
+explicite** aux deux niveaux (planification et construction du bot), sans défaut.
+
++9 tests (`test_eval_holdout_opponent.py`) : intersection vide `bot_training.ratios` ∩ holdout,
+présence en `bot_eval_weights`, somme à 1.0, **poids de holdout == 0.0**, **exclusion des
+signaux de sélection**, **absence de défaut de randomness**.
+Run de vérification : `vs TacticalBot: 0.00 (0/1 wins)` s'affiche désormais et aucun `KeyError`
+de randomness n'est levé — le `0.00` est la dette rosters, pas le câblage.
+
+⚠️ **`TacticalBot` n'a jamais été validé runtime sur le pipeline squad** : son docstring le
+disait « unused in training/eval » (désormais périmé) et il n'a pas joué un seul épisode
+complet, le run échouant sur la dette rosters avant. Les autres bots ont été maintenus au fil
+des refactors squad, celui-ci non. **Ne pas considérer §10.5 comme validé runtime** tant que
+les rosters §10.2 n'existent pas.
+
+**Suite après ces deux tranches** : `9 failed, 1451 passed` — **mêmes 9 échecs préexistants**
+(dette rosters), zéro régression.
+
+**🔴 PROCHAIN BLOQUEUR — dette rosters (§10.2).** C'est maintenant le seul obstacle à une mesure
+de win-rate : les 9 échecs de suite, l'échec de `--scenario bot`, et les `0.00` de l'évaluation
+viennent tous de `roster_pool_schedule produced zero eligible training rosters` (candidates=1).
+La réparation est la création des 2 rosters SM/Orks + la mise à jour des scénarios training qui
+les référencent, PAS la restauration des rosters supprimés volontairement (`43eae95a`).
+Reste aussi à archiver `holdout_regular/` + `holdout_hard/` dans `_archive_pre_v11/` (§10.5).
+
+**Historique — l'ancien libellé du bloqueur §10.4 :**
 Re-vérifié dans le code le 2026-07-19 : `update_frozen_model` ([env_wrappers.py:1272](../../ai/env_wrappers.py#L1272))
 n'a **aucun appelant** hors son propre test ; le chemin single-scenario construit
 `SelfPlayWrapper(masked_env, frozen_model=None, ...)` ([train.py:1537](../../ai/train.py#L1537), [1871](../../ai/train.py#L1871)) ;
@@ -1869,7 +1934,12 @@ point de vue de l'apprentissage.
 
 ### 10.4 ⚠️ Écart CODE vs PLAN à corriger avant le premier run
 
-> **Statut 2026-07-19 : TOUJOURS OUVERT, et désormais SUBI.** Les trois faits ci-dessous ont été
+> **Statut 2026-07-19 : ✅ RÉSOLU** — construction d'adversaires mutualisée dans
+> `build_training_opponents`, `use_bots` dérivé de la config (`bot_training`) et non du nom de
+> fichier, repli aléatoire refusé explicitement par `SelfPlayWrapper` et `make_training_env`.
+> Détail et vérification en §0. Le constat ci-dessous est conservé comme historique.
+>
+> **Constat d'origine — les trois faits ci-dessous ont été
 > re-vérifiés dans le code ce jour (aucun n'a bougé). Ce n'est plus théorique : les runs de
 > validation de T6-g/T6-h (`x5_debug`, n_envs=8, `training_benchmark`) **et** le run de mise en
 > service d'`ArmageddonAgent` (§10.2) sont tous passés par la ligne 2 du tableau — donc **contre
@@ -1909,7 +1979,12 @@ dans `make_training_env`, qui accepte DÉJÀ ces paramètres : seul l'appel de
 
 ### 10.5 Évaluation : le holdout porte sur l'ADVERSAIRE, pas sur les rosters
 
-**Constat** : les bots d'évaluation viennent de `callback_params.bot_eval_weights`
+> **Statut 2026-07-19 : ✅ CÂBLÉ** — `TacticalBot` est le holdout, à poids nul et exclu de tout
+> signal de sélection ; le défaut silencieux de `randomness` est supprimé. Détail en §0.
+> ⚠️ **Non validé runtime** (dette rosters §10.2) et l'archivage des scénarios holdout reste à
+> faire (voir plus bas). Le constat ci-dessous décrit l'état d'AVANT.
+
+**Constat (historique)** : les bots d'évaluation viennent de `callback_params.bot_eval_weights`
 (`_load_bot_eval_params`, bot_evaluation.py ~L168 ; itération sur `eval_weights.keys()` ~L886).
 Config actuelle, identique dans les 5 phases : `{greedy, defensive, control, aggressive_smart,
 adaptive}` — un **sous-ensemble strict des bots d'entraînement** (`bot_training.ratios` = les

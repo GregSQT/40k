@@ -1471,11 +1471,19 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     else:
         n_envs = _resolve_n_envs_for_step_logging(n_envs)
     
+    # V11 §10.4 : meme construction d'adversaires que les chemins rotation et agent.
+    opponents = build_training_opponents(
+        training_config,
+        "bot_training" in training_config,
+        training_config["total_episodes"] if "total_episodes" in training_config else None,
+        print,
+    )
+
     base_env = None
     if n_envs > 1:
         # ✓ CHANGE 3: Create vectorized environments for parallel training
         print(f"🚀 Creating {n_envs} parallel environments for accelerated training...")
-        
+
         # Disable step logger for vectorized training (avoid file conflicts)
         vec_envs = SubprocVecEnv([
             make_training_env(
@@ -1486,7 +1494,12 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
                 controlled_agent_key=controlled_agent_key,
                 unit_registry=unit_registry,
                 step_logger_enabled=False,  # Disabled for parallel envs
-                debug_mode=args.debug
+                debug_mode=args.debug,
+                use_bots=opponents["use_bots"],
+                training_bots=opponents["training_bots"],
+                agent_seat_mode=opponents["agent_seat_mode"],
+                global_seed=opponents["agent_seat_seed"],
+                opponent_mix_config=opponents["opponent_mix_config"],
             )
             for i in range(n_envs)
         ])
@@ -1531,13 +1544,21 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
         
         masked_env = ActionMasker(base_env, mask_fn)
 
-        # CRITICAL: Wrap with SelfPlayWrapper for proper self-play training
-        # This ensures Player 1 uses a frozen model copy, not the learning agent
-        # Without this, both P0 and P1 actions go into SB3's buffer with P1 getting 0.0 rewards
-        selfplay_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
-
-        # SB3 Required: Monitor wrapped environment
-        env = Monitor(selfplay_env)
+        if opponents["use_bots"]:
+            # V11 §10.4 : bots ponderes de bot_training, comme le chemin rotation.
+            bot_env = BotControlledEnv(
+                masked_env,
+                bots=opponents["training_bots"],
+                unit_registry=unit_registry,
+                agent_seat_mode=require_present(opponents["agent_seat_mode"], "agent_seat_mode"),
+                global_seed=opponents["agent_seat_seed"],
+            )
+            env = Monitor(bot_env)
+        else:
+            # Pas de bot_training : self-play. frozen_model=None est refuse par
+            # SelfPlayWrapper (V11 §10.4).
+            selfplay_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
+            env = Monitor(selfplay_env)
 
     # VecNormalize: observations and rewards normalization (optional, configurable)
     vec_norm_cfg = training_config.get("vec_normalize", {})  # get allowed: optional config
@@ -1752,12 +1773,18 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     scenario_file = get_agent_scenario_file(cfg, agent_key if agent_specific_mode else None, training_config_name, scenario_override)
     print(f"✅ Using scenario: {scenario_file}")
 
+    # V11 §10.4 : l'adversaire vient de la CONFIG (bot_training), plus du nom du fichier
+    # scenario. L'ancienne heuristique ("bot" dans le nom) faisait tomber tout scenario
+    # nomme autrement sur SelfPlayWrapper(frozen_model=None) — donc un P2 ALEATOIRE
+    # permanent, silencieux.
+    use_bots = "bot_training" in training_config
+
     # Meme budget par tour que le chemin rotation : setup_callbacks / train_model
     # convertissent des episodes en timesteps sans moteur sous la main.
     resolve_turn_step_limit(
         [scenario_file],
         training_config,
-        use_bots="bot" in os.path.basename(scenario_file).lower(),
+        use_bots=use_bots,
         log=print,
     )
 
@@ -1775,10 +1802,18 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
 
     n_envs = _resolve_n_envs_for_step_logging(n_envs)
 
+    # V11 §10.4 : meme construction d'adversaires que le chemin rotation.
+    opponents = build_training_opponents(
+        training_config,
+        use_bots,
+        training_config["total_episodes"] if "total_episodes" in training_config else None,
+        print,
+    )
+
     if n_envs > 1:
         # ✓ CHANGE 8: Create vectorized environments for parallel training
         print(f"🚀 Creating {n_envs} parallel environments for accelerated training...")
-        
+
         vec_envs = SubprocVecEnv([
             make_training_env(
                 rank=i,
@@ -1788,7 +1823,12 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
                 controlled_agent_key=effective_agent_key,
                 unit_registry=unit_registry,
                 step_logger_enabled=False,
-                debug_mode=debug_mode
+                debug_mode=debug_mode,
+                use_bots=opponents["use_bots"],
+                training_bots=opponents["training_bots"],
+                agent_seat_mode=opponents["agent_seat_mode"],
+                global_seed=opponents["agent_seat_seed"],
+                opponent_mix_config=opponents["opponent_mix_config"],
             )
             for i in range(n_envs)
         ])
@@ -1822,52 +1862,21 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
 
         masked_env = ActionMasker(base_env, mask_fn)
 
-        # Check if scenario name contains "bot" to use BotControlledEnv
-        scenario_name = os.path.basename(scenario_file) if scenario_file else ""
-        use_bot_env = "bot" in scenario_name.lower()
-
-        if use_bot_env and EVALUATION_BOTS_AVAILABLE:
-            agent_seat_mode = require_key(training_config, "agent_seat_mode")
-            if agent_seat_mode not in {"p1", "p2", "random"}:
-                raise ValueError(
-                    f"training_config.agent_seat_mode must be one of 'p1', 'p2', 'random' "
-                    f"(got {agent_seat_mode!r})"
-                )
-            agent_seat_seed = None
-            if agent_seat_mode == "random":
-                if "agent_seat_seed" in training_config:
-                    agent_seat_seed_raw = require_key(training_config, "agent_seat_seed")
-                elif "seed" in training_config:
-                    agent_seat_seed_raw = require_key(training_config, "seed")
-                else:
-                    raise KeyError(
-                        "agent_seat_mode='random' requires a seed key in training config. "
-                        "Provide 'agent_seat_seed' (preferred) or existing 'seed'."
-                    )
-                if not isinstance(agent_seat_seed_raw, int) or isinstance(agent_seat_seed_raw, bool):
-                    raise TypeError(
-                        "Seat seed must be an integer when agent_seat_mode='random' "
-                        "(from 'agent_seat_seed' or 'seed')."
-                    )
-                agent_seat_seed = int(agent_seat_seed_raw)
-            # Use BotControlledEnv with GreedyBot for bot scenarios
-            from ai.evaluation_bots import GreedyBot
-            training_bot = GreedyBot(randomness=0.15)
+        # V11 §10.4 : bots PONDERES issus de bot_training (comme le chemin rotation),
+        # plus un GreedyBot(0.15) code en dur declenche par le nom du fichier.
+        if opponents["use_bots"]:
             bot_env = BotControlledEnv(
                 masked_env,
-                training_bot,
-                unit_registry,
-                agent_seat_mode=require_present(agent_seat_mode, "agent_seat_mode"),
-                global_seed=agent_seat_seed,
+                bots=opponents["training_bots"],
+                unit_registry=unit_registry,
+                agent_seat_mode=require_present(opponents["agent_seat_mode"], "agent_seat_mode"),
+                global_seed=opponents["agent_seat_seed"],
             )
             env = Monitor(bot_env)
-            print(
-                f"🤖 Using GreedyBot (randomness=0.15) with agent_seat_mode={agent_seat_mode!r} "
-                f"(detected 'bot' in scenario name)"
-            )
         else:
-            # CRITICAL: Wrap with SelfPlayWrapper for proper self-play training
-            # Without this, P1 never takes actions and the game is broken
+            # Pas de bot_training en config : self-play. `frozen_model=None` est REFUSE
+            # par SelfPlayWrapper (cf. §10.4) — un P2 aleatoire silencieux n'est pas un
+            # adversaire d'entrainement valide.
             selfplay_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
             env = Monitor(selfplay_env)
 
@@ -2176,6 +2185,145 @@ def resolve_turn_step_limit(
     return max_steps
 
 
+def build_training_opponents(
+    training_config: Dict[str, Any],
+    use_bots: bool,
+    total_episodes: Optional[int],
+    log: Callable[[str], None],
+) -> Dict[str, Any]:
+    """Construction de l'adversaire d'entrainement — CHEMIN UNIQUE (V11 §10.4).
+
+    Historiquement seul `train_with_scenario_rotation` construisait les bots ponderes
+    et `opponent_mix` ; le chemin single-scenario tombait sur
+    `SelfPlayWrapper(frozen_model=None)`, dont le frozen n'etait JAMAIS mis a jour :
+    P2 jouait des actions ALEATOIRES du premier au dernier episode, sans qu'aucun log
+    ne le signale. Les deux chemins passent desormais par cette fonction.
+
+    Retourne les parametres a transmettre a `make_training_env` / `BotControlledEnv`.
+    """
+    opponents: Dict[str, Any] = {
+        "use_bots": use_bots,
+        "training_bots": None,
+        "agent_seat_mode": None,
+        "agent_seat_seed": None,
+        "opponent_mix_config": None,
+        "self_play_snapshot_path": None,
+        "self_play_snapshot_update_freq": None,
+        "self_play_snapshot_enabled": False,
+    }
+    if not use_bots:
+        return opponents
+
+    if not EVALUATION_BOTS_AVAILABLE:
+        raise ImportError("Evaluation bots not available but use_bots=True")
+
+    opponents["training_bots"] = _build_training_bots_from_config(training_config)
+    agent_seat_mode = require_key(training_config, "agent_seat_mode")
+    if agent_seat_mode not in {"p1", "p2", "random"}:
+        raise ValueError(
+            f"training_config.agent_seat_mode must be one of 'p1', 'p2', 'random' "
+            f"(got {agent_seat_mode!r})"
+        )
+    opponents["agent_seat_mode"] = agent_seat_mode
+    if agent_seat_mode == "random":
+        if "agent_seat_seed" in training_config:
+            agent_seat_seed_raw = require_key(training_config, "agent_seat_seed")
+        elif "seed" in training_config:
+            agent_seat_seed_raw = require_key(training_config, "seed")
+        else:
+            raise KeyError(
+                "agent_seat_mode='random' requires a seed key in training config. "
+                "Provide 'agent_seat_seed' (preferred) or existing 'seed'."
+            )
+        if not isinstance(agent_seat_seed_raw, int) or isinstance(agent_seat_seed_raw, bool):
+            raise TypeError(
+                "Seat seed must be an integer when agent_seat_mode='random' "
+                "(from 'agent_seat_seed' or 'seed')."
+            )
+        opponents["agent_seat_seed"] = int(agent_seat_seed_raw)
+
+    ratios = require_key(training_config, "bot_training").get("ratios", {"random": 0.2, "greedy": 0.4, "defensive": 0.4})
+    ratio_parts = [f"{v*100:.0f}% {k.replace('_', ' ').title()}" for k, v in ratios.items() if v > 0]
+    log(f"🤖 Bot training ratios: {', '.join(ratio_parts)}")
+    log(f"🤖 Agent seat mode: {agent_seat_mode}")
+
+    if "opponent_mix" not in training_config:
+        return opponents
+
+    mix_cfg = require_key(training_config, "opponent_mix")
+    if not isinstance(mix_cfg, dict):
+        raise TypeError("training_config.opponent_mix must be a mapping when provided.")
+    if not bool(require_key(mix_cfg, "enabled")):
+        return opponents
+
+    self_play_ratio_start = float(require_key(mix_cfg, "self_play_ratio_start"))
+    self_play_ratio_end = float(require_key(mix_cfg, "self_play_ratio_end"))
+    warmup_episodes = int(require_key(mix_cfg, "warmup_episodes"))
+    snapshot_path = str(require_key(mix_cfg, "snapshot_model_path"))
+    snapshot_refresh_episodes = int(require_key(mix_cfg, "snapshot_update_freq_episodes"))
+    snapshot_device = str(require_key(mix_cfg, "self_play_snapshot_device")).strip().lower()
+    self_play_deterministic = bool(require_key(mix_cfg, "self_play_deterministic"))
+
+    if not (0.0 <= self_play_ratio_start <= 1.0):
+        raise ValueError(
+            "opponent_mix.self_play_ratio_start must be in [0,1] "
+            f"(got {self_play_ratio_start})"
+        )
+    if not (0.0 <= self_play_ratio_end <= 1.0):
+        raise ValueError(
+            "opponent_mix.self_play_ratio_end must be in [0,1] "
+            f"(got {self_play_ratio_end})"
+        )
+    if warmup_episodes < 0:
+        raise ValueError(
+            f"opponent_mix.warmup_episodes must be >= 0 (got {warmup_episodes})"
+        )
+    if not snapshot_path.strip():
+        raise ValueError("opponent_mix.snapshot_model_path must be a non-empty string.")
+    if snapshot_refresh_episodes <= 0:
+        raise ValueError(
+            "opponent_mix.snapshot_update_freq_episodes must be > 0 "
+            f"(got {snapshot_refresh_episodes})"
+        )
+    if snapshot_device not in {"cpu", "auto"}:
+        raise ValueError(
+            "opponent_mix.self_play_snapshot_device must be either 'cpu' or 'auto' "
+            f"(got {snapshot_device!r})"
+        )
+    snapshot_dir = os.path.dirname(snapshot_path)
+    if not snapshot_dir:
+        raise ValueError(
+            f"opponent_mix.snapshot_model_path must include a directory (got {snapshot_path!r})"
+        )
+    os.makedirs(snapshot_dir, exist_ok=True)
+    if total_episodes is None:
+        raise ValueError(
+            "opponent_mix.enabled=True requires a known total_episodes to schedule the "
+            "self-play ratio."
+        )
+
+    opponents["opponent_mix_config"] = {
+        "enabled": True,
+        "self_play_ratio_start": self_play_ratio_start,
+        "self_play_ratio_end": self_play_ratio_end,
+        "warmup_episodes": warmup_episodes,
+        "total_episodes": int(total_episodes),
+        "snapshot_model_path": snapshot_path,
+        "snapshot_refresh_episodes": snapshot_refresh_episodes,
+        "snapshot_device": snapshot_device,
+        "deterministic": self_play_deterministic,
+    }
+    opponents["self_play_snapshot_enabled"] = True
+    opponents["self_play_snapshot_path"] = snapshot_path
+    opponents["self_play_snapshot_update_freq"] = snapshot_refresh_episodes
+    log(
+        "🤝 Opponent mix enabled: "
+        f"self-play ratio {self_play_ratio_start:.2f}->{self_play_ratio_end:.2f} "
+        f"(warmup={warmup_episodes} ep, snapshot every {snapshot_refresh_episodes} ep)"
+    )
+    return opponents
+
+
 def train_with_scenario_rotation(config, agent_key, training_config_name, rewards_config_name,
                                  scenario_list, total_episodes,
                                  new_model=False, append_training=False, use_bots=False, debug_mode=False,
@@ -2323,123 +2471,15 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     effective_agent_key = rewards_config_name if rewards_config_name else agent_key
     
     # Create bots for bot training mode (random selection per episode)
-    training_bots = None
-    agent_seat_mode = None
-    agent_seat_seed = None
-    opponent_mix_config = None
-    self_play_snapshot_path = None
-    self_play_snapshot_update_freq = None
-    self_play_snapshot_enabled = False
-    if use_bots:
-        if EVALUATION_BOTS_AVAILABLE:
-            training_bots = _build_training_bots_from_config(training_config)
-            agent_seat_mode = require_key(training_config, "agent_seat_mode")
-            if agent_seat_mode not in {"p1", "p2", "random"}:
-                raise ValueError(
-                    f"training_config.agent_seat_mode must be one of 'p1', 'p2', 'random' "
-                    f"(got {agent_seat_mode!r})"
-                )
-            if agent_seat_mode == "random":
-                if "agent_seat_seed" in training_config:
-                    agent_seat_seed_raw = require_key(training_config, "agent_seat_seed")
-                elif "seed" in training_config:
-                    agent_seat_seed_raw = require_key(training_config, "seed")
-                else:
-                    raise KeyError(
-                        "agent_seat_mode='random' requires a seed key in training config. "
-                        "Provide 'agent_seat_seed' (preferred) or existing 'seed'."
-                    )
-                if not isinstance(agent_seat_seed_raw, int) or isinstance(agent_seat_seed_raw, bool):
-                    raise TypeError(
-                        "Seat seed must be an integer when agent_seat_mode='random' "
-                        "(from 'agent_seat_seed' or 'seed')."
-                    )
-                agent_seat_seed = int(agent_seat_seed_raw)
-            ratios = require_key(training_config, "bot_training").get("ratios", {"random": 0.2, "greedy": 0.4, "defensive": 0.4})
-            ratio_parts = [f"{v*100:.0f}% {k.replace('_', ' ').title()}" for k, v in ratios.items() if v > 0]
-            chunk_log(f"🤖 Bot training ratios: {', '.join(ratio_parts)}")
-            chunk_log(f"🤖 Agent seat mode: {agent_seat_mode}")
-            if "opponent_mix" in training_config:
-                mix_cfg = require_key(training_config, "opponent_mix")
-                if not isinstance(mix_cfg, dict):
-                    raise TypeError(
-                        "training_config.opponent_mix must be a mapping when provided."
-                    )
-                mix_enabled = bool(require_key(mix_cfg, "enabled"))
-                if mix_enabled:
-                    self_play_ratio_start_raw = require_key(mix_cfg, "self_play_ratio_start")
-                    self_play_ratio_end_raw = require_key(mix_cfg, "self_play_ratio_end")
-                    warmup_raw = require_key(mix_cfg, "warmup_episodes")
-                    snapshot_path_raw = require_key(mix_cfg, "snapshot_model_path")
-                    snapshot_refresh_raw = require_key(mix_cfg, "snapshot_update_freq_episodes")
-                    snapshot_device_raw = require_key(mix_cfg, "self_play_snapshot_device")
-                    deterministic_raw = require_key(mix_cfg, "self_play_deterministic")
-
-                    self_play_ratio_start = float(self_play_ratio_start_raw)
-                    self_play_ratio_end = float(self_play_ratio_end_raw)
-                    warmup_episodes = int(warmup_raw)
-                    snapshot_path = str(snapshot_path_raw)
-                    snapshot_refresh_episodes = int(snapshot_refresh_raw)
-                    snapshot_device = str(snapshot_device_raw).strip().lower()
-                    self_play_deterministic = bool(deterministic_raw)
-
-                    if not (0.0 <= self_play_ratio_start <= 1.0):
-                        raise ValueError(
-                            "opponent_mix.self_play_ratio_start must be in [0,1] "
-                            f"(got {self_play_ratio_start})"
-                        )
-                    if not (0.0 <= self_play_ratio_end <= 1.0):
-                        raise ValueError(
-                            "opponent_mix.self_play_ratio_end must be in [0,1] "
-                            f"(got {self_play_ratio_end})"
-                        )
-                    if warmup_episodes < 0:
-                        raise ValueError(
-                            "opponent_mix.warmup_episodes must be >= 0 "
-                            f"(got {warmup_episodes})"
-                        )
-                    if not snapshot_path.strip():
-                        raise ValueError(
-                            "opponent_mix.snapshot_model_path must be a non-empty string."
-                        )
-                    if snapshot_refresh_episodes <= 0:
-                        raise ValueError(
-                            "opponent_mix.snapshot_update_freq_episodes must be > 0 "
-                            f"(got {snapshot_refresh_episodes})"
-                        )
-                    if snapshot_device not in {"cpu", "auto"}:
-                        raise ValueError(
-                            "opponent_mix.self_play_snapshot_device must be either 'cpu' or 'auto' "
-                            f"(got {snapshot_device!r})"
-                        )
-                    snapshot_dir = os.path.dirname(snapshot_path)
-                    if not snapshot_dir:
-                        raise ValueError(
-                            "opponent_mix.snapshot_model_path must include a directory "
-                            f"(got {snapshot_path!r})"
-                        )
-                    os.makedirs(snapshot_dir, exist_ok=True)
-                    opponent_mix_config = {
-                        "enabled": True,
-                        "self_play_ratio_start": self_play_ratio_start,
-                        "self_play_ratio_end": self_play_ratio_end,
-                        "warmup_episodes": warmup_episodes,
-                        "total_episodes": int(total_episodes),
-                        "snapshot_model_path": snapshot_path,
-                        "snapshot_refresh_episodes": snapshot_refresh_episodes,
-                        "snapshot_device": snapshot_device,
-                        "deterministic": self_play_deterministic,
-                    }
-                    self_play_snapshot_enabled = True
-                    self_play_snapshot_path = snapshot_path
-                    self_play_snapshot_update_freq = snapshot_refresh_episodes
-                    chunk_log(
-                        "🤝 Opponent mix enabled: "
-                        f"self-play ratio {self_play_ratio_start:.2f}->{self_play_ratio_end:.2f} "
-                        f"(warmup={warmup_episodes} ep, snapshot every {snapshot_refresh_episodes} ep)"
-                    )
-        else:
-            raise ImportError("Evaluation bots not available but use_bots=True")
+    # V11 §10.4 : construction MUTUALISEE avec le chemin single-scenario.
+    _opponents = build_training_opponents(training_config, use_bots, total_episodes, chunk_log)
+    training_bots = _opponents["training_bots"]
+    agent_seat_mode = _opponents["agent_seat_mode"]
+    agent_seat_seed = _opponents["agent_seat_seed"]
+    opponent_mix_config = _opponents["opponent_mix_config"]
+    self_play_snapshot_path = _opponents["self_play_snapshot_path"]
+    self_play_snapshot_update_freq = _opponents["self_play_snapshot_update_freq"]
+    self_play_snapshot_enabled = _opponents["self_play_snapshot_enabled"]
 
     # Branch: n_envs > 1 uses SubprocVecEnv for parallel training
     if n_envs > 1:
@@ -3004,6 +3044,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                         "aggressive_smart",
                         "defensive_smart",
                         "adaptive",
+                        "tactical",  # V11 §10.5 : holdout d'evaluation
                     )
                     available_bot_keys = [key for key in known_bot_keys if key in bot_results]
                     if len(available_bot_keys) == 0:

@@ -1177,6 +1177,13 @@ class W40KMetricsTracker:
             self.writer.add_scalar('bot_eval/vs_defensive_smart', bot_results['defensive_smart'], x)
         if 'adaptive' in bot_results:
             self.writer.add_scalar('bot_eval/vs_adaptive', bot_results['adaptive'], x)
+        # V11 §10.5 : holdout d'evaluation, jamais rencontre a l'entrainement — c'est
+        # LE win-rate qui mesure la competence et non l'exploitation apprise (§10.6).
+        if 'tactical' in bot_results:
+            self.writer.add_scalar('bot_eval/vs_tactical', bot_results['tactical'], x)
+            self.writer.add_scalar('0_critical/c_holdout_tactical', bot_results['tactical'], x)
+        # V11 §10.5 : 'tactical' est le holdout — mesure et logge ci-dessus, mais EXCLU de
+        # worst_bot_score, qui alimente 0_critical/b_worst_bot_score et suit la selection.
         ALL_BOT_KEYS = ('random', 'greedy', 'defensive', 'control', 'aggressive_smart', 'defensive_smart', 'adaptive')
         TIER2_BOT_KEYS = ('aggressive_smart', 'defensive_smart', 'adaptive')
         tier2_scores = [bot_results[k] for k in TIER2_BOT_KEYS if k in bot_results]

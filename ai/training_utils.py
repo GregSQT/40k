@@ -165,6 +165,18 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
     Returns:
         Callable that creates and returns a wrapped environment instance
     """
+    # V11 §10.4 : un worker vectorise ne peut PAS recevoir de frozen_model (pas de
+    # partage inter-processus) ; `SelfPlayWrapper(frozen_model=None)` y jouait donc des
+    # actions aleatoires en permanence, silencieusement. Le self-play vectorise passe par
+    # BotControlledEnv + opponent_mix (snapshot relu sur disque), pas par ce wrapper.
+    # Verifie AVANT de forker les workers, pas dans _init.
+    if not (use_bots and training_bots):
+        raise ValueError(
+            "make_training_env requiert use_bots=True et training_bots non vide : "
+            "un environnement vectorise n'a pas d'adversaire de self-play utilisable "
+            "(V11 §10.4). Configurer 'bot_training' dans la config d'entrainement."
+        )
+
     def _init():
         # Import environment (inside function to avoid import issues)
         from engine.w40k_core import W40KEngine
@@ -203,46 +215,43 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
         
         masked_env = ActionMasker(base_env, mask_fn)
 
-        # Bot training or self-play
-        if use_bots and training_bots:
-            if agent_seat_mode is None:
-                raise KeyError("agent_seat_mode is required when use_bots=True")
-            mix_enabled = bool(opponent_mix_config is not None and opponent_mix_config.get("enabled") is True)
-            wrapped_env = BotControlledEnv(
-                masked_env,
-                bots=training_bots,
-                unit_registry=unit_registry,
-                agent_seat_mode=agent_seat_mode,
-                global_seed=global_seed,
-                env_rank=rank,
-                self_play_opponent_enabled=mix_enabled,
-                self_play_ratio_start=(
-                    float(opponent_mix_config["self_play_ratio_start"]) if mix_enabled and opponent_mix_config is not None else None
-                ),
-                self_play_ratio_end=(
-                    float(opponent_mix_config["self_play_ratio_end"]) if mix_enabled and opponent_mix_config is not None else None
-                ),
-                self_play_total_episodes=(
-                    int(opponent_mix_config["total_episodes"]) if mix_enabled and opponent_mix_config is not None else None
-                ),
-                self_play_warmup_episodes=(
-                    int(opponent_mix_config["warmup_episodes"]) if mix_enabled and opponent_mix_config is not None else None
-                ),
-                self_play_snapshot_path=(
-                    str(opponent_mix_config["snapshot_model_path"]) if mix_enabled and opponent_mix_config is not None else None
-                ),
-                self_play_snapshot_refresh_episodes=(
-                    int(opponent_mix_config["snapshot_refresh_episodes"]) if mix_enabled and opponent_mix_config is not None else None
-                ),
-                self_play_snapshot_device=(
-                    str(opponent_mix_config["snapshot_device"]) if mix_enabled and opponent_mix_config is not None else None
-                ),
-                self_play_deterministic=(
-                    bool(opponent_mix_config["deterministic"]) if mix_enabled and opponent_mix_config is not None else False
-                ),
-            )
-        else:
-            wrapped_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
+        # Bot training (le self-play vectorise passe par opponent_mix, cf. garde ci-dessus)
+        if agent_seat_mode is None:
+            raise KeyError("agent_seat_mode is required when use_bots=True")
+        mix_enabled = bool(opponent_mix_config is not None and opponent_mix_config.get("enabled") is True)
+        wrapped_env = BotControlledEnv(
+            masked_env,
+            bots=training_bots,
+            unit_registry=unit_registry,
+            agent_seat_mode=agent_seat_mode,
+            global_seed=global_seed,
+            env_rank=rank,
+            self_play_opponent_enabled=mix_enabled,
+            self_play_ratio_start=(
+                float(opponent_mix_config["self_play_ratio_start"]) if mix_enabled and opponent_mix_config is not None else None
+            ),
+            self_play_ratio_end=(
+                float(opponent_mix_config["self_play_ratio_end"]) if mix_enabled and opponent_mix_config is not None else None
+            ),
+            self_play_total_episodes=(
+                int(opponent_mix_config["total_episodes"]) if mix_enabled and opponent_mix_config is not None else None
+            ),
+            self_play_warmup_episodes=(
+                int(opponent_mix_config["warmup_episodes"]) if mix_enabled and opponent_mix_config is not None else None
+            ),
+            self_play_snapshot_path=(
+                str(opponent_mix_config["snapshot_model_path"]) if mix_enabled and opponent_mix_config is not None else None
+            ),
+            self_play_snapshot_refresh_episodes=(
+                int(opponent_mix_config["snapshot_refresh_episodes"]) if mix_enabled and opponent_mix_config is not None else None
+            ),
+            self_play_snapshot_device=(
+                str(opponent_mix_config["snapshot_device"]) if mix_enabled and opponent_mix_config is not None else None
+            ),
+            self_play_deterministic=(
+                bool(opponent_mix_config["deterministic"]) if mix_enabled and opponent_mix_config is not None else False
+            ),
+        )
 
         # Wrap with Monitor for episode statistics
         monitored_env = Monitor(wrapped_env)

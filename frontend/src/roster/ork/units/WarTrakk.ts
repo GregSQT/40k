@@ -40,11 +40,12 @@ export class WarTrakk extends SwarmRangeSwarm {
   static FACTION_KEYWORDS = [{ keywordId: "ORKS" }];
 
   static ICON = "/icons/WarTrakk.webp"; // Path relative to public folder
-  static BASE_SHAPE = "round"; // Shape of the base
-  static BASE_SIZE = 35; // Size of the base
-  static MODEL_HEIGHT = 5; // Height of the model (inches). IMPORTANT: temporary indicative value
-  static ICON_SCALE = 1.7; // Size of the icon
-  static ILLUSTRATION_RATIO = 135; // Illustration size ratio in percent
+  static BASE_SHAPE = "oval"; // Shape of the base
+  /** Diamètres sur la grille micro-hex (engine/hex_utils ``compute_occupied_hexes``), pas des mm. */
+  static BASE_SIZE = [41, 27];
+  static MODEL_HEIGHT = 4; // Height of the model (inches). IMPORTANT: temporary indicative value
+  static ICON_SCALE = 2.2; // Size of the icon
+  static ILLUSTRATION_RATIO = 120; // Illustration size ratio in percent
 
   constructor(name: string, startPos: [number, number]) {
     super(name, WarTrakk.HP_MAX, startPos);

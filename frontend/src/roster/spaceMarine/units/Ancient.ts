@@ -56,7 +56,7 @@ export class Ancient extends LeaderEliteMeleeElite {
 
   static ICON = "/icons/Ancient.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
-  static BASE_SIZE = 20; // Size of the base
+  static BASE_SIZE = 16; // Size of the base
   static MODEL_HEIGHT = 2.5; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 1.9; // Size of the icon
   static ILLUSTRATION_RATIO = 150; // Illustration size ratio in percent
