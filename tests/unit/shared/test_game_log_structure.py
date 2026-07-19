@@ -8,7 +8,6 @@ from shared.gameLogStructure import (
     create_training_log_entry,
     get_event_icon,
     get_event_type_class,
-    log_unified_action,
 )
 
 
@@ -136,52 +135,3 @@ def test_get_event_icon_and_type_class_cover_supported_branches() -> None:
 def test_get_event_icon_raises_on_unsupported_type() -> None:
     with pytest.raises(ValueError, match=r"Unsupported event_type"):
         get_event_icon("unknown")
-
-
-def test_log_unified_action_calls_replay_logger_add_entry() -> None:
-    class DummyReplayLogger:
-        def __init__(self) -> None:
-            self.calls = []
-
-        def add_entry(self, **kwargs) -> None:
-            self.calls.append(kwargs)
-
-    class DummyEnv:
-        def __init__(self) -> None:
-            self.replay_logger = DummyReplayLogger()
-
-    env = DummyEnv()
-    acting = {"id": 1, "col": 1, "row": 1, "unit_type": "Intercessor", "player": 0}
-    target = {"id": 2, "col": 2, "row": 2, "unit_type": "Termagant", "player": 1}
-
-    log_unified_action(
-        env=env,
-        action_type="shoot",
-        acting_unit=acting,
-        target_unit=target,
-        reward=0.5,
-        phase="shoot",
-        turn_number=1,
-    )
-
-    assert len(env.replay_logger.calls) == 1
-    assert env.replay_logger.calls[0]["entry_type"] == "shoot"
-
-
-def test_log_unified_action_rejects_unknown_action_type() -> None:
-    class DummyReplayLogger:
-        pass
-
-    class DummyEnv:
-        replay_logger = DummyReplayLogger()
-
-    with pytest.raises(ValueError, match=r"Unknown action_type"):
-        log_unified_action(
-            env=DummyEnv(),
-            action_type="invalid",
-            acting_unit={"id": 1, "col": 1, "row": 1},
-            target_unit=None,
-            reward=0.0,
-            phase="move",
-            turn_number=1,
-        )

@@ -973,7 +973,6 @@ def _load_rule_checker_scenarios(project_root_path: str) -> List[str]:
 from ai.scenario_manager import ScenarioManager
 from ai.multi_agent_trainer import MultiAgentTrainer
 from config_loader import get_config_loader, get_max_turns
-from ai.game_replay_logger import GameReplayIntegration
 import torch
 
 # Use TF32 for faster matmul on Ampere+ GPUs (RTX 30xx, 40xx, A100, etc.)
@@ -1526,17 +1525,6 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             # Connect StepLogger directly to compliant W40KEngine
             base_env.step_logger = step_logger
             print("✅ StepLogger connected to compliant W40KEngine")
-        
-        # Enable replay logging for replay generation modes only
-        if args.replay or args.convert_steplog:
-            # Use same pattern as evaluate.py for working icon movement
-            base_env.is_evaluation_mode = True
-            base_env._force_evaluation_mode = True
-            # Direct integration without wrapper
-            base_env = GameReplayIntegration.enhance_training_env(base_env)
-            if hasattr(base_env, 'replay_logger') and base_env.replay_logger:
-                base_env.replay_logger.is_evaluation_mode = True
-                base_env.replay_logger.capture_initial_state()
         
         # Wrap environment with ActionMasker for MaskablePPO compatibility
         def mask_fn(env):
@@ -5093,17 +5081,6 @@ def main():
             # Only test if episodes > 0
             if args.test_episodes > 0:
                 test_trained_model(model, args.test_episodes, args.training_config, args.agent, args.rewards_config, debug_mode=args.debug)
-                
-                # Save training replay with our unified system
-                if hasattr(env, 'replay_logger'):
-                    from ai.game_replay_logger import GameReplayIntegration
-                    final_reward = 0.0  # Average reward from testing
-                    replay_file = GameReplayIntegration.save_episode_replay(
-                        env, 
-                        episode_reward=final_reward, 
-                        output_dir="ai/event_log", 
-                        is_best=False
-                    )
             else:
                 print("📊 Skipping testing (--test-episodes 0)")
             

@@ -22,8 +22,6 @@ export interface AIActionRequest {
       HP_CUR: number;
       MOVE: number;
       RNG_RNG: number;
-      RNG_DMG: number;
-      CC_DMG: number;
     }>;
   };
 }

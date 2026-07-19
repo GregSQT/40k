@@ -53,7 +53,6 @@ from engine.pve_controller import PvEController
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ai.step_logger import StepLogger
-    from ai.game_replay_logger import GameReplayLogger
     from ai.metrics_tracker import W40KMetricsTracker
 
 # Global flag to ensure debug.log is cleared only once per training session
@@ -438,7 +437,6 @@ class W40KEngine(gym.Env):
         self.quiet = quiet
         self.unit_registry = unit_registry
         self.step_logger: Optional["StepLogger"] = None  # Will be set by training system if enabled
-        self.replay_logger: Optional["GameReplayLogger"] = None  # Will be set by training system for replay capture
         self.is_evaluation_mode: bool = False  # Set by training system during evaluation
         self._force_evaluation_mode: bool = False  # Set by training system during evaluation
         self._metrics_tracker: Optional["W40KMetricsTracker"] = None  # Set by training system
@@ -1601,17 +1599,8 @@ class W40KEngine(gym.Env):
             )
         _step_t2 = time.perf_counter() if _step_t0 is not None else None
 
-        # CRITICAL: Capture pre-action state for replay_logger BEFORE action execution
-        # These are needed for replay logging (independent of step_logger)
-        pre_action_phase = self.game_state.get("phase", "unknown")
+        # Joueur pre-action : requis par info["acting_player"] apres execution.
         pre_action_player = int(require_key(self.game_state, "current_player"))
-        pre_action_positions = {}
-        if "unitId" in semantic_action:
-            unit_id = semantic_action["unitId"]
-            if unit_id:
-                pre_unit = self._get_unit_by_id(str(unit_id))
-                if pre_unit:
-                    pre_action_positions[str(unit_id)] = require_unit_position(pre_unit, self.game_state)
 
         # V11 T6 : curseur des action_logs AVANT l'action, pour ne transferer au StepLogger que
         # les entrees produites par CETTE action (cf. _flush_squad_action_logs_to_step_logger).
@@ -1691,138 +1680,6 @@ class W40KEngine(gym.Env):
             # Reset per-step counter
             self._units_activated_this_step = 0
         
-        # Log action ONLY if it's a real agent action with valid unit
-        # Note: pre_action_phase, pre_action_player, and pre_action_turn are already captured
-        # at lines 598-600 BEFORE action execution
-        
-        # Log to replay_logger for replay file generation (independent of step_logger)
-        # Log action for replay/debugging
-        if hasattr(self, 'replay_logger') and self.replay_logger and success:
-            # Get action_type and unit_id using same logic as step_logger
-            # CRITICAL: No defaults - require explicit values in result
-            if not isinstance(result, dict):
-                raise TypeError(f"result must be a dict for replay logger, got {type(result).__name__}")
-            
-            action_type = result.get("action")
-            if action_type is None:
-                raise ValueError(f"result missing 'action' field for replay logger. result keys: {list(result.keys())}")
-            
-            unit_id = result.get("unitId")
-            if unit_id is None:
-                raise ValueError(f"result missing 'unitId' field for replay logger. result keys: {list(result.keys())}")
-
-            valid_action_types = ["move", "flee", "shoot", "charge", "charge_fail", "combat", "wait"]
-            if action_type in valid_action_types and unit_id and unit_id != "none" and unit_id != "SYSTEM":
-                updated_unit = self._get_unit_by_id(str(unit_id)) if unit_id else None
-                if updated_unit:
-                    current_turn = self.game_state.get("current_turn", 1)
-                    step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
-
-                    if action_type == "move" or action_type == "flee":
-                        # CRITICAL: No defaults - require explicit coordinates
-                        if str(unit_id) not in pre_action_positions:
-                            raise ValueError(
-                                f"Replay logger {action_type} missing start position in pre_action_positions: unit_id={unit_id}"
-                            )
-                        start_pos = pre_action_positions[str(unit_id)]
-                        # Use result destination
-                        if isinstance(result, dict) and result.get("toCol") is not None and result.get("toRow") is not None:
-                            dest_col = int(result["toCol"])
-                            dest_row = int(result["toRow"])
-                        else:
-                            raise ValueError(
-                                f"Replay logger {action_type} missing destination in result: unit_id={unit_id}, result keys={list(result.keys())}"
-                            )
-                        self.replay_logger.log_move(
-                            updated_unit,
-                            start_pos[0], start_pos[1],
-                            dest_col, dest_row,
-                            current_turn, step_reward, 0
-                        )
-                    elif action_type == "shoot":
-                        # CRITICAL: No defaults - require explicit targetId in result
-                        target_id = result.get("targetId")
-                        if target_id is None:
-                            raise ValueError(f"Replay logger shoot missing targetId: result keys: {list(result.keys())}")
-                        target_unit = self._get_unit_by_id(str(target_id))
-                        if target_unit:
-                            # Build shoot_details from last_attack_result (optional display fields; # get allowed)
-                            ar = self.game_state.get("last_attack_result", {})  # get allowed
-                            shoot_details = {
-                                "summary": {
-                                    "totalShots": 1,
-                                    "hits": 1 if ar.get("hit_success") else 0,
-                                    "wounds": 1 if ar.get("wound_success") else 0,
-                                    "failedSaves": 1 if ar.get("damage", 0) > 0 else 0  # get allowed
-                                },
-                                "shots": [{
-                                    "hit_roll": ar.get("hit_roll", 0),   # get allowed
-                                    "wound_roll": ar.get("wound_roll", 0),  # get allowed
-                                    "save_roll": ar.get("save_roll", 0),   # get allowed
-                                    "damage": ar.get("damage", 0),         # get allowed
-                                    "hit": ar.get("hit_success", False),   # get allowed
-                                    "wound": ar.get("wound_success", False),  # get allowed
-                                    "save_success": ar.get("save_success", False),  # get allowed
-                                    "hit_target": ar.get("hit_target", 4),   # get allowed
-                                    "wound_target": ar.get("wound_target", 4),  # get allowed
-                                    "save_target": ar.get("save_target", 4)   # get allowed
-                                }]
-                            }
-                            self.replay_logger.log_shoot(
-                                updated_unit, target_unit, shoot_details,
-                                current_turn, step_reward, 4
-                            )
-                    elif action_type == "charge":
-                        target_id = result.get("targetId")
-                        target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
-                        if target_unit:
-                            # CRITICAL: No defaults - require explicit coordinates
-                            if str(unit_id) not in pre_action_positions:
-                                raise ValueError(f"Replay logger charge missing start position in pre_action_positions: unit_id={unit_id}")
-                            start_pos = pre_action_positions[str(unit_id)]
-                        # Use result destination; do not use updated_unit
-                            if isinstance(result, dict) and result.get("toCol") is not None and result.get("toRow") is not None:
-                                dest_col = int(result["toCol"])
-                                dest_row = int(result["toRow"])
-                            elif isinstance(semantic_action, dict) and semantic_action.get("destCol") is not None and semantic_action.get("destRow") is not None:
-                                dest_col = int(semantic_action["destCol"])
-                                dest_row = int(semantic_action["destRow"])
-                            else:
-                                raise ValueError(f"Replay logger charge missing destination: result.toCol={result.get('toCol') if isinstance(result, dict) else None}, result.toRow={result.get('toRow') if isinstance(result, dict) else None}, action.destCol={semantic_action.get('destCol') if isinstance(semantic_action, dict) else None}, action.destRow={semantic_action.get('destRow') if isinstance(semantic_action, dict) else None}")
-                            self.replay_logger.log_charge(
-                                updated_unit, target_unit,
-                                start_pos[0], start_pos[1],
-                                dest_col, dest_row,
-                                current_turn, step_reward, 5,
-                                charge_roll=result.get("charge_roll"),
-                                die1=None, die2=None,
-                                charge_succeeded=result.get("charge_succeeded", True)
-                            )
-                    elif action_type == "combat":
-                        target_id = result.get("targetId")
-                        target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
-                        if target_unit:
-                            # Build combat_details from last_attack_result (optional display fields; # get allowed)
-                            ar = self.game_state.get("last_attack_result", {})  # get allowed
-                            combat_details = {
-                                "summary": {
-                                    "totalAttacks": 1,
-                                    "hits": 1 if ar.get("hit_success") else 0,
-                                    "wounds": 1 if ar.get("wound_success") else 0,
-                                    "failedSaves": 1 if ar.get("damage_dealt", 0) > 0 else 0  # get allowed
-                                }
-                            }
-                            self.replay_logger.log_combat(
-                                updated_unit, target_unit, combat_details,
-                                current_turn, step_reward, 7
-                            )
-                    elif action_type == "wait":
-                        current_phase = self.game_state.get("phase", pre_action_phase)
-                        self.replay_logger.log_wait(
-                            updated_unit, current_turn, current_phase,
-                            step_reward, 6
-                        )
-
         # Convert to gym format
         action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
         if not eligible_units and not action_mask.any():

@@ -34,144 +34,7 @@ from ai.scenario_manager import ScenarioManager, TrainingMatchup
 from shared.data_validation import require_key, require_present
 from config_loader import get_config_loader
 
-@dataclass
-class EpisodeMetrics:
-    """Track metrics for a single episode."""
-    episode_num: int
-    total_reward: float
-    replay_data: Dict[str, Any]
-    
-    def __hash__(self):
-        """Make EpisodeMetrics hashable for use in sets - exclude replay_data."""
-        return hash((self.episode_num, float(self.total_reward)))
-    
-    def __eq__(self, other):
-        """Define equality for EpisodeMetrics - exclude replay_data."""
-        if not isinstance(other, EpisodeMetrics):
-            return False
-        return (self.episode_num == other.episode_num and 
-                abs(self.total_reward - other.total_reward) < 1e-6)
-
-class SelectiveEpisodeTracker:
-    """Track best/worst/shortest episodes during training for selective replay saving."""
-    
-    def __init__(self, agent_key: str, enemy_key: str, max_candidates: int):
-        if max_candidates <= 0:
-            raise ValueError("max_candidates must be positive")
-        self.agent_key = agent_key
-        self.enemy_key = enemy_key
-        self.max_candidates = max_candidates
-        self.episode_candidates: List[EpisodeMetrics] = []
-        self.current_episode = 0
-        self.shortest_episode: Optional[EpisodeMetrics] = None
-        self.best_reward_episode: Optional[EpisodeMetrics] = None
-        self.worst_reward_episode: Optional[EpisodeMetrics] = None
-    
-    def update_episode(self, total_reward: float, replay_data: Dict[str, Any]):
-        """Update tracking with new training episode data."""
-        self.current_episode += 1
-        episode = EpisodeMetrics(self.current_episode, total_reward, replay_data)
-        
-        # Add to candidates
-        self.episode_candidates.append(episode)
-        
-        # Update current bests for comparison
-        if self.best_reward_episode is None or total_reward > self.best_reward_episode.total_reward:
-            self.best_reward_episode = episode
-        if self.worst_reward_episode is None or total_reward < self.worst_reward_episode.total_reward:
-            self.worst_reward_episode = episode
-        
-        # Memory management - keep only promising candidates
-        if len(self.episode_candidates) > self.max_candidates:
-            self._prune_candidates()
-    
-    def _prune_candidates(self):
-        """Keep only the most promising episodes to manage memory."""
-        # Sort by different criteria and keep top candidates
-        sorted_by_reward = sorted(self.episode_candidates, key=lambda x: x.total_reward, reverse=True)
-        sorted_by_worst = sorted(self.episode_candidates, key=lambda x: x.total_reward)
-        
-        # Use config values for episode pruning
-        config_loader = get_config_loader()
-        full_config = config_loader.get_training_config()
-        training_config = full_config["default"]
-        shared_config = full_config["shared_parameters"]
-        keep_count = shared_config["episode_tracker"]["keep_per_category"]
-        keep_episodes = set()
-        keep_episodes.update(sorted_by_reward[:keep_count])  # Best rewards
-        keep_episodes.update(sorted_by_worst[:keep_count])   # Worst rewards
-        keep_episodes.update(self.episode_candidates[-keep_count:])  # Recent episodes
-        
-        self.episode_candidates = list(keep_episodes)
-    
-    def save_selective_replays(self, output_dir: str):
-        """Save the 3 selective replays from training episodes."""
-        saved_files = []
-        
-        # Determine enemy name for filename
-        enemy_name = self.enemy_key if self.enemy_key in self.agent_key else "Bot"
-        
-        episodes_to_save = [
-            (self.best_reward_episode, "best"),
-            (self.worst_reward_episode, "worst")
-        ]
-        
-        for episode, episode_type in episodes_to_save:
-            if episode is not None:
-                # Add unique timestamp to prevent overwrites
-                filename = f"replay_{self.agent_key}_vs_{enemy_name}_{episode_type}.json"
-                filepath = os.path.join(output_dir, filename)
-                
-                # Save replay data to file with JSON serialization fix
-                os.makedirs(output_dir, exist_ok=True)
-
-                # Convert numpy arrays to lists for JSON serialization
-                serializable_data = self._make_json_serializable(episode.replay_data)
-
-                # NOTE: get_training_config() is deprecated in ConfigLoader; selective
-                # replay saving is an offline diagnostic and must not bypass the
-                # global AI rules. We therefore require an explicit JSON formatting
-                # configuration in a dedicated diagnostics section, instead of
-                # silently falling back to any legacy training_config.json.
-                config_loader = get_config_loader()
-                diagnostics_config = config_loader.load_config("diagnostics", force_reload=False)
-                if "episode_tracker" not in diagnostics_config:
-                    raise KeyError(
-                        "diagnostics.json missing required 'episode_tracker' section for selective replay saving"
-                    )
-                if "indent_size" not in diagnostics_config["episode_tracker"]:
-                    raise KeyError(
-                        "diagnostics.episode_tracker missing required 'indent_size' key for selective replay saving"
-                    )
-                indent_size = diagnostics_config["episode_tracker"]["indent_size"]
-
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    json.dump(serializable_data, f, indent=indent_size)
-
-                saved_files.append(filepath)
-        
-        return saved_files
-    
-    def _make_json_serializable(self, obj):
-        """Convert numpy arrays and other non-serializable objects to JSON-compatible format."""
-        import numpy as np
-        
-        if isinstance(obj, dict):
-            return {key: self._make_json_serializable(value) for key, value in obj.items()}
-        elif isinstance(obj, list):
-            return [self._make_json_serializable(item) for item in obj]
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, np.integer):
-            return int(obj)
-        elif isinstance(obj, np.floating):
-            return float(obj)
-        elif isinstance(obj, (np.bool_, bool)):
-            return bool(obj)
-        else:
-            return obj
-
-# Import training components  
+# Import training components
 from stable_baselines3 import DQN
 MASKABLE_DQN_AVAILABLE = False
 
@@ -532,14 +395,8 @@ class MultiAgentTrainer:
             except Exception as model_error:
                 raise RuntimeError(f"Model creation failed for {session.agent_key}: {model_error}")
             
-            # Initialize selective replay tracking with config
-            full_config = self.config.get_training_config()
-            shared_config = full_config["shared_parameters"]
-            max_candidates = shared_config["episode_tracker"]["max_candidates"]
-            episode_tracker = SelectiveEpisodeTracker(session.agent_key, session.opponent_agent, max_candidates)
-            
             # Setup callbacks for this session (simplified - no evaluation callback)
-            callbacks = self._setup_session_callbacks(session, model, episode_tracker, training_config_name)
+            callbacks = self._setup_session_callbacks(session, model, training_config_name)
             
             # Execute training
             session_start_time = time.time()
@@ -600,7 +457,7 @@ class MultiAgentTrainer:
             
             # Test the trained model using SAME environment as training (has fixes applied)
             evaluation_start = time.time()
-            test_results = self._test_trained_model(model, env, eval_episodes, episode_tracker)
+            test_results = self._test_trained_model(model, env, eval_episodes)
             evaluation_time = time.time() - evaluation_start
             
             # Calculate total session duration (training + evaluation + model saving)
@@ -610,15 +467,6 @@ class MultiAgentTrainer:
             agent_model_path = self._get_agent_model_path(session.agent_key)
             model.save(agent_model_path)
 
-            # Save selective replays using episode tracker
-            replay_files_saved = []
-            try:
-                if episode_tracker:
-                    output_dir = shared_config["episode_tracker"]["output_dir"]
-                    replay_files_saved = episode_tracker.save_selective_replays(output_dir)
-            except Exception as replay_error:
-                    raise RuntimeError(f"Replay saving failed: {replay_error}")
-            
             # Update session status
             session.status = 'completed'
             session.completed_episodes = session.target_episodes
@@ -645,8 +493,7 @@ class MultiAgentTrainer:
                 "evaluation_time": evaluation_time,
                 "final_win_rate": test_results["win_rate"],
                 "final_avg_reward": test_results["avg_reward"],
-                "model_path": agent_model_path,
-                "selective_replay_files": replay_files_saved
+                "model_path": agent_model_path
             }
             
             # Reduced verbosity - session completion tracked by progress bar
@@ -662,27 +509,13 @@ class MultiAgentTrainer:
             # Calculate duration for failed session
             session_duration = time.time() - session_start_time if session_start_time is not None else 0.0
             
-            # Try to save replay even on failure using GameReplayLogger
-            replay_file_saved = None
-            try:
-                if env is not None:
-                    timestamp = time.strftime("%Y%m%d_%H%M%S")
-                    failed_replay_filename = f"ai/event_log/failed_training_{session.agent_key}_vs_{session.opponent_agent}.json"
-                    
-                    # Use GameReplayLogger's save method
-                    if hasattr(env.unwrapped, 'replay_logger'):
-                        replay_file_saved = env.unwrapped.replay_logger.save_replay(failed_replay_filename)
-            except Exception as replay_error:
-                pass  # Silent failure for failed session replay saving
-            
             return {
                 "session_id": session.session_id,
                 "agent_key": session.agent_key,
                 "opponent_agent": session.opponent_agent,
                 "status": "failed", 
                 "error": str(e),
-                "completed_episodes": session.completed_episodes,
-                "replay_file": replay_file_saved
+                "completed_episodes": session.completed_episodes
             }
 
     def _cleanup_previous_session_scenarios(self):
@@ -756,16 +589,7 @@ class MultiAgentTrainer:
                 print(f"❌ W40KEngine creation failed for {agent_key}: {env_error}")
                 raise RuntimeError(f"Failed to create W40KEngine for agent {agent_key}: {env_error}")
             
-            # Enhance environment with clean game logger
-            from ai.game_replay_logger import GameReplayIntegration
-            enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
-            
-            # CRITICAL FIX: DISABLE replay logging during training - only enable for evaluation
-            if hasattr(enhanced_env, 'replay_logger'):
-                enhanced_env.replay_logger.is_evaluation_mode = False  # Disable during training
-                enhanced_env.game_logger = enhanced_env.replay_logger
-            
-            env = Monitor(enhanced_env, allow_early_resets=True)
+            env = Monitor(base_env, allow_early_resets=True)
             
             # Agent-specific model path
             model_path = self._get_agent_model_path(agent_key)
@@ -823,7 +647,7 @@ class MultiAgentTrainer:
         
         return slowest_session
 
-    def _setup_session_callbacks(self, session: TrainingSession, model, episode_tracker: SelectiveEpisodeTracker, training_config_name: str = "default") -> List:
+    def _setup_session_callbacks(self, session: TrainingSession, model, training_config_name: str = "default") -> List:
         """Setup training callbacks - simplified without evaluation callback."""
         callbacks = []
         return callbacks
@@ -863,7 +687,7 @@ class MultiAgentTrainer:
         
         return eval_env
 
-    def _test_trained_model(self, model, env, num_episodes: int, episode_tracker: Optional[SelectiveEpisodeTracker] = None) -> Dict[str, float]:
+    def _test_trained_model(self, model, env, num_episodes: int) -> Dict[str, float]:
         """Test trained model with optimized single progress bar"""
         # AI_TURN.md COMPLIANCE: No default values - validate input
         if num_episodes <= 0:
@@ -898,33 +722,6 @@ class MultiAgentTrainer:
             obs, info = env.reset()
             episode_reward = 0
             done = False
-           
-            # CRITICAL FIX: Enable replay logging for evaluation episode
-            if episode_tracker:
-                try:
-                    # Set evaluation mode flags at ALL levels
-                    env.is_evaluation_mode = True
-                    
-                    # Find actual environment through wrappers
-                    actual_env = env
-                    while hasattr(actual_env, 'env'):
-                        actual_env.is_evaluation_mode = True
-                        actual_env._force_evaluation_mode = True
-                        actual_env = actual_env.env
-                    
-                    # Enable on unwrapped environment
-                    if hasattr(actual_env, 'unwrapped'):
-                        actual_env.unwrapped.is_evaluation_mode = True
-                        actual_env.unwrapped._force_evaluation_mode = True
-                    
-                    # Enable on replay logger directly
-                    if hasattr(actual_env, 'replay_logger') and actual_env.replay_logger:
-                        actual_env.replay_logger.is_evaluation_mode = True
-                        actual_env.replay_logger.env.is_evaluation_mode = True
-                        actual_env.replay_logger.env._force_evaluation_mode = True
-                        actual_env.replay_logger.clear()
-                except Exception as e:
-                    print(f"⚠️ Failed to enable replay logging: {e}")
            
             # Add step counter to prevent infinite loops
             step_count = 0
@@ -982,57 +779,6 @@ class MultiAgentTrainer:
             
             total_rewards.append(episode_reward)
             
-            # Track episode for selective replay saving using direct access to replay logger
-            if episode_tracker:
-                try:
-                    # Find replay logger in the environment hierarchy
-                    replay_logger = None
-                    actual_env = env
-                    
-                    # Check Monitor wrapper
-                    if hasattr(actual_env, 'env'):
-                        actual_env = actual_env.env
-                    
-                    # Check for replay logger
-                    if hasattr(actual_env, 'replay_logger') and actual_env.replay_logger:
-                        replay_logger = actual_env.replay_logger
-                    elif hasattr(actual_env, 'unwrapped') and hasattr(actual_env.unwrapped, 'replay_logger'):
-                        replay_logger = actual_env.unwrapped.replay_logger
-                    
-                    if replay_logger:
-                        # Force replay logger to capture data by directly calling log methods
-                        current_turn = info.get('current_turn', 1)
-                        
-                        # V11 T6 (hygiene) : un monkeypatch de `controller.execute_gym_action` vivait ici.
-                        # Purge — code mort ET cassé : le moteur squad (W40KEngine) n'expose aucun
-                        # attribut `controller`, et le patch appelait des méthodes inexistantes
-                        # (_get_gym_eligible_units, _convert_gym_action_to_mirror, _log_gym_action...).
-                        # Il portait le dernier layout à 8 actions (`action // 8`, `action % 8`), périmé
-                        # depuis l'espace squad 41 (cf. R5/T2, macro_intents.py).
-
-                        # Now get the data
-                        game_states = getattr(replay_logger, 'game_states', [])
-                        combat_log_entries = getattr(replay_logger, 'combat_log_entries', [])
-                        initial_state = getattr(replay_logger, 'initial_game_state', {})
-                        
-                        replay_data = {
-                            "episode_reward": episode_reward,
-                            "game_states": game_states.copy() if game_states else [],
-                            "combat_log": combat_log_entries.copy() if combat_log_entries else [],
-                            "initial_state": initial_state.copy() if initial_state else {},
-                            "game_info": {
-                                "scenario": "evaluation_episode", 
-                                "total_turns": max(1, current_turn) if current_turn is not None else 1,
-                                "winner": require_present(require_key(info, "winner"), "winner")
-                            }
-                        }
-                        
-                        episode_tracker.update_episode(episode_reward, replay_data)
-                    else:
-                        raise ValueError(f"No replay logger found for episode {episode+1}")
-                        
-                except Exception as replay_error:
-                    raise ValueError(f"No replay data captured for episode {episode+1}: {replay_error}")
             # Check win condition
             if info.get('winner') == 1:  # AI won
                 wins += 1

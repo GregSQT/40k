@@ -86,7 +86,9 @@ Les tâches 1-3 sont commitées (`6a7a9de1`).
   entraînement**. Bloque l'interprétation de tout win-rate par matchup, donc le critère §10.6.
 - Le **7ᵉ site du portage** (`_best_target_slot_by_threat`) n'est couvert que par un test unitaire :
   son appelant `DefensiveSmartBot` n'est pas dans `bot_eval_weights`, donc l'éval ne le joue pas.
-- Dette `ai/game_replay_logger.py` (~8 sites `RNG_DMG`/`CC_DMG`) + `config/unit_definitions.json`.
+- ~~Dette `ai/game_replay_logger.py` (~8 sites `RNG_DMG`/`CC_DMG`) + `config/unit_definitions.json`.~~
+  ✅ **soldée (§0.8)** : module supprimé, pas porté. Nouveau reste ouvert issu de §0.8 : purge de
+  `multi_agent_trainer.py` / `--orchestrate` (legacy pré-squad, non urgent, rien n'y `raise` plus).
 - ~~Bug d'affichage `Total: 30` au lieu de 60~~ ✅ corrigé (§0.7, constat 2).
 
 **⚠️ L'état de fin de session n'est ni « OK » ni « optimal ».** Mise à jour 2026-07-19 (fin de
@@ -209,9 +211,10 @@ existantes migrées ; les 4 tests sont **rouges sur le code d'avant**.
 vrai presque toujours. Le critère est donc devenu « dégâts mêlée attendus > dégâts de tir
 attendus », ce que la docstring de la classe décrivait déjà (« charges if melee is advantageous »).
 
-**Dette restante repérée au passage, NON traitée** : `ai/game_replay_logger.py` lit encore
+~~**Dette restante repérée au passage, NON traitée** : `ai/game_replay_logger.py` lit encore
 `unit["RNG_DMG"]`/`unit["CC_DMG"]` (~8 sites) et `config/unit_definitions.json` les déclare encore
-dans `required_properties`. Hors périmètre de la tâche 2 ; à traiter avant de se fier au replay.
+dans `required_properties`.~~ → **soldée en §0.8** : le module n'a pas été porté mais **supprimé**
+(aucun appelant vif, aucun consommateur de sa sortie).
 
 **Diagnostic d'origine (historique, attribution erronée conservée pour mémoire) :**
 
@@ -274,9 +277,10 @@ au lecteur suivant la certitude que le chemin est vivant et correct.
 
 ~~**À traiter** : supprimer la fonction et ses tests~~ → fait, voir en tête de §0.4.
 
-> **Motif récurrent à surveiller dans ce projet** — trois occurrences vérifiées à ce jour :
+> **Motif récurrent à surveiller dans ce projet** — cinq occurrences vérifiées à ce jour :
 > `update_frozen_model` (§10.4), `end_of_turn_coherency_removal` (§0.1), `_advance_to_next_player`
-> (§0.4). Du code correct, testé, et jamais appelé. **Devant toute fonction sur laquelle repose un
+> (§0.4), `game_replay_logger` (§0.8, 795 lignes + 8 tests), `log_unified_action` (§0.8). Du code
+> correct, testé, et jamais appelé. **Devant toute fonction sur laquelle repose un
 > raisonnement, vérifier d'abord qu'elle a un appelant.**
 
 ### 0.5 Fail-fast de l'évaluation standalone — ✅ FAIT (2026-07-19 soir)
@@ -628,6 +632,57 @@ réparation n'est pas « les restaurer » mais recréer 2 rosters (SM, Orks) —
   via le canal 5 `GRID_CH_LEVEL`. ⚠️ `scripts/migrate_scenario_bank_v11.py` cycle encore sur les
   3 terrains plats — le RELANCER repointerait la banque et casserait le test de banque.
 - `config/tutorial/scenario_etape*.json` ne se charge plus (`wall_ref` legacy sans `board_ref`).
+
+### 0.8 `game_replay_logger` — SUPPRIMÉ, pas porté (2026-07-19 soir)
+
+**Point de départ** : la dette annoncée en §0.3 (le module lit encore `RNG_DMG`/`CC_DMG`, champs
+supprimés du contrat d'unité). La question posée n'était pas « comment porter » mais « faut-il
+porter ». Réponse vérifiée : **non — supprimer**. 12 fichiers, **−1585 lignes**.
+
+**Les 3 constats qui ont tranché** (tous re-vérifiés dans le code, pas dans un rapport) :
+
+1. **Aucun appelant vif.** `enhance_training_env` était appelé à 2 endroits. Dans `train.py`, sous
+   `if args.replay or args.convert_steplog` — **inatteignable**, car `main()` fait `return` sur ces
+   deux flags bien avant (les deux modes sont intégralement servis par `ai/replay_converter.py`, qui
+   n'importe jamais ce module). Dans `multi_agent_trainer.py`, sur le chemin `--orchestrate`
+   (voir plus bas). `save_episode_replay` était atteint mais **no-op** : son corps est gardé par
+   `if env.replay_logger`, attribut resté à `None`.
+2. **Aucun consommateur de sa sortie.** Le replay du frontend charge `/api/replay/default|file|list`,
+   qui servent **`step.log`** (texte, `.log` uniquement), parsé par `replayParser.ts`. Le JSON
+   `ai/event_log/replay_*.json` est produit par `replay_converter.py`. `game_replay_logger` était le
+   **prédécesseur** de `replay_converter`, laissé branché après son remplacement.
+3. **Le périmètre cassé dépassait `RNG_DMG`/`CC_DMG`** : le format émis exigeait aussi `CUR_HP`,
+   `RNG_RNG`, `CC_RNG`, `MOVE`, `BASE_SHAPE`, `BASE_SIZE`. Porter, c'était réécrire le format entier
+   d'un fichier que personne ne lit.
+
+**Supprimé** : `ai/game_replay_logger.py` (795 l.) et son test ; `log_unified_action`
+(`shared/gameLogStructure.py`, 85 l., **aucun appelant hors tests** — nouvelle occurrence du motif
+§0.4) et ses 2 tests ; les hooks de `w40k_core.step()` (131 l.) + l'attribut `replay_logger` ;
+les câblages de `train.py` et `multi_agent_trainer.py` ; `required_properties` des 2
+`unit_definitions.json` (**clé sans aucun lecteur** — grep vide, config morte) ;
+`RNG_DMG`/`CC_DMG` de `frontend/src/types/api.ts` (types jamais lus).
+
+**Effet de bord assumé** : `SelectiveEpisodeTracker` (`multi_agent_trainer.py`) n'était alimenté
+**que** par ce logger. Le laisser en place garantissait un `raise ValueError` sur le chemin
+`--orchestrate`. La feature entière est donc supprimée (`EpisodeMetrics`,
+`SelectiveEpisodeTracker`, 3 sites de câblage, clé `selective_replay_files`).
+
+**Vérification** : `pytest tests/unit` **exit 0** — 1396 tests, 0 skip, 0 échec (compté sur les
+caractères de statut : le reporter du projet **n'imprime pas** la ligne de résumé, tout « N passed »
+non compté est à rejeter). `tsc --noEmit` exit 0. Imports des 4 modules touchés OK.
+
+⚠️ **Correction à §5/T2 (§992-995)** : ce paragraphe décrit `multi_agent_trainer.py:1016` comme
+contenant encore `action % 8` + `unit_idx = action // 8`. **C'est périmé** — la branche a été purgée
+au commit `6a7a9de1` ; il ne restait qu'un commentaire de purge, lui-même supprimé ici. Le grep est
+désormais vide. Ce paragraphe a déjà induit deux relecteurs en erreur (citation de la doc au lieu
+d'un grep) : **§992-995 est soldé.**
+
+**Reste ouvert — chantier distinct, non urgent** : la purge complète de `multi_agent_trainer.py` /
+`--orchestrate`. Rien n'y `raise` plus et la suite est verte, mais c'est du legacy pré-squad, encore
+importé au chargement de `train.py`. Deux preuves suffisent à le condamner, **sans s'appuyer sur la
+doc** : il charge les modèles via `DQN.load` alors que tous les `.zip` sont MaskablePPO, et il
+appelle `base_env.controller.connect_step_logger(...)` alors que `W40KEngine` n'expose que
+`pve_controller`. À traiter avec la même méthode : prouver la mort de chaque chemin avant de couper.
 
 ## 1. Objectif
 
@@ -989,11 +1044,16 @@ masque vide sur eligible units) = R7, UNMASQUÉ par le fix R5, à traiter en T5 
 
 **Contre-vérification indépendante (2026-07-15)** — T2 confirmée conforme (code relu, suite
 rejouée verte, grep de contrôle passé, smoke pile complète rejoué), avec 3 précisions :
-1. **Inexactitude du rapport** : `multi_agent_trainer.py:1016` contient encore `action % 8` +
+1. ~~**Inexactitude du rapport** : `multi_agent_trainer.py:1016` contient encore `action % 8` +
    `unit_idx = action // 8` (monkeypatch legacy de `controller.execute_gym_action`). Branche
    INERTE (gardée par `hasattr(actual_env, 'controller')`, attribut absent du moteur squad)
    mais « aucun littéral dans multi_agent_trainer » est faux — à condamner/purger comme
-   `game_replay_logger.log_action` (raccroché à T6 hygiène ou T5).
+   `game_replay_logger.log_action` (raccroché à T6 hygiène ou T5).~~
+   → ✅ **SOLDÉ, NE PLUS CITER (voir §0.8).** Le monkeypatch a été purgé au commit `6a7a9de1`,
+   le commentaire de purge qui l'a remplacé a disparu avec §0.8, et `game_replay_logger` est
+   supprimé. **`grep 'action % 8' ai/multi_agent_trainer.py` est vide.** Ce point a induit deux
+   relecteurs en erreur *après* sa résolution, parce qu'ils l'ont cité depuis cette doc au lieu de
+   grep le fichier — d'où le rappel : **une doc n'est pas une source, le code l'est.**
 2. **Précision sur le smoke pile complète** : les épisodes 40-48 steps ne se terminent PAS
    normalement — ils sont tués par le garde « 1000 steps » du wrapper, en deadlock
    `squad_wait` fight/pile_in dès le **TOUR 1** (scénario à unités pré-engagées), pas
@@ -1999,8 +2059,9 @@ Fichier proposé : `tests/unit/engine/test_agent_interface_contract.py`.
 - `evaluation_bots` : pour chaque phase (move/shoot/charge/fight), le bot ne choisit QUE des
   actions du masque ; choix hors masque = erreur explicite (test `raises`) ; les dicts de
   poids déploiement pointent des actions de `DEPLOY_SLOTS`.
-- `game_replay_logger` : décodage correct du layout 41 (un cas par famille d'action) — ou, si
-  condamné, erreur explicite testée.
+- ~~`game_replay_logger` : décodage correct du layout 41 (un cas par famille d'action) — ou, si
+  condamné, erreur explicite testée.~~ → **sans objet : le module est supprimé (§0.8).** Ne pas
+  réécrire de test pour lui.
 
 **T3** :
 - `_list_available_board_refs` retourne les refs du board résolu par

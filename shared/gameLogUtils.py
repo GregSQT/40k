@@ -5,7 +5,7 @@ Shared game log message formatting functions ONLY
 Extracted from PvP useGameLog.ts - preserves exact format
 
 These functions produce SHORT messages (no coords, no dice details).
-Used by: gameLogStructure.py (build_entry_message), game_replay_logger.py.
+Used by: gameLogStructure.py (build_entry_message).
 
 Example SHORT format (this module):
   format_shooting_message(1, 11)  -> "Unit 1 SHOT Unit 11"
