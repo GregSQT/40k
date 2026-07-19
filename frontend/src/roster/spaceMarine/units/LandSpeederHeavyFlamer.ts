@@ -1,11 +1,11 @@
-// frontend/src/roster/spaceMarine/units/EradicatorMeltaRifle.ts
+// frontend/src/roster/spaceMarine/units/LandSpeederHeavyFlamer.ts
 
 import { getWeapons } from "../armory";
 import { EliteRangeTroop } from "../classes/EliteRangeTroop";
 
-export class LandSpeeder extends EliteRangeTroop {
-  static NAME = "LandSpeeder";
-  static DISPLAY_NAME = "Land Speeder";
+export class LandSpeederHeavyFlamer extends EliteRangeTroop {
+  static NAME = "LandSpeederHeavyFlamer";
+  static DISPLAY_NAME = "Land Speeder Heavy Flamer";
 
   // BASE
   static MOVE = 14; // Move distance
@@ -23,9 +23,9 @@ export class LandSpeeder extends EliteRangeTroop {
     "multi_melta_vehicle",
     "stormfury_missile_launcher",
   ];
-  static RNG_WEAPONS = getWeapons(LandSpeeder.RNG_WEAPON_CODES);
+  static RNG_WEAPONS = getWeapons(LandSpeederHeavyFlamer.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["close_combat_weapon_a4"];
-  static CC_WEAPONS = getWeapons(LandSpeeder.CC_WEAPON_CODES);
+  static CC_WEAPONS = getWeapons(LandSpeederHeavyFlamer.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
@@ -40,12 +40,12 @@ export class LandSpeeder extends EliteRangeTroop {
 
   static ICON = "/icons/LandSpeeder.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
-  static BASE_SIZE = 16; // Size of the base
-  static MODEL_HEIGHT = 2.5; // Height of the model (inches). IMPORTANT: temporary indicative value
+  static BASE_SIZE = 35; // Size of the base
+  static MODEL_HEIGHT = 5; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 2.0; // Size of the icon
   static ILLUSTRATION_RATIO = 100; // Illustration size ratio in percent
 
   constructor(name: string, startPos: [number, number]) {
-    super(name, LandSpeeder.HP_MAX, startPos);
+    super(name, LandSpeederHeavyFlamer.HP_MAX, startPos);
   }
 }

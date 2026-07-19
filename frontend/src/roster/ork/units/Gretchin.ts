@@ -41,7 +41,7 @@ export class Gretchin extends SwarmRangeSwarm {
 
   static ICON = "/icons/Gretchin.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
-  static BASE_SIZE = 16; // Size of the base
+  static BASE_SIZE = 10; // Size of the base
   static MODEL_HEIGHT = 2.5; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 1.7; // Size of the icon
   static ILLUSTRATION_RATIO = 135; // Illustration size ratio in percent

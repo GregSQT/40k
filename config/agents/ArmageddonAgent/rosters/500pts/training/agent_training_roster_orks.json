@@ -1,0 +1,76 @@
+{
+  "roster_id": "agent_training_roster_orks",
+  "composition": [
+    {
+      "unit_type": "Boyz",
+      "count": 1,
+      "models": [
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "BoyzNobKombi",
+        "Warboss",
+        "PainBoy"
+      ]
+    },
+    {
+      "unit_type": "Boyz",
+      "count": 1,
+      "models": [
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "Boyz",
+        "BoyzNobKombi",
+        "Bigboss",
+        "BannerNob"
+      ]
+    },
+    {
+      "unit_type": "Gretchin",
+      "count": 1,
+      "models": [
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "Gretchin",
+        "WeirdBoy"
+      ]
+    },
+    {
+      "unit_type": "WarTrakk",
+      "count": 1
+    },
+    {
+      "unit_type": "BigMekDakkarig",
+      "count": 1
+    }
+  ]
+}

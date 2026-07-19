@@ -1,0 +1,977 @@
+{
+  "x1": {
+    "type": "################################################### x1 — curriculum phase 1 (board 25x21, scale ×1) ###################################################",
+    "seed": 12345,
+    "total_episodes": 30000,
+    "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
+    "agent_seat_mode": "random",
+    "eval_episodes": 10,
+    "bot_eval_scenario_pool": "holdout",
+    "bot_eval_show_progress": true,
+    "bot_eval_use_subprocess": true,
+    "bot_eval_n_workers": 6,
+    "n_envs": 48,
+    "model_params": {
+      "policy": "MultiInputPolicy",
+      "learning_rate": {
+        "initial": 0.002,
+        "final": 0.0015
+      },
+      "n_steps": 8192,
+      "batch_size": 1024,
+      "n_epochs": 3,
+      "gamma": 0.99,
+      "gae_lambda": 0.95,
+      "clip_range": 0.2,
+      "clip_range_vf": null,
+      "normalize_advantage": true,
+      "ent_coef": {
+        "start": 0.1,
+        "end": 0.1
+      },
+      "vf_coef": 1.0,
+      "max_grad_norm": 0.5,
+      "target_kl": 0.02,
+      "tensorboard_log": "./tensorboard/",
+      "policy_kwargs": {
+        "net_arch": [
+          320,
+          320
+        ],
+        "features_extractor_kwargs": {
+          "cnn_features": 256
+        }
+      },
+      "verbose": 0
+    },
+    "callback_params": {
+      "early_stopping_patience": 0,
+      "save_best_min_episodes": 10000,
+      "checkpoint_save_freq": 10000,
+      "max_checkpoints": 3,
+      "checkpoint_name_prefix": "ppo_checkpoint",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "bot_eval_freq": 2000,
+      "bot_eval_use_episodes": true,
+      "bot_eval_intermediate": 100,
+      "bot_eval_final": 100,
+      "bot_eval_worker_device": "cpu",
+      "bot_eval_task_timeout_seconds": 600,
+      "save_best_robust": true,
+      "save_best_robust_seed": true,
+      "robust_window": 5,
+      "robust_drawdown_penalty": 0.5,
+      "robust_penalty_bot": 0.12,
+      "robust_penalty_hard": 0.2,
+      "model_gating_enabled": false,
+      "model_gating_min_worst_bot": 0.25,
+      "model_gating_min_worst_scenario_combined": 0.35,
+      "holdout_regular_scenarios": [
+        "holdout_regular_bot-01",
+        "holdout_regular_bot-02",
+        "holdout_regular_bot-03",
+        "holdout_regular_bot-04",
+        "holdout_regular_bot-05"
+      ],
+      "holdout_hard_scenarios": [
+        "holdout_hard_bot-01",
+        "holdout_hard_bot-02",
+        "holdout_hard_bot-03",
+        "holdout_hard_bot-04",
+        "holdout_hard_bot-05"
+      ],
+      "holdout_hard_opponent_budget_modifier": 1.1,
+      "bot_eval_weights": {
+        "greedy": 0.23,
+        "defensive": 0.23,
+        "control": 0.23,
+        "aggressive_smart": 0.15,
+        "adaptive": 0.16
+      },
+      "bot_eval_randomness": {
+        "greedy": 0.05,
+        "defensive": 0.05,
+        "control": 0.05,
+        "aggressive_smart": 0.05,
+        "adaptive": 0.05
+      }
+    },
+    "roster_pool_schedule": {
+      "enabled": false,
+      "training": {
+        "start_counts": {
+          "swarm": 16,
+          "troop": 10,
+          "elite": 6
+        },
+        "end_counts": {
+          "swarm": 16,
+          "troop": 10,
+          "elite": 6
+        }
+      }
+    },
+    "deployment_random_mix": {
+      "enabled": false,
+      "training_only": true,
+      "force_random_ratio_start": 0.1,
+      "force_random_ratio_end": 0.2,
+      "schedule": "linear",
+      "freeze_after_progress": 0.8,
+      "apply_to": "agent_only"
+    },
+    "observation_params": {
+      "obs_size": 108,
+      "perception_radius": 25,
+      "max_nearby_units": 12,
+      "max_valid_targets": 5,
+      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=108 = vecteur (16 global + 5 squad agg + 7x6 top-k figs + 9x5 enemy slots) ; la grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
+    },
+    "step_log_buffer_size": 200,
+    "vec_normalize": {
+      "enabled": true,
+      "norm_obs": true,
+      "norm_reward": true,
+      "clip_obs": 10.0,
+      "clip_reward": 10.0,
+      "gamma": 0.99
+    },
+    "vec_normalize_eval": {
+      "enabled": true,
+      "training": false,
+      "norm_reward": false
+    },
+    "bot_training": {
+      "ratios": {
+        "random": 0.1,
+        "greedy": 0.2,
+        "defensive": 0.2,
+        "control": 0.2,
+        "aggressive_smart": 0.15,
+        "adaptive": 0.15
+      },
+      "randomness": {
+        "greedy": 0.05,
+        "defensive": 0.05,
+        "control": 0.05,
+        "aggressive_smart": 0.05,
+        "adaptive": 0.05
+      }
+    },
+    "scenario_sampling": {
+      "eval_ref_strict": true,
+      "train_objective_count_weights": {
+        "1": 0.025,
+        "2": 0.025,
+        "3": 0.025,
+        "4": 0.025,
+        "5": 0.9
+      },
+      "eval_objective_count_weights": {
+        "5": 1.0
+      },
+      "train_wall_ref_weights": {
+        "default": 1.0
+      },
+      "eval_wall_refs": [
+        "walls-33.json",
+        "walls-mc1.json"
+      ],
+      "train_selection_mode": "uniform_within_count",
+      "eval_selection_mode": "uniform_within_count"
+    },
+    "training_hard": {
+      "enabled": false,
+      "target_episode_ratio": 0.3,
+      "max_scenario_weight": 4,
+      "scenario_names": []
+    },
+    "unit_rule_forcing": {
+      "enabled": false,
+      "target_controlled_episode_ratio": 0.2,
+      "max_scenario_weight": 6
+    }
+  },
+  "x5_append": {
+    "type": "################################################### x5 — curriculum phase 2 (board 180x156, scale ×5) ###################################################",
+    "seed": 12345,
+    "total_episodes": 30000,
+    "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
+    "agent_seat_mode": "random",
+    "eval_episodes": 10,
+    "bot_eval_scenario_pool": "holdout",
+    "bot_eval_show_progress": true,
+    "bot_eval_use_subprocess": true,
+    "bot_eval_n_workers": 6,
+    "n_envs": 48,
+    "model_params": {
+      "policy": "MultiInputPolicy",
+      "learning_rate": {
+        "initial": 0.0005,
+        "final": 0.0003
+      },
+      "n_steps": 8192,
+      "batch_size": 1024,
+      "n_epochs": 3,
+      "gamma": 0.99,
+      "gae_lambda": 0.95,
+      "clip_range": 0.2,
+      "clip_range_vf": null,
+      "normalize_advantage": true,
+      "ent_coef": {
+        "start": 0.1,
+        "end": 0.1
+      },
+      "vf_coef": 1.0,
+      "max_grad_norm": 0.5,
+      "target_kl": 0.018,
+      "tensorboard_log": "./tensorboard/",
+      "policy_kwargs": {
+        "net_arch": [
+          320,
+          320
+        ],
+        "features_extractor_kwargs": {
+          "cnn_features": 256
+        }
+      },
+      "verbose": 0
+    },
+    "callback_params": {
+      "early_stopping_patience": 0,
+      "save_best_min_episodes": 10000,
+      "checkpoint_save_freq": 10000,
+      "max_checkpoints": 3,
+      "checkpoint_name_prefix": "ppo_checkpoint",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "bot_eval_freq": 2000,
+      "bot_eval_use_episodes": true,
+      "bot_eval_intermediate": 100,
+      "bot_eval_final": 100,
+      "bot_eval_worker_device": "cpu",
+      "bot_eval_task_timeout_seconds": 3600,
+      "save_best_robust": true,
+      "save_best_robust_seed": true,
+      "robust_window": 5,
+      "robust_drawdown_penalty": 0.5,
+      "robust_penalty_bot": 0.12,
+      "robust_penalty_hard": 0.2,
+      "model_gating_enabled": false,
+      "model_gating_min_worst_bot": 0.25,
+      "model_gating_min_worst_scenario_combined": 0.35,
+      "holdout_regular_scenarios": [
+        "holdout_regular_bot-01",
+        "holdout_regular_bot-02",
+        "holdout_regular_bot-03",
+        "holdout_regular_bot-04",
+        "holdout_regular_bot-05"
+      ],
+      "holdout_hard_scenarios": [
+        "holdout_hard_bot-01",
+        "holdout_hard_bot-02",
+        "holdout_hard_bot-03",
+        "holdout_hard_bot-04",
+        "holdout_hard_bot-05"
+      ],
+      "holdout_hard_opponent_budget_modifier": 1.1,
+      "bot_eval_weights": {
+        "greedy": 0.23,
+        "defensive": 0.23,
+        "control": 0.23,
+        "aggressive_smart": 0.15,
+        "adaptive": 0.16
+      },
+      "bot_eval_randomness": {
+        "greedy": 0.05,
+        "defensive": 0.05,
+        "control": 0.05,
+        "aggressive_smart": 0.05,
+        "adaptive": 0.05
+      }
+    },
+    "roster_pool_schedule": {
+      "enabled": false,
+      "training": {
+        "start_counts": {
+          "swarm": 16,
+          "troop": 10,
+          "elite": 6
+        },
+        "end_counts": {
+          "swarm": 16,
+          "troop": 10,
+          "elite": 6
+        }
+      }
+    },
+    "deployment_random_mix": {
+      "enabled": false,
+      "training_only": true,
+      "force_random_ratio_start": 0.1,
+      "force_random_ratio_end": 0.2,
+      "schedule": "linear",
+      "freeze_after_progress": 0.8,
+      "apply_to": "agent_only"
+    },
+    "observation_params": {
+      "obs_size": 108,
+      "perception_radius": 25,
+      "max_nearby_units": 12,
+      "max_valid_targets": 5,
+      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=108 = vecteur (16 global + 5 squad agg + 7x6 top-k figs + 9x5 enemy slots) ; la grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
+    },
+    "step_log_buffer_size": 200,
+    "vec_normalize": {
+      "enabled": true,
+      "norm_obs": true,
+      "norm_reward": true,
+      "clip_obs": 10.0,
+      "clip_reward": 10.0,
+      "gamma": 0.99,
+      "reset_on_curriculum": true
+    },
+    "vec_normalize_eval": {
+      "enabled": true,
+      "training": false,
+      "norm_reward": false
+    },
+    "bot_training": {
+      "ratios": {
+        "random": 0.1,
+        "greedy": 0.2,
+        "defensive": 0.2,
+        "control": 0.2,
+        "aggressive_smart": 0.15,
+        "adaptive": 0.15
+      },
+      "randomness": {
+        "greedy": 0.05,
+        "defensive": 0.05,
+        "control": 0.05,
+        "aggressive_smart": 0.05,
+        "adaptive": 0.05
+      }
+    },
+    "scenario_sampling": {
+      "eval_ref_strict": true,
+      "train_objective_count_weights": {
+        "1": 0.025,
+        "2": 0.025,
+        "3": 0.025,
+        "4": 0.025,
+        "5": 0.9
+      },
+      "eval_objective_count_weights": {
+        "5": 1.0
+      },
+      "train_wall_ref_weights": {
+        "default": 1.0
+      },
+      "eval_wall_refs": [
+        "walls-33.json",
+        "walls-mc1.json"
+      ],
+      "train_selection_mode": "uniform_within_count",
+      "eval_selection_mode": "uniform_within_count"
+    },
+    "training_hard": {
+      "enabled": false,
+      "target_episode_ratio": 0.3,
+      "max_scenario_weight": 4,
+      "scenario_names": []
+    },
+    "unit_rule_forcing": {
+      "enabled": false,
+      "target_controlled_episode_ratio": 0.2,
+      "max_scenario_weight": 6
+    }
+  },
+  "x5_new": {
+    "type": "################################################### x1 — curriculum phase 1 (board 25x21, scale ×1) ###################################################",
+    "seed": 12345,
+    "total_episodes": 10000,
+    "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
+    "agent_seat_mode": "random",
+    "eval_episodes": 10,
+    "bot_eval_scenario_pool": "holdout",
+    "bot_eval_show_progress": true,
+    "bot_eval_use_subprocess": true,
+    "bot_eval_n_workers": 6,
+    "n_envs": 48,
+    "model_params": {
+      "policy": "MultiInputPolicy",
+      "learning_rate": {
+        "initial": 0.002,
+        "final": 0.0015
+      },
+      "n_steps": 8192,
+      "batch_size": 1024,
+      "n_epochs": 3,
+      "gamma": 0.99,
+      "gae_lambda": 0.95,
+      "clip_range": 0.2,
+      "clip_range_vf": null,
+      "normalize_advantage": true,
+      "ent_coef": {
+        "start": 0.1,
+        "end": 0.1
+      },
+      "vf_coef": 1.0,
+      "max_grad_norm": 0.5,
+      "target_kl": 0.02,
+      "tensorboard_log": "./tensorboard/",
+      "policy_kwargs": {
+        "net_arch": [
+          320,
+          320
+        ],
+        "features_extractor_kwargs": {
+          "cnn_features": 256
+        }
+      },
+      "verbose": 0
+    },
+    "callback_params": {
+      "early_stopping_patience": 0,
+      "save_best_min_episodes": 10000,
+      "checkpoint_save_freq": 10000,
+      "max_checkpoints": 3,
+      "checkpoint_name_prefix": "ppo_checkpoint",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "bot_eval_freq": 2000,
+      "bot_eval_use_episodes": true,
+      "bot_eval_intermediate": 100,
+      "bot_eval_final": 100,
+      "bot_eval_worker_device": "cpu",
+      "bot_eval_task_timeout_seconds": 3600,
+      "save_best_robust": true,
+      "save_best_robust_seed": true,
+      "robust_window": 5,
+      "robust_drawdown_penalty": 0.5,
+      "robust_penalty_bot": 0.12,
+      "robust_penalty_hard": 0.2,
+      "model_gating_enabled": false,
+      "model_gating_min_worst_bot": 0.25,
+      "model_gating_min_worst_scenario_combined": 0.35,
+      "holdout_regular_scenarios": [
+        "holdout_regular_bot-01",
+        "holdout_regular_bot-02",
+        "holdout_regular_bot-03",
+        "holdout_regular_bot-04",
+        "holdout_regular_bot-05"
+      ],
+      "holdout_hard_scenarios": [
+        "holdout_hard_bot-01",
+        "holdout_hard_bot-02",
+        "holdout_hard_bot-03",
+        "holdout_hard_bot-04",
+        "holdout_hard_bot-05"
+      ],
+      "holdout_hard_opponent_budget_modifier": 1.1,
+      "bot_eval_weights": {
+        "greedy": 0.23,
+        "defensive": 0.23,
+        "control": 0.23,
+        "aggressive_smart": 0.15,
+        "adaptive": 0.16
+      },
+      "bot_eval_randomness": {
+        "greedy": 0.05,
+        "defensive": 0.05,
+        "control": 0.05,
+        "aggressive_smart": 0.05,
+        "adaptive": 0.05
+      }
+    },
+    "roster_pool_schedule": {
+      "enabled": false,
+      "training": {
+        "start_counts": {
+          "swarm": 16,
+          "troop": 10,
+          "elite": 6
+        },
+        "end_counts": {
+          "swarm": 16,
+          "troop": 10,
+          "elite": 6
+        }
+      }
+    },
+    "deployment_random_mix": {
+      "enabled": false,
+      "training_only": true,
+      "force_random_ratio_start": 0.1,
+      "force_random_ratio_end": 0.2,
+      "schedule": "linear",
+      "freeze_after_progress": 0.8,
+      "apply_to": "agent_only"
+    },
+    "observation_params": {
+      "obs_size": 108,
+      "perception_radius": 25,
+      "max_nearby_units": 12,
+      "max_valid_targets": 5,
+      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=108 = vecteur (16 global + 5 squad agg + 7x6 top-k figs + 9x5 enemy slots) ; la grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
+    },
+    "step_log_buffer_size": 200,
+    "vec_normalize": {
+      "enabled": true,
+      "norm_obs": true,
+      "norm_reward": true,
+      "clip_obs": 10.0,
+      "clip_reward": 10.0,
+      "gamma": 0.99
+    },
+    "vec_normalize_eval": {
+      "enabled": true,
+      "training": false,
+      "norm_reward": false
+    },
+    "bot_training": {
+      "ratios": {
+        "random": 0.1,
+        "greedy": 0.2,
+        "defensive": 0.2,
+        "control": 0.2,
+        "aggressive_smart": 0.15,
+        "adaptive": 0.15
+      },
+      "randomness": {
+        "greedy": 0.05,
+        "defensive": 0.05,
+        "control": 0.05,
+        "aggressive_smart": 0.05,
+        "adaptive": 0.05
+      }
+    },
+    "scenario_sampling": {
+      "eval_ref_strict": true,
+      "train_objective_count_weights": {
+        "1": 0.025,
+        "2": 0.025,
+        "3": 0.025,
+        "4": 0.025,
+        "5": 0.9
+      },
+      "eval_objective_count_weights": {
+        "5": 1.0
+      },
+      "train_wall_ref_weights": {
+        "default": 1.0
+      },
+      "eval_wall_refs": [
+        "walls-33.json",
+        "walls-mc1.json"
+      ],
+      "train_selection_mode": "uniform_within_count",
+      "eval_selection_mode": "uniform_within_count"
+    },
+    "training_hard": {
+      "enabled": false,
+      "target_episode_ratio": 0.3,
+      "max_scenario_weight": 4,
+      "scenario_names": []
+    },
+    "unit_rule_forcing": {
+      "enabled": false,
+      "target_controlled_episode_ratio": 0.2,
+      "max_scenario_weight": 6
+    }
+  },
+  "x1_debug": {
+    "type": "################################################### X1 debug ###################################################",
+    "seed": 12345,
+    "total_episodes": 500,
+    "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
+    "agent_seat_mode": "random",
+    "eval_episodes": 10,
+    "bot_eval_scenario_pool": "holdout",
+    "bot_eval_show_progress": true,
+    "bot_eval_use_subprocess": true,
+    "bot_eval_n_workers": 6,
+    "n_envs": 48,
+    "callback_params": {
+      "early_stopping_patience": 0,
+      "save_best_min_episodes": 10000,
+      "checkpoint_save_freq": 10000,
+      "max_checkpoints": 3,
+      "checkpoint_name_prefix": "ppo_checkpoint",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "bot_eval_freq": 2000,
+      "bot_eval_use_episodes": true,
+      "bot_eval_intermediate": 5,
+      "bot_eval_final": 5,
+      "bot_eval_worker_device": "cpu",
+      "bot_eval_task_timeout_seconds": 600,
+      "save_best_robust": false,
+      "save_best_robust_seed": false,
+      "robust_window": 5,
+      "robust_drawdown_penalty": 0.5,
+      "robust_penalty_bot": 0.12,
+      "robust_penalty_hard": 0.2,
+      "model_gating_enabled": false,
+      "model_gating_min_worst_bot": 0.25,
+      "model_gating_min_worst_scenario_combined": 0.35,
+      "holdout_regular_scenarios": [
+        "holdout_regular_bot-01",
+        "holdout_regular_bot-02",
+        "holdout_regular_bot-03",
+        "holdout_regular_bot-04",
+        "holdout_regular_bot-05"
+      ],
+      "holdout_hard_scenarios": [
+        "holdout_hard_bot-01",
+        "holdout_hard_bot-02",
+        "holdout_hard_bot-03",
+        "holdout_hard_bot-04",
+        "holdout_hard_bot-05"
+      ],
+      "holdout_hard_opponent_budget_modifier": 1.1,
+      "bot_eval_weights": {
+        "greedy": 0.23,
+        "defensive": 0.23,
+        "control": 0.23,
+        "aggressive_smart": 0.15,
+        "adaptive": 0.16
+      },
+      "bot_eval_randomness": {
+        "greedy": 0.05,
+        "defensive": 0.05,
+        "control": 0.05,
+        "aggressive_smart": 0.05,
+        "adaptive": 0.05
+      }
+    },
+    "roster_pool_schedule": {
+      "enabled": false,
+      "training": {
+        "start_counts": {
+          "swarm": 16,
+          "troop": 10,
+          "elite": 6
+        },
+        "end_counts": {
+          "swarm": 16,
+          "troop": 10,
+          "elite": 6
+        }
+      }
+    },
+    "deployment_random_mix": {
+      "enabled": false,
+      "training_only": true,
+      "force_random_ratio_start": 0.1,
+      "force_random_ratio_end": 0.2,
+      "schedule": "linear",
+      "freeze_after_progress": 0.8,
+      "apply_to": "agent_only"
+    },
+    "observation_params": {
+      "obs_size": 108,
+      "perception_radius": 25,
+      "max_nearby_units": 12,
+      "max_valid_targets": 5,
+      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=108 = vecteur (16 global + 5 squad agg + 7x6 top-k figs + 9x5 enemy slots) ; la grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
+    },
+    "step_log_buffer_size": 200,
+    "model_params": {
+      "policy": "MultiInputPolicy",
+      "learning_rate": {
+        "initial": 0.0005,
+        "final": 0.0003
+      },
+      "n_steps": 8192,
+      "batch_size": 1024,
+      "n_epochs": 3,
+      "gamma": 0.99,
+      "gae_lambda": 0.95,
+      "clip_range": 0.2,
+      "clip_range_vf": null,
+      "normalize_advantage": true,
+      "ent_coef": {
+        "start": 0.1,
+        "end": 0.1
+      },
+      "vf_coef": 1.0,
+      "max_grad_norm": 0.5,
+      "target_kl": 0.02,
+      "tensorboard_log": "./tensorboard/",
+      "policy_kwargs": {
+        "net_arch": [
+          320,
+          320
+        ],
+        "features_extractor_kwargs": {
+          "cnn_features": 256
+        }
+      },
+      "verbose": 0
+    },
+    "vec_normalize": {
+      "enabled": true,
+      "norm_obs": true,
+      "norm_reward": true,
+      "clip_obs": 10.0,
+      "clip_reward": 10.0,
+      "gamma": 0.99
+    },
+    "vec_normalize_eval": {
+      "enabled": true,
+      "training": false,
+      "norm_reward": false
+    },
+    "bot_training": {
+      "ratios": {
+        "random": 0.1,
+        "greedy": 0.2,
+        "defensive": 0.2,
+        "control": 0.2,
+        "aggressive_smart": 0.15,
+        "adaptive": 0.15
+      },
+      "randomness": {
+        "greedy": 0.05,
+        "defensive": 0.05,
+        "control": 0.05,
+        "aggressive_smart": 0.05,
+        "adaptive": 0.05
+      }
+    },
+    "scenario_sampling": {
+      "eval_ref_strict": true,
+      "train_objective_count_weights": {
+        "1": 0.025,
+        "2": 0.025,
+        "3": 0.025,
+        "4": 0.025,
+        "5": 0.9
+      },
+      "eval_objective_count_weights": {
+        "5": 1.0
+      },
+      "train_wall_ref_weights": {
+        "default": 1.0
+      },
+      "eval_wall_refs": [
+        "walls-33.json",
+        "walls-mc1.json"
+      ],
+      "train_selection_mode": "uniform_within_count",
+      "eval_selection_mode": "uniform_within_count"
+    },
+    "training_hard": {
+      "enabled": false,
+      "target_episode_ratio": 0.3,
+      "max_scenario_weight": 4,
+      "scenario_names": []
+    },
+    "unit_rule_forcing": {
+      "enabled": false,
+      "target_controlled_episode_ratio": 0.2,
+      "max_scenario_weight": 6
+    }
+  },
+  "x5_debug": {
+    "type": "################################################### X5 debug ###################################################",
+    "seed": 12345,
+    "total_episodes": 10,
+    "total_episodes_classic----------------------": 500,
+    "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
+    "agent_seat_mode": "random",
+    "eval_episodes": 0,
+    "bot_eval_scenario_pool": "holdout",
+    "bot_eval_show_progress": true,
+    "bot_eval_use_subprocess": true,
+    "bot_eval_n_workers": 3,
+    "n_envs": 8,
+    "n_envs_normal--------------------------------": 48,
+    "callback_params": {
+      "early_stopping_patience": 0,
+      "save_best_min_episodes": 10000,
+      "checkpoint_save_freq": 10000,
+      "max_checkpoints": 3,
+      "checkpoint_name_prefix": "ppo_checkpoint",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "bot_eval_freq": 500,
+      "bot_eval_freq_normal": "-----------------------------------------------------2000",
+      "bot_eval_use_episodes": true,
+      "bot_eval_intermediate": 5,
+      "bot_eval_intermediate_normal": "-----------------------------------------------100",
+      "bot_eval_final": 1,
+      "bot_eval_worker_device": "cpu",
+      "bot_eval_task_timeout_seconds": 600,
+      "save_best_robust": false,
+      "save_best_robust_seed": false,
+      "robust_window": 5,
+      "robust_drawdown_penalty": 0.5,
+      "robust_penalty_bot": 0.12,
+      "robust_penalty_hard": 0.2,
+      "model_gating_enabled": false,
+      "model_gating_min_worst_bot": 0.25,
+      "model_gating_min_worst_scenario_combined": 0.35,
+      "holdout_regular_scenarios": [
+        "holdout_regular_bot-01",
+        "holdout_regular_bot-02",
+        "holdout_regular_bot-03",
+        "holdout_regular_bot-04",
+        "holdout_regular_bot-05"
+      ],
+      "holdout_hard_scenarios": [
+        "holdout_hard_bot-01",
+        "holdout_hard_bot-02",
+        "holdout_hard_bot-03",
+        "holdout_hard_bot-04",
+        "holdout_hard_bot-05"
+      ],
+      "holdout_hard_opponent_budget_modifier": 1.1,
+      "bot_eval_weights": {
+        "greedy": 0.23,
+        "defensive": 0.23,
+        "control": 0.23,
+        "aggressive_smart": 0.15,
+        "adaptive": 0.16
+      },
+      "bot_eval_randomness": {
+        "greedy": 0.05,
+        "defensive": 0.05,
+        "control": 0.05,
+        "aggressive_smart": 0.05,
+        "adaptive": 0.05
+      }
+    },
+    "roster_pool_schedule": {
+      "enabled": false,
+      "training": {
+        "start_counts": {
+          "swarm": 16,
+          "troop": 10,
+          "elite": 6
+        },
+        "end_counts": {
+          "swarm": 16,
+          "troop": 10,
+          "elite": 6
+        }
+      }
+    },
+    "deployment_random_mix": {
+      "enabled": false,
+      "training_only": true,
+      "force_random_ratio_start": 0.1,
+      "force_random_ratio_end": 0.2,
+      "schedule": "linear",
+      "freeze_after_progress": 0.8,
+      "apply_to": "agent_only"
+    },
+    "observation_params": {
+      "obs_size": 108,
+      "perception_radius": 25,
+      "max_nearby_units": 12,
+      "max_valid_targets": 5,
+      "justification": "Refonte spatiale du move (move_action_space_spatial_rework.md). obs_size=108 = vecteur (16 global + 5 squad agg + 7x6 top-k figs + 9x5 enemy slots) ; la grille 32x32x6 (murs/allies/ennemis/EZ/objectifs/niveau) est fournie a part. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE = 1047 = 1032 micro [1024 cellules de la grille egocentrique + wait + 5 shoot + charge + fight] + 15 macro [5 objectifs x 3 intents]). La recopier ici creait une 2e source de verite qui ne pouvait qu'avoir tort."
+    },
+    "step_log_buffer_size": 200,
+    "model_params": {
+      "policy": "MultiInputPolicy",
+      "learning_rate": {
+        "initial": 0.0005,
+        "final": 0.0003
+      },
+      "n_steps": 8192,
+      "batch_size": 1024,
+      "n_epochs": 3,
+      "gamma": 0.99,
+      "gae_lambda": 0.95,
+      "clip_range": 0.2,
+      "clip_range_vf": null,
+      "normalize_advantage": true,
+      "ent_coef": {
+        "start": 0.1,
+        "end": 0.1
+      },
+      "vf_coef": 1.0,
+      "max_grad_norm": 0.5,
+      "target_kl": 0.02,
+      "tensorboard_log": "./tensorboard/",
+      "policy_kwargs": {
+        "net_arch": [
+          320,
+          320
+        ],
+        "features_extractor_kwargs": {
+          "cnn_features": 256
+        }
+      },
+      "verbose": 0
+    },
+    "vec_normalize": {
+      "enabled": true,
+      "norm_obs": true,
+      "norm_reward": true,
+      "clip_obs": 10.0,
+      "clip_reward": 10.0,
+      "gamma": 0.99
+    },
+    "vec_normalize_eval": {
+      "enabled": true,
+      "training": false,
+      "norm_reward": false
+    },
+    "bot_training": {
+      "ratios": {
+        "random": 0.1,
+        "greedy": 0.2,
+        "defensive": 0.2,
+        "control": 0.2,
+        "aggressive_smart": 0.15,
+        "adaptive": 0.15
+      },
+      "randomness": {
+        "greedy": 0.05,
+        "defensive": 0.05,
+        "control": 0.05,
+        "aggressive_smart": 0.05,
+        "adaptive": 0.05
+      }
+    },
+    "scenario_sampling": {
+      "eval_ref_strict": true,
+      "train_objective_count_weights": {
+        "1": 0.025,
+        "2": 0.025,
+        "3": 0.025,
+        "4": 0.025,
+        "5": 0.9
+      },
+      "eval_objective_count_weights": {
+        "5": 1.0
+      },
+      "train_wall_ref_weights": {
+        "default": 1.0
+      },
+      "eval_wall_refs": [
+        "walls-33.json",
+        "walls-mc1.json"
+      ],
+      "train_selection_mode": "uniform_within_count",
+      "eval_selection_mode": "uniform_within_count"
+    },
+    "training_hard": {
+      "enabled": false,
+      "target_episode_ratio": 0.3,
+      "max_scenario_weight": 4,
+      "scenario_names": []
+    },
+    "unit_rule_forcing": {
+      "enabled": false,
+      "target_controlled_episode_ratio": 0.2,
+      "max_scenario_weight": 6
+    }
+  }
+}

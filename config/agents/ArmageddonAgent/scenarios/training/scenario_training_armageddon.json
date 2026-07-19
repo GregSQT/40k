@@ -1,0 +1,14 @@
+{
+  "deployment_type": "active",
+  "scale": "500pts",
+  "agent_roster_ref": "training_random",
+  "opponent_roster_ref": [
+    "training/opponent_training_roster_space_marines.json",
+    "training/opponent_training_roster_orks.json"
+  ],
+  "primary_objectives": [
+    "objectives_control"
+  ],
+  "board_ref": "44x60x5",
+  "terrain_ref": "terrain-mc1.json"
+}
