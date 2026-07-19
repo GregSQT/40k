@@ -11,7 +11,7 @@ from engine.game_utils import get_unit_by_id
 from engine.combat_utils import set_unit_coordinates
 from engine.terrain_utils import validate_floor_placement, resolve_model_floor_level
 from engine.phase_handlers.shared_utils import (
-    update_units_cache_position, rebuild_choice_timing_index,
+    rebuild_choice_timing_index,
     compute_candidate_footprint, build_occupied_positions_set,
     candidate_overlaps_any_unit, coherency_violation_flags,
     update_model_position,
@@ -167,6 +167,40 @@ def _deployed_occupied_positions(
     return occupied
 
 
+_FOOTPRINT_OFFSETS_CACHE: Dict[
+    Tuple[Any, ...], Optional[Tuple[Tuple[Tuple[int, int], ...], ...]]
+] = {}
+
+
+def _footprint_offsets_for(
+    base_shape: str, base_size: Any, orientation: int, engagement_zone: int
+) -> Optional[Tuple[Tuple[Tuple[int, int], ...], ...]]:
+    """Offsets d'empreinte (colonne paire, colonne impaire) pour une géométrie de socle.
+
+    ``None`` = socle mono-hex (``engagement_zone <= 1`` ou ``base_size == 1``) : rien à
+    translater, l'empreinte est la cellule elle-même — les DEUX cas dégénérés de
+    ``_compute_unit_occupied_hexes``, reproduits à l'identique.
+
+    Cache au niveau MODULE : les offsets ne dépendent que de la géométrie du socle
+    (forme, taille, orientation), jamais de l'état de jeu — les recalculer par appel de
+    ``generate_compact_formation`` rejetterait le travail à chaque formation.
+    """
+    key = (
+        base_shape,
+        tuple(base_size) if isinstance(base_size, list) else base_size,
+        int(orientation),
+        int(engagement_zone) <= 1,
+    )
+    if key not in _FOOTPRINT_OFFSETS_CACHE:
+        from engine.hex_utils import precompute_footprint_offsets
+
+        _FOOTPRINT_OFFSETS_CACHE[key] = (
+            None if (int(engagement_zone) <= 1 or base_size == 1)
+            else precompute_footprint_offsets(base_shape, base_size, int(orientation))
+        )
+    return _FOOTPRINT_OFFSETS_CACHE[key]
+
+
 def _model_footprint(
     game_state: Dict[str, Any], model: Dict[str, Any], col: int, row: int
 ) -> Set[Tuple[int, int]]:
@@ -235,6 +269,8 @@ def generate_compact_formation(
         Socle, footprints_overlap, _hex_center, _HEX_CIRCUMRADIUS,
         build_hex_center_index, disc_overlaps_indexed_hexes, round_base_radius_norm,
     )
+    from engine.phase_handlers.shared_utils import get_engagement_zone
+    ez = get_engagement_zone(game_state)
     # Index _low_clear construit une fois (base ronde de l'unité) : clairance disque O(1) par case spirale.
     _cf_shape = require_key(unit, "BASE_SHAPE")
     _cf_radius = round_base_radius_norm(require_key(unit, "BASE_SIZE")) if _cf_shape == "round" else 0.0
@@ -246,6 +282,30 @@ def generate_compact_formation(
     placed: List[Tuple[str, int, int]] = []
     placed_socles: List["Socle"] = []
 
+    # Empreinte par TRANSLATION d'offsets pré-calculés, au lieu de la recalculer à chaque case
+    # de la spirale. Mesuré (cProfile, board x5, escouade de 6) : `_legal_socle` = 92 % du coût
+    # de cette fonction, dont 67 % dans `compute_occupied_hexes`/`_footprint_round` — 2590
+    # reconstructions d'empreinte et 341 660 appels à `_hex_center` pour UNE formation.
+    # `precompute_footprint_offsets` est fait pour ça (docstring : « expensive when called
+    # per-BFS-step … computes it ONCE at two reference positions ») et sert déjà au masque de
+    # déploiement multi-hex (`_get_valid_deployment_hexes`). Deux jeux d'offsets car en grille
+    # offset odd-q la forme dépend de la PARITÉ de colonne.
+    # Équivalence stricte avec `_model_footprint` : celui-ci délègue à
+    # `compute_candidate_footprint` → `_compute_unit_occupied_hexes`, qui renvoie {(col,row)}
+    # quand `engagement_zone <= 1` OU `base_size == 1`, et `compute_occupied_hexes` sinon —
+    # les deux cas dégénérés sont reproduits ici. Verrouillé par test.
+    def _model_fp(model: Dict[str, Any], c: int, r: int) -> Set[Tuple[int, int]]:
+        offsets = _footprint_offsets_for(
+            require_key(model, "BASE_SHAPE"),
+            require_key(model, "BASE_SIZE"),
+            int(model.get("orientation", 0)),  # get allowed (défaut 0 = face nord)
+            ez,
+        )
+        if offsets is None:
+            return {(int(c), int(r))}
+        off = offsets[0] if int(c) % 2 == 0 else offsets[1]
+        return {(int(c) + dc, int(r) + dr) for dc, dr in off}
+
     def _legal_socle(model: Dict[str, Any], c: int, r: int) -> Optional["Socle"]:
         """Place légale = empreinte dans la zone (hors mur / hors unités déployées) ET
         à 1 hex de marge des figs déjà posées (empreinte + anneau de voisins).
@@ -254,7 +314,7 @@ def generate_compact_formation(
         (``footprints_overlap``, preview/commit) tolère le contact — non modifiée — pour
         ne pas flagger en rouge un ajustement manuel où les socles se touchent."""
         _is_round = require_key(model, "BASE_SHAPE") == "round"
-        fp = _model_footprint(game_state, model, c, r)
+        fp = _model_fp(model, c, r)
         for cc, rr in fp:
             if cc < 0 or cc >= board_cols or rr < 0 or rr >= board_rows:
                 return None
@@ -317,7 +377,7 @@ def generate_compact_formation(
         model = models_cache[model_ids[j]]
         chosen: Optional[Tuple[int, int, "Socle"]] = None
         for c, r in spiral:
-            fp = _model_footprint(game_state, model, c, r)
+            fp = _model_fp(model, c, r)
             cand = Socle(
                 shape=require_key(model, "BASE_SHAPE"),
                 base_size=require_key(model, "BASE_SIZE"),
@@ -821,6 +881,103 @@ def deployment_preview_action(
     }
 
 
+def build_validated_deployment_plan(
+    game_state: Dict[str, Any], squad_id: str, anchor_col: int, anchor_row: int
+) -> Optional[List[Tuple[str, int, int, int]]]:
+    """Formation compacte AU SOL autour de l'ancre + validation par-figurine.
+
+    Retourne le plan en 4-uplets ``(model_id, col, row, level=0)`` si TOUTES les figurines
+    sont légales (``deployment_preview_plan.can_validate``), sinon ``None``.
+
+    Pourquoi cette fonction existe : ``generate_compact_formation`` est un helper UX qui
+    peut rendre un plan avec des figurines HORS ZONE (overflow documenté : « signalées
+    rouge par le preview, à repositionner »). Le plan n'est donc PAS légal par
+    construction — seul le preview le garantit. Tout appelant qui veut committer un
+    placement par-figurine depuis une simple ancre DOIT passer par ici.
+
+    Lecture pure et DÉTERMINISTE (spirale BFS + preview, aucune écriture) : le décodeur gym
+    l'appelle pour choisir une ancre exécutable et le commit la rappelle pour produire le
+    plan — à état identique, les deux obtiennent le MÊME plan. Même contrat que la carte de
+    cellules du move (``store_squad_move_cell_map``) : ce que le masque autorise est
+    exactement ce que le commit exécute.
+
+    ⚠️ L'ancre ORIENTE le placement, elle ne le CONTRAINT pas : la spirale de
+    ``generate_compact_formation`` retient la 1re case légale, donc une ancre hors zone place
+    l'escouade dans la zone la plus proche au lieu d'échouer. Le refus d'une ancre hors zone
+    reste donc la responsabilité de la validation mono-ancre de ``deploy_unit``
+    (``deploy_footprint_outside_zone``) — ne pas la retirer en croyant ce helper suffisant.
+
+    Niveau 0 : la formation est générée au sol (cf. ``generate_compact_formation``). Les
+    étages restent Phase B pour le gym ; le flux PvP par escouade passe, lui, par
+    ``deploy_generate_formation`` avec son niveau de vue.
+    """
+    plan = generate_compact_formation(game_state, str(squad_id), int(anchor_col), int(anchor_row))
+    leveled: List[Tuple[str, int, int, int]] = [(mid, c, r, 0) for mid, c, r in plan]
+    preview = deployment_preview_plan(game_state, str(squad_id), leveled)
+    if not preview["can_validate"]:
+        return None
+    return leveled
+
+
+DEPLOY_PLAN_CACHE_KEY = "_deploy_plan_cache"
+
+
+def _deploy_plan_cache_stamp(
+    game_state: Dict[str, Any], squad_id: str, anchor_col: int, anchor_row: int
+) -> Dict[str, Any]:
+    """Tampon d'identité d'un plan mémoisé : escouade + ancre + phase + avancement.
+
+    ``deployed_count`` capture le SEUL changement d'état capable de rendre un plan périmé
+    entre sa validation et son commit (une autre escouade posée entre-temps déplace les
+    chevauchements). Miroir du tampon (ancre, phase) de ``store_squad_move_cell_map``.
+    """
+    deployment_state = require_key(game_state, "deployment_state")
+    return {
+        "squad_id": str(squad_id),
+        "anchor": (int(anchor_col), int(anchor_row)),
+        "phase": str(game_state.get("phase", "")),  # get allowed (board sans phase posée)
+        "deployed_count": len(require_key(deployment_state, "deployed_units")),
+    }
+
+
+def store_validated_deployment_plan(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    anchor_col: int,
+    anchor_row: int,
+    plan: List[Tuple[str, int, int, int]],
+) -> None:
+    """Mémoise le plan validé par le décodeur pour que le commit ne le RECALCULE pas.
+
+    Pure optimisation : ``build_validated_deployment_plan`` est déterministe (verrouillé par
+    test), donc un recalcul rendrait le même plan — la mémo n'est jamais une source de vérité
+    divergente, seulement l'économie d'un 2e ``generate_compact_formation`` (~77 ms mesurés sur
+    board x5, soit le double du coût de la phase de déploiement si on le paie deux fois).
+    """
+    game_state[DEPLOY_PLAN_CACHE_KEY] = {
+        **_deploy_plan_cache_stamp(game_state, squad_id, anchor_col, anchor_row),
+        "plan": plan,
+    }
+
+
+def read_validated_deployment_plan(
+    game_state: Dict[str, Any], squad_id: str, anchor_col: int, anchor_row: int
+) -> Optional[List[Tuple[str, int, int, int]]]:
+    """Relit le plan mémoisé SI son tampon correspond exactement, sinon ``None``.
+
+    ``None`` est un état LÉGITIME, pas une erreur masquée : les appelants sans décodeur
+    (auto-déploiement du tutoriel PvP, drag mono-socle) n'en mémoisent jamais — ils passent
+    simplement par le calcul.
+    """
+    cached = game_state.get(DEPLOY_PLAN_CACHE_KEY)  # get allowed (aucun plan mémoisé)
+    if cached is None:
+        return None
+    stamp = _deploy_plan_cache_stamp(game_state, squad_id, anchor_col, anchor_row)
+    if any(cached.get(k) != v for k, v in stamp.items()):  # get allowed (comparaison de tampon)
+        return None
+    return require_key(cached, "plan")
+
+
 def _apply_deploy_plan(
     game_state: Dict[str, Any], action: Dict[str, Any]
 ) -> Tuple[bool, Dict[str, Any]]:
@@ -1021,9 +1178,31 @@ def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]
     ):
         return False, {"error": "deploy_footprint_occupied", "unitId": unit_id}
 
-    set_unit_coordinates(unit, dest_col, dest_row)
-    update_units_cache_position(game_state, unit_id, dest_col, dest_row)
-    rebuild_choice_timing_index(game_state)
+    # Commit PAR-FIGURINE, via le MÊME écrivain que le flux PvP par escouade
+    # (``_apply_deploy_plan`` → ``update_model_position`` par figurine, puis sync de l'ancre).
+    # L'ancien commit n'écrivait que l'ancre (``set_unit_coordinates`` +
+    # ``update_units_cache_position``, qui ne touchent JAMAIS ``models_cache``) : les figurines
+    # restaient à (-1,-1) et le pipeline squad par-figurine explosait une phase plus tard
+    # (``build_rigid_plan`` translatait 6 figurines confondues sur un même hex → « incohérence
+    # masque/exécution » au premier move). Cf. V11 T6-f.
+    # Aucune formation légale à cette ancre = refus EXPLICITE : le décodeur gym ne propose que
+    # des ancres dont le plan est validé (``_select_deployment_hex_for_action``), donc ce retour
+    # ne concerne que les appelants qui imposent une ancre (tutoriel PvP, drag mono-socle).
+    plan = read_validated_deployment_plan(game_state, unit_id, int(dest_col), int(dest_row))
+    if plan is None:
+        plan = build_validated_deployment_plan(game_state, unit_id, int(dest_col), int(dest_row))
+    if plan is None:
+        return False, {
+            "error": "deploy_plan_invalid",
+            "unitId": unit_id,
+            "anchor": (int(dest_col), int(dest_row)),
+        }
+    ok, plan_err = _apply_deploy_plan(
+        game_state,
+        {"unitId": unit_id, "plan": [[mid, c, r, lv] for mid, c, r, lv in plan]},
+    )
+    if not ok:
+        return False, plan_err
     _mark_deployed(deployment_state, unit_id, int(current_deployer))
 
     next_deployer = _resolve_next_deployer_after_success(deployment_state, int(current_deployer))
@@ -1033,11 +1212,14 @@ def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]
         deployment_state["current_deployer"] = next_deployer
         game_state["current_player"] = next_deployer
 
+    # Ancre EFFECTIVE (recalculée depuis les figurines par ``_apply_deploy_plan``), pas l'ancre
+    # demandée : la formation compacte peut décaler la 1re figurine si la case du clic est prise.
+    _committed = require_key(require_key(game_state, "units_cache"), unit_id)
     result = {
         "action": "deploy_unit",
         "unitId": unit_id,
-        "destCol": dest_col,
-        "destRow": dest_row,
+        "destCol": int(require_key(_committed, "col")),
+        "destRow": int(require_key(_committed, "row")),
         "deployment_complete": deployment_state.get("deployment_complete", False)
     }
 

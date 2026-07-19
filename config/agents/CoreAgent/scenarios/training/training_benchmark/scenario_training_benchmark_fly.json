@@ -8,5 +8,5 @@
     "objectives_control"
   ],
   "board_ref": "44x60x5",
-  "terrain_ref": "terrain-train-03.json"
+  "terrain_ref": "terrain-mc1.json"
 }

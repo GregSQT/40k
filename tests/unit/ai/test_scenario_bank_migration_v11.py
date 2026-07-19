@@ -24,7 +24,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCEN_ROOT = PROJECT_ROOT / "config" / "agents" / "CoreAgent" / "scenarios"
 ACTIVE_DIRS = ["training", "holdout_regular", "holdout_hard"]
 LEGACY_KEYS = ("objectives", "objectives_ref", "objective_hexes", "deployment_zone", "wall_ref")
-TRAIN_TERRAINS = {"terrain-train-01.json", "terrain-train-02.json", "terrain-train-03.json"}
+# Décision utilisateur 2026-07-19 : `terrain-train-01/02/03` sont OBSOLÈTES, toute la banque
+# (training + holdouts) tourne sur `terrain-mc1.json` jusqu'à nouvel ordre. Les terrains
+# d'entraînement étaient les versions APLATIES de mc1 générées par `migrate_scenario_bank_v11.py`
+# (Phase A « pas d'étages ») ; la banque porte donc désormais les 8 étages de mc1.
+# ⚠️ Ce script de migration T4 cycle encore sur les 3 terrains plats : le RELANCER repointerait
+# la banque dessus et casserait ce test — il est one-shot et déjà passé.
+TRAIN_TERRAINS = {"terrain-mc1.json"}
 
 
 def _load_migration_module():

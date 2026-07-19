@@ -1954,15 +1954,46 @@ class ActionDecoder:
                 -horizontal_cluster_penalty,
             )
 
-        best_hex = max(
-            valid_hexes,
-            key=lambda h: (
-                score_for_hex(h[0], h[1]),
-                -abs(h[0] - center_col),
-                -abs(h[1] - center_row),
-            ),
+        # Meilleure ancre de la stratégie DONT LA FORMATION EST EXÉCUTABLE. Le score seul ne
+        # suffit pas : `valid_hexes` ne contraint que l'ANCRE (empreinte ⊆ zone, hors mur,
+        # clearance — miroir T5), alors que le commit place désormais TOUTES les figurines
+        # (V11 T6-f). Une ancre au bord de zone peut donc scorer 1re et n'admettre aucune
+        # formation légale ; la retourner rouvrirait le deadlock masque/commit corrigé en T5.
+        # Ce n'est PAS un repli masquant une erreur : les candidates sont ordonnées par la
+        # stratégie et on retient la meilleure qui est jouable — épuisement = erreur explicite.
+        # Coût : cas nominal = 1 passe de scoring (identique à l'ancien `max`) + 1 formation.
+        from engine.phase_handlers.deployment_handlers import (
+            build_validated_deployment_plan, store_validated_deployment_plan,
         )
-        return best_hex
+
+        scored = [
+            (
+                (
+                    score_for_hex(h[0], h[1]),
+                    -abs(h[0] - center_col),
+                    -abs(h[1] - center_row),
+                ),
+                h,
+            )
+            for h in valid_hexes
+        ]
+        while scored:
+            best_idx = max(range(len(scored)), key=lambda i: scored[i][0])
+            cand = scored[best_idx][1]
+            plan = build_validated_deployment_plan(
+                game_state, str(unit_id), int(cand[0]), int(cand[1])
+            )
+            if plan is not None:
+                # Mémoisé pour que le commit exécute CE plan sans le recalculer.
+                store_validated_deployment_plan(
+                    game_state, str(unit_id), int(cand[0]), int(cand[1]), plan
+                )
+                return cand
+            scored.pop(best_idx)
+        raise ValueError(
+            f"Deployment deadlock: aucune des {len(valid_hexes)} ancres valides n'admet une "
+            f"formation légale pour l'escouade {unit_id} (joueur {current_deployer})"
+        )
     
     # ============================================================================
     # TARGET VALIDATION

@@ -8,5 +8,5 @@
   "agent_roster_ref": "holdout_hard/agent_holdout_hard_roster_swarm_01.json",
   "opponent_roster_ref": "holdout_hard/opponent_holdout_hard_roster_balanced_39.json",
   "board_ref": "44x60x5",
-  "terrain_ref": "terrain-train-01.json"
+  "terrain_ref": "terrain-mc1.json"
 }

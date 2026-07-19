@@ -8,6 +8,48 @@ Date d'audit : 2026-07-14. Tous les faits ci-dessous ont été vérifiés dans l
 sont indicatifs (constaté pendant l'audit : fight_handlers.py a bougé de ~45 lignes en une
 journée). Toujours re-localiser par grep du nom avant d'éditer.
 
+---
+
+## 0. ÉTAT AU 2026-07-19 — À LIRE EN PREMIER
+
+> Ce bloc est le point d'entrée. Il est mis à jour à chaque session ; le reste du document est
+> l'historique détaillé, dans lequel les entrées T6-x sont enfouies dans la section 5 (T6).
+
+**Le training NE TOURNE PAS.** Reproduction en une commande :
+
+```
+python3 ai/train.py --agent CoreAgent --training-config x5_debug \
+  --scenario config/agents/CoreAgent/scenarios/training/training_benchmark/scenario_training_benchmark.json \
+  --new --resolution 5
+```
+→ les 8 workers `SubprocVecEnv` meurent (EOFError côté parent). En moteur nu, l'erreur réelle est
+`ValueError: execute_squad_move a échoué : … incohérence masque/exécution` au premier move.
+
+**Chemin critique — 2 fixes, dans CET ORDRE** (section 5, tranche T6) :
+
+| # | Quoi | Pourquoi cet ordre |
+|---|---|---|
+| 1 | **T6-h** — `build_rigid_plan` translate en OFFSET : à `dx` impair le bloc se DÉFORME (mesuré : distance interne 2 → 1). Fix : translater en CUBE, miroir de `deployment_build_squad_destinations_pool`. | T6-g suppose des offsets de bloc invariants par translation. Éroder avant de corriger la déformation validerait une forme que l'exécution ne reproduit pas. |
+| 2 | **T6-g** — le pool BFS du move est construit sur l'ANCRE, mais `build_rigid_plan` translate TOUT le bloc sans le valider → figurines sur un mur / sur une autre escouade. Fix retenu (décision utilisateur) : **érosion morphologique** du pool par l'empreinte combinée. | C'est le crash ci-dessus. |
+
+**Déjà corrigé et validé le 2026-07-19** (détail en T6-e / T6-f) : `_turn_step_limit` absent du
+chemin single-scenario (T6-e, commité) ; commit de déploiement mono-ancre qui ne plaçait AUCUNE
+figurine (T6-f, +10 tests, non commité).
+
+**État de la suite** : `tests/unit` — **9 échecs, tous préexistants et hors chemin critique** :
+4 × banque de scénarios et 5 × déploiement/terrain, tous dus à des **rosters manquants ou
+non résolus** (`roster_pool_schedule produced zero eligible training rosters`, fichiers de
+roster holdout absents). Baseline vérifiée par `git stash` — aucune régression des fixes ci-dessus.
+
+**Dettes à connaître avant de s'y remettre** :
+- `--scenario bot` échoue en AMONT du moteur (roster) : utiliser `training_benchmark` pour
+  reproduire, pas `bot-01`.
+- Toute la banque (61 scénarios) tourne sur `terrain-mc1.json` depuis le 2026-07-19 (décision
+  utilisateur : `terrain-train-01/02/03` obsolètes). mc1 porte 8 étages ; l'observation les voit
+  via le canal 5 `GRID_CH_LEVEL`. ⚠️ `scripts/migrate_scenario_bank_v11.py` cycle encore sur les
+  3 terrains plats — le RELANCER repointerait la banque et casserait le test de banque.
+- `config/tutorial/scenario_etape*.json` ne se charge plus (`wall_ref` legacy sans `board_ref`).
+
 ## 1. Objectif
 
 Rétablir un entraînement fonctionnel de `CoreAgent` (`python3 ai/train.py --agent CoreAgent
@@ -570,7 +612,10 @@ Plan d'origine :
 3. Étendre le smoke test aux scénarios migrés (T4), sièges p1/p2/random, et à un scénario
    contenant Carnifex/Psychophage (validation R6).
 
-### T6 — Entraînement de validation + hygiène — ⏳ EN COURS (2026-07-16)
+### T6 — Entraînement de validation + hygiène — ⏳ EN COURS (màj 2026-07-19)
+
+> **Bloqueurs actifs : T6-h puis T6-g** (cf. §0). T6-a→T6-f sont résolus. Les entrées ci-dessous
+> sont chronologiques ; chercher `T6-g` / `T6-h` pour le chemin critique.
 
 **Préalable levé** : le bloqueur résiduel laissé par T5 (« reset crashe avec
 `agent_seat_mode="p2"/"random"` — `bot-owned eligible units with empty action mask` en fight
@@ -755,37 +800,140 @@ de T4/de code latent) :
   par-figurine du move (T6/refonte spatiale) — tant que l'exécution du move raisonnait par
   ancre, des figurines à `(-1,-1)` ne faisaient rien crasher (elles produisaient seulement les
   fausses collisions analyzer, cf. § logging).
-  **Solution (NON implémentée) — pattern « plan mémoisé au masque, exécuté au commit », miroir
-  EXACT de la phase move (`store_squad_move_cell_map`/`_squad_advance_rolls` : le commit exécute
-  ce que le masque a validé, jamais re-dérivé)** :
-  1. **Au masque** (gym) : pour chaque ancre candidate des 5 stratégies, générer la formation
-     (`generate_compact_formation`,
-     [deployment_handlers.py:190](../../engine/phase_handlers/deployment_handlers.py#L190) —
-     déterministe : spirale BFS) puis la valider par `deployment_preview_plan` (zone + murs
-     par-figurine + chevauchements + cohésion + §13.06). Seules les ancres au plan VERT restent
-     dans le masque ; le plan validé est mémoisé (tampon ancre+phase, comme la carte de cellules
-     du move).
-  2. **Au commit** : `deploy_unit` gym exécute le plan MÉMOISÉ via `_apply_deploy_plan`
-     ([deployment_handlers.py:824](../../engine/phase_handlers/deployment_handlers.py#L824)) —
-     qui écrit chaque figurine (`update_model_position`) et synchronise l'ancre. Aucune
-     réécriture parallèle de `models_cache`.
+  **Fix appliqué (2026-07-19) — le commit produit et exécute un plan PAR-FIGURINE validé, pour
+  les TROIS chemins d'un coup** (`deployment_handlers.py` + `action_decoder.py`) :
+  1. Nouveau `build_validated_deployment_plan` (deployment_handlers) : `generate_compact_formation`
+     autour de l'ancre + `deployment_preview_plan` ; rend le plan (4-uplets, niveau 0) SI toutes
+     les figurines sont légales, sinon `None`. Lecture pure et déterministe.
+  2. `deploy_unit` commit désormais via `_apply_deploy_plan` — le MÊME écrivain que le flux PvP
+     par escouade (`update_model_position` par figurine + sync de l'ancre). Plan illégal =
+     refus explicite `deploy_plan_invalid`. Comme les trois chemins du rayon partagent cette
+     branche, ils sont corrigés ensemble.
+  3. `_select_deployment_hex_for_action` (décodeur) retient la meilleure ancre de la stratégie
+     **dont la formation est exécutable** : le `max` est remplacé par un parcours par score
+     décroissant qui s'arrête au 1er plan valide ; épuisement = `ValueError` explicite. Sans
+     ça, une ancre au bord de zone pouvait scorer 1re et n'admettre aucune formation → deadlock
+     masque/commit, exactement la classe de bug corrigée en T5.
+  4. Le plan validé par le décodeur est mémoisé (`store_/read_validated_deployment_plan`, tampon
+     escouade+ancre+phase+nb déployés) pour que le commit ne le RECALCULE pas. Pure économie —
+     le helper étant déterministe (verrouillé par test), la mémo n'est jamais une source de
+     vérité divergente ; son absence (chemins PvP sans décodeur) est un état légitime.
+  **Résultat mesuré** : déploiement gym complet, `training_benchmark` — 0 figurine à `(-1,-1)`
+  (6/6 escouades). Chemin « ancre imposée » (drag PvP / auto-deploy tutoriel) exercé sur les
+  16 104 hexes de la zone : 6/6 escouades posées, refus répartis en 1815
+  `deploy_footprint_out_of_bounds` + 263 `outside_zone` + 31 `occupied` (tous de la validation
+  mono-ancre PRÉEXISTANTE) et seulement **2** `deploy_plan_invalid` — le fix ne restreint
+  quasiment pas les placements.
+  **Coût, et son optimisation** (phase de déploiement complète, board x5, 6 escouades) :
+  | étape | temps | note |
+  |---|---|---|
+  | avant le fix | 1,03 s | ne plaçait AUCUNE figurine — coût non représentatif |
+  | fix naïf | 2,31 s | `generate_compact_formation` payé 2× (décodeur + commit) |
+  | + mémoisation (point 4) | 1,70 s | supprime le doublon |
+  | + empreinte pré-calculée | **1,37 s** | voir ci-dessous |
+  5. **Empreinte par translation d'offsets dans `generate_compact_formation`.** cProfile :
+     `_legal_socle` = 92 % du coût de la fonction, dont 67 % à reconstruire l'empreinte du socle
+     via `compute_occupied_hexes`/`_footprint_round` — **2 590 reconstructions et 341 660 appels
+     à `_hex_center` pour UNE formation**, parce que la spirale BFS recalcule la forme à chaque
+     case. Remplacé par `precompute_footprint_offsets` (deux jeux d'offsets, parité de colonne),
+     le helper prévu exactement pour ça (docstring : « expensive when called per-BFS-step ») et
+     déjà utilisé par `_get_valid_deployment_hexes`. **50 ms → 17,4 ms par formation (×2,9).**
+     Équivalence stricte vérifiée par test aux deux parités — code partagé avec le déploiement
+     PvP par escouade, une divergence déplacerait des socles à l'écran.
+  **Reste optimisable (non fait)** : la spirale teste encore chaque case par balayage de son
+  empreinte (~77 % du résiduel) et `_deploy_pool_set` est reconstruit à chaque appel (~13 %).
+  Pistes, mesures et pièges : [`A_faire/perf_generate_compact_formation.md`](A_faire/perf_generate_compact_formation.md).
+  ⚠️ Le gain d'une érosion n'est PAS acquis dans le cas nominal (spirale qui s'arrête en
+  quelques cases) — à mesurer avant d'implémenter. Non bloquant : le vrai frein du training est
+  T6-g/T6-h, pas cette perf.
+  **Tests (+10)** : `tests/unit/engine/test_deployment_per_model_commit.py` — placement de toutes
+  les figurines, ancre = figurine d'index minimal (l'invariant dont `build_rigid_plan` dépend),
+  légalité du plan committé, déterminisme + lecture pure du helper, invalidation de la mémo sur
+  tampon périmé, équivalence de l'empreinte pré-calculée aux deux parités. Les 8 premiers sont
+  rouges sur l'ancien code. Suite `tests/unit` : mêmes échecs préexistants qu'avant le fix
+  (baseline vérifiée par `git stash`), aucune régression.
+  **Dette assumée** : `deploy_unit` porte désormais DEUX modèles de validation — la mono-ancre
+  héritée de T5 (empreinte du socle de l'unité ⊆ pool, miroir du masque) et la par-figurine.
+  La première n'a plus de sens géométrique strict une fois le placement fait par figurine ; elle
+  ne survit que parce que le masque T5 s'y aligne. À unifier le jour où le masque de déploiement
+  passera au squad-aware — ⚠️ **ce n'est planifié dans AUCUNE tranche** : la seule mention est
+  §9.4 P3 (« les actions 4-8 sont 5 STRATÉGIES scorées … élargir ou non »), question ouverte
+  non tranchée.
   ⚠️ **Écarté après analyse — deux fausses bonnes idées** :
   - *Filtrer le pool entier par `deployment_build_squad_destinations_pool`*
     ([deployment_handlers.py:552](../../engine/phase_handlers/deployment_handlers.py#L552)) :
     INSUFFISANT (ne teste que zone-fit du bloc rigide — pas les murs par-figurine, pas le
-    chevauchement d'unités déployées, pas §13.06, tous exigés par `deployment_preview_plan` →
-    le mismatch masque/commit resterait ouvert, même deadlock que T5) et SURDIMENSIONNÉ (le
-    décodeur n'expose que 5 slots-stratégies, pas ~16 000 hexes).
-  - *Committer par formation re-générée au commit sans mémoisation* : `generate_compact_formation`
-    est un helper UX qui peut rendre un plan avec figs HORS ZONE (overflow documenté « voile
-    rouge, à repositionner ») — le plan n'est PAS légal par construction, seule la validation
-    preview au moment du MASQUE donne la garantie.
-  3. Chemins PvP du rayon (tutoriel, drag non-"active") : même commit par plan validé —
-     décision d'implémentation à prendre au moment du fix (le tutoriel fournit des positions de
-     scénario mono-ancre).
-  4. Verrou de non-régression : test « après le commit de déploiement gym, TOUTES les figurines
-     vivantes de l'escouade ont une position `models_cache` ≠ `(-1,-1)` et l'ancre `units_cache`
-     est cohérente avec elles » — rouge sur le code actuel.
+    chevauchement d'unités déployées, pas §13.06, tous exigés par `deployment_preview_plan`) et
+    SURDIMENSIONNÉ (~16 000 hexes validés pour 5 slots-stratégies utilisés).
+  - *Valider les ancres DANS le masque* : impossible sans le réécrire — le masque n'active que
+    5 slots (`mask[4+i]`) et ne connaît PAS les ancres, qui sont calculées au décodage par
+    `_select_deployment_hex_for_action`. C'est donc le décodeur qui doit filtrer (point 3).
+  ⚠️ **Comportement non évident vérifié et verrouillé par test** : dans
+  `generate_compact_formation`, l'ancre ORIENTE le placement mais ne le CONTRAINT pas (sa
+  spirale retient la 1re case légale) — une ancre hors zone place l'escouade dans la zone la
+  plus proche au lieu d'échouer. Le refus d'une ancre hors zone reste donc porté par la
+  validation mono-ancre de `deploy_unit` (`deploy_footprint_outside_zone`), à ne pas retirer.
+  ⚠️ **Chemin tutoriel PvP non validé runtime** : `config/tutorial/scenario_etape*.json` ne se
+  charge plus du tout (`wall_ref` legacy sans `board_ref` →
+  `ValueError` dans `_resolve_board_dir`, game_state ~L1664) — dette T4 indépendante de ce fix
+  (la migration de banque n'a pas couvert `config/tutorial/`). Le chemin a été validé par son
+  équivalent fonctionnel (commit à ancre imposée, ci-dessus).
+
+- **T6-g — Le pool BFS du move valide l'ANCRE, pas le BLOC translaté (BLOQUANT) — ❌ À FAIRE
+  (révélé par le fix T6-f, 2026-07-19)**
+  **Repro** (moteur nu, `training_benchmark`, premier index du masque) : dès que les figurines
+  sont réellement placées, le crash T6-f se déplace au squad suivant —
+  `ValueError: execute_squad_move a échoué : squad=3 type=normal dest=(195,163) depuis
+  (197,168) — incohérence masque/exécution`.
+  **Root cause (tracée entrée par entrée sur le plan rigide)** : `build_squad_move_cell_map`
+  ([shared_utils.py:7394](../../engine/phase_handlers/shared_utils.py#L7394)) construit le pool
+  via `movement_build_valid_destinations_pool`, qui raisonne sur l'**ancre** de l'escouade, puis
+  le projette sur la grille égocentrique. Mais l'exécution passe par `build_rigid_plan`, qui
+  **translate TOUTES les figurines** du même vecteur — sans qu'aucune contrainte n'ait été
+  testée sur elles. Sur le plan rejeté : 3 figurines (`3#4`, `3#5`, `3#6`) atterrissent sur une
+  autre escouade et 1 (`3#17`) sur un mur, alors que l'ancre `3#0` est parfaitement légale.
+  `validate_move_plan` rejette donc une destination que le masque avait offerte.
+  **Ce n'est PAS une régression de T6-f** : le mismatch est structurel (pool d'ancre vs
+  exécution de bloc) et préexistait ; il était simplement masqué par T6-f, qui faisait échouer
+  le move plus tôt, pour une autre raison.
+  **Modèle retenu (décision utilisateur 2026-07-19) : érosion morphologique** — éroder la grille
+  des cellules acceptables par l'empreinte COMBINÉE de l'escouade, puis lire le résultat à
+  l'ancre. Exact (les autres unités sont fixes pendant le move de l'escouade), vectorisable, et
+  le code a déjà ce précédent exact dans `_get_valid_deployment_hexes` (érosion par empreinte,
+  DEUX jeux d'offsets selon la parité de colonne). Écarté : `validate_move_plan` en post-filtre
+  des candidates — exact aussi mais Python pur, |pool| × |figurines| par step (~2800 × 20).
+  ⚠️ **Ordre imposé par T6-h** : l'érosion suppose des offsets de bloc INVARIANTS par
+  translation. C'est faux aujourd'hui (cf. T6-h) — corriger la translation AVANT d'éroder,
+  sinon l'érosion valide une forme que l'exécution ne reproduit pas.
+  **À ne pas oublier dans le filtre** : bornes, murs, occupation des autres escouades PAR NIVEAU
+  et `forbid_enemy_er` (toutes des contraintes de cellule, donc érodables). La cohésion et le
+  budget per-model deviennent invariants une fois T6-h corrigé (translation réellement rigide),
+  mais `validate_move_plan` mesure le budget par `calculate_hex_distance` depuis chaque origine :
+  le vérifier plutôt que le supposer.
+
+- **T6-h — `build_rigid_plan` : la translation « rigide » DÉFORME le bloc (bug de parité hex) —
+  ❌ À FAIRE (constaté 2026-07-19)**
+  **Mesure** (2 figurines voisines, translation du bloc en offset puis distance interne
+  recalculée par `calculate_hex_distance`) :
+  `dx` pair → écart 0 (forme préservée) ; **`dx` impair → écart 1** : deux figurines à distance
+  2 se retrouvent à distance 1.
+  **Cause** : `build_rigid_plan`
+  ([shared_utils.py:3243](../../engine/phase_handlers/shared_utils.py#L3243)) applique
+  `new_col = col + dx, new_row = row + dy` en coordonnées OFFSET. En grille hexagonale offset,
+  une translation à `dx` impair change la parité de colonne de chaque figurine et n'est donc PAS
+  une translation hexagonale — la formation se déforme.
+  **Le projet connaît déjà ce piège et l'évite ailleurs** :
+  `deployment_build_squad_destinations_pool`
+  ([deployment_handlers.py:552](../../engine/phase_handlers/deployment_handlers.py#L552)) passe
+  explicitement par les coords CUBE, docstring « La translation rigide passe par les coords cube
+  (pas de bug de parité) ». `build_rigid_plan` n'a pas reçu ce traitement.
+  **Conséquences** : cohésion et collisions intra-plan faussées (deux figurines peuvent se
+  télescoper alors que le bloc d'origine était valide), distances per-model non uniformes, et
+  toute optimisation supposant des offsets constants (dont l'érosion de T6-g) invalide.
+  **Fix** : translater en cube (`offset_to_cube` / `cube_to_offset`), miroir du helper de
+  déploiement. Vérifier au passage les autres consommateurs de translation de bloc.
+  ⚠️ **Distinct de T6-g** : le crash T6-g mesuré avait `dx = -2` (pair), donc sans déformation —
+  les deux bugs sont indépendants et cumulatifs.
 
 **T6.2 — métriques TensorBoard : RÉSOLU, la mémoire projet était périmée.** Inspection directe
 des `events.out.tfevents.*` (EventAccumulator) sur training neuf : `0_critical/` porte bien les
@@ -1110,7 +1258,10 @@ Spec à figer à ce moment-là, principes déjà actés :
 | T3 | `train.py --step --training-config x1_debug` dépasse la résolution walls/objectives sans FileNotFoundError |
 | T4 | Les 61 scénarios se chargent (`W40KEngine(scenario_file=...)` + reset, script de balayage) ; zéro clé legacy ; sort de training_save/ statué |
 | T5 | 10 épisodes aléatoires masqués terminés sur ≥3 scénarios × sièges p1/p2 ; zéro masque vide |
-| T6 | Run `--new` court complet + analyzer + replay OK ; win-rate vs RandomBot en progression — ⏳ **PARTIEL (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép.). ✅ Suite verte (1293) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ✅ T6-c résolu : `_process_squad_action` journalise, analyzer tourne, `1.2 erreurs shooting = 0`. ✅ **T6-d résolu** : `squad_fight` = sélection FIGHT 12.04, machine V11 déroulée par `_fight_v11_gym_settle` (ordre 12.02→12.04→12.07 respecté, snapshot posé, double activation interdite). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (bruit) — mesuré AVANT T6-d, donc sur un moteur où la mêlée était fausse ; **à re-mesurer** avec phase `x1` + `bot_evaluation` holdout vs RandomBot |
+| T6 | Run `--new` court complet + analyzer + replay OK ; win-rate vs RandomBot en progression — ⏳ **PARTIEL (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép.). ✅ Suite verte (1293) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ✅ T6-c résolu : `_process_squad_action` journalise, analyzer tourne, `1.2 erreurs shooting = 0`. ✅ **T6-d résolu** : `squad_fight` = sélection FIGHT 12.04, machine V11 déroulée par `_fight_v11_gym_settle` (ordre 12.02→12.04→12.07 respecté, snapshot posé, double activation interdite). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (bruit) — mesuré AVANT T6-d, donc sur un moteur où la mêlée était fausse ; **à re-mesurer** avec phase `x1` + `bot_evaluation` holdout vs RandomBot. ❌ **Le run est de nouveau IMPOSSIBLE depuis le 2026-07-19** : T6-f a révélé T6-g/T6-h (cf. §0) — le critère T6 ne peut pas être réévalué avant ces 2 fixes |
+| T6-f | Après le commit de déploiement, AUCUNE figurine vivante à `(-1,-1)` et ancre `units_cache` = figurine d'index minimal, sur les 3 chemins (gym, ancre imposée tutoriel, drag) — ✅ **FAIT (2026-07-19)** |
+| T6-g | Toute cellule offerte par le masque de move est exécutable : sur N épisodes aléatoires, zéro `ValueError` « incohérence masque/exécution » — et un test dédié où une escouade dont le BLOC déborde (mur / autre escouade) ne voit PAS la cellule dans son masque |
+| T6-h | La translation de bloc préserve les distances internes pour TOUTES les parités de `dx` (test paramétré `dx` pair ET impair) — rouge sur le code actuel |
 
 ## 7. Annexe A — Smoke tests de référence
 
@@ -1227,8 +1378,21 @@ Fichier proposé : `tests/unit/engine/test_agent_interface_contract.py`.
 - Invariant global (smoke intégré en test, 3 seeds × 2 sièges, plafonné en steps) : à chaque
   step, `mask.any() or terminated` — c'est l'invariant qui protège MaskablePPO.
 
-**T6** : pas de test unitaire nouveau (validation par run réel + analyzer + replay), mais la
-suite complète doit rester verte après les changements de config/hygiène.
+**T6** : à l'origine « pas de test unitaire nouveau (validation par run réel + analyzer +
+replay), suite complète verte ». Les ruptures T6-c→T6-h ont imposé des verrous :
+- `test_squad_fight_target_parity.py` (T6-c, +5) et `test_squad_fight_v11_state.py` (T6-d, +6).
+- `test_deployment_per_model_commit.py` (T6-f, +10) : aucune figurine à `(-1,-1)` après commit ;
+  ancre = figurine d'index minimal (invariant de `build_rigid_plan`) ; légalité du plan
+  committé ; déterminisme + lecture pure de `build_validated_deployment_plan` ; invalidation de
+  la mémo sur tampon périmé ; équivalence de l'empreinte pré-calculée aux DEUX parités de
+  colonne (l'optimisation touche du code partagé PvP).
+- **À écrire avec T6-g / T6-h** : cf. critères d'acceptation (section 6). Pour T6-h, paramétrer
+  sur `dx` PAIR **et** IMPAIR — un test qui n'exerce que `dx` pair passe sur le code buggé.
+
+⚠️ **La suite n'est PAS verte et ne l'était pas avant ces fixes** : 9 échecs préexistants
+(4 banque de scénarios + 5 déploiement/terrain), tous dus à des rosters manquants ou non
+résolus. Le critère réel est donc « pas de NOUVEL échec », à établir par baseline `git stash`
+avant de conclure quoi que ce soit sur une régression.
 
 ### 8.4 Couverture Phase A' (une règle = son fichier de tests, AVANT suppression du code mort)
 
