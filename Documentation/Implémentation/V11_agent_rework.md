@@ -15,26 +15,43 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 > Ce bloc est le point d'entrée. Il est mis à jour à chaque session ; le reste du document est
 > l'historique détaillé, dans lequel les entrées T6-x sont enfouies dans la section 5 (T6).
 
-**Le training NE TOURNE PAS.** Reproduction en une commande :
+**LE TRAINING TOURNE (2026-07-19, après T6-h + T6-g).** La commande de repro historique passe
+désormais de bout en bout :
 
 ```
 python3 ai/train.py --agent CoreAgent --training-config x5_debug \
   --scenario config/agents/CoreAgent/scenarios/training/training_benchmark/scenario_training_benchmark.json \
   --new --resolution 5
 ```
-→ les 8 workers `SubprocVecEnv` meurent (EOFError côté parent). En moteur nu, l'erreur réelle est
-`ValueError: execute_squad_move a échoué : … incohérence masque/exécution` au premier move.
+→ 10/10 épisodes, 8 workers `SubprocVecEnv` vivants, **zéro** `execute_squad_move a échoué : …
+incohérence masque/exécution`, exit 0. Idem en mono-env (`--step`, x1_debug). Les seules
+exceptions résiduelles du run sont dans l'**ÉVALUATION** (`bot_evaluation`) et sont la dette
+rosters connue (`roster_pool_schedule produced zero eligible training rosters`) — cf. §10.2,
+c'est ce qui met les win-rates à 0.00, pas le moteur.
 
-**Chemin critique — 2 fixes, dans CET ORDRE** (section 5, tranche T6) :
+**Chemin critique — LES 2 FIXES SONT LIVRÉS** (détail en section 5, tranche T6) :
 
-| # | Quoi | Pourquoi cet ordre |
+| # | Quoi | État |
 |---|---|---|
-| 1 | **T6-h** — `build_rigid_plan` translate en OFFSET : à `dx` impair le bloc se DÉFORME (mesuré : distance interne 2 → 1). Fix : translater en CUBE, miroir de `deployment_build_squad_destinations_pool`. | T6-g suppose des offsets de bloc invariants par translation. Éroder avant de corriger la déformation validerait une forme que l'exécution ne reproduit pas. |
-| 2 | **T6-g** — le pool BFS du move est construit sur l'ANCRE, mais `build_rigid_plan` translate TOUT le bloc sans le valider → figurines sur un mur / sur une autre escouade. Fix retenu (décision utilisateur) : **érosion morphologique** du pool par l'empreinte combinée. | C'est le crash ci-dessus. |
+| 1 | **T6-h** — `build_rigid_plan` translatait en OFFSET : à `dx` impair le bloc se DÉFORMAIT (mesuré : distance interne 2 → 1). Fix : translation en CUBE, miroir de `deployment_build_squad_destinations_pool`. **Deux consommateurs de translation de bloc portaient le MÊME bug et ont été alignés** : `translate_squad_to_destination` (l'écrivain du commit, partagé move/charge/fight/pile-in — le laisser en offset aurait fait committer une formation DIFFÉRENTE de celle que `validate_move_plan` avait acceptée) et `preview_hidden_models_after_move` (shooting_handlers). | ✅ FAIT — +10 tests (`test_rigid_plan_translation.py`, paramétrés `dx` pair ET impair, rouges sur le code d'avant) |
+| 2 | **T6-g** — le pool BFS du move était construit sur l'ANCRE, mais `build_rigid_plan` translate TOUT le bloc sans le valider → figurines sur un mur / sur une autre escouade. Fix : **érosion morphologique** (`erode_move_pool_by_squad_block`, shared_utils), appelée dans `build_squad_move_cell_map` AVANT la projection sur la grille égocentrique. | ✅ FAIT — +6 tests (`test_move_pool_block_erosion.py`) |
+
+**Sur l'érosion (T6-g), ce qu'il faut savoir pour la maintenir** : le prédicat de cellule est
+celui de `validate_move_plan` sous `DEFAULT_MOVE_CONSTRAINTS` — bornes, murs, occupation des
+autres escouades **par niveau**, ER ennemie. Ce sont les seules contraintes érodables. Les deux
+autres ont été **vérifiées invariantes** par translation cube, donc déjà garanties par le pool
+d'ancre : `budget_per_model` (`calculate_hex_distance` est une distance cube → la distance de
+chaque figurine à son origine égale celle de l'ancre, bornée par le coût géodésique du pool) et
+`require_coherency` / collision intra-plan (ne dépendent que des positions RELATIVES). Escouade
+mono-figurine : l'ancre EST le bloc, le pool est déjà exact → court-circuit.
 
 **Déjà corrigé et validé le 2026-07-19** (détail en T6-e / T6-f) : `_turn_step_limit` absent du
 chemin single-scenario (T6-e, commité) ; commit de déploiement mono-ancre qui ne plaçait AUCUNE
 figurine (T6-f, +10 tests, non commité).
+
+**Suite au 2026-07-19 après T6-h/T6-g** : `9 failed, 1437 passed, 2 skipped`. Baseline vérifiée
+par `git stash` : `9 failed, 1421 passed` — **mêmes 9 échecs préexistants** (rosters, cf. plus
+bas), +16 = les tests des deux fixes. Zéro régression.
 
 **Après le training** — ne PAS anticiper : **T7** (unification de la validation de déploiement,
 section 5). Le déclencheur est « le training tourne » : T7 touche le masque, donc l'espace
@@ -897,8 +914,22 @@ de T4/de code latent) :
   (la migration de banque n'a pas couvert `config/tutorial/`). Le chemin a été validé par son
   équivalent fonctionnel (commit à ancre imposée, ci-dessus).
 
-- **T6-g — Le pool BFS du move valide l'ANCRE, pas le BLOC translaté (BLOQUANT) — ❌ À FAIRE
-  (révélé par le fix T6-f, 2026-07-19)**
+- **T6-g — Le pool BFS du move valide l'ANCRE, pas le BLOC translaté — ✅ FAIT (2026-07-19)**
+  **Réalisé** : `erode_move_pool_by_squad_block` (shared_utils), appelée par
+  `build_squad_move_cell_map` sur les `costs` du BFS, AVANT `project_pool_to_grid` — donc la
+  grille égocentrique, le masque et le décodage lisent tous le pool érodé (la source unique
+  reste unique). Le bloc est réduit à ses offsets CUBE relatifs à l'ancre (invariants depuis
+  T6-h), **groupés par NIVEAU** (une figurine ne collisionne qu'avec les figs d'un autre squad
+  au même étage — miroir exact de `validate_move_plan`), et les cellules interdites sont
+  pré-agrégées par niveau en un seul set (murs ∪ occupation ∪ ER ennemie) → un test
+  d'appartenance par figurine et par candidate, pas d'appel à `validate_move_plan` dans la
+  boucle. Invariants non érodés car démontrés invariants par translation : budget per-model et
+  cohésion (cf. §0). Aucune règle de jeu modifiée : l'érosion ne fait que RETIRER du masque des
+  destinations que l'exécution refusait déjà.
+  **Validation** : +6 tests dédiés (mur/autre escouade/ER sous une SŒUR alors que l'ANCRE est
+  légale, débordement de plateau, non-sur-filtrage, court-circuit mono-figurine) ; run x5_debug
+  8 workers 10/10 épisodes et run mono-env x1_debug, **zéro** « incohérence masque/exécution ».
+  Historique de la rupture ci-dessous.
   **Repro** (moteur nu, `training_benchmark`, premier index du masque) : dès que les figurines
   sont réellement placées, le crash T6-f se déplace au squad suivant —
   `ValueError: execute_squad_move a échoué : squad=3 type=normal dest=(195,163) depuis
@@ -930,7 +961,22 @@ de T4/de code latent) :
   le vérifier plutôt que le supposer.
 
 - **T6-h — `build_rigid_plan` : la translation « rigide » DÉFORME le bloc (bug de parité hex) —
-  ❌ À FAIRE (constaté 2026-07-19)**
+  ✅ FAIT (2026-07-19)**
+  **Réalisé** : translation en coords CUBE (`offset_to_cube` / `cube_to_offset`) dans
+  `build_rigid_plan`. **L'audit « autres consommateurs de translation de bloc » demandé par le
+  plan a trouvé DEUX autres sites portant le même bug**, tous deux alignés :
+  - `translate_squad_to_destination` (shared_utils) — **le plus grave** : c'est l'ÉCRIVAIN du
+    commit, partagé par move / charge / fight / pile-in / consolidation. Corriger
+    `build_rigid_plan` seul aurait fait committer une formation DIFFÉRENTE de celle que
+    `validate_move_plan` venait d'accepter (plan validé en cube, commit appliqué en offset) —
+    soit exactement la classe de bug « validé ≠ exécuté » que T6-g élimine ;
+  - `preview_hidden_models_after_move` (shooting_handlers) — simulation read-only du statut
+    « caché » (13.09) après move, dont la docstring se réclame explicitement du miroir de
+    `translate_squad_to_destination` : à `dx` impair, le preview affichait un bloc déformé,
+    donc un statut caché faux (impact PvP direct, pas seulement gym).
+  **Validation** : +10 tests paramétrés sur `dx` pair ET impair (distances internes préservées,
+  ancre exactement sur la destination) — **rouges sur le code d'avant** aux seules parités
+  impaires, verts après. Historique de la rupture ci-dessous.
   **Mesure** (2 figurines voisines, translation du bloc en offset puis distance interne
   recalculée par `calculate_hex_distance`) :
   `dx` pair → écart 0 (forme préservée) ; **`dx` impair → écart 1** : deux figurines à distance
@@ -1320,8 +1366,8 @@ Spec à figer à ce moment-là, principes déjà actés :
 | T5 | 10 épisodes aléatoires masqués terminés sur ≥3 scénarios × sièges p1/p2 ; zéro masque vide |
 | T6 | Run `--new` court complet + analyzer + replay OK ; ~~win-rate vs RandomBot en progression~~ → **critère REMPLACÉ le 2026-07-19, voir section 10.6** (win-rate PAR ROSTER contre un adversaire de holdout jamais vu à l'entraînement + absence de comportement absurde en partie humaine). L'ancien critère référençait un holdout de rosters qui n'existe plus. — ⏳ **PARTIEL (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép.). ✅ Suite verte (1293) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ✅ T6-c résolu : `_process_squad_action` journalise, analyzer tourne, `1.2 erreurs shooting = 0`. ✅ **T6-d résolu** : `squad_fight` = sélection FIGHT 12.04, machine V11 déroulée par `_fight_v11_gym_settle` (ordre 12.02→12.04→12.07 respecté, snapshot posé, double activation interdite). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (bruit) — mesuré AVANT T6-d, donc sur un moteur où la mêlée était fausse ; **à re-mesurer** avec phase `x1` + `bot_evaluation` holdout vs RandomBot. ❌ **Le run est de nouveau IMPOSSIBLE depuis le 2026-07-19** : T6-f a révélé T6-g/T6-h (cf. §0) — le critère T6 ne peut pas être réévalué avant ces 2 fixes |
 | T6-f | Après le commit de déploiement, AUCUNE figurine vivante à `(-1,-1)` et ancre `units_cache` = figurine d'index minimal, sur les 3 chemins (gym, ancre imposée tutoriel, drag) — ✅ **FAIT (2026-07-19)** |
-| T6-g | Toute cellule offerte par le masque de move est exécutable : sur N épisodes aléatoires, zéro `ValueError` « incohérence masque/exécution » — et un test dédié où une escouade dont le BLOC déborde (mur / autre escouade) ne voit PAS la cellule dans son masque |
-| T6-h | La translation de bloc préserve les distances internes pour TOUTES les parités de `dx` (test paramétré `dx` pair ET impair) — rouge sur le code actuel |
+| T6-g | Toute cellule offerte par le masque de move est exécutable : sur N épisodes aléatoires, zéro `ValueError` « incohérence masque/exécution » — et un test dédié où une escouade dont le BLOC déborde (mur / autre escouade) ne voit PAS la cellule dans son masque — ✅ **FAIT (2026-07-19)** : `test_move_pool_block_erosion.py` (+6, mur/escouade/ER sous une SŒUR, débordement plateau, non-sur-filtrage, mono-fig) ; runs x5_debug 8 workers (10/10 ép.) et mono-env x1_debug, zéro occurrence |
+| T6-h | La translation de bloc préserve les distances internes pour TOUTES les parités de `dx` (test paramétré `dx` pair ET impair) — rouge sur le code actuel — ✅ **FAIT (2026-07-19)** : `test_rigid_plan_translation.py` (+10), rouge avant le fix aux seules parités impaires ; fix étendu à `translate_squad_to_destination` (écrivain du commit) et `preview_hidden_models_after_move` |
 
 ## 7. Annexe A — Smoke tests de référence
 

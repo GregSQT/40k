@@ -2981,7 +2981,15 @@ def translate_squad_to_destination(
     À NE PAS confondre avec update_units_cache_position seul, qui ne met à jour
     que l'ancre — utilisé après une mort de figurine pour resync l'ancre sans
     toucher aux figs survivantes.
+
+    La translation est appliquée en coordonnées CUBE, MIROIR EXACT de
+    ``build_rigid_plan`` (le plan validé en amont) : en offset odd-q, un delta de
+    colonne impair change la parité de chaque figurine et déforme le bloc (V11 T6-h).
+    Toute divergence entre les deux ferait committer une formation differente de
+    celle que ``validate_move_plan`` a acceptée.
     """
+    from engine.hex_utils import offset_to_cube, cube_to_offset
+
     units_cache = game_state.get("units_cache", {})  # get allowed
     entry = units_cache.get(squad_id)
     if entry is None:
@@ -2989,9 +2997,10 @@ def translate_squad_to_destination(
     norm_dest_col, norm_dest_row = normalize_coordinates(int(dest_col), int(dest_row))
     old_col = int(entry.get("col", norm_dest_col))
     old_row = int(entry.get("row", norm_dest_row))
-    delta_col = norm_dest_col - old_col
-    delta_row = norm_dest_row - old_row
-    if delta_col != 0 or delta_row != 0:
+    if (norm_dest_col, norm_dest_row) != (old_col, old_row):
+        ox, oy, oz = offset_to_cube(old_col, old_row)
+        nx, ny, nz = offset_to_cube(norm_dest_col, norm_dest_row)
+        dcx, dcy, dcz = nx - ox, ny - oy, nz - oz
         models_cache = require_key(game_state, "models_cache")
         squad_models = require_key(game_state, "squad_models")
         for mid in squad_models.get(squad_id, []):  # get allowed
@@ -3000,8 +3009,10 @@ def translate_squad_to_destination(
                 continue
             if int(m.get("HP_CUR", 0)) <= 0:  # get allowed
                 continue
-            m["col"] = int(m["col"]) + delta_col
-            m["row"] = int(m["row"]) + delta_row
+            mx, my, mz = offset_to_cube(int(m["col"]), int(m["row"]))
+            new_col, new_row = cube_to_offset(mx + dcx, my + dcy, mz + dcz)
+            m["col"] = int(new_col)
+            m["row"] = int(new_row)
     # Update anchor first (sets entry.col/row, entry.occupied_hexes = anchor footprint).
     update_units_cache_position(game_state, squad_id, norm_dest_col, norm_dest_row)
     # Then override occupied_hexes (union de toutes les figs) + occupied_hexes_by_model
@@ -3249,11 +3260,16 @@ def build_rigid_plan(
     """Translation rigide depuis l'ancre — Normal/Advance/Fall Back.
 
     L ancre = figurine vivante de plus petit index (cf. _recompute_squad_anchor).
-    Toutes les figurines suivent le meme vecteur (dx, dy) = anchor_dest - anchor_origin.
+    Toutes les figurines suivent le meme vecteur de translation, appliqué en coordonnees
+    CUBE (miroir de deployment_build_squad_destinations_pool) : en offset odd-q, une
+    translation a dx impair change la parite de colonne de chaque figurine et DEFORME le
+    bloc (deux figs a distance 2 se retrouvent a distance 1).
 
     Returns list[(model_id, new_col, new_row)] ou None si squad sans figurine vivante.
     AUCUNE validation ici — voir validate_move_plan.
     """
+    from engine.hex_utils import offset_to_cube, cube_to_offset
+
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     mids = squad_models.get(squad_id, [])  # get allowed
@@ -3264,13 +3280,15 @@ def build_rigid_plan(
     anchor_origin_col = int(models_cache[anchor_id]["col"])
     anchor_origin_row = int(models_cache[anchor_id]["row"])
     dest_col, dest_row = normalize_coordinates(int(anchor_dest_col), int(anchor_dest_row))
-    dx = dest_col - anchor_origin_col
-    dy = dest_row - anchor_origin_row
+    ax, ay, az = offset_to_cube(anchor_origin_col, anchor_origin_row)
+    bx, by, bz = offset_to_cube(dest_col, dest_row)
+    dcx, dcy, dcz = bx - ax, by - ay, bz - az
     plan: List[Tuple[str, int, int]] = []
     for mid in alive_mids:
         m = models_cache[mid]
-        new_col, new_row = normalize_coordinates(int(m["col"]) + dx, int(m["row"]) + dy)
-        plan.append((mid, new_col, new_row))
+        mx, my, mz = offset_to_cube(int(m["col"]), int(m["row"]))
+        new_col, new_row = cube_to_offset(mx + dcx, my + dcy, mz + dcz)
+        plan.append((mid, int(new_col), int(new_row)))
     return plan
 
 
@@ -7391,6 +7409,93 @@ def clear_squad_move_cell_map(game_state: Dict[str, Any], squad_id: str) -> None
     game_state.get(MOVE_CELL_MAP_CACHE_KEY, {}).pop(str(squad_id), None)  # get allowed
 
 
+def erode_move_pool_by_squad_block(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    costs: Dict[Tuple[int, int], float],
+) -> Dict[Tuple[int, int], float]:
+    """V11 T6-g — Retire du pool de move les ancres dont le BLOC translaté est illégal.
+
+    ``movement_build_valid_destinations_pool`` raisonne sur l'ANCRE de l'escouade, mais
+    l'exécution passe par ``build_rigid_plan``, qui translate TOUTES les figurines du même
+    vecteur. Une ancre parfaitement légale peut donc poser une sœur sur un mur ou sur une
+    autre escouade — ``validate_move_plan`` rejette alors une destination que le masque
+    avait offerte (« incohérence masque/exécution »).
+
+    Érosion morphologique : le bloc est réduit à ses offsets CUBE relatifs à l'ancre
+    (invariants par translation rigide depuis le fix T6-h), et une ancre candidate n'est
+    conservée que si CHAQUE figurine atterrit sur une cellule acceptable. Les offsets sont
+    groupés par NIVEAU : une figurine ne collisionne qu'avec les figs d'un autre squad au
+    même étage — miroir exact de ``validate_move_plan``.
+
+    Prédicat de cellule = celui de ``validate_move_plan`` sous
+    ``DEFAULT_MOVE_CONSTRAINTS`` (bornes, murs, occupation des autres escouades par niveau,
+    ER ennemie), les seules contraintes érodables. Les deux autres sont INVARIANTES par
+    translation rigide, donc déjà garanties par le pool d'ancre :
+      - ``budget_per_model`` : ``calculate_hex_distance`` est une distance cube, donc
+        invariante par translation — la distance de chaque figurine à son origine est égale
+        à celle de l'ancre, elle-même bornée par le coût géodésique du pool ;
+      - ``require_coherency`` / collision intra-plan : ne dépendent que des positions
+        RELATIVES, préservées par la translation cube.
+
+    Lecture pure. Retourne un nouveau dict (sous-ensemble de ``costs``).
+    """
+    from engine.hex_utils import offset_to_cube, cube_to_offset
+
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive_mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
+    if len(alive_mids) <= 1:
+        # Mono-figurine : l'ancre EST le bloc, le pool d'ancre est déjà exact.
+        return costs
+
+    anchor = models_cache[alive_mids[0]]
+    ax, ay, az = offset_to_cube(int(anchor["col"]), int(anchor["row"]))
+    offsets_by_level: Dict[int, List[Tuple[int, int, int]]] = {}
+    for mid in alive_mids:
+        m = models_cache[mid]
+        mx, my, mz = offset_to_cube(int(m["col"]), int(m["row"]))
+        offsets_by_level.setdefault(int(require_key(m, "level")), []).append(
+            (mx - ax, my - ay, mz - az)
+        )
+
+    board_cols = int(require_key(game_state, "board_cols"))
+    board_rows = int(require_key(game_state, "board_rows"))
+    wall_hexes = game_state.get("wall_hexes", set())  # get allowed
+    player = int(require_key(anchor, "player"))
+    enemy_er = require_key(game_state, f"enemy_adjacent_hexes_player_{player}")
+
+    # Cellules interdites par NIVEAU, pré-agrégées : un seul test d'appartenance par figurine.
+    blocked_by_level: Dict[int, Set[Tuple[int, int]]] = {}
+    for lv in offsets_by_level:
+        blocked = set(build_occupied_positions_set(game_state, exclude_unit_id=squad_id, level=lv))
+        if wall_hexes:
+            blocked |= set(wall_hexes)
+        if enemy_er:
+            blocked |= set(enemy_er)
+        blocked_by_level[lv] = blocked
+
+    kept: Dict[Tuple[int, int], float] = {}
+    for (cc, rr), cost in costs.items():
+        bx, by, bz = offset_to_cube(int(cc), int(rr))
+        ok = True
+        for lv, offs in offsets_by_level.items():
+            blocked = blocked_by_level[lv]
+            for (ox, oy, oz) in offs:
+                ncol, nrow = cube_to_offset(bx + ox, by + oy, bz + oz)
+                if not (0 <= ncol < board_cols and 0 <= nrow < board_rows):
+                    ok = False
+                    break
+                if (ncol, nrow) in blocked:
+                    ok = False
+                    break
+            if not ok:
+                break
+        if ok:
+            kept[(cc, rr)] = cost
+    return kept
+
+
 def build_squad_move_cell_map(
     game_state: Dict[str, Any], squad_id: str, advance_roll: Optional[int]
 ) -> Dict[int, Tuple[Tuple[int, int], float]]:
@@ -7438,6 +7543,11 @@ def build_squad_move_cell_map(
     movement_build_valid_destinations_pool(
         game_state, squad_id, read_only=True, move_budget_override=budget, out_costs=costs
     )
+
+    # T6-g : le pool ci-dessus ne valide que l'ANCRE ; l'execution translate tout le BLOC.
+    # Erosion par l'empreinte combinee AVANT projection -> toute cellule masquee=1 est
+    # executable par `build_rigid_plan` + `validate_move_plan`.
+    costs = erode_move_pool_by_squad_block(game_state, squad_id, costs)
 
     # Ancre = units_cache, la MEME source que `require_unit_position` d'ou part le pool : grille et
     # pool sont donc concentriques.

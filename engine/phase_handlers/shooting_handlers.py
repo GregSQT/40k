@@ -1194,14 +1194,20 @@ def preview_hidden_models_from_position(
     norm_dest_col, norm_dest_row = normalize_coordinates(int(dest_col), int(dest_row))
     old_col = int(entry.get("col", norm_dest_col))
     old_row = int(entry.get("row", norm_dest_row))
-    delta_col = norm_dest_col - old_col
-    delta_row = norm_dest_row - old_row
     by_model = require_key(entry, "occupied_hexes_by_model")
-    # Translation offset rigide des figs (cf. translate_squad_to_destination), sans mutation.
-    moved_by_model = {
-        mid: (int(c) + delta_col, int(r) + delta_row)
-        for mid, (c, r) in by_model.items()
-    }
+    # Translation rigide des figs en coords CUBE — MIROIR EXACT de
+    # translate_squad_to_destination (offset odd-q : un delta de colonne impair
+    # déformerait le bloc, V11 T6-h). Sans mutation.
+    from engine.hex_utils import offset_to_cube, cube_to_offset
+
+    _ox, _oy, _oz = offset_to_cube(old_col, old_row)
+    _nx, _ny, _nz = offset_to_cube(norm_dest_col, norm_dest_row)
+    _dcx, _dcy, _dcz = _nx - _ox, _ny - _oy, _nz - _oz
+    moved_by_model = {}
+    for mid, (c, r) in by_model.items():
+        _mx, _my, _mz = offset_to_cube(int(c), int(r))
+        _nc, _nr = cube_to_offset(_mx + _dcx, _my + _dcy, _mz + _dcz)
+        moved_by_model[mid] = (int(_nc), int(_nr))
     # Le move applique unit['orientation'] = orientation avant de recalculer le footprint.
     unit_for_footprint = unit if orientation is None else {**unit, "orientation": int(orientation)}
     hidden_model_ids = compute_models_in_obscuring_terrain(
