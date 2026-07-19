@@ -75,10 +75,19 @@ il doit être verrouillé par un test AVANT qu'un chantier indépendant y touche
 | 2 | **Portage `CC_DMG`/`RNG_DMG` des bots vers le système multi-armes** | ✅ FAIT — 7 sites d'`ai/evaluation_bots.py` portés sur `get_max_ranged_damage`/`get_max_melee_damage`. Voir §0.3 (attribution corrigée). |
 | 3 | **Code mort : `_advance_to_next_player`** | ✅ FAIT — supprimé, avec ses **8** tests **et** l'îlot mort qu'il maintenait en vie. Voir §0.4. |
 
-**Reste ouvert après cette session** : dette n°4 (déséquilibre 824 vs 690 points, §0.6, décision
-utilisateur requise), le commit (n°5), et la mesure §10.6 elle-même — qui n'a **pas** encore été
-relancée depuis le portage `CC_DMG` : le prochain pas concret est un `--eval` complet pour vérifier
-que **48/48 épisodes** aboutissent et que `TacticalBot` (§10.5) est enfin validé runtime.
+**Éval relancée le 2026-07-19 après le portage — ✅ 60/60 épisodes, voir §0.7.** Elle valide le
+portage `CC_DMG` sur les 6 sites `TacticalBot` et **lève** le « §10.5 non validé runtime ». Elle a
+aussi établi que le motif d'exclusion du holdout écrit en §10.5 était **empiriquement faux**
+(`TacticalBot` n'est PAS le bot le plus fort : 0.60, 2ᵉ meilleur score) — corrigé sur place.
+Les tâches 1-3 sont commitées (`6a7a9de1`).
+
+**Reste ouvert** :
+- 🔴 **Déséquilibre 824 vs 690 points** (§0.6) — **décision utilisateur reportée au moment du vrai
+  entraînement**. Bloque l'interprétation de tout win-rate par matchup, donc le critère §10.6.
+- Le **7ᵉ site du portage** (`_best_target_slot_by_threat`) n'est couvert que par un test unitaire :
+  son appelant `DefensiveSmartBot` n'est pas dans `bot_eval_weights`, donc l'éval ne le joue pas.
+- Dette `ai/game_replay_logger.py` (~8 sites `RNG_DMG`/`CC_DMG`) + `config/unit_definitions.json`.
+- ~~Bug d'affichage `Total: 30` au lieu de 60~~ ✅ corrigé (§0.7, constat 2).
 
 **⚠️ L'état de fin de session n'est ni « OK » ni « optimal ».** Mise à jour 2026-07-19 (fin de
 session tâches 1-3) : suite toujours verte, **exit 0 sur 1407 tests collectés** (1404 + 11 nouveaux
@@ -335,6 +344,91 @@ budget se lira comme un écart de compétence par roster alors que c'est un dés
 exactement le signal que le critère « win-rate PAR ROSTER » est censé isoler. À trancher avant
 d'interpréter le moindre win-rate par matchup. **Décision non prise.**
 
+**Composition exacte des deux rosters** — recalculée depuis les fichiers via `UnitRegistry`
+(2026-07-19), pas recopiée : les chiffres ci-dessus sont confirmés.
+
+| | Orks — **824 pts / 47 fig.** | Space Marines — **690 pts / 23 fig.** |
+|---|---|---|
+| Masse | 20 × Gretchin @4 = 80 ; 18 × Boyz @7 = 126 ; 2 × BoyzNobKombi @9 = 18 | 6 × Intercessor @16 = 96 ; 3 × VanguardVeteran @20 = 60 ; 2 × Eradicator @23 = 46 ; 2 × IntercessorGL @18 = 36 ; 2 × IntercessorSgt @19 = 38 |
+| Lourd | WarTrakk **175** ; BigMekDakkarig **100** | LandSpeeder **95** |
+| Personnages | PainBoy 80 ; Warboss 75 ; WeirdBoy 65 ; Bigboss 55 ; BannerNob 50 | CaptainRelicShield 80 ; ChaplainJumpPack 75 ; Librarian 60 ; Ancient 40 |
+
+⚠️ **L'écart n'est pas seulement budgétaire (+134 pts), il est STRUCTUREL** — et c'est ce qui
+rend un simple rééquilibrage à 690 insuffisant :
+- **47 figurines contre 23** : deux fois plus de corps, donc un OC très supérieur sur les
+  objectifs (§14) et une résilience aux pertes sans commune mesure ;
+- **255 pts concentrés dans 2 véhicules Orks** (WarTrakk + BigMek) contre 95 côté SM ;
+- ce sont deux **profils de jeu** différents, pas la même liste à deux budgets. Ramener les Orks
+  à 690 pts changerait le budget sans rendre les matchups comparables.
+
+⚠️ **Les rosters `training` et `holdout_regular` sont IDENTIQUES** (vérifié : mêmes compositions,
+mêmes totaux, aux deux emplacements). C'est cohérent avec la décision §10.5 — le holdout porte sur
+l'**adversaire**, pas sur le roster — mais il faut en avoir conscience : **il n'existe aucune
+séparation de listes entre entraînement et évaluation**. Un sur-apprentissage sur les
+particularités de ces deux listes ne serait détecté par aucun des scénarios d'éval actuels.
+
+**Statut** : à trancher **avant le vrai entraînement** (décision reportée par l'utilisateur le
+2026-07-19 : « j'y reviendrai quand on fera vraiment l'entraînement »). Ne pas interpréter de
+win-rate par matchup d'ici là.
+
+### 0.7 Run d'éval du 2026-07-19 (post-portage `CC_DMG`) — 60/60 épisodes
+
+```
+python3 ai/train.py --agent ArmageddonAgent --eval --training-config x1_debug
+```
+
+Notes sur la commande, lues dans [train.py](../../ai/train.py) : `--eval` est un alias de
+`--test-only` (L4384) ; le mode **refuse** `--scenario bot` et résout **seul** les holdouts
+(L4647) ; `--training-config` est obligatoire en pratique — le défaut `"default"` n'existe pas
+(rupture R1, jamais corrigée). Phases réelles : `x1`, `x5_append`, `x5_new`, `x1_debug`, `x5_debug`.
+
+**Résultat — 60/60 épisodes complétés** (6 bots × `eval_episodes: 10` ; chaque bot affiche
+W+L+D = 10). Le fail-fast §0.5 n'a pas levé : **l'absence d'exception EST le résultat**.
+
+| Bot | Score | Détail |
+|---|---|---|
+| defensive | **0.90** | W:9 L:1 D:0 |
+| tactical *(holdout)* | **0.60** | W:6 L:3 D:1 |
+| aggressive_smart | 0.30 | W:3 L:7 D:0 |
+| control | 0.30 | W:3 L:6 D:1 |
+| greedy | 0.20 | W:2 L:8 D:0 |
+| adaptive | **0.10** | W:1 L:7 D:2 ← `worst_bot_score` |
+
+`Combined Score: 0.3830` — **recalculé à la main depuis les poids** (`tactical: 0.0`, les 5 autres
+sommant à 1.0) : **0.3830 exactement**. Le holdout ne pollue donc pas le score de sélection, et
+`worst_bot_score` retient bien `adaptive`, pas `tactical` : **les DEUX verrous de §10.5
+fonctionnent, vérifiés par le calcul et pas seulement par lecture du code.**
+
+**Ce que ce run VALIDE** :
+- ✅ **Portage `CC_DMG`/`RNG_DMG` validé runtime** sur les **6 sites `TacticalBot`** — le bot a
+  joué 10/10 épisodes entiers, contre 4/8 auparavant.
+- ✅ **§10.5 enfin validé runtime.** L'avertissement « `TacticalBot` n'a jamais été validé runtime
+  sur le pipeline squad » porté plus bas dans ce document est **levé**.
+
+⚠️ **Ce que ce run NE valide PAS** : le **7ᵉ site porté**, `_best_target_slot_by_threat`. Son
+unique appelant est `DefensiveSmartBot`, **absent de `bot_eval_weights`** — or l'éval ne joue que
+les bots pondérés (`active_bot_names = tuple(eval_weights.keys())`,
+[bot_evaluation.py:893](../../ai/bot_evaluation.py#L893)). Ce site n'est couvert que par son test
+unitaire. Même piège que §10.5 : **une liste de poids détermine qui TOURNE, pas seulement qui
+COMPTE.**
+
+**Trois constats du run, à traiter :**
+
+| # | Constat | Suite |
+|---|---|---|
+| 1 | **Le modèle échouerait au gating** : `worst_bot_score` 0.10 < `model_gating_min_worst_bot` 0.25. | Attendu — ce modèle n'a pas été entraîné dans les conditions actuelles. À re-mesurer après le vrai run. |
+| 2 | ~~**Bug d'affichage** : l'en-tête annonçait `Episodes per bot: 10 (Total: 30)` alors que **60** tournaient~~ — `episodes_per_bot * 3` codé en dur, littéral resté de l'époque à 3 bots. | ✅ **CORRIGÉ (2026-07-19)** : le total est dérivé de `len(callback_params.bot_eval_weights)` — **la même source unique** que `bot_evaluation` (`active_bot_names = tuple(eval_weights.keys())`), pour que le nombre annoncé ne puisse pas diverger du nombre joué. Vérifié sur le vrai chemin d'exécution (run interrompu après l'en-tête) : affiche `Total: 60`. |
+| 3 | **Réserve §0.5 confirmée OBSERVÉE** : le bloc `🏁 Scenario ranking` s'imprime bien **avant** le résumé. | Toujours ouvert. |
+
+`Worst holdout hard combined: N/A` s'affiche comme voulu (§0.6) : l'absence est **explicite**,
+pas un zéro silencieux. Le fix de §0.6 est donc lui aussi confirmé à l'exécution.
+
+**Ce que ce run ne débloque PAS — le critère §10.6.** Ranking par scénario :
+`bot-03 = 0.805`, `bot-01 = 0.383`, `bot-04 = 0.305`, `bot-02 = 0.153`. Les 4 scénarios holdout
+SONT les 4 matchups (SM/Ork × SM/Ork) : l'écart de 0.65 entre le meilleur et le pire mélange
+**compétence de l'agent** et **déséquilibre de listes** (§0.6, 824 vs 690). Tant que ce
+déséquilibre n'est pas tranché, aucun win-rate par matchup n'est interprétable.
+
 **LE TRAINING TOURNE (2026-07-19, après T6-h + T6-g).** La commande de repro historique passe
 désormais de bout en bout :
 
@@ -435,12 +529,29 @@ nécessaires (le premier seul ne suffit pas) :
 - **Poids nul** : `tactical: 0.0` dans `bot_eval_weights` (les 5 autres gardent leurs poids
   d'origine, somme 1.0). `combined` est un critère de gating et pilote le choix du BEST.
 - **Exclusion par NOM** : `worst_bot_score`, le gating et le score robuste itèrent sur des
-  ensembles de noms de bots, pas sur les poids — un poids nul ne les protège pas, et comme
-  `TacticalBot` est le bot le plus fort il serait presque toujours le `min`, donc dominerait le
-  gate. D'où `HOLDOUT_BOT_NAMES` / `SELECTION_BOT_NAMES = ALL_BOT_NAMES - HOLDOUT_BOT_NAMES`
+  ensembles de noms de bots, pas sur les poids — un poids nul ne les protège **pas**.
+  D'où `HOLDOUT_BOT_NAMES` / `SELECTION_BOT_NAMES = ALL_BOT_NAMES - HOLDOUT_BOT_NAMES`
   (training_callbacks), utilisé aux 3 sites de sélection ; `ALL_BOT_NAMES` reste pour
   l'affichage et le log. `ALL_BOT_KEYS` (metrics_tracker) exclut aussi le holdout, car il
   alimente `0_critical/b_worst_bot_score`.
+
+⚠️ **Le motif d'origine de cette exclusion était FAUX — corrigé le 2026-07-19 après mesure.**
+Ce document justifiait l'exclusion par nom en écrivant que « `TacticalBot` est le bot le plus
+fort, donc serait presque toujours le `min` et dominerait le gate ». **Mesuré (§0.7)** :
+`vs tactical = 0.60`, **deuxième meilleur score de l'agent**, très au-dessus de `greedy` (0.20)
+et `adaptive` (0.10) ; le `min` observé est `adaptive`. `TacticalBot` n'est donc pas le bot le
+plus fort face à ce modèle.
+
+**Le verrou reste néanmoins nécessaire, et pour une meilleure raison** : un holdout ne doit
+piloter aucun signal de sélection **quel que soit son niveau**. S'il était faible, l'inclure
+gonflerait `worst_bot_score` et laisserait passer le gate ; s'il était fort, il l'écraserait.
+Dans les deux cas la sélection se met à optimiser sur le holdout, et il cesse d'en être un.
+La force relative du bot est **hors sujet** — c'était l'erreur de raisonnement.
+
+**Leçon de méthode** (même famille que la demi-vérité de §0.1 sur `require_coherency`) : une
+justification par une propriété SUPPOSÉE du système (« ce bot est le plus fort ») est une
+hypothèse non mesurée. Ici elle était fausse et le verrou est resté correct par chance. Préférer
+une justification qui tient quelle que soit la valeur de la propriété.
 
 **Dette corrigée au passage** : `randomness_config` (bot_evaluation) ne recopiait que
 `greedy`/`defensive`/`control` — `aggressive_smart`, `adaptive` et `tactical` retombaient
@@ -454,11 +565,11 @@ signaux de sélection**, **absence de défaut de randomness**.
 Run de vérification : `vs TacticalBot: 0.00 (0/1 wins)` s'affiche désormais et aucun `KeyError`
 de randomness n'est levé — le `0.00` est la dette rosters, pas le câblage.
 
-⚠️ **`TacticalBot` n'a jamais été validé runtime sur le pipeline squad** : son docstring le
-disait « unused in training/eval » (désormais périmé) et il n'a pas joué un seul épisode
-complet, le run échouant sur la dette rosters avant. Les autres bots ont été maintenus au fil
-des refactors squad, celui-ci non. **Ne pas considérer §10.5 comme validé runtime** tant que
-les rosters §10.2 n'existent pas.
+~~⚠️ **`TacticalBot` n'a jamais été validé runtime sur le pipeline squad**~~
+✅ **LEVÉ le 2026-07-19 — voir §0.7** : après le portage `CC_DMG`/`RNG_DMG`, `TacticalBot` a joué
+**10/10 épisodes entiers** (`vs tactical: 0.60`, W:6 L:3 D:1). Constat historique : il n'avait
+jamais complété un épisode (docstring « unused in training/eval », puis 4/8 épisodes), parce que
+les autres bots avaient été maintenus au fil des refactors squad et pas lui.
 
 **Suite après ces deux tranches** : `9 failed, 1451 passed` — **mêmes 9 échecs préexistants**
 (dette rosters), zéro régression.

@@ -4702,9 +4702,15 @@ def main():
             training_config = cfg.load_agent_training_config(args.agent, args.training_config)
             episodes_per_bot = args.test_episodes if args.test_episodes else require_key(training_config, "eval_episodes")
             
+            # Le total = episodes_per_bot x NOMBRE DE BOTS REELLEMENT JOUES. L'eval ne joue que
+            # les bots ponderes (bot_evaluation: active_bot_names = tuple(eval_weights.keys())) —
+            # le `* 3` code en dur ici datait de l'epoque a 3 bots et annoncait 30 pour 60 tours.
+            eval_bot_count = len(require_key(
+                require_key(training_config, "callback_params"), "bot_eval_weights"
+            ))
             print("\n" + "="*80)
             print("🎯 RUNNING BOT EVALUATION")
-            print(f"Episodes per bot: {episodes_per_bot} (Total: {episodes_per_bot * 3})")
+            print(f"Episodes per bot: {episodes_per_bot} (Total: {episodes_per_bot * eval_bot_count})")
             print("="*80)
             
             results = evaluate_against_bots(
