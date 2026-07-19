@@ -15,7 +15,8 @@ export class BoyzNobKombi extends SwarmRangeSwarm {
   static HP_MAX = 2; // Max hit points
   static LD = 7; // Leadership score
   static OC = 2; // Operative Control
-  static VALUE = 9; // Unit value (W40K points cost)
+  static VALUE = 12; // Unit value (W40K points cost) — Munitorum Orks : BOYZ 75 pts / 10 modeles.
+                    // 9 Boyz a 7 + 1 Nob a 12 = 75 exact (le reliquat porte sur le champion).
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["kombi_rokkit", "kombi_shoota", "slugga"];

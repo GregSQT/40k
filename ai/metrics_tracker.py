@@ -42,7 +42,6 @@ from config_loader import get_config_loader
 class W40KMetricsTracker:
     """
     Tracks essential training metrics for W40K agents with tensorboard integration.
-    Designed to work with existing multi_agent_trainer.py structure.
     Streamlined to 20 critical metrics, removing redundant calculations.
     """
     

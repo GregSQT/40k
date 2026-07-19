@@ -15,7 +15,9 @@ export class IntercessorGrenadeLauncher extends TroopRangeSwarm {
   static HP_MAX = 2; // Max hit points
   static LD = 6; // Leadership score
   static OC = 2; // Operative Control
-  static VALUE = 18; // Unit value (W40K points cost)
+  static VALUE = 16; // Unit value (W40K points cost) — Munitorum SM : INTERCESSOR SQUAD 80 pts /
+                    // 5 modeles = 16 par modele. En 10e, l'equipement est gratuit : pas de
+                    // surcout pour le lance-grenades.
 
   // WEAPONS
   static RNG_WEAPON_CODES = [

@@ -15,7 +15,8 @@ export class IntercessorSergeant extends TroopMeleeElite {
   static HP_MAX = 2; // Max hit points
   static LD = 6; // Leadership score
   static OC = 2; // Operative Control
-  static VALUE = 19; // Unit value (W40K points cost)
+  static VALUE = 16; // Unit value (W40K points cost) — Munitorum SM : INTERCESSOR SQUAD 80 pts /
+                    // 5 modeles = 16 par modele, sergent compris (equipement gratuit en 10e).
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["bolt_rifle", "bolt_pistol"];

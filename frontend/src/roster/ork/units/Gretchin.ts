@@ -15,7 +15,9 @@ export class Gretchin extends SwarmRangeSwarm {
   static HP_MAX = 1; // Max hit points
   static LD = 8; // Leadership score
   static OC = 2; // Operative Control
-  static VALUE = 4; // Unit value (W40K points cost)
+  static VALUE = 5; // Unit value (W40K points cost) — Munitorum Orks : GRETCHIN 45 pts / 10 modeles
+                   // = 4,5 par modele, non representable (VALUE est coerce en int, game_state.py).
+                   // Arrondi au superieur pour ne pas sous-coter l'unite.
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["blasta"];

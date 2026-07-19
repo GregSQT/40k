@@ -50,19 +50,12 @@
         "Gretchin",
         "Gretchin",
         "Gretchin",
-        "Gretchin",
-        "Gretchin",
-        "Gretchin",
-        "Gretchin",
-        "Gretchin",
-        "Gretchin",
-        "Gretchin",
-        "Gretchin",
-        "Gretchin",
-        "Gretchin",
-        "Gretchin",
-        "WeirdBoy"
+        "Gretchin"
       ]
+    },
+    {
+      "unit_type": "WeirdBoy",
+      "count": 1
     },
     {
       "unit_type": "WarTrakk",

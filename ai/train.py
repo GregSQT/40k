@@ -971,7 +971,6 @@ def _load_rule_checker_scenarios(project_root_path: str) -> List[str]:
 
 # Multi-agent orchestration imports
 from ai.scenario_manager import ScenarioManager
-from ai.multi_agent_trainer import MultiAgentTrainer
 from config_loader import get_config_loader, get_max_turns
 import torch
 
@@ -4287,27 +4286,6 @@ def train_with_curriculum(
 
     return True, final_model, final_env
 
-def start_multi_agent_orchestration(config, total_episodes: int, training_config_name: str = "default",
-                                   rewards_config_name: str = "default", max_concurrent: Optional[int] = None,
-                                   training_phase: Optional[str] = None):
-    """Start multi-agent orchestration training with optional phase specification."""
-    
-    try:
-        trainer = MultiAgentTrainer(config, max_concurrent_sessions=max_concurrent)
-        results = trainer.start_balanced_training(
-            total_episodes=total_episodes,
-            training_config_name=training_config_name,
-            rewards_config_name=rewards_config_name,
-            training_phase=training_phase
-        )
-        
-        print(f"✅ Orchestration completed: {results['total_matchups']} matchups")
-        return results
-        
-    except Exception as e:
-        print(f"❌ Orchestration failed: {e}")
-        return None
-
 def main():
     """Main training function following AI_INSTRUCTIONS.md exactly."""
     parser = argparse.ArgumentParser(description="Train W40K AI (see Documentation/AI_TURN.md and AI_IMPLEMENTATION.md)")
@@ -4325,18 +4303,10 @@ def main():
                        help="Alias for --test-only")
     parser.add_argument("--test-episodes", type=int, default=0, 
                        help="Number of episodes for testing")
-    parser.add_argument("--multi-agent", action="store_true",
-                       help="Use multi-agent training system")
     parser.add_argument("--agent", type=str, default=None,
                        help="Train specific agent (e.g., 'SpaceMarine_Ranged')")
-    parser.add_argument("--orchestrate", action="store_true",
-                       help="Start balanced multi-agent orchestration training")
     parser.add_argument("--total-episodes", type=int, default=None,
                        help="Total episodes for training (overrides config file value)")
-    parser.add_argument("--max-concurrent", type=int, default=None,
-                       help="Maximum concurrent training sessions")
-    parser.add_argument("--training-phase", type=str, choices=["solo", "cross_faction", "full_composition"],
-                       help="Specific training phase for 3-phase training plan")
     parser.add_argument("--test-integration", action="store_true",
                        help="Test scenario manager integration")
     parser.add_argument("--step", action="store_true",
@@ -4400,8 +4370,6 @@ def main():
     print(f"New model: {args.new}")
     print(f"Append training: {args.append}")
     print(f"Test only: {args.test_only}")
-    print(f"Multi-agent: {args.multi_agent}")
-    print(f"Orchestrate: {args.orchestrate}")
     print(f"Step logging: {args.step}")
     print(f"Rule-checker mode: {args.rule_checker}")
     print(f"Debug mode: {args.debug}")
@@ -4471,32 +4439,6 @@ def main():
             success = test_scenario_manager_integration()
             return 0 if success else 1
         
-        # Multi-agent orchestration mode
-        if args.orchestrate:
-            # Use training config value when total_episodes is not provided
-            total_episodes = args.total_episodes
-            if total_episodes is None:
-                # Orchestration mode requires agent parameter
-                if not args.agent:
-                    raise ValueError("--agent parameter required when using --orchestrate without --total-episodes")
-                training_config = config.load_agent_training_config(args.agent, args.training_config)
-                if "total_episodes" not in training_config:
-                    raise KeyError(f"total_episodes missing from {args.agent} training config phase {args.training_config}")
-                total_episodes = training_config["total_episodes"]
-                print(f"📊 Using total_episodes from config: {total_episodes}")
-            else:
-                print(f"📊 Using total_episodes from command line: {total_episodes}")
-                
-            results = start_multi_agent_orchestration(
-                config=config,
-                total_episodes=total_episodes,
-                training_config_name=args.training_config,
-                rewards_config_name=args.rewards_config,
-                max_concurrent=args.max_concurrent,
-                training_phase=args.training_phase
-            )
-            return 0 if results else 1
-
         # Test-only mode - check BEFORE training
         elif args.test_only:
             if not args.agent:

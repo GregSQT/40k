@@ -7,17 +7,10 @@ Verrouille :
 - R1 : --training-config manquant -> erreur explicite listant les phases.
 """
 import json
-import sys
-import types
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
-if "ai.multi_agent_trainer" not in sys.modules:
-    _stub = types.ModuleType("ai.multi_agent_trainer")
-    setattr(_stub, "MultiAgentTrainer", object)
-    sys.modules["ai.multi_agent_trainer"] = _stub
 
 import ai.train as train
 
