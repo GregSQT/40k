@@ -33,10 +33,7 @@ from engine.phase_handlers.shared_utils import (
     validate_move_plan,
 )
 
-SCENARIO = (
-    "config/agents/CoreAgent/scenarios/training/training_benchmark/"
-    "scenario_training_benchmark.json"
-)
+SCENARIO = "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json"
 MAX_STEPS = 400
 
 
@@ -45,9 +42,9 @@ def _engine(seed):
     from engine.w40k_core import W40KEngine
 
     eng = W40KEngine(
-        rewards_config="CoreAgent",
+        rewards_config="ArmageddonAgent",
         training_config_name="x1_debug",
-        controlled_agent="CoreAgent",
+        controlled_agent="ArmageddonAgent",
         scenario_file=SCENARIO,
         unit_registry=UnitRegistry(),
         quiet=True,

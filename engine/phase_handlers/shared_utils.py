@@ -3289,21 +3289,22 @@ def build_move_blocked_cells_by_level(
     Les sets sont renvoyes PAR REFERENCE (lecture pure) : ne pas les muter.
     """
     wall_hexes = game_state.get("wall_hexes", set())  # get allowed
-    static_blocked: List[Set[Tuple[int, int]]] = []
+    static_blocked: List[Tuple[str, Set[Tuple[int, int]]]] = []
     if not constraints["allow_walls"] and wall_hexes:
-        static_blocked.append(wall_hexes)
+        static_blocked.append(("mur", wall_hexes))
     if constraints["forbid_enemy_er"]:
         enemy_er = require_key(game_state, f"enemy_adjacent_hexes_player_{int(player)}")
         if enemy_er:
-            static_blocked.append(enemy_er)
+            static_blocked.append(("ER ennemie", enemy_er))
 
-    out: Dict[int, List[Set[Tuple[int, int]]]] = {}
+    out: Dict[int, List[Tuple[str, Set[Tuple[int, int]]]]] = {}
     for lv in levels:
         blocked = list(static_blocked)
         if not constraints["allow_collisions"]:
-            blocked.append(
-                build_occupied_positions_set(game_state, exclude_unit_id=squad_id, level=int(lv))
-            )
+            blocked.append((
+                "occupation d'une autre escouade",
+                build_occupied_positions_set(game_state, exclude_unit_id=squad_id, level=int(lv)),
+            ))
         out[int(lv)] = blocked
     return out
 
@@ -3382,11 +3383,26 @@ def validate_move_plan(
 
     Validation atomique : un seul echec → False. Aucune ecriture.
     """
+    return explain_move_plan_rejection(plan, game_state, constraints) is None
+
+
+def explain_move_plan_rejection(
+    plan: MovePlan,
+    game_state: Dict[str, Any],
+    constraints: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """SOURCE UNIQUE de la validation d un plan de move : None = valide, sinon la RAISON.
+
+    `validate_move_plan` n'est que le predicat booleen construit dessus — il n'y a donc qu'une
+    seule implementation du check. Cette forme existe parce qu'une violation de l'invariant
+    « masque ⊆ executable » est fatale (w40k_core leve) : une erreur qui ne nomme PAS la
+    contrainte violee oblige a re-deviner la cause a chaque occurrence.
+    """
     c = dict(DEFAULT_MOVE_CONSTRAINTS)
     if constraints:
         c.update(constraints)
     if not plan:
-        return False
+        return "plan vide"
 
     models_cache = require_key(game_state, "models_cache")
     board_cols = require_key(game_state, "board_cols")
@@ -3395,7 +3411,7 @@ def validate_move_plan(
 
     first_model = models_cache.get(plan[0][0])
     if first_model is None:
-        return False
+        return f"figurine {plan[0][0]} absente de models_cache"
     squad_id = str(first_model["squad_id"])
     player = int(first_model["player"])
 
@@ -3423,31 +3439,51 @@ def validate_move_plan(
             mid = entry[0]
             m = models_cache.get(mid)
             if m is None:
-                return False
+                return f"figurine {mid} absente de models_cache"
             origin_positions[mid] = (int(m["col"]), int(m["row"]))
 
     new_cells: Set[Tuple[int, int]] = set()
     for entry in plan:
         mid, nc, nr = entry[0], int(entry[1]), int(entry[2])
         if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
-            return False
+            return f"figurine {mid} hors plateau en ({nc},{nr})"
         cell = (nc, nr)
-        if any(cell in s for s in blocked_by_level[_target_level(entry)]):
-            return False
+        for label, blocked_set in blocked_by_level[_target_level(entry)]:
+            if cell in blocked_set:
+                return (
+                    f"figurine {mid} en ({nc},{nr}) niveau {_target_level(entry)} "
+                    f"sur cellule interdite : {label}"
+                )
         if cell in new_cells:
-            return False  # collision intra-plan (deux figs sur meme hex)
+            return f"collision intra-plan : deux figurines en ({nc},{nr}) (dont {mid})"
         new_cells.add(cell)
         if c["budget_per_model"] is not None:
             o_col, o_row = origin_positions[mid]
-            if calculate_hex_distance(o_col, o_row, nc, nr) > int(c["budget_per_model"]):
-                return False
+            dist = calculate_hex_distance(o_col, o_row, nc, nr)
+            if dist > int(c["budget_per_model"]):
+                return (
+                    f"figurine {mid} hors budget : distance {dist} depuis "
+                    f"({o_col},{o_row}) > budget_per_model={int(c['budget_per_model'])}"
+                )
 
     if c["require_coherency"]:
         plan_positions = {entry[0]: (int(entry[1]), int(entry[2])) for entry in plan}
         if not _validate_plan_coherency(plan_positions, game_state):
-            return False
+            # La coherency ne depend que des positions RELATIVES, preservees par la translation
+            # cube : si le plan est incoherent, la formation ACTUELLE l'est deja. On le dit, car
+            # la cause n'est alors pas la destination mais l'etat de l'escouade (pertes).
+            current = {
+                mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"]))
+                for mid in plan_positions
+                if mid in models_cache
+            }
+            origin_coherent = _validate_plan_coherency(current, game_state)
+            return (
+                "coherency du plan invalide "
+                f"(formation actuelle {'coherente' if origin_coherent else 'DEJA incoherente'})"
+            )
 
-    return True
+    return None
 
 
 def apply_snap_corrections(
@@ -3827,6 +3863,31 @@ def get_squad_move_budget(
     return max(0, move_stat - tts_penalty)  # normal, fall_back
 
 
+def resolve_squad_move_constraints(
+    squad_id: str,
+    game_state: Dict[str, Any],
+    move_type: str,
+    advance_roll: Optional[int] = None,
+    extra_constraints: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """SOURCE UNIQUE des contraintes qu'un squad move applique — budget inclus.
+
+    Extraite d'`execute_squad_move` pour que le DIAGNOSTIC d'une violation de l'invariant
+    « masque ⊆ executable » (w40k_core) evalue exactement les memes contraintes que
+    l'execution : les recalculer a la main a l'endroit de l'erreur produirait un diagnostic
+    qui peut mentir.
+    """
+    budget = get_squad_move_budget(squad_id, game_state, move_type, advance_roll=advance_roll)
+    # Squad move rigide : retrancher le coût de descente de la fig la plus haute (§13.06), miroir du
+    # pool PvP. No-op tant que l'unité est au sol (l'IA directionnelle 2D ne monte pas) ou vole.
+    from engine.phase_handlers.movement_handlers import squad_descent_penalty_subhex
+    budget = max(0, budget - squad_descent_penalty_subhex(game_state, squad_id))
+    constraints: Dict[str, Any] = {"budget_per_model": budget}
+    if extra_constraints:
+        constraints.update(extra_constraints)
+    return constraints
+
+
 def execute_squad_move(
     squad_id: str,
     anchor_dest_col: int,
@@ -3849,14 +3910,9 @@ def execute_squad_move(
     plan = build_rigid_plan(anchor_dest_col, anchor_dest_row, squad_id, game_state)
     if plan is None:
         return False
-    budget = get_squad_move_budget(squad_id, game_state, move_type, advance_roll=advance_roll)
-    # Squad move rigide : retrancher le coût de descente de la fig la plus haute (§13.06), miroir du
-    # pool PvP. No-op tant que l'unité est au sol (l'IA directionnelle 2D ne monte pas) ou vole.
-    from engine.phase_handlers.movement_handlers import squad_descent_penalty_subhex
-    budget = max(0, budget - squad_descent_penalty_subhex(game_state, squad_id))
-    constraints: Dict[str, Any] = {"budget_per_model": budget}
-    if extra_constraints:
-        constraints.update(extra_constraints)
+    constraints = resolve_squad_move_constraints(
+        squad_id, game_state, move_type, advance_roll, extra_constraints
+    )
     if not validate_move_plan(plan, game_state, constraints):
         return False
     commit_move(plan, game_state, move_type)
@@ -7525,7 +7581,7 @@ def erode_move_pool_by_squad_block(
     # amortie sur |pool| x |figurines| tests (~2800 x 20). Cf. la docstring du helper : c'est
     # l'arbitrage du consommateur, `validate_move_plan` fait l'inverse.
     blocked_by_level: Dict[int, Set[Tuple[int, int]]] = {
-        lv: set().union(*sets) if sets else set()
+        lv: set().union(*(s for _label, s in sets)) if sets else set()
         for lv, sets in blocked_sets_by_level.items()
     }
 
@@ -7869,6 +7925,47 @@ def get_enemy_slot_mapping(
     raw = game_state.get(cache_key, [None] * SQUAD_ACTION_SHOOT_SLOT_COUNT)
     units_cache = game_state.get("units_cache", {})  # get allowed
     return [sid if (sid is not None and sid in units_cache) else None for sid in raw]
+
+
+def end_of_turn_regain_coherency_all_squads(
+    game_state: Dict[str, Any],
+) -> Dict[str, List[str]]:
+    """Etape End of Turn — REGAINING COHERENCY (03.03), sur TOUTES les escouades.
+
+    « In the End of Turn step of each player's turn, if one or more units on the battlefield
+    are not in coherency, those units' controlling players must remove models from them, one at
+    a time, until they are in coherency again. Models removed in this way are destroyed, but
+    they do not trigger rules that apply when a model is destroyed. »
+
+    Les DEUX joueurs sont traites : la regle vise « units on the battlefield », pas les seules
+    unites du joueur dont le tour s'acheve.
+
+    Pourquoi cette etape est indispensable : l'incoherence ne naissait que des pertes et n'etait
+    JAMAIS resorbee (`end_of_turn_coherency_removal` n'avait aucun appelant). Une escouade
+    amputee restait donc incoherente indefiniment, et comme `build_rigid_plan` translate le bloc
+    rigidement — ce qui PRESERVE l'incoherence — `validate_move_plan` rejetait CHAQUE destination
+    d'un pool que le masque (construit sur l'ancre, sans check de coherency) offrait entierement.
+    C'est l'« incoherence masque/execution » observee en phase move.
+
+    ⚠️ Dette assumee : la regle laisse au joueur le CHOIX des figurines retirees ;
+    `end_of_turn_coherency_removal` choisit a sa place (la plus eloignee du centroide, tie-break
+    par index croissant). Exact pour le gym et pour le cas dominant (la figurine isolee), mais
+    c'est une divergence visible en PvP. Une selection manuelle REMPLACERA cet appel.
+    Le choix auto n'est PAS neutre sur une escouade heterogene : le critere geometrique retire la
+    figurine la plus isolee, alors qu'un joueur sacrifierait des figurines de base pour conserver
+    une arme speciale — l'ecart porte sur la PUISSANCE conservee, pas seulement sur la position.
+
+    Retourne {squad_id: [model_ids retires]} pour les seules escouades ayant perdu une figurine.
+    """
+    squad_models = require_key(game_state, "squad_models")
+    removed_by_squad: Dict[str, List[str]] = {}
+    # Snapshot trie : `destroy_model` mute `squad_models`/`models_cache` sous l'iteration, et
+    # l'ordre doit etre deterministe (rejouabilite des episodes / replays).
+    for squad_id in sorted(squad_models.keys()):
+        removed = end_of_turn_coherency_removal(game_state, squad_id)
+        if removed:
+            removed_by_squad[squad_id] = removed
+    return removed_by_squad
 
 
 def end_of_turn_coherency_removal(

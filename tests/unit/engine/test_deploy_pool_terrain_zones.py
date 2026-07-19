@@ -19,7 +19,7 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 BOARD_SCEN_DIR = PROJECT_ROOT / "config" / "board" / "44x60x5" / "scenario"
-BANK_DIR = PROJECT_ROOT / "config" / "agents" / "CoreAgent" / "scenarios" / "training"
+BANK_DIR = PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
 
 
 def _load(scenario_file: str):
@@ -27,7 +27,7 @@ def _load(scenario_file: str):
     from engine.w40k_core import W40KEngine
 
     eng = W40KEngine(
-        rewards_config="CoreAgent", training_config_name="x1_debug", controlled_agent="CoreAgent",
+        rewards_config="ArmageddonAgent", training_config_name="x1_debug", controlled_agent="ArmageddonAgent",
         scenario_file=scenario_file, unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
     )
     eng.reset(seed=0)
@@ -43,6 +43,6 @@ def test_pvp_fixed_placement_terrain_zones_loads(scen):
 
 def test_terrain_zone_random_deployment_gets_pool():
     """Banque : deployment_type random + zones terrain → pool peuplé, reset sans erreur."""
-    eng = _load(str(BANK_DIR / "scenario_training_bot-07.json"))
+    eng = _load(str(BANK_DIR / "scenario_training_armageddon.json"))
     pools = eng.config.get("deployment_pools")
     assert isinstance(pools, dict) and sorted(pools.keys()) == [1, 2]

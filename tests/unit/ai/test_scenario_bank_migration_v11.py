@@ -1,4 +1,4 @@
-"""V11 T4 — Migration de la banque de scénarios CoreAgent.
+"""V11 T4 — Migration de banque de scénarios (script) + hygiène de la banque ArmageddonAgent.
 
 Couvre :
 - l'idempotence de la transformation `_migrate_scenario` (2e passage = même résultat) ;
@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SCEN_ROOT = PROJECT_ROOT / "config" / "agents" / "CoreAgent" / "scenarios"
+SCEN_ROOT = PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios"
 ACTIVE_DIRS = ["training", "holdout_regular", "holdout_hard"]
 LEGACY_KEYS = ("objectives", "objectives_ref", "objective_hexes", "deployment_zone", "wall_ref")
 # Décision utilisateur 2026-07-19 : `terrain-train-01/02/03` sont OBSOLÈTES, toute la banque
@@ -108,7 +108,10 @@ def test_normalize_roster_ref_fixes_bare_benchmark_name():
 # ── Invariant statique sur les 61 scénarios migrés ──────────────────────────────
 
 def test_bank_has_expected_count():
-    assert len(_bank_scenarios()) == 61
+    # Banque ArmageddonAgent (2026-07-19) : 1 scenario training + 4 holdout_regular = les
+    # 4 matchups SM/Ork. L'ancienne banque CoreAgent (61 scenarios) a ete retiree ; ce test
+    # garde desormais la banque VIVANTE contre une perte accidentelle de scenario.
+    assert len(_bank_scenarios()) == 5
 
 
 @pytest.mark.parametrize("scen", _bank_scenarios(), ids=lambda p: str(p.relative_to(SCEN_ROOT)))
@@ -122,11 +125,9 @@ def test_bank_scenario_has_no_legacy_and_valid_refs(scen):
 # ── Échantillon chargé de bout en bout (moteur + reset) ─────────────────────────
 
 _SAMPLE = [
-    "training/scenario_training_bot-01.json",       # deployment active + training_random
-    "training/scenario_training_bot-07.json",       # deployment random
-    "training/scenario_training_bot-18.json",       # deployment_type_P1/P2 mixtes
-    "training/training_benchmark/scenario_training_benchmark_classic.json",  # roster ref réparé
-    "holdout_hard/scenario_bot-01.json",            # roster explicite holdout
+    "training/scenario_training_armageddon.json",   # training_random + opponent_roster_ref liste
+    "holdout_regular/scenario_bot-01.json",         # roster explicite holdout, matchup SM vs SM
+    "holdout_regular/scenario_bot-02.json",         # matchup mixte SM vs Ork
 ]
 
 
@@ -137,9 +138,9 @@ def test_sample_scenario_loads_and_resets(rel):
 
     f = SCEN_ROOT / rel
     eng = W40KEngine(
-        rewards_config="CoreAgent",
+        rewards_config="ArmageddonAgent",
         training_config_name="x1_debug",
-        controlled_agent="CoreAgent",
+        controlled_agent="ArmageddonAgent",
         scenario_file=str(f),
         unit_registry=UnitRegistry(),
         quiet=True,

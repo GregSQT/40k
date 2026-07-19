@@ -67,20 +67,6 @@
       "model_gating_enabled": false,
       "model_gating_min_worst_bot": 0.25,
       "model_gating_min_worst_scenario_combined": 0.35,
-      "holdout_regular_scenarios": [
-        "holdout_regular_bot-01",
-        "holdout_regular_bot-02",
-        "holdout_regular_bot-03",
-        "holdout_regular_bot-04",
-        "holdout_regular_bot-05"
-      ],
-      "holdout_hard_scenarios": [
-        "holdout_hard_bot-01",
-        "holdout_hard_bot-02",
-        "holdout_hard_bot-03",
-        "holdout_hard_bot-04",
-        "holdout_hard_bot-05"
-      ],
       "holdout_hard_opponent_budget_modifier": 1.1,
       "bot_eval_weights": {
         "greedy": 0.23,
@@ -263,20 +249,6 @@
       "model_gating_enabled": false,
       "model_gating_min_worst_bot": 0.25,
       "model_gating_min_worst_scenario_combined": 0.35,
-      "holdout_regular_scenarios": [
-        "holdout_regular_bot-01",
-        "holdout_regular_bot-02",
-        "holdout_regular_bot-03",
-        "holdout_regular_bot-04",
-        "holdout_regular_bot-05"
-      ],
-      "holdout_hard_scenarios": [
-        "holdout_hard_bot-01",
-        "holdout_hard_bot-02",
-        "holdout_hard_bot-03",
-        "holdout_hard_bot-04",
-        "holdout_hard_bot-05"
-      ],
       "holdout_hard_opponent_budget_modifier": 1.1,
       "bot_eval_weights": {
         "greedy": 0.23,
@@ -460,20 +432,6 @@
       "model_gating_enabled": false,
       "model_gating_min_worst_bot": 0.25,
       "model_gating_min_worst_scenario_combined": 0.35,
-      "holdout_regular_scenarios": [
-        "holdout_regular_bot-01",
-        "holdout_regular_bot-02",
-        "holdout_regular_bot-03",
-        "holdout_regular_bot-04",
-        "holdout_regular_bot-05"
-      ],
-      "holdout_hard_scenarios": [
-        "holdout_hard_bot-01",
-        "holdout_hard_bot-02",
-        "holdout_hard_bot-03",
-        "holdout_hard_bot-04",
-        "holdout_hard_bot-05"
-      ],
       "holdout_hard_opponent_budget_modifier": 1.1,
       "bot_eval_weights": {
         "greedy": 0.23,
@@ -623,20 +581,6 @@
       "model_gating_enabled": false,
       "model_gating_min_worst_bot": 0.25,
       "model_gating_min_worst_scenario_combined": 0.35,
-      "holdout_regular_scenarios": [
-        "holdout_regular_bot-01",
-        "holdout_regular_bot-02",
-        "holdout_regular_bot-03",
-        "holdout_regular_bot-04",
-        "holdout_regular_bot-05"
-      ],
-      "holdout_hard_scenarios": [
-        "holdout_hard_bot-01",
-        "holdout_hard_bot-02",
-        "holdout_hard_bot-03",
-        "holdout_hard_bot-04",
-        "holdout_hard_bot-05"
-      ],
       "holdout_hard_opponent_budget_modifier": 1.1,
       "bot_eval_weights": {
         "greedy": 0.23,
@@ -823,20 +767,6 @@
       "model_gating_enabled": false,
       "model_gating_min_worst_bot": 0.25,
       "model_gating_min_worst_scenario_combined": 0.35,
-      "holdout_regular_scenarios": [
-        "holdout_regular_bot-01",
-        "holdout_regular_bot-02",
-        "holdout_regular_bot-03",
-        "holdout_regular_bot-04",
-        "holdout_regular_bot-05"
-      ],
-      "holdout_hard_scenarios": [
-        "holdout_hard_bot-01",
-        "holdout_hard_bot-02",
-        "holdout_hard_bot-03",
-        "holdout_hard_bot-04",
-        "holdout_hard_bot-05"
-      ],
       "holdout_hard_opponent_budget_modifier": 1.1,
       "bot_eval_weights": {
         "greedy": 0.23,

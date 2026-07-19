@@ -15,7 +15,7 @@ export class Librarian extends LeaderEliteMeleeElite {
   static HP_MAX = 4; // Max hit points
   static LD = 6; // Leadership score
   static OC = 1; // Operative Control
-  static VALUE = 75; // Unit value (W40K points cost)
+  static VALUE = 60; // Unit value (W40K points cost)
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["bolt_pistol", "smite_witchfire", "smite_focused_witchfire"];

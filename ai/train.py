@@ -4722,6 +4722,21 @@ def main():
                 scenario_list_override=eval_scenario_list_override,
             )
             
+            # Fiabilité stricte, miroir de `_apply_eval_results` (training_callbacks) : un épisode
+            # planté est retiré du dénominateur par `_get_result_with_timeout`, donc publier un
+            # score ici reviendrait à mesurer sur un échantillon tronqué SANS le signaler. Un crash
+            # moteur n'est pas une défaite de l'agent : il n'a pas à être compté, il a à faire
+            # échouer la mesure.
+            total_failed_episodes = int(require_key(results, "total_failed_episodes"))
+            eval_duration_seconds = float(require_key(results, "eval_duration_seconds"))
+            if total_failed_episodes > 0:
+                raise RuntimeError(
+                    "Bot evaluation failed episodes detected: "
+                    f"failed_episodes={total_failed_episodes}, "
+                    f"duration_seconds={eval_duration_seconds:.1f}. "
+                    "Evaluation stops immediately to enforce strict evaluation reliability."
+                )
+
             scenario_scores = require_key(results, "scenario_scores")
             if not isinstance(scenario_scores, dict) or not scenario_scores:
                 raise ValueError("eval-only requires non-empty scenario_scores in evaluation results")

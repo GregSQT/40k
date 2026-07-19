@@ -15,7 +15,7 @@ export class PainBoy extends SwarmRangeSwarm {
   static HP_MAX = 3; // Max hit points
   static LD = 7; // Leadership score
   static OC = 1; // Operative Control
-  static VALUE = 70; // Unit value (W40K points cost)
+  static VALUE = 80; // Unit value (W40K points cost)
 
   // WEAPONS
   static RNG_WEAPON_CODES: string[] = [];

@@ -15,7 +15,7 @@ export class LandSpeederHeavyFlamer extends EliteRangeTroop {
   static HP_MAX = 9; // Max hit points
   static LD = 6; // Leadership score
   static OC = 3; // Operative Control
-  static VALUE = 28; // Unit value (W40K points cost)
+  static VALUE = 95; // Unit value (W40K points cost)
 
   // WEAPONS
   static RNG_WEAPON_CODES = [

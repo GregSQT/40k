@@ -43,7 +43,7 @@ def _engine(scenario_file: str, seed: int):
     from engine.w40k_core import W40KEngine
 
     eng = W40KEngine(
-        rewards_config="CoreAgent", training_config_name="x1_debug", controlled_agent="CoreAgent",
+        rewards_config="ArmageddonAgent", training_config_name="x1_debug", controlled_agent="ArmageddonAgent",
         scenario_file=scenario_file, unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
     )
     eng.reset(seed=seed)

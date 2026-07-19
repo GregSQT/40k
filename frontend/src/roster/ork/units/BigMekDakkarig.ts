@@ -15,7 +15,7 @@ export class BigMekDakkarig extends SwarmRangeSwarm {
   static HP_MAX = 11; // Max hit points
   static LD = 7; // Leadership score
   static OC = 3; // Operative Control
-  static VALUE = 70; // Unit value (W40K points cost)
+  static VALUE = 100; // Unit value (W40K points cost)
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["blitzcannon", "rokkit_launcha_heavy"];

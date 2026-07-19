@@ -15,7 +15,7 @@ export class Boyz extends SwarmRangeSwarm {
   static HP_MAX = 1; // Max hit points
   static LD = 7; // Leadership score
   static OC = 2; // Operative Control
-  static VALUE = 70; // Unit value (W40K points cost)
+  static VALUE = 7; // Unit value (W40K points cost)
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["shoota", "slugga"];

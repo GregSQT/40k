@@ -15,7 +15,7 @@ export class BannerNob extends SwarmRangeSwarm {
   static HP_MAX = 4; // Max hit points
   static LD = 7; // Leadership score
   static OC = 6; // Operative Control
-  static VALUE = 70; // Unit value (W40K points cost)
+  static VALUE = 50; // Unit value (W40K points cost)
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["shoota"];

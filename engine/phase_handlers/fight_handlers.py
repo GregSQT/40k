@@ -31,6 +31,7 @@ from engine.combat_utils import (
 from engine.game_state import GameStateManager
 from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH
 from .shared_utils import (
+    end_of_turn_regain_coherency_all_squads,
     calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge,
     ACTION, PASS, ERROR, FIGHT,
     update_units_cache_hp, remove_from_units_cache,
@@ -103,6 +104,24 @@ def _is_ai_controlled_fight_unit(game_state: Dict[str, Any], unit: Dict[str, Any
     from .shared_utils import is_programmatic_owner
     unit_player = require_key(unit, "player")
     return is_programmatic_owner(game_state, unit_player)
+
+
+def _log_end_of_turn_coherency_removals(
+    game_state: Dict[str, Any], removed_by_squad: Dict[str, List[str]]
+) -> None:
+    """Journalise les retraits de l'etape End of Turn (03.03).
+
+    Le retrait est AUTOMATIQUE alors que la regle laisse le choix au joueur (dette assumee, cf.
+    `end_of_turn_regain_coherency_all_squads`) : il doit au minimum etre VISIBLE, sans quoi un
+    joueur PvP verrait des figurines disparaitre sans explication.
+    """
+    for squad_id in sorted(removed_by_squad):
+        removed = removed_by_squad[squad_id]
+        add_console_log(
+            game_state,
+            f"COHERENCY (03.03) : escouade {squad_id} hors coherency en fin de tour — "
+            f"{len(removed)} figurine(s) retiree(s) : {', '.join(removed)}",
+        )
 
 
 def _is_fight_auto_execution_allowed(game_state: Dict[str, Any]) -> bool:
@@ -1833,6 +1852,13 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(f"Invalid current_player value: {current_player_int}")
     game_state["current_player"] = current_player_int
 
+    # Etape End of Turn — REGAINING COHERENCY (03.03). Meme point que le chemin V11
+    # (`_fight_v11_phase_complete`) : Fight est la derniere phase du tour, et l'etape precede le
+    # test de limite de tour. Helper partage -> les deux chemins ne peuvent pas diverger.
+    _log_end_of_turn_coherency_removals(
+        game_state, end_of_turn_regain_coherency_all_squads(game_state)
+    )
+
     # Player progression logic
     if game_state["current_player"] == 1:
         # Player 1 complete ->    Player 2 command phase
@@ -3280,6 +3306,13 @@ def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["fight_eligible_units"] = []
     game_state["active_fight_unit"] = None
     add_console_log(game_state, "FIGHT PHASE COMPLETE (V11)")
+
+    # Etape End of Turn — REGAINING COHERENCY (03.03). Fight est la DERNIERE phase du tour :
+    # c'est ici que le tour s'acheve. Avant le test de limite de tour, pour que l'etat final de
+    # la partie respecte lui aussi la regle.
+    _log_end_of_turn_coherency_removals(
+        game_state, end_of_turn_regain_coherency_all_squads(game_state)
+    )
 
     current_player = int(require_key(game_state, "current_player"))
     if current_player not in (1, 2):

@@ -15,7 +15,7 @@ export class WarTrakk extends SwarmRangeSwarm {
   static HP_MAX = 7; // Max hit points
   static LD = 7; // Leadership score
   static OC = 1; // Operative Control
-  static VALUE = 70; // Unit value (W40K points cost)
+  static VALUE = 175; // Unit value (W40K points cost)
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["kustom_shoota_a2", "rokkit_launcha"];

@@ -29,8 +29,8 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCENARIO = (
-    PROJECT_ROOT / "config" / "agents" / "CoreAgent" / "scenarios" / "training"
-    / "training_benchmark" / "scenario_training_benchmark.json"
+    PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
+    / "scenario_training_armageddon.json"
 )
 
 UNDEPLOYED = (-1, -1)
@@ -41,7 +41,7 @@ def _load(seed: int = 0):
     from engine.w40k_core import W40KEngine
 
     eng = W40KEngine(
-        rewards_config="CoreAgent", training_config_name="x5_debug", controlled_agent="CoreAgent",
+        rewards_config="ArmageddonAgent", training_config_name="x5_debug", controlled_agent="ArmageddonAgent",
         scenario_file=str(SCENARIO), unit_registry=UnitRegistry(), quiet=True,
         gym_training_mode=True,
     )

@@ -5363,11 +5363,31 @@ class W40KEngine(gym.Env):
             # -> erreur explicite.
             ok = execute_squad_move(squad_id, dest_col, dest_row, move_type, self.game_state, advance_roll)
             if not ok:
+                # L'invariant viole doit NOMMER la contrainte qui l'a rejete : sans cela chaque
+                # occurrence oblige a re-deviner la cause. Rejoue la MEME construction de plan et
+                # les MEMES contraintes que `execute_squad_move` (helpers partages, aucune
+                # reimplementation) — chemin d'erreur uniquement, donc zero cout nominal.
+                from engine.phase_handlers.shared_utils import (
+                    build_rigid_plan,
+                    explain_move_plan_rejection,
+                    resolve_squad_move_constraints,
+                )
+                _plan = build_rigid_plan(dest_col, dest_row, squad_id, self.game_state)
+                if _plan is None:
+                    _reason = "build_rigid_plan a renvoyé None (aucune figurine vivante)"
+                else:
+                    _reason = explain_move_plan_rejection(
+                        _plan,
+                        self.game_state,
+                        resolve_squad_move_constraints(
+                            squad_id, self.game_state, move_type, advance_roll
+                        ),
+                    ) or "aucune contrainte violée au rejeu (état muté entre-temps)"
                 raise ValueError(
                     f"execute_squad_move a échoué : squad={squad_id} type={move_type} "
                     f"dest=({dest_col},{dest_row}) depuis ({_move_from_col},{_move_from_row}) — "
                     f"la destination vient du pool BFS du masque, elle DOIT être exécutable "
-                    f"(incohérence masque/exécution)"
+                    f"(incohérence masque/exécution). Contrainte violée : {_reason}"
                 )
             self.game_state.get("_squad_advance_rolls", {}).pop(squad_id, None)  # get allowed
             clear_squad_move_cell_map(self.game_state, squad_id)

@@ -15,7 +15,7 @@ export class IntercessorSergeant extends TroopMeleeElite {
   static HP_MAX = 2; // Max hit points
   static LD = 6; // Leadership score
   static OC = 2; // Operative Control
-  static VALUE = 21; // Unit value (W40K points cost)
+  static VALUE = 19; // Unit value (W40K points cost)
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["bolt_rifle", "bolt_pistol"];

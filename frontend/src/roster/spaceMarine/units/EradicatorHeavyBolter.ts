@@ -15,7 +15,7 @@ export class EradicatorHeavyBolter extends EliteRangeTroop {
   static HP_MAX = 3; // Max hit points
   static LD = 6; // Leadership score
   static OC = 1; // Operative Control
-  static VALUE = 28; // Unit value (W40K points cost)
+  static VALUE = 23; // Unit value (W40K points cost)
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["heavy_bolter"];

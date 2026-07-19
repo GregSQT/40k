@@ -15,7 +15,7 @@ export class VanguardVeteranSquadJumpPackPlasma extends TroopRangeSwarm {
   static HP_MAX = 2; // Max hit points
   static LD = 6; // Leadership score
   static OC = 1; // Operative Control
-  static VALUE = 18; // Unit value (W40K points cost)
+  static VALUE = 20; // Unit value (W40K points cost)
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["plasma_pistol_standard", "plasma_pistol_supercharge"];

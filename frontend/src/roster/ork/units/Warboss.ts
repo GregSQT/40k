@@ -15,7 +15,7 @@ export class Warboss extends SwarmRangeSwarm {
   static HP_MAX = 6; // Max hit points
   static LD = 6; // Leadership score
   static OC = 1; // Operative Control
-  static VALUE = 70; // Unit value (W40K points cost)
+  static VALUE = 75; // Unit value (W40K points cost)
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["kustom_shoota_a4"];
