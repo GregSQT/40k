@@ -124,22 +124,49 @@ def test_get_scenario_list_for_phase_bot_and_self_filters(tmp_path: Path) -> Non
     assert len(self_results) == 1 and self_results[0].endswith("scenario_self_alpha.json")
 
 
-def test_get_scenario_list_for_phase_bot_finds_holdout_when_training_empty(tmp_path: Path) -> None:
-    """Bot/self: training/ existe mais vide — les scénarios dans holdout_* doivent être listés."""
+@pytest.mark.parametrize("scenario_type", ["bot", "self"])
+def test_get_scenario_list_for_phase_bot_never_returns_holdout(
+    tmp_path: Path, scenario_type: str
+) -> None:
+    """Entraînement (bot/self) : les dossiers holdout_* sont le jeu de TEST, jamais balayés.
+
+    Régression §0.10 : `--scenario bot` sur ArmageddonAgent résolvait les 4 scénarios
+    holdout_regular/ (les matchups de mesure) en plus du scénario d'entraînement.
+    """
     scenarios_root = _scenario_root(tmp_path)
     training_dir = scenarios_root / "training"
     training_dir.mkdir(parents=True, exist_ok=True)
-    holdout_regular = scenarios_root / "holdout_regular"
-    holdout_regular.mkdir(parents=True, exist_ok=True)
-    (holdout_regular / "scenario_bot-01.json").write_text("{}", encoding="utf-8")
+    (training_dir / f"scenario_{scenario_type}_train.json").write_text("{}", encoding="utf-8")
+    for holdout_name in ("holdout_regular", "holdout_hard"):
+        holdout_dir = scenarios_root / holdout_name
+        holdout_dir.mkdir(parents=True, exist_ok=True)
+        (holdout_dir / f"scenario_{scenario_type}-01.json").write_text("{}", encoding="utf-8")
     config = DummyConfig(str(tmp_path / "config"))
 
-    bot_results = training_utils.get_scenario_list_for_phase(
-        config, "AgentX", "default", scenario_type="bot"
+    results = training_utils.get_scenario_list_for_phase(
+        config, "AgentX", "default", scenario_type=scenario_type
     )
-    assert len(bot_results) == 1
-    p = bot_results[0].replace("\\", "/")
-    assert "holdout_regular" in p and p.endswith("scenario_bot-01.json")
+    assert [p.replace("\\", "/").rsplit("/", 1)[-1] for p in results] == [
+        f"scenario_{scenario_type}_train.json"
+    ]
+    assert not any("holdout" in p for p in results)
+
+
+@pytest.mark.parametrize("scenario_type", ["bot", "self"])
+def test_get_scenario_list_for_phase_bot_empty_training_dir_returns_nothing(
+    tmp_path: Path, scenario_type: str
+) -> None:
+    """training/ vide + scénarios en holdout : liste VIDE (l'appelant lève), pas de repli."""
+    scenarios_root = _scenario_root(tmp_path)
+    (scenarios_root / "training").mkdir(parents=True, exist_ok=True)
+    holdout_regular = scenarios_root / "holdout_regular"
+    holdout_regular.mkdir(parents=True, exist_ok=True)
+    (holdout_regular / f"scenario_{scenario_type}-01.json").write_text("{}", encoding="utf-8")
+    config = DummyConfig(str(tmp_path / "config"))
+
+    assert training_utils.get_scenario_list_for_phase(
+        config, "AgentX", "default", scenario_type=scenario_type
+    ) == []
 
 
 def test_get_scenario_list_for_phase_returns_empty_when_agent_missing(tmp_path: Path) -> None:

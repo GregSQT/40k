@@ -328,9 +328,10 @@ def get_scenario_list_for_phase(config, agent_key, training_config_name, scenari
         List of scenario file paths
 
     Bot / self (entraînement contre bots ou self-play) :
-        Cherche dans scenarios/training/, puis holdout_regular/, puis holdout_hard/
-        (tous les dossiers existants), afin que des scénarios présents uniquement en holdout
-        soient trouvés même si training/ existe mais est vide.
+        Cherche UNIQUEMENT dans scenarios/training/ (ou la racine scenarios/ si training/
+        n'existe pas). Les dossiers holdout_regular/ et holdout_hard/ sont exclus : ce sont
+        les jeux de test. Si aucun scénario n'est trouvé, l'appelant lève une erreur
+        explicite — pas de repli sur le holdout.
     """
     scenarios: List[str] = []
     if not agent_key:
@@ -356,15 +357,10 @@ def get_scenario_list_for_phase(config, agent_key, training_config_name, scenari
     elif scenario_type == "training":
         search_dirs = [training_dir] if has_training_dir else []
     elif scenario_type in ("bot", "self"):
-        search_dirs = []
-        if has_training_dir:
-            search_dirs.append(training_dir)
-        if has_holdout_regular_dir:
-            search_dirs.append(holdout_regular_dir)
-        if has_holdout_hard_dir:
-            search_dirs.append(holdout_hard_dir)
-        if not search_dirs:
-            search_dirs = [scenarios_root]
+        # Modes d'ENTRAÎNEMENT : jamais les dossiers holdout_* — ce sont les jeux de test
+        # (mesure du critère §10.6). Les balayer revient à entraîner sur le jeu de test,
+        # silencieusement. Si training/ n'existe pas, la racine sert de dossier de scénarios.
+        search_dirs = [training_dir] if has_training_dir else [scenarios_root]
     else:
         # Default training behavior:
         # - if training/ exists, use it exclusively
