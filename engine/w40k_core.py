@@ -6027,80 +6027,12 @@ class W40KEngine(gym.Env):
     # PHASE INITIALIZATION - KEEP THESE (Handler delegation)
     # ============================================================================
     
-    def _movement_phase_init(self):
-        """Initialize movement phase using AI_MOVE.md delegation."""
-        # AI_MOVE.md: Handler manages phase initialization
-        movement_handlers.movement_phase_start(self.game_state)
-    
     def _shooting_phase_init(self):
         """AI_SHOOT.md EXACT: Pure delegation to handler"""
         # Handler manages everything including phase setting and pool building
         result = shooting_handlers.shooting_phase_start(self.game_state)
         self._shooting_phase_initialized = True
         return result
-    
-    
-    def _charge_phase_init(self):
-        """Initialize charge phase and build activation pool."""
-        self.game_state["phase"] = "charge"
-        # TODO: Build charge activation pool
-    
-    
-    def _fight_phase_init(self):
-        """Initialize fight phase and build activation pool."""
-        self.game_state["phase"] = "fight"
-        # TODO: Build fight activation pool
-        # If no units eligible for shooting, advance immediately to charge
-        if not self.game_state["shoot_activation_pool"]:
-            self._charge_phase_init()
-    
-    
-    def _advance_to_next_player(self):
-        """Advance to next player per AI_TURN.md turn progression."""
-        # Player switching logic
-        if self.game_state["current_player"] == 1:
-            self.game_state["current_player"] = 2
-        elif self.game_state["current_player"] == 2:
-            self.game_state["current_player"] = 1
-            self.game_state["turn"] += 1
-            
-            # Check turn limit immediately after P1 completes turn
-            if turn_limit_reached(self.game_state):
-                # Turn limit reached - mark game over and stop phase progression
-                self.game_state["game_over"] = True
-                return
-
-        # Reset per-enemy-turn reactive tracking on player switch.
-        self.game_state["units_reacted_this_enemy_turn"] = set()
-        self.game_state["reactive_macro_order_current_window"] = []
-        self.game_state["reaction_window_active"] = False
-        self.game_state["reactive_decision_payload"] = {}
-        
-        # Reset shooting phase initialization on player switch (align with MOVE phase re-init behavior)
-        self._shooting_phase_initialized = False
-        # Phase progression logic - simplified to move -> shoot -> move
-        if self.game_state["phase"] == "move":
-            init_result = self._shooting_phase_init()
-            if init_result and init_result.get("phase_complete"):
-                next_phase = init_result.get("next_phase")
-                if not next_phase:
-                    raise KeyError("shooting_phase_start returned phase_complete without next_phase")
-                if next_phase == "charge":
-                    self._charge_phase_init()
-                elif next_phase == "fight":
-                    self._fight_phase_init()
-                elif next_phase == "deployment":
-                    deployment_handlers.deployment_phase_start(self.game_state)
-                elif next_phase == "command":
-                    command_handlers.command_phase_start(self.game_state)
-                elif next_phase == "move":
-                    self._movement_phase_init()
-        elif self.game_state["phase"] == "shoot":
-            self._movement_phase_init()
-        elif self.game_state["phase"] == "charge":
-            self._movement_phase_init()
-        elif self.game_state["phase"] == "fight":
-            self._movement_phase_init()
     
     
     def _tracking_cleanup(self):

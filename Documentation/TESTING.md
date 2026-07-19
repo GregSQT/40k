@@ -47,7 +47,7 @@ npx vitest run
 | `test_reward_calculator.py` | 23 | `_calculate_wound_target`, `_calculate_expected_damage`, `_determine_winner` |
 | `test_action_decoder.py` | 54 | `normalize_action_input`, `validate_action_against_mask`, `convert_gym_action` (5 phases + fight sub-phases), edge cases |
 | `test_observation_builder.py` | 22 | `ObservationBuilder.__init__`, wound_target, expected_damage, favorite_target |
-| `test_engine_turn_loop.py` | 32 | `W40KEngine._check_game_over`, `_advance_to_next_player`, `GameStateManager.determine_winner` |
+| `test_engine_turn_loop.py` | 24 | `W40KEngine._check_game_over`, `GameStateManager.determine_winner` (les 8 tests de `_advance_to_next_player` ont été supprimés avec la méthode, code mort — cf. V11 §0.4) |
 | `test_los_cache_invalidation.py` | 7 | `_invalidate_los_cache_for_moved_unit` — invalidation sélective/totale |
 | `test_combat_utils*.py` | 16 | Coordonnées, dés, voisins, LoS cachée |
 | `test_shared_utils*.py` | 12 | Cache unités, HP, positions |
@@ -84,7 +84,7 @@ npx vitest run
 | 8b — Règles spéciales | DEVASTATING_WOUNDS, HAZARDOUS | ✅ OK |
 | 9 — Initialisation de phase | `movement/shooting/fight/charge_phase_start` | ✅ OK |
 | 10 — IA / Observations | `RewardCalculator`, `ActionDecoder`, `ObservationBuilder` | ✅ OK |
-| 11 — Boucle tour / fin de partie | `_check_game_over`, `_advance_to_next_player`, `determine_winner` | ✅ OK |
+| 11 — Boucle tour / fin de partie | `_check_game_over`, `determine_winner` ; la progression de tour réelle est en fin de phase Fight (`fight_handlers`, deux chemins) | ✅ OK |
 | 12 — Mouvement réactif | `maybe_resolve_reactive_move` | ✅ OK |
 | 13 — API Flask | endpoints REST `/api/game/*` | ✅ OK |
 | 14 — Flux e2e `execute_semantic_action` | skip, move, advance_phase, routing shoot/fight, game_over | ✅ OK |

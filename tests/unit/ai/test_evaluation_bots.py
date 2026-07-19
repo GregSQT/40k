@@ -29,6 +29,19 @@ CHARGE = mi.ACTION_CHARGE          # 1030
 FIGHT = mi.ACTION_FIGHT            # 1031
 
 
+def _dmg(rng: float = 0.0, cc: float = 0.0) -> dict:
+    """Tableaux d'armes (MULTIPLE_WEAPONS_IMPLEMENTATION.md) produisant les degats attendus voulus.
+
+    Remplace les anciens champs RNG_DMG/CC_DMG, SUPPRIMES du contrat d'unite : les bots lisent
+    desormais RNG_WEAPONS/CC_WEAPONS via get_max_ranged_damage / get_max_melee_damage (NB x DMG).
+    NB=1 -> le degat attendu vaut exactement `rng` / `cc`. Liste vide -> 0.0.
+    """
+    return {
+        "RNG_WEAPONS": [{"NB": 1, "DMG": rng}] if rng else [],
+        "CC_WEAPONS": [{"NB": 1, "DMG": cc}] if cc else [],
+    }
+
+
 def _patch_move_geometry(monkeypatch: pytest.MonkeyPatch) -> None:
     """Geometrie deterministe pour les tests de select_movement_destination : empreinte
     single-hex + distance de Manhattan entre les deux hexes representatifs."""
@@ -193,9 +206,9 @@ def test_tactical_bot_select_shooting_target_scoring(monkeypatch: pytest.MonkeyP
     game_state = {
         "current_player": 0,
         "units": [
-            {"id": "u0", "player": 0, "RNG_DMG": 4, "CC_DMG": 1},
-            {"id": "e1", "player": 1, "RNG_DMG": 2, "CC_DMG": 1},
-            {"id": "e2", "player": 1, "RNG_DMG": 1, "CC_DMG": 1},
+            {"id": "u0", "player": 0, **_dmg(rng=4, cc=1)},
+            {"id": "e1", "player": 1, **_dmg(rng=2, cc=1)},
+            {"id": "e2", "player": 1, **_dmg(rng=1, cc=1)},
         ],
     }
     monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs: uid in {"u0", "e1", "e2"})
@@ -209,9 +222,9 @@ def test_tactical_bot_find_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     game_state = {
         "current_player": 0,
         "units": [
-            {"id": "u0", "player": 0, "col": 1, "row": 1, "CC_DMG": 1, "RNG_DMG": 2},
-            {"id": "e1", "player": 1, "col": 4, "row": 1, "CC_DMG": 3, "RNG_DMG": 1},
-            {"id": "e2", "player": 1, "col": 9, "row": 1, "CC_DMG": 1, "RNG_DMG": 3},
+            {"id": "u0", "player": 0, "col": 1, "row": 1, **_dmg(rng=2, cc=1)},
+            {"id": "e1", "player": 1, "col": 4, "row": 1, **_dmg(rng=1, cc=3)},
+            {"id": "e2", "player": 1, "col": 9, "row": 1, **_dmg(rng=3, cc=1)},
         ],
         "units_cache": {},
     }
@@ -228,8 +241,8 @@ def test_tactical_bot_movement_position_helpers(monkeypatch: pytest.MonkeyPatch)
     game_state = {
         "units": [
             {"id": "u0", "player": 0},
-            {"id": "e1", "player": 1, "col": 5, "row": 5, "CC_DMG": 3, "RNG_DMG": 1},
-            {"id": "e2", "player": 1, "col": 10, "row": 10, "CC_DMG": 1, "RNG_DMG": 3},
+            {"id": "e1", "player": 1, "col": 5, "row": 5, **_dmg(rng=1, cc=3)},
+            {"id": "e2", "player": 1, "col": 10, "row": 10, **_dmg(rng=3, cc=1)},
         ],
         "units_cache": {},
         "config": {
@@ -348,3 +361,56 @@ def test_adaptive_bot_charge_posture(monkeypatch: pytest.MonkeyPatch) -> None:
     }
     # Losing charge -> charge
     assert bot.select_action_with_state([CHARGE, WAIT_ACTION], base_gs) == CHARGE
+
+
+# --- V11 §0.3 : portage CC_DMG/RNG_DMG vers le systeme multi-armes -----------------------------
+#
+# `CC_DMG` / `RNG_DMG` ont ete SUPPRIMES par le refactor multi-armes (cf. reward_mapper :
+# « Replaces old RNG_DMG/CC_DMG fields »). Aucun fichier d'unite ne les definit plus, mais 2 bots
+# les lisaient encore via require_key -> ConfigurationError.
+#
+# ⚠️ Correction de l'attribution portee en §0.3 du doc V11 : le site « ControlBot ligne 674 » est
+# en fait dans le helper module `_best_target_slot_by_threat`, dont l'UNIQUE appelant est
+# `DefensiveSmartBot` (verifie par grep). `DefensiveSmartBot` n'est PAS dans `bot_training.ratios`
+# (random/greedy/defensive/control/aggressive_smart/adaptive) : l'exposition est l'EVALUATION,
+# pas le training. Ces tests exercent les deux bots concernes sur des unites au contrat ACTUEL
+# (sans les champs supprimes) : ils sont rouges sur le code d'avant le portage.
+
+def _threat_gs(entries):
+    """game_state pour les selections par menace : units + units_cache alignes."""
+    units = [dict(e) for e in entries]
+    return {
+        "current_player": 0,
+        "phase": "shoot",
+        "units": units,
+        "units_cache": {str(u["id"]): dict(u) for u in units},
+    }
+
+
+def test_threat_focus_fire_without_legacy_damage_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`_best_target_slot_by_threat` (DefensiveSmartBot) : menace lue sur RNG_WEAPONS/CC_WEAPONS."""
+    gs = _threat_gs([
+        {"id": "1", "player": 0, "col": 1, "row": 1, **_dmg(rng=2, cc=1)},
+        {"id": "e1", "player": 1, "col": 3, "row": 1, **_dmg(rng=1, cc=1)},
+        {"id": "e2", "player": 1, "col": 4, "row": 1, **_dmg(rng=1, cc=6)},
+    ])
+    gs["units"][0]["valid_target_pool"] = ["e1", "e2"]
+    monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
+    monkeypatch.setattr(eb, "get_hp_from_cache", lambda uid, gs_: 5)
+
+    bot = DefensiveSmartBot(randomness=0.0)
+    # slot 1 = e2, la plus menacante (6 en melee vs 1 en tir pour e1).
+    assert bot.select_action_with_state([SHOOT, SHOOT2, WAIT_ACTION], gs) == SHOOT2
+
+
+def test_tactical_bot_charges_only_when_melee_beats_shooting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Le critere de charge porte desormais sur melee > tir (l'ancien seuil `CC_DMG >= 2`
+    portait sur un degat PAR TOUCHE d'un champ supprime)."""
+    monkeypatch.setattr(eb, "is_unit_alive", lambda uid, gs_: True)
+    bot = TacticalBot(randomness=0.0)
+
+    melee_unit = {"current_player": 0, "units": [{"id": "1", "player": 0, **_dmg(rng=1, cc=4)}]}
+    shooty_unit = {"current_player": 0, "units": [{"id": "1", "player": 0, **_dmg(rng=6, cc=1)}]}
+
+    assert bot.select_action([CHARGE, WAIT_ACTION], phase="charge", game_state=melee_unit) == CHARGE
+    assert bot.select_action([CHARGE, WAIT_ACTION], phase="charge", game_state=shooty_unit) == WAIT_ACTION

@@ -189,15 +189,12 @@ engine/
 
 **Phase Initialization:**
 - `_deployment_phase_init()` - Build deployment pools, deployable units (when active)
-- `_movement_phase_init()` - Build move_activation_pool
 - `_shooting_phase_init()` - Build shoot_activation_pool
-- `_charge_phase_init()` - Build charge_activation_pool
-- `_fight_phase_init()` - Build fight activation pools
+- (`_movement_phase_init` / `_charge_phase_init` / `_fight_phase_init` : SUPPRIMÉS le 2026-07-19 —
+  îlot de code mort, cf. V11_agent_rework §0.4. L'init de phase passe par les handlers.)
 
 **Game Flow:**
 - When scenario has `deployment_type == "active"`: match starts in `phase = "deployment"`; after all units placed, transition to command/move.
-- `_advance_to_fight_phase()` - Transition move→shoot→charge→fight
-- `_advance_to_next_player()` - Switch players, reset tracking
 - `_tracking_cleanup()` - Clear phase tracking sets
 - `_check_game_over()` - Check win conditions
 - `_determine_winner()` - Determine winner or draw

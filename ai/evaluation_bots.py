@@ -34,6 +34,7 @@ from engine.phase_handlers.shared_utils import (
     compute_candidate_footprint,
 )
 from engine import macro_intents as mi
+from engine.utils.weapon_helpers import get_max_ranged_damage, get_max_melee_damage
 
 # Espace d'action squad (source unique : engine/macro_intents.py). Aucun littéral nu.
 DEPLOYMENT_ACTIONS = list(mi.DEPLOY_SLOTS)   # 4-8 (slots de déploiement)
@@ -670,9 +671,10 @@ def _best_target_slot_by_threat(
         cache_entry = units_cache.get(tid)
         if cache_entry is None:
             continue
-        rng_dmg = float(require_key(cache_entry, "RNG_DMG"))
-        cc_dmg = float(require_key(cache_entry, "CC_DMG"))
-        threat = max(rng_dmg, cc_dmg)
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md : RNG_DMG/CC_DMG ont ete SUPPRIMES du contrat
+        # d'unite. La menace se calcule desormais sur les tableaux d'armes (NB x DMG attendu),
+        # meme source que RewardMapper._get_unit_threat.
+        threat = max(get_max_ranged_damage(cache_entry), get_max_melee_damage(cache_entry))
         if threat > best_threat:
             best_threat = threat
             best_slot = slot
@@ -1061,7 +1063,7 @@ class TacticalBot:
     This is the hardest bot to beat - it makes optimal decisions in each phase:
     - MOVE: Advances toward enemies if out of range, retreats if wounded
     - SHOOT: Always shoots if targets available, prioritizes wounded enemies
-    - CHARGE: Charges if melee is advantageous (high CC_DMG vs target HP)
+    - CHARGE: Charges if melee is advantageous (degats melee attendus > degats de tir)
     - FIGHT: Always fights when in melee, prioritizes killing wounded enemies
 
     Use this bot to test if agents learn proper multi-phase coordination.
@@ -1138,9 +1140,12 @@ class TacticalBot:
         if game_state and mi.ACTION_CHARGE in valid_actions:
             active_unit = self._get_active_unit(game_state)
             if active_unit:
-                # Charge if unit has good melee damage
-                cc_dmg = require_key(active_unit, 'CC_DMG')
-                if cc_dmg >= 2:  # Worth charging
+                # Charge si la melee est AVANTAGEUSE (cf. docstring de la classe).
+                # L'ancien critere `CC_DMG >= 2` portait sur un degat PAR TOUCHE d'un champ
+                # supprime ; transpose tel quel sur NB x DMG il serait vrai presque toujours.
+                # Le critere porte donc sur la comparaison melee vs tir, qui est la question
+                # que le bot pose reellement.
+                if get_max_melee_damage(active_unit) > get_max_ranged_damage(active_unit):
                     return mi.ACTION_CHARGE
 
         # Skip charge if not beneficial
@@ -1215,7 +1220,9 @@ class TacticalBot:
         if not active_unit:
             return valid_targets[0]
 
-        our_damage = require_key(active_unit, 'RNG_DMG')
+        # Degats de tir attendus sur une phase (NB x DMG) — comparables a des HP, donc le test
+        # `hp <= our_damage` ci-dessous est plus juste qu'avec l'ancien degat par touche.
+        our_damage = get_max_ranged_damage(active_unit)
         best_target = valid_targets[0]
         best_score = -float('inf')
 
@@ -1227,7 +1234,7 @@ class TacticalBot:
             hp = get_hp_from_cache(str(target["id"]), game_state)
             if hp is None:
                 continue
-            threat = max(require_key(target, 'RNG_DMG'), require_key(target, 'CC_DMG'))
+            threat = max(get_max_ranged_damage(target), get_max_melee_damage(target))
 
             # Scoring: killable > low HP > high threat
             score = 0
@@ -1263,7 +1270,7 @@ class TacticalBot:
         if not active_unit:
             return valid_targets[0]
 
-        our_melee_damage = require_key(active_unit, 'CC_DMG')
+        our_melee_damage = get_max_melee_damage(active_unit)
         best_target = valid_targets[0]
         best_score = -float('inf')
 
@@ -1275,7 +1282,7 @@ class TacticalBot:
             hp = get_hp_from_cache(str(target["id"]), game_state)
             if hp is None:
                 continue
-            ranged_threat = require_key(target, 'RNG_DMG')
+            ranged_threat = get_max_ranged_damage(target)
 
             # Scoring: killable > high ranged threat
             score = 0
@@ -1342,7 +1349,7 @@ class TacticalBot:
             for enemy in require_key(game_state, 'units'):
                 if enemy.get('player') != unit.get('player') and is_unit_alive(str(enemy.get("id")), game_state):
                     # Only consider melee threats
-                    if require_key(enemy, 'CC_DMG') > require_key(enemy, 'RNG_DMG'):
+                    if get_max_melee_damage(enemy) > get_max_ranged_damage(enemy):
                         enemy_entry = units_cache.get(str(enemy.get("id", "")))
                         enemy_fp = enemy_entry.get("occupied_hexes", {(enemy["col"], enemy["row"])}) if enemy_entry else {(enemy["col"], enemy["row"])}
                         dist = min_distance_between_sets(unit_fp, enemy_fp)

@@ -1,4 +1,12 @@
-"""Orchestration de tour W40KEngine — _check_game_over, _advance_to_next_player, determine_winner."""
+"""Orchestration de tour W40KEngine — _check_game_over, determine_winner.
+
+V11 §0.4 : les classes `TestAdvanceToNextPlayer` / `TestAdvanceToNextPlayerEdgeCases` ont ete
+SUPPRIMEES avec `_advance_to_next_player` (2026-07-19). Cette methode n'avait aucun appelant —
+la vraie progression de tour est dans `fight_handlers` (fin de phase Fight, deux chemins) — mais
+ses 12 tests VERTS l'ont fait passer pour la frontiere de tour : le fix 03.03 y a d'abord ete
+branche, et le crash s'est reproduit a l'identique. Du code mort couvert par des tests verts est
+un piege actif, pas une dette neutre.
+"""
 
 from __future__ import annotations
 
@@ -120,44 +128,6 @@ class TestCheckGameOver:
         gs["turn_limit_reached"] = True
         engine = _bare_engine(gs)
         assert engine._check_game_over() is True
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# _advance_to_next_player
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestAdvanceToNextPlayer:
-
-    def test_player1_switches_to_player2(self):
-        """advance_p1_to_p2 : current_player=1 → 2 après _advance_to_next_player."""
-        gs = _minimal_gs(current_player=1, phase="fight")
-        engine = _bare_engine(gs)
-        engine._advance_to_next_player()
-        assert gs["current_player"] == 2
-
-    def test_player2_switches_to_player1_and_increments_turn(self):
-        """advance_p2_to_p1 : current_player=2 → 1, turn incrémenté."""
-        gs = _minimal_gs(current_player=2, phase="fight", turn=1)
-        engine = _bare_engine(gs)
-        engine._advance_to_next_player()
-        assert gs["current_player"] == 1
-        assert gs["turn"] == 2
-
-    def test_reactive_state_reset_after_switch(self):
-        """advance_reactive_reset : units_reacted_this_enemy_turn vidé après switch."""
-        gs = _minimal_gs(current_player=1, phase="fight")
-        gs["units_reacted_this_enemy_turn"] = {"5", "6"}
-        engine = _bare_engine(gs)
-        engine._advance_to_next_player()
-        assert gs["units_reacted_this_enemy_turn"] == set()
-
-    def test_player2_turn_limit_reached_sets_game_over(self):
-        """advance_turn_limit : p2→p1 dépasse max_turns → game_over=True."""
-        gs = _minimal_gs(current_player=2, phase="fight", turn=5)
-        engine = _bare_engine(gs)
-        engine._advance_to_next_player()
-        # turn devient 6 > max_turns=5 → game_over
-        assert gs["game_over"] is True
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -349,45 +319,6 @@ class TestCheckGameOverEdgeCases:
         engine = _bare_engine(gs)
         engine._check_game_over()
         assert gs["turn_limit_reached"] is True
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# _advance_to_next_player — cas limites supplémentaires
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestAdvanceToNextPlayerEdgeCases:
-
-    def test_reaction_window_reset_to_false(self):
-        """advance_reaction_window : reaction_window_active remis à False."""
-        gs = _minimal_gs(current_player=1, phase="fight")
-        gs["reaction_window_active"] = True
-        engine = _bare_engine(gs)
-        engine._advance_to_next_player()
-        assert gs["reaction_window_active"] is False
-
-    def test_reactive_payload_cleared(self):
-        """advance_payload_cleared : reactive_decision_payload vidé."""
-        gs = _minimal_gs(current_player=1, phase="fight")
-        gs["reactive_decision_payload"] = {"unit_1": {"action": "reactive_move"}}
-        engine = _bare_engine(gs)
-        engine._advance_to_next_player()
-        assert gs["reactive_decision_payload"] == {}
-
-    def test_turn_not_incremented_when_p1_to_p2(self):
-        """advance_turn_no_increment : p1→p2 n'incrémente pas le tour."""
-        gs = _minimal_gs(current_player=1, phase="fight", turn=3)
-        engine = _bare_engine(gs)
-        engine._advance_to_next_player()
-        assert gs["turn"] == 3  # inchangé
-
-    def test_shooting_phase_initialized_reset(self):
-        """advance_shoot_init_reset : _shooting_phase_initialized remis à False."""
-        gs = _minimal_gs(current_player=1, phase="fight")
-        engine = _bare_engine(gs)
-        engine._shooting_phase_initialized = True
-        engine._advance_to_next_player()
-        assert engine._shooting_phase_initialized is False
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GameStateManager — _check_game_over avec turn_limit_reached déjà True

@@ -69,23 +69,34 @@ Le seul contre-exemple était dans le répertoire non échantillonné.
 **L'ordre est imposé** : le fix moteur T6-i vient de bouger deux fois (branchement déplacé), donc
 il doit être verrouillé par un test AVANT qu'un chantier indépendant y touche.
 
-| # | Tâche | Détail |
+| # | Tâche | État |
 |---|---|---|
-| 1 | **Test de non-régression 03.03** (§8 : « une règle = son fichier de tests ») | Le fix T6-i n'est couvert que par un run bout-en-bout. Verrouiller : (a) une escouade rendue incohérente par des pertes redevient cohérente après la fin de tour ; (b) les figurines retirées le sont **une à une** jusqu'au retour en coherency, jamais la dernière ; (c) le retrait ne déclenche ni reward kill ni perte d'OC (`reason='coherency_removal'`) ; (d) **les DEUX chemins de fin de Fight appellent l'étape** — `_fight_v11_phase_complete` ET `_fight_phase_complete`. Le point (d) est le plus important : c'est la garantie « les deux chemins ne peuvent pas diverger », et c'est précisément ce qu'un futur refactor cassera sans s'en apercevoir. |
-| 2 | **Portage `CC_DMG` des bots vers le système multi-armes** | Voir §0.3. Chantier indépendant, à faire sur une suite verte. |
-| 3 | **Code mort : `_advance_to_next_player`** | Voir §0.4. À supprimer ou marquer, avec ses tests. |
+| 1 | **Test de non-régression 03.03** (§8 : « une règle = son fichier de tests ») | ✅ FAIT — `tests/unit/engine/test_end_of_turn_coherency_03_03.py`, 11 tests. (a) retour en coherency après la fin de tour ; (b) retrait **une à une**, minimal, et **jamais la dernière figurine** ; (c) `reason='coherency_removal'` (spy sur `destroy_model`) + aucun compteur de kills touché ; (d) **les DEUX chemins** paramétrés (`_fight_phase_complete` ET `_fight_v11_phase_complete`), plus un test que l'étape précède le test de limite de tour. **Mutation-testé** : neutraliser les deux appels rend 4 tests rouges. |
+| 2 | **Portage `CC_DMG`/`RNG_DMG` des bots vers le système multi-armes** | ✅ FAIT — 7 sites d'`ai/evaluation_bots.py` portés sur `get_max_ranged_damage`/`get_max_melee_damage`. Voir §0.3 (attribution corrigée). |
+| 3 | **Code mort : `_advance_to_next_player`** | ✅ FAIT — supprimé, avec ses **8** tests **et** l'îlot mort qu'il maintenait en vie. Voir §0.4. |
 
-**⚠️ L'état de fin de session n'est ni « OK » ni « optimal ».** Ce qui est solide : suite verte
+**Reste ouvert après cette session** : dette n°4 (déséquilibre 824 vs 690 points, §0.6, décision
+utilisateur requise), le commit (n°5), et la mesure §10.6 elle-même — qui n'a **pas** encore été
+relancée depuis le portage `CC_DMG` : le prochain pas concret est un `--eval` complet pour vérifier
+que **48/48 épisodes** aboutissent et que `TacticalBot` (§10.5) est enfin validé runtime.
+
+**⚠️ L'état de fin de session n'est ni « OK » ni « optimal ».** Mise à jour 2026-07-19 (fin de
+session tâches 1-3) : suite toujours verte, **exit 0 sur 1407 tests collectés** (1404 + 11 nouveaux
+− 8 supprimés). ⚠️ Le compte exact « passed/skipped » n'est **pas** vérifiable ici : le reporter du
+projet n'imprime pas la ligne de résumé de pytest — le seul verdict disponible est le code de
+sortie. Ne pas recopier un « N passed » sans l'avoir vu.
+
+Constat d'origine — ce qui était solide : suite verte
 scellée par un run (`1402 passed, 2 skipped`), fix 03.03 livré et vérifié bout-en-bout, fail-fast
 de l'éval, tests repointés, doc à jour. Ce qui ne l'est pas — **les 5 dettes ouvertes** :
 
 | # | Dette ouverte | Pourquoi ça compte |
 |---|---|---|
-| 1 | **Test 03.03 non écrit** | Le trou le plus gênant. Le fix moteur a **bougé deux fois** (branché sur du code mort, puis déplacé) et n'est couvert que par un run bout-en-bout. **Un run n'est pas un test** : il ne rejouera pas tout seul au prochain refactor. |
-| 2 | **`CC_DMG` plante 2 épisodes sur 48** | Tant que ce n'est pas porté, **aucune mesure §10.6 ne peut aboutir** — c'est le fail-fast (§0.5) qui le garantit, et c'est **voulu**. Ne pas contourner. |
-| 3 | **`_advance_to_next_player` toujours présent** | Avec ses **12 tests verts sur du code mort**. Le prochain lecteur s'y fiera comme cette session l'a fait. Cf. §0.4. |
+| 1 | ~~**Test 03.03 non écrit**~~ ✅ **FERMÉE** | Verrouillée par `test_end_of_turn_coherency_03_03.py` (11 tests, mutation-testés). |
+| 2 | ~~**`CC_DMG` plante 2 épisodes sur 48**~~ ✅ **PORTÉ** — mais **non re-mesuré** | Le code ne lit plus les champs supprimés ; le run `--eval` qui prouve 48/48 **reste à faire**. Ne pas cocher §10.6 avant. |
+| 3 | ~~**`_advance_to_next_player` toujours présent**~~ ✅ **SUPPRIMÉ** | Cf. §0.4. |
 | 4 | **Déséquilibre 824 vs 690 points** (Orks/SM, +19 %) | Non tranché. **Faussera la lecture du win-rate par matchup**, qui est précisément le critère §10.6. Cf. §0.6. |
-| 5 | **Rien n'est commité** | Le diff porte sur 5 fichiers de code, 9 de tests, la doc, la config Armageddon, les `VALUE` Orks, plus ~110 suppressions du ménage CoreAgent. **Beaucoup pour un seul commit** : en cas de casse ultérieure, la bissection sera pénible. Découpage suggéré : (a) ménage CoreAgent + repointage des tests, (b) fix moteur 03.03 + diagnostic d'invariant, (c) configs + doc. |
+| 5 | **Rien n'est commité** | Diff cumulé des deux sessions : ~7 fichiers de code, ~11 de tests, 3 docs, la config Armageddon, les `VALUE` Orks, plus ~110 suppressions du ménage CoreAgent. **Beaucoup pour un seul commit** : en cas de casse ultérieure, la bissection sera pénible. Découpage suggéré, du plus indépendant au plus lié : (a) ménage CoreAgent + repointage des tests, (b) fix moteur 03.03 + diagnostic d'invariant, (c) configs + doc, **(d) portage `CC_DMG`/`RNG_DMG` des bots** (`ai/evaluation_bots.py` + son test — n'intersecte aucun autre lot), **(e) suppression de l'îlot de code mort** (`w40k_core.py` + `test_engine_turn_loop.py` + les 3 docs recalées — pure suppression, le lot le plus facile à révoquer isolément). |
 
 **⚠️ Réserve de méthode sur ce document.** Les sections §0.x reflètent ce qui a été relu et
 exécuté pendant la session du 2026-07-19 soir. **Le reste du document — T1 à T5, section 9 — n'a
@@ -166,7 +177,34 @@ avant d'instrumenter : `fall_back`/ER, puis double soustraction du coût de desc
 C'est ce diagnostic qui a donné la root cause en un run : les 12 occurrences portaient toutes
 `coherency du plan invalide (formation actuelle DEJA incoherente)`.
 
-### 0.3 🔴 `CC_DMG` — champ légacy lu par 2 bots (BLOQUANT éval, MINE en training)
+### 0.3 `CC_DMG` — champ légacy lu par 2 bots — ✅ PORTÉ (2026-07-19 soir)
+
+**Fait** : les **7** sites d'`ai/evaluation_bots.py` lisent désormais `RNG_WEAPONS`/`CC_WEAPONS`
+via `get_max_ranged_damage`/`get_max_melee_damage` (même source que
+`RewardMapper._get_unit_threat`). +2 tests (`test_evaluation_bots.py`) et les 2 fixtures légacy
+existantes migrées ; les 4 tests sont **rouges sur le code d'avant**.
+
+⚠️ **Deux corrections de fond au diagnostic ci-dessous, vérifiées dans le code** :
+
+1. **L'attribution « `ControlBot`, ligne 674 » était fausse.** La ligne 674 est dans le helper
+   module `_best_target_slot_by_threat`, dont l'**unique appelant** (grep) est
+   **`DefensiveSmartBot`** — qui n'est PAS dans `bot_training.ratios`
+   (random/greedy/defensive/control/aggressive_smart/adaptive). L'exposition était donc
+   **l'évaluation, pas le training** : ce n'était pas la mine annoncée. Le raisonnement « bot à
+   20 % du training » venait d'un numéro de ligne rattaché à la mauvaise classe.
+2. **`RNG_DMG` est mort exactement comme `CC_DMG`** et était lu sur 3 des 7 sites. Traiter le seul
+   `CC_DMG` aurait laissé la moitié du bug.
+
+**Changement de sémantique assumé** : l'ancien seuil de charge de `TacticalBot`
+(`CC_DMG >= 2`) portait sur un dégât **par touche**. Transposé tel quel sur `NB × DMG` il serait
+vrai presque toujours. Le critère est donc devenu « dégâts mêlée attendus > dégâts de tir
+attendus », ce que la docstring de la classe décrivait déjà (« charges if melee is advantageous »).
+
+**Dette restante repérée au passage, NON traitée** : `ai/game_replay_logger.py` lit encore
+`unit["RNG_DMG"]`/`unit["CC_DMG"]` (~8 sites) et `config/unit_definitions.json` les déclare encore
+dans `required_properties`. Hors périmètre de la tâche 2 ; à traiter avant de se fier au replay.
+
+**Diagnostic d'origine (historique, attribution erronée conservée pour mémoire) :**
 
 Les 2 épisodes encore plantés après T6-i le sont sur une cause **sans rapport** :
 
@@ -198,7 +236,22 @@ autres ayant été attribués au bug de coherency **sans vérification**. La bon
 **§10.5 reste NON validé runtime** tant que `TacticalBot` ne complète pas ses épisodes une fois
 `CC_DMG` porté. Et `0.25 sur 4 épisodes` n'est de toute façon pas une mesure.
 
-### 0.4 🔴 Code mort qui a induit en erreur — `_advance_to_next_player`
+### 0.4 Code mort qui a induit en erreur — `_advance_to_next_player` — ✅ SUPPRIMÉ (2026-07-19 soir)
+
+**Fait** : la méthode et ses **8** tests sont supprimés (les « 12 références » du diagnostic
+d'origine étaient des occurrences de grep, pas des tests — vérifié : 32 → 24 tests dans le
+fichier). Le grep de vérification a montré que ce
+n'était pas une fonction isolée mais un **îlot mort de 4 méthodes** : `_advance_to_next_player`
+était l'unique appelant de `_movement_phase_init`, `_charge_phase_init` et `_fight_phase_init`
+(ces deux dernières encore marquées `# TODO: Build … activation pool`, et
+`_fight_phase_init` branchant sur `_charge_phase_init` à partir du **pool de tir** — du code de
+l'ère pré-escouades). Les 4 sont supprimées ensemble. `_shooting_phase_init`, elle, est **vivante**
+(appelée par le flux de phase move) et est conservée.
+
+L'en-tête de `test_engine_turn_loop.py` porte désormais la raison de la suppression, pour qu'elle
+ne soit pas relue comme une perte de couverture.
+
+**Diagnostic d'origine (historique) :**
 
 `_advance_to_next_player` (w40k_core) **n'a aucun appelant** — vérifié par grep sur `engine/`
 et `ai/`. Elle contient pourtant toute la logique de bascule de joueur, d'incrément de tour et de
@@ -210,8 +263,7 @@ tour est dans `fight_handlers` (fin de phase de Fight, deux chemins).
 qui a masqué `end_of_turn_coherency_removal` (§0.1) et `update_frozen_model` (§10.4) : il donne
 au lecteur suivant la certitude que le chemin est vivant et correct.
 
-**À traiter** : supprimer la fonction et ses tests, ou la marquer explicitement comme non
-branchée. Ne pas laisser en l'état.
+~~**À traiter** : supprimer la fonction et ses tests~~ → fait, voir en tête de §0.4.
 
 > **Motif récurrent à surveiller dans ce projet** — trois occurrences vérifiées à ce jour :
 > `update_frozen_model` (§10.4), `end_of_turn_coherency_removal` (§0.1), `_advance_to_next_player`
@@ -659,8 +711,8 @@ du joueur 2, tous les pools vides, aucun état fight pendant → masque entière
 Analyse statique concordante : SEULE `_fight_phase_complete` (fight_handlers, def ~L1867,
 appelée ~L1488/1904/2408) pose `game_over` en vif — et uniquement **au sein d'un `step()`**.
 Masque vide = plus aucun step légal = la complétion de phase n'est jamais déclenchée.
-⚠️ `_advance_to_next_player` (w40k_core ~L5427) est du CODE MORT en production (aucun appelant
-hors `test_engine_turn_loop.py`, vérifié par grep) — ne PAS s'appuyer dessus pour le fix.
+⚠️ `_advance_to_next_player` était du CODE MORT en production — **supprimée le 2026-07-19**
+(cf. §0.4) : elle n'existe plus, ne pas la chercher.
 Nuance config : la limite de tours existe en deux endroits — `max_turns` (game_config.json L14)
 et `max_turns_per_episode` (training config) ; clarifier en T5 lequel fait foi en moteur nu.
 Dans la pile réelle, ce cas est censé être absorbé par le "WAIT forcé" du wrapper
@@ -988,7 +1040,8 @@ garanties + Carnifex en phase charge ») :
   `mask.any() or game_over` tient à CHAQUE step. Vérifié sur 3 scénarios `active` × 3 seeds +
   scénario fixe pré-engagé : zéro masque vide sans terminaison, zéro exception, toutes les
   parties se terminent (turn limit). Le fix conditionnel T5.2 sur `_fight_phase_complete`
-  n'était donc PAS requis — non touché ; `_advance_to_next_player` (mort) laissé tel quel.
+  n'était donc PAS requis — non touché ; `_advance_to_next_player` (mort) laissé tel quel
+  **à l'époque, supprimé depuis le 2026-07-19 (§0.4)**.
 - **Vraie rupture bloquante en moteur nu = déploiement `active`, PAS R7 (nouvelle, hors R1-R8)** :
   `ActionDecoder._get_valid_deployment_hexes` ([action_decoder.py:961](../../engine/action_decoder.py#L961)) testait le
   chevauchement inter-unités par CELLULES (`build_occupied_positions_set`), alors que le commit
@@ -1022,8 +1075,8 @@ Plan d'origine :
 2. Si le deadlock R7 persiste : corriger côté moteur la complétion de phase fight au dernier
    tour, via le SEUL chemin vif : `_fight_phase_complete` (fight_handlers, def ~1867) doit
    aboutir à `terminated` sans exiger une action supplémentaire quand le pool est vide.
-   `_advance_to_next_player` (w40k_core ~5427) est mort en production (cf. R7) — ne pas s'en
-   servir ; statuer sur sa suppression. Interdit de résoudre par injection d'action côté
+   `_advance_to_next_player` était mort en production (cf. R7) — **supprimée le 2026-07-19**
+   (§0.4), donc plus rien à statuer. Interdit de résoudre par injection d'action côté
    wrapper.
 3. Étendre le smoke test aux scénarios migrés (T4), sièges p1/p2/random, et à un scénario
    contenant Carnifex/Psychophage (validation R6).
