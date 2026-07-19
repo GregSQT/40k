@@ -155,7 +155,10 @@ Cette section décrit comment le training est structuré (qui appelle quoi). Pou
 
 ### Point d’entrée et CLI
 
-- **Script** : `ai/train.py`. Tous les modes (entraînement, test-only, macro, orchestrate, convert-steplog) partent de ce script.
+- **Script** : `ai/train.py`. Tous les modes (entraînement, test-only, macro, convert-steplog) partent de ce script.
+  ⚠️ Le mode `orchestrate` (`--orchestrate`, `--multi-agent`, `--max-concurrent`, `--training-phase`)
+  a été **supprimé** le 2026-07-19 avec `ai/multi_agent_trainer.py` : legacy pré-squad qui chargeait
+  les modèles en `DQN.load` alors que tous les `.zip` sont MaskablePPO. Cf. V11_agent_rework §0.8.
 - **Arguments essentiels** :
   - `--agent <agent_key>` : agent à entraîner (obligatoire pour training ciblé). Détermine le dossier de config et le chemin du modèle.
   - `--training-config <name>` : clé du bloc dans `*_training_config.json` (ex. `default`, `debug`).

@@ -82,13 +82,21 @@ aussi établi que le motif d'exclusion du holdout écrit en §10.5 était **empi
 Les tâches 1-3 sont commitées (`6a7a9de1`).
 
 **Reste ouvert** :
-- 🔴 **Déséquilibre 824 vs 690 points** (§0.6) — **décision utilisateur reportée au moment du vrai
-  entraînement**. Bloque l'interprétation de tout win-rate par matchup, donc le critère §10.6.
+- ~~🔴 **Déséquilibre 824 vs 690 points** (§0.6)~~ ✅ **SOLDÉ (§0.9, 2026-07-20)** : il n'y avait
+  pas de déséquilibre de listes. Aux points Munitorum, **680 vs 680**. Le +19 % venait de 3 `VALUE`
+  fausses (`WarTrakk` 175 au lieu de 60 à elle seule +115). Le critère §10.6 n'est plus bloqué.
+- 🔴 **`--scenario bot` entraîne sur le holdout** pour cet agent (§0.10) — **non corrigé**. Ne pas
+  l'utiliser pour ArmageddonAgent tant que le balayage n'est pas restreint à `training/`.
+- ⏳ **Aucun run d'entraînement valide depuis §0.9/§0.11.** Le seul lancé (x5_debug) est mort à
+  l'épisode 250 sur le bug §0.11, désormais corrigé — **à relancer**. Le modèle en place
+  (`model_ArmageddonAgent.zip`, 19/07 04:25) est ANTÉRIEUR aux `VALUE` corrigées : il a été
+  entraîné avec la `WarTrakk` à 175. Sauvegarde dans
+  `ai/models/_backup_pre_munitorum_20260719_232816/`.
 - Le **7ᵉ site du portage** (`_best_target_slot_by_threat`) n'est couvert que par un test unitaire :
   son appelant `DefensiveSmartBot` n'est pas dans `bot_eval_weights`, donc l'éval ne le joue pas.
 - ~~Dette `ai/game_replay_logger.py` (~8 sites `RNG_DMG`/`CC_DMG`) + `config/unit_definitions.json`.~~
-  ✅ **soldée (§0.8)** : module supprimé, pas porté. Nouveau reste ouvert issu de §0.8 : purge de
-  `multi_agent_trainer.py` / `--orchestrate` (legacy pré-squad, non urgent, rien n'y `raise` plus).
+  ✅ **soldée (§0.8)** : module supprimé, pas porté.
+- ~~Purge de `multi_agent_trainer.py` / `--orchestrate`~~ ✅ **faite (§0.8)**, module supprimé.
 - ~~Bug d'affichage `Total: 30` au lieu de 60~~ ✅ corrigé (§0.7, constat 2).
 
 **⚠️ L'état de fin de session n'est ni « OK » ni « optimal ».** Mise à jour 2026-07-19 (fin de
@@ -106,7 +114,7 @@ de l'éval, tests repointés, doc à jour. Ce qui ne l'est pas — **les 5 dette
 | 1 | ~~**Test 03.03 non écrit**~~ ✅ **FERMÉE** | Verrouillée par `test_end_of_turn_coherency_03_03.py` (11 tests, mutation-testés). |
 | 2 | ~~**`CC_DMG` plante 2 épisodes sur 48**~~ ✅ **PORTÉ** — mais **non re-mesuré** | Le code ne lit plus les champs supprimés ; le run `--eval` qui prouve 48/48 **reste à faire**. Ne pas cocher §10.6 avant. |
 | 3 | ~~**`_advance_to_next_player` toujours présent**~~ ✅ **SUPPRIMÉ** | Cf. §0.4. |
-| 4 | **Déséquilibre 824 vs 690 points** (Orks/SM, +19 %) | Non tranché. **Faussera la lecture du win-rate par matchup**, qui est précisément le critère §10.6. Cf. §0.6. |
+| 4 | ~~**Déséquilibre 824 vs 690 points** (Orks/SM, +19 %)~~ ✅ **SOLDÉ (§0.9)** | Artefact de 3 `VALUE` fausses, pas un déséquilibre de listes. Points Munitorum : **680 vs 680**. §10.6 débloqué. |
 | 5 | **Rien n'est commité** | Diff cumulé des deux sessions : ~7 fichiers de code, ~11 de tests, 3 docs, la config Armageddon, les `VALUE` Orks, plus ~110 suppressions du ménage CoreAgent. **Beaucoup pour un seul commit** : en cas de casse ultérieure, la bissection sera pénible. Découpage suggéré, du plus indépendant au plus lié : (a) ménage CoreAgent + repointage des tests, (b) fix moteur 03.03 + diagnostic d'invariant, (c) configs + doc, **(d) portage `CC_DMG`/`RNG_DMG` des bots** (`ai/evaluation_bots.py` + son test — n'intersecte aucun autre lot), **(e) suppression de l'îlot de code mort** (`w40k_core.py` + `test_engine_turn_loop.py` + les 3 docs recalées — pure suppression, le lot le plus facile à révoquer isolément). |
 
 **⚠️ Réserve de méthode sur ce document.** Les sections §0.x reflètent ce qui a été relu et
@@ -277,11 +285,17 @@ au lecteur suivant la certitude que le chemin est vivant et correct.
 
 ~~**À traiter** : supprimer la fonction et ses tests~~ → fait, voir en tête de §0.4.
 
-> **Motif récurrent à surveiller dans ce projet** — cinq occurrences vérifiées à ce jour :
-> `update_frozen_model` (§10.4), `end_of_turn_coherency_removal` (§0.1), `_advance_to_next_player`
-> (§0.4), `game_replay_logger` (§0.8, 795 lignes + 8 tests), `log_unified_action` (§0.8). Du code
+> **Motif récurrent à surveiller dans ce projet** — six occurrences vérifiées à ce jour.
+> **Cinq de type « jamais appelé »** : `update_frozen_model` (§10.4),
+> `end_of_turn_coherency_removal` (§0.1), `_advance_to_next_player` (§0.4),
+> `game_replay_logger` (§0.8, 795 lignes + 8 tests), `log_unified_action` (§0.8). Du code
 > correct, testé, et jamais appelé. **Devant toute fonction sur laquelle repose un
 > raisonnement, vérifier d'abord qu'elle a un appelant.**
+>
+> **Une de type « jamais exercé »** (§0.11) : `test_move_mask_is_executable.py` est appelé, vert,
+> et mesure le bon invariant sur le bon scénario — mais par exploration aléatoire, donc il ne
+> visite jamais la configuration qui cassait. **Un test vert ne couvre que les états qu'il
+> atteint ; sa docstring peut affirmer le contraire de bonne foi.**
 
 ### 0.5 Fail-fast de l'évaluation standalone — ✅ FAIT (2026-07-19 soir)
 
@@ -334,36 +348,43 @@ Note au passage : ce générateur reste **inutilisable ici** parce qu'il tire de
 plausibles (Boyz 7, Gretchin 4, WarTrakk 175, personnages 50-100), fini le `VALUE = 70` uniforme.
 L'objection « points factices » tombe.
 
-🔴 **Mais ils rendent mesurable un déséquilibre qui était jusque-là invisible** :
+~~🔴 **Mais ils rendent mesurable un déséquilibre qui était jusque-là invisible** :~~
 
-| Roster | Points | Figurines |
+| Roster | Points (état 2026-07-19 matin) | Figurines |
 |---|---|---|
-| Orks | **824** | 47 |
-| Space Marines | **690** | 23 |
+| Orks | ~~**824**~~ | ~~47~~ |
+| Space Marines | ~~**690**~~ | 23 |
 
-Les deux vivent dans un dossier `500pts` et **aucun ne fait 500** ; l'écart Orks/SM est de
-**+19 %**. Le moteur ne valide pas les points (`scale` n'est qu'un nom de dossier), donc rien ne
-le signale. **Impact direct sur §10.6** : sur les matchups mixtes (SM vs Ork), 19 % d'écart de
-budget se lira comme un écart de compétence par roster alors que c'est un déséquilibre de liste —
-exactement le signal que le critère « win-rate PAR ROSTER » est censé isoler. À trancher avant
-d'interpréter le moindre win-rate par matchup. **Décision non prise.**
+⚠️ **CE DÉSÉQUILIBRE N'EXISTAIT PAS — voir §0.9.** Confronté aux Munitorum officiels
+(2026-07-20), le « +19 % » s'est révélé être un **artefact de trois `static VALUE` fausses**, la
+`WarTrakk` cotée **175** au lieu de **60** pesant à elle seule +115. Aux points réels du
+Munitorum, les deux listes font **680 vs 680**, écart **0**. Le raisonnement ci-dessus était
+correct dans sa logique et **faux dans ses données** : il concluait à un déséquilibre de listes
+à partir de valeurs de code jamais confrontées à la source officielle. **Ne pas re-citer le
+824/690.**
 
-**Composition exacte des deux rosters** — recalculée depuis les fichiers via `UnitRegistry`
-(2026-07-19), pas recopiée : les chiffres ci-dessus sont confirmés.
+**Composition exacte des deux rosters — ÉTAT PÉRIMÉ DU 2026-07-19, conservé pour mémoire.**
+Recalculée depuis les fichiers via `UnitRegistry`, donc « confirmée » — mais confirmée contre le
+**code**, jamais contre le Munitorum. C'est exactement la faille : recalculer ne vaut pas vérifier
+la source. Composition et points à jour en **§0.9**.
 
-| | Orks — **824 pts / 47 fig.** | Space Marines — **690 pts / 23 fig.** |
+| | ~~Orks — **824 pts / 47 fig.**~~ | ~~Space Marines — **690 pts / 23 fig.**~~ |
 |---|---|---|
-| Masse | 20 × Gretchin @4 = 80 ; 18 × Boyz @7 = 126 ; 2 × BoyzNobKombi @9 = 18 | 6 × Intercessor @16 = 96 ; 3 × VanguardVeteran @20 = 60 ; 2 × Eradicator @23 = 46 ; 2 × IntercessorGL @18 = 36 ; 2 × IntercessorSgt @19 = 38 |
+| Masse ⚠️ périmé (10 Gretchin, pas 20) | 20 × Gretchin @4 = 80 ; 18 × Boyz @7 = 126 ; 2 × BoyzNobKombi @9 = 18 | 6 × Intercessor @16 = 96 ; 3 × VanguardVeteran @20 = 60 ; 2 × Eradicator @23 = 46 ; 2 × IntercessorGL @18 = 36 ; 2 × IntercessorSgt @19 = 38 |
 | Lourd | WarTrakk **175** ; BigMekDakkarig **100** | LandSpeeder **95** |
 | Personnages | PainBoy 80 ; Warboss 75 ; WeirdBoy 65 ; Bigboss 55 ; BannerNob 50 | CaptainRelicShield 80 ; ChaplainJumpPack 75 ; Librarian 60 ; Ancient 40 |
 
-⚠️ **L'écart n'est pas seulement budgétaire (+134 pts), il est STRUCTUREL** — et c'est ce qui
-rend un simple rééquilibrage à 690 insuffisant :
-- **47 figurines contre 23** : deux fois plus de corps, donc un OC très supérieur sur les
-  objectifs (§14) et une résilience aux pertes sans commune mesure ;
-- **255 pts concentrés dans 2 véhicules Orks** (WarTrakk + BigMek) contre 95 côté SM ;
-- ce sont deux **profils de jeu** différents, pas la même liste à deux budgets. Ramener les Orks
-  à 690 pts changerait le budget sans rendre les matchups comparables.
+⚠️ **Ce qui reste vrai de l'analyse ci-dessous, et ce qui tombe** (mise à jour §0.9) :
+- ❌ **L'écart budgétaire (+134 pts) n'existe pas.** Aux points Munitorum : 680 vs 680. Le
+  raisonnement « +255 pts concentrés dans 2 véhicules Orks » reposait sur la `WarTrakk` à 175 :
+  elle en vaut **60**. Les deux véhicules orks pèsent **160**, contre 95 pour le Land Speeder.
+- ✅ **L'asymétrie de masse reste réelle** : **37 figurines contre 23** (et non 47 — cf. §0.9,
+  10 Gretchin et non 20). Plus de corps ⇒ OC supérieur sur les objectifs (§14) et meilleure
+  résilience aux pertes.
+- 🔁 **Mais ce n'est plus un déséquilibre, c'est une identité de faction** : à budget égal, une
+  horde ork EST censée aligner plus de figurines qu'une escouade Space Marine. Les deux listes
+  étant par ailleurs figées par le contenu de la boîte (contrainte métier, §0.9), il n'y a rien
+  à « rééquilibrer » — et le win-rate par matchup redevient interprétable.
 
 ⚠️ **Les rosters `training` et `holdout_regular` sont IDENTIQUES** (vérifié : mêmes compositions,
 mêmes totaux, aux deux emplacements). C'est cohérent avec la décision §10.5 — le holdout porte sur
@@ -430,8 +451,11 @@ pas un zéro silencieux. Le fix de §0.6 est donc lui aussi confirmé à l'exéc
 **Ce que ce run ne débloque PAS — le critère §10.6.** Ranking par scénario :
 `bot-03 = 0.805`, `bot-01 = 0.383`, `bot-04 = 0.305`, `bot-02 = 0.153`. Les 4 scénarios holdout
 SONT les 4 matchups (SM/Ork × SM/Ork) : l'écart de 0.65 entre le meilleur et le pire mélange
-**compétence de l'agent** et **déséquilibre de listes** (§0.6, 824 vs 690). Tant que ce
-déséquilibre n'est pas tranché, aucun win-rate par matchup n'est interprétable.
+**compétence de l'agent** et ~~**déséquilibre de listes** (§0.6, 824 vs 690)~~. ⚠️ **Cette dernière
+imputation est INVALIDE** (§0.9) : les listes font 680 vs 680, il n'y a pas de déséquilibre de
+budget à invoquer. L'écart de 0.65 entre bot-03 et bot-02 mesure donc autre chose — compétence,
+asymétrie de masse, ou variance d'échantillon. **À réinterpréter après le run en cours**, sur des
+`VALUE` justes ; les chiffres de ce run-là ont été produits avec la `WarTrakk` à 175.
 
 **LE TRAINING TOURNE (2026-07-19, après T6-h + T6-g).** La commande de repro historique passe
 désormais de bout en bout :
@@ -677,12 +701,209 @@ au commit `6a7a9de1` ; il ne restait qu'un commentaire de purge, lui-même suppr
 désormais vide. Ce paragraphe a déjà induit deux relecteurs en erreur (citation de la doc au lieu
 d'un grep) : **§992-995 est soldé.**
 
-**Reste ouvert — chantier distinct, non urgent** : la purge complète de `multi_agent_trainer.py` /
-`--orchestrate`. Rien n'y `raise` plus et la suite est verte, mais c'est du legacy pré-squad, encore
-importé au chargement de `train.py`. Deux preuves suffisent à le condamner, **sans s'appuyer sur la
-doc** : il charge les modèles via `DQN.load` alors que tous les `.zip` sont MaskablePPO, et il
-appelle `base_env.controller.connect_step_logger(...)` alors que `W40KEngine` n'expose que
-`pve_controller`. À traiter avec la même méthode : prouver la mort de chaque chemin avant de couper.
+~~**Reste ouvert — chantier distinct, non urgent** : la purge complète de `multi_agent_trainer.py` /
+`--orchestrate`.~~ → ✅ **FAIT dans la foulée (2026-07-19 soir)**, le module est supprimé.
+Les deux preuves qui l'ont condamné, établies **sans s'appuyer sur la doc** : il chargeait les
+modèles via `DQN.load` alors que tous les `.zip` sont MaskablePPO, et il appelait
+`base_env.controller.connect_step_logger(...)` alors que `W40KEngine` n'expose que `pve_controller`.
+Supprimés avec lui : l'import dans `train.py`, `start_multi_agent_orchestration`, les flags
+`--multi-agent` / `--orchestrate` / `--max-concurrent` / `--training-phase`, et les 3 stubs
+`sys.modules["ai.multi_agent_trainer"]` des tests qui n'existaient QUE pour contourner cet import
+legacy. `--total-episodes` est **conservé** (encore lu dans le chemin d'entraînement vivant).
+`create_multi_agent_model` est un **homonyme vivant** de `train.py`, sans rapport — ne pas le purger.
+
+### 0.9 Rosters fidèles à la boîte + points Munitorum — ✅ FAIT (2026-07-20) — **§0.6 SOLDÉ**
+
+**Déclencheur** : l'utilisateur signale que la boîte Armageddon ne contient que **10 Gretchin**,
+alors que les 4 rosters en déclaraient 20. Il fournit les 2 Munitorum officiels
+(`Documentation/40k_rules/Armageddon/{Orks,Space Marines} - Munitorum UK.pdf`) et les datasheets.
+Contrainte métier posée : **les rosters doivent refléter la boîte, pas une liste optimisée.**
+
+⚠️ **Le texte de ces PDF n'est pas extractible** (contenu en image : `extract_text()` ne rend que
+les en-têtes). Il faut les **rendre en PNG** (`fitz`/pymupdf, dpi≥140) et les lire visuellement.
+Ne pas conclure « le PDF est vide ».
+
+**Points réels relevés dans les Munitorum** (par UNITÉ, pas par figurine) :
+
+| Orks | pts | Space Marines | pts |
+|---|---|---|---|
+| Boyz ×10 (×2 unités) | 150 | Intercessor Squad ×5 (×2) | 160 |
+| Gretchin | 45 | Vanguard Vets w/ Jump Packs ×5 | 100 |
+| Warboss 75 / Bigboss 55 / Bannernob 50 | 180 | Eradicators w/ Heavy Bolters ×3 | 70 |
+| Painboy 80 / Weirdboy 65 | 145 | Land Speeder | 95 |
+| Wartrakk | 60 | Captain 80 / Librarian 60 / Ancient 40 | 180 |
+| Big Mek Dakkarig | 100 | Chaplain w/ Jump Pack | 75 |
+| **TOTAL** | **680** | **TOTAL** | **680** |
+
+**Les 4 `static VALUE` corrigées** (elles seules créaient le faux déséquilibre de §0.6) :
+
+| Unité | avant | après | source |
+|---|---|---|---|
+| `WarTrakk` | **175** | **60** | Munitorum : WARTRAKK 1 model 60 pts |
+| `BoyzNobKombi` | 9 | 12 | BOYZ 75 pts / 10 → 9×7 + 1×12 = 75 exact |
+| `Gretchin` | 4 | 5 | 45 pts / 10 = 4,5 **non représentable** (`VALUE` coercé `int`, [game_state.py:952](../../engine/game_state.py#L952)) — arrondi au supérieur pour ne pas sous-coter |
+| `IntercessorGrenadeLauncher` / `IntercessorSergeant` | 18 / 19 | 16 / 16 | 80 pts / 5 modèles ; **en 10ᵉ l'équipement est gratuit**, tous les modèles d'une escouade coûtent pareil |
+
+Résultat mesuré sur les 8 fichiers de roster : **685 (Orks) vs 680 (SM)**, écart **0,7 %** contre
++19,4 % avant. Le résidu de 5 pts est l'arrondi Gretchin, incompressible en entier.
+
+🔒 **RÈGLE MÉTIER (utilisateur, 2026-07-20) — NON NÉGOCIABLE.** `VALUE` **suit les documents
+officiels**. Ce n'est pas une variable de tuning. `VALUE` est pourtant consommé **par figurine**
+(pondération de menace [reward_calculator.py:1442](../../engine/reward_calculator.py#L1442),
+différentiel d'armée [observation_builder.py:367](../../engine/observation_builder.py#L367)) : cet
+effet sur l'apprentissage est une **conséquence à assumer**, jamais un motif pour s'écarter du
+Munitorum. **Ne pas « rééquilibrer » ces valeurs pour améliorer un résultat d'entraînement.**
+
+**Ventilation par figurine — arbitrée le 2026-07-20, sujet CLOS.** Le document cote l'**unité**,
+pas la figurine ; quand le quotient n'est pas entier la répartition est sous-déterminée. Décision :
+**faire tomber le total d'unité juste partout où c'est représentable**, quitte à ce que la
+ventilation s'en écarte (Boyz : 9 × 7 + Nob 12 = 75 **exact**, plutôt que 10 modèles uniformes
+à 7 = 70). **Seul écart résiduel assumé** : Gretchin, unité à **50** au lieu de 45 — aucune
+répartition entière ne donne 45 sur 10 figurines identiques. Alternatives examinées et
+**écartées** : Gretchin à 4 (→ Orks 675), Boyz uniformes (→ 680/680). Ne pas les rouvrir.
+
+**🔴 Violation de règle corrigée : le Weirdboy ne peut pas mener les Gretchin.** Les 4 rosters
+l'attachaient à l'unité de Gretchin. Munitorum : `WEIRDBOY / LEADER : BOYZ, BREAKA BOYZ`. Le seul
+personnage habilité à mener des GRETCHIN est **Zodgrod Wortsnagga**, absent de la boîte. Les deux
+unités de Boyz ayant déjà chacune un Leader (Warboss, Bigboss) et une unité ne pouvant en accueillir
+qu'un, le Weirdboy est devenu une **unité autonome**. Vérifié au moteur : le roster ork charge
+désormais 6 unités au lieu de 5, et les 3 scénarios ork tournent jusqu'à terminaison (112/112/125
+steps).
+
+**Deux pièges de lecture des sources, à ne pas re-trébucher dessus :**
+1. **Le Grot Infirmier n'est pas une figurine de jeu.** Datasheet Painboy : `UNIT COMPOSITION :
+   1 Painboy`, `equipped with : … 1 Grot Orderly` → c'est de l'**équipement**. D'où 38 figurines
+   physiques dans la boîte mais **37 modèles de jeu**. Le roster n'a rien qui manque.
+2. **Contradiction entre deux sources officielles sur les Gretchin** : le Munitorum cote
+   `11 models … 45 pts`, la datasheet dit `UNIT COMPOSITION : 10 Gretchin`. La boîte en a 10.
+   Retenu : 10 modèles à 45 pts. Non tranchable depuis les documents — signalé, pas masqué.
+
+### 0.10 `--scenario bot` contamine le holdout sur ArmageddonAgent (2026-07-20, NON corrigé)
+
+`bot` n'est **pas un nom de scénario** mais un **mot-clé de mode rotation**, intercepté à
+[train.py:4919](../../ai/train.py#L4919) avant toute résolution de fichier. Il appelle
+`get_scenario_list_for_phase(scenario_type="bot")`, qui balaie `training/` **puis
+`holdout_regular/` puis `holdout_hard/`** (docstring explicite de la fonction).
+
+Or les 4 scénarios `scenario_bot-01..04` d'ArmageddonAgent vivent dans **`holdout_regular/`** :
+ce sont les 4 matchups qui servent à mesurer §10.6. Mesuré : `--scenario bot` résout **5**
+scénarios pour cet agent (les 4 holdout + celui d'entraînement). **Entraîner avec ce flag revient
+donc à entraîner sur le jeu de test**, silencieusement — aucun message ne le signale.
+
+⚠️ La dette notée en §0.0 (« `--scenario bot` échoue en amont du moteur ») vise **CoreAgent**, dont
+l'arborescence de scénarios est différente. Elle **ne s'applique pas à ArmageddonAgent**, où le flag
+n'échoue pas : il réussit et contamine.
+
+**Le scénario d'entraînement seul couvre déjà les 4 matchups** — inutile de chercher la rotation
+ailleurs. `scenario_training_armageddon.json` porte `agent_roster_ref: "training_random"`
+(→ `rng.choice` sur les 2 rosters agent, [game_state.py:1187](../../engine/game_state.py#L1187)) et
+un `opponent_roster_ref` **en liste** de 2 (→ second `rng.choice`,
+[:1200](../../engine/game_state.py#L1200)), tirages indépendants **refaits à chaque `reset()`**.
+Mesuré sur **400 resets** : Ork/Ork 102 (25,5 %), Ork/SM 107 (26,8 %), SM/SM 104 (26,0 %),
+SM/Ork 87 (21,8 %) — **les 4 matchups, équiprobables** (χ² = 2,38 pour un seuil de 7,81 à 3 ddl :
+aucun biais détectable). Un premier tir de 40 resets donnait 15/13/9/**3** et laissait craindre un
+biais : c'était du **bruit d'échantillonnage**, pas un bug. Leçon : ne pas conclure à un biais de
+tirage sur quelques dizaines d'observations — refaire la mesure en grand avant de diagnostiquer.
+
+⚠️ **Piège latent voisin — `agent_roster_seed`.** Cette clé de scénario est passée en
+`random_seed` au tirage du roster AGENT ([game_state.py:1056](../../engine/game_state.py#L1056)),
+et le RNG est reconstruit à chaque appel (`random.Random(seed)`,
+[:1142](../../engine/game_state.py#L1142)). Si elle est renseignée, **le roster agent devient
+identique à tous les épisodes** — le tirage est neutralisé sans le moindre message. Voulu pour les
+scénarios holdout `bot-01..04` (qui la portent, pour la reproductibilité), mais ce serait un piège
+silencieux dans un scénario d'entraînement. `scenario_training_armageddon.json` ne la porte pas
+(`None`) : vérifié. **À contrôler avant de conclure quoi que ce soit sur une distribution de
+matchups.**
+
+**Piège de lancement, préexistant** : `--training-config x5_debug` **seul** échoue pour cet agent
+(`No scenario file found … scenario_x5_debug.json`). ArmageddonAgent n'a que
+`scenario_training_armageddon.json`, donc `--scenario <chemin explicite>` est **obligatoire** :
+```
+python3 ai/train.py --agent ArmageddonAgent --training-config x5_debug \
+  --scenario config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json \
+  --new --resolution 5
+```
+⚠️ `x5_debug` = **1000 épisodes** (~2h50 à 8 envs), pas un run de quelques minutes malgré son nom.
+
+⚠️ **Ce que `x5_debug` ne produit PAS**, à cause de ses `callback_params` :
+`save_best_min_episodes = 10000` et `checkpoint_save_freq = 10000` sont **supérieurs** à ses
+1000 épisodes → **ni « best model » ni checkpoint** ne sont jamais écrits. `model_gating_enabled`
+est `False` (le `Gate 🧱` de la barre de progression est purement décoratif) et `bot_eval_final`
+vaut **1** épisode par bot — contre 60 pour le run de §0.7. C'est un run de **validation de
+pipeline**, pas de mesure : il ne peut pas servir le critère §10.6.
+
+### 0.11 Crash du training : collision intra-plan aveugle au niveau — ✅ CORRIGÉ (2026-07-20)
+
+**Symptôme.** Le run `x5_debug` lancé après §0.9 meurt à l'épisode **~250/1000** (exit 1) :
+```
+execute_squad_move a échoué : squad=3 type=fall_back dest=(205,160) depuis (210,142)
+— la destination vient du pool BFS du masque, elle DOIT être exécutable
+(incohérence masque/exécution). Contrainte violée : collision intra-plan :
+deux figurines en (189,159) (dont 3#9)
+```
+
+**Root cause, prouvée.** Dans `explain_move_plan_rejection`
+([shared_utils.py](../../engine/phase_handlers/shared_utils.py)), deux contrôles voisins ne
+traitaient pas la position de la même façon :
+
+| Contrôle | Clé | Niveau pris en compte |
+|---|---|---|
+| Cellule interdite — `blocked_by_level[_target_level(entry)]` | `(col, row)` **par niveau** | ✅ |
+| Collision intra-plan — `new_cells` | `(col, row)` **tous niveaux confondus** | ❌ |
+
+Or le niveau **fait partie de l'identité d'une position** : tout le prédicat d'occupation du
+moteur est per-niveau (`build_move_blocked_cells_by_level`), et le commentaire de `_target_level`
+le dit lui-même (« sinon un move vers l'étage est validé contre l'occupation du sol — bug
+superposition inter-niveaux »). Deux figurines d'une même escouade **légalement** superposées à
+des étages différents étaient donc comptées comme une collision.
+
+**Pourquoi ça tuait le training et pas juste un coup.** `build_rigid_plan` translate le bloc
+**rigidement** (même delta cube pour toutes les figurines, tuples à 3 éléments donc niveau
+inchangé). Deux figurines partagent donc `(col,row)` à l'arrivée **ssi** elles la partageaient au
+départ. Conséquence : dès qu'une escouade se retrouvait superposée sur deux étages, **TOUS ses
+déplacements ultérieurs** devenaient injouables — et comme `erode_move_pool_by_squad_block` ne
+teste PAS la collision (elle la démontre invariante par translation, ce qui est **exact**), le
+masque continuait d'offrir ces destinations. D'où le crash dur, et le profil observé : 250
+épisodes sains puis mort brutale, le temps que la superposition apparaisse.
+
+**Correctif** : `new_cells` clée sur `(niveau, col, row)`. Le message d'erreur nomme désormais le
+niveau. L'invariant revendiqué par l'érosion redevient vrai *pour de bon* : c'était le prédicat
+lui-même qui était faux, pas le raisonnement d'invariance.
+
+**Non-régression** : `tests/unit/engine/test_move_plan_intra_squad_levels.py`, 2 tests sur un
+**vrai moteur déploiement joué** (pas un `game_state` fabriqué) — niveaux différents ⇒ pas une
+collision (**rouge avant le fix**, vérifié) ; même niveau ⇒ toujours refusé (vert avant/après).
+Le 1ᵉʳ assert porte sur « le rejet n'est pas *une collision* » et non « aucun rejet » : la cellule
+peut légitimement être refusée pour une autre raison à l'étage (pas de plancher, mur), sinon le
+test serait instable. Suite : **1398 tests, 0 échec**.
+
+🔴 **Pourquoi `test_move_mask_is_executable.py` n'a rien vu** — c'est le point le plus important
+de cette entrée. Ce fichier mesure **cet invariant exact**, sur **ce scénario exact**, et il est
+vert. Il ne vérifie l'invariant que sur les états atteints par **exploration aléatoire** (3 seeds,
+400 steps) : la superposition inter-étages n'y survient jamais. Sa docstring affirme pourtant
+combler précisément ce trou (« Ce test remplace ce raisonnement par une mesure »).
+
+> **Quatrième variante du motif §0.4, et la plus sournoise.** Les trois premières étaient du code
+> *jamais appelé*. Celle-ci est du code appelé, par un test vert, qui **n'exerce jamais le cas**.
+> Un test qui explore au hasard ne prouve rien sur les configurations qu'il n'atteint pas — et sa
+> docstring peut affirmer le contraire en toute bonne foi. **Devant un test de type « je déroule
+> des parties et je vérifie un invariant », toujours se demander quelles configurations il ne
+> visite jamais, et les construire explicitement.**
+
+**Non tranché** : je n'ai pas l'état exact au moment du crash. Il est prouvé que le prédicat est
+aveugle au niveau et qu'il produit ce message sur une configuration légale ; il n'est **pas**
+prouvé que les deux figurines de l'escouade 3 étaient à des étages différents plutôt que dans un
+état déjà illégal. Si un crash de cette classe réapparaît, dumper l'état avant de conclure.
+
+**Limite connue, HORS PÉRIMÈTRE (décision utilisateur, 2026-07-20) : le cas x10.** Le contrôle
+compare les **sous-hex d'ancre**. Sur Board ×10 les figurines ont une **empreinte multi-hex**
+(`compute_candidate_footprint` — « Multi-hex footprints are only computed on Board ×10 ») : deux
+socles peuvent donc s'y chevaucher **sans partager leur ancre**, et la même classe d'incohérence
+masque/exécution reste ouverte à cette résolution. Sur x5 (résolution du training) l'empreinte
+vaut le sous-hex, le contrôle est **exact**. Limite préexistante, non introduite par le correctif.
+⚠️ Ne pas lire « l'invariant est rétabli » comme valant pour toutes les résolutions : il vaut
+pour x1 et x5. **On ne s'occupe pas de x10** — si le projet y vient un jour, rouvrir ce point
+AVANT d'y lancer un entraînement.
 
 ## 1. Objectif
 
@@ -1536,6 +1757,10 @@ de T4/de code latent) :
   **Validation** : +6 tests dédiés (mur/autre escouade/ER sous une SŒUR alors que l'ANCRE est
   légale, débordement de plateau, non-sur-filtrage, court-circuit mono-figurine) ; run x5_debug
   8 workers 10/10 épisodes et run mono-env x1_debug, **zéro** « incohérence masque/exécution ».
+  ⚠️ **Ce « zéro » ne vaut que pour les 10 épisodes mesurés** : une AUTRE cause de la même
+  classe a tué un run de 250 épisodes le 2026-07-20 — cf. **§0.11** (collision intra-plan
+  aveugle au niveau). L'érosion de T6-g reste correcte ; c'était le prédicat de collision
+  qu'elle ne teste pas — à raison — qui était faux.
   Historique de la rupture ci-dessous.
   **Repro** (moteur nu, `training_benchmark`, premier index du masque) : dès que les figurines
   sont réellement placées, le crash T6-f se déplace au squad suivant —
@@ -2385,8 +2610,9 @@ holdout que sur `TacticalBot`.
 
 ⚠️ **Les points des unités Orks sont factices** : `VALUE = 70` pour TOUTES (Boyz, Gretchin,
 Warboss, WarTrakk, BigMek…). Le total « 3290 pts » du roster Orks n'a aucun sens, et le moteur
-ne valide PAS les points (`scale` n'est qu'un nom de dossier). Déséquilibre réel à surveiller :
-**47 figurines côté Orks contre 23 côté SM**.
+ne valide PAS les points (`scale` n'est qu'un nom de dossier). ~~Déséquilibre réel à surveiller :
+**47 figurines côté Orks contre 23 côté SM**.~~ → chiffre périmé : **37 contre 23** depuis §0.9
+(10 Gretchin et non 20), et ce n'est pas un déséquilibre mais une identité de faction à 680 vs 680.
 
 **Bug corrigé au passage (registry d'unités)** : `LandSpeederOnslaughtGatlingCannon.ts` et
 `LandSpeederHeavyFlamer.ts` déclaraient TOUS DEUX `export class LandSpeeder`. `UnitRegistry`

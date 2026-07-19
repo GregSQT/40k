@@ -3442,21 +3442,32 @@ def explain_move_plan_rejection(
                 return f"figurine {mid} absente de models_cache"
             origin_positions[mid] = (int(m["col"]), int(m["row"]))
 
-    new_cells: Set[Tuple[int, int]] = set()
+    # Clé (niveau, col, row) : le NIVEAU fait partie de l'identité d'une position — meme
+    # regle que le contrôle de cellule interdite juste en dessous, qui est deja per-niveau.
+    # Clefer sur (col,row) seul rejetait comme « collision » deux figurines legalement
+    # superposees a des etages differents ; `build_rigid_plan` translatant le bloc
+    # rigidement, la superposition d'origine se reportait sur CHAQUE destination et toute la
+    # suite des moves de l'escouade devenait injouable (incoherence masque/execution).
+    new_cells: Set[Tuple[int, int, int]] = set()
     for entry in plan:
         mid, nc, nr = entry[0], int(entry[1]), int(entry[2])
         if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
             return f"figurine {mid} hors plateau en ({nc},{nr})"
         cell = (nc, nr)
-        for label, blocked_set in blocked_by_level[_target_level(entry)]:
+        level = _target_level(entry)
+        for label, blocked_set in blocked_by_level[level]:
             if cell in blocked_set:
                 return (
-                    f"figurine {mid} en ({nc},{nr}) niveau {_target_level(entry)} "
+                    f"figurine {mid} en ({nc},{nr}) niveau {level} "
                     f"sur cellule interdite : {label}"
                 )
-        if cell in new_cells:
-            return f"collision intra-plan : deux figurines en ({nc},{nr}) (dont {mid})"
-        new_cells.add(cell)
+        occupied = (level, nc, nr)
+        if occupied in new_cells:
+            return (
+                f"collision intra-plan : deux figurines en ({nc},{nr}) "
+                f"niveau {level} (dont {mid})"
+            )
+        new_cells.add(occupied)
         if c["budget_per_model"] is not None:
             o_col, o_row = origin_positions[mid]
             dist = calculate_hex_distance(o_col, o_row, nc, nr)
