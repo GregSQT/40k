@@ -36,10 +36,29 @@ python3 ai/train.py --agent CoreAgent --training-config x5_debug \
 chemin single-scenario (T6-e, commité) ; commit de déploiement mono-ancre qui ne plaçait AUCUNE
 figurine (T6-f, +10 tests, non commité).
 
+**Après le training** — ne PAS anticiper : **T7** (unification de la validation de déploiement,
+section 5). Le déclencheur est « le training tourne » : T7 touche le masque, donc l'espace
+d'action de l'agent, et exige une mesure avant/après impossible tant que rien ne tourne.
+
+**⚠️ AVANT de lancer le premier vrai run, lire la section 10** (stratégie d'entraînement et
+d'évaluation, décision utilisateur 2026-07-19). Deux points bloquants y sont établis :
+- **§10.4** — toute la machinerie d'adversaires (bots pondérés + self-play `opponent_mix`)
+  n'est câblée que sur `--scenario bot`. Le chemin single-scenario vectorisé (x5_debug,
+  n_envs=8) tombe sur `SelfPlayWrapper(frozen_model=None)` dont le frozen n'est JAMAIS mis à
+  jour (`update_frozen_model` : zéro appelant) → **P2 joue des actions ALÉATOIRES en
+  permanence**. Comme `--scenario bot` est cassé (rosters), un run lancé aujourd'hui
+  entraînerait contre du hasard **sans que rien ne le signale**. Même famille de divergence
+  que T6-e.
+- **§10.6** — le critère de succès T6 a été REMPLACÉ : l'ancien (« win-rate vs RandomBot sur
+  holdout ») référence un holdout de rosters supprimé. Le holdout porte désormais sur
+  l'**adversaire** (`TacticalBot`, réservé à l'évaluation), pas sur les rosters.
+
 **État de la suite** : `tests/unit` — **9 échecs, tous préexistants et hors chemin critique** :
 4 × banque de scénarios et 5 × déploiement/terrain, tous dus à des **rosters manquants ou
 non résolus** (`roster_pool_schedule produced zero eligible training rosters`, fichiers de
 roster holdout absents). Baseline vérifiée par `git stash` — aucune régression des fixes ci-dessus.
+Ces rosters ont été supprimés VOLONTAIREMENT (commit `43eae95a`, obsolètes pré-escouades) : la
+réparation n'est pas « les restaurer » mais recréer 2 rosters (SM, Orks) — cf. §10.2.
 
 **Dettes à connaître avant de s'y remettre** :
 - `--scenario bot` échoue en AMONT du moteur (roster) : utiliser `training_benchmark` pour
@@ -855,10 +874,9 @@ de T4/de code latent) :
   **Dette assumée** : `deploy_unit` porte désormais DEUX modèles de validation — la mono-ancre
   héritée de T5 (empreinte du socle de l'unité ⊆ pool, miroir du masque) et la par-figurine.
   La première n'a plus de sens géométrique strict une fois le placement fait par figurine ; elle
-  ne survit que parce que le masque T5 s'y aligne. À unifier le jour où le masque de déploiement
-  passera au squad-aware — ⚠️ **ce n'est planifié dans AUCUNE tranche** : la seule mention est
-  §9.4 P3 (« les actions 4-8 sont 5 STRATÉGIES scorées … élargir ou non »), question ouverte
-  non tranchée.
+  ne survit que parce que le masque T5 s'y aligne. **Planifié en T7** (section 5), déclencheur
+  « le training tourne » — le fondement règles y est établi par lecture des PDF (la mise en place
+  est PAR FIGURINE, aucun socle à l'ancre dans les règles).
   ⚠️ **Écarté après analyse — deux fausses bonnes idées** :
   - *Filtrer le pool entier par `deployment_build_squad_destinations_pool`*
     ([deployment_handlers.py:552](../../engine/phase_handlers/deployment_handlers.py#L552)) :
@@ -1236,6 +1254,48 @@ zéro erreur. Smoke `scripts/smoke_t5_bare.py` rejoué après TOUS les fixes T6 
 `(A) invariant/terminaison=OK | (B) mêlée+Carnifex=OK`, `melee_kills_total=5`,
 `carnifex_charge_any=True` — aucune régression moteur.
 
+### T7 — Unification de la validation de déploiement — ⏸️ EN ATTENTE (déclencheur explicite)
+
+**Déclencheur : le training tourne** (donc T6-h puis T6-g livrés, cf. §0). **Ne PAS commencer
+avant** — voir « pourquoi pas maintenant ».
+
+**Le problème.** Depuis T6-f, `deploy_unit` enchaîne DEUX contrôles :
+1. **mono-ancre** (hérité de T5) : l'empreinte d'UN socle posé à l'ancre ⊆ zone, hors mur,
+   clearance — miroir exact de `_get_valid_deployment_hexes` ;
+2. **par-figurine** (T6-f) : la formation entière validée par `deployment_preview_plan`.
+
+Le contrôle 1 teste **un objet qui n'existe plus** : l'unité n'occupe pas un socle à l'ancre,
+elle occupe N socles répartis ; l'ancre est un point de référence, pas une figurine.
+
+**Fondement règles (PDF lus, pas supposés)** :
+- « 18 Transports.pdf » : « Set up **each model** in your unit wholly within the set-up
+  distance » → la mise en place est PAR FIGURINE.
+- « 24 Core abilities.pdf » : « set up that unit anywhere that is **wholly within** your
+  deployment zone » → la contrainte porte sur l'unité ENTIÈRE, c.-à-d. toutes ses figurines.
+
+Aucune règle ne mentionne un socle à l'ancre. Le contrôle 1 refuse donc des placements **légaux
+au sens des règles** — typiquement une ancre en bord de zone dont le socle déborde alors que la
+formation tiendrait entièrement dedans. Ordre de grandeur mesuré sur le balayage des 16 104
+hexes de la zone (T6-f) : 263 refus `outside_zone` + 1 815 `out_of_bounds`, dont une part est
+légale au sens 40K.
+
+**Fix visé** : supprimer le contrôle mono-ancre du commit ET du masque, et laisser le décodeur
+(`_select_deployment_hex_for_action`, qui valide déjà la formation depuis T6-f) être le SEUL
+filtre. Un seul modèle de validation, aligné sur les règles, et l'agent récupère des placements
+aujourd'hui interdits.
+
+**Pourquoi pas maintenant (raisonnement à ne pas re-dérouler)** : ça modifie le masque de
+déploiement, donc **l'espace d'action de l'agent** — ça invalide les modèles entraînés et exige
+une mesure avant/après. Le faire pendant que le training ne tourne pas ajoute du risque sans
+pouvoir l'évaluer. Ordre optimal : **T6-h → T6-g → training qui tourne → T7**, dans sa propre
+tranche, avec avant/après mesuré (win-rate et taux de refus de déploiement).
+
+**Critère d'acceptation** : un seul prédicat de validation de déploiement dans le code (grep :
+plus de `compute_candidate_footprint` dans `deploy_unit`) ; un placement légal au sens 40K mais
+refusé aujourd'hui (ancre en bord de zone, formation entièrement dedans) est ACCEPTÉ — test
+dédié, rouge avant le fix ; suite verte hors échecs préexistants ; PvP non régressé (le drag
+mono-socle et l'auto-déploiement passent par le même commit).
+
 ### Phase B (après T6 ET Phase A' — section 9 — validés) — Observation niveaux
 Spec à figer à ce moment-là, principes déjà actés :
 - Ajouter aux 7 features par-figurine un `level` normalisé (source : champ `level` de la
@@ -1258,7 +1318,7 @@ Spec à figer à ce moment-là, principes déjà actés :
 | T3 | `train.py --step --training-config x1_debug` dépasse la résolution walls/objectives sans FileNotFoundError |
 | T4 | Les 61 scénarios se chargent (`W40KEngine(scenario_file=...)` + reset, script de balayage) ; zéro clé legacy ; sort de training_save/ statué |
 | T5 | 10 épisodes aléatoires masqués terminés sur ≥3 scénarios × sièges p1/p2 ; zéro masque vide |
-| T6 | Run `--new` court complet + analyzer + replay OK ; win-rate vs RandomBot en progression — ⏳ **PARTIEL (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép.). ✅ Suite verte (1293) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ✅ T6-c résolu : `_process_squad_action` journalise, analyzer tourne, `1.2 erreurs shooting = 0`. ✅ **T6-d résolu** : `squad_fight` = sélection FIGHT 12.04, machine V11 déroulée par `_fight_v11_gym_settle` (ordre 12.02→12.04→12.07 respecté, snapshot posé, double activation interdite). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (bruit) — mesuré AVANT T6-d, donc sur un moteur où la mêlée était fausse ; **à re-mesurer** avec phase `x1` + `bot_evaluation` holdout vs RandomBot. ❌ **Le run est de nouveau IMPOSSIBLE depuis le 2026-07-19** : T6-f a révélé T6-g/T6-h (cf. §0) — le critère T6 ne peut pas être réévalué avant ces 2 fixes |
+| T6 | Run `--new` court complet + analyzer + replay OK ; ~~win-rate vs RandomBot en progression~~ → **critère REMPLACÉ le 2026-07-19, voir section 10.6** (win-rate PAR ROSTER contre un adversaire de holdout jamais vu à l'entraînement + absence de comportement absurde en partie humaine). L'ancien critère référençait un holdout de rosters qui n'existe plus. — ⏳ **PARTIEL (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép.). ✅ Suite verte (1293) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ✅ T6-c résolu : `_process_squad_action` journalise, analyzer tourne, `1.2 erreurs shooting = 0`. ✅ **T6-d résolu** : `squad_fight` = sélection FIGHT 12.04, machine V11 déroulée par `_fight_v11_gym_settle` (ordre 12.02→12.04→12.07 respecté, snapshot posé, double activation interdite). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (bruit) — mesuré AVANT T6-d, donc sur un moteur où la mêlée était fausse ; **à re-mesurer** avec phase `x1` + `bot_evaluation` holdout vs RandomBot. ❌ **Le run est de nouveau IMPOSSIBLE depuis le 2026-07-19** : T6-f a révélé T6-g/T6-h (cf. §0) — le critère T6 ne peut pas être réévalué avant ces 2 fixes |
 | T6-f | Après le commit de déploiement, AUCUNE figurine vivante à `(-1,-1)` et ancre `units_cache` = figurine d'index minimal, sur les 3 chemins (gym, ancre imposée tutoriel, drag) — ✅ **FAIT (2026-07-19)** |
 | T6-g | Toute cellule offerte par le masque de move est exécutable : sur N épisodes aléatoires, zéro `ValueError` « incohérence masque/exécution » — et un test dédié où une escouade dont le BLOC déborde (mur / autre escouade) ne voit PAS la cellule dans son masque |
 | T6-h | La translation de bloc préserve les distances internes pour TOUTES les parités de `dx` (test paramétré `dx` pair ET impair) — rouge sur le code actuel |
@@ -1602,3 +1662,162 @@ Points de vigilance :
   nouvelles décisions — à statuer par tranche, jamais en silence. NB : un de ses deux
   consommateurs, `_ai_select_shooting_target` (shooting_handlers, def ~2093), est DÉJÀ mort
   (zéro appelant) — à inclure dans la suppression P1.
+
+---
+
+## 10. Stratégie d'entraînement et d'évaluation — DÉCISION UTILISATEUR (2026-07-19)
+
+### 10.1 Contexte et arbitrage
+
+**Objectif métier** : présenter le jeu avec une IA « acceptable » pour obtenir un financement.
+La démo oppose un **joueur humain** à l'IA, avec les **armées de la boîte de base**.
+
+**Arbitrage assumé** : l'agent n'apprendra PAS à jouer 40K, il apprendra à jouer **ces deux
+rosters**. C'est un choix délibéré pour éviter des semaines de tuning — la spécialisation réduit
+la variance de composition, donc le signal d'apprentissage est plus net et la convergence plus
+rapide. Pour une démo, un agent spécialisé est indiscernable d'un agent généraliste.
+
+⚠️ **Ne PAS « corriger » ce choix** en réintroduisant de la diversité de rosters : c'est une
+décision produit, pas un oubli.
+
+### 10.2 Rosters et matchups
+
+- **2 rosters** : Space Marines (SM) et Orks — les armées de la boîte de base, donc celles de
+  la démo. L'entraînement est aligné sur ce qui sera montré.
+- **3 matchups** : SM vs Orks, SM vs SM, Ork vs Ork.
+- Les rosters de l'ancienne banque ont été **supprimés volontairement** (commit `43eae95a`,
+  370 fichiers) : ils précédaient l'implémentation des escouades, donc obsolètes. Les nouveaux
+  sont à créer.
+
+### 10.3 Progression d'adversaires (l'axe qui porte la robustesse)
+
+Le risque dominant pour cette démo n'est PAS la composition des armées, c'est **l'écart entre
+l'adversaire d'entraînement et l'humain de la démo**. Trois niveaux, qualitativement différents :
+
+| Niveau | Nature | Limite |
+|---|---|---|
+| 1. Bots scriptés | politique **fixe** | l'agent apprend un exploit ; le win-rate monte sans que la compétence monte |
+| 2. Self-play | politique **non-stationnaire** qui s'adapte en retour | les exploits cessent de payer ; risque de catastrophic forgetting |
+| 3. MCTS | adversaire qui **cherche** | non exploitable par pattern ; coûteux |
+
+**Plan retenu** : (1) les bots scriptés → (2) introduction **progressive** du self-play →
+(3) MCTS **seulement si** la perf mesurée est insuffisante.
+
+⚠️ « Diversité d'adversaires » = diversité des **distributions de comportement**, pas nombre de
+classes de bots. Huit bots appliquant la même heuristique gloutonne ne font qu'UN adversaire du
+point de vue de l'apprentissage.
+
+**Déjà implémenté, à paramétrer et non à développer — mais UNIQUEMENT sur le chemin rotation**
+(`--scenario bot`, cf. §10.4) :
+- `training_config.bot_training.ratios` — mélange pondéré de bots
+  (`_build_training_bots_from_config`, train.py ~L91 ; 7 classes supportées, 6 pondérées dans
+  la config actuelle — `defensive_smart` n'y est pas). Configuré dans les 5 phases.
+- `training_config.opponent_mix` — self-play progressif : `self_play_ratio_start` →
+  `self_play_ratio_end`, `warmup_episodes`, snapshot publié par
+  `_publish_self_play_snapshot` (train.py ~L2854) et rechargé par mtime dans
+  `BotControlledEnv` (env_wrappers ~L515). Chaîne complète vérifiée : parse → publication →
+  rechargement. Le « progressivement » est donc de la config.
+  ⚠️ `opponent_mix` n'est PARSÉ que dans `train_with_scenario_rotation` (~L2362) —
+  `create_multi_agent_model` l'ignore totalement.
+
+### 10.4 ⚠️ Écart CODE vs PLAN à corriger avant le premier run
+
+**Toute la machinerie d'adversaires (bots pondérés + opponent_mix) n'est câblée que sur le
+chemin ROTATION.** L'adversaire réel du chemin single-scenario dépend de `n_envs` et du NOM du
+fichier scénario — vérifié branche par branche :
+
+| Chemin | Adversaire d'entraînement RÉEL |
+|---|---|
+| `--scenario bot` (`train_with_scenario_rotation`) | ✅ `bots=training_bots` pondérés (~L2492, ~L2755) + self-play `opponent_mix` |
+| `--scenario <fichier>`, `n_envs > 1` (cas RÉEL : x5_debug = 8) | ❌ `make_training_env` appelé SANS `use_bots`/`training_bots` (~L1782) → `SelfPlayWrapper(frozen_model=None)` → **ACTIONS ALÉATOIRES UNIFORMES, en permanence** (voir ci-dessous) |
+| `--scenario <fichier>`, `n_envs == 1`, nom contenant « bot » | `GreedyBot(randomness=0.15)` EN DUR (~L1855) |
+| `--scenario <fichier>`, `n_envs == 1`, autre nom (dont `scenario_training_benchmark.json`) | ❌ `SelfPlayWrapper` → **aléatoire permanent** aussi (~L1871) |
+
+**Pourquoi « aléatoire permanent » et pas du self-play** (bug latent distinct, vérifié) :
+`SelfPlayWrapper._get_frozen_model_action` (env_wrappers ~L1237) retombe sur
+`random.choice(valid_actions)` tant que `frozen_model is None` — et
+**`update_frozen_model` n'a AUCUN appelant** dans tout `ai/` (grep = 0 ; le compteur
+`frozen_model_update_frequency = 100` de train.py ~L2690 est du code mort). Le « self-play »
+du chemin single-scenario n'en est pas : P2 joue au hasard du premier au dernier épisode.
+Ne pas confondre avec le VRAI self-play (`opponent_mix` → `BotControlledEnv`, chemin rotation),
+qui recharge un snapshot publié sur disque et fonctionne.
+
+Or `--scenario bot` est cassé en amont (rosters, cf. §0) : le chemin réellement utilisable est
+le single-scenario. **Un run x5_debug lancé aujourd'hui entraînerait donc contre un adversaire
+ALÉATOIRE, sans qu'aucun log ne le signale** — pire que « spécialisé sur GreedyBot » : un agent
+qui n'a jamais rencontré d'opposition cohérente.
+
+C'est la même famille de divergence que **T6-e** (`_turn_step_limit` absent du chemin
+single-scenario) : deux chemins de `train.py` qui ont divergé. À traiter de la même façon —
+faire passer les deux par la même construction d'adversaires (`training_bots` + `opponent_mix`
+dans `make_training_env`, qui accepte DÉJÀ ces paramètres : seul l'appel de
+`create_multi_agent_model` ne les transmet pas).
+
+### 10.5 Évaluation : le holdout porte sur l'ADVERSAIRE, pas sur les rosters
+
+**Constat** : les bots d'évaluation viennent de `callback_params.bot_eval_weights`
+(`_load_bot_eval_params`, bot_evaluation.py ~L168 ; itération sur `eval_weights.keys()` ~L886).
+Config actuelle, identique dans les 5 phases : `{greedy, defensive, control, aggressive_smart,
+adaptive}` — un **sous-ensemble strict des bots d'entraînement** (`bot_training.ratios` = les
+mêmes 5 + `random`). L'agent n'est donc évalué QUE contre des adversaires rencontrés à
+l'entraînement : ce win-rate mesure **l'exploitation apprise, pas la compétence**, et sera
+systématiquement optimiste par rapport au comportement face à un humain.
+
+**Décision** : le holdout est un **adversaire réservé à l'évaluation**, jamais vu en
+entraînement. Candidat déjà disponible : **`TacticalBot`** — le seul des 8 qui n'est utilisé
+nulle part (`evaluation_bots.py` L19 : « unused in training/eval »).
+
+À faire : ajouter `TacticalBot` aux bots d'évaluation, et **garantir qu'il n'entre jamais**
+dans `bot_training.ratios` (test de non-régression : l'intersection entre bots d'entraînement
+et bots de holdout est vide).
+
+Cela remplace avantageusement le holdout de rosters supprimé, et répond à la question
+« 2 ou 4 rosters » : **rester à 2**, et mettre le holdout sur l'axe adversaire.
+
+⚠️ Les 20 scénarios de `holdout_regular/` + `holdout_hard/` pointent vers des rosters supprimés :
+ils ne chargent pas. **À archiver** dans `_archive_pre_v11/`. Tant qu'ils sont là,
+`bot_eval_scenario_pool: "holdout"` (présent dans les 5 phases de
+`CoreAgent_training_config.json`) pointe sur un pool mort.
+NB — répartition VÉRIFIÉE des 9 échecs de la suite (cause relue test par test) : **8 viennent
+des scénarios TRAINING** (`agent_roster_ref: "training_random"` →
+`roster_pool_schedule produced zero eligible training rosters`, candidates=1 : le pool de
+rosters d'entraînement est quasi vide depuis le cleanup `43eae95a`) et **1 seul** d'un fichier
+de roster holdout absent. Archiver les holdouts n'en fait tomber qu'un : le gros de la
+réparation est la création des nouveaux rosters SM/Orks (§10.2) + la mise à jour des scénarios
+training qui les référencent.
+
+### 10.6 Critère de succès (remplace le critère T6 « win-rate vs RandomBot »)
+
+Le critère historique référençait une capacité qui n'existe plus (holdout de rosters). Nouveau
+critère, en deux volets — **les deux sont requis** :
+
+1. **Quantitatif** : **win-rate PAR ROSTER** contre l'adversaire de holdout (`TacticalBot`),
+   jamais rencontré à l'entraînement. Par roster, car avec seulement 2 rosters, un effondrement
+   sur l'un pendant que l'autre monte est la **signature du catastrophic forgetting** (piège
+   listé dans CLAUDE.md) et le seul garde-fou qui reste. Un win-rate agrégé le masquerait.
+2. **Qualitatif — décisif pour l'objectif démo** : **absence de comportement absurde** sur N
+   parties jouées par quelqu'un n'ayant pas travaillé sur le projet, cherchant activement à
+   surprendre l'agent (déploiement inhabituel, tactique atypique).
+
+**Pourquoi le volet 2 n'est pas optionnel** : devant un financeur, ce qui convainc est que l'IA
+paraisse *sensée* (elle va sur les objectifs, tire sur des cibles plausibles, charge quand c'est
+logique). Un agent à 45 % de victoires qui joue de façon lisible impressionne davantage qu'un
+agent à 70 % qui gagne en exploitant une faiblesse de bot et produit un coup absurde au pire
+moment. **En démo, l'incohérence coûte plus cher que la défaite.**
+
+### 10.7 MCTS — deux usages distincts, ne pas les confondre
+
+| Document | Usage | Effet |
+|---|---|---|
+| `A_faire/MCTS/MCTS_bot_final.md` | MCTS comme **adversaire d'entraînement** (fraction d'épisodes, entre bots et self-play) | améliore l'entraînement → demande un cycle complet de plus |
+| `A_faire/MCTS/MCTS_agent_implementation.md` | MCTS **dans l'agent**, à l'inférence | corrige les coups absurdes **sans retraining** |
+
+Pour l'objectif démo (§10.6 volet 2), c'est le **second** qui a le meilleur rapport
+effort/résultat : c'est l'absurdité ponctuelle qui coûte cher, et une recherche à l'inférence la
+corrige directement. Contre-argument à mesurer : la **latence** en temps réel devant un public —
+`MCTS_agent_implementation.md` note lui-même « micro à chaque activation + rollouts = beaucoup
+plus lourd » et suggère « macro + feuille value seule » comme prototype. Un MCTS macro peu
+profond, ou limité aux seules décisions critiques, suffirait probablement.
+
+**À ne PAS anticiper** : plan B après mesure. Rien ne sert de décider avant de savoir si le PPO
+spécialisé suffit.
