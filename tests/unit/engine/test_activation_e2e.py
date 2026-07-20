@@ -206,7 +206,6 @@ def _bare_engine(gs: Dict[str, Any]) -> W40KEngine:
     engine = object.__new__(W40KEngine)
     engine.game_state = gs
     engine.step_logger = None
-    engine.replay_logger = None
     engine.gym_training_mode = False
     engine.config = _base_config()
     engine._shooting_phase_initialized = False

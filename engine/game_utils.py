@@ -130,9 +130,9 @@ def get_effective_turn_limit(game_state: Dict[str, Any]) -> Optional[int]:
     ``unlimited_turns`` (drapeau du game_state) exprime le seul cas metier sans limite :
     l'Endless Duty, base sur des vagues et non sur des tours.
     """
-    # get allowed (drapeau optionnel, defaut = bataille LIMITEE). Ce n'est pas un
-    # fallback anti-erreur : une bataille a une duree par defaut (regle 40k), et seul
-    # l'Endless Duty pose explicitement le drapeau pour s'en affranchir.
+    # get allowed (drapeau optionnel, absence = bataille LIMITEE). Ce n'est pas un masquage
+    # d'erreur : la regle 40k impose une duree bornee, et seul l'Endless Duty pose
+    # explicitement le drapeau pour s'en affranchir.
     if game_state.get("unlimited_turns", False):
         return None
     game_rules = require_key(require_key(game_state, "config"), "game_rules")

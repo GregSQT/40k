@@ -14,12 +14,18 @@ Verrou : toute cellule conservée par l'érosion est exécutable — le bloc tra
 AUCUNE figurine hors plateau / sur un mur / sur une autre escouade / dans l'ER ennemie.
 """
 
+from typing import Iterable, Tuple
+
 import pytest
 
 from engine.phase_handlers.shared_utils import erode_move_pool_by_squad_block
 
 
-def _game_state(*, wall_hexes=frozenset(), enemy_er=frozenset()):
+def _game_state(
+    *,
+    wall_hexes: Iterable[Tuple[int, int]] = (),
+    enemy_er: Iterable[Tuple[int, int]] = (),
+):
     """game_state minimal : uniquement ce que l'érosion lit.
 
     Escouade "1" en ligne horizontale : ancre (10,10), sœurs (11,10) et (12,10).

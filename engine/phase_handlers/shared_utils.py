@@ -3257,7 +3257,7 @@ def build_move_blocked_cells_by_level(
     player: int,
     levels: "Any",
     constraints: Dict[str, Any],
-) -> Dict[int, List[Set[Tuple[int, int]]]]:
+) -> Dict[int, List[Tuple[str, Set[Tuple[int, int]]]]]:
     """SOURCE UNIQUE du predicat de cellule d'un move — cellules INTERDITES, par niveau.
 
     Consommee par les DEUX cotes de l'invariant « masque ⊆ executable » :
@@ -7594,10 +7594,12 @@ def erode_move_pool_by_squad_block(
     # Ici — et SEULEMENT ici — l'union vaut sa copie : elle est payee une fois par niveau puis
     # amortie sur |pool| x |figurines| tests (~2800 x 20). Cf. la docstring du helper : c'est
     # l'arbitrage du consommateur, `validate_move_plan` fait l'inverse.
-    blocked_by_level: Dict[int, Set[Tuple[int, int]]] = {
-        lv: set().union(*(s for _label, s in sets)) if sets else set()
-        for lv, sets in blocked_sets_by_level.items()
-    }
+    blocked_by_level: Dict[int, Set[Tuple[int, int]]] = {}
+    for lv, sets in blocked_sets_by_level.items():
+        merged: Set[Tuple[int, int]] = set()
+        for _label, s in sets:
+            merged |= s
+        blocked_by_level[lv] = merged
 
     kept: Dict[Tuple[int, int], float] = {}
     for (cc, rr), cost in costs.items():
