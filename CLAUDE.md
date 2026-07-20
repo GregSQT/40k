@@ -137,6 +137,19 @@ Si aucun critère n'est rempli → ne rien dire.
 - NE JAMAIS utiliser de valeur par défaut pour éviter une erreur. Préférer l'erreur explicite si la valeur n'est pas fournie.
 - Les fallbacks sont autorisés uniquement dans les cas où c'est un comportement métier valide (ex: stratégie de repli planifiée), jamais pour contourner un bug ou une erreur.
 
+7. CLÔTURE COMPLÈTE DES SUJETS (TOUS MODES) — NON NÉGOCIABLE
+- Un sujet ouvert se ferme COMPLÈTEMENT : correction OPTIMALE (pas seulement correcte),
+  tests qui la verrouillent, documentation à jour, instruments temporaires retirés.
+- INTERDIT de livrer une solution sous-optimale en la déclarant « dette documentée ».
+  Documenter un manque n'est PAS le traiter — c'est le rendre présentable.
+- Une dette ne peut être ouverte QUE si le traitement est TECHNIQUEMENT IMPOSSIBLE dans la
+  session (dépendance externe, décision métier de l'utilisateur, donnée indisponible).
+  JAMAIS parce que c'est « plus long », « un changement d'algorithme » ou « hors chemin critique ».
+- Si un travail s'avère plus large que prévu : l'annoncer AVANT de commencer, pas après l'avoir
+  livré à moitié. L'utilisateur arbitre le périmètre en amont, jamais en constat d'échec.
+- « Correct mais pas optimal » n'est pas un livrable. Si l'optimum est identifié, il est implémenté.
+- Avant de dire qu'un sujet est fini : relire cette règle point par point et vérifier chacun.
+
 8. INVESTIGATION AUTONOME (EXCEPTION CRITIQUE)
 - Si l'utilisateur demande explicitement d'investiguer un problème, d'analyser une erreur, ou de trouver la root cause :
   → INVESTIGUER IMMÉDIATEMENT ET AUTONOMEMENT sans redemander la permission
