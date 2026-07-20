@@ -60,11 +60,13 @@ def test_shoot_auto_decider_is_wired_to_the_predicate():
 
 def test_shoot_auto_decider_pvp_human_stays_manual():
     """MIROIR PvP : hors gym, un défenseur humain n'est PAS auto — l'allocation reste manuelle."""
+    assert SHOOT_CTX.auto_decider is not None, "SHOOT_CTX.auto_decider débranché"
     assert SHOOT_CTX.auto_decider(_gs(gym=False, owner_type="human"), "10") is False
 
 
 def test_shoot_auto_decider_pve_ai_defender_is_auto():
     """Hors gym, un défenseur `ai` reste auto (comportement PvE historique, non régressé)."""
+    assert SHOOT_CTX.auto_decider is not None, "SHOOT_CTX.auto_decider débranché"
     assert SHOOT_CTX.auto_decider(_gs(gym=False, owner_type="ai"), "10") is True
 
 
@@ -77,6 +79,7 @@ def test_fight_auto_decider_is_wired_to_the_predicate():
 
 def test_fight_auto_decider_pvp_human_stays_manual():
     """MIROIR PvP : le chemin FIGHT_CTX ne doit pas auto-résoudre contre un humain."""
+    assert FIGHT_CTX.auto_decider is not None, "FIGHT_CTX.auto_decider débranché"
     assert FIGHT_CTX.auto_decider(_gs(gym=False, owner_type="human"), "10") is False
 
 
