@@ -84,6 +84,64 @@ def test_target_missing_from_unit_by_id_raises():
         _ai_select_fight_target(gs, "1", ["2", "42"])  # "42" n'est pas dans unit_by_id
 
 
+class _ScriptedRewardMapper:
+    """RewardMapper de test : score piloté par id de cible, et compte ses appels."""
+
+    scores: Dict[str, float] = {}
+    calls: List[str] = []
+
+    def __init__(self, _config):
+        pass
+
+    def get_shooting_priority_reward(self, _unit, target, _all_targets, _flag, _gs):
+        tid = str(target["id"])
+        type(self).calls.append(tid)
+        return type(self).scores[tid]
+
+
+@pytest.fixture
+def scripted_mapper(monkeypatch):
+    _ScriptedRewardMapper.calls = []
+    monkeypatch.setattr("ai.reward_mapper.RewardMapper", _ScriptedRewardMapper)
+    return _ScriptedRewardMapper
+
+
+def test_selects_highest_scoring_target_not_the_first(scripted_mapper):
+    """La cible retenue est celle de score MAXIMAL, pas la première du pool.
+
+    Verrouille le remplacement de la boucle à sentinelle par `max(..., key=...)` : un bug qui
+    renverrait `valid_targets[0]` passerait inaperçu sans ce test.
+    """
+    scripted_mapper.scores = {"2": 1.0, "3": 9.0}
+    gs = _game_state(reward_configs={"CoreAgent": {}})
+    assert _ai_select_fight_target(gs, "1", ["2", "3"]) == "3"
+
+
+def test_selection_is_stable_across_identical_calls(scripted_mapper):
+    """Déterminisme (§8.1) : deux appels identiques rendent la même cible."""
+    scripted_mapper.scores = {"2": 4.0, "3": 7.0}
+    gs = _game_state(reward_configs={"CoreAgent": {}})
+    first = _ai_select_fight_target(gs, "1", ["2", "3"])
+    second = _ai_select_fight_target(gs, "1", ["2", "3"])
+    assert first == second == "3"
+
+
+def test_tie_keeps_the_first_of_the_pool(scripted_mapper):
+    """Égalité de score → PREMIER du pool, comme l'ancien `>` strict (non-régression)."""
+    scripted_mapper.scores = {"2": 5.0, "3": 5.0}
+    gs = _game_state(reward_configs={"CoreAgent": {}})
+    assert _ai_select_fight_target(gs, "1", ["2", "3"]) == "2"
+    assert _ai_select_fight_target(gs, "1", ["3", "2"]) == "3"
+
+
+def test_each_target_is_scored_exactly_once(scripted_mapper):
+    """Le refactor supprime le double `get_unit_by_id` : un seul scoring par cible."""
+    scripted_mapper.scores = {"2": 1.0, "3": 2.0}
+    gs = _game_state(reward_configs={"CoreAgent": {}})
+    _ai_select_fight_target(gs, "1", ["2", "3"])
+    assert sorted(scripted_mapper.calls) == ["2", "3"], scripted_mapper.calls
+
+
 def test_unknown_fighter_unit_still_raises_value_error():
     """Non-régression : l'erreur explicite déjà présente AVANT le try n'est pas touchée."""
     gs = _game_state(reward_configs={"CoreAgent": {}})

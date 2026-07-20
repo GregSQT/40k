@@ -1789,7 +1789,7 @@ def _ai_select_fight_target(game_state: Dict[str, Any], unit_id: str, valid_targ
     # L'ancien `if t:` / `if not target: continue` la sautait en silence — si toutes les cibles
     # manquaient, la fonction renvoyait `valid_targets[0]` sans avoir scoré quoi que ce soit.
     # Erreur explicite depuis le 2026-07-20 (V11 §0.19.2).
-    all_targets = []
+    resolved: List[Tuple[str, Dict[str, Any]]] = []
     for tid in valid_targets:
         t = get_unit_by_id(game_state, tid)
         if t is None:
@@ -1797,22 +1797,21 @@ def _ai_select_fight_target(game_state: Dict[str, Any], unit_id: str, valid_targ
                 f"Cible {tid!r} du pool de combat absente de unit_by_id "
                 f"(désynchronisation units_cache/unit_by_id, unit_id={unit_id})"
             )
-        all_targets.append(t)
+        resolved.append((tid, t))
+    all_targets = [t for _tid, t in resolved]
 
-    best_target = valid_targets[0]
-    best_reward = -999999
-
-    for target_id in valid_targets:
-        target = get_unit_by_id(game_state, target_id)
-
-        # Fight phase uses same priority logic as shooting
-        # RewardMapper handles both via target priority calculation
-        reward = reward_mapper.get_shooting_priority_reward(unit, target, all_targets, False, game_state)
-
-        if reward > best_reward:
-            best_reward = reward
-            best_target = target_id
-
+    # Fight phase uses same priority logic as shooting — RewardMapper handles both.
+    # `max` retient le PREMIER maximum : même sémantique de départage que l'ancienne
+    # comparaison `>` stricte, donc sélection STABLE à pool identique (déterminisme exigé
+    # par §8.1 — l'assignation de crédit PPO se brouille si l'ordre varie).
+    # L'ancienne sentinelle `best_reward = -999999` est retirée : depuis que toute cible
+    # non résolue lève, il n'existe plus de cas où aucun candidat n'est scoré (V11 §0.19.3).
+    best_target, _best_unit = max(
+        resolved,
+        key=lambda pair: reward_mapper.get_shooting_priority_reward(
+            unit, pair[1], all_targets, False, game_state
+        ),
+    )
     return best_target
 
 
