@@ -1747,63 +1747,73 @@ def _ai_select_fight_target(game_state: Dict[str, Any], unit_id: str, valid_targ
 
     Fight priority (same as shooting): lowest HP, highest threat.
     """
+    # Pool vide = bug d'appelant : les 4 sites d'appel gardent déjà le cas en amont
+    # (fight_handlers ~3381 `if not targets`, ~5537 `if not valid`, ~6271 `if valid`,
+    # w40k_core ~5518 `if targets else None`). L'ancien `return ""` était une sentinelle
+    # muette sur une branche morte. Retiré le 2026-07-20 (V11 §0.19.2).
     if not valid_targets:
-        return ""
+        raise ValueError(
+            f"_ai_select_fight_target appelé avec un pool de cibles VIDE (unit_id={unit_id}) — "
+            f"l'appelant doit garder ce cas en amont"
+        )
 
     unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         raise ValueError(f"Unit not found for fight target selection: unit_id={unit_id}")
     
-    try:
-        from ai.reward_mapper import RewardMapper
+    # Aucun try/except ici : une erreur de config/registry est un BUG, elle doit remonter.
+    # L'ancien `except Exception: return valid_targets[0]` avalait les deux require_key et le
+    # ValueError de get_model_key, et sa seule trace (add_console_log) est un no-op hors
+    # --debug : le ciblage tombait silencieusement sur la première cible du pool. Retiré le
+    # 2026-07-20 (V11 §9.4), verrouillé par test_fight_target_selection_no_fallback.py.
+    from ai.reward_mapper import RewardMapper
 
-        reward_configs = require_key(game_state, "reward_configs")
+    reward_configs = require_key(game_state, "reward_configs")
 
-        # Get unit type for config lookup
-        global _unit_registry_singleton
-        if _unit_registry_singleton is None:
-            from ai.unit_registry import UnitRegistry
-            _unit_registry_singleton = UnitRegistry()
-        fighter_unit_type = unit["unitType"]
-        fighter_agent_key = _unit_registry_singleton.get_model_key(fighter_unit_type)
+    # Get unit type for config lookup
+    global _unit_registry_singleton
+    if _unit_registry_singleton is None:
+        from ai.unit_registry import UnitRegistry
+        _unit_registry_singleton = UnitRegistry()
+    fighter_unit_type = unit["unitType"]
+    fighter_agent_key = _unit_registry_singleton.get_model_key(fighter_unit_type)
 
-        # Get unit-specific config (required)
-        unit_reward_config = require_key(reward_configs, fighter_agent_key)
+    # Get unit-specific config (required)
+    unit_reward_config = require_key(reward_configs, fighter_agent_key)
 
-        reward_mapper = RewardMapper(unit_reward_config)
+    reward_mapper = RewardMapper(unit_reward_config)
 
-        # Build target list for reward mapper (single lookup per tid)
-        all_targets = []
-        for tid in valid_targets:
-            t = get_unit_by_id(game_state, tid)
-            if t:
-                all_targets.append(t)
+    # Build target list for reward mapper (single lookup per tid)
+    # Le pool vient de `units_cache` (_fight_build_valid_target_pool ~L2037) : une cible qui y
+    # figure mais manque de `unit_by_id` est une DÉSYNCHRONISATION D'INDEX, donc un bug.
+    # L'ancien `if t:` / `if not target: continue` la sautait en silence — si toutes les cibles
+    # manquaient, la fonction renvoyait `valid_targets[0]` sans avoir scoré quoi que ce soit.
+    # Erreur explicite depuis le 2026-07-20 (V11 §0.19.2).
+    all_targets = []
+    for tid in valid_targets:
+        t = get_unit_by_id(game_state, tid)
+        if t is None:
+            raise ValueError(
+                f"Cible {tid!r} du pool de combat absente de unit_by_id "
+                f"(désynchronisation units_cache/unit_by_id, unit_id={unit_id})"
+            )
+        all_targets.append(t)
 
-        best_target = valid_targets[0]
-        best_reward = -999999
+    best_target = valid_targets[0]
+    best_reward = -999999
 
-        for target_id in valid_targets:
-            target = get_unit_by_id(game_state, target_id)
-            if not target:
-                continue
+    for target_id in valid_targets:
+        target = get_unit_by_id(game_state, target_id)
 
-            # Fight phase uses same priority logic as shooting
-            # RewardMapper handles both via target priority calculation
-            reward = reward_mapper.get_shooting_priority_reward(unit, target, all_targets, False, game_state)
+        # Fight phase uses same priority logic as shooting
+        # RewardMapper handles both via target priority calculation
+        reward = reward_mapper.get_shooting_priority_reward(unit, target, all_targets, False, game_state)
 
-            if reward > best_reward:
-                best_reward = reward
-                best_target = target_id
+        if reward > best_reward:
+            best_reward = reward
+            best_target = target_id
 
-        return best_target
-
-    except Exception as e:
-        from engine.game_utils import add_console_log
-        episode = game_state.get("episode_number", "?")
-        turn = game_state.get("turn", "?")
-        unit_id_str = str(unit.get("id", "unknown"))
-        add_console_log(game_state, f"[TARGET SELECTION ERROR] E{episode} T{turn} Unit {unit_id_str}: target selection failed: {str(e)} - returning first valid target")
-        return valid_targets[0]
+    return best_target
 
 
 def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
