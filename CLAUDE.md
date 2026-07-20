@@ -149,6 +149,11 @@ Si aucun critère n'est rempli → ne rien dire.
   livré à moitié. L'utilisateur arbitre le périmètre en amont, jamais en constat d'échec.
 - « Correct mais pas optimal » n'est pas un livrable. Si l'optimum est identifié, il est implémenté.
 - Avant de dire qu'un sujet est fini : relire cette règle point par point et vérifier chacun.
+- NE JAMAIS annoncer une action comme faite avant de l'avoir exécutée. Décider de faire ≠ avoir
+  fait. Toute affirmation « j'ai écrit / modifié / supprimé / déplacé X » doit être précédée de
+  l'exécution ET suivie d'une vérification (relecture, grep, git status).
+- Une action qui rend périmé un état déjà écrit (commit, run, suppression) oblige à mettre à jour
+  cet état DANS LA MÊME RÉPONSE — un document rendu faux par sa propre livraison est une régression.
 
 8. INVESTIGATION AUTONOME (EXCEPTION CRITIQUE)
 - Si l'utilisateur demande explicitement d'investiguer un problème, d'analyser une erreur, ou de trouver la root cause :
