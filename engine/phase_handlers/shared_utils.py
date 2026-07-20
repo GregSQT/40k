@@ -577,10 +577,12 @@ def _build_models_for_unit(
     Maintains parallel structures models_cache (model_id -> dict) and
     squad_models (squad_id -> [model_id,...]) without touching units_cache.
 
-    points_per_hp formula (homogeneous):
-        VALUE / (model_count_at_start * HP_MAX)
-    Mixed profiles (per spec, when models[] declares heterogeneous HP_MAX):
-        VALUE / total_hp_pool, total_hp_pool = sum(HP_MAX_i for i in models)
+    points_per_hp est calcule PAR FIGURINE :
+        points_per_hp_i = VALUE_i / HP_MAX_i
+    ou VALUE_i = spec["VALUE"] (valeur de CETTE figurine, posee par
+    _build_enhanced_unit) et JAMAIS unit["VALUE"], qui porte la valeur de
+    l'ESCOUADE. Une escouade heterogene en points (Boyz : 9 x 7 + Nob 12)
+    donne donc des points_per_hp differents d'une figurine a l'autre.
     """
     hp_max = int(require_key(unit, "HP_MAX"))
     if hp_max <= 0:
@@ -614,19 +616,11 @@ def _build_models_for_unit(
         model_specs = explicit_models
     else:
         # Backward compat: single-figurine squad derived from unit fields.
-        model_specs = [{"col": unit_col, "row": unit_row, "HP_CUR": unit_hp_cur, "level": unit_level}]
+        # Mono-figurine : la figurine vaut ce que vaut l'unite (identite posee par
+        # _build_enhanced_unit, game_state.py:967, pour les unites a models[] explicite).
+        model_specs = [{"col": unit_col, "row": unit_row, "HP_CUR": unit_hp_cur, "level": unit_level, "VALUE": value}]
 
     model_count_at_start = len(model_specs)
-    # points_per_hp — homogeneous case (all models share unit HP_MAX). For
-    # mixed profiles (future), each spec carries its own HP_MAX and the formula
-    # becomes VALUE / sum(HP_MAX_i).
-    total_hp_pool = 0
-    for spec in model_specs:
-        spec_hp_max = int(spec.get("HP_MAX", hp_max))
-        if spec_hp_max <= 0:
-            raise ValueError(f"Squad {unit_id}: model spec has invalid HP_MAX={spec_hp_max}")
-        total_hp_pool += spec_hp_max
-    points_per_hp = float(value) / float(total_hp_pool) if total_hp_pool > 0 else 0.0
 
     model_ids: List[str] = []
     for idx, spec in enumerate(model_specs):
@@ -636,7 +630,12 @@ def _build_models_for_unit(
             int(require_key(spec, "col")), int(require_key(spec, "row"))
         )
         spec_hp_max = int(spec.get("HP_MAX", hp_max))
+        if spec_hp_max <= 0:
+            raise ValueError(f"Squad {unit_id}: model spec has invalid HP_MAX={spec_hp_max}")
         spec_hp_cur = int(spec.get("HP_CUR", spec_hp_max))
+        # VALUE PAR FIGURINE — jamais unit["VALUE"] (valeur d'escouade). Absence = erreur.
+        spec_value = int(require_key(spec, "VALUE"))
+        points_per_hp = float(spec_value) / float(spec_hp_max)
         # Orientation 0..5 : spec > unité > 0 (face nord). null explicite (scénario) → 0.
         _spec_orientation_raw = spec.get("orientation", unit.get("orientation", 0))  # get allowed (champ optionnel, défaut 0 = face nord)
         _spec_orientation = int(_spec_orientation_raw) if _spec_orientation_raw is not None else 0
@@ -663,6 +662,7 @@ def _build_models_for_unit(
             "SHOOT_LEFT": shoot_left,
             "ATTACK_LEFT": attack_left,
             "OC": int(spec.get("OC", oc)),
+            "VALUE": spec_value,
             "points_per_hp": points_per_hp,
             "ARMOR_SAVE": int(spec.get("ARMOR_SAVE", armor_save)),
             "INVUL_SAVE": int(spec.get("INVUL_SAVE", invul_save)),
@@ -6280,6 +6280,9 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     new_hp = hp_before - dmg_dealt
     destroyed = new_hp <= 0
     points_per_hp = float(require_key(m, "points_per_hp"))
+    # Valeur de CETTE figurine (pas la moyenne d'escouade) : le reward de kill la lit
+    # pour recompenser le ciblage des figurines cheres (Nob, sergent, perso attache).
+    model_value = float(require_key(m, "VALUE"))
     target_player = int(require_key(m, "player"))
     unit_type = m.get("unitType")  # get allowed
     col = m.get("col")  # get allowed
@@ -6310,7 +6313,7 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
         "attacker": pw["attacker_mid"], "target": cur,
         "target_squad_id": batch["target_sid"],
         "target_player": target_player, "points_per_hp": points_per_hp,
-        "damage": dmg_dealt, "destroyed": destroyed,
+        "damage": dmg_dealt, "destroyed": destroyed, "model_value": model_value,
     })
     batch["pool_index"] += 1
     if destroyed:

@@ -1493,12 +1493,16 @@ class ObservationBuilder:
                 p_fail = max(0.0, (sv_th - 1) / 6.0) if sv_th < 7 else 1.0
                 expected_dmg_per_attack = p_hit * p_wound * p_fail * d_mean
                 if expected_dmg_per_attack > 0:
-                    # Approx VALUE de la cible : somme points_per_hp * HP_total
-                    try:
-                        ppl = float(models_cache[e_mids[0]].get("points_per_hp", 0.0))
-                    except Exception:
-                        ppl = 0.0
-                    e_value = ppl * e_hp_total
+                    # VALUE de la cible = somme PAR FIGURINE de points_per_hp_i * HP_CUR_i.
+                    # Depuis que points_per_hp est calcule par figurine (VALUE_i / HP_MAX_i),
+                    # extrapoler celui de e_mids[0] a toute l escouade est FAUX des qu elle est
+                    # heterogene en points (Boyz 9 x 7 + Nob 12, perso attache) : la somme doit
+                    # etre faite figurine a figurine. require_key : pas de defaut masquant.
+                    e_value = sum(
+                        float(require_key(models_cache[mid], "points_per_hp"))
+                        * float(require_key(models_cache[mid], "HP_CUR"))
+                        for mid in e_mids
+                    )
                     # TTK = HP_total / expected_dmg_per_attack (en nb attaques moyennes)
                     ttk = max(1.0, e_hp_total / expected_dmg_per_attack)
                     value_over_ttk = min(1.0, e_value / (ttk * 50.0))  # /50 normalisation

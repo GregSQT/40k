@@ -20,7 +20,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Les prochaines entrées commencent à `0.18`.
+>   son numéro ; un numéro n'est jamais réattribué. Les prochaines entrées commencent à `0.20` (`0.18` et `0.19` attribuées le 2026-07-20).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -33,160 +33,194 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | # | Entrée | Nature | Ordre proposé | Pourquoi cet ordre |
 |---|---|---|---|---|
 | **§0.17** | Travail non commité | dette de session, **périssable** | **1** | Le diff cumulé porte sur du code, des tests et cette doc ; tout le reste se construit dessus. |
-| **§0.12** | Le reward de combat ignore la `VALUE` par figurine | 🔴 conception — **aucune ligne écrite** | **2** | Modifie le signal d'apprentissage : tout run lancé avant serait à refaire. |
-| **§0.14** | Re-mesure du run (score, non-régression §0.11) | mesure manquante | **3** | Le seul run récent s'arrête à 100 épisodes et son score a été produit sur le mauvais pool. Dépend de §0.12. |
+| **§0.18** | 🔴 **`collision intra-plan` de retour** — §0.11 n'est pas résolu | **bug moteur, BLOQUANT tout run long** | **2** | Aucun run de mesure ne va au bout de façon fiable ; tout ce qui dépend d'un run est bloqué derrière. |
+| **§0.14** | Re-mesure du run — **score** seulement | mesure manquante, **bloquée** | **3** | 🟠 Bloquée par **§0.18**. Seul acquis solide des deux runs : **fix §0.13 ✅ validé runtime**. |
 | **§0.15** | Rosters `training` ≡ `holdout_regular` | décision utilisateur **reportée** | **4** | À trancher avant le vrai entraînement, sinon aucun win-rate par matchup n'est interprétable. |
 | **§0.16** | Réserves de l'évaluation (3) | pièges latents, non bloquants | **5** | Aucune ne fausse une mesure aujourd'hui ; chacune peut le faire demain. |
+| **§0.19** | Revérifier T1→T5 et §9 ligne à ligne | audit de fond | **non planifié** | Ces tranches sont ✅ sans avoir jamais été réauditées ; 3 marqueurs ✅ ont déjà été démentis ailleurs. À mener quand §0.18 est dégagé. |
 
-L'**ordre est une proposition**, pas un constat — seule la dépendance §0.12 → §0.14 est
-technique. Les statuts, eux, ont été confrontés au code et à `git status` le 2026-07-20.
+L'**ordre est une proposition**, pas un constat, **sauf §0.18 → §0.14** qui est une dépendance
+**technique et bloquante** : tant que le moteur crashe en cours de run, aucune mesure ne peut
+aboutir. (L'ancienne dépendance §0.12 → §0.14 est **levée depuis le 2026-07-20**, §0.12 étant
+livré.) Les statuts ont été confrontés au code, à `git status` et à **deux runs réels** le
+2026-07-20.
 
 ⚠️ **Avant de vous appuyer sur une affirmation de ce document, lire §0bis** — en particulier la
 réserve de méthode sur le document lui-même (T1→T5 et section 9 n'ont **pas** été revérifiés
 ligne à ligne) et la règle de périmètre `ArmageddonAgent`.
 
 
-### 0.12 Le reward de combat ignore la `VALUE` par figurine — 🔴 OUVERT (constaté 2026-07-20)
-
-> **Énoncé de la dette, déplacé depuis le tableau de §0.0 (ligne 6), texte d'origine :**
-> Depuis §0.9 les escouades sont **hétérogènes en points**, mais le shaping tue-une-figurine vaut toujours `VALUE_escouade / model_count_at_start` — tuer le Nob (12) rapporte autant qu'un Boy (7), et un HP d'aumônier (75) autant qu'un HP d'Intercessor (16). L'agent n'a **aucun signal** pour cibler les figurines de valeur, alors que l'allocation 05.03 en fait une vraie décision. **Ouvert, aucune ligne écrite.**
-
-> **État vérifié dans le code le 2026-07-20** : le problème est **entier**. La `VALUE` par figurine
-> est bien *produite* en amont, mais elle n'est **jamais consommée** en aval. Rien de ce qui suit
-> n'est fait. Aucune ligne de code n'a été modifiée pour ce point.
-
-**Ce qui existe déjà (et qui est correct).** `_build_enhanced_unit`
-([game_state.py:952-984](../../engine/game_state.py#L952-L984)) pose **deux niveaux de valeur** :
-`unit["models"][i]["VALUE"]` = valeur de CHAQUE figurine (lue de la datasheet, ou de
-`full_unit_data["VALUE"]` quand l'unité n'a qu'une figurine, [ligne 967](../../engine/game_state.py#L967)),
-et `enhanced_unit["VALUE"] = total_value` = **somme** des figurines
-([ligne 984](../../engine/game_state.py#L984)). C'est ce qui rend §0.9 exact au point près
-(Boyz : 9 × 7 + Nob 12 = 75). La donnée par figurine **est donc disponible**, et elle atteint bien
-`_build_models_for_unit` : `build_units_cache` itère `for unit in game_state["units"]`, qui sont les
-`enhanced_units` produits par cette même fonction ([game_state.py:622-626](../../engine/game_state.py#L622-L626)).
-`spec["VALUE"]` est donc **présent sur chaque `model_spec`** au moment où le cache est construit —
-aucune plomberie à ajouter pour l'y amener.
-
-📌 **Ce n'est pas un oubli, c'est une dette assumée** : le commentaire
-[game_state.py:977-983](../../engine/game_state.py#L977-L983) énumère explicitement, parmi les
-consommateurs de `VALUE`, « les usages par-figurine **qui divisent déjà par
-`model_count_at_start`** (`points_per_hp`, reward par fig tuée) ». L'auteur de §0.9 a donc vu la
-moyenne et l'a laissée en place. Cette section ne corrige pas une régression : elle **solde** cette
-dette, devenue mesurable maintenant que les escouades sont hétérogènes en points.
-
-**Où la chaîne casse — 3 ruptures, toutes vérifiées.**
-
-| # | Emplacement | Ce que fait le code | Conséquence |
-|---|---|---|---|
-| A | [shared_utils.py:632-674](../../engine/phase_handlers/shared_utils.py#L632-L674) (`_build_models_for_unit`) | `models_cache[model_id]` est construit **sans aucune clé `VALUE`** — `spec["VALUE"]` n'est jamais lu | La valeur par figurine **s'arrête à `_build_enhanced_unit`** et n'atteint jamais le moteur de combat |
-| B | [shared_utils.py:629](../../engine/phase_handlers/shared_utils.py#L629) + [:666](../../engine/phase_handlers/shared_utils.py#L666) | `points_per_hp = VALUE_escouade / total_hp_pool` calculé **une seule fois**, puis recopié **identique** sur chaque figurine | Un HP retiré au Nob (12 pts) vaut exactement autant qu'un HP retiré à un Boy (7 pts) |
-| C | [reward_calculator.py:1020-1022](../../engine/reward_calculator.py#L1020-L1022) (`_squad_combat_shaping`) | figurine détruite → `meta["value"] / model_count_at_start`, soit la **moyenne d'escouade** | Tuer l'aumônier (75) rapporte autant qu'un Intercessor (16) |
-
-Rupture corollaire : **les events ne transportent pas la valeur**. L'event est construit en
-**un seul endroit dans tout le moteur** — [shared_utils.py:6309-6313](../../engine/phase_handlers/shared_utils.py#L6309-L6313),
-dans `_resolve_one_manual_wound` — et ne porte que `points_per_hp`, `damage`, `destroyed`,
-`target_squad_id`, `target_player`. Aucune clé `model_value` / `destroyed_model_value` n'existe
-nulle part. Même corrigé en A/B, le reward n'aurait **rien à lire** au moment de la destruction.
-
-> ✅ **Bonne nouvelle vérifiée — le correctif C est beaucoup plus petit que prévu.** Le moteur
-> d'allocation est **mutualisé tir/combat** via `ManualAllocCtx` : `fight_handlers.py` ne construit
-> **aucun** event, il réutilise `_resolve_one_manual_wound`. **Un seul site à modifier**, pas deux.
-> Et surtout : à cet endroit la variable `m` **est le dict de la figurine touchée** (c'est d'elle
-> qu'est déjà lu `points_per_hp`, [ligne 6282](../../engine/phase_handlers/shared_utils.py#L6282)).
-> Une fois A fait, `m["VALUE"]` est **directement en main** — il n'y a donc **pas besoin de passer
-> par `targets_meta`** ni de toucher aux deux sites qui le construisent
-> ([shared_utils.py:6130](../../engine/phase_handlers/shared_utils.py#L6130),
-> [fight_handlers.py:5707](../../engine/phase_handlers/fight_handlers.py#L5707)). `targets_meta`
-> reste ce qu'il doit rester : le porteur des données d'**escouade** (`value`,
-> `model_count_at_start`, `player`), consommées par le bonus de wipe.
-
-**Pourquoi ça compte maintenant.** L'allocation des pertes 05.03 (`Documentation/40k_rules/05 -
-Attack sequence`) laisse au défenseur le choix de la figurine qui encaisse, et le ciblage
-volontaire d'une figurine de valeur est donc une **décision de jeu réelle**. Avec la moyenne
-d'escouade, le reward est **plat** sur cette décision : l'agent n'a aucun signal l'incitant à
-concentrer le feu sur le Nob, le Sergent ou le personnage attaché. C'est précisément l'effet que
-§0.9 rend mesurable, puisque les escouades sont désormais **hétérogènes en points**.
-
-**Ce qui NE doit PAS changer.**
-- Le bonus de wipe ([reward_calculator.py:1026](../../engine/reward_calculator.py#L1026)) est
-  **déjà correct** : `meta["value"] * squad_kill_bonus_factor` = valeur de l'ESCOUADE, ce qui est
-  la sémantique voulue (« l'escouade entière est détruite »). **Ne pas le convertir par figurine.**
-- Les **unités mono-figurine** doivent rester **bit-identiques**. Le vérifier plutôt que le
-  supposer : `model_count_at_start = 1` ⇒ `value / 1` = `VALUE` de l'unique figurine (posée par
-  [game_state.py:967](../../engine/game_state.py#L967)) ; et `total_hp_pool = HP_MAX` ⇒
-  `points_per_hp = VALUE / HP_MAX`, identique au per-fig. Les deux formules coïncident — mais
-  cela doit être **verrouillé par un test**, pas par ce paragraphe.
-
-⚠️ **Piège de vérification.** L'énoncé naïf « dans le cas homogène la somme doit être inchangée »
-est **faux tel quel** : depuis §0.9, une escouade homogène en profil (même `HP_MAX`, même
-datasheet) peut être **hétérogène en `VALUE`** — c'est exactement le cas des Boyz (9 × 7 + 12).
-L'invariant à tester est donc « **`VALUE` uniforme sur toutes les figurines** ⇒ résultat identique
-à l'ancienne formule », pas « même profil ⇒ identique ». Construire le test sur une escouade à
-`VALUE` réellement uniforme (Gretchin : 10 × 5), sinon il passera pour la mauvaise raison.
-
-**Travail attendu, dans l'ordre (chaque étape est vérifiable seule) :**
-1. **A** — porter `spec["VALUE"]` dans `models_cache` (`_build_models_for_unit`). Source =
-   `spec["VALUE"]`, **jamais** `unit["VALUE"]` (valeur d'escouade). Absence de la clé ⇒ `require_key`,
-   **pas de défaut** (règle CLAUDE.md : pas de valeur par défaut masquant une donnée absente).
-2. **B** — `points_per_hp` **par figurine** = `VALUE_i / HP_MAX_i`, calculé **dans la boucle**
-   `for idx, spec in enumerate(model_specs)`. Supprimer le calcul unique ligne 629 et l'agrégat
-   `total_hp_pool`, qui n'a alors plus qu'un usage : la **validation** `spec_hp_max <= 0`
-   ([ligne 626](../../engine/phase_handlers/shared_utils.py#L626)) — la garder, en la déplaçant
-   dans la boucle unique. Mettre à jour la docstring
-   [shared_utils.py:580-583](../../engine/phase_handlers/shared_utils.py#L580-L583), qui documente
-   encore la formule d'escouade.
-   🔻 **Au passage, supprimer un fallback existant** : `... if total_hp_pool > 0 else 0.0`
-   ([ligne 629](../../engine/phase_handlers/shared_utils.py#L629)) est une **valeur par défaut
-   masquant une erreur** — branche morte, puisque la ligne 626 vient de lever sur tout
-   `spec_hp_max <= 0` et que `model_specs` est non vide par construction. Interdit par CLAUDE.md ;
-   ne pas le reconduire sur la formule par figurine (`HP_MAX_i` est déjà validé > 0 juste avant).
-3. **C** — ajouter la valeur de la figurine détruite à l'**event**, à l'unique site
-   [shared_utils.py:6309](../../engine/phase_handlers/shared_utils.py#L6309) (lire `m["VALUE"]`,
-   comme `points_per_hp` juste au-dessus), puis remplacer `value / mcs` par cette valeur dans
-   `_squad_combat_shaping`. `model_count_at_start` n'est alors plus lu que par le garde `mcs > 0`
-   ([reward_calculator.py:1021](../../engine/reward_calculator.py#L1021)), qui **disparaît avec la
-   division** — c'est un garde anti-`ZeroDivisionError`, pas une règle métier. Mettre à jour le
-   docstring [reward_calculator.py:1006](../../engine/reward_calculator.py#L1006), qui énonce
-   encore `(value / model_count_at_start)`.
-4. **Tests** — invariant mono-figurine, invariant `VALUE` uniforme (cf. piège ci-dessus), et un cas
-   **hétérogène** prouvant que tuer la figurine chère rapporte strictement plus. Suite complète
-   attendue verte ; ⚠️ *(affirmation périmée n°6 de §0bis : contredit §0.-1, non vérifiée)* le dossier de rosters de training étant réduit à 2 fichiers, **9 tests liés
-   à `roster_pool_schedule` échouent indépendamment de ce travail** — les valider sur un worktree
-   propre à HEAD avant de conclure à une régression.
-
-**Note connexe, hors périmètre de ce point.** L'affirmation de §0.9 (« `VALUE` est consommé **par
-figurine** — pondération de menace [reward_calculator.py:1442](../../engine/reward_calculator.py#L1442) »)
-est **inexacte** : cette ligne lit `friendly["VALUE"]`, soit la valeur de l'**escouade**. La règle
-métier 🔒 de §0.9 (suivre le Munitorum, ne pas tuner) reste valable telle quelle ; seule la
-justification technique citée est à requalifier.
-
-
-### 0.14 Re-mesure du run — 🔴 OUVERT (extrait de §0.13, 2026-07-20)
+### 0.14 Re-mesure du run — 🔴 BLOQUÉE par §0.18 (2 runs le 2026-07-20 : 1 abouti sans score exploitable, 1 crashé)
 
 > Part **ouverte** de §0.13 (run x5_debug 100 épisodes). Le run et le fix de l'évaluation
-> finale sont résolus et documentés en **§0.13** ; ce qui suit ne l'est pas.
+> finale sont résolus et documentés en **§0.13**.
 
-Ce qui reste à mesurer, tel qu'établi dans les entrées d'origine (puce du bloc « Reste
-ouvert » de §0.0, puis les deux avertissements de §0.13) :
+**Run de re-mesure du 2026-07-20 — commande exacte :**
 
-- ✅ **Run x5_debug 100 ép. TERMINÉ le 2026-07-20 — voir §0.13.** Le pipeline tourne de bout en
-  bout (100/100, exit 0, zéro exception). L'éval finale mesurait le scénario d'ENTRAÎNEMENT —
-  **bug corrigé le 2026-07-20** (§0.13, +2 tests) ; le score `0.46` de ce run reste
-  inexploitable pour §10.6 et **doit être re-mesuré** par un nouveau run, avec
-  `bot_eval_final` > 1. ⚠️ Le run s'arrêtant à 100 ép., **la non-régression du crash
-  §0.11 (~ép. 250) n'est toujours pas validée en bout-en-bout**.
+```
+python3 ai/train.py --agent ArmageddonAgent --scenario bot --new \
+        --training-config x5_debug --total-episodes 500
+```
 
-⚠️ **Ce que ce run NE prouve PAS** : il s'arrête à 100 épisodes, donc il **ne franchit pas
-l'épisode ~250** où tombait le crash §0.11. **La non-régression de §0.11 reste non validée par
-un run** (elle l'est par `test_move_plan_intra_squad_levels.py`, pas en bout-en-bout).
+(`--total-episodes` surcharge le `total_episodes: 100` de la config ; **la config n'a pas été
+modifiée**. Lancé APRÈS §0.12, donc sur le reward définitif.)
 
-⚠️ **Le score `0.46` de §0.13 n'est PAS re-mesuré pour autant** : il faut relancer un run pour
-obtenir un chiffre sur le holdout — et avec `bot_eval_final` > 1, sans quoi ce sera encore du
-bruit.
+**✅ Ce que ce run PROUVE.**
 
-**Rappel de dépendance** : §0.12 modifie le reward de combat. Relancer un run de mesure
-**avant** §0.12, c'est le refaire ensuite.
+| Point | Résultat |
+|---|---|
+| Déroulement | **500/500 épisodes, exit 0**, 1 h 48, 8 workers, GPU. **Zéro exception, zéro `incohérence masque/exécution`** dans tout le log. |
+| **Non-régression §0.11** | 🔴 **NON — affirmation RETIRÉE le 2026-07-20, voir §0.18.** Ce premier run a bien franchi l'épisode ~250, mais un **second run, même commande**, a **crashé sur le même message d'erreur à l'épisode ~280**. Un run qui passe ne prouve rien ici : le crash dépend de la trajectoire, donc du hasard. **L'avertissement « la non-régression de §0.11 reste non validée par un run » N'EST PAS levé.** |
+| **Fix §0.13** | ✅ **VALIDÉ RUNTIME.** Le ranking porte sur `holdout_regular_bot-01` / `-02` — l'éval finale joue bien le pool **holdout**, plus le scénario d'entraînement. |
+| Reward §0.12 | Le run tourne sans incident avec la `VALUE` par figurine et l'event `model_value`. Aucun crash du chemin d'allocation. |
 
+**Résultats de l'évaluation finale (12 épisodes = 2 par bot) :**
+
+```
+  vs adaptive            :  50.0% (1W-1L-0D)
+  vs aggressive_smart    :  50.0% (1W-1L-0D)
+  vs control             :   0.0% (0W-2L-0D)
+  vs defensive           : 100.0% (2W-0L-0D)
+  vs greedy              : 100.0% (2W-0L-0D)
+  vs tactical            : 100.0% (2W-0L-0D)   <-- holdout
+  Combined Score:  61.5%
+
+🏁 Scenario ranking (combined):
+  - holdout_regular_bot-01: combined=0.770 | worst_bot_score=0.000
+  - holdout_regular_bot-02: combined=0.460 | worst_bot_score=0.000
+```
+
+**🔴 Ce que ce run NE prouve PAS — le score reste NON CONCLUANT.**
+
+- **2 épisodes par bot.** `bot_eval_final` vaut **2** dans la phase `x5_debug`. C'est bien
+  « > 1 » comme l'exigeait cette entrée, mais **12 épisodes ne permettent aucune conclusion** :
+  chaque bot est un 2W-0L / 1W-1L / 0W-2L, soit une résolution de 50 points de pourcentage.
+  Le `61.5 %` est un chiffre **indicatif**, à ne PAS reporter dans §10.6.
+- **500 épisodes d'entraînement, ce n'est pas un agent entraîné.** Les phases réelles sont à
+  10 000–30 000 (`x1`, `x5_new`, `x5_append`). Ce run valide le **pipeline**, pas la politique.
+- **`vs tactical: 100 %` ne vaut rien comme signal de holdout** à 2 épisodes — c'est
+  précisément le chiffre qu'on voudrait fiable, et c'est celui qui a le moins d'échantillon.
+- ⚠️ **`vs control : 0 % (0W-2L)`** est le seul résultat qui mérite un œil : c'est le
+  `worst_bot_score=0.000` des deux scénarios. À 2 épisodes ce peut être du bruit pur ; **à
+  reconfronter au prochain run long** avant d'y voir un trou de comportement.
+
+**🔴 DEUXIÈME RUN — CRASH, voir §0.18.** Un run relancé avec la **même commande** après le
+correctif de la rupture D s'est arrêté à l'**épisode ~280** sur
+`ValueError: execute_squad_move a échoué … collision intra-plan`. **§0.11 n'est donc pas
+résolu.** C'est la conclusion la plus importante de cette entrée, et elle contredit ce que le
+premier run laissait croire.
+
+**🔴 INVALIDÉ A POSTERIORI (même jour) — la rupture D de §0.12.** Ce run a tourné **avant** la
+découverte de la régression d'observation (`value_over_ttk` extrapolait le `points_per_hp` de la
+figurine d'index 0). Les deux rosters de §10.2 étant hétérogènes en points, **l'agent s'est
+entraîné sur une observation fausse** pendant les 500 épisodes. Ce qui reste valable malgré
+tout : la **non-régression §0.11** et la **validation runtime du fix §0.13**, qui ne dépendent
+ni du reward ni de l'observation. Le score, lui, est à jeter deux fois plutôt qu'une.
+
+**Ce qui reste à faire pour fermer cette entrée** : un run sur une phase à `bot_eval_final`
+élevé (`x1`, `x5_new` et `x5_append` sont déjà à **100**) et à `total_episodes` réel, pour
+produire un win-rate **par roster** interprétable au sens de §10.6. ⚠️ Cf. **§0.15** : les
+rosters `training` et `holdout_regular` étant identiques, ce win-rate mesurera la robustesse à
+l'**adversaire**, jamais au roster.
+
+### 0.18 `collision intra-plan` de retour — §0.11 N'EST PAS RÉSOLU — 🔴 OUVERT (2026-07-20)
+
+**Reproduction.** Commande **identique** à celle de §0.14, relancée après le correctif de la
+rupture D (§0.12) :
+
+```
+python3 ai/train.py --agent ArmageddonAgent --scenario bot --new \
+        --training-config x5_debug --total-episodes 500
+```
+
+Arrêt à l'**épisode ~280** (worker `SubprocVecEnv` mort → `EOFError` côté maître → `💥 Fatal
+error`) :
+
+```
+ValueError: execute_squad_move a échoué : squad=104 type=advance dest=(137,212)
+depuis (135,180) — la destination vient du pool BFS du masque, elle DOIT être exécutable
+(incohérence masque/exécution). Contrainte violée : collision intra-plan :
+deux figurines en (147,227) niveau 0 (dont 104#5)
+```
+
+⚠️ **Le premier run de §0.14 avait passé les 500 épisodes.** Même commande, même seed de config.
+La divergence vient du correctif D, qui change l'observation, donc la politique, donc les
+trajectoires. **Leçon : sur ce crash, « un run est passé » n'est PAS une preuve de
+non-régression** — il faut plusieurs runs, ou une preuve statique.
+
+**Ce qui est DÉMONTRÉ (pas supposé) — la collision préexistait au move.**
+
+`build_rigid_plan` ([shared_utils.py:3312](../../engine/phase_handlers/shared_utils.py#L3312))
+translate en **cube** : `cube_to_offset(mx + dcx, my + dcy, mz + dcz)`.
+`offset_to_cube`/`cube_to_offset` ([hex_utils.py:92](../../engine/hex_utils.py#L92)) sont
+**bijectives**, et la translation cube est une **injection** : deux positions distinctes restent
+distinctes. Par ailleurs le plan qu'elle produit est un **3-tuple sans niveau**, donc
+`_target_level` relit le niveau **du `models_cache`**, inchangé par le move.
+
+⇒ **Une collision intra-plan sur un plan rigide implique une collision à l'ORIGINE** : deux
+figurines de l'escouade 104 occupaient **déjà** la même `(col, row, niveau)` avant le move. Le
+crash n'est donc **pas** un défaut de la translation (T6-h), ni du pool BFS ou de son érosion
+(T6-g) : **le masque et l'exécution sont d'accord — c'est l'état de départ qui est invalide.**
+Le fix de §0.11 (clé `(niveau, col, row)`) reste correct ; il traitait un **autre** cas.
+
+**Ce qui n'est PAS identifié.** *Quel* écrivain de positions produit la superposition. Le
+soupçon porte sur un chemin qui écrit dans `models_cache` **sans passer par
+`validate_move_plan`** — pile-in / consolidation, retrait de coherency (03.03), déploiement —
+mais **rien n'a été vérifié**, et ce document interdit d'ouvrir un chantier sur une intuition
+(§0bis). C'est le point de départ du prochain travail.
+
+**Piste d'instrumentation suggérée** (à valider avant de coder) : faire dire au message d'erreur
+**les positions d'ORIGINE** des deux figurines en cause, pas seulement leur destination. Si
+elles sont identiques, la démonstration ci-dessus est confirmée en runtime et le crash devient
+un simple révélateur ; l'invariant « deux figurines vivantes d'une même escouade n'occupent
+jamais la même `(col, row, niveau)` » mérite alors d'être vérifié **à l'écriture**, au plus près
+du fautif, plutôt qu'au move suivant.
+
+⚠️ **Bloquant** : aucun run long ne va au bout de façon fiable, donc **§0.14 et le critère §10.6
+sont bloqués derrière cette entrée**.
+
+📌 **Note annexe, hors périmètre** : après ce crash le process a affiché `💥 Fatal error` et
+s'est terminé avec un **code de sortie 0**. Un échec qui sort en 0 est un piège pour toute
+automatisation (CI, scripts d'enchaînement, ce document lui-même) — constaté, non corrigé.
+
+### 0.19 Revérifier T1→T5 et la section 9 ligne à ligne — 🟠 OUVERT (tâche créée le 2026-07-20)
+
+**Énoncé.** Les tranches **T1, T2, T3, T4, T5** (§5) et toute la **section 9** (Phase A') sont
+marquées ✅ FAIT, mais **n'ont jamais été revérifiées ligne à ligne contre le code**. Leur statut
+repose sur les sessions où elles ont été écrites, pas sur un audit ultérieur. La réserve existe
+depuis le 2026-07-19 en §0bis (« Réserve de méthode — ce qui n'a pas été revérifié ») ; elle y
+est une **mise en garde**, pas une tâche. **Cette entrée en fait une tâche**, pour qu'elle cesse
+d'être un avertissement que chacun contourne.
+
+**Pourquoi ça n'est pas de la précaution abstraite.** Le taux de découverte est élevé partout où
+on a effectivement regardé :
+
+| Session | Ce qui a été trouvé en revérifiant |
+|---|---|
+| 2026-07-19 soir | **3** affirmations périmées (« prochain bloqueur §10.4 » déjà résolu ; « archivage des holdouts à faire » déjà fait ; « 9 échecs préexistants » alors que la suite est verte) |
+| 2026-07-20 | **8** affirmations périmées recensées en §0bis, dont la n°6 (« 9 tests `roster_pool_schedule` échouent ») **démontrée fausse** par la suite complète |
+| 2026-07-20 | **§0.11 déclaré résolu ne l'est pas** (§0.18) — et le T6-i portait déjà, en 2026-07-19, le motif « code testé mais jamais appelé » |
+
+Trois marqueurs ✅ démentis sur les seules zones auditées. **Rien n'indique que T1→T5 et la
+section 9 soient d'une autre nature** — simplement, personne n'y a regardé.
+
+**Méthode suggérée** (une tranche = une passe, résultat écrit ici même) :
+1. Pour chaque critère d'acceptation de §6, retrouver **le test** qui le verrouille — pas le
+   code, le **test**. §8 pose la règle « une règle = son fichier de tests ».
+2. Vérifier que ce test **s'exécute** (il est collecté par la suite) **et qu'il échoue** si on
+   neutralise le code qu'il prétend couvrir. Le motif récurrent de ce projet est le **code testé
+   mais jamais appelé** (T6-i) et le **test qui passe pour la mauvaise raison** (rencontré en
+   §0.12 sur le bonus de kill, où le terme HP masquait le terme testé).
+3. Tout ✅ qui ne survit pas à (1) et (2) redevient ⏳, avec la preuve du démenti.
+
+⚠️ **Ne pas « nettoyer » en relisant la prose.** Corriger une affirmation sans relire le code
+reproduit exactement l'erreur qu'on cherche — c'est écrit en tête du tableau des affirmations
+périmées (§0bis), et c'est pour cette raison que ces 8 lignes ont été **signalées et non
+corrigées**.
+
+**Non planifié** : cette entrée n'a pas d'ordre dans le tableau d'état. C'est un audit de fond,
+à mener quand le chemin critique (§0.18 → §0.14) est dégagé — ou immédiatement si l'on doute
+d'une tranche en particulier.
 
 ### 0.15 Rosters `training` ≡ `holdout_regular` — 🔴 OUVERT (extrait de §0.6, décision reportée le 2026-07-19)
 
@@ -244,11 +278,31 @@ Note au passage : ce générateur reste **inutilisable ici** parce qu'il tire de
 `git status` / `git log` AVANT de s'en servir** — une affirmation d'état non redatée est le
 motif n°1 des affirmations périmées de ce document.
 
-**Constaté le 2026-07-20** (`git log --oneline -3`, `git status --short`) : `HEAD` = `75d812d3`
+**Constat périmé (2026-07-20 matin), conservé pour l'historique** : `HEAD` = `75d812d3`
 (« fix §0.10 ») ; non commités = `ai/training_callbacks.py`, cette documentation,
 `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json`, et
 `tests/unit/ai/test_final_eval_uses_holdout.py` **non suivi**. `config/users.db` apparaît
 également modifié — voir §0bis, il ne doit **jamais** entrer dans un commit.
+
+**➜ Constat REFAIT le 2026-07-20 après §0.12 et §0.14.** L'utilisateur a commité le lot
+précédent (`HEAD` = `595029fd` « doc updated »). **Nouveau travail non commité** :
+
+| Fichier | Nature |
+|---|---|
+| `engine/phase_handlers/shared_utils.py` | §0.12 A + B + C |
+| `engine/reward_calculator.py` | §0.12 C |
+| `engine/observation_builder.py` | §0.12 **D** — régression d'observation introduite par A/B, plus suppression du `.get(..., 0.0)` / `try-except` qui la masquait |
+| `tests/unit/engine/test_model_value_per_figurine.py` | **non suivi** — les 12 tests de §0.12 |
+| `tests/unit/engine/test_squad_fight_declaration.py` | fixture `_m` : ajout de `VALUE` (effet de bord de A) |
+| `tests/unit/engine/test_squad_shoot_declaration.py` | idem |
+| cette documentation | §0.12 → §0hist, §0.14 réécrite, renvois recalés |
+
+Ce lot est **cohérent et atomique** (une seule dette : §0.12 + sa doc) — contrairement au lot
+précédent, il n'y a pas lieu de le découper.
+
+🔴 **Modifiés par le run, à NE PAS commiter** : `config/users.db` (fichier **protégé**,
+CLAUDE.md) et `ai/models/ArmageddonAgent/model_ArmageddonAgent.zip` (**protégé** aussi ; le run
+`--new` l'a écrasé — c'est un modèle de debug à 500 épisodes, sans valeur).
 
 ⚠️ **Fichier mort non suivi : `Documentation/Implémentation/V11_agent_rework copy.md`** (état
 d'avant la réorganisation de §0, 2026-07-20 08:34). Vérifié par comparaison ligne à ligne :
@@ -288,6 +342,9 @@ et corrigées ce soir-là (« prochain bloqueur §10.4 » alors qu'il était ré
 holdouts à faire » alors qu'il l'était, « 9 échecs préexistants » alors que la suite est verte) —
 **il peut en rester d'autres du même genre**. Vérifier dans le code avant de s'appuyer sur une
 affirmation de ce document qui n'est pas datée de la session en cours.
+
+➜ **Cette réserve est désormais une TÂCHE : voir §0.19** (méthode d'audit et historique des
+démentis). Tant qu'elle n'est pas menée, la mise en garde ci-dessus reste pleinement valable.
 
 **Comptages de tests : le seul verdict disponible est le code de sortie (§0.-1)**
 
@@ -374,6 +431,19 @@ tirage sur quelques dizaines d'observations — refaire la mesure en grand avant
 
 ### Sur les runs et l'outillage
 
+
+**Un run qui passe ne prouve pas une non-régression sur un crash stochastique (§0.18)**
+
+🔴 **Erreur commise le 2026-07-20, à ne pas refaire.** Un run de 500 épisodes a franchi
+l'épisode ~250 sans le crash `collision intra-plan`, et on en a conclu — **par écrit, dans ce
+document** — que la non-régression §0.11 était « validée en bout-en-bout ». Un **second run,
+même commande**, a crashé à l'épisode ~280. Le crash dépend de la **trajectoire**, donc du
+hasard : un run vert est un **échantillon de taille 1**, pas une preuve.
+
+Règle : pour un crash dont le déclenchement dépend de la trajectoire, une non-régression se
+prouve par un **test qui reproduit la condition**, ou à défaut par **plusieurs runs**, jamais
+par un seul run vert. Et **tout changement de code qui touche l'observation ou le reward change
+les trajectoires** — un run vert d'avant le changement ne dit rien du code d'après.
 
 **L'ETA affichée au premier épisode est un artefact de warmup (§0.13)**
 
@@ -497,9 +567,10 @@ AVANT d'y lancer un entraînement.
 | 3 | §5 / tableau T6 | « le critère T6 est désormais bloqué par `CC_DMG` (§0.3) qui plante des épisodes d'évaluation » | Le portage §0.3 est fait et le run 60/60 de §0.7 le valide runtime. |
 | 4 | §10.5 (bandeau) | « ⚠️ Non validé runtime — cf. §0.3 (`CC_DMG`) » | Levé par §0.7 (`TacticalBot` 10/10 épisodes). |
 | 5 | §0.10 | « la dette notée en **§0.0** (`--scenario bot` échoue en amont du moteur) » | Cette dette est écrite dans **§0.7**, pas §0.0. Renvoi imprécis, non corrigé. |
-| 6 | §0.12, étape 4 | « **9 tests** liés à `roster_pool_schedule` échouent indépendamment de ce travail » | Contredit §0.-1 (« il n'y a plus d'échec préexistant à tolérer ; un test rouge est une régression »). Non vérifié : demanderait de lancer la suite. |
+| 6 | §0.12, étape 4 | « **9 tests** liés à `roster_pool_schedule` échouent indépendamment de ce travail » | ✅ **TRANCHÉ le 2026-07-20 — l'affirmation était FAUSSE.** Suite complète lancée : **1417 passed, 2 skipped, 0 failed**. Aucun échec `roster_pool_schedule`. §0.-1 avait raison : un test rouge est une régression, il n'y a pas d'échec préexistant à tolérer. |
 | 7 | §2 « État des lieux vérifié » | « Tous les imports du pipeline passent (`ai.train`, `ai.env_wrappers`, **`ai.multi_agent_trainer`**, …) » | `ai/multi_agent_trainer.py` **n'existe plus** (supprimé en §0.8, vérifié absent du disque le 2026-07-20). |
 | 8 | §0.17 (par construction) | l'état de commit | Périmé dès le prochain `git commit` — l'entrée porte elle-même l'ordre de la reconfronter à `git status`. |
+| 9 | §0.14 (rédigée puis **corrigée le même jour**) | « Non-régression §0.11 ✅ **VALIDÉE EN BOUT-EN-BOUT** » | ❌ **FAUSSE, retirée le 2026-07-20** — cf. §0.18 : le run suivant a crashé sur ce même message. Cas d'école : l'affirmation a été produite **par l'auteur du run lui-même**, le jour même, à partir d'un unique run vert. Le motif n°1 de ce document ne vient pas que du passé. |
 
 ---
 
@@ -630,7 +701,7 @@ de l'éval, tests repointés, doc à jour. Ce qui ne l'est pas — **les 6 dette
 | 4 | ~~**Déséquilibre 824 vs 690 points** (Orks/SM, +19 %)~~ ✅ **SOLDÉ (§0.9)** | Artefact de 3 `VALUE` fausses, pas un déséquilibre de listes. Points Munitorum : **680 vs 680**. §10.6 débloqué. |
 | 5 | **Rien n'est commité** | ➜ **Déplacé en §0.17 (ouvert)** — cette dette est périssable, son état à jour est en §0.17. |
 
-| 6 | 🔴 **Le reward de combat ignore la `VALUE` par figurine** | ➜ **Toujours OUVERT — voir §0.12**, qui porte l'analyse complète. |
+| 6 | ~~🔴 **Le reward de combat ignore la `VALUE` par figurine**~~ | ➜ ✅ **FERMÉE le 2026-07-20 — voir §0.12** (A/B/C **+ D** livrés, 14 tests mutation-testés, suite 1417 verte). |
 
 **⚠️ Réserve de méthode sur ce document.** Les sections §0.x reflètent ce qui a été relu et
 exécuté pendant la session du 2026-07-19 soir. **Le reste du document — T1 à T5, section 9 — n'a
@@ -1425,6 +1496,176 @@ vaut le sous-hex, le contrôle est **exact**. Limite préexistante, non introdui
 ⚠️ Ne pas lire « l'invariant est rétabli » comme valant pour toutes les résolutions : il vaut
 pour x1 et x5. **On ne s'occupe pas de x10** — si le projet y vient un jour, rouvrir ce point
 AVANT d'y lancer un entraînement.
+
+
+### 0.12 Le reward de combat ignore la `VALUE` par figurine — ✅ FAIT (2026-07-20)
+
+> ✅ **LIVRÉ le 2026-07-20 — A, B, C et les tests.** Suite complète **1415 passed, 2 skipped**
+> (1403 avant, +12 nouveaux). Ce qui suit est l'énoncé d'origine, conservé intégralement ;
+> le détail de ce qui a réellement été écrit est en fin d'entrée (« Ce qui a été livré »).
+
+
+
+> **Énoncé de la dette, déplacé depuis le tableau de §0.0 (ligne 6), texte d'origine :**
+> Depuis §0.9 les escouades sont **hétérogènes en points**, mais le shaping tue-une-figurine vaut toujours `VALUE_escouade / model_count_at_start` — tuer le Nob (12) rapporte autant qu'un Boy (7), et un HP d'aumônier (75) autant qu'un HP d'Intercessor (16). L'agent n'a **aucun signal** pour cibler les figurines de valeur, alors que l'allocation 05.03 en fait une vraie décision. **Ouvert, aucune ligne écrite.**
+
+> **État vérifié dans le code le 2026-07-20** : le problème est **entier**. La `VALUE` par figurine
+> est bien *produite* en amont, mais elle n'est **jamais consommée** en aval. Rien de ce qui suit
+> n'est fait. Aucune ligne de code n'a été modifiée pour ce point.
+
+**Ce qui existe déjà (et qui est correct).** `_build_enhanced_unit`
+([game_state.py:952-984](../../engine/game_state.py#L952-L984)) pose **deux niveaux de valeur** :
+`unit["models"][i]["VALUE"]` = valeur de CHAQUE figurine (lue de la datasheet, ou de
+`full_unit_data["VALUE"]` quand l'unité n'a qu'une figurine, [ligne 967](../../engine/game_state.py#L967)),
+et `enhanced_unit["VALUE"] = total_value` = **somme** des figurines
+([ligne 984](../../engine/game_state.py#L984)). C'est ce qui rend §0.9 exact au point près
+(Boyz : 9 × 7 + Nob 12 = 75). La donnée par figurine **est donc disponible**, et elle atteint bien
+`_build_models_for_unit` : `build_units_cache` itère `for unit in game_state["units"]`, qui sont les
+`enhanced_units` produits par cette même fonction ([game_state.py:622-626](../../engine/game_state.py#L622-L626)).
+`spec["VALUE"]` est donc **présent sur chaque `model_spec`** au moment où le cache est construit —
+aucune plomberie à ajouter pour l'y amener.
+
+📌 **Ce n'est pas un oubli, c'est une dette assumée** : le commentaire
+[game_state.py:977-983](../../engine/game_state.py#L977-L983) énumère explicitement, parmi les
+consommateurs de `VALUE`, « les usages par-figurine **qui divisent déjà par
+`model_count_at_start`** (`points_per_hp`, reward par fig tuée) ». L'auteur de §0.9 a donc vu la
+moyenne et l'a laissée en place. Cette section ne corrige pas une régression : elle **solde** cette
+dette, devenue mesurable maintenant que les escouades sont hétérogènes en points.
+
+**Où la chaîne casse — 3 ruptures, toutes vérifiées.**
+
+> 🔴 **CE RECENSEMENT ÉTAIT INCOMPLET — corrigé le 2026-07-20.** Il en manquait une **4ᵉ**,
+> côté **observation**, qui n'est pas une rupture préexistante mais une **régression créée par
+> les étapes A/B elles-mêmes**. Voir « Rupture D » en fin d'entrée. Leçon de méthode : le grep
+> des consommateurs de `points_per_hp` avait bien remonté le site
+> ([observation_builder.py:1498](../../engine/observation_builder.py#L1498)) — **il a été vu et
+> non ouvert**, parce que la ligne semblait ne concerner que le reward. Un consommateur listé
+> par un grep et non lu compte comme non audité (§0bis).
+
+| # | Emplacement | Ce que fait le code | Conséquence |
+|---|---|---|---|
+| A | [shared_utils.py:632-674](../../engine/phase_handlers/shared_utils.py#L632-L674) (`_build_models_for_unit`) | `models_cache[model_id]` est construit **sans aucune clé `VALUE`** — `spec["VALUE"]` n'est jamais lu | La valeur par figurine **s'arrête à `_build_enhanced_unit`** et n'atteint jamais le moteur de combat |
+| B | [shared_utils.py:629](../../engine/phase_handlers/shared_utils.py#L629) + [:666](../../engine/phase_handlers/shared_utils.py#L666) | `points_per_hp = VALUE_escouade / total_hp_pool` calculé **une seule fois**, puis recopié **identique** sur chaque figurine | Un HP retiré au Nob (12 pts) vaut exactement autant qu'un HP retiré à un Boy (7 pts) |
+| C | [reward_calculator.py:1020-1022](../../engine/reward_calculator.py#L1020-L1022) (`_squad_combat_shaping`) | figurine détruite → `meta["value"] / model_count_at_start`, soit la **moyenne d'escouade** | Tuer l'aumônier (75) rapporte autant qu'un Intercessor (16) |
+
+Rupture corollaire : **les events ne transportent pas la valeur**. L'event est construit en
+**un seul endroit dans tout le moteur** — [shared_utils.py:6309-6313](../../engine/phase_handlers/shared_utils.py#L6309-L6313),
+dans `_resolve_one_manual_wound` — et ne porte que `points_per_hp`, `damage`, `destroyed`,
+`target_squad_id`, `target_player`. Aucune clé `model_value` / `destroyed_model_value` n'existe
+nulle part. Même corrigé en A/B, le reward n'aurait **rien à lire** au moment de la destruction.
+
+> ✅ **Bonne nouvelle vérifiée — le correctif C est beaucoup plus petit que prévu.** Le moteur
+> d'allocation est **mutualisé tir/combat** via `ManualAllocCtx` : `fight_handlers.py` ne construit
+> **aucun** event, il réutilise `_resolve_one_manual_wound`. **Un seul site à modifier**, pas deux.
+> Et surtout : à cet endroit la variable `m` **est le dict de la figurine touchée** (c'est d'elle
+> qu'est déjà lu `points_per_hp`, [ligne 6282](../../engine/phase_handlers/shared_utils.py#L6282)).
+> Une fois A fait, `m["VALUE"]` est **directement en main** — il n'y a donc **pas besoin de passer
+> par `targets_meta`** ni de toucher aux deux sites qui le construisent
+> ([shared_utils.py:6130](../../engine/phase_handlers/shared_utils.py#L6130),
+> [fight_handlers.py:5707](../../engine/phase_handlers/fight_handlers.py#L5707)). `targets_meta`
+> reste ce qu'il doit rester : le porteur des données d'**escouade** (`value`,
+> `model_count_at_start`, `player`), consommées par le bonus de wipe.
+
+**Pourquoi ça compte maintenant.** L'allocation des pertes 05.03 (`Documentation/40k_rules/05 -
+Attack sequence`) laisse au défenseur le choix de la figurine qui encaisse, et le ciblage
+volontaire d'une figurine de valeur est donc une **décision de jeu réelle**. Avec la moyenne
+d'escouade, le reward est **plat** sur cette décision : l'agent n'a aucun signal l'incitant à
+concentrer le feu sur le Nob, le Sergent ou le personnage attaché. C'est précisément l'effet que
+§0.9 rend mesurable, puisque les escouades sont désormais **hétérogènes en points**.
+
+**Ce qui NE doit PAS changer.**
+- Le bonus de wipe ([reward_calculator.py:1026](../../engine/reward_calculator.py#L1026)) est
+  **déjà correct** : `meta["value"] * squad_kill_bonus_factor` = valeur de l'ESCOUADE, ce qui est
+  la sémantique voulue (« l'escouade entière est détruite »). **Ne pas le convertir par figurine.**
+- Les **unités mono-figurine** doivent rester **bit-identiques**. Le vérifier plutôt que le
+  supposer : `model_count_at_start = 1` ⇒ `value / 1` = `VALUE` de l'unique figurine (posée par
+  [game_state.py:967](../../engine/game_state.py#L967)) ; et `total_hp_pool = HP_MAX` ⇒
+  `points_per_hp = VALUE / HP_MAX`, identique au per-fig. Les deux formules coïncident — mais
+  cela doit être **verrouillé par un test**, pas par ce paragraphe.
+
+⚠️ **Piège de vérification.** L'énoncé naïf « dans le cas homogène la somme doit être inchangée »
+est **faux tel quel** : depuis §0.9, une escouade homogène en profil (même `HP_MAX`, même
+datasheet) peut être **hétérogène en `VALUE`** — c'est exactement le cas des Boyz (9 × 7 + 12).
+L'invariant à tester est donc « **`VALUE` uniforme sur toutes les figurines** ⇒ résultat identique
+à l'ancienne formule », pas « même profil ⇒ identique ». Construire le test sur une escouade à
+`VALUE` réellement uniforme (Gretchin : 10 × 5), sinon il passera pour la mauvaise raison.
+
+**Travail attendu, dans l'ordre (chaque étape est vérifiable seule) :**
+1. **A** — porter `spec["VALUE"]` dans `models_cache` (`_build_models_for_unit`). Source =
+   `spec["VALUE"]`, **jamais** `unit["VALUE"]` (valeur d'escouade). Absence de la clé ⇒ `require_key`,
+   **pas de défaut** (règle CLAUDE.md : pas de valeur par défaut masquant une donnée absente).
+2. **B** — `points_per_hp` **par figurine** = `VALUE_i / HP_MAX_i`, calculé **dans la boucle**
+   `for idx, spec in enumerate(model_specs)`. Supprimer le calcul unique ligne 629 et l'agrégat
+   `total_hp_pool`, qui n'a alors plus qu'un usage : la **validation** `spec_hp_max <= 0`
+   ([ligne 626](../../engine/phase_handlers/shared_utils.py#L626)) — la garder, en la déplaçant
+   dans la boucle unique. Mettre à jour la docstring
+   [shared_utils.py:580-583](../../engine/phase_handlers/shared_utils.py#L580-L583), qui documente
+   encore la formule d'escouade.
+   🔻 **Au passage, supprimer un fallback existant** : `... if total_hp_pool > 0 else 0.0`
+   ([ligne 629](../../engine/phase_handlers/shared_utils.py#L629)) est une **valeur par défaut
+   masquant une erreur** — branche morte, puisque la ligne 626 vient de lever sur tout
+   `spec_hp_max <= 0` et que `model_specs` est non vide par construction. Interdit par CLAUDE.md ;
+   ne pas le reconduire sur la formule par figurine (`HP_MAX_i` est déjà validé > 0 juste avant).
+3. **C** — ajouter la valeur de la figurine détruite à l'**event**, à l'unique site
+   [shared_utils.py:6309](../../engine/phase_handlers/shared_utils.py#L6309) (lire `m["VALUE"]`,
+   comme `points_per_hp` juste au-dessus), puis remplacer `value / mcs` par cette valeur dans
+   `_squad_combat_shaping`. `model_count_at_start` n'est alors plus lu que par le garde `mcs > 0`
+   ([reward_calculator.py:1021](../../engine/reward_calculator.py#L1021)), qui **disparaît avec la
+   division** — c'est un garde anti-`ZeroDivisionError`, pas une règle métier. Mettre à jour le
+   docstring [reward_calculator.py:1006](../../engine/reward_calculator.py#L1006), qui énonce
+   encore `(value / model_count_at_start)`.
+4. **Tests** — invariant mono-figurine, invariant `VALUE` uniforme (cf. piège ci-dessus), et un cas
+   **hétérogène** prouvant que tuer la figurine chère rapporte strictement plus. Suite complète
+   attendue verte ; ⚠️ *(affirmation périmée n°6 de §0bis : contredit §0.-1, non vérifiée)* le dossier de rosters de training étant réduit à 2 fichiers, **9 tests liés
+   à `roster_pool_schedule` échouent indépendamment de ce travail** — les valider sur un worktree
+   propre à HEAD avant de conclure à une régression.
+
+**Note connexe, hors périmètre de ce point.** L'affirmation de §0.9 (« `VALUE` est consommé **par
+figurine** — pondération de menace [reward_calculator.py:1442](../../engine/reward_calculator.py#L1442) »)
+est **inexacte** : cette ligne lit `friendly["VALUE"]`, soit la valeur de l'**escouade**. La règle
+métier 🔒 de §0.9 (suivre le Munitorum, ne pas tuner) reste valable telle quelle ; seule la
+justification technique citée est à requalifier.
+
+---
+
+**Ce qui a été livré (2026-07-20) — vérifié, pas supposé.**
+
+| Étape | Fichier | Ce qui a changé |
+|---|---|---|
+| **A** | [shared_utils.py](../../engine/phase_handlers/shared_utils.py) `_build_models_for_unit` | `models_cache[model_id]["VALUE"] = spec_value`, lu par `require_key(spec, "VALUE")` — **aucun défaut**. Le spec synthétique du chemin **mono-figurine** (unité sans `models[]`) reçoit `"VALUE": value`, ce qui est exact par construction : pour une mono-fig, valeur d'escouade = valeur de la figurine. |
+| **B** | idem | `points_per_hp = VALUE_i / HP_MAX_i` calculé **dans la boucle** `for idx, spec`. Supprimés : le calcul unique hors boucle, l'agrégat `total_hp_pool`, **et le fallback `if total_hp_pool > 0 else 0.0`** (valeur par défaut masquante, interdite CLAUDE.md). La validation `spec_hp_max <= 0` a été **déplacée dans la boucle unique**, pas supprimée — verrouillé par `test_hp_max_invalide_leve_toujours`. Docstring réécrite. |
+| **C** | idem `_resolve_one_manual_wound` + [reward_calculator.py](../../engine/reward_calculator.py) `_squad_combat_shaping` | L'event porte `"model_value": float(require_key(m, "VALUE"))` — **un seul site** dans tout le moteur, comme prévu (allocation mutualisée tir/combat via `ManualAllocCtx`). Le reward lit `require_key(ev, "model_value") * kill_f` ; `value / mcs` et le garde `mcs > 0` ont disparu. Docstring mise à jour. |
+
+**Tests** — [test_model_value_per_figurine.py](../../tests/unit/engine/test_model_value_per_figurine.py), **14 tests**, trois classes (la 3ᵉ, `TestObservationValueOverTtk`, couvre la rupture D décrite plus bas) :
+- `models_cache` : mono-fig inchangé ; **`VALUE` uniforme** (Gretchin 10 × 5) ⇒ identique à l'ancienne formule (c'est bien l'invariant du piège ci-dessus, pas « même profil ») ; **hétérogène** (Boyz 9 × 7 + Nob 12) ⇒ `points_per_hp` 7 vs 12, et assertion explicite que la moyenne 7.5 **n'apparaît plus** ; `HP_MAX` hétérogène ; `VALUE` absente ⇒ lève ; `HP_MAX <= 0` ⇒ lève.
+- `_squad_combat_shaping` : mono-fig bit-identique ; `VALUE` uniforme bit-identique ; **figurine chère > figurine bon marché** (`hp_damage_weight = 0` pour **isoler le terme de kill** — sans ça le test passait pour la mauvaise raison, via le terme HP) ; **le bonus de wipe reste sur la valeur d'ESCOUADE** ; event sans `model_value` ⇒ lève ; garde `is_victim` intacte.
+
+**Mutation-testé.** Réintroduire l'ancienne formule (B : `value / (hp_max * len(model_specs))` ; C : `value / mcs`) rend rouges `test_value_heterogene_differencie_les_figurines`, `test_hp_max_par_figurine_divise_bien_par_son_propre_hp`, `test_figurine_chere_rapporte_strictement_plus` et `test_event_sans_model_value_leve`.
+
+⚠️ **Effet de bord rencontré, à connaître.** `require_key(spec, "VALUE")` a cassé **48 tests dans 2 fichiers** (`test_squad_fight_declaration.py`, `test_squad_shoot_declaration.py`) : leurs fixtures appellent `build_units_cache` **directement**, sans passer par `_build_enhanced_unit` qui est le seul producteur de `VALUE` par figurine. Corrigé en ajoutant `"VALUE"` au helper `_m` des deux fichiers — **pas** en assouplissant `require_key`. **Aucun chemin de production n'était concerné** : les 3 producteurs de `models[]` en prod (`game_state.py:210`, `:738`, `:1840`) alimentent tous des unités qui passent ensuite par `_build_enhanced_unit`.
+
+**Rupture D — l'observation de l'agent, régression introduite par A/B (trouvée et corrigée le 2026-07-20).**
+
+| | |
+|---|---|
+| Emplacement | [observation_builder.py:1496-1505](../../engine/observation_builder.py#L1496-L1505), calcul de `value_over_ttk` (slot ennemi, `obs[base + 7]`) |
+| Ce que faisait le code | `ppl = models_cache[e_mids[0]]["points_per_hp"]` puis `e_value = ppl * e_hp_total` — le `points_per_hp` de la **figurine d'index 0** extrapolé à toute l'escouade |
+| Pourquoi c'était juste AVANT | `points_per_hp` était **uniforme par construction** : `ppl × HP_total` valait exactement la `VALUE` d'escouade |
+| Pourquoi A/B l'ont cassé | `points_per_hp` devient **hétérogène**. Boyz (9 × 7 + Nob 12) : `7 × 10 = 70` au lieu de 75. L'erreur dépend de **qui est en index 0** — un personnage attaché cher en tête ferait sur-évaluer toute l'escouade |
+| Portée | **L'observation de l'agent** (`value_over_ttk` = sa perception de la valeur des cibles) — soit exactement ce que §0.12 prétendait améliorer |
+| Correctif | `e_value = Σ points_per_hp_i × HP_CUR_i` sur les figurines vivantes. Même sémantique qu'avant (décroît avec les blessures), calculée par figurine. **Le fallback `.get(..., 0.0)` et le `try/except Exception` ont été supprimés** — c'est précisément ce masquage qui a rendu la régression silencieuse |
+
+Tests : `TestObservationValueOverTtk` (2 de plus, **14 au total** dans le fichier). L'invariant
+choisi est le plus fort disponible — **le résultat ne doit pas dépendre de l'ORDRE des
+figurines** : Nob en index 0 vs index 9 ⇒ même `value_over_ttk`. **Mutation-testé** : restaurer
+`ppl * e_hp_total` rend `test_invariant_a_lordre_des_figurines` rouge.
+
+⚠️ **Conséquence sur les mesures** : le run de 500 épisodes de **§0.14 a tourné AVANT ce
+correctif**, donc sur une observation fausse pour toute escouade hétérogène — c'est-à-dire pour
+les deux rosters de §10.2. Son score est à jeter pour cette raison **en plus** de celle déjà
+notée (12 épisodes d'éval).
+
+📌 **Réserve non traitée** (hors périmètre §0.12) : la variable locale `model_count_at_start` de `_build_models_for_unit` est **inutilisée** — elle l'était déjà avant ce travail, ce n'est pas une séquelle. Non supprimée.
 
 
 ### 0.13 Run de validation x5_debug 100 ép. — ✅ pipeline OK / éval finale sur le mauvais pool — ✅ CORRIGÉ (2026-07-20)

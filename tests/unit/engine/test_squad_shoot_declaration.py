@@ -108,7 +108,8 @@ def _activate(gs: Dict[str, Any], squad_id: str) -> None:
 
 
 def _m(col: int, row: int, weapons: List[Dict[str, Any]]) -> Dict[str, Any]:
-    return {"col": col, "row": row, "RNG_WEAPONS": weapons, "selectedRngWeaponIndex": 0}
+    # VALUE par figurine : exigee par _build_models_for_unit (points_per_hp par-fig).
+    return {"col": col, "row": row, "VALUE": 25, "RNG_WEAPONS": weapons, "selectedRngWeaponIndex": 0}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

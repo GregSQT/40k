@@ -112,7 +112,8 @@ def _activate(gs: Dict[str, Any], squad_id: str) -> None:
 
 
 def _m(col: int, row: int, weapons: List[Dict[str, Any]]) -> Dict[str, Any]:
-    return {"col": col, "row": row, "CC_WEAPONS": weapons, "selectedCcWeaponIndex": 0}
+    # VALUE par figurine : exigee par _build_models_for_unit (points_per_hp par-fig).
+    return {"col": col, "row": row, "VALUE": 25, "CC_WEAPONS": weapons, "selectedCcWeaponIndex": 0}
 
 
 # Escouade de reference : 2 figs close_combat + 2 figs power_fist(+close_combat),

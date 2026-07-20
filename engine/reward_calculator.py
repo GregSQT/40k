@@ -1003,7 +1003,8 @@ class RewardCalculator:
 
         Composantes (spec squad.md) :
           - points_per_hp * hp_damage_weight * damage  (par HP retire)
-          - (value / model_count_at_start) * model_kill_bonus_factor  (par fig tuee)
+          - model_value * model_kill_bonus_factor  (par fig tuee — VALUE de CETTE
+            figurine, portee par l event ; tuer le Nob rapporte plus qu un Boy)
           - value * squad_kill_bonus_factor  (par escouade wipe)
         """
         hp_w = float(require_key(shaping, "hp_damage_weight"))
@@ -1016,10 +1017,7 @@ class RewardCalculator:
                 continue
             total += float(ev["points_per_hp"]) * hp_w * int(ev["damage"])
             if ev["destroyed"]:
-                meta = require_key(targets_meta, ev["target_squad_id"])
-                mcs = int(require_key(meta, "model_count_at_start"))
-                if mcs > 0:
-                    total += (float(require_key(meta, "value")) / mcs) * kill_f
+                total += float(require_key(ev, "model_value")) * kill_f
         for sid in require_key(combat, "squads_wiped"):
             meta = require_key(targets_meta, sid)
             if is_victim(int(require_key(meta, "player"))):
