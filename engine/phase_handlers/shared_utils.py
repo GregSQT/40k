@@ -6904,6 +6904,173 @@ def squad_fight_activation_order(
 # ============================================================================
 
 
+def _assign_cells_toward_enemies(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    mids: List[str],
+    enemy_positions: List[Tuple[int, int]],
+    budget: int,
+) -> Dict[str, Tuple[int, int]]:
+    """Affectation figurine -> cellule pour un move vers l'ennemi (pile-in 12.03 / conso 12.08).
+
+    SOURCE UNIQUE des deux : les deux regles portent la MEME obligation — « Models in
+    base-contact with one or more enemy models cannot be moved » et « Each model that is moved
+    must end its move closer to the closest [target], and **engaged with it if possible** »
+    (12.03 WHILE MOVING ; 12.08 WHILE MOVING, modes Ongoing et Engaging). Dupliquer
+    l'algorithme rouvrirait la classe de bug §0.18, qui existait deja en double exemplaire.
+
+    L'immobilite des figurines au contact est appliquee inconditionnellement : elle est **sans
+    objet** en mode Engaging (unite non engagee => aucune figurine au contact), donc correcte
+    dans les deux cas sans avoir a connaitre le mode.
+
+    Retour : {model_id: (col, row)} pour TOUTES les figurines de ``mids``. Aucune ecriture.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    units_cache = game_state.get("units_cache", {})  # get allowed
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    wall_hexes = game_state.get("wall_hexes", set())
+    pile_in_budget = int(budget)
+
+    origins: Dict[str, Tuple[int, int]] = {
+        mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"])) for mid in mids
+    }
+
+    def _is_b2b_with_enemy(col: int, row: int) -> bool:
+        for ec, er in enemy_positions:
+            if calculate_hex_distance(col, row, ec, er) == BASE_TO_BASE_SUBHEX:
+                return True
+        return False
+
+    def _cell_base_legal(col: int, row: int) -> bool:
+        """Legalite INDEPENDANTE du plan : plateau, murs, autres escouades."""
+        if col < 0 or row < 0 or col >= board_cols or row >= board_rows:
+            return False
+        cell = (col, row)
+        if wall_hexes and cell in wall_hexes:
+            return False
+        for sid, entry in units_cache.items():
+            if str(sid) == squad_id:
+                continue
+            occ = entry.get("occupied_hexes")
+            if occ and cell in occ:
+                return False
+        return True
+
+    # 1. 12.03 WHILE MOVING : « Models in base-contact with one or more enemy models cannot be
+    #    moved ». Ces figurines restent, et leur cellule est definitivement occupee.
+    immobile = [mid for mid in mids if _is_b2b_with_enemy(*origins[mid])]
+    movers = [mid for mid in mids if mid not in set(immobile)]
+    static_cells = {origins[mid] for mid in immobile}
+
+    # 2. Cellules bord-a-bord atteignables (legalite hors-plan uniquement).
+    b2b_cells: Set[Tuple[int, int]] = set()
+    for ec, er in enemy_positions:
+        for nc, nr in get_hex_neighbors(ec, er):
+            if _cell_base_legal(nc, nr):
+                b2b_cells.add((nc, nr))
+
+    # 3. Couplage maximum figurine -> cellule B2B (12.03 « engaged with it if possible » +
+    #    « maximise the number of models that are engaged »). Une cellule qui est l'origine
+    #    d'une camarade n'est utilisable QUE si cette camarade la quitte : on part du cas le
+    #    plus contraint (aucune origine disponible) et on libere, par point fixe, les origines
+    #    des figurines dont le couplage confirme le depart. `blocked` decroit strictement a
+    #    chaque tour -> convergence ; et a chaque iteration le resultat est deja sans collision.
+    blocked: Set[Tuple[int, int]] = {origins[mid] for mid in mids}
+    matching: Dict[str, Tuple[int, int]] = {}
+    while True:
+        candidates = {
+            mid: sorted(
+                cell for cell in b2b_cells
+                if cell not in blocked
+                and calculate_hex_distance(
+                    origins[mid][0], origins[mid][1], cell[0], cell[1]
+                ) <= pile_in_budget
+            )
+            for mid in movers
+        }
+        matching = _max_b2b_matching(candidates)
+        freed = {origins[mid] for mid in matching}
+        if not freed - static_cells or blocked - freed == blocked:
+            break
+        blocked = (blocked - freed) | static_cells
+
+    # 4. Assemblage. Les origines des figurines NON couplees restent occupees : le pile-in est
+    #    optionnel (encart 12 : « you don't have to pile in »), elles peuvent rester sur place.
+    chosen: Dict[str, Tuple[int, int]] = {mid: origins[mid] for mid in immobile}
+    chosen.update(matching)
+    taken: Set[Tuple[int, int]] = set(static_cells) | set(matching.values())
+    unmatched = [mid for mid in movers if mid not in matching]
+    taken |= {origins[mid] for mid in unmatched}
+
+    for mid in unmatched:
+        oc, orow = origins[mid]
+        # (b) A defaut de B2B : finir strictement plus proche du plus proche ennemi.
+        nearest = min(
+            enemy_positions,
+            key=lambda ep: calculate_hex_distance(oc, orow, ep[0], ep[1]),
+        )
+        tc, tr = nearest
+        orig_dist = calculate_hex_distance(oc, orow, tc, tr)
+        best: Optional[Tuple[int, int, int]] = None  # (dist_to_target, col, row)
+        for d in range(1, pile_in_budget + 1):
+            for d_col in range(-d, d + 1):
+                for d_row in range(-d, d + 1):
+                    if max(abs(d_col), abs(d_row)) != d:
+                        continue
+                    nc, nr = oc + d_col, orow + d_row
+                    if not _cell_base_legal(nc, nr) or (nc, nr) in taken:
+                        continue
+                    cand_d = calculate_hex_distance(nc, nr, tc, tr)
+                    if cand_d >= orig_dist:
+                        continue
+                    if best is None or cand_d < best[0]:
+                        best = (cand_d, nc, nr)
+            if best is not None:
+                break
+        if best is None:
+            chosen[mid] = (oc, orow)  # reste sur place : sa cellule est deja dans `taken`
+        else:
+            taken.discard((oc, orow))  # elle part : son origine redevient libre
+            chosen[mid] = (best[1], best[2])
+            taken.add(chosen[mid])
+
+    return chosen
+
+
+def _max_b2b_matching(
+    candidates: Dict[str, List[Tuple[int, int]]]
+) -> Dict[str, Tuple[int, int]]:
+    """Couplage maximum figurine -> cellule bord-a-bord (algorithme de Kuhn).
+
+    12.03 WHILE MOVING impose « engaged with it **if possible** » a chaque figurine deplacee,
+    et l'encart du meme PDF donne l'intention : « units will pile in to **maximise** the number
+    of models that are engaged ». Un parcours glouton dans l'ordre des index ne maximise pas :
+    la 1re figurine prend la cellule dont la 2e avait un besoin exclusif. Le couplage maximum
+    est la formulation exacte de cette obligation, et il est **independant de l'ordre**.
+
+    ``candidates`` : {model_id: [cellules B2B legales et atteignables]}.
+    Retour : {model_id: cellule} pour les figurines couplees (les autres n'ont pas de B2B
+    possible dans ce couplage maximum).
+    """
+    match_cell: Dict[Tuple[int, int], str] = {}
+
+    def _augment(mid: str, visited: Set[Tuple[int, int]]) -> bool:
+        for cell in candidates[mid]:
+            if cell in visited:
+                continue
+            visited.add(cell)
+            holder = match_cell.get(cell)
+            if holder is None or _augment(holder, visited):
+                match_cell[cell] = mid
+                return True
+        return False
+
+    for mid in candidates:
+        _augment(mid, set())
+    return {mid: cell for cell, mid in match_cell.items()}
+
+
 def fight_pile_in_plan(
     game_state: Dict[str, Any], squad_id: str
 ) -> Optional[List[Tuple[str, int, int]]]:
@@ -6952,89 +7119,10 @@ def fight_pile_in_plan(
     board_rows = require_key(game_state, "board_rows")
     wall_hexes = game_state.get("wall_hexes", set())
 
-    occupied_after: Set[Tuple[int, int]] = set()
-    plan: List[Tuple[str, int, int]] = []
-
-    def _is_b2b_with_enemy(col: int, row: int) -> bool:
-        for ec, er in enemy_positions:
-            if calculate_hex_distance(col, row, ec, er) == BASE_TO_BASE_SUBHEX:
-                return True
-        return False
-
-    def _cell_legal(col: int, row: int) -> bool:
-        # B3 cleanup (audit) : parametre exclude supprime (jamais utilise)
-        if col < 0 or row < 0 or col >= board_cols or row >= board_rows:
-            return False
-        cell = (col, row)
-        if wall_hexes and cell in wall_hexes:
-            return False
-        if cell in occupied_after:
-            return False
-        # Pas de collision avec autres escouades (sauf notre cellule d origine).
-        for sid, entry in units_cache.items():
-            if str(sid) == squad_id:
-                continue
-            occ = entry.get("occupied_hexes")
-            if occ and cell in occ:
-                return False
-        return True
-
-    for mid in mids:
-        m = models_cache[mid]
-        orig_col, orig_row = int(m["col"]), int(m["row"])
-        # Deja B2B : reste sur place
-        if _is_b2b_with_enemy(orig_col, orig_row):
-            plan.append((mid, orig_col, orig_row))
-            occupied_after.add((orig_col, orig_row))
-            continue
-        # Cherche (a) B2B candidate
-        b2b_cands: List[Tuple[int, int, int]] = []  # (dist_from_orig, col, row)
-        for ec, er in enemy_positions:
-            for nc, nr in get_hex_neighbors(ec, er):
-                if not _cell_legal(nc, nr):
-                    continue
-                d = calculate_hex_distance(orig_col, orig_row, nc, nr)
-                if d > pile_in_budget:
-                    continue
-                b2b_cands.append((d, nc, nr))
-        picked: Optional[Tuple[int, int]] = None
-        if b2b_cands:
-            b2b_cands.sort()  # plus proche d origine d abord
-            _, pc, pr = b2b_cands[0]
-            picked = (pc, pr)
-        else:
-            # (b) Plus proche d un ennemi
-            nearest = min(
-                enemy_positions,
-                key=lambda ep: calculate_hex_distance(orig_col, orig_row, ep[0], ep[1]),
-            )
-            tc, tr = nearest
-            orig_dist = calculate_hex_distance(orig_col, orig_row, tc, tr)
-            best: Optional[Tuple[int, int, int]] = None  # (dist_to_target, col, row)
-            for d in range(1, pile_in_budget + 1):
-                for d_col in range(-d, d + 1):
-                    for d_row in range(-d, d + 1):
-                        if max(abs(d_col), abs(d_row)) != d:
-                            continue
-                        nc, nr = orig_col + d_col, orig_row + d_row
-                        if not _cell_legal(nc, nr):
-                            continue
-                        cand_d = calculate_hex_distance(nc, nr, tc, tr)
-                        if cand_d >= orig_dist:
-                            continue
-                        if best is None or cand_d < best[0]:
-                            best = (cand_d, nc, nr)
-                if best is not None:
-                    break
-            if best is not None:
-                _, pc, pr = best
-                picked = (pc, pr)
-        # Si pas de move utile : reste sur place (regle officielle : Pile In optionnel
-        # par-figurine ; seule l obligation B2B contraint).
-        if picked is None:
-            picked = (orig_col, orig_row)
-        plan.append((mid, picked[0], picked[1]))
-        occupied_after.add(picked)
+    chosen = _assign_cells_toward_enemies(
+        game_state, squad_id, mids, enemy_positions, pile_in_budget
+    )
+    plan: List[Tuple[str, int, int]] = [(mid, chosen[mid][0], chosen[mid][1]) for mid in mids]
 
     # Validation finale
     plan_positions = {mid: (c, r) for mid, c, r in plan}
@@ -7279,58 +7367,12 @@ def squad_consolidate_plan(
     board_rows = require_key(game_state, "board_rows")
     wall_hexes = game_state.get("wall_hexes", set())
 
-    occupied_after: Set[Tuple[int, int]] = set()
-    plan: List[Tuple[str, int, int]] = []
-
-    def _cell_legal(c, r):
-        if c < 0 or r < 0 or c >= board_cols or r >= board_rows: return False
-        if wall_hexes and (c, r) in wall_hexes: return False
-        if (c, r) in occupied_after: return False
-        for sid, entry in units_cache.items():
-            if str(sid) == squad_id: continue
-            occ = entry.get("occupied_hexes")
-            if occ and (c, r) in occ: return False
-        return True
-
-    for mid in mids:
-        m = models_cache[mid]
-        oc, orow = int(m["col"]), int(m["row"])
-        nearest = min(enemy_positions, key=lambda ep: calculate_hex_distance(oc, orow, ep[0], ep[1]))
-        tc, tr = nearest
-        orig_dist = calculate_hex_distance(oc, orow, tc, tr)
-        # B2B preference
-        b2b_cands: List[Tuple[int, int, int]] = []
-        for ec, er in enemy_positions:
-            for nc, nr in get_hex_neighbors(ec, er):
-                if not _cell_legal(nc, nr): continue
-                d = calculate_hex_distance(oc, orow, nc, nr)
-                if d > budget: continue
-                b2b_cands.append((d, nc, nr))
-        picked: Optional[Tuple[int, int]] = None
-        if b2b_cands:
-            b2b_cands.sort()
-            _, pc, pr = b2b_cands[0]
-            picked = (pc, pr)
-        else:
-            best: Optional[Tuple[int, int, int]] = None
-            for d in range(1, budget + 1):
-                for d_col in range(-d, d + 1):
-                    for d_row in range(-d, d + 1):
-                        if max(abs(d_col), abs(d_row)) != d: continue
-                        nc, nr = oc + d_col, orow + d_row
-                        if not _cell_legal(nc, nr): continue
-                        cd = calculate_hex_distance(nc, nr, tc, tr)
-                        if cd >= orig_dist: continue
-                        if best is None or cd < best[0]:
-                            best = (cd, nc, nr)
-                if best is not None: break
-            if best is not None:
-                _, pc, pr = best
-                picked = (pc, pr)
-        if picked is None:
-            picked = (oc, orow)
-        plan.append((mid, picked[0], picked[1]))
-        occupied_after.add(picked)
+    # SOURCE UNIQUE partagee avec le pile-in : 12.08 WHILE MOVING (Ongoing/Engaging) porte la
+    # meme obligation que 12.03 — immobilite au contact + « engaged with it if possible ».
+    chosen = _assign_cells_toward_enemies(
+        game_state, squad_id, mids, enemy_positions, budget
+    )
+    plan: List[Tuple[str, int, int]] = [(mid, chosen[mid][0], chosen[mid][1]) for mid in mids]
 
     # Validation finale : coherency + ER (au moins 1 fig)
     plan_positions = {mid: (c, r) for mid, c, r in plan}
