@@ -1021,6 +1021,13 @@ class MetricsCollectionCallback(BaseCallback):
             )
 
         # Use standalone function with progress bar for final eval
+        # `scenario_pool` est EXPLICITE : l'éval finale est une éval de MESURE, elle doit porter
+        # sur le holdout (§10.5 — le holdout porte sur l'adversaire). Miroir des 3 autres sites
+        # de mesure (train.py:3012, :4257, :4646), qui codent la même valeur en dur ; la clé de
+        # config `bot_eval_scenario_pool` n'alimente, elle, que l'éval INTERMÉDIAIRE (gating).
+        # Ne PAS retirer cet argument : la signature de `evaluate_against_bots` a pour défaut
+        # `"training"`, donc l'omettre fait silencieusement mesurer le scénario D'ENTRAÎNEMENT.
+        # C'était le bug V11 §0.12 (mesuré : `Scenario ranking: training_armageddon`).
         return evaluate_against_bots(
             model=model,
             training_config_name=training_config_name,
@@ -1028,7 +1035,8 @@ class MetricsCollectionCallback(BaseCallback):
             n_episodes=n_episodes,
             controlled_agent=controlled_agent,
             show_progress=True,
-            deterministic=eval_deterministic
+            deterministic=eval_deterministic,
+            scenario_pool="holdout",
         )
     
     def _on_step(self) -> bool:
