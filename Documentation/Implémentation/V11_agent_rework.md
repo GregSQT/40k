@@ -37,9 +37,9 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | ~~**§0.21**~~ | ~~Ordre glouton, B2B non maximal~~ | ✅ **CORRIGÉE le 2026-07-20** | — | Optimum implémenté (couplage maximum) le jour même. À l'origine de la **règle 7 de `CLAUDE.md`**. ➜ **descendue en §0hist** (avec §0.20). |
 | **§0.14** | Re-mesure du run — **score** seulement | mesure manquante, **débloquée** | **2** | 🟢 **Débloquée** par la résolution de §0.18. Il faut désormais 2-3 runs longs : un run vert ne prouve rien (leçon §0.18). |
 | ~~**§0.15**~~ | ~~Rosters `training` ≡ `holdout_regular`~~ | ✅ **TRANCHÉ le 2026-07-21** | — | Identité **assumée** par l'utilisateur : le holdout porte sur l'adversaire, pas le roster (§10.5, cohérent démo §10.2). Le win-rate par matchup mesure la robustesse à l'adversaire — périmètre choisi, pas angle mort. |
-| **§0.16** | Réserves de l'évaluation (**(a) SOLDÉE le 2026-07-21**, (b)/(c) = arbitrage) | pièges latents, non bloquants | **5** | (a) entièrement corrigée : worst_bot exclut tactical (helper `selection_worst_bot`, 2 sites, 3 tests) **ET** ranking supprimé quand l'éval est non fiable (helper `_render_scenario_ranking`, 3 tests, mutation rouge). Restent **(b)** 7ᵉ site non joué runtime et **(c)** clé config orpheline : **tous deux nécessitent un arbitrage de périmètre** (ajouter `DefensiveSmartBot` à l'éval / jeter le générateur holdout), non tranchés. Aucune ne fausse une mesure aujourd'hui. |
+| ~~**§0.16**~~ | ~~Réserves de l'évaluation~~ | ✅ **SOLDÉE le 2026-07-21** | — | (a) corrigée (worst_bot exclut tactical + ranking supprimé si éval non fiable, tests + mutations). (b) **status quo validé** : `DefensiveSmartBot` reste hors éval (il sous-performait), couverture unitaire suffisante. (c) **conservée délibérément** : clé + `build_holdout_benchmark.py` gardés pour un holdout généré prévu **après la démo**. (b) et (c) → **§0ter Notes post-implémentation**. |
 | **§0.19** | Revérifier T1→T5 et §9 ligne à ligne | audit de fond — **SOLDÉ (§0.19.1 → §0.19.3)** | **clos** | ✅ **T1→T5 tous verrouillés par mutation-test**, y compris le **branchement** de R4 (les 6 exigences de §8.3) et les **2 sites** de R6. §9 = **plan non implémenté**, jamais marqué ✅ : prémisse de la tâche fausse. Suite complète `EXIT=0` avec garde de stabilité d'arbre. |
-| **§0.22** | `MOVE_POOL_BUILD` = 95,6 % du training | diagnostic fait, **chantier optimisation ouvert** | **6** | Profileur réparé + hotspot chiffré (`_build_multi_hex_vectorized` ~68 %). L'optimisation (cache masques parité/bornes par forme×plateau) est un cycle moteur dédié avec tests d'équivalence de pool : arbitrage gain vs risque. |
+| **§0.22** | `MOVE_POOL_BUILD` = 95,6 % du training | ✅ **arbitrage tranché (2026-07-21) : à faire** — chantier déplacé dans un doc dédié | **6** | Diagnostic chiffré (`_build_multi_hex_vectorized` ~68 %). L'utilisateur a tranché : optimiser, **sans détriment métier/PvP**. Cadrage complet (garde-fous, plan, DoD) → **[`V11_move_pool_optimization.md`](V11_move_pool_optimization.md)**. Non commencé. |
 
 L'**ordre est une proposition**, pas un constat, **sauf §0.18 → §0.14** qui est une dépendance
 **technique et bloquante** : tant que le moteur crashe en cours de run, aucune mesure ne peut
@@ -552,24 +552,26 @@ Réserves :
   préexistant `test_holdout_bots_excluded_from_every_selection_signal` couvrait metrics_tracker
   mais **manquait ces deux sites** — c'était exactement le trou.
 
-**(b) Le 7ᵉ site du portage n'est pas couvert runtime (ex-§0.0 et §0.7)**
+**(b) Le 7ᵉ site du portage n'est pas couvert runtime — ✅ STATUS QUO VALIDÉ (2026-07-21)**
+
+Décision utilisateur : **`DefensiveSmartBot` reste hors éval.** Il avait été retiré délibérément
+parce qu'il **sous-performait** ; le réintroduire seulement pour couvrir `_best_target_slot_by_threat`
+en runtime n'a pas de justification (et fausserait la composition d'éval, donc `combined` et poids).
+Ce site reste couvert par son **test unitaire**, ce qui est jugé suffisant. ➜ Sujet clos, déplacé en
+**§0ter — Notes post-implémentation**. (Constat d'origine conservé ci-dessous pour mémoire.)
 
 - Le **7ᵉ site du portage** (`_best_target_slot_by_threat`) n'est couvert que par un test unitaire :
-  son appelant `DefensiveSmartBot` n'est pas dans `bot_eval_weights`, donc l'éval ne le joue pas.
+  son appelant `DefensiveSmartBot` n'est pas dans `bot_eval_weights`, donc l'éval ne le joue pas
+  (`active_bot_names = tuple(eval_weights.keys())`, [bot_evaluation.py:893](../../ai/bot_evaluation.py#L893)).
+  Piège §10.5 : **une liste de poids détermine qui TOURNE, pas seulement qui COMPTE.**
 
-⚠️ **Ce que ce run NE valide PAS** : le **7ᵉ site porté**, `_best_target_slot_by_threat`. Son
-unique appelant est `DefensiveSmartBot`, **absent de `bot_eval_weights`** — or l'éval ne joue que
-les bots pondérés (`active_bot_names = tuple(eval_weights.keys())`,
-[bot_evaluation.py:893](../../ai/bot_evaluation.py#L893)). Ce site n'est couvert que par son test
-unitaire. Même piège que §10.5 : **une liste de poids détermine qui TOURNE, pas seulement qui
-COMPTE.**
+**(c) Clé de config `holdout_hard_opponent_budget_modifier` — ✅ CONSERVÉE DÉLIBÉRÉMENT (2026-07-21)**
 
-**(c) Clé de config orpheline (ex-§0.6)**
-
-⚠️ `holdout_hard_opponent_budget_modifier: 1.1` subsiste dans les 5 phases, désormais sans
-consommateur pour cet agent (seul `scripts/build_holdout_benchmark.py` le lit). Non nettoyé.
-Note au passage : ce générateur reste **inutilisable ici** parce qu'il tire des armées
-**aléatoires** dans tout le pool d'unités, contraire à §10.2 (2 rosters fixes alignés sur la démo).
+Décision utilisateur : **garder la clé ET `scripts/build_holdout_benchmark.py`.** Un holdout à armées
+**générées** est prévu **après la démo** (une fois les 2 armées focus terminées). La clé n'est donc pas
+« morte » mais **en attente d'usage** : elle n'est simplement pas consommée par le chemin de training
+actuel (2 rosters fixes, §10.2). ➜ Ni la clé ni le script ne sont supprimés ; ce n'est plus une
+réserve mais un **choix assumé**. Note en §0ter.
 
 ### 0.17 Travail non commité — 🟠 OUVERT (état au 2026-07-21 00:05)
 
@@ -613,8 +615,9 @@ une datasheet complète (`VALUE`, `HP_MAX`, `OC`, `T`, `ARMOR_SAVE`, `INVUL_SAVE
 `--resolution` (défaut 5), et bascule `gym_training_mode=True` (on profile le chemin **training**,
 métrique `move_gym=hex`, celui qui domine). ✅ Tourne à toute résolution.
 
-**Diagnostic cProfile (config cachée après warmup ; board 60×80, move 12, base 5, ez 12, res 5, 300
-itérations, tri `tottime`).**
+**Diagnostic cProfile (config cachée après warmup ; board 60×80 SYNTHÉTIQUE — ⚠️ PAS le board de
+référence, qui est `config/board/44x60x5` = 220×300 subhex ; move 12, base 5, ez 12, res 5, 300
+itérations, tri `tottime`).** Proportions à re-mesurer sur 220×300, cf. `V11_move_pool_optimization.md`.
 
 | Fonction | Part | Note |
 |---|---|---|
@@ -635,8 +638,12 @@ de pool** (l'invariant du docstring de `_build_multi_hex_vectorized` : équivale
 Python d'origine), (4) un **re-bench**. Ce n'est pas un edit isolé — c'est un cycle moteur dédié.
 Aucune ligne de `_build_multi_hex_vectorized` n'a été modifiée.
 
-**Non planifié dans le tableau** : ouvrir ce chantier est un arbitrage utilisateur (gain de temps de
-run vs risque de régression sur un code à équivalence stricte).
+**Arbitrage TRANCHÉ (2026-07-21).** L'utilisateur a décidé : **on optimise**, à condition explicite
+que « le gain de performance ne se fasse pas au détriment du métier et du PvP ». Le chantier (objectif,
+garde-fou d'équivalence stricte, exigences cache/invalidation/tests, non-régression PvP, plan par
+étapes, Definition of Done) est **cadré dans un document dédié** :
+➜ **[`V11_move_pool_optimization.md`](V11_move_pool_optimization.md)**. Toujours **non commencé**
+(aucune ligne de `_build_multi_hex_vectorized` modifiée).
 
 ## 0bis. Pièges et leçons de méthode — 📌 SECTION CANONIQUE
 
@@ -921,6 +928,23 @@ AVANT d'y lancer un entraînement.
 | 10 | §0.18, note annexe | « après ce crash le process … s'est terminé avec un **code de sortie 0** » | ❌ **FAUSSE, tranchée le 2026-07-20 — voir §0.20.** Le handler `return 1`, `sys.exit` propage, et l'exécution confirme `EXIT=1`. Cause probable : un pipe (`| tee`) côté shell lors de la mesure. Enseignement : une note **« hors périmètre »** échappe à la relecture *parce qu'*elle est marquée annexe. |
 | 11-13 | §6 (T2, T4), §8.2 | layout d'actions « 41 », « 61 scénarios », `test_agent_interface_contract.py` | ➜ **détaillées en §0.19.1** (audit du 2026-07-20). Signalées, NON corrigées. |
 | 9 | §0.14 (rédigée puis **corrigée le même jour**) | « Non-régression §0.11 ✅ **VALIDÉE EN BOUT-EN-BOUT** » | ❌ **FAUSSE, retirée le 2026-07-20** — cf. §0.18 : le run suivant a crashé sur ce même message. Cas d'école : l'affirmation a été produite **par l'auteur du run lui-même**, le jour même, à partir d'un unique run vert. Le motif n°1 de ce document ne vient pas que du passé. |
+
+---
+
+## 0ter. Notes post-implémentation — décisions assumées, non-travaux
+
+> Choses **tranchées et closes** qui ne sont ni des bugs ni des dettes : des décisions de
+> périmètre que l'utilisateur assume. À ne pas rouvrir comme des réserves.
+
+- **§0.16(b) — `DefensiveSmartBot` reste hors éval (status quo, 2026-07-21).** Retiré à l'origine
+  parce qu'il **sous-performait**. Conséquence acceptée : son unique appelant
+  `_best_target_slot_by_threat` (7ᵉ site porté) n'est validé que par un **test unitaire**, jamais
+  en éval runtime. Le réintroduire pour la seule couverture fausserait la composition d'éval
+  (`combined`, poids) sans bénéfice. **Ne pas re-signaler comme un trou de couverture.**
+- **§0.16(c) — clé `holdout_hard_opponent_budget_modifier` + `build_holdout_benchmark.py` gardés
+  (2026-07-21).** Non consommés par le training actuel (2 rosters fixes, §10.2), mais **conservés
+  volontairement** : un holdout à armées **générées** est prévu **après la démo**. La clé est en
+  attente d'usage, pas morte. **Ne pas supprimer ni la clé ni le script.**
 
 ---
 
