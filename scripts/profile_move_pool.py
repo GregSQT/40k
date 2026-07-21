@@ -57,6 +57,7 @@ def _stress_units(
         "MOVE": move,
         "BASE_SIZE": base_size,
         "BASE_SHAPE": "round",
+        "VALUE": 100,
     }
     # Quatre coins / côtés pour forcer dilatations engagement et un masque d’empreinte large.
     margin_x = max(6, board_cols // 8)
@@ -68,6 +69,7 @@ def _stress_units(
             "row": cy,
             "HP_CUR": 2,
             "player": 1,
+            "VALUE": 50,
             "BASE_SIZE": 3,
             "BASE_SHAPE": "round",
         },
@@ -77,6 +79,7 @@ def _stress_units(
             "row": cy,
             "HP_CUR": 2,
             "player": 1,
+            "VALUE": 50,
             "BASE_SIZE": 2,
             "BASE_SHAPE": "round",
         },
@@ -86,11 +89,32 @@ def _stress_units(
             "row": margin_y,
             "HP_CUR": 2,
             "player": 1,
+            "VALUE": 50,
             "BASE_SIZE": 2,
             "BASE_SHAPE": "square",
         },
     ]
-    return [u1, *enemies]
+    # Champs de datasheet requis par build_units_cache/_build_models_for_unit depuis la
+    # migration squad V11 (§0.12). Sans objet pour le BFS de move, mais require_key les exige.
+    datasheet_defaults: Dict[str, Any] = {
+        "HP_MAX": 4,
+        "OC": 1,
+        "T": 4,
+        "ARMOR_SAVE": 3,
+        "INVUL_SAVE": 0,
+        "SHOOT_LEFT": 1,
+        "ATTACK_LEFT": 1,
+        "RNG_WEAPONS": [],
+        "CC_WEAPONS": [],
+        "UNIT_RULES": [],
+    }
+    units = [u1, *enemies]
+    for u in units:
+        for key, default in datasheet_defaults.items():
+            u.setdefault(key, default)
+        u.setdefault("HP_MAX", u["HP_CUR"])
+        u.setdefault("move", u.get("MOVE", 0))
+    return units
 
 
 def _build_game_state(
@@ -100,6 +124,7 @@ def _build_game_state(
     base_size: int,
     ez: int,
     walls: Set[Tuple[int, int]],
+    resolution: int,
     *,
     perf_timing: bool,
     perf_profile: bool,
@@ -108,6 +133,12 @@ def _build_game_state(
     config: Dict[str, Any] = {
         "game_rules": {"engagement_zone": ez, "max_base_size_hex": 35},
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+        # Regles de traversee (pathfinding) — alignees sur config/game_config.json.
+        "move": {
+            "can_move_through_enemy_engagement_zone": True,
+            "can_move_through_enemy_model": False,
+            "can_move_through_friendly_model": True,
+        },
     }
     gs: Dict[str, Any] = {
         "config": config,
@@ -118,6 +149,11 @@ def _build_game_state(
         "wall_hexes": walls,
         "units": units,
         "unit_by_id": _make_unit_by_id(units),
+        # Profiler le chemin d'ENTRAINEMENT (metrique move_gym = hex), qui est celui qui domine
+        # le cout (MOVE_POOL_BUILD = 95,6% du temps de training).
+        "gym_training_mode": True,
+        # Resolution subhex : c'est le multiplicateur qui fait exploser le BFS (x5 = training).
+        "inches_to_subhex": resolution,
     }
     if perf_timing:
         gs["perf_timing"] = True
@@ -135,6 +171,7 @@ def main() -> None:
     p.add_argument("--move", type=int, default=10, help="Portée MOVE de l’unité 1 (défaut: 10).")
     p.add_argument("--base-size", type=int, default=3, help="BASE_SIZE unité 1 (défaut: 3).")
     p.add_argument("--ez", type=int, default=10, help="engagement_zone (défaut: 10).")
+    p.add_argument("--resolution", type=int, default=5, help="inches_to_subhex, x1..x5 (défaut: 5).")
     p.add_argument(
         "--no-profile",
         action="store_true",
@@ -157,6 +194,7 @@ def main() -> None:
         args.base_size,
         args.ez,
         set(),
+        args.resolution,
         perf_timing=True,
         perf_profile=want_profile,
     )

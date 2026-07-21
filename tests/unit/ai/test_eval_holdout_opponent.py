@@ -129,6 +129,51 @@ def test_holdout_bots_excluded_from_every_selection_signal() -> None:
         )
 
 
+def test_selection_worst_bot_excludes_holdout_even_when_it_is_the_minimum() -> None:
+    """Lock comportemental : le holdout ne pilote JAMAIS worst_bot, meme s'il est le pire.
+
+    C'est le trou §0.16(a) : `combined` protege le holdout par poids nul, mais worst_bot
+    est un `min` sur des NOMS de bots — le poids n'y intervient pas.
+    """
+    from ai.training_callbacks import selection_worst_bot
+
+    scores = {"greedy": 0.80, "control": 0.55, "tactical": 0.05}
+    name, score = selection_worst_bot(scores)
+    assert name == "control" and score == 0.55, (
+        "tactical (0.05) est le minimum mais il est HOLDOUT : worst_bot doit rester sur control."
+    )
+
+
+def test_selection_worst_bot_raises_when_only_holdout_remains() -> None:
+    from ai.training_callbacks import selection_worst_bot
+
+    with pytest.raises(ValueError, match="holdout"):
+        selection_worst_bot({"tactical": 0.0})
+
+
+def test_both_worst_bot_sites_delegate_to_selection_worst_bot() -> None:
+    """Lock structurel : les DEUX sites de calcul du worst_bot passent par le helper.
+
+    Le lock comportemental ci-dessus ne vaut que si personne ne re-inline un `min` brut.
+    §0.16(a) nomme exactement ces deux sites (bot_evaluation par-scenario + train.py eval-only) ;
+    le test `test_holdout_bots_excluded_from_every_selection_signal` les avait manques.
+    """
+    import inspect
+
+    from ai import bot_evaluation, train
+
+    eval_src = inspect.getsource(bot_evaluation.evaluate_against_bots)
+    assert "selection_worst_bot(" in eval_src, (
+        "bot_evaluation.evaluate_against_bots ne delegue plus a selection_worst_bot : "
+        "worst_bot_score par-scenario risque de re-inclure le holdout (V11 §10.5)."
+    )
+    # Le site eval-only de train.py n'est pas isole dans une fonction : on inspecte le module.
+    train_src = inspect.getsource(train)
+    assert "worst_bot_name, worst_bot_score = selection_worst_bot(" in train_src, (
+        "le chemin --eval de train.py ne delegue plus a selection_worst_bot (V11 §10.5)."
+    )
+
+
 def test_evaluation_randomness_has_no_silent_default() -> None:
     """La config `bot_eval_randomness` doit etre LUE, pas contournee par un defaut 0.15.
 

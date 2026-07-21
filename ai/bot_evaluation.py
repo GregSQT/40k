@@ -1167,6 +1167,12 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     )
     results["scenario_bot_stats"] = scenario_bot_stats
 
+    # V11 §10.5 : le holdout (tactical) est MESURE et affiche, mais EXCLU du worst_bot_score,
+    # qui alimente le gate de curriculum (_extract_worst_bot_scores_for_gate). Le poids nul ne
+    # protege pas ce site : min() itere sur des win-rates, pas sur des poids. Import local
+    # (training_callbacks importe bot_evaluation en differe) : discipline anti-circularite du module.
+    from ai.training_callbacks import selection_worst_bot
+
     scenario_scores: Dict[str, Dict[str, float]] = {}
     for scenario_name, per_bot in scenario_bot_stats.items():
         bot_win_rates: Dict[str, float] = {}
@@ -1177,7 +1183,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         combined_score = sum(
             eval_weights[bn] * bot_win_rates[bn] for bn in active_bot_names
         )
-        worst_bot_score = min(bot_win_rates.values())
+        _, worst_bot_score = selection_worst_bot(bot_win_rates)
         scenario_scores[scenario_name] = {
             "combined": combined_score,
             "worst_bot_score": worst_bot_score,

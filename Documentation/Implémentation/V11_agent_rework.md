@@ -20,7 +20,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Les prochaines entrées commencent à `0.20` (`0.18` et `0.19` attribuées le 2026-07-20).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.23` (`0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -37,8 +37,9 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | ~~**§0.21**~~ | ~~Ordre glouton, B2B non maximal~~ | ✅ **CORRIGÉE le 2026-07-20** | — | Optimum implémenté (couplage maximum) le jour même. À l'origine de la **règle 7 de `CLAUDE.md`**. ➜ **descendue en §0hist** (avec §0.20). |
 | **§0.14** | Re-mesure du run — **score** seulement | mesure manquante, **débloquée** | **2** | 🟢 **Débloquée** par la résolution de §0.18. Il faut désormais 2-3 runs longs : un run vert ne prouve rien (leçon §0.18). |
 | **§0.15** | Rosters `training` ≡ `holdout_regular` | décision utilisateur **reportée** | **4** | À trancher avant le vrai entraînement, sinon aucun win-rate par matchup n'est interprétable. |
-| **§0.16** | Réserves de l'évaluation (3) | pièges latents, non bloquants | **5** | Aucune ne fausse une mesure aujourd'hui ; chacune peut le faire demain. |
+| **§0.16** | Réserves de l'évaluation (**1 corrigée le 2026-07-21**, 2 ouvertes) | pièges latents, non bloquants | **5** | (a)-worst_bot inclut tactical : **CORRIGÉE** (helper `selection_worst_bot`, 2 sites, 3 tests). Restent : ranking imprimé avant le raise, et (b)/(c). Aucune ne fausse une mesure aujourd'hui. |
 | **§0.19** | Revérifier T1→T5 et §9 ligne à ligne | audit de fond — **SOLDÉ (§0.19.1 → §0.19.3)** | **clos** | ✅ **T1→T5 tous verrouillés par mutation-test**, y compris le **branchement** de R4 (les 6 exigences de §8.3) et les **2 sites** de R6. §9 = **plan non implémenté**, jamais marqué ✅ : prémisse de la tâche fausse. Suite complète `EXIT=0` avec garde de stabilité d'arbre. |
+| **§0.22** | `MOVE_POOL_BUILD` = 95,6 % du training | diagnostic fait, **chantier optimisation ouvert** | **6** | Profileur réparé + hotspot chiffré (`_build_multi_hex_vectorized` ~68 %). L'optimisation (cache masques parité/bornes par forme×plateau) est un cycle moteur dédié avec tests d'équivalence de pool : arbitrage gain vs risque. |
 
 L'**ordre est une proposition**, pas un constat, **sauf §0.18 → §0.14** qui est une dépendance
 **technique et bloquante** : tant que le moteur crashe en cours de run, aucune mesure ne peut
@@ -519,13 +520,23 @@ win-rate par matchup d'ici là.
 
 **(a) Réserves du fail-fast `--eval` (ex-§0.5)**
 
-Réserves ouvertes, non traitées :
-- Le bloc `🏁 Scenario ranking` s'imprime **avant** le raise (produit dans `evaluate_against_bots`,
-  en amont du check) : des `combined` partiels restent affichés. Vaut aussi pour le training.
-- `worst_bot_name` du chemin eval-only est calculé sur **toutes** les clés de `bot_eval_weights`,
-  donc **`tactical` inclus** — alors que §10.5 impose son exclusion des signaux de sélection via
-  `SELECTION_BOT_NAMES`. Le poids nul ne protège pas ce site (même piège que §10.5). Non
-  déclenché à ce jour, mais réel.
+Réserves :
+- 🟠 **OUVERTE** — Le bloc `🏁 Scenario ranking` s'imprime **avant** le raise (produit dans
+  `evaluate_against_bots`, en amont du check) : des `combined` partiels restent affichés. Vaut
+  aussi pour le training.
+- ✅ **CORRIGÉE (2026-07-21)** — `worst_bot_name` du chemin eval-only était calculé sur **toutes**
+  les clés de `bot_eval_weights`, `tactical` **inclus**, alors que §10.5 impose son exclusion des
+  signaux de sélection. Le poids nul ne protégeait pas ce site (min sur des NOMS). **DEUX sites
+  étaient touchés, pas un** : le eval-only ([train.py:4682](../../ai/train.py#L4682)) ET le
+  `worst_bot_score` **par-scénario** de [bot_evaluation.py:1180](../../ai/bot_evaluation.py#L1180),
+  qui alimente le **gate de curriculum** (`_extract_worst_bot_scores_for_gate`) — donc un vrai
+  signal de sélection, pas seulement un affichage. Source unique : helper
+  `selection_worst_bot(scores)` dans `training_callbacks.py` (exclut `HOLDOUT_BOT_NAMES`, lève si
+  plus aucun bot de sélection). Verrou : 3 tests dans `test_eval_holdout_opponent.py` (lock
+  comportemental « holdout=min ne pilote pas worst_bot », lock du `raise`, lock **structurel** que
+  les deux sites délèguent au helper) ; **2 rouges sous mutation** du helper, verts après. Le test
+  préexistant `test_holdout_bots_excluded_from_every_selection_signal` couvrait metrics_tracker
+  mais **manquait ces deux sites** — c'était exactement le trou.
 
 **(b) Le 7ᵉ site du portage n'est pas couvert runtime (ex-§0.0 et §0.7)**
 
@@ -570,6 +581,48 @@ Il redeviendra sale au prochain training : le restaurer avant chaque commit.
 **Pourquoi l'entrée reste OUVERTE malgré tout** : les tests R4 de §8.3 sont en cours d'écriture
 (cf. §0.19). Ils produiront du non-commité dès qu'ils existeront. Fermer cette entrée maintenant
 la rendrait fausse une troisième fois.
+
+### 0.22 Coût du move pool — `MOVE_POOL_BUILD` = 95,6 % du training — 🟠 OUVERT (diagnostic + profileur réparé, 2026-07-21)
+
+**Constat chiffré (bench x5 du 2026-07-21, `perf_timing_bench_x5.log.score.json`).**
+`MOVE_POOL_BUILD` : **374 390 appels, 17,49 ms/appel, somme 6548,7 s sur 6848,6 s de temps
+instrumenté = 95,6 %**. Le BFS seul y pèse `bfs=12,13 ms/appel` (**69 %** du build) ; `prep`/`post`
+le reste. `CHARGE_DEST_BFS` (86,9 s) et `CHARGE_PHASE_START` (213 s) sont marginaux. **Le coût d'un
+run x5 est, à 95 %, la construction du pool de destinations de move.**
+
+**Outillage — `scripts/profile_move_pool.py` était CASSÉ, réparé (2026-07-21).** Il ne tournait plus
+depuis la migration squad (§0.12) : `build_units_cache`/`_build_models_for_unit` exigent désormais
+une datasheet complète (`VALUE`, `HP_MAX`, `OC`, `T`, `ARMOR_SAVE`, `INVUL_SAVE`, `SHOOT_LEFT`,
+`ATTACK_LEFT`, `RNG_WEAPONS`, `CC_WEAPONS`, `UNIT_RULES`), et le chemin exige `move` (minuscule),
+`config["move"]` (règles de traversée), `inches_to_subhex` et `gym_training_mode`. Ajoutés : bloc
+`datasheet_defaults` sur chaque unité, section `move` **alignée sur `config/game_config.json`**, flag
+`--resolution` (défaut 5), et bascule `gym_training_mode=True` (on profile le chemin **training**,
+métrique `move_gym=hex`, celui qui domine). ✅ Tourne à toute résolution.
+
+**Diagnostic cProfile (config cachée après warmup ; board 60×80, move 12, base 5, ez 12, res 5, 300
+itérations, tri `tottime`).**
+
+| Fonction | Part | Note |
+|---|---|---|
+| `_build_multi_hex_vectorized` ([movement_handlers.py:1523](../../engine/phase_handlers/movement_handlers.py#L1523)) | **~68 %** du build (interne + noyaux) | BFS/disque vectorisé NumPy. Le vrai goulot. |
+| `_dilate_by_kernel` / `_spread_by_kernel` | inclus ci-dessus | dilatations par slices, appelées plusieurs fois/build |
+| `_hex_center` + `math.sqrt` | ~10 % | **752 appels/build**, dans les footprints |
+| footprints (`_footprint_round/_square`) | faible | **PAS** le goulot : `precompute_footprint_offsets` existe déjà, ~6 appels/build |
+
+⚠️ **La config n'est PAS le goulot** : après warmup, `get_game_config` est cachée (le profil froid
+montrait un `_io.open` par appel, disparu à chaud). Ne pas partir sur cette fausse piste.
+
+**Chantier proposé — NON commencé (règle 7 : annoncé avant, pas livré à moitié).** Cacher entre
+appels ce qui ne dépend que de (dims plateau × forme de socle) et non de l'état mobile :
+`col_parity_mask`, `off_even_arr`/`off_odd_arr`, et les masques de bornes/parité
+(`_bounds_bad_parity`), aujourd'hui réalloués/recalculés à **chacun** des 374 k appels. Exige :
+(1) une clé de cache correcte, (2) une **invalidation** sûre, (3) des **tests d'équivalence stricte
+de pool** (l'invariant du docstring de `_build_multi_hex_vectorized` : équivalence exacte avec le BFS
+Python d'origine), (4) un **re-bench**. Ce n'est pas un edit isolé — c'est un cycle moteur dédié.
+Aucune ligne de `_build_multi_hex_vectorized` n'a été modifiée.
+
+**Non planifié dans le tableau** : ouvrir ce chantier est un arbitrage utilisateur (gain de temps de
+run vs risque de régression sur un code à équivalence stricte).
 
 ## 0bis. Pièges et leçons de méthode — 📌 SECTION CANONIQUE
 

@@ -1009,7 +1009,8 @@ from ai.training_callbacks import (
     EpisodeTerminationCallback,
     EpisodeBasedEvalCallback,
     MetricsCollectionCallback,
-    BotEvaluationCallback
+    BotEvaluationCallback,
+    selection_worst_bot,
 )
 
 # Training utilities (extracted to ai/training_utils.py)
@@ -4679,7 +4680,10 @@ def main():
 
             bot_eval_weights = require_key(require_key(training_config, "callback_params"), "bot_eval_weights")
             bot_scores = {bn: float(require_key(results, bn)) for bn in bot_eval_weights}
-            worst_bot_name, worst_bot_score = min(bot_scores.items(), key=lambda item: item[1])
+            # V11 §10.5 : le holdout (tactical) est MESURE mais EXCLU des signaux de selection.
+            # worst_bot_name pilote le diagnostic de point faible : un poids nul ne protege pas
+            # ce site (min sur des NOMS). Source unique : selection_worst_bot (training_callbacks).
+            worst_bot_name, worst_bot_score = selection_worst_bot(bot_scores)
 
             worst_scenario_name = None
             worst_scenario_combined = None

@@ -58,6 +58,26 @@ ALL_BOT_NAMES = frozenset([
 # Bots qui pilotent la selection (gating, worst_bot, score robuste). Le holdout en est exclu.
 SELECTION_BOT_NAMES = ALL_BOT_NAMES - HOLDOUT_BOT_NAMES
 
+
+def selection_worst_bot(scores):
+    """Retourne (nom, win-rate) du pire bot de SELECTION.
+
+    Le holdout (`HOLDOUT_BOT_NAMES`) est MESURE mais EXCLU de ce signal (V11 §10.5) : un poids
+    nul ne protege pas un ``min`` qui itere sur des NOMS de bots. Source unique pour les deux
+    sites de calcul du worst_bot (par-scenario dans bot_evaluation, eval-only dans train.py).
+
+    Raises:
+        ValueError: si aucun bot de selection ne subsiste hors holdout (signal impossible).
+    """
+    selection = {bn: score for bn, score in scores.items() if bn not in HOLDOUT_BOT_NAMES}
+    if not selection:
+        raise ValueError(
+            "Aucun bot de selection hors holdout "
+            f"(HOLDOUT_BOT_NAMES={sorted(HOLDOUT_BOT_NAMES)}) parmi {sorted(scores)} : "
+            "worst_bot serait pilote par le holdout (V11 §10.5)."
+        )
+    return min(selection.items(), key=lambda item: item[1])
+
 __all__ = [
     'LearningRateScheduleCallback',
     'EntropyScheduleCallback',
