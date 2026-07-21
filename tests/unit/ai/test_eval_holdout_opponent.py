@@ -204,3 +204,46 @@ def test_tactical_bot_is_instantiable_by_the_evaluation_factory() -> None:
 
     bot = TacticalBot(randomness=0.05)
     assert bot.select_action([]) is not None
+
+
+# --- V11 §0.16(a) : le ranking ne doit PAS s'afficher quand l'eval est non fiable ---
+
+_RANKING_SCORES = {
+    "holdout_regular_bot-01": {"combined": 0.77, "worst_bot_score": 0.0},
+    "holdout_regular_bot-02": {"combined": 0.46, "worst_bot_score": 0.0},
+}
+
+
+def test_scenario_ranking_shown_when_no_episode_failed() -> None:
+    from ai.bot_evaluation import _render_scenario_ranking
+
+    lines = _render_scenario_ranking(_RANKING_SCORES, total_failed_episodes=0)
+    assert lines[0] == "🏁 Scenario ranking (combined):"
+    # Tri decroissant par `combined` : le meilleur scenario en premier.
+    assert "holdout_regular_bot-01" in lines[1]
+    assert "holdout_regular_bot-02" in lines[2]
+    assert not any("SUPPRIME" in l for l in lines)
+
+
+def test_scenario_ranking_suppressed_when_episodes_failed() -> None:
+    """Un classement calcule sur un denominateur tronque ne doit pas paraitre fiable.
+
+    C'est la reserve ouverte de §0.16(a) : le bloc s'imprimait AVANT le raise eval-only
+    sur `total_failed_episodes > 0`, presentant des `combined` partiels comme un resultat.
+    """
+    from ai.bot_evaluation import _render_scenario_ranking
+
+    lines = _render_scenario_ranking(_RANKING_SCORES, total_failed_episodes=3)
+    joined = "\n".join(lines)
+    assert "SUPPRIME" in joined and "NON FIABLE" in joined
+    assert "3 episode(s) echoue(s)" in joined
+    # Aucun chiffre de classement ne doit fuiter.
+    assert "🏁" not in joined
+    assert "combined=" not in joined
+
+
+def test_scenario_ranking_empty_when_no_scores() -> None:
+    from ai.bot_evaluation import _render_scenario_ranking
+
+    assert _render_scenario_ranking({}, total_failed_episodes=0) == []
+    assert _render_scenario_ranking({}, total_failed_episodes=5) == []

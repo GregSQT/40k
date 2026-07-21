@@ -737,6 +737,40 @@ def _collect_parallel_results_with_timeouts(
     return results_list
 
 
+def _render_scenario_ranking(scenario_scores, total_failed_episodes):
+    """Lignes a imprimer pour le classement des scenarios (V11 §0.16(a)).
+
+    Quand des episodes ont echoue, les `combined`/`worst_bot_score` par scenario sont
+    calcules sur un denominateur TRONQUE (les episodes plantes sont retires du
+    denominateur par `_get_result_with_timeout`). L'appelant eval-only leve alors sur
+    `total_failed_episodes > 0` ; afficher un classement net juste avant ce raise
+    presenterait une mesure invalide comme fiable. On supprime donc le ranking et on
+    signale explicitement la non-fiabilite plutot que de masquer le probleme.
+
+    Retourne une liste de lignes (vide si aucun scenario n'a ete score).
+    """
+    if not scenario_scores:
+        return []
+    if int(total_failed_episodes) > 0:
+        return [
+            f"⚠️  Scenario ranking SUPPRIME : evaluation NON FIABLE "
+            f"({int(total_failed_episodes)} episode(s) echoue(s)). Les scores par "
+            f"scenario sont calcules sur un echantillon tronque — ne pas les reporter."
+        ]
+    ranking = sorted(
+        scenario_scores.items(),
+        key=lambda item: item[1]["combined"],
+        reverse=True,
+    )
+    lines = ["🏁 Scenario ranking (combined):"]
+    for name, values in ranking:
+        lines.append(
+            f"  - {name}: combined={values['combined']:.3f} "
+            f"| worst_bot_score={values['worst_bot_score']:.3f}"
+        )
+    return lines
+
+
 def evaluate_against_bots(model, training_config_name, rewards_config_name, n_episodes,
                          controlled_agent=None, show_progress=False, deterministic=True,
                          step_logger=None, debug_mode=False, eval_progress_label: Optional[str] = None,
@@ -1237,18 +1271,10 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         print("="*80)
         print("Bot behavior analysis completed - check logs for detailed stats")
         print("="*80 + "\n")
-        if scenario_scores:
-            ranking = sorted(
-                scenario_scores.items(),
-                key=lambda item: item[1]["combined"],
-                reverse=True
-            )
-            print("🏁 Scenario ranking (combined):")
-            for name, values in ranking:
-                print(
-                    f"  - {name}: combined={values['combined']:.3f} "
-                    f"| worst_bot_score={values['worst_bot_score']:.3f}"
-                )
+        ranking_lines = _render_scenario_ranking(scenario_scores, total_failed_episodes)
+        if ranking_lines:
+            for line in ranking_lines:
+                print(line)
             print()
 
     return results

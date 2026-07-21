@@ -36,8 +36,8 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 | ~~**§0.18**~~ | ~~🔴 `collision intra-plan` de retour~~ | ✅ **CORRIGÉE le 2026-07-20** | — | Cause trouvée, reproduite par test, corrigée par couplage maximum, mutation-testée, suite verte. **Aucune part ouverte.** ➜ **descendue en §0hist.** |
 | ~~**§0.21**~~ | ~~Ordre glouton, B2B non maximal~~ | ✅ **CORRIGÉE le 2026-07-20** | — | Optimum implémenté (couplage maximum) le jour même. À l'origine de la **règle 7 de `CLAUDE.md`**. ➜ **descendue en §0hist** (avec §0.20). |
 | **§0.14** | Re-mesure du run — **score** seulement | mesure manquante, **débloquée** | **2** | 🟢 **Débloquée** par la résolution de §0.18. Il faut désormais 2-3 runs longs : un run vert ne prouve rien (leçon §0.18). |
-| **§0.15** | Rosters `training` ≡ `holdout_regular` | décision utilisateur **reportée** | **4** | À trancher avant le vrai entraînement, sinon aucun win-rate par matchup n'est interprétable. |
-| **§0.16** | Réserves de l'évaluation (**1 corrigée le 2026-07-21**, 2 ouvertes) | pièges latents, non bloquants | **5** | (a)-worst_bot inclut tactical : **CORRIGÉE** (helper `selection_worst_bot`, 2 sites, 3 tests). Restent : ranking imprimé avant le raise, et (b)/(c). Aucune ne fausse une mesure aujourd'hui. |
+| ~~**§0.15**~~ | ~~Rosters `training` ≡ `holdout_regular`~~ | ✅ **TRANCHÉ le 2026-07-21** | — | Identité **assumée** par l'utilisateur : le holdout porte sur l'adversaire, pas le roster (§10.5, cohérent démo §10.2). Le win-rate par matchup mesure la robustesse à l'adversaire — périmètre choisi, pas angle mort. |
+| **§0.16** | Réserves de l'évaluation (**(a) SOLDÉE le 2026-07-21**, (b)/(c) = arbitrage) | pièges latents, non bloquants | **5** | (a) entièrement corrigée : worst_bot exclut tactical (helper `selection_worst_bot`, 2 sites, 3 tests) **ET** ranking supprimé quand l'éval est non fiable (helper `_render_scenario_ranking`, 3 tests, mutation rouge). Restent **(b)** 7ᵉ site non joué runtime et **(c)** clé config orpheline : **tous deux nécessitent un arbitrage de périmètre** (ajouter `DefensiveSmartBot` à l'éval / jeter le générateur holdout), non tranchés. Aucune ne fausse une mesure aujourd'hui. |
 | **§0.19** | Revérifier T1→T5 et §9 ligne à ligne | audit de fond — **SOLDÉ (§0.19.1 → §0.19.3)** | **clos** | ✅ **T1→T5 tous verrouillés par mutation-test**, y compris le **branchement** de R4 (les 6 exigences de §8.3) et les **2 sites** de R6. §9 = **plan non implémenté**, jamais marqué ✅ : prémisse de la tâche fausse. Suite complète `EXIT=0` avec garde de stabilité d'arbre. |
 | **§0.22** | `MOVE_POOL_BUILD` = 95,6 % du training | diagnostic fait, **chantier optimisation ouvert** | **6** | Profileur réparé + hotspot chiffré (`_build_multi_hex_vectorized` ~68 %). L'optimisation (cache masques parité/bornes par forme×plateau) est un cycle moteur dédié avec tests d'équivalence de pool : arbitrage gain vs risque. |
 
@@ -497,7 +497,7 @@ tombe.
 agent ne touche : les mutation-tests par tranche du tableau ci-dessus, et la contre-épreuve de
 §0.19.2 sur `fight_handlers.py`. Le test de pile-in passe **3 fois sur 3** en isolé.
 
-### 0.15 Rosters `training` ≡ `holdout_regular` — 🔴 OUVERT (extrait de §0.6, décision reportée le 2026-07-19)
+### 0.15 Rosters `training` ≡ `holdout_regular` — ✅ TRANCHÉ (2026-07-21 : identité ASSUMÉE)
 
 > Part **ouverte** de §0.6. La suppression des listes holdout mortes, elle, est résolue — voir
 > §0.6 pour la décision et sa justification.
@@ -508,9 +508,13 @@ l'**adversaire**, pas sur le roster — mais il faut en avoir conscience : **il 
 séparation de listes entre entraînement et évaluation**. Un sur-apprentissage sur les
 particularités de ces deux listes ne serait détecté par aucun des scénarios d'éval actuels.
 
-**Statut** : à trancher **avant le vrai entraînement** (décision reportée par l'utilisateur le
-2026-07-19 : « j'y reviendrai quand on fera vraiment l'entraînement »). Ne pas interpréter de
-win-rate par matchup d'ici là.
+**Statut** : ✅ **TRANCHÉ le 2026-07-21 — l'utilisateur ASSUME l'identité** (« Oui : rosters
+training ≡ holdout_regular »). Le holdout porte donc **exclusivement sur l'adversaire** (§10.5),
+jamais sur le roster : c'est cohérent avec la démo de financement (2 rosters fixes SM/Orks, §10.2)
+et avec la spécialisation assumée. **Conséquence à garder en tête** : aucun scénario d'éval ne
+détectera un sur-apprentissage sur les particularités de ces deux listes ; le win-rate par matchup
+mesure la robustesse à l'**adversaire**, pas au roster. Ce n'est pas un angle mort à corriger,
+c'est le périmètre choisi.
 
 ### 0.16 Réserves de l'évaluation — 🟠 OUVERT (extraits de §0.5, §0.6 et §0.7)
 
@@ -521,9 +525,19 @@ win-rate par matchup d'ici là.
 **(a) Réserves du fail-fast `--eval` (ex-§0.5)**
 
 Réserves :
-- 🟠 **OUVERTE** — Le bloc `🏁 Scenario ranking` s'imprime **avant** le raise (produit dans
-  `evaluate_against_bots`, en amont du check) : des `combined` partiels restent affichés. Vaut
-  aussi pour le training.
+- ✅ **CORRIGÉE (2026-07-21)** — Le bloc `🏁 Scenario ranking` s'imprimait **avant** le raise
+  eval-only sur `total_failed_episodes > 0` : quand des épisodes échouaient, les `combined`/
+  `worst_bot_score` par scénario (calculés sur un dénominateur **tronqué** — épisodes plantés
+  retirés par `_get_result_with_timeout`) étaient présentés comme un classement fiable juste
+  avant que la mesure ne soit invalidée. **Root cause** : la décision d'affichage n'était pas
+  gardée par la fiabilité de l'éval. **Fix** : décision extraite dans le helper pur
+  `_render_scenario_ranking(scenario_scores, total_failed_episodes)`
+  ([bot_evaluation.py](../../ai/bot_evaluation.py)) — si `total_failed_episodes > 0`, il retourne
+  un **avertissement explicite** (`⚠️ Scenario ranking SUPPRIMÉ : évaluation NON FIABLE`) au lieu
+  du classement, jamais un chiffre. Vaut pour le training ET l'eval-only (les deux passent par ce
+  print quand `show_summary`). **Verrou** : 3 tests dans `test_eval_holdout_opponent.py`
+  (affichage nominal trié, suppression + avertissement quand `failed>0`, liste vide sans scores) ;
+  **mutation** de la garde (`total_failed_episodes > 0` → `False`) → **1 rouge** ciblé, vert après.
 - ✅ **CORRIGÉE (2026-07-21)** — `worst_bot_name` du chemin eval-only était calculé sur **toutes**
   les clés de `bot_eval_weights`, `tactical` **inclus**, alors que §10.5 impose son exclusion des
   signaux de sélection. Le poids nul ne protégeait pas ce site (min sur des NOMS). **DEUX sites
